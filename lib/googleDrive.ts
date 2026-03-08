@@ -53,6 +53,7 @@ export async function uploadFileToDrive({
   const stream = Readable.from([content]);
 
   const response = await drive.files.create({
+    supportsAllDrives: true,
     requestBody: {
       name: fileName,
       parents: targetFolderId ? [targetFolderId] : undefined,
@@ -86,6 +87,8 @@ export async function listFilesInFolder(folderId?: string): Promise<DriveFile[]>
     q: `'${targetFolderId}' in parents and trashed = false`,
     fields: 'files(id, name, webViewLink)',
     orderBy: 'createdTime desc',
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
   });
 
   return (response.data.files ?? []).map((file) => ({
@@ -110,9 +113,10 @@ export async function uploadCsvAsGoogleSheet({
   const stream = Readable.from(['\uFEFF' + csvContent]); // BOM 추가 (한글 깨짐 방지)
 
   const response = await drive.files.create({
+    supportsAllDrives: true,
     requestBody: {
       name: fileName,
-      mimeType: 'application/vnd.google-apps.spreadsheet', // Google Sheets 형식으로 변환
+      mimeType: 'application/vnd.google-apps.spreadsheet',
       parents: targetFolderId ? [targetFolderId] : undefined,
     },
     media: {
@@ -142,6 +146,8 @@ export async function listFilesByNamePrefix(prefix: string, folderId?: string): 
     q: `'${targetFolderId}' in parents and name contains '${prefix}' and trashed = false`,
     fields: 'files(id, name, webViewLink)',
     orderBy: 'createdTime desc',
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
   });
 
   return (response.data.files ?? []).map((file) => ({
