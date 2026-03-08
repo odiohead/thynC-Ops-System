@@ -1,0 +1,82 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model HiraHospital {
+  id            Int      @id @default(autoincrement())
+  hiraId        String   @unique @map("hira_id")
+  name          String   @map("name")
+  typeCode      String   @map("type_code")
+  typeName      String   @map("type_name")
+  sidoCode      String   @map("sido_code")
+  sidoName      String   @map("sido_name")
+  sigunguCode   String   @map("sigungu_code")
+  sigunguName   String   @map("sigungu_name")
+  eupmyeondong  String?  @map("eupmyeondong")
+  postalCode    String?  @map("postal_code")
+  address       String?  @map("address")
+  phone         String?  @map("phone")
+  totalDoctors  Int?     @map("total_doctors")
+  openedAt      String?  @map("opened_at")
+  coordinateX   String?  @map("coordinate_x")
+  coordinateY   String?  @map("coordinate_y")
+  createdAt     DateTime @default(now()) @map("created_at")
+  hospital      Hospital?
+
+  @@map("hira_hospitals")
+}
+
+model Hospital {
+  id             Int      @id @default(autoincrement())
+  hospitalCode   String   @unique @map("hospital_code")
+  hiraId         String?  @unique @map("hira_id")
+  name           String   @map("name")
+  type           String   @map("type")
+  sidoCode       String?  @map("sido_code")
+  sidoName       String?  @map("sido_name")
+  sigunguCode    String?  @map("sigungu_code")
+  sigunguName    String?  @map("sigungu_name")
+  eupmyeondong   String?  @map("eupmyeondong")
+  postalCode     String?  @map("postal_code")
+  address        String?  @map("address")
+  coordinateX    String?  @map("coordinate_x")
+  coordinateY    String?  @map("coordinate_y")
+  status         String   @map("status")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  hiraHospital   HiraHospital? @relation(fields: [hiraId], references: [hiraId])
+
+  @@map("hospitals")
+}
+
+model StatusCode {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique @map("name")
+  order     Int      @default(0) @map("order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("status_codes")
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  phone     String
+  role      Role     @default(USER)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("users")
+}
