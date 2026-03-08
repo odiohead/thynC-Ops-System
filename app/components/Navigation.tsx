@@ -132,7 +132,7 @@ export default function Navigation() {
     <div className="flex h-full flex-col">
       {/* 로고 */}
       <div className="flex h-14 shrink-0 items-center border-b border-gray-200 px-5">
-        <span className="text-base font-bold tracking-tight text-gray-900">THYNC OPS</span>
+        <span className="text-base font-bold tracking-tight text-gray-900">{process.env.NEXT_PUBLIC_APP_NAME}</span>
       </div>
 
       {/* 네비게이션 */}
@@ -217,7 +217,7 @@ export default function Navigation() {
 
       {/* 모바일 상단 헤더 */}
       <header className="fixed left-0 right-0 top-0 z-40 flex h-14 items-center justify-between border-b border-gray-200 bg-white px-4 lg:hidden">
-        <span className="text-base font-bold tracking-tight text-gray-900">THYNC OPS</span>
+        <span className="text-base font-bold tracking-tight text-gray-900">{process.env.NEXT_PUBLIC_APP_NAME}</span>
         <button
           type="button"
           onClick={() => setMobileOpen(true)}
