@@ -28,7 +28,7 @@ interface StatusCode {
 
 export default function HospitalEditPage() {
   const router = useRouter()
-  const { id } = useParams<{ id: string }>()
+  const { code } = useParams<{ code: string }>()
 
   const [hospital, setHospital] = useState<Hospital | null>(null)
   const [statusCodes, setStatusCodes] = useState<StatusCode[]>([])
@@ -38,7 +38,7 @@ export default function HospitalEditPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch(`/api/hospitals/${id}`)
+    fetch(`/api/hospitals/${code}`)
       .then((r) => r.json())
       .then(({ hospital, statusCodes }) => {
         setHospital(hospital)
@@ -63,7 +63,7 @@ export default function HospitalEditPage() {
         setError('데이터를 불러오는 데 실패했습니다.')
         setLoading(false)
       })
-  }, [id])
+  }, [code])
 
   function set(field: string, value: string) {
     setForm((prev) => prev ? { ...prev, [field]: value } : prev)
@@ -75,14 +75,14 @@ export default function HospitalEditPage() {
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch(`/api/hospitals/${id}`, {
+      const res = await fetch(`/api/hospitals/${code}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       })
       if (res.ok) {
         router.refresh()
-        router.push(`/hospitals/${id}`)
+        router.push(`/hospitals/${code}`)
         router.refresh()
       } else {
         const json = await res.json()
@@ -118,7 +118,7 @@ export default function HospitalEditPage() {
         {/* 헤더 */}
         <div className="mb-6 flex items-center gap-4">
           <Link
-            href={`/hospitals/${id}`}
+            href={`/hospitals/${code}`}
             className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-100"
           >
             ← 상세로
@@ -285,7 +285,7 @@ export default function HospitalEditPage() {
           {/* 버튼 */}
           <div className="flex justify-end gap-3 pb-4">
             <Link
-              href={`/hospitals/${id}`}
+              href={`/hospitals/${code}`}
               className="rounded-lg border border-gray-300 px-5 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
             >
               취소

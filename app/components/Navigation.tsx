@@ -53,6 +53,15 @@ function LogoutIcon() {
   )
 }
 
+function DaewoongIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
+      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+    </svg>
+  )
+}
+
 function ChevronIcon({ open }: { open: boolean }) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>
@@ -85,6 +94,7 @@ export default function Navigation() {
   const router = useRouter()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(pathname.startsWith('/settings'))
+  const [daewoongOpen, setDaewoongOpen] = useState(pathname.startsWith('/daewoong-staff'))
   const [userRole, setUserRole] = useState<'ADMIN' | 'USER' | null>(null)
   const [userName, setUserName] = useState('')
 
@@ -110,6 +120,7 @@ export default function Navigation() {
 
   useEffect(() => {
     if (pathname.startsWith('/settings')) setSettingsOpen(true)
+    if (pathname.startsWith('/daewoong-staff')) setDaewoongOpen(true)
   }, [pathname])
 
   // 로그인 페이지에서는 사이드바 숨김
@@ -177,6 +188,31 @@ export default function Navigation() {
                 className={navItemClass(isActive('/settings/status'))}
               >
                 상태값 관리
+              </Link>
+            </div>
+          )}
+        </div>
+
+        {/* 대웅제약 관리 */}
+        <div>
+          <button
+            type="button"
+            onClick={() => setDaewoongOpen((v) => !v)}
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+              pathname.startsWith('/daewoong-staff')
+                ? 'text-gray-900 font-medium'
+                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+            }`}
+          >
+            <DaewoongIcon />
+            <span className="flex-1 text-left">대웅제약 관리</span>
+            <ChevronIcon open={daewoongOpen} />
+          </button>
+
+          {daewoongOpen && (
+            <div className="ml-7 mt-0.5 space-y-0.5 border-l border-gray-200 pl-3">
+              <Link href="/daewoong-staff" className={navItemClass(isActive('/daewoong-staff'))}>
+                직원 관리
               </Link>
             </div>
           )}

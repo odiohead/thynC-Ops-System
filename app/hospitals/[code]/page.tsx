@@ -1,13 +1,13 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
+import DeleteButton from './_components/DeleteButton'
+import DaewoongStaffTab from './_components/DaewoongStaffTab'
 
 export const dynamic = 'force-dynamic'
-import DeleteButton from './_components/DeleteButton'
-import CopyButton from './_components/CopyButton'
 
 interface PageProps {
-  params: { id: string }
+  params: { code: string }
 }
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
@@ -26,10 +26,7 @@ const STATUS_STYLE: Record<string, string> = {
 }
 
 export default async function HospitalDetailPage({ params }: PageProps) {
-  const id = parseInt(params.id)
-  if (isNaN(id)) notFound()
-
-  const hospital = await prisma.hospital.findUnique({ where: { id } })
+  const hospital = await prisma.hospital.findUnique({ where: { hospitalCode: params.code } })
   if (!hospital) notFound()
 
   const statusStyle = STATUS_STYLE[hospital.status] ?? 'bg-gray-100 text-gray-600'
@@ -54,12 +51,12 @@ export default async function HospitalDetailPage({ params }: PageProps) {
           </div>
           <div className="flex gap-2">
             <Link
-              href={`/hospitals/${hospital.id}/edit`}
+              href={`/hospitals/${hospital.hospitalCode}/edit`}
               className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
             >
               수정
             </Link>
-            <DeleteButton id={hospital.id} />
+            <DeleteButton code={hospital.hospitalCode} />
           </div>
         </div>
 
@@ -70,6 +67,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
           </div>
           <dl className="grid grid-cols-1 gap-6 px-6 py-5 sm:grid-cols-2">
             <Field label="병원코드" value={<span className="font-mono">{hospital.hospitalCode}</span>} />
+            <Field label="병원 이름" value={hospital.name} />
             <Field
               label="상태"
               value={
@@ -78,63 +76,16 @@ export default async function HospitalDetailPage({ params }: PageProps) {
                 </span>
               }
             />
-            <Field label="병원명" value={hospital.name} />
             <Field label="종별" value={hospital.type} />
-          </dl>
-        </div>
-
-        {/* 위치 정보 */}
-        <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-          <div className="border-b border-gray-200 px-6 py-4">
-            <h2 className="text-sm font-semibold text-gray-700">위치 정보</h2>
-          </div>
-          <dl className="grid grid-cols-1 gap-6 px-6 py-5 sm:grid-cols-2">
-            <Field label="시도코드" value={hospital.sidoCode} />
-            <Field label="시도명" value={hospital.sidoName} />
-            <Field label="시군구코드" value={hospital.sigunguCode} />
-            <Field label="시군구명" value={hospital.sigunguName} />
-            <Field label="읍면동" value={hospital.eupmyeondong} />
-            <Field label="우편번호" value={hospital.postalCode} />
             <div className="sm:col-span-2">
               <Field label="주소" value={hospital.address} />
             </div>
           </dl>
         </div>
 
-        {/* 기타 정보 */}
-        <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-          <div className="border-b border-gray-200 px-6 py-4">
-            <h2 className="text-sm font-semibold text-gray-700">기타 정보</h2>
-          </div>
-          <dl className="grid grid-cols-1 gap-6 px-6 py-5 sm:grid-cols-2">
-            <Field
-              label="심평원 ID"
-              value={
-                hospital.hiraId ? (
-                  <span className="flex items-center">
-                    <span className="truncate font-mono text-sm" title={hospital.hiraId}>
-                      {hospital.hiraId}
-                    </span>
-                    <CopyButton value={hospital.hiraId} />
-                  </span>
-                ) : null
-              }
-            />
-            <Field label="X 좌표" value={hospital.coordinateX} />
-            <Field label="Y 좌표" value={hospital.coordinateY} />
-            <Field
-              label="등록일"
-              value={hospital.createdAt.toLocaleDateString('ko-KR', {
-                year: 'numeric', month: '2-digit', day: '2-digit',
-              })}
-            />
-            <Field
-              label="최종 수정일"
-              value={hospital.updatedAt.toLocaleDateString('ko-KR', {
-                year: 'numeric', month: '2-digit', day: '2-digit',
-              })}
-            />
-          </dl>
+        {/* 대웅제약 담당자 */}
+        <div className="mt-4">
+          <DaewoongStaffTab hospitalCode={hospital.hospitalCode} />
         </div>
 
       </div>

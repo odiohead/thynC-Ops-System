@@ -49,9 +49,36 @@ model Hospital {
   status         String   @map("status")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
-  hiraHospital   HiraHospital? @relation(fields: [hiraId], references: [hiraId])
+  hiraHospital        HiraHospital? @relation(fields: [hiraId], references: [hiraId])
+  daewoongAssignments DaewoongHospitalAssignment[]
 
   @@map("hospitals")
+}
+
+model DaewoongStaff {
+  id          String   @id @map("id")
+  name        String   @map("name")
+  email       String   @map("email")
+  phoneNumber String?  @map("phone_number")
+  branchInfo  String?  @map("branch_info")
+  etc         String?  @map("etc")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  assignments DaewoongHospitalAssignment[]
+
+  @@map("daewoong_staff")
+}
+
+model DaewoongHospitalAssignment {
+  id           String        @id @default(uuid())
+  hospitalCode String        @map("hospital_code")
+  staffId      String        @map("staff_id")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  hospital     Hospital      @relation(fields: [hospitalCode], references: [hospitalCode])
+  staff        DaewoongStaff @relation(fields: [staffId], references: [id])
+
+  @@unique([hospitalCode, staffId])
+  @@map("daewoong_hospital_assignments")
 }
 
 model StatusCode {

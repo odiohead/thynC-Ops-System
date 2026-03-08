@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     const match = h.hospitalCode.match(/^HOSP-(\d+)$/)
     return match ? Math.max(max, parseInt(match[1])) : max
   }, 0)
-  const hospitalCode = `HOSP-${String(maxNum + 1).padStart(3, '0')}`
+  const hospitalCode = `HOSP-${String(maxNum + 1).padStart(6, '0')}`
 
   const hospital = await prisma.hospital.create({
     data: {

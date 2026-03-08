@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
-export default function DeleteButton({ id }: { id: number }) {
+export default function DeleteButton({ code }: { code: string }) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
 
@@ -11,7 +11,7 @@ export default function DeleteButton({ id }: { id: number }) {
     if (!confirm('정말 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.')) return
 
     setLoading(true)
-    const res = await fetch(`/api/hospitals/${id}`, { method: 'DELETE' })
+    const res = await fetch(`/api/hospitals/${code}`, { method: 'DELETE' })
     if (res.ok) {
       router.push('/hospitals')
     } else {

@@ -2,14 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 
-type Params = { params: { id: string } }
+type Params = { params: { code: string } }
 
 export async function GET(_req: NextRequest, { params }: Params) {
-  const id = parseInt(params.id)
-  if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })
-
   const [hospital, statusCodes] = await Promise.all([
-    prisma.hospital.findUnique({ where: { id } }),
+    prisma.hospital.findUnique({ where: { hospitalCode: params.code } }),
     prisma.statusCode.findMany({ orderBy: { order: 'asc' } }),
   ])
 
@@ -19,9 +16,6 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 export async function PUT(request: NextRequest, { params }: Params) {
-  const id = parseInt(params.id)
-  if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })
-
   const body = await request.json()
   const {
     name, type, status, address, postalCode,
@@ -30,7 +24,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   } = body
 
   const hospital = await prisma.hospital.update({
-    where: { id },
+    where: { hospitalCode: params.code },
     data: {
       name, type, status, address, postalCode,
       sidoCode, sidoName, sigunguCode, sigunguName,
@@ -39,15 +33,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
   })
 
   revalidatePath('/hospitals')
-  revalidatePath(`/hospitals/${id}`, 'page')
+  revalidatePath(`/hospitals/${params.code}`, 'page')
   return NextResponse.json({ hospital })
 }
 
 export async function DELETE(_req: NextRequest, { params }: Params) {
-  const id = parseInt(params.id)
-  if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })
-
-  await prisma.hospital.delete({ where: { id } })
-
+  await prisma.hospital.delete({ where: { hospitalCode: params.code } })
   return NextResponse.json({ success: true })
 }

@@ -119,7 +119,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
                           {h.hospitalCode}
                         </td>
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                          <Link href={`/hospitals/${h.id}`} className="hover:text-blue-600 hover:underline">
+                          <Link href={`/hospitals/${h.hospitalCode}`} className="hover:text-blue-600 hover:underline">
                             {h.name}
                           </Link>
                         </td>
