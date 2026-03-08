@@ -120,6 +120,39 @@ prisma/
 - 시스템 사용자 등록·수정·삭제
 - 계정 활성/비활성 처리
 
+### Google Drive 연동 (선택)
+- Service Account 기반 파일 업로드 (`POST /api/drive/upload`)
+- 폴더 내 파일 목록 조회 (`GET /api/drive/files`)
+- 연결 상태 확인 (`testDriveConnection()`)
+
+---
+
+## Google Drive 연동 설정
+
+Google Drive 연동을 사용하려면 아래 절차를 따릅니다.
+
+### 1. 서비스 계정 JSON 키 발급
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → IAM 및 관리자 → 서비스 계정
+2. 서비스 계정 생성 후 **키 추가 → JSON** 다운로드
+3. Google Drive API 활성화 (API 및 서비스 → 라이브러리)
+4. 공유할 Drive 폴더에 서비스 계정 이메일을 **편집자**로 초대
+
+### 2. JSON 키를 한 줄 문자열로 변환
+
+```bash
+cat your-service-account.json | tr -d '\n'
+```
+
+### 3. `.env.local`에 값 설정
+
+```env
+GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"...전체_JSON_한줄로..."}
+GOOGLE_DRIVE_FOLDER_ID=1r0QdwBtm5LPdBi1QvpUO9InUt7kSENm5
+```
+
+> 키 파일 원본(`.json`)과 `.env.local`은 절대 git에 커밋하지 마세요.
+
 ---
 
 ## 로컬 개발 환경 설정
@@ -143,13 +176,28 @@ npm install
 
 ### 3. 환경변수 설정
 
-`.env` 파일을 생성하고 아래 내용을 작성합니다.
+`.env.example`을 복사해서 `.env.local`을 생성하고 실제 값을 채웁니다.
+
+```bash
+cp .env.example .env.local
+```
 
 ```env
+# 데이터베이스
 DATABASE_URL="postgresql://<user>:<password>@localhost:5432/<dbname>"
+
+# 인증
 JWT_SECRET="your-secret-key"
+
+# 앱 이름
 NEXT_PUBLIC_APP_NAME="thynC Operations System"
+
+# Google Drive (선택 — 연동 시 필요)
+GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"..."}
+GOOGLE_DRIVE_FOLDER_ID=your_folder_id_here
 ```
+
+> `.env.local`은 `.gitignore`에 포함되어 있어 git에 커밋되지 않습니다.
 
 ### 4. DB 마이그레이션 및 시드
 
@@ -229,6 +277,12 @@ npm run dev
 | POST | `/api/settings/status` | 상태코드 추가 |
 | PUT  | `/api/settings/status/[id]` | 상태코드 수정 |
 | DELETE | `/api/settings/status/[id]` | 상태코드 삭제 |
+
+### Google Drive
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| POST | `/api/drive/upload` | 파일 업로드 (`fileName`, `content`, `mimeType`) |
+| GET  | `/api/drive/files` | 폴더 내 파일 목록 (`?folderId=` 선택) |
 
 ---
 
