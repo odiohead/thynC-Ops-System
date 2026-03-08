@@ -1,9 +1,12 @@
 import Link from 'next/link'
+import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
+import { verifyToken } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 import HospitalFilters from './_components/HospitalFilters'
 import Pagination from './_components/Pagination'
+import ExportToDriveButton from './_components/ExportToDriveButton'
 
 const PAGE_SIZE = 20
 
@@ -22,12 +25,22 @@ export const metadata = {
 }
 
 export default async function HospitalsPage({ searchParams }: PageProps) {
+  const cookieStore = cookies()
+  const token = cookieStore.get('auth-token')?.value
+  const user = token ? await verifyToken(token) : null
+  const isAdmin = user?.role === 'ADMIN'
+
   const page = Math.max(1, parseInt((searchParams.page as string) ?? '1'))
   const search = (searchParams.search as string) ?? ''
   const sido = (searchParams.sido as string) ?? ''
 
   const where = {
-    ...(search && { name: { contains: search, mode: 'insensitive' as const } }),
+    ...(search && {
+      OR: [
+        { hospitalName: { contains: search, mode: 'insensitive' as const } },
+        { hiraHospitalName: { contains: search, mode: 'insensitive' as const } },
+      ],
+    }),
     ...(sido && { sidoName: sido }),
   }
 
@@ -40,10 +53,9 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
       select: {
         id: true,
         hospitalCode: true,
-        name: true,
-        type: true,
-        sidoName: true,
-        sigunguName: true,
+        hiraHospitalName: true,
+        hospitalName: true,
+        address: true,
         status: true,
       },
     }),
@@ -69,12 +81,15 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
             <h1 className="text-2xl font-bold text-gray-900">병원 목록</h1>
             <p className="mt-1 text-sm text-gray-500">총 {total.toLocaleString()}개</p>
           </div>
-          <Link
-            href="/hospitals/register"
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-          >
-            병원 등록
-          </Link>
+          <div className="flex items-center gap-2">
+            {isAdmin && <ExportToDriveButton />}
+            <Link
+              href="/hospitals/register"
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+            >
+              병원 등록
+            </Link>
+          </div>
         </div>
 
         {/* 검색 & 필터 */}
@@ -90,7 +105,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  {['병원코드', '병원명', '종별', '시도', '시군구', '상태'].map((col) => (
+                  {['병원코드', '심평원 병원명', '병원명', '주소', '상태'].map((col) => (
                     <th
                       key={col}
                       className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500"
@@ -103,7 +118,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
               <tbody className="divide-y divide-gray-200">
                 {hospitals.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-16 text-center text-sm text-gray-400">
+                    <td colSpan={5} className="py-16 text-center text-sm text-gray-400">
                       검색 결과가 없습니다.
                     </td>
                   </tr>
@@ -118,19 +133,16 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
                         <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-gray-500">
                           {h.hospitalCode}
                         </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          {h.hiraHospitalName}
+                        </td>
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">
                           <Link href={`/hospitals/${h.hospitalCode}`} className="hover:text-blue-600 hover:underline">
-                            {h.name}
+                            {h.hospitalName}
                           </Link>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">
-                          {h.type}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">
-                          {h.sidoName ?? '-'}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">
-                          {h.sigunguName ?? '-'}
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          {h.address ?? '-'}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3">
                           <span

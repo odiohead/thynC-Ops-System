@@ -95,6 +95,62 @@ export async function listFilesInFolder(folderId?: string): Promise<DriveFile[]>
   }));
 }
 
+export async function uploadCsvAsGoogleSheet({
+  fileName,
+  csvContent,
+  folderId,
+}: {
+  fileName: string;
+  csvContent: string;
+  folderId?: string;
+}): Promise<DriveFile> {
+  const drive = getDriveClient();
+  const targetFolderId = folderId ?? process.env.GOOGLE_DRIVE_FOLDER_ID;
+
+  const stream = Readable.from(['\uFEFF' + csvContent]); // BOM 추가 (한글 깨짐 방지)
+
+  const response = await drive.files.create({
+    requestBody: {
+      name: fileName,
+      mimeType: 'application/vnd.google-apps.spreadsheet', // Google Sheets 형식으로 변환
+      parents: targetFolderId ? [targetFolderId] : undefined,
+    },
+    media: {
+      mimeType: 'text/csv',
+      body: stream,
+    },
+    fields: 'id, name, webViewLink',
+  });
+
+  const file = response.data;
+  return {
+    id: file.id ?? '',
+    name: file.name ?? '',
+    webViewLink: file.webViewLink ?? '',
+  };
+}
+
+export async function listFilesByNamePrefix(prefix: string, folderId?: string): Promise<DriveFile[]> {
+  const drive = getDriveClient();
+  const targetFolderId = folderId ?? process.env.GOOGLE_DRIVE_FOLDER_ID;
+
+  if (!targetFolderId) {
+    throw new Error('folderId가 지정되지 않았고 GOOGLE_DRIVE_FOLDER_ID 환경변수도 없습니다.');
+  }
+
+  const response = await drive.files.list({
+    q: `'${targetFolderId}' in parents and name contains '${prefix}' and trashed = false`,
+    fields: 'files(id, name, webViewLink)',
+    orderBy: 'createdTime desc',
+  });
+
+  return (response.data.files ?? []).map((file) => ({
+    id: file.id ?? '',
+    name: file.name ?? '',
+    webViewLink: file.webViewLink ?? '',
+  }));
+}
+
 export async function testDriveConnection(): Promise<{ success: boolean; message: string }> {
   try {
     await listFilesInFolder();
