@@ -89,16 +89,20 @@ export default function Navigation() {
   const [userName, setUserName] = useState('')
 
   useEffect(() => {
+    if (pathname === '/login') return
     fetch('/api/auth/me')
       .then((r) => r.json())
       .then((data) => {
         if (data?.role) {
           setUserRole(data.role)
           setUserName(data.name)
+        } else {
+          setUserRole(null)
+          setUserName('')
         }
       })
       .catch(() => {})
-  }, [])
+  }, [pathname])
 
   useEffect(() => {
     setMobileOpen(false)
