@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-03-15 | 기기 관리 페이지 구현 (/settings/devices)
+- API 추가
+  - `GET /api/settings/devices`: 전체 목록 (sortOrder 기준 정렬, usageCount 포함)
+  - `POST /api/settings/devices`: 기기 등록 (모델 코드 중복 검사)
+  - `PUT /api/settings/devices/[id]`: 기기 수정
+  - `DELETE /api/settings/devices/[id]`: 삭제 (ProjectDevice 참조 중이면 isActive=false 처리, 응답에 deactivated 플래그 포함)
+- 페이지 구현: `/settings/devices` — 상태값 관리 페이지와 동일한 레이아웃/패턴 적용
+  - 테이블: 순서(↑↓), 모델 코드, 기기명, 등록일, 활성 여부, 수정/삭제
+  - 인라인 수정, 추가 행 UI
+  - 비활성 기기는 투명도 처리, 삭제 시 참조 중이면 amber 안내 메시지 표시
+- Navigation.tsx: 설정 하위에 '기기 관리' 항목 추가 (ADMIN 전용)
+- 영향받은 파일: `app/api/settings/devices/route.ts` (신규), `app/api/settings/devices/[id]/route.ts` (신규), `app/settings/devices/page.tsx` (신규), `app/components/Navigation.tsx`
+
+---
+
 ## 2026-03-15 | 프로젝트 관련 신규 테이블 4개 추가 (DeviceInfo, Project, ProjectDevice, ProjectFile)
 - `DeviceInfo`: 기기 정보 (모델 코드, 이름, 활성여부, 정렬순서)
 - `Project`: 구축 프로젝트 (병원 연결, 차수, 계약일, 병동/병상/게이트웨이 수, 담당자, 일정, 완료여부, 이슈노트)

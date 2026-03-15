@@ -189,6 +189,14 @@ export default function Navigation() {
               >
                 상태값 관리
               </Link>
+              {userRole === 'ADMIN' && (
+                <Link
+                  href="/settings/devices"
+                  className={navItemClass(isActive('/settings/devices'))}
+                >
+                  기기 관리
+                </Link>
+              )}
             </div>
           )}
         </div>
