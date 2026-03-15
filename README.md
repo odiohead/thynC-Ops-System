@@ -42,12 +42,13 @@ thynC-Ops-System/
 app/
 ├── api/                        # API Routes
 │   ├── auth/                   # 인증 (login, logout, me)
-│   ├── hospitals/              # 병원 CRUD + 대웅 직원 배정
+│   ├── hospitals/              # 병원 CRUD + 대웅 직원 배정 + Excel 가져오기
 │   ├── hira-hospitals/         # HIRA 병원 데이터 조회
 │   ├── daewoong-staff/         # 대웅제약 직원 CRUD
 │   ├── users/                  # 시스템 사용자 관리
 │   └── settings/status/        # 상태코드 관리
 ├── hospitals/                  # 병원 목록·상세·등록·수정
+│   └── _components/            # HiraSearchModal, ImportButton
 ├── hira-hospitals/             # HIRA 병원 조회
 ├── daewoong-staff/             # 대웅제약 직원 목록·상세
 ├── users/                      # 사용자 관리 (ADMIN 전용)
@@ -79,6 +80,8 @@ prisma/
 - hospitalCode (고유 코드), HiraHospital과 연결 (hiraId)
 - HIRA 병원명 / 운영상 병원명 구분
 - 상태 (status), 좌표 정보 포함
+- 도입형태 (`intro_type`): 구축형/구독형/사용량비례형 (복수 시 쉼표 구분)
+- 도입 병상 수 (`intro_beds`)
 
 ### DaewoongStaff (대웅제약 직원)
 - 직원 ID, 이름, 이메일, 전화번호, 지점 정보, 비고
@@ -103,10 +106,16 @@ prisma/
 - 역할 기반 접근 제어 (ADMIN / USER)
 
 ### 병원 관리
-- HIRA 병원 데이터 검색 및 조회
+- HIRA 병원 데이터 검색 및 조회 (모달 방식)
 - 운영 병원 등록·수정·삭제
+  - 등록: 병원명+상태만으로 즉시 등록, HIRA 연결은 선택
+  - 수정: HIRA 병원 연결 변경·해제 지원
 - 병원별 대웅제약 담당 직원 배정·해제
 - 시도/시군구/상태 필터, 페이지네이션
+- **Excel 일괄 가져오기** (ADMIN 전용): `병원명`, `도입형태`, `도입병상 수` 컬럼 기준으로 전체 병원 데이터 일괄 교체
+  - 미리보기(preview) 모드 지원
+  - 같은 병원명 여러 행 → 도입형태 병합, 도입병상 수 합산
+- **병원 목록 Google Sheets 내보내기**: Drive Sheets API로 스프레드시트 직접 생성
 
 ### 대웅제약 직원 관리
 - 직원 목록 조회 및 상세 페이지
@@ -123,6 +132,7 @@ prisma/
 ### Google Drive 연동 (선택)
 - Service Account 기반 파일 업로드 (`POST /api/drive/upload`)
 - 폴더 내 파일 목록 조회 (`GET /api/drive/files`)
+- 병원 목록 스프레드시트 내보내기 (`POST /api/drive/export`) — Sheets API 직접 생성 방식
 - 연결 상태 확인 (`testDriveConnection()`)
 
 ---
@@ -243,6 +253,7 @@ npm run dev
 | GET  | `/api/hospitals/[code]` | 병원 상세 |
 | PUT  | `/api/hospitals/[code]` | 병원 수정 |
 | DELETE | `/api/hospitals/[code]` | 병원 삭제 |
+| POST | `/api/hospitals/import` | Excel 일괄 가져오기 (`?preview=true` 미리보기) |
 | GET  | `/api/hospitals/[code]/daewoong-staff` | 병원 담당 직원 목록 |
 | POST | `/api/hospitals/[code]/daewoong-staff` | 담당 직원 배정 |
 | DELETE | `/api/hospitals/[code]/daewoong-staff/[sid]` | 담당 직원 해제 |
@@ -283,6 +294,7 @@ npm run dev
 |--------|----------|------|
 | POST | `/api/drive/upload` | 파일 업로드 (`fileName`, `content`, `mimeType`) |
 | GET  | `/api/drive/files` | 폴더 내 파일 목록 (`?folderId=` 선택) |
+| POST | `/api/drive/export` | 병원 목록 스프레드시트 내보내기 (Sheets API) |
 
 ---
 
