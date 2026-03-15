@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-03-15 | 프로젝트 API Routes 구현
+- `GET/POST /api/projects`: 목록(필터/페이지네이션) 및 등록
+  - 등록 시 projectCode(PRJ-YYYYMM-NNNN), orderNumber(병원 내 차수), projectName("{병원명} N차") 자동 생성
+- `GET/PUT/DELETE /api/projects/[code]`: 상세 조회, 수정, 삭제
+  - 삭제 시 projectDevices, projectFiles 연관 데이터 먼저 삭제 처리
+- `GET/POST /api/projects/[code]/devices`: 기기 목록 조회 및 upsert 등록
+- `GET/POST /api/projects/[code]/files`: 파일 메타데이터 목록 조회 및 등록 (Drive 연동 없이 DB만 저장)
+- `DELETE /api/projects/[code]/files/[fileId]`: 파일 레코드 삭제
+- 영향받은 파일: `app/api/projects/route.ts`, `app/api/projects/[code]/route.ts`, `app/api/projects/[code]/devices/route.ts`, `app/api/projects/[code]/files/route.ts`, `app/api/projects/[code]/files/[fileId]/route.ts` (모두 신규)
+
+---
+
 ## 2026-03-15 | 기기 관리 페이지 구현 (/settings/devices)
 - API 추가
   - `GET /api/settings/devices`: 전체 목록 (sortOrder 기준 정렬, usageCount 포함)
