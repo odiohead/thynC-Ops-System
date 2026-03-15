@@ -32,11 +32,12 @@ model HiraHospital {
 }
 
 model Hospital {
-  id             Int      @id @default(autoincrement())
-  hospitalCode   String   @unique @map("hospital_code")
-  hiraId         String?  @unique @map("hira_id")
-  name           String   @map("name")
-  type           String   @map("type")
+  id                Int      @id @default(autoincrement())
+  hospitalCode      String   @unique @map("hospital_code")
+  hiraId            String?  @unique @map("hira_id")
+  hiraHospitalName  String   @map("hira_hospital_name")
+  hospitalName      String   @map("hospital_name")
+  type              String   @map("type")
   sidoCode       String?  @map("sido_code")
   sidoName       String?  @map("sido_name")
   sigunguCode    String?  @map("sigungu_code")
@@ -47,10 +48,13 @@ model Hospital {
   coordinateX    String?  @map("coordinate_x")
   coordinateY    String?  @map("coordinate_y")
   status         String   @map("status")
+  introType      String?  @map("intro_type")
+  introBeds      Int?     @map("intro_beds")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
   hiraHospital        HiraHospital? @relation(fields: [hiraId], references: [hiraId])
   daewoongAssignments DaewoongHospitalAssignment[]
+  projects            Project[]
 
   @@map("hospitals")
 }
@@ -96,14 +100,82 @@ enum Role {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
+  id        String    @id @default(uuid())
+  email     String    @unique
   password  String
   name      String
   phone     String
-  role      Role     @default(USER)
-  isActive  Boolean  @default(true) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at")
+  role      Role      @default(USER)
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  projects  Project[]
 
   @@map("users")
+}
+
+model DeviceInfo {
+  id          Int      @id @default(autoincrement())
+  deviceModel String   @unique @map("device_model")
+  deviceName  String   @map("device_name")
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  devices     ProjectDevice[]
+
+  @@map("device_info")
+}
+
+model Project {
+  id                  Int       @id @default(autoincrement())
+  projectCode         String    @unique @map("project_code")
+  projectName         String    @map("project_name")
+  hospitalCode        String    @map("hospital_code")
+  orderNumber         Int       @map("order_number")
+  contractDate        DateTime? @map("contract_date")
+  wardCount           Int?      @map("ward_count")
+  bedCount            Int?      @map("bed_count")
+  gatewayCount        Int?      @map("gateway_count")
+  hasSurvey           Boolean   @default(false) @map("has_survey")
+  hasOrder            Boolean   @default(false) @map("has_order")
+  builderUserId       String?   @map("builder_user_id")
+  builderNameManual   String?   @map("builder_name_manual")
+  startDate           DateTime? @map("start_date")
+  endDateExpected     DateTime? @map("end_date_expected")
+  isCompleted         Boolean   @default(false) @map("is_completed")
+  issueNote           String?   @db.Text @map("issue_note")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  hospital            Hospital  @relation(fields: [hospitalCode], references: [hospitalCode])
+  builder             User?     @relation(fields: [builderUserId], references: [id])
+  devices             ProjectDevice[]
+  files               ProjectFile[]
+
+  @@map("projects")
+}
+
+model ProjectDevice {
+  id           Int        @id @default(autoincrement())
+  projectId    Int        @map("project_id")
+  deviceInfoId Int        @map("device_info_id")
+  quantity     Int        @default(0) @map("quantity")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  project      Project    @relation(fields: [projectId], references: [id])
+  deviceInfo   DeviceInfo @relation(fields: [deviceInfoId], references: [id])
+
+  @@unique([projectId, deviceInfoId])
+  @@map("project_devices")
+}
+
+model ProjectFile {
+  id           Int      @id @default(autoincrement())
+  projectId    Int      @map("project_id")
+  fileCategory String   @map("file_category")
+  fileName     String   @map("file_name")
+  driveFileId  String   @map("drive_file_id")
+  driveUrl     String   @map("drive_url")
+  uploadedAt   DateTime @default(now()) @map("uploaded_at")
+  project      Project  @relation(fields: [projectId], references: [id])
+
+  @@map("project_files")
 }
