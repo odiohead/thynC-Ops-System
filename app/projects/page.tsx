@@ -36,6 +36,17 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
 
   const page = Math.max(1, parseInt((searchParams.page as string) ?? '1'))
   const search = (searchParams.search as string) ?? ''
+  const buildStatusId = (searchParams.buildStatusId as string) ?? ''
+  const contractorId = (searchParams.contractorId as string) ?? ''
+  const builderId = (searchParams.builderId as string) ?? ''
+  const orderBy = (searchParams.orderBy as string) ?? 'contractDate'
+  const order = ((searchParams.order as string) ?? 'desc') as 'asc' | 'desc'
+
+  const orderByMap: Record<string, object> = {
+    contractDate: { contractDate: order },
+    startDate: { startDate: order },
+  }
+  const orderByClause = orderByMap[orderBy] ?? { contractDate: 'desc' }
 
   const where = {
     ...(search && {
@@ -44,6 +55,9 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
         { hospital: { hospitalName: { contains: search, mode: 'insensitive' as const } } },
       ],
     }),
+    ...(buildStatusId && { buildStatusId: Number(buildStatusId) }),
+    ...(contractorId && { constructorId: Number(contractorId) }),
+    ...(builderId && { builderUserId: builderId }),
   }
 
   const [projects, total] = await Promise.all([
@@ -51,7 +65,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
       where,
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
-      orderBy: { createdAt: 'desc' },
+      orderBy: orderByClause,
       include: {
         hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
         builder: { select: { name: true } },
@@ -68,7 +82,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
   const cols = [
-    '프로젝트 코드', '프로젝트명', '차수', '계약일', '진행상태',
+    '프로젝트 코드', '프로젝트명', '차수', '계약일', '도입형태', '진행상태',
     '병동 수', '병상 수', 'G/W', '심전계', '산소포화도',
     '담당자', '구축업체', '구축 시작일', '구축 종료일(예상)', '프로젝트 폴더',
   ]
@@ -94,7 +108,14 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
         </div>
 
         {/* 필터 */}
-        <ProjectFilters initialSearch={search} />
+        <ProjectFilters
+          initialSearch={search}
+          initialBuildStatusId={buildStatusId}
+          initialContractorId={contractorId}
+          initialBuilderId={builderId}
+          initialOrderBy={orderBy}
+          initialOrder={order}
+        />
 
         {/* 테이블 */}
         <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
@@ -141,6 +162,9 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
                         </td>
                         <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '100px' }}>
                           {fmt(p.contractDate)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '88px' }}>
+                          {p.contractType ?? <span className="text-gray-400">-</span>}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3" style={{ minWidth: '100px' }}>
                           {p.buildStatus
@@ -198,7 +222,16 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
         </div>
 
         {/* 페이지네이션 */}
-        <ProjectPagination page={page} totalPages={totalPages} search={search} />
+        <ProjectPagination
+          page={page}
+          totalPages={totalPages}
+          search={search}
+          buildStatusId={buildStatusId}
+          contractorId={contractorId}
+          builderId={builderId}
+          orderBy={orderBy}
+          order={order}
+        />
 
       </div>
     </div>

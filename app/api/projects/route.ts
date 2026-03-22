@@ -9,9 +9,30 @@ export async function GET(request: NextRequest) {
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
   const limit = parseInt(searchParams.get('limit') ?? String(PAGE_SIZE))
   const hospitalCode = searchParams.get('hospitalCode') ?? ''
+  const search = searchParams.get('search') ?? ''
+  const buildStatusId = searchParams.get('buildStatusId') ?? ''
+  const contractorId = searchParams.get('contractorId') ?? ''
+  const builderId = searchParams.get('builderId') ?? ''
+  const orderBy = searchParams.get('orderBy') ?? 'contractDate'
+  const order = (searchParams.get('order') ?? 'desc') as 'asc' | 'desc'
+
+  const orderByMap: Record<string, object> = {
+    contractDate: { contractDate: order },
+    startDate: { startDate: order },
+  }
+  const orderByClause = orderByMap[orderBy] ?? { contractDate: 'desc' }
 
   const where = {
     ...(hospitalCode && { hospitalCode }),
+    ...(search && {
+      OR: [
+        { projectName: { contains: search, mode: 'insensitive' as const } },
+        { hospital: { hospitalName: { contains: search, mode: 'insensitive' as const } } },
+      ],
+    }),
+    ...(buildStatusId && { buildStatusId: Number(buildStatusId) }),
+    ...(contractorId && { constructorId: Number(contractorId) }),
+    ...(builderId && { builderUserId: builderId }),
   }
 
   const [projects, total] = await Promise.all([
@@ -19,7 +40,7 @@ export async function GET(request: NextRequest) {
       where,
       skip: (page - 1) * limit,
       take: limit,
-      orderBy: { createdAt: 'desc' },
+      orderBy: orderByClause,
       include: {
         hospital: {
           select: {

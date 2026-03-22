@@ -35,6 +35,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const body = await request.json()
   const {
     contractDate,
+    contractType,
     wardCount,
     bedCount,
     gatewayCount,
@@ -53,6 +54,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     where: { projectCode: params.code },
     data: {
       contractDate: contractDate !== undefined ? (contractDate ? new Date(contractDate) : null) : undefined,
+      contractType: contractType !== undefined ? (contractType || null) : undefined,
       wardCount: wardCount !== undefined ? (wardCount != null ? Number(wardCount) : null) : undefined,
       bedCount: bedCount !== undefined ? (bedCount != null ? Number(bedCount) : null) : undefined,
       gatewayCount: gatewayCount !== undefined ? (gatewayCount != null ? Number(gatewayCount) : null) : undefined,

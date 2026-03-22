@@ -47,6 +47,7 @@ interface Project {
   hospitalCode: string
   orderNumber: number
   contractDate: string | null
+  contractType: string | null
   wardCount: number | null
   bedCount: number | null
   gatewayCount: number | null
@@ -106,6 +107,7 @@ export default function ProjectDetailPage() {
 
   // 편집 상태
   const [contractDate, setContractDate] = useState('')
+  const [contractType, setContractType] = useState('')
   const [wardCount, setWardCount] = useState('')
   const [bedCount, setBedCount] = useState('')
   const [gatewayCount, setGatewayCount] = useState('')
@@ -145,6 +147,7 @@ export default function ProjectDetailPage() {
     setProject(p)
 
     setContractDate(toDateInput(p.contractDate))
+    setContractType(p.contractType ?? '')
     setWardCount(p.wardCount != null ? String(p.wardCount) : '')
     setBedCount(p.bedCount != null ? String(p.bedCount) : '')
     setGatewayCount(p.gatewayCount != null ? String(p.gatewayCount) : '')
@@ -190,6 +193,7 @@ export default function ProjectDetailPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contractDate: contractDate || null,
+        contractType: contractType || null,
         wardCount: wardCount !== '' ? Number(wardCount) : null,
         bedCount: bedCount !== '' ? Number(bedCount) : null,
         gatewayCount: gatewayCount !== '' ? Number(gatewayCount) : null,
@@ -349,6 +353,10 @@ export default function ProjectDetailPage() {
               <div>
                 <label className={labelClass}>계약일</label>
                 <input type="date" value={contractDate} onChange={(e) => setContractDate(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className={labelClass}>도입형태</label>
+                <input type="text" value={contractType} onChange={(e) => setContractType(e.target.value)} className={inputClass} placeholder="예: 구축형, 씨어스, 사용량" />
               </div>
               <div>
                 <label className={labelClass}>도입 병동 수</label>
