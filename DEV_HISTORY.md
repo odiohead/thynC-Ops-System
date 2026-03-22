@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-03-22 19:30 | 메인 페이지 대시보드 추가
+
+- `GET /api/dashboard` 신규 생성: 이번주/차주 구축현황 반환
+  - 이번주: buildStatus null이거나 "완료"가 아닌 프로젝트 + 이번주 startDate 범위 프로젝트 OR 조합, 중복 제거
+  - 차주: startDate가 차주 월~일 범위 내 프로젝트
+  - 날짜 범위 Asia/Seoul 기준 계산, endDateExpected asc(null 마지막) 정렬
+- `app/page.tsx` 대시보드 UI 구현
+  - "이번주 thynC 구축 현황" 카드: 번호·병원명·진행상태(StatusBadge)·예상종료일·비고 테이블, 헤더에 buildStatus별 건수 요약
+  - "차주 thynC 구축 예정" 카드: 번호·병원명·시작일·예상종료일·비고 테이블, 헤더에 N건 신규구축 요약
+  - 병원명 클릭 시 `/projects/[code]`로 이동, 예상종료일 없으면 "미정" 표시
+  - 데이터 없을 때 안내 메시지 표시
+- 영향 파일: `app/page.tsx`, `app/api/dashboard/route.ts`
+
+---
+
 ## 2026-03-22 18:30 | 프로젝트 contractType UI 반영 및 목록 필터/정렬 기능 추가
 
 - `Project` 상세 페이지 계약 정보 카드에 "도입형태" 필드 추가 (계약일 아래, 텍스트 input)
