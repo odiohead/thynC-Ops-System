@@ -146,6 +146,18 @@ model Contractor {
   @@map("constructors")
 }
 
+model BuildStatus {
+  id        Int       @id @default(autoincrement())
+  label     String    @map("label")
+  color     String?   @map("color")
+  sortOrder Int       @default(0) @map("sort_order")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  projects  Project[]
+
+  @@map("build_statuses")
+}
+
 model Project {
   id                  Int          @id @default(autoincrement())
   projectCode         String       @unique @map("project_code")
@@ -153,6 +165,7 @@ model Project {
   hospitalCode        String       @map("hospital_code")
   orderNumber         Int          @map("order_number")
   contractDate        DateTime?    @map("contract_date")
+  contractType        String?      @map("contract_type")
   wardCount           Int?         @map("ward_count")
   bedCount            Int?         @map("bed_count")
   gatewayCount        Int?         @map("gateway_count")
@@ -163,7 +176,7 @@ model Project {
   constructorId       Int?         @map("constructor_id")
   startDate           DateTime?    @map("start_date")
   endDateExpected     DateTime?    @map("end_date_expected")
-  isCompleted         Boolean      @default(false) @map("is_completed")
+  buildStatusId       Int?         @map("build_status_id")
   issueNote           String?      @db.Text @map("issue_note")
   driveFolderId       String?      @map("drive_folder_id")
   createdAt           DateTime     @default(now()) @map("created_at")
@@ -171,6 +184,7 @@ model Project {
   hospital            Hospital     @relation(fields: [hospitalCode], references: [hospitalCode])
   builder             User?        @relation(fields: [builderUserId], references: [id])
   contractor          Contractor?  @relation(fields: [constructorId], references: [id])
+  buildStatus         BuildStatus? @relation(fields: [buildStatusId], references: [id])
   devices             ProjectDevice[]
   files               ProjectFile[]
 
