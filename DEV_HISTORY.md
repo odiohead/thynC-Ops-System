@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-03-22 | 프로젝트 파일 업로드 Drive 폴더 기준 변경 (병원 → 프로젝트 하위)
+- 프로젝트 파일 업로드 가능 여부를 project.driveFolderId 기준에서 hospital.meta.driveProjectFolderId 기준으로 변경
+- 병원에 Drive 폴더가 있으면 → 첫 업로드 시 프로젝트 서브폴더 자동 생성 후 업로드 (사용자 개입 불필요)
+- 병원에 Drive 폴더가 없으면 → 안내 메시지 표시 + 병원 페이지 링크, 업로드 버튼 비활성화
+- 프로젝트 상세 API에 hospital.meta 포함
+- "Drive 폴더 생성" 수동 버튼 제거
+- 영향 파일: app/api/projects/[code]/route.ts, app/api/projects/[code]/files/route.ts, app/projects/[code]/page.tsx
+
+---
+
 ## 2026-03-22 | 기존 프로젝트 Drive 폴더 수동 생성 버튼 추가
 - 기존에 생성된 프로젝트(driveFolderId=null)는 파일 업로드 불가 문제 수정
 - `POST /api/projects/[code]/drive-folder` 신규 엔드포인트 추가: 병원 HospitalMeta.driveProjectFolderId 기반으로 Drive 폴더 생성 후 project.driveFolderId 저장

@@ -54,7 +54,7 @@ interface Project {
   isCompleted: boolean
   issueNote: string | null
   driveFolderId: string | null
-  hospital: { hospitalCode: string; hospitalName: string }
+  hospital: { hospitalCode: string; hospitalName: string; meta: { driveProjectFolderId: string | null } | null }
   builder: { id: string; name: string } | null
   contractor: ConstructorInfo | null
   devices: ProjectDevice[]
@@ -116,7 +116,6 @@ export default function ProjectDetailPage() {
 
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [creatingDriveFolder, setCreatingDriveFolder] = useState(false)
   const [uploadingCategory, setUploadingCategory] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -225,7 +224,7 @@ export default function ProjectDetailPage() {
   }
 
   function handleAddFileClick(category: string) {
-    if (!project?.driveFolderId) return
+    if (!project?.hospital.meta?.driveProjectFolderId) return
     pendingCategoryRef.current = category
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
@@ -258,24 +257,6 @@ export default function ProjectDetailPage() {
     } finally {
       setUploadingCategory(null)
       pendingCategoryRef.current = null
-    }
-  }
-
-  async function handleCreateDriveFolder() {
-    setCreatingDriveFolder(true)
-    setUploadError(null)
-    try {
-      const res = await fetch(`/api/projects/${code}/drive-folder`, { method: 'POST' })
-      if (!res.ok) {
-        const json = await res.json()
-        setUploadError(json.error ?? 'Drive 폴더 생성에 실패했습니다.')
-      } else {
-        await loadProject()
-      }
-    } catch {
-      setUploadError('Drive 폴더 생성 중 오류가 발생했습니다.')
-    } finally {
-      setCreatingDriveFolder(false)
     }
   }
 
@@ -474,17 +455,14 @@ export default function ProjectDetailPage() {
               <h2 className="text-sm font-semibold text-gray-700">첨부파일</h2>
             </div>
 
-            {!project.driveFolderId && (
-              <div className="flex items-center justify-between gap-4 px-6 py-4 bg-amber-50 border-b border-amber-100">
-                <p className="text-sm text-amber-700">Drive 폴더가 연결되지 않아 파일 업로드가 불가합니다.</p>
-                <button
-                  type="button"
-                  onClick={handleCreateDriveFolder}
-                  disabled={creatingDriveFolder}
-                  className="shrink-0 rounded border border-amber-400 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-50"
-                >
-                  {creatingDriveFolder ? '생성 중...' : 'Drive 폴더 생성'}
-                </button>
+            {!project.hospital.meta?.driveProjectFolderId && (
+              <div className="px-6 py-4 bg-amber-50 border-b border-amber-100">
+                <p className="text-sm text-amber-700">
+                  병원에 Drive 프로젝트 폴더가 등록되지 않아 파일 업로드가 불가합니다.{' '}
+                  <a href={`/hospitals/${project.hospital.hospitalCode}`} className="underline hover:text-amber-900">
+                    병원 페이지에서 먼저 등록해 주세요.
+                  </a>
+                </p>
               </div>
             )}
 
@@ -510,7 +488,7 @@ export default function ProjectDetailPage() {
                       <h3 className="text-sm font-medium text-gray-700">{cat.label}</h3>
                       <button
                         type="button"
-                        disabled={!project.driveFolderId || !!uploadingCategory}
+                        disabled={!project.hospital.meta?.driveProjectFolderId || !!uploadingCategory}
                         onClick={() => handleAddFileClick(cat.key)}
                         className="rounded border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
                       >

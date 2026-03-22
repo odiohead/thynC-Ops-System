@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { uploadBufferToDrive } from '@/lib/googleDrive'
+import { createDriveFolder, uploadBufferToDrive } from '@/lib/googleDrive'
 
 type Params = { params: { code: string } }
 
@@ -24,12 +24,17 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
-  const project = await prisma.project.findUnique({ where: { projectCode: params.code } })
+  const project = await prisma.project.findUnique({
+    where: { projectCode: params.code },
+    include: { hospital: { include: { meta: true } } },
+  })
   if (!project) return NextResponse.json({ error: '프로젝트를 찾을 수 없습니다.' }, { status: 404 })
 
-  if (!project.driveFolderId) {
+  // 병원 Drive 폴더 여부 확인
+  const hospitalDriveFolderId = project.hospital.meta?.driveProjectFolderId
+  if (!hospitalDriveFolderId) {
     return NextResponse.json(
-      { error: '프로젝트에 Drive 폴더가 연결되지 않아 파일을 업로드할 수 없습니다.' },
+      { error: '병원에 Drive 프로젝트 폴더가 설정되지 않아 파일을 업로드할 수 없습니다.' },
       { status: 400 }
     )
   }
@@ -46,6 +51,15 @@ export async function POST(request: NextRequest, { params }: Params) {
     )
   }
 
+  // 프로젝트 Drive 서브폴더가 없으면 자동 생성
+  let folderId = project.driveFolderId
+  if (!folderId) {
+    const hospitalName = project.hospital.hospitalName || project.hospital.hiraHospitalName
+    const folderName = `${project.projectCode}_${hospitalName}`
+    folderId = await createDriveFolder(folderName, hospitalDriveFolderId)
+    await prisma.project.update({ where: { id: project.id }, data: { driveFolderId: folderId } })
+  }
+
   const arrayBuffer = await file.arrayBuffer()
   const buffer = Buffer.from(arrayBuffer)
 
@@ -53,7 +67,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     fileName: file.name,
     buffer,
     mimeType: file.type || 'application/octet-stream',
-    folderId: project.driveFolderId,
+    folderId,
   })
 
   const projectFile = await prisma.projectFile.create({

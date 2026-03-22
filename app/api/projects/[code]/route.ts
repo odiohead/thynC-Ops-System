@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 type Params = { params: { code: string } }
 
 const projectInclude = {
-  hospital: true,
+  hospital: { include: { meta: true } },
   builder: { select: { id: true, name: true, email: true } },
   contractor: { select: { id: true, code: true, name: true } },
   devices: {
