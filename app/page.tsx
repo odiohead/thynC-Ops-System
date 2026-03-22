@@ -65,13 +65,12 @@ export default async function Home() {
   const thisWeek = getWeekRange(0)
   const nextWeek = getWeekRange(1)
 
-  // 이번주: (A) buildStatus null 또는 "완료" 아님, (B) 이번주 startDate — OR 후 중복 제거
+  // 이번주: 이번주 startDate 프로젝트 OR 진행중 상태 프로젝트 (중복 제거)
   const thisWeekRaw = await prisma.project.findMany({
     where: {
       OR: [
-        { buildStatus: null },
-        { buildStatus: { label: { not: '완료' } } },
         { startDate: { gte: thisWeek.start, lte: thisWeek.end } },
+        { buildStatus: { label: '진행중' } },
       ],
     },
     select: projectSelect,
