@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-03-22 12:30 | 프로젝트 목록 페이지 컬럼 개편
+
+- 프로젝트 목록 테이블 컬럼 전면 개편: 병원명 제거, 병동 수·병상 수·G/W·심전계·산소포화도·구축업체·구축 시작일·구축 종료일(예상)·프로젝트 폴더 추가
+- 숫자 컬럼(병동/병상/G/W/심전계/산소포화도) 중앙 정렬, 전체 테이블 overflow-x-auto 및 컬럼별 minWidth 지정
+- Prisma 쿼리에 contractor, devices(+deviceInfo.deviceModel) 포함 추가
+- 심전계(MC200MT-T), 산소포화도(MP1000W) deviceModel 기준으로 수량 추출
+- 프로젝트 폴더: driveFolderId 있으면 Google Drive 바로가기 링크, 없으면 '-'
+- 날짜 표시 YYYY-MM-DD 형식으로 통일 (toISOString().slice(0,10))
+- GET /api/projects include에 deviceInfo.deviceModel/deviceName 명시적 select 추가
+- 영향 파일: `app/projects/page.tsx`, `app/api/projects/route.ts`
+
+---
+
 ## 2026-03-22 11:30 | 병원 상태코드 색상 관리 및 StatusBadge 컴포넌트 적용
 
 - Navigation '상태값 관리' → '병원 상태코드 관리'로 메뉴명 변경, 설정 페이지 타이틀도 동일하게 변경

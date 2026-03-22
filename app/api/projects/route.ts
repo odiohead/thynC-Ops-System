@@ -39,7 +39,11 @@ export async function GET(request: NextRequest) {
           select: { id: true, code: true, name: true },
         },
         devices: {
-          include: { deviceInfo: true },
+          include: {
+            deviceInfo: {
+              select: { deviceModel: true, deviceName: true, sortOrder: true },
+            },
+          },
           orderBy: { deviceInfo: { sortOrder: 'asc' } },
         },
         files: {
