@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { createDriveFolder } from '@/lib/googleDrive'
 
 const PAGE_SIZE = 20
 
@@ -85,6 +86,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '병원을 찾을 수 없습니다.' }, { status: 404 })
   }
 
+  const hospitalMeta = await prisma.hospitalMeta.findUnique({ where: { hospitalCode } })
+  if (!hospitalMeta?.driveProjectFolderId) {
+    return NextResponse.json(
+      { error: '해당 병원에 Drive 프로젝트 폴더가 설정되어 있지 않습니다. 병원 상세 페이지에서 먼저 Drive 폴더를 등록해 주세요.' },
+      { status: 400 }
+    )
+  }
+
   // orderNumber: 해당 병원의 기존 프로젝트 수 + 1
   const existingCount = await prisma.project.count({ where: { hospitalCode } })
   const orderNumber = existingCount + 1
@@ -133,5 +142,20 @@ export async function POST(request: NextRequest) {
     },
   })
 
-  return NextResponse.json({ project }, { status: 201 })
+  // Drive 폴더 자동 생성
+  let driveFolderId: string | null = null
+  let driveWarning: string | undefined
+  try {
+    const folderName = `${projectCode}_${hospitalName}`
+    driveFolderId = await createDriveFolder(folderName, hospitalMeta.driveProjectFolderId)
+    await prisma.project.update({ where: { id: project.id }, data: { driveFolderId } })
+  } catch (e) {
+    console.error('Drive folder creation failed:', e)
+    driveWarning = 'Drive 폴더 생성에 실패했습니다. 프로젝트는 생성되었으나 파일 업로드를 위해 Drive 폴더를 수동으로 연결해주세요.'
+  }
+
+  return NextResponse.json(
+    { project: { ...project, driveFolderId }, ...(driveWarning ? { driveWarning } : {}) },
+    { status: 201 }
+  )
 }

@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import HospitalSelectModal, { SelectedHospital } from '../_components/HospitalSelectModal'
 
+
+
 interface DeviceInfo {
   id: number
   deviceModel: string
@@ -53,6 +55,8 @@ function NewProjectForm() {
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [deviceQty, setDeviceQty] = useState<Record<number, number>>({})
 
+  const [hospitalDriveOk, setHospitalDriveOk] = useState<boolean | null>(null)
+
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -73,9 +77,18 @@ function NewProjectForm() {
           hospitalCode: hospData.hospital.hospitalCode,
           hospitalName: hospData.hospital.hospitalName,
         })
+        setHospitalDriveOk(!!hospData.hospital.meta?.driveProjectFolderId)
       }
     })
   }, [searchParams])
+
+  useEffect(() => {
+    if (!hospital) { setHospitalDriveOk(null); return }
+    fetch(`/api/hospitals/${hospital.hospitalCode}`)
+      .then((r) => r.json())
+      .then((data) => setHospitalDriveOk(!!data.hospital?.meta?.driveProjectFolderId))
+      .catch(() => setHospitalDriveOk(null))
+  }, [hospital])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -154,6 +167,12 @@ function NewProjectForm() {
 
         {error && (
           <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        )}
+
+        {hospital && hospitalDriveOk === false && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            ⚠️ 선택한 병원에 Drive 프로젝트 폴더가 등록되어 있지 않습니다. 병원 상세 페이지에서 먼저 Drive 폴더를 연결해 주세요.
+          </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -338,7 +357,7 @@ function NewProjectForm() {
             </Link>
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || hospitalDriveOk === false}
               className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
             >
               {submitting ? '등록 중...' : '등록'}

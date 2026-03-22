@@ -39,6 +39,50 @@ interface DriveFile {
   webViewLink: string;
 }
 
+export async function createDriveFolder(name: string, parentFolderId: string): Promise<string> {
+  const { drive } = getDriveClient();
+  const response = await drive.files.create({
+    supportsAllDrives: true,
+    requestBody: {
+      name,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentFolderId],
+    },
+    fields: 'id',
+  });
+  return response.data.id!;
+}
+
+interface UploadBufferParams {
+  fileName: string;
+  buffer: Buffer;
+  mimeType: string;
+  folderId: string;
+}
+
+export async function uploadBufferToDrive({
+  fileName,
+  buffer,
+  mimeType,
+  folderId,
+}: UploadBufferParams): Promise<DriveFile> {
+  const { drive } = getDriveClient();
+  const response = await drive.files.create({
+    supportsAllDrives: true,
+    requestBody: {
+      name: fileName,
+      parents: [folderId],
+    },
+    media: {
+      mimeType,
+      body: Readable.from(buffer),
+    },
+    fields: 'id, name, webViewLink',
+  });
+  const file = response.data;
+  return { id: file.id ?? '', name: file.name ?? '', webViewLink: file.webViewLink ?? '' };
+}
+
 interface UploadFileParams {
   fileName: string;
   content: string;

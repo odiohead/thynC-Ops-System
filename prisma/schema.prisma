@@ -163,6 +163,7 @@ model Project {
   endDateExpected     DateTime?    @map("end_date_expected")
   isCompleted         Boolean      @default(false) @map("is_completed")
   issueNote           String?      @db.Text @map("issue_note")
+  driveFolderId       String?      @map("drive_folder_id")
   createdAt           DateTime     @default(now()) @map("created_at")
   updatedAt           DateTime     @updatedAt @map("updated_at")
   hospital            Hospital     @relation(fields: [hospitalCode], references: [hospitalCode])

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 
@@ -53,6 +53,7 @@ interface Project {
   endDateExpected: string | null
   isCompleted: boolean
   issueNote: string | null
+  driveFolderId: string | null
   hospital: { hospitalCode: string; hospitalName: string }
   builder: { id: string; name: string } | null
   contractor: ConstructorInfo | null
@@ -115,6 +116,10 @@ export default function ProjectDetailPage() {
 
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [uploadingCategory, setUploadingCategory] = useState<string | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const pendingCategoryRef = useRef<string | null>(null)
 
   const loadProject = useCallback(async () => {
     const res = await fetch(`/api/projects/${code}`)
@@ -216,6 +221,43 @@ export default function ProjectDetailPage() {
     if (!confirm('파일 레코드를 삭제하시겠습니까?')) return
     await fetch(`/api/projects/${code}/files/${fileId}`, { method: 'DELETE' })
     await loadProject()
+  }
+
+  function handleAddFileClick(category: string) {
+    if (!project?.driveFolderId) return
+    pendingCategoryRef.current = category
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+      fileInputRef.current.click()
+    }
+  }
+
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    const category = pendingCategoryRef.current
+    if (!file || !category) return
+
+    setUploadingCategory(category)
+    setUploadError(null)
+
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('fileCategory', category)
+
+    try {
+      const res = await fetch(`/api/projects/${code}/files`, { method: 'POST', body: formData })
+      if (!res.ok) {
+        const json = await res.json()
+        setUploadError(json.error ?? '업로드에 실패했습니다.')
+      } else {
+        await loadProject()
+      }
+    } catch {
+      setUploadError('업로드 중 오류가 발생했습니다.')
+    } finally {
+      setUploadingCategory(null)
+      pendingCategoryRef.current = null
+    }
   }
 
   if (loading) {
@@ -412,19 +454,40 @@ export default function ProjectDetailPage() {
             <div className="border-b border-gray-200 px-6 py-4">
               <h2 className="text-sm font-semibold text-gray-700">첨부파일</h2>
             </div>
+
+            {!project.driveFolderId && (
+              <div className="px-6 py-4 text-sm text-amber-600 bg-amber-50 border-b border-amber-100">
+                Drive 폴더가 연결되지 않아 파일 업로드가 불가합니다.
+              </div>
+            )}
+
+            {uploadError && (
+              <div className="px-6 py-3 text-sm text-red-600 bg-red-50 border-b border-red-100">{uploadError}</div>
+            )}
+
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleFileSelected}
+            />
+
             <div className="divide-y divide-gray-100">
               {FILE_CATEGORIES.map((cat) => {
                 const catFiles = project.files.filter((f) => f.fileCategory === cat.key)
+                const isUploading = uploadingCategory === cat.key
                 return (
                   <div key={cat.key} className="px-6 py-4">
                     <div className="flex items-center justify-between">
                       <h3 className="text-sm font-medium text-gray-700">{cat.label}</h3>
                       <button
                         type="button"
-                        onClick={() => alert('추후 지원 예정입니다.')}
-                        className="rounded border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-50"
+                        disabled={!project.driveFolderId || !!uploadingCategory}
+                        onClick={() => handleAddFileClick(cat.key)}
+                        className="rounded border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
-                        + 파일 추가
+                        {isUploading ? '업로드 중...' : '+ 파일 추가'}
                       </button>
                     </div>
                     {catFiles.length === 0 ? (
@@ -443,13 +506,15 @@ export default function ProjectDetailPage() {
                                 <span className="truncate text-xs text-gray-700">{f.fileName}</span>
                               )}
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteFile(f.id)}
-                              className="ml-3 shrink-0 text-xs text-red-400 hover:text-red-600"
-                            >
-                              삭제
-                            </button>
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteFile(f.id)}
+                                className="ml-3 shrink-0 text-xs text-red-400 hover:text-red-600"
+                              >
+                                삭제
+                              </button>
+                            )}
                           </li>
                         ))}
                       </ul>
