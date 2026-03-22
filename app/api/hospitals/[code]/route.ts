@@ -6,7 +6,7 @@ type Params = { params: { code: string } }
 
 export async function GET(_req: NextRequest, { params }: Params) {
   const [hospital, statusCodes] = await Promise.all([
-    prisma.hospital.findUnique({ where: { hospitalCode: params.code } }),
+    prisma.hospital.findUnique({ where: { hospitalCode: params.code }, include: { meta: true } }),
     prisma.statusCode.findMany({ orderBy: { order: 'asc' } }),
   ])
 

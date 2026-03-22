@@ -9,11 +9,9 @@ export async function GET(request: NextRequest) {
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
   const limit = parseInt(searchParams.get('limit') ?? String(PAGE_SIZE))
   const hospitalCode = searchParams.get('hospitalCode') ?? ''
-  const isCompletedParam = searchParams.get('isCompleted')
 
   const where = {
     ...(hospitalCode && { hospitalCode }),
-    ...(isCompletedParam !== null && { isCompleted: isCompletedParam === 'true' }),
   }
 
   const [projects, total] = await Promise.all([
@@ -37,6 +35,9 @@ export async function GET(request: NextRequest) {
         },
         contractor: {
           select: { id: true, code: true, name: true },
+        },
+        buildStatus: {
+          select: { id: true, label: true, color: true },
         },
         devices: {
           include: {
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
     constructorId,
     startDate,
     endDateExpected,
-    isCompleted,
+    buildStatusId,
     issueNote,
   } = body
 
@@ -137,7 +138,7 @@ export async function POST(request: NextRequest) {
       constructorId: constructorId ? Number(constructorId) : null,
       startDate: startDate ? new Date(startDate) : null,
       endDateExpected: endDateExpected ? new Date(endDateExpected) : null,
-      isCompleted: isCompleted ?? false,
+      buildStatusId: buildStatusId ? Number(buildStatusId) : null,
       issueNote: issueNote ?? null,
     },
     include: {

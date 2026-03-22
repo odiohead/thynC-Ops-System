@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { verifyToken } from '@/lib/auth'
 import ProjectFilters from './_components/ProjectFilters'
 import ProjectPagination from './_components/ProjectPagination'
+import StatusBadge from '@/app/components/StatusBadge'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,7 +36,6 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
 
   const page = Math.max(1, parseInt((searchParams.page as string) ?? '1'))
   const search = (searchParams.search as string) ?? ''
-  const isCompletedParam = (searchParams.isCompleted as string) ?? ''
 
   const where = {
     ...(search && {
@@ -44,7 +44,6 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
         { hospital: { hospitalName: { contains: search, mode: 'insensitive' as const } } },
       ],
     }),
-    ...(isCompletedParam !== '' && { isCompleted: isCompletedParam === 'true' }),
   }
 
   const [projects, total] = await Promise.all([
@@ -57,6 +56,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
         hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
         builder: { select: { name: true } },
         contractor: { select: { name: true } },
+        buildStatus: { select: { label: true, color: true } },
         devices: {
           include: { deviceInfo: { select: { deviceModel: true } } },
         },
@@ -68,7 +68,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
   const cols = [
-    '프로젝트 코드', '프로젝트명', '차수', '계약일',
+    '프로젝트 코드', '프로젝트명', '차수', '계약일', '진행상태',
     '병동 수', '병상 수', 'G/W', '심전계', '산소포화도',
     '담당자', '구축업체', '구축 시작일', '구축 종료일(예상)', '프로젝트 폴더',
   ]
@@ -94,7 +94,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
         </div>
 
         {/* 필터 */}
-        <ProjectFilters initialSearch={search} initialIsCompleted={isCompletedParam} />
+        <ProjectFilters initialSearch={search} />
 
         {/* 테이블 */}
         <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
@@ -116,7 +116,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
                 {projects.length === 0 ? (
                   <tr>
                     <td colSpan={cols.length} className="py-16 text-center text-sm text-gray-400">
-                      {search || isCompletedParam ? '검색 결과가 없습니다.' : '등록된 프로젝트가 없습니다.'}
+                      {search ? '검색 결과가 없습니다.' : '등록된 프로젝트가 없습니다.'}
                     </td>
                   </tr>
                 ) : (
@@ -126,76 +126,54 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
 
                     return (
                       <tr key={p.id} className="transition-colors hover:bg-gray-50">
-                        {/* 프로젝트 코드 */}
                         <td className="whitespace-nowrap px-3 py-3 font-mono text-xs text-gray-500" style={{ minWidth: '160px' }}>
                           <Link href={`/projects/${p.projectCode}`} className="hover:text-blue-600">
                             {p.projectCode}
                           </Link>
                         </td>
-
-                        {/* 프로젝트명 */}
                         <td className="px-3 py-3 font-medium text-gray-900" style={{ minWidth: '160px' }}>
                           <Link href={`/projects/${p.projectCode}`} className="hover:text-blue-600 hover:underline">
                             {p.projectName}
                           </Link>
                         </td>
-
-                        {/* 차수 */}
                         <td className="whitespace-nowrap px-3 py-3 text-center text-gray-600" style={{ minWidth: '56px' }}>
                           {p.orderNumber}차
                         </td>
-
-                        {/* 계약일 */}
                         <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '100px' }}>
                           {fmt(p.contractDate)}
                         </td>
-
-                        {/* 병동 수 */}
+                        <td className="whitespace-nowrap px-3 py-3" style={{ minWidth: '100px' }}>
+                          {p.buildStatus
+                            ? <StatusBadge label={p.buildStatus.label} color={p.buildStatus.color} />
+                            : <span className="text-gray-400">-</span>}
+                        </td>
                         <td className="whitespace-nowrap px-3 py-3 text-center text-gray-600" style={{ minWidth: '64px' }}>
                           <Num v={p.wardCount} />
                         </td>
-
-                        {/* 병상 수 */}
                         <td className="whitespace-nowrap px-3 py-3 text-center text-gray-600" style={{ minWidth: '64px' }}>
                           <Num v={p.bedCount} />
                         </td>
-
-                        {/* G/W */}
                         <td className="whitespace-nowrap px-3 py-3 text-center text-gray-600" style={{ minWidth: '56px' }}>
                           <Num v={p.gatewayCount} />
                         </td>
-
-                        {/* 심전계 */}
                         <td className="whitespace-nowrap px-3 py-3 text-center text-gray-600" style={{ minWidth: '64px' }}>
                           <Num v={ecgQty} />
                         </td>
-
-                        {/* 산소포화도 */}
                         <td className="whitespace-nowrap px-3 py-3 text-center text-gray-600" style={{ minWidth: '80px' }}>
                           <Num v={spo2Qty} />
                         </td>
-
-                        {/* 담당자 */}
                         <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '80px' }}>
                           {p.builder?.name ?? p.builderNameManual ?? <span className="text-gray-400">-</span>}
                         </td>
-
-                        {/* 구축업체 */}
                         <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '100px' }}>
                           {p.contractor?.name ?? <span className="text-gray-400">-</span>}
                         </td>
-
-                        {/* 구축 시작일 */}
                         <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '100px' }}>
                           {fmt(p.startDate)}
                         </td>
-
-                        {/* 구축 종료일(예상) */}
                         <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '120px' }}>
                           {fmt(p.endDateExpected)}
                         </td>
-
-                        {/* 프로젝트 폴더 */}
                         <td className="whitespace-nowrap px-3 py-3" style={{ minWidth: '80px' }}>
                           {p.driveFolderId ? (
                             <a
@@ -220,7 +198,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
         </div>
 
         {/* 페이지네이션 */}
-        <ProjectPagination page={page} totalPages={totalPages} search={search} isCompleted={isCompletedParam} />
+        <ProjectPagination page={page} totalPages={totalPages} search={search} />
 
       </div>
     </div>

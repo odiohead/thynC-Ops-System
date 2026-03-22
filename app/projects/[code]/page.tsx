@@ -34,6 +34,12 @@ interface ConstructorInfo {
   name: string
 }
 
+interface BuildStatusOption {
+  id: number
+  label: string
+  color: string | null
+}
+
 interface Project {
   id: number
   projectCode: string
@@ -51,7 +57,7 @@ interface Project {
   constructorId: number | null
   startDate: string | null
   endDateExpected: string | null
-  isCompleted: boolean
+  buildStatusId: number | null
   issueNote: string | null
   driveFolderId: string | null
   hospital: { hospitalCode: string; hospitalName: string; meta: { driveProjectFolderId: string | null } | null }
@@ -92,6 +98,7 @@ export default function ProjectDetailPage() {
   const [allDevices, setAllDevices] = useState<DeviceInfo[]>([])
   const [users, setUsers] = useState<UserOption[]>([])
   const [constructors, setConstructors] = useState<ConstructorOption[]>([])
+  const [buildStatuses, setBuildStatuses] = useState<BuildStatusOption[]>([])
   const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -110,7 +117,7 @@ export default function ProjectDetailPage() {
   const [constructorId, setConstructorId] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDateExpected, setEndDateExpected] = useState('')
-  const [isCompleted, setIsCompleted] = useState(false)
+  const [buildStatusId, setBuildStatusId] = useState('')
   const [issueNote, setIssueNote] = useState('')
   const [deviceQty, setDeviceQty] = useState<Record<number, number>>({})
 
@@ -148,7 +155,7 @@ export default function ProjectDetailPage() {
     setConstructorId(p.constructorId ? String(p.constructorId) : '')
     setStartDate(toDateInput(p.startDate))
     setEndDateExpected(toDateInput(p.endDateExpected))
-    setIsCompleted(p.isCompleted)
+    setBuildStatusId(p.buildStatusId ? String(p.buildStatusId) : '')
     setIssueNote(p.issueNote ?? '')
 
     const qtyMap: Record<number, number> = {}
@@ -162,11 +169,13 @@ export default function ProjectDetailPage() {
       fetch('/api/settings/devices').then((r) => r.json()),
       fetch('/api/users').then((r) => r.json()),
       fetch('/api/constructors').then((r) => r.json()),
+      fetch('/api/settings/build-status').then((r) => r.json()),
       fetch('/api/auth/me').then((r) => r.json()),
-    ]).then(([, devData, userData, conData, meData]) => {
+    ]).then(([, devData, userData, conData, bsData, meData]) => {
       setAllDevices((devData.devices ?? []).filter((d: DeviceInfo) => d.isActive))
       setUsers(Array.isArray(userData) ? userData : [])
       setConstructors(conData.constructors ?? [])
+      setBuildStatuses(bsData.buildStatuses ?? [])
       setIsAdmin(meData?.role === 'ADMIN')
       setLoading(false)
     })
@@ -191,7 +200,7 @@ export default function ProjectDetailPage() {
         constructorId: constructorId ? Number(constructorId) : null,
         startDate: startDate || null,
         endDateExpected: endDateExpected || null,
-        isCompleted,
+        buildStatusId: buildStatusId ? Number(buildStatusId) : null,
         issueNote: issueNote || null,
       }),
     })
@@ -448,13 +457,13 @@ export default function ProjectDetailPage() {
                 <input type="date" value={endDateExpected} onChange={(e) => setEndDateExpected(e.target.value)} className={inputClass} />
               </div>
               <div>
-                <label className={labelClass}>완료 여부</label>
-                <div className="mt-2">
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
-                    <input type="checkbox" checked={isCompleted} onChange={(e) => setIsCompleted(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                    구축 완료
-                  </label>
-                </div>
+                <label className={labelClass}>구축 진행상태</label>
+                <select value={buildStatusId} onChange={(e) => setBuildStatusId(e.target.value)} className={inputClass}>
+                  <option value="">상태 없음</option>
+                  {buildStatuses.map((bs) => (
+                    <option key={bs.id} value={bs.id}>{bs.label}</option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>

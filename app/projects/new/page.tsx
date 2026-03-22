@@ -26,6 +26,12 @@ interface ConstructorOption {
   name: string
 }
 
+interface BuildStatusOption {
+  id: number
+  label: string
+  color: string | null
+}
+
 function NewProjectForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -49,7 +55,8 @@ function NewProjectForm() {
 
   const [startDate, setStartDate] = useState('')
   const [endDateExpected, setEndDateExpected] = useState('')
-  const [isCompleted, setIsCompleted] = useState(false)
+  const [buildStatusId, setBuildStatusId] = useState('')
+  const [buildStatuses, setBuildStatuses] = useState<BuildStatusOption[]>([])
   const [issueNote, setIssueNote] = useState('')
 
   const [devices, setDevices] = useState<DeviceInfo[]>([])
@@ -67,11 +74,13 @@ function NewProjectForm() {
       fetch('/api/settings/devices').then((r) => r.json()),
       fetch('/api/users').then((r) => r.json()),
       fetch('/api/constructors').then((r) => r.json()),
+      fetch('/api/settings/build-status').then((r) => r.json()),
       presetCode ? fetch(`/api/hospitals/${presetCode}`).then((r) => r.json()) : Promise.resolve(null),
-    ]).then(([devData, userData, conData, hospData]) => {
+    ]).then(([devData, userData, conData, bsData, hospData]) => {
       setDevices((devData.devices ?? []).filter((d: DeviceInfo) => d.isActive))
       setUsers(Array.isArray(userData) ? userData : [])
       setConstructors(conData.constructors ?? [])
+      setBuildStatuses(bsData.buildStatuses ?? [])
       if (hospData?.hospital) {
         setHospital({
           hospitalCode: hospData.hospital.hospitalCode,
@@ -114,7 +123,7 @@ function NewProjectForm() {
           constructorId: constructorId ? Number(constructorId) : null,
           startDate: startDate || null,
           endDateExpected: endDateExpected || null,
-          isCompleted,
+          buildStatusId: buildStatusId ? Number(buildStatusId) : null,
           issueNote: issueNote || null,
         }),
       })
@@ -323,13 +332,13 @@ function NewProjectForm() {
                 <input type="date" value={endDateExpected} onChange={(e) => setEndDateExpected(e.target.value)} className={inputClass} />
               </div>
               <div>
-                <label className={labelClass}>완료 여부</label>
-                <div className="mt-2">
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
-                    <input type="checkbox" checked={isCompleted} onChange={(e) => setIsCompleted(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                    구축 완료
-                  </label>
-                </div>
+                <label className={labelClass}>구축 진행상태</label>
+                <select value={buildStatusId} onChange={(e) => setBuildStatusId(e.target.value)} className={inputClass}>
+                  <option value="">상태 없음</option>
+                  {buildStatuses.map((bs) => (
+                    <option key={bs.id} value={bs.id}>{bs.label}</option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>

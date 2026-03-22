@@ -9,6 +9,8 @@ import DriveFolderRow from './_components/DriveFolderRow'
 import HospitalDevicesSection from './_components/HospitalDevicesSection'
 import StatusBadge from '@/app/components/StatusBadge'
 
+
+
 export const dynamic = 'force-dynamic'
 
 interface PageProps {
@@ -38,7 +40,10 @@ export default async function HospitalDetailPage({ params }: PageProps) {
     prisma.project.findMany({
       where: { hospitalCode: params.code },
       orderBy: { orderNumber: 'asc' },
-      include: { builder: { select: { name: true } } },
+      include: {
+        builder: { select: { name: true } },
+        buildStatus: { select: { label: true, color: true } },
+      },
     }),
     prisma.deviceInfo.findMany({ orderBy: { sortOrder: 'asc' } }),
     prisma.hospitalDevice.findMany({ where: { hospitalCode: params.code } }),
@@ -168,7 +173,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    {['차수', '프로젝트 코드', '계약일', '구축 담당자', '완료 여부'].map((col) => (
+                    {['차수', '프로젝트 코드', '계약일', '구축 담당자', '진행상태'].map((col) => (
                       <th key={col} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">{col}</th>
                     ))}
                   </tr>
@@ -189,11 +194,9 @@ export default async function HospitalDetailPage({ params }: PageProps) {
                         {p.builder?.name ?? p.builderNameManual ?? <span className="text-gray-400">-</span>}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">
-                        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          p.isCompleted ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
-                        }`}>
-                          {p.isCompleted ? '완료' : '진행중'}
-                        </span>
+                        {p.buildStatus
+                          ? <StatusBadge label={p.buildStatus.label} color={p.buildStatus.color} />
+                          : <span className="text-gray-400 text-sm">-</span>}
                       </td>
                     </tr>
                   ))}

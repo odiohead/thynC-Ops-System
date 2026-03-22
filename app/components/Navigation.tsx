@@ -205,6 +205,14 @@ export default function Navigation() {
               </Link>
               {userRole === 'ADMIN' && (
                 <Link
+                  href="/settings/build-status"
+                  className={navItemClass(isActive('/settings/build-status'))}
+                >
+                  구축상태 관리
+                </Link>
+              )}
+              {userRole === 'ADMIN' && (
+                <Link
                   href="/settings/devices"
                   className={navItemClass(isActive('/settings/devices'))}
                 >

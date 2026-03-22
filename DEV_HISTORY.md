@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-03-22 17:00 | 프로젝트 Drive 폴더 일괄 생성 스크립트 실행
+
+- `scripts/create-project-drive-folders.mjs` 신규 생성 및 실행
+- driveFolderId 없는 프로젝트 184개 전체에 병원 폴더 하위에 `PROJ-XXXXXX_병원명` 형식의 서브폴더 생성
+- DB projects.drive_folder_id 전체 업데이트 완료 (성공 184개 / 실패 0개)
+- 영향 파일: `scripts/create-project-drive-folders.mjs`
+
+---
+
 ## 2026-03-22 15:30 | Project contractType 필드 추가 및 마이그레이션 dry-run 스크립트 생성
 
 - `Project` 모델에 `contractType String? @map("contract_type")` 필드 추가

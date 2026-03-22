@@ -7,6 +7,7 @@ const projectInclude = {
   hospital: { include: { meta: true } },
   builder: { select: { id: true, name: true, email: true } },
   contractor: { select: { id: true, code: true, name: true } },
+  buildStatus: { select: { id: true, label: true, color: true } },
   devices: {
     include: { deviceInfo: true },
     orderBy: { deviceInfo: { sortOrder: 'asc' } },
@@ -44,7 +45,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     constructorId,
     startDate,
     endDateExpected,
-    isCompleted,
+    buildStatusId,
     issueNote,
   } = body
 
@@ -62,7 +63,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       constructorId: constructorId !== undefined ? (constructorId ? Number(constructorId) : null) : undefined,
       startDate: startDate !== undefined ? (startDate ? new Date(startDate) : null) : undefined,
       endDateExpected: endDateExpected !== undefined ? (endDateExpected ? new Date(endDateExpected) : null) : undefined,
-      isCompleted: isCompleted !== undefined ? isCompleted : undefined,
+      buildStatusId: buildStatusId !== undefined ? (buildStatusId ? Number(buildStatusId) : null) : undefined,
       issueNote: issueNote !== undefined ? issueNote : undefined,
     },
     include: projectInclude,
