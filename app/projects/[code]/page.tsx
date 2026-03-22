@@ -125,6 +125,16 @@ export default function ProjectDetailPage() {
     const res = await fetch(`/api/projects/${code}`)
     if (!res.ok) { router.push('/projects'); return }
     const { project: p } = await res.json()
+
+    // 병원 Drive 폴더는 있지만 프로젝트 서브폴더가 없으면 자동 생성
+    if (!p.driveFolderId && p.hospital?.meta?.driveProjectFolderId) {
+      const folderRes = await fetch(`/api/projects/${code}/drive-folder`, { method: 'POST' })
+      if (folderRes.ok) {
+        const { driveFolderId } = await folderRes.json()
+        p.driveFolderId = driveFolderId
+      }
+    }
+
     setProject(p)
 
     setContractDate(toDateInput(p.contractDate))
