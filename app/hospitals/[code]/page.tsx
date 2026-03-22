@@ -6,6 +6,7 @@ import { verifyToken } from '@/lib/auth'
 import DeleteButton from './_components/DeleteButton'
 import DaewoongStaffTab from './_components/DaewoongStaffTab'
 import DriveFolderRow from './_components/DriveFolderRow'
+import HospitalDevicesSection from './_components/HospitalDevicesSection'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,7 +35,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
   const user = token ? await verifyToken(token) : null
   const isAdmin = user?.role === 'ADMIN'
 
-  const [hospital, projects] = await Promise.all([
+  const [hospital, projects, allDevices, hospitalDevices] = await Promise.all([
     prisma.hospital.findUnique({
       where: { hospitalCode: params.code },
       include: { meta: true },
@@ -44,11 +45,21 @@ export default async function HospitalDetailPage({ params }: PageProps) {
       orderBy: { orderNumber: 'asc' },
       include: { builder: { select: { name: true } } },
     }),
+    prisma.deviceInfo.findMany({ orderBy: { sortOrder: 'asc' } }),
+    prisma.hospitalDevice.findMany({ where: { hospitalCode: params.code } }),
   ])
   if (!hospital) notFound()
 
   const statusStyle = STATUS_STYLE[hospital.status] ?? 'bg-gray-100 text-gray-600'
   const introTypeList = hospital.introType ? hospital.introType.split(',') : []
+
+  const quantityMap = new Map(hospitalDevices.map((d) => [d.deviceInfoId, d.quantity]))
+  const deviceRows = allDevices.map((d) => ({
+    deviceInfoId: d.id,
+    deviceModel: d.deviceModel,
+    deviceName: d.deviceName,
+    quantity: quantityMap.get(d.id) ?? 0,
+  }))
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -139,6 +150,13 @@ export default async function HospitalDetailPage({ params }: PageProps) {
               initialFolderId={hospital.meta?.driveProjectFolderId ?? null}
             />
           </dl>
+          <div className="border-t border-gray-100 px-6 py-5">
+            <p className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-400">도입 기기 현황</p>
+            <HospitalDevicesSection
+              hospitalCode={hospital.hospitalCode}
+              initialDevices={deviceRows}
+            />
+          </div>
         </div>
 
         {/* 구축 프로젝트 */}

@@ -56,6 +56,7 @@ model Hospital {
   daewoongAssignments DaewoongHospitalAssignment[]
   projects            Project[]
   meta                HospitalMeta?
+  hospitalDevices     HospitalDevice[]
 
   @@map("hospitals")
 }
@@ -122,7 +123,8 @@ model DeviceInfo {
   sortOrder   Int      @default(0) @map("sort_order")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
-  devices     ProjectDevice[]
+  devices         ProjectDevice[]
+  hospitalDevices HospitalDevice[]
 
   @@map("device_info")
 }
@@ -166,6 +168,19 @@ model ProjectDevice {
 
   @@unique([projectId, deviceInfoId])
   @@map("project_devices")
+}
+
+model HospitalDevice {
+  id           Int        @id @default(autoincrement())
+  hospitalCode String     @map("hospital_code")
+  hospital     Hospital   @relation(fields: [hospitalCode], references: [hospitalCode])
+  deviceInfoId Int        @map("device_info_id")
+  deviceInfo   DeviceInfo @relation(fields: [deviceInfoId], references: [id])
+  quantity     Int        @default(0) @map("quantity")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  @@unique([hospitalCode, deviceInfoId])
+  @@map("hospital_devices")
 }
 
 model HospitalMeta {
