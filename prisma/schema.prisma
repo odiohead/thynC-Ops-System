@@ -55,6 +55,7 @@ model Hospital {
   hiraHospital        HiraHospital? @relation(fields: [hiraId], references: [hiraId])
   daewoongAssignments DaewoongHospitalAssignment[]
   projects            Project[]
+  meta                HospitalMeta?
 
   @@map("hospitals")
 }
@@ -165,6 +166,20 @@ model ProjectDevice {
 
   @@unique([projectId, deviceInfoId])
   @@map("project_devices")
+}
+
+model HospitalMeta {
+  id                     Int      @id @default(autoincrement())
+  hospitalCode           String   @unique @map("hospital_code")
+  hospital               Hospital @relation(fields: [hospitalCode], references: [hospitalCode])
+  driveProjectFolderId   String?  @map("drive_project_folder_id")
+  driveStatusFileId      String?  @map("drive_status_file_id")
+  driveInstallPlanFileId String?  @map("drive_install_plan_file_id")
+  remoteAccessUrl        String?  @map("remote_access_url")
+  remoteControlUrl       String?  @map("remote_control_url")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  @@map("hospital_meta")
 }
 
 model ProjectFile {

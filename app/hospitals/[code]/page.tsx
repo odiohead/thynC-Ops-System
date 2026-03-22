@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { verifyToken } from '@/lib/auth'
 import DeleteButton from './_components/DeleteButton'
 import DaewoongStaffTab from './_components/DaewoongStaffTab'
+import DriveFolderRow from './_components/DriveFolderRow'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,7 +35,10 @@ export default async function HospitalDetailPage({ params }: PageProps) {
   const isAdmin = user?.role === 'ADMIN'
 
   const [hospital, projects] = await Promise.all([
-    prisma.hospital.findUnique({ where: { hospitalCode: params.code } }),
+    prisma.hospital.findUnique({
+      where: { hospitalCode: params.code },
+      include: { meta: true },
+    }),
     prisma.project.findMany({
       where: { hospitalCode: params.code },
       orderBy: { orderNumber: 'asc' },
@@ -129,6 +133,10 @@ export default async function HospitalDetailPage({ params }: PageProps) {
             <Field
               label="도입 병상 수"
               value={hospital.introBeds != null ? `${hospital.introBeds.toLocaleString()}병상` : null}
+            />
+            <DriveFolderRow
+              hospitalCode={hospital.hospitalCode}
+              initialFolderId={hospital.meta?.driveProjectFolderId ?? null}
             />
           </dl>
         </div>

@@ -3,22 +3,21 @@
 import { useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
+import HiraSearchModal, { HiraHospital } from '../../_components/HiraSearchModal'
+
+const INTRO_TYPE_OPTIONS = ['구축형', '구독형', '사용량비례형']
 
 interface Hospital {
   id: number
   hospitalCode: string
-  name: string
+  hiraId: string | null
+  hiraHospitalName: string
+  hospitalName: string
   type: string
   status: string
-  sidoCode: string | null
-  sidoName: string | null
-  sigunguCode: string | null
-  sigunguName: string | null
-  eupmyeondong: string | null
-  postalCode: string | null
   address: string | null
-  coordinateX: string | null
-  coordinateY: string | null
+  introType: string | null
+  introBeds: number | null
 }
 
 interface StatusCode {
@@ -26,13 +25,23 @@ interface StatusCode {
   name: string
 }
 
+// pendingHira: undefined = 변경 없음, null = 연결 해제, HiraHospital = 새 연결
+type PendingHira = HiraHospital | null | undefined
+
 export default function HospitalEditPage() {
   const router = useRouter()
   const { code } = useParams<{ code: string }>()
 
   const [hospital, setHospital] = useState<Hospital | null>(null)
   const [statusCodes, setStatusCodes] = useState<StatusCode[]>([])
-  const [form, setForm] = useState<Omit<Hospital, 'id' | 'hospitalCode'> | null>(null)
+  const [hospitalName, setHospitalName] = useState('')
+  const [status, setStatus] = useState('')
+  const [introTypes, setIntroTypes] = useState<string[]>([])
+  const [introBeds, setIntroBeds] = useState('')
+
+  const [pendingHira, setPendingHira] = useState<PendingHira>(undefined)
+  const [showModal, setShowModal] = useState(false)
+
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -43,20 +52,10 @@ export default function HospitalEditPage() {
       .then(({ hospital, statusCodes }) => {
         setHospital(hospital)
         setStatusCodes(statusCodes)
-        setForm({
-          name: hospital.name,
-          type: hospital.type,
-          status: hospital.status,
-          sidoCode: hospital.sidoCode ?? '',
-          sidoName: hospital.sidoName ?? '',
-          sigunguCode: hospital.sigunguCode ?? '',
-          sigunguName: hospital.sigunguName ?? '',
-          eupmyeondong: hospital.eupmyeondong ?? '',
-          postalCode: hospital.postalCode ?? '',
-          address: hospital.address ?? '',
-          coordinateX: hospital.coordinateX ?? '',
-          coordinateY: hospital.coordinateY ?? '',
-        })
+        setHospitalName(hospital.hospitalName)
+        setStatus(hospital.status)
+        setIntroTypes(hospital.introType ? hospital.introType.split(',') : [])
+        setIntroBeds(hospital.introBeds != null ? String(hospital.introBeds) : '')
         setLoading(false)
       })
       .catch(() => {
@@ -65,20 +64,46 @@ export default function HospitalEditPage() {
       })
   }, [code])
 
-  function set(field: string, value: string) {
-    setForm((prev) => prev ? { ...prev, [field]: value } : prev)
+  function toggleIntroType(t: string) {
+    setIntroTypes((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t])
   }
+
+  // 현재 표시할 HIRA 정보
+  const displayHira = pendingHira !== undefined
+    ? pendingHira  // 변경 예정값 표시
+    : {            // 원본 데이터 표시
+        name: hospital?.hiraHospitalName ?? '',
+        typeName: hospital?.type ?? '',
+        address: hospital?.address ?? '',
+      }
+
+  const hasHiraLink = pendingHira !== undefined
+    ? pendingHira !== null
+    : !!hospital?.hiraId
+
+  const hiraChanged = pendingHira !== undefined
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!form) return
     setSaving(true)
     setError(null)
     try {
+      const body: Record<string, unknown> = {
+        hospitalName,
+        status,
+        introType: introTypes.length > 0 ? introTypes.join(',') : null,
+        introBeds: introBeds !== '' ? Number(introBeds) : null,
+      }
+
+      if (hiraChanged) {
+        body.changeHira = true
+        body.hiraId = pendingHira ? pendingHira.hiraId : null
+      }
+
       const res = await fetch(`/api/hospitals/${code}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify(body),
       })
       if (res.ok) {
         router.refresh()
@@ -103,7 +128,7 @@ export default function HospitalEditPage() {
     )
   }
 
-  if (error && !form) {
+  if (error && !hospital) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p className="text-sm text-red-500">{error}</p>
@@ -142,37 +167,34 @@ export default function HospitalEditPage() {
             <div className="border-b border-gray-200 px-6 py-4">
               <h2 className="text-sm font-semibold text-gray-700">기본 정보</h2>
             </div>
+            <div className="px-6 py-5">
+              <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">병원명 *</label>
+              <input
+                type="text"
+                required
+                value={hospitalName}
+                onChange={(e) => setHospitalName(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:max-w-sm"
+              />
+            </div>
+          </div>
+
+          {/* thynC 도입현황 */}
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="border-b border-gray-200 px-6 py-4">
+              <h2 className="text-sm font-semibold text-gray-700">thynC 도입현황</h2>
+            </div>
             <div className="grid grid-cols-1 gap-5 px-6 py-5 sm:grid-cols-2">
-              <div>
-                <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">병원명 *</label>
-                <input
-                  type="text"
-                  required
-                  value={form?.name ?? ''}
-                  onChange={(e) => set('name', e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">종별 *</label>
-                <input
-                  type="text"
-                  required
-                  value={form?.type ?? ''}
-                  onChange={(e) => set('type', e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
               <div>
                 <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">상태 *</label>
                 <select
                   required
-                  value={form?.status ?? ''}
-                  onChange={(e) => set('status', e.target.value)}
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   {statusCodes.length === 0 ? (
-                    <option value={form?.status}>{form?.status}</option>
+                    <option value={status}>{status}</option>
                   ) : (
                     statusCodes.map((sc) => (
                       <option key={sc.id} value={sc.name}>{sc.name}</option>
@@ -180,106 +202,103 @@ export default function HospitalEditPage() {
                   )}
                 </select>
               </div>
-            </div>
-          </div>
-
-          {/* 위치 정보 */}
-          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-200 px-6 py-4">
-              <h2 className="text-sm font-semibold text-gray-700">위치 정보</h2>
-            </div>
-            <div className="grid grid-cols-1 gap-5 px-6 py-5 sm:grid-cols-2">
               <div>
-                <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">시도코드</label>
+                <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">도입 병상 수</label>
                 <input
-                  type="text"
-                  value={form?.sidoCode ?? ''}
-                  onChange={(e) => set('sidoCode', e.target.value)}
+                  type="number"
+                  min="0"
+                  value={introBeds}
+                  onChange={(e) => setIntroBeds(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">시도명</label>
-                <input
-                  type="text"
-                  value={form?.sidoName ?? ''}
-                  onChange={(e) => set('sidoName', e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">시군구코드</label>
-                <input
-                  type="text"
-                  value={form?.sigunguCode ?? ''}
-                  onChange={(e) => set('sigunguCode', e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">시군구명</label>
-                <input
-                  type="text"
-                  value={form?.sigunguName ?? ''}
-                  onChange={(e) => set('sigunguName', e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">읍면동</label>
-                <input
-                  type="text"
-                  value={form?.eupmyeondong ?? ''}
-                  onChange={(e) => set('eupmyeondong', e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">우편번호</label>
-                <input
-                  type="text"
-                  value={form?.postalCode ?? ''}
-                  onChange={(e) => set('postalCode', e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  placeholder="숫자 입력"
                 />
               </div>
               <div className="sm:col-span-2">
-                <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">주소</label>
-                <input
-                  type="text"
-                  value={form?.address ?? ''}
-                  onChange={(e) => set('address', e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
+                <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">도입형태</label>
+                <div className="mt-2 flex flex-wrap gap-4">
+                  {INTRO_TYPE_OPTIONS.map((t) => (
+                    <label key={t} className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={introTypes.includes(t)}
+                        onChange={() => toggleIntroType(t)}
+                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      {t}
+                    </label>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
 
-          {/* 좌표 */}
+          {/* 심평원 정보 조회 */}
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-200 px-6 py-4">
-              <h2 className="text-sm font-semibold text-gray-700">좌표</h2>
-            </div>
-            <div className="grid grid-cols-1 gap-5 px-6 py-5 sm:grid-cols-2">
+            <div className="flex items-center justify-between px-6 py-4">
               <div>
-                <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">X 좌표</label>
-                <input
-                  type="text"
-                  value={form?.coordinateX ?? ''}
-                  onChange={(e) => set('coordinateX', e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
+                <h2 className="text-sm font-semibold text-gray-700">심평원 정보 조회</h2>
+                {hiraChanged && (
+                  <p className="mt-0.5 text-xs font-medium text-amber-600">
+                    {pendingHira === null ? '저장 시 연결이 해제됩니다.' : '저장 시 새 병원으로 연결됩니다.'}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {hasHiraLink && (
+                  <button
+                    type="button"
+                    onClick={() => setPendingHira(null)}
+                    className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-500 transition-colors hover:bg-red-50"
+                  >
+                    연결 해제
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowModal(true)}
+                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
+                >
+                  {hasHiraLink ? '병원 변경' : '병원 연결'}
+                </button>
+                {hiraChanged && (
+                  <button
+                    type="button"
+                    onClick={() => setPendingHira(undefined)}
+                    className="text-xs text-gray-400 hover:text-gray-600"
+                  >
+                    되돌리기
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <dl className="grid grid-cols-1 gap-4 border-t border-gray-100 px-6 py-4 sm:grid-cols-3">
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-gray-400">심평원 병원명</dt>
+                <dd className="mt-1 text-sm text-gray-900">
+                  {displayHira && 'name' in displayHira && displayHira.name
+                    ? displayHira.name
+                    : <span className="text-gray-400">-</span>}
+                </dd>
               </div>
               <div>
-                <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">Y 좌표</label>
-                <input
-                  type="text"
-                  value={form?.coordinateY ?? ''}
-                  onChange={(e) => set('coordinateY', e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
+                <dt className="text-xs font-medium uppercase tracking-wider text-gray-400">종별</dt>
+                <dd className="mt-1 text-sm text-gray-900">
+                  {displayHira && 'typeName' in displayHira && displayHira.typeName
+                    ? displayHira.typeName
+                    : (displayHira && 'type' in displayHira && (displayHira as { type?: string }).type)
+                      || <span className="text-gray-400">-</span>}
+                </dd>
               </div>
-            </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-gray-400">주소</dt>
+                <dd className="mt-1 text-sm text-gray-900">
+                  {displayHira && 'address' in displayHira && displayHira.address
+                    ? displayHira.address
+                    : <span className="text-gray-400">-</span>}
+                </dd>
+              </div>
+            </dl>
           </div>
 
           {/* 버튼 */}
@@ -301,6 +320,13 @@ export default function HospitalEditPage() {
 
         </form>
       </div>
+
+      <HiraSearchModal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        onSelect={(h) => setPendingHira(h)}
+        allowRegistered
+      />
     </div>
   )
 }

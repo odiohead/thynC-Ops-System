@@ -9,7 +9,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     include: {
       assignments: {
         include: {
-          hospital: { select: { hospitalCode: true, name: true } },
+          hospital: { select: { hospitalCode: true, hospitalName: true } },
         },
         orderBy: { createdAt: 'asc' },
       },

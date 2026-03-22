@@ -7,6 +7,7 @@ export const dynamic = 'force-dynamic'
 import HospitalFilters from './_components/HospitalFilters'
 import Pagination from './_components/Pagination'
 import ExportToDriveButton from './_components/ExportToDriveButton'
+import ImportButton from './_components/ImportButton'
 
 const PAGE_SIZE = 20
 
@@ -83,6 +84,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
           </div>
           <div className="flex items-center gap-2">
             {isAdmin && <ExportToDriveButton />}
+            {isAdmin && <ImportButton />}
             <Link
               href="/hospitals/register"
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"

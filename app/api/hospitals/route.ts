@@ -4,23 +4,27 @@ import { prisma } from '@/lib/prisma'
 const PAGE_SIZE = 20
 
 export async function POST(request: NextRequest) {
-  const { hiraId } = await request.json()
+  const { hiraId, hospitalName, status, introType, introBeds } = await request.json()
 
-  if (!hiraId) {
-    return NextResponse.json({ error: 'hiraId is required' }, { status: 400 })
+  if (!hospitalName?.trim()) {
+    return NextResponse.json({ error: '병원명은 필수입니다.' }, { status: 400 })
+  }
+  if (!status?.trim()) {
+    return NextResponse.json({ error: '상태는 필수입니다.' }, { status: 400 })
   }
 
-  const hira = await prisma.hiraHospital.findUnique({ where: { hiraId } })
-  if (!hira) {
-    return NextResponse.json({ error: '심평원 병원 정보를 찾을 수 없습니다.' }, { status: 404 })
+  let hiraData = null
+  if (hiraId) {
+    hiraData = await prisma.hiraHospital.findUnique({ where: { hiraId } })
+    if (!hiraData) {
+      return NextResponse.json({ error: '심평원 병원 정보를 찾을 수 없습니다.' }, { status: 404 })
+    }
+    const existing = await prisma.hospital.findUnique({ where: { hiraId } })
+    if (existing) {
+      return NextResponse.json({ error: '이미 등록된 병원입니다.' }, { status: 409 })
+    }
   }
 
-  const existing = await prisma.hospital.findUnique({ where: { hiraId } })
-  if (existing) {
-    return NextResponse.json({ error: '이미 등록된 병원입니다.' }, { status: 409 })
-  }
-
-  // hospital_code 자동 생성 (HOSP-NNN)
   const allCodes = await prisma.hospital.findMany({
     where: { hospitalCode: { startsWith: 'HOSP-' } },
     select: { hospitalCode: true },
@@ -34,19 +38,22 @@ export async function POST(request: NextRequest) {
   const hospital = await prisma.hospital.create({
     data: {
       hospitalCode,
-      hiraId: hira.hiraId,
-      name: hira.name,
-      type: hira.typeName,
-      sidoCode: hira.sidoCode,
-      sidoName: hira.sidoName,
-      sigunguCode: hira.sigunguCode,
-      sigunguName: hira.sigunguName,
-      eupmyeondong: hira.eupmyeondong,
-      postalCode: hira.postalCode,
-      address: hira.address,
-      coordinateX: hira.coordinateX,
-      coordinateY: hira.coordinateY,
-      status: '미계약',
+      hiraId: hiraData?.hiraId ?? null,
+      hiraHospitalName: hiraData?.name ?? hospitalName.trim(),
+      hospitalName: hospitalName.trim(),
+      type: hiraData?.typeName ?? '',
+      sidoCode: hiraData?.sidoCode ?? null,
+      sidoName: hiraData?.sidoName ?? null,
+      sigunguCode: hiraData?.sigunguCode ?? null,
+      sigunguName: hiraData?.sigunguName ?? null,
+      eupmyeondong: hiraData?.eupmyeondong ?? null,
+      postalCode: hiraData?.postalCode ?? null,
+      address: hiraData?.address ?? null,
+      coordinateX: hiraData?.coordinateX ?? null,
+      coordinateY: hiraData?.coordinateY ?? null,
+      status,
+      introType: introType ?? null,
+      introBeds: introBeds != null ? Number(introBeds) : null,
     },
   })
 
@@ -60,7 +67,12 @@ export async function GET(request: NextRequest) {
   const sido = searchParams.get('sido') ?? ''
 
   const where = {
-    ...(search && { name: { contains: search, mode: 'insensitive' as const } }),
+    ...(search && {
+      OR: [
+        { hospitalName: { contains: search, mode: 'insensitive' as const } },
+        { hiraHospitalName: { contains: search, mode: 'insensitive' as const } },
+      ],
+    }),
     ...(sido && { sidoName: sido }),
   }
 
@@ -73,7 +85,8 @@ export async function GET(request: NextRequest) {
       select: {
         id: true,
         hospitalCode: true,
-        name: true,
+        hiraHospitalName: true,
+        hospitalName: true,
         type: true,
         sidoName: true,
         sigunguName: true,
