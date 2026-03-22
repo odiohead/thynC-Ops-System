@@ -18,6 +18,7 @@ interface Hospital {
   address: string | null
   introType: string | null
   introBeds: number | null
+  contractDate: string | null
 }
 
 interface StatusCode {
@@ -38,6 +39,7 @@ export default function HospitalEditPage() {
   const [status, setStatus] = useState('')
   const [introTypes, setIntroTypes] = useState<string[]>([])
   const [introBeds, setIntroBeds] = useState('')
+  const [contractDate, setContractDate] = useState('')
 
   const [pendingHira, setPendingHira] = useState<PendingHira>(undefined)
   const [showModal, setShowModal] = useState(false)
@@ -56,6 +58,7 @@ export default function HospitalEditPage() {
         setStatus(hospital.status)
         setIntroTypes(hospital.introType ? hospital.introType.split(',') : [])
         setIntroBeds(hospital.introBeds != null ? String(hospital.introBeds) : '')
+        setContractDate(hospital.contractDate ? hospital.contractDate.slice(0, 10) : '')
         setLoading(false)
       })
       .catch(() => {
@@ -93,6 +96,7 @@ export default function HospitalEditPage() {
         status,
         introType: introTypes.length > 0 ? introTypes.join(',') : null,
         introBeds: introBeds !== '' ? Number(introBeds) : null,
+        contractDate: contractDate || null,
       }
 
       if (hiraChanged) {
@@ -167,15 +171,26 @@ export default function HospitalEditPage() {
             <div className="border-b border-gray-200 px-6 py-4">
               <h2 className="text-sm font-semibold text-gray-700">기본 정보</h2>
             </div>
-            <div className="px-6 py-5">
-              <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">병원명 *</label>
-              <input
-                type="text"
-                required
-                value={hospitalName}
-                onChange={(e) => setHospitalName(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:max-w-sm"
-              />
+            <div className="grid grid-cols-1 gap-5 px-6 py-5 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">병원명 *</label>
+                <input
+                  type="text"
+                  required
+                  value={hospitalName}
+                  onChange={(e) => setHospitalName(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">계약일</label>
+                <input
+                  type="date"
+                  value={contractDate}
+                  onChange={(e) => setContractDate(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
             </div>
           </div>
 

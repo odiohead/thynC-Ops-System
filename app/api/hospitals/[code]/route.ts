@@ -16,7 +16,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 export async function PUT(request: NextRequest, { params }: Params) {
-  const { hospitalName, status, introType, introBeds, changeHira, hiraId } = await request.json()
+  const { hospitalName, status, introType, introBeds, contractDate, changeHira, hiraId } = await request.json()
 
   let hiraUpdateData: Record<string, unknown> = {}
 
@@ -69,6 +69,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       status,
       introType: introType ?? null,
       introBeds: introBeds !== undefined && introBeds !== '' ? Number(introBeds) : null,
+      contractDate: contractDate ? new Date(contractDate) : null,
       ...hiraUpdateData,
     },
   })

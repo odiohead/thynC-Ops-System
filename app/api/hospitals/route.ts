@@ -85,12 +85,13 @@ export async function GET(request: NextRequest) {
       select: {
         id: true,
         hospitalCode: true,
-        hiraHospitalName: true,
         hospitalName: true,
-        type: true,
-        sidoName: true,
-        sigunguName: true,
+        address: true,
         status: true,
+        contractDate: true,
+        meta: {
+          select: { driveProjectFolderId: true },
+        },
       },
     }),
     prisma.hospital.count({ where }),

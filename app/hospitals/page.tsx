@@ -54,10 +54,13 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
       select: {
         id: true,
         hospitalCode: true,
-        hiraHospitalName: true,
         hospitalName: true,
         address: true,
         status: true,
+        contractDate: true,
+        meta: {
+          select: { driveProjectFolderId: true },
+        },
       },
     }),
     prisma.hospital.count({ where }),
@@ -107,7 +110,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  {['병원코드', '심평원 병원명', '병원명', '주소', '상태'].map((col) => (
+                  {['병원코드', '병원명', '주소', '상태', '계약일', '관리폴더'].map((col) => (
                     <th
                       key={col}
                       className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500"
@@ -120,7 +123,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
               <tbody className="divide-y divide-gray-200">
                 {hospitals.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-16 text-center text-sm text-gray-400">
+                    <td colSpan={6} className="py-16 text-center text-sm text-gray-400">
                       검색 결과가 없습니다.
                     </td>
                   </tr>
@@ -134,9 +137,6 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
                       <tr key={h.id} className="transition-colors hover:bg-gray-50">
                         <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-gray-500">
                           {h.hospitalCode}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-600">
-                          {h.hiraHospitalName}
                         </td>
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">
                           <Link href={`/hospitals/${h.hospitalCode}`} className="hover:text-blue-600 hover:underline">
@@ -152,6 +152,23 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
                           >
                             {st.label}
                           </span>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">
+                          {h.contractDate ? new Date(h.contractDate).toISOString().slice(0, 10) : '-'}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-sm">
+                          {h.meta?.driveProjectFolderId ? (
+                            <a
+                              href={`https://drive.google.com/drive/folders/${h.meta.driveProjectFolderId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline"
+                            >
+                              바로가기
+                            </a>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
                         </td>
                       </tr>
                     )

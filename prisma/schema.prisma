@@ -50,6 +50,7 @@ model Hospital {
   status         String   @map("status")
   introType      String?  @map("intro_type")
   introBeds      Int?     @map("intro_beds")
+  contractDate   DateTime? @map("contract_date")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
   hiraHospital        HiraHospital? @relation(fields: [hiraId], references: [hiraId])
