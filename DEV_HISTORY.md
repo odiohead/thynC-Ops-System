@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-03-22 | 병원 상세 thynC 현황 섹션 UI 구조 개편
+- 카드 타이틀 'thynC 도입현황' → 'thynC 현황', 섹션명 '도입 기기 현황' → '도입 현황'
+- '도입 병상 수'를 dl 그리드에서 제거하여 '도입 현황' 섹션으로 통합
+- `HospitalDevicesSection` 컴포넌트 재설계: 도입 병상 수 + 웨어러블 디바이스 도입 수량(그룹 레이블) + 기기별 수량 입력을 단일 테이블 구조로 통합, 같은 들여쓰기 레벨로 표시
+- `PUT /api/hospitals/[code]/devices` body 구조 변경: 배열 → `{ introBeds?, devices[] }` — introBeds 포함 시 Hospital 테이블도 트랜잭션으로 함께 업데이트
+- 영향받은 파일: `app/hospitals/[code]/_components/HospitalDevicesSection.tsx`, `app/hospitals/[code]/page.tsx`, `app/api/hospitals/[code]/devices/route.ts`
+
+---
+
 ## 2026-03-22 | 병원 상세 페이지 도입 기기 현황 기능 추가
 - `HospitalDevice` 신규 테이블 추가: hospitalCode(FK), deviceInfoId(FK), quantity, updatedAt + @@unique([hospitalCode, deviceInfoId])
 - Hospital, DeviceInfo 모델에 hospitalDevices 관계 필드 추가

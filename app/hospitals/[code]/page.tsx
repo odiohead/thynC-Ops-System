@@ -116,7 +116,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
         {/* thynC 도입현황 */}
         <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
           <div className="border-b border-gray-200 px-6 py-4">
-            <h2 className="text-sm font-semibold text-gray-700">thynC 도입현황</h2>
+            <h2 className="text-sm font-semibold text-gray-700">thynC 현황</h2>
           </div>
           <dl className="grid grid-cols-1 gap-6 px-6 py-5 sm:grid-cols-3">
             <Field
@@ -141,19 +141,16 @@ export default async function HospitalDetailPage({ params }: PageProps) {
                 ) : null
               }
             />
-            <Field
-              label="도입 병상 수"
-              value={hospital.introBeds != null ? `${hospital.introBeds.toLocaleString()}병상` : null}
-            />
             <DriveFolderRow
               hospitalCode={hospital.hospitalCode}
               initialFolderId={hospital.meta?.driveProjectFolderId ?? null}
             />
           </dl>
           <div className="border-t border-gray-100 px-6 py-5">
-            <p className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-400">도입 기기 현황</p>
+            <p className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-400">도입 현황</p>
             <HospitalDevicesSection
               hospitalCode={hospital.hospitalCode}
+              initialIntroBeds={hospital.introBeds}
               initialDevices={deviceRows}
             />
           </div>

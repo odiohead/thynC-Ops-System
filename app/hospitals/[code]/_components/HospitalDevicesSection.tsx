@@ -11,10 +11,17 @@ interface DeviceRow {
 
 interface Props {
   hospitalCode: string
+  initialIntroBeds: number | null
   initialDevices: DeviceRow[]
 }
 
-export default function HospitalDevicesSection({ hospitalCode, initialDevices }: Props) {
+function parseQuantity(value: string): number {
+  const num = parseInt(value, 10)
+  return isNaN(num) || num < 0 ? 0 : num
+}
+
+export default function HospitalDevicesSection({ hospitalCode, initialIntroBeds, initialDevices }: Props) {
+  const [introBeds, setIntroBeds] = useState<number>(initialIntroBeds ?? 0)
   const [quantities, setQuantities] = useState<Record<number, number>>(
     Object.fromEntries(initialDevices.map((d) => [d.deviceInfoId, d.quantity]))
   )
@@ -22,9 +29,14 @@ export default function HospitalDevicesSection({ hospitalCode, initialDevices }:
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  function handleChange(deviceInfoId: number, value: string) {
-    const num = parseInt(value, 10)
-    setQuantities((prev) => ({ ...prev, [deviceInfoId]: isNaN(num) || num < 0 ? 0 : num }))
+  function handleBedsChange(value: string) {
+    setIntroBeds(parseQuantity(value))
+    setSuccessMsg(null)
+    setError(null)
+  }
+
+  function handleDeviceChange(deviceInfoId: number, value: string) {
+    setQuantities((prev) => ({ ...prev, [deviceInfoId]: parseQuantity(value) }))
     setSuccessMsg(null)
     setError(null)
   }
@@ -34,14 +46,16 @@ export default function HospitalDevicesSection({ hospitalCode, initialDevices }:
     setSuccessMsg(null)
     setError(null)
     try {
-      const body = initialDevices.map((d) => ({
-        deviceInfoId: d.deviceInfoId,
-        quantity: quantities[d.deviceInfoId] ?? 0,
-      }))
       const res = await fetch(`/api/hospitals/${hospitalCode}/devices`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          introBeds: introBeds === 0 ? null : introBeds,
+          devices: initialDevices.map((d) => ({
+            deviceInfoId: d.deviceInfoId,
+            quantity: quantities[d.deviceInfoId] ?? 0,
+          })),
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? '저장에 실패했습니다.')
@@ -53,47 +67,54 @@ export default function HospitalDevicesSection({ hospitalCode, initialDevices }:
     }
   }
 
-  if (initialDevices.length === 0) {
-    return (
-      <p className="text-xs text-gray-400">
-        등록된 기기가 없습니다. 설정 → 기기 관리에서 먼저 기기를 추가하세요.
-      </p>
-    )
-  }
-
   return (
     <div className="flex flex-col gap-3">
-      <div className="overflow-hidden rounded border border-gray-200">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">기기명</th>
-              <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">모델코드</th>
-              <th className="w-28 px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">수량</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 bg-white">
-            {initialDevices.map((d) => (
-              <tr key={d.deviceInfoId}>
-                <td className="px-3 py-2 text-sm text-gray-800">{d.deviceName}</td>
-                <td className="px-3 py-2 font-mono text-xs text-gray-500">{d.deviceModel}</td>
-                <td className="px-3 py-2">
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="number"
-                      min={0}
-                      value={quantities[d.deviceInfoId] ?? 0}
-                      onChange={(e) => handleChange(d.deviceInfoId, e.target.value)}
-                      className="w-20 rounded border border-gray-300 px-2 py-1 text-right text-sm focus:border-blue-500 focus:outline-none"
-                      disabled={isSaving}
-                    />
-                    <span className="text-xs text-gray-500">대</span>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="divide-y divide-gray-100 rounded border border-gray-200 bg-white">
+
+        {/* 도입 병상 수 */}
+        <div className="flex items-center justify-between px-3 py-2.5">
+          <span className="text-sm text-gray-700">도입 병상 수</span>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              min={0}
+              value={introBeds}
+              onChange={(e) => handleBedsChange(e.target.value)}
+              className="w-20 rounded border border-gray-300 px-2 py-1 text-right text-sm focus:border-blue-500 focus:outline-none"
+              disabled={isSaving}
+            />
+            <span className="w-5 text-xs text-gray-500">병상</span>
+          </div>
+        </div>
+
+        {/* 웨어러블 디바이스 그룹 레이블 */}
+        <div className="bg-gray-50 px-3 py-2">
+          <span className="text-xs font-medium text-gray-500">웨어러블 디바이스 도입 수량</span>
+        </div>
+
+        {/* 기기별 행 */}
+        {initialDevices.length === 0 ? (
+          <div className="px-3 py-3">
+            <p className="text-xs text-gray-400">등록된 기기가 없습니다. 설정 → 기기 관리에서 먼저 기기를 추가하세요.</p>
+          </div>
+        ) : (
+          initialDevices.map((d) => (
+            <div key={d.deviceInfoId} className="flex items-center justify-between px-3 py-2.5">
+              <span className="text-sm text-gray-700">{d.deviceName}</span>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  min={0}
+                  value={quantities[d.deviceInfoId] ?? 0}
+                  onChange={(e) => handleDeviceChange(d.deviceInfoId, e.target.value)}
+                  className="w-20 rounded border border-gray-300 px-2 py-1 text-right text-sm focus:border-blue-500 focus:outline-none"
+                  disabled={isSaving}
+                />
+                <span className="w-5 text-xs text-gray-500">대</span>
+              </div>
+            </div>
+          ))
+        )}
       </div>
 
       <div className="flex items-center gap-3">

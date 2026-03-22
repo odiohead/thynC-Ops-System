@@ -40,7 +40,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
   return NextResponse.json(result);
 }
 
-// PUT: 기기 수량 일괄 upsert (quantity=0이면 레코드 삭제)
+// PUT: 기기 수량 일괄 upsert + introBeds 함께 업데이트
+// body: { introBeds?: number | null; devices: { deviceInfoId: number; quantity: number }[] }
 export async function PUT(request: NextRequest, { params }: RouteContext) {
   const cookieStore = cookies();
   const token = cookieStore.get('auth-token')?.value;
@@ -56,35 +57,52 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: '병원을 찾을 수 없습니다.' }, { status: 404 });
   }
 
-  const body = await request.json() as { deviceInfoId: number; quantity: number }[];
+  const body = await request.json() as {
+    introBeds?: number | null;
+    devices: { deviceInfoId: number; quantity: number }[];
+  };
 
-  if (!Array.isArray(body)) {
-    return NextResponse.json({ error: '배열 형태의 body가 필요합니다.' }, { status: 400 });
+  if (!body || !Array.isArray(body.devices)) {
+    return NextResponse.json({ error: '올바른 형태의 body가 필요합니다.' }, { status: 400 });
   }
 
-  await prisma.$transaction(
-    body.map((item) => {
-      if (item.quantity === 0) {
-        return prisma.hospitalDevice.deleteMany({
-          where: { hospitalCode: params.code, deviceInfoId: item.deviceInfoId },
-        });
-      }
-      return prisma.hospitalDevice.upsert({
-        where: {
-          hospitalCode_deviceInfoId: {
-            hospitalCode: params.code,
-            deviceInfoId: item.deviceInfoId,
-          },
-        },
-        update: { quantity: item.quantity },
-        create: {
+  const deviceOps = body.devices.map((item) => {
+    if (item.quantity === 0) {
+      return prisma.hospitalDevice.deleteMany({
+        where: { hospitalCode: params.code, deviceInfoId: item.deviceInfoId },
+      });
+    }
+    return prisma.hospitalDevice.upsert({
+      where: {
+        hospitalCode_deviceInfoId: {
           hospitalCode: params.code,
           deviceInfoId: item.deviceInfoId,
-          quantity: item.quantity,
         },
-      });
-    })
-  );
+      },
+      update: { quantity: item.quantity },
+      create: {
+        hospitalCode: params.code,
+        deviceInfoId: item.deviceInfoId,
+        quantity: item.quantity,
+      },
+    });
+  });
+
+  // introBeds가 body에 포함된 경우 Hospital 테이블도 함께 업데이트
+  if ('introBeds' in body) {
+    const introBeds = body.introBeds != null && body.introBeds !== 0
+      ? Number(body.introBeds)
+      : null;
+    await prisma.$transaction([
+      prisma.hospital.update({
+        where: { hospitalCode: params.code },
+        data: { introBeds },
+      }),
+      ...deviceOps,
+    ]);
+  } else {
+    await prisma.$transaction(deviceOps);
+  }
 
   return NextResponse.json({ success: true });
 }
