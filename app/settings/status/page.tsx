@@ -2,11 +2,74 @@
 
 import { useState, useEffect } from 'react'
 
+const PALETTE = [
+  '#3B82F6', '#10B981', '#F59E0B', '#EF4444',
+  '#8B5CF6', '#6B7280', '#F97316', '#14B8A6',
+]
+
 interface StatusCode {
   id: number
   name: string
   order: number
+  color: string | null
   usageCount: number
+}
+
+function ColorPreview({ color }: { color: string | null }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span
+        className="inline-block h-4 w-4 rounded-full border border-gray-200 shrink-0"
+        style={{ backgroundColor: color ?? '#E5E7EB' }}
+      />
+      {!color && <span className="text-xs text-gray-400">색상 없음</span>}
+    </div>
+  )
+}
+
+function ColorPicker({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <div className="mt-2 space-y-2">
+      <div className="flex items-center gap-2">
+        <input
+          type="color"
+          value={value || '#6B7280'}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-8 w-8 cursor-pointer rounded border border-gray-300"
+        />
+        <span className="font-mono text-xs text-gray-500">{value || '미선택'}</span>
+        {value && (
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            className="text-xs text-gray-400 hover:text-gray-600"
+          >
+            초기화
+          </button>
+        )}
+      </div>
+      <div className="flex gap-1.5">
+        {PALETTE.map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => onChange(c)}
+            title={c}
+            className={`h-5 w-5 rounded-full border-2 transition-transform hover:scale-110 ${
+              value === c ? 'border-gray-800 scale-110' : 'border-transparent'
+            }`}
+            style={{ backgroundColor: c }}
+          />
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export default function StatusSettingsPage() {
@@ -14,13 +77,13 @@ export default function StatusSettingsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // 인라인 수정 상태
   const [editId, setEditId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
+  const [editColor, setEditColor] = useState('')
 
-  // 추가 폼 상태
   const [isAdding, setIsAdding] = useState(false)
   const [addName, setAddName] = useState('')
+  const [addColor, setAddColor] = useState('')
 
   const [busy, setBusy] = useState(false)
 
@@ -44,7 +107,7 @@ export default function StatusSettingsPage() {
     const res = await fetch(`/api/settings/status/${sc.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: editName.trim(), order: sc.order }),
+      body: JSON.stringify({ name: editName.trim(), order: sc.order, color: editColor || null }),
     })
     if (res.ok) {
       await fetchStatuses()
@@ -74,12 +137,13 @@ export default function StatusSettingsPage() {
     const res = await fetch('/api/settings/status', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: addName.trim(), order: nextOrder }),
+      body: JSON.stringify({ name: addName.trim(), order: nextOrder, color: addColor || null }),
     })
     if (res.ok) {
       await fetchStatuses()
       setIsAdding(false)
       setAddName('')
+      setAddColor('')
     } else {
       showError((await res.json()).error)
     }
@@ -98,12 +162,12 @@ export default function StatusSettingsPage() {
       fetch(`/api/settings/status/${current.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: current.name, order: target.order }),
+        body: JSON.stringify({ name: current.name, order: target.order, color: current.color }),
       }),
       fetch(`/api/settings/status/${target.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: target.name, order: current.order }),
+        body: JSON.stringify({ name: target.name, order: current.order, color: target.color }),
       }),
     ])
 
@@ -118,8 +182,8 @@ export default function StatusSettingsPage() {
         {/* 헤더 */}
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">상태값 관리</h1>
-            <p className="mt-1 text-sm text-gray-500">병원에 적용되는 상태값을 관리합니다.</p>
+            <h1 className="text-2xl font-bold text-gray-900">병원 상태코드 관리</h1>
+            <p className="mt-1 text-sm text-gray-500">병원에 적용되는 상태코드와 표시 색상을 관리합니다.</p>
           </div>
           {!isAdding && (
             <button
@@ -127,12 +191,11 @@ export default function StatusSettingsPage() {
               onClick={() => { setIsAdding(true); setEditId(null) }}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
             >
-              + 상태값 추가
+              + 상태코드 추가
             </button>
           )}
         </div>
 
-        {/* 에러 */}
         {error && (
           <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
@@ -146,6 +209,7 @@ export default function StatusSettingsPage() {
               <tr>
                 <th className="w-16 px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">순서</th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">상태명</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">색상</th>
                 <th className="hidden px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 sm:table-cell">사용 병원</th>
                 <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">관리</th>
               </tr>
@@ -153,11 +217,11 @@ export default function StatusSettingsPage() {
             <tbody className="divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan={4} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td>
+                  <td colSpan={5} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td>
                 </tr>
               ) : statuses.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="py-12 text-center text-sm text-gray-400">등록된 상태값이 없습니다.</td>
+                  <td colSpan={5} className="py-12 text-center text-sm text-gray-400">등록된 상태코드가 없습니다.</td>
                 </tr>
               ) : (
                 statuses.map((sc, index) => (
@@ -210,6 +274,15 @@ export default function StatusSettingsPage() {
                       )}
                     </td>
 
+                    {/* 색상 */}
+                    <td className="px-4 py-3">
+                      {editId === sc.id ? (
+                        <ColorPicker value={editColor} onChange={setEditColor} />
+                      ) : (
+                        <ColorPreview color={sc.color} />
+                      )}
+                    </td>
+
                     {/* 사용 병원 수 */}
                     <td className="hidden px-4 py-3 sm:table-cell">
                       <span className="text-sm text-gray-500">
@@ -242,7 +315,12 @@ export default function StatusSettingsPage() {
                       ) : (
                         <div className="flex justify-end gap-2">
                           <button
-                            onClick={() => { setEditId(sc.id); setEditName(sc.name); setIsAdding(false) }}
+                            onClick={() => {
+                              setEditId(sc.id)
+                              setEditName(sc.name)
+                              setEditColor(sc.color ?? '')
+                              setIsAdding(false)
+                            }}
                             disabled={busy}
                             className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100 disabled:opacity-50"
                           >
@@ -273,12 +351,15 @@ export default function StatusSettingsPage() {
                       onChange={(e) => setAddName(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') handleAdd()
-                        if (e.key === 'Escape') { setIsAdding(false); setAddName('') }
+                        if (e.key === 'Escape') { setIsAdding(false); setAddName(''); setAddColor('') }
                       }}
                       placeholder="상태명 입력"
                       autoFocus
                       className="w-full rounded border border-blue-400 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
+                  </td>
+                  <td className="px-4 py-3">
+                    <ColorPicker value={addColor} onChange={setAddColor} />
                   </td>
                   <td className="hidden px-4 py-3 sm:table-cell" />
                   <td className="px-4 py-3 text-right">
@@ -291,7 +372,7 @@ export default function StatusSettingsPage() {
                         추가
                       </button>
                       <button
-                        onClick={() => { setIsAdding(false); setAddName('') }}
+                        onClick={() => { setIsAdding(false); setAddName(''); setAddColor('') }}
                         className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100"
                       >
                         취소

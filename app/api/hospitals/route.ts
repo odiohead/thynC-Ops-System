@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
     ...(sido && { sidoName: sido }),
   }
 
-  const [hospitals, total] = await Promise.all([
+  const [hospitals, total, statusCodes] = await Promise.all([
     prisma.hospital.findMany({
       where,
       skip: (page - 1) * PAGE_SIZE,
@@ -95,10 +95,13 @@ export async function GET(request: NextRequest) {
       },
     }),
     prisma.hospital.count({ where }),
+    prisma.statusCode.findMany({ select: { name: true, color: true } }),
   ])
 
+  const colorMap = new Map(statusCodes.map((sc) => [sc.name, sc.color]))
+
   return NextResponse.json({
-    hospitals,
+    hospitals: hospitals.map((h) => ({ ...h, statusColor: colorMap.get(h.status) ?? null })),
     total,
     page,
     totalPages: Math.ceil(total / PAGE_SIZE),

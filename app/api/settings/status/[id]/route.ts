@@ -7,7 +7,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const id = parseInt(params.id)
   if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })
 
-  const { name, order } = await request.json()
+  const { name, order, color } = await request.json()
 
   if (!name?.trim()) {
     return NextResponse.json({ error: '상태명을 입력해주세요.' }, { status: 400 })
@@ -23,7 +23,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const statusCode = await prisma.statusCode.update({
     where: { id },
-    data: { name: name.trim(), order },
+    data: { name: name.trim(), order, color: color !== undefined ? (color || null) : undefined },
   })
 
   return NextResponse.json({ statusCode })

@@ -12,7 +12,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
   if (!hospital) return NextResponse.json({ error: '병원을 찾을 수 없습니다.' }, { status: 404 })
 
-  return NextResponse.json({ hospital, statusCodes })
+  const statusColor = statusCodes.find((sc) => sc.name === hospital.status)?.color ?? null
+
+  return NextResponse.json({ hospital: { ...hospital, statusColor }, statusCodes })
 }
 
 export async function PUT(request: NextRequest, { params }: Params) {

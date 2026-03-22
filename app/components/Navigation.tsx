@@ -201,7 +201,7 @@ export default function Navigation() {
                 href="/settings/status"
                 className={navItemClass(isActive('/settings/status'))}
               >
-                상태값 관리
+                병원 상태코드 관리
               </Link>
               {userRole === 'ADMIN' && (
                 <Link

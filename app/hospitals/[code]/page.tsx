@@ -7,6 +7,7 @@ import DeleteButton from './_components/DeleteButton'
 import DaewoongStaffTab from './_components/DaewoongStaffTab'
 import DriveFolderRow from './_components/DriveFolderRow'
 import HospitalDevicesSection from './_components/HospitalDevicesSection'
+import StatusBadge from '@/app/components/StatusBadge'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,19 +24,13 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-const STATUS_STYLE: Record<string, string> = {
-  계약: 'bg-green-100 text-green-700',
-  해지: 'bg-red-100 text-red-700',
-  대기: 'bg-yellow-100 text-yellow-700',
-}
-
 export default async function HospitalDetailPage({ params }: PageProps) {
   const cookieStore = cookies()
   const token = cookieStore.get('auth-token')?.value
   const user = token ? await verifyToken(token) : null
   const isAdmin = user?.role === 'ADMIN'
 
-  const [hospital, projects, allDevices, hospitalDevices] = await Promise.all([
+  const [hospital, projects, allDevices, hospitalDevices, statusCodes] = await Promise.all([
     prisma.hospital.findUnique({
       where: { hospitalCode: params.code },
       include: { meta: true },
@@ -47,10 +42,11 @@ export default async function HospitalDetailPage({ params }: PageProps) {
     }),
     prisma.deviceInfo.findMany({ orderBy: { sortOrder: 'asc' } }),
     prisma.hospitalDevice.findMany({ where: { hospitalCode: params.code } }),
+    prisma.statusCode.findMany({ select: { name: true, color: true } }),
   ])
   if (!hospital) notFound()
 
-  const statusStyle = STATUS_STYLE[hospital.status] ?? 'bg-gray-100 text-gray-600'
+  const statusColor = statusCodes.find((sc) => sc.name === hospital.status)?.color ?? null
   const introTypeList = hospital.introType ? hospital.introType.split(',') : []
 
   const quantityMap = new Map(hospitalDevices.map((d) => [d.deviceInfoId, d.quantity]))
@@ -121,11 +117,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
           <dl className="grid grid-cols-1 gap-6 px-6 py-5 sm:grid-cols-3">
             <Field
               label="상태"
-              value={
-                <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${statusStyle}`}>
-                  {hospital.status}
-                </span>
-              }
+              value={<StatusBadge label={hospital.status} color={statusColor} />}
             />
             <Field
               label="도입형태"

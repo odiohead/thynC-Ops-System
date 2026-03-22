@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 import { verifyToken } from '@/lib/auth'
+import StatusBadge from '@/app/components/StatusBadge'
 
 export const dynamic = 'force-dynamic'
 import HospitalFilters from './_components/HospitalFilters'
@@ -10,12 +11,6 @@ import ExportToDriveButton from './_components/ExportToDriveButton'
 import ImportButton from './_components/ImportButton'
 
 const PAGE_SIZE = 20
-
-const STATUS_MAP: Record<string, { label: string; className: string }> = {
-  active: { label: '운영중', className: 'bg-green-100 text-green-700' },
-  inactive: { label: '운영중단', className: 'bg-red-100 text-red-700' },
-  pending: { label: '대기중', className: 'bg-yellow-100 text-yellow-700' },
-}
 
 interface PageProps {
   searchParams: { [key: string]: string | string[] | undefined }
@@ -45,7 +40,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
     ...(sido && { sidoName: sido }),
   }
 
-  const [hospitals, total, sidoRows] = await Promise.all([
+  const [hospitals, total, sidoRows, statusCodes] = await Promise.all([
     prisma.hospital.findMany({
       where,
       skip: (page - 1) * PAGE_SIZE,
@@ -70,7 +65,10 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
       distinct: ['sidoName'],
       orderBy: { sidoName: 'asc' },
     }),
+    prisma.statusCode.findMany({ select: { name: true, color: true } }),
   ])
+
+  const statusColorMap = new Map(statusCodes.map((sc) => [sc.name, sc.color]))
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
   const sidoOptions = sidoRows.map((r) => r.sidoName!).filter(Boolean)
@@ -128,13 +126,8 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
                     </td>
                   </tr>
                 ) : (
-                  hospitals.map((h) => {
-                    const st = STATUS_MAP[h.status] ?? {
-                      label: h.status,
-                      className: 'bg-gray-100 text-gray-600',
-                    }
-                    return (
-                      <tr key={h.id} className="transition-colors hover:bg-gray-50">
+                  hospitals.map((h) => (
+                    <tr key={h.id} className="transition-colors hover:bg-gray-50">
                         <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-gray-500">
                           {h.hospitalCode}
                         </td>
@@ -147,11 +140,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
                           {h.address ?? '-'}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${st.className}`}
-                          >
-                            {st.label}
-                          </span>
+                          <StatusBadge label={h.status} color={statusColorMap.get(h.status)} />
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">
                           {h.contractDate ? new Date(h.contractDate).toISOString().slice(0, 10) : '-'}
@@ -171,8 +160,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
                           )}
                         </td>
                       </tr>
-                    )
-                  })
+                  ))
                 )}
               </tbody>
             </table>

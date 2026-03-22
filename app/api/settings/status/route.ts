@@ -18,7 +18,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const { name, order } = await request.json()
+  const { name, order, color } = await request.json()
 
   if (!name?.trim()) {
     return NextResponse.json({ error: '상태명을 입력해주세요.' }, { status: 400 })
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
   }
 
   const statusCode = await prisma.statusCode.create({
-    data: { name: name.trim(), order: order ?? 0 },
+    data: { name: name.trim(), order: order ?? 0, color: color ?? null },
   })
 
   return NextResponse.json({ statusCode }, { status: 201 })

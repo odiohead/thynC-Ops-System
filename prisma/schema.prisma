@@ -92,6 +92,7 @@ model StatusCode {
   id        Int      @id @default(autoincrement())
   name      String   @unique @map("name")
   order     Int      @default(0) @map("order")
+  color     String?  @map("color")
   createdAt DateTime @default(now()) @map("created_at")
 
   @@map("status_codes")
