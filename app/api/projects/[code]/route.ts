@@ -6,6 +6,7 @@ type Params = { params: { code: string } }
 const projectInclude = {
   hospital: true,
   builder: { select: { id: true, name: true, email: true } },
+  contractor: { select: { id: true, code: true, name: true } },
   devices: {
     include: { deviceInfo: true },
     orderBy: { deviceInfo: { sortOrder: 'asc' } },
@@ -40,6 +41,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     hasOrder,
     builderUserId,
     builderNameManual,
+    constructorId,
     startDate,
     endDateExpected,
     isCompleted,
@@ -57,6 +59,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       hasOrder: hasOrder !== undefined ? hasOrder : undefined,
       builderUserId: builderUserId !== undefined ? builderUserId : undefined,
       builderNameManual: builderNameManual !== undefined ? builderNameManual : undefined,
+      constructorId: constructorId !== undefined ? (constructorId ? Number(constructorId) : null) : undefined,
       startDate: startDate !== undefined ? (startDate ? new Date(startDate) : null) : undefined,
       endDateExpected: endDateExpected !== undefined ? (endDateExpected ? new Date(endDateExpected) : null) : undefined,
       isCompleted: isCompleted !== undefined ? isCompleted : undefined,

@@ -18,6 +18,12 @@ interface UserOption {
   name: string
 }
 
+interface ConstructorOption {
+  id: number
+  code: string
+  name: string
+}
+
 function NewProjectForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -36,6 +42,8 @@ function NewProjectForm() {
   const [builderUserId, setBuilderUserId] = useState('')
   const [builderNameManual, setBuilderNameManual] = useState('')
   const [users, setUsers] = useState<UserOption[]>([])
+  const [constructorId, setConstructorId] = useState('')
+  const [constructors, setConstructors] = useState<ConstructorOption[]>([])
 
   const [startDate, setStartDate] = useState('')
   const [endDateExpected, setEndDateExpected] = useState('')
@@ -54,11 +62,12 @@ function NewProjectForm() {
     Promise.all([
       fetch('/api/settings/devices').then((r) => r.json()),
       fetch('/api/users').then((r) => r.json()),
+      fetch('/api/constructors').then((r) => r.json()),
       presetCode ? fetch(`/api/hospitals/${presetCode}`).then((r) => r.json()) : Promise.resolve(null),
-    ]).then(([devData, userData, hospData]) => {
-      const activeDevices: DeviceInfo[] = (devData.devices ?? []).filter((d: DeviceInfo) => d.isActive)
-      setDevices(activeDevices)
+    ]).then(([devData, userData, conData, hospData]) => {
+      setDevices((devData.devices ?? []).filter((d: DeviceInfo) => d.isActive))
       setUsers(Array.isArray(userData) ? userData : [])
+      setConstructors(conData.constructors ?? [])
       if (hospData?.hospital) {
         setHospital({
           hospitalCode: hospData.hospital.hospitalCode,
@@ -89,6 +98,7 @@ function NewProjectForm() {
           hasOrder,
           builderUserId: builderMode === 'user' && builderUserId ? builderUserId : null,
           builderNameManual: builderMode === 'manual' && builderNameManual ? builderNameManual : null,
+          constructorId: constructorId ? Number(constructorId) : null,
           startDate: startDate || null,
           endDateExpected: endDateExpected || null,
           isCompleted,
@@ -211,6 +221,31 @@ function NewProjectForm() {
                 </div>
               </div>
             </div>
+
+            {/* 기기별 도입 수량 */}
+            {devices.length > 0 && (
+              <div className="border-t border-gray-100 px-6 py-5">
+                <p className={`mb-3 ${labelClass}`}>기기별 도입 수량</p>
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                  {devices.map((d) => (
+                    <div key={d.id}>
+                      <label className={labelClass}>
+                        {d.deviceName}
+                        <span className="ml-1 font-mono normal-case text-gray-300">{d.deviceModel}</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={deviceQty[d.id] ?? ''}
+                        onChange={(e) => setDeviceQty((prev) => ({ ...prev, [d.id]: parseInt(e.target.value) || 0 }))}
+                        className={inputClass}
+                        placeholder="0"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 구축 정보 */}
@@ -249,6 +284,17 @@ function NewProjectForm() {
                 )}
               </div>
 
+              {/* 공사업체 */}
+              <div>
+                <label className={labelClass}>공사업체</label>
+                <select value={constructorId} onChange={(e) => setConstructorId(e.target.value)} className={inputClass}>
+                  <option value="">업체 선택 (선택사항)</option>
+                  {constructors.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
               <div>
                 <label className={labelClass}>구축 시작일</label>
                 <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputClass} />
@@ -268,30 +314,6 @@ function NewProjectForm() {
               </div>
             </div>
           </div>
-
-          {/* 기기 수량 */}
-          {devices.length > 0 && (
-            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-              <div className="border-b border-gray-200 px-6 py-4">
-                <h2 className="text-sm font-semibold text-gray-700">기기 수량</h2>
-              </div>
-              <div className="grid grid-cols-2 gap-4 px-6 py-5 sm:grid-cols-3 lg:grid-cols-4">
-                {devices.map((d) => (
-                  <div key={d.id}>
-                    <label className={labelClass}>{d.deviceName}<span className="ml-1 font-mono normal-case text-gray-300">{d.deviceModel}</span></label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={deviceQty[d.id] ?? ''}
-                      onChange={(e) => setDeviceQty((prev) => ({ ...prev, [d.id]: parseInt(e.target.value) || 0 }))}
-                      className={inputClass}
-                      placeholder="0"
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* 이슈 노트 */}
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">

@@ -34,6 +34,9 @@ export async function GET(request: NextRequest) {
         builder: {
           select: { id: true, name: true, email: true },
         },
+        contractor: {
+          select: { id: true, code: true, name: true },
+        },
         devices: {
           include: { deviceInfo: true },
           orderBy: { deviceInfo: { sortOrder: 'asc' } },
@@ -66,6 +69,7 @@ export async function POST(request: NextRequest) {
     hasOrder,
     builderUserId,
     builderNameManual,
+    constructorId,
     startDate,
     endDateExpected,
     isCompleted,
@@ -117,6 +121,7 @@ export async function POST(request: NextRequest) {
       hasOrder: hasOrder ?? false,
       builderUserId: builderUserId ?? null,
       builderNameManual: builderNameManual ?? null,
+      constructorId: constructorId ? Number(constructorId) : null,
       startDate: startDate ? new Date(startDate) : null,
       endDateExpected: endDateExpected ? new Date(endDateExpected) : null,
       isCompleted: isCompleted ?? false,

@@ -28,6 +28,12 @@ interface ProjectFile {
   uploadedAt: string
 }
 
+interface ConstructorInfo {
+  id: number
+  code: string
+  name: string
+}
+
 interface Project {
   id: number
   projectCode: string
@@ -42,18 +48,26 @@ interface Project {
   hasOrder: boolean
   builderUserId: string | null
   builderNameManual: string | null
+  constructorId: number | null
   startDate: string | null
   endDateExpected: string | null
   isCompleted: boolean
   issueNote: string | null
   hospital: { hospitalCode: string; hospitalName: string }
   builder: { id: string; name: string } | null
+  contractor: ConstructorInfo | null
   devices: ProjectDevice[]
   files: ProjectFile[]
 }
 
 interface UserOption {
   id: string
+  name: string
+}
+
+interface ConstructorOption {
+  id: number
+  code: string
   name: string
 }
 
@@ -76,6 +90,7 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<Project | null>(null)
   const [allDevices, setAllDevices] = useState<DeviceInfo[]>([])
   const [users, setUsers] = useState<UserOption[]>([])
+  const [constructors, setConstructors] = useState<ConstructorOption[]>([])
   const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -91,6 +106,7 @@ export default function ProjectDetailPage() {
   const [builderMode, setBuilderMode] = useState<'user' | 'manual'>('user')
   const [builderUserId, setBuilderUserId] = useState('')
   const [builderNameManual, setBuilderNameManual] = useState('')
+  const [constructorId, setConstructorId] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDateExpected, setEndDateExpected] = useState('')
   const [isCompleted, setIsCompleted] = useState(false)
@@ -114,6 +130,7 @@ export default function ProjectDetailPage() {
     setHasOrder(p.hasOrder)
     if (p.builderUserId) { setBuilderMode('user'); setBuilderUserId(p.builderUserId) }
     else if (p.builderNameManual) { setBuilderMode('manual'); setBuilderNameManual(p.builderNameManual) }
+    setConstructorId(p.constructorId ? String(p.constructorId) : '')
     setStartDate(toDateInput(p.startDate))
     setEndDateExpected(toDateInput(p.endDateExpected))
     setIsCompleted(p.isCompleted)
@@ -129,10 +146,12 @@ export default function ProjectDetailPage() {
       loadProject(),
       fetch('/api/settings/devices').then((r) => r.json()),
       fetch('/api/users').then((r) => r.json()),
+      fetch('/api/constructors').then((r) => r.json()),
       fetch('/api/auth/me').then((r) => r.json()),
-    ]).then(([, devData, userData, meData]) => {
+    ]).then(([, devData, userData, conData, meData]) => {
       setAllDevices((devData.devices ?? []).filter((d: DeviceInfo) => d.isActive))
       setUsers(Array.isArray(userData) ? userData : [])
+      setConstructors(conData.constructors ?? [])
       setIsAdmin(meData?.role === 'ADMIN')
       setLoading(false)
     })
@@ -154,6 +173,7 @@ export default function ProjectDetailPage() {
         hasOrder,
         builderUserId: builderMode === 'user' && builderUserId ? builderUserId : null,
         builderNameManual: builderMode === 'manual' && builderNameManual ? builderNameManual : null,
+        constructorId: constructorId ? Number(constructorId) : null,
         startDate: startDate || null,
         endDateExpected: endDateExpected || null,
         isCompleted,
@@ -295,6 +315,31 @@ export default function ProjectDetailPage() {
                 </div>
               </div>
             </div>
+
+            {/* 기기별 도입 수량 (계약 정보 카드 안으로 통합) */}
+            {allDevices.length > 0 && (
+              <div className="border-t border-gray-100 px-6 py-5">
+                <p className={`mb-3 ${labelClass}`}>기기별 도입 수량</p>
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                  {allDevices.map((d) => (
+                    <div key={d.id}>
+                      <label className={labelClass}>
+                        {d.deviceName}
+                        <span className="ml-1 font-mono normal-case text-gray-300">{d.deviceModel}</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={deviceQty[d.id] ?? ''}
+                        onChange={(e) => setDeviceQty((prev) => ({ ...prev, [d.id]: parseInt(e.target.value) || 0 }))}
+                        className={inputClass}
+                        placeholder="0"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 구축 정보 */}
@@ -330,6 +375,18 @@ export default function ProjectDetailPage() {
                   />
                 )}
               </div>
+
+              {/* 공사업체 */}
+              <div>
+                <label className={labelClass}>공사업체</label>
+                <select value={constructorId} onChange={(e) => setConstructorId(e.target.value)} className={inputClass}>
+                  <option value="">업체 선택 (선택사항)</option>
+                  {constructors.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
               <div>
                 <label className={labelClass}>구축 시작일</label>
                 <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputClass} />
@@ -349,33 +406,6 @@ export default function ProjectDetailPage() {
               </div>
             </div>
           </div>
-
-          {/* 기기 수량 */}
-          {allDevices.length > 0 && (
-            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-              <div className="border-b border-gray-200 px-6 py-4">
-                <h2 className="text-sm font-semibold text-gray-700">기기 수량</h2>
-              </div>
-              <div className="grid grid-cols-2 gap-4 px-6 py-5 sm:grid-cols-3 lg:grid-cols-4">
-                {allDevices.map((d) => (
-                  <div key={d.id}>
-                    <label className={labelClass}>
-                      {d.deviceName}
-                      <span className="ml-1 font-mono normal-case text-gray-300">{d.deviceModel}</span>
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={deviceQty[d.id] ?? ''}
-                      onChange={(e) => setDeviceQty((prev) => ({ ...prev, [d.id]: parseInt(e.target.value) || 0 }))}
-                      className={inputClass}
-                      placeholder="0"
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* 첨부파일 */}
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">

@@ -211,6 +211,14 @@ export default function Navigation() {
                   기기 관리
                 </Link>
               )}
+              {userRole === 'ADMIN' && (
+                <Link
+                  href="/settings/constructors"
+                  className={navItemClass(isActive('/settings/constructors'))}
+                >
+                  공사업체 관리
+                </Link>
+              )}
             </div>
           )}
         </div>
