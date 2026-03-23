@@ -4,15 +4,15 @@ const prisma = new PrismaClient()
 
 async function main() {
   const seeds = [
-    { name: '미계약', order: 1 },
-    { name: '계약완료', order: 2 },
-    { name: '운영', order: 3 },
-    { name: '해지', order: 4 },
+    { name: '미계약', order: 1, category: 'HOSPITAL' },
+    { name: '계약완료', order: 2, category: 'HOSPITAL' },
+    { name: '운영', order: 3, category: 'HOSPITAL' },
+    { name: '해지', order: 4, category: 'HOSPITAL' },
   ]
 
   for (const seed of seeds) {
     await prisma.statusCode.upsert({
-      where: { name: seed.name },
+      where: { name_category: { name: seed.name, category: seed.category } },
       update: { order: seed.order },
       create: seed,
     })

@@ -4,6 +4,170 @@
 
 ---
 
+## 2026-03-23 | 답사(Site Visit) 관리 기능 추가
+
+### DB 스키마
+- `StatusCode` 모델에 `category` 필드 추가 (`HOSPITAL` / `SITE_VISIT` 구분), 기존 데이터는 `HOSPITAL`로 마이그레이션
+- `StatusCode` unique 제약: `name` 단독 → `(name, category)` 복합 unique로 변경
+- `SiteVisit` 모델 신규 추가: hospitalCode, daewoongStaffId, assigneeId, requestDate, visitDate, replyDate, statusId, installPlanUrl, installPlanFileId, floorPlanUrl, floorPlanFileId, notes
+- `Hospital`, `DaewoongStaff`, `User`, `StatusCode`에 `siteVisits` relation 추가
+- 마이그레이션: SQL 직접 실행 + `prisma migrate resolve --applied 20260323120000_add_site_visit`
+
+### API
+- `GET/POST /api/settings/site-visit-status`: 답사 상태코드 목록/등록 (POST는 ADMIN 전용)
+- `PUT/DELETE /api/settings/site-visit-status/[id]`: 수정/삭제 (ADMIN 전용, 사용 중이면 삭제 차단)
+- `GET/POST /api/site-visits`: 답사 목록 조회(페이지네이션)/등록
+- `GET/PUT/DELETE /api/site-visits/[id]`: 답사 단건 조회/수정/삭제 (DELETE는 ADMIN 전용)
+- `POST /api/site-visits/upload`: 병원 Drive 폴더에 파일 업로드 (multipart/form-data)
+- `DELETE /api/drive/delete`: Drive 파일 삭제 API 신규 추가
+- 기존 `/api/settings/status`: category='HOSPITAL' 필터 추가로 기존 동작 유지
+
+### 페이지
+- `app/settings/site-visit-status/page.tsx`: 답사 상태 관리 (ADMIN 전용, 병원 상태코드 관리와 동일 구조)
+- `app/site-visits/page.tsx`: 답사 현황 목록 (병원명/대웅담당자/담당자/상태/요청일/답사날짜/설치계획서/회신날짜)
+- `app/site-visits/new/page.tsx`: 답사 등록 폼
+- `app/site-visits/[id]/page.tsx`: 답사 상세/수정 폼 (ADMIN만 삭제 버튼 노출)
+- `app/site-visits/SiteVisitForm.tsx`: 등록/수정 공용 폼 컴포넌트 (Drive 파일 업로드/삭제 포함)
+
+### Navigation
+- '답사 현황' 메뉴 추가 (프로젝트 관리 아래, 모든 역할 접근 가능)
+- 설정 하위에 '답사 상태 관리' 항목 추가 (ADMIN 전용)
+
+### 기타
+- `lib/googleDrive.ts`: `deleteDriveFile` 함수 추가
+- `prisma/seed.ts`: StatusCode upsert를 복합 unique 키(`name_category`)로 수정
+
+- 영향받은 파일: `prisma/schema.prisma`, `prisma/seed.ts`, `lib/googleDrive.ts`, `app/components/Navigation.tsx`, `app/api/settings/status/route.ts`, `app/api/settings/status/[id]/route.ts`, `app/api/settings/site-visit-status/route.ts`, `app/api/settings/site-visit-status/[id]/route.ts`, `app/api/site-visits/route.ts`, `app/api/site-visits/[id]/route.ts`, `app/api/site-visits/upload/route.ts`, `app/api/drive/delete/route.ts`, `app/settings/site-visit-status/page.tsx`, `app/site-visits/page.tsx`, `app/site-visits/new/page.tsx`, `app/site-visits/[id]/page.tsx`, `app/site-visits/SiteVisitForm.tsx`
+
+---
+
+## 2026-03-23 | 전체 로직 점검 및 버그/보안 수정
+
+### 버그 수정
+- 프로젝트 상세 저장 후 목록으로 돌아가면 반영 안 되는 문제: `PUT /api/projects/[code]` 저장 성공 시 `revalidatePath('/projects')` 호출하여 클라이언트 Router Cache 무효화 (VIEWER 경로 포함)
+
+### 보안 수정 (인증 누락)
+- `POST /api/hospitals/[code]/daewoong-staff`: 인증 체크 없음 → `getAuthUser` + VIEWER 403 추가
+- `DELETE /api/hospitals/[code]/daewoong-staff/[sid]`: 인증 체크 없음 → `getAuthUser` + VIEWER 403 추가
+
+### 로직 강화
+- `DELETE /api/hospitals/[code]`: VIEWER 403 → ADMIN 전용으로 강화, 연결된 프로젝트 존재 시 409 에러 반환 (DB 오류 방지 사전 체크)
+
+### 코드 일관성
+- `GET|PUT /api/hospitals/[code]/devices`: `cookies()` + `verifyToken()` 직접 호출 방식 → 전체 통일된 `getAuthUser(request)` 패턴으로 교체, PUT에 VIEWER 403 추가
+
+- 영향받은 파일: `app/api/projects/[code]/route.ts`, `app/api/hospitals/[code]/daewoong-staff/route.ts`, `app/api/hospitals/[code]/daewoong-staff/[sid]/route.ts`, `app/api/hospitals/[code]/route.ts`, `app/api/hospitals/[code]/devices/route.ts`
+
+---
+
+## 2026-03-23 | 비고 필드 추가 및 대시보드 UI 개편
+
+- DB: projects 테이블에 remark TEXT 컬럼 추가 (SQL 직접 실행 + prisma migrate resolve --applied)
+- Schema: Project 모델에 `remark String? @map("remark")` 필드 추가
+- API PUT /api/projects/[code]: remark 필드 저장 처리 (VIEWER 경로 포함)
+- API GET /api/dashboard: remark, builderUserId, builderNameManual, builder { name } select에 추가
+- 프로젝트 상세 페이지: 구축 정보 카드 마지막에 비고 input 추가, 저장 시 함께 전송
+- 대시보드 페이지: 서버→클라이언트 컴포넌트 전환, /api/dashboard fetch 사용
+  - 컬럼 통일: 병원명 | 진행상태 | 구축 시작일 | 구축 종료일(예상) | 담당자 | 비고 | (수정 버튼)
+  - 담당자: builderUser.name → builderNameManual 순으로 폴백
+  - 비고 인라인 수정: '수정' 버튼 → input 전환 → '저장' 버튼으로 PUT 호출, 저장 후 텍스트 복귀
+  - 이번주/차주 헤더 요약 텍스트(진행상태별 건수, 신규구축 건수) 유지
+- 영향받은 파일: `prisma/schema.prisma`, `app/api/projects/[code]/route.ts`, `app/api/dashboard/route.ts`, `app/projects/[code]/page.tsx`, `app/page.tsx`
+
+---
+
+## 2026-03-22 | ADMIN 프로필 수정 버그 수정 및 계정 삭제 기능 추가
+
+- API PUT /api/users/[id]: `isSelf`/`isAdmin` boolean으로 권한 체크 리팩토링, 빈 updateData 400 에러 처리 추가
+- API DELETE /api/users/[id]: 신규 추가 - ADMIN 전용, 자기 자신 삭제 불가
+- /users 페이지: ADMIN에게 계정 삭제 버튼 표시 (자기 자신 제외), `deletingId` 상태로 로딩 처리
+- /settings/profile 페이지: `/api/auth/me` 에러 응답 시 `me.id` undefined 접근 방지 (id 유무로 가드 추가)
+- 영향받은 파일: `app/api/users/[id]/route.ts`, `app/users/page.tsx`, `app/settings/profile/page.tsx`
+
+---
+
+## 2026-03-22 22:00 | 권한 3단계(ADMIN/USER/VIEWER) 개편 및 내 프로필 페이지 추가
+
+### DB / Prisma
+- `Role` enum에 `VIEWER` 추가: `ALTER TYPE "Role" ADD VALUE 'VIEWER'` 직접 실행 후 `prisma migrate resolve --applied`
+- `prisma/schema.prisma` Role enum 업데이트, `npx prisma generate` 재실행
+
+### lib/auth.ts
+- `JWTPayload.role` 타입에 `'VIEWER'` 추가
+- `getAuthUser(req)` 헬퍼 함수 추가 (쿠키에서 토큰 파싱 → JWTPayload 반환)
+
+### API 라우트 — VIEWER 403 처리
+- `POST /api/hospitals`, `PUT/DELETE /api/hospitals/[code]`: VIEWER 차단
+- `POST /api/daewoong-staff`, `PUT/DELETE /api/daewoong-staff/[id]`: VIEWER 차단
+- `POST /api/projects`: VIEWER 차단
+- `PUT /api/projects/[code]`: VIEWER는 issueNote 필드만 허용 (나머지 필드 차단)
+- `DELETE /api/projects/[code]`: VIEWER 차단
+- `POST /api/settings/build-status`, `PUT/DELETE /api/settings/build-status/[id]`: VIEWER 차단
+- `POST /api/settings/status`, `PUT/DELETE /api/settings/status/[id]`: VIEWER 차단
+- `POST /api/settings/devices`, `PUT/DELETE /api/settings/devices/[id]`: VIEWER 차단
+
+### users API 개편
+- `GET /api/users`: ADMIN 전용 → 모든 로그인 사용자 허용 (USER/VIEWER도 목록 조회 가능)
+- `POST /api/users`: ADMIN 전용 유지
+- `PATCH /api/users/[id]`: ADMIN 전용 유지 (isActive 토글)
+- `PUT /api/users/[id]` 신규 추가: 본인 또는 ADMIN만 허용, name/phone/비밀번호 변경
+  - 비밀번호 변경: currentPassword bcrypt.compare 검증 후 새 비밀번호 해싱 저장
+  - 역할(role) 변경: ADMIN만 가능
+
+### Navigation.tsx
+- `userRole` 타입에 `'VIEWER'` 추가
+- 심평원 병원목록: ADMIN만 노출
+- 대웅제약 관리: ADMIN, USER만 노출
+- 설정 서브메뉴: 내 프로필(모든 역할) + 나머지(ADMIN, USER)
+- 계정 관리: 모든 역할 노출
+- 하단 역할 표시: '관리자' / '일반' / '뷰어'
+
+### app/users/page.tsx
+- `User.role` 타입 VIEWER 추가, 역할 배지 VIEWER(파란색) 추가
+- 계정 생성 버튼: ADMIN만 노출
+- 활성화/비활성화 버튼: ADMIN만 노출 (컬럼 자체 숨김)
+- 현재 로그인 유저 행에 '(나)' 표시 및 하이라이트
+
+### app/settings/profile/page.tsx (신규)
+- 모든 역할 접근 가능, 설정 메뉴 최상단
+- 계정 정보 카드: 이메일/역할 읽기 전용 표시
+- 기본 정보 카드: 이름/전화번호 수정, `PUT /api/users/[id]` 호출
+- 비밀번호 변경 카드: 현재 비밀번호 확인 → 새 비밀번호 변경
+- 성공/실패 인라인 메시지 표시
+
+- 영향 파일: `prisma/schema.prisma`, `lib/auth.ts`, `app/api/users/route.ts`, `app/api/users/[id]/route.ts`, `app/api/hospitals/route.ts`, `app/api/hospitals/[code]/route.ts`, `app/api/daewoong-staff/route.ts`, `app/api/daewoong-staff/[id]/route.ts`, `app/api/projects/route.ts`, `app/api/projects/[code]/route.ts`, `app/api/settings/build-status/route.ts`, `app/api/settings/build-status/[id]/route.ts`, `app/api/settings/status/route.ts`, `app/api/settings/status/[id]/route.ts`, `app/api/settings/devices/route.ts`, `app/api/settings/devices/[id]/route.ts`, `app/components/Navigation.tsx`, `app/users/page.tsx`, `app/settings/profile/page.tsx`
+
+---
+
+## 2026-03-22 21:20 | 이슈 노트 에디터 뷰어/수정 모드 분리
+
+- `IssueNoteEditor.tsx` 수정: 기본값을 뷰어 모드(editable: false)로 변경
+  - 뷰어 모드: 콘텐츠 읽기 전용 표시, 우측 상단 "수정" 버튼
+  - 수정 모드: "수정" 버튼 클릭 시 에디터 활성화 + 툴바 표시, "완료" 버튼 클릭 시 즉시 저장 후 뷰어 모드 복귀
+  - "완료" 클릭 시 debounce 대기 없이 즉시 플러시 저장
+  - 내용 없을 때 뷰어 모드에서 "등록된 이슈 노트가 없습니다." 안내 표시
+  - 뷰어/수정 모드 모두 에디터 항상 마운트 유지 (editable 토글 방식)
+- 영향 파일: `app/components/IssueNoteEditor.tsx`
+
+---
+
+## 2026-03-22 21:00 | 이슈 노트 Tiptap 리치 텍스트 에디터 교체
+
+- `app/components/IssueNoteEditor.tsx` 신규 생성 (Tiptap 기반 클라이언트 컴포넌트)
+  - 패키지: @tiptap/react, @tiptap/pm, @tiptap/starter-kit, extension-link, extension-underline, extension-text-align, extension-placeholder, extension-typography (전체 v3.20.4)
+  - 툴바 버튼: H1/H2/H3 | Bold/Italic/Underline/Strike | BulletList/OrderedList | Blockquote/Code/CodeBlock | Link | HorizontalRule | Undo/Redo
+  - debounce 자동저장: 타이핑 멈춘 후 2초 뒤 PUT /api/projects/[code] 호출 (issueNote만 전달)
+  - 저장 상태 툴바 우측 표시: "저장 중..." / "저장됨 HH:MM" / "저장 실패"(빨간 텍스트)
+  - 링크 삽입/해제: window.prompt로 URL 입력, 활성 시 해제
+  - Placeholder: "이슈 및 특이사항을 기록하세요..."
+  - 에디터 내부 타이포그래피: h1~h3 크기 차이, 목록 들여쓰기, blockquote 좌측 border, code/pre 스타일 인라인 CSS
+  - USER 권한도 이슈노트 편집 가능 (에디터 자체 저장이므로 권한 분기 불필요)
+- `app/projects/[code]/page.tsx` 수정: 이슈 노트 `<textarea>` → `<IssueNoteEditor>` 컴포넌트로 교체, issueNote state 제거, handleSave에서 issueNote 제외
+- `PUT /api/projects/[code]` API: 이미 partial update 방식(`!== undefined` 패턴)이므로 별도 수정 없음
+- 영향 파일: `app/components/IssueNoteEditor.tsx`, `app/projects/[code]/page.tsx`
+
+---
+
 ## 2026-03-22 19:30 | 메인 페이지 대시보드 추가
 
 - `GET /api/dashboard` 신규 생성: 이번주/차주 구축현황 반환

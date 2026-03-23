@@ -58,6 +58,7 @@ model Hospital {
   projects            Project[]
   meta                HospitalMeta?
   hospitalDevices     HospitalDevice[]
+  siteVisits          SiteVisit[]
 
   @@map("hospitals")
 }
@@ -72,6 +73,7 @@ model DaewoongStaff {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
   assignments DaewoongHospitalAssignment[]
+  siteVisits  SiteVisit[]
 
   @@map("daewoong_staff")
 }
@@ -90,29 +92,34 @@ model DaewoongHospitalAssignment {
 
 model StatusCode {
   id        Int      @id @default(autoincrement())
-  name      String   @unique @map("name")
+  name      String   @map("name")
   order     Int      @default(0) @map("order")
   color     String?  @map("color")
+  category  String   @default("HOSPITAL") @map("category")
   createdAt DateTime @default(now()) @map("created_at")
+  siteVisits SiteVisit[]
 
+  @@unique([name, category])
   @@map("status_codes")
 }
 
 enum Role {
   ADMIN
   USER
+  VIEWER
 }
 
 model User {
-  id        String    @id @default(uuid())
-  email     String    @unique
-  password  String
-  name      String
-  phone     String
-  role      Role      @default(USER)
-  isActive  Boolean   @default(true) @map("is_active")
-  createdAt DateTime  @default(now()) @map("created_at")
-  projects  Project[]
+  id         String      @id @default(uuid())
+  email      String      @unique
+  password   String
+  name       String
+  phone      String
+  role       Role        @default(USER)
+  isActive   Boolean     @default(true) @map("is_active")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  projects   Project[]
+  siteVisits SiteVisit[]
 
   @@map("users")
 }
@@ -178,6 +185,7 @@ model Project {
   endDateExpected     DateTime?    @map("end_date_expected")
   buildStatusId       Int?         @map("build_status_id")
   issueNote           String?      @db.Text @map("issue_note")
+  remark              String?      @map("remark")
   driveFolderId       String?      @map("drive_folder_id")
   createdAt           DateTime     @default(now()) @map("created_at")
   updatedAt           DateTime     @updatedAt @map("updated_at")
@@ -242,4 +250,29 @@ model ProjectFile {
   project      Project  @relation(fields: [projectId], references: [id])
 
   @@map("project_files")
+}
+
+model SiteVisit {
+  id              Int            @id @default(autoincrement())
+  hospitalCode    String         @map("hospital_code")
+  daewoongStaffId String?        @map("daewoong_staff_id")
+  assigneeId      String?        @map("assignee_id")
+  requestDate     DateTime?      @map("request_date")
+  visitDate       DateTime?      @map("visit_date")
+  replyDate       DateTime?      @map("reply_date")
+  statusId        Int?           @map("status_id")
+  installPlanUrl  String?        @map("install_plan_url")
+  installPlanFileId String?      @map("install_plan_file_id")
+  floorPlanUrl    String?        @map("floor_plan_url")
+  floorPlanFileId String?        @map("floor_plan_file_id")
+  notes           String?        @db.Text @map("notes")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  hospital      Hospital       @relation(fields: [hospitalCode], references: [hospitalCode])
+  daewoongStaff DaewoongStaff? @relation(fields: [daewoongStaffId], references: [id])
+  assignee      User?          @relation(fields: [assigneeId], references: [id])
+  status        StatusCode?    @relation(fields: [statusId], references: [id])
+
+  @@map("site_visits")
 }

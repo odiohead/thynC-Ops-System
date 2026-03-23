@@ -266,6 +266,11 @@ export async function createFormattedSheet({
   };
 }
 
+export async function deleteDriveFile(fileId: string): Promise<void> {
+  const { drive } = getDriveClient();
+  await drive.files.delete({ fileId, supportsAllDrives: true });
+}
+
 export async function testDriveConnection(): Promise<{ success: boolean; message: string }> {
   try {
     await listFilesInFolder();
