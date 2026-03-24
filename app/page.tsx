@@ -183,7 +183,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
 
   const loadData = useCallback(async () => {
-    const res = await fetch('/api/dashboard')
+    const res = await fetch('/api/dashboard', { cache: 'no-store' })
     if (res.ok) {
       setData(await res.json())
     }

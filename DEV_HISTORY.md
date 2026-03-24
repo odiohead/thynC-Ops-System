@@ -4,6 +4,31 @@
 
 ---
 
+## 2026-03-24 | 버그수정 - 대시보드 buildStatus 캐시 불일치 문제
+- **원인**: Next.js 14 App Router에서 동적 API를 사용하지 않는 GET Route Handler는 빌드 타임에 정적으로 캐시됨. `app/api/dashboard/route.ts`가 정적 캐시로 서빙되어, DB에서 buildStatus 변경 후에도 대시보드가 빌드 당시 값을 표시하는 문제
+- **수정**: `app/api/dashboard/route.ts` 상단에 `export const dynamic = 'force-dynamic'` 추가 → 매 요청마다 DB를 새로 조회
+- **영향 파일**: `app/api/dashboard/route.ts`
+
+---
+
+## 2026-03-24 14:00 | PROD v1.0.0 배포 (DEV DB 전체 복제)
+- PROD .env 구성: DATABASE_URL, JWT_SECRET, NEXT_PUBLIC_APP_NAME PROD 값으로 설정
+- PROD git pull (main) 및 npm install 완료
+- thync_ops DB 신규 생성 (pg_hba.conf trust 임시 설정 후 원복)
+- DEV(thync_ops_dev) → PROD(thync_ops) pg_dump | psql 방식으로 전체 복제
+- 복제 결과: users 4, hospitals 172, projects 184, organizations 2, site_visits 1
+- Prisma 마이그레이션 21개 모두 적용 상태 확인, prisma generate 완료
+- npm run build 및 pm2 restart thync-prod 완료, 포트 3000 정상 기동
+
+---
+
+## 2026-03-24 | SUPER_ADMIN 계정 설정 및 DAEWOONG 삭제 보호
+- joon.lee@seerstech.com 계정 role을 ADMIN → SUPER_ADMIN으로 DB 직접 변경
+- 조직 삭제 API(`/api/settings/organizations/[id]`)에 DAEWOONG 코드 기반 영구 삭제 보호 추가 (code === 'DAEWOONG'이면 409 반환)
+- 영향 파일: `app/api/settings/organizations/[id]/route.ts`, DB users 테이블
+
+---
+
 ## 2026-03-24 | 페이지/컴포넌트 - Organization/User 기반으로 전면 교체
 
 ### 변경 배경

@@ -43,6 +43,10 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   const existing = await prisma.organization.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: '조직을 찾을 수 없습니다.' }, { status: 404 })
 
+  if (existing.code === 'DAEWOONG') {
+    return NextResponse.json({ error: '대웅제약 조직은 삭제할 수 없습니다.' }, { status: 409 })
+  }
+
   const userCount = await prisma.user.count({ where: { organizationId: id } })
   if (userCount > 0) {
     return NextResponse.json(

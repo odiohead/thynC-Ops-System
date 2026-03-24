@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 
+export const dynamic = 'force-dynamic'
+
 // 한국 시간(Asia/Seoul) 기준 이번주/차주 월~일 범위 계산
 function getWeekRange(offsetWeeks: number): { start: Date; end: Date } {
   const now = new Date()
