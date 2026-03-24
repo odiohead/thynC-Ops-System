@@ -30,7 +30,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
   const cookieStore = cookies()
   const token = cookieStore.get('auth-token')?.value
   const user = token ? await verifyToken(token) : null
-  const isAdmin = user?.role === 'ADMIN'
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN'
 
   const [hospital, projects, allDevices, hospitalDevices, statusCodes] = await Promise.all([
     prisma.hospital.findUnique({

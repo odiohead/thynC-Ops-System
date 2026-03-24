@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation'
 interface SiteVisit {
   id: number
   hospital: { hospitalCode: string; hospitalName: string; hiraHospitalName: string }
-  daewoongStaff: { id: string; name: string } | null
+  daewoongUser: { id: string; name: string } | null
   assignee: { id: string; name: string } | null
   status: { id: number; name: string; color: string | null } | null
   requestDate: string | null
@@ -108,7 +108,7 @@ export default function SiteVisitsPage() {
                         </Link>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-700">
-                        {sv.daewoongStaff?.name ?? '-'}
+                        {sv.daewoongUser?.name ?? '-'}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-700">
                         {sv.assignee?.name ?? '-'}

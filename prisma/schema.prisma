@@ -63,19 +63,6 @@ model Hospital {
   @@map("hospitals")
 }
 
-model DaewoongStaff {
-  id          String   @id @map("id")
-  name        String   @map("name")
-  email       String   @map("email")
-  phoneNumber String?  @map("phone_number")
-  branchInfo  String?  @map("branch_info")
-  etc         String?  @map("etc")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-
-  @@map("daewoong_staff")
-}
-
 model DaewoongHospitalAssignment {
   id             String   @id @default(uuid())
   hospitalCode   String   @map("hospital_code")

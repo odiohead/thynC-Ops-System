@@ -4,6 +4,40 @@
 
 ---
 
+## 2026-03-24 | 페이지/컴포넌트 - Organization/User 기반으로 전면 교체
+
+### 변경 배경
+- DaewoongStaff 관련 페이지 폐기 및 User/Organization 기반으로 전면 교체
+- SUPER_ADMIN 역할 UI 반영 (네비게이션, 역할 배지, 소속 관리 메뉴 등)
+
+### Navigation.tsx
+- SUPER_ADMIN 역할 타입 추가, 역할 레이블 추가('최고관리자')
+- 대웅제약 관리 메뉴 전체 제거
+- 소속 관리 메뉴 추가 (SUPER_ADMIN만, 설정 하위 최상단)
+- isAdminOrAbove 헬퍼 적용 (심평원 병원목록, 답사 상태 관리 등)
+
+### 삭제
+- `app/daewoong-staff/` 디렉토리 전체 삭제
+- `scripts/migrate-daewoong-to-user.ts`, `update-daewoong-fk.ts`, `daewoong-user-mapping.json` 삭제 (마이그레이션 완료)
+
+### 신규 페이지
+- `app/settings/organizations/page.tsx`: 소속 관리 (SUPER_ADMIN 전용, 인라인 수정, 순서이동, 추가/삭제)
+
+### 수정된 페이지/컴포넌트
+- `app/users/page.tsx`: 소속 컬럼 추가, 계정 생성 폼에 소속 드롭다운 추가, SUPER_ADMIN 배지 추가
+- `app/settings/profile/page.tsx`: 계정 정보에 소속 항목 추가 (읽기 전용), SUPER_ADMIN 역할 레이블 추가
+- `app/hospitals/[code]/_components/DaewoongStaffTab.tsx`: User(DAEWOONG 소속) 기반으로 전면 교체, daewoong-staff 링크 제거
+- `app/hospitals/[code]/page.tsx`: isAdmin에 SUPER_ADMIN 포함
+- `app/site-visits/page.tsx`: daewoongStaff → daewoongUser 필드명 교체
+
+### prisma/schema.prisma
+- DaewoongStaff 모델 제거 (테이블은 유지)
+
+### prisma/seed.ts
+- Organization seed 추가 (SEERS, DAEWOONG upsert by code)
+
+---
+
 ## 2026-03-24 | API - Organization 추가, DaewoongStaff → User 교체, 권한 헬퍼 적용
 
 ### 변경 배경

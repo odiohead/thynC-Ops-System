@@ -3,18 +3,31 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
+interface Organization {
+  id: number
+  name: string
+  code: string
+}
+
 interface User {
   id: string
   email: string
   name: string
   phone: string
-  role: 'ADMIN' | 'USER' | 'VIEWER'
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'USER' | 'VIEWER'
   isActive: boolean
   createdAt: string
+  organization: Organization | null
 }
 
-const ROLE_LABEL: Record<string, string> = { ADMIN: '관리자', USER: '일반', VIEWER: '뷰어' }
+const ROLE_LABEL: Record<string, string> = {
+  SUPER_ADMIN: '최고관리자',
+  ADMIN: '관리자',
+  USER: '일반',
+  VIEWER: '뷰어',
+}
 const ROLE_CLASS: Record<string, string> = {
+  SUPER_ADMIN: 'bg-indigo-100 text-indigo-700',
   ADMIN: 'bg-purple-100 text-purple-700',
   USER: 'bg-gray-100 text-gray-700',
   VIEWER: 'bg-blue-100 text-blue-700',
@@ -22,15 +35,24 @@ const ROLE_CLASS: Record<string, string> = {
 
 const inputClass = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
+function isAdminOrAbove(role: string | undefined) {
+  return role === 'SUPER_ADMIN' || role === 'ADMIN'
+}
+
 export default function UsersPage() {
   const router = useRouter()
   const [users, setUsers] = useState<User[]>([])
   const [currentUser, setCurrentUser] = useState<User | null>(null)
+  const [organizations, setOrganizations] = useState<Organization[]>([])
   const [loading, setLoading] = useState(true)
 
   // 계정 생성 모달
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [form, setForm] = useState({ email: '', password: '', name: '', phone: '', role: 'USER' as 'ADMIN' | 'USER' | 'VIEWER' })
+  const [form, setForm] = useState({
+    email: '', password: '', name: '', phone: '',
+    role: 'USER' as 'SUPER_ADMIN' | 'ADMIN' | 'USER' | 'VIEWER',
+    organizationId: '',
+  })
   const [formError, setFormError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -51,9 +73,11 @@ export default function UsersPage() {
     Promise.all([
       fetch('/api/auth/me').then((r) => r.json()),
       fetch('/api/users').then((r) => r.json()),
-    ]).then(([me, userList]) => {
+      fetch('/api/settings/organizations').then((r) => r.json()),
+    ]).then(([me, userList, orgData]) => {
       setCurrentUser(me?.id ? me : null)
       setUsers(Array.isArray(userList) ? userList : [])
+      setOrganizations((orgData.organizations ?? []).filter((o: Organization & { isActive?: boolean }) => o.isActive !== false))
       setLoading(false)
     })
   }, [])
@@ -93,13 +117,16 @@ export default function UsersPage() {
       const res = await fetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          organizationId: form.organizationId ? parseInt(form.organizationId) : null,
+        }),
       })
       const data = await res.json()
       if (!res.ok) { setFormError(data.error || '생성에 실패했습니다.'); return }
       setUsers((prev) => [...prev, data])
       setShowCreateModal(false)
-      setForm({ email: '', password: '', name: '', phone: '', role: 'USER' })
+      setForm({ email: '', password: '', name: '', phone: '', role: 'USER', organizationId: '' })
       router.refresh()
     } catch {
       setFormError('서버 오류가 발생했습니다.')
@@ -168,7 +195,7 @@ export default function UsersPage() {
     return <div className="p-8 text-sm text-gray-500">로딩 중...</div>
   }
 
-  const isAdmin = currentUser?.role === 'ADMIN'
+  const isAdmin = isAdminOrAbove(currentUser?.role)
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -191,6 +218,7 @@ export default function UsersPage() {
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">이름</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">이메일</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">연락처</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">소속</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">역할</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">상태</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">작업</th>
@@ -207,6 +235,7 @@ export default function UsersPage() {
                 </td>
                 <td className="px-4 py-3 text-gray-600">{user.email}</td>
                 <td className="px-4 py-3 text-gray-600">{user.phone || '-'}</td>
+                <td className="px-4 py-3 text-gray-600">{user.organization?.name ?? '-'}</td>
                 <td className="px-4 py-3">
                   <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${ROLE_CLASS[user.role] ?? 'bg-gray-100 text-gray-700'}`}>
                     {ROLE_LABEL[user.role] ?? user.role}
@@ -256,7 +285,7 @@ export default function UsersPage() {
         )}
       </div>
 
-      {/* 계정 생성 모달 (ADMIN만) */}
+      {/* 계정 생성 모달 (ADMIN 이상만) */}
       {showCreateModal && isAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl mx-4">
@@ -279,11 +308,23 @@ export default function UsersPage() {
                 <input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className={inputClass} />
               </div>
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">소속</label>
+                <select value={form.organizationId} onChange={(e) => setForm({ ...form, organizationId: e.target.value })} className={inputClass}>
+                  <option value="">소속 없음</option>
+                  {organizations.map((org) => (
+                    <option key={org.id} value={org.id}>{org.name} ({org.code})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">역할</label>
-                <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as 'ADMIN' | 'USER' | 'VIEWER' })} className={inputClass}>
+                <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as typeof form.role })} className={inputClass}>
                   <option value="USER">일반 (USER)</option>
                   <option value="VIEWER">뷰어 (VIEWER)</option>
                   <option value="ADMIN">관리자 (ADMIN)</option>
+                  {currentUser?.role === 'SUPER_ADMIN' && (
+                    <option value="SUPER_ADMIN">최고관리자 (SUPER_ADMIN)</option>
+                  )}
                 </select>
               </div>
               {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{formError}</p>}

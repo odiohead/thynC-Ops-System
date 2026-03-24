@@ -70,15 +70,6 @@ function SiteVisitIcon() {
   )
 }
 
-function DaewoongIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
-    </svg>
-  )
-}
-
 function ChevronIcon({ open }: { open: boolean }) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>
@@ -106,13 +97,25 @@ function CloseIcon() {
   )
 }
 
+type UserRole = 'SUPER_ADMIN' | 'ADMIN' | 'USER' | 'VIEWER'
+
+function isAdminOrAbove(role: UserRole | null) {
+  return role === 'SUPER_ADMIN' || role === 'ADMIN'
+}
+
+const ROLE_LABEL: Record<UserRole, string> = {
+  SUPER_ADMIN: '최고관리자',
+  ADMIN: '관리자',
+  USER: '일반',
+  VIEWER: '뷰어',
+}
+
 export default function Navigation() {
   const pathname = usePathname()
   const router = useRouter()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(pathname.startsWith('/settings'))
-  const [daewoongOpen, setDaewoongOpen] = useState(pathname.startsWith('/daewoong-staff'))
-  const [userRole, setUserRole] = useState<'ADMIN' | 'USER' | 'VIEWER' | null>(null)
+  const [userRole, setUserRole] = useState<UserRole | null>(null)
   const [userName, setUserName] = useState('')
 
   useEffect(() => {
@@ -137,10 +140,8 @@ export default function Navigation() {
 
   useEffect(() => {
     if (pathname.startsWith('/settings')) setSettingsOpen(true)
-    if (pathname.startsWith('/daewoong-staff')) setDaewoongOpen(true)
   }, [pathname])
 
-  // 로그인 페이지에서는 사이드바 숨김
   if (pathname === '/login') return null
 
   function isActive(href: string) {
@@ -170,8 +171,8 @@ export default function Navigation() {
       {/* 네비게이션 */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
 
-        {/* 심평원 병원목록 (ADMIN만) */}
-        {userRole === 'ADMIN' && (
+        {/* 심평원 병원목록 (ADMIN 이상만) */}
+        {isAdminOrAbove(userRole) && (
           <Link href="/hira-hospitals" className={navItemClass(isActive('/hira-hospitals'))}>
             <HiraIcon />
             심평원 병원목록
@@ -214,6 +215,15 @@ export default function Navigation() {
 
           {settingsOpen && (
             <div className="ml-7 mt-0.5 space-y-0.5 border-l border-gray-200 pl-3">
+              {/* 소속 관리: SUPER_ADMIN만 */}
+              {userRole === 'SUPER_ADMIN' && (
+                <Link
+                  href="/settings/organizations"
+                  className={navItemClass(isActive('/settings/organizations'))}
+                >
+                  소속 관리
+                </Link>
+              )}
               {/* 내 프로필: 모든 역할 */}
               <Link
                 href="/settings/profile"
@@ -221,8 +231,8 @@ export default function Navigation() {
               >
                 내 프로필
               </Link>
-              {/* 아래 항목: ADMIN, USER만 */}
-              {(userRole === 'ADMIN' || userRole === 'USER') && (
+              {/* 아래 항목: ADMIN 이상, USER */}
+              {(isAdminOrAbove(userRole) || userRole === 'USER') && (
                 <>
                   <Link
                     href="/settings/status"
@@ -250,8 +260,8 @@ export default function Navigation() {
                   </Link>
                 </>
               )}
-              {/* 답사 상태 관리: ADMIN만 */}
-              {userRole === 'ADMIN' && (
+              {/* 답사 상태 관리: ADMIN 이상만 */}
+              {isAdminOrAbove(userRole) && (
                 <Link
                   href="/settings/site-visit-status"
                   className={navItemClass(isActive('/settings/site-visit-status'))}
@@ -262,33 +272,6 @@ export default function Navigation() {
             </div>
           )}
         </div>
-
-        {/* 대웅제약 관리: ADMIN, USER만 */}
-        {(userRole === 'ADMIN' || userRole === 'USER') && (
-          <div>
-            <button
-              type="button"
-              onClick={() => setDaewoongOpen((v) => !v)}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
-                pathname.startsWith('/daewoong-staff')
-                  ? 'text-gray-900 font-medium'
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-              }`}
-            >
-              <DaewoongIcon />
-              <span className="flex-1 text-left">대웅제약 관리</span>
-              <ChevronIcon open={daewoongOpen} />
-            </button>
-
-            {daewoongOpen && (
-              <div className="ml-7 mt-0.5 space-y-0.5 border-l border-gray-200 pl-3">
-                <Link href="/daewoong-staff" className={navItemClass(isActive('/daewoong-staff'))}>
-                  직원 관리
-                </Link>
-              </div>
-            )}
-          </div>
-        )}
 
         {/* 계정 관리: 모든 역할 */}
         <Link href="/users" className={navItemClass(isActive('/users'))}>
@@ -304,7 +287,7 @@ export default function Navigation() {
           <div className="mb-2 px-3 py-1">
             <p className="text-xs font-medium text-gray-900 truncate">{userName}</p>
             <p className="text-xs text-gray-500">
-              {userRole === 'ADMIN' ? '관리자' : userRole === 'USER' ? '일반' : '뷰어'}
+              {userRole ? ROLE_LABEL[userRole] : ''}
             </p>
           </div>
         )}

@@ -7,11 +7,17 @@ interface Me {
   email: string
   name: string
   phone: string
-  role: 'ADMIN' | 'USER' | 'VIEWER'
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'USER' | 'VIEWER'
   isActive: boolean
+  organization?: { id: number; name: string; code: string } | null
 }
 
-const ROLE_LABEL: Record<string, string> = { ADMIN: '관리자', USER: '일반', VIEWER: '뷰어' }
+const ROLE_LABEL: Record<string, string> = {
+  SUPER_ADMIN: '최고관리자',
+  ADMIN: '관리자',
+  USER: '일반',
+  VIEWER: '뷰어',
+}
 
 const inputClass = 'mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400'
 const labelClass = 'block text-sm font-medium text-gray-700'
@@ -128,6 +134,10 @@ export default function ProfilePage() {
           <div>
             <label className={labelClass}>역할</label>
             <input type="text" value={ROLE_LABEL[me.role] ?? me.role} disabled className={inputClass} />
+          </div>
+          <div>
+            <label className={labelClass}>소속</label>
+            <input type="text" value={me.organization?.name ?? '-'} disabled className={inputClass} />
           </div>
         </div>
       </div>
