@@ -6,7 +6,7 @@ type Params = { params: { id: string } }
 
 const include = {
   hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
-  daewoongStaff: { select: { id: true, name: true } },
+  daewoongUser: { select: { id: true, name: true } },
   assignee: { select: { id: true, name: true } },
   status: { select: { id: true, name: true, color: true } },
 } as const
@@ -58,7 +58,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     where: { id },
     data: {
       hospitalCode,
-      daewoongStaffId: daewoongStaffId || null,
+      daewoongUserId: daewoongStaffId || null,
       assigneeId: assigneeId || null,
       requestDate: requestDate ? new Date(requestDate) : null,
       visitDate: visitDate ? new Date(visitDate) : null,

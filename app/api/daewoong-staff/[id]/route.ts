@@ -7,14 +7,6 @@ type Params = { params: { id: string } }
 export async function GET(_req: NextRequest, { params }: Params) {
   const staff = await prisma.daewoongStaff.findUnique({
     where: { id: params.id },
-    include: {
-      assignments: {
-        include: {
-          hospital: { select: { hospitalCode: true, hospitalName: true } },
-        },
-        orderBy: { createdAt: 'asc' },
-      },
-    },
   })
   if (!staff) return NextResponse.json({ error: '직원을 찾을 수 없습니다.' }, { status: 404 })
   return NextResponse.json({ staff })
@@ -35,7 +27,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
   if (!user || user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   // 매핑 먼저 삭제 후 직원 삭제
-  await prisma.daewoongHospitalAssignment.deleteMany({ where: { staffId: params.id } })
+  await prisma.daewoongHospitalAssignment.deleteMany({ where: { assignedUserId: params.id } })
   await prisma.daewoongStaff.delete({ where: { id: params.id } })
   return NextResponse.json({ success: true })
 }

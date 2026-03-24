@@ -4,6 +4,33 @@
 
 ---
 
+## 2026-03-24 | DaewoongStaff → User 마이그레이션 및 FK 교체
+
+### 변경 배경
+- 대웅 직원 정보를 별도 DaewoongStaff 테이블이 아닌 User 테이블로 통합 관리
+- 조직(Organization) 구분(SEERS/DAEWOONG)으로 대웅 직원 식별
+
+### DB 마이그레이션 (SQL + migrate resolve 패턴)
+- `daewoong_hospital_assignments.staff_id` → `assigned_user_id` (FK: users.id)
+- `site_visits.daewoong_staff_id` → `daewoong_user_id` (FK: users.id)
+- 마이그레이션 스크립트: `scripts/migrate-daewoong-to-user.ts`, `scripts/update-daewoong-fk.ts`
+
+### Prisma 스키마 변경
+- `DaewoongHospitalAssignment`: `staffId/staff` → `assignedUserId/assignedUser`
+- `SiteVisit`: `daewoongStaffId/daewoongStaff` → `daewoongUserId/daewoongUser`
+- User 모델에 역방향 관계 (`hospitalAssignments`, `daewoongSiteVisits`, `assignedSiteVisits`) 추가
+- Named relation 사용: `"SiteVisitDaewoongUser"`, `"SiteVisitAssignee"`
+
+### API 라우트 수정
+- `app/api/daewoong-staff/route.ts`: `_count.assignments` include 제거
+- `app/api/daewoong-staff/[id]/route.ts`: `staffId` → `assignedUserId`
+- `app/api/hospitals/[code]/daewoong-staff/route.ts`: `staff` → `assignedUser`, `staffId` → `assignedUserId`
+- `app/api/hospitals/[code]/daewoong-staff/[sid]/route.ts`: `staffId` → `assignedUserId`
+- `app/api/site-visits/route.ts`: include `daewoongStaff` → `daewoongUser`, data `daewoongStaffId` → `daewoongUserId`
+- `app/api/site-visits/[id]/route.ts`: 동일 변경
+
+---
+
 ## 2026-03-24 | DB 스키마 변경 - Organization 추가, Role 4단계 확장
 
 ### DB 변경 (SQL 직접 실행 + migrate resolve 패턴)

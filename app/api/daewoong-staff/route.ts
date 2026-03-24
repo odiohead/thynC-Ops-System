@@ -5,7 +5,6 @@ import { getAuthUser } from '@/lib/auth'
 export async function GET() {
   const staff = await prisma.daewoongStaff.findMany({
     orderBy: { id: 'asc' },
-    include: { _count: { select: { assignments: true } } },
   })
   return NextResponse.json({ staff })
 }

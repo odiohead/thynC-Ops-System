@@ -6,7 +6,7 @@ const PAGE_SIZE = 20
 
 const include = {
   hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
-  daewoongStaff: { select: { id: true, name: true } },
+  daewoongUser: { select: { id: true, name: true } },
   assignee: { select: { id: true, name: true } },
   status: { select: { id: true, name: true, color: true } },
 } as const
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
   const siteVisit = await prisma.siteVisit.create({
     data: {
       hospitalCode,
-      daewoongStaffId: daewoongStaffId || null,
+      daewoongUserId: daewoongStaffId || null,
       assigneeId: assigneeId || null,
       requestDate: requestDate ? new Date(requestDate) : null,
       visitDate: visitDate ? new Date(visitDate) : null,

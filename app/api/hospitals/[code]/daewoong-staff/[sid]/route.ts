@@ -9,7 +9,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   if (!user || user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   await prisma.daewoongHospitalAssignment.deleteMany({
-    where: { hospitalCode: params.code, staffId: params.sid },
+    where: { hospitalCode: params.code, assignedUserId: params.sid },
   })
   return NextResponse.json({ success: true })
 }

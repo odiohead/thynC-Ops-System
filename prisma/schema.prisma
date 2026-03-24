@@ -72,21 +72,19 @@ model DaewoongStaff {
   etc         String?  @map("etc")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
-  assignments DaewoongHospitalAssignment[]
-  siteVisits  SiteVisit[]
 
   @@map("daewoong_staff")
 }
 
 model DaewoongHospitalAssignment {
-  id           String        @id @default(uuid())
-  hospitalCode String        @map("hospital_code")
-  staffId      String        @map("staff_id")
-  createdAt    DateTime      @default(now()) @map("created_at")
-  hospital     Hospital      @relation(fields: [hospitalCode], references: [hospitalCode])
-  staff        DaewoongStaff @relation(fields: [staffId], references: [id])
+  id             String   @id @default(uuid())
+  hospitalCode   String   @map("hospital_code")
+  assignedUserId String   @map("assigned_user_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  hospital       Hospital @relation(fields: [hospitalCode], references: [hospitalCode])
+  assignedUser   User     @relation(fields: [assignedUserId], references: [id])
 
-  @@unique([hospitalCode, staffId])
+  @@unique([hospitalCode, assignedUserId])
   @@map("daewoong_hospital_assignments")
 }
 
@@ -132,9 +130,11 @@ model User {
   isActive       Boolean       @default(true) @map("is_active")
   organizationId Int?          @map("organization_id")
   createdAt      DateTime      @default(now()) @map("created_at")
-  organization   Organization? @relation(fields: [organizationId], references: [id])
-  projects       Project[]
-  siteVisits     SiteVisit[]
+  organization            Organization?                @relation(fields: [organizationId], references: [id])
+  projects                Project[]
+  assignedSiteVisits      SiteVisit[]                  @relation("SiteVisitAssignee")
+  daewoongSiteVisits      SiteVisit[]                  @relation("SiteVisitDaewoongUser")
+  hospitalAssignments     DaewoongHospitalAssignment[]
 
   @@map("users")
 }
@@ -270,7 +270,7 @@ model ProjectFile {
 model SiteVisit {
   id              Int            @id @default(autoincrement())
   hospitalCode    String         @map("hospital_code")
-  daewoongStaffId String?        @map("daewoong_staff_id")
+  daewoongUserId  String?        @map("daewoong_user_id")
   assigneeId      String?        @map("assignee_id")
   requestDate     DateTime?      @map("request_date")
   visitDate       DateTime?      @map("visit_date")
@@ -285,8 +285,8 @@ model SiteVisit {
   updatedAt       DateTime       @updatedAt @map("updated_at")
 
   hospital      Hospital       @relation(fields: [hospitalCode], references: [hospitalCode])
-  daewoongStaff DaewoongStaff? @relation(fields: [daewoongStaffId], references: [id])
-  assignee      User?          @relation(fields: [assigneeId], references: [id])
+  daewoongUser  User?          @relation("SiteVisitDaewoongUser", fields: [daewoongUserId], references: [id])
+  assignee      User?          @relation("SiteVisitAssignee", fields: [assigneeId], references: [id])
   status        StatusCode?    @relation(fields: [statusId], references: [id])
 
   @@map("site_visits")
