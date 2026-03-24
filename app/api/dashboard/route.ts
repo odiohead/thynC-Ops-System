@@ -30,9 +30,12 @@ const projectSelect = {
   projectCode: true,
   startDate: true,
   endDateExpected: true,
-  issueNote: true,
+  remark: true,
+  builderUserId: true,
+  builderNameManual: true,
   hospital: { select: { hospitalName: true, hiraHospitalName: true } },
   buildStatus: { select: { label: true, color: true } },
+  builder: { select: { name: true } },
 } as const
 
 export async function GET() {
@@ -45,9 +48,8 @@ export async function GET() {
   const thisWeekProjects = await prisma.project.findMany({
     where: {
       OR: [
-        { buildStatus: null },
-        { buildStatus: { label: { not: '완료' } } },
         { startDate: { gte: thisWeek.start, lte: thisWeek.end } },
+        { buildStatus: { label: '진행중' } },
       ],
     },
     select: projectSelect,

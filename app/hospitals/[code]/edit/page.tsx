@@ -112,7 +112,6 @@ export default function HospitalEditPage() {
       if (res.ok) {
         router.refresh()
         router.push(`/hospitals/${code}`)
-        router.refresh()
       } else {
         const json = await res.json()
         setError(json.error ?? '저장에 실패했습니다.')

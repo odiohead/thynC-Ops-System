@@ -64,6 +64,7 @@ export default function RegisterPage() {
       })
       if (res.ok) {
         const { hospital } = await res.json()
+        router.refresh()
         router.push(`/hospitals/${hospital.hospitalCode}`)
       } else {
         const json = await res.json()

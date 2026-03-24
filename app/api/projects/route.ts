@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { createDriveFolder } from '@/lib/googleDrive'
+import { getAuthUser } from '@/lib/auth'
 
 const PAGE_SIZE = 20
 
@@ -16,11 +17,12 @@ export async function GET(request: NextRequest) {
   const orderBy = searchParams.get('orderBy') ?? 'contractDate'
   const order = (searchParams.get('order') ?? 'desc') as 'asc' | 'desc'
 
+  const nullsPos = order === 'desc' ? 'last' : 'last'
   const orderByMap: Record<string, object> = {
-    contractDate: { contractDate: order },
-    startDate: { startDate: order },
+    contractDate: { contractDate: { sort: order, nulls: nullsPos } },
+    startDate: { startDate: { sort: order, nulls: nullsPos } },
   }
-  const orderByClause = orderByMap[orderBy] ?? { contractDate: 'desc' }
+  const orderByClause = orderByMap[orderBy] ?? { contractDate: { sort: 'desc', nulls: 'last' } }
 
   const where = {
     ...(hospitalCode && { hospitalCode }),
@@ -85,6 +87,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const authUser = await getAuthUser(request)
+  if (!authUser || authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const body = await request.json()
   const {
     hospitalCode,

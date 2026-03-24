@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyToken } from '@/lib/auth';
+import { getAuthUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 
 interface RouteContext {
@@ -9,9 +8,7 @@ interface RouteContext {
 
 // GET: DeviceInfo 전체 기준으로 병원별 기기 수량 조회
 export async function GET(request: NextRequest, { params }: RouteContext) {
-  const cookieStore = cookies();
-  const token = cookieStore.get('auth-token')?.value;
-  const user = token ? await verifyToken(token) : null;
+  const user = await getAuthUser(request);
   if (!user) {
     return NextResponse.json({ error: '인증이 필요합니다.' }, { status: 401 });
   }
@@ -43,10 +40,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 // PUT: 기기 수량 일괄 upsert + introBeds 함께 업데이트
 // body: { introBeds?: number | null; devices: { deviceInfoId: number; quantity: number }[] }
 export async function PUT(request: NextRequest, { params }: RouteContext) {
-  const cookieStore = cookies();
-  const token = cookieStore.get('auth-token')?.value;
-  const user = token ? await verifyToken(token) : null;
-  if (!user) {
+  const user = await getAuthUser(request);
+  if (!user || user.role === 'VIEWER') {
     return NextResponse.json({ error: '인증이 필요합니다.' }, { status: 401 });
   }
 

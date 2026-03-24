@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 
 interface DeviceInfo {
   id: number
@@ -22,6 +23,7 @@ interface EditForm {
 const emptyForm: EditForm = { deviceModel: '', deviceName: '', sortOrder: 0, isActive: true }
 
 export default function DevicesSettingsPage() {
+  const router = useRouter()
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -63,6 +65,7 @@ export default function DevicesSettingsPage() {
       body: JSON.stringify(editForm),
     })
     if (res.ok) {
+      router.refresh()
       await fetchDevices()
       setEditId(null)
     } else {
@@ -77,6 +80,7 @@ export default function DevicesSettingsPage() {
     const res = await fetch(`/api/settings/devices/${device.id}`, { method: 'DELETE' })
     const data = await res.json()
     if (res.ok) {
+      router.refresh()
       await fetchDevices()
       if (data.deactivated) showInfo(data.message)
     } else {
@@ -94,6 +98,7 @@ export default function DevicesSettingsPage() {
       body: JSON.stringify(addForm),
     })
     if (res.ok) {
+      router.refresh()
       await fetchDevices()
       setIsAdding(false)
       setAddForm(emptyForm)
@@ -134,6 +139,7 @@ export default function DevicesSettingsPage() {
       }),
     ])
 
+    router.refresh()
     await fetchDevices()
     setBusy(false)
   }

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
+import { getAuthUser } from '@/lib/auth'
 
 type Params = { params: { code: string } }
 
@@ -29,10 +31,29 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 export async function PUT(request: NextRequest, { params }: Params) {
+  const authUser = await getAuthUser(request)
+  if (!authUser) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
   const existing = await prisma.project.findUnique({ where: { projectCode: params.code } })
   if (!existing) return NextResponse.json({ error: '프로젝트를 찾을 수 없습니다.' }, { status: 404 })
 
   const body = await request.json()
+
+  // VIEWER는 issueNote만 수정 가능
+  if (authUser.role === 'VIEWER') {
+    const { issueNote, remark } = body
+    const project = await prisma.project.update({
+      where: { projectCode: params.code },
+      data: {
+        issueNote: issueNote !== undefined ? issueNote : undefined,
+        remark: remark !== undefined ? remark : undefined,
+      },
+      include: projectInclude,
+    })
+    revalidatePath('/projects')
+    return NextResponse.json({ project })
+  }
+
   const {
     contractDate,
     contractType,
@@ -48,6 +69,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     endDateExpected,
     buildStatusId,
     issueNote,
+    remark,
   } = body
 
   const project = await prisma.project.update({
@@ -67,14 +89,18 @@ export async function PUT(request: NextRequest, { params }: Params) {
       endDateExpected: endDateExpected !== undefined ? (endDateExpected ? new Date(endDateExpected) : null) : undefined,
       buildStatusId: buildStatusId !== undefined ? (buildStatusId ? Number(buildStatusId) : null) : undefined,
       issueNote: issueNote !== undefined ? issueNote : undefined,
+      remark: remark !== undefined ? remark : undefined,
     },
     include: projectInclude,
   })
 
+  revalidatePath('/projects')
   return NextResponse.json({ project })
 }
 
-export async function DELETE(_req: NextRequest, { params }: Params) {
+export async function DELETE(request: NextRequest, { params }: Params) {
+  const authUser = await getAuthUser(request)
+  if (!authUser || authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const existing = await prisma.project.findUnique({ where: { projectCode: params.code } })
   if (!existing) return NextResponse.json({ error: '프로젝트를 찾을 수 없습니다.' }, { status: 404 })
 

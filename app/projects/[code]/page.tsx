@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
+import IssueNoteEditor from '@/app/components/IssueNoteEditor'
 
 interface DeviceInfo {
   id: number
@@ -60,6 +61,7 @@ interface Project {
   endDateExpected: string | null
   buildStatusId: number | null
   issueNote: string | null
+  remark: string | null
   driveFolderId: string | null
   hospital: { hospitalCode: string; hospitalName: string; meta: { driveProjectFolderId: string | null } | null }
   builder: { id: string; name: string } | null
@@ -120,7 +122,7 @@ export default function ProjectDetailPage() {
   const [startDate, setStartDate] = useState('')
   const [endDateExpected, setEndDateExpected] = useState('')
   const [buildStatusId, setBuildStatusId] = useState('')
-  const [issueNote, setIssueNote] = useState('')
+  const [remark, setRemark] = useState('')
   const [deviceQty, setDeviceQty] = useState<Record<number, number>>({})
 
   const [saving, setSaving] = useState(false)
@@ -159,7 +161,7 @@ export default function ProjectDetailPage() {
     setStartDate(toDateInput(p.startDate))
     setEndDateExpected(toDateInput(p.endDateExpected))
     setBuildStatusId(p.buildStatusId ? String(p.buildStatusId) : '')
-    setIssueNote(p.issueNote ?? '')
+    setRemark(p.remark ?? '')
 
     const qtyMap: Record<number, number> = {}
     p.devices.forEach((d: ProjectDevice) => { qtyMap[d.deviceInfoId] = d.quantity })
@@ -205,7 +207,7 @@ export default function ProjectDetailPage() {
         startDate: startDate || null,
         endDateExpected: endDateExpected || null,
         buildStatusId: buildStatusId ? Number(buildStatusId) : null,
-        issueNote: issueNote || null,
+        remark: remark || null,
       }),
     })
 
@@ -227,6 +229,7 @@ export default function ProjectDetailPage() {
       )
     )
 
+    router.refresh()
     await loadProject()
     setSaving(false)
     setSaveMsg('저장되었습니다.')
@@ -237,6 +240,7 @@ export default function ProjectDetailPage() {
     if (!confirm(`'${project?.projectName}' 프로젝트를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return
     setDeleting(true)
     await fetch(`/api/projects/${code}`, { method: 'DELETE' })
+    router.refresh()
     router.push('/projects')
   }
 
@@ -473,6 +477,17 @@ export default function ProjectDetailPage() {
                   ))}
                 </select>
               </div>
+              <div className="sm:col-span-2">
+                <label className={labelClass}>비고</label>
+                <input
+                  type="text"
+                  value={remark}
+                  onChange={(e) => setRemark(e.target.value)}
+                  maxLength={200}
+                  placeholder="비고 사항 입력"
+                  className={inputClass}
+                />
+              </div>
             </div>
           </div>
 
@@ -563,12 +578,9 @@ export default function ProjectDetailPage() {
               <h2 className="text-sm font-semibold text-gray-700">이슈 노트</h2>
             </div>
             <div className="px-6 py-5">
-              <textarea
-                value={issueNote}
-                onChange={(e) => setIssueNote(e.target.value)}
-                rows={5}
-                placeholder="특이사항, 이슈 내용 등을 자유롭게 입력하세요."
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              <IssueNoteEditor
+                projectCode={code}
+                initialContent={project.issueNote ?? ''}
               />
             </div>
           </div>

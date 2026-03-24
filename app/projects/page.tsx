@@ -43,10 +43,10 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
   const order = ((searchParams.order as string) ?? 'desc') as 'asc' | 'desc'
 
   const orderByMap: Record<string, object> = {
-    contractDate: { contractDate: order },
-    startDate: { startDate: order },
+    contractDate: { contractDate: { sort: order, nulls: 'last' } },
+    startDate: { startDate: { sort: order, nulls: 'last' } },
   }
-  const orderByClause = orderByMap[orderBy] ?? { contractDate: 'desc' }
+  const orderByClause = orderByMap[orderBy] ?? { contractDate: { sort: 'desc', nulls: 'last' } }
 
   const where = {
     ...(search && {

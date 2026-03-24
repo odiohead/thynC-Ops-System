@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
+import { getAuthUser } from '@/lib/auth'
 
 type Params = { params: { code: string } }
 
@@ -18,6 +19,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 export async function PUT(request: NextRequest, { params }: Params) {
+  const user = await getAuthUser(request)
+  if (!user || user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { hospitalName, status, introType, introBeds, contractDate, changeHira, hiraId } = await request.json()
 
   let hiraUpdateData: Record<string, unknown> = {}
@@ -81,7 +84,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
   return NextResponse.json({ hospital })
 }
 
-export async function DELETE(_req: NextRequest, { params }: Params) {
+export async function DELETE(request: NextRequest, { params }: Params) {
+  const user = await getAuthUser(request)
+  if (!user || user.role !== 'ADMIN') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const projectCount = await prisma.project.count({ where: { hospitalCode: params.code } })
+  if (projectCount > 0) {
+    return NextResponse.json({ error: '연결된 프로젝트가 있어 삭제할 수 없습니다.' }, { status: 409 })
+  }
+
   await prisma.hospital.delete({ where: { hospitalCode: params.code } })
   return NextResponse.json({ success: true })
 }

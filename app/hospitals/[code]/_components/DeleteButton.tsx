@@ -13,6 +13,7 @@ export default function DeleteButton({ code }: { code: string }) {
     setLoading(true)
     const res = await fetch(`/api/hospitals/${code}`, { method: 'DELETE' })
     if (res.ok) {
+      router.refresh()
       router.push('/hospitals')
     } else {
       const json = await res.json()

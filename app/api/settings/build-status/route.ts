@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getAuthUser } from '@/lib/auth'
 
 export async function GET() {
   const [buildStatuses, grouped] = await Promise.all([
@@ -22,6 +23,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const user = await getAuthUser(request)
+  if (!user || user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { label, color, sortOrder } = await request.json()
 
   if (!label?.trim()) {

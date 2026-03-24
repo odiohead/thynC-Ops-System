@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getAuthUser } from '@/lib/auth'
 
 const PAGE_SIZE = 20
 
 export async function POST(request: NextRequest) {
+  const user = await getAuthUser(request)
+  if (!user || user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
   const { hiraId, hospitalName, status, introType, introBeds } = await request.json()
 
   if (!hospitalName?.trim()) {

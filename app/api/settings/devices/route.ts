@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getAuthUser } from '@/lib/auth'
 
 export async function GET() {
   const devices = await prisma.deviceInfo.findMany({
@@ -23,6 +24,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const user = await getAuthUser(request)
+  if (!user || user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { deviceModel, deviceName, sortOrder, isActive } = await request.json()
 
   if (!deviceModel?.trim()) {

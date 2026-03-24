@@ -69,7 +69,7 @@ export default function DaewoongStaffDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       })
-      if (res.ok) { setEditing(false); load() }
+      if (res.ok) { setEditing(false); router.refresh(); load() }
       else { const d = await res.json(); setFormError(d.error ?? '저장 실패') }
     } finally { setSaving(false) }
   }
@@ -77,12 +77,14 @@ export default function DaewoongStaffDetailPage() {
   async function handleDelete() {
     if (!confirm('직원을 삭제하시겠습니까? 담당 병원 배정도 모두 해제됩니다.')) return
     await fetch(`/api/daewoong-staff/${id}`, { method: 'DELETE' })
+    router.refresh()
     router.push('/daewoong-staff')
   }
 
   async function handleRemoveAssignment(hospitalCode: string) {
     if (!confirm('담당 병원 배정을 해제하시겠습니까?')) return
     await fetch(`/api/hospitals/${hospitalCode}/daewoong-staff/${id}`, { method: 'DELETE' })
+    router.refresh()
     load()
   }
 
@@ -101,7 +103,7 @@ export default function DaewoongStaffDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ staffId: id }),
       })
-      if (res.ok) { setShowAssignModal(false); setHospitalSearch(''); load() }
+      if (res.ok) { setShowAssignModal(false); setHospitalSearch(''); router.refresh(); load() }
       else { const d = await res.json(); setAssignError(d.error ?? '배정 실패') }
     } finally { setAssignLoading(false) }
   }

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import ColorPicker from '@/app/components/ColorPicker'
 
 interface BuildStatus {
@@ -24,6 +25,7 @@ function ColorPreview({ color }: { color: string | null }) {
 }
 
 export default function BuildStatusSettingsPage() {
+  const router = useRouter()
   const [statuses, setStatuses] = useState<BuildStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -61,6 +63,7 @@ export default function BuildStatusSettingsPage() {
       body: JSON.stringify({ label: editLabel.trim(), color: editColor || null, sortOrder: bs.sortOrder }),
     })
     if (res.ok) {
+      router.refresh()
       await fetchStatuses()
       setEditId(null)
     } else {
@@ -74,6 +77,7 @@ export default function BuildStatusSettingsPage() {
     setBusy(true)
     const res = await fetch(`/api/settings/build-status/${bs.id}`, { method: 'DELETE' })
     if (res.ok) {
+      router.refresh()
       await fetchStatuses()
     } else {
       showError((await res.json()).error)
@@ -91,6 +95,7 @@ export default function BuildStatusSettingsPage() {
       body: JSON.stringify({ label: addLabel.trim(), color: addColor || null, sortOrder: nextOrder }),
     })
     if (res.ok) {
+      router.refresh()
       await fetchStatuses()
       setIsAdding(false)
       setAddLabel('')
@@ -119,6 +124,7 @@ export default function BuildStatusSettingsPage() {
         body: JSON.stringify({ label: target.label, color: target.color, sortOrder: current.sortOrder }),
       }),
     ])
+    router.refresh()
     await fetchStatuses()
     setBusy(false)
   }

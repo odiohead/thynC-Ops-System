@@ -49,6 +49,7 @@ export default function DaewoongStaffPage() {
       if (res.ok) {
         setShowModal(false)
         setForm(EMPTY_FORM)
+        router.refresh()
         load()
       } else {
         const data = await res.json()

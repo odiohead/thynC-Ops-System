@@ -4,6 +4,32 @@
 
 ---
 
+## 2026-03-24 | 버그 수정: 수정 저장 후 목록에 이전 데이터 표시 문제 해결
+
+### 문제 원인
+Next.js App Router의 클라이언트 Router Cache로 인해, API 성공 후 `router.push()`로 이동하거나 현재 페이지를 유지할 때 이전 데이터가 표시되는 문제. 서버의 `revalidatePath`만으로는 클라이언트 Router Cache가 무효화되지 않음.
+
+### 해결 방법
+모든 PUT/POST/DELETE API 호출 성공 후 `router.refresh()`를 추가:
+- **이동이 있는 경우**: `router.refresh()` → `router.push()` 순서로 호출
+- **이동이 없는 경우**: API 성공 후 `router.refresh()` 호출 후 로컬 상태 업데이트
+
+### 수정된 파일
+- `app/projects/new/page.tsx` - POST 성공 후 push 전 refresh 추가
+- `app/projects/[code]/page.tsx` - PUT 저장 및 DELETE 시 refresh 추가
+- `app/hospitals/register/page.tsx` - POST 성공 후 push 전 refresh 추가
+- `app/hospitals/[code]/edit/page.tsx` - push 이후 중복 refresh 제거 (패턴 정리)
+- `app/hospitals/[code]/_components/DeleteButton.tsx` - DELETE 후 push 전 refresh 추가
+- `app/site-visits/SiteVisitForm.tsx` - PUT/POST/DELETE 성공 후 push 전 refresh 추가
+- `app/daewoong-staff/[id]/page.tsx` - PUT/DELETE/병원배정/해제 시 refresh 추가
+- `app/daewoong-staff/page.tsx` - POST 성공 후 refresh 추가
+- `app/users/page.tsx` - useRouter 추가, 모든 mutation(PATCH/DELETE/POST/PUT) 후 refresh 추가
+- `app/settings/devices/page.tsx` - useRouter 추가, 모든 mutation 후 refresh 추가
+- `app/settings/build-status/page.tsx` - useRouter 추가, 모든 mutation 후 refresh 추가
+- `app/page.tsx` - useRouter 추가, 비고 PUT 저장 후 refresh 추가
+
+---
+
 ## 2026-03-23 | 답사(Site Visit) 관리 기능 추가
 
 ### DB 스키마

@@ -230,6 +230,7 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
     })
 
     if (res.ok) {
+      router.refresh()
       router.push('/site-visits')
     } else {
       const data = await res.json()
@@ -243,6 +244,7 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
     setBusy(true)
     const res = await fetch(`/api/site-visits/${initialData?.id}`, { method: 'DELETE' })
     if (res.ok) {
+      router.refresh()
       router.push('/site-visits')
     } else {
       const data = await res.json()
