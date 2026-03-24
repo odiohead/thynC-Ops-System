@@ -34,3 +34,11 @@ export async function getAuthUser(req: NextRequest): Promise<JWTPayload | null> 
   if (!token) return null
   return verifyToken(token)
 }
+
+export function isAdminOrAbove(role: string) {
+  return role === 'SUPER_ADMIN' || role === 'ADMIN'
+}
+
+export function isSuperAdmin(role: string) {
+  return role === 'SUPER_ADMIN'
+}

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { verifyToken } from '@/lib/auth'
+import { verifyToken, isAdminOrAbove } from '@/lib/auth'
 import { createFormattedSheet, listFilesByNamePrefix } from '@/lib/googleDrive'
 
 const STATUS_LABEL: Record<string, string> = {
@@ -13,7 +13,7 @@ async function requireAdmin(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value
   if (!token) return null
   const payload = await verifyToken(token)
-  if (!payload || payload.role !== 'ADMIN') return null
+  if (!payload || !isAdminOrAbove(payload.role)) return null
   return payload
 }
 

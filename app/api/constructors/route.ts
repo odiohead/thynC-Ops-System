@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { verifyToken } from '@/lib/auth'
+import { verifyToken, isAdminOrAbove } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
 // CON-000001 형식 코드 생성
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
   const cookieStore = cookies()
   const token = cookieStore.get('auth-token')?.value
   const user = token ? await verifyToken(token) : null
-  if (!user || user.role !== 'ADMIN') {
+  if (!user || !isAdminOrAbove(user.role)) {
     return NextResponse.json({ error: '관리자 권한이 필요합니다.' }, { status: 403 })
   }
 

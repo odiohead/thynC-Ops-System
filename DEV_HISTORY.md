@@ -4,6 +4,45 @@
 
 ---
 
+## 2026-03-24 | API - Organization 추가, DaewoongStaff → User 교체, 권한 헬퍼 적용
+
+### 변경 배경
+- DaewoongStaff 기반 API를 User 기반으로 전면 교체
+- Organization 관리 API 신규 추가 (SUPER_ADMIN 전용)
+- SUPER_ADMIN 역할이 ADMIN 권한을 포함하도록 공통 헬퍼 적용
+
+### lib/auth.ts
+- `isAdminOrAbove(role)`: SUPER_ADMIN 또는 ADMIN 체크 헬퍼 추가
+- `isSuperAdmin(role)`: SUPER_ADMIN 전용 체크 헬퍼 추가
+
+### 신규 API
+- `app/api/settings/organizations/route.ts`: GET(목록+유저수), POST(SUPER_ADMIN 전용)
+- `app/api/settings/organizations/[id]/route.ts`: PUT, DELETE(SUPER_ADMIN 전용, 유저 있으면 409)
+
+### 삭제된 API
+- `app/api/daewoong-staff/` 디렉토리 전체 삭제
+
+### 수정된 API
+- `app/api/hospitals/[code]/daewoong-staff/route.ts`: GET은 기존 assignments 유지, POST는 userId + DAEWOONG 조직 검증
+- `app/api/site-visits/route.ts`, `app/api/site-visits/[id]/route.ts`: body 필드 daewoongStaffId → daewoongUserId
+- `app/api/users/route.ts`: organization include 추가, ?organization= 필터, POST에 organizationId 추가
+- `app/api/users/[id]/route.ts`: PUT에 organizationId 처리, 전체 role 체크 isAdminOrAbove 적용
+- `app/api/auth/login/route.ts`: JWT payload에 organization 포함
+- `app/api/auth/me/route.ts`: 응답에 organization 포함
+
+### 권한 체크 일괄 교체 (role === 'ADMIN' → isAdminOrAbove)
+- `app/api/settings/site-visit-status/route.ts`, `[id]/route.ts`
+- `app/api/hospitals/[code]/route.ts`
+- `app/api/projects/[code]/files/[fileId]/route.ts`
+- `app/api/constructors/route.ts`, `[code]/route.ts`
+- `app/api/drive/export/hospitals/route.ts`
+
+### 클라이언트
+- `app/site-visits/SiteVisitForm.tsx`: /api/daewoong-staff → /api/users?organization=DAEWOONG, daewoongStaffId → daewoongUserId
+- `app/site-visits/[id]/page.tsx`: daewoongStaffId → daewoongUserId
+
+---
+
 ## 2026-03-24 | DaewoongStaff → User 마이그레이션 및 FK 교체
 
 ### 변경 배경

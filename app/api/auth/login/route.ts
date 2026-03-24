@@ -6,7 +6,10 @@ import { signToken } from '@/lib/auth'
 export async function POST(req: NextRequest) {
   const { email, password } = await req.json()
 
-  const user = await prisma.user.findUnique({ where: { email } })
+  const user = await prisma.user.findUnique({
+    where: { email },
+    include: { organization: { select: { id: true, name: true, code: true } } },
+  })
   if (!user) {
     return NextResponse.json({ error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, { status: 401 })
   }
@@ -26,6 +29,7 @@ export async function POST(req: NextRequest) {
     name: user.name,
     role: user.role,
     isActive: user.isActive,
+    organization: user.organization ?? undefined,
   })
 
   const res = NextResponse.json({ ok: true })

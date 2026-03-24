@@ -9,7 +9,7 @@ interface Hospital {
   hiraHospitalName: string
 }
 
-interface DaewoongStaff {
+interface DaewoongUser {
   id: string
   name: string
 }
@@ -28,7 +28,7 @@ interface StatusCode {
 
 interface SiteVisitFormData {
   hospitalCode: string
-  daewoongStaffId: string
+  daewoongUserId: string
   assigneeId: string
   requestDate: string
   visitDate: string
@@ -156,14 +156,14 @@ function FileField({ label, currentUrl, currentFileId, onUpload, onDelete, hospi
 export default function SiteVisitForm({ initialData, mode }: Props) {
   const router = useRouter()
   const [hospitals, setHospitals] = useState<Hospital[]>([])
-  const [staff, setStaff] = useState<DaewoongStaff[]>([])
+  const [daewoongUsers, setDaewoongUsers] = useState<DaewoongUser[]>([])
   const [users, setUsers] = useState<UserItem[]>([])
   const [statuses, setStatuses] = useState<StatusCode[]>([])
   const [userRole, setUserRole] = useState<string | null>(null)
 
   const [form, setForm] = useState<SiteVisitFormData>({
     hospitalCode: initialData?.hospitalCode ?? '',
-    daewoongStaffId: initialData?.daewoongStaffId ?? '',
+    daewoongUserId: initialData?.daewoongUserId ?? '',
     assigneeId: initialData?.assigneeId ?? '',
     requestDate: initialData?.requestDate ?? '',
     visitDate: initialData?.visitDate ?? '',
@@ -182,13 +182,13 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
   useEffect(() => {
     Promise.all([
       fetch('/api/hospitals?limit=999').then((r) => r.json()),
-      fetch('/api/daewoong-staff').then((r) => r.json()),
+      fetch('/api/users?organization=DAEWOONG').then((r) => r.json()),
       fetch('/api/users').then((r) => r.json()),
       fetch('/api/settings/site-visit-status').then((r) => r.json()),
       fetch('/api/auth/me').then((r) => r.json()),
-    ]).then(([hData, sData, uData, stData, meData]) => {
+    ]).then(([hData, dData, uData, stData, meData]) => {
       setHospitals(hData.hospitals ?? [])
-      setStaff(sData.staff ?? [])
+      setDaewoongUsers(dData ?? [])
       setUsers((uData ?? []).filter((u: UserItem) => u.role === 'USER'))
       setStatuses(stData.statusCodes ?? [])
       setUserRole(meData?.role ?? null)
@@ -207,7 +207,7 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
 
     const payload = {
       hospitalCode: form.hospitalCode,
-      daewoongStaffId: form.daewoongStaffId || null,
+      daewoongUserId: form.daewoongUserId || null,
       assigneeId: form.assigneeId || null,
       requestDate: form.requestDate || null,
       visitDate: form.visitDate || null,
@@ -293,10 +293,10 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
           <div className="grid grid-cols-3 gap-4 px-6 py-4">
             <label className="flex items-center text-sm font-medium text-gray-700">대웅 담당자</label>
             <div className="col-span-2">
-              <select value={form.daewoongStaffId} onChange={(e) => set('daewoongStaffId', e.target.value)} className={selectClass}>
+              <select value={form.daewoongUserId} onChange={(e) => set('daewoongUserId', e.target.value)} className={selectClass}>
                 <option value="">선택 없음</option>
-                {staff.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
+                {daewoongUsers.map((u) => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
                 ))}
               </select>
             </div>

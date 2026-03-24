@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json()
   const {
     hospitalCode,
-    daewoongStaffId,
+    daewoongUserId,
     assigneeId,
     requestDate,
     visitDate,
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
   const siteVisit = await prisma.siteVisit.create({
     data: {
       hospitalCode,
-      daewoongUserId: daewoongStaffId || null,
+      daewoongUserId: daewoongUserId || null,
       assigneeId: assigneeId || null,
       requestDate: requestDate ? new Date(requestDate) : null,
       visitDate: visitDate ? new Date(visitDate) : null,

@@ -7,7 +7,7 @@ import SiteVisitForm from '../SiteVisitForm'
 interface SiteVisitData {
   id: number
   hospitalCode: string
-  daewoongStaffId: string | null
+  daewoongUserId: string | null
   assigneeId: string | null
   requestDate: string | null
   visitDate: string | null
@@ -64,7 +64,7 @@ export default function EditSiteVisitPage() {
   const initialData = {
     id: data.id,
     hospitalCode: data.hospitalCode,
-    daewoongStaffId: data.daewoongStaffId ?? '',
+    daewoongUserId: data.daewoongUserId ?? '',
     assigneeId: data.assigneeId ?? '',
     requestDate: data.requestDate ? data.requestDate.slice(0, 10) : '',
     visitDate: data.visitDate ? data.visitDate.slice(0, 10) : '',

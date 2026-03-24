@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 
 type Params = { params: { code: string } }
 
@@ -86,7 +86,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
 export async function DELETE(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
-  if (!user || user.role !== 'ADMIN') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const projectCount = await prisma.project.count({ where: { hospitalCode: params.code } })
   if (projectCount > 0) {

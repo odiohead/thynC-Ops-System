@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 
 export async function GET() {
   const statusCodes = await prisma.statusCode.findMany({
@@ -12,7 +12,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   const user = await getAuthUser(request)
-  if (!user || user.role !== 'ADMIN') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { name, order, color } = await request.json()
 
