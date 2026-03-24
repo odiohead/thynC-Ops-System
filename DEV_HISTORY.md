@@ -4,6 +4,25 @@
 
 ---
 
+## 2026-03-24 | DB 스키마 변경 - Organization 추가, Role 4단계 확장
+
+### DB 변경 (SQL 직접 실행 + migrate resolve 패턴)
+- `Role` enum에 `SUPER_ADMIN` 추가 (기존: ADMIN/USER/VIEWER → 4단계: SUPER_ADMIN/ADMIN/USER/VIEWER)
+- `organizations` 테이블 신규 생성: id, name, code(unique), is_active, sort_order, created_at
+- 기본 데이터 삽입: 씨어스(SEERS), 대웅제약(DAEWOONG)
+- `users` 테이블에 `organization_id` FK 컬럼 추가 (organizations 참조, nullable)
+
+### 마이그레이션 파일
+- `prisma/migrations/20260324000000_add_super_admin_role/migration.sql`
+- `prisma/migrations/20260324000001_add_organizations/migration.sql`
+- `prisma/migrations/20260324000002_add_organization_to_user/migration.sql`
+
+### 수정된 파일
+- `prisma/schema.prisma` - Role enum 확장, Organization 모델 추가, User 모델에 organization 관계 추가
+- `lib/auth.ts` - JWTPayload에 SUPER_ADMIN role 추가, organization 필드 추가
+
+---
+
 ## 2026-03-24 | 버그 수정: 수정 저장 후 목록에 이전 데이터 표시 문제 해결
 
 ### 문제 원인

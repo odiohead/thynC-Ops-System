@@ -7,8 +7,9 @@ export interface JWTPayload {
   userId: string
   email: string
   name: string
-  role: 'ADMIN' | 'USER' | 'VIEWER'
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'USER' | 'VIEWER'
   isActive: boolean
+  organization?: { id: number; name: string; code: string }
 }
 
 export async function signToken(payload: JWTPayload): Promise<string> {
