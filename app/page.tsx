@@ -5,7 +5,9 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import StatusBadge from '@/app/components/StatusBadge'
 import {
+  ComposedChart,
   LineChart,
+  Bar,
   Line,
   XAxis,
   YAxis,
@@ -310,59 +312,114 @@ export default function Home() {
             ) : (
               <div className="px-6 py-6 space-y-8">
 
-                {/* 차트 */}
-                <ResponsiveContainer width="100%" height={280}>
-                  <LineChart data={chartData} margin={{ top: 4, right: 24, left: 0, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                    <XAxis
-                      dataKey="label"
-                      tick={{ fontSize: 11, fill: '#6b7280' }}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      yAxisId="left"
-                      orientation="left"
-                      tick={{ fontSize: 11, fill: '#3b82f6' }}
-                      label={{ value: '병원(개)', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#3b82f6' } }}
-                    />
-                    <YAxis
-                      yAxisId="right"
-                      orientation="right"
-                      tick={{ fontSize: 11, fill: '#10b981' }}
-                      label={{ value: '병상(개)', angle: 90, position: 'insideRight', style: { fontSize: 11, fill: '#10b981' } }}
-                    />
-                    <Tooltip
-                      contentStyle={{ fontSize: 12 }}
-                      formatter={(value, name) => [
-                        typeof value === 'number' ? value.toLocaleString() : value,
-                        name === 'totalHospitals' ? '누적 병원' : '누적 병상',
-                      ]}
-                      labelFormatter={(label) => `${label}`}
-                    />
-                    <Legend
-                      formatter={(value) => value === 'totalHospitals' ? '누적 병원' : '누적 병상'}
-                      wrapperStyle={{ fontSize: 12 }}
-                    />
-                    <Line
-                      yAxisId="left"
-                      type="monotone"
-                      dataKey="totalHospitals"
-                      stroke="#3b82f6"
-                      strokeWidth={2}
-                      dot={{ r: 3 }}
-                      activeDot={{ r: 5 }}
-                    />
-                    <Line
-                      yAxisId="right"
-                      type="monotone"
-                      dataKey="totalBeds"
-                      stroke="#10b981"
-                      strokeWidth={2}
-                      dot={{ r: 3 }}
-                      activeDot={{ r: 5 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                {/* 누적 추이 라인 차트 */}
+                <div>
+                  <p className="mb-2 text-xs font-medium text-gray-500">누적 현황</p>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart data={chartData} margin={{ top: 4, right: 24, left: 0, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fontSize: 11, fill: '#6b7280' }}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis
+                        yAxisId="left"
+                        orientation="left"
+                        tick={{ fontSize: 11, fill: '#3b82f6' }}
+                        label={{ value: '병원(개)', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#3b82f6' } }}
+                      />
+                      <YAxis
+                        yAxisId="right"
+                        orientation="right"
+                        tick={{ fontSize: 11, fill: '#10b981' }}
+                        label={{ value: '병상(개)', angle: 90, position: 'insideRight', style: { fontSize: 11, fill: '#10b981' } }}
+                      />
+                      <Tooltip
+                        contentStyle={{ fontSize: 12 }}
+                        formatter={(value, name) => [
+                          typeof value === 'number' ? value.toLocaleString() : value,
+                          name === 'totalHospitals' ? '누적 병원' : '누적 병상',
+                        ]}
+                      />
+                      <Legend
+                        formatter={(value) => value === 'totalHospitals' ? '누적 병원' : '누적 병상'}
+                        wrapperStyle={{ fontSize: 12 }}
+                      />
+                      <Line
+                        yAxisId="left"
+                        type="monotone"
+                        dataKey="totalHospitals"
+                        stroke="#3b82f6"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                        activeDot={{ r: 5 }}
+                      />
+                      <Line
+                        yAxisId="right"
+                        type="monotone"
+                        dataKey="totalBeds"
+                        stroke="#10b981"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                        activeDot={{ r: 5 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* 월별 신규 막대 차트 */}
+                <div>
+                  <p className="mb-2 text-xs font-medium text-gray-500">월별 신규 현황</p>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <ComposedChart data={chartData} margin={{ top: 4, right: 24, left: 0, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fontSize: 11, fill: '#6b7280' }}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis
+                        yAxisId="left"
+                        orientation="left"
+                        allowDecimals={false}
+                        tick={{ fontSize: 11, fill: '#6366f1' }}
+                        label={{ value: '병원(개)', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#6366f1' } }}
+                      />
+                      <YAxis
+                        yAxisId="right"
+                        orientation="right"
+                        tick={{ fontSize: 11, fill: '#f59e0b' }}
+                        label={{ value: '병상(개)', angle: 90, position: 'insideRight', style: { fontSize: 11, fill: '#f59e0b' } }}
+                      />
+                      <Tooltip
+                        contentStyle={{ fontSize: 12 }}
+                        formatter={(value, name) => [
+                          typeof value === 'number' ? value.toLocaleString() : value,
+                          name === 'newHospitals' ? '신규 병원' : '신규 병상',
+                        ]}
+                      />
+                      <Legend
+                        formatter={(value) => value === 'newHospitals' ? '신규 병원' : '신규 병상'}
+                        wrapperStyle={{ fontSize: 12 }}
+                      />
+                      <Bar
+                        yAxisId="left"
+                        dataKey="newHospitals"
+                        fill="#6366f1"
+                        opacity={0.8}
+                        radius={[3, 3, 0, 0]}
+                      />
+                      <Bar
+                        yAxisId="right"
+                        dataKey="newBeds"
+                        fill="#f59e0b"
+                        opacity={0.8}
+                        radius={[3, 3, 0, 0]}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
 
                 {/* 테이블 */}
                 <div className="overflow-x-auto">
