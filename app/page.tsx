@@ -4,6 +4,16 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import StatusBadge from '@/app/components/StatusBadge'
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts'
 
 type DashboardProject = {
   projectCode: string
@@ -20,6 +30,15 @@ type DashboardProject = {
 type DashboardData = {
   thisWeek: DashboardProject[]
   nextWeek: DashboardProject[]
+}
+
+type MonthlyEntry = {
+  month: string
+  label: string
+  newHospitals: number
+  newBeds: number
+  totalHospitals: number
+  totalBeds: number
 }
 
 function fmt(date: string | null, fallback = '-'): string {
@@ -181,6 +200,8 @@ function DashboardTable({
 export default function Home() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [monthly, setMonthly] = useState<MonthlyEntry[] | null>(null)
+  const [monthlyLoading, setMonthlyLoading] = useState(true)
 
   const loadData = useCallback(async () => {
     const res = await fetch('/api/dashboard', { cache: 'no-store' })
@@ -190,9 +211,19 @@ export default function Home() {
     setLoading(false)
   }, [])
 
+  const loadMonthly = useCallback(async () => {
+    const res = await fetch('/api/dashboard/monthly', { cache: 'no-store' })
+    if (res.ok) {
+      const json = await res.json()
+      setMonthly(json.months)
+    }
+    setMonthlyLoading(false)
+  }, [])
+
   useEffect(() => {
     loadData()
-  }, [loadData])
+    loadMonthly()
+  }, [loadData, loadMonthly])
 
   function handleRemarkSaved(code: string, remark: string) {
     if (!data) return
@@ -211,6 +242,13 @@ export default function Home() {
 
   const thisWeekProjects = data?.thisWeek ?? []
   const nextWeekProjects = data?.nextWeek ?? []
+
+  // 차트용 데이터: 오름차순 (오래된 월 → 최신)
+  const chartData = monthly ?? []
+  // 테이블용: 내림차순 (최신 월 상단)
+  const tableData = [...chartData].reverse()
+
+  const latestEntry = chartData.length > 0 ? chartData[chartData.length - 1] : null
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -250,6 +288,119 @@ export default function Home() {
               <p className="px-6 py-10 text-center text-sm text-gray-400">해당 주차 구축 일정이 없습니다.</p>
             ) : (
               <DashboardTable projects={nextWeekProjects} onRemarkSaved={handleRemarkSaved} />
+            )}
+          </div>
+
+          {/* 월별 누적 사용 현황 */}
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <h2 className="text-sm font-semibold text-gray-700">월별 누적 사용 현황</h2>
+              {latestEntry && (
+                <div className="flex gap-4 text-xs text-gray-500">
+                  <span>누적 병원 <strong className="text-blue-600">{latestEntry.totalHospitals}개</strong></span>
+                  <span>누적 병상 <strong className="text-emerald-600">{latestEntry.totalBeds.toLocaleString()}개</strong></span>
+                </div>
+              )}
+            </div>
+
+            {monthlyLoading ? (
+              <p className="px-6 py-10 text-center text-sm text-gray-400">불러오는 중...</p>
+            ) : chartData.length === 0 ? (
+              <p className="px-6 py-10 text-center text-sm text-gray-400">구축완료된 프로젝트 데이터가 없습니다.</p>
+            ) : (
+              <div className="px-6 py-6 space-y-8">
+
+                {/* 차트 */}
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={chartData} margin={{ top: 4, right: 24, left: 0, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fontSize: 11, fill: '#6b7280' }}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis
+                      yAxisId="left"
+                      orientation="left"
+                      tick={{ fontSize: 11, fill: '#3b82f6' }}
+                      label={{ value: '병원(개)', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#3b82f6' } }}
+                    />
+                    <YAxis
+                      yAxisId="right"
+                      orientation="right"
+                      tick={{ fontSize: 11, fill: '#10b981' }}
+                      label={{ value: '병상(개)', angle: 90, position: 'insideRight', style: { fontSize: 11, fill: '#10b981' } }}
+                    />
+                    <Tooltip
+                      contentStyle={{ fontSize: 12 }}
+                      formatter={(value, name) => [
+                        typeof value === 'number' ? value.toLocaleString() : value,
+                        name === 'totalHospitals' ? '누적 병원' : '누적 병상',
+                      ]}
+                      labelFormatter={(label) => `${label}`}
+                    />
+                    <Legend
+                      formatter={(value) => value === 'totalHospitals' ? '누적 병원' : '누적 병상'}
+                      wrapperStyle={{ fontSize: 12 }}
+                    />
+                    <Line
+                      yAxisId="left"
+                      type="monotone"
+                      dataKey="totalHospitals"
+                      stroke="#3b82f6"
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                      activeDot={{ r: 5 }}
+                    />
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="totalBeds"
+                      stroke="#10b981"
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                      activeDot={{ r: 5 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+
+                {/* 테이블 */}
+                <div className="overflow-x-auto">
+                  <table className="w-full divide-y divide-gray-100 text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">월</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">신규 병원</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">신규 병상</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">누적 병원</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">누적 병상</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {tableData.map((row) => {
+                        const hasNew = row.newHospitals > 0 || row.newBeds > 0
+                        return (
+                          <tr
+                            key={row.month}
+                            className={hasNew ? 'bg-blue-50 font-medium' : 'text-gray-400'}
+                          >
+                            <td className="px-4 py-2.5 tabular-nums">{row.label}</td>
+                            <td className={`px-4 py-2.5 text-right tabular-nums ${hasNew ? 'text-blue-700' : ''}`}>
+                              {row.newHospitals > 0 ? `+${row.newHospitals}` : '-'}
+                            </td>
+                            <td className={`px-4 py-2.5 text-right tabular-nums ${hasNew ? 'text-emerald-700' : ''}`}>
+                              {row.newBeds > 0 ? `+${row.newBeds.toLocaleString()}` : '-'}
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-gray-700">{row.totalHospitals}</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-gray-700">{row.totalBeds.toLocaleString()}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+              </div>
             )}
           </div>
 

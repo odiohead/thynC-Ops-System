@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-03-29 12:30 | 대시보드 월별 누적 사용 현황 섹션 추가
+
+- 구축완료("완료" 또는 "구축완료") 프로젝트의 endDateExpected 익월을 서비스 시작월로 산정하여 월별 신규/누적 병원·병상 수 집계
+- 중간 월 gap 없이 첫 서비스 시작월부터 현재까지 전체 구간 표시
+- recharts 라이브러리 설치 후 이중 Y축 라인 차트(누적 병원: 파란색 / 누적 병상: 초록색) 구현
+- 테이블: 최신 월 상단 정렬, 신규 데이터 있는 행 강조 표시, 없는 행 연한 색 처리
+- 헤더에 현재 누적 병원 수 / 누적 병상 수 요약 표시
+- 영향받은 파일:
+  - `app/api/dashboard/monthly/route.ts` (신규)
+  - `app/page.tsx`
+  - `package.json` (recharts 추가)
+
+---
+
 ## 2026-03-29 | 심평원 병원정보 전체 갱신 스크립트 작성 및 실행
 - 심평원 Open API(getHospBasisList)를 호출해 `hira_hospitals` 테이블을 전체 갱신하는 스크립트 작성
 - `scripts/fetch-hira-hospitals.ts` 신규 생성: 15개 종별코드별로 전체 페이지 순회, xml2js로 XML 파싱, Prisma upsert(hiraId 기준), 100ms delay 적용
