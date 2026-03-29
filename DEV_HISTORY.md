@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-03-29 | 심평원 병원정보 전체 갱신 스크립트 작성 및 실행
+- 심평원 Open API(getHospBasisList)를 호출해 `hira_hospitals` 테이블을 전체 갱신하는 스크립트 작성
+- `scripts/fetch-hira-hospitals.ts` 신규 생성: 15개 종별코드별로 전체 페이지 순회, xml2js로 XML 파싱, Prisma upsert(hiraId 기준), 100ms delay 적용
+- `tsconfig.scripts.json` 설정으로 ts-node 실행: `npx ts-node --project tsconfig.scripts.json scripts/fetch-hira-hospitals.ts`
+- `prisma/schema.prisma` 및 `prisma/migrations/20260329000002_add_hira_hospital_columns/migration.sql`: `hira_hospitals` 테이블에 homepage, 의사수 관련 12개 컬럼(mdept/dety/cmdc × gdr/intn/resdnt/sdr), midwife_cnt 추가
+- ServiceKey URL 인코딩(`encodeURIComponent`) 적용 (미적용 시 401 오류 발생)
+- 실행 결과: 총 79,541건 처리 (의원 37,683 / 치과의원 19,334 / 한의원 14,863 외)
+
+---
+
 ## 2026-03-29 | 답사 비고란 리치텍스트 에디터 적용
 - 답사(SiteVisit) 폼의 비고 textarea를 Tiptap 기반 리치텍스트 에디터로 교체
 - `app/components/RichTextEditor.tsx` 신규 생성: `IssueNoteEditor`와 동일한 Tiptap 확장(StarterKit, Underline, Link, TextAlign, Placeholder, Typography) 및 툴바(H1~H3, B/I/U/S, 목록, 인용구, 코드, 링크, 수평선, undo/redo) 적용. `value/onChange` props 방식으로 폼 상태와 연동
