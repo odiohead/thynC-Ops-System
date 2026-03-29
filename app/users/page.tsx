@@ -69,6 +69,19 @@ export default function UsersPage() {
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
+  // 다른 계정 수정 모달 (SUPER_ADMIN 전용)
+  const [showEditOtherModal, setShowEditOtherModal] = useState(false)
+  const [editOtherUser, setEditOtherUser] = useState<User | null>(null)
+  const [editOtherName, setEditOtherName] = useState('')
+  const [editOtherPhone, setEditOtherPhone] = useState('')
+  const [editOtherRole, setEditOtherRole] = useState<User['role']>('USER')
+  const [editOtherOrgId, setEditOtherOrgId] = useState('')
+  const [editOtherPassword, setEditOtherPassword] = useState('')
+  const [editOtherConfirmPassword, setEditOtherConfirmPassword] = useState('')
+  const [editOtherError, setEditOtherError] = useState('')
+  const [editOtherSuccess, setEditOtherSuccess] = useState('')
+  const [editOtherSubmitting, setEditOtherSubmitting] = useState(false)
+
   useEffect(() => {
     Promise.all([
       fetch('/api/auth/me').then((r) => r.json()),
@@ -132,6 +145,64 @@ export default function UsersPage() {
       setFormError('서버 오류가 발생했습니다.')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  function openEditOtherModal(user: User) {
+    setEditOtherUser(user)
+    setEditOtherName(user.name)
+    setEditOtherPhone(user.phone ?? '')
+    setEditOtherRole(user.role)
+    setEditOtherOrgId(user.organization?.id?.toString() ?? '')
+    setEditOtherPassword('')
+    setEditOtherConfirmPassword('')
+    setEditOtherError('')
+    setEditOtherSuccess('')
+    setShowEditOtherModal(true)
+  }
+
+  async function handleEditOtherSave(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editOtherUser) return
+    setEditOtherError('')
+    setEditOtherSuccess('')
+
+    if (editOtherPassword && editOtherPassword !== editOtherConfirmPassword) {
+      setEditOtherError('새 비밀번호가 일치하지 않습니다.')
+      return
+    }
+    if (editOtherPassword && editOtherPassword.length < 6) {
+      setEditOtherError('새 비밀번호는 6자 이상이어야 합니다.')
+      return
+    }
+
+    setEditOtherSubmitting(true)
+    try {
+      const body: Record<string, unknown> = {
+        name: editOtherName,
+        phone: editOtherPhone,
+        role: editOtherRole,
+        organizationId: editOtherOrgId ? parseInt(editOtherOrgId) : null,
+      }
+      if (editOtherPassword) body.newPassword = editOtherPassword
+
+      const res = await fetch(`/api/users/${editOtherUser.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) { setEditOtherError(data.error ?? '저장에 실패했습니다.'); return }
+
+      setUsers((prev) => prev.map((u) => u.id === data.id ? data : u))
+      router.refresh()
+      setEditOtherSuccess('저장되었습니다.')
+      setEditOtherPassword('')
+      setEditOtherConfirmPassword('')
+    } catch {
+      setEditOtherError('서버 오류가 발생했습니다.')
+    } finally {
+      setEditOtherSubmitting(false)
     }
   }
 
@@ -256,6 +327,14 @@ export default function UsersPage() {
                     </button>
                   ) : isAdmin ? (
                     <div className="flex items-center gap-2">
+                      {currentUser?.role === 'SUPER_ADMIN' && (
+                        <button
+                          onClick={() => openEditOtherModal(user)}
+                          className="text-xs font-medium px-3 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                        >
+                          수정
+                        </button>
+                      )}
                       <button
                         onClick={() => handleToggle(user)}
                         className={`text-xs font-medium px-3 py-1 rounded-lg transition-colors ${
@@ -331,6 +410,63 @@ export default function UsersPage() {
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => { setShowCreateModal(false); setFormError('') }} className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">취소</button>
                 <button type="submit" disabled={submitting} className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{submitting ? '생성 중...' : '생성'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 다른 계정 수정 모달 (SUPER_ADMIN 전용) */}
+      {showEditOtherModal && editOtherUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl mx-4">
+            <h2 className="text-base font-semibold text-gray-900 mb-1">계정 수정</h2>
+            <p className="text-xs text-gray-500 mb-4">{editOtherUser.email}</p>
+            <form onSubmit={handleEditOtherSave} className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">이름 *</label>
+                <input type="text" value={editOtherName} onChange={(e) => setEditOtherName(e.target.value)} required className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">연락처</label>
+                <input type="tel" value={editOtherPhone} onChange={(e) => setEditOtherPhone(e.target.value)} placeholder="010-0000-0000" className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">역할</label>
+                <select value={editOtherRole} onChange={(e) => setEditOtherRole(e.target.value as User['role'])} className={inputClass}>
+                  <option value="VIEWER">뷰어 (VIEWER)</option>
+                  <option value="USER">일반 (USER)</option>
+                  <option value="ADMIN">관리자 (ADMIN)</option>
+                  <option value="SUPER_ADMIN">최고관리자 (SUPER_ADMIN)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">소속</label>
+                <select value={editOtherOrgId} onChange={(e) => setEditOtherOrgId(e.target.value)} className={inputClass}>
+                  <option value="">소속 없음</option>
+                  {organizations.map((org) => (
+                    <option key={org.id} value={org.id}>{org.name} ({org.code})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="border-t border-gray-100 pt-3">
+                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">비밀번호 변경 (선택)</p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">새 비밀번호 <span className="text-gray-400 font-normal">(6자 이상)</span></label>
+                    <input type="password" value={editOtherPassword} onChange={(e) => setEditOtherPassword(e.target.value)} autoComplete="new-password" className={inputClass} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">새 비밀번호 확인</label>
+                    <input type="password" value={editOtherConfirmPassword} onChange={(e) => setEditOtherConfirmPassword(e.target.value)} autoComplete="new-password" className={inputClass} />
+                  </div>
+                </div>
+              </div>
+              {editOtherError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{editOtherError}</p>}
+              {editOtherSuccess && <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-600">{editOtherSuccess}</p>}
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setShowEditOtherModal(false)} className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">닫기</button>
+                <button type="submit" disabled={editOtherSubmitting} className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{editOtherSubmitting ? '저장 중...' : '저장'}</button>
               </div>
             </form>
           </div>

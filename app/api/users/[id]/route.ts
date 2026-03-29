@@ -71,12 +71,16 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   // 비밀번호 변경
   if (newPassword) {
-    if (!currentPassword) {
-      return NextResponse.json({ error: '현재 비밀번호를 입력해주세요.' }, { status: 400 })
-    }
-    const valid = await bcrypt.compare(currentPassword, target.password)
-    if (!valid) {
-      return NextResponse.json({ error: '현재 비밀번호가 올바르지 않습니다.' }, { status: 400 })
+    // SUPER_ADMIN이 타인 계정 수정 시 현재 비밀번호 불필요
+    const isSuperAdminEditingOther = authUser.role === 'SUPER_ADMIN' && !isSelf
+    if (!isSuperAdminEditingOther) {
+      if (!currentPassword) {
+        return NextResponse.json({ error: '현재 비밀번호를 입력해주세요.' }, { status: 400 })
+      }
+      const valid = await bcrypt.compare(currentPassword, target.password)
+      if (!valid) {
+        return NextResponse.json({ error: '현재 비밀번호가 올바르지 않습니다.' }, { status: 400 })
+      }
     }
     if (newPassword.length < 6) {
       return NextResponse.json({ error: '새 비밀번호는 6자 이상이어야 합니다.' }, { status: 400 })

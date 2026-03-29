@@ -46,7 +46,14 @@ thynC 구축 및 운영을 위한 데이터 관리 시스템
 ## 인증
 - JWT 기반 자체 인증 (httpOnly 쿠키)
 - 기본 admin 계정: admin@thync.com / admin1234
-- 역할: ADMIN / USER
+- 역할: SUPER_ADMIN / ADMIN / USER / VIEWER
+  - SUPER_ADMIN: 전체 시스템 최고 관리자 (소속 관리, 타계정 수정 포함 모든 권한)
+  - ADMIN: 일반 관리자 (사용자 생성, 설정 관리 등)
+  - USER: 일반 사용자 (병원·프로젝트·답사 생성·수정 가능)
+  - VIEWER: 읽기 전용 (모든 데이터 조회만 가능)
+- 역할 헬퍼 (lib/auth.ts):
+  - isAdminOrAbove(role): SUPER_ADMIN 또는 ADMIN 여부
+  - isSuperAdmin(role): SUPER_ADMIN 여부
 - 미들웨어(middleware.ts)로 모든 페이지 인증 보호
 
 ## Git 워크플로우
@@ -62,6 +69,16 @@ thynC 구축 및 운영을 위한 데이터 관리 시스템
 - 파일명: kebab-case
 - API 라우트: /app/api/ 하위
 - 페이지: /app/ 하위
+
+## 주요 개발 파일
+- `CLAUDE.md`: Claude Code가 코드를 작성할 때 준수해야 하는 지침. 프로젝트 구조, 서버 환경, 역할 체계, 컨벤션 등 개발 기준 정의
+- `README.md`: 전체 기술 스택 및 형상, 기능 정리. 외부 참조용 문서
+- `DEV_HISTORY.md`: 개발 작업 이력을 기록하는 파일. 최신 작업이 상단에 위치
+
+## 개발 작업 절차
+1. `CLAUDE.md`에 기재된 지침을 준수하여 코드 작성
+2. 개발 완료 후 `DEV_HISTORY.md` 상단에 작업 내역 기록 (아래 기록 규칙 참고)
+3. git push 전 `README.md`에서 변경사항 업데이트 (기능 추가·수정·삭제 반영)
 
 ## ⚠️ 개발 작업 이력 기록 규칙 (중요)
 - 기능 개발, 수정, 제거 등 모든 개발 작업을 완료한 후, 반드시 `DEV_HISTORY.md` 파일에 작업 내역을 기록하세요.

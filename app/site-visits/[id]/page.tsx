@@ -13,10 +13,8 @@ interface SiteVisitData {
   visitDate: string | null
   replyDate: string | null
   statusId: number | null
-  installPlanUrl: string | null
-  installPlanFileId: string | null
-  floorPlanUrl: string | null
-  floorPlanFileId: string | null
+  installPlanS3Key: string | null
+  floorPlanS3Key: string | null
   notes: string | null
 }
 
@@ -70,10 +68,8 @@ export default function EditSiteVisitPage() {
     visitDate: data.visitDate ? data.visitDate.slice(0, 10) : '',
     replyDate: data.replyDate ? data.replyDate.slice(0, 10) : '',
     statusId: data.statusId != null ? String(data.statusId) : '',
-    installPlanUrl: data.installPlanUrl ?? '',
-    installPlanFileId: data.installPlanFileId ?? '',
-    floorPlanUrl: data.floorPlanUrl ?? '',
-    floorPlanFileId: data.floorPlanFileId ?? '',
+    installPlanS3Key: data.installPlanS3Key ?? '',
+    floorPlanS3Key: data.floorPlanS3Key ?? '',
     notes: data.notes ?? '',
   }
 

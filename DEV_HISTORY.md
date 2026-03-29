@@ -4,6 +4,134 @@
 
 ---
 
+## 2026-03-29 | 답사 비고란 리치텍스트 에디터 적용
+- 답사(SiteVisit) 폼의 비고 textarea를 Tiptap 기반 리치텍스트 에디터로 교체
+- `app/components/RichTextEditor.tsx` 신규 생성: `IssueNoteEditor`와 동일한 Tiptap 확장(StarterKit, Underline, Link, TextAlign, Placeholder, Typography) 및 툴바(H1~H3, B/I/U/S, 목록, 인용구, 코드, 링크, 수평선, undo/redo) 적용. `value/onChange` props 방식으로 폼 상태와 연동
+- `SiteVisitForm.tsx`: `NoteEditor`(textarea) 제거, `RichTextEditor` 컴포넌트로 교체. 비고 섹션 레이아웃을 풀-width로 변경
+- 영향 파일: `app/components/RichTextEditor.tsx` (신규), `app/site-visits/SiteVisitForm.tsx`
+
+---
+
+## 2026-03-29 | 버그수정 - 답사 S3 파일 키 저장 안 되는 문제
+- **원인**: `app/site-visits/[id]/page.tsx`의 `SiteVisitData` 인터페이스와 `initialData` 객체에 `installPlanS3Key`, `floorPlanS3Key` 필드가 누락되어 있어, 편집 폼이 항상 빈 값으로 초기화됨. 저장 시 기존 S3 키가 `null`로 덮어씌워지는 문제
+- **수정**: `SiteVisitData` 인터페이스에 두 필드 추가, `initialData` 구성 시 API 응답값 매핑 추가. 구 Drive 필드(`installPlanUrl`, `installPlanFileId`, `floorPlanUrl`, `floorPlanFileId`) 제거
+- `SiteVisitForm.tsx`와 API(`route.ts`, `[id]/route.ts`)는 이미 정상 구현되어 있어 변경 없음
+- 영향 파일: `app/site-visits/[id]/page.tsx`
+
+---
+
+## 2026-03-29 | S3 마이그레이션 Step 4 - 답사(SiteVisit) 파일 업로드를 Google Drive → S3로 교체
+- 답사 첨부파일(설치계획서, 도면) 저장소를 Google Drive에서 AWS S3로 전환
+
+### DB 스키마
+- `SiteVisit` 모델에 `installPlanS3Key String? @map("install_plan_s3_key")`, `floorPlanS3Key String? @map("floor_plan_s3_key")` 필드 추가
+- SQL 직접 실행 후 마이그레이션 파일 등록 (shadow DB 우회 패턴)
+- 마이그레이션명: `20260329000001_add_s3_keys_to_site_visit`
+
+### API 변경
+- `POST /api/site-visits/upload`: Drive 업로드 제거, `uploadToS3` 호출로 교체. hospitalCode를 query parameter로 받음. S3 key 형식: `site-visits/{hospitalCode}/{fileName}`. 응답: `{ s3Key, fileName }`
+- `DELETE /api/site-visits/file` (신규): `{ s3Key }` body 받아 `deleteFromS3` 호출. VIEWER 403
+- `GET /api/site-visits/file-url` (신규): `?key=` 쿼리로 presigned URL 생성 후 `{ url }` 반환. 인증 필요
+- `POST /api/site-visits`, `PUT /api/site-visits/[id]`: Drive 필드 제거, `installPlanS3Key` / `floorPlanS3Key` 추가
+
+### 프론트엔드 변경 (`app/site-visits/SiteVisitForm.tsx`)
+- `SiteVisitFormData`: Drive 관련 필드(`installPlanUrl`, `installPlanFileId`, `floorPlanUrl`, `floorPlanFileId`) 제거, S3 키 필드 2개 추가
+- `FileField` 컴포넌트 전면 재작성: S3 기반 업로드/다운로드/삭제로 교체, `app/projects/[code]/page.tsx` 첨부파일 섹션과 동일한 UI 구조 적용
+- 파일 업로드: `/api/site-visits/upload?hospitalCode=` 호출, accept 속성 추가
+- 파일 다운로드: `/api/site-visits/file-url?key=` 호출 후 `window.open(url)`
+- 파일 삭제: `/api/site-visits/file` 호출 후 s3Key 상태 초기화. confirm "정말 삭제하시겠습니까?" 표시
+- 삭제 버튼: ADMIN / SUPER_ADMIN만 노출 (`isAdmin` 체크 통일)
+- Drive 폴더 의존성 완전 제거 — 병원 Drive 폴더 여부 무관하게 항상 업로드 가능
+
+### 영향 파일
+- `prisma/schema.prisma`
+- `prisma/migrations/20260329000001_add_s3_keys_to_site_visit/migration.sql` (신규)
+- `app/api/site-visits/upload/route.ts`
+- `app/api/site-visits/file/route.ts` (신규)
+- `app/api/site-visits/file-url/route.ts` (신규)
+- `app/api/site-visits/route.ts`
+- `app/api/site-visits/[id]/route.ts`
+- `app/site-visits/SiteVisitForm.tsx`
+
+---
+
+## 2026-03-29 | 프로젝트 첨부파일 삭제 버튼 로딩 상태 및 동작 보완
+- `deletingFileId` 상태 추가: 삭제 중인 파일 ID를 추적하여 해당 버튼만 비활성화 및 "삭제 중..." 텍스트 표시
+- `handleDeleteFile` 수정: confirm 문구 변경("정말 삭제하시겠습니까?"), 삭제 성공 후 `router.refresh()` 추가
+- 삭제 버튼: ADMIN 역할에만 노출 (기존 유지), `disabled` + `opacity` 처리로 로딩 상태 시각화
+- 영향 파일: `app/projects/[code]/page.tsx`
+
+---
+
+## 2026-03-29 | S3 마이그레이션 Step 3 - 프로젝트 파일 업로드를 Google Drive → S3로 교체
+- 프로젝트 첨부파일 저장소를 Google Drive에서 AWS S3로 전환
+- 기존 driveUrl 보유 파일은 하위 호환 유지 (driveUrl로 열기 가능)
+
+### DB 스키마
+- `ProjectFile` 모델에 `s3Key String? @map("s3_key")` 필드 추가
+- SQL 직접 실행 후 마이그레이션 파일 등록 (shadow DB 권한 우회 패턴)
+- 마이그레이션명: `20260329000000_add_s3_key_to_project_file`
+
+### API 변경
+- `POST /api/projects/[code]/files`: Google Drive 업로드 제거, `lib/s3.ts`의 `uploadToS3` 호출로 교체. S3 key 형식: `projects/{projectCode}/{timestamp}_{fileName}`. driveFolderId 의존성 완전 제거
+- `DELETE /api/projects/[code]/files/[fileId]`: DB 삭제 전 `s3Key` 존재 시 `deleteFromS3` 호출 추가
+- `GET /api/projects/[code]/files/[fileId]/download` (신규): s3Key로 presigned URL 생성 후 `{ url }` 반환. s3Key 없으면 404
+
+### 프론트엔드 변경 (`app/projects/[code]/page.tsx`)
+- `ProjectFile` 인터페이스: `driveFileId` 제거, `driveUrl`을 nullable로 변경, `s3Key: string | null` 추가
+- Drive 폴더 자동 생성 로직(`loadProject` 내 drive-folder API 호출) 제거
+- Drive 폴더 미등록 경고 배너 제거
+- 파일 업로드 버튼: `driveProjectFolderId` 체크 조건 제거 → 항상 업로드 가능
+- 파일 input `accept` 속성 추가: `.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg`
+- 파일명 클릭 시: s3Key 있으면 download 엔드포인트 호출 후 `window.open(url)`, 없으면 driveUrl로 fallback
+- `handleAddFileClick`: driveProjectFolderId 가드 제거
+
+### 영향 파일
+- `prisma/schema.prisma`
+- `prisma/migrations/20260329000000_add_s3_key_to_project_file/migration.sql` (신규)
+- `app/api/projects/[code]/files/route.ts`
+- `app/api/projects/[code]/files/[fileId]/route.ts`
+- `app/api/projects/[code]/files/[fileId]/download/route.ts` (신규)
+- `app/projects/[code]/page.tsx`
+
+---
+
+## 2026-03-29 | lib/s3.ts - AWS S3 유틸리티 신규 생성
+- AWS S3 연동을 위한 공통 유틸리티 파일 생성
+- S3Client를 모듈 상단에서 1회 초기화 후 재사용 (환경변수: AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME)
+- 구현 함수:
+  - `uploadToS3(buffer, key, contentType)`: PutObjectCommand로 파일 업로드, 성공 시 key 반환
+  - `getSignedUrl(key, expiresIn?)`: GetObjectCommand + s3-request-presigner로 presigned URL 생성 (기본 만료 1시간)
+  - `deleteFromS3(key)`: DeleteObjectCommand로 파일 삭제
+- 각 함수에 try-catch 에러 핸들링 포함
+- 패키지: `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` (기존 설치됨)
+- 영향 파일: `lib/s3.ts` (신규)
+
+---
+
+## 2026-03-29 | README.md 전면 업데이트
+- 현재 소스 전체 파악 후 README.md를 최신 개발 현황에 맞게 전면 수정
+- 주요 변경 사항:
+  - 프로젝트 설명: DaewoongStaff 관련 문구 제거, 프로젝트/답사 관리 포함하도록 수정
+  - 디렉토리 구조: 현재 실제 구조 반영 (projects, site-visits, settings/* 등 추가)
+  - DB 스키마: DaewoongStaff 제거, Organization/Project/SiteVisit/DeviceInfo/BuildStatus/Contractor 등 추가
+  - 역할 체계: ADMIN/USER 2단계 → SUPER_ADMIN/ADMIN/USER/VIEWER 4단계로 업데이트
+  - 주요 기능: 대시보드, 프로젝트 관리, 답사 관리, 소속 관리, SUPER_ADMIN 타계정 수정 기능 추가
+  - API 엔드포인트: daewoong-staff API 제거, projects/site-visits/constructors/settings/* 전체 추가
+- 영향 파일: `README.md`
+
+---
+
+## 2026-03-26 | 계정 관리 - SUPER_ADMIN 타계정 수정 기능 추가
+
+- SUPER_ADMIN이 다른 계정의 이름/연락처/역할/소속/비밀번호를 수정할 수 있도록 기능 추가
+- 계정 목록에서 타계정 행에 "수정" 버튼 추가 (SUPER_ADMIN에게만 표시)
+- 수정 모달: 이름, 연락처, 역할(VIEWER/USER/ADMIN/SUPER_ADMIN), 소속, 비밀번호 변경 폼
+- SUPER_ADMIN이 타인 비밀번호 변경 시 현재 비밀번호 확인 과정 생략 (관리자 권한)
+- 영향 파일: `app/users/page.tsx`, `app/api/users/[id]/route.ts`
+
+---
+
 ## 2026-03-24 | 버그수정 - 대시보드 buildStatus 캐시 불일치 문제
 - **원인**: Next.js 14 App Router에서 동적 API를 사용하지 않는 GET Route Handler는 빌드 타임에 정적으로 캐시됨. `app/api/dashboard/route.ts`가 정적 캐시로 서빙되어, DB에서 buildStatus 변경 후에도 대시보드가 빌드 당시 값을 표시하는 문제
 - **수정**: `app/api/dashboard/route.ts` 상단에 `export const dynamic = 'force-dynamic'` 추가 → 매 요청마다 DB를 새로 조회

@@ -24,8 +24,8 @@ interface ProjectFile {
   id: number
   fileCategory: string
   fileName: string
-  driveFileId: string
-  driveUrl: string
+  driveUrl: string | null
+  s3Key: string | null
   uploadedAt: string
 }
 
@@ -127,6 +127,7 @@ export default function ProjectDetailPage() {
 
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [deletingFileId, setDeletingFileId] = useState<number | null>(null)
   const [uploadingCategory, setUploadingCategory] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -136,15 +137,6 @@ export default function ProjectDetailPage() {
     const res = await fetch(`/api/projects/${code}`)
     if (!res.ok) { router.push('/projects'); return }
     const { project: p } = await res.json()
-
-    // 병원 Drive 폴더는 있지만 프로젝트 서브폴더가 없으면 자동 생성
-    if (!p.driveFolderId && p.hospital?.meta?.driveProjectFolderId) {
-      const folderRes = await fetch(`/api/projects/${code}/drive-folder`, { method: 'POST' })
-      if (folderRes.ok) {
-        const { driveFolderId } = await folderRes.json()
-        p.driveFolderId = driveFolderId
-      }
-    }
 
     setProject(p)
 
@@ -245,13 +237,26 @@ export default function ProjectDetailPage() {
   }
 
   async function handleDeleteFile(fileId: number) {
-    if (!confirm('파일 레코드를 삭제하시겠습니까?')) return
+    if (!confirm('정말 삭제하시겠습니까?')) return
+    setDeletingFileId(fileId)
     await fetch(`/api/projects/${code}/files/${fileId}`, { method: 'DELETE' })
+    setDeletingFileId(null)
+    router.refresh()
     await loadProject()
   }
 
+  async function handleDownloadFile(file: ProjectFile) {
+    if (file.s3Key) {
+      const res = await fetch(`/api/projects/${code}/files/${file.id}/download`)
+      if (!res.ok) return
+      const { url } = await res.json()
+      window.open(url, '_blank')
+    } else if (file.driveUrl) {
+      window.open(file.driveUrl, '_blank')
+    }
+  }
+
   function handleAddFileClick(category: string) {
-    if (!project?.hospital.meta?.driveProjectFolderId) return
     pendingCategoryRef.current = category
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
@@ -497,17 +502,6 @@ export default function ProjectDetailPage() {
               <h2 className="text-sm font-semibold text-gray-700">첨부파일</h2>
             </div>
 
-            {!project.hospital.meta?.driveProjectFolderId && (
-              <div className="px-6 py-4 bg-amber-50 border-b border-amber-100">
-                <p className="text-sm text-amber-700">
-                  병원에 Drive 프로젝트 폴더가 등록되지 않아 파일 업로드가 불가합니다.{' '}
-                  <a href={`/hospitals/${project.hospital.hospitalCode}`} className="underline hover:text-amber-900">
-                    병원 페이지에서 먼저 등록해 주세요.
-                  </a>
-                </p>
-              </div>
-            )}
-
             {uploadError && (
               <div className="px-6 py-3 text-sm text-red-600 bg-red-50 border-b border-red-100">{uploadError}</div>
             )}
@@ -516,6 +510,7 @@ export default function ProjectDetailPage() {
             <input
               ref={fileInputRef}
               type="file"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
               className="hidden"
               onChange={handleFileSelected}
             />
@@ -530,7 +525,7 @@ export default function ProjectDetailPage() {
                       <h3 className="text-sm font-medium text-gray-700">{cat.label}</h3>
                       <button
                         type="button"
-                        disabled={!project.hospital.meta?.driveProjectFolderId || !!uploadingCategory}
+                        disabled={!!uploadingCategory}
                         onClick={() => handleAddFileClick(cat.key)}
                         className="rounded border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
@@ -547,21 +542,26 @@ export default function ProjectDetailPage() {
                               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-gray-400">
                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
                               </svg>
-                              {f.driveUrl ? (
-                                <a href={f.driveUrl} target="_blank" rel="noopener noreferrer" className="truncate text-xs text-blue-600 hover:underline">{f.fileName}</a>
+                              {(f.s3Key || f.driveUrl) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadFile(f)}
+                                  className="truncate text-xs text-blue-600 hover:underline text-left"
+                                >
+                                  {f.fileName}
+                                </button>
                               ) : (
                                 <span className="truncate text-xs text-gray-700">{f.fileName}</span>
                               )}
                             </div>
-                            {isAdmin && (
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteFile(f.id)}
-                                className="ml-3 shrink-0 text-xs text-red-400 hover:text-red-600"
-                              >
-                                삭제
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteFile(f.id)}
+                              disabled={deletingFileId === f.id}
+                              className="ml-3 shrink-0 text-xs text-red-400 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {deletingFileId === f.id ? '삭제 중...' : '삭제'}
+                            </button>
                           </li>
                         ))}
                       </ul>
