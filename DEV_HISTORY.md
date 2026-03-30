@@ -4,6 +4,40 @@
 
 ---
 
+## 2026-03-30 | 간트 탭 뷰 방식 변경 (고정 61일 + flex 레이아웃)
+
+- **토글 버튼 제거**: ±1주/±2주/±1개월 토글 완전 제거, 뷰 고정 61일 (centerDate ±30일)
+- **컨트롤 바 재구성**: 좌측 이전/오늘/다음(30일씩 이동), 중앙 기간 텍스트, 우측 `<input type="date">` 직접 입력으로 centerDate 설정
+- **레이아웃 전환**: 고정 픽셀(28px×N) → `flex: 1` 동적 너비. 61개 날짜 셀이 가로 공간을 균등 분할하여 우측 빈 공간 없이 꽉 채움. 가로 스크롤 제거
+- **바 위치/너비 퍼센트 계산**: `left: (startOff / 61) × 100%`, `width: (duration / 61) × 100%`
+- **오버레이 calc() 포지셔닝**: 주말·오늘 컬럼·오늘 세로선을 `calc(${LABEL_W}px + (100% - ${LABEL_W}px) * fraction)`으로 절대 위치 계산
+- **월/주차 헤더**: `flex: count` 비례 너비로 날짜 셀과 동기화
+- `WindowSize` 타입, `DAY_W` 상수, `scrollRef`, `didAutoScroll`, `windowDays`, `totalW`, `weekendIndices`, `todayIdx` 제거 → `TOTAL_DAYS = 61`, `todayOffset` 로 대체
+- 영향 파일: `app/projects/calendar/page.tsx`
+
+---
+
+## 2026-03-30 | 간트 뷰 레이아웃 버그 수정
+
+- **버그 1 수정**: 스크롤 컨테이너 직계 자식 div에 `width: LABEL_W + totalW` 명시 (`minWidth` → `width`). flex/flex-1 제거로 우측 빈 공간 제거
+- **버그 2 수정**: 헤더 4행(월/주차/일/진행건수)의 날짜 트랙 wrapper에 `width: totalW, flexShrink: 0` 명시. 모든 날짜 셀 `width: DAY_W, minWidth: DAY_W, flexShrink: 0` 통일
+- **버그 3 수정**: 라벨 컬럼(150px) 전체에 `position: sticky, left: 0, zIndex: 20(헤더)/15(행), background` 명시. 축 행 블록 `position: sticky, top: 0, zIndex: 10` 유지
+- Tailwind className 대신 인라인 스타일로 레이아웃 속성 통일 (border, flex 등)
+- 영향 파일: `app/projects/calendar/page.tsx`
+
+---
+
+## 2026-03-30 | 프로젝트 캘린더 페이지 재구성
+
+- 프로젝트 캘린더 페이지 재구성. 간트 보기(포커스 윈도우, ±1주/2주/1개월 토글, 기간 내 프로젝트만 필터링) + 캘린더 보기(월간 히트맵, 날짜 클릭 시 하단 상세 패널) 탭 구성으로 교체.
+- **공통 헤더**: 제목 '구축 일정 캘린더'(16px 500) + 우측 탭 버튼('간트 보기' / '캘린더 보기'), 탭 상태는 URL 쿼리스트링(?tab=gantt / ?tab=calendar)에 반영
+- **간트 탭**: centerDate 기준 ±1주(15일)/±2주(29일)/±1개월(61일) 포커스 윈도우, 이전/오늘/다음 버튼으로 windowDays씩 이동, 기간 내 프로젝트만 행 표시(0건 시 안내 텍스트), 구축일 미입력 하단 별도 섹션, 오늘 세로선(빨강) + 오늘 컬럼 연파랑, 4행 스티키 헤더(월/주차/일요일/진행건수)
+- **캘린더 탭**: 월간 히트맵(0~4건+ 색상 강도), 이전달/오늘/다음달 이동, 날짜 클릭 시 하단 상세 패널 업데이트(기본값 오늘), 주차 레이블(좌측 36px 컬럼)
+- **공통 유틸**: `countProjectsOnDate`, `getProjectsOnDate` 함수 파일 상단 정의
+- 영향 파일: `app/projects/calendar/page.tsx`
+
+---
+
 ## 2026-03-30 | 프로젝트 목록 정렬 변경 + 캘린더 보기 버튼 + 간트 캘린더 페이지 신설
 
 - **정렬 변경**: 프로젝트 목록 기본 정렬을 `startDate DESC nulls first`로 변경 — 구축시작일 미입력 프로젝트가 맨 위, 이후 최신순 정렬
