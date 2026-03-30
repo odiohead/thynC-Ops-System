@@ -17,6 +17,7 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 | 인증 | JWT (httpOnly 쿠키, jose 라이브러리) |
 | 파일 스토리지 | AWS S3 (`@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`) |
 | 차트 | Recharts |
+| 아이콘 | lucide-react |
 | 리치 텍스트 에디터 | Tiptap (`@tiptap/react` + 확장) |
 | 프로세스 관리 | PM2 |
 | 웹서버 | Nginx |
@@ -57,12 +58,14 @@ app/
 │   │   ├── devices/                  # 장비 정보 관리
 │   │   ├── build-status/             # 공사 상태 관리
 │   │   ├── status/                   # 병원 상태코드 관리
-│   │   └── site-visit-status/        # 답사 상태코드 관리
+│   │   ├── site-visit-status/        # 답사 상태코드 관리
+│   │   └── intro-type/               # 도입형태 관리
 │   └── drive/                        # Google Drive 연동 (파일 업로드/목록/삭제/병원목록 내보내기)
 ├── (대시보드)/                        # 메인 대시보드 (이번 주/다음 주 공사 현황)
 ├── hospitals/                        # 병원 목록·상세·등록·수정
 ├── hira-hospitals/                   # HIRA 병원 조회
 ├── projects/                         # 프로젝트 목록·상세·등록
+│   └── calendar/                     # 구축 일정 간트 캘린더 (새 탭)
 ├── site-visits/                      # 답사 목록·상세·등록
 ├── users/                            # 사용자 관리 (ADMIN 이상)
 ├── settings/
@@ -72,7 +75,8 @@ app/
 │   ├── build-status/                 # 공사 상태 관리
 │   ├── status/                       # 병원 상태코드 관리
 │   ├── site-visit-status/            # 답사 상태코드 관리
-│   └── constructors/                 # 시공사 관리
+│   ├── constructors/                 # 시공사 관리
+│   └── intro-type/                   # 도입형태 관리
 ├── login/                            # 로그인 페이지
 └── components/                       # 공통 컴포넌트 (Navigation, MainWrapper)
 
@@ -111,8 +115,12 @@ prisma/
 - hospitalCode (고유 코드), HiraHospital과 연결 (hiraId)
 - HIRA 병원명 / 운영상 병원명 구분
 - 상태 (status), 좌표 정보 포함
-- 도입형태 (`intro_type`): 구축형/구독형/사용량비례형 (복수 시 쉼표 구분)
-- 도입 병상 수 (`intro_beds`)
+- 도입형태: `HospitalIntroType` 조인 테이블로 다대다 연결 (복수 선택 가능)
+- 도입 병상 수 (`intro_beds`), 최초 계약일 (`contractDate`)
+
+### HospitalIntroType (병원 도입형태)
+- Hospital ↔ StatusCode(INTRO_TYPE) N:M 조인 테이블
+- 구축형 / 구독형 / 사용량비례형 등 다중 선택 가능
 
 ### HospitalMeta (병원 메타 정보)
 - Hospital과 1:1 관계
@@ -126,7 +134,7 @@ prisma/
 - 구축 공사 프로젝트 단위
 - `projectCode`, `projectName`, `orderNumber` (내부 순번)
 - 병원 연결, 담당자(`builderUserId` 또는 `builderNameManual`), 시공사(`constructorId`)
-- 계약 정보: `contractDate`, `contractType`
+- 계약 정보: `contractDate`, 도입형태(`introTypeId` → StatusCode INTRO_TYPE 연결)
 - 규모: `wardCount` (병동 수), `bedCount` (병상 수), `gatewayCount` (게이트웨이 수)
 - 진행 플래그: `hasSurvey` (답사 완료), `hasOrder` (발주 완료)
 - 공사 상태(`buildStatus`), 시작일/완료예정일, 비고(`remark`), 이슈 노트(`issueNote`, 리치 텍스트)
@@ -211,11 +219,17 @@ prisma/
 ### 프로젝트 관리
 - 구축 공사 프로젝트 등록·수정·삭제
 - 공사 상태(BuildStatus) 연결 및 관리
-- 담당자, 시공사, 계약일/계약형태, 시작일/완료예정일, 비고 관리
+- 담당자, 시공사, 계약일, 도입형태(IntroType), 시작일/완료예정일, 비고 관리
 - 병동 수 / 병상 수 / 게이트웨이 수, 답사·발주 완료 플래그
 - 이슈 노트: 리치 텍스트 에디터(Tiptap)로 서식 있는 내용 입력 가능
 - 프로젝트별 장비 관리
 - 프로젝트별 파일 관리 (S3 업로드 / 파일 다운로드 / Drive 연동 병행 지원)
+- 목록 기본 정렬: 구축시작일 DESC (미입력 프로젝트 최상단)
+- **구축 일정 캘린더**: 일 단위 간트 뷰 (`/projects/calendar`, 새 탭)
+  - 뷰 모드: 1개월 / 2주 / 3개월 전환
+  - 월·주차·일·진행건수 4행 헤더 (sticky), 라벨 열 sticky left
+  - 간트 바 클릭 시 프로젝트 상세 새 탭 오픈
+  - 구축시작일 미입력 프로젝트 하단 별도 섹션 분리
 
 ### 답사 관리
 - 병원 방문 답사 기록 등록·수정·삭제
@@ -236,6 +250,7 @@ prisma/
 - 소속 드롭다운 연결
 - **SUPER_ADMIN의 타계정 수정**: 이름·연락처·역할·소속·비밀번호 일괄 수정 (현재 비밀번호 확인 없이 변경 가능)
 - 계정 활성/비활성 처리
+- 소속별 탭 분리: 씨어스테크놀로지(SEERS) / 대웅제약(DAEWOONG) (탭별 사용자 수 뱃지)
 
 ### 설정 (ADMIN 이상)
 - 병원 상태코드 관리 (추가·수정·삭제·순서)
@@ -243,6 +258,7 @@ prisma/
 - 공사 상태(BuildStatus) 관리
 - 장비 정보(DeviceInfo) 관리
 - 시공사(Contractor) 관리
+- **도입형태(IntroType) 관리**: 구축형·구독형·사용량비례형 등 동적 추가·수정·삭제·순서 변경
 
 ### Google Drive 연동 (선택)
 - Service Account 기반 파일 업로드 (`POST /api/drive/upload`)
@@ -431,7 +447,7 @@ npm run dev
 ### 프로젝트
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| GET  | `/api/projects` | 프로젝트 목록 |
+| GET  | `/api/projects` | 프로젝트 목록 (`?all=true` 전체 반환, 페이지네이션 없음) |
 | POST | `/api/projects` | 프로젝트 등록 |
 | GET  | `/api/projects/[code]` | 프로젝트 상세 |
 | PUT  | `/api/projects/[code]` | 프로젝트 수정 |
@@ -498,6 +514,10 @@ npm run dev
 | POST | `/api/settings/site-visit-status` | 답사 상태코드 추가 |
 | PUT  | `/api/settings/site-visit-status/[id]` | 답사 상태코드 수정 |
 | DELETE | `/api/settings/site-visit-status/[id]` | 답사 상태코드 삭제 |
+| GET  | `/api/settings/intro-type` | 도입형태 목록 |
+| POST | `/api/settings/intro-type` | 도입형태 추가 |
+| PUT  | `/api/settings/intro-type/[id]` | 도입형태 수정 |
+| DELETE | `/api/settings/intro-type/[id]` | 도입형태 삭제 |
 
 ### Google Drive
 | Method | Endpoint | 설명 |

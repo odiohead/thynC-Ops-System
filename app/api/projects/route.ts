@@ -13,15 +13,17 @@ export async function GET(request: NextRequest) {
   const buildStatusId = searchParams.get('buildStatusId') ?? ''
   const contractorId = searchParams.get('contractorId') ?? ''
   const builderId = searchParams.get('builderId') ?? ''
-  const orderBy = searchParams.get('orderBy') ?? 'contractDate'
+  const all = searchParams.get('all') === 'true'
+  const orderBy = searchParams.get('orderBy') ?? 'startDate'
   const order = (searchParams.get('order') ?? 'desc') as 'asc' | 'desc'
 
-  const nullsPos = order === 'desc' ? 'last' : 'last'
+  // startDate DESC: null이 맨 위 (구축시작일 미입력 프로젝트 먼저)
+  const startDateNulls = order === 'desc' ? 'first' : 'last'
   const orderByMap: Record<string, object> = {
-    contractDate: { contractDate: { sort: order, nulls: nullsPos } },
-    startDate: { startDate: { sort: order, nulls: nullsPos } },
+    contractDate: { contractDate: { sort: order, nulls: 'last' } },
+    startDate: { startDate: { sort: order, nulls: startDateNulls } },
   }
-  const orderByClause = orderByMap[orderBy] ?? { contractDate: { sort: 'desc', nulls: 'last' } }
+  const orderByClause = orderByMap[orderBy] ?? { startDate: { sort: 'desc', nulls: 'first' } }
 
   const where = {
     ...(hospitalCode && { hospitalCode }),
@@ -39,8 +41,7 @@ export async function GET(request: NextRequest) {
   const [projects, total] = await Promise.all([
     prisma.project.findMany({
       where,
-      skip: (page - 1) * limit,
-      take: limit,
+      ...(all ? {} : { skip: (page - 1) * limit, take: limit }),
       orderBy: orderByClause,
       include: {
         hospital: {

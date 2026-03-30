@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 import { verifyToken } from '@/lib/auth'
+import { CalendarDays } from 'lucide-react'
 import ProjectFilters from './_components/ProjectFilters'
 import ProjectPagination from './_components/ProjectPagination'
 import StatusBadge from '@/app/components/StatusBadge'
@@ -39,14 +40,15 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
   const buildStatusId = (searchParams.buildStatusId as string) ?? ''
   const contractorId = (searchParams.contractorId as string) ?? ''
   const builderId = (searchParams.builderId as string) ?? ''
-  const orderBy = (searchParams.orderBy as string) ?? 'contractDate'
+  const orderBy = (searchParams.orderBy as string) ?? 'startDate'
   const order = ((searchParams.order as string) ?? 'desc') as 'asc' | 'desc'
 
+  const startDateNulls = order === 'desc' ? 'first' : 'last'
   const orderByMap: Record<string, object> = {
     contractDate: { contractDate: { sort: order, nulls: 'last' } },
-    startDate: { startDate: { sort: order, nulls: 'last' } },
+    startDate: { startDate: { sort: order, nulls: startDateNulls } },
   }
-  const orderByClause = orderByMap[orderBy] ?? { contractDate: { sort: 'desc', nulls: 'last' } }
+  const orderByClause = orderByMap[orderBy] ?? { startDate: { sort: 'desc', nulls: 'first' } }
 
   const where = {
     ...(search && {
@@ -97,14 +99,25 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
             <h1 className="text-2xl font-bold text-gray-900">프로젝트 관리</h1>
             <p className="mt-1 text-sm text-gray-500">총 {total.toLocaleString()}개</p>
           </div>
-          {isAdmin && (
-            <Link
-              href="/projects/new"
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+          <div className="flex items-center gap-2">
+            <a
+              href="/projects/calendar"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
             >
-              프로젝트 등록
-            </Link>
-          )}
+              <CalendarDays size={15} />
+              캘린더 보기
+            </a>
+            {isAdmin && (
+              <Link
+                href="/projects/new"
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+              >
+                프로젝트 등록
+              </Link>
+            )}
+          </div>
         </div>
 
         {/* 필터 */}
