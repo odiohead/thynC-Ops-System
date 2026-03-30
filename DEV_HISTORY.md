@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-03-30 | 프로젝트 생성 시 Google Drive 폴더 필수 조건 제거
+
+- 파일 스토리지가 S3로 전환됨에 따라 Drive 폴더 없어도 프로젝트 생성 가능하도록 차단 로직 제거
+- `app/api/projects/route.ts`: Drive 폴더 필수 체크(400 반환) 및 프로젝트 생성 후 Drive 폴더 자동 생성 로직 제거, `createDriveFolder` import 제거
+- `app/projects/new/page.tsx`: `hospitalDriveOk` state, Drive 폴더 미설정 경고 UI, 병원 선택 시 Drive 폴더 유무 조회 useEffect, submit 버튼 disabled 조건 제거
+- `/api/drive/*` 유틸리티 라우트 및 `lib/googleDrive.ts` 함수는 유지 (병원 목록 내보내기 등 Drive 전용 기능에 활용)
+- 영향 파일: `app/api/projects/route.ts`, `app/projects/new/page.tsx`
+
+---
+
 ## 2026-03-30 | PROD → DEV DB 데이터 동기화
 
 - `pg_dump --clean thync_ops | psql thync_ops_dev` 방식으로 상용 DB 데이터를 개발 DB에 전체 동기화
