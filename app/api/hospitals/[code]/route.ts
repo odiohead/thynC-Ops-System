@@ -88,11 +88,23 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
   if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const projectCount = await prisma.project.count({ where: { hospitalCode: params.code } })
+  const [projectCount, siteVisitCount] = await Promise.all([
+    prisma.project.count({ where: { hospitalCode: params.code } }),
+    prisma.siteVisit.count({ where: { hospitalCode: params.code } }),
+  ])
   if (projectCount > 0) {
     return NextResponse.json({ error: '연결된 프로젝트가 있어 삭제할 수 없습니다.' }, { status: 409 })
   }
+  if (siteVisitCount > 0) {
+    return NextResponse.json({ error: '연결된 답사 기록이 있어 삭제할 수 없습니다.' }, { status: 409 })
+  }
 
-  await prisma.hospital.delete({ where: { hospitalCode: params.code } })
+  await prisma.$transaction([
+    prisma.daewoongHospitalAssignment.deleteMany({ where: { hospitalCode: params.code } }),
+    prisma.hospitalDevice.deleteMany({ where: { hospitalCode: params.code } }),
+    prisma.hospitalMeta.deleteMany({ where: { hospitalCode: params.code } }),
+    prisma.hospital.delete({ where: { hospitalCode: params.code } }),
+  ])
+
   return NextResponse.json({ success: true })
 }

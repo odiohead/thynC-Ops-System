@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-03-30 | 병원 삭제 시 FK 제약 오류 수정
+
+- 병원 삭제 시 HospitalMeta, HospitalDevice, DaewoongHospitalAssignment 등 하위 레코드가 남아 있어 PostgreSQL FK 제약으로 삭제가 실패하던 문제 수정
+- 삭제 전 답사(SiteVisit) 연결 여부 추가 체크 (있으면 409 반환)
+- 트랜잭션으로 하위 레코드(담당자 배정 → 병원 장비 → 메타) 순서대로 삭제 후 병원 삭제 처리
+- 영향 파일: `app/api/hospitals/[code]/route.ts`
+
+---
+
 ## 2026-03-30 | 프로젝트 생성 시 Google Drive 폴더 필수 조건 제거
 
 - 파일 스토리지가 S3로 전환됨에 따라 Drive 폴더 없어도 프로젝트 생성 가능하도록 차단 로직 제거
