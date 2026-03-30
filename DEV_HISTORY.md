@@ -4,6 +4,42 @@
 
 ---
 
+## 2026-03-30 | 도입형태 기능 전면 개편 및 기타 수정
+
+- **TASK 4** 로그인 페이지: "Seers" → "SEERS" 텍스트 수정 (`app/login/page.tsx`)
+- **TASK 2** router.refresh() 감사: settings 페이지(status, site-visit-status)의 인플레이스 뮤테이션 핸들러에 `router.refresh()` 추가
+- **TASK 3** 도입형태 기능 전면 개편:
+  - DB: `hospital_intro_types` 조인 테이블 신설, `projects.intro_type_id` 컬럼 추가, INTRO_TYPE StatusCode 시드(구축형·구독형·사용량비례형) — SQL 직접 실행 후 prisma 스키마 동기화
+  - Prisma 스키마: `HospitalIntroType` 모델, `Hospital.introTypes`, `Project.introType / introTypeId` 관계 추가
+  - API: `/api/settings/intro-type` (GET/POST), `/api/settings/intro-type/[id]` (PUT/DELETE) 신설
+  - API: `/api/hospitals/[code]` GET에 `introTypes` include 추가, PUT에 `introTypeIds` 배열 처리(트랜잭션 delete+createMany)
+  - API: `/api/hospitals` POST에 `introTypeIds` 처리 추가 (이전 `introType` 문자열 제거)
+  - API: `/api/projects/[code]` GET/PUT에 `introType` 관계 include 및 `introTypeId` 저장 추가
+  - API: `/api/projects` POST에 `introTypeId` 저장 추가
+  - 네비게이션: 설정 메뉴에 "도입형태 관리" 링크 추가
+  - 설정 페이지: `/settings/intro-type` 관리 페이지 신설 (추가/수정/삭제/순서변경)
+  - 병원 상세(`/hospitals/[code]`): `introTypes` junction 데이터로 도입형태 칩 표시
+  - 병원 수정(`/hospitals/[code]/edit`): API에서 INTRO_TYPE 목록 동적 로드, chip 토글 UI, `introTypeIds` 전송
+  - 병원 등록(`/hospitals/register`): 동일 방식으로 chip 토글 UI, `introTypeIds` 전송
+  - 프로젝트 상세(`/projects/[code]`): 자유 텍스트 `contractType` → INTRO_TYPE select(`introTypeId`)로 교체
+  - 프로젝트 등록(`/projects/new`): 동일 방식으로 INTRO_TYPE select 추가
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/`, `app/login/page.tsx`, `app/components/Navigation.tsx`, `app/settings/intro-type/page.tsx`, `app/settings/status/page.tsx`, `app/settings/site-visit-status/page.tsx`, `app/api/settings/intro-type/route.ts`, `app/api/settings/intro-type/[id]/route.ts`, `app/api/hospitals/route.ts`, `app/api/hospitals/[code]/route.ts`, `app/api/projects/route.ts`, `app/api/projects/[code]/route.ts`, `app/hospitals/[code]/page.tsx`, `app/hospitals/[code]/edit/page.tsx`, `app/hospitals/register/page.tsx`, `app/projects/[code]/page.tsx`, `app/projects/new/page.tsx`
+
+---
+
+## 2026-03-30 | 병원 상세 UI 개선, 계정관리 탭 분리, S3 병원 디렉토리 자동 생성
+
+- Hospital detail: added contractDate field (DB+API+UI), removed Drive creation button, reorganized 기본정보 layout (종별+주소 one row), added thynC 시스템 현황 placeholder card.
+- Account management: Organization tab split (씨어스/대웅) with user count badges.
+- S3: auto-create /hospitals/{code}/ directory on hospital creation (best-effort, non-blocking).
+- 상세 내용:
+  - 병원 상세(`app/hospitals/[code]/page.tsx`): 기본정보 카드에서 종별·주소를 2-col 나란히 배치; DriveFolderRow 컴포넌트 및 관련 import 제거; thynC 현황 카드에 (최초)계약일 필드 추가(DB/API는 기존에 존재); thynC 시스템 현황 카드 신설(플레이스홀더)
+  - 계정 관리(`app/users/page.tsx`): 씨어스테크놀로지(SEERS)/대웅제약(DAEWOONG) 탭 추가, 탭별 사용자 수 뱃지, 클라이언트 사이드 필터링, 기본 탭 씨어스
+  - 병원 등록 API(`app/api/hospitals/route.ts`): 병원 생성 성공 후 S3에 `hospitals/{code}/` 빈 오브젝트 생성(실패 시 로그만 남기고 응답 계속)
+- 영향 파일: `app/hospitals/[code]/page.tsx`, `app/users/page.tsx`, `app/api/hospitals/route.ts`
+
+---
+
 ## 2026-03-30 | 로그인 페이지 UI 개편
 
 - 로그인 페이지 UI를 thynC 브랜드 기반 스플릿 레이아웃으로 전면 개편

@@ -4,12 +4,11 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import ColorPicker from '@/app/components/ColorPicker'
 
-interface StatusCode {
+interface IntroType {
   id: number
   name: string
   order: number
   color: string | null
-  usageCount: number
 }
 
 function ColorPreview({ color }: { color: string | null }) {
@@ -24,10 +23,9 @@ function ColorPreview({ color }: { color: string | null }) {
   )
 }
 
-
-export default function StatusSettingsPage() {
+export default function IntroTypeSettingsPage() {
   const router = useRouter()
-  const [statuses, setStatuses] = useState<StatusCode[]>([])
+  const [introTypes, setIntroTypes] = useState<IntroType[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -41,31 +39,31 @@ export default function StatusSettingsPage() {
 
   const [busy, setBusy] = useState(false)
 
-  async function fetchStatuses() {
-    const res = await fetch('/api/settings/status')
+  async function fetchIntroTypes() {
+    const res = await fetch('/api/settings/intro-type')
     const data = await res.json()
-    setStatuses(data.statusCodes)
+    setIntroTypes(data.introTypes ?? [])
     setLoading(false)
   }
 
-  useEffect(() => { fetchStatuses() }, [])
+  useEffect(() => { fetchIntroTypes() }, [])
 
   function showError(msg: string) {
     setError(msg)
     setTimeout(() => setError(null), 4000)
   }
 
-  async function handleSaveEdit(sc: StatusCode) {
+  async function handleSaveEdit(it: IntroType) {
     if (!editName.trim()) return
     setBusy(true)
-    const res = await fetch(`/api/settings/status/${sc.id}`, {
+    const res = await fetch(`/api/settings/intro-type/${it.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: editName.trim(), order: sc.order, color: editColor || null }),
+      body: JSON.stringify({ name: editName.trim(), order: it.order, color: editColor || null }),
     })
     if (res.ok) {
       router.refresh()
-      await fetchStatuses()
+      await fetchIntroTypes()
       setEditId(null)
     } else {
       showError((await res.json()).error)
@@ -73,13 +71,13 @@ export default function StatusSettingsPage() {
     setBusy(false)
   }
 
-  async function handleDelete(sc: StatusCode) {
-    if (!confirm(`'${sc.name}' 상태값을 삭제하시겠습니까?`)) return
+  async function handleDelete(it: IntroType) {
+    if (!confirm(`'${it.name}' 도입형태를 삭제하시겠습니까?`)) return
     setBusy(true)
-    const res = await fetch(`/api/settings/status/${sc.id}`, { method: 'DELETE' })
+    const res = await fetch(`/api/settings/intro-type/${it.id}`, { method: 'DELETE' })
     if (res.ok) {
       router.refresh()
-      await fetchStatuses()
+      await fetchIntroTypes()
     } else {
       showError((await res.json()).error)
     }
@@ -89,15 +87,15 @@ export default function StatusSettingsPage() {
   async function handleAdd() {
     if (!addName.trim()) return
     setBusy(true)
-    const nextOrder = statuses.length > 0 ? Math.max(...statuses.map((s) => s.order)) + 1 : 1
-    const res = await fetch('/api/settings/status', {
+    const nextOrder = introTypes.length > 0 ? Math.max(...introTypes.map((s) => s.order)) + 1 : 1
+    const res = await fetch('/api/settings/intro-type', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: addName.trim(), order: nextOrder, color: addColor || null }),
     })
     if (res.ok) {
       router.refresh()
-      await fetchStatuses()
+      await fetchIntroTypes()
       setIsAdding(false)
       setAddName('')
       setAddColor('')
@@ -109,19 +107,19 @@ export default function StatusSettingsPage() {
 
   async function handleMove(index: number, direction: 'up' | 'down') {
     const targetIndex = direction === 'up' ? index - 1 : index + 1
-    if (targetIndex < 0 || targetIndex >= statuses.length) return
+    if (targetIndex < 0 || targetIndex >= introTypes.length) return
 
-    const current = statuses[index]
-    const target = statuses[targetIndex]
+    const current = introTypes[index]
+    const target = introTypes[targetIndex]
     setBusy(true)
 
     await Promise.all([
-      fetch(`/api/settings/status/${current.id}`, {
+      fetch(`/api/settings/intro-type/${current.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: current.name, order: target.order, color: current.color }),
       }),
-      fetch(`/api/settings/status/${target.id}`, {
+      fetch(`/api/settings/intro-type/${target.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: target.name, order: current.order, color: target.color }),
@@ -129,7 +127,7 @@ export default function StatusSettingsPage() {
     ])
 
     router.refresh()
-    await fetchStatuses()
+    await fetchIntroTypes()
     setBusy(false)
   }
 
@@ -137,11 +135,10 @@ export default function StatusSettingsPage() {
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6 lg:px-8">
 
-        {/* 헤더 */}
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">병원 상태코드 관리</h1>
-            <p className="mt-1 text-sm text-gray-500">병원에 적용되는 상태코드와 표시 색상을 관리합니다.</p>
+            <h1 className="text-2xl font-bold text-gray-900">도입형태 관리</h1>
+            <p className="mt-1 text-sm text-gray-500">병원 및 프로젝트에 적용되는 도입형태를 관리합니다.</p>
           </div>
           {!isAdding && (
             <button
@@ -149,7 +146,7 @@ export default function StatusSettingsPage() {
               onClick={() => { setIsAdding(true); setEditId(null) }}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
             >
-              + 상태코드 추가
+              + 도입형태 추가
             </button>
           )}
         </div>
@@ -160,31 +157,28 @@ export default function StatusSettingsPage() {
           </div>
         )}
 
-        {/* 테이블 */}
         <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
                 <th className="w-16 px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">순서</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">상태명</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">도입형태명</th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">색상</th>
-                <th className="hidden px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 sm:table-cell">사용 병원</th>
                 <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">관리</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td>
+                  <td colSpan={4} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td>
                 </tr>
-              ) : statuses.length === 0 ? (
+              ) : introTypes.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-sm text-gray-400">등록된 상태코드가 없습니다.</td>
+                  <td colSpan={4} className="py-12 text-center text-sm text-gray-400">등록된 도입형태가 없습니다.</td>
                 </tr>
               ) : (
-                statuses.map((sc, index) => (
-                  <tr key={sc.id} className="hover:bg-gray-50">
-                    {/* 순서 */}
+                introTypes.map((it, index) => (
+                  <tr key={it.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
                         <span className="w-6 text-sm tabular-nums text-gray-500">{index + 1}</span>
@@ -193,7 +187,6 @@ export default function StatusSettingsPage() {
                             onClick={() => handleMove(index, 'up')}
                             disabled={index === 0 || busy}
                             className="rounded px-0.5 text-gray-400 transition-colors hover:text-gray-700 disabled:opacity-30"
-                            title="위로"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                               <polyline points="18 15 12 9 6 15" />
@@ -201,9 +194,8 @@ export default function StatusSettingsPage() {
                           </button>
                           <button
                             onClick={() => handleMove(index, 'down')}
-                            disabled={index === statuses.length - 1 || busy}
+                            disabled={index === introTypes.length - 1 || busy}
                             className="rounded px-0.5 text-gray-400 transition-colors hover:text-gray-700 disabled:opacity-30"
-                            title="아래로"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                               <polyline points="6 9 12 15 18 9" />
@@ -213,51 +205,37 @@ export default function StatusSettingsPage() {
                       </div>
                     </td>
 
-                    {/* 상태명 */}
                     <td className="px-4 py-3">
-                      {editId === sc.id ? (
+                      {editId === it.id ? (
                         <input
                           type="text"
                           value={editName}
                           onChange={(e) => setEditName(e.target.value)}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleSaveEdit(sc)
+                            if (e.key === 'Enter') handleSaveEdit(it)
                             if (e.key === 'Escape') setEditId(null)
                           }}
                           autoFocus
                           className="w-full rounded border border-blue-400 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                         />
                       ) : (
-                        <span className="text-sm font-medium text-gray-900">{sc.name}</span>
+                        <span className="text-sm font-medium text-gray-900">{it.name}</span>
                       )}
                     </td>
 
-                    {/* 색상 */}
                     <td className="px-4 py-3">
-                      {editId === sc.id ? (
+                      {editId === it.id ? (
                         <ColorPicker value={editColor} onChange={setEditColor} />
                       ) : (
-                        <ColorPreview color={sc.color} />
+                        <ColorPreview color={it.color} />
                       )}
                     </td>
 
-                    {/* 사용 병원 수 */}
-                    <td className="hidden px-4 py-3 sm:table-cell">
-                      <span className="text-sm text-gray-500">
-                        {sc.usageCount > 0 ? (
-                          <span className="font-medium text-gray-700">{sc.usageCount.toLocaleString()}개</span>
-                        ) : (
-                          <span className="text-gray-400">-</span>
-                        )}
-                      </span>
-                    </td>
-
-                    {/* 액션 */}
                     <td className="px-4 py-3 text-right">
-                      {editId === sc.id ? (
+                      {editId === it.id ? (
                         <div className="flex justify-end gap-2">
                           <button
-                            onClick={() => handleSaveEdit(sc)}
+                            onClick={() => handleSaveEdit(it)}
                             disabled={busy}
                             className="rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
                           >
@@ -274,9 +252,9 @@ export default function StatusSettingsPage() {
                         <div className="flex justify-end gap-2">
                           <button
                             onClick={() => {
-                              setEditId(sc.id)
-                              setEditName(sc.name)
-                              setEditColor(sc.color ?? '')
+                              setEditId(it.id)
+                              setEditName(it.name)
+                              setEditColor(it.color ?? '')
                               setIsAdding(false)
                             }}
                             disabled={busy}
@@ -285,7 +263,7 @@ export default function StatusSettingsPage() {
                             수정
                           </button>
                           <button
-                            onClick={() => handleDelete(sc)}
+                            onClick={() => handleDelete(it)}
                             disabled={busy}
                             className="rounded-md border border-red-200 px-3 py-1 text-xs font-medium text-red-500 transition-colors hover:bg-red-50 disabled:opacity-50"
                           >
@@ -298,10 +276,9 @@ export default function StatusSettingsPage() {
                 ))
               )}
 
-              {/* 추가 행 */}
               {isAdding && (
                 <tr className="bg-blue-50">
-                  <td className="px-4 py-3 text-sm text-gray-400">{statuses.length + 1}</td>
+                  <td className="px-4 py-3 text-sm text-gray-400">{introTypes.length + 1}</td>
                   <td className="px-4 py-3">
                     <input
                       type="text"
@@ -311,7 +288,7 @@ export default function StatusSettingsPage() {
                         if (e.key === 'Enter') handleAdd()
                         if (e.key === 'Escape') { setIsAdding(false); setAddName(''); setAddColor('') }
                       }}
-                      placeholder="상태명 입력"
+                      placeholder="도입형태명 입력"
                       autoFocus
                       className="w-full rounded border border-blue-400 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
@@ -319,7 +296,6 @@ export default function StatusSettingsPage() {
                   <td className="px-4 py-3">
                     <ColorPicker value={addColor} onChange={setAddColor} />
                   </td>
-                  <td className="hidden px-4 py-3 sm:table-cell" />
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-2">
                       <button

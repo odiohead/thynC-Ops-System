@@ -5,7 +5,6 @@ import { prisma } from '@/lib/prisma'
 import { verifyToken } from '@/lib/auth'
 import DeleteButton from './_components/DeleteButton'
 import DaewoongStaffTab from './_components/DaewoongStaffTab'
-import DriveFolderRow from './_components/DriveFolderRow'
 import HospitalDevicesSection from './_components/HospitalDevicesSection'
 import StatusBadge from '@/app/components/StatusBadge'
 
@@ -35,7 +34,10 @@ export default async function HospitalDetailPage({ params }: PageProps) {
   const [hospital, projects, allDevices, hospitalDevices, statusCodes] = await Promise.all([
     prisma.hospital.findUnique({
       where: { hospitalCode: params.code },
-      include: { meta: true },
+      include: {
+        meta: true,
+        introTypes: { include: { statusCode: true }, orderBy: { statusCode: { order: 'asc' } } },
+      },
     }),
     prisma.project.findMany({
       where: { hospitalCode: params.code },
@@ -52,7 +54,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
   if (!hospital) notFound()
 
   const statusColor = statusCodes.find((sc) => sc.name === hospital.status)?.color ?? null
-  const introTypeList = hospital.introType ? hospital.introType.split(',') : []
+  const introTypeList = hospital.introTypes ?? []
 
   const quantityMap = new Map(hospitalDevices.map((d) => [d.deviceInfoId, d.quantity]))
   const deviceRows = allDevices.map((d) => ({
@@ -103,9 +105,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
           </dl>
           <dl className="grid grid-cols-1 gap-6 border-t border-gray-100 px-6 py-5 sm:grid-cols-2">
             <Field label="종별" value={hospital.type || <span className="text-gray-400">-</span>} />
-            <div className="sm:col-span-2">
-              <Field label="주소" value={hospital.address} />
-            </div>
+            <Field label="주소" value={hospital.address} />
           </dl>
         </div>
 
@@ -129,18 +129,18 @@ export default async function HospitalDetailPage({ params }: PageProps) {
               value={
                 introTypeList.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
-                    {introTypeList.map((t) => (
-                      <span key={t} className="inline-flex rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700">
-                        {t}
+                    {introTypeList.map((it) => (
+                      <span key={it.id} className="inline-flex rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                        {it.statusCode.name}
                       </span>
                     ))}
                   </div>
                 ) : null
               }
             />
-            <DriveFolderRow
-              hospitalCode={hospital.hospitalCode}
-              initialFolderId={hospital.meta?.driveProjectFolderId ?? null}
+            <Field
+              label="(최초)계약일"
+              value={hospital.contractDate ? new Date(hospital.contractDate).toLocaleDateString('ko-KR') : null}
             />
           </dl>
           <div className="border-t border-gray-100 px-6 py-5">
@@ -151,6 +151,14 @@ export default async function HospitalDetailPage({ params }: PageProps) {
               initialDevices={deviceRows}
             />
           </div>
+        </div>
+
+        {/* thynC 시스템 현황 */}
+        <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-gray-200 px-6 py-4">
+            <h2 className="text-sm font-semibold text-gray-700">thynC 시스템 현황</h2>
+          </div>
+          <div className="px-6 py-8 text-center text-sm text-gray-400">추후 개발 예정</div>
         </div>
 
         {/* 구축 프로젝트 */}

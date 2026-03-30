@@ -5,8 +5,6 @@ import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import HiraSearchModal, { HiraHospital } from '../../_components/HiraSearchModal'
 
-const INTRO_TYPE_OPTIONS = ['구축형', '구독형', '사용량비례형']
-
 interface Hospital {
   id: number
   hospitalCode: string
@@ -16,12 +14,17 @@ interface Hospital {
   type: string
   status: string
   address: string | null
-  introType: string | null
   introBeds: number | null
   contractDate: string | null
+  introTypes: { id: number; statusCodeId: number; statusCode: { id: number; name: string } }[]
 }
 
 interface StatusCode {
+  id: number
+  name: string
+}
+
+interface IntroTypeOption {
   id: number
   name: string
 }
@@ -35,9 +38,10 @@ export default function HospitalEditPage() {
 
   const [hospital, setHospital] = useState<Hospital | null>(null)
   const [statusCodes, setStatusCodes] = useState<StatusCode[]>([])
+  const [introTypeOptions, setIntroTypeOptions] = useState<IntroTypeOption[]>([])
   const [hospitalName, setHospitalName] = useState('')
   const [status, setStatus] = useState('')
-  const [introTypes, setIntroTypes] = useState<string[]>([])
+  const [selectedIntroTypeIds, setSelectedIntroTypeIds] = useState<number[]>([])
   const [introBeds, setIntroBeds] = useState('')
   const [contractDate, setContractDate] = useState('')
 
@@ -49,14 +53,17 @@ export default function HospitalEditPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch(`/api/hospitals/${code}`)
-      .then((r) => r.json())
-      .then(({ hospital, statusCodes }) => {
+    Promise.all([
+      fetch(`/api/hospitals/${code}`).then((r) => r.json()),
+      fetch('/api/settings/intro-type').then((r) => r.json()),
+    ])
+      .then(([{ hospital, statusCodes }, introData]) => {
         setHospital(hospital)
         setStatusCodes(statusCodes)
+        setIntroTypeOptions(introData.introTypes ?? [])
         setHospitalName(hospital.hospitalName)
         setStatus(hospital.status)
-        setIntroTypes(hospital.introType ? hospital.introType.split(',') : [])
+        setSelectedIntroTypeIds((hospital.introTypes ?? []).map((it: { statusCodeId: number }) => it.statusCodeId))
         setIntroBeds(hospital.introBeds != null ? String(hospital.introBeds) : '')
         setContractDate(hospital.contractDate ? hospital.contractDate.slice(0, 10) : '')
         setLoading(false)
@@ -67,8 +74,8 @@ export default function HospitalEditPage() {
       })
   }, [code])
 
-  function toggleIntroType(t: string) {
-    setIntroTypes((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t])
+  function toggleIntroType(id: number) {
+    setSelectedIntroTypeIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
   }
 
   // 현재 표시할 HIRA 정보
@@ -94,7 +101,7 @@ export default function HospitalEditPage() {
       const body: Record<string, unknown> = {
         hospitalName,
         status,
-        introType: introTypes.length > 0 ? introTypes.join(',') : null,
+        introTypeIds: selectedIntroTypeIds,
         introBeds: introBeds !== '' ? Number(introBeds) : null,
         contractDate: contractDate || null,
       }
@@ -229,17 +236,20 @@ export default function HospitalEditPage() {
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">도입형태</label>
-                <div className="mt-2 flex flex-wrap gap-4">
-                  {INTRO_TYPE_OPTIONS.map((t) => (
-                    <label key={t} className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
-                      <input
-                        type="checkbox"
-                        checked={introTypes.includes(t)}
-                        onChange={() => toggleIntroType(t)}
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      {t}
-                    </label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {introTypeOptions.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => toggleIntroType(opt.id)}
+                      className={`rounded-full border px-3 py-1 text-sm transition-colors ${
+                        selectedIntroTypeIds.includes(opt.id)
+                          ? 'border-blue-500 bg-blue-500 text-white'
+                          : 'border-gray-300 bg-white text-gray-600 hover:border-blue-400 hover:text-blue-600'
+                      }`}
+                    >
+                      {opt.name}
+                    </button>
                   ))}
                 </div>
               </div>

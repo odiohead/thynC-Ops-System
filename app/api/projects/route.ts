@@ -92,6 +92,7 @@ export async function POST(request: NextRequest) {
   const {
     hospitalCode,
     contractDate,
+    introTypeId,
     wardCount,
     bedCount,
     gatewayCount,
@@ -144,6 +145,7 @@ export async function POST(request: NextRequest) {
       hospitalCode,
       orderNumber,
       contractDate: contractDate ? new Date(contractDate) : null,
+      introTypeId: introTypeId ? Number(introTypeId) : null,
       wardCount: wardCount != null ? Number(wardCount) : null,
       bedCount: bedCount != null ? Number(bedCount) : null,
       gatewayCount: gatewayCount != null ? Number(gatewayCount) : null,

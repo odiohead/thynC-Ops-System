@@ -40,6 +40,7 @@ function NewProjectForm() {
   const [showHospitalModal, setShowHospitalModal] = useState(false)
 
   const [contractDate, setContractDate] = useState('')
+  const [introTypeId, setIntroTypeId] = useState('')
   const [wardCount, setWardCount] = useState('')
   const [bedCount, setBedCount] = useState('')
   const [gatewayCount, setGatewayCount] = useState('')
@@ -57,6 +58,7 @@ function NewProjectForm() {
   const [endDateExpected, setEndDateExpected] = useState('')
   const [buildStatusId, setBuildStatusId] = useState('')
   const [buildStatuses, setBuildStatuses] = useState<BuildStatusOption[]>([])
+  const [introTypeOptions, setIntroTypeOptions] = useState<{ id: number; name: string }[]>([])
   const [issueNote, setIssueNote] = useState('')
 
   const [devices, setDevices] = useState<DeviceInfo[]>([])
@@ -73,12 +75,14 @@ function NewProjectForm() {
       fetch('/api/users').then((r) => r.json()),
       fetch('/api/constructors').then((r) => r.json()),
       fetch('/api/settings/build-status').then((r) => r.json()),
+      fetch('/api/settings/intro-type').then((r) => r.json()),
       presetCode ? fetch(`/api/hospitals/${presetCode}`).then((r) => r.json()) : Promise.resolve(null),
-    ]).then(([devData, userData, conData, bsData, hospData]) => {
+    ]).then(([devData, userData, conData, bsData, introData, hospData]) => {
       setDevices((devData.devices ?? []).filter((d: DeviceInfo) => d.isActive))
       setUsers(Array.isArray(userData) ? userData : [])
       setConstructors(conData.constructors ?? [])
       setBuildStatuses(bsData.buildStatuses ?? [])
+      setIntroTypeOptions(introData.introTypes ?? [])
       if (hospData?.hospital) {
         setHospital({
           hospitalCode: hospData.hospital.hospitalCode,
@@ -102,6 +106,7 @@ function NewProjectForm() {
         body: JSON.stringify({
           hospitalCode: hospital.hospitalCode,
           contractDate: contractDate || null,
+          introTypeId: introTypeId ? Number(introTypeId) : null,
           wardCount: wardCount !== '' ? Number(wardCount) : null,
           bedCount: bedCount !== '' ? Number(bedCount) : null,
           gatewayCount: gatewayCount !== '' ? Number(gatewayCount) : null,
@@ -206,6 +211,15 @@ function NewProjectForm() {
               <div>
                 <label className={labelClass}>계약일</label>
                 <input type="date" value={contractDate} onChange={(e) => setContractDate(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className={labelClass}>도입형태</label>
+                <select value={introTypeId} onChange={(e) => setIntroTypeId(e.target.value)} className={inputClass}>
+                  <option value="">선택 없음</option>
+                  {introTypeOptions.map((opt) => (
+                    <option key={opt.id} value={opt.id}>{opt.name}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className={labelClass}>도입 병동 수</label>

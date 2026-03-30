@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import ColorPicker from '@/app/components/ColorPicker'
 
 interface StatusCode {
@@ -23,6 +24,7 @@ function ColorPreview({ color }: { color: string | null }) {
 }
 
 export default function SiteVisitStatusPage() {
+  const router = useRouter()
   const [statuses, setStatuses] = useState<StatusCode[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -60,6 +62,7 @@ export default function SiteVisitStatusPage() {
       body: JSON.stringify({ name: editName.trim(), order: sc.order, color: editColor || null }),
     })
     if (res.ok) {
+      router.refresh()
       await fetchStatuses()
       setEditId(null)
     } else {
@@ -73,6 +76,7 @@ export default function SiteVisitStatusPage() {
     setBusy(true)
     const res = await fetch(`/api/settings/site-visit-status/${sc.id}`, { method: 'DELETE' })
     if (res.ok) {
+      router.refresh()
       await fetchStatuses()
     } else {
       showError((await res.json()).error)
@@ -90,6 +94,7 @@ export default function SiteVisitStatusPage() {
       body: JSON.stringify({ name: addName.trim(), order: nextOrder, color: addColor || null }),
     })
     if (res.ok) {
+      router.refresh()
       await fetchStatuses()
       setIsAdding(false)
       setAddName('')
@@ -121,6 +126,7 @@ export default function SiteVisitStatusPage() {
       }),
     ])
 
+    router.refresh()
     await fetchStatuses()
     setBusy(false)
   }

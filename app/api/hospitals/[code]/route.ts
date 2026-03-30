@@ -7,7 +7,13 @@ type Params = { params: { code: string } }
 
 export async function GET(_req: NextRequest, { params }: Params) {
   const [hospital, statusCodes] = await Promise.all([
-    prisma.hospital.findUnique({ where: { hospitalCode: params.code }, include: { meta: true } }),
+    prisma.hospital.findUnique({
+      where: { hospitalCode: params.code },
+      include: {
+        meta: true,
+        introTypes: { include: { statusCode: true }, orderBy: { statusCode: { order: 'asc' } } },
+      },
+    }),
     prisma.statusCode.findMany({ orderBy: { order: 'asc' } }),
   ])
 
@@ -21,7 +27,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 export async function PUT(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
   if (!user || user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  const { hospitalName, status, introType, introBeds, contractDate, changeHira, hiraId } = await request.json()
+  const { hospitalName, status, introType, introBeds, contractDate, changeHira, hiraId, introTypeIds } = await request.json()
 
   let hiraUpdateData: Record<string, unknown> = {}
 
@@ -67,16 +73,36 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
   }
 
-  const hospital = await prisma.hospital.update({
-    where: { hospitalCode: params.code },
-    data: {
-      hospitalName,
-      status,
-      introType: introType ?? null,
-      introBeds: introBeds !== undefined && introBeds !== '' ? Number(introBeds) : null,
-      contractDate: contractDate ? new Date(contractDate) : null,
-      ...hiraUpdateData,
-    },
+  const existingHospital = await prisma.hospital.findUnique({ where: { hospitalCode: params.code } })
+  if (!existingHospital) return NextResponse.json({ error: '병원을 찾을 수 없습니다.' }, { status: 404 })
+
+  const [hospital] = await prisma.$transaction(async (tx) => {
+    const updated = await tx.hospital.update({
+      where: { hospitalCode: params.code },
+      data: {
+        hospitalName,
+        status,
+        introType: introType ?? null,
+        introBeds: introBeds !== undefined && introBeds !== '' ? Number(introBeds) : null,
+        contractDate: contractDate ? new Date(contractDate) : null,
+        ...hiraUpdateData,
+      },
+      include: {
+        meta: true,
+        introTypes: { include: { statusCode: true }, orderBy: { statusCode: { order: 'asc' } } },
+      },
+    })
+
+    if (Array.isArray(introTypeIds)) {
+      await tx.hospitalIntroType.deleteMany({ where: { hospitalId: existingHospital.id } })
+      if (introTypeIds.length > 0) {
+        await tx.hospitalIntroType.createMany({
+          data: introTypeIds.map((scId: number) => ({ hospitalId: existingHospital.id, statusCodeId: scId })),
+        })
+      }
+    }
+
+    return [updated]
   })
 
   revalidatePath('/hospitals')

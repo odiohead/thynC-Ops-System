@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
+
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION!,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  },
+})
 
 const PAGE_SIZE = 20
 
@@ -8,7 +17,7 @@ export async function POST(request: NextRequest) {
   const user = await getAuthUser(request)
   if (!user || user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { hiraId, hospitalName, status, introType, introBeds } = await request.json()
+  const { hiraId, hospitalName, status, introTypeIds, introBeds } = await request.json()
 
   if (!hospitalName?.trim()) {
     return NextResponse.json({ error: '병원명은 필수입니다.' }, { status: 400 })
@@ -56,10 +65,27 @@ export async function POST(request: NextRequest) {
       coordinateX: hiraData?.coordinateX ?? null,
       coordinateY: hiraData?.coordinateY ?? null,
       status,
-      introType: introType ?? null,
       introBeds: introBeds != null ? Number(introBeds) : null,
     },
   })
+
+  // Create HospitalIntroType records
+  if (Array.isArray(introTypeIds) && introTypeIds.length > 0) {
+    await prisma.hospitalIntroType.createMany({
+      data: introTypeIds.map((scId: number) => ({ hospitalId: hospital.id, statusCodeId: scId })),
+    })
+  }
+
+  // S3 directory for future file storage
+  try {
+    await s3Client.send(new PutObjectCommand({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: `hospitals/${hospitalCode}/`,
+      Body: '',
+    }))
+  } catch (s3Err) {
+    console.error(`S3 병원 디렉토리 생성 실패 [${hospitalCode}]:`, s3Err)
+  }
 
   return NextResponse.json({ hospital }, { status: 201 })
 }

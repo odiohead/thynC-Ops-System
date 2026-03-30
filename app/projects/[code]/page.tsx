@@ -41,6 +41,11 @@ interface BuildStatusOption {
   color: string | null
 }
 
+interface IntroTypeOption {
+  id: number
+  name: string
+}
+
 interface Project {
   id: number
   projectCode: string
@@ -48,7 +53,7 @@ interface Project {
   hospitalCode: string
   orderNumber: number
   contractDate: string | null
-  contractType: string | null
+  introType: IntroTypeOption | null
   wardCount: number | null
   bedCount: number | null
   gatewayCount: number | null
@@ -102,6 +107,7 @@ export default function ProjectDetailPage() {
   const [users, setUsers] = useState<UserOption[]>([])
   const [constructors, setConstructors] = useState<ConstructorOption[]>([])
   const [buildStatuses, setBuildStatuses] = useState<BuildStatusOption[]>([])
+  const [introTypeOptions, setIntroTypeOptions] = useState<IntroTypeOption[]>([])
   const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -109,7 +115,7 @@ export default function ProjectDetailPage() {
 
   // 편집 상태
   const [contractDate, setContractDate] = useState('')
-  const [contractType, setContractType] = useState('')
+  const [introTypeId, setIntroTypeId] = useState('')
   const [wardCount, setWardCount] = useState('')
   const [bedCount, setBedCount] = useState('')
   const [gatewayCount, setGatewayCount] = useState('')
@@ -141,7 +147,7 @@ export default function ProjectDetailPage() {
     setProject(p)
 
     setContractDate(toDateInput(p.contractDate))
-    setContractType(p.contractType ?? '')
+    setIntroTypeId(p.introType?.id ? String(p.introType.id) : '')
     setWardCount(p.wardCount != null ? String(p.wardCount) : '')
     setBedCount(p.bedCount != null ? String(p.bedCount) : '')
     setGatewayCount(p.gatewayCount != null ? String(p.gatewayCount) : '')
@@ -168,12 +174,14 @@ export default function ProjectDetailPage() {
       fetch('/api/constructors').then((r) => r.json()),
       fetch('/api/settings/build-status').then((r) => r.json()),
       fetch('/api/auth/me').then((r) => r.json()),
-    ]).then(([, devData, userData, conData, bsData, meData]) => {
+      fetch('/api/settings/intro-type').then((r) => r.json()),
+    ]).then(([, devData, userData, conData, bsData, meData, introData]) => {
       setAllDevices((devData.devices ?? []).filter((d: DeviceInfo) => d.isActive))
       setUsers(Array.isArray(userData) ? userData : [])
       setConstructors(conData.constructors ?? [])
       setBuildStatuses(bsData.buildStatuses ?? [])
-      setIsAdmin(meData?.role === 'ADMIN')
+      setIsAdmin(meData?.role === 'ADMIN' || meData?.role === 'SUPER_ADMIN')
+      setIntroTypeOptions(introData.introTypes ?? [])
       setLoading(false)
     })
   }, [loadProject])
@@ -187,7 +195,7 @@ export default function ProjectDetailPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contractDate: contractDate || null,
-        contractType: contractType || null,
+        introTypeId: introTypeId ? Number(introTypeId) : null,
         wardCount: wardCount !== '' ? Number(wardCount) : null,
         bedCount: bedCount !== '' ? Number(bedCount) : null,
         gatewayCount: gatewayCount !== '' ? Number(gatewayCount) : null,
@@ -365,7 +373,12 @@ export default function ProjectDetailPage() {
               </div>
               <div>
                 <label className={labelClass}>도입형태</label>
-                <input type="text" value={contractType} onChange={(e) => setContractType(e.target.value)} className={inputClass} placeholder="예: 구축형, 씨어스, 사용량" />
+                <select value={introTypeId} onChange={(e) => setIntroTypeId(e.target.value)} className={inputClass}>
+                  <option value="">선택 없음</option>
+                  {introTypeOptions.map((opt) => (
+                    <option key={opt.id} value={opt.id}>{opt.name}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className={labelClass}>도입 병동 수</label>

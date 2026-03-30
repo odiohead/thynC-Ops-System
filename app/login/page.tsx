@@ -339,7 +339,7 @@ export default function LoginPage() {
                 © 2025 SEERS CO.,LTD
               </span>
               <span style={{ fontSize: 11, color: '#94A3B8' }}>
-                Powered by <strong style={{ color: '#475569', fontWeight: 600 }}>Seers</strong>
+                Powered by <strong style={{ color: '#475569', fontWeight: 600 }}>SEERS</strong>
               </span>
             </div>
 

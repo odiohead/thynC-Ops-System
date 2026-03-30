@@ -10,6 +10,7 @@ const projectInclude = {
   builder: { select: { id: true, name: true, email: true } },
   contractor: { select: { id: true, code: true, name: true } },
   buildStatus: { select: { id: true, label: true, color: true } },
+  introType: { select: { id: true, name: true } },
   devices: {
     include: { deviceInfo: true },
     orderBy: { deviceInfo: { sortOrder: 'asc' } },
@@ -68,6 +69,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     startDate,
     endDateExpected,
     buildStatusId,
+    introTypeId,
     issueNote,
     remark,
   } = body
@@ -88,6 +90,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       startDate: startDate !== undefined ? (startDate ? new Date(startDate) : null) : undefined,
       endDateExpected: endDateExpected !== undefined ? (endDateExpected ? new Date(endDateExpected) : null) : undefined,
       buildStatusId: buildStatusId !== undefined ? (buildStatusId ? Number(buildStatusId) : null) : undefined,
+      introTypeId: introTypeId !== undefined ? (introTypeId ? Number(introTypeId) : null) : undefined,
       issueNote: issueNote !== undefined ? issueNote : undefined,
       remark: remark !== undefined ? remark : undefined,
     },

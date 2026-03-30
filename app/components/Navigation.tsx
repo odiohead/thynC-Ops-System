@@ -258,6 +258,12 @@ export default function Navigation() {
                   >
                     공사업체 관리
                   </Link>
+                  <Link
+                    href="/settings/intro-type"
+                    className={navItemClass(isActive('/settings/intro-type'))}
+                  >
+                    도입형태 관리
+                  </Link>
                 </>
               )}
               {/* 답사 상태 관리: ADMIN 이상만 */}

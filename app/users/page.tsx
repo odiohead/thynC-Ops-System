@@ -68,6 +68,7 @@ export default function UsersPage() {
   const [editSubmitting, setEditSubmitting] = useState(false)
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'SEERS' | 'DAEWOONG'>('SEERS')
 
   // 다른 계정 수정 모달 (SUPER_ADMIN 전용)
   const [showEditOtherModal, setShowEditOtherModal] = useState(false)
@@ -268,6 +269,10 @@ export default function UsersPage() {
 
   const isAdmin = isAdminOrAbove(currentUser?.role)
 
+  const seersCount = users.filter((u) => u.organization?.code === 'SEERS').length
+  const daewoongCount = users.filter((u) => u.organization?.code === 'DAEWOONG').length
+  const filteredUsers = users.filter((u) => u.organization?.code === activeTab)
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
@@ -280,6 +285,31 @@ export default function UsersPage() {
             계정 생성
           </button>
         )}
+      </div>
+
+      {/* 조직 탭 */}
+      <div className="flex gap-1 mb-4 border-b border-gray-200">
+        {([
+          { code: 'SEERS', label: '씨어스테크놀로지', count: seersCount },
+          { code: 'DAEWOONG', label: '대웅제약', count: daewoongCount },
+        ] as const).map((tab) => (
+          <button
+            key={tab.code}
+            onClick={() => setActiveTab(tab.code)}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              activeTab === tab.code
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {tab.label}
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+              activeTab === tab.code ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+            }`}>
+              {tab.count}
+            </span>
+          </button>
+        ))}
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
@@ -296,7 +326,7 @@ export default function UsersPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {users.map((user) => (
+            {filteredUsers.map((user) => (
               <tr key={user.id} className={`hover:bg-gray-50 ${user.id === currentUser?.id ? 'bg-blue-50/40' : ''}`}>
                 <td className="px-4 py-3 font-medium text-gray-900">
                   {user.name}
@@ -359,7 +389,7 @@ export default function UsersPage() {
             ))}
           </tbody>
         </table>
-        {users.length === 0 && (
+        {filteredUsers.length === 0 && (
           <div className="py-12 text-center text-sm text-gray-500">계정이 없습니다.</div>
         )}
       </div>

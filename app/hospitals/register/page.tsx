@@ -5,9 +5,12 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import HiraSearchModal, { HiraHospital } from '../_components/HiraSearchModal'
 
-const INTRO_TYPE_OPTIONS = ['구축형', '구독형', '사용량비례형']
-
 interface StatusCode {
+  id: number
+  name: string
+}
+
+interface IntroTypeOption {
   id: number
   name: string
 }
@@ -17,9 +20,10 @@ export default function RegisterPage() {
 
   const [hospitalName, setHospitalName] = useState('')
   const [status, setStatus] = useState('')
-  const [introTypes, setIntroTypes] = useState<string[]>([])
+  const [selectedIntroTypeIds, setSelectedIntroTypeIds] = useState<number[]>([])
   const [introBeds, setIntroBeds] = useState('')
   const [statusCodes, setStatusCodes] = useState<StatusCode[]>([])
+  const [introTypeOptions, setIntroTypeOptions] = useState<IntroTypeOption[]>([])
 
   const [selectedHira, setSelectedHira] = useState<HiraHospital | null>(null)
   const [showModal, setShowModal] = useState(false)
@@ -28,17 +32,19 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('/api/settings/status')
-      .then((r) => r.json())
-      .then((d) => {
-        const codes: StatusCode[] = d.statusCodes ?? []
-        setStatusCodes(codes)
-        if (codes.length > 0) setStatus(codes[0].name)
-      })
+    Promise.all([
+      fetch('/api/settings/status').then((r) => r.json()),
+      fetch('/api/settings/intro-type').then((r) => r.json()),
+    ]).then(([statusData, introData]) => {
+      const codes: StatusCode[] = statusData.statusCodes ?? []
+      setStatusCodes(codes)
+      if (codes.length > 0) setStatus(codes[0].name)
+      setIntroTypeOptions(introData.introTypes ?? [])
+    })
   }, [])
 
-  function toggleIntroType(t: string) {
-    setIntroTypes((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t])
+  function toggleIntroType(id: number) {
+    setSelectedIntroTypeIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
   }
 
   function handleSelectHira(h: HiraHospital) {
@@ -58,7 +64,7 @@ export default function RegisterPage() {
           hospitalName,
           status,
           hiraId: selectedHira?.hiraId ?? null,
-          introType: introTypes.length > 0 ? introTypes.join(',') : null,
+          introTypeIds: selectedIntroTypeIds,
           introBeds: introBeds !== '' ? Number(introBeds) : null,
         }),
       })
@@ -145,17 +151,20 @@ export default function RegisterPage() {
             <div className="grid grid-cols-1 gap-5 px-6 py-5 sm:grid-cols-2">
               <div>
                 <label className="block text-xs font-medium uppercase tracking-wider text-gray-400">도입형태</label>
-                <div className="mt-2 flex flex-wrap gap-4">
-                  {INTRO_TYPE_OPTIONS.map((t) => (
-                    <label key={t} className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
-                      <input
-                        type="checkbox"
-                        checked={introTypes.includes(t)}
-                        onChange={() => toggleIntroType(t)}
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      {t}
-                    </label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {introTypeOptions.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => toggleIntroType(opt.id)}
+                      className={`rounded-full border px-3 py-1 text-sm transition-colors ${
+                        selectedIntroTypeIds.includes(opt.id)
+                          ? 'border-blue-500 bg-blue-500 text-white'
+                          : 'border-gray-300 bg-white text-gray-600 hover:border-blue-400 hover:text-blue-600'
+                      }`}
+                    >
+                      {opt.name}
+                    </button>
                   ))}
                 </div>
               </div>

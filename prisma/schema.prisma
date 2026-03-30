@@ -73,8 +73,20 @@ model Hospital {
   meta                HospitalMeta?
   hospitalDevices     HospitalDevice[]
   siteVisits          SiteVisit[]
+  introTypes          HospitalIntroType[]
 
   @@map("hospitals")
+}
+
+model HospitalIntroType {
+  id           Int        @id @default(autoincrement())
+  hospitalId   Int        @map("hospital_id")
+  statusCodeId Int        @map("status_code_id")
+  hospital     Hospital   @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  statusCode   StatusCode @relation(fields: [statusCodeId], references: [id], onDelete: Cascade)
+
+  @@unique([hospitalId, statusCodeId])
+  @@map("hospital_intro_types")
 }
 
 model DaewoongHospitalAssignment {
@@ -96,7 +108,9 @@ model StatusCode {
   color     String?  @map("color")
   category  String   @default("HOSPITAL") @map("category")
   createdAt DateTime @default(now()) @map("created_at")
-  siteVisits SiteVisit[]
+  siteVisits         SiteVisit[]
+  hospitalIntroTypes HospitalIntroType[]
+  introTypeProjects  Project[]           @relation("ProjectIntroType")
 
   @@unique([name, category])
   @@map("status_codes")
@@ -200,6 +214,7 @@ model Project {
   startDate           DateTime?    @map("start_date")
   endDateExpected     DateTime?    @map("end_date_expected")
   buildStatusId       Int?         @map("build_status_id")
+  introTypeId         Int?         @map("intro_type_id")
   issueNote           String?      @db.Text @map("issue_note")
   remark              String?      @map("remark")
   driveFolderId       String?      @map("drive_folder_id")
@@ -209,6 +224,7 @@ model Project {
   builder             User?        @relation(fields: [builderUserId], references: [id])
   contractor          Contractor?  @relation(fields: [constructorId], references: [id])
   buildStatus         BuildStatus? @relation(fields: [buildStatusId], references: [id])
+  introType           StatusCode?  @relation("ProjectIntroType", fields: [introTypeId], references: [id])
   devices             ProjectDevice[]
   files               ProjectFile[]
 
