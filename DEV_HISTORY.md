@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-03-30 | 프로젝트 목록 페이징 제거, 컬럼 개편, 보류 하단 정렬
+
+- **TASK 1 — 페이징 제거**: `app/api/projects/route.ts`에서 `?all=true`/`page`/`limit` 파라미터 및 `skip/take` 로직 완전 제거, 항상 전체 목록 반환. `page.tsx`에서 `ProjectPagination` 컴포넌트 제거 및 prisma 쿼리 페이징 제거. `ProjectFilters.tsx`에서 `page=1` 파라미터 제거. `ProjectPagination.tsx` 파일 삭제.
+- **TASK 2 — 보류 하단 정렬**: API(`route.ts`) 및 페이지(`page.tsx`) 모두에서 DB 정렬 후 JS 레벨 재정렬 — `buildStatus.label === '보류'` 항목을 배열 맨 뒤로 이동.
+- **TASK 3 — 컬럼 순서 변경**: 기존 16컬럼(프로젝트 코드·프로젝트명·차수·담당자 포함) → 12컬럼으로 축소 및 재배열: 병원명 | 진행상태 | 구축 시작일 | 구축 종료일(예상) | 도입형태 | 계약일 | 병동 수 | 병상 수 | G/W | 심전계 | 산소포화도 | 구축업체. 병원명에 프로젝트 상세 링크 적용.
+- **TASK 4 — 프로젝트 폴더 컬럼 삭제**: 테이블에서 "프로젝트 폴더" 컬럼 헤더 및 `driveFolderId` 렌더링 코드 완전 제거.
+- 영향 파일: `app/api/projects/route.ts`, `app/projects/page.tsx`, `app/projects/_components/ProjectFilters.tsx`, `app/projects/_components/ProjectPagination.tsx` (삭제)
+
+---
+
 ## 2026-03-30 | 간트 탭 뷰 방식 변경 (고정 61일 + flex 레이아웃)
 
 - **토글 버튼 제거**: ±1주/±2주/±1개월 토글 완전 제거, 뷰 고정 61일 (centerDate ±30일)

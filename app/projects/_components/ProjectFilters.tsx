@@ -62,7 +62,6 @@ export default function ProjectFilters({
     if (values.builderId) params.set('builderId', values.builderId)
     if (values.orderBy) params.set('orderBy', values.orderBy)
     if (values.order) params.set('order', values.order)
-    params.set('page', '1')
     return params.toString()
   }
 

@@ -1,93 +1,125 @@
-# thynC Operations System - CLAUDE.md
+[200~# thynC Operations System - CLAUDE.md
 
-## 프로젝트 개요
-thynC 구축 및 운영을 위한 데이터 관리 시스템
+> 작업 시작 전 이 파일과 `README.md`를 반드시 먼저 읽고 숙지하세요.
 
-## 기술 스택
-- Next.js 14 (App Router), TypeScript, Tailwind CSS
-- Node.js 20
-- Prisma ORM + PostgreSQL
-- JWT 인증 (httpOnly 쿠키)
-- PM2 (프로세스 관리)
-- Nginx (웹서버)
+---
 
-## 서버 환경
-- OS: Ubuntu 22.04 (AWS EC2)
-- DEV:  https://dev.ops.seersthync.com (포트 3001, PM2 프로세스명: thync-dev)
-- PROD: https://ops.seersthync.com     (포트 3000, PM2 프로세스명: thync-prod)
+## ⚠️ 절대 규칙
 
-## ⚠️ 서버 실행 규칙 (중요)
-- 절대 직접 `npm run start`, `nohup`, `node` 등으로 서버를 실행하지 마세요.
-- 빌드 및 재시작은 반드시 PM2를 사용하세요:
-  npm run build
-  pm2 restart thync-dev
+### 1. DB 마이그레이션 — `prisma migrate dev` 절대 금지
 
-## 환경변수 (.env)
-- `.env` 파일은 git에 포함되지 않습니다. 직접 수정 필요.
-- DEV `.env` 주요 항목:
-  - DATABASE_URL="postgresql://thync:thync1234@localhost:5432/thync_ops_dev"
-  - JWT_SECRET="thync-ops-dev-secret-key"
-  - NEXT_PUBLIC_APP_NAME="thynC Operations System : DEV"
-- PROD `.env` 주요 항목:
-  - DATABASE_URL="postgresql://thync:thync1234@localhost:5432/thync_ops"
-  - JWT_SECRET="thync-ops-prod-secret-key"
-  - NEXT_PUBLIC_APP_NAME="thynC Operations System"
+shadow DB 권한 문제로 `migrate dev` 사용 불가. **반드시 아래 패턴만 사용하세요.**
+```bash
+# 1. SQL 직접 실행
+psql -U thync -d thync_ops_dev -c "ALTER TABLE ..."
 
-## 데이터베이스
-- PostgreSQL (로컬)
-- DEV DB: thync_ops_dev
-- PROD DB: thync_ops
-- DB 유저: thync / thync1234
+# 2. 마이그레이션 파일 수동 생성
+mkdir -p prisma/migrations/YYYYMMDDHHMMSS_설명
+# migration.sql 에 위 SQL 동일하게 작성
 
-## 디렉토리 구조
-- DEV:  /home/ubuntu/thynC-Ops-System/thynC-Ops-DEV
-- PROD: /home/ubuntu/thynC-Ops-System/thynC-Ops-PROD
+# 3. 적용 완료 표시
+npx prisma migrate resolve --applied YYYYMMDDHHMMSS_설명
 
-## 인증
-- JWT 기반 자체 인증 (httpOnly 쿠키)
-- 기본 admin 계정: admin@thync.com / admin1234
-- 역할: SUPER_ADMIN / ADMIN / USER / VIEWER
-  - SUPER_ADMIN: 전체 시스템 최고 관리자 (소속 관리, 타계정 수정 포함 모든 권한)
-  - ADMIN: 일반 관리자 (사용자 생성, 설정 관리 등)
-  - USER: 일반 사용자 (병원·프로젝트·답사 생성·수정 가능)
-  - VIEWER: 읽기 전용 (모든 데이터 조회만 가능)
-- 역할 헬퍼 (lib/auth.ts):
-  - isAdminOrAbove(role): SUPER_ADMIN 또는 ADMIN 여부
-  - isSuperAdmin(role): SUPER_ADMIN 여부
-- 미들웨어(middleware.ts)로 모든 페이지 인증 보호
+# 4. 스키마·클라이언트 갱신
+# prisma/schema.prisma 수동 업데이트 후
+npx prisma generate
+```
 
-## Git 워크플로우
-- 개발은 DEV에서 작업 후 git push
-- PROD 반영 시:
-  cd /home/ubuntu/thynC-Ops-System/thynC-Ops-PROD
-  git pull origin main
-  npm run build
-  pm2 restart thync-prod
+### 2. 서버 실행 — PM2 외 직접 실행 금지
+```bash
+# ✅ 올바른 방법
+npm run build && pm2 restart thync-dev   # DEV
+npm run build && pm2 restart thync-prod  # PROD
 
-## 코딩 컨벤션
-- 컴포넌트: PascalCase
-- 파일명: kebab-case
-- API 라우트: /app/api/ 하위
-- 페이지: /app/ 하위
+# ❌ 절대 금지
+npm run start / nohup / node server.js
+```
 
-## 주요 개발 파일
-- `CLAUDE.md`: Claude Code가 코드를 작성할 때 준수해야 하는 지침. 프로젝트 구조, 서버 환경, 역할 체계, 컨벤션 등 개발 기준 정의
-- `README.md`: 전체 기술 스택 및 형상, 기능 정리. 외부 참조용 문서
-- `DEV_HISTORY.md`: 개발 작업 이력을 기록하는 파일. 최신 작업이 상단에 위치
+### 3. PROD 소스 직접 편집 금지
+
+`.env` 수정만 예외. 소스 코드는 반드시 DEV → git push → PROD git pull 절차를 따르세요.
+```bash
+# PROD 반영 절차
+cd /home/ubuntu/thynC-Ops-System/thynC-Ops-PROD
+git pull origin main
+npm run build
+pm2 restart thync-prod
+```
+
+---
 
 ## 개발 작업 절차
-1. `CLAUDE.md`에 기재된 지침을 준수하여 코드 작성
-2. 개발 완료 후 `DEV_HISTORY.md` 상단에 작업 내역 기록 (아래 기록 규칙 참고)
-3. git push 전 `README.md`에서 변경사항 업데이트 (기능 추가·수정·삭제 반영)
 
-## ⚠️ 개발 작업 이력 기록 규칙 (중요)
-- 기능 개발, 수정, 제거 등 모든 개발 작업을 완료한 후, 반드시 `DEV_HISTORY.md` 파일에 작업 내역을 기록하세요.
-- 기록 위치: `/home/ubuntu/thynC-Ops-System/thynC-Ops-DEV/DEV_HISTORY.md`
-- 기록 형식:
-  ```
-  ## YYYY-MM-DD HH:MM | 작업 제목
-  - 작업 내용 요약 (소스 코드가 아닌 무엇을 왜 어떻게 변경했는지 간단히 기술)
-  - 영향받은 파일/컴포넌트 목록
-  ```
-- 새 항목은 파일 **상단**에 추가하여 최신 작업이 위에 오도록 유지하세요.
-- 소스 코드를 그대로 기록하지 말고, 변경 내용을 간결하게 요약하세요.
+### 작업 시작 시
+1. `CLAUDE.md` 읽기 (이 파일)
+2. `README.md` 읽기 (스택·스키마·API 전체 형상)
+3. `DEV_HISTORY.md` 최근 항목 확인 (현재 개발 상태 파악)
+
+### 작업 완료 시
+1. `DEV_HISTORY.md` **상단에** 작업 내역 기록
+2. `git push` 전 `README.md` 아래 항목 중 변경된 부분 업데이트:
+   - **기능 추가·변경·삭제** → `주요 기능` 섹션 반영
+   - **새 API 엔드포인트 추가·삭제** → `API 엔드포인트` 섹션 반영
+   - **DB 모델·필드 변경** → `데이터베이스 스키마` 섹션 반영
+   - **새 패키지 설치** → `기술 스택` 섹션 반영
+   - **새 페이지·컴포넌트 추가** → `디렉토리 구조` 섹션 반영
+3. `git add . && git commit -m "..." && git push origin main`
+
+---
+
+## 코딩 컨벤션
+
+### router.refresh() — 모든 mutation 후 필수
+
+Next.js App Router Router Cache 문제로, PUT/POST/DELETE 성공 후 반드시 적용하세요.
+```typescript
+// 페이지 이동이 있는 경우
+router.refresh()
+router.push('/target-path')
+
+// 이동 없이 현재 페이지 유지하는 경우
+router.refresh()
+// 이후 로컬 상태 업데이트
+```
+
+### 역할 체크 — 헬퍼 함수 사용
+```typescript
+import { isAdminOrAbove, isSuperAdmin } from '@/lib/auth'
+
+// ✅ 올바른 방법 (SUPER_ADMIN 누락 방지)
+if (!isAdminOrAbove(user.role)) return 403
+
+// ❌ 잘못된 방법
+if (user.role !== 'ADMIN') return 403
+```
+
+### 네이밍
+- 컴포넌트: `PascalCase`
+- 파일명: `kebab-case`
+
+---
+
+## DEV_HISTORY.md 기록 형식
+```
+## YYYY-MM-DD HH:MM | 작업 제목
+
+- 무엇을 왜 어떻게 변경했는지 요약 (소스 코드 붙여넣기 금지)
+- 영향받은 파일/컴포넌트 목록
+```
+
+---
+
+## 비상시 DB 복구 절차
+```bash
+# 1. pg_hba.conf 임시 trust 설정
+sudo vi /etc/postgresql/*/main/pg_hba.conf
+# local all postgres peer → trust 변경
+sudo systemctl reload postgresql
+
+# 2. DB 재생성 및 DEV 덤프 복원
+psql -U postgres -c "DROP DATABASE IF EXISTS thync_ops;"
+psql -U postgres -c "CREATE DATABASE thync_ops OWNER thync;"
+pg_dump -U thync thync_ops_dev | psql -U postgres thync_ops
+
+# 3. pg_hba.conf 원복 후 reload
+```

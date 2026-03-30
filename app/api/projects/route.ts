@@ -2,18 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 
-const PAGE_SIZE = 20
-
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
-  const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
-  const limit = parseInt(searchParams.get('limit') ?? String(PAGE_SIZE))
   const hospitalCode = searchParams.get('hospitalCode') ?? ''
   const search = searchParams.get('search') ?? ''
   const buildStatusId = searchParams.get('buildStatusId') ?? ''
   const contractorId = searchParams.get('contractorId') ?? ''
   const builderId = searchParams.get('builderId') ?? ''
-  const all = searchParams.get('all') === 'true'
   const orderBy = searchParams.get('orderBy') ?? 'startDate'
   const order = (searchParams.get('order') ?? 'desc') as 'asc' | 'desc'
 
@@ -38,51 +33,52 @@ export async function GET(request: NextRequest) {
     ...(builderId && { builderUserId: builderId }),
   }
 
-  const [projects, total] = await Promise.all([
-    prisma.project.findMany({
-      where,
-      ...(all ? {} : { skip: (page - 1) * limit, take: limit }),
-      orderBy: orderByClause,
-      include: {
-        hospital: {
-          select: {
-            hospitalCode: true,
-            hospitalName: true,
-            hiraHospitalName: true,
-            sidoName: true,
-            sigunguName: true,
-          },
-        },
-        builder: {
-          select: { id: true, name: true, email: true },
-        },
-        contractor: {
-          select: { id: true, code: true, name: true },
-        },
-        buildStatus: {
-          select: { id: true, label: true, color: true },
-        },
-        devices: {
-          include: {
-            deviceInfo: {
-              select: { deviceModel: true, deviceName: true, sortOrder: true },
-            },
-          },
-          orderBy: { deviceInfo: { sortOrder: 'asc' } },
-        },
-        files: {
-          orderBy: { uploadedAt: 'asc' },
+  const projects = await prisma.project.findMany({
+    where,
+    orderBy: orderByClause,
+    include: {
+      hospital: {
+        select: {
+          hospitalCode: true,
+          hospitalName: true,
+          hiraHospitalName: true,
+          sidoName: true,
+          sigunguName: true,
         },
       },
-    }),
-    prisma.project.count({ where }),
-  ])
+      builder: {
+        select: { id: true, name: true, email: true },
+      },
+      contractor: {
+        select: { id: true, code: true, name: true },
+      },
+      buildStatus: {
+        select: { id: true, label: true, color: true },
+      },
+      devices: {
+        include: {
+          deviceInfo: {
+            select: { deviceModel: true, deviceName: true, sortOrder: true },
+          },
+        },
+        orderBy: { deviceInfo: { sortOrder: 'asc' } },
+      },
+      files: {
+        orderBy: { uploadedAt: 'asc' },
+      },
+    },
+  })
+
+  // 보류 상태 항목은 배열 맨 뒤로 정렬
+  const sorted = [...projects].sort((a, b) => {
+    const aHold = a.buildStatus?.label === '보류' ? 1 : 0
+    const bHold = b.buildStatus?.label === '보류' ? 1 : 0
+    return aHold - bHold
+  })
 
   return NextResponse.json({
-    projects,
-    total,
-    page,
-    totalPages: Math.ceil(total / limit),
+    projects: sorted,
+    total: sorted.length,
   })
 }
 

@@ -4,12 +4,9 @@ import { prisma } from '@/lib/prisma'
 import { verifyToken } from '@/lib/auth'
 import { CalendarDays } from 'lucide-react'
 import ProjectFilters from './_components/ProjectFilters'
-import ProjectPagination from './_components/ProjectPagination'
 import StatusBadge from '@/app/components/StatusBadge'
 
 export const dynamic = 'force-dynamic'
-
-const PAGE_SIZE = 20
 
 const ECG_MODEL = 'MC200MT-T'
 const SPO2_MODEL = 'MP1000W'
@@ -35,7 +32,6 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
   const user = token ? await verifyToken(token) : null
   const isAdmin = user?.role === 'ADMIN'
 
-  const page = Math.max(1, parseInt((searchParams.page as string) ?? '1'))
   const search = (searchParams.search as string) ?? ''
   const buildStatusId = (searchParams.buildStatusId as string) ?? ''
   const contractorId = (searchParams.contractorId as string) ?? ''
@@ -62,31 +58,30 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
     ...(builderId && { builderUserId: builderId }),
   }
 
-  const [projects, total] = await Promise.all([
-    prisma.project.findMany({
-      where,
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-      orderBy: orderByClause,
-      include: {
-        hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
-        builder: { select: { name: true } },
-        contractor: { select: { name: true } },
-        buildStatus: { select: { label: true, color: true } },
-        devices: {
-          include: { deviceInfo: { select: { deviceModel: true } } },
-        },
+  const rawProjects = await prisma.project.findMany({
+    where,
+    orderBy: orderByClause,
+    include: {
+      hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
+      builder: { select: { name: true } },
+      contractor: { select: { name: true } },
+      buildStatus: { select: { label: true, color: true } },
+      devices: {
+        include: { deviceInfo: { select: { deviceModel: true } } },
       },
-    }),
-    prisma.project.count({ where }),
-  ])
+    },
+  })
 
-  const totalPages = Math.ceil(total / PAGE_SIZE)
+  // 보류 상태 항목은 배열 맨 뒤로 정렬
+  const projects = [...rawProjects].sort((a, b) => {
+    const aHold = a.buildStatus?.label === '보류' ? 1 : 0
+    const bHold = b.buildStatus?.label === '보류' ? 1 : 0
+    return aHold - bHold
+  })
 
   const cols = [
-    '프로젝트 코드', '프로젝트명', '차수', '계약일', '도입형태', '진행상태',
-    '병동 수', '병상 수', 'G/W', '심전계', '산소포화도',
-    '담당자', '구축업체', '구축 시작일', '구축 종료일(예상)', '프로젝트 폴더',
+    '병원명', '진행상태', '구축 시작일', '구축 종료일(예상)', '도입형태', '계약일',
+    '병동 수', '병상 수', 'G/W', '심전계', '산소포화도', '구축업체',
   ]
 
   return (
@@ -97,7 +92,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">프로젝트 관리</h1>
-            <p className="mt-1 text-sm text-gray-500">총 {total.toLocaleString()}개</p>
+            <p className="mt-1 text-sm text-gray-500">총 {projects.length.toLocaleString()}개</p>
           </div>
           <div className="flex items-center gap-2">
             <a
@@ -157,32 +152,31 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
                   projects.map((p) => {
                     const ecgQty = p.devices.find((d) => d.deviceInfo.deviceModel === ECG_MODEL)?.quantity ?? null
                     const spo2Qty = p.devices.find((d) => d.deviceInfo.deviceModel === SPO2_MODEL)?.quantity ?? null
+                    const hospitalName = p.hospital?.hospitalName ?? p.hospital?.hiraHospitalName ?? '-'
 
                     return (
                       <tr key={p.id} className="transition-colors hover:bg-gray-50">
-                        <td className="whitespace-nowrap px-3 py-3 font-mono text-xs text-gray-500" style={{ minWidth: '160px' }}>
-                          <Link href={`/projects/${p.projectCode}`} className="hover:text-blue-600">
-                            {p.projectCode}
-                          </Link>
-                        </td>
                         <td className="px-3 py-3 font-medium text-gray-900" style={{ minWidth: '160px' }}>
                           <Link href={`/projects/${p.projectCode}`} className="hover:text-blue-600 hover:underline">
-                            {p.projectName}
+                            {hospitalName}
                           </Link>
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-center text-gray-600" style={{ minWidth: '56px' }}>
-                          {p.orderNumber}차
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '100px' }}>
-                          {fmt(p.contractDate)}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '88px' }}>
-                          {p.contractType ?? <span className="text-gray-400">-</span>}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3" style={{ minWidth: '100px' }}>
                           {p.buildStatus
                             ? <StatusBadge label={p.buildStatus.label} color={p.buildStatus.color} />
                             : <span className="text-gray-400">-</span>}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '100px' }}>
+                          {fmt(p.startDate)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '120px' }}>
+                          {fmt(p.endDateExpected)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '88px' }}>
+                          {p.contractType ?? <span className="text-gray-400">-</span>}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '100px' }}>
+                          {fmt(p.contractDate)}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3 text-center text-gray-600" style={{ minWidth: '64px' }}>
                           <Num v={p.wardCount} />
@@ -199,31 +193,8 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
                         <td className="whitespace-nowrap px-3 py-3 text-center text-gray-600" style={{ minWidth: '80px' }}>
                           <Num v={spo2Qty} />
                         </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '80px' }}>
-                          {p.builder?.name ?? p.builderNameManual ?? <span className="text-gray-400">-</span>}
-                        </td>
                         <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '100px' }}>
                           {p.contractor?.name ?? <span className="text-gray-400">-</span>}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '100px' }}>
-                          {fmt(p.startDate)}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '120px' }}>
-                          {fmt(p.endDateExpected)}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3" style={{ minWidth: '80px' }}>
-                          {p.driveFolderId ? (
-                            <a
-                              href={`https://drive.google.com/drive/folders/${p.driveFolderId}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-blue-600 hover:underline"
-                            >
-                              바로가기
-                            </a>
-                          ) : (
-                            <span className="text-gray-400">-</span>
-                          )}
                         </td>
                       </tr>
                     )
@@ -233,18 +204,6 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
             </table>
           </div>
         </div>
-
-        {/* 페이지네이션 */}
-        <ProjectPagination
-          page={page}
-          totalPages={totalPages}
-          search={search}
-          buildStatusId={buildStatusId}
-          contractorId={contractorId}
-          builderId={builderId}
-          orderBy={orderBy}
-          order={order}
-        />
 
       </div>
     </div>
