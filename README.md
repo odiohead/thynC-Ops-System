@@ -15,6 +15,9 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 | ORM | Prisma |
 | 데이터베이스 | PostgreSQL |
 | 인증 | JWT (httpOnly 쿠키, jose 라이브러리) |
+| 파일 스토리지 | AWS S3 (`@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`) |
+| 차트 | Recharts |
+| 리치 텍스트 에디터 | Tiptap (`@tiptap/react` + 확장) |
 | 프로세스 관리 | PM2 |
 | 웹서버 | Nginx |
 | 런타임 | Node.js 20 |
@@ -55,7 +58,7 @@ app/
 │   │   ├── build-status/             # 공사 상태 관리
 │   │   ├── status/                   # 병원 상태코드 관리
 │   │   └── site-visit-status/        # 답사 상태코드 관리
-│   └── drive/                        # Google Drive 연동
+│   └── drive/                        # Google Drive 연동 (파일 업로드/목록/삭제/병원목록 내보내기)
 ├── (대시보드)/                        # 메인 대시보드 (이번 주/다음 주 공사 현황)
 ├── hospitals/                        # 병원 목록·상세·등록·수정
 ├── hira-hospitals/                   # HIRA 병원 조회
@@ -76,6 +79,7 @@ app/
 lib/
 ├── auth.ts                           # JWT 인증 유틸리티 + 역할 헬퍼
 ├── prisma.ts                         # Prisma 클라이언트
+├── s3.ts                             # AWS S3 연동 유틸리티 (업로드/삭제/presigned URL)
 └── googleDrive.ts                    # Google Drive 연동 유틸리티
 
 prisma/
@@ -112,27 +116,35 @@ prisma/
 
 ### HospitalMeta (병원 메타 정보)
 - Hospital과 1:1 관계
-- Google Drive 폴더 ID, 원격 접속 URL 등 부가 정보
+- Google Drive 폴더 ID (`driveProjectFolderId`), Drive 상태 파일 ID (`driveStatusFileId`), Drive 설치계획 파일 ID (`driveInstallPlanFileId`)
+- 원격 접속 URL (`remoteAccessUrl`), 원격 제어 URL (`remoteControlUrl`)
 
 ### HospitalDevice (병원 장비)
 - Hospital ↔ DeviceInfo N:M 관계 테이블
 
 ### Project (프로젝트)
 - 구축 공사 프로젝트 단위
-- projectCode, 병원 연결, 담당자(builderUserId), 시공사(contractorCode)
-- 공사 상태(buildStatus), 시작일/완료예정일, 비고
-- Google Drive 폴더 연결
+- `projectCode`, `projectName`, `orderNumber` (내부 순번)
+- 병원 연결, 담당자(`builderUserId` 또는 `builderNameManual`), 시공사(`constructorId`)
+- 계약 정보: `contractDate`, `contractType`
+- 규모: `wardCount` (병동 수), `bedCount` (병상 수), `gatewayCount` (게이트웨이 수)
+- 진행 플래그: `hasSurvey` (답사 완료), `hasOrder` (발주 완료)
+- 공사 상태(`buildStatus`), 시작일/완료예정일, 비고(`remark`), 이슈 노트(`issueNote`, 리치 텍스트)
+- Google Drive 폴더 연결 (`driveFolderId`)
 
 ### ProjectDevice (프로젝트 장비)
 - Project ↔ DeviceInfo 관계 + 수량
 
 ### ProjectFile (프로젝트 파일)
-- 프로젝트에 첨부된 파일 (Google Drive 연동)
+- 프로젝트에 첨부된 파일
+- 파일 카테고리 (`fileCategory`), Google Drive 필드 (`driveFileId`, `driveUrl`) + S3 키 (`s3Key`) 병행 지원
 
 ### SiteVisit (답사)
 - 병원 답사 기록
-- 담당자(daewoongUserId: DAEWOONG 소속 User), 상태코드 연결
-- 파일 첨부 지원
+- 담당자 `daewoongUserId` (DAEWOONG 소속 User) + 추가 담당자 `assigneeId` (2인 지원)
+- 상태코드 연결, 방문일/요청일/회신일
+- 파일(설치계획서·평면도) 첨부: Drive 필드 (`installPlanUrl`, `floorPlanUrl`) + S3 키 (`installPlanS3Key`, `floorPlanS3Key`) 병행 지원
+- 노트(`notes`): 리치 텍스트(Tiptap)
 
 ### DaewoongHospitalAssignment (병원 담당자 배정)
 - User(DAEWOONG 소속) ↔ Hospital N:M 관계 테이블
@@ -179,6 +191,8 @@ prisma/
 ### 대시보드
 - 이번 주 / 다음 주 공사 예정 프로젝트 현황
 - 공사 상태별 요약, 비고 인라인 수정
+- **월별 누적 사용 현황**: 신규 병원/병상, 누적 병원/병상 추이 (Recharts 차트)
+- **월별 신규 병원/병상 막대 차트** (ComposedChart)
 - 캐시 미사용 (`force-dynamic`), 매 요청마다 DB 조회
 
 ### 병원 관리
@@ -197,15 +211,19 @@ prisma/
 ### 프로젝트 관리
 - 구축 공사 프로젝트 등록·수정·삭제
 - 공사 상태(BuildStatus) 연결 및 관리
-- 담당자, 시공사, 시작일/완료예정일, 비고 관리
+- 담당자, 시공사, 계약일/계약형태, 시작일/완료예정일, 비고 관리
+- 병동 수 / 병상 수 / 게이트웨이 수, 답사·발주 완료 플래그
+- 이슈 노트: 리치 텍스트 에디터(Tiptap)로 서식 있는 내용 입력 가능
 - 프로젝트별 장비 관리
-- 프로젝트별 파일 관리 (Google Drive 연동)
+- 프로젝트별 파일 관리 (S3 업로드 / 파일 다운로드 / Drive 연동 병행 지원)
 
 ### 답사 관리
 - 병원 방문 답사 기록 등록·수정·삭제
-- 담당자(DAEWOONG 소속 User) 연결
+- 담당자(DAEWOONG 소속) + 추가 담당자 2인 연결 지원
+- 방문일 / 요청일 / 회신일 관리
 - 답사 상태코드 연결
-- 파일 첨부 지원
+- 설치계획서·평면도 파일 첨부 (AWS S3 업로드, presigned URL 다운로드)
+- 노트: Tiptap 리치 텍스트 에디터
 
 ### 소속 관리 (SUPER_ADMIN 전용)
 - 소속(Organization) 추가·수정·삭제
@@ -230,8 +248,10 @@ prisma/
 - Service Account 기반 파일 업로드 (`POST /api/drive/upload`)
 - 폴더 내 파일 목록 조회 (`GET /api/drive/files`)
 - 파일 삭제 (`POST /api/drive/delete`)
-- 병원 목록 스프레드시트 내보내기 (`POST /api/drive/export/hospitals`)
+- 병원 목록 스프레드시트 내보내기 (`POST /api/drive/export/hospitals`, Sheets API)
 - 연결 상태 확인 (`testDriveConnection()`)
+
+> 프로젝트 파일·답사 파일 업로드는 AWS S3로 전환되었습니다. Google Drive는 병원 목록 내보내기 등 Drive 전용 기능에 활용됩니다.
 
 ---
 
@@ -260,6 +280,37 @@ GOOGLE_DRIVE_FOLDER_ID=1r0QdwBtm5LPdBi1QvpUO9InUt7kSENm5
 ```
 
 > 키 파일 원본(`.json`)과 `.env.local`은 절대 git에 커밋하지 마세요.
+
+---
+
+## AWS S3 연동 설정
+
+프로젝트 파일 및 답사 파일은 AWS S3에 저장됩니다.
+
+### 1. IAM 사용자 및 버킷 준비
+
+1. AWS Console → IAM → 사용자 생성 후 `AmazonS3FullAccess` (또는 해당 버킷 전용 정책) 부여
+2. 액세스 키 생성
+3. S3 버킷 생성 (예: `seers-thync-ops`, 리전: `ap-northeast-2`)
+
+### 2. `.env`에 값 설정
+
+```env
+AWS_REGION=ap-northeast-2
+AWS_ACCESS_KEY_ID=your_access_key_id
+AWS_SECRET_ACCESS_KEY=your_secret_access_key
+S3_BUCKET_NAME=seers-thync-ops
+```
+
+### 파일 저장 경로 규칙
+
+| 구분 | S3 키 패턴 |
+|------|-----------|
+| 프로젝트 파일 | `projects/{projectCode}/{timestamp}_{fileName}` |
+| 답사 설치계획서 | `site-visits/{hospitalCode}/install-plan_{fileName}` |
+| 답사 평면도 | `site-visits/{hospitalCode}/floor-plan_{fileName}` |
+
+> `.env` 파일은 절대 git에 커밋하지 마세요.
 
 ---
 
@@ -300,7 +351,13 @@ JWT_SECRET="your-secret-key"
 # 앱 이름
 NEXT_PUBLIC_APP_NAME="thynC Operations System"
 
-# Google Drive (선택 — 연동 시 필요)
+# AWS S3 (파일 업로드 — 필수)
+AWS_REGION=ap-northeast-2
+AWS_ACCESS_KEY_ID=your_access_key_id
+AWS_SECRET_ACCESS_KEY=your_secret_access_key
+S3_BUCKET_NAME=seers-thync-ops
+
+# Google Drive (선택 — 병원 목록 내보내기 등 Drive 연동 시 필요)
 GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"..."}
 GOOGLE_DRIVE_FOLDER_ID=your_folder_id_here
 ```
@@ -347,6 +404,7 @@ npm run dev
 | Method | Endpoint | 설명 |
 |--------|----------|------|
 | GET | `/api/dashboard` | 이번 주/다음 주 공사 현황 |
+| GET | `/api/dashboard/monthly` | 월별 누적 병원/병상 통계 |
 
 ### 병원
 | Method | Endpoint | 설명 |
@@ -382,6 +440,7 @@ npm run dev
 | POST | `/api/projects/[code]/devices` | 프로젝트 장비 추가 |
 | GET  | `/api/projects/[code]/files` | 프로젝트 파일 목록 |
 | POST | `/api/projects/[code]/files` | 프로젝트 파일 추가 |
+| GET  | `/api/projects/[code]/files/[fileId]/download` | 프로젝트 파일 다운로드 (S3 presigned URL) |
 | PUT  | `/api/projects/[code]/files/[fileId]` | 프로젝트 파일 수정 |
 | DELETE | `/api/projects/[code]/files/[fileId]` | 프로젝트 파일 삭제 |
 | POST | `/api/projects/[code]/drive-folder` | Drive 폴더 연결 |
@@ -394,7 +453,9 @@ npm run dev
 | GET  | `/api/site-visits/[id]` | 답사 상세 |
 | PUT  | `/api/site-visits/[id]` | 답사 수정 |
 | DELETE | `/api/site-visits/[id]` | 답사 삭제 |
-| POST | `/api/site-visits/upload` | 답사 파일 업로드 |
+| POST | `/api/site-visits/upload` | 답사 파일 업로드 (S3) |
+| GET  | `/api/site-visits/file-url` | 답사 파일 presigned URL 발급 (`?key=`) |
+| DELETE | `/api/site-visits/file` | 답사 S3 파일 삭제 |
 
 ### 시공사
 | Method | Endpoint | 설명 |

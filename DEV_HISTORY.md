@@ -4,6 +4,39 @@
 
 ---
 
+## 2026-03-30 | PROD → DEV DB 데이터 동기화
+
+- `pg_dump --clean thync_ops | psql thync_ops_dev` 방식으로 상용 DB 데이터를 개발 DB에 전체 동기화
+- 동기화 후 주요 테이블 row count 및 updated_at 타임스탬프 일치 확인 (hospitals 172, projects 187 등)
+- 스키마 변경 없음, 데이터만 덮어씌움
+
+---
+
+## 2026-03-29 15:00 | 대시보드 월별 누적 현황 엑셀 다운로드 기능 추가
+
+- 대시보드 "월별 누적 사용 현황" 섹션 헤더 우측에 엑셀 다운로드 버튼 추가
+- 이미 로드된 `monthly` state 데이터를 `xlsx` 라이브러리로 클라이언트에서 직접 변환하여 다운로드 (신규 API 없음)
+- 다운로드 파일명: `월별누적현황_YYYY-MM-DD.xlsx`, 컬럼: 월 / 신규 병원 수 / 신규 병상 수 / 누적 병원 수 / 누적 병상 수 (최신 월 상단)
+- 데이터 없거나 로딩 중일 때 버튼 disabled 처리
+- 영향 파일: `app/page.tsx`
+
+---
+
+## 2026-03-29 14:30 | README.md 형상정보 최신화
+
+- 최신 소스코드 분석 후 README에 누락된 형상정보 추가
+- 기술 스택: AWS S3 (`@aws-sdk`), Recharts, Tiptap 추가
+- AWS S3 연동 설정 섹션 신규 추가 (IAM 설정, 환경변수, 파일 저장 경로 규칙)
+- 환경변수 예시에 S3 관련 항목(`AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME`) 추가
+- 디렉토리 구조: `lib/s3.ts` 추가
+- DB 스키마: Project 신규 필드(projectName, orderNumber, contractType, wardCount, bedCount, gatewayCount, hasSurvey, hasOrder, builderNameManual, issueNote 등), SiteVisit S3 필드 및 assigneeId, HospitalMeta 추가 필드, ProjectFile fileCategory/s3Key 반영
+- 주요 기능: 대시보드 월별 차트, 프로젝트 이슈노트(리치텍스트), 답사 2인 담당자/S3 파일/리치텍스트 노트 추가
+- API 엔드포인트: `/api/dashboard/monthly`, `/api/projects/[code]/files/[fileId]/download`, `/api/site-visits/file-url`, `/api/site-visits/file` (DELETE) 추가
+- Google Drive 연동 설명에 S3 전환 안내 추가
+- 영향 파일: `README.md`
+
+---
+
 ## 2026-03-29 13:00 | 대시보드 월별 신규 병원/병상 막대 차트 추가
 
 - 누적 라인 차트 하단에 월별 신규 현황 막대 차트 추가

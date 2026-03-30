@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import StatusBadge from '@/app/components/StatusBadge'
+import * as XLSX from 'xlsx'
 import {
   ComposedChart,
   LineChart,
@@ -41,6 +42,25 @@ type MonthlyEntry = {
   newBeds: number
   totalHospitals: number
   totalBeds: number
+}
+
+function downloadMonthlyExcel(data: MonthlyEntry[]) {
+  const rows = [...data].reverse().map((entry) => ({
+    '월': entry.label,
+    '신규 병원 수': entry.newHospitals,
+    '신규 병상 수': entry.newBeds,
+    '누적 병원 수': entry.totalHospitals,
+    '누적 병상 수': entry.totalBeds,
+  }))
+
+  const ws = XLSX.utils.json_to_sheet(rows)
+  ws['!cols'] = [{ wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }]
+
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, '월별 누적 현황')
+
+  const today = new Date().toISOString().slice(0, 10)
+  XLSX.writeFile(wb, `월별누적현황_${today}.xlsx`)
 }
 
 function fmt(date: string | null, fallback = '-'): string {
@@ -297,12 +317,21 @@ export default function Home() {
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
               <h2 className="text-sm font-semibold text-gray-700">월별 누적 사용 현황</h2>
-              {latestEntry && (
-                <div className="flex gap-4 text-xs text-gray-500">
-                  <span>누적 병원 <strong className="text-blue-600">{latestEntry.totalHospitals}개</strong></span>
-                  <span>누적 병상 <strong className="text-emerald-600">{latestEntry.totalBeds.toLocaleString()}개</strong></span>
-                </div>
-              )}
+              <div className="flex items-center gap-4">
+                {latestEntry && (
+                  <div className="flex gap-4 text-xs text-gray-500">
+                    <span>누적 병원 <strong className="text-blue-600">{latestEntry.totalHospitals}개</strong></span>
+                    <span>누적 병상 <strong className="text-emerald-600">{latestEntry.totalBeds.toLocaleString()}개</strong></span>
+                  </div>
+                )}
+                <button
+                  onClick={() => monthly && downloadMonthlyExcel(monthly)}
+                  disabled={!monthly || monthly.length === 0}
+                  className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  엑셀 다운로드
+                </button>
+              </div>
             </div>
 
             {monthlyLoading ? (
