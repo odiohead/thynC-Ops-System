@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
-import { verifyToken } from '@/lib/auth'
+import { verifyToken, isAdminOrAbove } from '@/lib/auth'
 import { CalendarDays } from 'lucide-react'
 import ProjectFilters from './_components/ProjectFilters'
 import StatusBadge from '@/app/components/StatusBadge'
@@ -30,7 +30,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
   const cookieStore = cookies()
   const token = cookieStore.get('auth-token')?.value
   const user = token ? await verifyToken(token) : null
-  const isAdmin = user?.role === 'ADMIN'
+  const isAdmin = user ? isAdminOrAbove(user.role) : false
 
   const search = (searchParams.search as string) ?? ''
   const buildStatusId = (searchParams.buildStatusId as string) ?? ''
@@ -80,7 +80,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
   })
 
   const cols = [
-    '병원명', '진행상태', '구축 시작일', '구축 종료일(예상)', '도입형태', '계약일',
+    '프로젝트명', '진행상태', '구축 시작일', '구축 종료일(예상)', '도입형태', '계약일',
     '병동 수', '병상 수', 'G/W', '심전계', '산소포화도', '구축업체',
   ]
 
@@ -152,13 +152,12 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
                   projects.map((p) => {
                     const ecgQty = p.devices.find((d) => d.deviceInfo.deviceModel === ECG_MODEL)?.quantity ?? null
                     const spo2Qty = p.devices.find((d) => d.deviceInfo.deviceModel === SPO2_MODEL)?.quantity ?? null
-                    const hospitalName = p.hospital?.hospitalName ?? p.hospital?.hiraHospitalName ?? '-'
 
                     return (
                       <tr key={p.id} className="transition-colors hover:bg-gray-50">
                         <td className="px-3 py-3 font-medium text-gray-900" style={{ minWidth: '160px' }}>
                           <Link href={`/projects/${p.projectCode}`} className="hover:text-blue-600 hover:underline">
-                            {hospitalName}
+                            {p.projectName}
                           </Link>
                         </td>
                         <td className="whitespace-nowrap px-3 py-3" style={{ minWidth: '100px' }}>

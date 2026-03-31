@@ -62,7 +62,7 @@ export default function SiteVisitsPage() {
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
 
         <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-900">답사 현황</h1>
+          <h1 className="text-2xl font-bold text-gray-900">답사 관리</h1>
           <button
             type="button"
             onClick={() => router.push('/site-visits/new')}

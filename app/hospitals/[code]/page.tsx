@@ -7,6 +7,8 @@ import DeleteButton from './_components/DeleteButton'
 import DaewoongStaffTab from './_components/DaewoongStaffTab'
 import HospitalDevicesSection from './_components/HospitalDevicesSection'
 import StatusBadge from '@/app/components/StatusBadge'
+import SiteVisitsCard from './_components/SiteVisitsCard'
+import InstallPlansCard from './_components/InstallPlansCard'
 
 
 
@@ -31,7 +33,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
   const user = token ? await verifyToken(token) : null
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN'
 
-  const [hospital, projects, allDevices, hospitalDevices, statusCodes] = await Promise.all([
+  const [hospital, projects, siteVisits, installPlans, allDevices, hospitalDevices, statusCodes] = await Promise.all([
     prisma.hospital.findUnique({
       where: { hospitalCode: params.code },
       include: {
@@ -47,6 +49,22 @@ export default async function HospitalDetailPage({ params }: PageProps) {
         buildStatus: { select: { label: true, color: true } },
       },
     }),
+    prisma.siteVisit.findMany({
+      where: { hospitalCode: params.code },
+      orderBy: { requestDate: { sort: 'desc', nulls: 'last' } },
+      include: {
+        daewoongUser: { select: { id: true, name: true } },
+        assignee: { select: { id: true, name: true } },
+        status: { select: { name: true, color: true } },
+      },
+    }),
+    prisma.installPlan.findMany({
+      where: { hospitalCode: params.code },
+      orderBy: { requestDate: { sort: 'desc', nulls: 'last' } },
+      include: {
+        author: { select: { id: true, name: true } },
+      },
+    }),
     prisma.deviceInfo.findMany({ orderBy: { sortOrder: 'asc' } }),
     prisma.hospitalDevice.findMany({ where: { hospitalCode: params.code } }),
     prisma.statusCode.findMany({ select: { name: true, color: true } }),
@@ -55,6 +73,25 @@ export default async function HospitalDetailPage({ params }: PageProps) {
 
   const statusColor = statusCodes.find((sc) => sc.name === hospital.status)?.color ?? null
   const introTypeList = hospital.introTypes ?? []
+
+  const siteVisitsData = siteVisits.map((sv) => ({
+    id: sv.id,
+    requestDate: sv.requestDate ? sv.requestDate.toISOString() : null,
+    visitDate: sv.visitDate ? sv.visitDate.toISOString() : null,
+    replyDate: sv.replyDate ? sv.replyDate.toISOString() : null,
+    status: sv.status ?? null,
+    daewoongUser: sv.daewoongUser ?? null,
+    assignee: sv.assignee ?? null,
+  }))
+
+  const installPlansData = installPlans.map((ip) => ({
+    id: ip.id,
+    requestDate: ip.requestDate ? ip.requestDate.toISOString() : null,
+    writeStatus: ip.writeStatus,
+    replyStatus: ip.replyStatus,
+    replyDate: ip.replyDate ? ip.replyDate.toISOString() : null,
+    author: ip.author ?? null,
+  }))
 
   const quantityMap = new Map(hospitalDevices.map((d) => [d.deviceInfoId, d.quantity]))
   const deviceRows = allDevices.map((d) => ({
@@ -160,6 +197,20 @@ export default async function HospitalDetailPage({ params }: PageProps) {
           </div>
           <div className="px-6 py-8 text-center text-sm text-gray-400">추후 개발 예정</div>
         </div>
+
+        {/* 답사 관리 */}
+        <SiteVisitsCard
+          hospitalCode={hospital.hospitalCode}
+          siteVisits={siteVisitsData}
+          isAdmin={isAdmin}
+        />
+
+        {/* 설치계획(가안) 관리 */}
+        <InstallPlansCard
+          hospitalCode={hospital.hospitalCode}
+          installPlans={installPlansData}
+          isAdmin={isAdmin}
+        />
 
         {/* 구축 프로젝트 */}
         <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">

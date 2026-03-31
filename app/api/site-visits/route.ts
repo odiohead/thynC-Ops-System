@@ -18,15 +18,21 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
   const limit = parseInt(searchParams.get('limit') ?? String(PAGE_SIZE))
+  const hospitalCode = searchParams.get('hospitalCode') ?? ''
+
+  const where = {
+    ...(hospitalCode && { hospitalCode }),
+  }
 
   const [siteVisits, total] = await Promise.all([
     prisma.siteVisit.findMany({
+      where,
       skip: (page - 1) * limit,
       take: limit,
       orderBy: { createdAt: 'desc' },
       include,
     }),
-    prisma.siteVisit.count(),
+    prisma.siteVisit.count({ where }),
   ])
 
   return NextResponse.json({

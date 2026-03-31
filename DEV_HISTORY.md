@@ -4,6 +4,33 @@
 
 ---
 
+## 2026-03-31 | 프로젝트명 표시 수정, 답사 관리 명칭 변경, 병원 상세 카드 추가
+
+- **TASK 1 — 프로젝트명 표시 수정** (`app/projects/page.tsx`): 컬럼 헤더 '병원명' → '프로젝트명', 셀 데이터 `hospitalName` → `p.projectName`으로 변경. 링크는 유지.
+- **TASK 2 — 메뉴명 변경**: `app/components/Navigation.tsx` 및 `app/site-visits/page.tsx`에서 '답사 현황' → '답사 관리'로 일괄 변경.
+- **TASK 3 — 병원 상세 카드 추가**:
+  - `app/api/site-visits/route.ts`: `?hospitalCode=` 필터 파라미터 추가
+  - `app/api/install-plans/route.ts`: `?hospitalCode=` 필터 파라미터 추가
+  - `app/hospitals/[code]/page.tsx`: Prisma로 해당 병원의 답사/설치계획 목록 조회, 직렬화 후 클라이언트 카드 컴포넌트 전달. 구축 프로젝트 카드 위에 '답사 관리' → '설치계획(가안) 관리' 순서로 추가.
+  - `app/hospitals/[code]/_components/SiteVisitsCard.tsx`: 신설 (행 클릭 시 `/site-visits/[id]`, + 답사 등록 버튼 ADMIN 이상)
+  - `app/hospitals/[code]/_components/InstallPlansCard.tsx`: 신설 (행 클릭 시 `/install-plans/[id]`, + 등록 버튼 ADMIN 이상, 상태 뱃지)
+  - `app/site-visits/new/page.tsx`: 클라이언트 컴포넌트 → 서버 컴포넌트로 전환, `?hospitalCode=` 쿼리 읽어 `SiteVisitForm`에 `initialData` 전달
+  - `app/install-plans/new/page.tsx`: `?hospitalCode=` 쿼리 읽어 Prisma로 병원 조회, `InstallPlanForm`에 `initialHospital` 전달
+  - `app/install-plans/InstallPlanForm.tsx`: `initialHospitalCode`, `initialHospital` props 추가
+
+---
+
+## 2026-03-31 | 설치계획(가안) 관리 기능 신설 + 프로젝트 등록 버튼 권한 수정
+
+- **TASK 1 — 등록 버튼 권한 수정** (`app/projects/page.tsx`): `isAdmin` 조건을 `user.role === 'ADMIN'` → `isAdminOrAbove(user.role)` 로 수정. SUPER_ADMIN도 등록 버튼 노출.
+- **TASK 2 — DB 마이그레이션**: `install_plans` 테이블 신설 (SQL 직접 실행). 마이그레이션명 `20260331000000_add_install_plans`. `prisma/schema.prisma`에 `InstallPlan` 모델 추가, `Hospital.installPlans`, `User.authoredInstallPlans` 역방향 관계 추가. `npx prisma generate` 실행.
+- **TASK 3 — API 구현**: `app/api/install-plans/route.ts` (GET 목록 전체 반환+필터+정렬, POST 등록), `app/api/install-plans/[id]/route.ts` (GET 단건, PUT 수정, DELETE ADMIN 이상만) 신설.
+- **TASK 4 — 페이지 구현**: `app/install-plans/page.tsx` (목록: 클라이언트 컴포넌트, 필터+컬럼 정렬 토글, 행 클릭 상세 이동, 상태 색상 뱃지), `app/install-plans/new/page.tsx` (ADMIN 이상 접근), `app/install-plans/[id]/page.tsx` + `DetailClient.tsx` (상세/수정+삭제), `app/install-plans/InstallPlanForm.tsx` (병원 검색 모달, 상태 select, 씨어스 유저 select, RichTextEditor 비고).
+- **TASK 5 — 네비게이션**: `app/components/Navigation.tsx`에 '설치계획(가안) 관리' 메뉴 추가 (FileText SVG 아이콘, 답사 현황 위, 모든 역할 접근 가능).
+- 영향 파일: `app/projects/page.tsx`, `prisma/schema.prisma`, `prisma/migrations/20260331000000_add_install_plans/`, `app/api/install-plans/route.ts`, `app/api/install-plans/[id]/route.ts`, `app/install-plans/page.tsx`, `app/install-plans/new/page.tsx`, `app/install-plans/[id]/page.tsx`, `app/install-plans/[id]/DetailClient.tsx`, `app/install-plans/InstallPlanForm.tsx`, `app/components/Navigation.tsx`
+
+---
+
 ## 2026-03-30 | 프로젝트 목록 페이징 제거, 컬럼 개편, 보류 하단 정렬
 
 - **TASK 1 — 페이징 제거**: `app/api/projects/route.ts`에서 `?all=true`/`page`/`limit` 파라미터 및 `skip/take` 로직 완전 제거, 항상 전체 목록 반환. `page.tsx`에서 `ProjectPagination` 컴포넌트 제거 및 prisma 쿼리 페이징 제거. `ProjectFilters.tsx`에서 `page=1` 파라미터 제거. `ProjectPagination.tsx` 파일 삭제.

@@ -74,6 +74,7 @@ model Hospital {
   hospitalDevices     HospitalDevice[]
   siteVisits          SiteVisit[]
   introTypes          HospitalIntroType[]
+  installPlans        InstallPlan[]
 
   @@map("hospitals")
 }
@@ -150,6 +151,7 @@ model User {
   assignedSiteVisits      SiteVisit[]                  @relation("SiteVisitAssignee")
   daewoongSiteVisits      SiteVisit[]                  @relation("SiteVisitDaewoongUser")
   hospitalAssignments     DaewoongHospitalAssignment[]
+  authoredInstallPlans    InstallPlan[]                @relation("InstallPlanAuthor")
 
   @@map("users")
 }
@@ -310,4 +312,23 @@ model SiteVisit {
   status        StatusCode?    @relation(fields: [statusId], references: [id])
 
   @@map("site_visits")
+}
+
+model InstallPlan {
+  id           Int       @id @default(autoincrement())
+  hospitalCode String?   @map("hospital_code")
+  requestDate  DateTime? @map("request_date") @db.Date
+  writeStatus  String    @default("-") @map("write_status")
+  replyStatus  String    @default("-") @map("reply_status")
+  authorId     String?   @map("author_id")
+  replyDate    DateTime? @map("reply_date") @db.Date
+  note         String?
+
+  hospital Hospital? @relation(fields: [hospitalCode], references: [hospitalCode])
+  author   User?     @relation("InstallPlanAuthor", fields: [authorId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("install_plans")
 }

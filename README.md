@@ -60,10 +60,12 @@ app/
 │   │   ├── status/                   # 병원 상태코드 관리
 │   │   ├── site-visit-status/        # 답사 상태코드 관리
 │   │   └── intro-type/               # 도입형태 관리
+│   ├── install-plans/                # 설치계획(가안) CRUD
 │   └── drive/                        # Google Drive 연동 (파일 업로드/목록/삭제/병원목록 내보내기)
 ├── (대시보드)/                        # 메인 대시보드 (이번 주/다음 주 공사 현황)
 ├── hospitals/                        # 병원 목록·상세·등록·수정
 ├── hira-hospitals/                   # HIRA 병원 조회
+├── install-plans/                    # 설치계획(가안) 목록·상세·등록
 ├── projects/                         # 프로젝트 목록·상세·등록
 │   └── calendar/                     # 구축 일정 간트 캘린더 (새 탭)
 ├── site-visits/                      # 답사 목록·상세·등록
@@ -147,6 +149,14 @@ prisma/
 - 프로젝트에 첨부된 파일
 - 파일 카테고리 (`fileCategory`), Google Drive 필드 (`driveFileId`, `driveUrl`) + S3 키 (`s3Key`) 병행 지원
 
+### InstallPlan (설치계획 가안)
+- 병원별 설치계획(가안) 관리
+- 병원 연결 (hospitalCode, 선택사항)
+- 요청일 (`requestDate`), 회신일 (`replyDate`)
+- 작성완료여부 (`writeStatus`): `-` / `미완료` / `완료`
+- 회신여부 (`replyStatus`): `-` / `미완료` / `완료`
+- 작성자 (`authorId` → User), 비고 (`note`, 리치 텍스트)
+
 ### SiteVisit (답사)
 - 병원 답사 기록
 - 담당자 `daewoongUserId` (DAEWOONG 소속 User) + 추가 담당자 `assigneeId` (2인 지원)
@@ -205,6 +215,7 @@ prisma/
 
 ### 병원 관리
 - HIRA 병원 데이터 검색 및 조회 (모달 방식)
+- 병원 상세 → 답사 관리 카드 + 설치계획(가안) 관리 카드 + 구축 프로젝트 카드 순으로 표시 (각 카드에서 해당 병원 데이터 직접 조회, 행 클릭 상세 이동, ADMIN 이상 등록 버튼 제공)
 - 운영 병원 등록·수정·삭제
   - 등록: 병원명+상태만으로 즉시 등록, HIRA 연결은 선택
   - 수정: HIRA 병원 연결 변경·해제 지원
@@ -239,7 +250,14 @@ prisma/
     - 날짜 클릭 시 하단 상세 패널 업데이트 (기본값: 오늘)
     - 상세 패널: 해당 날짜 진행중 프로젝트 목록, 클릭 시 상세 새 탭 오픈
 
-### 답사 관리
+### 설치계획(가안) 관리
+- 설치계획(가안) 등록·수정·삭제 (삭제는 ADMIN 이상)
+- 병원 검색 모달로 병원 연결 (선택사항)
+- 요청일 / 작성완료여부 / 회신여부 / 작성자(씨어스) / 회신일 / 비고(Tiptap 리치 텍스트)
+- 작성완료여부·회신여부 색상 뱃지: 완료(초록) / 미완료(노랑) / -(회색)
+- 목록 컬럼 헤더 클릭으로 오름차순/내림차순 정렬 토글
+
+### 답사 관리 (구 답사 현황)
 - 병원 방문 답사 기록 등록·수정·삭제
 - 담당자(DAEWOONG 소속) + 추가 담당자 2인 연결 지원
 - 방문일 / 요청일 / 회신일 관리
@@ -468,6 +486,15 @@ npm run dev
 | PUT  | `/api/projects/[code]/files/[fileId]` | 프로젝트 파일 수정 |
 | DELETE | `/api/projects/[code]/files/[fileId]` | 프로젝트 파일 삭제 |
 | POST | `/api/projects/[code]/drive-folder` | Drive 폴더 연결 |
+
+### 설치계획(가안)
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET  | `/api/install-plans` | 설치계획 목록 (필터·정렬, 전체 반환) |
+| POST | `/api/install-plans` | 설치계획 등록 |
+| GET  | `/api/install-plans/[id]` | 설치계획 상세 |
+| PUT  | `/api/install-plans/[id]` | 설치계획 수정 |
+| DELETE | `/api/install-plans/[id]` | 설치계획 삭제 (ADMIN 이상) |
 
 ### 답사
 | Method | Endpoint | 설명 |
