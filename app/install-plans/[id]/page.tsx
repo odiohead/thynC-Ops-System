@@ -49,6 +49,9 @@ export default async function InstallPlanDetailPage({ params }: Props) {
       <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6 lg:px-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">설치계획(가안) 상세</h1>
+          {installPlan.planCode && (
+            <p className="mt-1 font-mono text-sm text-gray-400">{installPlan.planCode}</p>
+          )}
         </div>
         <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
           <InstallPlanDetailClient initialData={data} canAdmin={canAdmin} />

@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-03-31 | 답사 병원 검색 모달 전환, 설치계획 코드 관리, 계정 미배정 탭 추가
+
+- **TASK 1 — 답사 병원 선택 UX 개선** (`app/site-visits/SiteVisitForm.tsx`): 병원 `<select>` 드롭다운 → 검색 모달 방식으로 전환 (InstallPlanForm과 동일한 패턴). edit 모드에서 기존 hospitalCode로 `/api/hospitals/{code}` 호출해 병원명 자동 표시.
+- **TASK 2 — 설치계획 검색 버그 수정** (`app/api/install-plans/route.ts`): 목록 검색 시 `hospitalName`만 검색하던 것을 `hiraHospitalName`도 OR 조건으로 추가.
+- **TASK 3 — 설치계획 planCode 관리**: DB `install_plans` 테이블에 `plan_code VARCHAR(50) UNIQUE` 컬럼 추가 (마이그레이션명 `20260331120000_add_install_plan_code`). 신규 등록 시 `IP-NNNNN` 형식 자동 생성. UI 노출: 목록 페이지(코드 컬럼 추가), 병원 상세 InstallPlansCard(코드 컬럼 추가), 설치계획 상세 페이지 헤더에 코드 표시.
+- **TASK 4 — 계정관리 미배정 탭 추가** (`app/users/page.tsx`): 소속(organization)이 없는 계정이 SEERS/DAEWOONG 탭 어디에도 표시되지 않던 문제 수정. '미배정' 탭 추가하여 organization이 null인 계정(최고관리자 등) 접근 가능.
+- 영향 파일: `app/site-visits/SiteVisitForm.tsx`, `app/api/install-plans/route.ts`, `prisma/schema.prisma`, `prisma/migrations/20260331120000_add_install_plan_code/`, `app/install-plans/page.tsx`, `app/install-plans/[id]/page.tsx`, `app/hospitals/[code]/_components/InstallPlansCard.tsx`, `app/hospitals/[code]/page.tsx`, `app/users/page.tsx`
+
+---
+
 ## 2026-03-31 | 프로젝트명 표시 수정, 답사 관리 명칭 변경, 병원 상세 카드 추가
 
 - **TASK 1 — 프로젝트명 표시 수정** (`app/projects/page.tsx`): 컬럼 헤더 '병원명' → '프로젝트명', 셀 데이터 `hospitalName` → `p.projectName`으로 변경. 링크는 유지.

@@ -5,6 +5,7 @@ import Link from 'next/link'
 
 interface InstallPlan {
   id: number
+  planCode: string | null
   requestDate: string | null
   writeStatus: string
   replyStatus: string
@@ -52,7 +53,7 @@ export default function InstallPlansCard({ hospitalCode, installPlans, isAdmin }
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                {['요청일', '작성완료여부', '회신여부', '작성자', '회신일'].map((col) => (
+                {['코드', '요청일', '작성완료여부', '회신여부', '작성자', '회신일'].map((col) => (
                   <th key={col} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">{col}</th>
                 ))}
               </tr>
@@ -64,6 +65,7 @@ export default function InstallPlansCard({ hospitalCode, installPlans, isAdmin }
                   className="cursor-pointer transition-colors hover:bg-gray-50"
                   onClick={() => router.push(`/install-plans/${ip.id}`)}
                 >
+                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-gray-500">{ip.planCode ?? '-'}</td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-700">{fmt(ip.requestDate)}</td>
                   <td className="whitespace-nowrap px-4 py-3"><StatusBadge value={ip.writeStatus} /></td>
                   <td className="whitespace-nowrap px-4 py-3"><StatusBadge value={ip.replyStatus} /></td>

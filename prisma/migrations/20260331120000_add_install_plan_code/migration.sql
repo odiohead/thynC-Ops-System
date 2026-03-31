@@ -1,0 +1,1 @@
+ALTER TABLE install_plans ADD COLUMN IF NOT EXISTS plan_code VARCHAR(50) UNIQUE;

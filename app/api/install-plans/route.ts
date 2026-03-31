@@ -21,7 +21,12 @@ export async function GET(request: NextRequest) {
   const where = {
     ...(hospitalCode && { hospitalCode }),
     ...(search && {
-      hospital: { hospitalName: { contains: search, mode: 'insensitive' as const } },
+      hospital: {
+        OR: [
+          { hospitalName: { contains: search, mode: 'insensitive' as const } },
+          { hiraHospitalName: { contains: search, mode: 'insensitive' as const } },
+        ],
+      },
     }),
     ...(writeStatus && { writeStatus }),
     ...(replyStatus && { replyStatus }),
@@ -48,7 +53,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json()
   const { hospitalCode, requestDate, writeStatus, replyStatus, authorId, replyDate, note } = body
 
-  const installPlan = await prisma.installPlan.create({
+  const created = await prisma.installPlan.create({
     data: {
       hospitalCode: hospitalCode || null,
       requestDate: requestDate ? new Date(requestDate) : null,
@@ -58,6 +63,12 @@ export async function POST(request: NextRequest) {
       replyDate: replyDate ? new Date(replyDate) : null,
       note: note || null,
     },
+  })
+
+  const planCode = `IP-${String(created.id).padStart(5, '0')}`
+  const installPlan = await prisma.installPlan.update({
+    where: { id: created.id },
+    data: { planCode },
     include: {
       hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
       author: { select: { id: true, name: true } },

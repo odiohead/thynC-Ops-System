@@ -17,6 +17,7 @@ interface UserOption {
 
 interface InstallPlan {
   id: number
+  planCode: string | null
   hospital: Hospital | null
   requestDate: string | null
   writeStatus: string
@@ -164,6 +165,7 @@ export default function InstallPlansPage() {
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
+                  <th className={thStaticClass}>코드</th>
                   <th className={thStaticClass}>병원명</th>
                   <th className={thClass} onClick={() => handleSort('requestDate')}>요청일 <SortIndicator col="requestDate" /></th>
                   <th className={thClass} onClick={() => handleSort('writeStatus')}>작성완료여부 <SortIndicator col="writeStatus" /></th>
@@ -176,7 +178,7 @@ export default function InstallPlansPage() {
               <tbody className="divide-y divide-gray-200">
                 {plans.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-16 text-center text-sm text-gray-400">
+                    <td colSpan={8} className="py-16 text-center text-sm text-gray-400">
                       등록된 설치계획(가안)이 없습니다.
                     </td>
                   </tr>
@@ -187,6 +189,9 @@ export default function InstallPlansPage() {
                       className="cursor-pointer transition-colors hover:bg-gray-50"
                       onClick={() => router.push(`/install-plans/${p.id}`)}
                     >
+                      <td className="whitespace-nowrap px-3 py-3 font-mono text-xs text-gray-500">
+                        {p.planCode ?? '-'}
+                      </td>
                       <td className="px-3 py-3 font-medium text-gray-900" style={{ minWidth: '160px' }}>
                         {p.hospital
                           ? (p.hospital.hospitalName || p.hospital.hiraHospitalName)

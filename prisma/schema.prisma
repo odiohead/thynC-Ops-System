@@ -316,6 +316,7 @@ model SiteVisit {
 
 model InstallPlan {
   id           Int       @id @default(autoincrement())
+  planCode     String?   @unique @map("plan_code")
   hospitalCode String?   @map("hospital_code")
   requestDate  DateTime? @map("request_date") @db.Date
   writeStatus  String    @default("-") @map("write_status")

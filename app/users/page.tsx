@@ -68,7 +68,7 @@ export default function UsersPage() {
   const [editSubmitting, setEditSubmitting] = useState(false)
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'SEERS' | 'DAEWOONG'>('SEERS')
+  const [activeTab, setActiveTab] = useState<'SEERS' | 'DAEWOONG' | 'ETC'>('SEERS')
 
   // 다른 계정 수정 모달 (SUPER_ADMIN 전용)
   const [showEditOtherModal, setShowEditOtherModal] = useState(false)
@@ -271,7 +271,10 @@ export default function UsersPage() {
 
   const seersCount = users.filter((u) => u.organization?.code === 'SEERS').length
   const daewoongCount = users.filter((u) => u.organization?.code === 'DAEWOONG').length
-  const filteredUsers = users.filter((u) => u.organization?.code === activeTab)
+  const etcCount = users.filter((u) => !u.organization).length
+  const filteredUsers = activeTab === 'ETC'
+    ? users.filter((u) => !u.organization)
+    : users.filter((u) => u.organization?.code === activeTab)
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -292,6 +295,7 @@ export default function UsersPage() {
         {([
           { code: 'SEERS', label: '씨어스테크놀로지', count: seersCount },
           { code: 'DAEWOONG', label: '대웅제약', count: daewoongCount },
+          { code: 'ETC', label: '미배정', count: etcCount },
         ] as const).map((tab) => (
           <button
             key={tab.code}

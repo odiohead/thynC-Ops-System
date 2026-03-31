@@ -86,6 +86,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
 
   const installPlansData = installPlans.map((ip) => ({
     id: ip.id,
+    planCode: ip.planCode ?? null,
     requestDate: ip.requestDate ? ip.requestDate.toISOString() : null,
     writeStatus: ip.writeStatus,
     replyStatus: ip.replyStatus,

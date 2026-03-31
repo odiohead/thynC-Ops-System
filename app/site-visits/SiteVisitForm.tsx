@@ -173,11 +173,17 @@ function FileField({ s3Key, onUploadComplete, onDeleteComplete, hospitalCode, bu
 
 export default function SiteVisitForm({ initialData, mode }: Props) {
   const router = useRouter()
-  const [hospitals, setHospitals] = useState<Hospital[]>([])
   const [daewoongUsers, setDaewoongUsers] = useState<DaewoongUser[]>([])
   const [users, setUsers] = useState<UserItem[]>([])
   const [statuses, setStatuses] = useState<StatusCode[]>([])
   const [userRole, setUserRole] = useState<string | null>(null)
+
+  // 병원 선택
+  const [hospital, setHospital] = useState<Hospital | null>(null)
+  const [hospitalModalOpen, setHospitalModalOpen] = useState(false)
+  const [hospitalSearch, setHospitalSearch] = useState('')
+  const [hospitalResults, setHospitalResults] = useState<Hospital[]>([])
+  const [hospitalSearching, setHospitalSearching] = useState(false)
 
   const [form, setForm] = useState<SiteVisitFormData>({
     hospitalCode: initialData?.hospitalCode ?? '',
@@ -199,19 +205,57 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/hospitals?limit=999').then((r) => r.json()),
       fetch('/api/users?organization=DAEWOONG').then((r) => r.json()),
       fetch('/api/users').then((r) => r.json()),
       fetch('/api/settings/site-visit-status').then((r) => r.json()),
       fetch('/api/auth/me').then((r) => r.json()),
-    ]).then(([hData, dData, uData, stData, meData]) => {
-      setHospitals(hData.hospitals ?? [])
+    ]).then(([dData, uData, stData, meData]) => {
       setDaewoongUsers(dData ?? [])
       setUsers((uData ?? []).filter((u: UserItem) => u.role === 'USER'))
       setStatuses(stData.statusCodes ?? [])
       setUserRole(meData?.role ?? null)
     })
-  }, [])
+
+    // edit 모드에서 기존 병원 정보 로드
+    if (initialData?.hospitalCode) {
+      fetch(`/api/hospitals/${initialData.hospitalCode}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.hospital) {
+            setHospital({
+              hospitalCode: data.hospital.hospitalCode,
+              hospitalName: data.hospital.hospitalName,
+              hiraHospitalName: data.hospital.hiraHospitalName,
+            })
+          }
+        })
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function searchHospitals() {
+    if (!hospitalSearch.trim()) return
+    setHospitalSearching(true)
+    try {
+      const res = await fetch(`/api/hospitals?search=${encodeURIComponent(hospitalSearch)}&limit=20`)
+      const data = await res.json()
+      setHospitalResults(data.hospitals ?? [])
+    } finally {
+      setHospitalSearching(false)
+    }
+  }
+
+  function selectHospital(h: Hospital) {
+    setHospital(h)
+    setForm((prev) => ({ ...prev, hospitalCode: h.hospitalCode }))
+    setHospitalModalOpen(false)
+    setHospitalSearch('')
+    setHospitalResults([])
+  }
+
+  function clearHospital() {
+    setHospital(null)
+    setForm((prev) => ({ ...prev, hospitalCode: '' }))
+  }
 
   function set(field: keyof SiteVisitFormData, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -273,174 +317,249 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
   const selectClass = inputClass
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+    <>
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+          <div className="divide-y divide-gray-100">
+
+            {/* 병원명 */}
+            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+              <label className="flex items-center text-sm font-medium text-gray-700">
+                병원명 <span className="ml-1 text-red-500">*</span>
+              </label>
+              <div className="col-span-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 bg-gray-50 min-h-[38px]">
+                    {hospital ? (
+                      <span>
+                        {hospital.hospitalName || hospital.hiraHospitalName}
+                        <span className="ml-2 font-mono text-xs text-gray-400">({hospital.hospitalCode})</span>
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">병원을 선택해주세요</span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setHospitalModalOpen(true)}
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    {hospital ? '변경' : '병원 선택'}
+                  </button>
+                  {hospital && (
+                    <button
+                      type="button"
+                      onClick={clearHospital}
+                      className="rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                    >
+                      해제
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* 대웅 담당자 */}
+            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+              <label className="flex items-center text-sm font-medium text-gray-700">대웅 담당자</label>
+              <div className="col-span-2">
+                <select value={form.daewoongUserId} onChange={(e) => set('daewoongUserId', e.target.value)} className={selectClass}>
+                  <option value="">선택 없음</option>
+                  {daewoongUsers.map((u) => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* 담당자 */}
+            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+              <label className="flex items-center text-sm font-medium text-gray-700">담당자</label>
+              <div className="col-span-2">
+                <select value={form.assigneeId} onChange={(e) => set('assigneeId', e.target.value)} className={selectClass}>
+                  <option value="">선택 없음</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* 상태 */}
+            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+              <label className="flex items-center text-sm font-medium text-gray-700">상태</label>
+              <div className="col-span-2">
+                <select value={form.statusId} onChange={(e) => set('statusId', e.target.value)} className={selectClass}>
+                  <option value="">선택 없음</option>
+                  {statuses.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* 요청일 */}
+            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+              <label className="flex items-center text-sm font-medium text-gray-700">요청일</label>
+              <div className="col-span-2">
+                <input type="date" value={form.requestDate} onChange={(e) => set('requestDate', e.target.value)} className={inputClass} />
+              </div>
+            </div>
+
+            {/* 답사 날짜 */}
+            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+              <label className="flex items-center text-sm font-medium text-gray-700">답사 날짜</label>
+              <div className="col-span-2">
+                <input type="date" value={form.visitDate} onChange={(e) => set('visitDate', e.target.value)} className={inputClass} />
+              </div>
+            </div>
+
+            {/* 회신 날짜 */}
+            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+              <label className="flex items-center text-sm font-medium text-gray-700">회신 날짜</label>
+              <div className="col-span-2">
+                <input type="date" value={form.replyDate} onChange={(e) => set('replyDate', e.target.value)} className={inputClass} />
+              </div>
+            </div>
+
+            {/* 설치계획서 */}
+            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+              <label className="flex items-start pt-1 text-sm font-medium text-gray-700">설치계획서</label>
+              <div className="col-span-2">
+                <FileField
+                  s3Key={form.installPlanS3Key}
+                  onUploadComplete={(s3Key) => set('installPlanS3Key', s3Key)}
+                  onDeleteComplete={() => set('installPlanS3Key', '')}
+                  hospitalCode={form.hospitalCode}
+                  busy={busy}
+                  isAdmin={isAdmin}
+                />
+              </div>
+            </div>
+
+            {/* 도면 */}
+            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+              <label className="flex items-start pt-1 text-sm font-medium text-gray-700">도면</label>
+              <div className="col-span-2">
+                <FileField
+                  s3Key={form.floorPlanS3Key}
+                  onUploadComplete={(s3Key) => set('floorPlanS3Key', s3Key)}
+                  onDeleteComplete={() => set('floorPlanS3Key', '')}
+                  hospitalCode={form.hospitalCode}
+                  busy={busy}
+                  isAdmin={isAdmin}
+                />
+              </div>
+            </div>
+
+            {/* 비고 */}
+            <div className="px-6 py-4">
+              <label className="mb-2 block text-sm font-medium text-gray-700">비고</label>
+              <RichTextEditor
+                value={form.notes}
+                onChange={(v) => set('notes', v)}
+                placeholder="비고를 입력하세요."
+              />
+            </div>
+
+          </div>
         </div>
-      )}
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-        <div className="divide-y divide-gray-100">
-
-          {/* 병원명 */}
-          <div className="grid grid-cols-3 gap-4 px-6 py-4">
-            <label className="flex items-center text-sm font-medium text-gray-700">
-              병원명 <span className="ml-1 text-red-500">*</span>
-            </label>
-            <div className="col-span-2">
-              <select
-                value={form.hospitalCode}
-                onChange={(e) => set('hospitalCode', e.target.value)}
-                required
-                className={selectClass}
+        <div className="flex items-center justify-between">
+          <div>
+            {mode === 'edit' && isAdmin && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={busy}
+                className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
               >
-                <option value="">병원 선택</option>
-                {hospitals.map((h) => (
-                  <option key={h.hospitalCode} value={h.hospitalCode}>
-                    {h.hospitalName || h.hiraHospitalName} ({h.hospitalCode})
-                  </option>
-                ))}
-              </select>
-            </div>
+                삭제
+              </button>
+            )}
           </div>
-
-          {/* 대웅 담당자 */}
-          <div className="grid grid-cols-3 gap-4 px-6 py-4">
-            <label className="flex items-center text-sm font-medium text-gray-700">대웅 담당자</label>
-            <div className="col-span-2">
-              <select value={form.daewoongUserId} onChange={(e) => set('daewoongUserId', e.target.value)} className={selectClass}>
-                <option value="">선택 없음</option>
-                {daewoongUsers.map((u) => (
-                  <option key={u.id} value={u.id}>{u.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* 담당자 */}
-          <div className="grid grid-cols-3 gap-4 px-6 py-4">
-            <label className="flex items-center text-sm font-medium text-gray-700">담당자</label>
-            <div className="col-span-2">
-              <select value={form.assigneeId} onChange={(e) => set('assigneeId', e.target.value)} className={selectClass}>
-                <option value="">선택 없음</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>{u.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* 상태 */}
-          <div className="grid grid-cols-3 gap-4 px-6 py-4">
-            <label className="flex items-center text-sm font-medium text-gray-700">상태</label>
-            <div className="col-span-2">
-              <select value={form.statusId} onChange={(e) => set('statusId', e.target.value)} className={selectClass}>
-                <option value="">선택 없음</option>
-                {statuses.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* 요청일 */}
-          <div className="grid grid-cols-3 gap-4 px-6 py-4">
-            <label className="flex items-center text-sm font-medium text-gray-700">요청일</label>
-            <div className="col-span-2">
-              <input type="date" value={form.requestDate} onChange={(e) => set('requestDate', e.target.value)} className={inputClass} />
-            </div>
-          </div>
-
-          {/* 답사 날짜 */}
-          <div className="grid grid-cols-3 gap-4 px-6 py-4">
-            <label className="flex items-center text-sm font-medium text-gray-700">답사 날짜</label>
-            <div className="col-span-2">
-              <input type="date" value={form.visitDate} onChange={(e) => set('visitDate', e.target.value)} className={inputClass} />
-            </div>
-          </div>
-
-          {/* 회신 날짜 */}
-          <div className="grid grid-cols-3 gap-4 px-6 py-4">
-            <label className="flex items-center text-sm font-medium text-gray-700">회신 날짜</label>
-            <div className="col-span-2">
-              <input type="date" value={form.replyDate} onChange={(e) => set('replyDate', e.target.value)} className={inputClass} />
-            </div>
-          </div>
-
-          {/* 설치계획서 */}
-          <div className="grid grid-cols-3 gap-4 px-6 py-4">
-            <label className="flex items-start pt-1 text-sm font-medium text-gray-700">설치계획서</label>
-            <div className="col-span-2">
-              <FileField
-                s3Key={form.installPlanS3Key}
-                onUploadComplete={(s3Key) => set('installPlanS3Key', s3Key)}
-                onDeleteComplete={() => set('installPlanS3Key', '')}
-                hospitalCode={form.hospitalCode}
-                busy={busy}
-                isAdmin={isAdmin}
-              />
-            </div>
-          </div>
-
-          {/* 도면 */}
-          <div className="grid grid-cols-3 gap-4 px-6 py-4">
-            <label className="flex items-start pt-1 text-sm font-medium text-gray-700">도면</label>
-            <div className="col-span-2">
-              <FileField
-                s3Key={form.floorPlanS3Key}
-                onUploadComplete={(s3Key) => set('floorPlanS3Key', s3Key)}
-                onDeleteComplete={() => set('floorPlanS3Key', '')}
-                hospitalCode={form.hospitalCode}
-                busy={busy}
-                isAdmin={isAdmin}
-              />
-            </div>
-          </div>
-
-          {/* 비고 */}
-          <div className="px-6 py-4">
-            <label className="mb-2 block text-sm font-medium text-gray-700">비고</label>
-            <RichTextEditor
-              value={form.notes}
-              onChange={(v) => set('notes', v)}
-              placeholder="비고를 입력하세요."
-            />
-          </div>
-
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div>
-          {mode === 'edit' && isAdmin && (
+          <div className="flex gap-3">
             <button
               type="button"
-              onClick={handleDelete}
-              disabled={busy}
-              className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
+              onClick={() => router.push('/site-visits')}
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50"
             >
-              삭제
+              취소
             </button>
-          )}
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+            >
+              {busy ? '저장 중...' : mode === 'create' ? '등록' : '저장'}
+            </button>
+          </div>
         </div>
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={() => router.push('/site-visits')}
-            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50"
-          >
-            취소
-          </button>
-          <button
-            type="submit"
-            disabled={busy}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
-          >
-            {busy ? '저장 중...' : mode === 'create' ? '등록' : '저장'}
-          </button>
+      </form>
+
+      {/* 병원 검색 모달 */}
+      {hospitalModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-lg rounded-xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+              <h2 className="text-base font-semibold text-gray-900">병원 검색</h2>
+              <button
+                type="button"
+                onClick={() => { setHospitalModalOpen(false); setHospitalSearch(''); setHospitalResults([]) }}
+                className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-5">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={hospitalSearch}
+                  onChange={(e) => setHospitalSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), searchHospitals())}
+                  placeholder="병원명 검색..."
+                  className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={searchHospitals}
+                  disabled={hospitalSearching}
+                  className="rounded-lg bg-gray-800 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-60"
+                >
+                  검색
+                </button>
+              </div>
+              <div className="mt-3 max-h-72 overflow-y-auto divide-y divide-gray-100">
+                {hospitalResults.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-gray-400">
+                    {hospitalSearching ? '검색 중...' : '검색어를 입력하고 검색 버튼을 눌러주세요.'}
+                  </p>
+                ) : (
+                  hospitalResults.map((h) => (
+                    <button
+                      key={h.hospitalCode}
+                      type="button"
+                      onClick={() => selectHospital(h)}
+                      className="flex w-full flex-col px-2 py-2.5 text-left hover:bg-blue-50"
+                    >
+                      <span className="text-sm font-medium text-gray-900">{h.hospitalName || h.hiraHospitalName}</span>
+                      <span className="text-xs text-gray-400">{h.hospitalCode}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-    </form>
+      )}
+    </>
   )
 }
