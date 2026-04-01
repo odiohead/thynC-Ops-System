@@ -61,6 +61,9 @@ app/
 │   │   ├── site-visit-status/        # 답사 상태코드 관리
 │   │   └── intro-type/               # 도입형태 관리
 │   ├── install-plans/                # 설치계획(가안) CRUD
+│   ├── hira-hospitals/
+│   │   └── sync/                     # 심평원 연동 (POST: 백그라운드 시작, GET: 히스토리 목록)
+│   │       └── [id]/                 # 연동 잡 상세 + 로그
 │   └── drive/                        # Google Drive 연동 (파일 업로드/목록/삭제/병원목록 내보내기)
 ├── (대시보드)/                        # 메인 대시보드 (이번 주/다음 주 공사 현황)
 ├── hospitals/                        # 병원 목록·상세·등록·수정
@@ -73,6 +76,7 @@ app/
 ├── settings/
 │   ├── profile/                      # 내 계정 정보
 │   ├── organizations/                # 소속 관리 (SUPER_ADMIN 전용)
+│   ├── hira-sync/                    # 심평원 연동 관리 (SUPER_ADMIN 전용)
 │   ├── devices/                      # 장비 정보 관리
 │   ├── build-status/                 # 공사 상태 관리
 │   ├── status/                       # 병원 상태코드 관리
@@ -178,6 +182,15 @@ prisma/
 
 ### Contractor (시공사)
 - 시공사 코드, 이름, 연락처 등
+
+### HiraSyncJob (심평원 연동 잡)
+- 심평원 연동 실행 단위 (백그라운드 비동기 처리)
+- 시작시간 (`startedAt`), 종료시간 (`endedAt`), 상태 (`status`: running/done/error), 연동건수 (`totalCount`)
+
+### HiraSyncLog (심평원 연동 로그)
+- HiraSyncJob 1:N 관계
+- 이벤트 타입 (`type`: init/group_start/group_api_done/group_db_done/done/error)
+- 메시지 (`message`), 추가 데이터 (`stats`, JSONB)
 
 ---
 

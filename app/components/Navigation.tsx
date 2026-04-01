@@ -242,6 +242,15 @@ export default function Navigation() {
                   소속 관리
                 </Link>
               )}
+              {/* 심평원 연동 관리: SUPER_ADMIN만 */}
+              {userRole === 'SUPER_ADMIN' && (
+                <Link
+                  href="/settings/hira-sync"
+                  className={navItemClass(isActive('/settings/hira-sync'))}
+                >
+                  심평원 연동 관리
+                </Link>
+              )}
               {/* 내 프로필: 모든 역할 */}
               <Link
                 href="/settings/profile"

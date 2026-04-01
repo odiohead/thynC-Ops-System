@@ -4,6 +4,48 @@
 
 ---
 
+## 2026-04-01 | 심평원 연동 백그라운드 전환 + 연동 관리 설정 페이지 신설
+
+- **아키텍처 전환**: SSE 스트리밍 방식 → DB 저장 + 백그라운드 비동기 방식으로 전면 전환. POST 핸들러가 즉시 jobId를 반환하고 `runSync()`를 await 없이 실행 → 브라우저 닫아도 연동 계속 진행.
+- **DB 마이그레이션** (`20260401000000_add_hira_sync_jobs`): `hira_sync_jobs`(id, started_at, ended_at, status, total_count), `hira_sync_logs`(id, job_id, type, message, stats, created_at) 테이블 신설.
+- **API 재작성** (`app/api/hira-hospitals/sync/route.ts`): GET=히스토리 목록(최신 50건), POST=백그라운드 연동 시작(중복 실행 방지). 연동 진행 중 각 단계별 로그를 DB에 저장.
+- **잡 상세 API 신설** (`app/api/hira-hospitals/sync/[id]/route.ts`): GET=특정 잡 상세 + 전체 로그 반환.
+- **설정 페이지 신설** (`app/settings/hira-sync/`): SUPER_ADMIN 전용. 연동 시작 버튼, 히스토리 테이블(시작시간/종료시간/상태/연동건수), 행 클릭 시 우측 로그 패널 오픈. 진행 중인 잡은 2초 폴링으로 실시간 갱신.
+- **Navigation 업데이트** (`app/components/Navigation.tsx`): 설정 하위에 '심평원 연동 관리' 메뉴 추가 (SUPER_ADMIN만 노출).
+- **hira-hospitals 페이지 정리** (`app/hira-hospitals/page.tsx`): 기존 HiraSyncButton 완전 제거.
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260401000000_add_hira_sync_jobs/`, `app/api/hira-hospitals/sync/route.ts`, `app/api/hira-hospitals/sync/[id]/route.ts` (신설), `app/settings/hira-sync/page.tsx` (신설), `app/settings/hira-sync/_components/HiraSyncPageClient.tsx` (신설), `app/components/Navigation.tsx`, `app/hira-hospitals/page.tsx`
+
+---
+
+## 2026-04-01 | 심평원 연동 Nginx 타임아웃 버그 수정 (keepalive + 타임아웃 연장)
+
+- **원인**: Nginx `proxy_read_timeout` 기본값(60초) 초과로 커넥션 강제 종료
+- **TASK 1 — API keepalive ping 추가** (`app/api/hira-hospitals/sync/route.ts`): `group_start` 직후, 각 페이지 fetch 직전, DB upsert 100건 배치마다 `{"type":"keepalive"}` SSE 이벤트 전송. `upsertHospitals` → `upsertBatch(items, onKeepalive)` 로 리팩터(배치 단위 콜백).
+- **TASK 2 — Nginx SSE 전용 location 추가** (`/etc/nginx/sites-available/thync-ops`): DEV 서버 블록에 `/api/hira-hospitals/sync` location 추가 — `proxy_read_timeout 600s`, `proxy_buffering off`, `proxy_cache off`, HTTP/1.1 chunked 전송. PROD 설정 미변경. `sudo nginx -t && sudo systemctl reload nginx` 적용.
+- **TASK 3 — 클라이언트 오류 처리 개선** (`HiraSyncButton.tsx`): keepalive 이벤트 수신 시 무시(로그 미출력). `lastEventTypeRef`로 스트림 종료 시 정상/비정상 구분. 네트워크 에러 메시지에 "network error"/"failed to fetch" 포함 시 사용자 친화적 문구 출력.
+- 영향 파일: `app/api/hira-hospitals/sync/route.ts`, `/etc/nginx/sites-available/thync-ops`, `app/hira-hospitals/_components/HiraSyncButton.tsx`
+
+---
+
+## 2026-04-01 | 심평원 연동 SSE 이벤트 구조 세분화 및 UI 전면 재작성
+
+- **TASK 1 — API 라우트 재작성** (`app/api/hira-hospitals/sync/route.ts`): SSE 이벤트를 6종(init / group_start / group_api_done / group_db_done / done / error)으로 세분화. 각 이벤트에 `stats` 객체 포함. 종별코드별 오류는 해당 그룹만 스킵하고 계속 진행. fatal 오류 시 `stats.fatal: true` 추가. `cumulativeCount` 누적 카운터 도입.
+- **TASK 2 — HiraSyncButton 전면 재작성** (`app/hira-hospitals/_components/HiraSyncButton.tsx`): EventSource → `fetch + ReadableStream` 방식으로 교체 (자동 재연결 오발화 방지). 상단 요약 바(진행 그룹 수 / 누적 처리 건수 / 프로그레스 바) 추가. 이벤트 타입별 로그 스타일 구분(회색/기본/파란색 ✓/노란색 ⚠/초록색/빨간색 ✗). AbortController로 연결 취소 지원.
+- 영향 파일: `app/api/hira-hospitals/sync/route.ts`, `app/hira-hospitals/_components/HiraSyncButton.tsx`
+
+---
+
+## 2026-04-01 | 심평원 연동 버튼 추가, 병원 상태코드 필터 버그 수정, 대시보드 섹션 순서 변경
+
+- **TASK 1 — 심평원 SSE 연동 API** (`app/api/hira-hospitals/sync/route.ts`): SUPER_ADMIN 전용 GET 핸들러 신설. 종별코드 15개를 순서대로 처리하며 HIRA Open API 호출 → xml2js 파싱 → Prisma upsert. 각 단계별 진행 상황을 SSE(`text/event-stream`)로 실시간 스트리밍. `maxDuration=300` 설정.
+- **TASK 2 — 심평원 연동 버튼 + 팝업** (`app/hira-hospitals/_components/HiraSyncButton.tsx`): 클라이언트 컴포넌트 신설. 버튼 클릭 시 모달 오픈 + `EventSource`로 SSE 연결. 로그 실시간 추가·자동 스크롤. progress/done/error 타입별 텍스트 색상 구분. 연동 중 닫기 비활성화, 완료/오류 시 닫기 활성화.
+- **TASK 3 — 심평원 페이지 구조 개편** (`app/hira-hospitals/page.tsx`): 서버 컴포넌트 유지. `verifyToken` + `isSuperAdmin`으로 권한 확인 후 헤더 우측에 `HiraSyncButton` 조건부 렌더링.
+- **TASK 4 — 병원 상태코드 필터 버그 수정**: `app/hospitals/[code]/page.tsx`(line 70) 및 `app/api/hospitals/[code]/route.ts`(line 17)의 `statusCode.findMany()`에 `where: { category: 'HOSPITAL' }` 조건 추가. 기존에 SITE_VISIT 카테고리 값까지 함께 조회되던 문제 수정.
+- **TASK 5 — 대시보드 섹션 순서 변경** (`app/page.tsx`): '월별 누적 사용 현황' 섹션을 '이번주 구축 현황' 및 '차주 구축 예정' 카드보다 위로 이동. JSX 순서만 변경, 데이터 로직 무변경.
+- 영향 파일: `app/api/hira-hospitals/sync/route.ts` (신설), `app/hira-hospitals/_components/HiraSyncButton.tsx` (신설), `app/hira-hospitals/page.tsx`, `app/hospitals/[code]/page.tsx`, `app/api/hospitals/[code]/route.ts`, `app/page.tsx`
+
+---
+
 ## 2026-03-31 | 답사 병원 검색 모달 전환, 설치계획 코드 관리, 계정 미배정 탭 추가
 
 - **TASK 1 — 답사 병원 선택 UX 개선** (`app/site-visits/SiteVisitForm.tsx`): 병원 `<select>` 드롭다운 → 검색 모달 방식으로 전환 (InstallPlanForm과 동일한 패턴). edit 모드에서 기존 hospitalCode로 `/api/hospitals/{code}` 호출해 병원명 자동 표시.

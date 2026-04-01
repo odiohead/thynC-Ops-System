@@ -67,7 +67,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
     }),
     prisma.deviceInfo.findMany({ orderBy: { sortOrder: 'asc' } }),
     prisma.hospitalDevice.findMany({ where: { hospitalCode: params.code } }),
-    prisma.statusCode.findMany({ select: { name: true, color: true } }),
+    prisma.statusCode.findMany({ where: { category: 'HOSPITAL' }, select: { name: true, color: true } }),
   ])
   if (!hospital) notFound()
 

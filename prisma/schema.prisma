@@ -333,3 +333,26 @@ model InstallPlan {
 
   @@map("install_plans")
 }
+
+model HiraSyncJob {
+  id         Int           @id @default(autoincrement())
+  startedAt  DateTime      @default(now()) @map("started_at")
+  endedAt    DateTime?     @map("ended_at")
+  status     String        @default("running") @map("status")
+  totalCount Int           @default(0) @map("total_count")
+  logs       HiraSyncLog[]
+
+  @@map("hira_sync_jobs")
+}
+
+model HiraSyncLog {
+  id        Int         @id @default(autoincrement())
+  jobId     Int         @map("job_id")
+  job       HiraSyncJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  type      String      @map("type")
+  message   String      @map("message")
+  stats     Json?       @map("stats")
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  @@map("hira_sync_logs")
+}

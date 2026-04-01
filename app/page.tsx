@@ -283,36 +283,6 @@ export default function Home() {
 
         <div className="space-y-6">
 
-          {/* 이번주 구축현황 */}
-          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-              <h2 className="text-sm font-semibold text-gray-700">이번주 thynC 구축 현황</h2>
-              {thisWeekProjects.length > 0 && (
-                <span className="text-xs text-gray-400">{buildStatusSummary(thisWeekProjects)}</span>
-              )}
-            </div>
-            {thisWeekProjects.length === 0 ? (
-              <p className="px-6 py-10 text-center text-sm text-gray-400">해당 주차 구축 일정이 없습니다.</p>
-            ) : (
-              <DashboardTable projects={thisWeekProjects} onRemarkSaved={handleRemarkSaved} />
-            )}
-          </div>
-
-          {/* 차주 구축현황 */}
-          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-              <h2 className="text-sm font-semibold text-gray-700">차주 thynC 구축 예정</h2>
-              {nextWeekProjects.length > 0 && (
-                <span className="text-xs text-gray-400">{nextWeekProjects.length}건 신규구축</span>
-              )}
-            </div>
-            {nextWeekProjects.length === 0 ? (
-              <p className="px-6 py-10 text-center text-sm text-gray-400">해당 주차 구축 일정이 없습니다.</p>
-            ) : (
-              <DashboardTable projects={nextWeekProjects} onRemarkSaved={handleRemarkSaved} />
-            )}
-          </div>
-
           {/* 월별 누적 사용 현황 */}
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
@@ -487,6 +457,36 @@ export default function Home() {
                 </div>
 
               </div>
+            )}
+          </div>
+
+          {/* 이번주 구축현황 */}
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <h2 className="text-sm font-semibold text-gray-700">이번주 thynC 구축 현황</h2>
+              {thisWeekProjects.length > 0 && (
+                <span className="text-xs text-gray-400">{buildStatusSummary(thisWeekProjects)}</span>
+              )}
+            </div>
+            {thisWeekProjects.length === 0 ? (
+              <p className="px-6 py-10 text-center text-sm text-gray-400">해당 주차 구축 일정이 없습니다.</p>
+            ) : (
+              <DashboardTable projects={thisWeekProjects} onRemarkSaved={handleRemarkSaved} />
+            )}
+          </div>
+
+          {/* 차주 구축현황 */}
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <h2 className="text-sm font-semibold text-gray-700">차주 thynC 구축 예정</h2>
+              {nextWeekProjects.length > 0 && (
+                <span className="text-xs text-gray-400">{nextWeekProjects.length}건 신규구축</span>
+              )}
+            </div>
+            {nextWeekProjects.length === 0 ? (
+              <p className="px-6 py-10 text-center text-sm text-gray-400">해당 주차 구축 일정이 없습니다.</p>
+            ) : (
+              <DashboardTable projects={nextWeekProjects} onRemarkSaved={handleRemarkSaved} />
             )}
           </div>
 

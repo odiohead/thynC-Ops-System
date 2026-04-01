@@ -14,7 +14,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
         introTypes: { include: { statusCode: true }, orderBy: { statusCode: { order: 'asc' } } },
       },
     }),
-    prisma.statusCode.findMany({ orderBy: { order: 'asc' } }),
+    prisma.statusCode.findMany({ where: { category: 'HOSPITAL' }, orderBy: { order: 'asc' } }),
   ])
 
   if (!hospital) return NextResponse.json({ error: '병원을 찾을 수 없습니다.' }, { status: 404 })
