@@ -61,9 +61,12 @@ export async function GET(req: NextRequest) {
   let totalHospitals = 0
   let totalBeds = 0
 
-  // firstMonth부터 currentMonth까지 순회
+  // firstMonth부터 max(currentMonth, monthMap 마지막 키)까지 순회
+  // (endDateExpected 익월을 서비스 시작월로 계산하므로, 당월 완료 프로젝트는 다음 달 버킷에 쌓임)
+  const lastMonthInMap = allMonthKeys[allMonthKeys.length - 1]
+  const endMonth = currentMonth >= lastMonthInMap ? currentMonth : lastMonthInMap
   const cursor = new Date(`${firstMonth}-01`)
-  const endCursor = new Date(`${currentMonth}-01`)
+  const endCursor = new Date(`${endMonth}-01`)
 
   while (cursor <= endCursor) {
     const month = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
