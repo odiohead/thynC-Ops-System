@@ -298,6 +298,11 @@ prisma/
 - 장비 정보(DeviceInfo) 관리
 - 시공사(Contractor) 관리
 - **도입형태(IntroType) 관리**: 구축형·구독형·사용량비례형 등 동적 추가·수정·삭제·순서 변경
+- **심평원 연동 관리** (SUPER_ADMIN 전용): 심평원 Open API 병원 데이터 동기화
+  - 연동 시작 버튼 → 백그라운드 비동기 처리 (브라우저 닫아도 서버에서 계속 실행)
+  - 연동 히스토리 목록 (시작시간·종료시간·상태·연동건수)
+  - 히스토리 행 클릭 시 상세 로그 패널 표시 (이벤트 타입별 색상 구분)
+  - 진행 중 잡에 대해 2초 간격 폴링으로 실시간 로그 갱신
 
 ### Google Drive 연동 (선택)
 - Service Account 기반 파일 업로드 (`POST /api/drive/upload`)
@@ -482,6 +487,9 @@ npm run dev
 |--------|----------|------|
 | GET | `/api/hira-hospitals` | HIRA 병원 목록 (검색/필터) |
 | GET | `/api/hira-hospitals/[id]` | HIRA 병원 상세 |
+| GET | `/api/hira-hospitals/sync` | 연동 잡 히스토리 목록 (최근 50건) |
+| POST | `/api/hira-hospitals/sync` | 연동 잡 시작 (백그라운드 비동기, SUPER_ADMIN) |
+| GET | `/api/hira-hospitals/sync/[id]` | 연동 잡 상세 + 로그 목록 (SUPER_ADMIN) |
 
 ### 프로젝트
 | Method | Endpoint | 설명 |
