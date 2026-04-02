@@ -5,17 +5,21 @@ interface Props {
   totalPages: number
   search: string
   sido: string
+  statuses: string[]
+  types: string[]
 }
 
-function buildHref(page: number, search: string, sido: string) {
+function buildHref(page: number, search: string, sido: string, statuses: string[], types: string[]) {
   const params = new URLSearchParams()
   params.set('page', String(page))
   if (search) params.set('search', search)
   if (sido) params.set('sido', sido)
+  statuses.forEach((s) => params.append('status', s))
+  types.forEach((t) => params.append('type', t))
   return `/hospitals?${params.toString()}`
 }
 
-export default function Pagination({ page, totalPages, search, sido }: Props) {
+export default function Pagination({ page, totalPages, search, sido, statuses, types }: Props) {
   if (totalPages <= 1) return null
 
   const delta = 2
@@ -30,14 +34,14 @@ export default function Pagination({ page, totalPages, search, sido }: Props) {
   return (
     <div className="mt-6 flex items-center justify-center gap-1">
       {page > 1 && (
-        <Link href={buildHref(page - 1, search, sido)} className={linkBase}>
+        <Link href={buildHref(page - 1, search, sido, statuses, types)} className={linkBase}>
           ← 이전
         </Link>
       )}
 
       {range[0] > 1 && (
         <>
-          <Link href={buildHref(1, search, sido)} className={linkBase}>
+          <Link href={buildHref(1, search, sido, statuses, types)} className={linkBase}>
             1
           </Link>
           {range[0] > 2 && <span className="px-1 text-gray-400">…</span>}
@@ -45,7 +49,7 @@ export default function Pagination({ page, totalPages, search, sido }: Props) {
       )}
 
       {range.map((p) => (
-        <Link key={p} href={buildHref(p, search, sido)} className={p === page ? activeLink : linkBase}>
+        <Link key={p} href={buildHref(p, search, sido, statuses, types)} className={p === page ? activeLink : linkBase}>
           {p}
         </Link>
       ))}
@@ -55,14 +59,14 @@ export default function Pagination({ page, totalPages, search, sido }: Props) {
           {range[range.length - 1] < totalPages - 1 && (
             <span className="px-1 text-gray-400">…</span>
           )}
-          <Link href={buildHref(totalPages, search, sido)} className={linkBase}>
+          <Link href={buildHref(totalPages, search, sido, statuses, types)} className={linkBase}>
             {totalPages}
           </Link>
         </>
       )}
 
       {page < totalPages && (
-        <Link href={buildHref(page + 1, search, sido)} className={linkBase}>
+        <Link href={buildHref(page + 1, search, sido, statuses, types)} className={linkBase}>
           다음 →
         </Link>
       )}

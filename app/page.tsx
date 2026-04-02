@@ -35,6 +35,18 @@ type DashboardData = {
   nextWeek: DashboardProject[]
 }
 
+type HospitalStatRow = {
+  clCdNm: string
+  total: number
+  reviewing: number
+  contracted: number
+}
+
+type HospitalStats = {
+  rows: HospitalStatRow[]
+  totals: { total: number; reviewing: number; contracted: number }
+}
+
 type MonthlyEntry = {
   month: string
   label: string
@@ -224,6 +236,8 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [monthly, setMonthly] = useState<MonthlyEntry[] | null>(null)
   const [monthlyLoading, setMonthlyLoading] = useState(true)
+  const [hospitalStats, setHospitalStats] = useState<HospitalStats | null>(null)
+  const [statsLoading, setStatsLoading] = useState(true)
 
   const loadData = useCallback(async () => {
     const res = await fetch('/api/dashboard', { cache: 'no-store' })
@@ -242,10 +256,19 @@ export default function Home() {
     setMonthlyLoading(false)
   }, [])
 
+  const loadHospitalStats = useCallback(async () => {
+    const res = await fetch('/api/dashboard/hospital-stats', { cache: 'no-store' })
+    if (res.ok) {
+      setHospitalStats(await res.json())
+    }
+    setStatsLoading(false)
+  }, [])
+
   useEffect(() => {
     loadData()
     loadMonthly()
-  }, [loadData, loadMonthly])
+    loadHospitalStats()
+  }, [loadData, loadMonthly, loadHospitalStats])
 
   function handleRemarkSaved(code: string, remark: string) {
     if (!data) return
@@ -282,6 +305,56 @@ export default function Home() {
         </div>
 
         <div className="space-y-6">
+
+          {/* thynC 현황 */}
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="border-b border-gray-200 px-6 py-4">
+              <h2 className="text-sm font-semibold text-gray-700">thynC 현황</h2>
+            </div>
+            {statsLoading ? (
+              <p className="px-6 py-8 text-center text-sm text-gray-400">불러오는 중...</p>
+            ) : !hospitalStats ? (
+              <p className="px-6 py-8 text-center text-sm text-gray-400">데이터를 불러올 수 없습니다.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full divide-y divide-gray-100 text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">종별</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">전체 병원 수</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">도입검토중</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">도입확정</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {hospitalStats.rows.map((row) => (
+                      <tr key={row.clCdNm} className="hover:bg-gray-50">
+                        <td className="px-4 py-2.5 font-medium text-gray-800">{row.clCdNm}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-gray-700">{row.total.toLocaleString()}</td>
+                        <td className={`px-4 py-2.5 text-right tabular-nums font-medium ${row.reviewing > 0 ? 'text-blue-600' : 'text-gray-300'}`}>
+                          {row.reviewing > 0 ? row.reviewing.toLocaleString() : '-'}
+                        </td>
+                        <td className={`px-4 py-2.5 text-right tabular-nums font-medium ${row.contracted > 0 ? 'text-emerald-600' : 'text-gray-300'}`}>
+                          {row.contracted > 0 ? row.contracted.toLocaleString() : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                    {/* 합계 행 */}
+                    <tr className="border-t-2 border-gray-200 bg-gray-50 font-semibold">
+                      <td className="px-4 py-2.5 text-gray-900">합계</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-gray-900">{hospitalStats.totals.total.toLocaleString()}</td>
+                      <td className={`px-4 py-2.5 text-right tabular-nums ${hospitalStats.totals.reviewing > 0 ? 'text-blue-600' : 'text-gray-300'}`}>
+                        {hospitalStats.totals.reviewing > 0 ? hospitalStats.totals.reviewing.toLocaleString() : '-'}
+                      </td>
+                      <td className={`px-4 py-2.5 text-right tabular-nums ${hospitalStats.totals.contracted > 0 ? 'text-emerald-600' : 'text-gray-300'}`}>
+                        {hospitalStats.totals.contracted > 0 ? hospitalStats.totals.contracted.toLocaleString() : '-'}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
 
           {/* 월별 누적 사용 현황 */}
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">

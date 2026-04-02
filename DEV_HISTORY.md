@@ -4,6 +4,38 @@
 
 ---
 
+## 2026-04-02 | 대시보드 thynC 현황 종별 테이블 추가
+
+- `app/api/dashboard/hospital-stats/route.ts` 신설: 종별 × (전체/도입검토중/도입확정) 집계
+- 도입검토중 기준: status IN ('가견적요청', '답사요청')
+- 도입확정 기준: status IN ('계약완료', '운영')
+- hospitals.type 컬럼 직접 사용 (hira_hospitals 조인 불필요), hiraId 없는 병원은 '기타' 분류
+- 대시보드 최상단에 'thynC 현황' 테이블 추가 (합계 행 포함, 0건 종별 행 생략, 도입검토중 파란색·도입확정 초록색)
+- 영향 파일: `app/api/dashboard/hospital-stats/route.ts` (신규), `app/page.tsx`
+
+---
+
+## 2026-04-02 | 병원 목록 상태 멀티필터 추가
+
+- `HospitalFilters.tsx`: 상태 멀티선택 드롭다운 추가. 체크박스 클릭 즉시 URL 반영, 선택 건수 버튼에 표시, 외부 클릭 시 닫힘, 선택 초기화 버튼 포함
+- `page.tsx`: `searchParams.status` 배열 파싱 → `where: { status: { in: [...] } }` 조건 적용. `statusOptions`·`initialStatuses` props 전달. statusCode 쿼리에 `category: 'HOSPITAL'` 조건 추가
+- `Pagination.tsx`: `statuses` prop 추가, `buildHref`에 다중 `status` 파라미터 유지
+- 영향 파일: `app/hospitals/page.tsx`, `app/hospitals/_components/HospitalFilters.tsx`, `app/hospitals/_components/Pagination.tsx`
+
+---
+
+## 2026-04-01 | HIRA → Hospital 일괄 마이그레이션 스크립트 작성
+
+- `scripts/migrate-hira-to-hospitals.ts` 신규 생성
+- 대상: hira_hospitals에서 한의원·치과의원 제외, 이미 hospital에 매핑된 hiraId 중복 제외
+- dry-run 결과: 전체 79,618건 중 신규 삽입 대상 45,247건 (한의원/치과의원 34,197건 제외, 기매핑 174건 제외)
+- `--dry-run` / `--execute` 플래그 지원, 500건 배치 `createMany(skipDuplicates: true)`
+- StatusCode `'미계약'`(HOSPITAL) 없으면 스크립트 종료 처리
+- hospitalCode 채번: 기존 최댓값(HOSP-000174) 이후 HOSP-000175부터 순번 증가
+- 영향 파일: `scripts/migrate-hira-to-hospitals.ts` (신규)
+
+---
+
 ## 2026-04-01 | 심평원 연동 백그라운드 전환 + 연동 관리 설정 페이지 신설
 
 - **아키텍처 전환**: SSE 스트리밍 방식 → DB 저장 + 백그라운드 비동기 방식으로 전면 전환. POST 핸들러가 즉시 jobId를 반환하고 `runSync()`를 await 없이 실행 → 브라우저 닫아도 연동 계속 진행.

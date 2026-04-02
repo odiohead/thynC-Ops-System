@@ -29,6 +29,20 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
   const page = Math.max(1, parseInt((searchParams.page as string) ?? '1'))
   const search = (searchParams.search as string) ?? ''
   const sido = (searchParams.sido as string) ?? ''
+  const rawStatus = searchParams.status
+  const statusFilter: string[] = rawStatus
+    ? Array.isArray(rawStatus) ? rawStatus : [rawStatus]
+    : []
+
+  const rawType = searchParams.type
+  const typeFilter: string[] = rawType
+    ? Array.isArray(rawType) ? rawType : [rawType]
+    : []
+
+  const TYPE_ORDER = [
+    '상급종합', '종합병원', '병원', '요양병원', '정신병원', '한방병원',
+    '치과병원', '의원', '보건소', '보건지소', '보건진료소', '보건의료원', '기타',
+  ]
 
   const where = {
     ...(search && {
@@ -38,9 +52,11 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
       ],
     }),
     ...(sido && { sidoName: sido }),
+    ...(statusFilter.length > 0 && { status: { in: statusFilter } }),
+    ...(typeFilter.length > 0 && { type: { in: typeFilter } }),
   }
 
-  const [hospitals, total, sidoRows, statusCodes] = await Promise.all([
+  const [hospitals, total, sidoRows, statusCodes, typeRows] = await Promise.all([
     prisma.hospital.findMany({
       where,
       skip: (page - 1) * PAGE_SIZE,
@@ -50,6 +66,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
         id: true,
         hospitalCode: true,
         hospitalName: true,
+        type: true,
         address: true,
         status: true,
         contractDate: true,
@@ -65,13 +82,23 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
       distinct: ['sidoName'],
       orderBy: { sidoName: 'asc' },
     }),
-    prisma.statusCode.findMany({ select: { name: true, color: true } }),
+    prisma.statusCode.findMany({
+      where: { category: 'HOSPITAL' },
+      select: { name: true, color: true },
+      orderBy: { order: 'asc' },
+    }),
+    prisma.hospital.findMany({
+      select: { type: true },
+      distinct: ['type'],
+    }),
   ])
 
   const statusColorMap = new Map(statusCodes.map((sc) => [sc.name, sc.color]))
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
   const sidoOptions = sidoRows.map((r) => r.sidoName!).filter(Boolean)
+  const allTypes = typeRows.map((r) => r.type).filter(Boolean)
+  const typeOptions = TYPE_ORDER.filter((t) => allTypes.includes(t))
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -98,8 +125,12 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
         {/* 검색 & 필터 */}
         <HospitalFilters
           sidoOptions={sidoOptions}
+          statusOptions={statusCodes}
+          typeOptions={typeOptions}
           initialSearch={search}
           initialSido={sido}
+          initialStatuses={statusFilter}
+          initialTypes={typeFilter}
         />
 
         {/* 테이블 */}
@@ -132,9 +163,16 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
                           {h.hospitalCode}
                         </td>
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                          <Link href={`/hospitals/${h.hospitalCode}`} className="hover:text-blue-600 hover:underline">
-                            {h.hospitalName}
-                          </Link>
+                          <div className="flex items-center gap-1.5">
+                            <Link href={`/hospitals/${h.hospitalCode}`} className="hover:text-blue-600 hover:underline">
+                              {h.hospitalName}
+                            </Link>
+                            {h.type && (
+                              <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-normal text-gray-500">
+                                {h.type}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600">
                           {h.address ?? '-'}
@@ -168,7 +206,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
         </div>
 
         {/* 페이지네이션 */}
-        <Pagination page={page} totalPages={totalPages} search={search} sido={sido} />
+        <Pagination page={page} totalPages={totalPages} search={search} sido={sido} statuses={statusFilter} types={typeFilter} />
       </div>
     </div>
   )
