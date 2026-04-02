@@ -17,6 +17,7 @@ interface User {
   role: 'SUPER_ADMIN' | 'ADMIN' | 'USER' | 'VIEWER'
   isActive: boolean
   createdAt: string
+  lastLoginAt: string | null
   organization: Organization | null
 }
 
@@ -326,6 +327,7 @@ export default function UsersPage() {
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">소속</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">역할</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">상태</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">마지막 로그인</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">작업</th>
             </tr>
           </thead>
@@ -350,6 +352,11 @@ export default function UsersPage() {
                   <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${user.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                     {user.isActive ? '활성' : '비활성'}
                   </span>
+                </td>
+                <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
+                  {user.lastLoginAt
+                    ? new Date(user.lastLoginAt).toLocaleString('ko-KR', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+                    : <span className="text-gray-300">-</span>}
                 </td>
                 <td className="px-4 py-3">
                   {user.id === currentUser?.id ? (

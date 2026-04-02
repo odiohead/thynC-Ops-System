@@ -146,6 +146,7 @@ model User {
   isActive       Boolean       @default(true) @map("is_active")
   organizationId Int?          @map("organization_id")
   createdAt      DateTime      @default(now()) @map("created_at")
+  lastLoginAt    DateTime?     @map("last_login_at")
   organization            Organization?                @relation(fields: [organizationId], references: [id])
   projects                Project[]
   assignedSiteVisits      SiteVisit[]                  @relation("SiteVisitAssignee")

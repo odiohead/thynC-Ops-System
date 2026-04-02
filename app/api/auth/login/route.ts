@@ -23,6 +23,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: '비활성화된 계정입니다.' }, { status: 403 })
   }
 
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { lastLoginAt: new Date() },
+  })
+
   const token = await signToken({
     userId: user.id,
     email: user.email,

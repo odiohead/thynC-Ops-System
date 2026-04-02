@@ -22,6 +22,7 @@ export async function GET(req: NextRequest) {
       role: true,
       isActive: true,
       createdAt: true,
+      lastLoginAt: true,
       organization: { select: { id: true, name: true, code: true } },
     },
     orderBy: { createdAt: 'asc' },
@@ -62,6 +63,7 @@ export async function POST(req: NextRequest) {
       role: true,
       isActive: true,
       createdAt: true,
+      lastLoginAt: true,
       organization: { select: { id: true, name: true, code: true } },
     },
   })

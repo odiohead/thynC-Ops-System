@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-04-02 | 계정 관리 마지막 로그인 시간 추가
+
+- DB 마이그레이션 (`20260402000000_add_last_login_at`): `users` 테이블에 `last_login_at TIMESTAMP(3)` 컬럼 추가
+- `prisma/schema.prisma`: `User` 모델에 `lastLoginAt DateTime?` 필드 추가
+- `app/api/auth/login/route.ts`: 로그인 성공 시 `last_login_at` 현재 시각으로 업데이트
+- `app/api/users/route.ts`: GET/POST select에 `lastLoginAt` 포함
+- `app/users/page.tsx`: `User` 타입에 `lastLoginAt` 추가, 테이블에 '마지막 로그인' 컬럼 추가 (미기록 시 `-` 표시)
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260402000000_add_last_login_at/`, `app/api/auth/login/route.ts`, `app/api/users/route.ts`, `app/users/page.tsx`
+
+---
+
 ## 2026-04-02 | 대시보드 thynC 현황 종별 테이블 추가
 
 - `app/api/dashboard/hospital-stats/route.ts` 신설: 종별 × (전체/도입검토중/도입확정) 집계
