@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { verifyToken, isAdminOrAbove } from '@/lib/auth'
+import { verifyToken } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import InstallPlanForm from '../InstallPlanForm'
 
@@ -16,7 +16,7 @@ export default async function NewInstallPlanPage({ searchParams }: Props) {
   const token = cookieStore.get('auth-token')?.value
   const user = token ? await verifyToken(token) : null
 
-  if (!user || !isAdminOrAbove(user.role)) redirect('/install-plans')
+  if (!user || user.role === 'VIEWER') redirect('/install-plans')
 
   const preHospitalCode = searchParams.hospitalCode ?? ''
   const preHospital = preHospitalCode
