@@ -12,7 +12,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   const installPlan = await prisma.installPlan.findUnique({
     where: { id },
     include: {
-      hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
+      hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true, sidoName: true, sigunguName: true, address: true, status: true } },
       author: { select: { id: true, name: true } },
     },
   })
@@ -43,7 +43,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       updatedAt: new Date(),
     },
     include: {
-      hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
+      hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true, sidoName: true, sigunguName: true, address: true, status: true } },
       author: { select: { id: true, name: true } },
     },
   })

@@ -5,7 +5,7 @@ import { getAuthUser } from '@/lib/auth'
 const PAGE_SIZE = 20
 
 const include = {
-  hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
+  hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true, address: true } },
   daewoongUser: { select: { id: true, name: true } },
   assignee: { select: { id: true, name: true } },
   status: { select: { id: true, name: true, color: true } },

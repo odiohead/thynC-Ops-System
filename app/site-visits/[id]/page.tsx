@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
 import SiteVisitForm from '../SiteVisitForm'
 
 interface SiteVisitFile {
@@ -11,9 +12,20 @@ interface SiteVisitFile {
   s3Key: string
 }
 
+interface Hospital {
+  hospitalCode: string
+  hospitalName: string
+  hiraHospitalName: string
+  sidoName: string | null
+  sigunguName: string | null
+  address: string | null
+  status: string
+}
+
 interface SiteVisitData {
   id: number
   hospitalCode: string
+  hospital: Hospital
   daewoongUserId: string | null
   assigneeId: string | null
   requestDate: string | null
@@ -24,6 +36,44 @@ interface SiteVisitData {
   floorPlanS3Key: string | null
   notes: string | null
   files: SiteVisitFile[]
+}
+
+const labelClass = 'text-xs font-medium uppercase tracking-wider text-gray-400'
+
+function HospitalCard({ hospital }: { hospital: Hospital }) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm mb-4">
+      <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-gray-700">병원 기본정보</h2>
+        <Link href={`/hospitals/${hospital.hospitalCode}`} className="text-xs text-blue-600 hover:underline">
+          병원 상세 →
+        </Link>
+      </div>
+      <div className="grid grid-cols-1 gap-5 px-6 py-5 sm:grid-cols-3">
+        <div>
+          <p className={labelClass}>병원명</p>
+          <p className="mt-1 text-sm text-gray-900">{hospital.hospitalName}</p>
+          {hospital.hiraHospitalName && hospital.hiraHospitalName !== hospital.hospitalName && (
+            <p className="mt-0.5 text-xs text-gray-400">{hospital.hiraHospitalName}</p>
+          )}
+        </div>
+        <div>
+          <p className={labelClass}>지역</p>
+          <p className="mt-1 text-sm text-gray-900">
+            {[hospital.sidoName, hospital.sigunguName].filter(Boolean).join(' ') || '-'}
+          </p>
+        </div>
+        <div>
+          <p className={labelClass}>상태</p>
+          <p className="mt-1 text-sm text-gray-900">{hospital.status || '-'}</p>
+        </div>
+        <div className="sm:col-span-3">
+          <p className={labelClass}>주소</p>
+          <p className="mt-1 text-sm text-gray-900">{hospital.address || '-'}</p>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function EditSiteVisitPage() {
@@ -87,8 +137,12 @@ export default function EditSiteVisitPage() {
       <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">답사 상세 / 수정</h1>
+          <p className="mt-1 font-mono text-sm text-gray-400">SV-{String(data.id).padStart(5, '0')}</p>
         </div>
-        <SiteVisitForm mode="edit" initialData={initialData} />
+        {data.hospital && <HospitalCard hospital={data.hospital} />}
+        <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
+          <SiteVisitForm mode="edit" initialData={initialData} />
+        </div>
       </div>
     </div>
   )

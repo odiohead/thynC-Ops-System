@@ -5,7 +5,7 @@ import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 type Params = { params: { id: string } }
 
 const include = {
-  hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
+  hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true, sidoName: true, sigunguName: true, address: true, status: true } },
   daewoongUser: { select: { id: true, name: true } },
   assignee: { select: { id: true, name: true } },
   status: { select: { id: true, name: true, color: true } },

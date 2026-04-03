@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers'
 import { notFound, redirect } from 'next/navigation'
+import Link from 'next/link'
 import { verifyToken, isAdminOrAbove } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import InstallPlanDetailClient from './DetailClient'
@@ -8,6 +9,8 @@ export const dynamic = 'force-dynamic'
 export const metadata = { title: '설치계획(가안) 상세' }
 
 interface Props { params: { id: string } }
+
+const labelClass = 'text-xs font-medium uppercase tracking-wider text-gray-400'
 
 export default async function InstallPlanDetailPage({ params }: Props) {
   const cookieStore = cookies()
@@ -22,7 +25,7 @@ export default async function InstallPlanDetailPage({ params }: Props) {
   const installPlan = await prisma.installPlan.findUnique({
     where: { id },
     include: {
-      hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
+      hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true, sidoName: true, sigunguName: true, address: true, status: true } },
       author: { select: { id: true, name: true } },
       files: { orderBy: { uploadedAt: 'asc' } },
     },
@@ -53,6 +56,8 @@ export default async function InstallPlanDetailPage({ params }: Props) {
     })),
   }
 
+  const hospital = installPlan.hospital
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6 lg:px-8">
@@ -62,6 +67,42 @@ export default async function InstallPlanDetailPage({ params }: Props) {
             <p className="mt-1 font-mono text-sm text-gray-400">{installPlan.planCode}</p>
           )}
         </div>
+
+        {/* 병원 기본정보 카드 */}
+        {hospital && (
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm mb-4">
+            <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-gray-700">병원 기본정보</h2>
+              <Link href={`/hospitals/${hospital.hospitalCode}`} className="text-xs text-blue-600 hover:underline">
+                병원 상세 →
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 gap-5 px-6 py-5 sm:grid-cols-3">
+              <div>
+                <p className={labelClass}>병원명</p>
+                <p className="mt-1 text-sm text-gray-900">{hospital.hospitalName}</p>
+                {hospital.hiraHospitalName && hospital.hiraHospitalName !== hospital.hospitalName && (
+                  <p className="mt-0.5 text-xs text-gray-400">{hospital.hiraHospitalName}</p>
+                )}
+              </div>
+              <div>
+                <p className={labelClass}>지역</p>
+                <p className="mt-1 text-sm text-gray-900">
+                  {[hospital.sidoName, hospital.sigunguName].filter(Boolean).join(' ') || '-'}
+                </p>
+              </div>
+              <div>
+                <p className={labelClass}>상태</p>
+                <p className="mt-1 text-sm text-gray-900">{hospital.status || '-'}</p>
+              </div>
+              <div className="sm:col-span-3">
+                <p className={labelClass}>주소</p>
+                <p className="mt-1 text-sm text-gray-900">{hospital.address || '-'}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
           <InstallPlanDetailClient initialData={data} canAdmin={canAdmin} canEdit={canEdit} />
         </div>

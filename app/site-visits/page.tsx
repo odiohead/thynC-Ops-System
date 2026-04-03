@@ -6,19 +6,22 @@ import { useRouter } from 'next/navigation'
 
 interface SiteVisit {
   id: number
-  hospital: { hospitalCode: string; hospitalName: string; hiraHospitalName: string }
+  hospital: { hospitalCode: string; hospitalName: string; hiraHospitalName: string; address: string | null }
   daewoongUser: { id: string; name: string } | null
   assignee: { id: string; name: string } | null
   status: { id: number; name: string; color: string | null } | null
   requestDate: string | null
   visitDate: string | null
   replyDate: string | null
-  installPlanUrl: string | null
 }
 
 function formatDate(val: string | null): string {
   if (!val) return '-'
   return val.slice(0, 10)
+}
+
+function formatCode(id: number): string {
+  return `SV-${String(id).padStart(5, '0')}`
 }
 
 function StatusBadge({ status }: { status: { name: string; color: string | null } | null }) {
@@ -77,29 +80,33 @@ export default function SiteVisitsPage() {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">병원명</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">대웅 담당자</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">담당자</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">상태</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">요청일</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">답사 날짜</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">설치계획서</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">회신 날짜</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 whitespace-nowrap">코드</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 whitespace-nowrap">병원명</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 whitespace-nowrap">주소</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 whitespace-nowrap">대웅 담당자</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 whitespace-nowrap">담당자</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 whitespace-nowrap">상태</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 whitespace-nowrap">요청일</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 whitespace-nowrap">답사 날짜</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 whitespace-nowrap">회신 날짜</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {loading ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td>
+                    <td colSpan={9} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td>
                   </tr>
                 ) : siteVisits.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-sm text-gray-400">등록된 답사가 없습니다.</td>
+                    <td colSpan={9} className="py-12 text-center text-sm text-gray-400">등록된 답사가 없습니다.</td>
                   </tr>
                 ) : (
                   siteVisits.map((sv) => (
                     <tr key={sv.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 text-xs font-mono text-gray-400 whitespace-nowrap">
+                        {formatCode(sv.id)}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <Link
                           href={`/site-visits/${sv.id}`}
                           className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline"
@@ -107,27 +114,21 @@ export default function SiteVisitsPage() {
                           {sv.hospital.hospitalName || sv.hospital.hiraHospitalName}
                         </Link>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-700">
+                      <td className="px-4 py-3 text-sm text-gray-500 max-w-xs truncate">
+                        {sv.hospital.address || '-'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">
                         {sv.daewoongUser?.name ?? '-'}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-700">
+                      <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">
                         {sv.assignee?.name ?? '-'}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <StatusBadge status={sv.status} />
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-700">{formatDate(sv.requestDate)}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700">{formatDate(sv.visitDate)}</td>
-                      <td className="px-4 py-3 text-sm">
-                        {sv.installPlanUrl ? (
-                          <a href={sv.installPlanUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                            보기
-                          </a>
-                        ) : (
-                          <span className="text-gray-400">-</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-700">{formatDate(sv.replyDate)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatDate(sv.requestDate)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatDate(sv.visitDate)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatDate(sv.replyDate)}</td>
                     </tr>
                   ))
                 )}

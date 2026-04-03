@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-04-03 | 답사관리 리스트 개선 + 상세 병원카드 + 설치계획(가안) 상세 병원카드
+
+- **답사관리 리스트** (`app/site-visits/page.tsx`):
+  - 첫 번째 컬럼에 코드 추가 (`SV-XXXXX` 형식, id padStart 5자리)
+  - 병원명 다음에 주소 컬럼 추가
+  - 설치계획서 컬럼 제거 (colSpan 8→9)
+  - `app/api/site-visits/route.ts`: hospital select에 `address` 추가
+- **답사관리 상세** (`app/site-visits/[id]/page.tsx`): 병원 기본정보 카드 추가 (병원명/지역/상태/주소), 코드(`SV-XXXXX`) 헤더 표시. `app/api/site-visits/[id]/route.ts`: hospital select에 `sidoName`, `sigunguName`, `address`, `status` 추가
+- **설치계획(가안) 상세** (`app/install-plans/[id]/page.tsx`): 병원 기본정보 카드 추가 (병원 매핑 시에만 노출). `app/api/install-plans/[id]/route.ts`: hospital select 동일하게 확장
+- 영향 파일: `app/site-visits/page.tsx`, `app/site-visits/[id]/page.tsx`, `app/api/site-visits/route.ts`, `app/api/site-visits/[id]/route.ts`, `app/install-plans/[id]/page.tsx`, `app/api/install-plans/[id]/route.ts`
+
+---
+
 ## 2026-04-03 | S3 계층 구조 개편 + 설치계획(가안) 파일 업로드 신설
 
 - **S3 Key 패턴 변경**: 3개 메뉴 모두 `hospital/{hospitalCode}/{메뉴}/{...}` 구조로 통일
