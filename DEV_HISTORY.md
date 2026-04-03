@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-04-03 | 계정관리 테이블 줄바꿈 수정 + USER 역할 등록/수정 권한 부여
+
+- **계정관리 테이블 한줄 표시** (`app/users/page.tsx`): 컨테이너 `max-w-5xl` → `max-w-6xl` 확장, 테이블 wrapper에 `overflow-x-auto` 추가, 이름·이메일·연락처·소속·역할·상태·작업 `<td>` 전체에 `whitespace-nowrap` 적용
+- **USER 역할 등록/수정 권한 부여**: 아래 4개 파일의 `isAdmin` 조건을 `ADMIN||SUPER_ADMIN` → `role !== 'VIEWER'`로 변경하여 일반(USER) 등급도 등록·수정 버튼 노출
+  - `app/hospitals/[code]/page.tsx`: 병원 상세 내 답사 등록·설치계획 등록·프로젝트 등록 버튼
+  - `app/projects/page.tsx`: 프로젝트 등록 버튼 (미사용 import `isAdminOrAbove` 제거)
+  - `app/install-plans/page.tsx`: 설치계획(가안) 등록 버튼
+  - `app/site-visits/SiteVisitForm.tsx`: 답사 폼 내 파일 삭제 버튼
+- API 레벨 권한(VIEWER 차단)은 기존과 동일 유지, 삭제 기능은 여전히 ADMIN 이상만 가능
+
+---
+
 ## 2026-04-02 | 계정 관리 마지막 로그인 시간 추가
 
 - DB 마이그레이션 (`20260402000000_add_last_login_at`): `users` 테이블에 `last_login_at TIMESTAMP(3)` 컬럼 추가

@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
-import { verifyToken, isAdminOrAbove } from '@/lib/auth'
+import { verifyToken } from '@/lib/auth'
 import { CalendarDays } from 'lucide-react'
 import ProjectFilters from './_components/ProjectFilters'
 import StatusBadge from '@/app/components/StatusBadge'
@@ -30,7 +30,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
   const cookieStore = cookies()
   const token = cookieStore.get('auth-token')?.value
   const user = token ? await verifyToken(token) : null
-  const isAdmin = user ? isAdminOrAbove(user.role) : false
+  const isAdmin = !!user && user.role !== 'VIEWER'
 
   const search = (searchParams.search as string) ?? ''
   const buildStatusId = (searchParams.buildStatusId as string) ?? ''

@@ -77,7 +77,7 @@ export default function InstallPlansPage() {
       fetch('/api/auth/me').then((r) => r.json()),
     ]).then(([userData, me]) => {
       setUsers(Array.isArray(userData) ? userData : [])
-      setIsAdmin(me?.role === 'SUPER_ADMIN' || me?.role === 'ADMIN')
+      setIsAdmin(!!me?.role && me?.role !== 'VIEWER')
     })
   }, [])
 

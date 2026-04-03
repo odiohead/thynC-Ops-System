@@ -278,7 +278,7 @@ export default function UsersPage() {
     : users.filter((u) => u.organization?.code === activeTab)
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-gray-900">계정 관리</h1>
         {isAdmin && (
@@ -317,7 +317,7 @@ export default function UsersPage() {
         ))}
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
@@ -334,21 +334,21 @@ export default function UsersPage() {
           <tbody className="divide-y divide-gray-100">
             {filteredUsers.map((user) => (
               <tr key={user.id} className={`hover:bg-gray-50 ${user.id === currentUser?.id ? 'bg-blue-50/40' : ''}`}>
-                <td className="px-4 py-3 font-medium text-gray-900">
+                <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
                   {user.name}
                   {user.id === currentUser?.id && (
                     <span className="ml-2 text-xs text-blue-500">(나)</span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-gray-600">{user.email}</td>
-                <td className="px-4 py-3 text-gray-600">{user.phone || '-'}</td>
-                <td className="px-4 py-3 text-gray-600">{user.organization?.name ?? '-'}</td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{user.email}</td>
+                <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{user.phone || '-'}</td>
+                <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{user.organization?.name ?? '-'}</td>
+                <td className="px-4 py-3 whitespace-nowrap">
                   <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${ROLE_CLASS[user.role] ?? 'bg-gray-100 text-gray-700'}`}>
                     {ROLE_LABEL[user.role] ?? user.role}
                   </span>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3 whitespace-nowrap">
                   <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${user.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                     {user.isActive ? '활성' : '비활성'}
                   </span>
@@ -358,7 +358,7 @@ export default function UsersPage() {
                     ? new Date(user.lastLoginAt).toLocaleString('ko-KR', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
                     : <span className="text-gray-300">-</span>}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3 whitespace-nowrap">
                   {user.id === currentUser?.id ? (
                     <button
                       onClick={openEditModal}

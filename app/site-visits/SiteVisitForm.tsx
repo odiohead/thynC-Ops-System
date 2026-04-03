@@ -201,7 +201,7 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN'
+  const isAdmin = !!userRole && userRole !== 'VIEWER'
 
   useEffect(() => {
     Promise.all([
