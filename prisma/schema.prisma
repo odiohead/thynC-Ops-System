@@ -307,12 +307,25 @@ model SiteVisit {
   createdAt       DateTime       @default(now()) @map("created_at")
   updatedAt       DateTime       @updatedAt @map("updated_at")
 
-  hospital      Hospital       @relation(fields: [hospitalCode], references: [hospitalCode])
-  daewoongUser  User?          @relation("SiteVisitDaewoongUser", fields: [daewoongUserId], references: [id])
-  assignee      User?          @relation("SiteVisitAssignee", fields: [assigneeId], references: [id])
-  status        StatusCode?    @relation(fields: [statusId], references: [id])
+  hospital      Hospital         @relation(fields: [hospitalCode], references: [hospitalCode])
+  daewoongUser  User?            @relation("SiteVisitDaewoongUser", fields: [daewoongUserId], references: [id])
+  assignee      User?            @relation("SiteVisitAssignee", fields: [assigneeId], references: [id])
+  status        StatusCode?      @relation(fields: [statusId], references: [id])
+  files         SiteVisitFile[]
 
   @@map("site_visits")
+}
+
+model SiteVisitFile {
+  id           Int       @id @default(autoincrement())
+  siteVisitId  Int       @map("site_visit_id")
+  fileCategory String    @map("file_category")
+  fileName     String    @map("file_name")
+  s3Key        String    @map("s3_key")
+  uploadedAt   DateTime  @default(now()) @map("uploaded_at")
+  siteVisit    SiteVisit @relation(fields: [siteVisitId], references: [id], onDelete: Cascade)
+
+  @@map("site_visit_files")
 }
 
 model InstallPlan {

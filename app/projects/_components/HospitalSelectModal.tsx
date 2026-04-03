@@ -18,6 +18,7 @@ interface Hospital {
   hospitalName: string
   hiraHospitalName: string
   sidoName: string | null
+  address: string | null
   status: string
 }
 
@@ -62,7 +63,7 @@ export default function HospitalSelectModal({ isOpen, onClose, onSelect }: Props
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="flex h-[75vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+      <div className="flex h-[75vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
 
         {/* 헤더 */}
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
@@ -108,20 +109,21 @@ export default function HospitalSelectModal({ isOpen, onClose, onSelect }: Props
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="sticky top-0 bg-gray-50">
               <tr>
-                {['병원명', '지역', '상태', ''].map((col, i) => (
+                {['병원명', '주소', '지역', '상태', ''].map((col, i) => (
                   <th key={i} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">{col}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {loading ? (
-                <tr><td colSpan={4} className="py-16 text-center text-sm text-gray-400">불러오는 중...</td></tr>
+                <tr><td colSpan={5} className="py-16 text-center text-sm text-gray-400">불러오는 중...</td></tr>
               ) : !data || data.hospitals.length === 0 ? (
-                <tr><td colSpan={4} className="py-16 text-center text-sm text-gray-400">검색 결과가 없습니다.</td></tr>
+                <tr><td colSpan={5} className="py-16 text-center text-sm text-gray-400">검색 결과가 없습니다.</td></tr>
               ) : (
                 data.hospitals.map((h) => (
                   <tr key={h.hospitalCode} className="cursor-pointer transition-colors hover:bg-blue-50">
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{h.hospitalName}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900">{h.hospitalName}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500">{h.address ?? '-'}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500">{h.sidoName ?? '-'}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500">{h.status}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-right">

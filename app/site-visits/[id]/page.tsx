@@ -4,6 +4,13 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import SiteVisitForm from '../SiteVisitForm'
 
+interface SiteVisitFile {
+  id: number
+  fileCategory: string
+  fileName: string
+  s3Key: string
+}
+
 interface SiteVisitData {
   id: number
   hospitalCode: string
@@ -16,6 +23,7 @@ interface SiteVisitData {
   installPlanS3Key: string | null
   floorPlanS3Key: string | null
   notes: string | null
+  files: SiteVisitFile[]
 }
 
 export default function EditSiteVisitPage() {
@@ -71,6 +79,7 @@ export default function EditSiteVisitPage() {
     installPlanS3Key: data.installPlanS3Key ?? '',
     floorPlanS3Key: data.floorPlanS3Key ?? '',
     notes: data.notes ?? '',
+    files: data.files ?? [],
   }
 
   return (

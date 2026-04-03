@@ -27,6 +27,14 @@ interface StatusCode {
   color: string | null
 }
 
+interface SiteVisitFileItem {
+  id?: number
+  fileCategory: string
+  fileName: string
+  s3Key: string
+  staged?: boolean // create 모드에서 아직 저장 안 된 파일
+}
+
 interface SiteVisitFormData {
   hospitalCode: string
   daewoongUserId: string
@@ -35,37 +43,121 @@ interface SiteVisitFormData {
   visitDate: string
   replyDate: string
   statusId: string
-  installPlanS3Key: string
-  floorPlanS3Key: string
   notes: string
 }
 
 interface Props {
-  initialData?: Partial<SiteVisitFormData> & { id?: number }
+  initialData?: Partial<SiteVisitFormData> & {
+    id?: number
+    installPlanS3Key?: string
+    floorPlanS3Key?: string
+    files?: SiteVisitFileItem[]
+  }
   mode: 'create' | 'edit'
 }
 
+// ─── MultiFileField 컴포넌트 ───────────────────────────────────────────────────
 
-interface FileFieldProps {
-  s3Key: string
-  onUploadComplete: (s3Key: string) => void
-  onDeleteComplete: () => void
+interface MultiFileFieldProps {
+  label: string
+  fileCategory: string
   hospitalCode: string
   busy: boolean
   isAdmin: boolean
+  // create 모드
+  stagedFiles?: SiteVisitFileItem[]
+  onStagedFilesChange?: (files: SiteVisitFileItem[]) => void
+  // edit 모드
+  siteVisitId?: number
+  savedFiles?: SiteVisitFileItem[]
+  legacyS3Key?: string
+  legacyFieldName?: 'installPlanS3Key' | 'floorPlanS3Key'
+  onSavedFilesChange?: (files: SiteVisitFileItem[]) => void
 }
 
-function FileField({ s3Key, onUploadComplete, onDeleteComplete, hospitalCode, busy, isAdmin }: FileFieldProps) {
+function MultiFileField({
+  label,
+  fileCategory,
+  hospitalCode,
+  busy,
+  isAdmin,
+  stagedFiles,
+  onStagedFilesChange,
+  siteVisitId,
+  savedFiles,
+  legacyS3Key,
+  legacyFieldName,
+  onSavedFilesChange,
+}: MultiFileFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
-  const [deleting, setDeleting] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [deletingKey, setDeletingKey] = useState<string | null>(null)
 
-  const fileName = s3Key ? s3Key.split('/').pop() ?? s3Key : null
+  const isCreateMode = siteVisitId === undefined
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+  // 표시할 파일 목록 합산
+  const displayFiles: SiteVisitFileItem[] = []
+  if (isCreateMode) {
+    displayFiles.push(...(stagedFiles ?? []))
+  } else {
+    if (legacyS3Key) {
+      displayFiles.push({
+        fileCategory,
+        fileName: legacyS3Key.split('/').pop() ?? legacyS3Key,
+        s3Key: legacyS3Key,
+      })
+    }
+    displayFiles.push(...(savedFiles ?? []))
+  }
+
+  async function handleDownload(s3Key: string) {
+    const res = await fetch(`/api/site-visits/file-url?key=${encodeURIComponent(s3Key)}`)
+    if (!res.ok) return
+    const { url } = await res.json()
+    window.open(url, '_blank')
+  }
+
+  async function handleDelete(file: SiteVisitFileItem) {
+    if (!confirm('정말 삭제하시겠습니까?')) return
+    setDeletingKey(file.s3Key)
+
+    if (isCreateMode) {
+      // staged 파일: S3에서 삭제 후 local state에서 제거
+      await fetch('/api/site-visits/file', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ s3Key: file.s3Key }),
+      })
+      onStagedFilesChange?.((stagedFiles ?? []).filter((f) => f.s3Key !== file.s3Key))
+    } else {
+      if (file.id) {
+        // SiteVisitFile 레코드 삭제
+        await fetch(`/api/site-visits/${siteVisitId}/files/${file.id}`, { method: 'DELETE' })
+        onSavedFilesChange?.((savedFiles ?? []).filter((f) => f.id !== file.id))
+      } else {
+        // 레거시 필드 null 처리
+        await fetch(`/api/site-visits/${siteVisitId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [legacyFieldName!]: null }),
+        })
+        onSavedFilesChange?.(savedFiles ?? [])
+        // 레거시 S3 삭제
+        await fetch('/api/site-visits/file', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ s3Key: file.s3Key }),
+        })
+      }
+    }
+
+    setDeletingKey(null)
+  }
+
+  async function handleFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const selected = Array.from(e.target.files ?? [])
+    if (selected.length === 0) return
 
     if (!hospitalCode) {
       setUploadError('병원을 먼저 선택해주세요.')
@@ -75,20 +167,40 @@ function FileField({ s3Key, onUploadComplete, onDeleteComplete, hospitalCode, bu
     setUploading(true)
     setUploadError(null)
 
-    const formData = new FormData()
-    formData.append('file', file)
-
     try {
-      const res = await fetch(`/api/site-visits/upload?hospitalCode=${encodeURIComponent(hospitalCode)}`, {
-        method: 'POST',
-        body: formData,
-      })
-      if (res.ok) {
-        const data = await res.json()
-        onUploadComplete(data.s3Key)
-      } else {
-        const data = await res.json()
-        setUploadError(data.error ?? '업로드 실패')
+      for (const file of selected) {
+        const formData = new FormData()
+        formData.append('file', file)
+
+        if (isCreateMode) {
+          const res = await fetch(
+            `/api/site-visits/upload?hospitalCode=${encodeURIComponent(hospitalCode)}`,
+            { method: 'POST', body: formData }
+          )
+          if (res.ok) {
+            const data = await res.json()
+            onStagedFilesChange?.([
+              ...(stagedFiles ?? []),
+              { fileCategory, s3Key: data.s3Key, fileName: file.name, staged: true },
+            ])
+          } else {
+            const data = await res.json()
+            setUploadError(data.error ?? '업로드 실패')
+          }
+        } else {
+          formData.append('fileCategory', fileCategory)
+          const res = await fetch(`/api/site-visits/${siteVisitId}/files`, {
+            method: 'POST',
+            body: formData,
+          })
+          if (res.ok) {
+            const data = await res.json()
+            onSavedFilesChange?.([...(savedFiles ?? []), data.file])
+          } else {
+            const data = await res.json()
+            setUploadError(data.error ?? '업로드 실패')
+          }
+        }
       }
     } catch {
       setUploadError('업로드 중 오류가 발생했습니다.')
@@ -98,64 +210,52 @@ function FileField({ s3Key, onUploadComplete, onDeleteComplete, hospitalCode, bu
     }
   }
 
-  async function handleDownload() {
-    if (!s3Key) return
-    const res = await fetch(`/api/site-visits/file-url?key=${encodeURIComponent(s3Key)}`)
-    if (!res.ok) return
-    const { url } = await res.json()
-    window.open(url, '_blank')
-  }
-
-  async function handleDelete() {
-    if (!confirm('정말 삭제하시겠습니까?')) return
-    if (!s3Key) return
-    setDeleting(true)
-    await fetch('/api/site-visits/file', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ s3Key }),
-    })
-    setDeleting(false)
-    onDeleteComplete()
-  }
-
   return (
     <div className="space-y-2">
-      {s3Key && fileName ? (
-        <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-gray-400">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
-            </svg>
-            <button
-              type="button"
-              onClick={handleDownload}
-              className="truncate text-xs text-blue-600 hover:underline text-left"
-            >
-              {fileName}
-            </button>
-          </div>
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={deleting || busy}
-              className="ml-3 shrink-0 text-xs text-red-400 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {deleting ? '삭제 중...' : '삭제'}
-            </button>
-          )}
-        </div>
-      ) : (
+      {displayFiles.length === 0 ? (
         <p className="text-xs text-gray-400">등록된 파일이 없습니다.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {displayFiles.map((f) => (
+            <li
+              key={f.s3Key}
+              className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-gray-400">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
+                </svg>
+                <button
+                  type="button"
+                  onClick={() => handleDownload(f.s3Key)}
+                  className="truncate text-xs text-blue-600 hover:underline text-left"
+                >
+                  {f.fileName}
+                </button>
+              </div>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => handleDelete(f)}
+                  disabled={deletingKey === f.s3Key || busy}
+                  className="ml-3 shrink-0 text-xs text-red-400 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {deletingKey === f.s3Key ? '삭제 중...' : '삭제'}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
+
       <div>
         <input
           ref={inputRef}
           type="file"
-          accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
+          multiple
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.zip"
           className="hidden"
-          onChange={handleFileChange}
+          onChange={handleFilesSelected}
         />
         <button
           type="button"
@@ -163,13 +263,15 @@ function FileField({ s3Key, onUploadComplete, onDeleteComplete, hospitalCode, bu
           onClick={() => { if (inputRef.current) { inputRef.current.value = ''; inputRef.current.click() } }}
           className="rounded border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {uploading ? '업로드 중...' : '+ 파일 추가'}
+          {uploading ? '업로드 중...' : `+ ${label} 추가`}
         </button>
       </div>
       {uploadError && <p className="text-xs text-red-500">{uploadError}</p>}
     </div>
   )
 }
+
+// ─── SiteVisitForm 본체 ────────────────────────────────────────────────────────
 
 export default function SiteVisitForm({ initialData, mode }: Props) {
   const router = useRouter()
@@ -178,7 +280,6 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
   const [statuses, setStatuses] = useState<StatusCode[]>([])
   const [userRole, setUserRole] = useState<string | null>(null)
 
-  // 병원 선택
   const [hospital, setHospital] = useState<Hospital | null>(null)
   const [hospitalModalOpen, setHospitalModalOpen] = useState(false)
   const [hospitalSearch, setHospitalSearch] = useState('')
@@ -193,15 +294,22 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
     visitDate: initialData?.visitDate ?? '',
     replyDate: initialData?.replyDate ?? '',
     statusId: initialData?.statusId ?? '',
-    installPlanS3Key: initialData?.installPlanS3Key ?? '',
-    floorPlanS3Key: initialData?.floorPlanS3Key ?? '',
     notes: initialData?.notes ?? '',
   })
+
+  // 파일 상태 (create: staged, edit: saved)
+  const [installPlanFiles, setInstallPlanFiles] = useState<SiteVisitFileItem[]>(
+    initialData?.files?.filter((f) => f.fileCategory === 'INSTALL_PLAN') ?? []
+  )
+  const [floorPlanFiles, setFloorPlanFiles] = useState<SiteVisitFileItem[]>(
+    initialData?.files?.filter((f) => f.fileCategory === 'FLOOR_PLAN') ?? []
+  )
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const isAdmin = !!userRole && userRole !== 'VIEWER'
+  const isEditMode = mode === 'edit'
 
   useEffect(() => {
     Promise.all([
@@ -216,7 +324,6 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
       setUserRole(meData?.role ?? null)
     })
 
-    // edit 모드에서 기존 병원 정보 로드
     if (initialData?.hospitalCode) {
       fetch(`/api/hospitals/${initialData.hospitalCode}`)
         .then((r) => r.json())
@@ -275,9 +382,15 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
       visitDate: form.visitDate || null,
       replyDate: form.replyDate || null,
       statusId: form.statusId ? Number(form.statusId) : null,
-      installPlanS3Key: form.installPlanS3Key || null,
-      floorPlanS3Key: form.floorPlanS3Key || null,
       notes: form.notes || null,
+      // create 모드: staged 파일 전달
+      ...(mode === 'create' && {
+        files: [...installPlanFiles, ...floorPlanFiles].map((f) => ({
+          fileCategory: f.fileCategory,
+          s3Key: f.s3Key,
+          fileName: f.fileName,
+        })),
+      }),
     }
 
     const url = mode === 'create' ? '/api/site-visits' : `/api/site-visits/${initialData?.id}`
@@ -432,13 +545,24 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
             <div className="grid grid-cols-3 gap-4 px-6 py-4">
               <label className="flex items-start pt-1 text-sm font-medium text-gray-700">설치계획서</label>
               <div className="col-span-2">
-                <FileField
-                  s3Key={form.installPlanS3Key}
-                  onUploadComplete={(s3Key) => set('installPlanS3Key', s3Key)}
-                  onDeleteComplete={() => set('installPlanS3Key', '')}
+                <MultiFileField
+                  label="설치계획서"
+                  fileCategory="INSTALL_PLAN"
                   hospitalCode={form.hospitalCode}
                   busy={busy}
                   isAdmin={isAdmin}
+                  {...(isEditMode
+                    ? {
+                        siteVisitId: initialData?.id,
+                        savedFiles: installPlanFiles,
+                        legacyS3Key: initialData?.installPlanS3Key,
+                        legacyFieldName: 'installPlanS3Key',
+                        onSavedFilesChange: setInstallPlanFiles,
+                      }
+                    : {
+                        stagedFiles: installPlanFiles,
+                        onStagedFilesChange: setInstallPlanFiles,
+                      })}
                 />
               </div>
             </div>
@@ -447,13 +571,24 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
             <div className="grid grid-cols-3 gap-4 px-6 py-4">
               <label className="flex items-start pt-1 text-sm font-medium text-gray-700">도면</label>
               <div className="col-span-2">
-                <FileField
-                  s3Key={form.floorPlanS3Key}
-                  onUploadComplete={(s3Key) => set('floorPlanS3Key', s3Key)}
-                  onDeleteComplete={() => set('floorPlanS3Key', '')}
+                <MultiFileField
+                  label="도면"
+                  fileCategory="FLOOR_PLAN"
                   hospitalCode={form.hospitalCode}
                   busy={busy}
                   isAdmin={isAdmin}
+                  {...(isEditMode
+                    ? {
+                        siteVisitId: initialData?.id,
+                        savedFiles: floorPlanFiles,
+                        legacyS3Key: initialData?.floorPlanS3Key,
+                        legacyFieldName: 'floorPlanS3Key',
+                        onSavedFilesChange: setFloorPlanFiles,
+                      }
+                    : {
+                        stagedFiles: floorPlanFiles,
+                        onStagedFilesChange: setFloorPlanFiles,
+                      })}
                 />
               </div>
             </div>

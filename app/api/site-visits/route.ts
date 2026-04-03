@@ -9,6 +9,7 @@ const include = {
   daewoongUser: { select: { id: true, name: true } },
   assignee: { select: { id: true, name: true } },
   status: { select: { id: true, name: true, color: true } },
+  files: { orderBy: { uploadedAt: 'asc' as const } },
 } as const
 
 export async function GET(request: NextRequest) {
@@ -56,9 +57,8 @@ export async function POST(request: NextRequest) {
     visitDate,
     replyDate,
     statusId,
-    installPlanS3Key,
-    floorPlanS3Key,
     notes,
+    files,
   } = body
 
   if (!hospitalCode) {
@@ -74,9 +74,16 @@ export async function POST(request: NextRequest) {
       visitDate: visitDate ? new Date(visitDate) : null,
       replyDate: replyDate ? new Date(replyDate) : null,
       statusId: statusId ? Number(statusId) : null,
-      installPlanS3Key: installPlanS3Key || null,
-      floorPlanS3Key: floorPlanS3Key || null,
       notes: notes || null,
+      ...(Array.isArray(files) && files.length > 0 && {
+        files: {
+          create: files.map((f: { fileCategory: string; s3Key: string; fileName: string }) => ({
+            fileCategory: f.fileCategory,
+            fileName: f.fileName,
+            s3Key: f.s3Key,
+          })),
+        },
+      }),
     },
     include,
   })

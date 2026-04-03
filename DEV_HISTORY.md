@@ -4,6 +4,25 @@
 
 ---
 
+## 2026-04-03 | 파일업로드 멀티파일·ZIP 지원 + 프로젝트 상세 병원기본정보 카드 추가
+
+- **DB 마이그레이션** (`20260403000000_add_site_visit_files`): `site_visit_files` 테이블 신설 (id, site_visit_id FK, file_category, file_name, s3_key, uploaded_at)
+- **Prisma 스키마**: `SiteVisitFile` 모델 추가, `SiteVisit` 에 `files SiteVisitFile[]` 관계 추가
+- **답사 파일 API 신설** (`app/api/site-visits/[id]/files/route.ts`): GET(목록), POST(파일 업로드 → SiteVisitFile 저장)
+- **답사 파일 삭제 API 신설** (`app/api/site-visits/[id]/files/[fileId]/route.ts`): DELETE(S3+DB 삭제)
+- **기존 API 업데이트**: `GET/POST /api/site-visits`, `GET /api/site-visits/[id]` — include에 `files` 추가, POST에 `files` 배열로 SiteVisitFile 일괄 생성 지원
+- **SiteVisitForm.tsx 전면 재설계**: `FileField`(단일파일) → `MultiFileField`(멀티파일)로 교체
+  - create 모드: S3 업로드 후 staged 상태로 로컬 관리 → 폼 제출 시 API에 files 배열 전달
+  - edit 모드: 업로드 즉시 `POST /api/site-visits/[id]/files`, 삭제 즉시 DELETE. 레거시 `installPlanS3Key`/`floorPlanS3Key` 필드는 별도 표시 + PUT으로 null 처리
+  - `accept`에 `.zip` 추가, `multiple` 속성 추가
+- **`app/site-visits/[id]/page.tsx`**: `SiteVisitData` 인터페이스에 `files` 추가, `initialData`에 `files` 전달
+- **프로젝트 상세 멀티파일** (`app/projects/[code]/page.tsx`): `multiple` + `.zip` 추가, `handleFileSelected`를 파일 배열 루프로 재작성
+- **프로젝트 상세 병원기본정보 카드** (`app/projects/[code]/page.tsx`): 최상단에 병원명(HIRA명 병기)·지역·상태·주소 표시 카드 추가, 'Project.hospital' 타입 확장
+- **병원 선택 팝업 주소 표시** (`app/projects/_components/HospitalSelectModal.tsx`): `address` 필드 추가, 테이블에 주소 컬럼 삽입, 모달 너비 `max-w-3xl`로 확장
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260403000000_add_site_visit_files/`, `app/api/site-visits/[id]/files/route.ts` (신설), `app/api/site-visits/[id]/files/[fileId]/route.ts` (신설), `app/api/site-visits/route.ts`, `app/api/site-visits/[id]/route.ts`, `app/site-visits/SiteVisitForm.tsx`, `app/site-visits/[id]/page.tsx`, `app/projects/[code]/page.tsx`, `app/projects/_components/HospitalSelectModal.tsx`
+
+---
+
 ## 2026-04-03 | 계정관리 테이블 줄바꿈 수정 + USER 역할 등록/수정 권한 부여
 
 - **계정관리 테이블 한줄 표시** (`app/users/page.tsx`): 컨테이너 `max-w-5xl` → `max-w-6xl` 확장, 테이블 wrapper에 `overflow-x-auto` 추가, 이름·이메일·연락처·소속·역할·상태·작업 `<td>` 전체에 `whitespace-nowrap` 적용

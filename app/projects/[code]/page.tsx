@@ -68,7 +68,17 @@ interface Project {
   issueNote: string | null
   remark: string | null
   driveFolderId: string | null
-  hospital: { hospitalCode: string; hospitalName: string; meta: { driveProjectFolderId: string | null } | null }
+  hospital: {
+    hospitalCode: string
+    hospitalName: string
+    hiraHospitalName: string | null
+    sidoName: string | null
+    sigunguName: string | null
+    address: string | null
+    status: string
+    type: string | null
+    meta: { driveProjectFolderId: string | null } | null
+  }
   builder: { id: string; name: string } | null
   contractor: ConstructorInfo | null
   devices: ProjectDevice[]
@@ -273,25 +283,26 @@ export default function ProjectDetailPage() {
   }
 
   async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
+    const files = Array.from(e.target.files ?? [])
     const category = pendingCategoryRef.current
-    if (!file || !category) return
+    if (files.length === 0 || !category) return
 
     setUploadingCategory(category)
     setUploadError(null)
 
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('fileCategory', category)
-
     try {
-      const res = await fetch(`/api/projects/${code}/files`, { method: 'POST', body: formData })
-      if (!res.ok) {
-        const json = await res.json()
-        setUploadError(json.error ?? '업로드에 실패했습니다.')
-      } else {
-        await loadProject()
+      for (const file of files) {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('fileCategory', category)
+        const res = await fetch(`/api/projects/${code}/files`, { method: 'POST', body: formData })
+        if (!res.ok) {
+          const json = await res.json()
+          setUploadError(json.error ?? '업로드에 실패했습니다.')
+          break
+        }
       }
+      await loadProject()
     } catch {
       setUploadError('업로드 중 오류가 발생했습니다.')
     } finally {
@@ -360,6 +371,39 @@ export default function ProjectDetailPage() {
         )}
 
         <div className="space-y-4">
+
+          {/* 병원 기본정보 */}
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-gray-700">병원 기본정보</h2>
+              <Link href={`/hospitals/${project.hospital.hospitalCode}`} className="text-xs text-blue-600 hover:underline">
+                병원 상세 →
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 gap-5 px-6 py-5 sm:grid-cols-3">
+              <div>
+                <p className={labelClass}>병원명</p>
+                <p className="mt-1 text-sm text-gray-900">{project.hospital.hospitalName}</p>
+                {project.hospital.hiraHospitalName && project.hospital.hiraHospitalName !== project.hospital.hospitalName && (
+                  <p className="mt-0.5 text-xs text-gray-400">{project.hospital.hiraHospitalName}</p>
+                )}
+              </div>
+              <div>
+                <p className={labelClass}>지역</p>
+                <p className="mt-1 text-sm text-gray-900">
+                  {[project.hospital.sidoName, project.hospital.sigunguName].filter(Boolean).join(' ') || '-'}
+                </p>
+              </div>
+              <div>
+                <p className={labelClass}>상태</p>
+                <p className="mt-1 text-sm text-gray-900">{project.hospital.status || '-'}</p>
+              </div>
+              <div className="sm:col-span-3">
+                <p className={labelClass}>주소</p>
+                <p className="mt-1 text-sm text-gray-900">{project.hospital.address || '-'}</p>
+              </div>
+            </div>
+          </div>
 
           {/* 계약 정보 */}
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
@@ -523,7 +567,8 @@ export default function ProjectDetailPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
+              multiple
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.zip"
               className="hidden"
               onChange={handleFileSelected}
             />
