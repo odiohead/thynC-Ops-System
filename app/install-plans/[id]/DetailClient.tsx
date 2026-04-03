@@ -15,8 +15,16 @@ interface UserOption {
   name: string
 }
 
+interface InstallPlanFileItem {
+  id?: number
+  fileCategory: string
+  fileName: string
+  s3Key: string
+}
+
 interface InstallPlanData {
   id: number
+  planCode?: string | null
   hospitalCode: string | null
   hospital: Hospital | null
   requestDate: string | null
@@ -26,14 +34,16 @@ interface InstallPlanData {
   author: UserOption | null
   replyDate: string | null
   note: string | null
+  files?: InstallPlanFileItem[]
 }
 
 interface Props {
   initialData: InstallPlanData
   canAdmin: boolean
+  canEdit: boolean
 }
 
-export default function InstallPlanDetailClient({ initialData, canAdmin }: Props) {
+export default function InstallPlanDetailClient({ initialData, canAdmin, canEdit }: Props) {
   const router = useRouter()
   const [deleting, setDeleting] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
@@ -53,7 +63,7 @@ export default function InstallPlanDetailClient({ initialData, canAdmin }: Props
 
   return (
     <>
-      <InstallPlanForm initialData={initialData} mode="edit" />
+      <InstallPlanForm initialData={initialData} mode="edit" canEdit={canEdit} />
 
       {canAdmin && (
         <div className="mt-6 border-t border-gray-200 pt-6">

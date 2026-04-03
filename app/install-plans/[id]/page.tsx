@@ -24,15 +24,18 @@ export default async function InstallPlanDetailPage({ params }: Props) {
     include: {
       hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
       author: { select: { id: true, name: true } },
+      files: { orderBy: { uploadedAt: 'asc' } },
     },
   })
 
   if (!installPlan) notFound()
 
   const canAdmin = isAdminOrAbove(user.role)
+  const canEdit = user.role !== 'VIEWER'
 
   const data = {
     id: installPlan.id,
+    planCode: installPlan.planCode,
     hospitalCode: installPlan.hospitalCode,
     hospital: installPlan.hospital,
     requestDate: installPlan.requestDate ? installPlan.requestDate.toISOString() : null,
@@ -42,6 +45,12 @@ export default async function InstallPlanDetailPage({ params }: Props) {
     author: installPlan.author,
     replyDate: installPlan.replyDate ? installPlan.replyDate.toISOString() : null,
     note: installPlan.note,
+    files: installPlan.files.map((f) => ({
+      id: f.id,
+      fileCategory: f.fileCategory,
+      fileName: f.fileName,
+      s3Key: f.s3Key,
+    })),
   }
 
   return (
@@ -54,7 +63,7 @@ export default async function InstallPlanDetailPage({ params }: Props) {
           )}
         </div>
         <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
-          <InstallPlanDetailClient initialData={data} canAdmin={canAdmin} />
+          <InstallPlanDetailClient initialData={data} canAdmin={canAdmin} canEdit={canEdit} />
         </div>
       </div>
     </div>

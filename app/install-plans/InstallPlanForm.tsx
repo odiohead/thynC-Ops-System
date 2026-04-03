@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import RichTextEditor from '@/app/components/RichTextEditor'
 
@@ -15,8 +15,16 @@ interface UserOption {
   name: string
 }
 
+interface InstallPlanFileItem {
+  id?: number
+  fileCategory: string
+  fileName: string
+  s3Key: string
+}
+
 interface InstallPlanData {
   id: number
+  planCode?: string | null
   hospitalCode: string | null
   hospital: Hospital | null
   requestDate: string | null
@@ -26,6 +34,7 @@ interface InstallPlanData {
   author: UserOption | null
   replyDate: string | null
   note: string | null
+  files?: InstallPlanFileItem[]
 }
 
 interface Props {
@@ -33,11 +42,136 @@ interface Props {
   mode: 'new' | 'edit'
   initialHospitalCode?: string
   initialHospital?: Hospital | null
+  canEdit?: boolean
 }
 
 const STATUS_OPTIONS = ['-', '미완료', '완료']
 
-export default function InstallPlanForm({ initialData, mode, initialHospitalCode, initialHospital }: Props) {
+// ─── FileField 컴포넌트 ───────────────────────────────────────────────────────
+
+interface FileFieldProps {
+  label: string
+  fileCategory: string
+  installPlanId: number
+  savedFiles: InstallPlanFileItem[]
+  onSavedFilesChange: (files: InstallPlanFileItem[]) => void
+  canEdit: boolean
+}
+
+function FileField({ label, fileCategory, installPlanId, savedFiles, onSavedFilesChange, canEdit }: FileFieldProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
+
+  const displayFiles = savedFiles.filter((f) => f.fileCategory === fileCategory)
+
+  async function handleDownload(s3Key: string) {
+    const res = await fetch(`/api/install-plans/file-url?key=${encodeURIComponent(s3Key)}`)
+    if (!res.ok) return
+    const { url } = await res.json()
+    window.open(url, '_blank')
+  }
+
+  async function handleDelete(file: InstallPlanFileItem) {
+    if (!file.id || !confirm('정말 삭제하시겠습니까?')) return
+    setDeletingId(file.id)
+    const res = await fetch(`/api/install-plans/${installPlanId}/files/${file.id}`, { method: 'DELETE' })
+    if (res.ok) {
+      onSavedFilesChange(savedFiles.filter((f) => f.id !== file.id))
+    }
+    setDeletingId(null)
+  }
+
+  async function handleFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const selected = Array.from(e.target.files ?? [])
+    if (selected.length === 0) return
+    setUploading(true)
+    setUploadError(null)
+    try {
+      for (const file of selected) {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('fileCategory', fileCategory)
+        const res = await fetch(`/api/install-plans/${installPlanId}/files`, { method: 'POST', body: formData })
+        if (res.ok) {
+          const data = await res.json()
+          onSavedFilesChange([...savedFiles, data.file])
+        } else {
+          const data = await res.json()
+          setUploadError(data.error ?? '업로드 실패')
+        }
+      }
+    } catch {
+      setUploadError('업로드 중 오류가 발생했습니다.')
+    } finally {
+      setUploading(false)
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {displayFiles.length === 0 ? (
+        <p className="text-xs text-gray-400">등록된 파일이 없습니다.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {displayFiles.map((f) => (
+            <li key={f.s3Key} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-gray-400">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
+                </svg>
+                <button
+                  type="button"
+                  onClick={() => handleDownload(f.s3Key)}
+                  className="truncate text-xs text-blue-600 hover:underline text-left"
+                >
+                  {f.fileName}
+                </button>
+              </div>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => handleDelete(f)}
+                  disabled={deletingId === f.id}
+                  className="ml-3 shrink-0 text-xs text-red-400 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {deletingId === f.id ? '삭제 중...' : '삭제'}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {canEdit && (
+        <div>
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.zip"
+            className="hidden"
+            onChange={handleFilesSelected}
+          />
+          <button
+            type="button"
+            disabled={uploading}
+            onClick={() => { if (inputRef.current) { inputRef.current.value = ''; inputRef.current.click() } }}
+            className="rounded border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {uploading ? '업로드 중...' : `+ ${label} 추가`}
+          </button>
+        </div>
+      )}
+      {uploadError && <p className="text-xs text-red-500">{uploadError}</p>}
+    </div>
+  )
+}
+
+// ─── 메인 폼 ─────────────────────────────────────────────────────────────────
+
+export default function InstallPlanForm({ initialData, mode, initialHospitalCode, initialHospital, canEdit = true }: Props) {
   const router = useRouter()
 
   const [hospitalCode, setHospitalCode] = useState(initialData?.hospitalCode ?? initialHospitalCode ?? '')
@@ -48,6 +182,7 @@ export default function InstallPlanForm({ initialData, mode, initialHospitalCode
   const [authorId, setAuthorId] = useState(initialData?.authorId ?? '')
   const [replyDate, setReplyDate] = useState(initialData?.replyDate?.slice(0, 10) ?? '')
   const [note, setNote] = useState(initialData?.note ?? '')
+  const [files, setFiles] = useState<InstallPlanFileItem[]>(initialData?.files ?? [])
 
   const [users, setUsers] = useState<UserOption[]>([])
   const [saving, setSaving] = useState(false)
@@ -128,6 +263,9 @@ export default function InstallPlanForm({ initialData, mode, initialHospitalCode
   const labelClass = 'block text-sm font-medium text-gray-700'
   const inputClass = 'mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500'
   const selectClass = inputClass
+
+  const isEditMode = mode === 'edit' && !!initialData?.id
+  const hasHospital = !!hospitalCode
 
   return (
     <>
@@ -227,6 +365,41 @@ export default function InstallPlanForm({ initialData, mode, initialHospitalCode
           </button>
         </div>
       </form>
+
+      {/* 파일 첨부 (edit 모드 + 병원 매핑된 경우에만 표시) */}
+      {isEditMode && (
+        <div className="mt-8 space-y-6 border-t border-gray-200 pt-6">
+          {!hasHospital && (
+            <p className="text-sm text-amber-600">병원을 매핑하면 파일을 첨부할 수 있습니다.</p>
+          )}
+          {hasHospital && (
+            <>
+              <div>
+                <p className="text-sm font-medium text-gray-700 mb-2">도면</p>
+                <FileField
+                  label="도면"
+                  fileCategory="FLOOR_PLAN"
+                  installPlanId={initialData!.id}
+                  savedFiles={files}
+                  onSavedFilesChange={setFiles}
+                  canEdit={canEdit}
+                />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-700 mb-2">설치계획서</p>
+                <FileField
+                  label="설치계획서"
+                  fileCategory="INSTALL_PLAN"
+                  installPlanId={initialData!.id}
+                  savedFiles={files}
+                  onSavedFilesChange={setFiles}
+                  canEdit={canEdit}
+                />
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* 병원 검색 모달 */}
       {hospitalModalOpen && (

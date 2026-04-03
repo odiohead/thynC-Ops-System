@@ -4,6 +4,25 @@
 
 ---
 
+## 2026-04-03 | S3 계층 구조 개편 + 설치계획(가안) 파일 업로드 신설
+
+- **S3 Key 패턴 변경**: 3개 메뉴 모두 `hospital/{hospitalCode}/{메뉴}/{...}` 구조로 통일
+  - 답사 신규 staged 업로드: `hospital/{hospitalCode}/site-visits/{ts}_{name}`
+  - 답사 edit 업로드: `hospital/{hospitalCode}/site-visits/{siteVisitId}/{ts}_{name}`
+  - 프로젝트 파일 업로드: `hospital/{hospitalCode}/projects/{projectCode}/{ts}_{name}` (hospitalCode를 project에서 조회)
+- **DB 마이그레이션** (`20260403010000_add_install_plan_files`): `install_plan_files` 테이블 신설 (id, install_plan_id FK, file_category, file_name, s3_key, uploaded_at)
+- **Prisma 스키마**: `InstallPlanFile` 모델 추가, `InstallPlan`에 `files` 관계 추가
+- **설치계획 파일 API 신설**:
+  - `GET/POST /api/install-plans/[id]/files`: 파일 목록 조회 / S3 업로드 + DB 저장 (`hospital/{hospitalCode}/install-plans/{planCode}/{ts}_{name}`)
+  - `DELETE /api/install-plans/[id]/files/[fileId]`: S3 + DB 동시 삭제
+  - `GET /api/install-plans/file-url`: presigned URL 생성 (1시간 만료)
+- **설치계획 UI 업데이트**: `InstallPlanForm.tsx`에 `FileField` 컴포넌트 추가 — 도면(FLOOR_PLAN), 설치계획서(INSTALL_PLAN) 각 1개 섹션. edit 모드 + 병원 매핑 시에만 노출. 병원 미매핑 시 안내 메시지 표시
+- **`app/install-plans/[id]/page.tsx`**: files 포함하여 조회, `canEdit` prop 추가
+- **`app/install-plans/[id]/DetailClient.tsx`**: `files`, `canEdit` prop 전달
+- 영향 파일: `app/api/site-visits/upload/route.ts`, `app/api/site-visits/[id]/files/route.ts`, `app/api/projects/[code]/files/route.ts`, `app/api/install-plans/[id]/files/route.ts` (신설), `app/api/install-plans/[id]/files/[fileId]/route.ts` (신설), `app/api/install-plans/file-url/route.ts` (신설), `app/install-plans/InstallPlanForm.tsx`, `app/install-plans/[id]/page.tsx`, `app/install-plans/[id]/DetailClient.tsx`, `prisma/schema.prisma`, `prisma/migrations/20260403010000_add_install_plan_files/`
+
+---
+
 ## 2026-04-03 | 파일업로드 멀티파일·ZIP 지원 + 프로젝트 상세 병원기본정보 카드 추가
 
 - **DB 마이그레이션** (`20260403000000_add_site_visit_files`): `site_visit_files` 테이블 신설 (id, site_visit_id FK, file_category, file_name, s3_key, uploaded_at)

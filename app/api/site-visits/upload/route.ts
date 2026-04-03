@@ -22,7 +22,8 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer())
-    const s3Key = `site-visits/${hospitalCode}/${file.name}`
+    const timestamp = Date.now()
+    const s3Key = `hospital/${hospitalCode}/site-visits/${timestamp}_${file.name}`
 
     await uploadToS3(buffer, s3Key, file.type || 'application/octet-stream')
 

@@ -339,13 +339,26 @@ model InstallPlan {
   replyDate    DateTime? @map("reply_date") @db.Date
   note         String?
 
-  hospital Hospital? @relation(fields: [hospitalCode], references: [hospitalCode])
-  author   User?     @relation("InstallPlanAuthor", fields: [authorId], references: [id])
+  hospital Hospital?         @relation(fields: [hospitalCode], references: [hospitalCode])
+  author   User?             @relation("InstallPlanAuthor", fields: [authorId], references: [id])
+  files    InstallPlanFile[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("install_plans")
+}
+
+model InstallPlanFile {
+  id            Int         @id @default(autoincrement())
+  installPlanId Int         @map("install_plan_id")
+  fileCategory  String      @map("file_category")
+  fileName      String      @map("file_name")
+  s3Key         String      @map("s3_key")
+  uploadedAt    DateTime    @default(now()) @map("uploaded_at")
+  installPlan   InstallPlan @relation(fields: [installPlanId], references: [id], onDelete: Cascade)
+
+  @@map("install_plan_files")
 }
 
 model HiraSyncJob {
