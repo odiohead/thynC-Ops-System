@@ -9,6 +9,11 @@ interface Organization {
   code: string
 }
 
+interface Department {
+  id: number
+  name: string
+}
+
 interface User {
   id: string
   email: string
@@ -19,6 +24,7 @@ interface User {
   createdAt: string
   lastLoginAt: string | null
   organization: Organization | null
+  department: Department | null
 }
 
 const ROLE_LABEL: Record<string, string> = {
@@ -47,12 +53,17 @@ export default function UsersPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([])
   const [loading, setLoading] = useState(true)
 
+  // 부서 목록 (동적 로드)
+  const [createDepartments, setCreateDepartments] = useState<Department[]>([])
+  const [editOtherDepartments, setEditOtherDepartments] = useState<Department[]>([])
+
   // 계정 생성 모달
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [form, setForm] = useState({
     email: '', password: '', name: '', phone: '',
     role: 'USER' as 'SUPER_ADMIN' | 'ADMIN' | 'USER' | 'VIEWER',
     organizationId: '',
+    departmentId: '',
   })
   const [formError, setFormError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -78,6 +89,7 @@ export default function UsersPage() {
   const [editOtherPhone, setEditOtherPhone] = useState('')
   const [editOtherRole, setEditOtherRole] = useState<User['role']>('USER')
   const [editOtherOrgId, setEditOtherOrgId] = useState('')
+  const [editOtherDeptId, setEditOtherDeptId] = useState('')
   const [editOtherPassword, setEditOtherPassword] = useState('')
   const [editOtherConfirmPassword, setEditOtherConfirmPassword] = useState('')
   const [editOtherError, setEditOtherError] = useState('')
@@ -124,6 +136,20 @@ export default function UsersPage() {
     }
   }
 
+  async function loadDepartments(orgId: string, target: 'create' | 'editOther') {
+    if (!orgId) {
+      if (target === 'create') setCreateDepartments([])
+      else setEditOtherDepartments([])
+      return
+    }
+    const res = await fetch(`/api/settings/departments?organizationId=${orgId}`)
+    if (res.ok) {
+      const data = await res.json()
+      if (target === 'create') setCreateDepartments(data)
+      else setEditOtherDepartments(data)
+    }
+  }
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     setFormError('')
@@ -135,13 +161,15 @@ export default function UsersPage() {
         body: JSON.stringify({
           ...form,
           organizationId: form.organizationId ? parseInt(form.organizationId) : null,
+          departmentId: form.departmentId ? parseInt(form.departmentId) : null,
         }),
       })
       const data = await res.json()
       if (!res.ok) { setFormError(data.error || '생성에 실패했습니다.'); return }
       setUsers((prev) => [...prev, data])
       setShowCreateModal(false)
-      setForm({ email: '', password: '', name: '', phone: '', role: 'USER', organizationId: '' })
+      setForm({ email: '', password: '', name: '', phone: '', role: 'USER', organizationId: '', departmentId: '' })
+      setCreateDepartments([])
       router.refresh()
     } catch {
       setFormError('서버 오류가 발생했습니다.')
@@ -156,6 +184,8 @@ export default function UsersPage() {
     setEditOtherPhone(user.phone ?? '')
     setEditOtherRole(user.role)
     setEditOtherOrgId(user.organization?.id?.toString() ?? '')
+    setEditOtherDeptId(user.department?.id?.toString() ?? '')
+    if (user.organization?.id) loadDepartments(user.organization.id.toString(), 'editOther')
     setEditOtherPassword('')
     setEditOtherConfirmPassword('')
     setEditOtherError('')
@@ -185,6 +215,7 @@ export default function UsersPage() {
         phone: editOtherPhone,
         role: editOtherRole,
         organizationId: editOtherOrgId ? parseInt(editOtherOrgId) : null,
+        departmentId: editOtherDeptId ? parseInt(editOtherDeptId) : null,
       }
       if (editOtherPassword) body.newPassword = editOtherPassword
 
@@ -325,6 +356,7 @@ export default function UsersPage() {
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">이메일</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">연락처</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">소속</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">부서</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">역할</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">상태</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">마지막 로그인</th>
@@ -343,6 +375,7 @@ export default function UsersPage() {
                 <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{user.email}</td>
                 <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{user.phone || '-'}</td>
                 <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{user.organization?.name ?? '-'}</td>
+                <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{user.department?.name ?? '-'}</td>
                 <td className="px-4 py-3 whitespace-nowrap">
                   <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${ROLE_CLASS[user.role] ?? 'bg-gray-100 text-gray-700'}`}>
                     {ROLE_LABEL[user.role] ?? user.role}
@@ -429,10 +462,31 @@ export default function UsersPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">소속</label>
-                <select value={form.organizationId} onChange={(e) => setForm({ ...form, organizationId: e.target.value })} className={inputClass}>
+                <select
+                  value={form.organizationId}
+                  onChange={(e) => {
+                    setForm({ ...form, organizationId: e.target.value, departmentId: '' })
+                    loadDepartments(e.target.value, 'create')
+                  }}
+                  className={inputClass}
+                >
                   <option value="">소속 없음</option>
                   {organizations.map((org) => (
                     <option key={org.id} value={org.id}>{org.name} ({org.code})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">부서</label>
+                <select
+                  value={form.departmentId}
+                  onChange={(e) => setForm({ ...form, departmentId: e.target.value })}
+                  disabled={!form.organizationId || createDepartments.length === 0}
+                  className={inputClass}
+                >
+                  <option value="">{!form.organizationId || createDepartments.length === 0 ? '부서 없음' : '부서 선택'}</option>
+                  {createDepartments.map((dept) => (
+                    <option key={dept.id} value={dept.id}>{dept.name}</option>
                   ))}
                 </select>
               </div>
@@ -483,10 +537,32 @@ export default function UsersPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">소속</label>
-                <select value={editOtherOrgId} onChange={(e) => setEditOtherOrgId(e.target.value)} className={inputClass}>
+                <select
+                  value={editOtherOrgId}
+                  onChange={(e) => {
+                    setEditOtherOrgId(e.target.value)
+                    setEditOtherDeptId('')
+                    loadDepartments(e.target.value, 'editOther')
+                  }}
+                  className={inputClass}
+                >
                   <option value="">소속 없음</option>
                   {organizations.map((org) => (
                     <option key={org.id} value={org.id}>{org.name} ({org.code})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">부서</label>
+                <select
+                  value={editOtherDeptId}
+                  onChange={(e) => setEditOtherDeptId(e.target.value)}
+                  disabled={!editOtherOrgId || editOtherDepartments.length === 0}
+                  className={inputClass}
+                >
+                  <option value="">{!editOtherOrgId || editOtherDepartments.length === 0 ? '부서 없음' : '부서 선택'}</option>
+                  {editOtherDepartments.map((dept) => (
+                    <option key={dept.id} value={dept.id}>{dept.name}</option>
                   ))}
                 </select>
               </div>

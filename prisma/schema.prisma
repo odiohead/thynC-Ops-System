@@ -125,13 +125,14 @@ enum Role {
 }
 
 model Organization {
-  id        Int      @id @default(autoincrement())
-  name      String
-  code      String   @unique
-  isActive  Boolean  @default(true) @map("is_active")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  users     User[]
+  id          Int          @id @default(autoincrement())
+  name        String
+  code        String       @unique
+  isActive    Boolean      @default(true) @map("is_active")
+  sortOrder   Int          @default(0) @map("sort_order")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  users       User[]
+  departments Department[]
 
   @@map("organizations")
 }
@@ -145,9 +146,12 @@ model User {
   role           Role          @default(USER)
   isActive       Boolean       @default(true) @map("is_active")
   organizationId Int?          @map("organization_id")
+  departmentId   Int?          @map("department_id")
   createdAt      DateTime      @default(now()) @map("created_at")
   lastLoginAt    DateTime?     @map("last_login_at")
   organization            Organization?                @relation(fields: [organizationId], references: [id])
+  department              Department?                  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  fieldEngineer           FieldEngineer?
   projects                Project[]
   assignedSiteVisits      SiteVisit[]                  @relation("SiteVisitAssignee")
   daewoongSiteVisits      SiteVisit[]                  @relation("SiteVisitDaewoongUser")
@@ -155,6 +159,27 @@ model User {
   authoredInstallPlans    InstallPlan[]                @relation("InstallPlanAuthor")
 
   @@map("users")
+}
+
+model Department {
+  id             Int          @id @default(autoincrement())
+  name           String       @db.VarChar(100)
+  organizationId Int          @map("organization_id")
+  sortOrder      Int          @default(0) @map("sort_order")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users          User[]
+
+  @@map("departments")
+}
+
+model FieldEngineer {
+  id        Int      @id @default(autoincrement())
+  userId    String   @unique @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("field_engineers")
 }
 
 model DeviceInfo {

@@ -55,6 +55,11 @@ app/
 │   ├── users/                        # 시스템 사용자 관리
 │   ├── settings/
 │   │   ├── organizations/            # 소속(조직) 관리 (SUPER_ADMIN 전용)
+│   │   ├── departments/              # 부서 관리 (ADMIN 이상)
+│   │   │   └── [id]/                 # 부서 수정/삭제
+│   │   ├── field-engineers/          # 필드 엔지니어 관리 (ADMIN 이상)
+│   │   │   ├── [id]/                 # 필드 엔지니어 삭제
+│   │   │   └── candidates/           # 등록 후보 목록
 │   │   ├── devices/                  # 장비 정보 관리
 │   │   ├── build-status/             # 공사 상태 관리
 │   │   ├── status/                   # 병원 상태코드 관리
@@ -76,6 +81,7 @@ app/
 ├── settings/
 │   ├── profile/                      # 내 계정 정보
 │   ├── organizations/                # 소속 관리 (SUPER_ADMIN 전용)
+│   ├── field-engineers/              # 필드 엔지니어 리스트 (ADMIN 이상)
 │   ├── hira-sync/                    # 심평원 연동 관리 (SUPER_ADMIN 전용)
 │   ├── devices/                      # 장비 정보 관리
 │   ├── build-status/                 # 공사 상태 관리
@@ -106,12 +112,21 @@ prisma/
 ### User (시스템 사용자)
 - 이메일, 비밀번호(bcrypt), 이름, 전화번호
 - 역할: `SUPER_ADMIN` / `ADMIN` / `USER` / `VIEWER`
-- 소속(Organization) 연결 (organizationId)
+- 소속(Organization) 연결 (organizationId), 부서(Department) 연결 (departmentId, 선택)
 
 ### Organization (소속/조직)
 - 사용자 그룹 단위 (예: SEERS, DAEWOONG)
 - code (고유 코드, 대문자), name, isActive, sortOrder
 - 삭제 보호: `DAEWOONG` 코드는 영구 삭제 불가
+
+### Department (부서)
+- Organization 하위 부서 단위
+- name, organizationId, sortOrder
+- 연결된 유저가 있으면 삭제 불가 (409)
+
+### FieldEngineer (필드 엔지니어)
+- SEERS 소속 User 중 필드 엔지니어로 지정된 목록
+- userId (User 1:1 관계, UNIQUE), createdAt
 
 ### HiraHospital (건강보험심사평가원 병원 원본 데이터)
 - HIRA에서 가져온 공공 병원 데이터 원본
@@ -287,9 +302,23 @@ prisma/
 ### 사용자 관리
 - 시스템 사용자 등록·수정·삭제 (ADMIN 이상)
 - 소속 드롭다운 연결
-- **SUPER_ADMIN의 타계정 수정**: 이름·연락처·역할·소속·비밀번호 일괄 수정 (현재 비밀번호 확인 없이 변경 가능)
+- **SUPER_ADMIN의 타계정 수정**: 이름·연락처·역할·소속·부서·비밀번호 일괄 수정 (현재 비밀번호 확인 없이 변경 가능)
 - 계정 활성/비활성 처리
 - 소속별 탭 분리: 씨어스테크놀로지(SEERS) / 대웅제약(DAEWOONG) (탭별 사용자 수 뱃지)
+- 계정 생성·수정 시 부서 드롭다운 (소속 선택 연동 동적 로드)
+
+### 소속 관리 (SUPER_ADMIN 전용)
+- 소속(Organization) 추가·수정·삭제·순서 이동
+- **부서 관리**: 각 소속 행의 "부서 관리" 버튼으로 인라인 아코디언 열기 (다른 소속 아코디언 자동 닫힘)
+  - 부서 목록 테이블: 순서↑↓, 부서명 인라인 수정, 소속 계정 수, 삭제
+  - 부서 추가: 하단 입력 행에서 즉시 추가
+  - 연결된 계정 있으면 삭제 불가 (인라인 에러 표시)
+
+### 필드 엔지니어 리스트 (ADMIN 이상)
+- SEERS 소속 사용자 중 필드 엔지니어 등록·삭제
+- "+ 추가" 버튼으로 후보 검색 모달 열기 (이름/이메일 검색, 300ms debounce, 페이지네이션)
+- 후보: SEERS 소속·활성·미등록 사용자만 표시
+- 목록 테이블: 번호·이름·이메일·소속·부서·추가일·삭제
 
 ### 설정 (ADMIN 이상)
 - 병원 상태코드 관리 (추가·수정·삭제·순서)
@@ -554,6 +583,14 @@ npm run dev
 | POST | `/api/settings/organizations` | 소속 추가 (SUPER_ADMIN 전용) |
 | PUT  | `/api/settings/organizations/[id]` | 소속 수정 (SUPER_ADMIN 전용) |
 | DELETE | `/api/settings/organizations/[id]` | 소속 삭제 (SUPER_ADMIN 전용) |
+| GET  | `/api/settings/departments` | 부서 목록 (`?organizationId=` 필수, `_count.users` 포함) |
+| POST | `/api/settings/departments` | 부서 추가 (ADMIN 이상) |
+| PUT  | `/api/settings/departments/[id]` | 부서 수정 (ADMIN 이상) |
+| DELETE | `/api/settings/departments/[id]` | 부서 삭제 (ADMIN 이상, 연결 계정 있으면 409) |
+| GET  | `/api/settings/field-engineers` | 필드 엔지니어 목록 (`?search=&page=&limit=`) |
+| POST | `/api/settings/field-engineers` | 필드 엔지니어 등록 (ADMIN 이상, SEERS 소속만 가능) |
+| DELETE | `/api/settings/field-engineers/[id]` | 필드 엔지니어 삭제 (ADMIN 이상, 204) |
+| GET  | `/api/settings/field-engineers/candidates` | 등록 후보 목록 (ADMIN 이상, SEERS·활성·미등록) |
 | GET  | `/api/settings/devices` | 장비 정보 목록 |
 | POST | `/api/settings/devices` | 장비 정보 추가 |
 | PUT  | `/api/settings/devices/[id]` | 장비 정보 수정 |

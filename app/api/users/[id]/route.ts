@@ -14,6 +14,7 @@ const userSelect = {
   isActive: true,
   createdAt: true,
   organization: { select: { id: true, name: true, code: true } },
+  department: { select: { id: true, name: true } },
 } as const
 
 /** ADMIN 전용: isActive 토글 */
@@ -48,7 +49,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (!target) return NextResponse.json({ error: '사용자를 찾을 수 없습니다.' }, { status: 404 })
 
   const body = await req.json()
-  const { name, phone, currentPassword, newPassword, role, organizationId } = body
+  const { name, phone, currentPassword, newPassword, role, organizationId, departmentId } = body
 
   const updateData: Record<string, unknown> = {}
 
@@ -67,6 +68,12 @@ export async function PUT(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: '조직 변경은 관리자만 가능합니다.' }, { status: 403 })
     }
     updateData.organizationId = organizationId || null
+  }
+  if (departmentId !== undefined) {
+    if (!isAdmin) {
+      return NextResponse.json({ error: '부서 변경은 관리자만 가능합니다.' }, { status: 403 })
+    }
+    updateData.departmentId = departmentId || null
   }
 
   // 비밀번호 변경

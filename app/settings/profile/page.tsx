@@ -10,6 +10,7 @@ interface Me {
   role: 'SUPER_ADMIN' | 'ADMIN' | 'USER' | 'VIEWER'
   isActive: boolean
   organization?: { id: number; name: string; code: string } | null
+  department?: { id: number; name: string } | null
 }
 
 const ROLE_LABEL: Record<string, string> = {
@@ -138,6 +139,10 @@ export default function ProfilePage() {
           <div>
             <label className={labelClass}>소속</label>
             <input type="text" value={me.organization?.name ?? '-'} disabled className={inputClass} />
+          </div>
+          <div>
+            <label className={labelClass}>부서</label>
+            <input type="text" value={me.department?.name ?? '-'} disabled className={inputClass} />
           </div>
         </div>
       </div>

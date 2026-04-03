@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
       createdAt: true,
       lastLoginAt: true,
       organization: { select: { id: true, name: true, code: true } },
+      department: { select: { id: true, name: true } },
     },
     orderBy: { createdAt: 'asc' },
   })
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
   const user = await getAuthUser(req)
   if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { email, password, name, phone, role, organizationId } = await req.json()
+  const { email, password, name, phone, role, organizationId, departmentId } = await req.json()
 
   if (!email || !password || !name) {
     return NextResponse.json({ error: '필수 항목을 입력해주세요.' }, { status: 400 })
@@ -54,6 +55,7 @@ export async function POST(req: NextRequest) {
       phone: phone || '',
       role: role || 'USER',
       organizationId: organizationId || null,
+      departmentId: departmentId || null,
     },
     select: {
       id: true,
@@ -65,6 +67,7 @@ export async function POST(req: NextRequest) {
       createdAt: true,
       lastLoginAt: true,
       organization: { select: { id: true, name: true, code: true } },
+      department: { select: { id: true, name: true } },
     },
   })
 

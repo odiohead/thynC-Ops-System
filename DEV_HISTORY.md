@@ -4,6 +4,27 @@
 
 ---
 
+## 2026-04-04 | 부서 관리 + 필드 엔지니어 리스트 신설
+
+- **DB 마이그레이션** (`20260404000000_add_departments_and_field_engineers`): `departments` 테이블 신설 (id, name, organization_id FK, sort_order, created_at), `users` 테이블에 `department_id` 컬럼 추가, `field_engineers` 테이블 신설 (id, user_id UNIQUE FK, created_at)
+- **Prisma 스키마**: `Department` 모델 추가 (Organization 역방향 관계), `FieldEngineer` 모델 추가, `User` 모델에 `departmentId`, `department`, `fieldEngineer` 필드 추가, `Organization` 모델에 `departments` 역방향 관계 추가
+- **부서 관리 API 신설**:
+  - `GET/POST /api/settings/departments`: 소속별 부서 목록 조회 / 부서 추가 (ADMIN 이상). 각 부서에 `_count.users` 포함. 동일 소속 내 이름 중복 409
+  - `PUT/DELETE /api/settings/departments/[id]`: 부서명·순서 수정 / 삭제 (ADMIN 이상). 연결 계정 있으면 삭제 409
+- **필드 엔지니어 API 신설**:
+  - `GET/POST /api/settings/field-engineers`: 목록 조회(검색·페이지네이션) / 등록 (SEERS 소속 + 미등록 검증, 중복 409)
+  - `DELETE /api/settings/field-engineers/[id]`: 삭제 (204 반환)
+  - `GET /api/settings/field-engineers/candidates`: SEERS 소속·활성·미등록 유저 후보 목록 (ADMIN 이상, 검색·페이지네이션)
+- **소속 관리 페이지 고도화** (`app/settings/organizations/page.tsx`): 각 소속 행에 "부서 관리" 버튼 추가. 클릭 시 인라인 아코디언 펼침 (다른 소속 아코디언 자동 닫힘). 부서 테이블(순서↑↓, 부서명 인라인 수정, 계정 수, 삭제), 하단 부서 추가 행
+- **필드 엔지니어 설정 페이지 신설** (`app/settings/field-engineers/page.tsx`): ADMIN 이상 접근 (미인증 시 `/` redirect). 목록 테이블(번호·이름·이메일·소속·부서·추가일·삭제). "+ 추가" 버튼으로 모달 오픈. 모달: 검색 debounce 300ms + 후보 페이지네이션 + 선택 시 등록. 409 인라인 에러 표시
+- **사용자 관리 페이지 부서 필드 추가** (`app/users/page.tsx`): 테이블에 '부서' 컬럼 추가 (소속 우측). 계정 생성 폼에 부서 드롭다운 추가 (소속 선택 시 동적 로드, 부서 없으면 비활성). SUPER_ADMIN 타계정 수정 모달에도 동일 적용. POST/PUT body에 `departmentId` 포함
+- **API 업데이트**: `GET/POST /api/users` — select에 `department` 추가, POST body에 `departmentId` 수신. `PUT /api/users/[id]` — `departmentId` 수신 (null 허용). `GET /api/auth/me` — select에 `department` 추가
+- **내 프로필 페이지 부서 표시** (`app/settings/profile/page.tsx`): 소속 항목 아래에 '부서' 읽기 전용 항목 추가 (없으면 '-')
+- **Navigation 업데이트** (`app/components/Navigation.tsx`): 설정 하위 메뉴에 '필드 엔지니어 리스트' 추가 (ADMIN 이상, UsersIcon, 소속 관리 바로 아래)
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260404000000_add_departments_and_field_engineers/`, `app/api/settings/departments/route.ts` (신설), `app/api/settings/departments/[id]/route.ts` (신설), `app/api/settings/field-engineers/route.ts` (신설), `app/api/settings/field-engineers/[id]/route.ts` (신설), `app/api/settings/field-engineers/candidates/route.ts` (신설), `app/settings/organizations/page.tsx`, `app/settings/field-engineers/page.tsx` (신설), `app/users/page.tsx`, `app/api/users/route.ts`, `app/api/users/[id]/route.ts`, `app/api/auth/me/route.ts`, `app/settings/profile/page.tsx`, `app/components/Navigation.tsx`
+
+---
+
 ## 2026-04-03 | 답사관리 리스트 개선 + 상세 병원카드 + 설치계획(가안) 상세 병원카드
 
 - **답사관리 리스트** (`app/site-visits/page.tsx`):

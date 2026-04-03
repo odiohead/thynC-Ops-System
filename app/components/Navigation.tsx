@@ -242,6 +242,16 @@ export default function Navigation() {
                   소속 관리
                 </Link>
               )}
+              {/* 필드 엔지니어 리스트: ADMIN 이상 */}
+              {isAdminOrAbove(userRole) && (
+                <Link
+                  href="/settings/field-engineers"
+                  className={navItemClass(isActive('/settings/field-engineers'))}
+                >
+                  <UsersIcon />
+                  필드 엔지니어 리스트
+                </Link>
+              )}
               {/* 심평원 연동 관리: SUPER_ADMIN만 */}
               {userRole === 'SUPER_ADMIN' && (
                 <Link
