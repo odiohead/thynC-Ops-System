@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-04-04 | 담당자 선택 모달 X버튼 아이콘 및 스크롤 구조 개선
+
+- `FieldEngineerSelectModal.tsx`, `DaewoongSelectModal.tsx` 두 모달의 X 닫기 버튼을 lucide-react `X` 아이콘 컴���넌트로 교체
+- 모달 내부 레이아웃을 flex column 3영역 구조로 개선: 상단 고정(헤더), 중간 스크롤(검색+테이블), 하단 고정(페이지네이션+버튼)
+- 모달 최대 높이 85vh, 중간 영역만 overflowY auto 스크롤 적용
+- 영향 파일: `app/components/FieldEngineerSelectModal.tsx`, `app/components/DaewoongSelectModal.tsx`
+
+---
+
 ## 2026-04-04 | 내 정보 수정 모달에 소속/부서 필드 추가
 
 - `app/users/page.tsx`의 "내 정보 수정" 모달에 소속(organization) 드롭다운과 부서(department) 드롭다운 추가

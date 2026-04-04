@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { X } from 'lucide-react'
 
 interface FieldEngineerUser {
   id: string
@@ -134,21 +135,23 @@ export default function FieldEngineerSelectModal({
           position: 'relative',
           width: '100%',
           maxWidth: '640px',
-          maxHeight: '80vh',
-          overflowY: 'auto',
+          maxHeight: '85vh',
+          display: 'flex',
+          flexDirection: 'column',
         }}
         className="rounded-xl bg-white shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+        {/* 상단 고정: 헤더 */}
+        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4" style={{ flexShrink: 0 }}>
           <h2 className="text-base font-semibold text-gray-900">{title}</h2>
           <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100">
-            ��
+            <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="p-5">
-          {/* 검색 */}
+        {/* 중간 스크롤: 검색 + 테이블 */}
+        <div className="p-5" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
           <input
             type="text"
             value={search}
@@ -157,7 +160,6 @@ export default function FieldEngineerSelectModal({
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
 
-          {/* 테이블 */}
           <div className="mt-3 overflow-x-auto rounded-lg border border-gray-200">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
@@ -197,9 +199,11 @@ export default function FieldEngineerSelectModal({
               </tbody>
             </table>
           </div>
+        </div>
 
-          {/* 페이지네이션 */}
-          <div className="mt-3 flex items-center justify-center gap-2">
+        {/* 하단 고정: 페이지네이션 + 버튼 */}
+        <div className="border-t border-gray-200 px-5 py-4" style={{ flexShrink: 0 }}>
+          <div className="flex items-center justify-center gap-2 mb-3">
             <button
               type="button"
               onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -218,24 +222,22 @@ export default function FieldEngineerSelectModal({
               다음
             </button>
           </div>
-        </div>
-
-        {/* 하단 버튼 */}
-        <div className="flex items-center justify-end gap-2 border-t border-gray-200 px-5 py-4">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            취소
-          </button>
-          <button
-            type="button"
-            onClick={handleConfirm}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            선택 완료
-          </button>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirm}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              선택 완료
+            </button>
+          </div>
         </div>
       </div>
     </div>
