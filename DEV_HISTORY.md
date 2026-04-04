@@ -4,6 +4,42 @@
 
 ---
 
+## 2026-04-04 | 담당자 선택 모달 오버레이 fixed 전환 + 배경 불투명도 개선
+
+- `FieldEngineerSelectModal.tsx`, `DaewoongSelectModal.tsx` 두 모달의 오버레이 래퍼를 `absolute` → `fixed` 포지션으로 변경하여 스크롤 시에도 화면 전체를 덮도록 수정
+- `zIndex: 9999`, `backgroundColor: rgba(0,0,0,0.55)`, `backdropFilter: blur(2px)` 적용
+- 내부 컨텐츠 박스에 `maxHeight: 80vh`, `overflowY: auto` 추가하여 긴 목록 스크롤 지원
+- 영향 파일: `app/components/FieldEngineerSelectModal.tsx`, `app/components/DaewoongSelectModal.tsx`
+
+---
+
+## 2026-04-04 | 담당자 N:M 교체 + 병원 대웅 담당자 복수 선택
+
+- **DB 마이그레이션** (`20260404010000_add_assignee_tables`): `project_assignees`, `install_plan_assignees`, `site_visit_assignees` 테이블 신설 (각각 N:M 관계). 기존 단일 FK 데이터 이관 후 `projects.builder_user_id`, `install_plans.author_id`, `site_visits.assignee_id` 컬럼 삭제
+- **Prisma 스키마**: `ProjectAssignee`, `InstallPlanAssignee`, `SiteVisitAssignee` 모델 추가. `Project`, `InstallPlan`, `SiteVisit` 모델에서 기존 단일 FK 관계 제거 → `assignees` 역방향 관계로 교체. `User` 모델에서 기존 역방향 관계 제거 → `projectAssignees`, `installPlanAssignees`, `siteVisitAssignees`로 교체
+- **필드 엔지니어 선택 공통 모달** (`app/components/FieldEngineerSelectModal.tsx`) 신설: `/api/settings/field-engineers` 기반 체크박스 복수 선택, 검색(300ms debounce), 페이지네이션
+- **대웅 담당자 선택 공통 모달** (`app/components/DaewoongSelectModal.tsx`) 신설: `/api/users?organization=DAEWOONG` 기반 체크박스 복수 선택, 검색, 페이지네이션
+- **Users API 확장** (`app/api/users/route.ts`): `?search=`, `?page=`, `?limit=` 파라미터 추가. 페이지네이션 파라미터 있으면 `{ data, total, page, limit }` 반환, 없으면 기존 배열 반환 (하위 호환)
+- **프로젝트 API** (`app/api/projects/route.ts`, `[code]/route.ts`): `builderUserId` → `assigneeIds` 배열로 교체. GET include에 `assignees` 추가. PUT에서 트랜잭션으로 N:M 갱신
+- **설치계획 API** (`app/api/install-plans/route.ts`, `[id]/route.ts`): `authorId` → `assigneeIds` 배열로 교체. 동일 패턴 적용
+- **답사 API** (`app/api/site-visits/route.ts`, `[id]/route.ts`): `assigneeId` → `assigneeIds` 배열로 교체. 동일 패턴 적용
+- **대시보드 API** (`app/api/dashboard/route.ts`): `builder` → `assignees` include로 교체
+- **프로젝트 상세 페이지** (`app/projects/[code]/page.tsx`): 기존 radio(시스템 사용자/직접 입력) UI 제거 → 칩 기반 복수 담당자 + FieldEngineerSelectModal. `builderNameManual` 별도 텍스트 input 유지
+- **프로젝트 등록 페이지** (`app/projects/new/page.tsx`): 동일하게 복수 담당자 UI 교체
+- **프로젝트 목록 페이지** (`app/projects/page.tsx`): `builder` → `assignees` 기반 표시, 필터 쿼리 업데이트
+- **설치계획 폼** (`app/install-plans/InstallPlanForm.tsx`): 작성자 단일 select → 칩 기반 복수 담당자 + FieldEngineerSelectModal
+- **설치계획 목록** (`app/install-plans/page.tsx`): `author` → `assignees` 기반 표시
+- **설치계획 상세** (`app/install-plans/[id]/page.tsx`, `DetailClient.tsx`): `author`/`authorId` → `assignees` 교체
+- **답사 폼** (`app/site-visits/SiteVisitForm.tsx`): 담당자 단일 select → 칩 기반 복수 담당자 + FieldEngineerSelectModal
+- **답사 목록** (`app/site-visits/page.tsx`): `assignee` → `assignees` 기반 표시
+- **답사 상세** (`app/site-visits/[id]/page.tsx`): `assigneeId` → `assignees` 교체
+- **병원 대웅 담당자** (`app/hospitals/[code]/_components/DaewoongStaffTab.tsx`): 기존 한 명씩 추가/해제 리스트 방식 → DaewoongSelectModal 기반 복수 선택(체크박스) 방식. 칩 UI로 표시, 개별 × 버튼 해제
+- **병원 상세 하위 카드** (`SiteVisitsCard.tsx`, `InstallPlansCard.tsx`): `assignee`/`author` → `assignees` 기반 표시
+- **대시보드** (`app/page.tsx`): `builder` → `assignees` 기반 담당자명 표시
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260404010000_add_assignee_tables/`, `app/components/FieldEngineerSelectModal.tsx` (신설), `app/components/DaewoongSelectModal.tsx` (신설), `app/api/users/route.ts`, `app/api/projects/route.ts`, `app/api/projects/[code]/route.ts`, `app/api/install-plans/route.ts`, `app/api/install-plans/[id]/route.ts`, `app/api/site-visits/route.ts`, `app/api/site-visits/[id]/route.ts`, `app/api/dashboard/route.ts`, `app/projects/[code]/page.tsx`, `app/projects/new/page.tsx`, `app/projects/page.tsx`, `app/install-plans/InstallPlanForm.tsx`, `app/install-plans/page.tsx`, `app/install-plans/[id]/page.tsx`, `app/install-plans/[id]/DetailClient.tsx`, `app/site-visits/SiteVisitForm.tsx`, `app/site-visits/page.tsx`, `app/site-visits/[id]/page.tsx`, `app/hospitals/[code]/page.tsx`, `app/hospitals/[code]/_components/DaewoongStaffTab.tsx`, `app/hospitals/[code]/_components/SiteVisitsCard.tsx`, `app/hospitals/[code]/_components/InstallPlansCard.tsx`, `app/page.tsx`
+
+---
+
 ## 2026-04-04 | 부서 관리 + 필드 엔지니어 리스트 신설
 
 - **DB 마이그레이션** (`20260404000000_add_departments_and_field_engineers`): `departments` 테이블 신설 (id, name, organization_id FK, sort_order, created_at), `users` 테이블에 `department_id` 컬럼 추가, `field_engineers` 테이블 신설 (id, user_id UNIQUE FK, created_at)
