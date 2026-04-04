@@ -22,7 +22,7 @@ interface InstallPlan {
   requestDate: string | null
   writeStatus: string
   replyStatus: string
-  author: UserOption | null
+  assignees: { user: { id: string; name: string } }[]
   replyDate: string | null
   createdAt: string
 }
@@ -200,7 +200,7 @@ export default function InstallPlansPage() {
                       <td className="whitespace-nowrap px-3 py-3 text-gray-600">{fmt(p.requestDate)}</td>
                       <td className="whitespace-nowrap px-3 py-3"><StatusBadge value={p.writeStatus} /></td>
                       <td className="whitespace-nowrap px-3 py-3"><StatusBadge value={p.replyStatus} /></td>
-                      <td className="whitespace-nowrap px-3 py-3 text-gray-600">{p.author?.name ?? '-'}</td>
+                      <td className="whitespace-nowrap px-3 py-3 text-gray-600">{p.assignees?.length > 0 ? p.assignees.map((a) => a.user.name).join(', ') : '-'}</td>
                       <td className="whitespace-nowrap px-3 py-3 text-gray-600">{fmt(p.replyDate)}</td>
                       <td className="whitespace-nowrap px-3 py-3 text-gray-600">{fmt(p.createdAt)}</td>
                     </tr>

@@ -11,7 +11,7 @@ interface SiteVisit {
   replyDate: string | null
   status: { name: string; color: string | null } | null
   daewoongUser: { id: string; name: string } | null
-  assignee: { id: string; name: string } | null
+  assignees: { user: { id: string; name: string } }[]
 }
 
 interface Props {
@@ -68,7 +68,7 @@ export default function SiteVisitsCard({ hospitalCode, siteVisits, isAdmin }: Pr
                       : <span className="text-gray-400 text-sm">-</span>}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">{sv.daewoongUser?.name ?? '-'}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">{sv.assignee?.name ?? '-'}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">{sv.assignees?.length > 0 ? sv.assignees.map((a) => a.user.name).join(', ') : '-'}</td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-700">{fmt(sv.replyDate)}</td>
                 </tr>
               ))}

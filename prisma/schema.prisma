@@ -152,11 +152,11 @@ model User {
   organization            Organization?                @relation(fields: [organizationId], references: [id])
   department              Department?                  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   fieldEngineer           FieldEngineer?
-  projects                Project[]
-  assignedSiteVisits      SiteVisit[]                  @relation("SiteVisitAssignee")
   daewoongSiteVisits      SiteVisit[]                  @relation("SiteVisitDaewoongUser")
   hospitalAssignments     DaewoongHospitalAssignment[]
-  authoredInstallPlans    InstallPlan[]                @relation("InstallPlanAuthor")
+  projectAssignees        ProjectAssignee[]
+  installPlanAssignees    InstallPlanAssignee[]
+  siteVisitAssignees      SiteVisitAssignee[]
 
   @@map("users")
 }
@@ -236,7 +236,6 @@ model Project {
   gatewayCount        Int?         @map("gateway_count")
   hasSurvey           Boolean      @default(false) @map("has_survey")
   hasOrder            Boolean      @default(false) @map("has_order")
-  builderUserId       String?      @map("builder_user_id")
   builderNameManual   String?      @map("builder_name_manual")
   constructorId       Int?         @map("constructor_id")
   startDate           DateTime?    @map("start_date")
@@ -249,12 +248,12 @@ model Project {
   createdAt           DateTime     @default(now()) @map("created_at")
   updatedAt           DateTime     @updatedAt @map("updated_at")
   hospital            Hospital     @relation(fields: [hospitalCode], references: [hospitalCode])
-  builder             User?        @relation(fields: [builderUserId], references: [id])
   contractor          Contractor?  @relation(fields: [constructorId], references: [id])
   buildStatus         BuildStatus? @relation(fields: [buildStatusId], references: [id])
   introType           StatusCode?  @relation("ProjectIntroType", fields: [introTypeId], references: [id])
   devices             ProjectDevice[]
   files               ProjectFile[]
+  assignees           ProjectAssignee[]
 
   @@map("projects")
 }
@@ -317,7 +316,6 @@ model SiteVisit {
   id              Int            @id @default(autoincrement())
   hospitalCode    String         @map("hospital_code")
   daewoongUserId  String?        @map("daewoong_user_id")
-  assigneeId      String?        @map("assignee_id")
   requestDate     DateTime?      @map("request_date")
   visitDate       DateTime?      @map("visit_date")
   replyDate       DateTime?      @map("reply_date")
@@ -334,9 +332,9 @@ model SiteVisit {
 
   hospital      Hospital         @relation(fields: [hospitalCode], references: [hospitalCode])
   daewoongUser  User?            @relation("SiteVisitDaewoongUser", fields: [daewoongUserId], references: [id])
-  assignee      User?            @relation("SiteVisitAssignee", fields: [assigneeId], references: [id])
   status        StatusCode?      @relation(fields: [statusId], references: [id])
   files         SiteVisitFile[]
+  assignees     SiteVisitAssignee[]
 
   @@map("site_visits")
 }
@@ -360,13 +358,12 @@ model InstallPlan {
   requestDate  DateTime? @map("request_date") @db.Date
   writeStatus  String    @default("-") @map("write_status")
   replyStatus  String    @default("-") @map("reply_status")
-  authorId     String?   @map("author_id")
   replyDate    DateTime? @map("reply_date") @db.Date
   note         String?
 
-  hospital Hospital?         @relation(fields: [hospitalCode], references: [hospitalCode])
-  author   User?             @relation("InstallPlanAuthor", fields: [authorId], references: [id])
-  files    InstallPlanFile[]
+  hospital  Hospital?         @relation(fields: [hospitalCode], references: [hospitalCode])
+  files     InstallPlanFile[]
+  assignees InstallPlanAssignee[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -395,6 +392,42 @@ model HiraSyncJob {
   logs       HiraSyncLog[]
 
   @@map("hira_sync_jobs")
+}
+
+model ProjectAssignee {
+  id          Int      @id @default(autoincrement())
+  projectCode String   @map("project_code")
+  userId      String   @map("user_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  project     Project  @relation(fields: [projectCode], references: [projectCode], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectCode, userId])
+  @@map("project_assignees")
+}
+
+model InstallPlanAssignee {
+  id            Int         @id @default(autoincrement())
+  installPlanId Int         @map("install_plan_id")
+  userId        String      @map("user_id")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  installPlan   InstallPlan @relation(fields: [installPlanId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([installPlanId, userId])
+  @@map("install_plan_assignees")
+}
+
+model SiteVisitAssignee {
+  id          Int       @id @default(autoincrement())
+  siteVisitId Int       @map("site_visit_id")
+  userId      String    @map("user_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  siteVisit   SiteVisit @relation(fields: [siteVisitId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([siteVisitId, userId])
+  @@map("site_visit_assignees")
 }
 
 model HiraSyncLog {

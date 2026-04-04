@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
     }),
     ...(writeStatus && { writeStatus }),
     ...(replyStatus && { replyStatus }),
-    ...(authorId && { authorId }),
+    ...(authorId && { assignees: { some: { userId: authorId } } }),
   }
 
   const installPlans = await prisma.installPlan.findMany({
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
     orderBy: { [safeOrderBy]: order },
     include: {
       hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
-      author: { select: { id: true, name: true } },
+      assignees: { include: { user: { select: { id: true, name: true } } } },
     },
   })
 
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
   if (authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()
-  const { hospitalCode, requestDate, writeStatus, replyStatus, authorId, replyDate, note } = body
+  const { hospitalCode, requestDate, writeStatus, replyStatus, assigneeIds, replyDate, note } = body
 
   const created = await prisma.installPlan.create({
     data: {
@@ -59,11 +59,20 @@ export async function POST(request: NextRequest) {
       requestDate: requestDate ? new Date(requestDate) : null,
       writeStatus: writeStatus ?? '-',
       replyStatus: replyStatus ?? '-',
-      authorId: authorId || null,
       replyDate: replyDate ? new Date(replyDate) : null,
       note: note || null,
     },
   })
+
+  // assignees 생성
+  if (Array.isArray(assigneeIds) && assigneeIds.length > 0) {
+    await prisma.installPlanAssignee.createMany({
+      data: assigneeIds.map((userId: string) => ({
+        installPlanId: created.id,
+        userId,
+      })),
+    })
+  }
 
   const planCode = `IP-${String(created.id).padStart(5, '0')}`
   const installPlan = await prisma.installPlan.update({
@@ -71,7 +80,7 @@ export async function POST(request: NextRequest) {
     data: { planCode },
     include: {
       hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
-      author: { select: { id: true, name: true } },
+      assignees: { include: { user: { select: { id: true, name: true } } } },
     },
   })
 

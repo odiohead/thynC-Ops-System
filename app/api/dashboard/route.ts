@@ -33,11 +33,10 @@ const projectSelect = {
   startDate: true,
   endDateExpected: true,
   remark: true,
-  builderUserId: true,
   builderNameManual: true,
   hospital: { select: { hospitalName: true, hiraHospitalName: true } },
   buildStatus: { select: { label: true, color: true } },
-  builder: { select: { name: true } },
+  assignees: { include: { user: { select: { name: true } } } },
 } as const
 
 export async function GET() {

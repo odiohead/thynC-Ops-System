@@ -8,7 +8,7 @@ interface SiteVisit {
   id: number
   hospital: { hospitalCode: string; hospitalName: string; hiraHospitalName: string; address: string | null }
   daewoongUser: { id: string; name: string } | null
-  assignee: { id: string; name: string } | null
+  assignees: { user: { id: string; name: string } }[]
   status: { id: number; name: string; color: string | null } | null
   requestDate: string | null
   visitDate: string | null
@@ -121,7 +121,7 @@ export default function SiteVisitsPage() {
                         {sv.daewoongUser?.name ?? '-'}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">
-                        {sv.assignee?.name ?? '-'}
+                        {sv.assignees?.length > 0 ? sv.assignees.map((a) => a.user.name).join(', ') : '-'}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <StatusBadge status={sv.status} />

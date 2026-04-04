@@ -154,12 +154,16 @@ prisma/
 ### Project (프로젝트)
 - 구축 공사 프로젝트 단위
 - `projectCode`, `projectName`, `orderNumber` (내부 순번)
-- 병원 연결, 담당자(`builderUserId` 또는 `builderNameManual`), 시공사(`constructorId`)
+- 병원 연결, 담당자 N:M (`ProjectAssignee`), 수동 담당자명(`builderNameManual`), 시공사(`constructorId`)
 - 계약 정보: `contractDate`, 도입형태(`introTypeId` → StatusCode INTRO_TYPE 연결)
 - 규모: `wardCount` (병동 수), `bedCount` (병상 수), `gatewayCount` (게이트웨이 수)
 - 진행 플래그: `hasSurvey` (답사 완료), `hasOrder` (발주 완료)
 - 공사 상태(`buildStatus`), 시작일/완료예정일, 비고(`remark`), 이슈 노트(`issueNote`, 리치 텍스트)
 - Google Drive 폴더 연결 (`driveFolderId`)
+
+### ProjectAssignee (프로젝트 담당자)
+- Project ↔ User N:M 관계 테이블
+- projectCode, userId, createdAt
 
 ### ProjectDevice (프로젝트 장비)
 - Project ↔ DeviceInfo 관계 + 수량
@@ -174,14 +178,22 @@ prisma/
 - 요청일 (`requestDate`), 회신일 (`replyDate`)
 - 작성완료여부 (`writeStatus`): `-` / `미완료` / `완료`
 - 회신여부 (`replyStatus`): `-` / `미완료` / `완료`
-- 작성자 (`authorId` → User), 비고 (`note`, 리치 텍스트)
+- 담당자 N:M (`InstallPlanAssignee`), 비고 (`note`, 리치 텍스트)
+
+### InstallPlanAssignee (설치계획 담당자)
+- InstallPlan ↔ User N:M 관계 테이블
+- installPlanId, userId, createdAt
 
 ### SiteVisit (답사)
 - 병원 답사 기록
-- 담당자 `daewoongUserId` (DAEWOONG 소속 User) + 추가 담당자 `assigneeId` (2인 지원)
+- 대웅 담당자 `daewoongUserId` (DAEWOONG 소속 User) + 담당자 N:M (`SiteVisitAssignee`)
 - 상태코드 연결, 방문일/요청일/회신일
 - 파일(설치계획서·평면도) 첨부: Drive 필드 (`installPlanUrl`, `floorPlanUrl`) + S3 키 (`installPlanS3Key`, `floorPlanS3Key`) 병행 지원
 - 노트(`notes`): 리치 텍스트(Tiptap)
+
+### SiteVisitAssignee (답사 담당자)
+- SiteVisit ↔ User N:M 관계 테이블
+- siteVisitId, userId, createdAt
 
 ### DaewoongHospitalAssignment (병원 담당자 배정)
 - User(DAEWOONG 소속) ↔ Hospital N:M 관계 테이블
@@ -247,7 +259,7 @@ prisma/
 - 운영 병원 등록·수정·삭제
   - 등록: 병원명+상태만으로 즉시 등록, HIRA 연결은 선택
   - 수정: HIRA 병원 연결 변경·해제 지원
-- 병원별 담당자(DAEWOONG 소속 User) 배정·해제
+- 병원별 대웅 담당자(DAEWOONG 소속 User) 복수 선택 배정·해제 (DaewoongSelectModal 체크박스 방식)
 - 병원별 장비 관리
 - 시도/시군구/상태 필터, 페이지네이션
 - **Excel 일괄 가져오기** (ADMIN 이상): `병원명`, `도입형태`, `도입병상 수` 컬럼 기준 일괄 교체
@@ -258,7 +270,7 @@ prisma/
 ### 프로젝트 관리
 - 구축 공사 프로젝트 등록·수정·삭제
 - 공사 상태(BuildStatus) 연결 및 관리
-- 담당자, 시공사, 계약일, 도입형태(IntroType), 시작일/완료예정일, 비고 관리
+- 담당자(복수 지정, 필드 엔지니어 선택 모달), 시공사, 계약일, 도입형태(IntroType), 시작일/완료예정일, 비고 관리
 - 병동 수 / 병상 수 / 게이트웨이 수, 답사·발주 완료 플래그
 - 이슈 노트: 리치 텍스트 에디터(Tiptap)로 서식 있는 내용 입력 가능
 - 프로젝트별 장비 관리
@@ -281,13 +293,13 @@ prisma/
 ### 설치계획(가안) 관리
 - 설치계획(가안) 등록·수정·삭제 (삭제는 ADMIN 이상)
 - 병원 검색 모달로 병원 연결 (선택사항)
-- 요청일 / 작성완료여부 / 회신여부 / 작성자(씨어스) / 회신일 / 비고(Tiptap 리치 텍스트)
+- 요청일 / 작성완료여부 / 회신여부 / 담당자(씨어스, 복수 지정) / 회신일 / 비고(Tiptap 리치 텍스트)
 - 작성완료여부·회신여부 색상 뱃지: 완료(초록) / 미완료(노랑) / -(회색)
 - 목록 컬럼 헤더 클릭으로 오름차순/내림차순 정렬 토글
 
 ### 답사 관리 (구 답사 현황)
 - 병원 방문 답사 기록 등록·수정·삭제
-- 담당자(DAEWOONG 소속) + 추가 담당자 2인 연결 지원
+- 대웅 담당자(DAEWOONG 소속) + 담당자(필드 엔지니어, 복수 지정) 연결 지원
 - 방문일 / 요청일 / 회신일 관리
 - 답사 상태코드 연결
 - 설치계획서·평면도 파일 첨부 (AWS S3 업로드, presigned URL 다운로드)
@@ -570,7 +582,7 @@ npm run dev
 ### 사용자
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| GET  | `/api/users` | 사용자 목록 (`?organization=` 필터 가능) |
+| GET  | `/api/users` | 사용자 목록 (`?organization=` 필터, `?search=` 검색, `?page=&limit=` 페이지네이션 — page/limit 있으면 `{data,total,page,limit}` 반환) |
 | POST | `/api/users` | 사용자 등록 |
 | GET  | `/api/users/[id]` | 사용자 상세 |
 | PUT  | `/api/users/[id]` | 사용자 수정 (SUPER_ADMIN은 타계정 수정 가능) |

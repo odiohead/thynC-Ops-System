@@ -13,7 +13,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     where: { id },
     include: {
       hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true, sidoName: true, sigunguName: true, address: true, status: true } },
-      author: { select: { id: true, name: true } },
+      assignees: { include: { user: { select: { id: true, name: true, email: true } } } },
     },
   })
 
@@ -28,27 +28,44 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const id = parseInt(params.id)
   const body = await request.json()
-  const { hospitalCode, requestDate, writeStatus, replyStatus, authorId, replyDate, note } = body
+  const { hospitalCode, requestDate, writeStatus, replyStatus, assigneeIds, replyDate, note } = body
 
-  const installPlan = await prisma.installPlan.update({
+  await prisma.installPlan.update({
     where: { id },
     data: {
       hospitalCode: hospitalCode || null,
       requestDate: requestDate ? new Date(requestDate) : null,
       writeStatus: writeStatus ?? '-',
       replyStatus: replyStatus ?? '-',
-      authorId: authorId || null,
       replyDate: replyDate ? new Date(replyDate) : null,
       note: note || null,
       updatedAt: new Date(),
     },
+  })
+
+  // assigneeIds가 전달되면 N:M 테이블 갱신
+  if (Array.isArray(assigneeIds)) {
+    await prisma.$transaction([
+      prisma.installPlanAssignee.deleteMany({ where: { installPlanId: id } }),
+      prisma.installPlanAssignee.createMany({
+        data: assigneeIds.map((userId: string) => ({
+          installPlanId: id,
+          userId,
+        })),
+      }),
+    ])
+  }
+
+  // 갱신된 데이터 다시 조회
+  const updated = await prisma.installPlan.findUnique({
+    where: { id },
     include: {
       hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true, sidoName: true, sigunguName: true, address: true, status: true } },
-      author: { select: { id: true, name: true } },
+      assignees: { include: { user: { select: { id: true, name: true, email: true } } } },
     },
   })
 
-  return NextResponse.json({ installPlan })
+  return NextResponse.json({ installPlan: updated })
 }
 
 export async function DELETE(request: NextRequest, { params }: Params) {

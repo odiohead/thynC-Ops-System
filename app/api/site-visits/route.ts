@@ -7,7 +7,7 @@ const PAGE_SIZE = 20
 const include = {
   hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true, address: true } },
   daewoongUser: { select: { id: true, name: true } },
-  assignee: { select: { id: true, name: true } },
+  assignees: { include: { user: { select: { id: true, name: true } } } },
   status: { select: { id: true, name: true, color: true } },
   files: { orderBy: { uploadedAt: 'asc' as const } },
 } as const
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
   const {
     hospitalCode,
     daewoongUserId,
-    assigneeId,
+    assigneeIds,
     requestDate,
     visitDate,
     replyDate,
@@ -69,7 +69,6 @@ export async function POST(request: NextRequest) {
     data: {
       hospitalCode,
       daewoongUserId: daewoongUserId || null,
-      assigneeId: assigneeId || null,
       requestDate: requestDate ? new Date(requestDate) : null,
       visitDate: visitDate ? new Date(visitDate) : null,
       replyDate: replyDate ? new Date(replyDate) : null,
@@ -87,6 +86,16 @@ export async function POST(request: NextRequest) {
     },
     include,
   })
+
+  // assignees 생성
+  if (Array.isArray(assigneeIds) && assigneeIds.length > 0) {
+    await prisma.siteVisitAssignee.createMany({
+      data: assigneeIds.map((userId: string) => ({
+        siteVisitId: siteVisit.id,
+        userId,
+      })),
+    })
+  }
 
   return NextResponse.json({ siteVisit }, { status: 201 })
 }

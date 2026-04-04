@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import RichTextEditor from '@/app/components/RichTextEditor'
+import FieldEngineerSelectModal from '@/app/components/FieldEngineerSelectModal'
 
 interface Hospital {
   hospitalCode: string
@@ -13,12 +14,6 @@ interface Hospital {
 interface DaewoongUser {
   id: string
   name: string
-}
-
-interface UserItem {
-  id: string
-  name: string
-  role: string
 }
 
 interface StatusCode {
@@ -38,7 +33,6 @@ interface SiteVisitFileItem {
 interface SiteVisitFormData {
   hospitalCode: string
   daewoongUserId: string
-  assigneeId: string
   requestDate: string
   visitDate: string
   replyDate: string
@@ -52,6 +46,7 @@ interface Props {
     installPlanS3Key?: string
     floorPlanS3Key?: string
     files?: SiteVisitFileItem[]
+    assignees?: { user: { id: string; name: string; email: string } }[]
   }
   mode: 'create' | 'edit'
 }
@@ -276,9 +271,12 @@ function MultiFileField({
 export default function SiteVisitForm({ initialData, mode }: Props) {
   const router = useRouter()
   const [daewoongUsers, setDaewoongUsers] = useState<DaewoongUser[]>([])
-  const [users, setUsers] = useState<UserItem[]>([])
   const [statuses, setStatuses] = useState<StatusCode[]>([])
   const [userRole, setUserRole] = useState<string | null>(null)
+  const [assignees, setAssignees] = useState<{ id: string; name: string; email: string }[]>(
+    (initialData?.assignees ?? []).map((a) => a.user)
+  )
+  const [assigneeModalOpen, setAssigneeModalOpen] = useState(false)
 
   const [hospital, setHospital] = useState<Hospital | null>(null)
   const [hospitalModalOpen, setHospitalModalOpen] = useState(false)
@@ -289,7 +287,6 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
   const [form, setForm] = useState<SiteVisitFormData>({
     hospitalCode: initialData?.hospitalCode ?? '',
     daewoongUserId: initialData?.daewoongUserId ?? '',
-    assigneeId: initialData?.assigneeId ?? '',
     requestDate: initialData?.requestDate ?? '',
     visitDate: initialData?.visitDate ?? '',
     replyDate: initialData?.replyDate ?? '',
@@ -314,12 +311,10 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
   useEffect(() => {
     Promise.all([
       fetch('/api/users?organization=DAEWOONG').then((r) => r.json()),
-      fetch('/api/users').then((r) => r.json()),
       fetch('/api/settings/site-visit-status').then((r) => r.json()),
       fetch('/api/auth/me').then((r) => r.json()),
-    ]).then(([dData, uData, stData, meData]) => {
+    ]).then(([dData, stData, meData]) => {
       setDaewoongUsers(dData ?? [])
-      setUsers((uData ?? []).filter((u: UserItem) => u.role === 'USER'))
       setStatuses(stData.statusCodes ?? [])
       setUserRole(meData?.role ?? null)
     })
@@ -377,7 +372,7 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
     const payload = {
       hospitalCode: form.hospitalCode,
       daewoongUserId: form.daewoongUserId || null,
-      assigneeId: form.assigneeId || null,
+      assigneeIds: assignees.map((a) => a.id),
       requestDate: form.requestDate || null,
       visitDate: form.visitDate || null,
       replyDate: form.replyDate || null,
@@ -495,12 +490,33 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
             <div className="grid grid-cols-3 gap-4 px-6 py-4">
               <label className="flex items-center text-sm font-medium text-gray-700">담당자</label>
               <div className="col-span-2">
-                <select value={form.assigneeId} onChange={(e) => set('assigneeId', e.target.value)} className={selectClass}>
-                  <option value="">선택 없음</option>
-                  {users.map((u) => (
-                    <option key={u.id} value={u.id}>{u.name}</option>
-                  ))}
-                </select>
+                <div className="flex flex-wrap items-center gap-2">
+                  {assignees.length === 0 ? (
+                    <span className="text-sm text-gray-400">-</span>
+                  ) : (
+                    assignees.map((a) => (
+                      <span key={a.id} className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">
+                        {a.name}
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => setAssignees((prev) => prev.filter((x) => x.id !== a.id))}
+                            className="ml-0.5 text-blue-400 hover:text-blue-600"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </span>
+                    ))
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setAssigneeModalOpen(true)}
+                    className="rounded-lg border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    담당자 추가
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -637,6 +653,14 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
           </div>
         </div>
       </form>
+
+      {/* 담당자 선택 모달 */}
+      <FieldEngineerSelectModal
+        isOpen={assigneeModalOpen}
+        onClose={() => setAssigneeModalOpen(false)}
+        onSelect={(selected) => setAssignees(selected)}
+        currentAssigneeIds={assignees.map((a) => a.id)}
+      />
 
       {/* 병원 검색 모달 */}
       {hospitalModalOpen && (

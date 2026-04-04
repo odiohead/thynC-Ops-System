@@ -55,7 +55,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
     }),
     ...(buildStatusId && { buildStatusId: Number(buildStatusId) }),
     ...(contractorId && { constructorId: Number(contractorId) }),
-    ...(builderId && { builderUserId: builderId }),
+    ...(builderId && { assignees: { some: { userId: builderId } } }),
   }
 
   const rawProjects = await prisma.project.findMany({
@@ -63,7 +63,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
     orderBy: orderByClause,
     include: {
       hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
-      builder: { select: { name: true } },
+      assignees: { include: { user: { select: { name: true } } } },
       contractor: { select: { name: true } },
       buildStatus: { select: { label: true, color: true } },
       devices: {

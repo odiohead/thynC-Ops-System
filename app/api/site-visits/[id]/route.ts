@@ -7,7 +7,7 @@ type Params = { params: { id: string } }
 const include = {
   hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true, sidoName: true, sigunguName: true, address: true, status: true } },
   daewoongUser: { select: { id: true, name: true } },
-  assignee: { select: { id: true, name: true } },
+  assignees: { include: { user: { select: { id: true, name: true, email: true } } } },
   status: { select: { id: true, name: true, color: true } },
   files: { orderBy: { uploadedAt: 'asc' as const } },
 } as const
@@ -36,7 +36,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const {
     hospitalCode,
     daewoongUserId,
-    assigneeId,
+    assigneeIds,
     requestDate,
     visitDate,
     replyDate,
@@ -53,12 +53,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const existing = await prisma.siteVisit.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: '답사를 찾을 수 없습니다.' }, { status: 404 })
 
-  const siteVisit = await prisma.siteVisit.update({
+  await prisma.siteVisit.update({
     where: { id },
     data: {
       hospitalCode,
       daewoongUserId: daewoongUserId || null,
-      assigneeId: assigneeId || null,
       requestDate: requestDate ? new Date(requestDate) : null,
       visitDate: visitDate ? new Date(visitDate) : null,
       replyDate: replyDate ? new Date(replyDate) : null,
@@ -67,10 +66,25 @@ export async function PUT(request: NextRequest, { params }: Params) {
       floorPlanS3Key: floorPlanS3Key !== undefined ? (floorPlanS3Key || null) : undefined,
       notes: notes !== undefined ? (notes || null) : undefined,
     },
-    include,
   })
 
-  return NextResponse.json({ siteVisit })
+  // assigneeIds가 전달되면 N:M 테이블 갱신
+  if (Array.isArray(assigneeIds)) {
+    await prisma.$transaction([
+      prisma.siteVisitAssignee.deleteMany({ where: { siteVisitId: id } }),
+      prisma.siteVisitAssignee.createMany({
+        data: assigneeIds.map((userId: string) => ({
+          siteVisitId: id,
+          userId,
+        })),
+      }),
+    ])
+  }
+
+  // 갱신된 데이터 다시 조회
+  const updated = await prisma.siteVisit.findUnique({ where: { id }, include })
+
+  return NextResponse.json({ siteVisit: updated })
 }
 
 export async function DELETE(request: NextRequest, { params }: Params) {

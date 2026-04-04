@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-04-04 | 내 정보 수정 모달에 소속/부서 필드 추가
+
+- `app/users/page.tsx`의 "내 정보 수정" 모달에 소속(organization) 드롭다운과 부서(department) 드롭다운 추가
+- 이름 필드 위(최상단)에 소속 → 부서 순서로 배치
+- 소속 변경 시 `/api/settings/departments?organizationId={id}` 동적 fetch로 부서 목록 로드
+- 모달 열릴 때 현재 본인의 organizationId/departmentId 초기값 설정 및 부서 목록 사전 로드
+- 저장 시 PUT body에 organizationId, departmentId 포함 전송
+- 저장 후 currentUser 및 users 목록 상태에 organization/department 반영
+- 영향 파일: `app/users/page.tsx`
+
+---
+
 ## 2026-04-04 | 담당자 선택 모달 오버레이 fixed 전환 + 배경 불투명도 개선
 
 - `FieldEngineerSelectModal.tsx`, `DaewoongSelectModal.tsx` 두 모달의 오버레이 래퍼를 `absolute` → `fixed` 포지션으로 변경하여 스크롤 시에도 화면 전체를 덮도록 수정

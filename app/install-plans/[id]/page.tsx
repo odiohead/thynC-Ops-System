@@ -26,7 +26,7 @@ export default async function InstallPlanDetailPage({ params }: Props) {
     where: { id },
     include: {
       hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true, sidoName: true, sigunguName: true, address: true, status: true } },
-      author: { select: { id: true, name: true } },
+      assignees: { include: { user: { select: { id: true, name: true, email: true } } } },
       files: { orderBy: { uploadedAt: 'asc' } },
     },
   })
@@ -44,8 +44,7 @@ export default async function InstallPlanDetailPage({ params }: Props) {
     requestDate: installPlan.requestDate ? installPlan.requestDate.toISOString() : null,
     writeStatus: installPlan.writeStatus,
     replyStatus: installPlan.replyStatus,
-    authorId: installPlan.authorId,
-    author: installPlan.author,
+    assignees: installPlan.assignees,
     replyDate: installPlan.replyDate ? installPlan.replyDate.toISOString() : null,
     note: installPlan.note,
     files: installPlan.files.map((f) => ({

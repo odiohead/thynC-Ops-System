@@ -45,7 +45,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
       where: { hospitalCode: params.code },
       orderBy: { orderNumber: 'asc' },
       include: {
-        builder: { select: { name: true } },
+        assignees: { include: { user: { select: { name: true } } } },
         buildStatus: { select: { label: true, color: true } },
       },
     }),
@@ -54,7 +54,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
       orderBy: { requestDate: { sort: 'desc', nulls: 'last' } },
       include: {
         daewoongUser: { select: { id: true, name: true } },
-        assignee: { select: { id: true, name: true } },
+        assignees: { include: { user: { select: { id: true, name: true } } } },
         status: { select: { name: true, color: true } },
       },
     }),
@@ -62,7 +62,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
       where: { hospitalCode: params.code },
       orderBy: { requestDate: { sort: 'desc', nulls: 'last' } },
       include: {
-        author: { select: { id: true, name: true } },
+        assignees: { include: { user: { select: { id: true, name: true } } } },
       },
     }),
     prisma.deviceInfo.findMany({ orderBy: { sortOrder: 'asc' } }),
@@ -81,7 +81,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
     replyDate: sv.replyDate ? sv.replyDate.toISOString() : null,
     status: sv.status ?? null,
     daewoongUser: sv.daewoongUser ?? null,
-    assignee: sv.assignee ?? null,
+    assignees: sv.assignees ?? [],
   }))
 
   const installPlansData = installPlans.map((ip) => ({
@@ -91,7 +91,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
     writeStatus: ip.writeStatus,
     replyStatus: ip.replyStatus,
     replyDate: ip.replyDate ? ip.replyDate.toISOString() : null,
-    author: ip.author ?? null,
+    assignees: ip.assignees ?? [],
   }))
 
   const quantityMap = new Map(hospitalDevices.map((d) => [d.deviceInfoId, d.quantity]))
@@ -149,7 +149,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
 
         {/* 대웅제약 담당자 */}
         <div className="mt-4">
-          <DaewoongStaffTab hospitalCode={hospital.hospitalCode} />
+          <DaewoongStaffTab hospitalCode={hospital.hospitalCode} isAdmin={isAdmin} />
         </div>
 
         {/* thynC 도입현황 */}
@@ -251,7 +251,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
                         {p.contractDate ? new Date(p.contractDate).toLocaleDateString('ko-KR') : '-'}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
-                        {p.builder?.name ?? p.builderNameManual ?? <span className="text-gray-400">-</span>}
+                        {p.assignees?.length > 0 ? p.assignees.map((a: { user: { name: string } }) => a.user.name).join(', ') : p.builderNameManual ?? <span className="text-gray-400">-</span>}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">
                         {p.buildStatus

@@ -9,23 +9,56 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const orgCode = searchParams.get('organization')
+  const search = searchParams.get('search') ?? ''
+  const pageParam = searchParams.get('page')
+  const limitParam = searchParams.get('limit')
 
+  const where = {
+    ...(orgCode && { organization: { code: orgCode } }),
+    ...(search && {
+      OR: [
+        { name: { contains: search, mode: 'insensitive' as const } },
+        { email: { contains: search, mode: 'insensitive' as const } },
+      ],
+    }),
+  }
+
+  const select = {
+    id: true,
+    email: true,
+    name: true,
+    phone: true,
+    role: true,
+    isActive: true,
+    createdAt: true,
+    lastLoginAt: true,
+    organization: { select: { id: true, name: true, code: true } },
+    department: { select: { id: true, name: true } },
+  }
+
+  // 페이지네이션 모드: page 또는 limit 파라미터가 있을 때
+  if (pageParam || limitParam) {
+    const page = Math.max(1, parseInt(pageParam ?? '1'))
+    const limit = Math.max(1, parseInt(limitParam ?? '10'))
+
+    const [data, total] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        select,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.user.count({ where }),
+    ])
+
+    return NextResponse.json({ data, total, page, limit })
+  }
+
+  // 기존 호환: 배열 반환
   const users = await prisma.user.findMany({
-    where: orgCode
-      ? { organization: { code: orgCode } }
-      : undefined,
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      phone: true,
-      role: true,
-      isActive: true,
-      createdAt: true,
-      lastLoginAt: true,
-      organization: { select: { id: true, name: true, code: true } },
-      department: { select: { id: true, name: true } },
-    },
+    where,
+    select,
     orderBy: { createdAt: 'asc' },
   })
   return NextResponse.json(users)

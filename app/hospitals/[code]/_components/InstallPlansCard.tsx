@@ -10,7 +10,7 @@ interface InstallPlan {
   writeStatus: string
   replyStatus: string
   replyDate: string | null
-  author: { id: string; name: string } | null
+  assignees: { user: { id: string; name: string } }[]
 }
 
 interface Props {
@@ -69,7 +69,7 @@ export default function InstallPlansCard({ hospitalCode, installPlans, isAdmin }
                   <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-700">{fmt(ip.requestDate)}</td>
                   <td className="whitespace-nowrap px-4 py-3"><StatusBadge value={ip.writeStatus} /></td>
                   <td className="whitespace-nowrap px-4 py-3"><StatusBadge value={ip.replyStatus} /></td>
-                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">{ip.author?.name ?? '-'}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">{ip.assignees?.length > 0 ? ip.assignees.map((a) => a.user.name).join(', ') : '-'}</td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-700">{fmt(ip.replyDate)}</td>
                 </tr>
               ))}

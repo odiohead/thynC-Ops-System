@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
     }),
     ...(buildStatusId && { buildStatusId: Number(buildStatusId) }),
     ...(contractorId && { constructorId: Number(contractorId) }),
-    ...(builderId && { builderUserId: builderId }),
+    ...(builderId && { assignees: { some: { userId: builderId } } }),
   }
 
   const projects = await prisma.project.findMany({
@@ -46,8 +46,8 @@ export async function GET(request: NextRequest) {
           sigunguName: true,
         },
       },
-      builder: {
-        select: { id: true, name: true, email: true },
+      assignees: {
+        include: { user: { select: { id: true, name: true } } },
       },
       contractor: {
         select: { id: true, code: true, name: true },
@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
     gatewayCount,
     hasSurvey,
     hasOrder,
-    builderUserId,
+    assigneeIds,
     builderNameManual,
     constructorId,
     startDate,
@@ -148,7 +148,6 @@ export async function POST(request: NextRequest) {
       gatewayCount: gatewayCount != null ? Number(gatewayCount) : null,
       hasSurvey: hasSurvey ?? false,
       hasOrder: hasOrder ?? false,
-      builderUserId: builderUserId ?? null,
       builderNameManual: builderNameManual ?? null,
       constructorId: constructorId ? Number(constructorId) : null,
       startDate: startDate ? new Date(startDate) : null,
@@ -158,9 +157,19 @@ export async function POST(request: NextRequest) {
     },
     include: {
       hospital: true,
-      builder: { select: { id: true, name: true, email: true } },
+      assignees: { include: { user: { select: { id: true, name: true } } } },
     },
   })
+
+  // assignees 생성
+  if (Array.isArray(assigneeIds) && assigneeIds.length > 0) {
+    await prisma.projectAssignee.createMany({
+      data: assigneeIds.map((userId: string) => ({
+        projectCode: project.projectCode,
+        userId,
+      })),
+    })
+  }
 
   return NextResponse.json({ project }, { status: 201 })
 }

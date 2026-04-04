@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import HospitalSelectModal, { SelectedHospital } from '../_components/HospitalSelectModal'
+import FieldEngineerSelectModal from '@/app/components/FieldEngineerSelectModal'
 
 
 
@@ -13,11 +14,6 @@ interface DeviceInfo {
   deviceName: string
   isActive: boolean
   sortOrder: number
-}
-
-interface UserOption {
-  id: string
-  name: string
 }
 
 interface ConstructorOption {
@@ -47,10 +43,9 @@ function NewProjectForm() {
   const [hasSurvey, setHasSurvey] = useState(false)
   const [hasOrder, setHasOrder] = useState(false)
 
-  const [builderMode, setBuilderMode] = useState<'user' | 'manual'>('user')
-  const [builderUserId, setBuilderUserId] = useState('')
+  const [assignees, setAssignees] = useState<{ id: string; name: string; email: string }[]>([])
+  const [assigneeModalOpen, setAssigneeModalOpen] = useState(false)
   const [builderNameManual, setBuilderNameManual] = useState('')
-  const [users, setUsers] = useState<UserOption[]>([])
   const [constructorId, setConstructorId] = useState('')
   const [constructors, setConstructors] = useState<ConstructorOption[]>([])
 
@@ -72,14 +67,12 @@ function NewProjectForm() {
 
     Promise.all([
       fetch('/api/settings/devices').then((r) => r.json()),
-      fetch('/api/users').then((r) => r.json()),
       fetch('/api/constructors').then((r) => r.json()),
       fetch('/api/settings/build-status').then((r) => r.json()),
       fetch('/api/settings/intro-type').then((r) => r.json()),
       presetCode ? fetch(`/api/hospitals/${presetCode}`).then((r) => r.json()) : Promise.resolve(null),
-    ]).then(([devData, userData, conData, bsData, introData, hospData]) => {
+    ]).then(([devData, conData, bsData, introData, hospData]) => {
       setDevices((devData.devices ?? []).filter((d: DeviceInfo) => d.isActive))
-      setUsers(Array.isArray(userData) ? userData : [])
       setConstructors(conData.constructors ?? [])
       setBuildStatuses(bsData.buildStatuses ?? [])
       setIntroTypeOptions(introData.introTypes ?? [])
@@ -112,8 +105,8 @@ function NewProjectForm() {
           gatewayCount: gatewayCount !== '' ? Number(gatewayCount) : null,
           hasSurvey,
           hasOrder,
-          builderUserId: builderMode === 'user' && builderUserId ? builderUserId : null,
-          builderNameManual: builderMode === 'manual' && builderNameManual ? builderNameManual : null,
+          assigneeIds: assignees.map((a) => a.id),
+          builderNameManual: builderNameManual || null,
           constructorId: constructorId ? Number(constructorId) : null,
           startDate: startDate || null,
           endDateExpected: endDateExpected || null,
@@ -284,30 +277,41 @@ function NewProjectForm() {
               {/* 구축 담당자 */}
               <div className="sm:col-span-2">
                 <label className={labelClass}>구축 담당자</label>
-                <div className="mt-2 flex gap-4">
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
-                    <input type="radio" checked={builderMode === 'user'} onChange={() => setBuilderMode('user')} className="text-blue-600" />
-                    시스템 사용자 선택
-                  </label>
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
-                    <input type="radio" checked={builderMode === 'manual'} onChange={() => setBuilderMode('manual')} className="text-blue-600" />
-                    직접 입력
-                  </label>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {assignees.length === 0 ? (
+                    <span className="text-sm text-gray-400">-</span>
+                  ) : (
+                    assignees.map((a) => (
+                      <span key={a.id} className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">
+                        {a.name}
+                        <button
+                          type="button"
+                          onClick={() => setAssignees((prev) => prev.filter((x) => x.id !== a.id))}
+                          className="ml-0.5 text-blue-400 hover:text-blue-600"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setAssigneeModalOpen(true)}
+                    className="rounded-lg border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    담당자 추가
+                  </button>
                 </div>
-                {builderMode === 'user' ? (
-                  <select value={builderUserId} onChange={(e) => setBuilderUserId(e.target.value)} className={`${inputClass} mt-2`}>
-                    <option value="">담당자 선택</option>
-                    {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    value={builderNameManual}
-                    onChange={(e) => setBuilderNameManual(e.target.value)}
-                    placeholder="담당자명 직접 입력"
-                    className={`${inputClass} mt-2`}
-                  />
-                )}
+              </div>
+              <div className="sm:col-span-2">
+                <label className={labelClass}>담당자 (직접 입력)</label>
+                <input
+                  type="text"
+                  value={builderNameManual}
+                  onChange={(e) => setBuilderNameManual(e.target.value)}
+                  placeholder="담당자명 직접 입력 (보조)"
+                  className={`${inputClass} mt-1`}
+                />
               </div>
 
               {/* 공사업체 */}
@@ -378,6 +382,13 @@ function NewProjectForm() {
         isOpen={showHospitalModal}
         onClose={() => setShowHospitalModal(false)}
         onSelect={setHospital}
+      />
+
+      <FieldEngineerSelectModal
+        isOpen={assigneeModalOpen}
+        onClose={() => setAssigneeModalOpen(false)}
+        onSelect={(selected) => setAssignees(selected)}
+        currentAssigneeIds={assignees.map((a) => a.id)}
       />
     </div>
   )

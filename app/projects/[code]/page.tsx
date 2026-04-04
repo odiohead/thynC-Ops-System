@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import IssueNoteEditor from '@/app/components/IssueNoteEditor'
+import FieldEngineerSelectModal from '@/app/components/FieldEngineerSelectModal'
 
 interface DeviceInfo {
   id: number
@@ -59,7 +60,6 @@ interface Project {
   gatewayCount: number | null
   hasSurvey: boolean
   hasOrder: boolean
-  builderUserId: string | null
   builderNameManual: string | null
   constructorId: number | null
   startDate: string | null
@@ -79,15 +79,10 @@ interface Project {
     type: string | null
     meta: { driveProjectFolderId: string | null } | null
   }
-  builder: { id: string; name: string } | null
+  assignees: { user: { id: string; name: string; email: string } }[]
   contractor: ConstructorInfo | null
   devices: ProjectDevice[]
   files: ProjectFile[]
-}
-
-interface UserOption {
-  id: string
-  name: string
 }
 
 interface ConstructorOption {
@@ -114,7 +109,6 @@ export default function ProjectDetailPage() {
 
   const [project, setProject] = useState<Project | null>(null)
   const [allDevices, setAllDevices] = useState<DeviceInfo[]>([])
-  const [users, setUsers] = useState<UserOption[]>([])
   const [constructors, setConstructors] = useState<ConstructorOption[]>([])
   const [buildStatuses, setBuildStatuses] = useState<BuildStatusOption[]>([])
   const [introTypeOptions, setIntroTypeOptions] = useState<IntroTypeOption[]>([])
@@ -131,8 +125,8 @@ export default function ProjectDetailPage() {
   const [gatewayCount, setGatewayCount] = useState('')
   const [hasSurvey, setHasSurvey] = useState(false)
   const [hasOrder, setHasOrder] = useState(false)
-  const [builderMode, setBuilderMode] = useState<'user' | 'manual'>('user')
-  const [builderUserId, setBuilderUserId] = useState('')
+  const [assignees, setAssignees] = useState<{ id: string; name: string; email: string }[]>([])
+  const [assigneeModalOpen, setAssigneeModalOpen] = useState(false)
   const [builderNameManual, setBuilderNameManual] = useState('')
   const [constructorId, setConstructorId] = useState('')
   const [startDate, setStartDate] = useState('')
@@ -163,8 +157,8 @@ export default function ProjectDetailPage() {
     setGatewayCount(p.gatewayCount != null ? String(p.gatewayCount) : '')
     setHasSurvey(p.hasSurvey)
     setHasOrder(p.hasOrder)
-    if (p.builderUserId) { setBuilderMode('user'); setBuilderUserId(p.builderUserId) }
-    else if (p.builderNameManual) { setBuilderMode('manual'); setBuilderNameManual(p.builderNameManual) }
+    setAssignees((p.assignees ?? []).map((a: { user: { id: string; name: string; email: string } }) => a.user))
+    setBuilderNameManual(p.builderNameManual ?? '')
     setConstructorId(p.constructorId ? String(p.constructorId) : '')
     setStartDate(toDateInput(p.startDate))
     setEndDateExpected(toDateInput(p.endDateExpected))
@@ -180,14 +174,12 @@ export default function ProjectDetailPage() {
     Promise.all([
       loadProject(),
       fetch('/api/settings/devices').then((r) => r.json()),
-      fetch('/api/users').then((r) => r.json()),
       fetch('/api/constructors').then((r) => r.json()),
       fetch('/api/settings/build-status').then((r) => r.json()),
       fetch('/api/auth/me').then((r) => r.json()),
       fetch('/api/settings/intro-type').then((r) => r.json()),
-    ]).then(([, devData, userData, conData, bsData, meData, introData]) => {
+    ]).then(([, devData, conData, bsData, meData, introData]) => {
       setAllDevices((devData.devices ?? []).filter((d: DeviceInfo) => d.isActive))
-      setUsers(Array.isArray(userData) ? userData : [])
       setConstructors(conData.constructors ?? [])
       setBuildStatuses(bsData.buildStatuses ?? [])
       setIsAdmin(meData?.role === 'ADMIN' || meData?.role === 'SUPER_ADMIN')
@@ -211,8 +203,8 @@ export default function ProjectDetailPage() {
         gatewayCount: gatewayCount !== '' ? Number(gatewayCount) : null,
         hasSurvey,
         hasOrder,
-        builderUserId: builderMode === 'user' && builderUserId ? builderUserId : null,
-        builderNameManual: builderMode === 'manual' && builderNameManual ? builderNameManual : null,
+        assigneeIds: assignees.map((a) => a.id),
+        builderNameManual: builderNameManual || null,
         constructorId: constructorId ? Number(constructorId) : null,
         startDate: startDate || null,
         endDateExpected: endDateExpected || null,
@@ -485,30 +477,41 @@ export default function ProjectDetailPage() {
             <div className="grid grid-cols-1 gap-5 px-6 py-5 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <label className={labelClass}>구축 담당자</label>
-                <div className="mt-2 flex gap-4">
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
-                    <input type="radio" checked={builderMode === 'user'} onChange={() => setBuilderMode('user')} className="text-blue-600" />
-                    시스템 사용자 선택
-                  </label>
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
-                    <input type="radio" checked={builderMode === 'manual'} onChange={() => setBuilderMode('manual')} className="text-blue-600" />
-                    직접 입력
-                  </label>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {assignees.length === 0 ? (
+                    <span className="text-sm text-gray-400">-</span>
+                  ) : (
+                    assignees.map((a) => (
+                      <span key={a.id} className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">
+                        {a.name}
+                        <button
+                          type="button"
+                          onClick={() => setAssignees((prev) => prev.filter((x) => x.id !== a.id))}
+                          className="ml-0.5 text-blue-400 hover:text-blue-600"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setAssigneeModalOpen(true)}
+                    className="rounded-lg border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    담당자 추가
+                  </button>
                 </div>
-                {builderMode === 'user' ? (
-                  <select value={builderUserId} onChange={(e) => setBuilderUserId(e.target.value)} className={`${inputClass} mt-2`}>
-                    <option value="">담당자 선택</option>
-                    {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    value={builderNameManual}
-                    onChange={(e) => setBuilderNameManual(e.target.value)}
-                    placeholder="담당자명 직접 입력"
-                    className={`${inputClass} mt-2`}
-                  />
-                )}
+              </div>
+              <div className="sm:col-span-2">
+                <label className={labelClass}>담당자 (직접 입력)</label>
+                <input
+                  type="text"
+                  value={builderNameManual}
+                  onChange={(e) => setBuilderNameManual(e.target.value)}
+                  placeholder="담당자명 직접 입력 (보조)"
+                  className={`${inputClass} mt-1`}
+                />
               </div>
 
               {/* 공사업체 */}
@@ -656,6 +659,14 @@ export default function ProjectDetailPage() {
 
         </div>
       </div>
+
+      {/* 담당자 선택 모달 */}
+      <FieldEngineerSelectModal
+        isOpen={assigneeModalOpen}
+        onClose={() => setAssigneeModalOpen(false)}
+        onSelect={(selected) => setAssignees(selected)}
+        currentAssigneeIds={assignees.map((a) => a.id)}
+      />
     </div>
   )
 }

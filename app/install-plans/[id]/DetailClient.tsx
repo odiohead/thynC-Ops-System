@@ -10,11 +10,6 @@ interface Hospital {
   hiraHospitalName: string
 }
 
-interface UserOption {
-  id: string
-  name: string
-}
-
 interface InstallPlanFileItem {
   id?: number
   fileCategory: string
@@ -30,8 +25,7 @@ interface InstallPlanData {
   requestDate: string | null
   writeStatus: string
   replyStatus: string
-  authorId: string | null
-  author: UserOption | null
+  assignees: { user: { id: string; name: string; email: string } }[]
   replyDate: string | null
   note: string | null
   files?: InstallPlanFileItem[]

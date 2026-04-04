@@ -23,11 +23,10 @@ type DashboardProject = {
   startDate: string | null
   endDateExpected: string | null
   remark: string | null
-  builderUserId: string | null
   builderNameManual: string | null
   hospital: { hospitalName: string; hiraHospitalName: string }
   buildStatus: { label: string; color: string | null } | null
-  builder: { name: string } | null
+  assignees: { user: { name: string } }[]
 }
 
 type DashboardData = {
@@ -85,7 +84,7 @@ function hospitalName(h: { hospitalName: string; hiraHospitalName: string }): st
 }
 
 function builderName(p: DashboardProject): string {
-  if (p.builder?.name) return p.builder.name
+  if (p.assignees?.length > 0) return p.assignees.map((a) => a.user.name).join(', ')
   if (p.builderNameManual) return p.builderNameManual
   return '-'
 }

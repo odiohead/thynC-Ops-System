@@ -72,6 +72,9 @@ export default function UsersPage() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [editName, setEditName] = useState('')
   const [editPhone, setEditPhone] = useState('')
+  const [editMyOrgId, setEditMyOrgId] = useState('')
+  const [editMyDeptId, setEditMyDeptId] = useState('')
+  const [editMyDepartments, setEditMyDepartments] = useState<Department[]>([])
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -239,10 +242,24 @@ export default function UsersPage() {
     }
   }
 
+  async function loadEditMyDepartments(orgId: string) {
+    if (!orgId) { setEditMyDepartments([]); return }
+    const res = await fetch(`/api/settings/departments?organizationId=${orgId}`)
+    if (res.ok) {
+      const data = await res.json()
+      setEditMyDepartments(data)
+    }
+  }
+
   function openEditModal() {
     if (!currentUser) return
     setEditName(currentUser.name)
     setEditPhone(currentUser.phone ?? '')
+    const orgId = currentUser.organization?.id?.toString() ?? ''
+    setEditMyOrgId(orgId)
+    setEditMyDeptId(currentUser.department?.id?.toString() ?? '')
+    if (orgId) loadEditMyDepartments(orgId)
+    else setEditMyDepartments([])
     setCurrentPassword('')
     setNewPassword('')
     setConfirmPassword('')
@@ -270,7 +287,12 @@ export default function UsersPage() {
 
     setEditSubmitting(true)
     try {
-      const body: Record<string, unknown> = { name: editName, phone: editPhone }
+      const body: Record<string, unknown> = {
+        name: editName,
+        phone: editPhone,
+        organizationId: editMyOrgId ? parseInt(editMyOrgId) : null,
+        departmentId: editMyDeptId ? parseInt(editMyDeptId) : null,
+      }
       if (newPassword) { body.currentPassword = currentPassword; body.newPassword = newPassword }
 
       const res = await fetch(`/api/users/${currentUser.id}`, {
@@ -281,8 +303,8 @@ export default function UsersPage() {
       const data = await res.json()
       if (!res.ok) { setEditError(data.error ?? '저장에 실패했습니다.'); return }
 
-      setCurrentUser((prev) => prev ? { ...prev, name: data.name, phone: data.phone } : prev)
-      setUsers((prev) => prev.map((u) => u.id === data.id ? { ...u, name: data.name, phone: data.phone } : u))
+      setCurrentUser((prev) => prev ? { ...prev, name: data.name, phone: data.phone, organization: data.organization ?? null, department: data.department ?? null } : prev)
+      setUsers((prev) => prev.map((u) => u.id === data.id ? data : u))
       router.refresh()
       setEditSuccess('저장되었습니다.')
       setCurrentPassword('')
@@ -596,6 +618,37 @@ export default function UsersPage() {
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl mx-4">
             <h2 className="text-base font-semibold text-gray-900 mb-4">내 정보 수정</h2>
             <form onSubmit={handleEditSave} className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">소속</label>
+                <select
+                  value={editMyOrgId}
+                  onChange={(e) => {
+                    setEditMyOrgId(e.target.value)
+                    setEditMyDeptId('')
+                    loadEditMyDepartments(e.target.value)
+                  }}
+                  className={inputClass}
+                >
+                  <option value="">소속 없음</option>
+                  {organizations.map((org) => (
+                    <option key={org.id} value={org.id}>{org.name} ({org.code})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">부서</label>
+                <select
+                  value={editMyDeptId}
+                  onChange={(e) => setEditMyDeptId(e.target.value)}
+                  disabled={!editMyOrgId || editMyDepartments.length === 0}
+                  className={inputClass}
+                >
+                  <option value="">{!editMyOrgId || editMyDepartments.length === 0 ? '부서 없음' : '부서 선택'}</option>
+                  {editMyDepartments.map((dept) => (
+                    <option key={dept.id} value={dept.id}>{dept.name}</option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">이름 *</label>
                 <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} required className={inputClass} />

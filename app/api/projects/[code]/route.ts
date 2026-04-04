@@ -7,7 +7,7 @@ type Params = { params: { code: string } }
 
 const projectInclude = {
   hospital: { include: { meta: true } },
-  builder: { select: { id: true, name: true, email: true } },
+  assignees: { include: { user: { select: { id: true, name: true, email: true } } } },
   contractor: { select: { id: true, code: true, name: true } },
   buildStatus: { select: { id: true, label: true, color: true } },
   introType: { select: { id: true, name: true } },
@@ -63,7 +63,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     gatewayCount,
     hasSurvey,
     hasOrder,
-    builderUserId,
+    assigneeIds,
     builderNameManual,
     constructorId,
     startDate,
@@ -74,7 +74,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     remark,
   } = body
 
-  const project = await prisma.project.update({
+  await prisma.project.update({
     where: { projectCode: params.code },
     data: {
       contractDate: contractDate !== undefined ? (contractDate ? new Date(contractDate) : null) : undefined,
@@ -84,7 +84,6 @@ export async function PUT(request: NextRequest, { params }: Params) {
       gatewayCount: gatewayCount !== undefined ? (gatewayCount != null ? Number(gatewayCount) : null) : undefined,
       hasSurvey: hasSurvey !== undefined ? hasSurvey : undefined,
       hasOrder: hasOrder !== undefined ? hasOrder : undefined,
-      builderUserId: builderUserId !== undefined ? builderUserId : undefined,
       builderNameManual: builderNameManual !== undefined ? builderNameManual : undefined,
       constructorId: constructorId !== undefined ? (constructorId ? Number(constructorId) : null) : undefined,
       startDate: startDate !== undefined ? (startDate ? new Date(startDate) : null) : undefined,
@@ -94,11 +93,29 @@ export async function PUT(request: NextRequest, { params }: Params) {
       issueNote: issueNote !== undefined ? issueNote : undefined,
       remark: remark !== undefined ? remark : undefined,
     },
+  })
+
+  // assigneeIds가 전달되면 N:M 테이블 갱신
+  if (Array.isArray(assigneeIds)) {
+    await prisma.$transaction([
+      prisma.projectAssignee.deleteMany({ where: { projectCode: params.code } }),
+      prisma.projectAssignee.createMany({
+        data: assigneeIds.map((userId: string) => ({
+          projectCode: params.code,
+          userId,
+        })),
+      }),
+    ])
+  }
+
+  // 갱신된 데이터 다시 조회
+  const updated = await prisma.project.findUnique({
+    where: { projectCode: params.code },
     include: projectInclude,
   })
 
   revalidatePath('/projects')
-  return NextResponse.json({ project })
+  return NextResponse.json({ project: updated })
 }
 
 export async function DELETE(request: NextRequest, { params }: Params) {

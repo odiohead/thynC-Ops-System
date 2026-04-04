@@ -1,18 +1,14 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import RichTextEditor from '@/app/components/RichTextEditor'
+import FieldEngineerSelectModal from '@/app/components/FieldEngineerSelectModal'
 
 interface Hospital {
   hospitalCode: string
   hospitalName: string
   hiraHospitalName: string
-}
-
-interface UserOption {
-  id: string
-  name: string
 }
 
 interface InstallPlanFileItem {
@@ -30,8 +26,7 @@ interface InstallPlanData {
   requestDate: string | null
   writeStatus: string
   replyStatus: string
-  authorId: string | null
-  author: UserOption | null
+  assignees: { user: { id: string; name: string; email: string } }[]
   replyDate: string | null
   note: string | null
   files?: InstallPlanFileItem[]
@@ -179,12 +174,14 @@ export default function InstallPlanForm({ initialData, mode, initialHospitalCode
   const [requestDate, setRequestDate] = useState(initialData?.requestDate?.slice(0, 10) ?? '')
   const [writeStatus, setWriteStatus] = useState(initialData?.writeStatus ?? '-')
   const [replyStatus, setReplyStatus] = useState(initialData?.replyStatus ?? '-')
-  const [authorId, setAuthorId] = useState(initialData?.authorId ?? '')
+  const [assignees, setAssignees] = useState<{ id: string; name: string; email: string }[]>(
+    (initialData?.assignees ?? []).map((a) => a.user)
+  )
+  const [assigneeModalOpen, setAssigneeModalOpen] = useState(false)
   const [replyDate, setReplyDate] = useState(initialData?.replyDate?.slice(0, 10) ?? '')
   const [note, setNote] = useState(initialData?.note ?? '')
   const [files, setFiles] = useState<InstallPlanFileItem[]>(initialData?.files ?? [])
 
-  const [users, setUsers] = useState<UserOption[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -194,11 +191,6 @@ export default function InstallPlanForm({ initialData, mode, initialHospitalCode
   const [hospitalResults, setHospitalResults] = useState<Hospital[]>([])
   const [hospitalSearching, setHospitalSearching] = useState(false)
 
-  useEffect(() => {
-    fetch('/api/users?organization=SEERS')
-      .then((r) => r.json())
-      .then((data) => setUsers(Array.isArray(data) ? data : []))
-  }, [])
 
   async function searchHospitals() {
     if (!hospitalSearch.trim()) return
@@ -235,7 +227,7 @@ export default function InstallPlanForm({ initialData, mode, initialHospitalCode
       requestDate: requestDate || null,
       writeStatus,
       replyStatus,
-      authorId: authorId || null,
+      assigneeIds: assignees.map((a) => a.id),
       replyDate: replyDate || null,
       note: note || null,
     }
@@ -324,13 +316,34 @@ export default function InstallPlanForm({ initialData, mode, initialHospitalCode
           </div>
         </div>
 
-        {/* 작성자 */}
+        {/* 담당자 */}
         <div>
-          <label className={labelClass}>작성자 (씨어스)</label>
-          <select value={authorId} onChange={(e) => setAuthorId(e.target.value)} className={selectClass}>
-            <option value="">선택 안함</option>
-            {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
+          <label className={labelClass}>담당자 (씨어스)</label>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            {assignees.length === 0 ? (
+              <span className="text-sm text-gray-400">-</span>
+            ) : (
+              assignees.map((a) => (
+                <span key={a.id} className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">
+                  {a.name}
+                  <button
+                    type="button"
+                    onClick={() => setAssignees((prev) => prev.filter((x) => x.id !== a.id))}
+                    className="ml-0.5 text-blue-400 hover:text-blue-600"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))
+            )}
+            <button
+              type="button"
+              onClick={() => setAssigneeModalOpen(true)}
+              className="rounded-lg border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+            >
+              담당자 추가
+            </button>
+          </div>
         </div>
 
         {/* 회신일 */}
@@ -400,6 +413,14 @@ export default function InstallPlanForm({ initialData, mode, initialHospitalCode
           )}
         </div>
       )}
+
+      {/* 담당자 선택 모달 */}
+      <FieldEngineerSelectModal
+        isOpen={assigneeModalOpen}
+        onClose={() => setAssigneeModalOpen(false)}
+        onSelect={(selected) => setAssignees(selected)}
+        currentAssigneeIds={assignees.map((a) => a.id)}
+      />
 
       {/* 병원 검색 모달 */}
       {hospitalModalOpen && (

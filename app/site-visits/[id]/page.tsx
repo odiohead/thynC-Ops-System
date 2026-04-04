@@ -27,7 +27,7 @@ interface SiteVisitData {
   hospitalCode: string
   hospital: Hospital
   daewoongUserId: string | null
-  assigneeId: string | null
+  assignees: { user: { id: string; name: string; email: string } }[]
   requestDate: string | null
   visitDate: string | null
   replyDate: string | null
@@ -121,7 +121,7 @@ export default function EditSiteVisitPage() {
     id: data.id,
     hospitalCode: data.hospitalCode,
     daewoongUserId: data.daewoongUserId ?? '',
-    assigneeId: data.assigneeId ?? '',
+    assignees: data.assignees ?? [],
     requestDate: data.requestDate ? data.requestDate.slice(0, 10) : '',
     visitDate: data.visitDate ? data.visitDate.slice(0, 10) : '',
     replyDate: data.replyDate ? data.replyDate.slice(0, 10) : '',
