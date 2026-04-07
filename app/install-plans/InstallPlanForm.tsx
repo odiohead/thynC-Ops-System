@@ -172,8 +172,8 @@ export default function InstallPlanForm({ initialData, mode, initialHospitalCode
   const [hospitalCode, setHospitalCode] = useState(initialData?.hospitalCode ?? initialHospitalCode ?? '')
   const [hospital, setHospital] = useState<Hospital | null>(initialData?.hospital ?? initialHospital ?? null)
   const [requestDate, setRequestDate] = useState(initialData?.requestDate?.slice(0, 10) ?? '')
-  const [writeStatus, setWriteStatus] = useState(initialData?.writeStatus ?? '-')
-  const [replyStatus, setReplyStatus] = useState(initialData?.replyStatus ?? '-')
+  const [writeStatus, setWriteStatus] = useState(initialData?.writeStatus ?? (mode === 'new' ? '미완료' : '-'))
+  const [replyStatus, setReplyStatus] = useState(initialData?.replyStatus ?? (mode === 'new' ? '미완료' : '-'))
   const [assignees, setAssignees] = useState<{ id: string; name: string; email: string }[]>(
     (initialData?.assignees ?? []).map((a) => a.user)
   )

@@ -4,6 +4,26 @@
 
 ---
 
+## 2026-04-07 | 답사 상태값 개편 + 정렬 로직 변경 + 상태 필터
+
+- **DB 마이그레이션** (`20260407000000_update_site_visit_statuses`): 답사 상태 '대기' → '접수' 이름 변경, '답사예정' 상태 신규 추가 (order=2, color=#F59E0B). 최종 상태: 접수(1) → 답사예정(2) → 작성완료(3) → 회신완료(4)
+- **답사 API 정렬** (`app/api/site-visits/route.ts`): 상태 우선순위 접수(0) > 답사예정(1) > 작성완료(2) > 회신완료(3). 접수 상태는 요청일 오래된 순(ASC), 나머지는 요청일 최신 순(DESC). `statusId` 쿼리 파라미터로 상태 필터 추가
+- **답사 등록 기본값** (`app/site-visits/SiteVisitForm.tsx`): create 모드 기본 상태를 '접수'로 변경
+- **답사 리스트 필터** (`app/site-visits/page.tsx`): 상태 드롭다운 필터 UI 추가 (전체/접수/답사예정/작성완료/회신완료)
+- 영향 파일: `prisma/migrations/20260407000000_update_site_visit_statuses/`, `app/api/site-visits/route.ts`, `app/site-visits/SiteVisitForm.tsx`, `app/site-visits/page.tsx`
+
+---
+
+## 2026-04-07 | 프로젝트 담당자 컬럼 추가 + 답사/설치계획 기본값 및 정렬 개선
+
+- **프로젝트 리스트** (`app/projects/page.tsx`): '진행상태'와 '구축 시작일' 사이에 '담당자' 컬럼 추가 (assignees 이름 콤마 구분 표시)
+- **답사 리스트 정렬** (`app/api/site-visits/route.ts`): 상태 우선순위 정렬 적용 (대기 → 작성완료 → 회신완료 → 기타/없음), 같은 상태 내에서는 요청일 오래된 순(ASC)
+- **답사 등록 기본값** (`app/site-visits/SiteVisitForm.tsx`): create 모드에서 상태 필드 기본값을 '대기'로 설정
+- **설치계획(가안) 등록 기본값** (`app/install-plans/InstallPlanForm.tsx`): new 모드에서 작성완료여부·회신여부 기본값을 '미완료'로 설정
+- 영향 파일: `app/projects/page.tsx`, `app/api/site-visits/route.ts`, `app/site-visits/SiteVisitForm.tsx`, `app/install-plans/InstallPlanForm.tsx`
+
+---
+
 ## 2026-04-04 | 담당자 선택 모달 X버튼 아이콘 및 스크롤 구조 개선
 
 - `FieldEngineerSelectModal.tsx`, `DaewoongSelectModal.tsx` 두 모달의 X 닫기 버튼을 lucide-react `X` 아이콘 컴���넌트로 교체

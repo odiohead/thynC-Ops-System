@@ -315,8 +315,14 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
       fetch('/api/auth/me').then((r) => r.json()),
     ]).then(([dData, stData, meData]) => {
       setDaewoongUsers(dData ?? [])
-      setStatuses(stData.statusCodes ?? [])
+      const codes = stData.statusCodes ?? []
+      setStatuses(codes)
       setUserRole(meData?.role ?? null)
+      // create 모드: 상태 기본값 '접수'
+      if (mode === 'create' && !initialData?.statusId) {
+        const defaultStatus = codes.find((s: StatusCode) => s.name === '접수')
+        if (defaultStatus) setForm((prev) => ({ ...prev, statusId: String(defaultStatus.id) }))
+      }
     })
 
     if (initialData?.hospitalCode) {

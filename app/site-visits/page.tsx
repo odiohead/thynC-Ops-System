@@ -4,12 +4,18 @@ import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
+interface StatusCode {
+  id: number
+  name: string
+  color: string | null
+}
+
 interface SiteVisit {
   id: number
   hospital: { hospitalCode: string; hospitalName: string; hiraHospitalName: string; address: string | null }
   daewoongUser: { id: string; name: string } | null
   assignees: { user: { id: string; name: string } }[]
-  status: { id: number; name: string; color: string | null } | null
+  status: StatusCode | null
   requestDate: string | null
   visitDate: string | null
   replyDate: string | null
@@ -46,10 +52,20 @@ export default function SiteVisitsPage() {
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
+  const [statuses, setStatuses] = useState<StatusCode[]>([])
+  const [filterStatusId, setFilterStatusId] = useState('')
 
-  const fetchData = useCallback(async (p: number) => {
+  useEffect(() => {
+    fetch('/api/settings/site-visit-status')
+      .then((r) => r.json())
+      .then((data) => setStatuses(data.statusCodes ?? []))
+  }, [])
+
+  const fetchData = useCallback(async (p: number, statusId: string) => {
     setLoading(true)
-    const res = await fetch(`/api/site-visits?page=${p}`)
+    const params = new URLSearchParams({ page: String(p) })
+    if (statusId) params.set('statusId', statusId)
+    const res = await fetch(`/api/site-visits?${params}`)
     if (res.ok) {
       const data = await res.json()
       setSiteVisits(data.siteVisits)
@@ -58,7 +74,7 @@ export default function SiteVisitsPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { fetchData(page) }, [fetchData, page])
+  useEffect(() => { fetchData(page, filterStatusId) }, [fetchData, page, filterStatusId])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -73,6 +89,21 @@ export default function SiteVisitsPage() {
           >
             + 답사 등록
           </button>
+        </div>
+
+        {/* 필터 */}
+        <div className="mb-4 flex items-center gap-3">
+          <label className="text-sm font-medium text-gray-700">상태</label>
+          <select
+            value={filterStatusId}
+            onChange={(e) => { setFilterStatusId(e.target.value); setPage(1) }}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="">전체</option>
+            {statuses.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
         </div>
 
         <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">

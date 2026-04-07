@@ -20,21 +20,36 @@ export async function GET(request: NextRequest) {
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
   const limit = parseInt(searchParams.get('limit') ?? String(PAGE_SIZE))
   const hospitalCode = searchParams.get('hospitalCode') ?? ''
+  const statusId = searchParams.get('statusId') ?? ''
 
   const where = {
     ...(hospitalCode && { hospitalCode }),
+    ...(statusId && { statusId: Number(statusId) }),
   }
 
-  const [siteVisits, total] = await Promise.all([
+  const [rawSiteVisits, total] = await Promise.all([
     prisma.siteVisit.findMany({
       where,
-      skip: (page - 1) * limit,
-      take: limit,
       orderBy: { createdAt: 'desc' },
       include,
     }),
     prisma.siteVisit.count({ where }),
   ])
+
+  // 정렬: 접수(0) > 답사예정(1) > 작성완료(2) > 회신완료(3) > 기타(4)
+  // 접수: 요청일 오래된 순(ASC), 나머지: 요청일 최신 순(DESC)
+  const statusPriority: Record<string, number> = { '접수': 0, '답사예정': 1, '작성완료': 2, '회신완료': 3 }
+  const sorted = rawSiteVisits.sort((a, b) => {
+    const aPri = statusPriority[a.status?.name ?? ''] ?? 4
+    const bPri = statusPriority[b.status?.name ?? ''] ?? 4
+    if (aPri !== bPri) return aPri - bPri
+    const aDate = a.requestDate ? new Date(a.requestDate).getTime() : Infinity
+    const bDate = b.requestDate ? new Date(b.requestDate).getTime() : Infinity
+    // 접수: 오래된 순(ASC), 나머지: 최신 순(DESC)
+    if (aPri === 0) return aDate - bDate
+    return bDate - aDate
+  })
+  const siteVisits = sorted.slice((page - 1) * limit, page * limit)
 
   return NextResponse.json({
     siteVisits,

@@ -80,7 +80,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
   })
 
   const cols = [
-    '프로젝트명', '진행상태', '구축 시작일', '구축 종료일(예상)', '도입형태', '계약일',
+    '프로젝트명', '진행상태', '담당자', '구축 시작일', '구축 종료일(예상)', '도입형태', '계약일',
     '병동 수', '병상 수', 'G/W', '심전계', '산소포화도', '구축업체',
   ]
 
@@ -163,6 +163,11 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
                         <td className="whitespace-nowrap px-3 py-3" style={{ minWidth: '100px' }}>
                           {p.buildStatus
                             ? <StatusBadge label={p.buildStatus.label} color={p.buildStatus.color} />
+                            : <span className="text-gray-400">-</span>}
+                        </td>
+                        <td className="px-3 py-3 text-gray-600" style={{ minWidth: '100px' }}>
+                          {p.assignees.length > 0
+                            ? p.assignees.map((a) => a.user.name).join(', ')
                             : <span className="text-gray-400">-</span>}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '100px' }}>
