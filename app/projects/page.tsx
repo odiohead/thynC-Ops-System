@@ -39,6 +39,10 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
   const orderBy = (searchParams.orderBy as string) ?? 'startDate'
   const order = ((searchParams.order as string) ?? 'desc') as 'asc' | 'desc'
 
+  const buildStatusIds = buildStatusId ? buildStatusId.split(',').map(Number).filter(Boolean) : []
+  const contractorIds = contractorId ? contractorId.split(',').map(Number).filter(Boolean) : []
+  const builderIdList = builderId ? builderId.split(',').filter(Boolean) : []
+
   const startDateNulls = order === 'desc' ? 'first' : 'last'
   const orderByMap: Record<string, object> = {
     contractDate: { contractDate: { sort: order, nulls: 'last' } },
@@ -53,9 +57,9 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
         { hospital: { hospitalName: { contains: search, mode: 'insensitive' as const } } },
       ],
     }),
-    ...(buildStatusId && { buildStatusId: Number(buildStatusId) }),
-    ...(contractorId && { constructorId: Number(contractorId) }),
-    ...(builderId && { assignees: { some: { userId: builderId } } }),
+    ...(buildStatusIds.length > 0 && { buildStatusId: { in: buildStatusIds } }),
+    ...(contractorIds.length > 0 && { constructorId: { in: contractorIds } }),
+    ...(builderIdList.length > 0 && { assignees: { some: { userId: { in: builderIdList } } } }),
   }
 
   const rawProjects = await prisma.project.findMany({

@@ -1,7 +1,8 @@
 'use client'
 
 import { useRouter, usePathname } from 'next/navigation'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { ChevronDown, X } from 'lucide-react'
 
 interface BuildStatus { id: number; label: string }
 interface Contractor { id: number; name: string }
@@ -16,6 +17,92 @@ interface Props {
   initialOrder: string
 }
 
+function MultiSelectDropdown({
+  label,
+  options,
+  selectedIds,
+  onChange,
+}: {
+  label: string
+  options: { id: string; name: string }[]
+  selectedIds: string[]
+  onChange: (ids: string[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  function toggle(id: string) {
+    const next = selectedIds.includes(id)
+      ? selectedIds.filter((v) => v !== id)
+      : [...selectedIds, id]
+    onChange(next)
+  }
+
+  const selectedNames = options
+    .filter((o) => selectedIds.includes(o.id))
+    .map((o) => o.name)
+
+  const displayText = selectedNames.length === 0
+    ? `${label} 전체`
+    : selectedNames.length <= 2
+      ? selectedNames.join(', ')
+      : `${selectedNames[0]} 외 ${selectedNames.length - 1}건`
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+      >
+        <span className={selectedIds.length > 0 ? 'text-blue-600 font-medium' : 'text-gray-700'}>
+          {displayText}
+        </span>
+        {selectedIds.length > 0 ? (
+          <X
+            size={14}
+            className="text-gray-400 hover:text-gray-600"
+            onClick={(e) => { e.stopPropagation(); onChange([]) }}
+          />
+        ) : (
+          <ChevronDown size={14} className="text-gray-400" />
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 max-h-60 w-52 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+          {options.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-400">항목 없음</div>
+          ) : (
+            options.map((o) => (
+              <label
+                key={o.id}
+                className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(o.id)}
+                  onChange={() => toggle(o.id)}
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="truncate">{o.name}</span>
+              </label>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ProjectFilters({
   initialSearch,
   initialBuildStatusId,
@@ -28,9 +115,9 @@ export default function ProjectFilters({
   const pathname = usePathname()
 
   const [search, setSearch] = useState(initialSearch)
-  const [buildStatusId, setBuildStatusId] = useState(initialBuildStatusId)
-  const [contractorId, setContractorId] = useState(initialContractorId)
-  const [builderId, setBuilderId] = useState(initialBuilderId)
+  const [buildStatusIds, setBuildStatusIds] = useState<string[]>(initialBuildStatusId ? initialBuildStatusId.split(',') : [])
+  const [contractorIds, setContractorIds] = useState<string[]>(initialContractorId ? initialContractorId.split(',') : [])
+  const [builderIds, setBuilderIds] = useState<string[]>(initialBuilderId ? initialBuilderId.split(',') : [])
   const [orderBy, setOrderBy] = useState(initialOrderBy)
   const [order, setOrder] = useState(initialOrder)
 
@@ -53,7 +140,12 @@ export default function ProjectFilters({
   function buildParams(overrides: Record<string, string> = {}) {
     const params = new URLSearchParams()
     const values: Record<string, string> = {
-      search, buildStatusId, contractorId, builderId, orderBy, order,
+      search,
+      buildStatusId: buildStatusIds.join(','),
+      contractorId: contractorIds.join(','),
+      builderId: builderIds.join(','),
+      orderBy,
+      order,
       ...overrides,
     }
     if (values.search) params.set('search', values.search)
@@ -69,11 +161,18 @@ export default function ProjectFilters({
     router.push(`${pathname}?${buildParams()}`)
   }
 
+  function handleMultiSelect(key: string, ids: string[]) {
+    const setters: Record<string, (v: string[]) => void> = {
+      buildStatusId: setBuildStatusIds,
+      contractorId: setContractorIds,
+      builderId: setBuilderIds,
+    }
+    setters[key]?.(ids)
+    router.push(`${pathname}?${buildParams({ [key]: ids.join(',') })}`)
+  }
+
   function handleSelect(key: string, value: string) {
     const setters: Record<string, (v: string) => void> = {
-      buildStatusId: setBuildStatusId,
-      contractorId: setContractorId,
-      builderId: setBuilderId,
       orderBy: setOrderBy,
       order: setOrder,
     }
@@ -104,20 +203,26 @@ export default function ProjectFilters({
 
       {/* 2행: 필터 + 정렬 */}
       <div className="flex flex-wrap gap-2">
-        <select value={buildStatusId} onChange={(e) => handleSelect('buildStatusId', e.target.value)} className={selectClass}>
-          <option value="">진행상태 전체</option>
-          {buildStatuses.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-        </select>
+        <MultiSelectDropdown
+          label="진행상태"
+          options={buildStatuses.map((s) => ({ id: String(s.id), name: s.label }))}
+          selectedIds={buildStatusIds}
+          onChange={(ids) => handleMultiSelect('buildStatusId', ids)}
+        />
 
-        <select value={contractorId} onChange={(e) => handleSelect('contractorId', e.target.value)} className={selectClass}>
-          <option value="">구축업체 전체</option>
-          {contractors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        <MultiSelectDropdown
+          label="구축업체"
+          options={contractors.map((c) => ({ id: String(c.id), name: c.name }))}
+          selectedIds={contractorIds}
+          onChange={(ids) => handleMultiSelect('contractorId', ids)}
+        />
 
-        <select value={builderId} onChange={(e) => handleSelect('builderId', e.target.value)} className={selectClass}>
-          <option value="">담당자 전체</option>
-          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-        </select>
+        <MultiSelectDropdown
+          label="담당자"
+          options={users.map((u) => ({ id: u.id, name: u.name }))}
+          selectedIds={builderIds}
+          onChange={(ids) => handleMultiSelect('builderId', ids)}
+        />
 
         <div className="ml-auto flex gap-2">
           <select value={orderBy} onChange={(e) => handleSelect('orderBy', e.target.value)} className={selectClass}>

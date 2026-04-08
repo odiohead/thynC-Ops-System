@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-04-08 17:00 | 프로젝트 필터 복수 선택(체크박스) 전환
+
+- **프로젝트 필터 컴포넌트** (`app/projects/_components/ProjectFilters.tsx`): 진행상태·구축업체·담당자 3개 필터를 단일 `<select>` → 체크박스 기반 복수 선택 드롭다운(`MultiSelectDropdown`)으로 교체. 선택된 항목 수에 따라 이름 또는 "외 N건" 표시, X 버튼으로 전체 해제
+- **프로젝트 목록 서버** (`app/projects/page.tsx`): URL 파라미터를 콤마 구분 배열로 파싱, Prisma `where` 조건을 `in` 연산자로 변경하여 복수 필터 지원
+- 영향 파일: `app/projects/_components/ProjectFilters.tsx`, `app/projects/page.tsx`
+
+---
+
 ## 2026-04-07 | 답사 상태값 개편 + 정렬 로직 변경 + 상태 필터
 
 - **DB 마이그레이션** (`20260407000000_update_site_visit_statuses`): 답사 상태 '대기' → '접수' 이름 변경, '답사예정' 상태 신규 추가 (order=2, color=#F59E0B). 최종 상태: 접수(1) → 답사예정(2) → 작성완료(3) → 회신완료(4)
