@@ -261,6 +261,15 @@ export default function Navigation() {
                   심평원 연동 관리
                 </Link>
               )}
+              {/* 메일 동기화: ADMIN 이상 */}
+              {isAdminOrAbove(userRole) && (
+                <Link
+                  href="/settings/mail-sync"
+                  className={navItemClass(isActive('/settings/mail-sync'))}
+                >
+                  메일 동기화
+                </Link>
+              )}
               {/* 내 프로필: 모든 역할 */}
               <Link
                 href="/settings/profile"

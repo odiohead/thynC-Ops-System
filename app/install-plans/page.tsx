@@ -110,12 +110,20 @@ export default function InstallPlansPage() {
             <p className="mt-1 text-sm text-gray-500">총 {plans.length.toLocaleString()}개</p>
           </div>
           {isAdmin && (
-            <Link
-              href="/install-plans/new"
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-            >
-              등록
-            </Link>
+            <div className="flex gap-2">
+              <button
+                onClick={() => router.push('/mail-queue')}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+              >
+                메일 확인
+              </button>
+              <Link
+                href="/install-plans/new"
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+              >
+                등록
+              </Link>
+            </div>
           )}
         </div>
 

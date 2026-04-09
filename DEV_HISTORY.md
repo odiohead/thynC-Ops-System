@@ -4,6 +4,82 @@
 
 ---
 
+## 2026-04-09 | [STAGE 6] 메일 동기화 스케줄러 + 설정 UI
+
+- app_settings 테이블 신설 (key-value 형태, 마이그레이션: 20260409030000_add_app_settings)
+- lib/mail-scheduler.ts 신설: setInterval 기반 스케줄러 (30분/1시간/2시간/6시간/OFF)
+- instrumentation.ts 신설: 서버 시작 시 DB에서 간격 읽어 스케줄러 자동 복원
+- GET/PUT /api/settings/mail-sync: 동기화 주기 조회/변경 API
+- app/settings/mail-sync/page.tsx 신설: 동기화 주기 선택 UI
+- 네비게이션 설정 메뉴에 "메일 동기화" 항목 추가
+- 영향 파일: prisma/schema.prisma, next.config.mjs, instrumentation.ts (신설), lib/mail-scheduler.ts (신설), app/api/settings/mail-sync/route.ts (신설), app/settings/mail-sync/page.tsx (신설), app/components/Navigation.tsx
+
+---
+
+## 2026-04-09 | [STAGE 5.2] 메일 큐 — 주소 필드 + 비고 메일 원문 삽입
+
+- install_plan_queue 테이블에 address 컬럼 추가 (마이그레이션: 20260409020000_add_address_to_queue)
+- lib/gmail.ts: parseFormEmail()에 '거래처 주소' 복수줄 파싱 + fullText(응답 본문 전체) 추출 추가
+- PUT /api/mail-queue/[id]: note에 주소 포함 + 메일 원문 전체 텍스트 삽입
+- 메일 큐 UI: 테이블·모달에 주소 컬럼 추가
+- 영향 파일: prisma/schema.prisma, prisma/migrations/20260409020000_add_address_to_queue/, lib/gmail.ts, app/api/mail-queue/sync/route.ts, app/api/mail-queue/[id]/route.ts, app/mail-queue/page.tsx
+
+---
+
+## 2026-04-09 | [STAGE 5.1] 메일 큐 도면 파일 자동 등록
+
+- install_plan_queue 테이블에 file_url 컬럼 추가 (마이그레이션: 20260409010000_add_file_url_to_queue)
+- lib/gmail.ts: parseFormEmail()에 daewoongfmc.imweb.me 파일 다운로드 링크 파싱 추가
+- 폴링(sync) 시 file_url 저장, 등록(PUT) 시 파일 다운로드 → S3 업로드 → InstallPlanFile(FLOOR_PLAN) 자동 생성
+- 메일 큐 UI에 도면 컬럼 추가 (파일 링크 표시)
+- 기존 50건 raw_body에서 file_url 백필 완료
+- 영향 파일: prisma/schema.prisma, prisma/migrations/20260409010000_add_file_url_to_queue/, lib/gmail.ts, app/api/mail-queue/sync/route.ts, app/api/mail-queue/[id]/route.ts, app/mail-queue/page.tsx
+
+---
+
+## 2026-04-09 | [STAGE 5] 설치계획 요청 메일 큐 — UI
+
+- app/install-plans/page.tsx: 헤더에 "메일 확인" 버튼 추가 (/mail-queue 이동)
+- app/mail-queue/page.tsx 신설: 메일 가져오기, 탭 필터, 등록 모달(병원 연결 필수, HospitalSelectModal 재사용), 무시 처리
+- 영향 파일: app/install-plans/page.tsx, app/mail-queue/page.tsx (신설)
+
+---
+
+## 2026-04-09 | [STAGE 4] 설치계획 요청 메일 큐 — 큐 관리 API
+
+- GET /api/mail-queue: 큐 전체 목록 조회
+- PUT /api/mail-queue/[id]: 큐 → install_plans 등록 (IP-NNNNN 코드 자동생성, 담당자 정보 note 자동 삽입)
+- DELETE /api/mail-queue/[id]: 무시 처리 (status: ignored)
+- 영향 파일: app/api/mail-queue/route.ts (신설), app/api/mail-queue/[id]/route.ts (신설)
+
+---
+
+## 2026-04-09 | [STAGE 3] 설치계획 요청 메일 큐 — Gmail 폴링 API
+
+- POST /api/mail-queue/sync: Gmail 조회 → HTML 파싱 → install_plan_queue 저장
+- JWT 쿠키 + CRON_SECRET Bearer 이중 인증 지원
+- gmail_message_id 기준 중복 방지, 개별 메시지 오류 시 skip 처리
+- 영향 파일: app/api/mail-queue/sync/route.ts (신설)
+
+---
+
+## 2026-04-09 | [STAGE 2] 설치계획 요청 메일 큐 — Gmail 유틸리티 + OAuth
+
+- lib/gmail.ts 신설 (getGmailClient, decodeBase64Url, extractHtmlBody, parseFormEmail, parseKstDate)
+- OAuth2 Refresh Token 발급용 API 신설 (1회성)
+- 영향 파일: lib/gmail.ts (신설), app/api/auth/gmail/route.ts (신설), app/api/auth/gmail/callback/route.ts (신설)
+
+---
+
+## 2026-04-09 | [STAGE 1] 설치계획 요청 메일 큐 — DB 준비
+
+- googleapis 패키지 설치
+- install_plan_queue 테이블 신설
+- InstallPlanQueue Prisma 모델 추가, InstallPlan에 queueItem 관계 추가
+- 영향 파일: prisma/schema.prisma, prisma/migrations/20260409000000_add_install_plan_queue/
+
+---
+
 ## 2026-04-08 17:00 | 프로젝트 필터 복수 선택(체크박스) 전환
 
 - **프로젝트 필터 컴포넌트** (`app/projects/_components/ProjectFilters.tsx`): 진행상태·구축업체·담당자 3개 필터를 단일 `<select>` → 체크박스 기반 복수 선택 드롭다운(`MultiSelectDropdown`)으로 교체. 선택된 항목 수에 따라 이름 또는 "외 N건" 표시, X 버튼으로 전체 해제
