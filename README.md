@@ -23,6 +23,7 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 | 웹서버 | Nginx |
 | 마크다운 렌더링 | react-markdown + `@tailwindcss/typography` |
 | AI 챗봇 | Flowise RAG (외부 API 연동) |
+| AI 정제 | Anthropic Claude API (`@anthropic-ai/sdk`) |
 | 런타임 | Node.js 20 |
 
 ---
@@ -69,7 +70,9 @@ app/
 │   │   ├── intro-type/               # 도입형태 관리
 │   │   ├── consultation-type/        # 상담유형 관리
 │   │   └── document-type/            # 문서유형 관리
-│   ├── ai-assistant/                 # AI 어시스턴트 (Flowise 프록시)
+│   ├── ai-assistant/                 # AI 어시스턴트 (Flowise 프록시 + 정제 + 상담이력 저장)
+│   │   ├── summarize/                # AI 정제 (Anthropic Claude API)
+│   │   └── consultation/             # 상담이력 저장 (ConsultationQueue)
 │   ├── install-plans/                # 설치계획(가안) CRUD
 │   ├── hira-hospitals/
 │   │   └── sync/                     # 심평원 연동 (POST: 백그라운드 시작, GET: 히스토리 목록)
@@ -229,6 +232,12 @@ prisma/
 - 이벤트 타입 (`type`: init/group_start/group_api_done/group_db_done/done/error)
 - 메시지 (`message`), 추가 데이터 (`stats`, JSONB)
 
+### ConsultationQueue (상담 대기열)
+- AI 어시스턴트 상담이력 저장
+- Hospital 연결 (hospitalCode, 선택), 상담유형(StatusCode CONSULTATION_TYPE), 문서유형(StatusCode DOCUMENT_TYPE)
+- 결론(`conclusion`), 대화이력(`chatHistory`, JSONB), AI 정제 결과(`aiSummary`)
+- 상태(`status`: PENDING 등), 상담자(`consultedById` → User)
+
 ---
 
 ## 인증 및 역할 체계
@@ -349,11 +358,12 @@ prisma/
 
 ### AI 어시스턴트
 - Flowise RAG 서버 연동 AI 챗봇
-- 질문 입력 → Next.js API 프록시 → Flowise API → 답변 반환
-- 사용자/AI 말풍선 구분, AI 답변 마크다운 렌더링 (react-markdown + prose)
-- 세션 ID 기반 대화 컨텍스트 유지
-- 로딩 애니메이션, Enter 전송, Shift+Enter 줄바꿈
-- 모든 역할 접근 가능
+- 2단 레이아웃: 좌측 채팅 + 우측 상담 정리 패널 (토글 열기/닫기)
+- **좌측 채팅**: 병원 검색(debounce) → 선택 태그 표시, 기본값 '공통', 사용자/AI 말풍선 구분, AI 답변 마크다운 렌더링
+- **우측 상담 정리 패널 (선택사항)**: 상담유형/문서유형 선택, AI 정제 버튼(Anthropic Claude API), 결론 텍스트, 대기리스트 등록 (대화 없이도 등록 가능)
+- AI 정제: 대화 내역을 마크다운 상담이력으로 자동 정리 (claude-sonnet-4-5)
+- 상담이력 저장: ConsultationQueue 테이블에 병원·유형·대화·정제결과 저장
+- 세션 ID 기반 대화 컨텍스트 유지, 모든 역할 접근 가능
 
 ### 설정 (ADMIN 이상)
 - 병원 상태코드 관리 (추가·수정·삭제·순서)
@@ -587,6 +597,8 @@ npm run dev
 | Method | Endpoint | 설명 |
 |--------|----------|------|
 | POST | `/api/ai-assistant` | AI 질문 전송 (`{ question, sessionId? }` → `{ answer }`) |
+| POST | `/api/ai-assistant/summarize` | AI 정제 (대화 → 마크다운 상담이력) |
+| POST | `/api/ai-assistant/consultation` | 상담이력 대기리스트 등록 |
 
 ### 답사
 | Method | Endpoint | 설명 |

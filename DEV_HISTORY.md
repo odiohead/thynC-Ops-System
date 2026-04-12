@@ -4,6 +4,38 @@
 
 ---
 
+## 2026-04-12 | AI 어시스턴트 전체 기능 구현
+
+- `@anthropic-ai/sdk` 패키지 설치, `ANTHROPIC_API_KEY` 환경변수 추가
+- **ConsultationQueue 테이블 신설** (마이그레이션: 20260412010000_add_consultation_queue): hospitalCode, consultationTypeId, documentTypeId, conclusion, chatHistory(JSONB), aiSummary, status, consultedById
+- **StatusCode 테이블에 `value` 컬럼 추가** (마이그레이션: 20260412000000_add_value_to_status_codes)
+- **문서유형(DOCUMENT_TYPE)** 설정 관리 CRUD + seed 7건, **상담유형(CONSULTATION_TYPE)** 설정 관리 CRUD + seed 5건
+- **AI 정제 API** (`app/api/ai-assistant/summarize/route.ts`): Anthropic claude-sonnet-4-5 호출, 대화를 마크다운 상담이력으로 정리
+- **상담이력 저장 API** (`app/api/ai-assistant/consultation/route.ts`): ConsultationQueue 저장, 대화 없이도 등록 가능
+- **채팅 UI 전면 개편** (`app/ai-assistant/page.tsx`):
+  - 병원 검색: debounce 검색 → 드롭다운 선택 방식, 기본값 '공통', 선택 시 파란 태그 + X 해제
+  - 병원 선택 영역 카드 분리, 대화 영역 border+bg-white 적용, 전체 여백 개선
+  - 우측 상담 정리 패널: 토글 열기/닫기, 제목에 "(선택사항)" 표시
+  - 상담유형/문서유형 선택, AI 정제 버튼, 결론 텍스트, 대기리스트 등록
+- Navigation 설정 메뉴에 상담유형/문서유형 관리 추가
+- 영향 파일: `.env`, `.env.example`, `package.json`, `tailwind.config.ts`, `prisma/schema.prisma`, `prisma/seed.ts`, `app/ai-assistant/page.tsx`, `app/components/Navigation.tsx`, `app/api/ai-assistant/route.ts`, `app/api/ai-assistant/summarize/route.ts` (신설), `app/api/ai-assistant/consultation/route.ts` (신설), `app/api/settings/consultation-type/` (신설), `app/api/settings/document-type/` (신설), `app/settings/consultation-type/page.tsx` (신설), `app/settings/document-type/page.tsx` (신설), `prisma/migrations/20260412000000_add_value_to_status_codes/`, `prisma/migrations/20260412010000_add_consultation_queue/`
+
+---
+
+## 2026-04-12 | AI 어시스턴트 채팅 + 상담유형 관리 기능 추가 (초기 버전)
+
+- `@anthropic-ai/sdk` 패키지 설치, `ANTHROPIC_API_KEY` 환경변수 추가
+- **ConsultationQueue 테이블 신설** (마이그레이션: 20260412010000_add_consultation_queue): hospitalCode, consultationTypeId, documentTypeId, conclusion, chatHistory(JSONB), aiSummary, status, consultedById
+- **Prisma 스키마**: ConsultationQueue 모델 추가, StatusCode·User·Hospital 역방향 관계 추가
+- **AI 정제 API** (`app/api/ai-assistant/summarize/route.ts` 신설): Anthropic claude-sonnet-4-5 호출, 대화를 마크다운 상담이력으로 정리
+- **상담이력 저장 API** (`app/api/ai-assistant/consultation/route.ts` 신설): ConsultationQueue에 저장, 현재 유저 자동 적용
+- **채팅 UI 2단 레이아웃** (`app/ai-assistant/page.tsx` 전면 개편):
+  - 좌측: 병원 선택 드롭다운(검색 포함) + 채팅 영역
+  - 우측: 상담유형/문서유형 선택, AI 정제 버튼, 결론 텍스트에어리어, 대기리스트 등록 버튼
+- 영향 파일: `.env`, `.env.example`, `package.json`, `prisma/schema.prisma`, `prisma/migrations/20260412010000_add_consultation_queue/`, `app/ai-assistant/page.tsx`, `app/api/ai-assistant/summarize/route.ts` (신설), `app/api/ai-assistant/consultation/route.ts` (신설)
+
+---
+
 ## 2026-04-12 | 문서유형 관리 기능 추가
 
 - StatusCode 테이블에 `value` 컬럼(String?, nullable) 추가 (마이그레이션: 20260412000000_add_value_to_status_codes)
