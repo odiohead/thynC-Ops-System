@@ -67,7 +67,8 @@ app/
 │   │   ├── status/                   # 병원 상태코드 관리
 │   │   ├── site-visit-status/        # 답사 상태코드 관리
 │   │   ├── intro-type/               # 도입형태 관리
-│   │   └── consultation-type/        # 상담유형 관리
+│   │   ├── consultation-type/        # 상담유형 관리
+│   │   └── document-type/            # 문서유형 관리
 │   ├── ai-assistant/                 # AI 어시스턴트 (Flowise 프록시)
 │   ├── install-plans/                # 설치계획(가안) CRUD
 │   ├── hira-hospitals/
@@ -94,7 +95,8 @@ app/
 │   ├── site-visit-status/            # 답사 상태코드 관리
 │   ├── constructors/                 # 시공사 관리
 │   ├── intro-type/                   # 도입형태 관리
-│   └── consultation-type/            # 상담유형 관리
+│   ├── consultation-type/            # 상담유형 관리
+│   └── document-type/                # 문서유형 관리
 ├── login/                            # 로그인 페이지
 └── components/                       # 공통 컴포넌트 (Navigation, MainWrapper)
 
@@ -106,7 +108,7 @@ lib/
 
 prisma/
 ├── schema.prisma                     # DB 스키마
-├── seed.ts                           # 기본 데이터 시드 (Organization, 상담유형 포함)
+├── seed.ts                           # 기본 데이터 시드 (Organization, 상담유형, 문서유형 포함)
 ├── seed-admin.ts                     # 관리자 계정 생성
 └── seed-hira.ts                      # HIRA 병원 데이터 시드
 ```
@@ -211,7 +213,9 @@ prisma/
 - 공사 진행 상태 정의 (레이블, 색상)
 
 ### StatusCode (상태코드)
-- 병원/답사 상태값 정의 (커스터마이징 가능, 색상 포함)
+- 병원/답사/상담유형/문서유형 등 다용도 상태값 정의 (커스터마이징 가능, 색상 포함)
+- category: `HOSPITAL` / `SITE_VISIT` / `INTRO_TYPE` / `CONSULTATION_TYPE` / `DOCUMENT_TYPE`
+- value: 코드값 (String?, nullable) — 문서유형 등에서 내부 식별자로 사용
 
 ### Contractor (시공사)
 - 시공사 코드, 이름, 연락처 등
@@ -359,6 +363,7 @@ prisma/
 - 시공사(Contractor) 관리
 - **도입형태(IntroType) 관리**: 구축형·구독형·사용량비례형 등 동적 추가·수정·삭제·순서 변경
 - **상담유형(ConsultationType) 관리**: AI 어시스턴트 상담유형 동적 추가·수정·삭제·순서 변경
+- **문서유형(DocumentType) 관리**: AI 어시스턴트 문서유형 동적 추가·수정·삭제·순서 변경 (value 코드값 포함)
 - **심평원 연동 관리** (SUPER_ADMIN 전용): 심평원 Open API 병원 데이터 동기화
   - 연동 시작 버튼 → 백그라운드 비동기 처리 (브라우저 닫아도 서버에서 계속 실행)
   - 연동 히스토리 목록 (시작시간·종료시간·상태·연동건수)
@@ -652,6 +657,10 @@ npm run dev
 | POST | `/api/settings/consultation-type` | 상담유형 추가 |
 | PUT  | `/api/settings/consultation-type/[id]` | 상담유형 수정 |
 | DELETE | `/api/settings/consultation-type/[id]` | 상담유형 삭제 (ADMIN 이상) |
+| GET  | `/api/settings/document-type` | 문서유형 목록 |
+| POST | `/api/settings/document-type` | 문서유형 추가 |
+| PUT  | `/api/settings/document-type/[id]` | 문서유형 수정 |
+| DELETE | `/api/settings/document-type/[id]` | 문서유형 삭제 (ADMIN 이상) |
 
 ### Google Drive
 | Method | Endpoint | 설명 |

@@ -105,6 +105,7 @@ model DaewoongHospitalAssignment {
 model StatusCode {
   id        Int      @id @default(autoincrement())
   name      String   @map("name")
+  value     String?  @map("value")
   order     Int      @default(0) @map("order")
   color     String?  @map("color")
   category  String   @default("HOSPITAL") @map("category")

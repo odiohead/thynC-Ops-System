@@ -38,6 +38,26 @@ async function main() {
   }
   console.log('✓ 상담유형 seed 완료:', consultationTypeSeeds.map((s) => s.name).join(', '))
 
+  // 문서유형 seed
+  const documentTypeSeeds = [
+    { name: '정책', value: 'POLICY', order: 0, category: 'DOCUMENT_TYPE' },
+    { name: '기술문서', value: 'TECH_DOC', order: 1, category: 'DOCUMENT_TYPE' },
+    { name: '릴리즈노트', value: 'RELEASE_NOTE', order: 2, category: 'DOCUMENT_TYPE' },
+    { name: '병원별 설정', value: 'HOSPITAL_CONFIG', order: 3, category: 'DOCUMENT_TYPE' },
+    { name: '교육/매뉴얼', value: 'MANUAL', order: 4, category: 'DOCUMENT_TYPE' },
+    { name: 'FAQ', value: 'FAQ', order: 5, category: 'DOCUMENT_TYPE' },
+    { name: '상담이력', value: 'CONSULTATION', order: 6, category: 'DOCUMENT_TYPE' },
+  ]
+
+  for (const seed of documentTypeSeeds) {
+    await prisma.statusCode.upsert({
+      where: { name_category: { name: seed.name, category: seed.category } },
+      update: { order: seed.order, value: seed.value },
+      create: seed,
+    })
+  }
+  console.log('✓ 문서유형 seed 완료:', documentTypeSeeds.map((s) => s.name).join(', '))
+
   // Organization seed
   const orgSeeds = [
     { code: 'SEERS', name: '씨어스', sortOrder: 1 },

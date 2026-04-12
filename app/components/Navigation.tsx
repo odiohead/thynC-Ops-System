@@ -312,6 +312,12 @@ export default function Navigation() {
                     상담유형 관리
                   </Link>
                   <Link
+                    href="/settings/document-type"
+                    className={navItemClass(isActive('/settings/document-type'))}
+                  >
+                    문서유형 관리
+                  </Link>
+                  <Link
                     href="/settings/build-status"
                     className={navItemClass(isActive('/settings/build-status'))}
                   >

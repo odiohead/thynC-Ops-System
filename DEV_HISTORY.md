@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-04-12 | 문서유형 관리 기능 추가
+
+- StatusCode 테이블에 `value` 컬럼(String?, nullable) 추가 (마이그레이션: 20260412000000_add_value_to_status_codes)
+- 문서유형(DOCUMENT_TYPE) seed 데이터 7건 추가 (정책, 기술문서, 릴리즈노트, 병원별 설정, 교육/매뉴얼, FAQ, 상담이력)
+- 문서유형 설정 관리 CRUD API 추가 (GET/POST/PUT/DELETE, value 필드 포함)
+- 문서유형 설정 관리 페이지 추가 (순서/문서유형명/값(value)/색상 컬럼)
+- Navigation 설정 메뉴에 "문서유형 관리" 항목 추가
+- 영향 파일: `prisma/schema.prisma`, `prisma/seed.ts`, `prisma/migrations/20260412000000_add_value_to_status_codes/`, `app/api/settings/document-type/route.ts` (신설), `app/api/settings/document-type/[id]/route.ts` (신설), `app/settings/document-type/page.tsx` (신설), `app/components/Navigation.tsx`
+
+---
+
 ## 2026-04-12 | AI 어시스턴트 채팅 + 상담유형 관리 기능 추가
 
 - Flowise RAG 서버 연동 AI 어시스턴트 채팅 기능 추가 (Next.js API → Flowise API 프록시 구조)
