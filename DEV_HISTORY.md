@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-04-12 | AI 어시스턴트 채팅 + 상담유형 관리 기능 추가
+
+- Flowise RAG 서버 연동 AI 어시스턴트 채팅 기능 추가 (Next.js API → Flowise API 프록시 구조)
+- AI 답변 마크다운 렌더링 적용 (react-markdown + @tailwindcss/typography)
+- 환경변수 FLOWISE_API_HOST, FLOWISE_CHATFLOW_ID 추가
+- 상담유형(CONSULTATION_TYPE) 설정 관리 CRUD 추가 (StatusCode 테이블 category 활용)
+- 상담유형 seed 데이터 5건 추가 (알람 관련, 디바이스 트러블슈팅, 소프트웨어 설정, 네트워크 연결, 기타)
+- Navigation 사이드바에 "AI 어시스턴트" 메뉴 (모든 역할), 설정 > "상담유형 관리" 메뉴 (ADMIN 이상) 추가
+- 영향 파일: `.env`, `.env.example`, `tailwind.config.ts`, `package.json`, `prisma/seed.ts`, `app/components/Navigation.tsx`, `app/ai-assistant/page.tsx` (신설), `app/api/ai-assistant/route.ts` (신설), `app/api/settings/consultation-type/route.ts` (신설), `app/api/settings/consultation-type/[id]/route.ts` (신설), `app/settings/consultation-type/page.tsx` (신설)
+
+---
+
 ## 2026-04-09 | [STAGE 6] 메일 동기화 스케줄러 + 설정 UI
 
 - app_settings 테이블 신설 (key-value 형태, 마이그레이션: 20260409030000_add_app_settings)

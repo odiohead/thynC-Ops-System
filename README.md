@@ -21,6 +21,8 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 | 리치 텍스트 에디터 | Tiptap (`@tiptap/react` + 확장) |
 | 프로세스 관리 | PM2 |
 | 웹서버 | Nginx |
+| 마크다운 렌더링 | react-markdown + `@tailwindcss/typography` |
+| AI 챗봇 | Flowise RAG (외부 API 연동) |
 | 런타임 | Node.js 20 |
 
 ---
@@ -64,7 +66,9 @@ app/
 │   │   ├── build-status/             # 공사 상태 관리
 │   │   ├── status/                   # 병원 상태코드 관리
 │   │   ├── site-visit-status/        # 답사 상태코드 관리
-│   │   └── intro-type/               # 도입형태 관리
+│   │   ├── intro-type/               # 도입형태 관리
+│   │   └── consultation-type/        # 상담유형 관리
+│   ├── ai-assistant/                 # AI 어시스턴트 (Flowise 프록시)
 │   ├── install-plans/                # 설치계획(가안) CRUD
 │   ├── hira-hospitals/
 │   │   └── sync/                     # 심평원 연동 (POST: 백그라운드 시작, GET: 히스토리 목록)
@@ -77,6 +81,7 @@ app/
 ├── projects/                         # 프로젝트 목록·상세·등록
 │   └── calendar/                     # 구축 일정 간트 캘린더 (새 탭)
 ├── site-visits/                      # 답사 목록·상세·등록
+├── ai-assistant/                     # AI 어시스턴트 채팅
 ├── users/                            # 사용자 관리 (ADMIN 이상)
 ├── settings/
 │   ├── profile/                      # 내 계정 정보
@@ -88,7 +93,8 @@ app/
 │   ├── status/                       # 병원 상태코드 관리
 │   ├── site-visit-status/            # 답사 상태코드 관리
 │   ├── constructors/                 # 시공사 관리
-│   └── intro-type/                   # 도입형태 관리
+│   ├── intro-type/                   # 도입형태 관리
+│   └── consultation-type/            # 상담유형 관리
 ├── login/                            # 로그인 페이지
 └── components/                       # 공통 컴포넌트 (Navigation, MainWrapper)
 
@@ -100,7 +106,7 @@ lib/
 
 prisma/
 ├── schema.prisma                     # DB 스키마
-├── seed.ts                           # 기본 데이터 시드 (Organization 포함)
+├── seed.ts                           # 기본 데이터 시드 (Organization, 상담유형 포함)
 ├── seed-admin.ts                     # 관리자 계정 생성
 └── seed-hira.ts                      # HIRA 병원 데이터 시드
 ```
@@ -337,6 +343,14 @@ prisma/
 - 후보: SEERS 소속·활성·미등록 사용자만 표시
 - 목록 테이블: 번호·이름·이메일·소속·부서·추가일·삭제
 
+### AI 어시스턴트
+- Flowise RAG 서버 연동 AI 챗봇
+- 질문 입력 → Next.js API 프록시 → Flowise API → 답변 반환
+- 사용자/AI 말풍선 구분, AI 답변 마크다운 렌더링 (react-markdown + prose)
+- 세션 ID 기반 대화 컨텍스트 유지
+- 로딩 애니메이션, Enter 전송, Shift+Enter 줄바꿈
+- 모든 역할 접근 가능
+
 ### 설정 (ADMIN 이상)
 - 병원 상태코드 관리 (추가·수정·삭제·순서)
 - 답사 상태코드 관리
@@ -344,6 +358,7 @@ prisma/
 - 장비 정보(DeviceInfo) 관리
 - 시공사(Contractor) 관리
 - **도입형태(IntroType) 관리**: 구축형·구독형·사용량비례형 등 동적 추가·수정·삭제·순서 변경
+- **상담유형(ConsultationType) 관리**: AI 어시스턴트 상담유형 동적 추가·수정·삭제·순서 변경
 - **심평원 연동 관리** (SUPER_ADMIN 전용): 심평원 Open API 병원 데이터 동기화
   - 연동 시작 버튼 → 백그라운드 비동기 처리 (브라우저 닫아도 서버에서 계속 실행)
   - 연동 히스토리 목록 (시작시간·종료시간·상태·연동건수)
@@ -563,6 +578,11 @@ npm run dev
 | PUT  | `/api/install-plans/[id]` | 설치계획 수정 |
 | DELETE | `/api/install-plans/[id]` | 설치계획 삭제 (ADMIN 이상) |
 
+### AI 어시스턴트
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| POST | `/api/ai-assistant` | AI 질문 전송 (`{ question, sessionId? }` → `{ answer }`) |
+
 ### 답사
 | Method | Endpoint | 설명 |
 |--------|----------|------|
@@ -628,6 +648,10 @@ npm run dev
 | POST | `/api/settings/intro-type` | 도입형태 추가 |
 | PUT  | `/api/settings/intro-type/[id]` | 도입형태 수정 |
 | DELETE | `/api/settings/intro-type/[id]` | 도입형태 삭제 |
+| GET  | `/api/settings/consultation-type` | 상담유형 목록 |
+| POST | `/api/settings/consultation-type` | 상담유형 추가 |
+| PUT  | `/api/settings/consultation-type/[id]` | 상담유형 수정 |
+| DELETE | `/api/settings/consultation-type/[id]` | 상담유형 삭제 (ADMIN 이상) |
 
 ### Google Drive
 | Method | Endpoint | 설명 |
