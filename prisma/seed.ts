@@ -20,6 +20,24 @@ async function main() {
   }
   console.log('✓ 상태값 seed 완료:', statusSeeds.map((s) => s.name).join(', '))
 
+  // 상담유형 seed
+  const consultationTypeSeeds = [
+    { name: '알람 관련', order: 0, category: 'CONSULTATION_TYPE' },
+    { name: '디바이스 트러블슈팅', order: 1, category: 'CONSULTATION_TYPE' },
+    { name: '소프트웨어 설정', order: 2, category: 'CONSULTATION_TYPE' },
+    { name: '네트워크 연결', order: 3, category: 'CONSULTATION_TYPE' },
+    { name: '기타', order: 4, category: 'CONSULTATION_TYPE' },
+  ]
+
+  for (const seed of consultationTypeSeeds) {
+    await prisma.statusCode.upsert({
+      where: { name_category: { name: seed.name, category: seed.category } },
+      update: { order: seed.order },
+      create: seed,
+    })
+  }
+  console.log('✓ 상담유형 seed 완료:', consultationTypeSeeds.map((s) => s.name).join(', '))
+
   // Organization seed
   const orgSeeds = [
     { code: 'SEERS', name: '씨어스', sortOrder: 1 },
