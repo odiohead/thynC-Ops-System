@@ -35,7 +35,27 @@ npm run build && pm2 restart thync-prod  # PROD
 npm run start / nohup / node server.js
 ```
 
-### 3. PROD 소스 직접 편집 금지
+### 3. git push / 빌드 — 명시적 요청 시에만 실행
+
+개발 작업 완료 후 자동으로 git commit/push, 빌드/PM2 재시작을 수행하지 마세요.
+사용자가 여러 건을 모아서 테스트 후 직접 요청합니다.
+
+```bash
+# ❌ 작업 완료 후 자동 실행 금지
+git add . && git commit && git push
+npm run build && pm2 restart thync-dev
+
+# ✅ 사용자가 명시적으로 요청했을 때만 실행
+```
+
+### 4. 빌드 시 힙 메모리 4GB 설정 필수
+
+빌드 실행 시 반드시 `NODE_OPTIONS`으로 힙 메모리를 4GB로 설정하세요.
+```bash
+NODE_OPTIONS="--max-old-space-size=4096" npm run build && pm2 restart thync-dev
+```
+
+### 5. PROD 소스 직접 편집 금지
 
 `.env` 수정만 예외. 소스 코드는 반드시 DEV → git push → PROD git pull 절차를 따르세요.
 ```bash
@@ -57,13 +77,13 @@ pm2 restart thync-prod
 
 ### 작업 완료 시
 1. `DEV_HISTORY.md` **상단에** 작업 내역 기록
-2. `git push` 전 `README.md` 아래 항목 중 변경된 부분 업데이트:
+2. `README.md` 아래 항목 중 변경된 부분 업데이트:
    - **기능 추가·변경·삭제** → `주요 기능` 섹션 반영
    - **새 API 엔드포인트 추가·삭제** → `API 엔드포인트` 섹션 반영
    - **DB 모델·필드 변경** → `데이터베이스 스키마` 섹션 반영
    - **새 패키지 설치** → `기술 스택` 섹션 반영
    - **새 페이지·컴포넌트 추가** → `디렉토리 구조` 섹션 반영
-3. `git add . && git commit -m "..." && git push origin main`
+3. **빌드·git push는 사용자가 명시적으로 요청할 때만 실행** (자동 실행 금지)
 
 ---
 

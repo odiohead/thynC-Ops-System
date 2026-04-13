@@ -307,17 +307,12 @@ prisma/
 - 목록 표시: 페이지네이션 없이 전체 목록 한 번에 표시
 - 목록 기본 정렬: 구축시작일 DESC (미입력 프로젝트 최상단), 보류 상태 항목 최하단
 - 목록 컬럼: 병원명 | 진행상태 | 담당자 | 구축 시작일 | 구축 종료일(예상) | 도입형태 | 계약일 | 병동 수 | 병상 수 | G/W | 심전계 | 산소포화도 | 구축업체
-- **구축 일정 캘린더** (`/projects/calendar`, 새 탭): 간트/캘린더 탭 전환 (URL `?tab=` 동기화)
-  - **간트 탭**: 기준일 ±30일 고정 61일 뷰, 가로 flex 레이아웃 (스크롤 없이 뷰포트 꽉 채움)
-    - 이전/오늘/다음(30일 이동) + date input 직접 날짜 이동
-    - 월·주차·일·진행건수 4행 헤더 (sticky top), 라벨 열 150px 고정
-    - 진행건수 행: 0~4건+ 색상 강도 표시
-    - 오늘 컬럼 연파랑, 오늘 세로선 빨강, 바 클릭 시 프로젝트 상세 새 탭 오픈
-    - 구축일 미입력 프로젝트 하단 별도 섹션 분리
-  - **캘린더 탭**: 월간 히트맵 (0~4건+ 색상 강도), 주차 레이블(좌측)
-    - 이전달/오늘/다음달 이동
-    - 날짜 클릭 시 하단 상세 패널 업데이트 (기본값: 오늘)
-    - 상세 패널: 해당 날짜 진행중 프로젝트 목록, 클릭 시 상세 새 탭 오픈
+- **필드 엔지니어 간트차트** (`/projects/calendar`): 필드 엔지니어 기준 월간 간트차트
+  - Y축: 필드 엔지니어 1명 = 1행 그룹, 배정 프로젝트가 겹치면 레인(sub-row) 자동 분리
+  - X축: 월 단위 날짜 (URL `?month=YYYY-MM` 동기화), 주차·일별 2행 헤더 (sticky top)
+  - 바 색상: 프로젝트 buildStatus.color 사용, 바 클릭 시 프로젝트 상세 새 탭 오픈
+  - 주말 컬럼 연회색 오버레이, 오늘 세로선 빨강
+  - 배정 프로젝트 없는 엔지니어도 빈 행으로 표시
 
 ### 설치계획(가안) 관리
 - 설치계획(가안) 등록·수정·삭제 (삭제는 ADMIN 이상)
@@ -661,7 +656,7 @@ npm run dev
 | POST | `/api/settings/departments` | 부서 추가 (ADMIN 이상) |
 | PUT  | `/api/settings/departments/[id]` | 부서 수정 (ADMIN 이상) |
 | DELETE | `/api/settings/departments/[id]` | 부서 삭제 (ADMIN 이상, 연결 계정 있으면 409) |
-| GET  | `/api/settings/field-engineers` | 필드 엔지니어 목록 (`?search=&page=&limit=`) |
+| GET  | `/api/settings/field-engineers` | 필드 엔지니어 목록 (`?search=&page=&limit=`, `?all=true` 전체 반환) |
 | POST | `/api/settings/field-engineers` | 필드 엔지니어 등록 (ADMIN 이상, SEERS 소속만 가능) |
 | DELETE | `/api/settings/field-engineers/[id]` | 필드 엔지니어 삭제 (ADMIN 이상, 204) |
 | GET  | `/api/settings/field-engineers/candidates` | 등록 후보 목록 (ADMIN 이상, SEERS·활성·미등록) |

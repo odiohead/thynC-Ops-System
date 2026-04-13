@@ -81,10 +81,21 @@ export function UsersIcon() {
   )
 }
 
+export function GanttIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="14" height="4" rx="1" />
+      <rect x="7" y="10" width="12" height="4" rx="1" />
+      <rect x="5" y="16" width="10" height="4" rx="1" />
+    </svg>
+  )
+}
+
 export const ICON_MAP: Record<string, () => ReactNode> = {
   'hira': HiraIcon,
   'hospital': HospitalIcon,
   'project': ProjectIcon,
+  'gantt': GanttIcon,
   'file-text': FileTextIcon,
   'site-visit': SiteVisitIcon,
   'bot': BotIcon,

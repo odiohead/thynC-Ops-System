@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-04-13 | 필드 엔지니어 기준 간트차트로 캘린더 페이지 교체
+
+- **캘린더 페이지 전면 교체** (`app/projects/calendar/page.tsx`): 기존 프로젝트 기준 간트/캘린더 탭 구조 완전 제거, 필드 엔지니어 기준 월간 간트차트로 재작성
+  - Y축: 필드 엔지니어 1명 = 1행 그룹, 배정 프로젝트 겹칠 시 레인(sub-row) 자동 분리 알고리즘 적용
+  - X축: 월 단위 날짜, URL `?month=YYYY-MM` 파라미터로 월 관리, 주차·일별 2행 sticky 헤더
+  - 바: buildStatus.color 사용, 클릭 시 프로젝트 상세 새 탭, 주말 오버레이, 오늘 세로선
+- **필드 엔지니어 API 확장** (`app/api/settings/field-engineers/route.ts`): `?all=true` 파라미터 추가, 페이지네이션 없이 전체 목록 반환 (기존 페이지네이션 하위 호환 유지)
+- 영향 파일: `app/projects/calendar/page.tsx`, `app/api/settings/field-engineers/route.ts`, `README.md`
+
+---
+
 ## 2026-04-13 | 네비게이션 메뉴 설정 관리 시스템
 
 - **nav_menu_items 테이블 신설** (마이그레이션: 20260413000000_add_nav_menu_items): menuKey, label, href, iconKey, parentKey, allowedRoles(TEXT[]), allowedOrgCodes(TEXT[]), isActive, sortOrder

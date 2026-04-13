@@ -7,6 +7,19 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
+  const all = searchParams.get('all') === 'true'
+
+  // all=true: 페이지네이션 없이 전체 목록 반환
+  if (all) {
+    const data = await prisma.fieldEngineer.findMany({
+      include: {
+        user: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+    return NextResponse.json({ data })
+  }
+
   const search = searchParams.get('search') ?? ''
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
   const limit = Math.max(1, parseInt(searchParams.get('limit') ?? '20'))
