@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-04-13 | 네비게이션 메뉴 설정 관리 시스템
+
+- **nav_menu_items 테이블 신설** (마이그레이션: 20260413000000_add_nav_menu_items): menuKey, label, href, iconKey, parentKey, allowedRoles(TEXT[]), allowedOrgCodes(TEXT[]), isActive, sortOrder
+- 기존 하드코딩 메뉴 22개 항목(메인 8 + 설정 하위 14) seed 데이터 이관
+- **NavIcons.tsx 신설**: Navigation.tsx에서 메뉴용 SVG 아이콘 분리, ICON_MAP 룩업 + getMenuIcon 헬퍼
+- **네비게이션 조회 API** (`app/api/nav-menus/route.ts` 신설): 활성 메뉴만 반환, Navigation 컴포넌트에서 사용
+- **메뉴 관리 CRUD API** (`app/api/settings/nav-menus/` 신설): SUPER_ADMIN 전용, GET/POST/PUT/DELETE
+- **메뉴 관리 설정 페이지** (`app/settings/nav-menus/page.tsx` 신설): 메인 메뉴/설정 하위 메뉴 2개 섹션, 메뉴명 인라인 수정, 허용 역할 체크박스(SUPER_ADMIN/ADMIN/USER/VIEWER), 허용 소속 체크박스(Organization 동적 로드), 활성 토글, 순서 변경(↑↓), 새 메뉴 추가/삭제
+- **Navigation.tsx 전면 리팩터**: DB 기반 동적 메뉴 렌더링, 역할+소속 기반 클라이언트 필터링(`isMenuVisible`), API 실패 시 폴백 메뉴, 로딩 스켈레톤
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260413000000_add_nav_menu_items/`, `app/components/NavIcons.tsx` (신설), `app/components/Navigation.tsx`, `app/api/nav-menus/route.ts` (신설), `app/api/settings/nav-menus/route.ts` (신설), `app/api/settings/nav-menus/[id]/route.ts` (신설), `app/settings/nav-menus/page.tsx` (신설)
+
+---
+
 ## 2026-04-12 | AI 어시스턴트 전체 기능 구현
 
 - `@anthropic-ai/sdk` 패키지 설치, `ANTHROPIC_API_KEY` 환경변수 추가

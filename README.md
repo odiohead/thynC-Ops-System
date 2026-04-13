@@ -54,6 +54,7 @@ app/
 │   ├── hira-hospitals/               # HIRA 병원 데이터 조회
 │   ├── projects/                     # 프로젝트 CRUD + 장비/파일 관리
 │   ├── site-visits/                  # 답사 CRUD + 파일 업로드
+│   ├── nav-menus/                    # 네비게이션 메뉴 조회 (Navigation 컴포넌트용)
 │   ├── constructors/                 # 시공사 관리
 │   ├── users/                        # 시스템 사용자 관리
 │   ├── settings/
@@ -69,7 +70,8 @@ app/
 │   │   ├── site-visit-status/        # 답사 상태코드 관리
 │   │   ├── intro-type/               # 도입형태 관리
 │   │   ├── consultation-type/        # 상담유형 관리
-│   │   └── document-type/            # 문서유형 관리
+│   │   ├── document-type/            # 문서유형 관리
+│   │   └── nav-menus/                # 네비게이션 메뉴 관리 CRUD (SUPER_ADMIN)
 │   ├── ai-assistant/                 # AI 어시스턴트 (Flowise 프록시 + 정제 + 상담이력 저장)
 │   │   ├── summarize/                # AI 정제 (Anthropic Claude API)
 │   │   └── consultation/             # 상담이력 저장 (ConsultationQueue)
@@ -99,9 +101,10 @@ app/
 │   ├── constructors/                 # 시공사 관리
 │   ├── intro-type/                   # 도입형태 관리
 │   ├── consultation-type/            # 상담유형 관리
-│   └── document-type/                # 문서유형 관리
+│   ├── document-type/                # 문서유형 관리
+│   └── nav-menus/                    # 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
 ├── login/                            # 로그인 페이지
-└── components/                       # 공통 컴포넌트 (Navigation, MainWrapper)
+└── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper)
 
 lib/
 ├── auth.ts                           # JWT 인증 유틸리티 + 역할 헬퍼
@@ -231,6 +234,13 @@ prisma/
 - HiraSyncJob 1:N 관계
 - 이벤트 타입 (`type`: init/group_start/group_api_done/group_db_done/done/error)
 - 메시지 (`message`), 추가 데이터 (`stats`, JSONB)
+
+### NavMenuItem (네비게이션 메뉴 설정)
+- 네비게이션 메뉴 항목별 표시 이름, 접근 권한, 노출 여부 관리
+- `menuKey` (고유 식별자), `label` (표시 이름, 변경 가능), `href` (URL 경로)
+- `iconKey` (아이콘 매핑 키), `parentKey` (상위 메뉴 키, NULL=최상위, `settings`=설정 하위)
+- `allowedRoles` (TEXT[], 허용 역할 배열, 빈 배열=전체), `allowedOrgCodes` (TEXT[], 허용 소속 코드 배열, 빈 배열=전체)
+- `isActive` (활성/비활성 토글), `sortOrder` (정렬 순서)
 
 ### ConsultationQueue (상담 대기열)
 - AI 어시스턴트 상담이력 저장
@@ -364,6 +374,16 @@ prisma/
 - AI 정제: 대화 내역을 마크다운 상담이력으로 자동 정리 (claude-sonnet-4-5)
 - 상담이력 저장: ConsultationQueue 테이블에 병원·유형·대화·정제결과 저장
 - 세션 ID 기반 대화 컨텍스트 유지, 모든 역할 접근 가능
+
+### 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
+- DB 기반 동적 네비게이션 메뉴 시스템
+- 메뉴명 인라인 수정 (표시 이름 커스터마이징)
+- 역할별 메뉴 노출 제어: 체크박스로 SUPER_ADMIN/ADMIN/USER/VIEWER 선택 (빈 선택=전체 역할)
+- 소속별 메뉴 노출 제어: 체크박스로 Organization 선택 (빈 선택=전체 소속)
+- 활성/비활성 토글로 메뉴 숨기기
+- 메인 메뉴 / 설정 하위 메뉴 2개 섹션으로 구분
+- 순서 변경 (↑↓ 버튼), 새 메뉴 추가/삭제
+- API 실패 시 폴백 메뉴 자동 적용
 
 ### 설정 (ADMIN 이상)
 - 병원 상태코드 관리 (추가·수정·삭제·순서)
@@ -673,6 +693,15 @@ npm run dev
 | POST | `/api/settings/document-type` | 문서유형 추가 |
 | PUT  | `/api/settings/document-type/[id]` | 문서유형 수정 |
 | DELETE | `/api/settings/document-type/[id]` | 문서유형 삭제 (ADMIN 이상) |
+
+### 네비게이션 메뉴
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET | `/api/nav-menus` | 활성 메뉴 목록 (Navigation 컴포넌트용) |
+| GET | `/api/settings/nav-menus` | 전체 메뉴 목록 + 소속 목록 (SUPER_ADMIN) |
+| POST | `/api/settings/nav-menus` | 메뉴 추가 (SUPER_ADMIN) |
+| PUT | `/api/settings/nav-menus/[id]` | 메뉴 수정 (SUPER_ADMIN) |
+| DELETE | `/api/settings/nav-menus/[id]` | 메뉴 삭제 (SUPER_ADMIN) |
 
 ### Google Drive
 | Method | Endpoint | 설명 |

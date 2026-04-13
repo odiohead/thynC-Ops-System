@@ -1,99 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { getMenuIcon } from './NavIcons'
 
-function HiraIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-      <ellipse cx="12" cy="5" rx="9" ry="3" />
-      <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-      <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-    </svg>
-  )
-}
-
-function HospitalIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-      <polyline points="9 22 9 12 15 12 15 22" />
-    </svg>
-  )
-}
-
-function SettingsIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
-  )
-}
-
-function UsersIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  )
-}
-
-function LogoutIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <polyline points="16 17 21 12 16 7" />
-      <line x1="21" y1="12" x2="9" y2="12" />
-    </svg>
-  )
-}
-
-function ProjectIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-    </svg>
-  )
-}
-
-function FileTextIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="16" y1="13" x2="8" y2="13" />
-      <line x1="16" y1="17" x2="8" y2="17" />
-      <polyline points="10 9 9 9 8 9" />
-    </svg>
-  )
-}
-
-function SiteVisitIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-      <circle cx="12" cy="10" r="3" />
-    </svg>
-  )
-}
-
-function BotIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 8V4H8"/>
-      <rect width="16" height="12" x="4" y="8" rx="2"/>
-      <path d="M2 14h2"/>
-      <path d="M20 14h2"/>
-      <path d="M15 13v2"/>
-      <path d="M9 13v2"/>
-    </svg>
-  )
-}
+/* ── 구조적 아이콘 (메뉴 아이콘이 아닌 UI용) ── */
 
 function ChevronIcon({ open }: { open: boolean }) {
   return (
@@ -122,10 +34,30 @@ function CloseIcon() {
   )
 }
 
+function LogoutIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  )
+}
+
+/* ── 타입 ── */
+
 type UserRole = 'SUPER_ADMIN' | 'ADMIN' | 'USER' | 'VIEWER'
 
-function isAdminOrAbove(role: UserRole | null) {
-  return role === 'SUPER_ADMIN' || role === 'ADMIN'
+interface NavItem {
+  id: number
+  menuKey: string
+  label: string
+  href: string
+  iconKey: string | null
+  parentKey: string | null
+  allowedRoles: string[]
+  allowedOrgCodes: string[]
+  sortOrder: number
 }
 
 const ROLE_LABEL: Record<UserRole, string> = {
@@ -135,6 +67,33 @@ const ROLE_LABEL: Record<UserRole, string> = {
   VIEWER: '뷰어',
 }
 
+/* ── API 실패 시 폴백 메뉴 ── */
+
+const FALLBACK_MENUS: NavItem[] = [
+  { id: 0, menuKey: 'hospitals', label: '병원 목록', href: '/hospitals', iconKey: 'hospital', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 20 },
+  { id: 0, menuKey: 'projects', label: '프로젝트 관리', href: '/projects', iconKey: 'project', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 30 },
+  { id: 0, menuKey: 'install-plans', label: '설치계획(가안) 관리', href: '/install-plans', iconKey: 'file-text', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 40 },
+  { id: 0, menuKey: 'site-visits', label: '답사 관리', href: '/site-visits', iconKey: 'site-visit', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 50 },
+  { id: 0, menuKey: 'ai-assistant', label: 'AI 어시스턴트', href: '/ai-assistant', iconKey: 'bot', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 60 },
+  { id: 0, menuKey: 'settings', label: '설정', href: '/settings', iconKey: 'settings', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 70 },
+  { id: 0, menuKey: 'users', label: '계정 관리', href: '/users', iconKey: 'users', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 80 },
+  { id: 0, menuKey: 'settings/nav-menus', label: '메뉴 관리', href: '/settings/nav-menus', iconKey: null, parentKey: 'settings', allowedRoles: ['SUPER_ADMIN'], allowedOrgCodes: [], sortOrder: 5 },
+  { id: 0, menuKey: 'settings/profile', label: '내 프로필', href: '/settings/profile', iconKey: null, parentKey: 'settings', allowedRoles: [], allowedOrgCodes: [], sortOrder: 50 },
+]
+
+/* ── 메뉴 노출 여부 판단 ── */
+
+function isMenuVisible(item: NavItem, role: UserRole | null, orgCode: string | null): boolean {
+  if (!role) return false
+  if (item.allowedRoles.length > 0 && !item.allowedRoles.includes(role)) return false
+  if (item.allowedOrgCodes.length > 0) {
+    if (!orgCode || !item.allowedOrgCodes.includes(orgCode)) return false
+  }
+  return true
+}
+
+/* ── Navigation 컴포넌트 ── */
+
 export default function Navigation() {
   const pathname = usePathname()
   const router = useRouter()
@@ -142,7 +101,12 @@ export default function Navigation() {
   const [settingsOpen, setSettingsOpen] = useState(pathname.startsWith('/settings'))
   const [userRole, setUserRole] = useState<UserRole | null>(null)
   const [userName, setUserName] = useState('')
+  const [userOrgCode, setUserOrgCode] = useState<string | null>(null)
+  const [menuItems, setMenuItems] = useState<NavItem[]>([])
+  const [menuLoaded, setMenuLoaded] = useState(false)
+  const menuFetched = useRef(false)
 
+  // 사용자 정보 로드
   useEffect(() => {
     if (pathname === '/login') return
     fetch('/api/auth/me')
@@ -151,12 +115,24 @@ export default function Navigation() {
         if (data?.role) {
           setUserRole(data.role)
           setUserName(data.name)
+          setUserOrgCode(data.organization?.code ?? null)
         } else {
           setUserRole(null)
           setUserName('')
+          setUserOrgCode(null)
         }
       })
       .catch(() => {})
+  }, [pathname])
+
+  // 메뉴 데이터 로드 (최초 1회)
+  useEffect(() => {
+    if (pathname === '/login' || menuFetched.current) return
+    menuFetched.current = true
+    fetch('/api/nav-menus')
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(data => { setMenuItems(data.items); setMenuLoaded(true) })
+      .catch(() => { setMenuItems(FALLBACK_MENUS); setMenuLoaded(true) })
   }, [pathname])
 
   useEffect(() => {
@@ -186,6 +162,22 @@ export default function Navigation() {
     router.refresh()
   }
 
+  // 메뉴 분류
+  const topLevelItems = menuItems
+    .filter(i => i.parentKey === null && i.menuKey !== 'settings' && i.menuKey !== 'users')
+    .filter(i => isMenuVisible(i, userRole, userOrgCode))
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+
+  const settingsGroup = menuItems.find(i => i.menuKey === 'settings')
+  const settingsVisible = settingsGroup && isMenuVisible(settingsGroup, userRole, userOrgCode)
+  const settingsChildren = menuItems
+    .filter(i => i.parentKey === 'settings')
+    .filter(i => isMenuVisible(i, userRole, userOrgCode))
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+
+  const usersItem = menuItems.find(i => i.menuKey === 'users')
+  const usersVisible = usersItem && isMenuVisible(usersItem, userRole, userOrgCode)
+
   const sidebarContent = (
     <div className="flex h-full flex-col">
       {/* 로고 */}
@@ -195,173 +187,62 @@ export default function Navigation() {
 
       {/* 네비게이션 */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
-
-        {/* 심평원 병원목록 (ADMIN 이상만) */}
-        {isAdminOrAbove(userRole) && (
-          <Link href="/hira-hospitals" className={navItemClass(isActive('/hira-hospitals'))}>
-            <HiraIcon />
-            심평원 병원목록
-          </Link>
-        )}
-
-        {/* 병원 목록 */}
-        <Link href="/hospitals" className={navItemClass(isActive('/hospitals'))}>
-          <HospitalIcon />
-          병원 목록
-        </Link>
-
-        {/* 프로젝트 관리 */}
-        <Link href="/projects" className={navItemClass(isActive('/projects'))}>
-          <ProjectIcon />
-          프로젝트 관리
-        </Link>
-
-        {/* 설치계획(가안) 관리 */}
-        <Link href="/install-plans" className={navItemClass(isActive('/install-plans'))}>
-          <FileTextIcon />
-          설치계획(가안) 관리
-        </Link>
-
-        {/* 답사 현황 */}
-        <Link href="/site-visits" className={navItemClass(isActive('/site-visits'))}>
-          <SiteVisitIcon />
-          답사 관리
-        </Link>
-
-        {/* AI 어시스턴트 */}
-        <Link href="/ai-assistant" className={navItemClass(isActive('/ai-assistant'))}>
-          <BotIcon />
-          AI 어시스턴트
-        </Link>
-
-        {/* 설정 */}
-        <div>
-          <button
-            type="button"
-            onClick={() => setSettingsOpen((v) => !v)}
-            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
-              pathname.startsWith('/settings')
-                ? 'text-gray-900 font-medium'
-                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-            }`}
-          >
-            <SettingsIcon />
-            <span className="flex-1 text-left">설정</span>
-            <ChevronIcon open={settingsOpen} />
-          </button>
-
-          {settingsOpen && (
-            <div className="ml-7 mt-0.5 space-y-0.5 border-l border-gray-200 pl-3">
-              {/* 소속 관리: SUPER_ADMIN만 */}
-              {userRole === 'SUPER_ADMIN' && (
-                <Link
-                  href="/settings/organizations"
-                  className={navItemClass(isActive('/settings/organizations'))}
-                >
-                  소속 관리
-                </Link>
-              )}
-              {/* 필드 엔지니어 리스트: ADMIN 이상 */}
-              {isAdminOrAbove(userRole) && (
-                <Link
-                  href="/settings/field-engineers"
-                  className={navItemClass(isActive('/settings/field-engineers'))}
-                >
-                  <UsersIcon />
-                  필드 엔지니어 리스트
-                </Link>
-              )}
-              {/* 심평원 연동 관리: SUPER_ADMIN만 */}
-              {userRole === 'SUPER_ADMIN' && (
-                <Link
-                  href="/settings/hira-sync"
-                  className={navItemClass(isActive('/settings/hira-sync'))}
-                >
-                  심평원 연동 관리
-                </Link>
-              )}
-              {/* 메일 동기화: ADMIN 이상 */}
-              {isAdminOrAbove(userRole) && (
-                <Link
-                  href="/settings/mail-sync"
-                  className={navItemClass(isActive('/settings/mail-sync'))}
-                >
-                  메일 동기화
-                </Link>
-              )}
-              {/* 내 프로필: 모든 역할 */}
-              <Link
-                href="/settings/profile"
-                className={navItemClass(isActive('/settings/profile'))}
-              >
-                내 프로필
+        {!menuLoaded ? (
+          /* 스켈레톤 */
+          <div className="space-y-2">
+            {[1,2,3,4,5].map(i => (
+              <div key={i} className="h-8 rounded-lg bg-gray-100 animate-pulse" />
+            ))}
+          </div>
+        ) : (
+          <>
+            {/* 최상위 메뉴 */}
+            {topLevelItems.map(item => (
+              <Link key={item.menuKey} href={item.href} className={navItemClass(isActive(item.href))}>
+                {getMenuIcon(item.iconKey)}
+                {item.label}
               </Link>
-              {/* 아래 항목: ADMIN 이상, USER */}
-              {(isAdminOrAbove(userRole) || userRole === 'USER') && (
-                <>
-                  <Link
-                    href="/settings/status"
-                    className={navItemClass(isActive('/settings/status'))}
-                  >
-                    병원 상태코드 관리
-                  </Link>
-                  <Link
-                    href="/settings/consultation-type"
-                    className={navItemClass(isActive('/settings/consultation-type'))}
-                  >
-                    상담유형 관리
-                  </Link>
-                  <Link
-                    href="/settings/document-type"
-                    className={navItemClass(isActive('/settings/document-type'))}
-                  >
-                    문서유형 관리
-                  </Link>
-                  <Link
-                    href="/settings/build-status"
-                    className={navItemClass(isActive('/settings/build-status'))}
-                  >
-                    구축상태 관리
-                  </Link>
-                  <Link
-                    href="/settings/devices"
-                    className={navItemClass(isActive('/settings/devices'))}
-                  >
-                    기기 관리
-                  </Link>
-                  <Link
-                    href="/settings/constructors"
-                    className={navItemClass(isActive('/settings/constructors'))}
-                  >
-                    공사업체 관리
-                  </Link>
-                  <Link
-                    href="/settings/intro-type"
-                    className={navItemClass(isActive('/settings/intro-type'))}
-                  >
-                    도입형태 관리
-                  </Link>
-                </>
-              )}
-              {/* 답사 상태 관리: ADMIN 이상만 */}
-              {isAdminOrAbove(userRole) && (
-                <Link
-                  href="/settings/site-visit-status"
-                  className={navItemClass(isActive('/settings/site-visit-status'))}
+            ))}
+
+            {/* 설정 아코디언 */}
+            {settingsVisible && settingsChildren.length > 0 && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen((v) => !v)}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+                    pathname.startsWith('/settings')
+                      ? 'text-gray-900 font-medium'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                  }`}
                 >
-                  답사 상태 관리
-                </Link>
-              )}
-            </div>
-          )}
-        </div>
+                  {getMenuIcon(settingsGroup!.iconKey)}
+                  <span className="flex-1 text-left">{settingsGroup!.label}</span>
+                  <ChevronIcon open={settingsOpen} />
+                </button>
 
-        {/* 계정 관리: 모든 역할 */}
-        <Link href="/users" className={navItemClass(isActive('/users'))}>
-          <UsersIcon />
-          계정 관리
-        </Link>
+                {settingsOpen && (
+                  <div className="ml-7 mt-0.5 space-y-0.5 border-l border-gray-200 pl-3">
+                    {settingsChildren.map(child => (
+                      <Link key={child.menuKey} href={child.href} className={navItemClass(isActive(child.href))}>
+                        {getMenuIcon(child.iconKey)}
+                        {child.label}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
+            {/* 계정 관리 */}
+            {usersVisible && usersItem && (
+              <Link href={usersItem.href} className={navItemClass(isActive(usersItem.href))}>
+                {getMenuIcon(usersItem.iconKey)}
+                {usersItem.label}
+              </Link>
+            )}
+          </>
+        )}
       </nav>
 
       {/* 하단 사용자 정보 + 로그아웃 */}

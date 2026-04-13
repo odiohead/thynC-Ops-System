@@ -497,3 +497,20 @@ model AppSetting {
 
   @@map("app_settings")
 }
+
+model NavMenuItem {
+  id              Int      @id @default(autoincrement())
+  menuKey         String   @unique @map("menu_key") @db.VarChar(100)
+  label           String   @map("label") @db.VarChar(200)
+  href            String   @map("href") @db.VarChar(200)
+  iconKey         String?  @map("icon_key") @db.VarChar(50)
+  parentKey       String?  @map("parent_key") @db.VarChar(100)
+  allowedRoles    String[] @default([]) @map("allowed_roles")
+  allowedOrgCodes String[] @default([]) @map("allowed_org_codes")
+  isActive        Boolean  @default(true) @map("is_active")
+  sortOrder       Int      @default(0) @map("sort_order")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("nav_menu_items")
+}
