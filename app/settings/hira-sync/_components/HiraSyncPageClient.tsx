@@ -70,6 +70,8 @@ export default function HiraSyncPageClient({ initialJobs }: { initialJobs: Job[]
   const [selectedLogs, setSelectedLogs] = useState<Log[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
   const logRef = useRef<HTMLDivElement>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<string | null>(null)
 
   const hasRunning = jobs.some((j) => j.status === 'running')
 
@@ -134,6 +136,25 @@ export default function HiraSyncPageClient({ initialJobs }: { initialJobs: Job[]
     }
   }
 
+  async function syncHospitals() {
+    setSyncing(true)
+    setSyncResult(null)
+    setError(null)
+    try {
+      const res = await fetch('/api/hospitals/sync-from-hira', { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok) {
+        setError(json.error ?? '동기화 실패')
+      } else {
+        setSyncResult(json.message)
+      }
+    } catch {
+      setError('동기화 중 오류가 발생했습니다.')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   function selectJob(jobId: number) {
     if (selectedJobId === jobId) {
       setSelectedJobId(null)
@@ -156,16 +177,28 @@ export default function HiraSyncPageClient({ initialJobs }: { initialJobs: Job[]
             <h2 className="text-sm font-semibold text-gray-700">데이터 연동</h2>
             <p className="mt-0.5 text-xs text-gray-400">심평원 Open API에서 병원 데이터를 가져와 갱신합니다.</p>
           </div>
-          <button
-            onClick={startSync}
-            disabled={starting || hasRunning}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {starting ? '시작 중...' : hasRunning ? '연동 진행 중' : '연동 시작'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={startSync}
+              disabled={starting || hasRunning}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {starting ? '시작 중...' : hasRunning ? '연동 진행 중' : '연동 시작'}
+            </button>
+            <button
+              onClick={syncHospitals}
+              disabled={syncing || hasRunning}
+              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {syncing ? '동기화 중...' : '병원목록 동기화'}
+            </button>
+          </div>
         </div>
         {error && (
           <div className="border-b border-red-100 bg-red-50 px-6 py-3 text-sm text-red-600">{error}</div>
+        )}
+        {syncResult && (
+          <div className="border-b border-green-100 bg-green-50 px-6 py-3 text-sm text-green-600">{syncResult}</div>
         )}
         {hasRunning && (
           <div className="flex items-center gap-2 px-6 py-3 text-xs text-blue-600">
