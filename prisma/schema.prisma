@@ -75,7 +75,9 @@ model Hospital {
   siteVisits          SiteVisit[]
   introTypes          HospitalIntroType[]
   installPlans        InstallPlan[]
+  maintenances        Maintenance[]
   consultationQueues  ConsultationQueue[]
+  tasks               Task[]
 
   @@map("hospitals")
 }
@@ -116,6 +118,8 @@ model StatusCode {
   introTypeProjects             Project[]              @relation("ProjectIntroType")
   consultationTypeQueues        ConsultationQueue[]    @relation("ConsultationTypeQueue")
   documentTypeQueues            ConsultationQueue[]    @relation("DocumentTypeQueue")
+  maintenanceTypes              Maintenance[]          @relation("MaintenanceType")
+  maintenanceStatuses           Maintenance[]          @relation("MaintenanceStatus")
 
   @@unique([name, category])
   @@map("status_codes")
@@ -182,6 +186,7 @@ model User {
   projectAssignees        ProjectAssignee[]
   installPlanAssignees    InstallPlanAssignee[]
   siteVisitAssignees      SiteVisitAssignee[]
+  maintenanceAssignees    MaintenanceAssignee[]
   consultationQueues      ConsultationQueue[]
 
   @@map("users")
@@ -340,6 +345,7 @@ model ProjectFile {
 
 model SiteVisit {
   id              Int            @id @default(autoincrement())
+  siteVisitCode   String?        @unique @map("site_visit_code") @db.VarChar(50)
   hospitalCode    String         @map("hospital_code")
   daewoongUserId  String?        @map("daewoong_user_id")
   requestDate     DateTime?      @map("request_date")
@@ -513,4 +519,77 @@ model NavMenuItem {
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("nav_menu_items")
+}
+
+model Task {
+  id           Int       @id @default(autoincrement())
+  taskCode     String    @unique @map("task_code") @db.VarChar(20)
+  taskType     String    @map("task_type") @db.VarChar(20)
+  refCode      String    @map("ref_code") @db.VarChar(50)
+  hospitalCode String?   @map("hospital_code") @db.VarChar(50)
+  title        String?
+  isCompleted  Boolean   @default(false) @map("is_completed")
+  completedAt  DateTime? @map("completed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  hospital Hospital? @relation(fields: [hospitalCode], references: [hospitalCode])
+
+  @@index([taskType])
+  @@index([refCode])
+  @@index([hospitalCode])
+  @@map("tasks")
+}
+
+model Maintenance {
+  id                Int       @id @default(autoincrement())
+  maintenanceCode   String?   @unique @map("maintenance_code")
+  hospitalCode      String    @map("hospital_code")
+  typeId            Int?      @map("type_id")
+  statusId          Int?      @map("status_id")
+  priority          String    @default("보통") @map("priority")
+  title             String    @map("title")
+  reporterName      String?   @map("reporter_name")
+  isRemote          Boolean   @default(false) @map("is_remote")
+  reportedAt        DateTime? @map("reported_at") @db.Date
+  visitDate         DateTime? @map("visit_date") @db.Date
+  resolvedAt        DateTime? @map("resolved_at") @db.Date
+  symptoms          String?   @db.Text @map("symptoms")
+  cause             String?   @db.Text @map("cause")
+  resolution        String?   @db.Text @map("resolution")
+  notes             String?   @db.Text @map("notes")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  hospital   Hospital    @relation(fields: [hospitalCode], references: [hospitalCode])
+  type       StatusCode? @relation("MaintenanceType", fields: [typeId], references: [id])
+  status     StatusCode? @relation("MaintenanceStatus", fields: [statusId], references: [id])
+  assignees  MaintenanceAssignee[]
+  files      MaintenanceFile[]
+
+  @@map("maintenances")
+}
+
+model MaintenanceAssignee {
+  id            Int         @id @default(autoincrement())
+  maintenanceId Int         @map("maintenance_id")
+  userId        String      @map("user_id")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  maintenance   Maintenance @relation(fields: [maintenanceId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([maintenanceId, userId])
+  @@map("maintenance_assignees")
+}
+
+model MaintenanceFile {
+  id            Int         @id @default(autoincrement())
+  maintenanceId Int         @map("maintenance_id")
+  fileCategory  String      @map("file_category")
+  fileName      String      @map("file_name")
+  s3Key         String      @map("s3_key")
+  uploadedAt    DateTime    @default(now()) @map("uploaded_at")
+  maintenance   Maintenance @relation(fields: [maintenanceId], references: [id], onDelete: Cascade)
+
+  @@map("maintenance_files")
 }

@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import SiteVisitForm from '../SiteVisitForm'
+import MaintenanceForm from '../MaintenanceForm'
 
-interface SiteVisitFile {
+interface MaintenanceFile {
   id: number
   fileCategory: string
   fileName: string
@@ -22,21 +22,26 @@ interface Hospital {
   status: string
 }
 
-interface SiteVisitData {
+interface MaintenanceData {
   id: number
-  siteVisitCode: string | null
+  maintenanceCode: string | null
   hospitalCode: string
   hospital: Hospital
-  daewoongUserId: string | null
-  assignees: { user: { id: string; name: string; email: string } }[]
-  requestDate: string | null
-  visitDate: string | null
-  replyDate: string | null
+  typeId: number | null
   statusId: number | null
-  installPlanS3Key: string | null
-  floorPlanS3Key: string | null
+  priority: string
+  title: string
+  reporterName: string | null
+  isRemote: boolean
+  reportedAt: string | null
+  visitDate: string | null
+  resolvedAt: string | null
+  symptoms: string | null
+  cause: string | null
+  resolution: string | null
   notes: string | null
-  files: SiteVisitFile[]
+  assignees: { user: { id: string; name: string; email: string } }[]
+  files: MaintenanceFile[]
 }
 
 const labelClass = 'text-xs font-medium uppercase tracking-wider text-gray-400'
@@ -77,22 +82,22 @@ function HospitalCard({ hospital }: { hospital: Hospital }) {
   )
 }
 
-export default function EditSiteVisitPage() {
+export default function EditMaintenancePage() {
   const params = useParams()
   const id = params.id as string
 
-  const [data, setData] = useState<SiteVisitData | null>(null)
+  const [data, setData] = useState<MaintenanceData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch(`/api/site-visits/${id}`)
+    fetch(`/api/maintenances/${id}`)
       .then((r) => r.json())
       .then((d) => {
-        if (d.siteVisit) {
-          setData(d.siteVisit)
+        if (d.maintenance) {
+          setData(d.maintenance)
         } else {
-          setError('답사를 찾을 수 없습니다.')
+          setError('유지보수를 찾을 수 없습니다.')
         }
         setLoading(false)
       })
@@ -121,15 +126,20 @@ export default function EditSiteVisitPage() {
   const initialData = {
     id: data.id,
     hospitalCode: data.hospitalCode,
-    daewoongUserId: data.daewoongUserId ?? '',
-    assignees: data.assignees ?? [],
-    requestDate: data.requestDate ? data.requestDate.slice(0, 10) : '',
-    visitDate: data.visitDate ? data.visitDate.slice(0, 10) : '',
-    replyDate: data.replyDate ? data.replyDate.slice(0, 10) : '',
+    typeId: data.typeId != null ? String(data.typeId) : '',
     statusId: data.statusId != null ? String(data.statusId) : '',
-    installPlanS3Key: data.installPlanS3Key ?? '',
-    floorPlanS3Key: data.floorPlanS3Key ?? '',
+    priority: data.priority,
+    title: data.title,
+    reporterName: data.reporterName ?? '',
+    isRemote: data.isRemote,
+    reportedAt: data.reportedAt ? data.reportedAt.slice(0, 10) : '',
+    visitDate: data.visitDate ? data.visitDate.slice(0, 10) : '',
+    resolvedAt: data.resolvedAt ? data.resolvedAt.slice(0, 10) : '',
+    symptoms: data.symptoms ?? '',
+    cause: data.cause ?? '',
+    resolution: data.resolution ?? '',
     notes: data.notes ?? '',
+    assignees: data.assignees ?? [],
     files: data.files ?? [],
   }
 
@@ -137,12 +147,12 @@ export default function EditSiteVisitPage() {
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">답사 상세 / 수정</h1>
-          <p className="mt-1 font-mono text-sm text-gray-400">{data.siteVisitCode ?? `SV-${String(data.id).padStart(5, '0')}`}</p>
+          <h1 className="text-2xl font-bold text-gray-900">유지보수 상세 / 수정</h1>
+          <p className="mt-1 font-mono text-sm text-gray-400">{data.maintenanceCode ?? `MNT-${String(data.id).padStart(4, '0')}`}</p>
         </div>
         {data.hospital && <HospitalCard hospital={data.hospital} />}
         <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
-          <SiteVisitForm mode="edit" initialData={initialData} />
+          <MaintenanceForm mode="edit" initialData={initialData} />
         </div>
       </div>
     </div>

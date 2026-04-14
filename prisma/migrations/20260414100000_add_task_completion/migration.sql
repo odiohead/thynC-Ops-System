@@ -1,0 +1,2 @@
+ALTER TABLE tasks ADD COLUMN is_completed BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE tasks ADD COLUMN completed_at TIMESTAMP;

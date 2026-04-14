@@ -26,8 +26,8 @@ function formatDate(val: string | null): string {
   return val.slice(0, 10)
 }
 
-function formatCode(id: number): string {
-  return `SV-${String(id).padStart(5, '0')}`
+function formatCode(sv: { siteVisitCode?: string | null; id: number }): string {
+  return sv.siteVisitCode ?? `SV-${String(sv.id).padStart(5, '0')}`
 }
 
 function StatusBadge({ status }: { status: { name: string; color: string | null } | null }) {
@@ -135,7 +135,7 @@ export default function SiteVisitsPage() {
                   siteVisits.map((sv) => (
                     <tr key={sv.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-xs font-mono text-gray-400 whitespace-nowrap">
-                        {formatCode(sv.id)}
+                        {formatCode(sv)}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <Link

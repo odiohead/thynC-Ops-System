@@ -84,6 +84,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
   // 갱신된 데이터 다시 조회
   const updated = await prisma.siteVisit.findUnique({ where: { id }, include })
 
+  // Task 완료 동기화: '회신완료' → 완료
+  if (statusId !== undefined && updated?.siteVisitCode) {
+    const isCompleted = updated.status?.name === '회신완료'
+    await prisma.task.updateMany({
+      where: { refCode: updated.siteVisitCode, taskType: 'SITE_VISIT' },
+      data: { isCompleted, completedAt: isCompleted ? new Date() : null },
+    })
+  }
+
   return NextResponse.json({ siteVisit: updated })
 }
 

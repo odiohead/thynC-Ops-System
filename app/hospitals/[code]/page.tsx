@@ -9,6 +9,7 @@ import HospitalDevicesSection from './_components/HospitalDevicesSection'
 import StatusBadge from '@/app/components/StatusBadge'
 import SiteVisitsCard from './_components/SiteVisitsCard'
 import InstallPlansCard from './_components/InstallPlansCard'
+import MaintenancesCard from './_components/MaintenancesCard'
 
 
 
@@ -33,7 +34,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
   const user = token ? await verifyToken(token) : null
   const isAdmin = !!user && user.role !== 'VIEWER'
 
-  const [hospital, projects, siteVisits, installPlans, allDevices, hospitalDevices, statusCodes] = await Promise.all([
+  const [hospital, projects, siteVisits, installPlans, maintenances, allDevices, hospitalDevices, statusCodes] = await Promise.all([
     prisma.hospital.findUnique({
       where: { hospitalCode: params.code },
       include: {
@@ -65,6 +66,15 @@ export default async function HospitalDetailPage({ params }: PageProps) {
         assignees: { include: { user: { select: { id: true, name: true } } } },
       },
     }),
+    prisma.maintenance.findMany({
+      where: { hospitalCode: params.code },
+      orderBy: { reportedAt: { sort: 'desc', nulls: 'last' } },
+      include: {
+        type: { select: { name: true, color: true } },
+        status: { select: { name: true, color: true } },
+        assignees: { include: { user: { select: { id: true, name: true } } } },
+      },
+    }),
     prisma.deviceInfo.findMany({ orderBy: { sortOrder: 'asc' } }),
     prisma.hospitalDevice.findMany({ where: { hospitalCode: params.code } }),
     prisma.statusCode.findMany({ where: { category: 'HOSPITAL' }, select: { name: true, color: true } }),
@@ -92,6 +102,18 @@ export default async function HospitalDetailPage({ params }: PageProps) {
     replyStatus: ip.replyStatus,
     replyDate: ip.replyDate ? ip.replyDate.toISOString() : null,
     assignees: ip.assignees ?? [],
+  }))
+
+  const maintenancesData = maintenances.map((m) => ({
+    id: m.id,
+    reportedAt: m.reportedAt ? m.reportedAt.toISOString() : null,
+    resolvedAt: m.resolvedAt ? m.resolvedAt.toISOString() : null,
+    title: m.title,
+    priority: m.priority,
+    isRemote: m.isRemote,
+    type: m.type ?? null,
+    status: m.status ?? null,
+    assignees: m.assignees ?? [],
   }))
 
   const quantityMap = new Map(hospitalDevices.map((d) => [d.deviceInfoId, d.quantity]))
@@ -210,6 +232,13 @@ export default async function HospitalDetailPage({ params }: PageProps) {
         <InstallPlansCard
           hospitalCode={hospital.hospitalCode}
           installPlans={installPlansData}
+          isAdmin={isAdmin}
+        />
+
+        {/* 유지보수 */}
+        <MaintenancesCard
+          hospitalCode={hospital.hospitalCode}
+          maintenances={maintenancesData}
           isAdmin={isAdmin}
         />
 

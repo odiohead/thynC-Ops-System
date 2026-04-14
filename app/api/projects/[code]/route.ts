@@ -114,6 +114,16 @@ export async function PUT(request: NextRequest, { params }: Params) {
     include: projectInclude,
   })
 
+  // Task 완료 동기화: buildStatus 라벨에 '완료' 포함 → 완료
+  if (buildStatusId !== undefined && updated) {
+    const bsLabel = updated.buildStatus?.label ?? ''
+    const isCompleted = bsLabel.includes('완료')
+    await prisma.task.updateMany({
+      where: { refCode: params.code, taskType: 'PROJECT' },
+      data: { isCompleted, completedAt: isCompleted ? new Date() : null },
+    })
+  }
+
   revalidatePath('/projects')
   return NextResponse.json({ project: updated })
 }

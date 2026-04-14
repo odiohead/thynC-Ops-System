@@ -55,7 +55,18 @@ npm run build && pm2 restart thync-dev
 NODE_OPTIONS="--max-old-space-size=4096" npm run build && pm2 restart thync-dev
 ```
 
-### 5. PROD 소스 직접 편집 금지
+### 5. PROD DB 작업 — 명시적 허락 시에만 실행
+
+PROD DB(`thync_ops`)에 대한 DDL(ALTER, CREATE, DROP 등) 및 DML(INSERT, UPDATE, DELETE 등)은 사용자가 명시적으로 허락했을 때만 실행하세요. DEV DB 작업 후 자동으로 PROD DB에 동일 작업을 수행하지 마세요.
+
+```bash
+# ❌ DEV 작업 후 자동으로 PROD에도 실행 금지
+PGPASSWORD=... psql -U thync -d thync_ops -c "ALTER TABLE ..."
+
+# ✅ 사용자에게 PROD 반영 여부를 먼저 확인
+```
+
+### 6. PROD 소스 직접 편집 금지
 
 `.env` 수정만 예외. 소스 코드는 반드시 DEV → git push → PROD git pull 절차를 따르세요.
 ```bash

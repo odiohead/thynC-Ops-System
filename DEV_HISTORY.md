@@ -4,6 +4,51 @@
 
 ---
 
+## 2026-04-14 | 유지보수(Maintenance) 업무 모듈 신규 추가
+
+- **DB 스키마**: Maintenance, MaintenanceAssignee, MaintenanceFile 3개 모델 추가 (마이그레이션: 20260414000000_add_maintenances)
+  - Maintenance: maintenanceCode(`MNT-YYYYMM-NNNN` 자동채번), 병원 연결, 장애유형(MAINTENANCE_TYPE)/상태(MAINTENANCE_STATUS) StatusCode 연결, 우선순위(긴급/높음/보통/낮음), 원격처리 여부, 증상/원인/조치내용/비고 필드
+  - MaintenanceAssignee: N:M 담당자 관계, MaintenanceFile: S3 첨부파일
+- **StatusCode 관련**: status_codes 테이블 레거시 `name` unique 인덱스 제거 (name+category 복합 unique만 유지)
+- **설정 API/페이지**: 장애유형 관리(`/settings/maintenance-type`), 유지보수 상태 관리(`/settings/maintenance-status`) CRUD 추가
+- **seed 데이터**: MAINTENANCE_TYPE 4건(하드웨어/소프트웨어/네트워크/기타), MAINTENANCE_STATUS 4건(접수/처리중/완료/보류), NavMenuItem 3건(유지보수, 장애유형 관리, 유지보수 상태 관리)
+- **유지보수 CRUD API**: `app/api/maintenances/` — GET 목록(필터: 병원명/장애유형/상태/우선순위), POST 등록(코드 자동채번), GET/PUT/DELETE 단건, 파일 업로드/삭제/presigned URL
+- **유지보수 페이지**: 목록(`/maintenances`), 등록(`/maintenances/new`), 상세/수정(`/maintenances/[id]`), MaintenanceForm 공용 폼 컴포넌트
+  - 기존 SiteVisitForm 패턴 동일 적용: 병원 검색 모달, FieldEngineerSelectModal 담당자 복수 배정, RichTextEditor(조치내용/비고), MultiFileField(edit 모드)
+  - 목록: 접수일/병원명/제목/장애유형/우선순위/상태/원격/담당자/방문일/완료일 컬럼, 우선순위 색상 뱃지
+- **네비게이션**: NavIcons에 WrenchIcon 추가, NavMenuItem에 유지보수 메뉴(답사 관리 아래, sortOrder 55) + 설정 하위 2개 항목 추가
+- **Task 통합 연동**: 유지보수 생성 시 tasks 테이블에 `MAINTENANCE` 타입 Task 자동 생성 (TASK-YYYYMM-NNNNN 채번), 수정 시 title/hospitalCode 동기화, 삭제 시 Task도 삭제
+- **업무(Task) 현황 페이지** (`/tasks`): 프로젝트·답사·설치계획·유지보수 전체 업무 통합 조회, 업무유형별 요약 카드(클릭 필터), 검색(업무코드/병원명/제목), 행 클릭 시 원본 상세 이동
+- **Task API** (`app/api/tasks/route.ts`): GET 목록 + 원본 레코드 id lookup (상세 페이지 이동용)
+- **네비게이션**: ClipboardListIcon 추가, '업무(Task) 현황' 메뉴 추가 (설치계획과 답사 사이, sortOrder 45)
+- **병원 상세 연동**: `app/hospitals/[code]/_components/MaintenancesCard.tsx` 신설, 병원 상세 페이지에 유지보수 카드 추가
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260414000000_add_maintenances/`, `prisma/seed.ts`, `app/api/maintenances/` (신설), `app/api/tasks/` (신설), `app/api/settings/maintenance-type/` (신설), `app/api/settings/maintenance-status/` (신설), `app/maintenances/` (신설), `app/tasks/` (신설), `app/settings/maintenance-type/` (신설), `app/settings/maintenance-status/` (신설), `app/components/NavIcons.tsx`, `app/hospitals/[code]/page.tsx`, `app/hospitals/[code]/_components/MaintenancesCard.tsx` (신설)
+
+---
+
+## 2026-04-13 | TASK 통합 개념 도입 - tasks 테이블 신규 생성 및 기존 데이터 마이그레이션
+
+- **tasks 테이블 신규 생성** (마이그레이션: 20260413120000_add_tasks): task_code(TASK-YYYYMM-NNNNN), task_type, ref_code, hospital_code, title
+- 기존 3개 업무(projects 199건, site_visits 15건, install_plans 11건)를 tasks 테이블로 통합 마이그레이션 (총 225건)
+- task_code 채번: 3개 소스의 날짜 기준 오름차순 정렬 후 월별 시퀀스 통합 채번
+- 마이그레이션 스크립트 `scripts/migrate-tasks.ts` 작성 (--dry-run / --execute 모드 지원)
+- 기존 테이블(projects, site_visits, install_plans)은 변경 없음
+- Prisma 스키마에 Task 모델 추가, Hospital 모델에 역방향 관계(tasks) 추가
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260413120000_add_tasks/`, `scripts/migrate-tasks.ts`
+
+---
+
+## 2026-04-13 | 답사·설치계획 코드체계 변경
+
+- **site_visits 테이블에 `site_visit_code` 컬럼 추가** (마이그레이션: 20260413200000_add_site_visit_code): `VISIT-YYYYMM-NNNNN` 코드체계, unique 제약
+- **install_plans `plan_code` 코드체계 변경**: `IP-NNNNN` → `IP-YYYYMM-NNNNN` 형식으로 전환
+- 기존 데이터 백필: created_at 기준 월별 순번 부여 (DEV/PROD 양쪽 적용)
+- **답사 생성 API** (`app/api/site-visits/route.ts`): 생성 시 `siteVisitCode` 자동 발번 로직 추가
+- **설치계획 생성 API** (`app/api/install-plans/route.ts`): `planCode` 발번 로직을 월별 순번 방식으로 변경
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260413200000_add_site_visit_code/`, `app/api/site-visits/route.ts`, `app/api/install-plans/route.ts`
+
+---
+
 ## 2026-04-13 | 필드 엔지니어 기준 간트차트로 캘린더 페이지 교체
 
 - **캘린더 페이지 전면 교체** (`app/projects/calendar/page.tsx`): 기존 프로젝트 기준 간트/캘린더 탭 구조 완전 제거, 필드 엔지니어 기준 월간 간트차트로 재작성

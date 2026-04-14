@@ -74,7 +74,18 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  const planCode = `IP-${String(created.id).padStart(5, '0')}`
+  // planCode 생성: IP-YYYYMM-NNNNN
+  const now = new Date()
+  const ym = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`
+  const ipPrefix = `IP-${ym}-`
+  const lastPlan = await prisma.installPlan.findFirst({
+    where: { planCode: { startsWith: ipPrefix } },
+    orderBy: { planCode: 'desc' },
+    select: { planCode: true },
+  })
+  const ipSeq = lastPlan?.planCode ? parseInt(lastPlan.planCode.slice(-5)) + 1 : 1
+  const planCode = `${ipPrefix}${String(ipSeq).padStart(5, '0')}`
+
   const installPlan = await prisma.installPlan.update({
     where: { id: created.id },
     data: { planCode },

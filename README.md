@@ -1,7 +1,7 @@
 # thynC Operations System
 
 thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
-병원 정보 관리, 프로젝트(구축 공사) 관리, 답사 관리, 조직/사용자 권한 관리 기능을 제공합니다.
+병원 정보 관리, 프로젝트(구축 공사) 관리, 답사 관리, 유지보수 관리, 조직/사용자 권한 관리 기능을 제공합니다.
 
 ---
 
@@ -54,6 +54,8 @@ app/
 │   ├── hira-hospitals/               # HIRA 병원 데이터 조회
 │   ├── projects/                     # 프로젝트 CRUD + 장비/파일 관리
 │   ├── site-visits/                  # 답사 CRUD + 파일 업로드
+│   ├── maintenances/                 # 유지보수 CRUD + 파일 관리
+│   ├── tasks/                        # 업무(Task) 통합 조회
 │   ├── nav-menus/                    # 네비게이션 메뉴 조회 (Navigation 컴포넌트용)
 │   ├── constructors/                 # 시공사 관리
 │   ├── users/                        # 시스템 사용자 관리
@@ -71,6 +73,8 @@ app/
 │   │   ├── intro-type/               # 도입형태 관리
 │   │   ├── consultation-type/        # 상담유형 관리
 │   │   ├── document-type/            # 문서유형 관리
+│   │   ├── maintenance-type/         # 장애유형 관리
+│   │   ├── maintenance-status/       # 유지보수 상태 관리
 │   │   └── nav-menus/                # 네비게이션 메뉴 관리 CRUD (SUPER_ADMIN)
 │   ├── ai-assistant/                 # AI 어시스턴트 (Flowise 프록시 + 정제 + 상담이력 저장)
 │   │   ├── summarize/                # AI 정제 (Anthropic Claude API)
@@ -87,6 +91,8 @@ app/
 ├── projects/                         # 프로젝트 목록·상세·등록
 │   └── calendar/                     # 구축 일정 간트 캘린더 (새 탭)
 ├── site-visits/                      # 답사 목록·상세·등록
+├── maintenances/                     # 유지보수 목록·상세·등록
+├── tasks/                            # 업무(Task) 현황 (통합 조회)
 ├── ai-assistant/                     # AI 어시스턴트 채팅
 ├── users/                            # 사용자 관리 (ADMIN 이상)
 ├── settings/
@@ -102,6 +108,8 @@ app/
 │   ├── intro-type/                   # 도입형태 관리
 │   ├── consultation-type/            # 상담유형 관리
 │   ├── document-type/                # 문서유형 관리
+│   ├── maintenance-type/             # 장애유형 관리
+│   ├── maintenance-status/           # 유지보수 상태 관리
 │   └── nav-menus/                    # 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
 ├── login/                            # 로그인 페이지
 └── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper)
@@ -188,6 +196,7 @@ prisma/
 
 ### InstallPlan (설치계획 가안)
 - 병원별 설치계획(가안) 관리
+- 고유 코드 `planCode`: `IP-YYYYMM-NNNNN` 형식 (생성 시 자동 발번)
 - 병원 연결 (hospitalCode, 선택사항)
 - 요청일 (`requestDate`), 회신일 (`replyDate`)
 - 작성완료여부 (`writeStatus`): `-` / `미완료` / `완료`
@@ -200,6 +209,7 @@ prisma/
 
 ### SiteVisit (답사)
 - 병원 답사 기록
+- 고유 코드 `siteVisitCode`: `VISIT-YYYYMM-NNNNN` 형식 (생성 시 자동 발번)
 - 대웅 담당자 `daewoongUserId` (DAEWOONG 소속 User) + 담당자 N:M (`SiteVisitAssignee`)
 - 상태코드 연결, 방문일/요청일/회신일
 - 파일(설치계획서·평면도) 첨부: Drive 필드 (`installPlanUrl`, `floorPlanUrl`) + S3 키 (`installPlanS3Key`, `floorPlanS3Key`) 병행 지원
@@ -208,6 +218,26 @@ prisma/
 ### SiteVisitAssignee (답사 담당자)
 - SiteVisit ↔ User N:M 관계 테이블
 - siteVisitId, userId, createdAt
+
+### Maintenance (유지보수)
+- 병원 장비/시스템 유지보수 기록
+- 고유 코드 `maintenanceCode`: `MNT-YYYYMM-NNNN` 형식 (생성 시 자동 발번)
+- 병원 연결 (hospitalCode, 필수)
+- 장애유형(`typeId` → StatusCode MAINTENANCE_TYPE), 상태(`statusId` → StatusCode MAINTENANCE_STATUS)
+- 우선순위(`priority`): 긴급/높음/보통/낮음 (기본값: 보통)
+- 신고자(`reporterName`): 병원 측 텍스트
+- 원격처리 여부(`isRemote`), 접수일(`reportedAt`), 방문일(`visitDate`), 완료일(`resolvedAt`)
+- 증상(`symptoms`), 원인(`cause`): plain text
+- 조치내용(`resolution`), 비고(`notes`): 리치 텍스트(Tiptap)
+- 담당자 N:M (`MaintenanceAssignee`), 첨부파일 (`MaintenanceFile`, S3)
+
+### MaintenanceAssignee (유지보수 담당자)
+- Maintenance ↔ User N:M 관계 테이블
+- maintenanceId, userId, createdAt
+
+### MaintenanceFile (유지보수 첨부파일)
+- Maintenance에 첨부된 파일
+- fileCategory, fileName, s3Key
 
 ### DaewoongHospitalAssignment (병원 담당자 배정)
 - User(DAEWOONG 소속) ↔ Hospital N:M 관계 테이블
@@ -219,8 +249,8 @@ prisma/
 - 공사 진행 상태 정의 (레이블, 색상)
 
 ### StatusCode (상태코드)
-- 병원/답사/상담유형/문서유형 등 다용도 상태값 정의 (커스터마이징 가능, 색상 포함)
-- category: `HOSPITAL` / `SITE_VISIT` / `INTRO_TYPE` / `CONSULTATION_TYPE` / `DOCUMENT_TYPE`
+- 병원/답사/상담유형/문서유형/장애유형/유지보수상태 등 다용도 상태값 정의 (커스터마이징 가능, 색상 포함)
+- category: `HOSPITAL` / `SITE_VISIT` / `INTRO_TYPE` / `CONSULTATION_TYPE` / `DOCUMENT_TYPE` / `MAINTENANCE_TYPE` / `MAINTENANCE_STATUS`
 - value: 코드값 (String?, nullable) — 문서유형 등에서 내부 식별자로 사용
 
 ### Contractor (시공사)
@@ -241,6 +271,14 @@ prisma/
 - `iconKey` (아이콘 매핑 키), `parentKey` (상위 메뉴 키, NULL=최상위, `settings`=설정 하위)
 - `allowedRoles` (TEXT[], 허용 역할 배열, 빈 배열=전체), `allowedOrgCodes` (TEXT[], 허용 소속 코드 배열, 빈 배열=전체)
 - `isActive` (활성/비활성 토글), `sortOrder` (정렬 순서)
+
+### Task (통합 업무)
+- 프로젝트, 답사, 설치계획(가안), 유지보수를 통합 관리하는 TASK 테이블
+- 고유 코드 `taskCode`: `TASK-YYYYMM-NNNNN` 형식 (월별 순번 통합 채번)
+- `taskType`: `PROJECT` / `SITE_VISIT` / `INSTALL_PLAN` / `MAINTENANCE`
+- `refCode`: 원본 테이블의 고유 코드 (projectCode / siteVisitCode / planCode / maintenanceCode)
+- `hospitalCode` (FK→Hospital, nullable), `title`
+- 기존 테이블은 변경 없이 유지, tasks는 참조용 통합 뷰
 
 ### ConsultationQueue (상담 대기열)
 - AI 어시스턴트 상담이력 저장
@@ -333,6 +371,20 @@ prisma/
 - 등록 시 상태 기본값: '접수'
 - 설치계획서·평면도 파일 첨부 (AWS S3 업로드, presigned URL 다운로드)
 - 노트: Tiptap 리치 텍스트 에디터
+
+### 유지보수 관리
+- 병원 장비/시스템 유지보수 기록 등록·수정·삭제 (삭제는 ADMIN 이상)
+- 병원 ���색 모달로 병원 연결 (필수)
+- 장애유형(MAINTENANCE_TYPE) / 상태(MAINTENANCE_STATUS) / 우선순위(긴급/높음/보통/낮음) 관리
+- 담당자(필드 엔지니어, 복수 지정), 신고자(병원 측 텍스트), 원격처리 체크박스
+- 접수일 / 방문일 / 완료일 관리
+- 증상·원인: plain textarea, 조치내용·비고: Tiptap 리치 텍스트
+- 첨부파일 관리 (AWS S3 업로드, presigned URL 다운로드) — edit 모드에서만
+- 목록 컬럼: 접수일 | 병원명 | 제목 | 장애유형 | 우선순위 | 상태 | 원격 | 담당자 | 방문일 | 완료일
+- 목록 필터: 병원명 텍스트 검색, 장애유형/상태/우선순위 select
+- 우선순위 색상 뱃지: 긴급(red) / 높음(amber) / 보통(blue) / 낮음(gray)
+- 등록 시 상태 기본값: '접수'
+- 병원 상세 페이지에 유지보수 카드 연동
 
 ### 소속 관리 (SUPER_ADMIN 전용)
 - 소속(Organization) 추가·수정·삭제

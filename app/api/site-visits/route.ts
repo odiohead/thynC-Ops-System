@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '병원을 선택해주세요.' }, { status: 400 })
   }
 
-  const siteVisit = await prisma.siteVisit.create({
+  const created = await prisma.siteVisit.create({
     data: {
       hospitalCode,
       daewoongUserId: daewoongUserId || null,
@@ -99,6 +99,23 @@ export async function POST(request: NextRequest) {
         },
       }),
     },
+  })
+
+  // siteVisitCode 생성: VISIT-YYYYMM-NNNNN
+  const now = new Date()
+  const ym = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`
+  const prefix = `VISIT-${ym}-`
+  const last = await prisma.siteVisit.findFirst({
+    where: { siteVisitCode: { startsWith: prefix } },
+    orderBy: { siteVisitCode: 'desc' },
+    select: { siteVisitCode: true },
+  })
+  const seq = last?.siteVisitCode ? parseInt(last.siteVisitCode.slice(-5)) + 1 : 1
+  const siteVisitCode = `${prefix}${String(seq).padStart(5, '0')}`
+
+  const siteVisit = await prisma.siteVisit.update({
+    where: { id: created.id },
+    data: { siteVisitCode },
     include,
   })
 

@@ -65,6 +65,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
     },
   })
 
+  // Task 완료 동기화: writeStatus='완료' AND replyStatus='완료' → 완료
+  if ((writeStatus !== undefined || replyStatus !== undefined) && updated?.planCode) {
+    const isCompleted = updated.writeStatus === '완료' && updated.replyStatus === '완료'
+    await prisma.task.updateMany({
+      where: { refCode: updated.planCode, taskType: 'INSTALL_PLAN' },
+      data: { isCompleted, completedAt: isCompleted ? new Date() : null },
+    })
+  }
+
   return NextResponse.json({ installPlan: updated })
 }
 
