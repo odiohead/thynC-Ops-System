@@ -30,9 +30,52 @@ interface Project {
   assignees: ProjectAssignee[]
 }
 
+interface MaintenanceItem {
+  id: number
+  maintenanceCode: string | null
+  title: string
+  reportedAt: string | null
+  visitDate: string | null
+  resolvedAt: string | null
+  hospital: {
+    hospitalName: string | null
+    hiraHospitalName: string | null
+  }
+  type: { id: number; name: string; color: string } | null
+  status: { id: number; name: string; color: string } | null
+  assignees: { userId: string; user: { id: string; name: string } }[]
+}
+
+interface SiteVisitItem {
+  id: number
+  siteVisitCode: string | null
+  hospitalCode: string
+  visitDate: string | null
+  requestDate: string | null
+  hospital: {
+    hospitalName: string | null
+    hiraHospitalName: string | null
+  }
+  status: { id: number; name: string; color: string } | null
+  assignees: { userId: string; user: { id: string; name: string } }[]
+}
+
+// Unified item for gantt chart
+interface GanttItem {
+  id: number
+  kind: 'project' | 'maintenance' | 'site-visit'
+  code: string
+  startDate: string
+  endDate: string
+  label: string
+  color: string
+  tooltip: string
+  href: string
+}
+
 interface Lane {
-  projects: Project[]
-  lastEnd: number // timestamp of last bar's endDateExpected
+  items: GanttItem[]
+  lastEnd: number
 }
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
@@ -56,37 +99,97 @@ function formatMonthDay(d: Date): string {
 
 // ─── Lane allocation ──────────────────────────────────────────────────────────
 
-function allocateLanes(projects: Project[]): Project[][] {
+function allocateLanes(items: GanttItem[]): GanttItem[][] {
   // Sort by startDate ASC
-  const sorted = [...projects].sort((a, b) => {
-    const aStart = a.startDate ? a.startDate.slice(0, 10) : '9999'
-    const bStart = b.startDate ? b.startDate.slice(0, 10) : '9999'
-    return aStart.localeCompare(bStart)
-  })
+  const sorted = [...items].sort((a, b) => a.startDate.localeCompare(b.startDate))
 
   const lanes: Lane[] = []
 
-  for (const proj of sorted) {
-    if (!proj.startDate || !proj.endDateExpected) continue
-    const projStart = parseDate(proj.startDate).getTime()
-    const projEnd = parseDate(proj.endDateExpected).getTime()
+  for (const item of sorted) {
+    const itemStart = parseDate(item.startDate).getTime()
+    const itemEnd = parseDate(item.endDate).getTime()
 
     let placed = false
     for (const lane of lanes) {
-      if (lane.lastEnd < projStart) {
-        lane.projects.push(proj)
-        lane.lastEnd = projEnd
+      if (lane.lastEnd < itemStart) {
+        lane.items.push(item)
+        lane.lastEnd = itemEnd
         placed = true
         break
       }
     }
 
     if (!placed) {
-      lanes.push({ projects: [proj], lastEnd: projEnd })
+      lanes.push({ items: [item], lastEnd: itemEnd })
     }
   }
 
-  return lanes.length > 0 ? lanes.map(l => l.projects) : [[]]
+  return lanes.length > 0 ? lanes.map(l => l.items) : [[]]
+}
+
+// ─── Convert to GanttItems ───────────────────────────────────────────────────
+
+function projectsToGanttItems(projects: Project[]): GanttItem[] {
+  return projects
+    .filter(p => p.startDate && p.endDateExpected)
+    .map(p => ({
+      id: p.id,
+      kind: 'project' as const,
+      code: p.projectCode,
+      startDate: p.startDate!.slice(0, 10),
+      endDate: p.endDateExpected!.slice(0, 10),
+      label: p.hospital.hospitalName ?? p.hospital.hiraHospitalName ?? '',
+      color: p.buildStatus?.color ?? '#6B7280',
+      tooltip: `[구축] ${p.hospital.hospitalName ?? p.hospital.hiraHospitalName ?? ''} (${p.startDate!.slice(0, 10)} ~ ${p.endDateExpected!.slice(0, 10)})`,
+      href: `/projects/${p.projectCode}`,
+    }))
+}
+
+function maintenancesToGanttItems(maintenances: MaintenanceItem[]): GanttItem[] {
+  return maintenances
+    .filter(m => m.reportedAt || m.visitDate || m.resolvedAt)
+    .map(m => {
+      const dates = [m.reportedAt, m.visitDate, m.resolvedAt]
+        .filter(Boolean)
+        .map(d => d!.slice(0, 10))
+        .sort()
+      const startDate = dates[0]
+      const endDate = dates[dates.length - 1]
+
+      return {
+        id: m.id + 1000000,
+        kind: 'maintenance' as const,
+        code: m.maintenanceCode ?? '',
+        startDate,
+        endDate,
+        label: `🔧 ${m.hospital.hospitalName ?? m.hospital.hiraHospitalName ?? ''} - ${m.title}`,
+        color: m.type?.color ?? '#F59E0B',
+        tooltip: `[유지보수] ${m.hospital.hospitalName ?? m.hospital.hiraHospitalName ?? ''} - ${m.title} (${startDate} ~ ${endDate})`,
+        href: `/maintenances/${m.id}`,
+      }
+    })
+}
+
+function siteVisitsToGanttItems(siteVisits: SiteVisitItem[]): GanttItem[] {
+  return siteVisits
+    .filter(sv => sv.visitDate)
+    .map(sv => {
+      const date = sv.visitDate!.slice(0, 10)
+      const hospitalName = sv.hospital.hospitalName ?? sv.hospital.hiraHospitalName ?? ''
+      const statusName = sv.status?.name ?? ''
+
+      return {
+        id: sv.id + 2000000,
+        kind: 'site-visit' as const,
+        code: sv.siteVisitCode ?? '',
+        startDate: date,
+        endDate: date,
+        label: `📋 ${hospitalName} 답사`,
+        color: sv.status?.color ?? '#10B981',
+        tooltip: `[답사] ${hospitalName} (${date}) ${statusName}`,
+        href: `/site-visits/${sv.id}`,
+      }
+    })
 }
 
 // ─── Week groups builder ──────────────────────────────────────────────────────
@@ -141,6 +244,8 @@ function CalendarPageContent() {
 
   const [engineers, setEngineers] = useState<FieldEngineer[]>([])
   const [projects, setProjects] = useState<Project[]>([])
+  const [maintenances, setMaintenances] = useState<MaintenanceItem[]>([])
+  const [siteVisits, setSiteVisits] = useState<SiteVisitItem[]>([])
   const [loading, setLoading] = useState(true)
 
   // Fetch data
@@ -148,10 +253,14 @@ function CalendarPageContent() {
     Promise.all([
       fetch('/api/settings/field-engineers?all=true').then(r => r.json()),
       fetch('/api/projects?all=true').then(r => r.json()),
+      fetch('/api/maintenances').then(r => r.json()),
+      fetch('/api/site-visits?limit=9999').then(r => r.json()),
     ])
-      .then(([feData, projData]) => {
+      .then(([feData, projData, mntData, svData]) => {
         setEngineers(feData.data ?? [])
         setProjects(projData.projects ?? [])
+        setMaintenances(mntData.maintenances ?? [])
+        setSiteVisits(svData.siteVisits ?? [])
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -203,19 +312,45 @@ function CalendarPageContent() {
     return -1
   }, [today, currentYear, currentMonth])
 
-  // Engineer rows with lane data
+  // Engineer rows with lane data (projects + maintenances combined)
   const engineerRows = useMemo(() => {
     return engineers.map(eng => {
-      // Find projects assigned to this engineer that overlap with current month
-      const assigned = projects.filter(p => {
+      // Projects assigned to this engineer overlapping with current month
+      const assignedProjects = projects.filter(p => {
         if (!p.startDate || !p.endDateExpected) return false
         const hasAssignee = p.assignees.some(a => a.userId === eng.userId)
         if (!hasAssignee) return false
-        // Intersection: project range overlaps with month range
         return p.startDate.slice(0, 10) <= monthEndStr && p.endDateExpected.slice(0, 10) >= monthStartStr
       })
 
-      const lanes = allocateLanes(assigned)
+      // Maintenances assigned to this engineer overlapping with current month
+      const assignedMaint = maintenances.filter(m => {
+        const hasAssignee = m.assignees.some(a => a.userId === eng.userId)
+        if (!hasAssignee) return false
+        const dates = [m.reportedAt, m.visitDate, m.resolvedAt].filter(Boolean).map(d => d!.slice(0, 10)).sort()
+        if (dates.length === 0) return false
+        const start = dates[0]
+        const end = dates[dates.length - 1]
+        return start <= monthEndStr && end >= monthStartStr
+      })
+
+      // Site visits assigned to this engineer overlapping with current month
+      const assignedSV = siteVisits.filter(sv => {
+        const hasAssignee = sv.assignees.some(a => a.userId === eng.userId)
+        if (!hasAssignee) return false
+        if (!sv.visitDate) return false
+        const date = sv.visitDate.slice(0, 10)
+        return date >= monthStartStr && date <= monthEndStr
+      })
+
+      // Convert to unified GanttItems
+      const ganttItems = [
+        ...projectsToGanttItems(assignedProjects),
+        ...maintenancesToGanttItems(assignedMaint),
+        ...siteVisitsToGanttItems(assignedSV),
+      ]
+
+      const lanes = allocateLanes(ganttItems)
 
       return {
         engineer: eng,
@@ -223,7 +358,7 @@ function CalendarPageContent() {
         laneCount: lanes.length,
       }
     })
-  }, [engineers, projects, monthStartStr, monthEndStr])
+  }, [engineers, projects, maintenances, siteVisits, monthStartStr, monthEndStr])
 
   // Total content height for overlays
   const totalContentHeight = useMemo(() => {
@@ -426,18 +561,16 @@ function CalendarPageContent() {
 
                   {/* Track area: lanes stacked vertically */}
                   <div style={{ flex: 1, position: 'relative', zIndex: 2 }}>
-                    {lanes.map((laneProjects, laneIdx) =>
-                      laneProjects.map(proj => {
-                        if (!proj.startDate || !proj.endDateExpected) return null
-
-                        const projStartDate = parseDate(proj.startDate)
-                        const projEndDate = parseDate(proj.endDateExpected)
+                    {lanes.map((laneItems, laneIdx) =>
+                      laneItems.map(item => {
+                        const itemStartDate = parseDate(item.startDate)
+                        const itemEndDate = parseDate(item.endDate)
                         const monthStart = new Date(currentYear, currentMonth, 1)
                         const monthEnd = new Date(currentYear, currentMonth, totalDays)
 
                         // Clamp to month
-                        const clampedStart = projStartDate < monthStart ? monthStart : projStartDate
-                        const clampedEnd = projEndDate > monthEnd ? monthEnd : projEndDate
+                        const clampedStart = itemStartDate < monthStart ? monthStart : itemStartDate
+                        const clampedEnd = itemEndDate > monthEnd ? monthEnd : itemEndDate
 
                         const startDay = clampedStart.getDate() - 1 // 0-indexed
                         const endDay = clampedEnd.getDate() - 1
@@ -445,38 +578,72 @@ function CalendarPageContent() {
 
                         const leftPct = (startDay / totalDays) * 100
                         const widthPct = (duration / totalDays) * 100
-                        const barColor = proj.buildStatus?.color ?? '#6B7280'
-                        const hospitalName = proj.hospital.hospitalName ?? proj.hospital.hiraHospitalName ?? ''
+                        const barColor = item.color
+
+                        const todayTime = today.getTime()
+                        const clampedStartTime = clampedStart.getTime()
+                        const clampedEndTime = clampedEnd.getTime()
+
+                        const isPast = todayTime > clampedEndTime
+                        const isFuture = todayTime < clampedStartTime
+                        const spansToday = !isPast && !isFuture
+                        const isMaintenance = item.kind === 'maintenance'
+
+                        // Past fade overlay width (percentage within bar)
+                        let pastOverlayPct = 0
+                        if (spansToday) {
+                          const barDuration = clampedEndTime - clampedStartTime
+                          pastOverlayPct = barDuration > 0
+                            ? ((todayTime - clampedStartTime) / barDuration) * 100
+                            : 0
+                        }
 
                         // Calculate approximate pixel width for text visibility
-                        const approxWidth = (duration / totalDays) * (window?.innerWidth ?? 1200)
+                        const approxWidth = (duration / totalDays) * (typeof window !== 'undefined' ? window.innerWidth : 1200)
                         const showText = approxWidth >= 40
 
                         return (
                           <div
-                            key={proj.id}
-                            title={`${hospitalName} (${proj.startDate?.slice(0, 10)} ~ ${proj.endDateExpected?.slice(0, 10)})`}
-                            onClick={() => window.open(`/projects/${proj.projectCode}`, '_blank')}
+                            key={item.id}
+                            title={item.tooltip}
+                            onClick={() => window.open(item.href, '_blank')}
                             style={{
                               position: 'absolute',
                               left: `${leftPct}%`,
                               top: laneIdx * LANE_H + 6,
                               width: `${widthPct}%`,
                               height: LANE_H - 12,
-                              background: barColor,
+                              backgroundColor: barColor,
+                              opacity: isPast ? 0.45 : 1,
                               borderRadius: 4,
                               cursor: 'pointer',
                               display: 'flex', alignItems: 'center',
                               paddingLeft: 6, paddingRight: 6,
                               overflow: 'hidden',
+                              ...(isMaintenance || item.kind === 'site-visit' ? {
+                                border: `1.5px solid ${barColor}`,
+                                borderLeftWidth: 3,
+                              } : {}),
                             }}
                           >
+                            {/* Past portion fade overlay */}
+                            {spansToday && pastOverlayPct > 0 && (
+                              <div style={{
+                                position: 'absolute', left: 0, top: 0,
+                                width: `${pastOverlayPct}%`, height: '100%',
+                                backgroundColor: 'rgba(255,255,255,0.55)',
+                                borderRadius: '4px 0 0 4px',
+                                pointerEvents: 'none',
+                              }} />
+                            )}
                             {showText && (
                               <span style={{
                                 fontSize: 10, color: 'white', whiteSpace: 'nowrap',
                                 overflow: 'hidden', textOverflow: 'ellipsis',
+                                position: 'relative', zIndex: 1,
+                                ...(item.kind !== 'project' ? { textShadow: '0 0 2px rgba(0,0,0,0.3)' } : {}),
                               }}>
-                                {hospitalName}
+                                {item.label}
                               </span>
                             )}
                           </div>

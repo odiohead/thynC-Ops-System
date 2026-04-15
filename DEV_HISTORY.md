@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-04-15 | 구축일정 간트차트 기능 개선
+
+- **바 색상 과거/미래 반전**: 과거 일정은 옅게(opacity 0.45), 미래 일정은 짙게 표시. 오늘을 걸치는 바는 gradient로 과거 부분만 투명하게 처리
+- **유지보수 업무 간트차트 통합**: 프로젝트뿐 아니라 유지보수(Maintenance) 업무도 필드 엔지니어별 간트차트에 표시
+  - 유지보수 바 날짜: reportedAt, visitDate, resolvedAt 중 가장 이른 날짜~가장 늦은 날짜 범위 사용
+  - 유지보수 바 색상: 장애유형(type.color) 사용, 구축 프로젝트와 구분을 위해 좌측 3px 보더 + 사선 패턴(미래) 적용
+  - 유지보수 바 라벨: 🔧 아이콘 + 병원명 - 제목 형식
+  - 바 클릭 시 유지보수 상세 페이지 새 탭 오픈
+- **답사(SiteVisit) 간트차트 통합**: 필드 엔지니어에 배정된 답사도 간트차트에 표시
+  - 답사 바 날짜: visitDate(방문일) 기준 단일일 바
+  - 답사 바 색상: 답사 상태(status.color) 사용, 📋 아이콘 + 병원명 답사 라벨
+  - 바 클릭 시 답사 상세 페이지 새 탭 오픈
+- **통합 GanttItem 타입 도입**: Project, Maintenance, SiteVisit을 통합 GanttItem으로 변환 후 레인 배치
+- 영향 파일: `app/projects/calendar/page.tsx`
+
+---
+
 ## 2026-04-14 | 유지보수(Maintenance) 업무 모듈 신규 추가
 
 - **DB 스키마**: Maintenance, MaintenanceAssignee, MaintenanceFile 3개 모델 추가 (마이그레이션: 20260414000000_add_maintenances)
