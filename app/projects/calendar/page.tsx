@@ -580,23 +580,7 @@ function CalendarPageContent() {
                         const widthPct = (duration / totalDays) * 100
                         const barColor = item.color
 
-                        const todayTime = today.getTime()
-                        const clampedStartTime = clampedStart.getTime()
-                        const clampedEndTime = clampedEnd.getTime()
-
-                        const isPast = todayTime > clampedEndTime
-                        const isFuture = todayTime < clampedStartTime
-                        const spansToday = !isPast && !isFuture
-                        const isMaintenance = item.kind === 'maintenance'
-
-                        // Past fade overlay width (percentage within bar)
-                        let pastOverlayPct = 0
-                        if (spansToday) {
-                          const barDuration = clampedEndTime - clampedStartTime
-                          pastOverlayPct = barDuration > 0
-                            ? ((todayTime - clampedStartTime) / barDuration) * 100
-                            : 0
-                        }
+                        const isPast = today.getTime() > clampedEnd.getTime()
 
                         // Calculate approximate pixel width for text visibility
                         const approxWidth = (duration / totalDays) * (typeof window !== 'undefined' ? window.innerWidth : 1200)
@@ -620,27 +604,16 @@ function CalendarPageContent() {
                               display: 'flex', alignItems: 'center',
                               paddingLeft: 6, paddingRight: 6,
                               overflow: 'hidden',
-                              ...(isMaintenance || item.kind === 'site-visit' ? {
+                              ...(item.kind === 'maintenance' || item.kind === 'site-visit' ? {
                                 border: `1.5px solid ${barColor}`,
                                 borderLeftWidth: 3,
                               } : {}),
                             }}
                           >
-                            {/* Past portion fade overlay */}
-                            {spansToday && pastOverlayPct > 0 && (
-                              <div style={{
-                                position: 'absolute', left: 0, top: 0,
-                                width: `${pastOverlayPct}%`, height: '100%',
-                                backgroundColor: 'rgba(255,255,255,0.55)',
-                                borderRadius: '4px 0 0 4px',
-                                pointerEvents: 'none',
-                              }} />
-                            )}
                             {showText && (
                               <span style={{
                                 fontSize: 10, color: 'white', whiteSpace: 'nowrap',
                                 overflow: 'hidden', textOverflow: 'ellipsis',
-                                position: 'relative', zIndex: 1,
                                 ...(item.kind !== 'project' ? { textShadow: '0 0 2px rgba(0,0,0,0.3)' } : {}),
                               }}>
                                 {item.label}
