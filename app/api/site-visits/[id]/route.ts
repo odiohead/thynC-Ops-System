@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
 
 type Params = { params: { id: string } }
 
@@ -93,6 +94,39 @@ export async function PUT(request: NextRequest, { params }: Params) {
     })
   }
 
+  // Google Calendar 동기화 (비차단)
+  const calendarChanged = visitDate !== undefined || assigneeIds !== undefined
+  if (updated && calendarChanged) {
+    const hasVisitDate = !!updated.visitDate
+    const hasEventId = !!updated.calendarEventId
+    const hospitalName = updated.hospital.hospitalName ?? updated.hospital.hiraHospitalName ?? ''
+    const assigneeEmails = updated.assignees
+      .map((a: { user: { email?: string } }) => a.user.email)
+      .filter(Boolean) as string[]
+
+    if (hasEventId && !hasVisitDate) {
+      await deleteCalendarEvent('site-visit', updated.calendarEventId!)
+      await prisma.siteVisit.update({ where: { id }, data: { calendarEventId: null } })
+    } else if (hasEventId && hasVisitDate) {
+      await updateCalendarEvent('site-visit', updated.calendarEventId!, {
+        summary: `[답사] ${hospitalName}`,
+        description: `답사 코드: ${updated.siteVisitCode}`,
+        startDate: updated.visitDate!,
+        attendeeEmails: assigneeEmails,
+      })
+    } else if (!hasEventId && hasVisitDate) {
+      const eventId = await createCalendarEvent('site-visit', {
+        summary: `[답사] ${hospitalName}`,
+        description: `답사 코드: ${updated.siteVisitCode}`,
+        startDate: updated.visitDate!,
+        attendeeEmails: assigneeEmails,
+      })
+      if (eventId) {
+        await prisma.siteVisit.update({ where: { id }, data: { calendarEventId: eventId } })
+      }
+    }
+  }
+
   return NextResponse.json({ siteVisit: updated })
 }
 
@@ -105,6 +139,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
 
   const existing = await prisma.siteVisit.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: '답사를 찾을 수 없습니다.' }, { status: 404 })
+
+  // Google Calendar 이벤트 삭제 (비차단)
+  if (existing.calendarEventId) {
+    await deleteCalendarEvent('site-visit', existing.calendarEventId)
+  }
 
   await prisma.siteVisit.delete({ where: { id } })
   return NextResponse.json({ success: true })

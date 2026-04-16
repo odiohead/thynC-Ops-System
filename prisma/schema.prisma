@@ -276,6 +276,7 @@ model Project {
   issueNote           String?      @db.Text @map("issue_note")
   remark              String?      @map("remark")
   driveFolderId       String?      @map("drive_folder_id")
+  calendarEventId     String?      @map("calendar_event_id")
   createdAt           DateTime     @default(now()) @map("created_at")
   updatedAt           DateTime     @updatedAt @map("updated_at")
   hospital            Hospital     @relation(fields: [hospitalCode], references: [hospitalCode])
@@ -359,6 +360,7 @@ model SiteVisit {
   installPlanS3Key  String?  @map("install_plan_s3_key")
   floorPlanS3Key    String?  @map("floor_plan_s3_key")
   notes           String?        @db.Text @map("notes")
+  calendarEventId String?        @map("calendar_event_id")
   createdAt       DateTime       @default(now()) @map("created_at")
   updatedAt       DateTime       @updatedAt @map("updated_at")
 
@@ -558,6 +560,7 @@ model Maintenance {
   cause             String?   @db.Text @map("cause")
   resolution        String?   @db.Text @map("resolution")
   notes             String?   @db.Text @map("notes")
+  calendarEventId   String?   @map("calendar_event_id")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 

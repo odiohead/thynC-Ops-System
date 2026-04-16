@@ -182,6 +182,7 @@ prisma/
 - 진행 플래그: `hasSurvey` (답사 완료), `hasOrder` (발주 완료)
 - 공사 상태(`buildStatus`), 시작일/완료예정일, 비고(`remark`), 이슈 노트(`issueNote`, 리치 텍스트)
 - Google Drive 폴더 연결 (`driveFolderId`)
+- Google Calendar 이벤트 ID (`calendarEventId`) — 프로젝트 생성/수정/삭제 시 자동 동기화
 
 ### ProjectAssignee (프로젝트 담당자)
 - Project ↔ User N:M 관계 테이블

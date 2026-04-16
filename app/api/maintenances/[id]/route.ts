@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { deleteFromS3 } from '@/lib/s3'
+import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
 
 export const dynamic = 'force-dynamic'
 
@@ -111,6 +112,39 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
   }
 
+  // Google Calendar 동기화 (비차단)
+  const calendarChanged = visitDate !== undefined || assigneeIds !== undefined || title !== undefined
+  if (updated && calendarChanged) {
+    const hasVisitDate = !!updated.visitDate
+    const hasEventId = !!updated.calendarEventId
+    const hospitalName = updated.hospital.hospitalName ?? updated.hospital.hiraHospitalName ?? ''
+    const assigneeEmails = updated.assignees
+      .map((a: { user: { email?: string } }) => a.user.email)
+      .filter(Boolean) as string[]
+
+    if (hasEventId && !hasVisitDate) {
+      await deleteCalendarEvent('maintenance', updated.calendarEventId!)
+      await prisma.maintenance.update({ where: { id }, data: { calendarEventId: null } })
+    } else if (hasEventId && hasVisitDate) {
+      await updateCalendarEvent('maintenance', updated.calendarEventId!, {
+        summary: `[유지보수] ${hospitalName} - ${updated.title}`,
+        description: `유지보수 코드: ${updated.maintenanceCode}`,
+        startDate: updated.visitDate!,
+        attendeeEmails: assigneeEmails,
+      })
+    } else if (!hasEventId && hasVisitDate) {
+      const eventId = await createCalendarEvent('maintenance', {
+        summary: `[유지보수] ${hospitalName} - ${updated.title}`,
+        description: `유지보수 코드: ${updated.maintenanceCode}`,
+        startDate: updated.visitDate!,
+        attendeeEmails: assigneeEmails,
+      })
+      if (eventId) {
+        await prisma.maintenance.update({ where: { id }, data: { calendarEventId: eventId } })
+      }
+    }
+  }
+
   return NextResponse.json({ maintenance: updated })
 }
 
@@ -123,9 +157,14 @@ export async function DELETE(request: NextRequest, { params }: Params) {
 
   const existing = await prisma.maintenance.findUnique({
     where: { id },
-    include: { files: true },
+    include: { files: true, hospital: { select: { hospitalName: true } } },
   })
   if (!existing) return NextResponse.json({ error: '유지보수를 찾을 수 없습니다.' }, { status: 404 })
+
+  // Google Calendar 이벤트 삭제 (비차단)
+  if (existing.calendarEventId) {
+    await deleteCalendarEvent('maintenance', existing.calendarEventId)
+  }
 
   // S3 파일 삭제
   for (const file of existing.files) {

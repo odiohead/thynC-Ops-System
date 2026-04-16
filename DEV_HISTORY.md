@@ -4,6 +4,28 @@
 
 ---
 
+## 2026-04-16 | Google Calendar 프로젝트 일정 동기화
+
+- **DB 마이그레이션**: projects 테이블에 `calendar_event_id` TEXT 컬럼 추가 (20260416000000_add_calendar_event_id_to_projects)
+- **OAuth2 인증 라우트 신규 생성** (Gmail OAuth 패턴 동일):
+  - `app/api/auth/calendar/route.ts`: GET → Google Calendar OAuth 인증 URL redirect (SUPER_ADMIN 전용)
+  - `app/api/auth/calendar/callback/route.ts`: GET → code로 토큰 교환, refresh_token을 app_settings 테이블에 저장
+- **lib/googleCalendar.ts 신규 생성**: OAuth2Client 사용, refresh_token은 app_settings DB에서 조회
+  - `createCalendarEvent(project)`: All-day 이벤트 생성 (summary: projectName, endDateExpected +1일)
+  - `updateCalendarEvent(eventId, project)`: 이벤트 수정
+  - `deleteCalendarEvent(eventId)`: 이벤트 삭제
+  - 모든 함수 try-catch, 실패 시 console.error만 (프로젝트 저장 비차단)
+- **프로젝트 POST** (`app/api/projects/route.ts`): 생성 후 startDate 있으면 캘린더 이벤트 생성, eventId DB 저장
+- **프로젝트 PUT** (`app/api/projects/[code]/route.ts`):
+  - calendarEventId 있고 startDate 삭제 → 캘린더 이벤트 삭제 + calendarEventId null
+  - calendarEventId 있고 startDate 유지 → 이벤트 업데이트
+  - calendarEventId 없고 startDate 생김 → 새 이벤트 생성
+- **프로젝트 DELETE**: 삭제 전 calendarEventId 있으면 캘린더 이벤트 삭제
+- **환경변수**: `GOOGLE_CALENDAR_ID` 추가 (.env), CLIENT_ID/SECRET는 기존 Gmail OAuth와 동일 사용
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260416000000_add_calendar_event_id_to_projects/`, `.env`, `lib/googleCalendar.ts` (신설), `app/api/auth/calendar/` (신설), `app/api/projects/route.ts`, `app/api/projects/[code]/route.ts`
+
+---
+
 ## 2026-04-15 | 구축일정 간트차트 기능 개선
 
 - **바 색상 과거/미래 반전**: 과거 일정은 옅게(opacity 0.45), 미래 일정은 짙게 표시. 오늘을 걸치는 바는 gradient로 과거 부분만 투명하게 처리

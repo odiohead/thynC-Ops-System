@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { createCalendarEvent } from '@/lib/googleCalendar'
 
 const PAGE_SIZE = 20
 
@@ -127,6 +128,35 @@ export async function POST(request: NextRequest) {
         userId,
       })),
     })
+  }
+
+  // Google Calendar 이벤트 생성 (비차단) — visitDate 기준
+  if (siteVisit.visitDate) {
+    const assigneeEmails = Array.isArray(assigneeIds) && assigneeIds.length > 0
+      ? (await prisma.user.findMany({
+          where: { id: { in: assigneeIds } },
+          select: { email: true },
+        })).map(u => u.email)
+      : []
+
+    const hospital = await prisma.hospital.findUnique({
+      where: { hospitalCode },
+      select: { hospitalName: true, hiraHospitalName: true },
+    })
+    const hospitalName = hospital?.hospitalName ?? hospital?.hiraHospitalName ?? ''
+
+    const eventId = await createCalendarEvent('site-visit', {
+      summary: `[답사] ${hospitalName}`,
+      description: `답사 코드: ${siteVisitCode}`,
+      startDate: siteVisit.visitDate,
+      attendeeEmails: assigneeEmails,
+    })
+    if (eventId) {
+      await prisma.siteVisit.update({
+        where: { id: siteVisit.id },
+        data: { calendarEventId: eventId },
+      })
+    }
   }
 
   return NextResponse.json({ siteVisit }, { status: 201 })

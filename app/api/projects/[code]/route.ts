@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
 
 type Params = { params: { code: string } }
 
@@ -124,6 +125,48 @@ export async function PUT(request: NextRequest, { params }: Params) {
     })
   }
 
+  // Google Calendar 동기화 (비차단)
+  const calendarChanged = startDate !== undefined || endDateExpected !== undefined || Array.isArray(assigneeIds)
+  if (updated && calendarChanged) {
+    const hasStartDate = !!updated.startDate
+    const hasEventId = !!updated.calendarEventId
+
+    // 담당자 이메일 조회
+    const assigneeEmails = updated.assignees
+      .map((a: { user: { email?: string } }) => a.user.email)
+      .filter(Boolean) as string[]
+
+    if (hasEventId && !hasStartDate) {
+      await deleteCalendarEvent('project', updated.calendarEventId!)
+      await prisma.project.update({
+        where: { projectCode: params.code },
+        data: { calendarEventId: null },
+      })
+    } else if (hasEventId && hasStartDate) {
+      await updateCalendarEvent('project', updated.calendarEventId!, {
+        summary: updated.projectName,
+        description: `프로젝트 코드: ${updated.projectCode}`,
+        startDate: updated.startDate!,
+        endDate: updated.endDateExpected,
+        attendeeEmails: assigneeEmails,
+      })
+    } else if (!hasEventId && hasStartDate) {
+      const eventId = await createCalendarEvent('project', {
+        summary: updated.projectName,
+        description: `프로젝트 코드: ${updated.projectCode}`,
+        startDate: updated.startDate!,
+        endDate: updated.endDateExpected,
+        attendeeEmails: assigneeEmails,
+      })
+      if (eventId) {
+        await prisma.project.update({
+          where: { projectCode: params.code },
+          data: { calendarEventId: eventId },
+        })
+      }
+    }
+  }
+
   revalidatePath('/projects')
   return NextResponse.json({ project: updated })
 }
@@ -133,6 +176,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   if (!authUser || authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const existing = await prisma.project.findUnique({ where: { projectCode: params.code } })
   if (!existing) return NextResponse.json({ error: '프로젝트를 찾을 수 없습니다.' }, { status: 404 })
+
+  // Google Calendar 이벤트 삭제 (비차단)
+  if (existing.calendarEventId) {
+    await deleteCalendarEvent('project', existing.calendarEventId)
+  }
 
   // 연관 데이터 먼저 삭제
   await prisma.projectDevice.deleteMany({ where: { projectId: existing.id } })

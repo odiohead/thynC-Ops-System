@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { createCalendarEvent } from '@/lib/googleCalendar'
 
 export const dynamic = 'force-dynamic'
 
@@ -144,6 +145,30 @@ export async function POST(request: NextRequest) {
       title: title.trim(),
     },
   })
+
+  // Google Calendar 이벤트 생성 (비차단) — visitDate 기준
+  if (maintenance.visitDate) {
+    const assigneeEmails = Array.isArray(assigneeIds) && assigneeIds.length > 0
+      ? (await prisma.user.findMany({
+          where: { id: { in: assigneeIds } },
+          select: { email: true },
+        })).map(u => u.email)
+      : []
+
+    const hospitalName = maintenance.hospital.hospitalName ?? maintenance.hospital.hiraHospitalName ?? ''
+    const eventId = await createCalendarEvent('maintenance', {
+      summary: `[유지보수] ${hospitalName} - ${title.trim()}`,
+      description: `유지보수 코드: ${maintenanceCode}`,
+      startDate: maintenance.visitDate,
+      attendeeEmails: assigneeEmails,
+    })
+    if (eventId) {
+      await prisma.maintenance.update({
+        where: { id: maintenance.id },
+        data: { calendarEventId: eventId },
+      })
+    }
+  }
 
   return NextResponse.json({ maintenance }, { status: 201 })
 }

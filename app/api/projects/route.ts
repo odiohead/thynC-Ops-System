@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { createCalendarEvent } from '@/lib/googleCalendar'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -169,6 +170,31 @@ export async function POST(request: NextRequest) {
         userId,
       })),
     })
+  }
+
+  // Google Calendar 이벤트 생성 (비차단)
+  if (project.startDate) {
+    // 담당자 이메일 조회
+    const assigneeEmails = Array.isArray(assigneeIds) && assigneeIds.length > 0
+      ? (await prisma.user.findMany({
+          where: { id: { in: assigneeIds } },
+          select: { email: true },
+        })).map(u => u.email)
+      : []
+
+    const eventId = await createCalendarEvent('project', {
+      summary: project.projectName,
+      description: `프로젝트 코드: ${project.projectCode}`,
+      startDate: project.startDate,
+      endDate: project.endDateExpected,
+      attendeeEmails: assigneeEmails,
+    })
+    if (eventId) {
+      await prisma.project.update({
+        where: { projectCode: project.projectCode },
+        data: { calendarEventId: eventId },
+      })
+    }
   }
 
   return NextResponse.json({ project }, { status: 201 })
