@@ -215,6 +215,7 @@ prisma/
 - 상태코드 연결, 방문일/요청일/회신일
 - 파일(설치계획서·평면도) 첨부: Drive 필드 (`installPlanUrl`, `floorPlanUrl`) + S3 키 (`installPlanS3Key`, `floorPlanS3Key`) 병행 지원
 - 노트(`notes`): 리치 텍스트(Tiptap)
+- Google Calendar 이벤트 ID (`calendarEventId`) — 답사 생성/수정/삭제 시 자동 동기화
 
 ### SiteVisitAssignee (답사 담당자)
 - SiteVisit ↔ User N:M 관계 테이블
@@ -231,6 +232,7 @@ prisma/
 - 증상(`symptoms`), 원인(`cause`): plain text
 - 조치내용(`resolution`), 비고(`notes`): 리치 텍스트(Tiptap)
 - 담당자 N:M (`MaintenanceAssignee`), 첨부파일 (`MaintenanceFile`, S3)
+- Google Calendar 이벤트 ID (`calendarEventId`) — 유지보수 생성/수정/삭제 시 자동 동기화
 
 ### MaintenanceAssignee (유지보수 담당자)
 - Maintenance ↔ User N:M 관계 테이블

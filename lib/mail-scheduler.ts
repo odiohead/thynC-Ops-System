@@ -9,17 +9,25 @@ let timer: ReturnType<typeof setInterval> | null = null
 let currentInterval = 'off'
 
 async function runSync() {
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3001'
+  const secret = process.env.CRON_SECRET || ''
+  const headers = { Authorization: `Bearer ${secret}` }
+
+  // 설치계획 메일 동기화
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3001'
-    const secret = process.env.CRON_SECRET || ''
-    await fetch(`${baseUrl}/api/mail-queue/sync`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${secret}` },
-    })
-    console.log(`[mail-scheduler] 동기화 완료 (${new Date().toISOString()})`)
+    await fetch(`${baseUrl}/api/mail-queue/sync`, { method: 'POST', headers })
   } catch (err) {
-    console.error('[mail-scheduler] 동기화 실패:', err)
+    console.error('[mail-scheduler] 설치계획 동기화 실패:', err)
   }
+
+  // 답사 메일 동기화
+  try {
+    await fetch(`${baseUrl}/api/site-visit-queue/sync`, { method: 'POST', headers })
+  } catch (err) {
+    console.error('[mail-scheduler] 답사 동기화 실패:', err)
+  }
+
+  console.log(`[mail-scheduler] 동기화 완료 (${new Date().toISOString()})`)
 }
 
 export function startScheduler(interval: string) {

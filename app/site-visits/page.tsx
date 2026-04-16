@@ -82,13 +82,22 @@ export default function SiteVisitsPage() {
 
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">답사 관리</h1>
-          <button
-            type="button"
-            onClick={() => router.push('/site-visits/new')}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-          >
-            + 답사 등록
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => router.push('/site-visit-queue')}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            >
+              메일 확인
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push('/site-visits/new')}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+            >
+              + 답사 등록
+            </button>
+          </div>
         </div>
 
         {/* 필터 */}

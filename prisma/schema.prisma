@@ -369,6 +369,7 @@ model SiteVisit {
   status        StatusCode?      @relation(fields: [statusId], references: [id])
   files         SiteVisitFile[]
   assignees     SiteVisitAssignee[]
+  queue         SiteVisitQueue?
 
   @@map("site_visits")
 }
@@ -497,6 +498,28 @@ model InstallPlanQueue {
   createdAt       DateTime     @default(now()) @map("created_at")
 
   @@map("install_plan_queue")
+}
+
+model SiteVisitQueue {
+  id              Int        @id @default(autoincrement())
+  gmailMessageId  String     @unique @map("gmail_message_id")
+  receivedAt      DateTime   @map("received_at")
+  hospitalNameRaw String     @map("hospital_name_raw")
+  requestDate     DateTime?  @map("request_date")
+  managerName     String     @map("manager_name")
+  managerPhone    String     @map("manager_phone")
+  managerEmail    String     @map("manager_email")
+  totalBeds       String     @map("total_beds")
+  address         String     @default("") @db.Text
+  model           String
+  rawBody         String     @map("raw_body") @db.Text
+  fileUrl         String     @default("") @map("file_url") @db.Text
+  status          String     @default("pending")
+  siteVisitId     Int?       @unique @map("site_visit_id")
+  siteVisit       SiteVisit? @relation(fields: [siteVisitId], references: [id])
+  createdAt       DateTime   @default(now()) @map("created_at")
+
+  @@map("site_visit_queue")
 }
 
 model AppSetting {

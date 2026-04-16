@@ -4,25 +4,50 @@
 
 ---
 
-## 2026-04-16 | Google Calendar 프로젝트 일정 동기화
+## 2026-04-16 | 답사(실측) 요청 메일 큐 기능 추가
 
-- **DB 마이그레이션**: projects 테이블에 `calendar_event_id` TEXT 컬럼 추가 (20260416000000_add_calendar_event_id_to_projects)
+- **DB 마이그레이션**: `site_visit_queue` 테이블 생성 (20260416200000_add_site_visit_queue)
+  - InstallPlanQueue와 동일 구조, `site_visit_id` FK → SiteVisit 연결
+- **환경변수**: `GMAIL_SV_SENDER_EMAIL`, `GMAIL_SV_SUBJECT_KEYWORD` 추가 (설치계획과 완전 분리)
+- **Gmail 폴링 동기화** (`app/api/site-visit-queue/sync/route.ts`): 답사용 env로 Gmail API 조회, SiteVisitQueue 적재
+- **답사 등록** (`app/api/site-visit-queue/[id]/route.ts`):
+  - 큐 항목에서 병원 선택 → SiteVisit 생성 (status: 접수, notes: 메일 본문 HTML)
+  - siteVisitCode 자동 채번, Task 레코드 생성, Google Calendar 이벤트 생성
+  - 도면 파일 URL → S3 다운로드/업로드 → SiteVisitFile 생성
+- **큐 관리 API** (`app/api/site-visit-queue/route.ts`): GET 목록, DELETE 일괄삭제
+- **스케줄러 확장** (`lib/mail-scheduler.ts`): 기존 설치계획 sync + 답사 sync 둘 다 호출
+- **관리 페이지** (`app/site-visit-queue/page.tsx`): 기존 mail-queue 페이지 패턴 동일, 대기/등록완료/무시 탭, 병원 선택 모달
+- **네비게이션**: MailIcon 추가, '실측요청 메일' 메뉴 (답사 관리 아래, ADMIN 이상)
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260416200000_add_site_visit_queue/`, `.env`, `lib/mail-scheduler.ts`, `app/api/site-visit-queue/` (신설), `app/site-visit-queue/page.tsx` (신설), `app/components/NavIcons.tsx`
+
+---
+
+## 2026-04-16 | Google Calendar 프로젝트·유지보수·답사 3종 캘린더 동기화
+
+- **DB 마이그레이션**:
+  - projects 테이블에 `calendar_event_id` 추가 (20260416000000_add_calendar_event_id_to_projects)
+  - maintenances, site_visits 테이블에 `calendar_event_id` 추가 (20260416100000_add_calendar_event_id_to_maintenances_and_site_visits)
 - **OAuth2 인증 라우트 신규 생성** (Gmail OAuth 패턴 동일):
   - `app/api/auth/calendar/route.ts`: GET → Google Calendar OAuth 인증 URL redirect (SUPER_ADMIN 전용)
   - `app/api/auth/calendar/callback/route.ts`: GET → code로 토큰 교환, refresh_token을 app_settings 테이블에 저장
-- **lib/googleCalendar.ts 신규 생성**: OAuth2Client 사용, refresh_token은 app_settings DB에서 조회
-  - `createCalendarEvent(project)`: All-day 이벤트 생성 (summary: projectName, endDateExpected +1일)
-  - `updateCalendarEvent(eventId, project)`: 이벤트 수정
-  - `deleteCalendarEvent(eventId)`: 이벤트 삭제
-  - 모든 함수 try-catch, 실패 시 console.error만 (프로젝트 저장 비차단)
-- **프로젝트 POST** (`app/api/projects/route.ts`): 생성 후 startDate 있으면 캘린더 이벤트 생성, eventId DB 저장
-- **프로젝트 PUT** (`app/api/projects/[code]/route.ts`):
-  - calendarEventId 있고 startDate 삭제 → 캘린더 이벤트 삭제 + calendarEventId null
-  - calendarEventId 있고 startDate 유지 → 이벤트 업데이트
-  - calendarEventId 없고 startDate 생김 → 새 이벤트 생성
-- **프로젝트 DELETE**: 삭제 전 calendarEventId 있으면 캘린더 이벤트 삭제
-- **환경변수**: `GOOGLE_CALENDAR_ID` 추가 (.env), CLIENT_ID/SECRET는 기존 Gmail OAuth와 동일 사용
-- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260416000000_add_calendar_event_id_to_projects/`, `.env`, `lib/googleCalendar.ts` (신설), `app/api/auth/calendar/` (신설), `app/api/projects/route.ts`, `app/api/projects/[code]/route.ts`
+- **lib/googleCalendar.ts 신규 생성**: OAuth2Client 사용, CalendarType(`project`/`maintenance`/`site-visit`)으로 3종 캘린더 분기
+  - `createCalendarEvent(type, data)`: All-day 이벤트 생성 + 담당자 이메일 참석자 추가
+  - `updateCalendarEvent(type, eventId, data)`: 이벤트 수정 (일정·담당자 변경 반영)
+  - `deleteCalendarEvent(type, eventId)`: 이벤트 삭제
+  - 모든 함수 try-catch, 실패 시 console.error만 (업무 저장 비차단)
+- **프로젝트 캘린더 동기화** (`app/api/projects/`):
+  - POST: startDate 있으면 이벤트 생성, 담당자 이메일 참석자 추가
+  - PUT: 일정/담당자 변경 시 이벤트 업데이트, startDate 삭제 시 이벤트 삭제, 신규 startDate 시 이벤트 생성
+  - DELETE: 이벤트 삭제
+  - summary: `{projectName}` (병원명 N차)
+- **유지보수 캘린더 동기화** (`app/api/maintenances/`):
+  - POST/PUT/DELETE 동일 패턴, visitDate(방문일) 기준
+  - summary: `[유지보수] {병원명} - {제목}`
+- **답사 캘린더 동기화** (`app/api/site-visits/`):
+  - POST/PUT/DELETE 동일 패턴, visitDate(방문일) 기준
+  - summary: `[답사] {병원명}`
+- **환경변수**: `GOOGLE_CALENDAR_PROJECT_ID`, `GOOGLE_CALENDAR_MAINTENANCE_ID`, `GOOGLE_CALENDAR_SITE_VISIT_ID` 추가
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260416*`, `.env`, `lib/googleCalendar.ts` (신설), `app/api/auth/calendar/` (신설), `app/api/projects/route.ts`, `app/api/projects/[code]/route.ts`, `app/api/maintenances/route.ts`, `app/api/maintenances/[id]/route.ts`, `app/api/site-visits/route.ts`, `app/api/site-visits/[id]/route.ts`
 
 ---
 
