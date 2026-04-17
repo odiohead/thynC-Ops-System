@@ -9,6 +9,8 @@ const VALID_CATEGORIES = [
   'CONTRACTOR_CONFIRM',
   'INSTALL_CONFIRM',
   'INSPECTION_CHECKLIST',
+  'ESTIMATE',
+  'CONTRACT',
 ]
 
 export async function GET(_req: NextRequest, { params }: Params) {

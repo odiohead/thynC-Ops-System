@@ -98,6 +98,11 @@ const FILE_CATEGORIES: { key: string; label: string }[] = [
   { key: 'INSPECTION_CHECKLIST', label: '검수체크리스트' },
 ]
 
+const CONTRACT_FILE_CATEGORIES: { key: string; label: string }[] = [
+  { key: 'ESTIMATE', label: '견적서' },
+  { key: 'CONTRACT', label: '계약서' },
+]
+
 function toDateInput(val: string | null): string {
   if (!val) return ''
   return val.slice(0, 10)
@@ -467,6 +472,65 @@ export default function ProjectDetailPage() {
                 </div>
               </div>
             )}
+
+            {/* 견적서 / 계약서 파일 */}
+            <div className="border-t border-gray-100">
+              <div className="grid grid-cols-1 divide-y divide-gray-100 sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+                {CONTRACT_FILE_CATEGORIES.map((cat) => {
+                  const catFiles = project.files.filter((f) => f.fileCategory === cat.key)
+                  const isUploading = uploadingCategory === cat.key
+                  return (
+                    <div key={cat.key} className="px-6 py-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-medium text-gray-700">{cat.label}</h3>
+                        <button
+                          type="button"
+                          disabled={!!uploadingCategory}
+                          onClick={() => handleAddFileClick(cat.key)}
+                          className="rounded border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {isUploading ? '업로드 중...' : '+ 파일 추가'}
+                        </button>
+                      </div>
+                      {catFiles.length === 0 ? (
+                        <p className="mt-2 text-xs text-gray-400">등록된 파일이 없습니다.</p>
+                      ) : (
+                        <ul className="mt-2 space-y-1.5">
+                          {catFiles.map((f) => (
+                            <li key={f.id} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-gray-400">
+                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
+                                </svg>
+                                {(f.s3Key || f.driveUrl) ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadFile(f)}
+                                    className="truncate text-xs text-blue-600 hover:underline text-left"
+                                  >
+                                    {f.fileName}
+                                  </button>
+                                ) : (
+                                  <span className="truncate text-xs text-gray-700">{f.fileName}</span>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteFile(f.id)}
+                                disabled={deletingFileId === f.id}
+                                className="ml-3 shrink-0 text-xs text-red-400 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                {deletingFileId === f.id ? '삭제 중...' : '삭제'}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
           </div>
 
           {/* 구축 정보 */}
