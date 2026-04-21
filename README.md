@@ -146,9 +146,11 @@ prisma/
 - name, organizationId, sortOrder
 - 연결된 유저가 있으면 삭제 불가 (409)
 
-### FieldEngineer (필드 엔지니어)
-- SEERS 소속 User 중 필드 엔지니어로 지정된 목록
-- userId (User 1:1 관계, UNIQUE), createdAt
+### FieldEngineer (업무별 담당자 풀)
+- SEERS 소속 User 중 업무별 담당자로 지정된 목록
+- userId, workType(`PROJECT` / `INSTALL_PLAN` / `MAINTENANCE`), createdAt
+- (userId, workType) 복합 UNIQUE — 한 사용자가 여러 풀에 동시 등록 가능
+- `PROJECT` 풀은 프로젝트·답사에서 공유, `INSTALL_PLAN`/`MAINTENANCE`는 각 업무 전용
 
 ### HiraHospital (건강보험심사평가원 병원 원본 데이터)
 - HIRA에서 가져온 공공 병원 데이터 원본
@@ -338,7 +340,7 @@ prisma/
 - **병원 목록 Google Sheets 내보내기**: Drive Sheets API로 스프레드시트 직접 생성
 
 ### 프로젝트 관리
-- 구축 공사 프로젝트 등록·수정·삭제
+- 구축 공사 프로젝트 등록·수정·삭제 (삭제는 ADMIN 이상)
 - 공사 상태(BuildStatus) 연결 및 관리
 - 담당자(복수 지정, 필드 엔지니어 선택 모달), 시공사, 계약일, 도입형태(IntroType), 시작일/완료예정일, 비고 관리
 - 병동 수 / 병상 수 / 게이트웨이 수, 답사·발주 완료 플래그
@@ -367,7 +369,7 @@ prisma/
 - 목록 컬럼 헤더 클릭으로 오름차순/내림차순 정렬 토글
 
 ### 답사 관리 (구 답사 현황)
-- 병원 방문 답사 기록 등록·수정·삭제
+- 병원 방문 답사 기록 등록·수정·삭제 (삭제는 ADMIN 이상)
 - 대웅 담당자(DAEWOONG 소속) + 담당자(필드 엔지니어, 복수 지정) 연결 지원
 - 방문일 / 요청일 / 회신일 관리
 - 답사 상태코드 연결
@@ -413,10 +415,14 @@ prisma/
   - 부서 추가: 하단 입력 행에서 즉시 추가
   - 연결된 계정 있으면 삭제 불가 (인라인 에러 표시)
 
-### 필드 엔지니어 리스트 (ADMIN 이상)
-- SEERS 소속 사용자 중 필드 엔지니어 등록·삭제
+### 담당자 리스트 (ADMIN 이상)
+- SEERS 소속 사용자 중 업무별 담당자 등록·삭제
+- **탭 3종**: 프로젝트 담당자 / 설치계획 담당자 / 유지보수 담당자
+  - 프로젝트 담당자 풀은 프로젝트·답사 페이지에서 공유 사용
+  - 설치계획·유지보수는 각 업무 전용 풀
+  - 한 사용자가 여러 풀에 동시 등록 가능
 - "+ 추가" 버튼으로 후보 검색 모달 열기 (이름/이메일 검색, 300ms debounce, 페이지네이션)
-- 후보: SEERS 소속·활성·미등록 사용자만 표시
+- 후보: SEERS 소속·활성·해당 풀 미등록 사용자만 표시
 - 목록 테이블: 번호·이름·이메일·소속·부서·추가일·삭제
 
 ### AI 어시스턴트
@@ -714,10 +720,10 @@ npm run dev
 | POST | `/api/settings/departments` | 부서 추가 (ADMIN 이상) |
 | PUT  | `/api/settings/departments/[id]` | 부서 수정 (ADMIN 이상) |
 | DELETE | `/api/settings/departments/[id]` | 부서 삭제 (ADMIN 이상, 연결 계정 있으면 409) |
-| GET  | `/api/settings/field-engineers` | 필드 엔지니어 목록 (`?search=&page=&limit=`, `?all=true` 전체 반환) |
-| POST | `/api/settings/field-engineers` | 필드 엔지니어 등록 (ADMIN 이상, SEERS 소속만 가능) |
-| DELETE | `/api/settings/field-engineers/[id]` | 필드 엔지니어 삭제 (ADMIN 이상, 204) |
-| GET  | `/api/settings/field-engineers/candidates` | 등록 후보 목록 (ADMIN 이상, SEERS·활성·미등록) |
+| GET  | `/api/settings/field-engineers` | 담당자 목록 (`?workType=PROJECT\|INSTALL_PLAN\|MAINTENANCE` 기본 PROJECT, `?search=&page=&limit=`, `?all=true` 전체 반환) |
+| POST | `/api/settings/field-engineers` | 담당자 등록 (ADMIN 이상, SEERS 소속만 가능, `{userId, workType}`) |
+| DELETE | `/api/settings/field-engineers/[id]` | 담당자 삭제 (ADMIN 이상, 204) |
+| GET  | `/api/settings/field-engineers/candidates` | 등록 후보 목록 (ADMIN 이상, SEERS·활성·해당 workType 미등록) |
 | GET  | `/api/settings/devices` | 장비 정보 목록 |
 | POST | `/api/settings/devices` | 장비 정보 추가 |
 | PUT  | `/api/settings/devices/[id]` | 장비 정보 수정 |

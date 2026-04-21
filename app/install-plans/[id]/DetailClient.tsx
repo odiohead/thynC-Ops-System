@@ -49,9 +49,10 @@ export default function InstallPlanDetailClient({ initialData, canAdmin, canEdit
       router.refresh()
       router.push('/install-plans')
     } else {
+      const data = await res.json().catch(() => ({}))
       setDeleting(false)
       setShowConfirm(false)
-      alert('삭제에 실패했습니다.')
+      alert(data.error ?? '삭제에 실패했습니다.')
     }
   }
 

@@ -10,12 +10,15 @@ interface FieldEngineerUser {
   department?: { name: string } | null
 }
 
+type WorkType = 'PROJECT' | 'INSTALL_PLAN' | 'MAINTENANCE'
+
 interface Props {
   isOpen: boolean
   onClose: () => void
   onSelect: (users: { id: string; name: string; email: string }[]) => void
   currentAssigneeIds: string[]
   title?: string
+  workType?: WorkType
 }
 
 export default function FieldEngineerSelectModal({
@@ -24,6 +27,7 @@ export default function FieldEngineerSelectModal({
   onSelect,
   currentAssigneeIds,
   title = '담당자 선택',
+  workType = 'PROJECT',
 }: Props) {
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -59,7 +63,7 @@ export default function FieldEngineerSelectModal({
 
   const fetchData = useCallback(async () => {
     setLoading(true)
-    const params = new URLSearchParams({ page: String(page), limit: String(limit) })
+    const params = new URLSearchParams({ page: String(page), limit: String(limit), workType })
     if (debouncedSearch) params.set('search', debouncedSearch)
     const res = await fetch(`/api/settings/field-engineers?${params}`)
     if (res.ok) {
@@ -86,7 +90,7 @@ export default function FieldEngineerSelectModal({
       })
     }
     setLoading(false)
-  }, [page, debouncedSearch])
+  }, [page, debouncedSearch, workType])
 
   useEffect(() => {
     if (isOpen) fetchData()

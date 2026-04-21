@@ -3,6 +3,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 
+type WorkType = 'PROJECT' | 'INSTALL_PLAN' | 'MAINTENANCE'
+
+const TABS: { value: WorkType; label: string }[] = [
+  { value: 'PROJECT', label: '프로젝트 담당자' },
+  { value: 'INSTALL_PLAN', label: '설치계획 담당자' },
+  { value: 'MAINTENANCE', label: '유지보수 담당자' },
+]
+
 interface FieldEngineer {
   id: number
   createdAt: string
@@ -25,6 +33,7 @@ interface Candidate {
 
 export default function FieldEngineersPage() {
   const router = useRouter()
+  const [workType, setWorkType] = useState<WorkType>('PROJECT')
   const [engineers, setEngineers] = useState<FieldEngineer[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -43,16 +52,16 @@ export default function FieldEngineersPage() {
   const [modalError, setModalError] = useState<string | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  async function fetchEngineers(p: number) {
+  const fetchEngineers = useCallback(async (p: number, type: WorkType) => {
     setLoading(true)
-    const res = await fetch(`/api/settings/field-engineers?page=${p}&limit=${limit}`)
+    const res = await fetch(`/api/settings/field-engineers?page=${p}&limit=${limit}&workType=${type}`)
     if (res.ok) {
       const data = await res.json()
       setEngineers(data.data)
       setTotal(data.total)
     }
     setLoading(false)
-  }
+  }, [])
 
   async function fetchMe() {
     const res = await fetch('/api/auth/me')
@@ -67,13 +76,17 @@ export default function FieldEngineersPage() {
 
   useEffect(() => {
     fetchMe()
-    fetchEngineers(1)
   }, [])
 
-  const fetchCandidates = useCallback(async (s: string, p: number) => {
+  useEffect(() => {
+    setPage(1)
+    fetchEngineers(1, workType)
+  }, [workType, fetchEngineers])
+
+  const fetchCandidates = useCallback(async (s: string, p: number, type: WorkType) => {
     setCandidateLoading(true)
     setModalError(null)
-    const res = await fetch(`/api/settings/field-engineers/candidates?search=${encodeURIComponent(s)}&page=${p}&limit=${candidateLimit}`)
+    const res = await fetch(`/api/settings/field-engineers/candidates?search=${encodeURIComponent(s)}&page=${p}&limit=${candidateLimit}&workType=${type}`)
     if (res.ok) {
       const data = await res.json()
       setCandidates(data.data)
@@ -89,7 +102,7 @@ export default function FieldEngineersPage() {
     setCandidateTotal(0)
     setCandidatePage(1)
     setModalError(null)
-    fetchCandidates('', 1)
+    fetchCandidates('', 1, workType)
   }
 
   function handleSearchChange(value: string) {
@@ -97,13 +110,13 @@ export default function FieldEngineersPage() {
     setCandidatePage(1)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
-      fetchCandidates(value, 1)
+      fetchCandidates(value, 1, workType)
     }, 300)
   }
 
   function handleCandidatePageChange(newPage: number) {
     setCandidatePage(newPage)
-    fetchCandidates(search, newPage)
+    fetchCandidates(search, newPage, workType)
   }
 
   async function handleSelect(candidate: Candidate) {
@@ -111,12 +124,12 @@ export default function FieldEngineersPage() {
     const res = await fetch('/api/settings/field-engineers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: candidate.id }),
+      body: JSON.stringify({ userId: candidate.id, workType }),
     })
     if (res.ok) {
       setShowModal(false)
       setPage(1)
-      fetchEngineers(1)
+      fetchEngineers(1, workType)
       router.refresh()
     } else {
       const data = await res.json()
@@ -132,7 +145,7 @@ export default function FieldEngineersPage() {
     if (!confirm('정말 삭제하시겠습니까?')) return
     const res = await fetch(`/api/settings/field-engineers/${fe.id}`, { method: 'DELETE' })
     if (res.ok || res.status === 204) {
-      fetchEngineers(page)
+      fetchEngineers(page, workType)
       router.refresh()
     }
   }
@@ -148,16 +161,35 @@ export default function FieldEngineersPage() {
     return null
   }
 
+  const currentTab = TABS.find((t) => t.value === workType)
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-semibold text-gray-900">필드 엔지니어 리스트</h1>
+        <h1 className="text-xl font-semibold text-gray-900">담당자 리스트</h1>
         <button
           onClick={openModal}
           className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
         >
           + 추가
         </button>
+      </div>
+
+      {/* 탭 */}
+      <div className="mb-4 flex border-b border-gray-200">
+        {TABS.map((tab) => (
+          <button
+            key={tab.value}
+            onClick={() => setWorkType(tab.value)}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${
+              workType === tab.value
+                ? 'border-b-2 border-blue-600 text-blue-600'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto">
@@ -197,7 +229,7 @@ export default function FieldEngineersPage() {
           </tbody>
         </table>
         {engineers.length === 0 && (
-          <div className="py-12 text-center text-sm text-gray-500">등록된 필드 엔지니어가 없습니다.</div>
+          <div className="py-12 text-center text-sm text-gray-500">등록된 담당자가 없습니다.</div>
         )}
       </div>
 
@@ -205,7 +237,7 @@ export default function FieldEngineersPage() {
       {totalPages > 1 && (
         <div className="mt-4 flex items-center justify-center gap-2">
           <button
-            onClick={() => { setPage(page - 1); fetchEngineers(page - 1) }}
+            onClick={() => { setPage(page - 1); fetchEngineers(page - 1, workType) }}
             disabled={page === 1}
             className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40"
           >
@@ -213,7 +245,7 @@ export default function FieldEngineersPage() {
           </button>
           <span className="text-sm text-gray-600">{page} / {totalPages}</span>
           <button
-            onClick={() => { setPage(page + 1); fetchEngineers(page + 1) }}
+            onClick={() => { setPage(page + 1); fetchEngineers(page + 1, workType) }}
             disabled={page === totalPages}
             className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40"
           >
@@ -230,7 +262,7 @@ export default function FieldEngineersPage() {
         >
           <div className="w-full max-w-lg rounded-xl bg-white shadow-xl mx-4">
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-              <h2 className="text-base font-semibold text-gray-900">필드 엔지니어 추가</h2>
+              <h2 className="text-base font-semibold text-gray-900">{currentTab?.label ?? '담당자'} 추가</h2>
               <button
                 onClick={() => setShowModal(false)}
                 className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"

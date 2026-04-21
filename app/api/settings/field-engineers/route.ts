@@ -2,16 +2,26 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 
+const VALID_WORK_TYPES = ['PROJECT', 'INSTALL_PLAN', 'MAINTENANCE'] as const
+type WorkType = typeof VALID_WORK_TYPES[number]
+
+function parseWorkType(raw: string | null): WorkType {
+  if (raw && (VALID_WORK_TYPES as readonly string[]).includes(raw)) return raw as WorkType
+  return 'PROJECT'
+}
+
 export async function GET(req: NextRequest) {
   const user = await getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
   const all = searchParams.get('all') === 'true'
+  const workType = parseWorkType(searchParams.get('workType'))
 
   // all=true: 페이지네이션 없이 전체 목록 반환
   if (all) {
     const data = await prisma.fieldEngineer.findMany({
+      where: { workType },
       include: {
         user: { select: { id: true, name: true } },
       },
@@ -24,9 +34,12 @@ export async function GET(req: NextRequest) {
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
   const limit = Math.max(1, parseInt(searchParams.get('limit') ?? '20'))
 
-  const where = search
-    ? { user: { OR: [{ name: { contains: search } }, { email: { contains: search } }] } }
-    : undefined
+  const where = {
+    workType,
+    ...(search
+      ? { user: { OR: [{ name: { contains: search } }, { email: { contains: search } }] } }
+      : {}),
+  }
 
   const [data, total] = await Promise.all([
     prisma.fieldEngineer.findMany({
@@ -56,11 +69,14 @@ export async function POST(req: NextRequest) {
   const authUser = await getAuthUser(req)
   if (!authUser || !isAdminOrAbove(authUser.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { userId } = await req.json()
+  const { userId, workType: rawType } = await req.json()
   if (!userId) return NextResponse.json({ error: 'userId가 필요합니다.' }, { status: 400 })
+  const workType = parseWorkType(rawType ?? null)
 
-  const existing = await prisma.fieldEngineer.findUnique({ where: { userId } })
-  if (existing) return NextResponse.json({ error: '이미 등록된 필드 엔지니어입니다.' }, { status: 409 })
+  const existing = await prisma.fieldEngineer.findUnique({
+    where: { userId_workType: { userId, workType } },
+  })
+  if (existing) return NextResponse.json({ error: '이미 등록된 담당자입니다.' }, { status: 409 })
 
   const targetUser = await prisma.user.findUnique({
     where: { id: userId },
@@ -72,7 +88,7 @@ export async function POST(req: NextRequest) {
   }
 
   const fieldEngineer = await prisma.fieldEngineer.create({
-    data: { userId },
+    data: { userId, workType },
     include: {
       user: {
         select: {

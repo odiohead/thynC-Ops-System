@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
 
 type Params = { params: { code: string } }
@@ -173,7 +173,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
 export async function DELETE(request: NextRequest, { params }: Params) {
   const authUser = await getAuthUser(request)
-  if (!authUser || authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!authUser) return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
+  if (!isAdminOrAbove(authUser.role)) return NextResponse.json({ error: '삭제 권한이 없습니다. 관리자(ADMIN)에게 문의하세요.' }, { status: 403 })
   const existing = await prisma.project.findUnique({ where: { projectCode: params.code } })
   if (!existing) return NextResponse.json({ error: '프로젝트를 찾을 수 없습니다.' }, { status: 404 })
 

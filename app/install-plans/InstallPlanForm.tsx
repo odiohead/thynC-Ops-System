@@ -420,6 +420,7 @@ export default function InstallPlanForm({ initialData, mode, initialHospitalCode
         onClose={() => setAssigneeModalOpen(false)}
         onSelect={(selected) => setAssignees(selected)}
         currentAssigneeIds={assignees.map((a) => a.id)}
+        workType="INSTALL_PLAN"
       />
 
       {/* 병원 검색 모달 */}

@@ -180,7 +180,7 @@ model User {
   lastLoginAt    DateTime?     @map("last_login_at")
   organization            Organization?                @relation(fields: [organizationId], references: [id])
   department              Department?                  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  fieldEngineer           FieldEngineer?
+  fieldEngineers          FieldEngineer[]
   daewoongSiteVisits      SiteVisit[]                  @relation("SiteVisitDaewoongUser")
   hospitalAssignments     DaewoongHospitalAssignment[]
   projectAssignees        ProjectAssignee[]
@@ -206,10 +206,13 @@ model Department {
 
 model FieldEngineer {
   id        Int      @id @default(autoincrement())
-  userId    String   @unique @map("user_id")
+  userId    String   @map("user_id")
+  workType  String   @default("PROJECT") @map("work_type")
   createdAt DateTime @default(now()) @map("created_at")
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, workType])
+  @@index([workType])
   @@map("field_engineers")
 }
 

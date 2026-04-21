@@ -652,6 +652,7 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
         onClose={() => setAssigneeModalOpen(false)}
         onSelect={(selected) => setAssignees(selected)}
         currentAssigneeIds={assignees.map((a) => a.id)}
+        workType="MAINTENANCE"
       />
 
       {/* 병원 검색 모달 */}

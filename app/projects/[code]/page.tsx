@@ -246,9 +246,15 @@ export default function ProjectDetailPage() {
   async function handleDelete() {
     if (!confirm(`'${project?.projectName}' 프로젝트를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return
     setDeleting(true)
-    await fetch(`/api/projects/${code}`, { method: 'DELETE' })
-    router.refresh()
-    router.push('/projects')
+    const res = await fetch(`/api/projects/${code}`, { method: 'DELETE' })
+    if (res.ok) {
+      router.refresh()
+      router.push('/projects')
+    } else {
+      const data = await res.json().catch(() => ({}))
+      alert(data.error ?? '삭제에 실패했습니다.')
+      setDeleting(false)
+    }
   }
 
   async function handleDeleteFile(fileId: number) {

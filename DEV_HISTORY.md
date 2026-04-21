@@ -4,6 +4,40 @@
 
 ---
 
+## 2026-04-20 | 담당자 풀 업무 유형별 분리 (필드엔지니어 → PROJECT / INSTALL_PLAN / MAINTENANCE)
+
+- **DB 마이그레이션** (20260420000000_add_work_type_to_field_engineers):
+  - `field_engineers` 테이블 `user_id` UNIQUE 제거
+  - `work_type` 컬럼 추가 (NOT NULL, DEFAULT 'PROJECT')
+  - 기존 row 12개는 PROJECT로 유지, INSTALL_PLAN/MAINTENANCE 타입으로 복제 (총 36 row)
+  - (user_id, work_type) 복합 UNIQUE + work_type INDEX 추가
+- **Prisma 스키마**: User→FieldEngineer 관계 1:1 → 1:N (`fieldEngineer` → `fieldEngineers`), FieldEngineer 모델에 workType·복합 unique·인덱스 추가
+- **API 확장** (`app/api/settings/field-engineers/`):
+  - GET·POST에 `workType` 쿼리 파라미터 (기본값 PROJECT). POST 바디에도 workType 수용
+  - candidates GET도 workType별 미등록 사용자 필터링
+  - DELETE는 id 기준이라 변경 없음
+- **설정 페이지 탭 UI** (`app/settings/field-engineers/page.tsx`): 프로젝트/설치계획/유지보수 3개 탭, 탭 전환 시 목록 재조회, 추가 모달 제목도 탭별로 변경. 페이지 제목을 "담당자 리스트"로 변경
+- **FieldEngineerSelectModal**: `workType` prop 추가 (기본 PROJECT). API 호출 시 전달
+- **Form 소비처 업데이트**:
+  - `MaintenanceForm` → `workType="MAINTENANCE"` 전달
+  - `InstallPlanForm` → `workType="INSTALL_PLAN"` 전달
+  - 프로젝트(new/edit) 및 SiteVisitForm은 기본값 PROJECT 유지 (답사는 프로젝트 풀 공유)
+- **주의**: 간트차트(`/projects/calendar`)는 workType 지정 없이 호출 → PROJECT 풀 기준으로 행 구성. 기존 12명은 3풀 모두에 존재하므로 당장은 차이 없으나, 향후 유지보수 전용 담당자만 추가되면 간트차트에 해당 엔지니어 행이 안 생기는 엣지 케이스 있음 (후속 논의 대상)
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260420000000_add_work_type_to_field_engineers/`, `app/api/settings/field-engineers/route.ts`, `app/api/settings/field-engineers/candidates/route.ts`, `app/settings/field-engineers/page.tsx`, `app/components/FieldEngineerSelectModal.tsx`, `app/maintenances/MaintenanceForm.tsx`, `app/install-plans/InstallPlanForm.tsx`, `README.md`
+
+---
+
+## 2026-04-20 | 업무 삭제 권한 정책 통일 + Google Calendar ID 라벨 스왑 수정
+
+- **Google Calendar ID 라벨 스왑 수정** (`.env`): `GOOGLE_CALENDAR_MAINTENANCE_ID`와 `GOOGLE_CALENDAR_SITE_VISIT_ID` 값이 맞바뀌어 있어 유지보수 등록이 "답사일정" 캘린더로 들어가던 이슈 수정. 실제 캘린더 summary로 검증 후 값 스왑 (DEV 반영 완료, PROD는 별도)
+- **프로젝트 DELETE 권한 강화**: `app/api/projects/[code]/route.ts` DELETE를 VIEWER 제외 → `isAdminOrAbove`로 변경. 프로젝트/답사/유지보수/설치계획 4개 업무 모듈 삭제 정책을 ADMIN 이상으로 통일
+- **403 응답 메시지 한글화**: 4개 업무 모듈 DELETE 핸들러의 `'Forbidden'` → `'삭제 권한이 없습니다. 관리자(ADMIN)에게 문의하세요.'`. USER가 유지보수·답사 폼의 삭제 버튼을 누를 때 원인이 바로 보이도록 함 (삭제 버튼은 `isAdmin` 변수가 VIEWER 제외로 정의되어 USER에게도 노출됨)
+- **프론트 핸들러 에러 표시 보강**: 프로젝트 상세(`app/projects/[code]/page.tsx`)는 응답 상태 확인 없이 항상 redirect하던 로직 → 실패 시 `data.error` alert 후 버튼 복구. 설치계획 상세(`app/install-plans/[id]/DetailClient.tsx`)도 하드코딩 메시지 대신 API 메시지 사용
+- **README**: 프로젝트·답사 관리 섹션에 "삭제는 ADMIN 이상" 표기 추가
+- 영향 파일: `.env`, `app/api/projects/[code]/route.ts`, `app/api/maintenances/[id]/route.ts`, `app/api/site-visits/[id]/route.ts`, `app/api/install-plans/[id]/route.ts`, `app/projects/[code]/page.tsx`, `app/install-plans/[id]/DetailClient.tsx`, `README.md`
+
+---
+
 ## 2026-04-16 | 답사(실측) 요청 메일 큐 기능 추가
 
 - **DB 마이그레이션**: `site_visit_queue` 테이블 생성 (20260416200000_add_site_visit_queue)
