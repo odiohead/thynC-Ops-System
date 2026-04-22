@@ -97,6 +97,32 @@ function formatMonthDay(d: Date): string {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
+function toYmd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** Monday of the ISO week containing the given date */
+function getMondayOfWeek(date: Date): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const day = d.getDay() // 0=Sun, 1=Mon, ..., 6=Sat
+  const diff = day === 0 ? -6 : 1 - day
+  d.setDate(d.getDate() + diff)
+  return d
+}
+
+/** Sunday of the ISO week containing the given date */
+function getSundayOfWeek(date: Date): Date {
+  const mon = getMondayOfWeek(date)
+  const sun = new Date(mon)
+  sun.setDate(mon.getDate() + 6)
+  return sun
+}
+
+/** Inclusive day count between two dates (same day → 1) */
+function daysBetween(from: Date, to: Date): number {
+  return Math.round((to.getTime() - from.getTime()) / 86400000) + 1
+}
+
 // ─── Lane allocation ──────────────────────────────────────────────────────────
 
 function allocateLanes(items: GanttItem[]): GanttItem[][] {
@@ -147,24 +173,20 @@ function projectsToGanttItems(projects: Project[]): GanttItem[] {
 
 function maintenancesToGanttItems(maintenances: MaintenanceItem[]): GanttItem[] {
   return maintenances
-    .filter(m => m.reportedAt || m.visitDate || m.resolvedAt)
+    .filter(m => m.visitDate)
     .map(m => {
-      const dates = [m.reportedAt, m.visitDate, m.resolvedAt]
-        .filter(Boolean)
-        .map(d => d!.slice(0, 10))
-        .sort()
-      const startDate = dates[0]
-      const endDate = dates[dates.length - 1]
+      const date = m.visitDate!.slice(0, 10)
+      const hospitalName = m.hospital.hospitalName ?? m.hospital.hiraHospitalName ?? ''
 
       return {
         id: m.id + 1000000,
         kind: 'maintenance' as const,
         code: m.maintenanceCode ?? '',
-        startDate,
-        endDate,
-        label: `🔧 ${m.hospital.hospitalName ?? m.hospital.hiraHospitalName ?? ''} - ${m.title}`,
+        startDate: date,
+        endDate: date,
+        label: `🔧 ${hospitalName} - ${m.title}`,
         color: m.type?.color ?? '#F59E0B',
-        tooltip: `[유지보수] ${m.hospital.hospitalName ?? m.hospital.hiraHospitalName ?? ''} - ${m.title} (${startDate} ~ ${endDate})`,
+        tooltip: `[유지보수] ${hospitalName} - ${m.title} (${date})`,
         href: `/maintenances/${m.id}`,
       }
     })
@@ -201,10 +223,11 @@ interface WeekGroup {
   count: number
 }
 
-function buildWeekGroups(year: number, month: number, totalDays: number): WeekGroup[] {
+function buildWeekGroups(startDate: Date, totalDays: number): WeekGroup[] {
   const groups: WeekGroup[] = []
-  for (let day = 1; day <= totalDays; day++) {
-    const d = new Date(year, month, day)
+  for (let i = 0; i < totalDays; i++) {
+    const d = new Date(startDate)
+    d.setDate(startDate.getDate() + i)
     const w = getISOWeek(d)
     const last = groups[groups.length - 1]
     if (last && last.week === w) {
@@ -278,69 +301,74 @@ function CalendarPageContent() {
     router.replace(`?month=${param}`, { scroll: false })
   }
 
-  // Derived: totalDays in current month
-  const totalDays = useMemo(() => new Date(currentYear, currentMonth + 1, 0).getDate(), [currentYear, currentMonth])
-
-  // Month first/last as strings for intersection test
-  const monthStartStr = useMemo(() =>
-    `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-01`,
+  // View range: whole ISO weeks covering the current month (extends to prev/next month when needed)
+  const viewStart = useMemo(
+    () => getMondayOfWeek(new Date(currentYear, currentMonth, 1)),
     [currentYear, currentMonth]
   )
-  const monthEndStr = useMemo(() =>
-    `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(totalDays).padStart(2, '0')}`,
-    [currentYear, currentMonth, totalDays]
-  )
+  const viewEnd = useMemo(() => {
+    const lastDay = new Date(currentYear, currentMonth + 1, 0)
+    return getSundayOfWeek(lastDay)
+  }, [currentYear, currentMonth])
+  const totalDays = useMemo(() => daysBetween(viewStart, viewEnd), [viewStart, viewEnd])
+
+  // View first/last as strings for intersection test
+  const viewStartStr = useMemo(() => toYmd(viewStart), [viewStart])
+  const viewEndStr = useMemo(() => toYmd(viewEnd), [viewEnd])
 
   // Week groups for header row 1
-  const weekGroups = useMemo(() => buildWeekGroups(currentYear, currentMonth, totalDays), [currentYear, currentMonth, totalDays])
+  const weekGroups = useMemo(() => buildWeekGroups(viewStart, totalDays), [viewStart, totalDays])
 
   // Day info for header row 2
   const days = useMemo(() => {
-    const arr: { date: Date; day: number; dow: number }[] = []
-    for (let d = 1; d <= totalDays; d++) {
-      const date = new Date(currentYear, currentMonth, d)
-      arr.push({ date, day: d, dow: date.getDay() })
+    const arr: { date: Date; day: number; dow: number; inMonth: boolean }[] = []
+    for (let i = 0; i < totalDays; i++) {
+      const date = new Date(viewStart)
+      date.setDate(viewStart.getDate() + i)
+      arr.push({
+        date,
+        day: date.getDate(),
+        dow: date.getDay(),
+        inMonth: date.getMonth() === currentMonth && date.getFullYear() === currentYear,
+      })
     }
     return arr
-  }, [currentYear, currentMonth, totalDays])
+  }, [viewStart, totalDays, currentYear, currentMonth])
 
-  // Today column index (0-based, -1 if not in this month)
+  // Today column index (0-based, -1 if today is outside the view range)
   const todayCol = useMemo(() => {
-    if (today.getFullYear() === currentYear && today.getMonth() === currentMonth) {
-      return today.getDate() - 1
-    }
+    const diff = Math.round((today.getTime() - viewStart.getTime()) / 86400000)
+    if (diff >= 0 && diff < totalDays) return diff
     return -1
-  }, [today, currentYear, currentMonth])
+  }, [today, viewStart, totalDays])
 
   // Engineer rows with lane data (projects + maintenances combined)
   const engineerRows = useMemo(() => {
     return engineers.map(eng => {
-      // Projects assigned to this engineer overlapping with current month
+      // Projects assigned to this engineer overlapping with view range
       const assignedProjects = projects.filter(p => {
         if (!p.startDate || !p.endDateExpected) return false
         const hasAssignee = p.assignees.some(a => a.userId === eng.userId)
         if (!hasAssignee) return false
-        return p.startDate.slice(0, 10) <= monthEndStr && p.endDateExpected.slice(0, 10) >= monthStartStr
+        return p.startDate.slice(0, 10) <= viewEndStr && p.endDateExpected.slice(0, 10) >= viewStartStr
       })
 
-      // Maintenances assigned to this engineer overlapping with current month
+      // Maintenances assigned to this engineer whose visitDate falls in view range
       const assignedMaint = maintenances.filter(m => {
         const hasAssignee = m.assignees.some(a => a.userId === eng.userId)
         if (!hasAssignee) return false
-        const dates = [m.reportedAt, m.visitDate, m.resolvedAt].filter(Boolean).map(d => d!.slice(0, 10)).sort()
-        if (dates.length === 0) return false
-        const start = dates[0]
-        const end = dates[dates.length - 1]
-        return start <= monthEndStr && end >= monthStartStr
+        if (!m.visitDate) return false
+        const date = m.visitDate.slice(0, 10)
+        return date >= viewStartStr && date <= viewEndStr
       })
 
-      // Site visits assigned to this engineer overlapping with current month
+      // Site visits assigned to this engineer overlapping with view range
       const assignedSV = siteVisits.filter(sv => {
         const hasAssignee = sv.assignees.some(a => a.userId === eng.userId)
         if (!hasAssignee) return false
         if (!sv.visitDate) return false
         const date = sv.visitDate.slice(0, 10)
-        return date >= monthStartStr && date <= monthEndStr
+        return date >= viewStartStr && date <= viewEndStr
       })
 
       // Convert to unified GanttItems
@@ -358,7 +386,7 @@ function CalendarPageContent() {
         laneCount: lanes.length,
       }
     })
-  }, [engineers, projects, maintenances, siteVisits, monthStartStr, monthEndStr])
+  }, [engineers, projects, maintenances, siteVisits, viewStartStr, viewEndStr])
 
   // Total content height for overlays
   const totalContentHeight = useMemo(() => {
@@ -455,16 +483,21 @@ function CalendarPageContent() {
                   if (isSun) label += ' 일'
                   else if (isSat) label += ' 토'
 
+                  const baseColor = isSun ? '#EF4444' : isSat ? '#3B82F6' : '#6B7280'
+                  const color = isToday ? '#EF4444' : (d.inMonth ? baseColor : '#D1D5DB')
+
                   return (
                     <div
                       key={i}
                       style={{
                         flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontSize: 10,
-                        color: isToday ? '#EF4444' : isSun ? '#EF4444' : isSat ? '#3B82F6' : '#6B7280',
+                        color,
                         fontWeight: isToday ? 700 : 400,
                         borderRight: i < totalDays - 1 ? '1px solid #F3F4F6' : 'none',
-                        background: isToday ? 'rgba(239,68,68,0.06)' : 'transparent',
+                        background: isToday
+                          ? 'rgba(239,68,68,0.06)'
+                          : (d.inMonth ? 'transparent' : '#FAFAFA'),
                       }}
                     >
                       {label}
@@ -565,18 +598,16 @@ function CalendarPageContent() {
                       laneItems.map(item => {
                         const itemStartDate = parseDate(item.startDate)
                         const itemEndDate = parseDate(item.endDate)
-                        const monthStart = new Date(currentYear, currentMonth, 1)
-                        const monthEnd = new Date(currentYear, currentMonth, totalDays)
 
-                        // Clamp to month
-                        const clampedStart = itemStartDate < monthStart ? monthStart : itemStartDate
-                        const clampedEnd = itemEndDate > monthEnd ? monthEnd : itemEndDate
+                        // Clamp to view range
+                        const clampedStart = itemStartDate < viewStart ? viewStart : itemStartDate
+                        const clampedEnd = itemEndDate > viewEnd ? viewEnd : itemEndDate
 
-                        const startDay = clampedStart.getDate() - 1 // 0-indexed
-                        const endDay = clampedEnd.getDate() - 1
-                        const duration = endDay - startDay + 1
+                        const startCol = Math.round((clampedStart.getTime() - viewStart.getTime()) / 86400000)
+                        const endCol = Math.round((clampedEnd.getTime() - viewStart.getTime()) / 86400000)
+                        const duration = endCol - startCol + 1
 
-                        const leftPct = (startDay / totalDays) * 100
+                        const leftPct = (startCol / totalDays) * 100
                         const widthPct = (duration / totalDays) * 100
                         const barColor = item.color
 

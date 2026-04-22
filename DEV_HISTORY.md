@@ -4,6 +4,26 @@
 
 ---
 
+## 2026-04-22 | 구축일정 간트차트 개선 — 유지보수 방문일 단일일 처리 + 월 경계 주 잘림 해결
+
+- **유지보수 바 표시 방식 단순화** (`app/projects/calendar/page.tsx`):
+  - 기존: 접수일/방문일/완료일 중 min~max 범위로 다일 바 표시
+  - 변경: `visitDate`(방문일)만 사용하는 1일짜리 단일 바. `visitDate` 미입력 건은 간트차트에 아예 표시되지 않음
+  - `maintenancesToGanttItems()` 및 엔지니어별 필터 로직 모두 `visitDate` 기반으로 통일 (답사와 동일 패턴)
+- **월 경계 주 잘림 해결**:
+  - 기존: 해당 월의 1일~말일만 렌더링 → 월이 걸친 주가 잘려 다른 달 영역의 업무가 아예 보이지 않음
+  - 변경: 월이 속한 ISO 주의 **월요일 ~ 일요일** 전체를 뷰 범위로 확장 (총 35~42일)
+  - 예: 2026년 4월 보기 → 3/30(월) ~ 5/3(일)까지 표시
+  - 헬퍼 추가: `getMondayOfWeek`, `getSundayOfWeek`, `daysBetween`, `toYmd`
+  - `buildWeekGroups(startDate, totalDays)` 시그니처 변경 — 뷰 시작일부터 주차 그룹 생성
+  - 바 포지셔닝: `monthStart.getDate() - 1` → `viewStart` 기준 ms-diff 계산으로 변경
+  - 엔지니어별 업무 필터: `monthStartStr`/`monthEndStr` → `viewStartStr`/`viewEndStr`로 교체
+  - `todayCol`: 뷰 범위 기준 판정 (인접 월 영역에 today가 걸쳐도 빨간 세로선 정상 표시)
+  - Day 헤더: 현재 월 외 날짜는 연한 회색 글자 + `#FAFAFA` 배경으로 시각 구분
+- 영향 파일: `app/projects/calendar/page.tsx`, `README.md`
+
+---
+
 ## 2026-04-20 | 담당자 풀 업무 유형별 분리 (필드엔지니어 → PROJECT / INSTALL_PLAN / MAINTENANCE)
 
 - **DB 마이그레이션** (20260420000000_add_work_type_to_field_engineers):
