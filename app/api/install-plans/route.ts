@@ -95,5 +95,26 @@ export async function POST(request: NextRequest) {
     },
   })
 
+  // Task 레코드 생성: TASK-YYYYMM-NNNNN
+  const taskPrefix = `TASK-${ym}-`
+  const lastTask = await prisma.task.findFirst({
+    where: { taskCode: { startsWith: taskPrefix } },
+    orderBy: { taskCode: 'desc' },
+    select: { taskCode: true },
+  })
+  const taskSeq = lastTask?.taskCode ? parseInt(lastTask.taskCode.slice(-5)) + 1 : 1
+  const taskCode = `${taskPrefix}${String(taskSeq).padStart(5, '0')}`
+
+  const hospitalName = installPlan.hospital?.hospitalName || installPlan.hospital?.hiraHospitalName || ''
+  await prisma.task.create({
+    data: {
+      taskCode,
+      taskType: 'INSTALL_PLAN',
+      refCode: planCode,
+      hospitalCode: hospitalCode || null,
+      title: hospitalName ? `설치계획(가안) ${hospitalName}` : '설치계획(가안)',
+    },
+  })
+
   return NextResponse.json({ installPlan }, { status: 201 })
 }

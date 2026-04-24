@@ -4,6 +4,30 @@
 
 ---
 
+## 2026-04-24 | 설치계획 메일큐 planCode 포맷·Task 생성 누락 수정 + 답사 자동 sync 진단 로그 보강
+
+- **메일큐 설치계획 등록 시 planCode 구포맷 버그 수정** (`app/api/mail-queue/[id]/route.ts`):
+  - 기존: `IP-${created.id}` → `IP-00123` 같은 구 포맷으로 생성 (2026-04-13 코드체계 변경 이후 누락)
+  - 변경: 수동 등록과 동일하게 `IP-YYYYMM-NNNNN` 월별 순번 채번
+- **Task 레코드 생성 누락 보강**:
+  - `app/api/mail-queue/[id]/route.ts` PUT: Task 레코드 자동 생성 추가 (`TASK-YYYYMM-NNNNN`, taskType=`INSTALL_PLAN`)
+  - `app/api/install-plans/route.ts` POST (수동 등록 경로도 동일하게 누락되어 있었음) Task 생성 로직 추가
+  - `app/api/install-plans/[id]/route.ts` DELETE: 설치계획 삭제 시 연결된 Task 레코드도 `deleteMany`로 함께 삭제 (Maintenance DELETE와 동일 패턴)
+  - 영향: 그동안 /tasks 업무 현황 페이지에서 설치계획이 안 보이던 현상 해소. 기존 누락 레코드는 데이터 백필 별도 필요
+- **답사 메일 자동 sync "마지막 동기화 시간은 최신인데 새 메일 리스트업 안 됨" 이슈 원인 + 수정**:
+  - 원인 1: `mail_sync_last` 키가 설치계획 sync에서만 upsert되는데 답사 페이지도 같은 키를 읽어 표시 → 설치계획 sync만 성공해도 답사 페이지는 "최근 동기화됨"으로 보임
+  - 원인 2: `lib/mail-scheduler.ts`의 fetch try-catch가 네트워크 실패만 잡고 HTTP 4xx/5xx는 silent pass → 답사 sync가 500 반환해도 "동기화 완료" 로그만 찍힘
+  - 수정:
+    - `lib/mail-scheduler.ts`: `res.ok` 체크 + HTTP 에러 시 status·body를 console.error로 로깅, 각 sync별 성공/실패 로그 분리
+    - `app/api/site-visit-queue/sync/route.ts`: 최상위 try-catch 추가 (핸들러 내부 throw를 500 + 에러 로그로 캡처), 완료 시 `mail_sync_last_site_visit` 전용 키 upsert
+    - `app/api/site-visit-queue/route.ts` GET: 답사 전용 키 우선, 없으면 레거시 `mail_sync_last` fallback
+    - `app/api/mail-queue/sync/route.ts`: `mail_sync_last_install_plan` 전용 키 추가 upsert (레거시 공용 키 병행 유지 → 하위 호환)
+    - `app/api/mail-queue/route.ts` GET: 설치계획 전용 키 우선, 없으면 레거시 fallback
+  - 후속 확인 필요: 재시작 후 30분 뒤 `pm2 logs thync-dev | grep mail-scheduler`에서 `답사 동기화 HTTP 500: ...` 로그 확인 시 실제 실패 원인 파악 가능
+- 영향 파일: `app/api/mail-queue/[id]/route.ts`, `app/api/mail-queue/route.ts`, `app/api/mail-queue/sync/route.ts`, `app/api/install-plans/route.ts`, `app/api/install-plans/[id]/route.ts`, `app/api/site-visit-queue/route.ts`, `app/api/site-visit-queue/sync/route.ts`, `lib/mail-scheduler.ts`
+
+---
+
 ## 2026-04-22 | 구축일정 간트차트 개선 — 유지보수 방문일 단일일 처리 + 월 경계 주 잘림 해결
 
 - **유지보수 바 표시 방식 단순화** (`app/projects/calendar/page.tsx`):

@@ -8,26 +8,32 @@ const INTERVAL_MAP: Record<string, number> = {
 let timer: ReturnType<typeof setInterval> | null = null
 let currentInterval = 'off'
 
+async function callSync(label: string, url: string, headers: Record<string, string>) {
+  try {
+    const res = await fetch(url, { method: 'POST', headers })
+    if (!res.ok) {
+      let body = ''
+      try { body = await res.text() } catch {}
+      console.error(`[mail-scheduler] ${label} HTTP ${res.status}: ${body.slice(0, 500)}`)
+      return
+    }
+    const data = await res.json().catch(() => null)
+    const newCount = data?.newCount ?? '?'
+    console.log(`[mail-scheduler] ${label} 성공 (newCount=${newCount})`)
+  } catch (err) {
+    console.error(`[mail-scheduler] ${label} 네트워크 실패:`, err)
+  }
+}
+
 async function runSync() {
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3001'
   const secret = process.env.CRON_SECRET || ''
   const headers = { Authorization: `Bearer ${secret}` }
 
-  // 설치계획 메일 동기화
-  try {
-    await fetch(`${baseUrl}/api/mail-queue/sync`, { method: 'POST', headers })
-  } catch (err) {
-    console.error('[mail-scheduler] 설치계획 동기화 실패:', err)
-  }
+  await callSync('설치계획 동기화', `${baseUrl}/api/mail-queue/sync`, headers)
+  await callSync('답사 동기화', `${baseUrl}/api/site-visit-queue/sync`, headers)
 
-  // 답사 메일 동기화
-  try {
-    await fetch(`${baseUrl}/api/site-visit-queue/sync`, { method: 'POST', headers })
-  } catch (err) {
-    console.error('[mail-scheduler] 답사 동기화 실패:', err)
-  }
-
-  console.log(`[mail-scheduler] 동기화 완료 (${new Date().toISOString()})`)
+  console.log(`[mail-scheduler] 동기화 루프 완료 (${new Date().toISOString()})`)
 }
 
 export function startScheduler(interval: string) {

@@ -39,7 +39,17 @@ export async function PUT(
     },
   })
 
-  const planCode = `IP-${String(created.id).padStart(5, '0')}`
+  // planCode 생성: IP-YYYYMM-NNNNN (수동 등록과 동일한 포맷)
+  const now = new Date()
+  const ym = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`
+  const ipPrefix = `IP-${ym}-`
+  const lastPlan = await prisma.installPlan.findFirst({
+    where: { planCode: { startsWith: ipPrefix } },
+    orderBy: { planCode: 'desc' },
+    select: { planCode: true },
+  })
+  const ipSeq = lastPlan?.planCode ? parseInt(lastPlan.planCode.slice(-5)) + 1 : 1
+  const planCode = `${ipPrefix}${String(ipSeq).padStart(5, '0')}`
 
   const installPlan = await prisma.installPlan.update({
     where: { id: created.id },
@@ -47,6 +57,27 @@ export async function PUT(
     include: {
       hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
       assignees: { include: { user: { select: { id: true, name: true } } } },
+    },
+  })
+
+  // Task 레코드 생성: TASK-YYYYMM-NNNNN
+  const taskPrefix = `TASK-${ym}-`
+  const lastTask = await prisma.task.findFirst({
+    where: { taskCode: { startsWith: taskPrefix } },
+    orderBy: { taskCode: 'desc' },
+    select: { taskCode: true },
+  })
+  const taskSeq = lastTask?.taskCode ? parseInt(lastTask.taskCode.slice(-5)) + 1 : 1
+  const taskCode = `${taskPrefix}${String(taskSeq).padStart(5, '0')}`
+
+  const hospitalName = installPlan.hospital?.hospitalName || installPlan.hospital?.hiraHospitalName || ''
+  await prisma.task.create({
+    data: {
+      taskCode,
+      taskType: 'INSTALL_PLAN',
+      refCode: planCode,
+      hospitalCode,
+      title: hospitalName ? `설치계획(가안) ${hospitalName}` : '설치계획(가안)',
     },
   })
 

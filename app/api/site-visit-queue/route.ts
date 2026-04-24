@@ -18,12 +18,16 @@ export async function GET(request: NextRequest) {
       },
     }),
     prisma.appSetting.findMany({
-      where: { key: { in: ['mail_sync_interval', 'mail_sync_last'] } },
+      where: { key: { in: ['mail_sync_interval', 'mail_sync_last_site_visit', 'mail_sync_last'] } },
     }),
   ])
 
   const syncInterval = settings.find((s) => s.key === 'mail_sync_interval')?.value || 'off'
-  const syncLast = settings.find((s) => s.key === 'mail_sync_last')?.value || null
+  // 답사 전용 키 우선, 없으면 레거시 공용 키로 폴백
+  const syncLast =
+    settings.find((s) => s.key === 'mail_sync_last_site_visit')?.value ||
+    settings.find((s) => s.key === 'mail_sync_last')?.value ||
+    null
 
   return NextResponse.json({ items, syncInterval, syncLast })
 }

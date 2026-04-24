@@ -83,6 +83,17 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   if (!isAdminOrAbove(authUser.role)) return NextResponse.json({ error: '삭제 권한이 없습니다. 관리자(ADMIN)에게 문의하세요.' }, { status: 403 })
 
   const id = parseInt(params.id)
+  const existing = await prisma.installPlan.findUnique({
+    where: { id },
+    select: { planCode: true },
+  })
+
+  if (existing?.planCode) {
+    await prisma.task.deleteMany({
+      where: { refCode: existing.planCode, taskType: 'INSTALL_PLAN' },
+    })
+  }
+
   await prisma.installPlan.delete({ where: { id } })
   return NextResponse.json({ ok: true })
 }

@@ -109,11 +109,17 @@ export async function POST(request: NextRequest) {
 
   const total = await prisma.installPlanQueue.count()
 
-  // 마지막 동기화 시간 기록
+  // 마지막 동기화 시간 기록 (설치계획 전용 + 레거시 공용 키 병행)
+  const nowIso = new Date().toISOString()
+  await prisma.appSetting.upsert({
+    where: { key: 'mail_sync_last_install_plan' },
+    update: { value: nowIso },
+    create: { key: 'mail_sync_last_install_plan', value: nowIso },
+  })
   await prisma.appSetting.upsert({
     where: { key: 'mail_sync_last' },
-    update: { value: new Date().toISOString() },
-    create: { key: 'mail_sync_last', value: new Date().toISOString() },
+    update: { value: nowIso },
+    create: { key: 'mail_sync_last', value: nowIso },
   })
 
   return NextResponse.json({ success: true, newCount, total })
