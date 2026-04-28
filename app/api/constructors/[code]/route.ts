@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { verifyToken, isAdminOrAbove } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Params = { params: { code: string } }
 
@@ -46,11 +47,22 @@ export async function PUT(request: NextRequest, { params }: Params) {
     },
   })
 
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'UPDATE',
+    resource: 'contractor',
+    resourceId: params.code,
+    resourceLabel: constructor.name,
+    before: existing,
+    after: constructor,
+  })
+
   return NextResponse.json({ constructor })
 }
 
 // DELETE: 삭제 (ADMIN 전용, 연결된 프로젝트 있으면 차단)
-export async function DELETE(_req: NextRequest, { params }: Params) {
+export async function DELETE(request: NextRequest, { params }: Params) {
   const cookieStore = cookies()
   const token = cookieStore.get('auth-token')?.value
   const user = token ? await verifyToken(token) : null
@@ -74,5 +86,16 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   }
 
   await prisma.contractor.delete({ where: { code: params.code } })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'DELETE',
+    resource: 'contractor',
+    resourceId: params.code,
+    resourceLabel: existing.name,
+    before: existing,
+  })
+
   return NextResponse.json({ success: true })
 }

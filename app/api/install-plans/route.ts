@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 export async function GET(request: NextRequest) {
   const authUser = await getAuthUser(request)
@@ -114,6 +115,16 @@ export async function POST(request: NextRequest) {
       hospitalCode: hospitalCode || null,
       title: hospitalName ? `설치계획(가안) ${hospitalName}` : '설치계획(가안)',
     },
+  })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(authUser),
+    action: 'CREATE',
+    resource: 'install_plan',
+    resourceId: installPlan.planCode ?? String(installPlan.id),
+    resourceLabel: `${hospitalName || '병원 미지정'} 설치계획`,
+    after: installPlan,
   })
 
   return NextResponse.json({ installPlan }, { status: 201 })

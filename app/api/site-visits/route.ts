@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { createCalendarEvent } from '@/lib/googleCalendar'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 const PAGE_SIZE = 20
 
@@ -158,6 +159,16 @@ export async function POST(request: NextRequest) {
       })
     }
   }
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'CREATE',
+    resource: 'site_visit',
+    resourceId: siteVisit.siteVisitCode ?? String(siteVisit.id),
+    resourceLabel: `${siteVisit.hospital?.hospitalName ?? siteVisit.hospital?.hiraHospitalName ?? ''} 답사`,
+    after: siteVisit,
+  })
 
   return NextResponse.json({ siteVisit }, { status: 201 })
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 export async function GET(request: NextRequest) {
   const user = await getAuthUser(request)
@@ -65,6 +66,16 @@ export async function POST(request: NextRequest) {
       allowedOrgCodes: allowedOrgCodes ?? [],
       sortOrder: sortOrder ?? 0,
     },
+  })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'CREATE',
+    resource: 'setting:nav_menu',
+    resourceId: item.id,
+    resourceLabel: `${item.label} (${item.menuKey})`,
+    after: item,
   })
 
   return NextResponse.json({ item }, { status: 201 })

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { verifyToken, isAdminOrAbove } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 // CON-000001 형식 코드 생성
 async function generateConstructorCode(): Promise<string> {
@@ -49,6 +50,16 @@ export async function POST(request: NextRequest) {
       managerPhone: managerPhone?.trim() || null,
       managerEmail: managerEmail?.trim() || null,
     },
+  })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'CREATE',
+    resource: 'contractor',
+    resourceId: constructor.code,
+    resourceLabel: constructor.name,
+    after: constructor,
   })
 
   return NextResponse.json({ constructor }, { status: 201 })

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { createCalendarEvent } from '@/lib/googleCalendar'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -169,6 +170,16 @@ export async function POST(request: NextRequest) {
       })
     }
   }
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'CREATE',
+    resource: 'maintenance',
+    resourceId: maintenance.maintenanceCode ?? String(maintenance.id),
+    resourceLabel: `${maintenance.hospital?.hospitalName ?? maintenance.hospital?.hiraHospitalName ?? ''} - ${maintenance.title}`,
+    after: maintenance,
+  })
 
   return NextResponse.json({ maintenance }, { status: 201 })
 }

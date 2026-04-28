@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Params = { params: { id: string } }
 
@@ -27,6 +28,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: '이미 존재하는 모델 코드입니다.' }, { status: 409 })
   }
 
+  const before = await prisma.deviceInfo.findUnique({ where: { id } })
+
   const device = await prisma.deviceInfo.update({
     where: { id },
     data: {
@@ -35,6 +38,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
       sortOrder: sortOrder ?? 0,
       isActive: isActive ?? true,
     },
+  })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'UPDATE',
+    resource: 'setting:device_info',
+    resourceId: id,
+    resourceLabel: `${device.deviceModel} ${device.deviceName}`,
+    before,
+    after: device,
   })
 
   return NextResponse.json({ device })
@@ -52,7 +66,17 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   const usageCount = await prisma.projectDevice.count({ where: { deviceInfoId: id } })
   if (usageCount > 0) {
     // 참조 중이면 삭제 불가 → 비활성화 처리
-    await prisma.deviceInfo.update({ where: { id }, data: { isActive: false } })
+    const updated = await prisma.deviceInfo.update({ where: { id }, data: { isActive: false } })
+    await logAudit({
+      req: request,
+      actor: auditActorFromJWT(user),
+      action: 'UPDATE',
+      resource: 'setting:device_info',
+      resourceId: id,
+      resourceLabel: `${device.deviceModel} ${device.deviceName} (비활성화)`,
+      before: device,
+      after: updated,
+    })
     return NextResponse.json({
       deactivated: true,
       message: `${usageCount}개 프로젝트에서 사용 중이어서 삭제할 수 없습니다. 비활성화 처리되었습니다.`,
@@ -60,5 +84,16 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   }
 
   await prisma.deviceInfo.delete({ where: { id } })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'DELETE',
+    resource: 'setting:device_info',
+    resourceId: id,
+    resourceLabel: `${device.deviceModel} ${device.deviceName}`,
+    before: device,
+  })
+
   return NextResponse.json({ success: true })
 }

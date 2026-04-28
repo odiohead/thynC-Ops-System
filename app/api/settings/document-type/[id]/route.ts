@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Params = { params: { id: string } }
 
@@ -24,6 +25,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: '이미 존재하는 문서유형명입니다.' }, { status: 409 })
   }
 
+  const before = await prisma.statusCode.findUnique({ where: { id } })
+
   const statusCode = await prisma.statusCode.update({
     where: { id },
     data: {
@@ -32,6 +35,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
       order,
       color: color !== undefined ? (color || null) : undefined,
     },
+  })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'UPDATE',
+    resource: 'setting:document_type',
+    resourceId: id,
+    resourceLabel: statusCode.name,
+    before,
+    after: statusCode,
   })
 
   return NextResponse.json({ statusCode })
@@ -50,5 +64,16 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   }
 
   await prisma.statusCode.delete({ where: { id } })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'DELETE',
+    resource: 'setting:document_type',
+    resourceId: id,
+    resourceLabel: sc.name,
+    before: sc,
+  })
+
   return NextResponse.json({ success: true })
 }

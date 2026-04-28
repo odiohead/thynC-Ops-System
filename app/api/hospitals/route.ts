@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION!,
@@ -86,6 +87,16 @@ export async function POST(request: NextRequest) {
   } catch (s3Err) {
     console.error(`S3 병원 디렉토리 생성 실패 [${hospitalCode}]:`, s3Err)
   }
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'CREATE',
+    resource: 'hospital',
+    resourceId: hospital.hospitalCode,
+    resourceLabel: hospital.hospitalName,
+    after: hospital,
+  })
 
   return NextResponse.json({ hospital }, { status: 201 })
 }

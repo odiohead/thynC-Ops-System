@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import bcrypt from 'bcryptjs'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 export async function GET(req: NextRequest) {
   const user = await getAuthUser(req)
@@ -102,6 +103,16 @@ export async function POST(req: NextRequest) {
       organization: { select: { id: true, name: true, code: true } },
       department: { select: { id: true, name: true } },
     },
+  })
+
+  await logAudit({
+    req,
+    actor: auditActorFromJWT(user),
+    action: 'CREATE',
+    resource: 'user',
+    resourceId: newUser.id,
+    resourceLabel: `${newUser.name} (${newUser.email})`,
+    after: newUser,
   })
 
   return NextResponse.json(newUser, { status: 201 })

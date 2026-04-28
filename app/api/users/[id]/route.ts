@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import bcrypt from 'bcryptjs'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Params = { params: { id: string } }
 
@@ -25,11 +26,27 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   const { isActive } = await req.json()
+
+  const target = await prisma.user.findUnique({ where: { id: params.id }, select: userSelect })
+  if (!target) return NextResponse.json({ error: '사용자를 찾을 수 없습니다.' }, { status: 404 })
+
   const updated = await prisma.user.update({
     where: { id: params.id },
     data: { isActive },
     select: userSelect,
   })
+
+  await logAudit({
+    req,
+    actor: auditActorFromJWT(authUser),
+    action: 'UPDATE',
+    resource: 'user',
+    resourceId: params.id,
+    resourceLabel: `${target.name} (${target.email})`,
+    before: { isActive: target.isActive },
+    after: { isActive: updated.isActive },
+  })
+
   return NextResponse.json(updated)
 }
 
@@ -104,6 +121,18 @@ export async function PUT(req: NextRequest, { params }: Params) {
     data: updateData,
     select: userSelect,
   })
+
+  await logAudit({
+    req,
+    actor: auditActorFromJWT(authUser),
+    action: 'UPDATE',
+    resource: 'user',
+    resourceId: target.id,
+    resourceLabel: `${target.name} (${target.email})`,
+    before: target,
+    after: updated,
+  })
+
   return NextResponse.json(updated)
 }
 
@@ -121,5 +150,16 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   if (!target) return NextResponse.json({ error: '사용자를 찾을 수 없습니다.' }, { status: 404 })
 
   await prisma.user.delete({ where: { id: params.id } })
+
+  await logAudit({
+    req,
+    actor: auditActorFromJWT(authUser),
+    action: 'DELETE',
+    resource: 'user',
+    resourceId: target.id,
+    resourceLabel: `${target.name} (${target.email})`,
+    before: target,
+  })
+
   return NextResponse.json({ success: true })
 }

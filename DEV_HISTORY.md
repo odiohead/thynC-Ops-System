@@ -4,6 +4,59 @@
 
 ---
 
+## 2026-04-28 | 감사 로그(AuditLog) 시스템 도입 — 모든 mutation·인증 이벤트 기록 + 관리자 조회 UI
+
+- **DB 마이그레이션** (20260428000000_add_audit_logs):
+  - `audit_logs` 테이블 신규 생성 (id SERIAL PK, actor_id/email/name/role 스냅샷, action, resource, resource_id, resource_label, before/after JSONB, ip_address, user_agent, created_at)
+  - 인덱스 3종: (actor_id, created_at DESC), (resource, resource_id, created_at DESC), (created_at DESC)
+  - User FK는 의도적으로 두지 않음 — 사용자 삭제 후에도 로그 보존 위해 actor 정보 스냅샷 컬럼으로 보관
+- **lib/audit.ts 신규 작성**:
+  - `logAudit({ req, actor, action, resource, resourceId, resourceLabel, before, after })` — 동기 기록, try-catch로 본 작업 비차단
+  - `auditActorFromJWT(jwt)` — JWTPayload(`userId/email/name/role`)를 AuditActor로 변환
+  - `redact()` — `password`/`passwordHash`/`hashedPassword` 키를 `[REDACTED]`로 자동 마스킹 (재귀 적용, Date는 ISO 문자열로 변환)
+  - `getRequestMeta()` — `x-forwarded-for`/`x-real-ip` 우선순위로 IP 추출, User-Agent 추출
+- **적용 범위 — Stage 2a (인증 2개)**:
+  - `app/api/auth/login/route.ts` LOGIN 기록 (성공 시)
+  - `app/api/auth/logout/route.ts` LOGOUT 기록 (시그니처에 `req: NextRequest` 추가)
+- **적용 범위 — Stage 2b (User CRUD 4개)**:
+  - `app/api/users/route.ts` POST → CREATE
+  - `app/api/users/[id]/route.ts` PUT/PATCH/DELETE → UPDATE/UPDATE/DELETE (PATCH는 isActive 토글만, target 미리 조회로 정확한 before snapshot 확보)
+- **적용 범위 — Stage 2c (4대 업무 모듈)**:
+  - Project (POST/PUT/DELETE) — VIEWER의 issueNote/remark 부분 수정도 별도 UPDATE 기록
+  - SiteVisit (POST/PUT/DELETE)
+  - Maintenance (POST/PUT/DELETE)
+  - InstallPlan (POST/PUT/DELETE) — PUT/DELETE에 existing 사전 조회 추가, 04-24 Task 동기화 fix와 충돌 해결하여 병합
+- **적용 범위 — Stage 3 (부가 모듈)**:
+  - Hospital (POST/PUT/DELETE) + 대웅 담당자 배정/해제 (`hospital_daewoong_assignment` resource)
+  - Constructor (POST/PUT/DELETE)
+  - Settings StatusCode 7종 (status, site-visit-status, intro-type, consultation-type, document-type, maintenance-type, maintenance-status) — 모두 `setting:*` resource로 분리, PUT 핸들러에 findUnique 추가
+  - Settings 7종 (build-status, organization, department, field-engineer, device-info, nav-menu) — device 비활성화 케이스도 UPDATE로 기록
+- **Stage 4 — 관리자 UI**:
+  - `app/api/settings/audit-logs/route.ts` 신규 — GET 목록 + 페이지네이션 + 필터 (search/action/resource/from/to) + facets (distinct resource/action 목록 반환)
+  - `app/settings/audit-logs/page.tsx` 신규 — 검색·필터 폼, 액션별 색상 뱃지, 역할별 색상 뱃지, 행 클릭 시 상세 모달 (before/after 필드별 비교 테이블, 변경된 필드는 노란색 하이라이트)
+  - NavMenuItem `settings/audit-logs` 추가 (SUPER_ADMIN, sortOrder=7)
+- **검증**:
+  - 프로젝트 전체 `tsc --noEmit` 통과
+  - `npm run build` (NODE_OPTIONS=--max-old-space-size=4096) 통과 — `/settings/audit-logs` 라우트 정상 등록
+  - DEV DB `audit_logs` 테이블 정상 생성 확인
+- **주의**: PROD DB는 아직 미적용 — 사용자 명시 요청 시 동일 SQL 실행 필요
+- 영향 파일 (총 30+개):
+  - `prisma/schema.prisma`, `prisma/migrations/20260428000000_add_audit_logs/`
+  - `lib/audit.ts` (신설)
+  - `app/api/auth/login/route.ts`, `app/api/auth/logout/route.ts`
+  - `app/api/users/route.ts`, `app/api/users/[id]/route.ts`
+  - `app/api/projects/route.ts`, `app/api/projects/[code]/route.ts`
+  - `app/api/site-visits/route.ts`, `app/api/site-visits/[id]/route.ts`
+  - `app/api/maintenances/route.ts`, `app/api/maintenances/[id]/route.ts`
+  - `app/api/install-plans/route.ts`, `app/api/install-plans/[id]/route.ts`
+  - `app/api/hospitals/route.ts`, `app/api/hospitals/[code]/route.ts`, `app/api/hospitals/[code]/daewoong-staff/route.ts`, `app/api/hospitals/[code]/daewoong-staff/[sid]/route.ts`
+  - `app/api/constructors/route.ts`, `app/api/constructors/[code]/route.ts`
+  - `app/api/settings/{status,site-visit-status,intro-type,consultation-type,document-type,maintenance-type,maintenance-status,build-status,organizations,departments,field-engineers,devices,nav-menus}/route.ts` 및 각 `[id]/route.ts`
+  - `app/api/settings/audit-logs/route.ts` (신설), `app/settings/audit-logs/page.tsx` (신설)
+  - `README.md`, `DEV_HISTORY.md`
+
+---
+
 ## 2026-04-24 | 설치계획 메일큐 planCode 포맷·Task 생성 누락 수정 + 답사 자동 sync 진단 로그 보강
 
 - **메일큐 설치계획 등록 시 planCode 구포맷 버그 수정** (`app/api/mail-queue/[id]/route.ts`):

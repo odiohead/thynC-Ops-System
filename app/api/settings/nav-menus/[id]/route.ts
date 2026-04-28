@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Params = { params: { id: string } }
 
@@ -46,6 +47,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const item = await prisma.navMenuItem.update({ where: { id }, data })
 
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'UPDATE',
+    resource: 'setting:nav_menu',
+    resourceId: id,
+    resourceLabel: `${item.label} (${item.menuKey})`,
+    before: existing,
+    after: item,
+  })
+
   return NextResponse.json({ item })
 }
 
@@ -75,5 +87,16 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   }
 
   await prisma.navMenuItem.delete({ where: { id } })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'DELETE',
+    resource: 'setting:nav_menu',
+    resourceId: id,
+    resourceLabel: `${existing.label} (${existing.menuKey})`,
+    before: existing,
+  })
+
   return NextResponse.json({ success: true })
 }

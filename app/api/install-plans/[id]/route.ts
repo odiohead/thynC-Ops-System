@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 interface Params { params: { id: string } }
 
@@ -29,6 +30,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const id = parseInt(params.id)
   const body = await request.json()
   const { hospitalCode, requestDate, writeStatus, replyStatus, assigneeIds, replyDate, note } = body
+
+  const existing = await prisma.installPlan.findUnique({ where: { id } })
+  if (!existing) return NextResponse.json({ error: '설치계획을 찾을 수 없습니다.' }, { status: 404 })
 
   await prisma.installPlan.update({
     where: { id },
@@ -74,6 +78,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
     })
   }
 
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(authUser),
+    action: 'UPDATE',
+    resource: 'install_plan',
+    resourceId: existing.planCode ?? String(id),
+    resourceLabel: `${updated?.hospital?.hospitalName ?? updated?.hospital?.hiraHospitalName ?? '병원 미지정'} 설치계획`,
+    before: existing,
+    after: updated,
+  })
+
   return NextResponse.json({ installPlan: updated })
 }
 
@@ -85,15 +100,27 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   const id = parseInt(params.id)
   const existing = await prisma.installPlan.findUnique({
     where: { id },
-    select: { planCode: true },
+    include: { hospital: { select: { hospitalName: true, hiraHospitalName: true } } },
   })
+  if (!existing) return NextResponse.json({ error: '설치계획을 찾을 수 없습니다.' }, { status: 404 })
 
-  if (existing?.planCode) {
+  if (existing.planCode) {
     await prisma.task.deleteMany({
       where: { refCode: existing.planCode, taskType: 'INSTALL_PLAN' },
     })
   }
 
   await prisma.installPlan.delete({ where: { id } })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(authUser),
+    action: 'DELETE',
+    resource: 'install_plan',
+    resourceId: existing.planCode ?? String(id),
+    resourceLabel: `${existing.hospital?.hospitalName ?? existing.hospital?.hiraHospitalName ?? '병원 미지정'} 설치계획`,
+    before: existing,
+  })
+
   return NextResponse.json({ ok: true })
 }

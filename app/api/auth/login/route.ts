@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import bcrypt from 'bcryptjs'
 import { signToken } from '@/lib/auth'
+import { logAudit } from '@/lib/audit'
 
 export async function POST(req: NextRequest) {
   const { email, password } = await req.json()
@@ -44,5 +45,15 @@ export async function POST(req: NextRequest) {
     maxAge: 60 * 60 * 24 * 7,
     sameSite: 'lax',
   })
+
+  await logAudit({
+    req,
+    actor: { id: user.id, email: user.email, name: user.name, role: user.role },
+    action: 'LOGIN',
+    resource: 'auth',
+    resourceId: user.id,
+    resourceLabel: `${user.name} (${user.email})`,
+  })
+
   return res
 }

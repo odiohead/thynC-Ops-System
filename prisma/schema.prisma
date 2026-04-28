@@ -622,3 +622,30 @@ model MaintenanceFile {
 
   @@map("maintenance_files")
 }
+
+model AuditLog {
+  id            Int       @id @default(autoincrement())
+
+  actorId       String?   @map("actor_id")
+  actorEmail    String?   @map("actor_email")
+  actorName     String?   @map("actor_name")
+  actorRole     String?   @map("actor_role")
+
+  action        String
+  resource      String
+  resourceId    String?   @map("resource_id")
+  resourceLabel String?   @map("resource_label")
+
+  before        Json?
+  after         Json?
+
+  ipAddress     String?   @map("ip_address")
+  userAgent     String?   @map("user_agent")
+
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([actorId, createdAt])
+  @@index([resource, resourceId, createdAt])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

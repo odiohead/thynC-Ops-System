@@ -3,6 +3,7 @@ import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Params = { params: { code: string } }
 
@@ -51,6 +52,16 @@ export async function PUT(request: NextRequest, { params }: Params) {
         remark: remark !== undefined ? remark : undefined,
       },
       include: projectInclude,
+    })
+    await logAudit({
+      req: request,
+      actor: auditActorFromJWT(authUser),
+      action: 'UPDATE',
+      resource: 'project',
+      resourceId: params.code,
+      resourceLabel: existing.projectName,
+      before: { issueNote: existing.issueNote, remark: existing.remark },
+      after: { issueNote: project.issueNote, remark: project.remark },
     })
     revalidatePath('/projects')
     return NextResponse.json({ project })
@@ -167,6 +178,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
   }
 
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(authUser),
+    action: 'UPDATE',
+    resource: 'project',
+    resourceId: params.code,
+    resourceLabel: updated?.projectName ?? existing.projectName,
+    before: existing,
+    after: updated,
+  })
+
   revalidatePath('/projects')
   return NextResponse.json({ project: updated })
 }
@@ -187,6 +209,16 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   await prisma.projectDevice.deleteMany({ where: { projectId: existing.id } })
   await prisma.projectFile.deleteMany({ where: { projectId: existing.id } })
   await prisma.project.delete({ where: { projectCode: params.code } })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(authUser),
+    action: 'DELETE',
+    resource: 'project',
+    resourceId: params.code,
+    resourceLabel: existing.projectName,
+    before: existing,
+  })
 
   return NextResponse.json({ success: true })
 }

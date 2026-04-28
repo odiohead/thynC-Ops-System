@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Params = { params: { code: string } }
 
@@ -105,6 +106,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
     return [updated]
   })
 
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'UPDATE',
+    resource: 'hospital',
+    resourceId: params.code,
+    resourceLabel: hospital.hospitalName,
+    before: existingHospital,
+    after: hospital,
+  })
+
   revalidatePath('/hospitals')
   revalidatePath(`/hospitals/${params.code}`, 'page')
   return NextResponse.json({ hospital })
@@ -125,12 +137,25 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: '연결된 답사 기록이 있어 삭제할 수 없습니다.' }, { status: 409 })
   }
 
+  const existing = await prisma.hospital.findUnique({ where: { hospitalCode: params.code } })
+  if (!existing) return NextResponse.json({ error: '병원을 찾을 수 없습니다.' }, { status: 404 })
+
   await prisma.$transaction([
     prisma.daewoongHospitalAssignment.deleteMany({ where: { hospitalCode: params.code } }),
     prisma.hospitalDevice.deleteMany({ where: { hospitalCode: params.code } }),
     prisma.hospitalMeta.deleteMany({ where: { hospitalCode: params.code } }),
     prisma.hospital.delete({ where: { hospitalCode: params.code } }),
   ])
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'DELETE',
+    resource: 'hospital',
+    resourceId: params.code,
+    resourceLabel: existing.hospitalName,
+    before: existing,
+  })
 
   return NextResponse.json({ success: true })
 }

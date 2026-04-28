@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { deleteFromS3 } from '@/lib/s3'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -145,6 +146,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
   }
 
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'UPDATE',
+    resource: 'maintenance',
+    resourceId: existing.maintenanceCode ?? String(id),
+    resourceLabel: `${updated?.hospital?.hospitalName ?? updated?.hospital?.hiraHospitalName ?? ''} - ${updated?.title ?? existing.title}`,
+    before: existing,
+    after: updated,
+  })
+
   return NextResponse.json({ maintenance: updated })
 }
 
@@ -184,5 +196,16 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   }
 
   await prisma.maintenance.delete({ where: { id } })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'DELETE',
+    resource: 'maintenance',
+    resourceId: existing.maintenanceCode ?? String(id),
+    resourceLabel: `${existing.hospital?.hospitalName ?? ''} - ${existing.title}`,
+    before: existing,
+  })
+
   return NextResponse.json({ success: true })
 }

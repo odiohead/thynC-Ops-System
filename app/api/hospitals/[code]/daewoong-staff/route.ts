@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Params = { params: { code: string } }
 
@@ -44,6 +45,17 @@ export async function POST(request: NextRequest, { params }: Params) {
         },
       },
     })
+
+    await logAudit({
+      req: request,
+      actor: auditActorFromJWT(user),
+      action: 'CREATE',
+      resource: 'hospital_daewoong_assignment',
+      resourceId: `${params.code}/${userId}`,
+      resourceLabel: `${params.code} ↔ ${assignment.assignedUser.name}`,
+      after: assignment,
+    })
+
     return NextResponse.json({ assignment }, { status: 201 })
   } catch {
     return NextResponse.json({ error: '이미 배정된 직원입니다.' }, { status: 409 })

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isSuperAdmin } from '@/lib/auth'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Params = { params: { id: string } }
 
@@ -30,6 +31,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
     include: { _count: { select: { users: true } } },
   })
 
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'UPDATE',
+    resource: 'setting:organization',
+    resourceId: id,
+    resourceLabel: `${organization.name} (${organization.code})`,
+    before: existing,
+    after: organization,
+  })
+
   return NextResponse.json({ organization })
 }
 
@@ -56,5 +68,16 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   }
 
   await prisma.organization.delete({ where: { id } })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'DELETE',
+    resource: 'setting:organization',
+    resourceId: id,
+    resourceLabel: `${existing.name} (${existing.code})`,
+    before: existing,
+  })
+
   return NextResponse.json({ success: true })
 }

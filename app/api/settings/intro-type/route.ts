@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 export async function GET() {
   const introTypes = await prisma.statusCode.findMany({
@@ -27,6 +28,16 @@ export async function POST(request: NextRequest) {
 
   const introType = await prisma.statusCode.create({
     data: { name: name.trim(), order: order ?? 0, color: color ?? null, category: 'INTRO_TYPE' },
+  })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'CREATE',
+    resource: 'setting:intro_type',
+    resourceId: introType.id,
+    resourceLabel: introType.name,
+    after: introType,
   })
 
   return NextResponse.json({ introType }, { status: 201 })

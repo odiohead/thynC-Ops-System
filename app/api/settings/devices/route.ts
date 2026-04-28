@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 export async function GET() {
   const devices = await prisma.deviceInfo.findMany({
@@ -47,6 +48,16 @@ export async function POST(request: NextRequest) {
       sortOrder: sortOrder ?? 0,
       isActive: isActive ?? true,
     },
+  })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'CREATE',
+    resource: 'setting:device_info',
+    resourceId: device.id,
+    resourceLabel: `${device.deviceModel} ${device.deviceName}`,
+    after: device,
   })
 
   return NextResponse.json({ device }, { status: 201 })

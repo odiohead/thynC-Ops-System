@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 const VALID_WORK_TYPES = ['PROJECT', 'INSTALL_PLAN', 'MAINTENANCE'] as const
 type WorkType = typeof VALID_WORK_TYPES[number]
@@ -101,5 +102,16 @@ export async function POST(req: NextRequest) {
       },
     },
   })
+
+  await logAudit({
+    req,
+    actor: auditActorFromJWT(authUser),
+    action: 'CREATE',
+    resource: 'setting:field_engineer',
+    resourceId: fieldEngineer.id,
+    resourceLabel: `[${workType}] ${fieldEngineer.user.name}`,
+    after: fieldEngineer,
+  })
+
   return NextResponse.json(fieldEngineer, { status: 201 })
 }

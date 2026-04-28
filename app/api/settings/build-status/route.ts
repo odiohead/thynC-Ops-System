@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 export async function GET() {
   const [buildStatuses, grouped] = await Promise.all([
@@ -33,6 +34,16 @@ export async function POST(request: NextRequest) {
 
   const buildStatus = await prisma.buildStatus.create({
     data: { label: label.trim(), color: color ?? null, sortOrder: sortOrder ?? 0 },
+  })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'CREATE',
+    resource: 'setting:build_status',
+    resourceId: buildStatus.id,
+    resourceLabel: buildStatus.label,
+    after: buildStatus,
   })
 
   return NextResponse.json({ buildStatus }, { status: 201 })

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Params = { params: { id: string } }
 
@@ -127,6 +128,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
   }
 
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'UPDATE',
+    resource: 'site_visit',
+    resourceId: updated?.siteVisitCode ?? String(id),
+    resourceLabel: `${updated?.hospital?.hospitalName ?? updated?.hospital?.hiraHospitalName ?? ''} 답사`,
+    before: existing,
+    after: updated,
+  })
+
   return NextResponse.json({ siteVisit: updated })
 }
 
@@ -147,5 +159,16 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   }
 
   await prisma.siteVisit.delete({ where: { id } })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'DELETE',
+    resource: 'site_visit',
+    resourceId: existing.siteVisitCode ?? String(id),
+    resourceLabel: `답사 (id=${id})`,
+    before: existing,
+  })
+
   return NextResponse.json({ success: true })
 }

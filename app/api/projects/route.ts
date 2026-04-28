@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { createCalendarEvent } from '@/lib/googleCalendar'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -196,6 +197,16 @@ export async function POST(request: NextRequest) {
       })
     }
   }
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(authUser),
+    action: 'CREATE',
+    resource: 'project',
+    resourceId: project.projectCode,
+    resourceLabel: project.projectName,
+    after: project,
+  })
 
   return NextResponse.json({ project }, { status: 201 })
 }

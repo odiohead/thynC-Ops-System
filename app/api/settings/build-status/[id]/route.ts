@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Params = { params: { id: string } }
 
@@ -17,9 +18,22 @@ export async function PUT(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: '상태명을 입력해주세요.' }, { status: 400 })
   }
 
+  const before = await prisma.buildStatus.findUnique({ where: { id } })
+
   const buildStatus = await prisma.buildStatus.update({
     where: { id },
     data: { label: label.trim(), color: color !== undefined ? (color || null) : undefined, sortOrder },
+  })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'UPDATE',
+    resource: 'setting:build_status',
+    resourceId: id,
+    resourceLabel: buildStatus.label,
+    before,
+    after: buildStatus,
   })
 
   return NextResponse.json({ buildStatus })
@@ -43,5 +57,16 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   }
 
   await prisma.buildStatus.delete({ where: { id } })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(user),
+    action: 'DELETE',
+    resource: 'setting:build_status',
+    resourceId: id,
+    resourceLabel: bs.label,
+    before: bs,
+  })
+
   return NextResponse.json({ success: true })
 }

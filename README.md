@@ -75,7 +75,8 @@ app/
 │   │   ├── document-type/            # 문서유형 관리
 │   │   ├── maintenance-type/         # 장애유형 관리
 │   │   ├── maintenance-status/       # 유지보수 상태 관리
-│   │   └── nav-menus/                # 네비게이션 메뉴 관리 CRUD (SUPER_ADMIN)
+│   │   ├── nav-menus/                # 네비게이션 메뉴 관리 CRUD (SUPER_ADMIN)
+│   │   └── audit-logs/               # 감사 로그 조회 (SUPER_ADMIN)
 │   ├── ai-assistant/                 # AI 어시스턴트 (Flowise 프록시 + 정제 + 상담이력 저장)
 │   │   ├── summarize/                # AI 정제 (Anthropic Claude API)
 │   │   └── consultation/             # 상담이력 저장 (ConsultationQueue)
@@ -110,7 +111,8 @@ app/
 │   ├── document-type/                # 문서유형 관리
 │   ├── maintenance-type/             # 장애유형 관리
 │   ├── maintenance-status/           # 유지보수 상태 관리
-│   └── nav-menus/                    # 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
+│   ├── nav-menus/                    # 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
+│   └── audit-logs/                   # 감사 로그 (SUPER_ADMIN 전용)
 ├── login/                            # 로그인 페이지
 └── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper)
 
@@ -118,7 +120,8 @@ lib/
 ├── auth.ts                           # JWT 인증 유틸리티 + 역할 헬퍼
 ├── prisma.ts                         # Prisma 클라이언트
 ├── s3.ts                             # AWS S3 연동 유틸리티 (업로드/삭제/presigned URL)
-└── googleDrive.ts                    # Google Drive 연동 유틸리티
+├── googleDrive.ts                    # Google Drive 연동 유틸리티
+└── audit.ts                          # 감사 로그 헬퍼 (logAudit, auditActorFromJWT, redact)
 
 prisma/
 ├── schema.prisma                     # DB 스키마
@@ -243,6 +246,16 @@ prisma/
 ### MaintenanceFile (유지보수 첨부파일)
 - Maintenance에 첨부된 파일
 - fileCategory, fileName, s3Key
+
+### AuditLog (감사 로그)
+- 시스템 내 모든 mutation 및 인증 이벤트 기록
+- actorId/actorEmail/actorName/actorRole (User 스냅샷 — User 삭제 후에도 기록 보존)
+- action: `CREATE` / `UPDATE` / `DELETE` / `LOGIN` / `LOGOUT`
+- resource: `auth` / `user` / `hospital` / `project` / `site_visit` / `maintenance` / `install_plan` / `contractor` / `setting:*` 등
+- resourceId, resourceLabel (사람이 읽기 좋은 이름)
+- before/after (JSONB, 비밀번호 등 민감정보 자동 redact)
+- ipAddress, userAgent
+- (actorId, createdAt) / (resource, resourceId, createdAt) / (createdAt) 인덱스
 
 ### DaewoongHospitalAssignment (병원 담당자 배정)
 - User(DAEWOONG 소속) ↔ Hospital N:M 관계 테이블
@@ -445,6 +458,14 @@ prisma/
 - 메인 메뉴 / 설정 하위 메뉴 2개 섹션으로 구분
 - 순서 변경 (↑↓ 버튼), 새 메뉴 추가/삭제
 - API 실패 시 폴백 메뉴 자동 적용
+
+### 감사 로그 (SUPER_ADMIN 전용)
+- 시스템 내 모든 데이터 변경(CREATE/UPDATE/DELETE) 및 인증(LOGIN/LOGOUT) 이벤트 기록
+- 적용 범위: 인증, User CRUD, 4대 업무(Project/SiteVisit/Maintenance/InstallPlan), Hospital(+ 대웅 담당자 배정/해제), Contractor, Settings 전체
+- `/settings/audit-logs` 페이지: 검색(사용자/대상명) + 액션·대상·기간 필터 + 페이지네이션
+- 행 클릭 시 상세 모달: before/after 필드별 비교 테이블(변경 필드 노란색 하이라이트)
+- 비밀번호 등 민감 필드는 저장 시점에 자동 `[REDACTED]` 처리
+- 로그 기록 실패는 본 작업을 차단하지 않음 (try-catch 보호)
 
 ### 설정 (ADMIN 이상)
 - 병원 상태코드 관리 (추가·수정·삭제·순서)
@@ -754,6 +775,7 @@ npm run dev
 | POST | `/api/settings/document-type` | 문서유형 추가 |
 | PUT  | `/api/settings/document-type/[id]` | 문서유형 수정 |
 | DELETE | `/api/settings/document-type/[id]` | 문서유형 삭제 (ADMIN 이상) |
+| GET  | `/api/settings/audit-logs` | 감사 로그 목록 (SUPER_ADMIN 전용, `?page=&limit=&search=&action=&resource=&from=&to=`) |
 
 ### 네비게이션 메뉴
 | Method | Endpoint | 설명 |
