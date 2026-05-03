@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-05-03 | 답사(SiteVisit) 삭제 실패 수정 — site_visit_queue FK 분리 후 삭제
+
+- **증상**: PROD에서 답사 상세페이지에서 삭제 시 실패 (예: VISIT-202604-00023). 답사가 답사 등록 큐(`site_visit_queue`)로부터 자동 등록된 경우 재현.
+- **원인**: `site_visit_queue.site_visit_id` FK가 `ON DELETE NO ACTION` (Prisma `SiteVisitQueue.siteVisit` 관계에 `onDelete` 미지정). 큐 레코드가 답사를 참조 중이면 PostgreSQL이 SiteVisit DELETE를 거부.
+- **수정**: `app/api/site-visits/[id]/route.ts` DELETE 핸들러에서 `prisma.$transaction`으로 (1) `siteVisitQueue.updateMany({ siteVisitId } → null)` 실행 후 (2) `siteVisit.delete` 실행하도록 변경. 큐 이력 자체는 보존.
+- **영향 파일**: `app/api/site-visits/[id]/route.ts`
+- **DB/스키마 변경 없음**. (스키마 차원의 `onDelete: SetNull` 변환은 향후 별도 검토)
+
+---
+
 ## 2026-04-28 | 감사 로그(AuditLog) 시스템 도입 — 모든 mutation·인증 이벤트 기록 + 관리자 조회 UI
 
 - **DB 마이그레이션** (20260428000000_add_audit_logs):

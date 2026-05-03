@@ -158,7 +158,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     await deleteCalendarEvent('site-visit', existing.calendarEventId)
   }
 
-  await prisma.siteVisit.delete({ where: { id } })
+  // site_visit_queue.site_visit_id FK는 NO ACTION이라 큐 레코드의 참조부터 끊어야 함
+  await prisma.$transaction([
+    prisma.siteVisitQueue.updateMany({ where: { siteVisitId: id }, data: { siteVisitId: null } }),
+    prisma.siteVisit.delete({ where: { id } }),
+  ])
 
   await logAudit({
     req: request,
