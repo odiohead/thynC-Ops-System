@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma'
 import { uploadToS3 } from '@/lib/s3'
 import { parseFormEmail, buildNoteHtml } from '@/lib/gmail'
 import { createCalendarEvent } from '@/lib/googleCalendar'
+import { advanceHospitalStatus } from '@/lib/hospitalStatus'
+import { auditActorFromJWT } from '@/lib/audit'
 
 export async function PUT(
   request: NextRequest,
@@ -144,6 +146,14 @@ export async function PUT(
   await prisma.siteVisitQueue.update({
     where: { id },
     data: { status: 'registered', siteVisitId: siteVisit.id },
+  })
+
+  await advanceHospitalStatus({
+    hospitalCode,
+    targetStatus: '답사요청',
+    req: request,
+    actor: auditActorFromJWT(authUser),
+    source: '답사 메일큐 등록',
   })
 
   return NextResponse.json({ siteVisit })

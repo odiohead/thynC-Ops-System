@@ -4,6 +4,34 @@
 
 ---
 
+## 2026-05-04 | 업무 등록에 따른 병원 thynC 현황상태 자동 진행
+
+- **요구사항**:
+  1. 설치계획(가안) 등록 → 병원 status `가견적요청`
+  2. 답사 등록 → 병원 status `답사요청`
+  3. 프로젝트 등록 시 `contractDate` 입력 → 병원 status `계약완료` + `Hospital.contractDate` 갱신(단, 기존 값이 있으면 보존 — 추가도입)
+  4. 프로젝트 `buildStatus`가 `구축완료`(라벨에 `완료` 포함)로 변경 → 병원 status `운영`
+- **단방향 규칙**: 진행 단계 rank(미계약=1 → 가견적요청=2 → 답사요청=3 → 계약완료=4 → 운영=5 → 해지=6) 기준, **현재보다 후행 단계로만 갱신**한다. 이미 `운영`인 병원에 새 설치계획·답사가 들어와도 status는 보존(추가도입 케이스).
+- **lib/hospitalStatus.ts 신규**:
+  - `advanceHospitalStatus({ hospitalCode, targetStatus, newContractDate?, req?, actor?, source? })` — 단방향 검사 → Hospital.status·contractDate 부분 갱신 → AuditLog `UPDATE`(`resource='hospital'`, label에 `(자동: <source>)` 표기) 기록.
+  - 변경이 발생했을 때만 audit 기록(노이즈 방지). `newContractDate`는 Hospital.contractDate가 NULL일 때만 채움.
+  - 모든 실패는 try-catch로 흡수 → 본 작업(설치계획/답사/프로젝트 저장) 비차단.
+- **적용 위치**:
+  - `app/api/install-plans/route.ts` POST → `가견적요청`
+  - `app/api/site-visits/route.ts` POST → `답사요청`
+  - `app/api/projects/route.ts` POST(contractDate 있을 때) → `계약완료` + Hospital.contractDate fill
+  - `app/api/projects/[code]/route.ts` PUT — 두 트리거:
+    - `contractDate`가 PUT으로 채워졌을 때(등록 시 미입력 → 사후 입력 케이스 포함) → `계약완료` + Hospital.contractDate fill(NULL일 때만)
+    - `buildStatus` 라벨에 `완료` 포함될 때(기존 task 완료 동기화 분기 안에서) → `운영`
+  - `app/api/mail-queue/[id]/route.ts` PUT(설치계획 자동 등록 시) → `가견적요청`
+  - `app/api/site-visit-queue/[id]/route.ts` PUT(답사 자동 등록 시) → `답사요청`
+  - 메일 큐 `sync` 핸들러(폴링→큐 적재)에는 적용하지 않음 — 사용자 정책: 큐 적재 시점 아닌 실제 관리자 등록 시점에만 반영.
+- **DB/스키마 변경 없음** (`hospitals.status`는 기존 text 컬럼 그대로 사용).
+- **검증**: `npx tsc --noEmit` 통과.
+- **영향 파일**: `lib/hospitalStatus.ts` (신규), `app/api/install-plans/route.ts`, `app/api/site-visits/route.ts`, `app/api/projects/route.ts`, `app/api/projects/[code]/route.ts`, `app/api/mail-queue/[id]/route.ts`, `app/api/site-visit-queue/[id]/route.ts`, `README.md`, `DEV_HISTORY.md`
+
+---
+
 ## 2026-05-04 | PROD → DEV 데이터 동기화 스크립트 추가
 
 - **목적**: 상용 데이터를 기준으로 DEV 환경 테스트가 필요할 때, 매번 수동 절차(덤프·TRUNCATE·복원)를 반복하지 않도록 스크립트화.

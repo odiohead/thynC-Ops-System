@@ -3,6 +3,8 @@ import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { uploadToS3 } from '@/lib/s3'
 import { parseFormEmail, buildNoteHtml } from '@/lib/gmail'
+import { advanceHospitalStatus } from '@/lib/hospitalStatus'
+import { auditActorFromJWT } from '@/lib/audit'
 
 export async function PUT(
   request: NextRequest,
@@ -119,6 +121,14 @@ export async function PUT(
   await prisma.installPlanQueue.update({
     where: { id },
     data: { status: 'registered', installPlanId: installPlan.id },
+  })
+
+  await advanceHospitalStatus({
+    hospitalCode,
+    targetStatus: '가견적요청',
+    req: request,
+    actor: auditActorFromJWT(authUser),
+    source: '설치계획 메일큐 등록',
   })
 
   return NextResponse.json({ installPlan })

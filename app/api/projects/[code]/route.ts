@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import { advanceHospitalStatus } from '@/lib/hospitalStatus'
 
 type Params = { params: { code: string } }
 
@@ -133,6 +134,30 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await prisma.task.updateMany({
       where: { refCode: params.code, taskType: 'PROJECT' },
       data: { isCompleted, completedAt: isCompleted ? new Date() : null },
+    })
+
+    // 구축완료 진입 시 병원 상태를 '운영'으로 진행
+    if (isCompleted) {
+      await advanceHospitalStatus({
+        hospitalCode: updated.hospitalCode,
+        targetStatus: '운영',
+        req: request,
+        actor: auditActorFromJWT(authUser),
+        source: '프로젝트 구축완료',
+      })
+    }
+  }
+
+  // 계약일이 PUT으로 채워진 경우(등록 시 미입력 → 사후 입력 케이스 포함) 병원 상태를 '계약완료'로 진행
+  // Hospital.contractDate는 NULL일 때만 채움(이미 있으면 추가도입·기존값 보존)
+  if (contractDate !== undefined && updated?.contractDate) {
+    await advanceHospitalStatus({
+      hospitalCode: updated.hospitalCode,
+      targetStatus: '계약완료',
+      newContractDate: updated.contractDate,
+      req: request,
+      actor: auditActorFromJWT(authUser),
+      source: '프로젝트 계약일 입력',
     })
   }
 

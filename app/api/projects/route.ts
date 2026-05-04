@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { createCalendarEvent } from '@/lib/googleCalendar'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import { advanceHospitalStatus } from '@/lib/hospitalStatus'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -207,6 +208,18 @@ export async function POST(request: NextRequest) {
     resourceLabel: project.projectName,
     after: project,
   })
+
+  // 계약일이 입력된 경우 병원 상태를 '계약완료'로 진행 + 계약일 NULL이면 함께 갱신
+  if (project.contractDate) {
+    await advanceHospitalStatus({
+      hospitalCode,
+      targetStatus: '계약완료',
+      newContractDate: project.contractDate,
+      req: request,
+      actor: auditActorFromJWT(authUser),
+      source: '프로젝트 등록(계약일 입력)',
+    })
+  }
 
   return NextResponse.json({ project }, { status: 201 })
 }

@@ -121,7 +121,8 @@ lib/
 ├── prisma.ts                         # Prisma 클라이언트
 ├── s3.ts                             # AWS S3 연동 유틸리티 (업로드/삭제/presigned URL)
 ├── googleDrive.ts                    # Google Drive 연동 유틸리티
-└── audit.ts                          # 감사 로그 헬퍼 (logAudit, auditActorFromJWT, redact)
+├── audit.ts                          # 감사 로그 헬퍼 (logAudit, auditActorFromJWT, redact)
+└── hospitalStatus.ts                 # 병원 thynC 현황상태 단방향 자동 진행 헬퍼 (advanceHospitalStatus)
 
 prisma/
 ├── schema.prisma                     # DB 스키마
@@ -337,6 +338,15 @@ prisma/
 - **월별 누적 사용 현황**: 신규 병원/병상, 누적 병원/병상 추이 (Recharts 차트)
 - **월별 신규 병원/병상 막대 차트** (ComposedChart)
 - 캐시 미사용 (`force-dynamic`), 매 요청마다 DB 조회
+
+### 병원 thynC 현황상태 자동 진행 규칙
+- 업무 등록·진행 상태에 따라 `hospitals.status`를 단방향(미계약 → 가견적요청 → 답사요청 → 계약완료 → 운영 → 해지)으로 자동 진행. 후행 단계에 있는 병원의 status는 보존(이미 `운영`인 병원에 추가 설치계획·답사가 들어와도 다운그레이드 안 함).
+- 트리거 시점:
+  - 설치계획(가안) 등록 → `가견적요청` (수동·메일큐 자동등록 둘 다, 큐 적재 단계는 제외)
+  - 답사 등록 → `답사요청` (동일)
+  - 프로젝트 등록 시 계약일(`contractDate`) 입력 → `계약완료`. `Hospital.contractDate`가 NULL이면 함께 채우고, 이미 값이 있는 추가도입은 계약일 보존
+  - 프로젝트 `buildStatus`가 라벨에 `완료` 포함된 값으로 변경 → `운영`
+- 모든 자동 변경은 `audit_logs`에 `resource='hospital'` UPDATE로 기록(`resourceLabel`에 `(자동: <source>)` 표기), 트리거 발생시킨 사용자가 actor.
 
 ### 병원 관리
 - HIRA 병원 데이터 검색 및 조회 (모달 방식)

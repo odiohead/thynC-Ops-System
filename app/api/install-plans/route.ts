@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import { advanceHospitalStatus } from '@/lib/hospitalStatus'
 
 export async function GET(request: NextRequest) {
   const authUser = await getAuthUser(request)
@@ -125,6 +126,14 @@ export async function POST(request: NextRequest) {
     resourceId: installPlan.planCode ?? String(installPlan.id),
     resourceLabel: `${hospitalName || '병원 미지정'} 설치계획`,
     after: installPlan,
+  })
+
+  await advanceHospitalStatus({
+    hospitalCode: hospitalCode || null,
+    targetStatus: '가견적요청',
+    req: request,
+    actor: auditActorFromJWT(authUser),
+    source: '설치계획 등록',
   })
 
   return NextResponse.json({ installPlan }, { status: 201 })
