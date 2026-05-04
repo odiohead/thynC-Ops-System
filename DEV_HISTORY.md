@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-05-04 | PROD → DEV 데이터 동기화 스크립트 추가
+
+- **목적**: 상용 데이터를 기준으로 DEV 환경 테스트가 필요할 때, 매번 수동 절차(덤프·TRUNCATE·복원)를 반복하지 않도록 스크립트화.
+- **scripts/sync-prod-data-to-dev.sh 신규**:
+  - DEV DB(`thync_ops_dev`) 자체는 유지하고 데이터만 PROD(`thync_ops`)로 덮어쓰기 (DROP DATABASE 미사용)
+  - 단계: ① `.env`에서 DB 비번 자동 추출 → ② PROD/DEV 연결 확인 → ③ **스키마 diff 검사**(불일치 시 중단, `\restrict`/`\unrestrict` 무작위 토큰 라인은 무시) → ④ 사용자 확인(`--yes`로 생략) → ⑤ DEV 전체 백업 → ⑥ PROD `--data-only` 덤프(`_prisma_migrations` 제외) → ⑦ TRUNCATE + 적재 단일 트랜잭션 → ⑧ 7일 지난 백업 자동 삭제
+  - `_prisma_migrations`는 동기화 제외(DEV 고유 마이그레이션 상태 보존)
+  - `thync` 유저가 슈퍼유저가 아니라 `session_replication_role` 사용 불가 → `pg_dump` 의존성 정렬에 의존 + TRUNCATE/적재를 단일 트랜잭션으로 묶어 실패 시 DEV 무변경 보장
+  - 백업 위치: `/home/ubuntu/backups/db-sync/`, 보관 7일
+- **사용법**: `./scripts/sync-prod-data-to-dev.sh` (또는 `--yes`)
+- **롤백**: `gunzip -c <backup>.sql.gz | psql -U thync -d thync_ops_dev`
+- **첫 실행 결과** (2026-05-04 00:16): 약 9초 소요, users/projects/hospitals/tasks/audit_logs 등 주요 테이블 row 수 PROD↔DEV 일치 확인.
+- **영향 파일**: `scripts/sync-prod-data-to-dev.sh` (신규)
+
+---
+
 ## 2026-05-03 | 답사(SiteVisit) 삭제 실패 수정 — site_visit_queue FK 분리 후 삭제
 
 - **증상**: PROD에서 답사 상세페이지에서 삭제 시 실패 (예: VISIT-202604-00023). 답사가 답사 등록 큐(`site_visit_queue`)로부터 자동 등록된 경우 재현.
