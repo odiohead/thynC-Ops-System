@@ -1,3 +1,5 @@
+import { syncInstallPlanMails, syncSiteVisitMails } from '@/lib/mail-sync'
+
 const INTERVAL_MAP: Record<string, number> = {
   '30m': 30 * 60 * 1000,
   '1h': 60 * 60 * 1000,
@@ -8,31 +10,18 @@ const INTERVAL_MAP: Record<string, number> = {
 let timer: ReturnType<typeof setInterval> | null = null
 let currentInterval = 'off'
 
-async function callSync(label: string, url: string, headers: Record<string, string>) {
+async function runOne(label: string, fn: () => Promise<{ newCount: number; total: number }>) {
   try {
-    const res = await fetch(url, { method: 'POST', headers })
-    if (!res.ok) {
-      let body = ''
-      try { body = await res.text() } catch {}
-      console.error(`[mail-scheduler] ${label} HTTP ${res.status}: ${body.slice(0, 500)}`)
-      return
-    }
-    const data = await res.json().catch(() => null)
-    const newCount = data?.newCount ?? '?'
-    console.log(`[mail-scheduler] ${label} 성공 (newCount=${newCount})`)
+    const { newCount, total } = await fn()
+    console.log(`[mail-scheduler] ${label} 성공 (newCount=${newCount}, total=${total})`)
   } catch (err) {
-    console.error(`[mail-scheduler] ${label} 네트워크 실패:`, err)
+    console.error(`[mail-scheduler] ${label} 실패:`, err)
   }
 }
 
 async function runSync() {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3001'
-  const secret = process.env.CRON_SECRET || ''
-  const headers = { Authorization: `Bearer ${secret}` }
-
-  await callSync('설치계획 동기화', `${baseUrl}/api/mail-queue/sync`, headers)
-  await callSync('답사 동기화', `${baseUrl}/api/site-visit-queue/sync`, headers)
-
+  await runOne('설치계획 동기화', syncInstallPlanMails)
+  await runOne('답사 동기화', syncSiteVisitMails)
   console.log(`[mail-scheduler] 동기화 루프 완료 (${new Date().toISOString()})`)
 }
 

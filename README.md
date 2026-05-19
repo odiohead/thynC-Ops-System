@@ -121,6 +121,9 @@ lib/
 ├── prisma.ts                         # Prisma 클라이언트
 ├── s3.ts                             # AWS S3 연동 유틸리티 (업로드/삭제/presigned URL)
 ├── googleDrive.ts                    # Google Drive 연동 유틸리티
+├── gmail.ts                          # Gmail API 클라이언트 + 메일 파싱 유틸
+├── mail-sync.ts                      # 설치계획·답사 메일 큐 동기화 로직 (Gmail → DB INSERT)
+├── mail-scheduler.ts                 # 메일 동기화 인터벌 스케줄러 (mail-sync 함수 직접 호출)
 ├── audit.ts                          # 감사 로그 헬퍼 (logAudit, auditActorFromJWT, redact)
 └── hospitalStatus.ts                 # 병원 thynC 현황상태 단방향 자동 진행 헬퍼 (advanceHospitalStatus)
 

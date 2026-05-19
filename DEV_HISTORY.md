@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-05-19 | 메일 자동 동기화 스케줄러 — 외부 fetch 제거 (직접 함수 호출)
+
+- **문제**: 설치계획·답사 모두 자동 메일 동기화가 동작하지 않음. "메일 가져오기" 버튼(수동)을 누를 때만 그동안 누락된 메일이 한꺼번에 수집됨.
+- **원인**:
+  1. `mail-scheduler.ts`가 `fetch(NEXT_PUBLIC_APP_URL + path)`로 **외부 HTTPS 도메인을 통해 자기 자신을 호출**하는 구조였음. nginx/middleware/SSL 경로를 거치며 부작용 발생.
+  2. `middleware.ts`가 `/api/mail-queue`만 공개 경로로 두고 `/api/site-visit-queue`는 보호 → 스케줄러의 Bearer 인증이 통과하지 못해 `/login`으로 307 redirect → fetch가 POST 메서드 유지한 채 follow → `/login`은 페이지 라우트라 POST 미지원 → **HTTP 405**. 이로 인해 답사 자동 sync는 약 5일 동안 0회 성공(`mail_sync_last_site_visit` 갱신 5/14에 멈춤).
+- **수정**: 두 sync 라우트의 비즈니스 로직을 `lib/mail-sync.ts`로 추출하고, 스케줄러는 외부 fetch 없이 그 함수를 직접 import해 호출. middleware·nginx·도메인·인증 전부 우회.
+- **영향 파일**:
+  - `lib/mail-sync.ts` (신규) — `syncInstallPlanMails()` / `syncSiteVisitMails()` 순수 함수
+  - `lib/mail-scheduler.ts` — `fetch`/`CRON_SECRET`/`NEXT_PUBLIC_APP_URL` 의존 제거, 직접 함수 호출
+  - `app/api/mail-queue/sync/route.ts` — 인증 wrapper로 슬림화(107→약 35줄)
+  - `app/api/site-visit-queue/sync/route.ts` — 동일 패턴(99→약 35줄)
+- **수동 버튼 동작**: 페이지의 "메일 가져오기" fetch는 쿠키 인증으로 middleware 통과하므로 그대로 작동.
+- **남은 작업**: `middleware.ts`가 `/api/site-visit-queue`를 보호하는 부분은 자동 sync와 무관해졌지만, 외부 cron이나 curl로 답사 sync route를 직접 호출하는 시나리오에는 여전히 영향. 필요 시 별도 추가.
+
+---
+
 ## 2026-05-19 | DB ↔ Prisma 스키마 drift 정합화 (DEV)
 
 - **배경**: DEV DB와 `schema.prisma`·마이그레이션 히스토리 비교 결과 3건의 drift 발견
