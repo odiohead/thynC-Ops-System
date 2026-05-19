@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-05-19 | DB ↔ Prisma 스키마 drift 정합화 (DEV)
+
+- **배경**: DEV DB와 `schema.prisma`·마이그레이션 히스토리 비교 결과 3건의 drift 발견
+  1. `daewoong_staff` 테이블이 DB에는 존재하나 schema·코드에 정의 없음. 어떤 마이그레이션도 CREATE한 적이 없는 잔재. 행 0건.
+  2. `install_plans.created_at`, `updated_at`이 DB에서 NULL 허용으로 생성되어 있으나 `schema.prisma`는 required. 실데이터는 모두 기본값으로 채워져 있어 영향 없음.
+  3. `20260401000000_add_hira_sync_jobs` 마이그레이션 파일이 존재하나 `_prisma_migrations`에 적용 기록 없음(테이블은 이미 DB에 존재) — `prisma migrate status`가 미적용으로 경고.
+- **적용 내용**:
+  - DEV DB: `DROP TABLE IF EXISTS daewoong_staff`, `install_plans` 타임스탬프 NOT NULL 전환
+  - 신규 마이그레이션 `prisma/migrations/20260519000000_fix_schema_drift/migration.sql` 생성 + `migrate resolve --applied`
+  - **과거 마이그레이션 수정** `prisma/migrations/20260323120000_add_site_visit/migration.sql`: 존재하지 않는 `daewoong_staff` 테이블을 FK 참조하던 `ALTER TABLE site_visits ADD CONSTRAINT site_visits_daewoong_staff_id_fkey` 블록 제거. `daewoong_staff_id` 컬럼 자체는 후속 `20260324000004_update_site_visit_fk`가 DROP하므로 유지. `_prisma_migrations.checksum`을 새 파일 sha256으로 갱신
+  - 누락된 `20260401000000_add_hira_sync_jobs`를 `migrate resolve --applied`로 기록
+- **검증**: `prisma migrate status` → "Database schema is up to date!" / drift 비교 스크립트 → 0건
+- **PROD 반영 필요**: 동일 작업을 PROD DB(`thync_ops`)와 `thynC-Ops-PROD` 리포에도 적용해야 환경 간 정합이 완성됨 (사용자 명시 요청 후 진행)
+
+---
+
 ## 2026-05-04 | 업무 등록에 따른 병원 thynC 현황상태 자동 진행
 
 - **요구사항**:

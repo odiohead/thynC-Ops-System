@@ -32,8 +32,9 @@ CREATE TABLE "site_visits" (
 ALTER TABLE "site_visits" ADD CONSTRAINT "site_visits_hospital_code_fkey"
     FOREIGN KEY ("hospital_code") REFERENCES "hospitals"("hospital_code") ON DELETE RESTRICT ON UPDATE CASCADE;
 
-ALTER TABLE "site_visits" ADD CONSTRAINT "site_visits_daewoong_staff_id_fkey"
-    FOREIGN KEY ("daewoong_staff_id") REFERENCES "daewoong_staff"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- daewoong_staff FK 제거됨(2026-05-19): daewoong_staff 테이블을 만드는 마이그레이션이
+-- 어디에도 없어 신규 환경 재현 시 실패했음. daewoong_staff_id 컬럼 자체는 후속
+-- 20260324000004_update_site_visit_fk에서 DROP COLUMN으로 제거됨.
 
 ALTER TABLE "site_visits" ADD CONSTRAINT "site_visits_assignee_id_fkey"
     FOREIGN KEY ("assignee_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
