@@ -4,6 +4,23 @@
 
 ---
 
+## 환경 구성 (3개)
+
+| 명칭 | 경로 | 호스트 | DB | PM2 |
+|---|---|---|---|---|
+| **prod** | `/home/ubuntu/thynC-Ops-System/thynC-Ops-PROD` | AWS EC2 (13.125.238.77) | `thync_ops` | `thync-prod` |
+| **dev** | `/home/ubuntu/thynC-Ops-System/...` (PROD와 같은 호스트) | AWS EC2 (13.125.238.77) | `thync_ops_dev` | `thync-dev` |
+| **dev2** | `/home/ubuntu/workspace/thynC-Ops-System` | 사용자 WSL2 (별도 PC) | `thync_ops_dev` (로컬) | `thync-dev` |
+
+작업 디렉토리(cwd)로 환경을 자동 식별:
+- `/home/ubuntu/thynC-Ops-System/thynC-Ops-PROD` → **prod**
+- `/home/ubuntu/thynC-Ops-System/...` (PROD 호스트의 dev) → **dev**
+- `/home/ubuntu/workspace/thynC-Ops-System` → **dev2**
+
+`dev`와 `dev2`는 같은 main 브랜치를 공유하므로, 작업 전 `git pull` 권장 (다른 환경에서 작업 중일 가능성).
+
+---
+
 ## ⚠️ 절대 규칙
 
 ### 1. DB 마이그레이션 — `prisma migrate dev` 절대 금지
@@ -76,6 +93,49 @@ git pull origin main
 npm run build
 pm2 restart thync-prod
 ```
+
+---
+
+## 자주 쓰는 작업 — 약속어
+
+### PROD → DEV 데이터 동기화
+
+**트리거 문구** (다음 중 하나)
+- "PROD 데이터 동기화해줘"
+- "상용 데이터 가져와"
+- "DB 데이터 PROD에서 가져와"
+
+**환경별 동작 (cwd로 자동 분기)**
+
+#### dev에서 실행 시 (PROD와 같은 호스트)
+- `scripts/sync-prod-data-to-dev.sh` 실행
+- PROD/DEV 모두 localhost에 있어 별도 dump 전송 불필요
+- 스크립트가 스키마 diff 검사 → 다르면 abort
+- DEV 백업 자동 생성 (`/home/ubuntu/backups/db-sync/`)
+
+#### dev2에서 실행 시 (별도 PC, WSL2)
+1. PROD `~/backups/db/` 중 **가장 최신** `thync_ops_*.dump` 자동 선택 (일일 01:00 KST 정기 백업)
+2. SCP로 `/home/ubuntu/backups/db-sync/`에 전송
+3. `pm2 stop thync-dev`
+4. 현재 DEV 백업: `dev_before_sync_<ts>.sql.gz`
+5. 36개 테이블 `TRUNCATE ... RESTART IDENTITY CASCADE` (`_prisma_migrations` 제외)
+6. dump를 `/tmp/restore.dump`로 복사 (postgres 슈퍼유저가 ubuntu home 못 읽음)
+7. 풀덤프인 경우 `pg_restore --list`로 TOC 추출 후 `_prisma_migrations` TABLE DATA 라인만 제거한 필터 파일 생성
+8. `sudo -u postgres pg_restore --data-only --disable-triggers --single-transaction --no-owner --no-privileges [-L /tmp/restore.list] /tmp/restore.dump`
+9. `/tmp/restore.dump`, `/tmp/restore.list` 정리
+10. `pm2 start thync-dev` + HTTP 응답 확인
+11. 주요 테이블 row 수 보고
+
+**옵션 (양쪽 공통)**
+- `"PROD에서 새로 dump 떠서 동기화"` → 정기 백업 안 쓰고 PROD 서버에서 즉시 `pg_dump -Fc --data-only` 신규 생성 후 진행
+- `"특정 파일로 동기화: <파일명>"` → 자동 최신 대신 지정 파일 사용
+
+**안전장치 (양쪽 공통)**
+- DEV 백업은 **항상** 생성 (생략 옵션 없음)
+- 동기화 전 PM2 정지 → DB 커넥션 정리
+- 단일 트랜잭션 적재 → 실패 시 자동 롤백
+- `_prisma_migrations`는 **절대 덮어쓰지 않음** → DEV 마이그레이션 히스토리 보호
+- PROD DB는 **읽기(pg_dump)만** 수행, DDL/DML 절대 금지
 
 ---
 
