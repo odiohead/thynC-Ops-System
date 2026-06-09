@@ -1,10 +1,12 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  schemas  = ["public", "wiki"]
 }
 
 model HiraHospital {
@@ -43,6 +45,7 @@ model HiraHospital {
   hospital        Hospital?
 
   @@map("hira_hospitals")
+  @@schema("public")
 }
 
 model Hospital {
@@ -80,6 +83,7 @@ model Hospital {
   tasks               Task[]
 
   @@map("hospitals")
+  @@schema("public")
 }
 
 model HospitalIntroType {
@@ -91,6 +95,7 @@ model HospitalIntroType {
 
   @@unique([hospitalId, statusCodeId])
   @@map("hospital_intro_types")
+  @@schema("public")
 }
 
 model DaewoongHospitalAssignment {
@@ -103,6 +108,7 @@ model DaewoongHospitalAssignment {
 
   @@unique([hospitalCode, assignedUserId])
   @@map("daewoong_hospital_assignments")
+  @@schema("public")
 }
 
 model StatusCode {
@@ -123,6 +129,7 @@ model StatusCode {
 
   @@unique([name, category])
   @@map("status_codes")
+  @@schema("public")
 }
 
 model ConsultationQueue {
@@ -144,6 +151,7 @@ model ConsultationQueue {
   consultedBy         User        @relation(fields: [consultedById], references: [id])
 
   @@map("consultation_queue")
+  @@schema("public")
 }
 
 enum Role {
@@ -151,6 +159,8 @@ enum Role {
   ADMIN
   USER
   VIEWER
+
+  @@schema("public")
 }
 
 model Organization {
@@ -164,6 +174,7 @@ model Organization {
   departments Department[]
 
   @@map("organizations")
+  @@schema("public")
 }
 
 model User {
@@ -188,8 +199,17 @@ model User {
   siteVisitAssignees      SiteVisitAssignee[]
   maintenanceAssignees    MaintenanceAssignee[]
   consultationQueues      ConsultationQueue[]
+  wikiPagesAuthored       WikiPage[]                   @relation("WikiPageAuthor")
+  wikiPagesEdited         WikiPage[]                   @relation("WikiPageLastEditor")
+  wikiAttachmentsUploaded WikiAttachment[]             @relation("WikiAttachmentUploader")
+  wikiPageRefsCreated     WikiPageReference[]          @relation("WikiPageRefCreator")
+  wikiFavorites           WikiFavorite[]               @relation("WikiFavoriteUser")
+  wikiViewLogs            WikiViewLog[]                @relation("WikiViewLogUser")
+  wikiVersionsSaved       WikiVersion[]                @relation("WikiVersionSaver")
+  wikiCommentsAuthored    WikiComment[]                @relation("WikiCommentAuthor")
 
   @@map("users")
+  @@schema("public")
 }
 
 model Department {
@@ -202,6 +222,7 @@ model Department {
   users          User[]
 
   @@map("departments")
+  @@schema("public")
 }
 
 model FieldEngineer {
@@ -214,6 +235,7 @@ model FieldEngineer {
   @@unique([userId, workType])
   @@index([workType])
   @@map("field_engineers")
+  @@schema("public")
 }
 
 model DeviceInfo {
@@ -228,6 +250,7 @@ model DeviceInfo {
   hospitalDevices HospitalDevice[]
 
   @@map("device_info")
+  @@schema("public")
 }
 
 model Contractor {
@@ -243,6 +266,7 @@ model Contractor {
   projects       Project[]
 
   @@map("constructors")
+  @@schema("public")
 }
 
 model BuildStatus {
@@ -255,6 +279,7 @@ model BuildStatus {
   projects  Project[]
 
   @@map("build_statuses")
+  @@schema("public")
 }
 
 model Project {
@@ -291,6 +316,7 @@ model Project {
   assignees           ProjectAssignee[]
 
   @@map("projects")
+  @@schema("public")
 }
 
 model ProjectDevice {
@@ -304,6 +330,7 @@ model ProjectDevice {
 
   @@unique([projectId, deviceInfoId])
   @@map("project_devices")
+  @@schema("public")
 }
 
 model HospitalDevice {
@@ -317,6 +344,7 @@ model HospitalDevice {
 
   @@unique([hospitalCode, deviceInfoId])
   @@map("hospital_devices")
+  @@schema("public")
 }
 
 model HospitalMeta {
@@ -331,6 +359,7 @@ model HospitalMeta {
   updatedAt              DateTime @updatedAt @map("updated_at")
 
   @@map("hospital_meta")
+  @@schema("public")
 }
 
 model ProjectFile {
@@ -345,6 +374,7 @@ model ProjectFile {
   project      Project  @relation(fields: [projectId], references: [id])
 
   @@map("project_files")
+  @@schema("public")
 }
 
 model SiteVisit {
@@ -375,6 +405,7 @@ model SiteVisit {
   queue         SiteVisitQueue?
 
   @@map("site_visits")
+  @@schema("public")
 }
 
 model SiteVisitFile {
@@ -387,6 +418,7 @@ model SiteVisitFile {
   siteVisit    SiteVisit @relation(fields: [siteVisitId], references: [id], onDelete: Cascade)
 
   @@map("site_visit_files")
+  @@schema("public")
 }
 
 model InstallPlan {
@@ -408,6 +440,7 @@ model InstallPlan {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("install_plans")
+  @@schema("public")
 }
 
 model InstallPlanFile {
@@ -420,6 +453,7 @@ model InstallPlanFile {
   installPlan   InstallPlan @relation(fields: [installPlanId], references: [id], onDelete: Cascade)
 
   @@map("install_plan_files")
+  @@schema("public")
 }
 
 model HiraSyncJob {
@@ -431,6 +465,7 @@ model HiraSyncJob {
   logs       HiraSyncLog[]
 
   @@map("hira_sync_jobs")
+  @@schema("public")
 }
 
 model ProjectAssignee {
@@ -443,6 +478,7 @@ model ProjectAssignee {
 
   @@unique([projectCode, userId])
   @@map("project_assignees")
+  @@schema("public")
 }
 
 model InstallPlanAssignee {
@@ -455,6 +491,7 @@ model InstallPlanAssignee {
 
   @@unique([installPlanId, userId])
   @@map("install_plan_assignees")
+  @@schema("public")
 }
 
 model SiteVisitAssignee {
@@ -467,6 +504,7 @@ model SiteVisitAssignee {
 
   @@unique([siteVisitId, userId])
   @@map("site_visit_assignees")
+  @@schema("public")
 }
 
 model HiraSyncLog {
@@ -479,6 +517,7 @@ model HiraSyncLog {
   createdAt DateTime    @default(now()) @map("created_at")
 
   @@map("hira_sync_logs")
+  @@schema("public")
 }
 
 model InstallPlanQueue {
@@ -501,6 +540,7 @@ model InstallPlanQueue {
   createdAt       DateTime     @default(now()) @map("created_at")
 
   @@map("install_plan_queue")
+  @@schema("public")
 }
 
 model SiteVisitQueue {
@@ -523,6 +563,7 @@ model SiteVisitQueue {
   createdAt       DateTime   @default(now()) @map("created_at")
 
   @@map("site_visit_queue")
+  @@schema("public")
 }
 
 model AppSetting {
@@ -530,6 +571,7 @@ model AppSetting {
   value String @default("")
 
   @@map("app_settings")
+  @@schema("public")
 }
 
 model NavMenuItem {
@@ -547,6 +589,7 @@ model NavMenuItem {
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("nav_menu_items")
+  @@schema("public")
 }
 
 model Task {
@@ -567,6 +610,7 @@ model Task {
   @@index([refCode])
   @@index([hospitalCode])
   @@map("tasks")
+  @@schema("public")
 }
 
 model Maintenance {
@@ -597,6 +641,7 @@ model Maintenance {
   files      MaintenanceFile[]
 
   @@map("maintenances")
+  @@schema("public")
 }
 
 model MaintenanceAssignee {
@@ -609,6 +654,7 @@ model MaintenanceAssignee {
 
   @@unique([maintenanceId, userId])
   @@map("maintenance_assignees")
+  @@schema("public")
 }
 
 model MaintenanceFile {
@@ -621,6 +667,7 @@ model MaintenanceFile {
   maintenance   Maintenance @relation(fields: [maintenanceId], references: [id], onDelete: Cascade)
 
   @@map("maintenance_files")
+  @@schema("public")
 }
 
 model AuditLog {
@@ -648,4 +695,172 @@ model AuditLog {
   @@index([resource, resourceId, createdAt])
   @@index([createdAt])
   @@map("audit_logs")
+  @@schema("public")
+}
+
+// ============================================================
+// Wiki 모듈 (사내 위키)
+//
+// - 별도 PostgreSQL 스키마 `wiki`에 격리
+// - FK 참조 방향: wiki.* → public.*  (반대 금지)
+// - 코드 의존성: app/wiki/*, lib/wiki/* → 메인 OK / 메인 → 위키 금지
+// ============================================================
+
+model WikiPage {
+  id           String   @id @default(uuid())
+  parentId     String?  @map("parent_id")
+  title        String
+  slug         String?
+  contentJson  Json     @map("content_json")
+  isPublished  Boolean  @default(true) @map("is_published")
+  sortOrder    Int      @default(0) @map("sort_order")
+  authorId     String   @map("author_id")
+  lastEditorId String?  @map("last_editor_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  plainText   String              @default("") @map("plain_text")
+
+  parent      WikiPage?           @relation("WikiPageTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children    WikiPage[]          @relation("WikiPageTree")
+  author      User                @relation("WikiPageAuthor", fields: [authorId], references: [id])
+  lastEditor  User?               @relation("WikiPageLastEditor", fields: [lastEditorId], references: [id])
+  attachments WikiAttachment[]
+  references  WikiPageReference[]
+  tags        WikiPageTag[]
+  favorites   WikiFavorite[]
+  viewLogs    WikiViewLog[]
+  versions    WikiVersion[]
+  comments    WikiComment[]
+
+  @@index([parentId, sortOrder])
+  @@index([updatedAt(sort: Desc)])
+  @@index([authorId])
+  @@map("wiki_pages")
+  @@schema("wiki")
+}
+
+model WikiAttachment {
+  id         String   @id @default(uuid())
+  pageId     String   @map("page_id")
+  fileName   String   @map("file_name")
+  s3Key      String   @unique @map("s3_key")
+  size       Int
+  mimeType   String   @map("mime_type")
+  uploaderId String   @map("uploader_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  page     WikiPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  uploader User     @relation("WikiAttachmentUploader", fields: [uploaderId], references: [id])
+
+  @@index([pageId])
+  @@map("wiki_attachments")
+  @@schema("wiki")
+}
+
+model WikiPageReference {
+  id          String   @id @default(uuid())
+  pageId      String   @map("page_id")
+  refType     String   @map("ref_type")
+  refCode     String   @map("ref_code")
+  createdById String   @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  page      WikiPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("WikiPageRefCreator", fields: [createdById], references: [id])
+
+  @@unique([pageId, refType, refCode])
+  @@index([refType, refCode])
+  @@index([pageId])
+  @@map("wiki_page_references")
+  @@schema("wiki")
+}
+
+model WikiTag {
+  id        String        @id @default(uuid())
+  name      String        @unique
+  color     String?
+  sortOrder Int           @default(0) @map("sort_order")
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  pages WikiPageTag[]
+
+  @@map("wiki_tags")
+  @@schema("wiki")
+}
+
+model WikiPageTag {
+  pageId  String   @map("page_id")
+  tagId   String   @map("tag_id")
+  addedAt DateTime @default(now()) @map("added_at")
+
+  page WikiPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  tag  WikiTag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([pageId, tagId])
+  @@index([tagId])
+  @@map("wiki_page_tags")
+  @@schema("wiki")
+}
+
+model WikiFavorite {
+  userId    String   @map("user_id")
+  pageId    String   @map("page_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User     @relation("WikiFavoriteUser", fields: [userId], references: [id], onDelete: Cascade)
+  page WikiPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@id([userId, pageId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("wiki_favorites")
+  @@schema("wiki")
+}
+
+model WikiViewLog {
+  id       String   @id @default(uuid())
+  userId   String   @map("user_id")
+  pageId   String   @map("page_id")
+  viewedAt DateTime @default(now()) @map("viewed_at")
+
+  user User     @relation("WikiViewLogUser", fields: [userId], references: [id], onDelete: Cascade)
+  page WikiPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@index([userId, viewedAt(sort: Desc)])
+  @@index([pageId])
+  @@map("wiki_view_logs")
+  @@schema("wiki")
+}
+
+model WikiVersion {
+  id          String   @id @default(uuid())
+  pageId      String   @map("page_id")
+  title       String
+  contentJson Json     @map("content_json")
+  savedById   String   @map("saved_by_id")
+  savedAt     DateTime @default(now()) @map("saved_at")
+
+  page    WikiPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  savedBy User     @relation("WikiVersionSaver", fields: [savedById], references: [id])
+
+  @@index([pageId, savedAt(sort: Desc)])
+  @@map("wiki_versions")
+  @@schema("wiki")
+}
+
+model WikiComment {
+  id        String   @id @default(uuid())
+  pageId    String   @map("page_id")
+  authorId  String   @map("author_id")
+  body      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  page   WikiPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  author User     @relation("WikiCommentAuthor", fields: [authorId], references: [id])
+
+  @@index([pageId, createdAt])
+  @@index([authorId])
+  @@map("wiki_comments")
+  @@schema("wiki")
 }

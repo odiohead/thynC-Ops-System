@@ -18,7 +18,8 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 | 파일 스토리지 | AWS S3 (`@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`) |
 | 차트 | Recharts |
 | 아이콘 | lucide-react |
-| 리치 텍스트 에디터 | Tiptap (`@tiptap/react` + 확장) |
+| 리치 텍스트 에디터 | Tiptap (`@tiptap/react` + 확장) — 기존 모듈용 |
+| 블록 에디터 (위키) | BlockNote (`@blocknote/core`, `@blocknote/react`, `@blocknote/ariakit`) — 위키 전용 |
 | 프로세스 관리 | PM2 |
 | 웹서버 | Nginx |
 | 마크다운 렌더링 | react-markdown + `@tailwindcss/typography` |
@@ -80,6 +81,13 @@ app/
 │   ├── ai-assistant/                 # AI 어시스턴트 (Flowise 프록시 + 정제 + 상담이력 저장)
 │   │   ├── summarize/                # AI 정제 (Anthropic Claude API)
 │   │   └── consultation/             # 상담이력 저장 (ConsultationQueue)
+│   ├── wiki/                         # 사내 위키
+│   │   ├── pages/
+│   │   │   ├── route.ts              # GET 목록 / POST 생성
+│   │   │   └── [id]/
+│   │   │       ├── route.ts          # GET / PUT / DELETE
+│   │   │       └── move/route.ts     # PATCH 이동 (direction/parentId/sortOrder)
+│   │   └── tree/route.ts             # GET 전체 트리
 │   ├── install-plans/                # 설치계획(가안) CRUD
 │   ├── hira-hospitals/
 │   │   └── sync/                     # 심평원 연동 (POST: 백그라운드 시작, GET: 히스토리 목록)
@@ -95,6 +103,15 @@ app/
 ├── maintenances/                     # 유지보수 목록·상세·등록
 ├── tasks/                            # 업무(Task) 현황 (통합 조회)
 ├── ai-assistant/                     # AI 어시스턴트 채팅
+├── wiki/                             # 사내 위키 (Phase 2-3)
+│   ├── layout.tsx                    # 사이드바 + 콘텐츠 flex 레이아웃 (모든 /wiki/* 적용)
+│   ├── page.tsx                      # 위키 홈 (최근 페이지 목록)
+│   ├── new/page.tsx                  # 신규 페이지 작성 (?parentId= 쿼리로 하위 추가)
+│   ├── [id]/page.tsx                 # 페이지 상세 (server, parent chain 수집)
+│   ├── [id]/WikiPageView.tsx         # 상세 클라이언트 (breadcrumb + 편집 토글)
+│   └── components/
+│       ├── WikiEditor.tsx            # BlockNote 에디터 래퍼
+│       └── WikiSidebar.tsx           # 페이지 트리 사이드바 (collapse/expand + ↑↓+)
 ├── users/                            # 사용자 관리 (ADMIN 이상)
 ├── settings/
 │   ├── profile/                      # 내 계정 정보
@@ -308,6 +325,45 @@ prisma/
 - 결론(`conclusion`), 대화이력(`chatHistory`, JSONB), AI 정제 결과(`aiSummary`)
 - 상태(`status`: PENDING 등), 상담자(`consultedById` → User)
 
+### Wiki 모듈 — 별도 PostgreSQL 스키마 `wiki`
+- 사내 위키(Notion-like) 기능. 본문은 BlockNote JSON 블록 배열로 저장
+- 모든 위키 테이블은 `wiki.*` 스키마에 격리. FK 방향은 `wiki.* → public.*` 만 허용
+
+#### WikiPage (위키 페이지)
+- `id` (uuid), `parentId`(self-reference, 트리 구조), `title`, `slug` (선택)
+- `contentJson` (JSONB, BlockNote 블록 배열), `isPublished`, `sortOrder`
+- `authorId` → User, `lastEditorId` → User (nullable)
+- 인덱스: `(parent_id, sort_order)`, `(updated_at DESC)`, `(author_id)`
+
+#### WikiAttachment (위키 첨부)
+- `id` (uuid), `pageId` → WikiPage, `fileName`, `s3Key` (UNIQUE)
+- `size`, `mimeType`, `uploaderId` → User
+- S3 키 패턴: `wiki/{pageId}/{timestamp}_{fileName}`
+
+#### WikiPageReference (위키 ↔ 메인 도메인 참조)
+- 위키 페이지와 병원/프로젝트의 명시적 N:M 연결 인덱스
+- `id` (uuid), `pageId` → WikiPage, `refType` (`hospital` | `project`), `refCode`, `createdById` → User
+- UNIQUE `(pageId, refType, refCode)` + `(refType, refCode)` 역검색 인덱스
+
+#### WikiTag / WikiPageTag (태그)
+- `WikiTag`: id, name UNIQUE, color, sortOrder
+- `WikiPageTag`: pageId × tagId N:M (PK 복합)
+
+#### WikiFavorite (즐겨찾기)
+- 복합 PK `(userId, pageId)`, 인덱스 `(userId, createdAt desc)`
+
+#### WikiViewLog (열람 로그)
+- 사용자별 페이지 열람 기록, 인덱스 `(userId, viewedAt desc)` + `(pageId)`. 최근 본 페이지 산출용
+
+#### WikiVersion (버전 히스토리)
+- 본문 수정 시 직전 상태 스냅샷. `pageId`, `title`, `contentJson`(JSONB), `savedById`, `savedAt`. 인덱스 `(pageId, savedAt desc)`
+
+#### WikiComment (댓글)
+- 페이지 단위 flat 댓글. `pageId`, `authorId`, `body`, 생성/수정 타임스탬프. 인덱스 `(pageId, createdAt)` + `(authorId)`
+
+#### WikiPage 추가 컬럼 (Phase 7)
+- `plainText` (TEXT NOT NULL DEFAULT '') — BlockNote JSON에서 추출한 검색용 평문
+
 ---
 
 ## 인증 및 역할 체계
@@ -452,6 +508,28 @@ prisma/
 - "+ 추가" 버튼으로 후보 검색 모달 열기 (이름/이메일 검색, 300ms debounce, 페이지네이션)
 - 후보: SEERS 소속·활성·해당 풀 미등록 사용자만 표시
 - 목록 테이블: 번호·이름·이메일·소속·부서·추가일·삭제
+
+### 사내 위키 (Phase 2-7)
+- Notion-like 블록 에디터(BlockNote) 기반 사내 위키
+- 별도 PostgreSQL 스키마 `wiki`에 격리, 메인 모듈과 단방향 의존성 유지
+- 페이지 단위 작성·조회·수정·삭제 (BlockNote JSON 본문)
+- **계층 구조**: `parentId`로 무한 깊이 트리, 좌측 사이드바에서 접기/펼치기·형제 순서 변경(↑↓)·하위 페이지 추가(+)
+- **breadcrumb**: 상세 페이지 상단에 부모 체인 표시
+- **파일 첨부**: 이미지/파일 BlockNote 안에서 드래그/슬래시로 직접 업로드. S3 저장(`wiki/{pageId}/{ts}_{name}`), 최대 50MB, 24h presigned URL로 표시
+- **메인 메뉴 등록**: `nav_menu_items`에 `wiki` 행 (sort_order=15)
+- **감사 로그**: CREATE/UPDATE/DELETE 모두 `resource='wiki_page'`로 기록
+- **명시적 참조 (WikiPageReference)**: 병원/프로젝트를 chip 형태로 명시적 연결, 병원 상세 역참조 카드
+- **태그**: 페이지에 다중 태그 추가, 검색에서 태그 필터 가능 (`WikiTag`/`WikiPageTag`)
+- **즐겨찾기**: 페이지 상단 ☆ 토글, `/wiki/favorites` 전용 페이지
+- **최근 본 페이지**: 페이지 열람 시 `WikiViewLog` 자동 기록, `/wiki/recent`에서 사용자별 최근 50개 페이지
+- **검색** (`/wiki/search`): 제목 + 본문(plain_text 컬럼) ILIKE, 태그 필터, 매칭 부위 snippet `<mark>` 강조
+- **버전 히스토리**: 본문 수정 시 직전 상태를 `WikiVersion`에 자동 스냅샷, 상단 "🕘 버전" 버튼으로 목록 + 복원 (복원도 현재 본문을 새 스냅샷으로 보존)
+- **댓글**: 페이지 하단 flat 댓글 (본인+ADMIN 수정·삭제, Ctrl+Enter 단축키)
+- **BlockNote 커스텀 블록**:
+  - **페이지 블록** — 슬래시 `/`에 "하위 페이지 추가" → 자식 페이지 즉시 생성 + 본문에 📄 링크 블록 삽입
+  - **인라인 mention** — `@` 입력 시 병원·프로젝트 통합 검색 자동완성, 선택 시 `target="_blank"` 링크 삽입
+- 권한: 로그인 필수 / VIEWER 읽기 / USER 이상 쓰기·삭제
+- 인라인 mention 검색은 검색 plain_text 인덱스에도 포함됨 (label 추출)
 
 ### AI 어시스턴트
 - Flowise RAG 서버 연동 AI 챗봇
@@ -806,6 +884,43 @@ npm run dev
 | GET  | `/api/drive/files` | 폴더 내 파일 목록 (`?folderId=` 선택) |
 | POST | `/api/drive/delete` | 파일 삭제 |
 | POST | `/api/drive/export/hospitals` | 병원 목록 스프레드시트 내보내기 (Sheets API) |
+
+### 위키 (Phase 2-7)
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET  | `/api/wiki/pages` | 페이지 목록 (`?parentId=` 필터 또는 `?refType=&refCode=` 역참조 검색) |
+| POST | `/api/wiki/pages` | 페이지 생성 — USER+, 감사로그 CREATE, `plainText` 자동 |
+| GET  | `/api/wiki/pages/[id]` | 페이지 상세 |
+| PUT  | `/api/wiki/pages/[id]` | 페이지 수정 — USER+, 감사로그 UPDATE, **본문 변경 시 직전 상태 자동 버전 스냅샷 + `plainText` 동기화** |
+| DELETE | `/api/wiki/pages/[id]` | 페이지 삭제 (자식 + 첨부 S3 best-effort 정리) — USER+, 감사로그 DELETE |
+| PATCH | `/api/wiki/pages/[id]/move` | 페이지 이동/정렬 — USER+, 순환 참조 차단 |
+| GET  | `/api/wiki/tree` | 전체 위키 페이지 평면 리스트 |
+| POST | `/api/wiki/upload?pageId=` | 첨부 업로드 (multipart, 최대 50MB) — USER+ |
+| GET  | `/api/wiki/files/[id]` | 첨부 다운로드 (24h presigned URL로 307) |
+| DELETE | `/api/wiki/files/[id]` | 첨부 삭제 — USER+ |
+| GET  | `/api/wiki/pages/[id]/references` | 페이지의 병원/프로젝트 참조 목록 (라벨 enrich) |
+| POST | `/api/wiki/pages/[id]/references` | 참조 추가 — USER+, 도메인 객체 존재 검증, 중복 시 409 |
+| DELETE | `/api/wiki/pages/[id]/references/[refId]` | 참조 해제 — USER+ |
+| GET  | `/api/wiki/tags` | 태그 목록 (`?q=` 검색) |
+| POST | `/api/wiki/tags` | 태그 생성 (`{name, color?}`) — USER+ |
+| PUT  | `/api/wiki/tags/[id]` | 태그 수정 — USER+ |
+| DELETE | `/api/wiki/tags/[id]` | 태그 삭제 — USER+ |
+| GET  | `/api/wiki/pages/[id]/tags` | 페이지의 태그 목록 |
+| POST | `/api/wiki/pages/[id]/tags` | 태그 연결 (`{tagId}` 기존 또는 `{name}` 신규 자동 생성) — USER+ |
+| DELETE | `/api/wiki/pages/[id]/tags?tagId=` | 태그 연결 해제 — USER+ |
+| GET  | `/api/wiki/favorites` | 내 즐겨찾기 페이지 목록 |
+| GET  | `/api/wiki/pages/[id]/favorite` | 현재 페이지 즐겨찾기 여부 |
+| POST | `/api/wiki/pages/[id]/favorite` | 즐겨찾기 추가 |
+| DELETE | `/api/wiki/pages/[id]/favorite` | 즐겨찾기 해제 |
+| GET  | `/api/wiki/search` | 검색 (`?q=&tagId=`) — 제목 + plain_text ILIKE, snippet 반환 |
+| GET  | `/api/wiki/pages/[id]/versions` | 페이지 버전 목록 |
+| GET  | `/api/wiki/pages/[id]/versions/[versionId]` | 버전 상세 |
+| POST | `/api/wiki/pages/[id]/versions/[versionId]` | 해당 버전으로 복원 — USER+, 감사로그 UPDATE |
+| GET  | `/api/wiki/pages/[id]/comments` | 댓글 목록 |
+| POST | `/api/wiki/pages/[id]/comments` | 댓글 등록 (`{body}`) — USER+ |
+| PUT  | `/api/wiki/comments/[id]` | 댓글 수정 (본인 + ADMIN+) |
+| DELETE | `/api/wiki/comments/[id]` | 댓글 삭제 (본인 + ADMIN+) |
+| GET  | `/api/wiki/mention?q=` | @ mention 자동완성 — 병원/프로젝트 통합 검색 (타입별 5개) |
 
 ---
 

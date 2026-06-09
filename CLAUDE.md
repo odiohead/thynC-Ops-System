@@ -94,6 +94,31 @@ npm run build
 pm2 restart thync-prod
 ```
 
+### 7. 위키 모듈 경계 — 단방향 의존성
+
+위키는 별도 서비스로 떼어낼 가능성을 보존하기 위해 **메인 모듈 → 위키 코드 import 금지**.
+
+- **허용 방향**: `app/wiki/*`, `lib/wiki/*` → 메인 모듈 (`lib/auth.ts`, `lib/s3.ts`, `lib/audit.ts` 등)
+- **금지 방향**: `app/hospitals/*`, `app/projects/*`, `app/site-visits/*`, `app/maintenances/*`, `app/install-plans/*`, `app/tasks/*`, `lib/mail-*` → `app/wiki/*`, `lib/wiki/*`
+- 메인에서 위키 데이터가 필요하면 `fetch('/api/wiki/...')`로 호출 (쿠키 인증 자동 전달)
+
+```typescript
+// app/hospitals/[code]/page.tsx (메인 모듈)
+// ❌ 금지
+import { getWikiPages } from '@/lib/wiki/...'
+import WikiCard from '@/app/wiki/components/...'
+
+// ✅ 허용 — HTTP 호출
+const res = await fetch(`/api/wiki/pages?refType=hospital&refCode=${code}`)
+```
+
+### 8. 위키 DB 테이블은 `wiki` 스키마에만 생성
+
+- 새 위키 테이블은 모두 Prisma 모델에 `@@schema("wiki")` 부여
+- 마이그레이션 SQL은 `CREATE TABLE wiki.xxx` 형식
+- `wiki.*` 테이블이 `public.users`, `public.hospitals` 등을 FK로 참조하는 것은 OK
+- **`public.*` 테이블이 `wiki.*`를 FK로 참조하는 것 금지** (의존성 방향 위반)
+
 ---
 
 ## 자주 쓰는 작업 — 약속어
@@ -137,6 +162,22 @@ pm2 restart thync-prod
 - `_prisma_migrations`는 **절대 덮어쓰지 않음** → DEV 마이그레이션 히스토리 보호
 - PROD DB는 **읽기(pg_dump)만** 수행, DDL/DML 절대 금지
 
+### 위키 Phase 진행
+
+**트리거 문구**
+- "위키 Phase N 진행해줘"
+- "위키 다음 단계로"
+
+**동작**
+1. `wiki_dev_schedule.md`에서 해당 Phase 작업 항목·검증·게이트 확인
+2. 이전 Phase 게이트 통과 여부 확인 (안 됐으면 사용자에게 보고 후 중단)
+3. 해당 Phase 작업 항목 순차 진행
+4. Phase 완료 후:
+   - `wiki_dev_schedule.md` 하단 체크리스트 갱신
+   - `DEV_HISTORY.md` 상단에 기록
+   - `README.md` 관련 섹션 갱신
+   - **빌드·PM2 재시작·git push는 사용자 명시 요청 시에만**
+
 ---
 
 ## 개발 작업 절차
@@ -145,6 +186,7 @@ pm2 restart thync-prod
 1. `CLAUDE.md` 읽기 (이 파일)
 2. `README.md` 읽기 (스택·스키마·API 전체 형상)
 3. `DEV_HISTORY.md` 최근 항목 확인 (현재 개발 상태 파악)
+4. **위키 관련 작업인 경우** `wiki_dev_schedule.md` 추가 확인 — 현재 어느 Phase에 있는지, 다음 Phase 게이트가 무엇인지 파악. Phase 0 미확정 상태에서 Phase 1 코드 작성 금지
 
 ### 작업 완료 시
 1. `DEV_HISTORY.md` **상단에** 작업 내역 기록
@@ -187,6 +229,16 @@ if (user.role !== 'ADMIN') return 403
 ### 네이밍
 - 컴포넌트: `PascalCase`
 - 파일명: `kebab-case`
+
+### 에디터 — 모듈별 사용 분기
+
+| 사용처 | 에디터 | 저장 형식 |
+|---|---|---|
+| 위키 페이지 본문 | **BlockNote** | JSON 블록 배열 (JSONB) |
+| 프로젝트 `issueNote`, 답사 `notes`, 유지보수 `resolution`/`notes`, 설치계획 `note` | **Tiptap** (기존) | HTML 문자열 |
+
+기존 Tiptap 사용처는 변경 금지. 데이터 형식 호환성과 마이그레이션 비용 때문.
+"통일해서 BlockNote로 가자" 같은 유혹은 거절. 두 에디터 공존이 정답.
 
 ---
 

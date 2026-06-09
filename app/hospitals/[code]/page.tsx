@@ -10,6 +10,7 @@ import StatusBadge from '@/app/components/StatusBadge'
 import SiteVisitsCard from './_components/SiteVisitsCard'
 import InstallPlansCard from './_components/InstallPlansCard'
 import MaintenancesCard from './_components/MaintenancesCard'
+import RelatedWikiPagesCard from './_components/RelatedWikiPagesCard'
 
 
 
@@ -294,6 +295,8 @@ export default async function HospitalDetailPage({ params }: PageProps) {
             </div>
           )}
         </div>
+
+        <RelatedWikiPagesCard hospitalCode={hospital.hospitalCode} />
 
       </div>
     </div>

@@ -4,6 +4,227 @@
 
 ---
 
+## 2026-06-10 | 사내 위키(Wiki) Phase 7 — 태그/즐겨찾기/최근/검색/버전/댓글/페이지 블록/mention
+
+- **목적**: 위키 사용성을 Notion 수준에 근접시키기 위한 부가 기능 일괄 도입. 한 batch로 9개 기능 + 6개 신규 DB 모델.
+- **DB 마이그레이션** (`20260610075023_add_wiki_phase7`):
+  - `wiki.wiki_pages` 에 `plain_text TEXT NOT NULL DEFAULT ''` 추가 (검색용)
+  - 신규 테이블 6종 (모두 `@@schema("wiki")`): `wiki_tags` / `wiki_page_tags` / `wiki_favorites` / `wiki_view_logs` / `wiki_versions` / `wiki_comments`
+  - 인덱스: 태그 page/tag, favorite (user,createdAt desc), view_log (user,viewed_at desc) + (page_id), version (page_id, saved_at desc), comment (page_id, created_at) + (author_id)
+  - FK 방향 wiki → public 유지 (절대 규칙 #8 준수)
+- **plain_text 백필 스크립트** (`scripts/backfill-plain-text.mts`): 51개 페이지에 BlockNote JSON → 텍스트 추출 후 컬럼 채움. `lib/wiki/blockText.ts`의 재귀 워커로 `content.text`, inline content `label/title`, page block `title` props 모두 수집
+- **태그**:
+  - API: `/api/wiki/tags` (GET 목록·검색, POST 생성) / `/api/wiki/tags/[id]` (PUT, DELETE) / `/api/wiki/pages/[id]/tags` (GET, POST `{tagId|name}` 신규 자동 생성, DELETE `?tagId=`)
+  - UI: `app/wiki/[id]/TagPicker.tsx` (인라인 chip + 자동완성 dropdown + Enter로 새 태그 추가)
+- **즐겨찾기**:
+  - API: `/api/wiki/favorites` (GET 내 즐겨찾기 목록), `/api/wiki/pages/[id]/favorite` (GET/POST/DELETE)
+  - UI: `app/wiki/[id]/FavoriteButton.tsx` (☆/★ 토글), `app/wiki/favorites/page.tsx` (전용 페이지)
+- **최근 본 페이지**:
+  - 자동 로깅: 페이지 상세 server component에서 비차단 `wiki_view_logs.create()`
+  - 페이지: `app/wiki/recent/page.tsx` — `$queryRaw DISTINCT ON (page_id)`로 페이지당 가장 최근 1건 → 50개 표시
+- **검색**:
+  - API: `/api/wiki/search?q=&tagId=` — `title` + `plain_text` ILIKE, 태그 필터 동시 적용, snippet 60자 radius
+  - 페이지: `app/wiki/search/page.tsx` — 검색 입력 + 태그 칩 필터 + 결과 하이라이트 (제목·snippet 모두 `<mark>` 강조)
+- **버전 히스토리**:
+  - 자동 스냅샷: 페이지 PUT 시 `contentJson` 변경되면 직전 상태를 `wiki_versions`에 `$transaction` 안에서 저장
+  - API: `/api/wiki/pages/[id]/versions` (GET 목록), `/api/wiki/pages/[id]/versions/[versionId]` (GET 상세, POST 복원). 복원도 현재 본문을 새 버전으로 보존한 뒤 적용 → 무손실
+  - UI: `app/wiki/[id]/VersionHistoryModal.tsx` — 페이지 상단 "🕘 버전" 버튼으로 열림, 행마다 "복원" 버튼
+- **댓글** (flat, 스레드 미지원):
+  - API: `/api/wiki/pages/[id]/comments` (GET, POST), `/api/wiki/comments/[id]` (PUT, DELETE)
+  - 권한: 본인 댓글 + ADMIN/SUPER_ADMIN 수정·삭제 가능, VIEWER 읽기만
+  - UI: `app/wiki/[id]/CommentSection.tsx` — 페이지 하단, Ctrl+Enter 등록 단축키
+- **BlockNote 페이지 블록 (커스텀)**:
+  - 신규 블록 타입 `wikiPageLink` — props: `pageId`, `title`. 렌더는 `contentEditable={false}` 박스 (📄 + 제목)로 `/wiki/<pageId>` 링크
+  - 슬래시(`/`) 메뉴에 "하위 페이지 추가" 항목 — `window.prompt`로 제목 받고 `POST /api/wiki/pages`로 자식 생성 → 받은 id로 `wikiPageLink` 블록 본문 삽입
+  - `SuggestionMenuController triggerCharacter="/"`로 기본 슬래시 메뉴 항목 + 커스텀 항목 통합, `filterSuggestionItems`로 쿼리 필터링
+- **BlockNote 인라인 mention (커스텀)**:
+  - 신규 inline content `mention` — props: `refType` (`hospital`|`project`), `refCode`, `label`. 렌더는 `target="_blank"` 링크 (`/hospitals/[code]` 또는 `/projects/[code]`)
+  - `SuggestionMenuController triggerCharacter="@"` + `/api/wiki/mention?q=` (병원/프로젝트 통합 검색, 타입별 5개) → 자동완성 메뉴 → `editor.insertInlineContent`로 본문 삽입
+  - 사이드 효과: 명시적 `WikiPageReference`와는 별개로 본문 내 inline 링크가 검색 plain_text에도 포함됨 (label 추출)
+- **사이드바 변경** (`WikiSidebar.tsx`): 상단에 3-grid 네비 추가 (🔍 검색 / ⭐ 즐겨찾기 / 🕐 최근), 현재 경로 하이라이트
+- **WikiEditor.tsx 대규모 리팩토링**:
+  - `BlockNoteSchema.create({blockSpecs, inlineContentSpecs})` 로 커스텀 스키마 정의
+  - `createReactBlockSpec`은 팩토리 함수 반환 → 호출하여 spec 얻은 뒤 스키마에 주입 (BlockNote 0.51.4 API)
+  - `useCreateBlockNote({schema: wikiSchema, ...})`, `<BlockNoteView slashMenu={false}>` + `<SuggestionMenuController>` 2개 직접 마운트
+  - 기존 페이지(50개 임포트 + 테스트) 호환 — 기본 블록은 그대로 인식
+  - `onChange` 시그니처를 `(blocks: unknown[]) => void`로 광역화 → 소비자(WikiPageView, new) 상태도 `useState<unknown[]>`로 변경
+- **이연 결정**: 드래그앤드롭 트리 이동 — 기존 ↑↓ 버튼이 잘 동작 + DnD는 별도 라이브러리(`@dnd-kit` 등) 필요해서 다음 batch로 이연
+- **검증**: `npx tsc --noEmit` 통과, `npm run build` 통과 (`/wiki/[id]` 413KB, 신규 라우트 4종 등록), PM2 재시작 후 모든 신규 라우트 smoke test OK (미인증 307)
+- **영향 파일** (총 30+개):
+  - `prisma/schema.prisma`, `prisma/migrations/20260610075023_add_wiki_phase7/migration.sql` (신규)
+  - `lib/wiki/blockText.ts` (신규), `scripts/backfill-plain-text.mts` (신규)
+  - `app/api/wiki/tags/route.ts` + `[id]/route.ts` (신규)
+  - `app/api/wiki/pages/[id]/tags/route.ts` (신규)
+  - `app/api/wiki/favorites/route.ts` + `/api/wiki/pages/[id]/favorite/route.ts` (신규)
+  - `app/api/wiki/search/route.ts` (신규)
+  - `app/api/wiki/pages/[id]/versions/route.ts` + `[versionId]/route.ts` (신규)
+  - `app/api/wiki/pages/[id]/comments/route.ts` + `/api/wiki/comments/[id]/route.ts` (신규)
+  - `app/api/wiki/mention/route.ts` (신규)
+  - `app/api/wiki/pages/route.ts`, `app/api/wiki/pages/[id]/route.ts` (plainText 동기화 + 버전 스냅샷)
+  - `app/wiki/components/WikiEditor.tsx` (커스텀 스키마 전면 재작성)
+  - `app/wiki/components/WikiSidebar.tsx` (네비 추가)
+  - `app/wiki/[id]/page.tsx` (server, 태그·favorite·열람 로그·current user 전달)
+  - `app/wiki/[id]/WikiPageView.tsx` (FavoriteButton/TagPicker/VersionHistoryModal/CommentSection 통합)
+  - `app/wiki/[id]/TagPicker.tsx`, `FavoriteButton.tsx`, `VersionHistoryModal.tsx`, `CommentSection.tsx` (신규)
+  - `app/wiki/favorites/page.tsx`, `app/wiki/recent/page.tsx`, `app/wiki/search/page.tsx` (신규)
+  - `app/wiki/new/page.tsx` (상태 타입 변경)
+  - `wiki_dev_schedule.md`, `README.md`
+
+---
+
+## 2026-06-09 | 사내 위키(Wiki) Phase 6 — 감사 로그 + 명시적 참조 + 병원 상세 역참조
+
+- **목적**: 위키 mutation을 audit_logs에 기록 + 위키 페이지와 메인 도메인(병원/프로젝트)을 명시적으로 연결하고, 병원 상세에서 관련 위키 문서를 표시.
+- **인라인 mention 이연**: 스케줄의 BlockNote 커스텀 inline content + 자동완성(`@hospital:HOSP-001`)은 BlockNote 스키마 커스터마이징 + 에디터 안정성 리스크가 커서 Phase 7로 연기. 대신 **명시적 참조(WikiPageReference)** 로 동일 기능 효과 확보 — 사용자가 "관련 항목"에 직접 병원/프로젝트를 chip으로 추가.
+- **DB 마이그레이션** (`20260609091541_add_wiki_page_references`):
+  - `wiki.wiki_page_references` 테이블 신설 (`id`/`page_id`/`ref_type`/`ref_code`/`created_by`/`created_at`)
+  - 인덱스 3종: `(page_id, ref_type, ref_code)` UNIQUE / `(ref_type, ref_code)` / `(page_id)`
+  - FK: `page_id → wiki.wiki_pages CASCADE`, `created_by → public.users RESTRICT` (단방향 wiki→public 유지)
+- **Prisma 모델**: `WikiPageReference` 추가, `WikiPage.references`, `User.wikiPageRefsCreated` 역참조 등록
+- **감사 로그 적용** (`lib/audit.ts`):
+  - 위키 페이지 CREATE/UPDATE/DELETE 모두 `resource='wiki_page'`로 기록
+  - `before/after`는 메타(`title`, `parentId`, `isPublished`, `slug`)만 + UPDATE에는 `contentChanged: boolean` 플래그
+  - 본문 JSON 통째 저장은 비용/가치 비효율로 제외 (필요해지면 Phase 7 WikiVersion 활용)
+- **참조 API 신규**:
+  - `GET /api/wiki/pages/[id]/references` — 페이지의 참조 목록 + 메인 도메인 라벨(병원명/프로젝트명) enrich
+  - `POST /api/wiki/pages/[id]/references` — `{refType, refCode}` 추가. 도메인 객체 존재 검증 + UNIQUE 위반 시 409
+  - `DELETE /api/wiki/pages/[id]/references/[refId]` — 연결 해제
+- **GET /api/wiki/pages 확장**: `?refType=&refCode=` 쿼리로 역참조 검색 (특정 병원/프로젝트를 참조하는 페이지 목록)
+- **위키 상세 UI**:
+  - `app/wiki/[id]/page.tsx` (server) — 참조 + 라벨 enrich
+  - `app/wiki/[id]/WikiPageView.tsx` — "관련 항목:" 영역에 chip 렌더 + "+ 연결" 버튼. 내부 `ReferenceChip` 컴포넌트로 분리
+  - `app/wiki/[id]/ReferencePickerModal.tsx` (신규) — 병원/프로젝트 탭 + debounce 검색 + 클릭 시 POST → onAdded
+- **병원 상세 역참조** (CLAUDE.md 절대 규칙 #7 준수 — 메인 → 위키 코드 import 금지):
+  - `app/hospitals/[code]/_components/RelatedWikiPagesCard.tsx` (신규, 메인 모듈 내) — `useEffect`에서 `fetch('/api/wiki/pages?refType=hospital&refCode=...')` 호출. `@/app/wiki/*`, `@/lib/wiki/*` import 0건 (소스 상단 주석으로 명시)
+  - `app/hospitals/[code]/page.tsx` — 마지막 카드로 `<RelatedWikiPagesCard hospitalCode={...} />` 삽입. 참조 0건이면 카드 자체 미렌더
+- **검증**: `npx tsc --noEmit` 통과, `prisma validate` OK.
+- **영향 파일**: `prisma/schema.prisma`, `prisma/migrations/20260609091541_add_wiki_page_references/migration.sql` (신규), `app/api/wiki/pages/route.ts`, `app/api/wiki/pages/[id]/route.ts`, `app/api/wiki/pages/[id]/references/route.ts` (신규), `app/api/wiki/pages/[id]/references/[refId]/route.ts` (신규), `app/wiki/[id]/page.tsx`, `app/wiki/[id]/WikiPageView.tsx`, `app/wiki/[id]/ReferencePickerModal.tsx` (신규), `app/hospitals/[code]/page.tsx`, `app/hospitals/[code]/_components/RelatedWikiPagesCard.tsx` (신규), `README.md`, `wiki_dev_schedule.md`
+
+---
+
+## 2026-06-09 | 사내 위키(Wiki) Phase 5 — 권한 가드 강화 + 메인 메뉴 등록
+
+- **목적**: 위키를 일반 운영 시스템처럼 메인 네비게이션에서 접근 가능하게 등록 + 권한 정책 명문화.
+- **권한 가드**: Phase 2 시점에 이미 `getAuthUser` + `VIEWER POST/PUT/DELETE 403` 적용되어 있어 추가 코드 없음 (재확인만).
+  - Phase 0 결정대로 페이지별 ACL은 미구현 (Phase 7 후순위)
+- **메인 메뉴 등록**:
+  - `nav_menu_items` 테이블에 `wiki` 행 1건 INSERT — `(menu_key='wiki', label='사내 위키', href='/wiki', icon_key='book', sort_order=15, allowed_roles='{}', allowed_org_codes='{}', is_active=true)`
+  - 정렬: `hira-hospitals(10)` 다음, `hospitals(20)` 앞
+  - `allowed_roles='{}'`로 전체 역할(VIEWER 포함) 노출, 향후 SUPER_ADMIN UI에서 토글 가능
+- **NavIcons**: `BookIcon` SVG 신규 추가, `ICON_MAP['book']` 매핑 등록
+- **PROD 반영 필요**: 동일 INSERT를 PROD `nav_menu_items`에도 실행해야 메뉴 노출됨 (사용자 명시 요청 후 진행)
+- **영향 파일**: `app/components/NavIcons.tsx`, DB 직접 변경 (마이그레이션 파일 X — 데이터 시드성), `README.md`, `wiki_dev_schedule.md`
+
+---
+
+## 2026-06-09 | 사내 위키(Wiki) Phase 4 — 파일 첨부 (S3) + BlockNote 업로드 연동
+
+- **목적**: 위키 페이지에 이미지/파일을 BlockNote 에디터 안에서 직접 업로드·표시.
+- **S3 통합**: 기존 `lib/s3.ts` 재사용 (`uploadToS3`, `getSignedUrl`, `deleteFromS3`)
+- **S3 키 패턴** (Phase 0 결정): `wiki/{pageId}/{timestamp}_{safeFileName}` (파일명은 `[^\w.\-]+` → `_` 치환으로 안전화)
+- **신규 API**:
+  - `POST /api/wiki/upload?pageId=<id>` — multipart `file` 업로드. 50MB 초과 시 413, pageId 누락/페이지 부재 시 400/404. 응답에 `url='/api/wiki/files/[attachmentId]'` (BlockNote 본문에 영구적으로 박을 URL)
+  - `GET /api/wiki/files/[id]` — 인증 사용자에게 24h presigned URL로 **307 redirect**. BlockNote 렌더 시점마다 fresh URL 발급
+  - `DELETE /api/wiki/files/[id]` — S3 + DB row 삭제 (USER+). S3 실패는 로그만 남기고 DB는 정리
+- **BlockNote 연동** (`app/wiki/components/WikiEditor.tsx`):
+  - `pageId` prop 추가. 있을 때만 `uploadFile` 콜백 활성화하여 BlockNote 이미지/파일 블록의 업로드 핸들러 동작
+  - `pageId` 없는 경우(=`/wiki/new`)는 업로드 비활성, 안내 문구 표시
+- **페이지 삭제 시 첨부 정리**:
+  - `app/api/wiki/pages/[id]/route.ts` DELETE — 자식 페이지 ID를 BFS로 수집 → 모든 해당 페이지의 첨부 S3 키 best-effort 삭제 → 페이지 삭제 (DB CASCADE가 첨부 row 정리)
+- **검증**: `npx tsc --noEmit` 통과
+- **영향 파일**: `app/api/wiki/upload/route.ts` (신규), `app/api/wiki/files/[id]/route.ts` (신규), `app/api/wiki/pages/[id]/route.ts`, `app/wiki/components/WikiEditor.tsx`, `app/wiki/[id]/WikiPageView.tsx`, `app/wiki/new/page.tsx`, `README.md`, `wiki_dev_schedule.md`
+
+---
+
+## 2026-06-09 | 사내 위키(Wiki) Phase 3 — 페이지 트리 + 사이드 네비게이션 + 이동/정렬 API
+
+- **목적**: Notion-like 좌측 사이드바에서 위키 페이지를 계층 탐색 + 순서/부모 변경 가능하게.
+- **API 신규**:
+  - `GET /api/wiki/tree` — 전체 위키 페이지를 평면 리스트로 반환 (클라이언트에서 트리 구성)
+  - `PATCH /api/wiki/pages/[id]/move` — 3가지 모드
+    1. `{ direction: 'up' | 'down' }` — 같은 부모 안 인접 형제와 sortOrder 교환 (단일 트랜잭션)
+    2. `{ parentId: string | null }` — 새 부모로 이동. sortOrder 미지정 시 새 부모 자식 최하단
+    3. `{ sortOrder: number }` — 명시적 위치 지정
+  - **순환 참조 방지**: 새 parentId가 본인이거나 본인의 후손이면 400. 후손 집합은 BFS로 in-memory 계산
+- **UI 신규**:
+  - `app/wiki/layout.tsx` — 좌측 사이드바(고정 폭 288px) + 우측 콘텐츠 flex 레이아웃. `/wiki/*` 모든 페이지에 자동 적용
+  - `app/wiki/components/WikiSidebar.tsx` (client) — 트리 렌더, 행 hover 시 ↑↓+ 버튼 노출
+    - chevron(▼/▶) 토글로 자식 접기/펼치기 (로컬 state, 기본 펼침)
+    - ↑↓: 형제 sortOrder 교환 API 호출 → `router.refresh()`
+    - +: `/wiki/new?parentId=<id>`로 이동
+    - 현재 페이지는 `bg-blue-100`으로 하이라이트 (`usePathname` 기반)
+    - 재귀 컴포넌트(`TreeRow`)로 무한 깊이 지원, 들여쓰기 depth*12px
+  - `app/wiki/new/page.tsx` — `?parentId=` 쿼리 수용, "하위 페이지로 추가됩니다" 뱃지 표시
+  - `app/wiki/[id]/page.tsx` — server-side에서 부모 체인 BFS로 수집 (방문 set으로 무한루프 방지)
+  - `app/wiki/[id]/WikiPageView.tsx` — breadcrumb (`위키 / 부모 / ... / 현재`) + "+ 하위 페이지" 버튼 추가
+  - `app/wiki/page.tsx` — 사이드바와 중복되는 헤더/버튼 제거, "최근 수정 페이지" 목록으로 간소화
+- **검증**: `npx tsc --noEmit` 통과. `Map.values()` 이터레이션은 `Array.from()`으로 래핑 (TS target ES2017 호환).
+- **빌드/PM2 재시작**: CLAUDE.md 절대규칙 #3에 따라 사용자 명시 요청 대기.
+- **영향 파일**: `app/api/wiki/tree/route.ts` (신규), `app/api/wiki/pages/[id]/move/route.ts` (신규), `app/wiki/layout.tsx` (신규), `app/wiki/components/WikiSidebar.tsx` (신규), `app/wiki/new/page.tsx`, `app/wiki/[id]/page.tsx`, `app/wiki/[id]/WikiPageView.tsx`, `app/wiki/page.tsx`, `wiki_dev_schedule.md`, `README.md`
+
+---
+
+## 2026-06-09 | 사내 위키(Wiki) Phase 2 — BlockNote POC (페이지 1개 CRUD)
+
+- **목적**: BlockNote 에디터로 페이지 1개를 작성·저장·조회·수정·삭제하는 최소 동작 확보.
+- **에디터 선택 변경**: Phase 0 결정의 `@blocknote/mantine` → **`@blocknote/ariakit`** 전환
+  - 사유 1: Mantine 9.3.1이 React 19 peer dep 강제 → React 18 프로젝트와 충돌
+  - 사유 2: `@blocknote/shadcn`은 Tailwind 4.x 요구 → 프로젝트는 Tailwind 3.4.1 (메이저 업그레이드 비용은 위키 도입과 별개)
+  - Ariakit은 헤드리스라 Tailwind 3 + React 18과 무충돌
+  - `wiki_dev_schedule.md`의 Phase 0 결정 요약에 반영
+- **신규 패키지**: `@blocknote/core` `@blocknote/react` `@blocknote/ariakit` (모두 0.51.4)
+- **API 라우트 신설**:
+  - `app/api/wiki/pages/route.ts` — GET 목록(`?parentId=` 필터 지원) / POST 생성
+  - `app/api/wiki/pages/[id]/route.ts` — GET 상세 / PUT 수정 / DELETE 삭제
+  - 권한: 미들웨어로 미인증 차단(자동) + API에서 VIEWER는 POST/PUT/DELETE 403
+  - 자기 자신을 parent로 지정 시 400
+- **UI 라우트 신설**:
+  - `app/wiki/page.tsx` (server) — 최근 50개 페이지 목록, "+ 새 페이지" 버튼
+  - `app/wiki/new/page.tsx` (client) — 제목 + BlockNote 에디터로 신규 작성
+  - `app/wiki/[id]/page.tsx` (server) — 페이지 fetch 후 클라이언트 컴포넌트로 전달
+  - `app/wiki/[id]/WikiPageView.tsx` (client) — 읽기 모드 ↔ 편집 모드 토글, 저장/삭제
+  - `app/wiki/components/WikiEditor.tsx` (client) — BlockNote 래퍼 (initialContent, editable, onChange)
+- **저장 형식**: BlockNote JSON 블록 배열을 `wiki.wiki_pages.content_json` JSONB에 그대로 저장
+- **mutation 후 처리**: 모든 POST/PUT/DELETE 후 `router.refresh()` + 필요 시 `router.push()` (코딩 컨벤션 준수)
+- **검증 진행**:
+  - `npx tsc --noEmit` 통과
+  - `npm run build`/PM2 재시작은 CLAUDE.md 절대규칙 #3에 따라 **사용자 명시 요청 대기**
+  - 메인 메뉴 등록(`nav_menu_items` INSERT)은 Phase 5에서 진행 — 현재는 직접 `/wiki` URL 접근 (또는 SUPER_ADMIN UI 설정)
+- **영향 파일**: `package.json`, `package-lock.json`, `app/api/wiki/pages/route.ts` (신규), `app/api/wiki/pages/[id]/route.ts` (신규), `app/wiki/page.tsx` (신규), `app/wiki/new/page.tsx` (신규), `app/wiki/[id]/page.tsx` (신규), `app/wiki/[id]/WikiPageView.tsx` (신규), `app/wiki/components/WikiEditor.tsx` (신규), `wiki_dev_schedule.md`, `README.md`
+
+---
+
+## 2026-06-09 | 사내 위키(Wiki) 모듈 Phase 0~1 — 설계 확정 + DB 스키마 신설
+
+- **목적**: thynC Ops에 Notion-like 사내 위키 기능 추가. 기존 시스템과 통합하되 모듈/DB 스키마/의존성으로 격리하여 추후 분리 가능성 보존.
+- **Phase 0 — 설계 결정 확정 (`wiki_dev_schedule.md`)**:
+  - 통합 방식: 소스 모듈 분리 + 단일 배포 (B)
+  - DB: 같은 DB + 새 PostgreSQL 스키마 `wiki`
+  - 에디터: BlockNote (기존 Tiptap 3.20.4 위)
+  - 의존성: wiki → main 코드 import OK / main → wiki 금지 (HTTP fetch만)
+  - 권한: 역할 기반만 / 트리: parent_id 무한 깊이 / 버전: 덮어쓰기 / 검색: 제목·태그만 (풀텍스트 Phase 7) / 첨부: 50MB, `wiki/{pageId}/{ts}_{name}` / VIEWER 읽기 허용 / 테마 `@blocknote/mantine`
+- **Phase 1 — DB 스키마 신설 + Prisma 모델**:
+  - `prisma/schema.prisma`: `multiSchema` preview 활성화, `schemas = ["public", "wiki"]` 추가
+  - 기존 36개 모델 + Role enum 전체에 `@@schema("public")` 부여 (sed 일괄)
+  - 신규 모델: `WikiPage` (id/parentId/title/slug/contentJson(JSONB)/isPublished/sortOrder/authorId→User/lastEditorId→User), `WikiAttachment` (id/pageId→WikiPage/fileName/s3Key UNIQUE/size/mimeType/uploaderId→User) 둘 다 `@@schema("wiki")`
+  - User 모델에 역참조 추가 (`wikiPagesAuthored`, `wikiPagesEdited`, `wikiAttachmentsUploaded`)
+  - FK 방향: wiki → public 만 (CLAUDE.md 절대규칙 #8 준수)
+- **마이그레이션** (`20260609083213_add_wiki_schema/migration.sql`):
+  - `CREATE SCHEMA IF NOT EXISTS wiki`
+  - `wiki.wiki_pages`, `wiki.wiki_attachments` 테이블 + 인덱스 (`(parent_id, sort_order)`, `(updated_at DESC)`, `(author_id)`, `(page_id)`, `s3_key` UNIQUE)
+  - 수동 SQL → `psql -f` 적용 → `prisma migrate resolve --applied` → `prisma generate`
+  - `prisma migrate status` clean, 타입체크 통과
+- **CLAUDE.md 갱신**:
+  - 절대 규칙 #7 추가 — 위키 모듈 경계 (단방향 의존성)
+  - 절대 규칙 #8 추가 — 위키 DB 테이블은 `wiki` 스키마에만, FK 역방향 금지
+  - "약속어" 섹션에 "위키 Phase 진행" 트리거 추가
+  - "코딩 컨벤션 > 에디터 사용 분기" 추가 (위키는 BlockNote, 기존 Tiptap 유지)
+  - "작업 시작 시" 4번 항목 추가 — 위키 작업 시 `wiki_dev_schedule.md` 확인
+- **DEV 적용 완료, PROD 미적용** — Phase 진행 모두 끝나고 사용자 명시 요청 시 동일 SQL을 PROD에도 실행 필요
+- **영향 파일**: `prisma/schema.prisma`, `prisma/migrations/20260609083213_add_wiki_schema/migration.sql` (신규), `CLAUDE.md`, `wiki_dev_schedule.md` (신규), `README.md`
+
+---
+
 ## 2026-05-19 | 메일 자동 동기화 스케줄러 — 외부 fetch 제거 (직접 함수 호출)
 
 - **문제**: 설치계획·답사 모두 자동 메일 동기화가 동작하지 않음. "메일 가져오기" 버튼(수동)을 누를 때만 그동안 누락된 메일이 한꺼번에 수집됨.
