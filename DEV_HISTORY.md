@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-06-10 | 사내 위키(Wiki) Phase 8 — PROD 반영 완료
+
+- **사전 검토**: 위키 도입이 기존 운영시스템에 영향 없는지 전수 검증 (메인 모듈 코드 변경 최소·의존성 방향 위반 0건·마이그레이션 public 무손상·공유 패키지 버전 변동 없음·tsc/런타임 쿼리/smoke test 통과)
+- **dev2 → main push**: 커밋 `061d52b` — Phase 1~7 전체 (50개 파일, +5,732줄)
+- **PROD 반영 절차** (사용자 명시 요청):
+  1. PROD `git pull` → HEAD `061d52b`
+  2. `npm install` — `@blocknote/{core,react,ariakit,server-util}` 0.51.4 설치
+  3. PROD DB(`thync_ops`) 마이그레이션 3건 psql `--single-transaction` 적용 + `migrate resolve --applied` → 54건 정합, `wiki.*` 테이블 9종 생성
+  4. `nav_menu_items`에 wiki 행 INSERT (idempotent, sort_order=15)
+  5. `prisma generate` + 힙 4GB 빌드 → `/wiki/*` 라우트 등록 확인
+  6. `pm2 restart thync-prod` → online, Ready in 1.1s
+- **smoke test**: `/login` 200, 메인 라우트(hospitals/projects/tasks) 및 위키 라우트(/wiki, search, favorites, recent, API) 모두 미인증 307 정상
+- **미이관 항목**: DEV의 위키 본문 51페이지(Notion 임포트분)는 PROD로 이관하지 않음 — PROD 위키는 빈 상태로 시작. 이관 필요 시 별도 결정
+- **참고**: PROD DB 작업·빌드·재시작 모두 사용자 명시 요청("prod에 반영해줘")에 따라 수행
+
+---
+
 ## 2026-06-10 | 사내 위키(Wiki) Phase 7 — 태그/즐겨찾기/최근/검색/버전/댓글/페이지 블록/mention
 
 - **목적**: 위키 사용성을 Notion 수준에 근접시키기 위한 부가 기능 일괄 도입. 한 batch로 9개 기능 + 6개 신규 DB 모델.
