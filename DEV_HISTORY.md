@@ -23,7 +23,7 @@
   - 행별 📂 버튼으로 모달 이동도 가능 (DnD 불편한 깊은 트리 대비)
 - **검증**: `npx tsc --noEmit` 통과. 라우트 핸들러 직접 호출 통합 테스트 14건 전부 통과 (position 이동/같은 부모 재정렬/순환 차단 400/하위 포함 복제 copied=2·태그 복사·suffix/단일 복제/VIEWER 403), 테스트 데이터 정리 확인
 - **영향 파일**: `app/api/wiki/pages/[id]/move/route.ts`, `app/api/wiki/pages/[id]/duplicate/route.ts` (신규), `app/wiki/components/MovePageModal.tsx` (신규), `app/wiki/components/WikiSidebar.tsx`, `app/wiki/[id]/WikiPageView.tsx`, `app/wiki/[id]/page.tsx`, `package.json` (`@dnd-kit/core`), `README.md`, `wiki_dev_schedule.md`
-- **빌드·PM2 재시작·git push는 사용자 명시 요청 대기**
+- **PROD 반영 완료** (2026-06-10, 커밋 `dea435f`): dev2 검증 후 push → PROD pull + `@dnd-kit` 설치 + 빌드 + 재시작, smoke test 정상. DB 변경 없음
 
 ---
 
