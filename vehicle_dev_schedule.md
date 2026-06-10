@@ -122,4 +122,4 @@
 - [x] Phase 2 — 예약 API (2026-06-10) — 통합 테스트 18/18 통과 (충돌 409·EXCLUDE race 차단 포함)
 - [x] Phase 3 — 현황 보드 UI (2026-06-10) — tsc·ESLint 통과, nav 메뉴 2건 등록. 브라우저 검증은 빌드·PM2 재시작(사용자 요청) 후 진행
 - [x] Phase 4 — 문서 갱신 (2026-06-10) — README/DEV_HISTORY 반영
-- [ ] Phase 5 — PROD 반영 (사용자 명시 요청 대기)
+- [x] Phase 5 — PROD 반영 (2026-06-10) — 커밋 `7be07a3` push → PROD pull + DB 마이그레이션(55건 정합) + nav 메뉴 2건 + 빌드·재시작, smoke test 정상

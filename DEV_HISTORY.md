@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-06-10 | 차량예약시스템 Phase 5 — PROD 반영 완료
+
+- **커밋 `7be07a3`** (16파일, +2,463줄) push → PROD pull (fast-forward)
+- **PROD DB(`thync_ops`) 마이그레이션** (사용자 명시 요청 "prod에 반영해줘"):
+  - `20260610113000_add_vehicle_reservation` psql `--single-transaction` 적용 — `btree_gist` 확장 + `vehicles`/`vehicle_reservations` + EXCLUDE 제약 (PG 16.14 trusted extension이라 thync 권한으로 정상 생성)
+  - `migrate resolve --applied` → 마이그레이션 55건 정합 (dev2와 동일)
+  - `nav_menu_items`에 `vehicle-reservations`(차량예약, sort 58) + `settings/vehicles`(차량 관리, ADMIN+, sort 160) INSERT
+- **빌드·재시작**: `prisma generate` + 힙 4GB 빌드 (차량 라우트 4종 등록 확인) + `pm2 restart thync-prod` → online, Ready in 1.2s
+- **smoke test**: `/login` 200, 차량예약·차량 관리·API 및 기존 라우트(wiki/hospitals/projects) 모두 미인증 307 정상, 에러 로그 없음
+- **참고**: 신규 npm 패키지 없음(`package.json` 무변경). PROD 차량 데이터는 빈 상태 — 설정 > 차량 관리에서 등록 후 사용
+
+---
+
 ## 2026-06-10 | dev2 DB 재구축 — PG16 단일화 + PROD 데이터 전체 동기화
 
 - **발단**: dev2 네비게이션에서 위키 메뉴 실종 → 조사 결과 dev2(WSL2)에 PG14·PG16 클러스터가 둘 다 port 5432로 공존, 재부팅 시 먼저 뜨는 쪽이 5432를 차지하는 구조였음
