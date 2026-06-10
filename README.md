@@ -20,6 +20,7 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 | 아이콘 | lucide-react |
 | 리치 텍스트 에디터 | Tiptap (`@tiptap/react` + 확장) — 기존 모듈용 |
 | 블록 에디터 (위키) | BlockNote (`@blocknote/core`, `@blocknote/react`, `@blocknote/ariakit`) — 위키 전용 |
+| 드래그앤드롭 (위키) | `@dnd-kit/core` — 위키 사이드바 트리 이동 전용 |
 | 프로세스 관리 | PM2 |
 | 웹서버 | Nginx |
 | 마크다운 렌더링 | react-markdown + `@tailwindcss/typography` |
@@ -86,7 +87,8 @@ app/
 │   │   │   ├── route.ts              # GET 목록 / POST 생성
 │   │   │   └── [id]/
 │   │   │       ├── route.ts          # GET / PUT / DELETE
-│   │   │       └── move/route.ts     # PATCH 이동 (direction/parentId/sortOrder)
+│   │   │       ├── move/route.ts     # PATCH 이동 (direction/parentId/position/sortOrder)
+│   │   │       └── duplicate/route.ts # POST 복제 (단일/하위 포함)
 │   │   └── tree/route.ts             # GET 전체 트리
 │   ├── install-plans/                # 설치계획(가안) CRUD
 │   ├── hira-hospitals/
@@ -111,7 +113,8 @@ app/
 │   ├── [id]/WikiPageView.tsx         # 상세 클라이언트 (breadcrumb + 편집 토글)
 │   └── components/
 │       ├── WikiEditor.tsx            # BlockNote 에디터 래퍼
-│       └── WikiSidebar.tsx           # 페이지 트리 사이드바 (collapse/expand + ↑↓+)
+│       ├── WikiSidebar.tsx           # 페이지 트리 사이드바 (collapse/expand + ↑↓+ + DnD 이동)
+│       └── MovePageModal.tsx         # 페이지 이동 모달 (새 부모 트리 선택)
 ├── users/                            # 사용자 관리 (ADMIN 이상)
 ├── settings/
 │   ├── profile/                      # 내 계정 정보
@@ -514,6 +517,9 @@ prisma/
 - 별도 PostgreSQL 스키마 `wiki`에 격리, 메인 모듈과 단방향 의존성 유지
 - 페이지 단위 작성·조회·수정·삭제 (BlockNote JSON 본문)
 - **계층 구조**: `parentId`로 무한 깊이 트리, 좌측 사이드바에서 접기/펼치기·형제 순서 변경(↑↓)·하위 페이지 추가(+)
+- **드래그앤드롭 트리 이동** (`@dnd-kit/core`): 사이드바에서 핸들(⠿)로 드래그 — 행 위에 놓으면 하위로, 행 사이 틈에 놓으면 해당 위치로, 하단 존에 놓으면 최상위로. 자기 자신/후손으로의 이동은 차단
+- **페이지 이동 모달**: 사이드바 📂 버튼 또는 페이지 상세 "📂 이동" 버튼 → 트리에서 새 부모 선택 (루트 이동 포함)
+- **페이지 복제**: 페이지 상세 "⧉ 복제" 버튼 — 단일 또는 하위 포함 재귀 복제. 본문·태그·참조 복사, 댓글·버전·첨부 미복사. 사본 제목 " (사본)" suffix
 - **breadcrumb**: 상세 페이지 상단에 부모 체인 표시
 - **파일 첨부**: 이미지/파일 BlockNote 안에서 드래그/슬래시로 직접 업로드. S3 저장(`wiki/{pageId}/{ts}_{name}`), 최대 50MB, 24h presigned URL로 표시
 - **메인 메뉴 등록**: `nav_menu_items`에 `wiki` 행 (sort_order=15)
@@ -893,7 +899,8 @@ npm run dev
 | GET  | `/api/wiki/pages/[id]` | 페이지 상세 |
 | PUT  | `/api/wiki/pages/[id]` | 페이지 수정 — USER+, 감사로그 UPDATE, **본문 변경 시 직전 상태 자동 버전 스냅샷 + `plainText` 동기화** |
 | DELETE | `/api/wiki/pages/[id]` | 페이지 삭제 (자식 + 첨부 S3 best-effort 정리) — USER+, 감사로그 DELETE |
-| PATCH | `/api/wiki/pages/[id]/move` | 페이지 이동/정렬 — USER+, 순환 참조 차단 |
+| PATCH | `/api/wiki/pages/[id]/move` | 페이지 이동/정렬 — USER+, 순환 참조 차단. `{direction}` 형제 교환 / `{parentId}` 부모 변경(최하단) / `{parentId, position}` 특정 위치 삽입(형제 sortOrder 재부여) / `{sortOrder}` 직접 지정 |
+| POST | `/api/wiki/pages/[id]/duplicate` | 페이지 복제 (`{includeChildren?}`) — USER+, 본문·태그·참조 복사, 감사로그 CREATE |
 | GET  | `/api/wiki/tree` | 전체 위키 페이지 평면 리스트 |
 | POST | `/api/wiki/upload?pageId=` | 첨부 업로드 (multipart, 최대 50MB) — USER+ |
 | GET  | `/api/wiki/files/[id]` | 첨부 다운로드 (24h presigned URL로 307) |

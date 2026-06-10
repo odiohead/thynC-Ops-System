@@ -5,10 +5,11 @@ import { getAuthUser } from '@/lib/auth'
 type Ctx = { params: { id: string } }
 
 /**
- * 페이지 이동/정렬 — 세 가지 모드 지원
- * - { direction: 'up' | 'down' }   같은 부모 안에서 인접 형제와 sortOrder 교환
- * - { parentId: string | null }    새 부모로 이동 (sortOrder는 새 부모 자식 최하단)
- * - { sortOrder: number }          명시적 위치 지정
+ * 페이지 이동/정렬 — 네 가지 모드 지원
+ * - { direction: 'up' | 'down' }            같은 부모 안에서 인접 형제와 sortOrder 교환
+ * - { parentId: string | null }             새 부모로 이동 (sortOrder는 새 부모 자식 최하단)
+ * - { parentId, position: number }          새 부모의 자식 중 position 인덱스에 삽입 (형제 전체 sortOrder 재부여)
+ * - { sortOrder: number }                   명시적 위치 지정
  *
  * 순환 참조 방지: 새 부모가 본인이거나 본인의 후손이면 400
  */
@@ -18,10 +19,11 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
   if (authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()
-  const { direction, parentId, sortOrder } = body as {
+  const { direction, parentId, sortOrder, position } = body as {
     direction?: 'up' | 'down'
     parentId?: string | null
     sortOrder?: number
+    position?: number
   }
 
   const target = await prisma.wikiPage.findUnique({
@@ -101,6 +103,28 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
       if (!newParent) {
         return NextResponse.json({ error: 'Parent not found' }, { status: 404 })
       }
+    }
+
+    // position 모드: 새 부모의 자식 목록(본인 제외) position 인덱스에 삽입, 전체 sortOrder 0..n 재부여
+    if (position !== undefined) {
+      const siblings = await prisma.wikiPage.findMany({
+        where: { parentId, id: { not: target.id } },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        select: { id: true },
+      })
+      const clamped = Math.max(0, Math.min(position, siblings.length))
+      const orderedIds = [
+        ...siblings.slice(0, clamped).map((s) => s.id),
+        target.id,
+        ...siblings.slice(clamped).map((s) => s.id),
+      ]
+      await prisma.$transaction([
+        prisma.wikiPage.update({ where: { id: target.id }, data: { parentId } }),
+        ...orderedIds.map((pid, i) =>
+          prisma.wikiPage.update({ where: { id: pid }, data: { sortOrder: i } }),
+        ),
+      ])
+      return NextResponse.json({ ok: true })
     }
 
     let nextSortOrder = sortOrder

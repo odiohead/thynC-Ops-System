@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import type { PartialBlock } from '@blocknote/core'
 import WikiEditor from '../components/WikiEditor'
+import MovePageModal from '../components/MovePageModal'
 import ReferencePickerModal from './ReferencePickerModal'
 import TagPicker, { type Tag } from './TagPicker'
 import FavoriteButton from './FavoriteButton'
@@ -21,6 +22,7 @@ type Reference = {
 type Props = {
   id: string
   title: string
+  parentId: string | null
   breadcrumb: { id: string; title: string }[]
   initialContent: PartialBlock[]
   author: string
@@ -36,6 +38,7 @@ type Props = {
 export default function WikiPageView({
   id,
   title: initialTitle,
+  parentId,
   breadcrumb,
   initialContent,
   author,
@@ -49,6 +52,9 @@ export default function WikiPageView({
 }: Props) {
   const [showRefPicker, setShowRefPicker] = useState(false)
   const [showVersions, setShowVersions] = useState(false)
+  const [showMove, setShowMove] = useState(false)
+  const [showDuplicate, setShowDuplicate] = useState(false)
+  const [duplicating, setDuplicating] = useState(false)
   const router = useRouter()
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(initialTitle)
@@ -96,6 +102,28 @@ export default function WikiPageView({
 
   const addChild = () => {
     router.push(`/wiki/new?parentId=${id}`)
+  }
+
+  const handleDuplicate = async (includeChildren: boolean) => {
+    if (duplicating) return
+    setDuplicating(true)
+    try {
+      const res = await fetch(`/api/wiki/pages/${id}/duplicate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ includeChildren }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        alert(data.error || `복제 실패 (${res.status})`)
+        return
+      }
+      setShowDuplicate(false)
+      router.refresh()
+      router.push(`/wiki/${data.id}`)
+    } finally {
+      setDuplicating(false)
+    }
   }
 
   return (
@@ -167,6 +195,20 @@ export default function WikiPageView({
                 + 하위 페이지
               </button>
               <button
+                onClick={() => setShowMove(true)}
+                className="px-3 py-2 text-sm border rounded hover:bg-gray-50"
+                title="다른 위치로 이동"
+              >
+                📂 이동
+              </button>
+              <button
+                onClick={() => setShowDuplicate(true)}
+                className="px-3 py-2 text-sm border rounded hover:bg-gray-50"
+                title="페이지 복제"
+              >
+                ⧉ 복제
+              </button>
+              <button
                 onClick={handleDelete}
                 className="px-4 py-2 border border-red-300 text-red-600 rounded hover:bg-red-50"
               >
@@ -223,6 +265,59 @@ export default function WikiPageView({
 
       {showVersions && (
         <VersionHistoryModal pageId={id} onClose={() => setShowVersions(false)} />
+      )}
+
+      {showMove && (
+        <MovePageModal
+          pageId={id}
+          currentParentId={parentId}
+          onClose={() => setShowMove(false)}
+          onMoved={() => router.refresh()}
+        />
+      )}
+
+      {showDuplicate && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => !duplicating && setShowDuplicate(false)}
+        >
+          <div
+            className="w-[400px] bg-white rounded-lg shadow-xl p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-semibold text-gray-800 mb-2">페이지 복제</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              &ldquo;{title}&rdquo; 페이지를 복제합니다. 하위 페이지도 함께 복제할까요?
+              <br />
+              <span className="text-xs text-gray-400">
+                (댓글·버전 히스토리·첨부 파일은 복사되지 않습니다)
+              </span>
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowDuplicate(false)}
+                disabled={duplicating}
+                className="px-3 py-1.5 text-sm border rounded hover:bg-gray-50 disabled:opacity-50"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => handleDuplicate(false)}
+                disabled={duplicating}
+                className="px-3 py-1.5 text-sm border rounded hover:bg-gray-50 disabled:opacity-50"
+              >
+                이 페이지만
+              </button>
+              <button
+                onClick={() => handleDuplicate(true)}
+                disabled={duplicating}
+                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              >
+                {duplicating ? '복제 중...' : '하위 포함 복제'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {error && (

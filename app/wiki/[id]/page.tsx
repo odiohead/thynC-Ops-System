@@ -105,6 +105,7 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
     <WikiPageView
       id={page.id}
       title={page.title}
+      parentId={page.parentId}
       breadcrumb={breadcrumb}
       initialContent={initialContent}
       author={page.author.name}

@@ -4,6 +4,29 @@
 
 ---
 
+## 2026-06-10 | 사내 위키(Wiki) — 페이지 이동(트리 간)·복제·드래그앤드롭
+
+- **목적**: Phase 3/7에서 이연됐던 페이지 단위 이동·복제 UX 완성. ① 트리 간 이동 모달, ② 페이지 복제, ③ DnD 트리 이동 3종 한 batch.
+- **move API 확장** (`/api/wiki/pages/[id]/move`):
+  - 신규 `{parentId, position}` 모드 — 새 부모의 자식 중 position 인덱스에 삽입, 형제 전체 sortOrder 0..n 재부여 (`$transaction`)
+  - 기존 3개 모드(direction/parentId/sortOrder) 그대로 유지, 순환 참조 차단 로직 공유
+- **duplicate API 신규** (`POST /api/wiki/pages/[id]/duplicate`, body `{includeChildren?}`):
+  - 복사: 본문(contentJson/plainText)·발행 상태·태그·참조(병원/프로젝트). 미복사: 댓글·버전·즐겨찾기·열람로그·첨부(본문 이미지 URL은 원본 첨부를 가리킴)
+  - 사본은 같은 부모 최하단 배치, 최상위 사본만 제목에 " (사본)" suffix, 하위는 sortOrder 보존 재귀 복제
+  - 작성자/수정자 = 복제 실행자, 감사로그 CREATE (`duplicatedFrom`/`copiedCount` 메타)
+- **MovePageModal** (`app/wiki/components/MovePageModal.tsx`, 신규): `/api/wiki/tree` 기반 트리에서 새 부모 선택, "최상위(루트)" 옵션, 자기 자신/후손·현재 위치 비활성화
+- **WikiPageView**: "📂 이동"·"⧉ 복제" 버튼 추가. 복제는 3택 모달(취소/이 페이지만/하위 포함). 서버 page.tsx에서 `parentId` prop 전달 추가
+- **사이드바 DnD** (`@dnd-kit/core` 신규 설치, WikiSidebar 개편):
+  - 행 hover 시 드래그 핸들(⠿) 노출 — 핸들로만 드래그 시작 (PointerSensor distance 5px, 링크 클릭과 충돌 없음)
+  - 드롭 존 3종: 행 위(하위로 nest, ring 하이라이트) / 행 사이 틈(해당 위치 삽입, 파란 라인) / 하단 존(최상위로)
+  - 자기 자신/후손으로의 드롭은 클라이언트에서 차단 (서버 가드와 이중)
+  - 행별 📂 버튼으로 모달 이동도 가능 (DnD 불편한 깊은 트리 대비)
+- **검증**: `npx tsc --noEmit` 통과. 라우트 핸들러 직접 호출 통합 테스트 14건 전부 통과 (position 이동/같은 부모 재정렬/순환 차단 400/하위 포함 복제 copied=2·태그 복사·suffix/단일 복제/VIEWER 403), 테스트 데이터 정리 확인
+- **영향 파일**: `app/api/wiki/pages/[id]/move/route.ts`, `app/api/wiki/pages/[id]/duplicate/route.ts` (신규), `app/wiki/components/MovePageModal.tsx` (신규), `app/wiki/components/WikiSidebar.tsx`, `app/wiki/[id]/WikiPageView.tsx`, `app/wiki/[id]/page.tsx`, `package.json` (`@dnd-kit/core`), `README.md`, `wiki_dev_schedule.md`
+- **빌드·PM2 재시작·git push는 사용자 명시 요청 대기**
+
+---
+
 ## 2026-06-10 | 사내 위키(Wiki) Phase 8 — PROD 반영 완료
 
 - **사전 검토**: 위키 도입이 기존 운영시스템에 영향 없는지 전수 검증 (메인 모듈 코드 변경 최소·의존성 방향 위반 0건·마이그레이션 public 무손상·공유 패키지 버전 변동 없음·tsc/런타임 쿼리/smoke test 통과)
