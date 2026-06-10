@@ -4,6 +4,59 @@
 
 ---
 
+## 2026-06-10 | dev2 DB 재구축 — PG16 단일화 + PROD 데이터 전체 동기화
+
+- **발단**: dev2 네비게이션에서 위키 메뉴 실종 → 조사 결과 dev2(WSL2)에 PG14·PG16 클러스터가 둘 다 port 5432로 공존, 재부팅 시 먼저 뜨는 쪽이 5432를 차지하는 구조였음
+  - 4/23 셋업 때 두 버전이 함께 설치됨. 4월엔 PG16이 사용되다 5/19 재부팅에 PG14로 뒤바뀜(당시 빈 DB에 PROD 동기화로 채워 아무도 인지 못함) → 이후 위키 개발 포함 모든 데이터는 PG14에 축적 → **6/10 17:35 재부팅에 다시 PG16(4월 복사본)으로 뒤바뀌며 "위키 실종"으로 표면화**
+- **조치** (사용자 결정: PROD와 버전 통일 + 데이터는 PROD 기준, dev 기존 데이터 폐기):
+  1. 현 PG16 DB 안전 백업 (`dev2_pg16_stale_backup_*.dump`)
+  2. PROD(PG **16.14**)에서 신규 풀덤프 생성(`pg_dump` 읽기 전용) 후 SCP — 정기백업(01:00)은 위키 PROD 반영 이전 시점이라 사용하지 않음
+  3. PG16(5432)의 `thync_ops_dev` DROP/CREATE → 풀덤프 복원 (`--no-owner --role=thync`)
+  4. 차량예약 마이그레이션 재적용 + `migrate resolve` → 마이그레이션 55건(PROD 54 + 차량 1) 정합
+  5. 차량예약 nav 메뉴 2건 재INSERT (위키 메뉴는 PROD 데이터에 포함되어 자동 복원)
+  6. PG14 `start.conf=manual` 전환 — 재부팅 포트 경쟁 원천 차단, 데이터는 콜드 백업으로 디스크 보존
+- **검증**: 복원 후 마이그레이션 55건·wiki 테이블 9종·병원 79,737건·사용자 36명·위키/차량 메뉴 확인. E2E 14/14 재통과
+- **부수 개선**: 테스트 스크립트 3종의 하드코딩 사용자 ID를 DB 동적 조회로 변경 (동기화로 ID 바뀌어도 동작)
+- **참고**: dev2의 위키 51페이지(Notion 임포트분)는 사용자 결정으로 미이관 (PG14 콜드 백업에는 남아 있음). dev2 로그인 계정은 PROD와 동일해짐
+
+---
+
+## 2026-06-10 | 차량예약시스템 Phase 1~3 — 차량 관리 + 예약 API + 주간 현황 보드
+
+- **목적**: 법인차량 예약 기능 신설. 설계(`vehicle_dev_schedule.md` Phase 0, 2026-06-10 확정: 시간 단위 30분 / 선착순 즉시 확정 / 반납 기록 없음 / 캘린더 연동 보류) 기반 Phase 1~3 한 batch.
+- **DB 마이그레이션** (`20260610113000_add_vehicle_reservation`, DEV 적용 + resolve 완료):
+  - `vehicles` (차량 마스터: name / plate_number UNIQUE / model / seat_count / color / memo / is_active / sort_order)
+  - `vehicle_reservations` (vehicle_id FK, user_id FK→users, start_at/end_at, purpose, destination, status RESERVED|CANCELED)
+  - `btree_gist` 확장 + **EXCLUDE 제약** `vehicle_reservations_no_overlap`: 같은 차량의 RESERVED 예약 간 `tsrange(start_at, end_at)` 겹침을 DB가 차단 (동시 요청 race 안전망)
+  - 인덱스 `(vehicle_id, start_at)`, `(user_id, start_at)`
+- **차량 API** (`/api/vehicles`, `/api/vehicles/[id]`): GET 목록(`?activeOnly`) / POST·PUT·DELETE는 `isAdminOrAbove`. 차량번호 중복 409. 예약 이력 있는 차량 DELETE → 비활성화 처리(기기 관리와 동일 패턴)
+- **예약 API** (`/api/vehicle-reservations`, `[id]`):
+  - GET: 기간(`from`/`to` 겹침)·차량·`mine=true` 필터, RESERVED만 반환, 차량·예약자 정보 포함
+  - POST: USER 이상. `$transaction` 안에서 겹침 검사 → 409 + "이미 ○○님이 …~… 예약" 메시지 + conflict 정보. EXCLUDE 제약 위반(race)도 409 처리
+  - PUT: 본인 or ADMIN+. 시간·차량 변경 시 충돌 재검사(자기 자신 제외). 취소된 예약 수정 400
+  - DELETE: 본인 or ADMIN+. soft 취소(status=CANCELED) → 취소된 시간대 재예약 가능
+  - 감사 로그: `resource='vehicle'` / `'vehicle_reservation'` CREATE/UPDATE/DELETE 전부 기록
+- **차량 관리 페이지** (`/settings/vehicles`): 설정 페이지 표준 패턴 (테이블 + 인라인 수정 + ↑↓ 순서 + 활성 토글 + 추가 행), 보드 색상은 ColorPicker 재사용
+- **차량예약 페이지** (`/vehicle-reservations`):
+  - 주간 보드: 행=차량(색 칩), 열=월~일, 예약 카드(시간/예약자/목적), 내 예약 파란 강조, 다일 예약 ←/→ 분할 표시
+  - 빈 셀 클릭 → 차량·날짜 채워진 예약 모달, 카드 클릭 → 상세(본인/ADMIN은 수정·취소)
+  - 주 이동 ◀▶/오늘, URL `?week=` 동기화(history.replaceState), 오늘·주말 컬럼 하이라이트
+  - 내 예약 탭: 다가오는 예약 목록(건수 뱃지) + 상세 진입
+  - 모달: 30분 단위 시각 select(종료 24:00 지원, 자정 종료 예약은 전날 24:00으로 표현), 종일(09:00~18:00) 버튼, 다일 예약 지원
+  - VIEWER는 조회만(예약 버튼·셀 클릭·취소 비노출)
+- **네비게이션**: `NavIcons`에 `CarIcon` 추가(`icon_key='car'`), `nav_menu_items`에 `vehicle-reservations`(차량예약, sort 58 — 유지보수와 AI 사이) + `settings/vehicles`(차량 관리, ADMIN+, sort 160) INSERT (DEV 적용 완료, idempotent)
+- **검증**: `npx tsc --noEmit` + ESLint 통과. 라우트 핸들러 직접 호출 통합 테스트 **30건 전부 통과**
+  - Phase 1 (12건): CRUD/권한 403/중복 409/activeOnly/이력 차량 비활성화/감사로그
+  - Phase 2 (18건): 생성/충돌 409/경계 접촉 허용/타차량 동시간/비활성 차량 400/기간·mine 필터/본인·타인 수정·취소 권한/취소 후 재예약/EXCLUDE 제약 우회 INSERT 차단(23P01)/감사로그
+  - 테스트 스크립트: `scripts/test-vehicle-api.mts`, `scripts/test-vehicle-reservation-api.mts` (재검증용 보존, 테스트 데이터 자동 정리)
+- **영향 파일**: `prisma/schema.prisma`, `prisma/migrations/20260610113000_add_vehicle_reservation/` (신규), `app/api/vehicles/route.ts` + `[id]/route.ts` (신규), `app/api/vehicle-reservations/route.ts` + `[id]/route.ts` (신규), `app/settings/vehicles/page.tsx` (신규), `app/vehicle-reservations/page.tsx` + `ReservationModal.tsx` (신규), `app/components/NavIcons.tsx`, `README.md`, `vehicle_dev_schedule.md`
+- **버그 수정 (빌드 후 사용자 리포트)**: 보드 빈 셀 클릭 시 예약 모달이 안 열리는 문제 — `/api/auth/me`가 user 객체를 직접 반환하는데 페이지가 `data.user`로 파싱해 `me`가 항상 null → 예약 권한 없음으로 오판. Navigation 등 기존 패턴(`data?.role` 직접 읽기)에 맞춰 수정
+- **E2E 검증** (`scripts/test-vehicle-e2e.mts`, 실제 HTTP 스택 localhost:3000 대상): 14/14 통과 — auth/me 형태, 미인증 307/인증 200, 차량 등록→예약→충돌 409→주간/내 예약 조회→수정→취소→보드 미노출→이력 차량 비활성화 전 플로우
+- **빌드·재시작**: dev2에서 힙 4GB 빌드 + `pm2 resurrect`(데몬 초기화 상태였음) 후 재시작. dev2의 thync-dev는 포트 **3000** (3001은 EC2 dev)
+- **미실행**: git push (사용자 명시 요청 대기), PROD 반영(Phase 5)
+
+---
+
 ## 2026-06-10 | 사내 위키(Wiki) — 페이지 이동(트리 간)·복제·드래그앤드롭
 
 - **목적**: Phase 3/7에서 이연됐던 페이지 단위 이동·복제 UX 완성. ① 트리 간 이동 모달, ② 페이지 복제, ③ DnD 트리 이동 3종 한 batch.

@@ -90,6 +90,8 @@ app/
 │   │   │       ├── move/route.ts     # PATCH 이동 (direction/parentId/position/sortOrder)
 │   │   │       └── duplicate/route.ts # POST 복제 (단일/하위 포함)
 │   │   └── tree/route.ts             # GET 전체 트리
+│   ├── vehicles/                     # 차량 마스터 CRUD (ADMIN 이상 쓰기)
+│   ├── vehicle-reservations/         # 차량예약 CRUD (충돌 검사 + soft 취소)
 │   ├── install-plans/                # 설치계획(가안) CRUD
 │   ├── hira-hospitals/
 │   │   └── sync/                     # 심평원 연동 (POST: 백그라운드 시작, GET: 히스토리 목록)
@@ -104,6 +106,7 @@ app/
 ├── site-visits/                      # 답사 목록·상세·등록
 ├── maintenances/                     # 유지보수 목록·상세·등록
 ├── tasks/                            # 업무(Task) 현황 (통합 조회)
+├── vehicle-reservations/             # 차량예약 주간 현황 보드 + 예약 모달 + 내 예약
 ├── ai-assistant/                     # AI 어시스턴트 채팅
 ├── wiki/                             # 사내 위키 (Phase 2-3)
 │   ├── layout.tsx                    # 사이드바 + 콘텐츠 flex 레이아웃 (모든 /wiki/* 적용)
@@ -131,6 +134,7 @@ app/
 │   ├── document-type/                # 문서유형 관리
 │   ├── maintenance-type/             # 장애유형 관리
 │   ├── maintenance-status/           # 유지보수 상태 관리
+│   ├── vehicles/                     # 차량 관리 (ADMIN 이상)
 │   ├── nav-menus/                    # 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
 │   └── audit-logs/                   # 감사 로그 (SUPER_ADMIN 전용)
 ├── login/                            # 로그인 페이지
@@ -328,6 +332,21 @@ prisma/
 - 결론(`conclusion`), 대화이력(`chatHistory`, JSONB), AI 정제 결과(`aiSummary`)
 - 상태(`status`: PENDING 등), 상담자(`consultedById` → User)
 
+### Vehicle (법인차량)
+- 차량예약에 사용되는 차량 마스터
+- `name` (표시 이름), `plateNumber` (차량번호, UNIQUE), `model`, `seatCount`, `color` (보드 표시 색), `memo`
+- `isActive`, `sortOrder` — 예약 이력이 있는 차량은 삭제 대신 비활성화 (이력 보존)
+
+### VehicleReservation (차량예약)
+- 선착순 즉시 확정 예약. 시간 단위(30분 간격), 다일(多日) 예약 가능
+- `vehicleId` → Vehicle, `userId` → User (예약자)
+- `startAt` / `endAt`, `purpose` (목적), `destination` (행선지)
+- `status`: `RESERVED` / `CANCELED` — 취소는 soft delete (이력 보존)
+- 더블부킹 방지 이중 장치:
+  - 앱 레벨: `$transaction` 안에서 겹침 검사 → 409 + 겹치는 예약자/시간 안내
+  - DB 레벨: `btree_gist` 확장 + EXCLUDE 제약 (`vehicle_id` 동일 & `tsrange(start_at, end_at)` 겹침 & RESERVED 상태) — 동시 요청 race까지 차단
+- 인덱스: `(vehicle_id, start_at)`, `(user_id, start_at)`
+
 ### Wiki 모듈 — 별도 PostgreSQL 스키마 `wiki`
 - 사내 위키(Notion-like) 기능. 본문은 BlockNote JSON 블록 배열로 저장
 - 모든 위키 테이블은 `wiki.*` 스키마에 격리. FK 방향은 `wiki.* → public.*` 만 허용
@@ -480,6 +499,21 @@ prisma/
 - 우선순위 색상 뱃지: 긴급(red) / 높음(amber) / 보통(blue) / 낮음(gray)
 - 등록 시 상태 기본값: '접수'
 - 병원 상세 페이지에 유지보수 카드 연동
+
+### 차량예약
+- 법인차량 선착순 즉시 확정 예약 (승인 절차 없음)
+- **주간 현황 보드** (`/vehicle-reservations`): 행=차량(색 칩+이름+차량번호), 열=월~일
+  - 예약 카드: 시간·예약자·목적, 내 예약은 파란색 강조, 여러 날에 걸친 예약은 ←/→ 표시로 분할 렌더
+  - 빈 영역 클릭 → 해당 차량·날짜로 예약 모달 자동 채움
+  - 주 이동 ◀▶ + 오늘 버튼, URL `?week=` 동기화, 오늘 컬럼·주말 컬럼 하이라이트
+- **예약 모달**: 차량 / 시작·종료(날짜+30분 단위 시각, 다일 예약 지원) / 종일(09:00~18:00) 버튼 / 목적 / 행선지
+  - 충돌 시 "이미 ○○님이 …~… 예약했습니다" 인라인 안내 (409)
+- **내 예약 탭**: 다가오는 본인 예약 목록 + 상세/수정/취소
+- 권한: 조회=로그인 전체(VIEWER 포함), 예약·본인 수정·취소=USER 이상, 타인 예약 취소=ADMIN 이상
+- 더블부킹 방지: 앱 레벨 트랜잭션 검사 + DB EXCLUDE 제약 이중 장치
+- **차량 관리** (`/settings/vehicles`, ADMIN 이상): 차량 등록·수정·삭제·순서·활성 토글, 보드 표시 색상(ColorPicker)
+  - 예약 이력 있는 차량 삭제 → 자동 비활성화 (이력 보존)
+- 감사 로그: `resource='vehicle'` / `'vehicle_reservation'` 으로 모든 mutation 기록
 
 ### 소속 관리 (SUPER_ADMIN 전용)
 - 소속(Organization) 추가·수정·삭제
@@ -791,6 +825,19 @@ npm run dev
 | GET  | `/api/install-plans/[id]` | 설치계획 상세 |
 | PUT  | `/api/install-plans/[id]` | 설치계획 수정 |
 | DELETE | `/api/install-plans/[id]` | 설치계획 삭제 (ADMIN 이상) |
+
+### 차량예약
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET  | `/api/vehicles` | 차량 목록 (`?activeOnly=true`, 예약 건수 포함) |
+| POST | `/api/vehicles` | 차량 등록 (ADMIN 이상) |
+| PUT  | `/api/vehicles/[id]` | 차량 수정 (ADMIN 이상) |
+| DELETE | `/api/vehicles/[id]` | 차량 삭제 (ADMIN 이상, 예약 이력 있으면 비활성화 처리) |
+| GET  | `/api/vehicle-reservations` | 예약 목록 (`?from=&to=&vehicleId=&mine=true`, RESERVED만) |
+| POST | `/api/vehicle-reservations` | 예약 생성 (USER 이상, 충돌 시 409 + 겹치는 예약 정보) |
+| GET  | `/api/vehicle-reservations/[id]` | 예약 상세 |
+| PUT  | `/api/vehicle-reservations/[id]` | 예약 수정 (본인 또는 ADMIN 이상, 충돌 재검사) |
+| DELETE | `/api/vehicle-reservations/[id]` | 예약 취소 (본인 또는 ADMIN 이상, status=CANCELED) |
 
 ### AI 어시스턴트
 | Method | Endpoint | 설명 |

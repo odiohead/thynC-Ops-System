@@ -207,6 +207,7 @@ model User {
   wikiViewLogs            WikiViewLog[]                @relation("WikiViewLogUser")
   wikiVersionsSaved       WikiVersion[]                @relation("WikiVersionSaver")
   wikiCommentsAuthored    WikiComment[]                @relation("WikiCommentAuthor")
+  vehicleReservations     VehicleReservation[]         @relation("VehicleReservationUser")
 
   @@map("users")
   @@schema("public")
@@ -863,4 +864,46 @@ model WikiComment {
   @@index([authorId])
   @@map("wiki_comments")
   @@schema("wiki")
+}
+
+// ===== 차량예약 =====
+
+model Vehicle {
+  id          Int      @id @default(autoincrement())
+  name        String
+  plateNumber String   @unique @map("plate_number")
+  model       String?
+  seatCount   Int?     @map("seat_count")
+  color       String?
+  memo        String?
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  reservations VehicleReservation[]
+
+  @@map("vehicles")
+  @@schema("public")
+}
+
+model VehicleReservation {
+  id          Int      @id @default(autoincrement())
+  vehicleId   Int      @map("vehicle_id")
+  userId      String   @map("user_id")
+  startAt     DateTime @map("start_at")
+  endAt       DateTime @map("end_at")
+  purpose     String?
+  destination String?
+  status      String   @default("RESERVED")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  user    User    @relation("VehicleReservationUser", fields: [userId], references: [id])
+
+  @@index([vehicleId, startAt])
+  @@index([userId, startAt])
+  @@map("vehicle_reservations")
+  @@schema("public")
 }
