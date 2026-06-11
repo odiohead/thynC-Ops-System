@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-06-12 | 위키 — 하위페이지 링크 블록 유실 버그 수정
+
+- **버그**: 편집 중 슬래시 메뉴 "하위 페이지 추가"로 삽입된 `wikiPageLink` 블록이 에디터 메모리에만 존재 → 저장 전 링크 클릭(일반 `<a>` 전체 네비게이션)으로 이탈하면 부모 본문에서 링크가 유실됨
+- **수정 1 (핵심)**: 하위페이지 생성·블록 삽입 직후 부모 본문을 `PUT /api/wiki/pages/{parentId}`로 즉시 자동 저장 → 이탈해도 링크 보존 (`WikiEditor.tsx`)
+- **수정 2 (사이드바)**: 하위페이지 생성 직후 `router.refresh()` 호출 → 사이드바 트리에 새 페이지 즉시 반영 (`WikiEditor.tsx`)
+- **수정 3 (잠재버그)**: `WikiPageView`의 `content` state가 `[]`로 초기화되어 편집 진입 후 무변경 저장 시 본문이 빈 배열로 덮이는 위험 → `initialContent`로 초기화
+- 영향 파일: `app/wiki/components/WikiEditor.tsx`, `app/wiki/[id]/WikiPageView.tsx`
+
+---
+
 ## 2026-06-10 | 차량예약시스템 Phase 5 — PROD 반영 완료
 
 - **커밋 `7be07a3`** (16파일, +2,463줄) push → PROD pull (fast-forward)

@@ -58,7 +58,8 @@ export default function WikiPageView({
   const router = useRouter()
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(initialTitle)
-  const [content, setContent] = useState<unknown[]>([])
+  // 빈 배열로 시작하면 편집 진입 후 무변경 저장 시 본문이 []로 덮여 유실됨 → DB 본문으로 초기화
+  const [content, setContent] = useState<unknown[]>(initialContent as unknown[])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 

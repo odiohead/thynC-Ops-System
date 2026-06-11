@@ -1,5 +1,6 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
 import {
   useCreateBlockNote,
   createReactBlockSpec,
@@ -103,6 +104,7 @@ export default function WikiEditor({
   onChange,
   pageId,
 }: Props) {
+  const router = useRouter()
   const editor = useCreateBlockNote({
     schema: wikiSchema,
     initialContent:
@@ -182,6 +184,18 @@ export default function WikiEditor({
                     cursor.block,
                     'after',
                   )
+                  // 링크 블록은 에디터 메모리에만 존재 → 저장 전 이탈 시 유실되므로 부모 본문 즉시 저장
+                  const saveRes = await fetch(`/api/wiki/pages/${pageId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contentJson: editor.document }),
+                  })
+                  if (!saveRes.ok) {
+                    const err = await saveRes.json().catch(() => ({}))
+                    alert(err.error || `부모 페이지 저장 실패 (${saveRes.status})`)
+                  }
+                  // 사이드바 트리에 새 하위 페이지 즉시 반영
+                  router.refresh()
                 } catch (e) {
                   alert((e as Error).message)
                 }
