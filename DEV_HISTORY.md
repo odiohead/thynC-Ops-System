@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-06-12 | 위키 — 파일 첨부 블록 카드 스타일 렌더링
+
+- 기본 `file` 블록의 조악한 렌더를 커스텀 카드로 교체 (`createReactBlockSpec`, type·propSchema 동일 → 기존 저장 데이터 마이그레이션 없이 호환)
+- 확장자별 아이콘 배지: Word(W·파랑), Excel/CSV(X·초록), PPT(P·주황), PDF(빨강), HWP(하늘), ZIP(노랑), TXT/MD(회색), 기타(📄)
+- 파일명 볼드·파란색·hover 밑줄, 확장자 표기, hover 시 다운로드 아이콘, 새 탭 열기
+- 빈 블록(업로드 전) 상태: 편집 중엔 점선 "파일 업로드" 버튼(`editor.uploadFile` 직접 호출), 읽기 모드엔 안내 문구
+- 영향 파일: `app/wiki/components/WikiEditor.tsx`
+
+---
+
 ## 2026-06-12 | 위키 하위페이지 링크 유실 수정 — PROD 반영 완료
 
 - **커밋 `8f233dc`** (3파일, +26/-1) push → PROD pull (fast-forward)

@@ -52,6 +52,123 @@ const wikiPageLinkSpec = createReactBlockSpec(
 )()
 
 // ──────────────────────────────────────────────────────────
+// 커스텀 블록: 파일 첨부 카드
+// 기본 file 블록과 type·propSchema가 동일 → 기존 저장 데이터 그대로 호환
+// ──────────────────────────────────────────────────────────
+const FILE_KIND: Record<string, { label: string; bg: string }> = {
+  doc: { label: 'W', bg: 'bg-blue-600' },
+  docx: { label: 'W', bg: 'bg-blue-600' },
+  xls: { label: 'X', bg: 'bg-green-700' },
+  xlsx: { label: 'X', bg: 'bg-green-700' },
+  csv: { label: 'X', bg: 'bg-green-700' },
+  ppt: { label: 'P', bg: 'bg-orange-600' },
+  pptx: { label: 'P', bg: 'bg-orange-600' },
+  pdf: { label: 'PDF', bg: 'bg-red-600' },
+  hwp: { label: 'H', bg: 'bg-sky-600' },
+  hwpx: { label: 'H', bg: 'bg-sky-600' },
+  zip: { label: 'ZIP', bg: 'bg-amber-500' },
+  rar: { label: 'ZIP', bg: 'bg-amber-500' },
+  '7z': { label: 'ZIP', bg: 'bg-amber-500' },
+  txt: { label: 'TXT', bg: 'bg-gray-500' },
+  md: { label: 'MD', bg: 'bg-gray-500' },
+}
+
+function fileExt(name: string): string {
+  const idx = name.lastIndexOf('.')
+  return idx >= 0 ? name.slice(idx + 1).toLowerCase() : ''
+}
+
+const wikiFileSpec = createReactBlockSpec(
+  {
+    type: 'file',
+    propSchema: {
+      backgroundColor: { default: 'default' },
+      name: { default: '' },
+      url: { default: '' },
+      caption: { default: '' },
+    },
+    content: 'none',
+  },
+  {
+    render: (props) => {
+      const { name, url, caption } = props.block.props
+      const editor = props.editor
+
+      // 업로드 전(빈 블록): 편집 중이면 파일 선택 버튼, 읽기 모드면 안내만
+      if (!url) {
+        if (!editor.isEditable) {
+          return (
+            <div className="my-1 px-3 py-2 text-sm text-gray-400 border border-dashed border-gray-300 rounded-lg">
+              📎 첨부된 파일 없음
+            </div>
+          )
+        }
+        return (
+          <label
+            contentEditable={false}
+            className="flex items-center gap-2 my-1 px-3 py-2.5 border border-dashed border-gray-300 rounded-lg text-sm text-gray-500 cursor-pointer hover:bg-gray-50 hover:border-gray-400"
+          >
+            <span>📎</span>
+            <span>파일 업로드</span>
+            <input
+              type="file"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0]
+                if (!file || !editor.uploadFile) return
+                try {
+                  const uploaded = await editor.uploadFile(file, props.block.id)
+                  const newUrl =
+                    typeof uploaded === 'string'
+                      ? uploaded
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      : String((uploaded as any)?.props?.url ?? '')
+                  editor.updateBlock(props.block, {
+                    props: { url: newUrl, name: file.name },
+                  })
+                } catch (err) {
+                  alert((err as Error).message)
+                }
+              }}
+            />
+          </label>
+        )
+      }
+
+      const ext = fileExt(name || url)
+      const kind = FILE_KIND[ext] ?? { label: '📄', bg: 'bg-gray-400' }
+      return (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          contentEditable={false}
+          className="group/file flex items-center gap-3 my-1 px-3 py-2.5 border border-gray-200 rounded-lg bg-white shadow-sm hover:bg-gray-50 hover:border-gray-300 no-underline"
+        >
+          <span
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded ${kind.bg} text-white text-[11px] font-bold`}
+          >
+            {kind.label}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold text-blue-700 group-hover/file:underline">
+              {name || url}
+            </span>
+            <span className="block text-[11px] text-gray-400">
+              <span className="uppercase">{ext || 'FILE'}</span>
+              {caption ? ` · ${caption}` : ''}
+            </span>
+          </span>
+          <span className="shrink-0 text-gray-300 group-hover/file:text-gray-600" title="다운로드">
+            ⬇
+          </span>
+        </a>
+      )
+    },
+  },
+)()
+
+// ──────────────────────────────────────────────────────────
 // 커스텀 인라인: @ mention (병원/프로젝트)
 // ──────────────────────────────────────────────────────────
 const mentionSpec = createReactInlineContentSpec(
@@ -87,7 +204,7 @@ const mentionSpec = createReactInlineContentSpec(
 // 스키마: 기본 + 커스텀
 // ──────────────────────────────────────────────────────────
 const wikiSchema = BlockNoteSchema.create({
-  blockSpecs: { ...defaultBlockSpecs, wikiPageLink: wikiPageLinkSpec },
+  blockSpecs: { ...defaultBlockSpecs, file: wikiFileSpec, wikiPageLink: wikiPageLinkSpec },
   inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionSpec },
 })
 
