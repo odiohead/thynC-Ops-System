@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-06-12 | 위키 파일 첨부 카드 렌더링 — PROD 반영 완료
+
+- **커밋 `bbdbd43`** (2파일, +128/-1) push → PROD pull (fast-forward)
+- 신규 패키지·DB 변경 없음
+- 힙 4GB 빌드 + `pm2 restart thync-prod` → online, Ready in 1.2s
+- smoke test: `/login` 200, `/wiki` 미인증 307 정상, 에러 로그 없음
+
+---
+
 ## 2026-06-12 | 위키 — 파일 첨부 블록 카드 스타일 렌더링
 
 - 기본 `file` 블록의 조악한 렌더를 커스텀 카드로 교체 (`createReactBlockSpec`, type·propSchema 동일 → 기존 저장 데이터 마이그레이션 없이 호환)
