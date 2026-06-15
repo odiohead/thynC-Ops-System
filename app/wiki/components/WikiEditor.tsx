@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   useCreateBlockNote,
@@ -201,6 +202,103 @@ const mentionSpec = createReactInlineContentSpec(
 )
 
 // ──────────────────────────────────────────────────────────
+// 기존 페이지 링크 선택 모달
+// /api/wiki/search 로 기존 위키 페이지를 검색해 wikiPageLink 블록으로 삽입
+// ──────────────────────────────────────────────────────────
+type WikiSearchResult = { id: string; title: string; snippet: string | null }
+
+function WikiPageLinkPicker({
+  onSelect,
+  onClose,
+}: {
+  onSelect: (page: { id: string; title: string }) => void
+  onClose: () => void
+}) {
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState<WikiSearchResult[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    const term = q.trim()
+    if (!term) {
+      setResults([])
+      setLoading(false)
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/wiki/search?q=${encodeURIComponent(term)}`)
+        if (!res.ok) {
+          if (!cancelled) setResults([])
+          return
+        }
+        const data = await res.json()
+        if (!cancelled) setResults((data.results as WikiSearchResult[]) ?? [])
+      } catch {
+        if (!cancelled) setResults([])
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }, 250)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [q])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-24"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg rounded-lg bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b p-3">
+          <input
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') onClose()
+            }}
+            placeholder="연결할 페이지 제목·내용 검색…"
+            className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+          />
+        </div>
+        <div className="max-h-80 overflow-y-auto p-2">
+          {loading && <div className="p-3 text-sm text-gray-400">검색 중…</div>}
+          {!loading && q.trim() && results.length === 0 && (
+            <div className="p-3 text-sm text-gray-400">검색 결과 없음</div>
+          )}
+          {!loading && !q.trim() && (
+            <div className="p-3 text-sm text-gray-400">제목 또는 본문 내용으로 검색하세요.</div>
+          )}
+          {results.map((r) => (
+            <button
+              key={r.id}
+              onClick={() => onSelect({ id: r.id, title: r.title })}
+              className="block w-full rounded px-3 py-2 text-left hover:bg-blue-50"
+            >
+              <span className="text-sm">
+                <span className="mr-2">📄</span>
+                <span className="font-medium text-gray-800">{r.title || '(빈 제목)'}</span>
+              </span>
+              {r.snippet && (
+                <span className="mt-0.5 block truncate text-xs text-gray-400">{r.snippet}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ──────────────────────────────────────────────────────────
 // 스키마: 기본 + 커스텀
 // ──────────────────────────────────────────────────────────
 const wikiSchema = BlockNoteSchema.create({
@@ -222,6 +320,10 @@ export default function WikiEditor({
   pageId,
 }: Props) {
   const router = useRouter()
+  const [linkPickerOpen, setLinkPickerOpen] = useState(false)
+  // 링크 삽입 위치 — 모달이 열려 있는 동안 커서가 이동·소실될 수 있으므로 슬래시 클릭 시점에 고정
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pendingBlockRef = useRef<any>(null)
   const editor = useCreateBlockNote({
     schema: wikiSchema,
     initialContent:
@@ -247,7 +349,43 @@ export default function WikiEditor({
       : undefined,
   })
 
+  // 검색 모달에서 기존 페이지 선택 → wikiPageLink 블록 삽입 (신규 생성 없음)
+  const handleLinkSelect = async (page: { id: string; title: string }) => {
+    setLinkPickerOpen(false)
+    const cursorBlock = pendingBlockRef.current ?? editor.getTextCursorPosition().block
+    pendingBlockRef.current = null
+    editor.insertBlocks(
+      [
+        {
+          type: 'wikiPageLink',
+          props: { pageId: page.id, title: page.title },
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ] as any,
+      cursorBlock,
+      'after',
+    )
+    // 하위 페이지 추가와 동일하게, 삽입 블록이 메모리에만 있어 이탈 시 유실되므로 본문 즉시 저장
+    if (pageId) {
+      try {
+        const saveRes = await fetch(`/api/wiki/pages/${pageId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contentJson: editor.document }),
+        })
+        if (!saveRes.ok) {
+          const err = await saveRes.json().catch(() => ({}))
+          alert(err.error || `본문 저장 실패 (${saveRes.status})`)
+        }
+        router.refresh()
+      } catch (e) {
+        alert((e as Error).message)
+      }
+    }
+  }
+
   return (
+    <>
     <BlockNoteView
       editor={editor}
       editable={editable}
@@ -319,6 +457,17 @@ export default function WikiEditor({
               },
             })
           }
+          items.push({
+            title: '기존 페이지 링크',
+            subtext: '이미 있는 위키 페이지를 검색해 링크로 삽입',
+            aliases: ['link', 'pagelink', 'ref', '링크', '페이지링크', '참조', '연결'],
+            group: '위키',
+            icon: <span>🔗</span>,
+            onItemClick: () => {
+              pendingBlockRef.current = editor.getTextCursorPosition().block
+              setLinkPickerOpen(true)
+            },
+          })
           return filterSuggestionItems(items, query)
         }}
       />
@@ -355,5 +504,15 @@ export default function WikiEditor({
         }}
       />
     </BlockNoteView>
+      {linkPickerOpen && (
+        <WikiPageLinkPicker
+          onSelect={handleLinkSelect}
+          onClose={() => {
+            pendingBlockRef.current = null
+            setLinkPickerOpen(false)
+          }}
+        />
+      )}
+    </>
   )
 }
