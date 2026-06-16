@@ -3,9 +3,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import type { PartialBlock } from '@blocknote/core'
-import WikiEditor from '../components/WikiEditor'
+import { PageSkeleton } from '../components/ui/Skeleton'
 import MovePageModal from '../components/MovePageModal'
+
+// BlockNote는 렌더 중 window를 참조 → SSR 비안전. 클라이언트 전용으로 동적 로드
+const WikiEditor = dynamic(() => import('../components/WikiEditor'), {
+  ssr: false,
+  loading: () => <PageSkeleton />,
+})
 import ReferencePickerModal from './ReferencePickerModal'
 import TagPicker, { type Tag } from './TagPicker'
 import FavoriteButton from './FavoriteButton'

@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import type { PartialBlock } from '@blocknote/core'
-import WikiEditor from '../components/WikiEditor'
 import { useToast } from '../components/ui/Toast'
+
+// BlockNote는 렌더 중 window를 참조 → SSR 비안전. 클라이언트 전용으로 동적 로드
+const WikiEditor = dynamic(() => import('../components/WikiEditor'), { ssr: false })
 
 type Template = { id: string; title: string; icon: string | null }
 
