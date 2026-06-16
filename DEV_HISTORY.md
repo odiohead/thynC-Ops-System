@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-06-16 | 차량예약 보드 — 예약 있는 셀에도 항상 신규 예약 클릭 여백 추가 (PROD 반영)
+
+- 주간 현황 보드에서 예약 칩이 채워진 셀은 빈 공간이 거의 없어 "그 차량·그 날짜 추가 예약" 진입이 발견하기 어려웠던 문제 해결
+- 각 요일 셀 칩 목록 하단에 hover 시 `+`가 떠오르는 신규 예약 여백 추가 (칩 있으면 min-h 20px, 빈 셀이면 64px). 별도 onClick 없이 기존 `<td>` 클릭 핸들러(`openCreate`)로 버블링 처리 → 중복 호출 없음. `canReserve`(USER 이상)일 때만 노출
+- 프론트 단독, DB·패키지 변경 없음. `npx tsc --noEmit` 통과
+- 영향 파일: `app/vehicle-reservations/page.tsx`
+
+---
+
 ## 2026-06-16 | 위키 고도화 PROD 반영 + 에디터 SSR 크래시 핫픽스
 
 - **PROD 반영**: Phase 9~13 + 멀티컬럼 + Pretendard를 PROD(`thync-prod`)에 배포. 절차: git pull → `npm install`(신규 의존성 `@blocknote/xl-multi-column`) → 마이그레이션 M1~M6 `thync_ops` 적용(사용자 승인) → `prisma generate` → 빌드(heap 4GB) → `pm2 restart thync-prod`. 폰트 200·스키마(4컬럼+2테이블) 실재·외부 도메인 307 검증

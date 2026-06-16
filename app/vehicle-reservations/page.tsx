@@ -307,6 +307,17 @@ export default function VehicleReservationsPage() {
                                   </button>
                                 )
                               })}
+                              {/* 예약이 차 있어도 항상 클릭 가능한 신규 예약 여백 (hover 시 + 표시) */}
+                              {canReserve && (
+                                <div
+                                  className={`flex items-center justify-center rounded text-xs font-medium text-transparent transition-colors hover:bg-blue-100/80 hover:text-blue-500 ${
+                                    chips.length > 0 ? 'min-h-[20px]' : 'min-h-[64px]'
+                                  }`}
+                                  title="새 예약"
+                                >
+                                  +
+                                </div>
+                              )}
                             </div>
                           </td>
                         )
