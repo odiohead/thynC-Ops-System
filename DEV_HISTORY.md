@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-06-16 | 위키 고도화 PROD 반영 + 에디터 SSR 크래시 핫픽스
+
+- **PROD 반영**: Phase 9~13 + 멀티컬럼 + Pretendard를 PROD(`thync-prod`)에 배포. 절차: git pull → `npm install`(신규 의존성 `@blocknote/xl-multi-column`) → 마이그레이션 M1~M6 `thync_ops` 적용(사용자 승인) → `prisma generate` → 빌드(heap 4GB) → `pm2 restart thync-prod`. 폰트 200·스키마(4컬럼+2테이블) 실재·외부 도메인 307 검증
+- **핫픽스 — 에디터 SSR 크래시**: BlockNote(멀티컬럼 포함)가 렌더 중 `window` 참조 → `/wiki/[id]`·`/wiki/new` 상세 SSR에서 500(`ReferenceError: window is not defined`). `WikiEditor`를 `next/dynamic`의 `ssr:false`로 클라이언트 전용 로드하여 해결. dev2·PROD 모두 인증 상태 상세페이지 200 확인
+  - 교훈: 위키 검증 시 `/wiki`(홈)는 미인증 307만 확인했을 뿐, **인증된 상세페이지 SSR을 안 찔러봐서** 누락. 이후 JWT 발급해 200 검증하는 절차 추가
+- 영향 파일: `app/wiki/[id]/WikiPageView.tsx`, `app/wiki/new/page.tsx`
+
+---
+
 ## 2026-06-16 | 위키 — 멀티컬럼 블록 추가 + 개발 범위 확정
 
 - **멀티컬럼 블록 추가**: `@blocknote/xl-multi-column@^0.51.4` 도입. 블록을 좌우로 나란히 배치(2단/3단 칼럼). `withMultiColumn`으로 에디터 스키마 확장, `multiColumnDropCursor`(블록을 다른 블록 옆으로 드래그 시 칼럼 생성), 슬래시 메뉴에 `getMultiColumnSlashMenuItems` 추가, 다국어 사전 `multi_column: ko` 적용
