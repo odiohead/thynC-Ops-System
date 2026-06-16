@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-06-16 | 위키 — 페이지 제목 수정 시 상위 페이지 링크 라벨 미갱신 버그 수정
+
+- **버그**: `wikiPageLink` 블록은 대상 페이지 제목을 블록 prop(`title`) 문자열로 박아두고 렌더 시 그대로 표시. 페이지 제목을 수정해도, 그 페이지를 링크한 다른(상위) 페이지 본문의 링크 명칭이 옛 제목 그대로 남았음
+- **수정**: 제목 변경 시(`title !== existing.title`) 백링크 인덱스(`wiki_page_links.targetPageId`)로 이 페이지를 링크한 소스 페이지들을 찾아, 본문 내 해당 `wikiPageLink` 블록의 `title` prop을 새 제목으로 동기화. 검색 일관성 위해 소스 페이지 `plainText`도 재추출. 모두 제목 변경 트랜잭션 안에서 처리
+- `lib/wiki/blockText.ts`에 `updatePageLinkTitles(blocks, targetPageId, newTitle)` 헬퍼 추가 (매칭 블록만 교체, 변경 여부 반환 → 불필요한 쓰기 방지)
+- 렌더링은 블록 prop을 그대로 쓰므로 클라이언트 변경 불필요. `npx tsc --noEmit` 통과
+- 영향 파일: `lib/wiki/blockText.ts`, `app/api/wiki/pages/[id]/route.ts`
+
+---
+
 ## 2026-06-16 | 차량예약 보드 — 예약 있는 셀에도 항상 신규 예약 클릭 여백 추가 (PROD 반영)
 
 - 주간 현황 보드에서 예약 칩이 채워진 셀은 빈 공간이 거의 없어 "그 차량·그 날짜 추가 예약" 진입이 발견하기 어려웠던 문제 해결

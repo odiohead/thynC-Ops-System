@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { deleteFromS3 } from '@/lib/s3'
-import { extractPlainTextFromBlocks, extractPageLinks } from '@/lib/wiki/blockText'
+import { extractPlainTextFromBlocks, extractPageLinks, updatePageLinkTitles } from '@/lib/wiki/blockText'
 
 type Ctx = { params: { id: string } }
 
@@ -137,7 +137,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
         }
       }
     }
-    return tx.wikiPage.update({
+    const result = await tx.wikiPage.update({
       where: { id: params.id },
       data: {
         ...(title !== undefined && { title }),
@@ -164,6 +164,38 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
         slug: true,
       },
     })
+
+    // 제목이 바뀌면, 이 페이지를 링크한 다른 페이지 본문의 wikiPageLink 라벨도 동기화.
+    // (라벨은 블록 prop.title 문자열에 박혀 있어 자동 갱신되지 않음 → 백링크로 소스 페이지를 찾아 갱신)
+    if (title !== undefined && title !== existing.title) {
+      const backlinks = await tx.wikiPageLink.findMany({
+        where: { targetPageId: params.id },
+        select: { sourcePageId: true },
+      })
+      const sourceIds = backlinks
+        .map((b) => b.sourcePageId)
+        .filter((sid) => sid !== params.id)
+      if (sourceIds.length > 0) {
+        const sources = await tx.wikiPage.findMany({
+          where: { id: { in: sourceIds } },
+          select: { id: true, contentJson: true },
+        })
+        for (const src of sources) {
+          const { blocks, changed } = updatePageLinkTitles(src.contentJson, params.id, title)
+          if (changed) {
+            await tx.wikiPage.update({
+              where: { id: src.id },
+              data: {
+                contentJson: blocks as Prisma.InputJsonValue,
+                plainText: extractPlainTextFromBlocks(blocks),
+              },
+            })
+          }
+        }
+      }
+    }
+
+    return result
   })
 
   await logAudit({

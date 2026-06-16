@@ -56,3 +56,39 @@ export function extractPageLinks(blocks: unknown): string[] {
   }
   return Array.from(ids)
 }
+
+/**
+ * 본문 내 특정 페이지를 가리키는 wikiPageLink 블록의 title prop을 새 제목으로 갱신.
+ * 대상 페이지 제목 변경 시, 그 페이지를 링크한 다른 페이지 본문의 링크 라벨을 동기화하는 용도.
+ * 매칭 블록만 새 객체로 교체(나머지는 참조 유지)하고, 실제 변경 여부를 함께 반환.
+ */
+export function updatePageLinkTitles(
+  blocks: unknown,
+  targetPageId: string,
+  newTitle: string,
+): { blocks: unknown; changed: boolean } {
+  if (!Array.isArray(blocks)) return { blocks, changed: false }
+  let changed = false
+  function walk(items: unknown[]): unknown[] {
+    return items.map((raw) => {
+      if (!raw || typeof raw !== 'object') return raw
+      const b = raw as {
+        type?: string
+        props?: { pageId?: unknown; title?: unknown }
+        children?: unknown
+      }
+      let next: Record<string, unknown> = b as Record<string, unknown>
+      if (b.type === 'wikiPageLink' && b.props?.pageId === targetPageId && b.props?.title !== newTitle) {
+        next = { ...b, props: { ...b.props, title: newTitle } }
+        changed = true
+      }
+      const children = (next as { children?: unknown }).children
+      if (Array.isArray(children)) {
+        next = { ...next, children: walk(children as unknown[]) }
+      }
+      return next
+    })
+  }
+  const result = walk(blocks as unknown[])
+  return { blocks: result, changed }
+}
