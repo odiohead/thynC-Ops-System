@@ -4,6 +4,63 @@
 
 ---
 
+## 2026-06-16 | 위키 — 멀티컬럼 블록 추가 + 개발 범위 확정
+
+- **멀티컬럼 블록 추가**: `@blocknote/xl-multi-column@^0.51.4` 도입. 블록을 좌우로 나란히 배치(2단/3단 칼럼). `withMultiColumn`으로 에디터 스키마 확장, `multiColumnDropCursor`(블록을 다른 블록 옆으로 드래그 시 칼럼 생성), 슬래시 메뉴에 `getMultiColumnSlashMenuItems` 추가, 다국어 사전 `multi_column: ko` 적용
+- **개발 목록에서 영구 제외(보류 아님)**: 인라인(텍스트선택) 댓글, 토글 리스트, 사용자 @멘션 알림 — 향후에도 진행하지 않음. 기존 페이지 댓글·병원/프로젝트 멘션은 그대로 유지
+- 영향 파일: `app/wiki/components/WikiEditor.tsx`, `package.json`. `npx tsc --noEmit` 통과
+
+---
+
+## 2026-06-16 | 위키 고도화 Phase 10~13 — 편집경험·블록·협업·운영 기능
+
+> 설계: `wiki_enhancement_design.md`. 제외(보류): C1 실시간협업, C2 DB뷰, 멀티컬럼, 인라인(텍스트선택) 댓글. DB 마이그레이션은 dev2 로컬에만 적용(PROD 미반영).
+
+**Phase 10 — 편집경험(A1) + 아이콘/커버(A2)**
+- **자동 저장**: 편집/저장 모드 토글 제거 → 진입 즉시 편집, 본문/제목 변경 시 debounce 1.5초 자동 PUT. 헤더에 저장 상태 인디케이터(저장 중/저장됨/실패/충돌). VIEWER는 읽기 전용
+- **충돌 감지**: 클라이언트가 진입 시점 `baseUpdatedAt`을 PUT에 동봉 → 서버가 현재 updatedAt과 비교, 더 최신이면 409 + "새로고침" 배너 (실시간 협업 대신 lost-update 방지)
+- **버전 스냅샷 throttle**: 자동저장으로 버전이 폭증하지 않도록, 마지막 스냅샷이 2분 이상 지난 경우에만 wiki_versions 기록
+- **에디터 인라인 저장 정리**: 하위페이지/링크 삽입의 개별 PUT을 부모 `onSaveNow` 콜백으로 위임
+- **페이지 아이콘(이모지) + 커버 이미지**: `wiki.wiki_pages`에 `icon`/`cover_url`/`cover_offset_y` 추가(M1). 경량 EmojiPicker(외부 패키지 없음), 커버 업로드는 기존 `/api/wiki/upload` 재사용. 아이콘은 사이드바·홈·검색·휴지통에도 노출
+
+**Phase 11 — 블록 확장 + 목차 + 홈 대시보드**
+- **커스텀 블록**: 콜아웃(💡 아이콘+배경색 박스), 구분선 — 슬래시 메뉴에 추가. 기존 contentJson 호환
+- **목차(TOC)**: 본문 heading 블록을 추출해 넓은 화면(xl+) 우측에 floating, 클릭 시 스크롤. 본문 변경 시 실시간 갱신
+- **홈 대시보드**: "최근 수정 20개" → 즐겨찾기 / 최근 본 / 최근 수정 3섹션
+- (멀티컬럼은 패키지 도입 리스크로 보류)
+
+**Phase 12 — 백링크 + 템플릿**
+- **백링크**: `wiki.wiki_page_links`(source/target, M3) 신설. 본문 저장 시 wikiPageLink 블록을 파싱해 인덱스 갱신(실존 페이지만), 상세 하단에 "이 페이지를 링크한 페이지" 패널
+- **템플릿**: `wiki.wiki_pages.is_template`(M2). 페이지 상세 ⋯ "템플릿으로 저장"(복제 후 템플릿 표시), 신규 작성 화면에 "빈 페이지 + 템플릿 갤러리" 시작 선택. 템플릿은 트리/홈/검색에서 제외
+- (인라인 텍스트선택 댓글은 앵커 보존 난이도로 후속 분리, 기존 페이지 댓글 유지)
+
+**Phase 13 — 휴지통 + 검색 고도화 + 알림**
+- **휴지통(soft delete)**: `wiki.wiki_pages.deleted_at`(M4). 삭제 → 휴지통(하위 동반), `/wiki/trash`에서 복구(부모 삭제 시 루트 승격)/영구삭제. **모든 조회 경로에 `deleted_at IS NULL` 필터 적용**(트리/홈/검색/상세/백링크/참조 역검색/recent/favorites). 영구삭제는 `DELETE ?permanent=1` + S3 정리
+- **검색 고도화**: 작성자·기간 필터 추가, 삭제/템플릿 제외, pg_trgm GIN 인덱스(title/plain_text, M6)로 ILIKE 가속
+- **알림(B7)**: `wiki.wiki_notifications`(M5). 댓글 작성 시 페이지 작성자+최근수정자에게 알림(본인 제외), 사이드바 헤더 🔔 벨(미읽음 뱃지, 60초 폴링, 클릭 시 읽음 처리·이동). (사용자 @멘션 알림은 후속)
+
+**공통 UI(Phase 9 연장)**: 모든 신규 화면 토큰 적용, alert→토스트, 빈 상태→EmptyState, 모달→WikiModal
+
+- 마이그레이션: M1~M6 (`wiki` 스키마 한정). `npx tsc --noEmit` 통과, 빌드·`pm2 restart thync-dev` 검증(클린 부팅, 307 정상). git push·PROD 반영 미실행
+- 영향 파일: `app/api/wiki/pages/route.ts`, `app/api/wiki/pages/[id]/route.ts`, `app/api/wiki/pages/[id]/restore/route.ts`(신규), `app/api/wiki/pages/[id]/comments/route.ts`, `app/api/wiki/notifications/route.ts`(신규), `app/api/wiki/search/route.ts`, `lib/wiki/blockText.ts`, `app/wiki/[id]/{page,WikiPageView,TableOfContents}.tsx`, `app/wiki/{page,new,search,recent,favorites,trash}/page.tsx`, `app/wiki/components/{WikiEditor,WikiSidebar,NotificationBell}.tsx`, `app/wiki/components/ui/{EmojiPicker,OverflowMenu,...}.tsx`, `prisma/schema.prisma`
+
+---
+
+## 2026-06-16 | 위키 고도화 Phase 9 — 디자인 시스템 기반 (UI 완성도)
+
+- 위키를 상용 제품 수준으로 끌어올리기 위한 고도화 1단계. 기능 변화 없이 **룩앤필 통일**에 집중. 상세 설계는 `wiki_enhancement_design.md` 참고 (범위: C1 실시간협업·C2 DB뷰 제외)
+- **디자인 토큰 도입** (`app/wiki/wiki-theme.css`): 웜 그레이 팔레트(순흑/순백 대비 제거), 타이포 스케일, 간격·라운드·그림자·모션 토큰. 모두 `.wiki-root` 스코프 → 앱 나머지 무영향. BlockNote(ariakit) CSS 변수 오버라이드로 에디터 톤 통일
+- **공통 컴포넌트 신설** (`app/wiki/components/ui/`): `Toast`(+Provider, `alert()` 대체), `WikiModal`(오버레이 블러·ESC·진입 트랜지션), `Skeleton`/`PageSkeleton`/`ListSkeleton`, `EmptyState`(아이콘+CTA), `OverflowMenu`(⋯ 메뉴)
+- **레이아웃 full-bleed화**: 에디터를 `border rounded p-4` 박스에서 꺼내 `wiki-content`(max-w 900) 읽기 폭으로. 페이지 제목 `wiki-page-title`(2.25rem/800). 댓글 영역 구분선 추가
+- **상단 액션바 정리**: 버튼 6개 나열 → `편집` + `+ 하위 페이지` + `⋯`(버전/이동/복제/삭제) 오버플로 메뉴로 통합. 복제 모달을 `WikiModal`로 교체
+- **사이드바 리프레시 + 상태 유지(A4)**: 토큰 기반 재스타일, 폭 접기(« ») localStorage 유지, 펼침/접힘 상태 localStorage 유지 + 현재 페이지 조상 자동 펼침, alert→토스트. DnD 이동 로직은 그대로 보존
+- **홈 페이지**: 토큰 적용 + 빈 상태를 `EmptyState`로 교체
+- 데이터 모델·API·패키지 변경 없음 (프론트 단독, 기존 contentJson 100% 호환). `npx tsc --noEmit` 통과
+- 영향 파일: `app/wiki/wiki-theme.css`(신규), `app/wiki/components/ui/*`(신규 5종), `app/wiki/layout.tsx`, `app/wiki/components/WikiSidebar.tsx`, `app/wiki/[id]/WikiPageView.tsx`, `app/wiki/page.tsx`
+- 빌드·PM2 재시작·git push는 미실행 (사용자 명시 요청 대기)
+
+---
+
 ## 2026-06-15 | 위키 — 기존 페이지 링크 삽입 기능 추가
 
 - 기존엔 본문에서 다른 페이지를 거는 방법이 `/` 슬래시 "하위 페이지 추가"(항상 신규 생성)뿐이었음. 이미 사이드바에 있는 페이지를 신규 생성 없이 본문에 링크하는 경로가 없었던 문제 해결

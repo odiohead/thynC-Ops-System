@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import type { PartialBlock } from '@blocknote/core'
@@ -11,6 +11,11 @@ import TagPicker, { type Tag } from './TagPicker'
 import FavoriteButton from './FavoriteButton'
 import VersionHistoryModal from './VersionHistoryModal'
 import CommentSection from './CommentSection'
+import OverflowMenu from '../components/ui/OverflowMenu'
+import WikiModal from '../components/ui/WikiModal'
+import EmojiPicker from '../components/ui/EmojiPicker'
+import TableOfContents, { extractHeadings, type Heading } from './TableOfContents'
+import { useToast } from '../components/ui/Toast'
 
 type Reference = {
   id: string
@@ -19,12 +24,18 @@ type Reference = {
   label: string
 }
 
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error' | 'conflict'
+
 type Props = {
   id: string
   title: string
   parentId: string | null
   breadcrumb: { id: string; title: string }[]
   initialContent: PartialBlock[]
+  icon: string | null
+  coverUrl: string | null
+  coverOffsetY: number
+  backlinks: { id: string; title: string; icon: string | null }[]
   author: string
   lastEditor: string
   updatedAt: string
@@ -41,6 +52,10 @@ export default function WikiPageView({
   parentId,
   breadcrumb,
   initialContent,
+  icon: initialIcon,
+  coverUrl: initialCoverUrl,
+  coverOffsetY: initialCoverOffsetY,
+  backlinks,
   author,
   lastEditor,
   updatedAt,
@@ -50,43 +65,139 @@ export default function WikiPageView({
   currentUserId,
   currentUserRole,
 }: Props) {
+  const router = useRouter()
+  const toast = useToast()
+  const editable = currentUserRole !== 'VIEWER'
+
   const [showRefPicker, setShowRefPicker] = useState(false)
   const [showVersions, setShowVersions] = useState(false)
   const [showMove, setShowMove] = useState(false)
   const [showDuplicate, setShowDuplicate] = useState(false)
+  const [showEmoji, setShowEmoji] = useState(false)
   const [duplicating, setDuplicating] = useState(false)
-  const router = useRouter()
-  const [editing, setEditing] = useState(false)
-  const [title, setTitle] = useState(initialTitle)
-  // 빈 배열로 시작하면 편집 진입 후 무변경 저장 시 본문이 []로 덮여 유실됨 → DB 본문으로 초기화
-  const [content, setContent] = useState<unknown[]>(initialContent as unknown[])
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
-  const handleSave = async () => {
-    if (!title.trim()) {
-      setError('제목을 입력하세요.')
-      return
+  const [title, setTitle] = useState(initialTitle)
+  const [icon, setIcon] = useState<string | null>(initialIcon)
+  const [coverUrl, setCoverUrl] = useState<string | null>(initialCoverUrl)
+  const [status, setStatus] = useState<SaveStatus>('idle')
+  const [headings, setHeadings] = useState<Heading[]>(() => extractHeadings(initialContent))
+
+  // 저장 로직은 최신값을 ref로 참조 (디바운스 타이머의 stale closure 방지)
+  const titleRef = useRef(initialTitle)
+  const contentRef = useRef<unknown[]>(initialContent as unknown[])
+  const baseUpdatedAtRef = useRef(updatedAt)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const inFlightRef = useRef(false)
+  const dirtyRef = useRef(false)
+
+  const coverInputRef = useRef<HTMLInputElement>(null)
+
+  const doSave = useCallback(
+    async (extra?: { icon?: string | null; coverUrl?: string | null; coverOffsetY?: number }) => {
+      if (!editable) return
+      if (inFlightRef.current) {
+        dirtyRef.current = true
+        return
+      }
+      inFlightRef.current = true
+      setStatus('saving')
+      try {
+        const res = await fetch(`/api/wiki/pages/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: titleRef.current,
+            contentJson: contentRef.current,
+            baseUpdatedAt: baseUpdatedAtRef.current,
+            ...extra,
+          }),
+        })
+        if (res.status === 409) {
+          setStatus('conflict')
+          return
+        }
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          setStatus('error')
+          toast.error(err.error || `저장 실패 (${res.status})`)
+          return
+        }
+        const data = await res.json()
+        if (data.updatedAt) baseUpdatedAtRef.current = data.updatedAt
+        setStatus('saved')
+      } catch (e) {
+        setStatus('error')
+        toast.error(e instanceof Error ? e.message : '저장 실패')
+      } finally {
+        inFlightRef.current = false
+        if (dirtyRef.current) {
+          dirtyRef.current = false
+          void doSave()
+        }
+      }
+    },
+    [editable, id, toast],
+  )
+
+  const scheduleSave = useCallback(() => {
+    if (!editable) return
+    setStatus('saving')
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => void doSave(), 1500)
+  }, [editable, doSave])
+
+  // 언마운트 시 대기 중인 저장 flush
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
     }
-    setSaving(true)
-    setError(null)
+  }, [])
+
+  const onTitleChange = (v: string) => {
+    setTitle(v)
+    titleRef.current = v
+    scheduleSave()
+  }
+
+  const onContentChange = (blocks: unknown[]) => {
+    contentRef.current = blocks
+    setHeadings(extractHeadings(blocks))
+    scheduleSave()
+  }
+
+  // 에디터 인라인 작업(하위페이지/링크 삽입)에서 즉시 저장
+  const saveNow = useCallback(async () => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    await doSave()
+  }, [doSave])
+
+  const handleSelectIcon = (emoji: string | null) => {
+    setShowEmoji(false)
+    setIcon(emoji)
+    void doSave({ icon: emoji })
+  }
+
+  const handleCoverFile = async (file: File) => {
     try {
-      const res = await fetch(`/api/wiki/pages/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title.trim(), contentJson: content }),
-      })
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch(`/api/wiki/upload?pageId=${id}`, { method: 'POST', body: fd })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        throw new Error(err.error || `저장 실패 (${res.status})`)
+        toast.error(err.error || `커버 업로드 실패 (${res.status})`)
+        return
       }
-      setEditing(false)
-      router.refresh()
+      const data = await res.json()
+      setCoverUrl(data.url)
+      void doSave({ coverUrl: data.url })
     } catch (e) {
-      setError(e instanceof Error ? e.message : '저장 실패')
-    } finally {
-      setSaving(false)
+      toast.error(e instanceof Error ? e.message : '커버 업로드 실패')
     }
+  }
+
+  const removeCover = () => {
+    setCoverUrl(null)
+    void doSave({ coverUrl: null })
   }
 
   const handleDelete = async () => {
@@ -94,7 +205,7 @@ export default function WikiPageView({
     const res = await fetch(`/api/wiki/pages/${id}`, { method: 'DELETE' })
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
-      alert(err.error || `삭제 실패 (${res.status})`)
+      toast.error(err.error || `삭제 실패 (${res.status})`)
       return
     }
     router.refresh()
@@ -103,6 +214,30 @@ export default function WikiPageView({
 
   const addChild = () => {
     router.push(`/wiki/new?parentId=${id}`)
+  }
+
+  const handleSaveAsTemplate = async () => {
+    try {
+      const dup = await fetch(`/api/wiki/pages/${id}/duplicate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ includeChildren: false }),
+      })
+      const dupData = await dup.json().catch(() => ({}))
+      if (!dup.ok) {
+        toast.error(dupData.error || '템플릿 저장 실패')
+        return
+      }
+      await fetch(`/api/wiki/pages/${dupData.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isTemplate: true, title: `${title || '제목 없음'} (템플릿)` }),
+      })
+      toast.success('템플릿으로 저장되었습니다')
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '템플릿 저장 실패')
+    }
   }
 
   const handleDuplicate = async (includeChildren: boolean) => {
@@ -116,7 +251,7 @@ export default function WikiPageView({
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        alert(data.error || `복제 실패 (${res.status})`)
+        toast.error(data.error || `복제 실패 (${res.status})`)
         return
       }
       setShowDuplicate(false)
@@ -128,133 +263,228 @@ export default function WikiPageView({
   }
 
   return (
-    <div className="max-w-5xl mx-auto p-6">
-      <nav className="mb-3 text-sm text-gray-500 flex items-center gap-1 flex-wrap">
-        <Link href="/wiki" className="hover:underline">
-          위키
-        </Link>
-        {breadcrumb.map((b) => (
-          <span key={b.id} className="flex items-center gap-1">
-            <span className="text-gray-300">/</span>
-            <Link href={`/wiki/${b.id}`} className="hover:underline">
-              {b.title}
-            </Link>
-          </span>
-        ))}
-      </nav>
-
-      <div className="mb-6 flex items-center justify-between">
-        {editing ? (
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="flex-1 text-2xl font-bold border-b border-gray-200 focus:border-blue-500 focus:outline-none py-2"
+    <div className="pb-24">
+      {/* 커버 */}
+      {coverUrl ? (
+        <div className="group relative h-48 w-full overflow-hidden bg-[var(--wiki-bg-sunken)]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={coverUrl}
+            alt="커버"
+            className="h-full w-full object-cover"
+            style={{ objectPosition: `center ${initialCoverOffsetY}%` }}
           />
-        ) : (
-          <h1 className="flex-1 flex items-center gap-2 text-2xl font-bold">
-            <FavoriteButton pageId={id} initialFavorited={favorited} />
-            <span>{title}</span>
-          </h1>
-        )}
+          {editable && (
+            <div className="absolute bottom-2 right-3 hidden gap-1.5 group-hover:flex">
+              <button
+                onClick={() => coverInputRef.current?.click()}
+                className="rounded-[6px] bg-black/55 px-2.5 py-1 text-xs text-white backdrop-blur transition hover:bg-black/70"
+              >
+                커버 변경
+              </button>
+              <button
+                onClick={removeCover}
+                className="rounded-[6px] bg-black/55 px-2.5 py-1 text-xs text-white backdrop-blur transition hover:bg-black/70"
+              >
+                제거
+              </button>
+            </div>
+          )}
+        </div>
+      ) : null}
 
-        <div className="ml-4 flex gap-2">
-          {editing ? (
-            <>
-              <button
-                onClick={() => {
-                  setEditing(false)
-                  setTitle(initialTitle)
-                  setError(null)
-                }}
-                disabled={saving}
-                className="px-4 py-2 border rounded hover:bg-gray-50 disabled:opacity-50"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-              >
-                {saving ? '저장 중...' : '저장'}
-              </button>
-            </>
+      <input
+        ref={coverInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) void handleCoverFile(f)
+          e.target.value = ''
+        }}
+      />
+
+      <div className={`wiki-content ${coverUrl ? 'pt-4' : 'pt-7'}`}>
+        <div className="flex items-center justify-between gap-3">
+          <nav className="flex flex-wrap items-center gap-1 text-sm text-[var(--wiki-text-muted)]">
+            <Link href="/wiki" className="transition hover:text-[var(--wiki-text)]">
+              위키
+            </Link>
+            {breadcrumb.map((b) => (
+              <span key={b.id} className="flex items-center gap-1">
+                <span className="text-[var(--wiki-border-strong)]">/</span>
+                <Link href={`/wiki/${b.id}`} className="transition hover:text-[var(--wiki-text)]">
+                  {b.title}
+                </Link>
+              </span>
+            ))}
+          </nav>
+          <SaveIndicator status={status} editable={editable} onRefresh={() => router.refresh()} />
+        </div>
+
+        {/* 아이콘 + 커버 추가 영역 */}
+        <div className="relative mt-3 flex items-center gap-2">
+          {icon ? (
+            <button
+              onClick={() => editable && setShowEmoji((s) => !s)}
+              className="rounded-[8px] text-5xl leading-none transition hover:bg-[var(--wiki-hover)]"
+              title={editable ? '아이콘 변경' : undefined}
+            >
+              {icon}
+            </button>
           ) : (
-            <>
+            editable && (
               <button
-                onClick={() => setShowVersions(true)}
-                className="px-3 py-2 text-sm border rounded hover:bg-gray-50"
-                title="버전 히스토리"
+                onClick={() => setShowEmoji((s) => !s)}
+                className="rounded-[6px] px-2 py-1 text-xs text-[var(--wiki-text-muted)] opacity-70 transition hover:bg-[var(--wiki-hover)] hover:opacity-100"
               >
-                🕘 버전
+                😀 아이콘 추가
               </button>
+            )
+          )}
+          {editable && !coverUrl && (
+            <button
+              onClick={() => coverInputRef.current?.click()}
+              className="rounded-[6px] px-2 py-1 text-xs text-[var(--wiki-text-muted)] opacity-70 transition hover:bg-[var(--wiki-hover)] hover:opacity-100"
+            >
+              🖼️ 커버 추가
+            </button>
+          )}
+          {showEmoji && (
+            <div className="absolute left-0 top-full z-40">
+              <EmojiPicker onSelect={handleSelectIcon} onClose={() => setShowEmoji(false)} />
+            </div>
+          )}
+        </div>
+
+        {/* 제목 + 액션 */}
+        <div className="mt-2 flex items-start justify-between gap-4">
+          {editable ? (
+            <div className="flex flex-1 items-center gap-2.5">
+              <FavoriteButton pageId={id} initialFavorited={favorited} />
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => onTitleChange(e.target.value)}
+                placeholder="제목 없음"
+                className="wiki-page-title flex-1 border-none bg-transparent py-1 focus:outline-none"
+              />
+            </div>
+          ) : (
+            <h1 className="wiki-page-title flex flex-1 items-center gap-2.5">
+              <FavoriteButton pageId={id} initialFavorited={favorited} />
+              <span>{title || '제목 없음'}</span>
+            </h1>
+          )}
+
+          <div className="flex shrink-0 items-center gap-2 pt-1.5">
+            {editable && (
               <button
                 onClick={addChild}
-                className="px-4 py-2 border rounded hover:bg-gray-50"
+                className="rounded-[6px] border border-[var(--wiki-border)] px-3 py-2 text-sm text-[var(--wiki-text-soft)] transition hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]"
               >
                 + 하위 페이지
               </button>
-              <button
-                onClick={() => setShowMove(true)}
-                className="px-3 py-2 text-sm border rounded hover:bg-gray-50"
-                title="다른 위치로 이동"
-              >
-                📂 이동
-              </button>
-              <button
-                onClick={() => setShowDuplicate(true)}
-                className="px-3 py-2 text-sm border rounded hover:bg-gray-50"
-                title="페이지 복제"
-              >
-                ⧉ 복제
-              </button>
-              <button
-                onClick={handleDelete}
-                className="px-4 py-2 border border-red-300 text-red-600 rounded hover:bg-red-50"
-              >
-                삭제
-              </button>
-              <button
-                onClick={() => setEditing(true)}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-              >
-                편집
-              </button>
-            </>
+            )}
+            <OverflowMenu
+              items={[
+                { label: '버전 기록', icon: '🕘', onClick: () => setShowVersions(true) },
+                ...(editable
+                  ? [
+                      { label: '다른 위치로 이동', icon: '📂', onClick: () => setShowMove(true) },
+                      { label: '페이지 복제', icon: '⧉', onClick: () => setShowDuplicate(true) },
+                      { label: '템플릿으로 저장', icon: '📐', onClick: handleSaveAsTemplate },
+                      { label: '삭제', icon: '🗑', onClick: handleDelete, danger: true },
+                    ]
+                  : []),
+              ]}
+            />
+          </div>
+        </div>
+
+        <div className="mt-2 text-sm text-[var(--wiki-text-muted)]">
+          작성자: {author} · 최근 수정자: {lastEditor} ·{' '}
+          {new Date(updatedAt).toLocaleString('ko-KR')}
+        </div>
+
+        <div className="mt-3">
+          <TagPicker pageId={id} initialTags={tags} onChange={() => router.refresh()} />
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-[var(--wiki-text-muted)]">관련 항목:</span>
+          {references.length === 0 && (
+            <span className="text-xs text-[var(--wiki-text-muted)]">아직 연결된 항목 없음</span>
+          )}
+          {references.map((r) => (
+            <ReferenceChip key={r.id} pageId={id} reference={r} onRemoved={() => router.refresh()} />
+          ))}
+          {editable && (
+            <button
+              onClick={() => setShowRefPicker(true)}
+              className="rounded-[4px] border border-dashed border-[var(--wiki-border-strong)] px-2 py-0.5 text-xs text-[var(--wiki-text-soft)] transition hover:bg-[var(--wiki-hover)]"
+            >
+              + 연결
+            </button>
           )}
         </div>
-      </div>
 
-      <div className="mb-3 text-sm text-gray-500">
-        작성자: {author} · 최근 수정자: {lastEditor} ·{' '}
-        {new Date(updatedAt).toLocaleString('ko-KR')}
-      </div>
-
-      <div className="mb-2">
-        <TagPicker pageId={id} initialTags={tags} onChange={() => router.refresh()} />
-      </div>
-
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <span className="text-xs text-gray-500">관련 항목:</span>
-        {references.length === 0 && (
-          <span className="text-xs text-gray-400">아직 연결된 항목 없음</span>
+        {status === 'conflict' && (
+          <div className="mt-4 flex items-center justify-between rounded-[6px] border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <span>다른 곳에서 이 페이지가 수정되었습니다. 최신 내용을 불러오세요.</span>
+            <button
+              onClick={() => router.refresh()}
+              className="ml-3 shrink-0 rounded-[6px] border border-amber-300 bg-white px-3 py-1 text-xs font-medium transition hover:bg-amber-100"
+            >
+              새로고침
+            </button>
+          </div>
         )}
-        {references.map((r) => (
-          <ReferenceChip
-            key={r.id}
-            pageId={id}
-            reference={r}
-            onRemoved={() => router.refresh()}
-          />
-        ))}
-        <button
-          onClick={() => setShowRefPicker(true)}
-          className="text-xs px-2 py-0.5 border border-dashed border-gray-300 text-gray-600 rounded hover:bg-gray-50"
-        >
-          + 연결
-        </button>
       </div>
+
+      <TableOfContents headings={headings} />
+
+      <div className="wiki-content mt-5">
+        <WikiEditor
+          initialContent={initialContent}
+          editable={editable}
+          onChange={onContentChange}
+          onSaveNow={saveNow}
+          pageId={id}
+        />
+      </div>
+
+      {backlinks.length > 0 && (
+        <div className="wiki-content mt-8 border-t border-[var(--wiki-border)] pt-6">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--wiki-text-muted)]">
+            🔗 이 페이지를 링크한 페이지 ({backlinks.length})
+          </h3>
+          <ul className="flex flex-wrap gap-2">
+            {backlinks.map((b) => (
+              <li key={b.id}>
+                <Link
+                  href={`/wiki/${b.id}`}
+                  className="inline-flex items-center gap-1.5 rounded-[6px] border border-[var(--wiki-border)] bg-[var(--wiki-bg)] px-2.5 py-1 text-sm text-[var(--wiki-text-soft)] transition hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]"
+                >
+                  <span className="text-sm leading-none">{b.icon || '📄'}</span>
+                  <span>{b.title || '제목 없음'}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {currentUserId && (
+        <div className="wiki-content mt-8 border-t border-[var(--wiki-border)] pt-6">
+          <CommentSection
+            pageId={id}
+            currentUserId={currentUserId}
+            currentUserRole={currentUserRole}
+          />
+        </div>
+      )}
 
       {showRefPicker && (
         <ReferencePickerModal
@@ -277,74 +507,71 @@ export default function WikiPageView({
         />
       )}
 
-      {showDuplicate && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          onClick={() => !duplicating && setShowDuplicate(false)}
-        >
-          <div
-            className="w-[400px] bg-white rounded-lg shadow-xl p-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="font-semibold text-gray-800 mb-2">페이지 복제</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              &ldquo;{title}&rdquo; 페이지를 복제합니다. 하위 페이지도 함께 복제할까요?
-              <br />
-              <span className="text-xs text-gray-400">
-                (댓글·버전 히스토리·첨부 파일은 복사되지 않습니다)
-              </span>
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowDuplicate(false)}
-                disabled={duplicating}
-                className="px-3 py-1.5 text-sm border rounded hover:bg-gray-50 disabled:opacity-50"
-              >
-                취소
-              </button>
-              <button
-                onClick={() => handleDuplicate(false)}
-                disabled={duplicating}
-                className="px-3 py-1.5 text-sm border rounded hover:bg-gray-50 disabled:opacity-50"
-              >
-                이 페이지만
-              </button>
-              <button
-                onClick={() => handleDuplicate(true)}
-                disabled={duplicating}
-                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-              >
-                {duplicating ? '복제 중...' : '하위 포함 복제'}
-              </button>
-            </div>
-          </div>
+      <WikiModal
+        open={showDuplicate}
+        onClose={() => !duplicating && setShowDuplicate(false)}
+        title="페이지 복제"
+        width={420}
+        footer={
+          <>
+            <button
+              onClick={() => setShowDuplicate(false)}
+              disabled={duplicating}
+              className="rounded-[6px] border border-[var(--wiki-border)] px-3 py-1.5 text-sm transition hover:bg-[var(--wiki-hover)] disabled:opacity-50"
+            >
+              취소
+            </button>
+            <button
+              onClick={() => handleDuplicate(false)}
+              disabled={duplicating}
+              className="rounded-[6px] border border-[var(--wiki-border)] px-3 py-1.5 text-sm transition hover:bg-[var(--wiki-hover)] disabled:opacity-50"
+            >
+              이 페이지만
+            </button>
+            <button
+              onClick={() => handleDuplicate(true)}
+              disabled={duplicating}
+              className="rounded-[6px] bg-[var(--wiki-accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:brightness-95 disabled:opacity-50"
+            >
+              {duplicating ? '복제 중...' : '하위 포함 복제'}
+            </button>
+          </>
+        }
+      >
+        <div className="px-5 py-4 text-sm text-[var(--wiki-text-soft)]">
+          &ldquo;{title}&rdquo; 페이지를 복제합니다. 하위 페이지도 함께 복제할까요?
+          <br />
+          <span className="text-xs text-[var(--wiki-text-muted)]">
+            (댓글·버전 히스토리·첨부 파일은 복사되지 않습니다)
+          </span>
         </div>
-      )}
-
-      {error && (
-        <div className="mb-4 p-3 bg-red-50 text-red-700 border border-red-200 rounded text-sm">
-          {error}
-        </div>
-      )}
-
-      <div className="border rounded p-4 min-h-[400px]">
-        <WikiEditor
-          initialContent={initialContent}
-          editable={editing}
-          onChange={editing ? setContent : undefined}
-          pageId={id}
-        />
-      </div>
-
-      {!editing && currentUserId && (
-        <CommentSection
-          pageId={id}
-          currentUserId={currentUserId}
-          currentUserRole={currentUserRole}
-        />
-      )}
+      </WikiModal>
     </div>
   )
+}
+
+function SaveIndicator({
+  status,
+  editable,
+  onRefresh,
+}: {
+  status: SaveStatus
+  editable: boolean
+  onRefresh: () => void
+}) {
+  if (!editable) {
+    return <span className="text-xs text-[var(--wiki-text-muted)]">읽기 전용</span>
+  }
+  if (status === 'saving') return <span className="text-xs text-[var(--wiki-text-muted)]">저장 중…</span>
+  if (status === 'saved') return <span className="text-xs text-[var(--wiki-text-muted)]">저장됨 ✓</span>
+  if (status === 'error') return <span className="text-xs text-red-500">저장 실패</span>
+  if (status === 'conflict')
+    return (
+      <button onClick={onRefresh} className="text-xs text-amber-600 underline">
+        충돌 — 새로고침
+      </button>
+    )
+  return null
 }
 
 function ReferenceChip({
@@ -356,6 +583,7 @@ function ReferenceChip({
   reference: Reference
   onRemoved: () => void
 }) {
+  const toast = useToast()
   const [busy, setBusy] = useState(false)
   const href =
     reference.refType === 'hospital'
@@ -376,7 +604,7 @@ function ReferenceChip({
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        alert(err.error || `해제 실패 (${res.status})`)
+        toast.error(err.error || `해제 실패 (${res.status})`)
       } else {
         onRemoved()
       }
@@ -386,7 +614,7 @@ function ReferenceChip({
   }
 
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs border rounded ${colorClass}`}>
+    <span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs ${colorClass}`}>
       <span className="opacity-60">[{typeLabel}]</span>
       <Link href={href} className="hover:underline">
         {reference.label}
@@ -394,7 +622,7 @@ function ReferenceChip({
       <button
         onClick={remove}
         disabled={busy}
-        className="text-gray-500 hover:text-red-600 ml-1"
+        className="ml-1 text-gray-500 hover:text-red-600"
         aria-label="해제"
       >
         ×

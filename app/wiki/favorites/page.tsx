@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 import { verifyToken } from '@/lib/auth'
+import EmptyState from '../components/ui/EmptyState'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,17 +11,18 @@ export default async function FavoritesPage() {
   const jwt = token ? await verifyToken(token) : null
 
   if (!jwt) {
-    return <div className="p-6 text-sm text-gray-500">로그인이 필요합니다.</div>
+    return <div className="wiki-content py-10 text-sm text-[var(--wiki-text-soft)]">로그인이 필요합니다.</div>
   }
 
   const favorites = await prisma.wikiFavorite.findMany({
-    where: { userId: jwt.userId },
+    where: { userId: jwt.userId, page: { deletedAt: null } },
     orderBy: { createdAt: 'desc' },
     include: {
       page: {
         select: {
           id: true,
           title: true,
+          icon: true,
           updatedAt: true,
           author: { select: { name: true } },
           lastEditor: { select: { name: true } },
@@ -30,23 +32,32 @@ export default async function FavoritesPage() {
   })
 
   return (
-    <div className="max-w-4xl mx-auto p-6">
-      <h1 className="text-xl font-bold mb-4">⭐ 즐겨찾기</h1>
+    <div className="wiki-content py-10">
+      <h1 className="wiki-page-title mb-5">⭐ 즐겨찾기</h1>
       {favorites.length === 0 ? (
-        <div className="text-center py-12 text-sm text-gray-400 border rounded">
-          즐겨찾기한 페이지가 없습니다. 페이지 상단의 ☆ 버튼으로 추가하세요.
-        </div>
+        <EmptyState
+          icon="⭐"
+          title="즐겨찾기한 페이지가 없습니다"
+          description="페이지 상단의 ☆ 버튼으로 추가하세요."
+        />
       ) : (
-        <ul className="divide-y border rounded bg-white">
+        <ul className="overflow-hidden rounded-[10px] border border-[var(--wiki-border)] bg-[var(--wiki-bg)]">
           {favorites.map((f) => (
-            <li key={f.page.id} className="hover:bg-gray-50">
-              <Link href={`/wiki/${f.page.id}`} className="block p-3">
-                <div className="text-sm font-medium text-gray-900">{f.page.title}</div>
-                <div className="mt-0.5 text-xs text-gray-500">
-                  최근 수정: {f.page.lastEditor?.name ?? f.page.author?.name ?? '-'} ·{' '}
-                  {new Date(f.page.updatedAt).toLocaleString('ko-KR')} · 즐겨찾기 추가{' '}
-                  {new Date(f.createdAt).toLocaleDateString('ko-KR')}
-                </div>
+            <li key={f.page.id} className="border-b border-[var(--wiki-border)] last:border-0">
+              <Link
+                href={`/wiki/${f.page.id}`}
+                className="flex items-center gap-2.5 px-4 py-2.5 transition hover:bg-[var(--wiki-hover)]"
+              >
+                <span className="shrink-0 text-base leading-none">{f.page.icon || '📄'}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-[var(--wiki-text)]">
+                    {f.page.title || '제목 없음'}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-[var(--wiki-text-muted)]">
+                    {f.page.lastEditor?.name ?? f.page.author?.name ?? '-'} ·{' '}
+                    {new Date(f.page.updatedAt).toLocaleDateString('ko-KR')}
+                  </span>
+                </span>
               </Link>
             </li>
           ))}

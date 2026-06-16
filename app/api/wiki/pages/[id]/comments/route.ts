@@ -33,7 +33,7 @@ export async function POST(request: NextRequest, { params }: Ctx) {
 
   const page = await prisma.wikiPage.findUnique({
     where: { id: params.id },
-    select: { id: true },
+    select: { id: true, title: true, authorId: true, lastEditorId: true },
   })
   if (!page) return NextResponse.json({ error: 'Page not found' }, { status: 404 })
 
@@ -47,5 +47,25 @@ export async function POST(request: NextRequest, { params }: Ctx) {
       author: { select: { id: true, name: true } },
     },
   })
+
+  // 알림: 페이지 작성자 + 최근 수정자에게 (본인 제외, 중복 제거). 비차단
+  const recipients = new Set<string>()
+  if (page.authorId && page.authorId !== authUser.userId) recipients.add(page.authorId)
+  if (page.lastEditorId && page.lastEditorId !== authUser.userId) recipients.add(page.lastEditorId)
+  if (recipients.size > 0) {
+    prisma.wikiNotification
+      .createMany({
+        data: Array.from(recipients).map((uid) => ({
+          userId: uid,
+          pageId: params.id,
+          type: 'comment',
+          actorId: authUser.userId,
+          actorName: authUser.name,
+          pageTitle: page.title,
+        })),
+      })
+      .catch((e) => console.error('[wiki] 알림 생성 실패:', e))
+  }
+
   return NextResponse.json({ comment: created }, { status: 201 })
 }

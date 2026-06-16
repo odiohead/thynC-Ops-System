@@ -18,6 +18,13 @@ import {
   filterSuggestionItems,
   type PartialBlock,
 } from '@blocknote/core'
+import {
+  withMultiColumn,
+  getMultiColumnSlashMenuItems,
+  multiColumnDropCursor,
+  locales as multiColumnLocales,
+} from '@blocknote/xl-multi-column'
+import { en as coreLocaleEn } from '@blocknote/core/locales'
 import '@blocknote/core/fonts/inter.css'
 import '@blocknote/ariakit/style.css'
 
@@ -170,6 +177,70 @@ const wikiFileSpec = createReactBlockSpec(
 )()
 
 // ──────────────────────────────────────────────────────────
+// 커스텀 블록: 콜아웃 (아이콘 + 배경색 박스)
+// ──────────────────────────────────────────────────────────
+const CALLOUT_COLORS: Record<string, { bg: string; border: string }> = {
+  blue: { bg: 'bg-blue-50', border: 'border-blue-200' },
+  amber: { bg: 'bg-amber-50', border: 'border-amber-200' },
+  green: { bg: 'bg-green-50', border: 'border-green-200' },
+  red: { bg: 'bg-red-50', border: 'border-red-200' },
+  gray: { bg: 'bg-gray-50', border: 'border-gray-200' },
+}
+
+const calloutSpec = createReactBlockSpec(
+  {
+    type: 'callout',
+    propSchema: {
+      emoji: { default: '💡' },
+      color: { default: 'blue' },
+    },
+    content: 'inline',
+  },
+  {
+    render: (props) => {
+      const { emoji, color } = props.block.props
+      const c = CALLOUT_COLORS[color] ?? CALLOUT_COLORS.blue
+      return (
+        <div className={`my-1 flex items-start gap-2.5 rounded-[8px] border ${c.bg} ${c.border} px-3 py-2.5`}>
+          <button
+            contentEditable={false}
+            type="button"
+            onClick={() => {
+              if (!props.editor.isEditable) return
+              const next = window.prompt('콜아웃 이모지', emoji || '💡')
+              if (next !== null) props.editor.updateBlock(props.block, { props: { emoji: next || '💡' } })
+            }}
+            className="mt-0.5 shrink-0 text-base leading-none"
+            title="이모지 변경"
+          >
+            {emoji || '💡'}
+          </button>
+          <div className="min-w-0 flex-1 text-sm leading-relaxed" ref={props.contentRef} />
+        </div>
+      )
+    },
+  },
+)()
+
+// ──────────────────────────────────────────────────────────
+// 커스텀 블록: 구분선
+// ──────────────────────────────────────────────────────────
+const dividerSpec = createReactBlockSpec(
+  {
+    type: 'divider',
+    propSchema: {},
+    content: 'none',
+  },
+  {
+    render: () => (
+      <div contentEditable={false} className="my-2 select-none py-1">
+        <hr className="border-t border-[var(--wiki-border-strong)]" />
+      </div>
+    ),
+  },
+)()
+
+// ──────────────────────────────────────────────────────────
 // 커스텀 인라인: @ mention (병원/프로젝트)
 // ──────────────────────────────────────────────────────────
 const mentionSpec = createReactInlineContentSpec(
@@ -301,16 +372,26 @@ function WikiPageLinkPicker({
 // ──────────────────────────────────────────────────────────
 // 스키마: 기본 + 커스텀
 // ──────────────────────────────────────────────────────────
-const wikiSchema = BlockNoteSchema.create({
-  blockSpecs: { ...defaultBlockSpecs, file: wikiFileSpec, wikiPageLink: wikiPageLinkSpec },
-  inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionSpec },
-})
+const wikiSchema = withMultiColumn(
+  BlockNoteSchema.create({
+    blockSpecs: {
+      ...defaultBlockSpecs,
+      file: wikiFileSpec,
+      wikiPageLink: wikiPageLinkSpec,
+      callout: calloutSpec,
+      divider: dividerSpec,
+    },
+    inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionSpec },
+  }),
+)
 
 type Props = {
   initialContent?: PartialBlock[]
   editable?: boolean
   onChange?: (blocks: unknown[]) => void
   pageId?: string
+  /** 하위페이지/링크 삽입 등 즉시 영속화가 필요할 때 부모의 저장을 호출 */
+  onSaveNow?: () => Promise<void>
 }
 
 export default function WikiEditor({
@@ -318,6 +399,7 @@ export default function WikiEditor({
   editable = true,
   onChange,
   pageId,
+  onSaveNow,
 }: Props) {
   const router = useRouter()
   const [linkPickerOpen, setLinkPickerOpen] = useState(false)
@@ -326,6 +408,8 @@ export default function WikiEditor({
   const pendingBlockRef = useRef<any>(null)
   const editor = useCreateBlockNote({
     schema: wikiSchema,
+    dropCursor: multiColumnDropCursor,
+    dictionary: { ...coreLocaleEn, multi_column: multiColumnLocales.ko },
     initialContent:
       initialContent && initialContent.length > 0
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -365,22 +449,11 @@ export default function WikiEditor({
       cursorBlock,
       'after',
     )
-    // 하위 페이지 추가와 동일하게, 삽입 블록이 메모리에만 있어 이탈 시 유실되므로 본문 즉시 저장
-    if (pageId) {
-      try {
-        const saveRes = await fetch(`/api/wiki/pages/${pageId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contentJson: editor.document }),
-        })
-        if (!saveRes.ok) {
-          const err = await saveRes.json().catch(() => ({}))
-          alert(err.error || `본문 저장 실패 (${saveRes.status})`)
-        }
-        router.refresh()
-      } catch (e) {
-        alert((e as Error).message)
-      }
+    // 삽입 블록이 메모리에만 있어 이탈 시 유실되므로 부모의 즉시저장 호출
+    onChange?.(editor.document as unknown[])
+    if (onSaveNow) {
+      await onSaveNow()
+      router.refresh()
     }
   }
 
@@ -400,6 +473,7 @@ export default function WikiEditor({
         getItems={async (query) => {
           const items: DefaultReactSuggestionItem[] = [
             ...getDefaultReactSlashMenuItems(editor),
+            ...getMultiColumnSlashMenuItems(editor),
           ]
           if (pageId) {
             items.push({
@@ -440,15 +514,8 @@ export default function WikiEditor({
                     'after',
                   )
                   // 링크 블록은 에디터 메모리에만 존재 → 저장 전 이탈 시 유실되므로 부모 본문 즉시 저장
-                  const saveRes = await fetch(`/api/wiki/pages/${pageId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contentJson: editor.document }),
-                  })
-                  if (!saveRes.ok) {
-                    const err = await saveRes.json().catch(() => ({}))
-                    alert(err.error || `부모 페이지 저장 실패 (${saveRes.status})`)
-                  }
+                  onChange?.(editor.document as unknown[])
+                  if (onSaveNow) await onSaveNow()
                   // 사이드바 트리에 새 하위 페이지 즉시 반영
                   router.refresh()
                 } catch (e) {
@@ -466,6 +533,38 @@ export default function WikiEditor({
             onItemClick: () => {
               pendingBlockRef.current = editor.getTextCursorPosition().block
               setLinkPickerOpen(true)
+            },
+          })
+          items.push({
+            title: '콜아웃',
+            subtext: '아이콘 + 배경색 강조 박스',
+            aliases: ['callout', 'note', 'info', '콜아웃', '강조', '안내'],
+            group: '기본 블록',
+            icon: <span>💡</span>,
+            onItemClick: () => {
+              const cur = editor.getTextCursorPosition().block
+              editor.insertBlocks(
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                [{ type: 'callout', props: { emoji: '💡', color: 'blue' } }] as any,
+                cur,
+                'after',
+              )
+            },
+          })
+          items.push({
+            title: '구분선',
+            subtext: '가로 구분선',
+            aliases: ['divider', 'hr', 'rule', '구분', '구분선', '선'],
+            group: '기본 블록',
+            icon: <span>―</span>,
+            onItemClick: () => {
+              const cur = editor.getTextCursorPosition().block
+              editor.insertBlocks(
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                [{ type: 'divider' }] as any,
+                cur,
+                'after',
+              )
             },
           })
           return filterSuggestionItems(items, query)

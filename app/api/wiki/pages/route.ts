@@ -13,11 +13,22 @@ export async function GET(request: NextRequest) {
   const parentId = searchParams.get('parentId')
   const refType = searchParams.get('refType')
   const refCode = searchParams.get('refCode')
+  const templates = searchParams.get('templates')
+
+  // 템플릿 목록 (신규 작성 화면 갤러리용)
+  if (templates) {
+    const tpls = await prisma.wikiPage.findMany({
+      where: { isTemplate: true, deletedAt: null },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true, title: true, icon: true },
+    })
+    return NextResponse.json({ templates: tpls })
+  }
 
   // 역참조 조회: 특정 병원/프로젝트를 참조하는 위키 페이지 목록
   if (refType && refCode) {
     const refs = await prisma.wikiPageReference.findMany({
-      where: { refType, refCode },
+      where: { refType, refCode, page: { deletedAt: null } },
       orderBy: { createdAt: 'desc' },
       select: {
         page: {
@@ -37,10 +48,10 @@ export async function GET(request: NextRequest) {
 
   const where =
     parentId === 'null' || parentId === ''
-      ? { parentId: null }
+      ? { parentId: null, isTemplate: false, deletedAt: null }
       : parentId
-        ? { parentId }
-        : {}
+        ? { parentId, isTemplate: false, deletedAt: null }
+        : { isTemplate: false, deletedAt: null }
 
   const pages = await prisma.wikiPage.findMany({
     where,

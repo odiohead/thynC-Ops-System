@@ -1,0 +1,201 @@
+/* ──────────────────────────────────────────────────────────
+ * 위키 디자인 시스템 토큰 (Phase 9)
+ * 모든 토큰/스타일은 .wiki-root 하위로 스코프 → 앱 나머지에 영향 없음
+ * 색은 순흑/순백 대비를 피하고 웜 그레이 계열로 (상용 제품 톤)
+ * ────────────────────────────────────────────────────────── */
+
+/* Pretendard Variable (self-host, /public/fonts) */
+@font-face {
+  font-family: "Pretendard Variable";
+  src: url("/fonts/PretendardVariable.woff2") format("woff2-variations");
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+}
+
+.wiki-root {
+  /* 배경 / 표면 */
+  --wiki-bg: #ffffff;
+  --wiki-bg-subtle: #f7f7f5;
+  --wiki-bg-sunken: #f1f1ef;
+
+  /* 텍스트 */
+  --wiki-text: #37352f;
+  --wiki-text-soft: #6b6a65;
+  --wiki-text-muted: #9b9a97;
+
+  /* 라인 / 강조 */
+  --wiki-border: #e9e9e7;
+  --wiki-border-strong: #dcdcd8;
+  --wiki-accent: #2383e2;
+  --wiki-accent-soft: #eaf3fc;
+
+  /* 상태 오버레이 */
+  --wiki-hover: rgba(55, 53, 47, 0.06);
+  --wiki-active: rgba(55, 53, 47, 0.10);
+  --wiki-selected: rgba(35, 131, 226, 0.10);
+
+  /* 모양 / 그림자 / 모션 */
+  --wiki-radius-sm: 4px;
+  --wiki-radius: 6px;
+  --wiki-radius-lg: 8px;
+  --wiki-radius-xl: 12px;
+  --wiki-shadow-sm: 0 1px 2px rgba(15, 15, 15, 0.05), 0 1px 3px rgba(15, 15, 15, 0.04);
+  --wiki-shadow-md: 0 4px 12px rgba(15, 15, 15, 0.10);
+  --wiki-shadow-lg: 0 8px 32px rgba(15, 15, 15, 0.14);
+  --wiki-ease: 150ms ease;
+  --wiki-ease-panel: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  color: var(--wiki-text);
+}
+
+/* ── 타이포그래피 ───────────────────────────────────────── */
+.wiki-root {
+  font-family: "Pretendard Variable", "Pretendard", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic",
+    "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.wiki-page-title {
+  font-size: 2.25rem;
+  line-height: 1.2;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--wiki-text);
+}
+.wiki-page-title::placeholder {
+  color: var(--wiki-text-muted);
+  font-weight: 800;
+}
+
+/* ── 본문 읽기 폭 (full-bleed 컨테이너 안의 콘텐츠 폭) ──── */
+.wiki-content {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+/* ── 스크롤바 (얇고 은은하게) ──────────────────────────── */
+.wiki-root .wiki-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.wiki-root .wiki-scroll::-webkit-scrollbar-thumb {
+  background: rgba(55, 53, 47, 0.16);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.wiki-root .wiki-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(55, 53, 47, 0.28);
+  background-clip: padding-box;
+}
+.wiki-root .wiki-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ──────────────────────────────────────────────────────────
+ * BlockNote (ariakit) 테마 오버라이드
+ * 헤드리스이므로 CSS 변수로 톤 통일. 에디터를 박스에서 꺼내 full-bleed로.
+ * ────────────────────────────────────────────────────────── */
+.wiki-root .bn-container {
+  --bn-colors-editor-text: var(--wiki-text);
+  --bn-colors-editor-background: transparent;
+  --bn-colors-menu-text: var(--wiki-text);
+  --bn-colors-menu-background: var(--wiki-bg);
+  --bn-colors-tooltip-text: var(--wiki-text);
+  --bn-colors-tooltip-background: var(--wiki-bg-subtle);
+  --bn-colors-hovered-text: var(--wiki-text);
+  --bn-colors-hovered-background: var(--wiki-hover);
+  --bn-colors-selected-text: var(--wiki-text);
+  --bn-colors-selected-background: var(--wiki-selected);
+  --bn-colors-disabled-text: var(--wiki-text-muted);
+  --bn-colors-disabled-background: var(--wiki-bg-sunken);
+  --bn-colors-border: var(--wiki-border);
+  --bn-colors-side-menu: var(--wiki-text-muted);
+  --bn-colors-shadow: rgba(15, 15, 15, 0.12);
+  --bn-border-radius: var(--wiki-radius);
+  --bn-font-family: inherit;
+  font-size: 16px;
+}
+
+/* 에디터 본문 좌우 패딩 제거 (컨테이너가 폭을 잡음) */
+.wiki-root .bn-editor {
+  padding-inline: 0;
+}
+
+/* 본문 블록 간격·가독성 */
+.wiki-root .bn-block-content {
+  line-height: 1.65;
+}
+.wiki-root .bn-inline-content {
+  font-size: 1rem;
+}
+
+/* 제목 블록 톤 */
+.wiki-root .bn-block-content[data-content-type="heading"] {
+  letter-spacing: -0.01em;
+}
+
+/* 메뉴/슬래시 팝오버 그림자·라운드 통일 */
+.wiki-root .bn-popover-content,
+.wiki-root .bn-suggestion-menu,
+.wiki-root .bn-formatting-toolbar {
+  box-shadow: var(--wiki-shadow-md);
+  border: 1px solid var(--wiki-border);
+  border-radius: var(--wiki-radius-lg);
+}
+
+/* ──────────────────────────────────────────────────────────
+ * 공통 컴포넌트 모션 (Toast / Modal / Skeleton)
+ * 미세하게 — 과한 애니메이션 금지
+ * ────────────────────────────────────────────────────────── */
+@keyframes wiki-toast-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.wiki-toast-enter {
+  animation: wiki-toast-in 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes wiki-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes wiki-panel-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.wiki-modal-overlay {
+  background: rgba(15, 15, 15, 0.32);
+  backdrop-filter: blur(2px);
+  animation: wiki-overlay-in 140ms ease;
+}
+.wiki-modal-panel {
+  animation: wiki-panel-in 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes wiki-skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.wiki-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--wiki-bg-sunken) 0%,
+    var(--wiki-bg-subtle) 50%,
+    var(--wiki-bg-sunken) 100%
+  );
+  animation: wiki-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wiki-toast-enter,
+  .wiki-modal-overlay,
+  .wiki-modal-panel,
+  .wiki-skeleton {
+    animation: none;
+  }
+}

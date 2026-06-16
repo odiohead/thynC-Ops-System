@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -16,12 +16,15 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import MovePageModal from './MovePageModal'
+import NotificationBell from './NotificationBell'
+import { useToast } from './ui/Toast'
 
 export type SidebarPage = {
   id: string
   parentId: string | null
   title: string
   sortOrder: number
+  icon?: string | null
 }
 
 type Props = {
@@ -29,6 +32,9 @@ type Props = {
 }
 
 type TreeNode = SidebarPage & { children: TreeNode[] }
+
+const COLLAPSED_KEY = 'wiki-sidebar-collapsed'
+const COLLAPSED_IDS_KEY = 'wiki-sidebar-collapsed-ids'
 
 function buildTree(pages: SidebarPage[]): TreeNode[] {
   const map = new Map<string, TreeNode>()
@@ -76,20 +82,77 @@ export default function WikiSidebar({ pages }: Props) {
   const tree = useMemo(() => buildTree(pages), [pages])
   const pathname = usePathname()
   const router = useRouter()
-  const currentId = pathname.startsWith('/wiki/') && pathname !== '/wiki/new'
-    ? pathname.replace('/wiki/', '')
-    : null
+  const toast = useToast()
+  const currentId =
+    pathname.startsWith('/wiki/') && pathname !== '/wiki/new'
+      ? pathname.replace('/wiki/', '')
+      : null
+
+  const byId = useMemo(() => new Map(pages.map((p) => [p.id, p])), [pages])
+
+  // ── 사이드바 폭 접기 (localStorage 유지) ───────────────────
+  const [collapsed, setCollapsed] = useState(false)
+  useEffect(() => {
+    setCollapsed(localStorage.getItem(COLLAPSED_KEY) === '1')
+  }, [])
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      const next = !c
+      localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0')
+      return next
+    })
+  }
+
+  // ── 펼침/접힘 상태 (collapsed = 접힌 id 집합, 기본은 모두 펼침) ──
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(COLLAPSED_IDS_KEY)
+      if (raw) setCollapsedIds(new Set(JSON.parse(raw)))
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  // 현재 페이지의 조상은 항상 펼쳐 보이도록 (자동 노출)
+  useEffect(() => {
+    if (!currentId) return
+    const ancestors: string[] = []
+    let cur = byId.get(currentId)?.parentId ?? null
+    const guard = new Set<string>()
+    while (cur && !guard.has(cur)) {
+      guard.add(cur)
+      ancestors.push(cur)
+      cur = byId.get(cur)?.parentId ?? null
+    }
+    if (ancestors.length === 0) return
+    setCollapsedIds((prev) => {
+      if (!ancestors.some((a) => prev.has(a))) return prev
+      const next = new Set(prev)
+      ancestors.forEach((a) => next.delete(a))
+      localStorage.setItem(COLLAPSED_IDS_KEY, JSON.stringify(Array.from(next)))
+      return next
+    })
+  }, [currentId, byId])
+
+  const toggleExpand = (id: string) => {
+    setCollapsedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      localStorage.setItem(COLLAPSED_IDS_KEY, JSON.stringify(Array.from(next)))
+      return next
+    })
+  }
 
   const [activeId, setActiveId] = useState<string | null>(null)
   const [moveTarget, setMoveTarget] = useState<SidebarPage | null>(null)
-  const byId = useMemo(() => new Map(pages.map((p) => [p.id, p])), [pages])
   const activeNode = activeId ? byId.get(activeId) : null
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   )
 
-  // 시각적 트리와 동일한 정렬의 형제 목록 (position 계산용)
   const visualSiblings = (parentId: string | null): SidebarPage[] =>
     pages
       .filter((p) => (p.parentId ?? null) === parentId)
@@ -106,7 +169,7 @@ export default function WikiSidebar({ pages }: Props) {
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
-      alert(err.error || '이동 실패')
+      toast.error(err.error || '이동 실패')
     } else {
       router.refresh()
     }
@@ -129,7 +192,6 @@ export default function WikiSidebar({ pages }: Props) {
     if (overId === 'root-end') {
       const dragged = byId.get(draggedId)
       if (dragged && dragged.parentId === null) {
-        // 이미 루트 → 루트 최하단으로 재배치
         const sibs = visualSiblings(null).filter((s) => s.id !== draggedId)
         await applyMove(draggedId, { parentId: null, position: sibs.length })
       } else {
@@ -150,7 +212,6 @@ export default function WikiSidebar({ pages }: Props) {
       const gapNode = byId.get(gapNodeId)
       if (!gapNode) return
       const newParentId = gapNode.parentId ?? null
-      // 새 부모가 드래그 중인 페이지 본인/후손이면 순환 → 차단
       if (newParentId !== null && blocked.has(newParentId)) return
       if (gapNodeId === draggedId) return
       const sibs = visualSiblings(newParentId).filter((s) => s.id !== draggedId)
@@ -161,73 +222,122 @@ export default function WikiSidebar({ pages }: Props) {
     }
   }
 
-  return (
-    <aside className="w-72 shrink-0 border-r bg-gray-50 overflow-y-auto p-3">
-      <div className="flex items-center justify-between mb-2">
-        <Link href="/wiki" className="text-sm font-bold text-gray-700 hover:text-gray-900">
-          사내 위키
-        </Link>
+  if (collapsed) {
+    return (
+      <aside className="flex w-11 shrink-0 flex-col items-center gap-2 border-r border-[var(--wiki-border)] bg-[var(--wiki-bg-subtle)] py-3">
+        <button
+          onClick={toggleCollapsed}
+          title="사이드바 펼치기"
+          className="rounded-[6px] px-2 py-1 text-[var(--wiki-text-soft)] transition hover:bg-[var(--wiki-hover)]"
+        >
+          »
+        </button>
         <Link
           href="/wiki/new"
-          className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+          title="새 페이지"
+          className="rounded-[6px] px-2 py-1 text-[var(--wiki-accent)] transition hover:bg-[var(--wiki-accent-soft)]"
         >
-          + 새 페이지
+          ＋
         </Link>
-      </div>
-
-      <nav className="mb-3 grid grid-cols-3 gap-1 text-[11px]">
         <Link
           href="/wiki/search"
-          className={`text-center py-1 rounded border border-gray-200 hover:bg-gray-100 ${pathname === '/wiki/search' ? 'bg-gray-200' : 'bg-white'}`}
+          title="검색"
+          className="rounded-[6px] px-2 py-1 text-[var(--wiki-text-soft)] transition hover:bg-[var(--wiki-hover)]"
         >
-          🔍 검색
+          🔍
         </Link>
-        <Link
-          href="/wiki/favorites"
-          className={`text-center py-1 rounded border border-gray-200 hover:bg-gray-100 ${pathname === '/wiki/favorites' ? 'bg-gray-200' : 'bg-white'}`}
-        >
-          ⭐ 즐겨찾기
-        </Link>
-        <Link
-          href="/wiki/recent"
-          className={`text-center py-1 rounded border border-gray-200 hover:bg-gray-100 ${pathname === '/wiki/recent' ? 'bg-gray-200' : 'bg-white'}`}
-        >
-          🕐 최근
-        </Link>
-      </nav>
+      </aside>
+    )
+  }
 
-      {tree.length === 0 ? (
-        <div className="text-xs text-gray-400 px-2 py-4 text-center">아직 페이지가 없습니다</div>
-      ) : (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={pointerWithin}
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
-          onDragCancel={() => setActiveId(null)}
-        >
-          <ul className="space-y-0">
-            {tree.map((node) => (
-              <TreeRow
-                key={node.id}
-                node={node}
-                depth={0}
-                currentId={currentId}
-                dragging={activeId !== null}
-                onMoveModal={(p) => setMoveTarget(p)}
-              />
-            ))}
-          </ul>
-          <RootEndZone visible={activeId !== null} />
-          <DragOverlay dropAnimation={null}>
-            {activeNode ? (
-              <div className="px-2 py-1 bg-white border border-blue-300 rounded shadow text-sm text-gray-800 opacity-90">
-                {activeNode.title}
-              </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
-      )}
+  return (
+    <aside className="wiki-scroll flex w-72 shrink-0 flex-col overflow-y-auto border-r border-[var(--wiki-border)] bg-[var(--wiki-bg-subtle)]">
+      <div className="sticky top-0 z-10 bg-[var(--wiki-bg-subtle)] px-3 pt-3">
+        <div className="mb-2 flex items-center justify-between">
+          <Link
+            href="/wiki"
+            className="text-sm font-bold text-[var(--wiki-text)] transition hover:opacity-70"
+          >
+            사내 위키
+          </Link>
+          <div className="flex items-center gap-1">
+            <NotificationBell />
+            <Link
+              href="/wiki/new"
+              className="rounded-[6px] bg-[var(--wiki-accent)] px-2 py-1 text-xs font-medium text-white transition hover:brightness-95"
+            >
+              + 새 페이지
+            </Link>
+            <button
+              onClick={toggleCollapsed}
+              title="사이드바 접기"
+              className="rounded-[6px] px-1.5 py-1 text-[var(--wiki-text-muted)] transition hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]"
+            >
+              «
+            </button>
+          </div>
+        </div>
+
+        <nav className="mb-3 grid grid-cols-2 gap-1 text-[11px]">
+          {[
+            { href: '/wiki/search', label: '🔍 검색' },
+            { href: '/wiki/favorites', label: '⭐ 즐겨찾기' },
+            { href: '/wiki/recent', label: '🕐 최근' },
+            { href: '/wiki/trash', label: '🗑 휴지통' },
+          ].map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`rounded-[6px] border py-1 text-center transition ${
+                pathname === item.href
+                  ? 'border-[var(--wiki-border-strong)] bg-[var(--wiki-active)] text-[var(--wiki-text)]'
+                  : 'border-[var(--wiki-border)] bg-[var(--wiki-bg)] text-[var(--wiki-text-soft)] hover:bg-[var(--wiki-hover)]'
+              }`}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      </div>
+
+      <div className="flex-1 px-3 pb-4">
+        {tree.length === 0 ? (
+          <div className="px-2 py-6 text-center text-xs text-[var(--wiki-text-muted)]">
+            아직 페이지가 없습니다
+          </div>
+        ) : (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={pointerWithin}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+            onDragCancel={() => setActiveId(null)}
+          >
+            <ul className="space-y-0">
+              {tree.map((node) => (
+                <TreeRow
+                  key={node.id}
+                  node={node}
+                  depth={0}
+                  currentId={currentId}
+                  dragging={activeId !== null}
+                  collapsedIds={collapsedIds}
+                  onToggleExpand={toggleExpand}
+                  onMoveModal={(p) => setMoveTarget(p)}
+                />
+              ))}
+            </ul>
+            <RootEndZone visible={activeId !== null} />
+            <DragOverlay dropAnimation={null}>
+              {activeNode ? (
+                <div className="rounded-[6px] border border-[var(--wiki-accent)] bg-[var(--wiki-bg)] px-2 py-1 text-sm text-[var(--wiki-text)] opacity-90 shadow-[var(--wiki-shadow-md)]">
+                  {activeNode.title}
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        )}
+      </div>
 
       {moveTarget && (
         <MovePageModal
@@ -241,15 +351,25 @@ export default function WikiSidebar({ pages }: Props) {
   )
 }
 
-function GapDropZone({ nodeId, depth, visible }: { nodeId: string; depth: number; visible: boolean }) {
+function GapDropZone({
+  nodeId,
+  depth,
+  visible,
+}: {
+  nodeId: string
+  depth: number
+  visible: boolean
+}) {
   const { isOver, setNodeRef } = useDroppable({ id: `before:${nodeId}` })
   return (
     <div
       ref={setNodeRef}
-      className={visible ? 'h-2 -my-1 relative z-10' : 'h-0'}
-      style={{ marginLeft: depth * 12 + 4 }}
+      className={visible ? 'relative z-10 -my-1 h-2' : 'h-0'}
+      style={{ marginLeft: depth * 14 + 4 }}
     >
-      {visible && isOver && <div className="h-0.5 mt-0.5 bg-blue-500 rounded" />}
+      {visible && isOver && (
+        <div className="mt-0.5 h-0.5 rounded bg-[var(--wiki-accent)]" />
+      )}
     </div>
   )
 }
@@ -260,8 +380,10 @@ function RootEndZone({ visible }: { visible: boolean }) {
   return (
     <div
       ref={setNodeRef}
-      className={`mt-1 px-2 py-2 text-[11px] text-center border border-dashed rounded ${
-        isOver ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-400'
+      className={`mt-1 rounded-[6px] border border-dashed px-2 py-2 text-center text-[11px] transition ${
+        isOver
+          ? 'border-[var(--wiki-accent)] bg-[var(--wiki-accent-soft)] text-[var(--wiki-accent)]'
+          : 'border-[var(--wiki-border-strong)] text-[var(--wiki-text-muted)]'
       }`}
     >
       여기에 놓으면 최상위로 이동
@@ -274,18 +396,23 @@ function TreeRow({
   depth,
   currentId,
   dragging,
+  collapsedIds,
+  onToggleExpand,
   onMoveModal,
 }: {
   node: TreeNode
   depth: number
   currentId: string | null
   dragging: boolean
+  collapsedIds: Set<string>
+  onToggleExpand: (id: string) => void
   onMoveModal: (p: SidebarPage) => void
 }) {
   const router = useRouter()
-  const [expanded, setExpanded] = useState(true)
+  const toast = useToast()
   const [busy, setBusy] = useState(false)
   const hasChildren = node.children.length > 0
+  const expanded = !collapsedIds.has(node.id)
   const isCurrent = currentId === node.id
 
   const {
@@ -307,7 +434,7 @@ function TreeRow({
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        alert(err.error || '이동 실패')
+        toast.error(err.error || '이동 실패')
       } else {
         router.refresh()
       }
@@ -325,40 +452,45 @@ function TreeRow({
       <GapDropZone nodeId={node.id} depth={depth} visible={dragging} />
       <div
         ref={setDropRef}
-        className={`group flex items-center gap-1 px-1 py-1 rounded text-sm ${
-          isCurrent ? 'bg-blue-100 text-blue-900' : 'hover:bg-gray-200 text-gray-800'
-        } ${dragging && isOver ? 'ring-2 ring-blue-400 bg-blue-50' : ''}`}
-        style={{ paddingLeft: depth * 12 + 4 }}
+        className={`group flex items-center gap-1 rounded-[6px] px-1 py-1 text-sm transition ${
+          isCurrent
+            ? 'bg-[var(--wiki-selected)] font-medium text-[var(--wiki-text)]'
+            : 'text-[var(--wiki-text-soft)] hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]'
+        } ${dragging && isOver ? 'ring-2 ring-[var(--wiki-accent)] ring-inset' : ''}`}
+        style={{ paddingLeft: depth * 14 + 4 }}
       >
         <span
           ref={setDragRef}
           {...attributes}
           {...listeners}
-          className="w-3 shrink-0 cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-600 opacity-0 group-hover:opacity-100 select-none"
+          className="w-3 shrink-0 cursor-grab select-none text-[var(--wiki-text-muted)] opacity-0 transition hover:text-[var(--wiki-text-soft)] active:cursor-grabbing group-hover:opacity-100"
           title="드래그하여 이동"
         >
           ⠿
         </span>
 
         <button
-          onClick={() => hasChildren && setExpanded(!expanded)}
-          className={`w-4 h-4 flex items-center justify-center text-gray-500 ${
-            hasChildren ? 'hover:text-gray-800' : 'invisible'
+          onClick={() => hasChildren && onToggleExpand(node.id)}
+          className={`flex h-4 w-4 items-center justify-center text-[10px] text-[var(--wiki-text-muted)] transition ${
+            hasChildren ? 'hover:text-[var(--wiki-text)]' : 'invisible'
           }`}
           aria-label={expanded ? 'collapse' : 'expand'}
         >
           {hasChildren ? (expanded ? '▼' : '▶') : ''}
         </button>
 
-        <Link href={`/wiki/${node.id}`} className="flex-1 truncate">
-          {node.title}
+        <Link href={`/wiki/${node.id}`} className="flex flex-1 items-center gap-1.5 truncate">
+          <span className="shrink-0 text-[13px] leading-none opacity-90">
+            {node.icon || '📄'}
+          </span>
+          <span className="truncate">{node.title || '제목 없음'}</span>
         </Link>
 
-        <div className="hidden group-hover:flex items-center gap-0.5 ml-1">
+        <div className="ml-1 hidden items-center gap-0.5 group-hover:flex">
           <button
             onClick={() => move('up')}
             disabled={busy}
-            className="text-xs text-gray-500 hover:text-gray-900 px-1"
+            className="rounded px-1 text-xs text-[var(--wiki-text-muted)] transition hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]"
             title="위로"
           >
             ↑
@@ -366,21 +498,21 @@ function TreeRow({
           <button
             onClick={() => move('down')}
             disabled={busy}
-            className="text-xs text-gray-500 hover:text-gray-900 px-1"
+            className="rounded px-1 text-xs text-[var(--wiki-text-muted)] transition hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]"
             title="아래로"
           >
             ↓
           </button>
           <button
             onClick={() => onMoveModal(node)}
-            className="text-xs text-gray-500 hover:text-gray-900 px-1"
+            className="rounded px-1 text-xs text-[var(--wiki-text-muted)] transition hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]"
             title="다른 위치로 이동"
           >
             📂
           </button>
           <button
             onClick={addChild}
-            className="text-xs text-gray-500 hover:text-gray-900 px-1"
+            className="rounded px-1 text-xs text-[var(--wiki-text-muted)] transition hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]"
             title="하위 페이지 추가"
           >
             +
@@ -397,6 +529,8 @@ function TreeRow({
               depth={depth + 1}
               currentId={currentId}
               dragging={dragging}
+              collapsedIds={collapsedIds}
+              onToggleExpand={onToggleExpand}
               onMoveModal={onMoveModal}
             />
           ))}

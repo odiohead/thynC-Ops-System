@@ -19,7 +19,7 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 | 차트 | Recharts |
 | 아이콘 | lucide-react |
 | 리치 텍스트 에디터 | Tiptap (`@tiptap/react` + 확장) — 기존 모듈용 |
-| 블록 에디터 (위키) | BlockNote (`@blocknote/core`, `@blocknote/react`, `@blocknote/ariakit`) — 위키 전용 |
+| 블록 에디터 (위키) | BlockNote (`@blocknote/core`, `@blocknote/react`, `@blocknote/ariakit`, `@blocknote/xl-multi-column`) — 위키 전용 |
 | 드래그앤드롭 (위키) | `@dnd-kit/core` — 위키 사이드바 트리 이동 전용 |
 | 프로세스 관리 | PM2 |
 | 웹서버 | Nginx |
@@ -355,7 +355,19 @@ prisma/
 - `id` (uuid), `parentId`(self-reference, 트리 구조), `title`, `slug` (선택)
 - `contentJson` (JSONB, BlockNote 블록 배열), `isPublished`, `sortOrder`
 - `authorId` → User, `lastEditorId` → User (nullable)
-- 인덱스: `(parent_id, sort_order)`, `(updated_at DESC)`, `(author_id)`
+- `icon` (이모지), `coverUrl` (커버 이미지 S3 URL), `coverOffsetY` (커버 세로 위치 %)
+- `isTemplate` (템플릿 표시 — 트리/홈/검색에서 제외, 신규 작성 갤러리에만 노출)
+- `deletedAt` (휴지통 soft delete — NULL=정상, 값=삭제됨)
+- 인덱스: `(parent_id, sort_order)`, `(updated_at DESC)`, `(author_id)`, `(is_template)`, `(deleted_at)`, title/plain_text trigram GIN(`pg_trgm`, 검색 가속)
+
+#### WikiPageLink (페이지 간 링크 — 백링크)
+- 본문의 `wikiPageLink` 블록을 인덱싱. `sourcePageId` → `targetPageId` (복합 PK), `(target_page_id)` 역참조 인덱스
+- 본문 저장 시 자동 재계산. 상세 페이지 "이 페이지를 링크한 페이지" 패널 산출용
+
+#### WikiNotification (알림)
+- `id` (uuid), `userId` → User, `pageId` → WikiPage(nullable), `type`(`comment` 등)
+- `actorId`/`actorName`/`pageTitle` (스냅샷), `readAt`(nullable), `createdAt`
+- 인덱스 `(user_id, read_at, created_at DESC)`. 댓글 작성 시 작성자+최근수정자에게 생성
 
 #### WikiAttachment (위키 첨부)
 - `id` (uuid), `pageId` → WikiPage, `fileName`, `s3Key` (UNIQUE)
@@ -546,10 +558,21 @@ prisma/
 - 후보: SEERS 소속·활성·해당 풀 미등록 사용자만 표시
 - 목록 테이블: 번호·이름·이메일·소속·부서·추가일·삭제
 
-### 사내 위키 (Phase 2-7)
+### 사내 위키 (Phase 2-13)
 - Notion-like 블록 에디터(BlockNote) 기반 사내 위키
 - 별도 PostgreSQL 스키마 `wiki`에 격리, 메인 모듈과 단방향 의존성 유지
 - 페이지 단위 작성·조회·수정·삭제 (BlockNote JSON 본문)
+- **디자인 시스템(Phase 9)**: 위키 전용 디자인 토큰(`app/wiki/wiki-theme.css`, `.wiki-root` 스코프), full-bleed 레이아웃, 공통 컴포넌트(Toast/WikiModal/Skeleton/EmptyState/OverflowMenu), `alert()` 미사용(토스트로 통일)
+- **자동 저장 + 충돌 감지(Phase 10)**: 편집 모드 토글 없이 진입 즉시 편집, 변경 시 debounce 1.5초 자동 저장, 헤더 저장 인디케이터. `baseUpdatedAt` 비교로 다른 곳 수정 시 409 충돌 안내(실시간 협업 대신 lost-update 방지). 버전 스냅샷은 2분 throttle
+- **페이지 아이콘·커버(Phase 10)**: 이모지 아이콘(경량 EmojiPicker) + 커버 이미지. 사이드바·홈·검색·휴지통에 아이콘 노출
+- **블록 확장(Phase 11)**: 콜아웃(💡 배경색 박스)·구분선 커스텀 블록(슬래시 메뉴), **멀티컬럼**(`@blocknote/xl-multi-column` — 블록을 좌우 칼럼으로 나란히 배치, 드래그로 칼럼 생성)
+- **목차 TOC(Phase 11)**: heading 추출 → 넓은 화면 우측 floating 목차(클릭 스크롤)
+- **홈 대시보드(Phase 11)**: 즐겨찾기 / 최근 본 / 최근 수정 3섹션
+- **백링크(Phase 12)**: 본문 저장 시 페이지 링크를 `WikiPageLink`로 인덱싱, 상세 하단 "이 페이지를 링크한 페이지" 패널
+- **템플릿(Phase 12)**: 페이지 상세 ⋯ "템플릿으로 저장", 신규 작성 시 "빈 페이지 + 템플릿 갤러리" 선택
+- **휴지통(Phase 13)**: soft delete(`deletedAt`) → `/wiki/trash`에서 복구(부모 삭제 시 루트 승격)/영구삭제. 모든 조회에서 삭제 페이지 제외
+- **검색 고도화(Phase 13)**: 작성자·기간 필터, `pg_trgm` GIN 인덱스로 ILIKE 가속, 삭제/템플릿 제외
+- **알림(Phase 13)**: 댓글 시 작성자+최근수정자에게 `WikiNotification` 생성, 사이드바 🔔 벨(미읽음 뱃지·60초 폴링·읽음 처리)
 - **계층 구조**: `parentId`로 무한 깊이 트리, 좌측 사이드바에서 접기/펼치기·형제 순서 변경(↑↓)·하위 페이지 추가(+)
 - **드래그앤드롭 트리 이동** (`@dnd-kit/core`): 사이드바에서 핸들(⠿)로 드래그 — 행 위에 놓으면 하위로, 행 사이 틈에 놓으면 해당 위치로, 하단 존에 놓으면 최상위로. 자기 자신/후손으로의 이동은 차단
 - **페이지 이동 모달**: 사이드바 📂 버튼 또는 페이지 상세 "📂 이동" 버튼 → 트리에서 새 부모 선택 (루트 이동 포함)
@@ -939,14 +962,15 @@ npm run dev
 | POST | `/api/drive/delete` | 파일 삭제 |
 | POST | `/api/drive/export/hospitals` | 병원 목록 스프레드시트 내보내기 (Sheets API) |
 
-### 위키 (Phase 2-7)
+### 위키 (Phase 2-13)
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| GET  | `/api/wiki/pages` | 페이지 목록 (`?parentId=` 필터 또는 `?refType=&refCode=` 역참조 검색) |
+| GET  | `/api/wiki/pages` | 페이지 목록 (`?parentId=` 필터 / `?refType=&refCode=` 역참조 / `?templates=1` 템플릿 목록). 삭제·템플릿 기본 제외 |
 | POST | `/api/wiki/pages` | 페이지 생성 — USER+, 감사로그 CREATE, `plainText` 자동 |
 | GET  | `/api/wiki/pages/[id]` | 페이지 상세 |
-| PUT  | `/api/wiki/pages/[id]` | 페이지 수정 — USER+, 감사로그 UPDATE, **본문 변경 시 직전 상태 자동 버전 스냅샷 + `plainText` 동기화** |
-| DELETE | `/api/wiki/pages/[id]` | 페이지 삭제 (자식 + 첨부 S3 best-effort 정리) — USER+, 감사로그 DELETE |
+| PUT  | `/api/wiki/pages/[id]` | 페이지 수정 — USER+, 감사로그 UPDATE. 본문 변경 시 **버전 스냅샷(2분 throttle) + `plainText`/백링크 동기화**. `icon`/`coverUrl`/`coverOffsetY`/`isTemplate` 수정, `baseUpdatedAt`로 **충돌 감지(409)** |
+| DELETE | `/api/wiki/pages/[id]` | 휴지통 이동(soft delete, 자식 동반). `?permanent=1` → 영구 삭제(+첨부 S3 정리) — USER+, 감사로그 DELETE |
+| POST | `/api/wiki/pages/[id]/restore` | 휴지통에서 복구 (자식 동반, 부모 삭제 시 루트 승격) — USER+ |
 | PATCH | `/api/wiki/pages/[id]/move` | 페이지 이동/정렬 — USER+, 순환 참조 차단. `{direction}` 형제 교환 / `{parentId}` 부모 변경(최하단) / `{parentId, position}` 특정 위치 삽입(형제 sortOrder 재부여) / `{sortOrder}` 직접 지정 |
 | POST | `/api/wiki/pages/[id]/duplicate` | 페이지 복제 (`{includeChildren?}`) — USER+, 본문·태그·참조 복사, 감사로그 CREATE |
 | GET  | `/api/wiki/tree` | 전체 위키 페이지 평면 리스트 |
@@ -967,7 +991,9 @@ npm run dev
 | GET  | `/api/wiki/pages/[id]/favorite` | 현재 페이지 즐겨찾기 여부 |
 | POST | `/api/wiki/pages/[id]/favorite` | 즐겨찾기 추가 |
 | DELETE | `/api/wiki/pages/[id]/favorite` | 즐겨찾기 해제 |
-| GET  | `/api/wiki/search` | 검색 (`?q=&tagId=`) — 제목 + plain_text ILIKE, snippet 반환 |
+| GET  | `/api/wiki/search` | 검색 (`?q=&tagId=`) — 제목 + plain_text ILIKE(trgm 가속), snippet 반환, 삭제/템플릿 제외. (페이지 `/wiki/search`는 작성자·기간 필터 추가) |
+| GET  | `/api/wiki/notifications` | 내 알림 목록 + 미읽음 수 |
+| PATCH | `/api/wiki/notifications` | 알림 읽음 처리 (`{ids?}` 없으면 전체) |
 | GET  | `/api/wiki/pages/[id]/versions` | 페이지 버전 목록 |
 | GET  | `/api/wiki/pages/[id]/versions/[versionId]` | 버전 상세 |
 | POST | `/api/wiki/pages/[id]/versions/[versionId]` | 해당 버전으로 복원 — USER+, 감사로그 UPDATE |

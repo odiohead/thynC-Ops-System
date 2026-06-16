@@ -721,6 +721,11 @@ model WikiPage {
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   plainText   String              @default("") @map("plain_text")
+  icon         String? @map("icon")
+  coverUrl     String? @map("cover_url")
+  coverOffsetY Int     @default(50) @map("cover_offset_y")
+  isTemplate   Boolean @default(false) @map("is_template")
+  deletedAt    DateTime? @map("deleted_at")
 
   parent      WikiPage?           @relation("WikiPageTree", fields: [parentId], references: [id], onDelete: Cascade)
   children    WikiPage[]          @relation("WikiPageTree")
@@ -733,11 +738,42 @@ model WikiPage {
   viewLogs    WikiViewLog[]
   versions    WikiVersion[]
   comments    WikiComment[]
+  outgoingLinks WikiPageLink[]    @relation("WikiPageLinkSource")
+  backlinks     WikiPageLink[]    @relation("WikiPageLinkTarget")
 
   @@index([parentId, sortOrder])
   @@index([updatedAt(sort: Desc)])
   @@index([authorId])
   @@map("wiki_pages")
+  @@schema("wiki")
+}
+
+model WikiPageLink {
+  sourcePageId String @map("source_page_id")
+  targetPageId String @map("target_page_id")
+
+  source WikiPage @relation("WikiPageLinkSource", fields: [sourcePageId], references: [id], onDelete: Cascade)
+  target WikiPage @relation("WikiPageLinkTarget", fields: [targetPageId], references: [id], onDelete: Cascade)
+
+  @@id([sourcePageId, targetPageId])
+  @@index([targetPageId])
+  @@map("wiki_page_links")
+  @@schema("wiki")
+}
+
+model WikiNotification {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  pageId    String?   @map("page_id")
+  type      String
+  actorId   String?   @map("actor_id")
+  actorName String?   @map("actor_name")
+  pageTitle String?   @map("page_title")
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId, readAt, createdAt])
+  @@map("wiki_notifications")
   @@schema("wiki")
 }
 

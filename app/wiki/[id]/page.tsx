@@ -35,7 +35,7 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
     },
   })
 
-  if (!page) notFound()
+  if (!page || page.deletedAt) notFound()
 
   const initialContent = Array.isArray(page.contentJson)
     ? (page.contentJson as unknown as PartialBlock[])
@@ -85,6 +85,17 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
   })
   const tags = tagRels.map((r) => ({ id: r.tag.id, name: r.tag.name, color: r.tag.color }))
 
+  // 백링크 — 이 페이지를 링크한 페이지들
+  const backlinkRels = await prisma.wikiPageLink.findMany({
+    where: { targetPageId: page.id, source: { deletedAt: null } },
+    select: { source: { select: { id: true, title: true, icon: true } } },
+  })
+  const backlinks = backlinkRels.map((r) => ({
+    id: r.source.id,
+    title: r.source.title,
+    icon: r.source.icon,
+  }))
+
   // 즐겨찾기 + 열람 로그 (현재 사용자)
   const token = cookies().get('auth-token')?.value
   const jwt = token ? await verifyToken(token) : null
@@ -108,6 +119,10 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
       parentId={page.parentId}
       breadcrumb={breadcrumb}
       initialContent={initialContent}
+      icon={page.icon}
+      coverUrl={page.coverUrl}
+      coverOffsetY={page.coverOffsetY}
+      backlinks={backlinks}
       author={page.author.name}
       lastEditor={page.lastEditor?.name ?? page.author.name}
       updatedAt={page.updatedAt.toISOString()}

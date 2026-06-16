@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { deleteFromS3 } from '@/lib/s3'
-import { extractPlainTextFromBlocks } from '@/lib/wiki/blockText'
+import { extractPlainTextFromBlocks, extractPageLinks } from '@/lib/wiki/blockText'
 
 type Ctx = { params: { id: string } }
 
@@ -39,13 +39,30 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   if (authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()
-  const { title, slug, contentJson, isPublished, parentId, sortOrder } = body as {
+  const {
+    title,
+    slug,
+    contentJson,
+    isPublished,
+    parentId,
+    sortOrder,
+    icon,
+    coverUrl,
+    coverOffsetY,
+    isTemplate,
+    baseUpdatedAt,
+  } = body as {
     title?: string
     slug?: string | null
     contentJson?: unknown
     isPublished?: boolean
     parentId?: string | null
     sortOrder?: number
+    icon?: string | null
+    coverUrl?: string | null
+    coverOffsetY?: number
+    isTemplate?: boolean
+    baseUpdatedAt?: string
   }
 
   const existing = await prisma.wikiPage.findUnique({ where: { id: params.id } })
@@ -55,24 +72,69 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
     return NextResponse.json({ error: 'Cannot set self as parent' }, { status: 400 })
   }
 
+  // 충돌 감지: 클라이언트가 보고 있던 시점(baseUpdatedAt) 이후 다른 곳에서 수정됐으면 409
+  // (실시간 협업 대신 lost-update 방지. baseUpdatedAt 없으면 검사 생략 — 내부 즉시저장 등)
+  if (baseUpdatedAt) {
+    const baseMs = new Date(baseUpdatedAt).getTime()
+    if (!Number.isNaN(baseMs) && existing.updatedAt.getTime() > baseMs) {
+      return NextResponse.json(
+        {
+          error: '다른 곳에서 이 페이지가 수정되었습니다. 새로고침 후 다시 시도하세요.',
+          conflict: true,
+          serverUpdatedAt: existing.updatedAt.toISOString(),
+        },
+        { status: 409 },
+      )
+    }
+  }
+
   // 본문 변경 시 plainText 동기화 + 변경 전 버전 스냅샷 저장
   const willChangeContent = contentJson !== undefined
   const updated = await prisma.$transaction(async (tx) => {
-    // 본문이 바뀌면 직전 상태를 wiki_versions에 스냅샷
+    // 본문이 바뀌면 직전 상태를 wiki_versions에 스냅샷.
+    // 단, 자동저장으로 스냅샷이 폭증하지 않도록 마지막 스냅샷이 2분 이상 지났을 때만 기록.
     if (willChangeContent) {
-      const current = await tx.wikiPage.findUnique({
-        where: { id: params.id },
-        select: { title: true, contentJson: true },
+      const lastVersion = await tx.wikiVersion.findFirst({
+        where: { pageId: params.id },
+        orderBy: { savedAt: 'desc' },
+        select: { savedAt: true },
       })
-      if (current) {
-        await tx.wikiVersion.create({
-          data: {
-            pageId: params.id,
-            title: current.title,
-            contentJson: current.contentJson as Prisma.InputJsonValue,
-            savedById: authUser.userId,
-          },
+      const SNAPSHOT_INTERVAL_MS = 2 * 60 * 1000
+      const shouldSnapshot =
+        !lastVersion || existing.updatedAt.getTime() - lastVersion.savedAt.getTime() > SNAPSHOT_INTERVAL_MS
+      if (shouldSnapshot) {
+        const current = await tx.wikiPage.findUnique({
+          where: { id: params.id },
+          select: { title: true, contentJson: true },
         })
+        if (current) {
+          await tx.wikiVersion.create({
+            data: {
+              pageId: params.id,
+              title: current.title,
+              contentJson: current.contentJson as Prisma.InputJsonValue,
+              savedById: authUser.userId,
+            },
+          })
+        }
+      }
+    }
+    // 백링크 인덱스 갱신: 본문이 바뀌면 이 페이지의 outgoing 링크를 재계산
+    if (willChangeContent) {
+      const rawTargets = extractPageLinks(contentJson).filter((t) => t !== params.id)
+      await tx.wikiPageLink.deleteMany({ where: { sourcePageId: params.id } })
+      if (rawTargets.length > 0) {
+        // 삭제된 페이지를 가리키는 링크는 FK 위반이 되므로 실존 페이지만 기록
+        const existing = await tx.wikiPage.findMany({
+          where: { id: { in: rawTargets } },
+          select: { id: true },
+        })
+        if (existing.length > 0) {
+          await tx.wikiPageLink.createMany({
+            data: existing.map((e) => ({ sourcePageId: params.id, targetPageId: e.id })),
+            skipDuplicates: true,
+          })
+        }
       }
     }
     return tx.wikiPage.update({
@@ -87,6 +149,10 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
         ...(isPublished !== undefined && { isPublished }),
         ...(parentId !== undefined && { parentId }),
         ...(sortOrder !== undefined && { sortOrder }),
+        ...(icon !== undefined && { icon }),
+        ...(coverUrl !== undefined && { coverUrl }),
+        ...(coverOffsetY !== undefined && { coverOffsetY }),
+        ...(isTemplate !== undefined && { isTemplate }),
         lastEditorId: authUser.userId,
       },
       select: {
@@ -119,18 +185,39 @@ export async function DELETE(request: NextRequest, { params }: Ctx) {
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
+  const permanent = new URL(request.url).searchParams.get('permanent') === '1'
+
   const existing = await prisma.wikiPage.findUnique({ where: { id: params.id } })
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  // 자식 페이지 + 첨부 파일 통째로 수집해서 S3 정리 (CASCADE는 DB만 처리)
   const descendantIds = await collectDescendantIds(params.id)
   const allPageIds = [params.id, ...descendantIds]
+
+  if (!permanent) {
+    // 휴지통으로 이동 (soft delete) — 페이지 + 하위 전체
+    const now = new Date()
+    await prisma.wikiPage.updateMany({
+      where: { id: { in: allPageIds }, deletedAt: null },
+      data: { deletedAt: now },
+    })
+    await logAudit({
+      req: request,
+      actor: auditActorFromJWT(authUser),
+      action: 'DELETE',
+      resource: 'wiki_page',
+      resourceId: existing.id,
+      resourceLabel: existing.title,
+      before: metaSnapshot(existing),
+      after: { trashed: true },
+    })
+    return new NextResponse(null, { status: 204 })
+  }
+
+  // 영구 삭제 — 첨부 S3 정리 후 hard delete (CASCADE)
   const attachments = await prisma.wikiAttachment.findMany({
     where: { pageId: { in: allPageIds } },
     select: { s3Key: true },
   })
-
-  // S3 best-effort — 실패해도 DB 삭제는 진행
   for (const a of attachments) {
     try {
       await deleteFromS3(a.s3Key)
@@ -149,6 +236,7 @@ export async function DELETE(request: NextRequest, { params }: Ctx) {
     resourceId: existing.id,
     resourceLabel: existing.title,
     before: metaSnapshot(existing),
+    after: { permanent: true },
   })
 
   return new NextResponse(null, { status: 204 })

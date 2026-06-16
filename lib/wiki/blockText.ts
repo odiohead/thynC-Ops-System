@@ -34,3 +34,25 @@ export function extractPlainTextFromBlocks(blocks: unknown): string {
   }
   return parts.join(' ').replace(/\s+/g, ' ').trim()
 }
+
+/**
+ * BlockNote 본문에서 다른 위키 페이지로의 링크(wikiPageLink 블록) 대상 id를 수집.
+ * 백링크 인덱스(wiki_page_links) 갱신용. 중복 제거된 id 배열 반환.
+ */
+export function extractPageLinks(blocks: unknown): string[] {
+  if (!Array.isArray(blocks)) return []
+  const ids = new Set<string>()
+  walk(blocks as unknown[])
+  function walk(items: unknown[]) {
+    for (const raw of items) {
+      if (!raw || typeof raw !== 'object') continue
+      const b = raw as { type?: string; props?: { pageId?: unknown }; children?: unknown }
+      if (b.type === 'wikiPageLink') {
+        const pid = b.props?.pageId
+        if (typeof pid === 'string' && pid) ids.add(pid)
+      }
+      if (Array.isArray(b.children)) walk(b.children as unknown[])
+    }
+  }
+  return Array.from(ids)
+}

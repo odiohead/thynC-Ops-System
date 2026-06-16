@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
 
   if (!q && !tagId) return NextResponse.json({ results: [] })
 
-  const where: Record<string, unknown> = {}
+  const where: Record<string, unknown> = { deletedAt: null, isTemplate: false }
   if (q) {
     where.OR = [
       { title: { contains: q, mode: 'insensitive' } },
