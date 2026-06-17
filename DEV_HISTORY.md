@@ -7,7 +7,8 @@
 ## 2026-06-16 | 위키 — 페이지 제목 수정 시 상위 페이지 링크 라벨 미갱신 버그 수정
 
 - **버그**: `wikiPageLink` 블록은 대상 페이지 제목을 블록 prop(`title`) 문자열로 박아두고 렌더 시 그대로 표시. 페이지 제목을 수정해도, 그 페이지를 링크한 다른(상위) 페이지 본문의 링크 명칭이 옛 제목 그대로 남았음
-- **수정**: 제목 변경 시(`title !== existing.title`) 백링크 인덱스(`wiki_page_links.targetPageId`)로 이 페이지를 링크한 소스 페이지들을 찾아, 본문 내 해당 `wikiPageLink` 블록의 `title` prop을 새 제목으로 동기화. 검색 일관성 위해 소스 페이지 `plainText`도 재추출. 모두 제목 변경 트랜잭션 안에서 처리
+- **수정**: 제목 변경 시(`title !== existing.title`) 이 페이지를 링크한 소스 페이지들을 찾아, 본문 내 해당 `wikiPageLink` 블록의 `title` prop을 새 제목으로 동기화. 검색 일관성 위해 소스 페이지 `plainText`도 재추출. 모두 제목 변경 트랜잭션 안에서 처리
+- **소스 페이지 탐색은 본문 직접 스캔** (`content_json::text LIKE '%pageId%'`): 백링크 테이블(`wiki_page_links`)은 Phase 12 이후 재저장된 페이지만 인덱싱해 누락이 많음(PROD 진단: 백링크 1행 vs wikiPageLink 보유 페이지 3개)을 확인해, 테이블 의존을 버리고 본문 스캔으로 전환. `updatePageLinkTitles`가 매칭 블록만 교체하고 `changed`로 불필요 쓰기 방지하므로 LIKE 오탐 후보는 안전하게 무시됨
 - `lib/wiki/blockText.ts`에 `updatePageLinkTitles(blocks, targetPageId, newTitle)` 헬퍼 추가 (매칭 블록만 교체, 변경 여부 반환 → 불필요한 쓰기 방지)
 - 렌더링은 블록 prop을 그대로 쓰므로 클라이언트 변경 불필요. `npx tsc --noEmit` 통과
 - 영향 파일: `lib/wiki/blockText.ts`, `app/api/wiki/pages/[id]/route.ts`

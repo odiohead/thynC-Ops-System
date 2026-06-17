@@ -166,31 +166,27 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
     })
 
     // 제목이 바뀌면, 이 페이지를 링크한 다른 페이지 본문의 wikiPageLink 라벨도 동기화.
-    // (라벨은 블록 prop.title 문자열에 박혀 있어 자동 갱신되지 않음 → 백링크로 소스 페이지를 찾아 갱신)
+    // (라벨은 블록 prop.title 문자열에 박혀 있어 자동 갱신되지 않음)
+    // 백링크 테이블(wiki_page_links)은 Phase 12 이후 재저장된 페이지만 포함해 누락이 많으므로
+    // 신뢰하지 않고, 본문에 해당 pageId가 등장하는 페이지를 직접 스캔해 후보를 추린다.
     if (title !== undefined && title !== existing.title) {
-      const backlinks = await tx.wikiPageLink.findMany({
-        where: { targetPageId: params.id },
-        select: { sourcePageId: true },
-      })
-      const sourceIds = backlinks
-        .map((b) => b.sourcePageId)
-        .filter((sid) => sid !== params.id)
-      if (sourceIds.length > 0) {
-        const sources = await tx.wikiPage.findMany({
-          where: { id: { in: sourceIds } },
-          select: { id: true, contentJson: true },
-        })
-        for (const src of sources) {
-          const { blocks, changed } = updatePageLinkTitles(src.contentJson, params.id, title)
-          if (changed) {
-            await tx.wikiPage.update({
-              where: { id: src.id },
-              data: {
-                contentJson: blocks as Prisma.InputJsonValue,
-                plainText: extractPlainTextFromBlocks(blocks),
-              },
-            })
-          }
+      const candidates = await tx.$queryRaw<{ id: string; contentJson: unknown }[]>`
+        SELECT id, content_json AS "contentJson"
+        FROM wiki.wiki_pages
+        WHERE deleted_at IS NULL
+          AND content_json::text LIKE ${'%' + params.id + '%'}
+      `
+      for (const src of candidates) {
+        if (src.id === params.id) continue
+        const { blocks, changed } = updatePageLinkTitles(src.contentJson, params.id, title)
+        if (changed) {
+          await tx.wikiPage.update({
+            where: { id: src.id },
+            data: {
+              contentJson: blocks as Prisma.InputJsonValue,
+              plainText: extractPlainTextFromBlocks(blocks),
+            },
+          })
         }
       }
     }
