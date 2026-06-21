@@ -46,6 +46,11 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
+  const actor = await prisma.user.findUnique({ where: { id: user.userId }, select: { vehicleReservationBlocked: true } })
+  if (actor?.vehicleReservationBlocked) {
+    return NextResponse.json({ error: '차량예약 사용이 제한된 계정입니다.' }, { status: 403 })
+  }
+
   const { vehicleId, startAt, endAt, purpose, destination } = await request.json()
 
   if (!vehicleId) return NextResponse.json({ error: '차량을 선택해주세요.' }, { status: 400 })

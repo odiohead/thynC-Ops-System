@@ -21,6 +21,7 @@ interface User {
   phone: string
   role: 'SUPER_ADMIN' | 'ADMIN' | 'USER' | 'VIEWER'
   isActive: boolean
+  vehicleReservationBlocked: boolean
   createdAt: string
   lastLoginAt: string | null
   organization: Organization | null
@@ -93,6 +94,7 @@ export default function UsersPage() {
   const [editOtherRole, setEditOtherRole] = useState<User['role']>('USER')
   const [editOtherOrgId, setEditOtherOrgId] = useState('')
   const [editOtherDeptId, setEditOtherDeptId] = useState('')
+  const [editOtherVehicleBlocked, setEditOtherVehicleBlocked] = useState(false)
   const [editOtherPassword, setEditOtherPassword] = useState('')
   const [editOtherConfirmPassword, setEditOtherConfirmPassword] = useState('')
   const [editOtherError, setEditOtherError] = useState('')
@@ -189,6 +191,7 @@ export default function UsersPage() {
     setEditOtherOrgId(user.organization?.id?.toString() ?? '')
     setEditOtherDeptId(user.department?.id?.toString() ?? '')
     if (user.organization?.id) loadDepartments(user.organization.id.toString(), 'editOther')
+    setEditOtherVehicleBlocked(user.vehicleReservationBlocked === true)
     setEditOtherPassword('')
     setEditOtherConfirmPassword('')
     setEditOtherError('')
@@ -219,6 +222,7 @@ export default function UsersPage() {
         role: editOtherRole,
         organizationId: editOtherOrgId ? parseInt(editOtherOrgId) : null,
         departmentId: editOtherDeptId ? parseInt(editOtherDeptId) : null,
+        vehicleReservationBlocked: editOtherVehicleBlocked,
       }
       if (editOtherPassword) body.newPassword = editOtherPassword
 
@@ -404,9 +408,16 @@ export default function UsersPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap">
-                  <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${user.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                    {user.isActive ? '활성' : '비활성'}
-                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${user.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                      {user.isActive ? '활성' : '비활성'}
+                    </span>
+                    {user.vehicleReservationBlocked && (
+                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700" title="차량예약 사용 제한">
+                        예약제한
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
                   {user.lastLoginAt
@@ -587,6 +598,21 @@ export default function UsersPage() {
                     <option key={dept.id} value={dept.id}>{dept.name}</option>
                   ))}
                 </select>
+              </div>
+              <div className="border-t border-gray-100 pt-3">
+                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">기능 제한</p>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editOtherVehicleBlocked}
+                    onChange={(e) => setEditOtherVehicleBlocked(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-700">
+                    차량예약 사용 제한
+                    <span className="block text-xs text-gray-400">체크 시 이 계정은 차량예약 등록·수정·취소가 불가하며 현황 조회만 가능합니다.</span>
+                  </span>
+                </label>
               </div>
               <div className="border-t border-gray-100 pt-3">
                 <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">비밀번호 변경 (선택)</p>

@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-06-22 | 차량예약 — 계정별 사용 제한 기능 (계정관리에서 제어)
+
+- **요구**: 특정 사용자가 차량예약 기능을 사용하지 못하도록 계정관리에서 지정. 역할(VIEWER)과 별개로, USER/ADMIN 계정도 개별 차단 가능
+- **DB**: `public.users`에 `vehicle_reservation_blocked boolean NOT NULL DEFAULT false` 컬럼 추가 (마이그레이션 `20260622000000_add_vehicle_reservation_blocked`, dev2 로컬만 적용·PROD 미반영). schema.prisma `User.vehicleReservationBlocked` 반영 + `prisma generate`
+- **제어 지점**: 계정관리(`/users`) → "다른 계정 수정" 모달(SUPER_ADMIN)에 "차량예약 사용 제한" 체크박스 추가. 목록에 `예약제한` 앰버 뱃지 노출. 변경 권한은 역할/소속과 동일하게 API에서 ADMIN 이상으로 게이트
+- **서버 강제**: 차량예약 `POST`/`PUT`/`DELETE` 진입 시 actor의 `vehicleReservationBlocked`를 DB 조회 → true면 403 "차량예약 사용이 제한된 계정입니다." (JWT(7일)에 의존하지 않고 실시간 차단). 차단 계정은 등록·수정·취소 모두 불가, 조회만 가능 (필요 시 관리자가 대신 취소)
+- **클라이언트**: `/api/auth/me`·`/api/users`·`/api/users/[id]` select에 필드 추가. 차량예약 페이지 `canReserve`/`canEdit`에 차단 반영 + 상단 안내 배너 노출
+- `npx tsc --noEmit` 통과. 빌드·git push·PROD 반영 미실행 (사용자 요청 대기)
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260622000000_add_vehicle_reservation_blocked/`, `app/api/auth/me/route.ts`, `app/api/users/route.ts`, `app/api/users/[id]/route.ts`, `app/api/vehicle-reservations/route.ts`, `app/api/vehicle-reservations/[id]/route.ts`, `app/users/page.tsx`, `app/vehicle-reservations/page.tsx`
+
+---
+
 ## 2026-06-16 | 위키 — 페이지 제목 수정 시 상위 페이지 링크 라벨 미갱신 버그 수정
 
 - **버그**: `wikiPageLink` 블록은 대상 페이지 제목을 블록 prop(`title`) 문자열로 박아두고 렌더 시 그대로 표시. 페이지 제목을 수정해도, 그 페이지를 링크한 다른(상위) 페이지 본문의 링크 명칭이 옛 제목 그대로 남았음

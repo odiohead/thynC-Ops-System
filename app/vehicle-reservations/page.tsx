@@ -8,6 +8,7 @@ interface Me {
   id: string
   name: string
   role: 'SUPER_ADMIN' | 'ADMIN' | 'USER' | 'VIEWER'
+  vehicleReservationBlocked?: boolean
 }
 
 const DAY_LABELS = ['월', '화', '수', '목', '금', '토', '일']
@@ -59,7 +60,8 @@ export default function VehicleReservationsPage() {
   } | null>(null)
 
   const isAdmin = me != null && (me.role === 'SUPER_ADMIN' || me.role === 'ADMIN')
-  const canReserve = me != null && me.role !== 'VIEWER'
+  const isBlocked = me != null && me.vehicleReservationBlocked === true
+  const canReserve = me != null && me.role !== 'VIEWER' && !isBlocked
 
   // URL ?week= 동기화 (최초 1회 읽기)
   useEffect(() => {
@@ -79,7 +81,7 @@ export default function VehicleReservationsPage() {
   useEffect(() => {
     fetch('/api/auth/me')
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => setMe(data?.id ? { id: data.id, name: data.name, role: data.role } : null))
+      .then((data) => setMe(data?.id ? { id: data.id, name: data.name, role: data.role, vehicleReservationBlocked: data.vehicleReservationBlocked } : null))
       .catch(() => setMe(null))
     fetch('/api/vehicles?activeOnly=true')
       .then((res) => res.json())
@@ -174,6 +176,12 @@ export default function VehicleReservationsPage() {
             </button>
           )}
         </div>
+
+        {isBlocked && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            차량예약 사용이 제한된 계정입니다. 예약 등록·수정·취소가 불가하며 현황 조회만 가능합니다. 문의는 관리자에게 해주세요.
+          </div>
+        )}
 
         {/* 탭 + 주 네비게이션 */}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -413,6 +421,7 @@ export default function VehicleReservationsPage() {
             modal.reservation != null &&
             me != null &&
             me.role !== 'VIEWER' &&
+            !isBlocked &&
             (modal.reservation.user.id === me.id || isAdmin)
           }
           onClose={() => setModal(null)}

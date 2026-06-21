@@ -18,6 +18,7 @@ export async function GET(req: NextRequest) {
       phone: true,
       role: true,
       isActive: true,
+      vehicleReservationBlocked: true,
       createdAt: true,
       organization: { select: { id: true, name: true, code: true } },
       department: { select: { id: true, name: true } },

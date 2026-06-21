@@ -13,6 +13,7 @@ const userSelect = {
   phone: true,
   role: true,
   isActive: true,
+  vehicleReservationBlocked: true,
   createdAt: true,
   organization: { select: { id: true, name: true, code: true } },
   department: { select: { id: true, name: true } },
@@ -66,7 +67,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (!target) return NextResponse.json({ error: '사용자를 찾을 수 없습니다.' }, { status: 404 })
 
   const body = await req.json()
-  const { name, phone, currentPassword, newPassword, role, organizationId, departmentId } = body
+  const { name, phone, currentPassword, newPassword, role, organizationId, departmentId, vehicleReservationBlocked } = body
 
   const updateData: Record<string, unknown> = {}
 
@@ -91,6 +92,13 @@ export async function PUT(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: '부서 변경은 관리자만 가능합니다.' }, { status: 403 })
     }
     updateData.departmentId = departmentId || null
+  }
+  // 차량예약 사용 제한: ADMIN만 가능
+  if (vehicleReservationBlocked !== undefined) {
+    if (!isAdmin) {
+      return NextResponse.json({ error: '차량예약 제한 변경은 관리자만 가능합니다.' }, { status: 403 })
+    }
+    updateData.vehicleReservationBlocked = vehicleReservationBlocked === true
   }
 
   // 비밀번호 변경

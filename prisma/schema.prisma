@@ -185,6 +185,7 @@ model User {
   phone          String
   role           Role          @default(USER)
   isActive       Boolean       @default(true) @map("is_active")
+  vehicleReservationBlocked Boolean @default(false) @map("vehicle_reservation_blocked")
   organizationId Int?          @map("organization_id")
   departmentId   Int?          @map("department_id")
   createdAt      DateTime      @default(now()) @map("created_at")

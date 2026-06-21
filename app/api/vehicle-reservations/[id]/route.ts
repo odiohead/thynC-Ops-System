@@ -35,6 +35,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
+  const actor = await prisma.user.findUnique({ where: { id: user.userId }, select: { vehicleReservationBlocked: true } })
+  if (actor?.vehicleReservationBlocked) {
+    return NextResponse.json({ error: '차량예약 사용이 제한된 계정입니다.' }, { status: 403 })
+  }
+
   const id = parseInt(params.id)
   if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })
 
@@ -127,6 +132,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const actor = await prisma.user.findUnique({ where: { id: user.userId }, select: { vehicleReservationBlocked: true } })
+  if (actor?.vehicleReservationBlocked) {
+    return NextResponse.json({ error: '차량예약 사용이 제한된 계정입니다.' }, { status: 403 })
+  }
 
   const id = parseInt(params.id)
   if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })
