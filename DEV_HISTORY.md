@@ -11,7 +11,7 @@
 - **제어 지점**: 계정관리(`/users`) → "다른 계정 수정" 모달(SUPER_ADMIN)에 "차량예약 사용 제한" 체크박스 추가. 목록에 `예약제한` 앰버 뱃지 노출. 변경 권한은 역할/소속과 동일하게 API에서 ADMIN 이상으로 게이트
 - **서버 강제**: 차량예약 `POST`/`PUT`/`DELETE` 진입 시 actor의 `vehicleReservationBlocked`를 DB 조회 → true면 403 "차량예약 사용이 제한된 계정입니다." (JWT(7일)에 의존하지 않고 실시간 차단). 차단 계정은 등록·수정·취소 모두 불가, 조회만 가능 (필요 시 관리자가 대신 취소)
 - **클라이언트**: `/api/auth/me`·`/api/users`·`/api/users/[id]` select에 필드 추가. 차량예약 페이지 `canReserve`/`canEdit`에 차단 반영 + 상단 안내 배너 노출
-- `npx tsc --noEmit` 통과. 빌드·git push·PROD 반영 미실행 (사용자 요청 대기)
+- `npx tsc --noEmit` 통과. **DEV·PROD 모두 반영 완료**: dev2 빌드+`pm2 restart thync-dev`, git push(`81b5775`) → PROD pull → `thync_ops`에 동일 컬럼 ALTER + migrate resolve + generate + 힙4GB 빌드 + `pm2 restart thync-prod`. 양쪽 login 200·vehicle 307·`ops.seersthync.com` 200 검증, 신규 에러 없음
 - 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260622000000_add_vehicle_reservation_blocked/`, `app/api/auth/me/route.ts`, `app/api/users/route.ts`, `app/api/users/[id]/route.ts`, `app/api/vehicle-reservations/route.ts`, `app/api/vehicle-reservations/[id]/route.ts`, `app/users/page.tsx`, `app/vehicle-reservations/page.tsx`
 
 ---
