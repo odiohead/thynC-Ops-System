@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
       memo: v.memo,
       isActive: v.isActive,
       sortOrder: v.sortOrder,
+      lastOdometer: v.lastOdometer,
       createdAt: v.createdAt,
       reservationCount: v._count.reservations,
     })),

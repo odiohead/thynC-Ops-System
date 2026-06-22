@@ -34,7 +34,11 @@ export async function GET(request: NextRequest) {
       ...(vehicleId ? { vehicleId } : {}),
       ...(mine ? { userId: user.userId } : {}),
     },
-    include: { vehicle: VEHICLE_SELECT, user: USER_SELECT },
+    include: {
+      vehicle: VEHICLE_SELECT,
+      user: USER_SELECT,
+      log: { select: { id: true, endOdometer: true, distanceKm: true } },
+    },
     orderBy: [{ startAt: 'asc' }],
   })
 

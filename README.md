@@ -92,6 +92,8 @@ app/
 │   │   └── tree/route.ts             # GET 전체 트리
 │   ├── vehicles/                     # 차량 마스터 CRUD (ADMIN 이상 쓰기)
 │   ├── vehicle-reservations/         # 차량예약 CRUD (충돌 검사 + soft 취소)
+│   │   └── [id]/return/              # 반납(POST: 주행거리 입력→운행일지 생성) / 반납취소(DELETE, ADMIN)
+│   ├── vehicle-logs/                 # 운행일지 목록·작성 + [id] 조회/수정/삭제
 │   ├── install-plans/                # 설치계획(가안) CRUD
 │   ├── hira-hospitals/
 │   │   └── sync/                     # 심평원 연동 (POST: 백그라운드 시작, GET: 히스토리 목록)
@@ -106,7 +108,7 @@ app/
 ├── site-visits/                      # 답사 목록·상세·등록
 ├── maintenances/                     # 유지보수 목록·상세·등록
 ├── tasks/                            # 업무(Task) 현황 (통합 조회)
-├── vehicle-reservations/             # 차량예약 주간 현황 보드 + 예약 모달 + 내 예약
+├── vehicle-reservations/             # 차량예약 주간 현황 보드 + 예약/반납 모달 + 내 예약 + 운행일지 탭(VehicleLogsPanel)
 ├── ai-assistant/                     # AI 어시스턴트 채팅
 ├── wiki/                             # 사내 위키 (Phase 2-3)
 │   ├── layout.tsx                    # 사이드바 + 콘텐츠 flex 레이아웃 (모든 /wiki/* 적용)
@@ -149,7 +151,8 @@ lib/
 ├── mail-sync.ts                      # 설치계획·답사 메일 큐 동기화 로직 (Gmail → DB INSERT)
 ├── mail-scheduler.ts                 # 메일 동기화 인터벌 스케줄러 (mail-sync 함수 직접 호출)
 ├── audit.ts                          # 감사 로그 헬퍼 (logAudit, auditActorFromJWT, redact)
-└── hospitalStatus.ts                 # 병원 thynC 현황상태 단방향 자동 진행 헬퍼 (advanceHospitalStatus)
+├── hospitalStatus.ts                 # 병원 thynC 현황상태 단방향 자동 진행 헬퍼 (advanceHospitalStatus)
+└── vehicleLog.ts                     # 운행일지 거리 재계산(recalcVehicleLogs) + 주행거리 무결성 검사(checkOdometerConsistency)
 
 prisma/
 ├── schema.prisma                     # DB 스키마
@@ -337,16 +340,27 @@ prisma/
 - 차량예약에 사용되는 차량 마스터
 - `name` (표시 이름), `plateNumber` (차량번호, UNIQUE), `model`, `seatCount`, `color` (보드 표시 색), `memo`
 - `isActive`, `sortOrder` — 예약 이력이 있는 차량은 삭제 대신 비활성화 (이력 보존)
+- `lastOdometer` (최신 누적 주행거리, km) — 운행일지 종료거리로 자동 갱신, 반납 입력 시 직전 기록 안내·검증에 사용
 
 ### VehicleReservation (차량예약)
 - 선착순 즉시 확정 예약. 시간 단위(30분 간격), 다일(多日) 예약 가능
 - `vehicleId` → Vehicle, `userId` → User (예약자)
 - `startAt` / `endAt`, `purpose` (목적), `destination` (행선지)
 - `status`: `RESERVED` / `CANCELED` — 취소는 soft delete (이력 보존)
+- `returnedAt` (반납 완료 시각, nullable) — NULL=미반납. 반납 시 운행일지 생성과 함께 기록, status는 RESERVED 유지(보드 표시·충돌검사 영향 없음)
 - 더블부킹 방지 이중 장치:
   - 앱 레벨: `$transaction` 안에서 겹침 검사 → 409 + 겹치는 예약자/시간 안내
   - DB 레벨: `btree_gist` 확장 + EXCLUDE 제약 (`vehicle_id` 동일 & `tsrange(start_at, end_at)` 겹침 & RESERVED 상태) — 동시 요청 race까지 차단
 - 인덱스: `(vehicle_id, start_at)`, `(user_id, start_at)`
+
+### VehicleLog (차량 운행일지)
+- 차량별 운행 기록. 반납 절차로 생성되거나(예약 연결) 직접 작성(예약 미연결)
+- `vehicleId` → Vehicle, `reservationId` → VehicleReservation (nullable, UNIQUE 1:1), `driverId` → User (운전자)
+- `startAt` / `endAt`, `purpose` (운행 목적), `destination` (행선지) — 예약 연결 시 예약값 자동 채움
+- `endOdometer` (운행 후 최종 주행거리, km), `distanceKm` (구간거리 = 종료거리 − 직전 일지 종료거리, 자동 계산·저장)
+- `note` (비고), `createdById` → User (작성자)
+- 인덱스: `(vehicle_id, end_at)`, `(driver_id, start_at)`
+- 거리 무결성: 생성/수정/삭제 시 같은 차량 일지를 endAt 순으로 재계산하고 앞/뒤 기록과 모순(주행거리 역전) 차단
 
 ### Wiki 모듈 — 별도 PostgreSQL 스키마 `wiki`
 - 사내 위키(Notion-like) 기능. 본문은 BlockNote JSON 블록 배열로 저장
@@ -517,8 +531,11 @@ prisma/
 - 법인차량 선착순 즉시 확정 예약 (승인 절차 없음)
 - **주간 현황 보드** (`/vehicle-reservations`): 행=차량(색 칩+이름+차량번호), 열=월~일
   - 예약 카드: 시간·예약자·목적, 내 예약은 파란색 강조, 여러 날에 걸친 예약은 ←/→ 표시로 분할 렌더
+  - **반납 상태 색 구분**: 반납완료(회색 ✓) / 반납필요(종료시간 지난 미반납, 앰버 ⚠) / 내 예약(파랑) / 타인(회색)
   - 빈 영역 클릭 → 해당 차량·날짜로 예약 모달 자동 채움
   - 주 이동 ◀▶ + 오늘 버튼, URL `?week=` 동기화, 오늘 컬럼·주말 컬럼 하이라이트
+- **반납**: 예약 상세 모달에 `반납` 버튼 → 최종 주행거리(+비고) 입력 → 운행일지 자동 생성 + 반납완료 처리(한 트랜잭션). 시작/종료/목적/행선지/운전자는 예약값 자동(운전자 변경은 ADMIN). 반납완료 예약은 수정/취소 대신 반납 정보 표시, ADMIN은 반납취소(일지 삭제+해제) 가능
+- **운행일지 탭**: 현황 보드 | 내 예약 | 운행일지. 차량·기간 필터 + 합계 주행거리, 예약 미연결 운행 직접 작성·수정·삭제. 조회=로그인 전체, 작성·수정·삭제=USER 이상 본인(운전자/작성자) 또는 ADMIN
 - **예약 모달**: 차량 / 시작·종료(날짜+30분 단위 시각, 다일 예약 지원) / 종일(09:00~18:00) 버튼 / 목적 / 행선지
   - 충돌 시 "이미 ○○님이 …~… 예약했습니다" 인라인 안내 (409)
 - **내 예약 탭**: 다가오는 본인 예약 목록 + 상세/수정/취소

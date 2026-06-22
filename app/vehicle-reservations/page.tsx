@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import ReservationModal, { ReservationItem, VehicleOption } from './ReservationModal'
+import VehicleLogsPanel from './VehicleLogsPanel'
 
 interface Me {
   id: string
@@ -49,7 +50,7 @@ export default function VehicleReservationsPage() {
   const [loading, setLoading] = useState(true)
 
   const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()))
-  const [tab, setTab] = useState<'board' | 'mine'>('board')
+  const [tab, setTab] = useState<'board' | 'mine' | 'logs'>('board')
 
   // 모달 상태
   const [modal, setModal] = useState<{
@@ -202,6 +203,14 @@ export default function VehicleReservationsPage() {
             >
               내 예약 {myUpcoming.length > 0 && <span className="ml-1 rounded-full bg-white/20 px-1.5 text-xs">{myUpcoming.length}</span>}
             </button>
+            <button
+              onClick={() => setTab('logs')}
+              className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+                tab === 'logs' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              운행일지
+            </button>
           </div>
 
           {tab === 'board' && (
@@ -295,22 +304,28 @@ export default function VehicleReservationsPage() {
                             <div className="flex flex-col gap-1">
                               {chips.map(({ r, label }) => {
                                 const mine = me != null && r.user.id === me.id
+                                const returned = r.returnedAt != null
+                                const overdue = !returned && new Date(r.endAt) < new Date()
+                                const chipClass = returned
+                                  ? 'bg-gray-50 text-gray-400 hover:bg-gray-100'
+                                  : overdue
+                                    ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-300 hover:bg-amber-200'
+                                    : mine
+                                      ? 'bg-blue-100 text-blue-900 ring-1 ring-blue-300 hover:bg-blue-200'
+                                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                const marker = returned ? '✓ ' : overdue ? '⚠ ' : ''
                                 return (
                                   <button
                                     key={`${r.id}-${i}`}
                                     onClick={(e) => { e.stopPropagation(); openView(r) }}
-                                    style={{ borderLeftColor: v.color || '#9CA3AF' }}
-                                    className={`w-full rounded border-l-[3px] px-1.5 py-1 text-left text-xs leading-tight transition-colors ${
-                                      mine
-                                        ? 'bg-blue-100 text-blue-900 ring-1 ring-blue-300 hover:bg-blue-200'
-                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                    }`}
-                                    title={`${r.user.name}${r.purpose ? ` · ${r.purpose}` : ''}`}
+                                    style={{ borderLeftColor: returned ? '#D1D5DB' : v.color || '#9CA3AF' }}
+                                    className={`w-full rounded border-l-[3px] px-1.5 py-1 text-left text-xs leading-tight transition-colors ${chipClass}`}
+                                    title={`${marker}${r.user.name}${r.purpose ? ` · ${r.purpose}` : ''}${returned ? ' (반납완료)' : overdue ? ' (반납필요)' : ''}`}
                                   >
-                                    <div className="font-medium tabular-nums">{label}</div>
+                                    <div className="font-medium tabular-nums">{marker}{label}</div>
                                     <div className="truncate">
                                       {r.user.name}
-                                      {r.purpose && <span className="text-gray-400"> · {r.purpose}</span>}
+                                      {r.purpose && <span className="opacity-60"> · {r.purpose}</span>}
                                     </div>
                                   </button>
                                 )
@@ -394,6 +409,16 @@ export default function VehicleReservationsPage() {
           </div>
         )}
 
+        {/* 운행일지 */}
+        {tab === 'logs' && (
+          <VehicleLogsPanel
+            me={me}
+            vehicles={vehicles}
+            canWrite={me != null && me.role !== 'VIEWER'}
+            isAdmin={isAdmin}
+          />
+        )}
+
         {/* 범례 */}
         {tab === 'board' && (
           <div className="mt-3 flex items-center gap-4 text-xs text-gray-400">
@@ -402,6 +427,12 @@ export default function VehicleReservationsPage() {
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-block h-3 w-5 rounded bg-gray-100" /> 다른 사용자 예약
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-3 w-5 rounded bg-amber-100 ring-1 ring-amber-300" /> ⚠ 반납필요
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-3 w-5 rounded bg-gray-50 ring-1 ring-gray-200" /> ✓ 반납완료
             </span>
             {canReserve && <span>빈 영역 클릭 = 해당 차량·날짜로 바로 예약</span>}
           </div>
@@ -424,6 +455,13 @@ export default function VehicleReservationsPage() {
             !isBlocked &&
             (modal.reservation.user.id === me.id || isAdmin)
           }
+          canReturn={
+            modal.reservation != null &&
+            me != null &&
+            me.role !== 'VIEWER' &&
+            (modal.reservation.user.id === me.id || isAdmin)
+          }
+          isAdmin={isAdmin}
           onClose={() => setModal(null)}
           onSaved={handleSaved}
         />

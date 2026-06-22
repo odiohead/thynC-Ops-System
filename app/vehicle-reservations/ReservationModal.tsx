@@ -7,6 +7,7 @@ export interface VehicleOption {
   name: string
   plateNumber: string
   color: string | null
+  lastOdometer?: number | null
 }
 
 export interface ReservationItem {
@@ -17,6 +18,8 @@ export interface ReservationItem {
   purpose: string | null
   destination: string | null
   status: string
+  returnedAt: string | null
+  log?: { id: number; endOdometer: number; distanceKm: number | null } | null
   user: { id: string; name: string; email: string }
   vehicle: { id: number; name: string; plateNumber: string; color: string | null }
 }
@@ -27,7 +30,9 @@ interface Props {
   reservation?: ReservationItem | null
   initialVehicleId?: number
   initialDate?: string // YYYY-MM-DD
-  canEdit: boolean // 본인 예약 or ADMIN+
+  canEdit: boolean // 본인 예약 or ADMIN+ (반납 전에만)
+  canReturn: boolean // 반납 가능 (본인 예약 or ADMIN+)
+  isAdmin: boolean // 반납 취소 권한
   onClose: () => void
   onSaved: () => void
 }
@@ -67,11 +72,14 @@ function combine(dateStr: string, timeStr: string): Date {
 }
 
 export default function ReservationModal({
-  mode: initialMode, vehicles, reservation, initialVehicleId, initialDate, canEdit, onClose, onSaved,
+  mode: initialMode, vehicles, reservation, initialVehicleId, initialDate, canEdit, canReturn, isAdmin, onClose, onSaved,
 }: Props) {
-  const [mode, setMode] = useState(initialMode)
+  const [mode, setMode] = useState<'create' | 'edit' | 'view' | 'return'>(initialMode)
   const isView = mode === 'view'
+  const isReturn = mode === 'return'
+  const readOnly = isView || isReturn
   const r = reservation
+  const reservedVehicle = r ? vehicles.find((v) => v.id === r.vehicleId) : undefined
 
   // 자정(00:00) 종료 예약은 select 옵션에 맞춰 전날 24:00으로 표현
   function initEnd(endAt: string): { date: string; time: string } {
@@ -91,6 +99,10 @@ export default function ReservationModal({
   const [endTime, setEndTime] = useState(r ? initEnd(r.endAt).time : '18:00')
   const [purpose, setPurpose] = useState(r?.purpose ?? '')
   const [destination, setDestination] = useState(r?.destination ?? '')
+
+  // 반납 입력
+  const [endOdometer, setEndOdometer] = useState('')
+  const [returnNote, setReturnNote] = useState('')
 
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -149,7 +161,42 @@ export default function ReservationModal({
     }
   }
 
-  const title = mode === 'create' ? '차량 예약' : mode === 'edit' ? '예약 수정' : '예약 상세'
+  async function handleReturn() {
+    if (!r) return
+    setError(null)
+    const odo = parseInt(endOdometer, 10)
+    if (!Number.isInteger(odo) || odo < 0) {
+      setError('최종 주행거리를 올바르게 입력해주세요.')
+      return
+    }
+    setBusy(true)
+    const res = await fetch(`/api/vehicle-reservations/${r.id}/return`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endOdometer: odo, note: returnNote }),
+    })
+    if (res.ok) {
+      onSaved()
+    } else {
+      setError((await res.json()).error ?? '반납에 실패했습니다.')
+      setBusy(false)
+    }
+  }
+
+  async function handleReturnCancel() {
+    if (!r) return
+    if (!confirm('반납을 취소하시겠습니까? 작성된 운행일지가 삭제됩니다.')) return
+    setBusy(true)
+    const res = await fetch(`/api/vehicle-reservations/${r.id}/return`, { method: 'DELETE' })
+    if (res.ok) {
+      onSaved()
+    } else {
+      setError((await res.json()).error ?? '반납 취소에 실패했습니다.')
+      setBusy(false)
+    }
+  }
+
+  const title = mode === 'create' ? '차량 예약' : mode === 'edit' ? '예약 수정' : isReturn ? '차량 반납' : '예약 상세'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -182,7 +229,7 @@ export default function ReservationModal({
           {/* 차량 */}
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-500">차량</label>
-            {isView ? (
+            {readOnly ? (
               <p className="text-sm text-gray-900">{r?.vehicle.name} ({r?.vehicle.plateNumber})</p>
             ) : (
               <select
@@ -198,7 +245,7 @@ export default function ReservationModal({
           </div>
 
           {/* 시간 */}
-          {isView ? (
+          {readOnly ? (
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-500">이용 시간</label>
               <p className="text-sm text-gray-900">
@@ -264,7 +311,7 @@ export default function ReservationModal({
           {/* 목적 */}
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-500">사용 목적</label>
-            {isView ? (
+            {readOnly ? (
               <p className="text-sm text-gray-900">{r?.purpose || '-'}</p>
             ) : (
               <input
@@ -280,7 +327,7 @@ export default function ReservationModal({
           {/* 행선지 */}
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-500">행선지</label>
-            {isView ? (
+            {readOnly ? (
               <p className="text-sm text-gray-900">{r?.destination || '-'}</p>
             ) : (
               <input
@@ -292,40 +339,124 @@ export default function ReservationModal({
               />
             )}
           </div>
+
+          {/* 반납 완료 정보 (반납된 예약) */}
+          {isView && r?.returnedAt && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+              <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-gray-500">
+                <span className="inline-flex items-center rounded-full bg-gray-200 px-2 py-0.5 text-gray-700">✓ 반납완료</span>
+                <span>{new Date(r.returnedAt).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+              </div>
+              {r.log && (
+                <div className="text-sm text-gray-900">
+                  최종 주행거리 <span className="font-semibold tabular-nums">{r.log.endOdometer.toLocaleString()}</span> km
+                  {r.log.distanceKm != null && (
+                    <span className="text-gray-500"> · 이번 운행 <span className="tabular-nums">{r.log.distanceKm.toLocaleString()}</span> km</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 반납 입력 */}
+          {isReturn && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-600">
+                  최종 주행거리 (km) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  value={endOdometer}
+                  onChange={(e) => setEndOdometer(e.target.value)}
+                  placeholder={reservedVehicle?.lastOdometer != null ? `직전 기록: ${reservedVehicle.lastOdometer.toLocaleString()} km` : '계기판의 누적 주행거리'}
+                  autoFocus
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                {reservedVehicle?.lastOdometer != null && (
+                  <p className="mt-1 text-xs text-gray-400">직전 운행 종료 거리: {reservedVehicle.lastOdometer.toLocaleString()} km</p>
+                )}
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-600">비고 (선택)</label>
+                <input
+                  type="text"
+                  value={returnNote}
+                  onChange={(e) => setReturnNote(e.target.value)}
+                  placeholder="특이사항"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 액션 */}
-        <div className="mt-6 flex justify-end gap-2">
-          {isView && canEdit && (
+        <div className="mt-6 flex items-center justify-end gap-2">
+          {/* 상세: 반납 전 = 취소/수정/반납, 반납 후 = (ADMIN) 반납취소 */}
+          {isView && r && !r.returnedAt && (
             <>
-              <button
-                onClick={handleCancel}
-                disabled={busy}
-                className="mr-auto rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-500 transition-colors hover:bg-red-50 disabled:opacity-50"
-              >
-                예약 취소
-              </button>
-              <button
-                onClick={() => setMode('edit')}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100"
-              >
-                수정
-              </button>
+              {canEdit && (
+                <button
+                  onClick={handleCancel}
+                  disabled={busy}
+                  className="mr-auto rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-500 transition-colors hover:bg-red-50 disabled:opacity-50"
+                >
+                  예약 취소
+                </button>
+              )}
+              {canEdit && (
+                <button
+                  onClick={() => setMode('edit')}
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100"
+                >
+                  수정
+                </button>
+              )}
+              {canReturn && (
+                <button
+                  onClick={() => { setError(null); setMode('return') }}
+                  className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600"
+                >
+                  반납
+                </button>
+              )}
             </>
           )}
+          {isView && r?.returnedAt && isAdmin && (
+            <button
+              onClick={handleReturnCancel}
+              disabled={busy}
+              className="mr-auto rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-500 transition-colors hover:bg-gray-100 disabled:opacity-50"
+            >
+              반납 취소
+            </button>
+          )}
+
           <button
-            onClick={onClose}
+            onClick={isReturn ? () => { setError(null); setMode('view') } : onClose}
             className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100"
           >
-            닫기
+            {isReturn ? '뒤로' : '닫기'}
           </button>
-          {!isView && (
+          {(mode === 'create' || mode === 'edit') && (
             <button
               onClick={handleSubmit}
               disabled={busy || !vehicleId}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
             >
               {mode === 'create' ? '예약하기' : '저장'}
+            </button>
+          )}
+          {isReturn && (
+            <button
+              onClick={handleReturn}
+              disabled={busy}
+              className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
+            >
+              반납 완료
             </button>
           )}
         </div>

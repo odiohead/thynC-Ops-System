@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-06-22 | 차량 운행일지 + 반납 기능 (설계·구현)
+
+- **요구**: 차량별 운행일지 관리. 최종 주행거리는 "반납" 절차로 입력. 예약(사용목적·행선지·운전자) 연동. 보드에서 반납완료/미반납 색 구분
+- **DB** (dev2 로컬만 적용, 마이그레이션 `20260622010000_add_vehicle_logs_and_return`):
+  - `vehicle_reservations.returned_at` 추가 (NULL=미반납, 값=반납완료 시각). status는 RESERVED 유지 → 보드 표시·충돌검사·EXCLUDE 제약 무영향
+  - `vehicles.last_odometer` 추가 (최신 누적 주행거리 캐시)
+  - `vehicle_logs` 신설: vehicleId, reservationId?(unique 1:1), driverId, startAt, endAt, purpose?, destination?, endOdometer, distanceKm?, note?, createdById. 인덱스 `(vehicleId,endAt)`,`(driverId,startAt)`
+- **거리 계산**: 종료 주행거리만 입력받고, `distanceKm = endOdometer − 직전(같은 차량, endAt 더 이른 것 중 최신) 일지 endOdometer`. 일지 생성/수정/삭제 트랜잭션에서 `recalcVehicleLogs`로 차량 전체 재계산 + `lastOdometer` 갱신. `checkOdometerConsistency`로 앞/뒤 기록과 모순(역주행) 차단 (`lib/vehicleLog.ts`)
+- **반납 동선**: 예약 칩 클릭 → 예약 상세 모달에 **반납** 버튼 → 최종 주행거리(+비고) 입력 → 한 트랜잭션으로 운행일지 생성 + `returnedAt` 갱신 + lastOdometer 갱신. 시작/종료/목적/행선지/운전자는 예약값 자동(운전자 변경은 ADMIN만). 반납완료 예약은 수정/취소 숨기고 반납 정보 표시, **반납취소(ADMIN)** = 일지 삭제 + returnedAt 해제
+- **보드 색 구분**: 반납완료(회색 ✓) / 반납필요(종료시간 지난 미반납, 앰버 ⚠) / 내 예약(파랑) / 타인(회색). 범례 추가
+- **운행일지 탭** (`/vehicle-reservations`): 현황 보드 | 내 예약 | **운행일지**. 차량·기간 필터 + 합계 주행거리, 직접 작성(예약 미연결)·수정·삭제
+- **API**: `POST|DELETE /api/vehicle-reservations/[id]/return`(반납/반납취소), `GET|POST /api/vehicle-logs`, `GET|PUT|DELETE /api/vehicle-logs/[id]`. 권한: 조회=로그인 전체, 작성·수정·삭제=USER 이상 본인(운전자/작성자) 또는 ADMIN. audit `resource='vehicle_log'`/`'vehicle_reservation'`(반납)
+- 빌드·git push·PROD 반영 미실행 (사용자 요청 대기)
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260622010000_add_vehicle_logs_and_return/`, `lib/vehicleLog.ts`(신규), `app/api/vehicle-reservations/route.ts`, `app/api/vehicle-reservations/[id]/return/route.ts`(신규), `app/api/vehicle-logs/route.ts`(신규), `app/api/vehicle-logs/[id]/route.ts`(신규), `app/api/vehicles/route.ts`, `app/vehicle-reservations/{page,ReservationModal,VehicleLogsPanel}.tsx`
+
+---
+
 ## 2026-06-22 | 차량예약 — 계정별 사용 제한 기능 (계정관리에서 제어)
 
 - **요구**: 특정 사용자가 차량예약 기능을 사용하지 못하도록 계정관리에서 지정. 역할(VIEWER)과 별개로, USER/ADMIN 계정도 개별 차단 가능
