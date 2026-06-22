@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isUserOrAbove } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { uploadToS3 } from '@/lib/s3'
 import { parseFormEmail, buildNoteHtml } from '@/lib/gmail'
@@ -11,7 +11,7 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   const authUser = await getAuthUser(request)
-  if (!authUser || !isAdminOrAbove(authUser.role)) {
+  if (!authUser || !isUserOrAbove(authUser.role)) {
     return NextResponse.json({ error: '권한 없음' }, { status: 403 })
   }
 
@@ -139,7 +139,7 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   const authUser = await getAuthUser(request)
-  if (!authUser || !isAdminOrAbove(authUser.role)) {
+  if (!authUser || !isUserOrAbove(authUser.role)) {
     return NextResponse.json({ error: '권한 없음' }, { status: 403 })
   }
 

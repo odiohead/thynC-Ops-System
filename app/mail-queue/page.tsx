@@ -39,7 +39,7 @@ function fmtDate(d: string | null | undefined) {
 export default function MailQueuePage() {
   const router = useRouter()
   const [items, setItems] = useState<QueueItem[]>([])
-  const [isAdmin, setIsAdmin] = useState(false)
+  const [canAccess, setCanAccess] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
   const [activeTab, setActiveTab] = useState<TabKey>('pending')
 
@@ -69,16 +69,16 @@ export default function MailQueuePage() {
     fetch('/api/auth/me')
       .then((r) => r.json())
       .then((me) => {
-        const admin = !!me?.role && (me.role === 'SUPER_ADMIN' || me.role === 'ADMIN')
-        setIsAdmin(admin)
+        const allowed = !!me?.role && me.role !== 'VIEWER'
+        setCanAccess(allowed)
         setAuthChecked(true)
-        if (!admin) router.push('/')
+        if (!allowed) router.push('/')
       })
   }, [router])
 
   useEffect(() => {
-    if (isAdmin) fetchItems()
-  }, [isAdmin, fetchItems])
+    if (canAccess) fetchItems()
+  }, [canAccess, fetchItems])
 
   async function handleSync() {
     setSyncing(true)

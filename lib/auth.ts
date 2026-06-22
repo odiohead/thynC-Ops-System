@@ -42,3 +42,8 @@ export function isAdminOrAbove(role: string) {
 export function isSuperAdmin(role: string) {
   return role === 'SUPER_ADMIN'
 }
+
+/** USER 이상 (VIEWER만 제외) — 쓰기 가능 역할 */
+export function isUserOrAbove(role: string) {
+  return role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'USER'
+}

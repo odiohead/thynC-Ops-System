@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-06-22 | 메일큐·답사큐 페이지 USER(일반) 접근 허용
+
+- **버그**: 이전에 두 페이지를 일반 유저에게 허용 요청했으나 코드 미반영 — `mail-queue`/`site-visit-queue` 페이지·API가 여전히 `isAdminOrAbove`(SUPER_ADMIN/ADMIN)로 막혀 USER는 페이지 진입 시 `/`로 리다이렉트, API 403
+- **수정**: VIEWER만 차단(=USER 이상 허용)으로 변경
+  - `lib/auth.ts`에 `isUserOrAbove(role)` 헬퍼 추가 (VIEWER 제외)
+  - 페이지 접근 게이트: `me.role !== 'VIEWER'`로 변경, 상태변수 `isAdmin`→`canAccess`
+  - API 6개 `isAdminOrAbove`→`isUserOrAbove`: 목록·일괄삭제(`*/route.ts`), 등록·삭제(`*/[id]/route.ts`), 메일 sync(`*/sync/route.ts`)
+- 진입점: 답사관리 "메일 확인" 버튼은 무게이트, 설치계획관리는 이미 `!VIEWER` 노출 — 변경 불필요
+- `npx tsc --noEmit` 통과. **DEV·PROD 모두 반영 완료**: dev2 빌드+`pm2 restart thync-dev`, git push → PROD pull(DB 변경 없음) → 힙4GB 빌드 + `pm2 restart thync-prod`. 양쪽 login 200·큐 페이지 307·`ops.seersthync.com` 200 검증
+- 영향 파일: `lib/auth.ts`, `app/mail-queue/page.tsx`, `app/site-visit-queue/page.tsx`, `app/api/mail-queue/{route,[id]/route,sync/route}.ts`, `app/api/site-visit-queue/{route,[id]/route,sync/route}.ts`
+
+---
+
 ## 2026-06-22 | 차량 운행일지 + 반납 기능 (설계·구현)
 
 - **요구**: 차량별 운행일지 관리. 최종 주행거리는 "반납" 절차로 입력. 예약(사용목적·행선지·운전자) 연동. 보드에서 반납완료/미반납 색 구분

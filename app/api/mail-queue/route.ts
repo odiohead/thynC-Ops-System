@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isUserOrAbove } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(request: NextRequest) {
   const authUser = await getAuthUser(request)
-  if (!authUser || !isAdminOrAbove(authUser.role)) {
+  if (!authUser || !isUserOrAbove(authUser.role)) {
     return NextResponse.json({ error: '권한 없음' }, { status: 403 })
   }
 
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const authUser = await getAuthUser(request)
-  if (!authUser || !isAdminOrAbove(authUser.role)) {
+  if (!authUser || !isUserOrAbove(authUser.role)) {
     return NextResponse.json({ error: '권한 없음' }, { status: 403 })
   }
 

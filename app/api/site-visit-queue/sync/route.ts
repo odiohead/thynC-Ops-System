@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyToken, isAdminOrAbove } from '@/lib/auth'
+import { verifyToken, isUserOrAbove } from '@/lib/auth'
 import { syncSiteVisitMails } from '@/lib/mail-sync'
 
 export async function POST(request: NextRequest) {
@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
 
   if (token) {
     const user = await verifyToken(token)
-    if (user && isAdminOrAbove(user.role)) {
+    if (user && isUserOrAbove(user.role)) {
       authenticated = true
     }
   }
