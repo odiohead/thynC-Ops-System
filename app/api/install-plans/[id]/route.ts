@@ -104,13 +104,19 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   })
   if (!existing) return NextResponse.json({ error: '설치계획을 찾을 수 없습니다.' }, { status: 404 })
 
-  if (existing.planCode) {
-    await prisma.task.deleteMany({
-      where: { refCode: existing.planCode, taskType: 'INSTALL_PLAN' },
-    })
-  }
-
-  await prisma.installPlan.delete({ where: { id } })
+  // 연결된 메일큐 항목 해제 + Task 삭제 + 설치계획 삭제를 한 트랜잭션으로 처리
+  // install_plan_queue FK는 NO ACTION이라 먼저 링크를 끊어야 삭제 가능.
+  // 링크 해제 후 'ignored' 처리 — 삭제된 설치계획의 출처 메일이 큐에 다시 노출되지 않도록 함(메일 원본은 보존).
+  await prisma.$transaction([
+    prisma.installPlanQueue.updateMany({
+      where: { installPlanId: id },
+      data: { installPlanId: null, status: 'ignored' },
+    }),
+    ...(existing.planCode
+      ? [prisma.task.deleteMany({ where: { refCode: existing.planCode, taskType: 'INSTALL_PLAN' } })]
+      : []),
+    prisma.installPlan.delete({ where: { id } }),
+  ])
 
   await logAudit({
     req: request,

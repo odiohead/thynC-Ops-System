@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-06-23 | 설치계획 삭제 실패 버그 수정 — 메일큐 연결 항목 FK 막힘
+
+- **버그(PROD 발견)**: 메일큐에서 등록된 설치계획은 삭제가 실패. `install_plan_queue.install_plan_id` FK가 `onDelete: Cascade`가 아닌 `NO ACTION`이라, 큐가 연결된 설치계획 삭제 시 FK 제약 위반. (files·assignees는 Cascade라 정상) — PROD IP-202606-00016/00017(중복 건) 삭제 불가로 확인
+- **수정**: `DELETE /api/install-plans/[id]`에서 삭제 전 연결된 큐 항목을 해제하도록 변경. 큐 항목 unlink(`installPlanId=null`) + `status='ignored'`(메일 원본 보존, 큐에 다시 노출 안 됨) → Task 삭제 → 설치계획 삭제를 **단일 트랜잭션**으로 처리. 스키마 FK 변경(PROD DDL) 없이 코드만으로 해결
+- 삭제된 설치계획의 출처 메일은 '무시(ignored)' 처리되어 메일큐에 재노출되지 않음 (메일 원본 레코드는 유지)
+- `npx tsc --noEmit` 통과
+- 영향 파일: `app/api/install-plans/[id]/route.ts`
+
+---
+
 ## 2026-06-23 | 답사 관리 목록 — 상단 동기화 가로 스크롤바 추가
 
 - **불편**: 답사 목록(`/site-visits`)은 컬럼이 많아 좌우 스크롤이 생기는데, 가로 스크롤바가 테이블 맨 아래에 붙어 있어 행이 많으면 브라우저를 최하단까지 내려야 스크롤바가 보임
