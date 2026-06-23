@@ -9,8 +9,9 @@
 - **불편**: 답사 목록(`/site-visits`)은 컬럼이 많아 좌우 스크롤이 생기는데, 가로 스크롤바가 테이블 맨 아래에 붙어 있어 행이 많으면 브라우저를 최하단까지 내려야 스크롤바가 보임
 - **수정**: 테이블 위에 항상 보이는 동기화 가로 스크롤바를 추가. 페이지 로딩 즉시 보이고, 상단 바 ↔ 테이블 스크롤을 양방향 동기화(`syncFrom`, `requestAnimationFrame`으로 재귀 방지)
 - 테이블 실제 `scrollWidth`를 측정해 상단 더미 바 폭에 반영, 데이터(`siteVisits`)·창 크기(`resize`) 변동 시 자동 재측정. 컬럼이 넘칠 때만 상단 바 노출, 기존 하단 스크롤바도 유지
+- 대안 검토: 높이 고정+sticky 헤더(B안)도 시연했으나 사용자가 상단 스크롤바(A안) 선호 → A안 확정
+- **DEV·PROD 모두 반영 완료**: dev2 빌드+`pm2 restart thync-dev`, git push(`67f224e`) → PROD pull → 힙4GB 빌드 + `pm2 restart thync-prod`(DB·패키지 변경 없음). PROD root 307·login 200·site-visits 307 검증
 - 영향 파일: `app/site-visits/page.tsx`
-- 빌드·git push 미실행 (사용자 테스트 후 요청 대기)
 
 ---
 
