@@ -14,6 +14,7 @@
   - 선택 결과는 칩(단일일 `YYYY-MM-DD` / 기간 `시작 ~ 종료`)으로 표시, × 개별 삭제. 월 네비게이션·주말 색·오늘 강조
 - **연동 변경**: `MaintenanceForm`의 반복 행 입력/핸들러 제거 → `<MaintenanceVisitPicker>`로 교체(`visits` 상태·제출 페이로드 동일). 상세(`[id]/page.tsx`) initialData는 단일일을 `endDate=startDate`로 채워 전달(피커가 start=end로 단일일 판별)
 - 데이터 형식 `{startDate,endDate}` 불변 → 목록·간트·API 무변경. `npx tsc --noEmit` 통과
+- **DEV·PROD 모두 반영 완료** (방문일 다건화 + 캘린더 선택기를 commit `3d31414`로 함께 배포): dev2 빌드+`pm2 restart thync-dev`, git push → PROD pull → `thync_ops`에 마이그레이션 `20260626000000` 단일 트랜잭션 적용(기존 159건 visit_date 이관, 본체 calendar_event_id 해제) + migrate resolve + generate + 힙4GB 빌드 + `pm2 restart thync-prod`. 양쪽 login 200·보호라우트 307·`ops.seersthync.com` 307 검증, PROD 인증 상태 `/api/maintenances` LIST·DETAIL 200(visits 정상), 신규 에러 없음
 - 영향 파일: `app/maintenances/MaintenanceVisitPicker.tsx`(신규), `app/maintenances/MaintenanceForm.tsx`, `app/maintenances/[id]/page.tsx`
 
 ---
@@ -27,7 +28,7 @@
 - **API**: POST/PUT body가 `visitDate` 대신 `visits:[{startDate,endDate}]` 수신. `lib/maintenanceVisit.ts` 신설(`normalizeVisits` 입력 정규화·중복제거·정렬, `visitEventPayload` 캘린더 페이로드, `ymd`/`visitKey`). GET 목록·상세 include에 `visits` 추가. DELETE는 방문 항목별 캘린더 이벤트까지 정리
 - **UI**: 등록/수정 폼의 단일 날짜 입력을 "방문일정" 반복 입력으로 교체(항목별 시작일 ~ 종료일(선택), + 추가/× 삭제, 종료일 비우면 단일일). 목록 방문일 컬럼은 `start~end` 다건을 `, ` 결합(3건↑ "외 N건"). 상세 진입 시 단일일(start=end)은 종료일 비워 표시
 - **간트차트** (`/projects/calendar`): 유지보수 1건 → 방문 항목별 바 다수. 뷰 범위와 겹치는 항목만 렌더, 필터를 단일 날짜 비교 → 범위 교집합으로 변경. 기간 항목은 여러 날 바로 표시
-- `npx tsc --noEmit` 통과. **빌드·PM2 재시작·git push·PROD 반영 미실행** (사용자 테스트 후 요청 대기)
+- `npx tsc --noEmit` 통과. **DEV·PROD 모두 반영 완료** (위 캘린더 선택기 작업과 commit `3d31414`로 함께 배포 — 상단 항목 배포 기록 참조)
 - 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260626000000_add_maintenance_visits/`, `lib/maintenanceVisit.ts`(신규), `app/api/maintenances/route.ts`, `app/api/maintenances/[id]/route.ts`, `app/maintenances/{MaintenanceForm,page,[id]/page}.tsx`, `app/projects/calendar/page.tsx`
 
 ---
