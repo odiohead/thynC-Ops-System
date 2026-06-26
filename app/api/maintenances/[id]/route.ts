@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { deleteFromS3 } from '@/lib/s3'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
+import { normalizeVisits, visitEventPayload, visitKey, ymd } from '@/lib/maintenanceVisit'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
@@ -15,6 +16,7 @@ const include = {
   status: { select: { id: true, name: true, color: true } },
   assignees: { include: { user: { select: { id: true, name: true, email: true } } } },
   files: { orderBy: { uploadedAt: 'asc' as const } },
+  visits: { orderBy: { sortOrder: 'asc' as const } },
 } as const
 
 export async function GET(request: NextRequest, { params }: Params) {
@@ -50,7 +52,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     reporterName,
     isRemote,
     reportedAt,
-    visitDate,
+    visits,
     resolvedAt,
     symptoms,
     cause,
@@ -70,7 +72,6 @@ export async function PUT(request: NextRequest, { params }: Params) {
       ...(reporterName !== undefined && { reporterName: reporterName || null }),
       ...(isRemote !== undefined && { isRemote }),
       ...(reportedAt !== undefined && { reportedAt: reportedAt ? new Date(reportedAt) : null }),
-      ...(visitDate !== undefined && { visitDate: visitDate ? new Date(visitDate) : null }),
       ...(resolvedAt !== undefined && { resolvedAt: resolvedAt ? new Date(resolvedAt) : null }),
       ...(symptoms !== undefined && { symptoms: symptoms || null }),
       ...(cause !== undefined && { cause: cause || null }),
@@ -90,6 +91,43 @@ export async function PUT(request: NextRequest, { params }: Params) {
         })),
       }),
     ])
+  }
+
+  // 방문일정 reconcile — (시작,종료) 키로 매칭하여 삭제/유지/추가. 캘린더 이벤트ID는 유지 항목 보존
+  const deletedVisitEventIds: string[] = []
+  if (Array.isArray(visits)) {
+    const normalizedVisits = normalizeVisits(visits)
+    const existingVisits = await prisma.maintenanceVisit.findMany({ where: { maintenanceId: id } })
+    const existingByKey = new Map(existingVisits.map((v) => [visitKey(ymd(v.startDate), ymd(v.endDate)), v]))
+    const newByKey = new Map(normalizedVisits.map((v) => [visitKey(v.startDate, v.endDate), v]))
+
+    // 삭제: 기존에 있으나 새 목록에 없는 항목 (캘린더 이벤트도 정리)
+    const toDelete = existingVisits.filter((v) => !newByKey.has(visitKey(ymd(v.startDate), ymd(v.endDate))))
+    for (const v of toDelete) {
+      if (v.calendarEventId) deletedVisitEventIds.push(v.calendarEventId)
+    }
+    if (toDelete.length > 0) {
+      await prisma.maintenanceVisit.deleteMany({ where: { id: { in: toDelete.map((v) => v.id) } } })
+    }
+    // 유지: sortOrder만 갱신
+    for (const v of normalizedVisits) {
+      const existing = existingByKey.get(visitKey(v.startDate, v.endDate))
+      if (existing) {
+        if (existing.sortOrder !== v.sortOrder) {
+          await prisma.maintenanceVisit.update({ where: { id: existing.id }, data: { sortOrder: v.sortOrder } })
+        }
+      } else {
+        // 추가 (캘린더 이벤트는 아래에서 생성)
+        await prisma.maintenanceVisit.create({
+          data: {
+            maintenanceId: id,
+            startDate: new Date(v.startDate),
+            endDate: new Date(v.endDate),
+            sortOrder: v.sortOrder,
+          },
+        })
+      }
+    }
   }
 
   const updated = await prisma.maintenance.findUnique({ where: { id }, include })
@@ -113,35 +151,36 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
   }
 
-  // Google Calendar 동기화 (비차단)
-  const calendarChanged = visitDate !== undefined || assigneeIds !== undefined || title !== undefined
-  if (updated && calendarChanged) {
-    const hasVisitDate = !!updated.visitDate
-    const hasEventId = !!updated.calendarEventId
+  // Google Calendar 동기화 (비차단) — 방문 항목별 1개씩
+  // 삭제된 방문 항목의 이벤트 제거
+  for (const eventId of deletedVisitEventIds) {
+    await deleteCalendarEvent('maintenance', eventId)
+  }
+  const calendarMetaChanged = title !== undefined || assigneeIds !== undefined
+  if (updated && (Array.isArray(visits) || calendarMetaChanged)) {
     const hospitalName = updated.hospital.hospitalName ?? updated.hospital.hiraHospitalName ?? ''
     const assigneeEmails = updated.assignees
       .map((a: { user: { email?: string } }) => a.user.email)
       .filter(Boolean) as string[]
 
-    if (hasEventId && !hasVisitDate) {
-      await deleteCalendarEvent('maintenance', updated.calendarEventId!)
-      await prisma.maintenance.update({ where: { id }, data: { calendarEventId: null } })
-    } else if (hasEventId && hasVisitDate) {
-      await updateCalendarEvent('maintenance', updated.calendarEventId!, {
-        summary: `[유지보수] ${hospitalName} - ${updated.title}`,
-        description: `유지보수 코드: ${updated.maintenanceCode}`,
-        startDate: updated.visitDate!,
+    for (const visit of updated.visits) {
+      const payload = visitEventPayload({
+        hospitalName,
+        title: updated.title,
+        maintenanceCode: updated.maintenanceCode,
+        startDate: ymd(visit.startDate),
+        endDate: ymd(visit.endDate),
         attendeeEmails: assigneeEmails,
       })
-    } else if (!hasEventId && hasVisitDate) {
-      const eventId = await createCalendarEvent('maintenance', {
-        summary: `[유지보수] ${hospitalName} - ${updated.title}`,
-        description: `유지보수 코드: ${updated.maintenanceCode}`,
-        startDate: updated.visitDate!,
-        attendeeEmails: assigneeEmails,
-      })
-      if (eventId) {
-        await prisma.maintenance.update({ where: { id }, data: { calendarEventId: eventId } })
+      if (!visit.calendarEventId) {
+        // 신규 방문 항목 → 이벤트 생성
+        const eventId = await createCalendarEvent('maintenance', payload)
+        if (eventId) {
+          await prisma.maintenanceVisit.update({ where: { id: visit.id }, data: { calendarEventId: eventId } })
+        }
+      } else if (calendarMetaChanged) {
+        // 유지된 항목 + 제목/담당자 변경 → 이벤트 갱신
+        await updateCalendarEvent('maintenance', visit.calendarEventId, payload)
       }
     }
   }
@@ -170,11 +209,14 @@ export async function DELETE(request: NextRequest, { params }: Params) {
 
   const existing = await prisma.maintenance.findUnique({
     where: { id },
-    include: { files: true, hospital: { select: { hospitalName: true } } },
+    include: { files: true, visits: true, hospital: { select: { hospitalName: true } } },
   })
   if (!existing) return NextResponse.json({ error: '유지보수를 찾을 수 없습니다.' }, { status: 404 })
 
-  // Google Calendar 이벤트 삭제 (비차단)
+  // Google Calendar 이벤트 삭제 (비차단) — 방문 항목별 + 레거시 본체 이벤트
+  for (const visit of existing.visits) {
+    if (visit.calendarEventId) await deleteCalendarEvent('maintenance', visit.calendarEventId)
+  }
   if (existing.calendarEventId) {
     await deleteCalendarEvent('maintenance', existing.calendarEventId)
   }

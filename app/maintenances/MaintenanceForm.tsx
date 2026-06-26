@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import RichTextEditor from '@/app/components/RichTextEditor'
 import FieldEngineerSelectModal from '@/app/components/FieldEngineerSelectModal'
+import MaintenanceVisitPicker, { type VisitInput } from './MaintenanceVisitPicker'
 
 interface Hospital {
   hospitalCode: string
@@ -33,7 +34,6 @@ interface MaintenanceFormData {
   reporterName: string
   isRemote: boolean
   reportedAt: string
-  visitDate: string
   resolvedAt: string
   symptoms: string
   cause: string
@@ -46,6 +46,7 @@ interface Props {
     id?: number
     files?: MaintenanceFileItem[]
     assignees?: { user: { id: string; name: string; email: string } }[]
+    visits?: VisitInput[]
   }
   mode: 'create' | 'edit'
 }
@@ -226,7 +227,6 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
     reporterName: initialData?.reporterName ?? '',
     isRemote: initialData?.isRemote ?? false,
     reportedAt: initialData?.reportedAt ?? '',
-    visitDate: initialData?.visitDate ?? '',
     resolvedAt: initialData?.resolvedAt ?? '',
     symptoms: initialData?.symptoms ?? '',
     cause: initialData?.cause ?? '',
@@ -237,6 +237,8 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
   const [maintenanceFiles, setMaintenanceFiles] = useState<MaintenanceFileItem[]>(
     initialData?.files ?? []
   )
+
+  const [visits, setVisits] = useState<VisitInput[]>(initialData?.visits ?? [])
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -321,7 +323,9 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
       reporterName: form.reporterName || null,
       isRemote: form.isRemote,
       reportedAt: form.reportedAt || null,
-      visitDate: form.visitDate || null,
+      visits: visits
+        .filter((v) => v.startDate)
+        .map((v) => ({ startDate: v.startDate, endDate: v.endDate || v.startDate })),
       resolvedAt: form.resolvedAt || null,
       symptoms: form.symptoms || null,
       cause: form.cause || null,
@@ -529,11 +533,11 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
               </div>
             </div>
 
-            {/* 방문일 */}
+            {/* 방문일정 */}
             <div className="grid grid-cols-3 gap-4 px-6 py-4">
-              <label className="flex items-center text-sm font-medium text-gray-700">방문일</label>
+              <label className="flex items-start pt-2 text-sm font-medium text-gray-700">방문일정</label>
               <div className="col-span-2">
-                <input type="date" value={form.visitDate} onChange={(e) => set('visitDate', e.target.value)} className={inputClass} />
+                <MaintenanceVisitPicker visits={visits} onChange={setVisits} />
               </div>
             </div>
 

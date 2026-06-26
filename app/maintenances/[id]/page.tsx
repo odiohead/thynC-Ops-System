@@ -34,7 +34,6 @@ interface MaintenanceData {
   reporterName: string | null
   isRemote: boolean
   reportedAt: string | null
-  visitDate: string | null
   resolvedAt: string | null
   symptoms: string | null
   cause: string | null
@@ -42,6 +41,7 @@ interface MaintenanceData {
   notes: string | null
   assignees: { user: { id: string; name: string; email: string } }[]
   files: MaintenanceFile[]
+  visits: { id: number; startDate: string; endDate: string }[]
 }
 
 const labelClass = 'text-xs font-medium uppercase tracking-wider text-gray-400'
@@ -133,7 +133,6 @@ export default function EditMaintenancePage() {
     reporterName: data.reporterName ?? '',
     isRemote: data.isRemote,
     reportedAt: data.reportedAt ? data.reportedAt.slice(0, 10) : '',
-    visitDate: data.visitDate ? data.visitDate.slice(0, 10) : '',
     resolvedAt: data.resolvedAt ? data.resolvedAt.slice(0, 10) : '',
     symptoms: data.symptoms ?? '',
     cause: data.cause ?? '',
@@ -141,6 +140,10 @@ export default function EditMaintenancePage() {
     notes: data.notes ?? '',
     assignees: data.assignees ?? [],
     files: data.files ?? [],
+    visits: (data.visits ?? []).map((v) => ({
+      startDate: v.startDate.slice(0, 10),
+      endDate: v.endDate.slice(0, 10),
+    })),
   }
 
   return (

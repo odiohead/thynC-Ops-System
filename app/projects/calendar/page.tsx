@@ -35,8 +35,8 @@ interface MaintenanceItem {
   maintenanceCode: string | null
   title: string
   reportedAt: string | null
-  visitDate: string | null
   resolvedAt: string | null
+  visits: { startDate: string; endDate: string }[]
   hospital: {
     hospitalName: string | null
     hiraHospitalName: string | null
@@ -171,25 +171,39 @@ function projectsToGanttItems(projects: Project[]): GanttItem[] {
     }))
 }
 
-function maintenancesToGanttItems(maintenances: MaintenanceItem[]): GanttItem[] {
-  return maintenances
-    .filter(m => m.visitDate)
-    .map(m => {
-      const date = m.visitDate!.slice(0, 10)
-      const hospitalName = m.hospital.hospitalName ?? m.hospital.hiraHospitalName ?? ''
+function maintenancesToGanttItems(
+  maintenances: MaintenanceItem[],
+  viewStartStr: string,
+  viewEndStr: string,
+): GanttItem[] {
+  return maintenances.flatMap(m => {
+    const hospitalName = m.hospital.hospitalName ?? m.hospital.hiraHospitalName ?? ''
+    return (m.visits ?? [])
+      .map((visit, idx) => ({ visit, idx }))
+      // 뷰 범위와 겹치는 방문 항목만 바로 렌더
+      .filter(({ visit }) => {
+        const start = visit.startDate.slice(0, 10)
+        const end = visit.endDate.slice(0, 10)
+        return start <= viewEndStr && end >= viewStartStr
+      })
+      .map(({ visit, idx }) => {
+        const start = visit.startDate.slice(0, 10)
+        const end = visit.endDate.slice(0, 10)
+        const rangeLabel = start === end ? start : `${start} ~ ${end}`
 
-      return {
-        id: m.id + 1000000,
-        kind: 'maintenance' as const,
-        code: m.maintenanceCode ?? '',
-        startDate: date,
-        endDate: date,
-        label: `🔧 ${hospitalName} - ${m.title}`,
-        color: m.type?.color ?? '#F59E0B',
-        tooltip: `[유지보수] ${hospitalName} - ${m.title} (${date})`,
-        href: `/maintenances/${m.id}`,
-      }
-    })
+        return {
+          id: 1_000_000 + m.id * 1000 + idx,
+          kind: 'maintenance' as const,
+          code: m.maintenanceCode ?? '',
+          startDate: start,
+          endDate: end,
+          label: `🔧 ${hospitalName} - ${m.title}`,
+          color: m.type?.color ?? '#F59E0B',
+          tooltip: `[유지보수] ${hospitalName} - ${m.title} (${rangeLabel})`,
+          href: `/maintenances/${m.id}`,
+        }
+      })
+  })
 }
 
 function siteVisitsToGanttItems(siteVisits: SiteVisitItem[]): GanttItem[] {
@@ -353,13 +367,15 @@ function CalendarPageContent() {
         return p.startDate.slice(0, 10) <= viewEndStr && p.endDateExpected.slice(0, 10) >= viewStartStr
       })
 
-      // Maintenances assigned to this engineer whose visitDate falls in view range
+      // Maintenances assigned to this engineer with any visit overlapping the view range
       const assignedMaint = maintenances.filter(m => {
         const hasAssignee = m.assignees.some(a => a.userId === eng.userId)
         if (!hasAssignee) return false
-        if (!m.visitDate) return false
-        const date = m.visitDate.slice(0, 10)
-        return date >= viewStartStr && date <= viewEndStr
+        return (m.visits ?? []).some(v => {
+          const start = v.startDate.slice(0, 10)
+          const end = v.endDate.slice(0, 10)
+          return start <= viewEndStr && end >= viewStartStr
+        })
       })
 
       // Site visits assigned to this engineer overlapping with view range
@@ -374,7 +390,7 @@ function CalendarPageContent() {
       // Convert to unified GanttItems
       const ganttItems = [
         ...projectsToGanttItems(assignedProjects),
-        ...maintenancesToGanttItems(assignedMaint),
+        ...maintenancesToGanttItems(assignedMaint, viewStartStr, viewEndStr),
         ...siteVisitsToGanttItems(assignedSV),
       ]
 

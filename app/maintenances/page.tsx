@@ -19,14 +19,25 @@ interface Maintenance {
   title: string
   isRemote: boolean
   reportedAt: string | null
-  visitDate: string | null
   resolvedAt: string | null
   assignees: { user: { id: string; name: string } }[]
+  visits: { startDate: string; endDate: string }[]
 }
 
 function formatDate(val: string | null): string {
   if (!val) return '-'
   return val.slice(0, 10)
+}
+
+function formatVisits(visits: { startDate: string; endDate: string }[]): string {
+  if (!visits || visits.length === 0) return '-'
+  const labels = visits.map((v) => {
+    const s = v.startDate.slice(0, 10)
+    const e = v.endDate.slice(0, 10)
+    return s === e ? s : `${s}~${e.slice(5)}`
+  })
+  if (labels.length <= 2) return labels.join(', ')
+  return `${labels.slice(0, 2).join(', ')} 외 ${labels.length - 2}건`
 }
 
 function StatusBadge({ status }: { status: { name: string; color: string | null } | null }) {
@@ -202,7 +213,7 @@ export default function MaintenancesPage() {
                       <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">
                         {m.assignees?.length > 0 ? m.assignees.map((a) => a.user.name).join(', ') : '-'}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatDate(m.visitDate)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatVisits(m.visits)}</td>
                       <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatDate(m.resolvedAt)}</td>
                     </tr>
                   ))

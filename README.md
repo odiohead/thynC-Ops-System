@@ -152,7 +152,8 @@ lib/
 ├── mail-scheduler.ts                 # 메일 동기화 인터벌 스케줄러 (mail-sync 함수 직접 호출)
 ├── audit.ts                          # 감사 로그 헬퍼 (logAudit, auditActorFromJWT, redact)
 ├── hospitalStatus.ts                 # 병원 thynC 현황상태 단방향 자동 진행 헬퍼 (advanceHospitalStatus)
-└── vehicleLog.ts                     # 운행일지 거리 재계산(recalcVehicleLogs) + 주행거리 무결성 검사(checkOdometerConsistency)
+├── vehicleLog.ts                     # 운행일지 거리 재계산(recalcVehicleLogs) + 주행거리 무결성 검사(checkOdometerConsistency)
+└── maintenanceVisit.ts               # 유지보수 방문일정 정규화(normalizeVisits) + 캘린더 페이로드(visitEventPayload) + ymd/visitKey
 
 prisma/
 ├── schema.prisma                     # DB 스키마
@@ -265,15 +266,21 @@ prisma/
 - 장애유형(`typeId` → StatusCode MAINTENANCE_TYPE), 상태(`statusId` → StatusCode MAINTENANCE_STATUS)
 - 우선순위(`priority`): 긴급/높음/보통/낮음 (기본값: 보통)
 - 신고자(`reporterName`): 병원 측 텍스트
-- 원격처리 여부(`isRemote`), 접수일(`reportedAt`), 방문일(`visitDate`), 완료일(`resolvedAt`)
+- 원격처리 여부(`isRemote`), 접수일(`reportedAt`), 완료일(`resolvedAt`)
+- 방문일정: `MaintenanceVisit` 자식 테이블로 다건 관리 (단일 `visitDate`/`calendarEventId` 컬럼은 보존·deprecated)
 - 증상(`symptoms`), 원인(`cause`): plain text
 - 조치내용(`resolution`), 비고(`notes`): 리치 텍스트(Tiptap)
-- 담당자 N:M (`MaintenanceAssignee`), 첨부파일 (`MaintenanceFile`, S3)
-- Google Calendar 이벤트 ID (`calendarEventId`) — 유지보수 생성/수정/삭제 시 자동 동기화
+- 담당자 N:M (`MaintenanceAssignee`), 첨부파일 (`MaintenanceFile`, S3), 방문일정 1:N (`MaintenanceVisit`)
+- Google Calendar 이벤트 ID는 방문 항목(`MaintenanceVisit.calendarEventId`)별 관리 — 항목 생성/수정/삭제 시 자동 동기화
 
 ### MaintenanceAssignee (유지보수 담당자)
 - Maintenance ↔ User N:M 관계 테이블
 - maintenanceId, userId, createdAt
+
+### MaintenanceVisit (유지보수 방문일정)
+- Maintenance 1:N 방문일정. 각 항목은 단일일(start=end) 또는 기간(start~end), 비연속 다건 지원
+- `maintenanceId`(FK Cascade), `startDate`/`endDate`(@db.Date), `calendarEventId`(항목별 Google Calendar 이벤트), `sortOrder`, `createdAt`
+- 인덱스 `(maintenanceId)`
 
 ### MaintenanceFile (유지보수 첨부파일)
 - Maintenance에 첨부된 파일
@@ -486,7 +493,7 @@ prisma/
   - X축: 뷰 범위 = 해당 월이 속한 ISO 주의 월요일 ~ 일요일 (월 경계 주가 잘리지 않도록 인접 월 일부 포함, 총 35~42일), URL `?month=YYYY-MM` 동기화, 주차·일별 2행 헤더 (sticky top), 현재 월 외 날짜는 연한 회색 글자 + 연회색 배경으로 구분
   - 구축 프로젝트 + 유지보수 + 답사 업무 통합 표시
   - 바 색상: 프로젝트는 buildStatus.color, 유지보수는 장애유형 color, 답사는 답사 상태 color (좌측 보더 + 사선 패턴으로 구분)
-  - 유지보수 바는 `visitDate`(방문일) 기준 1일짜리 단일 바로 표시. `visitDate` 미입력 건은 간트차트 미표시
+  - 유지보수 바는 방문일정(`MaintenanceVisit`) 항목별로 표시 — 단일일은 1일 바, 기간은 시작~종료 바. 한 건에 방문 항목이 여럿이면 바도 여럿. 뷰 범위와 겹치는 항목만 렌더, 방문일정 없는 건은 미표시
   - 답사 바는 `visitDate`(방문일) 기준 1일짜리 단일 바
   - 과거 일정 옅게, 미래 일정 짙게 표시 (오늘 기준 gradient 분리)
   - 바 클릭 시 해당 상세 페이지 새 탭 오픈
@@ -518,10 +525,11 @@ prisma/
 - 병원 ���색 모달로 병원 연결 (필수)
 - 장애유형(MAINTENANCE_TYPE) / 상태(MAINTENANCE_STATUS) / 우선순위(긴급/높음/보통/낮음) 관리
 - 담당자(필드 엔지니어, 복수 지정), 신고자(병원 측 텍스트), 원격처리 체크박스
-- 접수일 / 방문일 / 완료일 관리
+- 접수일 / 완료일 관리
+- **방문일정 다건 (캘린더 선택기)**: "방문일 지정" 버튼 → 월 달력 모달(`MaintenanceVisitPicker`, 외부 라이브러리 없는 자체 컴포넌트). 날짜를 클릭해 비연속 여러 날(예: 3일·7일·15일)을 토글 선택, **`장기일정` 체크박스**를 켜면 시작·종료일을 찍어 연속 기간 등록. 단일일·기간을 한 건에 혼합 + 기간 여러 개 가능. 선택 결과는 칩으로 표시·개별 삭제. 방문 항목별 Google Calendar 이벤트 자동 동기화
 - 증상·원인: plain textarea, 조치내용·비고: Tiptap 리치 텍스트
 - 첨부파일 관리 (AWS S3 업로드, presigned URL 다운로드) — edit 모드에서만
-- 목록 컬럼: 접수일 | 병원명 | 제목 | 장애유형 | 우선순위 | 상태 | 원격 | 담당자 | 방문일 | 완료일
+- 목록 컬럼: 접수일 | 병원명 | 제목 | 장애유형 | 우선순위 | 상태 | 원격 | 담당자 | 방문일정 | 완료일 (방문일정은 다건을 결합 표시, 3건↑은 "외 N건")
 - 목록 필터: 병원명 텍스트 검색, 장애유형/상태/우선순위 select
 - 우선순위 색상 뱃지: 긴급(red) / 높음(amber) / 보통(blue) / 낮음(gray)
 - 등록 시 상태 기본값: '접수'

@@ -2,15 +2,21 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { createCalendarEvent } from '@/lib/googleCalendar'
+import { normalizeVisits, visitEventPayload } from '@/lib/maintenanceVisit'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
+
+const visitsInclude = {
+  visits: { orderBy: { sortOrder: 'asc' as const } },
+} as const
 
 const include = {
   hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true, address: true } },
   type: { select: { id: true, name: true, color: true } },
   status: { select: { id: true, name: true, color: true } },
   assignees: { include: { user: { select: { id: true, name: true } } } },
+  ...visitsInclude,
 } as const
 
 export async function GET(request: NextRequest) {
@@ -64,7 +70,7 @@ export async function POST(request: NextRequest) {
     reporterName,
     isRemote,
     reportedAt,
-    visitDate,
+    visits,
     resolvedAt,
     symptoms,
     cause,
@@ -72,6 +78,8 @@ export async function POST(request: NextRequest) {
     notes,
     assigneeIds,
   } = body
+
+  const normalizedVisits = normalizeVisits(visits)
 
   if (!hospitalCode) {
     return NextResponse.json({ error: '병원을 선택해주세요.' }, { status: 400 })
@@ -90,7 +98,6 @@ export async function POST(request: NextRequest) {
       reporterName: reporterName || null,
       isRemote: isRemote ?? false,
       reportedAt: reportedAt ? new Date(reportedAt) : null,
-      visitDate: visitDate ? new Date(visitDate) : null,
       resolvedAt: resolvedAt ? new Date(resolvedAt) : null,
       symptoms: symptoms || null,
       cause: cause || null,
@@ -105,6 +112,18 @@ export async function POST(request: NextRequest) {
       data: assigneeIds.map((userId: string) => ({
         maintenanceId: created.id,
         userId,
+      })),
+    })
+  }
+
+  // 방문일정 생성
+  if (normalizedVisits.length > 0) {
+    await prisma.maintenanceVisit.createMany({
+      data: normalizedVisits.map((v) => ({
+        maintenanceId: created.id,
+        startDate: new Date(v.startDate),
+        endDate: new Date(v.endDate),
+        sortOrder: v.sortOrder,
       })),
     })
   }
@@ -147,8 +166,8 @@ export async function POST(request: NextRequest) {
     },
   })
 
-  // Google Calendar 이벤트 생성 (비차단) — visitDate 기준
-  if (maintenance.visitDate) {
+  // Google Calendar 이벤트 생성 (비차단) — 방문 항목별 1개씩
+  if (maintenance.visits.length > 0) {
     const assigneeEmails = Array.isArray(assigneeIds) && assigneeIds.length > 0
       ? (await prisma.user.findMany({
           where: { id: { in: assigneeIds } },
@@ -157,17 +176,21 @@ export async function POST(request: NextRequest) {
       : []
 
     const hospitalName = maintenance.hospital.hospitalName ?? maintenance.hospital.hiraHospitalName ?? ''
-    const eventId = await createCalendarEvent('maintenance', {
-      summary: `[유지보수] ${hospitalName} - ${title.trim()}`,
-      description: `유지보수 코드: ${maintenanceCode}`,
-      startDate: maintenance.visitDate,
-      attendeeEmails: assigneeEmails,
-    })
-    if (eventId) {
-      await prisma.maintenance.update({
-        where: { id: maintenance.id },
-        data: { calendarEventId: eventId },
-      })
+    for (const visit of maintenance.visits) {
+      const eventId = await createCalendarEvent('maintenance', visitEventPayload({
+        hospitalName,
+        title: title.trim(),
+        maintenanceCode,
+        startDate: visit.startDate.toISOString().slice(0, 10),
+        endDate: visit.endDate.toISOString().slice(0, 10),
+        attendeeEmails: assigneeEmails,
+      }))
+      if (eventId) {
+        await prisma.maintenanceVisit.update({
+          where: { id: visit.id },
+          data: { calendarEventId: eventId },
+        })
+      }
     }
   }
 

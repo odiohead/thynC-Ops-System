@@ -628,13 +628,13 @@ model Maintenance {
   reporterName      String?   @map("reporter_name")
   isRemote          Boolean   @default(false) @map("is_remote")
   reportedAt        DateTime? @map("reported_at") @db.Date
-  visitDate         DateTime? @map("visit_date") @db.Date
+  visitDate         DateTime? @map("visit_date") @db.Date // deprecated: 방문일정은 visits(MaintenanceVisit)로 이전
   resolvedAt        DateTime? @map("resolved_at") @db.Date
   symptoms          String?   @db.Text @map("symptoms")
   cause             String?   @db.Text @map("cause")
   resolution        String?   @db.Text @map("resolution")
   notes             String?   @db.Text @map("notes")
-  calendarEventId   String?   @map("calendar_event_id")
+  calendarEventId   String?   @map("calendar_event_id") // deprecated: 캘린더 이벤트ID는 방문 항목별(MaintenanceVisit.calendarEventId)로 이전
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
@@ -643,8 +643,24 @@ model Maintenance {
   status     StatusCode? @relation("MaintenanceStatus", fields: [statusId], references: [id])
   assignees  MaintenanceAssignee[]
   files      MaintenanceFile[]
+  visits     MaintenanceVisit[]
 
   @@map("maintenances")
+  @@schema("public")
+}
+
+model MaintenanceVisit {
+  id              Int         @id @default(autoincrement())
+  maintenanceId   Int         @map("maintenance_id")
+  startDate       DateTime    @map("start_date") @db.Date
+  endDate         DateTime    @map("end_date") @db.Date
+  calendarEventId String?     @map("calendar_event_id")
+  sortOrder       Int         @default(0) @map("sort_order")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  maintenance     Maintenance @relation(fields: [maintenanceId], references: [id], onDelete: Cascade)
+
+  @@index([maintenanceId])
+  @@map("maintenance_visits")
   @@schema("public")
 }
 

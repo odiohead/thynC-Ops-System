@@ -4,6 +4,34 @@
 
 ---
 
+## 2026-06-26 | 유지보수 방문일정 — 입력 UI를 캘린더 선택기로 교체
+
+- **변경 배경**: 앞선 작업의 "시작일~종료일 반복 행" 입력 대신, 캘린더에서 날짜를 직접 클릭해 고르는 방식을 요청. 데이터 모델(`maintenance_visits`)·API·간트차트는 그대로 두고 **폼 입력 UI만 교체**
+- **신규 컴포넌트** `app/maintenances/MaintenanceVisitPicker.tsx` (외부 라이브러리 없는 자체 월 달력):
+  - "방문일 지정" 버튼 → 월 달력 모달. 날짜 클릭 토글로 **비연속 여러 날**(3일·7일·15일 등) 선택 → 각 단일일 방문 항목
+  - **`장기일정` 체크박스**: 켜면 시작일·종료일을 클릭해 연속 기간 1건 등록(호버 미리보기). 끄면 단일일 토글 모드
+  - 단일일 + 기간 **혼합 가능**, 기간 **여러 개** 가능. 새 기간에 포함되는 단일일은 자동 정리, 동일 기간 중복 방지
+  - 선택 결과는 칩(단일일 `YYYY-MM-DD` / 기간 `시작 ~ 종료`)으로 표시, × 개별 삭제. 월 네비게이션·주말 색·오늘 강조
+- **연동 변경**: `MaintenanceForm`의 반복 행 입력/핸들러 제거 → `<MaintenanceVisitPicker>`로 교체(`visits` 상태·제출 페이로드 동일). 상세(`[id]/page.tsx`) initialData는 단일일을 `endDate=startDate`로 채워 전달(피커가 start=end로 단일일 판별)
+- 데이터 형식 `{startDate,endDate}` 불변 → 목록·간트·API 무변경. `npx tsc --noEmit` 통과
+- 영향 파일: `app/maintenances/MaintenanceVisitPicker.tsx`(신규), `app/maintenances/MaintenanceForm.tsx`, `app/maintenances/[id]/page.tsx`
+
+---
+
+## 2026-06-26 | 유지보수 방문일 — 단일일 → 다건(기간·비연속) 확장
+
+- **요구**: 유지보수 방문일을 하루만 입력하던 것을 (1) 기간(시작~종료) 설정 + (2) 비연속 여러 날(예: 3일·7일·15일) 입력 가능하도록 개선
+- **모델**: 두 요구를 한 번에 담기 위해 방문일정을 자식 테이블로 분리. `maintenance.visit_date`(단일) → `maintenance_visits`(N건, 각 항목 `start_date`~`end_date`). 단일일은 start=end, 기간은 start≠end, 비연속은 항목 여러 개. 기존 `visit_date`/`calendar_event_id` 컬럼은 보존(deprecated)
+- **DB** (dev2 로컬만 적용, 마이그레이션 `20260626000000_add_maintenance_visits`): `maintenance_visits` 신설(maintenanceId, startDate, endDate, calendarEventId?, sortOrder, createdAt, `(maintenanceId)` 인덱스, FK Cascade). 기존 `visit_date` 보유 건(125건)을 방문 항목 1건(start=end)으로 이관 + 캘린더 이벤트ID 승계, 본체 `calendar_event_id`는 중복 해제(NULL). schema.prisma `MaintenanceVisit` 모델 추가 + `prisma generate`
+- **Google Calendar**: 방문 항목당 all-day 이벤트 1개(이벤트ID를 항목별 저장). 단일일은 1일, 기간은 start~end. PUT은 (시작,종료) 키로 reconcile — 삭제 항목 이벤트 제거, 신규 항목 이벤트 생성, 유지 항목은 제목/담당자 변경 시에만 갱신
+- **API**: POST/PUT body가 `visitDate` 대신 `visits:[{startDate,endDate}]` 수신. `lib/maintenanceVisit.ts` 신설(`normalizeVisits` 입력 정규화·중복제거·정렬, `visitEventPayload` 캘린더 페이로드, `ymd`/`visitKey`). GET 목록·상세 include에 `visits` 추가. DELETE는 방문 항목별 캘린더 이벤트까지 정리
+- **UI**: 등록/수정 폼의 단일 날짜 입력을 "방문일정" 반복 입력으로 교체(항목별 시작일 ~ 종료일(선택), + 추가/× 삭제, 종료일 비우면 단일일). 목록 방문일 컬럼은 `start~end` 다건을 `, ` 결합(3건↑ "외 N건"). 상세 진입 시 단일일(start=end)은 종료일 비워 표시
+- **간트차트** (`/projects/calendar`): 유지보수 1건 → 방문 항목별 바 다수. 뷰 범위와 겹치는 항목만 렌더, 필터를 단일 날짜 비교 → 범위 교집합으로 변경. 기간 항목은 여러 날 바로 표시
+- `npx tsc --noEmit` 통과. **빌드·PM2 재시작·git push·PROD 반영 미실행** (사용자 테스트 후 요청 대기)
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20260626000000_add_maintenance_visits/`, `lib/maintenanceVisit.ts`(신규), `app/api/maintenances/route.ts`, `app/api/maintenances/[id]/route.ts`, `app/maintenances/{MaintenanceForm,page,[id]/page}.tsx`, `app/projects/calendar/page.tsx`
+
+---
+
 ## 2026-06-23 | 설치계획 삭제 실패 버그 수정 — 메일큐 연결 항목 FK 막힘
 
 - **버그(PROD 발견)**: 메일큐에서 등록된 설치계획은 삭제가 실패. `install_plan_queue.install_plan_id` FK가 `onDelete: Cascade`가 아닌 `NO ACTION`이라, 큐가 연결된 설치계획 삭제 시 FK 제약 위반. (files·assignees는 Cascade라 정상) — PROD IP-202606-00016/00017(중복 건) 삭제 불가로 확인
