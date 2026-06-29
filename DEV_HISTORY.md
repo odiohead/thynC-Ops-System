@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-06-30 | 위키 에디터 — heading(제목) 크기 미적용 버그 수정 (볼드만 되던 문제)
+
+- **버그(PROD 발견)**: 위키 BlockNote 에디터에서 heading(H1/H2/H3) 적용 시 글자가 굵어지기만 하고 크기는 본문과 동일하게 유지됨
+- **원인**: `wiki-theme.css`의 전역 규칙 `.bn-inline-content { font-size: 1rem }`이 heading 블록 내부 텍스트(`.bn-inline-content`)까지 1rem으로 강제. BlockNote는 heading 크기를 부모 컨테이너(`.bn-block-content[data-content-type=heading]`)의 `font-size: var(--level)`(3em/2em/1.3em…)로 주고 자식이 이를 상속하는 구조인데, 자식의 직접 지정(1rem)이 상속을 이겨 크기가 묶임. `font-weight:700`은 자식이 덮어쓰지 않아 그대로 상속 → 볼드만 적용되는 증상
+- **수정**: 1rem 고정을 `[data-content-type="paragraph"] .bn-inline-content`로 스코프 축소. heading은 BlockNote의 em 스케일(`--level`) 복원, 단락 본문은 1rem 유지. 목록·인용 등 나머지 블록은 컨테이너 기본 16px(=1rem) 상속이라 무영향. CSS 단독 변경(DB·패키지 무변경)
+- **DEV·PROD 모두 반영 완료**: dev2 힙4GB 빌드+`pm2 restart thync-dev`, git push → PROD pull → 힙4GB 빌드 + `pm2 restart thync-prod`
+- 영향 파일: `app/wiki/wiki-theme.css`
+
+---
+
 ## 2026-06-26 | 유지보수 방문일정 — 입력 UI를 캘린더 선택기로 교체
 
 - **변경 배경**: 앞선 작업의 "시작일~종료일 반복 행" 입력 대신, 캘린더에서 날짜를 직접 클릭해 고르는 방식을 요청. 데이터 모델(`maintenance_visits`)·API·간트차트는 그대로 두고 **폼 입력 UI만 교체**

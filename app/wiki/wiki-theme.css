@@ -130,7 +130,10 @@
 .wiki-root .bn-block-content {
   line-height: 1.65;
 }
-.wiki-root .bn-inline-content {
+/* 단락 본문만 기준 크기로 고정 — heading은 BlockNote의 em 스케일(--level) 유지
+ * (전역 .bn-inline-content에 font-size를 주면 heading 자식 텍스트가 1rem으로
+ *  덮여 크기가 안 커지고 볼드만 적용되는 버그 발생) */
+.wiki-root .bn-block-content[data-content-type="paragraph"] .bn-inline-content {
   font-size: 1rem;
 }
 
