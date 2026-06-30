@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "next lint",
     "seed": "npx prisma db seed",
-    "seed:admin": "tsx prisma/seed-admin.ts"
+    "seed:admin": "tsx prisma/seed-admin.ts",
+    "build:collab": "node collab-server/build.mjs",
+    "start:collab": "node collab-server/dist/index.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -23,6 +25,9 @@
     "@blocknote/server-util": "^0.51.4",
     "@blocknote/xl-multi-column": "^0.51.4",
     "@dnd-kit/core": "^6.3.1",
+    "@hocuspocus/extension-database": "^2.15.3",
+    "@hocuspocus/provider": "^2.15.3",
+    "@hocuspocus/server": "^2.15.3",
     "@prisma/client": "^5.22.0",
     "@tailwindcss/typography": "^0.5.19",
     "@tiptap/extension-link": "^3.20.4",
@@ -36,6 +41,7 @@
     "@types/xml2js": "^0.4.14",
     "bcryptjs": "^3.0.3",
     "dotenv": "^17.3.1",
+    "esbuild": "^0.27.7",
     "googleapis": "^171.4.0",
     "jose": "^6.2.0",
     "lucide-react": "^1.7.0",

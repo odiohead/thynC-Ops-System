@@ -4,6 +4,36 @@
 
 ---
 
+## 2026-06-30 | 위키 실시간 동시편집(Yjs) — 자체구축 협업 서버 (DEV PoC)
+
+- **목표**: 위키를 여러 명이 동시에 편집하고, 다른 사람 변경·커서가 실시간으로 보이게. 데이터는 전부 자체 인프라에 유지(외부 협업 서비스 미사용)
+- **아키텍처**: 기존 단일작성 자동저장(전체 덮어쓰기 PUT + `baseUpdatedAt` 409) → **CRDT(Yjs) 기반 실시간 협업**으로 전환. Next 앱과 **별도 프로세스**인 Hocuspocus WebSocket 서버를 추가(메인 앱은 협업 서버 import 안 함 — 위키 모듈 분리 원칙 유지)
+- **협업 서버** (`collab-server/index.mts`, ESM, esbuild 번들 → `dist/index.mjs`, PM2 `thync-collab`, 포트 1234):
+  - 인증: WS 업그레이드 헤더의 `auth-token`(httpOnly 쿠키)을 jose로 검증. VIEWER는 readOnly, 삭제 페이지는 연결 거부
+  - `onLoadDocument`(Database extension fetch): 저장된 Y.Doc 있으면 반환, 없으면 기존 `content_json`을 server-util `blocksToYDoc`로 **1회 시딩**(기존 페이지 무손실 전환)
+  - `onStoreDocument`(store, 디바운스): Y.Doc 바이너리를 `wiki.wiki_page_ydoc`에 upsert + Y.Doc→블록 변환으로 `content_json`/`plain_text`(검색·렌더 스냅샷)·백링크(`wiki_page_links`) 동기화
+  - 번들: jsdom(런타임 동적 require)·@prisma/client는 external, 나머지(yjs/blocknote/hocuspocus)는 단일 번들로 yjs 중복 로드 방지
+- **공유 스키마**: `lib/wiki/wikiSchema.tsx`로 BlockNote 커스텀 스키마(콜아웃·구분선·페이지링크·파일·멘션·멀티컬럼)를 추출 → 클라이언트(WikiEditor)와 협업 서버가 **동일 스키마** 사용(Y.Doc↔블록 변환 일치). WikiEditor는 이 모듈을 import하도록 리팩터
+- **클라이언트**: `WikiEditor`에 협업 모드 추가 — `HocuspocusProvider`로 `ws://localhost:1234`(운영은 `/collab`) 연결, BlockNote `collaboration`(fragment `prosemirror` + awareness 커서/이름/색) 적용, 연결상태 인디케이터. 협업 모드에선 기존 자동저장/409 로직 비활성(본문은 협업 서버가 저장), 제목·메타만 PUT
+- **항상 협업(기본 적용)**: 별도 토글 없이 **모든 위키 페이지가 실시간 협업**. 기존 페이지는 첫 진입 시 `content_json`에서 자동 시딩(무손실). 협업 서버에 8초 내 연결 못 하면 **스냅샷 기반 읽기전용으로 자동 폴백**(빈 화면/데이터 유실 방지) + 재연결 안내 배너. (`collab_enabled` 컬럼은 향후 페이지별 비활성 escape-hatch용으로 보존하되 현재 동작은 항상 협업)
+- **DB**: 마이그레이션 `20260630000000_add_wiki_collab` — `wiki.wiki_page_ydoc(page_id PK→wiki_pages, state bytea, updated_at)` 신설 + `wiki_pages.collab_enabled boolean DEFAULT false`. schema.prisma `WikiPageYdoc` 모델 + `WikiPage.collabEnabled` 추가 + generate (dev2 로컬만 적용)
+- **패키지 추가**: `@hocuspocus/server`, `@hocuspocus/extension-database`, `@hocuspocus/provider`(2.15.3). yjs는 기존 13.6.31 단일 인스턴스 유지
+- **검증(dev2 자동 E2E)**: 인증(유효 쿠키 수락/무단 연결 거부) ✅, 실시간 중계(doc A→B 즉시 반영) ✅, 영속화(`wiki_page_ydoc` 저장) ✅, **materialize**(Y.Doc→`content_json`/`plain_text` 검색 스냅샷 동기화) ✅, 커스텀 블록 round-trip(callout props 보존) ✅. `tsc --noEmit`·Next 빌드 통과. **브라우저 두 창 동시편집·커서 최종 확인은 사용자 테스트 예정**. PROD 미반영(Nginx `/collab` WS 프록시 + PM2 `thync-collab` 추가 + 마이그레이션 필요)
+- 영향 파일: `collab-server/{index.mts,build.mjs}`(신규), `lib/wiki/wikiSchema.tsx`(신규), `prisma/schema.prisma`, `prisma/migrations/20260630000000_add_wiki_collab/`, `app/wiki/components/WikiEditor.tsx`, `app/wiki/[id]/{WikiPageView,page}.tsx`, `app/api/wiki/pages/[id]/route.ts`, `package.json`, `.gitignore`
+
+---
+
+## 2026-06-30 | 위키 사이드바 — 삭제/이동 실시간 미반영 + tree API 필터 누락 수정
+
+- **버그1 (사이드바 stale)**: 페이지 삭제 후 좌측 네비에서 사라지지 않음. 원인 — 사이드바는 `layout.tsx`(서버)의 `pages` prop으로 그려지는데, Next.js App Router는 같은 레이아웃을 공유하는 페이지 간 **클라이언트 내비게이션 시 레이아웃을 재렌더/재조회하지 않음** → `router.push('/wiki')` 후에도 prop이 삭제 전 그대로
+- **수정1**: `WikiSidebar`가 **경로(pathname)가 바뀔 때마다 `/api/wiki/tree`를 직접 재조회**해 트리를 실시간 갱신(레이아웃 캐시 비의존). 추가·삭제·이동이 내비게이션 즉시 반영. 드래그/형제 계산도 `livePages` 기준
+- **버그2 (tree API)**: `/api/wiki/tree`가 `where` 필터 없이 **삭제·템플릿 페이지까지 반환** → 이동 모달에 유령 페이지 노출
+- **수정2**: `where: { isTemplate:false, deletedAt:null }` + 사이드바용 `icon` 필드 추가
+- 삭제된 페이지 클릭 시 502는 현재 코드에선 `notFound()`로 404 처리됨(과거 빌드/캐시 잔재). 위 수정으로 삭제 페이지는 애초에 사이드바에서 즉시 사라져 클릭 대상이 안 됨
+- 영향 파일: `app/wiki/components/WikiSidebar.tsx`, `app/api/wiki/tree/route.ts`
+
+---
+
 ## 2026-06-30 | 위키 에디터 — heading(제목) 크기 미적용 버그 수정 (볼드만 되던 문제)
 
 - **버그(PROD 발견)**: 위키 BlockNote 에디터에서 heading(H1/H2/H3) 적용 시 글자가 굵어지기만 하고 크기는 본문과 동일하게 유지됨

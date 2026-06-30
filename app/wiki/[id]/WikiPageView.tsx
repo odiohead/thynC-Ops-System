@@ -51,6 +51,14 @@ type Props = {
   favorited: boolean
   currentUserId: string
   currentUserRole: string
+  currentUserName: string
+}
+
+/** 사용자 id로 안정적인 커서 색 생성 (협업 awareness용) */
+function colorFromId(seed: string): string {
+  let h = 0
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360
+  return `hsl(${h}, 65%, 45%)`
 }
 
 export default function WikiPageView({
@@ -71,10 +79,14 @@ export default function WikiPageView({
   favorited,
   currentUserId,
   currentUserRole,
+  currentUserName,
 }: Props) {
   const router = useRouter()
   const toast = useToast()
   const editable = currentUserRole !== 'VIEWER'
+  // 모든 페이지 실시간 협업 기본. 협업 서버 연결 실패 시 스냅샷 읽기전용으로 폴백.
+  const [collabFailed, setCollabFailed] = useState(false)
+  const collabActive = !collabFailed
 
   const [showRefPicker, setShowRefPicker] = useState(false)
   const [showVersions, setShowVersions] = useState(false)
@@ -109,15 +121,12 @@ export default function WikiPageView({
       inFlightRef.current = true
       setStatus('saving')
       try {
+        // 본문(contentJson)은 협업 서버가 Y.Doc에서 저장하므로 제목/메타만 PUT.
+        // baseUpdatedAt 생략 → 협업 서버의 잦은 updatedAt 갱신과 충돌(409) 방지.
         const res = await fetch(`/api/wiki/pages/${id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: titleRef.current,
-            contentJson: contentRef.current,
-            baseUpdatedAt: baseUpdatedAtRef.current,
-            ...extra,
-          }),
+          body: JSON.stringify({ title: titleRef.current, ...extra }),
         })
         if (res.status === 409) {
           setStatus('conflict')
@@ -169,7 +178,7 @@ export default function WikiPageView({
   const onContentChange = (blocks: unknown[]) => {
     contentRef.current = blocks
     setHeadings(extractHeadings(blocks))
-    scheduleSave()
+    // 본문 저장은 협업 서버(Y.Doc)가 담당 → 여기서 자동저장(PUT) 안 함. TOC만 갱신.
   }
 
   // 에디터 인라인 작업(하위페이지/링크 삽입)에서 즉시 저장
@@ -206,6 +215,7 @@ export default function WikiPageView({
     setCoverUrl(null)
     void doSave({ coverUrl: null })
   }
+
 
   const handleDelete = async () => {
     if (!confirm('이 페이지를 삭제하시겠습니까?')) return
@@ -327,7 +337,10 @@ export default function WikiPageView({
               </span>
             ))}
           </nav>
-          <SaveIndicator status={status} editable={editable} onRefresh={() => router.refresh()} />
+          {/* 제목/메타 저장 상태만 표시 (본문은 협업 서버가 실시간 저장) */}
+          {status === 'saving' || status === 'error' ? (
+            <SaveIndicator status={status} editable={editable} onRefresh={() => router.refresh()} />
+          ) : null}
         </div>
 
         {/* 아이콘 + 커버 추가 영역 */}
@@ -453,13 +466,31 @@ export default function WikiPageView({
       <TableOfContents headings={headings} />
 
       <div className="wiki-content mt-5">
-        <WikiEditor
-          initialContent={initialContent}
-          editable={editable}
-          onChange={onContentChange}
-          onSaveNow={saveNow}
-          pageId={id}
-        />
+        {collabFailed && (
+          <div className="mb-3 rounded-[6px] border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            실시간 협업 서버에 연결할 수 없어 <strong>읽기 전용</strong>으로 표시합니다. 잠시 후
+            <button
+              onClick={() => router.refresh()}
+              className="mx-1 rounded border border-amber-300 bg-white px-2 py-0.5 text-xs font-medium transition hover:bg-amber-100"
+            >
+              새로고침
+            </button>
+            하면 다시 편집할 수 있습니다.
+          </div>
+        )}
+        {collabActive ? (
+          <WikiEditor
+            key="collab"
+            editable={editable}
+            onChange={onContentChange}
+            onSaveNow={saveNow}
+            pageId={id}
+            collab={{ pageId: id, userName: currentUserName, userColor: colorFromId(currentUserId) }}
+            onCollabUnavailable={() => setCollabFailed(true)}
+          />
+        ) : (
+          <WikiEditor key="legacy" initialContent={initialContent} editable={false} pageId={id} />
+        )}
       </div>
 
       {backlinks.length > 0 && (

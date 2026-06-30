@@ -7,12 +7,14 @@ export async function GET(request: NextRequest) {
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const pages = await prisma.wikiPage.findMany({
+    where: { isTemplate: false, deletedAt: null },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     select: {
       id: true,
       parentId: true,
       title: true,
       sortOrder: true,
+      icon: true,
       isPublished: true,
       updatedAt: true,
     },

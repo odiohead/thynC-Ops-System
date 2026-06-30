@@ -79,16 +79,36 @@ function collectDescendants(pages: SidebarPage[], rootId: string): Set<string> {
 }
 
 export default function WikiSidebar({ pages }: Props) {
-  const tree = useMemo(() => buildTree(pages), [pages])
   const pathname = usePathname()
   const router = useRouter()
   const toast = useToast()
+
+  // 레이아웃(서버)은 /wiki 내 클라이언트 내비게이션 시 재렌더되지 않아 pages prop이 stale.
+  // 페이지 추가·삭제·이동을 실시간 반영하기 위해 경로가 바뀔 때마다 트리를 직접 재조회한다.
+  const [livePages, setLivePages] = useState<SidebarPage[]>(pages)
+  useEffect(() => {
+    setLivePages(pages)
+  }, [pages])
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/wiki/tree')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && Array.isArray(d?.pages)) setLivePages(d.pages as SidebarPage[])
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [pathname])
+
+  const tree = useMemo(() => buildTree(livePages), [livePages])
   const currentId =
     pathname.startsWith('/wiki/') && pathname !== '/wiki/new'
       ? pathname.replace('/wiki/', '')
       : null
 
-  const byId = useMemo(() => new Map(pages.map((p) => [p.id, p])), [pages])
+  const byId = useMemo(() => new Map(livePages.map((p) => [p.id, p])), [livePages])
 
   // ── 사이드바 폭 접기 (localStorage 유지) ───────────────────
   const [collapsed, setCollapsed] = useState(false)
@@ -154,7 +174,7 @@ export default function WikiSidebar({ pages }: Props) {
   )
 
   const visualSiblings = (parentId: string | null): SidebarPage[] =>
-    pages
+    livePages
       .filter((p) => (p.parentId ?? null) === parentId)
       .sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title))
 
@@ -186,7 +206,7 @@ export default function WikiSidebar({ pages }: Props) {
     if (!over) return
     const overId = String(over.id)
 
-    const blocked = collectDescendants(pages, draggedId)
+    const blocked = collectDescendants(livePages, draggedId)
     blocked.add(draggedId)
 
     if (overId === 'root-end') {

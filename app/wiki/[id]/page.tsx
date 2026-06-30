@@ -131,6 +131,7 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
       favorited={favorited}
       currentUserId={jwt?.userId ?? ''}
       currentUserRole={jwt?.role ?? 'VIEWER'}
+      currentUserName={jwt?.name ?? ''}
     />
   )
 }

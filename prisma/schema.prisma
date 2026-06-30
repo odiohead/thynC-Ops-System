@@ -745,6 +745,7 @@ model WikiPage {
   coverOffsetY Int     @default(50) @map("cover_offset_y")
   isTemplate   Boolean @default(false) @map("is_template")
   deletedAt    DateTime? @map("deleted_at")
+  collabEnabled Boolean @default(false) @map("collab_enabled")
 
   parent      WikiPage?           @relation("WikiPageTree", fields: [parentId], references: [id], onDelete: Cascade)
   children    WikiPage[]          @relation("WikiPageTree")
@@ -759,11 +760,24 @@ model WikiPage {
   comments    WikiComment[]
   outgoingLinks WikiPageLink[]    @relation("WikiPageLinkSource")
   backlinks     WikiPageLink[]    @relation("WikiPageLinkTarget")
+  ydoc          WikiPageYdoc?
 
   @@index([parentId, sortOrder])
   @@index([updatedAt(sort: Desc)])
   @@index([authorId])
   @@map("wiki_pages")
+  @@schema("wiki")
+}
+
+// 위키 실시간 동시편집(Yjs) 협업 문서 상태 — 편집 중 진실의 원천(Y.Doc 바이너리)
+model WikiPageYdoc {
+  pageId    String   @id @map("page_id")
+  state     Bytes
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  page WikiPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@map("wiki_page_ydoc")
   @@schema("wiki")
 }
 

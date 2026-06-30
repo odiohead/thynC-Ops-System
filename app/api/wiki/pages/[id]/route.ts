@@ -50,6 +50,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
     coverUrl,
     coverOffsetY,
     isTemplate,
+    collabEnabled,
     baseUpdatedAt,
   } = body as {
     title?: string
@@ -62,6 +63,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
     coverUrl?: string | null
     coverOffsetY?: number
     isTemplate?: boolean
+    collabEnabled?: boolean
     baseUpdatedAt?: string
   }
 
@@ -153,6 +155,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
         ...(coverUrl !== undefined && { coverUrl }),
         ...(coverOffsetY !== undefined && { coverOffsetY }),
         ...(isTemplate !== undefined && { isTemplate }),
+        ...(collabEnabled !== undefined && { collabEnabled }),
         lastEditorId: authUser.userId,
       },
       select: {

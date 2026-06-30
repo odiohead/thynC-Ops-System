@@ -37,3 +37,6 @@ yarn-error.log*
 next-env.d.ts
 
 /app/generated/prisma
+
+# 위키 협업 서버 번들 산출물 (배포 시 build:collab로 생성)
+collab-server/dist/
