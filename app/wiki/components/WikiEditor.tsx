@@ -184,9 +184,16 @@ export default function WikiEditor({
     if (!provider) return
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const onStatus = (e: any) => setCollabStatus(e.status)
+    const onSynced = () => setCollabStatus('connected')
     provider.on('status', onStatus)
+    provider.on('synced', onSynced)
+    // race 방지: 리스너 부착 전에 이미 연결/동기화됐을 수 있으므로 현재 상태로 보정.
+    // (provider는 생성 즉시 연결을 시작하는데 이 effect는 렌더 후 실행되어 'connected'를 놓칠 수 있음)
+    if (provider.isConnected || provider.isSynced) setCollabStatus('connected')
+    else if (provider.status) setCollabStatus(provider.status)
     return () => {
       provider.off('status', onStatus)
+      provider.off('synced', onSynced)
       provider.destroy()
     }
   }, [provider])
