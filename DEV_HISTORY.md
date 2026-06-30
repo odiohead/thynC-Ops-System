@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-06-30 | 위키 협업 — 연결상태 race로 인한 오(誤)폴백 수정 (PROD 핫픽스)
+
+- **증상(PROD)**: 위키 페이지에서 "협업 서버에 연결할 수 없어 읽기전용" 폴백이 항상 표시. 그러나 서버 진단상 인증·DB·Nginx·WS 모두 정상(유효 토큰 연결 synced), 협업 서버 에러 로그에 브라우저발 인증실패 기록 없음 → 연결은 성공했는데 클라이언트가 오폴백
+- **원인**: `HocuspocusProvider`는 `useState` 생성 즉시 연결 시작하는데 `provider.on('status')` 리스너는 `useEffect`(렌더 후)에서 부착 → 연결이 빠른 환경(특히 prod)에선 `'connected'` 이벤트가 리스너 부착 전에 발생·누락 → `collabStatus`가 `'connecting'`에 머물러 8초 폴백 발동
+- **수정**: 리스너 부착 시 `provider.isConnected/isSynced/status`로 현재 상태를 동기 보정 + `'synced'` 이벤트도 청취. (`WikiEditor.tsx`)
+- **DEV·PROD 반영 완료**: dev2 빌드+재시작, push(`c8c32a9`) → PROD pull+힙4GB 빌드+`pm2 restart thync-prod`. login 200 확인
+- 영향 파일: `app/wiki/components/WikiEditor.tsx`
+
+---
+
 ## 2026-06-30 | 위키 실시간 동시편집(Yjs) — 자체구축 협업 서버 (DEV PoC)
 
 - **목표**: 위키를 여러 명이 동시에 편집하고, 다른 사람 변경·커서가 실시간으로 보이게. 데이터는 전부 자체 인프라에 유지(외부 협업 서비스 미사용)
