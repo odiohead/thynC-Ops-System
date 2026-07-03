@@ -12,7 +12,8 @@
 - **담당자 풀**: `FieldEngineer`에 workType `ETC_TASK` 추가(A안). 후보·등록 모두 **SEERS + thynC운영팀**(부서명 '운영' 포함)으로 서버 검증. 담당자 리스트에 "기타업무 담당자" 탭 추가
 - **UI**: `/etc-tasks` 목록(접수일|제목|상태|우선순위|담당자|관련 병원(결합, 3곳↑ "외 N곳")|업무기간|완료일 + 필터), `new`/`[id]` 등록·수정 폼 — 병원 다중 선택 모달(칩 토글), 담당자 모달(ETC_TASK 풀), **업무기간은 유지보수 캘린더 선택기(`MaintenanceVisitPicker`) 재사용**, 비고 Tiptap 리치 텍스트, 첨부(edit 모드). `/settings/etc-task-status` 상태 관리 페이지. 네비 아이콘 `briefcase` 신규
 - **통합**: 업무(Task) 현황 페이지에 ETC 타입(라벨 '기타업무', slate 색, 요약카드 5열, 상세 이동), **간트차트에 기타업무 바 표기** — 업무기간 항목별 바(상태 색, 🗂 prefix), 뷰 범위 교집합 필터·레인 배치·과거 옅게 등 기존 규칙 동일
-- **검증(dev2 E2E)**: `tsc --noEmit`·힙4GB 빌드 통과, dev2 재시작 후 API E2E — 생성(코드 발번·병원 2곳·기간 2건·Task 미러) ✅, 수정(상태 완료→Task isCompleted, 기간 reconcile, 병원 축소) ✅, 파일 S3 업로드 ✅, 필터(제목·상태·우선순위·병원) ✅, tasks 통합 refId ✅, 운영팀 후보 필터 ✅, 삭제(자식·Task·파일 cascade) ✅, 감사로그 3건 ✅, 신규 페이지 6종 200 ✅. **PROD 미반영** (반영 시 마이그레이션 SQL 적용 + migrate resolve 필요, 선택: PROD `.env`에 `GOOGLE_CALENDAR_ETC_TASK_ID`)
+- **검증(dev2 E2E)**: `tsc --noEmit`·힙4GB 빌드 통과, dev2 재시작 후 API E2E — 생성(코드 발번·병원 2곳·기간 2건·Task 미러) ✅, 수정(상태 완료→Task isCompleted, 기간 reconcile, 병원 축소) ✅, 파일 S3 업로드 ✅, 필터(제목·상태·우선순위·병원) ✅, tasks 통합 refId ✅, 운영팀 후보 필터 ✅, 삭제(자식·Task·파일 cascade) ✅, 감사로그 3건 ✅, 신규 페이지 6종 200 ✅
+- **DEV·PROD 모두 반영 완료** (병원 재지정 `d3c00c5` + 기타업무 `9d9ed31` 함께 배포): dev2 빌드+`pm2 restart thync-dev`, git push → PROD pull → `thync_ops`에 마이그레이션 `20260703010000` 단일 트랜잭션 적용(테이블 5개+상태코드 4건+네비 2행) + migrate resolve + generate + 힙4GB 빌드 + `pm2 restart thync-prod`. PROD login 200·`/etc-tasks` 307·`ops.seersthync.com` 307 검증, 신규 에러 없음(재배포 직후 Server Action 불일치 로그는 일시적 정상). **PROD Google Calendar 동기화는 `GOOGLE_CALENDAR_ETC_TASK_ID` env 미설정으로 스킵 상태** — 캘린더 ID 확보 시 `.env` 추가
 - 영향 파일: `prisma/{schema.prisma,seed.ts,migrations/20260703010000_add_etc_tasks/}`, `lib/{etcTask.ts(신규),googleCalendar.ts}`, `app/api/etc-tasks/**(신규)`, `app/api/settings/etc-task-status/**(신규)`, `app/api/settings/field-engineers/{route,candidates/route}.ts`, `app/api/tasks/route.ts`, `app/etc-tasks/**(신규)`, `app/settings/etc-task-status/page.tsx(신규)`, `app/settings/field-engineers/page.tsx`, `app/components/{NavIcons,FieldEngineerSelectModal}.tsx`, `app/tasks/page.tsx`, `app/projects/calendar/page.tsx`
 
 ---
@@ -25,7 +26,7 @@
 - **`lib/workItemReassign.ts`**(신규): `reassignWorkItemHospital` — 한 트랜잭션으로 업무 hospitalCode(+프로젝트명 치환) + Task 미러(hospitalCode/title) 동기화, 이후 옛 병원 완전 재계산·새 병원 전진, 감사로그(병원 재지정 라벨). `transferAllWorkItems` — 병원의 모든 업무(프로젝트/답사/설치계획/유지보수/상담)+Task 일괄 이전(Phase 2)
 - **API**: `POST /api/work-items/reassign`(ADMIN 이상, body: type/code/newHospitalCode/updateProjectName), `POST /api/hospitals/[code]/transfer-work`(SUPER_ADMIN, body: toHospitalCode/updateProjectNames)
 - **UI**: `ReassignHospitalButton`(공유 컴포넌트) — 프로젝트/유지보수/답사/설치계획 상세에 "병원 재지정" 버튼(병원 검색 모달→확인, 프로젝트는 이름 변경 옵션, canReassign 미제공 시 /api/auth/me로 ADMIN 자체판별). `TransferAllWorkButton` — 병원 상세에 "업무 일괄 이전"(SUPER_ADMIN)
-- **검증(dev2 자동 E2E)**: 단건 재지정(병원·프로젝트명·Task 동기화) ✅, 옛 병원 재계산(미계약+계약일 비움) ✅, 새 병원 전진(운영+계약일) ✅, 일괄 이전(B→A 전량) ✅. `tsc --noEmit`·Next 빌드 통과. **PROD 미반영**(DB 스키마 변경 없음 — 코드/컴포넌트만)
+- **검증(dev2 자동 E2E)**: 단건 재지정(병원·프로젝트명·Task 동기화) ✅, 옛 병원 재계산(미계약+계약일 비움) ✅, 새 병원 전진(운영+계약일) ✅, 일괄 이전(B→A 전량) ✅. `tsc --noEmit`·Next 빌드 통과. DB 스키마 변경 없음(코드/컴포넌트만). **2026-07-03 PROD 반영 완료** (commit `d3c00c5`, 기타업무 모듈과 함께 배포 — 상단 항목 배포 기록 참조)
 - 영향 파일: `lib/hospitalStatus.ts`, `lib/workItemReassign.ts`(신규), `app/api/work-items/reassign/route.ts`(신규), `app/api/hospitals/[code]/transfer-work/route.ts`(신규), `app/components/{ReassignHospitalButton,TransferAllWorkButton}.tsx`(신규), `app/{projects/[code],maintenances/[id],site-visits/[id],install-plans/[id]}/page.tsx`, `app/hospitals/[code]/page.tsx`
 
 ---
