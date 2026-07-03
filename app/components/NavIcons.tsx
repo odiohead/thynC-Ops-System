@@ -139,6 +139,15 @@ export function CarIcon() {
   )
 }
 
+export function BriefcaseIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <rect width="20" height="14" x="2" y="7" rx="2" ry="2" />
+      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+    </svg>
+  )
+}
+
 export const ICON_MAP: Record<string, () => ReactNode> = {
   'hira': HiraIcon,
   'hospital': HospitalIcon,
@@ -154,6 +163,7 @@ export const ICON_MAP: Record<string, () => ReactNode> = {
   'mail': MailIcon,
   'book': BookIcon,
   'car': CarIcon,
+  'briefcase': BriefcaseIcon,
 }
 
 export function getMenuIcon(iconKey: string | null | undefined): ReactNode | null {

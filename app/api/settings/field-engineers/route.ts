@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
-const VALID_WORK_TYPES = ['PROJECT', 'INSTALL_PLAN', 'MAINTENANCE'] as const
+const VALID_WORK_TYPES = ['PROJECT', 'INSTALL_PLAN', 'MAINTENANCE', 'ETC_TASK'] as const
 type WorkType = typeof VALID_WORK_TYPES[number]
 
 function parseWorkType(raw: string | null): WorkType {
@@ -81,11 +81,14 @@ export async function POST(req: NextRequest) {
 
   const targetUser = await prisma.user.findUnique({
     where: { id: userId },
-    include: { organization: { select: { code: true } } },
+    include: { organization: { select: { code: true } }, department: { select: { name: true } } },
   })
   if (!targetUser) return NextResponse.json({ error: '사용자를 찾을 수 없습니다.' }, { status: 404 })
   if (targetUser.organization?.code !== 'SEERS') {
     return NextResponse.json({ error: 'SEERS 소속 사용자만 등록할 수 있습니다.' }, { status: 400 })
+  }
+  if (workType === 'ETC_TASK' && !targetUser.department?.name?.includes('운영')) {
+    return NextResponse.json({ error: '기타업무 담당자는 thynC운영팀 소속만 등록할 수 있습니다.' }, { status: 400 })
   }
 
   const fieldEngineer = await prisma.fieldEngineer.create({

@@ -17,13 +17,14 @@ interface Task {
   hospital: { hospitalCode: string; hospitalName: string; hiraHospitalName: string } | null
 }
 
-const TASK_TYPES = ['PROJECT', 'SITE_VISIT', 'INSTALL_PLAN', 'MAINTENANCE'] as const
+const TASK_TYPES = ['PROJECT', 'SITE_VISIT', 'INSTALL_PLAN', 'MAINTENANCE', 'ETC'] as const
 
 const taskTypeLabels: Record<string, string> = {
   PROJECT: '프로젝트',
   SITE_VISIT: '답사',
   INSTALL_PLAN: '설치계획(가안)',
   MAINTENANCE: '유지보수',
+  ETC: '기타업무',
 }
 
 const taskTypeColors: Record<string, string> = {
@@ -31,6 +32,7 @@ const taskTypeColors: Record<string, string> = {
   SITE_VISIT: 'bg-teal-100 text-teal-700 border-teal-300',
   INSTALL_PLAN: 'bg-orange-100 text-orange-700 border-orange-300',
   MAINTENANCE: 'bg-rose-100 text-rose-700 border-rose-300',
+  ETC: 'bg-slate-100 text-slate-700 border-slate-300',
 }
 
 function getDetailUrl(task: Task): string | null {
@@ -43,6 +45,8 @@ function getDetailUrl(task: Task): string | null {
       return task.refId ? `/install-plans/${task.refId}` : null
     case 'MAINTENANCE':
       return task.refId ? `/maintenances/${task.refId}` : null
+    case 'ETC':
+      return task.refId ? `/etc-tasks/${task.refId}` : null
     default:
       return null
   }
@@ -128,11 +132,11 @@ export default function TasksPage() {
 
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">업무(Task) 현황</h1>
-          <p className="mt-1 text-sm text-gray-500">프로젝트·답사·설치계획·유지보수 전체 업무를 통합 조회합니다.</p>
+          <p className="mt-1 text-sm text-gray-500">프로젝트·답사·설치계획·유지보수·기타업무 전체 업무를 통합 조회합니다.</p>
         </div>
 
         {/* 요약 카드 */}
-        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-5">
           {TASK_TYPES.map((type) => {
             const cls = taskTypeColors[type] ?? ''
             const isActive = filterType === type

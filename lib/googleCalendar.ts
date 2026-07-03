@@ -20,13 +20,14 @@ async function getCalendarClient() {
 }
 
 /** 캘린더 종류별 환경변수 매핑 */
-type CalendarType = 'project' | 'maintenance' | 'site-visit'
+type CalendarType = 'project' | 'maintenance' | 'site-visit' | 'etc-task'
 
 function getCalendarId(type: CalendarType): string {
   const envMap: Record<CalendarType, string> = {
     'project': 'GOOGLE_CALENDAR_PROJECT_ID',
     'maintenance': 'GOOGLE_CALENDAR_MAINTENANCE_ID',
     'site-visit': 'GOOGLE_CALENDAR_SITE_VISIT_ID',
+    'etc-task': 'GOOGLE_CALENDAR_ETC_TASK_ID',
   }
   const envKey = envMap[type]
   const id = process.env[envKey]

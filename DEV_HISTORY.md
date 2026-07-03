@@ -4,6 +4,32 @@
 
 ---
 
+## 2026-07-03 | 기타업무(EtcTask) 모듈 신설 — 다병원·비유지보수 업무 관리
+
+- **배경**: 유지보수는 병원 1곳 필수 연결이라 여러 병원을 커버하는 업무(다병원 펌웨어 점검 등)나 유지보수가 아닌 주요 업무를 담을 곳이 없음 → 전용 모듈 신설
+- **DB** (dev2 로컬 적용, 마이그레이션 `20260703010000_add_etc_tasks`): `etc_tasks`(본체: 코드/제목/상태/우선순위/접수일/완료일/비고) + `etc_task_assignees`(User N:M) + `etc_task_hospitals`(**병원 N:M — 0~N곳 선택 연결**) + `etc_task_visits`(업무기간 다건: 단일일·기간 혼합, 항목별 캘린더 이벤트ID) + `etc_task_files`(S3 첨부). 상태코드 category `ETC_TASK_STATUS` 시드(접수/처리중/완료/보류, seed.ts에도 추가), 네비 메뉴 `etc-tasks`(sort 47, **SEERS 소속만 노출** — 메뉴 관리에서 변경 가능) + `settings/etc-task-status`(155) 시드
+- **API**: `/api/etc-tasks` GET(제목검색·상태·우선순위·hospitalCode 필터)/POST, `[id]` GET/PUT/DELETE(ADMIN), `[id]/files` 업로드(S3 `etc-tasks/{id}/…`)·삭제, `file-url` presigned, `/api/settings/etc-task-status` CRUD. 코드 발번 `ETC-YYYYMM-NNNN`, **Task 미러 `taskType='ETC'`**(상태 '완료' → isCompleted 동기화, hospitalCode는 다병원이라 null), 감사로그 `resource='etc_task'`, **업무기간 항목별 Google Calendar 이벤트**(신규 타입 `etc-task` → env `GOOGLE_CALENDAR_ETC_TASK_ID`, 미설정 시 자동 스킵). 기간 reconcile·정규화는 `lib/maintenanceVisit` 공유(`normalizeVisits`/`visitKey`/`ymd`), 캘린더 페이로드는 `lib/etcTask.ts`
+- **담당자 풀**: `FieldEngineer`에 workType `ETC_TASK` 추가(A안). 후보·등록 모두 **SEERS + thynC운영팀**(부서명 '운영' 포함)으로 서버 검증. 담당자 리스트에 "기타업무 담당자" 탭 추가
+- **UI**: `/etc-tasks` 목록(접수일|제목|상태|우선순위|담당자|관련 병원(결합, 3곳↑ "외 N곳")|업무기간|완료일 + 필터), `new`/`[id]` 등록·수정 폼 — 병원 다중 선택 모달(칩 토글), 담당자 모달(ETC_TASK 풀), **업무기간은 유지보수 캘린더 선택기(`MaintenanceVisitPicker`) 재사용**, 비고 Tiptap 리치 텍스트, 첨부(edit 모드). `/settings/etc-task-status` 상태 관리 페이지. 네비 아이콘 `briefcase` 신규
+- **통합**: 업무(Task) 현황 페이지에 ETC 타입(라벨 '기타업무', slate 색, 요약카드 5열, 상세 이동), **간트차트에 기타업무 바 표기** — 업무기간 항목별 바(상태 색, 🗂 prefix), 뷰 범위 교집합 필터·레인 배치·과거 옅게 등 기존 규칙 동일
+- **검증(dev2 E2E)**: `tsc --noEmit`·힙4GB 빌드 통과, dev2 재시작 후 API E2E — 생성(코드 발번·병원 2곳·기간 2건·Task 미러) ✅, 수정(상태 완료→Task isCompleted, 기간 reconcile, 병원 축소) ✅, 파일 S3 업로드 ✅, 필터(제목·상태·우선순위·병원) ✅, tasks 통합 refId ✅, 운영팀 후보 필터 ✅, 삭제(자식·Task·파일 cascade) ✅, 감사로그 3건 ✅, 신규 페이지 6종 200 ✅. **PROD 미반영** (반영 시 마이그레이션 SQL 적용 + migrate resolve 필요, 선택: PROD `.env`에 `GOOGLE_CALENDAR_ETC_TASK_ID`)
+- 영향 파일: `prisma/{schema.prisma,seed.ts,migrations/20260703010000_add_etc_tasks/}`, `lib/{etcTask.ts(신규),googleCalendar.ts}`, `app/api/etc-tasks/**(신규)`, `app/api/settings/etc-task-status/**(신규)`, `app/api/settings/field-engineers/{route,candidates/route}.ts`, `app/api/tasks/route.ts`, `app/etc-tasks/**(신규)`, `app/settings/etc-task-status/page.tsx(신규)`, `app/settings/field-engineers/page.tsx`, `app/components/{NavIcons,FieldEngineerSelectModal}.tsx`, `app/tasks/page.tsx`, `app/projects/calendar/page.tsx`
+
+---
+
+## 2026-07-03 | 업무 병원 재지정(매핑 정정) 기능 + 병원 업무 일괄 이전(Phase 2)
+
+- **배경**: 사람이 업무(프로젝트/답사/설치계획/유지보수) 등록 시 병원을 헷갈려 잘못 매핑하는 휴먼에러 발생(실제 HOSP-001807↔002967 사건). 그동안 DB 수동 수정으로 대응 → 정식 기능화
+- **기존 상태 진단**: 유지보수·답사·설치계획 PUT은 이미 hospitalCode 변경+Task 미러 동기화를 지원. 빈틈 = ① 업무를 옮겨도 **옛 병원 status가 하향되지 않음**(advanceHospitalStatus는 전진 전용), ② 전용 동선·가드레일·프로젝트명 갱신 부재
+- **`lib/hospitalStatus.ts`**: `recomputeHospitalStatus(hospitalCode, advanceOnly?)` 신규 — 병원의 실제 업무로부터 상태·계약일을 **정방향 재계산(하향 포함)**. 규칙: 구축완료 프로젝트→운영 / 계약 프로젝트→계약완료 / 답사→답사요청 / 설치계획→가견적요청 / 업무없음→미계약(해지는 수동 보존). 계약일은 프로젝트 계약일 최솟값. `advanceOnly=true`면 전진만(새 병원용)
+- **`lib/workItemReassign.ts`**(신규): `reassignWorkItemHospital` — 한 트랜잭션으로 업무 hospitalCode(+프로젝트명 치환) + Task 미러(hospitalCode/title) 동기화, 이후 옛 병원 완전 재계산·새 병원 전진, 감사로그(병원 재지정 라벨). `transferAllWorkItems` — 병원의 모든 업무(프로젝트/답사/설치계획/유지보수/상담)+Task 일괄 이전(Phase 2)
+- **API**: `POST /api/work-items/reassign`(ADMIN 이상, body: type/code/newHospitalCode/updateProjectName), `POST /api/hospitals/[code]/transfer-work`(SUPER_ADMIN, body: toHospitalCode/updateProjectNames)
+- **UI**: `ReassignHospitalButton`(공유 컴포넌트) — 프로젝트/유지보수/답사/설치계획 상세에 "병원 재지정" 버튼(병원 검색 모달→확인, 프로젝트는 이름 변경 옵션, canReassign 미제공 시 /api/auth/me로 ADMIN 자체판별). `TransferAllWorkButton` — 병원 상세에 "업무 일괄 이전"(SUPER_ADMIN)
+- **검증(dev2 자동 E2E)**: 단건 재지정(병원·프로젝트명·Task 동기화) ✅, 옛 병원 재계산(미계약+계약일 비움) ✅, 새 병원 전진(운영+계약일) ✅, 일괄 이전(B→A 전량) ✅. `tsc --noEmit`·Next 빌드 통과. **PROD 미반영**(DB 스키마 변경 없음 — 코드/컴포넌트만)
+- 영향 파일: `lib/hospitalStatus.ts`, `lib/workItemReassign.ts`(신규), `app/api/work-items/reassign/route.ts`(신규), `app/api/hospitals/[code]/transfer-work/route.ts`(신규), `app/components/{ReassignHospitalButton,TransferAllWorkButton}.tsx`(신규), `app/{projects/[code],maintenances/[id],site-visits/[id],install-plans/[id]}/page.tsx`, `app/hospitals/[code]/page.tsx`
+
+---
+
 ## 2026-06-30 | 위키 협업 — 연결상태 race로 인한 오(誤)폴백 수정 (PROD 핫픽스)
 
 - **증상(PROD)**: 위키 페이지에서 "협업 서버에 연결할 수 없어 읽기전용" 폴백이 항상 표시. 그러나 서버 진단상 인증·DB·Nginx·WS 모두 정상(유효 토큰 연결 synced), 협업 서버 에러 로그에 브라우저발 인증실패 기록 없음 → 연결은 성공했는데 클라이언트가 오폴백

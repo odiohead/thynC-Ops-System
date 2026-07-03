@@ -81,6 +81,7 @@ model Hospital {
   maintenances        Maintenance[]
   consultationQueues  ConsultationQueue[]
   tasks               Task[]
+  etcTaskHospitals    EtcTaskHospital[]
 
   @@map("hospitals")
   @@schema("public")
@@ -126,6 +127,7 @@ model StatusCode {
   documentTypeQueues            ConsultationQueue[]    @relation("DocumentTypeQueue")
   maintenanceTypes              Maintenance[]          @relation("MaintenanceType")
   maintenanceStatuses           Maintenance[]          @relation("MaintenanceStatus")
+  etcTaskStatuses               EtcTask[]              @relation("EtcTaskStatus")
 
   @@unique([name, category])
   @@map("status_codes")
@@ -199,6 +201,7 @@ model User {
   installPlanAssignees    InstallPlanAssignee[]
   siteVisitAssignees      SiteVisitAssignee[]
   maintenanceAssignees    MaintenanceAssignee[]
+  etcTaskAssignees        EtcTaskAssignee[]
   consultationQueues      ConsultationQueue[]
   wikiPagesAuthored       WikiPage[]                   @relation("WikiPageAuthor")
   wikiPagesEdited         WikiPage[]                   @relation("WikiPageLastEditor")
@@ -674,6 +677,83 @@ model MaintenanceAssignee {
 
   @@unique([maintenanceId, userId])
   @@map("maintenance_assignees")
+  @@schema("public")
+}
+
+model EtcTask {
+  id          Int       @id @default(autoincrement())
+  etcTaskCode String?   @unique @map("etc_task_code")
+  title       String    @map("title")
+  statusId    Int?      @map("status_id")
+  priority    String    @default("보통") @map("priority")
+  reportedAt  DateTime? @map("reported_at") @db.Date
+  resolvedAt  DateTime? @map("resolved_at") @db.Date
+  note        String?   @db.Text @map("note")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  status    StatusCode?       @relation("EtcTaskStatus", fields: [statusId], references: [id])
+  assignees EtcTaskAssignee[]
+  hospitals EtcTaskHospital[]
+  visits    EtcTaskVisit[]
+  files     EtcTaskFile[]
+
+  @@map("etc_tasks")
+  @@schema("public")
+}
+
+model EtcTaskAssignee {
+  id        Int      @id @default(autoincrement())
+  etcTaskId Int      @map("etc_task_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  etcTask   EtcTask  @relation(fields: [etcTaskId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([etcTaskId, userId])
+  @@map("etc_task_assignees")
+  @@schema("public")
+}
+
+model EtcTaskHospital {
+  id           Int      @id @default(autoincrement())
+  etcTaskId    Int      @map("etc_task_id")
+  hospitalCode String   @map("hospital_code")
+  createdAt    DateTime @default(now()) @map("created_at")
+  etcTask      EtcTask  @relation(fields: [etcTaskId], references: [id], onDelete: Cascade)
+  hospital     Hospital @relation(fields: [hospitalCode], references: [hospitalCode])
+
+  @@unique([etcTaskId, hospitalCode])
+  @@index([hospitalCode])
+  @@map("etc_task_hospitals")
+  @@schema("public")
+}
+
+model EtcTaskVisit {
+  id              Int      @id @default(autoincrement())
+  etcTaskId       Int      @map("etc_task_id")
+  startDate       DateTime @map("start_date") @db.Date
+  endDate         DateTime @map("end_date") @db.Date
+  calendarEventId String?  @map("calendar_event_id")
+  sortOrder       Int      @default(0) @map("sort_order")
+  createdAt       DateTime @default(now()) @map("created_at")
+  etcTask         EtcTask  @relation(fields: [etcTaskId], references: [id], onDelete: Cascade)
+
+  @@index([etcTaskId])
+  @@map("etc_task_visits")
+  @@schema("public")
+}
+
+model EtcTaskFile {
+  id           Int      @id @default(autoincrement())
+  etcTaskId    Int      @map("etc_task_id")
+  fileCategory String   @map("file_category")
+  fileName     String   @map("file_name")
+  s3Key        String   @map("s3_key")
+  uploadedAt   DateTime @default(now()) @map("uploaded_at")
+  etcTask      EtcTask  @relation(fields: [etcTaskId], references: [id], onDelete: Cascade)
+
+  @@map("etc_task_files")
   @@schema("public")
 }
 

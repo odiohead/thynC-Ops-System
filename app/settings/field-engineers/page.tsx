@@ -3,12 +3,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 
-type WorkType = 'PROJECT' | 'INSTALL_PLAN' | 'MAINTENANCE'
+type WorkType = 'PROJECT' | 'INSTALL_PLAN' | 'MAINTENANCE' | 'ETC_TASK'
 
 const TABS: { value: WorkType; label: string }[] = [
   { value: 'PROJECT', label: '프로젝트 담당자' },
   { value: 'INSTALL_PLAN', label: '설치계획 담당자' },
   { value: 'MAINTENANCE', label: '유지보수 담당자' },
+  { value: 'ETC_TASK', label: '기타업무 담당자' },
 ]
 
 interface FieldEngineer {

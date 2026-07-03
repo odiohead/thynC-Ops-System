@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
 
   // 원본 레코드 id lookup (상세 페이지 이동용)
   const refCodes = tasks.map((t) => t.refCode)
-  const [siteVisits, installPlans, maintenances] = await Promise.all([
+  const [siteVisits, installPlans, maintenances, etcTasks] = await Promise.all([
     prisma.siteVisit.findMany({
       where: { siteVisitCode: { in: refCodes } },
       select: { id: true, siteVisitCode: true },
@@ -54,12 +54,17 @@ export async function GET(request: NextRequest) {
       where: { maintenanceCode: { in: refCodes } },
       select: { id: true, maintenanceCode: true },
     }),
+    prisma.etcTask.findMany({
+      where: { etcTaskCode: { in: refCodes } },
+      select: { id: true, etcTaskCode: true },
+    }),
   ])
 
   const refIdMap = new Map<string, number>()
   for (const sv of siteVisits) if (sv.siteVisitCode) refIdMap.set(sv.siteVisitCode, sv.id)
   for (const ip of installPlans) if (ip.planCode) refIdMap.set(ip.planCode, ip.id)
   for (const m of maintenances) if (m.maintenanceCode) refIdMap.set(m.maintenanceCode, m.id)
+  for (const e of etcTasks) if (e.etcTaskCode) refIdMap.set(e.etcTaskCode, e.id)
 
   const tasksWithRefId = tasks.map((t) => ({
     ...t,

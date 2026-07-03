@@ -92,6 +92,23 @@ async function main() {
   }
   console.log('✓ 유지보수 상태 seed 완료:', maintenanceStatusSeeds.map((s) => s.name).join(', '))
 
+  // 기타업무 상태 seed
+  const etcTaskStatusSeeds = [
+    { name: '접수', order: 0, category: 'ETC_TASK_STATUS', color: '#3B82F6' },
+    { name: '처리중', order: 1, category: 'ETC_TASK_STATUS', color: '#F59E0B' },
+    { name: '완료', order: 2, category: 'ETC_TASK_STATUS', color: '#10B981' },
+    { name: '보류', order: 3, category: 'ETC_TASK_STATUS', color: '#6B7280' },
+  ]
+
+  for (const seed of etcTaskStatusSeeds) {
+    await prisma.statusCode.upsert({
+      where: { name_category: { name: seed.name, category: seed.category } },
+      update: { order: seed.order, color: seed.color },
+      create: seed,
+    })
+  }
+  console.log('✓ 기타업무 상태 seed 완료:', etcTaskStatusSeeds.map((s) => s.name).join(', '))
+
   // Task/유지보수 네비게이션 메뉴 seed
   const maintenanceNavSeeds = [
     { menuKey: 'tasks', label: '업무(Task) 현황', href: '/tasks', iconKey: 'clipboard-list', parentKey: null, allowedRoles: [] as string[], sortOrder: 45 },

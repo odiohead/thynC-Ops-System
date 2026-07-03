@@ -60,10 +60,19 @@ interface SiteVisitItem {
   assignees: { userId: string; user: { id: string; name: string } }[]
 }
 
+interface EtcTaskItem {
+  id: number
+  etcTaskCode: string | null
+  title: string
+  visits: { startDate: string; endDate: string }[]
+  status: { id: number; name: string; color: string } | null
+  assignees: { userId: string; user: { id: string; name: string } }[]
+}
+
 // Unified item for gantt chart
 interface GanttItem {
   id: number
-  kind: 'project' | 'maintenance' | 'site-visit'
+  kind: 'project' | 'maintenance' | 'site-visit' | 'etc-task'
   code: string
   startDate: string
   endDate: string
@@ -228,6 +237,40 @@ function siteVisitsToGanttItems(siteVisits: SiteVisitItem[]): GanttItem[] {
     })
 }
 
+function etcTasksToGanttItems(
+  etcTasks: EtcTaskItem[],
+  viewStartStr: string,
+  viewEndStr: string,
+): GanttItem[] {
+  return etcTasks.flatMap(t => {
+    return (t.visits ?? [])
+      .map((visit, idx) => ({ visit, idx }))
+      // 뷰 범위와 겹치는 업무기간 항목만 바로 렌더
+      .filter(({ visit }) => {
+        const start = visit.startDate.slice(0, 10)
+        const end = visit.endDate.slice(0, 10)
+        return start <= viewEndStr && end >= viewStartStr
+      })
+      .map(({ visit, idx }) => {
+        const start = visit.startDate.slice(0, 10)
+        const end = visit.endDate.slice(0, 10)
+        const rangeLabel = start === end ? start : `${start} ~ ${end}`
+
+        return {
+          id: 3_000_000 + t.id * 1000 + idx,
+          kind: 'etc-task' as const,
+          code: t.etcTaskCode ?? '',
+          startDate: start,
+          endDate: end,
+          label: `🗂 ${t.title}`,
+          color: t.status?.color ?? '#6366F1',
+          tooltip: `[기타업무] ${t.title} (${rangeLabel})`,
+          href: `/etc-tasks/${t.id}`,
+        }
+      })
+  })
+}
+
 // ─── Week groups builder ──────────────────────────────────────────────────────
 
 interface WeekGroup {
@@ -283,6 +326,7 @@ function CalendarPageContent() {
   const [projects, setProjects] = useState<Project[]>([])
   const [maintenances, setMaintenances] = useState<MaintenanceItem[]>([])
   const [siteVisits, setSiteVisits] = useState<SiteVisitItem[]>([])
+  const [etcTasks, setEtcTasks] = useState<EtcTaskItem[]>([])
   const [loading, setLoading] = useState(true)
 
   // Fetch data
@@ -292,12 +336,14 @@ function CalendarPageContent() {
       fetch('/api/projects?all=true').then(r => r.json()),
       fetch('/api/maintenances').then(r => r.json()),
       fetch('/api/site-visits?limit=9999').then(r => r.json()),
+      fetch('/api/etc-tasks').then(r => r.json()),
     ])
-      .then(([feData, projData, mntData, svData]) => {
+      .then(([feData, projData, mntData, svData, etcData]) => {
         setEngineers(feData.data ?? [])
         setProjects(projData.projects ?? [])
         setMaintenances(mntData.maintenances ?? [])
         setSiteVisits(svData.siteVisits ?? [])
+        setEtcTasks(etcData.etcTasks ?? [])
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -387,11 +433,23 @@ function CalendarPageContent() {
         return date >= viewStartStr && date <= viewEndStr
       })
 
+      // Etc tasks assigned to this engineer with any period overlapping the view range
+      const assignedEtc = etcTasks.filter(t => {
+        const hasAssignee = t.assignees.some(a => a.userId === eng.userId)
+        if (!hasAssignee) return false
+        return (t.visits ?? []).some(v => {
+          const start = v.startDate.slice(0, 10)
+          const end = v.endDate.slice(0, 10)
+          return start <= viewEndStr && end >= viewStartStr
+        })
+      })
+
       // Convert to unified GanttItems
       const ganttItems = [
         ...projectsToGanttItems(assignedProjects),
         ...maintenancesToGanttItems(assignedMaint, viewStartStr, viewEndStr),
         ...siteVisitsToGanttItems(assignedSV),
+        ...etcTasksToGanttItems(assignedEtc, viewStartStr, viewEndStr),
       ]
 
       const lanes = allocateLanes(ganttItems)
@@ -402,7 +460,7 @@ function CalendarPageContent() {
         laneCount: lanes.length,
       }
     })
-  }, [engineers, projects, maintenances, siteVisits, viewStartStr, viewEndStr])
+  }, [engineers, projects, maintenances, siteVisits, etcTasks, viewStartStr, viewEndStr])
 
   // Total content height for overlays
   const totalContentHeight = useMemo(() => {
@@ -651,7 +709,7 @@ function CalendarPageContent() {
                               display: 'flex', alignItems: 'center',
                               paddingLeft: 6, paddingRight: 6,
                               overflow: 'hidden',
-                              ...(item.kind === 'maintenance' || item.kind === 'site-visit' ? {
+                              ...(item.kind === 'maintenance' || item.kind === 'site-visit' || item.kind === 'etc-task' ? {
                                 border: `1.5px solid ${barColor}`,
                                 borderLeftWidth: 3,
                               } : {}),

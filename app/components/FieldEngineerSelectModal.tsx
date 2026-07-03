@@ -10,7 +10,7 @@ interface FieldEngineerUser {
   department?: { name: string } | null
 }
 
-type WorkType = 'PROJECT' | 'INSTALL_PLAN' | 'MAINTENANCE'
+type WorkType = 'PROJECT' | 'INSTALL_PLAN' | 'MAINTENANCE' | 'ETC_TASK'
 
 interface Props {
   isOpen: boolean

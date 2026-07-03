@@ -77,6 +77,7 @@ app/
 │   │   ├── document-type/            # 문서유형 관리
 │   │   ├── maintenance-type/         # 장애유형 관리
 │   │   ├── maintenance-status/       # 유지보수 상태 관리
+│   │   ├── etc-task-status/          # 기타업무 상태 관리
 │   │   ├── nav-menus/                # 네비게이션 메뉴 관리 CRUD (SUPER_ADMIN)
 │   │   └── audit-logs/               # 감사 로그 조회 (SUPER_ADMIN)
 │   ├── ai-assistant/                 # AI 어시스턴트 (Flowise 프록시 + 정제 + 상담이력 저장)
@@ -95,6 +96,7 @@ app/
 │   │   └── [id]/return/              # 반납(POST: 주행거리 입력→운행일지 생성) / 반납취소(DELETE, ADMIN)
 │   ├── vehicle-logs/                 # 운행일지 목록·작성 + [id] 조회/수정/삭제
 │   ├── install-plans/                # 설치계획(가안) CRUD
+│   ├── etc-tasks/                    # 기타업무 CRUD + 파일 관리 (다병원·비유지보수 업무)
 │   ├── hira-hospitals/
 │   │   └── sync/                     # 심평원 연동 (POST: 백그라운드 시작, GET: 히스토리 목록)
 │   │       └── [id]/                 # 연동 잡 상세 + 로그
@@ -107,6 +109,7 @@ app/
 │   └── calendar/                     # 구축 일정 간트 캘린더 (새 탭)
 ├── site-visits/                      # 답사 목록·상세·등록
 ├── maintenances/                     # 유지보수 목록·상세·등록
+├── etc-tasks/                        # 기타업무 목록·상세·등록 (다병원·비유지보수 업무)
 ├── tasks/                            # 업무(Task) 현황 (통합 조회)
 ├── vehicle-reservations/             # 차량예약 주간 현황 보드 + 예약/반납 모달 + 내 예약 + 운행일지 탭(VehicleLogsPanel)
 ├── ai-assistant/                     # AI 어시스턴트 채팅
@@ -136,6 +139,7 @@ app/
 │   ├── document-type/                # 문서유형 관리
 │   ├── maintenance-type/             # 장애유형 관리
 │   ├── maintenance-status/           # 유지보수 상태 관리
+│   ├── etc-task-status/              # 기타업무 상태 관리
 │   ├── vehicles/                     # 차량 관리 (ADMIN 이상)
 │   ├── nav-menus/                    # 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
 │   └── audit-logs/                   # 감사 로그 (SUPER_ADMIN 전용)
@@ -153,7 +157,8 @@ lib/
 ├── audit.ts                          # 감사 로그 헬퍼 (logAudit, auditActorFromJWT, redact)
 ├── hospitalStatus.ts                 # 병원 thynC 현황상태 단방향 자동 진행 헬퍼 (advanceHospitalStatus)
 ├── vehicleLog.ts                     # 운행일지 거리 재계산(recalcVehicleLogs) + 주행거리 무결성 검사(checkOdometerConsistency)
-└── maintenanceVisit.ts               # 유지보수 방문일정 정규화(normalizeVisits) + 캘린더 페이로드(visitEventPayload) + ymd/visitKey
+├── maintenanceVisit.ts               # 유지보수 방문일정 정규화(normalizeVisits) + 캘린더 페이로드(visitEventPayload) + ymd/visitKey — 기타업무 업무기간도 공유
+└── etcTask.ts                        # 기타업무 캘린더 이벤트 페이로드(etcTaskVisitEventPayload)
 
 prisma/
 ├── schema.prisma                     # DB 스키마
@@ -184,9 +189,10 @@ prisma/
 
 ### FieldEngineer (업무별 담당자 풀)
 - SEERS 소속 User 중 업무별 담당자로 지정된 목록
-- userId, workType(`PROJECT` / `INSTALL_PLAN` / `MAINTENANCE`), createdAt
+- userId, workType(`PROJECT` / `INSTALL_PLAN` / `MAINTENANCE` / `ETC_TASK`), createdAt
 - (userId, workType) 복합 UNIQUE — 한 사용자가 여러 풀에 동시 등록 가능
-- `PROJECT` 풀은 프로젝트·답사에서 공유, `INSTALL_PLAN`/`MAINTENANCE`는 각 업무 전용
+- `PROJECT` 풀은 프로젝트·답사에서 공유, `INSTALL_PLAN`/`MAINTENANCE`/`ETC_TASK`는 각 업무 전용
+- `ETC_TASK` 풀은 SEERS + thynC운영팀 소속만 등록 가능 (후보·등록 서버 검증)
 
 ### HiraHospital (건강보험심사평가원 병원 원본 데이터)
 - HIRA에서 가져온 공공 병원 데이터 원본
@@ -286,6 +292,29 @@ prisma/
 - Maintenance에 첨부된 파일
 - fileCategory, fileName, s3Key
 
+### EtcTask (기타업무)
+- 여러 병원을 커버하거나 유지보수가 아닌 주요 업무 관리
+- 고유 코드 `etcTaskCode`: `ETC-YYYYMM-NNNN` 형식 (생성 시 자동 발번)
+- 상태(`statusId` → StatusCode ETC_TASK_STATUS), 우선순위(`priority`): 긴급/높음/보통/낮음 (기본값: 보통)
+- 접수일(`reportedAt`), 완료일(`resolvedAt`)
+- 비고(`note`): 리치 텍스트(Tiptap)
+- 담당자 N:M (`EtcTaskAssignee`), 병원 N:M (`EtcTaskHospital`, 0~N곳 선택 연결), 업무기간 1:N (`EtcTaskVisit`), 첨부파일 (`EtcTaskFile`, S3)
+
+### EtcTaskAssignee (기타업무 담당자)
+- EtcTask ↔ User N:M 관계 테이블 (etcTaskId, userId UNIQUE)
+
+### EtcTaskHospital (기타업무 관련 병원)
+- EtcTask ↔ Hospital N:M 관계 테이블 — 다병원 업무를 위해 병원을 0~N곳 연결
+- UNIQUE `(etcTaskId, hospitalCode)` + `(hospitalCode)` 역검색 인덱스
+
+### EtcTaskVisit (기타업무 업무기간)
+- EtcTask 1:N 업무기간. 단일일(start=end)·기간(start~end)·비연속 다건 지원 (유지보수 방문일정과 동일 구조)
+- `startDate`/`endDate`(@db.Date), `calendarEventId`(항목별 Google Calendar 이벤트, env `GOOGLE_CALENDAR_ETC_TASK_ID`), `sortOrder`
+- 간트차트에 항목별 바로 표시
+
+### EtcTaskFile (기타업무 첨부파일)
+- EtcTask에 첨부된 파일 (fileCategory, fileName, s3Key — `etc-tasks/{id}/{timestamp}_{fileName}`)
+
 ### AuditLog (감사 로그)
 - 시스템 내 모든 mutation 및 인증 이벤트 기록
 - actorId/actorEmail/actorName/actorRole (User 스냅샷 — User 삭제 후에도 기록 보존)
@@ -307,7 +336,7 @@ prisma/
 
 ### StatusCode (상태코드)
 - 병원/답사/상담유형/문서유형/장애유형/유지보수상태 등 다용도 상태값 정의 (커스터마이징 가능, 색상 포함)
-- category: `HOSPITAL` / `SITE_VISIT` / `INTRO_TYPE` / `CONSULTATION_TYPE` / `DOCUMENT_TYPE` / `MAINTENANCE_TYPE` / `MAINTENANCE_STATUS`
+- category: `HOSPITAL` / `SITE_VISIT` / `INTRO_TYPE` / `CONSULTATION_TYPE` / `DOCUMENT_TYPE` / `MAINTENANCE_TYPE` / `MAINTENANCE_STATUS` / `ETC_TASK_STATUS`
 - value: 코드값 (String?, nullable) — 문서유형 등에서 내부 식별자로 사용
 
 ### Contractor (시공사)
@@ -330,10 +359,10 @@ prisma/
 - `isActive` (활성/비활성 토글), `sortOrder` (정렬 순서)
 
 ### Task (통합 업무)
-- 프로젝트, 답사, 설치계획(가안), 유지보수를 통합 관리하는 TASK 테이블
+- 프로젝트, 답사, 설치계획(가안), 유지보수, 기타업무를 통합 관리하는 TASK 테이블
 - 고유 코드 `taskCode`: `TASK-YYYYMM-NNNNN` 형식 (월별 순번 통합 채번)
-- `taskType`: `PROJECT` / `SITE_VISIT` / `INSTALL_PLAN` / `MAINTENANCE`
-- `refCode`: 원본 테이블의 고유 코드 (projectCode / siteVisitCode / planCode / maintenanceCode)
+- `taskType`: `PROJECT` / `SITE_VISIT` / `INSTALL_PLAN` / `MAINTENANCE` / `ETC`
+- `refCode`: 원본 테이블의 고유 코드 (projectCode / siteVisitCode / planCode / maintenanceCode / etcTaskCode)
 - `hospitalCode` (FK→Hospital, nullable), `title`
 - 기존 테이블은 변경 없이 유지, tasks는 참조용 통합 뷰
 
@@ -476,6 +505,8 @@ prisma/
   - 미리보기(preview) 모드 지원
   - 같은 병원명 여러 행 → 도입형태 병합, 도입병상 수 합산
 - **병원 목록 Google Sheets 내보내기**: Drive Sheets API로 스프레드시트 직접 생성
+- **업무 병원 재지정(매핑 정정)** (ADMIN 이상): 프로젝트/답사/설치계획/유지보수 상세의 "병원 재지정" 버튼으로 잘못 지정된 병원을 올바른 병원으로 이전. 한 트랜잭션으로 업무 hospitalCode + Task 미러 동기화, 두 병원 현황 상태 자동 재계산(옛 병원 하향 포함), 프로젝트는 이름의 병원명도 선택 변경. 감사로그 기록
+- **병원 업무 일괄 이전** (SUPER_ADMIN): 병원 상세의 "업무 일괄 이전" 버튼으로 한 병원의 모든 업무(프로젝트·답사·설치계획·유지보수·상담)를 다른 병원으로 한 번에 이전(병원을 통째로 잘못 만든 경우 정리용)
 
 ### 프로젝트 관리
 - 구축 공사 프로젝트 등록·수정·삭제 (삭제는 ADMIN 이상)
@@ -491,10 +522,11 @@ prisma/
 - **필드 엔지니어 간트차트** (`/projects/calendar`): 필드 엔지니어 기준 월간 간트차트
   - Y축: 필드 엔지니어 1명 = 1행 그룹, 배정 업무가 겹치면 레인(sub-row) 자동 분리
   - X축: 뷰 범위 = 해당 월이 속한 ISO 주의 월요일 ~ 일요일 (월 경계 주가 잘리지 않도록 인접 월 일부 포함, 총 35~42일), URL `?month=YYYY-MM` 동기화, 주차·일별 2행 헤더 (sticky top), 현재 월 외 날짜는 연한 회색 글자 + 연회색 배경으로 구분
-  - 구축 프로젝트 + 유지보수 + 답사 업무 통합 표시
-  - 바 색상: 프로젝트는 buildStatus.color, 유지보수는 장애유형 color, 답사는 답사 상태 color (좌측 보더 + 사선 패턴으로 구분)
+  - 구축 프로젝트 + 유지보수 + 답사 + 기타업무 통합 표시
+  - 바 색상: 프로젝트는 buildStatus.color, 유지보수는 장애유형 color, 답사는 답사 상태 color, 기타업무는 상태 color (좌측 보더 + 사선 패턴으로 구분)
   - 유지보수 바는 방문일정(`MaintenanceVisit`) 항목별로 표시 — 단일일은 1일 바, 기간은 시작~종료 바. 한 건에 방문 항목이 여럿이면 바도 여럿. 뷰 범위와 겹치는 항목만 렌더, 방문일정 없는 건은 미표시
   - 답사 바는 `visitDate`(방문일) 기준 1일짜리 단일 바
+  - 기타업무 바는 업무기간(`EtcTaskVisit`) 항목별로 표시 — 유지보수 방문일정과 동일 규칙
   - 과거 일정 옅게, 미래 일정 짙게 표시 (오늘 기준 gradient 분리)
   - 바 클릭 시 해당 상세 페이지 새 탭 오픈
   - 주말 컬럼 연회색 오버레이, 오늘 세로선 빨강
@@ -534,6 +566,19 @@ prisma/
 - 우선순위 색상 뱃지: 긴급(red) / 높음(amber) / 보통(blue) / 낮음(gray)
 - 등록 시 상태 기본값: '접수'
 - 병원 상세 페이지에 유지보수 카드 연동
+
+### 기타업무 관리
+- 여러 병원을 커버하는 업무(다병원 점검 등)나 유지보수가 아닌 주요 업무 관리 (`/etc-tasks`)
+- 등록·수정·삭제 (삭제는 ADMIN 이상), 고유 코드 `ETC-YYYYMM-NNNN` 자동 발번
+- 제목 / 상태(ETC_TASK_STATUS, 설정에서 관리) / 우선순위(긴급/높음/보통/낮음) / 접수일 / 완료일
+- **관련 병원 다중 연결** (선택, 0~N곳): 병원 검색 모달에서 칩 토글로 여러 병원 연결
+- 담당자(기타업무 전용 풀, SEERS + thynC운영팀만 등록 가능, 복수 지정)
+- **업무기간 다건**: 유지보수와 동일한 캘린더 선택기(`MaintenanceVisitPicker`)로 단일일·기간 혼합 등록 → **간트차트에 항목별 바 표기**(🗂, 상태 색) + 항목별 Google Calendar 이벤트 자동 동기화(`GOOGLE_CALENDAR_ETC_TASK_ID`, 미설정 시 스킵)
+- 비고: Tiptap 리치 텍스트, 첨부파일(S3, edit 모드)
+- 업무(Task) 현황에 `ETC` 타입으로 통합 조회 (상태 '완료' → isCompleted 동기화)
+- 목록 컬럼: 접수일 | 제목 | 상태 | 우선순위 | 담당자 | 관련 병원(3곳↑ "외 N곳") | 업무기간 | 완료일. 필터: 제목 검색, 상태/우선순위 select
+- 네비 메뉴 기본 노출: SEERS 소속만 (메뉴 관리에서 변경 가능)
+- 감사 로그 `resource='etc_task'`로 모든 mutation 기록
 
 ### 차량예약
 - 법인차량 선착순 즉시 확정 예약 (승인 절차 없음)
@@ -578,9 +623,10 @@ prisma/
 
 ### 담당자 리스트 (ADMIN 이상)
 - SEERS 소속 사용자 중 업무별 담당자 등록·삭제
-- **탭 3종**: 프로젝트 담당자 / 설치계획 담당자 / 유지보수 담당자
+- **탭 4종**: 프로젝트 담당자 / 설치계획 담당자 / 유지보수 담당자 / 기타업무 담당자
   - 프로젝트 담당자 풀은 프로젝트·답사 페이지에서 공유 사용
-  - 설치계획·유지보수는 각 업무 전용 풀
+  - 설치계획·유지보수·기타업무는 각 업무 전용 풀
+  - 기타업무 담당자는 SEERS + thynC운영팀 소속만 후보로 표시·등록 가능
   - 한 사용자가 여러 풀에 동시 등록 가능
 - "+ 추가" 버튼으로 후보 검색 모달 열기 (이름/이메일 검색, 300ms debounce, 페이지네이션)
 - 후보: SEERS 소속·활성·해당 풀 미등록 사용자만 표시
@@ -836,6 +882,8 @@ npm run dev
 | PUT  | `/api/hospitals/[code]` | 병원 수정 |
 | DELETE | `/api/hospitals/[code]` | 병원 삭제 |
 | POST | `/api/hospitals/import` | Excel 일괄 가져오기 (`?preview=true` 미리보기) |
+| POST | `/api/hospitals/[code]/transfer-work` | 병원 업무 일괄 이전 (SUPER_ADMIN) |
+| POST | `/api/work-items/reassign` | 업무 병원 재지정 (ADMIN 이상, type/code/newHospitalCode) |
 | GET  | `/api/hospitals/[code]/devices` | 병원 장비 목록 |
 | POST | `/api/hospitals/[code]/devices` | 병원 장비 추가 |
 | GET  | `/api/hospitals/[code]/daewoong-staff` | 병원 담당자 목록 |
@@ -877,6 +925,19 @@ npm run dev
 | GET  | `/api/install-plans/[id]` | 설치계획 상세 |
 | PUT  | `/api/install-plans/[id]` | 설치계획 수정 |
 | DELETE | `/api/install-plans/[id]` | 설치계획 삭제 (ADMIN 이상) |
+
+### 기타업무
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET  | `/api/etc-tasks` | 기타업무 목록 (`?search=`제목 `&statusId=&priority=&hospitalCode=` 필터) |
+| POST | `/api/etc-tasks` | 기타업무 등록 (USER 이상, 코드 발번 + Task 미러 + 기간별 캘린더 이벤트) |
+| GET  | `/api/etc-tasks/[id]` | 기타업무 상세 |
+| PUT  | `/api/etc-tasks/[id]` | 기타업무 수정 (담당자·병원·업무기간 reconcile, 상태 '완료' → Task isCompleted) |
+| DELETE | `/api/etc-tasks/[id]` | 기타업무 삭제 (ADMIN 이상, 캘린더·S3·Task 정리) |
+| GET  | `/api/etc-tasks/[id]/files` | 첨부파일 목록 |
+| POST | `/api/etc-tasks/[id]/files` | 첨부파일 업로드 (S3 `etc-tasks/{id}/…`) |
+| DELETE | `/api/etc-tasks/[id]/files/[fileId]` | 첨부파일 삭제 |
+| GET  | `/api/etc-tasks/file-url` | 첨부파일 presigned URL 발급 (`?key=`) |
 
 ### 차량예약
 | Method | Endpoint | 설명 |
@@ -939,7 +1000,7 @@ npm run dev
 | POST | `/api/settings/departments` | 부서 추가 (ADMIN 이상) |
 | PUT  | `/api/settings/departments/[id]` | 부서 수정 (ADMIN 이상) |
 | DELETE | `/api/settings/departments/[id]` | 부서 삭제 (ADMIN 이상, 연결 계정 있으면 409) |
-| GET  | `/api/settings/field-engineers` | 담당자 목록 (`?workType=PROJECT\|INSTALL_PLAN\|MAINTENANCE` 기본 PROJECT, `?search=&page=&limit=`, `?all=true` 전체 반환) |
+| GET  | `/api/settings/field-engineers` | 담당자 목록 (`?workType=PROJECT\|INSTALL_PLAN\|MAINTENANCE\|ETC_TASK` 기본 PROJECT, `?search=&page=&limit=`, `?all=true` 전체 반환) |
 | POST | `/api/settings/field-engineers` | 담당자 등록 (ADMIN 이상, SEERS 소속만 가능, `{userId, workType}`) |
 | DELETE | `/api/settings/field-engineers/[id]` | 담당자 삭제 (ADMIN 이상, 204) |
 | GET  | `/api/settings/field-engineers/candidates` | 등록 후보 목록 (ADMIN 이상, SEERS·활성·해당 workType 미등록) |
@@ -971,6 +1032,10 @@ npm run dev
 | POST | `/api/settings/document-type` | 문서유형 추가 |
 | PUT  | `/api/settings/document-type/[id]` | 문서유형 수정 |
 | DELETE | `/api/settings/document-type/[id]` | 문서유형 삭제 (ADMIN 이상) |
+| GET  | `/api/settings/etc-task-status` | 기타업무 상태 목록 |
+| POST | `/api/settings/etc-task-status` | 기타업무 상태 추가 |
+| PUT  | `/api/settings/etc-task-status/[id]` | 기타업무 상태 수정 |
+| DELETE | `/api/settings/etc-task-status/[id]` | 기타업무 상태 삭제 (ADMIN 이상) |
 | GET  | `/api/settings/audit-logs` | 감사 로그 목록 (SUPER_ADMIN 전용, `?page=&limit=&search=&action=&resource=&from=&to=`) |
 
 ### 네비게이션 메뉴

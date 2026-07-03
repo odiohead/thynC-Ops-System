@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 
-const VALID_WORK_TYPES = ['PROJECT', 'INSTALL_PLAN', 'MAINTENANCE'] as const
+const VALID_WORK_TYPES = ['PROJECT', 'INSTALL_PLAN', 'MAINTENANCE', 'ETC_TASK'] as const
 type WorkType = typeof VALID_WORK_TYPES[number]
 
 function parseWorkType(raw: string | null): WorkType {
@@ -30,6 +30,8 @@ export async function GET(req: NextRequest) {
     organization: { code: 'SEERS' },
     isActive: true,
     id: { notIn: registeredUserIds.length > 0 ? registeredUserIds : [''] },
+    // 기타업무 담당자는 thynC운영팀 소속만 등록 대상
+    ...(workType === 'ETC_TASK' ? { department: { name: { contains: '운영' } } } : {}),
     ...(search
       ? { OR: [{ name: { contains: search } }, { email: { contains: search } }] }
       : {}),
