@@ -5,6 +5,7 @@ import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import IssueNoteEditor from '@/app/components/IssueNoteEditor'
 import FieldEngineerSelectModal from '@/app/components/FieldEngineerSelectModal'
+import ReassignHospitalButton from '@/app/components/ReassignHospitalButton'
 
 interface DeviceInfo {
   id: number
@@ -345,6 +346,13 @@ export default function ProjectDetailPage() {
                 <Link href={`/hospitals/${project.hospital.hospitalCode}`} className="text-sm text-blue-600 hover:underline">
                   {project.hospital.hospitalName}
                 </Link>
+                <ReassignHospitalButton
+                  type="PROJECT"
+                  code={project.projectCode}
+                  currentHospitalCode={project.hospital.hospitalCode}
+                  currentHospitalName={project.hospital.hospitalName}
+                  canReassign={isAdmin}
+                />
               </div>
             </div>
           </div>

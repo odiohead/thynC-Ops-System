@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import SiteVisitForm from '../SiteVisitForm'
+import ReassignHospitalButton from '@/app/components/ReassignHospitalButton'
 
 interface SiteVisitFile {
   id: number
@@ -141,6 +142,17 @@ export default function EditSiteVisitPage() {
           <p className="mt-1 font-mono text-sm text-gray-400">{data.siteVisitCode ?? `SV-${String(data.id).padStart(5, '0')}`}</p>
         </div>
         {data.hospital && <HospitalCard hospital={data.hospital} />}
+        {data.siteVisitCode && (
+          <div className="mb-4 flex items-center gap-2">
+            <span className="text-xs text-gray-400">병원이 잘못 지정되었나요?</span>
+            <ReassignHospitalButton
+              type="SITE_VISIT"
+              code={data.siteVisitCode}
+              currentHospitalCode={data.hospitalCode}
+              currentHospitalName={data.hospital?.hospitalName}
+            />
+          </div>
+        )}
         <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
           <SiteVisitForm mode="edit" initialData={initialData} />
         </div>

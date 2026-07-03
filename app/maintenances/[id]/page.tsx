@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import MaintenanceForm from '../MaintenanceForm'
+import ReassignHospitalButton from '@/app/components/ReassignHospitalButton'
 
 interface MaintenanceFile {
   id: number
@@ -154,6 +155,17 @@ export default function EditMaintenancePage() {
           <p className="mt-1 font-mono text-sm text-gray-400">{data.maintenanceCode ?? `MNT-${String(data.id).padStart(4, '0')}`}</p>
         </div>
         {data.hospital && <HospitalCard hospital={data.hospital} />}
+        {data.maintenanceCode && (
+          <div className="mb-4 flex items-center gap-2">
+            <span className="text-xs text-gray-400">병원이 잘못 지정되었나요?</span>
+            <ReassignHospitalButton
+              type="MAINTENANCE"
+              code={data.maintenanceCode}
+              currentHospitalCode={data.hospitalCode}
+              currentHospitalName={data.hospital?.hospitalName}
+            />
+          </div>
+        )}
         <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
           <MaintenanceForm mode="edit" initialData={initialData} />
         </div>

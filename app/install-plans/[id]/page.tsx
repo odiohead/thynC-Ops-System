@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { verifyToken, isAdminOrAbove } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import InstallPlanDetailClient from './DetailClient'
+import ReassignHospitalButton from '@/app/components/ReassignHospitalButton'
 
 export const dynamic = 'force-dynamic'
 export const metadata = { title: '설치계획(가안) 상세' }
@@ -99,6 +100,19 @@ export default async function InstallPlanDetailPage({ params }: Props) {
                 <p className="mt-1 text-sm text-gray-900">{hospital.address || '-'}</p>
               </div>
             </div>
+          </div>
+        )}
+
+        {installPlan.planCode && canAdmin && (
+          <div className="mb-4 flex items-center gap-2">
+            <span className="text-xs text-gray-400">병원이 잘못 지정되었나요?</span>
+            <ReassignHospitalButton
+              type="INSTALL_PLAN"
+              code={installPlan.planCode}
+              currentHospitalCode={installPlan.hospitalCode}
+              currentHospitalName={hospital?.hospitalName}
+              canReassign={canAdmin}
+            />
           </div>
         )}
 

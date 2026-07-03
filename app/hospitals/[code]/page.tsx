@@ -4,6 +4,7 @@ import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 import { verifyToken } from '@/lib/auth'
 import DeleteButton from './_components/DeleteButton'
+import TransferAllWorkButton from '@/app/components/TransferAllWorkButton'
 import DaewoongStaffTab from './_components/DaewoongStaffTab'
 import HospitalDevicesSection from './_components/HospitalDevicesSection'
 import StatusBadge from '@/app/components/StatusBadge'
@@ -150,6 +151,11 @@ export default async function HospitalDetailPage({ params }: PageProps) {
             >
               수정
             </Link>
+            <TransferAllWorkButton
+              fromHospitalCode={hospital.hospitalCode}
+              fromHospitalName={hospital.hospitalName}
+              canTransfer={user?.role === 'SUPER_ADMIN'}
+            />
             <DeleteButton code={hospital.hospitalCode} />
           </div>
         </div>
