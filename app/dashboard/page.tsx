@@ -7,7 +7,7 @@
  * - 사이니지 원칙: 모든 수치는 호버 없이 상시 표시
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Maximize, Minimize } from 'lucide-react'
 import StatusBadge from '@/app/components/StatusBadge'
 import ThemeToggle from '@/app/components/theme/ThemeToggle'
@@ -156,7 +156,8 @@ export default function DashboardPage() {
 
   const thisWeek = projects?.thisWeek ?? []
   const nextWeek = projects?.nextWeek ?? []
-  const chartMonths = (monthly ?? []).slice(-12)
+  // useMemo: 시계(1초) 리렌더마다 새 배열이 생기면 recharts가 데이터 변경으로 오인해 재애니메이션(라벨 깜빡임)
+  const chartMonths = useMemo(() => (monthly ?? []).slice(-12), [monthly])
   const doneThisWeek = thisWeek.filter((p) => p.buildStatus?.label?.includes('완료')).length
   const mntItems = maintenance?.items ?? []
 
@@ -262,7 +263,7 @@ export default function DashboardPage() {
 
       {/* ═══ 중단: 월별 추이 차트 + 유지보수 진행중 내역 ═══ */}
       <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
-        <Panel title="월별 누적 도입 추이" badge={chartMonths.length > 0 ? `최근 ${chartMonths.length}개월` : undefined}
+        <Panel title="월별 누적 도입 현황" badge={chartMonths.length > 0 ? `최근 ${chartMonths.length}개월` : undefined}
           headerRight={
             <div className="flex items-center gap-4 text-sm text-muted-foreground">
               <span className="flex items-center gap-1.5">
@@ -285,10 +286,10 @@ export default function DashboardPage() {
                     라인(병원)=상단 밴드 · 바(병상)=하단 밴드로 분리해 라벨 겹침 방지 */}
                 <YAxis yAxisId="h" hide domain={[0, (max: number) => Math.ceil(max * 1.08)]} />
                 <YAxis yAxisId="b" hide domain={[0, (max: number) => Math.ceil(max * 1.75)]} />
-                <Bar yAxisId="b" dataKey="totalBeds" name="누적 병상" fill={chart.amber} radius={[4, 4, 0, 0]} maxBarSize={38} opacity={0.9}>
+                <Bar yAxisId="b" dataKey="totalBeds" name="누적 병상" fill={chart.amber} radius={[4, 4, 0, 0]} maxBarSize={38} opacity={0.9} isAnimationActive={false}>
                   <LabelList dataKey="totalBeds" position="top" offset={6} formatter={(v) => Number(v).toLocaleString()} style={{ fontSize: 13, fontWeight: 700, fill: chart.dark ? '#FCD34D' : '#B45309' }} />
                 </Bar>
-                <Line yAxisId="h" dataKey="totalHospitals" name="누적 병원" stroke={chart.blue} strokeWidth={2.5} dot={{ r: 4, fill: chart.blue }}>
+                <Line yAxisId="h" dataKey="totalHospitals" name="누적 병원" stroke={chart.blue} strokeWidth={2.5} dot={{ r: 4, fill: chart.blue }} isAnimationActive={false}>
                   <LabelList dataKey="totalHospitals" position="top" offset={12} style={{ fontSize: 15, fontWeight: 700, fill: chart.blue }} />
                 </Line>
               </ComposedChart>
