@@ -16,7 +16,8 @@
 - **차트 라벨 가독성(사이니지)**: 라인(병원)=상단 밴드(domain ×1.08)·바(병상)=하단 밴드(×1.75)로 세로 분리해 라벨 겹침 제거, 병원 라벨 15px·병상 라벨 13px 볼드(바 위 표시, 테마별 색 보정)
 - **API 확장**: /api/dashboard/maintenance에 `items`(진행중 12건, 접수일 최신순, additive) 추가 — 기존 응답 필드 무변경
 - **검증**: tsc 0오류, 힙4GB 빌드 통과, dev2 재시작, /dashboard 307(미인증 리다이렉트 정상)
-- 영향 파일: `app/dashboard/page.tsx`(전면 재작성), `app/components/{MainWrapper,Navigation}.tsx`
+- **PROD 배포 완료 (2026-07-05)**: `cb46613` push → PROD pull → 힙4GB 빌드 → `pm2 restart thync-prod`. 스모크: login 200·/dashboard 307(인증 리다이렉트 정상)·ops.seersthync.com 307 ✅. DB 마이그레이션·npm install 불필요
+- 영향 파일: `app/dashboard/page.tsx`(전면 재작성), `app/api/dashboard/maintenance/route.ts`, `app/components/{MainWrapper,Navigation}.tsx`
 
 ---
 
