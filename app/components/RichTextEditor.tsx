@@ -145,21 +145,21 @@ export default function RichTextEditor({ value, onChange, placeholder = '내용�
         .prose-editor ul { list-style-type: disc;    padding-left: 1.5rem; margin: 0.25rem 0; }
         .prose-editor ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
         .prose-editor blockquote {
-          border-left: 3px solid #d1d5db;
+          border-left: 3px solid hsl(var(--border));
           padding-left: 1rem;
-          color: #6b7280;
+          color: hsl(var(--muted-foreground));
           margin: 0.5rem 0;
         }
         .prose-editor code {
-          background: #f3f4f6;
+          background: hsl(var(--muted));
           border-radius: 3px;
           padding: 0.1em 0.3em;
           font-size: 0.875em;
           font-family: monospace;
         }
         .prose-editor pre {
-          background: #1f2937;
-          color: #f9fafb;
+          background: hsl(var(--foreground) / 0.9);
+          color: hsl(var(--background));
           border-radius: 0.375rem;
           padding: 0.75rem 1rem;
           overflow-x: auto;

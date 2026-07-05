@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import StatusBadge from '@/app/components/StatusBadge'
+import { useChartTheme } from '@/app/components/theme/useChartTheme'
 import * as XLSX from 'xlsx'
 import {
   ComposedChart,
@@ -231,6 +232,7 @@ function DashboardTable({
 }
 
 export default function Home() {
+  const chart = useChartTheme()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [monthly, setMonthly] = useState<MonthlyEntry[] | null>(null)
@@ -388,26 +390,26 @@ export default function Home() {
                   <p className="mb-2 text-xs font-medium text-gray-500">누적 현황</p>
                   <ResponsiveContainer width="100%" height={260}>
                     <LineChart data={chartData} margin={{ top: 4, right: 24, left: 0, bottom: 4 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
                       <XAxis
                         dataKey="label"
-                        tick={{ fontSize: 11, fill: '#6b7280' }}
+                        tick={{ fontSize: 11, fill: chart.tick }}
                         interval="preserveStartEnd"
                       />
                       <YAxis
                         yAxisId="left"
                         orientation="left"
-                        tick={{ fontSize: 11, fill: '#3b82f6' }}
-                        label={{ value: '병원(개)', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#3b82f6' } }}
+                        tick={{ fontSize: 11, fill: chart.blue }}
+                        label={{ value: '병원(개)', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: chart.blue } }}
                       />
                       <YAxis
                         yAxisId="right"
                         orientation="right"
-                        tick={{ fontSize: 11, fill: '#10b981' }}
-                        label={{ value: '병상(개)', angle: 90, position: 'insideRight', style: { fontSize: 11, fill: '#10b981' } }}
+                        tick={{ fontSize: 11, fill: chart.emerald }}
+                        label={{ value: '병상(개)', angle: 90, position: 'insideRight', style: { fontSize: 11, fill: chart.emerald } }}
                       />
                       <Tooltip
-                        contentStyle={{ fontSize: 12 }}
+                        contentStyle={chart.tooltip}
                         formatter={(value, name) => [
                           typeof value === 'number' ? value.toLocaleString() : value,
                           name === 'totalHospitals' ? '누적 병원' : '누적 병상',
@@ -421,7 +423,7 @@ export default function Home() {
                         yAxisId="left"
                         type="monotone"
                         dataKey="totalHospitals"
-                        stroke="#3b82f6"
+                        stroke={chart.blue}
                         strokeWidth={2}
                         dot={{ r: 3 }}
                         activeDot={{ r: 5 }}
@@ -430,7 +432,7 @@ export default function Home() {
                         yAxisId="right"
                         type="monotone"
                         dataKey="totalBeds"
-                        stroke="#10b981"
+                        stroke={chart.emerald}
                         strokeWidth={2}
                         dot={{ r: 3 }}
                         activeDot={{ r: 5 }}
@@ -444,27 +446,27 @@ export default function Home() {
                   <p className="mb-2 text-xs font-medium text-gray-500">월별 신규 현황</p>
                   <ResponsiveContainer width="100%" height={220}>
                     <ComposedChart data={chartData} margin={{ top: 4, right: 24, left: 0, bottom: 4 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
                       <XAxis
                         dataKey="label"
-                        tick={{ fontSize: 11, fill: '#6b7280' }}
+                        tick={{ fontSize: 11, fill: chart.tick }}
                         interval="preserveStartEnd"
                       />
                       <YAxis
                         yAxisId="left"
                         orientation="left"
                         allowDecimals={false}
-                        tick={{ fontSize: 11, fill: '#6366f1' }}
-                        label={{ value: '병원(개)', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#6366f1' } }}
+                        tick={{ fontSize: 11, fill: chart.indigo }}
+                        label={{ value: '병원(개)', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: chart.indigo } }}
                       />
                       <YAxis
                         yAxisId="right"
                         orientation="right"
-                        tick={{ fontSize: 11, fill: '#f59e0b' }}
-                        label={{ value: '병상(개)', angle: 90, position: 'insideRight', style: { fontSize: 11, fill: '#f59e0b' } }}
+                        tick={{ fontSize: 11, fill: chart.amber }}
+                        label={{ value: '병상(개)', angle: 90, position: 'insideRight', style: { fontSize: 11, fill: chart.amber } }}
                       />
                       <Tooltip
-                        contentStyle={{ fontSize: 12 }}
+                        contentStyle={chart.tooltip}
                         formatter={(value, name) => [
                           typeof value === 'number' ? value.toLocaleString() : value,
                           name === 'newHospitals' ? '신규 병원' : '신규 병상',
@@ -477,14 +479,14 @@ export default function Home() {
                       <Bar
                         yAxisId="left"
                         dataKey="newHospitals"
-                        fill="#6366f1"
+                        fill={chart.indigo}
                         opacity={0.8}
                         radius={[3, 3, 0, 0]}
                       />
                       <Bar
                         yAxisId="right"
                         dataKey="newBeds"
-                        fill="#f59e0b"
+                        fill={chart.amber}
                         opacity={0.8}
                         radius={[3, 3, 0, 0]}
                       />

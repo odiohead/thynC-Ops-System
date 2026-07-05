@@ -9,6 +9,7 @@ import {
   type DefaultReactSuggestionItem,
 } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/ariakit'
+import { useTheme } from '@/app/components/theme/ThemeProvider'
 import {
   filterSuggestionItems,
   type PartialBlock,
@@ -161,6 +162,7 @@ export default function WikiEditor({
   collab,
   onCollabUnavailable,
 }: Props) {
+  const { theme } = useTheme()
   const router = useRouter()
   const [linkPickerOpen, setLinkPickerOpen] = useState(false)
   // 링크 삽입 위치 — 모달이 열려 있는 동안 커서가 이동·소실될 수 있으므로 슬래시 클릭 시점에 고정
@@ -300,6 +302,7 @@ export default function WikiEditor({
     )}
     <BlockNoteView
       editor={editor}
+      theme={theme}
       editable={editable}
       slashMenu={false}
       onChange={() => {

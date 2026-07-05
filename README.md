@@ -11,7 +11,9 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 |------|------|
 | 프레임워크 | Next.js 14 (App Router) |
 | 언어 | TypeScript |
-| 스타일링 | Tailwind CSS |
+| 스타일링 | Tailwind CSS + 시멘틱 디자인 토큰(HSL CSS 변수, 라이트/다크) — `app/globals.css`·`tailwind.config.ts` |
+| 폰트 | Pretendard Variable (self-host, `app/fonts/`) |
+| 테마 | 라이트/다크 토글 (`ThemeProvider`, localStorage 영속, 라이트 기본) |
 | ORM | Prisma |
 | 데이터베이스 | PostgreSQL |
 | 인증 | JWT (httpOnly 쿠키, jose 라이브러리) |
@@ -144,7 +146,9 @@ app/
 │   ├── nav-menus/                    # 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
 │   └── audit-logs/                   # 감사 로그 (SUPER_ADMIN 전용)
 ├── login/                            # 로그인 페이지
-└── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper)
+└── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper, StatusBadge 등)
+    ├── theme/                        # ThemeProvider, ThemeToggle, useChartTheme (다크모드)
+    └── ui/                           # 디자인 프리미티브 (Button, Card, Badge, Input, Table, Modal, PageHeader, EmptyState)
 
 lib/
 ├── auth.ts                           # JWT 인증 유틸리티 + 역할 헬퍼

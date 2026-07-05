@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-07-05 | UI 디자인 리뉴얼 Phase 1~4 — 디자인 토큰 + 팔레트 브리지 + 다크모드 (브랜치 design/renewal-liquid-glass)
+
+- **배경**: create-next-app 기본값 위에 기능만 쌓여 비주얼 레이어 부재(Arial 렌더링, Tailwind 원색 남발, 토큰 없음) → 미니멀·클린(Linear/Vercel풍) 방향으로 전면 리뉴얼. main과 격리된 `design/renewal-liquid-glass` 브랜치에서 진행
+- **Phase 0 (토대)**: Pretendard Variable self-host(`app/fonts/`)로 전 화면 폰트 교체(Arial 제거), `globals.css`에 시멘틱 디자인 토큰(HSL 채널, 라이트+다크 전 세트: background/card/muted/accent/primary/success/warning/destructive + subtle 계열), `tailwind.config.ts` darkMode='class' + 토큰 매핑 + 그림자/라운드 스케일, `lib/cn.ts`(의존성 0 className 헬퍼), `ThemeProvider`+`ThemeToggle`(localStorage 영속, FOUC 방지 인라인 스크립트, 라이트 기본), `layout.tsx` lang=ko, Navigation 토큰화+토글 노출
+- **Phase 1 (팔레트 브리지 — 핵심 전략)**: 기존 98개 파일·3,600+ 하드코딩 색상 클래스를 무수정 커버 — tailwind.config에서 gray/blue/red/green/amber/emerald/yellow/purple/indigo/rose/teal/orange/sky 13계열을 CSS 변수 참조(`hsl(var(--x) / <alpha-value>)`)로 재정의. 라이트=gray→slate 톤 보정·blue→Heritage Blue(#2C5CE5), 다크=의미론 기반 스케일 반전(50~300=어두운 틴트, 400~900=밝은 텍스트). `.dark .bg-white`→card 표면 오버라이드(158곳, text-white는 유지). 새 코드는 시멘틱 토큰 사용이 표준
+- **Phase 2 (프리미티브)**: `app/components/ui/` 신설 — Button(5 variant)/Card/Badge/Input·Select·Textarea/Table/Modal/PageHeader/EmptyState (전부 토큰 기반, 의존성 0). StatusBadge를 CSS 변수+`.dark .status-badge-dynamic`(color-mix 틴트 변환)으로 다크 대응 — DB 저장 hex 색상 유지하면서 서버 컴포넌트 호환. 로그인 페이지 액센트 정렬(#1A56DB→#2C5CE5, 한글 Pretendard 폴백)
+- **Phase 3 (핵심 화면)**: `useChartTheme` 훅 신설 — recharts는 CSS 변수를 못 읽으므로 라이트/다크 값 직접 분기(그리드·틱·툴팁·시리즈 컬러). 메인(app/page.tsx)·대시보드 차트 하드코딩 hex 전량 치환. 프로젝트 캘린더 구조색(보더·헤더 배경·텍스트) 토큰화
+- **Phase 4 (주변부)**: WikiEditor BlockNoteView에 `theme={theme}` 연동(wiki→main import, 허용 방향), Tiptap RichTextEditor 인라인 스타일 토큰화, 글로벌 마이크로(::selection, :focus-visible 링, 스크롤바 테마)
+- **검증**: `tsc --noEmit` 0오류, 힙4GB 빌드 통과, dev2 재시작·HTTP 200 확인. 다크모드는 라이트 기본에 opt-in(사이드바 하단 토글)
+- **핫픽스 (같은 날)**: bg 클래스 없는 네이티브 폼 컨트롤(select 56·input 187)이 다크에서 UA 흰 배경으로 남는 문제 — `color-scheme: light/dark` 선언 + base 레이어 폼 기본값(card 표면색·placeholder·accent-color)으로 일괄 해결. globals.css만 수정, 컴포넌트 무수정. option 드롭다운·date picker·스크롤바도 다크 적용
+- **남은 백로그**: 설정 페이지 색상 스와치 fallback(#E5E7EB) 다크 미세 보정, 데이터 도트(차량색 등)는 양 모드 허용으로 유지, 페이지별 시멘틱 토큰 점진 전환
+- 영향 파일: `app/globals.css`, `tailwind.config.ts`, `app/layout.tsx`, `app/fonts/PretendardVariable.woff2(신규)`, `lib/cn.ts(신규)`, `app/components/theme/{ThemeProvider,ThemeToggle,useChartTheme}(신규)`, `app/components/ui/{Button,Card,Badge,Input,Table,Modal,PageHeader,EmptyState}.tsx(신규)`, `app/components/{Navigation,StatusBadge,RichTextEditor}.tsx`, `app/{page,dashboard/page,login/page,projects/calendar/page}.tsx`, `app/wiki/components/WikiEditor.tsx`
+
+---
+
 ## 2026-07-03 | 기타업무(EtcTask) 모듈 신설 — 다병원·비유지보수 업무 관리
 
 - **배경**: 유지보수는 병원 1곳 필수 연결이라 여러 병원을 커버하는 업무(다병원 펌웨어 점검 등)나 유지보수가 아닌 주요 업무를 담을 곳이 없음 → 전용 모듈 신설

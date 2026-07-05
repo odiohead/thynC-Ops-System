@@ -10,6 +10,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts'
+import { useChartTheme } from '@/app/components/theme/useChartTheme'
 
 type SummaryData = {
   hospitalCount: number
@@ -31,6 +32,7 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 export default function DashboardPage() {
+  const chart = useChartTheme()
   const [summary, setSummary] = useState<SummaryData | null>(null)
   const [maintenance, setMaintenance] = useState<MaintenanceData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -196,27 +198,27 @@ export default function DashboardPage() {
                 ) : (
                   <ResponsiveContainer width="100%" height={200}>
                     <BarChart data={maintenance.weekly} margin={{ top: 4, right: 8, left: -16, bottom: 4 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
                       <XAxis
                         dataKey="label"
-                        tick={{ fontSize: 11, fill: '#9CA3AF' }}
+                        tick={{ fontSize: 11, fill: chart.tick }}
                         axisLine={false}
                         tickLine={false}
                       />
                       <YAxis
                         allowDecimals={false}
-                        tick={{ fontSize: 11, fill: '#9CA3AF' }}
+                        tick={{ fontSize: 11, fill: chart.tick }}
                         axisLine={false}
                         tickLine={false}
                       />
                       <Tooltip
-                        contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
+                        contentStyle={chart.tooltip}
                         formatter={(value) => [`${value}건`, '등록건수']}
                         labelFormatter={(label) => `${label} 주`}
                       />
                       <Bar
                         dataKey="count"
-                        fill="#F59E0B"
+                        fill={chart.amber}
                         radius={[4, 4, 0, 0]}
                         maxBarSize={36}
                       />

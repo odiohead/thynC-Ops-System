@@ -44,7 +44,7 @@ export default function LoginPage() {
   /* Shared style atoms                                          */
   /* ─────────────────────────────────────────────────────────── */
   const monoFont = dmMono.style.fontFamily
-  const sansFont = dmSans.style.fontFamily
+  const sansFont = `${dmSans.style.fontFamily}, var(--font-pretendard), sans-serif`
 
   return (
     <>
@@ -77,8 +77,8 @@ export default function LoginPage() {
         }
         .lp-input::placeholder { color: #CBD5E1; }
         .lp-input:focus {
-          border-color: #1A56DB;
-          box-shadow: 0 0 0 3px rgba(26,86,219,0.1);
+          border-color: #2C5CE5;
+          box-shadow: 0 0 0 3px rgba(44,92,229,0.12);
         }
       `}</style>
 
@@ -113,7 +113,7 @@ export default function LoginPage() {
           <div style={{
             position: 'absolute', width: 320, height: 320,
             left: '50%', top: '44%', transform: 'translate(-50%, -50%)',
-            background: 'radial-gradient(circle, rgba(26,86,219,0.18) 0%, transparent 70%)',
+            background: 'radial-gradient(circle, rgba(44,92,229,0.18) 0%, transparent 70%)',
             pointerEvents: 'none',
           }} />
 
@@ -121,14 +121,14 @@ export default function LoginPage() {
           <div style={{
             position: 'absolute', top: 0, right: 0,
             width: 120, height: 120, borderBottomLeftRadius: 120,
-            background: 'rgba(26,86,219,0.08)', pointerEvents: 'none',
+            background: 'rgba(44,92,229,0.08)', pointerEvents: 'none',
           }} />
 
           {/* Bottom-left corner arc */}
           <div style={{
             position: 'absolute', bottom: 0, left: 0,
             width: 80, height: 80, borderTopRightRadius: 80,
-            background: 'rgba(26,86,219,0.06)', pointerEvents: 'none',
+            background: 'rgba(44,92,229,0.06)', pointerEvents: 'none',
           }} />
 
           {/* ── Top: version tag ── */}
@@ -202,7 +202,7 @@ export default function LoginPage() {
           {/* Top accent line */}
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-            background: 'linear-gradient(90deg, #1A56DB, #3B82F6)',
+            background: 'linear-gradient(90deg, #2C5CE5, #4B7BFF)',
           }} />
 
           <div style={{ maxWidth: 360, width: '100%', margin: '0 auto' }}>
@@ -279,11 +279,11 @@ export default function LoginPage() {
                   }}>
                     <input
                       type="checkbox"
-                      style={{ width: 14, height: 14, accentColor: '#1A56DB' }}
+                      style={{ width: 14, height: 14, accentColor: '#2C5CE5' }}
                     />
                     로그인 상태 유지
                   </label>
-                  <a href="#" style={{ fontSize: 12, color: '#1A56DB', textDecoration: 'none' }}>
+                  <a href="#" style={{ fontSize: 12, color: '#2C5CE5', textDecoration: 'none' }}>
                     비밀번호 찾기
                   </a>
                 </div>

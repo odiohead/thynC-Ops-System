@@ -3,11 +3,13 @@ import localFont from "next/font/local";
 import "./globals.css";
 import Navigation from "./components/Navigation";
 import MainWrapper from "./components/MainWrapper";
+import { ThemeProvider, themeInitScript } from "./components/theme/ThemeProvider";
 
-const geistSans = localFont({
-  src: "./fonts/GeistVF.woff",
-  variable: "--font-geist-sans",
-  weight: "100 900",
+const pretendard = localFont({
+  src: "./fonts/PretendardVariable.woff2",
+  variable: "--font-pretendard",
+  weight: "45 920",
+  display: "swap",
 });
 const geistMono = localFont({
   src: "./fonts/GeistMonoVF.woff",
@@ -26,10 +28,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <Navigation />
-        <MainWrapper>{children}</MainWrapper>
+    <html lang="ko" suppressHydrationWarning>
+      <head>
+        {/* 최초 페인트 전 테마 적용 (FOUC 방지) */}
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
+      <body className={`${pretendard.variable} ${geistMono.variable} antialiased`}>
+        <ThemeProvider>
+          <Navigation />
+          <MainWrapper>{children}</MainWrapper>
+        </ThemeProvider>
       </body>
     </html>
   );

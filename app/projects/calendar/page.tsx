@@ -174,7 +174,7 @@ function projectsToGanttItems(projects: Project[]): GanttItem[] {
       startDate: p.startDate!.slice(0, 10),
       endDate: p.endDateExpected!.slice(0, 10),
       label: p.hospital.hospitalName ?? p.hospital.hiraHospitalName ?? '',
-      color: p.buildStatus?.color ?? '#6B7280',
+      color: p.buildStatus?.color ?? 'hsl(var(--muted-foreground))',
       tooltip: `[구축] ${p.hospital.hospitalName ?? p.hospital.hiraHospitalName ?? ''} (${p.startDate!.slice(0, 10)} ~ ${p.endDateExpected!.slice(0, 10)})`,
       href: `/projects/${p.projectCode}`,
     }))
@@ -513,15 +513,15 @@ function CalendarPageContent() {
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: NAME_W + totalDays * 32 }}>
 
           {/* Sticky header: 2 rows */}
-          <div style={{ position: 'sticky', top: 0, zIndex: 20, background: 'white' }}>
+          <div style={{ position: 'sticky', top: 0, zIndex: 20, background: 'hsl(var(--card))' }}>
 
             {/* Row 1: Week groups */}
-            <div style={{ display: 'flex', height: 32, borderBottom: '1px solid #E5E7EB' }}>
+            <div style={{ display: 'flex', height: 32, borderBottom: '1px solid hsl(var(--border))' }}>
               <div style={{
                 width: NAME_W, minWidth: NAME_W, flexShrink: 0,
-                borderRight: '1px solid #E5E7EB', background: '#F9FAFB',
+                borderRight: '1px solid hsl(var(--border))', background: 'hsl(var(--muted))',
                 display: 'flex', alignItems: 'center', paddingLeft: 12,
-                fontSize: 12, fontWeight: 600, color: '#374151',
+                fontSize: 12, fontWeight: 600, color: 'hsl(var(--foreground))',
               }}>
                 담당자
               </div>
@@ -531,8 +531,8 @@ function CalendarPageContent() {
                     key={i}
                     style={{
                       flex: g.count, display: 'flex', alignItems: 'center', paddingLeft: 6,
-                      fontSize: 11, color: '#6B7280', fontWeight: 500,
-                      borderRight: i < weekGroups.length - 1 ? '1px solid #E5E7EB' : 'none',
+                      fontSize: 11, color: 'hsl(var(--muted-foreground))', fontWeight: 500,
+                      borderRight: i < weekGroups.length - 1 ? '1px solid hsl(var(--border))' : 'none',
                       overflow: 'hidden', whiteSpace: 'nowrap',
                     }}
                   >
@@ -543,10 +543,10 @@ function CalendarPageContent() {
             </div>
 
             {/* Row 2: Day cells */}
-            <div style={{ display: 'flex', height: 28, borderBottom: '1px solid #D1D5DB' }}>
+            <div style={{ display: 'flex', height: 28, borderBottom: '1px solid hsl(var(--border))' }}>
               <div style={{
                 width: NAME_W, minWidth: NAME_W, flexShrink: 0,
-                borderRight: '1px solid #E5E7EB', background: '#F9FAFB',
+                borderRight: '1px solid hsl(var(--border))', background: 'hsl(var(--muted))',
               }} />
               <div style={{ flex: 1, display: 'flex' }}>
                 {days.map((d, i) => {
@@ -557,8 +557,8 @@ function CalendarPageContent() {
                   if (isSun) label += ' 일'
                   else if (isSat) label += ' 토'
 
-                  const baseColor = isSun ? '#EF4444' : isSat ? '#3B82F6' : '#6B7280'
-                  const color = isToday ? '#EF4444' : (d.inMonth ? baseColor : '#D1D5DB')
+                  const baseColor = isSun ? '#EF4444' : isSat ? '#3B82F6' : 'hsl(var(--muted-foreground))'
+                  const color = isToday ? '#EF4444' : (d.inMonth ? baseColor : 'hsl(var(--border))')
 
                   return (
                     <div
@@ -568,10 +568,10 @@ function CalendarPageContent() {
                         fontSize: 10,
                         color,
                         fontWeight: isToday ? 700 : 400,
-                        borderRight: i < totalDays - 1 ? '1px solid #F3F4F6' : 'none',
+                        borderRight: i < totalDays - 1 ? '1px solid hsl(var(--muted))' : 'none',
                         background: isToday
                           ? 'rgba(239,68,68,0.06)'
-                          : (d.inMonth ? 'transparent' : '#FAFAFA'),
+                          : (d.inMonth ? 'transparent' : 'hsl(var(--muted))'),
                       }}
                     >
                       {label}
@@ -643,21 +643,21 @@ function CalendarPageContent() {
                   key={engineer.id}
                   style={{
                     display: 'flex', height: rowHeight,
-                    borderBottom: '1px solid #E5E7EB',
+                    borderBottom: '1px solid hsl(var(--border))',
                   }}
                 >
                   {/* Name cell: spans full row group, vertically centered */}
                   <div
                     style={{
                       width: NAME_W, minWidth: NAME_W, flexShrink: 0,
-                      borderRight: '1px solid #E5E7EB', background: 'white',
+                      borderRight: '1px solid hsl(var(--border))', background: 'hsl(var(--card))',
                       display: 'flex', alignItems: 'center', paddingLeft: 12,
                       position: 'relative', zIndex: 2,
                     }}
                   >
                     <span
                       style={{
-                        fontSize: 12, fontWeight: 500, color: '#1F2937',
+                        fontSize: 12, fontWeight: 500, color: 'hsl(var(--foreground))',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}
                       title={engineer.user.name}
