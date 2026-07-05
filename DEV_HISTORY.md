@@ -14,6 +14,7 @@
 - **Phase 4 (주변부)**: WikiEditor BlockNoteView에 `theme={theme}` 연동(wiki→main import, 허용 방향), Tiptap RichTextEditor 인라인 스타일 토큰화, 글로벌 마이크로(::selection, :focus-visible 링, 스크롤바 테마)
 - **검증**: `tsc --noEmit` 0오류, 힙4GB 빌드 통과, dev2 재시작·HTTP 200 확인. 다크모드는 라이트 기본에 opt-in(사이드바 하단 토글)
 - **핫픽스 (같은 날)**: bg 클래스 없는 네이티브 폼 컨트롤(select 56·input 187)이 다크에서 UA 흰 배경으로 남는 문제 — `color-scheme: light/dark` 선언 + base 레이어 폼 기본값(card 표면색·placeholder·accent-color)으로 일괄 해결. globals.css만 수정, 컴포넌트 무수정. option 드롭다운·date picker·스크롤바도 다크 적용
+- **PROD 배포 완료 (2026-07-05)**: `design/renewal-liquid-glass` → main 머지(`60c9ba7`) → push → PROD pull → 힙4GB 빌드 → `pm2 restart thync-prod`. 스모크: login 200·root 307·ops.seersthync.com 307 ✅. npm install·DB 마이그레이션 불필요(순수 UI). 재배포 직후 Server Action 불일치 로그는 일시적 정상
 - **남은 백로그**: 설정 페이지 색상 스와치 fallback(#E5E7EB) 다크 미세 보정, 데이터 도트(차량색 등)는 양 모드 허용으로 유지, 페이지별 시멘틱 토큰 점진 전환
 - 영향 파일: `app/globals.css`, `tailwind.config.ts`, `app/layout.tsx`, `app/fonts/PretendardVariable.woff2(신규)`, `lib/cn.ts(신규)`, `app/components/theme/{ThemeProvider,ThemeToggle,useChartTheme}(신규)`, `app/components/ui/{Button,Card,Badge,Input,Table,Modal,PageHeader,EmptyState}.tsx(신규)`, `app/components/{Navigation,StatusBadge,RichTextEditor}.tsx`, `app/{page,dashboard/page,login/page,projects/calendar/page}.tsx`, `app/wiki/components/WikiEditor.tsx`
 
