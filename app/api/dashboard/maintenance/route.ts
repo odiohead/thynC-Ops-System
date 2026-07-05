@@ -24,8 +24,8 @@ export async function GET(req: NextRequest) {
     SELECT sc.name, COUNT(*)::bigint as count
     FROM maintenances m
     JOIN status_codes sc ON sc.id = m.status_id
-    GROUP BY sc.name, sc.sort_order
-    ORDER BY sc.sort_order
+    GROUP BY sc.name, sc."order"
+    ORDER BY sc."order"
   `
 
   const byStatus = statusCounts.map((r) => ({
@@ -72,5 +72,25 @@ export async function GET(req: NextRequest) {
     weekly.push({ weekStart: key, label, count: found ? Number(found.count) : 0 })
   }
 
-  return NextResponse.json({ inProgressCount, byStatus, weekly })
+  // 진행중 내역 (사이니지 월보드용) — 접수일 최신순
+  const items = await prisma.maintenance.findMany({
+    where: {
+      status: { name: { in: IN_PROGRESS_STATUSES } },
+    },
+    select: {
+      id: true,
+      title: true,
+      priority: true,
+      reportedAt: true,
+      isRemote: true,
+      hospital: { select: { hospitalName: true } },
+      status: { select: { name: true, color: true } },
+      type: { select: { name: true } },
+      assignees: { select: { user: { select: { name: true } } } },
+    },
+    orderBy: [{ reportedAt: 'desc' }, { id: 'desc' }],
+    take: 12,
+  })
+
+  return NextResponse.json({ inProgressCount, byStatus, weekly, items })
 }
