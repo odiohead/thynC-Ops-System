@@ -53,7 +53,7 @@ thynC-Ops-System/
 app/
 ├── api/                              # API Routes
 │   ├── auth/                         # 인증 (login, logout, me)
-│   ├── dashboard/                    # 대시보드 (이번 주/다음 주 공사 현황)
+│   ├── dashboard/                    # 대시보드 집계 API (공사현황·summary·monthly·maintenance·hospital-stats)
 │   ├── hospitals/                    # 병원 CRUD + 장비 배정 + 담당자 배정 + Excel 가져오기
 │   ├── hira-hospitals/               # HIRA 병원 데이터 조회
 │   ├── projects/                     # 프로젝트 CRUD + 장비/파일 관리
@@ -104,6 +104,7 @@ app/
 │   │       └── [id]/                 # 연동 잡 상세 + 로그
 │   └── drive/                        # Google Drive 연동 (파일 업로드/목록/삭제/병원목록 내보내기)
 ├── (대시보드)/                        # 메인 대시보드 (이번 주/다음 주 공사 현황)
+├── dashboard/                        # 사이니지 월보드 (50인치 상시 표시, 네비 없음)
 ├── hospitals/                        # 병원 목록·상세·등록·수정
 ├── hira-hospitals/                   # HIRA 병원 조회
 ├── install-plans/                    # 설치계획(가안) 목록·상세·등록
@@ -486,6 +487,12 @@ prisma/
 - **월별 누적 사용 현황**: 신규 병원/병상, 누적 병원/병상 추이 (Recharts 차트)
 - **월별 신규 병원/병상 막대 차트** (ComposedChart)
 - 캐시 미사용 (`force-dynamic`), 매 요청마다 DB 조회
+
+### 사이니지 월보드 (`/dashboard`, 50인치 상시 표시용)
+- 네비게이션 없는 h-screen 무스크롤 단일 화면, 다크/라이트 토글, 전체화면 버튼, 실시간 시계, 60초 자동 폴링(실패 시 기존 데이터 유지)
+- KPI 7컬럼: 도입병원 / 도입병상 / **종별 도입 현황(전국 HIRA 모수 대비 도입수·도입률: 상급종합·종합병원·병원·기타)** / 유지보수 진행중 / 이번주 구축 / 차주 구축 예정
+- 월별 누적 도입 현황 차트(라벨 상시 표시 — 사이니지 원칙상 호버 툴팁 미사용, 라인·바 밴드 분리, 애니메이션 비활성)
+- 유지보수 진행중 내역(우선순위 마커, 최신 7건) + 이번주/차주 구축 리스트
 
 ### 병원 thynC 현황상태 자동 진행 규칙
 - 업무 등록·진행 상태에 따라 `hospitals.status`를 단방향(미계약 → 가견적요청 → 답사요청 → 계약완료 → 운영 → 해지)으로 자동 진행. 후행 단계에 있는 병원의 status는 보존(이미 `운영`인 병원에 추가 설치계획·답사가 들어와도 다운그레이드 안 함).
@@ -876,6 +883,9 @@ npm run dev
 |--------|----------|------|
 | GET | `/api/dashboard` | 이번 주/다음 주 공사 현황 |
 | GET | `/api/dashboard/monthly` | 월별 누적 병원/병상 통계 |
+| GET | `/api/dashboard/summary` | 도입병원/병상 합계 + 상태별 집계 |
+| GET | `/api/dashboard/maintenance` | 유지보수 진행중 건수·상태별·주간 추이 + 진행중 내역(items) |
+| GET | `/api/dashboard/hospital-stats` | 종별(HIRA) 병원 현황 — 전국 모수·검토중·도입(contracted) |
 
 ### 병원
 | Method | Endpoint | 설명 |
