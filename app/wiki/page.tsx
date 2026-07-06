@@ -121,7 +121,7 @@ export default async function WikiHomePage() {
   const recentCards = recentEdited.map(toCard)
 
   return (
-    <div className="wiki-content py-10">
+    <div className="wiki-content py-6 sm:py-10">
       <h1 className="wiki-page-title mb-1.5">사내 위키</h1>
       <p className="mb-8 text-sm text-[var(--wiki-text-soft)]">
         좌측 사이드바에서 페이지를 선택하거나 새 페이지를 작성하세요.

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import Navigation from "./components/Navigation";
@@ -20,6 +20,20 @@ const geistMono = localFont({
 export const metadata: Metadata = {
   title: "Thync Ops",
   description: "Thync Operations Management",
+  appleWebApp: {
+    title: "Thync Ops",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // 노치·홈 인디케이터 영역까지 캔버스 확장 (safe-area 유틸리티와 조합)
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f8fafc" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0f1c" },
+  ],
 };
 
 export default function RootLayout({

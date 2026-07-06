@@ -469,7 +469,7 @@ function CalendarPageContent() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen text-gray-500 text-sm">
+      <div className="flex items-center justify-center h-[calc(100dvh-3.5rem)] lg:h-screen text-gray-500 text-sm">
         데이터를 불러오는 중...
       </div>
     )
@@ -477,7 +477,7 @@ function CalendarPageContent() {
 
   if (engineers.length === 0) {
     return (
-      <div className="flex flex-col h-screen bg-white">
+      <div className="flex flex-col h-[calc(100dvh-3.5rem)] lg:h-screen bg-white">
         <div className="flex items-center justify-center flex-1 text-gray-400 text-sm">
           등록된 필드 엔지니어가 없습니다.
         </div>
@@ -488,9 +488,9 @@ function CalendarPageContent() {
   const monthLabel = `${currentYear}년 ${currentMonth + 1}월`
 
   return (
-    <div className="flex flex-col h-screen bg-white">
+    <div className="flex flex-col h-[calc(100dvh-3.5rem)] lg:h-screen bg-white">
       {/* Header control bar */}
-      <div className="flex items-center justify-between px-4 py-3 shrink-0 border-b border-gray-200">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 shrink-0 border-b border-gray-200">
         <div className="flex items-center gap-1">
           <button onClick={() => navigateMonth(-1)} className="p-1.5 rounded hover:bg-gray-100 text-gray-600">
             <ChevronLeft size={16} />
@@ -742,7 +742,7 @@ function CalendarPageContent() {
 export default function CalendarPage() {
   return (
     <Suspense fallback={
-      <div className="flex items-center justify-center h-screen text-gray-500 text-sm">
+      <div className="flex items-center justify-center h-[calc(100dvh-3.5rem)] lg:h-screen text-gray-500 text-sm">
         데이터를 불러오는 중...
       </div>
     }>

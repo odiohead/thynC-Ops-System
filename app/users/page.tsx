@@ -335,7 +335,7 @@ export default function UsersPage() {
     : users.filter((u) => u.organization?.code === activeTab)
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-gray-900">계정 관리</h1>
         {isAdmin && (
@@ -349,7 +349,7 @@ export default function UsersPage() {
       </div>
 
       {/* 조직 탭 */}
-      <div className="flex gap-1 mb-4 border-b border-gray-200">
+      <div className="flex gap-1 mb-4 border-b border-gray-200 overflow-x-auto scrollbar-none">
         {([
           { code: 'SEERS', label: '씨어스테크놀로지', count: seersCount },
           { code: 'DAEWOONG', label: '대웅제약', count: daewoongCount },
@@ -358,7 +358,7 @@ export default function UsersPage() {
           <button
             key={tab.code}
             onClick={() => setActiveTab(tab.code)}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            className={`flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
               activeTab === tab.code
                 ? 'border-blue-600 text-blue-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -374,7 +374,86 @@ export default function UsersPage() {
         ))}
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto">
+      {/* 모바일 카드 리스트 */}
+      <div className="md:hidden space-y-2.5">
+        {filteredUsers.length === 0 ? (
+          <div className="rounded-xl border border-border bg-card py-12 text-center text-sm text-muted-foreground">계정이 없습니다.</div>
+        ) : (
+          filteredUsers.map((user) => (
+            <div
+              key={user.id}
+              className={`rounded-xl border border-border p-4 shadow-xs ${user.id === currentUser?.id ? 'bg-blue-50/40' : 'bg-card'}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
+                  {user.name}
+                  {user.id === currentUser?.id && (
+                    <span className="ml-1.5 text-xs font-normal text-blue-500">(나)</span>
+                  )}
+                </span>
+                <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${ROLE_CLASS[user.role] ?? 'bg-gray-100 text-gray-700'}`}>
+                  {ROLE_LABEL[user.role] ?? user.role}
+                </span>
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span className="break-all">{user.email}</span>
+                <span>{user.organization?.name ?? '미배정'}</span>
+                {user.department && <span>{user.department.name}</span>}
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium ${user.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  {user.isActive ? '활성' : '비활성'}
+                </span>
+                {user.vehicleReservationBlocked && (
+                  <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-700" title="차량예약 사용 제한">
+                    예약제한
+                  </span>
+                )}
+              </div>
+              {(user.id === currentUser?.id || isAdmin) && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {user.id === currentUser?.id ? (
+                    <button
+                      onClick={openEditModal}
+                      className="text-xs font-medium px-3 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                    >
+                      수정
+                    </button>
+                  ) : (
+                    <>
+                      {currentUser?.role === 'SUPER_ADMIN' && (
+                        <button
+                          onClick={() => openEditOtherModal(user)}
+                          className="text-xs font-medium px-3 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                        >
+                          수정
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleToggle(user)}
+                        className={`text-xs font-medium px-3 py-1 rounded-lg transition-colors ${
+                          user.isActive
+                            ? 'bg-red-50 text-red-600 hover:bg-red-100'
+                            : 'bg-green-50 text-green-600 hover:bg-green-100'
+                        }`}
+                      >
+                        {user.isActive ? '비활성화' : '활성화'}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(user)}
+                        disabled={deletingId === user.id}
+                        className="text-xs font-medium px-3 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50 transition-colors"
+                      >
+                        {deletingId === user.id ? '삭제 중...' : '삭제'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="hidden md:block rounded-xl border border-gray-200 bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
@@ -473,8 +552,8 @@ export default function UsersPage() {
 
       {/* 계정 생성 모달 (ADMIN 이상만) */}
       {showCreateModal && isAdmin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl mx-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md max-h-[85dvh] overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
             <h2 className="text-base font-semibold text-gray-900 mb-4">계정 생성</h2>
             <form onSubmit={handleCreate} className="space-y-3">
               <div>
@@ -546,8 +625,8 @@ export default function UsersPage() {
 
       {/* 다른 계정 수정 모달 (SUPER_ADMIN 전용) */}
       {showEditOtherModal && editOtherUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl mx-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md max-h-[85dvh] overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
             <h2 className="text-base font-semibold text-gray-900 mb-1">계정 수정</h2>
             <p className="text-xs text-gray-500 mb-4">{editOtherUser.email}</p>
             <form onSubmit={handleEditOtherSave} className="space-y-3">
@@ -640,8 +719,8 @@ export default function UsersPage() {
 
       {/* 내 정보 수정 모달 */}
       {showEditModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl mx-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md max-h-[85dvh] overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
             <h2 className="text-base font-semibold text-gray-900 mb-4">내 정보 수정</h2>
             <form onSubmit={handleEditSave} className="space-y-3">
               <div>

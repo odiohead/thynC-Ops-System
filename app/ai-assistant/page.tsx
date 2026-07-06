@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
+import { X } from 'lucide-react'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -230,10 +231,10 @@ export default function AiAssistantPage() {
   }
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-2rem)] px-4 py-6 sm:px-6 lg:px-8">
+    <div className="flex gap-6 h-[calc(100dvh-3.5rem)] lg:h-[calc(100vh-2rem)] px-4 py-4 sm:px-6 lg:px-8 lg:py-6">
       {/* 토스트 */}
       {toast && (
-        <div className="fixed top-4 right-4 z-50 rounded-lg bg-gray-900 px-4 py-2.5 text-sm text-white shadow-lg">
+        <div className="fixed top-4 right-4 z-[60] rounded-lg bg-gray-900 px-4 py-2.5 text-sm text-white shadow-lg">
           {toast}
         </div>
       )}
@@ -260,7 +261,7 @@ export default function AiAssistantPage() {
           </div>
 
           {/* 병원 선택 영역 */}
-          <div className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
             <span className="text-sm font-medium text-gray-500 shrink-0">병원</span>
             {selectedHospital ? (
               <span className="inline-flex items-center gap-1.5 rounded-md bg-blue-50 border border-blue-200 px-2.5 py-1 text-sm font-medium text-blue-700">
@@ -359,7 +360,7 @@ export default function AiAssistantPage() {
         </div>
 
         {/* 입력 영역 */}
-        <div className="shrink-0 pt-4">
+        <div className="shrink-0 pt-4 pb-[env(safe-area-inset-bottom)]">
           <div className="flex gap-2 items-end">
             <textarea
               ref={inputRef}
@@ -382,12 +383,19 @@ export default function AiAssistantPage() {
         </div>
       </div>
 
-      {/* ===== 우측: 상담 정리 패널 (토글) ===== */}
+      {/* ===== 우측: 상담 정리 패널 (토글) — 모바일에서는 풀스크린 오버레이 ===== */}
       {panelOpen && (
-        <div className="w-80 shrink-0 flex flex-col border-l border-gray-200 pl-6">
+        <div className="fixed inset-0 z-50 flex flex-col bg-card p-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:static lg:z-auto lg:w-80 lg:shrink-0 lg:border-l lg:border-border lg:bg-transparent lg:p-0 lg:pl-6">
           <div className="flex items-baseline gap-2 mb-4 pt-1">
             <h2 className="text-base font-semibold text-gray-900">상담 정리</h2>
             <span className="text-xs text-gray-400">(선택사항)</span>
+            <button
+              onClick={() => setPanelOpen(false)}
+              className="ml-auto self-center p-1 rounded-md text-muted-foreground hover:bg-muted transition-colors lg:hidden"
+              title="상담 정리 닫기"
+            >
+              <X size={18} />
+            </button>
           </div>
 
           <div className="space-y-3 flex-1 overflow-y-auto">

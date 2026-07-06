@@ -170,13 +170,13 @@ export default function TasksPage() {
         </div>
 
         {/* 필터 */}
-        <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
           <input
             type="text"
             placeholder="업무코드·병원명·제목 검색..."
             value={filterSearch}
             onChange={(e) => setFilterSearch(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 w-72"
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 w-full sm:w-72"
           />
           <select
             value={filterType}
@@ -248,8 +248,73 @@ export default function TasksPage() {
           </button>
         </div>
 
+        {/* 모바일 카드 리스트 */}
+        <div className="md:hidden mt-3 space-y-2.5">
+          {loading ? (
+            <div className="rounded-xl border border-border bg-card py-12 text-center text-sm text-muted-foreground">
+              불러오는 중...
+            </div>
+          ) : tasks.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card py-12 text-center text-sm text-muted-foreground">
+              {activeTab === 'incomplete' ? '미완료 업무가 없습니다.' : '완료된 업무가 없습니다.'}
+            </div>
+          ) : (
+            tasks.map((t) => {
+              const typeCls = taskTypeColors[t.taskType] ?? 'bg-gray-100 text-gray-600 border-gray-300'
+              const url = getDetailUrl(t)
+              return (
+                <div
+                  key={t.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => { if (url) router.push(url) }}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      if (url) router.push(url)
+                    }
+                  }}
+                  className="block w-full cursor-pointer rounded-xl border border-border bg-card p-4 text-left shadow-xs transition active:scale-[0.99]"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleToggle(t, e) }}
+                      disabled={togglingId === t.id}
+                      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                        t.isCompleted
+                          ? 'border-green-500 bg-green-500 text-white'
+                          : 'border-gray-300 bg-white hover:border-gray-400'
+                      } disabled:opacity-50`}
+                      title={t.isCompleted ? '미완료로 변경' : '완료로 변경'}
+                    >
+                      {t.isCompleted && (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
+                    </button>
+                    <span className={`min-w-0 flex-1 truncate text-sm font-semibold ${t.isCompleted ? 'text-muted-foreground line-through' : 'text-foreground'}`}>
+                      {t.title || '-'}
+                    </span>
+                    <span className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${typeCls}`}>
+                      {taskTypeLabels[t.taskType] ?? t.taskType}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <span className="font-mono">{t.taskCode}</span>
+                    <span>{t.hospital ? (t.hospital.hospitalName || t.hospital.hiraHospitalName) : '-'}</span>
+                    <span>{formatDate(t.createdAt)}</span>
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
+
         {/* 테이블 */}
-        <div className="overflow-hidden rounded-b-lg border border-t-0 border-gray-200 bg-white shadow-sm">
+        <div className="hidden md:block overflow-hidden rounded-b-lg border border-t-0 border-gray-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">

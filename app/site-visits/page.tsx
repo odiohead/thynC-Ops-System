@@ -124,7 +124,7 @@ export default function SiteVisitsPage() {
         </div>
 
         {/* 필터 */}
-        <div className="mb-4 flex items-center gap-3">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
           <label className="text-sm font-medium text-gray-700">상태</label>
           <select
             value={filterStatusId}
@@ -138,16 +138,51 @@ export default function SiteVisitsPage() {
           </select>
         </div>
 
+        {/* 모바일 카드 리스트 */}
+        <div className="space-y-2.5 md:hidden">
+          {loading ? (
+            <div className="rounded-xl border border-border bg-card py-12 text-center text-sm text-muted-foreground">불러오는 중...</div>
+          ) : siteVisits.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card py-12 text-center text-sm text-muted-foreground">등록된 답사가 없습니다.</div>
+          ) : (
+            siteVisits.map((sv) => (
+              <Link
+                key={sv.id}
+                href={`/site-visits/${sv.id}`}
+                className="block w-full rounded-xl border border-border bg-card p-4 text-left shadow-xs transition active:scale-[0.99]"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="min-w-0 truncate text-sm font-semibold text-foreground">
+                    {sv.hospital.hospitalName || sv.hospital.hiraHospitalName}
+                  </span>
+                  <span className="shrink-0">
+                    <StatusBadge status={sv.status} />
+                  </span>
+                </div>
+                <p className="mt-1 truncate text-xs text-muted-foreground">{sv.hospital.address || '-'}</p>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span>코드 <span className="text-foreground">{formatCode(sv)}</span></span>
+                  <span>대웅 <span className="text-foreground">{sv.daewoongUser?.name ?? '-'}</span></span>
+                  <span>담당자 <span className="text-foreground">{sv.assignees?.length > 0 ? sv.assignees.map((a) => a.user.name).join(', ') : '-'}</span></span>
+                  <span>요청일 <span className="text-foreground">{formatDate(sv.requestDate)}</span></span>
+                  <span>답사 <span className="text-foreground">{formatDate(sv.visitDate)}</span></span>
+                  <span>회신 <span className="text-foreground">{formatDate(sv.replyDate)}</span></span>
+                </div>
+              </Link>
+            ))
+          )}
+        </div>
+
         {/* 상단 동기화 가로 스크롤바 — 페이지 로딩 시 바로 보임 */}
         <div
           ref={topScrollRef}
           onScroll={() => syncFrom(topScrollRef.current, tableScrollRef.current)}
-          className="overflow-x-auto"
+          className="hidden overflow-x-auto md:block"
         >
           <div style={{ width: scrollWidth, height: 1 }} />
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div className="hidden overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm md:block">
           <div
             ref={tableScrollRef}
             onScroll={() => syncFrom(tableScrollRef.current, topScrollRef.current)}

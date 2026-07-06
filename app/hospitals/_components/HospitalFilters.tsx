@@ -79,7 +79,7 @@ export default function HospitalFilters({
   }
 
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
       {/* 검색 */}
       <form
         onSubmit={(e) => {
@@ -103,153 +103,156 @@ export default function HospitalFilters({
         </button>
       </form>
 
-      {/* 시도 필터 */}
-      <select
-        value={sido}
-        onChange={(e) => {
-          setSido(e.target.value)
-          apply(search, e.target.value, statuses, types)
-        }}
-        className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:w-40"
-      >
-        <option value="">전체 시도</option>
-        {sidoOptions.map((s) => (
-          <option key={s} value={s}>
-            {s}
-          </option>
-        ))}
-      </select>
-
-      {/* 병원종 멀티선택 드롭다운 */}
-      <div className="relative" ref={typeRef}>
-        <button
-          type="button"
-          onClick={() => setTypeOpen((o) => !o)}
-          className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors sm:w-36 ${
-            types.length > 0
-              ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500'
-              : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-          }`}
+      {/* 시도·병원종·상태 필터 */}
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-3">
+        {/* 시도 필터 */}
+        <select
+          value={sido}
+          onChange={(e) => {
+            setSido(e.target.value)
+            apply(search, e.target.value, statuses, types)
+          }}
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:w-40"
         >
-          <span className="flex-1 text-left">
-            {types.length > 0 ? `병원종 (${types.length})` : '병원종'}
-          </span>
-          <svg
-            className={`h-4 w-4 transition-transform ${typeOpen ? 'rotate-180' : ''}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+          <option value="">전체 시도</option>
+          {sidoOptions.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+
+        {/* 병원종 멀티선택 드롭다운 */}
+        <div className="relative" ref={typeRef}>
+          <button
+            type="button"
+            onClick={() => setTypeOpen((o) => !o)}
+            className={`flex w-full items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors sm:w-36 ${
+              types.length > 0
+                ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500'
+                : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+            }`}
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
+            <span className="flex-1 text-left">
+              {types.length > 0 ? `병원종 (${types.length})` : '병원종'}
+            </span>
+            <svg
+              className={`h-4 w-4 transition-transform ${typeOpen ? 'rotate-180' : ''}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
 
-        {typeOpen && (
-          <div className="absolute right-0 z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-            {typeOptions.map((opt) => {
-              const checked = types.includes(opt)
-              return (
-                <label
-                  key={opt}
-                  className="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50"
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleType(opt)}
-                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm text-gray-700">{opt}</span>
-                </label>
-              )
-            })}
-            {types.length > 0 && (
-              <>
-                <div className="my-1 border-t border-gray-100" />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTypes([])
-                    apply(search, sido, statuses, [])
-                    setTypeOpen(false)
-                  }}
-                  className="w-full px-3 py-2 text-left text-sm text-red-500 hover:bg-gray-50"
-                >
-                  선택 초기화
-                </button>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* 상태 멀티선택 드롭다운 */}
-      <div className="relative" ref={statusRef}>
-        <button
-          type="button"
-          onClick={() => setStatusOpen((o) => !o)}
-          className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors sm:w-36 ${
-            statuses.length > 0
-              ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500'
-              : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-          }`}
-        >
-          <span className="flex-1 text-left">
-            {statuses.length > 0 ? `상태 (${statuses.length})` : '상태'}
-          </span>
-          <svg
-            className={`h-4 w-4 transition-transform ${statusOpen ? 'rotate-180' : ''}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-
-        {statusOpen && (
-          <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-            {statusOptions.map((opt) => {
-              const checked = statuses.includes(opt.name)
-              return (
-                <label
-                  key={opt.name}
-                  className="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50"
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleStatus(opt.name)}
-                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  {opt.color && (
-                    <span
-                      className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                      style={{ backgroundColor: opt.color }}
+          {typeOpen && (
+            <div className="absolute right-0 z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+              {typeOptions.map((opt) => {
+                const checked = types.includes(opt)
+                return (
+                  <label
+                    key={opt}
+                    className="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleType(opt)}
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
-                  )}
-                  <span className="text-sm text-gray-700">{opt.name}</span>
-                </label>
-              )
-            })}
-            {statuses.length > 0 && (
-              <>
-                <div className="my-1 border-t border-gray-100" />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStatuses([])
-                    apply(search, sido, [], types)
-                    setStatusOpen(false)
-                  }}
-                  className="w-full px-3 py-2 text-left text-sm text-red-500 hover:bg-gray-50"
-                >
-                  선택 초기화
-                </button>
-              </>
-            )}
-          </div>
-        )}
+                    <span className="text-sm text-gray-700">{opt}</span>
+                  </label>
+                )
+              })}
+              {types.length > 0 && (
+                <>
+                  <div className="my-1 border-t border-gray-100" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTypes([])
+                      apply(search, sido, statuses, [])
+                      setTypeOpen(false)
+                    }}
+                    className="w-full px-3 py-2 text-left text-sm text-red-500 hover:bg-gray-50"
+                  >
+                    선택 초기화
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 상태 멀티선택 드롭다운 */}
+        <div className="relative col-span-2 sm:col-span-1" ref={statusRef}>
+          <button
+            type="button"
+            onClick={() => setStatusOpen((o) => !o)}
+            className={`flex w-full items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors sm:w-36 ${
+              statuses.length > 0
+                ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500'
+                : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <span className="flex-1 text-left">
+              {statuses.length > 0 ? `상태 (${statuses.length})` : '상태'}
+            </span>
+            <svg
+              className={`h-4 w-4 transition-transform ${statusOpen ? 'rotate-180' : ''}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {statusOpen && (
+            <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+              {statusOptions.map((opt) => {
+                const checked = statuses.includes(opt.name)
+                return (
+                  <label
+                    key={opt.name}
+                    className="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleStatus(opt.name)}
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    {opt.color && (
+                      <span
+                        className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                        style={{ backgroundColor: opt.color }}
+                      />
+                    )}
+                    <span className="text-sm text-gray-700">{opt.name}</span>
+                  </label>
+                )
+              })}
+              {statuses.length > 0 && (
+                <>
+                  <div className="my-1 border-t border-gray-100" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStatuses([])
+                      apply(search, sido, [], types)
+                      setStatusOpen(false)
+                    }}
+                    className="w-full px-3 py-2 text-left text-sm text-red-500 hover:bg-gray-50"
+                  >
+                    선택 초기화
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

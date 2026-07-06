@@ -18,6 +18,7 @@ import {
 import MovePageModal from './MovePageModal'
 import NotificationBell from './NotificationBell'
 import { useToast } from './ui/Toast'
+import { useOverlayDismiss } from '@/app/components/useOverlayDismiss'
 
 export type SidebarPage = {
   id: string
@@ -109,6 +110,14 @@ export default function WikiSidebar({ pages }: Props) {
       : null
 
   const byId = useMemo(() => new Map(livePages.map((p) => [p.id, p])), [livePages])
+
+  // ── 모바일 오프캔버스 드로어 (lg 미만 전용) ─────────────────
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  useEffect(() => {
+    setDrawerOpen(false)
+  }, [pathname])
+  // 열림 동안 배경 스크롤 잠금 + ESC 닫기 (글로벌 네비 드로어와 동일 동작)
+  useOverlayDismiss(drawerOpen, () => setDrawerOpen(false))
 
   // ── 사이드바 폭 접기 (localStorage 유지) ───────────────────
   const [collapsed, setCollapsed] = useState(false)
@@ -242,36 +251,10 @@ export default function WikiSidebar({ pages }: Props) {
     }
   }
 
-  if (collapsed) {
-    return (
-      <aside className="flex w-11 shrink-0 flex-col items-center gap-2 border-r border-[var(--wiki-border)] bg-[var(--wiki-bg-subtle)] py-3">
-        <button
-          onClick={toggleCollapsed}
-          title="사이드바 펼치기"
-          className="rounded-[6px] px-2 py-1 text-[var(--wiki-text-soft)] transition hover:bg-[var(--wiki-hover)]"
-        >
-          »
-        </button>
-        <Link
-          href="/wiki/new"
-          title="새 페이지"
-          className="rounded-[6px] px-2 py-1 text-[var(--wiki-accent)] transition hover:bg-[var(--wiki-accent-soft)]"
-        >
-          ＋
-        </Link>
-        <Link
-          href="/wiki/search"
-          title="검색"
-          className="rounded-[6px] px-2 py-1 text-[var(--wiki-text-soft)] transition hover:bg-[var(--wiki-hover)]"
-        >
-          🔍
-        </Link>
-      </aside>
-    )
-  }
-
-  return (
-    <aside className="wiki-scroll flex w-72 shrink-0 flex-col overflow-y-auto border-r border-[var(--wiki-border)] bg-[var(--wiki-bg-subtle)]">
+  // ── 사이드바 내부 콘텐츠 (데스크탑 aside · 모바일 드로어 공용) ──
+  // variant에 따라 우측 상단 버튼만 분기: desktop=접기(«), drawer=닫기(✕)
+  const sidebarBody = (variant: 'desktop' | 'drawer') => (
+    <>
       <div className="sticky top-0 z-10 bg-[var(--wiki-bg-subtle)] px-3 pt-3">
         <div className="mb-2 flex items-center justify-between">
           <Link
@@ -288,13 +271,23 @@ export default function WikiSidebar({ pages }: Props) {
             >
               + 새 페이지
             </Link>
-            <button
-              onClick={toggleCollapsed}
-              title="사이드바 접기"
-              className="rounded-[6px] px-1.5 py-1 text-[var(--wiki-text-muted)] transition hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]"
-            >
-              «
-            </button>
+            {variant === 'desktop' ? (
+              <button
+                onClick={toggleCollapsed}
+                title="사이드바 접기"
+                className="rounded-[6px] px-1.5 py-1 text-[var(--wiki-text-muted)] transition hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]"
+              >
+                «
+              </button>
+            ) : (
+              <button
+                onClick={() => setDrawerOpen(false)}
+                aria-label="페이지 목록 닫기"
+                className="flex h-8 w-8 items-center justify-center rounded-[6px] text-[var(--wiki-text-muted)] transition hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]"
+              >
+                ✕
+              </button>
+            )}
           </div>
         </div>
 
@@ -358,6 +351,75 @@ export default function WikiSidebar({ pages }: Props) {
           </DndContext>
         )}
       </div>
+    </>
+  )
+
+  return (
+    <>
+      {/* ── 데스크탑 사이드바 (lg 이상) ───────────────────────── */}
+      {collapsed ? (
+        <aside className="hidden w-11 shrink-0 flex-col items-center gap-2 border-r border-[var(--wiki-border)] bg-[var(--wiki-bg-subtle)] py-3 lg:flex">
+          <button
+            onClick={toggleCollapsed}
+            title="사이드바 펼치기"
+            className="rounded-[6px] px-2 py-1 text-[var(--wiki-text-soft)] transition hover:bg-[var(--wiki-hover)]"
+          >
+            »
+          </button>
+          <Link
+            href="/wiki/new"
+            title="새 페이지"
+            className="rounded-[6px] px-2 py-1 text-[var(--wiki-accent)] transition hover:bg-[var(--wiki-accent-soft)]"
+          >
+            ＋
+          </Link>
+          <Link
+            href="/wiki/search"
+            title="검색"
+            className="rounded-[6px] px-2 py-1 text-[var(--wiki-text-soft)] transition hover:bg-[var(--wiki-hover)]"
+          >
+            🔍
+          </Link>
+        </aside>
+      ) : (
+        <aside className="wiki-scroll hidden w-72 shrink-0 flex-col overflow-y-auto border-r border-[var(--wiki-border)] bg-[var(--wiki-bg-subtle)] lg:flex">
+          {sidebarBody('desktop')}
+        </aside>
+      )}
+
+      {/* ── 모바일 드로어 트리거 (lg 미만) ─────────────────────── */}
+      <button
+        onClick={() => setDrawerOpen(true)}
+        aria-label="페이지 목록"
+        className="fixed bottom-4 left-4 z-40 flex h-11 w-11 items-center justify-center rounded-full border border-[var(--wiki-border)] bg-[var(--wiki-bg)] text-[var(--wiki-text-soft)] shadow-lg transition hover:bg-[var(--wiki-hover)] lg:hidden"
+      >
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <path d="M3 4.5h14M3 10h14M3 15.5h14" />
+        </svg>
+      </button>
+
+      {/* ── 모바일 오프캔버스 드로어 ──────────────────────────── */}
+      {drawerOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-foreground/40 lg:hidden"
+            onClick={() => setDrawerOpen(false)}
+            aria-hidden="true"
+          />
+          <aside className="wiki-scroll fixed inset-y-0 left-0 z-50 flex w-80 max-w-[85vw] flex-col overflow-y-auto border-r border-[var(--wiki-border)] bg-[var(--wiki-bg-subtle)] shadow-[var(--wiki-shadow-lg)] lg:hidden">
+            {sidebarBody('drawer')}
+          </aside>
+        </>
+      )}
 
       {moveTarget && (
         <MovePageModal
@@ -367,7 +429,7 @@ export default function WikiSidebar({ pages }: Props) {
           onMoved={() => router.refresh()}
         />
       )}
-    </aside>
+    </>
   )
 }
 
@@ -506,7 +568,8 @@ function TreeRow({
           <span className="truncate">{node.title || '제목 없음'}</span>
         </Link>
 
-        <div className="ml-1 hidden items-center gap-0.5 group-hover:flex">
+        {/* 터치(lg 미만)에선 항상 노출, 데스크탑은 hover 노출 */}
+        <div className="ml-1 flex items-center gap-0.5 lg:hidden lg:group-hover:flex">
           <button
             onClick={() => move('up')}
             disabled={busy}

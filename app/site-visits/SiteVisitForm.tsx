@@ -443,12 +443,12 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
           <div className="divide-y divide-gray-100">
 
             {/* 병원명 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">
                 병원명 <span className="ml-1 text-red-500">*</span>
               </label>
-              <div className="col-span-2">
-                <div className="flex items-center gap-2">
+              <div className="sm:col-span-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <div className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 bg-gray-50 min-h-[38px]">
                     {hospital ? (
                       <span>
@@ -480,9 +480,9 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
             </div>
 
             {/* 대웅 담당자 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">대웅 담당자</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <select value={form.daewoongUserId} onChange={(e) => set('daewoongUserId', e.target.value)} className={selectClass}>
                   <option value="">선택 없음</option>
                   {daewoongUsers.map((u) => (
@@ -493,9 +493,9 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
             </div>
 
             {/* 담당자 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">담당자</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <div className="flex flex-wrap items-center gap-2">
                   {assignees.length === 0 ? (
                     <span className="text-sm text-gray-400">-</span>
@@ -527,9 +527,9 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
             </div>
 
             {/* 상태 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">상태</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <select value={form.statusId} onChange={(e) => set('statusId', e.target.value)} className={selectClass}>
                   <option value="">선택 없음</option>
                   {statuses.map((s) => (
@@ -540,33 +540,33 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
             </div>
 
             {/* 요청일 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">요청일</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <input type="date" value={form.requestDate} onChange={(e) => set('requestDate', e.target.value)} className={inputClass} />
               </div>
             </div>
 
             {/* 답사 날짜 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">답사 날짜</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <input type="date" value={form.visitDate} onChange={(e) => set('visitDate', e.target.value)} className={inputClass} />
               </div>
             </div>
 
             {/* 회신 날짜 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">회신 날짜</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <input type="date" value={form.replyDate} onChange={(e) => set('replyDate', e.target.value)} className={inputClass} />
               </div>
             </div>
 
             {/* 설치계획서 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
-              <label className="flex items-start pt-1 text-sm font-medium text-gray-700">설치계획서</label>
-              <div className="col-span-2">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
+              <label className="flex items-start sm:pt-1 text-sm font-medium text-gray-700">설치계획서</label>
+              <div className="sm:col-span-2">
                 <MultiFileField
                   label="설치계획서"
                   fileCategory="INSTALL_PLAN"
@@ -590,9 +590,9 @@ export default function SiteVisitForm({ initialData, mode }: Props) {
             </div>
 
             {/* 도면 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
-              <label className="flex items-start pt-1 text-sm font-medium text-gray-700">도면</label>
-              <div className="col-span-2">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
+              <label className="flex items-start sm:pt-1 text-sm font-medium text-gray-700">도면</label>
+              <div className="sm:col-span-2">
                 <MultiFileField
                   label="도면"
                   fileCategory="FLOOR_PLAN"

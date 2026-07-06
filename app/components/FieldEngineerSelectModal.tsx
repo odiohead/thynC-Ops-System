@@ -131,6 +131,7 @@ export default function FieldEngineerSelectModal({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
+        padding: '16px',
       }}
       onClick={onClose}
     >
@@ -139,7 +140,7 @@ export default function FieldEngineerSelectModal({
           position: 'relative',
           width: '100%',
           maxWidth: '640px',
-          maxHeight: '85vh',
+          maxHeight: '85dvh',
           display: 'flex',
           flexDirection: 'column',
         }}

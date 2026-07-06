@@ -140,7 +140,71 @@ function DashboardTable({
   }
 
   return (
-    <div className="overflow-x-auto">
+    <>
+    {/* 모바일 카드 리스트 */}
+    <div className="md:hidden divide-y divide-gray-100">
+      {projects.map((p) => (
+        <div key={p.projectCode} className="p-4">
+          <div className="flex items-start justify-between gap-2">
+            <Link
+              href={`/projects/${p.projectCode}`}
+              className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900 hover:text-blue-600 hover:underline"
+            >
+              {hospitalName(p.hospital)}
+            </Link>
+            <span className="shrink-0">
+              {p.buildStatus
+                ? <StatusBadge label={p.buildStatus.label} color={p.buildStatus.color} />
+                : <span className="text-xs text-gray-400">-</span>}
+            </span>
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span className="tabular-nums">{fmt(p.startDate)} ~ {fmt(p.endDateExpected, '미정')}</span>
+            <span>담당 {builderName(p)}</span>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            {editingCode === p.projectCode ? (
+              <>
+                <input
+                  type="text"
+                  value={editingRemark}
+                  onChange={(e) => setEditingRemark(e.target.value)}
+                  maxLength={200}
+                  autoFocus
+                  className="w-full min-w-0 flex-1 rounded border border-blue-400 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveRemark(p.projectCode)
+                    if (e.key === 'Escape') setEditingCode(null)
+                  }}
+                />
+                <button
+                  onClick={() => saveRemark(p.projectCode)}
+                  disabled={saving}
+                  className="shrink-0 rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {saving ? '...' : '저장'}
+                </button>
+              </>
+            ) : (
+              <>
+                <span className={`min-w-0 flex-1 truncate text-xs ${p.remark ? 'text-gray-700' : 'text-gray-400'}`}>
+                  {p.remark || '비고 없음'}
+                </span>
+                <button
+                  onClick={() => startEdit(p)}
+                  className="shrink-0 rounded border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-50"
+                >
+                  수정
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+
+    {/* 데스크톱 테이블 */}
+    <div className="hidden md:block overflow-x-auto">
       <table className="w-full table-fixed divide-y divide-gray-100">
         <colgroup>
           <col className="w-[180px]" />  {/* 병원명 */}
@@ -228,6 +292,7 @@ function DashboardTable({
         </tbody>
       </table>
     </div>
+    </>
   )
 }
 
@@ -298,7 +363,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-6xl px-4 py-5 sm:px-6 sm:py-8 lg:px-8">
 
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900">대시보드</h1>
@@ -309,7 +374,7 @@ export default function Home() {
 
           {/* thynC 현황 */}
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-200 px-6 py-4">
+            <div className="border-b border-gray-200 px-4 py-4 sm:px-6">
               <h2 className="text-sm font-semibold text-gray-700">thynC 현황</h2>
             </div>
             {statsLoading ? (
@@ -359,9 +424,9 @@ export default function Home() {
 
           {/* 월별 누적 사용 현황 */}
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-4 py-4 sm:px-6">
               <h2 className="text-sm font-semibold text-gray-700">월별 누적 사용 현황</h2>
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                 {latestEntry && (
                   <div className="flex gap-4 text-xs text-gray-500">
                     <span>누적 병원 <strong className="text-blue-600">{latestEntry.totalHospitals}개</strong></span>
@@ -383,7 +448,7 @@ export default function Home() {
             ) : chartData.length === 0 ? (
               <p className="px-6 py-10 text-center text-sm text-gray-400">구축완료된 프로젝트 데이터가 없습니다.</p>
             ) : (
-              <div className="px-6 py-6 space-y-8">
+              <div className="p-4 sm:p-6 space-y-8">
 
                 {/* 누적 추이 라인 차트 */}
                 <div>
@@ -536,7 +601,7 @@ export default function Home() {
 
           {/* 이번주 구축현황 */}
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-4 py-4 sm:px-6">
               <h2 className="text-sm font-semibold text-gray-700">이번주 thynC 구축 현황</h2>
               {thisWeekProjects.length > 0 && (
                 <span className="text-xs text-gray-400">{buildStatusSummary(thisWeekProjects)}</span>
@@ -551,7 +616,7 @@ export default function Home() {
 
           {/* 차주 구축현황 */}
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-4 py-4 sm:px-6">
               <h2 className="text-sm font-semibold text-gray-700">차주 thynC 구축 예정</h2>
               {nextWeekProjects.length > 0 && (
                 <span className="text-xs text-gray-400">{nextWeekProjects.length}건 신규구축</span>

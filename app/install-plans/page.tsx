@@ -97,7 +97,7 @@ export default function InstallPlansPage() {
 
   const thClass = 'whitespace-nowrap px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:bg-gray-100 select-none'
   const thStaticClass = 'whitespace-nowrap px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500'
-  const selectClass = 'rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none bg-white'
+  const selectClass = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none bg-white sm:w-auto'
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -147,7 +147,7 @@ export default function InstallPlansPage() {
               검색
             </button>
           </form>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
             <select value={writeStatusFilter} onChange={(e) => setWriteStatusFilter(e.target.value)} className={selectClass}>
               <option value="">작성완료여부 전체</option>
               <option value="-">-</option>
@@ -160,15 +160,52 @@ export default function InstallPlansPage() {
               <option value="미완료">미완료</option>
               <option value="완료">완료</option>
             </select>
-            <select value={authorIdFilter} onChange={(e) => setAuthorIdFilter(e.target.value)} className={selectClass}>
+            <select value={authorIdFilter} onChange={(e) => setAuthorIdFilter(e.target.value)} className={`${selectClass} col-span-2 sm:col-span-1`}>
               <option value="">작성자 전체</option>
               {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
           </div>
         </div>
 
-        {/* 테이블 */}
-        <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        {/* 모바일 카드 리스트 */}
+        <div className="mt-4 space-y-2.5 md:hidden">
+          {plans.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card py-16 text-center text-sm text-muted-foreground">
+              등록된 설치계획(가안)이 없습니다.
+            </div>
+          ) : (
+            plans.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => router.push(`/install-plans/${p.id}`)}
+                className="block w-full rounded-xl border border-border bg-card p-4 text-left shadow-xs transition active:scale-[0.99]"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-sm font-semibold text-foreground">
+                    {p.hospital
+                      ? (p.hospital.hospitalName || p.hospital.hiraHospitalName)
+                      : '-'}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+                    회신 <StatusBadge value={p.replyStatus} />
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span>코드 <span className="font-mono text-foreground">{p.planCode ?? '-'}</span></span>
+                  <span className="flex items-center gap-1">작성 <StatusBadge value={p.writeStatus} /></span>
+                  <span>작성자 <span className="text-foreground">{p.assignees?.length > 0 ? p.assignees.map((a) => a.user.name).join(', ') : '-'}</span></span>
+                  <span>요청일 <span className="text-foreground">{fmt(p.requestDate)}</span></span>
+                  <span>회신일 <span className="text-foreground">{fmt(p.replyDate)}</span></span>
+                  <span>등록일 <span className="text-foreground">{fmt(p.createdAt)}</span></span>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+
+        {/* 테이블 (데스크탑) */}
+        <div className="mt-4 hidden overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm md:block">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">

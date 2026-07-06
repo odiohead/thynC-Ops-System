@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
-import { verifyToken } from '@/lib/auth'
+import { verifyToken, isAdminOrAbove } from '@/lib/auth'
 import StatusBadge from '@/app/components/StatusBadge'
 
 export const dynamic = 'force-dynamic'
@@ -11,6 +11,8 @@ import ExportToDriveButton from './_components/ExportToDriveButton'
 import ImportButton from './_components/ImportButton'
 
 const PAGE_SIZE = 20
+
+const fmtDate = (d: Date | null) => (d ? new Date(d).toISOString().slice(0, 10) : '-')
 
 interface PageProps {
   searchParams: { [key: string]: string | string[] | undefined }
@@ -24,7 +26,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
   const cookieStore = cookies()
   const token = cookieStore.get('auth-token')?.value
   const user = token ? await verifyToken(token) : null
-  const isAdmin = user?.role === 'ADMIN'
+  const isAdmin = user ? isAdminOrAbove(user.role) : false
 
   const page = Math.max(1, parseInt((searchParams.page as string) ?? '1'))
   const search = (searchParams.search as string) ?? ''
@@ -133,8 +135,42 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
           initialTypes={typeFilter}
         />
 
-        {/* 테이블 */}
-        <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        {/* 모바일 카드 리스트 */}
+        <div className="mt-4 space-y-2.5 md:hidden">
+          {hospitals.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card py-16 text-center text-sm text-muted-foreground">
+              검색 결과가 없습니다.
+            </div>
+          ) : (
+            hospitals.map((h) => (
+              <Link
+                key={h.id}
+                href={`/hospitals/${h.hospitalCode}`}
+                className="block w-full rounded-xl border border-border bg-card p-4 text-left shadow-xs transition active:scale-[0.99]"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-sm font-semibold text-foreground">
+                    {h.hospitalName}
+                  </span>
+                  <span className="shrink-0">
+                    <StatusBadge label={h.status} color={statusColorMap.get(h.status)} />
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span>코드 <span className="font-mono text-foreground">{h.hospitalCode}</span></span>
+                  {h.type && (
+                    <span>병원종 <span className="text-foreground">{h.type}</span></span>
+                  )}
+                  <span>계약일 <span className="text-foreground">{fmtDate(h.contractDate)}</span></span>
+                  <span className="w-full truncate">주소 <span className="text-foreground">{h.address ?? '-'}</span></span>
+                </div>
+              </Link>
+            ))
+          )}
+        </div>
+
+        {/* 테이블 (데스크탑) */}
+        <div className="mt-4 hidden overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm md:block">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -181,7 +217,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
                           <StatusBadge label={h.status} color={statusColorMap.get(h.status)} />
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">
-                          {h.contractDate ? new Date(h.contractDate).toISOString().slice(0, 10) : '-'}
+                          {fmtDate(h.contractDate)}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-sm">
                           {h.meta?.driveProjectFolderId ? (

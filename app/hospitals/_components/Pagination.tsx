@@ -32,7 +32,7 @@ export default function Pagination({ page, totalPages, search, sido, statuses, t
   const activeLink = 'rounded px-3 py-1.5 text-sm font-semibold bg-blue-600 text-white'
 
   return (
-    <div className="mt-6 flex items-center justify-center gap-1">
+    <div className="mt-6 flex flex-wrap items-center justify-center gap-1">
       {page > 1 && (
         <Link href={buildHref(page - 1, search, sido, statuses, types)} className={linkBase}>
           ← 이전

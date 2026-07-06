@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { getMenuIcon } from './NavIcons'
 import ThemeToggle from './theme/ThemeToggle'
+import { useOverlayDismiss } from './useOverlayDismiss'
 
 /* ── 구조적 아이콘 (메뉴 아이콘이 아닌 UI용) ── */
 
@@ -140,6 +141,9 @@ export default function Navigation() {
     setMobileOpen(false)
   }, [pathname])
 
+  // 드로어 열림: 배경 스크롤 잠금 + ESC 닫기
+  useOverlayDismiss(mobileOpen, () => setMobileOpen(false))
+
   useEffect(() => {
     if (pathname.startsWith('/settings')) setSettingsOpen(true)
   }, [pathname])
@@ -152,7 +156,7 @@ export default function Navigation() {
   }
 
   const navItemClass = (active: boolean) =>
-    `flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+    `flex items-center gap-3 rounded-md px-3 py-2.5 lg:py-2 text-sm transition-colors ${
       active
         ? 'bg-primary-subtle text-primary-subtle-foreground font-medium'
         : 'text-muted-foreground hover:bg-accent hover:text-foreground'
@@ -212,7 +216,7 @@ export default function Navigation() {
                 <button
                   type="button"
                   onClick={() => setSettingsOpen((v) => !v)}
-                  className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 lg:py-2 text-sm transition-colors ${
                     pathname.startsWith('/settings')
                       ? 'text-foreground font-medium'
                       : 'text-muted-foreground hover:bg-accent hover:text-foreground'
@@ -248,7 +252,7 @@ export default function Navigation() {
       </nav>
 
       {/* 하단 사용자 정보 + 로그아웃 */}
-      <div className="shrink-0 border-t border-border p-3">
+      <div className="shrink-0 border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <div className="mb-2 flex items-center justify-between gap-2 px-3 py-1">
           {userName ? (
             <div className="min-w-0">
@@ -263,7 +267,7 @@ export default function Navigation() {
         <button
           type="button"
           onClick={handleLogout}
-          className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 lg:py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         >
           <LogoutIcon />
           로그아웃
@@ -280,41 +284,49 @@ export default function Navigation() {
       </aside>
 
       {/* 모바일 상단 헤더 */}
-      <header className="fixed left-0 right-0 top-0 z-40 flex h-14 items-center justify-between border-b border-border bg-card px-4 lg:hidden">
-        <Link href="/" className="text-base font-bold tracking-tight text-foreground hover:text-primary transition-colors">{process.env.NEXT_PUBLIC_APP_NAME}</Link>
+      <header className="fixed left-0 right-0 top-0 z-40 flex h-14 items-center justify-between border-b border-border bg-card pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] lg:hidden">
+        <Link href="/" className="px-1 py-2 text-base font-bold tracking-tight text-foreground hover:text-primary transition-colors">{process.env.NEXT_PUBLIC_APP_NAME}</Link>
         <div className="flex items-center gap-1">
           <ThemeToggle />
           <button
             type="button"
             onClick={() => setMobileOpen(true)}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label="메뉴 열기"
+            className="-mr-1 rounded-md p-2.5 text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             <MenuIcon />
           </button>
         </div>
       </header>
 
-      {/* 모바일 드로어 */}
-      {mobileOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-foreground/40 lg:hidden"
+      {/* 모바일 드로어 — 항상 마운트해 두고 transform/opacity 트랜지션으로 개폐 */}
+      <div
+        aria-hidden="true"
+        onClick={() => setMobileOpen(false)}
+        className={`fixed inset-0 z-40 bg-foreground/40 backdrop-blur-[2px] transition-opacity duration-200 lg:hidden ${
+          mobileOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+      />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label="메뉴"
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 max-w-[85vw] flex-col border-r border-border bg-card shadow-xl transition-[transform,visibility] duration-200 ease-out lg:hidden ${
+          mobileOpen ? 'visible translate-x-0' : 'invisible -translate-x-full'
+        }`}
+      >
+        <div className="absolute right-2 top-2">
+          <button
+            type="button"
             onClick={() => setMobileOpen(false)}
-          />
-          <aside className="fixed inset-y-0 left-0 z-50 flex w-60 flex-col border-r border-border bg-card lg:hidden">
-            <div className="absolute right-3 top-3">
-              <button
-                type="button"
-                onClick={() => setMobileOpen(false)}
-                className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-            {sidebarContent}
-          </aside>
-        </>
-      )}
+            aria-label="메뉴 닫기"
+            className="rounded-md p-2.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <CloseIcon />
+          </button>
+        </div>
+        {sidebarContent}
+      </aside>
     </>
   )
 }

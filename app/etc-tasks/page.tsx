@@ -129,14 +129,15 @@ export default function EtcTasksPage() {
         </div>
 
         {/* 필터 */}
-        <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
           <input
             type="text"
             placeholder="제목 검색..."
             value={filterSearch}
             onChange={(e) => setFilterSearch(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:w-auto"
           />
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
           <select
             value={filterStatusId}
             onChange={(e) => setFilterStatusId(e.target.value)}
@@ -157,9 +158,43 @@ export default function EtcTasksPage() {
               <option key={p} value={p}>{p}</option>
             ))}
           </select>
+          </div>
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        {/* 모바일 카드 리스트 */}
+        <div className="space-y-2.5 md:hidden">
+          {loading ? (
+            <div className="rounded-xl border border-border bg-card py-12 text-center text-sm text-muted-foreground">불러오는 중...</div>
+          ) : etcTasks.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card py-12 text-center text-sm text-muted-foreground">등록된 기타업무가 없습니다.</div>
+          ) : (
+            etcTasks.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => router.push(`/etc-tasks/${t.id}`)}
+                className="block w-full rounded-xl border border-border bg-card p-4 text-left shadow-xs transition active:scale-[0.99]"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="min-w-0 truncate text-sm font-semibold text-foreground">{t.title}</span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    <PriorityBadge priority={t.priority} />
+                    <StatusBadge status={t.status} />
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span>접수일 <span className="text-foreground">{formatDate(t.reportedAt)}</span></span>
+                  <span>담당자 <span className="text-foreground">{t.assignees?.length > 0 ? t.assignees.map((a) => a.user.name).join(', ') : '-'}</span></span>
+                  <span>병원 <span className="text-foreground">{formatHospitals(t.hospitals)}</span></span>
+                  <span>기간 <span className="text-foreground">{formatVisits(t.visits)}</span></span>
+                  <span>완료일 <span className="text-foreground">{formatDate(t.resolvedAt)}</span></span>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+
+        <div className="hidden overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm md:block">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">

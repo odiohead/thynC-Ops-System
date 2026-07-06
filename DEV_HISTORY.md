@@ -4,6 +4,25 @@
 
 ---
 
+## 2026-07-05 | 모바일 최적화 전면 작업 — 반응형 UI/UX (전 화면)
+
+- **배경**: 데스크탑 기준으로만 발전해 온 화면들을 모바일에서도 최적 사용 가능하도록 전면 개편. 사전 실태 진단 결과 — 목록 8종 전부 raw 테이블(가로 스크롤 강제), MaintenanceForm 등 폼 `grid-cols-3` 하드코딩(모바일 붕괴), 위키 사이드바 고정 288px, 간트차트 min-width 부재, safe-area·터치 설정 전무
+- **전역 토대**: `layout.tsx` viewport(`viewportFit: cover`)+테마컬러+appleWebApp, iOS 입력 포커스 자동확대 방지(coarse pointer에서 폼 컨트롤 16px), 탭 하이라이트 제거, `scrollbar-none` 유틸리티. safe-area 패딩은 커스텀 클래스 대신 **Tailwind 임의값**(`pb-[max(1rem,env(safe-area-inset-bottom))]`) 표준 — 다른 p-* 유틸리티와의 우선순위가 결정적이도록
+- **네비게이션**: 모바일 드로어 슬라이드 애니메이션(항상 마운트 + transform/visibility 트랜지션), 열림 중 배경 스크롤 잠금+ESC 닫기, 터치 타깃 확대(메뉴 항목 py-2.5, 햄버거 p-2.5), 홈 인디케이터·노치 safe-area
+- **공용 오버레이 훅 신설** `app/components/useOverlayDismiss.ts`: 스크롤 잠금+ESC 닫기 — Navigation 드로어·ui/Modal·위키 드로어에 공통 적용 (동작 통일)
+- **ui/Modal**: 모바일에서 **바텀시트**(하단 정렬, 그랩 핸들, rounded-t-2xl) / sm 이상 중앙 다이얼로그, `max-h-[90dvh]` 내부 스크롤
+- **목록 모바일 카드화 (테이블 병행)**: 병원·프로젝트·설치계획·답사·유지보수·기타업무·업무현황·계정 8종 + 메인 대시보드 공사현황 — 기존 테이블은 `hidden md:block`, md 미만에서 핵심 필드 4~6개 카드 리스트(`rounded-xl border bg-card`, 상태/우선순위 뱃지·담당자 "외 N명" 규칙 재사용, 행 클릭과 동일 이동). 필터 바는 모바일 세로 스택(검색 w-full + select 2컬럼 그리드), 답사 필터 flex-wrap 누락 버그 수정. tasks 카드는 완료 토글 포함(div role=button + stopPropagation), 메인 대시보드 카드는 비고 인라인 수정 동작 유지
+- **폼**: MaintenanceForm·SiteVisitForm·EtcTaskForm의 `grid-cols-3` → `grid-cols-1 sm:grid-cols-3`(모바일 라벨 위/입력 풀폭), FieldEngineer·Daewoong 선택모달 오버레이 p-4+85dvh, MaintenanceVisitPicker 320px 화면 이탈 보정, users 자체 모달 3종 오버플로 보정
+- **위키**: lg 미만 사이드바 숨김 + **오프캔버스 드로어**(플로팅 트리거 44px, 백드롭, 라우트 변경 자동 닫힘, 기존 트리·DnD·알림벨 콘텐츠 공유 렌더), 트리 행 액션 버튼(↑↓📂+) 터치에선 상시 노출, layout 높이 `100dvh-3.5rem`(모바일 헤더) 보정
+- **간트차트**: `h-screen`+모바일 헤더 pt-14 이중 적용으로 하단 56px 잘리던 문제 보정(`h-[calc(100dvh-3.5rem)] lg:h-screen`), min-width 가로 스크롤은 기존 구조 확인(정상)
+- **AI 어시스턴트**: 상담 정리 패널 모바일 풀스크린 오버레이 전환(닫기 버튼, lucide X), 채팅 높이 dvh 보정, 입력영역 safe-area
+- **셀프 코드리뷰 반영**: hospitals 목록 `role === 'ADMIN'` 하드코딩 → `isAdminOrAbove` (SUPER_ADMIN이 Excel 가져오기·Drive 내보내기 버튼 못 보던 실버그), safe-area 클래스 덮어쓰기 함정 제거, 필터 래퍼 패턴 통일(sm:flex), 미사용 xs 브레이크포인트·pt-safe 제거
+- **검증**: `tsc --noEmit` 0오류. 빌드·PM2 재시작은 사용자 요청 시 진행 예정 (규칙 준수)
+- **남은 백로그**: 모바일 카드 셸·빈 상태 플레이스홀더가 8개 페이지에 중복 — 공유 `MobileListCard`/`EmptyState` 컴포넌트로 통합 여지. users 카드/테이블 액션 버튼 중복 → in-file 컴포넌트 추출 여지
+- 영향 파일: `app/layout.tsx`, `app/globals.css`, `tailwind.config.ts`, `app/components/{Navigation,useOverlayDismiss(신규),DaewoongSelectModal,FieldEngineerSelectModal}.tsx`, `app/components/ui/Modal.tsx`, `app/{page,hospitals/page,projects/page,install-plans/page,site-visits/page,maintenances/page,etc-tasks/page,tasks/page,users/page,ai-assistant/page,projects/calendar/page}.tsx`, `app/hospitals/_components/{HospitalFilters,Pagination}.tsx`, `app/projects/_components/ProjectFilters.tsx`, `app/{maintenances/MaintenanceForm,maintenances/MaintenanceVisitPicker,site-visits/SiteVisitForm,etc-tasks/EtcTaskForm}.tsx`, `app/wiki/{layout,page}.tsx`, `app/wiki/components/WikiSidebar.tsx`
+
+---
+
 ## 2026-07-05 | 월보드 차트 깜빡임 수정 + 패널명 변경
 
 - "월별 누적 도입 추이" → "월별 누적 도입 현황" 명칭 변경

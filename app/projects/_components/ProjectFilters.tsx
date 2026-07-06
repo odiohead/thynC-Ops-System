@@ -22,11 +22,13 @@ function MultiSelectDropdown({
   options,
   selectedIds,
   onChange,
+  className = '',
 }: {
   label: string
   options: { id: string; name: string }[]
   selectedIds: string[]
   onChange: (ids: string[]) => void
+  className?: string
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -57,23 +59,23 @@ function MultiSelectDropdown({
       : `${selectedNames[0]} 외 ${selectedNames.length - 1}건`
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className={`relative ${className}`}>
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="flex w-full items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:w-auto"
       >
-        <span className={selectedIds.length > 0 ? 'text-blue-600 font-medium' : 'text-gray-700'}>
+        <span className={`min-w-0 flex-1 truncate text-left ${selectedIds.length > 0 ? 'text-blue-600 font-medium' : 'text-gray-700'}`}>
           {displayText}
         </span>
         {selectedIds.length > 0 ? (
           <X
             size={14}
-            className="text-gray-400 hover:text-gray-600"
+            className="shrink-0 text-gray-400 hover:text-gray-600"
             onClick={(e) => { e.stopPropagation(); onChange([]) }}
           />
         ) : (
-          <ChevronDown size={14} className="text-gray-400" />
+          <ChevronDown size={14} className="shrink-0 text-gray-400" />
         )}
       </button>
 
@@ -180,7 +182,7 @@ export default function ProjectFilters({
     router.push(`${pathname}?${buildParams({ [key]: value })}`)
   }
 
-  const selectClass = 'rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white'
+  const selectClass = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white sm:w-auto'
 
   return (
     <div className="space-y-2">
@@ -202,7 +204,7 @@ export default function ProjectFilters({
       </form>
 
       {/* 2행: 필터 + 정렬 */}
-      <div className="flex flex-wrap gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
         <MultiSelectDropdown
           label="진행상태"
           options={buildStatuses.map((s) => ({ id: String(s.id), name: s.label }))}
@@ -222,9 +224,10 @@ export default function ProjectFilters({
           options={users.map((u) => ({ id: u.id, name: u.name }))}
           selectedIds={builderIds}
           onChange={(ids) => handleMultiSelect('builderId', ids)}
+          className="col-span-2 sm:col-span-1"
         />
 
-        <div className="ml-auto flex gap-2">
+        <div className="col-span-2 grid grid-cols-2 gap-2 sm:ml-auto sm:flex">
           <select value={orderBy} onChange={(e) => handleSelect('orderBy', e.target.value)} className={selectClass}>
             <option value="contractDate">계약일 기준</option>
             <option value="startDate">구축 시작일 기준</option>

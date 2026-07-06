@@ -383,12 +383,12 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
           <div className="divide-y divide-gray-100">
 
             {/* 병원명 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">
                 병원명 <span className="ml-1 text-red-500">*</span>
               </label>
-              <div className="col-span-2">
-                <div className="flex items-center gap-2">
+              <div className="sm:col-span-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <div className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 bg-gray-50 min-h-[38px]">
                     {hospital ? (
                       <span>
@@ -420,19 +420,19 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
             </div>
 
             {/* 제목 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">
                 제목 <span className="ml-1 text-red-500">*</span>
               </label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <input type="text" value={form.title} onChange={(e) => set('title', e.target.value)} className={inputClass} placeholder="장애/유지보수 제목" />
               </div>
             </div>
 
             {/* 장애유형 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">장애유형</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <select value={form.typeId} onChange={(e) => set('typeId', e.target.value)} className={selectClass}>
                   <option value="">선택 없음</option>
                   {types.map((t) => (
@@ -443,9 +443,9 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
             </div>
 
             {/* 상태 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">상태</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <select value={form.statusId} onChange={(e) => set('statusId', e.target.value)} className={selectClass}>
                   <option value="">선택 없음</option>
                   {statuses.map((s) => (
@@ -456,9 +456,9 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
             </div>
 
             {/* 우선순위 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">우선순위</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <select value={form.priority} onChange={(e) => set('priority', e.target.value)} className={selectClass}>
                   {['긴급', '높음', '보통', '낮음'].map((p) => (
                     <option key={p} value={p}>{p}</option>
@@ -468,17 +468,17 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
             </div>
 
             {/* 신고자 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">신고자 (병원 측)</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <input type="text" value={form.reporterName} onChange={(e) => set('reporterName', e.target.value)} className={inputClass} placeholder="병원 측 담당자명" />
               </div>
             </div>
 
             {/* 원격처리 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">원격처리</label>
-              <div className="col-span-2 flex items-center">
+              <div className="sm:col-span-2 flex items-center">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -492,9 +492,9 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
             </div>
 
             {/* 담당자 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">담당자</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <div className="flex flex-wrap items-center gap-2">
                   {assignees.length === 0 ? (
                     <span className="text-sm text-gray-400">-</span>
@@ -526,33 +526,33 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
             </div>
 
             {/* 접수일 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">접수일</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <input type="date" value={form.reportedAt} onChange={(e) => set('reportedAt', e.target.value)} className={inputClass} />
               </div>
             </div>
 
             {/* 방문일정 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
-              <label className="flex items-start pt-2 text-sm font-medium text-gray-700">방문일정</label>
-              <div className="col-span-2">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
+              <label className="flex items-start sm:pt-2 text-sm font-medium text-gray-700">방문일정</label>
+              <div className="sm:col-span-2">
                 <MaintenanceVisitPicker visits={visits} onChange={setVisits} />
               </div>
             </div>
 
             {/* 완료일 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">완료일</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <input type="date" value={form.resolvedAt} onChange={(e) => set('resolvedAt', e.target.value)} className={inputClass} />
               </div>
             </div>
 
             {/* 증상 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
-              <label className="flex items-start pt-2 text-sm font-medium text-gray-700">증상</label>
-              <div className="col-span-2">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
+              <label className="flex items-start sm:pt-2 text-sm font-medium text-gray-700">증상</label>
+              <div className="sm:col-span-2">
                 <textarea
                   rows={4}
                   value={form.symptoms}
@@ -564,9 +564,9 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
             </div>
 
             {/* 원인 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
-              <label className="flex items-start pt-2 text-sm font-medium text-gray-700">원인</label>
-              <div className="col-span-2">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
+              <label className="flex items-start sm:pt-2 text-sm font-medium text-gray-700">원인</label>
+              <div className="sm:col-span-2">
                 <textarea
                   rows={4}
                   value={form.cause}
@@ -599,9 +599,9 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
 
             {/* 첨부파일 — edit 모드에서만 */}
             {isEditMode && (
-              <div className="grid grid-cols-3 gap-4 px-6 py-4">
-                <label className="flex items-start pt-1 text-sm font-medium text-gray-700">첨부파일</label>
-                <div className="col-span-2">
+              <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
+                <label className="flex items-start sm:pt-1 text-sm font-medium text-gray-700">첨부파일</label>
+                <div className="sm:col-span-2">
                   <MultiFileField
                     label="파일"
                     fileCategory="MAINTENANCE_FILE"

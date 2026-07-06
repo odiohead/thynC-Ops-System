@@ -148,8 +148,9 @@ app/
 │   └── audit-logs/                   # 감사 로그 (SUPER_ADMIN 전용)
 ├── login/                            # 로그인 페이지
 └── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper, StatusBadge 등)
+    ├── useOverlayDismiss.ts          # 오버레이(드로어·모달) 공통 훅 — 배경 스크롤 잠금 + ESC 닫기
     ├── theme/                        # ThemeProvider, ThemeToggle, useChartTheme (다크모드)
-    └── ui/                           # 디자인 프리미티브 (Button, Card, Badge, Input, Table, Modal, PageHeader, EmptyState)
+    └── ui/                           # 디자인 프리미티브 (Button, Card, Badge, Input, Table, Modal(모바일 바텀시트), PageHeader, EmptyState)
 
 lib/
 ├── auth.ts                           # JWT 인증 유틸리티 + 역할 헬퍼
@@ -480,6 +481,15 @@ prisma/
 ---
 
 ## 주요 기능
+
+### 모바일 대응 (반응형 UI/UX)
+- 전 화면 모바일 최적화: viewport `viewport-fit=cover`(노치·홈 인디케이터 safe-area), iOS 입력 포커스 자동확대 방지, 탭 하이라이트 제거
+- **목록 페이지 카드 뷰**: 병원/프로젝트/설치계획/답사/유지보수/기타업무/업무현황/계정 목록이 md(768px) 미만에서 테이블 대신 카드 리스트로 표시 (핵심 필드 + 상태 뱃지, 탭하면 상세 이동). 메인 대시보드 공사현황도 카드 전환(비고 인라인 수정 유지)
+- **네비게이션**: 모바일 상단 헤더 + 슬라이드 드로어 (배경 스크롤 잠금, ESC/백드롭 닫기)
+- **모달**: `ui/Modal`은 모바일에서 바텀시트로 전환. 폼(유지보수·답사·기타업무)은 모바일 1컬럼 스택
+- **위키**: lg 미만에서 사이드바가 오프캔버스 드로어로 전환 (좌하단 플로팅 버튼)
+- **간트차트·차량보드**: min-width 기반 가로 스크롤, 모바일 헤더 높이 보정(dvh)
+- 공통 오버레이 동작은 `useOverlayDismiss` 훅으로 통일
 
 ### 대시보드
 - 이번 주 / 다음 주 공사 예정 프로젝트 현황

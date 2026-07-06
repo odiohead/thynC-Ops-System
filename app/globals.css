@@ -387,6 +387,13 @@
     accent-color: hsl(var(--primary));
   }
 
+  html {
+    /* 모바일: 탭 하이라이트 제거 + 가로모드 폰트 자동 확대 방지 */
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
   body {
     color: hsl(var(--foreground));
     background: hsl(var(--background));
@@ -402,6 +409,27 @@
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+
+  /* safe-area(노치·홈 인디케이터) 패딩은 별도 클래스 대신 Tailwind 임의값을 사용:
+     예) pb-[max(1rem,env(safe-area-inset-bottom))] — 다른 p-* 유틸리티와의 우선순위가 결정적 */
+
+  /* 가로 스크롤 영역(필터 칩·탭 등)에서 스크롤바 숨김 */
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ── 모바일(터치) 최적화 ── */
+@media (hover: none) and (pointer: coarse) {
+  /* iOS Safari가 16px 미만 입력 포커스 시 화면을 자동 확대하는 것을 방지 */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    font-size: max(16px, 1em);
   }
 }
 

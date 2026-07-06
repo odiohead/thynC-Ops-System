@@ -346,19 +346,19 @@ export default function EtcTaskForm({ initialData, mode }: Props) {
           <div className="divide-y divide-gray-100">
 
             {/* 제목 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">
                 제목 <span className="ml-1 text-red-500">*</span>
               </label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <input type="text" value={form.title} onChange={(e) => set('title', e.target.value)} className={inputClass} placeholder="기타업무 제목" />
               </div>
             </div>
 
             {/* 상태 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">상태</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <select value={form.statusId} onChange={(e) => set('statusId', e.target.value)} className={selectClass}>
                   <option value="">선택 없음</option>
                   {statuses.map((s) => (
@@ -369,9 +369,9 @@ export default function EtcTaskForm({ initialData, mode }: Props) {
             </div>
 
             {/* 우선순위 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">우선순위</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <select value={form.priority} onChange={(e) => set('priority', e.target.value)} className={selectClass}>
                   {['긴급', '높음', '보통', '낮음'].map((p) => (
                     <option key={p} value={p}>{p}</option>
@@ -381,9 +381,9 @@ export default function EtcTaskForm({ initialData, mode }: Props) {
             </div>
 
             {/* 담당자 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">담당자</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <div className="flex flex-wrap items-center gap-2">
                   {assignees.length === 0 ? (
                     <span className="text-sm text-gray-400">-</span>
@@ -415,9 +415,9 @@ export default function EtcTaskForm({ initialData, mode }: Props) {
             </div>
 
             {/* 관련 병원 (선택, 다중) */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">관련 병원</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <div className="flex flex-wrap items-center gap-2">
                   {hospitals.length === 0 ? (
                     <span className="text-sm text-gray-400">-</span>
@@ -448,26 +448,26 @@ export default function EtcTaskForm({ initialData, mode }: Props) {
             </div>
 
             {/* 접수일 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">접수일</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <input type="date" value={form.reportedAt} onChange={(e) => set('reportedAt', e.target.value)} className={inputClass} />
               </div>
             </div>
 
             {/* 업무기간 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
-              <label className="flex items-start pt-2 text-sm font-medium text-gray-700">업무기간</label>
-              <div className="col-span-2">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
+              <label className="flex items-start sm:pt-2 text-sm font-medium text-gray-700">업무기간</label>
+              <div className="sm:col-span-2">
                 <MaintenanceVisitPicker visits={visits} onChange={setVisits} />
                 <p className="mt-1 text-xs text-gray-400">설정한 기간은 간트차트와 Google Calendar에 표시됩니다.</p>
               </div>
             </div>
 
             {/* 완료일 */}
-            <div className="grid grid-cols-3 gap-4 px-6 py-4">
+            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
               <label className="flex items-center text-sm font-medium text-gray-700">완료일</label>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <input type="date" value={form.resolvedAt} onChange={(e) => set('resolvedAt', e.target.value)} className={inputClass} />
               </div>
             </div>
@@ -484,9 +484,9 @@ export default function EtcTaskForm({ initialData, mode }: Props) {
 
             {/* 첨부파일 — edit 모드에서만 */}
             {isEditMode && (
-              <div className="grid grid-cols-3 gap-4 px-6 py-4">
-                <label className="flex items-start pt-1 text-sm font-medium text-gray-700">첨부파일</label>
-                <div className="col-span-2">
+              <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
+                <label className="flex items-start sm:pt-1 text-sm font-medium text-gray-700">첨부파일</label>
+                <div className="sm:col-span-2">
                   <MultiFileField
                     label="파일"
                     fileCategory="ETC_TASK_FILE"

@@ -129,8 +129,43 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
           initialOrder={order}
         />
 
-        {/* 테이블 */}
-        <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        {/* 모바일 카드 리스트 */}
+        <div className="mt-4 space-y-2.5 md:hidden">
+          {projects.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card py-16 text-center text-sm text-muted-foreground">
+              {search ? '검색 결과가 없습니다.' : '등록된 프로젝트가 없습니다.'}
+            </div>
+          ) : (
+            projects.map((p) => (
+              <Link
+                key={p.id}
+                href={`/projects/${p.projectCode}`}
+                className="block w-full rounded-xl border border-border bg-card p-4 text-left shadow-xs transition active:scale-[0.99]"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-sm font-semibold text-foreground">
+                    {p.projectName}
+                  </span>
+                  {p.buildStatus && (
+                    <span className="shrink-0">
+                      <StatusBadge label={p.buildStatus.label} color={p.buildStatus.color} />
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span>담당자 <span className="text-foreground">{p.assignees.length > 0 ? p.assignees.map((a) => a.user.name).join(', ') : '-'}</span></span>
+                  <span>시작일 <span className="text-foreground">{fmt(p.startDate)}</span></span>
+                  <span>종료(예상) <span className="text-foreground">{fmt(p.endDateExpected)}</span></span>
+                  <span>도입형태 <span className="text-foreground">{p.contractType ?? '-'}</span></span>
+                  <span>구축업체 <span className="text-foreground">{p.contractor?.name ?? '-'}</span></span>
+                </div>
+              </Link>
+            ))
+          )}
+        </div>
+
+        {/* 테이블 (데스크탑) */}
+        <div className="mt-4 hidden overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm md:block">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
