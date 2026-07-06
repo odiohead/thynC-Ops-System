@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-07-07 | Slack 알림 시스템 PROD 배포 (Phase 6)
+
+- **배포**: dev2 커밋 `fc0c85e` push → PROD pull → **DB 마이그레이션 4건** psql 적용+resolve(notification_logs / users.slack_user_id / users.slack_notify_enabled / 4테이블 status_changed_at) → nav_menu_items `settings/notifications`(sort 45, {SUPER_ADMIN,ADMIN}) INSERT → `.env`에 SLACK_* 5종 추가(**SLACK_NOTIFY_MODE=live**, 채널 3종은 임시로 테스트 채널 C0794GUQQ8Z — 운영 채널 확정 시 교체) → prisma generate → 힙4GB 빌드 → `pm2 restart thync-prod`. npm install 불필요
+- **사용자 지시 반영**: **PROD 전 사용자(40명) `slack_notify_enabled=false`(발송 해제)** — DM은 계정관리에서 개별로 켠 사람에게만. 신규 계정 기본값은 true(생성 시 조정 가능)
+- **초기 상태(안전)**: `notify_enabled` 미설정=off → **설정 페이지에서 켜기 전까지 아무 알림도 발송 안 됨**. 지연 감지 스케줄러 OFF 확인(`notify_delay_interval` 미설정). live 모드지만 이중 게이트로 무발송
+- **스모크**: login 200 · root/도메인 307 · `/settings/notifications` 307(인증 리다이렉트 정상) · 재시작 후 신규 에러 0 · 스케줄러 로그 정상(mail 30m, notify OFF)
+- **PROD 활성화 절차(추후)**: ①설정→Slack 알림에서 전역 on + 주기 선택 ②운영 채널 생성·봇 초대 후 `.env` `SLACK_CHANNEL_MAIN/DELAY` 교체+재시작 ③DM 원하는 계정만 계정관리에서 발송 체크
+- 영향: PROD DB(테이블 1·컬럼 6·메뉴 1행·users 40행 UPDATE), PROD `.env`
+
+---
+
 ## 2026-07-07 | Slack 알림 전체 검수 + 단계(상태) 체류 지연 기능
 
 - **검수 배경**: `function_notification.md` 기준 Phase 0~5 구현 전수 검토(설계-코드 대조) + 사용자 요청 기능("각 단계별로 오래 지속되면 알림") 타당성 검토·구현

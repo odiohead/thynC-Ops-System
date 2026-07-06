@@ -303,7 +303,7 @@ notifyTaskCreated({ taskType: 'MAINTENANCE', refCode, title, hospitalName, assig
 | 3 | 지연 감지 스케줄러 + 채널 요약 | ✅ 완료 | 2026-07-06 |
 | 4 | 담당자 DM + 스팸 방지 | ✅ 완료 | 2026-07-07 |
 | 5 | 설정 UI + 발송 이력 | ✅ 완료 | 2026-07-07 |
-| 6 | PROD 배포 | ⬜ 대기 | |
+| 6 | PROD 배포 | ✅ 완료 | 2026-07-07 |
 
 ### 결정 이력 (확정 시 여기에 기록)
 
