@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser, isUserOrAbove } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { notifyTaskEvent } from '@/lib/notify'
 import { uploadToS3 } from '@/lib/s3'
 import { parseFormEmail, buildNoteHtml } from '@/lib/gmail'
 import { advanceHospitalStatus } from '@/lib/hospitalStatus'
@@ -82,6 +83,9 @@ export async function PUT(
       title: hospitalName ? `설치계획(가안) ${hospitalName}` : '설치계획(가안)',
     },
   })
+
+  // Slack 알림 (메일큐 자동등록) — best-effort
+  notifyTaskEvent({ eventType: 'task_created', taskType: 'INSTALL_PLAN', refCode: planCode, autoRegistered: true }).catch(() => {})
 
   // 파일 링크가 있으면 다운로드 → S3 업로드 → InstallPlanFile 생성
   if (queueItem.fileUrl && hospitalCode) {

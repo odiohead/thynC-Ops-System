@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { notifyTaskEvent } from '@/lib/notify'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { advanceHospitalStatus } from '@/lib/hospitalStatus'
@@ -135,6 +136,9 @@ export async function POST(request: NextRequest) {
     actor: auditActorFromJWT(authUser),
     source: '설치계획 등록',
   })
+
+  // Slack 알림 (등록) — best-effort
+  notifyTaskEvent({ eventType: 'task_created', taskType: 'INSTALL_PLAN', refCode: planCode, actorName: authUser.name }).catch(() => {})
 
   return NextResponse.json({ installPlan }, { status: 201 })
 }

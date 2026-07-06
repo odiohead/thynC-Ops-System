@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser, isUserOrAbove } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { notifyTaskEvent } from '@/lib/notify'
 import { uploadToS3 } from '@/lib/s3'
 import { parseFormEmail, buildNoteHtml } from '@/lib/gmail'
 import { createCalendarEvent } from '@/lib/googleCalendar'
@@ -125,6 +126,9 @@ export async function PUT(
       title: `${siteVisit.hospital.hospitalName ?? siteVisit.hospital.hiraHospitalName ?? ''} 답사`,
     },
   })
+
+  // Slack 알림 (메일큐 자동등록) — best-effort
+  notifyTaskEvent({ eventType: 'task_created', taskType: 'SITE_VISIT', refCode: siteVisitCode, autoRegistered: true }).catch(() => {})
 
   // Google Calendar 이벤트 생성 (비차단)
   if (siteVisit.visitDate) {

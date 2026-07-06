@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { notifyTaskStatusChanged } from '@/lib/notify'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { deleteFromS3 } from '@/lib/s3'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
@@ -67,6 +68,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
       ...(hospitalCode !== undefined && { hospitalCode }),
       ...(typeId !== undefined && { typeId: typeId ? Number(typeId) : null }),
       ...(statusId !== undefined && { statusId: statusId ? Number(statusId) : null }),
+      // 상태 실변경 시 단계 진입 시각 기록 (단계 체류 지연 감지)
+      ...(statusId !== undefined && (statusId ? Number(statusId) : null) !== existing.statusId && { statusChangedAt: new Date() }),
       ...(priority !== undefined && { priority }),
       ...(title !== undefined && { title: title.trim() }),
       ...(reporterName !== undefined && { reporterName: reporterName || null }),
@@ -142,6 +145,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
       const isCompleted = updated?.status?.name === '완료'
       taskUpdate.isCompleted = isCompleted
       taskUpdate.completedAt = isCompleted ? new Date() : null
+      // Slack 알림 (상태 변경) — best-effort. 실제 상태 변경 시에만 발송
+      if (existing.maintenanceCode) notifyTaskStatusChanged({ taskType: 'MAINTENANCE', refCode: existing.maintenanceCode, actorName: user.name }).catch(() => {})
     }
     if (Object.keys(taskUpdate).length > 0) {
       await prisma.task.updateMany({

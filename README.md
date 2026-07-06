@@ -81,6 +81,7 @@ app/
 │   │   ├── maintenance-status/       # 유지보수 상태 관리
 │   │   ├── etc-task-status/          # 기타업무 상태 관리
 │   │   ├── nav-menus/                # 네비게이션 메뉴 관리 CRUD (SUPER_ADMIN)
+│   │   ├── notifications/            # Slack 알림 설정 GET/PUT (ADMIN — 토글·주기·DM·타입별 필드) + logs/ 발송 이력 조회
 │   │   └── audit-logs/               # 감사 로그 조회 (SUPER_ADMIN)
 │   ├── ai-assistant/                 # AI 어시스턴트 (Flowise 프록시 + 정제 + 상담이력 저장)
 │   │   ├── summarize/                # AI 정제 (Anthropic Claude API)
@@ -145,6 +146,7 @@ app/
 │   ├── etc-task-status/              # 기타업무 상태 관리
 │   ├── vehicles/                     # 차량 관리 (ADMIN 이상)
 │   ├── nav-menus/                    # 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
+│   ├── notifications/                # Slack 알림 설정 (ADMIN 이상 — 전역/이벤트 토글 + 타입별 포함 필드)
 │   └── audit-logs/                   # 감사 로그 (SUPER_ADMIN 전용)
 ├── login/                            # 로그인 페이지
 └── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper, StatusBadge 등)
@@ -164,7 +166,12 @@ lib/
 ├── hospitalStatus.ts                 # 병원 thynC 현황상태 단방향 자동 진행 헬퍼 (advanceHospitalStatus)
 ├── vehicleLog.ts                     # 운행일지 거리 재계산(recalcVehicleLogs) + 주행거리 무결성 검사(checkOdometerConsistency)
 ├── maintenanceVisit.ts               # 유지보수 방문일정 정규화(normalizeVisits) + 캘린더 페이로드(visitEventPayload) + ymd/visitKey — 기타업무 업무기간도 공유
-└── etcTask.ts                        # 기타업무 캘린더 이벤트 페이로드(etcTaskVisitEventPayload)
+├── etcTask.ts                        # 기타업무 캘린더 이벤트 페이로드(etcTaskVisitEventPayload)
+├── slack.ts                          # Slack Web API 전송 어댑터 (의존성0 fetch, 모드 라우팅 off/test/live, lookupByEmail)
+├── notify.ts                         # 알림 정책·로그 레이어 (이벤트·상태변경·지연요약·enrich·dedup + notification_logs, best-effort)
+├── notifyFields.ts                   # Slack 알림 메시지 필드 카탈로그·타입별 추천 기본값 (설정 페이지·notify 공유)
+├── delay-rules.ts                    # 지연 업무 판정 (타입별 기준일·임계일수, findDelayedTasks — KST 기준·보류 제외)
+└── notify-scheduler.ts               # 지연 감지 인터벌 스케줄러 (mail-scheduler 패턴, notify_delay_interval 제어)
 
 prisma/
 ├── schema.prisma                     # DB 스키마
@@ -182,6 +189,8 @@ prisma/
 - 역할: `SUPER_ADMIN` / `ADMIN` / `USER` / `VIEWER`
 - 소속(Organization) 연결 (organizationId), 부서(Department) 연결 (departmentId, 선택)
 - 차량예약 사용 제한 (`vehicleReservationBlocked`, 기본 false): true면 역할과 무관하게 차량예약 등록·수정·취소 불가 (조회만 가능). 계정관리에서 제어
+- Slack DM 매핑 캐시 (`slackUserId`, nullable): 지연 알림 DM 발송 시 이메일→Slack ID 조회 결과 캐시 (Phase 4)
+- Slack 발송 유무 (`slackNotifyEnabled`, 기본 true): false면 해당 계정에 Slack DM 미발송. 계정관리 타계정 수정에서 제어(ADMIN)
 
 ### Organization (소속/조직)
 - 사용자 그룹 단위 (예: SEERS, DAEWOONG)
@@ -231,6 +240,7 @@ prisma/
 - 규모: `wardCount` (병동 수), `bedCount` (병상 수), `gatewayCount` (게이트웨이 수)
 - 진행 플래그: `hasSurvey` (답사 완료), `hasOrder` (발주 완료)
 - 공사 상태(`buildStatus`), 시작일/완료예정일, 비고(`remark`), 이슈 노트(`issueNote`, 리치 텍스트)
+- 공사상태 진입 시각(`statusChangedAt`) — 상태 실변경 시 기록, 단계 체류 지연 감지용
 - Google Drive 폴더 연결 (`driveFolderId`)
 - Google Calendar 이벤트 ID (`calendarEventId`) — 프로젝트 생성/수정/삭제 시 자동 동기화
 
@@ -262,7 +272,7 @@ prisma/
 - 병원 답사 기록
 - 고유 코드 `siteVisitCode`: `VISIT-YYYYMM-NNNNN` 형식 (생성 시 자동 발번)
 - 대웅 담당자 `daewoongUserId` (DAEWOONG 소속 User) + 담당자 N:M (`SiteVisitAssignee`)
-- 상태코드 연결, 방문일/요청일/회신일
+- 상태코드 연결, 방문일/요청일/회신일, 상태 진입 시각(`statusChangedAt`, 단계 체류 지연 감지용)
 - 파일(설치계획서·평면도) 첨부: Drive 필드 (`installPlanUrl`, `floorPlanUrl`) + S3 키 (`installPlanS3Key`, `floorPlanS3Key`) 병행 지원
 - 노트(`notes`): 리치 텍스트(Tiptap)
 - Google Calendar 이벤트 ID (`calendarEventId`) — 답사 생성/수정/삭제 시 자동 동기화
@@ -275,7 +285,7 @@ prisma/
 - 병원 장비/시스템 유지보수 기록
 - 고유 코드 `maintenanceCode`: `MNT-YYYYMM-NNNN` 형식 (생성 시 자동 발번)
 - 병원 연결 (hospitalCode, 필수)
-- 장애유형(`typeId` → StatusCode MAINTENANCE_TYPE), 상태(`statusId` → StatusCode MAINTENANCE_STATUS)
+- 장애유형(`typeId` → StatusCode MAINTENANCE_TYPE), 상태(`statusId` → StatusCode MAINTENANCE_STATUS), 상태 진입 시각(`statusChangedAt`)
 - 우선순위(`priority`): 긴급/높음/보통/낮음 (기본값: 보통)
 - 신고자(`reporterName`): 병원 측 텍스트
 - 원격처리 여부(`isRemote`), 접수일(`reportedAt`), 완료일(`resolvedAt`)
@@ -301,7 +311,7 @@ prisma/
 ### EtcTask (기타업무)
 - 여러 병원을 커버하거나 유지보수가 아닌 주요 업무 관리
 - 고유 코드 `etcTaskCode`: `ETC-YYYYMM-NNNN` 형식 (생성 시 자동 발번)
-- 상태(`statusId` → StatusCode ETC_TASK_STATUS), 우선순위(`priority`): 긴급/높음/보통/낮음 (기본값: 보통)
+- 상태(`statusId` → StatusCode ETC_TASK_STATUS), 우선순위(`priority`): 긴급/높음/보통/낮음 (기본값: 보통), 상태 진입 시각(`statusChangedAt`)
 - 접수일(`reportedAt`), 완료일(`resolvedAt`)
 - 비고(`note`): 리치 텍스트(Tiptap)
 - 담당자 N:M (`EtcTaskAssignee`), 병원 N:M (`EtcTaskHospital`, 0~N곳 선택 연결), 업무기간 1:N (`EtcTaskVisit`), 첨부파일 (`EtcTaskFile`, S3)
@@ -403,6 +413,12 @@ prisma/
 - `note` (비고), `createdById` → User (작성자)
 - 인덱스: `(vehicle_id, end_at)`, `(driver_id, start_at)`
 - 거리 무결성: 생성/수정/삭제 시 같은 차량 일지를 endAt 순으로 재계산하고 앞/뒤 기록과 모순(주행거리 역전) 차단
+
+### NotificationLog (Slack 알림 발송 이력)
+- Slack 알림 발송 기록 + 중복 발송 방지(dedup)의 근거 테이블 (`function_notification.md` Phase 1)
+- `eventType` (`task_created`/`task_completed`/`delayed`), `taskType`, `refCode` (원본 업무 코드)
+- `targetType` (`channel`/`dm`), `targetId` (채널 ID 또는 Slack user ID), `status` (`sent`/`failed`/`skipped`), `error`, `payload` (JSONB)
+- 인덱스: `(event_type, ref_code, target_id, created_at)` (dedup 조회), `(created_at)`
 
 ### Wiki 모듈 — 별도 PostgreSQL 스키마 `wiki`
 - 사내 위키(Notion-like) 기능. 본문은 BlockNote JSON 블록 배열로 저장
@@ -652,6 +668,19 @@ prisma/
 - "+ 추가" 버튼으로 후보 검색 모달 열기 (이름/이메일 검색, 300ms debounce, 페이지네이션)
 - 후보: SEERS 소속·활성·해당 풀 미등록 사용자만 표시
 - 목록 테이블: 번호·이름·이메일·소속·부서·추가일·삭제
+
+### Slack 알림 (개발 중 — `function_notification.md`)
+- 주요 업무(프로젝트/답사/설치계획/유지보수/기타업무) **등록 시 + 이후 상태 변경 시마다 Slack 채널 알림** (Phase 2 완료). 완료도 "→ 완료" 상태 변경의 한 경우
+- 전송 어댑터 `lib/slack.ts`(의존성0 fetch) + 정책·로그 `lib/notify.ts`. 발송 실패는 업무 API를 절대 깨지 않는 best-effort
+- **발송 모드** (`SLACK_NOTIFY_MODE`): `off`(미발송) / `test`(전부 테스트 채널 + `[DEV]` prefix, 비-production은 live 자동 강등) / `live`(운영). DEV는 항상 test
+- **게이트**: AppSetting `notify_enabled`(기본 off) + `notify_events_enabled`(기본 on). 채널은 `SLACK_CHANNEL_MAIN` 단일
+- **상태 변경 감지**: 타입별 상태 시그니처(프로젝트=공사상태, 답사/유지보수/기타업무=상태명, 설치계획=작성/회신여부)를 직전 발송 로그와 비교해 **실제 변경 시에만** 발송(from→to 표기). 등록 알림은 `refCode`당 1회 dedup. (업무현황 완료 체크박스는 원본 상태 미변경이라 알림 대상 아님)
+- 메시지: 고정(이모지+타입+병원명/제목+상세 링크, 등록 🆕 / 상태변경 🔄 `접수 → 처리중`) + **타입별 선택 필드**
+- **지연 감지 요약** (Phase 3): 주기(`notify_delay_interval` off/1h/6h/24h) 점검 → 지연 업무 요약 1메시지(⏰ N건, 상세링크)를 지연 채널로. 기준(설정 페이지에서 편집 가능·`notify_delay_rules`) — 답사·설치계획 요청일+N / 기타업무 접수일+N / 프로젝트 완료예정일+N / 유지보수 우선순위별(긴급·높음·보통·낮음), 완료·보류 제외(KST 자정 기준). 12시간 내 동일 목록 재발송 스킵. 스케줄러는 `lib/notify-scheduler.ts`(mail-scheduler 패턴, instrumentation 기동), 판정은 `lib/delay-rules.ts`
+- **단계(상태) 체류 지연**: 특정 상태(단계)에 지정 일수 이상 머물면 지연 판정 — 기준일 규칙과 병행(둘 중 하나만 걸려도 지연). 타입별·상태별 임계일을 설정 페이지에서 지정(`notify_status_dwell`, 0=미사용, 기본 전체 미사용). 상태 진입 시각은 각 업무 테이블 `status_changed_at`(상태 실변경 시 기록, 레거시 NULL은 요청/접수일→등록일 fallback). 완료예정일 미입력 프로젝트도 체류 규칙으로 감지 가능. 설치계획은 작성/회신 2-플래그 구조라 제외
+- **담당자 DM** (Phase 4): 지연 업무 담당자에게 개인 DM 리마인드(`notify_dm_enabled`, 기본 off). 매핑 — 계정 이메일로 Slack `lookupByEmail` 후 `users.slack_user_id` 캐시(실패 시 그 사람만 스킵). 같은 건·같은 사람 24h 1회, 상한 없음(해소 시까지). test 모드는 실제 담당자 대신 테스트 채널로 `[DEV][DM→이름]`
+- **설정 페이지 `/settings/notifications`** (ADMIN 이상): 발송 모드(읽기전용) + 전역/이벤트 토글 + **지연 요약 주기·담당자 DM 토글** + **지연 판정 기준일 편집**(타입별·유지보수 우선순위별) + **업무 타입별 메시지 포함 필드 선택**(예: 답사에 '요청일') + **발송 이력**(최근 50건·상태 필터, `GET /api/settings/notifications/logs`). 저장은 AppSetting(`notify_enabled`/`notify_events_enabled`/`notify_delay_interval`/`notify_dm_enabled`/`notify_event_fields`/`notify_delay_rules`/`notify_dm_policy`)
+- **계정별 발송 차단**: `users.slackNotifyEnabled=false`인 계정은 DM 미발송(계정관리에서 제어)
 
 ### 사내 위키 (Phase 2-13)
 - Notion-like 블록 에디터(BlockNote) 기반 사내 위키

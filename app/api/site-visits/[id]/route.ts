@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { notifyTaskStatusChanged } from '@/lib/notify'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
@@ -67,6 +68,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
       installPlanS3Key: installPlanS3Key !== undefined ? (installPlanS3Key || null) : undefined,
       floorPlanS3Key: floorPlanS3Key !== undefined ? (floorPlanS3Key || null) : undefined,
       notes: notes !== undefined ? (notes || null) : undefined,
+      // 상태 실변경 시 단계 진입 시각 기록 (단계 체류 지연 감지)
+      ...((statusId ? Number(statusId) : null) !== existing.statusId ? { statusChangedAt: new Date() } : {}),
     },
   })
 
@@ -93,6 +96,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
       where: { refCode: updated.siteVisitCode, taskType: 'SITE_VISIT' },
       data: { isCompleted, completedAt: isCompleted ? new Date() : null },
     })
+    // Slack 알림 (상태 변경) — best-effort. 실제 상태 변경 시에만 발송
+    notifyTaskStatusChanged({ taskType: 'SITE_VISIT', refCode: updated.siteVisitCode, actorName: user.name }).catch(() => {})
   }
 
   // Google Calendar 동기화 (비차단)

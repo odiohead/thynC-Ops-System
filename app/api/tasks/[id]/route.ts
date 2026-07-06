@@ -29,5 +29,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     },
   })
 
+  // 업무현황 완료 체크박스는 Task.isCompleted 플래그만 토글하며 원본 업무의 상태값을 바꾸지 않으므로
+  // Slack 상태변경 알림 대상이 아니다(상태 알림은 각 업무 상세의 상태 변경에서 발송).
+
   return NextResponse.json({ task })
 }

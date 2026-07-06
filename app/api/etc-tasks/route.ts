@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { notifyTaskEvent } from '@/lib/notify'
 import { getAuthUser } from '@/lib/auth'
 import { createCalendarEvent } from '@/lib/googleCalendar'
 import { normalizeVisits } from '@/lib/maintenanceVisit'
@@ -182,6 +183,9 @@ export async function POST(request: NextRequest) {
     resourceLabel: etcTask.title,
     after: etcTask,
   })
+
+  // Slack 알림 (등록) — best-effort
+  notifyTaskEvent({ eventType: 'task_created', taskType: 'ETC', refCode: etcTaskCode, actorName: user.name }).catch(() => {})
 
   return NextResponse.json({ etcTask }, { status: 201 })
 }

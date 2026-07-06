@@ -190,6 +190,8 @@ model User {
   vehicleReservationBlocked Boolean @default(false) @map("vehicle_reservation_blocked")
   organizationId Int?          @map("organization_id")
   departmentId   Int?          @map("department_id")
+  slackUserId    String?       @map("slack_user_id") @db.VarChar(20) // Slack DM 매핑 캐시 (Phase 4)
+  slackNotifyEnabled Boolean   @default(true) @map("slack_notify_enabled") // 계정별 Slack 발송 유무(false=미발송)
   createdAt      DateTime      @default(now()) @map("created_at")
   lastLoginAt    DateTime?     @map("last_login_at")
   organization            Organization?                @relation(fields: [organizationId], references: [id])
@@ -307,6 +309,7 @@ model Project {
   startDate           DateTime?    @map("start_date")
   endDateExpected     DateTime?    @map("end_date_expected")
   buildStatusId       Int?         @map("build_status_id")
+  statusChangedAt     DateTime?    @default(now()) @map("status_changed_at") // 현재 공사상태 진입 시각 (단계 체류 지연 감지)
   introTypeId         Int?         @map("intro_type_id")
   issueNote           String?      @db.Text @map("issue_note")
   remark              String?      @map("remark")
@@ -393,6 +396,7 @@ model SiteVisit {
   visitDate       DateTime?      @map("visit_date")
   replyDate       DateTime?      @map("reply_date")
   statusId        Int?           @map("status_id")
+  statusChangedAt DateTime?      @default(now()) @map("status_changed_at") // 현재 상태 진입 시각 (단계 체류 지연 감지)
   installPlanUrl    String?  @map("install_plan_url")
   installPlanFileId String?  @map("install_plan_file_id")
   floorPlanUrl      String?  @map("floor_plan_url")
@@ -581,6 +585,26 @@ model AppSetting {
   @@schema("public")
 }
 
+// Slack 알림 발송 이력 (function_notification.md Phase 1)
+// 이벤트/지연 알림 발송 기록 + 중복 발송 방지(dedup) 근거 테이블
+model NotificationLog {
+  id         Int      @id @default(autoincrement())
+  eventType  String   @map("event_type") @db.VarChar(30) // task_created | task_completed | delayed
+  taskType   String?  @map("task_type") @db.VarChar(20)  // PROJECT | SITE_VISIT | INSTALL_PLAN | MAINTENANCE | ETC
+  refCode    String?  @map("ref_code") @db.VarChar(50)   // 원본 업무 코드
+  targetType String   @map("target_type") @db.VarChar(10) // channel | dm
+  targetId   String   @map("target_id") @db.VarChar(50)   // 채널 ID 또는 Slack user ID
+  status     String   @db.VarChar(10)                     // sent | failed | skipped
+  error      String?
+  payload    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([eventType, refCode, targetId, createdAt])
+  @@index([createdAt])
+  @@map("notification_logs")
+  @@schema("public")
+}
+
 model NavMenuItem {
   id              Int      @id @default(autoincrement())
   menuKey         String   @unique @map("menu_key") @db.VarChar(100)
@@ -626,6 +650,7 @@ model Maintenance {
   hospitalCode      String    @map("hospital_code")
   typeId            Int?      @map("type_id")
   statusId          Int?      @map("status_id")
+  statusChangedAt   DateTime? @default(now()) @map("status_changed_at") // 현재 상태 진입 시각 (단계 체류 지연 감지)
   priority          String    @default("보통") @map("priority")
   title             String    @map("title")
   reporterName      String?   @map("reporter_name")
@@ -685,6 +710,7 @@ model EtcTask {
   etcTaskCode String?   @unique @map("etc_task_code")
   title       String    @map("title")
   statusId    Int?      @map("status_id")
+  statusChangedAt DateTime? @default(now()) @map("status_changed_at") // 현재 상태 진입 시각 (단계 체류 지연 감지)
   priority    String    @default("보통") @map("priority")
   reportedAt  DateTime? @map("reported_at") @db.Date
   resolvedAt  DateTime? @map("resolved_at") @db.Date

@@ -32,6 +32,7 @@ export async function GET(req: NextRequest) {
     role: true,
     isActive: true,
     vehicleReservationBlocked: true,
+    slackNotifyEnabled: true,
     createdAt: true,
     lastLoginAt: true,
     organization: { select: { id: true, name: true, code: true } },
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
   const user = await getAuthUser(req)
   if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { email, password, name, phone, role, organizationId, departmentId, vehicleReservationBlocked } = await req.json()
+  const { email, password, name, phone, role, organizationId, departmentId, vehicleReservationBlocked, slackNotifyEnabled } = await req.json()
 
   if (!email || !password || !name) {
     return NextResponse.json({ error: '필수 항목을 입력해주세요.' }, { status: 400 })
@@ -90,6 +91,7 @@ export async function POST(req: NextRequest) {
       phone: phone || '',
       role: role || 'USER',
       vehicleReservationBlocked: vehicleReservationBlocked === true,
+      slackNotifyEnabled: slackNotifyEnabled !== false, // 기본 true(발송)
       organizationId: organizationId || null,
       departmentId: departmentId || null,
     },
@@ -101,6 +103,7 @@ export async function POST(req: NextRequest) {
       role: true,
       isActive: true,
       vehicleReservationBlocked: true,
+      slackNotifyEnabled: true,
       createdAt: true,
       lastLoginAt: true,
       organization: { select: { id: true, name: true, code: true } },

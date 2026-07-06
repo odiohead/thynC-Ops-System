@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
+import { notifyTaskStatusChanged } from '@/lib/notify'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
@@ -105,6 +106,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
       introTypeId: introTypeId !== undefined ? (introTypeId ? Number(introTypeId) : null) : undefined,
       issueNote: issueNote !== undefined ? issueNote : undefined,
       remark: remark !== undefined ? remark : undefined,
+      // 공사상태 실변경 시 단계 진입 시각 기록 (단계 체류 지연 감지)
+      ...(buildStatusId !== undefined && (buildStatusId ? Number(buildStatusId) : null) !== existing.buildStatusId
+        ? { statusChangedAt: new Date() }
+        : {}),
     },
   })
 
@@ -135,6 +140,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
       where: { refCode: params.code, taskType: 'PROJECT' },
       data: { isCompleted, completedAt: isCompleted ? new Date() : null },
     })
+
+    // Slack 알림 (상태 변경) — best-effort. 실제 상태 변경 시에만 발송(notify 내부 시그니처 비교)
+    notifyTaskStatusChanged({ taskType: 'PROJECT', refCode: params.code, actorName: authUser.name }).catch(() => {})
 
     // 구축완료 진입 시 병원 상태를 '운영'으로 진행
     if (isCompleted) {

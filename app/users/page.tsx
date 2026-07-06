@@ -22,6 +22,7 @@ interface User {
   role: 'SUPER_ADMIN' | 'ADMIN' | 'USER' | 'VIEWER'
   isActive: boolean
   vehicleReservationBlocked: boolean
+  slackNotifyEnabled: boolean
   createdAt: string
   lastLoginAt: string | null
   organization: Organization | null
@@ -95,6 +96,7 @@ export default function UsersPage() {
   const [editOtherOrgId, setEditOtherOrgId] = useState('')
   const [editOtherDeptId, setEditOtherDeptId] = useState('')
   const [editOtherVehicleBlocked, setEditOtherVehicleBlocked] = useState(false)
+  const [editOtherSlackEnabled, setEditOtherSlackEnabled] = useState(true)
   const [editOtherPassword, setEditOtherPassword] = useState('')
   const [editOtherConfirmPassword, setEditOtherConfirmPassword] = useState('')
   const [editOtherError, setEditOtherError] = useState('')
@@ -192,6 +194,7 @@ export default function UsersPage() {
     setEditOtherDeptId(user.department?.id?.toString() ?? '')
     if (user.organization?.id) loadDepartments(user.organization.id.toString(), 'editOther')
     setEditOtherVehicleBlocked(user.vehicleReservationBlocked === true)
+    setEditOtherSlackEnabled(user.slackNotifyEnabled !== false)
     setEditOtherPassword('')
     setEditOtherConfirmPassword('')
     setEditOtherError('')
@@ -223,6 +226,7 @@ export default function UsersPage() {
         organizationId: editOtherOrgId ? parseInt(editOtherOrgId) : null,
         departmentId: editOtherDeptId ? parseInt(editOtherDeptId) : null,
         vehicleReservationBlocked: editOtherVehicleBlocked,
+        slackNotifyEnabled: editOtherSlackEnabled,
       }
       if (editOtherPassword) body.newPassword = editOtherPassword
 
@@ -690,6 +694,18 @@ export default function UsersPage() {
                   <span className="text-sm text-gray-700">
                     차량예약 사용 제한
                     <span className="block text-xs text-gray-400">체크 시 이 계정은 차량예약 등록·수정·취소가 불가하며 현황 조회만 가능합니다.</span>
+                  </span>
+                </label>
+                <label className="mt-3 flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editOtherSlackEnabled}
+                    onChange={(e) => setEditOtherSlackEnabled(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-700">
+                    Slack 알림 발송
+                    <span className="block text-xs text-gray-400">체크 해제 시 이 계정에게는 Slack DM(지연 리마인드 등)을 발송하지 않습니다.</span>
                   </span>
                 </label>
               </div>

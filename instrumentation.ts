@@ -13,5 +13,16 @@ export async function register() {
     } catch (err) {
       console.error('[instrumentation] 메일 스케줄러 초기화 실패:', err)
     }
+
+    // Slack 지연 감지 스케줄러 (function_notification.md Phase 3)
+    try {
+      const { startNotifyScheduler } = await import('@/lib/notify-scheduler')
+      const ds = await prisma.appSetting.findUnique({
+        where: { key: 'notify_delay_interval' },
+      })
+      startNotifyScheduler(ds?.value || 'off')
+    } catch (err) {
+      console.error('[instrumentation] 지연 감지 스케줄러 초기화 실패:', err)
+    }
   }
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { notifyTaskEvent } from '@/lib/notify'
 import { getAuthUser } from '@/lib/auth'
 import { createCalendarEvent } from '@/lib/googleCalendar'
 import { normalizeVisits, visitEventPayload } from '@/lib/maintenanceVisit'
@@ -203,6 +204,9 @@ export async function POST(request: NextRequest) {
     resourceLabel: `${maintenance.hospital?.hospitalName ?? maintenance.hospital?.hiraHospitalName ?? ''} - ${maintenance.title}`,
     after: maintenance,
   })
+
+  // Slack 알림 (등록) — best-effort
+  notifyTaskEvent({ eventType: 'task_created', taskType: 'MAINTENANCE', refCode: maintenanceCode, actorName: user.name }).catch(() => {})
 
   return NextResponse.json({ maintenance }, { status: 201 })
 }

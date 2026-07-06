@@ -4,6 +4,118 @@
 
 ---
 
+## 2026-07-07 | Slack 알림 전체 검수 + 단계(상태) 체류 지연 기능
+
+- **검수 배경**: `function_notification.md` 기준 Phase 0~5 구현 전수 검토(설계-코드 대조) + 사용자 요청 기능("각 단계별로 오래 지속되면 알림") 타당성 검토·구현
+- **검수 발견·수정 3건**:
+  - ①(버그) **레거시 업무 오알림** — 알림 도입 전 생성된 업무는 발송 이력이 없어 `lastSig=null` → 비고만 수정해도 "상태 변경" 알림 발송(기존 업무 수백 건 해당). 수정: 기준선 없으면 무발송으로 현재 상태를 baseline 캡처(`skipped/baseline` 로그, targetId `(baseline)`)하고 다음 실변경부터 정상 감지
+  - ②(개선) **DM 루프** — mode off여도 담당자마다 Slack 매핑 API 호출 + opt_out/매핑실패 스킵 로그가 감지 주기마다 무한 누적. 수정: mode off 조기 반환, 스킵 로그도 dedupHours당 1건만
+  - ③(일관성) users POST 생성이 `slackNotifyEnabled` 미수용, POST·[id] GET 응답 select 미포함 → 반영
+- **신규 기능 — 단계(상태) 체류 지연**: 특정 상태에 지정 일수 이상 머물면 지연 판정(기준일 규칙과 병행, 둘 중 하나만 걸려도 지연·중복 1회 표시)
+  - **DB**: projects/site_visits/maintenances/etc_tasks에 `status_changed_at`(TIMESTAMP, 기존 행 NULL·신규 DEFAULT now) — 마이그레이션 `20260707..._add_status_changed_at`(fast-default 회피 위해 ADD 후 SET DEFAULT), schema 4모델 `statusChangedAt @default(now())` + generate
+  - **라우트**: 4개 [id]/[code] PUT이 상태(공사상태/상태ID) 실변경 시 `statusChangedAt` 갱신 (existing 비교, update data에 조건부 1줄)
+  - **판정**: `lib/delay-rules.ts` — `notify_status_dwell`(JSON, 기본 빈값=미사용) + `dwellCheck`. 진입시각 = statusChangedAt → 레거시(NULL)는 요청/접수일→생성일 fallback. 앵커 규칙 우선, 라벨 `'처리중' 상태 N일째`. 쿼리 where에서 앵커일 not-null 필터 제거(앵커 없어도 체류 판정 가능) — **완료예정일 미입력 프로젝트도 지연 감지 가능해짐**(기존 빈틈)
+  - **설정**: `/settings/notifications`에 "단계 체류 지연 기준" 카드 — 타입별 상태 목록 동적 로드(BuildStatus 라벨·StatusCode 3카테고리, 완료·보류성 제외), 상태별 일수 입력(0=미사용). API sanitize(양의 정수만 저장). INSTALL_PLAN은 작성/회신 2-플래그 구조라 체류 대상 제외
+- **검증(dev2)**: `tsc --noEmit` 0오류. E2E — baseline(레거시 첫 PUT 무발송→실변경 시 `접수→처리중` 발송), 체류(처리중 5일 임계·10일 체류 감지 `'처리중' 상태 10일째`, 미설정 상태 미감지, 타 업무 오탐 0), 신규 생성 statusChangedAt 자동 기록 전부 통과
+- **미반영**: git push·PROD 안 함. PROD 반영 시 `status_changed_at` 마이그레이션 추가 필요(누적 4건)
+- 영향 파일: `prisma/{schema.prisma,migrations/20260707..._add_status_changed_at/}`, `lib/{notify.ts,delay-rules.ts}`, `app/api/settings/notifications/route.ts`, `app/settings/notifications/page.tsx`, `app/api/{projects/[code],site-visits/[id],maintenances/[id],etc-tasks/[id]}/route.ts`, `app/api/users/{route.ts,[id]/route.ts}`
+
+---
+
+## 2026-07-07 | Slack 알림 — 지연 기준일 설정 UI + 계정별 발송 플래그
+
+- **지연 기준일 설정 UI**: 그동안 코드 기본값(DB JSON 오버라이드만 가능)이던 지연 기준을 `/settings/notifications`에서 편집 가능하게. 타입별 일수(답사·설치계획·기타업무 요청/접수일+N, 프로젝트 완료예정일+N) + 유지보수 우선순위별 4칸. API GET에 `getDelayRules()` 반환, PUT에 `sanitizeDelayRules`(음수·비수치 방지) 후 `notify_delay_rules` 저장. 저장 즉시 다음 감지부터 반영
+- **계정별 Slack 발송 플래그**: `users.slack_notify_enabled`(BOOLEAN DEFAULT true) 신설 — 마이그레이션 `20260707..._add_user_slack_notify_flag`, schema+generate. false면 해당 계정에게 DM 미발송. `lib/notify.ts` `sendDelayDMs`가 매핑 전에 플래그 확인 → off면 `user_opt_out` 스킵 로그. `lib/delay-rules.ts` `AssigneeUser`·쿼리 select에 플래그 포함
+- **UI**: 계정관리(`/users`) 타계정 수정 모달 '기능 제한'에 "Slack 알림 발송" 체크박스(ADMIN, 해제=미발송). users API [id] PUT·목록 GET에 `slackNotifyEnabled` 반영
+- **검증(dev2)**: `tsc --noEmit` 0오류. 플래그 OFF→DM skipped(user_opt_out)·ON→sent 확인. 기준일 오버라이드는 findDelayedTasks E2E로 기검증
+- **미반영**: git push·빌드·PROD 안 함. PROD 반영 시 `users.slack_notify_enabled` 마이그레이션 필요
+- 영향 파일: `prisma/{schema.prisma,migrations/20260707..._add_user_slack_notify_flag/}`, `lib/{notify.ts,delay-rules.ts}`, `app/api/settings/notifications/route.ts`, `app/settings/notifications/page.tsx`, `app/api/users/{route.ts,[id]/route.ts}`, `app/users/page.tsx`
+
+---
+
+## 2026-07-07 | Slack 알림 Phase 4·5 — 담당자 DM + 설정/발송 이력 UI
+
+- **Phase 4 (담당자 DM)**: 지연 업무 담당자에게 개인 DM 리마인드. ⏳ 확정 — 대상 담당자 전원, 조용시간·주말 제한 없음, 상한 무제한(해소 시까지 매일), 재알림 24h 1회
+  - **DB**: `users.slack_user_id`(VARCHAR20, nullable) 추가 — 마이그레이션 `20260707071923_add_user_slack_id`, schema+generate
+  - **매핑**: `lib/notify.ts` `resolveSlackUserId` — `users.email`로 `slackLookupUserByEmail` 조회 후 `slack_user_id` 캐시. 실패 시 그 담당자만 skip(`no_slack_mapping`)
+  - **DM 발송**: `sendDelayDMs` — 지연 각 건×담당자, 24h dedup(같은 건·같은 사람), test 모드는 실제 담당자 대신 테스트 채널로 `[DEV][DM→이름]` 라우팅. `notify_dm_enabled`(기본 off) 게이트
+  - **`lib/delay-rules.ts`**: `DelayedItem`에 `assignees`(id·name·email·slackUserId) 추가, 5개 타입 쿼리에 담당자 select
+  - **스케줄러 개편**: `notifyDelayedSummary` → `runDelayNotifications`(채널 요약 + DM 통합, 각 자체 dedup). 채널 요약 dedup에 `targetType='channel'` 조건 추가(DM 로그와 분리)
+- **Phase 5 (설정 UI + 발송 이력)**: `/settings/notifications`에 지연 요약 주기 select·담당자 DM 토글 추가(Phase 3·4에서 반영). **발송 이력** 섹션 — 최근 50건(상태 필터 전체/발송/스킵/실패), 이벤트·대상(채널/DM→이름)·시각·본문 미리보기. `GET /api/settings/notifications/logs`(ADMIN+). DM 로그 payload에 textPreview 저장
+- **검증(dev2)**: `tsc --noEmit` 0오류. 매핑 표본 11/15 성공, DM 미매핑 skip·24h dedup·해피패스(이준호 U072… 발송+캐시 저장) 확인. 지연 요약 채널 발송 유지. dev2 기본값 enabled on·events on·delay 24h·**dm off**
+- **미반영**: git push·빌드·PROD 안 함. PROD 반영 시 `users.slack_user_id` 마이그레이션 + `notify_*` 설정 필요
+- 영향 파일: `prisma/{schema.prisma,migrations/20260707071923_add_user_slack_id/}`, `lib/{notify.ts,delay-rules.ts,notify-scheduler.ts}`, `app/api/settings/notifications/{route.ts,logs/route.ts(신규)}`, `app/settings/notifications/page.tsx`
+
+---
+
+## 2026-07-06 | Slack 알림 Phase 3 — 지연 감지 스케줄러 + 채널 요약
+
+- **배경**: `function_notification.md` Phase 3. 지연 업무를 주기 점검해 지연 채널에 요약 발송. ⏳ 확정: 답사·설치계획 요청일+7일, 기타업무 접수일+14일, 프로젝트 완료예정일 경과, 유지보수 우선순위별(긴급1·높음3·보통7·낮음14), 감지 주기 매일 1회(24h)
+- **`lib/delay-rules.ts`(신규)**: `DEFAULT_DELAY_RULES` + `getDelayRules`(AppSetting `notify_delay_rules` JSON 오버라이드) + `findDelayedTasks()` — 타입별 원본에서 기준일 초과 & 미완료(완료/회신완료·**보류 제외**) 항목 산출, KST 자정 기준 overdueDays 계산, 지연일 내림차순
+- **`lib/notify.ts` 확장**: `notifyDelayedSummary()` — 전역 off·지연0건 스킵, 요약 1메시지(⏰ N건, 최대 20+"외 N건", 상세링크), `SLACK_CHANNEL_DELAY`(미설정 시 MAIN)로 발송. **12시간 내 동일 멤버십(refCode 집합) 재발송 스킵**(payload.sig 비교)
+- **`lib/notify-scheduler.ts`(신규)** + **instrumentation.ts**: mail-scheduler 패턴. `notify_delay_interval`(off/1h/6h/24h)로 제어, 부팅 시 기동, 첫 실행은 인터벌 경과 후(재배포 즉시 발송 방지)
+- **설정 페이지/API 확장**: `/settings/notifications`에 지연 요약 주기 select 추가, API GET/PUT에 `delayInterval` 추가 + 저장 시 `startNotifyScheduler` 즉시 반영
+- **검증(dev2)**: `tsc --noEmit` 0오류. 실데이터 지연 48건 감지(프로젝트5·유지보수36·답사7, 우선순위 기준 반영) → 요약 발송 sent → 즉시 재실행 dedup 스킵 확인. dev2 `notify_delay_interval=24h` 설정
+- **미반영**: git push·빌드·PROD 안 함. PROD 반영 시 `notify_delay_interval` env/설정 별도
+- 영향 파일: `lib/{delay-rules.ts(신규),notify.ts,notify-scheduler.ts(신규)}`, `instrumentation.ts`, `app/api/settings/notifications/route.ts`, `app/settings/notifications/page.tsx`
+
+---
+
+## 2026-07-06 | Slack 알림 Phase 2 트리거 변경 — 완료 → 상태 변경 전체
+
+- **배경**: "등록은 등록, 나머지는 상태가 바뀔 때마다 알림" 요구. 기존 완료(task_completed) 한정 → **모든 상태 변경**(task_status_changed)으로 확장. 완료는 "→ 완료" 상태 변경의 한 경우로 포함
+- **상태 시그니처 방식**: enrich가 타입별 상태값을 시그니처로 산출 — 프로젝트=공사상태(buildStatus) 라벨, 답사/유지보수/기타업무=상태명, 설치계획=`작성:{작성완료여부}/회신:{회신여부}`. `notifyTaskStatusChanged`가 **직전 발송(sent) 로그의 payload.sig와 현재 값을 비교해 실제 변경 시에만 발송**(from→to 표기). 등록 알림이 baseline sig를 남김
+- **route 훅**: 5개 [id] PUT(projects/site-visits/install-plans/maintenances/etc-tasks)의 완료 훅을 `notifyTaskStatusChanged` 무조건 호출로 교체 — 비상태 필드만 바꾼 저장은 notify 내부 비교로 자동 스킵. **업무현황(/tasks) 완료 체크박스 훅 제거**(Task.isCompleted 플래그만 토글, 원본 상태 미변경이라 상태변경 알림 대상 아님)
+- **메시지**: 🔄 상태 변경 + `상태: 접수 → *처리중*` 라인 + 선택 필드. 등록은 기존 🆕 유지
+- **부수**: notification_logs payload에 sig 저장, sig 조회는 `task_created`/`task_status_changed`만 대상(향후 delayed 오염 방지). 설정 페이지 토글 라벨 "등록·상태변경 알림"으로 변경
+- **검증(dev2)**: `tsc --noEmit` 0오류. 임시 기타업무로 상태전이 E2E — 등록(baseline)→변경없음(스킵)→접수→처리중(발송, from→to)→변경없음(스킵)→처리중→완료(발송) 전부 기대대로. `[DEV]` 본문 표시 확인
+- **미반영**: git push·빌드·PROD 안 함
+- 영향 파일: `lib/notify.ts`, `app/api/{projects/[code],site-visits/[id],install-plans/[id],maintenances/[id],etc-tasks/[id],tasks/[id]}/route.ts`, `app/settings/notifications/page.tsx`
+
+---
+
+## 2026-07-06 | Slack 알림 Phase 2 추가 — 메시지 필드 설정화 (설정 페이지)
+
+- **배경**: Phase 2 이벤트 알림에 대해 "타입별로 어떤 파라미터를 메시지에 넣을지 설정 화면에서 지정"하고 싶다는 요구(예: 답사는 '요청일'을 포함). Phase 5(설정 UI)의 필드 설정 부분을 앞당겨 구현. ⏳ 확정: 등록/완료 공통 필드셋 + 타입별 추천 세트 기본 on
+- **`lib/notifyFields.ts`(신규)**: 타입별 선택 가능 필드 카탈로그(FIELD_CATALOG) + 추천 기본값(DEFAULT_FIELDS) + 라벨. 설정 페이지와 notify.ts가 공유. 답사=요청일/방문일/회신일/답사상태/대웅담당자, 유지보수=우선순위/장애유형/상태/신고자/접수일/완료일/원격/방문일정, 프로젝트=계약일/도입형태/구축일정/공사상태/시공사/규모 등
+- **`lib/notify.ts` 개편**: enrich가 타입별 원본에서 전체 후보 필드를 조회해 `fieldValues`(값 있는 것만) 구성, `getEventFields`로 AppSetting `notify_event_fields`(JSON) 읽어 선택 필드만 카탈로그 순서로 렌더. 고정 표시(업무타입·병원명/제목·상세링크)는 유지. 값 없는 필드 자동 생략
+- **설정 페이지 `/settings/notifications`(신규, ADMIN+)**: 발송 모드(읽기전용) + 전역/이벤트 토글 + 타입별 포함 필드 체크박스. API `/api/settings/notifications` GET/PUT(감사로그 `setting:notifications`). 네비 메뉴 `settings/notifications`(sort 45, {SUPER_ADMIN,ADMIN}) 추가(dev2 DML)
+- **부수 수정**: test 모드 `[DEV]` prefix가 fallback text에만 붙고 실제 렌더되는 blocks 본문엔 미적용이던 버그 수정(첫 블록 본문에도 prefix). notification_logs `payload.textPreview`에 렌더 본문 저장(디버깅·향후 이력 UI용)
+- **검증(dev2)**: `tsc --noEmit` 0오류. 필드 설정 E2E — 답사=요청일만 → `• 요청일: 2026-07-02` 표시, 유지보수=우선순위+접수일(값 없는 접수일 자동 생략), 프로젝트=필드없음 → 링크만. `[DEV]` 본문 표시 확인. 테스트 후 실 refCode 로그·임시 설정 정리
+- **미반영**: git push·빌드·PROD 안 함. **PROD 반영 시 nav_menu_items INSERT 필요**(`settings/notifications` 행) — DB 마이그레이션 항목
+- 영향 파일: `lib/{notify.ts,notifyFields.ts(신규)}`, `app/api/settings/notifications/route.ts(신규)`, `app/settings/notifications/page.tsx(신규)`, nav_menu_items(dev2)
+
+---
+
+## 2026-07-06 | Slack 알림 Phase 2 — 이벤트 알림 (등록/완료 → 단일 채널)
+
+- **배경**: `function_notification.md` Phase 2. 주요 업무 5종 등록·완료 시 Slack 단일 채널(`SLACK_CHANNEL_MAIN`)에 핵심 필드 알림. ⏳ 결정 확정: 단일 채널 + 핵심 필드(이모지·타입·병원명·제목·담당자·상세링크, 등록🆕/완료✅)
+- **중요 발견 — Task 미러 불완전**: 프로젝트·답사 POST는 Task 미러를 생성하지 않음(PROJECT 원본 235 vs Task 199). 설계서의 "모든 업무 API가 Task를 생성" 전제가 부분적으로 어긋남 → 훅을 **엔티티 생성/완료 지점**에 걸고, `lib/notify.ts`가 `(taskType, refCode)`로 **원본 엔티티 직접 조회(enrich)**해 병원명·담당자·상세 id 획득(Task 유무와 무관하게 동작)
+- **멱등성 = notification_logs dedup**: `refCode`+`eventType`에 `sent` 로그가 있으면 스킵. 이전 완료상태 판정 없이 재저장·재시도·완료 재PUT 중복을 자동 차단. 완료 훅은 "isCompleted=true면 호출"만 하면 됨
+- **`lib/notify.ts` 확장**: `notifyTaskEvent`(게이트→dedup→enrich→메시지빌드→dispatch), 타입별 enrich(Project/SiteVisit/InstallPlan/Maintenance/EtcTask), Block Kit 메시지 빌더, `eventsEnabled`(AppSetting `notify_enabled` 기본 off && `notify_events_enabled` 기본 on). ETC는 다병원이라 "첫병원 외 N곳" 표기
+- **훅 13곳 연결** (Task 미러 갱신 지점/엔티티 지점, 전부 best-effort `.catch(()=>{})`): 등록 7 = projects·site-visits·install-plans·maintenances·etc-tasks POST + mail-queue·site-visit-queue 자동등록(autoRegistered). 완료 6 = projects/[code]·site-visits/[id]·install-plans/[id]·maintenances/[id]·etc-tasks/[id] PUT + **tasks/[id] PATCH(업무현황 완료 체크박스 — 설계서 누락분 반영)**
+- **검증(dev2)**: `tsc --noEmit` 0오류. notify 레이어 E2E — 게이트 off 미발송·5타입 등록/완료 발송·dedup(재호출 sent 1 유지)·토큰부재 skipped·메시지 렌더(병원명/담당자) 전부 통과. 테스트 후 실 refCode 로그 정리(수동 테스트 dedup 방지). dev2 `notify_enabled=on` 유지(test 모드 → 테스트 채널로만)
+- **미반영**: git push·빌드·PROD 안 함(규칙 준수)
+- 영향 파일: `lib/notify.ts`, `app/api/{projects,site-visits,install-plans,maintenances,etc-tasks}/route.ts`, `app/api/{projects/[code],site-visits/[id],install-plans/[id],maintenances/[id],etc-tasks/[id],tasks/[id]}/route.ts`, `app/api/{mail-queue,site-visit-queue}/[id]/route.ts`
+
+---
+
+## 2026-07-06 | Slack 알림 Phase 0~1 — 전송 기반 (slack.ts + notification_logs)
+
+- **배경**: 주요 업무(프로젝트/답사/설치계획/유지보수/기타업무) 등록·완료·지연 시 Slack 알림 기능 추가. 설계·진행 기준은 `function_notification.md`(Fable 작성). 이번은 Phase 0(사전 준비)~Phase 1(전송 기반)
+- **Phase 0 (Slack 준비)**: 봇 `thync_ops_bot`(워크스페이스 SEERS) 생성, 스코프 `chat:write`/`users:read`/`users:read.email`/`im:write`, 테스트 채널 `C0794GUQQ8Z` 확보·봇 초대. `.env`에 `SLACK_BOT_TOKEN`·`SLACK_CHANNEL_{MAIN,DELAY,TEST}`·`SLACK_NOTIFY_MODE=test` 추가. 게이트: `auth.test`+`chat.postMessage` 실발송 성공
+- **Phase 1 (전송 기반)**:
+  - **DB** — `notification_logs` 테이블 신설(마이그레이션 `20260706215535_add_notification_logs`, dev2 로컬만): 발송 이력 + 중복발송 방지(dedup) 근거. `event_type`/`task_type`/`ref_code`/`target_type`/`target_id`/`status`/`error`/`payload`(jsonb)/`created_at` + dedup 인덱스 2종. schema.prisma `NotificationLog` 모델 추가 + generate
+  - **`lib/slack.ts`(신규)** — 의존성 0 fetch 어댑터. `getSlackMode`(off/test/live, 비-production은 live→test 강등), `resolveTargetChannel`(test 모드 → 테스트 채널 라우팅), `slackPostMessage`, `slackLookupUserByEmail`(Phase 4 DM 매핑용). 토큰 미설정 시 자동 스킵, 모두 throw 안 함
+  - **`lib/notify.ts`(신규)** — 정책·로그 골격. `dispatchToChannel`(모드 확인 → 채널 라우팅 → `[DEV]` prefix → 발송 → `notification_logs` 기록), `recordLog`, `sendConnectionTest`. 모든 export throw 안 함(호출부 mutation 보호). AppSetting 기능토글 게이트는 Phase 2 이벤트 함수에서 확인 예정
+- **레이어 분리 확정**: slack.ts=순수 전송·모드 라우팅 / notify.ts=정책·dedup·로그
+- **검증(dev2)**: `tsc --noEmit` 0오류. 전체 경로 E2E(notify→slack→Slack 발송→로그 기록) — test 채널 수신·`[DEV]` prefix·`status=sent`·`notification_logs` 0→1건 확인
+- **설계서 보완 발견**: 완료 훅 지점에 `app/api/tasks/[id]/route.ts`(업무현황 완료 체크박스, Task.isCompleted 직접 토글) 포함 필요 → Phase 2 반영 예정 (function_notification.md 결정 이력 기록)
+- **미반영**: git push·빌드·PROD 배포 안 함(규칙 준수, 사용자 요청 대기). PROD DB 마이그레이션은 Phase 6에서 별도 확인 후
+- 영향 파일: `.env`, `prisma/{schema.prisma,migrations/20260706215535_add_notification_logs/}`, `lib/{slack.ts,notify.ts}`(신규), `function_notification.md`
+
+---
+
 ## 2026-07-05 | 모바일 최적화 전면 작업 — 반응형 UI/UX (전 화면)
 
 - **배경**: 데스크탑 기준으로만 발전해 온 화면들을 모바일에서도 최적 사용 가능하도록 전면 개편. 사전 실태 진단 결과 — 목록 8종 전부 raw 테이블(가로 스크롤 강제), MaintenanceForm 등 폼 `grid-cols-3` 하드코딩(모바일 붕괴), 위키 사이드바 고정 288px, 간트차트 min-width 부재, safe-area·터치 설정 전무

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { notifyTaskStatusChanged } from '@/lib/notify'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
@@ -76,6 +77,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
       where: { refCode: updated.planCode, taskType: 'INSTALL_PLAN' },
       data: { isCompleted, completedAt: isCompleted ? new Date() : null },
     })
+    // Slack 알림 (상태 변경) — best-effort. 작성완료여부/회신여부 변경 시 발송
+    notifyTaskStatusChanged({ taskType: 'INSTALL_PLAN', refCode: updated.planCode, actorName: authUser.name }).catch(() => {})
   }
 
   await logAudit({

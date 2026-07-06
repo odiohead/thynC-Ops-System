@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { notifyTaskEvent } from '@/lib/notify'
 import { getAuthUser } from '@/lib/auth'
 import { createCalendarEvent } from '@/lib/googleCalendar'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
@@ -220,6 +221,9 @@ export async function POST(request: NextRequest) {
       source: '프로젝트 등록(계약일 입력)',
     })
   }
+
+  // Slack 알림 (등록) — best-effort
+  notifyTaskEvent({ eventType: 'task_created', taskType: 'PROJECT', refCode: project.projectCode, actorName: authUser.name }).catch(() => {})
 
   return NextResponse.json({ project }, { status: 201 })
 }
