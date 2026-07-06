@@ -170,10 +170,27 @@ interface EnrichedTask {
   statusSignature: string | null // 상태 변경 감지용 상태 시그니처 (타입별 상태값)
 }
 
-/** 담당자 표시: "홍길동 외 2명" / "미지정" */
-function assigneeText(names: string[]): string {
-  if (names.length === 0) return '미지정'
-  return names.length === 1 ? names[0] : `${names[0]} 외 ${names.length - 1}명`
+/** 담당자 enrich용 전체 필드 select (멘션 렌더링에 필요) */
+const ASSIGNEE_FULL = { select: { user: { select: { id: true, name: true, email: true, slackUserId: true, slackNotifyEnabled: true } } } } as const
+
+/**
+ * 담당자 표시 — 계정 발송 플래그 on + Slack 매핑 성공이면 `<@ID>` 멘션(태그), 아니면 이름 텍스트 폴백.
+ * 멘션은 개인 알림이 울리므로 slack_notify_enabled=false 계정은 태그하지 않는다.
+ */
+async function assigneeDisplay(arr: { user: AssigneeUser }[]): Promise<string | null> {
+  if (!arr.length) return null
+  const parts: string[] = []
+  for (const { user: u } of arr) {
+    if (u.slackNotifyEnabled) {
+      const sid = await resolveSlackUserId(u)
+      if (sid) {
+        parts.push(`<@${sid}>`)
+        continue
+      }
+    }
+    parts.push(u.name)
+  }
+  return parts.join(', ')
 }
 
 const ymd = (d: Date | null | undefined): string | null => (d ? d.toISOString().slice(0, 10) : null)
@@ -195,7 +212,6 @@ function formatVisits(visits: { startDate: Date; endDate: Date }[]): string | nu
  */
 async function enrichTask(taskType: TaskType, refCode: string): Promise<EnrichedTask | null> {
   const base = process.env.NEXT_PUBLIC_APP_URL || ''
-  const asnNames = (arr: { user: { name: string } }[]) => arr.map((a) => a.user.name)
   const fv: Record<string, string> = {}
 
   switch (taskType) {
@@ -206,15 +222,15 @@ async function enrichTask(taskType: TaskType, refCode: string): Promise<Enriched
           projectName: true, contractDate: true, startDate: true, endDateExpected: true,
           wardCount: true, bedCount: true, gatewayCount: true,
           hospital: { select: { hospitalName: true } },
-          assignees: { select: { user: { select: { name: true } } } },
+          assignees: ASSIGNEE_FULL,
           introType: { select: { name: true } },
           buildStatus: { select: { label: true } },
           contractor: { select: { name: true } },
         },
       })
       if (!p) return null
-      const asn = asnNames(p.assignees)
-      if (asn.length) fv.assignees = assigneeText(asn)
+      const asn = await assigneeDisplay(p.assignees)
+      if (asn) fv.assignees = asn
       if (p.buildStatus?.label) fv.buildStatus = p.buildStatus.label
       if (p.contractDate) fv.contractDate = ymd(p.contractDate)!
       if (p.introType?.name) fv.introType = p.introType.name
@@ -235,14 +251,14 @@ async function enrichTask(taskType: TaskType, refCode: string): Promise<Enriched
         select: {
           id: true, requestDate: true, visitDate: true, replyDate: true,
           hospital: { select: { hospitalName: true } },
-          assignees: { select: { user: { select: { name: true } } } },
+          assignees: ASSIGNEE_FULL,
           status: { select: { name: true } },
           daewoongUser: { select: { name: true } },
         },
       })
       if (!s) return null
-      const asn = asnNames(s.assignees)
-      if (asn.length) fv.assignees = assigneeText(asn)
+      const asn = await assigneeDisplay(s.assignees)
+      if (asn) fv.assignees = asn
       if (s.requestDate) fv.requestDate = ymd(s.requestDate)!
       if (s.visitDate) fv.visitDate = ymd(s.visitDate)!
       if (s.replyDate) fv.replyDate = ymd(s.replyDate)!
@@ -256,12 +272,12 @@ async function enrichTask(taskType: TaskType, refCode: string): Promise<Enriched
         select: {
           id: true, requestDate: true, replyDate: true, writeStatus: true, replyStatus: true,
           hospital: { select: { hospitalName: true } },
-          assignees: { select: { user: { select: { name: true } } } },
+          assignees: ASSIGNEE_FULL,
         },
       })
       if (!ip) return null
-      const asn = asnNames(ip.assignees)
-      if (asn.length) fv.assignees = assigneeText(asn)
+      const asn = await assigneeDisplay(ip.assignees)
+      if (asn) fv.assignees = asn
       if (ip.requestDate) fv.requestDate = ymd(ip.requestDate)!
       if (ip.replyDate) fv.replyDate = ymd(ip.replyDate)!
       if (ip.writeStatus && ip.writeStatus !== '-') fv.writeStatus = ip.writeStatus
@@ -274,15 +290,15 @@ async function enrichTask(taskType: TaskType, refCode: string): Promise<Enriched
         select: {
           id: true, title: true, priority: true, reporterName: true, reportedAt: true, resolvedAt: true, isRemote: true,
           hospital: { select: { hospitalName: true } },
-          assignees: { select: { user: { select: { name: true } } } },
+          assignees: ASSIGNEE_FULL,
           type: { select: { name: true } },
           status: { select: { name: true } },
           visits: { select: { startDate: true, endDate: true }, orderBy: { sortOrder: 'asc' } },
         },
       })
       if (!m) return null
-      const asn = asnNames(m.assignees)
-      if (asn.length) fv.assignees = assigneeText(asn)
+      const asn = await assigneeDisplay(m.assignees)
+      if (asn) fv.assignees = asn
       if (m.priority) fv.priority = m.priority
       if (m.type?.name) fv.type = m.type.name
       if (m.status?.name) fv.status = m.status.name
@@ -299,15 +315,15 @@ async function enrichTask(taskType: TaskType, refCode: string): Promise<Enriched
         where: { etcTaskCode: refCode },
         select: {
           id: true, title: true, priority: true, reportedAt: true, resolvedAt: true,
-          assignees: { select: { user: { select: { name: true } } } },
+          assignees: ASSIGNEE_FULL,
           status: { select: { name: true } },
           hospitals: { select: { hospital: { select: { hospitalName: true } } } },
           visits: { select: { startDate: true, endDate: true }, orderBy: { sortOrder: 'asc' } },
         },
       })
       if (!e) return null
-      const asn = asnNames(e.assignees)
-      if (asn.length) fv.assignees = assigneeText(asn)
+      const asn = await assigneeDisplay(e.assignees)
+      if (asn) fv.assignees = asn
       if (e.priority) fv.priority = e.priority
       if (e.status?.name) fv.status = e.status.name
       if (e.reportedAt) fv.reportedAt = ymd(e.reportedAt)!

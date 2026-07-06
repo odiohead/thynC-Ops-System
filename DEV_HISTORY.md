@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-07-07 | Slack 채널 알림 담당자 멘션(태그) 전환
+
+- **변경**: 등록/상태변경 채널 알림의 담당자 필드를 이름 텍스트("홍길동 외 1명") → **Slack 멘션 태그(`<@ID>`)**로. 태그되면 담당자에게 개인 알림이 울림
+- **규칙**: 계정 발송 플래그(`slack_notify_enabled`) **on + Slack 매핑 성공**인 담당자만 태그, 그 외(플래그 off·매핑 실패·Slack 미가입)는 이름 텍스트 폴백. "외 N명" 압축 제거(전원 나열 — 태그 목적). 매핑은 기존 `resolveSlackUserId`(이메일 조회+`slack_user_id` 캐시) 재사용
+- **구현**: `lib/notify.ts` — enrich 담당자 select를 전체 필드(`ASSIGNEE_FULL`)로, `assigneeDisplay()` 헬퍼 신설(멘션/폴백 혼합 렌더), 기존 `assigneeText`/`asnNames` 제거
+- **검증(dev2)**: `tsc` 0오류. E2E — 담당자 2명(플래그 on 이준호 → `<@U072NJMK363>` 태그, 플래그 off 함석민 → 이름만) 혼합 렌더 확인
+- **PROD 반영**: 전원 플래그 off 상태라 배포 직후엔 전부 이름 텍스트 — 계정관리에서 발송 체크한 사람부터 태그됨 (별도 DB 작업 없음, 코드만)
+- 영향 파일: `lib/notify.ts`
+
+---
+
 ## 2026-07-07 | Slack 알림 시스템 PROD 배포 (Phase 6)
 
 - **배포**: dev2 커밋 `fc0c85e` push → PROD pull → **DB 마이그레이션 4건** psql 적용+resolve(notification_logs / users.slack_user_id / users.slack_notify_enabled / 4테이블 status_changed_at) → nav_menu_items `settings/notifications`(sort 45, {SUPER_ADMIN,ADMIN}) INSERT → `.env`에 SLACK_* 5종 추가(**SLACK_NOTIFY_MODE=live**, 채널 3종은 임시로 테스트 채널 C0794GUQQ8Z — 운영 채널 확정 시 교체) → prisma generate → 힙4GB 빌드 → `pm2 restart thync-prod`. npm install 불필요
