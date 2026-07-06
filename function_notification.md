@@ -307,6 +307,8 @@ notifyTaskCreated({ taskType: 'MAINTENANCE', refCode, title, hospitalName, assig
 
 ### 결정 이력 (확정 시 여기에 기록)
 
+- **2026-07-07 (업무별 on/off)**: 업무 타입(PROJECT/SITE_VISIT/INSTALL_PLAN/MAINTENANCE/ETC)별 Slack 사용 토글. `notify_types_enabled`(JSON, 기본 전부 on). 끈 타입은 **등록·상태변경·지연·DM 전부 미발송**. notify.ts `getTypesEnabled`/`typeEnabled` 게이트를 이벤트 함수 + `runDelayNotifications`(지연 목록 필터)에 적용. 설정 페이지 "업무별 알림 사용" 카드(5토글).
+
 - **2026-07-07 (담당자 멘션)**: 채널 알림(등록/상태변경)의 담당자 필드를 이름 텍스트 → **Slack 멘션(`<@ID>`) 태그**로 변경. 규칙: 계정 발송 플래그(`slack_notify_enabled`) on **그리고** Slack 매핑 성공인 담당자만 태그, 그 외(플래그 off·매핑 실패)는 이름 텍스트 폴백. "외 N명" 압축 제거 — 전원 나열(태그 목적상). 멘션도 개인 알림이 울리므로 플래그 off 계정 보호는 DM과 동일 기준. PROD는 전원 플래그 off 상태라 켠 사람만 태그됨.
 
 - **2026-07-07 (검수 + 단계 체류 지연)**: 전체 구현 검수(Fable) — 발견·수정 3건: ①**레거시 오알림 버그**(알림 도입 전 업무는 발송 이력이 없어 첫 PUT에서 상태 안 바뀌어도 "상태 변경" 발송됨 → 기준선 없으면 무발송 baseline 캡처(`skipped/baseline` 로그) 후 다음 실변경부터 감지), ②DM 루프 개선(mode off 시 Slack 매핑 API 미호출, opt_out·매핑실패 스킵 로그 dedupHours당 1건만 — 무한 누적 방지), ③users API 일관성(POST 생성 `slackNotifyEnabled` 수용 + 응답 select 포함). **추가 기능 — 단계(상태) 체류 지연**: 4테이블(projects/site_visits/maintenances/etc_tasks)에 `status_changed_at`(기존 행 NULL·신규 DEFAULT now, 마이그레이션 `20260707..._add_status_changed_at`), 4개 PUT 라우트가 상태 실변경 시 갱신. `notify_status_dwell`(JSON, 기본 빈값=미사용)로 타입별·상태별 임계일 설정 — 설정 페이지 "단계 체류 지연 기준" 카드(상태 목록 동적: BuildStatus/StatusCode, 완료·보류성 상태 제외. 0=미사용). 판정: 앵커 규칙 우선, 아니면 체류(진입시각 = statusChangedAt → 레거시는 앵커일/생성일 fallback), 라벨 `'처리중' 상태 N일째`. **부수 이득**: 완료예정일 미입력 프로젝트도 체류 규칙으로 지연 감지 가능(기존엔 감지 불가 빈틈). INSTALL_PLAN은 2-플래그 구조라 체류 제외.

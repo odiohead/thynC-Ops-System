@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-07-07 | Slack 알림 — 업무 타입별 on/off 토글
+
+- **기능**: 업무 타입(프로젝트/답사/설치계획/유지보수/기타업무)별로 Slack 알림 사용/미사용 토글. 필요에 따라 특정 업무만 켜거나 끔
+- **동작**: `notify_types_enabled`(AppSetting JSON, 기본 전부 on). 끈 타입은 **등록·상태변경·지연 요약·담당자 DM 모든 알림 미발송**
+- **구현**: `lib/notify.ts` `getTypesEnabled()`/`typeEnabled()` — `notifyTaskEvent`·`notifyTaskStatusChanged` 진입 게이트 + `runDelayNotifications`에서 지연 목록을 활성 타입만 필터. 설정 API GET/PUT에 `typesEnabled`, 설정 페이지에 "업무별 알림 사용" 카드(5개 체크박스, 전역 off면 비활성)
+- **검증(dev2)**: `tsc` 0오류. E2E — ETC off 시 등록 미발송·지연 요약에서 제외, on 시 정상 발송 확인
+- 영향 파일: `lib/notify.ts`, `app/api/settings/notifications/route.ts`, `app/settings/notifications/page.tsx`
+
+---
+
 ## 2026-07-07 | Slack 채널 알림 담당자 멘션(태그) 전환
 
 - **변경**: 등록/상태변경 채널 알림의 담당자 필드를 이름 텍스트("홍길동 외 1명") → **Slack 멘션 태그(`<@ID>`)**로. 태그되면 담당자에게 개인 알림이 울림

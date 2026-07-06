@@ -21,6 +21,7 @@ interface Config {
   delayInterval: string
   activeDelayInterval: string
   dmEnabled: boolean
+  typesEnabled: Record<string, boolean>
   delayRules: DelayRules
   statusDwell: StatusDwell
   statusOptions: Record<string, string[]>
@@ -142,7 +143,7 @@ export default function NotificationSettingsPage() {
       const res = await fetch('/api/settings/notifications', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: cfg.enabled, eventsEnabled: cfg.eventsEnabled, delayInterval: cfg.delayInterval, dmEnabled: cfg.dmEnabled, delayRules: cfg.delayRules, statusDwell: cfg.statusDwell, fields: cfg.fields }),
+        body: JSON.stringify({ enabled: cfg.enabled, eventsEnabled: cfg.eventsEnabled, delayInterval: cfg.delayInterval, dmEnabled: cfg.dmEnabled, typesEnabled: cfg.typesEnabled, delayRules: cfg.delayRules, statusDwell: cfg.statusDwell, fields: cfg.fields }),
       })
       if (res.ok) {
         router.refresh()
@@ -195,6 +196,26 @@ export default function NotificationSettingsPage() {
             </span>
             <input type="checkbox" className="h-5 w-5 accent-primary" checked={cfg.eventsEnabled} onChange={(e) => setCfg({ ...cfg, eventsEnabled: e.target.checked })} disabled={!cfg.enabled} />
           </label>
+        </div>
+
+        {/* 업무별 알림 사용 */}
+        <div className="mb-6 rounded-xl border bg-card p-4">
+          <p className="text-sm font-medium text-foreground mb-1">업무별 알림 사용</p>
+          <p className="text-xs text-muted-foreground mb-3">끈 업무 타입은 등록·상태변경·지연·DM 모든 알림이 발송되지 않습니다.</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+            {cfg.taskTypes.map((t) => (
+              <label key={t} className="flex items-center gap-2 cursor-pointer text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-primary"
+                  checked={cfg.typesEnabled[t] !== false}
+                  onChange={(e) => setCfg({ ...cfg, typesEnabled: { ...cfg.typesEnabled, [t]: e.target.checked } })}
+                  disabled={!cfg.enabled}
+                />
+                <span>{cfg.labels[t]}</span>
+              </label>
+            ))}
+          </div>
         </div>
 
         {/* 지연 감지 */}

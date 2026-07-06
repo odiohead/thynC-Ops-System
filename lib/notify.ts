@@ -12,7 +12,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getSlackMode, resolveTargetChannel, slackPostMessage, slackLookupUserByEmail } from '@/lib/slack'
-import { FIELD_CATALOG, DEFAULT_FIELDS, TASK_TYPE_LABELS } from '@/lib/notifyFields'
+import { FIELD_CATALOG, DEFAULT_FIELDS, TASK_TYPE_LABELS, TASK_TYPES } from '@/lib/notifyFields'
 import { findDelayedTasks, type DelayedItem, type AssigneeUser } from '@/lib/delay-rules'
 
 export type NotifyEventType = 'task_created' | 'task_status_changed' | 'delayed'
@@ -145,6 +145,26 @@ export async function sendConnectionTest(): Promise<void> {
 // ─────────────────────────────────────────────────────────────
 
 export type TaskType = 'PROJECT' | 'SITE_VISIT' | 'INSTALL_PLAN' | 'MAINTENANCE' | 'ETC'
+
+/** 업무 타입별 Slack 사용 여부 (notify_types_enabled, 기본 전부 on). 이벤트·지연·DM 모두 이 게이트 적용 */
+export async function getTypesEnabled(): Promise<Record<TaskType, boolean>> {
+  const result = {} as Record<TaskType, boolean>
+  for (const t of TASK_TYPES) result[t] = true
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: 'notify_types_enabled' } })
+    if (row?.value) {
+      const parsed = JSON.parse(row.value) as Partial<Record<TaskType, boolean>>
+      for (const t of TASK_TYPES) if (parsed[t] === false) result[t] = false
+    }
+  } catch (err) {
+    console.error('[notify] notify_types_enabled 파싱 실패:', err)
+  }
+  return result
+}
+
+async function typeEnabled(taskType: TaskType): Promise<boolean> {
+  return (await getTypesEnabled())[taskType]
+}
 
 /** AppSetting 이벤트 알림 게이트: notify_enabled(기본 off) && notify_events_enabled(기본 on) */
 async function eventsEnabled(): Promise<boolean> {
@@ -404,6 +424,7 @@ export async function notifyTaskEvent(input: {
 }): Promise<void> {
   try {
     if (!(await eventsEnabled())) return
+    if (!(await typeEnabled(input.taskType))) return
 
     // 멱등성: 같은 업무의 등록 알림이 이미 발송(sent)됐으면 스킵(재시도·중복 POST 차단).
     // Task 미러가 불완전(프로젝트·답사 POST는 Task 미생성)해도 refCode 기준이라 안전.
@@ -444,6 +465,7 @@ export async function notifyTaskStatusChanged(input: {
 }): Promise<void> {
   try {
     if (!(await eventsEnabled())) return
+    if (!(await typeEnabled(input.taskType))) return
 
     const enriched = await enrichTask(input.taskType, input.refCode)
     if (!enriched) return
@@ -656,9 +678,10 @@ export async function runDelayNotifications(): Promise<void> {
     const g = await prisma.appSetting.findUnique({ where: { key: 'notify_enabled' } })
     if ((g?.value ?? 'off') !== 'on') return
 
-    const items = await findDelayedTasks()
+    const types = await getTypesEnabled()
+    const items = (await findDelayedTasks()).filter((i) => types[i.taskType])
     if (items.length === 0) {
-      console.log('[notify] 지연 업무 없음 — 미발송')
+      console.log('[notify] 지연 업무 없음(또는 전 타입 비활성) — 미발송')
       return
     }
 

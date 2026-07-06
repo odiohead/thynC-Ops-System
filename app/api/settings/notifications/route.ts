@@ -5,7 +5,7 @@ import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { FIELD_CATALOG, DEFAULT_FIELDS, TASK_TYPES, TASK_TYPE_LABELS } from '@/lib/notifyFields'
 import { startNotifyScheduler, getNotifyInterval } from '@/lib/notify-scheduler'
 import { getDelayRules, getStatusDwellRules, DEFAULT_DELAY_RULES, type DelayRules, type StatusDwellRules } from '@/lib/delay-rules'
-import type { TaskType } from '@/lib/notify'
+import { getTypesEnabled, type TaskType } from '@/lib/notify'
 
 const DELAY_INTERVALS = ['off', '1h', '6h', '24h']
 const PRIORITIES = ['긴급', '높음', '보통', '낮음']
@@ -103,6 +103,7 @@ export async function GET(request: NextRequest) {
     delayInterval: map['notify_delay_interval'] ?? 'off',
     activeDelayInterval: getNotifyInterval(),
     dmEnabled: (map['notify_dm_enabled'] ?? 'off') === 'on',
+    typesEnabled: await getTypesEnabled(),
     delayRules: await getDelayRules(),
     statusDwell: await getStatusDwellRules(),
     statusOptions: await getStatusOptions(),
@@ -122,11 +123,14 @@ export async function PUT(request: NextRequest) {
   }
 
   const body = await request.json()
-  const { enabled, eventsEnabled, fields, delayInterval, dmEnabled, delayRules, statusDwell } = body
+  const { enabled, eventsEnabled, fields, delayInterval, dmEnabled, delayRules, statusDwell, typesEnabled } = body
   const delayVal = DELAY_INTERVALS.includes(delayInterval) ? delayInterval : 'off'
   const dmVal = dmEnabled ? 'on' : 'off'
   const cleanRules = sanitizeDelayRules(delayRules)
   const cleanDwell = sanitizeStatusDwell(statusDwell)
+  // 업무 타입별 on/off — 명시적으로 false인 것만 off, 나머지 on
+  const cleanTypes = {} as Record<TaskType, boolean>
+  for (const t of TASK_TYPES) cleanTypes[t] = !(typesEnabled && typesEnabled[t] === false)
 
   // 필드는 카탈로그에 있는 key만 허용 (미지정 타입은 기본값)
   const clean = {} as Record<TaskType, string[]>
@@ -147,6 +151,7 @@ export async function PUT(request: NextRequest) {
     prisma.appSetting.upsert({ where: { key: 'notify_dm_enabled' }, update: { value: dmVal }, create: { key: 'notify_dm_enabled', value: dmVal } }),
     prisma.appSetting.upsert({ where: { key: 'notify_delay_rules' }, update: { value: JSON.stringify(cleanRules) }, create: { key: 'notify_delay_rules', value: JSON.stringify(cleanRules) } }),
     prisma.appSetting.upsert({ where: { key: 'notify_status_dwell' }, update: { value: JSON.stringify(cleanDwell) }, create: { key: 'notify_status_dwell', value: JSON.stringify(cleanDwell) } }),
+    prisma.appSetting.upsert({ where: { key: 'notify_types_enabled' }, update: { value: JSON.stringify(cleanTypes) }, create: { key: 'notify_types_enabled', value: JSON.stringify(cleanTypes) } }),
   ])
 
   // 지연 감지 스케줄러 즉시 반영
@@ -159,7 +164,7 @@ export async function PUT(request: NextRequest) {
     resource: 'setting:notifications',
     resourceId: 'notifications',
     resourceLabel: 'Slack 알림 설정',
-    after: { enabled, eventsEnabled, delayInterval: delayVal, dmEnabled: dmVal, delayRules: cleanRules, statusDwell: cleanDwell, fields: clean },
+    after: { enabled, eventsEnabled, delayInterval: delayVal, dmEnabled: dmVal, typesEnabled: cleanTypes, delayRules: cleanRules, statusDwell: cleanDwell, fields: clean },
   })
 
   return NextResponse.json({ message: '저장되었습니다.', fields: clean })

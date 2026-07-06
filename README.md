@@ -673,7 +673,7 @@ prisma/
 - 주요 업무(프로젝트/답사/설치계획/유지보수/기타업무) **등록 시 + 이후 상태 변경 시마다 Slack 채널 알림** (Phase 2 완료). 완료도 "→ 완료" 상태 변경의 한 경우
 - 전송 어댑터 `lib/slack.ts`(의존성0 fetch) + 정책·로그 `lib/notify.ts`. 발송 실패는 업무 API를 절대 깨지 않는 best-effort
 - **발송 모드** (`SLACK_NOTIFY_MODE`): `off`(미발송) / `test`(전부 테스트 채널 + `[DEV]` prefix, 비-production은 live 자동 강등) / `live`(운영). DEV는 항상 test
-- **게이트**: AppSetting `notify_enabled`(기본 off) + `notify_events_enabled`(기본 on). 채널은 `SLACK_CHANNEL_MAIN` 단일
+- **게이트**: AppSetting `notify_enabled`(기본 off) + `notify_events_enabled`(기본 on) + **업무 타입별 `notify_types_enabled`(기본 전부 on, 끈 타입은 등록·상태변경·지연·DM 전부 미발송)**. 채널은 `SLACK_CHANNEL_MAIN` 단일
 - **상태 변경 감지**: 타입별 상태 시그니처(프로젝트=공사상태, 답사/유지보수/기타업무=상태명, 설치계획=작성/회신여부)를 직전 발송 로그와 비교해 **실제 변경 시에만** 발송(from→to 표기). 등록 알림은 `refCode`당 1회 dedup. (업무현황 완료 체크박스는 원본 상태 미변경이라 알림 대상 아님)
 - 메시지: 고정(이모지+타입+병원명/제목+상세 링크, 등록 🆕 / 상태변경 🔄 `접수 → 처리중`) + **타입별 선택 필드**
 - **담당자 멘션**: 담당자 필드는 Slack 태그(`<@ID>`) — 단 계정 발송 플래그 on + 매핑 성공인 사람만, 그 외는 이름 텍스트 폴백
