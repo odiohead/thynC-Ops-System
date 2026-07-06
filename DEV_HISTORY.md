@@ -17,7 +17,8 @@
 - **간트차트**: `h-screen`+모바일 헤더 pt-14 이중 적용으로 하단 56px 잘리던 문제 보정(`h-[calc(100dvh-3.5rem)] lg:h-screen`), min-width 가로 스크롤은 기존 구조 확인(정상)
 - **AI 어시스턴트**: 상담 정리 패널 모바일 풀스크린 오버레이 전환(닫기 버튼, lucide X), 채팅 높이 dvh 보정, 입력영역 safe-area
 - **셀프 코드리뷰 반영**: hospitals 목록 `role === 'ADMIN'` 하드코딩 → `isAdminOrAbove` (SUPER_ADMIN이 Excel 가져오기·Drive 내보내기 버튼 못 보던 실버그), safe-area 클래스 덮어쓰기 함정 제거, 필터 래퍼 패턴 통일(sm:flex), 미사용 xs 브레이크포인트·pt-safe 제거
-- **검증**: `tsc --noEmit` 0오류. 빌드·PM2 재시작은 사용자 요청 시 진행 예정 (규칙 준수)
+- **검증**: `tsc --noEmit` 0오류
+- **DEV·PROD 반영 완료 (2026-07-06)**: dev2에서 커밋 `7e50750` push → PROD pull(2커밋: docs `07683a7` + 모바일 `7e50750`) → 힙4GB 빌드 → `pm2 restart thync-prod`. 순수 UI라 npm install·DB 마이그레이션 불필요. 스모크: login 200·root 307·`ops.seersthync.com` 307 ✅. error 로그의 `/api/etc-tasks` 항목은 기존 `GOOGLE_CALENDAR_ETC_TASK_ID` env 미설정 캘린더 스킵 경고(예상 동작, 이번 배포와 무관)
 - **남은 백로그**: 모바일 카드 셸·빈 상태 플레이스홀더가 8개 페이지에 중복 — 공유 `MobileListCard`/`EmptyState` 컴포넌트로 통합 여지. users 카드/테이블 액션 버튼 중복 → in-file 컴포넌트 추출 여지
 - 영향 파일: `app/layout.tsx`, `app/globals.css`, `tailwind.config.ts`, `app/components/{Navigation,useOverlayDismiss(신규),DaewoongSelectModal,FieldEngineerSelectModal}.tsx`, `app/components/ui/Modal.tsx`, `app/{page,hospitals/page,projects/page,install-plans/page,site-visits/page,maintenances/page,etc-tasks/page,tasks/page,users/page,ai-assistant/page,projects/calendar/page}.tsx`, `app/hospitals/_components/{HospitalFilters,Pagination}.tsx`, `app/projects/_components/ProjectFilters.tsx`, `app/{maintenances/MaintenanceForm,maintenances/MaintenanceVisitPicker,site-visits/SiteVisitForm,etc-tasks/EtcTaskForm}.tsx`, `app/wiki/{layout,page}.tsx`, `app/wiki/components/WikiSidebar.tsx`
 
