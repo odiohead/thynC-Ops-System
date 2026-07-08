@@ -185,7 +185,7 @@ const res = await fetch(`/api/wiki/pages?refType=hospital&refCode=${code}`)
 ### 작업 시작 시
 1. `CLAUDE.md` 읽기 (이 파일)
 2. `README.md` 읽기 (스택·스키마·API 전체 형상)
-3. `DEV_HISTORY.md` 최근 항목 확인 (현재 개발 상태 파악)
+3. `DEV_HISTORY.md`는 **상단 최근 10개 항목만** 읽기 (전체 읽기 금지 — 파일이 커서 컨텍스트 낭비. 과거 이력이 필요하면 Grep으로 키워드 검색)
 4. **위키 관련 작업인 경우** `wiki_dev_schedule.md` 추가 확인 — 현재 어느 Phase에 있는지, 다음 Phase 게이트가 무엇인지 파악. Phase 0 미확정 상태에서 Phase 1 코드 작성 금지
 
 ### 작업 완료 시

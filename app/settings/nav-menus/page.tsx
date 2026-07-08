@@ -20,6 +20,7 @@ interface NavItem {
   href: string
   iconKey: string | null
   parentKey: string | null
+  groupLabel: string | null
   allowedRoles: string[]
   allowedOrgCodes: string[]
   isActive: boolean
@@ -42,7 +43,7 @@ export default function NavMenuSettingsPage() {
   const [busy, setBusy] = useState(false)
   const [isAdding, setIsAdding] = useState(false)
   const [addData, setAddData] = useState({
-    menuKey: '', label: '', href: '', iconKey: '',
+    menuKey: '', label: '', href: '', iconKey: '', groupLabel: '',
     parentKey: '', allowedRoles: [] as string[], allowedOrgCodes: [] as string[],
   })
 
@@ -75,6 +76,7 @@ export default function NavMenuSettingsPage() {
     setEditData({
       label: item.label,
       iconKey: item.iconKey,
+      groupLabel: item.groupLabel,
       allowedRoles: [...item.allowedRoles],
       allowedOrgCodes: [...item.allowedOrgCodes],
     })
@@ -179,6 +181,7 @@ export default function NavMenuSettingsPage() {
           ...addData,
           iconKey: addData.iconKey || null,
           parentKey: addData.parentKey || null,
+          groupLabel: addData.groupLabel || null,
         }),
       })
       if (!res.ok) {
@@ -187,7 +190,7 @@ export default function NavMenuSettingsPage() {
         return
       }
       setIsAdding(false)
-      setAddData({ menuKey: '', label: '', href: '', iconKey: '', parentKey: '', allowedRoles: [], allowedOrgCodes: [] })
+      setAddData({ menuKey: '', label: '', href: '', iconKey: '', groupLabel: '', parentKey: '', allowedRoles: [], allowedOrgCodes: [] })
       await fetchData()
     } finally {
       setBusy(false)
@@ -267,7 +270,7 @@ export default function NavMenuSettingsPage() {
     )
   }
 
-  function renderTable(title: string, list: NavItem[]) {
+  function renderTable(title: string, list: NavItem[], withGroup = false) {
     return (
       <div className="mb-8">
         <h2 className="text-base font-semibold text-gray-800 mb-3">{title}</h2>
@@ -278,6 +281,7 @@ export default function NavMenuSettingsPage() {
                 <th className="px-3 py-2 text-left w-16">순서</th>
                 <th className="px-3 py-2 text-left w-10">아이콘</th>
                 <th className="px-3 py-2 text-left">메뉴명</th>
+                {withGroup && <th className="px-3 py-2 text-left w-32">그룹</th>}
                 <th className="px-3 py-2 text-left w-44">경로</th>
                 <th className="px-3 py-2 text-left">허용 역할</th>
                 <th className="px-3 py-2 text-left">허용 소속</th>
@@ -339,6 +343,23 @@ export default function NavMenuSettingsPage() {
                         </div>
                       )}
                     </td>
+                    {/* 그룹 (설정 하위만) */}
+                    {withGroup && (
+                      <td className="px-3 py-2">
+                        {isEditing ? (
+                          <input
+                            value={editData.groupLabel ?? ''}
+                            onChange={e => setEditData({ ...editData, groupLabel: e.target.value })}
+                            placeholder="예: 자재관리"
+                            className="w-28 border border-gray-300 rounded px-2 py-1 text-xs"
+                          />
+                        ) : (
+                          item.groupLabel
+                            ? <span className="inline-flex rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">{item.groupLabel}</span>
+                            : <span className="text-xs text-gray-300">-</span>
+                        )}
+                      </td>
+                    )}
                     {/* 경로 */}
                     <td className="px-3 py-2 text-xs text-gray-500 font-mono">{item.href}</td>
                     {/* 허용 역할 */}
@@ -487,6 +508,15 @@ export default function NavMenuSettingsPage() {
               </select>
             </div>
             <div>
+              <label className="text-xs text-gray-600">그룹 (설정 하위 메뉴만 — 네비 그룹 헤더)</label>
+              <input
+                value={addData.groupLabel}
+                onChange={e => setAddData({ ...addData, groupLabel: e.target.value })}
+                placeholder="예: 자재관리"
+                className="mt-0.5 w-full border border-gray-300 rounded px-2 py-1 text-sm"
+              />
+            </div>
+            <div>
               <label className="text-xs text-gray-600 block mb-1">허용 역할 (비어있으면 전체)</label>
               <RoleCheckboxes
                 selected={addData.allowedRoles}
@@ -514,7 +544,7 @@ export default function NavMenuSettingsPage() {
       )}
 
       {renderTable('메인 메뉴', mainItems)}
-      {renderTable('설정 하위 메뉴', settingsItems)}
+      {renderTable('설정 하위 메뉴', settingsItems, true)}
     </div>
   )
 }

@@ -82,6 +82,8 @@ model Hospital {
   consultationQueues  ConsultationQueue[]
   tasks               Task[]
   etcTaskHospitals    EtcTaskHospital[]
+  inventoryTransactions InventoryTransaction[]
+  inventoryUnits        InventoryUnit[]
 
   @@map("hospitals")
   @@schema("public")
@@ -128,6 +130,8 @@ model StatusCode {
   maintenanceTypes              Maintenance[]          @relation("MaintenanceType")
   maintenanceStatuses           Maintenance[]          @relation("MaintenanceStatus")
   etcTaskStatuses               EtcTask[]              @relation("EtcTaskStatus")
+  manufacturerItems             InventoryItem[]        @relation("ItemManufacturer")
+  reasonTransactions            InventoryTransaction[] @relation("TxReason")
 
   @@unique([name, category])
   @@map("status_codes")
@@ -216,6 +220,9 @@ model User {
   vehicleReservations     VehicleReservation[]         @relation("VehicleReservationUser")
   vehicleLogsDriven       VehicleLog[]                 @relation("VehicleLogDriver")
   vehicleLogsCreated      VehicleLog[]                 @relation("VehicleLogCreator")
+  inventoryManager        InventoryManager?
+  inventoryTxActed        InventoryTransaction[]       @relation("InventoryTxActor")
+  inventoryTxCanceled     InventoryTransaction[]       @relation("InventoryTxCanceler")
 
   @@map("users")
   @@schema("public")
@@ -257,6 +264,7 @@ model DeviceInfo {
   updatedAt   DateTime @updatedAt @map("updated_at")
   devices         ProjectDevice[]
   hospitalDevices HospitalDevice[]
+  inventoryItems  InventoryItem[]
 
   @@map("device_info")
   @@schema("public")
@@ -612,6 +620,7 @@ model NavMenuItem {
   href            String   @map("href") @db.VarChar(200)
   iconKey         String?  @map("icon_key") @db.VarChar(50)
   parentKey       String?  @map("parent_key") @db.VarChar(100)
+  groupLabel      String?  @map("group_label") @db.VarChar(50) // 설정 하위 메뉴 기능별 그룹 (네비 그룹 헤더)
   allowedRoles    String[] @default([]) @map("allowed_roles")
   allowedOrgCodes String[] @default([]) @map("allowed_org_codes")
   isActive        Boolean  @default(true) @map("is_active")
@@ -620,6 +629,213 @@ model NavMenuItem {
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("nav_menu_items")
+  @@schema("public")
+}
+
+// ─── 자재관리(WMS) Phase 1 ─── (function_wms.md §4)
+
+model Warehouse {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique @db.VarChar(50)
+  memo      String?
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  stocks    InventoryStock[]
+  txFrom    InventoryTransaction[] @relation("TxFromWarehouse")
+  txTo      InventoryTransaction[] @relation("TxToWarehouse")
+  units     InventoryUnit[]
+
+  @@map("warehouses")
+  @@schema("public")
+}
+
+model InventoryCategory {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(50)
+  parentId  Int?     @map("parent_id")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  parent    InventoryCategory?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children  InventoryCategory[] @relation("CategoryTree")
+  items     InventoryItem[]
+
+  // UNIQUE (COALESCE(parent_id,0), name)는 SQL 전용 (Prisma 미표현 — 마이그레이션 참조)
+  @@index([parentId])
+  @@map("inventory_categories")
+  @@schema("public")
+}
+
+model InventoryItem {
+  id              Int         @id @default(autoincrement())
+  itemCode        String      @unique @map("item_code") @db.VarChar(20)
+  name            String      @db.VarChar(100)
+  categoryId      Int?        @map("category_id")
+  spec            String?     @db.VarChar(200)
+  unit            String      @default("EA") @db.VarChar(20)
+  isSerialManaged Boolean     @default(false) @map("is_serial_managed")
+  deviceInfoId    Int?        @map("device_info_id")
+  manufacturerId  Int?        @map("manufacturer_id")
+  refPrice        Int?        @map("ref_price")
+  memo            String?
+  isActive        Boolean     @default(true) @map("is_active")
+  sortOrder       Int         @default(0) @map("sort_order")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  category        InventoryCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  deviceInfo      DeviceInfo? @relation(fields: [deviceInfoId], references: [id], onDelete: SetNull)
+  manufacturer    StatusCode? @relation("ItemManufacturer", fields: [manufacturerId], references: [id], onDelete: SetNull)
+  stocks          InventoryStock[]
+  transactions    InventoryTransaction[]
+  units           InventoryUnit[]
+  components      InventoryItemComponent[] @relation("ComponentParent") // 이 품목이 주자재일 때의 부자재 구성
+  usedIn          InventoryItemComponent[] @relation("ComponentChild")  // 이 품목이 부자재로 소속된 주자재
+
+  @@index([categoryId])
+  @@map("inventory_items")
+  @@schema("public")
+}
+
+// 인벤토리 마스터 — 대웅제약재고 / 평가용재고(이관 잠금) / 판매용재고
+model Inventory {
+  id               Int      @id @default(autoincrement())
+  name             String   @unique @db.VarChar(50)
+  isTransferLocked Boolean  @default(false) @map("is_transfer_locked") // true면 TRANSFER 출발·도착 모두 불가
+  linkHospital     Boolean  @default(false) @map("link_hospital") // true면 출고 시 병원 연결 허용 (대웅제약재고)
+  memo             String?
+  isActive         Boolean  @default(true) @map("is_active")
+  sortOrder        Int      @default(0) @map("sort_order")
+  createdAt        DateTime @default(now()) @map("created_at")
+  stocks           InventoryStock[]
+  txFrom           InventoryTransaction[] @relation("TxInventory")
+  txTo             InventoryTransaction[] @relation("TxToInventory")
+  units            InventoryUnit[]
+
+  @@map("inventories")
+  @@schema("public")
+}
+
+// 주자재-부자재 매핑 (1단계 깊이 — 부자재는 다시 주자재가 될 수 없음, API 검증)
+model InventoryItemComponent {
+  parentItemId Int      @map("parent_item_id")
+  childItemId  Int      @map("child_item_id")
+  quantity     Int      @default(1) // 주자재 1개당 부자재 구성 수량
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  parent       InventoryItem @relation("ComponentParent", fields: [parentItemId], references: [id], onDelete: Cascade)
+  child        InventoryItem @relation("ComponentChild", fields: [childItemId], references: [id], onDelete: Cascade)
+
+  @@id([parentItemId, childItemId])
+  @@index([childItemId])
+  @@map("inventory_item_components")
+  @@schema("public")
+}
+
+model InventoryManager {
+  id        Int      @id @default(autoincrement())
+  userId    String   @unique @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("inventory_managers")
+  @@schema("public")
+}
+
+model InventoryStock {
+  itemId      Int      @map("item_id")
+  warehouseId Int      @map("warehouse_id")
+  inventoryId Int      @map("inventory_id")
+  quantity    Int      @default(0)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  item        InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse   Warehouse     @relation(fields: [warehouseId], references: [id])
+  inventory   Inventory     @relation(fields: [inventoryId], references: [id])
+
+  @@id([itemId, warehouseId, inventoryId])
+  @@map("inventory_stocks")
+  @@schema("public")
+}
+
+model InventoryTransaction {
+  id            Int       @id @default(autoincrement())
+  txCode        String    @unique @map("tx_code") @db.VarChar(20)
+  txType        String    @map("tx_type") @db.VarChar(10) // IN | OUT | MOVE | TRANSFER
+  reasonId      Int?      @map("reason_id") // IN/OUT 유형 (StatusCode STOCK_IN_TYPE/STOCK_OUT_TYPE), MOVE/TRANSFER는 NULL
+  itemId        Int       @map("item_id")
+  warehouseId   Int       @map("warehouse_id")
+  toWarehouseId Int?      @map("to_warehouse_id") // MOVE·TRANSFER 도착 위치
+  inventoryId   Int       @map("inventory_id")
+  toInventoryId Int?      @map("to_inventory_id") // TRANSFER 도착 인벤토리
+  quantity      Int
+  transferDate  DateTime? @map("transfer_date") @db.Date // TRANSFER 이관일자
+  transferPrice Int?      @map("transfer_price") // TRANSFER 이관 단가 (참고용, 선택)
+  destination   String?   @db.VarChar(100) // OUT 출고처 (자유 텍스트 — 유관부서·거래처 등)
+  hospitalCode  String?   @map("hospital_code")
+  workType      String?   @map("work_type") @db.VarChar(20)
+  refCode       String?   @map("ref_code") @db.VarChar(50)
+  parentTxId    Int?      @map("parent_tx_id") // 세트출고 자식 전표 → 주자재 전표
+  note          String?
+  actorId       String    @map("actor_id")
+  canceledAt    DateTime? @map("canceled_at")
+  canceledById  String?   @map("canceled_by_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  item          InventoryItem @relation(fields: [itemId], references: [id])
+  warehouse     Warehouse     @relation("TxFromWarehouse", fields: [warehouseId], references: [id])
+  toWarehouse   Warehouse?    @relation("TxToWarehouse", fields: [toWarehouseId], references: [id])
+  inventory     Inventory     @relation("TxInventory", fields: [inventoryId], references: [id])
+  toInventory   Inventory?    @relation("TxToInventory", fields: [toInventoryId], references: [id])
+  reasonCode    StatusCode?   @relation("TxReason", fields: [reasonId], references: [id])
+  hospital      Hospital?     @relation(fields: [hospitalCode], references: [hospitalCode])
+  actor         User          @relation("InventoryTxActor", fields: [actorId], references: [id])
+  canceledBy    User?         @relation("InventoryTxCanceler", fields: [canceledById], references: [id])
+  parentTx      InventoryTransaction?  @relation("TxSetComponents", fields: [parentTxId], references: [id])
+  childTxs      InventoryTransaction[] @relation("TxSetComponents")
+  units         InventoryTransactionUnit[]
+
+  @@index([itemId, createdAt(sort: Desc)])
+  @@index([hospitalCode])
+  @@index([workType, refCode])
+  @@index([createdAt(sort: Desc)])
+  @@index([inventoryId, createdAt(sort: Desc)])
+  @@index([parentTxId])
+  @@map("inventory_transactions")
+  @@schema("public")
+}
+
+model InventoryUnit {
+  id           Int      @id @default(autoincrement())
+  itemId       Int      @map("item_id")
+  serialNo     String   @map("serial_no") @db.VarChar(100)
+  status       String   @default("IN_STOCK") @db.VarChar(10)
+  warehouseId  Int?     @map("warehouse_id")
+  inventoryId  Int      @map("inventory_id")
+  hospitalCode String?  @map("hospital_code")
+  memo         String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  item         InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse    Warehouse?    @relation(fields: [warehouseId], references: [id])
+  inventory    Inventory     @relation(fields: [inventoryId], references: [id])
+  hospital     Hospital?     @relation(fields: [hospitalCode], references: [hospitalCode])
+  transactions InventoryTransactionUnit[]
+
+  @@unique([itemId, serialNo])
+  @@index([itemId, status])
+  @@index([hospitalCode])
+  @@index([inventoryId])
+  @@map("inventory_units")
+  @@schema("public")
+}
+
+model InventoryTransactionUnit {
+  transactionId Int @map("transaction_id")
+  unitId        Int @map("unit_id")
+  transaction   InventoryTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  unit          InventoryUnit        @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@id([transactionId, unitId])
+  @@index([unitId])
+  @@map("inventory_transaction_units")
   @@schema("public")
 }
 

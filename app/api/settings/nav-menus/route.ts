@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json()
-  const { menuKey, label, href, iconKey, parentKey, allowedRoles, allowedOrgCodes, sortOrder } = body
+  const { menuKey, label, href, iconKey, parentKey, allowedRoles, allowedOrgCodes, sortOrder, groupLabel } = body
 
   if (!menuKey?.trim()) {
     return NextResponse.json({ error: '메뉴 키를 입력해주세요.' }, { status: 400 })
@@ -62,6 +62,7 @@ export async function POST(request: NextRequest) {
       href: href.trim(),
       iconKey: iconKey || null,
       parentKey: parentKey || null,
+      groupLabel: groupLabel?.trim() || null,
       allowedRoles: allowedRoles ?? [],
       allowedOrgCodes: allowedOrgCodes ?? [],
       sortOrder: sortOrder ?? 0,

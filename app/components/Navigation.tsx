@@ -57,6 +57,7 @@ interface NavItem {
   href: string
   iconKey: string | null
   parentKey: string | null
+  groupLabel?: string | null // 설정 하위 메뉴 기능별 그룹 헤더
   allowedRoles: string[]
   allowedOrgCodes: string[]
   sortOrder: number
@@ -181,6 +182,16 @@ export default function Navigation() {
     .filter(i => isMenuVisible(i, userRole, userOrgCode))
     .sort((a, b) => a.sortOrder - b.sortOrder)
 
+  // 설정 하위 메뉴를 기능별 그룹으로 묶기 (그룹 순서 = 정렬 후 첫 등장 순, 그룹 없는 항목은 맨 앞 무제목 그룹)
+  const settingsGrouped: { label: string | null; items: NavItem[] }[] = []
+  for (const child of settingsChildren) {
+    const key = child.groupLabel?.trim() || null
+    const g = settingsGrouped.find((x) => x.label === key)
+    if (g) g.items.push(child)
+    else if (key === null) settingsGrouped.unshift({ label: null, items: [child] })
+    else settingsGrouped.push({ label: key, items: [child] })
+  }
+
   const usersItem = menuItems.find(i => i.menuKey === 'users')
   const usersVisible = usersItem && isMenuVisible(usersItem, userRole, userOrgCode)
 
@@ -229,11 +240,22 @@ export default function Navigation() {
 
                 {settingsOpen && (
                   <div className="ml-7 mt-0.5 space-y-0.5 border-l border-border pl-3">
-                    {settingsChildren.map(child => (
-                      <Link key={child.menuKey} href={child.href} className={navItemClass(isActive(child.href))}>
-                        {getMenuIcon(child.iconKey)}
-                        {child.label}
-                      </Link>
+                    {settingsGrouped.map((group, gi) => (
+                      <div key={group.label ?? '_'} className={gi > 0 ? 'pt-1' : ''}>
+                        {group.label && (
+                          <div className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70 select-none">
+                            {group.label}
+                          </div>
+                        )}
+                        <div className="space-y-0.5">
+                          {group.items.map(child => (
+                            <Link key={child.menuKey} href={child.href} className={navItemClass(isActive(child.href))}>
+                              {getMenuIcon(child.iconKey)}
+                              {child.label}
+                            </Link>
+                          ))}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 )}

@@ -24,7 +24,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   }
 
   const body = await request.json()
-  const { label, iconKey, allowedRoles, allowedOrgCodes, isActive, sortOrder } = body
+  const { label, iconKey, allowedRoles, allowedOrgCodes, isActive, sortOrder, groupLabel } = body
 
   if (label !== undefined && !label?.trim()) {
     return NextResponse.json({ error: '메뉴명을 입력해주세요.' }, { status: 400 })
@@ -44,6 +44,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if (allowedOrgCodes !== undefined) data.allowedOrgCodes = allowedOrgCodes
   if (isActive !== undefined) data.isActive = isActive
   if (sortOrder !== undefined) data.sortOrder = sortOrder
+  if (groupLabel !== undefined) data.groupLabel = groupLabel?.trim() || null
 
   const item = await prisma.navMenuItem.update({ where: { id }, data })
 

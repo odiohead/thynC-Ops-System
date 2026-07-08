@@ -4,6 +4,100 @@
 
 ---
 
+## 2026-07-08 | 자재관리 이관 보완(일자·단가·창고 자동선택) + 설정 메뉴 기능별 그룹화
+
+- **배경**: 사용자 피드백 2건 — ①이관 시 수량·일자·단가 입력 필드 필요(대웅제약재고→판매용재고 이관은 대웅이 재판매하는 개념. 단가는 참고용 선택값, 일자는 기본 오늘). "이관을 해보면 입력할 필드가 없다" — 기본 선택 창고에 재고가 없으면 버킷·수량 UI가 비활성으로 보이던 UX 문제 ②설정 하위 메뉴 25개가 평면 나열되어 가독성 저하 — 기능별 그룹 계층 필요
+- **DB(마이그레이션 `20260708200000_transfer_fields_and_settings_groups`)**: `inventory_transactions.transfer_date`(DATE)·`transfer_price`(INT, 참고용) + `nav_menu_items.group_label`(VARCHAR(50)) 추가. 설정 하위 25개 메뉴에 그룹 라벨·정렬 재부여 — **일반**(내 프로필·메뉴 관리) / **조직·계정**(소속·필드 엔지니어) / **병원·구축**(병원 상태·도입형태·구축상태·공사업체·기기·답사 상태) / **업무 유형·상태**(장애유형·유지보수/기타업무 상태·상담/문서유형) / **자재관리**(인벤토리·창고·품목 분류·제조사·입출고 유형·재고 담당자) / **차량** / **연동·알림**(심평원·메일·Slack)
+- **이관(TRANSFER) 보완**: 모달에 **이관일자**(date, 기본 오늘 KST)·**이관 단가**(원, 선택) 필드. 서버 검증(날짜 형식·음수 단가 400) + DATE 컬럼 UTC 자정 고정으로 날짜 밀림 방지. 이력·인벤토리 자재 상세·Excel export에 이관일자·단가 표시. **재고 있는 창고 자동 선택** — 출고/이동/이관 모달을 열 때 현재 선택 창고에 재고가 없으면 재고 있는 창고로 1회 자동 전환(빈 화면 방지). 수량 필드는 비시리얼 공통 입력, 시리얼은 직접 입력/스캔·목록 선택 그대로
+- **설정 메뉴 그룹화**: Navigation 설정 아코디언이 `group_label` 기준 **그룹 헤더 + 항목** 구조로 렌더(그룹 순서 = 정렬순 첫 등장). 메뉴 관리 페이지 설정 하위 테이블에 '그룹' 컬럼(인라인 편집)·추가 폼에 그룹 입력 — 그룹명은 자유 텍스트라 신규 그룹도 즉시 생성 가능
+- **검증(dev2)**: `tsc` 0오류 → 빌드 → 재시작 → E2E: 이관 일자/단가 저장(지정일 2026-07-08 정확 저장·미지정 시 오늘 기본·단가 미입력 NULL·음수 400), 이관 취소 원복, nav API 그룹 7종 순서·자재관리 그룹 6메뉴 확인. 테스트 전표는 취소로 원복
+- 영향 파일: `prisma/{schema.prisma,migrations/20260708200000.../}`, `lib/inventory.ts`, `app/api/inventory/transactions/{route,export/route}.ts`, `app/api/settings/nav-menus/{route,[id]/route}.ts`, `app/inventory/{transactions/page,components/TransactionModal,[invId]/items/[itemId]/page}`, `app/components/Navigation.tsx`, `app/settings/nav-menus/page.tsx`
+
+---
+
+## 2026-07-08 | 자재관리(WMS) — 인벤토리 자재 상세 라우트 분리 (`/inventory/[invId]/items/[itemId]`)
+
+- **배경**: 사용자 피드백 — 인벤토리 탭에서 자재 클릭 시 품목 마스터 페이지(전체 정보)로 이동해 인벤토리 분리가 무의미. 직전의 `?inv=` 쿼리 컨텍스트 승계는 클라이언트 전환 시점에 URL을 읽는 버그로 미동작(현황 페이지 탭이 URL에 반영되지 않은 상태에서 신규 페이지가 이전 주소를 읽음). **쿼리 방식 폐기, URL 경로 레벨로 인벤토리 승격** 재설계(사용자 승인)
+- **신규: 인벤토리 자재 상세** `/inventory/[invId]/items/[itemId]` — 경로에 인벤토리 고정. 인벤토리 뱃지 헤더 + 이 인벤토리의 재고 총량·위치별 칩 + 이 인벤토리의 입출고 이력(이관은 출발→도착 방향 표시)·개체 목록만 표시. 다른 인벤토리/전체 탭 없음(철저 분리). "품목 마스터 보기" 링크 제공
+- **전표 모달 인벤토리 고정 모드**: `fixedInventoryId` prop — 인벤토리 자재 상세에서 열면 입고/출고/이동/이관 전부 해당 인벤토리로 고정(select disabled `(고정)` 표시, 버킷도 해당 인벤토리만 로드). 기존 `defaultInventoryId`(현황 탭 기본값, 변경 가능)와 별개
+- **품목 마스터 상세 정리** (`/inventory/items/[id]`): 어정쩡한 인벤토리 탭 제거 → 기준정보·부자재 구성 관리 + **인벤토리별 재고 요약 카드**(카드 클릭 → 해당 인벤토리 자재 상세로 이동) + 전체 이력·개체 목록. breadcrumb `자재 현황 / 품목 마스터 / 코드`
+- **진입 규칙**: 현황·이력의 인벤토리 탭에서 자재 클릭 → 인벤토리 자재 상세 / 전체 탭·품목 관리에서 클릭 → 품목 마스터 상세
+- **검증(dev2)**: `tsc` 0오류 → 힙4GB 빌드(신규 라우트 등록 확인) → 재시작 → 스코프 라우트 3종·마스터·현황 200, 스코프 데이터 분리(평가용=개체 2·전표 1건만)는 API 레벨 재확인, 신규 에러 로그 0
+- 영향 파일: `app/inventory/[invId]/items/[itemId]/page.tsx(신규)`, `app/inventory/{page,transactions/page,items/[id]/page,components/TransactionModal}`, `README.md`, `function_wms.md`
+
+---
+
+## 2026-07-08 | 자재관리(WMS) Phase 9 보완 — 인벤토리 분리 레벨 상향·병원연결 제한·시리얼 바코드 대량 출고
+
+- **배경**: 사용자 피드백 4건 — ①탭에서 입출고 열면 인벤토리 기본값이 대웅제약 고정 ②이력·개체목록도 인벤토리 분리 필요(분리 레벨 상향) ③병원 연결은 대웅제약재고 출고만 ④재고 1만 개·1회 100~200개 출고 — 체크박스로 불가, 시리얼 직접 입력/바코드 스캔 필요
+- **DB(마이그레이션 `20260708150000_add_inventory_link_hospital`)**: `inventories.link_hospital`(BOOLEAN DEFAULT false, 대웅제약재고만 true) — 병원 연결 허용 인벤토리 플래그. 설정 페이지·API에 편집 칼럼 추가
+- **인벤토리 분리 레벨 상향**: 입출고 이력 페이지에 **인벤토리 탭**(전체/3종, 기존 select 필터 승격), 품목 상세에 **인벤토리 탭**(재고 칩·총재고 카드·입출고 이력·시리얼 개체 목록이 탭 기준으로 분리 조회). 현황↔이력 이동 시 `?inv=` 쿼리로 탭 유지
+- **품목 상세 인벤토리 컨텍스트 승계**: 현황·이력의 인벤토리 탭에서 품목 클릭 시 `?inv=`로 상세 진입 → 상세가 그 인벤토리로 스코프되어 열림(재고·이력·개체 전부 해당 인벤토리만, breadcrumb에 인벤토리명 표시, 탭 전환 시 URL 동기화). 부자재↔주자재 상호 링크·자재현황 복귀 링크도 컨텍스트 유지. 데이터 근거: 재고·개체·전표 레코드마다 `inventory_id` 독립 컬럼 보유(품목 기준정보만 인벤토리 공통)
+- **전표 모달 탭 컨텍스트**: `defaultInventoryId` prop — 현재 탭의 인벤토리가 기본 선택(입고=마스터 select preselect, 출고/이동/이관=해당 버킷 우선 선택)
+- **병원 연결 제한**: 출고 폼의 병원 검색·업무 연결은 `linkHospital` 인벤토리에서만 노출, 서버도 검증(그 외 인벤토리에 hospitalCode 오면 400). 평가용/판매용은 출고처 텍스트만
+- **시리얼 대량 출고 (바코드 스캔)**: 출고/이동/이관의 개체 지정을 **시리얼 직접 입력 textarea**(줄 단위 붙여넣기·바코드 리더기 연속 스캔)로 전환 — `lib/inventory.ts`가 `serials[]`를 개체로 해석(미등록 시리얼 400·버킷 불일치/비재고 409, 문제 시리얼 최대 10건 명시). 가용 개체 목록(최대 200개 표시)에서 클릭 추가/제거 병행, 기존 `unitIds` 경로도 유지
+- **검증(dev2)**: `tsc` 0오류 → 힙4GB 빌드 → 재시작 → **E2E 11/11 통과**(linkHospital 플래그·판매용+병원 400/대웅+병원 성공·시리얼 200개 벌크 입고→120개 직접입력 출고→30개 이관·미등록 시리얼 명시 400·출고된/타 인벤토리 시리얼 409·이력 인벤토리 분리). 테스트 데이터 정리(사용자 수기 입고분 평가용 2EA 보존)
+- **미반영**: git push·PROD 안 함 (Phase 6 일괄, 마이그레이션 누적 6건)
+- 영향 파일: `prisma/{schema.prisma,migrations/20260708150000.../}`, `lib/inventory.ts`, `app/api/settings/inventories/{route,[id]/route}.ts`, `app/inventory/{page,transactions/page,items/[id]/page,components/TransactionModal}`, `app/settings/inventories/page.tsx`, `function_wms.md`
+
+---
+
+## 2026-07-08 | 자재관리(WMS) Phase 9 — 인벤토리 재설계(3분리·이관)·주자재/부자재·유형 설정화·출고처·Excel export
+
+- **배경**: 사용자 재설계 요청. 소유×용도 2차원(Phase 7) 폐기 → **인벤토리 1차원**으로 전환. 재고 = **품목×위치×인벤토리**(대웅제약재고/평가용재고/판매용재고 — 같은 품목도 인벤토리별 수량·입출고 완전 독립). PROD 미배포 시점이라 구조 교체 부담 없음
+- **DB(마이그레이션 `20260708100000_redesign_inventory_inventories`)**: `inventories`(시드 3행, `is_transfer_locked` — 평가용 true) + `inventory_item_components`(주자재-부자재 매핑, 구성 수량, 1단계 깊이) 신설. stocks/transactions/units의 `owner_id`/`purpose_id` → `inventory_id` 치환(기존 데이터 **판매용재고** 백필 — 사용자 확정), stocks PK 3컬럼 재구성. transactions에 `to_inventory_id`(이관)·`destination`(출고처)·`parent_tx_id`(세트출고)·`reason_id`(유형 FK) 추가, `reason` VARCHAR 제거. STOCK_OWNER/PURPOSE StatusCode 삭제, `STOCK_IN_TYPE`/`STOCK_OUT_TYPE` 시드(회수 `RETURN`·폐기/불량 `DISPOSE` value = 시스템 유형). **안전재고 제거**(`safety_stock` 컬럼·부족 뱃지·`notify_stock_enabled`·`maybeNotifyLowStock` — 사용자 확정, 수량·입출고 집중), '실사조정' 유형 미시드
+- **이관(TRANSFER) 규칙**: 신규 전표 유형 — 출발·도착 인벤토리 모두 잠금 해제여야 허용. **대웅제약↔판매용 상호 이관, 평가용재고는 양방향 금지**(409). 시리얼 개체는 이관 시 `inventory_id` 소속 변경, 회수(반품)는 원래 인벤토리로만(우회 이관 차단 400). 취소는 역방향 복원
+- **주자재/부자재 + 세트출고**: 품목 상세 "부자재 구성" 카드(추가·수량·해제, ADMIN). 부자재↔주자재 겸직 금지(1단계, 409). 출고 모달 "부자재 함께 출고" — 비시리얼 부자재를 같은 위치·인벤토리에서 자동 차감(수량=출고수량×구성수량, 수정 가능), 자식 전표 `parent_tx_id` 연결, **부모 취소 시 자식 일괄 취소**, 부자재 재고 부족 시 전체 롤백 409. 시리얼 부자재는 세트 제외(개별 출고 안내)
+- **입출고 유형 설정화**: `/settings/stock-reasons`(입고/출고 2섹션, StatusCodeManager 재사용) + 공용 핸들러 `lib/stockReasonApi.ts`. 시스템 유형(value)·사용 중 유형 삭제 409, 카테고리 불일치 전표 400
+- **출고처**: OUT 전표 `destination` 자유 텍스트(유관부서 출고요청 구조 — 평가용/판매용은 병원 미연결 가능) + 기존 병원/업무 연결 병행(대웅제약재고 권장)
+- **Excel export**: 재고 현황·입출고 내역 다운로드(`stocks/export`·`transactions/export`, 화면 필터 그대로, 기존 `xlsx` 쓰기 재사용 — 신규 패키지 없음). 이력에 기간(from/to) 필터 추가
+- **UI**: `/inventory` 인벤토리 탭(전체/3종) + 주자재·부자재 뱃지, 전표 모달 4유형(인벤토리 select 1개·이관 도착 선택·출고처·세트출고), 이력 인벤토리 필터·이관 `A → B` 표기·세트 표기, 품목 상세 개체 목록 **인벤토리/위치/설치처 컬럼 분리**(DB도 전 필드 독립 컬럼 — 사용자 요청 확인), `/settings/inventories`(잠금 토글) 신설, `/settings/stock-types`(소유/용도) 제거. nav 메뉴 치환+추가
+- **검증(dev2)**: `tsc` 0오류 → 힙4GB 빌드 → `pm2 restart thync-dev` → **런타임 E2E 30/30 통과**(인벤토리 독립 입출고·초과출고 409·이관 허용/양방향 잠금 409·이관 취소 복원·부자재 매핑 규칙 4종·세트출고 차감/부족 롤백/부모취소 동반취소·시리얼 이관/회수 규칙·유형 CRUD/삭제보호·export 2종·이력 필터). 테스트 데이터 정리, 기존 실데이터(게이트웨이 5EA→판매용재고) 백필 무결
+- **미반영**: git push·PROD 안 함 (Phase 6에서 마이그레이션 누적 5건 일괄 배포 예정)
+- 영향 파일: `prisma/{schema.prisma,migrations/20260708100000.../}`, `lib/{inventory.ts(재작성),inventoryQuery.ts(신규),stockReasonApi.ts(신규),notify.ts}`, `app/api/inventory/{transactions(+export),stocks(+export),units,items,items/[id](+components),items/import}/`, `app/api/settings/{inventories(신규),stock-in-type(신규),stock-out-type(신규),stock-owner·stock-purpose(삭제),notifications}/`, `app/inventory/{page,transactions/page,items/page,items/[id]/page,components/TransactionModal}`, `app/settings/{inventories(신규),stock-reasons(신규),stock-types(삭제),notifications/page}`, `app/hospitals/[code]/_components/InventoryUsageCard.tsx`, `function_wms.md`(§4-10·Phase 9)
+
+---
+
+## 2026-07-07 | 자재관리(WMS) Phase 7·8 — 재고 구분 2차원(소유×용도)·계층 분류·제조사 + 검수 보완 5건
+
+- **배경**: `function_wms.md` Phase 7·8 (Fable 직접 구현). 같은 품목이라도 소유(대웅제약/씨어스)·용도(판매/평가/기타)가 다르면 별개 재고로 — 재고 = **품목×위치×소유×용도** 4차원. 품목 기본정보에 대>중>소 계층 분류·제조사 추가. 구현 전 OPUS Phase 1~5 전수 검수 수행
+- **Phase 7 (마이그레이션 `20260707150000`)**: StatusCode `STOCK_OWNER`(씨어스/대웅제약 재고)·`STOCK_PURPOSE`(판매/평가/기타) 시드. stocks/transactions/units에 `owner_id`/`purpose_id`(기존 행 (씨어스,기타) 백필→NOT NULL), **stocks PK 4컬럼 재구성**. **구분 간 전환 없음**(입고 시 확정·CONVERT 미구현, 회수도 원래 구분만 허용·400). MOVE는 같은 버킷 내 위치만 변경. 시리얼 개체도 버킷 보유 — OUT/MOVE 시 버킷 일치 강제. 설정 `/settings/stock-types`(소유·용도 2섹션, 공용 `StatusCodeManager` 컴포넌트 신설), 사용 중 구분 삭제 409. 전표 모달: IN=소유·용도 자유 선택, OUT/MOVE=재고 있는 버킷 select(가용수량 표시), 시리얼은 버킷 선택 후 개체 로드. 현황 칩 `위치·소유·용도 N` + 소유/용도 필터, 이력·품목상세·개체목록에 구분 표시
+- **Phase 8 (마이그레이션 `20260707160000`)**: `inventory_categories`(계층 트리, parent_id·COALESCE UNIQUE·**3단계 제한/중복명/사용·하위 존재 삭제 409는 API 검증**). 기존 StatusCode ITEM_CATEGORY 4행 → 대분류 무손실 이관(FK 교체) 후 구 행 삭제. 제조사 = StatusCode `MANUFACTURER` + `/settings/manufacturers` + `items.manufacturer_id`. `/settings/item-category`는 트리 UI로 전면 재작성(들여쓰기·+하위·형제 순서). 품목 폼 대>중>소 연동 select, 목록·현황·상세에 분류 경로(`전자제품 > 모니터`)·제조사 표시, 분류 필터는 후손 포함. Excel 컬럼 확장: `품목명|대분류|중분류|소분류|제조사|규격|단위|시리얼여부|안전재고|참고단가`(경로·이름 매칭, 미매칭 경고)
+- **검수 보완 5건 (OPUS Phase 1~5 대상)**: ①품목 PUT `isSerialManaged` 잠금(이력 존재 시 409 — 설계 요구인데 미구현이었음) ②이력 있는 품목 DELETE→비활성화 전환(기존엔 FK 500) ③창고 DELETE 보호(재고 잔존 409 / 이력 시 비활성화) ④**시리얼 동시성 가드** — 개체 갱신을 조건부 updateMany(상태·위치·버킷 where)+건수 검증으로 교체(동시 요청 이중 출고 차단), 취소 원복도 동일 ⑤IN 전표 취소 시 안전재고 알림 훅 + 전표코드 P2002 동시 채번 재시도
+- **검증(dev2)**: `tsc` 0오류 → 힙4GB 빌드 → `pm2 restart thync-dev` → 신규 라우트 스모크 → **런타임 E2E 31/31 통과**(버킷 독립 차감·교차출고 409·이동 버킷 유지·취소 복원·시리얼 버킷 일치·회수 구분전환 400·분류 4단계 400·중복명/사용 중 삭제 409·분류경로·잠금 409·비활성화 전환). 테스트 데이터 정리, 기존 실데이터(게이트웨이 2EA) 백필 무결 확인
+- **미반영**: git push·PROD 안 함(사용자 검토 후 Phase 6 진행 예정 — 마이그레이션 누적 4건). 모바일 카드 뷰는 후속(가로 스크롤로 대응 중)
+- 영향 파일: `prisma/{schema.prisma,migrations/2026070715·16...}`, `lib/inventory.ts`(재작성), `lib/notify.ts`, `app/api/settings/{stock-owner,stock-purpose,manufacturers,item-category,warehouses/[id]}/`, `app/api/inventory/{items,items/[id],items/import,stocks,transactions,transactions/[id]/cancel,units}/`, `app/settings/{_components/StatusCodeManager.tsx(신규),stock-types(신규),manufacturers(신규),item-category}/`, `app/inventory/{page,transactions/page,items/page,items/[id]/page,components/TransactionModal}`
+
+---
+
+## 2026-07-07 | 자재관리(WMS) Phase 2~5 — 재고 원장·입출고·시리얼·병원연동·안전재고 알림
+
+- **배경**: `function_wms.md` Phase 2~5 일괄 진행. Phase 1 마스터 위에 실제 재고 이동(입고·출고·이동·취소)·시리얼 개체 추적·병원/업무 연동·안전재고 Slack 알림 구축
+- **DB(마이그레이션 2건)**: `20260707130000` — `inventory_stocks`(품목×위치 현재고 스냅샷, `CHECK quantity>=0`), `inventory_transactions`(입출고 원장 append-only, `tx_code=STK-YYYYMM-NNNN`, hospital/work_type/ref_code 포함). `20260707140000` — `inventory_units`(시리얼 개체 IN_STOCK/OUT/DISPOSED) + `inventory_transaction_units`(전표-개체 조인). schema 4모델 + Item/Warehouse/User/Hospital 역관계 → generate
+- **핵심 로직 `lib/inventory.ts`**: `createInventoryTransaction`/`cancelInventoryTransaction`을 `prisma.$transaction`으로 원자 처리. 재고 감소는 조건부 `updateMany(quantity>=n)` + DB CHECK 이중 방어(음수 불가). 시리얼: IN 벌크입력·중복검사, `회수(반품)`은 기존 OUT 개체 복귀, OUT 개체선택(폐기/불량→DISPOSED), MOVE 위치이동. 취소는 역방향 되돌림 + `canceled_at` 마킹(역전표 미생성), 음수/개체이동 시 409. 스냅샷·개체·원장 정합을 한 트랜잭션에서 보장
+- **API**: `inventory/transactions`(목록/등록), `[id]/cancel`, `stocks`(품목별 위치 집계+부족판정), `units`(조회)·`[id]`(정정), `hospital-works`(출고 업무연결 후보), `can-manage`(권한 UI 게이트). 권한=재고 담당자 풀 or ADMIN(`canManageStock` 실시간 조회), 감사로그 `inventory_tx`
+- **UI**: `/inventory` 현황(위치별 재고칩·부족 뱃지·부족만 필터·입출고 모달), `/inventory/transactions` 이력(유형/위치 필터·취소), `/inventory/items/[id]` 상세(요약카드·위치별 재고·이력/개체 탭). 공용 `TransactionModal`(IN/OUT/MOVE 토글 + 비시리얼 수량/시리얼 벌크·개체선택 + 출고 시 병원검색·업무드롭다운). 병원 상세에 '사용 자재' 카드(출고 이력 + 설치 개체)
+- **Phase 5 안전재고 알림**: `lib/notify.ts maybeNotifyLowStock` — OUT 커밋 후 best-effort 호출, `notify_enabled && notify_stock_enabled`(기본 off) 게이트, 품목 총재고<안전재고 시 `SLACK_CHANNEL_MAIN`로 `📦 [재고 부족]`, 같은 품목 24h dedup. 설정 페이지에 토글 추가. 기존 slack/notify 인프라(모드·로그·dedup) 재사용
+- **검증(dev2)**: `tsc --noEmit` 0오류. 런타임 E2E는 빌드·재시작 후 진행
+- **미반영**: git push·PROD 안 함. PROD 반영 시 마이그레이션 2건 필요
+- 영향 파일: `prisma/{schema.prisma,migrations/2026070713·14...}`, `lib/{inventory.ts,notify.ts}`, `app/api/inventory/{transactions,stocks,units,hospital-works,can-manage,items/[id]}`, `app/inventory/{page,transactions,items/[id],components/TransactionModal}`, `app/hospitals/[code]/{page,_components/InventoryUsageCard}`, `app/api/settings/notifications/route.ts`, `app/settings/notifications/page.tsx`
+
+---
+
+## 2026-07-07 | 자재관리(WMS) Phase 1 — 품목·위치 마스터 + 재고 담당자 풀
+
+- **배경**: `function_wms.md` Phase 1. 구축·판매에서 취급하는 하드웨어 자재(50~100품목) 재고관리 시스템의 마스터 계층 구축. Phase 2(재고 원장·입출고)의 토대
+- **DB(마이그레이션 `20260707120000_add_inventory_phase1`)**: 신규 테이블 3개 — `inventory_items`(품목 마스터: item_code `ITEM-NNNN`·분류 FK·시리얼관리 플래그·DeviceInfo 선택 FK·참고단가·안전재고), `warehouses`(위치 마스터), `inventory_managers`(재고 담당자 풀 — **FieldEngineer와 별개 직무**, user_id UNIQUE). 시드: 품목 분류 4종(자사기기/전자제품/네트워크/잡자재, StatusCode `ITEM_CATEGORY`), 위치 2종(본사 창고/불량·수리 대기), nav 메뉴 4행(메인 `자재관리` sort 48 + 설정 하위 3종). psql 직접 적용 → migrate resolve → schema.prisma 수동 갱신(모델 3개 + StatusCode/DeviceInfo/User 역관계) → generate
+- **API**: 설정 3종 — `item-category`(StatusCode CRUD, 삭제 시 사용 품목 검사), `warehouses`(CRUD), `inventory-managers`(목록/추가/삭제 + candidates 후보검색). 품목 — `inventory/items`(GET 필터·POST 채번), `[id]`(GET/PUT/DELETE), `import`(Excel 미리보기+등록, 중복 품목명 스킵·분류명 매핑). 모두 감사로그(`resource=inventory_item`/`setting:*`) + ADMIN 이상 쓰기
+- **화면**: `/inventory`(자재 현황 — 전 로그인 조회, 검색·분류 필터), `/inventory/items`(품목 관리 ADMIN — 모달 폼 + Excel 가져오기), `/settings/{warehouses,inventory-managers,item-category}`. 기존 설정 CRUD·담당자 풀·병원 Excel 패턴 재사용
+- **권한**: 조회=전 로그인, 품목·위치·분류·담당자 관리=ADMIN 이상. `lib/inventory.ts` `canManageStock`(ADMIN or 재고 담당자 풀 — Phase 2 입출고용) + `nextItemCode`
+- **아이콘**: NavIcons에 `package`(box) 추가
+- **검증(dev2)**: `tsc --noEmit` 0오류. DB 시드·테이블·nav 메뉴 삽입 확인. **런타임 E2E(품목 등록/수정·Excel·설정 CRUD)는 빌드·PM2 재시작 후 진행 예정**(사용자 요청 대기)
+- **미반영**: git push·빌드·PROD 안 함. PROD 반영 시 `20260707120000_add_inventory_phase1` 마이그레이션 필요
+- 영향 파일: `prisma/{schema.prisma,migrations/20260707120000_add_inventory_phase1/}`, `lib/inventory.ts(신규)`, `app/api/settings/{item-category,warehouses,inventory-managers}/`, `app/api/inventory/items/`, `app/settings/{item-category,warehouses,inventory-managers}/page.tsx`, `app/inventory/{page.tsx,items/page.tsx}`, `app/components/NavIcons.tsx`
+
+---
+
 ## 2026-07-07 | Slack 알림 — 업무 타입별 on/off 토글
 
 - **기능**: 업무 타입(프로젝트/답사/설치계획/유지보수/기타업무)별로 Slack 알림 사용/미사용 토글. 필요에 따라 특정 업무만 켜거나 끔

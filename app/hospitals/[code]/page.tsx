@@ -12,6 +12,7 @@ import SiteVisitsCard from './_components/SiteVisitsCard'
 import InstallPlansCard from './_components/InstallPlansCard'
 import MaintenancesCard from './_components/MaintenancesCard'
 import RelatedWikiPagesCard from './_components/RelatedWikiPagesCard'
+import InventoryUsageCard from './_components/InventoryUsageCard'
 
 
 
@@ -301,6 +302,8 @@ export default async function HospitalDetailPage({ params }: PageProps) {
             </div>
           )}
         </div>
+
+        <InventoryUsageCard hospitalCode={hospital.hospitalCode} />
 
         <RelatedWikiPagesCard hospitalCode={hospital.hospitalCode} />
 
