@@ -11,6 +11,7 @@ interface StockRow {
   id: number
   itemCode: string
   name: string
+  modelName: string | null
   spec: string | null
   unit: string
   isSerialManaged: boolean
@@ -118,7 +119,7 @@ export default function InventoryPage() {
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="품목명·코드·규격 검색" className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="품목명·모델명·코드·규격 검색" className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
         <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
           <option value="">전체 분류</option>
           {categoryOptions(categories).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
@@ -156,6 +157,7 @@ export default function InventoryPage() {
                 </td>
                 <td className="px-3 py-3 font-medium text-gray-900">
                   <Link href={tabInventory ? `/inventory/${tabInventory}/items/${r.id}` : `/inventory/items/${r.id}`} className="hover:text-blue-600 hover:underline">{r.name}</Link>
+                  {r.modelName && <span className="ml-1 text-xs text-gray-400">{r.modelName}</span>}
                   {r.isSerialManaged && <span className="ml-1 text-xs text-indigo-500">S/N</span>}
                   {r.componentCount > 0 && <span className="ml-1 rounded bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-600" title={`부자재 ${r.componentCount}종`}>주자재</span>}
                   {r.isComponent && <span className="ml-1 rounded bg-sky-50 px-1.5 py-0.5 text-xs font-medium text-sky-600">부자재</span>}

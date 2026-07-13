@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic'
 
 interface ItemImportRow {
   name: string
+  modelName: string | null
   cat1: string | null // 대분류
   cat2: string | null // 중분류
   cat3: string | null // 소분류
@@ -24,7 +25,7 @@ const SERIAL_TRUE = new Set(['시리얼', 'y', 'yes', 'true', 'o', '예', '1', '
 function parseExcel(buffer: ArrayBuffer): ItemImportRow[] {
   const workbook = XLSX.read(buffer)
   const sheet = workbook.Sheets[workbook.SheetNames[0]]
-  // A=품목명, B=대분류, C=중분류, D=소분류, E=제조사, F=규격, G=단위, H=시리얼여부, I=참고단가 (1행 헤더 skip)
+  // A=품목명, B=모델명, C=대분류, D=중분류, E=소분류, F=제조사, G=규격, H=단위, I=시리얼여부, J=참고단가 (1행 헤더 skip)
   const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 }) as unknown[][]
 
   const out: ItemImportRow[] = []
@@ -34,20 +35,21 @@ function parseExcel(buffer: ArrayBuffer): ItemImportRow[] {
     const name = String(row[0] ?? '').trim()
     if (!name) continue
 
-    const cat1 = String(row[1] ?? '').trim() || null
-    const cat2 = String(row[2] ?? '').trim() || null
-    const cat3 = String(row[3] ?? '').trim() || null
-    const serialRaw = String(row[7] ?? '').trim().toLowerCase()
-    const price = Number(row[8] ?? 0)
+    const cat1 = String(row[2] ?? '').trim() || null
+    const cat2 = String(row[3] ?? '').trim() || null
+    const cat3 = String(row[4] ?? '').trim() || null
+    const serialRaw = String(row[8] ?? '').trim().toLowerCase()
+    const price = Number(row[9] ?? 0)
 
     out.push({
       name,
+      modelName: String(row[1] ?? '').trim() || null,
       cat1,
       cat2,
       cat3,
-      manufacturer: String(row[4] ?? '').trim() || null,
-      spec: String(row[5] ?? '').trim() || null,
-      unit: String(row[6] ?? '').trim() || 'EA',
+      manufacturer: String(row[5] ?? '').trim() || null,
+      spec: String(row[6] ?? '').trim() || null,
+      unit: String(row[7] ?? '').trim() || 'EA',
       isSerialManaged: SERIAL_TRUE.has(serialRaw),
       refPrice: Number.isFinite(price) && price > 0 ? Math.floor(price) : null,
       categoryPath: [cat1, cat2, cat3].filter(Boolean).join(' > ') || null,
@@ -89,7 +91,7 @@ export async function POST(request: NextRequest) {
     const buffer = await file.arrayBuffer()
     const parsed = parseExcel(buffer)
     if (parsed.length === 0) {
-      return NextResponse.json({ error: '파일에 유효한 데이터가 없습니다. 컬럼 순서를 확인하세요. (품목명, 대분류, 중분류, 소분류, 제조사, 규격, 단위, 시리얼여부, 참고단가)' }, { status: 400 })
+      return NextResponse.json({ error: '파일에 유효한 데이터가 없습니다. 컬럼 순서를 확인하세요. (품목명, 모델명, 대분류, 중분류, 소분류, 제조사, 규격, 단위, 시리얼여부, 참고단가)' }, { status: 400 })
     }
 
     const [categories, manufacturers, existing] = await Promise.all([
@@ -138,6 +140,7 @@ export async function POST(request: NextRequest) {
       return {
         itemCode: `ITEM-${String(seq).padStart(4, '0')}`,
         name: r.name,
+        modelName: r.modelName,
         categoryId: resolveCategory(categories, [r.cat1, r.cat2, r.cat3]).id,
         manufacturerId: r.manufacturer ? (mfrMap.get(r.manufacturer) ?? null) : null,
         spec: r.spec,

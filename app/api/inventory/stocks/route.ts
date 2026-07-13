@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
     ...(includeInactive ? {} : { isActive: true }),
     ...(categoryIds ? { categoryId: { in: categoryIds } } : {}),
     ...(search
-      ? { OR: [{ name: { contains: search } }, { itemCode: { contains: search } }, { spec: { contains: search } }] }
+      ? { OR: [{ name: { contains: search } }, { itemCode: { contains: search } }, { modelName: { contains: search } }, { spec: { contains: search } }] }
       : {}),
   }
 
@@ -100,6 +100,7 @@ export async function GET(req: NextRequest) {
       id: item.id,
       itemCode: item.itemCode,
       name: item.name,
+      modelName: item.modelName,
       spec: item.spec,
       unit: item.unit,
       isSerialManaged: item.isSerialManaged,

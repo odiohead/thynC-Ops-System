@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
     isActive: true,
     ...(categoryIds ? { categoryId: { in: categoryIds } } : {}),
     ...(search
-      ? { OR: [{ name: { contains: search } }, { itemCode: { contains: search } }, { spec: { contains: search } }] }
+      ? { OR: [{ name: { contains: search } }, { itemCode: { contains: search } }, { modelName: { contains: search } }, { spec: { contains: search } }] }
       : {}),
   }
 
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
     },
     include: {
       item: {
-        select: { itemCode: true, name: true, spec: true, unit: true, isSerialManaged: true, categoryId: true, manufacturer: { select: { name: true } } },
+        select: { itemCode: true, name: true, modelName: true, spec: true, unit: true, isSerialManaged: true, categoryId: true, manufacturer: { select: { name: true } } },
       },
       warehouse: { select: { name: true } },
       inventory: { select: { name: true } },
@@ -52,6 +52,7 @@ export async function GET(req: NextRequest) {
     인벤토리: s.inventory.name,
     품목코드: s.item.itemCode,
     품목명: s.item.name,
+    모델명: s.item.modelName ?? '',
     분류: categoryPath(allCategories, s.item.categoryId),
     제조사: s.item.manufacturer?.name ?? '',
     규격: s.item.spec ?? '',

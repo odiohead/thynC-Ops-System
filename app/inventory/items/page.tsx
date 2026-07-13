@@ -11,6 +11,7 @@ interface Item {
   id: number
   itemCode: string
   name: string
+  modelName: string | null
   spec: string | null
   unit: string
   isSerialManaged: boolean
@@ -26,6 +27,7 @@ interface Item {
 
 interface ItemForm {
   name: string
+  modelName: string
   cat1: number | null // 대분류
   cat2: number | null // 중분류
   cat3: number | null // 소분류
@@ -40,7 +42,7 @@ interface ItemForm {
 }
 
 const emptyForm: ItemForm = {
-  name: '', cat1: null, cat2: null, cat3: null, manufacturerId: null, spec: '', unit: 'EA',
+  name: '', modelName: '', cat1: null, cat2: null, cat3: null, manufacturerId: null, spec: '', unit: 'EA',
   isSerialManaged: false, deviceInfoId: null, refPrice: '', memo: '', isActive: true,
 }
 
@@ -50,7 +52,7 @@ interface PreviewResult {
   skipped: number
   unknownCategories: string[]
   unknownManufacturers: string[]
-  rows: { name: string; categoryPath: string | null; manufacturer: string | null; unit: string; isSerialManaged: boolean }[]
+  rows: { name: string; modelName: string | null; categoryPath: string | null; manufacturer: string | null; unit: string; isSerialManaged: boolean }[]
 }
 
 /** 품목의 categoryId에서 대/중/소 선택 상태 복원 */
@@ -146,6 +148,7 @@ export default function InventoryItemsPage() {
     setEditId(item.id)
     setForm({
       name: item.name,
+      modelName: item.modelName ?? '',
       cat1: c1, cat2: c2, cat3: c3,
       manufacturerId: item.manufacturer?.id ?? null,
       spec: item.spec ?? '',
@@ -165,6 +168,7 @@ export default function InventoryItemsPage() {
     const categoryId = form.cat3 ?? form.cat2 ?? form.cat1 // 가장 깊은 선택 노드
     const payload = {
       name: form.name.trim(),
+      modelName: form.modelName.trim() || null,
       categoryId,
       manufacturerId: form.manufacturerId,
       spec: form.spec,
@@ -275,7 +279,7 @@ export default function InventoryItemsPage() {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="품목명·코드·규격 검색"
+          placeholder="품목명·모델명·코드·규격 검색"
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
         <select
@@ -302,6 +306,7 @@ export default function InventoryItemsPage() {
               <th className="px-3 py-3">코드</th>
               <th className="px-3 py-3">분류</th>
               <th className="px-3 py-3">품목명</th>
+              <th className="px-3 py-3">모델명</th>
               <th className="px-3 py-3">제조사</th>
               <th className="px-3 py-3">규격</th>
               <th className="px-3 py-3">단위</th>
@@ -320,6 +325,7 @@ export default function InventoryItemsPage() {
                   {item.name}
                   {item.deviceInfo && <span className="ml-1 text-xs text-gray-400">({item.deviceInfo.deviceModel})</span>}
                 </td>
+                <td className="px-3 py-3 text-gray-600 text-xs">{item.modelName ?? '-'}</td>
                 <td className="px-3 py-3 text-gray-600 text-xs">{item.manufacturer?.name ?? '-'}</td>
                 <td className="px-3 py-3 text-gray-600">{item.spec || '-'}</td>
                 <td className="px-3 py-3 text-gray-600">{item.unit}</td>
@@ -361,6 +367,10 @@ export default function InventoryItemsPage() {
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">품목명 <span className="text-red-500">*</span></label>
                 <input type="text" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} autoFocus className={selectCls} placeholder="예: 게이트웨이" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">모델명</label>
+                <input type="text" value={form.modelName} onChange={(e) => setForm((f) => ({ ...f, modelName: e.target.value }))} className={selectCls} placeholder="예: MC200M-T" />
               </div>
 
               {/* 대/중/소분류 연동 select */}
@@ -460,7 +470,7 @@ export default function InventoryItemsPage() {
             </div>
             <div className="px-6 py-4 space-y-4">
               <p className="text-xs text-gray-500">
-                컬럼 순서: <b>품목명 · 대분류 · 중분류 · 소분류 · 제조사 · 규격 · 단위 · 시리얼여부 · 참고단가</b> (1행은 헤더).
+                컬럼 순서: <b>품목명 · 모델명 · 대분류 · 중분류 · 소분류 · 제조사 · 규격 · 단위 · 시리얼여부 · 참고단가</b> (1행은 헤더).
                 분류·제조사는 등록된 이름과 일치해야 하며, 매칭 실패 시 미지정으로 등록됩니다.
                 시리얼여부는 &apos;시리얼/Y/예&apos; 등이면 개체 관리. 이미 있는 품목명은 건너뜁니다.
               </p>
@@ -491,12 +501,13 @@ export default function InventoryItemsPage() {
                   <div className="max-h-48 overflow-y-auto rounded border border-gray-100">
                     <table className="w-full text-xs">
                       <thead className="bg-gray-50 text-gray-500">
-                        <tr><th className="px-2 py-1 text-left">품목명</th><th className="px-2 py-1 text-left">분류</th><th className="px-2 py-1 text-left">제조사</th><th className="px-2 py-1 text-left">단위</th><th className="px-2 py-1 text-center">S/N</th></tr>
+                        <tr><th className="px-2 py-1 text-left">품목명</th><th className="px-2 py-1 text-left">모델명</th><th className="px-2 py-1 text-left">분류</th><th className="px-2 py-1 text-left">제조사</th><th className="px-2 py-1 text-left">단위</th><th className="px-2 py-1 text-center">S/N</th></tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                         {preview.rows.slice(0, 100).map((r, i) => (
                           <tr key={i}>
                             <td className="px-2 py-1">{r.name}</td>
+                            <td className="px-2 py-1 text-gray-500">{r.modelName ?? '-'}</td>
                             <td className="px-2 py-1 text-gray-500">{r.categoryPath ?? '-'}</td>
                             <td className="px-2 py-1 text-gray-500">{r.manufacturer ?? '-'}</td>
                             <td className="px-2 py-1 text-gray-500">{r.unit}</td>

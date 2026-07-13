@@ -78,6 +78,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     where: { id },
     data: {
       name,
+      modelName: body.modelName?.trim() || null,
       categoryId: body.categoryId ?? null,
       spec: body.spec?.trim() || null,
       unit: body.unit?.trim() || 'EA',

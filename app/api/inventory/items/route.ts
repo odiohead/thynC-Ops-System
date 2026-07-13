@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
           OR: [
             { name: { contains: search } },
             { itemCode: { contains: search } },
+            { modelName: { contains: search } },
             { spec: { contains: search } },
           ],
         }
@@ -70,6 +71,7 @@ export async function POST(req: NextRequest) {
     data: {
       itemCode,
       name,
+      modelName: body.modelName?.trim() || null,
       categoryId: body.categoryId ?? null,
       spec: body.spec?.trim() || null,
       unit: body.unit?.trim() || 'EA',

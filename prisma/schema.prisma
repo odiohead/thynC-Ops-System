@@ -670,6 +670,7 @@ model InventoryItem {
   id              Int         @id @default(autoincrement())
   itemCode        String      @unique @map("item_code") @db.VarChar(20)
   name            String      @db.VarChar(100)
+  modelName       String?     @map("model_name") @db.VarChar(100) // 제조사 모델명 (규격과 별개)
   categoryId      Int?        @map("category_id")
   spec            String?     @db.VarChar(200)
   unit            String      @default("EA") @db.VarChar(20)

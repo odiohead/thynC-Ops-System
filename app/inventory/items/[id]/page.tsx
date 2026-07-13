@@ -9,6 +9,7 @@ interface Item {
   id: number
   itemCode: string
   name: string
+  modelName: string | null
   spec: string | null
   unit: string
   isSerialManaged: boolean
@@ -168,6 +169,7 @@ export default function ItemDetailPage() {
             {!item.isActive && <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded">비활성</span>}
           </h1>
           <div className="mt-1 flex items-center gap-2 text-sm text-gray-500">
+            {item.modelName && <span className="rounded bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600">{item.modelName}</span>}
             {item.categoryPath && <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{item.categoryPath}</span>}
             {item.manufacturer && <span className="text-xs">{item.manufacturer.name}</span>}
             {item.spec && <span>{item.spec}</span>}
