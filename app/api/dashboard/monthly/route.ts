@@ -18,8 +18,10 @@ export async function GET(req: NextRequest) {
     },
     select: {
       endDateExpected: true,
-      hospital: { select: { introBeds: true } },
+      hospitalCode: true,
+      bedCount: true,
     },
+    orderBy: { endDateExpected: 'asc' },
   })
 
   if (projects.length === 0) {
@@ -27,7 +29,10 @@ export async function GET(req: NextRequest) {
   }
 
   // 서비스 시작월 = endDateExpected 익월
+  // 신규 병상 = 각 완료 프로젝트(차수)의 bedCount를 해당 차수의 서비스 시작월에 집계
+  // 신규 병원 = 병원별 최초 완료 프로젝트의 서비스 시작월에 1회만 집계 (2차·3차는 병상만 가산)
   const monthMap = new Map<string, { newHospitals: number; newBeds: number }>()
+  const seenHospitals = new Set<string>()
 
   for (const p of projects) {
     const end = p.endDateExpected!
@@ -37,8 +42,11 @@ export async function GET(req: NextRequest) {
     const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 
     const entry = monthMap.get(month) ?? { newHospitals: 0, newBeds: 0 }
-    entry.newHospitals += 1
-    entry.newBeds += p.hospital.introBeds ?? 0
+    if (!seenHospitals.has(p.hospitalCode)) {
+      seenHospitals.add(p.hospitalCode)
+      entry.newHospitals += 1
+    }
+    entry.newBeds += p.bedCount ?? 0
     monthMap.set(month, entry)
   }
 

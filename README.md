@@ -451,7 +451,7 @@ prisma/
 
 #### InventoryItem (품목 마스터)
 - 자재 품목 단위. 고유 코드 `itemCode`: `ITEM-NNNN` (전체 순번, 생성 시 자동 발번)
-- `name`, 분류(`categoryId` → InventoryCategory 트리), 제조사(`manufacturerId` → StatusCode `MANUFACTURER`), `spec`(규격), `unit`(단위, 기본 EA)
+- `name`, **`modelName`(모델명 — 제조사 모델 식별자, 규격과 별개)**, 분류(`categoryId` → InventoryCategory 트리), 제조사(`manufacturerId` → StatusCode `MANUFACTURER`), `spec`(규격), `unit`(단위, 기본 EA)
 - `isSerialManaged`(시리얼 개체 추적 여부 — 입출고 이력 생기면 변경 409 잠금), `deviceInfoId`(자사 기기 ↔ DeviceInfo 선택 FK)
 - `refPrice`(참고 단가, nullable), `memo`, `isActive`, `sortOrder`
 - 이력 있는 품목 삭제 → 비활성화 전환 (이력 보존)
@@ -586,7 +586,7 @@ prisma/
 ### 대시보드
 - 이번 주 / 다음 주 공사 예정 프로젝트 현황
 - 공사 상태별 요약, 비고 인라인 수정
-- **월별 누적 사용 현황**: 신규 병원/병상, 누적 병원/병상 추이 (Recharts 차트)
+- **월별 누적 사용 현황**: 신규 병원/병상, 누적 병원/병상 추이 (Recharts 차트) — 신규 병상은 완료 프로젝트(차수)별 `bedCount`를 각 차수의 서비스 시작월에 집계, 신규 병원은 병원별 최초 완료 프로젝트 월에 1회만 집계(2차·3차 도입은 병상만 가산)
 - **월별 신규 병원/병상 막대 차트** (ComposedChart)
 - 캐시 미사용 (`force-dynamic`), 매 요청마다 DB 조회
 
@@ -706,7 +706,7 @@ prisma/
 - **주자재/부자재 (BOM)**: 품목 상세에서 주자재 아래 부자재 N개 매핑(구성 수량 포함, 1단계 깊이). 출고 모달 **"부자재 함께 출고"(세트출고)** — 비시리얼 부자재를 같은 위치·인벤토리에서 자동 동시 출고(수량=출고수량×구성수량, 수정 가능), 자식 전표 `parent_tx_id` 연결·부모 취소 시 일괄 취소. 시리얼 부자재는 개별 출고
 - **시리얼 개체 추적 (바코드 스캔 대량 처리)**: `is_serial_managed` 품목은 개체 단위 관리(IN_STOCK/OUT/DISPOSED). 입고·출고·이동·이관 모두 **시리얼 직접 입력 textarea**(줄 단위 붙여넣기·바코드 리더기 연속 스캔) — 재고 1만 개·1회 100~200개 출고 대응. 서버가 시리얼→개체 해석 후 버킷(위치·인벤토리·재고 상태) 검증(미등록/불일치 시리얼 명시 거부), 가용 개체 목록 클릭 선택 병행. 수량↔개체 정합 보장, 동시성 가드(조건부 updateMany+건수 검증)
 - **입출고 이력** (`/inventory/transactions`): 유형·인벤토리·위치·기간 필터, 취소(권한자), **Excel 다운로드**(필터 반영, 최대 1만 행)
-- **품목 마스터** (`/inventory/items`, ADMIN): `ITEM-NNNN` 자동 발번, 대>중>소 분류 트리·제조사·규격·단위·시리얼 여부·DeviceInfo 연결·참고단가. **Excel 일괄 가져오기**(품목명·대/중/소분류·제조사·규격·단위·시리얼여부·참고단가, 미리보기)
+- **품목 마스터** (`/inventory/items`, ADMIN): `ITEM-NNNN` 자동 발번, **모델명**·대>중>소 분류 트리·제조사·규격·단위·시리얼 여부·DeviceInfo 연결·참고단가. 검색은 품목명·모델명·코드·규격 통합. **Excel 일괄 가져오기**(품목명·모델명·대/중/소분류·제조사·규격·단위·시리얼여부·참고단가, 미리보기)
 - **품목 상세** (`/inventory/items/[id]`): 요약·인벤토리×위치별 재고·**부자재 구성 카드**(매핑 추가/수량/해제, 부자재면 소속 주자재 표시)·입출고 이력·시리얼 개체 목록(인벤토리·위치·설치처 컬럼 분리)
 - **처리 권한**: 입고/출고/이동/이관/취소 = 재고 담당자 풀(`/settings/inventory-managers`) + ADMIN 이상(`canManageStock` 서버 실시간 검사). 조회=전 로그인. 감사 로그 `resource='inventory_tx'`/`inventory_item`/`setting:*`
 - **PROD 배포 완료** (2026-07-08 — 마이그레이션 8건 일괄)

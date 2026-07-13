@@ -4,6 +4,27 @@
 
 ---
 
+## 2026-07-13 | 병상 집계 정합화 — monthly 차수별 집계 전환 + 2차·3차 도입 introBeds 데이터 보정
+
+- **배경**: 사용자 문의 — 메인 대시보드의 누적 병상(18,714)과 사이니지 월보드(`/dashboard`)의 도입병상(16,378) 불일치. 조사 결과 두 가지 문제: ①`/api/dashboard/monthly`가 완료 프로젝트 **건수마다** 병원 introBeds 전체를 합산 → 완료 프로젝트 2~3건(2차·3차 도입) 병원 22곳의 병상 중복 집계(+2,849 과대) ②`hospitals.intro_beds`는 수기 필드라 **2차·3차 도입 병상이 미반영**된 병원 13곳 존재(사용자 확인: 다중 프로젝트 = 차수별 추가 도입이 맞음)
+- **monthly API 수정**: 신규 병상 = 완료 프로젝트(차수)별 `bedCount`를 각 차수의 서비스 시작월(endDateExpected 익월)에 집계, 신규 병원 = 병원별 최초 완료 프로젝트 월에 1회(2차·3차는 병상만 가산). 병원 introBeds 참조 제거. 수정 후 누적 병원 185 / 누적 병상 17,402
+- **기준 원칙(사용자 확정)**: **프로젝트의 `bed_count`가 도입 병상의 기준 데이터.** `hospitals.intro_beds`는 완료 프로젝트 bed_count 합계를 따라간다
+- **데이터 마이그레이션(DEV 완료)**: `scripts/sync-intro-beds-from-projects.sql`(멱등, 항상 재계산) — 완료 프로젝트 1건 이상 병원 전체 대상 `intro_beds = 완료 프로젝트 bed_count 합`. 1차 다중 프로젝트 13곳(+624: 강릉아산 40→161, 대청 120→240, 동탄시티 90→156, 새통영 104→169, 영암한국 60→120, 바로본 60→100, 광주씨티 10→50, 문산중앙 60→99, 나은필 NULL→30, 서울성심 80→100, 양평 30→40, 해남우리 50→60, 광주센트럴 76→79) + 2차 전체 동기화 30곳(단일 프로젝트 불일치 29곳: 삼성서울 41→0, 명지성모 212→177, 동아대 NULL→257 등 + 광주보훈 NULL→0) = 총 43행. 변경 전 값 백업 CSV 보관(scratchpad). 프로젝트 구축완료 처리 후 이 스크립트를 재실행하면 intro_beds가 따라옴
+- **수정 후 수치(DEV)**: 메인 누적 병상(monthly) 18,714→**17,402**(=완료 프로젝트 bed_count 총합), 사이니지 도입병상(summary) 16,378→**17,915**. 잔여 513 차이 = 병원 상태 '운영'인데 프로젝트가 준비/진행중/보류인 6곳(좋은강안 200·광주열린 120·좋은삼정 98·담양사랑 35·곡성사랑 30·강릉고려 30) — 프로젝트 완료 처리 후 스크립트 재실행하면 수렴. 완료 프로젝트인데 bed_count 미입력 3건(광주보훈 1차·나은필 2차·원광대 2차)은 입력 필요(현재 0으로 집계)
+- **검증(dev2)**: `tsc` 0오류, 집계 로직 SQL 재현으로 총계 일치 확인
+- 영향 파일: `app/api/dashboard/monthly/route.ts`, `scripts/sync-intro-beds-from-projects.sql(신규)`, `README.md`, DEV DB `hospitals.intro_beds` 43행
+
+## 2026-07-08 | 자재관리 품목 마스터에 모델명(model_name) 필드 추가
+
+- **배경**: 사용자 요청 — 품목 필드에 모델명 필요 (제조사 모델 식별자, 규격(spec)과 별개)
+- **DB(마이그레이션 `20260708220000_add_item_model_name`)**: `inventory_items.model_name` VARCHAR(100) NULL
+- **반영 범위**: 품목 CRUD API(POST/PUT)·품목 폼(품목명 아래 입력)·품목 관리 목록 컬럼·자재 현황(품목명 옆 회색 표기)·품목 마스터/인벤토리 자재 상세(모델명 뱃지)·**검색**(품목명·모델명·코드·규격 통합 — 현황/품목 관리)·**Excel 가져오기**(2번째 컬럼으로 삽입: 품목명·모델명·대/중/소분류·제조사·규격·단위·시리얼여부·참고단가)·재고 현황 export(모델명 컬럼)
+- **검증(dev2)**: `tsc` 0오류 → 빌드 → 재시작 → E2E(모델명 저장·모델명 검색 매칭 확인)
+- **미반영**: git push·PROD 안 함 (요청 시 마이그레이션 1건과 함께 반영)
+- 영향 파일: `prisma/{schema.prisma,migrations/20260708220000.../}`, `app/api/inventory/{items,items/[id],items/import,stocks,stocks/export}/`, `app/inventory/{page,items/page,items/[id]/page,[invId]/items/[itemId]/page}`
+
+---
+
 ## 2026-07-08 | 자재관리(WMS) 전체 + 설정 메뉴 그룹화 PROD 배포 (Phase 6 완료)
 
 - **배포**: dev2 커밋 `b7a4c76` push → PROD pull → **사전 백업**(`~/backups/db/thync_ops_pre_wms_20260708_0007.dump`, 14MB) → **DB 마이그레이션 8건** psql 순차 적용+resolve(`20260707120000`~`20260708200000` — WMS Phase 1~9 전체 + link_hospital + 이관 필드·메뉴 그룹) → prisma generate → 힙4GB 빌드 → `pm2 restart thync-prod`. npm install 불필요(신규 패키지 없음)
