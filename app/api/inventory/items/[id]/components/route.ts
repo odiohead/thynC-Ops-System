@@ -54,11 +54,15 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!Number.isFinite(quantity) || quantity <= 0) return NextResponse.json({ error: '구성 수량은 1 이상이어야 합니다.' }, { status: 400 })
 
   const [parent, child] = await Promise.all([
-    prisma.inventoryItem.findUnique({ where: { id: parentId }, select: { id: true, name: true, itemCode: true } }),
-    prisma.inventoryItem.findUnique({ where: { id: childId }, select: { id: true, name: true } }),
+    prisma.inventoryItem.findUnique({ where: { id: parentId }, select: { id: true, name: true, itemCode: true, inventoryId: true } }),
+    prisma.inventoryItem.findUnique({ where: { id: childId }, select: { id: true, name: true, inventoryId: true } }),
   ])
   if (!parent) return NextResponse.json({ error: '주자재 품목을 찾을 수 없습니다.' }, { status: 404 })
   if (!child) return NextResponse.json({ error: '부자재 품목을 찾을 수 없습니다.' }, { status: 404 })
+  // 인벤토리별 완전 분리 — 부자재 매핑은 같은 인벤토리 품목끼리만
+  if (parent.inventoryId !== child.inventoryId) {
+    return NextResponse.json({ error: '부자재는 주자재와 같은 인벤토리의 품목만 등록할 수 있습니다.' }, { status: 409 })
+  }
 
   // 1단계 깊이 강제
   const [parentIsChild, childIsParent, dup] = await Promise.all([

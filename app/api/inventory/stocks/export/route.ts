@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
 
   const itemWhere: Prisma.InventoryItemWhereInput = {
     isActive: true,
+    ...(inventoryId ? { inventoryId: parseInt(inventoryId) } : {}), // 품목 소속 인벤토리 필터
     ...(categoryIds ? { categoryId: { in: categoryIds } } : {}),
     ...(search
       ? { OR: [{ name: { contains: search } }, { itemCode: { contains: search } }, { modelName: { contains: search } }, { spec: { contains: search } }] }
@@ -35,7 +36,6 @@ export async function GET(req: NextRequest) {
     where: {
       quantity: { gt: 0 },
       ...(warehouseId ? { warehouseId: parseInt(warehouseId) } : {}),
-      ...(inventoryId ? { inventoryId: parseInt(inventoryId) } : {}),
       item: itemWhere,
     },
     include: {

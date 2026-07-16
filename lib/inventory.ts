@@ -25,9 +25,10 @@ export async function canManageStock(user: { userId: string; role: string }): Pr
   return !!mgr
 }
 
-// ─── 전표 유형 (function_wms.md Phase 9) ───
+// ─── 전표 유형 (function_wms.md Phase 9 → Phase 10에서 TRANSFER 폐지) ───
+// TRANSFER(이관)는 인벤토리별 품목 완전 분리로 폐지 — 과거 전표만 이력에 남음 (신규 생성·취소 불가)
 
-export const TX_TYPES = ['IN', 'OUT', 'MOVE', 'TRANSFER'] as const
+export const TX_TYPES = ['IN', 'OUT', 'MOVE'] as const
 export type TxType = (typeof TX_TYPES)[number]
 
 /** IN/OUT 유형(사유)은 StatusCode 마스터로 관리 — 시스템 동작이 걸린 유형은 value로 식별 */
@@ -106,28 +107,23 @@ export interface CreateTxInput {
   reasonId?: number | null // IN/OUT 필수 (StatusCode STOCK_IN_TYPE/STOCK_OUT_TYPE)
   itemId: number
   warehouseId: number
-  toWarehouseId?: number | null // MOVE 필수 / TRANSFER 선택(미지정 시 같은 위치)
-  inventoryId: number
-  toInventoryId?: number | null // TRANSFER 필수 (도착 인벤토리)
+  toWarehouseId?: number | null // MOVE 필수
   quantity: number
-  transferDate?: string | null // TRANSFER 이관일자 (YYYY-MM-DD, 미지정 시 오늘)
-  transferPrice?: number | null // TRANSFER 이관 단가 (참고용, 선택)
   destination?: string | null // OUT 출고처 (자유 텍스트)
   hospitalCode?: string | null
   workType?: string | null
   refCode?: string | null
   note?: string | null
   serials?: string[] // 시리얼 품목 IN (신규 또는 회수 대상)
-  unitIds?: number[] // 시리얼 품목 OUT/MOVE/TRANSFER (선택 개체)
+  unitIds?: number[] // 시리얼 품목 OUT/MOVE (선택 개체)
   components?: ComponentOutInput[] // OUT 세트출고 — 매핑된 비시리얼 부자재 동시 출고
 }
 
 /**
- * 입고/출고/이동/이관 전표를 생성하고 재고 스냅샷·시리얼 개체를 한 트랜잭션에서 갱신한다.
- * 재고는 (품목×위치×인벤토리) 버킷 단위.
+ * 입고/출고/이동 전표를 생성하고 재고 스냅샷·시리얼 개체를 한 트랜잭션에서 갱신한다.
+ * 인벤토리는 품목에서 파생 (품목이 인벤토리에 귀속) — 위치도 같은 인벤토리 소속이어야 한다.
  * - MOVE: 같은 인벤토리 안에서 물리 위치만 변경
- * - TRANSFER: 인벤토리 간 이관 — 출발·도착 인벤토리 모두 is_transfer_locked=false여야 허용 (평가용재고 차단)
- * - OUT + components: 주자재와 매핑된 부자재를 같은 위치·인벤토리에서 함께 출고 (자식 전표, parent_tx_id 연결)
+ * - OUT + components: 주자재와 매핑된 부자재(같은 인벤토리)를 같은 위치에서 함께 출고 (자식 전표, parent_tx_id 연결)
  * 전표코드 동시 채번 충돌(P2002)은 재시도. 실패 시 InventoryError(4xx) 또는 롤백.
  */
 export async function createInventoryTransaction(input: CreateTxInput, actorId: string) {
@@ -137,9 +133,11 @@ export async function createInventoryTransaction(input: CreateTxInput, actorId: 
 
   const item = await prisma.inventoryItem.findUnique({ where: { id: input.itemId } })
   if (!item) throw new InventoryError('품목을 찾을 수 없습니다.', 404)
+  const inventoryId = item.inventoryId // 인벤토리는 품목에서 파생
 
   const srcWh = await prisma.warehouse.findUnique({ where: { id: input.warehouseId } })
   if (!srcWh) throw new InventoryError('위치를 찾을 수 없습니다.', 404)
+  if (srcWh.inventoryId !== inventoryId) throw new InventoryError('선택한 위치가 이 품목의 인벤토리에 속하지 않습니다.')
 
   // IN/OUT 유형(사유) 검증 — StatusCode 카테고리 일치, value로 시스템 동작 식별
   let reasonValue: string | null = null
@@ -154,46 +152,17 @@ export async function createInventoryTransaction(input: CreateTxInput, actorId: 
     reasonId = reason.id
   }
 
-  // 인벤토리 검증
-  const inventory = await prisma.inventory.findUnique({ where: { id: input.inventoryId } })
-  if (!inventory) throw new InventoryError('인벤토리를 선택하세요.')
+  // 인벤토리 검증 (품목 소속 인벤토리)
+  const inventory = await prisma.inventory.findUnique({ where: { id: inventoryId } })
+  if (!inventory) throw new InventoryError('품목의 인벤토리를 찾을 수 없습니다.', 404)
   if (input.txType === 'IN' && !inventory.isActive) throw new InventoryError('비활성 인벤토리에는 입고할 수 없습니다.')
 
   if (input.txType === 'MOVE') {
     if (!input.toWarehouseId) throw new InventoryError('이동할 도착 위치를 선택하세요.')
     if (input.toWarehouseId === input.warehouseId) throw new InventoryError('출발 위치와 도착 위치가 같습니다.')
-  }
-
-  // TRANSFER 이관일자(기본 오늘·KST)·단가(참고용) 파싱 — DATE 컬럼이라 UTC 자정으로 고정해 날짜 밀림 방지
-  let transferDate: Date | null = null
-  let transferPrice: number | null = null
-  if (input.txType === 'TRANSFER') {
-    const raw = input.transferDate?.trim() || new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) throw new InventoryError('이관일자가 올바르지 않습니다. (YYYY-MM-DD)')
-    transferDate = new Date(`${raw}T00:00:00Z`)
-    if (isNaN(transferDate.getTime())) throw new InventoryError('이관일자가 올바르지 않습니다. (YYYY-MM-DD)')
-    if (input.transferPrice != null) {
-      const p = Math.trunc(Number(input.transferPrice))
-      if (!Number.isFinite(p) || p < 0) throw new InventoryError('이관 단가는 0 이상의 숫자여야 합니다.')
-      transferPrice = p
-    }
-  }
-
-  let toInventory: { id: number; name: string; isTransferLocked: boolean; isActive: boolean } | null = null
-  if (input.txType === 'TRANSFER') {
-    if (!input.toInventoryId) throw new InventoryError('이관할 도착 인벤토리를 선택하세요.')
-    if (input.toInventoryId === input.inventoryId) throw new InventoryError('출발 인벤토리와 도착 인벤토리가 같습니다.')
-    toInventory = await prisma.inventory.findUnique({ where: { id: input.toInventoryId } })
-    if (!toInventory) throw new InventoryError('도착 인벤토리를 찾을 수 없습니다.', 404)
-    if (!toInventory.isActive) throw new InventoryError('비활성 인벤토리로는 이관할 수 없습니다.')
-    // 이관 잠금 — 평가용재고는 출발·도착 어느 쪽으로도 이관 불가 (사용자 확정)
-    if (inventory.isTransferLocked) throw new InventoryError(`'${inventory.name}'은(는) 다른 인벤토리로 이관할 수 없습니다.`, 409)
-    if (toInventory.isTransferLocked) throw new InventoryError(`'${toInventory.name}'(으)로는 이관할 수 없습니다.`, 409)
-  }
-
-  if (input.toWarehouseId && (input.txType === 'MOVE' || input.txType === 'TRANSFER')) {
-    const destWh = await prisma.warehouse.findUnique({ where: { id: input.toWarehouseId }, select: { id: true } })
+    const destWh = await prisma.warehouse.findUnique({ where: { id: input.toWarehouseId }, select: { id: true, inventoryId: true } })
     if (!destWh) throw new InventoryError('도착 위치를 찾을 수 없습니다.', 404)
+    if (destWh.inventoryId !== inventoryId) throw new InventoryError('도착 위치가 이 품목의 인벤토리에 속하지 않습니다.')
   }
 
   if (input.hospitalCode) {
@@ -205,7 +174,7 @@ export async function createInventoryTransaction(input: CreateTxInput, actorId: 
     if (!h) throw new InventoryError('연결할 병원을 찾을 수 없습니다.', 404)
   }
 
-  // 세트출고(부자재 동시 출고) 검증 — OUT + 주자재 매핑 + 비시리얼 부자재만
+  // 세트출고(부자재 동시 출고) 검증 — OUT + 주자재 매핑 + 비시리얼 부자재만 (매핑은 같은 인벤토리 내에서만 생성됨)
   const componentPlans: { itemId: number; quantity: number; name: string; unit: string }[] = []
   const compInputs = (input.components ?? []).filter((c) => Math.trunc(c.quantity) > 0)
   if (compInputs.length > 0) {
@@ -225,8 +194,7 @@ export async function createInventoryTransaction(input: CreateTxInput, actorId: 
     }
   }
 
-  const srcBucket: Bucket = { itemId: input.itemId, warehouseId: input.warehouseId, inventoryId: input.inventoryId }
-  const destWarehouseId = input.toWarehouseId ?? input.warehouseId
+  const srcBucket: Bucket = { itemId: input.itemId, warehouseId: input.warehouseId, inventoryId }
 
   // 전표코드 P2002(동시 채번 충돌) 재시도
   for (let attempt = 0; ; attempt++) {
@@ -242,12 +210,9 @@ export async function createInventoryTransaction(input: CreateTxInput, actorId: 
             reasonId,
             itemId: input.itemId,
             warehouseId: input.warehouseId,
-            toWarehouseId: input.txType === 'MOVE' || input.txType === 'TRANSFER' ? (input.toWarehouseId ?? null) : null,
-            inventoryId: input.inventoryId,
-            toInventoryId: input.txType === 'TRANSFER' ? input.toInventoryId : null,
+            toWarehouseId: input.txType === 'MOVE' ? (input.toWarehouseId ?? null) : null,
+            inventoryId,
             quantity: qty,
-            transferDate,
-            transferPrice,
             destination: input.txType === 'OUT' ? (input.destination?.trim() || null) : null,
             hospitalCode: input.txType === 'OUT' ? (input.hospitalCode ?? null) : null,
             workType: input.txType === 'OUT' ? (input.workType ?? null) : null,
@@ -261,22 +226,19 @@ export async function createInventoryTransaction(input: CreateTxInput, actorId: 
         if (input.txType === 'IN') {
           await increaseStock(client, srcBucket, qty)
         } else if (input.txType === 'OUT') {
-          await decreaseStock(client, srcBucket, qty, `${srcWh.name}·${inventory.name}`)
-        } else if (input.txType === 'MOVE') {
-          await decreaseStock(client, srcBucket, qty, `${srcWh.name}·${inventory.name}`)
-          await increaseStock(client, { ...srcBucket, warehouseId: input.toWarehouseId! }, qty)
+          await decreaseStock(client, srcBucket, qty, srcWh.name)
         } else {
-          // TRANSFER: 인벤토리 이동 (위치는 선택적으로 함께 변경)
-          await decreaseStock(client, srcBucket, qty, `${srcWh.name}·${inventory.name}`)
-          await increaseStock(client, { itemId: input.itemId, warehouseId: destWarehouseId, inventoryId: input.toInventoryId! }, qty)
+          // MOVE: 같은 인벤토리 안에서 위치만 변경
+          await decreaseStock(client, srcBucket, qty, srcWh.name)
+          await increaseStock(client, { ...srcBucket, warehouseId: input.toWarehouseId! }, qty)
         }
 
         // 3) 시리얼 개체 처리
         if (item.isSerialManaged) {
-          await applySerialUnits(client, tx.id, input, item.id, qty, reasonValue, destWarehouseId)
+          await applySerialUnits(client, tx.id, input, item.id, qty, reasonValue, inventoryId)
         }
 
-        // 4) 세트출고 — 부자재 자식 전표 (같은 위치·인벤토리에서 차감, parent_tx_id 연결)
+        // 4) 세트출고 — 부자재 자식 전표 (같은 위치에서 차감, parent_tx_id 연결)
         for (const comp of componentPlans) {
           const childCode = await nextTxCode(client)
           await client.inventoryTransaction.create({
@@ -286,7 +248,7 @@ export async function createInventoryTransaction(input: CreateTxInput, actorId: 
               reasonId,
               itemId: comp.itemId,
               warehouseId: input.warehouseId,
-              inventoryId: input.inventoryId,
+              inventoryId,
               quantity: comp.quantity,
               destination: input.destination?.trim() || null,
               hospitalCode: input.hospitalCode ?? null,
@@ -299,9 +261,9 @@ export async function createInventoryTransaction(input: CreateTxInput, actorId: 
           })
           await decreaseStock(
             client,
-            { itemId: comp.itemId, warehouseId: input.warehouseId, inventoryId: input.inventoryId },
+            { itemId: comp.itemId, warehouseId: input.warehouseId, inventoryId },
             comp.quantity,
-            `부자재 ${comp.name} — ${srcWh.name}·${inventory.name}`,
+            `부자재 ${comp.name} — ${srcWh.name}`,
           )
         }
 
@@ -328,7 +290,7 @@ async function applySerialUnits(
   itemId: number,
   qty: number,
   reasonValue: string | null,
-  destWarehouseId: number,
+  inventoryId: number,
 ) {
   const links = (unitIds: number[]) =>
     client.inventoryTransactionUnit.createMany({ data: unitIds.map((unitId) => ({ transactionId: txId, unitId })) })
@@ -340,7 +302,7 @@ async function applySerialUnits(
     if (uniq.size !== serials.length) throw new InventoryError('입력한 시리얼에 중복이 있습니다.')
 
     if (reasonValue === REASON_VALUE_RETURN) {
-      // 회수(반품): 기존 OUT 개체를 IN_STOCK으로 복귀 — 원래 인벤토리와 일치해야 함 (우회 이관 차단)
+      // 회수(반품): 이 품목(=이 인벤토리)의 기존 OUT 개체를 IN_STOCK으로 복귀
       const existing = await client.inventoryUnit.findMany({ where: { itemId, serialNo: { in: serials } } })
       const map = new Map(existing.map((u) => [u.serialNo, u]))
       const unitIds: number[] = []
@@ -348,9 +310,6 @@ async function applySerialUnits(
         const u = map.get(s)
         if (!u) throw new InventoryError(`회수 대상 시리얼을 찾을 수 없습니다: ${s}`)
         if (u.status === 'IN_STOCK') throw new InventoryError(`이미 재고에 있는 시리얼입니다: ${s}`)
-        if (u.inventoryId !== input.inventoryId) {
-          throw new InventoryError(`회수는 출고 당시의 인벤토리로만 가능합니다: ${s}`)
-        }
         unitIds.push(u.id)
       }
       // 동시성 가드: 상태 조건부 갱신 + 건수 검증 (경합 시 롤백)
@@ -361,13 +320,13 @@ async function applySerialUnits(
       if (res.count !== unitIds.length) throw new InventoryError('처리 중 개체 상태가 변경되었습니다. 다시 시도하세요.', 409)
       await links(unitIds)
     } else {
-      // 신규 입고: 개체 생성 (같은 품목 내 시리얼 중복 금지, 인벤토리 기록)
+      // 신규 입고: 개체 생성 (같은 품목 내 시리얼 중복 금지, 품목의 인벤토리 기록)
       const dup = await client.inventoryUnit.findMany({ where: { itemId, serialNo: { in: serials } }, select: { serialNo: true } })
       if (dup.length > 0) throw new InventoryError(`이미 등록된 시리얼입니다: ${dup.map((d) => d.serialNo).join(', ')}`)
       const unitIds: number[] = []
       for (const s of serials) {
         const u = await client.inventoryUnit.create({
-          data: { itemId, serialNo: s, status: 'IN_STOCK', warehouseId: input.warehouseId, inventoryId: input.inventoryId },
+          data: { itemId, serialNo: s, status: 'IN_STOCK', warehouseId: input.warehouseId, inventoryId },
         })
         unitIds.push(u.id)
       }
@@ -376,7 +335,7 @@ async function applySerialUnits(
     return
   }
 
-  // OUT / MOVE / TRANSFER: 개체 지정 — 같은 버킷(위치+인벤토리)의 IN_STOCK 개체만.
+  // OUT / MOVE: 개체 지정 — 해당 위치의 IN_STOCK 개체만.
   // 지정 방식 2가지: ① unitIds(목록 선택) ② serials(시리얼 직접 입력·바코드 스캔 — 대량 처리용)
   let unitIds = input.unitIds ?? []
   if (unitIds.length === 0) {
@@ -393,7 +352,7 @@ async function applySerialUnits(
     for (const s of serials) {
       const u = bySerial.get(s)
       if (!u) { missing.push(s); continue }
-      if (u.status !== 'IN_STOCK' || u.warehouseId !== input.warehouseId || u.inventoryId !== input.inventoryId) {
+      if (u.status !== 'IN_STOCK' || u.warehouseId !== input.warehouseId) {
         notInBucket.push(s)
         continue
       }
@@ -401,7 +360,7 @@ async function applySerialUnits(
     }
     if (missing.length > 0) throw new InventoryError(`등록되지 않은 시리얼입니다: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? ` 외 ${missing.length - 10}건` : ''}`)
     if (notInBucket.length > 0) {
-      throw new InventoryError(`해당 위치·인벤토리의 재고 상태가 아닌 시리얼입니다: ${notInBucket.slice(0, 10).join(', ')}${notInBucket.length > 10 ? ` 외 ${notInBucket.length - 10}건` : ''}`, 409)
+      throw new InventoryError(`해당 위치의 재고 상태가 아닌 시리얼입니다: ${notInBucket.slice(0, 10).join(', ')}${notInBucket.length > 10 ? ` 외 ${notInBucket.length - 10}건` : ''}`, 409)
     }
     unitIds = resolved
   }
@@ -412,33 +371,27 @@ async function applySerialUnits(
     itemId,
     status: 'IN_STOCK',
     warehouseId: input.warehouseId,
-    inventoryId: input.inventoryId,
   }
 
   let res: { count: number }
   if (input.txType === 'OUT') {
     const disposed = reasonValue === REASON_VALUE_DISPOSE
-    // 동시성 가드: 버킷·상태 조건을 갱신 where에 포함 + 건수 검증 (이중 출고 차단)
+    // 동시성 가드: 위치·상태 조건을 갱신 where에 포함 + 건수 검증 (이중 출고 차단)
     res = await client.inventoryUnit.updateMany({
       where: guard,
       data: disposed
         ? { status: 'DISPOSED', warehouseId: null }
         : { status: 'OUT', warehouseId: null, hospitalCode: input.hospitalCode ?? null },
     })
-  } else if (input.txType === 'MOVE') {
+  } else {
+    // MOVE
     res = await client.inventoryUnit.updateMany({
       where: guard,
       data: { warehouseId: input.toWarehouseId! },
     })
-  } else {
-    // TRANSFER: 개체의 인벤토리 소속 변경 (+위치 변경 가능)
-    res = await client.inventoryUnit.updateMany({
-      where: guard,
-      data: { inventoryId: input.toInventoryId!, warehouseId: destWarehouseId },
-    })
   }
   if (res.count !== unitIds.length) {
-    throw new InventoryError('선택한 개체 중 해당 위치·인벤토리의 재고 상태가 아닌 것이 있습니다. 목록을 새로고침 후 다시 시도하세요.', 409)
+    throw new InventoryError('선택한 개체 중 해당 위치의 재고 상태가 아닌 것이 있습니다. 목록을 새로고침 후 다시 시도하세요.', 409)
   }
   await links(unitIds)
 }
@@ -458,24 +411,15 @@ type CancelableTx = Prisma.InventoryTransactionGetPayload<{
 /** 단일 전표의 재고·개체를 역방향으로 되돌린다 (취소 공용 — 세트출고 자식 포함). */
 async function reverseTransaction(client: Tx, tx: CancelableTx) {
   const bucket: Bucket = { itemId: tx.itemId, warehouseId: tx.warehouseId, inventoryId: tx.inventoryId }
-  const destWarehouseId = tx.toWarehouseId ?? tx.warehouseId
 
   // 1) 재고 역방향
   if (tx.txType === 'IN') {
-    await decreaseStock(client, bucket, tx.quantity, `${tx.warehouse.name}·${tx.inventory.name}`)
+    await decreaseStock(client, bucket, tx.quantity, tx.warehouse.name)
   } else if (tx.txType === 'OUT') {
     await increaseStock(client, bucket, tx.quantity)
-  } else if (tx.txType === 'MOVE') {
-    await decreaseStock(client, { ...bucket, warehouseId: tx.toWarehouseId! }, tx.quantity, tx.toWarehouse?.name ?? '도착지')
-    await increaseStock(client, bucket, tx.quantity)
   } else {
-    // TRANSFER 취소: 도착 버킷 → 출발 버킷 복귀
-    await decreaseStock(
-      client,
-      { itemId: tx.itemId, warehouseId: destWarehouseId, inventoryId: tx.toInventoryId! },
-      tx.quantity,
-      `${tx.toWarehouse?.name ?? tx.warehouse.name}·${tx.toInventory?.name ?? '도착 인벤토리'}`,
-    )
+    // MOVE 취소: 도착 위치 → 출발 위치 복귀
+    await decreaseStock(client, { ...bucket, warehouseId: tx.toWarehouseId! }, tx.quantity, tx.toWarehouse?.name ?? '도착지')
     await increaseStock(client, bucket, tx.quantity)
   }
 
@@ -506,20 +450,13 @@ async function reverseTransaction(client: Tx, tx: CancelableTx) {
         data: { status: 'IN_STOCK', warehouseId: tx.warehouseId, hospitalCode: null },
       })
       if (res.count !== unitIds.length) throw new InventoryError('개체가 이미 재입고되어 취소할 수 없습니다.', 409)
-    } else if (tx.txType === 'MOVE') {
+    } else {
       // MOVE 취소 → 출발지로 복귀 (현재 IN_STOCK@도착지여야)
       const res = await client.inventoryUnit.updateMany({
         where: { id: { in: unitIds }, status: 'IN_STOCK', warehouseId: tx.toWarehouseId!, inventoryId: tx.inventoryId },
         data: { warehouseId: tx.warehouseId },
       })
       if (res.count !== unitIds.length) throw new InventoryError('개체가 이미 이동되어 취소할 수 없습니다.', 409)
-    } else {
-      // TRANSFER 취소 → 출발 인벤토리·위치로 복귀 (현재 IN_STOCK@도착 버킷이어야)
-      const res = await client.inventoryUnit.updateMany({
-        where: { id: { in: unitIds }, status: 'IN_STOCK', warehouseId: destWarehouseId, inventoryId: tx.toInventoryId! },
-        data: { inventoryId: tx.inventoryId, warehouseId: tx.warehouseId },
-      })
-      if (res.count !== unitIds.length) throw new InventoryError('개체가 이미 변경되어 취소할 수 없습니다.', 409)
     }
   }
 }
@@ -546,6 +483,9 @@ export async function cancelInventoryTransaction(transactionId: number, actorId:
   })
   if (!tx) throw new InventoryError('전표를 찾을 수 없습니다.', 404)
   if (tx.canceledAt) throw new InventoryError('이미 취소된 전표입니다.', 409)
+  if (tx.txType === 'TRANSFER') {
+    throw new InventoryError('이관 기능 폐지로 과거 이관 전표는 취소할 수 없습니다. 필요 시 입고/출고 전표로 조정하세요.', 409)
+  }
 
   // 세트출고 자식 전표 (미취소분) — 부모 취소 시 함께 취소
   const children = await prisma.inventoryTransaction.findMany({

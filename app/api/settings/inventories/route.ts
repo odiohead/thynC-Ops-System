@@ -28,7 +28,6 @@ export async function POST(request: NextRequest) {
   const inventory = await prisma.inventory.create({
     data: {
       name,
-      isTransferLocked: !!body.isTransferLocked,
       linkHospital: !!body.linkHospital,
       memo: body.memo?.trim() || null,
       sortOrder: body.sortOrder ?? 0,

@@ -9,62 +9,66 @@ export interface ModalItem {
   unit: string
   isSerialManaged: boolean
 }
-interface Warehouse { id: number; name: string; isActive: boolean }
-interface Inventory { id: number; name: string; isTransferLocked: boolean; linkHospital: boolean; isActive: boolean }
+export interface ModalInventory {
+  id: number
+  name: string
+  linkHospital: boolean
+}
+interface Warehouse { id: number; name: string; isActive: boolean; inventoryId: number }
 interface Reason { id: number; name: string; value: string | null }
-interface Bucket { warehouseId: number; warehouseName: string; inventoryId: number; inventoryName: string; isTransferLocked: boolean; quantity: number }
+interface Bucket { warehouseId: number; warehouseName: string; quantity: number }
 interface Unit { id: number; serialNo: string }
 interface Hospital { hospitalCode: string; hospitalName: string }
 interface Work { workType: string; refCode: string; label: string }
 interface Component { childItemId: number; quantity: number; item: { id: number; itemCode: string; name: string; unit: string; isSerialManaged: boolean; isActive: boolean } }
+interface PickItem { id: number; itemCode: string; name: string; modelName: string | null; unit: string; isSerialManaged: boolean }
 
-type TxType = 'IN' | 'OUT' | 'MOVE' | 'TRANSFER'
+export type TxType = 'IN' | 'OUT' | 'MOVE'
 
-const TYPE_LABEL: Record<TxType, string> = { IN: '입고', OUT: '출고', MOVE: '이동', TRANSFER: '이관' }
+const TYPE_LABEL: Record<TxType, string> = { IN: '입고', OUT: '출고', MOVE: '이동' }
 
+/**
+ * 입고/출고/이동 전표 모달 — 인벤토리 고정(품목·위치 전부 해당 인벤토리 스코프).
+ * item 미지정 시 모달 안에서 이 인벤토리의 품목을 검색·선택 (인벤토리 카드 섹션의 입고/출고 버튼용).
+ */
 export default function TransactionModal({
-  item, warehouses, defaultInventoryId, fixedInventoryId, onClose, onDone,
+  inventory, warehouses, item: fixedItem, defaultTxType, onClose, onDone,
 }: {
-  item: ModalItem
-  warehouses: Warehouse[]
-  defaultInventoryId?: number | null // 현재 인벤토리 탭 — 모달 기본값 (변경 가능)
-  fixedInventoryId?: number | null // 인벤토리 자재 상세 — 인벤토리 고정 (변경 불가)
+  inventory: ModalInventory
+  warehouses: Warehouse[] // 이 인벤토리의 위치 목록
+  item?: ModalItem | null // 지정 시 품목 고정 (품목 상세에서 열 때)
+  defaultTxType?: TxType
   onClose: () => void
   onDone: () => void
 }) {
-  const fixed = fixedInventoryId != null
-  const preferredInventoryId = fixedInventoryId ?? defaultInventoryId ?? null
-  const activeWarehouses = warehouses.filter((w) => w.isActive)
-  const [txType, setTxType] = useState<TxType>('IN')
+  const activeWarehouses = warehouses.filter((w) => w.isActive && w.inventoryId === inventory.id)
+  const [txType, setTxType] = useState<TxType>(defaultTxType ?? 'IN')
   const [warehouseId, setWarehouseId] = useState<number | null>(activeWarehouses[0]?.id ?? null)
   const [toWarehouseId, setToWarehouseId] = useState<number | null>(null)
   const [quantity, setQuantity] = useState('1')
-  const [serialsText, setSerialsText] = useState('') // IN 신규/회수 + OUT·MOVE·TRANSFER 시리얼 입력(스캔)
+  const [serialsText, setSerialsText] = useState('') // IN 신규/회수 + OUT·MOVE 시리얼 입력(스캔)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // 인벤토리 — IN은 마스터에서 선택(탭 기본값), OUT/MOVE/TRANSFER는 재고 있는 인벤토리 중 선택
-  const [inventories, setInventories] = useState<Inventory[]>([])
-  const [inventoryId, setInventoryId] = useState<number | null>(null)
-  const [toInventoryId, setToInventoryId] = useState<number | null>(null)
+  // 품목 — 고정(상세에서 진입) 또는 모달 내 선택(카드 섹션 버튼)
+  const [item, setItem] = useState<ModalItem | null>(fixedItem ?? null)
+  const [pickList, setPickList] = useState<PickItem[]>([])
+  const [pickSearch, setPickSearch] = useState('')
+
   const [buckets, setBuckets] = useState<Bucket[]>([])
   const autoWarehousePicked = useRef(false) // 재고 있는 창고 1회 자동 선택
-
-  // 이관: 일자(기본 오늘)·단가(참고용)
-  const [transferDate, setTransferDate] = useState(() => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10))
-  const [transferPrice, setTransferPrice] = useState('')
 
   // 입고/출고 유형 (설정에서 관리)
   const [inReasons, setInReasons] = useState<Reason[]>([])
   const [outReasons, setOutReasons] = useState<Reason[]>([])
   const [reasonId, setReasonId] = useState<number | null>(null)
 
-  // 시리얼 OUT/MOVE/TRANSFER — 가용 개체 목록 (참고용 표시·클릭 추가)
+  // 시리얼 OUT/MOVE — 가용 개체 목록 (참고용 표시·클릭 추가)
   const [units, setUnits] = useState<Unit[]>([])
   const [showAvail, setShowAvail] = useState(false)
 
-  // 출고: 출고처·병원·업무 연결
+  // 출고: 출고처·병원·업무 연결 (병원 연결은 linkHospital 인벤토리만)
   const [destination, setDestination] = useState('')
   const [hospital, setHospital] = useState<Hospital | null>(null)
   const [hospitalSearch, setHospitalSearch] = useState('')
@@ -79,27 +83,18 @@ export default function TransactionModal({
   const [compChecked, setCompChecked] = useState<Set<number>>(new Set())
   const [compQty, setCompQty] = useState<Record<number, string>>({})
 
-  const serial = item.isSerialManaged
-  const needSerialInput = serial && txType !== 'IN' // 출고·이동·이관 — 시리얼 입력/스캔
-  const needBucketPick = txType !== 'IN' // 기존 재고(위치×인벤토리)에서 선택
+  const serial = item?.isSerialManaged ?? false
+  const needSerialInput = serial && txType !== 'IN' // 출고·이동 — 시리얼 입력/스캔
+  const needBucketPick = txType !== 'IN' // 기존 재고 위치에서 선택
 
-  const activeInventories = inventories.filter((i) => i.isActive)
   const reasons = txType === 'IN' ? inReasons : txType === 'OUT' ? outReasons : []
   const currentReason = reasons.find((r) => r.id === reasonId)
-  const sourceInventory = inventories.find((i) => i.id === inventoryId)
-  const canLinkHospital = txType === 'OUT' && !!sourceInventory?.linkHospital // 병원 연결은 대웅제약재고 출고만
+  const canLinkHospital = txType === 'OUT' && inventory.linkHospital
 
   const serialLines = serialsText.split('\n').map((s) => s.trim()).filter(Boolean)
 
-  // 마스터 로드 — 인벤토리·입출고 유형·부자재 매핑
+  // 마스터 로드 — 입출고 유형 + (품목 미고정 시) 이 인벤토리의 품목 목록
   useEffect(() => {
-    fetch('/api/settings/inventories').then(async (r) => {
-      if (!r.ok) return
-      const list: Inventory[] = (await r.json()).inventories ?? []
-      setInventories(list)
-      const preferred = list.find((i) => i.isActive && i.id === preferredInventoryId) ?? (fixed ? null : list.find((i) => i.isActive))
-      if (preferred) setInventoryId((prev) => prev ?? preferred.id)
-    })
     fetch('/api/settings/stock-in-type').then(async (r) => {
       if (!r.ok) return
       const list: Reason[] = (await r.json()).statusCodes ?? []
@@ -107,57 +102,62 @@ export default function TransactionModal({
       if (list.length) setReasonId((prev) => prev ?? list[0].id)
     })
     fetch('/api/settings/stock-out-type').then(async (r) => { if (r.ok) setOutReasons((await r.json()).statusCodes ?? []) })
+    if (!fixedItem) {
+      fetch(`/api/inventory/items?inventoryId=${inventory.id}`).then(async (r) => {
+        if (r.ok) setPickList(((await r.json()).items ?? []) as PickItem[])
+      })
+    }
+  }, [inventory.id, fixedItem])
+
+  // 부자재 매핑 로드 — 선택 품목 기준
+  useEffect(() => {
+    if (!item) { setComponents([]); return }
     fetch(`/api/inventory/items/${item.id}/components`).then(async (r) => {
       if (r.ok) setComponents(((await r.json()).components ?? []) as Component[])
     })
-  }, [item.id, preferredInventoryId, fixed])
+  }, [item])
 
   function switchType(t: TxType) {
     setTxType(t)
     setReasonId(t === 'IN' ? (inReasons[0]?.id ?? null) : t === 'OUT' ? (outReasons[0]?.id ?? null) : null)
     setError(null)
     setSerialsText('')
-    setToInventoryId(null)
     setToWarehouseId(null)
-    if (t !== 'IN') setInventoryId(null) // 버킷 로드 후 우선 인벤토리로 재선택
-    else if (fixed) setInventoryId(preferredInventoryId)
-    else setInventoryId(activeInventories.find((i) => i.id === preferredInventoryId)?.id ?? activeInventories[0]?.id ?? null)
+    autoWarehousePicked.current = false
     if (t !== 'OUT') { setHospital(null); setWorks([]); setSelectedWork(''); setDestination(''); setSetOut(false) }
   }
 
-  // OUT/MOVE/TRANSFER: 출발 위치의 재고 버킷(인벤토리) 로드 — 고정/탭 인벤토리 우선 선택.
-  // 현재 위치에 재고가 없으면 재고 있는 위치로 1회 자동 전환 (모달 열자마자 입력 가능하도록)
+  function pickItem(id: number | null) {
+    const p = pickList.find((x) => x.id === id)
+    setItem(p ? { id: p.id, itemCode: p.itemCode, name: p.name, unit: p.unit, isSerialManaged: p.isSerialManaged } : null)
+    setSerialsText('')
+    setSetOut(false)
+    setError(null)
+    autoWarehousePicked.current = false
+  }
+
+  // OUT/MOVE: 품목의 위치별 재고 로드 — 현재 위치에 재고가 없으면 재고 있는 위치로 1회 자동 전환
   const loadBuckets = useCallback(async () => {
-    if (!needBucketPick || !warehouseId) { setBuckets([]); return }
-    const res = await fetch(`/api/inventory/stocks?itemId=${item.id}${fixed ? `&inventoryId=${fixedInventoryId}` : ''}`)
+    if (!needBucketPick || !item) { setBuckets([]); return }
+    const res = await fetch(`/api/inventory/stocks?itemId=${item.id}`)
     if (res.ok) {
       const all: Bucket[] = (await res.json()).buckets
-      const here = all.filter((b) => b.warehouseId === warehouseId)
-      if (here.length === 0 && all.length > 0 && !autoWarehousePicked.current) {
+      setBuckets(all)
+      if (warehouseId && !all.some((b) => b.warehouseId === warehouseId) && all.length > 0 && !autoWarehousePicked.current) {
         autoWarehousePicked.current = true
-        const target = all.find((b) => b.inventoryId === preferredInventoryId) ?? all[0]
-        setWarehouseId(target.warehouseId) // 재고 있는 위치로 전환 → loadBuckets 재실행
-        return
+        setWarehouseId(all[0].warehouseId)
       }
-      setBuckets(here)
-      const preferred = here.find((b) => b.inventoryId === preferredInventoryId) ?? (here.length === 1 ? here[0] : null)
-      setInventoryId(preferred ? preferred.inventoryId : null)
     }
-  }, [needBucketPick, warehouseId, item.id, preferredInventoryId, fixed, fixedInventoryId])
+  }, [needBucketPick, item, warehouseId])
   useEffect(() => { loadBuckets() }, [loadBuckets])
 
-  // 시리얼 OUT/MOVE/TRANSFER: 선택 버킷의 IN_STOCK 개체 로드 (가용 목록 표시용)
+  // 시리얼 OUT/MOVE: 선택 위치의 IN_STOCK 개체 로드 (가용 목록 표시용)
   const loadUnits = useCallback(async () => {
-    if (!needSerialInput || !warehouseId || !inventoryId) { setUnits([]); return }
-    const res = await fetch(`/api/inventory/units?itemId=${item.id}&warehouseId=${warehouseId}&status=IN_STOCK&inventoryId=${inventoryId}`)
+    if (!needSerialInput || !warehouseId || !item) { setUnits([]); return }
+    const res = await fetch(`/api/inventory/units?itemId=${item.id}&warehouseId=${warehouseId}&status=IN_STOCK`)
     if (res.ok) setUnits((await res.json()).units)
-  }, [needSerialInput, warehouseId, inventoryId, item.id])
+  }, [needSerialInput, warehouseId, item])
   useEffect(() => { loadUnits() }, [loadUnits])
-
-  // 인벤토리 변경 시 병원 연결 불가면 해제
-  useEffect(() => {
-    if (!canLinkHospital && hospital) { setHospital(null); setWorks([]); setSelectedWork('') }
-  }, [canLinkHospital, hospital])
 
   // 병원 검색
   useEffect(() => {
@@ -187,7 +187,7 @@ export default function TransactionModal({
     setSerialsText(Array.from(lines).join('\n'))
   }
 
-  const selectedBucket = buckets.find((b) => b.inventoryId === inventoryId)
+  const selectedBucket = buckets.find((b) => b.warehouseId === warehouseId)
 
   const effectiveQty = serial ? serialLines.length : parseInt(quantity) || 0
 
@@ -209,14 +209,19 @@ export default function TransactionModal({
     }
   }
 
+  const filteredPickList = pickSearch.trim()
+    ? pickList.filter((p) => {
+        const q = pickSearch.trim().toLowerCase()
+        return p.name.toLowerCase().includes(q) || p.itemCode.toLowerCase().includes(q) || (p.modelName ?? '').toLowerCase().includes(q)
+      })
+    : pickList
+
   async function submit() {
     setError(null)
+    if (!item) { setError('품목을 선택하세요.'); return }
     if (!warehouseId) { setError('위치를 선택하세요.'); return }
     if (txType === 'MOVE' && !toWarehouseId) { setError('도착 위치를 선택하세요.'); return }
-    if (!inventoryId) { setError('인벤토리를 선택하세요.'); return }
     if ((txType === 'IN' || txType === 'OUT') && !reasonId) { setError(`${TYPE_LABEL[txType]} 유형을 선택하세요.`); return }
-    if (txType === 'TRANSFER' && !toInventoryId) { setError('도착 인벤토리를 선택하세요.'); return }
-    if (txType === 'TRANSFER' && !transferDate) { setError('이관일자를 입력하세요.'); return }
     if (effectiveQty <= 0) { setError(serial ? '시리얼을 입력하세요.' : '수량을 입력하세요.'); return }
 
     const compPayload = txType === 'OUT' && setOut
@@ -232,18 +237,14 @@ export default function TransactionModal({
       reasonId,
       itemId: item.id,
       warehouseId,
-      toWarehouseId: txType === 'MOVE' ? toWarehouseId : txType === 'TRANSFER' ? (toWarehouseId ?? null) : null,
-      inventoryId,
-      toInventoryId: txType === 'TRANSFER' ? toInventoryId : null,
+      toWarehouseId: txType === 'MOVE' ? toWarehouseId : null,
       quantity: effectiveQty,
-      transferDate: txType === 'TRANSFER' ? transferDate : null,
-      transferPrice: txType === 'TRANSFER' && transferPrice.trim() ? parseInt(transferPrice) : null,
       destination: txType === 'OUT' ? destination.trim() || null : null,
       hospitalCode: canLinkHospital ? hospital?.hospitalCode ?? null : null,
       workType: canLinkHospital ? work?.workType ?? null : null,
       refCode: canLinkHospital ? work?.refCode ?? null : null,
       note,
-      serials: serial ? serialLines : [], // IN=신규/회수, OUT·MOVE·TRANSFER=대상 개체 지정 (서버에서 버킷 검증)
+      serials: serial ? serialLines : [], // IN=신규/회수, OUT·MOVE=대상 개체 지정 (서버에서 위치 검증)
       unitIds: [],
       components: compPayload,
     }
@@ -264,8 +265,15 @@ export default function TransactionModal({
       <div className="w-full max-w-lg rounded-xl bg-white shadow-xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 sticky top-0 bg-white z-10">
           <div>
-            <h2 className="text-base font-semibold text-gray-900">재고 입출고</h2>
-            <p className="text-xs text-gray-500 mt-0.5">{item.itemCode} · {item.name}{serial && <span className="ml-1 text-indigo-600">(시리얼)</span>}</p>
+            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              재고 입출고
+              <span className="rounded bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">{inventory.name}</span>
+            </h2>
+            {item ? (
+              <p className="text-xs text-gray-500 mt-0.5">{item.itemCode} · {item.name}{serial && <span className="ml-1 text-indigo-600">(시리얼)</span>}</p>
+            ) : (
+              <p className="text-xs text-gray-400 mt-0.5">품목을 선택하세요</p>
+            )}
           </div>
           <button onClick={onClose} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
@@ -275,13 +283,29 @@ export default function TransactionModal({
         <div className="px-6 py-4 space-y-4">
           {/* 유형 토글 */}
           <div className="flex gap-2">
-            {(['IN', 'OUT', 'MOVE', 'TRANSFER'] as TxType[]).map((t) => (
+            {(['IN', 'OUT', 'MOVE'] as TxType[]).map((t) => (
               <button key={t} onClick={() => switchType(t)}
                 className={`flex-1 rounded-lg border px-2 py-2 text-sm font-medium transition-colors ${txType === t ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
                 {TYPE_LABEL[t]}
               </button>
             ))}
           </div>
+
+          {/* 품목 선택 (고정 아닐 때) */}
+          {!fixedItem && (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">품목 <span className="text-red-500">*</span></label>
+              <input value={pickSearch} onChange={(e) => setPickSearch(e.target.value)} placeholder="품목명·모델명·코드 검색" className={inputCls + ' mb-1.5'} />
+              <select value={item?.id ?? ''} onChange={(e) => pickItem(e.target.value ? parseInt(e.target.value) : null)} className={inputCls} size={filteredPickList.length > 6 ? 6 : undefined}>
+                <option value="">선택하세요 ({filteredPickList.length}개)</option>
+                {filteredPickList.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}{p.modelName ? ` [${p.modelName}]` : ''} ({p.itemCode}){p.isSerialManaged ? ' — S/N' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             {(txType === 'IN' || txType === 'OUT') && (
@@ -292,11 +316,24 @@ export default function TransactionModal({
                 </select>
               </div>
             )}
-            <div className={txType === 'MOVE' || txType === 'TRANSFER' ? 'col-span-2' : ''}>
+            <div className={txType === 'MOVE' ? 'col-span-2' : ''}>
               <label className="block text-xs font-medium text-gray-700 mb-1">{txType === 'MOVE' ? '출발 위치' : '위치'}</label>
-              <select value={warehouseId ?? ''} onChange={(e) => setWarehouseId(e.target.value ? parseInt(e.target.value) : null)} className={inputCls}>
-                {activeWarehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-              </select>
+              {txType === 'IN' ? (
+                <select value={warehouseId ?? ''} onChange={(e) => setWarehouseId(e.target.value ? parseInt(e.target.value) : null)} className={inputCls}>
+                  {activeWarehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                </select>
+              ) : (
+                <select value={warehouseId ?? ''} onChange={(e) => setWarehouseId(e.target.value ? parseInt(e.target.value) : null)} className={inputCls}>
+                  <option value="">선택하세요</option>
+                  {activeWarehouses.map((w) => {
+                    const b = buckets.find((x) => x.warehouseId === w.id)
+                    return <option key={w.id} value={w.id}>{w.name}{b ? ` (재고 ${b.quantity})` : ' (재고 없음)'}</option>
+                  })}
+                </select>
+              )}
+              {needBucketPick && item && buckets.length === 0 && (
+                <p className="mt-1 text-xs text-gray-400">이 인벤토리에 재고가 없습니다.</p>
+              )}
             </div>
           </div>
 
@@ -310,73 +347,8 @@ export default function TransactionModal({
             </div>
           )}
 
-          {/* 인벤토리 — 고정 모드(인벤토리 자재 상세)에서는 변경 불가 */}
-          {txType === 'IN' ? (
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">인벤토리 <span className="text-red-500">*</span>{fixed && <span className="ml-1 text-gray-400">(고정)</span>}</label>
-              <select value={inventoryId ?? ''} disabled={fixed} onChange={(e) => setInventoryId(e.target.value ? parseInt(e.target.value) : null)} className={inputCls + ' disabled:bg-gray-50 disabled:text-gray-500'}>
-                {activeInventories.filter((i) => !fixed || i.id === fixedInventoryId).map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-              </select>
-              {currentReason?.value === 'RETURN' && (
-                <p className="mt-1 text-xs text-amber-600">회수는 출고 당시의 인벤토리와 동일해야 합니다. (인벤토리 전환 불가)</p>
-              )}
-            </div>
-          ) : (
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">인벤토리 (재고 구분) <span className="text-red-500">*</span>{fixed && <span className="ml-1 text-gray-400">(고정)</span>}</label>
-              <select value={inventoryId ?? ''} disabled={fixed} onChange={(e) => setInventoryId(e.target.value ? parseInt(e.target.value) : null)} className={inputCls + ' disabled:bg-gray-50 disabled:text-gray-500'}>
-                <option value="">선택하세요</option>
-                {buckets.map((b) => (
-                  <option key={b.inventoryId} value={b.inventoryId}>
-                    {b.inventoryName} (재고 {b.quantity})
-                  </option>
-                ))}
-              </select>
-              {buckets.length === 0 && <p className="mt-1 text-xs text-gray-400">해당 위치에 {fixed ? '이 인벤토리의 ' : ''}재고가 없습니다.</p>}
-            </div>
-          )}
-
-          {/* 이관: 도착 인벤토리 (+선택적 도착 위치) */}
-          {txType === 'TRANSFER' && (
-            <div className="rounded-lg border border-gray-200 p-3 space-y-2">
-              {sourceInventory?.isTransferLocked ? (
-                <p className="text-xs text-red-600">&apos;{sourceInventory.name}&apos;은(는) 다른 인벤토리로 이관할 수 없습니다.</p>
-              ) : (
-                <>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">도착 인벤토리 <span className="text-red-500">*</span></label>
-                    <select value={toInventoryId ?? ''} onChange={(e) => setToInventoryId(e.target.value ? parseInt(e.target.value) : null)} className={inputCls}>
-                      <option value="">선택하세요</option>
-                      {activeInventories.filter((i) => i.id !== inventoryId && !i.isTransferLocked).map((i) => (
-                        <option key={i.id} value={i.id}>{i.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">도착 위치 (선택 — 미지정 시 현재 위치 유지)</label>
-                    <select value={toWarehouseId ?? ''} onChange={(e) => setToWarehouseId(e.target.value ? parseInt(e.target.value) : null)} className={inputCls}>
-                      <option value="">현재 위치 유지</option>
-                      {activeWarehouses.filter((w) => w.id !== warehouseId).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">이관일자 <span className="text-red-500">*</span></label>
-                      <input type="date" value={transferDate} onChange={(e) => setTransferDate(e.target.value)} className={inputCls} />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">이관 단가 (원 — 참고용, 선택)</label>
-                      <input type="number" min={0} value={transferPrice} onChange={(e) => setTransferPrice(e.target.value)} className={inputCls} placeholder="예: 150000" />
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-400">이관 잠금 인벤토리(예: 평가용재고)는 출발·도착 모두 선택할 수 없습니다. 단가는 재판매(대웅제약→판매용) 참고 기록용입니다.</p>
-                </>
-              )}
-            </div>
-          )}
-
           {/* 수량 or 시리얼 */}
-          {!serial ? (
+          {!item ? null : !serial ? (
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
                 수량 ({item.unit})
@@ -388,18 +360,18 @@ export default function TransactionModal({
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">시리얼 입력 · 바코드 스캔 (줄바꿈으로 여러 개) · <b>{effectiveQty}개</b></label>
               <textarea value={serialsText} onChange={(e) => setSerialsText(e.target.value)} rows={5} placeholder={'SN001\nSN002\nSN003\n(바코드 리더기로 연속 스캔 가능)'} className={inputCls + ' font-mono'} />
-              {currentReason?.value === 'RETURN' && <p className="mt-1 text-xs text-amber-600">회수: 이미 출고된 개체의 시리얼을 입력하세요.</p>}
+              {currentReason?.value === 'RETURN' && <p className="mt-1 text-xs text-amber-600">회수: 이 인벤토리에서 출고된 개체의 시리얼을 입력하세요.</p>}
             </div>
           ) : (
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
                 {TYPE_LABEL[txType]} 대상 시리얼 — 직접 입력 · 바코드 스캔 (줄바꿈으로 여러 개) · <b>{effectiveQty}개</b>
-                {inventoryId && <span className="ml-1 text-gray-400">/ 가용 {units.length}개</span>}
+                {warehouseId && <span className="ml-1 text-gray-400">/ 가용 {units.length}개</span>}
               </label>
               <textarea value={serialsText} onChange={(e) => setSerialsText(e.target.value)} rows={5}
-                placeholder={'SN001\nSN002\n(바코드 리더기로 연속 스캔하거나 붙여넣기)'} className={inputCls + ' font-mono'} disabled={!inventoryId} />
-              <p className="mt-1 text-xs text-gray-400">대량 처리: 시리얼을 줄 단위로 붙여넣거나 바코드 리더기로 연속 스캔하세요. 존재하지 않거나 해당 위치·인벤토리 재고가 아닌 시리얼은 확정 시 거부됩니다.</p>
-              {inventoryId && units.length > 0 && (
+                placeholder={'SN001\nSN002\n(바코드 리더기로 연속 스캔하거나 붙여넣기)'} className={inputCls + ' font-mono'} disabled={!warehouseId} />
+              <p className="mt-1 text-xs text-gray-400">대량 처리: 시리얼을 줄 단위로 붙여넣거나 바코드 리더기로 연속 스캔하세요. 존재하지 않거나 해당 위치 재고가 아닌 시리얼은 확정 시 거부됩니다.</p>
+              {warehouseId && units.length > 0 && (
                 <div className="mt-2">
                   <button type="button" onClick={() => setShowAvail((v) => !v)} className="text-xs text-blue-600 hover:underline">
                     {showAvail ? '▲ 가용 개체 목록 접기' : `▼ 가용 개체 목록에서 선택 (${units.length}개)`}
@@ -425,7 +397,7 @@ export default function TransactionModal({
           )}
 
           {/* 출고: 부자재 세트출고 */}
-          {txType === 'OUT' && components.length > 0 && (
+          {item && txType === 'OUT' && components.length > 0 && (
             <div className="rounded-lg border border-gray-200 p-3 space-y-2">
               <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
                 <input type="checkbox" checked={setOut} onChange={(e) => toggleSetOut(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
@@ -448,14 +420,14 @@ export default function TransactionModal({
                   {serialComponents.length > 0 && (
                     <p className="text-xs text-amber-600">시리얼 관리 부자재({serialComponents.map((c) => c.item.name).join(', ')})는 세트출고에서 제외됩니다 — 개별 출고하세요.</p>
                   )}
-                  <p className="text-xs text-gray-400">부자재는 주자재와 같은 위치·인벤토리 재고에서 차감됩니다. (수량 = 출고수량 × 구성수량, 수정 가능)</p>
+                  <p className="text-xs text-gray-400">부자재는 주자재와 같은 위치 재고에서 차감됩니다. (수량 = 출고수량 × 구성수량, 수정 가능)</p>
                 </div>
               )}
             </div>
           )}
 
-          {/* 출고: 출고처 (+대웅제약재고만 병원·업무 연결) */}
-          {txType === 'OUT' && (
+          {/* 출고: 출고처 (+병원 연결 허용 인벤토리만 병원·업무 연결) */}
+          {item && txType === 'OUT' && (
             <div className="rounded-lg border border-gray-200 p-3 space-y-2">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">출고처 (자유 입력)</label>
@@ -492,7 +464,7 @@ export default function TransactionModal({
                   )}
                 </>
               ) : (
-                inventoryId != null && <p className="text-xs text-gray-400">병원 연결은 병원 연결 허용 인벤토리(대웅제약재고) 출고에서만 가능합니다.</p>
+                <p className="text-xs text-gray-400">병원 연결은 병원 연결 허용 인벤토리(대웅제약재고) 출고에서만 가능합니다.</p>
               )}
             </div>
           )}
@@ -507,7 +479,7 @@ export default function TransactionModal({
 
         <div className="flex justify-end gap-2 border-t border-gray-200 px-6 py-4 sticky bottom-0 bg-white">
           <button onClick={onClose} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">취소</button>
-          <button onClick={submit} disabled={busy || effectiveQty <= 0} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+          <button onClick={submit} disabled={busy || !item || effectiveQty <= 0} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
             {busy ? '처리 중...' : `${TYPE_LABEL[txType]} 확정`}
           </button>
         </div>

@@ -16,18 +16,17 @@ interface Item {
   refPrice: number | null
   memo: string | null
   isActive: boolean
+  inventoryId: number
+  inventory: { id: number; name: string; linkHospital: boolean } | null
   categoryPath: string
   manufacturer: { id: number; name: string } | null
   deviceInfo: { deviceName: string; deviceModel: string } | null
-  stocks: { warehouseId: number; inventoryId: number; quantity: number; warehouse: { name: string }; inventory: { name: string } }[]
+  stocks: { warehouseId: number; quantity: number; warehouse: { name: string } }[]
 }
-interface Warehouse { id: number; name: string; isActive: boolean }
-interface InventoryMaster { id: number; name: string; isTransferLocked: boolean; linkHospital: boolean; isActive: boolean }
+interface Warehouse { id: number; name: string; isActive: boolean; inventoryId: number }
 interface Tx {
   id: number; txCode: string; txType: string; quantity: number
   reasonCode: { name: string } | null
-  transferDate: string | null
-  transferPrice: number | null
   destination: string | null
   canceledAt: string | null; createdAt: string
   warehouse: { name: string } | null; toWarehouse: { name: string } | null
@@ -40,7 +39,7 @@ interface Unit {
   warehouse: { name: string } | null; hospital: { hospitalName: string } | null
 }
 
-const TYPE_LABEL: Record<string, string> = { IN: '입고', OUT: '출고', MOVE: '이동', TRANSFER: '이관' }
+const TYPE_LABEL: Record<string, string> = { IN: '입고', OUT: '출고', MOVE: '이동', TRANSFER: '이관(구)' }
 const UNIT_STATUS: Record<string, { label: string; cls: string }> = {
   IN_STOCK: { label: '재고', cls: 'bg-green-50 text-green-700' },
   OUT: { label: '출고', cls: 'bg-blue-50 text-blue-700' },
@@ -48,16 +47,14 @@ const UNIT_STATUS: Record<string, { label: string; cls: string }> = {
 }
 
 /**
- * 인벤토리 자재 상세 — URL 경로에 인벤토리가 고정된 스코프 페이지.
- * 재고·이력·개체·입출고 처리 전부 이 인벤토리로 한정 (다른 인벤토리 정보 미노출).
+ * 인벤토리 자재 상세 — 품목이 인벤토리에 귀속되므로 URL의 invId와 품목 소속이 일치해야 한다.
+ * 재고·이력·개체·입출고 처리 전부 이 인벤토리 스코프.
  */
 export default function InventoryScopedItemPage() {
   const params = useParams()
   const invId = parseInt(params.invId as string)
   const itemId = params.itemId as string
 
-  const [inventory, setInventory] = useState<InventoryMaster | null>(null)
-  const [invLoaded, setInvLoaded] = useState(false)
   const [item, setItem] = useState<Item | null>(null)
   const [txs, setTxs] = useState<Tx[]>([])
   const [units, setUnits] = useState<Unit[]>([])
@@ -70,39 +67,42 @@ export default function InventoryScopedItemPage() {
   const fetchAll = useCallback(async () => {
     const [iRes, tRes] = await Promise.all([
       fetch(`/api/inventory/items/${itemId}`),
-      fetch(`/api/inventory/transactions?itemId=${itemId}&inventoryId=${invId}&limit=100`),
+      fetch(`/api/inventory/transactions?itemId=${itemId}&limit=100`),
     ])
     if (iRes.ok) setItem((await iRes.json()).item)
     if (tRes.ok) setTxs((await tRes.json()).data)
     setLoading(false)
-  }, [itemId, invId])
+  }, [itemId])
 
   const fetchUnits = useCallback(async () => {
-    const res = await fetch(`/api/inventory/units?itemId=${itemId}&inventoryId=${invId}`)
+    const res = await fetch(`/api/inventory/units?itemId=${itemId}`)
     if (res.ok) setUnits((await res.json()).units)
-  }, [itemId, invId])
+  }, [itemId])
 
   useEffect(() => {
-    fetch('/api/settings/inventories').then(async (r) => {
-      if (r.ok) {
-        const list: InventoryMaster[] = (await r.json()).inventories
-        setInventory(list.find((i) => i.id === invId) ?? null)
-      }
-      setInvLoaded(true)
-    })
     fetch('/api/settings/warehouses').then(async (r) => { if (r.ok) setWarehouses((await r.json()).warehouses) })
     fetch('/api/inventory/can-manage').then(async (r) => { if (r.ok) setCanManage((await r.json()).canManage) })
-  }, [invId])
+  }, [])
   useEffect(() => { fetchAll() }, [fetchAll])
   useEffect(() => { if (item?.isSerialManaged) fetchUnits() }, [item?.isSerialManaged, fetchUnits])
 
-  if (loading || !invLoaded) return <div className="p-8 text-sm text-gray-500">불러오는 중...</div>
-  if (!inventory) return <div className="p-8 text-sm text-gray-500">인벤토리를 찾을 수 없습니다. <Link href="/inventory" className="text-blue-600">자재 현황으로</Link></div>
+  if (loading) return <div className="p-8 text-sm text-gray-500">불러오는 중...</div>
   if (!item) return <div className="p-8 text-sm text-gray-500">품목을 찾을 수 없습니다. <Link href="/inventory" className="text-blue-600">자재 현황으로</Link></div>
+  // 품목이 다른 인벤토리 소속이면 스코프 불일치 안내
+  if (item.inventoryId !== invId) {
+    return (
+      <div className="p-8 text-sm text-gray-500">
+        이 품목은 다른 인벤토리({item.inventory?.name ?? '?'}) 소속입니다.{' '}
+        <Link href={`/inventory/${item.inventoryId}/items/${item.id}`} className="text-blue-600 hover:underline">해당 인벤토리에서 보기</Link>
+        {' · '}
+        <Link href="/inventory" className="text-blue-600 hover:underline">자재 현황으로</Link>
+      </div>
+    )
+  }
 
-  // 이 인벤토리의 재고만
-  const scopedStocks = item.stocks.filter((s) => s.inventoryId === invId && s.quantity > 0)
-  const scopedTotal = item.stocks.filter((s) => s.inventoryId === invId).reduce((sum, s) => sum + s.quantity, 0)
+  const inventory = item.inventory!
+  const scopedStocks = item.stocks.filter((s) => s.quantity > 0)
+  const scopedTotal = item.stocks.reduce((sum, s) => sum + s.quantity, 0)
   const inStockUnits = units.filter((u) => u.status === 'IN_STOCK')
 
   const modalItem: ModalItem = { id: item.id, itemCode: item.itemCode, name: item.name, unit: item.unit, isSerialManaged: item.isSerialManaged }
@@ -110,7 +110,7 @@ export default function InventoryScopedItemPage() {
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <div className="mb-4 flex items-center gap-2 text-sm text-gray-500">
-        <Link href={`/inventory?inv=${invId}`} className="hover:text-blue-600">자재 현황</Link>
+        <Link href="/inventory" className="hover:text-blue-600">자재 현황</Link>
         <span>/</span>
         <span className="font-medium text-blue-600">{inventory.name}</span>
         <span>/</span>
@@ -120,9 +120,8 @@ export default function InventoryScopedItemPage() {
       <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-sm font-semibold ${inventory.isTransferLocked ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
+            <span className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2.5 py-1 text-sm font-semibold text-blue-700">
               {inventory.name}
-              {inventory.isTransferLocked && <span title="이관 잠금">🔒</span>}
             </span>
           </div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
@@ -167,7 +166,7 @@ export default function InventoryScopedItemPage() {
         </div>
       </div>
 
-      {/* 탭 — 이 인벤토리의 이력·개체만 */}
+      {/* 탭 — 이 품목(=이 인벤토리)의 이력·개체 */}
       <div className="mb-3 flex border-b border-gray-200">
         <button onClick={() => setTab('history')} className={`px-4 py-2 text-sm font-medium ${tab === 'history' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>입출고 이력</button>
         {item.isSerialManaged && <button onClick={() => setTab('units')} className={`px-4 py-2 text-sm font-medium ${tab === 'units' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>개체 목록 (재고 {inStockUnits.length})</button>}
@@ -183,7 +182,7 @@ export default function InventoryScopedItemPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {txs.length === 0 ? (
-                <tr><td colSpan={8} className="py-8 text-center text-sm text-gray-400">이 인벤토리의 이력이 없습니다.</td></tr>
+                <tr><td colSpan={8} className="py-8 text-center text-sm text-gray-400">이력이 없습니다.</td></tr>
               ) : txs.map((tx) => (
                 <tr key={tx.id} className={tx.canceledAt ? 'opacity-50 line-through' : ''}>
                   <td className="px-3 py-2 font-mono text-xs text-gray-500">
@@ -194,14 +193,10 @@ export default function InventoryScopedItemPage() {
                   <td className="px-3 py-2">
                     {TYPE_LABEL[tx.txType] ?? tx.txType}
                     {tx.txType === 'TRANSFER' && tx.inventory && tx.toInventory && (
-                      <span className={`block text-[10px] ${tx.toInventory.id === invId ? 'text-green-600' : 'text-purple-600'}`}>
-                        {tx.inventory.name} → {tx.toInventory.name}
-                        {tx.transferDate && <> · {new Date(tx.transferDate).toLocaleDateString('ko-KR')}</>}
-                        {tx.transferPrice != null && <> · {tx.transferPrice.toLocaleString()}원</>}
-                      </span>
+                      <span className="block text-[10px] text-purple-600">{tx.inventory.name} → {tx.toInventory.name}</span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-gray-600">{tx.txType === 'MOVE' ? '이동' : tx.txType === 'TRANSFER' ? '이관' : (tx.reasonCode?.name ?? '-')}</td>
+                  <td className="px-3 py-2 text-gray-600">{tx.txType === 'MOVE' ? '이동' : tx.txType === 'TRANSFER' ? '이관(구)' : (tx.reasonCode?.name ?? '-')}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{tx.quantity}</td>
                   <td className="px-3 py-2 text-gray-600">{tx.warehouse?.name}{tx.toWarehouse && ` → ${tx.toWarehouse.name}`}</td>
                   <td className="px-3 py-2 text-gray-500 text-xs">{tx.destination ?? tx.hospital?.hospitalName ?? '-'}</td>
@@ -221,7 +216,7 @@ export default function InventoryScopedItemPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {units.length === 0 ? (
-                <tr><td colSpan={5} className="py-8 text-center text-sm text-gray-400">이 인벤토리의 개체가 없습니다.</td></tr>
+                <tr><td colSpan={5} className="py-8 text-center text-sm text-gray-400">개체가 없습니다.</td></tr>
               ) : units.map((u) => (
                 <tr key={u.id}>
                   <td className="px-3 py-2 font-mono text-gray-900">{u.serialNo}</td>
@@ -237,7 +232,7 @@ export default function InventoryScopedItemPage() {
       )}
 
       {modalOpen && (
-        <TransactionModal item={modalItem} warehouses={warehouses} fixedInventoryId={invId}
+        <TransactionModal item={modalItem} inventory={inventory} warehouses={warehouses}
           onClose={() => setModalOpen(false)} onDone={() => { setModalOpen(false); fetchAll(); if (item.isSerialManaged) fetchUnits() }} />
       )}
     </div>

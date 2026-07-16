@@ -634,18 +634,22 @@ model NavMenuItem {
 
 // ─── 자재관리(WMS) Phase 1 ─── (function_wms.md §4)
 
+// 위치(창고) — 인벤토리에 귀속 (인벤토리별 독립 추가/삭제, 위치명은 인벤토리 내 UNIQUE)
 model Warehouse {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique @db.VarChar(50)
-  memo      String?
-  isActive  Boolean  @default(true) @map("is_active")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  stocks    InventoryStock[]
-  txFrom    InventoryTransaction[] @relation("TxFromWarehouse")
-  txTo      InventoryTransaction[] @relation("TxToWarehouse")
-  units     InventoryUnit[]
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(50)
+  inventoryId Int      @map("inventory_id")
+  memo        String?
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  inventory   Inventory @relation(fields: [inventoryId], references: [id])
+  stocks      InventoryStock[]
+  txFrom      InventoryTransaction[] @relation("TxFromWarehouse")
+  txTo        InventoryTransaction[] @relation("TxToWarehouse")
+  units       InventoryUnit[]
 
+  @@unique([inventoryId, name])
   @@map("warehouses")
   @@schema("public")
 }
@@ -666,11 +670,13 @@ model InventoryCategory {
   @@schema("public")
 }
 
+// 품목 마스터 — 인벤토리에 귀속. 같은 물건(예: MC200M-T)도 인벤토리마다 별도 품목·별도 코드로 관리
 model InventoryItem {
   id              Int         @id @default(autoincrement())
   itemCode        String      @unique @map("item_code") @db.VarChar(20)
   name            String      @db.VarChar(100)
   modelName       String?     @map("model_name") @db.VarChar(100) // 제조사 모델명 (규격과 별개)
+  inventoryId     Int         @map("inventory_id") // 소속 인벤토리 (변경 불가)
   categoryId      Int?        @map("category_id")
   spec            String?     @db.VarChar(200)
   unit            String      @default("EA") @db.VarChar(20)
@@ -683,6 +689,7 @@ model InventoryItem {
   sortOrder       Int         @default(0) @map("sort_order")
   createdAt       DateTime    @default(now()) @map("created_at")
   updatedAt       DateTime    @updatedAt @map("updated_at")
+  inventory       Inventory   @relation("InventoryItems", fields: [inventoryId], references: [id])
   category        InventoryCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   deviceInfo      DeviceInfo? @relation(fields: [deviceInfoId], references: [id], onDelete: SetNull)
   manufacturer    StatusCode? @relation("ItemManufacturer", fields: [manufacturerId], references: [id], onDelete: SetNull)
@@ -693,20 +700,22 @@ model InventoryItem {
   usedIn          InventoryItemComponent[] @relation("ComponentChild")  // 이 품목이 부자재로 소속된 주자재
 
   @@index([categoryId])
+  @@index([inventoryId])
   @@map("inventory_items")
   @@schema("public")
 }
 
-// 인벤토리 마스터 — 대웅제약재고 / 평가용재고(이관 잠금) / 판매용재고
+// 인벤토리 마스터 — 대웅제약재고 / 평가용재고 / 판매용재고 (품목·위치·재고·전표 전부 인벤토리별 완전 독립)
 model Inventory {
   id               Int      @id @default(autoincrement())
   name             String   @unique @db.VarChar(50)
-  isTransferLocked Boolean  @default(false) @map("is_transfer_locked") // true면 TRANSFER 출발·도착 모두 불가
   linkHospital     Boolean  @default(false) @map("link_hospital") // true면 출고 시 병원 연결 허용 (대웅제약재고)
   memo             String?
   isActive         Boolean  @default(true) @map("is_active")
   sortOrder        Int      @default(0) @map("sort_order")
   createdAt        DateTime @default(now()) @map("created_at")
+  items            InventoryItem[] @relation("InventoryItems")
+  warehouses       Warehouse[]
   stocks           InventoryStock[]
   txFrom           InventoryTransaction[] @relation("TxInventory")
   txTo             InventoryTransaction[] @relation("TxToInventory")
@@ -760,16 +769,16 @@ model InventoryStock {
 model InventoryTransaction {
   id            Int       @id @default(autoincrement())
   txCode        String    @unique @map("tx_code") @db.VarChar(20)
-  txType        String    @map("tx_type") @db.VarChar(10) // IN | OUT | MOVE | TRANSFER
-  reasonId      Int?      @map("reason_id") // IN/OUT 유형 (StatusCode STOCK_IN_TYPE/STOCK_OUT_TYPE), MOVE/TRANSFER는 NULL
+  txType        String    @map("tx_type") @db.VarChar(10) // IN | OUT | MOVE (TRANSFER는 폐지 — 과거 전표만 존재)
+  reasonId      Int?      @map("reason_id") // IN/OUT 유형 (StatusCode STOCK_IN_TYPE/STOCK_OUT_TYPE), MOVE는 NULL
   itemId        Int       @map("item_id")
   warehouseId   Int       @map("warehouse_id")
-  toWarehouseId Int?      @map("to_warehouse_id") // MOVE·TRANSFER 도착 위치
-  inventoryId   Int       @map("inventory_id")
-  toInventoryId Int?      @map("to_inventory_id") // TRANSFER 도착 인벤토리
+  toWarehouseId Int?      @map("to_warehouse_id") // MOVE 도착 위치
+  inventoryId   Int       @map("inventory_id") // = item.inventoryId (비정규화 — 서버에서 강제)
+  toInventoryId Int?      @map("to_inventory_id") // deprecated — 과거 TRANSFER 전표 표시용
   quantity      Int
-  transferDate  DateTime? @map("transfer_date") @db.Date // TRANSFER 이관일자
-  transferPrice Int?      @map("transfer_price") // TRANSFER 이관 단가 (참고용, 선택)
+  transferDate  DateTime? @map("transfer_date") @db.Date // deprecated — 과거 TRANSFER 이관일자
+  transferPrice Int?      @map("transfer_price") // deprecated — 과거 TRANSFER 이관 단가
   destination   String?   @db.VarChar(100) // OUT 출고처 (자유 텍스트 — 유관부서·거래처 등)
   hospitalCode  String?   @map("hospital_code")
   workType      String?   @map("work_type") @db.VarChar(20)

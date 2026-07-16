@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 
-interface Warehouse { id: number; name: string }
-interface Inventory { id: number; name: string; isTransferLocked: boolean; isActive: boolean }
+interface Warehouse { id: number; name: string; inventoryId: number }
+interface Inventory { id: number; name: string; isActive: boolean }
 interface Tx {
   id: number
   txCode: string
@@ -37,7 +37,7 @@ const TYPE_BADGE: Record<string, string> = {
   MOVE: 'bg-blue-50 text-blue-700',
   TRANSFER: 'bg-purple-50 text-purple-700',
 }
-const TYPE_LABEL: Record<string, string> = { IN: '입고', OUT: '출고', MOVE: '이동', TRANSFER: '이관' }
+const TYPE_LABEL: Record<string, string> = { IN: '입고', OUT: '출고', MOVE: '이동', TRANSFER: '이관(구)' }
 
 export default function TransactionsPage() {
   const [txs, setTxs] = useState<Tx[]>([])
@@ -119,10 +119,9 @@ export default function TransactionsPage() {
           전체
         </button>
         {inventories.filter((i) => i.isActive).map((inv) => (
-          <button key={inv.id} onClick={() => setFilterInventory(String(inv.id))}
+          <button key={inv.id} onClick={() => { setFilterInventory(String(inv.id)); setFilterWarehouse('') }}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${filterInventory === String(inv.id) ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
             {inv.name}
-            {inv.isTransferLocked && <span className="ml-1 text-xs text-amber-500" title="이관 잠금">🔒</span>}
           </button>
         ))}
       </div>
@@ -133,11 +132,12 @@ export default function TransactionsPage() {
           <option value="IN">입고</option>
           <option value="OUT">출고</option>
           <option value="MOVE">이동</option>
-          <option value="TRANSFER">이관</option>
         </select>
         <select value={filterWarehouse} onChange={(e) => setFilterWarehouse(e.target.value)} className={inputCls}>
           <option value="">전체 위치</option>
-          {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+          {warehouses
+            .filter((w) => !filterInventory || w.inventoryId === parseInt(filterInventory))
+            .map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
         </select>
         <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className={inputCls} />
         <span className="text-gray-400 text-sm">~</span>
@@ -176,7 +176,7 @@ export default function TransactionsPage() {
                 </td>
                 <td className="px-3 py-3 text-gray-500 text-xs">{new Date(tx.createdAt).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}</td>
                 <td className="px-3 py-3"><span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${TYPE_BADGE[tx.txType]}`}>{TYPE_LABEL[tx.txType]}</span></td>
-                <td className="px-3 py-3 text-gray-600">{tx.txType === 'MOVE' ? '이동' : tx.txType === 'TRANSFER' ? '이관' : (tx.reasonCode?.name ?? '-')}</td>
+                <td className="px-3 py-3 text-gray-600">{tx.txType === 'MOVE' ? '이동' : tx.txType === 'TRANSFER' ? '이관(구)' : (tx.reasonCode?.name ?? '-')}</td>
                 <td className="px-3 py-3">
                   <Link href={filterInventory ? `/inventory/${filterInventory}/items/${tx.item.id}` : `/inventory/items/${tx.item.id}`} className="font-medium text-gray-900 hover:text-blue-600 no-underline">{tx.item.name}</Link>
                   <span className="ml-1 font-mono text-xs text-gray-400">{tx.item.itemCode}</span>

@@ -12,31 +12,25 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
 
-  // 버킷 모드: 전표 모달용 — 특정 품목(·위치)의 (위치, 인벤토리)별 가용 재고
+  // 버킷 모드: 전표 모달용 — 특정 품목의 위치별 가용 재고 (품목이 인벤토리에 귀속되어 인벤토리 축은 불필요)
   const itemIdParam = searchParams.get('itemId')
   if (itemIdParam) {
     const whParam = searchParams.get('warehouseId')
-    const invParam = searchParams.get('inventoryId')
     const buckets = await prisma.inventoryStock.findMany({
       where: {
         itemId: parseInt(itemIdParam),
         ...(whParam ? { warehouseId: parseInt(whParam) } : {}),
-        ...(invParam ? { inventoryId: parseInt(invParam) } : {}),
         quantity: { gt: 0 },
       },
       include: {
-        inventory: { select: { id: true, name: true, isTransferLocked: true } },
         warehouse: { select: { id: true, name: true } },
       },
-      orderBy: [{ inventoryId: 'asc' }, { warehouseId: 'asc' }],
+      orderBy: [{ warehouseId: 'asc' }],
     })
     return NextResponse.json({
       buckets: buckets.map((b) => ({
         warehouseId: b.warehouseId,
         warehouseName: b.warehouse.name,
-        inventoryId: b.inventoryId,
-        inventoryName: b.inventory.name,
-        isTransferLocked: b.inventory.isTransferLocked,
         quantity: b.quantity,
       })),
     })
@@ -45,7 +39,7 @@ export async function GET(req: NextRequest) {
   const search = searchParams.get('search')?.trim() ?? ''
   const categoryId = searchParams.get('categoryId')
   const warehouseId = searchParams.get('warehouseId')
-  const inventoryId = searchParams.get('inventoryId')
+  const inventoryId = searchParams.get('inventoryId') // 품목 소속 인벤토리 필터
   const includeInactive = searchParams.get('includeInactive') === 'true'
 
   const allCategories = await prisma.inventoryCategory.findMany({
@@ -55,6 +49,7 @@ export async function GET(req: NextRequest) {
 
   const where: Prisma.InventoryItemWhereInput = {
     ...(includeInactive ? {} : { isActive: true }),
+    ...(inventoryId ? { inventoryId: parseInt(inventoryId) } : {}),
     ...(categoryIds ? { categoryId: { in: categoryIds } } : {}),
     ...(search
       ? { OR: [{ name: { contains: search } }, { itemCode: { contains: search } }, { modelName: { contains: search } }, { spec: { contains: search } }] }
@@ -64,13 +59,13 @@ export async function GET(req: NextRequest) {
   const items = await prisma.inventoryItem.findMany({
     where,
     include: {
+      inventory: { select: { id: true, name: true, linkHospital: true, isActive: true, sortOrder: true } },
       category: { select: { id: true, name: true } },
       manufacturer: { select: { id: true, name: true } },
       deviceInfo: { select: { deviceModel: true } },
       stocks: {
         include: {
           warehouse: { select: { id: true, name: true, isActive: true } },
-          inventory: { select: { id: true, name: true } },
         },
       },
       components: { select: { childItemId: true } },
@@ -80,21 +75,16 @@ export async function GET(req: NextRequest) {
   })
 
   const whFilter = warehouseId ? parseInt(warehouseId) : null
-  const invFilter = inventoryId ? parseInt(inventoryId) : null
 
   const rows = items.map((item) => {
     const stocks = item.stocks
       .filter((s) => s.quantity > 0)
-      .filter((s) => (invFilter ? s.inventoryId === invFilter : true))
       .map((s) => ({
         warehouseId: s.warehouseId,
         warehouseName: s.warehouse.name,
-        inventoryId: s.inventoryId,
-        inventoryName: s.inventory.name,
         quantity: s.quantity,
       }))
       .sort((a, b) => b.quantity - a.quantity)
-    // 총재고: 인벤토리 탭 선택 시 그 인벤토리 합계, 전체 탭이면 전체 합계
     const total = stocks.reduce((sum, s) => sum + s.quantity, 0)
     return {
       id: item.id,
@@ -105,6 +95,8 @@ export async function GET(req: NextRequest) {
       unit: item.unit,
       isSerialManaged: item.isSerialManaged,
       isActive: item.isActive,
+      inventoryId: item.inventoryId,
+      inventory: item.inventory,
       category: item.category,
       categoryPath: categoryPath(allCategories, item.categoryId),
       manufacturer: item.manufacturer,

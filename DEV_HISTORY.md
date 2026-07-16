@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-07-16 | 자재관리(WMS) Phase 10 — 인벤토리별 완전 분리 재설계 (품목·위치 귀속, 이관 폐지, 첫페이지 카드 섹션)
+
+- **배경**: 사용자 요청 — 대웅제약재고/평가용재고/판매용재고 3개 인벤토리를 **완전 독립된 자재관리**로 전환. 같은 물건(MC200M-T)도 인벤토리마다 자재코드를 새로 따는 구조. 추가 요구: ①자재별 입출고 버튼 제거 → 섹션 단위 입고/출고 버튼 ②위치(창고)도 인벤토리별 독립 추가/삭제 ③첫페이지를 탭이 아닌 인벤토리별 카드 섹션으로
+- **DB(마이그레이션 `20260716100000_inventory_scoped_items_warehouses`)**: `inventory_items.inventory_id`·`warehouses.inventory_id` NOT NULL FK 추가. **데이터 분리 백필(plpgsql, PROD 재적용 가능하게 범용 작성)** — 품목은 재고 합 최대 인벤토리를 주 소속으로, 그 외 사용 인벤토리마다 품목 복제(새 ITEM-NNNN 발번)+재고·개체·전표 재매핑(DEV: 게이트웨이→판매용 원본 + 평가용 복제 ITEM-0004). 활성 위치는 전 인벤토리에 복제(4곳×3), 참조 인벤토리별 재매핑. 위치명 UNIQUE → `(inventory_id, name)`. 수량 0 재고 스냅샷 사전 정리. `inventories.is_transfer_locked` 삭제. 인벤토리 갈라진 부자재 매핑 제거
+- **이관(TRANSFER) 폐지(사용자 확정)**: 품목이 인벤토리 귀속이라 이관 개념 성립 불가 — 필요 시 A 출고 + B 입고로 처리. 전표 유형 IN/OUT/MOVE 3종, 과거 이관 전표는 '이관(구)'로 이력 표시만(취소 409). `to_inventory_id`/`transfer_date`/`transfer_price` 컬럼은 과거 전표 표시용 보존(deprecated)
+- **lib/inventory.ts**: 전표의 인벤토리를 품목에서 파생(입력값 제거), 출발·도착 위치의 인벤토리 소속 검증(400), 회수 인벤토리 검증은 품목 격리로 자연 해소, 시리얼 가드에서 인벤토리 축 제거(품목=인벤토리)
+- **API**: 품목 POST/import에 `inventoryId` 필수(+같은 인벤토리 내 이름 중복만 스킵), items/stocks GET에 inventoryId 필터(품목 소속 기준), 창고 POST에 `inventoryId` 필수·이름 중복 검사 인벤토리 내로, 부자재 매핑 같은 인벤토리 검증(409), 인벤토리 삭제 보호에 품목·위치 카운트 추가, stocks 버킷 모드는 위치 축만 반환
+- **UI**: ①**첫페이지 `/inventory` = 인벤토리별 카드 섹션**(탭 제거) — 헤더에 품목 수·총수량·위치 수 + **입고/출고/이동 버튼**(품목은 모달에서 검색·선택), 행별 입출고 버튼 제거 ②**TransactionModal 재작성** — 인벤토리 고정 prop + 품목 선택 모드, 이관 UI 제거 ③품목 관리: 인벤토리 탭·컬럼·등록 폼 인벤토리 select(수정 불가)·Excel 가져오기 인벤토리 선택 ④품목 마스터/인벤토리 자재 상세: 단일 인벤토리 기준 정리(스코프 불일치 안내) ⑤이력: 이관 필터 제거·위치 필터 탭 스코프 ⑥`/settings/warehouses` 인벤토리별 섹션 재작성 ⑦`/settings/inventories` 이관 잠금 컬럼 제거
+- **검증(dev2)**: `tsc` 0오류 → 힙4GB 빌드 → `pm2 restart thync-dev` → **런타임 E2E 23/23 통과**(품목·위치 인벤토리 귀속/타 인벤토리 위치 400/TRANSFER 400/같은 이름 품목·위치 타 인벤토리 허용·같은 인벤토리 409/병원 연결 인벤토리 제한/시리얼 품목 격리/부자재 동일 인벤토리 409/과거 이관 취소 409/재고 정합). 테스트 데이터 정리, 기존 실데이터 재고 무결(판매용 5·평가용 1)
+- **미반영**: git push·PROD 안 함 (요청 시 마이그레이션 `20260716100000` 1건과 함께 반영 — 백필이 PROD 데이터에도 범용 동작)
+- 영향 파일: `prisma/{schema.prisma,migrations/20260716100000.../}`, `lib/inventory.ts`, `app/api/inventory/{items,items/[id],items/[id]/components,items/import,stocks,stocks/export,transactions,transactions/export}/`, `app/api/settings/{warehouses,warehouses/[id],inventories,inventories/[id]}/`, `app/inventory/{page,components/TransactionModal(재작성),transactions/page,items/page,items/[id]/page,[invId]/items/[itemId]/page}`, `app/settings/{warehouses(재작성),inventories}/page.tsx`, `README.md`, `function_wms.md`
+
+---
+
 ## 2026-07-14 | 운영 상태인데 완료 프로젝트 없는 병원 6곳 → 미계약 변경 (PROD·DEV)
 
 - **배경**: 사용자 요청 — 병상 집계 정합화 후 남은 513병상 차이의 원인이던 "상태 '운영'인데 완료 프로젝트가 없는(전부 '보류') 병원"을 미계약으로 정리

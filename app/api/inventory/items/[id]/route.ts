@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client'
 type Params = { params: { id: string } }
 
 const itemInclude = {
+  inventory: { select: { id: true, name: true, linkHospital: true, isActive: true } },
   category: { select: { id: true, name: true, parentId: true } },
   manufacturer: { select: { id: true, name: true } },
   deviceInfo: { select: { id: true, deviceName: true, deviceModel: true } },
@@ -28,7 +29,6 @@ export async function GET(req: NextRequest, { params }: Params) {
         stocks: {
           include: {
             warehouse: { select: { id: true, name: true, isActive: true } },
-            inventory: { select: { id: true, name: true } },
           },
         },
         components: {

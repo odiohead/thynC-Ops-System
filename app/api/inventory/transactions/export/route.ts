@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx'
 
 export const dynamic = 'force-dynamic'
 
-const TYPE_LABEL: Record<string, string> = { IN: '입고', OUT: '출고', MOVE: '이동', TRANSFER: '이관' }
+const TYPE_LABEL: Record<string, string> = { IN: '입고', OUT: '출고', MOVE: '이동', TRANSFER: '이관(구)' }
 
 /** 입출고 내역 Excel export — 이력 화면과 동일한 필터 적용 (최대 10,000행) */
 export async function GET(req: NextRequest) {
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
     전표코드: tx.txCode,
     일시: new Date(tx.createdAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }),
     유형: TYPE_LABEL[tx.txType] ?? tx.txType,
-    입출고유형: tx.txType === 'MOVE' ? '이동' : tx.txType === 'TRANSFER' ? '이관' : (tx.reasonCode?.name ?? ''),
+    입출고유형: tx.txType === 'MOVE' ? '이동' : tx.txType === 'TRANSFER' ? '이관(구)' : (tx.reasonCode?.name ?? ''),
     품목코드: tx.item.itemCode,
     품목명: tx.item.name,
     수량: tx.quantity,

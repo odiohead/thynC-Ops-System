@@ -17,15 +17,16 @@ export async function PUT(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: '위치명을 입력해주세요.' }, { status: 400 })
   }
 
-  const duplicate = await prisma.warehouse.findFirst({
-    where: { name: name.trim(), id: { not: id } },
-  })
-  if (duplicate) {
-    return NextResponse.json({ error: '이미 존재하는 위치명입니다.' }, { status: 409 })
-  }
-
   const before = await prisma.warehouse.findUnique({ where: { id } })
   if (!before) return NextResponse.json({ error: '위치를 찾을 수 없습니다.' }, { status: 404 })
+
+  // 위치명 중복 검사는 같은 인벤토리 내에서만 (인벤토리 소속은 변경 불가)
+  const duplicate = await prisma.warehouse.findFirst({
+    where: { inventoryId: before.inventoryId, name: name.trim(), id: { not: id } },
+  })
+  if (duplicate) {
+    return NextResponse.json({ error: '이 인벤토리에 이미 존재하는 위치명입니다.' }, { status: 409 })
+  }
 
   const warehouse = await prisma.warehouse.update({
     where: { id },

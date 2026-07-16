@@ -26,7 +26,6 @@ export async function PUT(request: NextRequest, { params }: Params) {
     where: { id },
     data: {
       name,
-      isTransferLocked: body.isTransferLocked !== undefined ? !!body.isTransferLocked : undefined,
       linkHospital: body.linkHospital !== undefined ? !!body.linkHospital : undefined,
       memo: body.memo !== undefined ? (body.memo?.trim() || null) : undefined,
       isActive: body.isActive !== undefined ? !!body.isActive : undefined,
@@ -58,15 +57,17 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   const inv = await prisma.inventory.findUnique({ where: { id } })
   if (!inv) return NextResponse.json({ error: '인벤토리를 찾을 수 없습니다.' }, { status: 404 })
 
-  // 재고·전표·개체에서 사용 중이면 삭제 금지 (이력 보존)
-  const [stockCnt, txCnt, unitCnt] = await Promise.all([
+  // 품목·위치·재고·전표·개체에서 사용 중이면 삭제 금지 (이력 보존)
+  const [itemCnt, whCnt, stockCnt, txCnt, unitCnt] = await Promise.all([
+    prisma.inventoryItem.count({ where: { inventoryId: id } }),
+    prisma.warehouse.count({ where: { inventoryId: id } }),
     prisma.inventoryStock.count({ where: { inventoryId: id } }),
     prisma.inventoryTransaction.count({ where: { OR: [{ inventoryId: id }, { toInventoryId: id }] } }),
     prisma.inventoryUnit.count({ where: { inventoryId: id } }),
   ])
-  if (stockCnt + txCnt + unitCnt > 0) {
+  if (itemCnt + whCnt + stockCnt + txCnt + unitCnt > 0) {
     return NextResponse.json(
-      { error: `이 인벤토리를 사용하는 재고·전표·개체가 있어 삭제할 수 없습니다. (재고 ${stockCnt}·전표 ${txCnt}·개체 ${unitCnt}) 비활성화를 사용하세요.` },
+      { error: `이 인벤토리를 사용하는 데이터가 있어 삭제할 수 없습니다. (품목 ${itemCnt}·위치 ${whCnt}·재고 ${stockCnt}·전표 ${txCnt}·개체 ${unitCnt}) 비활성화를 사용하세요.` },
       { status: 409 },
     )
   }

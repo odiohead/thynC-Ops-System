@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation'
 interface Inventory {
   id: number
   name: string
-  isTransferLocked: boolean
   linkHospital: boolean
   memo: string | null
   isActive: boolean
@@ -15,7 +14,7 @@ interface Inventory {
 
 /**
  * 인벤토리 관리 (ADMIN 이상) — 대웅제약재고 / 평가용재고 / 판매용재고.
- * 이관 잠금 인벤토리는 TRANSFER 출발·도착 모두 불가 (평가용재고).
+ * 품목·위치·재고·전표가 인벤토리별로 완전 독립 관리된다.
  */
 export default function InventoriesSettingsPage() {
   const router = useRouter()
@@ -29,7 +28,6 @@ export default function InventoriesSettingsPage() {
 
   const [isAdding, setIsAdding] = useState(false)
   const [addName, setAddName] = useState('')
-  const [addLocked, setAddLocked] = useState(false)
   const [addLinkHospital, setAddLinkHospital] = useState(false)
 
   const fetchAll = useCallback(async () => {
@@ -63,9 +61,9 @@ export default function InventoriesSettingsPage() {
     const res = await fetch('/api/settings/inventories', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: addName.trim(), isTransferLocked: addLocked, linkHospital: addLinkHospital, sortOrder: nextOrder }),
+      body: JSON.stringify({ name: addName.trim(), linkHospital: addLinkHospital, sortOrder: nextOrder }),
     })
-    if (res.ok) { router.refresh(); await fetchAll(); setIsAdding(false); setAddName(''); setAddLocked(false); setAddLinkHospital(false) }
+    if (res.ok) { router.refresh(); await fetchAll(); setIsAdding(false); setAddName(''); setAddLinkHospital(false) }
     else showError((await res.json()).error ?? '추가 실패')
     setBusy(false)
   }
@@ -99,9 +97,7 @@ export default function InventoriesSettingsPage() {
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-gray-900">인벤토리 관리</h1>
         <p className="mt-1 text-sm text-gray-500">
-          재고를 관리하는 인벤토리 목록입니다. 같은 품목도 인벤토리별로 수량·입출고가 독립 관리됩니다.
-          <br />
-          <b>이관 잠금</b>이 켜진 인벤토리(예: 평가용재고)는 다른 인벤토리와의 이관(TRANSFER)이 출발·도착 모두 차단됩니다.
+          재고를 관리하는 인벤토리 목록입니다. 품목·위치·재고·입출고가 인벤토리별로 완전 독립 관리됩니다.
           <br />
           <b>병원 연결</b>이 켜진 인벤토리(예: 대웅제약재고)에서만 출고 시 병원·업무 연결이 가능합니다.
         </p>
@@ -121,7 +117,6 @@ export default function InventoriesSettingsPage() {
             <tr>
               <th className="w-16 px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">순서</th>
               <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">이름</th>
-              <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500">이관 잠금</th>
               <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500">병원 연결</th>
               <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500">활성</th>
               <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">관리</th>
@@ -129,9 +124,9 @@ export default function InventoriesSettingsPage() {
           </thead>
           <tbody className="divide-y divide-gray-200">
             {loading ? (
-              <tr><td colSpan={6} className="py-10 text-center text-sm text-gray-400">불러오는 중...</td></tr>
+              <tr><td colSpan={5} className="py-10 text-center text-sm text-gray-400">불러오는 중...</td></tr>
             ) : inventories.length === 0 ? (
-              <tr><td colSpan={6} className="py-10 text-center text-sm text-gray-400">등록된 인벤토리가 없습니다.</td></tr>
+              <tr><td colSpan={5} className="py-10 text-center text-sm text-gray-400">등록된 인벤토리가 없습니다.</td></tr>
             ) : inventories.map((inv, index) => (
               <tr key={inv.id} className={`hover:bg-gray-50 ${!inv.isActive ? 'opacity-50' : ''}`}>
                 <td className="px-4 py-3">
@@ -158,11 +153,6 @@ export default function InventoriesSettingsPage() {
                   ) : (
                     <span className="text-sm font-medium text-gray-900">{inv.name}</span>
                   )}
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <input type="checkbox" checked={inv.isTransferLocked} disabled={busy}
-                    onChange={(e) => patch(inv, { isTransferLocked: e.target.checked })}
-                    className="h-4 w-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500" />
                 </td>
                 <td className="px-4 py-3 text-center">
                   <input type="checkbox" checked={inv.linkHospital} disabled={busy}
@@ -200,9 +190,6 @@ export default function InventoriesSettingsPage() {
                     onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') { setIsAdding(false); setAddName('') } }}
                     className="w-full rounded border border-blue-400 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <input type="checkbox" checked={addLocked} onChange={(e) => setAddLocked(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500" />
                 </td>
                 <td className="px-4 py-3 text-center">
                   <input type="checkbox" checked={addLinkHospital} onChange={(e) => setAddLinkHospital(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500" />

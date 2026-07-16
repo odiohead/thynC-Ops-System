@@ -81,11 +81,11 @@ app/
 │   │   ├── maintenance-status/       # 유지보수 상태 관리
 │   │   ├── etc-task-status/          # 기타업무 상태 관리
 │   │   ├── item-category/            # 품목 분류 트리 CRUD (대>중>소 3단계)
-│   │   ├── inventories/              # 인벤토리 마스터 CRUD (이관 잠금 토글, 사용 중 삭제 409)
+│   │   ├── inventories/              # 인벤토리 마스터 CRUD (병원 연결 토글, 사용 중 삭제 409)
 │   │   ├── stock-in-type/            # 입고 유형 CRUD (시스템 유형·사용 중 삭제 409)
 │   │   ├── stock-out-type/           # 출고 유형 CRUD (시스템 유형·사용 중 삭제 409)
 │   │   ├── manufacturers/            # 제조사 CRUD (사용 중 삭제 409)
-│   │   ├── warehouses/               # 창고(위치) CRUD (재고 잔존 409·이력 시 비활성화)
+│   │   ├── warehouses/               # 창고(위치) CRUD (인벤토리 귀속, 재고 잔존 409·이력 시 비활성화)
 │   │   ├── inventory-managers/       # 재고 담당자 풀 CRUD + candidates
 │   │   ├── nav-menus/                # 네비게이션 메뉴 관리 CRUD (SUPER_ADMIN)
 │   │   ├── notifications/            # Slack 알림 설정 GET/PUT (ADMIN — 토글·주기·DM·타입별 필드) + logs/ 발송 이력 조회
@@ -159,16 +159,16 @@ app/
 │   ├── maintenance-status/           # 유지보수 상태 관리
 │   ├── etc-task-status/              # 기타업무 상태 관리
 │   ├── item-category/                # 품목 분류 관리 (ADMIN 이상 — 대>중>소 계층 트리)
-│   ├── inventories/                  # 인벤토리 관리 (ADMIN 이상 — 이름·이관 잠금·활성·순서)
+│   ├── inventories/                  # 인벤토리 관리 (ADMIN 이상 — 이름·병원 연결·활성·순서)
 │   ├── stock-reasons/                # 입출고 유형 관리 (ADMIN 이상 — 입고/출고 2섹션, StatusCodeManager 공용 컴포넌트)
 │   ├── manufacturers/                # 제조사 관리 (ADMIN 이상)
-│   ├── warehouses/                   # 창고(위치) 관리 (ADMIN 이상)
+│   ├── warehouses/                   # 창고(위치) 관리 (ADMIN 이상 — 인벤토리별 섹션)
 │   ├── inventory-managers/           # 재고 담당자 관리 (ADMIN 이상 — 담당자 풀)
 │   ├── vehicles/                     # 차량 관리 (ADMIN 이상)
 │   ├── nav-menus/                    # 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
 │   ├── notifications/                # Slack 알림 설정 (ADMIN 이상 — 전역/이벤트 토글 + 타입별 포함 필드)
 │   └── audit-logs/                   # 감사 로그 (SUPER_ADMIN 전용)
-├── inventory/                        # 자재 현황(인벤토리 탭) + [invId]/items/[itemId](인벤토리 자재 상세) + transactions/(이력) + items/(관리·[id] 품목 마스터 상세) + components/TransactionModal
+├── inventory/                        # 자재 현황(인벤토리별 카드 섹션 + 섹션 입고/출고/이동 버튼) + [invId]/items/[itemId](인벤토리 자재 상세) + transactions/(이력) + items/(관리·[id] 품목 마스터 상세) + components/TransactionModal(품목 선택 모드)
 ├── login/                            # 로그인 페이지
 └── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper, StatusBadge 등)
     ├── useOverlayDismiss.ts          # 오버레이(드로어·모달) 공통 훅 — 배경 스크롤 잠금 + ESC 닫기
@@ -451,48 +451,52 @@ prisma/
 
 #### InventoryItem (품목 마스터)
 - 자재 품목 단위. 고유 코드 `itemCode`: `ITEM-NNNN` (전체 순번, 생성 시 자동 발번)
+- **`inventoryId`(소속 인벤토리 — Phase 10, 필수·변경 불가)**: 같은 물건도 인벤토리마다 별도 품목·별도 코드로 등록 (완전 독립 관리)
 - `name`, **`modelName`(모델명 — 제조사 모델 식별자, 규격과 별개)**, 분류(`categoryId` → InventoryCategory 트리), 제조사(`manufacturerId` → StatusCode `MANUFACTURER`), `spec`(규격), `unit`(단위, 기본 EA)
 - `isSerialManaged`(시리얼 개체 추적 여부 — 입출고 이력 생기면 변경 409 잠금), `deviceInfoId`(자사 기기 ↔ DeviceInfo 선택 FK)
 - `refPrice`(참고 단가, nullable), `memo`, `isActive`, `sortOrder`
 - 이력 있는 품목 삭제 → 비활성화 전환 (이력 보존)
-- 인덱스: `(category_id)`
+- 인덱스: `(category_id)`, `(inventory_id)`
 
-#### Inventory (인벤토리 마스터 — Phase 9)
+#### Inventory (인벤토리 마스터 — Phase 9·10)
 - 재고를 나누는 인벤토리 단위. 시드 3행: **대웅제약재고 / 평가용재고 / 판매용재고**
-- `name`(UNIQUE), **`isTransferLocked`**(true면 TRANSFER 출발·도착 모두 불가 — 평가용재고), **`linkHospital`**(true면 출고 시 병원·업무 연결 허용 — 대웅제약재고만), `memo`, `isActive`, `sortOrder`
-- 사용 중(재고·전표·개체) 삭제 409 → 비활성화 사용. `/settings/inventories`에서 편집
+- `name`(UNIQUE), **`linkHospital`**(true면 출고 시 병원·업무 연결 허용 — 대웅제약재고만), `memo`, `isActive`, `sortOrder`
+- ~~`isTransferLocked`~~ — Phase 10에서 이관(TRANSFER) 폐지와 함께 컬럼 삭제
+- 사용 중(품목·위치·재고·전표·개체) 삭제 409 → 비활성화 사용. `/settings/inventories`에서 편집
 
 #### InventoryItemComponent (주자재-부자재 매핑 — Phase 9)
 - 주자재(모) 품목 아래 부자재(자식) 품목 N개 매핑. 복합 PK `(parentItemId, childItemId)`
-- `quantity`(주자재 1개당 구성 수량, `CHECK > 0`), `sortOrder`. **1단계 깊이만 허용**(부자재는 주자재가 될 수 없음 — API 검증)
+- `quantity`(주자재 1개당 구성 수량, `CHECK > 0`), `sortOrder`. **1단계 깊이만 허용**(부자재는 주자재가 될 수 없음 — API 검증). **같은 인벤토리 품목끼리만 매핑 가능**(Phase 10, API 409)
 - 출고 시 세트출고 옵션으로 비시리얼 부자재 자동 동시 출고
 
 #### Warehouse (위치/창고 마스터)
-- 자재 보관 위치. `name`(UNIQUE), `memo`, `isActive`, `sortOrder`
+- 자재 보관 위치. **`inventoryId`(소속 인벤토리 — Phase 10, 필수)**: 인벤토리별로 독립 추가/삭제
+- `name`(UNIQUE는 인벤토리 내에서만 — `(inventory_id, name)`), `memo`, `isActive`, `sortOrder`
 - 불량품 보관은 별도 상태가 아니라 '불량/수리 대기' 같은 위치로 표현
 
 #### InventoryManager (재고 담당자 풀)
 - 재고 입출고·이동·취소 처리 권한 담당자. **FieldEngineer(업무 담당자)와 별개 직무**
 - `userId`(→ User, UNIQUE). ADMIN 이상은 풀 미등록이어도 처리 가능
 
-#### 재고 차원 — 품목 × 위치 × 인벤토리 (Phase 9 재설계)
-- 같은 품목이라도 인벤토리(대웅제약/평가용/판매용)가 다르면 **수량·입출고 완전 독립** 관리
-- 전표 유형 4종: `IN`/`OUT`/`MOVE`(같은 인벤토리 내 위치 이동)/**`TRANSFER`(인벤토리 간 이관)**
-- **이관 규칙**: 출발·도착 모두 `isTransferLocked=false`여야 허용 — 대웅제약↔판매용 가능, **평가용재고는 양방향 이관 금지**
+#### 재고 차원 — 인벤토리별 완전 독립 (Phase 10 재설계)
+- **품목·위치가 인벤토리에 귀속**되어 인벤토리(대웅제약/평가용/판매용)별로 자재관리가 완전 분리 — 같은 물건도 인벤토리마다 별도 품목 코드
+- 전표 유형 3종: `IN`/`OUT`/`MOVE`(같은 인벤토리 내 위치 이동). **`TRANSFER`(이관)는 Phase 10에서 폐지** — 과거 전표만 이력 표시(취소 불가), 인벤토리 간 이동은 출고+입고로 처리
+- 전표의 인벤토리는 품목에서 파생(입력값 아님), 위치도 같은 인벤토리 소속 검증(400)
 - 입고/출고 유형은 StatusCode `STOCK_IN_TYPE`(구매·회수(반품)`RETURN`·기타)/`STOCK_OUT_TYPE`(설치·판매·폐기`DISPOSE`·불량`DISPOSE`·기타)으로 마스터화 — `/settings/stock-reasons`에서 추가·삭제(시스템 유형·사용 중 유형은 삭제 409)
 
 #### InventoryStock (현재고 스냅샷)
-- 품목×위치×인벤토리별 현재고. 복합 PK `(itemId, warehouseId, inventoryId)`, `quantity`(DB `CHECK >= 0`), `updatedAt`
+- 품목×위치별 현재고. 복합 PK `(itemId, warehouseId, inventoryId)` (`inventoryId`는 품목 소속과 동일 — 비정규화), `quantity`(DB `CHECK >= 0`), `updatedAt`
 - 전표 처리와 같은 트랜잭션에서 버킷 단위 증감 — 재고 수량의 진실
 
 #### InventoryTransaction (입출고 원장)
-- append-only 전표. `txCode`(`STK-YYYYMM-NNNN`, 동시 채번 P2002 재시도), `txType`(IN/OUT/MOVE/TRANSFER), `reasonId`(→ StatusCode 입출고 유형, MOVE/TRANSFER는 NULL), `itemId`, `warehouseId`(출발/입고처), `toWarehouseId`(MOVE·TRANSFER 도착), `inventoryId`, `toInventoryId`(TRANSFER 도착 인벤토리), `quantity`(`CHECK > 0`)
+- append-only 전표. `txCode`(`STK-YYYYMM-NNNN`, 동시 채번 P2002 재시도), `txType`(IN/OUT/MOVE — TRANSFER는 과거 전표만), `reasonId`(→ StatusCode 입출고 유형, MOVE는 NULL), `itemId`, `warehouseId`(출발/입고처), `toWarehouseId`(MOVE 도착), `inventoryId`(= 품목 소속, 비정규화), `quantity`(`CHECK > 0`)
+- deprecated 컬럼(과거 TRANSFER 표시용 보존): `toInventoryId`, `transferDate`, `transferPrice`
 - OUT 부가정보(선택): **`destination`(출고처 자유 텍스트)**, `hospitalCode`, `workType`(PROJECT/MAINTENANCE/ETC), `refCode`
 - **`parentTxId`**(세트출고 — 부자재 자식 전표가 주자재 전표 참조. 부모 취소 시 자식 일괄 취소)
 - `actorId`, `canceledAt`/`canceledById`(취소 마킹). 인덱스: `(item_id, created_at)`, `(hospital_code)`, `(work_type, ref_code)`, `(created_at)`, `(inventory_id, created_at)`, `(parent_tx_id)`
 
 #### InventoryUnit / InventoryTransactionUnit (시리얼 개체)
-- `InventoryUnit`: 시리얼 품목 개체. `itemId`+`serialNo`(UNIQUE), `status`(IN_STOCK/OUT/DISPOSED), `warehouseId`(재고 시 위치), `inventoryId`(소속 인벤토리 — 출고·이동 시 버킷 일치 강제, 이관 시 소속 변경, 회수는 원래 인벤토리만), `hospitalCode`(출고 설치처). 인덱스 `(item_id, status)`, `(hospital_code)`, `(inventory_id)`
+- `InventoryUnit`: 시리얼 품목 개체. `itemId`+`serialNo`(UNIQUE — 품목이 인벤토리 귀속이라 시리얼도 자동 격리), `status`(IN_STOCK/OUT/DISPOSED), `warehouseId`(재고 시 위치), `inventoryId`(= 품목 소속, 비정규화), `hospitalCode`(출고 설치처). 인덱스 `(item_id, status)`, `(hospital_code)`, `(inventory_id)`
 - 갱신은 조건부 updateMany + 건수 검증 (동시 요청 이중 출고 차단)
 - `InventoryTransactionUnit`: 전표↔개체 조인(개체 이력 산출). 복합 PK `(transactionId, unitId)`
 
@@ -695,21 +699,19 @@ prisma/
 
 ### 자재관리(WMS) (개발 중 — `function_wms.md`)
 - 구축·판매에서 취급하는 하드웨어 자재(게이트웨이·MC200M-T 등 자사기기, 사이니지·PC·모니터 등 전자제품, 케이블 등 잡자재) 재고관리. **자재 수량·입출고 관리에 집중**(안전재고·실사조정 등 부가기능 미채택)
-- **인벤토리 3분리 (Phase 9 재설계)**: 재고 = **품목 × 위치 × 인벤토리**. 인벤토리는 **대웅제약재고 / 평가용재고 / 판매용재고** 3종(`/settings/inventories`에서 추가·이관 잠금·병원 연결·활성 편집) — 같은 MC200M-T라도 인벤토리별 수량·입출고 완전 독립
-  - **인벤토리 탭 분리**: 자재 현황·입출고 이력 모두 상단 **인벤토리 탭**(전체/대웅제약/평가용/판매용)으로 분리 조회. 현황↔이력 이동 시 탭 유지, **입출고 모달의 기본 인벤토리 = 현재 탭**
-  - **인벤토리 자재 상세** (`/inventory/[invId]/items/[itemId]`): 인벤토리 탭에서 자재 클릭 시 진입 — **URL 경로에 인벤토리 고정**. 그 인벤토리의 재고·입출고 이력·개체 목록만 표시(타 인벤토리 정보 미노출), 입출고 모달도 인벤토리 고정. 전체 탭·품목 관리에서 클릭하면 **품목 마스터 상세**(`/inventory/items/[id]` — 기준정보·부자재 구성 + 인벤토리별 재고 요약 카드→각 인벤토리 상세 링크 + 전체 이력·개체)
-  - **자재 현황** (`/inventory`, 전 로그인 조회): 인벤토리 탭 + 분류·위치·검색 필터, 위치별 재고 칩, 주자재/부자재 뱃지, **Excel 다운로드**(현재 필터 반영)
-  - **이관(TRANSFER)**: 인벤토리 간 재고 이동 전표 — **대웅제약↔판매용 상호 이관 가능, 평가용재고는 양방향 이관 금지**(이관 잠금). **이관일자**(기본 오늘)·**이관 단가**(참고용 선택 — 대웅→판매 재판매 기록) 입력, 이력·상세·Excel에 표시. 시리얼 개체는 이관 시 소속 인벤토리 변경, 회수(반품)도 원래 인벤토리로만(우회 이관 차단). 출고/이동/이관 모달은 현재 창고에 재고가 없으면 재고 있는 창고 자동 선택
-- **입출고 원장**: 입고(IN)/출고(OUT)/이동(MOVE, 같은 인벤토리 내 위치 이동)/이관(TRANSFER) 전표, 전표코드 `STK-YYYYMM-NNNN`. **원장은 불변(append-only)** — 잘못 입력은 취소(역방향 되돌림)로 보정, 취소가 재고를 음수로 만들면 거부. 재고 음수 방지 이중장치(앱 조건부 차감 + DB `CHECK quantity>=0`)
+- **인벤토리 완전 분리 (Phase 10 재설계)**: 인벤토리는 **대웅제약재고 / 평가용재고 / 판매용재고** 3종(`/settings/inventories`에서 추가·병원 연결·활성 편집). **품목·위치(창고)·재고·전표·개체 전부 인벤토리에 귀속** — 같은 MC200M-T라도 인벤토리마다 별도 품목(별도 코드)으로 등록해 완전 독립 관리. **이관(TRANSFER) 기능 폐지**(과거 전표는 '이관(구)'로 이력 표시만, 취소 불가) — 인벤토리 간 이동이 필요하면 A 출고 + B 입고로 각각 처리
+  - **자재 현황** (`/inventory`, 전 로그인 조회): **인벤토리별 카드 섹션**(탭 없음) — 섹션 헤더에 인벤토리명·품목 수·총 수량·위치 수 + **입고/출고/이동 버튼 1세트**(품목은 모달에서 검색·선택, 행별 입출고 버튼 없음). 검색·분류 필터는 전 섹션 공통, **Excel 다운로드**
+  - **인벤토리 자재 상세** (`/inventory/[invId]/items/[itemId]`): 현황 섹션에서 자재 클릭 시 진입 — 품목 소속 인벤토리와 URL 불일치 시 안내. 그 품목의 재고·이력·개체 + 입출고 모달(품목·인벤토리 고정). **품목 마스터 상세**(`/inventory/items/[id]`)는 기준정보·부자재 구성 관리 + 재고 요약·이력·개체
+- **입출고 원장**: 입고(IN)/출고(OUT)/이동(MOVE, 같은 인벤토리 내 위치 이동) 전표 3종, 전표코드 `STK-YYYYMM-NNNN`. **인벤토리는 품목에서 파생**(전표 입력값 아님), 위치도 품목과 같은 인벤토리 소속이어야 함(서버 400). **원장은 불변(append-only)** — 잘못 입력은 취소(역방향 되돌림)로 보정, 취소가 재고를 음수로 만들면 거부. 재고 음수 방지 이중장치(앱 조건부 차감 + DB `CHECK quantity>=0`). 출고/이동 모달은 현재 위치에 재고가 없으면 재고 있는 위치 자동 선택
 - **입고/출고 유형 설정화** (`/settings/stock-reasons`, ADMIN): 입고(구매/회수(반품)/기타)·출고(설치/판매/폐기/불량/기타) 유형을 설정에서 추가·삭제. 시스템 동작이 걸린 유형(회수=개체 복귀, 폐기·불량=DISPOSED)과 사용 중 유형은 삭제 409
-- **출고처 기재**: 출고 전표에 출고처 자유 텍스트(`destination`). **병원·업무 연결은 병원 연결 허용 인벤토리(대웅제약재고) 출고에서만 가능**(UI 숨김 + 서버 400) — 평가용/판매용은 출고처 텍스트만. 병원 상세 **'사용 자재' 카드**(출고 이력 + 설치 개체)
-- **주자재/부자재 (BOM)**: 품목 상세에서 주자재 아래 부자재 N개 매핑(구성 수량 포함, 1단계 깊이). 출고 모달 **"부자재 함께 출고"(세트출고)** — 비시리얼 부자재를 같은 위치·인벤토리에서 자동 동시 출고(수량=출고수량×구성수량, 수정 가능), 자식 전표 `parent_tx_id` 연결·부모 취소 시 일괄 취소. 시리얼 부자재는 개별 출고
-- **시리얼 개체 추적 (바코드 스캔 대량 처리)**: `is_serial_managed` 품목은 개체 단위 관리(IN_STOCK/OUT/DISPOSED). 입고·출고·이동·이관 모두 **시리얼 직접 입력 textarea**(줄 단위 붙여넣기·바코드 리더기 연속 스캔) — 재고 1만 개·1회 100~200개 출고 대응. 서버가 시리얼→개체 해석 후 버킷(위치·인벤토리·재고 상태) 검증(미등록/불일치 시리얼 명시 거부), 가용 개체 목록 클릭 선택 병행. 수량↔개체 정합 보장, 동시성 가드(조건부 updateMany+건수 검증)
-- **입출고 이력** (`/inventory/transactions`): 유형·인벤토리·위치·기간 필터, 취소(권한자), **Excel 다운로드**(필터 반영, 최대 1만 행)
-- **품목 마스터** (`/inventory/items`, ADMIN): `ITEM-NNNN` 자동 발번, **모델명**·대>중>소 분류 트리·제조사·규격·단위·시리얼 여부·DeviceInfo 연결·참고단가. 검색은 품목명·모델명·코드·규격 통합. **Excel 일괄 가져오기**(품목명·모델명·대/중/소분류·제조사·규격·단위·시리얼여부·참고단가, 미리보기)
-- **품목 상세** (`/inventory/items/[id]`): 요약·인벤토리×위치별 재고·**부자재 구성 카드**(매핑 추가/수량/해제, 부자재면 소속 주자재 표시)·입출고 이력·시리얼 개체 목록(인벤토리·위치·설치처 컬럼 분리)
-- **처리 권한**: 입고/출고/이동/이관/취소 = 재고 담당자 풀(`/settings/inventory-managers`) + ADMIN 이상(`canManageStock` 서버 실시간 검사). 조회=전 로그인. 감사 로그 `resource='inventory_tx'`/`inventory_item`/`setting:*`
-- **PROD 배포 완료** (2026-07-08 — 마이그레이션 8건 일괄)
+- **출고처 기재**: 출고 전표에 출고처 자유 텍스트(`destination`). **병원·업무 연결은 병원 연결 허용 인벤토리(대웅제약재고) 품목 출고에서만 가능**(UI 숨김 + 서버 400) — 평가용/판매용은 출고처 텍스트만. 병원 상세 **'사용 자재' 카드**(출고 이력 + 설치 개체)
+- **주자재/부자재 (BOM)**: 품목 상세에서 주자재 아래 부자재 N개 매핑(구성 수량 포함, 1단계 깊이, **같은 인벤토리 품목끼리만** — 서버 409). 출고 모달 **"부자재 함께 출고"(세트출고)** — 비시리얼 부자재를 같은 위치에서 자동 동시 출고(수량=출고수량×구성수량, 수정 가능), 자식 전표 `parent_tx_id` 연결·부모 취소 시 일괄 취소. 시리얼 부자재는 개별 출고
+- **시리얼 개체 추적 (바코드 스캔 대량 처리)**: `is_serial_managed` 품목은 개체 단위 관리(IN_STOCK/OUT/DISPOSED). 입고·출고·이동 모두 **시리얼 직접 입력 textarea**(줄 단위 붙여넣기·바코드 리더기 연속 스캔) — 재고 1만 개·1회 100~200개 출고 대응. 서버가 시리얼→개체 해석 후 위치·재고 상태 검증(미등록/불일치 시리얼 명시 거부 — 시리얼은 품목 단위라 타 인벤토리 개체는 자동 격리), 가용 개체 목록 클릭 선택 병행. 수량↔개체 정합 보장, 동시성 가드(조건부 updateMany+건수 검증)
+- **입출고 이력** (`/inventory/transactions`): 인벤토리 탭 + 유형·위치(탭 인벤토리 스코프)·기간 필터, 취소(권한자, 과거 이관 전표는 취소 불가 409), **Excel 다운로드**(필터 반영, 최대 1만 행)
+- **품목 마스터** (`/inventory/items`, ADMIN): 인벤토리 탭 + 인벤토리 컬럼. `ITEM-NNNN` 자동 발번(전체 순번), **등록 시 인벤토리 필수·수정 불가**. **모델명**·대>중>소 분류 트리·제조사·규격·단위·시리얼 여부·DeviceInfo 연결·참고단가. 검색은 품목명·모델명·코드·규격 통합. **Excel 일괄 가져오기**(가져올 인벤토리 선택 필수, 같은 인벤토리 내 품목명 중복만 스킵)
+- **위치(창고) 관리** (`/settings/warehouses`, ADMIN): **인벤토리별 섹션으로 독립 추가/수정/삭제** — 위치명 UNIQUE는 인벤토리 내에서만(다른 인벤토리엔 같은 이름 허용)
+- **처리 권한**: 입고/출고/이동/취소 = 재고 담당자 풀(`/settings/inventory-managers`) + ADMIN 이상(`canManageStock` 서버 실시간 검사). 조회=전 로그인. 감사 로그 `resource='inventory_tx'`/`inventory_item`/`setting:*`
+- **PROD 배포**: Phase 9까지 배포 완료(2026-07-08). **Phase 10(인벤토리 완전 분리)은 DEV만 반영** — PROD 배포 시 마이그레이션 `20260716100000` 필요
 
 ### 차량예약
 - 법인차량 선착순 즉시 확정 예약 (승인 절차 없음)

@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client'
 export const dynamic = 'force-dynamic'
 
 const itemInclude = {
+  inventory: { select: { id: true, name: true, linkHospital: true } },
   category: { select: { id: true, name: true, parentId: true } },
   manufacturer: { select: { id: true, name: true } },
   deviceInfo: { select: { id: true, deviceName: true, deviceModel: true } },
@@ -19,6 +20,7 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const search = searchParams.get('search')?.trim() ?? ''
+  const inventoryId = searchParams.get('inventoryId')
   const categoryId = searchParams.get('categoryId')
   const manufacturerId = searchParams.get('manufacturerId')
   const includeInactive = searchParams.get('includeInactive') === 'true'
@@ -32,6 +34,7 @@ export async function GET(req: NextRequest) {
 
   const where: Prisma.InventoryItemWhereInput = {
     ...(includeInactive ? {} : { isActive: true }),
+    ...(inventoryId ? { inventoryId: parseInt(inventoryId) } : {}),
     ...(categoryIds ? { categoryId: { in: categoryIds } } : {}),
     ...(manufacturerId ? { manufacturerId: parseInt(manufacturerId) } : {}),
     ...(search
@@ -65,12 +68,20 @@ export async function POST(req: NextRequest) {
   const name = body.name?.trim()
   if (!name) return NextResponse.json({ error: '품목명을 입력해주세요.' }, { status: 400 })
 
+  // 품목은 인벤토리에 귀속 — 필수
+  const inventoryId = parseInt(body.inventoryId)
+  if (isNaN(inventoryId)) return NextResponse.json({ error: '인벤토리를 선택해주세요.' }, { status: 400 })
+  const inventory = await prisma.inventory.findUnique({ where: { id: inventoryId } })
+  if (!inventory) return NextResponse.json({ error: '인벤토리를 찾을 수 없습니다.' }, { status: 404 })
+  if (!inventory.isActive) return NextResponse.json({ error: '비활성 인벤토리에는 품목을 등록할 수 없습니다.' }, { status: 400 })
+
   const itemCode = await nextItemCode()
 
   const item = await prisma.inventoryItem.create({
     data: {
       itemCode,
       name,
+      inventoryId,
       modelName: body.modelName?.trim() || null,
       categoryId: body.categoryId ?? null,
       spec: body.spec?.trim() || null,

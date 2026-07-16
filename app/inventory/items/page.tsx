@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 interface Category { id: number; name: string; parentId: number | null }
 interface Device { id: number; deviceModel: string; deviceName: string }
 interface Manufacturer { id: number; name: string }
+interface Inventory { id: number; name: string; isActive: boolean }
 
 interface Item {
   id: number
@@ -19,6 +20,8 @@ interface Item {
   memo: string | null
   isActive: boolean
   sortOrder: number
+  inventoryId: number
+  inventory: { id: number; name: string } | null
   category: { id: number; name: string; parentId: number | null } | null
   categoryPath: string
   manufacturer: { id: number; name: string } | null
@@ -26,6 +29,7 @@ interface Item {
 }
 
 interface ItemForm {
+  inventoryId: number | null // 소속 인벤토리 (등록 시 필수, 수정 불가)
   name: string
   modelName: string
   cat1: number | null // 대분류
@@ -42,7 +46,7 @@ interface ItemForm {
 }
 
 const emptyForm: ItemForm = {
-  name: '', modelName: '', cat1: null, cat2: null, cat3: null, manufacturerId: null, spec: '', unit: 'EA',
+  inventoryId: null, name: '', modelName: '', cat1: null, cat2: null, cat3: null, manufacturerId: null, spec: '', unit: 'EA',
   isSerialManaged: false, deviceInfoId: null, refPrice: '', memo: '', isActive: true,
 }
 
@@ -74,6 +78,7 @@ export default function InventoryItemsPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [devices, setDevices] = useState<Device[]>([])
   const [manufacturers, setManufacturers] = useState<Manufacturer[]>([])
+  const [inventories, setInventories] = useState<Inventory[]>([])
   const [loading, setLoading] = useState(true)
   const [userRole, setUserRole] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -81,6 +86,7 @@ export default function InventoryItemsPage() {
 
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState<string>('')
+  const [tabInventory, setTabInventory] = useState<string>('') // '' = 전체
 
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState<number | null>(null)
@@ -89,6 +95,7 @@ export default function InventoryItemsPage() {
 
   const [showImport, setShowImport] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
+  const [importInventoryId, setImportInventoryId] = useState<number | null>(null)
   const [preview, setPreview] = useState<PreviewResult | null>(null)
   const [importBusy, setImportBusy] = useState(false)
   const [importMsg, setImportMsg] = useState<string | null>(null)
@@ -97,20 +104,23 @@ export default function InventoryItemsPage() {
     const params = new URLSearchParams({ includeInactive: 'true' })
     if (search.trim()) params.set('search', search.trim())
     if (filterCategory) params.set('categoryId', filterCategory)
+    if (tabInventory) params.set('inventoryId', tabInventory)
     const res = await fetch(`/api/inventory/items?${params.toString()}`)
     if (res.ok) setItems((await res.json()).items)
     setLoading(false)
-  }, [search, filterCategory])
+  }, [search, filterCategory, tabInventory])
 
   async function fetchMeta() {
-    const [cRes, dRes, mRes] = await Promise.all([
+    const [cRes, dRes, mRes, iRes] = await Promise.all([
       fetch('/api/settings/item-category'),
       fetch('/api/settings/devices'),
       fetch('/api/settings/manufacturers'),
+      fetch('/api/settings/inventories'),
     ])
     if (cRes.ok) setCategories((await cRes.json()).categories)
     if (dRes.ok) setDevices((await dRes.json()).devices)
     if (mRes.ok) setManufacturers((await mRes.json()).statusCodes)
+    if (iRes.ok) setInventories((await iRes.json()).inventories)
   }
 
   async function fetchMe() {
@@ -137,9 +147,12 @@ export default function InventoryItemsPage() {
   const roots = categories.filter((c) => c.parentId === null)
   const childrenOf = (id: number | null) => (id == null ? [] : categories.filter((c) => c.parentId === id))
 
+  const activeInventories = inventories.filter((i) => i.isActive)
+
   function openAdd() {
     setEditId(null)
-    setForm(emptyForm)
+    // 현재 탭 인벤토리가 기본 선택
+    setForm({ ...emptyForm, inventoryId: tabInventory ? parseInt(tabInventory) : (activeInventories[0]?.id ?? null) })
     setShowForm(true)
   }
 
@@ -147,6 +160,7 @@ export default function InventoryItemsPage() {
     const [c1, c2, c3] = categoryChain(categories, item.category?.id ?? null)
     setEditId(item.id)
     setForm({
+      inventoryId: item.inventoryId,
       name: item.name,
       modelName: item.modelName ?? '',
       cat1: c1, cat2: c2, cat3: c3,
@@ -164,9 +178,11 @@ export default function InventoryItemsPage() {
 
   async function handleSave() {
     if (!form.name.trim()) return
+    if (!editId && !form.inventoryId) { showError('인벤토리를 선택해주세요.'); return }
     setBusy(true)
     const categoryId = form.cat3 ?? form.cat2 ?? form.cat1 // 가장 깊은 선택 노드
     const payload = {
+      inventoryId: form.inventoryId, // 등록 시에만 사용 (수정 시 서버에서 무시)
       name: form.name.trim(),
       modelName: form.modelName.trim() || null,
       categoryId,
@@ -211,11 +227,12 @@ export default function InventoryItemsPage() {
   }
 
   async function handlePreview() {
-    if (!importFile) return
+    if (!importFile || !importInventoryId) return
     setImportBusy(true)
     setImportMsg(null)
     const fd = new FormData()
     fd.append('file', importFile)
+    fd.append('inventoryId', String(importInventoryId))
     const res = await fetch('/api/inventory/items/import?preview=true', { method: 'POST', body: fd })
     const data = await res.json()
     if (res.ok) setPreview(data)
@@ -224,10 +241,11 @@ export default function InventoryItemsPage() {
   }
 
   async function handleImport() {
-    if (!importFile) return
+    if (!importFile || !importInventoryId) return
     setImportBusy(true)
     const fd = new FormData()
     fd.append('file', importFile)
+    fd.append('inventoryId', String(importInventoryId))
     const res = await fetch('/api/inventory/items/import', { method: 'POST', body: fd })
     const data = await res.json()
     if (res.ok) {
@@ -256,7 +274,7 @@ export default function InventoryItemsPage() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => { setShowImport(true); setPreview(null); setImportFile(null); setImportMsg(null) }}
+            onClick={() => { setShowImport(true); setPreview(null); setImportFile(null); setImportMsg(null); setImportInventoryId(tabInventory ? parseInt(tabInventory) : null) }}
             className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
           >
             Excel 가져오기
@@ -272,6 +290,20 @@ export default function InventoryItemsPage() {
 
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
       {info && <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{info}</div>}
+
+      {/* 인벤토리 탭 — 품목은 인벤토리별 독립 관리 */}
+      <div className="mb-4 flex flex-wrap gap-1 border-b border-gray-200">
+        <button onClick={() => setTabInventory('')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${tabInventory === '' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          전체
+        </button>
+        {activeInventories.map((inv) => (
+          <button key={inv.id} onClick={() => setTabInventory(String(inv.id))}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${tabInventory === String(inv.id) ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+            {inv.name}
+          </button>
+        ))}
+      </div>
 
       {/* 필터 */}
       <div className="mb-4 flex flex-wrap gap-2">
@@ -304,6 +336,7 @@ export default function InventoryItemsPage() {
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               <th className="px-3 py-3">코드</th>
+              <th className="px-3 py-3">인벤토리</th>
               <th className="px-3 py-3">분류</th>
               <th className="px-3 py-3">품목명</th>
               <th className="px-3 py-3">모델명</th>
@@ -320,6 +353,9 @@ export default function InventoryItemsPage() {
             {items.map((item) => (
               <tr key={item.id} className={`hover:bg-gray-50 ${!item.isActive ? 'opacity-50' : ''}`}>
                 <td className="px-3 py-3 font-mono text-xs text-gray-500">{item.itemCode}</td>
+                <td className="px-3 py-3 text-xs">
+                  <span className="rounded bg-blue-50 px-1.5 py-0.5 font-medium text-blue-700">{item.inventory?.name ?? '-'}</span>
+                </td>
                 <td className="px-3 py-3 text-xs text-gray-600">{item.categoryPath || '-'}</td>
                 <td className="px-3 py-3 font-medium text-gray-900">
                   {item.name}
@@ -364,6 +400,16 @@ export default function InventoryItemsPage() {
               </button>
             </div>
             <div className="px-6 py-4 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">인벤토리 <span className="text-red-500">*</span>{editId && <span className="ml-1 text-gray-400">(변경 불가)</span>}</label>
+                <select value={form.inventoryId ?? ''} disabled={!!editId}
+                  onChange={(e) => setForm((f) => ({ ...f, inventoryId: e.target.value ? parseInt(e.target.value) : null }))}
+                  className={selectCls + ' disabled:bg-gray-50 disabled:text-gray-500'}>
+                  <option value="">선택하세요</option>
+                  {activeInventories.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                </select>
+                {!editId && <p className="mt-1 text-xs text-gray-400">품목은 인벤토리별로 독립 관리됩니다. 같은 물건도 인벤토리마다 따로 등록하세요.</p>}
+              </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">품목명 <span className="text-red-500">*</span></label>
                 <input type="text" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} autoFocus className={selectCls} placeholder="예: 게이트웨이" />
@@ -452,7 +498,7 @@ export default function InventoryItemsPage() {
             </div>
             <div className="flex justify-end gap-2 border-t border-gray-200 px-6 py-4 sticky bottom-0 bg-white">
               <button onClick={() => setShowForm(false)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">취소</button>
-              <button onClick={handleSave} disabled={busy || !form.name.trim()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{editId ? '저장' : '추가'}</button>
+              <button onClick={handleSave} disabled={busy || !form.name.trim() || (!editId && !form.inventoryId)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{editId ? '저장' : '추가'}</button>
             </div>
           </div>
         </div>
@@ -472,8 +518,15 @@ export default function InventoryItemsPage() {
               <p className="text-xs text-gray-500">
                 컬럼 순서: <b>품목명 · 모델명 · 대분류 · 중분류 · 소분류 · 제조사 · 규격 · 단위 · 시리얼여부 · 참고단가</b> (1행은 헤더).
                 분류·제조사는 등록된 이름과 일치해야 하며, 매칭 실패 시 미지정으로 등록됩니다.
-                시리얼여부는 &apos;시리얼/Y/예&apos; 등이면 개체 관리. 이미 있는 품목명은 건너뜁니다.
+                시리얼여부는 &apos;시리얼/Y/예&apos; 등이면 개체 관리. 선택한 인벤토리에 이미 있는 품목명은 건너뜁니다.
               </p>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">가져올 인벤토리 <span className="text-red-500">*</span></label>
+                <select value={importInventoryId ?? ''} onChange={(e) => { setImportInventoryId(e.target.value ? parseInt(e.target.value) : null); setPreview(null) }} className={selectCls}>
+                  <option value="">선택하세요</option>
+                  {activeInventories.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                </select>
+              </div>
               <input
                 type="file"
                 accept=".xlsx,.xls"
@@ -522,7 +575,7 @@ export default function InventoryItemsPage() {
             </div>
             <div className="flex justify-end gap-2 border-t border-gray-200 px-6 py-4">
               {!preview ? (
-                <button onClick={handlePreview} disabled={!importFile || importBusy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{importBusy ? '분석 중...' : '미리보기'}</button>
+                <button onClick={handlePreview} disabled={!importFile || !importInventoryId || importBusy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{importBusy ? '분석 중...' : '미리보기'}</button>
               ) : (
                 <button onClick={handleImport} disabled={importBusy || preview.newCount === 0} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{importBusy ? '등록 중...' : `${preview.newCount}건 등록`}</button>
               )}

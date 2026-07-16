@@ -88,6 +88,13 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File | null
     if (!file) return NextResponse.json({ error: '파일이 없습니다.' }, { status: 400 })
 
+    // 품목은 인벤토리에 귀속 — 가져올 인벤토리 필수
+    const inventoryId = parseInt(String(formData.get('inventoryId') ?? ''))
+    if (isNaN(inventoryId)) return NextResponse.json({ error: '가져올 인벤토리를 선택하세요.' }, { status: 400 })
+    const inventory = await prisma.inventory.findUnique({ where: { id: inventoryId } })
+    if (!inventory) return NextResponse.json({ error: '인벤토리를 찾을 수 없습니다.' }, { status: 404 })
+    if (!inventory.isActive) return NextResponse.json({ error: '비활성 인벤토리에는 등록할 수 없습니다.' }, { status: 400 })
+
     const buffer = await file.arrayBuffer()
     const parsed = parseExcel(buffer)
     if (parsed.length === 0) {
@@ -97,7 +104,7 @@ export async function POST(request: NextRequest) {
     const [categories, manufacturers, existing] = await Promise.all([
       prisma.inventoryCategory.findMany({ select: { id: true, name: true, parentId: true } }),
       prisma.statusCode.findMany({ where: { category: 'MANUFACTURER' }, select: { id: true, name: true } }),
-      prisma.inventoryItem.findMany({ select: { name: true } }),
+      prisma.inventoryItem.findMany({ where: { inventoryId }, select: { name: true } }), // 중복 검사는 같은 인벤토리 내에서만
     ])
     const mfrMap = new Map(manufacturers.map((m) => [m.name, m.id]))
     const existingNames = new Set(existing.map((e) => e.name))
@@ -139,6 +146,7 @@ export async function POST(request: NextRequest) {
       seq += 1
       return {
         itemCode: `ITEM-${String(seq).padStart(4, '0')}`,
+        inventoryId,
         name: r.name,
         modelName: r.modelName,
         categoryId: resolveCategory(categories, [r.cat1, r.cat2, r.cat3]).id,
@@ -159,8 +167,8 @@ export async function POST(request: NextRequest) {
       actor: auditActorFromJWT(user),
       action: 'CREATE',
       resource: 'inventory_item',
-      resourceLabel: `Excel 일괄 등록 ${data.length}건`,
-      after: { imported: data.length, skipped },
+      resourceLabel: `Excel 일괄 등록 ${data.length}건 (${inventory.name})`,
+      after: { imported: data.length, skipped, inventoryId },
     })
 
     return NextResponse.json({
