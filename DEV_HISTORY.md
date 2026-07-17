@@ -4,6 +4,34 @@
 
 ---
 
+## 2026-07-17 | 차량예약 — 미반납자 예약 차단 + 빠른 예약·반납 모바일 페이지
+
+- **배경**: 사용자 요청 — ①반납 처리 안 한 이용자는 추가 예약 불가 ②앱 대신 폰에서 손쉽게 예약·반납하는 모바일 웹페이지
+- **미반납자 예약 차단**: `POST /api/vehicle-reservations`에 가드 — 본인 예약 중 종료시각 경과 + `returnedAt` NULL(보드의 '반납필요'와 동일 정의)이 있으면 403 + 대상 건 안내 메시지(`unreturnedReservationId` 포함). 운행 중(종료 전) 예약은 차단 사유 아님. 반납 즉시 해제. 주간 보드에 경고 배너 + "바로 반납하기" 버튼(반납 모달 직행) 추가
+- **빠른 예약·반납 모바일 페이지** `/vehicle-reservations/mobile` (max-w-md 단일 컬럼, 신규 API 없음):
+  - **반납 섹션(최상단)**: 내 이용 중 예약 카드(운행중 파랑/반납필요 앰버 뱃지) → 탭하면 인라인 폼(최종 주행거리 — 직전 기록 placeholder 힌트, 비고) → 반납 완료. 반납 후 차량 lastOdometer 재조회·예약 차단 해제 반영
+  - **예약 섹션**: 날짜+시작시각(30분 select) + 이용시간 칩(1/2/4시간·종일 09~18·직접입력 — 종료 날짜/시각) → 시간창 변경 시 250ms debounce로 해당 구간 예약 조회 → **차량 리스트에 가용성 실시간 표시**(가능=탭 선택, 충돌=예약자·기간 표시 dim) → 목적·행선지 입력 → 예약. 미반납 보유 시 앰버 안내 + 버튼 비활성(서버도 차단)
+  - VIEWER·예약제한 계정은 조회만. 주간 보드 헤더에 "📱 빠른 예약·반납" 링크, 모바일 페이지에서 "주간 보드" 링크
+- **검증(dev2)**: `tsc` 0오류 → 힙4GB 빌드 → 재시작 → E2E: 과거 미반납 예약 생성 → 신규 예약 403(안내 메시지 정확) → 반납 200 → 신규 예약 201 → 반납취소·예약취소로 원복(lastOdometer NULL 복원 확인), 모바일 페이지 200
+- 영향 파일: `app/api/vehicle-reservations/route.ts`, `app/vehicle-reservations/{page.tsx,mobile/page.tsx(신규)}`, `README.md`
+
+---
+
+## 2026-07-17 | 프로젝트 이슈노트 → 사내위키 전환 (위키 페이지 임베드 + 기존 22건 이관)
+
+- **배경**: 사용자 결정 — 이슈노트를 Tiptap 단일 HTML 필드 대신 위키 페이지로 관리(버전·작성자 추적·충돌 보호·첨부·검색 확보). 결정 사항: ①프로젝트 상세에서 인라인 편집(링크 아님) ②페이지는 생성 버튼으로 필요할 때만(빈 내용 프로젝트는 미생성) ③위키 트리에 전용 최상위 카테고리 '프로젝트 이슈노트'(이동 차단) ④프로젝트 삭제돼도 페이지는 카테고리에서 접근 유지 ⑤위키 쪽 삭제는 ADMIN만
+- **연결 구조**: 루트 카테고리 페이지 id는 AppSetting `wiki_project_issue_root_id`(첫 생성 시 자동 발행), 프로젝트↔페이지 1:1은 `WikiPageReference` refType `project_issue`(FK 방향 규칙 준수 — DB 마이그레이션 없음). 헬퍼 `lib/wiki/projectIssueNote.ts`
+- **전용 API** `/api/wiki/project-issue-notes`: GET(projectCode→페이지+본문 or null) / POST(생성 — USER+, 멱등, 루트 자동 보장, 감사로그)
+- **보호 규칙(서버)**: 루트=이동·이름변경·템플릿화·삭제·복제 차단, 이슈노트 페이지=카테고리 밖 이동(부모 변경)·템플릿화 차단+삭제 ADMIN만(같은 부모 내 정렬은 허용), 일반 페이지의 카테고리 안 이동·직속 생성 차단, 복제 시 `project_issue` 참조 미복사(이슈노트 사본은 최상위 일반 페이지로), 참조 패널에서 `project_issue` 숨김. UI(사이드바 DnD·📂·＋, 상세 메뉴·제목 입력)도 동일하게 숨김 — tree API가 보호 정보(`projectIssueRootId`/`projectIssuePageIds`) 제공
+- **임베드 패널** `app/wiki/components/ProjectIssueNotePanel.tsx`: 프로젝트 상세 이슈노트 카드에 위키 본문 인라인 편집 — 위키 상세와 동일한 실시간 협업(Y.Doc) 모드라 위키에서 동시에 열어도 일치, 협업 서버 미연결 시 스냅샷 읽기 전용 폴백. 미생성 시 "+ 이슈노트 생성" 버튼(USER+), "위키에서 열기" 링크. **메인→위키 import 승인 예외 1건**(CLAUDE.md 규칙 7에 명시) — 데이터 교환은 전부 HTTP
+- **프로젝트 페이지**: 상세의 Tiptap `IssueNoteEditor` 제거(컴포넌트 삭제) → 패널 교체, 등록 폼의 이슈노트 textarea 제거(등록 후 상세에서 생성). `projects.issue_note` 컬럼·API 필드는 백업용 보존(deprecated)
+- **기존 데이터 이관** `scripts/migrate-issue-notes-to-wiki.mts`(tsx ESM): issue_note 있는 프로젝트를 `@blocknote/server-util`로 HTML→블록 변환해 일괄 이관 — **DEV 22건 이관 완료**(빈 내용 3건 스킵), 멱등(재실행 시 기존 페이지 스킵). 협업 서버가 content_json으로 Y.Doc 1회 시딩하므로 추가 작업 불필요
+- **검증(dev2)**: `tsc` 0오류, dry-run→실행→재실행 멱등 확인, DB 검증(카테고리 하위 22페이지·참조 22건·plain_text 정상)
+- **미반영**: 빌드·PM2 재시작·git push 안 함 (DB 마이그레이션 불필요 — PROD 반영 시 소스 배포 + 이관 스크립트 1회 실행)
+- 영향 파일: `lib/wiki/projectIssueNote.ts(신규)`, `app/api/wiki/{project-issue-notes(신규),pages,pages/[id],pages/[id]/move,pages/[id]/duplicate,pages/[id]/references,tree}/`, `app/wiki/{components/{ProjectIssueNotePanel(신규),WikiSidebar},[id]/{page,WikiPageView}}`, `app/projects/{[code]/page,new/page}`, `app/components/IssueNoteEditor.tsx(삭제)`, `scripts/migrate-issue-notes-to-wiki.mts(신규)`, `README.md`, `CLAUDE.md`
+
+---
+
 ## 2026-07-16 | 자재관리 Phase 10 (인벤토리 완전 분리) PROD 배포
 
 - **배포**: dev2 커밋 `20b310b` push → PROD pull → **사전 백업**(`~/backups/db/thync_ops_pre_wms_phase10_20260716.dump`, 14MB) → 마이그레이션 `20260716100000` psql 단일 트랜잭션 적용+resolve → prisma generate → 힙4GB 빌드 → `pm2 restart thync-prod`

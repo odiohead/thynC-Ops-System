@@ -55,6 +55,27 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '차량예약 사용이 제한된 계정입니다.' }, { status: 403 })
   }
 
+  // 반납 미처리(종료시각 경과 + 미반납) 예약이 있으면 새 예약 차단 — 먼저 반납해야 함
+  const unreturned = await prisma.vehicleReservation.findFirst({
+    where: {
+      userId: user.userId,
+      status: 'RESERVED',
+      returnedAt: null,
+      endAt: { lt: new Date() },
+    },
+    include: { vehicle: { select: { name: true, plateNumber: true } } },
+    orderBy: { endAt: 'asc' },
+  })
+  if (unreturned) {
+    return NextResponse.json(
+      {
+        error: `반납 처리하지 않은 예약이 있어 새 예약을 할 수 없습니다. ${unreturned.vehicle.name}(${unreturned.vehicle.plateNumber}) ${fmtPeriod(unreturned.startAt, unreturned.endAt)} 이용 건을 먼저 반납해주세요.`,
+        unreturnedReservationId: unreturned.id,
+      },
+      { status: 403 },
+    )
+  }
+
   const { vehicleId, startAt, endAt, purpose, destination } = await request.json()
 
   if (!vehicleId) return NextResponse.json({ error: '차량을 선택해주세요.' }, { status: 400 })

@@ -100,7 +100,8 @@ app/
 │   │   │       ├── route.ts          # GET / PUT / DELETE
 │   │   │       ├── move/route.ts     # PATCH 이동 (direction/parentId/position/sortOrder)
 │   │   │       └── duplicate/route.ts # POST 복제 (단일/하위 포함)
-│   │   └── tree/route.ts             # GET 전체 트리
+│   │   ├── tree/route.ts             # GET 전체 트리 (+프로젝트 이슈노트 보호 정보)
+│   │   └── project-issue-notes/      # 프로젝트 이슈노트 조회/생성 (프로젝트 상세 임베드용)
 │   ├── vehicles/                     # 차량 마스터 CRUD (ADMIN 이상 쓰기)
 │   ├── vehicle-reservations/         # 차량예약 CRUD (충돌 검사 + soft 취소)
 │   │   └── [id]/return/              # 반납(POST: 주행거리 입력→운행일지 생성) / 반납취소(DELETE, ADMIN)
@@ -130,6 +131,7 @@ app/
 ├── etc-tasks/                        # 기타업무 목록·상세·등록 (다병원·비유지보수 업무)
 ├── tasks/                            # 업무(Task) 현황 (통합 조회)
 ├── vehicle-reservations/             # 차량예약 주간 현황 보드 + 예약/반납 모달 + 내 예약 + 운행일지 탭(VehicleLogsPanel)
+│   └── mobile/                       # 빠른 예약·반납 모바일 페이지 (가능 차량 실시간 검색 + 인라인 반납)
 ├── ai-assistant/                     # AI 어시스턴트 채팅
 ├── wiki/                             # 사내 위키 (Phase 2-3)
 │   ├── layout.tsx                    # 사이드바 + 콘텐츠 flex 레이아웃 (모든 /wiki/* 적용)
@@ -139,7 +141,8 @@ app/
 │   ├── [id]/WikiPageView.tsx         # 상세 클라이언트 (breadcrumb + 편집 토글)
 │   └── components/
 │       ├── WikiEditor.tsx            # BlockNote 에디터 래퍼
-│       ├── WikiSidebar.tsx           # 페이지 트리 사이드바 (collapse/expand + ↑↓+ + DnD 이동)
+│       ├── WikiSidebar.tsx           # 페이지 트리 사이드바 (collapse/expand + ↑↓+ + DnD 이동, 이슈노트 보호 컨트롤 숨김)
+│       ├── ProjectIssueNotePanel.tsx # 프로젝트 상세 이슈노트 임베드 패널 (협업 편집, 메인→위키 import 승인 예외)
 │       └── MovePageModal.tsx         # 페이지 이동 모달 (새 부모 트리 선택)
 ├── users/                            # 사용자 관리 (ADMIN 이상)
 ├── settings/
@@ -193,7 +196,11 @@ lib/
 ├── notifyFields.ts                   # Slack 알림 메시지 필드 카탈로그·타입별 추천 기본값 (설정 페이지·notify 공유)
 ├── delay-rules.ts                    # 지연 업무 판정 (타입별 기준일·임계일수, findDelayedTasks — KST 기준·보류 제외)
 ├── notify-scheduler.ts               # 지연 감지 인터벌 스케줄러 (mail-scheduler 패턴, notify_delay_interval 제어)
-└── inventory.ts                      # 자재관리 — 품목 채번(nextItemCode) + 재고 처리 권한(canManageStock: ADMIN or 재고 담당자 풀)
+├── inventory.ts                      # 자재관리 — 품목 채번(nextItemCode) + 재고 처리 권한(canManageStock: ADMIN or 재고 담당자 풀)
+└── wiki/
+    ├── blockText.ts                  # BlockNote 블록 → plain text 추출·페이지 링크 인덱싱
+    ├── wikiSchema.tsx                # BlockNote 커스텀 스키마 (콜아웃·구분선·페이지링크·mention·멀티컬럼)
+    └── projectIssueNote.ts           # 프로젝트 이슈노트 — 루트 카테고리 보장·보호 판정 (refType 'project_issue')
 
 prisma/
 ├── schema.prisma                     # DB 스키마
@@ -261,7 +268,8 @@ prisma/
 - 계약 정보: `contractDate`, 도입형태(`introTypeId` → StatusCode INTRO_TYPE 연결)
 - 규모: `wardCount` (병동 수), `bedCount` (병상 수), `gatewayCount` (게이트웨이 수)
 - 진행 플래그: `hasSurvey` (답사 완료), `hasOrder` (발주 완료)
-- 공사 상태(`buildStatus`), 시작일/완료예정일, 비고(`remark`), 이슈 노트(`issueNote`, 리치 텍스트)
+- 공사 상태(`buildStatus`), 시작일/완료예정일, 비고(`remark`)
+- 이슈 노트: 위키 '프로젝트 이슈노트' 페이지로 관리 (`WikiPageReference` refType `project_issue`로 1:1 연결). `issueNote` 컬럼은 위키 전환 전 백업용 보존 (deprecated — UI 미사용)
 - 공사상태 진입 시각(`statusChangedAt`) — 상태 실변경 시 기록, 단계 체류 지연 감지용
 - Google Drive 폴더 연결 (`driveFolderId`)
 - Google Calendar 이벤트 ID (`calendarEventId`) — 프로젝트 생성/수정/삭제 시 자동 동기화
@@ -529,8 +537,9 @@ prisma/
 
 #### WikiPageReference (위키 ↔ 메인 도메인 참조)
 - 위키 페이지와 병원/프로젝트의 명시적 N:M 연결 인덱스
-- `id` (uuid), `pageId` → WikiPage, `refType` (`hospital` | `project`), `refCode`, `createdById` → User
+- `id` (uuid), `pageId` → WikiPage, `refType` (`hospital` | `project` | `project_issue`), `refCode`, `createdById` → User
 - UNIQUE `(pageId, refType, refCode)` + `(refType, refCode)` 역검색 인덱스
+- `project_issue`는 프로젝트↔이슈노트 페이지 1:1 시스템 연결 (참조 패널 미노출, 수동 추가 불가, 복제 시 미복사)
 
 #### WikiTag / WikiPageTag (태그)
 - `WikiTag`: id, name UNIQUE, color, sortOrder
@@ -630,7 +639,7 @@ prisma/
 - 공사 상태(BuildStatus) 연결 및 관리
 - 담당자(복수 지정, 필드 엔지니어 선택 모달), 시공사, 계약일, 도입형태(IntroType), 시작일/완료예정일, 비고 관리
 - 병동 수 / 병상 수 / 게이트웨이 수, 답사·발주 완료 플래그
-- 이슈 노트: 리치 텍스트 에디터(Tiptap)로 서식 있는 내용 입력 가능
+- **이슈 노트 (위키 임베드)**: 프로젝트 상세에 사내위키 '프로젝트 이슈노트' 페이지를 인라인 임베드(BlockNote 실시간 협업 편집). "+ 이슈노트 생성" 버튼으로 필요할 때만 페이지 생성(프로젝트당 1개), "위키에서 열기" 링크 제공. 협업 서버 미연결 시 스냅샷 읽기 전용 폴백. 기존 Tiptap `issueNote` 컬럼은 백업용 보존(deprecated)
 - 프로젝트별 장비 관리
 - 프로젝트별 파일 관리 (S3 업로드 / 파일 다운로드 / Drive 연동 병행 지원)
 - 목록 표시: 페이지네이션 없이 전체 목록 한 번에 표시
@@ -715,6 +724,11 @@ prisma/
 
 ### 차량예약
 - 법인차량 선착순 즉시 확정 예약 (승인 절차 없음)
+- **미반납자 예약 차단**: 종료시각이 지났는데 반납 처리하지 않은 예약이 있으면 새 예약 불가 (서버 403 + 대상 건 안내, 보드 상단 경고 배너 + "바로 반납하기" 버튼). 반납 즉시 차단 해제
+- **빠른 예약·반납 모바일 페이지** (`/vehicle-reservations/mobile`): 현장에서 폰으로 최소 탭 예약·반납
+  - **반납**: 내 이용 중(운행중/반납필요) 차량 카드 → 최종 주행거리(직전 기록 힌트)+비고 입력 → 즉시 반납
+  - **빠른 예약**: 날짜·시작시각(30분 단위) + 이용시간 칩(1/2/4시간·종일·직접입력) → **가능 차량 실시간 검색**(충돌 차량은 예약자·시간 표시로 비활성) → 차량 탭 선택 → 목적·행선지 입력 → 예약
+  - 기존 API만 사용(신규 API 없음), 주간 보드와 상호 링크
 - **주간 현황 보드** (`/vehicle-reservations`): 행=차량(색 칩+이름+차량번호), 열=월~일
   - 예약 카드: 시간·예약자·목적, 내 예약은 파란색 강조, 여러 날에 걸친 예약은 ←/→ 표시로 분할 렌더
   - **반납 상태 색 구분**: 반납완료(회색 ✓) / 반납필요(종료시간 지난 미반납, 앰버 ⚠) / 내 예약(파랑) / 타인(회색)
@@ -803,6 +817,7 @@ prisma/
 - **메인 메뉴 등록**: `nav_menu_items`에 `wiki` 행 (sort_order=15)
 - **감사 로그**: CREATE/UPDATE/DELETE 모두 `resource='wiki_page'`로 기록
 - **명시적 참조 (WikiPageReference)**: 병원/프로젝트를 chip 형태로 명시적 연결, 병원 상세 역참조 카드
+- **프로젝트 이슈노트 시스템 카테고리**: 최상위 '프로젝트 이슈노트' 카테고리(AppSetting `wiki_project_issue_root_id`) 아래 프로젝트별 이슈노트 페이지 수용 — 프로젝트 상세에서 생성·임베드 편집. 루트는 이동·이름변경·삭제·복제 차단, 이슈노트 페이지는 카테고리 밖 이동·템플릿화 차단 + 삭제는 ADMIN 이상만(서버 검증 + 사이드바/상세 메뉴 숨김). 일반 페이지를 카테고리 안으로 이동·생성하는 것도 차단. 이슈노트 페이지 복제 시 사본은 일반 페이지로 최상위 생성(`project_issue` 참조 미복사). 프로젝트가 삭제돼도 페이지는 카테고리에서 계속 접근 가능
 - **태그**: 페이지에 다중 태그 추가, 검색에서 태그 필터 가능 (`WikiTag`/`WikiPageTag`)
 - **즐겨찾기**: 페이지 상단 ☆ 토글, `/wiki/favorites` 전용 페이지
 - **최근 본 페이지**: 페이지 열람 시 `WikiViewLog` 자동 기록, `/wiki/recent`에서 사용자별 최근 50개 페이지
@@ -1098,7 +1113,7 @@ npm run dev
 | PUT  | `/api/vehicles/[id]` | 차량 수정 (ADMIN 이상) |
 | DELETE | `/api/vehicles/[id]` | 차량 삭제 (ADMIN 이상, 예약 이력 있으면 비활성화 처리) |
 | GET  | `/api/vehicle-reservations` | 예약 목록 (`?from=&to=&vehicleId=&mine=true`, RESERVED만) |
-| POST | `/api/vehicle-reservations` | 예약 생성 (USER 이상, 충돌 시 409 + 겹치는 예약 정보) |
+| POST | `/api/vehicle-reservations` | 예약 생성 (USER 이상, 충돌 시 409 + 겹치는 예약 정보, **반납 미처리 건 보유 시 403**) |
 | GET  | `/api/vehicle-reservations/[id]` | 예약 상세 |
 | PUT  | `/api/vehicle-reservations/[id]` | 예약 수정 (본인 또는 ADMIN 이상, 충돌 재검사) |
 | DELETE | `/api/vehicle-reservations/[id]` | 예약 취소 (본인 또는 ADMIN 이상, status=CANCELED) |
@@ -1246,6 +1261,8 @@ npm run dev
 | PUT  | `/api/wiki/comments/[id]` | 댓글 수정 (본인 + ADMIN+) |
 | DELETE | `/api/wiki/comments/[id]` | 댓글 삭제 (본인 + ADMIN+) |
 | GET  | `/api/wiki/mention?q=` | @ mention 자동완성 — 병원/프로젝트 통합 검색 (타입별 5개) |
+| GET  | `/api/wiki/project-issue-notes?projectCode=` | 프로젝트 이슈노트 페이지 조회 (본문 포함, 없으면 null) |
+| POST | `/api/wiki/project-issue-notes` | 프로젝트 이슈노트 페이지 생성 (`{projectCode}`) — USER+, 프로젝트당 1개(멱등), 루트 카테고리 자동 보장 |
 
 ---
 

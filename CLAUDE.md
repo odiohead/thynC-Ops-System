@@ -101,6 +101,7 @@ pm2 restart thync-prod
 - **허용 방향**: `app/wiki/*`, `lib/wiki/*` → 메인 모듈 (`lib/auth.ts`, `lib/s3.ts`, `lib/audit.ts` 등)
 - **금지 방향**: `app/hospitals/*`, `app/projects/*`, `app/site-visits/*`, `app/maintenances/*`, `app/install-plans/*`, `app/tasks/*`, `lib/mail-*` → `app/wiki/*`, `lib/wiki/*`
 - 메인에서 위키 데이터가 필요하면 `fetch('/api/wiki/...')`로 호출 (쿠키 인증 자동 전달)
+- **승인 예외 (2026-07-17, 프로젝트 이슈노트 위키 전환)**: `app/projects/[code]/page.tsx` → `app/wiki/components/ProjectIssueNotePanel` import 1건만 허용. 패널 내부의 데이터 교환은 전부 HTTP(`/api/wiki/*`)이며, 이 결정으로 위키는 "떼어낼 수 있는 부가 모듈"이 아니라 콘텐츠 백본으로 격상됨(분리 시 이슈노트 임베드 동반 이전 필요)
 
 ```typescript
 // app/hospitals/[code]/page.tsx (메인 모듈)
@@ -235,7 +236,8 @@ if (user.role !== 'ADMIN') return 403
 | 사용처 | 에디터 | 저장 형식 |
 |---|---|---|
 | 위키 페이지 본문 | **BlockNote** | JSON 블록 배열 (JSONB) |
-| 프로젝트 `issueNote`, 답사 `notes`, 유지보수 `resolution`/`notes`, 설치계획 `note` | **Tiptap** (기존) | HTML 문자열 |
+| 프로젝트 이슈노트 (위키 '프로젝트 이슈노트' 페이지 임베드) | **BlockNote** (ProjectIssueNotePanel) | 위키 JSONB (`projects.issue_note` 컬럼은 백업용 보존·deprecated) |
+| 답사 `notes`, 유지보수 `resolution`/`notes`, 설치계획 `note` | **Tiptap** (기존) | HTML 문자열 |
 
 기존 Tiptap 사용처는 변경 금지. 데이터 형식 호환성과 마이그레이션 비용 때문.
 "통일해서 BlockNote로 가자" 같은 유혹은 거절. 두 에디터 공존이 정답.

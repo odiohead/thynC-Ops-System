@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import ReservationModal, { ReservationItem, VehicleOption } from './ReservationModal'
 import VehicleLogsPanel from './VehicleLogsPanel'
 
@@ -47,6 +48,7 @@ export default function VehicleReservationsPage() {
   const [vehicles, setVehicles] = useState<VehicleOption[]>([])
   const [reservations, setReservations] = useState<ReservationItem[]>([])
   const [myUpcoming, setMyUpcoming] = useState<ReservationItem[]>([])
+  const [myOverdue, setMyOverdue] = useState<ReservationItem[]>([])
   const [loading, setLoading] = useState(true)
 
   const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()))
@@ -103,12 +105,21 @@ export default function VehicleReservationsPage() {
   }, [weekStart])
 
   const fetchMyUpcoming = useCallback(async () => {
-    const res = await fetch(
-      `/api/vehicle-reservations?mine=true&from=${encodeURIComponent(new Date().toISOString())}`,
-    )
+    const now = new Date().toISOString()
+    const res = await fetch(`/api/vehicle-reservations?mine=true&from=${encodeURIComponent(now)}`)
     if (res.ok) {
       const data = await res.json()
       setMyUpcoming(data.reservations ?? [])
+    }
+    // 반납 미처리(종료 경과 + 미반납) 건 — 신규 예약이 서버에서 차단되므로 배너로 안내
+    const res2 = await fetch(`/api/vehicle-reservations?mine=true&to=${encodeURIComponent(now)}`)
+    if (res2.ok) {
+      const data2 = await res2.json()
+      setMyOverdue(
+        ((data2.reservations ?? []) as ReservationItem[]).filter(
+          (r) => !r.returnedAt && new Date(r.endAt) < new Date(),
+        ),
+      )
     }
   }, [])
 
@@ -167,20 +178,43 @@ export default function VehicleReservationsPage() {
             <h1 className="text-2xl font-bold text-gray-900">차량예약</h1>
             <p className="mt-1 text-sm text-gray-500">법인차량 주간 예약 현황입니다. 빈 영역을 클릭해 예약하세요.</p>
           </div>
-          {canReserve && (
-            <button
-              type="button"
-              onClick={() => setModal({ mode: 'create', initialDate: todayStr })}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+          <div className="flex items-center gap-2">
+            <Link
+              href="/vehicle-reservations/mobile"
+              className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50"
             >
-              + 예약하기
-            </button>
-          )}
+              📱 빠른 예약·반납
+            </Link>
+            {canReserve && (
+              <button
+                type="button"
+                onClick={() => setModal({ mode: 'create', initialDate: todayStr })}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+              >
+                + 예약하기
+              </button>
+            )}
+          </div>
         </div>
 
         {isBlocked && (
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
             차량예약 사용이 제한된 계정입니다. 예약 등록·수정·취소가 불가하며 현황 조회만 가능합니다. 문의는 관리자에게 해주세요.
+          </div>
+        )}
+
+        {myOverdue.length > 0 && !isBlocked && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            <span>
+              ⚠ 반납 처리하지 않은 이용 건이 <strong>{myOverdue.length}건</strong> 있습니다. 반납 전까지 새 예약을 할 수 없습니다.
+            </span>
+            <button
+              type="button"
+              onClick={() => setModal({ mode: 'view', reservation: myOverdue[0] })}
+              className="rounded-lg border border-amber-300 bg-white px-3 py-1 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-100"
+            >
+              바로 반납하기
+            </button>
           </div>
         )}
 
