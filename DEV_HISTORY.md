@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-07-17 | 차량예약 고도화 + 이슈노트 위키 전환 PROD 배포
+
+- **배포**: dev2 커밋 2건(`8dcee79` 차량예약, `e3aa514` 이슈노트 위키 전환) push → PROD pull → **사전 백업**(`~/backups/db/thync_ops_pre_vehicle_issuenote_20260717.dump`, 14MB) → 힙4GB 빌드 → `pm2 restart thync-prod` (DB 마이그레이션 없음 — 스키마 변경 無)
+- **이슈노트 이관 (PROD)**: `npx tsx scripts/migrate-issue-notes-to-wiki.mts` dry-run 확인 후 실행 — **22건 이관 완료**(빈 내용 3건 스킵), 위키 '프로젝트 이슈노트' 카테고리 하위 22페이지·`project_issue` 참조 22건 검증. 협업 서버(thync-collab-prod)는 기동 중이라 재시작 불필요(Y.Doc은 첫 열람 시 content_json으로 시딩)
+- **스모크**: 도메인 login 200 · `/vehicle-reservations/mobile` 307(인증 리다이렉트 정상) · 재시작 후 신규 에러 0 (에러 로그의 GOOGLE_CALENDAR_ETC_TASK_ID 건은 배포 전부터 있던 무관 이슈 — 선택 환경변수 미설정)
+- 영향: PROD 소스·빌드, PROD DB wiki 스키마(페이지 23행 — 루트 카테고리 1 + 이슈노트 22, 참조 22행, app_settings 1행). `projects.issue_note` 컬럼은 백업용 보존
+
+---
+
 ## 2026-07-17 | 차량예약 — 미반납자 예약 차단 + 빠른 예약·반납 모바일 페이지
 
 - **배경**: 사용자 요청 — ①반납 처리 안 한 이용자는 추가 예약 불가 ②앱 대신 폰에서 손쉽게 예약·반납하는 모바일 웹페이지
