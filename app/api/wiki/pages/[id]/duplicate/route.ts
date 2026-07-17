@@ -3,6 +3,10 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { Prisma } from '@prisma/client'
+import {
+  getIssuePageProtection,
+  PROJECT_ISSUE_REF_TYPE,
+} from '@/lib/wiki/projectIssueNote'
 
 type Ctx = { params: { id: string } }
 
@@ -30,8 +34,18 @@ export async function POST(request: NextRequest, { params }: Ctx) {
   })
   if (!source) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+  // 프로젝트 이슈노트 보호 — 루트: 복제 불가 / 이슈노트 페이지: 사본은 일반 페이지로 최상위에 생성
+  const protection = await getIssuePageProtection(source.id)
+  if (protection === 'root') {
+    return NextResponse.json(
+      { error: '시스템 카테고리(프로젝트 이슈노트)는 복제할 수 없습니다.' },
+      { status: 400 },
+    )
+  }
+  const copyParentId = protection === 'issue' ? null : source.parentId
+
   const last = await prisma.wikiPage.findFirst({
-    where: { parentId: source.parentId },
+    where: { parentId: copyParentId },
     orderBy: { sortOrder: 'desc' },
     select: { sortOrder: true },
   })
@@ -70,11 +84,14 @@ export async function POST(request: NextRequest, { params }: Ctx) {
           create: src.tags.map((t) => ({ tagId: t.tagId })),
         },
         references: {
-          create: src.references.map((r) => ({
-            refType: r.refType,
-            refCode: r.refCode,
-            createdById: authUser!.userId,
-          })),
+          // project_issue 참조는 프로젝트↔이슈노트 1:1 연결이므로 사본에 복사하지 않음
+          create: src.references
+            .filter((r) => r.refType !== PROJECT_ISSUE_REF_TYPE)
+            .map((r) => ({
+              refType: r.refType,
+              refCode: r.refCode,
+              createdById: authUser!.userId,
+            })),
         },
       },
       select: { id: true },
@@ -98,7 +115,7 @@ export async function POST(request: NextRequest, { params }: Ctx) {
   try {
     const newId = await copyPage(
       source.id,
-      source.parentId,
+      copyParentId,
       ' (사본)',
       (last?.sortOrder ?? -1) + 1,
     )

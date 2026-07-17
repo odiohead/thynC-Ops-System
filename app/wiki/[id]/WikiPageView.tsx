@@ -52,6 +52,8 @@ type Props = {
   currentUserId: string
   currentUserRole: string
   currentUserName: string
+  /** 프로젝트 이슈노트 보호 등급 — 'root'(시스템 카테고리) | 'issue'(이슈노트 페이지) | null */
+  issueProtection: 'root' | 'issue' | null
 }
 
 /** 사용자 id로 안정적인 커서 색 생성 (협업 awareness용) */
@@ -80,10 +82,12 @@ export default function WikiPageView({
   currentUserId,
   currentUserRole,
   currentUserName,
+  issueProtection,
 }: Props) {
   const router = useRouter()
   const toast = useToast()
   const editable = currentUserRole !== 'VIEWER'
+  const isAdmin = currentUserRole === 'ADMIN' || currentUserRole === 'SUPER_ADMIN'
   // 모든 페이지 실시간 협업 기본. 협업 서버 연결 실패 시 스냅샷 읽기전용으로 폴백.
   const [collabFailed, setCollabFailed] = useState(false)
   const collabActive = !collabFailed
@@ -380,7 +384,7 @@ export default function WikiPageView({
 
         {/* 제목 + 액션 */}
         <div className="mt-2 flex items-start justify-between gap-4">
-          {editable ? (
+          {editable && issueProtection !== 'root' ? (
             <div className="flex flex-1 items-center gap-2.5">
               <FavoriteButton pageId={id} initialFavorited={favorited} />
               <input
@@ -399,7 +403,7 @@ export default function WikiPageView({
           )}
 
           <div className="flex shrink-0 items-center gap-2 pt-1.5">
-            {editable && (
+            {editable && issueProtection !== 'root' && (
               <button
                 onClick={addChild}
                 className="rounded-[6px] border border-[var(--wiki-border)] px-3 py-2 text-sm text-[var(--wiki-text-soft)] transition hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]"
@@ -410,12 +414,20 @@ export default function WikiPageView({
             <OverflowMenu
               items={[
                 { label: '버전 기록', icon: '🕘', onClick: () => setShowVersions(true) },
-                ...(editable
+                // 프로젝트 이슈노트 보호 — 루트: 이동·복제·템플릿·삭제 전부 숨김,
+                // 이슈노트 페이지: 이동·템플릿 숨김, 삭제는 ADMIN 이상만 (서버도 동일 검증)
+                ...(editable && issueProtection !== 'root'
                   ? [
-                      { label: '다른 위치로 이동', icon: '📂', onClick: () => setShowMove(true) },
+                      ...(issueProtection !== 'issue'
+                        ? [{ label: '다른 위치로 이동', icon: '📂', onClick: () => setShowMove(true) }]
+                        : []),
                       { label: '페이지 복제', icon: '⧉', onClick: () => setShowDuplicate(true) },
-                      { label: '템플릿으로 저장', icon: '📐', onClick: handleSaveAsTemplate },
-                      { label: '삭제', icon: '🗑', onClick: handleDelete, danger: true },
+                      ...(issueProtection !== 'issue'
+                        ? [{ label: '템플릿으로 저장', icon: '📐', onClick: handleSaveAsTemplate }]
+                        : []),
+                      ...(issueProtection !== 'issue' || isAdmin
+                        ? [{ label: '삭제', icon: '🗑', onClick: handleDelete, danger: true }]
+                        : []),
                     ]
                   : []),
               ]}

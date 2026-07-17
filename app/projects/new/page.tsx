@@ -54,7 +54,6 @@ function NewProjectForm() {
   const [buildStatusId, setBuildStatusId] = useState('')
   const [buildStatuses, setBuildStatuses] = useState<BuildStatusOption[]>([])
   const [introTypeOptions, setIntroTypeOptions] = useState<{ id: number; name: string }[]>([])
-  const [issueNote, setIssueNote] = useState('')
 
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [deviceQty, setDeviceQty] = useState<Record<number, number>>({})
@@ -111,7 +110,6 @@ function NewProjectForm() {
           startDate: startDate || null,
           endDateExpected: endDateExpected || null,
           buildStatusId: buildStatusId ? Number(buildStatusId) : null,
-          issueNote: issueNote || null,
         }),
       })
 
@@ -345,21 +343,7 @@ function NewProjectForm() {
             </div>
           </div>
 
-          {/* 이슈 노트 */}
-          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-200 px-6 py-4">
-              <h2 className="text-sm font-semibold text-gray-700">이슈 노트</h2>
-            </div>
-            <div className="px-6 py-5">
-              <textarea
-                value={issueNote}
-                onChange={(e) => setIssueNote(e.target.value)}
-                rows={4}
-                placeholder="특이사항, 이슈 내용 등을 자유롭게 입력하세요."
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-          </div>
+          {/* 이슈 노트는 프로젝트 등록 후 상세 페이지에서 위키 페이지로 생성 */}
 
           {/* 버튼 */}
           <div className="flex justify-end gap-3 pb-4">

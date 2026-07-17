@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
-import IssueNoteEditor from '@/app/components/IssueNoteEditor'
+// 이슈노트는 위키 임베드로 전환 — 메인→위키 import 승인 예외 (CLAUDE.md 규칙 7 참고)
+import ProjectIssueNotePanel from '@/app/wiki/components/ProjectIssueNotePanel'
 import FieldEngineerSelectModal from '@/app/components/FieldEngineerSelectModal'
 import ReassignHospitalButton from '@/app/components/ReassignHospitalButton'
 
@@ -66,7 +67,6 @@ interface Project {
   startDate: string | null
   endDateExpected: string | null
   buildStatusId: number | null
-  issueNote: string | null
   remark: string | null
   driveFolderId: string | null
   hospital: {
@@ -711,16 +711,13 @@ export default function ProjectDetailPage() {
             </div>
           </div>
 
-          {/* 이슈 노트 */}
+          {/* 이슈 노트 — 사내위키 '프로젝트 이슈노트' 페이지 임베드 */}
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
             <div className="border-b border-gray-200 px-6 py-4">
               <h2 className="text-sm font-semibold text-gray-700">이슈 노트</h2>
             </div>
             <div className="px-6 py-5">
-              <IssueNoteEditor
-                projectCode={code}
-                initialContent={project.issueNote ?? ''}
-              />
+              <ProjectIssueNotePanel projectCode={code} />
             </div>
           </div>
 

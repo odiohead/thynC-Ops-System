@@ -87,6 +87,9 @@ export default function WikiSidebar({ pages }: Props) {
   // 레이아웃(서버)은 /wiki 내 클라이언트 내비게이션 시 재렌더되지 않아 pages prop이 stale.
   // 페이지 추가·삭제·이동을 실시간 반영하기 위해 경로가 바뀔 때마다 트리를 직접 재조회한다.
   const [livePages, setLivePages] = useState<SidebarPage[]>(pages)
+  // 프로젝트 이슈노트 보호 정보 — 루트 카테고리·이슈노트 페이지는 이동/추가 컨트롤 숨김
+  const [issueRootId, setIssueRootId] = useState<string | null>(null)
+  const [issuePageIds, setIssuePageIds] = useState<Set<string>>(new Set())
   useEffect(() => {
     setLivePages(pages)
   }, [pages])
@@ -95,7 +98,10 @@ export default function WikiSidebar({ pages }: Props) {
     fetch('/api/wiki/tree')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (!cancelled && Array.isArray(d?.pages)) setLivePages(d.pages as SidebarPage[])
+        if (cancelled) return
+        if (Array.isArray(d?.pages)) setLivePages(d.pages as SidebarPage[])
+        setIssueRootId((d?.projectIssueRootId as string | null) ?? null)
+        setIssuePageIds(new Set((d?.projectIssuePageIds as string[]) ?? []))
       })
       .catch(() => {})
     return () => {
@@ -337,6 +343,8 @@ export default function WikiSidebar({ pages }: Props) {
                   collapsedIds={collapsedIds}
                   onToggleExpand={toggleExpand}
                   onMoveModal={(p) => setMoveTarget(p)}
+                  issueRootId={issueRootId}
+                  issuePageIds={issuePageIds}
                 />
               ))}
             </ul>
@@ -481,6 +489,8 @@ function TreeRow({
   collapsedIds,
   onToggleExpand,
   onMoveModal,
+  issueRootId,
+  issuePageIds,
 }: {
   node: TreeNode
   depth: number
@@ -489,6 +499,8 @@ function TreeRow({
   collapsedIds: Set<string>
   onToggleExpand: (id: string) => void
   onMoveModal: (p: SidebarPage) => void
+  issueRootId: string | null
+  issuePageIds: Set<string>
 }) {
   const router = useRouter()
   const toast = useToast()
@@ -496,6 +508,9 @@ function TreeRow({
   const hasChildren = node.children.length > 0
   const expanded = !collapsedIds.has(node.id)
   const isCurrent = currentId === node.id
+  // 프로젝트 이슈노트 보호 — 루트/이슈노트 페이지는 트리 이동(DnD·📂) 불가, 루트는 하위 추가도 전용 API로만
+  const protection: 'root' | 'issue' | null =
+    issueRootId === node.id ? 'root' : issuePageIds.has(node.id) ? 'issue' : null
 
   const {
     attributes,
@@ -541,15 +556,19 @@ function TreeRow({
         } ${dragging && isOver ? 'ring-2 ring-[var(--wiki-accent)] ring-inset' : ''}`}
         style={{ paddingLeft: depth * 14 + 4 }}
       >
-        <span
-          ref={setDragRef}
-          {...attributes}
-          {...listeners}
-          className="w-3 shrink-0 cursor-grab select-none text-[var(--wiki-text-muted)] opacity-0 transition hover:text-[var(--wiki-text-soft)] active:cursor-grabbing group-hover:opacity-100"
-          title="드래그하여 이동"
-        >
-          ⠿
-        </span>
+        {protection ? (
+          <span className="w-3 shrink-0 select-none" aria-hidden="true" />
+        ) : (
+          <span
+            ref={setDragRef}
+            {...attributes}
+            {...listeners}
+            className="w-3 shrink-0 cursor-grab select-none text-[var(--wiki-text-muted)] opacity-0 transition hover:text-[var(--wiki-text-soft)] active:cursor-grabbing group-hover:opacity-100"
+            title="드래그하여 이동"
+          >
+            ⠿
+          </span>
+        )}
 
         <button
           onClick={() => hasChildren && onToggleExpand(node.id)}
@@ -586,20 +605,24 @@ function TreeRow({
           >
             ↓
           </button>
-          <button
-            onClick={() => onMoveModal(node)}
-            className="rounded px-1 text-xs text-[var(--wiki-text-muted)] transition hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]"
-            title="다른 위치로 이동"
-          >
-            📂
-          </button>
-          <button
-            onClick={addChild}
-            className="rounded px-1 text-xs text-[var(--wiki-text-muted)] transition hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]"
-            title="하위 페이지 추가"
-          >
-            +
-          </button>
+          {!protection && (
+            <button
+              onClick={() => onMoveModal(node)}
+              className="rounded px-1 text-xs text-[var(--wiki-text-muted)] transition hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]"
+              title="다른 위치로 이동"
+            >
+              📂
+            </button>
+          )}
+          {protection !== 'root' && (
+            <button
+              onClick={addChild}
+              className="rounded px-1 text-xs text-[var(--wiki-text-muted)] transition hover:bg-[var(--wiki-hover)] hover:text-[var(--wiki-text)]"
+              title="하위 페이지 추가"
+            >
+              +
+            </button>
+          )}
         </div>
       </div>
 
@@ -615,6 +638,8 @@ function TreeRow({
               collapsedIds={collapsedIds}
               onToggleExpand={onToggleExpand}
               onMoveModal={onMoveModal}
+              issueRootId={issueRootId}
+              issuePageIds={issuePageIds}
             />
           ))}
         </ul>

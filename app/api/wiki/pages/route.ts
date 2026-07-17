@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { extractPlainTextFromBlocks } from '@/lib/wiki/blockText'
+import { getIssueNoteRootSetting } from '@/lib/wiki/projectIssueNote'
 
 export async function GET(request: NextRequest) {
   const authUser = await getAuthUser(request)
@@ -91,6 +92,17 @@ export async function POST(request: NextRequest) {
 
   if (!title || typeof title !== 'string') {
     return NextResponse.json({ error: 'title is required' }, { status: 400 })
+  }
+
+  // 프로젝트 이슈노트 카테고리 직속 페이지는 프로젝트 상세(전용 API)에서만 생성 가능
+  if (parentId) {
+    const issueRootId = await getIssueNoteRootSetting()
+    if (issueRootId && parentId === issueRootId) {
+      return NextResponse.json(
+        { error: '프로젝트 이슈노트 카테고리에는 프로젝트 상세에서만 페이지를 추가할 수 있습니다.' },
+        { status: 400 },
+      )
+    }
   }
 
   const contentArr = (contentJson ?? []) as unknown

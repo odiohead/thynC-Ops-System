@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 import { verifyToken } from '@/lib/auth'
 import type { PartialBlock } from '@blocknote/core'
+import { getIssuePageProtection } from '@/lib/wiki/projectIssueNote'
 import WikiPageView from './WikiPageView'
 
 export const dynamic = 'force-dynamic'
@@ -43,6 +44,9 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
 
   const parentChain = await getParentChain(page.id)
   const breadcrumb = parentChain.slice(0, -1)
+
+  // 프로젝트 이슈노트 보호 등급 — 루트 카테고리/이슈노트 페이지는 이동·삭제 등 메뉴 제한
+  const issueProtection = await getIssuePageProtection(page.id)
 
   // 참조(병원/프로젝트) + 라벨 enrich
   const rawRefs = await prisma.wikiPageReference.findMany({
@@ -128,6 +132,7 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
       updatedAt={page.updatedAt.toISOString()}
       references={references}
       tags={tags}
+      issueProtection={issueProtection}
       favorited={favorited}
       currentUserId={jwt?.userId ?? ''}
       currentUserRole={jwt?.role ?? 'VIEWER'}

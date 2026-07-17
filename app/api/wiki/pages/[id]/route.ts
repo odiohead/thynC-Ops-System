@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { deleteFromS3 } from '@/lib/s3'
+import { getIssuePageProtection } from '@/lib/wiki/projectIssueNote'
 import { extractPlainTextFromBlocks, extractPageLinks, updatePageLinkTitles } from '@/lib/wiki/blockText'
 
 type Ctx = { params: { id: string } }
@@ -72,6 +73,34 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
 
   if (parentId === params.id) {
     return NextResponse.json({ error: 'Cannot set self as parent' }, { status: 400 })
+  }
+
+  // 프로젝트 이슈노트 보호 — 루트: 이름·위치·템플릿화 차단 / 이슈노트: 위치·템플릿화 차단
+  const protection = await getIssuePageProtection(params.id)
+  if (protection === 'root') {
+    if (
+      (title !== undefined && title !== existing.title) ||
+      (parentId !== undefined && parentId !== existing.parentId) ||
+      isTemplate === true
+    ) {
+      return NextResponse.json(
+        { error: '시스템 카테고리(프로젝트 이슈노트)는 이름 변경·이동할 수 없습니다.' },
+        { status: 400 },
+      )
+    }
+  } else if (protection === 'issue') {
+    if (parentId !== undefined && parentId !== existing.parentId) {
+      return NextResponse.json(
+        { error: '프로젝트 이슈노트 페이지는 카테고리 밖으로 이동할 수 없습니다.' },
+        { status: 400 },
+      )
+    }
+    if (isTemplate === true) {
+      return NextResponse.json(
+        { error: '프로젝트 이슈노트 페이지는 템플릿으로 전환할 수 없습니다.' },
+        { status: 400 },
+      )
+    }
   }
 
   // 충돌 감지: 클라이언트가 보고 있던 시점(baseUpdatedAt) 이후 다른 곳에서 수정됐으면 409
@@ -220,6 +249,21 @@ export async function DELETE(request: NextRequest, { params }: Ctx) {
 
   const existing = await prisma.wikiPage.findUnique({ where: { id: params.id } })
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  // 프로젝트 이슈노트 보호 — 루트: 삭제 불가 / 이슈노트 페이지: ADMIN 이상만 삭제 가능
+  const protection = await getIssuePageProtection(params.id)
+  if (protection === 'root') {
+    return NextResponse.json(
+      { error: '시스템 카테고리(프로젝트 이슈노트)는 삭제할 수 없습니다.' },
+      { status: 400 },
+    )
+  }
+  if (protection === 'issue' && !isAdminOrAbove(authUser.role)) {
+    return NextResponse.json(
+      { error: '프로젝트 이슈노트 페이지는 관리자만 삭제할 수 있습니다.' },
+      { status: 403 },
+    )
+  }
 
   const descendantIds = await collectDescendantIds(params.id)
   const allPageIds = [params.id, ...descendantIds]

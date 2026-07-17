@@ -11,7 +11,8 @@ export async function GET(request: NextRequest, { params }: Ctx) {
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const refs = await prisma.wikiPageReference.findMany({
-    where: { pageId: params.id },
+    // project_issue는 시스템 내부 연결(프로젝트↔이슈노트 1:1)이라 참조 패널에 노출하지 않음
+    where: { pageId: params.id, refType: { in: ['hospital', 'project'] } },
     orderBy: { createdAt: 'asc' },
     select: {
       id: true,

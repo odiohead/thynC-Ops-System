@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import {
+  getIssuePageProtection,
+  getIssueNoteRootSetting,
+} from '@/lib/wiki/projectIssueNote'
 
 type Ctx = { params: { id: string } }
 
@@ -62,6 +66,32 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
   if (parentId !== undefined) {
     if (parentId === target.id) {
       return NextResponse.json({ error: 'Cannot set self as parent' }, { status: 400 })
+    }
+    // 프로젝트 이슈노트 보호: 부모가 실제로 바뀌는 이동만 차단 (같은 부모 내 정렬은 허용)
+    if (parentId !== target.parentId) {
+      const protection = await getIssuePageProtection(target.id)
+      if (protection === 'root') {
+        return NextResponse.json(
+          { error: '시스템 카테고리(프로젝트 이슈노트)는 이동할 수 없습니다.' },
+          { status: 400 },
+        )
+      }
+      if (protection === 'issue') {
+        return NextResponse.json(
+          { error: '프로젝트 이슈노트 페이지는 카테고리 밖으로 이동할 수 없습니다.' },
+          { status: 400 },
+        )
+      }
+      // 일반 페이지를 이슈노트 카테고리 안으로 넣는 것도 차단 (카테고리 순수성 유지)
+      if (parentId !== null) {
+        const rootId = await getIssueNoteRootSetting()
+        if (rootId && parentId === rootId) {
+          return NextResponse.json(
+            { error: '프로젝트 이슈노트 카테고리에는 프로젝트 상세에서만 페이지를 추가할 수 있습니다.' },
+            { status: 400 },
+          )
+        }
+      }
     }
     if (parentId !== null) {
       // 순환 참조 방지: 새 부모가 target의 후손인지 검사
