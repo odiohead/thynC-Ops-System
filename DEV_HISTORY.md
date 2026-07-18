@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-07-18 | 사내위키 HTML 문서 페이지 지원 PROD 배포
+
+- **배포**: dev2 커밋 `a325291` push → PROD pull → 마이그레이션 `20260718120000_wiki_html_pages` psql 적용+resolve → prisma generate → 힙4GB 빌드 → `pm2 restart thync-prod`
+- **dev2 검증**: 힙4GB 빌드 → 재시작 → API E2E 통과 — HTML 페이지 생성(sanitize: script·onload 제거, style 보존 확인)/상세 조회(pageType·plainText)/위키 검색 히트/문서 교체(PUT contentHtml)/블록 본문 저장 400/영구 삭제
+- **백업 주의**: 사전 백업이 pg_dump 인증 문제로 1회 실패 → DDL(컬럼 추가, 데이터 무변경) 적용 직후 `~/backups/db/thync_ops_pre_wiki_html_20260718.dump`(14MB, DATABASE_URL 방식)로 확보. 추가 컬럼 외 데이터 동일하므로 복구 유효성 문제 없음
+- **스모크(PROD)**: 도메인 login 200 · wiki API 307(인증 리다이렉트 정상) · 재시작 후 신규 에러 0 (에러 로그 최종 수정 시각이 배포 전 — GOOGLE_CALENDAR_ETC_TASK_ID 건은 기존 무관 이슈)
+- 영향: PROD DB `wiki.wiki_pages` 컬럼 2개 추가, PROD 소스·빌드
+
+---
+
 ## 2026-07-18 | 사내위키 HTML 문서 페이지 지원 (AI 어시스턴트 v2 기반 재설계)
 
 - **배경**: 사용자 요청 — 앞으로 기능정의서·서비스 시나리오 등 산출물을 HTML로 작성해 위키에 게시하고, AI 어시스턴트가 HTML 문서도 지식으로 참조할 수 있도록 기반 구축
