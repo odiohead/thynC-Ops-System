@@ -2,7 +2,25 @@
 
 import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { X } from 'lucide-react'
+
+// 어시스턴트 답변의 GFM 표(파이프 테이블)를 가로 스크롤·테두리·헤더 강조가 있는
+// 실제 표로 렌더링. remark-gfm 없이는 `|`·`---`가 평문으로 노출돼 가시성이 떨어졌음.
+const MARKDOWN_COMPONENTS = {
+  table: (props: React.ComponentProps<'table'>) => (
+    <div className="my-2 overflow-x-auto rounded-lg border border-gray-300">
+      <table className="w-full border-collapse text-xs" {...props} />
+    </div>
+  ),
+  thead: (props: React.ComponentProps<'thead'>) => <thead className="bg-gray-200" {...props} />,
+  th: (props: React.ComponentProps<'th'>) => (
+    <th className="border border-gray-300 px-2 py-1 text-left font-semibold whitespace-nowrap" {...props} />
+  ),
+  td: (props: React.ComponentProps<'td'>) => (
+    <td className="border border-gray-300 px-2 py-1 align-top" {...props} />
+  ),
+} as const
 
 interface Message {
   role: 'user' | 'assistant'
@@ -549,7 +567,7 @@ export default function AiAssistantPage() {
                   {msg.content}
                 </div>
               ) : (
-                <div className="max-w-[75%] rounded-2xl px-4 py-2.5 bg-gray-100 text-gray-900">
+                <div className="max-w-[88%] rounded-2xl px-4 py-2.5 bg-gray-100 text-gray-900">
                   {msg.tools && msg.tools.length > 0 && (
                     <div className="mb-1.5 space-y-0.5">
                       {msg.tools.map((t, j) => (
@@ -561,7 +579,9 @@ export default function AiAssistantPage() {
                   )}
                   {msg.content ? (
                     <div className="prose prose-sm prose-gray max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2 prose-pre:my-2 prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-code:text-blue-600 prose-code:before:content-none prose-code:after:content-none prose-a:text-blue-600">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+                        {msg.content}
+                      </ReactMarkdown>
                     </div>
                   ) : i === messages.length - 1 && loading ? (
                     <div className="flex items-center gap-1.5 py-1">

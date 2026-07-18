@@ -570,6 +570,7 @@ prisma/
 
 #### WikiPage 추가 컬럼 (Phase 7)
 - `plainText` (TEXT NOT NULL DEFAULT '') — BlockNote JSON에서 추출한 검색용 평문
+- `aiExcluded` (BOOLEAN DEFAULT false) — AI 어시스턴트 검색 제외 플래그. true면 이 페이지 **및 하위 전체**가 `search_wiki`/`read_wiki_page`/`read_hospital_note` 대상에서 제외(조회 시 재귀 CTE로 cascade 계산 — `lib/wiki/aiExclusion.ts`). ADMIN이 `PATCH /api/wiki/pages/[id]/ai-exclude`로 토글(위키 페이지 메뉴/버튼)
 
 #### WikiPage HTML 문서 페이지 (2026-07-18)
 - `pageType` (VARCHAR(10) NOT NULL DEFAULT 'block') — `'block'`(BlockNote) | `'html'`(HTML 문서)

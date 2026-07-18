@@ -1082,6 +1082,7 @@ model WikiPage {
   collabEnabled Boolean @default(false) @map("collab_enabled")
   pageType     String  @default("block") @map("page_type") @db.VarChar(10)
   contentHtml  String? @map("content_html")
+  aiExcluded   Boolean @default(false) @map("ai_excluded")
 
   parent      WikiPage?           @relation("WikiPageTree", fields: [parentId], references: [id], onDelete: Cascade)
   children    WikiPage[]          @relation("WikiPageTree")

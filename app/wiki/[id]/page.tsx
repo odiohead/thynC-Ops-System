@@ -72,6 +72,7 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
         updatedAt={page.updatedAt.toISOString()}
         favorited={favorited}
         currentUserRole={jwt?.role ?? 'VIEWER'}
+        aiExcluded={page.aiExcluded}
       />
     )
   }
@@ -168,6 +169,7 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
       currentUserId={jwt?.userId ?? ''}
       currentUserRole={jwt?.role ?? 'VIEWER'}
       currentUserName={jwt?.name ?? ''}
+      aiExcluded={page.aiExcluded}
     />
   )
 }

@@ -54,6 +54,8 @@ type Props = {
   currentUserName: string
   /** 프로젝트 이슈노트 보호 등급 — 'root'(시스템 카테고리) | 'issue'(이슈노트 페이지) | null */
   issueProtection: 'root' | 'issue' | null
+  /** AI 어시스턴트 검색 제외 여부 (하위 페이지까지 cascade) */
+  aiExcluded: boolean
 }
 
 /** 사용자 id로 안정적인 커서 색 생성 (협업 awareness용) */
@@ -83,11 +85,33 @@ export default function WikiPageView({
   currentUserRole,
   currentUserName,
   issueProtection,
+  aiExcluded,
 }: Props) {
   const router = useRouter()
   const toast = useToast()
   const editable = currentUserRole !== 'VIEWER'
   const isAdmin = currentUserRole === 'ADMIN' || currentUserRole === 'SUPER_ADMIN'
+  const [excluded, setExcluded] = useState(aiExcluded)
+
+  const toggleAiExclude = useCallback(async () => {
+    const next = !excluded
+    try {
+      const res = await fetch(`/api/wiki/pages/${id}/ai-exclude`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ excluded: next }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error || '변경 실패')
+      }
+      setExcluded(next)
+      router.refresh()
+      toast.success(next ? 'AI 어시스턴트 검색에서 제외했습니다 (하위 포함).' : 'AI 어시스턴트 검색 제외를 해제했습니다.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '변경 실패')
+    }
+  }, [excluded, id, router, toast])
   // 모든 페이지 실시간 협업 기본. 협업 서버 연결 실패 시 스냅샷 읽기전용으로 폴백.
   const [collabFailed, setCollabFailed] = useState(false)
   const collabActive = !collabFailed
@@ -414,6 +438,16 @@ export default function WikiPageView({
             <OverflowMenu
               items={[
                 { label: '버전 기록', icon: '🕘', onClick: () => setShowVersions(true) },
+                // AI 어시스턴트 검색 제외 토글 — ADMIN 이상만. 카테고리에 걸면 하위 전체 제외
+                ...(isAdmin
+                  ? [
+                      {
+                        label: excluded ? 'AI 검색 제외 해제' : 'AI 어시스턴트 검색 제외',
+                        icon: excluded ? '🤖' : '🚫',
+                        onClick: toggleAiExclude,
+                      },
+                    ]
+                  : []),
                 // 프로젝트 이슈노트 보호 — 루트: 이동·복제·템플릿·삭제 전부 숨김,
                 // 이슈노트 페이지: 이동·템플릿 숨김, 삭제는 ADMIN 이상만 (서버도 동일 검증)
                 ...(editable && issueProtection !== 'root'
@@ -439,6 +473,12 @@ export default function WikiPageView({
           작성자: {author} · 최근 수정자: {lastEditor} ·{' '}
           {new Date(updatedAt).toLocaleString('ko-KR')}
         </div>
+
+        {excluded && (
+          <div className="mt-2 inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-200">
+            🚫 이 페이지(및 하위)는 AI 어시스턴트 검색에서 제외됨
+          </div>
+        )}
 
         <div className="mt-3">
           <TagPicker pageId={id} initialTags={tags} onChange={() => router.refresh()} />

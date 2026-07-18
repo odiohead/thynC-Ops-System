@@ -16,6 +16,7 @@ type Props = {
   updatedAt: string
   favorited: boolean
   currentUserRole: string
+  aiExcluded: boolean
 }
 
 /**
@@ -32,10 +33,33 @@ export default function WikiHtmlPageView({
   updatedAt,
   favorited,
   currentUserRole,
+  aiExcluded,
 }: Props) {
   const router = useRouter()
   const toast = useToast()
   const editable = currentUserRole !== 'VIEWER'
+  const isAdmin = currentUserRole === 'ADMIN' || currentUserRole === 'SUPER_ADMIN'
+  const [excluded, setExcluded] = useState(aiExcluded)
+
+  const toggleAiExclude = async () => {
+    const next = !excluded
+    try {
+      const res = await fetch(`/api/wiki/pages/${id}/ai-exclude`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ excluded: next }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error || '변경 실패')
+      }
+      setExcluded(next)
+      router.refresh()
+      toast.success(next ? 'AI 어시스턴트 검색에서 제외했습니다 (하위 포함).' : 'AI 어시스턴트 검색 제외를 해제했습니다.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '변경 실패')
+    }
+  }
 
   const [title, setTitle] = useState(initialTitle)
   const [busy, setBusy] = useState(false)
@@ -171,6 +195,15 @@ export default function WikiHtmlPageView({
           >
             ⬇ 다운로드
           </button>
+          {isAdmin && (
+            <button
+              onClick={toggleAiExclude}
+              className="rounded-[6px] border border-[var(--wiki-border)] px-2.5 py-1.5 text-xs transition hover:bg-[var(--wiki-hover)]"
+              title={excluded ? 'AI 어시스턴트 검색 제외를 해제' : 'AI 어시스턴트 검색에서 제외(하위 포함)'}
+            >
+              {excluded ? '🤖 AI 제외 해제' : '🚫 AI 제외'}
+            </button>
+          )}
           {editable && (
             <>
               <button
@@ -204,10 +237,15 @@ export default function WikiHtmlPageView({
         </div>
       </div>
 
-      <div className="mb-4 text-xs text-[var(--wiki-text-muted)]">
+      <div className="mb-2 text-xs text-[var(--wiki-text-muted)]">
         HTML 문서 · 작성 {author} · 최근 수정 {lastEditor} ·{' '}
         {new Date(updatedAt).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}
       </div>
+      {excluded && (
+        <div className="mb-4 inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-200">
+          🚫 이 페이지(및 하위)는 AI 어시스턴트 검색에서 제외됨
+        </div>
+      )}
 
       {/* 본문 — sandbox iframe (스크립트 실행 차단) */}
       <iframe

@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-07-18 | AI 어시스턴트 — 답변 표 렌더링 개선 + 위키 AI 검색 제외 제어
+
+- **배경**: 사용자 피드백 2건 — ①어시스턴트 답변의 표가 마크다운 파이프(`| a | b |`)로만 나와 가시성 저하 ②사내위키 중 어시스턴트에 포함되면 안 되는 영역을 제외하는 제어 필요
+- **표 렌더링(①)**: `ReactMarkdown`에 `remark-gfm`(4.0.1) 미적용이 원인 — GFM 표가 렌더 안 됨. `app/ai-assistant/page.tsx`에 `remarkPlugins={[remarkGfm]}` + 커스텀 표 컴포넌트(테두리·헤더 강조·**가로 스크롤 래퍼**) 적용, 어시스턴트 말풍선 폭 75%→88%. `lib/ai/agent.ts` 프롬프트에 "표는 열 5개 이하로, 초과 시 핵심 열만 표+나머지 불릿 / 1~2건은 불릿" 가이드 추가
+- **위키 AI 제외(②)**: `wiki.wiki_pages.ai_excluded`(bool, 마이그레이션 `20260718170000_wiki_ai_excluded`) 추가. 제외는 **하위 페이지 전체 cascade**(조회 시 재귀 CTE 계산 — `lib/wiki/aiExclusion.ts`: `getAiExcludedPageIds`/`isPageAiExcluded`). `lib/ai/tools.ts`의 `search_wiki`(notIn 필터)·`read_wiki_page`·`read_hospital_note`에서 제외 반영. 토글 API `PATCH /api/wiki/pages/[id]/ai-exclude`(ADMIN 전용, 감사로그). UI: 위키 페이지(블록·HTML 뷰) ADMIN에게 "AI 어시스턴트 검색 제외/해제" 메뉴·버튼 + 제외 시 앰버 배지. 카테고리에 걸면 그 영역 전체 제외
+- **검증(dev2)**: `tsc` 0오류 → 힙4GB 빌드 → 재시작(200) → E2E: 카테고리 thync_1.3.0 제외 시 하위 13개 cascade·부정맥 검색 10→0→해제 후 복원 / PATCH API 200·권한·DB 반영·원복 / 실제 채팅 SSE로 "부정맥 Red·Yellow 표 정리" 요청 → search_wiki 10회 호출 후 **GFM 표 2개 포함 답변** 생성 확인
+- 영향 파일: `app/ai-assistant/page.tsx`, `lib/ai/{agent,tools}.ts`, `lib/wiki/aiExclusion.ts(신규)`, `app/api/wiki/pages/[id]/ai-exclude/route.ts(신규)`, `app/wiki/[id]/{page,WikiPageView,WikiHtmlPageView}.tsx`, `prisma/{schema.prisma,migrations/20260718170000_wiki_ai_excluded/}`, `package.json`(remark-gfm)
+
 ## 2026-07-18 | thynC 제품 산출물 문서 세트 12종 작성 → 사내위키 게시(dev2·PROD)
 
 - **배경**: 사용자 요청 — thynC 솔루션(SEERS mobiCARE Console)은 운영 중이나 기능정의서·API규격서 등 기획/설계 산출물이 전무. PROD `/home/ubuntu/thynC`의 배포 산출물(백엔드 WAR·프론트엔드 2종·DB DDL)을 분석해 표준 산출물을 만들고 사내위키 `thync_1.3.0` 카테고리에 HTML 문서로 게시, AI 어시스턴트가 참조하도록 함

@@ -1,6 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { prisma } from '@/lib/prisma'
 import { findHospitalNotePage } from '@/lib/wiki/hospitalNote'
+import { getAiExcludedPageIds, isPageAiExcluded } from '@/lib/wiki/aiExclusion'
 
 /**
  * AI 어시스턴트 도구 레이어 (function_ai_assistant.html §5)
@@ -647,10 +648,13 @@ async function aggregateStats(input: ToolInput) {
 async function searchWiki(input: ToolInput) {
   const query = str(input.query)
   if (!query) return { error: 'query가 필요합니다.' }
+  // AI 검색 제외로 표시된 페이지(및 그 하위 전체)는 대상에서 뺀다
+  const excluded = await getAiExcludedPageIds()
   const rows = await prisma.wikiPage.findMany({
     where: {
       deletedAt: null,
       isTemplate: false,
+      ...(excluded.size > 0 ? { id: { notIn: Array.from(excluded) } } : {}),
       OR: [
         { title: { contains: query, mode: 'insensitive' } },
         { plainText: { contains: query, mode: 'insensitive' } },
@@ -681,6 +685,8 @@ async function readWikiPage(input: ToolInput) {
     select: { id: true, title: true, plainText: true, deletedAt: true, updatedAt: true },
   })
   if (!page || page.deletedAt) return { error: '페이지를 찾을 수 없습니다.' }
+  // AI 검색 제외 영역의 페이지는 직접 id로도 열람 불가
+  if (await isPageAiExcluded(pageId)) return { error: '페이지를 찾을 수 없습니다.' }
   const text = page.plainText
   return {
     pageId: page.id,
@@ -696,6 +702,7 @@ async function readHospitalNote(input: ToolInput) {
   if (!code) return { error: 'hospitalCode가 필요합니다.' }
   const page = await findHospitalNotePage(code)
   if (!page) return { note: '이 병원의 병원 노트(상담이력)가 아직 없습니다.' }
+  if (await isPageAiExcluded(page.id)) return { note: '이 병원의 병원 노트(상담이력)가 아직 없습니다.' }
   const text = page.plainText
   return {
     pageId: page.id,
