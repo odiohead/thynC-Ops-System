@@ -119,14 +119,25 @@ export interface CreateTxInput {
   components?: ComponentOutInput[] // OUT 세트출고 — 매핑된 비시리얼 부자재 동시 출고
 }
 
+/** 검증 완료된 전표 실행 계획 — planInventoryTransaction 산출물, applyInventoryTransaction 입력 */
+export interface TxPlan {
+  input: CreateTxInput
+  qty: number
+  itemId: number
+  itemName: string
+  isSerialManaged: boolean
+  inventoryId: number
+  srcWhName: string
+  reasonId: number | null
+  reasonValue: string | null
+  componentPlans: { itemId: number; quantity: number; name: string; unit: string }[]
+}
+
 /**
- * 입고/출고/이동 전표를 생성하고 재고 스냅샷·시리얼 개체를 한 트랜잭션에서 갱신한다.
+ * 전표 입력 검증 → 실행 계획 생성 (쓰기 없음).
  * 인벤토리는 품목에서 파생 (품목이 인벤토리에 귀속) — 위치도 같은 인벤토리 소속이어야 한다.
- * - MOVE: 같은 인벤토리 안에서 물리 위치만 변경
- * - OUT + components: 주자재와 매핑된 부자재(같은 인벤토리)를 같은 위치에서 함께 출고 (자식 전표, parent_tx_id 연결)
- * 전표코드 동시 채번 충돌(P2002)은 재시도. 실패 시 InventoryError(4xx) 또는 롤백.
  */
-export async function createInventoryTransaction(input: CreateTxInput, actorId: string) {
+export async function planInventoryTransaction(input: CreateTxInput): Promise<TxPlan> {
   const qty = Math.trunc(input.quantity)
   if (!TX_TYPES.includes(input.txType)) throw new InventoryError('잘못된 전표 유형입니다.')
   if (!Number.isFinite(qty) || qty <= 0) throw new InventoryError('수량은 1 이상이어야 합니다.')
@@ -194,87 +205,117 @@ export async function createInventoryTransaction(input: CreateTxInput, actorId: 
     }
   }
 
+  return {
+    input,
+    qty,
+    itemId: item.id,
+    itemName: item.name,
+    isSerialManaged: item.isSerialManaged,
+    inventoryId,
+    srcWhName: srcWh.name,
+    reasonId,
+    reasonValue,
+    componentPlans,
+  }
+}
+
+/**
+ * 검증된 계획을 주어진 트랜잭션 클라이언트에서 실행 — 전표 생성 + 재고 스냅샷 + 시리얼 개체 + 세트출고 자식 전표.
+ * 일괄 처리(bulk)에서 여러 계획을 한 트랜잭션에 묶을 수 있도록 분리.
+ */
+export async function applyInventoryTransaction(client: Tx, plan: TxPlan, actorId: string) {
+  const { input, qty, inventoryId, reasonId, reasonValue, componentPlans } = plan
   const srcBucket: Bucket = { itemId: input.itemId, warehouseId: input.warehouseId, inventoryId }
+
+  const txCode = await nextTxCode(client)
+
+  // 1) 전표 생성
+  const tx = await client.inventoryTransaction.create({
+    data: {
+      txCode,
+      txType: input.txType,
+      reasonId,
+      itemId: input.itemId,
+      warehouseId: input.warehouseId,
+      toWarehouseId: input.txType === 'MOVE' ? (input.toWarehouseId ?? null) : null,
+      inventoryId,
+      quantity: qty,
+      destination: input.txType === 'OUT' ? (input.destination?.trim() || null) : null,
+      hospitalCode: input.txType === 'OUT' ? (input.hospitalCode ?? null) : null,
+      workType: input.txType === 'OUT' ? (input.workType ?? null) : null,
+      refCode: input.txType === 'OUT' ? (input.refCode ?? null) : null,
+      note: input.note?.trim() || null,
+      actorId,
+    },
+  })
+
+  // 2) 재고 스냅샷 증감 (버킷 단위)
+  if (input.txType === 'IN') {
+    await increaseStock(client, srcBucket, qty)
+  } else if (input.txType === 'OUT') {
+    await decreaseStock(client, srcBucket, qty, plan.srcWhName)
+  } else {
+    // MOVE: 같은 인벤토리 안에서 위치만 변경
+    await decreaseStock(client, srcBucket, qty, plan.srcWhName)
+    await increaseStock(client, { ...srcBucket, warehouseId: input.toWarehouseId! }, qty)
+  }
+
+  // 3) 시리얼 개체 처리
+  if (plan.isSerialManaged) {
+    await applySerialUnits(client, tx.id, input, plan.itemId, qty, reasonValue, inventoryId)
+  }
+
+  // 4) 세트출고 — 부자재 자식 전표 (같은 위치에서 차감, parent_tx_id 연결)
+  for (const comp of componentPlans) {
+    const childCode = await nextTxCode(client)
+    await client.inventoryTransaction.create({
+      data: {
+        txCode: childCode,
+        txType: 'OUT',
+        reasonId,
+        itemId: comp.itemId,
+        warehouseId: input.warehouseId,
+        inventoryId,
+        quantity: comp.quantity,
+        destination: input.destination?.trim() || null,
+        hospitalCode: input.hospitalCode ?? null,
+        workType: input.workType ?? null,
+        refCode: input.refCode ?? null,
+        note: `세트출고 (${plan.itemName} ${txCode})`,
+        parentTxId: tx.id,
+        actorId,
+      },
+    })
+    await decreaseStock(
+      client,
+      { itemId: comp.itemId, warehouseId: input.warehouseId, inventoryId },
+      comp.quantity,
+      `부자재 ${comp.name} — ${plan.srcWhName}`,
+    )
+  }
+
+  return client.inventoryTransaction.findUnique({
+    where: { id: tx.id },
+    include: {
+      item: { select: { id: true, name: true, itemCode: true } },
+      childTxs: { select: { id: true, txCode: true, itemId: true, quantity: true } },
+    },
+  })
+}
+
+/**
+ * 입고/출고/이동 전표를 생성하고 재고 스냅샷·시리얼 개체를 한 트랜잭션에서 갱신한다.
+ * - MOVE: 같은 인벤토리 안에서 물리 위치만 변경
+ * - OUT + components: 주자재와 매핑된 부자재(같은 인벤토리)를 같은 위치에서 함께 출고 (자식 전표, parent_tx_id 연결)
+ * 전표코드 동시 채번 충돌(P2002)은 재시도. 실패 시 InventoryError(4xx) 또는 롤백.
+ */
+export async function createInventoryTransaction(input: CreateTxInput, actorId: string) {
+  const plan = await planInventoryTransaction(input)
 
   // 전표코드 P2002(동시 채번 충돌) 재시도
   for (let attempt = 0; ; attempt++) {
     try {
-      return await prisma.$transaction(async (client) => {
-        const txCode = await nextTxCode(client)
-
-        // 1) 전표 생성
-        const tx = await client.inventoryTransaction.create({
-          data: {
-            txCode,
-            txType: input.txType,
-            reasonId,
-            itemId: input.itemId,
-            warehouseId: input.warehouseId,
-            toWarehouseId: input.txType === 'MOVE' ? (input.toWarehouseId ?? null) : null,
-            inventoryId,
-            quantity: qty,
-            destination: input.txType === 'OUT' ? (input.destination?.trim() || null) : null,
-            hospitalCode: input.txType === 'OUT' ? (input.hospitalCode ?? null) : null,
-            workType: input.txType === 'OUT' ? (input.workType ?? null) : null,
-            refCode: input.txType === 'OUT' ? (input.refCode ?? null) : null,
-            note: input.note?.trim() || null,
-            actorId,
-          },
-        })
-
-        // 2) 재고 스냅샷 증감 (버킷 단위)
-        if (input.txType === 'IN') {
-          await increaseStock(client, srcBucket, qty)
-        } else if (input.txType === 'OUT') {
-          await decreaseStock(client, srcBucket, qty, srcWh.name)
-        } else {
-          // MOVE: 같은 인벤토리 안에서 위치만 변경
-          await decreaseStock(client, srcBucket, qty, srcWh.name)
-          await increaseStock(client, { ...srcBucket, warehouseId: input.toWarehouseId! }, qty)
-        }
-
-        // 3) 시리얼 개체 처리
-        if (item.isSerialManaged) {
-          await applySerialUnits(client, tx.id, input, item.id, qty, reasonValue, inventoryId)
-        }
-
-        // 4) 세트출고 — 부자재 자식 전표 (같은 위치에서 차감, parent_tx_id 연결)
-        for (const comp of componentPlans) {
-          const childCode = await nextTxCode(client)
-          await client.inventoryTransaction.create({
-            data: {
-              txCode: childCode,
-              txType: 'OUT',
-              reasonId,
-              itemId: comp.itemId,
-              warehouseId: input.warehouseId,
-              inventoryId,
-              quantity: comp.quantity,
-              destination: input.destination?.trim() || null,
-              hospitalCode: input.hospitalCode ?? null,
-              workType: input.workType ?? null,
-              refCode: input.refCode ?? null,
-              note: `세트출고 (${item.name} ${txCode})`,
-              parentTxId: tx.id,
-              actorId,
-            },
-          })
-          await decreaseStock(
-            client,
-            { itemId: comp.itemId, warehouseId: input.warehouseId, inventoryId },
-            comp.quantity,
-            `부자재 ${comp.name} — ${srcWh.name}`,
-          )
-        }
-
-        return client.inventoryTransaction.findUnique({
-          where: { id: tx.id },
-          include: {
-            item: { select: { id: true, name: true, itemCode: true } },
-            childTxs: { select: { id: true, txCode: true, itemId: true, quantity: true } },
-          },
-        })
-      })
+      return await prisma.$transaction((client) => applyInventoryTransaction(client, plan, actorId))
     } catch (e) {
       const isTxCodeDup = e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002'
       if (isTxCodeDup && attempt < 2) continue

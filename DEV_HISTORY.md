@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-07-18 23:20 | 자재관리 — 시리얼 품목 Excel 일괄 입출고 (마이그레이션용)
+
+- 기존 엑셀 자재관리 데이터를 옮기기 위한 일괄 처리 기능. 입출고 이력 페이지에 'Excel 일괄 입출고' 버튼(재고 처리 권한자) — A열=품목명·B열=시리얼번호(1행 헤더) 업로드
+- 구분(입고/출고)·인벤토리·위치·유형 선택 → 미리보기(행 단위 검증: 미등록 품목, 비시리얼 품목, 파일 내 중복, 기등록/미등록 시리얼, 위치·재고 상태 불일치) → 오류 0건일 때만 실행. **시리얼 관리 품목만** 대상, 품목별 전표 1건씩(품목명은 인벤토리 내 정확 일치), 최대 2000행, 전체 단일 트랜잭션(all-or-nothing, 실패 시 전부 롤백)
+- 회수(RETURN)/폐기(DISPOSE) 등 유형별 시스템 동작은 기존 전표 로직 그대로 적용 — `createInventoryTransaction`을 계획(plan)/실행(apply)으로 분리해 일괄 처리가 동일 검증·시리얼 로직을 재사용
+- 검증: dev2에서 API E2E 14케이스 통과(오류 검출 5종, 오류 시 실행 거부, 입고→중복 차단→위치 불일치 차단→출고→이중 출고 차단→회수 복귀), 테스트 전표는 취소로 원복
+- README 자재관리 섹션의 "Phase 10 DEV만 반영" 주의 삭제 (PROD에 20260716100000 적용 확인됨 — 문서만 갱신)
+- 영향 파일: `lib/inventory.ts`(plan/apply 분리), `app/api/inventory/transactions/bulk-serial/route.ts`(신규), `app/inventory/components/BulkSerialTxModal.tsx`(신규), `app/inventory/transactions/page.tsx`, `README.md`, `function_wms.md`
+
 ## 2026-07-18 22:25 | 문서 변경분 PROD 반영 (빌드·재시작 생략)
 
 - 미푸시 커밋 87ae971(배포 기록) + CLAUDE.md 프로젝트 성격 섹션(f30bb77)을 push 후 PROD git pull

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import BulkSerialTxModal from '../components/BulkSerialTxModal'
 
 interface Warehouse { id: number; name: string; inventoryId: number }
 interface Inventory { id: number; name: string; isActive: boolean }
@@ -48,6 +49,7 @@ export default function TransactionsPage() {
   const limit = 50
   const [loading, setLoading] = useState(true)
   const [canManage, setCanManage] = useState(false)
+  const [showBulk, setShowBulk] = useState(false)
 
   const [filterType, setFilterType] = useState('')
   const [filterWarehouse, setFilterWarehouse] = useState('')
@@ -105,6 +107,9 @@ export default function TransactionsPage() {
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold text-gray-900">입출고 이력</h1>
         <div className="flex gap-2">
+          {canManage && (
+            <button onClick={() => setShowBulk(true)} className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100">Excel 일괄 입출고</button>
+          )}
           <button onClick={exportExcel} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Excel 다운로드</button>
           <Link href={`/inventory${filterInventory ? `?inv=${filterInventory}` : ''}`} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">자재 현황</Link>
         </div>
@@ -220,6 +225,10 @@ export default function TransactionsPage() {
           <span className="text-sm text-gray-600">{page} / {totalPages}</span>
           <button onClick={() => { setPage(page + 1); fetchTxs(page + 1) }} disabled={page === totalPages} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40">다음</button>
         </div>
+      )}
+
+      {showBulk && (
+        <BulkSerialTxModal onClose={() => setShowBulk(false)} onDone={() => { setPage(1); fetchTxs(1) }} />
       )}
     </div>
   )
