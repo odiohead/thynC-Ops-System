@@ -5,6 +5,7 @@ import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { deleteFromS3 } from '@/lib/s3'
 import { getIssuePageProtection } from '@/lib/wiki/projectIssueNote'
+import { getHospitalNotePageProtection } from '@/lib/wiki/hospitalNote'
 import { extractPlainTextFromBlocks, extractPageLinks, updatePageLinkTitles } from '@/lib/wiki/blockText'
 import { sanitizeHtmlDocument, extractPlainTextFromHtml, HTML_DOC_MAX_BYTES } from '@/lib/wiki/htmlText'
 
@@ -117,6 +118,34 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
     if (isTemplate === true) {
       return NextResponse.json(
         { error: '프로젝트 이슈노트 페이지는 템플릿으로 전환할 수 없습니다.' },
+        { status: 400 },
+      )
+    }
+  }
+
+  // 병원 노트 보호 — 이슈노트와 동일 규칙
+  const noteProtection = await getHospitalNotePageProtection(params.id)
+  if (noteProtection === 'root') {
+    if (
+      (title !== undefined && title !== existing.title) ||
+      (parentId !== undefined && parentId !== existing.parentId) ||
+      isTemplate === true
+    ) {
+      return NextResponse.json(
+        { error: '시스템 카테고리(병원 노트)는 이름 변경·이동할 수 없습니다.' },
+        { status: 400 },
+      )
+    }
+  } else if (noteProtection === 'note') {
+    if (parentId !== undefined && parentId !== existing.parentId) {
+      return NextResponse.json(
+        { error: '병원 노트 페이지는 카테고리 밖으로 이동할 수 없습니다.' },
+        { status: 400 },
+      )
+    }
+    if (isTemplate === true) {
+      return NextResponse.json(
+        { error: '병원 노트 페이지는 템플릿으로 전환할 수 없습니다.' },
         { status: 400 },
       )
     }
@@ -286,6 +315,19 @@ export async function DELETE(request: NextRequest, { params }: Ctx) {
   if (protection === 'issue' && !isAdminOrAbove(authUser.role)) {
     return NextResponse.json(
       { error: '프로젝트 이슈노트 페이지는 관리자만 삭제할 수 있습니다.' },
+      { status: 403 },
+    )
+  }
+  const noteProtection = await getHospitalNotePageProtection(params.id)
+  if (noteProtection === 'root') {
+    return NextResponse.json(
+      { error: '시스템 카테고리(병원 노트)는 삭제할 수 없습니다.' },
+      { status: 400 },
+    )
+  }
+  if (noteProtection === 'note' && !isAdminOrAbove(authUser.role)) {
+    return NextResponse.json(
+      { error: '병원 노트 페이지는 관리자만 삭제할 수 있습니다.' },
       { status: 403 },
     )
   }

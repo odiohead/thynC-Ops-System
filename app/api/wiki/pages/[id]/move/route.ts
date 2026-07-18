@@ -5,6 +5,10 @@ import {
   getIssuePageProtection,
   getIssueNoteRootSetting,
 } from '@/lib/wiki/projectIssueNote'
+import {
+  getHospitalNotePageProtection,
+  getHospitalNoteRootSetting,
+} from '@/lib/wiki/hospitalNote'
 
 type Ctx = { params: { id: string } }
 
@@ -82,12 +86,33 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
           { status: 400 },
         )
       }
-      // 일반 페이지를 이슈노트 카테고리 안으로 넣는 것도 차단 (카테고리 순수성 유지)
+      // 병원 노트 보호 — 이슈노트와 동일 규칙
+      const noteProtection = await getHospitalNotePageProtection(target.id)
+      if (noteProtection === 'root') {
+        return NextResponse.json(
+          { error: '시스템 카테고리(병원 노트)는 이동할 수 없습니다.' },
+          { status: 400 },
+        )
+      }
+      if (noteProtection === 'note') {
+        return NextResponse.json(
+          { error: '병원 노트 페이지는 카테고리 밖으로 이동할 수 없습니다.' },
+          { status: 400 },
+        )
+      }
+      // 일반 페이지를 시스템 카테고리 안으로 넣는 것도 차단 (카테고리 순수성 유지)
       if (parentId !== null) {
         const rootId = await getIssueNoteRootSetting()
         if (rootId && parentId === rootId) {
           return NextResponse.json(
             { error: '프로젝트 이슈노트 카테고리에는 프로젝트 상세에서만 페이지를 추가할 수 있습니다.' },
+            { status: 400 },
+          )
+        }
+        const noteRootId = await getHospitalNoteRootSetting()
+        if (noteRootId && parentId === noteRootId) {
+          return NextResponse.json(
+            { error: '병원 노트 카테고리에는 병원 상세·상담 정리에서만 페이지를 추가할 수 있습니다.' },
             { status: 400 },
           )
         }

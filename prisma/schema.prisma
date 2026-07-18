@@ -84,6 +84,7 @@ model Hospital {
   etcTaskHospitals    EtcTaskHospital[]
   inventoryTransactions InventoryTransaction[]
   inventoryUnits        InventoryUnit[]
+  aiChatSessions        AiChatSession[]
 
   @@map("hospitals")
   @@schema("public")
@@ -223,6 +224,7 @@ model User {
   inventoryManager        InventoryManager?
   inventoryTxActed        InventoryTransaction[]       @relation("InventoryTxActor")
   inventoryTxCanceled     InventoryTransaction[]       @relation("InventoryTxCanceler")
+  aiChatSessions          AiChatSession[]
 
   @@map("users")
   @@schema("public")
@@ -1339,5 +1341,40 @@ model VehicleLog {
   @@index([vehicleId, endAt])
   @@index([driverId, startAt])
   @@map("vehicle_logs")
+  @@schema("public")
+}
+
+// ===== AI 어시스턴트 v2 (function_ai_assistant.html) =====
+
+model AiChatSession {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id")
+  hospitalCode String?  @map("hospital_code")
+  title        String   @default("") @db.VarChar(80)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hospital Hospital?       @relation(fields: [hospitalCode], references: [hospitalCode])
+  messages AiChatMessage[]
+
+  @@index([userId, updatedAt(sort: Desc)])
+  @@map("ai_chat_sessions")
+  @@schema("public")
+}
+
+model AiChatMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  sessionId String   @map("session_id") @db.Uuid
+  role      String   @db.VarChar(10)
+  content   String   @default("")
+  toolCalls Json?    @map("tool_calls")
+  usage     Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  session AiChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@map("ai_chat_messages")
   @@schema("public")
 }

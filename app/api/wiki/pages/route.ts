@@ -6,6 +6,7 @@ import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { extractPlainTextFromBlocks } from '@/lib/wiki/blockText'
 import { sanitizeHtmlDocument, extractPlainTextFromHtml, HTML_DOC_MAX_BYTES } from '@/lib/wiki/htmlText'
 import { getIssueNoteRootSetting } from '@/lib/wiki/projectIssueNote'
+import { getHospitalNoteRootSetting } from '@/lib/wiki/hospitalNote'
 
 export async function GET(request: NextRequest) {
   const authUser = await getAuthUser(request)
@@ -111,12 +112,19 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 프로젝트 이슈노트 카테고리 직속 페이지는 프로젝트 상세(전용 API)에서만 생성 가능
+  // 시스템 카테고리(프로젝트 이슈노트/병원 노트) 직속 페이지는 전용 API에서만 생성 가능
   if (parentId) {
     const issueRootId = await getIssueNoteRootSetting()
     if (issueRootId && parentId === issueRootId) {
       return NextResponse.json(
         { error: '프로젝트 이슈노트 카테고리에는 프로젝트 상세에서만 페이지를 추가할 수 있습니다.' },
+        { status: 400 },
+      )
+    }
+    const hospitalNoteRootId = await getHospitalNoteRootSetting()
+    if (hospitalNoteRootId && parentId === hospitalNoteRootId) {
+      return NextResponse.json(
+        { error: '병원 노트 카테고리에는 병원 상세·상담 정리에서만 페이지를 추가할 수 있습니다.' },
         { status: 400 },
       )
     }

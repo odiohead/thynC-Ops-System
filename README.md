@@ -180,6 +180,9 @@ app/
     └── ui/                           # 디자인 프리미티브 (Button, Card, Badge, Input, Table, Modal(모바일 바텀시트), PageHeader, EmptyState)
 
 lib/
+├── ai/                               # AI 어시스턴트 v2 (function_ai_assistant.html)
+│   ├── agent.ts                      # 에이전트 루프 — claude-opus-4-8 스트리밍 + tool use 반복(최대 8회)
+│   └── tools.ts                      # 도구 4종 (read-only Prisma SELECT — 병원검색/현황/프로젝트/유지보수)
 ├── auth.ts                           # JWT 인증 유틸리티 + 역할 헬퍼
 ├── prisma.ts                         # Prisma 클라이언트
 ├── s3.ts                             # AWS S3 연동 유틸리티 (업로드/삭제/presigned URL)
@@ -202,7 +205,8 @@ lib/
     ├── blockText.ts                  # BlockNote 블록 → plain text 추출·페이지 링크 인덱싱
     ├── htmlText.ts                   # HTML 문서 페이지 — sanitize(script 등 제거) + plain text·title 추출
     ├── wikiSchema.tsx                # BlockNote 커스텀 스키마 (콜아웃·구분선·페이지링크·mention·멀티컬럼)
-    └── projectIssueNote.ts           # 프로젝트 이슈노트 — 루트 카테고리 보장·보호 판정 (refType 'project_issue')
+    ├── projectIssueNote.ts           # 프로젝트 이슈노트 — 루트 카테고리 보장·보호 판정 (refType 'project_issue')
+    └── hospitalNote.ts               # 병원 노트 — 루트 카테고리 보장·보호 판정·페이지 조회 (refType 'hospital_note')
 
 prisma/
 ├── schema.prisma                     # DB 스키마
@@ -413,6 +417,11 @@ prisma/
 - `refCode`: 원본 테이블의 고유 코드 (projectCode / siteVisitCode / planCode / maintenanceCode / etcTaskCode)
 - `hospitalCode` (FK→Hospital, nullable), `title`
 - 기존 테이블은 변경 없이 유지, tasks는 참조용 통합 뷰
+
+### AiChatSession / AiChatMessage (AI 어시스턴트 v2 대화)
+- `AiChatSession`: 사용자별 대화 세션 — `userId`(→User, Cascade), `hospitalCode`(→Hospital, nullable — 선택 병원 컨텍스트), `title`(첫 질문 40자 자동), 인덱스 `(user_id, updated_at DESC)`
+- `AiChatMessage`: 세션 1:N 메시지 — `role`(user|assistant), `content`(표시용 텍스트), `toolCalls`(JSONB — 도구 호출 기록 [{name,input,resultSummary}]), `usage`(JSONB — 토큰 사용량), 인덱스 `(session_id, created_at)`
+- 세션 삭제 = hard delete (개인 대화), 계정 삭제 시 Cascade
 
 ### ConsultationQueue (상담 대기열)
 - AI 어시스턴트 상담이력 저장
@@ -832,6 +841,7 @@ prisma/
 - **메인 메뉴 등록**: `nav_menu_items`에 `wiki` 행 (sort_order=15)
 - **감사 로그**: CREATE/UPDATE/DELETE 모두 `resource='wiki_page'`로 기록
 - **명시적 참조 (WikiPageReference)**: 병원/프로젝트를 chip 형태로 명시적 연결, 병원 상세 역참조 카드
+- **병원 노트 시스템 카테고리 (2026-07-18)**: 최상위 '병원 노트' 카테고리(AppSetting `wiki_hospital_note_root_id`) 아래 병원별 노트 페이지(`WikiPageReference` refType `hospital_note` 1:1). 병원 상세에 임베드(HospitalNotePanel, 협업 편집), AI 어시스턴트 상담 정리가 상담이력을 append, 어시스턴트 `read_hospital_note` 도구가 재활용. 보호 규칙은 이슈노트와 동일(루트 이동·삭제 차단, 노트 이동 차단·삭제 ADMIN만, 카테고리 직속 생성 차단, 복제 시 참조 미복사)
 - **프로젝트 이슈노트 시스템 카테고리**: 최상위 '프로젝트 이슈노트' 카테고리(AppSetting `wiki_project_issue_root_id`) 아래 프로젝트별 이슈노트 페이지 수용 — 프로젝트 상세에서 생성·임베드 편집. 루트는 이동·이름변경·삭제·복제 차단, 이슈노트 페이지는 카테고리 밖 이동·템플릿화 차단 + 삭제는 ADMIN 이상만(서버 검증 + 사이드바/상세 메뉴 숨김). 일반 페이지를 카테고리 안으로 이동·생성하는 것도 차단. 이슈노트 페이지 복제 시 사본은 일반 페이지로 최상위 생성(`project_issue` 참조 미복사). 프로젝트가 삭제돼도 페이지는 카테고리에서 계속 접근 가능
 - **태그**: 페이지에 다중 태그 추가, 검색에서 태그 필터 가능 (`WikiTag`/`WikiPageTag`)
 - **즐겨찾기**: 페이지 상단 ☆ 토글, `/wiki/favorites` 전용 페이지
@@ -846,14 +856,15 @@ prisma/
 - 권한: 로그인 필수 / VIEWER 읽기 / USER 이상 쓰기·삭제
 - 인라인 mention 검색은 검색 plain_text 인덱스에도 포함됨 (label 추출)
 
-### AI 어시스턴트
-- Flowise RAG 서버 연동 AI 챗봇
-- 2단 레이아웃: 좌측 채팅 + 우측 상담 정리 패널 (토글 열기/닫기)
-- **좌측 채팅**: 병원 검색(debounce) → 선택 태그 표시, 기본값 '공통', 사용자/AI 말풍선 구분, AI 답변 마크다운 렌더링
-- **우측 상담 정리 패널 (선택사항)**: 상담유형/문서유형 선택, AI 정제 버튼(Anthropic Claude API), 결론 텍스트, 대기리스트 등록 (대화 없이도 등록 가능)
-- AI 정제: 대화 내역을 마크다운 상담이력으로 자동 정리 (claude-sonnet-4-5)
-- 상담이력 저장: ConsultationQueue 테이블에 병원·유형·대화·정제결과 저장
-- 세션 ID 기반 대화 컨텍스트 유지, 모든 역할 접근 가능
+### AI 어시스턴트 v2 (에이전트형 — `function_ai_assistant.html`, Phase 1~4·6 완료 2026-07-18)
+- **에이전트**: Anthropic API(`claude-opus-4-8` + adaptive thinking) 직접 호출, **tool use로 운영 DB·위키 실데이터 조회** 후 답변. 역할 3축 — ①CS 응대(위키 지식+병원 노트) ②정보 조회(병원 현황·형상) ③영업·운영 집계
+- **도구 12종(read-only, `lib/ai/tools.ts` 화이트리스트)**: `search_hospitals`(운영·계약 우선 랭킹) / `get_hospital_overview` / `list_projects` / `list_maintenances` / `list_site_visits` / `list_install_plans` / `list_etc_tasks` / `get_dashboard_summary` / **`aggregate_stats`**(신규계약·완료구축·유지보수·답사·신규병원 — 기간 집계) / `search_wiki` / `read_wiki_page` / `read_hospital_note`
+- 에이전트 루프(`lib/ai/agent.ts`): 스트리밍 + tool use 반복(최대 8회), 도구 실패 is_error 전달, **프롬프트 캐싱**(시스템+도구 정의 breakpoint, 가변 컨텍스트는 캐시 뒤 배치)
+- **SSE 스트리밍**: `POST /api/ai-assistant/chat` — `text`/`tool_start`/`done`/`error` + 15초 하트비트(프록시 타임아웃 보호), 도구 진행 상태("🔍 집계 중...") 인라인 표시
+- **세션 UX**: 좌측 사이드바(내 대화 목록·이어하기·삭제, 모바일 드로어), 세션 제목 자동(첫 질문 40자), 병원 컨텍스트 칩 복원
+- **상담 정리 → 병원 노트**: AI 정제(`claude-opus-4-8`) 후 **"병원 노트에 추가"** — 위키 '병원 노트' 카테고리의 병원별 페이지에 날짜·상담자 헤더와 함께 append → 다음 상담에서 `read_hospital_note`로 재활용 (상담 대기열은 폐기 — API·UI 제거, `consultation_queue` 테이블은 이력 보존)
+- 권한: VIEWER 사용 불가(403), 세션은 소유자만 접근(삭제는 본인 또는 ADMIN)
+- **Flowise 제거**: 프록시 라우트·env 삭제 완료 (Flowise EC2 종료는 추후 결정)
 
 ### 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
 - DB 기반 동적 네비게이션 메뉴 시스템
@@ -1136,9 +1147,11 @@ npm run dev
 ### AI 어시스턴트
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| POST | `/api/ai-assistant` | AI 질문 전송 (`{ question, sessionId? }` → `{ answer }`) |
-| POST | `/api/ai-assistant/summarize` | AI 정제 (대화 → 마크다운 상담이력) |
-| POST | `/api/ai-assistant/consultation` | 상담이력 대기리스트 등록 |
+| POST | `/api/ai-assistant/chat` | **v2 에이전트 채팅** (`{ sessionId?, message, hospitalCode? }` → SSE 스트림: `text`/`tool_start`/`done`/`error`). USER 이상, 세션 자동 생성·소유자 검증 |
+| GET | `/api/ai-assistant/sessions` | 내 세션 목록 (최근순 50개) |
+| GET | `/api/ai-assistant/sessions/[id]` | 세션 메시지 전체 (본인만, 도구 라벨 포함) |
+| DELETE | `/api/ai-assistant/sessions/[id]` | 세션 삭제 (본인 또는 ADMIN) |
+| POST | `/api/ai-assistant/summarize` | AI 정제 (대화 → 마크다운 상담이력, `claude-opus-4-8`) |
 
 ### 답사
 | Method | Endpoint | 설명 |
@@ -1278,6 +1291,8 @@ npm run dev
 | GET  | `/api/wiki/mention?q=` | @ mention 자동완성 — 병원/프로젝트 통합 검색 (타입별 5개) |
 | GET  | `/api/wiki/project-issue-notes?projectCode=` | 프로젝트 이슈노트 페이지 조회 (본문 포함, 없으면 null) |
 | POST | `/api/wiki/project-issue-notes` | 프로젝트 이슈노트 페이지 생성 (`{projectCode}`) — USER+, 프로젝트당 1개(멱등), 루트 카테고리 자동 보장 |
+| GET  | `/api/wiki/hospital-notes?hospitalCode=` | 병원 노트 페이지 조회 (본문 포함, 없으면 null) |
+| POST | `/api/wiki/hospital-notes` | 병원 노트 생성(`{hospitalCode}`, 멱등) / **상담이력 append**(`{hospitalCode, appendMd, consultationType?}` — 마크다운→블록 변환 후 날짜·상담자 헤더와 함께 하단 추가, 버전 스냅샷) — USER+ |
 
 ---
 

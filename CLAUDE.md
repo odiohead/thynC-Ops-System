@@ -102,6 +102,7 @@ pm2 restart thync-prod
 - **금지 방향**: `app/hospitals/*`, `app/projects/*`, `app/site-visits/*`, `app/maintenances/*`, `app/install-plans/*`, `app/tasks/*`, `lib/mail-*` → `app/wiki/*`, `lib/wiki/*`
 - 메인에서 위키 데이터가 필요하면 `fetch('/api/wiki/...')`로 호출 (쿠키 인증 자동 전달)
 - **승인 예외 (2026-07-17, 프로젝트 이슈노트 위키 전환)**: `app/projects/[code]/page.tsx` → `app/wiki/components/ProjectIssueNotePanel` import 1건만 허용. 패널 내부의 데이터 교환은 전부 HTTP(`/api/wiki/*`)이며, 이 결정으로 위키는 "떼어낼 수 있는 부가 모듈"이 아니라 콘텐츠 백본으로 격상됨(분리 시 이슈노트 임베드 동반 이전 필요)
+- **승인 예외 2 (2026-07-18, 병원 노트 — AI 어시스턴트 v2 Phase 4)**: `app/hospitals/[code]/page.tsx` → `app/wiki/components/HospitalNotePanel` import 1건 추가 허용. 이슈노트와 동일 패턴(데이터 교환은 전부 HTTP `/api/wiki/hospital-notes`)
 
 ```typescript
 // app/hospitals/[code]/page.tsx (메인 모듈)

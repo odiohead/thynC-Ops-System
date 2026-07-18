@@ -7,6 +7,7 @@ import {
   getIssuePageProtection,
   PROJECT_ISSUE_REF_TYPE,
 } from '@/lib/wiki/projectIssueNote'
+import { HOSPITAL_NOTE_REF_TYPE } from '@/lib/wiki/hospitalNote'
 
 type Ctx = { params: { id: string } }
 
@@ -88,9 +89,9 @@ export async function POST(request: NextRequest, { params }: Ctx) {
           create: src.tags.map((t) => ({ tagId: t.tagId })),
         },
         references: {
-          // project_issue 참조는 프로젝트↔이슈노트 1:1 연결이므로 사본에 복사하지 않음
+          // project_issue/hospital_note 참조는 원본↔페이지 1:1 시스템 연결이므로 사본에 복사하지 않음
           create: src.references
-            .filter((r) => r.refType !== PROJECT_ISSUE_REF_TYPE)
+            .filter((r) => r.refType !== PROJECT_ISSUE_REF_TYPE && r.refType !== HOSPITAL_NOTE_REF_TYPE)
             .map((r) => ({
               refType: r.refType,
               refCode: r.refCode,

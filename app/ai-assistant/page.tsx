@@ -7,6 +7,8 @@ import { X } from 'lucide-react'
 interface Message {
   role: 'user' | 'assistant'
   content: string
+  /** assistant 턴에서 실행된 도구 진행 라벨 (예: "병원 검색 중") */
+  tools?: string[]
 }
 
 interface HospitalResult {
@@ -20,8 +22,46 @@ interface StatusCodeOption {
   value: string | null
 }
 
-function generateSessionId() {
-  return 'sess-' + Math.random().toString(36).substring(2) + Date.now().toString(36)
+interface SessionItem {
+  id: string
+  title: string
+  hospitalCode: string | null
+  hospitalName: string | null
+  updatedAt: string
+  messageCount: number
+}
+
+/** SSE 스트림 파서 — "event: X\ndata: {...}" 블록 단위로 콜백 호출 */
+async function readSseStream(
+  res: Response,
+  onEvent: (event: string, data: Record<string, unknown>) => void,
+) {
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let idx
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const chunk = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      let event = 'message'
+      let data = ''
+      for (const line of chunk.split('\n')) {
+        if (line.startsWith('event: ')) event = line.slice(7).trim()
+        else if (line.startsWith('data: ')) data += line.slice(6)
+      }
+      if (data) {
+        try {
+          onEvent(event, JSON.parse(data))
+        } catch {
+          /* 파싱 실패 블록은 무시 */
+        }
+      }
+    }
+  }
 }
 
 export default function AiAssistantPage() {
@@ -29,7 +69,72 @@ export default function AiAssistantPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [sessionId] = useState(() => generateSessionId())
+  const [sessionId, setSessionId] = useState<string | null>(null)
+
+  // 세션 사이드바
+  const [sessions, setSessions] = useState<SessionItem[]>([])
+  const [sidebarOpen, setSidebarOpen] = useState(false) // 모바일 오버레이
+
+  const loadSessions = async () => {
+    try {
+      const res = await fetch('/api/ai-assistant/sessions')
+      if (res.ok) {
+        const data = await res.json()
+        setSessions(data.sessions ?? [])
+      }
+    } catch {
+      /* 목록 로드 실패는 조용히 무시 */
+    }
+  }
+
+  useEffect(() => {
+    void loadSessions()
+  }, [])
+
+  const openSession = async (id: string) => {
+    if (loading) return
+    try {
+      const res = await fetch(`/api/ai-assistant/sessions/${id}`)
+      if (!res.ok) return
+      const data = await res.json()
+      setSessionId(data.session.id)
+      setMessages(
+        (data.messages as { role: 'user' | 'assistant'; content: string; tools?: string[] }[]).map(
+          (m) => ({ role: m.role, content: m.content, tools: m.tools }),
+        ),
+      )
+      if (data.session.hospitalCode && data.session.hospitalName) {
+        setSelectedHospital({
+          hospitalCode: data.session.hospitalCode,
+          hospitalName: data.session.hospitalName,
+        })
+      } else {
+        setSelectedHospital(null)
+      }
+      setSidebarOpen(false)
+    } catch {
+      /* noop */
+    }
+  }
+
+  const startNewChat = () => {
+    if (loading) return
+    setSessionId(null)
+    setMessages([])
+    setSelectedHospital(null)
+    setSidebarOpen(false)
+    inputRef.current?.focus()
+  }
+
+  const deleteSession = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!confirm('이 대화를 삭제할까요?')) return
+    const res = await fetch(`/api/ai-assistant/sessions/${id}`, { method: 'DELETE' })
+    if (res.ok || res.status === 204) {
+      if (sessionId === id) startNewChat()
+      void loadSessions()
+    }
+  }
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -45,23 +150,18 @@ export default function AiAssistantPage() {
   // 우측 패널 상태
   const [panelOpen, setPanelOpen] = useState(false)
   const [consultationTypes, setConsultationTypes] = useState<StatusCodeOption[]>([])
-  const [documentTypes, setDocumentTypes] = useState<StatusCodeOption[]>([])
   const [selectedConsultationType, setSelectedConsultationType] = useState('')
-  const [selectedDocumentType, setSelectedDocumentType] = useState('')
   const [conclusion, setConclusion] = useState('')
   const [summarizing, setSummarizing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
 
-  // 데이터 로드 (상담유형, 문서유형)
+  // 데이터 로드 (상담유형)
   useEffect(() => {
-    Promise.all([
-      fetch('/api/settings/consultation-type').then((r) => r.json()),
-      fetch('/api/settings/document-type').then((r) => r.json()),
-    ]).then(([ctData, dtData]) => {
-      setConsultationTypes(ctData.statusCodes ?? [])
-      setDocumentTypes(dtData.statusCodes ?? [])
-    })
+    fetch('/api/settings/consultation-type')
+      .then((r) => r.json())
+      .then((ctData) => setConsultationTypes(ctData.statusCodes ?? []))
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -127,29 +227,61 @@ export default function AiAssistantPage() {
     setTimeout(() => setToast(null), 3000)
   }
 
-  // 채팅 전송
+  // 채팅 전송 — SSE 스트리밍 (에이전트가 도구로 실데이터 조회)
   async function handleSend() {
     const q = input.trim()
     if (!q || loading) return
 
     setInput('')
-    setMessages((prev) => [...prev, { role: 'user', content: q }])
+    setMessages((prev) => [...prev, { role: 'user', content: q }, { role: 'assistant', content: '', tools: [] }])
     setLoading(true)
 
+    // 마지막(assistant) 말풍선을 부분 갱신하는 헬퍼
+    const patchLast = (fn: (m: Message) => Message) =>
+      setMessages((prev) => {
+        const next = [...prev]
+        next[next.length - 1] = fn(next[next.length - 1])
+        return next
+      })
+
     try {
-      const res = await fetch('/api/ai-assistant', {
+      const res = await fetch('/api/ai-assistant/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: q, sessionId }),
+        body: JSON.stringify({
+          sessionId,
+          message: q,
+          hospitalCode: selectedHospital?.hospitalCode ?? null,
+        }),
       })
-      const data = await res.json()
-      if (!res.ok) {
-        setMessages((prev) => [...prev, { role: 'assistant', content: data.error || '오류가 발생했습니다.' }])
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}))
+        patchLast((m) => ({ ...m, content: data.error || '오류가 발생했습니다.' }))
         return
       }
-      setMessages((prev) => [...prev, { role: 'assistant', content: data.answer }])
+
+      let failed = false
+      await readSseStream(res, (event, data) => {
+        if (event === 'text') {
+          patchLast((m) => ({ ...m, content: m.content + String(data.delta ?? '') }))
+        } else if (event === 'tool_start') {
+          patchLast((m) => ({ ...m, tools: [...(m.tools ?? []), String(data.label ?? '조회 중')] }))
+        } else if (event === 'done') {
+          if (typeof data.sessionId === 'string') setSessionId(data.sessionId)
+        } else if (event === 'error') {
+          failed = true
+          patchLast((m) => ({
+            ...m,
+            content: m.content || String(data.message ?? 'AI 응답 생성에 실패했습니다.'),
+          }))
+        }
+      })
+      if (failed) return
+      // 스트림이 정상 종료됐는데 내용이 비면 안내
+      patchLast((m) => (m.content ? m : { ...m, content: '(응답이 생성되지 않았습니다. 다시 시도해 주세요.)' }))
+      void loadSessions()
     } catch {
-      setMessages((prev) => [...prev, { role: 'assistant', content: 'AI 서버에 연결할 수 없습니다.' }])
+      patchLast((m) => ({ ...m, content: m.content || 'AI 서버에 연결할 수 없습니다.' }))
     } finally {
       setLoading(false)
       inputRef.current?.focus()
@@ -198,37 +330,84 @@ export default function AiAssistantPage() {
     }
   }
 
-  // 대기리스트 등록
-  async function handleSaveConsultation() {
+  // 병원 노트에 상담이력 추가 (위키 '병원 노트' 페이지에 append)
+  async function handleAddToHospitalNote() {
+    if (!selectedHospital) {
+      showToast('병원을 먼저 지정하세요.')
+      return
+    }
+    if (!conclusion.trim()) {
+      showToast('결론(정제 내용)을 입력하거나 AI 정제를 실행하세요.')
+      return
+    }
     setSaving(true)
     try {
-      const res = await fetch('/api/ai-assistant/consultation', {
+      const consultationTypeName = selectedConsultationType
+        ? consultationTypes.find((c) => String(c.id) === selectedConsultationType)?.name ?? undefined
+        : undefined
+      const res = await fetch('/api/wiki/hospital-notes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          hospitalCode: selectedHospital?.hospitalCode || null,
-          consultationTypeId: selectedConsultationType || null,
-          documentTypeId: selectedDocumentType || null,
-          conclusion,
-          chatHistory: messages.length > 0 ? messages : [],
-          aiSummary: conclusion,
+          hospitalCode: selectedHospital.hospitalCode,
+          appendMd: conclusion,
+          consultationType: consultationTypeName,
         }),
       })
       const data = await res.json()
       if (!res.ok) {
-        showToast(data.error || '저장에 실패했습니다.')
+        showToast(data.error || '병원 노트 추가에 실패했습니다.')
         return
       }
-      showToast('대기리스트에 등록되었습니다.')
+      showToast('병원 노트에 추가되었습니다.')
       setConclusion('')
       setSelectedConsultationType('')
-      setSelectedDocumentType('')
     } catch {
-      showToast('저장에 실패했습니다.')
+      showToast('병원 노트 추가에 실패했습니다.')
     } finally {
       setSaving(false)
     }
   }
+
+  const sessionList = (
+    <>
+      <button
+        onClick={startNewChat}
+        className="mb-3 w-full rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100"
+      >
+        + 새 대화
+      </button>
+      <div className="flex-1 space-y-1 overflow-y-auto">
+        {sessions.length === 0 && (
+          <p className="px-2 py-4 text-center text-xs text-gray-400">대화 기록이 없습니다.</p>
+        )}
+        {sessions.map((s) => (
+          <div
+            key={s.id}
+            onClick={() => openSession(s.id)}
+            className={`group cursor-pointer rounded-lg px-3 py-2 transition-colors ${
+              sessionId === s.id ? 'bg-blue-50 text-blue-800' : 'hover:bg-gray-100 text-gray-700'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-1">
+              <span className="truncate text-sm">{s.title}</span>
+              <button
+                onClick={(e) => deleteSession(s.id, e)}
+                className="hidden shrink-0 rounded p-0.5 text-gray-400 hover:text-red-500 group-hover:block"
+                title="대화 삭제"
+              >
+                <X size={13} />
+              </button>
+            </div>
+            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-gray-400">
+              <span>{new Date(s.updatedAt).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })}</span>
+              {s.hospitalName && <span className="truncate">🏥 {s.hospitalName}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  )
 
   return (
     <div className="flex gap-6 h-[calc(100dvh-3.5rem)] lg:h-[calc(100vh-2rem)] px-4 py-4 sm:px-6 lg:px-8 lg:py-6">
@@ -239,14 +418,47 @@ export default function AiAssistantPage() {
         </div>
       )}
 
+      {/* ===== 세션 사이드바 (데스크톱) ===== */}
+      <div className="hidden lg:flex w-60 shrink-0 flex-col border-r border-gray-200 pr-4">
+        <h2 className="mb-2 text-xs font-semibold text-gray-500">대화 목록</h2>
+        {sessionList}
+      </div>
+
+      {/* ===== 세션 사이드바 (모바일 오버레이) ===== */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-50 flex lg:hidden">
+          <div className="flex w-72 max-w-[80vw] flex-col bg-white p-4 shadow-xl">
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-gray-700">대화 목록</h2>
+              <button onClick={() => setSidebarOpen(false)} className="rounded p-1 hover:bg-gray-100">
+                <X size={18} />
+              </button>
+            </div>
+            {sessionList}
+          </div>
+          <div className="flex-1 bg-black/30" onClick={() => setSidebarOpen(false)} />
+        </div>
+      )}
+
       {/* ===== 좌측: 채팅 영역 ===== */}
       <div className="flex flex-col flex-1 min-w-0 max-w-4xl">
         {/* 헤더 */}
         <div className="shrink-0 mb-4">
           <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">AI 어시스턴트</h1>
-              <p className="mt-1 text-sm text-gray-500">thynC 시스템에 대해 무엇이든 물어보세요.</p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSidebarOpen(true)}
+                className="rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-50 lg:hidden"
+                title="대화 목록"
+              >
+                ☰
+              </button>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">AI 어시스턴트</h1>
+                <p className="mt-1 text-sm text-gray-500">
+                  병원 현황·유지보수·구축·집계·제품 지식(위키)을 실데이터로 답합니다.
+                </p>
+              </div>
             </div>
             <button
               onClick={() => setPanelOpen((v) => !v)}
@@ -338,25 +550,30 @@ export default function AiAssistantPage() {
                 </div>
               ) : (
                 <div className="max-w-[75%] rounded-2xl px-4 py-2.5 bg-gray-100 text-gray-900">
-                  <div className="prose prose-sm prose-gray max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2 prose-pre:my-2 prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-code:text-blue-600 prose-code:before:content-none prose-code:after:content-none prose-a:text-blue-600">
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
-                  </div>
+                  {msg.tools && msg.tools.length > 0 && (
+                    <div className="mb-1.5 space-y-0.5">
+                      {msg.tools.map((t, j) => (
+                        <div key={j} className="text-xs text-gray-500">
+                          🔍 {t}...
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {msg.content ? (
+                    <div className="prose prose-sm prose-gray max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2 prose-pre:my-2 prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-code:text-blue-600 prose-code:before:content-none prose-code:after:content-none prose-a:text-blue-600">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
+                  ) : i === messages.length - 1 && loading ? (
+                    <div className="flex items-center gap-1.5 py-1">
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>
           ))}
-
-          {loading && (
-            <div className="flex justify-start">
-              <div className="bg-gray-100 rounded-2xl px-4 py-2.5">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* 입력 영역 */}
@@ -422,21 +639,6 @@ export default function AiAssistantPage() {
               </select>
             </div>
 
-            {/* 문서유형 */}
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">문서유형</label>
-              <select
-                value={selectedDocumentType}
-                onChange={(e) => setSelectedDocumentType(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">선택 안 함</option>
-                {documentTypes.map((dt) => (
-                  <option key={dt.id} value={dt.id}>{dt.name}</option>
-                ))}
-              </select>
-            </div>
-
             {/* 결론 / AI 정제 결과 */}
             <div>
               <div className="flex items-center justify-between mb-1">
@@ -459,15 +661,20 @@ export default function AiAssistantPage() {
             </div>
           </div>
 
-          {/* 등록 버튼 */}
+          {/* 병원 노트 추가 버튼 */}
           <div className="shrink-0 pt-3 border-t border-gray-200 mt-3">
             <button
-              onClick={handleSaveConsultation}
-              disabled={saving}
+              onClick={handleAddToHospitalNote}
+              disabled={saving || !selectedHospital}
               className="w-full rounded-lg bg-green-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {saving ? '등록 중...' : '대기리스트 등록'}
+              {saving ? '추가 중...' : '📋 병원 노트에 추가'}
             </button>
+            <p className="mt-1.5 text-xs text-gray-400">
+              {selectedHospital
+                ? `위키 '병원 노트 > ${selectedHospital.hospitalName}' 페이지에 상담이력으로 기록됩니다.`
+                : '병원을 지정하면 해당 병원의 노트에 상담이력을 기록할 수 있습니다.'}
+            </p>
           </div>
         </div>
       )}

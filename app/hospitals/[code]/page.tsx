@@ -12,6 +12,8 @@ import SiteVisitsCard from './_components/SiteVisitsCard'
 import InstallPlansCard from './_components/InstallPlansCard'
 import MaintenancesCard from './_components/MaintenancesCard'
 import RelatedWikiPagesCard from './_components/RelatedWikiPagesCard'
+// 병원 노트 임베드 — 메인→위키 import 승인 예외 (CLAUDE.md 규칙 7, 데이터 교환은 전부 HTTP)
+import HospitalNotePanel from '@/app/wiki/components/HospitalNotePanel'
 import InventoryUsageCard from './_components/InventoryUsageCard'
 
 
@@ -304,6 +306,12 @@ export default async function HospitalDetailPage({ params }: PageProps) {
         </div>
 
         <InventoryUsageCard hospitalCode={hospital.hospitalCode} />
+
+        {/* 병원 노트 — 위키 '병원 노트' 페이지 임베드 (상담이력·특이사항 축적) */}
+        <div className="bg-white shadow-sm ring-1 ring-gray-900/5 rounded-xl p-6">
+          <h2 className="mb-3 text-sm font-semibold text-gray-700">🗒️ 병원 노트</h2>
+          <HospitalNotePanel hospitalCode={hospital.hospitalCode} />
+        </div>
 
         <RelatedWikiPagesCard hospitalCode={hospital.hospitalCode} />
 

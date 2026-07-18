@@ -4,6 +4,33 @@
 
 ---
 
+## 2026-07-18 | AI 어시스턴트 v2 Phase 2·3·4·6 완주 — 도구 12종·캐싱·세션 UX·병원 노트·Flowise 폐기
+
+- **배경**: 사용자 지시 — 로드맵 잔여 전체 진행 후 PROD 반영
+- **Phase 2 (도구 완성+캐싱)**: 도구 8종 추가 — `list_site_visits`/`list_install_plans`/`list_etc_tasks`/`get_dashboard_summary`/**`aggregate_stats`**(metric 5종: new_contracts·completed_builds·maintenance_count·site_visit_count·new_hospitals — KST 기간, 그룹 분해)/`search_wiki`(snippet)/`read_wiki_page`/`read_hospital_note`(뒷부분 우선 8천자). 시스템 프롬프트 3축 재정비. **프롬프트 캐싱**: 도구 정의+시스템에 breakpoint, 가변 컨텍스트(날짜·병원)는 캐시 뒤 블록 — E2E에서 캐시 read 8152/write 0 확인
+- **Phase 3 (세션 UX)**: `GET/DELETE /api/ai-assistant/sessions[/id]`(본인만, 도구 라벨 복원) + 좌측 사이드바(내 대화 목록·이어하기·삭제·병원 칩 복원, 모바일 드로어) + 전송 후 목록 갱신
+- **Phase 4 (병원 노트)**: `lib/wiki/hospitalNote.ts`(이슈노트 패턴 복제 — 루트 `wiki_hospital_note_root_id`·refType `hospital_note`) + `/api/wiki/hospital-notes`(GET/POST 멱등 생성/**상담이력 append** — `@blocknote/server-util` 마크다운→블록, 날짜·상담자 헤더, 버전 스냅샷, 감사로그). 위키 보호 규칙 통합(pages POST/PUT/DELETE·move·duplicate — 루트 이동·삭제 차단/노트 이동 차단·삭제 ADMIN/직속 생성 차단/복제 시 참조 미복사). 병원 상세에 `HospitalNotePanel` 임베드(협업 편집 — CLAUDE.md 규칙 7 승인 예외 2 추가). 상담 정리 패널 개편: 문서유형 제거, "대기리스트 등록"→**"병원 노트에 추가"**. AI 정제 모델 `claude-opus-4-8` 교정. **상담 대기열 폐기**: `/api/ai-assistant/consultation` 삭제(테이블·모델은 이력 보존)
+- **Phase 6 (Flowise 폐기)**: 프록시 `/api/ai-assistant` 라우트 삭제, dev2 `.env`·`.env.example`에서 FLOWISE_* 제거 (PROD env는 배포 시 제거). EC2 종료·문서 2건 이관은 추후 결정
+- **기술 이슈**: `@blocknote/server-util` 정적 import가 Next 빌드 페이지 수집과 충돌 → 동적 import + `serverComponentsExternalPackages` 등록으로 해결(마크다운→블록 변환 정상화). SSE에 15초 하트비트 추가(Nginx read timeout 보호)
+- **검증(dev2)**: `tsc` 0오류 → 힙4GB 빌드 → E2E — 집계(이번달 신규 계약 목록·병상합)/캐시 히트/위키 검색·본문(4회 검색 체이닝, 근거 없는 건 "없다" 답변)/병원 노트 생성→상담 append(마크다운 heading·bullet 블록 변환 확인)→GET→**어시스턴트 read_hospital_note로 과거 상담이력 재활용**/세션 목록·조회(도구 라벨)·삭제 204/보호 규칙 3종 400(노트 이동·루트 삭제·직속 생성). 테스트 데이터 정리 완료
+- 영향 파일: `lib/ai/{tools,agent}.ts`, `lib/wiki/hospitalNote.ts(신규)`, `app/api/ai-assistant/{chat,sessions,sessions/[id],summarize}/`, `app/api/ai-assistant/{route,consultation}(삭제)`, `app/api/wiki/{hospital-notes(신규),pages,pages/[id],pages/[id]/move,pages/[id]/duplicate}/`, `app/wiki/components/HospitalNotePanel.tsx(신규)`, `app/hospitals/[code]/page.tsx`, `app/ai-assistant/page.tsx`, `next.config.mjs`, `.env(.example)`, `README.md`, `CLAUDE.md`, `function_ai_assistant.html`
+
+---
+
+## 2026-07-18 | AI 어시스턴트 v2 Phase 1 — 코어 에이전트 (tool use 실데이터 질의응답 + SSE 스트리밍 + 대화 영속화)
+
+- **배경**: `function_ai_assistant.html` Phase 0 게이트 통과 (미결사항 확정: 모델 `claude-opus-4-8`·상담 대기열 폐기 예정·병원 노트 USER+·Flowise EC2 종료 추후 / **API 키 dev2·PROD 발급·유효성 확인**) → Phase 1 착수
+- **DB(마이그레이션 `20260718150000_ai_chat_tables`)**: `ai_chat_sessions`(userId·hospitalCode·title) + `ai_chat_messages`(role·content·tool_calls·usage JSONB) — 세션 소유자만 접근, hard delete
+- **에이전트**: `lib/ai/agent.ts` — `claude-opus-4-8` + adaptive thinking, `messages.stream()` 텍스트 델타 즉시 중계, tool use 루프 최대 8회(한도 도달 시 마무리 지시 주입), 도구 실패 is_error 전달, usage 집계
+- **도구 4종**: `lib/ai/tools.ts` — `search_hospitals`(운영·계약 우선 랭킹 — E2E 중 "가나다순 20건 잘림에 실병원 매몰" 결함 발견·보완) / `get_hospital_overview`(도입형태·병상·담당자·장비·업무 카운트) / `list_projects`(상태·기간 필터) / `list_maintenances`(상태·우선순위·접수일 필터, HTML strip). 전부 read-only Prisma SELECT, row 상한 명시
+- **API**: `POST /api/ai-assistant/chat`(신규) — SSE(`text`/`tool_start`/`done`/`error`), 세션 자동 생성(제목=첫 질문 40자)·소유자 403·병원 컨텍스트 주입, user/assistant 메시지 저장, 히스토리 최근 30개 텍스트 재구성. VIEWER 403
+- **UI**: `app/ai-assistant/page.tsx` — Flowise 호출 제거 → SSE 스트리밍 파서(fetch reader), 어시스턴트 말풍선에 도구 진행 라벨("🔍 유지보수 조회 중...") 인라인 표시 + 인라인 로딩, done의 sessionId로 대화 이어하기, 선택 병원 hospitalCode 전송
+- **검증(dev2, Phase 1 게이트)**: `tsc` 0오류 → 힙4GB 빌드 → 재시작 → **실데이터 E2E 5종 + 이어하기 통과**: ①병원검색(아산 20건 랭킹) ②병원현황(서울아산 — 도구 2연쇄, 유지보수 19건 DB 일치) ③기간집계(7월 유지보수 17건 — DB 정확 일치, 우선순위 분해) ④진행중 프로젝트 8건(지연 의심 자체 식별) ⑤복합(한양대 현황+유지보수 — 도구 3연쇄) ⑥세션 이어하기(도구 재호출 없이 맥락 답변). 세션·메시지 DB 저장 확인
+- **미반영**: git push·PROD 배포 안 함 (사용자 dev2 테스트 후 요청 시)
+- 영향 파일: `prisma/{schema.prisma,migrations/20260718150000_ai_chat_tables/}`, `lib/ai/{agent.ts,tools.ts}(신규)`, `app/api/ai-assistant/chat/route.ts(신규)`, `app/ai-assistant/page.tsx`, `README.md`, `function_ai_assistant.html`
+
+---
+
 ## 2026-07-18 | 사내위키 HTML 문서 페이지 지원 PROD 배포
 
 - **배포**: dev2 커밋 `a325291` push → PROD pull → 마이그레이션 `20260718120000_wiki_html_pages` psql 적용+resolve → prisma generate → 힙4GB 빌드 → `pm2 restart thync-prod`

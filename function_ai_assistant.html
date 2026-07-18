@@ -491,15 +491,15 @@ event: error       data: {"message":"..."}                              ← best
 <p class="sub">각 Phase는 독립 배포 가능 단위. <b>빌드·PM2 재시작·git push·PROD 반영은 사용자 명시 요청 시에만</b> (CLAUDE.md 규칙). Phase 1~2가 기능 본체, 4가 상담이력 자산화의 핵심.</p>
 
 <!-- ==================== 13 ==================== -->
-<h2 id="s13"><span class="no">13</span>미결사항 (Phase 0에서 결정 필요)</h2>
+<h2 id="s13"><span class="no">13</span>미결사항 — 결정 완료 <span class="chip g">2026-07-18 확정</span></h2>
 
 <table>
-  <tr><th style="width:36px">#</th><th style="width:230px">항목</th><th>선택지</th><th style="width:260px">비고</th></tr>
-  <tr><td>1</td><td>DEV용 Anthropic API 키</td><td>PROD 키 공유 / 신규 발급</td><td>dev2 <code>.env</code>는 placeholder — Phase 1 착수 전 필수</td></tr>
-  <tr><td>2</td><td>채팅 모델 확정</td><td><code>claude-opus-4-8</code>(권장) / 비용 우선 시 하위 모델</td><td>§9 비용 추정 참고</td></tr>
-  <tr><td>3</td><td>상담 대기열(consultation_queue)</td><td>병원 노트로 대체 후 폐기(권장) / 병행 유지</td><td>병원 노트가 주 저장처가 되면 역할 소멸. 문서유형 select도 함께 정리</td></tr>
-  <tr><td>4</td><td>병원 노트 append 권한</td><td>USER 이상(위키 관행과 동일, 권장) / 별도 제한</td><td>노트 삭제는 ADMIN만 (이슈노트와 동일)</td></tr>
-  <tr><td>5</td><td>Flowise EC2 종료 시점</td><td>Phase 6 직후 / 관망 후</td><td>인스턴스 비용 절감 vs 롤백 여지</td></tr>
+  <tr><th style="width:36px">#</th><th style="width:230px">항목</th><th>결정</th><th style="width:260px">비고</th></tr>
+  <tr><td>1</td><td>Anthropic API 키 (DEV·PROD)</td><td><span class="chip a">진행 중</span> 신규 발급 후 양쪽 <code>.env</code>에 설정</td><td>Console(platform.claude.com)에서 발급 — Phase 1 착수 전 필수</td></tr>
+  <tr><td>2</td><td>채팅 모델</td><td><span class="chip g">확정</span> <code>claude-opus-4-8</code> + adaptive thinking</td><td>AI 정제도 동일 모델로 교체</td></tr>
+  <tr><td>3</td><td>상담 대기열(consultation_queue)</td><td><span class="chip g">확정</span> <b>폐기</b> — 병원 노트로 대체</td><td>Phase 4에서 저장 API·문서유형 select 제거, 테이블은 데이터 0건 확인 후 drop</td></tr>
+  <tr><td>4</td><td>병원 노트 append 권한</td><td><span class="chip g">확정</span> USER 이상 (위키 관행과 동일)</td><td>노트 삭제는 ADMIN만 (이슈노트와 동일)</td></tr>
+  <tr><td>5</td><td>Flowise EC2 종료 시점</td><td><span class="chip a">추후 결정</span> — Phase 6 완료 후 별도 판단</td><td>프록시 라우트·env 제거까지만 Phase 6에서 수행</td></tr>
 </table>
 
 <!-- ==================== 14 ==================== -->
@@ -509,13 +509,13 @@ event: error       data: {"message":"..."}                              ← best
   <li class="done">Phase 0 — 설계 문서 작성 v1 (2026-07-18)</li>
   <li class="done">Phase 0 — 설계 v2 보완: 역할 3축 확장 + aggregate_stats + 병원 노트/상담이력 축적 (2026-07-18)</li>
   <li class="done">기반 — 위키 HTML 문서 페이지 지원 (부록 A, 2026-07-18)</li>
-  <li>Phase 0 — 미결사항 1~5 결정</li>
-  <li>Phase 1 — 코어 에이전트 (DB·루프·도구 4종·SSE·UI 전환)</li>
-  <li>Phase 2 — 도구 12종 완성 + 집계 + 캐싱 + 도구 표시 UI</li>
-  <li>Phase 3 — 세션 UX (사이드바·이어하기)</li>
-  <li>Phase 4 — 병원 노트 + 상담이력 append + AI 정제 교정</li>
-  <li>Phase 5 — 실사용 피드백 튜닝</li>
-  <li>Phase 6 — Flowise 폐기</li>
+  <li class="done">Phase 0 — 미결사항 결정 + API 키 발급·유효성 확인 (2026-07-18: 모델 opus-4-8·대기열 폐기·노트 권한 USER+, Flowise 종료는 추후)</li>
+  <li class="done">Phase 1 — 코어 에이전트 (2026-07-18: 테이블 2종·에이전트 루프·도구 4종·SSE·UI 전환 — dev2 실데이터 E2E 5종+이어하기 통과, 검색 랭킹 보완 포함)</li>
+  <li class="done">Phase 2 — 도구 12종 완성 + aggregate_stats 집계 + 프롬프트 캐싱(히트 확인) + 도구 표시 UI (2026-07-18)</li>
+  <li class="done">Phase 3 — 세션 UX: 사이드바(목록·이어하기·삭제)·모바일 드로어 (2026-07-18)</li>
+  <li class="done">Phase 4 — 병원 노트(위키 카테고리+보호 규칙+병원 상세 임베드+상담 append 파이프라인+read_hospital_note 재활용) + AI 정제 모델 교정 + 상담 대기열 폐기(API·UI 제거, 테이블은 보존) (2026-07-18)</li>
+  <li>Phase 5 — 실사용 피드백 튜닝 (상시)</li>
+  <li class="done">Phase 6 — Flowise 프록시 라우트·env 제거 (2026-07-18 — EC2 종료는 미결 #5대로 추후 결정, 기존 문서 2건은 EC2에 잔존)</li>
 </ul>
 
 <!-- ==================== 부록 A ==================== -->
