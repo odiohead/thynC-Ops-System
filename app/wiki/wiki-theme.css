@@ -126,6 +126,17 @@
   padding-inline: 0;
 }
 
+/* 본문 하이퍼링크 — 링크 여부가 시각적으로 드러나도록 파란색 + 밑줄
+ * (BlockNote 기본은 본문 색 그대로라 링크를 걸어도 표시가 없음) */
+.wiki-root .bn-editor a {
+  color: var(--wiki-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.wiki-root .bn-editor a:hover {
+  opacity: 0.75;
+}
+
 /* 본문 블록 간격·가독성 */
 .wiki-root .bn-block-content {
   line-height: 1.65;

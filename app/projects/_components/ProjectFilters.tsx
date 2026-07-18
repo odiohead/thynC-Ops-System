@@ -127,6 +127,15 @@ export default function ProjectFilters({
   const [contractors, setContractors] = useState<Contractor[]>([])
   const [users, setUsers] = useState<UserOption[]>([])
 
+  // 목록 검색 상태 보존 — 상세 페이지의 '목록으로' 복귀 시 이 쿼리로 복원 (sessionStorage)
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('projects:listQuery', window.location.search)
+    } catch {
+      /* sessionStorage 미지원 환경은 무시 */
+    }
+  })
+
   useEffect(() => {
     Promise.all([
       fetch('/api/settings/build-status').then((r) => r.json()),

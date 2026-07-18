@@ -143,6 +143,22 @@ export default function ProjectDetailPage() {
 
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  // 목록 복귀 경로 — 목록 페이지가 sessionStorage에 저장한 마지막 검색 쿼리를 복원
+  const [listHref, setListHref] = useState('/projects')
+  useEffect(() => {
+    try {
+      const q = sessionStorage.getItem('projects:listQuery')
+      if (q) setListHref(`/projects${q}`)
+    } catch { /* 무시 */ }
+  }, [])
+  // 핸들러에서는 호출 시점의 최신 쿼리를 읽는다 (deps 고정 회피)
+  function listUrl() {
+    try {
+      return `/projects${sessionStorage.getItem('projects:listQuery') ?? ''}`
+    } catch {
+      return '/projects'
+    }
+  }
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null)
   const [uploadingCategory, setUploadingCategory] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -151,7 +167,7 @@ export default function ProjectDetailPage() {
 
   const loadProject = useCallback(async () => {
     const res = await fetch(`/api/projects/${code}`)
-    if (!res.ok) { router.push('/projects'); return }
+    if (!res.ok) { router.push(listUrl()); return }
     const { project: p } = await res.json()
 
     setProject(p)
@@ -250,7 +266,7 @@ export default function ProjectDetailPage() {
     const res = await fetch(`/api/projects/${code}`, { method: 'DELETE' })
     if (res.ok) {
       router.refresh()
-      router.push('/projects')
+      router.push(listUrl())
     } else {
       const data = await res.json().catch(() => ({}))
       alert(data.error ?? '삭제에 실패했습니다.')
@@ -335,7 +351,7 @@ export default function ProjectDetailPage() {
         {/* 헤더 */}
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-center gap-4">
-            <Link href="/projects" className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-100">
+            <Link href={listHref} className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-100">
               ← 목록으로
             </Link>
             <div>
