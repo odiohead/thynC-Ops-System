@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-07-18 | AI 어시스턴트 v2 (Phase 1~4·6) PROD 배포
+
+- **배포**: dev2 커밋 2건(`c0a4e6c` v2 본체, `a325291` 선행 Phase 1 포함) push → PROD pull → **사전 백업**(`~/backups/db/thync_ops_pre_ai_v2_20260718.dump`, 14MB) → 마이그레이션 `20260718150000_ai_chat_tables` psql 적용+resolve → **PROD `.env` FLOWISE_* 제거** → prisma generate → 힙4GB 빌드 → `pm2 restart thync-prod`
+- **스모크**: 도메인 login 200 · /ai-assistant·chat API 307(인증 리다이렉트 정상) · 재시작 후 신규 에러 0 (에러 로그 최종 수정 시각이 배포 전)
+- **PROD 유의**: ANTHROPIC_API_KEY 실키 설정 완료(사용자, 배포 전). 병원 노트 루트 카테고리·페이지는 첫 사용 시 자동 생성. Flowise EC2(43.201.26.9)는 미결 #5대로 존치 — 종료 시점 별도 결정
+- 영향: PROD DB(`ai_chat_sessions`/`ai_chat_messages` 신설), PROD 소스·빌드·env
+
+---
+
 ## 2026-07-18 | AI 어시스턴트 v2 Phase 2·3·4·6 완주 — 도구 12종·캐싱·세션 UX·병원 노트·Flowise 폐기
 
 - **배경**: 사용자 지시 — 로드맵 잔여 전체 진행 후 PROD 반영
