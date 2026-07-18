@@ -5,6 +5,7 @@ import { verifyToken } from '@/lib/auth'
 import type { PartialBlock } from '@blocknote/core'
 import { getIssuePageProtection } from '@/lib/wiki/projectIssueNote'
 import WikiPageView from './WikiPageView'
+import WikiHtmlPageView from './WikiHtmlPageView'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,6 +45,36 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
 
   const parentChain = await getParentChain(page.id)
   const breadcrumb = parentChain.slice(0, -1)
+
+  // HTML 문서 페이지 — BlockNote 대신 전용 뷰어(sandbox iframe)로 렌더
+  if (page.pageType === 'html') {
+    const token = cookies().get('auth-token')?.value
+    const jwt = token ? await verifyToken(token) : null
+    let favorited = false
+    if (jwt?.userId) {
+      const fav = await prisma.wikiFavorite.findUnique({
+        where: { userId_pageId: { userId: jwt.userId, pageId: page.id } },
+        select: { createdAt: true },
+      })
+      favorited = !!fav
+      prisma.wikiViewLog
+        .create({ data: { userId: jwt.userId, pageId: page.id } })
+        .catch(() => {})
+    }
+    return (
+      <WikiHtmlPageView
+        id={page.id}
+        title={page.title}
+        breadcrumb={breadcrumb}
+        contentHtml={page.contentHtml ?? ''}
+        author={page.author.name}
+        lastEditor={page.lastEditor?.name ?? page.author.name}
+        updatedAt={page.updatedAt.toISOString()}
+        favorited={favorited}
+        currentUserRole={jwt?.role ?? 'VIEWER'}
+      />
+    )
+  }
 
   // 프로젝트 이슈노트 보호 등급 — 루트 카테고리/이슈노트 페이지는 이동·삭제 등 메뉴 제한
   const issueProtection = await getIssuePageProtection(page.id)

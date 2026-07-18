@@ -137,8 +137,9 @@ app/
 │   ├── layout.tsx                    # 사이드바 + 콘텐츠 flex 레이아웃 (모든 /wiki/* 적용)
 │   ├── page.tsx                      # 위키 홈 (최근 페이지 목록)
 │   ├── new/page.tsx                  # 신규 페이지 작성 (?parentId= 쿼리로 하위 추가)
-│   ├── [id]/page.tsx                 # 페이지 상세 (server, parent chain 수집)
+│   ├── [id]/page.tsx                 # 페이지 상세 (server, parent chain 수집, 페이지 타입 분기)
 │   ├── [id]/WikiPageView.tsx         # 상세 클라이언트 (breadcrumb + 편집 토글)
+│   ├── [id]/WikiHtmlPageView.tsx     # HTML 문서 페이지 뷰어 (sandbox iframe + 파일 교체/다운로드)
 │   └── components/
 │       ├── WikiEditor.tsx            # BlockNote 에디터 래퍼
 │       ├── WikiSidebar.tsx           # 페이지 트리 사이드바 (collapse/expand + ↑↓+ + DnD 이동, 이슈노트 보호 컨트롤 숨김)
@@ -199,6 +200,7 @@ lib/
 ├── inventory.ts                      # 자재관리 — 품목 채번(nextItemCode) + 재고 처리 권한(canManageStock: ADMIN or 재고 담당자 풀)
 └── wiki/
     ├── blockText.ts                  # BlockNote 블록 → plain text 추출·페이지 링크 인덱싱
+    ├── htmlText.ts                   # HTML 문서 페이지 — sanitize(script 등 제거) + plain text·title 추출
     ├── wikiSchema.tsx                # BlockNote 커스텀 스키마 (콜아웃·구분선·페이지링크·mention·멀티컬럼)
     └── projectIssueNote.ts           # 프로젝트 이슈노트 — 루트 카테고리 보장·보호 판정 (refType 'project_issue')
 
@@ -560,6 +562,12 @@ prisma/
 #### WikiPage 추가 컬럼 (Phase 7)
 - `plainText` (TEXT NOT NULL DEFAULT '') — BlockNote JSON에서 추출한 검색용 평문
 
+#### WikiPage HTML 문서 페이지 (2026-07-18)
+- `pageType` (VARCHAR(10) NOT NULL DEFAULT 'block') — `'block'`(BlockNote) | `'html'`(HTML 문서)
+- `contentHtml` (TEXT, nullable) — HTML 문서 페이지의 원본 HTML (저장 시 sanitize: script·인라인 이벤트·javascript: URL·iframe 제거, 최대 2MB)
+- HTML 페이지도 저장 시 `plainText` 추출 → 기존 검색·AI 어시스턴트 지식소스에 자동 포함
+- 렌더링은 sandbox iframe(스크립트 실행 차단), 편집은 파일 재업로드 방식(버전 스냅샷 미지원)
+
 ---
 
 ## 인증 및 역할 체계
@@ -803,6 +811,7 @@ prisma/
 - Notion-like 블록 에디터(BlockNote) 기반 사내 위키
 - 별도 PostgreSQL 스키마 `wiki`에 격리, 메인 모듈과 단방향 의존성 유지
 - 페이지 단위 작성·조회·수정·삭제 (BlockNote JSON 본문)
+- **HTML 문서 페이지 (2026-07-18)**: 신규 작성에서 "HTML 문서 업로드"로 HTML 파일을 그대로 게시(설계서·산출물 등, 최대 2MB) — 저장 시 sanitize(script·인라인 이벤트·`javascript:`·iframe 제거), sandbox iframe으로 원본 디자인 그대로 렌더(스크립트 실행 차단), 파일 교체/다운로드, plain_text 추출로 위키 검색·AI 어시스턴트 지식소스에 자동 포함. 편집은 재업로드 방식(버전 히스토리 미지원)
 - **디자인 시스템(Phase 9)**: 위키 전용 디자인 토큰(`app/wiki/wiki-theme.css`, `.wiki-root` 스코프), full-bleed 레이아웃, 공통 컴포넌트(Toast/WikiModal/Skeleton/EmptyState/OverflowMenu), `alert()` 미사용(토스트로 통일)
 - **자동 저장 + 충돌 감지(Phase 10)**: 편집 모드 토글 없이 진입 즉시 편집, 변경 시 debounce 1.5초 자동 저장, 헤더 저장 인디케이터. `baseUpdatedAt` 비교로 다른 곳 수정 시 409 충돌 안내(실시간 협업 대신 lost-update 방지). 버전 스냅샷은 2분 throttle
 - **페이지 아이콘·커버(Phase 10)**: 이모지 아이콘(경량 EmojiPicker) + 커버 이미지. 사이드바·홈·검색·휴지통에 아이콘 노출
@@ -1231,9 +1240,9 @@ npm run dev
 | Method | Endpoint | 설명 |
 |--------|----------|------|
 | GET  | `/api/wiki/pages` | 페이지 목록 (`?parentId=` 필터 / `?refType=&refCode=` 역참조 / `?templates=1` 템플릿 목록). 삭제·템플릿 기본 제외 |
-| POST | `/api/wiki/pages` | 페이지 생성 — USER+, 감사로그 CREATE, `plainText` 자동 |
+| POST | `/api/wiki/pages` | 페이지 생성 — USER+, 감사로그 CREATE, `plainText` 자동. **HTML 문서 페이지**: `{pageType:'html', contentHtml}` (sanitize 후 저장, 최대 2MB) |
 | GET  | `/api/wiki/pages/[id]` | 페이지 상세 |
-| PUT  | `/api/wiki/pages/[id]` | 페이지 수정 — USER+, 감사로그 UPDATE. 본문 변경 시 **버전 스냅샷(2분 throttle) + `plainText`/백링크 동기화**. `icon`/`coverUrl`/`coverOffsetY`/`isTemplate` 수정, `baseUpdatedAt`로 **충돌 감지(409)** |
+| PUT  | `/api/wiki/pages/[id]` | 페이지 수정 — USER+, 감사로그 UPDATE. 본문 변경 시 **버전 스냅샷(2분 throttle) + `plainText`/백링크 동기화**. `icon`/`coverUrl`/`coverOffsetY`/`isTemplate` 수정, `baseUpdatedAt`로 **충돌 감지(409)**. HTML 페이지는 `contentHtml`로 문서 교체(블록 본문과 상호 배타 400) |
 | DELETE | `/api/wiki/pages/[id]` | 휴지통 이동(soft delete, 자식 동반). `?permanent=1` → 영구 삭제(+첨부 S3 정리) — USER+, 감사로그 DELETE |
 | POST | `/api/wiki/pages/[id]/restore` | 휴지통에서 복구 (자식 동반, 부모 삭제 시 루트 승격) — USER+ |
 | PATCH | `/api/wiki/pages/[id]/move` | 페이지 이동/정렬 — USER+, 순환 참조 차단. `{direction}` 형제 교환 / `{parentId}` 부모 변경(최하단) / `{parentId, position}` 특정 위치 삽입(형제 sortOrder 재부여) / `{sortOrder}` 직접 지정 |

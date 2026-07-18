@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import type { PartialBlock } from '@blocknote/core'
@@ -26,6 +26,11 @@ export default function NewWikiPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // HTML 문서 업로드 모드 — 파일 내용이 있으면 에디터 대신 미리보기 표시
+  const [htmlContent, setHtmlContent] = useState<string | null>(null)
+  const [htmlFileName, setHtmlFileName] = useState<string>('')
+  const htmlInputRef = useRef<HTMLInputElement>(null)
+
   useEffect(() => {
     let cancelled = false
     fetch('/api/wiki/pages?templates=1')
@@ -34,9 +39,9 @@ export default function NewWikiPage() {
         if (cancelled) return
         const list = (d.templates as Template[]) ?? []
         setTemplates(list)
-        if (list.length === 0) setPicking(false) // 템플릿 없으면 바로 빈 페이지
+        // 템플릿이 없어도 선택 화면 유지 — 빈 페이지 / HTML 문서 업로드 선택지 제공
       })
-      .catch(() => !cancelled && setPicking(false))
+      .catch(() => {})
     return () => {
       cancelled = true
     }
@@ -44,6 +49,27 @@ export default function NewWikiPage() {
 
   const startBlank = () => {
     setSeed(undefined)
+    setPicking(false)
+  }
+
+  const handleHtmlFile = async (file: File) => {
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('HTML 문서는 최대 2MB까지 업로드할 수 있습니다')
+      return
+    }
+    const text = await file.text()
+    if (!text.trim()) {
+      toast.error('빈 파일입니다')
+      return
+    }
+    setHtmlContent(text)
+    setHtmlFileName(file.name)
+    // 제목 자동 채움: <title> → 없으면 파일명(확장자 제거)
+    if (!title.trim()) {
+      const m = text.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
+      const t = m ? m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : ''
+      setTitle(t || file.name.replace(/\.html?$/i, ''))
+    }
     setPicking(false)
   }
 
@@ -72,10 +98,14 @@ export default function NewWikiPage() {
     setSaving(true)
     setError(null)
     try {
+      const payload =
+        htmlContent !== null
+          ? { title: title.trim(), parentId: parentId || null, pageType: 'html', contentHtml: htmlContent }
+          : { title: title.trim(), contentJson: content, parentId: parentId || null }
       const res = await fetch('/api/wiki/pages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title.trim(), contentJson: content, parentId: parentId || null }),
+        body: JSON.stringify(payload),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
@@ -103,6 +133,25 @@ export default function NewWikiPage() {
             <span className="text-sm font-semibold text-[var(--wiki-text)]">빈 페이지</span>
             <span className="text-xs text-[var(--wiki-text-muted)]">처음부터 작성</span>
           </button>
+          <button
+            onClick={() => htmlInputRef.current?.click()}
+            className="flex flex-col items-start gap-1 rounded-[10px] border border-[var(--wiki-border)] bg-[var(--wiki-bg)] p-4 text-left transition hover:border-[var(--wiki-accent)] hover:bg-[var(--wiki-hover)]"
+          >
+            <span className="text-2xl">🌐</span>
+            <span className="text-sm font-semibold text-[var(--wiki-text)]">HTML 문서 업로드</span>
+            <span className="text-xs text-[var(--wiki-text-muted)]">설계서·산출물 등 HTML 파일을 그대로 게시 (최대 2MB)</span>
+          </button>
+          <input
+            ref={htmlInputRef}
+            type="file"
+            accept=".html,.htm,text/html"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) handleHtmlFile(f)
+              e.target.value = ''
+            }}
+          />
           {templates.map((t) => (
             <button
               key={t.id}
@@ -161,10 +210,43 @@ export default function NewWikiPage() {
         </div>
       )}
 
-      <div className="mb-2 text-xs text-[var(--wiki-text-muted)]">
-        이미지·파일 첨부는 페이지를 먼저 저장한 뒤 가능합니다.
-      </div>
-      <WikiEditor initialContent={seed} onChange={setContent} />
+      {htmlContent !== null ? (
+        <div>
+          <div className="mb-2 flex items-center justify-between text-xs text-[var(--wiki-text-muted)]">
+            <span>🌐 HTML 문서 — {htmlFileName} · 게시 후에는 파일 재업로드로 교체할 수 있습니다.</span>
+            <button
+              onClick={() => htmlInputRef.current?.click()}
+              className="rounded-[6px] border border-[var(--wiki-border)] px-2 py-1 transition hover:bg-[var(--wiki-hover)]"
+            >
+              다른 파일 선택
+            </button>
+          </div>
+          <input
+            ref={htmlInputRef}
+            type="file"
+            accept=".html,.htm,text/html"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) handleHtmlFile(f)
+              e.target.value = ''
+            }}
+          />
+          <iframe
+            srcDoc={htmlContent}
+            sandbox="allow-same-origin"
+            title="HTML 미리보기"
+            className="h-[70vh] w-full rounded-[10px] border border-[var(--wiki-border)] bg-white"
+          />
+        </div>
+      ) : (
+        <>
+          <div className="mb-2 text-xs text-[var(--wiki-text-muted)]">
+            이미지·파일 첨부는 페이지를 먼저 저장한 뒤 가능합니다.
+          </div>
+          <WikiEditor initialContent={seed} onChange={setContent} />
+        </>
+      )}
     </div>
   )
 }

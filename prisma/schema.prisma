@@ -1078,6 +1078,8 @@ model WikiPage {
   isTemplate   Boolean @default(false) @map("is_template")
   deletedAt    DateTime? @map("deleted_at")
   collabEnabled Boolean @default(false) @map("collab_enabled")
+  pageType     String  @default("block") @map("page_type") @db.VarChar(10)
+  contentHtml  String? @map("content_html")
 
   parent      WikiPage?           @relation("WikiPageTree", fields: [parentId], references: [id], onDelete: Cascade)
   children    WikiPage[]          @relation("WikiPageTree")

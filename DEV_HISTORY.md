@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-07-18 | 사내위키 HTML 문서 페이지 지원 (AI 어시스턴트 v2 기반 재설계)
+
+- **배경**: 사용자 요청 — 앞으로 기능정의서·서비스 시나리오 등 산출물을 HTML로 작성해 위키에 게시하고, AI 어시스턴트가 HTML 문서도 지식으로 참조할 수 있도록 기반 구축
+- **DB(마이그레이션 `20260718120000_wiki_html_pages`)**: `wiki.wiki_pages`에 `page_type`('block'|'html', 기본 block) + `content_html`(TEXT) 추가
+- **저장 처리** `lib/wiki/htmlText.ts`(신규): sanitize(script 블록·인라인 이벤트 핸들러·`javascript:` URL·iframe/object/embed 제거 — 스타일·구조는 보존) + HTML→plain_text 추출 + `<title>` 추출. 본문 상한 2MB
+- **API**: `POST /api/wiki/pages`에 `{pageType:'html', contentHtml}` 지원, `PUT /api/wiki/pages/[id]`에 `contentHtml` 문서 교체 지원(블록/HTML 본문 필드 상호 배타 400, HTML 페이지는 버전 스냅샷·백링크 생략), 복제 API가 `pageType`/`contentHtml` 동반 복사
+- **UI**: 신규 작성 화면에 "🌐 HTML 문서 업로드" 카드(제목 `<title>`→파일명 자동, 미리보기 iframe, 템플릿 없어도 선택 화면 유지) + 상세 전용 뷰어 `WikiHtmlPageView`(신규 — sandbox iframe `allow-same-origin`만 허용해 스크립트 실행 차단, 높이 자동 조정, 제목 인라인 수정, 파일 교체·다운로드·휴지통, 즐겨찾기·열람로그 연동)
+- **검색·어시스턴트 연동**: 저장 시 plain_text 추출로 기존 위키 검색(ILIKE+pg_trgm)에 자동 포함 — 향후 어시스턴트 `search_wiki`/`read_wiki_page` 도구(plain_text 기반)에서 추가 작업 없이 HTML 문서 참조 가능 (설계서 부록 A)
+- **검증(dev2)**: `tsc` 0오류 · sanitize/추출 단위 테스트 14/14 통과(설계서 실파일 14K자 추출 포함) · DB 레벨 등록→plain_text 검색 히트→정리 확인. **빌드·PM2 재시작 미실행** (런타임 E2E는 빌드 요청 시 수행 예정)
+- 영향 파일: `prisma/{schema.prisma,migrations/20260718120000_wiki_html_pages/}`, `lib/wiki/htmlText.ts(신규)`, `app/api/wiki/pages/{route,[id]/route,[id]/duplicate/route}.ts`, `app/wiki/{new/page.tsx,[id]/{page.tsx,WikiHtmlPageView.tsx(신규)}}`, `function_ai_assistant.html(부록 A)`, `README.md`, `CLAUDE.md`
+
+---
+
 ## 2026-07-18 | AI 어시스턴트 v2 재구축 설계안 작성 (function_ai_assistant.html)
 
 - **배경**: 사용자 요청 — 외부 Flowise RAG 프록시 기반 AI 어시스턴트의 실사용성 확보. 현행 분석 결과: RAG가 외부 EC2 블랙박스(문서 2건뿐), 병원 선택 미전달, 대화 휘발, AI 정제 모델 ID 무효(`claude-sonnet-4-5-20250514`), 상담 대기열 미소비 → **Flowise 폐기 + 에이전트형 직접 구현(B안)** 확정

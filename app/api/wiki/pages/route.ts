@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { extractPlainTextFromBlocks } from '@/lib/wiki/blockText'
+import { sanitizeHtmlDocument, extractPlainTextFromHtml, HTML_DOC_MAX_BYTES } from '@/lib/wiki/htmlText'
 import { getIssueNoteRootSetting } from '@/lib/wiki/projectIssueNote'
 
 export async function GET(request: NextRequest) {
@@ -83,15 +84,31 @@ export async function POST(request: NextRequest) {
   if (authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()
-  const { title, parentId, slug, contentJson } = body as {
+  const { title, parentId, slug, contentJson, pageType, contentHtml } = body as {
     title?: string
     parentId?: string | null
     slug?: string | null
     contentJson?: unknown
+    pageType?: string
+    contentHtml?: string
   }
 
   if (!title || typeof title !== 'string') {
     return NextResponse.json({ error: 'title is required' }, { status: 400 })
+  }
+
+  // HTML 문서 페이지 검증
+  const isHtmlPage = pageType === 'html'
+  if (pageType !== undefined && pageType !== 'block' && pageType !== 'html') {
+    return NextResponse.json({ error: 'pageType은 block 또는 html이어야 합니다.' }, { status: 400 })
+  }
+  if (isHtmlPage) {
+    if (!contentHtml || typeof contentHtml !== 'string' || !contentHtml.trim()) {
+      return NextResponse.json({ error: 'HTML 문서 내용(contentHtml)이 필요합니다.' }, { status: 400 })
+    }
+    if (Buffer.byteLength(contentHtml, 'utf8') > HTML_DOC_MAX_BYTES) {
+      return NextResponse.json({ error: 'HTML 문서는 최대 2MB까지 업로드할 수 있습니다.' }, { status: 400 })
+    }
   }
 
   // 프로젝트 이슈노트 카테고리 직속 페이지는 프로젝트 상세(전용 API)에서만 생성 가능
@@ -106,13 +123,18 @@ export async function POST(request: NextRequest) {
   }
 
   const contentArr = (contentJson ?? []) as unknown
+  const sanitizedHtml = isHtmlPage ? sanitizeHtmlDocument(contentHtml as string) : null
   const created = await prisma.wikiPage.create({
     data: {
       title,
       parentId: parentId ?? null,
       slug: slug ?? null,
       contentJson: contentArr as Prisma.InputJsonValue,
-      plainText: extractPlainTextFromBlocks(contentArr),
+      pageType: isHtmlPage ? 'html' : 'block',
+      contentHtml: sanitizedHtml,
+      plainText: isHtmlPage
+        ? extractPlainTextFromHtml(sanitizedHtml as string)
+        : extractPlainTextFromBlocks(contentArr),
       authorId: authUser.userId,
       lastEditorId: authUser.userId,
     },

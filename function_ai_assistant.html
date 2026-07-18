@@ -140,6 +140,7 @@
   <a href="#s12"><span class="n">12</span> 단계별 로드맵</a>
   <a href="#s13"><span class="n">13</span> 미결사항</a>
   <a href="#s14"><span class="n">14</span> 진행 체크리스트</a>
+  <a href="#sA"><span class="n">A</span> 부록 — 위키 HTML 문서 지원 (완료)</a>
 </nav>
 
 <!-- ==================== 1 ==================== -->
@@ -507,6 +508,7 @@ event: error       data: {"message":"..."}                              ← best
 <ul class="check">
   <li class="done">Phase 0 — 설계 문서 작성 v1 (2026-07-18)</li>
   <li class="done">Phase 0 — 설계 v2 보완: 역할 3축 확장 + aggregate_stats + 병원 노트/상담이력 축적 (2026-07-18)</li>
+  <li class="done">기반 — 위키 HTML 문서 페이지 지원 (부록 A, 2026-07-18)</li>
   <li>Phase 0 — 미결사항 1~5 결정</li>
   <li>Phase 1 — 코어 에이전트 (DB·루프·도구 4종·SSE·UI 전환)</li>
   <li>Phase 2 — 도구 12종 완성 + 집계 + 캐싱 + 도구 표시 UI</li>
@@ -515,6 +517,27 @@ event: error       data: {"message":"..."}                              ← best
   <li>Phase 5 — 실사용 피드백 튜닝</li>
   <li>Phase 6 — Flowise 폐기</li>
 </ul>
+
+<!-- ==================== 부록 A ==================== -->
+<h2 id="sA"><span class="no">A</span>부록 — 위키 HTML 문서 지원 <span class="chip g">구현 완료 2026-07-18</span></h2>
+
+<p><b>배경:</b> 기능정의서·서비스 시나리오 등 산출물을 HTML 형식으로 작성해 위키에 게시하고,
+어시스턴트가 그 내용을 지식으로 참조할 수 있어야 한다. 이를 위해 위키에 <b>HTML 문서 페이지 타입</b>을 신설했다 (본 설계에 앞서 기반으로 선행 구현).</p>
+
+<table>
+  <tr><th style="width:150px">요소</th><th>구현</th></tr>
+  <tr><td>DB</td><td><code>wiki.wiki_pages</code>에 <code>page_type</code>('block'|'html', 기본 block) + <code>content_html</code>(TEXT) 추가 — 마이그레이션 <code>20260718120000_wiki_html_pages</code></td></tr>
+  <tr><td>저장 처리</td><td><code>lib/wiki/htmlText.ts</code> — <b>sanitize</b>(script·인라인 이벤트 핸들러·javascript: URL·iframe/object/embed 제거, 스타일은 보존) 후 저장. 상한 2MB</td></tr>
+  <tr><td>검색 연동</td><td>저장 시 HTML→<b>plain_text 추출</b> → 기존 위키 검색(ILIKE+pg_trgm)에 자동 포함</td></tr>
+  <tr><td>렌더링</td><td>상세 페이지에서 <b>sandbox iframe</b>(<code>allow-same-origin</code>만 허용 — 스크립트 실행 차단, 높이 자동 조정)으로 원본 디자인 그대로 표시 (<code>WikiHtmlPageView</code>)</td></tr>
+  <tr><td>업로드/교체</td><td>신규 작성 화면 "HTML 문서 업로드" 카드(제목은 &lt;title&gt;→파일명 자동) · 상세에서 파일 교체·다운로드. 편집은 재업로드 방식 (버전 스냅샷 미지원 — 원본 파일은 작성자 보유)</td></tr>
+  <tr><td>기존 기능 호환</td><td>트리·즐겨찾기·최근 본·복제(pageType/contentHtml 동반 복사)·휴지통 동일 적용. 블록 페이지와 본문 필드 상호 배타 검증(400)</td></tr>
+</table>
+
+<div class="callout">
+  <b>어시스턴트 연계 —</b> §5의 <code>search_wiki</code> / <code>read_wiki_page</code> 도구는 <code>plain_text</code> 기반이므로,
+  HTML 문서 페이지도 <b>추가 작업 없이 자동으로 지식소스에 포함</b>된다. (예: 기능정의서를 HTML로 게시하면 "○○ 기능이 뭐야?" 질문에 해당 문서가 검색·인용됨)
+</div>
 
 </div>
 </body>

@@ -6,6 +6,7 @@ import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { deleteFromS3 } from '@/lib/s3'
 import { getIssuePageProtection } from '@/lib/wiki/projectIssueNote'
 import { extractPlainTextFromBlocks, extractPageLinks, updatePageLinkTitles } from '@/lib/wiki/blockText'
+import { sanitizeHtmlDocument, extractPlainTextFromHtml, HTML_DOC_MAX_BYTES } from '@/lib/wiki/htmlText'
 
 type Ctx = { params: { id: string } }
 
@@ -53,6 +54,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
     isTemplate,
     collabEnabled,
     baseUpdatedAt,
+    contentHtml,
   } = body as {
     title?: string
     slug?: string | null
@@ -66,10 +68,27 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
     isTemplate?: boolean
     collabEnabled?: boolean
     baseUpdatedAt?: string
+    contentHtml?: string
   }
 
   const existing = await prisma.wikiPage.findUnique({ where: { id: params.id } })
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  // 페이지 타입별 본문 필드 검증 — HTML 페이지는 contentHtml, 블록 페이지는 contentJson만 허용
+  if (existing.pageType === 'html' && contentJson !== undefined) {
+    return NextResponse.json({ error: 'HTML 문서 페이지는 블록 본문을 가질 수 없습니다.' }, { status: 400 })
+  }
+  if (existing.pageType !== 'html' && contentHtml !== undefined) {
+    return NextResponse.json({ error: '블록 페이지에는 contentHtml을 저장할 수 없습니다.' }, { status: 400 })
+  }
+  if (contentHtml !== undefined) {
+    if (typeof contentHtml !== 'string' || !contentHtml.trim()) {
+      return NextResponse.json({ error: 'HTML 문서 내용이 비어 있습니다.' }, { status: 400 })
+    }
+    if (Buffer.byteLength(contentHtml, 'utf8') > HTML_DOC_MAX_BYTES) {
+      return NextResponse.json({ error: 'HTML 문서는 최대 2MB까지 업로드할 수 있습니다.' }, { status: 400 })
+    }
+  }
 
   if (parentId === params.id) {
     return NextResponse.json({ error: 'Cannot set self as parent' }, { status: 400 })
@@ -168,6 +187,8 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
         }
       }
     }
+    // HTML 문서 교체 (재업로드) — sanitize 후 plain_text 재추출. 버전 스냅샷은 미지원(원본 파일은 사용자 보유)
+    const sanitizedHtml = contentHtml !== undefined ? sanitizeHtmlDocument(contentHtml) : undefined
     const result = await tx.wikiPage.update({
       where: { id: params.id },
       data: {
@@ -176,6 +197,10 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
         ...(contentJson !== undefined && {
           contentJson: contentJson as Prisma.InputJsonValue,
           plainText: extractPlainTextFromBlocks(contentJson),
+        }),
+        ...(sanitizedHtml !== undefined && {
+          contentHtml: sanitizedHtml,
+          plainText: extractPlainTextFromHtml(sanitizedHtml),
         }),
         ...(isPublished !== undefined && { isPublished }),
         ...(parentId !== undefined && { parentId }),
