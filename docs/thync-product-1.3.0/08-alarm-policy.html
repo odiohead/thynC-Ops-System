@@ -1,0 +1,230 @@
+<title>알람·부정맥 임상 정책서</title>
+<style>
+:root{--ink:#1a2332;--sub:#5a6a7e;--line:#dde4ec;--bg:#fff;--accent:#0b6bcb;--accent-soft:#eaf3fc;--head-bg:#f5f8fb;--warn-bg:#fff7e6;--warn-line:#f0c36d;--ok:#1a7f37}
+*{box-sizing:border-box}
+body{margin:0;padding:32px 40px 80px;background:var(--bg);color:var(--ink);font-family:'Pretendard','Pretendard Variable',-apple-system,'Segoe UI','Malgun Gothic',sans-serif;font-size:14.5px;line-height:1.65;max-width:1080px;margin-left:auto;margin-right:auto}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.5px}
+h2{font-size:19px;margin:44px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--ink);letter-spacing:-.3px}
+h3{font-size:16px;margin:28px 0 10px}
+h4{font-size:14.5px;margin:20px 0 8px;color:var(--sub)}
+p{margin:8px 0}
+code{background:var(--accent-soft);color:var(--accent);padding:1px 5px;border-radius:4px;font-family:'D2Coding',Consolas,monospace;font-size:13px}
+pre{background:#f6f8fa;border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.5}
+pre code{background:none;color:inherit;padding:0}
+table{border-collapse:collapse;width:100%;margin:12px 0 20px;font-size:13.5px}
+th{background:var(--head-bg);border:1px solid var(--line);padding:7px 10px;text-align:left;font-weight:600;white-space:nowrap}
+td{border:1px solid var(--line);padding:6px 10px;vertical-align:top}
+tr:nth-child(even) td{background:#fafcfe}
+.doc-meta{border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:20px 0 8px;background:var(--head-bg)}
+.doc-meta table{margin:0;font-size:13px}
+.doc-meta td,.doc-meta th{border:none;padding:3px 14px 3px 0;background:none!important}
+.doc-meta th{color:var(--sub);font-weight:600;width:120px}
+.toc{background:var(--accent-soft);border-radius:10px;padding:16px 24px;margin:24px 0}
+.toc ol{margin:6px 0;padding-left:22px}
+.toc a{color:var(--accent);text-decoration:none}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent);margin-right:4px}
+.badge.get{background:#e6f4ea;color:#1a7f37}
+.badge.post{background:#eaf3fc;color:#0b6bcb}
+.badge.put{background:#fff7e6;color:#9a6700}
+.badge.del{background:#ffebe9;color:#cf222e}
+.note{background:var(--warn-bg);border-left:4px solid var(--warn-line);padding:10px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:13.5px}
+.sub{color:var(--sub);font-size:13px}
+.arch{display:flex;flex-direction:column;gap:10px;margin:18px 0}
+.arch-row{display:flex;gap:10px;flex-wrap:wrap}
+.arch-box{border:1.5px solid var(--accent);border-radius:10px;padding:10px 14px;background:var(--accent-soft);flex:1;min-width:140px;text-align:center}
+.arch-box.plain{border-color:var(--line);background:var(--head-bg)}
+.arch-box b{display:block;font-size:13.5px}
+.arch-box span{font-size:12px;color:var(--sub)}
+.footer{margin-top:60px;padding-top:16px;border-top:1px solid var(--line);color:var(--sub);font-size:12.5px}
+</style>
+
+<h1>알람·부정맥 임상 정책서</h1>
+<p class="sub">thynC 환자 감시 솔루션 · 산출물 세트 <b>thync_1.3.0</b></p>
+
+<div class="doc-meta">
+<table>
+<tr><th>문서 성격</th><td>임상 알람·부정맥 판정 정책 (Clinical Alarm Policy)</td></tr>
+<tr><th>대상 제품</th><td>thynC IP2140 (mobiCARE Console) — 백엔드 <code>thync-api-onpremise 01.01.431</code></td></tr>
+<tr><th>작성일</th><td>2026-07-18</td></tr>
+<tr><th>작성 근거</th><td>운영 배포 산출물(WAR·프론트엔드·DB 스키마) 역공학 기반 재구성</td></tr>
+<tr><th>버전</th><td><code>thync.service M1.3.0</code> / 백엔드 <code>01.01.431</code></td></tr>
+</table>
+</div>
+
+<div class="note"><b>문서 성격 안내.</b> 본 문서는 기존 기획·설계 산출물이 부재한 상태에서, 실제 운영 중인 소스(백엔드 WAR 디컴파일, 프론트엔드 소스, DB DDL·시드 데이터)를 분석해 <b>사후 재구성</b>한 것입니다. <b>임상 안전에 직결되는 내용</b>이므로 소스에서 직접 확인된 값(부정맥 분류·판정 파라미터·알람 레벨)을 기준으로 정확히 기술하되, 알고리즘 내부 판정 로직 등 코드에서 명확하지 않은 항목은 <span class="sub">(추정)</span>으로 표기합니다. 실제 임상 적용 임계값은 병원/병동 설정에 따라 달라지므로, 최종 근거는 각 기관의 알람 설정 화면과 매뉴얼(ST-M6200-UM-KR Rev.6)을 우선합니다.</div>
+
+<div class="toc">
+<b>목차</b>
+<ol>
+<li><a href="#overview">① 알람 체계 개요 (Red / 낙상 Red / Yellow / Blue)</a></li>
+<li><a href="#arrhythmia">② 부정맥 종류별 분류표</a></li>
+<li><a href="#vital">③ 생체신호 한계값 알람 (HR·RESP·SpO2·TEMP·BP·ST)</a></li>
+<li><a href="#ews">④ EWS(조기경보점수) 개요</a></li>
+<li><a href="#fall">⑤ 낙상 알람 (자이로/가속도 · FALL_BED)</a></li>
+<li><a href="#operation">⑥ 알람 운영 (Pause · Clear · 대응상태)</a></li>
+<li><a href="#params">⑦ 부정맥 판정 파라미터·설명 (기초 데이터)</a></li>
+<li><a href="#device">⑧ 장치 상태·기술 알람 (LEAD · 배터리)</a></li>
+<li><a href="#api">⑨ 관련 API·설정키</a></li>
+</ol>
+</div>
+
+<h2 id="overview">① 알람 체계 개요</h2>
+<p>thynC 알람은 우선순위에 따라 <b>Red(응급) &gt; 낙상 Red &gt; Yellow(일반) &gt; Blue(기술)</b> 4단계로 구분됩니다. 모니터링 카드는 색상·깜빡임(blink)으로, 청각은 내장(base64) 오디오로 표현하며 대시보드에서 볼륨을 조절합니다.</p>
+<table>
+<tr><th>구분</th><th>색상</th><th>우선순위</th><th>사운드</th><th>대상</th><th>레벨코드</th></tr>
+<tr><td><b>Red alarm</b></td><td>빨강 <code>#DD1111</code></td><td>최상</td><td>빠른 beep</td><td>응급 부정맥 (Asystole·VTach·Pause 등)</td><td>RED = 1</td></tr>
+<tr><td><b>낙상 Red alarm</b></td><td>빨강</td><td>상 (낙상)</td><td>보통 속도 beep</td><td>낙상 발생 (카드·상세 모두 Red)</td><td>Fall = 4</td></tr>
+<tr><td><b>Yellow alarm</b></td><td>노랑 <code>#FF9900</code></td><td>중</td><td>느린 beep</td><td>일반 부정맥 + 생체신호 한계 이탈</td><td>YELLOW = 3</td></tr>
+<tr><td><b>Blue alarm</b></td><td>파랑</td><td>하 (기술)</td><td>기관 토글(<code>BEEP.IS_USE.BLUE</code>)</td><td>장치 관련 기술 알람 (LEAD/배터리 등)</td><td>Orange = 2 <span class="sub">(중간 레벨)</span></td></tr>
+</table>
+<p class="sub">알람 레벨은 DB <code>bio_signal_alarm_level.alarm_level</code>에 정의: <code>0</code>=None, <code>1</code>=Red, <code>2</code>=Orange, <code>3</code>=Yellow, <code>4</code>=Fall Detection. 프론트 상수는 RED=1 · (중간)=2 · YELLOW=3으로 매핑됩니다. Yellow·Blue·낙상 사운드는 기관별 <code>BEEP.IS_USE.*</code> 토글로 on/off, 환자별 <b>알람 일시정지(Pause)</b>·<b>알람 확인(Clear)</b>을 지원합니다.</p>
+<p class="sub">그 밖의 환자 상태 표시: <b>Stand by</b>(검사 등 측정 일시중단) / <b>등록 장치 없음</b> / <b>빈 병상</b>.</p>
+
+<h2 id="arrhythmia">② 부정맥 종류별 분류표</h2>
+<p>AI 부정맥 분석 결과는 검출 타입별로 Red(응급)·Yellow(일반)로 분류되어 알람을 발생시킵니다. 아래는 DB 시드(<code>arrhythmia_description</code> 17종 · <code>bio_signal_alarm_level</code> 기준) 분류입니다.</p>
+
+<h3>Red alarm — 응급(Life-threatening) 부정맥</h3>
+<table>
+<tr><th>표시명</th><th>타입코드</th><th>설명</th><th>기본 레벨</th></tr>
+<tr><td>Asystole (심정지)</td><td><code>ASYSTOLE</code></td><td>지정 시간(초) 이상 심박 정지</td><td>Red(1)</td></tr>
+<tr><td>Ventricular Tachycardia (심실빈맥)</td><td><code>VT</code></td><td>심실 기원 빈맥 연속 검출</td><td>Red(1)</td></tr>
+<tr><td>Pause (심정지 휴지)</td><td><code>PAUSE</code></td><td>지정 시간(초) 이상 박동 휴지</td><td>Red(1)</td></tr>
+<tr><td>Extreme Bradycardia (극서맥)</td><td><code>BRADY</code></td><td>지정 bpm 미만이 지정 beat 이상 지속</td><td>Red(1)</td></tr>
+<tr><td>Extreme Tachycardia (극빈맥)</td><td><code>TACHY</code></td><td>지정 bpm 초과가 지정 beat 이상 지속</td><td>Red(1)</td></tr>
+<tr><td>Run PVCs High (연속 PVC 다발)</td><td><code>V_RUN_HIGH</code></td><td>심실조기수축 연속(run) 다발 검출</td><td>Red(1) <span class="sub">(추정)</span></td></tr>
+</table>
+
+<h3>Yellow alarm — 일반(Dysrhythmia/Ventricular) 부정맥</h3>
+<table>
+<tr><th>표시명</th><th>타입코드</th><th>설명</th><th>기본 레벨</th></tr>
+<tr><td>Atrial Fibrillation (심방세동)</td><td><code>AFIB</code></td><td>불규칙 심방 리듬 검출</td><td>Yellow(3)</td></tr>
+<tr><td>SVT (상심실성 빈맥)</td><td><code>SVT</code></td><td>지정 bpm 초과가 지정 run 이상 지속</td><td>Yellow(3)</td></tr>
+<tr><td>Pair PVCs (PVC 쌍)</td><td><code>V_PAIR</code></td><td>심실조기수축 2연발</td><td>Yellow(3)</td></tr>
+<tr><td>Vent Bigeminy (심실 이단맥)</td><td><code>V_BIGEMINY</code></td><td>정상-PVC 교대 패턴</td><td>Yellow(3)</td></tr>
+<tr><td>Vent Trigeminy (심실 삼단맥)</td><td><code>V_TRIGEMINY</code></td><td>정상 2-PVC 1 반복 패턴</td><td>Yellow(3)</td></tr>
+<tr><td>Non-sustain VT (비지속성 심실빈맥)</td><td><code>V_NON_SUSTAIN</code></td><td>짧게 지속되는 심실빈맥</td><td>Yellow(3)</td></tr>
+<tr><td>PVCs/min HIGH (분당 PVC 다수)</td><td><code>V_MIN_HIGH</code></td><td>분당 PVC 수 임계 초과</td><td>Yellow(3)</td></tr>
+<tr><td>Vent Rhythm (심실 고유리듬)</td><td><code>V_RHYTHM</code></td><td>지정 bpm·run 조건의 심실 리듬</td><td>Yellow(3)</td></tr>
+<tr><td>Missed beat (박동 누락)</td><td><code>MISSED</code></td><td>예상 박동 누락 검출</td><td>Yellow(3)</td></tr>
+<tr><td>High HR (고심박)</td><td><code>HIGH_HR</code></td><td>설정 상한 초과 심박수</td><td>Yellow(3)</td></tr>
+<tr><td>Low HR (저심박)</td><td><code>LOW_HR</code></td><td>설정 하한 미만 심박수</td><td>Yellow(3)</td></tr>
+</table>
+<div class="note"><b>분류 근거·주의.</b> Red/Yellow 배정은 프론트 상수(<code>js/custom/constant/monitoring/arrhythmia.js</code>)와 DB 시드(<code>bio_signal_alarm_level</code>: ASYSTOLE·PAUSE·BRADY·TACHY·VT=레벨1, AFIB·HIGH_HR 등=레벨3)를 종합한 것입니다. 항목별 알람 레벨과 on/off는 기관·병동 설정(<code>bio_signal_alarm_level</code>·<code>arrhythmia_alarm</code>)에서 재정의될 수 있으므로, <b>실제 운영 레벨은 병원 알람 설정을 우선</b>합니다. 알람 카테고리 트리(<code>arrhythmia_category</code>)는 All Alarms / Life-threatening / Ventricular alarms / AFib / Dysrhythmias 5개 대분류로 구성됩니다.</div>
+
+<h2 id="vital">③ 생체신호 한계값 알람 (Limit Alarm)</h2>
+<p>각 생체신호는 <b>알람 ON/OFF 플래그 + 하한(min)/상한(max) Limit</b> 구조로 관리됩니다. 이탈 시 Yellow 계열 알람이 발생하며, 한계값은 <b>병동 기본값</b>(<code>organization_alarm_setting</code>) → <b>환자별 개별 설정</b>(<code>measurement_alarm_setting</code>) 순으로 재정의됩니다.</p>
+<table>
+<tr><th>항목</th><th>ON/OFF 키</th><th>Limit 컬럼</th><th>설정 범위(관리자 화면)</th><th>이벤트 타입</th></tr>
+<tr><td>심박수 HR</td><td><code>hr_alert_alarm</code></td><td><code>heart_rate_min / max</code></td><td>0 ~ 300 bpm</td><td>3 (HR)</td></tr>
+<tr><td>호흡수 RESP</td><td><code>resp_alert_alarm</code></td><td><code>resp_min / max</code></td><td>0 ~ 60 rpm</td><td>5 (RESP)</td></tr>
+<tr><td>산소포화도 SpO2</td><td><code>spo2_alert_alarm</code></td><td><code>spo2_min / max</code></td><td>% 범위</td><td>4 (SpO2)</td></tr>
+<tr><td>체온 TEMP</td><td><code>temp_alert_alarm</code></td><td><code>temp_min / max</code> · <code>temp_unit</code></td><td>0 ~ 50 (℃/℉ 선택)</td><td>6 (TEMP)</td></tr>
+<tr><td>혈압 BP</td><td><code>bp_alert_alarm</code></td><td><code>sys / dia / pulse_min / max</code></td><td>SYS·DIA·MAP</td><td>—</td></tr>
+<tr><td>ST 세그먼트</td><td><code>st_alert_alarm</code></td><td><code>st_min / max</code> (decimal)</td><td>ST 값 범위</td><td>2 (ST)</td></tr>
+<tr><td>EWS</td><td><code>ews_alert_alarm</code></td><td>(점수 임계)</td><td>④ 참조</td><td>—</td></tr>
+<tr><td>부정맥</td><td><code>arrhythmia_alert_alarm</code></td><td>②·⑦ 참조</td><td>항목별</td><td>1 (arry)</td></tr>
+</table>
+<p class="sub">이벤트 발생 이력은 <code>bio_signal_event</code>에 적재: <code>event_type</code>(1 부정맥 / 2 ST / 3 HR / 4 SpO2 / 5 RESP / 6 TEMP / 10 수동), <code>alram_type</code>(0 none / 1 max 초과 / 2 min 미달), 당시 임계값(<code>min_value</code>/<code>max_value</code>)·측정값(<code>value</code>)·ECG 스트립(<code>ecg_json</code>)을 함께 저장합니다. 체온·활력 초기값은 <code>patient_info</code>에 기록됩니다.</p>
+
+<h2 id="ews">④ EWS(조기경보점수) 개요</h2>
+<p>EWS(Early Warning Score)는 생체신호를 종합해 환자 악화 위험을 점수화한 값으로, 시계열(<code>ews</code> 테이블)로 저장·트렌드 표시됩니다. HR·RESP·SpO2·TEMP·혈압 등 활력징후 구간별 배점을 합산하는 방식<span class="sub">(구체 배점표는 코드에서 확인되지 않음 — 추정)</span>이며, <code>ews_alert_alarm</code> 임계 초과 시 알람을 발생시킵니다.</p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>저장</td><td><code>ews</code> 시계열(주차 샤드) — <code>value</code>(int 점수), <code>ews_msg</code>(JSON, 산출 근거), <code>ecg_json</code>(구간 ECG)</td></tr>
+<tr><td>표시</td><td>모니터링 카드·대시보드 셀·검토(트렌드) 화면에 EWS 값 표시</td></tr>
+<tr><td>알람</td><td><code>ews_alert_alarm</code> ON 시 임계 초과 경보 (병동/환자 설정)</td></tr>
+<tr><td>조회 API</td><td><span class="badge post">POST</span><code>/API/BioSignal/SelectEwsList</code> · <code>/SelectEwsPage</code> · <code>/SelectEwsLast</code></td></tr>
+</table>
+
+<h2 id="fall">⑤ 낙상 알람</h2>
+<p>낙상은 웨어러블 패치의 <b>자이로·가속도 센서</b> 데이터(<code>gr_ac_json_data</code>)를 기반으로 검출하며, 검출 시 <b>낙상 Red 알람</b>(시·청각)을 발생시킵니다.</p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>기능 토글</td><td>기관 기능환경 <code>FUNCTION_ENVIRONMENT.FALL_BED</code> + 백엔드 <code>bio.signal.fall.event.enabled</code> (병원별: <code>sev</code>=false, <code>dev/premium</code>=true). 환자별 사용 여부는 등록 시 <b>낙상</b> 옵션(<code>measurement_info.fall_use_info</code>)</td></tr>
+<tr><td>알람 레벨</td><td><code>bio_signal_alarm_level.alarm_level = 4</code> (Fall Detection). 사운드는 보통 속도 beep(기관 <code>BEEP.IS_USE.FALL_BED</code> 토글)</td></tr>
+<tr><td>상태 관리</td><td><code>bio_signal_last_fall_event.fall_event_check</code>: <code>2</code>=대응중 / <code>1</code>=경보해제 / <code>0</code>=NONE</td></tr>
+<tr><td>대응 처리</td><td><span class="badge post">POST</span><code>/API/Measurement/UpdateMeasurementFallResponseStatus</code> (낙상 대응 상태 갱신). 실시간 이벤트 <code>101</code>(낙상대응)로 화면 동기화</td></tr>
+</table>
+<p class="sub">낙상 원시 파일은 <code>/API/BioSignal/SelectGyroAccelerationRawFile</code>·<code>DownloadGyroAccelerationRawFile</code>로 열람하며, 검출 이벤트는 낙상 카드/환자 상세에 Red로 표시됩니다.</p>
+
+<h2 id="operation">⑥ 알람 운영</h2>
+<h3>일시정지 (Pause)</h3>
+<p>환자 단위로 알람을 일시 정지합니다. 상태 변경은 실시간 이벤트 <code>50</code>(일시정지)로 다른 클라이언트에 동기화(<code>pause-change</code>)됩니다.</p>
+<h3>알람 확인/해제 (Clear)</h3>
+<p>발생 알람을 확인 처리하면 지정 시간(<code>alarm_clear_duration</code>, 기본 5분) 동안 동일 알람을 억제합니다.</p>
+<table>
+<tr><th>대상</th><th>정책/컬럼</th><th>API</th></tr>
+<tr><td>기관/병동 클리어 정책</td><td><code>alarm_clear_org</code> (<code>alarm_clear_duration</code> 기본 5, <code>apply_monitoring</code>) · <code>global_setting.use_alarm_clear</code>·<code>alarm_clear_time</code></td><td><code>SelectAlarmClearOrg</code> · <code>UpdateAlarmClearOrg</code></td></tr>
+<tr><td>측정별 클리어 상태</td><td><code>alarm_clear_status</code> (진행 상태·시작/종료 시각)</td><td><code>SelectAlarmClearStatus</code> · <code>UpdateAlarmClearStatus</code></td></tr>
+<tr><td>측정 알람 상태</td><td><code>measurement_info.alarm_status</code>(1=알람클리어)</td><td><code>UpdateMeasurementInfoAlarmStatus</code></td></tr>
+</table>
+<h3>대응 상태 / 낙상 대응</h3>
+<table>
+<tr><th>상태</th><th>컬럼</th><th>API</th></tr>
+<tr><td>대응중(응답)</td><td><code>measurement_info.responding_status</code>(1=대응중)</td><td><code>UpdateMeasurementInfoResponseStatus</code></td></tr>
+<tr><td>낙상 대응</td><td><code>bio_signal_last_fall_event.fall_event_check</code></td><td><code>UpdateMeasurementFallResponseStatus</code></td></tr>
+</table>
+
+<h2 id="params">⑦ 부정맥 판정 파라미터·설명 (기초 데이터)</h2>
+<p>부정맥 검출 임계값은 <code>arrhythmia_value_parameter</code>에 <b>성인/소아 기본값을 분리</b>해 시드(REF_ORG 기준 19건)하며, 신규 기관 생성 시 REF_ORG 값을 복사해 초기화합니다. 아래는 시드 기본값입니다.</p>
+<table>
+<tr><th>파라미터</th><th>대상 부정맥</th><th>성인 기본값</th><th>소아 기본값</th><th>비고</th></tr>
+<tr><td><code>asystole</code></td><td>Asystole</td><td>2.5 ~ 4.0 s</td><td>동일 <span class="sub">(추정)</span></td><td>심박 정지 시간</td></tr>
+<tr><td><code>pause</code></td><td>Pause</td><td>2.0 s</td><td>—</td><td>휴지 시간</td></tr>
+<tr><td><code>brady</code> (+count)</td><td>Extreme Brady</td><td>40 bpm / 5 beats</td><td>—</td><td>하한 bpm·지속 beat</td></tr>
+<tr><td><code>tachy</code> (+count)</td><td>Extreme Tachy</td><td>140 bpm / 17 beats</td><td>—</td><td>상한 bpm·지속 beat</td></tr>
+<tr><td><code>highHeartRate</code></td><td>High HR</td><td>120 bpm</td><td>160 bpm</td><td>고심박 상한</td></tr>
+<tr><td><code>lowHeartRate</code></td><td>Low HR</td><td>50 bpm</td><td>75 bpm</td><td>저심박 하한</td></tr>
+<tr><td><code>vtach</code> (+count/run)</td><td>VTach</td><td>100 / 120 bpm · 5 run</td><td>—</td><td>심실빈맥 bpm·연속</td></tr>
+<tr><td><code>pvcsMin</code></td><td>PVCs/min High</td><td>10</td><td>5</td><td>분당 PVC 임계</td></tr>
+<tr><td><code>svt</code> (+run)</td><td>SVT</td><td>180 / 200 bpm · 5 run</td><td>—</td><td>상심실빈맥 bpm·연속</td></tr>
+<tr><td><code>ventRhythm</code> (+run)</td><td>Vent Rhythm</td><td>100 bpm · 14 run</td><td>—</td><td>심실 리듬 bpm·연속</td></tr>
+</table>
+<p class="sub">파라미터 메타는 <code>arrhythmia_value_parameter</code>에 <code>value_data_type</code>(0 INT / 1 BigDecimal), <code>pre_label</code>/<code>post_label</code>(단위 표기), <code>adult_default_value</code>/<code>child_default_value</code>로 저장됩니다. 각 파라미터·부정맥 타입 설명은 다국어(<code>arrhythmia_value_parameter_description</code>: ko 19 + en 19건, <code>arrhythmia_description</code>: KR 17건)로 관리됩니다. 성인/소아 구분은 측정 세션의 <code>age_group_type</code>(1 Adult / 2 Pediatric·Neonatal)을 따릅니다.</p>
+<div class="note"><b>임상 주의.</b> 위 값은 REF_ORG 시드 <b>기본값</b>이며, 병원·병동·환자별로 재정의됩니다. 실제 적용 임계값은 반드시 해당 측정의 <code>arrhythmia_alarm</code>/<code>arrhythmia_value_parameter</code> 조회로 확인하세요.</div>
+
+<h2 id="device">⑧ 장치 상태·기술 알람</h2>
+<p>웨어러블 장치의 연결·리드·배터리 상태는 <b>Blue(기술) 알람</b>으로 통지됩니다. 상태는 <code>device_last_status_info</code>에 측정코드+타입당 1행으로 유지되고, 실시간 이벤트 <code>80</code>(장치 알람)으로 화면에 반영됩니다.</p>
+<table>
+<tr><th>상태</th><th>표시</th><th>코드(<code>device_last_status_info.status</code>)</th></tr>
+<tr><td>연결</td><td>Connect / Recording Start</td><td>1 (connected)</td></tr>
+<tr><td>리드 부착</td><td>LEAD ON</td><td>2 (lead on)</td></tr>
+<tr><td>리드 탈락</td><td>LEAD OFF</td><td>3 (lead off)</td></tr>
+<tr><td>연결 끊김</td><td>Disconnect / Recording Stop / Force Stop</td><td>4 (disconnected)</td></tr>
+</table>
+<h4>배터리 부족 임계</h4>
+<table>
+<tr><th>장치</th><th>임계</th><th>단위</th></tr>
+<tr><td>ECG 패치 (MC 심전계)</td><td>2750</td><td>mV</td></tr>
+<tr><td>체온계 (TEMP)</td><td>2750</td><td>mV</td></tr>
+<tr><td>펄스옥시미터 (SpO2)</td><td>2750</td><td>mV</td></tr>
+<tr><td>반지형 혈압계 (SkyLabs CART-ON)</td><td>30</td><td>%</td></tr>
+<tr><td>참케어 혈압계 (Charmcare)</td><td>25</td><td>%</td></tr>
+</table>
+<p class="sub">배터리 값은 <code>device_last_status_info.battery_value</code>(mV 또는 %)로 수신되며, 임계 미만 시 카드에 배터리 부족 표시. 점검 이력은 <code>device_battery_check</code>에 기록. Blue 알람 사운드는 기관 <code>BEEP.IS_USE.BLUE</code> 토글에 종속됩니다.</p>
+
+<h2 id="api">⑨ 관련 API·설정키</h2>
+<h4>알람·부정맥 API</h4>
+<table>
+<tr><th>구분</th><th>엔드포인트</th></tr>
+<tr><td>생체신호 알람 설정(병동/환자)</td><td><code>/API/Measurement/Select·UpdateAlarmSettingOrg(ForAdmin)</code> · <code>Select·UpdateAlarmSettingMeasurement</code></td></tr>
+<tr><td>부정맥 알람 on/off·레벨</td><td><code>/API/Measurement/Select·UpdateArrhythmiaAlarm</code> · <code>Select·UpdateOrgArrhythmiaAlarm(ForAdmin)</code> · <code>/API/BioSignal/SelectBioSignalAlarmLevelList</code></td></tr>
+<tr><td>부정맥 파라미터·설명·분류</td><td><code>/API/Measurement/SelectArrhythmiaAlarmParamList(ForAdmin)</code> · <code>SelectArrhythmiaDescriptionList</code> · <code>SelectArrhythmiaCategoryList</code></td></tr>
+<tr><td>알람 클리어</td><td><code>/API/Measurement/Select·UpdateAlarmClearStatus</code> · <code>Select·UpdateAlarmClearOrg(ForAdmin)</code></td></tr>
+<tr><td>대응/낙상 상태</td><td><code>/API/Measurement/UpdateMeasurementInfoAlarmStatus</code> · <code>UpdateMeasurementInfoResponseStatus</code> · <code>UpdateMeasurementFallResponseStatus</code></td></tr>
+<tr><td>이벤트/EWS/ST 조회</td><td><code>/API/Measurement/SelectArrhythmiaEventList</code> · <code>/API/BioSignal/SelectEwsList</code> · <code>SelectRecentStSegmentInfo</code></td></tr>
+<tr><td>알고리즘 서버 연동</td><td><code>/API/Algorithm/Select·Insert·Update·DeleteArrhythmiaSettingInfo</code> (부정맥 판정 설정 교환)</td></tr>
+</table>
+<h4>임상 정책 관련 설정키</h4>
+<table>
+<tr><th>설정키</th><th>의미</th><th>기본값</th></tr>
+<tr><td><code>biosignal.hr.datasource.type</code></td><td>HR 소스 (ecg / spo2=ECG 부재 시 PulseRate 대체)</td><td><code>ecg</code></td></tr>
+<tr><td><code>arrhythmia.ecg.insert.type</code></td><td>AI 부정맥 ECG DB insert (0 저장 / 1 미저장)</td><td><code>1</code></td></tr>
+<tr><td><code>arrhythmia.ecg.select.type</code></td><td>부정맥 ECG 조회 소스 (0 DB / 1 DB+임시파일)</td><td><code>0</code></td></tr>
+<tr><td><code>bio.signal.fall.event.enabled</code></td><td>낙상 이벤트 알람 사용</td><td>병원별 (sev=false)</td></tr>
+<tr><td><code>bio.signal.resp.event.enabled</code></td><td>호흡 이벤트 알람 사용</td><td>병원별</td></tr>
+<tr><td><code>biosignal.temp.ai.correction.type</code></td><td>체온 AI 보정</td><td>병원별 (cnuhh=1)</td></tr>
+<tr><td><code>global_setting.use_alarm_clear</code> · <code>alarm_clear_time</code></td><td>알람 클리어 사용·시간</td><td><code>0</code> · <code>5</code></td></tr>
+</table>
+
+<div class="footer">thynC Operations · 내부 산출물 · thync_1.3.0 문서 세트 · 2026-07-18 작성 · 소스 역공학 기반</div>

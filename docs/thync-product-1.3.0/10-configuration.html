@@ -1,0 +1,220 @@
+<title>환경설정 정의서</title>
+<style>
+:root{--ink:#1a2332;--sub:#5a6a7e;--line:#dde4ec;--bg:#fff;--accent:#0b6bcb;--accent-soft:#eaf3fc;--head-bg:#f5f8fb;--warn-bg:#fff7e6;--warn-line:#f0c36d;--ok:#1a7f37}
+*{box-sizing:border-box}
+body{margin:0;padding:32px 40px 80px;background:var(--bg);color:var(--ink);font-family:'Pretendard','Pretendard Variable',-apple-system,'Segoe UI','Malgun Gothic',sans-serif;font-size:14.5px;line-height:1.65;max-width:1080px;margin-left:auto;margin-right:auto}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.5px}
+h2{font-size:19px;margin:44px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--ink);letter-spacing:-.3px}
+h3{font-size:16px;margin:28px 0 10px}
+h4{font-size:14.5px;margin:20px 0 8px;color:var(--sub)}
+p{margin:8px 0}
+code{background:var(--accent-soft);color:var(--accent);padding:1px 5px;border-radius:4px;font-family:'D2Coding',Consolas,monospace;font-size:13px}
+pre{background:#f6f8fa;border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.5}
+pre code{background:none;color:inherit;padding:0}
+table{border-collapse:collapse;width:100%;margin:12px 0 20px;font-size:13.5px}
+th{background:var(--head-bg);border:1px solid var(--line);padding:7px 10px;text-align:left;font-weight:600;white-space:nowrap}
+td{border:1px solid var(--line);padding:6px 10px;vertical-align:top}
+tr:nth-child(even) td{background:#fafcfe}
+.doc-meta{border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:20px 0 8px;background:var(--head-bg)}
+.doc-meta table{margin:0;font-size:13px}
+.doc-meta td,.doc-meta th{border:none;padding:3px 14px 3px 0;background:none!important}
+.doc-meta th{color:var(--sub);font-weight:600;width:120px}
+.toc{background:var(--accent-soft);border-radius:10px;padding:16px 24px;margin:24px 0}
+.toc ol{margin:6px 0;padding-left:22px}
+.toc a{color:var(--accent);text-decoration:none}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent);margin-right:4px}
+.badge.get{background:#e6f4ea;color:#1a7f37}
+.badge.post{background:#eaf3fc;color:#0b6bcb}
+.badge.put{background:#fff7e6;color:#9a6700}
+.badge.del{background:#ffebe9;color:#cf222e}
+.note{background:var(--warn-bg);border-left:4px solid var(--warn-line);padding:10px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:13.5px}
+.sub{color:var(--sub);font-size:13px}
+.arch{display:flex;flex-direction:column;gap:10px;margin:18px 0}
+.arch-row{display:flex;gap:10px;flex-wrap:wrap}
+.arch-box{border:1.5px solid var(--accent);border-radius:10px;padding:10px 14px;background:var(--accent-soft);flex:1;min-width:140px;text-align:center}
+.arch-box.plain{border-color:var(--line);background:var(--head-bg)}
+.arch-box b{display:block;font-size:13.5px}
+.arch-box span{font-size:12px;color:var(--sub)}
+.footer{margin-top:60px;padding-top:16px;border-top:1px solid var(--line);color:var(--sub);font-size:12.5px}
+</style>
+
+<h1>환경설정 정의서</h1>
+<p class="sub">thynC 환자 감시 솔루션 · 산출물 세트 <b>thync_1.3.0</b></p>
+
+<div class="doc-meta">
+<table>
+<tr><th>문서 성격</th><td>환경설정 정의서 (Configuration Reference)</td></tr>
+<tr><th>대상 제품</th><td>thynC IP2140 (mobiCARE Console) — 백엔드 <code>thync-api-onpremise 01.01.431</code></td></tr>
+<tr><th>작성일</th><td>2026-07-18</td></tr>
+<tr><th>작성 근거</th><td>운영 배포 산출물(WAR·프론트엔드·DB 스키마) 역공학 기반 재구성</td></tr>
+<tr><th>버전</th><td>01.01.431</td></tr>
+</table>
+</div>
+
+<div class="note"><b>문서 성격 안내.</b> 본 문서는 실제 운영 WAR 내 <code>application*.properties</code> 18종을 분석해 <b>사후 재구성</b>한 설정 레퍼런스입니다. 코드에서 확인된 사실을 기준으로 하되, 의도가 불명확한 항목은 <span class="sub">(추정)</span>으로 표기합니다. <b>DB·Redis 비밀번호, AWS 액세스키, Gmail 앱 비밀번호, JMX 계정 등 모든 비밀값은 보안상 마스킹(<code>**********</code>)</b>하였으며, 소스에 평문으로 존재하더라도 본 문서에는 노출하지 않습니다.</div>
+
+<div class="toc">
+<b>목차</b>
+<ol>
+<li><a href="#overview">설정 체계 개요</a></li>
+<li><a href="#profiles">프로파일 구조</a></li>
+<li><a href="#groups">설정 그룹별 레퍼런스</a></li>
+<li><a href="#hospitals">병원별 커스텀 프로파일 비교</a></li>
+<li><a href="#hygiene">설정 위생 유의사항</a></li>
+</ol>
+</div>
+
+<h2 id="overview">1. 설정 체계 개요</h2>
+<p>설정은 <b>공통 파일 + 프로파일별 파일</b> 2계층으로 구성됩니다.</p>
+<table>
+<tr><th>파일</th><th>범위</th><th>주요 내용</th></tr>
+<tr><td><code>application.properties</code></td><td>공통(모든 프로파일)</td><td>빌드 메타(<code>ext.*</code>), <code>spring.profiles.active</code>, <code>server.port=80</code>, JPA 공통(<code>ddl-auto=none</code>, MySQL5Dialect, <code>open-in-view=true</code>), SMTP(Gmail 587), multipart 100MB, 공통 로깅 레벨, SkyLabs 기본</td></tr>
+<tr><td><code>application-thync-api-&lt;프로파일&gt;.properties</code></td><td>프로파일별(전체 설정)</td><td>인프라·DB·Redis·Kafka·DICOM·EMR·HL7·임상 정책 등 프로파일 단위 전체 오버라이드. 총 17종</td></tr>
+</table>
+<p><b>버전 메타(<code>ext.*</code>)</b>가 빌드 버전의 원천입니다(MANIFEST.MF에는 버전 없음). 활성 프로파일은 <code>spring.profiles.active</code> 한 줄로 선택합니다.</p>
+<pre><code># application.properties
+spring.profiles.active=thync-api-onpremise
+ext.buildVersion=01.01.431   # (표기 예 — ext.* 키가 버전 원천)</code></pre>
+
+<h2 id="profiles">2. 프로파일 구조</h2>
+<p>총 17종의 프로파일이 4개 계열로 나뉩니다.</p>
+<table>
+<tr><th>계열</th><th>프로파일</th><th>인프라</th><th>특징</th></tr>
+<tr><td>클라우드</td><td><code>dev</code>, <code>test</code>, <code>premium</code></td><td><code>infrastructure=cloud</code></td><td>AWS Aurora RDS / S3 저장 / ElastiCache(test), read 풀 활성, Kafka 토픽 <code>.dev</code>, 스케줄러 test-config</td></tr>
+<tr><td>온프레 기본</td><td><code>onpremise</code></td><td><code>infrastructure=onPremise</code></td><td>표준 템플릿, 전부 localhost. 본 문서 3절 기본값의 기준</td></tr>
+<tr><td>온프레 병원별</td><td><code>onpremise-{sev, cnuhh, bjh, bs, believesewoong, gg, gh, gnasan, hns, icb, mch, ezcaretech}</code></td><td><code>onPremise</code></td><td>기본 대비 diff로 병원별 커스텀(4절). 총 12종</td></tr>
+<tr><td>특수</td><td><code>local-ezcare-release</code></td><td>로컬</td><td>이지케어텍 연동 로컬 릴리즈 테스트</td></tr>
+</table>
+<div class="note">일부 병원 파일(sev 등)은 <b>CRLF 개행</b>으로 Windows에서 편집된 흔적이 있습니다. 편집 환경 차이로 인한 개행 혼재는 diff 노이즈를 유발하니 편집 도구 개행 설정에 유의하세요.</div>
+
+<h2 id="groups">3. 설정 그룹별 레퍼런스</h2>
+<p>아래 값은 <b><code>onpremise</code> 기본 프로파일</b> 기준입니다. 비밀값은 전부 마스킹했습니다.</p>
+
+<h3>3.1 애플리케이션·데이터 저장 정책</h3>
+<table>
+<tr><th>키</th><th>기본값</th><th>의미</th></tr>
+<tr><td><code>project.app.name</code></td><td>Thync</td><td>제품명</td></tr>
+<tr><td><code>project.app.data.server.type</code></td><td>API</td><td>서버 역할</td></tr>
+<tr><td><code>project.app.data.db.basic.table.schema</code></td><td>thync</td><td>MySQL 스키마명</td></tr>
+<tr><td><code>project.app.data.file.storage</code></td><td><b>LOCAL</b></td><td>파일 저장소 (클라우드 프로파일은 AWS=S3)</td></tr>
+<tr><td><code>project.server.infrastructure</code></td><td>onPremise</td><td>cloud / onPremise</td></tr>
+<tr><td><code>project.sever.type</code></td><td>DEV</td><td>서버 타입 표기 <span class="sub">(키명 오타 — sever)</span></td></tr>
+<tr><td><code>project.app.data.save.ecg.raw.file</code> / <code>ecg.json.data</code></td><td>1 / 1</td><td>ECG raw·JSON 저장 여부</td></tr>
+<tr><td><code>file.gep.seconds</code></td><td>60</td><td>ECG 파일 분할 저장 주기(초) — 60/180/720</td></tr>
+<tr><td><code>old.data.delete.type</code></td><td>1</td><td>보존기간 경과 데이터(DB+파일) 삭제 on(1)/off(0)</td></tr>
+<tr><td><code>data.retention.days</code></td><td><b>90</b></td><td>데이터 보존일수</td></tr>
+<tr><td><code>trend.data.make.type</code></td><td>1</td><td>트렌드 생성: 1=최종값, 2=평균, 5=둘 다</td></tr>
+<tr><td><code>log.db.enabled</code></td><td>true</td><td>데이터 로그 DB 저장</td></tr>
+</table>
+
+<h3>3.2 생체신호·알람·AI</h3>
+<table>
+<tr><th>키</th><th>기본값</th><th>의미</th></tr>
+<tr><td><code>biosignal.hr.datasource.type</code></td><td>ecg</td><td>HR 소스 (ecg / spo2 = ECG 부재 시 SpO2 PulseRate 대체)</td></tr>
+<tr><td><code>arrhythmia.ecg.insert.type</code></td><td>1</td><td>AI 부정맥 ECG DB insert (0=저장, 1=미저장)</td></tr>
+<tr><td><code>arrhythmia.ecg.select.type</code></td><td>0</td><td>부정맥 ECG 조회 (0=DB, 1=DB+임시파일)</td></tr>
+<tr><td><code>bio.signal.resp.event.enabled</code> / <code>fall.event.enabled</code></td><td>미정의 <span class="sub">(sev=false, dev·premium=true)</span></td><td>호흡/낙상 이벤트 알람</td></tr>
+<tr><td><code>biosignal.temp.ai.correction.type</code></td><td>미정의 <span class="sub">(cnuhh=1)</span></td><td>체온 AI 보정</td></tr>
+<tr><td><code>ecg.data.random.pacebit</code></td><td>미정의 <span class="sub">(dev·premium=1)</span></td><td>페이스비트 랜덤 생성(테스트)</td></tr>
+</table>
+
+<h3>3.3 데이터베이스 (MySQL / HikariCP)</h3>
+<table>
+<tr><th>키</th><th>기본값</th><th>의미</th></tr>
+<tr><td><code>spring.datasource.url</code></td><td><code>jdbc:mysql://127.0.0.1:3306/thync</code> (UTC, useSSL=false, allowPublicKeyRetrieval)</td><td>주 DB</td></tr>
+<tr><td><code>spring.datasource.username</code> / <code>password</code></td><td><code>**********</code> / <code>**********</code></td><td>계정 — <b>보안상 마스킹</b></td></tr>
+<tr><td><code>mobicare.console.write.datasource.hikari.*</code></td><td>pool 40, conn-timeout 15s, idle 300s, max-lifetime 900s, leak-detection 60s, keepalive 180s, validation <code>SELECT 1</code></td><td>쓰기 풀 (SmartER-Write-HikariPool)</td></tr>
+<tr><td><code>mobicare.console.read.datasource.hikari.*</code></td><td>온프레 기본 주석(단일 DB); dev/test/premium/cnuhh/gh만 활성</td><td>읽기 풀 (RDS 리더 분리용)</td></tr>
+<tr><td><code>oracle.datasource.*</code></td><td>병원별 (driver <code>oracle.jdbc.OracleDriver</code>, validation <code>SELECT 1 FROM DUAL</code>, 자격증명 <code>**********</code>)</td><td>병원 HIS(Oracle) 연동</td></tr>
+</table>
+
+<h3>3.4 Redis / Kafka</h3>
+<table>
+<tr><th>키</th><th>기본값</th><th>의미</th></tr>
+<tr><td><code>redis.cache.type</code> / <code>host</code> / <code>port</code> / <code>password</code></td><td>on-premise / 127.0.0.1 / 6379 / <code>**********</code></td><td>캐시 (test는 ElastiCache) — <b>비밀번호 마스킹</b></td></tr>
+<tr><td><code>project.kafka.listener.sever.autostartup</code></td><td>false</td><td>카프카 리스너 자동시작 (온프레 기본 off) <span class="sub">(키명 오타 — sever)</span></td></tr>
+<tr><td><code>biosignal.listener.topic</code></td><td>biosignal.stream (클라우드는 .dev)</td><td>생체신호 토픽</td></tr>
+<tr><td><code>spring.kafka.bootstrap-servers</code></td><td>AWS parse server (host:9092)</td><td>브로커</td></tr>
+<tr><td><code>spring.kafka.consumer.*</code></td><td>group-id=myGroup, auto-offset-reset=latest, auto-commit</td><td>컨슈머</td></tr>
+</table>
+
+<h3>3.5 DICOM (PACS 전송)</h3>
+<table>
+<tr><th>키</th><th>기본값</th><th>의미</th></tr>
+<tr><td><code>dicom.file.send.type</code></td><td>1</td><td>0=전송, 1=미전송</td></tr>
+<tr><td><code>dicom.remote.host</code> / <code>port</code> / <code>aetitle</code></td><td>127.0.0.1 / 4242 / ORTHANC</td><td>원격 PACS AE</td></tr>
+<tr><td><code>dicom.remote.org</code></td><td>병원별</td><td>병원 조직 코드</td></tr>
+<tr><td><code>dicom.file.patientid.prefix</code></td><td>병원별 <span class="sub">(hns=00000000)</span></td><td>환자ID 프리픽스 패딩</td></tr>
+</table>
+
+<h3>3.6 EMR / HL7 / 외부 인터페이스</h3>
+<table>
+<tr><th>키</th><th>기본값</th><th>의미</th></tr>
+<tr><td><code>emr.enabled</code> / <code>emr.organization.code</code></td><td>false / ACK</td><td>EMR 전송 on-off·기관코드</td></tr>
+<tr><td><code>ack.tcp.server.enable</code> / <code>organization</code> / <code>sendInterval.fixed</code></td><td>false / ACK / false</td><td>HL7(MLLP) TCP 서버 — organization: INFINITT, ACK, HALLA, InitialAndParticularTime, PARTICULAR</td></tr>
+<tr><td><code>ack.sftp.enable</code></td><td>false</td><td>ECG 리포트 SFTP 전송</td></tr>
+<tr><td><code>tcp.server.enable</code></td><td>false</td><td>범용 TCP 서버</td></tr>
+<tr><td><code>cardio.send.type</code> / <code>cardio.ssl.disabled</code></td><td>true / true</td><td>mobiCARE Cardio(홀터) 리포트 연동·SSL</td></tr>
+<tr><td><code>cardio.report.scheduler.active</code></td><td>false</td><td>Cardio 리포트 스케줄러</td></tr>
+<tr><td><code>spring.ezcaretech.*</code></td><td>ezcaretech·dev·premium만 (OAuth client_credentials, client_id/secret <code>**********</code>, hospitalId/tenantId, 폴더)</td><td>이지케어텍 EMR 게이트 연동 — <b>시크릿 마스킹</b></td></tr>
+<tr><td><code>skylabs.scheduler.active</code> + <code>v1.api.url/token</code></td><td>false / api.cart-on.io / <code>**********</code></td><td>SkyLabs CART-ON 연동 — <b>토큰 마스킹</b></td></tr>
+<tr><td><code>charmcare.schedule.active</code></td><td>false</td><td>참케어 연동</td></tr>
+<tr><td><code>premium.cloud.domain.name</code> / <code>premium.schedule.send-daily-usage.enabled</code></td><td>dev-api.seersthync.com / false</td><td>온프레→클라우드 일일 사용량 전송</td></tr>
+</table>
+
+<h3>3.7 SMTP · 푸시 · JMX · AWS · 스케줄러</h3>
+<table>
+<tr><th>항목</th><th>값 / 설정</th><th>비고</th></tr>
+<tr><td>SMTP</td><td>Gmail smtp.gmail.com:587 (STARTTLS), 계정 <code>seers.developer@gmail.com</code>, 앱 비밀번호 <code>**********</code></td><td>공통. <b>앱 비밀번호 마스킹</b></td></tr>
+<tr><td>Firebase 푸시</td><td>h-connect 서비스 계정 json(<code>**********</code>), 패키지 com.seers.hometreatment</td><td>모바일 푸시(H-Connect). <b>서비스 계정 키 마스킹</b></td></tr>
+<tr><td>스케줄러</td><td><code>mobicare.server.scheduler.resource=classpath:scheduler-thync-onpremise-config-api.xml</code></td><td>클라우드는 scheduler-thync-test-config-api.xml</td></tr>
+<tr><td>JMX</td><td>jmxrmi @9090, 계정 <code>**********</code> / <code>**********</code></td><td><b>계정 마스킹.</b> dev/premium은 port 값이 <code>9090AAAAAAA</code>로 오염(설정 오타)</td></tr>
+<tr><td>AWS</td><td>액세스키/시크릿 <code>**********</code>, S3 버킷(thync-bio-data-dev)</td><td>온프레는 LOCAL이라 미사용이나 <b>액세스키가 평문 잔존</b> → 5절 개선 권고. <b>본 문서는 마스킹</b></td></tr>
+</table>
+
+<h2 id="hospitals">4. 병원별 커스텀 프로파일 비교</h2>
+<p>기준: <code>onpremise</code> 기본 대비 diff. 병원명은 이니셜 기반 <b>추정</b>이며 근거 강도를 표기합니다(★근거 명확 / ☆추정).</p>
+<table>
+<tr><th>프로파일</th><th>병원 <span class="sub">(추정)</span></th><th>핵심 커스텀</th></tr>
+<tr><td><code>sev</code></td><td>세브란스병원 ☆</td><td>emr.organization.code=THYNC, cardio.send.type=false·ssl.disabled=false, 호흡/낙상 이벤트 명시 false. 그 외 기본과 동일(최소 커스텀)</td></tr>
+<tr><td><code>cnuhh</code></td><td>화순전남대병원 ☆</td><td><b>HR 소스 spo2</b>, 체온 AI 보정(=1), read 풀 활성(로컬), Hikari 타임아웃 구세대 값, net.seers DEBUG. 구형 포맷(212줄 — report/bprawfile/보존기간 키 부재 → 코드 기본값)</td></tr>
+<tr><td><code>gh</code></td><td>미상(G병원)</td><td>cnuhh 계열: HR 소스 spo2, read 풀, DEBUG 로깅. 구형 포맷(222줄)</td></tr>
+<tr><td><code>bjh</code></td><td>미상(B병원)</td><td><b>EMR on</b>(code=BJH), 전용 스케줄 <code>bjh.emr.send.cron=0 0 0/4 * * ?</code>(4시간)·send.hour=4, <b>DICOM 전송 on</b>(AE=TY_RCV, org=MCH — mch 값 복사 흔적), <b>Oracle HIS on</b>(RAC 2노드), DEBUG. temp 폴더 <code>tempaaaa/</code>(오타)</td></tr>
+<tr><td><code>bs</code></td><td>봉생기념병원 ☆</td><td>EMR on(code=BS), DICOM on(TY_RCV), Oracle on(pointnet), <b>병동 매핑키</b> bs.ward.thync.{3a,3b,icu}=BSHOSP…, premium 일일사용량 전송 on</td></tr>
+<tr><td><code>believesewoong</code></td><td>부산 세웅병원 ☆</td><td>emr code=THYNC, Oracle 정의만 있고 <b>enabled=false</b>(bs와 동일 pointnet DB), trend.data.make.type=2(평균), premium 사용량 전송 on</td></tr>
+<tr><td><code>icb</code></td><td>인천 소재 병원 ☆ <span class="sub">(부민/백병원 계열 추정)</span></td><td>EMR on(code=ICB), DICOM on(TY_RCV), Oracle on(point), 병동 매핑 icb.ward.thync.{3w,6w,8w,icu}</td></tr>
+<tr><td><code>gg</code></td><td>가천대 길병원 ★</td><td>EMR on(gil_hosp), <b>ack.tcp.server.enable=true</b>(HL7 TCP), cardio.send=false</td></tr>
+<tr><td><code>hns</code></td><td>미상(H병원)</td><td>EMR on(code=THYNC), <b>HL7 TCP on</b>, <b>DICOM on</b>(AE=NETGATE), patientid.prefix=00000000, cardio.send=false</td></tr>
+<tr><td><code>mch</code></td><td>미상(M병원)</td><td>DICOM 대상만 설정(TY_RCV, org=MCH — send.type은 기본 1=미전송), emr code=MCH(enabled 기본 false), DEBUG</td></tr>
+<tr><td><code>gnasan</code></td><td>강릉아산병원 ☆</td><td>DICOM 대상 설정(<b>AE=PETAGATE</b>, org=GNASAN), emr code=DDDD(더미), DEBUG</td></tr>
+<tr><td><code>ezcaretech</code></td><td>이지케어텍(EMR 벤더) 연동 ★</td><td>spring.ezcaretech.* 풀셋(OAuth client_credentials, report_download→transfer_complete 폴더), emr code=THYNC, cardio off, JMX 키 제거</td></tr>
+<tr><td><code>dev</code>/<code>test</code>/<code>premium</code></td><td>클라우드 환경(참고)</td><td>infrastructure=cloud, Aurora RDS 클러스터/S3 저장/ElastiCache(test), read 풀 활성, kafka 토픽 .dev, 스케줄러 test-config; premium은 manager.seersthync.com·부산부민 ezcaretech 값</td></tr>
+</table>
+
+<h4>병원 커스텀 5개 축</h4>
+<div class="arch">
+<div class="arch-row">
+<div class="arch-box"><b>① EMR 전송</b><span>on/off·기관코드</span></div>
+<div class="arch-box"><b>② HL7 인터페이스</b><span>TCP(MLLP)/SFTP</span></div>
+<div class="arch-box"><b>③ DICOM PACS</b><span>AE/host/port</span></div>
+<div class="arch-box"><b>④ Oracle HIS</b><span>직결 조회/전송</span></div>
+<div class="arch-box"><b>⑤ 임상 정책</b><span>HR소스·트렌드·알람</span></div>
+</div>
+</div>
+<p>DB·Redis·디렉토리 등 <b>인프라 설정은 전 병원 동일</b>(localhost 표준 구성)하며, 병원별 차이는 위 5개 축에 집중됩니다.</p>
+
+<h2 id="hygiene">5. 설정 위생 유의사항</h2>
+<div class="note"><b>비밀값 취급 원칙.</b> 본 문서 전반의 비밀값은 마스킹(<code>**********</code>) 처리되어 있습니다. 실제 프로퍼티 파일에는 자격증명이 평문으로 존재할 수 있으나, <b>문서·위키·이슈 등 외부 공유물에는 실제 값을 절대 기재하지 마십시오.</b></div>
+
+<p>운영 안정성과 보안을 위한 <b>개선 권고</b> 사항입니다(현행 동작에는 문제 없으나 정비 대상).</p>
+<table>
+<tr><th>항목</th><th>현황</th><th>개선 권고</th></tr>
+<tr><td>평문 자격증명 내장</td><td>DB·Redis·JMX·Gmail·AWS·이지케어텍 시크릿이 프로퍼티에 평문 존재</td><td>환경변수·시크릿 관리(예: Jasypt/외부 시크릿 스토어)로 분리 <span class="sub">(추정 방안)</span></td></tr>
+<tr><td>미사용 AWS 키 잔존</td><td>온프레(LOCAL)에도 AWS 액세스키·S3 버킷 값 잔존</td><td>온프레 프로파일에서 미사용 클라우드 자격증명 제거</td></tr>
+<tr><td>설정 오타 키</td><td><code>project.sever.type</code>, <code>...listener.sever.autostartup</code>(sever), <code>project.log.base.folder</code>(로고 용도), <code>tempaaaa/</code>, JMX port <code>9090AAAAAAA</code></td><td>오타 정정 시 하위호환 확인 후 일괄 정비(현재 코드가 오타 키에 의존)</td></tr>
+<tr><td>값 복사 흔적</td><td>bjh DICOM org=MCH 등 타 병원 값 복사 잔재</td><td>병원별 값 재검증</td></tr>
+<tr><td>개행 혼재</td><td>일부 병원 파일 CRLF(Windows 편집)</td><td>편집 도구 개행 통일(LF)로 diff 노이즈 제거</td></tr>
+<tr><td>JSON 로그 미연결</td><td>JSON_FILE appender 정의만 있고 root 미연결</td><td>구조화 로그 필요 시 root 연결, 불필요 시 정의 제거</td></tr>
+</table>
+
+<div class="footer">thynC Operations · 내부 산출물 · thync_1.3.0 문서 세트 · 2026-07-18 작성 · 소스 역공학 기반</div>

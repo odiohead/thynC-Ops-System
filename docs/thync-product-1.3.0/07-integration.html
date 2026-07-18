@@ -1,0 +1,252 @@
+<title>외부 연동(인터페이스) 정의서</title>
+<style>
+:root{--ink:#1a2332;--sub:#5a6a7e;--line:#dde4ec;--bg:#fff;--accent:#0b6bcb;--accent-soft:#eaf3fc;--head-bg:#f5f8fb;--warn-bg:#fff7e6;--warn-line:#f0c36d;--ok:#1a7f37}
+*{box-sizing:border-box}
+body{margin:0;padding:32px 40px 80px;background:var(--bg);color:var(--ink);font-family:'Pretendard','Pretendard Variable',-apple-system,'Segoe UI','Malgun Gothic',sans-serif;font-size:14.5px;line-height:1.65;max-width:1080px;margin-left:auto;margin-right:auto}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.5px}
+h2{font-size:19px;margin:44px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--ink);letter-spacing:-.3px}
+h3{font-size:16px;margin:28px 0 10px}
+h4{font-size:14.5px;margin:20px 0 8px;color:var(--sub)}
+p{margin:8px 0}
+code{background:var(--accent-soft);color:var(--accent);padding:1px 5px;border-radius:4px;font-family:'D2Coding',Consolas,monospace;font-size:13px}
+pre{background:#f6f8fa;border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.5}
+pre code{background:none;color:inherit;padding:0}
+table{border-collapse:collapse;width:100%;margin:12px 0 20px;font-size:13.5px}
+th{background:var(--head-bg);border:1px solid var(--line);padding:7px 10px;text-align:left;font-weight:600;white-space:nowrap}
+td{border:1px solid var(--line);padding:6px 10px;vertical-align:top}
+tr:nth-child(even) td{background:#fafcfe}
+.doc-meta{border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:20px 0 8px;background:var(--head-bg)}
+.doc-meta table{margin:0;font-size:13px}
+.doc-meta td,.doc-meta th{border:none;padding:3px 14px 3px 0;background:none!important}
+.doc-meta th{color:var(--sub);font-weight:600;width:120px}
+.toc{background:var(--accent-soft);border-radius:10px;padding:16px 24px;margin:24px 0}
+.toc ol{margin:6px 0;padding-left:22px}
+.toc a{color:var(--accent);text-decoration:none}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent);margin-right:4px}
+.badge.get{background:#e6f4ea;color:#1a7f37}
+.badge.post{background:#eaf3fc;color:#0b6bcb}
+.badge.put{background:#fff7e6;color:#9a6700}
+.badge.del{background:#ffebe9;color:#cf222e}
+.note{background:var(--warn-bg);border-left:4px solid var(--warn-line);padding:10px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:13.5px}
+.sub{color:var(--sub);font-size:13px}
+.arch{display:flex;flex-direction:column;gap:10px;margin:18px 0}
+.arch-row{display:flex;gap:10px;flex-wrap:wrap}
+.arch-box{border:1.5px solid var(--accent);border-radius:10px;padding:10px 14px;background:var(--accent-soft);flex:1;min-width:140px;text-align:center}
+.arch-box.plain{border-color:var(--line);background:var(--head-bg)}
+.arch-box b{display:block;font-size:13.5px}
+.arch-box span{font-size:12px;color:var(--sub)}
+.footer{margin-top:60px;padding-top:16px;border-top:1px solid var(--line);color:var(--sub);font-size:12.5px}
+</style>
+
+<h1>외부 연동(인터페이스) 정의서</h1>
+<p class="sub">thynC 환자 감시 솔루션 · 산출물 세트 <b>thync_1.3.0</b></p>
+
+<div class="doc-meta">
+<table>
+<tr><th>문서 성격</th><td>외부 시스템 연동 정의서 (Integration)</td></tr>
+<tr><th>대상 제품</th><td>thynC IP2140 (mobiCARE Console) — 백엔드 <code>thync-api-onpremise 01.01.431</code></td></tr>
+<tr><th>작성일</th><td>2026-07-18</td></tr>
+<tr><th>작성 근거</th><td>운영 배포 산출물(WAR·프론트엔드·DB 스키마) 역공학 기반 재구성</td></tr>
+<tr><th>버전</th><td><code>thync-api-onpremise 01.01.431</code></td></tr>
+</table>
+</div>
+
+<div class="note"><b>문서 성격 안내.</b> 본 문서는 기존 기획·설계 산출물이 부재한 상태에서, 실제 운영 중인 소스(백엔드 WAR 디컴파일, 프론트엔드 소스, DB DDL)를 분석해 <b>사후 재구성</b>한 것입니다. 소스에서 직접 확인된 사실을 기준으로 하되, 명칭·의도가 코드에서 명확하지 않은 항목은 <span class="sub">(추정)</span>으로 표기합니다. <b>비밀값(계정 비밀번호·OAuth secret·API 토큰·AWS 키)은 모두 <code>********</code>로 마스킹</b>했으며, 병원별 내부 IP·AE 타이틀은 형식만 일반화(구체 값 미기재)했습니다.</div>
+
+<div class="toc">
+<b>목차</b>
+<ol>
+<li><a href="#overview">연동 아키텍처 개요</a></li>
+<li><a href="#emr">① EMR 연동 개요 (emr.enabled · organization.code)</a></li>
+<li><a href="#hl7">② HL7 v2.5 (HAPI · ACK 모듈 · MLLP TCP · SFTP)</a></li>
+<li><a href="#dicom">③ DICOM PACS (dcm4che · ECG 리포트 C-STORE)</a></li>
+<li><a href="#oracle">④ Oracle HIS 직결 (ojdbc8 · 환자/의사/병동 조회)</a></li>
+<li><a href="#cardio">⑤ mobiCARE Cardio 홀터 리포트 연동</a></li>
+<li><a href="#skylabs">⑥ SkyLabs CART-ON (반지형 혈압/PPG)</a></li>
+<li><a href="#ezcare">⑦ ezcaretech EMR 게이트 (OAuth client_credentials)</a></li>
+<li><a href="#firebase">⑧ Firebase 푸시 (H-Connect · FcmMessagePush)</a></li>
+<li><a href="#kafka">⑨ Kafka 생체신호 스트림 (biosignal.stream)</a></li>
+<li><a href="#report">⑩ PDF 리포트 변환·전송 파이프라인</a></li>
+<li><a href="#matrix">병원별 연동 활성 매트릭스</a></li>
+<li><a href="#keys">부록 A. 연동 설정키 요약</a></li>
+</ol>
+</div>
+
+<h2 id="overview">1. 연동 아키텍처 개요</h2>
+<p>thynC 백엔드(Spring Boot 2.3.12, Java 8, 외장 Tomcat WAR)는 병원별 <b>온프레미스</b>로 배포되며, 활성 프로파일(<code>spring.profiles.active</code>) 한 줄로 병원별 연동 on/off·대상 주소가 결정됩니다. 모든 연동은 사내 모듈(<code>module-emr / ack / cardio / skylabs / ezcaretech / his / push / stream</code>)로 기능 경계가 분리되어 있고, 사용 여부는 <code>application-thync-api-&lt;프로파일&gt;.properties</code> 설정키로 토글됩니다.</p>
+
+<div class="arch">
+<div class="arch-row">
+<div class="arch-box plain"><b>병원 EMR/HIS</b><span>Oracle HIS · HL7 IE · PACS</span></div>
+<div class="arch-box"><b>thynC 백엔드</b><span>thync-api-onpremise 01.01.431</span></div>
+<div class="arch-box plain"><b>외부 서비스</b><span>Cardio · SkyLabs · Firebase</span></div>
+</div>
+<div class="arch-row">
+<div class="arch-box plain"><b>수신(inbound)</b><span>HIS 환자/의사/병동 조회, SkyLabs PPG/BP 패킷, ezcaretech 환자정보</span></div>
+<div class="arch-box plain"><b>송신(outbound)</b><span>HL7 바이탈, DICOM ECG 리포트, EMR PDF, Cardio 홀터오더, FCM 푸시</span></div>
+</div>
+</div>
+
+<div class="note"><b>연동의 5개 커스텀 축.</b> 병원별 프로파일 차이는 사실상 (1) EMR 전송 on/off·기관코드, (2) HL7 TCP/SFTP 인터페이스, (3) DICOM PACS 전송 대상(AE/host/port), (4) Oracle HIS 직결, (5) 임상 정책(HR 소스·트렌드·알람)으로 압축됩니다. DB·Redis·디렉토리 등 인프라는 전 병원 동일(localhost 표준 구성)입니다.</div>
+
+<h2 id="emr">① EMR 연동 개요</h2>
+<table>
+<tr><th style="width:120px">항목</th><th>내용</th></tr>
+<tr><td><b>목적</b></td><td>측정 바이탈(체온·호흡·부정맥 이벤트)·ECG 리포트를 병원 EMR/HIS로 전달. 병원별로 전달 방식(HL7 / DICOM / Oracle 직결 / ezcaretech / PDF)이 상이하며, 본 항목은 그 <b>공통 on/off 스위치</b>를 정의</td></tr>
+<tr><td><b>방식</b></td><td>전송 대상(체온·호흡)은 큐 테이블(<code>bio_signal_temp_emr_update</code>, <code>bio_signal_resp_emr_update</code>)에 적재 후 스케줄러가 전송. ECG 스트립은 <code>UploadEmrStrips</code>로 업로드</td></tr>
+<tr><td><b>프로토콜</b></td><td>병원별 하위 연동(②~⑦, ⑩)에 위임</td></tr>
+<tr><td><b>트리거·주기</b></td><td>측정 세션의 <code>measurement_info.send_interval</code>(분)·<code>auto_report</code> 기준 주기 전송. 관리자 화면에서 연동 주기 설정(<code>UpdateEmrPeriod</code>)</td></tr>
+<tr><td><b>관련 설정키</b></td><td><code>emr.enabled</code> (기본 <code>false</code>) · <code>emr.organization.code</code> (기본 <code>ACK</code>; 병원별 <code>THYNC/BS/BJH/ICB/gil_hosp/MCH</code> 등)</td></tr>
+<tr><td><b>관련 API</b></td><td><span class="badge post">POST</span><code>/API/Manager/SelectEmrData</code> · <code>/API/Manager/UpdateEmrPeriod</code> · <code>/API/Measurement/UploadEmrStrips</code></td></tr>
+<tr><td><b>온·오프 조건</b></td><td><code>emr.enabled=true</code>인 병원 프로파일에서만 활성. 관리자 콘솔 <code>기관정보</code>의 HIS 연동 여부(<code>organization.sync_his</code>)·<code>EMR</code> 설정 화면과 연동</td></tr>
+</table>
+<p class="sub">관련 DB: <code>emr_interface_info</code>(EMR 인터페이스 서버 IP·전송시각), <code>bio_signal_temp_emr_update</code>/<code>bio_signal_resp_emr_update</code>(업로드 큐/이력).</p>
+
+<h2 id="hl7">② HL7 v2.5 연동 (HAPI · ACK 모듈)</h2>
+<table>
+<tr><th style="width:120px">항목</th><th>내용</th></tr>
+<tr><td><b>목적</b></td><td>병원 인터페이스 엔진(IE)으로 환자 바이탈·이벤트를 HL7 v2.5 메시지로 송수신 (ADT/ORU 계열)<span class="sub"> (메시지 유형은 추정)</span></td></tr>
+<tr><td><b>방식</b></td><td>사내 <code>module-ack</code> + <b>HAPI 2.3</b>(hapi-structures-v25) 파싱/생성. 수신은 <b>Netty 기반 MLLP TCP 서버</b>, 전송은 별도로 <b>SFTP</b>(jsch)로 ECG 리포트 파일 전달 가능</td></tr>
+<tr><td><b>프로토콜</b></td><td>HL7 v2.5 over <b>MLLP(TCP)</b> · 파일 전송은 <b>SFTP/SSH</b></td></tr>
+<tr><td><b>트리거·주기</b></td><td><code>ack.tcp.server.sendInterval.fixed</code>로 고정 주기 전송 여부 결정. 이벤트/측정 발생 시 송신<span class="sub"> (추정)</span></td></tr>
+<tr><td><b>관련 설정키</b></td><td><code>ack.tcp.server.enable</code> (기본 <code>false</code>) · <code>ack.tcp.server.organization</code> (<code>INFINITT / ACK / HALLA / InitialAndParticularTime / PARTICULAR</code> 중 병원 IE 규격) · <code>ack.tcp.server.sendInterval.fixed</code> · <code>ack.sftp.enable</code> (ECG 리포트 SFTP 전송) · <code>tcp.server.enable</code>(범용 TCP)</td></tr>
+<tr><td><b>관련 API</b></td><td>내부 TCP/스케줄러 처리(HTTP 엔드포인트 아님). 연동 대상 환자는 <code>infinitt_patient</code>(PACS 처방 TXT 임포트) 등으로 매핑</td></tr>
+<tr><td><b>온·오프 조건</b></td><td><code>ack.tcp.server.enable=true</code> 병원(예: <code>gg</code>·<code>hns</code> 프로파일)에서 활성. <code>organization</code> 값이 병원 IE 벤더 포맷을 지정</td></tr>
+</table>
+
+<h2 id="dicom">③ DICOM PACS 전송 (dcm4che · ECG 리포트 C-STORE)</h2>
+<table>
+<tr><th style="width:120px">항목</th><th>내용</th></tr>
+<tr><td><b>목적</b></td><td>ECG 측정 리포트(PDF)를 DICOM 오브젝트로 변환해 병원 PACS로 저장(영상 아카이브에 심전도 리포트 귀속)</td></tr>
+<tr><td><b>방식</b></td><td>사내 로직이 PDF → DICOM 변환 후 <b>dcm4che 5.23.3</b> 네트워크 모듈로 원격 AE에 <b>C-STORE</b> 전송. 변환/전송 결과는 <code>dicom_transfer_log</code>에 상태 기록</td></tr>
+<tr><td><b>프로토콜</b></td><td>DICOM DIMSE <b>C-STORE</b> (TCP)</td></tr>
+<tr><td><b>트리거·주기</b></td><td>리포트 생성 파이프라인(⑩) 완료 시 또는 관리 API 호출 시. 폴더 감시 후 변환→전송<span class="sub"> (추정)</span></td></tr>
+<tr><td><b>관련 설정키</b></td><td><code>dicom.file.send.type</code> (<code>0</code>=전송, <code>1</code>=미전송) · <code>dicom.remote.host</code> · <code>dicom.remote.port</code> · <code>dicom.remote.aetitle</code> · <code>dicom.remote.org</code>(병원 조직코드) · <code>dicom.file.patientid.prefix</code>(환자ID 프리픽스 패딩)</td></tr>
+<tr><td><b>관련 API</b></td><td><span class="badge post">POST</span><code>/API/Admin/CreateDicomFolder</code> · <code>/API/Admin/DicomConvertAndSend</code> · <code>/API/Admin/DicomSend</code> (인증 제외 <code>/API/Admin</code> 카테고리 — 내부/운영용)</td></tr>
+<tr><td><b>온·오프 조건</b></td><td><code>dicom.file.send.type=0</code> 병원에서만 실제 전송. 대상(host/port/aetitle)은 <b>병원별 상이</b> — 형식은 <code>&lt;PACS_IP&gt;:&lt;port&gt;</code>, AE=<code>&lt;대상 AE 타이틀&gt;</code> (예: 게이트웨이 AE / 수신 AE). 온프레 기본값(<code>127.0.0.1:4242</code>, AE <code>ORTHANC</code>)은 미전송 상태의 플레이스홀더</td></tr>
+</table>
+<p class="sub"><code>dicom_transfer_log.status</code>: 0=none, 1=변환실패, 2=변환성공, 4=전송실패, 5=전송성공. 일부 병원은 대상 AE만 정의하고 <code>send.type=1</code>(미전송)로 두어 <b>설정만 존재</b>하는 상태(예: <code>mch</code>·<code>gnasan</code>).</p>
+
+<h2 id="oracle">④ Oracle HIS 직결 (ojdbc8)</h2>
+<table>
+<tr><th style="width:120px">항목</th><th>내용</th></tr>
+<tr><td><b>목적</b></td><td>병원 HIS(Oracle) DB에 직접 접속해 재원 환자·의사·병동·진료과 정보를 조회하고, HIS 계정으로 SSO 로그인 처리</td></tr>
+<tr><td><b>방식</b></td><td><b>ojdbc8 19.3</b> + UCP로 Oracle 직결. <code>SELECT 1 FROM DUAL</code>로 커넥션 검증. 조회 결과는 <code>his_patient</code>/<code>his_doctor</code>/<code>his_department</code>/<code>his_em_patient</code>/<code>rep_nurse</code> 테이블로 동기화</td></tr>
+<tr><td><b>프로토콜</b></td><td>Oracle Net (JDBC over TCP, 서비스명/SID). 단일/RAC 노드 모두 지원</td></tr>
+<tr><td><b>트리거·주기</b></td><td>로그인·환자 목록 화면 진입 시 온디맨드 조회. 스케줄 동기화 병행<span class="sub"> (추정)</span></td></tr>
+<tr><td><b>관련 설정키</b></td><td><code>oracle.datasource.driver-class-name=oracle.jdbc.OracleDriver</code> · <code>oracle.datasource.jdbc-url</code>(병원별 host:port/service, RAC는 2노드) · <code>oracle.datasource.username</code> · <code>oracle.datasource.password</code> <code>********</code></td></tr>
+<tr><td><b>관련 API</b></td><td><span class="badge post">POST</span><code>/API/Account/LoginHIS</code> · <code>/API/Account/LogoutHIS</code> · <code>/API/Account/LoginHISforManager</code> · <code>/API/Doctor/SelectHisPatientList</code> · <code>/API/Doctor/SelectHisDoctorList</code> · <code>/API/Doctor/SelectHisStaywardList</code> · <code>/API/Doctor/SelectHisExinfo1~5</code> · <code>/API/Doctor/SelectHisPacsinfo</code> · <code>/API/Util/HumcHISLogin</code></td></tr>
+<tr><td><b>온·오프 조건</b></td><td><code>oracle.datasource.*</code>가 정의되고 <code>enabled</code>가 켜진 병원(예: <code>bjh</code>·<code>bs</code>·<code>icb</code>)에서 활성. 정의만 있고 <code>enabled=false</code>인 경우(예: <code>believesewoong</code>)는 미사용. 기관 마스터의 <code>organization.sync_his</code>로도 노출 제어</td></tr>
+</table>
+<p class="sub">HIS 호출 실패 시 에러코드 <code>1793</code> 반환. 접속 정보(host/계정)는 <b>병원별 상이</b>하여 본 문서에는 형식만 기재.</p>
+
+<h2 id="cardio">⑤ mobiCARE Cardio 홀터 리포트 연동</h2>
+<table>
+<tr><th style="width:120px">항목</th><th>내용</th></tr>
+<tr><td><b>목적</b></td><td>thynC ECG 데이터를 SEERS <b>mobiCARE Cardio</b>(홀터 분석 플랫폼)로 전송하고, 분석 완료된 홀터 리포트를 수신·조회</td></tr>
+<tr><td><b>방식</b></td><td>사내 <code>module-cardio</code> + OkHttp/Retrofit REST 호출. <code>CardioSync</code> API로 측정코드/링크정보 교환, ECG 파일 업로드, 홀터 오더 요청, 리포트 다운로드</td></tr>
+<tr><td><b>프로토콜</b></td><td>HTTPS REST (SSL 검증 토글 가능)</td></tr>
+<tr><td><b>트리거·주기</b></td><td><code>cardio.report.scheduler.active=true</code> 시 스케줄러가 주기 전송/수신. 병동에 <code>cardio_sync</code> 플래그가 켜진 대상만</td></tr>
+<tr><td><b>관련 설정키</b></td><td><code>cardio.send.type</code> (기본 <code>true</code>) · <code>cardio.ssl.disabled</code> (기본 <code>true</code>) · <code>cardio.report.scheduler.active</code> (기본 <code>false</code>) · <code>project.cardio.base.folder</code>(리포트 저장) · <code>ward.cardio_sync</code>·<code>ward.cardio_organization_code</code>(대상 기관코드)</td></tr>
+<tr><td><b>관련 API</b></td><td><span class="badge post">POST</span><code>/API/CardioSync/selectCardioMeasurementCode</code> · <code>/insertECGData</code> · <code>/SendHolterOrderRequestCardio</code> · <code>/SelectCardioMeasurementInfoList</code> · <code>/InsertLinkInfoCardioUnlinked</code> · <code>/SendLinkInfoCardio</code> · <code>/DownloadHolterReport</code></td></tr>
+<tr><td><b>온·오프 조건</b></td><td>온프레 기본 켜짐(<code>cardio.send.type=true</code>). <code>gg</code>·<code>hns</code>·<code>sev</code> 등은 <code>false</code>로 비활성. 연동 계정/URL은 <code>cardio_integration_setting</code>(계정 <code>********</code>·base_url)에 저장</td></tr>
+</table>
+<p class="sub">관련 DB: <code>link_cardio_info</code>(전송 작업 단위·send_status), <code>link_cardio_report_info</code>(수신 리포트 파일), <code>link_cardio_send_file_info</code>, <code>report_check</code>.</p>
+
+<h2 id="skylabs">⑥ SkyLabs CART-ON (반지형 혈압/PPG)</h2>
+<table>
+<tr><th style="width:120px">항목</th><th>내용</th></tr>
+<tr><td><b>목적</b></td><td>SkyLabs <b>CART-ON</b> 반지형(ring) 디바이스의 PPG·혈압(BP) 데이터를 수집·적재</td></tr>
+<tr><td><b>방식</b></td><td>디바이스/게이트웨이가 PPG·이벤트 패킷을 REST로 등록하고, 백엔드는 SkyLabs CART-ON API(<code>api.cart-on.io</code>)와 상호 연동. 전송 이력은 <code>skylabs_packet_send_history</code>에 기록</td></tr>
+<tr><td><b>프로토콜</b></td><td>HTTPS REST (v1 API)</td></tr>
+<tr><td><b>트리거·주기</b></td><td><code>skylabs.scheduler.active=true</code> 시 스케줄러 동작. 패킷 수신은 이벤트 기반</td></tr>
+<tr><td><b>관련 설정키</b></td><td><code>skylabs.scheduler.active</code> (기본 <code>false</code>) · <code>skylabs.v1.api.url</code> (<code>https://api.cart-on.io</code>) · <code>skylabs.v1.api.token</code> <code>********</code></td></tr>
+<tr><td><b>관련 API</b></td><td><span class="badge post">POST</span><code>/API/BioSignal/InsertSkyLabsPPGPacketList</code> · <code>/API/BioSignal/InsertSkyLabsEventPacketList</code></td></tr>
+<tr><td><b>온·오프 조건</b></td><td>기관 기능 토글(<code>RING</code> 혈압계)·<code>skylabs.scheduler.active</code>로 활성. <code>device_info.cart_status</code>(0 대기 / 1 가능)로 Cart 연결 상태 관리</td></tr>
+</table>
+<p class="sub">적재 DB: <code>ppg_raw_data</code>(spo2·pr·rr·pi), <code>blood_pressure</code>(SkyLabs BP: status <code>CAL/GOOD</code>, <code>irreqular_heart_beat</code>, <code>movement</code>).</p>
+
+<h2 id="ezcare">⑦ ezcaretech EMR 게이트 (OAuth client_credentials)</h2>
+<table>
+<tr><th style="width:120px">항목</th><th>내용</th></tr>
+<tr><td><b>목적</b></td><td>이지케어텍(ezCaretech) EMR/EDGE 게이트와 연동해 환자·병동·병실 정보를 조회하고 측정 리포트를 전송</td></tr>
+<tr><td><b>방식</b></td><td>사내 <code>module-ezcaretech-01.01.313</code>. <b>OAuth2 client_credentials</b>로 액세스 토큰 발급 후 REST 호출. 환자 상태는 <code>ezcaretech_patient</code>/<code>ezcaretech_patient_history</code>로 동기화, 리포트는 지정 폴더(<code>report_download</code>→<code>transfer_complete</code>) 경유 전송</td></tr>
+<tr><td><b>프로토콜</b></td><td>HTTPS REST + OAuth2 (grant_type=client_credentials)</td></tr>
+<tr><td><b>트리거·주기</b></td><td>환자정보/병동 조회는 온디맨드, 리포트 전송은 폴더 감시·스케줄<span class="sub"> (추정)</span></td></tr>
+<tr><td><b>관련 설정키</b></td><td><code>spring.ezcaretech.client-id</code> <code>********</code> · <code>spring.ezcaretech.client-secret</code> <code>********</code> · <code>spring.ezcaretech.hospital-id</code> · <code>spring.ezcaretech.tenant-id</code> · 폴더 경로 키(<code>report_download</code>/<code>transfer_complete</code>)</td></tr>
+<tr><td><b>관련 API</b></td><td><span class="badge post">POST</span><code>/API/EzCareTech/tokenTest</code> · <code>/patientInfoList</code> · <code>/wardInfoList</code> · <code>/sickRoomInfoList</code> · <code>/insertEZ</code> · <code>/sendReport</code> (인증 제외 <code>/API/EzCareTech</code> 카테고리)</td></tr>
+<tr><td><b>온·오프 조건</b></td><td><code>spring.ezcaretech.*</code>가 정의된 프로파일(<code>ezcaretech</code>·클라우드 <code>premium</code>)에서만 활성. 온프레 표준 프로파일에는 미포함</td></tr>
+</table>
+
+<h2 id="firebase">⑧ Firebase 푸시 (firebase-admin · H-Connect)</h2>
+<table>
+<tr><th style="width:120px">항목</th><th>내용</th></tr>
+<tr><td><b>목적</b></td><td>환자 앱·의료진 대상 모바일 푸시(FCM). 협진 초대·접속 상태·화상통화(H-Connect) 이벤트 알림 전달</td></tr>
+<tr><td><b>방식</b></td><td><b>firebase-admin 8.1.0</b> 서비스 계정(JSON)으로 FCM 전송. 외부 시스템은 웹훅(<code>FcmMessagePush</code>)으로 푸시 요청 가능(인증 제외). 토큰은 <code>push_user_token</code>(의료진)·<code>patient_fcm</code>(환자)에 저장</td></tr>
+<tr><td><b>프로토콜</b></td><td>FCM (HTTPS, gRPC 백엔드)</td></tr>
+<tr><td><b>트리거·주기</b></td><td>협진/알림/화상 이벤트 발생 시 즉시. 예약 알림은 <code>notification.push_type</code>(1 즉시 / 2 예약)</td></tr>
+<tr><td><b>관련 설정키</b></td><td>Firebase 서비스 계정 JSON 경로(h-connect) · 앱 패키지 <code>com.seers.hometreatment</code> · 자격 JSON 내 키는 <code>********</code></td></tr>
+<tr><td><b>관련 API</b></td><td><span class="badge post">POST</span><code>/API/Message/FcmMessagePush</code>(웹훅, 인증 제외) · <code>/API/Message/InsertPushToken</code> · <code>/API/Util/SendPushMessage</code> · <code>/API/Doctor/ConnectCondition</code>(HConnect) · <code>/API/VCall/EventVCall</code>(HConnect) · <code>/API/Application/UpdatePatientFcm</code></td></tr>
+<tr><td><b>온·오프 조건</b></td><td>서비스 계정 설정 시 활성. 발송 이력은 <code>push_call_log</code>에 기록</td></tr>
+</table>
+
+<h2 id="kafka">⑨ Kafka 생체신호 스트림 (biosignal.stream)</h2>
+<table>
+<tr><th style="width:120px">항목</th><th>내용</th></tr>
+<tr><td><b>목적</b></td><td>대규모/클라우드 환경에서 게이트웨이 수신 생체신호를 Kafka 토픽으로 분산 처리(파싱 서버 ↔ 콘솔)</td></tr>
+<tr><td><b>방식</b></td><td><b>kafka-clients 2.5.1</b> + spring-kafka. 컨슈머가 <code>biosignal.stream</code> 토픽 구독. <b>온프레미스 표준 구성에서는 Netty 게이트웨이 직접 수신이 기본이며 Kafka 리스너는 비활성</b></td></tr>
+<tr><td><b>프로토콜</b></td><td>Kafka (TCP, lz4/snappy/zstd 코덱)</td></tr>
+<tr><td><b>트리거·주기</b></td><td>리스너 자동시작 여부에 따라 상시 컨슘. <code>auto-offset-reset=latest</code></td></tr>
+<tr><td><b>관련 설정키</b></td><td><code>project.kafka.listener.sever.autostartup</code> (온프레 기본 <code>false</code>) · <code>biosignal.listener.topic</code> (<code>biosignal.stream</code>, 클라우드는 <code>.dev</code>) · <code>spring.kafka.bootstrap-servers</code> · <code>spring.kafka.consumer.group-id=myGroup</code></td></tr>
+<tr><td><b>관련 API</b></td><td>HTTP 엔드포인트 없음(내부 컨슈머). 콘솔 실시간 전송은 WebSocket(STOMP) <code>/topic/public/allLeads/bioSignalData/{measurementCode}</code></td></tr>
+<tr><td><b>온·오프 조건</b></td><td><code>autostartup=true</code>(주로 클라우드 <code>dev/test/premium</code>)에서만 활성. 온프레 병원은 기본 off</td></tr>
+</table>
+
+<h2 id="report">⑩ PDF 리포트 변환·전송 파이프라인</h2>
+<table>
+<tr><th style="width:120px">항목</th><th>내용</th></tr>
+<tr><td><b>목적</b></td><td>측정 결과 리포트를 PDF로 생성한 뒤 EMR/PACS/외부 플랫폼으로 전송하는 공통 파이프라인. ②HL7·③DICOM·⑤Cardio·⑦ezcaretech 전송의 파일 소스</td></tr>
+<tr><td><b>방식</b></td><td><b>PDFBox 2.0.27</b>로 PDF 생성/변환. 폴더 상태 전이로 파이프라인 진행: <code>report_download</code> → <code>converted</code>(변환 성공) / <code>converted_fail</code> → <code>transferred</code>(전송 성공) / <code>transferred_fail</code></td></tr>
+<tr><td><b>프로토콜</b></td><td>로컬 파일 폴더 감시 → 하위 연동 프로토콜(DICOM C-STORE / SFTP / REST)로 위임</td></tr>
+<tr><td><b>트리거·주기</b></td><td>자동 리포트(<code>report_check.auto_report</code>, 일별) 또는 측정 종료 시. <code>measurement_info.send_interval</code>(분) 주기</td></tr>
+<tr><td><b>관련 설정키</b></td><td><code>project.report.*</code>(각 폴더 경로) · <code>measurement_info.auto_report</code>·<code>send_interval</code></td></tr>
+<tr><td><b>관련 API</b></td><td><span class="badge post">POST</span><code>/API/Admin/DicomConvertAndSend</code>(DICOM 경로) · <code>/API/CardioSync/DownloadHolterReport</code> · <code>/API/EzCareTech/sendReport</code></td></tr>
+<tr><td><b>온·오프 조건</b></td><td>병원별 전송 대상(②~⑦) 활성 여부에 종속. 변환/전송 결과는 <code>dicom_transfer_log</code>(DICOM)·각 <code>link_cardio_*</code>에 상태 기록</td></tr>
+</table>
+
+<h2 id="matrix">병원별 연동 활성 매트릭스</h2>
+<p>기준: 온프레 <code>onpremise</code> 표준 프로파일 대비 diff. 병원명은 프로파일 이니셜 기반 <b>추정</b>이며 <code>★</code>는 근거 명확, <span class="sub">(추정)</span>은 이니셜 유추입니다. <code>✓</code>=활성, <code>–</code>=비활성/미설정, <code>◐</code>=대상만 설정(실제 전송 off).</p>
+<table>
+<tr><th>프로파일</th><th>병원(추정)</th><th>EMR<br>기관코드</th><th>HL7 TCP<br>/SFTP</th><th>DICOM<br>전송</th><th>Oracle<br>HIS</th><th>Cardio</th><th>비고</th></tr>
+<tr><td><code>onpremise</code></td><td>표준 템플릿</td><td>– (ACK)</td><td>–</td><td>–</td><td>–</td><td>✓</td><td>전부 localhost 기본</td></tr>
+<tr><td><code>sev</code></td><td>세브란스병원 <span class="sub">(추정)</span></td><td>– (THYNC)</td><td>–</td><td>–</td><td>–</td><td>–</td><td>최소 커스텀, 호흡/낙상 이벤트 false</td></tr>
+<tr><td><code>cnuhh</code></td><td>화순전남대병원 <span class="sub">(추정)</span></td><td>–</td><td>–</td><td>–</td><td>–</td><td>✓</td><td>HR 소스 SpO2, 체온 AI 보정</td></tr>
+<tr><td><code>gh</code></td><td>G병원 <span class="sub">(추정)</span></td><td>–</td><td>–</td><td>–</td><td>–</td><td>✓</td><td>cnuhh 계열(HR SpO2)</td></tr>
+<tr><td><code>bjh</code></td><td>B병원 <span class="sub">(추정)</span></td><td>✓ BJH</td><td>–</td><td>✓</td><td>✓ (RAC 2노드)</td><td>✓</td><td>EMR 4시간 주기(<code>0 0 0/4 * * ?</code>)</td></tr>
+<tr><td><code>bs</code></td><td>봉생기념병원 <span class="sub">(추정)</span></td><td>✓ BS</td><td>–</td><td>✓</td><td>✓</td><td>✓</td><td>병동 매핑키 <code>bs.ward.thync.*</code></td></tr>
+<tr><td><code>believesewoong</code></td><td>부산 세웅병원 <span class="sub">(추정)</span></td><td>✓ THYNC</td><td>–</td><td>–</td><td>◐ (정의만, enabled=false)</td><td>✓</td><td>트렌드=평균, 사용량 전송 on</td></tr>
+<tr><td><code>icb</code></td><td>인천 소재 병원 <span class="sub">(추정)</span></td><td>✓ ICB</td><td>–</td><td>✓</td><td>✓</td><td>✓</td><td>병동 매핑 <code>icb.ward.thync.*</code></td></tr>
+<tr><td><code>gg</code></td><td>가천대 길병원 ★</td><td>✓ gil_hosp</td><td>✓ (TCP)</td><td>–</td><td>–</td><td>–</td><td>HL7 인터페이스 사용</td></tr>
+<tr><td><code>hns</code></td><td>H병원 <span class="sub">(추정)</span></td><td>✓ THYNC</td><td>✓ (TCP)</td><td>✓ (AE NETGATE)</td><td>–</td><td>–</td><td>환자ID prefix 패딩</td></tr>
+<tr><td><code>mch</code></td><td>M병원 <span class="sub">(추정)</span></td><td>◐ MCH (기본 off)</td><td>–</td><td>◐ (대상만)</td><td>–</td><td>✓</td><td>DICOM 대상만 설정, send.type=1</td></tr>
+<tr><td><code>gnasan</code></td><td>강릉아산병원 <span class="sub">(추정)</span></td><td>◐ DDDD(더미)</td><td>–</td><td>◐ (AE PETAGATE)</td><td>–</td><td>✓</td><td>DICOM 대상만 설정</td></tr>
+<tr><td><code>ezcaretech</code></td><td>이지케어텍 연동 사이트 ★</td><td>✓ THYNC</td><td>–</td><td>–</td><td>–</td><td>–</td><td>ezcaretech OAuth 풀셋 (⑦)</td></tr>
+</table>
+<div class="note"><b>주의.</b> 위 매트릭스의 host/port/AE 타이틀·Oracle 접속정보·병동 매핑값은 <b>병원별 상이</b>하여 구체값을 기재하지 않았습니다. 실제 대상 주소는 각 병원 프로파일 <code>application-thync-api-&lt;프로파일&gt;.properties</code>에서 확인하세요(비밀값은 절대 문서·위키에 전재 금지).</div>
+
+<h2 id="keys">부록 A. 연동 설정키 요약</h2>
+<table>
+<tr><th>연동</th><th>핵심 설정키</th><th>기본값(onpremise)</th></tr>
+<tr><td>EMR</td><td><code>emr.enabled</code> / <code>emr.organization.code</code></td><td><code>false</code> / <code>ACK</code></td></tr>
+<tr><td>HL7</td><td><code>ack.tcp.server.enable</code> / <code>ack.tcp.server.organization</code> / <code>ack.sftp.enable</code></td><td><code>false</code> / <code>ACK</code> / <code>false</code></td></tr>
+<tr><td>DICOM</td><td><code>dicom.file.send.type</code> / <code>dicom.remote.host·port·aetitle</code></td><td><code>1</code>(미전송) / 병원별</td></tr>
+<tr><td>Oracle HIS</td><td><code>oracle.datasource.jdbc-url·username·password</code></td><td>병원별 (password <code>********</code>)</td></tr>
+<tr><td>Cardio</td><td><code>cardio.send.type</code> / <code>cardio.ssl.disabled</code> / <code>cardio.report.scheduler.active</code></td><td><code>true</code> / <code>true</code> / <code>false</code></td></tr>
+<tr><td>SkyLabs</td><td><code>skylabs.scheduler.active</code> / <code>skylabs.v1.api.url·token</code></td><td><code>false</code> / <code>api.cart-on.io</code>·<code>********</code></td></tr>
+<tr><td>ezcaretech</td><td><code>spring.ezcaretech.client-id·client-secret·hospital-id·tenant-id</code></td><td>미정의(전용 프로파일만)</td></tr>
+<tr><td>Firebase</td><td>서비스 계정 JSON(h-connect) / 패키지 <code>com.seers.hometreatment</code></td><td>설정 시 활성</td></tr>
+<tr><td>Kafka</td><td><code>project.kafka.listener.sever.autostartup</code> / <code>biosignal.listener.topic</code></td><td><code>false</code> / <code>biosignal.stream</code></td></tr>
+<tr><td>리포트</td><td><code>project.report.*</code> 폴더 / <code>measurement_info.send_interval·auto_report</code></td><td>폴더 파이프라인</td></tr>
+</table>
+
+<div class="footer">thynC Operations · 내부 산출물 · thync_1.3.0 문서 세트 · 2026-07-18 작성 · 소스 역공학 기반</div>

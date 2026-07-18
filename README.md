@@ -865,6 +865,7 @@ prisma/
 - **상담 정리 → 병원 노트**: AI 정제(`claude-opus-4-8`) 후 **"병원 노트에 추가"** — 위키 '병원 노트' 카테고리의 병원별 페이지에 날짜·상담자 헤더와 함께 append → 다음 상담에서 `read_hospital_note`로 재활용 (상담 대기열은 폐기 — API·UI 제거, `consultation_queue` 테이블은 이력 보존)
 - 권한: VIEWER 사용 불가(403), 세션은 소유자만 접근(삭제는 본인 또는 ADMIN)
 - **Flowise 제거**: 프록시 라우트·env 삭제 완료 (Flowise EC2 종료는 추후 결정)
+- **제품 지식 소스**: thynC 솔루션 자체 사양은 사내위키 `thync_1.3.0` 카테고리의 산출물 문서 세트(HTML 12종 — 기능정의서·API규격서·DB설계서·알람정책·외부연동·설치/설정·용어집)로 제공. `search_wiki`/`read_wiki_page`로 자동 참조하며, 원본은 `docs/thync-product-1.3.0/`에 보존(`scripts/publish-wiki-html-docs.mts`로 재게시)
 
 ### 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
 - DB 기반 동적 네비게이션 메뉴 시스템

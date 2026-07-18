@@ -1,0 +1,18 @@
+{
+  "category": "thync_1.3.0",
+  "categoryIcon": "🫀",
+  "pages": [
+    { "file": "00-index.html", "title": "00. 산출물 개요 · 문서 인덱스", "icon": "📚" },
+    { "file": "01-system-overview.html", "title": "01. 시스템 개요서", "icon": "📘" },
+    { "file": "02-architecture.html", "title": "02. 소프트웨어 아키텍처 정의서", "icon": "🏛️" },
+    { "file": "03-func-service-console.html", "title": "03. 기능정의서 — 서비스 콘솔(의료진)", "icon": "🩺" },
+    { "file": "04-func-manager-console.html", "title": "04. 기능정의서 — 관리자 콘솔(Manager)", "icon": "🛠️" },
+    { "file": "05-api-spec.html", "title": "05. API 규격서", "icon": "🔌" },
+    { "file": "06-db-design.html", "title": "06. 데이터베이스 설계서", "icon": "🗄️" },
+    { "file": "07-integration.html", "title": "07. 외부 연동(인터페이스) 정의서", "icon": "🔗" },
+    { "file": "08-alarm-policy.html", "title": "08. 알람·부정맥 임상 정책서", "icon": "🚨" },
+    { "file": "09-install-deploy.html", "title": "09. 설치·배포 가이드", "icon": "📦" },
+    { "file": "10-configuration.html", "title": "10. 환경설정 정의서", "icon": "⚙️" },
+    { "file": "11-glossary-codes.html", "title": "11. 용어·코드 정의서", "icon": "📖" }
+  ]
+}

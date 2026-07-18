@@ -1,0 +1,249 @@
+<title>시스템 개요서 — thynC 환자 감시 솔루션</title>
+<style>
+:root{--ink:#1a2332;--sub:#5a6a7e;--line:#dde4ec;--bg:#fff;--accent:#0b6bcb;--accent-soft:#eaf3fc;--head-bg:#f5f8fb;--warn-bg:#fff7e6;--warn-line:#f0c36d;--ok:#1a7f37}
+*{box-sizing:border-box}
+body{margin:0;padding:32px 40px 80px;background:var(--bg);color:var(--ink);font-family:'Pretendard','Pretendard Variable',-apple-system,'Segoe UI','Malgun Gothic',sans-serif;font-size:14.5px;line-height:1.65;max-width:1080px;margin-left:auto;margin-right:auto}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.5px}
+h2{font-size:19px;margin:44px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--ink);letter-spacing:-.3px}
+h3{font-size:16px;margin:28px 0 10px}
+h4{font-size:14.5px;margin:20px 0 8px;color:var(--sub)}
+p{margin:8px 0}
+code{background:var(--accent-soft);color:var(--accent);padding:1px 5px;border-radius:4px;font-family:'D2Coding',Consolas,monospace;font-size:13px}
+pre{background:#f6f8fa;border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.5}
+pre code{background:none;color:inherit;padding:0}
+table{border-collapse:collapse;width:100%;margin:12px 0 20px;font-size:13.5px}
+th{background:var(--head-bg);border:1px solid var(--line);padding:7px 10px;text-align:left;font-weight:600;white-space:nowrap}
+td{border:1px solid var(--line);padding:6px 10px;vertical-align:top}
+tr:nth-child(even) td{background:#fafcfe}
+.doc-meta{border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:20px 0 8px;background:var(--head-bg)}
+.doc-meta table{margin:0;font-size:13px}
+.doc-meta td,.doc-meta th{border:none;padding:3px 14px 3px 0;background:none!important}
+.doc-meta th{color:var(--sub);font-weight:600;width:120px}
+.toc{background:var(--accent-soft);border-radius:10px;padding:16px 24px;margin:24px 0}
+.toc ol{margin:6px 0;padding-left:22px}
+.toc a{color:var(--accent);text-decoration:none}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent);margin-right:4px}
+.badge.get{background:#e6f4ea;color:#1a7f37}
+.badge.post{background:#eaf3fc;color:#0b6bcb}
+.badge.put{background:#fff7e6;color:#9a6700}
+.badge.del{background:#ffebe9;color:#cf222e}
+.note{background:var(--warn-bg);border-left:4px solid var(--warn-line);padding:10px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:13.5px}
+.sub{color:var(--sub);font-size:13px}
+.arch{display:flex;flex-direction:column;gap:10px;margin:18px 0}
+.arch-row{display:flex;gap:10px;flex-wrap:wrap}
+.arch-box{border:1.5px solid var(--accent);border-radius:10px;padding:10px 14px;background:var(--accent-soft);flex:1;min-width:140px;text-align:center}
+.arch-box.plain{border-color:var(--line);background:var(--head-bg)}
+.arch-box b{display:block;font-size:13.5px}
+.arch-box span{font-size:12px;color:var(--sub)}
+.footer{margin-top:60px;padding-top:16px;border-top:1px solid var(--line);color:var(--sub);font-size:12.5px}
+</style>
+
+<h1>시스템 개요서</h1>
+<p class="sub">thynC 환자 감시 솔루션 · 산출물 세트 <b>thync_1.3.0</b></p>
+
+<div class="doc-meta">
+<table>
+<tr><th>문서 성격</th><td>시스템 개요서 (System Overview)</td></tr>
+<tr><th>대상 제품</th><td>thynC IP2140 (mobiCARE Console) — 백엔드 <code>thync-api-onpremise 01.01.431</code></td></tr>
+<tr><th>작성일</th><td>2026-07-18</td></tr>
+<tr><th>작성 근거</th><td>운영 배포 산출물(WAR·프론트엔드·DB 스키마) 역공학 기반 재구성</td></tr>
+<tr><th>버전</th><td>백엔드 01.01.431 / 서비스 M1.3.0.031 / 매니저 1.0.1</td></tr>
+</table>
+</div>
+
+<div class="note"><b>문서 성격 안내.</b> 본 문서는 기존 기획·설계 산출물이 부재한 상태에서, 실제 운영 중인 소스(백엔드 WAR 디컴파일, 프론트엔드 소스, DB DDL)를 분석해 <b>사후 재구성</b>한 것입니다. 소스에서 직접 확인된 사실을 기준으로 하되, 명칭·의도가 코드에서 명확하지 않은 항목은 <span class="sub">(추정)</span>으로 표기합니다.</div>
+
+<div class="toc">
+<b>목차</b>
+<ol>
+<li><a href="#overview">제품 개요 · 목적</a></li>
+<li><a href="#roles">이해관계자 · 사용자 역할</a></li>
+<li><a href="#features">핵심 기능 영역 요약</a></li>
+<li><a href="#components">시스템 구성 개념도</a></li>
+<li><a href="#stack">기술 스택 요약</a></li>
+<li><a href="#deploy">배포 형상 (온프레미스 · 클라우드)</a></li>
+<li><a href="#data">데이터 규모 · 특성</a></li>
+<li><a href="#docset">산출물 문서 세트 안내</a></li>
+</ol>
+</div>
+
+<h2 id="overview">1. 제품 개요 · 목적</h2>
+
+<p><b>thynC</b>(정식 명칭 <b>thynC IP2140</b>, SEERS社 <b>mobiCARE Console</b>)는 병원 입원 환자를 대상으로 한 <b>무선 웨어러블 생체신호 실시간 모니터링 솔루션</b>입니다. 식약처 품목허가 <b>제인 23-5092호</b>(환자감시장치 소프트웨어)로 허가된 의료기기 소프트웨어입니다.</p>
+
+<p>기존 병상 감시 장치(bedside monitor)는 환자를 침상과 케이블에 묶어 두어 거동을 제약하고, 일반 병동(General Ward)에는 설치 비용 문제로 보급되기 어려웠습니다. thynC는 이 공백을 <b>경량 무선 웨어러블 + 게이트웨이 무선 수신 + 중앙 콘솔 통합 감시</b> 구조로 해결합니다. 환자는 케이블 없이 병동을 자유롭게 이동하고, 의료진은 여러 병동의 다수 환자를 하나의 중앙 콘솔에서 동시에 감시합니다.</p>
+
+<h4>동작 흐름 (개념)</h4>
+<p>환자에게 심전계(ECG)·펄스옥시미터(SpO2)·체온계·혈압계(참케어형/반지형) 등 웨어러블 센서를 부착하면, 센서가 측정한 생체신호를 병동에 설치된 <b>게이트웨이</b>가 무선으로 수신합니다. 게이트웨이는 이를 원내 <b>API 서버</b>로 전달하고, 서버는 신호를 저장하고 <b>AI 부정맥 분석</b>과 <b>알람 임계값 판정</b>을 수행합니다. 판정 결과와 실시간 파형은 WebSocket으로 간호사·의사의 <b>서비스 콘솔</b>에 즉시 전송되어 중앙 감시 화면에 표시됩니다.</p>
+
+<div class="arch">
+<div class="arch-row">
+<div class="arch-box plain"><b>웨어러블 센서</b><span>ECG · SpO2 · 체온 · 혈압</span></div>
+<div class="arch-box plain"><b>게이트웨이</b><span>무선 수신 · 서버 전달</span></div>
+<div class="arch-box"><b>API 서버</b><span>저장 · AI 부정맥 분석 · 알람 판정</span></div>
+<div class="arch-box plain"><b>서비스 콘솔</b><span>간호사 · 의사 실시간 감시</span></div>
+</div>
+</div>
+
+<p>제품이 해결하는 핵심 가치는 다음과 같습니다.</p>
+<table>
+<tr><th>과제</th><th>thynC의 해결 방식</th></tr>
+<tr><td>일반 병동의 상시 감시 부재</td><td>무선 웨어러블로 케이블·설치 부담 없이 병동 단위 상시 모니터링</td></tr>
+<tr><td>이상 징후의 지연 인지</td><td>AI 부정맥 분석 + 임계값 알람으로 실시간 위험 감지·통보</td></tr>
+<tr><td>환자 거동 제약</td><td>무선 센서 + 게이트웨이 수신으로 이동 중에도 신호 수집</td></tr>
+<tr><td>분산된 감시 지점</td><td>중앙 콘솔(카드뷰·대시보드)로 다병동·다환자 통합 감시</td></tr>
+<tr><td>병원 시스템과의 단절</td><td>EMR · HIS · HL7 · DICOM(PACS) 연동으로 원내 워크플로 통합</td></tr>
+</table>
+
+<h2 id="roles">2. 이해관계자 · 사용자 역할</h2>
+
+<p>thynC는 환자·의료진·병원 관리자·제조사(SEERS)를 아우르는 다중 이해관계자 시스템입니다. 서비스 콘솔의 접근 권한은 <b>계정 등급(level/grade)</b>으로 통제되며, 상위 등급이 하위 등급의 기능을 포함합니다. 콘솔 UI 등급값과 DB의 <code>user_account.level</code> 값이 계층상 대응합니다.</p>
+
+<table>
+<tr><th>역할</th><th>코드</th><th>콘솔 등급</th><th>DB level</th><th>주요 권한 · 범위</th></tr>
+<tr><td>환자</td><td>PATIENT</td><td>—</td><td>1</td><td>웨어러블 착용 대상. 모바일 앱(H-Connect)으로 본인 데이터·동의·알림 수신 <span class="sub">(콘솔 로그인 대상 아님)</span></td></tr>
+<tr><td>간호사</td><td>NURSE</td><td>2</td><td>2</td><td><b>소속 병동만</b> 조회. 환자·병상 관리, 모니터링, 의료기기 관리</td></tr>
+<tr><td>의사</td><td>DOCTOR</td><td>5</td><td>4</td><td><b>전 병동</b> 조회. 모니터링·검토·보고서·원격협진</td></tr>
+<tr><td>병원 관리자</td><td>MANAGER</td><td>8</td><td>10 / 14</td><td>기관 내 <b>관리자 설정</b> 메뉴(계정·병동·알람·장치·게이트웨이·EMR·테마·중앙모니터) 전권</td></tr>
+<tr><td>SEERS 시스템관리자</td><td>SYSTEM_ADMIN</td><td>—</td><td>10~14</td><td>SEERS 본사 관리자 콘솔(<code>thync.manager</code>)로 <b>전 기관</b> 프로비저닝·장비·버전·서버 관리 <span class="sub">(추정: 별도 콘솔)</span></td></tr>
+</table>
+
+<div class="note">콘솔 등급값(2 / 5 / 8)은 서비스 프론트엔드의 UI 조건부 렌더링 기준이고, DB <code>user_account.level</code>(1:patient / 2:nurse / 4:doctor / 10:sysmanager / 13:sub admin / 14:admin)은 서버 권한 판정 기준입니다. 두 체계가 병존하므로 권한 로직 수정 시 양쪽을 함께 확인해야 합니다. 이 외에 게이트웨이 장비 등록용 특수 등급(시드상 level 20)이 존재합니다.</div>
+
+<h4>이해관계자별 관점</h4>
+<table>
+<tr><th>이해관계자</th><th>접점(콘솔/앱)</th><th>관심사</th></tr>
+<tr><td>환자 · 보호자</td><td>모바일 앱(H-Connect, Firebase 푸시)</td><td>본인 측정값 열람, 동의, 알림</td></tr>
+<tr><td>간호사</td><td>서비스 콘솔 (병동 뷰)</td><td>담당 병동 환자 상태·알람 즉시 대응</td></tr>
+<tr><td>의사</td><td>서비스 콘솔 · 원격협진</td><td>전 병동 검토, 부정맥 판독, 협진</td></tr>
+<tr><td>병원 관리자(MANAGER)</td><td>서비스 콘솔 (관리자 설정)</td><td>계정·병동·장비·알람 정책·EMR 연동 운영</td></tr>
+<tr><td>SEERS 운영/시스템관리자</td><td>관리자 콘솔(<code>thync.manager</code>)</td><td>기관 온보딩, 장비/게이트웨이 관리, 버전·서버 배포</td></tr>
+<tr><td>병원 IT/전산</td><td>온프레미스 서버 운영</td><td>서버·DB·네트워크·HIS/EMR 인터페이스 유지</td></tr>
+</table>
+
+<h2 id="features">3. 핵심 기능 영역 요약</h2>
+
+<p>thynC의 기능은 크게 7개 영역으로 나뉩니다. 각 영역의 상세 규격은 <a href="#docset">문서 세트</a>의 기능정의서·알람정책서에서 다룹니다.</p>
+
+<table>
+<tr><th>기능 영역</th><th>설명</th><th>주 사용자</th></tr>
+<tr><td><b>실시간 모니터링</b></td><td>웨어러블 생체신호(ECG 파형·HR·SpO2·체온·호흡·혈압)의 실시간 표시. 위험도순/병실별 카드뷰, 리스트뷰, 중앙모니터(대시보드), 알람 보드, 간이 모니터링</td><td>간호사·의사</td></tr>
+<tr><td><b>부정맥 · 알람</b></td><td>AI 부정맥 분석(<code>analysis_arrhythmia</code>), EWS(조기경보점수), 임계값 기반 알람 판정, 낙상·호흡 이벤트, 알람 클리어/이력</td><td>간호사·의사</td></tr>
+<tr><td><b>환자 · 병상 관리</b></td><td>환자 등록·정보·동의·증상, 병상 배정·이동, 측정 세션 시작/종료, 측정 이력·리포트</td><td>간호사</td></tr>
+<tr><td><b>장비 · 게이트웨이 관리</b></td><td>디바이스 공장/등록/상태·배터리·리셋, 게이트웨이 등록·펌웨어·연결 로그</td><td>간호사·관리자</td></tr>
+<tr><td><b>원격협진</b></td><td>화상통화(vcall) 기반 협진, 협진 케이스·일정·메시지, 의료진 메시징</td><td>의사</td></tr>
+<tr><td><b>EMR · HIS 연동</b></td><td>HL7 v2 메시지, DICOM(PACS) ECG 리포트 전송, Oracle HIS 직결 조회, 이지케어텍/인피니트/mobiCARE Cardio 연동</td><td>병원 시스템(자동)</td></tr>
+<tr><td><b>통계 · 리포트</b></td><td>트렌드·요약 데이터 생성, PDF 리포트 생성·변환·전송 파이프라인, 사용량 집계(프리미엄)</td><td>관리자·시스템</td></tr>
+</table>
+
+<h2 id="components">4. 시스템 구성 개념도</h2>
+
+<p>thynC는 <b>3개 소프트웨어 컴포넌트</b>(API 서버 · 서비스 콘솔 · 관리자 콘솔)와 <b>데이터 계층</b>(MySQL · Redis · 파일 스토리지), <b>현장 장비</b>(게이트웨이 · 웨어러블), <b>외부 연동</b>으로 구성됩니다.</p>
+
+<div class="arch">
+<div class="arch-row">
+<div class="arch-box plain"><b>웨어러블 센서</b><span>ECG · SpO2 · 체온 · 혈압(참케어/반지형)</span></div>
+<div class="arch-box plain"><b>게이트웨이</b><span>무선 수신 → 서버 전송</span></div>
+</div>
+<div class="arch-row">
+<div class="arch-box"><b>① API 서버 (WAR)</b><span>Spring Boot 2.3.12 · Java 8 · 외장 Tomcat 8/9<br>thync-api-onpremise 01.01.431</span></div>
+</div>
+<div class="arch-row">
+<div class="arch-box plain"><b>MySQL <code>thync</code></b><span>주 DB · 시계열 샤딩</span></div>
+<div class="arch-box plain"><b>Redis</b><span>캐시 · 최신값</span></div>
+<div class="arch-box plain"><b>파일 스토리지</b><span>LOCAL(온프레) / S3(클라우드)</span></div>
+</div>
+<div class="arch-row">
+<div class="arch-box"><b>② 서비스 콘솔 FE</b><span>의료진용 · Vanilla JS SPA<br>thync.service M1.3.0.031</span></div>
+<div class="arch-box"><b>③ 관리자 콘솔 FE</b><span>SEERS 시스템관리자용<br>thync.manager 1.0.1</span></div>
+</div>
+<div class="arch-row">
+<div class="arch-box plain"><b>외부 연동</b><span>EMR · HL7 v2 · DICOM(PACS) · Oracle HIS · Cardio · SkyLabs · 이지케어텍 · Firebase</span></div>
+</div>
+</div>
+
+<p>서비스·관리자 콘솔(FE)은 API 서버에 REST(주로 POST/JSON)로 요청하고, 실시간 파형은 <b>SockJS + STOMP WebSocket</b>(<code>/ws</code>)으로 수신합니다. FE는 별도 웹서버(정적 서빙)로 배포되며, 백엔드는 정적 리소스를 사실상 서빙하지 않습니다.</p>
+
+<table>
+<tr><th>#</th><th>컴포넌트</th><th>역할</th><th>기술</th><th>버전</th></tr>
+<tr><td>①</td><td>백엔드 API 서버</td><td>수신·저장·AI 분석·알람 판정·연동·인증</td><td>Spring Boot 2.3.12 WAR (Java 8)</td><td><code>01.01.431</code></td></tr>
+<tr><td>②</td><td>서비스 콘솔 FE</td><td>의료진 실시간 감시·환자/병상 관리</td><td>빌드 없는 Vanilla JS SPA</td><td><code>M1.3.0 patchadd 031</code></td></tr>
+<tr><td>③</td><td>관리자 콘솔 FE</td><td>SEERS 본사 시스템 관리(전 기관)</td><td>Vanilla JS SPA(서비스와 동일 구조)</td><td><code>1.0.1</code></td></tr>
+</table>
+
+<h2 id="stack">5. 기술 스택 요약</h2>
+
+<table>
+<tr><th>계층</th><th>기술</th><th>비고</th></tr>
+<tr><td>언어 / 런타임</td><td>Java 8 (일부 Kotlin stdlib)</td><td><code>ext.javaVersion=1.8</code></td></tr>
+<tr><td>백엔드 프레임워크</td><td>Spring Boot 2.3.12.RELEASE (Spring 5.2.15)</td><td>Gradle 6.7.1 멀티모듈 → WAR</td></tr>
+<tr><td>서블릿 컨테이너</td><td>외장 Tomcat 8 / 9</td><td>WAR 배포 (embed는 Tomcat 9.0.46)</td></tr>
+<tr><td>보안</td><td>Spring Security 5.3.9 + 커스텀 토큰</td><td>세션 STATELESS, CSRF disable, <code>SX-Auth-Token</code></td></tr>
+<tr><td>ORM / DB</td><td>Spring Data JPA 2.3.9 + Hibernate 5.4.32 / MySQL 8 (<code>thync</code>)</td><td><code>ddl-auto=none</code>, mysql-connector 8.0.25</td></tr>
+<tr><td>캐시</td><td>Redis (spring-data-redis 2.3.9 + Lettuce 5.3.7)</td><td>온프레: <code>localhost:6379</code></td></tr>
+<tr><td>실시간 / 소켓</td><td>Spring WebSocket + Netty 4.1.65</td><td>SockJS+STOMP(콘솔), Netty(게이트웨이·HL7 MLLP)</td></tr>
+<tr><td>메시지 스트림</td><td>Kafka 2.5.1 (spring-kafka 2.5.14)</td><td><code>biosignal.stream</code> — 온프레 기본 비활성</td></tr>
+<tr><td>의료 표준</td><td>DICOM(dcm4che 5.23) · HL7 v2(HAPI 2.3)</td><td>PACS C-STORE, HL7 v2.5</td></tr>
+<tr><td>연동 HTTP</td><td>OkHttp / Retrofit / Apache HttpClient</td><td>SkyLabs · 이지케어텍 등</td></tr>
+<tr><td>Push</td><td>firebase-admin 8.1.0</td><td>모바일 푸시(H-Connect)</td></tr>
+<tr><td>리포트</td><td>PDFBox 2.0.27</td><td>PDF 리포트 생성·변환 (POI 없음)</td></tr>
+<tr><td>프론트엔드</td><td>Vanilla JS SPA(자체 프레임워크) + jQuery 3.5.1 · Handlebars 4.7.7 · D3 / Chart.js · SockJS 1.5.0 + STOMP 1.7.1</td><td>빌드/번들 없음, dynamic import</td></tr>
+<tr><td>클라우드</td><td>AWS SDK 1.11 (S3/KMS) + spring-cloud-aws 2.2.6</td><td>클라우드 프로파일에서 ECG 파일 S3 저장</td></tr>
+</table>
+
+<p>백엔드는 20종의 사내 모듈(<code>module-*.jar</code>: common / model / database / storage / stream / scheduler / task / netty / push / rawdata / vcall / his / emr / ack / cardio / skylabs / ezcaretech / premium / rtls 등)로 기능 경계가 분리되어 있습니다. 계층·모듈 상세는 <b>아키텍처 정의서</b>를 참조하세요.</p>
+
+<h2 id="deploy">6. 배포 형상 (온프레미스 · 클라우드)</h2>
+
+<p>thynC는 <b>병원별 온프레미스(원내 서버) 배포</b>가 주력이며, 일부 사이트는 <b>클라우드(AWS)</b>로 운영됩니다. 배포 프로파일은 WAR 한 개에 전부 내장되고, <code>application.properties</code>의 <code>spring.profiles.active</code> 한 줄로 활성 프로파일이 선택됩니다(병원별 WAR = active 프로파일만 다름).</p>
+
+<table>
+<tr><th>구분</th><th>온프레미스 (onPremise)</th><th>클라우드 (cloud)</th></tr>
+<tr><td>주력 여부</td><td>주력 (병원별 원내 서버)</td><td>일부 사이트(dev/test/premium)</td></tr>
+<tr><td>DB</td><td>로컬 MySQL <code>127.0.0.1:3306/thync</code></td><td>AWS Aurora RDS (read 풀 분리)</td></tr>
+<tr><td>캐시</td><td>로컬 Redis <code>127.0.0.1:6379</code></td><td>ElastiCache(test)</td></tr>
+<tr><td>파일 저장</td><td><code>LOCAL</code> (ECG raw/JSON 원내 디스크)</td><td>AWS <code>S3</code></td></tr>
+<tr><td>Kafka</td><td>기본 비활성(<code>autostartup=false</code>)</td><td>토픽 <code>.dev</code> 사용</td></tr>
+<tr><td>WAR 프로파일</td><td><code>onpremise</code> + 병원별 12종(sev, cnuhh, bjh, bs, believesewoong, gg, gh, gnasan, hns, icb, mch, ezcaretech)</td><td><code>dev</code>, <code>test</code>, <code>premium</code></td></tr>
+</table>
+
+<p>병원별 커스텀은 5개 축으로 나타납니다 — ① EMR 전송 on/off·기관코드, ② HL7 TCP/SFTP 인터페이스, ③ DICOM PACS 전송 대상(AE/host/port), ④ Oracle HIS 직결, ⑤ HR 소스·트렌드·알람 등 임상 정책. DB·Redis·디렉토리 등 인프라 설정은 전 병원 공통(localhost 표준)입니다. 프로파일별 상세는 <b>환경설정 정의서</b>를 참조하세요.</p>
+
+<p>프론트엔드는 웹서버의 <code>~/html/&lt;DIRECTORY&gt;/</code> Git 저장소를 <code>git reset --hard</code>로 강제 동기화하여 배포합니다(빌드 없음). 백엔드 반영은 DEV → git → PROD git pull 절차를 따릅니다.</p>
+
+<h2 id="data">7. 데이터 규모 · 특성</h2>
+
+<p>주 DB는 MySQL 8(InnoDB, <code>thync</code> 스키마)이며, <b>논리 163개 테이블 / 물리 1,847개 테이블</b>로 구성됩니다. 물리 테이블 수가 큰 이유는 초당 다건 유입되는 <b>고빈도 시계열 데이터를 샤딩</b>하기 때문입니다.</p>
+
+<table>
+<tr><th>샤딩 전략</th><th>대상</th><th>물리 테이블</th></tr>
+<tr><td><b>주차/순번 샤드</b> <code>&lt;name&gt;_YYYY_NNNN</code></td><td>고빈도 시계열 14종 (ECG·HR·SpO2·호흡·EWS·부정맥 분석 등, 종당 100개)</td><td>1,400개</td></tr>
+<tr><td><b>해시 샤드</b> <code>&lt;name&gt;_00NN</code></td><td>파일 수신 상태 3종(측정코드당 1행, 고빈도 UPDATE 분산)</td><td>300개</td></tr>
+<tr><td><b>연 단위 샤드</b> <code>&lt;name&gt;_YYYY</code></td><td>temperature / device_status / bio_signal_event 등 5종</td><td>연 5개</td></tr>
+<tr><td>단일 테이블</td><td>나머지 도메인(조직·환자·장비·연동·로그 등)</td><td>147개(논리)</td></tr>
+</table>
+
+<p>각 측정 세션의 샤드 위치는 <code>measurement_info</code>의 <code>shard</code>(연도)·<code>part</code>(0~100) 컬럼이 라우팅 키로 지정합니다. 모든 시계열 샤드는 <code>measurement_info.measurement_code</code>를 FK(ON DELETE CASCADE)로 참조하므로, 측정 세션 삭제 시 관련 시계열이 일괄 삭제됩니다. 실시간 화면 응답을 위해 최신값 캐시 테이블 10종을 별도 유지합니다.</p>
+
+<div class="note"><b>데이터 보존.</b> 기본 보존 기간은 <b>90일</b>(<code>data.retention.days=90</code>, <code>global_setting.backup_day</code>)이며, <code>old.data.delete.type=1</code>일 때 보존 기간이 지난 DB 행과 파일이 삭제됩니다. ECG 원본 파일은 온프레 <code>LOCAL</code> 디스크, 클라우드 <code>S3</code>에 저장됩니다.</div>
+
+<h2 id="docset">8. 산출물 문서 세트 안내</h2>
+
+<p>본 문서는 산출물 세트 <b>thync_1.3.0</b>의 일부입니다. 세트는 다음 문서로 구성됩니다.</p>
+
+<table>
+<tr><th>#</th><th>문서</th><th>내용</th></tr>
+<tr><td>01</td><td><b>시스템 개요서</b> (본 문서)</td><td>제품 개요·역할·구성·스택·배포·데이터 개괄</td></tr>
+<tr><td>02</td><td>소프트웨어 아키텍처 정의서</td><td>계층·실시간 스트리밍·데이터·인증·연동 아키텍처</td></tr>
+<tr><td>03</td><td>기능정의서 (서비스 콘솔)</td><td>의료진용 화면·기능 정의</td></tr>
+<tr><td>04</td><td>기능정의서 (관리자 콘솔)</td><td>SEERS 시스템관리자용 화면·기능 정의</td></tr>
+<tr><td>05</td><td>API 규격서</td><td>REST 엔드포인트·인증·공통 규격</td></tr>
+<tr><td>06</td><td>DB 설계서</td><td>163개 논리 테이블·샤딩·관계 정의</td></tr>
+<tr><td>07</td><td>외부 연동 정의서</td><td>EMR·HL7·DICOM·HIS·Cardio·SkyLabs·이지케어텍</td></tr>
+<tr><td>08</td><td>알람 정책서</td><td>부정맥·EWS·임계값·낙상/호흡 이벤트·알람 클리어</td></tr>
+<tr><td>09</td><td>설치·배포 정의서</td><td>WAR/FE 배포, 디렉토리 레이아웃, 운영 플래그</td></tr>
+<tr><td>10</td><td>환경설정 정의서</td><td><code>application.properties</code> 체계·병원별 프로파일</td></tr>
+<tr><td>11</td><td>용어·코드집</td><td>도메인 용어·코드값(등급·상태·에러코드 등)</td></tr>
+</table>
+
+<div class="footer">thynC Operations · 내부 산출물 · thync_1.3.0 문서 세트 · 2026-07-18 작성 · 소스 역공학 기반</div>

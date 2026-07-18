@@ -1,0 +1,304 @@
+<title>소프트웨어 아키텍처 정의서 — thynC 환자 감시 솔루션</title>
+<style>
+:root{--ink:#1a2332;--sub:#5a6a7e;--line:#dde4ec;--bg:#fff;--accent:#0b6bcb;--accent-soft:#eaf3fc;--head-bg:#f5f8fb;--warn-bg:#fff7e6;--warn-line:#f0c36d;--ok:#1a7f37}
+*{box-sizing:border-box}
+body{margin:0;padding:32px 40px 80px;background:var(--bg);color:var(--ink);font-family:'Pretendard','Pretendard Variable',-apple-system,'Segoe UI','Malgun Gothic',sans-serif;font-size:14.5px;line-height:1.65;max-width:1080px;margin-left:auto;margin-right:auto}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.5px}
+h2{font-size:19px;margin:44px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--ink);letter-spacing:-.3px}
+h3{font-size:16px;margin:28px 0 10px}
+h4{font-size:14.5px;margin:20px 0 8px;color:var(--sub)}
+p{margin:8px 0}
+code{background:var(--accent-soft);color:var(--accent);padding:1px 5px;border-radius:4px;font-family:'D2Coding',Consolas,monospace;font-size:13px}
+pre{background:#f6f8fa;border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.5}
+pre code{background:none;color:inherit;padding:0}
+table{border-collapse:collapse;width:100%;margin:12px 0 20px;font-size:13.5px}
+th{background:var(--head-bg);border:1px solid var(--line);padding:7px 10px;text-align:left;font-weight:600;white-space:nowrap}
+td{border:1px solid var(--line);padding:6px 10px;vertical-align:top}
+tr:nth-child(even) td{background:#fafcfe}
+.doc-meta{border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:20px 0 8px;background:var(--head-bg)}
+.doc-meta table{margin:0;font-size:13px}
+.doc-meta td,.doc-meta th{border:none;padding:3px 14px 3px 0;background:none!important}
+.doc-meta th{color:var(--sub);font-weight:600;width:120px}
+.toc{background:var(--accent-soft);border-radius:10px;padding:16px 24px;margin:24px 0}
+.toc ol{margin:6px 0;padding-left:22px}
+.toc a{color:var(--accent);text-decoration:none}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent);margin-right:4px}
+.badge.get{background:#e6f4ea;color:#1a7f37}
+.badge.post{background:#eaf3fc;color:#0b6bcb}
+.badge.put{background:#fff7e6;color:#9a6700}
+.badge.del{background:#ffebe9;color:#cf222e}
+.note{background:var(--warn-bg);border-left:4px solid var(--warn-line);padding:10px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:13.5px}
+.sub{color:var(--sub);font-size:13px}
+.arch{display:flex;flex-direction:column;gap:10px;margin:18px 0}
+.arch-row{display:flex;gap:10px;flex-wrap:wrap}
+.arch-box{border:1.5px solid var(--accent);border-radius:10px;padding:10px 14px;background:var(--accent-soft);flex:1;min-width:140px;text-align:center}
+.arch-box.plain{border-color:var(--line);background:var(--head-bg)}
+.arch-box b{display:block;font-size:13.5px}
+.arch-box span{font-size:12px;color:var(--sub)}
+.footer{margin-top:60px;padding-top:16px;border-top:1px solid var(--line);color:var(--sub);font-size:12.5px}
+</style>
+
+<h1>소프트웨어 아키텍처 정의서</h1>
+<p class="sub">thynC 환자 감시 솔루션 · 산출물 세트 <b>thync_1.3.0</b></p>
+
+<div class="doc-meta">
+<table>
+<tr><th>문서 성격</th><td>소프트웨어 아키텍처 정의서 (Architecture)</td></tr>
+<tr><th>대상 제품</th><td>thynC IP2140 (mobiCARE Console) — 백엔드 <code>thync-api-onpremise 01.01.431</code></td></tr>
+<tr><th>작성일</th><td>2026-07-18</td></tr>
+<tr><th>작성 근거</th><td>운영 배포 산출물(WAR·프론트엔드·DB 스키마) 역공학 기반 재구성</td></tr>
+<tr><th>버전</th><td>백엔드 01.01.431 / 서비스 M1.3.0.031 / 매니저 1.0.1</td></tr>
+</table>
+</div>
+
+<div class="note"><b>문서 성격 안내.</b> 본 문서는 기존 기획·설계 산출물이 부재한 상태에서, 실제 운영 중인 소스(백엔드 WAR 디컴파일, 프론트엔드 소스, DB DDL)를 분석해 <b>사후 재구성</b>한 것입니다. 소스에서 직접 확인된 사실을 기준으로 하되, 명칭·의도가 코드에서 명확하지 않은 항목은 <span class="sub">(추정)</span>으로 표기합니다.</div>
+
+<div class="toc">
+<b>목차</b>
+<ol>
+<li><a href="#principles">아키텍처 개요 · 설계 원칙</a></li>
+<li><a href="#overall">전체 구성도</a></li>
+<li><a href="#backend">백엔드 계층 구조</a></li>
+<li><a href="#frontend">프론트엔드 아키텍처</a></li>
+<li><a href="#realtime">실시간 스트리밍 아키텍처</a></li>
+<li><a href="#data">데이터 아키텍처 (샤딩)</a></li>
+<li><a href="#security">인증 · 보안 아키텍처</a></li>
+<li><a href="#integration">연동 아키텍처 요약</a></li>
+<li><a href="#topology">확장 · 배포 토폴로지</a></li>
+</ol>
+</div>
+
+<h2 id="principles">1. 아키텍처 개요 · 설계 원칙</h2>
+
+<p>thynC 백엔드는 <b>단일 Spring Boot WAR</b>로 패키징되지만, 내부적으로는 20종의 사내 모듈(<code>module-*.jar</code>)로 기능 경계가 분리된 <b>모듈러 모놀리스</b> 구조입니다. 프론트엔드(서비스·관리자 콘솔)는 빌드 없는 Vanilla JS SPA로, API 서버와는 REST + WebSocket으로만 결합됩니다.</p>
+
+<table>
+<tr><th>설계 원칙</th><th>구현 방식</th></tr>
+<tr><td><b>온프레미스 우선, 클라우드 겸용</b></td><td>동일 코드베이스에 프로파일 내장. <code>infrastructure=onPremise/cloud</code> 한 값으로 DB·저장소·캐시 대상 전환</td></tr>
+<tr><td><b>기능 경계 모듈화</b></td><td>도메인별 <code>module-*.jar</code>(his/emr/ack/cardio/skylabs/vcall 등)로 연동·기능 분리</td></tr>
+<tr><td><b>고빈도 시계열 분산</b></td><td>주차·해시·연 단위 샤딩으로 초당 다건 유입 데이터를 물리 테이블 분할</td></tr>
+<tr><td><b>실시간성</b></td><td>SockJS+STOMP WebSocket 파형 스트리밍 + 최신값 캐시 테이블</td></tr>
+<tr><td><b>느슨한 FE 결합</b></td><td>빌드 없는 SPA, REST(POST/JSON) 중심 + 토큰 헤더 인증</td></tr>
+<tr><td><b>표준 기반 연동</b></td><td>HL7 v2(HAPI)·DICOM(dcm4che)·Oracle HIS 직결로 병원 시스템 통합</td></tr>
+</table>
+
+<h2 id="overall">2. 전체 구성도</h2>
+
+<p>현장 장비(웨어러블·게이트웨이)에서 시작해 API 서버·데이터 계층을 거쳐 콘솔로 이어지는 데이터 흐름과, API 서버가 병원 외부 시스템과 맺는 연동을 함께 나타냅니다.</p>
+
+<div class="arch">
+<div class="arch-row">
+<div class="arch-box plain"><b>웨어러블</b><span>ECG · SpO2 · 체온 · 혈압</span></div>
+<div class="arch-box plain"><b>게이트웨이</b><span>Netty TCP 수신</span></div>
+</div>
+<div class="arch-row">
+<div class="arch-box"><b>API 서버 (Spring Boot WAR)</b><span>Controller → Service → Repository(JPA)<br>AOP DataLog · TokenInterceptor 인증 · 스케줄러</span></div>
+</div>
+<div class="arch-row">
+<div class="arch-box plain"><b>MySQL <code>thync</code></b><span>시계열 샤딩(주차/해시/연)</span></div>
+<div class="arch-box plain"><b>Redis</b><span>캐시 · 액세스토큰</span></div>
+<div class="arch-box plain"><b>파일 스토리지</b><span>LOCAL / S3 (ECG raw·JSON)</span></div>
+</div>
+<div class="arch-row">
+<div class="arch-box"><b>서비스 콘솔 FE</b><span>REST + STOMP/WebSocket</span></div>
+<div class="arch-box"><b>관리자 콘솔 FE</b><span>REST + WebSocket</span></div>
+<div class="arch-box plain"><b>외부 연동</b><span>EMR · HL7 · DICOM · Oracle HIS · Cardio · SkyLabs · 이지케어텍 · Firebase</span></div>
+</div>
+</div>
+
+<table>
+<tr><th>경로</th><th>프로토콜</th><th>내용</th></tr>
+<tr><td>게이트웨이 → API 서버</td><td>TCP (Netty)</td><td>웨어러블 생체신호 수신</td></tr>
+<tr><td>FE ↔ API 서버</td><td>HTTP REST (POST/JSON)</td><td>조회·등록·설정 API</td></tr>
+<tr><td>FE ↔ API 서버</td><td>SockJS + STOMP (<code>/ws</code>)</td><td>실시간 파형·이벤트 스트리밍</td></tr>
+<tr><td>API 서버 ↔ MySQL</td><td>JDBC (HikariCP)</td><td>저장·조회(write/read 풀)</td></tr>
+<tr><td>API 서버 ↔ Redis</td><td>Lettuce</td><td>캐시·토큰</td></tr>
+<tr><td>API 서버 ↔ 외부</td><td>HL7 MLLP · DICOM · JDBC(Oracle) · HTTPS · SFTP</td><td>병원/외부 시스템 연동</td></tr>
+</table>
+
+<h2 id="backend">3. 백엔드 계층 구조</h2>
+
+<p>백엔드는 전형적인 <b>3계층(Controller → Service → Repository)</b> 구조에 <b>AOP 로깅</b>과 <b>인터셉터 인증</b>이 횡단 관심사로 결합된 형태입니다. 데이터 접근은 Spring Data JPA + Hibernate(<code>ddl-auto=none</code>, MySQL5Dialect)로 수행합니다.</p>
+
+<div class="arch">
+<div class="arch-row">
+<div class="arch-box plain"><b>TokenInterceptor</b><span>요청별 토큰 인증(preHandle)</span></div>
+<div class="arch-box plain"><b>DataLogAspect (AOP)</b><span>호출 시작/결과 로깅</span></div>
+</div>
+<div class="arch-row">
+<div class="arch-box"><b>Controller (87종)</b><span>REST 핸들러 약 626 · POST/JSON 중심</span></div>
+</div>
+<div class="arch-row">
+<div class="arch-box"><b>Service</b><span>도메인 로직 · 트랜잭션 · 연동 오케스트레이션</span></div>
+</div>
+<div class="arch-row">
+<div class="arch-box"><b>Repository (JPA/Hibernate)</b><span>샤드 라우팅 · 최신값 캐시 갱신</span></div>
+</div>
+</div>
+
+<table>
+<tr><th>계층 / 요소</th><th>역할</th><th>근거</th></tr>
+<tr><td><b>Controller</b></td><td>REST 엔드포인트. 87개 컨트롤러, 핸들러 약 626개. 첫 인자로 <code>HttpServletRequest</code>. 거의 POST + <code>@RequestBody</code>(JSON), 다운로드만 GET, 업로드는 <code>@ModelAttribute+MultipartFile</code></td><td>디컴파일 컨트롤러</td></tr>
+<tr><td><b>Service</b></td><td>도메인 로직·트랜잭션 경계·외부 연동 호출</td><td>계층 관례</td></tr>
+<tr><td><b>Repository</b></td><td>Spring Data JPA 2.3.9 + Hibernate 5.4.32, 샤드 테이블 라우팅</td><td>lib 분석</td></tr>
+<tr><td><b>TokenInterceptor</b></td><td>요청별 커스텀 액세스 토큰 검증(<code>preHandle</code>). Spring Security는 STATELESS·CSRF disable만 담당</td><td>InterceptorConfig</td></tr>
+<tr><td><b>DataLogAspect (AOP)</b></td><td>AspectJ 기반. 컨트롤러 호출 시작/결과를 <code>DataLog</code>로 기록, <code>data_log</code> 적재(<code>log.db.enabled=true</code>)</td><td>DataLogAspect</td></tr>
+<tr><td><b>ExceptionAdviceController</b></td><td><code>@RestControllerAdvice</code>. 예외를 <code>ResJson</code>(error/message/remoteIp)로 표준화, 500 반환</td><td>공통 규격</td></tr>
+</table>
+
+<h4>사내 모듈 경계 (module-*.jar 20종)</h4>
+<p>기능 영역이 별도 jar로 분리되어, 병원별로 필요한 연동만 활성화하는 구조입니다.</p>
+<table>
+<tr><th>그룹</th><th>모듈</th><th>역할</th></tr>
+<tr><td>코어</td><td>common · model · database · storage</td><td>공통 유틸·엔티티·DB·파일 저장 추상화</td></tr>
+<tr><td>수집/스트림</td><td>stream · netty · rawdata · scheduler · task</td><td>게이트웨이 수신·스트리밍·raw 파일·스케줄</td></tr>
+<tr><td>알림</td><td>push</td><td>Firebase 모바일 푸시</td></tr>
+<tr><td>협진</td><td>vcall</td><td>화상통화 원격협진</td></tr>
+<tr><td>병원 연동</td><td>his · emr · ack(HL7 ACK) · ezcaretech-01.01.313</td><td>HIS 조회·EMR 전송·HL7·이지케어텍</td></tr>
+<tr><td>외부 서비스</td><td>cardio(홀터 리포트) · skylabs(CART-ON)</td><td>mobiCARE Cardio·SkyLabs</td></tr>
+<tr><td>운영</td><td>premium-01.01.323(사용량 전송) · rtls-01.00.03(위치추적)</td><td>온프레→클라우드 집계·RTLS</td></tr>
+</table>
+
+<h2 id="frontend">4. 프론트엔드 아키텍처</h2>
+
+<p>서비스·관리자 콘솔은 모두 <b>빌드/번들링이 없는 Vanilla JS SPA</b>(자체 "seers frontframework for vanilla")입니다. 정적 파일을 웹서버가 그대로 서빙하고, 런타임 로더가 URL을 해석해 필요한 컨트롤러 모듈을 동적으로 불러옵니다.</p>
+
+<div class="arch">
+<div class="arch-row">
+<div class="arch-box plain"><b>index.html</b><span>index-init.js 로딩(css/js)</span></div>
+<div class="arch-box plain"><b>loader.js</b><span>/{controller}/{action}/{id} 파싱</span></div>
+<div class="arch-box plain"><b>dynamic import()</b><span>controller/{name}.js 동적 로딩</span></div>
+</div>
+<div class="arch-row">
+<div class="arch-box"><b>Controller (화면 로직)</b><span>History API SPA 라우팅</span></div>
+<div class="arch-box"><b>Handlebars 테마</b><span>template/{테마}/content/*.js</span></div>
+<div class="arch-box"><b>차트/실시간</b><span>D3 · Chart.js · SockJS+STOMP · Web Worker</span></div>
+</div>
+</div>
+
+<table>
+<tr><th>요소</th><th>내용</th></tr>
+<tr><td>라우팅</td><td><code>loader.js</code>가 URL <code>/{controller}/{action}/{id}</code>를 파싱 → <code>js/controller/{controller}.js</code> 동적 로딩(History API)</td></tr>
+<tr><td>템플릿</td><td>Handlebars 4.7.7 문자열이 <code>template/{테마}/content/*.js</code>에 내장. 활성 테마 <code>GBL.DESIGN.THEME="thync"</code></td></tr>
+<tr><td>실시간</td><td>SockJS 1.5.0 + STOMP 1.7.1로 파형 수신, Web Worker(<code>window-worker</code>)에서 차트 데이터 가공</td></tr>
+<tr><td>캐시 무효화</td><td>빌드 없이 <code>?V=버전</code> 쿼리스트링(<code>index-init.js?V=...patchadd.031...</code>)</td></tr>
+<tr><td>도메인 분기</td><td><code>dashboard.seersthync.com</code>→중앙모니터(<code>full-monitoring</code>), <code>alarm.seersthync.com</code>→알람보드(<code>alarm-monitoring</code>)</td></tr>
+<tr><td>API 베이스</td><td><code>{host}/mobiCAREConsole/API</code>. 온프레는 동일 호스트 http(:8080)/https(:8443) 자동 판별</td></tr>
+<tr><td>등급별 렌더링</td><td>NURSE=2 / DOCTOR=5 / MANAGER=8 로 상단 메뉴 조건부 노출(<code>header.js</code>)</td></tr>
+</table>
+
+<h2 id="realtime">5. 실시간 스트리밍 아키텍처</h2>
+
+<p>실시간 파형·이벤트는 <b>SockJS + STOMP over WebSocket</b>(<code>/ws</code>, permitAll)로 콘솔에 전송됩니다. 게이트웨이 수신은 <b>Netty TCP</b>가 담당하고, 콘솔로의 브로드캐스트는 STOMP 토픽으로 분리됩니다.</p>
+
+<div class="arch">
+<div class="arch-row">
+<div class="arch-box plain"><b>게이트웨이</b><span>Netty TCP 수신</span></div>
+<div class="arch-box"><b>수신·분석 파이프라인</b><span>저장 · AI 부정맥 · 알람 판정</span></div>
+<div class="arch-box plain"><b>STOMP 브로커</b><span>파형 토픽 · 이벤트 버스 토픽</span></div>
+<div class="arch-box"><b>콘솔(FE)</b><span>SockJS+STOMP 구독</span></div>
+</div>
+</div>
+
+<table>
+<tr><th>요소</th><th>내용</th></tr>
+<tr><td>수신 서버</td><td>Netty 4.1.65 — 게이트웨이 생체신호 TCP 수신, HL7 MLLP TCP 서버 겸용</td></tr>
+<tr><td>콘솔 전송</td><td>Spring WebSocket/messaging 5.2.15 + SockJS(폴백) + STOMP</td></tr>
+<tr><td>토픽 구성</td><td>실시간 <b>파형 토픽</b>과 <b>이벤트 버스 토픽</b>(알람·이벤트) 분리 <span class="sub">(추정: 파형/이벤트 채널 이원화)</span></td></tr>
+<tr><td>스트림 서버 분리</td><td><code>/API/Server/SelectAPIServer</code>(인증 제외)로 클라이언트가 접속할 스트림/API 서버를 조회 → 수신·스트리밍 서버 분리 배치 가능</td></tr>
+<tr><td>Kafka 옵션</td><td><code>biosignal.stream</code> 토픽(온프레 기본 비활성, 클라우드 <code>.dev</code>)으로 신호 스트림 버스 확장 가능</td></tr>
+<tr><td>최신값 캐시</td><td>실시간 화면 초기 렌더용 최신값 캐시 테이블 10종을 병행 갱신</td></tr>
+</table>
+
+<h2 id="data">6. 데이터 아키텍처 (샤딩)</h2>
+
+<p>고빈도 시계열 데이터를 단일 테이블 비대화 없이 처리하기 위해 <b>3종 샤딩(주차/순번·해시·연 단위)</b>을 병행합니다. 측정 세션 메타(<code>measurement_info</code>)의 <code>shard</code>(연도)·<code>part</code>(0~100) 컬럼이 각 세션의 샤드 위치를 라우팅합니다.</p>
+
+<table>
+<tr><th>샤딩 유형</th><th>명명 규칙</th><th>대상 (종수 × 100)</th><th>물리</th></tr>
+<tr><td>주차/순번 샤드</td><td><code>&lt;name&gt;_YYYY_NNNN</code> (0000~0099)</td><td>고빈도 시계열 14종 — activity_level·spo2·heart_rate·ecg_json_data·resp·resp_signal_data·ews·st_segment·pvc_count·ppg_raw_data·gr_ac_json_data·bio_signal_trend·bio_signal_summary_trend·analysis_arrhythmia</td><td>1,400</td></tr>
+<tr><td>해시 샤드</td><td><code>&lt;name&gt;_00NN</code> (0000~0099)</td><td>파일 수신 상태 3종(측정코드당 1행, UNIQUE) — ecg_raw_data_info·ecg_json_data_info·gr_ac_data_info</td><td>300</td></tr>
+<tr><td>연 단위 샤드</td><td><code>&lt;name&gt;_YYYY</code></td><td>temperature·device_status_info·bio_signal_event·arrhythmia_alarm·bio_signal_last_simple_data (5종)</td><td>연 5</td></tr>
+<tr><td>단일 테이블</td><td>—</td><td>조직·환자·장비·연동·로그 등 나머지</td><td>147(논리)</td></tr>
+</table>
+
+<p>주차/순번 샤드는 <b>초당 다건 유입되는 파형·수치</b>의 단일 테이블 비대화를 막고, 해시 샤드는 <b>고빈도 UPDATE(수신 오프셋 갱신)</b>를 분산합니다. 모든 시계열 샤드는 <code>measurement_info.measurement_code</code>를 FK(ON DELETE CASCADE)로 참조하므로, 측정 세션 삭제 시 관련 시계열이 일괄 삭제됩니다.</p>
+
+<table>
+<tr><th>요소</th><th>내용</th></tr>
+<tr><td>라우팅 키</td><td><code>measurement_info.shard</code>(연도) + <code>part</code>(0~100)로 세션별 샤드 결정</td></tr>
+<tr><td>최신값 캐시</td><td>ECG/SpO2/체온/ST/혈압/혈당 등 최신값 테이블 10종 — 실시간 화면 응답 가속</td></tr>
+<tr><td>ECG 파일</td><td>raw·JSON 원본을 온프레 <code>LOCAL</code>(<code>ecg/</code> 디렉토리) / 클라우드 <code>S3</code>에 저장. <code>file.gep.seconds</code>(60/180/720)로 분할</td></tr>
+<tr><td>보존</td><td>기본 90일(<code>data.retention.days</code>). <code>old.data.delete.type=1</code>이면 만료 데이터·파일 삭제</td></tr>
+<tr><td>커넥션 풀</td><td>HikariCP write 풀(pool 40) 기본. read 풀은 클라우드·일부 병원(RDS 리더 분리)만 활성</td></tr>
+</table>
+
+<h2 id="security">7. 인증 · 보안 아키텍처</h2>
+
+<p>인증은 Spring Security가 아니라 <b>커스텀 액세스 토큰 + TokenInterceptor</b>가 담당합니다. Security는 세션 STATELESS·CSRF disable만 설정합니다. 토큰은 로그인(<code>/Account/Login</code>) 응답으로 발급되어 이후 모든 요청 헤더 <code>SX-Auth-Token</code>으로 전달되고, 캐시(<code>AccessTokenCacheService</code>)로 유효성이 검증됩니다.</p>
+
+<table>
+<tr><th>요소</th><th>내용</th></tr>
+<tr><td>토큰 전달 헤더</td><td><code>SX-Auth-Token</code> (호환: <code>x-auth-token</code>, <code>authorization</code>)</td></tr>
+<tr><td>검증</td><td><code>AccessTokenCacheService.isAvailableAccessToken()</code> — 캐시 기반</td></tr>
+<tr><td>인증 실패</td><td>HTTP 200 + 바디 <code>{result:false, error:241, message:...}</code> (에러 필드로 판별)</td></tr>
+<tr><td>CORS</td><td><code>allowedOrigin=*</code>, <code>allowCredentials=true</code>. 허용 헤더에 <code>SX-*</code> 계열(Auth-Token/Client-IP/API-Route/Secure-Code)</td></tr>
+<tr><td>WebSocket</td><td><code>/ws</code> permitAll(연결 후 동일 토큰 사용)</td></tr>
+<tr><td>세션 갱신</td><td>FE가 2시간 주기 <code>/AccountUtil/SessionRenew</code> 호출</td></tr>
+</table>
+
+<h4>인터셉터 제외 경로 (신뢰 경계 유의)</h4>
+<p>전 경로(<code>/**</code>)에 토큰 인터셉터를 적용하되, 아래 카테고리·경로는 <b>토큰 검사에서 제외</b>됩니다. 이는 장비/내부 호출을 위한 별도 신뢰 경계를 전제한 것으로, 네트워크 수준(방화벽·세그먼트)에서 보호되어야 합니다.</p>
+<table>
+<tr><th>구분</th><th>제외 대상</th></tr>
+<tr><td>카테고리 전체</td><td><code>/API/Admin/**</code>, <code>/API/Util/**</code>, <code>/API/Gateway/**</code>, <code>/API/Application/**</code>, <code>/API/Assignment/**</code>, <code>/API/Version/**</code>, <code>/API/Premium/**</code>, <code>/API/EzCareTech/**</code>, <code>/api/v1/**</code></td></tr>
+<tr><td>개별 개방</td><td>로그인·계정찾기(<code>/Account/Login</code>, <code>/AccountUtil/Found*</code>), <code>/Server/SelectAPIServer</code>, 일부 다운로드·알고리즘 조회 등</td></tr>
+</table>
+
+<div class="note"><b>보안 유의.</b> ① <code>Admin/Util/Gateway/Application/Premium/EzCareTech</code> 카테고리는 토큰 미검증이므로 <b>내부망·장비망 격리</b>가 전제되어야 합니다. ② 시크릿 코드(<code>SX-Secure-Code</code>) 및 특수 고정 토큰(헬스체크용)으로 토큰 검사를 우회하는 경로가 존재합니다. ③ 일부 온프레 프로파일에 AWS 액세스키·DB 자격증명이 평문 잔존합니다(값은 <code>********</code> 처리). 운영 시 자격증명 회수·경로 격리를 권고합니다.</div>
+
+<h2 id="integration">8. 연동 아키텍처 요약</h2>
+
+<p>API 서버는 병원 시스템·외부 서비스와 다양한 표준·프로토콜로 연동합니다. 연동은 <code>application.properties</code> 프로파일 플래그로 병원별 on/off 됩니다.</p>
+
+<table>
+<tr><th>연동</th><th>프로토콜/기술</th><th>용도</th><th>모듈</th></tr>
+<tr><td>EMR 전송</td><td>내부 인터페이스(<code>emr.enabled</code>)</td><td>측정·리포트 EMR 반영</td><td>emr</td></tr>
+<tr><td>HL7 v2</td><td>HAPI 2.3 · MLLP(TCP)</td><td>인터페이스 엔진 연동(HL7 v2.5)</td><td>ack</td></tr>
+<tr><td>DICOM(PACS)</td><td>dcm4che 5.23 · C-STORE</td><td>ECG 리포트 DICOM 전송(원격 AE)</td><td>storage/emr</td></tr>
+<tr><td>Oracle HIS</td><td>ojdbc8 · JDBC 직결</td><td>병원 HIS 환자·의료진 조회</td><td>his</td></tr>
+<tr><td>mobiCARE Cardio</td><td>HTTPS(OkHttp/Retrofit)</td><td>홀터 리포트 연동</td><td>cardio</td></tr>
+<tr><td>SkyLabs(CART-ON)</td><td>HTTPS(<code>api.cart-on.io</code>)</td><td>부정맥 분석 연동</td><td>skylabs</td></tr>
+<tr><td>이지케어텍</td><td>OAuth client_credentials</td><td>EMR 게이트 연동</td><td>ezcaretech</td></tr>
+<tr><td>Firebase</td><td>firebase-admin 8.1.0</td><td>모바일 푸시(H-Connect)</td><td>push</td></tr>
+<tr><td>SFTP</td><td>jsch 0.2.8</td><td>ACK ECG 리포트 전송</td><td>ack</td></tr>
+<tr><td>프리미엄 사용량</td><td>HTTPS(<code>*.seersthync.com</code>)</td><td>온프레→클라우드 일일 사용량 전송</td><td>premium</td></tr>
+</table>
+<p>상세 규격(메시지 포맷·필드 매핑·스케줄)은 <b>외부 연동 정의서</b>를 참조하세요.</p>
+
+<h2 id="topology">9. 확장 · 배포 토폴로지</h2>
+
+<p>배포는 <b>온프레미스</b>(병원별 원내 서버)와 <b>클라우드</b>(AWS) 두 토폴로지로 나뉩니다. 동일 WAR에 프로파일이 내장되어 <code>spring.profiles.active</code> 한 줄로 전환됩니다.</p>
+
+<table>
+<tr><th>축</th><th>온프레미스</th><th>클라우드</th></tr>
+<tr><td>DB</td><td>로컬 MySQL(단일)</td><td>Aurora RDS(write/read 풀 분리)</td></tr>
+<tr><td>캐시</td><td>로컬 Redis</td><td>ElastiCache(test)</td></tr>
+<tr><td>파일</td><td>LOCAL 디스크</td><td>S3</td></tr>
+<tr><td>스트림 버스</td><td>Kafka 비활성</td><td>Kafka <code>.dev</code> 토픽</td></tr>
+<tr><td>서버 분리</td><td>API+스트림 단일 서버(소규모)</td><td><code>SelectAPIServer</code>로 API/스트림 서버 분리 조회</td></tr>
+</table>
+
+<h4>확장 포인트</h4>
+<table>
+<tr><th>확장 축</th><th>수단</th></tr>
+<tr><td>읽기 부하</td><td>read HikariCP 풀 + RDS 리더로 조회 분산</td></tr>
+<tr><td>쓰기/시계열 부하</td><td>주차·해시 샤딩으로 물리 테이블 분산(단일 DB 내)</td></tr>
+<tr><td>수신/스트리밍</td><td>Netty 수신 서버와 스트림 서버 분리, <code>SelectAPIServer</code>로 클라이언트 라우팅</td></tr>
+<tr><td>파일 저장</td><td>LOCAL↔S3 스토리지 추상화(<code>storage</code> 모듈)로 전환</td></tr>
+<tr><td>다기관</td><td>기관코드(<code>organization_code</code>) 논리 분리 + 프로파일별 WAR</td></tr>
+</table>
+
+<p>런타임 디렉토리·운영 플래그·프로파일 상세는 <b>설치·배포 정의서</b> 및 <b>환경설정 정의서</b>에서 다룹니다.</p>
+
+<div class="footer">thynC Operations · 내부 산출물 · thync_1.3.0 문서 세트 · 2026-07-18 작성 · 소스 역공학 기반</div>

@@ -1,0 +1,546 @@
+<title>기능정의서 — 서비스 콘솔(의료진 모니터링)</title>
+<style>
+:root{--ink:#1a2332;--sub:#5a6a7e;--line:#dde4ec;--bg:#fff;--accent:#0b6bcb;--accent-soft:#eaf3fc;--head-bg:#f5f8fb;--warn-bg:#fff7e6;--warn-line:#f0c36d;--ok:#1a7f37}
+*{box-sizing:border-box}
+body{margin:0;padding:32px 40px 80px;background:var(--bg);color:var(--ink);font-family:'Pretendard','Pretendard Variable',-apple-system,'Segoe UI','Malgun Gothic',sans-serif;font-size:14.5px;line-height:1.65;max-width:1080px;margin-left:auto;margin-right:auto}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.5px}
+h2{font-size:19px;margin:44px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--ink);letter-spacing:-.3px}
+h3{font-size:16px;margin:28px 0 10px}
+h4{font-size:14.5px;margin:20px 0 8px;color:var(--sub)}
+p{margin:8px 0}
+code{background:var(--accent-soft);color:var(--accent);padding:1px 5px;border-radius:4px;font-family:'D2Coding',Consolas,monospace;font-size:13px}
+pre{background:#f6f8fa;border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.5}
+pre code{background:none;color:inherit;padding:0}
+table{border-collapse:collapse;width:100%;margin:12px 0 20px;font-size:13.5px}
+th{background:var(--head-bg);border:1px solid var(--line);padding:7px 10px;text-align:left;font-weight:600;white-space:nowrap}
+td{border:1px solid var(--line);padding:6px 10px;vertical-align:top}
+tr:nth-child(even) td{background:#fafcfe}
+.doc-meta{border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:20px 0 8px;background:var(--head-bg)}
+.doc-meta table{margin:0;font-size:13px}
+.doc-meta td,.doc-meta th{border:none;padding:3px 14px 3px 0;background:none!important}
+.doc-meta th{color:var(--sub);font-weight:600;width:120px}
+.toc{background:var(--accent-soft);border-radius:10px;padding:16px 24px;margin:24px 0}
+.toc ol{margin:6px 0;padding-left:22px}
+.toc a{color:var(--accent);text-decoration:none}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent);margin-right:4px}
+.badge.get{background:#e6f4ea;color:#1a7f37}
+.badge.post{background:#eaf3fc;color:#0b6bcb}
+.badge.put{background:#fff7e6;color:#9a6700}
+.badge.del{background:#ffebe9;color:#cf222e}
+.note{background:var(--warn-bg);border-left:4px solid var(--warn-line);padding:10px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:13.5px}
+.sub{color:var(--sub);font-size:13px}
+.arch{display:flex;flex-direction:column;gap:10px;margin:18px 0}
+.arch-row{display:flex;gap:10px;flex-wrap:wrap}
+.arch-box{border:1.5px solid var(--accent);border-radius:10px;padding:10px 14px;background:var(--accent-soft);flex:1;min-width:140px;text-align:center}
+.arch-box.plain{border-color:var(--line);background:var(--head-bg)}
+.arch-box b{display:block;font-size:13.5px}
+.arch-box span{font-size:12px;color:var(--sub)}
+.footer{margin-top:60px;padding-top:16px;border-top:1px solid var(--line);color:var(--sub);font-size:12.5px}
+</style>
+
+<h1>기능정의서 — 서비스 콘솔(의료진 모니터링)</h1>
+<p class="sub">thynC 환자 감시 솔루션 · 산출물 세트 <b>thync_1.3.0</b></p>
+
+<div class="doc-meta">
+<table>
+<tr><th>문서 성격</th><td>소프트웨어 기능정의서 (의료진용 콘솔)</td></tr>
+<tr><th>대상 제품</th><td>thynC IP2140 (mobiCARE Console) — 백엔드 <code>thync-api-onpremise 01.01.431</code></td></tr>
+<tr><th>작성일</th><td>2026-07-18</td></tr>
+<tr><th>작성 근거</th><td>운영 배포 산출물(WAR·프론트엔드·DB 스키마) 역공학 기반 재구성</td></tr>
+<tr><th>버전</th><td>thync.service M1.3.0 patchadd 031</td></tr>
+</table>
+</div>
+
+<div class="note"><b>문서 성격 안내.</b> 본 문서는 기존 기획·설계 산출물이 부재한 상태에서, 실제 운영 중인 소스(백엔드 WAR 디컴파일, 프론트엔드 소스, DB DDL)를 분석해 <b>사후 재구성</b>한 것입니다. 소스에서 직접 확인된 사실을 기준으로 하되, 명칭·의도가 코드에서 명확하지 않은 항목은 <span class="sub">(추정)</span>으로 표기합니다.</div>
+
+<div class="toc">
+<b>목차</b>
+<ol>
+<li><a href="#overview">개요 — 제품·사용자·기술·인증·권한·기능토글</a></li>
+<li><a href="#sitemap">사이트맵 (전체 화면 계층)</a></li>
+<li><a href="#login">로그인</a></li>
+<li><a href="#gnb">상단 메뉴바 (GNB)</a></li>
+<li><a href="#patient">환자관리 — 병상설정 / 환자등록 / 측정이력</a></li>
+<li><a href="#device">의료기기 관리</a></li>
+<li><a href="#monitoring">모니터링 (중앙 실시간)</a></li>
+<li><a href="#patient-detail">모니터링 — 환자 상세 (바이탈/검토/기록실/보고서/알람설정)</a></li>
+<li><a href="#dashboard-setting">중앙모니터 설정</a></li>
+<li><a href="#full-monitoring">중앙모니터 (대시보드)</a></li>
+<li><a href="#alarm-board">알람 모니터링 보드</a></li>
+<li><a href="#simple-monitoring">간이 모니터링</a></li>
+<li><a href="#admin">관리자 설정 9종</a></li>
+<li><a href="#remote">원격협진</a></li>
+<li><a href="#mypage">마이페이지 (계정 설정)</a></li>
+<li><a href="#common">공통 기능 — 세션/다국어/컴포넌트/실시간</a></li>
+<li><a href="#appendix">부록 — 화맵 ↔ 주요 API 매핑 요약표</a></li>
+</ol>
+</div>
+
+<h2 id="overview">1. 개요</h2>
+
+<h3>1.1 제품 및 대상 사용자</h3>
+<p>thynC는 SEERS사(씨어스테크놀로지)의 병원 입원환자용 <b>무선 웨어러블 생체신호 실시간 모니터링 솔루션</b>이며, 본 문서가 다루는 <b>서비스 콘솔(thync.service)</b>은 그중 <b>의료진용 중앙 모니터링 웹 콘솔</b>입니다. 병동의 간호사·의사·병원관리자가 환자 병상 배정, 실시간 중앙 모니터링, 부정맥·낙상 알람 대응, 측정이력·보고서 열람, 관리자 설정을 수행합니다.</p>
+
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>대상 사용자</td><td>간호사(NURSE) · 의사(DOCTOR) · 병원관리자(MANAGER)</td></tr>
+<tr><td>제품 모델</td><td>thynC IP2140 (품목허가 제인 23-5092호)</td></tr>
+<tr><td>사용자 매뉴얼</td><td>ST-M6200-UM-KR Rev.6 (2025-11-26, 54p)</td></tr>
+<tr><td>화면 표기 버전</td><td><code>M1.3.0</code> · ⓒ 2025 seerstech</td></tr>
+<tr><td>정밀 버전</td><td><code>0.4.0-202406101604.thync-M1.3.0(001)-...patchadd.031.260714</code></td></tr>
+</table>
+
+<h3>1.2 기술 개요</h3>
+<table>
+<tr><th>구분</th><th>내용</th></tr>
+<tr><td>아키텍처</td><td>프레임워크 없는 <b>Vanilla JS SPA</b> (자체 "seers frontframework for vanilla"). 빌드/번들링 없음 — ES 모듈 dynamic <code>import()</code> + 자체 로더</td></tr>
+<tr><td>라우팅</td><td>History API SPA. <code>index.html</code> → <code>js/index-init.js</code> → <code>js/common/loader.js</code>가 URL <code>/{controller}/{action}/{id}</code>를 파싱해 <code>js/controller/{controller}.js</code> 동적 로딩</td></tr>
+<tr><td>화면 템플릿</td><td>Handlebars 4.7.7 문자열 (<code>template/{테마}/content/*.js</code>). 활성 테마 <code>GBL.DESIGN.THEME = "thync"</code></td></tr>
+<tr><td>주요 라이브러리</td><td>jQuery 3.5.1 / jQuery UI 1.12.1, Bootstrap 3.3.2, D3 · Chart.js(파형·트렌드), SockJS 1.5.0 + STOMP 1.7.1(실시간), exceljs(엑셀), fili(필터), asmCrypto, coloris, Web Worker(차트 데이터 가공)</td></tr>
+<tr><td>API 베이스</td><td><code>{host}/mobiCAREConsole/API</code> — 운영 <code>https://www.api.seersthync.com</code>, 온프레미스는 같은 호스트 <code>:8080</code>(http)/<code>:8443</code>(https) 자동 판별</td></tr>
+<tr><td>배포</td><td>정적 파일 서빙. <code>deploy-server.sh</code>가 서버에서 <code>git fetch</code> + <code>git reset --hard</code>. 캐시 무효화는 <code>?V=버전</code> 쿼리스트링</td></tr>
+</table>
+
+<h3>1.3 도메인별 기본 화면 분기</h3>
+<p>접속 도메인에 따라 기본 진입 컨트롤러가 달라집니다.</p>
+<table>
+<tr><th>접속 도메인</th><th>기본 화면</th><th>용도</th></tr>
+<tr><td>일반(콘솔)</td><td><code>patient/index</code> (병상설정)</td><td>의료진 콘솔 전체</td></tr>
+<tr><td><code>dashboard.seersthync.com</code></td><td><code>full-monitoring</code></td><td>중앙모니터 전용(스테이션 대형 모니터)</td></tr>
+<tr><td><code>alarm.seersthync.com</code></td><td><code>alarm-monitoring</code></td><td>알람 전용 전광판</td></tr>
+</table>
+
+<h3>1.4 인증 흐름</h3>
+<div class="arch">
+<div class="arch-row">
+<div class="arch-box"><b>로그인</b><span>/Account/Login (HIS 시 /Account/LoginHIS)</span></div>
+<div class="arch-box"><b>토큰 저장</b><span>응답 accessToken → 쿠키</span></div>
+<div class="arch-box"><b>API 요청</b><span>헤더 SX-Auth-Token + SX-Client-IP</span></div>
+</div>
+<div class="arch-row">
+<div class="arch-box plain"><b>세션 갱신</b><span>2h 주기 /AccountUtil/SessionRenew</span></div>
+<div class="arch-box plain"><b>WebSocket</b><span>동일 토큰으로 STOMP 연결</span></div>
+<div class="arch-box plain"><b>만료·잠금</b><span>SESSION_CLOSED / ACCOUNT_LOCKED / ORGANIZATION_LOCKED → 자동 로그아웃</span></div>
+</div>
+</div>
+<p class="sub">아이디 기억 쿠키 30일. 비밀번호 찾기 <code>/AccountUtil/FoundAccountPassword</code>. 페이지 새로고침 시 쿠키에서 토큰 복원(REFRESH_SET).</p>
+
+<h3>1.5 계정 등급 (권한)</h3>
+<table>
+<tr><th>등급</th><th>코드값</th><th>조회 범위</th><th>노출 메뉴</th></tr>
+<tr><td>간호사 NURSE</td><td>2</td><td>소속 병동만</td><td>환자관리·의료기기·모니터링·중앙모니터 설정·마이페이지</td></tr>
+<tr><td>의사 DOCTOR</td><td>5</td><td>전 병동 조회</td><td>간호사 메뉴 동일 (전 병동)</td></tr>
+<tr><td>관리자 MANAGER</td><td>8</td><td>전 병동 + 관리</td><td>위 전체 + <b>관리자 설정</b> 메뉴 추가</td></tr>
+</table>
+<p class="sub">상단 메뉴는 등급값 기준 조건부 렌더링(<code>js/module/layout/template/thync/header.js</code>).</p>
+
+<h3>1.6 기능 토글 (FUNCTION_ENVIRONMENT)</h3>
+<p>로그인 후 <code>/Global/SelectGlobalSetting</code>으로 기관별 기능 활성/비활성을 로딩합니다.</p>
+<table>
+<tr><th>토글</th><th>설명</th></tr>
+<tr><td>REMOTE_CONSULTATION</td><td>원격협진 메뉴 노출 및 외부 링크(<code>LINK.URL</code>) 연결</td></tr>
+<tr><td>PRIVACY_ENHANCEMENT</td><td>개인정보 강화 — 로그인 실패 메시지 상세/일반 분기 등</td></tr>
+<tr><td>MULTI_LANGUAGE</td><td>다국어(ko-KR / en-US) — 헤더 언어 전환 노출</td></tr>
+<tr><td>BEEP (YELLOW/BLUE/FALL_BED)</td><td>알람 사운드 사용 여부(색상별 토글)</td></tr>
+<tr><td>FALL_BED</td><td>낙상 감지 알람 사용</td></tr>
+<tr><td>RTLS</td><td>실시간 위치(Real-Time Location) 표시</td></tr>
+<tr><td>RING / CHARM</td><td>반지형 · 참케어(H2-ABPM) 혈압계 지원</td></tr>
+<tr><td>UDI 표시</td><td>버전 모달의 UDI 바코드·허가·제조번호 표시</td></tr>
+<tr><td>EMR 연동</td><td>EMR 스트립 전송·연동주기 설정</td></tr>
+</table>
+
+<h2 id="sitemap">2. 사이트맵 (전체 화면 계층)</h2>
+<p>라우팅 형식: <code>/{controller}/{action}</code> · 기본 진입 <code>patient/index</code>.</p>
+
+<table>
+<tr><th>대분류</th><th>화면</th><th>경로</th><th>컨트롤러</th><th>권한</th></tr>
+<tr><td colspan="2">로그인</td><td><code>/login/index</code></td><td>login.js</td><td>-</td></tr>
+<tr><td colspan="2">상단 메뉴바(GNB)</td><td>(공통 레이아웃)</td><td>header.js</td><td>-</td></tr>
+<tr><td rowspan="4">1. 환자관리</td><td>병상설정(기본화면)</td><td>/patient/index</td><td rowspan="4">patient.js</td><td rowspan="4">간호사↑</td></tr>
+<tr><td>환자등록</td><td>/patient/register</td></tr>
+<tr><td>측정이력</td><td>/patient/history</td></tr>
+<tr><td>측정이력 상세·레포트(온프레미스)</td><td>/onpremise-history · /onpremise-report</td></tr>
+<tr><td>2. 의료기기 관리</td><td>기기 목록·사용이력</td><td>/device/index</td><td>device.js</td><td>간호사↑</td></tr>
+<tr><td rowspan="2">3. 모니터링</td><td>중앙 실시간(카드/리스트/정렬/알람/검색)</td><td>/monitoring/index</td><td>monitoring.js</td><td>간호사↑</td></tr>
+<tr><td>환자 상세(바이탈/검토/기록실/보고서/알람설정)</td><td>/vital · /examine · /recording · /report · /alarm-setting</td><td>각 controller.js</td><td>간호사↑</td></tr>
+<tr><td>4. 중앙모니터 설정</td><td>모니터·레이아웃·대상 구성</td><td>/dashboard-setting/index</td><td>dashboard-setting.js</td><td>간호사↑</td></tr>
+<tr><td>(대시보드)</td><td>중앙모니터 실행(새 창)</td><td>/full-monitoring/select</td><td>full-monitoring.js</td><td>-</td></tr>
+<tr><td rowspan="9">5. 관리자 설정</td><td>5-1 기관정보</td><td>/admin-setting/organ</td><td>admin/organ.js</td><td rowspan="9"><b>관리자만</b></td></tr>
+<tr><td>5-2 계정설정</td><td>/admin-setting/user · userRegister</td><td>admin/user.js</td></tr>
+<tr><td>5-3 병동설정</td><td>/admin-setting/ward</td><td>admin/ward.js</td></tr>
+<tr><td>5-4 알람설정</td><td>/admin-setting/alarm</td><td>admin/alarm.js</td></tr>
+<tr><td>5-5 장치관리</td><td>/admin-setting/device</td><td>admin/device.js</td></tr>
+<tr><td>5-6 테마설정</td><td>/admin-setting/theme</td><td>admin/theme.js</td></tr>
+<tr><td>5-7 게이트웨이</td><td>/admin-setting/gateway</td><td>admin/gateway.js</td></tr>
+<tr><td>5-8 EMR</td><td>/admin-setting/emr</td><td>admin/emr.js</td></tr>
+<tr><td>5-9 중앙모니터</td><td>/admin-setting/dashboard</td><td>admin/dashboard-setting.js</td></tr>
+<tr><td>6. 원격협진</td><td>외부 링크(새 창)</td><td>FUNCTION_ENVIRONMENT.REMOTE_CONSULTATION.LINK.URL</td><td>-</td><td>토글 시</td></tr>
+<tr><td>7. 마이페이지</td><td>계정 정보·비밀번호</td><td>/mypage/index</td><td>mypage.js</td><td>전체</td></tr>
+<tr><td colspan="2">로그아웃</td><td>/logout</td><td>logout.js</td><td>-</td></tr>
+</table>
+
+<h4>전용 도메인 화면 (레이아웃 없는 독립 화면)</h4>
+<table>
+<tr><th>화면</th><th>경로</th><th>진입</th></tr>
+<tr><td>중앙모니터(대시보드) 전용</td><td>/full-monitoring/select</td><td>dashboard.seersthync.com</td></tr>
+<tr><td>알람 모니터링 보드</td><td>/alarm-monitoring/index</td><td>alarm.seersthync.com</td></tr>
+<tr><td>간이 모니터링</td><td>/simple-monitoring/select</td><td>태블릿·보조 디스플레이</td></tr>
+</table>
+
+<div class="note"><b>범위 참고.</b> 오류/설치 화면(<code>error.js</code>, <code>error.html</code>, <code>complete.html</code>)과 레거시·프레임워크 예제 잔재(<code>old-monitoring</code>, <code>thync-dashboard</code>, <code>sample-page</code> 등)는 운영 화면이 아니므로 본 정의서에서 제외합니다. 또한 매뉴얼 Rev.6의 "홀터처방" 화면은 이 소스(M1.3.0 patchadd 031)에는 <b>미포함</b>입니다.</div>
+
+<h2 id="login">3. 로그인</h2>
+<p class="sub"><code>js/controller/login.js</code> · 매뉴얼 2.1.1</p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>계정 인증 후 콘솔 진입</td></tr>
+<tr><td>주요 기능</td><td>아이디/비밀번호 입력 · <b>아이디 기억</b>(쿠키 30일) · 로그인 · 로그인 실패 경고(계정없음/비밀번호 불일치 — 기관 설정에 따라 상세/일반 메시지) · 계정 잠금·기관 잠금 처리 · 비밀번호 찾기</td></tr>
+<tr><td>표시 데이터</td><td>기관 로고(관리자 설정에서 변경, 기본 thynC), 소프트웨어 버전</td></tr>
+<tr><td>사용 API</td><td><span class="badge post">POST</span><code>/Account/Login</code>, <code>/Account/LoginHIS</code>(HIS SSO), <code>/AccountUtil/FoundAccountPassword</code>, <code>/Global/SelectGlobalSetting</code></td></tr>
+<tr><td>실시간 요소</td><td>없음</td></tr>
+</table>
+
+<h2 id="gnb">4. 상단 메뉴바 (GNB)</h2>
+<p class="sub"><code>js/module/layout/template/thync/header.js</code> · 매뉴얼 2.1.2 · 모든 콘솔 화면 공통</p>
+<table>
+<tr><th>요소</th><th>동작</th><th>노출 조건</th></tr>
+<tr><td>로고</td><td>기본 화면(병상설정) 이동. 기관 로고로 교체됨</td><td>항상</td></tr>
+<tr><td>환자관리</td><td>/patient/index 이동</td><td>간호사↑</td></tr>
+<tr><td>의료기기 관리</td><td>/device/index 이동</td><td>간호사↑</td></tr>
+<tr><td>모니터링</td><td>/monitoring/index 이동</td><td>간호사↑</td></tr>
+<tr><td>중앙모니터 설정</td><td>/dashboard-setting/index 이동</td><td>간호사↑</td></tr>
+<tr><td>관리자 설정</td><td>/admin-setting/* 이동</td><td><b>관리자만</b></td></tr>
+<tr><td>원격협진</td><td>외부 협진 시스템 새 창 오픈</td><td>REMOTE_CONSULTATION 토글 시</td></tr>
+<tr><td>접속 계정 명칭</td><td>로그인 계정 표시(마이페이지 진입)</td><td>항상</td></tr>
+<tr><td>언어 설정</td><td>한국어/English 전환(지구본 아이콘)</td><td>MULTI_LANGUAGE 시</td></tr>
+<tr><td>버전 버튼</td><td>UDI 정보 모달(허가번호·제조번호·UDI 바코드)</td><td>항상</td></tr>
+<tr><td>로그아웃</td><td>/logout 이동(<code>/Account/Logout</code>)</td><td>항상</td></tr>
+</table>
+
+<h2 id="patient">5. 환자관리</h2>
+
+<h3>5.1 병상설정</h3>
+<p class="sub"><code>/patient/index</code> · <code>template/thync/content/patient.js</code> (index) · 매뉴얼 2.1.3-① · <b>로그인 직후 기본 화면</b></p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>접속 계정 병동의 병실·병상 현황판</td></tr>
+<tr><td>주요 기능</td><td>병동 선택 · 환자명/환자번호 검색(→ 상세 모니터링 이동) · 병실별 환자 현황 카드 · 병실 미배정 환자 목록 · <b>드래그&드롭 병상 배정/이동</b>(빈 병상 이동·배정 확인 알림, 맞바꾸기 금지) · 신규환자등록 버튼 · 측정 종료 · (모달) 장치검색·병상이동·측정종료</td></tr>
+<tr><td>표시 데이터</td><td>병동/병실/병상 구조, 환자(이름·성별·나이·환자코드), 측정 상태(대기/측정중/완료/종료), 모니터링 현황 바(사용 병상 수/전체 병상 수)</td></tr>
+<tr><td>사용 API</td><td><code>/Manager/SelectWard</code>, <code>/Manager/SelectSickRoom</code>, <code>/Manager/SelectSickBed</code>, <code>/Measurement/SelectMeasurementInfoList</code>, <code>/Measurement/SelectSickRoomPatientList</code>, <code>/Measurement/UpdateMeasurementInfo</code>(병상 변경), <code>/Measurement/UpdateMeasurementInfoStatus</code>(측정 종료)</td></tr>
+<tr><td>실시간 요소</td><td>STOMP <code>/topic/public/event</code> 수신(측정 등록/변경·병동 변경 등) 시 화면 갱신</td></tr>
+</table>
+
+<h3>5.2 환자등록</h3>
+<p class="sub"><code>/patient/register</code> · 매뉴얼 2.1.3-②</p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>환자 정보 및 착용 측정기기 등록</td></tr>
+<tr><td>환자 정보 입력</td><td>(필수값 검증) 환자등록번호(MRN) · 이름 · 성별 · 생년월일 · 병동/병실/병상 선택</td></tr>
+<tr><td>옵션 플래그</td><td><b>낙상</b>(사용 시 낙상 발생 시각·청각 알람) · <b>Patient Paced</b>(심박조율기) · <b>DNR</b>(연명치료 중단) · <b>Infants under 10kg</b>(10kg 미만 소아)</td></tr>
+<tr><td>측정기기 등록</td><td>장치 검색 모달(누적사용 횟수/시간 정렬) · 시리얼번호 직접 입력(형식 검증: 알파벳 A/C/P + 숫자 6자리) · ECG 다중 리드 추가(Lead II 선등록 후 I/III) · 참케어 혈압계 측정 주기(수동) 설정 · 반지형 혈압계 지원</td></tr>
+<tr><td>기타</td><td>수기 메모, HIS 환자 정보 가져오기(현재 비활성)</td></tr>
+<tr><td>사용 API</td><td><code>/Measurement/InsertMeasurementInfo</code>, <code>/Measurement/InsertDeviceInfo</code>, <code>/Measurement/UpdateDeviceInfo</code>, <code>/Measurement/DeleteDeviceInfo</code>, <code>/Device/SelectDeviceRegisterUnusedPage</code>, <code>/Device/SelectDeviceUsageList</code>, <code>/Doctor/SelectHisPatientList</code>(HIS), <code>/BioSignal/InsertBloodPressure</code>(수동 혈압)</td></tr>
+<tr><td>실시간 요소</td><td>등록 직후 게이트웨이 자동 매칭 상태를 이벤트 토픽으로 반영</td></tr>
+</table>
+
+<h3>5.3 측정이력</h3>
+<p class="sub"><code>/patient/history</code> (온프레미스 변형 historyForOnpremise) · 매뉴얼 2.1.3-③</p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>측정 완료 환자의 측정 기간 목록 조회 (종료 후 30일까지)</td></tr>
+<tr><td>주요 기능</td><td>종료 7일 이내 항목 → <b>상세보기</b> 이동(7일 초과~30일은 회색 비활성) · 환자명/환자코드 검색 · 병동·병실 필터 · 측정 시작/종료 날짜 검색</td></tr>
+<tr><td>상세·레포트</td><td>온프레미스 전용 <code>/onpremise-history</code>·<code>/onpremise-report</code>(레이아웃 없는 열람 화면): 종료 측정의 파형·이벤트·트렌드 열람과 레포트 생성/인쇄·이미지 저장</td></tr>
+<tr><td>사용 API</td><td><code>/Measurement/SelectMeasurementInfoPage</code>, <code>/Measurement/SelectMeasurementInfoDetail</code>, (상세) <code>/BioSignal/SelectBioSignalEventSimplePage</code>, <code>/BioSignal/SelectBioSignalsTrendDataPage</code>, <code>/BioSignal/SelectEcgRawData</code>, <code>/BioSignal/SelectEcgRawDataIndex</code></td></tr>
+<tr><td>실시간 요소</td><td>없음 (종료 데이터 조회)</td></tr>
+</table>
+
+<h2 id="device">6. 의료기기 관리</h2>
+<p class="sub"><code>/device/index</code> · <code>template/thync/content/device.js</code> · 매뉴얼 2.1.4</p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>등록된 웨어러블 의료기기 조회 및 누적 사용이력 확인 (조회 중심 — 등록/이동은 관리자 설정&gt;장치관리)</td></tr>
+<tr><td>주요 기능</td><td>병동별/종류별 기기 목록 · 시리얼 검색 · 통계(종류별 수량) · <b>기기별 사용 이력 조회 모달</b>(사용 환자·기간·누적사용 횟수/시간)</td></tr>
+<tr><td>표시 데이터</td><td>기기 종류(MC200M 심전계 / MP100W 펄스옥시미터 / MT100D 체온계 / H2-ABPM 참케어 혈압계 / SL-MPF1K07 반지형 혈압계 — S/N 첫자리로 자동 분류), 상태, 배터리</td></tr>
+<tr><td>사용 API</td><td><code>/Device/SelectDeviceRegisterPage</code>, <code>/Device/SelectDeviceRegisterCount</code>, <code>/Device/SelectDeviceUsageList</code></td></tr>
+<tr><td>실시간 요소</td><td>장치 상태 변경 이벤트(DEVICE_ALARM=80) 수신</td></tr>
+</table>
+
+<h2 id="monitoring">7. 모니터링 (중앙 실시간)</h2>
+<p class="sub"><code>/monitoring/index</code> · <code>template/thync/content/monitoring.js</code>·<code>monitoring/*.js</code> · 매뉴얼 2.1.5 · <b>핵심 실시간 화면</b></p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>병동 전체 환자의 생체신호 실시간 중앙 모니터링</td></tr>
+</table>
+
+<h4>7.1 화면 기능 (버튼·동작 단위)</h4>
+<table>
+<tr><th>기능</th><th>동작</th></tr>
+<tr><td>정렬 전환</td><td><b>실시간 위험도 순</b>(Red &gt; Yellow &gt; 정상) / <b>병실별</b></td></tr>
+<tr><td>보기 전환</td><td>카드뷰 / 리스트뷰(<code>mode=list</code>)</td></tr>
+<tr><td>전체 알람(모달)</td><td>기간 조회 · 발생 알람 최신순 정렬 · 건수 표시</td></tr>
+<tr><td>최근 알람</td><td>24시간 이내 발생 알람</td></tr>
+<tr><td>환자 검색</td><td>이름 / 환자코드</td></tr>
+<tr><td>신규환자등록</td><td>환자등록 화면 진입</td></tr>
+<tr><td>모니터링 현황 바</td><td>측정 병상 / 전체 병상(%) 표시</td></tr>
+<tr><td>알람 일시정지(Pause)</td><td>카드별 알람 사운드·표시 일시정지</td></tr>
+<tr><td>알람 확인(Clear)</td><td>발생 알람 확인 처리</td></tr>
+<tr><td>카드 상태 표시</td><td>알람 시 깜빡임(blink)·색상, 낙상 Red, Stand by(검사 일시중단)/등록 장치 없음/빈 병상(신규등록 진입)</td></tr>
+<tr><td>환자 상세 진입</td><td>카드 클릭 → 상세 모니터링</td></tr>
+</table>
+
+<h4>7.2 표시 데이터</h4>
+<p>병상번호·환자정보, ECG 파형(전 리드), HR, RESP, SpO2, TEMP, NBP(SYS/DIA/MAP), EWS, PVCs/min, 부정맥명, 장치 연결상태(LEAD ON/OFF, Connect/Disconnect), 배터리 부족.</p>
+
+<h4>7.3 사용 API</h4>
+<p><code>/Measurement/SelectMeasurementInfoList</code>, <code>/Measurement/SelectDeviceLastData</code>, <code>/Measurement/SelectArrhythmiaAlarmList</code>, <code>/Measurement/UpdateMeasurementInfoAlarmStatus</code>(알람 확인), <code>/Measurement/UpdateMeasurementInfoResponseStatus</code>(대응 상태), <code>/Measurement/UpdateMeasurementFallResponseStatus</code>(낙상 대응), <code>/BioSignal/SelectTemperatureLast</code>, <code>/BioSignal/SelectSpO2Last</code>, <code>/BioSignal/SelectBloodPressureList</code>, <code>/Server/SelectAPIServer</code>(스트림 서버 목록).</p>
+
+<h4>7.4 실시간 요소</h4>
+<p>SockJS + STOMP. 파형 스트림 <code>/topic/public/allLeads/bioSignalData/{measurementCode}</code>(간이 <code>…/bioSignalSimpleData/…</code>), 이벤트 <code>/topic/public/event</code>(측정=10, 병동=20, 알람=30, 일시정지=50, 공지=60, 장치=80, 낙상대응=101, 중앙모니터 레이아웃/병상 200~204). D3 실시간 파형 렌더 + Web Worker 데이터 가공. 청각 알람(beep) Red/Yellow/(Blue)/낙상.</p>
+
+<h2 id="patient-detail">8. 모니터링 — 환자 상세</h2>
+<p class="sub">subHeader + 좌측 사이드 메뉴 4탭 · 매뉴얼 2.2.4 상세 보기와 동일 구성</p>
+
+<h4>8.1 상세 상단바 (subHeader)</h4>
+<table>
+<tr><th>버튼/요소</th><th>동작</th></tr>
+<tr><td>뒤로가기</td><td>모니터링 목록 복귀</td></tr>
+<tr><td>환자 요약 정보</td><td>선택 환자 기본 정보 표시</td></tr>
+<tr><td>최근 알람</td><td>해당 환자 최근 알람 조회</td></tr>
+<tr><td>알람 일시정지 토글</td><td>환자별 알람 Pause</td></tr>
+<tr><td>알람설정</td><td>환자별 알람설정 화면 진입</td></tr>
+<tr><td>환자정보 수정</td><td>환자 정보 수정 진입</td></tr>
+</table>
+
+<h3>8.2 바이탈</h3>
+<p class="sub"><code>/vital/index</code> · <code>js/controller/vital.js</code></p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>선택 환자 바이탈 확대 실시간 뷰</td></tr>
+<tr><td>기능/데이터</td><td>전 리드 ECG 파형 확대 · HR/RESP/SpO2/TEMP/BP 수치 · 부정맥·낙상 알람 표시 · 혈압 측정 목록(수동 입력/수정/삭제 — 참케어·반지형)</td></tr>
+<tr><td>사용 API</td><td><code>/Measurement/SelectMeasurementInfoDetail</code>, <code>/BioSignal/SelectBloodPressurePage</code>, <code>/BioSignal/Insert·Update·DeleteBloodPressure</code>, <code>/BioSignal/SelectRecentStSegmentInfo</code>, <code>/BioSignal/SelectRecentMultiStSegmentInfo</code>(ST)</td></tr>
+<tr><td>실시간 요소</td><td>bioSignalData 스트림 구독(해당 measurementCode)</td></tr>
+</table>
+
+<h3>8.3 검토</h3>
+<p class="sub"><code>/examine/index</code> · <code>js/controller/examine.js</code>, monitoring/review.js</p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>측정 신호에 포함된 이상신호(부정맥 이벤트) 조회·검토</td></tr>
+<tr><td>기능</td><td>기간/리드 선택 · 트렌드 차트(HR·RESP·SpO2·TEMP·활동량·EWS) · 이상신호 구간 탐색 · ECG 스트립 확인 · 이벤트 저장(기록실 등록) · 알람설정 바로가기</td></tr>
+<tr><td>사용 API</td><td><code>/BioSignal/SelectBioSignalsTrendDataPage</code>, <code>/BioSignal/SelectBioSignalsGraphicalTrendDataList</code>, <code>/BioSignal/SelectBioSignalsSummaryTrendDataPage</code>, <code>/BioSignal/SelectBioSignalsGraphicalSummaryTrendDataList</code>, <code>/Measurement/SelectArrhythmiaEventList</code>, <code>/Measurement/SelectArrhythmiaDescriptionList</code>, <code>/BioSignal/SelectEcgRawData(Index)</code>, <code>/BioSignal/InsertBioSignalEvent</code></td></tr>
+<tr><td>실시간 요소</td><td>스트림 최종수신시간 표시 모듈(stream-last-update-time-view)</td></tr>
+</table>
+
+<h3>8.4 기록실</h3>
+<p class="sub"><code>/recording/index</code>, <code>/recording/detail</code> · <code>js/controller/recording.js</code></p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>모니터링 중 기록(저장)된 이상신호 스트립 조회·관리</td></tr>
+<tr><td>기능</td><td>이벤트 목록(페이지네이션) · 상세보기(파형 스트립·판독 코멘트) · 수정/삭제 · 리듬 추가 모달(add-rhythm-modal) · 엑셀 다운로드 · EMR 전송(UploadEmrStrips)</td></tr>
+<tr><td>사용 API</td><td><code>/BioSignal/SelectBioSignalEventSimplePage</code>, <code>/BioSignal/SelectBioSignalEvent</code>, <code>/BioSignal/Update·Delete·InsertBioSignalEvent</code>, <code>/BioSignal/UpdateBioSignalEventData</code>, <code>/Measurement/UploadEmrStrips</code></td></tr>
+<tr><td>실시간 요소</td><td>없음</td></tr>
+</table>
+
+<h3>8.5 보고서</h3>
+<p class="sub"><code>/report/index</code> · <code>js/controller/report.js</code> + monitoring/report*.js, onpremise-report.js</p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>측정 결과 보고서 생성·출력</td></tr>
+<tr><td>기능</td><td>측정 요약(측정기간·부정맥 발생 요약·트렌드) · 페이지 구성 미리보기(new-report.html 양식) · 인쇄/이미지(JPEG) 저장 · 자동 생성 리포트(report-for-auto)</td></tr>
+<tr><td>사용 API</td><td><code>/BioSignal/SelectBioSignalsMergePage</code>, <code>/BioSignal/SelectBioSignalsTrendDataPage</code>, <code>/BioSignal/SelectEcgRawData</code>, <code>/Measurement/SelectIntegratedDataInfo*</code></td></tr>
+<tr><td>실시간 요소</td><td>없음</td></tr>
+</table>
+
+<h3>8.6 알람설정 (환자별)</h3>
+<p class="sub"><code>/alarm-setting/index</code> · <code>js/controller/alarm-setting.js</code></p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>해당 환자(측정)의 알람 한계값 개별 설정</td></tr>
+<tr><td>기능</td><td>HR/RESP/SpO2/TEMP/BP/부정맥/ST 알람 ON-OFF 및 Limit 설정(병동 기본값에서 개별 재정의) · 알람 확인(clear) 상태 관리</td></tr>
+<tr><td>사용 API</td><td><code>/Measurement/SelectAlarmSettingMeasurement</code>, <code>/Measurement/UpdateAlarmSettingMeasurement</code>, <code>/Measurement/SelectArrhythmiaAlarmParamList</code>, <code>/Measurement/SelectArrhythmiaAlarmList</code>, <code>/Measurement/UpdateArrhythmiaAlarm</code>, <code>/Measurement/Select·UpdateAlarmClearStatus</code>, <code>/BioSignal/SelectBioSignalAlarmLevelList</code></td></tr>
+</table>
+
+<div class="note">알람 정책(부정맥 분류·색상·사운드·한계값)의 상세는 별도 문서(알람 정책 정의서)에서 다루며, 본 문서는 화면 기능 관점의 요약만 포함합니다. <a href="#common">공통 기능 §16.5 알람 체계</a> 참조.</div>
+
+<h2 id="dashboard-setting">9. 중앙모니터 설정</h2>
+<p class="sub"><code>/dashboard-setting/index</code> · <code>template/thync/content/dashboard-setting.js</code> · 매뉴얼 2.1.6</p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>중앙모니터(대시보드) 화면 구성 관리</td></tr>
+<tr><td>① 중앙 모니터 정렬</td><td>모니터(디스플레이) 추가/삭제/이름 변경</td></tr>
+<tr><td>② 모니터 레이아웃 설정</td><td>30인(3x10) / 24인(3x8) / 18인(3x6) / 20인(2x10) / 16인(2x8) / 12인(2x6) / 8인(2x4) / 6인(2x3) / 4인(2x2) / 2인(1x2)</td></tr>
+<tr><td>③ 모니터링 대상 선택</td><td>우측 환자 리스트에서 병상 배치(드래그) · 병상 삭제 확인 · <b>새창에서 중앙모니터 열기</b></td></tr>
+<tr><td>사용 API</td><td><code>/Manager/SelectDisplay</code>, <code>/Manager/SelectDisplayDetail</code>, <code>/Manager/Insert·Update·DeleteDisplay</code>, <code>/Manager/SelectMonitorLayoutList</code>, <code>/Manager/SelectMonitorLayout</code>, <code>/Manager/Insert·Update·DeleteMonitorLayout</code></td></tr>
+<tr><td>실시간 요소</td><td>설정 변경 시 이벤트(200~204)로 열려있는 대시보드 창 자동 새로고침("중앙모니터 설정이 변경되어 잠시 후 새로고침 됩니다")</td></tr>
+</table>
+
+<h2 id="full-monitoring">10. 중앙모니터 (대시보드)</h2>
+<p class="sub"><code>/full-monitoring/select</code> · <code>template/thync/content/full-monitoring.js</code> · 매뉴얼 2.2 · 레이아웃 없는 전용 창/전용 도메인</p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>스테이션 대형 모니터용 다병상 실시간 대시보드</td></tr>
+<tr><td>대시보드 메뉴 바</td><td>로고 · <b>중앙모니터 선택</b>(운영 중 모니터 전환) · <b>청각적 알람 볼륨 조절</b> · <b>여유 병상</b> 수 · <b>모니터링 현황</b>(모니터링 중 병상 수) · 전체화면</td></tr>
+<tr><td>병상 셀</td><td>ECG 파형 + HR/RESP/SpO2/TEMP/NBP/EWS 수치 · 부정맥·낙상 Red/Yellow 알람 표시 · Stand by/빈 병상/장치없음 상태</td></tr>
+<tr><td>모니터링 정보 상세 보기(셀 클릭)</td><td>부정맥·낙상 알람 표시 + 바이탈(확대) / 검토 / 기록실 탭 (dataTableForDetailVital·Review·Recording 템플릿) — 부모 창과 postMessage로 측정정보 공유(GLOBAL.MEASUREMENT)</td></tr>
+<tr><td>사용 API</td><td><code>/Manager/SelectDisplayDetail</code>, <code>/Manager/SelectMonitorLayout</code>, 모니터링과 동일한 Measurement/BioSignal 계열</td></tr>
+<tr><td>실시간 요소</td><td>병상 수만큼 bioSignalData 스트림 구독 + <code>/topic/public/event</code>, Red/Yellow/낙상 beep(base64 오디오, 볼륨바)</td></tr>
+</table>
+
+<h2 id="alarm-board">11. 알람 모니터링 보드</h2>
+<p class="sub"><code>/alarm-monitoring/index</code> · <code>js/controller/alarm-monitoring.js</code> · alarm.seersthync.com 전용 도메인 기본 화면, 레이아웃 없음</p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>알람 전용 전광판</td></tr>
+<tr><td>기능</td><td>발생 알람 실시간 나열 · 전체화면 버튼 · 다중 알람 beep(beep-multi)</td></tr>
+<tr><td>실시간 요소</td><td><code>/topic/public/event</code> + 스트림 구독</td></tr>
+</table>
+
+<h2 id="simple-monitoring">12. 간이 모니터링</h2>
+<p class="sub"><code>/simple-monitoring/select</code> · <code>js/controller/simple-monitoring.js</code></p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>축약형 모니터링 화면(병상 낙상/EWS 중심 카드, 태블릿·보조 디스플레이용)</td></tr>
+<tr><td>실시간 요소</td><td>대시보드와 동일 구독 구조(bioSignalSimpleData 간이 스트림)</td></tr>
+</table>
+
+<h2 id="admin">13. 관리자 설정 (9종)</h2>
+<p class="sub"><code>/admin-setting/*</code> · 매뉴얼 2.1.7 · <b>관리자(MANAGER)만</b></p>
+<p>공통: 좌측 설정 메뉴 + 상단 "설정 완료" 버튼(클릭해야 저장·적용).</p>
+
+<h3>13.1 기관정보 <span class="sub">(organ)</span></h3>
+<table>
+<tr><td>기능</td><td>병원/기관명·세부 설명 입력 · HIS 연동 여부 · 장치관리 구분(씨어스/병원) · 기관 로고 업로드(로그인·메뉴바 반영, 미리보기)</td></tr>
+<tr><td>사용 API</td><td><code>/Manager/SelectOrganization(SimplePage)</code>, <code>/Manager/UpdateOrganization</code>, <code>/Manager/InsertLogoFile</code></td></tr>
+</table>
+
+<h3>13.2 계정설정 <span class="sub">(user, userRegister)</span></h3>
+<table>
+<tr><td>기능</td><td>계정 목록 조회·수정 · 신규 계정 등록(관리자/의사/간호사 구분, 소속 병동 지정) · 계정 삭제 · 비밀번호 초기화</td></tr>
+<tr><td>사용 API</td><td><code>/Account/SelectAccountSimpleList</code>, <code>/Account/CreateAccount</code>, <code>/Account/UpdateAccount</code>, <code>/Account/UpdatePassword</code>, <code>/Account/DeleteAccount</code></td></tr>
+</table>
+
+<h3>13.3 병동설정 <span class="sub">(ward)</span></h3>
+<table>
+<tr><td>기능</td><td>병동 추가/삭제 · 병실·병상 추가/수정/삭제 · 병상 표시코드·표시순서 변경</td></tr>
+<tr><td>사용 API</td><td><code>/Manager/*Ward(ForAdmin)</code>, <code>/Manager/*SickRoom(ForAdmin)</code>, <code>/Manager/*SickBed</code>, <code>/Manager/UpdateSickBedDisplayCode</code>, <code>/Manager/UpdateSickBedDisplayOrderNumber</code></td></tr>
+</table>
+
+<h3>13.4 알람설정 <span class="sub">(alarm — 병동 기본값)</span></h3>
+<table>
+<tr><td>기능</td><td>병동 선택 후 기본 알람값 설정 — HR(0-300) / RESP(0-60) / SpO2 / TEMP(0-50, ℃·℉ 단위) / BP(SYS·DIA·MAP) / 부정맥(항목별 ON-OFF·범위) / ST Segment, 각 Alarm ON/OFF + Limit</td></tr>
+<tr><td>사용 API</td><td><code>/Measurement/SelectAlarmSettingOrg(ForAdmin)</code>, <code>/Measurement/UpdateAlarmSettingOrg(ForAdmin)</code>, <code>/Measurement/Select·UpdateOrgArrhythmiaAlarm*(ForAdmin)</code>, <code>/Measurement/SelectArrhythmiaAlarmParamListForAdmin</code>, <code>/Measurement/Select·UpdateAlarmClearOrg(ForAdmin)</code></td></tr>
+</table>
+
+<h3>13.5 장치관리 <span class="sub">(device)</span></h3>
+<table>
+<tr><td>기능</td><td>병동 선택 · 시리얼 검색 · 장치 상세 · 병동 간 장치 이동 · 신규 장치 등록(복수 대기목록) · 장치 삭제 · 배터리 점검 등록</td></tr>
+<tr><td>사용 API</td><td><code>/Device/InsertDeviceRegister</code>, <code>/Device/UpdateDeviceRegister</code>, <code>/Device/DeleteDeviceRegister</code>, <code>/Device/SelectDeviceRegisterPage</code>, <code>/Device/InsertDeviceBatteryCheck</code></td></tr>
+</table>
+
+<h3>13.6 테마설정 <span class="sub">(theme)</span></h3>
+<table>
+<tr><td>기능</td><td>메뉴바 포함 화면 테마 색상 설정(사용자 색) · 미리보기</td></tr>
+<tr><td>사용 API</td><td><code>/Global/Select·Insert·UpdateGlobalSetting</code></td></tr>
+</table>
+
+<h3>13.7 게이트웨이 <span class="sub">(gateway)</span></h3>
+<table>
+<tr><td>기능</td><td>게이트웨이 목록/상세/등록/수정/삭제 · 펌웨어 관리</td></tr>
+<tr><td>사용 API</td><td><code>/Manager/SelectGatewayInfoPage</code>, <code>/Manager/SelectGatewayInfo</code>, <code>/Manager/Insert·Update·DeleteGatewayInfo</code>, <code>/Manager/SelectGatewayFwInfoPage</code>, <code>/Manager/SelectGatewayFwInfo</code>, <code>/Manager/Insert·DeleteGatewayFwInfo</code></td></tr>
+</table>
+
+<h3>13.8 EMR <span class="sub">(emr)</span></h3>
+<table>
+<tr><td>기능</td><td>EMR 연동 정보·연동주기 설정</td></tr>
+<tr><td>사용 API</td><td><code>/Manager/SelectEmrData</code>, <code>/Manager/UpdateEmrPeriod</code></td></tr>
+</table>
+
+<h3>13.9 중앙모니터 <span class="sub">(dashboard)</span></h3>
+<table>
+<tr><td>기능</td><td>관리자용 중앙모니터 설정(중앙모니터 설정 화면과 동일 API 사용 — §9 참조)</td></tr>
+</table>
+
+<h2 id="remote">14. 원격협진</h2>
+<p class="sub">매뉴얼 2.1.8 · 외부 시스템, 새 창 · 본 프론트엔드에 화면 없음</p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>진입</td><td>메뉴 바 버튼 클릭 시 <code>FUNCTION_ENVIRONMENT.REMOTE_CONSULTATION.LINK.URL</code> 새 창 오픈 (외부 협진 시스템)</td></tr>
+<tr><td>매뉴얼상 기능 <span class="sub">(외부 시스템)</span></td><td>신규 의뢰(환자 등록번호 유효성 확인, DICOM 분석영상·첨부 1GB, 자문의 선택, 서명) · 협진 수락(즉시 시작) · 화상협진방 입장 · 화상 채팅(참여자·채팅·파일 공유 png/jpg/pdf/dcm)</td></tr>
+</table>
+
+<h2 id="mypage">15. 마이페이지 (계정 설정)</h2>
+<p class="sub"><code>/mypage/index</code> · <code>js/controller/mypage.js</code></p>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>목적</td><td>본인 계정 정보·비밀번호 변경</td></tr>
+<tr><td>기능</td><td>계정 정보 표시 · 현재 비밀번호 확인 후 새 비밀번호 변경(영문+숫자 8자 이상 검증)</td></tr>
+<tr><td>사용 API</td><td><code>/Account/SelectAccountSimple</code>, <code>/Account/UpdateAccount</code>, <code>/Account/UpdatePassword</code></td></tr>
+</table>
+
+<h2 id="common">16. 공통 기능</h2>
+
+<h3>16.1 세션/토큰</h3>
+<p>로그인 → <code>accessToken</code> 쿠키 저장 → 모든 API 헤더 <code>SX-Auth-Token</code> + <code>SX-Client-IP</code> → 2시간 주기 <code>/AccountUtil/SessionRenew</code> → 실패(AUTH_FAIL)/세션종료 시 <code>/logout</code> 강제 이동. 페이지 새로고침 시 쿠키에서 토큰 복원(REFRESH_SET).</p>
+
+<h3>16.2 다국어</h3>
+<p><code>js/language/{ko-KR|en-US}/…</code>(base/constant/controller 단위 분리) + 레이아웃 모듈별 language 디렉토리. 헤더 지구본 아이콘으로 한국어/English 전환(기관 MULTI_LANGUAGE 설정 시 노출).</p>
+
+<h3>16.3 공통 컴포넌트 <span class="sub">(js/module/*)</span></h3>
+<table>
+<tr><th>분류</th><th>모듈</th></tr>
+<tr><td>레이아웃/UI</td><td><code>layout</code>(헤더/좌측메뉴/푸터), <code>alert</code>/<code>custom-alert</code>/<code>toast-message</code>/<code>popup</code>(공지 팝업·오늘 하루 닫기), <code>paging</code></td></tr>
+<tr><td>실시간 반영</td><td><code>emergency</code>(카드 알람 상태 전환), <code>fall-bed</code>(낙상 UI), <code>alarm-change</code>, <code>measurement-change</code>, <code>pause-change</code>(알람 일시정지 동기화), <code>ward-room-bed-change</code>, <code>socket-for-blood-pressure</code>, <code>socket-for-notice</code>(공지 팝업), <code>stream-last-update-time-view</code>, <code>rtls</code>(위치, 기관 설정 시)</td></tr>
+<tr><td>기타</td><td><code>version</code>(버전/카피라이트), <code>window-worker</code>(차트용 Web Worker), <code>login</code></td></tr>
+<tr><td>차트</td><td><code>js/custom/bio-chart/*</code>(ECG 스트립·리포트 차트), D3 실시간 파형(socketD3), Chart.js 트렌드</td></tr>
+</table>
+
+<h3>16.4 실시간(WebSocket) 아키텍처 요약</h3>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>연결</td><td>SockJS + STOMP, URL <code>/mobiCAREConsole/ws?SX-API-Route=GWS-1&amp;key=STREAM-SERVER</code>, 헤더 <code>SX-Auth-Token</code>. 스트림 서버 목록은 <code>/Server/SelectAPIServer</code> 조회</td></tr>
+<tr><td>파형 스트림</td><td><code>/topic/public/allLeads/bioSignalData/{measurementCode}</code>(전체 리드), <code>…/bioSignalSimpleData/{measurementCode}</code>(간이)</td></tr>
+<tr><td>이벤트 버스</td><td><code>/topic/public/event</code> — 측정 10 / 병동 20 / 측정알람 30 / 일시정지 50 / 공지 60 / 장치알람 80 / 낙상대응 101 / 중앙모니터 레이아웃 200~202·병상 203~204</td></tr>
+<tr><td>창 간 공유</td><td>대시보드 새 창 ↔ 부모 창 postMessage(GLOBAL.MEASUREMENT)로 측정정보 공유</td></tr>
+</table>
+
+<h3>16.5 알람 체계 (요약)</h3>
+<div class="note">상세 알람 정책은 별도 문서에서 다룹니다. 여기서는 화면 표시 관점의 요약만 제공합니다.</div>
+<table>
+<tr><th>레벨</th><th>색상</th><th>대표 부정맥 · 조건</th></tr>
+<tr><td>Red (긴급, 레벨 1)</td><td>빨강 #DD1111, 빠른 beep</td><td>Asystole, VTach(VT), Pause, Extreme Brady, Extreme Tachy, Run PVCs High</td></tr>
+<tr><td>낙상 Red</td><td>빨강, 보통 속도 beep</td><td>낙상 발생 (모니터링 카드·환자 상세 모두 Red)</td></tr>
+<tr><td>Yellow (일반, 레벨 3)</td><td>노랑 #FF9900, 느린 beep</td><td>SVT, Pair PVCs, Vent Bi/Trigeminy, Non-sustain VT, PVCs/min HIGH, AFIB, Missed beat, Vent Rhythm, High/Low HR, 또는 생체신호 한계 이탈</td></tr>
+<tr><td>Blue (기술 알람)</td><td>파랑</td><td>장치 관련(BEEP.IS_USE.BLUE 설정 시 사운드)</td></tr>
+</table>
+<p class="sub">청각 알람은 base64 내장 오디오, 볼륨 조절바(대시보드), 환자별 <b>알람 일시정지(Pause)</b>/<b>알람 확인(Clear)</b> 지원. Yellow/Blue/낙상 사운드는 기관별 토글. 기타 환자 상태: Stand by(검사 일시중단)/등록 장치 없음/빈 병상. 장치 상태: Recording Start·Stop/Connect/LEAD ON·OFF/Disconnect/Force Stop, 배터리 부족(ECG·TEMP·SpO2 2750mV, 반지혈압 30%, 참케어 25% 기준).</p>
+
+<h2 id="appendix">17. 부록 — 화면 ↔ 주요 API 매핑 요약표</h2>
+<table>
+<tr><th>화면</th><th>대표 조회 API</th><th>대표 변경 API</th><th>실시간</th></tr>
+<tr><td>로그인</td><td>/Global/SelectGlobalSetting</td><td>/Account/Login</td><td>-</td></tr>
+<tr><td>병상설정</td><td>/Manager/SelectWard·SickRoom·SickBed, /Measurement/SelectMeasurementInfoList</td><td>/Measurement/UpdateMeasurementInfo(Status)</td><td>event</td></tr>
+<tr><td>환자등록</td><td>/Device/SelectDeviceRegisterUnusedPage</td><td>/Measurement/InsertMeasurementInfo, InsertDeviceInfo</td><td>event</td></tr>
+<tr><td>측정이력</td><td>/Measurement/SelectMeasurementInfoPage·Detail</td><td>-</td><td>-</td></tr>
+<tr><td>의료기기 관리</td><td>/Device/SelectDeviceRegisterPage·Count, /Device/SelectDeviceUsageList</td><td>-</td><td>event(80)</td></tr>
+<tr><td>모니터링</td><td>/Measurement/SelectMeasurementInfoList·SelectDeviceLastData·SelectArrhythmiaAlarmList</td><td>/Measurement/UpdateMeasurementInfoAlarmStatus·ResponseStatus·FallResponseStatus</td><td>bioSignalData + event</td></tr>
+<tr><td>상세-바이탈</td><td>/Measurement/SelectMeasurementInfoDetail, /BioSignal/SelectBloodPressurePage</td><td>/BioSignal/Insert·Update·DeleteBloodPressure</td><td>bioSignalData</td></tr>
+<tr><td>상세-검토</td><td>/BioSignal/SelectBioSignalsTrendDataPage, /Measurement/SelectArrhythmiaEventList</td><td>/BioSignal/InsertBioSignalEvent</td><td>stream 수신시각</td></tr>
+<tr><td>상세-기록실</td><td>/BioSignal/SelectBioSignalEventSimplePage·Event</td><td>/BioSignal/Update·Delete·InsertBioSignalEvent, /Measurement/UploadEmrStrips</td><td>-</td></tr>
+<tr><td>상세-보고서</td><td>/BioSignal/SelectBioSignalsMergePage, /Measurement/SelectIntegratedDataInfo*</td><td>-</td><td>-</td></tr>
+<tr><td>상세-알람설정</td><td>/Measurement/SelectAlarmSettingMeasurement·SelectArrhythmiaAlarmList</td><td>/Measurement/UpdateAlarmSettingMeasurement·UpdateArrhythmiaAlarm</td><td>event(30)</td></tr>
+<tr><td>중앙모니터 설정</td><td>/Manager/SelectDisplay(Detail)·SelectMonitorLayout(List)</td><td>/Manager/Insert·Update·DeleteDisplay·MonitorLayout</td><td>event(200~204)</td></tr>
+<tr><td>중앙모니터(대시보드)</td><td>/Manager/SelectDisplayDetail·SelectMonitorLayout</td><td>-</td><td>bioSignalData + event</td></tr>
+<tr><td>알람 보드</td><td>Measurement/BioSignal 계열</td><td>-</td><td>event + stream</td></tr>
+<tr><td>간이 모니터링</td><td>Measurement/BioSignal 계열</td><td>-</td><td>bioSignalSimpleData</td></tr>
+<tr><td>관리자-기관정보</td><td>/Manager/SelectOrganization(SimplePage)</td><td>/Manager/UpdateOrganization·InsertLogoFile</td><td>-</td></tr>
+<tr><td>관리자-계정</td><td>/Account/SelectAccountSimpleList</td><td>/Account/Create·Update·DeleteAccount·UpdatePassword</td><td>-</td></tr>
+<tr><td>관리자-병동</td><td>/Manager/Select*ForAdmin</td><td>/Manager/Insert·Update·Delete Ward·SickRoom·SickBed</td><td>-</td></tr>
+<tr><td>관리자-알람</td><td>/Measurement/SelectAlarmSettingOrgForAdmin</td><td>/Measurement/UpdateAlarmSettingOrgForAdmin·UpdateOrgArrhythmiaAlarmForAdmin</td><td>-</td></tr>
+<tr><td>관리자-장치</td><td>/Device/SelectDeviceRegisterPage</td><td>/Device/Insert·Update·DeleteDeviceRegister·InsertDeviceBatteryCheck</td><td>-</td></tr>
+<tr><td>관리자-테마</td><td>/Global/SelectGlobalSetting</td><td>/Global/Insert·UpdateGlobalSetting</td><td>-</td></tr>
+<tr><td>관리자-게이트웨이</td><td>/Manager/SelectGatewayInfo(Page)·GatewayFwInfo(Page)</td><td>/Manager/Insert·Update·DeleteGatewayInfo·GatewayFwInfo</td><td>-</td></tr>
+<tr><td>관리자-EMR</td><td>/Manager/SelectEmrData</td><td>/Manager/UpdateEmrPeriod</td><td>-</td></tr>
+<tr><td>마이페이지</td><td>/Account/SelectAccountSimple</td><td>/Account/UpdateAccount·UpdatePassword</td><td>-</td></tr>
+</table>
+
+<div class="footer">thynC Operations · 내부 산출물 · thync_1.3.0 문서 세트 · 2026-07-18 작성 · 소스 역공학 기반</div>

@@ -1,0 +1,1310 @@
+<title>API 규격서</title>
+<style>
+:root{--ink:#1a2332;--sub:#5a6a7e;--line:#dde4ec;--bg:#fff;--accent:#0b6bcb;--accent-soft:#eaf3fc;--head-bg:#f5f8fb;--warn-bg:#fff7e6;--warn-line:#f0c36d;--ok:#1a7f37}
+*{box-sizing:border-box}
+body{margin:0;padding:32px 40px 80px;background:var(--bg);color:var(--ink);font-family:'Pretendard','Pretendard Variable',-apple-system,'Segoe UI','Malgun Gothic',sans-serif;font-size:14.5px;line-height:1.65;max-width:1080px;margin-left:auto;margin-right:auto}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.5px}
+h2{font-size:19px;margin:44px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--ink);letter-spacing:-.3px}
+h3{font-size:16px;margin:28px 0 10px}
+h4{font-size:14.5px;margin:20px 0 8px;color:var(--sub)}
+p{margin:8px 0}
+code{background:var(--accent-soft);color:var(--accent);padding:1px 5px;border-radius:4px;font-family:'D2Coding',Consolas,monospace;font-size:13px}
+pre{background:#f6f8fa;border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.5}
+pre code{background:none;color:inherit;padding:0}
+table{border-collapse:collapse;width:100%;margin:12px 0 20px;font-size:13.5px}
+th{background:var(--head-bg);border:1px solid var(--line);padding:7px 10px;text-align:left;font-weight:600;white-space:nowrap}
+td{border:1px solid var(--line);padding:6px 10px;vertical-align:top}
+tr:nth-child(even) td{background:#fafcfe}
+.doc-meta{border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:20px 0 8px;background:var(--head-bg)}
+.doc-meta table{margin:0;font-size:13px}
+.doc-meta td,.doc-meta th{border:none;padding:3px 14px 3px 0;background:none!important}
+.doc-meta th{color:var(--sub);font-weight:600;width:120px}
+.toc{background:var(--accent-soft);border-radius:10px;padding:16px 24px;margin:24px 0}
+.toc ol{margin:6px 0;padding-left:22px}
+.toc a{color:var(--accent);text-decoration:none}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent);margin-right:4px}
+.badge.get{background:#e6f4ea;color:#1a7f37}
+.badge.post{background:#eaf3fc;color:#0b6bcb}
+.badge.put{background:#fff7e6;color:#9a6700}
+.badge.del{background:#ffebe9;color:#cf222e}
+.note{background:var(--warn-bg);border-left:4px solid var(--warn-line);padding:10px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:13.5px}
+.sub{color:var(--sub);font-size:13px}
+.arch{display:flex;flex-direction:column;gap:10px;margin:18px 0}
+.arch-row{display:flex;gap:10px;flex-wrap:wrap}
+.arch-box{border:1.5px solid var(--accent);border-radius:10px;padding:10px 14px;background:var(--accent-soft);flex:1;min-width:140px;text-align:center}
+.arch-box.plain{border-color:var(--line);background:var(--head-bg)}
+.arch-box b{display:block;font-size:13.5px}
+.arch-box span{font-size:12px;color:var(--sub)}
+.footer{margin-top:60px;padding-top:16px;border-top:1px solid var(--line);color:var(--sub);font-size:12.5px}
+</style>
+
+<h1>API 규격서</h1>
+<p class="sub">thynC 환자 감시 솔루션 · 산출물 세트 <b>thync_1.3.0</b></p>
+
+<div class="doc-meta">
+<table>
+<tr><th>문서 성격</th><td>REST API 규격서 (Interface Specification)</td></tr>
+<tr><th>대상 제품</th><td>thynC IP2140 (mobiCARE Console) — 백엔드 <code>thync-api-onpremise 01.01.431</code></td></tr>
+<tr><th>작성일</th><td>2026-07-18</td></tr>
+<tr><th>작성 근거</th><td>운영 배포 산출물(WAR·프론트엔드·DB 스키마) 역공학 기반 재구성</td></tr>
+<tr><th>버전</th><td>thync-api-onpremise 01.01.431</td></tr>
+</table>
+</div>
+
+<div class="note"><b>문서 성격 안내.</b> 본 문서는 기존 기획·설계 산출물이 부재한 상태에서, 실제 운영 중인 소스(백엔드 WAR 디컴파일, 프론트엔드 소스, DB DDL)를 분석해 <b>사후 재구성</b>한 것입니다. 소스에서 직접 확인된 사실을 기준으로 하되, 명칭·의도가 코드에서 명확하지 않은 항목은 <span class="sub">(추정)</span>으로 표기합니다.</div>
+
+<p>본 규격서는 <code>mobiCARE Console thync-api-onpremise 01.01.431</code> (Spring Boot 2.3.12 기반 REST API 서버)의 인터페이스를 정리한 것입니다. 디컴파일된 컨트롤러 87개와 인증·공통 설정 파일을 분석했으며, 총 핸들러 메서드는 약 626개(테스트/더미 엔드포인트 포함)입니다. 거의 모든 API가 <b>POST + <code>@RequestBody</code>(JSON)</b> 방식이며, 파일 다운로드만 <code>GET</code>, 파일 업로드는 <code>@ModelAttribute + MultipartFile</code>을 사용합니다. 모든 핸들러는 첫 인자로 <code>HttpServletRequest request</code>를 받으나(문서 표에서는 생략), 표에는 body/path/param만 표기합니다.</p>
+
+<div class="toc">
+<b>목차</b>
+<ol>
+<li><a href="#common">공통 규격</a></li>
+<li><a href="#account">계정 (account)</a></li>
+<li><a href="#admin">관리자·시스템 (admin)</a></li>
+<li><a href="#application">애플리케이션 (application)</a></li>
+<li><a href="#biosignal">생체신호 (biosignal)</a></li>
+<li><a href="#board">게시판·알림 (board)</a></li>
+<li><a href="#cardio">카디오 연동 (cardio)</a></li>
+<li><a href="#device">장비 (device)</a></li>
+<li><a href="#dicom">DICOM (dicom)</a></li>
+<li><a href="#doctor">의사·협진 (doctor)</a></li>
+<li><a href="#emr">EMR (emr)</a></li>
+<li><a href="#ezcare">EzCareTech 연동 (ezcare)</a></li>
+<li><a href="#gateway">게이트웨이 (gateway)</a></li>
+<li><a href="#global">전역 설정 (global)</a></li>
+<li><a href="#log">로그 (log)</a></li>
+<li><a href="#logo">로고 (logo)</a></li>
+<li><a href="#manager">병동/시설 관리 (manager)</a></li>
+<li><a href="#measurement">측정(모니터링) (measurement)</a></li>
+<li><a href="#message">메시지·푸시 (message)</a></li>
+<li><a href="#premium">프리미엄 (premium)</a></li>
+<li><a href="#rtls">RTLS 실시간 위치 (rtls)</a></li>
+<li><a href="#server">서버 관리 (server)</a></li>
+<li><a href="#utils">유틸리티 (utils)</a></li>
+<li><a href="#vcall">화상통화·룸 (vcall)</a></li>
+<li><a href="#version">버전 관리 (version)</a></li>
+<li><a href="#algorithm">알고리즘 (algorithm)</a></li>
+<li><a href="#appendix">부록: 테스트/더미 엔드포인트</a></li>
+</ol>
+</div>
+
+<h2 id="common">1. 공통 규격</h2>
+
+<h3>1.1 베이스 경로 · 요청 방식</h3>
+<ul>
+<li>베이스 경로: <code>{host}/mobiCAREConsole/API</code> (각 표의 <code>Path</code>는 <code>/API/...</code> 형태로 표기하며, 실제 호출 시 앞에 <code>/mobiCAREConsole</code> 컨텍스트가 붙음)</li>
+<li>요청 방식: 조회·등록·수정·삭제 모두 <span class="badge post">POST</span> + JSON 바디(<code>@RequestBody</code>) 관례. 파일 다운로드만 <span class="badge get">GET</span>(경로 파라미터), 파일 업로드는 <span class="badge post">POST</span> <code>multipart/form-data</code>(<code>@ModelAttribute + MultipartFile</code>).</li>
+<li>공통 요청 파라미터: 대부분의 <code>ReqXxx</code> DTO는 요청자 식별용 <code>requester</code>(요청 사용자 코드)와 <code>organizationCode</code>(조직 코드)를 공통 필드로 포함. 다운로드 GET 경로도 <code>{requester}:{...}</code> 형태로 요청자를 경로에 포함.</li>
+</ul>
+
+<h3>1.2 인증 (TokenInterceptor)</h3>
+<ul>
+<li>인증 방식: <b>커스텀 액세스 토큰</b> 기반. Spring Security는 세션 <code>STATELESS</code> + CSRF disable만 담당하고, 실제 요청별 인증은 <code>TokenInterceptor.preHandle</code>이 수행.</li>
+<li>토큰 추출: <code>ReqJson.makeAccessToken(request)</code> — 요청 헤더/파라미터에서 accessToken 추출. 토큰 전달 헤더는 <code>SX-Auth-Token</code>, <code>x-auth-token</code>, <code>authorization</code>. 유효성은 <code>AccessTokenCacheService.isAvailableAccessToken(accessToken)</code>로 캐시 검증.</li>
+<li>세션 갱신: <code>/API/AccountUtil/SessionRenew</code>, <code>/API/Application/SessionRenew</code>로 토큰(세션)을 재발급.</li>
+</ul>
+
+<div class="note"><b>보안 주의 — 인증 우회 경로.</b> 토큰 인터셉터에는 검사 없이 통과하는 우회 경로가 두 가지 존재합니다. <b>실제 문자열 값은 본 문서에서 노출하지 않습니다.</b>
+<ul>
+<li><b>시크릿 코드 우회</b>: 요청 헤더 <code>SX-Secure-Code</code>(<code>ReqJson.makeSecureCode</code>)가 특정 고정 문자열(<code>********</code>)과 일치하면 토큰 검사 없이 통과.</li>
+<li><b>특수 토큰 우회</b>: accessToken이 특정 고정 문자열(<code>********</code>)이면 무조건 통과(모니터링/헬스체크용 고정 토큰으로 <span class="sub">추정</span>).</li>
+</ul>
+두 우회 경로는 하드코딩된 고정 비밀값에 의존하므로, 값이 유출되면 전 API 인증을 우회할 수 있는 신뢰경계 리스크입니다.</div>
+
+<h3>1.3 인증 실패 응답</h3>
+<p>인증 실패 시 <code>Content-Type: application/json</code>, 바디 <code>{"result": false, "error": 241, "message": &lt;ErrorCode.getErrorMsg(241)&gt;}</code>(에러 <code>241</code> = invalid accessToken). HTTP 상태는 <b>200</b>으로 반환되며, 성공/실패는 바디의 <code>error</code> 필드로 판별합니다.</p>
+
+<h3>1.4 인증 제외 경로 (InterceptorConfig — excludePathPatterns)</h3>
+<p>전 경로 <code>/**</code>에 인터셉터를 적용하되 아래를 제외합니다.</p>
+<p><b>카테고리 전체 개방</b> (해당 접두 경로 전체가 토큰 미검사):</p>
+<table>
+<tr><th>카테고리 패턴</th><th>비고</th></tr>
+<tr><td><code>/API/EzCareTech/**</code></td><td>외부 EMR/EDGE 연동</td></tr>
+<tr><td><code>/API/Admin/**</code></td><td>DB/서버 운영 API — <b>보안 주의</b></td></tr>
+<tr><td><code>/API/Util/**</code></td><td>캐시/이메일/명령 실행 — <b>보안 주의</b></td></tr>
+<tr><td><code>/API/Gateway/**</code></td><td>게이트웨이(수신기) 장비용</td></tr>
+<tr><td><code>/API/Application/**</code></td><td>환자 앱용</td></tr>
+<tr><td><code>/API/Assignment/**</code></td><td>게이트웨이 배정</td></tr>
+<tr><td><code>/API/Version/**</code></td><td>앱 버전 관리</td></tr>
+<tr><td><code>/API/Premium/**</code></td><td>온프레미스↔클라우드 연동</td></tr>
+<tr><td><code>/api/v1/**</code></td><td>별도 v1 API 계열</td></tr>
+</table>
+<p><b>개별 개방</b> (특정 엔드포인트만 토큰 미검사):</p>
+<table>
+<tr><th>경로</th><th>용도</th></tr>
+<tr><td><code>/API/Algorithm/SelectArrhythmiaSettingInfo/**</code></td><td>알고리즘 서버용 부정맥 설정 조회</td></tr>
+<tr><td><code>/API/Algorithm/SelectMeasurementInfo</code></td><td>알고리즘 서버용 측정정보 조회</td></tr>
+<tr><td><code>/API/Account/CreateAccountParamedic/**</code></td><td>구급대원 계정 생성</td></tr>
+<tr><td><code>/API/Account/SelectFireStationAddressList/**</code></td><td>소방서 주소 목록</td></tr>
+<tr><td><code>/API/Account/Login</code>, <code>/API/Account/LoginHIS</code>, <code>/API/Account/LoginHISforManager</code>, <code>/API/Account/LoginHISForMobile</code></td><td>로그인 계열</td></tr>
+<tr><td><code>/API/AccountUtil/FoundAccountId</code>, <code>/API/AccountUtil/FoundAccountPassword</code></td><td>아이디/비밀번호 찾기</td></tr>
+<tr><td><code>/API/Server/SelectAPIServer</code></td><td>API 서버 조회</td></tr>
+<tr><td><code>/API/Manager/DownloadWardDrawingContents/**</code></td><td>병동 도면 다운로드</td></tr>
+<tr><td><code>/API/Measurement/DownloadEmergencyTransportContents/**</code></td><td>응급이송 콘텐츠 다운로드</td></tr>
+<tr><td><code>/API/Manager/DownLoadSwVersionInfoFile/**</code></td><td>SW 버전 파일 다운로드</td></tr>
+<tr><td><code>/API/Manager/DownloadLogoFile/**</code></td><td>로고 다운로드</td></tr>
+<tr><td><code>/API/Message//FcmMessagePush</code></td><td>FCM 웹훅 푸시</td></tr>
+</table>
+
+<div class="note"><b>보안 주의 — 신뢰경계 분리 필요.</b> <code>Admin</code>·<code>Util</code>·<code>Gateway</code>·<code>Application</code>·<code>Premium</code>·<code>EzCareTech</code> 전 카테고리가 토큰 인터셉터 미적용입니다(내부/장비용 API로 별도 신뢰경계를 가정). 특히 <code>/API/Admin/**</code>은 테이블 <code>DROP</code>/<code>ALTER</code>/<code>QueryDump</code>, <code>/API/Util/**</code>은 <code>RunCommand</code>(서버 명령 실행)/<code>EmailSend</code>를 포함하므로, 네트워크 레벨(방화벽·역방향 프록시)에서 외부 노출을 반드시 차단해야 합니다.</div>
+
+<h3>1.5 CORS (WebSecurityConfig)</h3>
+<ul>
+<li><code>allowedOrigin=*</code>, <code>allowCredentials=true</code>, <code>maxAge=3600</code></li>
+<li>허용 헤더: <code>authorization, content-type, x-auth-token, SX-Auth-Token, SX-Client-IP, SX-API-Route, SX-Secure-Code</code></li>
+<li>허용 메서드: <code>OPTIONS, HEAD, GET, PUT, POST, DELETE, PATCH</code></li>
+<li><code>/ws</code>(WebSocket)는 <code>permitAll</code>, 세션 <code>STATELESS</code>, CSRF disable</li>
+</ul>
+
+<h3>1.6 공통 응답 구조 (ResJson)</h3>
+<ul>
+<li>표준 성공/실패 래퍼는 <code>ResJson</code> 계열: <code>{ result: boolean, error: int, message: string, remoteIp: string, ... }</code>.</li>
+<li>각 조회 API는 <code>ResJson</code>을 상속한 <code>ResSelectXxx</code> DTO로 데이터 필드를 추가.</li>
+<li>페이지네이션 응답은 <code>ResSelectXxxList</code> / <code>ResSelectXxxPage</code> DTO(리스트 + 페이지 정보).</li>
+</ul>
+
+<h3>1.7 공통 에러 처리 (ExceptionAdviceController — @RestControllerAdvice)</h3>
+<ul>
+<li><code>Exception.class</code> → HTTP 500, <code>ResJson</code> 반환: <code>error=500</code>, <code>message="Exception: &lt;toString&gt;, Class: &lt;class&gt;, Method: &lt;method&gt;, Line: &lt;line&gt;"</code>, <code>remoteIp</code> 포함. <code>log.db.enabled=true</code>이면 <code>data_log</code> 테이블에 ERROR 로그 적재(<code>DataLogService.insert</code>).</li>
+<li><code>SQLException.class</code> → HTTP 500(구현은 <code>null</code> 반환, "DataBase Error" 콘솔 출력).</li>
+<li>에러 코드 메시지는 <code>net.seers.common.utils.ErrorCode.getErrorMsg(int)</code>로 매핑.</li>
+</ul>
+<table>
+<tr><th>에러코드</th><th>의미</th></tr>
+<tr><td><code>241</code></td><td>invalid accessToken (인증 실패)</td></tr>
+<tr><td><code>500</code></td><td>서버 예외(ExceptionAdvice 래핑)</td></tr>
+</table>
+
+<h3>1.8 로깅 (DataLogAspect / DataLog)</h3>
+<p>AOP(<code>DataLogAspect</code>)로 컨트롤러 호출 시작/결과를 <code>DataLog.makeMessage</code>/<code>makeResult</code>로 기록. <code>DataLogController</code>(<code>@ControllerAdvice</code>)가 로그 조회 API를 제공.</p>
+
+<h3>1.9 ForManager / ForAdmin 접미사 관례</h3>
+<ul>
+<li><code>...ForManager</code> 메서드는 대부분 내부적으로 동명의 기본 메서드로 위임(relay). <code>HttpServletResponse</code>를 추가로 받아 매니저 서버(중앙 관리 콘솔)에서 온프레미스로 프록시하는 라우팅 계층(<code>SX-API-Route</code> 헤더 관련). 기능은 기본 API와 동일하되 호출 주체(권한 범위)가 다름.</li>
+<li><code>...ForAdmin</code>은 상위 관리자(전체 조직) 스코프 조회/수정.</li>
+</ul>
+
+<h2 id="account">2. 계정 (account)</h2>
+
+<h3>AccountController — 사용자 계정 CRUD·로그인/로그아웃·프로필</h3>
+<p class="sub">클래스 레벨 매핑 없음(메서드별 절대경로).</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/CreateAccountParamedic</code></td><td>구급대원 계정 생성(인증 제외)</td><td><code>ReqCreateAccount</code></td><td><code>ResSelectAccount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/SelectFireStationAddressList</code></td><td>소방서 주소 목록 조회(인증 제외)</td><td><code>ReqFireStationAddress</code></td><td><code>ResFireStationAddressList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/CreateAccount</code></td><td>일반 계정 생성</td><td><code>ReqCreateAccount</code></td><td><code>ResSelectAccountSimple</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/UpdateAccount</code></td><td>계정 정보 수정</td><td><code>ReqUpdateAccount</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/UpdateAccountParamedic</code></td><td>구급대원 계정 수정</td><td><code>ReqUpdateAccount</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/UpdatePassword</code></td><td>비밀번호 변경</td><td><code>ReqUpdatePassword</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/CheckPassword</code></td><td>비밀번호 확인</td><td><code>ReqUpdatePassword</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/UpdateProfilePhoto</code></td><td>프로필 사진 업로드(<code>MultipartFile profileFile</code>)</td><td><code>ReqUpdateProfilePhoto</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/Login</code></td><td>로그인(인증 제외)</td><td><code>ReqLogin</code></td><td><code>ResLogin</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/Logout</code></td><td>로그아웃</td><td><code>ReqLogout</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/DeleteAccount</code></td><td>계정 삭제</td><td><code>ReqSelectAccount</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/DeleteAllAccountList</code></td><td>계정 일괄 삭제</td><td><code>ReqSelectAccount</code></td><td><code>ResDeleteAccount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/SelectAccountSimple</code></td><td>계정 단건 조회</td><td><code>ReqSelectAccount</code></td><td><code>ResSelectAccountSimple</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/SelectAccountSimpleList</code></td><td>계정 목록 조회</td><td><code>ReqSelectAccount</code></td><td><code>ResSelectAccountSimpleList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/SelectAccountSimplePage</code></td><td>계정 페이지 조회</td><td><code>ReqSelectAccount</code></td><td><code>ResSelectAccountSimplePage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/SelectAllAccountSimpleList</code></td><td>전체 계정 목록(관리자)</td><td><code>ReqSelectAccount</code></td><td><code>ResSelectAccountSimpleList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/SelectAllAccountSimplePage</code></td><td>전체 계정 페이지(관리자)</td><td><code>ReqSelectAccount</code></td><td><code>ResSelectAccountSimplePage</code></td></tr>
+</table>
+
+<h3>AccountHISController — HIS(병원정보시스템) 연동 로그인</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/LoginHIS</code></td><td>HIS 연동 로그인(인증 제외)</td><td><code>ReqLogin</code></td><td><code>ResLogin</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/LogoutHIS</code></td><td>HIS 연동 로그아웃</td><td><code>ReqLogout</code></td><td><code>ResJson</code></td></tr>
+</table>
+
+<h3>AccountHISforManagerController — HIS 매니저 로그인</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/LoginHISforManager</code></td><td>HIS 매니저 로그인(인증 제외)</td><td><code>ReqLogin</code></td><td><code>ResLogin</code></td></tr>
+</table>
+
+<h3>AccountUtilController — 계정 유틸(아이디/비번 찾기·세션갱신)</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/AccountUtil/FoundAccountId</code></td><td>아이디 찾기(인증 제외)</td><td><code>ReqAccountUtil</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/AccountUtil/FoundAccountPassword</code></td><td>비밀번호 찾기(인증 제외)</td><td><code>ReqAccountUtil</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/AccountUtil/SessionRenew</code></td><td>세션(토큰) 갱신</td><td><code>ReqAccountUtil</code></td><td><code>ResLogin</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/AccountUtil/UpdatePwAlertDateTime</code></td><td>비밀번호 변경 알림일시 갱신</td><td><code>ReqAccountUtil</code></td><td><code>ResJson</code></td></tr>
+</table>
+
+<h3>SpecialAccountController — 특수(전용) 계정 관리</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/InsertSpecialAccount</code></td><td>특수계정 생성</td><td><code>ReqSpecialAccount</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/UpdateSpecialAccount</code></td><td>특수계정 수정</td><td><code>ReqSpecialAccount</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/DeleteSpecialAccount</code></td><td>특수계정 삭제</td><td><code>ReqSpecialAccount</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Account/SelectSpecialAccount</code></td><td>특수계정 조회</td><td><code>ReqSpecialAccount</code></td><td><code>ResSelectSpecialAccount</code></td></tr>
+</table>
+
+<h2 id="admin">3. 관리자·시스템 (admin)</h2>
+
+<h3>AdminController — DB 테이블/서버설정 관리</h3>
+<div class="note"><b>보안 주의.</b> 이 컨트롤러는 <code>/API/Admin/**</code> 카테고리로 <b>토큰 인증 미적용</b>이며, 테이블 <code>DROP</code>/<code>ALTER</code>, <code>QueryDump</code> 등 파괴적 DB 운영 API를 포함합니다. 외부 노출을 반드시 차단하세요.</div>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/clearEcgInfoMap</code></td><td>ECG 인메모리 맵 초기화</td><td><code>ReqAdmin</code></td><td><code>Map</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/selectEcgInfoMap</code></td><td>ECG 인메모리 맵 조회</td><td><code>ReqAdmin</code></td><td><code>Map</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/UpdateServerConfigInfo</code></td><td>서버 설정 수정</td><td><code>ReqUpdateServerConfig</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/SelectServerConfigInfo</code></td><td>서버 설정 조회</td><td><code>ReqUpdateServerConfig</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/DeleteMeasurementInfo</code></td><td>측정정보 삭제</td><td><code>ReqDeleteMeasurementInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/DeleteMeasurementInfoLike</code></td><td>측정정보 LIKE 삭제</td><td><code>ReqDeleteMeasurementInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/CreateTableNextYear</code></td><td>내년도 파티션 테이블 생성</td><td><code>ReqAdmin</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/CreateTableNextYearWithCheck</code></td><td>내년도 테이블 생성(존재확인)</td><td><code>ReqAdmin</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/CreateTable</code></td><td>테이블 생성</td><td><code>ReqAdmin</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/DropTableDeveloper</code></td><td>테이블 드롭(개발자용)</td><td><code>ReqAdmin</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/CheckTable</code></td><td>테이블 점검</td><td><code>ReqAdmin</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/RepairTable</code></td><td>테이블 복구</td><td><code>ReqAdmin</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/OptimizeTable</code></td><td>테이블 최적화</td><td><code>ReqAdmin</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/AlterAddColumn</code></td><td>컬럼 추가</td><td><code>ReqAlterColumn</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/AlterDropColumn</code></td><td>컬럼 삭제</td><td><code>ReqAlterColumn</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/AlterAddForeignKey</code></td><td>FK 추가</td><td><code>ReqAlterColumn</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/AlterDropForeignKey</code></td><td>FK 삭제</td><td><code>ReqAlterColumn</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/QueryDump</code></td><td>쿼리 덤프 실행</td><td><code>ReqQueryDump</code></td><td><code>ResJson</code></td></tr>
+</table>
+<p class="sub"><code>SystemController</code> — 빈 클래스(엔드포인트 없음).</p>
+
+<h2 id="application">4. 애플리케이션 (application)</h2>
+
+<h3>ApplicationController — 환자 앱 로그인/세션/FCM/동의</h3>
+<p class="sub">카테고리 인증 제외 <code>/API/Application/**</code>.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Application/Login</code></td><td>앱 로그인</td><td><code>ReqLoginApp</code></td><td><code>ResLoginApp</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Application/Logout</code></td><td>앱 로그아웃</td><td><code>ReqLogoutApp</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Application/SessionRenew</code></td><td>앱 세션 갱신</td><td><code>ReqLoginApp</code></td><td><code>ResLoginApp</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Application/UpdatePatientFcm</code></td><td>환자 FCM 토큰 갱신</td><td><code>ReqUpdatePatientFcm</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Application/UpdatePatientAgreement</code></td><td>환자 동의 갱신</td><td><code>ReqUpdatePatientAgreement</code></td><td><code>ResJson</code></td></tr>
+</table>
+
+<h2 id="biosignal">5. 생체신호 (biosignal)</h2>
+
+<h3>ActivityLevelController — 활동량</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectActivityLevelList</code></td><td>활동량 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataIntList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectActivityLevelDateGroupList</code></td><td>활동량 일자그룹 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataIntList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectActivityLevelTrendList</code></td><td>활동량 트렌드</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataIntList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectActivityLevelLast</code></td><td>활동량 최신값</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataInt</code></td></tr>
+</table>
+
+<h3>BioSignalController — 생체신호 통합 조회</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBioSignalList</code></td><td>생체신호 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectBioSignalList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBioSignalsMergePage</code></td><td>생체신호 병합 페이지</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectMergeBioSignalList</code></td></tr>
+</table>
+
+<h3>BioSignalEventController — 부정맥/생체신호 이벤트·ST세그먼트</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectArrhythmiaEventList</code></td><td>부정맥 이벤트 목록</td><td><code>ReqArrhythmiaEvent</code></td><td><code>ResSelectArrhythmiaEvent</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBioSignalEventSimplePage</code></td><td>이벤트 간이 페이지</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectABioSignalEventSimplePage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBioSignalEventSimpleList</code></td><td>이벤트 간이 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectABioSignalEventSimplePage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBioSignalEventSimpleDoctorPage</code></td><td>이벤트 간이 페이지(의사용)</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectABioSignalEventSimplePage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBioSignalEvent</code></td><td>이벤트 단건</td><td><code>ReqSelectBioSignalEvent</code></td><td><code>ResSelectABioSignalEvent</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/UpdateBioSignalEvent</code></td><td>이벤트 수정</td><td><code>ReqUpdateBioSignalEvent</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/DeleteBioSignalEvent</code></td><td>이벤트 삭제</td><td><code>ReqUpdateBioSignalEvent</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/InsertBioSignalEvent</code></td><td>이벤트 생성</td><td><code>ReqInsertBioSignalEvent</code></td><td><code>ResBioSignalUpdate</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/UpdateBioSignalEventData</code></td><td>이벤트 데이터 수정</td><td><code>ReqUpdateBioSignalEventData</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectOrganBioSignalEventSimpleList</code></td><td>조직단위 이벤트 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectABioSignalEventSimplePage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectOrganBioSignalEventSimplePage</code></td><td>조직단위 이벤트 페이지</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectABioSignalEventSimplePage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectRecentStSegmentInfo</code></td><td>최근 ST세그먼트</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectStSegmentInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectRecentMultiStSegmentInfo</code></td><td>최근 다중 ST세그먼트</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectStSegmentInfoList</code></td></tr>
+</table>
+<p class="sub"><code>BioSignalLastEventController</code> — 테스트 전용(<code>/test22</code>). 부록 참조.</p>
+
+<h3>BioSignalLevelController — 생체신호 알람 레벨</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBioSignalAlarmLevelList</code></td><td>알람 레벨 목록</td><td><code>ReqSelectBioSignalLevel</code></td><td><code>ResSelectBioSignalLevelList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/UpdateBioSignalAlarmLevel</code></td><td>알람 레벨 수정</td><td><code>ReqUpdateBioSignalLevel</code></td><td><code>ResJson</code></td></tr>
+</table>
+
+<h3>BioSignalsSummaryTrendDataController — 요약 트렌드</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBioSignalsSummaryTrendDataPage</code></td><td>요약 트렌드 페이지</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectABioSignalsSummaryTrendDataPage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBioSignalsGraphicalSummaryTrendDataList</code></td><td>그래픽 요약 트렌드 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectABioSignalsGraphicalSummaryTrendDataList</code></td></tr>
+</table>
+
+<h3>BioSignalsTrendDataController — 트렌드</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBioSignalsTrendDataPage</code></td><td>트렌드 페이지</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectABioSignalsTrendDataPage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBioSignalsGraphicalTrendDataList</code></td><td>그래픽 트렌드 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectABioSignalsGraphicalTrendDataList</code></td></tr>
+</table>
+
+<h3>BloodPressureController — 혈압</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/InsertBloodPressure</code></td><td>혈압 등록</td><td><code>ReqInsertBloodPressure</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/UpdateBloodPressure</code></td><td>혈압 수정</td><td><code>ReqUpdateBloodPressure</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/DeleteBloodPressure</code></td><td>혈압 삭제</td><td><code>ReqUpdateIntegerBioData</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBloodPressureList</code></td><td>혈압 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectBloodPressureList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBloodPressurePage</code></td><td>혈압 페이지</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectBloodPressurePage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBloodPressureLast</code></td><td>혈압 최신값</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectBloodPressure</code></td></tr>
+</table>
+
+<h3>BloodSugarController — 혈당</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/InsertBloodSugar</code></td><td>혈당 등록</td><td><code>ReqInsertIntegerBioData</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/UpdateBloodSugar</code></td><td>혈당 수정</td><td><code>ReqUpdateIntegerBioData</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/DeleteBloodSugar</code></td><td>혈당 삭제</td><td><code>ReqUpdateIntegerBioData</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBloodSugarList</code></td><td>혈당 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectBloodSugarList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectBloodSugarLast</code></td><td>혈당 최신값</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectBloodSugar</code></td></tr>
+</table>
+
+<h3>CharmcareController — Charmcare 장비 이벤트</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SendCharmcareDeviceMeasureEvent</code></td><td>Charmcare 측정 이벤트 전송</td><td>(없음)</td><td><code>ResCommon</code></td></tr>
+</table>
+
+<h3>ECGController — 심전도(ECG) 원시데이터·파일</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청/파라미터</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectEcgRawDataIndex</code></td><td>ECG 원시데이터 인덱스 조회</td><td><code>ReqSelectECGRawData</code></td><td><code>ResSelectAnalysisECGRawDataList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectEcgRawData</code></td><td>ECG 원시데이터 조회</td><td><code>ReqSelectECGRawData</code></td><td><code>ResSimpleSelectECGRawData</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectECGRawDataLastSeconds</code></td><td>ECG 최근 N초 데이터</td><td><code>ReqSelectECGRawData</code></td><td><code>ResSelectECGRawDataLastSeconds</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectECGRawFile</code></td><td>ECG 원시파일 목록</td><td><code>ReqSelectECGRawFile</code></td><td><code>ResSelectRawFileList</code></td></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/API/BioSignal/DownloadECGRawFile/{requester}:{measurementCode}:{indexId}</code></td><td>ECG 원시파일 다운로드</td><td>Path: requester, measurementCode, indexId(long)</td><td><code>ResponseEntity&lt;byte[]&gt;</code></td></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/API/BioSignal/DownloadECGFile/{requester}:{measurementCode}:{indexId}</code></td><td>ECG 파일 다운로드</td><td>Path: requester, measurementCode</td><td><code>ResponseEntity&lt;byte[]&gt;</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/CreateJsonFile</code></td><td>ECG JSON 파일 생성</td><td><code>ReqSelectECGRawData</code></td><td><code>void</code></td></tr>
+</table>
+
+<h3>EwsController — 조기경보점수(EWS)</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/DeleteEws</code></td><td>EWS 삭제</td><td><code>ReqSelectEws</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectEwsList</code></td><td>EWS 목록</td><td><code>ReqSelectEws</code></td><td><code>ResSelectEwsList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectEwsPage</code></td><td>EWS 페이지</td><td><code>ReqSelectEws</code></td><td><code>ResSelectEwsList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectEwsLast</code></td><td>EWS 최신값</td><td><code>ReqSelectEws</code></td><td><code>ResSelectEws</code></td></tr>
+</table>
+
+<h3>GyroAccelerationController — 자이로/가속도(낙상)</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청/파라미터</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectGyroAccelerationRawFile</code></td><td>자이로/가속도 원시파일 목록</td><td><code>ReqSelectGyroAccelerationRawFile</code></td><td><code>ResSelectRawFileList</code></td></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/API/BioSignal/DownloadGyroAccelerationRawFile/{requestUserCode}:{measurementCode}:{indexId}</code></td><td>자이로/가속도 원시파일 다운로드</td><td>Path: requestUserCode, measurementCode, indexId(long)</td><td><code>ResponseEntity&lt;byte[]&gt;</code></td></tr>
+</table>
+
+<h3>HeartRateController — 심박수</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectHeartRateList</code></td><td>심박수 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataIntList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectHeartRateDateGroupList</code></td><td>심박수 일자그룹 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataIntList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectHeartRateTrendList</code></td><td>심박수 트렌드</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataIntList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectHeartRateLast</code></td><td>심박수 최신값</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataInt</code></td></tr>
+</table>
+
+<h3>MedianaController — Mediana 장비 데이터</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/InsertMedianaData</code></td><td>Mediana 데이터 등록</td><td><code>ReqInsertMediaData</code></td><td><code>ResJson</code></td></tr>
+</table>
+
+<h3>OmissionBioSignalController — 누락 생체신호(오프라인 보정)</h3>
+<p class="sub">카테고리 <code>/API/Omission/</code>.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Omission/InsertOmissionEcgData</code></td><td>누락 ECG 데이터 등록</td><td><code>ReqOmissionBioSignalData</code></td><td><code>ResOmissionBioSignalInfo</code></td></tr>
+</table>
+
+<h3>RespController — 호흡수</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectRespList</code></td><td>호흡수 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataIntList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectRespDateGroupList</code></td><td>호흡수 일자그룹 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataIntList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectRespTrendList</code></td><td>호흡수 트렌드</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataIntList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectRespLast</code></td><td>호흡수 최신값</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataInt</code></td></tr>
+</table>
+
+<h3>SkyLabsController — SkyLabs PPG 패킷</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/InsertSkyLabsPPGPacketList</code></td><td>SkyLabs PPG 패킷 등록</td><td><code>ReqInsertSkyLabsPPGPacketList</code></td><td><code>ResInsertSkyLabsPPGPacketList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/InsertSkyLabsEventPacketList</code></td><td>SkyLabs 이벤트 패킷 등록</td><td><code>ReqInsertSkyLabsEventPacketList</code></td><td><code>ResInsertSkyLabsEventPacketList</code></td></tr>
+</table>
+
+<h3>SpO2Controller — 산소포화도</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/InsertSpO2</code></td><td>SpO2 등록</td><td><code>ReqInsertIntegerBioData</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/UpdateSpO2</code></td><td>SpO2 수정</td><td><code>ReqUpdateIntegerBioData</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/DeleteSpO2</code></td><td>SpO2 삭제</td><td><code>ReqUpdateIntegerBioData</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectSpO2List</code></td><td>SpO2 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectSpO2List</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectSpO2Page</code></td><td>SpO2 페이지</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectSpO2Page</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectSpO2SimpleList</code></td><td>SpO2 간이 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataIntList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectSpO2DateGroupList</code></td><td>SpO2 일자그룹 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectSpO2List</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectSpO2TrendList</code></td><td>SpO2 트렌드</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataIntList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectSpO2Last</code></td><td>SpO2 최신값</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectSpO2</code></td></tr>
+</table>
+
+<h3>SymptomRecordController — 증상 기록</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/InsertSymptomRecord</code></td><td>증상 등록</td><td><code>ReqInsertSymptomRecord</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/UpdateSymptomRecord</code></td><td>증상 수정</td><td><code>ReqUpdateSymptomRecord</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/DeleteSymptomRecord</code></td><td>증상 삭제</td><td><code>ReqDeleteSymptomRecord</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectSymptomRecordList</code></td><td>증상 목록</td><td><code>ReqSelectSymptomRecord</code></td><td><code>ResSelectPatientInfoSymptomList</code></td></tr>
+</table>
+
+<h3>TemperatureController — 체온</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/InsertTemperature</code></td><td>체온 등록</td><td><code>ReqInsertTemperature</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/UpdateTemperature</code></td><td>체온 수정</td><td><code>ReqUpdateTemperature</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/DeleteTemperature</code></td><td>체온 삭제</td><td><code>ReqUpdateTemperature</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectTemperatureList</code></td><td>체온 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectTemperatureList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectTemperaturePage</code></td><td>체온 페이지</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectTemperaturePage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectTemperatureSimpleList</code></td><td>체온 간이 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataDecimalList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectTemperatureDateGroupList</code></td><td>체온 일자그룹 목록</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataDecimalList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectTemperatureTrendList</code></td><td>체온 트렌드</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectRawDataDecimalList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/BioSignal/SelectTemperatureLast</code></td><td>체온 최신값</td><td><code>ReqSelectBioData</code></td><td><code>ResSelectTemperature</code></td></tr>
+</table>
+
+<h2 id="board">6. 게시판·알림 (board)</h2>
+
+<h3>NoticeController — 공지사항</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/InsertNotice</code></td><td>공지 등록</td><td><code>ReqInsertNotice</code></td><td><code>ResInsertNotice</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/InsertNoticeForManager</code></td><td>공지 등록(매니저)</td><td><code>ReqInsertNotice</code></td><td><code>ResInsertNotice</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/UpdateNotice</code></td><td>공지 수정</td><td><code>ReqUpdateNotice</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/UpdateNoticeForManager</code></td><td>공지 수정(매니저)</td><td><code>ReqUpdateNotice</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/DeleteNotice</code></td><td>공지 삭제</td><td><code>ReqSelectNotice</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/SelectNoticeSimplePage</code></td><td>공지 간이 페이지</td><td><code>ReqSelectNotice</code></td><td><code>ResSelectNoticeSimpleList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/SelectNotice</code></td><td>공지 단건</td><td><code>ReqSelectNotice</code></td><td><code>ResSelectNotice</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/SelectNoticeSimpleList</code></td><td>공지 간이 목록</td><td><code>ReqSelectNotice</code></td><td><code>ResSelectNoticeSimpleList</code></td></tr>
+</table>
+
+<h3>NoticeFileController — 공지 첨부파일</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청/파라미터</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/InsertNoticeFile</code></td><td>공지파일 업로드(<code>MultipartFile file</code>)</td><td><code>ReqInsertNoticeFile</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/DeleteNoticeFile</code></td><td>공지파일 삭제</td><td><code>ReqSelectNoticeFile</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/API/Board/DownloadNoticeFile/{noticeCode}:{noticeFileCode}</code></td><td>공지파일 다운로드</td><td>Path: noticeCode, noticeFileCode</td><td><code>ResponseEntity&lt;byte[]&gt;</code></td></tr>
+</table>
+
+<h3>NotificationController — 알림(푸시/수신확인)</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/InsertNotification</code></td><td>알림 생성</td><td><code>ReqInsertNotification</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/UpdateNotification</code></td><td>알림 수정</td><td><code>ReqUpdateNotification</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/DeleteNotification</code></td><td>알림 삭제</td><td><code>ReqSelectNotification</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/SelectNotificationPage</code></td><td>알림 페이지</td><td><code>ReqSelectNotification</code></td><td><code>ResSelectNotificationList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/SelectNotificationApp</code></td><td>앱 알림 목록</td><td><code>ReqSelectNotification</code></td><td><code>ResSelectNotificationList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/SelectNotification</code></td><td>알림 단건</td><td><code>ReqSelectNotification</code></td><td><code>ResSelectNotification</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/UpdateNotificationReceive</code></td><td>알림 수신 표시</td><td><code>ReqUpdateNotificationCheck</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Board/UpdateNotificationRead</code></td><td>알림 읽음 표시</td><td><code>ReqUpdateNotificationCheck</code></td><td><code>ResJson</code></td></tr>
+</table>
+
+<h2 id="cardio">7. 카디오 연동 (cardio)</h2>
+
+<h3>CardioSyncController — Cardio(외부 심전도 분석) 동기화·홀터 리포트</h3>
+<p class="sub">카테고리 <code>/API/CardioSync/</code>.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/CardioSync/selectCardioMeasurementCode</code></td><td>Cardio 측정코드 목록</td><td><code>ReqSelectSyncCardio</code></td><td><code>ResSelectCardioSync</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/CardioSync/insertECGData</code></td><td>Cardio로 ECG 데이터 전송</td><td><code>ReqSelectMeasurementInfo</code></td><td><code>void</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/CardioSync/InsertLinkInfoCardioUnlinked</code></td><td>Cardio 미연결 링크정보 등록</td><td><code>ReqSelectSyncCardio</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/CardioSync/SelectLinkInfoCardioUnlinked</code></td><td>Cardio 미연결 링크정보 조회</td><td><code>ReqSelectSyncCardio</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/CardioSync/SendLinkInfoCardio</code></td><td>Cardio 링크정보 전송</td><td><code>ReqSelectSyncCardio</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/CardioSync/SelectCardioMeasurementInfoList</code></td><td>Cardio 측정정보 목록</td><td><code>ReqSelectCardioMeasurementInfoList</code></td><td><code>ResSelectMeasurementInfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/CardioSync/SendHolterOrderRequestCardio</code></td><td>홀터 오더 요청 전송</td><td><code>ReqHolterOrderRequestCardio</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/CardioSync/DownloadHolterReport</code></td><td>홀터 리포트 다운로드</td><td><code>ReqDownloadCardioReport</code></td><td><code>ResponseEntity&lt;Resource&gt;</code></td></tr>
+</table>
+
+<h2 id="device">8. 장비 (device)</h2>
+
+<h3>DeviceFactoryController — 공장출하 장비 마스터</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/InsertDeviceFactory</code></td><td>공장장비 등록</td><td><code>ReqInsertDeviceFactory</code></td><td><code>ResSelectDeviceFactory</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/InsertDeviceFactoryList</code></td><td>공장장비 일괄등록</td><td><code>ReqInsertDeviceFactoryList</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/UpdateDeviceFactory</code></td><td>공장장비 수정</td><td><code>ReqInsertDeviceFactory</code></td><td><code>ResSelectDeviceFactory</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/DeleteDeviceFactory</code></td><td>공장장비 삭제</td><td><code>ReqSelectDeviceFactory</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/CheckDeviceFactory</code></td><td>공장장비 확인</td><td><code>ReqSelectDeviceFactory</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/SelectDeviceFactorySimplePage</code></td><td>공장장비 간이 페이지</td><td><code>ReqSelectDeviceFactory</code></td><td><code>ResSelectDeviceFactorySimple</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/SelectDeviceFactory</code></td><td>공장장비 조회</td><td><code>ReqSelectDeviceFactory</code></td><td><code>ResSelectDeviceFactory</code></td></tr>
+</table>
+
+<h3>DeviceInfoController — 측정용 장비 정보</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/InsertDeviceInfo</code></td><td>장비정보 등록</td><td><code>ReqInsertDeviceInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/DeleteDeviceInfo</code></td><td>장비정보 삭제</td><td><code>ReqSelectDeviceInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateDeviceInfo</code></td><td>장비정보 수정</td><td><code>ReqUpdateDeviceInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectDeviceInfo</code></td><td>장비정보 조회</td><td><code>ReqSelectDeviceInfo</code></td><td><code>ResSelectDeviceInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectUsingDeviceInfo</code></td><td>사용중 장비 상세</td><td><code>ReqSelectDeviceInfo</code></td><td><code>ResSelectDeviceInfoDetail</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectDeviceMeasurementInfo</code></td><td>장비-측정 매핑 조회</td><td><code>ReqSelectDeviceMeasurementInfo</code></td><td><code>ResSelectDeviceMeasurementInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectDeviceMeasurementInfoForMobile</code></td><td>장비-측정 매핑(모바일)</td><td><code>ReqSelectDeviceMeasurementInfo</code></td><td><code>ResSelectDeviceMeasurementInfo</code></td></tr>
+</table>
+
+<h3>DeviceRegisterController — 장비 등록/조직배정/사용현황</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/InsertDeviceRegister</code></td><td>장비 등록</td><td><code>ReqInsertDeviceRegister</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/InsertAllDeviceRegister</code></td><td>장비 일괄 등록</td><td><code>ReqInsertDeviceRegister</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/InsertAllDeviceRegisterForManager</code></td><td>장비 일괄 등록(매니저)</td><td><code>ReqInsertDeviceRegister</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/UpdateAllDeviceOrganizationCodeList</code></td><td>장비 조직코드 일괄변경</td><td><code>ReqUpdateDeviceRegisterList</code></td><td><code>ResDeviceEventListResult</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/DeleteAllDeviceRegisterList</code></td><td>장비 일괄 삭제</td><td><code>ReqUpdateDeviceRegisterList</code></td><td><code>ResDeviceEventListResult</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/UpdateDeviceRegister</code></td><td>장비 수정</td><td><code>ReqUpdateDeviceRegister</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/DeleteDeviceRegister</code></td><td>장비 삭제</td><td><code>ReqSelectDeviceRegister</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/ResetDeviceRegisterUseTime</code></td><td>장비 사용시간 초기화</td><td><code>ReqSelectDeviceRegister</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/SelectDeviceRegisterPage</code></td><td>장비 등록 페이지</td><td><code>ReqSelectDeviceRegister</code></td><td><code>ResSelectDeviceRegisterList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/SelectAllDeviceRegisterPage</code></td><td>전체 장비 페이지</td><td><code>ReqSelectDeviceRegister</code></td><td><code>ResSelectDeviceRegisterList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/SelectAllDeviceRegisterPageForManager</code></td><td>전체 장비 페이지(매니저)</td><td><code>ReqSelectDeviceRegister</code></td><td><code>ResSelectDeviceRegisterList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/SelectDeviceUsageList</code></td><td>장비 사용현황 목록</td><td><code>ReqSelectDeviceRegister</code></td><td><code>ResSelectDeviceUsagePage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/SelectDeviceRegisterUnusedPage</code></td><td>미사용 장비 페이지</td><td><code>ReqSelectDeviceRegister</code></td><td><code>ResSelectDeviceRegisterList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/SelectDeviceRegisterCount</code></td><td>장비 상태별 카운트</td><td><code>ReqSelectDeviceRegister</code></td><td><code>ResSelectDeviceRegisterStatusCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/InsertDeviceListRegister</code></td><td>장비 리스트 등록</td><td><code>ReqInsertDeviceListRegister</code></td><td><code>ResInsertDeviceListRegister</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/InsertAllDeviceListRegisterForManager</code></td><td>장비 리스트 일괄등록(매니저)</td><td><code>ReqInsertDeviceListRegister</code></td><td><code>ResInsertDeviceListRegister</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/DeleteAllDeviceRegisterListForManager</code></td><td>장비 일괄 삭제(매니저)</td><td><code>ReqUpdateDeviceRegisterList</code></td><td><code>ResDeviceEventListResult</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/DeleteDeviceRegisterForManager</code></td><td>장비 삭제(매니저)</td><td><code>ReqSelectDeviceRegister</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/UpdateAllDeviceOrganizationCodeListForManager</code></td><td>장비 조직코드 일괄변경(매니저)</td><td><code>ReqUpdateDeviceRegisterList</code></td><td><code>ResDeviceEventListResult</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/InsertAllDeviceListRegister</code></td><td>장비 리스트 일괄등록</td><td><code>ReqInsertDeviceListRegister</code></td><td><code>ResInsertDeviceListRegister</code></td></tr>
+</table>
+
+<h3>DeviceStatusInfoController — 장비 상태·배터리</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectDeviceLastStatusInfo</code></td><td>장비 최신 상태 조회</td><td><code>ReqSelectDeviceStatusInfo</code></td><td><code>ResSelectDeviceStatusInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/InsertDeviceBatteryCheck</code></td><td>장비 배터리 체크 등록</td><td><code>ReqInsertDeviceBatteryCheck</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Device/SelectDeviceBatteryCheck</code></td><td>장비 배터리 체크 조회</td><td><code>ReqInsertDeviceBatteryCheck</code></td><td><code>ResSelectDeviceStatusInfo</code></td></tr>
+</table>
+
+<h2 id="dicom">9. DICOM (dicom)</h2>
+
+<h3>DicomController — DICOM 폴더/변환/전송</h3>
+<p class="sub"><code>@Controller</code>, 인증 제외 카테고리 <code>/API/Admin/</code>. 모든 메서드가 body 없이 <code>HttpServletRequest</code>만 받음.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/CreateDicomFolder</code></td><td>DICOM 폴더 생성</td><td>(없음)</td><td><code>void</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/DicomConvertAndSend</code></td><td>DICOM 변환 후 전송</td><td>(없음)</td><td><code>void</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Admin/DicomSend</code></td><td>DICOM 전송</td><td>(없음)</td><td><code>void</code></td></tr>
+</table>
+
+<h2 id="doctor">10. 의사·협진 (doctor)</h2>
+
+<h3>DoctorController — 협진/원격진료/스케줄/북마크/HIS 연동 (최대 규모)</h3>
+<p class="sub">단일 컨트롤러에 65개 핸들러. 협진(consult) 라이프사이클, 원격/실시간/응급/소견/자문/예약 협진, 케이스, 회의록, 북마크, HIS 연동 조회를 포괄.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectCalendarScheduleList</code></td><td>캘린더 일정 목록</td><td><code>ReqSelectDoctorCalendar</code></td><td><code>ResSelectScheduleCalendarListInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectConsultAlarmList</code></td><td>협진 알람 목록</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResSelectConsultAlarmListInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectMyScheduleList</code></td><td>내 일정 목록</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResSelectMyScheduleListInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectMyScheduleWithHisList</code></td><td>내 일정(HIS 포함)</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResSelectMyScheduleListInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectRemoteSessionList</code></td><td>원격세션 목록</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResSelectRemoteSessionListInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/InsertConsult</code></td><td>협진 생성</td><td><code>ReqInsertDoctorConsult</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/InsertRemoteConsult</code></td><td>원격협진 생성</td><td><code>ReqInsertDoctorConsult</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/InsertEmergencyConsult</code></td><td>응급협진 생성</td><td><code>ReqInsertDoctorConsult</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateConsultConfirm</code></td><td>협진 승인</td><td><code>ReqUpdateConsultReply</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateRemoteConsultGoOut</code></td><td>원격협진 퇴장</td><td><code>ReqUpdateConsultReply</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateRemoteConsultGoIn</code></td><td>원격협진 입장</td><td><code>ReqUpdateConsultReply</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/InsertConsultReply</code></td><td>협진 답변 등록</td><td><code>ReqUpdateConsultReply</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateConsultReply</code></td><td>협진 답변 수정</td><td><code>ReqUpdateConsultReply</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectConsultView</code></td><td>협진 상세 조회</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResSelectConsultViewInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectRealTimeAndOpinionAndEmergencyConsultView</code></td><td>실시간/소견/응급 협진 조회</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResSelectConsultRealtimeView</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectConsultConfirmView</code></td><td>협진 승인 뷰</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResConsultConfirmViewInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectScheduleCount</code></td><td>일정 카운트</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResScheduleCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectScreeningClinicView</code></td><td>선별진료소 뷰</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResSelectRemoteSessionListInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectHisPatientList</code></td><td>HIS 환자 목록</td><td><code>ReqSelectHisPatient</code></td><td><code>ResSelectHisPatient</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectHisDoctorList</code></td><td>HIS 의사 목록</td><td><code>ReqSelectHisDoctor</code></td><td><code>ResSelectHisDoctor</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateStatusDeleteConsult</code></td><td>협진 상태-삭제 처리</td><td><code>ReqUpdateConsultReply</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateRemoteConsultFirstDatetime</code></td><td>원격협진 최초일시 갱신</td><td><code>ReqUpdateConsultReply</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectRemoteConsultFirstDatetime</code></td><td>원격협진 최초일시 조회</td><td><code>ReqUpdateConsultReply</code></td><td><code>ResSelectRemoteConsultStartDatetime</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateRemoteConsultDone</code></td><td>원격협진 완료</td><td><code>ReqUpdateConsultReply</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectParticipantsDoctorList</code></td><td>참여 의사 목록</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResSelectConsultMemberList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectOpinionConsultList</code></td><td>소견 협진 목록</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResSelectOpinionConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/InsertOpinionConsult</code></td><td>소견 협진 생성</td><td><code>ReqInsertDoctorConsult</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectRemoteConsultCaseList</code></td><td>원격협진 케이스 목록</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResSelectConsultCaseListInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateConsult</code></td><td>협진 수정</td><td><code>ReqInsertDoctorConsult</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectBookMarkUserList</code></td><td>북마크 사용자 목록</td><td><code>ReqSelectBookmark</code></td><td><code>ResSelectBookmarkInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectBookMarkList</code></td><td>북마크 목록</td><td><code>ReqSelectBookmark</code></td><td><code>ResSelectBookmarkInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/InsertBookMark</code></td><td>북마크 등록</td><td><code>ReqSelectBookmark</code></td><td><code>ResSelectBookmarkInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/InsertBookMarkDetail</code></td><td>북마크 상세 등록</td><td><code>ReqSelectBookmark</code></td><td><code>ResSelectBookmarkInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/DeleteBookMark</code></td><td>북마크 삭제</td><td><code>ReqSelectBookmark</code></td><td><code>ResSelectBookmarkInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/DeleteBookMarkDetail</code></td><td>북마크 상세 삭제</td><td><code>ReqSelectBookmark</code></td><td><code>ResSelectBookmarkInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectHisExinfo1</code></td><td>HIS 추가정보1</td><td><code>ReqExinfo</code></td><td><code>ResHisExinfo1</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectHisExinfo2</code></td><td>HIS 추가정보2</td><td><code>ReqExinfo</code></td><td><code>ResHisExinfo2</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectHisExinfo3</code></td><td>HIS 추가정보3</td><td><code>ReqExinfo</code></td><td><code>ResHisExinfo3</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectHisPacsinfo</code></td><td>HIS PACS 정보</td><td><code>ReqPacs</code></td><td><code>ResHisPacsinfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectHisExinfo5</code></td><td>HIS 추가정보5</td><td><code>ReqExinfo</code></td><td><code>ResHisExinfo5</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateVroomId</code></td><td>화상방 ID 갱신</td><td><code>ReqUpdateCaseVroomId</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateRemoteConsultCaseStatus</code></td><td>원격협진 케이스 상태 갱신</td><td><code>ReqUpdateConsultReply</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/ConnectCondition</code></td><td>접속 상태 푸시(HConnect)</td><td><code>ReqSendFcmHconnectMessage</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectScheduleCheck</code></td><td>HIS 일정 체크</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResCheckDateTime</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/InsertRealTimeConsult</code></td><td>실시간 협진 생성</td><td><code>ReqInsertDoctorConsult</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateRealTimeConsult</code></td><td>실시간 협진 수정</td><td><code>ReqInsertDoctorConsult</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/InsertAdviceConsult</code></td><td>자문 협진 생성</td><td><code>ReqInsertDoctorConsult</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateAdviceConsult</code></td><td>자문 협진 수정</td><td><code>ReqInsertDoctorConsult</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateConsultStatus</code></td><td>협진 상태 갱신</td><td><code>ReqUpdateConsultReply</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/DeleteConsult</code></td><td>협진 삭제</td><td><code>ReqUpdateConsultReply</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/InsertReserveConsult</code></td><td>예약 협진 생성</td><td><code>ReqInsertDoctorConsult</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateReserveConsult</code></td><td>예약 협진 수정</td><td><code>ReqInsertDoctorConsult</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectAllScheduleList</code></td><td>전체 일정 목록</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResSelectMyScheduleListInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectConsultList</code></td><td>협진 목록</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResSelectRemoteSessionListInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectCaseList</code></td><td>케이스 목록</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResSelectConsultCaseListInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateProceedings</code></td><td>회의록 갱신</td><td><code>ReqUpdateConsultReply</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectCalendarScheduleVer2List</code></td><td>캘린더 일정 목록 v2</td><td><code>ReqSelectDoctorCalendar</code></td><td><code>ResSelectScheduleCalendarListInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectProceedings</code></td><td>회의록 조회</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResSelectProceedings</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/UpdateHostCaseStay</code></td><td>호스트 케이스 대기 갱신</td><td><code>ReqUpdateConsultReply</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectHworksCount</code></td><td>Hworks 카운트</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResCheckCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/InsertConsultInvite</code></td><td>협진 초대</td><td><code>ReqInsertDoctorConsult</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/InsertCase</code></td><td>케이스 생성</td><td><code>ReqInsertDoctorConsult</code></td><td><code>ResSelectConsultInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectHisStaywardList</code></td><td>HIS 재원병동 목록</td><td><code>ReqSelectHisPatient</code></td><td><code>ResSelectHisPatient</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Doctor/SelectMeasurementConsultCheck</code></td><td>측정-협진 체크</td><td><code>ReqSelectDoctorConsult</code></td><td><code>ResSelectConsultRealtimeView</code></td></tr>
+</table>
+
+<h2 id="emr">11. EMR (emr)</h2>
+
+<h3>EmrTestController — EMR(BJH) 연동 테스트</h3>
+<div class="note"><b>운영 규격 외.</b> 이 컨트롤러는 개발/테스트용(BJH 병원 EMR 연동 검증)입니다. 운영 API로 취급하지 말고 배포 시 비활성/제거를 권장합니다.</div>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/bjhPatient</code></td><td>BJH EMR 환자 조회 테스트</td><td><code>ReqSelectSickRoomPatientList</code></td><td><code>String</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/bjhInsert</code></td><td>BJH EMR 바이탈 등록 테스트</td><td><code>ReqSelectSickRoomPatientList</code></td><td><code>String</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/bjhEmrSendTest</code></td><td>BJH EMR 전송 테스트</td><td><code>ReqSelectSickRoomPatientList</code></td><td><code>String</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/bjhEmrSend</code></td><td>BJH EMR 전송</td><td><code>ReqSelectSickRoomPatientList</code></td><td><code>String</code></td></tr>
+</table>
+
+<h2 id="ezcare">12. EzCareTech 연동 (ezcare)</h2>
+
+<h3>EzCareTechController — EzCareTech(외부 EMR/EDGE) 연동</h3>
+<p class="sub">인증 제외 <code>/API/EzCareTech/**</code>. 모든 메서드가 <code>HttpServletRequest</code>만 받고 body는 내부에서 파싱(raw).</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/EzCareTech/tokenTest</code></td><td>토큰 테스트</td><td>(raw)</td><td><code>ReqJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/EzCareTech/patientInfoList</code></td><td>환자정보 목록</td><td>(raw)</td><td><code>ReqJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/EzCareTech/wardInfoList</code></td><td>병동정보 목록</td><td>(raw)</td><td><code>ReqJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/EzCareTech/sickRoomInfoList</code></td><td>병실정보 목록</td><td>(raw)</td><td><code>ReqJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/EzCareTech/insertEZ</code></td><td>EZ 데이터 등록</td><td>(raw)</td><td><code>ReqJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/EzCareTech/sendReport</code></td><td>리포트 전송</td><td>(raw)</td><td><code>ReqJson</code></td></tr>
+</table>
+
+<h2 id="gateway">13. 게이트웨이 (gateway)</h2>
+
+<h3>GatewayController — 게이트웨이(수신기) 로그인·펌웨어·측정 연동</h3>
+<p class="sub">인증 제외 <code>/API/Gateway/**</code>.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청/파라미터</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Gateway/Login</code></td><td>GW 로그인</td><td><code>ReqLoginGw</code></td><td><code>ResLoginGw</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Gateway/LoginForMobile</code></td><td>GW 로그인(모바일)</td><td><code>ReqLoginGw</code></td><td><code>ResLoginGw</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Gateway/SelectGatewayFwInfo</code></td><td>GW 펌웨어 정보 조회</td><td><code>ReqSelectGatewayFwInfo</code></td><td><code>ResSelectGatewayFwInfo</code></td></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/API/Gateway/DownloadGatewayFwInfo/{serialNumber}:{fwVersion}:{organizationCode}</code></td><td>GW 펌웨어 다운로드</td><td>Path: serialNumber, fwVersion, organizationCode</td><td><code>ResponseEntity&lt;byte[]&gt;</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Gateway/UpdateGatewayFwVersion</code></td><td>GW 펌웨어 버전 갱신</td><td><code>ReqUpdateGatewayFwVersion</code></td><td><code>ResSelectGatewayInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Gateway/SelectGatewayInfo</code></td><td>GW 정보 조회</td><td><code>ReqSelectGatewayInfo</code></td><td><code>ResSelectGatewayInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Gateway/SelectMeasurementInfo</code></td><td>GW 측정정보 조회</td><td><code>ReqSelectGatewayMeasurementInfo</code></td><td><code>ResSelectMeasurementInfoGwList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Gateway/SelectPatientCodeList</code></td><td>GW 환자코드 목록</td><td><code>ReqSelectGatewayMeasurementInfo</code></td><td><code>ResSelectMeasurementInfoGwList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Gateway/UpdateMeasurementInfoStatus</code></td><td>GW 측정 상태 갱신</td><td><code>ReqUpdateMeasurementInfoStatus</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Gateway/UpdateGatewayAlive</code></td><td>GW 생존신호 갱신</td><td><code>ReqSelectGatewayInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/API/Gateway/SelectGatewayAlive/{serialNumber}</code></td><td>GW 생존상태 조회</td><td>Path: serialNumber</td><td><code>ResAliveResult</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Gateway/SelectBloodPressureDeviceList</code></td><td>GW 혈압장비 목록</td><td><code>ReqSelectBloodPressureDeviceList</code></td><td><code>ResSelectBloodPressureDeviceRegisterList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Gateway/InsertBPRawData</code></td><td>GW 혈압 원시데이터 등록</td><td><code>ReqInsertBPRawDataFile</code></td><td><code>ResInsertBPRawData</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Gateway/InsertDeviceMonitoringInfoList</code></td><td>GW 장비 모니터링 정보 등록</td><td><code>ReqDeviceMonitoringInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Gateway/CheckingPing</code></td><td>GW 핑 체크</td><td><code>ReqUtil</code>(required=false)</td><td><code>ResSelectCheckingPingGW</code></td></tr>
+</table>
+<p class="sub">참고: <code>GatewayInfoController</code>(manager 도메인)에도 <code>/API/Gateway/ResetGatewayTest</code>(GET/POST)가 존재.</p>
+
+<h3>GwAssignmentController — 게이트웨이 배정</h3>
+<p class="sub">인증 제외 <code>/API/Assignment/**</code> 카테고리로 매핑.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Gateway/SelectGwAssignmentMeasurementInfo</code></td><td>GW 배정 측정정보 조회</td><td><code>ReqSelectGatewayAssignment</code></td><td><code>ResSelectMeasurementInfoList</code></td></tr>
+</table>
+
+<h2 id="global">14. 전역 설정 (global)</h2>
+
+<p class="sub"><code>GlobalDefaultSettingController</code> — 빈 클래스(서비스만 주입, 엔드포인트 없음).</p>
+<h3>GlobalVariableSettingController — 전역 변수 설정</h3>
+<p class="sub">카테고리 <code>/API/Global/</code>.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Global/InsertGlobalSetting</code></td><td>전역설정 등록</td><td><code>ReqInsertGlobalSetting</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Global/UpdateGlobalSetting</code></td><td>전역설정 수정</td><td><code>ReqSelectGlobalSetting</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Global/DeleteGlobalSetting</code></td><td>전역설정 삭제</td><td><code>ReqUpdateGlobalSetting</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Global/SelectGlobalSetting</code></td><td>전역설정 조회</td><td><code>ReqSelectGlobalSetting</code></td><td><code>ResSelectGlobalSetting</code></td></tr>
+</table>
+
+<h2 id="log">15. 로그 (log)</h2>
+
+<h3>DataLogController — 데이터 로그 조회</h3>
+<p class="sub"><code>@ControllerAdvice</code> + <code>@RestController</code>.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectDataLogPage</code></td><td>데이터 로그 페이지</td><td><code>ReqSelectDataLog</code></td><td><code>ResSelectDataLogList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectDataLogPageForManager</code></td><td>데이터 로그 페이지(매니저)</td><td><code>ReqSelectDataLog</code></td><td><code>ResSelectDataLogList</code></td></tr>
+</table>
+
+<h2 id="logo">16. 로고 (logo)</h2>
+
+<h3>LogoController — 조직 로고 파일</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청/파라미터</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertLogoFile</code></td><td>로고 업로드(<code>MultipartFile file</code>)</td><td><code>ReqInsertLogo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/API/Manager/DownloadLogoFile/{organizationCode}</code></td><td>로고 다운로드(인증 제외)</td><td>Path: organizationCode</td><td><code>ResponseEntity&lt;byte[]&gt;</code></td></tr>
+</table>
+
+<h2 id="manager">17. 병동/시설 관리 (manager)</h2>
+
+<h3>BuildingController — 건물</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertBuilding</code></td><td>건물 등록</td><td><code>ReqInsertBuilding</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateBuilding</code></td><td>건물 수정</td><td><code>ReqUpdateBuilding</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteBuilding</code></td><td>건물 삭제</td><td><code>ReqSelectBuilding</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectBuilding</code></td><td>건물 목록</td><td><code>ReqSelectBuilding</code></td><td><code>ResSelectBuildingList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectBuildingDetail</code></td><td>건물 상세</td><td><code>ReqSelectBuilding</code></td><td><code>ResSelectBuilding</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateWardBuildingCode</code></td><td>병동 건물코드 갱신</td><td><code>ReqUpdateWardBuildingCode</code></td><td><code>ResJson</code></td></tr>
+</table>
+
+<h3>DisplayController — 디스플레이(모니터) 정보</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertDisplay</code></td><td>디스플레이 등록</td><td><code>ReqInsertDisplayInfo</code></td><td><code>ResInsertDisplayinfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateDisplay</code></td><td>디스플레이 수정</td><td><code>ReqInsertDisplayInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteDisplay</code></td><td>디스플레이 삭제</td><td><code>ReqSelectDisplayInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectDisplay</code></td><td>디스플레이 목록</td><td><code>ReqSelectDisplayInfoList</code></td><td><code>ResSelectDisplayInfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectDisplayDetail</code></td><td>디스플레이 상세</td><td><code>ReqSelectDisplayInfo</code></td><td><code>ResSelectDisplayInfo</code></td></tr>
+</table>
+
+<h3>GatewayFwInfoController — 게이트웨이 펌웨어 관리</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청/파라미터</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertGatewayFwInfo</code></td><td>GW 펌웨어 업로드(<code>MultipartFile file</code>)</td><td><code>ReqInsertGatewayFwInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteGatewayFwInfo</code></td><td>GW 펌웨어 삭제</td><td><code>ReqSelectGatewayFwInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectGatewayFwInfo</code></td><td>GW 펌웨어 조회</td><td><code>ReqSelectGatewayFwInfo</code></td><td><code>ResSelectGatewayFwInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectGatewayFwInfoPage</code></td><td>GW 펌웨어 페이지</td><td><code>ReqSelectGatewayInfo</code></td><td><code>ResSelectGatewayFwInfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectGatewayFwInfoList</code></td><td>GW 펌웨어 목록</td><td><code>ReqSelectGatewayInfo</code></td><td><code>ResSelectGatewayFwInfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateGatewayStart</code></td><td>GW 시작(펌웨어 배포)</td><td><code>ReqUpdateGatewayStart</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/TestEventGatewayFwInfo</code></td><td>GW 펌웨어 이벤트 테스트</td><td><code>ReqUpdateGatewayStart</code></td><td><code>ResJson</code></td></tr>
+</table>
+
+<h3>GatewayInfoController — 게이트웨이 정보 CRUD·조직배정</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청/파라미터</th><th>응답</th></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/API/Gateway/ResetGatewayTest</code></td><td>GW 리셋 테스트(GET)</td><td><code>@RequestParam String serialNumber</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Gateway/ResetGatewayTest</code></td><td>GW 리셋 테스트(POST)</td><td><code>ReqSelectGatewayInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertGatewayInfo</code></td><td>GW 정보 등록</td><td><code>ReqInsertGatewayInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertGatewayInfoForManager</code></td><td>GW 정보 등록(매니저)</td><td><code>ReqInsertGatewayInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateGatewayInfo</code></td><td>GW 정보 수정</td><td><code>ReqUpdateGatewayInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateGatewayInfoForManager</code></td><td>GW 정보 수정(매니저)</td><td><code>ReqUpdateGatewayInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteGatewayInfoList</code></td><td>GW 일괄 삭제</td><td><code>ReqDeleteGatewayInfoList</code></td><td><code>ResDeleteAccount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteGatewayInfoListForManager</code></td><td>GW 일괄 삭제(매니저)</td><td><code>ReqDeleteGatewayInfoList</code></td><td><code>ResDeleteAccount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteGatewayInfo</code></td><td>GW 삭제</td><td><code>ReqSelectGatewayInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteGatewayInfoForManager</code></td><td>GW 삭제(매니저)</td><td><code>ReqSelectGatewayInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectGatewayInfo</code></td><td>GW 조회</td><td><code>ReqSelectGatewayInfo</code></td><td><code>ResSelectGatewayInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectGatewayInfoForManager</code></td><td>GW 조회(매니저)</td><td><code>ReqSelectGatewayInfo</code></td><td><code>ResSelectGatewayInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectGatewayInfoList</code></td><td>GW 목록</td><td><code>ReqSelectGatewayInfo</code></td><td><code>ResSelectGatewayInfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectGatewayInfoListForManager</code></td><td>GW 목록(매니저)</td><td><code>ReqSelectGatewayInfo</code></td><td><code>ResSelectGatewayInfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectGatewayInfoPage</code></td><td>GW 페이지</td><td><code>ReqSelectGatewayInfo</code></td><td><code>ResSelectGatewayInfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectGatewayInfoPageForManager</code></td><td>GW 페이지(매니저)</td><td><code>ReqSelectGatewayInfo</code></td><td><code>ResSelectGatewayInfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertGatewayListInfo</code></td><td>GW 리스트 등록</td><td><code>ReqInsertGatewayListInfo</code></td><td><code>ResInsertGateWayListInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertGatewayListInfoForManager</code></td><td>GW 리스트 등록(매니저)</td><td><code>ReqInsertGatewayListInfo</code></td><td><code>ResInsertGateWayListInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateAllGWOrganizationCodeList</code></td><td>GW 조직코드 일괄변경</td><td><code>ReqUpdateGwOrgList</code></td><td><code>ResGwUpdateOrganization</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateAllGWOrganizationCodeListForManager</code></td><td>GW 조직코드 일괄변경(매니저)</td><td><code>ReqUpdateGwOrgList</code></td><td><code>ResGwUpdateOrganization</code></td></tr>
+</table>
+
+<h3>HisWardSyncController — HIS 병동/병실 동기화</h3>
+<p class="sub">카테고리 <code>/API/HisSync/</code>.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/HisSync/HisWardSync</code></td><td>HIS 병동·병실 정보 동기화</td><td>(body 없음)</td><td><code>ResJson</code></td></tr>
+</table>
+
+<h3>MeasurementDisplayController — 측정 디스플레이 매핑</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertMeasurementDisplay</code></td><td>측정 디스플레이 등록</td><td><code>ReqInsertMeasurementDisplay</code></td><td><code>ResInsertDisplayinfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateMeasurementDisplay</code></td><td>측정 디스플레이 수정</td><td><code>ReqInsertDisplayInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteMeasurementDisplay</code></td><td>측정 디스플레이 삭제</td><td><code>ReqSelectDisplayInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectMeasurementDisplay</code></td><td>측정 디스플레이 조회</td><td><code>ReqSelectDisplayInfo</code></td><td><code>ResSelectDisplayInfoList</code></td></tr>
+</table>
+
+<h3>MonitorContoller — 모니터 레이아웃</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertMonitorLayout</code></td><td>모니터 레이아웃 등록</td><td><code>ReqInsertMonitorLayout</code></td><td><code>ResInsertMonitorLayout</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateMonitorLayout</code></td><td>모니터 레이아웃 수정</td><td><code>ReqInsertMonitorLayout</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteMonitorLayout</code></td><td>모니터 레이아웃 삭제</td><td><code>ReqSelectMonitorLayout</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectMonitorLayoutList</code></td><td>모니터 레이아웃 목록</td><td><code>ReqSelectMonitorLayout</code></td><td><code>ResSelectMonitorLayoutList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectMonitorLayout</code></td><td>모니터 레이아웃 조회</td><td><code>ReqSelectMonitorLayout</code></td><td><code>ResSelectMonitorLayout</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertDefaultMonitorLayout</code></td><td>기본 모니터 레이아웃 등록</td><td><code>ReqInsertMonitorLayout</code></td><td><code>ResInsertMonitorLayout</code></td></tr>
+</table>
+
+<h3>NurseController — 대표 간호사</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertRepNurseInfo</code></td><td>대표 간호사 등록</td><td><code>ReqInsertRepNurse</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectRepNurseInfoList</code></td><td>대표 간호사 목록</td><td><code>ReqInsertRepNurse</code></td><td><code>ResRepNurseList</code></td></tr>
+</table>
+
+<h3>OrganizationController — 조직(병원) 관리</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertOrganization</code></td><td>조직 등록</td><td><code>ReqInsertOrganization</code></td><td><code>ResSelectOrganization</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertOrganizationForManager</code></td><td>조직 등록(매니저)</td><td><code>ReqInsertOrganization</code></td><td><code>ResSelectOrganization</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateOrganization</code></td><td>조직 수정</td><td><code>ReqUpdateOrganization</code></td><td><code>ResSelectOrganization</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateOrganizationForManager</code></td><td>조직 수정(매니저)</td><td><code>ReqUpdateOrganization</code></td><td><code>ResSelectOrganization</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateAllOrganization</code></td><td>조직 전체 수정</td><td><code>ReqUpdateOrganization</code></td><td><code>ResSelectOrganization</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateOrganizationExpirationList</code></td><td>조직 만료 일괄 갱신</td><td><code>ReqUpdateOrganizationExpiration</code></td><td><code>ResUpdateOrganization</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteOrganization</code></td><td>조직 삭제</td><td><code>ReqSelectOrganization</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectOrganizationPage</code></td><td>조직 페이지</td><td><code>ReqSelectOrganization</code></td><td><code>ResSelectOrganizationList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectOrganizationPageForManager</code></td><td>조직 페이지(매니저)</td><td><code>ReqSelectOrganization</code></td><td><code>ResSelectOrganizationList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectOrganizationList</code></td><td>조직 목록</td><td><code>ReqSelectOrganization</code></td><td><code>ResSelectOrganizationList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectOrganizationListForManager</code></td><td>조직 목록(매니저)</td><td><code>ReqSelectOrganization</code></td><td><code>ResSelectOrganizationList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectOrganizationSimplePage</code></td><td>조직 간이 페이지</td><td><code>ReqSelectOrganization</code></td><td><code>ResSelectOrganizationSimpleList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectOrganization</code></td><td>조직 조회</td><td><code>ReqSelectOrganization</code></td><td><code>ResSelectOrganization</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectOrgBloodPressureInfo</code></td><td>조직 혈압설정 조회</td><td><code>ReqSelectBloodPressureSetting</code></td><td><code>ResSelectBloodPressureSetttingInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateOrgBloodPressureInfo</code></td><td>조직 혈압설정 수정</td><td><code>ReqUpdateBloodPressureSetting</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectOrganizationForAdmin</code></td><td>조직 조회(관리자)</td><td><code>ReqSelectOrganization</code></td><td><code>ResSelectOrganization</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectOrganizationForManager</code></td><td>조직 조회(매니저)</td><td><code>ReqSelectOrganization</code></td><td><code>ResSelectOrganization</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectOrganizationTest</code></td><td>조직 조회(테스트)</td><td><code>ReqSelectOrganization</code></td><td><code>ResSelectOrganization</code></td></tr>
+</table>
+
+<h3>ReportController — 리포트 확인 관리</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertReportCheck</code></td><td>리포트 확인 등록</td><td><code>ReqInsertReportCheck</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectReportCheck</code></td><td>리포트 확인 조회</td><td><code>ReqSelectReportCheck</code></td><td><code>ResReportCheck</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectReportCheckList</code></td><td>리포트 확인 목록</td><td><code>ReqSelectReportCheck</code></td><td><code>ResReportCheckList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateReportCheck</code></td><td>리포트 확인 수정</td><td><code>ReqUpdateReportCheck</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteReportCheck</code></td><td>리포트 확인 삭제</td><td><code>ReqInsertReportCheck</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectUnReportCheckList</code></td><td>미확인 리포트 목록</td><td><code>ReqSelectReportCheck</code></td><td><code>ResReportCheckList</code></td></tr>
+</table>
+
+<h3>ScreeningClinicController — 선별진료소 운영</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertScreeningClinic</code></td><td>선별진료소 등록</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScheduleCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateScreeningClinic</code></td><td>선별진료소 수정</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScheduleCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectScreeningClinic</code></td><td>선별진료소 조회</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResSelectScreeningClinic</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectScreeningClinicPage</code></td><td>선별진료소 페이지</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResSelectScreeningClinic</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertScreeningClinicRoom</code></td><td>선별진료실 등록</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScheduleCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateScreeningRoomClinic</code></td><td>선별진료실 수정</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScheduleCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectScreeningClinicRoom</code></td><td>선별진료실 조회</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResSelectScreeningClinicRoom</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectScreeningClinicPatientPage</code></td><td>선별진료 환자 페이지</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResSelectScreeningClinicPatient</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateScreeningClinicRegistration</code></td><td>선별진료 접수 갱신</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScheduleCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectScreeningRoomPatientCallPage</code></td><td>진료실 환자호출 페이지</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResSelectScreeningPatientWait</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateScreeningClinicRoomStatus</code></td><td>진료실 상태 갱신</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScheduleCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateScreeningClinicRoomDoctorCall</code></td><td>진료실 의사호출</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScheduleCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateScreeningClinicRoomPatientCall</code></td><td>진료실 환자호출</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScheduleCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateScreeningClinicRegistrationCancel</code></td><td>접수 취소</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScheduleCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectScreeningClinicRoomPatientWaitPage</code></td><td>진료실 대기환자 페이지</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResSelectScreeningPatientCall</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectScreeningClinicDoctorCall</code></td><td>의사호출 조회</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResSelectScreeningClinicDoctorCall</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateScreeningClinicRoomPatientCallCancel</code></td><td>환자호출 취소</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScheduleCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateScreeningClinicDoctorCallCancel</code></td><td>의사호출 취소</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScheduleCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateScreeningClinicPatientTreatmentStatus</code></td><td>환자 진료상태 갱신</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScheduleCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectScreeningClinicRoomDetail</code></td><td>진료실 상세</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResSelectScreeningClinicRoomDetail</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectScreeningClinicDoctorCallDisplayDetail</code></td><td>의사호출 디스플레이 상세</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResSelectScreeningClinicDoctorCallDisplay</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteScreeningClinic</code></td><td>선별진료소 삭제</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScheduleCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteScreeningClinicRoom</code></td><td>선별진료실 삭제</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScheduleCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectScreeningClinicRoomPage</code></td><td>선별진료실 페이지</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResSelectScreeningClinicRoom</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateScreeningClinicOrderNo</code></td><td>진료 순번 갱신</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResSelectScreeningClinicRoom</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateScreeningClinicOrderNoEvent</code></td><td>진료 순번 이벤트 갱신</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResSelectScreeningClinicRoom</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateScreeningClinicWaitMove</code></td><td>대기 이동</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResSelectScreeningClinicPatient</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/MessageScreeningClinicWindows</code></td><td>진료소 창 메시지</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResSelectScreeningClinicPatient</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectScreeningClinicStatusCount</code></td><td>진료소 상태 카운트</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScreeningClinicStatusCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectScreeningClinicStatusList</code></td><td>진료소 상태 목록</td><td><code>ReqSelectScreeningClinic</code></td><td><code>ResScreeningClinicStatusList</code></td></tr>
+</table>
+
+<h3>ServerRoomController — EMR 인터페이스 IP/주기 설정</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectEmrData</code></td><td>EMR 인터페이스 조회</td><td><code>ReqJson</code></td><td><code>ResSelectEmrinterfaceInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertEmrIp</code></td><td>EMR IP 등록</td><td><code>ReqInsertEmrinterfaceInfo</code></td><td><code>ResSelectEmrinterfaceInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateEmrIp</code></td><td>EMR IP 수정</td><td><code>ReqInsertEmrinterfaceInfo</code></td><td><code>ResSelectEmrinterfaceInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateEmrPeriod</code></td><td>EMR 전송주기 수정</td><td><code>ReqInsertEmrinterfaceInfo</code></td><td><code>ResSelectEmrinterfaceInfo</code></td></tr>
+</table>
+
+<h3>SickBedController — 병상(침대) 상태·트렌드</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertSickBed</code></td><td>병상 등록</td><td><code>ReqInsertSickBed</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateSickBed</code></td><td>병상 수정</td><td><code>ReqInsertSickBed</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteSickBed</code></td><td>병상 삭제</td><td><code>ReqSelectSickBed</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectSickBedStatus</code></td><td>병상 상태 조회</td><td><code>ReqSelectSickBed</code></td><td><code>ResSelectSickBedStatus</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectSickBedTrend</code></td><td>병상 트렌드</td><td><code>ReqSelectSickBed</code></td><td><code>ResSelectSickBedTrend</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectSickBed</code></td><td>병상 목록</td><td><code>ReqSelectSickBed</code></td><td><code>ResSelectSickBedList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateSickBedMonitoringDeactivate</code></td><td>병상 모니터링 비활성화</td><td><code>ReqUpdateSickBedMonitoringDeactivate</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateSickBedDisplayOrderNumber</code></td><td>병상 표시순서 갱신</td><td><code>ReqUpdateSickBedDisplayOrderNumber</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateSickBedDisplayCode</code></td><td>병상 표시코드 갱신</td><td><code>ReqUpdateSickBedDisplayCode</code></td><td><code>ResJson</code></td></tr>
+</table>
+
+<h3>SickRoomController — 병실</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertSickRoom</code></td><td>병실 등록</td><td><code>ReqInsertSickRoom</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertSickRoomForAdmin</code></td><td>병실 등록(관리자)</td><td><code>ReqInsertSickRoom</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateSickRoom</code></td><td>병실 수정</td><td><code>ReqUpdateSickRoom</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateSickRoomForAdmin</code></td><td>병실 수정(관리자)</td><td><code>ReqUpdateSickRoom</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteSickRoom</code></td><td>병실 삭제</td><td><code>ReqSelectSickRoom</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteSickRoomForAdmin</code></td><td>병실 삭제(관리자)</td><td><code>ReqSelectSickRoom</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectSickRoom</code></td><td>병실 목록</td><td><code>ReqSelectWard</code></td><td><code>ResSelectSickRoomList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectSickRoomForAdmin</code></td><td>병실 목록(관리자)</td><td><code>ReqSelectWard</code></td><td><code>ResSelectSickRoomList</code></td></tr>
+</table>
+
+<h3>SoftwareVersionController — 소프트웨어 버전 배포 관리</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청/파라미터</th><th>응답</th></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/API/Manager/DownLoadSwVersionInfoFile/{organizationCode}/{swVersionId}</code></td><td>SW 버전 파일 다운로드(인증 제외)</td><td>Path: organizationCode, swVersionId(Long)</td><td><code>ResponseEntity&lt;byte[]&gt;</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateSwVersionInfoActiveStatus</code></td><td>SW 버전 활성상태 갱신</td><td><code>ReqDeleteSwVersionInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateSwVersionInfo</code></td><td>SW 버전 수정(<code>MultipartFile file</code>)</td><td><code>ReqUpdateSwVersionInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertSwVersionInfoForManager</code></td><td>SW 버전 등록(매니저, 파일)</td><td><code>ReqInsertSwVersionInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertSwVersionInfo</code></td><td>SW 버전 등록(파일)</td><td><code>ReqInsertSwVersionInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteSwVersionInfo</code></td><td>SW 버전 삭제</td><td><code>ReqDeleteSwVersionInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteSwVersionInfoList</code></td><td>SW 버전 일괄 삭제</td><td><code>ReqDeleteSwVersionInfo</code></td><td><code>ResDeleteAccount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteSwVersionInfoListForManager</code></td><td>SW 버전 일괄 삭제(매니저)</td><td><code>ReqDeleteSwVersionInfo</code></td><td><code>ResDeleteAccount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectSwVersionInfo</code></td><td>SW 버전 조회</td><td><code>ReqSelectSwVersionInfo</code></td><td><code>ResSelectSwVersionInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectSwVersionInfoForManager</code></td><td>SW 버전 조회(매니저)</td><td><code>ReqSelectSwVersionInfo</code></td><td><code>ResSelectSwVersionInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectSwVersionInfoPage</code></td><td>SW 버전 페이지</td><td><code>ReqSelectSwVersionInfo</code></td><td><code>ResSelectSwVersionIfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectSwVersionInfoPageForManager</code></td><td>SW 버전 페이지(매니저)</td><td><code>ReqSelectSwVersionInfo</code></td><td><code>ResSelectSwVersionIfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectSwVersionInfoListForManager</code></td><td>SW 버전 목록(매니저)</td><td><code>ReqSelectSwVersionInfo</code></td><td><code>ResSelectSwVersionIfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectSwVersionInfoList</code></td><td>SW 버전 목록</td><td><code>ReqSelectSwVersionInfo</code></td><td><code>ResSelectSwVersionIfoList</code></td></tr>
+</table>
+
+<h3>WardController — 병동·병동 도면</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청/파라미터</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertWard</code></td><td>병동 등록</td><td><code>ReqInsertWard</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertWardForAdmin</code></td><td>병동 등록(관리자)</td><td><code>ReqInsertWard</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateWard</code></td><td>병동 수정</td><td><code>ReqInsertWard</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/UpdateWardForAdmin</code></td><td>병동 수정(관리자)</td><td><code>ReqInsertWard</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteWard</code></td><td>병동 삭제</td><td><code>ReqSelectWard</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteWardForAdmin</code></td><td>병동 삭제(관리자)</td><td><code>ReqSelectWard</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectWard</code></td><td>병동 목록</td><td><code>ReqSelectWard</code></td><td><code>ResSelectWardList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectWardForAdmin</code></td><td>병동 목록(관리자)</td><td><code>ReqSelectWard</code></td><td><code>ResSelectWardList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectWardForManager</code></td><td>병동 목록(매니저)</td><td><code>ReqSelectWard</code></td><td><code>ResSelectWardList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectWardDetail</code></td><td>병동 상세</td><td><code>ReqSelectWard</code></td><td><code>ResSelectWardDetail</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertWardDrawingContents</code></td><td>병동 도면 업로드(<code>MultipartFile file</code>)</td><td><code>ReqInsertWardContents</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteWardDrawingContents</code></td><td>병동 도면 삭제</td><td><code>ReqDeleteWardContents</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectWardDrawingContents</code></td><td>병동 도면 목록</td><td><code>ReqSelectWardContents</code></td><td><code>ResSelectWardContentsList</code></td></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/API/Manager/DownloadWardDrawingContents/{requester}:{wardCode}:{id}</code></td><td>병동 도면 다운로드(인증 제외)</td><td>Path: requester, wardCode, id(long)</td><td><code>ResponseEntity&lt;byte[]&gt;</code></td></tr>
+</table>
+
+<h2 id="measurement">18. 측정(모니터링) (measurement)</h2>
+
+<h3>AlarmClearStatusController — 알람 해제 상태</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateAlarmClearStatus</code></td><td>알람 해제 상태 갱신</td><td><code>ReqUpdateAlarmClearStatus</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectAlarmClearStatus</code></td><td>알람 해제 상태 조회</td><td><code>ReqSelectArrhythmiaSettingInfo</code></td><td><code>ResSelectAlarmClearStatus</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateAlarmClearOrg</code></td><td>조직 알람 해제 갱신</td><td><code>ReqUpdateAlarmClearOrg</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectAlarmClearOrg</code></td><td>조직 알람 해제 조회</td><td><code>ReqSelectArrhythmiaSettingInfo</code></td><td><code>ResSelectAlarmClearOrg</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectAlarmClearOrgForAdmin</code></td><td>조직 알람 해제 조회(관리자)</td><td><code>ReqSelectArrhythmiaSettingInfo</code></td><td><code>ResSelectAlarmClearOrg</code></td></tr>
+</table>
+
+<h3>ArrhythmiaAlarmController — 부정맥 알람</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateArrhythmiaAlarm</code></td><td>부정맥 알람 갱신</td><td><code>ReqUpdateArrhythmiaAlarm</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateOrgArrhythmiaAlarm</code></td><td>조직 부정맥 알람 갱신</td><td><code>ReqOrgUpdateArrhythmiaAlarm</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectArrhythmiaAlarmList</code></td><td>부정맥 알람 목록</td><td><code>ReqSelectArrhythmiaAlarm</code></td><td><code>ResSelectArrhythmiaAlarmList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateOrgArrhythmiaAlarmForAdmin</code></td><td>조직 부정맥 알람 갱신(관리자)</td><td><code>ReqOrgUpdateArrhythmiaAlarm</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectOrgArrhythmiaAlarmList</code></td><td>조직 부정맥 알람 목록</td><td><code>ReqSelectArrhythmiaAlarm</code></td><td><code>ResSelectOrgArrhythmiaAlarmList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectOrgArrhythmiaAlarmListForAdmin</code></td><td>조직 부정맥 알람 목록(관리자)</td><td><code>ReqSelectArrhythmiaAlarm</code></td><td><code>ResSelectOrgArrhythmiaAlarmList</code></td></tr>
+</table>
+
+<h3>ArrhythmiaAlarmSettingController — 부정맥 알람 설정</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/InsertArrhythmiaAlarmSetting</code></td><td>부정맥 알람 설정 등록</td><td><code>ReqInsertMeasurementInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/DeleteArrhythmiaAlarmSetting</code></td><td>부정맥 알람 설정 삭제</td><td><code>ReqUpdateMeasurementInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectArrhythmiaAlarmParamList</code></td><td>부정맥 알람 파라미터 목록</td><td><code>ReqSelectBioSignalLevel</code></td><td><code>ResSelectArrhythmiaRequestParamList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectArrhythmiaAlarmParamListForAdmin</code></td><td>부정맥 알람 파라미터 목록(관리자)</td><td><code>ReqSelectBioSignalLevel</code></td><td><code>ResSelectArrhythmiaRequestParamList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateArrhythmiaAlarmSetting</code></td><td>부정맥 알람 설정 갱신</td><td><code>ReqUpdateArrhythmiaAlarmSetting</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectArrhythmiaAlarmSetting</code></td><td>부정맥 알람 설정 조회</td><td><code>ReqSelectMeasurementInfo</code></td><td><code>ResSelectArrhythmiaAlarmSetting</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectArrhythmiaDescriptionList</code></td><td>부정맥 설명 목록</td><td><code>ReqJson</code></td><td><code>ResSelectArrhythmiaDescriptionList</code></td></tr>
+</table>
+
+<h3>ArrhythmiaCategoryController — 부정맥 분류</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectArrhythmiaCategoryList</code></td><td>부정맥 분류 목록</td><td><code>ReqSelectArrhythmiaSettingInfo</code></td><td><code>ResSelectArrhythmiaCategoryList</code></td></tr>
+</table>
+
+<h3>ArrhythmiaSettingInfoController — 부정맥 설정 정보</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/InsertArrhythmiaSettingInfo</code></td><td>부정맥 설정 등록</td><td><code>ReqInsertMeasurementInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/DeleteArrhythmiaSettingInfo</code></td><td>부정맥 설정 삭제</td><td><code>ReqUpdateMeasurementInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateArrhythmiaSettingInfo</code></td><td>부정맥 설정 갱신</td><td><code>ReqUpdateArrhythmiaSettingInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectArrhythmiaSettingInfo</code></td><td>부정맥 설정 조회</td><td><code>ReqSelectMeasurementInfo</code></td><td><code>ResSelectArrhythmiaSetting</code></td></tr>
+</table>
+
+<h3>EmergencyTransportController — 응급이송(구급) 환자/위치/파일</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청/파라미터</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/InsertEmergencyTransportPatient</code></td><td>응급이송 환자 등록</td><td><code>ReqInsertEmergencyTransportPatient</code></td><td><code>ResInsertEmergencyTransportPatientInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateEmergencyTransportPatient</code></td><td>응급이송 환자 수정</td><td><code>ReqUpdateEmergencyTransportPatient</code></td><td><code>ResInsertEmergencyTransportPatientInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateEmergencyTransportPatientEndType</code></td><td>응급이송 종료유형 갱신</td><td><code>ReqUpdateEmergencyTransportPatientEndType</code></td><td><code>ResInsertEmergencyTransportPatientInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectEmergencyTransportPatient</code></td><td>응급이송 환자 조회</td><td><code>ReqSelectEmergencyTransportPatient</code></td><td><code>ResInsertEmergencyTransportPatientInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/DeleteEmergencyTransportPatient</code></td><td>응급이송 환자 삭제</td><td><code>ReqSelectEmergencyTransportPatient</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectEmergencyTransportPatientList</code></td><td>응급이송 환자 목록</td><td><code>ReqSelectEmergencyTransportPatientList</code></td><td><code>ResSelectEmergencyTransportPatientInfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateEmergencyTransportPatientStatus</code></td><td>응급이송 환자 상태 갱신</td><td><code>ReqUpdateEmergencyTransportPatientStatus</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectEmergencyTransportPatientStatus</code></td><td>응급이송 환자 상태 조회</td><td><code>ReqSelectEmergencyTransportPatientStatus</code></td><td><code>ResSelectEmergencyTransportPatientStatus</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/InsertEmergencyTransportContents</code></td><td>응급이송 콘텐츠 업로드(<code>MultipartFile file</code>)</td><td><code>ReqInsertEmergencyTransportContents</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/DeleteEmergencyTransportContents</code></td><td>응급이송 콘텐츠 삭제</td><td><code>ReqSelectEmergencyTransportContents</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectEmergencyTransportContents</code></td><td>응급이송 콘텐츠 목록</td><td><code>ReqSelectEmergencyTransportContents</code></td><td><code>ResSelectEmergencyTransportContentsList</code></td></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/API/Measurement/DownloadEmergencyTransportContents/{requester}:{measurementCode}:{id}</code></td><td>응급이송 콘텐츠 다운로드(인증 제외)</td><td>Path: requester, measurementCode, id(long)</td><td><code>ResponseEntity&lt;byte[]&gt;</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectEmergencyTransportLocationInfoList</code></td><td>응급이송 위치정보 목록</td><td><code>ReqSelectEmergencyTransportLocationInfoList</code></td><td><code>ResSelectEmergencyTransportLocationInfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/InsertEmergencyTransportLocationInfo</code></td><td>응급이송 위치정보 등록</td><td><code>ReqInsertEmergencyTransportLocationInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectEmergencyTransportLocationInfoLast</code></td><td>응급이송 위치정보 최신</td><td><code>ReqSelectEmergencyTransportLocationInfo</code></td><td><code>ResSelectEmergencyTransportLocationInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/InsertEmergencyTransportCallDoctorInfo</code></td><td>응급이송 의사호출 등록</td><td><code>ReqInsertEmergencyTransportCallDoctorInfo</code></td><td><code>ResJson</code></td></tr>
+</table>
+
+<h3>MeasurementAlarmController — 측정 알람 설정</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/InsertAlarmSettingMeasurement</code></td><td>측정 알람 설정 등록</td><td><code>ReqInsertMeasurementInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/DeleteAlarmSettingMeasurement</code></td><td>측정 알람 설정 삭제</td><td><code>ReqUpdateMeasurementInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateAlarmSettingOrg</code></td><td>조직 알람 설정 갱신</td><td><code>ReqUpdateMeasurementAlarmSetting</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateAlarmSettingMeasurement</code></td><td>측정 알람 설정 갱신</td><td><code>ReqUpdateMeasurementAlarmSetting</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectAlarmSettingMeasurement</code></td><td>측정 알람 설정 조회</td><td><code>ReqSelectArrhythmiaSettingInfo</code></td><td><code>ResSelectMeasurementAlarmSetting</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectAlarmSettingOrg</code></td><td>조직 알람 설정 조회</td><td><code>ReqSelectArrhythmiaSettingInfo</code></td><td><code>ResSelectOrgAlarmSetting</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectAlarmSettingOrgForAdmin</code></td><td>조직 알람 설정 조회(관리자)</td><td><code>ReqSelectArrhythmiaSettingInfo</code></td><td><code>ResSelectOrgAlarmSetting</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateAlarmSettingOrgForAdmin</code></td><td>조직 알람 설정 갱신(관리자)</td><td><code>ReqUpdateMeasurementAlarmSetting</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectAlarmSettingMeasurementList</code></td><td>측정 알람 설정 목록</td><td><code>ReqSelectMeasurementAlarmSetting</code></td><td><code>ResSelectMeasurementAlarmSettingList</code></td></tr>
+</table>
+
+<h3>MeasurementController — 측정(모니터링) 세션 핵심 CRUD·환자정보 (대규모)</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청/파라미터</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/InsertMeasurementInfo</code></td><td>측정정보 등록</td><td><code>ReqInsertMeasurementInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectMeasurementInfoLeadList</code></td><td>측정 리드(채널) 목록</td><td><code>ReqSelectMeasurementInfoChannel</code></td><td><code>ResSelectMeasurementInfoChannelList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/InsertMeasurementInfoLead</code></td><td>측정 리드 등록</td><td><code>ReqInsertMeasurementInfoLead</code></td><td><code>ResInsertMeasurementInfoLead</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/DeleteMeasurementInfo</code></td><td>측정정보 삭제</td><td><code>ReqUpdateMeasurementInfo</code></td><td><code>ResSelectMeasurementInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateMeasurementAutoReport</code></td><td>측정 자동리포트 갱신</td><td><code>ReqUpdateMeasurementInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateMeasurementInfo</code></td><td>측정정보 수정</td><td><code>ReqUpdateMeasurementInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateMeasurementInfoForce</code></td><td>측정정보 강제수정</td><td><code>ReqUpdateMeasurementInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateMeasurementInfoStatus</code></td><td>측정 상태 갱신</td><td><code>ReqUpdateMeasurementInfoStatus</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateMeasurementInfoAlarmStatus</code></td><td>측정 알람상태 갱신</td><td><code>ReqUpdateMeasurementInfoStatus</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateMeasurementInfoResponseStatus</code></td><td>측정 응답상태 갱신</td><td><code>ReqUpdateMeasurementInfoStatus</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdatePatientInfo</code></td><td>환자정보 수정</td><td><code>ReqUpdatePatientInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectMeasurementInfoList</code></td><td>측정정보 목록</td><td><code>ReqSelectMeasurementInfo</code></td><td><code>ResSelectMeasurementInfoSimpleList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectMeasurementInfoPage</code></td><td>측정정보 페이지</td><td><code>ReqSelectMeasurementInfo</code></td><td><code>ResSelectMeasurementInfoSimpleList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectMeasurementInfoBioDataPage</code></td><td>측정정보+생체데이터 페이지</td><td><code>ReqSelectMeasurementInfo</code></td><td><code>ResSelectMeasurementInfoSimpleBioDataList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectMeasurementInfoDetail</code></td><td>측정정보 상세</td><td><code>ReqSelectMeasurementInfo</code></td><td><code>ResSelectMeasurementInfo</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectMeasurementInfoBioDataLast</code></td><td>측정 최신 생체데이터</td><td><code>ReqSelectMeasurementInfo</code></td><td><code>ResSelectMeasurementInfoDataLast</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectLastMeasurementInfoList</code></td><td>최신 측정정보 목록</td><td><code>ReqSelectMeasurementInfo</code></td><td><code>ResSelectMeasurementInfoSimpleList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectMeasurementInfoCount</code></td><td>측정정보 카운트</td><td><code>ReqSelectMeasurementInfo</code></td><td><code>ResSelectMeasurementInfoSimpleList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateMeasurementFallResponseStatus</code></td><td>낙상 응답상태 갱신</td><td><code>ReqUpdateMeasurementInfoStatus</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UploadEmrStrips</code></td><td>EMR 스트립 업로드(<code>@ModelAttribute</code>)</td><td><code>ReqUploadEmrStrips</code></td><td><code>ResJson</code></td></tr>
+</table>
+
+<h3>MeasurementSummaryController — 측정 통계/카운트</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectMeasurementOrgPeriodCount</code></td><td>조직 기간별 측정 카운트</td><td><code>ReqSelectMeasurementPeriodCount</code></td><td><code>ResSelectMeasurementPeriodCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectMeasurementOrgPeriodCountForManager</code></td><td>조직 기간별 카운트(매니저)</td><td><code>ReqSelectMeasurementPeriodCount</code></td><td><code>ResSelectMeasurementPeriodCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectMeasurementOrgDayCount</code></td><td>조직 일별 측정 카운트</td><td><code>ReqSelectMeasurementDayCount</code></td><td><code>ResSelectMeasurementOrgDayCount</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectMeasurementOrgTotalCount</code></td><td>조직 전체 측정 카운트</td><td><code>ReqSelectMeasurementPeriodCount</code></td><td><code>ResSelectMeasurementOrgTotalCount</code></td></tr>
+</table>
+
+<h3>MedicalMemoController — 진료 메모</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/InsertMedicalMemo</code></td><td>진료메모 등록</td><td><code>ReqInsertMedicalMemo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateMedicalMemo</code></td><td>진료메모 수정</td><td><code>ReqUpdateMedicalMemo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/DeleteMedicalMemo</code></td><td>진료메모 삭제</td><td><code>ReqUpdateMedicalMemo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectMedicalMemoList</code></td><td>진료메모 목록</td><td><code>ReqSelectMedicalMemo</code></td><td><code>ResSelectMedicalMemoList</code></td></tr>
+</table>
+
+<h3>MentalHealthController — 정신건강 기록</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/InsertMentalHealth</code></td><td>정신건강 등록</td><td><code>ReqInsertMentalHealth</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/UpdateMentalHealth</code></td><td>정신건강 수정</td><td><code>ReqUpdateMentalHealth</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/DeleteMentalHealth</code></td><td>정신건강 삭제</td><td><code>ReqUpdateMentalHealth</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectMentalHealthList</code></td><td>정신건강 목록</td><td><code>ReqSelectMentalHealth</code></td><td><code>ResSelectMentalHealthList</code></td></tr>
+</table>
+
+<h3>PatientController — 병실 환자 목록</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectSickRoomPatientList</code></td><td>병실 환자 목록 조회</td><td><code>ReqSelectSickRoomPatientList</code></td><td><code>ResSelectPatientInfoList</code></td></tr>
+</table>
+
+<h2 id="message">19. 메시지·푸시 (message)</h2>
+
+<h3>MessageController — 채팅방/FCM 푸시/토큰</h3>
+<p class="sub">일부 인증 제외(<code>FcmMessagePush</code>).</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Message/CreateToken</code></td><td>메시지 토큰 생성(로그인)</td><td><code>ReqHttpMessage</code></td><td><code>ResHttpMessage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Message/ConsultCreateRoom</code></td><td>협진 채팅방 생성/입장</td><td><code>ReqHttpMessage</code></td><td><code>ResHttpMessage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Message/StaffCreateRoom</code></td><td>스태프 채팅방 생성/입장</td><td><code>ReqHttpMessage</code></td><td><code>ResHttpMessage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Message/InsertPushToken</code></td><td>푸시 토큰 등록</td><td><code>ReqPushKey</code></td><td><code>ResPushKey</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Message/FcmMessagePush</code></td><td>FCM 메시지 푸시(웹훅, 인증 제외)</td><td><code>WebHookMessage</code></td><td><code>void</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Message/AdminCreateToken</code></td><td>관리자 메시지 토큰 생성</td><td><code>ReqHttpMessage</code></td><td><code>ResHttpMessage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Message/StaffRoomDuplicateCheck</code></td><td>스태프 방 중복 확인</td><td><code>ReqHttpMessage</code></td><td><code>ResHttpMessage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Message/Rooms</code></td><td>스태프 방 목록</td><td><code>ReqHttpMessage</code></td><td><code>ResStaffRooms</code></td></tr>
+</table>
+
+<h2 id="premium">20. 프리미엄(온프레미스↔클라우드) (premium)</h2>
+
+<h3>PremiumController — 사용량/과금·온프레미스-클라우드 데이터 임포터</h3>
+<p class="sub">인증 제외 <code>/API/Premium/**</code>.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청/파라미터</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Premium/TodayHistoryBatch</code></td><td>당일 프리미엄 이력 배치</td><td>(없음)</td><td><code>boolean</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Premium/InsertUsageInfo</code></td><td>온프레미스→클라우드 사용량 임포트</td><td><code>ReqUsageInfo</code></td><td><code>ResponseEntity&lt;ReqUsageInfo&gt;</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Premium/SelectPremiumHistory</code></td><td>프리미엄 이력 조회</td><td><code>ReqSearchInfo</code></td><td><code>ResPremiumInfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Premium/SelectDetailUsage</code></td><td>상세 사용량 조회</td><td><code>ReqDetailSearchInfo</code></td><td><code>ResDetailUsageInfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Premium/InsertPremiumMeasurementInfoList</code></td><td>프리미엄 측정정보 등록</td><td><code>ReqInsertPremiumMeasurementInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Premium/InsertOnpremiseDeviceRegisterInfo</code></td><td>온프레미스 장비등록 정보 등록</td><td><code>ReqPremiumDeviceRegisterInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Premium/SelectServiceOrganizationInfoList</code></td><td>서비스 조직정보 목록</td><td><code>ReqSelectServiceOrganizationInfoList</code></td><td><code>ResSelectServiceOrganizationInfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Premium/SelectServiceUseInfoPage</code></td><td>서비스 사용정보 페이지</td><td><code>ReqSelectServiceUseInfoPage</code></td><td><code>ResSelectServiceUseInfoPage</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Premium/SelectServiceUseDetailInfoListPage</code></td><td>서비스 사용 상세 페이지</td><td><code>ReqSelectServiceUseDetailInfoListPage</code></td><td><code>ResSlectServiceUseDetailInfoListPage</code></td></tr>
+</table>
+
+<h2 id="rtls">21. RTLS(실시간 위치) (rtls)</h2>
+
+<h3>RTLSControllers — 실시간 위치추적 데이터</h3>
+<p class="sub">카테고리 <code>/API/Rtls/</code>.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Rtls/HisInsertRTLS</code></td><td>RTLS 위치 등록(동기)</td><td><code>ReqInsertRTLS</code></td><td><code>boolean</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Rtls/HisInsertRTLSAsync</code></td><td>RTLS 위치 등록(비동기)</td><td><code>ReqInsertRTLS</code></td><td><code>boolean</code></td></tr>
+</table>
+
+<h2 id="server">22. 서버 관리 (server)</h2>
+
+<h3>APIServerController — API 서버 등록/조회</h3>
+<p class="sub"><code>SelectAPIServer</code> 인증 제외.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Server/InsertAPIServer</code></td><td>API 서버 등록</td><td><code>ReqAPIServer</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Server/UpdateAPIServer</code></td><td>API 서버 수정</td><td><code>ReqAPIServer</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Server/DeleteAPIServer</code></td><td>API 서버 삭제</td><td><code>ReqAPIServer</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Server/SelectAPIServer</code></td><td>API 서버 조회(인증 제외)</td><td><code>ReqAPIServer</code></td><td><code>ResSelectAPIServer</code></td></tr>
+</table>
+
+<h3>ServerConnInfoController — 서버 접속 정보</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Server/SelectServerConnInfo</code></td><td>서버 접속정보 조회</td><td><code>ReqAPIServer</code></td><td><code>ResSelectServerConnInfoList</code></td></tr>
+</table>
+
+<h3>ServerUrlInfoController — 서버 URL 정보</h3>
+<p class="sub">경로는 <code>/API/Manager/</code>.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertServerUrlInfo</code></td><td>서버 URL 등록</td><td><code>ReqServerUrlInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/InsertServerUrlInfoForManager</code></td><td>서버 URL 등록(매니저)</td><td><code>ReqServerUrlInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteServerUrlInfo</code></td><td>서버 URL 삭제</td><td><code>ReqServerUrlInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/DeleteServerUrlInfoForManager</code></td><td>서버 URL 삭제(매니저)</td><td><code>ReqServerUrlInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectServerUrlInfoListForManager</code></td><td>서버 URL 목록(매니저)</td><td><code>ReqServerUrlInfo</code></td><td><code>ResSelectSeverUrlInfoList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Manager/SelectServerUrlInfoList</code></td><td>서버 URL 목록</td><td><code>ReqServerUrlInfo</code></td><td><code>ResSelectSeverUrlInfoList</code></td></tr>
+</table>
+
+<h2 id="utils">23. 유틸리티 (utils)</h2>
+
+<h3>UtilController — 캐시/이메일/명령/헬스체크/토큰검증</h3>
+<div class="note"><b>보안 주의.</b> 이 컨트롤러는 인증 제외 <code>/API/Util/**</code>이며, <code>RunCommand</code>(서버 명령 실행)와 <code>EmailSend</code>(이메일 발송)를 포함합니다. 외부 노출 시 원격 명령 실행 위험이 있으므로 네트워크 레벨에서 반드시 차단하세요.</div>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청/파라미터</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/RemakeECGJsonDataType</code></td><td>ECG JSON 데이터타입 재생성</td><td><code>ReqUtil</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/SelectServerInfo</code></td><td>서버 정보 조회</td><td><code>ReqJson</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/CheckingPing</code></td><td>핑 체크(POST)</td><td><code>ReqUtil</code>(required=false)</td><td><code>ResSelectCheckingPing</code></td></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/API/Util/CheckingPing</code></td><td>핑 체크(GET)</td><td>(없음)</td><td><code>ResSelectCheckingPing</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/ShowCache</code></td><td>캐시 조회</td><td><code>ReqUtil</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/ClearCache</code></td><td>캐시 전체 초기화</td><td><code>ReqUtil</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/ClearCacheUserData</code></td><td>사용자 캐시 초기화</td><td><code>ReqUtil</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/EmailSend</code></td><td>이메일 발송</td><td><code>ReqSendEmail</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/RunCommand</code></td><td>서버 명령 실행</td><td><code>ReqUtil</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/DownloadECGData</code></td><td>ECG 데이터 다운로드</td><td><code>ReqDownloadECGData</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/UploadFile</code></td><td>파일 업로드(<code>MultipartFile file</code>)</td><td><code>ReqUtil</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/SendPushMessage</code></td><td>푸시 메시지 발송</td><td><code>ReqSendFcmMessage</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/HumcHISLogin</code></td><td>HUMC HIS 로그인</td><td><code>ReqSendFcmMessage</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/HumcHISInsertTemp</code></td><td>HUMC HIS 체온 등록</td><td><code>ReqHumcHisInsertTemp</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/CheckOrganPassword</code></td><td>조직 비밀번호 확인</td><td><code>ReqCheckOrganPassword</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/CheckOrganPassword2</code></td><td>조직 비밀번호 확인2</td><td><code>ReqCheckOrganPassword2</code></td><td><code>ResCheckOrganPassword2</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Util/SelectServerTime</code></td><td>서버 시각 조회</td><td>(없음)</td><td><code>ResSelectServerTime</code></td></tr>
+<tr><td><span class="badge get">GET</span></td><td><code>/API/Util//validate-token</code></td><td>액세스 토큰 검증</td><td><code>@RequestParam accessToken</code></td><td><code>ResLogin</code></td></tr>
+</table>
+
+<h2 id="vcall">24. 화상통화·룸 (vcall)</h2>
+
+<h3>RoomController — 룸 관리</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Room/CreateRoom</code></td><td>룸 생성</td><td><code>ReqCreateRoom</code></td><td><code>ResCreateRoom</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Room/DeleteRoom</code></td><td>룸 삭제</td><td><code>ReqDeleteRoom</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Room/SelectRoomInfo</code></td><td>룸 상세 조회</td><td><code>ReqSelectRoomInfo</code></td><td><code>ResSelectRoomDetail</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Room/SelectListRoom</code></td><td>룸 목록</td><td><code>ReqSelectRoomList</code></td><td><code>ResSelectRoomList</code></td></tr>
+</table>
+
+<h3>RoomUserController — 룸 참여자</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Room/SelectRoomUserList</code></td><td>룸 참여자 목록</td><td><code>ReqSelectRoomUserList</code></td><td><code>ResSelectRoomUserList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Room/UpdateUserStatus</code></td><td>룸 참여자 상태 갱신</td><td><code>ReqUpdateUserStatus</code></td><td><code>ResUpdateUserStatus</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Room/InsertRoomUser</code></td><td>룸 참여자 추가</td><td><code>ReqInsertRoomUser</code></td><td><code>ResSelectRoomUserList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Room/DeleteRoomUser</code></td><td>룸 참여자 삭제</td><td><code>ReqDeleteRoomUser</code></td><td><code>ResSelectRoomUserList</code></td></tr>
+</table>
+
+<h3>VCallController — 화상통화</h3>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/VCall/CreateVCall</code></td><td>화상통화 생성</td><td><code>ReqCreateVCall</code></td><td><code>ResCreateVCall</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/VCall/EventVCall</code></td><td>화상통화 이벤트(FCM HConnect)</td><td><code>ReqSendFcmHconnectMessage</code></td><td><code>ResJson</code></td></tr>
+</table>
+
+<h2 id="version">25. 버전 관리 (version)</h2>
+
+<h3>AppVersionControlController — 앱 버전 강제업데이트 관리</h3>
+<p class="sub">인증 제외 <code>/API/Version/**</code>.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Version/InsertAppVersionControl</code></td><td>앱 버전 등록</td><td><code>ReqInsertAppVersionControl</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Version/UpdateAppVersionControl</code></td><td>앱 버전 수정</td><td><code>ReqInsertAppVersionControl</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Version/DeleteAppVersionControl</code></td><td>앱 버전 삭제</td><td><code>ReqSelectAppVersionControl</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Version/SelectAppVersionControlPage</code></td><td>앱 버전 페이지</td><td><code>ReqSelectAppVersionControl</code></td><td><code>ResSelectAppVersionControlList</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Version/SelectAppVersionControlLast</code></td><td>앱 버전 최신 조회</td><td><code>ReqSelectAppVersionControl</code></td><td><code>ResSelectAppVersionControl</code></td></tr>
+</table>
+
+<h2 id="algorithm">26. 알고리즘 (algorithm)</h2>
+
+<h3>ArrhythmiaSettingInfoAlgorithmController — 알고리즘 서버용 부정맥 설정</h3>
+<p class="sub"><code>SelectArrhythmiaSettingInfo</code> 인증 제외.</p>
+<table>
+<tr><th>메서드</th><th>경로</th><th>기능</th><th>요청 바디</th><th>응답</th></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Algorithm/InsertArrhythmiaSettingInfo</code></td><td>부정맥 설정 등록(알고리즘)</td><td><code>ReqInsertMeasurementInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Algorithm/DeleteArrhythmiaSettingInfo</code></td><td>부정맥 설정 삭제(알고리즘)</td><td><code>ReqUpdateMeasurementInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Algorithm/UpdateArrhythmiaSettingInfo</code></td><td>부정맥 설정 갱신(알고리즘)</td><td><code>ReqUpdateArrhythmiaSettingInfo</code></td><td><code>ResJson</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Algorithm/SelectArrhythmiaSettingInfo</code></td><td>부정맥 설정 조회(알고리즘, 인증 제외)</td><td><code>ReqSelectArrhythmiaSettingInfo</code></td><td><code>ResSelectArrhythmiaSetting</code></td></tr>
+<tr><td><span class="badge post">POST</span></td><td><code>/API/Measurement/SelectArrhythmiaSettingList</code></td><td>부정맥 설정 목록(알고리즘용)</td><td><code>ReqSelectArrhythmiaAlarm</code></td><td><code>ResSelectArrhythmiaAlarmListForAlgo</code></td></tr>
+</table>
+<div class="note">참고: <code>/API/Algorithm/SelectMeasurementInfo</code>도 인증 제외 목록에 있으나 이 컨트롤러에는 매핑이 없습니다(다른 클래스 또는 별도 배포 경로일 수 있음). <span class="sub">(추정)</span></div>
+
+<h2 id="appendix">부록: 테스트/더미 엔드포인트 (운영 규격 외)</h2>
+<p>아래 경로들은 개발/테스트용이며 운영 규격에서 제외합니다. 배포 시 비활성/제거를 권장합니다.</p>
+<table>
+<tr><th>구분</th><th>경로</th></tr>
+<tr><td>AOP/더미 작성</td><td><code>/aopTest</code>, <code>/doWriteDummy</code>, <code>/makeHmFileUploadMap</code>, <code>/dogc</code>, <code>/testShowMap</code></td></tr>
+<tr><td>테이블/샤딩 테스트</td><td><code>/testCreateTable</code>, <code>/summaryShardTable</code></td></tr>
+<tr><td>임시 테스트</td><td><code>/test22</code>, <code>/test333aaaa3</code>, <code>/test3333</code>, <code>/aaa</code>, <code>/test9999</code>, <code>/Temp22</code>, <code>/fileTest</code>, <code>/test</code></td></tr>
+<tr><td>푸시 테스트</td><td><code>/pushtest</code>, <code>/msgpushtest</code></td></tr>
+<tr><td>로드/더미 데이터 생성</td><td><code>/makeLoadTestDummy</code>, <code>/makeDummyMeasurement</code>, <code>/makeDailySummary</code></td></tr>
+<tr><td>장비/카디오 점검</td><td><code>/DeviceAllResetTempAPi</code>, <code>/cardioAPICheck</code>, <code>/cardioCheckPing</code></td></tr>
+<tr><td>BJH EMR 테스트</td><td><code>/bjhPatient</code>, <code>/bjhInsert</code>, <code>/bjhEmrSendTest</code>, <code>/bjhEmrSend</code></td></tr>
+</table>
+
+<h3>참고: 비-컨트롤러 파일</h3>
+<ul>
+<li><code>MainApplication.java</code> — Spring Boot 부트스트랩(<code>@SpringBootApplication</code>)</li>
+<li><code>InitialRunner.java</code> — 기동 시 초기화 로직(ApplicationRunner/CommandLineRunner)</li>
+<li><code>component/aop/AppConfig.java</code> — AOP/빈 설정</li>
+<li><code>component/aop/DataLogAspect.java</code> — 컨트롤러 호출 로깅 AOP</li>
+<li><code>controller/ControllerMap.java</code> — 경로 문자열 상수 모음(엔드포인트 정의 아님)</li>
+<li><code>controller/ExceptionAdviceController.java</code> — 전역 예외 처리(공통 규격 1.7 참조)</li>
+</ul>
+
+<div class="footer">thynC Operations · 내부 산출물 · thync_1.3.0 문서 세트 · 2026-07-18 작성 · 소스 역공학 기반</div>

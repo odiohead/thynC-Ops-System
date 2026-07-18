@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-07-18 | thynC 제품 산출물 문서 세트 12종 작성 → 사내위키 게시(dev2·PROD)
+
+- **배경**: 사용자 요청 — thynC 솔루션(SEERS mobiCARE Console)은 운영 중이나 기능정의서·API규격서 등 기획/설계 산출물이 전무. PROD `/home/ubuntu/thynC`의 배포 산출물(백엔드 WAR·프론트엔드 2종·DB DDL)을 분석해 표준 산출물을 만들고 사내위키 `thync_1.3.0` 카테고리에 HTML 문서로 게시, AI 어시스턴트가 참조하도록 함
+- **소스 분석**: PROD 산출물을 dev2로 회수 후 분석 — 백엔드 `mobiCARE_Console_thync-api-onpremise-01.01.431.war`(Spring Boot 2.3.12/Java8, CFR 디컴파일 컨트롤러 96개·엔드포인트 ~606), 서비스 콘솔 `thync.service M1.3.0.031`·관리자 콘솔 `thync.manager 1.0.1`(Vanilla JS SPA), DB DDL(MySQL 스키마 thync, 물리 1,847=논리 163 테이블·시계열 샤딩). 5개 분석 에이전트 병렬 수행
+- **산출물 12종(HTML)**: 00 인덱스 / 01 시스템개요 / 02 아키텍처 / 03 기능정의서(서비스콘솔) / 04 기능정의서(관리자콘솔) / 05 API규격서(173KB·26도메인·94컨트롤러) / 06 DB설계서(163테이블) / 07 외부연동 / 08 알람·부정맥 정책 / 09 설치·배포 / 10 환경설정 / 11 용어·코드집. 공통 인라인 CSS 템플릿, 순수 HTML(위키 sandbox iframe 호환), 운영 비밀값 전부 마스킹, 근거 불명확 항목 (추정) 표기
+- **게시 방식**: `scripts/publish-wiki-html-docs.mts`(신규) — manifest.json 기반으로 루트 카테고리(블록 페이지) + 하위 HTML 문서(pageType='html') 멱등 생성/갱신. API와 동일한 sanitize+plainText 추출 경유. 원본 HTML·manifest는 `docs/thync-product-1.3.0/`에 보존(재게시 가능)
+- **AI 연동**: `search_wiki`가 plainText(HTML 페이지 포함)를 검색하므로 게시만으로 자동 참조. 추가로 `lib/ai/agent.ts` 시스템 프롬프트에 "제품 사양(기능/API/DB/알람/연동) 질문은 위키 thync_1.3.0 산출물을 먼저 검색" 힌트 1줄 추가
+- **검증(dev2)**: `tsc` 0오류 → 힙4GB 빌드 → 재시작(HTTP 200) → 12건 게시 → DB 확인(전 페이지 pageType=html·<style> 보존·<script> 제거·plainText 채워짐) → 검색 시뮬레이션(게이트웨이 35·부정맥 10 페이지 히트)
+- 영향 파일: `lib/ai/agent.ts`, `scripts/publish-wiki-html-docs.mts(신규)`, `docs/thync-product-1.3.0/(신규 12 HTML + manifest)`, `DEV_HISTORY.md`, `README.md`
+
 ## 2026-07-18 | AI 어시스턴트 v2 (Phase 1~4·6) PROD 배포
 
 - **배포**: dev2 커밋 2건(`c0a4e6c` v2 본체, `a325291` 선행 Phase 1 포함) push → PROD pull → **사전 백업**(`~/backups/db/thync_ops_pre_ai_v2_20260718.dump`, 14MB) → 마이그레이션 `20260718150000_ai_chat_tables` psql 적용+resolve → **PROD `.env` FLOWISE_* 제거** → prisma generate → 힙4GB 빌드 → `pm2 restart thync-prod`

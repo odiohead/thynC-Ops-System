@@ -1,0 +1,608 @@
+<title>데이터베이스 설계서</title>
+<style>
+:root{--ink:#1a2332;--sub:#5a6a7e;--line:#dde4ec;--bg:#fff;--accent:#0b6bcb;--accent-soft:#eaf3fc;--head-bg:#f5f8fb;--warn-bg:#fff7e6;--warn-line:#f0c36d;--ok:#1a7f37}
+*{box-sizing:border-box}
+body{margin:0;padding:32px 40px 80px;background:var(--bg);color:var(--ink);font-family:'Pretendard','Pretendard Variable',-apple-system,'Segoe UI','Malgun Gothic',sans-serif;font-size:14.5px;line-height:1.65;max-width:1080px;margin-left:auto;margin-right:auto}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.5px}
+h2{font-size:19px;margin:44px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--ink);letter-spacing:-.3px}
+h3{font-size:16px;margin:28px 0 10px}
+h4{font-size:14.5px;margin:20px 0 8px;color:var(--sub)}
+p{margin:8px 0}
+code{background:var(--accent-soft);color:var(--accent);padding:1px 5px;border-radius:4px;font-family:'D2Coding',Consolas,monospace;font-size:13px}
+pre{background:#f6f8fa;border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.5}
+pre code{background:none;color:inherit;padding:0}
+table{border-collapse:collapse;width:100%;margin:12px 0 20px;font-size:13.5px}
+th{background:var(--head-bg);border:1px solid var(--line);padding:7px 10px;text-align:left;font-weight:600;white-space:nowrap}
+td{border:1px solid var(--line);padding:6px 10px;vertical-align:top}
+tr:nth-child(even) td{background:#fafcfe}
+.doc-meta{border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:20px 0 8px;background:var(--head-bg)}
+.doc-meta table{margin:0;font-size:13px}
+.doc-meta td,.doc-meta th{border:none;padding:3px 14px 3px 0;background:none!important}
+.doc-meta th{color:var(--sub);font-weight:600;width:120px}
+.toc{background:var(--accent-soft);border-radius:10px;padding:16px 24px;margin:24px 0}
+.toc ol{margin:6px 0;padding-left:22px}
+.toc a{color:var(--accent);text-decoration:none}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent);margin-right:4px}
+.badge.get{background:#e6f4ea;color:#1a7f37}
+.badge.post{background:#eaf3fc;color:#0b6bcb}
+.badge.put{background:#fff7e6;color:#9a6700}
+.badge.del{background:#ffebe9;color:#cf222e}
+.note{background:var(--warn-bg);border-left:4px solid var(--warn-line);padding:10px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:13.5px}
+.sub{color:var(--sub);font-size:13px}
+.arch{display:flex;flex-direction:column;gap:10px;margin:18px 0}
+.arch-row{display:flex;gap:10px;flex-wrap:wrap}
+.arch-box{border:1.5px solid var(--accent);border-radius:10px;padding:10px 14px;background:var(--accent-soft);flex:1;min-width:140px;text-align:center}
+.arch-box.plain{border-color:var(--line);background:var(--head-bg)}
+.arch-box b{display:block;font-size:13.5px}
+.arch-box span{font-size:12px;color:var(--sub)}
+.footer{margin-top:60px;padding-top:16px;border-top:1px solid var(--line);color:var(--sub);font-size:12.5px}
+</style>
+
+<h1>데이터베이스 설계서</h1>
+<p class="sub">thynC 환자 감시 솔루션 · 산출물 세트 <b>thync_1.3.0</b></p>
+
+<div class="doc-meta">
+<table>
+<tr><th>문서 성격</th><td>데이터베이스 설계서 (DB Schema)</td></tr>
+<tr><th>대상 제품</th><td>thynC IP2140 (mobiCARE Console) — 백엔드 <code>thync-api-onpremise 01.01.431</code></td></tr>
+<tr><th>작성일</th><td>2026-07-18</td></tr>
+<tr><th>작성 근거</th><td>운영 배포 산출물(WAR·프론트엔드·DB 스키마) 역공학 기반 재구성</td></tr>
+<tr><th>버전</th><td>MySQL 스키마 <code>thync</code> (스냅샷 2026-06-16)</td></tr>
+</table>
+</div>
+
+<div class="note"><b>문서 성격 안내.</b> 본 문서는 기존 기획·설계 산출물이 부재한 상태에서, 실제 운영 중인 소스(백엔드 WAR 디컴파일, 프론트엔드 소스, DB DDL)를 분석해 <b>사후 재구성</b>한 것입니다. 소스에서 직접 확인된 사실을 기준으로 하되, 명칭·의도가 코드에서 명확하지 않은 항목은 <span class="sub">(추정)</span>으로 표기합니다.</div>
+
+<div class="toc">
+<b>목차</b>
+<ol>
+<li><a href="#overview">DB 개요</a></li>
+<li><a href="#sharding">샤딩 전략</a></li>
+<li><a href="#d-org">도메인 1 — 조직/계정 (14)</a></li>
+<li><a href="#d-ward">도메인 2 — 병동/시설/디스플레이 (9)</a></li>
+<li><a href="#d-patient">도메인 3 — 환자 (10)</a></li>
+<li><a href="#d-measure">도메인 4 — 측정 세션 (4)</a></li>
+<li><a href="#d-device">도메인 5 — 장비/게이트웨이 (12)</a></li>
+<li><a href="#d-timeseries">도메인 6 — 생체신호 시계열: 주차 샤드 (14)</a></li>
+<li><a href="#d-fileidx">도메인 7 — 시계열 파일/수신 인덱스 (6)</a></li>
+<li><a href="#d-biomisc">도메인 8 — 기타 생체신호 (3)</a></li>
+<li><a href="#d-lastcache">도메인 9 — 최신값 캐시 (10)</a></li>
+<li><a href="#d-arrhythmia">도메인 10 — 부정맥/알람 (13)</a></li>
+<li><a href="#d-emr">도메인 11 — EMR/HIS 연동 (12)</a></li>
+<li><a href="#d-cardio">도메인 12 — mobiCARE Cardio 연동 (5)</a></li>
+<li><a href="#d-emergency">도메인 13 — 응급이송 (8)</a></li>
+<li><a href="#d-consult">도메인 14 — 원격협진/메시징 (14)</a></li>
+<li><a href="#d-screening">도메인 15 — 선별진료소 (4)</a></li>
+<li><a href="#d-premium">도메인 16 — 프리미엄(구독형) (5)</a></li>
+<li><a href="#d-notice">도메인 17 — 공지/알림/푸시 (6)</a></li>
+<li><a href="#d-server">도메인 18 — 서버/버전/에러코드 (6)</a></li>
+<li><a href="#d-log">도메인 19 — 로그/감사 (7)</a></li>
+<li><a href="#d-temp">도메인 20 — 임시 (1)</a></li>
+<li><a href="#seed">기초 데이터 (insert_data)</a></li>
+<li><a href="#erd">ERD 관계 요약</a></li>
+</ol>
+</div>
+
+<h2 id="overview">1. DB 개요</h2>
+
+<table>
+<tr><th>항목</th><th>값</th></tr>
+<tr><td>DBMS</td><td>MySQL 8.x (InnoDB 스토리지 엔진)</td></tr>
+<tr><td>스키마명</td><td><code>thync</code> (시드 SQL 첫 줄 <code>USE thync;</code>)</td></tr>
+<tr><td>물리 테이블 수</td><td><b>1,847개</b> (샤드 실체 테이블 포함)</td></tr>
+<tr><td>논리 테이블 수</td><td><b>163개</b> (샤드 그룹을 대표 1종으로 셈)</td></tr>
+<tr><td>문자셋</td><td>기본 <code>utf8mb3</code>, 일부 신규 테이블 <code>utf8mb4</code></td></tr>
+<tr><td>스키마 관리 방식</td><td>JPA/Hibernate <code>ddl-auto=none</code> <span class="sub">(추정)</span> — 애플리케이션이 스키마를 생성/변경하지 않고, DDL은 <code>create_table_*.sql</code>로 수동 배포. 샤드 테이블은 런타임에 애플리케이션이 동적 생성/라우팅.</td></tr>
+<tr><td>기준 스냅샷</td><td><code>create_table_20260616.sql</code> (물리 1,847) · <code>insert_data_20260617.sql</code> (기초 시드)</td></tr>
+</table>
+
+<p>thynC 백엔드는 입원환자 웨어러블 패치(ECG·SpO2·체온)에서 초당 다건 유입되는 파형/수치 데이터를 저장·분석하는 시스템으로, 데이터 성격이 크게 <b>① 마스터/설정성 데이터</b>(기관·병동·환자·장비 등, 저빈도 변경)와 <b>② 고빈도 시계열 데이터</b>(생체신호·부정맥 분석·파일 수신 상태)로 나뉜다. 후자의 단일 테이블 비대화를 막기 위해 <b>2단계 샤딩</b>을 병행한다.</p>
+
+<h2 id="sharding">2. 샤딩 전략</h2>
+
+<p>고빈도 데이터는 물리적으로 여러 테이블에 분산 저장한다. 논리 163개 중 <b>17종이 종당 100개</b>로 샤딩되어 물리 테이블 수를 1,847개까지 끌어올린 핵심 원인이다. 라우팅 키는 <code>measurement_info</code>의 <code>shard</code>(연도) / <code>part</code>(0~100) 컬럼이며, 각 측정 세션은 시작 시점에 자신의 샤드 위치를 이 두 컬럼에 확정한다.</p>
+
+<div class="arch">
+<div class="arch-row">
+<div class="arch-box"><b>주차/순번 샤드</b><span>시계열 14종 × 100 = 1,400</span></div>
+<div class="arch-box"><b>해시 샤드</b><span>수신 상태 3종 × 100 = 300</span></div>
+<div class="arch-box plain"><b>연 단위 샤드</b><span>5종 × 1(연 로테이션)</span></div>
+<div class="arch-box plain"><b>단일 테이블</b><span>나머지 147종 × 1</span></div>
+</div>
+</div>
+
+<h3>2.1 주차/순번 샤드 — <code>&lt;name&gt;_YYYY_NNNN</code> (시계열 14종 × 100)</h3>
+<p>측정 중 초당 다건 유입되는 파형/수치·부정맥 분석 데이터. 테이블명은 <code>연도 + 순번(0000~0099)</code> 형식이며, 세션의 <code>measurement_info.shard</code>(연도)·<code>part</code>(0~99)로 대상 물리 테이블을 결정한다. 종당 100개 → <b>14종 × 100 = 1,400개</b>.</p>
+<table>
+<tr><th>대상 테이블 14종</th><th>물리 예시</th></tr>
+<tr><td><code>activity_level</code>, <code>heart_rate</code>, <code>spo2</code>, <code>resp</code>, <code>resp_signal_data</code>, <code>st_segment</code>, <code>pvc_count</code>, <code>ews</code>, <code>ppg_raw_data</code>, <code>ecg_json_data</code>, <code>gr_ac_json_data</code>, <code>bio_signal_trend</code>, <code>bio_signal_summary_trend</code>, <code>analysis_arrhythmia</code></td><td><code>heart_rate_2026_0000</code> … <code>heart_rate_2026_0099</code></td></tr>
+</table>
+
+<h3>2.2 해시 샤드 — <code>&lt;name&gt;_NNNN</code> (수신 상태 3종 × 100)</h3>
+<p>측정코드당 1행(UNIQUE <code>measurement_code</code>)인 <b>파일 수신 상태</b> 테이블. 수신 오프셋(마지막 시퀀스/초/파일 인덱스)을 고빈도로 <b>UPDATE</b>하기 때문에, 갱신 부하를 100개 샤드로 해시 분산한다. 연도 접미사 없이 순번(<code>0000~0099</code>)만 붙는다. <b>3종 × 100 = 300개</b>.</p>
+<table>
+<tr><th>대상 테이블 3종</th><th>물리 예시</th></tr>
+<tr><td><code>ecg_raw_data_info</code>, <code>ecg_json_data_info</code>, <code>gr_ac_data_info</code></td><td><code>ecg_raw_data_info_0000</code> … <code>_0099</code></td></tr>
+</table>
+
+<h3>2.3 연 단위 샤드 — <code>&lt;name&gt;_YYYY</code> (5종 × 1)</h3>
+<p>연 1개 테이블로 로테이션되는 상태/이벤트성 시계열. 논리 명칭에 연도가 포함되어 있으며 매년 신규 테이블을 생성해 운영한다.</p>
+<table>
+<tr><th>대상 테이블 5종</th></tr>
+<tr><td><code>temperature_2026</code>, <code>device_status_info_2026</code>, <code>bio_signal_event_2026</code>, <code>arrhythmia_alarm_2026</code>, <code>bio_signal_last_simple_data_2026</code></td></tr>
+</table>
+
+<div class="note"><b>귀속·삭제 정책.</b> 모든 시계열 샤드는 <code>measurement_info.measurement_code</code>를 FK로 참조하며 <code>ON DELETE CASCADE</code>가 걸려 있다. 측정 세션을 삭제하면 해당 세션에 귀속된 시계열/파일/부정맥 데이터가 물리 샤드 전반에서 일괄 삭제된다.</div>
+
+<h2 id="d-org">도메인 1 — 조직/계정 (14)</h2>
+<p class="sub">organization · organization_mobile_password · organization_front_setting · organization_bloodpressure_setting · organization_alarm_setting · global_setting · user_account · special_account · access_token · login_info · temporary_password · profile_photo · logo_file · fire_station_address</p>
+
+<h3>organization — 기관(병원) 마스터</h3>
+<p>전 테이블의 논리 FK 루트. <b>PK</b> <code>organization_id</code>, <b>UNIQUE</b> <code>organization_code</code>.</p>
+<table>
+<tr><th>컬럼</th><th>타입/코드값</th><th>설명</th></tr>
+<tr><td><code>organization_code</code></td><td>varchar(64)</td><td>기관 고유코드 — 거의 모든 테이블의 논리 FK 루트</td></tr>
+<tr><td><code>organization_type</code></td><td>int</td><td>기관 유형</td></tr>
+<tr><td><code>organization_name</code></td><td>varchar(128)</td><td>기관명</td></tr>
+<tr><td><code>system_manager</code></td><td>varchar(200)</td><td>시스템 담당자 이메일</td></tr>
+<tr><td><code>sync_his</code></td><td>int</td><td>HIS 연동 여부</td></tr>
+<tr><td><code>device_manager_type</code></td><td>int</td><td>장비 관리 방식</td></tr>
+<tr><td><code>country_code/name·state·city·address·latitude·longitude</code></td><td>-</td><td>소재지 정보</td></tr>
+<tr><td><code>phone_number·representative_name/phone_number/email</code></td><td>-</td><td>대표 연락처</td></tr>
+<tr><td><code>level</code></td><td>int</td><td>no=0, hospital=1, management=5, admin=10</td></tr>
+<tr><td><code>expiration·expiration_date_time</code></td><td>-</td><td>사용 만료</td></tr>
+<tr><td><code>gmt_code·timezone</code></td><td>-</td><td>타임존</td></tr>
+<tr><td><code>theme_type·user_color·user_gradient1/2</code></td><td>-</td><td>UI 테마</td></tr>
+<tr><td><code>measurement_date</code></td><td>int (기본 15)</td><td>기관별 기본 측정일수</td></tr>
+<tr><td><code>hide_name·hide_name_type</code></td><td>-</td><td>환자 이름 마스킹 위치·문자</td></tr>
+</table>
+
+<h3>user_account — 사용자(의료진/관리자) 계정</h3>
+<p><b>PK</b> <code>user_id</code>, <b>UNIQUE</b> <code>id</code>·<code>user_code</code>. FK <code>organization_code</code> → organization CASCADE.</p>
+<table>
+<tr><th>컬럼</th><th>타입/코드값</th><th>설명</th></tr>
+<tr><td><code>id</code></td><td>-</td><td>로그인 ID</td></tr>
+<tr><td><code>password·salt</code></td><td>SHA256</td><td>비밀번호 해시 + salt</td></tr>
+<tr><td><code>organization_code</code></td><td>-</td><td>소속 기관</td></tr>
+<tr><td><code>user_code</code></td><td>-</td><td><code>organization_code + id</code> 조합 고유코드</td></tr>
+<tr><td><code>ward_code</code></td><td>-</td><td>소속 병동</td></tr>
+<tr><td><code>employee_code·department·position</code></td><td>-</td><td>조직 정보</td></tr>
+<tr><td><code>system_manager</code></td><td>int</td><td>1:normal, 10:manager</td></tr>
+<tr><td><code>level</code></td><td>int</td><td>1:patient, 2:nurse, 4:doctor, 10:sysmanager, 13:sub admin, 14:admin, 20:gateway등록용(시드)</td></tr>
+<tr><td><code>name·gender·birthday·phone_number·email</code></td><td>-</td><td>인적사항</td></tr>
+<tr><td><code>status</code></td><td>int</td><td>0:none, 1:locked, 2:deactivated</td></tr>
+<tr><td><code>lock_type</code></td><td>int</td><td>1:로그인실패, 2:비활성, 3:비밀번호만료, 10:수동</td></tr>
+<tr><td><code>fire_station_address_id</code></td><td>-</td><td>소방서 소속(응급이송용)</td></tr>
+<tr><td><code>account_type</code></td><td>-</td><td>계정 유형</td></tr>
+<tr><td><code>last_update_pw_date_time·last_login_date_time·modify_pw_alert_date_time·deactivate_date_time</code></td><td>-</td><td>계정 상태 타임스탬프</td></tr>
+<tr><td><code>allowed_ip_list</code></td><td>varchar(4096)</td><td>접속 허용 IP 목록</td></tr>
+</table>
+
+<h4>조직/계정 — 나머지 테이블</h4>
+<table>
+<tr><th>테이블</th><th>PK/UNIQUE</th><th>용도·주요 컬럼</th></tr>
+<tr><td><code>organization_mobile_password</code></td><td>PK organization_code</td><td>기관별 모바일 앱 공용 비밀번호 — <code>password</code>(varchar40)</td></tr>
+<tr><td><code>organization_front_setting</code></td><td>PK id, UQ organization_code</td><td>기관별 프론트엔드 설정 JSON — <code>front_setting_json</code>(text), <code>modify_date_time</code>, <code>requester</code></td></tr>
+<tr><td><code>organization_bloodpressure_setting</code></td><td>PK setting_id, UQ organization_code</td><td>기관별 혈압계(Cart BP) 단말 세팅 — 각 값 + <code>*_setting</code>(0:disabled/1:enabled/2:unselected) 쌍</td></tr>
+<tr><td><code>organization_alarm_setting</code></td><td>PK index_id, KEY org/ward_code</td><td>기관/병동 기본 생체신호 알람 임계값 — HR/ST/SpO2/RESP/TEMP/EWS/BP/부정맥 min·max·alert (measurement_alarm_setting과 동일 구조의 기본값)</td></tr>
+<tr><td><code>global_setting</code></td><td>PK id, UQ organization_code (CASCADE)</td><td>기관별 전역 설정 — <code>bio_signals_trend_second</code>(기본600, 트렌드 생성주기), <code>use_alarm_clear·alarm_clear_time</code>, <code>backup_day</code>(기본90, 보존기간)</td></tr>
+<tr><td><code>special_account</code></td><td>PK id, UQ user_code (CASCADE)</td><td>특수 계정(중복 로그인 허용) — <code>multiple</code>(1:허용)</td></tr>
+<tr><td><code>access_token</code></td><td>PK id, UQ access_token</td><td>로그인 액세스 토큰 — <code>user_code</code>, <code>ip</code>, <code>login_type</code>(0:none,1:cardio,2:manager), <code>login/session_close_date_time</code></td></tr>
+<tr><td><code>login_info</code></td><td>PK login_info_id</td><td>로그인 시도 이력 — <code>user_ip</code>, <code>access_token</code>, <code>status</code>(0:success,1:fail), <code>lock_type</code>, <code>message</code>, <code>timezone·gmt_code</code></td></tr>
+<tr><td><code>temporary_password</code></td><td>PK id, FK user_code (CASCADE)</td><td>임시 비밀번호 발급 — <code>new_password</code>, <code>make/valid_date_time</code>, <code>session_end_flag</code>(0:valid,1:end)</td></tr>
+<tr><td><code>profile_photo</code></td><td>PK id, UQ user_code</td><td>사용자 프로필 사진(S3) — <code>file_key</code>, <code>url</code>, <code>date_time</code></td></tr>
+<tr><td><code>logo_file</code></td><td>PK logo_file_id</td><td>기관 로고 파일(S3) — <code>organization_code</code>, <code>file_key</code>, <code>check_sum</code>, <code>file_name/size</code></td></tr>
+<tr><td><code>fire_station_address</code></td><td>PK id</td><td>소방서 주소 마스터(응급이송 소속 선택용) — <code>headquarters</code>, <code>fire_station</code>, <code>fire_station_address</code></td></tr>
+</table>
+
+<h2 id="d-ward">도메인 2 — 병동/시설/디스플레이 (9)</h2>
+<p class="sub">building · ward · sickroom · sickbed · ward_drawing_contents · ward_bloodpressure_setting · sickbed_connect_display · display_information · monitor_layout</p>
+
+<div class="note"><b>계층 구조.</b> <code>organization</code> 1:N <code>building</code> / <code>ward</code> 1:N <code>sickroom</code> 1:N <code>sickbed</code>. 병상은 중앙 모니터(<code>display_information</code>)에 N:M으로 연결된다(<code>sickbed_connect_display</code>).</p></div>
+
+<h3>ward — 병동 / sickroom — 병실 / sickbed — 병상</h3>
+<table>
+<tr><th>테이블</th><th>PK/UNIQUE·FK</th><th>주요 컬럼</th></tr>
+<tr><td><code>ward</code></td><td>PK ward_id, UQ ward_code; FK org(CASCADE)</td><td><code>building_code</code>(소속 건물), <code>ward</code>(varchar128, 병동명), <code>cardio_sync·cardio_organization_code</code>(Cardio 연동), <code>nickname·order_number·etc·deactivate</code>(0:none,1:비활성)</td></tr>
+<tr><td><code>sickroom</code></td><td>PK sickroom_id, UQ sickroom_code; FK org·ward(CASCADE)</td><td><code>sickroom</code>(병실명), <code>nickname</code>, <code>number_patient_room</code>(설정 병상수), <code>order_number·etc·deactivate</code></td></tr>
+<tr><td><code>sickbed</code></td><td>PK sickbed_id, UQ sickbed_code; FK org·sickroom·ward(CASCADE), display_code(SET NULL)</td><td><code>sickbed</code>(병상명), <code>display_order_number</code>(모니터 표시 순서), <code>display_code</code>(연결 중앙모니터), <code>monitoring_deactivate·deactivate</code></td></tr>
+</table>
+
+<h4>병동/시설/디스플레이 — 나머지 테이블</h4>
+<table>
+<tr><th>테이블</th><th>PK/UNIQUE</th><th>용도</th></tr>
+<tr><td><code>building</code></td><td>PK id, UQ building_code / (org,building)</td><td>건물(동) — <code>building</code>(이름), <code>building_type</code>, <code>nickname</code>, <code>order_number</code>, <code>deactivate</code></td></tr>
+<tr><td><code>ward_drawing_contents</code></td><td>UQ ward_code / file_key</td><td>병동 도면 이미지(병동당 1개, S3) — <code>file_name/path/key/url</code>, <code>checksum</code>, <code>file_size</code></td></tr>
+<tr><td><code>ward_bloodpressure_setting</code></td><td>UQ index_id; FK org·ward(CASCADE)</td><td>병동별 혈압계(Cart BP) 단말 세팅 — <code>bt_activation</code>, <code>buzzer_activation_st/ed_time</code>, <code>continuous_measurement</code>, <code>disp_timeout_*</code>, <code>imu_activation</code>, <code>movement_threshold_lvl</code> + 각 <code>*_enable</code></td></tr>
+<tr><td><code>sickbed_connect_display</code></td><td>UQ (sickbed_code, display_code)</td><td>병상↔디스플레이 N:M 연결 — <code>display_order_number</code></td></tr>
+<tr><td><code>display_information</code></td><td>UQ display_code; FK monitor_layout_code(SET NULL)</td><td>중앙 모니터링 디스플레이 정의 — <code>display_number/name/type</code>, <code>monitor_layout_code</code></td></tr>
+<tr><td><code>monitor_layout</code></td><td>PK id</td><td>모니터 레이아웃(분할 구성) — <code>ward_code</code>, <code>monitor_layout_name/number</code>, <code>width·height·sort</code></td></tr>
+</table>
+
+<h2 id="d-patient">도메인 3 — 환자 (10)</h2>
+<p class="sub">patient · patient_info · patient_info_disease · patient_info_symptom · patient_agreement · patient_fcm · patient_sensitive · symptom_record · mental_health · medical_memo</p>
+
+<h3>patient — 환자 기본 마스터 (경량)</h3>
+<table>
+<tr><th>컬럼</th><th>설명</th></tr>
+<tr><td><code>patient_id</code> (PK)</td><td>내부 식별자</td></tr>
+<tr><td><code>patient_code</code></td><td>병원 등록번호</td></tr>
+<tr><td><code>organization_code·ward_code·sickroom_code</code></td><td>배정 위치</td></tr>
+<tr><td><code>name·birthday·age·gender</code></td><td>인적사항</td></tr>
+</table>
+<p class="sub">환자의 문진/입퇴원/증상 등 세부 정보는 <b>측정 세션 단위</b>(<code>measurement_code</code>)로 아래 부속 테이블에 저장된다.</p>
+
+<h4>환자 — 측정 세션별 부속 테이블 (대부분 UNIQUE measurement_code, FK CASCADE)</h4>
+<table>
+<tr><th>테이블</th><th>용도·주요 컬럼</th></tr>
+<tr><td><code>patient_info</code></td><td>세션별 환자 상세(문진/입퇴원/초기 활력징후) — <code>medical_staff_user_code/name</code>, <code>symptom_start/confirmed_case/entrance/discharge_date</code>, <code>possible_questionnaire·recently_medicine·pregnancy(_weeks)</code>, 초기 활력징후 <code>left/right_temp·pulse·bp_systolic/diastolic·spo2·resp</code></td></tr>
+<tr><td><code>patient_info_disease</code></td><td>기저질환 체크(측정코드당 1행) — <code>hypertension·hypotension·organ_transplant·diabetes·respiratory·immune·heart·liver·operation·allergy·kidney</code>(0/1), <code>cancer·etc</code>(텍스트)</td></tr>
+<tr><td><code>patient_info_symptom</code></td><td>증상 체크(측정코드당 1행) — <code>heat·cough·gut·cold·sputum·chest·throat·diarrhea·breathing</code> 등 15항목(0/1), <code>etc</code>, <code>record_user_code/sub_name</code></td></tr>
+<tr><td><code>patient_agreement</code></td><td>기기/개인정보 동의 — <code>device_agreement·personal_agreement</code>(0:None,1:No,2:Yes)</td></tr>
+<tr><td><code>patient_fcm</code></td><td>환자 앱 FCM 푸시 토큰 — <code>fcm_key</code>, <code>app_version</code>, <code>device_model/os</code>, <code>device_kind</code>(1:iOS,2:Android,3:Web)</td></tr>
+<tr><td><code>patient_sensitive</code></td><td>민감정보 암호화 저장 — <code>enc_yn</code>, <code>enc_patient_code/name/birthday/gender/age</code>(암호문), <code>patient_code_hash/salt·name_hash/salt</code>(검색용 해시)</td></tr>
+<tr><td><code>symptom_record</code></td><td>증상 기록 시계열(측정 중 반복) — patient_info_symptom 동일 항목 + <code>seconds</code>, <code>record_user_code/sub_name</code>, <code>record_date_time</code></td></tr>
+<tr><td><code>mental_health</code></td><td>정신건강 설문 — <code>pts_total</code>(외상후스트레스), <code>depressed_total·depressed2_total</code>(우울), <code>vas_total</code>, <code>agreement</code>, <code>message</code></td></tr>
+<tr><td><code>medical_memo</code></td><td>의료진 메모 — <code>record_user_code/sub_name</code>, <code>message</code>(varchar2000), <code>record_date_time</code></td></tr>
+</table>
+
+<h2 id="d-measure">도메인 4 — 측정 세션 (4)</h2>
+<p class="sub">measurement_info · measurement_setting_info · measurement_alarm_setting · test_measurement_info</p>
+
+<h3>measurement_info — 측정 세션 마스터 (시스템의 중심 테이블)</h3>
+<p><b>PK</b> <code>measurement_id</code>, <b>UNIQUE</b> <code>measurement_code</code> — 모든 시계열/부속 테이블의 FK 대상. FK <code>organization_code</code> → organization CASCADE. 인덱스: (org,ward,sickroom), (org,patient_status), (org,measurement_type/status), patient_code, name, start/end_date_time, parent_measurement_code 등 다수.</p>
+<table>
+<tr><th>컬럼</th><th>타입/코드값</th><th>설명</th></tr>
+<tr><td><code>measurement_code</code></td><td>varchar(64)</td><td>측정 고유코드 (전 시계열의 FK 루트)</td></tr>
+<tr><td><code>lead</code></td><td>1,2,3</td><td>ECG 리드 타입</td></tr>
+<tr><td><code>parent_measurement_code·parent_type</code></td><td>0:parent,1:child</td><td>복수 패치 연결 시 부모-자식</td></tr>
+<tr><td><code>shard·part</code></td><td>연도 / 0~100</td><td><b>시계열 샤드 라우팅 키</b></td></tr>
+<tr><td><code>organization_code·ward_code·sickroom_code·sickbed_code</code></td><td>-</td><td>배정 위치</td></tr>
+<tr><td><code>patient_code</code></td><td>-</td><td>병원 환자번호</td></tr>
+<tr><td><code>patient_status</code></td><td>int</td><td>0:None,1:Waiting,2:Reservation,3:Entrance,4:Leave,5:Transfer,9:ETC</td></tr>
+<tr><td><code>measurement_type</code></td><td>ET/BM</td><td>ET:응급이송, BM:병상 모니터링</td></tr>
+<tr><td><code>measurement_status</code></td><td>int</td><td>0:none,1:start,2:stop,3:finish</td></tr>
+<tr><td><code>responding_status·alarm_status</code></td><td>-</td><td>1:대응중 / 1:알람클리어</td></tr>
+<tr><td><code>name·gender·age·age_group_type·birthday·ssn·foreigner·phone_number·guardian_phone_number·address</code></td><td>-</td><td>환자 인적사항 (age_group_type 1:Adult, 2:Pediatric/Neonatal)</td></tr>
+<tr><td><code>patient_paced·fall_use_info·dnr</code></td><td>-</td><td>페이스메이커 / 낙상감지 사용 / DNR</td></tr>
+<tr><td><code>doctor_id·gendr·admdate</code></td><td>-</td><td>HIS 연동 필드</td></tr>
+<tr><td><code>start/end_system_time·start/end_date_time·duration·elapsed_time</code></td><td>-</td><td>gateway UTC ms / 측정 기간(시간) / 경과(초)</td></tr>
+<tr><td><code>api_route</code></td><td>기본 GWS-1</td><td>담당 API 서버 라우트</td></tr>
+<tr><td><code>auto_report·send_interval</code></td><td>-</td><td>ACK EMR 전송 간격(분)</td></tr>
+<tr><td><code>gmt_code·timezone·patient_status_date_time</code></td><td>-</td><td>타임존·상태 변경 시각</td></tr>
+</table>
+
+<h4>측정 세션 — 나머지 테이블</h4>
+<table>
+<tr><th>테이블</th><th>PK/UNIQUE</th><th>용도</th></tr>
+<tr><td><code>measurement_setting_info</code></td><td>UQ measurement_code (CASCADE)</td><td>측정별 그래프/HR 설정(레거시) — <code>heart_rate_min/max</code>, <code>hr_alert_alarm</code>, <code>graph_select</code>(0:none,1:activity,2:temp)</td></tr>
+<tr><td><code>measurement_alarm_setting</code></td><td>UQ measurement_code (CASCADE)</td><td>측정별 생체신호 알람 임계값 — HR/ST/SpO2/RESP/TEMP(<code>temp_unit</code> 0:C,1:F)/EWS/BP min·max·alert, <code>arrhythmia_alert_alarm</code>, <code>scale</code></td></tr>
+<tr><td><code>test_measurement_info</code></td><td>단일 컬럼 id (PK 없음)</td><td>measurement_info 테스트 사본(동일 컬럼 구성)</td></tr>
+</table>
+
+<h2 id="d-device">도메인 5 — 장비/게이트웨이 (12)</h2>
+<p class="sub">device_factory · device_register · device_info · device_info_audit · device_last_status_info · device_status_info_2026 · device_battery_check · device_reset · test_device_register · gateway_info · gateway_fw_info · gateway_device_conn_log</p>
+
+<h3>device_register — 기관 보유 디바이스 등록/운용 현황</h3>
+<p><b>PK</b> <code>device_register_id</code>, <b>UNIQUE</b> <code>serial_number</code>·<code>device_code</code>. FK <code>sickbed_code·sickroom_code</code> SET NULL.</p>
+<table>
+<tr><th>컬럼</th><th>코드값</th><th>설명</th></tr>
+<tr><td><code>organization_code·ward_code</code></td><td>-</td><td>배정 병동</td></tr>
+<tr><td><code>device_type</code></td><td>1:ecg,2:temp,3:spo2</td><td>장비 종류</td></tr>
+<tr><td><code>device_code</code></td><td>S1,H1…</td><td>표시용 코드</td></tr>
+<tr><td><code>mac_address</code></td><td>-</td><td>BLE MAC</td></tr>
+<tr><td><code>total_use_time·total_use_count</code></td><td>분/회</td><td>누적 사용량</td></tr>
+<tr><td><code>device_return_status</code></td><td>0:사용중,1:반납</td><td>반납 상태</td></tr>
+<tr><td><code>sickbed_code·sickroom_code</code></td><td>-</td><td>현재 연결 병상</td></tr>
+<tr><td><code>auto_mode·auto_time_value·auto_time_value_etc·auto_time_value_type</code></td><td>0:분,1:시간</td><td>자동 측정종료 (기본 240)</td></tr>
+<tr><td><code>premium</code></td><td>1:구독형,0:기존</td><td>구독형 여부</td></tr>
+</table>
+
+<h3>gateway_info — 게이트웨이(병실 설치 수신 장비) 마스터</h3>
+<p><b>PK</b> <code>gateway_info_id</code>, <b>UNIQUE</b> <code>serial_number</code>·<code>mac_address</code>. FK <code>organization_code</code> CASCADE.</p>
+<table>
+<tr><th>컬럼</th><th>코드값</th><th>설명</th></tr>
+<tr><td><code>ip·ward_code·sickroom_code·floor·lc_number</code></td><td>-</td><td>설치 위치 / 층·위치번호</td></tr>
+<tr><td><code>fw_version·update_fw_version·fw_update_date_time</code></td><td>-</td><td>펌웨어 상태</td></tr>
+<tr><td><code>conn_status</code></td><td>0:none,1:connected,2:disconnected,5:disable</td><td>연결 상태</td></tr>
+<tr><td><code>conn_status_update_time(_by_stream)·process_status</code></td><td>-</td><td>리셋/업데이트 진행 상태</td></tr>
+<tr><td><code>gateway_error_code</code></td><td>-</td><td>장애 코드</td></tr>
+<tr><td><code>axis_x·axis_y</code></td><td>-</td><td>도면 좌표</td></tr>
+<tr><td><code>deactivate·send_email</code></td><td>-</td><td>비활성 / 장애 메일 발송 여부</td></tr>
+</table>
+
+<h4>장비/게이트웨이 — 나머지 테이블</h4>
+<table>
+<tr><th>테이블</th><th>PK/UNIQUE</th><th>용도·주요 컬럼</th></tr>
+<tr><td><code>device_factory</code></td><td>PK id, UQ serial_number/product_number</td><td>패치 생산(공장) 마스터 — <code>service_name·product_name</code>, <code>lot_number·carton/inner_box_number</code>, <code>mac_address·firmware/hardware_version</code>, <code>device_type</code>(1:ecg,2:temp,3:spo2), <code>service_type</code>(NORMAL/PREMIUM/REPLACEMENT/SAMPLE/DEVELOPMENT), <code>usable</code>(UNUSED/USED/UNUSABLE/DISPOSAL), <code>refurbished</code>, <code>repair_count</code>, <code>shard</code></td></tr>
+<tr><td><code>device_info</code></td><td>UQ (measurement_code, serial_number); FK mc(CASCADE)</td><td>측정 세션에 연결된 디바이스 — <code>parent_measurement_code</code>, <code>lead</code>(기본'2'), <code>device_type</code>(1:ECG,2:Temp,3:SpO2,4:HR), <code>device_code·serial_number·mac_address</code>, <code>premium</code>, <code>cart_status</code>(SkyLabs Cart 연결 가능 0:대기/1:가능)</td></tr>
+<tr><td><code>device_info_audit</code></td><td>PK audit_id</td><td>device_info 변경 감사 — <code>event_type</code> ENUM(INSERT/UPDATE/DELETE/START) + 스냅샷, <code>logged_at</code></td></tr>
+<tr><td><code>device_last_status_info</code></td><td>UQ (measurement_code, device_type); FK mc(CASCADE)</td><td>디바이스 최신 상태 — <code>status</code>(1:connected,2:lead on,3:lead off,4:disconnected), <code>battery_value</code>(%), <code>device_kind</code>, <code>message</code>, <code>date_time</code>(ms)</td></tr>
+<tr><td><code>device_status_info_2026</code></td><td>PK id; FK mc(CASCADE) <span class="sub">(연 샤드)</span></td><td>디바이스 상태 이력 — device_last_status_info 동일 구조의 시계열</td></tr>
+<tr><td><code>device_battery_check</code></td><td>UQ device_status_info_id</td><td>배터리 체크 로그 — device_status_info 동일 컬럼</td></tr>
+<tr><td><code>device_reset</code></td><td>PK index_id</td><td>디바이스 리셋 이력 — <code>serial_number</code>, <code>date_time</code></td></tr>
+<tr><td><code>test_device_register</code></td><td>PK id, UQ serial/device_code</td><td>device_register 테스트 사본</td></tr>
+<tr><td><code>gateway_fw_info</code></td><td>PK id, UQ file_key / (org, fw_version)</td><td>게이트웨이 펌웨어 배포 파일 — <code>file_url/size</code>, <code>checksum</code>, <code>level</code>(0:none,1:normal,2:high,3:instant)</td></tr>
+<tr><td><code>gateway_device_conn_log</code></td><td>PK index_id</td><td>게이트웨이↔패치 BLE 연결 로그 — <code>gw_sn/sub_info/ip</code>, <code>device_sn/mac</code>, <code>rssi</code>, <code>status</code>(2:connected,5:disconnected), <code>conn_total</code></td></tr>
+</table>
+
+<h2 id="d-timeseries">도메인 6 — 생체신호 시계열: 주차 샤드 14종 (14)</h2>
+<p class="sub">activity_level · heart_rate · spo2 · resp · resp_signal_data · st_segment · pvc_count · ews · ppg_raw_data · ecg_json_data · gr_ac_json_data · bio_signal_trend · bio_signal_summary_trend · analysis_arrhythmia</p>
+
+<div class="note"><b>공통 구조.</b> 각 종은 <code>&lt;name&gt;_YYYY_NNNN</code>으로 <b>×100 샤드</b>. 공통 컬럼: PK <code>index_id</code>(bigint AI), <code>measurement_code</code> FK → measurement_info CASCADE, KEY (mc,seconds)·(mc,value)·(mc,date_time). <code>seconds</code> = 측정 시작시점 기준 경과초. 아래는 대표 스키마이며 실제 저장은 세션의 <code>shard·part</code>가 지정하는 물리 테이블에 이뤄진다.</div>
+
+<table>
+<tr><th>테이블 (×100 샤드)</th><th>용도·고유 컬럼</th></tr>
+<tr><td><code>activity_level</code></td><td>활동량 레벨 — <code>seconds</code>(decimal 11,3), <code>value</code>(int), <code>date_time</code></td></tr>
+<tr><td><code>heart_rate</code></td><td>심박수(HR) — <code>value</code>(int bpm), <code>date_time</code>(datetime(3))</td></tr>
+<tr><td><code>spo2</code></td><td>산소포화도 — <code>data_type</code>(1:Patch,2:User), <code>record_user_code/sub_name</code>, <code>value</code>(%), <code>record_date_time</code></td></tr>
+<tr><td><code>resp</code></td><td>호흡수 — <code>value</code>(int), <code>date_time</code>(datetime(3))</td></tr>
+<tr><td><code>resp_signal_data</code></td><td>호흡 신호 이벤트 — <code>resp_signal_data_type</code>(int), <code>seconds</code>, <code>date_time</code></td></tr>
+<tr><td><code>st_segment</code></td><td>ST 세그먼트 값 — <code>value</code>(decimal 8,3), <code>date_time</code></td></tr>
+<tr><td><code>pvc_count</code></td><td>분당 PVC(심실조기수축) 개수 — <code>value</code>(int)</td></tr>
+<tr><td><code>ews</code></td><td>조기경고점수 — <code>value</code>(int), <code>ews_msg</code>(json), <code>ecg_json</code>(json, 구간 ECG raw), <code>date_time</code></td></tr>
+<tr><td><code>ppg_raw_data</code></td><td>PPG(SpO2 패치) 원시 수치 — <code>data_type</code>, <code>spo2</code>(%), <code>pr</code>(Pulse Rate), <code>rr</code>(Resp Rate), <code>pi</code>(Perfusion Index)</td></tr>
+<tr><td><code>ecg_json_data</code></td><td>ECG 파형 JSON 청크 — UQ <code>ecg_code</code>, <code>index_number</code>, <code>file_key</code>(S3), <code>start/end_seconds</code>(r-peak), <code>json_data</code>(mediumtext), <code>total</code></td></tr>
+<tr><td><code>gr_ac_json_data</code></td><td>자이로/가속도 JSON 청크 — UQ <code>gr_ac_code</code>, <code>index_number</code>, <code>file_key</code>, <code>json_data</code>(json), <code>total</code></td></tr>
+<tr><td><code>bio_signal_trend</code></td><td>생체신호 트렌드(주기 스냅샷) — <code>hr·temp·resp·ews·spo2</code> + 각 <code>*_date_time·*_data_type</code>, <code>diastolic/systolic/pulse·bp_data_type</code>, <code>error</code></td></tr>
+<tr><td><code>bio_signal_summary_trend</code></td><td>요약 트렌드(구간 min/max/avg) — <code>hr/temp/resp/spo2_avg/max/min</code>, BP, <code>summary_start/end_date_time</code></td></tr>
+<tr><td><code>analysis_arrhythmia</code></td><td>부정맥 분석(검출 구간) 결과 — <code>bio_signal_event_id</code>, <code>arrhythmia_code</code>, <code>arrhythmia_status</code>(0~3), <code>rhythm_type</code>(0x00~0x10), <code>rhythm</code>(SVEs/VEs/AF/VF…), <code>start/end_seconds</code>, <code>duration·beat_count</code>, <code>min/max/avg_hr</code>, <code>selected·add_user·comment</code>, <code>json_data</code></td></tr>
+</table>
+
+<h2 id="d-fileidx">도메인 7 — 시계열 파일/수신 인덱스 (6)</h2>
+<p class="sub">ecg_raw_data_info · ecg_json_data_info · gr_ac_data_info · ecg_raw_file · ecg_json_raw_file · gr_ac_raw_file</p>
+
+<h3>ecg_raw_data_info — ECG 바이너리 수신 상태 (해시 샤드 ×100)</h3>
+<p><b>PK</b> <code>index_id</code>, <b>UNIQUE</b> <code>measurement_code</code> (FK CASCADE). 측정코드당 1행, 수신 오프셋을 고빈도 UPDATE.</p>
+<table>
+<tr><th>컬럼</th><th>설명</th></tr>
+<tr><td><code>last_seconds·last_sequence_number</code></td><td>마지막 수신 경과초 / 프로토콜 시퀀스</td></tr>
+<tr><td><code>file_index·file_name·file_path·file_key·file_size</code></td><td>기록 중 파일</td></tr>
+<tr><td><code>start/end_date_time</code></td><td>수신 구간</td></tr>
+<tr><td><code>last_system_time·last_server_system_time·update_cache_system_time·update_db_system_time</code></td><td>수신/캐시/DB 갱신 시각(ms)</td></tr>
+</table>
+
+<h4>파일/수신 인덱스 — 나머지 테이블</h4>
+<table>
+<tr><th>테이블</th><th>용도</th></tr>
+<tr><td><code>ecg_json_data_info</code> <span class="sub">(해시 ×100)</span></td><td>ECG JSON 수신 상태 — ecg_raw_data_info 동일 구조 + <code>file_count·total_count</code></td></tr>
+<tr><td><code>gr_ac_data_info</code> <span class="sub">(해시 ×100)</span></td><td>자이로/가속도 수신 상태 — ecg_json_data_info 동일 구조</td></tr>
+<tr><td><code>ecg_raw_file</code></td><td>ECG 원시 바이너리 파일 목록(S3 업로드 완료본) — UQ file_key, <code>file_name/path/key</code>, <code>checksum</code>(SHA256), <code>file_size</code>, <code>start/end/upload_date_time</code></td></tr>
+<tr><td><code>ecg_json_raw_file</code></td><td>ECG JSON 파일 목록(S3) — ecg_raw_file 동일 구조</td></tr>
+<tr><td><code>gr_ac_raw_file</code></td><td>자이로/가속도 파일 목록(S3) — ecg_raw_file 동일 구조</td></tr>
+</table>
+
+<h2 id="d-biomisc">도메인 8 — 기타 생체신호 (3)</h2>
+<p class="sub">temperature_2026 · blood_pressure · blood_sugar</p>
+<table>
+<tr><th>테이블</th><th>PK/FK</th><th>용도·주요 컬럼</th></tr>
+<tr><td><code>temperature_2026</code> <span class="sub">(연 샤드)</span></td><td>PK index_id; FK mc(CASCADE)</td><td>체온 시계열 — <code>data_type</code>(1:Patch,2:User), <code>seconds</code>, <code>value</code>(℃)·<code>original_value</code>, <code>ta</code>(주변온도)·<code>to</code>(대상온도), <code>record_date_time</code></td></tr>
+<tr><td><code>blood_pressure</code></td><td>PK index_id; FK mc(CASCADE)</td><td>혈압 측정 — <code>blood_pressure_type</code>(0:None,1:NBP,2:NIBP,3:NABP), <code>data_type</code>(1:Patch,2:User/EMR), <code>systolic·diastolic·pulse·map</code>, SkyLabs Cart BP 부가정보(<code>activity_level·status·irreqular_heart_beat·movement</code>)</td></tr>
+<tr><td><code>blood_sugar</code></td><td>PK index_id; FK mc(CASCADE)</td><td>혈당 — <code>value</code>(mg/dL), <code>seconds</code>, <code>record_user_code/sub_name</code>, <code>record_date_time</code></td></tr>
+</table>
+
+<h2 id="d-lastcache">도메인 9 — 최신값 캐시 (10)</h2>
+<p class="sub">모니터링 화면용, 측정코드당 1행. bio_signal_ecg/spo2/temp/st/blood_pressure/blood_sugar_last_data · bio_signal_last_simple_data_2026 · arrhythmia_last_data · bio_signal_last_event · bio_signal_last_fall_event</p>
+<table>
+<tr><th>테이블</th><th>용도·주요 컬럼</th></tr>
+<tr><td><code>bio_signal_ecg_last_data</code></td><td>ECG 패치 최신값 — <code>activity_level·heart_rate·ews·resp·battery_value</code>, <code>date_time</code></td></tr>
+<tr><td><code>bio_signal_spo2_last_data</code></td><td>SpO2 최신값 — <code>spo2</code>(%), <code>battery_value</code></td></tr>
+<tr><td><code>bio_signal_temp_last_data</code></td><td>체온 최신값 — <code>temperature</code>(℃), <code>battery_value</code></td></tr>
+<tr><td><code>bio_signal_st_last_data</code></td><td>ST 최신값(구간 포함) — <code>start/end_seconds</code>, <code>json_data</code>, <code>value</code>, <code>heart_rate</code>, <code>iso·j_point</code></td></tr>
+<tr><td><code>bio_signal_blood_pressure_last_data</code></td><td>혈압 최신값 — <code>systolic·diastolic·pulse</code>(+<code>blood_sugar</code>)</td></tr>
+<tr><td><code>bio_signal_blood_sugar_last_data</code></td><td>혈당 최신값 — <code>blood_sugar</code>(mg/dL)</td></tr>
+<tr><td><code>bio_signal_last_simple_data_2026</code> <span class="sub">(연 샤드)</span></td><td>통합 최신값 스냅샷 — <code>hr·pvc_count·resp·spo2·temp·systolic/diastolic/pulse</code>, <code>arrhythmia_code</code>, <code>bio_signal_event_id</code></td></tr>
+<tr><td><code>arrhythmia_last_data</code></td><td>최신 부정맥 이벤트 캐시 — <code>arrhythmia_code/type_code/type</code>, <code>event_type</code>(1:arry,2:ST,3:HR,4:SpO2,5:RESP,6:TEMP,10:MANUAL), <code>alarm_level</code>, <code>seconds·end_seconds</code></td></tr>
+<tr><td><code>bio_signal_last_event</code></td><td>최신 생체신호 이벤트 캐시 — bio_signal_event 동일 구조 + <code>end_seconds·value_three_decimal·report</code></td></tr>
+<tr><td><code>bio_signal_last_fall_event</code></td><td>최신 낙상 이벤트 — <code>event_type</code>(기본31), <code>fall_event_check</code>(2:대응중,1:경보해제,0:NONE), <code>seconds·end_seconds</code>, <code>confirm</code></td></tr>
+</table>
+
+<h2 id="d-arrhythmia">도메인 10 — 부정맥/알람 (13)</h2>
+<p class="sub">bio_signal_event(+_2026) · bio_signal_alarm_level · arrhythmia_alarm_2026 · arrhythmia_alarm_setting · arrhythmia_setting_info · arrhythmia_manual_setting · arrhythmia_category · arrhythmia_category_item · arrhythmia_description · arrhythmia_value_parameter · arrhythmia_value_parameter_description · alarm_clear_org · alarm_clear_status</p>
+
+<h3>bio_signal_event — 생체신호/부정맥 이벤트 발생 이력 (연 샤드 bio_signal_event_2026 동일 구조)</h3>
+<p><b>PK</b> <code>bio_signal_event_id</code>. KEY measurement_code, arrhythmia_code, event_date_time, arrhythmia_type_code.</p>
+<table>
+<tr><th>컬럼</th><th>코드값</th><th>설명</th></tr>
+<tr><td><code>arrhythmia_code·arrhythmia_type_code</code></td><td>-</td><td>부정맥 건/타입 코드</td></tr>
+<tr><td><code>event_type·event_detail</code></td><td>1:arry,2:ST,3:HR,4:SpO2,5:RESP,6:TEMP,10:MANUAL</td><td>이벤트 유형</td></tr>
+<tr><td><code>min_value·max_value·value</code></td><td>-</td><td>당시 설정 임계값 / 측정값</td></tr>
+<tr><td><code>alram_type</code></td><td>0:none,1:max,2:min</td><td>임계 방향</td></tr>
+<tr><td><code>requester·priority·seconds·event_date_time·confirm</code></td><td>-</td><td>수동 등록자 / 확인 처리</td></tr>
+<tr><td><code>ecg_json_include·ecg_json</code></td><td>-</td><td>이벤트 시점 ECG 스트립</td></tr>
+</table>
+
+<h4>부정맥/알람 — 나머지 테이블</h4>
+<table>
+<tr><th>테이블</th><th>용도·주요 컬럼</th></tr>
+<tr><td><code>bio_signal_alarm_level</code></td><td>알람 항목별 레벨 정의(기관/병동) — <code>alarm_level</code>(0:None,1:Red,2:Orange,3:Yellow,4:Fall Detection), <code>is_arrhythmia</code>, <code>alert_alarm</code>, <code>parameter</code>, <code>display_name</code>, <code>alarm_code</code>(ASYSTOLE,AFIB…)</td></tr>
+<tr><td><code>arrhythmia_alarm_2026</code> <span class="sub">(연 샤드)</span></td><td>측정별 부정맥 알람 on/off·임계값 — UQ(mc, parameter), <code>alarm_code</code>, <code>parameter_type</code>(0:alarm,1:value), <code>alarm_on</code>, <code>value</code></td></tr>
+<tr><td><code>arrhythmia_alarm_setting</code> <span class="sub">(미사용)</span></td><td>측정별 부정맥 알람 플래그 — <code>afib_alarm</code>~<code>vtach_alarm</code> 17종 on/off</td></tr>
+<tr><td><code>arrhythmia_setting_info</code> <span class="sub">(미사용)</span></td><td>측정별 부정맥 임계값 — <code>asystole</code>, <code>extreme_brady/tachycardia(_count)</code>, <code>high/low_heart_rate</code>, <code>v_tach(_count)</code>, <code>pvcs_min_high</code>, <code>svt(_count)</code>, <code>pause</code>, <code>vent_rhythm_count</code></td></tr>
+<tr><td><code>arrhythmia_manual_setting</code></td><td>수동 이벤트 부정맥 다중 체크 — <code>arrhythmia_manual_type·arrhythmia_type</code> + 17종 플래그</td></tr>
+<tr><td><code>arrhythmia_category</code></td><td>부정맥 알람 카테고리 트리(2단계) — <code>category_id·parent_category_id</code>, <code>category_level</code>(1/2), <code>category_name</code></td></tr>
+<tr><td><code>arrhythmia_category_item</code></td><td>카테고리 하위 항목↔부정맥 타입 매핑 — <code>arrhythmia_type_kor</code>, <code>arrhythmia_type</code>(ALL_RED,ALL_YELLOW,HIGH_HR,VT…)</td></tr>
+<tr><td><code>arrhythmia_description</code></td><td>부정맥 타입별 설명/기본 알람레벨 — UQ <code>arrhythmia_type_code</code>(AFIB,ASYSTOLE…), <code>arrhythmia_description</code>(검출 조건), <code>alarm_level</code>, <code>language_type</code>(기본 KR)</td></tr>
+<tr><td><code>arrhythmia_value_parameter</code></td><td>부정맥 판정 파라미터 기본값(기관/병동) — <code>parameter</code>, <code>value_data_type</code>(0:INT,1:BigDecimal), <code>pre/post_label</code>, <code>adult/child_default_value</code>(성인/소아)</td></tr>
+<tr><td><code>arrhythmia_value_parameter_description</code></td><td>파라미터 설명 다국어(ko/en) — <code>alarm_code·parameter·description·language_type</code></td></tr>
+<tr><td><code>alarm_clear_org</code></td><td>기관/병동별 알람 클리어 정책 — UQ ward_code, <code>alarm_clear_duration</code>(기본5), <code>apply_monitoring</code></td></tr>
+<tr><td><code>alarm_clear_status</code></td><td>측정별 알람 클리어 진행 상태 — <code>alarm_clear_status</code>, <code>start/end_date_time·system_time</code>, <code>alarm_clear_duration</code>, <code>is_update</code></td></tr>
+</table>
+
+<h2 id="d-emr">도메인 11 — EMR/HIS 연동 (12)</h2>
+<p class="sub">emr_interface_info · bio_signal_temp_emr_update · bio_signal_resp_emr_update · his_department · his_doctor · his_patient · his_em_patient · ezcaretech_patient · ezcaretech_patient_history · infinitt_patient · rep_nurse · dicom_transfer_log</p>
+<table>
+<tr><th>테이블</th><th>용도·주요 컬럼</th></tr>
+<tr><td><code>emr_interface_info</code></td><td>EMR 인터페이스 서버 정보 — <code>emr_interface_name</code>, <code>ip</code>(base url), <code>send_time</code>(ACK EMR 연동 특정 시각)</td></tr>
+<tr><td><code>bio_signal_temp_emr_update</code></td><td>체온 EMR 업로드 큐/이력 — <code>organization_code·measurement_code·patient_code</code>, <code>temperature</code>, <code>date_time·upload_date_time</code></td></tr>
+<tr><td><code>bio_signal_resp_emr_update</code></td><td>호흡수 EMR 업로드 큐/이력 — 동일 구조(<code>resp</code>)</td></tr>
+<tr><td><code>his_department</code></td><td>HIS 진료과 마스터 — PK(meddept, organizationCode), <code>meddeptmn</code>(과명)</td></tr>
+<tr><td><code>his_doctor</code></td><td>HIS 의사 마스터 — PK(userid, organizationCode), <code>username</code>, <code>jikchek</code>(직책), <code>departmentCode/Name</code></td></tr>
+<tr><td><code>his_patient</code></td><td>HIS 입원환자 연동(병동/병실/병상 배정) — <code>patno·patname·age·sex·birthday</code>, <code>wardCode/nm·roomCode/nm·bedno</code>, <code>meddept</code>, <code>chadr·chadrnm</code>(주치의)</td></tr>
+<tr><td><code>his_em_patient</code></td><td>HIS 응급환자 연동 — his_patient 동일 구조</td></tr>
+<tr><td><code>ezcaretech_patient</code></td><td>이지케어텍(EMR) 환자 연동 현재 상태 — UQ(patient_id, encounter_id), <code>ward/room/bed_code·name</code>, <code>patient_name·gender_code·age·birthdate</code>, <code>department·attending_physician</code>, 주의표지(<code>fall_down·infection·allergy·dnr·is_isolation·fire</code>), <code>blood_type_abo/rh</code></td></tr>
+<tr><td><code>ezcaretech_patient_history</code></td><td>이지케어텍 환자 연동 이력 — PK id, UQ(patient_id, encounter_id), 동일 구조</td></tr>
+<tr><td><code>infinitt_patient</code></td><td>INFINITT(PACS) 처방 환자 연동(TXT 임포트) — UQ(org, patient_code, prescription_date, order_code), <code>name·birthday·gender·age</code>, <code>prescription_date</code>, <code>order_code</code>, <code>source_file_name·file_created_at</code></td></tr>
+<tr><td><code>rep_nurse</code></td><td>간호사 마스터(협진/HIS 연동용) — <code>user_name·position·ward_code/name</code></td></tr>
+<tr><td><code>dicom_transfer_log</code></td><td>리포트 PDF→DICOM 변환/전송 로그(PACS) — <code>status</code>(0:none,1:변환실패,2:변환성공,4:전송실패,5:전송성공), <code>pdf/dicom_file_name</code>, <code>status_msg·event_time</code></td></tr>
+</table>
+
+<h2 id="d-cardio">도메인 12 — mobiCARE Cardio 연동 (5)</h2>
+<p class="sub">cardio_integration_setting · link_cardio_info · link_cardio_report_info · link_cardio_send_file_info · report_check</p>
+<table>
+<tr><th>테이블</th><th>용도·주요 컬럼</th></tr>
+<tr><td><code>cardio_integration_setting</code></td><td>Cardio 플랫폼 연동 계정/URL 설정 — <code>cardio_account_id/pw</code>, <code>cardio_platform_type</code>, <code>cardio_base_url</code>, <code>requester</code></td></tr>
+<tr><td><code>link_cardio_info</code></td><td>Cardio 전송 작업 단위(측정/일 단위) — <code>sync_type</code>(0:all,1:day), <code>measurement_code(_date)</code>, <code>send_status</code>(0:none,1:sending,2:fail,5:completed), <code>start/end_file_index</code>, <code>send/total_file_count</code>, <code>complete_date_time</code></td></tr>
+<tr><td><code>link_cardio_report_info</code></td><td>Cardio 심전도 리포트 수신 파일 — <code>measurement_code</code>, <code>link_cardio_info_table_id</code>, <code>file_name/path/size</code>, <code>checksum</code>, <code>report_confirmed</code>(0:미확인,1:확인)</td></tr>
+<tr><td><code>link_cardio_send_file_info</code></td><td>Cardio 파일 전송 상태 — <code>s3_file_name</code>, <code>local_file_path</code>, <code>send_flag</code>(0:none,1:success)</td></tr>
+<tr><td><code>report_check</code></td><td>일별 자동 리포트 생성 체크 — <code>measurement_code·report_date</code>, <code>auto_report</code>(0/1), <code>file_name</code></td></tr>
+</table>
+
+<h2 id="d-emergency">도메인 13 — 응급이송 (8)</h2>
+<p class="sub">measurement_type='ET'. emergency_transport_patient_info · _symptom · _occurrence_type · _evaluation · _first_aid · _member · emergency_transport_location_info · emergency_transport_contents</p>
+<table>
+<tr><th>테이블</th><th>용도·주요 컬럼</th></tr>
+<tr><td><code>emergency_transport_patient_info</code></td><td>응급이송 환자 접수/진행 상태 — UQ measurement_code, 의심질환 플래그(<code>cardiac_arrest·stroke·myocardial_infarction·severe_trauma·suspicion_infection</code>), <code>emergency_transport_approve_type</code>(0:접수요청,1:승인,2:취소), 종료 상태 3자(<code>_end_type·_room_end_type·_doctor_end_type</code> 각 0:진행중,1:종료)</td></tr>
+<tr><td><code>emergency_transport_patient_symptom</code></td><td>이송 환자 증상 체크리스트(측정코드당 1행) — 통증/외상/의식·호흡/출혈/기타 40여 개 0/1 플래그 + <code>etc_msg</code></td></tr>
+<tr><td><code>emergency_transport_patient_occurrence_type</code></td><td>발생 유형(병력/사고 유형/발생 장소) — 병력·사고유형·발생장소 50여 개 0/1 플래그</td></tr>
+<tr><td><code>emergency_transport_patient_evaluation</code></td><td>환자 평가(부위별 손상+의식/동공/중증도) — 인체 도식 부위 플래그, 의식수준(<code>alert·verbal·painful·coma</code>), 동공(<code>left/right_pupil_*</code>), 중증도(<code>emergency·semi_emergency·dead</code>…), <code>evaluation_opinion·time_occurrence</code></td></tr>
+<tr><td><code>emergency_transport_patient_first_aid</code></td><td>응급처치 기록 — 기도/호흡(<code>artificial_respiration·airway_intubation·bvm·oxygen_administration</code>), CPR·AED(<code>cpr_implementation·aed_shock</code>), 고정(<code>fixed_cervical_spine·fixation_splint</code>), 순환(<code>secure_vein·hemostasis·wound_dressing</code>)</td></tr>
+<tr><td><code>emergency_transport_patient_member</code></td><td>이송 건 참여 의사 매핑 — KEY(emergency_patient_info_id, doctor_id), <code>register/update_date_time</code></td></tr>
+<tr><td><code>emergency_transport_location_info</code></td><td>구급차 실시간 위치/도착 예정 — FK mc(CASCADE), <code>estimated_arrival_time</code>, <code>remaining_distance/minute</code>, <code>longitude·latitude</code></td></tr>
+<tr><td><code>emergency_transport_contents</code></td><td>이송 중 촬영 사진/동영상(S3) — <code>file_type</code>(1:PHOTO,2:VIDEO), <code>file_name/path/key/url</code>, <code>checksum·file_size</code></td></tr>
+</table>
+
+<h2 id="d-consult">도메인 14 — 원격협진/메시징 (14)</h2>
+<p class="sub">doctor consult · vcall. doctor_consult_master · _case_list · _member_list · _message · _patient_his · _schedule_list · _schedule_check_list · doctor_schedule_master · doctor_bookmark_master · _detail · room_info · room_user_info · staff_message_master · staff_message_member</p>
+<table>
+<tr><th>테이블</th><th>용도·주요 컬럼</th></tr>
+<tr><td><code>doctor_consult_master</code></td><td>협진 세션 마스터 — <code>create_id/name/position</code>, <code>consult_channel</code>, <code>start/end_datetime</code>, <code>member/case/reply_count</code>, <code>consult_state</code>(Y/N), <code>measurement_code</code>, <code>v_room_id/state/password</code>(화상방), <code>proceedings</code>(회의록), <code>tenminago_push_state</code></td></tr>
+<tr><td><code>doctor_consult_case_list</code></td><td>협진 케이스(환자 사례) — PK(consult_id, order_no), <code>case_title/contents</code>, 환자 정보, <code>measurement_code</code>, <code>message_room_id/state</code>, <code>v_room_id/state</code>, <code>case_status·host_stay</code></td></tr>
+<tr><td><code>doctor_consult_member_list</code></td><td>협진 참여 의사 — PK(consult_id, doctor_id), <code>doctor_name·level·class</code>, <code>confirm/reply/remote_state</code>, <code>host</code>(Y/N)</td></tr>
+<tr><td><code>doctor_consult_message</code></td><td>협진 케이스별 메시지방 연결 — <code>order_no·case_title/contents</code>, <code>message_room_id/state</code></td></tr>
+<tr><td><code>doctor_consult_patient_his</code></td><td>협진용 HIS 환자 스냅샷 — <code>patient_name/age/ward/ward_room/condition/gender</code></td></tr>
+<tr><td><code>doctor_consult_schedule_list</code></td><td>협진 일정 후보 시간대 — <code>consult_start/end_datetime</code>, <code>confirm</code>(Y/N)</td></tr>
+<tr><td><code>doctor_consult_schedule_check_list</code></td><td>일정 후보에 대한 의사별 선택 — PK(consult_id, order_no, doctor_id)</td></tr>
+<tr><td><code>doctor_schedule_master</code></td><td>의사 개인 일정 — <code>schedule_title/type</code>, <code>start/end_date_time</code></td></tr>
+<tr><td><code>doctor_bookmark_master</code></td><td>의사 북마크 그룹 — <code>bookmark_channel</code>(1:consult,2:screening,3:emergency), <code>bookmark_name/state</code></td></tr>
+<tr><td><code>doctor_bookmark_detail</code></td><td>북마크 그룹 멤버 — <code>user_name·department·position</code></td></tr>
+<tr><td><code>room_info</code></td><td>화상통화(vcall/WebRTC) 방 — <code>creatorId·password·publishers·deactivate</code>, <code>create/delete_date_time</code></td></tr>
+<tr><td><code>room_user_info</code></td><td>화상통화 방 참여자 — <code>user_type</code>(0:creator,1:joiner), <code>connect/dis_connect_time</code>, <code>connect_status</code></td></tr>
+<tr><td><code>staff_message_master</code></td><td>의료진 메시지방 — <code>room_name/desc/state</code>, <code>create_id·create_type</code>(0:doctor,1:nurse)</td></tr>
+<tr><td><code>staff_message_member</code></td><td>메시지방 멤버 — PK(room_id, user_id), <code>host</code>(Y/N), <code>in_out</code>, <code>user_type</code>(0:doctor,1:nurse)</td></tr>
+</table>
+
+<h2 id="d-screening">도메인 15 — 선별진료소 (4)</h2>
+<p class="sub">screening_clinic · screening_clinic_room · screening_clinic_patient · screening_clinic_visit_record</p>
+<table>
+<tr><th>테이블</th><th>용도·주요 컬럼</th></tr>
+<tr><td><code>screening_clinic</code></td><td>선별진료소 — UQ screening_clinic_code, <code>screening_clinic_name</code>, <code>status</code>(0:None,1:disinfect,2:usable,3:clinic,5:unusable,10:disable), <code>type·create_id</code></td></tr>
+<tr><td><code>screening_clinic_room</code></td><td>진료실 — UQ room_code, <code>room_name·status·order_no</code>, <code>room_type</code>(1:선별,2:호흡기)</td></tr>
+<tr><td><code>screening_clinic_patient</code></td><td>예약/접수 환자 — UQ reservation_code, <code>medical_staff_code/name</code>, 환자 정보, <code>patient_status</code>(0:None,1:Reservation,2:Waiting,3:Clinic,5:Complete,9:Cancel), <code>v_room_id/state·message_room_id/state</code></td></tr>
+<tr><td><code>screening_clinic_visit_record</code></td><td>방문 기록 — UQ reservation_code, <code>patient_code·gender·reservation_date_time·room_type</code></td></tr>
+</table>
+
+<h2 id="d-premium">도메인 16 — 프리미엄(구독형) (5)</h2>
+<p class="sub">premium_organization · premium_measurement_info · premium_connection_history · premium_usage_summary · test_premium_usage_summary</p>
+<table>
+<tr><th>테이블</th><th>용도·주요 컬럼</th></tr>
+<tr><td><code>premium_organization</code></td><td>구독형 기관(도메인) 목록 — UQ domain_name, <code>organization_name</code></td></tr>
+<tr><td><code>premium_measurement_info</code></td><td>구독형 측정 사용 이력(과금 산정) — <code>measurement_code·parent</code>, <code>device_type</code>(1:ECG,3:SpO2), <code>serial_number</code>, 환자·병동 정보, <code>status</code>(0:정상해제,1:연결중,-1:오류해제), <code>device_on/off_dt</code>, <code>duration</code>(시간)</td></tr>
+<tr><td><code>premium_connection_history</code></td><td>구독형 디바이스 연결/해제 이력 — FK mc·org, <code>device_on/off_dt</code>, <code>device_type·status·serial_number</code></td></tr>
+<tr><td><code>premium_usage_summary</code></td><td>구독형 일별 사용량 집계(도메인 단위) — <code>domain_name·the_period_day</code>, <code>ECG_total·SpO2_total</code>, <code>regist_dt</code></td></tr>
+<tr><td><code>test_premium_usage_summary</code></td><td>사용량 집계 테스트 사본 — <code>organization_code/name·the_period_day·ECG_total·SpO2_total</code></td></tr>
+</table>
+
+<h2 id="d-notice">도메인 17 — 공지/알림/푸시 (6)</h2>
+<p class="sub">notice · notice_file · notification · notification_check · push_user_token · push_call_log</p>
+<table>
+<tr><th>테이블</th><th>용도·주요 컬럼</th></tr>
+<tr><td><code>notice</code></td><td>공지사항 — UQ notice_code, <code>organization_code·target_type</code>, <code>title·body</code>(longtext), <code>notice_level</code>(1~9), <code>notice_start/end_date_time</code></td></tr>
+<tr><td><code>notice_file</code></td><td>공지 첨부파일(S3) — UQ notice_file_code, FK notice_code(CASCADE), <code>file_key·checksum·file_name/size</code></td></tr>
+<tr><td><code>notification</code></td><td>환자 대상 알림(메시지/화상통화 초대) — UQ notification_code, <code>notification_type</code>(MESSAGE,VCALL), <code>push_type</code>(0:none,1:즉시,2:예약), <code>title·body·etc</code>(vcall 방 이름), <code>reservation_date_time</code></td></tr>
+<tr><td><code>notification_check</code></td><td>알림 수신/읽음 확인 — UQ(notification_code, measurement_code), FK notification_code(CASCADE), <code>receive/read_date_time</code></td></tr>
+<tr><td><code>push_user_token</code></td><td>사용자(의료진) 푸시 토큰 — PK(user_id, service_code), <code>organization_code·client_token·department</code></td></tr>
+<tr><td><code>push_call_log</code></td><td>푸시 발송 로그 — <code>request_id·target_id·client_key</code>, <code>call_api/type/message</code>, <code>push_channel·call_datetime</code></td></tr>
+</table>
+
+<h2 id="d-server">도메인 18 — 서버/버전/에러코드 (6)</h2>
+<p class="sub">api_server_info · server_url_info · server_conn_info · app_version_control · sw_version_info · error_code_info</p>
+<table>
+<tr><th>테이블</th><th>용도·주요 컬럼</th></tr>
+<tr><td><code>api_server_info</code></td><td>API 서버(이벤트/데이터) 라우트 — <code>server_type</code>(1:event,2:data), <code>api_route</code>(GWS-1,2…), <code>main</code>(1:main), <code>base_url·etc</code></td></tr>
+<tr><td><code>server_url_info</code></td><td>외부 서버 URL 목록 — UQ base_url, <code>server_name·etc</code></td></tr>
+<tr><td><code>server_conn_info</code></td><td>클라이언트/게이트웨이 웹소켓 연결 상태 — <code>requester</code>(gateway SN/user_code), <code>session_id·api_route</code>, <code>device_kind</code>(1:iOS,2:Android,3:web,10:gateway,11:phone g/w), <code>conn_status</code>(1:disconnected,2:connected,5:disable)</td></tr>
+<tr><td><code>app_version_control</code></td><td>모바일 앱 버전 관리 — UQ(package_name, device_type), <code>version_name/code</code>, <code>update_type</code>(0:none,1:force)</td></tr>
+<tr><td><code>sw_version_info</code></td><td>소프트웨어 구성요소 버전/배포 파일 — <code>sw_type</code>(0:Backend,1:FrontEnd,2:Gateway,3:AI,4:Mobile), <code>active_status</code>, <code>file_key/url/size·checksum</code>, <code>level</code>(0~3)</td></tr>
+<tr><td><code>error_code_info</code></td><td>API 에러코드 사전 — <code>error_code·error_code_hex</code>, <code>error_code_description(_kor)</code>, <code>use_api</code>(Global/Account/Measurement/Manager/VCALL)</td></tr>
+</table>
+
+<h2 id="d-log">도메인 19 — 로그/감사 (7)</h2>
+<p class="sub">api_call_log · api_request_log · data_log · event_log · ecg_stream_log · websocket_log_info · skylabs_packet_send_history</p>
+<table>
+<tr><th>테이블</th><th>용도·주요 컬럼</th></tr>
+<tr><td><code>api_call_log</code></td><td>API 호출 간단 로그 — <code>request_id·api_name·date_time·status</code></td></tr>
+<tr><td><code>api_request_log</code></td><td>API 요청/응답 전문 로그(이벤트 확인용) — <code>requester·method·event_time</code>, <code>request·response</code>(text)</td></tr>
+<tr><td><code>data_log</code></td><td>상세 처리 로그 — <code>method·ip·log_level</code>, <code>request·response</code>, <code>error_code/type/msg</code>, <code>process_time</code>(ms)</td></tr>
+<tr><td><code>event_log</code></td><td>데이터 변경 감사(audit) 로그 — <code>event_type/action/status·event_api</code>, <code>requester·id·target</code>, <code>audit_memo</code>, <code>old_data·new_data</code>(변경 전/후 스냅샷)</td></tr>
+<tr><td><code>ecg_stream_log</code></td><td>ECG 실시간 스트림 디버그 로그 — <code>type</code>(1:ECG,2:ALGO), <code>requester·measurement_code·serial_number</code>, <code>stream_packet·stream_sample_packet</code>(mediumtext)</td></tr>
+<tr><td><code>websocket_log_info</code></td><td>웹소켓 연결/해제 이력 — <code>requester·session_id·api_route·device_kind·ip·conn_status</code>, <code>etc</code>(해제 사유)</td></tr>
+<tr><td><code>skylabs_packet_send_history</code></td><td>SkyLabs(Cart BP) 패킷 전송 이력 — <code>mac_address</code>, <code>type</code>(PPG/EVENT_LOG), <code>packet_count</code>, <code>response_code/message</code></td></tr>
+</table>
+
+<h2 id="d-temp">도메인 20 — 임시 (1)</h2>
+<table>
+<tr><th>테이블</th><th>용도</th></tr>
+<tr><td><code>temp_test_table</code></td><td>임시 테스트 테이블 — <code>fw_version·organization_code·useYn</code></td></tr>
+</table>
+
+<h2 id="seed">기초 데이터 (insert_data_20260617.sql)</h2>
+<p>코드성/설정성 데이터만 시드하며(측정·환자 데이터 없음), <code>REF_ORG</code>가 신규 기관 생성 시 알람 레벨·파라미터의 <b>복사 원본</b> 역할을 한다.</p>
+<table>
+<tr><th>#</th><th>대상 테이블</th><th>내용</th><th>건수</th></tr>
+<tr><td>1</td><td><code>organization</code></td><td>기관 3개: <code>SEERS</code>(씨어스테크놀로지), <code>THYNC</code>(씽크), <code>REF_ORG</code>(데이터용 기본기관 — "삭제금지", 각종 기본 설정의 참조 원본)</td><td>3</td></tr>
+<tr><td>1.1</td><td><code>user_account</code></td><td>마스터 계정: <code>admin.seers</code>(~3), <code>admin.thync</code>(~3) — level 14(admin), <code>admin.thync10</code> — level 20(gateway 등록용). 비밀번호 SHA256 고정 해시</td><td>7</td></tr>
+<tr><td>2</td><td><code>global_setting</code></td><td>전역 설정: <code>bio_signals_trend_second=600</code>, <code>use_alarm_clear=0</code>, <code>alarm_clear_time=5</code> (INSERT…SELECT로 미설정 기관 일괄 생성)</td><td>기관수</td></tr>
+<tr><td>3</td><td><code>bio_signal_alarm_level</code></td><td>REF_ORG 기준 알람 레벨: 부정맥 17종(ASYSTOLE·PAUSE·BRADY·TACHY·VT=레벨1, AFIB·HIGH_HR 등=레벨3) + 생체신호 min/max 9종(HR/RESP/TEMP/SpO2/ST=레벨3) + ETC_ALARM(레벨0) + FALL_DETECTION(레벨4)</td><td>28</td></tr>
+<tr><td>4</td><td><code>arrhythmia_description</code></td><td>부정맥 17종 타입코드·표시명·한국어 검출조건·기본 알람레벨 (AFIB, ASYSTOLE, BRADY, TACHY, HIGH_HR, LOW_HR, MISSED, V_NON_SUSTAIN, V_PAIR, PAUSE, V_MIN_HIGH, V_RUN_HIGH, SVT, V_BIGEMINY, V_RHYTHM, V_TRIGEMINY, VT)</td><td>17</td></tr>
+<tr><td>5</td><td><code>arrhythmia_category</code> / <code>_item</code></td><td>알람 카테고리 트리: 1단계 5개(All Alarms, Life-threatening, Ventricular alarms, AFib, Dysrhythmias) + 2단계 20개, 항목→부정맥 타입 매핑 21건(ALL_RED/ALL_YELLOW 포함)</td><td>25+21</td></tr>
+<tr><td>5'</td><td><code>arrhythmia_value_parameter</code></td><td>REF_ORG 기준 판정 파라미터: asystole(2.5~4.0s), brady 40bpm/5beats, tachy 140bpm/17beats, HR high/low(성인 120/50, 소아 160/75), vtach 100/120bpm·5run, PVCs/min 10/5, SVT 180/200bpm·5run, pause 2.0s, ventRhythm 100bpm·14run 등 성인/소아 분리</td><td>19</td></tr>
+<tr><td>5''</td><td><code>arrhythmia_value_parameter_description</code></td><td>위 파라미터 설명 다국어(ko 19 + en 19)</td><td>38</td></tr>
+<tr><td>5'''</td><td><code>organization_mobile_password</code></td><td>THYNC/SEERS 모바일 공용 비밀번호 '1234'</td><td>2</td></tr>
+<tr><td>6</td><td><code>error_code_info</code></td><td>에러코드 사전: Global(0~7 성공/파라미터/DB/계정/권한/잠김, 241 세션만료, 250 서버점검, 253 WS오류, 254 Unknown, 500, 1793 HIS 호출 실패), Account(257~258), Measurement(259~260, 272~273 측정코드/병상 중복), Manager(288, 293 디스플레이/빌딩 코드), VCALL(768 인원초과, 769 미디어서버 오류)</td><td>22</td></tr>
+</table>
+
+<h2 id="erd">ERD 관계 요약</h2>
+
+<h3>시설 계층 (하향 CASCADE)</h3>
+<div class="arch">
+<div class="arch-row">
+<div class="arch-box">organization</div>
+<div class="arch-box plain">building</div>
+</div>
+<div class="arch-row">
+<div class="arch-box">organization</div>
+<div class="arch-box plain">ward</div>
+<div class="arch-box plain">sickroom</div>
+<div class="arch-box plain">sickbed</div>
+</div>
+</div>
+<p class="sub"><code>organization</code> 1:N <code>ward</code> 1:N <code>sickroom</code> 1:N <code>sickbed</code>. 각 하위는 상위의 <code>organization_code</code>·<code>ward_code</code>·<code>sickroom_code</code>를 FK로 참조(ON DELETE CASCADE). <code>sickbed</code> ↔ <code>display_information</code>은 <code>sickbed_connect_display</code>로 N:M.</p>
+
+<h3>측정 세션 중심 (measurement_code 허브)</h3>
+<p><code>measurement_info</code>가 시스템의 중심 허브이며, <code>measurement_code</code>(UNIQUE)를 통해 대부분의 데이터가 귀속된다.</p>
+<table>
+<tr><th>관계</th><th>대상</th><th>정책</th></tr>
+<tr><td>measurement_info 1:1</td><td>patient_info, patient_info_disease/symptom, patient_agreement, patient_fcm, patient_sensitive, measurement_setting_info, measurement_alarm_setting</td><td>UNIQUE mc, FK CASCADE</td></tr>
+<tr><td>measurement_info 1:N</td><td>시계열 14종(주차 샤드), temperature_2026, blood_pressure, blood_sugar, device_info, device_status, symptom_record, medical_memo, bio_signal_event</td><td>FK CASCADE (샤드는 shard·part 라우팅)</td></tr>
+<tr><td>measurement_info 1:1</td><td>수신 상태 3종(해시 샤드), 최신값 캐시 10종</td><td>UNIQUE mc, FK CASCADE</td></tr>
+<tr><td>measurement_info ↔ patient</td><td>patient_code(논리 FK, 병원 등록번호)</td><td>느슨 결합 — patient는 경량 마스터</td></tr>
+<tr><td>measurement_info ↔ device_register</td><td>device_info(mc,serial_number)로 세션-장비 연결</td><td>세션 시작 시 장비 배정</td></tr>
+<tr><td>measurement_info ↔ gateway_info</td><td>gateway는 sickroom_code로 위치 연결, 세션은 sickbed 경유 라우팅</td><td>물리 위치 기반 <span class="sub">(추정)</span></td></tr>
+<tr><td>measurement_info self-ref</td><td>parent_measurement_code / parent_type(0:parent,1:child)</td><td>복수 패치 부모-자식</td></tr>
+</table>
+
+<h3>알람/부정맥 참조 흐름</h3>
+<p><code>REF_ORG</code>(기준 기관)의 <code>bio_signal_alarm_level</code>·<code>arrhythmia_value_parameter</code>가 <b>복사 원본</b>이 되어, 신규 기관/병동 생성 시 기관·병동 단위 임계값으로 파생된다. 측정 세션은 이를 <code>measurement_alarm_setting</code>·<code>arrhythmia_alarm_2026</code>으로 스냅샷하여 세션별 임계값을 확정하고, 임계 위반 시 <code>bio_signal_event</code>(+ <code>analysis_arrhythmia</code>)에 이벤트를 남기며 <code>*_last_data</code> 캐시를 갱신한다.</p>
+
+<div class="footer">thynC Operations · 내부 산출물 · thync_1.3.0 문서 세트 · 2026-07-18 작성 · 소스 역공학 기반</div>

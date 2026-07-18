@@ -1,0 +1,433 @@
+<title>용어·코드 정의서</title>
+<style>
+:root{--ink:#1a2332;--sub:#5a6a7e;--line:#dde4ec;--bg:#fff;--accent:#0b6bcb;--accent-soft:#eaf3fc;--head-bg:#f5f8fb;--warn-bg:#fff7e6;--warn-line:#f0c36d;--ok:#1a7f37}
+*{box-sizing:border-box}
+body{margin:0;padding:32px 40px 80px;background:var(--bg);color:var(--ink);font-family:'Pretendard','Pretendard Variable',-apple-system,'Segoe UI','Malgun Gothic',sans-serif;font-size:14.5px;line-height:1.65;max-width:1080px;margin-left:auto;margin-right:auto}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.5px}
+h2{font-size:19px;margin:44px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--ink);letter-spacing:-.3px}
+h3{font-size:16px;margin:28px 0 10px}
+h4{font-size:14.5px;margin:20px 0 8px;color:var(--sub)}
+p{margin:8px 0}
+code{background:var(--accent-soft);color:var(--accent);padding:1px 5px;border-radius:4px;font-family:'D2Coding',Consolas,monospace;font-size:13px}
+pre{background:#f6f8fa;border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.5}
+pre code{background:none;color:inherit;padding:0}
+table{border-collapse:collapse;width:100%;margin:12px 0 20px;font-size:13.5px}
+th{background:var(--head-bg);border:1px solid var(--line);padding:7px 10px;text-align:left;font-weight:600;white-space:nowrap}
+td{border:1px solid var(--line);padding:6px 10px;vertical-align:top}
+tr:nth-child(even) td{background:#fafcfe}
+.doc-meta{border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:20px 0 8px;background:var(--head-bg)}
+.doc-meta table{margin:0;font-size:13px}
+.doc-meta td,.doc-meta th{border:none;padding:3px 14px 3px 0;background:none!important}
+.doc-meta th{color:var(--sub);font-weight:600;width:120px}
+.toc{background:var(--accent-soft);border-radius:10px;padding:16px 24px;margin:24px 0}
+.toc ol{margin:6px 0;padding-left:22px}
+.toc a{color:var(--accent);text-decoration:none}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent);margin-right:4px}
+.badge.get{background:#e6f4ea;color:#1a7f37}
+.badge.post{background:#eaf3fc;color:#0b6bcb}
+.badge.put{background:#fff7e6;color:#9a6700}
+.badge.del{background:#ffebe9;color:#cf222e}
+.note{background:var(--warn-bg);border-left:4px solid var(--warn-line);padding:10px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:13.5px}
+.sub{color:var(--sub);font-size:13px}
+.arch{display:flex;flex-direction:column;gap:10px;margin:18px 0}
+.arch-row{display:flex;gap:10px;flex-wrap:wrap}
+.arch-box{border:1.5px solid var(--accent);border-radius:10px;padding:10px 14px;background:var(--accent-soft);flex:1;min-width:140px;text-align:center}
+.arch-box.plain{border-color:var(--line);background:var(--head-bg)}
+.arch-box b{display:block;font-size:13.5px}
+.arch-box span{font-size:12px;color:var(--sub)}
+.footer{margin-top:60px;padding-top:16px;border-top:1px solid var(--line);color:var(--sub);font-size:12.5px}
+</style>
+
+<h1>용어·코드 정의서</h1>
+<p class="sub">thynC 환자 감시 솔루션 · 산출물 세트 <b>thync_1.3.0</b></p>
+
+<div class="doc-meta">
+<table>
+<tr><th>문서 성격</th><td>용어집 및 코드 정의서 (Glossary &amp; Code Dictionary)</td></tr>
+<tr><th>대상 제품</th><td>thynC IP2140 (mobiCARE Console) — 백엔드 <code>thync-api-onpremise 01.01.431</code></td></tr>
+<tr><th>작성일</th><td>2026-07-18</td></tr>
+<tr><th>작성 근거</th><td>운영 배포 산출물(WAR·프론트엔드·DB 스키마) 역공학 기반 재구성</td></tr>
+<tr><th>버전</th><td>thync_1.3.0</td></tr>
+</table>
+</div>
+
+<div class="note"><b>문서 성격 안내.</b> 본 문서는 기존 기획·설계 산출물이 부재한 상태에서, 실제 운영 중인 소스(백엔드 WAR 디컴파일, 프론트엔드 소스, DB DDL·시드)를 분석해 <b>사후 재구성</b>한 것입니다. 소스에서 직접 확인된 코드값·명칭을 기준으로 하되, 의미가 코드에서 명확하지 않은 항목은 <span class="sub">(추정)</span>으로 표기합니다. 본 정의서는 사내위키에 게시되어 AI 어시스턴트가 약어·코드값을 해석하는 <b>사전(dictionary)</b> 역할을 합니다.</div>
+
+<div class="toc">
+<b>목차</b>
+<ol>
+<li><a href="#glossary">일반 용어집 (도메인 약어·용어)</a></li>
+<li><a href="#account-level">계정 권한 등급 코드</a></li>
+<li><a href="#alarm">알람 레벨·색상 코드</a></li>
+<li><a href="#arrhythmia">부정맥(Arrhythmia) 타입 코드</a></li>
+<li><a href="#biosignal">생체신호 종류 코드</a></li>
+<li><a href="#device">기기(장비) 종류 코드</a></li>
+<li><a href="#ws-event">WebSocket 이벤트 타입 코드</a></li>
+<li><a href="#error-code">API 응답·에러 코드</a></li>
+<li><a href="#status-code">상태 코드류</a></li>
+<li><a href="#function-env">기능 토글(FUNCTION_ENVIRONMENT) 키</a></li>
+<li><a href="#profile">설정 프로파일 코드</a></li>
+</ol>
+</div>
+
+<h2 id="glossary">1. 일반 용어집 (도메인 약어·용어)</h2>
+<p>thynC 도메인에서 반복 등장하는 제품·임상·기술 용어를 정리합니다. 코드성 값은 이후 섹션(2~11)에서 별도로 다룹니다.</p>
+
+<h3>제품·플랫폼 용어</h3>
+<table>
+<tr><th style="width:150px">용어 / 약어</th><th>의미</th></tr>
+<tr><td><b>thynC</b> (씽크)</td><td>SEERS(씨어스테크놀로지)의 병원 입원환자 무선 웨어러블 생체신호 실시간 모니터링 솔루션. 모델명 thynC IP2140, 품목허가 제인 23-5092호. 화면 표기 버전 <code>M1.3.0</code></td></tr>
+<tr><td><b>mobiCARE</b></td><td>SEERS의 웨어러블 심전도/생체신호 측정 브랜드. 백엔드 API 베이스 경로가 <code>/mobiCAREConsole/API</code>. thynC는 mobiCARE Console 제품군의 병원용 콘솔</td></tr>
+<tr><td><b>mobiCARE Console</b></td><td>의료진용 웹 콘솔(서비스 콘솔). 병상설정·모니터링·중앙모니터·관리자 설정 기능 제공. 관리자 콘솔은 별도 "THYNC MANAGER"</td></tr>
+<tr><td><b>mobiCARE Cardio</b> (Cardio)</td><td>외부 심전도 분석/홀터 리포트 플랫폼. thynC에서 측정한 ECG를 Cardio로 전송해 부정맥 분석·홀터 리포트를 수신 (병동 <code>cardio_sync</code> 설정으로 연동)</td></tr>
+<tr><td><b>THYNC MANAGER</b></td><td>SEERS 본사 시스템 관리자 전용 관리자 콘솔. 기관·게이트웨이·계정·의료기기·SW버전·통계 관리 (접근: 계정등급 20 이상)</td></tr>
+<tr><td><b>패치 / 웨어러블</b></td><td>환자 신체에 부착·착용하는 무선 측정 디바이스(ECG 패치, 체온계, 펄스옥시미터, 혈압계). BLE로 게이트웨이에 연결</td></tr>
+<tr><td><b>게이트웨이 (Gateway)</b></td><td>병실에 설치되어 환자 패치의 BLE 신호를 수신해 서버로 중계하는 무선 수신 장치. 시리얼·MAC·펌웨어·설치 층/좌표로 관리 (<code>gateway_info</code>)</td></tr>
+<tr><td><b>UDI</b></td><td>Unique Device Identification, 의료기기 고유식별. 콘솔 상단 버전 버튼에서 허가번호·제조번호·UDI 바코드 표시</td></tr>
+<tr><td><b>RTLS</b></td><td>Real-Time Location System. 환자·장비 실시간 위치 표시 기능(기관 설정 시 노출)</td></tr>
+</table>
+
+<h3>조직·시설 용어</h3>
+<table>
+<tr><th style="width:150px">용어 / 약어</th><th>의미</th></tr>
+<tr><td><b>기관 (Organization)</b></td><td>서비스를 사용하는 병원 단위. <code>organization_code</code>가 전 테이블의 논리 FK 루트. 시드 기본기관 <code>REF_ORG</code>(설정 복사 원본, 삭제금지)·<code>SEERS</code>·<code>THYNC</code></td></tr>
+<tr><td><b>병동 (Ward)</b></td><td>기관 하위 조직 단위. 계정(간호사)의 소속·조회 범위 기준. <code>ward_code</code></td></tr>
+<tr><td><b>병실 (Sickroom)</b></td><td>병동 하위 방 단위. <code>sickroom_code</code>, 설정 병상수(<code>number_patient_room</code>) 보유</td></tr>
+<tr><td><b>병상 (Sickbed)</b></td><td>병실 내 개별 침상. 모니터링 최소 단위. <code>sickbed_code</code>, 표시코드·표시순서·중앙모니터 연결(<code>display_code</code>) 보유</td></tr>
+<tr><td><b>건물/동 (Building)</b></td><td>병동 상위 물리 단위. <code>building_code</code></td></tr>
+<tr><td><b>중앙모니터 / 대시보드</b></td><td>스테이션 대형 모니터용 다병상 실시간 대시보드. 디스플레이(<code>display_information</code>) + 레이아웃(<code>monitor_layout</code>, 2~30인 분할)로 구성</td></tr>
+</table>
+
+<h3>측정·임상 용어</h3>
+<table>
+<tr><th style="width:150px">용어 / 약어</th><th>의미</th></tr>
+<tr><td><b>측정 (Measurement)</b></td><td>한 환자에게 기기를 부착해 생체신호를 수집하는 세션. <code>measurement_code</code>가 모든 시계열·부속 데이터의 중심 키. 측정 세션 삭제 시 시계열 일괄 삭제(CASCADE)</td></tr>
+<tr><td><b>리드 (Lead)</b></td><td>ECG 유도(誘導). thynC는 <code>lead</code> 값 1/2/3 지원. Lead II를 선등록 후 I/III 추가 가능(다중 리드)</td></tr>
+<tr><td><b>ECG</b></td><td>Electrocardiogram, 심전도. 패치가 수집하는 핵심 파형. 실시간 스트림·이벤트 스트립·원시(raw) 파일로 저장</td></tr>
+<tr><td><b>HR</b></td><td>Heart Rate, 심박수(bpm)</td></tr>
+<tr><td><b>RESP</b></td><td>Respiration Rate, 호흡수(회/분)</td></tr>
+<tr><td><b>SpO2</b></td><td>산소포화도(%). 펄스옥시미터(PPG) 측정</td></tr>
+<tr><td><b>TEMP</b></td><td>체온(℃/℉). 패치형 체온계 측정. 주변온도(TAmb)·대상온도(TObj) 부가</td></tr>
+<tr><td><b>BP / NBP</b></td><td>Blood Pressure / Non-invasive BP, 비침습 혈압. <code>SYS</code>(수축기)/<code>DIA</code>(이완기)/<code>MAP</code>(평균동맥압)/pulse. 유형 NBP·NIBP·NABP</td></tr>
+<tr><td><b>SYS / DIA / MAP</b></td><td>Systolic(수축기압) / Diastolic(이완기압) / Mean Arterial Pressure(평균동맥압)</td></tr>
+<tr><td><b>PVC / PVCs/min</b></td><td>Premature Ventricular Contraction, 심실조기수축. 분당 PVC 개수를 시계열로 집계(<code>pvc_count</code>)</td></tr>
+<tr><td><b>부정맥 (Arrhythmia)</b></td><td>비정상 심장 리듬. 알고리즘이 ECG에서 검출(<code>analysis_arrhythmia</code>), 타입별 알람 레벨 부여. → 4장</td></tr>
+<tr><td><b>ST 세그먼트</b></td><td>ECG의 ST 구간 값(허혈 지표). ISO·J-point 기준으로 값 산출, 알람 임계 설정 대상</td></tr>
+<tr><td><b>EWS</b></td><td>Early Warning Score, 조기경보점수. HR·RESP·TEMP·SpO2 등을 종합한 위험도 점수. 모니터링 카드·정렬에 활용</td></tr>
+<tr><td><b>트렌드 (Trend)</b></td><td>생체신호를 주기(<code>bio_signals_trend_second</code>, 기본 600초) 스냅샷으로 저장한 추이 데이터. 요약 트렌드는 구간 min/max/avg</td></tr>
+<tr><td><b>활동량 (Activity Level)</b></td><td>패치 가속도 기반 환자 움직임 지표(<code>activity_level</code>)</td></tr>
+<tr><td><b>낙상 (Fall)</b></td><td>자이로/가속도 기반 낙상 감지. 발생 시 Red 알람·대응 상태 관리(<code>fall_use_info</code>, <code>bio_signal_last_fall_event</code>)</td></tr>
+<tr><td><b>DNR</b></td><td>Do Not Resuscitate, 연명치료(심폐소생술) 중단. 환자 등록 옵션 플래그</td></tr>
+<tr><td><b>Patient Paced</b></td><td>심박조율기(페이스메이커) 부착 환자. ECG 판독 보정을 위한 플래그(<code>patient_paced</code>)</td></tr>
+<tr><td><b>Infants under 10kg</b></td><td>10kg 미만 소아 플래그(연령군 <code>age_group_type</code> Pediatric/Neonatal과 연계)</td></tr>
+<tr><td><b>MRN / 환자등록번호</b></td><td>Medical Record Number, 병원 환자 등록번호(<code>patient_code</code>)</td></tr>
+<tr><td><b>Stand by</b></td><td>검사 등으로 측정을 일시 중단한 환자 상태 표시</td></tr>
+</table>
+
+<h3>연동·기술 용어</h3>
+<table>
+<tr><th style="width:150px">용어 / 약어</th><th>의미</th></tr>
+<tr><td><b>HIS</b></td><td>Hospital Information System, 병원정보시스템. SSO 로그인(<code>/Account/LoginHIS</code>)·환자/의사/재원 정보 연동</td></tr>
+<tr><td><b>EMR</b></td><td>Electronic Medical Record, 전자의무기록. 체온·호흡·스트립 등을 병원 EMR로 전송(ACK EMR, 연동주기 설정)</td></tr>
+<tr><td><b>ACK EMR</b></td><td>EMR 전송 확인(Acknowledge) 방식 연동. <code>send_interval</code>(분) 주기로 전송</td></tr>
+<tr><td><b>HL7</b></td><td>Health Level 7, 의료정보 교환 표준. 일부 병원은 HL7 TCP 인터페이스로 EMR 연동</td></tr>
+<tr><td><b>DICOM</b></td><td>의료영상 표준. 리포트 PDF를 DICOM으로 변환해 PACS로 전송(<code>dicom_transfer_log</code>)</td></tr>
+<tr><td><b>PACS</b></td><td>Picture Archiving and Communication System, 의료영상저장전송시스템</td></tr>
+<tr><td><b>협진 / 원격협진</b></td><td>의료진 간 자문·화상 협진(doctor consult). 실시간/소견/응급/예약 유형, 화상방(vcall/WebRTC) 연동</td></tr>
+<tr><td><b>참케어 (Charmcare)</b></td><td>H2-ABPM 혈압계 브랜드. 측정 주기(수동) 설정 지원 (기능토글 <code>CHARM_BLOOD_PRESSURE</code>)</td></tr>
+<tr><td><b>SkyLabs / 반지형 혈압계</b></td><td>SL-MPF1K07 반지형(Ring) 혈압계(SkyLabs). PPG 패킷·Cart BP로 연동 (기능토글 <code>RING_BLOOD_PRESSURE</code>)</td></tr>
+<tr><td><b>STOMP / SockJS</b></td><td>실시간 통신 프로토콜. WebSocket(<code>/mobiCAREConsole/ws</code>) 위에서 파형 스트림·이벤트 구독. → 7장</td></tr>
+<tr><td><b>API Route (GWS-1)</b></td><td>측정 세션을 담당하는 API/스트림 서버 라우트 키(<code>api_route</code>, 기본 <code>GWS-1</code>). 이벤트/데이터 서버 분리(<code>api_server_info</code>)</td></tr>
+<tr><td><b>샤드 (shard/part)</b></td><td>고빈도 시계열의 테이블 분산 키. <code>measurement_info.shard</code>(연도)·<code>part</code>(0~100)로 시계열 샤드 라우팅</td></tr>
+</table>
+
+<h2 id="account-level">2. 계정 권한 등급 코드</h2>
+<p>사용자 계정 등급은 <code>user_account.level</code> 정수값으로 표현됩니다. 값이 클수록 상위 권한이며, 콘솔별 접근 범위가 다릅니다.</p>
+<table>
+<tr><th style="width:70px">level</th><th style="width:170px">코드/명칭</th><th>접근 범위</th></tr>
+<tr><td><code>1</code></td><td>환자 (PATIENT)</td><td>환자 앱 전용 <span class="sub">(콘솔 로그인 대상 아님)</span></td></tr>
+<tr><td><code>2</code></td><td>간호사 (NURSE)</td><td>서비스 콘솔 — 본인 <b>소속 병동만</b> 조회. 환자관리·모니터링·의료기기 조회</td></tr>
+<tr><td><code>5</code></td><td>의사 (DOCTOR)</td><td>서비스 콘솔 — <b>전 병동</b> 조회 <span class="sub">(user_account 시드에서는 doctor=4로 정의되어, 프론트 표기 5와 차이 존재 — 등급 경계값은 코드 확인 필요)</span></td></tr>
+<tr><td><code>8</code></td><td>매니저/관리자 (MANAGER)</td><td>서비스 콘솔 — 위 권한 + <b>관리자 설정</b> 메뉴(기관·계정·병동·알람·장치·게이트웨이·EMR·중앙모니터) 노출</td></tr>
+<tr><td><code>13</code></td><td>부관리자 (SUB ADMIN) <span class="sub">(추정)</span></td><td>관리자 하위 스코프 <span class="sub">(DB 정의상 존재, 프론트 미표기)</span></td></tr>
+<tr><td><code>14</code></td><td>관리자 (ADMIN)</td><td>기관 관리자. 마스터 계정 <code>admin.seers</code>·<code>admin.thync</code> 시드 등급</td></tr>
+<tr><td><code>20</code></td><td>시스템관리자 / 사이트매니저 (SYSTEM_ADMIN)</td><td><b>THYNC MANAGER(관리자 콘솔) 접속 최소 등급.</b> 미만이면 "시스템 관리자만 접속할 수 있습니다" 차단. 시드 계정 <code>admin.thync10</code>(게이트웨이 등록용)</td></tr>
+</table>
+<div class="note"><b>주의.</b> 프론트엔드 표기(간호사2/의사5/매니저8/관리자14/시스템관리자20)와 DB 시드(<code>user_account.level</code>: patient1/nurse2/doctor4/sysmanager10/subadmin13/admin14/gateway20)의 숫자 매핑이 일부 다릅니다. 권한 판정은 반드시 소스의 등급 상수를 기준으로 확인하세요. 별도 <code>system_manager</code> 컬럼(1:normal, 10:manager)도 존재합니다.</div>
+
+<h2 id="alarm">3. 알람 레벨·색상 코드</h2>
+<p>알람은 레벨(우선순위)과 색상으로 구분되며, 청각 알람(beep)이 동반됩니다. 레벨 값은 <code>bio_signal_alarm_level.alarm_level</code> 기준입니다.</p>
+
+<h4>알람 레벨 코드</h4>
+<table>
+<tr><th style="width:70px">레벨</th><th style="width:150px">색상/명칭</th><th>의미</th></tr>
+<tr><td><code>0</code></td><td>None</td><td>알람 없음 / 기타 알람(ETC_ALARM)</td></tr>
+<tr><td><code>1</code></td><td><b>Red</b> (빨강 #DD1111)</td><td>최고 우선순위. 응급 부정맥(생명 위협) — 빠른 beep</td></tr>
+<tr><td><code>2</code></td><td>Orange (주황) <span class="sub">(중간)</span></td><td>중간 우선순위 <span class="sub">(프론트 알람레벨 상수에서는 "중간=2"로 표기)</span></td></tr>
+<tr><td><code>3</code></td><td><b>Yellow</b> (노랑 #FF9900)</td><td>일반 부정맥 또는 생체신호 계산값의 설정 한계 이탈 — 느린 beep</td></tr>
+<tr><td><code>4</code></td><td><b>Fall Detection</b> (낙상)</td><td>낙상 감지 알람 (시드 <code>FALL_DETECTION</code> 레벨 4). 화면에는 Red로 표시</td></tr>
+</table>
+
+<h4>색상별 의미·사운드</h4>
+<table>
+<tr><th style="width:120px">색상</th><th>대상</th><th>사운드</th></tr>
+<tr><td><b>Red</b></td><td>응급 부정맥: Asystole, VTach(VT), Pause, Extreme Brady, Extreme Tachy, Run PVCs High</td><td>빠른 beep (base64 내장 오디오, 상시)</td></tr>
+<tr><td><b>낙상 Red</b></td><td>낙상 발생 (모니터링 카드·환자 상세 모두 Red)</td><td>보통 속도 beep (기관 토글 <code>BEEP.FALL_BED</code>)</td></tr>
+<tr><td><b>Yellow</b></td><td>일반 부정맥: SVT, Pair PVCs, Bigeminy, Trigeminy, Non-sustain VT, AFIB, Missed beat, Vent Rhythm, High/Low HR, PVCs/min High. 또는 생체신호 한계 이탈</td><td>느린 beep (기관 토글 <code>BEEP.YELLOW</code>)</td></tr>
+<tr><td><b>Blue</b></td><td>기술 알람(장치 관련, DEVICE_ALARM 계열)</td><td>기관 토글(<code>BEEP.IS_USE.BLUE</code>)에 따라 사용</td></tr>
+</table>
+<p class="sub">환자별로 <b>알람 일시정지(Pause)</b> / <b>알람 확인(Clear)</b> 지원. 부정맥 표시는 blink(깜빡임). 대시보드는 볼륨 조절바 제공.</p>
+
+<h2 id="arrhythmia">4. 부정맥(Arrhythmia) 타입 코드</h2>
+<p>시드(<code>arrhythmia_description</code>) 기준 17종 부정맥 타입과 기본 알람 레벨입니다. 타입 코드(<code>arrhythmia_type_code</code>)는 API·이벤트에서 사용됩니다.</p>
+<table>
+<tr><th style="width:150px">타입 코드</th><th style="width:100px">기본 레벨</th><th>의미</th></tr>
+<tr><td><code>ASYSTOLE</code></td><td>Red(1)</td><td>심정지(무수축) — 일정 시간 QRS 부재 (기본 2.5~4.0초)</td></tr>
+<tr><td><code>VT</code></td><td>Red(1)</td><td>심실빈맥(Ventricular Tachycardia) — 연속 심실 박동(기본 100/120bpm, 5run)</td></tr>
+<tr><td><code>PAUSE</code></td><td>Red(1)</td><td>심정지 휴지(RR 간격 과다, 기본 2.0초)</td></tr>
+<tr><td><code>BRADY</code></td><td>Red(1)</td><td>Extreme Bradycardia, 극서맥 (기본 40bpm/5beats)</td></tr>
+<tr><td><code>TACHY</code></td><td>Red(1)</td><td>Extreme Tachycardia, 극빈맥 (기본 140bpm/17beats)</td></tr>
+<tr><td><code>V_RUN_HIGH</code></td><td>Red(1) <span class="sub">(추정)</span></td><td>Run PVCs High, 연속 PVC 다발</td></tr>
+<tr><td><code>AFIB</code></td><td>Yellow(3)</td><td>심방세동(Atrial Fibrillation)</td></tr>
+<tr><td><code>SVT</code></td><td>Yellow(3)</td><td>상심실성 빈맥(기본 180/200bpm, 5run)</td></tr>
+<tr><td><code>HIGH_HR</code></td><td>Yellow(3)</td><td>고심박(성인 기본 120bpm)</td></tr>
+<tr><td><code>LOW_HR</code></td><td>Yellow(3)</td><td>저심박(성인 기본 50bpm)</td></tr>
+<tr><td><code>MISSED</code></td><td>Yellow(3)</td><td>Missed beat, 결손 박동</td></tr>
+<tr><td><code>V_PAIR</code></td><td>Yellow(3)</td><td>Pair PVCs, PVC 2연발</td></tr>
+<tr><td><code>V_BIGEMINY</code></td><td>Yellow(3)</td><td>Vent Bigeminy, 심실이단맥</td></tr>
+<tr><td><code>V_TRIGEMINY</code></td><td>Yellow(3)</td><td>Vent Trigeminy, 심실삼단맥</td></tr>
+<tr><td><code>V_NON_SUSTAIN</code></td><td>Yellow(3)</td><td>Non-sustained VT, 비지속성 심실빈맥</td></tr>
+<tr><td><code>V_RHYTHM</code></td><td>Yellow(3)</td><td>Vent Rhythm, 심실 고유 리듬(기본 100bpm, 14run)</td></tr>
+<tr><td><code>V_MIN_HIGH</code></td><td>Yellow(3)</td><td>PVCs/min High, 분당 PVC 다수(기본 10/5)</td></tr>
+</table>
+<h4>알람 카테고리 트리 (1단계)</h4>
+<table>
+<tr><th style="width:200px">카테고리</th><th>의미</th></tr>
+<tr><td>All Alarms</td><td>전체 알람</td></tr>
+<tr><td>Life-threatening</td><td>생명 위협(Red 계열)</td></tr>
+<tr><td>Ventricular alarms</td><td>심실성 부정맥</td></tr>
+<tr><td>AFib</td><td>심방세동 계열</td></tr>
+<tr><td>Dysrhythmias</td><td>기타 부정맥</td></tr>
+</table>
+<h4>알고리즘 검출 리듬 타입 (analysis_arrhythmia.rhythm_type)</h4>
+<table>
+<tr><th style="width:100px">rhythm_type</th><th>의미</th></tr>
+<tr><td><code>0x00</code></td><td>None</td></tr>
+<tr><td><code>0x03</code></td><td>AF / AFL (심방세동/조동)</td></tr>
+<tr><td><code>0x0B</code></td><td>ADD NOISE (추가 노이즈 구간) <span class="sub">(추정)</span></td></tr>
+<tr><td><code>0x10</code></td><td>BASE NOISE (기저 노이즈) <span class="sub">(추정)</span></td></tr>
+</table>
+<p class="sub">부정맥 검출 상태 <code>arrhythmia_status</code>: 0:none, 1:start, 2:proceeding, 3:end. <code>rhythm</code> 표기값: SVEs, VEs, AF, VF, add strip 등.</p>
+
+<h2 id="biosignal">5. 생체신호 종류 코드</h2>
+<p>이벤트/캐시 테이블에서 사용하는 생체신호 <code>event_type</code> 및 혈압/혈당 데이터 타입 코드입니다.</p>
+
+<h4>이벤트 타입 (bio_signal_event.event_type / arrhythmia_last_data.event_type)</h4>
+<table>
+<tr><th style="width:70px">값</th><th style="width:130px">종류</th><th>설명</th></tr>
+<tr><td><code>1</code></td><td>arry (부정맥)</td><td>부정맥 이벤트</td></tr>
+<tr><td><code>2</code></td><td>ST</td><td>ST 세그먼트 이탈</td></tr>
+<tr><td><code>3</code></td><td>HR</td><td>심박수 한계 이탈</td></tr>
+<tr><td><code>4</code></td><td>SpO2</td><td>산소포화도 한계 이탈</td></tr>
+<tr><td><code>5</code></td><td>RESP</td><td>호흡수 한계 이탈</td></tr>
+<tr><td><code>6</code></td><td>TEMP</td><td>체온 한계 이탈</td></tr>
+<tr><td><code>10</code></td><td>MANUAL</td><td>수동 등록 이벤트</td></tr>
+<tr><td><code>31</code></td><td>FALL <span class="sub">(추정)</span></td><td>낙상 이벤트 (<code>bio_signal_last_fall_event.event_type</code> 기본 31)</td></tr>
+</table>
+
+<h4>생체신호 항목 (모니터링 표시 수치)</h4>
+<table>
+<tr><th style="width:110px">항목</th><th style="width:90px">단위</th><th>설명 / 저장</th></tr>
+<tr><td>ECG</td><td>mV 파형</td><td>심전도 파형 (실시간 스트림·raw 파일·JSON 청크)</td></tr>
+<tr><td>HR</td><td>bpm</td><td>심박수 (<code>heart_rate</code> 시계열)</td></tr>
+<tr><td>RESP</td><td>회/분</td><td>호흡수 (<code>resp</code>)</td></tr>
+<tr><td>SpO2</td><td>%</td><td>산소포화도 (<code>spo2</code>, <code>ppg_raw_data</code>)</td></tr>
+<tr><td>TEMP</td><td>℃ / ℉</td><td>체온 (<code>temperature_2026</code>, temp_unit 0:C/1:F)</td></tr>
+<tr><td>NBP (SYS/DIA/MAP)</td><td>mmHg</td><td>비침습 혈압 (<code>blood_pressure</code>)</td></tr>
+<tr><td>PVCs/min</td><td>개/분</td><td>분당 심실조기수축 수 (<code>pvc_count</code>)</td></tr>
+<tr><td>ST</td><td>mm</td><td>ST 세그먼트 값 (<code>st_segment</code>)</td></tr>
+<tr><td>EWS</td><td>점수</td><td>조기경보점수 (<code>ews</code>)</td></tr>
+<tr><td>활동량</td><td>레벨</td><td>움직임 지표 (<code>activity_level</code>)</td></tr>
+<tr><td>혈당</td><td>mg/dL</td><td>혈당 (<code>blood_sugar</code>)</td></tr>
+</table>
+<p class="sub">데이터 소스 구분 <code>data_type</code>: 1=Patch(패치 자동), 2=User/EMR(수기·EMR 입력). 혈압 유형 <code>blood_pressure_type</code>: 0:None, 1:NBP, 2:NIBP, 3:NABP.</p>
+
+<h2 id="device">6. 기기(장비) 종류 코드</h2>
+<p>측정 디바이스는 <code>device_type</code>(정수)으로 분류되며, 콘솔은 <b>시리얼 첫자리</b>로 종류를 자동 판별합니다.</p>
+
+<h4>디바이스 타입 코드</h4>
+<table>
+<tr><th style="width:100px">device_type</th><th style="width:160px">종류</th><th>대표 제품</th></tr>
+<tr><td><code>1</code></td><td>ECG (심전계)</td><td>MC200M</td></tr>
+<tr><td><code>2</code></td><td>TEMP (체온계)</td><td>MT100D</td></tr>
+<tr><td><code>3</code></td><td>SpO2 (펄스옥시미터)</td><td>MP100W</td></tr>
+<tr><td><code>4</code></td><td>HR <span class="sub">(device_info상 구분값)</span></td><td>—</td></tr>
+</table>
+
+<h4>제품·시리얼·MAC 규칙</h4>
+<table>
+<tr><th style="width:150px">제품</th><th style="width:130px">종류</th><th>MAC prefix</th><th>비고</th></tr>
+<tr><td><b>MC200M</b></td><td>심전계 (ECG)</td><td><code>08:D5:C0:5x</code></td><td>다중 리드(Lead II 선등록 후 I/III)</td></tr>
+<tr><td><b>MP100W</b></td><td>펄스옥시미터 (SpO2)</td><td><code>08:D5:C0:4x</code></td><td>PPG 측정 (SpO2/PR/RR/PI)</td></tr>
+<tr><td><b>MT100D</b></td><td>체온계 (TEMP)</td><td><code>08:D5:C0:6x</code></td><td>TAmb·TObj 부가</td></tr>
+<tr><td><b>H2-ABPM</b></td><td>참케어 혈압계 (BP)</td><td><code>08:D5:C0:7x</code></td><td>측정 주기(수동) 설정, 배터리 25% 기준</td></tr>
+<tr><td><b>SL-MPF1K07</b></td><td>반지형 혈압계 (SkyLabs)</td><td>SkyLabs API 제공</td><td>Ring BP, Cart BP 연동, 배터리 30% 기준</td></tr>
+<tr><td>(Tag)</td><td>위치 태그 (RTLS)</td><td><code>08:D5:C0:1x</code></td><td>위치 추적용</td></tr>
+</table>
+<div class="note"><b>시리얼 첫자리 규칙.</b> 환자등록 시 시리얼번호는 <b>알파벳 1자 + 숫자 6자리</b> 형식으로 검증됩니다(정규식 <code>A/C/P</code> 계열). 콘솔은 이 첫자리와 MAC prefix로 기기 종류를 자동 분류합니다. 첫자리→종류의 정확한 매핑(예: A=ECG, P=SpO2, C=TEMP)은 <span class="sub">(추정)</span>이며 소스의 분류 로직 확인이 필요합니다. MAC prefix(제조사 <code>08:D5:C0</code> OUI + 종류 코드)는 매니저 콘솔 등록 로직에서 확인된 값입니다.</div>
+<p class="sub">배터리 부족 기준: ECG·TEMP·SpO2 = 2750mV, 반지형 혈압 = 30%, 참케어 = 25%. 공장 마스터(<code>device_factory</code>) 서비스타입: NORMAL/PREMIUM/REPLACEMENT/SAMPLE/DEVELOPMENT.</p>
+
+<h2 id="ws-event">7. WebSocket 이벤트 타입 코드</h2>
+<p>실시간 이벤트 버스 토픽 <code>/topic/public/event</code>에서 사용하는 이벤트 타입 코드입니다. 파형 스트림은 별도 토픽(<code>/topic/public/allLeads/bioSignalData/{measurementCode}</code>).</p>
+<table>
+<tr><th style="width:110px">이벤트 코드</th><th style="width:170px">종류</th><th>설명</th></tr>
+<tr><td><code>10</code></td><td>측정 (MEASUREMENT)</td><td>측정 등록/변경/종료 등 측정 세션 변경</td></tr>
+<tr><td><code>20</code></td><td>병동 (WARD)</td><td>병동/병실/병상 구조 변경</td></tr>
+<tr><td><code>30</code></td><td>알람 (ALARM)</td><td>측정 알람 발생/해제</td></tr>
+<tr><td><code>50</code></td><td>일시정지 (PAUSE)</td><td>알람 일시정지 동기화</td></tr>
+<tr><td><code>60</code></td><td>공지 (NOTICE)</td><td>기관 공지 팝업</td></tr>
+<tr><td><code>80</code></td><td>장치 (DEVICE_ALARM)</td><td>장치 연결/상태/배터리 변경</td></tr>
+<tr><td><code>101</code></td><td>낙상 대응 (FALL RESPONSE)</td><td>낙상 알람 대응 상태 변경</td></tr>
+<tr><td><code>200~202</code></td><td>중앙모니터 레이아웃</td><td>대시보드 레이아웃 변경 → 열린 대시보드 창 자동 새로고침</td></tr>
+<tr><td><code>203~204</code></td><td>중앙모니터 병상</td><td>대시보드 병상 배치 변경</td></tr>
+</table>
+<p class="sub">연결: SockJS+STOMP, <code>{host}/mobiCAREConsole/ws?SX-API-Route=GWS-1&amp;key=STREAM-SERVER</code>, 헤더 <code>SX-Auth-Token</code>. 스트림 서버 목록은 <code>/Server/SelectAPIServer</code> 조회.</p>
+
+<h2 id="error-code">8. API 응답·에러 코드</h2>
+<p>모든 API 응답은 <code>{ result, error, message, ... }</code> 래퍼(ResJson)를 사용합니다. <code>error</code> 필드가 코드값이며, HTTP 상태는 200으로 반환되는 경우가 많아 <b>바디의 <code>error</code>로 판별</b>합니다. 코드 사전은 <code>error_code_info</code> 테이블(시드 22건).</p>
+<table>
+<tr><th style="width:80px">코드</th><th style="width:90px">Hex</th><th style="width:200px">명칭</th><th>의미</th></tr>
+<tr><td><code>0</code></td><td><code>0x0000</code></td><td>SUCCESS</td><td>정상 처리</td></tr>
+<tr><td><code>1</code></td><td><code>0x0001</code></td><td>INVALID_PARAMETER</td><td>잘못된 파라미터</td></tr>
+<tr><td><code>2</code></td><td><code>0x0002</code></td><td>DATABASE_ERROR</td><td>DB 오류</td></tr>
+<tr><td><code>3</code></td><td><code>0x0003</code></td><td>ACCOUNT_INFO_FAIL</td><td>계정 정보 조회 실패(계정 없음/비밀번호 불일치)</td></tr>
+<tr><td><code>4</code></td><td><code>0x0004</code></td><td>AUTHORITY_ERROR</td><td>권한 오류</td></tr>
+<tr><td><code>5</code></td><td><code>0x0005</code></td><td>INCORRECT_DATA</td><td>잘못된 데이터</td></tr>
+<tr><td><code>6~7</code></td><td><code>0x0006~0x0007</code></td><td>ACCOUNT_LOCKED / ORGANIZATION_LOCKED <span class="sub">(추정 매핑)</span></td><td>계정 잠금 / 기관 사용 종료(잠금)</td></tr>
+<tr><td><code>241</code></td><td><code>0x00F1</code></td><td>SESSION_CLOSED (invalid accessToken)</td><td>세션 만료·토큰 무효 → 로그인 화면 이동</td></tr>
+<tr><td><code>250</code></td><td>—</td><td>SERVER_CHECK <span class="sub">(추정)</span></td><td>서버 점검 중</td></tr>
+<tr><td><code>253</code></td><td>—</td><td>WEBSOCKET_ERROR <span class="sub">(추정)</span></td><td>WebSocket 오류</td></tr>
+<tr><td><code>254</code></td><td>—</td><td>UNKNOWN</td><td>알 수 없는 오류</td></tr>
+<tr><td><code>257~258</code></td><td>—</td><td>Account 계열 <span class="sub">(추정)</span></td><td>계정 도메인 오류(아이디/이메일 중복 등)</td></tr>
+<tr><td><code>259~260</code></td><td>—</td><td>Measurement 계열 <span class="sub">(추정)</span></td><td>측정 도메인 오류</td></tr>
+<tr><td><code>272</code></td><td>—</td><td>MEASUREMENT_CODE_DUP <span class="sub">(추정)</span></td><td>측정코드 중복</td></tr>
+<tr><td><code>273</code></td><td>—</td><td>SICKBED_DUP <span class="sub">(추정)</span></td><td>병상 중복</td></tr>
+<tr><td><code>288</code></td><td>—</td><td>Manager 계열 <span class="sub">(추정)</span></td><td>관리 도메인 오류</td></tr>
+<tr><td><code>293</code></td><td>—</td><td>DISPLAY/BUILDING_CODE <span class="sub">(추정)</span></td><td>디스플레이/빌딩 코드 오류</td></tr>
+<tr><td><code>500</code></td><td>—</td><td>EXCEPTION</td><td>서버 예외 (message에 클래스·메서드·라인 포함, data_log 적재)</td></tr>
+<tr><td><code>768</code></td><td>—</td><td>VCALL_OVER_CAPACITY</td><td>화상협진 인원 초과</td></tr>
+<tr><td><code>769</code></td><td>—</td><td>VCALL_MEDIA_ERROR</td><td>화상협진 미디어서버 오류</td></tr>
+<tr><td><code>1793</code></td><td>—</td><td>HIS_CALL_FAIL</td><td>HIS 호출 실패</td></tr>
+</table>
+<div class="note"><b>토큰/시크릿 관련.</b> 인증은 커스텀 토큰(<code>SX-Auth-Token</code>) 기반이며, 시크릿 코드(<code>SX-Secure-Code</code>) 또는 고정 특수 토큰이 일치하면 토큰 검사를 우회합니다. 실제 시크릿/특수토큰 문자열은 보안상 노출하지 않습니다(<code>********</code>). 상세 API 목록은 「API 규격서」 참조.</div>
+
+<h2 id="status-code">9. 상태 코드류</h2>
+
+<h4>측정 상태 (measurement_info.measurement_status)</h4>
+<table>
+<tr><th style="width:70px">값</th><th style="width:130px">상태</th><th>의미</th></tr>
+<tr><td><code>0</code></td><td>none</td><td>대기(미시작)</td></tr>
+<tr><td><code>1</code></td><td>start</td><td>측정 중</td></tr>
+<tr><td><code>2</code></td><td>stop</td><td>완료(정지)</td></tr>
+<tr><td><code>3</code></td><td>finish</td><td>종료</td></tr>
+</table>
+<p class="sub">부가: <code>responding_status</code> 1=대응중, <code>alarm_status</code> 1=알람 클리어. 측정 유형 <code>measurement_type</code>: BM(병상 모니터링)·ET(응급이송).</p>
+
+<h4>환자 상태 (measurement_info.patient_status)</h4>
+<table>
+<tr><th style="width:70px">값</th><th>상태</th></tr>
+<tr><td><code>0</code></td><td>None</td></tr>
+<tr><td><code>1</code></td><td>Waiting (대기)</td></tr>
+<tr><td><code>2</code></td><td>Reservation (예약)</td></tr>
+<tr><td><code>3</code></td><td>Entrance (입원)</td></tr>
+<tr><td><code>4</code></td><td>Leave (퇴원)</td></tr>
+<tr><td><code>5</code></td><td>Transfer (전동/전실)</td></tr>
+<tr><td><code>9</code></td><td>ETC (기타)</td></tr>
+</table>
+
+<h4>장치 상태 (device_last_status_info.status)</h4>
+<table>
+<tr><th style="width:70px">값</th><th style="width:150px">상태</th><th>의미</th></tr>
+<tr><td><code>1</code></td><td>Connect</td><td>연결됨</td></tr>
+<tr><td><code>2</code></td><td>LEAD ON</td><td>리드 부착</td></tr>
+<tr><td><code>3</code></td><td>LEAD OFF</td><td>리드 탈락</td></tr>
+<tr><td><code>4</code></td><td>Disconnect</td><td>연결 끊김</td></tr>
+</table>
+<p class="sub">모니터링 표시 상태 문구: Recording Start / Connect / LEAD ON / LEAD OFF / Disconnect / Recording Stop / Force Stop. 배터리 값은 % 또는 mV.</p>
+
+<h4>게이트웨이 연결 상태 (gateway_info.conn_status)</h4>
+<table>
+<tr><th style="width:70px">값</th><th>상태</th></tr>
+<tr><td><code>0</code></td><td>none</td></tr>
+<tr><td><code>1</code></td><td>connected (연결)</td></tr>
+<tr><td><code>2</code></td><td>disconnected (미연결)</td></tr>
+<tr><td><code>5</code></td><td>disable (비활성)</td></tr>
+</table>
+
+<h4>낙상 이벤트 상태 (bio_signal_last_fall_event.fall_event_check)</h4>
+<table>
+<tr><th style="width:70px">값</th><th>의미</th></tr>
+<tr><td><code>0</code></td><td>NONE</td></tr>
+<tr><td><code>1</code></td><td>경보 해제</td></tr>
+<tr><td><code>2</code></td><td>대응 중</td></tr>
+</table>
+
+<h4>협진/기타 상태</h4>
+<table>
+<tr><th style="width:220px">항목</th><th>값·의미</th></tr>
+<tr><td>협진 상태 (doctor_consult_master.consult_state)</td><td>Y(진행)/N. remote_state·confirm 등 부가 상태 다수</td></tr>
+<tr><td>화상방 참여자 (room_user_info.connect_status)</td><td>0:connect, 1:disconnect / user_type 0:creator, 1:joiner</td></tr>
+<tr><td>선별진료소 (screening_clinic.status)</td><td>0:None, 1:disinfect, 2:usable, 3:clinic, 5:unusable, 10:disable</td></tr>
+<tr><td>웹소켓 연결 (server_conn_info.conn_status)</td><td>1:disconnected, 2:connected, 5:disable / device_kind 10:gateway, 11:phone g/w</td></tr>
+<tr><td>계정 잠금 (user_account.lock_type)</td><td>1:로그인실패, 2:비활성, 3:비밀번호만료, 10:수동 / status 0:none, 1:locked, 2:deactivated</td></tr>
+<tr><td>DICOM 전송 (dicom_transfer_log.status)</td><td>0:none, 1:변환실패, 2:변환성공, 4:전송실패, 5:전송성공</td></tr>
+</table>
+
+<h2 id="function-env">10. 기능 토글(FUNCTION_ENVIRONMENT) 키</h2>
+<p>기관별 기능 활성화는 <code>/Global/SelectGlobalSetting</code>이 로딩하는 <code>FUNCTION_ENVIRONMENT</code> 설정으로 제어됩니다. 주요 토글 키입니다.</p>
+<table>
+<tr><th style="width:230px">키</th><th>기능</th></tr>
+<tr><td><code>REMOTE_CONSULTATION</code></td><td>원격협진 메뉴 노출. <code>.LINK.URL</code>로 외부 협진 시스템 새 창 오픈</td></tr>
+<tr><td><code>PRIVACY_ENHANCEMENT</code></td><td>개인정보 강화(삼성서울 대응). API <code>...ForManager</code> 교체, 이메일 마스킹, 감사 메모(auditMemo), 로그인·이벤트 로그 탭 추가</td></tr>
+<tr><td><code>MULTI_LANGUAGE</code></td><td>다국어(ko-KR/en-US) 전환 지구본 아이콘 노출</td></tr>
+<tr><td><code>FALL_BED</code></td><td>낙상 감지 기능(낙상 발생 시 시각·청각 알람)</td></tr>
+<tr><td><code>RTLS</code></td><td>실시간 위치 추적 표시</td></tr>
+<tr><td><code>BEEP</code></td><td>청각 알람 사운드. 하위 <code>YELLOW</code>/<code>BLUE</code>/<code>FALL_BED</code> 별 <code>IS_USE</code></td></tr>
+<tr><td><code>DEVICE.RING_BLOOD_PRESSURE</code></td><td>반지형 혈압계(SkyLabs) 사용</td></tr>
+<tr><td><code>DEVICE.CHARM_BLOOD_PRESSURE</code></td><td>참케어(H2-ABPM) 혈압계 사용</td></tr>
+<tr><td><code>UDI</code></td><td>UDI(고유식별) 정보 표시</td></tr>
+<tr><td><code>MANY_WARD_SERVER</code></td><td>다병동 서버 구성. 매니저 콘솔 "다병동 서버" 메뉴 노출</td></tr>
+<tr><td><code>EMR</code> 연동</td><td>EMR 전송 연동(기관별 on/off·연동주기)</td></tr>
+</table>
+
+<h2 id="profile">11. 설정 프로파일 코드</h2>
+<p>백엔드 WAR에는 모든 Spring 프로파일이 내장되며, <code>application.properties</code>의 <code>spring.profiles.active</code> 한 줄로 활성 프로파일을 선택합니다(병원별 WAR = active 프로파일만 다르게 빌드). 환경 프로파일과 온프레미스 병원별 프로파일(<code>onpremise-{name}</code>) 12종입니다.</p>
+
+<h4>환경 프로파일</h4>
+<table>
+<tr><th style="width:150px">프로파일</th><th>용도</th></tr>
+<tr><td><code>onpremise</code></td><td>온프레미스 기본 프로파일(병원 커스텀의 기준 baseline). localhost 표준 구성</td></tr>
+<tr><td><code>dev</code></td><td>클라우드 개발 환경 (AWS Aurora RDS·S3, read 풀 활성, kafka <code>.dev</code> 토픽)</td></tr>
+<tr><td><code>test</code></td><td>클라우드 테스트 환경 (ElastiCache 등)</td></tr>
+<tr><td><code>premium</code></td><td>클라우드 구독형 환경 (<code>manager.seersthync.com</code>, 부산부민 ezcaretech 값)</td></tr>
+</table>
+
+<h4>온프레미스 병원별 프로파일 (<code>onpremise-{name}</code>) — 병원명은 추정</h4>
+<table>
+<tr><th style="width:130px">프로파일</th><th style="width:200px">병원 (추정)</th><th>핵심 커스텀</th></tr>
+<tr><td><code>sev</code></td><td>세브란스병원 <span class="sub">(추정)</span></td><td>emr code=THYNC, 호흡/낙상 이벤트 false. 최소 커스텀</td></tr>
+<tr><td><code>cnuhh</code></td><td>화순전남대학교병원 <span class="sub">(추정, CNUH-Hwasun)</span></td><td>HR 소스 spo2, 체온 AI 보정(=1), read 풀 활성</td></tr>
+<tr><td><code>bjh</code></td><td>B병원 <span class="sub">(추정)</span></td><td>EMR on(BJH), 4시간 주기 전송 cron, DICOM 전송 on, Oracle HIS on</td></tr>
+<tr><td><code>bs</code></td><td>봉생기념병원 <span class="sub">(추정, ward BSHOSP)</span></td><td>EMR on(BS), DICOM on, Oracle on, 병동 매핑키, premium 사용량 전송</td></tr>
+<tr><td><code>believesewoong</code></td><td>부산 세웅병원 <span class="sub">(추정, Believe+Sewoong)</span></td><td>emr THYNC, Oracle 정의만(enabled=false), 트렌드 평균(type=2)</td></tr>
+<tr><td><code>gg</code></td><td>가천대 길병원 <span class="sub">(근거: emr code gil_hosp)</span></td><td>EMR on(gil_hosp), HL7 TCP on(ack.tcp.server), cardio off</td></tr>
+<tr><td><code>gh</code></td><td>G병원 <span class="sub">(추정)</span></td><td>cnuhh 계열: HR 소스 spo2, read 풀, DEBUG 로깅</td></tr>
+<tr><td><code>gnasan</code></td><td>강릉아산병원 <span class="sub">(추정, GN+Asan)</span></td><td>DICOM 대상(AE=PETAGATE, org=GNASAN), emr code=DDDD(더미)</td></tr>
+<tr><td><code>hns</code></td><td>H병원 <span class="sub">(추정)</span></td><td>EMR on(THYNC), HL7 TCP on, DICOM on(AE=NETGATE)</td></tr>
+<tr><td><code>icb</code></td><td>인천 소재 병원 <span class="sub">(추정, ward IBSH/bkhosp)</span></td><td>EMR on(ICB), DICOM on, Oracle on, 병동 매핑</td></tr>
+<tr><td><code>mch</code></td><td>M병원 <span class="sub">(추정)</span></td><td>DICOM 대상만 설정(org=MCH), emr code=MCH(기본 미전송)</td></tr>
+<tr><td><code>ezcaretech</code></td><td>이지케어텍 연동 사이트 <span class="sub">(근거: spring.ezcaretech.* 풀셋)</span></td><td>OAuth client_credentials 연동, emr code=THYNC, cardio off</td></tr>
+</table>
+<p class="sub">병원 커스텀 축 5가지: (1) EMR 전송 on/off·기관코드, (2) HL7 TCP/SFTP 인터페이스, (3) DICOM PACS 전송 대상(AE/host/port), (4) Oracle HIS 직결, (5) HR 소스·트렌드·알람 등 임상 정책. 인프라 설정은 전 병원 동일(localhost 표준). AWS 키·JMX 계정 등 비밀값은 본 문서에서 <code>********</code> 처리.</p>
+
+<div class="footer">thynC Operations · 내부 산출물 · thync_1.3.0 문서 세트 · 2026-07-18 작성 · 소스 역공학 기반</div>
