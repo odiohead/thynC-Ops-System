@@ -10,7 +10,8 @@
 - **표 렌더링(①)**: `ReactMarkdown`에 `remark-gfm`(4.0.1) 미적용이 원인 — GFM 표가 렌더 안 됨. `app/ai-assistant/page.tsx`에 `remarkPlugins={[remarkGfm]}` + 커스텀 표 컴포넌트(테두리·헤더 강조·**가로 스크롤 래퍼**) 적용, 어시스턴트 말풍선 폭 75%→88%. `lib/ai/agent.ts` 프롬프트에 "표는 열 5개 이하로, 초과 시 핵심 열만 표+나머지 불릿 / 1~2건은 불릿" 가이드 추가
 - **위키 AI 제외(②)**: `wiki.wiki_pages.ai_excluded`(bool, 마이그레이션 `20260718170000_wiki_ai_excluded`) 추가. 제외는 **하위 페이지 전체 cascade**(조회 시 재귀 CTE 계산 — `lib/wiki/aiExclusion.ts`: `getAiExcludedPageIds`/`isPageAiExcluded`). `lib/ai/tools.ts`의 `search_wiki`(notIn 필터)·`read_wiki_page`·`read_hospital_note`에서 제외 반영. 토글 API `PATCH /api/wiki/pages/[id]/ai-exclude`(ADMIN 전용, 감사로그). UI: 위키 페이지(블록·HTML 뷰) ADMIN에게 "AI 어시스턴트 검색 제외/해제" 메뉴·버튼 + 제외 시 앰버 배지. 카테고리에 걸면 그 영역 전체 제외
 - **검증(dev2)**: `tsc` 0오류 → 힙4GB 빌드 → 재시작(200) → E2E: 카테고리 thync_1.3.0 제외 시 하위 13개 cascade·부정맥 검색 10→0→해제 후 복원 / PATCH API 200·권한·DB 반영·원복 / 실제 채팅 SSE로 "부정맥 Red·Yellow 표 정리" 요청 → search_wiki 10회 호출 후 **GFM 표 2개 포함 답변** 생성 확인
-- 영향 파일: `app/ai-assistant/page.tsx`, `lib/ai/{agent,tools}.ts`, `lib/wiki/aiExclusion.ts(신규)`, `app/api/wiki/pages/[id]/ai-exclude/route.ts(신규)`, `app/wiki/[id]/{page,WikiPageView,WikiHtmlPageView}.tsx`, `prisma/{schema.prisma,migrations/20260718170000_wiki_ai_excluded/}`, `package.json`(remark-gfm)
+- **PROD 배포**: 커밋 `0f14a41` push → PROD pull → `npm install`(remark-gfm 4.0.1) → 마이그레이션 psql 적용+resolve → prisma generate → 힙4GB 빌드 → `pm2 restart thync-prod`(login 200) → 검증: ai_excluded 컬럼 존재·cascade CTE 13(카테고리+12문서)·ai-exclude 라우트 존재(미인증 307)·재시작 후 신규 에러 0(에러 로그 07-17 16:00)
+- 영향 파일: `app/ai-assistant/page.tsx`, `lib/ai/{agent,tools}.ts`, `lib/wiki/aiExclusion.ts(신규)`, `app/api/wiki/pages/[id]/ai-exclude/route.ts(신규)`, `app/wiki/[id]/{page,WikiPageView,WikiHtmlPageView}.tsx`, `prisma/{schema.prisma,migrations/20260718170000_wiki_ai_excluded/}`, `package.json`(remark-gfm) / PROD: 소스·빌드·PROD DB(wiki.wiki_pages.ai_excluded 컬럼)
 
 ## 2026-07-18 | thynC 제품 산출물 문서 세트 12종 작성 → 사내위키 게시(dev2·PROD)
 
