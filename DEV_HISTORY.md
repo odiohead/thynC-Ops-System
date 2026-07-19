@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-07-19 05:40 | 자재관리 — 품목 태그·비고 노출·비시리얼 LOT (마이그 2차 준비)
+
+- **품목 태그**: `inventory_items.tags`(TEXT[], 최대 10개·30자, 중복 제거) — 폼 쉼표 입력, 목록 뱃지 표시
+- **비고 노출**: 기존 `memo` 필드를 폼 라벨 '비고'로 변경 + 품목 목록에 비고 컬럼 (신규 컬럼 추가 없음 — 중복 필드 방지)
+- **비시리얼 LOT**: LOT 관리 플래그를 시리얼과 독립 — 비시리얼 품목도 체크 가능. 전표 단위 `inventory_transactions.lot_no`(선택) 기록: 단건 모달 입고·출고 LOT 입력란, 이력 LOT 컬럼·Excel export, 전표 수정(ADMIN)으로 변경 가능. LOT 비관리 품목에 입력 시 400. 시리얼+LOT 품목의 개체 단위 필수 로직은 기존 유지
+- 마이그레이션 `20260719050000_wms_item_tags_tx_lot` (DEV 적용)
+- 검증: E2E 10케이스(태그 정규화·수정, 비시리얼 LOT 입출고·생략 허용·비관리 거부·전표 LOT 수정) 통과
+- 영향 파일: prisma/schema.prisma, lib/inventory.ts, items API 3종(태그·플래그 독립), transactions API 2종, TransactionModal, TxEditModal, transactions/page, transactions/export, items/page(태그·비고·LOT 체크), README.md
+
 ## 2026-07-19 03:20 | 유지보수 개편 + 자재관리 보완 PROD 배포
 
 - `bb2d12d` push → PROD pull → **사전 백업** `~/backups/db/thync_ops_pre_mnt_logs_20260719.dump`(maintenances 테이블) → 마이그레이션 2건 psql 적용+resolve(`20260718235500_maintenance_logs`: 비고 30건 이관·원인 85건 병합 — DEV와 동일 수치, `20260719023000_wms_requester_lot`) → prisma generate → 힙 4GB 빌드 → `pm2 restart thync-prod` → HTTP 응답 정상

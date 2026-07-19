@@ -54,7 +54,7 @@ function parseExcel(buffer: ArrayBuffer): ItemImportRow[] {
       spec: String(row[6] ?? '').trim() || null,
       unit: String(row[7] ?? '').trim() || 'EA',
       isSerialManaged: isSerial,
-      isLotManaged: isSerial && SERIAL_TRUE.has(lotRaw),
+      isLotManaged: SERIAL_TRUE.has(lotRaw),
       refPrice: Number.isFinite(price) && price > 0 ? Math.floor(price) : null,
       categoryPath: [cat1, cat2, cat3].filter(Boolean).join(' > ') || null,
     })

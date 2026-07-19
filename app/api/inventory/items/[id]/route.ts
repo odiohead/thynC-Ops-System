@@ -7,6 +7,11 @@ import { Prisma } from '@prisma/client'
 
 type Params = { params: { id: string } }
 
+const normTags = (v: unknown): string[] =>
+  Array.isArray(v)
+    ? Array.from(new Set(v.map((t) => String(t).trim()).filter(Boolean))).slice(0, 10).map((t) => t.slice(0, 30))
+    : []
+
 const itemInclude = {
   inventory: { select: { id: true, name: true, linkHospital: true, isActive: true } },
   category: { select: { id: true, name: true, parentId: true } },
@@ -67,7 +72,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   // 시리얼/LOT 관리 여부는 재고 이력이 생기면 변경 금지 — 수량↔개체 정합이 깨짐 (function_wms.md §4-1)
   const wantSerial = !!body.isSerialManaged
-  const wantLot = wantSerial && !!body.isLotManaged // LOT 관리는 시리얼 품목에서만 유효
+  const wantLot = !!body.isLotManaged // 비시리얼 품목도 LOT 관리 가능 (전표 단위 기록)
   if (wantSerial !== before.isSerialManaged || wantLot !== before.isLotManaged) {
     const txCount = await prisma.inventoryTransaction.count({ where: { itemId: id } })
     if (txCount > 0) {
@@ -85,6 +90,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       unit: body.unit?.trim() || 'EA',
       isSerialManaged: wantSerial,
       isLotManaged: wantLot,
+      ...(body.tags !== undefined && { tags: normTags(body.tags) }),
       deviceInfoId: body.deviceInfoId ?? null,
       manufacturerId: body.manufacturerId ?? null,
       refPrice: typeof body.refPrice === 'number' ? body.refPrice : null,

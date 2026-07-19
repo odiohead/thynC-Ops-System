@@ -684,7 +684,8 @@ model InventoryItem {
   spec            String?     @db.VarChar(200)
   unit            String      @default("EA") @db.VarChar(20)
   isSerialManaged Boolean     @default(false) @map("is_serial_managed")
-  isLotManaged    Boolean     @default(false) @map("is_lot_managed") // 시리얼 관리 품목 중 LOT 추적 대상 (신규 입고 시 LOT 필수)
+  isLotManaged    Boolean     @default(false) @map("is_lot_managed") // LOT 추적 대상 — 시리얼 품목: 신규 입고 시 개체별 LOT 필수 / 비시리얼 품목: 전표 단위 LOT 선택 기록
+  tags            String[]    @default([]) // 자유 태그 (분류·검색 보조)
   deviceInfoId    Int?        @map("device_info_id")
   manufacturerId  Int?        @map("manufacturer_id")
   refPrice        Int?        @map("ref_price")
@@ -785,6 +786,7 @@ model InventoryTransaction {
   transferPrice Int?      @map("transfer_price") // deprecated — 과거 TRANSFER 이관 단가
   destination   String?   @db.VarChar(100) // OUT 출고처 (자유 텍스트 — 유관부서·거래처 등)
   requester     String?   @db.VarChar(100) // 요청자 (자유 텍스트 — OUT 필수, IN 선택)
+  lotNo         String?   @map("lot_no") @db.VarChar(100) // 전표 단위 LOT — 비시리얼 LOT 품목(선택) / 시리얼 품목 단건 입고 시 표기용
   hospitalCode  String?   @map("hospital_code")
   workType      String?   @map("work_type") @db.VarChar(20)
   refCode       String?   @map("ref_code") @db.VarChar(50)

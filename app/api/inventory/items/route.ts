@@ -7,6 +7,12 @@ import { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
+const normTags = (v: unknown): string[] =>
+  Array.isArray(v)
+    ? Array.from(new Set(v.map((t) => String(t).trim()).filter(Boolean))).slice(0, 10).map((t) => t.slice(0, 30))
+    : []
+
+
 const itemInclude = {
   inventory: { select: { id: true, name: true, linkHospital: true } },
   category: { select: { id: true, name: true, parentId: true } },
@@ -87,7 +93,8 @@ export async function POST(req: NextRequest) {
       spec: body.spec?.trim() || null,
       unit: body.unit?.trim() || 'EA',
       isSerialManaged: !!body.isSerialManaged,
-      isLotManaged: !!body.isSerialManaged && !!body.isLotManaged,
+      isLotManaged: !!body.isLotManaged,
+      tags: normTags(body.tags),
       deviceInfoId: body.deviceInfoId ?? null,
       manufacturerId: body.manufacturerId ?? null,
       refPrice: typeof body.refPrice === 'number' ? body.refPrice : null,

@@ -11,6 +11,7 @@ interface EditableTx {
   reasonCode: { id: number; name: string; value?: string | null } | null
   requester: string | null
   destination: string | null
+  lotNo: string | null
   note: string | null
 }
 
@@ -23,6 +24,7 @@ export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; o
   const [reasonId, setReasonId] = useState<number | null>(tx.reasonCode?.id ?? null)
   const [requester, setRequester] = useState(tx.requester ?? '')
   const [destination, setDestination] = useState(tx.destination ?? '')
+  const [lotNo, setLotNo] = useState(tx.lotNo ?? '')
   const [note, setNote] = useState(tx.note ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -42,7 +44,7 @@ export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; o
   async function save() {
     if (tx.txType === 'OUT' && !requester.trim()) { setError('출고 전표의 요청자는 비울 수 없습니다.'); return }
     setBusy(true); setError(null)
-    const payload: Record<string, unknown> = { requester: requester.trim(), note }
+    const payload: Record<string, unknown> = { requester: requester.trim(), note, lotNo: lotNo.trim() }
     if (hasReason && reasonId) payload.reasonId = reasonId
     if (tx.txType === 'OUT') payload.destination = destination
     const res = await fetch(`/api/inventory/transactions/${tx.id}`, {
@@ -85,6 +87,10 @@ export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; o
               <input value={destination} onChange={(e) => setDestination(e.target.value)} className={inputCls} />
             </div>
           )}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">LOT <span className="font-normal text-gray-400">(전표 표기 — 개체 LOT은 변경 안 됨)</span></label>
+            <input value={lotNo} onChange={(e) => setLotNo(e.target.value)} className={inputCls} />
+          </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-500">비고</label>
             <input value={note} onChange={(e) => setNote(e.target.value)} className={inputCls} />

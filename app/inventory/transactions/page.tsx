@@ -17,6 +17,7 @@ interface Tx {
   transferPrice: number | null
   destination: string | null
   requester: string | null
+  lotNo: string | null
   note: string | null
   canceledAt: string | null
   createdAt: string
@@ -168,6 +169,7 @@ export default function TransactionsPage() {
               <th className="px-3 py-3 text-right">수량</th>
               <th className="px-3 py-3">인벤토리</th>
               <th className="px-3 py-3">위치</th>
+              <th className="px-3 py-3">LOT</th>
               <th className="px-3 py-3">요청자</th>
               <th className="px-3 py-3">출고처</th>
               <th className="px-3 py-3">병원/업무</th>
@@ -177,9 +179,9 @@ export default function TransactionsPage() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading ? (
-              <tr><td colSpan={canManage ? 13 : 12} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td></tr>
+              <tr><td colSpan={canManage ? 14 : 13} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td></tr>
             ) : txs.length === 0 ? (
-              <tr><td colSpan={canManage ? 13 : 12} className="py-12 text-center text-sm text-gray-400">이력이 없습니다.</td></tr>
+              <tr><td colSpan={canManage ? 14 : 13} className="py-12 text-center text-sm text-gray-400">이력이 없습니다.</td></tr>
             ) : txs.map((tx) => (
               <tr key={tx.id} className={`hover:bg-gray-50 ${tx.canceledAt ? 'opacity-50 line-through' : ''}`}>
                 <td className="px-3 py-3 font-mono text-xs text-gray-500">
@@ -206,6 +208,7 @@ export default function TransactionsPage() {
                 <td className="px-3 py-3 text-gray-600 text-xs">
                   {tx.warehouse?.name}{tx.toWarehouse && <span className="text-gray-400"> → {tx.toWarehouse.name}</span>}
                 </td>
+                <td className="px-3 py-3 font-mono text-xs text-gray-500">{tx.lotNo ?? '-'}</td>
                 <td className="px-3 py-3 text-gray-600 text-xs">{tx.requester ?? '-'}</td>
                 <td className="px-3 py-3 text-gray-600 text-xs">{tx.destination ?? '-'}</td>
                 <td className="px-3 py-3 text-gray-600 text-xs">

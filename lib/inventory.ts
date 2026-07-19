@@ -116,7 +116,8 @@ export interface CreateTxInput {
   refCode?: string | null
   note?: string | null
   serials?: string[] // 시리얼 품목 IN (신규 또는 회수 대상)
-  lotBySerial?: Record<string, string | null> // 신규 입고 시 시리얼별 LOT (LOT 관리 품목 필수)
+  lotBySerial?: Record<string, string | null> // 시리얼 품목 신규 입고 시 시리얼별 LOT (LOT 관리 품목 필수)
+  lotNo?: string | null // 전표 단위 LOT — 비시리얼 LOT 관리 품목(선택) / 시리얼 단건 입고 표기용
   unitIds?: number[] // 시리얼 품목 OUT/MOVE (선택 개체)
   components?: ComponentOutInput[] // OUT 세트출고 — 매핑된 비시리얼 부자재 동시 출고
 }
@@ -151,6 +152,9 @@ export async function planInventoryTransaction(input: CreateTxInput): Promise<Tx
 
   if (input.txType === 'OUT' && !input.requester?.trim()) {
     throw new InventoryError('출고 요청자를 입력하세요. (내부 처리는 "자체 처리" 등으로 기입)')
+  }
+  if (input.lotNo?.trim() && !item.isLotManaged) {
+    throw new InventoryError('이 품목은 LOT 관리 대상이 아닙니다. LOT 입력을 제거하세요.')
   }
 
   const srcWh = await prisma.warehouse.findUnique({ where: { id: input.warehouseId } })
@@ -250,6 +254,7 @@ export async function applyInventoryTransaction(client: Tx, plan: TxPlan, actorI
       quantity: qty,
       destination: input.txType === 'OUT' ? (input.destination?.trim() || null) : null,
       requester: input.txType === 'MOVE' ? null : (input.requester?.trim() || null),
+      lotNo: input.txType === 'MOVE' ? null : (input.lotNo?.trim() || null),
       hospitalCode: input.txType === 'OUT' ? (input.hospitalCode ?? null) : null,
       workType: input.txType === 'OUT' ? (input.workType ?? null) : null,
       refCode: input.txType === 'OUT' ? (input.refCode ?? null) : null,

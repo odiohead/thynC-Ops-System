@@ -36,6 +36,7 @@ export async function GET(req: NextRequest) {
     이관일자: tx.transferDate ? new Date(tx.transferDate).toISOString().slice(0, 10) : '',
     이관단가: tx.transferPrice ?? '',
     위치: tx.warehouse.name + (tx.toWarehouse ? ` → ${tx.toWarehouse.name}` : ''),
+    LOT: tx.lotNo ?? '',
     요청자: tx.requester ?? '',
     출고처: tx.destination ?? '',
     병원: tx.hospital?.hospitalName ?? '',

@@ -96,7 +96,8 @@ export default function TransactionModal({
 
   const serialLines = serialsText.split('\n').map((s) => s.trim()).filter(Boolean)
   const isReturnIn = txType === 'IN' && currentReason?.value === 'RETURN'
-  const needLotInput = !!item?.isLotManaged && serial && txType === 'IN' && !isReturnIn // 신규 입고만 LOT 입력
+  const needLotInput = !!item?.isLotManaged && serial && txType === 'IN' && !isReturnIn // 시리얼+LOT: 신규 입고 필수
+  const optionalLotInput = !!item?.isLotManaged && !serial && txType !== 'MOVE' // 비시리얼+LOT: 전표 단위 선택 기록
 
   // 마스터 로드 — 입출고 유형 + (품목 미고정 시) 이 인벤토리의 품목 목록
   useEffect(() => {
@@ -255,6 +256,7 @@ export default function TransactionModal({
       note,
       serials: serial ? serialLines : [], // IN=신규/회수, OUT·MOVE=대상 개체 지정 (서버에서 위치 검증)
       lotBySerial: needLotInput ? Object.fromEntries(serialLines.map((sn) => [sn, lotNo.trim()])) : undefined,
+      lotNo: needLotInput || optionalLotInput ? lotNo.trim() || null : null,
       unitIds: [],
       components: compPayload,
     }
@@ -376,6 +378,12 @@ export default function TransactionModal({
                 {selectedBucket && needBucketPick && <span className="ml-1 text-gray-400">— 가용 {selectedBucket.quantity}</span>}
               </label>
               <input type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className={inputCls} />
+              {optionalLotInput && (
+                <div className="mt-2">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">LOT 번호 <span className="font-normal text-gray-400">(선택 — 이 전표에 기록)</span></label>
+                  <input value={lotNo} onChange={(e) => setLotNo(e.target.value)} className={inputCls + ' font-mono'} placeholder="예: MP26010601" />
+                </div>
+              )}
             </div>
           ) : txType === 'IN' ? (
             <div>

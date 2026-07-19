@@ -62,6 +62,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     data.requester = requester
   }
   if (body.note !== undefined) data.note = String(body.note ?? '').trim() || null
+  if (body.lotNo !== undefined && existing.txType !== 'MOVE') data.lotNo = String(body.lotNo ?? '').trim() || null
 
   // OUT 전용 메타
   if (existing.txType === 'OUT') {

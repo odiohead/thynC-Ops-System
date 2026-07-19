@@ -57,6 +57,7 @@ export async function POST(req: NextRequest) {
         note: body.note ?? null,
         serials: body.serials ?? [],
         lotBySerial: body.lotBySerial ?? undefined,
+        lotNo: body.lotNo ?? null,
         unitIds: body.unitIds ?? [],
         components: body.components ?? [],
       },
