@@ -28,17 +28,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ months: [] })
   }
 
-  // 서비스 시작월 = endDateExpected 익월
-  // 신규 병상 = 각 완료 프로젝트(차수)의 bedCount를 해당 차수의 서비스 시작월에 집계
-  // 신규 병원 = 병원별 최초 완료 프로젝트의 서비스 시작월에 1회만 집계 (2차·3차는 병상만 가산)
+  // 집계 기준 = 프로젝트 완료일(endDateExpected)의 당월 (2026-07-20 실시간 전환 — 구 로직은 익월)
+  // 신규 병상 = 각 완료 프로젝트(차수)의 bedCount를 완료월에 집계
+  // 신규 병원 = 병원별 최초 완료 프로젝트의 완료월에 1회만 집계 (2차·3차는 병상만 가산)
   const monthMap = new Map<string, { newHospitals: number; newBeds: number }>()
   const seenHospitals = new Set<string>()
 
   for (const p of projects) {
-    const end = p.endDateExpected!
-    // 익월 계산
-    const d = new Date(end)
-    d.setMonth(d.getMonth() + 1)
+    const d = new Date(p.endDateExpected!)
     const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 
     const entry = monthMap.get(month) ?? { newHospitals: 0, newBeds: 0 }
@@ -70,7 +67,7 @@ export async function GET(req: NextRequest) {
   let totalBeds = 0
 
   // firstMonth부터 max(currentMonth, monthMap 마지막 키)까지 순회
-  // (endDateExpected 익월을 서비스 시작월로 계산하므로, 당월 완료 프로젝트는 다음 달 버킷에 쌓임)
+  // (완료일이 미래로 입력된 프로젝트가 있으면 현재 월 이후 버킷도 표시)
   const lastMonthInMap = allMonthKeys[allMonthKeys.length - 1]
   const endMonth = currentMonth >= lastMonthInMap ? currentMonth : lastMonthInMap
   const cursor = new Date(`${firstMonth}-01`)
