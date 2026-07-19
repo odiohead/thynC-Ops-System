@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import BulkSerialTxModal from '../components/BulkSerialTxModal'
+import TxEditModal from '../components/TxEditModal'
 
 interface Warehouse { id: number; name: string; inventoryId: number }
 interface Inventory { id: number; name: string; isActive: boolean }
@@ -10,11 +11,12 @@ interface Tx {
   id: number
   txCode: string
   txType: 'IN' | 'OUT' | 'MOVE' | 'TRANSFER'
-  reasonCode: { id: number; name: string } | null
+  reasonCode: { id: number; name: string; value?: string | null } | null
   quantity: number
   transferDate: string | null
   transferPrice: number | null
   destination: string | null
+  requester: string | null
   note: string | null
   canceledAt: string | null
   createdAt: string
@@ -49,7 +51,9 @@ export default function TransactionsPage() {
   const limit = 50
   const [loading, setLoading] = useState(true)
   const [canManage, setCanManage] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
   const [showBulk, setShowBulk] = useState(false)
+  const [editTx, setEditTx] = useState<Tx | null>(null)
 
   const [filterType, setFilterType] = useState('')
   const [filterWarehouse, setFilterWarehouse] = useState('')
@@ -84,6 +88,9 @@ export default function TransactionsPage() {
     fetch('/api/settings/warehouses').then(async (r) => { if (r.ok) setWarehouses((await r.json()).warehouses) })
     fetch('/api/settings/inventories').then(async (r) => { if (r.ok) setInventories((await r.json()).inventories) })
     fetch('/api/inventory/can-manage').then(async (r) => { if (r.ok) setCanManage((await r.json()).canManage) })
+    fetch('/api/auth/me').then(async (r) => {
+      if (r.ok) { const d = await r.json(); const role = d.role ?? d.user?.role; setIsAdmin(role === 'ADMIN' || role === 'SUPER_ADMIN') }
+    })
   }, [])
   useEffect(() => { setPage(1); fetchTxs(1) }, [fetchTxs])
 
@@ -161,17 +168,18 @@ export default function TransactionsPage() {
               <th className="px-3 py-3 text-right">수량</th>
               <th className="px-3 py-3">인벤토리</th>
               <th className="px-3 py-3">위치</th>
+              <th className="px-3 py-3">요청자</th>
               <th className="px-3 py-3">출고처</th>
               <th className="px-3 py-3">병원/업무</th>
               <th className="px-3 py-3">처리자</th>
-              {canManage && <th className="px-3 py-3 text-right">취소</th>}
+              {canManage && <th className="px-3 py-3 text-right">관리</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading ? (
-              <tr><td colSpan={canManage ? 12 : 11} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td></tr>
+              <tr><td colSpan={canManage ? 13 : 12} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td></tr>
             ) : txs.length === 0 ? (
-              <tr><td colSpan={canManage ? 12 : 11} className="py-12 text-center text-sm text-gray-400">이력이 없습니다.</td></tr>
+              <tr><td colSpan={canManage ? 13 : 12} className="py-12 text-center text-sm text-gray-400">이력이 없습니다.</td></tr>
             ) : txs.map((tx) => (
               <tr key={tx.id} className={`hover:bg-gray-50 ${tx.canceledAt ? 'opacity-50 line-through' : ''}`}>
                 <td className="px-3 py-3 font-mono text-xs text-gray-500">
@@ -198,6 +206,7 @@ export default function TransactionsPage() {
                 <td className="px-3 py-3 text-gray-600 text-xs">
                   {tx.warehouse?.name}{tx.toWarehouse && <span className="text-gray-400"> → {tx.toWarehouse.name}</span>}
                 </td>
+                <td className="px-3 py-3 text-gray-600 text-xs">{tx.requester ?? '-'}</td>
                 <td className="px-3 py-3 text-gray-600 text-xs">{tx.destination ?? '-'}</td>
                 <td className="px-3 py-3 text-gray-600 text-xs">
                   {tx.hospital?.hospitalName ?? '-'}{tx.refCode && <span className="text-gray-400"> · {tx.refCode}</span>}
@@ -208,8 +217,13 @@ export default function TransactionsPage() {
                 </td>
                 {canManage && (
                   <td className="px-3 py-3 text-right">
-                    {!tx.canceledAt && (
-                      <button onClick={() => handleCancel(tx)} className="rounded-md border border-red-200 px-3 py-1 text-xs font-medium text-red-500 hover:bg-red-50 no-underline">취소</button>
+                    {!tx.canceledAt && tx.txType !== 'TRANSFER' && (
+                      <span className="inline-flex gap-1">
+                        {isAdmin && (
+                          <button onClick={() => setEditTx(tx)} className="rounded-md border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-50 no-underline">수정</button>
+                        )}
+                        <button onClick={() => handleCancel(tx)} className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 no-underline">취소</button>
+                      </span>
                     )}
                   </td>
                 )}
@@ -229,6 +243,10 @@ export default function TransactionsPage() {
 
       {showBulk && (
         <BulkSerialTxModal onClose={() => setShowBulk(false)} onDone={() => { setPage(1); fetchTxs(1) }} />
+      )}
+
+      {editTx && (
+        <TxEditModal tx={editTx} onClose={() => setEditTx(null)} onDone={() => { setEditTx(null); fetchTxs(page) }} />
       )}
     </div>
   )

@@ -13,6 +13,7 @@ interface Item {
   spec: string | null
   unit: string
   isSerialManaged: boolean
+  isLotManaged: boolean
   refPrice: number | null
   memo: string | null
   isActive: boolean
@@ -35,7 +36,7 @@ interface Tx {
   parentTx: { txCode: string } | null
 }
 interface Unit {
-  id: number; serialNo: string; status: string; memo: string | null
+  id: number; serialNo: string; lotNo: string | null; status: string; memo: string | null
   warehouse: { name: string } | null; hospital: { hospitalName: string } | null
 }
 
@@ -105,7 +106,7 @@ export default function InventoryScopedItemPage() {
   const scopedTotal = item.stocks.reduce((sum, s) => sum + s.quantity, 0)
   const inStockUnits = units.filter((u) => u.status === 'IN_STOCK')
 
-  const modalItem: ModalItem = { id: item.id, itemCode: item.itemCode, name: item.name, unit: item.unit, isSerialManaged: item.isSerialManaged }
+  const modalItem: ModalItem = { id: item.id, itemCode: item.itemCode, name: item.name, unit: item.unit, isSerialManaged: item.isSerialManaged, isLotManaged: item.isLotManaged }
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -211,15 +212,16 @@ export default function InventoryScopedItemPage() {
           <table className="w-full text-sm whitespace-nowrap">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <th className="px-3 py-2">시리얼</th><th className="px-3 py-2">상태</th><th className="px-3 py-2">위치</th><th className="px-3 py-2">설치처</th><th className="px-3 py-2">메모</th>
+                <th className="px-3 py-2">시리얼</th><th className="px-3 py-2">LOT</th><th className="px-3 py-2">상태</th><th className="px-3 py-2">위치</th><th className="px-3 py-2">설치처</th><th className="px-3 py-2">메모</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {units.length === 0 ? (
-                <tr><td colSpan={5} className="py-8 text-center text-sm text-gray-400">개체가 없습니다.</td></tr>
+                <tr><td colSpan={6} className="py-8 text-center text-sm text-gray-400">개체가 없습니다.</td></tr>
               ) : units.map((u) => (
                 <tr key={u.id}>
                   <td className="px-3 py-2 font-mono text-gray-900">{u.serialNo}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-gray-500">{u.lotNo ?? '-'}</td>
                   <td className="px-3 py-2"><span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${UNIT_STATUS[u.status]?.cls ?? ''}`}>{UNIT_STATUS[u.status]?.label ?? u.status}</span></td>
                   <td className="px-3 py-2 text-gray-600 text-xs">{u.status === 'IN_STOCK' ? (u.warehouse?.name ?? '-') : '-'}</td>
                   <td className="px-3 py-2 text-gray-600 text-xs">{u.status === 'OUT' ? (u.hospital?.hospitalName ?? '출고됨') : '-'}</td>

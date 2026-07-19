@@ -10,6 +10,7 @@ interface BulkRow {
   row: number
   name: string
   serial: string
+  lot: string
   status: 'ok' | 'error'
   message?: string
   itemCode?: string
@@ -28,6 +29,7 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
   const [warehouseId, setWarehouseId] = useState<number | null>(null)
   const [reasonId, setReasonId] = useState<number | null>(null)
   const [destination, setDestination] = useState('')
+  const [requester, setRequester] = useState('')
   const [file, setFile] = useState<File | null>(null)
 
   const [preview, setPreview] = useState<PreviewResult | null>(null)
@@ -48,7 +50,7 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
     [warehouses, inventoryId],
   )
   const reasons = txType === 'IN' ? inReasons : outReasons
-  const ready = !!file && !!inventoryId && !!warehouseId && !!reasonId
+  const ready = !!file && !!inventoryId && !!warehouseId && !!reasonId && (txType !== 'OUT' || !!requester.trim())
 
   function resetPreview() { setPreview(null); setError(null); setDoneMsg(null) }
 
@@ -59,6 +61,7 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
     fd.append('warehouseId', String(warehouseId))
     fd.append('reasonId', String(reasonId))
     if (txType === 'OUT' && destination.trim()) fd.append('destination', destination.trim())
+    if (requester.trim()) fd.append('requester', requester.trim())
     return fd
   }
 
@@ -101,8 +104,9 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
         </div>
 
         <div className="mb-4 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
-          A열=품목명, B열=시리얼번호 (1행은 헤더로 무시) · <b>시리얼 관리 품목만</b> 처리됩니다 ·
+          A열=품목명, B열=시리얼번호, C열=LOT번호 (1행은 헤더로 무시) · <b>시리얼 관리 품목만</b> 처리됩니다 ·
           품목명은 선택한 인벤토리의 품목과 정확히 일치해야 하며, 품목별로 전표가 1건씩 생성됩니다. 오류가 1건이라도 있으면 전체가 실행되지 않습니다.
+          C열은 <b>LOT 관리 품목의 입고 시 필수</b>이고, 출고 시에는 값이 있으면 개체의 LOT과 대조 검증합니다.
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -138,8 +142,12 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
               {activeWarehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
             </select>
           </div>
+          <div className={txType === 'OUT' ? '' : 'col-span-2'}>
+            <label className="mb-1 block text-xs font-medium text-gray-500">요청자 {txType === 'OUT' ? '(필수)' : '(선택)'}</label>
+            <input value={requester} onChange={(e) => setRequester(e.target.value)} placeholder={txType === 'OUT' ? '예: 대웅 홍길동, 자체 처리' : '요청자가 있으면 입력'} className={inputCls} />
+          </div>
           {txType === 'OUT' && (
-            <div className="col-span-2">
+            <div>
               <label className="mb-1 block text-xs font-medium text-gray-500">출고처 (선택)</label>
               <input value={destination} onChange={(e) => { setDestination(e.target.value) }} placeholder="예: OO병원, 유관부서" className={inputCls} />
             </div>
@@ -178,6 +186,7 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
                     <th className="px-3 py-2">행</th>
                     <th className="px-3 py-2">품목명</th>
                     <th className="px-3 py-2">시리얼번호</th>
+                    <th className="px-3 py-2">LOT</th>
                     <th className="px-3 py-2">결과</th>
                   </tr>
                 </thead>
@@ -187,6 +196,7 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
                       <td className="px-3 py-1.5 text-gray-400">{r.row}</td>
                       <td className="px-3 py-1.5">{r.name}{r.itemCode && <span className="ml-1 text-xs text-gray-400">{r.itemCode}</span>}</td>
                       <td className="px-3 py-1.5 font-mono text-xs">{r.serial}</td>
+                      <td className="px-3 py-1.5 font-mono text-xs text-gray-500">{r.lot || '-'}</td>
                       <td className="px-3 py-1.5">
                         {r.status === 'ok' ? <span className="text-green-600">정상</span> : <span className="text-red-600">{r.message}</span>}
                       </td>

@@ -56,9 +56,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     visits,
     resolvedAt,
     symptoms,
-    cause,
     resolution,
-    notes,
     assigneeIds,
   } = body
 
@@ -77,9 +75,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       ...(reportedAt !== undefined && { reportedAt: reportedAt ? new Date(reportedAt) : null }),
       ...(resolvedAt !== undefined && { resolvedAt: resolvedAt ? new Date(resolvedAt) : null }),
       ...(symptoms !== undefined && { symptoms: symptoms || null }),
-      ...(cause !== undefined && { cause: cause || null }),
       ...(resolution !== undefined && { resolution: resolution || null }),
-      ...(notes !== undefined && { notes: notes || null }),
     },
   })
 

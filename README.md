@@ -326,9 +326,10 @@ prisma/
 - 신고자(`reporterName`): 병원 측 텍스트
 - 원격처리 여부(`isRemote`), 접수일(`reportedAt`), 완료일(`resolvedAt`)
 - 방문일정: `MaintenanceVisit` 자식 테이블로 다건 관리 (단일 `visitDate`/`calendarEventId` 컬럼은 보존·deprecated)
-- 증상(`symptoms`), 원인(`cause`): plain text
-- 조치내용(`resolution`), 비고(`notes`): 리치 텍스트(Tiptap)
-- 담당자 N:M (`MaintenanceAssignee`), 첨부파일 (`MaintenanceFile`, S3), 방문일정 1:N (`MaintenanceVisit`)
+- 증상(`symptoms`): plain text
+- 조치 요약(`resolution`): 리치 텍스트(Tiptap) — 원인 포함 종결 요약 (구 원인 필드 내용은 상단에 병합됨)
+- `cause`·`notes` 컬럼: **deprecated** — 2026-07-18 개편으로 원인은 `resolution`에 병합, 비고는 `MaintenanceLog`로 이관 (백업용 보존, 앱 미사용)
+- 담당자 N:M (`MaintenanceAssignee`), 첨부파일 (`MaintenanceFile`, S3), 방문일정 1:N (`MaintenanceVisit`), 처리 기록 1:N (`MaintenanceLog`)
 - Google Calendar 이벤트 ID는 방문 항목(`MaintenanceVisit.calendarEventId`)별 관리 — 항목 생성/수정/삭제 시 자동 동기화
 
 ### MaintenanceAssignee (유지보수 담당자)
@@ -343,6 +344,11 @@ prisma/
 ### MaintenanceFile (유지보수 첨부파일)
 - Maintenance에 첨부된 파일
 - fileCategory, fileName, s3Key
+
+### MaintenanceLog (유지보수 처리 기록)
+- Maintenance 1:N 진행 경과 타임라인 (구 비고 필드 대체) — 엔트리별 작성자·시각 자동 기록
+- `maintenanceId`(FK Cascade), `authorId`(FK users, SetNull — NULL이면 구 비고 이관분), `content`(Tiptap HTML, 저장 시 sanitize), `createdAt`/`updatedAt`
+- 인덱스 `(maintenanceId, createdAt DESC)`
 
 ### EtcTask (기타업무)
 - 여러 병원을 커버하거나 유지보수가 아닌 주요 업무 관리
@@ -472,7 +478,7 @@ prisma/
 - 자재 품목 단위. 고유 코드 `itemCode`: `ITEM-NNNN` (전체 순번, 생성 시 자동 발번)
 - **`inventoryId`(소속 인벤토리 — Phase 10, 필수·변경 불가)**: 같은 물건도 인벤토리마다 별도 품목·별도 코드로 등록 (완전 독립 관리)
 - `name`, **`modelName`(모델명 — 제조사 모델 식별자, 규격과 별개)**, 분류(`categoryId` → InventoryCategory 트리), 제조사(`manufacturerId` → StatusCode `MANUFACTURER`), `spec`(규격), `unit`(단위, 기본 EA)
-- `isSerialManaged`(시리얼 개체 추적 여부 — 입출고 이력 생기면 변경 409 잠금), `deviceInfoId`(자사 기기 ↔ DeviceInfo 선택 FK)
+- `isSerialManaged`(시리얼 개체 추적 여부), `isLotManaged`(LOT 추적 여부 — 시리얼 품목만, 신규 입고 시 LOT 필수) — 둘 다 입출고 이력 생기면 변경 409 잠금. `deviceInfoId`(자사 기기 ↔ DeviceInfo 선택 FK)
 - `refPrice`(참고 단가, nullable), `memo`, `isActive`, `sortOrder`
 - 이력 있는 품목 삭제 → 비활성화 전환 (이력 보존)
 - 인덱스: `(category_id)`, `(inventory_id)`
@@ -508,7 +514,7 @@ prisma/
 - 전표 처리와 같은 트랜잭션에서 버킷 단위 증감 — 재고 수량의 진실
 
 #### InventoryTransaction (입출고 원장)
-- append-only 전표. `txCode`(`STK-YYYYMM-NNNN`, 동시 채번 P2002 재시도), `txType`(IN/OUT/MOVE — TRANSFER는 과거 전표만), `reasonId`(→ StatusCode 입출고 유형, MOVE는 NULL), `itemId`, `warehouseId`(출발/입고처), `toWarehouseId`(MOVE 도착), `inventoryId`(= 품목 소속, 비정규화), `quantity`(`CHECK > 0`)
+- append-only 전표. `txCode`(`STK-YYYYMM-NNNN`, 동시 채번 P2002 재시도), `txType`(IN/OUT/MOVE — TRANSFER는 과거 전표만), `reasonId`(→ StatusCode 입출고 유형, MOVE는 NULL), `itemId`, `warehouseId`(출발/입고처), `toWarehouseId`(MOVE 도착), `inventoryId`(= 품목 소속, 비정규화), `quantity`(`CHECK > 0`), `requester`(요청자 자유 텍스트 — OUT 필수). 메타 필드는 ADMIN이 사후 수정 가능(유형은 같은 동작 부류만)
 - deprecated 컬럼(과거 TRANSFER 표시용 보존): `toInventoryId`, `transferDate`, `transferPrice`
 - OUT 부가정보(선택): **`destination`(출고처 자유 텍스트)**, `hospitalCode`, `workType`(PROJECT/MAINTENANCE/ETC), `refCode`
 - **`parentTxId`**(세트출고 — 부자재 자식 전표가 주자재 전표 참조. 부모 취소 시 자식 일괄 취소)
@@ -707,8 +713,9 @@ prisma/
 - 담당자(필드 엔지니어, 복수 지정), 신고자(병원 측 텍스트), 원격처리 체크박스
 - 접수일 / 완료일 관리
 - **방문일정 다건 (캘린더 선택기)**: "방문일 지정" 버튼 → 월 달력 모달(`MaintenanceVisitPicker`, 외부 라이브러리 없는 자체 컴포넌트). 날짜를 클릭해 비연속 여러 날(예: 3일·7일·15일)을 토글 선택, **`장기일정` 체크박스**를 켜면 시작·종료일을 찍어 연속 기간 등록. 단일일·기간을 한 건에 혼합 + 기간 여러 개 가능. 선택 결과는 칩으로 표시·개별 삭제. 방문 항목별 Google Calendar 이벤트 자동 동기화
-- 증상·원인: plain textarea, 조치내용·비고: Tiptap 리치 텍스트
-- 첨부파일 관리 (AWS S3 업로드, presigned URL 다운로드) — edit 모드에서만
+- 증상: plain textarea, **조치 요약**: Tiptap 리치 텍스트 — 원인·조치를 종결 시 요약 (완료 처리인데 비어 있으면 안내 배지, 저장은 허용). AI 어시스턴트가 유사 장애 검색에 사용
+- **처리 기록 타임라인** (2026-07-18, 구 원인·비고 필드 개편): 상세 페이지 하단 패널 — 진행 경과를 엔트리 단위로 기록(Tiptap), 작성자·시각 자동 기록, **폼과 독립 저장**(기록 추가에 전체 폼 저장 불필요, 동시 편집 충돌 없음). 수정·삭제는 본인+ADMIN(이관분은 ADMIN만). 구 비고 데이터는 '(구 비고 이관)' 기록으로 이관, 구 원인은 조치 요약 상단에 병합
+- 첨부파일 관리 (AWS S3 업로드, presigned URL 다운로드) — edit 모드에서만 (건 단위 — 기록별 첨부 아님)
 - 목록 컬럼: 접수일 | 병원명 | 제목 | 장애유형 | 우선순위 | 상태 | 원격 | 담당자 | 방문일정 | 완료일 (방문일정은 다건을 결합 표시, 3건↑은 "외 N건")
 - **목록 필터**: 병원명 텍스트 검색, 장애유형/상태/우선순위/**담당자** select + **접수일 기간 필터** — 전체 1회 로드 후 클라이언트 즉시 필터 (총 N건 표시, 필터 초기화 버튼)
 - **컬럼 헤더 정렬**: 전 컬럼 클릭 정렬 (오름차순 → 내림차순 → 기본 정렬 해제 · 우선순위는 긴급>높음>보통>낮음 순, 빈 값은 항상 뒤로)
@@ -740,9 +747,12 @@ prisma/
 - **출고처 기재**: 출고 전표에 출고처 자유 텍스트(`destination`). **병원·업무 연결은 병원 연결 허용 인벤토리(대웅제약재고) 품목 출고에서만 가능**(UI 숨김 + 서버 400) — 평가용/판매용은 출고처 텍스트만. 병원 상세 **'사용 자재' 카드**(출고 이력 + 설치 개체)
 - **주자재/부자재 (BOM)**: 품목 상세에서 주자재 아래 부자재 N개 매핑(구성 수량 포함, 1단계 깊이, **같은 인벤토리 품목끼리만** — 서버 409). 출고 모달 **"부자재 함께 출고"(세트출고)** — 비시리얼 부자재를 같은 위치에서 자동 동시 출고(수량=출고수량×구성수량, 수정 가능), 자식 전표 `parent_tx_id` 연결·부모 취소 시 일괄 취소. 시리얼 부자재는 개별 출고
 - **시리얼 개체 추적 (바코드 스캔 대량 처리)**: `is_serial_managed` 품목은 개체 단위 관리(IN_STOCK/OUT/DISPOSED). 입고·출고·이동 모두 **시리얼 직접 입력 textarea**(줄 단위 붙여넣기·바코드 리더기 연속 스캔) — 재고 1만 개·1회 100~200개 출고 대응. 서버가 시리얼→개체 해석 후 위치·재고 상태 검증(미등록/불일치 시리얼 명시 거부 — 시리얼은 품목 단위라 타 인벤토리 개체는 자동 격리), 가용 개체 목록 클릭 선택 병행. 수량↔개체 정합 보장, 동시성 가드(조건부 updateMany+건수 검증)
-- **입출고 이력** (`/inventory/transactions`): 인벤토리 탭 + 유형·위치(탭 인벤토리 스코프)·기간 필터, 취소(권한자, 과거 이관 전표는 취소 불가 409), **Excel 다운로드**(필터 반영, 최대 1만 행)
-- **Excel 일괄 입출고 (시리얼 품목 마이그레이션)**: 이력 페이지 'Excel 일괄 입출고' 버튼(처리 권한자) — A열=품목명·B열=시리얼번호(1행 헤더) 업로드로 입고/출고 일괄 처리(`POST /api/inventory/transactions/bulk-serial`, preview 모드). 구분(입고/출고)·인벤토리·위치·유형(회수/폐기 등 시스템 동작 포함) 선택 후 **시리얼 관리 품목만** 대상. 품목명은 선택 인벤토리 내 정확 일치(동명 2건 이상이면 매칭 거부), 품목별 전표 1건씩 생성(최대 2000행). 미리보기에서 행 단위 검증(미등록 품목·비시리얼 품목·파일 내 중복·기등록/미등록 시리얼·위치 불일치) 후 **오류 0건일 때만 실행, 전체 단일 트랜잭션(all-or-nothing)**
-- **품목 마스터** (`/inventory/items`, ADMIN): 인벤토리 탭 + 인벤토리 컬럼. `ITEM-NNNN` 자동 발번(전체 순번), **등록 시 인벤토리 필수·수정 불가**. **모델명**·대>중>소 분류 트리·제조사·규격·단위·시리얼 여부·DeviceInfo 연결·참고단가. 검색은 품목명·모델명·코드·규격 통합. **Excel 일괄 가져오기**(가져올 인벤토리 선택 필수, 같은 인벤토리 내 품목명 중복만 스킵)
+- **LOT 추적 (2026-07-19)**: 품목 마스터 'LOT 관리' 체크(시리얼 품목만, 입출고 이력 생기면 변경 409 잠금) → `inventory_units.lot_no`에 개체 단위 기록. **신규 입고 시 LOT 필수**(비관리 품목은 입력 거부), 회수·출고 시 LOT 값이 있으면 개체 LOT과 대조 검증. 단건 입고 모달은 전표당 LOT 1개(전체 시리얼 동일 적용) — LOT 혼합은 전표 분리 또는 Excel 일괄(행별 LOT). 개체 목록에 LOT 컬럼
+- **요청자 (2026-07-19)**: 전표 `requester`(자유 텍스트) — **출고 필수**(내부 처리는 "자체 처리" 등 기입), 입고 선택, 이동 없음. 세트출고 자식 전표에 상속, 이력 컬럼·Excel 다운로드 포함
+- **전표 메타 수정 (2026-07-19, ADMIN 이상)**: `PUT /api/inventory/transactions/[id]` — 유형(같은 시스템 동작 부류 내에서만: 일반↔일반·회수↔회수·폐기↔폐기)·요청자·출고처·병원/업무 연결·비고. **수량·품목·위치·시리얼은 수정 불가**(재고 스냅샷·개체 정합 — 취소 후 재등록). 취소·이관(구) 전표 수정 불가, 감사 로그 before/after 기록
+- **입출고 이력** (`/inventory/transactions`): 인벤토리 탭 + 유형·위치(탭 인벤토리 스코프)·기간 필터, **수정(ADMIN)**·취소(권한자, 과거 이관 전표는 취소 불가 409), 요청자 컬럼, **Excel 다운로드**(필터 반영, 최대 1만 행)
+- **Excel 일괄 입출고 (시리얼 품목 마이그레이션)**: 이력 페이지 'Excel 일괄 입출고' 버튼(처리 권한자) — **A열=품목명·B열=시리얼번호·C열=LOT번호**(1행 헤더) 업로드로 입고/출고 일괄 처리(`POST /api/inventory/transactions/bulk-serial`, preview 모드). 구분(입고/출고)·인벤토리·위치·유형·요청자(출고 필수) 선택 후 **시리얼 관리 품목만** 대상. 품목명은 선택 인벤토리 내 정확 일치(동명 2건 이상이면 매칭 거부), 품목별 전표 1건씩 생성(최대 2000행). 미리보기에서 행 단위 검증(미등록 품목·비시리얼 품목·파일 내 중복·기등록/미등록 시리얼·위치 불일치·**LOT 규칙**: 입고 시 LOT 관리 품목 C열 필수/비관리 금지, 회수·출고 시 값 있으면 개체 LOT 대조) 후 **오류 0건일 때만 실행, 전체 단일 트랜잭션(all-or-nothing)**
+- **품목 마스터** (`/inventory/items`, ADMIN): 인벤토리 탭 + 인벤토리 컬럼. `ITEM-NNNN` 자동 발번(전체 순번), **등록 시 인벤토리 필수·수정 불가**. **모델명**·대>중>소 분류 트리·제조사·규격·단위·시리얼 여부·DeviceInfo 연결·참고단가. 검색은 품목명·모델명·코드·규격 통합. **Excel 일괄 가져오기**(가져올 인벤토리 선택 필수, 같은 인벤토리 내 품목명 중복만 스킵, K열=LOT여부)
 - **위치(창고) 관리** (`/settings/warehouses`, ADMIN): **인벤토리별 섹션으로 독립 추가/수정/삭제** — 위치명 UNIQUE는 인벤토리 내에서만(다른 인벤토리엔 같은 이름 허용)
 - **처리 권한**: 입고/출고/이동/취소 = 재고 담당자 풀(`/settings/inventory-managers`) + ADMIN 이상(`canManageStock` 서버 실시간 검사). 조회=전 로그인. 감사 로그 `resource='inventory_tx'`/`inventory_item`/`setting:*`
 - **PROD 배포**: Phase 10(인벤토리 완전 분리, 마이그레이션 `20260716100000`)까지 배포 완료
@@ -1120,6 +1130,20 @@ npm run dev
 | GET  | `/api/install-plans/[id]` | 설치계획 상세 |
 | PUT  | `/api/install-plans/[id]` | 설치계획 수정 |
 | DELETE | `/api/install-plans/[id]` | 설치계획 삭제 (ADMIN 이상) |
+
+### 유지보수
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET  | `/api/maintenances` | 유지보수 목록 (`?search=`병원명 `&hospitalCode=&typeId=&statusId=&priority=` 필터) |
+| POST | `/api/maintenances` | 유지보수 등록 |
+| GET  | `/api/maintenances/[id]` | 유지보수 상세 |
+| PUT  | `/api/maintenances/[id]` | 유지보수 수정 |
+| DELETE | `/api/maintenances/[id]` | 유지보수 삭제 (ADMIN 이상) |
+| GET/POST | `/api/maintenances/[id]/files`, `/api/maintenances/file-url` | 첨부파일 업로드·presigned URL |
+| GET  | `/api/maintenances/[id]/logs` | 처리 기록 목록 (최신순, 작성자 포함) |
+| POST | `/api/maintenances/[id]/logs` | 처리 기록 추가 (USER 이상, sanitize 후 저장) |
+| PUT  | `/api/maintenances/[id]/logs/[logId]` | 처리 기록 수정 (본인 or ADMIN — 이관분은 ADMIN만) |
+| DELETE | `/api/maintenances/[id]/logs/[logId]` | 처리 기록 삭제 (본인 or ADMIN) |
 
 ### 기타업무
 | Method | Endpoint | 설명 |

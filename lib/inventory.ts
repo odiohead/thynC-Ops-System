@@ -110,11 +110,13 @@ export interface CreateTxInput {
   toWarehouseId?: number | null // MOVE 필수
   quantity: number
   destination?: string | null // OUT 출고처 (자유 텍스트)
+  requester?: string | null // 요청자 (자유 텍스트) — OUT 필수, IN 선택
   hospitalCode?: string | null
   workType?: string | null
   refCode?: string | null
   note?: string | null
   serials?: string[] // 시리얼 품목 IN (신규 또는 회수 대상)
+  lotBySerial?: Record<string, string | null> // 신규 입고 시 시리얼별 LOT (LOT 관리 품목 필수)
   unitIds?: number[] // 시리얼 품목 OUT/MOVE (선택 개체)
   components?: ComponentOutInput[] // OUT 세트출고 — 매핑된 비시리얼 부자재 동시 출고
 }
@@ -126,6 +128,7 @@ export interface TxPlan {
   itemId: number
   itemName: string
   isSerialManaged: boolean
+  isLotManaged: boolean
   inventoryId: number
   srcWhName: string
   reasonId: number | null
@@ -145,6 +148,10 @@ export async function planInventoryTransaction(input: CreateTxInput): Promise<Tx
   const item = await prisma.inventoryItem.findUnique({ where: { id: input.itemId } })
   if (!item) throw new InventoryError('품목을 찾을 수 없습니다.', 404)
   const inventoryId = item.inventoryId // 인벤토리는 품목에서 파생
+
+  if (input.txType === 'OUT' && !input.requester?.trim()) {
+    throw new InventoryError('출고 요청자를 입력하세요. (내부 처리는 "자체 처리" 등으로 기입)')
+  }
 
   const srcWh = await prisma.warehouse.findUnique({ where: { id: input.warehouseId } })
   if (!srcWh) throw new InventoryError('위치를 찾을 수 없습니다.', 404)
@@ -211,6 +218,7 @@ export async function planInventoryTransaction(input: CreateTxInput): Promise<Tx
     itemId: item.id,
     itemName: item.name,
     isSerialManaged: item.isSerialManaged,
+    isLotManaged: item.isLotManaged,
     inventoryId,
     srcWhName: srcWh.name,
     reasonId,
@@ -241,6 +249,7 @@ export async function applyInventoryTransaction(client: Tx, plan: TxPlan, actorI
       inventoryId,
       quantity: qty,
       destination: input.txType === 'OUT' ? (input.destination?.trim() || null) : null,
+      requester: input.txType === 'MOVE' ? null : (input.requester?.trim() || null),
       hospitalCode: input.txType === 'OUT' ? (input.hospitalCode ?? null) : null,
       workType: input.txType === 'OUT' ? (input.workType ?? null) : null,
       refCode: input.txType === 'OUT' ? (input.refCode ?? null) : null,
@@ -262,7 +271,7 @@ export async function applyInventoryTransaction(client: Tx, plan: TxPlan, actorI
 
   // 3) 시리얼 개체 처리
   if (plan.isSerialManaged) {
-    await applySerialUnits(client, tx.id, input, plan.itemId, qty, reasonValue, inventoryId)
+    await applySerialUnits(client, tx.id, input, plan.itemId, qty, reasonValue, inventoryId, plan.isLotManaged)
   }
 
   // 4) 세트출고 — 부자재 자식 전표 (같은 위치에서 차감, parent_tx_id 연결)
@@ -278,6 +287,7 @@ export async function applyInventoryTransaction(client: Tx, plan: TxPlan, actorI
         inventoryId,
         quantity: comp.quantity,
         destination: input.destination?.trim() || null,
+        requester: input.requester?.trim() || null,
         hospitalCode: input.hospitalCode ?? null,
         workType: input.workType ?? null,
         refCode: input.refCode ?? null,
@@ -332,6 +342,7 @@ async function applySerialUnits(
   qty: number,
   reasonValue: string | null,
   inventoryId: number,
+  isLotManaged: boolean,
 ) {
   const links = (unitIds: number[]) =>
     client.inventoryTransactionUnit.createMany({ data: unitIds.map((unitId) => ({ transactionId: txId, unitId })) })
@@ -362,12 +373,22 @@ async function applySerialUnits(
       await links(unitIds)
     } else {
       // 신규 입고: 개체 생성 (같은 품목 내 시리얼 중복 금지, 품목의 인벤토리 기록)
+      // LOT 검증 — LOT 관리 품목은 시리얼별 LOT 필수, 비관리 품목은 LOT 입력 거부
+      const lotOf = (s: string) => input.lotBySerial?.[s]?.trim() || null
+      if (isLotManaged) {
+        const missing = serials.filter((s) => !lotOf(s))
+        if (missing.length > 0) {
+          throw new InventoryError(`LOT 관리 품목입니다. LOT 번호를 입력하세요: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ` 외 ${missing.length - 5}건` : ''}`)
+        }
+      } else if (serials.some((s) => lotOf(s))) {
+        throw new InventoryError('이 품목은 LOT 관리 대상이 아닙니다. LOT 입력을 제거하세요.')
+      }
       const dup = await client.inventoryUnit.findMany({ where: { itemId, serialNo: { in: serials } }, select: { serialNo: true } })
       if (dup.length > 0) throw new InventoryError(`이미 등록된 시리얼입니다: ${dup.map((d) => d.serialNo).join(', ')}`)
       const unitIds: number[] = []
       for (const s of serials) {
         const u = await client.inventoryUnit.create({
-          data: { itemId, serialNo: s, status: 'IN_STOCK', warehouseId: input.warehouseId, inventoryId },
+          data: { itemId, serialNo: s, lotNo: lotOf(s), status: 'IN_STOCK', warehouseId: input.warehouseId, inventoryId },
         })
         unitIds.push(u.id)
       }

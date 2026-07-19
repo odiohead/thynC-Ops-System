@@ -87,6 +87,7 @@ export async function POST(req: NextRequest) {
       spec: body.spec?.trim() || null,
       unit: body.unit?.trim() || 'EA',
       isSerialManaged: !!body.isSerialManaged,
+      isLotManaged: !!body.isSerialManaged && !!body.isLotManaged,
       deviceInfoId: body.deviceInfoId ?? null,
       manufacturerId: body.manufacturerId ?? null,
       refPrice: typeof body.refPrice === 'number' ? body.refPrice : null,

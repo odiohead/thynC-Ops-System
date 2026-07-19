@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import MaintenanceForm from '../MaintenanceForm'
+import MaintenanceLogPanel from '../MaintenanceLogPanel'
 import ReassignHospitalButton from '@/app/components/ReassignHospitalButton'
 
 interface MaintenanceFile {
@@ -37,9 +38,7 @@ interface MaintenanceData {
   reportedAt: string | null
   resolvedAt: string | null
   symptoms: string | null
-  cause: string | null
   resolution: string | null
-  notes: string | null
   assignees: { user: { id: string; name: string; email: string } }[]
   files: MaintenanceFile[]
   visits: { id: number; startDate: string; endDate: string }[]
@@ -136,9 +135,7 @@ export default function EditMaintenancePage() {
     reportedAt: data.reportedAt ? data.reportedAt.slice(0, 10) : '',
     resolvedAt: data.resolvedAt ? data.resolvedAt.slice(0, 10) : '',
     symptoms: data.symptoms ?? '',
-    cause: data.cause ?? '',
     resolution: data.resolution ?? '',
-    notes: data.notes ?? '',
     assignees: data.assignees ?? [],
     files: data.files ?? [],
     visits: (data.visits ?? []).map((v) => ({
@@ -168,6 +165,11 @@ export default function EditMaintenancePage() {
         )}
         <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
           <MaintenanceForm mode="edit" initialData={initialData} />
+        </div>
+
+        {/* 처리 기록 타임라인 — 폼과 독립 저장 */}
+        <div className="mt-4 rounded-xl bg-white p-6 shadow-sm border border-gray-200">
+          <MaintenanceLogPanel maintenanceId={data.id} />
         </div>
       </div>
     </div>

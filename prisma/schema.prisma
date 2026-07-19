@@ -208,6 +208,7 @@ model User {
   installPlanAssignees    InstallPlanAssignee[]
   siteVisitAssignees      SiteVisitAssignee[]
   maintenanceAssignees    MaintenanceAssignee[]
+  maintenanceLogs         MaintenanceLog[]             @relation("MaintenanceLogAuthor")
   etcTaskAssignees        EtcTaskAssignee[]
   consultationQueues      ConsultationQueue[]
   wikiPagesAuthored       WikiPage[]                   @relation("WikiPageAuthor")
@@ -683,6 +684,7 @@ model InventoryItem {
   spec            String?     @db.VarChar(200)
   unit            String      @default("EA") @db.VarChar(20)
   isSerialManaged Boolean     @default(false) @map("is_serial_managed")
+  isLotManaged    Boolean     @default(false) @map("is_lot_managed") // 시리얼 관리 품목 중 LOT 추적 대상 (신규 입고 시 LOT 필수)
   deviceInfoId    Int?        @map("device_info_id")
   manufacturerId  Int?        @map("manufacturer_id")
   refPrice        Int?        @map("ref_price")
@@ -782,6 +784,7 @@ model InventoryTransaction {
   transferDate  DateTime? @map("transfer_date") @db.Date // deprecated — 과거 TRANSFER 이관일자
   transferPrice Int?      @map("transfer_price") // deprecated — 과거 TRANSFER 이관 단가
   destination   String?   @db.VarChar(100) // OUT 출고처 (자유 텍스트 — 유관부서·거래처 등)
+  requester     String?   @db.VarChar(100) // 요청자 (자유 텍스트 — OUT 필수, IN 선택)
   hospitalCode  String?   @map("hospital_code")
   workType      String?   @map("work_type") @db.VarChar(20)
   refCode       String?   @map("ref_code") @db.VarChar(50)
@@ -818,6 +821,7 @@ model InventoryUnit {
   id           Int      @id @default(autoincrement())
   itemId       Int      @map("item_id")
   serialNo     String   @map("serial_no") @db.VarChar(100)
+  lotNo        String?  @map("lot_no") @db.VarChar(100) // LOT 관리 품목의 로트 번호 (신규 입고 시 기록)
   status       String   @default("IN_STOCK") @db.VarChar(10)
   warehouseId  Int?     @map("warehouse_id")
   inventoryId  Int      @map("inventory_id")
@@ -887,9 +891,9 @@ model Maintenance {
   visitDate         DateTime? @map("visit_date") @db.Date // deprecated: 방문일정은 visits(MaintenanceVisit)로 이전
   resolvedAt        DateTime? @map("resolved_at") @db.Date
   symptoms          String?   @db.Text @map("symptoms")
-  cause             String?   @db.Text @map("cause")
-  resolution        String?   @db.Text @map("resolution")
-  notes             String?   @db.Text @map("notes")
+  cause             String?   @db.Text @map("cause") // deprecated: resolution(조치 요약)에 병합됨 — 백업용 보존, 앱에서 미사용
+  resolution        String?   @db.Text @map("resolution") // 조치 요약 (원인 포함, 종결 시 작성)
+  notes             String?   @db.Text @map("notes") // deprecated: maintenance_logs(처리 기록)로 이관됨 — 백업용 보존, 앱에서 미사용
   calendarEventId   String?   @map("calendar_event_id") // deprecated: 캘린더 이벤트ID는 방문 항목별(MaintenanceVisit.calendarEventId)로 이전
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
@@ -900,8 +904,25 @@ model Maintenance {
   assignees  MaintenanceAssignee[]
   files      MaintenanceFile[]
   visits     MaintenanceVisit[]
+  logs       MaintenanceLog[]
 
   @@map("maintenances")
+  @@schema("public")
+}
+
+// 처리 기록 — 유지보수 진행 경과 타임라인 (구 비고 필드 대체, 엔트리별 작성자·시각 자동 기록)
+model MaintenanceLog {
+  id            Int         @id @default(autoincrement())
+  maintenanceId Int         @map("maintenance_id")
+  authorId      String?     @map("author_id") // NULL = 구 비고 필드 이관분 (작성자 미상)
+  content       String      @db.Text // Tiptap HTML
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+  maintenance   Maintenance @relation(fields: [maintenanceId], references: [id], onDelete: Cascade)
+  author        User?       @relation("MaintenanceLogAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([maintenanceId, createdAt(sort: Desc)])
+  @@map("maintenance_logs")
   @@schema("public")
 }
 

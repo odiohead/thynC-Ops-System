@@ -8,6 +8,7 @@ export interface ModalItem {
   name: string
   unit: string
   isSerialManaged: boolean
+  isLotManaged: boolean
 }
 export interface ModalInventory {
   id: number
@@ -21,7 +22,7 @@ interface Unit { id: number; serialNo: string }
 interface Hospital { hospitalCode: string; hospitalName: string }
 interface Work { workType: string; refCode: string; label: string }
 interface Component { childItemId: number; quantity: number; item: { id: number; itemCode: string; name: string; unit: string; isSerialManaged: boolean; isActive: boolean } }
-interface PickItem { id: number; itemCode: string; name: string; modelName: string | null; unit: string; isSerialManaged: boolean }
+interface PickItem { id: number; itemCode: string; name: string; modelName: string | null; unit: string; isSerialManaged: boolean; isLotManaged: boolean }
 
 export type TxType = 'IN' | 'OUT' | 'MOVE'
 
@@ -47,6 +48,8 @@ export default function TransactionModal({
   const [toWarehouseId, setToWarehouseId] = useState<number | null>(null)
   const [quantity, setQuantity] = useState('1')
   const [serialsText, setSerialsText] = useState('') // IN 신규/회수 + OUT·MOVE 시리얼 입력(스캔)
+  const [requester, setRequester] = useState('') // 요청자 — OUT 필수, IN 선택
+  const [lotNo, setLotNo] = useState('') // LOT 관리 품목 신규 입고 — 전표당 1개(전체 시리얼 동일 적용)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -92,6 +95,8 @@ export default function TransactionModal({
   const canLinkHospital = txType === 'OUT' && inventory.linkHospital
 
   const serialLines = serialsText.split('\n').map((s) => s.trim()).filter(Boolean)
+  const isReturnIn = txType === 'IN' && currentReason?.value === 'RETURN'
+  const needLotInput = !!item?.isLotManaged && serial && txType === 'IN' && !isReturnIn // 신규 입고만 LOT 입력
 
   // 마스터 로드 — 입출고 유형 + (품목 미고정 시) 이 인벤토리의 품목 목록
   useEffect(() => {
@@ -129,7 +134,8 @@ export default function TransactionModal({
 
   function pickItem(id: number | null) {
     const p = pickList.find((x) => x.id === id)
-    setItem(p ? { id: p.id, itemCode: p.itemCode, name: p.name, unit: p.unit, isSerialManaged: p.isSerialManaged } : null)
+    setItem(p ? { id: p.id, itemCode: p.itemCode, name: p.name, unit: p.unit, isSerialManaged: p.isSerialManaged, isLotManaged: p.isLotManaged } : null)
+    setLotNo('')
     setSerialsText('')
     setSetOut(false)
     setError(null)
@@ -223,6 +229,8 @@ export default function TransactionModal({
     if (txType === 'MOVE' && !toWarehouseId) { setError('도착 위치를 선택하세요.'); return }
     if ((txType === 'IN' || txType === 'OUT') && !reasonId) { setError(`${TYPE_LABEL[txType]} 유형을 선택하세요.`); return }
     if (effectiveQty <= 0) { setError(serial ? '시리얼을 입력하세요.' : '수량을 입력하세요.'); return }
+    if (txType === 'OUT' && !requester.trim()) { setError('출고 요청자를 입력하세요. (내부 처리는 "자체 처리" 등으로 기입)'); return }
+    if (needLotInput && !lotNo.trim()) { setError('LOT 관리 품목입니다. LOT 번호를 입력하세요.'); return }
 
     const compPayload = txType === 'OUT' && setOut
       ? normalComponents
@@ -240,11 +248,13 @@ export default function TransactionModal({
       toWarehouseId: txType === 'MOVE' ? toWarehouseId : null,
       quantity: effectiveQty,
       destination: txType === 'OUT' ? destination.trim() || null : null,
+      requester: txType === 'MOVE' ? null : requester.trim() || null,
       hospitalCode: canLinkHospital ? hospital?.hospitalCode ?? null : null,
       workType: canLinkHospital ? work?.workType ?? null : null,
       refCode: canLinkHospital ? work?.refCode ?? null : null,
       note,
       serials: serial ? serialLines : [], // IN=신규/회수, OUT·MOVE=대상 개체 지정 (서버에서 위치 검증)
+      lotBySerial: needLotInput ? Object.fromEntries(serialLines.map((sn) => [sn, lotNo.trim()])) : undefined,
       unitIds: [],
       components: compPayload,
     }
@@ -347,6 +357,17 @@ export default function TransactionModal({
             </div>
           )}
 
+          {/* 요청자 — OUT 필수, IN 선택 */}
+          {txType !== 'MOVE' && (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                요청자 {txType === 'OUT' ? <span className="text-red-500">*</span> : <span className="text-gray-400">(선택)</span>}
+              </label>
+              <input value={requester} onChange={(e) => setRequester(e.target.value)} className={inputCls}
+                placeholder={txType === 'OUT' ? '예: 대웅 홍길동, ○○병원 김간호사, 자체 처리' : '요청자가 있으면 입력'} />
+            </div>
+          )}
+
           {/* 수량 or 시리얼 */}
           {!item ? null : !serial ? (
             <div>
@@ -361,6 +382,13 @@ export default function TransactionModal({
               <label className="block text-xs font-medium text-gray-700 mb-1">시리얼 입력 · 바코드 스캔 (줄바꿈으로 여러 개) · <b>{effectiveQty}개</b></label>
               <textarea value={serialsText} onChange={(e) => setSerialsText(e.target.value)} rows={5} placeholder={'SN001\nSN002\nSN003\n(바코드 리더기로 연속 스캔 가능)'} className={inputCls + ' font-mono'} />
               {currentReason?.value === 'RETURN' && <p className="mt-1 text-xs text-amber-600">회수: 이 인벤토리에서 출고된 개체의 시리얼을 입력하세요.</p>}
+              {needLotInput && (
+                <div className="mt-2">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">LOT 번호 <span className="text-red-500">*</span> <span className="font-normal text-gray-400">— 이 전표의 모든 시리얼에 동일 적용</span></label>
+                  <input value={lotNo} onChange={(e) => setLotNo(e.target.value)} className={inputCls + ' font-mono'} placeholder="예: LOT2607-01" />
+                  <p className="mt-1 text-xs text-gray-400">LOT이 다른 개체는 전표를 나눠 입고하거나 Excel 일괄 입출고(행별 LOT)를 사용하세요.</p>
+                </div>
+              )}
             </div>
           ) : (
             <div>

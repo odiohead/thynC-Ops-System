@@ -4,6 +4,32 @@
 
 ---
 
+## 2026-07-19 03:10 | 자재관리 보완 — 요청자·LOT 추적·전표 메타 수정 (실데이터 입력 준비)
+
+- **요청자**: `inventory_transactions.requester`(자유 텍스트) — 출고 필수(서버 400)·입고 선택·이동 없음. 단건 모달/일괄 업로드 입력, 세트출고 자식 상속, 이력 컬럼·Excel export 반영
+- **LOT 추적**: `inventory_items.is_lot_managed`(시리얼 품목만, 이력 생기면 변경 409 잠금) + `inventory_units.lot_no`. 신규 입고 시 LOT 필수(비관리 품목은 거부), 회수·출고 시 값이 있으면 개체 LOT 대조. 단건 입고 모달=전표당 LOT 1개, Excel 일괄=C열 행별 LOT. 품목 폼·목록 뱃지·Excel 가져오기 K열·개체 목록 LOT 컬럼
+- **전표 메타 수정(ADMIN)**: 신규 `PUT /api/inventory/transactions/[id]` + TxEditModal — 유형(같은 시스템 동작 부류만: 일반↔일반/회수↔회수/폐기↔폐기, 그 외 409)·요청자·출고처·병원/업무·비고. 수량·품목·위치·시리얼은 불가(취소 후 재등록), 취소·이관(구) 전표 불가, 감사 로그 before/after
+- 마이그레이션 `20260719023000_wms_requester_lot` (DEV 적용, 컬럼 3개 추가 — PROD 배포 시 적용 필요)
+- 검증: dev2 E2E 17케이스(LOT 필수/금지/대조, 요청자 필수 단건·일괄, 메타 수정·부류 제한·권한) + 유지보수 처리기록 6케이스 통과, 테스트 데이터 정리
+- 영향 파일: prisma/schema.prisma, lib/inventory.ts, `app/api/inventory/transactions/[id]/route.ts`(신규), bulk-serial/route.ts, items API 2종, items/import, `app/inventory/components/TxEditModal.tsx`(신규), TransactionModal, BulkSerialTxModal, transactions/page, items/page, 품목상세 2종(개체 LOT), transactions/export, README.md, function_wms.md
+
+## 2026-07-19 01:55 | PROD 자재관리 테스트 데이터 정리 (실데이터 입력 준비)
+
+- 사용자 요청으로 PROD WMS 가비지 데이터 삭제: 품목 8·재고 6·전표 22·개체 0·매핑 0 → TRUNCATE RESTART IDENTITY (품목 채번 ITEM-0001부터 재시작)
+- **보존**: 인벤토리 4, 품목 분류 11, 위치 12, 재고 담당자 풀, 입출고 유형
+- 삭제 전 백업: PROD `~/backups/db/thync_ops_pre_wms_cleanup_20260719.dump` (해당 6개 테이블, 31KB)
+
+## 2026-07-19 00:20 | 유지보수 원인·조치·비고 개편 — 처리 기록 타임라인 (C안)
+
+- **배경**: 비고 필드가 사실상 진행 경과 로그로 쓰임(Slack 붙여넣기 등, 평균 272자) + 전체 폼 일괄 저장이라 이력·작성자 없음. 설계 승인(C안) 후 개편
+- **처리 기록 타임라인**: 신규 `maintenance_logs` 테이블(작성자 FK SetNull·Tiptap HTML·sanitize) + CRUD API(`/api/maintenances/[id]/logs`) + 상세 페이지 하단 `MaintenanceLogPanel` — 엔트리별 독립 저장, 수정·삭제는 본인+ADMIN
+- **필드 재편**: 원인(cause)→조치 요약(resolution) 상단에 병합(HTML 이스케이프), 비고(notes)→처리 기록 이관(작성자 NULL='(구 비고 이관)', 시각=updated_at). `cause`·`notes` 컬럼은 백업용 보존(deprecated), API 입출력에서 제거. 폼은 증상+조치 요약만 남기고 완료 처리 시 요약 미작성이면 안내 배지
+- **AI 어시스턴트**: listMaintenances에 recentLogs(최근 3건, 작성자·날짜 포함) 노출
+- **신규 lib**: `lib/richtext.ts`(sanitizeRichTextHtml·isEmptyRichText — 위키 htmlText와 동일 규칙, 모듈 경계 때문에 별도 구현)
+- **마이그레이션**: `20260718235500_maintenance_logs` (DEV 적용: 비고 30건 이관, 원인 85건 병합 — 멱등 가드 포함). **PROD 미적용** — 배포 시 psql 적용 + resolve 필요
+- 검증: tsc --noEmit 통과, DEV DB 이관 데이터 확인. 빌드·재시작·E2E는 사용자 요청 시
+- 영향 파일: prisma/schema.prisma, `app/api/maintenances/[id]/logs/*`(신규 2), `app/api/maintenances/route.ts`, `app/api/maintenances/[id]/route.ts`, `app/maintenances/MaintenanceForm.tsx`, `app/maintenances/MaintenanceLogPanel.tsx`(신규), `app/maintenances/[id]/page.tsx`, `lib/richtext.ts`(신규), `lib/ai/tools.ts`, README.md, CLAUDE.md(에디터 표)
+
 ## 2026-07-18 23:35 | Excel 일괄 입출고 PROD 배포
 
 - `d210f2c` push → PROD pull → 힙 4GB 빌드 → `pm2 restart thync-prod` → HTTP 응답 정상 확인

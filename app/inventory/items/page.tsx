@@ -16,6 +16,7 @@ interface Item {
   spec: string | null
   unit: string
   isSerialManaged: boolean
+  isLotManaged: boolean
   refPrice: number | null
   memo: string | null
   isActive: boolean
@@ -39,6 +40,7 @@ interface ItemForm {
   spec: string
   unit: string
   isSerialManaged: boolean
+  isLotManaged: boolean
   deviceInfoId: number | null
   refPrice: string
   memo: string
@@ -47,7 +49,7 @@ interface ItemForm {
 
 const emptyForm: ItemForm = {
   inventoryId: null, name: '', modelName: '', cat1: null, cat2: null, cat3: null, manufacturerId: null, spec: '', unit: 'EA',
-  isSerialManaged: false, deviceInfoId: null, refPrice: '', memo: '', isActive: true,
+  isSerialManaged: false, isLotManaged: false, deviceInfoId: null, refPrice: '', memo: '', isActive: true,
 }
 
 interface PreviewResult {
@@ -56,7 +58,7 @@ interface PreviewResult {
   skipped: number
   unknownCategories: string[]
   unknownManufacturers: string[]
-  rows: { name: string; modelName: string | null; categoryPath: string | null; manufacturer: string | null; unit: string; isSerialManaged: boolean }[]
+  rows: { name: string; modelName: string | null; categoryPath: string | null; manufacturer: string | null; unit: string; isSerialManaged: boolean; isLotManaged: boolean }[]
 }
 
 /** 품목의 categoryId에서 대/중/소 선택 상태 복원 */
@@ -168,6 +170,7 @@ export default function InventoryItemsPage() {
       spec: item.spec ?? '',
       unit: item.unit,
       isSerialManaged: item.isSerialManaged,
+      isLotManaged: item.isLotManaged,
       deviceInfoId: item.deviceInfo?.id ?? null,
       refPrice: item.refPrice != null ? String(item.refPrice) : '',
       memo: item.memo ?? '',
@@ -190,6 +193,7 @@ export default function InventoryItemsPage() {
       spec: form.spec,
       unit: form.unit,
       isSerialManaged: form.isSerialManaged,
+      isLotManaged: form.isSerialManaged && form.isLotManaged,
       deviceInfoId: form.deviceInfoId,
       refPrice: form.refPrice.trim() ? parseInt(form.refPrice) : null,
       memo: form.memo,
@@ -367,7 +371,7 @@ export default function InventoryItemsPage() {
                 <td className="px-3 py-3 text-gray-600">{item.unit}</td>
                 <td className="px-3 py-3 text-center">
                   {item.isSerialManaged
-                    ? <span className="inline-flex items-center rounded bg-indigo-50 px-1.5 py-0.5 text-xs font-medium text-indigo-600">S/N</span>
+                    ? <span className="inline-flex items-center gap-0.5"><span className="rounded bg-indigo-50 px-1.5 py-0.5 text-xs font-medium text-indigo-600">S/N</span>{item.isLotManaged && <span className="rounded bg-teal-50 px-1.5 py-0.5 text-xs font-medium text-teal-600">LOT</span>}</span>
                     : <span className="text-gray-300">-</span>}
                 </td>
                 <td className="px-3 py-3 text-right tabular-nums text-gray-600">{item.refPrice != null ? item.refPrice.toLocaleString() : '-'}</td>
@@ -482,15 +486,19 @@ export default function InventoryItemsPage() {
               </div>
               <div className="flex items-center gap-4">
                 <label className="flex items-center gap-2 text-sm text-gray-700">
-                  <input type="checkbox" checked={form.isSerialManaged} onChange={(e) => setForm((f) => ({ ...f, isSerialManaged: e.target.checked }))} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                  <input type="checkbox" checked={form.isSerialManaged} onChange={(e) => setForm((f) => ({ ...f, isSerialManaged: e.target.checked, isLotManaged: e.target.checked && f.isLotManaged }))} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                   시리얼(개체) 관리
+                </label>
+                <label className={`flex items-center gap-2 text-sm ${form.isSerialManaged ? 'text-gray-700' : 'text-gray-300'}`}>
+                  <input type="checkbox" checked={form.isLotManaged} disabled={!form.isSerialManaged} onChange={(e) => setForm((f) => ({ ...f, isLotManaged: e.target.checked }))} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-40" />
+                  LOT 관리
                 </label>
                 <label className="flex items-center gap-2 text-sm text-gray-700">
                   <input type="checkbox" checked={form.isActive} onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                   활성
                 </label>
               </div>
-              {editId && <p className="text-xs text-gray-400">시리얼 관리 여부는 입출고 이력이 생기면 변경할 수 없습니다.</p>}
+              {editId && <p className="text-xs text-gray-400">시리얼/LOT 관리 여부는 입출고 이력이 생기면 변경할 수 없습니다. LOT 관리 품목은 신규 입고 시 LOT 번호가 필수입니다.</p>}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">메모</label>
                 <textarea value={form.memo} onChange={(e) => setForm((f) => ({ ...f, memo: e.target.value }))} rows={2} className={selectCls} />
@@ -516,9 +524,9 @@ export default function InventoryItemsPage() {
             </div>
             <div className="px-6 py-4 space-y-4">
               <p className="text-xs text-gray-500">
-                컬럼 순서: <b>품목명 · 모델명 · 대분류 · 중분류 · 소분류 · 제조사 · 규격 · 단위 · 시리얼여부 · 참고단가</b> (1행은 헤더).
+                컬럼 순서: <b>품목명 · 모델명 · 대분류 · 중분류 · 소분류 · 제조사 · 규격 · 단위 · 시리얼여부 · 참고단가 · LOT여부</b> (1행은 헤더).
                 분류·제조사는 등록된 이름과 일치해야 하며, 매칭 실패 시 미지정으로 등록됩니다.
-                시리얼여부는 &apos;시리얼/Y/예&apos; 등이면 개체 관리. 선택한 인벤토리에 이미 있는 품목명은 건너뜁니다.
+                시리얼여부·LOT여부는 &apos;Y/예/시리얼&apos; 등이면 활성 (LOT은 시리얼 품목만 유효). 선택한 인벤토리에 이미 있는 품목명은 건너뜁니다.
               </p>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">가져올 인벤토리 <span className="text-red-500">*</span></label>
@@ -554,7 +562,7 @@ export default function InventoryItemsPage() {
                   <div className="max-h-48 overflow-y-auto rounded border border-gray-100">
                     <table className="w-full text-xs">
                       <thead className="bg-gray-50 text-gray-500">
-                        <tr><th className="px-2 py-1 text-left">품목명</th><th className="px-2 py-1 text-left">모델명</th><th className="px-2 py-1 text-left">분류</th><th className="px-2 py-1 text-left">제조사</th><th className="px-2 py-1 text-left">단위</th><th className="px-2 py-1 text-center">S/N</th></tr>
+                        <tr><th className="px-2 py-1 text-left">품목명</th><th className="px-2 py-1 text-left">모델명</th><th className="px-2 py-1 text-left">분류</th><th className="px-2 py-1 text-left">제조사</th><th className="px-2 py-1 text-left">단위</th><th className="px-2 py-1 text-center">S/N</th><th className="px-2 py-1 text-center">LOT</th></tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                         {preview.rows.slice(0, 100).map((r, i) => (
@@ -565,6 +573,7 @@ export default function InventoryItemsPage() {
                             <td className="px-2 py-1 text-gray-500">{r.manufacturer ?? '-'}</td>
                             <td className="px-2 py-1 text-gray-500">{r.unit}</td>
                             <td className="px-2 py-1 text-center">{r.isSerialManaged ? '✓' : ''}</td>
+                            <td className="px-2 py-1 text-center">{r.isLotManaged ? '✓' : ''}</td>
                           </tr>
                         ))}
                       </tbody>

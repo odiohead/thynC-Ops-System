@@ -74,9 +74,7 @@ export async function POST(request: NextRequest) {
     visits,
     resolvedAt,
     symptoms,
-    cause,
     resolution,
-    notes,
     assigneeIds,
   } = body
 
@@ -101,9 +99,7 @@ export async function POST(request: NextRequest) {
       reportedAt: reportedAt ? new Date(reportedAt) : null,
       resolvedAt: resolvedAt ? new Date(resolvedAt) : null,
       symptoms: symptoms || null,
-      cause: cause || null,
       resolution: resolution || null,
-      notes: notes || null,
     },
   })
 

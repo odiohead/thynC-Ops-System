@@ -77,8 +77,8 @@
 | `lib/inventory.ts` | 전표 코드 발번, 재고 증감 트랜잭션 헬퍼(`applyStockDelta`), 권한 체크(`canManageStock` — ADMIN 이상 or INVENTORY 풀), 안전재고 판정 |
 | `app/api/inventory/items/route.ts` + `[id]/route.ts` | 품목 CRUD |
 | `app/api/inventory/items/import/route.ts` | 품목 Excel 일괄 등록 (preview 모드 포함) |
-| `app/api/inventory/transactions/route.ts` + `[id]/cancel/route.ts` | 전표 목록/등록 + 취소 |
-| `app/api/inventory/transactions/bulk-serial/route.ts` | 시리얼 품목 Excel 일괄 입출고 (preview 모드 포함) — A열 품목명·B열 시리얼 |
+| `app/api/inventory/transactions/route.ts` + `[id]/route.ts` + `[id]/cancel/route.ts` | 전표 목록/등록 + 메타 수정(ADMIN) + 취소 |
+| `app/api/inventory/transactions/bulk-serial/route.ts` | 시리얼 품목 Excel 일괄 입출고 (preview 모드 포함) — A열 품목명·B열 시리얼·C열 LOT |
 | `app/api/inventory/stocks/route.ts` | 재고 현황 집계 조회 |
 | `app/api/inventory/units/route.ts` + `[id]/route.ts` | 시리얼 개체 목록/수정 |
 | `app/api/settings/warehouses/route.ts` + `[id]/route.ts` | 위치(창고) CRUD |

@@ -257,7 +257,7 @@ if (user.role !== 'ADMIN') return 403
 | 위키 페이지 본문 | **BlockNote** | JSON 블록 배열 (JSONB) |
 | 위키 HTML 문서 페이지 (`pageType='html'`) | **없음** (파일 업로드/재업로드 교체) | 원본 HTML 문자열 (`content_html`, sanitize 후 저장) — sandbox iframe 렌더 |
 | 프로젝트 이슈노트 (위키 '프로젝트 이슈노트' 페이지 임베드) | **BlockNote** (ProjectIssueNotePanel) | 위키 JSONB (`projects.issue_note` 컬럼은 백업용 보존·deprecated) |
-| 답사 `notes`, 유지보수 `resolution`/`notes`, 설치계획 `note` | **Tiptap** (기존) | HTML 문자열 |
+| 답사 `notes`, 유지보수 `resolution`(조치 요약)·처리 기록(`maintenance_logs.content`), 설치계획 `note` | **Tiptap** (기존) | HTML 문자열 |
 
 기존 Tiptap 사용처는 변경 금지. 데이터 형식 호환성과 마이그레이션 비용 때문.
 "통일해서 BlockNote로 가자" 같은 유혹은 거절. 두 에디터 공존이 정답.

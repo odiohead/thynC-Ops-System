@@ -363,6 +363,11 @@ async function listMaintenances(input: ToolInput) {
       status: { select: { name: true } },
       assignees: { include: { user: { select: { name: true } } } },
       visits: { orderBy: { startDate: 'asc' }, select: { startDate: true, endDate: true } },
+      logs: {
+        orderBy: { createdAt: 'desc' },
+        take: 3,
+        select: { content: true, createdAt: true, author: { select: { name: true } } },
+      },
     },
   })
   return {
@@ -380,6 +385,7 @@ async function listMaintenances(input: ToolInput) {
       resolvedAt: ymd(m.resolvedAt),
       symptoms: stripHtml(m.symptoms, 200),
       resolution: stripHtml(m.resolution, 300),
+      recentLogs: m.logs.map((l) => `${ymd(l.createdAt)} ${l.author?.name ?? '미상'}: ${stripHtml(l.content, 150)}`),
       assignees: m.assignees.map((a) => a.user.name),
       visits: m.visits.map((v) =>
         ymd(v.startDate) === ymd(v.endDate) ? ymd(v.startDate) : `${ymd(v.startDate)}~${ymd(v.endDate)}`,

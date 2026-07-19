@@ -36,9 +36,7 @@ interface MaintenanceFormData {
   reportedAt: string
   resolvedAt: string
   symptoms: string
-  cause: string
   resolution: string
-  notes: string
 }
 
 interface Props {
@@ -229,9 +227,7 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
     reportedAt: initialData?.reportedAt ?? '',
     resolvedAt: initialData?.resolvedAt ?? '',
     symptoms: initialData?.symptoms ?? '',
-    cause: initialData?.cause ?? '',
     resolution: initialData?.resolution ?? '',
-    notes: initialData?.notes ?? '',
   })
 
   const [maintenanceFiles, setMaintenanceFiles] = useState<MaintenanceFileItem[]>(
@@ -307,6 +303,12 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
     setForm((prev) => ({ ...prev, [field]: value }))
   }
 
+  // 완료 처리(완료일 입력 or 완료 상태)인데 조치 요약이 비어 있으면 안내 (저장은 막지 않음)
+  const doneStatus = statuses.find((s) => s.name === '완료')
+  const resolutionMissing =
+    (form.resolvedAt !== '' || (!!doneStatus && form.statusId === String(doneStatus.id))) &&
+    form.resolution.replace(/<[^>]*>|&nbsp;/g, '').trim() === ''
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.hospitalCode) { setError('병원을 선택해주세요.'); return }
@@ -328,9 +330,7 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
         .map((v) => ({ startDate: v.startDate, endDate: v.endDate || v.startDate })),
       resolvedAt: form.resolvedAt || null,
       symptoms: form.symptoms || null,
-      cause: form.cause || null,
       resolution: form.resolution || null,
-      notes: form.notes || null,
       assigneeIds: assignees.map((a) => a.id),
     }
 
@@ -563,38 +563,20 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
               </div>
             </div>
 
-            {/* 원인 */}
-            <div className="grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4">
-              <label className="flex items-start sm:pt-2 text-sm font-medium text-gray-700">원인</label>
-              <div className="sm:col-span-2">
-                <textarea
-                  rows={4}
-                  value={form.cause}
-                  onChange={(e) => set('cause', e.target.value)}
-                  className={inputClass}
-                  placeholder="장애 원인을 입력하세요."
-                />
-              </div>
-            </div>
-
-            {/* 조치 내용 */}
+            {/* 조치 요약 — 원인·조치를 종결 시 요약 (진행 경과는 아래 '처리 기록' 타임라인에) */}
             <div className="px-6 py-4">
-              <label className="mb-2 block text-sm font-medium text-gray-700">조치 내용</label>
+              <label className="mb-2 block text-sm font-medium text-gray-700">조치 요약</label>
+              <p className="mb-2 text-xs text-gray-400">원인과 조치 내용을 종결 시점에 요약하세요. 진행 경과는 하단 &lsquo;처리 기록&rsquo;에 남기면 작성자·시각이 자동 기록됩니다.</p>
               <RichTextEditor
                 value={form.resolution}
                 onChange={(v) => set('resolution', v)}
-                placeholder="조치 내용을 입력하세요."
+                placeholder="원인과 조치 내용을 요약해 입력하세요."
               />
-            </div>
-
-            {/* 비고 */}
-            <div className="px-6 py-4">
-              <label className="mb-2 block text-sm font-medium text-gray-700">비고</label>
-              <RichTextEditor
-                value={form.notes}
-                onChange={(v) => set('notes', v)}
-                placeholder="비고를 입력하세요."
-              />
+              {resolutionMissing && (
+                <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  완료 처리된 건입니다. 조치 요약을 남겨두면 나중에 유사 장애 대응과 AI 검색에 도움이 됩니다.
+                </p>
+              )}
             </div>
 
             {/* 첨부파일 — edit 모드에서만 */}
