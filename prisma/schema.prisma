@@ -226,6 +226,7 @@ model User {
   inventoryTxActed        InventoryTransaction[]       @relation("InventoryTxActor")
   inventoryTxCanceled     InventoryTransaction[]       @relation("InventoryTxCanceler")
   aiChatSessions          AiChatSession[]
+  gatewayPlanJobs         GatewayPlanJob[]             @relation("GatewayPlanJobCreator")
 
   @@map("users")
   @@schema("public")
@@ -685,7 +686,7 @@ model InventoryItem {
   unit            String      @default("EA") @db.VarChar(20)
   isSerialManaged Boolean     @default(false) @map("is_serial_managed")
   isLotManaged    Boolean     @default(false) @map("is_lot_managed") // LOT 추적 대상 — 시리얼 품목: 신규 입고 시 개체별 LOT 필수 / 비시리얼 품목: 전표 단위 LOT 선택 기록
-  tags            String[]    @default([]) // 자유 태그 (분류·검색 보조)
+  tags            String[]    @default([]) // deprecated (2026-07-20) — 태그는 개체(InventoryUnit.tags) 단위로 이관, 백업 보존
   deviceInfoId    Int?        @map("device_info_id")
   manufacturerId  Int?        @map("manufacturer_id")
   refPrice        Int?        @map("ref_price")
@@ -829,6 +830,7 @@ model InventoryUnit {
   inventoryId  Int      @map("inventory_id")
   hospitalCode String?  @map("hospital_code")
   memo         String?
+  tags         String[] @default([]) // 개체(단품) 자유 태그 — 예: DEMO, 각인 (2026-07-20)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
   item         InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
@@ -1369,6 +1371,42 @@ model VehicleLog {
 }
 
 // ===== AI 어시스턴트 v2 (function_ai_assistant.html) =====
+
+// 게이트웨이 배치 플래너 잡 (function_gateway_planner.html Phase 1)
+model GatewayPlanJob {
+  id            Int      @id @default(autoincrement())
+  title         String   @db.VarChar(300)
+  status        String   @default("PENDING") @db.VarChar(20) // PENDING|RASTERIZING|ANALYZING|NEED_SCALE|PLACED|ERROR
+  originalKey   String   @map("original_key")
+  originalName  String   @map("original_name") @db.VarChar(300)
+  pageIndex     Int      @default(0) @map("page_index")
+  pageCount     Int?     @map("page_count")
+  imageKey      String?  @map("image_key") // 원본 해상도 PNG (PPTX 배경용)
+  visionKey     String?  @map("vision_key") // 분석·미리보기용 축소 PNG (좌표 기준)
+  imageWidth    Int?     @map("image_width")
+  imageHeight   Int?     @map("image_height")
+  visionWidth   Int?     @map("vision_width")
+  visionHeight  Int?     @map("vision_height")
+  scaleMPerPx   Float?   @map("scale_m_per_px") // 확정 스케일 (m / vision px)
+  scaleSource   String?  @map("scale_source") @db.VarChar(20) // ai_dimension | manual_2point | none
+  scaleMeta     Json?    @map("scale_meta") // AI 치수 후보·산포 등
+  analysis      Json?    // 공간 인식 결과 (spaces[], vision 좌표)
+  placements    Json?    // 배치 결과 (points[], vision 좌표)
+  gatewayCount  Int?     @map("gateway_count")
+  rulesSnapshot Json?    @map("rules_snapshot")
+  pptxKey       String?  @map("pptx_key")
+  errorMessage  String?  @map("error_message")
+  tokenUsage    Json?    @map("token_usage")
+  createdById   String   @map("created_by")
+  createdBy     User     @relation("GatewayPlanJobCreator", fields: [createdById], references: [id])
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([createdById, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@map("gateway_plan_jobs")
+  @@schema("public")
+}
 
 model AiChatSession {
   id           String   @id @default(uuid()) @db.Uuid

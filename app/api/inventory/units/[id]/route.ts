@@ -19,8 +19,16 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!unit) return NextResponse.json({ error: '개체를 찾을 수 없습니다.' }, { status: 404 })
 
   const body = await req.json()
-  const data: { memo?: string | null; serialNo?: string } = {}
+  const data: { memo?: string | null; serialNo?: string; tags?: string[] } = {}
   if (body.memo !== undefined) data.memo = body.memo?.trim() || null
+  if (body.tags !== undefined) {
+    if (!Array.isArray(body.tags)) return NextResponse.json({ error: '태그 형식이 잘못되었습니다.' }, { status: 400 })
+    const tags = Array.from(new Set(
+      (body.tags as unknown[]).map((t) => String(t).trim()).filter(Boolean).map((t) => t.slice(0, 30)),
+    ))
+    if (tags.length > 10) return NextResponse.json({ error: '태그는 최대 10개까지 입력할 수 있습니다.' }, { status: 400 })
+    data.tags = tags
+  }
   if (body.serialNo !== undefined && body.serialNo.trim()) {
     const serialNo = body.serialNo.trim()
     if (serialNo !== unit.serialNo) {

@@ -4,6 +4,36 @@
 
 ---
 
+## 2026-07-20 | 자재관리 — 출고 유형 400 버그 수정 + 태그를 개체(시리얼 단품) 단위로 이관
+
+- **출고 버그**: 재고 입출고 모달을 '출고' 버튼으로 바로 열면 "전표 유형에 맞지 않는 입출고 유형입니다"(400) — 마스터 로드 시 reasonId를 무조건 **입고 유형 1번으로 시드**해서, 출고 탭에서 select는 첫 출고 유형을 표시하지만 실제 전송값은 입고 유형 ID였음. 시드 제거 + 현재 탭 목록에 없는 reasonId면 첫 항목으로 교정하는 정합성 effect 추가 (BulkSerialTxModal은 전환 시 리셋 구조라 무관)
+- **개체 태그**: 사용자 피드백 — 태그는 품목이 아니라 **자재 개체(시리얼 단품)** 단위가 맞음. `inventory_units.tags`(TEXT[], 최대 10개) 추가(마이그레이션 `20260720100000_wms_unit_tags`), `PATCH /api/inventory/units/[id]`에 tags 지원(트림·중복 제거), 개체 목록 2곳(품목 마스터 상세·인벤토리 자재 상세)에 태그 컬럼 + '편집' 모달(`UnitEditModal` 신규 — 태그·메모, 처리 권한자). 품목 단위 태그 UI(2026-07-19 추가분)는 제거 — `inventory_items.tags` 컬럼·API는 백업 보존(deprecated)
+- 검증: tsc 0오류 → 빌드 → E2E(시리얼 품목 생성→입고→개체 태그 PATCH(정규화 확인)→정상 출고→입고 유형으로 출고 시 400) 통과, 테스트 데이터 정리
+- 영향 파일: TransactionModal, UnitEditModal(신규), units [id] API, 개체 목록 페이지 2곳, items/page(태그 UI 제거), prisma/schema.prisma, README.md
+
+## 2026-07-19 | 게이트웨이 배치 플래너 — Phase 1·2 구현 (파이프라인 + UI, DEV 배포)
+
+- **기능**: 도면 업로드 → 백그라운드 파이프라인(래스터화 pdftoppm → sharp 정규화 → Claude Vision 2×2 타일 공간 인식 + 전체 뷰 치수 판독 → robust median 스케일 후보 → 결정론적 배치 엔진) → 스케일 확정(AI 후보 승인/2점 보정/스케일 없이) → 배치 미리보기(SVG 오버레이) → **PPTX 생성**(A4 가로, 빨간 점 0.2cm 개별 도형 + 총대수 텍스트박스). 접근 ADMIN 이상, 신규 메인 네비 'GW 배치 플래너'(wifi 아이콘)
+- **DB**: `gateway_plan_jobs` 테이블(마이그레이션 `20260719120000`, psql+resolve 적용) + nav_menu_items 2행(메인·설정, allowed_roles ADMIN). 배치 규칙은 AppSetting `gw_planner_rules`
+- **신규 의존성**: sharp·pptxgenjs(npm), poppler-utils(시스템 — PROD 배포 시 `apt install poppler-utils` 필요)
+- **파일**: `lib/gateway-planner/`(types·rules·vision·scale·placement·pptx·runner), `app/api/gateway-planner/jobs/*`(6 라우트), `app/api/settings/gateway-planner/`, `app/gateway-planner/`(메인·[id] 상세), `app/settings/gateway-planner/`, NavIcons(wifi)
+- **검증(dev2)**: tsc 0오류 → 힙4GB 빌드 → pm2 재시작(200) → API E2E: good_1.jpg 업로드 → 분석(호출 5회, in 20k/out 7.5k 토큰) → NEED_SCALE(공간 87·후보 0.068m/px·미리보기 127대) → 스케일 확정 → 재배치 → PPTX 생성·다운로드(ellipse 127개·A4 가로·이미지·총대수 확인). 설정 GET 정상. E2E 잡(#1)은 UI 확인용으로 보존
+- 미결: 성능튜닝(사용자 결정으로 추후), PROD 배포 시 poppler 설치 + 마이그레이션 적용 필요
+
+## 2026-07-19 | 게이트웨이 배치 플래너 — Phase 0 인식 개선 라운드 (타일 분석 + 2-pass 검증)
+
+- 사용자 피드백(우상단 복도 미검출·good_2 병실 미분리) 반영 개선 3종: **2×2 타일 분할 고해상도 분석**(`analyze2.mjs`, 실효 해상도 1.8배, IoU 병합+복도 세그먼트 이어붙이기), **2-pass 검증**(`verify.mjs`, 오버레이 재검수 교정), **프롬프트 보강**(복도 필수·호실 분리·인출선 추적)
+- 결과: good_1 복도 4→5(날개 복도 검출)·화장실 1→8, good_2 병실 16→32(호실 단위 분리). 스케일은 robust median + "공간=타일·스케일=전체뷰" 조합으로 산포 41.6%→7.2%(good_1, 면적 표기 대비 2% 내)
+- 복도 점이 통로 중앙선 등간격("형광등식") 배치 확인. 상세 비교는 `scripts/gateway-planner-phase0/RESULT.md` 개선 라운드 섹션
+- 영향 파일: scripts/gateway-planner-phase0/(analyze2.mjs·verify.mjs 신규, place.mjs·render_spaces.mjs variant/robust scale), RESULT.md
+
+## 2026-07-19 | 게이트웨이 배치 플래너 — 설계안 v0.2 + Phase 0 프로토타입 검증 완료
+
+- **설계안** `function_gateway_planner.html` 작성(v0.1→v0.2): 도면 업로드 → Claude Vision 공간 인식 → 스케일 확정(사용자) → 결정론적 배치 엔진 → 편집 가능한 PPTX(A4 가로, 빨간 점 개별 도형) 파이프라인. 확정 — 접근 ADMIN 이상, 점 번호 없음, 제외공간(계단·EV·야외) 외 전 공간 배치 후 사람이 제거. 신규 의존성: poppler-utils(시스템)·sharp(설치됨)·pptxgenjs(미설치)
+- **Phase 0 검증** (`scripts/gateway-planner-phase0/`, 결과 `RESULT.md`): 샘플 4종(`docs/gateway-planner-samples/` — CAD 2종·피난안내도 사진·Excel 개략도)으로 전처리→공간 인식(claude-opus-4-8, 1568px+그리드 오버레이, tool use)→치수 기반 스케일(중앙값)→배치(복도 8m 간격·병실 면적 1~2개)→점 오버레이 이미지까지 완주. good_1: 공간 58개·스케일 오차 병실 면적 대조 ±25% 내·95대 배치. 무치수 도면(bad_1)도 개소 기반 배치 동작. 발견: 인출선 화장실 인식 약함, 피난안내도류 복도 미검출 → RESULT.md에 Phase 1 반영사항 정리
+- 영향 파일: function_gateway_planner.html(신규), docs/gateway-planner-samples/(신규 4), scripts/gateway-planner-phase0/(신규 — preprocess/analyze/render_spaces/place.mjs, RESULT.md, work/ 산출물), package.json(sharp)
+- 다음 단계: 사용자 판정(work/*_placed.png) → Phase 1 코어 파이프라인 착수 여부 결정
+
 ## 2026-07-19 05:55 | 태그·비시리얼 LOT PROD 배포 + 센서 기초 재고 마이그레이션
 
 - `446cb86` push → PROD pull → 마이그레이션 `20260719050000` 적용+resolve → 빌드 → 재시작 → 정상

@@ -28,6 +28,8 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 | 마크다운 렌더링 | react-markdown + `@tailwindcss/typography` |
 | AI 챗봇 | Flowise RAG (외부 API 연동) |
 | AI 정제 | Anthropic Claude API (`@anthropic-ai/sdk`) |
+| 이미지 처리 (GW 플래너) | sharp + poppler-utils(`pdftoppm`·`pdfinfo`, 시스템 패키지) |
+| PPTX 생성 (GW 플래너) | pptxgenjs |
 | 런타임 | Node.js 20 |
 
 ---
@@ -102,6 +104,8 @@ app/
 │   │   │       └── duplicate/route.ts # POST 복제 (단일/하위 포함)
 │   │   ├── tree/route.ts             # GET 전체 트리 (+프로젝트 이슈노트 보호 정보)
 │   │   └── project-issue-notes/      # 프로젝트 이슈노트 조회/생성 (프로젝트 상세 임베드용)
+│   ├── gateway-planner/              # GW 배치 플래너 (ADMIN 이상)
+│   │   └── jobs/                     # 잡 목록/업로드 + [id](상세·삭제)/scale(스케일 확정)/replace(재배치)/reanalyze/pptx
 │   ├── vehicles/                     # 차량 마스터 CRUD (ADMIN 이상 쓰기)
 │   ├── vehicle-reservations/         # 차량예약 CRUD (충돌 검사 + soft 취소)
 │   │   └── [id]/return/              # 반납(POST: 주행거리 입력→운행일지 생성) / 반납취소(DELETE, ADMIN)
@@ -130,6 +134,7 @@ app/
 ├── maintenances/                     # 유지보수 목록·상세·등록
 ├── etc-tasks/                        # 기타업무 목록·상세·등록 (다병원·비유지보수 업무)
 ├── tasks/                            # 업무(Task) 현황 (통합 조회)
+├── gateway-planner/                  # GW 배치 플래너 — 도면 업로드·잡 목록 + [id](진행 폴링·스케일 확정·2점 보정·배치 미리보기·PPTX)
 ├── vehicle-reservations/             # 차량예약 주간 현황 보드 + 예약/반납 모달 + 내 예약 + 운행일지 탭(VehicleLogsPanel)
 │   └── mobile/                       # 빠른 예약·반납 모바일 페이지 (가능 차량 실시간 검색 + 인라인 반납)
 ├── ai-assistant/                     # AI 어시스턴트 채팅
@@ -201,6 +206,14 @@ lib/
 ├── delay-rules.ts                    # 지연 업무 판정 (타입별 기준일·임계일수, findDelayedTasks — KST 기준·보류 제외)
 ├── notify-scheduler.ts               # 지연 감지 인터벌 스케줄러 (mail-scheduler 패턴, notify_delay_interval 제어)
 ├── inventory.ts                      # 자재관리 — 품목 채번(nextItemCode) + 재고 처리 권한(canManageStock: ADMIN or 재고 담당자 풀)
+├── gateway-planner/                  # GW 배치 플래너 (function_gateway_planner.html)
+│   ├── types.ts                      # 공용 타입 + 기본 배치 규칙
+│   ├── rules.ts                      # 규칙 로드/저장 (AppSetting gw_planner_rules)
+│   ├── vision.ts                     # 래스터화(pdftoppm)·정규화(sharp)·Claude Vision 타일 분석·병합
+│   ├── scale.ts                      # 치수 판독 → 스케일 산출 (robust median)
+│   ├── placement.ts                  # 결정론적 배치 엔진 (복도 중앙선 등간격·실별 개수)
+│   ├── pptx.ts                       # PPTX 생성 (A4 가로, 점 개별 도형)
+│   └── runner.ts                     # 백그라운드 파이프라인 러너 + 재배치
 └── wiki/
     ├── blockText.ts                  # BlockNote 블록 → plain text 추출·페이지 링크 인덱싱
     ├── htmlText.ts                   # HTML 문서 페이지 — sanitize(script 등 제거) + plain text·title 추출
@@ -478,7 +491,7 @@ prisma/
 - 자재 품목 단위. 고유 코드 `itemCode`: `ITEM-NNNN` (전체 순번, 생성 시 자동 발번)
 - **`inventoryId`(소속 인벤토리 — Phase 10, 필수·변경 불가)**: 같은 물건도 인벤토리마다 별도 품목·별도 코드로 등록 (완전 독립 관리)
 - `name`, **`modelName`(모델명 — 제조사 모델 식별자, 규격과 별개)**, 분류(`categoryId` → InventoryCategory 트리), 제조사(`manufacturerId` → StatusCode `MANUFACTURER`), `spec`(규격), `unit`(단위, 기본 EA)
-- `isSerialManaged`(시리얼 개체 추적 여부), `isLotManaged`(LOT 추적 — **시리얼 품목**: 신규 입고 시 개체별 LOT 필수 / **비시리얼 품목**: 전표 단위 `lot_no` 선택 기록) — 둘 다 입출고 이력 생기면 변경 409 잠금. `tags`(TEXT[] 자유 태그, 최대 10개), `deviceInfoId`(자사 기기 ↔ DeviceInfo 선택 FK)
+- `isSerialManaged`(시리얼 개체 추적 여부), `isLotManaged`(LOT 추적 — **시리얼 품목**: 신규 입고 시 개체별 LOT 필수 / **비시리얼 품목**: 전표 단위 `lot_no` 선택 기록) — 둘 다 입출고 이력 생기면 변경 409 잠금. `deviceInfoId`(자사 기기 ↔ DeviceInfo 선택 FK). ~~`tags`~~ — deprecated(2026-07-20, 태그는 개체 `InventoryUnit.tags`로 이관·백업 보존)
 - `refPrice`(참고 단가, nullable), `memo`, `isActive`, `sortOrder`
 - 이력 있는 품목 삭제 → 비활성화 전환 (이력 보존)
 - 인덱스: `(category_id)`, `(inventory_id)`
@@ -521,9 +534,17 @@ prisma/
 - `actorId`, `canceledAt`/`canceledById`(취소 마킹). 인덱스: `(item_id, created_at)`, `(hospital_code)`, `(work_type, ref_code)`, `(created_at)`, `(inventory_id, created_at)`, `(parent_tx_id)`
 
 #### InventoryUnit / InventoryTransactionUnit (시리얼 개체)
-- `InventoryUnit`: 시리얼 품목 개체. `itemId`+`serialNo`(UNIQUE — 품목이 인벤토리 귀속이라 시리얼도 자동 격리), `status`(IN_STOCK/OUT/DISPOSED), `warehouseId`(재고 시 위치), `inventoryId`(= 품목 소속, 비정규화), `hospitalCode`(출고 설치처). 인덱스 `(item_id, status)`, `(hospital_code)`, `(inventory_id)`
+- `InventoryUnit`: 시리얼 품목 개체. `itemId`+`serialNo`(UNIQUE — 품목이 인벤토리 귀속이라 시리얼도 자동 격리), `status`(IN_STOCK/OUT/DISPOSED), `warehouseId`(재고 시 위치), `inventoryId`(= 품목 소속, 비정규화), `hospitalCode`(출고 설치처), **`tags`(TEXT[] — 개체 단위 자유 태그, 최대 10개, 2026-07-20)**, `memo`. 태그·메모는 `PATCH /api/inventory/units/[id]`로 정정(처리 권한자). 인덱스 `(item_id, status)`, `(hospital_code)`, `(inventory_id)`
 - 갱신은 조건부 updateMany + 건수 검증 (동시 요청 이중 출고 차단)
 - `InventoryTransactionUnit`: 전표↔개체 조인(개체 이력 산출). 복합 PK `(transactionId, unitId)`
+
+### GatewayPlanJob (게이트웨이 배치 플래너 잡 — `function_gateway_planner.html`)
+- 도면 분석 잡 단위. `status`: PENDING → RASTERIZING → ANALYZING → NEED_SCALE(사용자 스케일 확정 대기) → PLACED / ERROR
+- 원본·정규화 이미지·PPTX S3 키(`gateway-planner/{jobId}/…`), 이미지 크기(원본/vision)
+- 스케일: `scaleMPerPx`(m/px, vision 좌표 기준), `scaleSource`(ai_dimension/manual_2point/none), `scaleMeta`(AI 치수 후보·2점 보정 입력)
+- `analysis`(JSONB — 공간 인식 spaces[]), `placements`(JSONB — 배치 points[]·skipped·notes), `gatewayCount`, `rulesSnapshot`, `tokenUsage`
+- `createdBy` → User. 인덱스 `(created_by, created_at DESC)`, `(created_at DESC)`
+- 배치 규칙은 AppSetting `gw_planner_rules` (커버리지 직경·복도 간격 계수·병실 개수·제외 공간 등)
 
 ### Wiki 모듈 — 별도 PostgreSQL 스키마 `wiki`
 - 사내 위키(Notion-like) 기능. 본문은 BlockNote JSON 블록 배열로 저장
@@ -748,7 +769,7 @@ prisma/
 - **주자재/부자재 (BOM)**: 품목 상세에서 주자재 아래 부자재 N개 매핑(구성 수량 포함, 1단계 깊이, **같은 인벤토리 품목끼리만** — 서버 409). 출고 모달 **"부자재 함께 출고"(세트출고)** — 비시리얼 부자재를 같은 위치에서 자동 동시 출고(수량=출고수량×구성수량, 수정 가능), 자식 전표 `parent_tx_id` 연결·부모 취소 시 일괄 취소. 시리얼 부자재는 개별 출고
 - **시리얼 개체 추적 (바코드 스캔 대량 처리)**: `is_serial_managed` 품목은 개체 단위 관리(IN_STOCK/OUT/DISPOSED). 입고·출고·이동 모두 **시리얼 직접 입력 textarea**(줄 단위 붙여넣기·바코드 리더기 연속 스캔) — 재고 1만 개·1회 100~200개 출고 대응. 서버가 시리얼→개체 해석 후 위치·재고 상태 검증(미등록/불일치 시리얼 명시 거부 — 시리얼은 품목 단위라 타 인벤토리 개체는 자동 격리), 가용 개체 목록 클릭 선택 병행. 수량↔개체 정합 보장, 동시성 가드(조건부 updateMany+건수 검증)
 - **LOT 추적 (2026-07-19)**: 품목 마스터 'LOT 관리' 체크(입출고 이력 생기면 변경 409 잠금). **시리얼 품목**: `inventory_units.lot_no` 개체 단위 — 신규 입고 시 필수, 회수·출고 시 값이 있으면 개체 LOT 대조. **비시리얼 품목**: 전표 단위 `inventory_transactions.lot_no` 선택 기록(입고·출고, 이력·Excel 표시). 단건 입고 모달은 전표당 LOT 1개 — LOT 혼합은 전표 분리 또는 Excel 일괄(행별 LOT). 개체 목록·이력에 LOT 컬럼
-- **품목 태그·비고 (2026-07-19)**: `tags`(쉼표 입력 → 뱃지 표시, 분류 보조) + 기존 memo를 '비고'로 노출(품목 목록 컬럼)
+- **개체(단품) 태그·비고 (2026-07-20)**: 태그는 **시리얼 개체 단위**(`inventory_units.tags`, 최대 10개) — 개체 목록에 태그 컬럼 + '편집' 모달(태그·메모, 처리 권한자)로 관리(예: DEMO, 각인). 품목 단위 태그(2026-07-19)는 개체 태그로 대체되어 UI 제거(`inventory_items.tags` 컬럼은 백업 보존). 품목 memo는 '비고'로 노출(품목 목록 컬럼)
 - **요청자 (2026-07-19)**: 전표 `requester`(자유 텍스트) — **출고 필수**(내부 처리는 "자체 처리" 등 기입), 입고 선택, 이동 없음. 세트출고 자식 전표에 상속, 이력 컬럼·Excel 다운로드 포함
 - **전표 메타 수정 (2026-07-19, ADMIN 이상)**: `PUT /api/inventory/transactions/[id]` — 유형(같은 시스템 동작 부류 내에서만: 일반↔일반·회수↔회수·폐기↔폐기)·요청자·출고처·병원/업무 연결·비고. **수량·품목·위치·시리얼은 수정 불가**(재고 스냅샷·개체 정합 — 취소 후 재등록). 취소·이관(구) 전표 수정 불가, 감사 로그 before/after 기록
 - **입출고 이력** (`/inventory/transactions`): 인벤토리 탭 + 유형·위치(탭 인벤토리 스코프)·기간 필터, **수정(ADMIN)**·취소(권한자, 과거 이관 전표는 취소 불가 409), 요청자 컬럼, **Excel 다운로드**(필터 반영, 최대 1만 행)
@@ -757,6 +778,14 @@ prisma/
 - **위치(창고) 관리** (`/settings/warehouses`, ADMIN): **인벤토리별 섹션으로 독립 추가/수정/삭제** — 위치명 UNIQUE는 인벤토리 내에서만(다른 인벤토리엔 같은 이름 허용)
 - **처리 권한**: 입고/출고/이동/취소 = 재고 담당자 풀(`/settings/inventory-managers`) + ADMIN 이상(`canManageStock` 서버 실시간 검사). 조회=전 로그인. 감사 로그 `resource='inventory_tx'`/`inventory_item`/`setting:*`
 - **PROD 배포**: Phase 10(인벤토리 완전 분리, 마이그레이션 `20260716100000`)까지 배포 완료
+
+### GW 배치 플래너 (`/gateway-planner`, ADMIN 이상 — `function_gateway_planner.html` Phase 1·2)
+- **목적**: 병원 1개층 도면(스캔 PDF/JPG/PNG)을 업로드하면 AI가 공간(복도·병실·화장실 등)을 인식하고 게이트웨이 설치 위치 초안을 자동 배치 → **편집 가능한 PPTX**(A4 가로, 빨간 점 = 개별 도형)로 다운로드해 사람이 PowerPoint에서 검토·수정 후 설치계획 문서에 사용
+- **파이프라인** (백그라운드 잡 — HiraSyncJob 패턴, 30초~2분): 래스터화(pdftoppm 200DPI) → 정규화(sharp, 장변 1568px) → **Claude Vision 공간 인식**(2×2 타일 분할 + 그리드 오버레이, claude-opus-4-8 tool use) + **전체 뷰 치수 판독** → 스케일 후보 산출(robust median) → **결정론적 배치 엔진**(AI 미사용 — 복도는 중앙선 등간격, 병실 면적 기준 1~2개, 화장실 1개, 계단·EV·야외 제외) → 미리보기 배치
+- **스케일 확정 (필수 사람 개입)**: AI 치수 판독 후보 승인 / 도면 2점 클릭+실거리 입력 보정 / 스케일 없이 진행(개소 기반만) — 확정 후 PPTX 생성 가능
+- **잡 상세**: 진행 상태 폴링, 도면 위 점·공간 인식 결과 SVG 오버레이 미리보기, 공간별 집계, 재배치(AI 재호출 없음)·AI 재분석·PPTX 생성/다운로드·삭제
+- **배치 규칙 설정** (`/settings/gateway-planner`, ADMIN): 커버리지 직경(기본 10m)·복도 간격 계수(0.8→8m)·병실 기본/소형 개수·소형 기준 면적(20㎡)·최소 배치 면적·제외 공간·점 직경(0.2cm)/색상. AppSetting `gw_planner_rules`, 변경 후 기존 잡은 "재배치"로 반영
+- 감사 로그 `resource='gateway_plan'` / `setting:gateway-planner`. 접근: 메뉴·API 모두 ADMIN 이상
 
 ### 차량예약
 - 법인차량 선착순 즉시 확정 예약 (승인 절차 없음)
@@ -1171,6 +1200,19 @@ npm run dev
 | GET  | `/api/vehicle-reservations/[id]` | 예약 상세 |
 | PUT  | `/api/vehicle-reservations/[id]` | 예약 수정 (본인 또는 ADMIN 이상, 충돌 재검사) |
 | DELETE | `/api/vehicle-reservations/[id]` | 예약 취소 (본인 또는 ADMIN 이상, status=CANCELED) |
+
+### GW 배치 플래너 (전체 ADMIN 이상)
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET | `/api/gateway-planner/jobs` | 잡 목록 (최근 100건) |
+| POST | `/api/gateway-planner/jobs` | 도면 업로드 + 잡 생성 (multipart `file`/`title`/`page`, 백그라운드 파이프라인 시작) |
+| GET | `/api/gateway-planner/jobs/[id]` | 잡 상세 (상태 폴링 겸용 — 분석·배치 결과 + presigned 이미지/PPTX URL) |
+| DELETE | `/api/gateway-planner/jobs/[id]` | 잡 삭제 (S3 파일 포함) |
+| PATCH | `/api/gateway-planner/jobs/[id]/scale` | 스케일 확정 (`mode`: confirm/manual(2점+m)/none) → 재배치 + PLACED |
+| POST | `/api/gateway-planner/jobs/[id]/replace` | 현재 규칙으로 재배치 (AI 재호출 없음) |
+| POST | `/api/gateway-planner/jobs/[id]/reanalyze` | AI 재분석 (원본부터 파이프라인 재수행, 스케일 초기화) |
+| POST | `/api/gateway-planner/jobs/[id]/pptx` | PPTX 생성 → S3 저장 + presigned URL (PLACED 상태에서만) |
+| GET/PUT | `/api/settings/gateway-planner` | 배치 규칙 조회/저장 (AppSetting `gw_planner_rules`) |
 
 ### AI 어시스턴트
 | Method | Endpoint | 설명 |

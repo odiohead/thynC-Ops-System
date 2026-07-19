@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import TransactionModal, { ModalItem } from '../../components/TransactionModal'
+import UnitEditModal from '../../components/UnitEditModal'
 
 interface Item {
   id: number
@@ -39,7 +40,7 @@ interface Tx {
   parentTx: { txCode: string } | null
 }
 interface Unit {
-  id: number; serialNo: string; lotNo: string | null; status: string; memo: string | null
+  id: number; serialNo: string; lotNo: string | null; status: string; memo: string | null; tags: string[]
   warehouse: { name: string } | null; hospital: { hospitalName: string } | null
 }
 interface CandidateItem { id: number; itemCode: string; name: string; isSerialManaged: boolean }
@@ -61,6 +62,7 @@ export default function ItemDetailPage() {
   const [units, setUnits] = useState<Unit[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [canManage, setCanManage] = useState(false)
+  const [editUnit, setEditUnit] = useState<Unit | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [tab, setTab] = useState<'history' | 'units'>('history')
   const [modalOpen, setModalOpen] = useState(false)
@@ -336,20 +338,32 @@ export default function ItemDetailPage() {
           <table className="w-full text-sm whitespace-nowrap">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <th className="px-3 py-2">시리얼</th><th className="px-3 py-2">LOT</th><th className="px-3 py-2">상태</th><th className="px-3 py-2">위치</th><th className="px-3 py-2">설치처</th><th className="px-3 py-2">메모</th>
+                <th className="px-3 py-2">시리얼</th><th className="px-3 py-2">LOT</th><th className="px-3 py-2">태그</th><th className="px-3 py-2">상태</th><th className="px-3 py-2">위치</th><th className="px-3 py-2">설치처</th><th className="px-3 py-2">메모</th>{canManage && <th className="px-3 py-2" />}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {units.length === 0 ? (
-                <tr><td colSpan={6} className="py-8 text-center text-sm text-gray-400">개체 없음</td></tr>
+                <tr><td colSpan={canManage ? 8 : 7} className="py-8 text-center text-sm text-gray-400">개체 없음</td></tr>
               ) : units.map((u) => (
                 <tr key={u.id}>
                   <td className="px-3 py-2 font-mono text-gray-900">{u.serialNo}</td>
                   <td className="px-3 py-2 font-mono text-xs text-gray-500">{u.lotNo ?? '-'}</td>
+                  <td className="px-3 py-2">
+                    {(u.tags ?? []).length === 0 ? <span className="text-xs text-gray-300">-</span> : (
+                      <div className="flex flex-wrap gap-1">
+                        {u.tags.map((t) => <span key={t} className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600">#{t}</span>)}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-3 py-2"><span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${UNIT_STATUS[u.status]?.cls ?? ''}`}>{UNIT_STATUS[u.status]?.label ?? u.status}</span></td>
                   <td className="px-3 py-2 text-gray-600 text-xs">{u.status === 'IN_STOCK' ? (u.warehouse?.name ?? '-') : '-'}</td>
                   <td className="px-3 py-2 text-gray-600 text-xs">{u.status === 'OUT' ? (u.hospital?.hospitalName ?? '출고됨') : '-'}</td>
                   <td className="px-3 py-2 text-gray-500 text-xs">{u.memo ?? '-'}</td>
+                  {canManage && (
+                    <td className="px-3 py-2 text-right">
+                      <button onClick={() => setEditUnit(u)} className="text-xs text-blue-500 hover:underline">편집</button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -360,6 +374,9 @@ export default function ItemDetailPage() {
       {modalOpen && inventory && (
         <TransactionModal item={modalItem} inventory={inventory} warehouses={warehouses}
           onClose={() => setModalOpen(false)} onDone={() => { setModalOpen(false); fetchAll(); if (item.isSerialManaged) fetchUnits() }} />
+      )}
+      {editUnit && (
+        <UnitEditModal unit={editUnit} onClose={() => setEditUnit(null)} onSaved={fetchUnits} />
       )}
     </div>
   )

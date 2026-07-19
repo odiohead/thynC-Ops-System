@@ -17,7 +17,6 @@ interface Item {
   unit: string
   isSerialManaged: boolean
   isLotManaged: boolean
-  tags: string[]
   refPrice: number | null
   memo: string | null
   isActive: boolean
@@ -42,7 +41,6 @@ interface ItemForm {
   unit: string
   isSerialManaged: boolean
   isLotManaged: boolean
-  tags: string // 쉼표 구분 입력
   deviceInfoId: number | null
   refPrice: string
   memo: string
@@ -51,7 +49,7 @@ interface ItemForm {
 
 const emptyForm: ItemForm = {
   inventoryId: null, name: '', modelName: '', cat1: null, cat2: null, cat3: null, manufacturerId: null, spec: '', unit: 'EA',
-  isSerialManaged: false, isLotManaged: false, tags: '', deviceInfoId: null, refPrice: '', memo: '', isActive: true,
+  isSerialManaged: false, isLotManaged: false, deviceInfoId: null, refPrice: '', memo: '', isActive: true,
 }
 
 interface PreviewResult {
@@ -173,7 +171,6 @@ export default function InventoryItemsPage() {
       unit: item.unit,
       isSerialManaged: item.isSerialManaged,
       isLotManaged: item.isLotManaged,
-      tags: (item.tags ?? []).join(', '),
       deviceInfoId: item.deviceInfo?.id ?? null,
       refPrice: item.refPrice != null ? String(item.refPrice) : '',
       memo: item.memo ?? '',
@@ -197,7 +194,6 @@ export default function InventoryItemsPage() {
       unit: form.unit,
       isSerialManaged: form.isSerialManaged,
       isLotManaged: form.isLotManaged,
-      tags: form.tags.split(',').map((t) => t.trim()).filter(Boolean),
       deviceInfoId: form.deviceInfoId,
       refPrice: form.refPrice.trim() ? parseInt(form.refPrice) : null,
       memo: form.memo,
@@ -369,11 +365,6 @@ export default function InventoryItemsPage() {
                 <td className="px-3 py-3 font-medium text-gray-900">
                   {item.name}
                   {item.deviceInfo && <span className="ml-1 text-xs text-gray-400">({item.deviceInfo.deviceModel})</span>}
-                  {(item.tags ?? []).length > 0 && (
-                    <span className="mt-0.5 flex flex-wrap gap-1">
-                      {item.tags.map((t) => <span key={t} className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">#{t}</span>)}
-                    </span>
-                  )}
                 </td>
                 <td className="px-3 py-3 text-gray-600 text-xs">{item.modelName ?? '-'}</td>
                 <td className="px-3 py-3 text-gray-600 text-xs">{item.manufacturer?.name ?? '-'}</td>
@@ -510,10 +501,6 @@ export default function InventoryItemsPage() {
                 </label>
               </div>
               {editId && <p className="text-xs text-gray-400">시리얼/LOT 관리 여부는 입출고 이력이 생기면 변경할 수 없습니다. 시리얼+LOT 품목은 신규 입고 시 LOT 필수, 비시리얼 LOT 품목은 전표에 LOT 선택 기록.</p>}
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">태그 (쉼표로 구분)</label>
-                <input value={form.tags} onChange={(e) => setForm((f) => ({ ...f, tags: e.target.value }))} className={selectCls} placeholder="예: DEMO, 각인, 평가1차" />
-              </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">비고</label>
                 <textarea value={form.memo} onChange={(e) => setForm((f) => ({ ...f, memo: e.target.value }))} rows={2} className={selectCls} />

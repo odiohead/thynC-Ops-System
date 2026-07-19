@@ -102,10 +102,7 @@ export default function TransactionModal({
   // 마스터 로드 — 입출고 유형 + (품목 미고정 시) 이 인벤토리의 품목 목록
   useEffect(() => {
     fetch('/api/settings/stock-in-type').then(async (r) => {
-      if (!r.ok) return
-      const list: Reason[] = (await r.json()).statusCodes ?? []
-      setInReasons(list)
-      if (list.length) setReasonId((prev) => prev ?? list[0].id)
+      if (r.ok) setInReasons((await r.json()).statusCodes ?? [])
     })
     fetch('/api/settings/stock-out-type').then(async (r) => { if (r.ok) setOutReasons((await r.json()).statusCodes ?? []) })
     if (!fixedItem) {
@@ -122,6 +119,15 @@ export default function TransactionModal({
       if (r.ok) setComponents(((await r.json()).components ?? []) as Component[])
     })
   }, [item])
+
+  // 유형(사유) 정합성 보장 — 현재 탭의 목록에 없는 reasonId면 첫 항목으로 교정
+  // (출고 탭으로 바로 열렸을 때 입고 유형이 시드되어 400 나던 버그 방지)
+  useEffect(() => {
+    if (txType === 'MOVE') return
+    const list = txType === 'IN' ? inReasons : outReasons
+    if (!list.length) return
+    if (!list.some((r) => r.id === reasonId)) setReasonId(list[0].id)
+  }, [txType, inReasons, outReasons, reasonId])
 
   function switchType(t: TxType) {
     setTxType(t)
