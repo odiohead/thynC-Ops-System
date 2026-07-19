@@ -4,6 +4,10 @@
 
 ---
 
+## 2026-07-19 03:20 | 유지보수 개편 + 자재관리 보완 PROD 배포
+
+- `bb2d12d` push → PROD pull → **사전 백업** `~/backups/db/thync_ops_pre_mnt_logs_20260719.dump`(maintenances 테이블) → 마이그레이션 2건 psql 적용+resolve(`20260718235500_maintenance_logs`: 비고 30건 이관·원인 85건 병합 — DEV와 동일 수치, `20260719023000_wms_requester_lot`) → prisma generate → 힙 4GB 빌드 → `pm2 restart thync-prod` → HTTP 응답 정상
+
 ## 2026-07-19 03:10 | 자재관리 보완 — 요청자·LOT 추적·전표 메타 수정 (실데이터 입력 준비)
 
 - **요청자**: `inventory_transactions.requester`(자유 텍스트) — 출고 필수(서버 400)·입고 선택·이동 없음. 단건 모달/일괄 업로드 입력, 세트출고 자식 상속, 이력 컬럼·Excel export 반영
