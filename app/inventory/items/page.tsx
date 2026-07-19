@@ -270,7 +270,7 @@ export default function InventoryItemsPage() {
   const selectCls = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="p-6 max-w-screen-2xl mx-auto">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">품목 관리</h1>
@@ -339,51 +339,51 @@ export default function InventoryItemsPage() {
         <table className="w-full text-sm whitespace-nowrap">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              <th className="px-3 py-3">코드</th>
-              <th className="px-3 py-3">인벤토리</th>
-              <th className="px-3 py-3">분류</th>
-              <th className="px-3 py-3">품목명</th>
-              <th className="px-3 py-3">모델명</th>
-              <th className="px-3 py-3">제조사</th>
-              <th className="px-3 py-3">규격</th>
-              <th className="px-3 py-3">단위</th>
-              <th className="px-3 py-3 text-center">시리얼</th>
-              <th className="px-3 py-3">비고</th>
-              <th className="px-3 py-3 text-right">참고단가</th>
-              <th className="px-3 py-3 text-center">활성</th>
-              <th className="px-3 py-3 text-right">관리</th>
+              <th className="px-2 py-2.5">코드</th>
+              <th className="px-2 py-2.5">인벤토리</th>
+              <th className="px-2 py-2.5">분류</th>
+              <th className="px-2 py-2.5">품목명</th>
+              <th className="px-2 py-2.5">모델명</th>
+              <th className="px-2 py-2.5">제조사</th>
+              <th className="px-2 py-2.5">규격</th>
+              <th className="px-2 py-2.5">단위</th>
+              <th className="px-2 py-2.5 text-center">시리얼</th>
+              <th className="px-2 py-2.5">비고</th>
+              <th className="px-2 py-2.5 text-right">참고단가</th>
+              <th className="px-2 py-2.5 text-center">활성</th>
+              <th className="px-2 py-2.5 text-right">관리</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {items.map((item) => (
               <tr key={item.id} className={`hover:bg-gray-50 ${!item.isActive ? 'opacity-50' : ''}`}>
-                <td className="px-3 py-3 font-mono text-xs text-gray-500">{item.itemCode}</td>
-                <td className="px-3 py-3 text-xs">
+                <td className="px-2 py-2 font-mono text-xs text-gray-500">{item.itemCode}</td>
+                <td className="px-2 py-2 text-xs">
                   <span className="rounded bg-blue-50 px-1.5 py-0.5 font-medium text-blue-700">{item.inventory?.name ?? '-'}</span>
                 </td>
-                <td className="px-3 py-3 text-xs text-gray-600">{item.categoryPath || '-'}</td>
-                <td className="px-3 py-3 font-medium text-gray-900">
+                <td className="px-2 py-2 text-xs text-gray-600 max-w-[130px] truncate" title={item.categoryPath}>{item.categoryPath || '-'}</td>
+                <td className="px-2 py-2 font-medium text-gray-900 max-w-[200px] truncate" title={item.name}>
                   {item.name}
                   {item.deviceInfo && <span className="ml-1 text-xs text-gray-400">({item.deviceInfo.deviceModel})</span>}
                 </td>
-                <td className="px-3 py-3 text-gray-600 text-xs">{item.modelName ?? '-'}</td>
-                <td className="px-3 py-3 text-gray-600 text-xs">{item.manufacturer?.name ?? '-'}</td>
-                <td className="px-3 py-3 text-gray-600">{item.spec || '-'}</td>
-                <td className="px-3 py-3 text-gray-600">{item.unit}</td>
-                <td className="px-3 py-3 text-center">
+                <td className="px-2 py-2 text-gray-600 text-xs max-w-[120px] truncate" title={item.modelName ?? ''}>{item.modelName ?? '-'}</td>
+                <td className="px-2 py-2 text-gray-600 text-xs max-w-[90px] truncate" title={item.manufacturer?.name ?? ''}>{item.manufacturer?.name ?? '-'}</td>
+                <td className="px-2 py-2 text-gray-600 text-xs max-w-[100px] truncate" title={item.spec ?? ''}>{item.spec || '-'}</td>
+                <td className="px-2 py-2 text-gray-600 text-xs">{item.unit}</td>
+                <td className="px-2 py-2 text-center">
                   {item.isSerialManaged || item.isLotManaged
                     ? <span className="inline-flex items-center gap-0.5">{item.isSerialManaged && <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-xs font-medium text-indigo-600">S/N</span>}{item.isLotManaged && <span className="rounded bg-teal-50 px-1.5 py-0.5 text-xs font-medium text-teal-600">LOT</span>}</span>
                     : <span className="text-gray-300">-</span>}
                 </td>
-                <td className="px-3 py-3 text-gray-500 text-xs max-w-[160px] truncate" title={item.memo ?? ''}>{item.memo || '-'}</td>
-                <td className="px-3 py-3 text-right tabular-nums text-gray-600">{item.refPrice != null ? item.refPrice.toLocaleString() : '-'}</td>
-                <td className="px-3 py-3 text-center">
+                <td className="px-2 py-2 text-gray-500 text-xs max-w-[120px] truncate" title={item.memo ?? ''}>{item.memo || '-'}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-gray-600 text-xs">{item.refPrice != null ? item.refPrice.toLocaleString() : '-'}</td>
+                <td className="px-2 py-2 text-center">
                   <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${item.isActive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                     {item.isActive ? '활성' : '비활성'}
                   </span>
                 </td>
-                <td className="px-3 py-3 text-right">
-                  <div className="flex justify-end gap-2">
+                <td className="px-2 py-2 text-right">
+                  <div className="flex justify-end gap-1.5">
                     <button onClick={() => openEdit(item)} disabled={busy} className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-50">수정</button>
                     <button onClick={() => handleDelete(item)} disabled={busy} className="rounded-md border border-red-200 px-3 py-1 text-xs font-medium text-red-500 hover:bg-red-50 disabled:opacity-50">삭제</button>
                   </div>
@@ -500,7 +500,7 @@ export default function InventoryItemsPage() {
                   활성
                 </label>
               </div>
-              {editId && <p className="text-xs text-gray-400">시리얼/LOT 관리 여부는 입출고 이력이 생기면 변경할 수 없습니다. 시리얼+LOT 품목은 신규 입고 시 LOT 필수, 비시리얼 LOT 품목은 전표에 LOT 선택 기록.</p>}
+              {editId && <p className="text-xs text-gray-400">시리얼 관리 여부는 입출고 이력이 생기면 변경할 수 없습니다. LOT 관리는 이력이 있어도 변경 가능 — 기존 재고·전표의 LOT는 빈 값으로 남고 이후 입출고부터 적용됩니다. (시리얼+LOT: 신규 입고 시 LOT 필수, 비시리얼+LOT: 전표에 선택 기록)</p>}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">비고</label>
                 <textarea value={form.memo} onChange={(e) => setForm((f) => ({ ...f, memo: e.target.value }))} rows={2} className={selectCls} />

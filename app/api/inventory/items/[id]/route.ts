@@ -70,13 +70,14 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const name = body.name?.trim()
   if (!name) return NextResponse.json({ error: '품목명을 입력해주세요.' }, { status: 400 })
 
-  // 시리얼/LOT 관리 여부는 재고 이력이 생기면 변경 금지 — 수량↔개체 정합이 깨짐 (function_wms.md §4-1)
+  // 시리얼 관리 여부는 재고 이력이 생기면 변경 금지 — 수량↔개체 정합이 깨짐 (function_wms.md §4-1)
+  // LOT 관리 여부는 이력이 있어도 변경 허용 (2026-07-20) — 기존 개체·전표의 LOT는 없음(-) 유지, 이후 입출고부터 규칙 적용
   const wantSerial = !!body.isSerialManaged
   const wantLot = !!body.isLotManaged // 비시리얼 품목도 LOT 관리 가능 (전표 단위 기록)
-  if (wantSerial !== before.isSerialManaged || wantLot !== before.isLotManaged) {
+  if (wantSerial !== before.isSerialManaged) {
     const txCount = await prisma.inventoryTransaction.count({ where: { itemId: id } })
     if (txCount > 0) {
-      return NextResponse.json({ error: `입출고 이력이 ${txCount}건 있어 시리얼/LOT 관리 여부를 변경할 수 없습니다.` }, { status: 409 })
+      return NextResponse.json({ error: `입출고 이력이 ${txCount}건 있어 시리얼 관리 여부를 변경할 수 없습니다.` }, { status: 409 })
     }
   }
 

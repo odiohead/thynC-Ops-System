@@ -491,7 +491,7 @@ prisma/
 - 자재 품목 단위. 고유 코드 `itemCode`: `ITEM-NNNN` (전체 순번, 생성 시 자동 발번)
 - **`inventoryId`(소속 인벤토리 — Phase 10, 필수·변경 불가)**: 같은 물건도 인벤토리마다 별도 품목·별도 코드로 등록 (완전 독립 관리)
 - `name`, **`modelName`(모델명 — 제조사 모델 식별자, 규격과 별개)**, 분류(`categoryId` → InventoryCategory 트리), 제조사(`manufacturerId` → StatusCode `MANUFACTURER`), `spec`(규격), `unit`(단위, 기본 EA)
-- `isSerialManaged`(시리얼 개체 추적 여부), `isLotManaged`(LOT 추적 — **시리얼 품목**: 신규 입고 시 개체별 LOT 필수 / **비시리얼 품목**: 전표 단위 `lot_no` 선택 기록) — 둘 다 입출고 이력 생기면 변경 409 잠금. `deviceInfoId`(자사 기기 ↔ DeviceInfo 선택 FK). ~~`tags`~~ — deprecated(2026-07-20, 태그는 개체 `InventoryUnit.tags`로 이관·백업 보존)
+- `isSerialManaged`(시리얼 개체 추적 여부), `isLotManaged`(LOT 추적 — **시리얼 품목**: 신규 입고 시 개체별 LOT 필수 / **비시리얼 품목**: 전표 단위 `lot_no` 선택 기록). **시리얼 여부만 이력 생기면 변경 409 잠금** — LOT 여부는 이력이 있어도 변경 가능(2026-07-20, 기존 재고·전표 LOT는 빈 값 유지·이후 입출고부터 적용). `deviceInfoId`(자사 기기 ↔ DeviceInfo 선택 FK). ~~`tags`~~ — deprecated(2026-07-20, 태그는 개체 `InventoryUnit.tags`로 이관·백업 보존)
 - `refPrice`(참고 단가, nullable), `memo`, `isActive`, `sortOrder`
 - 이력 있는 품목 삭제 → 비활성화 전환 (이력 보존)
 - 인덱스: `(category_id)`, `(inventory_id)`
