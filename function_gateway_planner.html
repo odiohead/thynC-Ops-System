@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>게이트웨이 배치 플래너 — 설계안 v0.1</title>
+<style>
+  :root {
+    --ink: #1f2937; --sub: #6b7280; --line: #e5e7eb; --bg: #f9fafb;
+    --accent: #dc2626; --blue: #2563eb; --green: #059669; --amber: #d97706;
+    --code-bg: #f3f4f6;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: 'Pretendard', 'Segoe UI', 'Malgun Gothic', sans-serif; color: var(--ink); margin: 0; background: var(--bg); line-height: 1.65; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
+  header.doc { border-bottom: 3px solid var(--ink); padding-bottom: 16px; margin-bottom: 32px; }
+  header.doc h1 { margin: 0 0 6px; font-size: 26px; }
+  header.doc .meta { color: var(--sub); font-size: 13px; }
+  h2 { font-size: 20px; margin: 44px 0 12px; padding: 8px 12px; background: var(--ink); color: #fff; border-radius: 6px; }
+  h3 { font-size: 16px; margin: 26px 0 8px; border-left: 4px solid var(--blue); padding-left: 10px; }
+  p, li { font-size: 14.5px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; background: #fff; }
+  th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; white-space: nowrap; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; font-family: 'D2Coding', Consolas, monospace; }
+  pre { background: #111827; color: #e5e7eb; padding: 14px 16px; border-radius: 8px; overflow-x: auto; font-size: 12.5px; line-height: 1.5; }
+  pre code { background: none; padding: 0; color: inherit; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; margin: 14px 0; }
+  .flow { display: flex; flex-direction: column; gap: 0; margin: 16px 0; }
+  .flow-step { background: #fff; border: 2px solid var(--ink); border-radius: 10px; padding: 12px 18px; }
+  .flow-step .no { display: inline-block; background: var(--ink); color: #fff; border-radius: 999px; width: 24px; height: 24px; text-align: center; line-height: 24px; font-size: 13px; font-weight: 700; margin-right: 8px; }
+  .flow-step b { font-size: 15px; }
+  .flow-step .desc { color: var(--sub); font-size: 13px; margin: 4px 0 0 32px; }
+  .flow-arrow { text-align: center; color: var(--sub); font-size: 18px; padding: 2px 0; }
+  .badge { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-right: 4px; vertical-align: middle; }
+  .b-new { background: #fee2e2; color: #b91c1c; }
+  .b-exist { background: #dbeafe; color: #1d4ed8; }
+  .b-sys { background: #fef3c7; color: #92400e; }
+  .b-p1 { background: #dcfce7; color: #166534; }
+  .warn { border-left: 4px solid var(--amber); background: #fffbeb; padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 12px 0; font-size: 14px; }
+  .risk-hi { color: var(--accent); font-weight: 700; }
+  .risk-mid { color: var(--amber); font-weight: 700; }
+  .risk-lo { color: var(--green); font-weight: 700; }
+  .arch { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 20px; margin: 14px 0; overflow-x: auto; }
+  .q { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px 16px; margin: 10px 0; }
+  .q b { color: var(--blue); }
+  .dot-sample { display: inline-block; width: 10px; height: 10px; background: var(--accent); border-radius: 50%; vertical-align: middle; }
+  ul { padding-left: 22px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <h1>게이트웨이 배치 플래너 (Gateway Placement Planner) — 설계안</h1>
+  <div class="meta">v0.2 · 2026-07-19 · thynC Operations System 신규 기능 · 상태: <b>설계 확정 중 — 샘플 도면 검토 완료, Phase 0 착수 대기</b></div>
+</header>
+
+<h2>1. 개요</h2>
+<div class="card">
+  <p><b>목적</b>: 병원에서 전달받은 1개층 도면(스캔 PDF/JPG)을 업로드하면, AI가 도면의 공간 구조(복도·병실·화장실 등)를 인식하고 게이트웨이 커버리지 규칙에 따라 설치 위치 초안을 산출하여, <b>사람이 PowerPoint에서 검토·수정할 수 있는 편집 가능한 PPTX</b>로 내려주는 도구.</p>
+  <p><b>설계 철학</b>: AI는 80% 초안을 만들고, 최종 판단은 사람이 한다. 산출물의 빨간 점은 개별 도형 객체로 생성되어 PowerPoint에서 자유롭게 이동·삭제·복사할 수 있으며, 검토 완료된 슬라이드를 실제 설치계획 문서에 복사해 사용한다. 점 개수 = 장비 수량 = 견적 근거.</p>
+  <p><b>범위</b>: 설치계획 문서 전체 생성이 아니라 <b>도면 분석 + 게이트웨이 배치 표시 페이지 1장 생성</b>에만 집중. 1회 처리 단위 = 1개층 도면 1장.</p>
+</div>
+
+<h2>2. 확정 요구사항</h2>
+<table>
+  <tr><th>항목</th><th>내용</th></tr>
+  <tr><td>입력 형식</td><td>스캔 PDF(구조정보 없는 이미지 PDF) 또는 JPG — <b>순수 이미지 분석</b>. CAD 메타데이터 없음</td></tr>
+  <tr><td>축척</td><td>축척 표기가 없어도 <b>치수(길이) 표기는 일반적으로 존재</b> → 치수 기반 스케일 산출. 치수도 없는 도면은 후순위 처리</td></tr>
+  <tr><td>배치 규칙 (초기값)</td><td>
+    ① 게이트웨이 커버리지: <b>직경 10m</b><br>
+    ② 병실: 기본 <b>2개</b>, 매우 작은 병실은 <b>1개</b><br>
+    ③ 공용화장실: <b>1개</b><br>
+    ④ 계단실·야외: <b>제외</b><br>
+    ⑤ 규칙은 추후 <b>설정 화면에서 변경 가능</b>해야 함
+  </td></tr>
+  <tr><td>배치 위치</td><td>운영관리시스템 <b>내부</b>에 개발하되, <b>별도 메인 네비게이션 메뉴</b>로 완전 독립 도구로 사용 (병원/설치계획 연동 없음 — MVP 기준)</td></tr>
+  <tr><td>배치 대상 공간</td><td>계단실·EV·야외 등 제외 목록 외에는 <b>인식된 모든 실(미분류 포함)에 일단 배치</b> → 불필요한 곳은 사람이 PPT에서 점 삭제 (2026-07-19 확정)</td></tr>
+  <tr><td>산출물</td><td>PPTX, <b>A4 가로(29.7 × 21.0cm)</b>. 게이트웨이 = <span class="dot-sample"></span> <b>빨간 점, 직경 0.2cm</b>, 개별 도형 객체(이동·삭제 가능). <b>총 대수 표기</b>. 점 번호 라벨(GW-01…)은 <b>미적용</b> (2026-07-19 확정)</td></tr>
+  <tr><td>접근 권한</td><td><b>ADMIN 이상</b> (네비 메뉴·API 모두. 추후 완화는 메뉴 관리 + 코드 권한 상수로 조정) (2026-07-19 확정)</td></tr>
+</table>
+
+<h3>2.1 샘플 도면 검토 결과 (2026-07-19, <code>docs/gateway-planner-samples/</code> 4종)</h3>
+<table>
+  <tr><th>샘플</th><th>특성</th><th>설계 시사점</th></tr>
+  <tr><td><code>good_1.jpg</code><br>(지상9층 평면도)</td><td>CAD 출력 고품질 이미지(3508px). 축척 표기(A1 1/150·A3 1/300) + 그리드 치수 체인(mm) + 실별 호수·병상수·면적 표기(예: 36.0m2/10.9py). L자형 복도</td><td><b>이상적 입력.</b> 치수·면적 표기가 풍부해 스케일 자동 산출과 병실 면적 판정(1~2개 규칙)까지 가능. 실명에 병상수 <code>(6)</code>가 있어 병상수 기반 규칙 확장 여지</td></tr>
+  <tr><td><code>good_2.pdf</code><br>(5~6층 평면도)</td><td>도면 인쇄 PDF, 축척 1/200 + 치수 체인. 단, <b>세로 시트에 도면이 90° 회전</b> 배치, 표제란·주기가 도면을 둘러쌈</td><td>파이프라인에 <b>회전 감지·보정</b> 단계 필요(AI에 방향 질의 or 사용자 회전 버튼). 표제란 영역은 공간 인식에서 제외 처리</td></tr>
+  <tr><td><code>bad_1.jpg</code><br>(5F 비상대피안내도)</td><td>건축 도면이 아닌 <b>피난안내도 스마트폰 촬영 사진</b>. 실 구조는 추상화된 개략도, <b>치수·축척·면적 일절 없음</b>. 실명 표기는 명확(501~508호·화장실·간호데스크)</td><td>스케일 산출 불가 → 복도 간격 배치 불가. 단 <b>개소 기반 규칙(병실 2·화장실 1)은 스케일 없이도 동작</b> — "무치수 모드"(복도만 대략 길이 입력 or 수동)로 부분 지원 가능. Phase 4 대상</td></tr>
+  <tr><td><code>bad_2.jpg</code><br>(지상 4층 평면도)</td><td>Excel 표 형태로 그린 개략 평면도. 실 기하는 왜곡(표 셀)이나 <b>하단·우측 치수(4,000…·합계 51,000mm)와 실별 면적·인실 표기는 존재</b></td><td>기하 좌표는 부정확해도 <b>실 목록·치수는 판독 가능</b> → 개소 기반 배치 + 근사 복도 간격까지 가능할 것. 점 위치 정밀도는 낮음을 전제(사람 보정 폭 큼)</td></tr>
+</table>
+<div class="warn"><b>결론</b>: good 계열은 파이프라인 전체가 그대로 적용 가능. bad 계열은 "공간 인식 + 개소 기반 배치"까지는 유효하고 복도 간격 배치만 제한 — MVP는 good 계열을 기준으로 하되, bad 계열은 Phase 0에서 인식 한계를 실측한 뒤 무치수 모드(Phase 4)의 범위를 정한다.</div>
+
+<h2>3. 시스템 아키텍처</h2>
+<div class="arch">
+<pre style="background:#fff;color:var(--ink);border:none;padding:0;margin:0;">
+┌──────────────────────────── thynC Ops System (Next.js 14, 기존 앱 내부) ────────────────────────────┐
+│                                                                                                      │
+│  [브라우저]                        [API Routes]                         [백그라운드 처리]              │
+│                                                                                                      │
+│  /gateway-planner        ──────▶  POST /api/gateway-planner/jobs   ──▶  Job 생성(PENDING) 후 즉시 응답 │
+│   업로드·잡 목록                       │                                      │                        │
+│                                       │                              ┌───────▼────────────────────┐  │
+│  /gateway-planner/[id]   ◀──폴링──  GET /api/gateway-planner/jobs/[id]│ 파이프라인 (async, 잡 단위)  │  │
+│   진행상태·미리보기·           │                                      │ ① PDF → PNG 래스터화        │  │
+│   스케일 확정·PPTX 다운로드     │                                      │    (pdftoppm/poppler)       │  │
+│                               │                                      │ ② 이미지 정규화 (sharp)      │  │
+│  /settings/gateway-planner    │                                      │ ③ Claude Vision 공간 인식    │  │
+│   배치 규칙 설정(ADMIN)        │                                      │    + 치수 판독 → 스케일 후보  │  │
+│                               │                                      │ ④ 배치 엔진 (결정론적 코드)   │  │
+│                               │                                      │ ⑤ pptxgenjs → PPTX 생성     │  │
+│                               │                                      └───────┬────────────────────┘  │
+│                               │                                              │                        │
+└───────────────────────────────┼──────────────────────────────────────────────┼────────────────────────┘
+                                │                                              │
+                    ┌───────────▼───────────┐                     ┌────────────▼───────────┐
+                    │ PostgreSQL (public)   │                     │ AWS S3                  │
+                    │ gateway_plan_jobs     │                     │ gateway-planner/{jobId}/ │
+                    │ (잡·분석결과·배치 JSON) │                     │  original.pdf / page.png │
+                    │ AppSetting (배치 규칙) │                     │  result.pptx             │
+                    └───────────────────────┘                     └──────────────────────────┘
+                                                  ┌──────────────────────┐
+                                                  │ Anthropic Claude API │  ◀── 기존 ANTHROPIC_API_KEY 재사용
+                                                  │ (Vision 도면 분석)     │
+                                                  └──────────────────────┘
+</pre>
+</div>
+
+<div class="card">
+  <b>아키텍처 결정 근거</b>
+  <ul>
+    <li><b>운영시스템 내부 개발 리스크 없음</b>: 신규 라우트(<code>/gateway-planner</code>, <code>/api/gateway-planner/*</code>)와 신규 테이블만 추가 — 기존 모듈을 수정하지 않으므로 격리도가 높다. 인증(JWT)·S3·Anthropic API·감사로그 등 기존 인프라를 전부 재사용해 개발량이 크게 줄어든다.</li>
+    <li><b>백그라운드 잡 패턴</b>: AI 분석은 30초~2분 소요 예상 → HTTP 요청 안에서 처리하지 않고, 기존 <b>심평원 연동(HiraSyncJob) 패턴</b>(잡 테이블 + 비동기 처리 + 클라이언트 폴링)을 그대로 따른다. 검증된 패턴이라 신규 인프라(큐 서버 등) 불필요.</li>
+    <li><b>배치 계산은 AI가 아니라 코드가 수행</b>: AI는 "공간 인식(어디가 복도·병실·화장실인가)"까지만 담당하고, 점 좌표 산출은 결정론적 배치 엔진(TypeScript)이 수행한다. 규칙 변경 시 재분석 없이 재배치만 하면 되고, 결과가 재현 가능하며, AI 좌표 환각 리스크를 구조적으로 줄인다.</li>
+  </ul>
+</div>
+
+<h2>4. 처리 파이프라인</h2>
+<div class="flow">
+  <div class="flow-step"><span class="no">1</span><b>업로드 & 래스터화</b>
+    <div class="desc">PDF/JPG 업로드(최대 30MB) → S3 원본 저장 → PDF는 poppler <code>pdftoppm</code>으로 200DPI PNG 변환(다중 페이지면 페이지 선택 UI), JPG는 그대로 → sharp로 장변 3000px 정규화 → <b>도면 방향 감지·회전 보정</b>(good_2 사례: 세로 시트에 90° 회전 배치 — AI 방향 질의 + 사용자 회전 버튼 폴백) → S3 저장. 잡 상태 <code>RASTERIZED</code></div>
+  </div>
+  <div class="flow-arrow">▼</div>
+  <div class="flow-step"><span class="no">2</span><b>AI 공간 인식 (Claude Vision)</b>
+    <div class="desc">정규화 이미지를 Claude Vision에 전달. ① 치수 표기 판독 → 픽셀↔미터 스케일 후보 산출 ② 공간 세그먼트 추출 — 각 공간의 종류(복도/병실/공용화장실/계단/EV/야외/기타)와 bounding box(+가능 시 polygon)를 JSON으로 반환. 좌표 정확도를 위해 그리드 오버레이 기법 + 2차 검증 패스 사용(§8). 잡 상태 <code>ANALYZED</code></div>
+  </div>
+  <div class="flow-arrow">▼</div>
+  <div class="flow-step"><span class="no">3</span><b>스케일 확정 (사람 개입 지점 ①)</b>
+    <div class="desc">결과 화면에서 AI가 읽은 스케일 후보(예: "복도 치수 32,400 → 1px=0.021m")를 표시하고 사용자가 확인. 오류·부재 시 <b>2점 클릭 보정</b>: 도면에서 길이를 아는 두 점을 클릭하고 실제 거리(m) 입력 → 스케일 재계산. 스케일이 커버리지 간격 계산의 근거이므로 확정 없이는 배치 단계로 진행 불가</div>
+  </div>
+  <div class="flow-arrow">▼</div>
+  <div class="flow-step"><span class="no">4</span><b>배치 엔진 (결정론적 코드)</b>
+    <div class="desc">공간 목록 + 스케일 + 배치 규칙(AppSetting)으로 좌표 산출 — 복도: 중심선을 따라 커버리지 직경 × 중첩계수 간격 배치 / 병실: 면적 기준 1~2개 / 공용화장실: 1개 / 계단·야외: 제외. 결과는 점 목록 JSON(공간 참조 포함). 잡 상태 <code>PLACED</code></div>
+  </div>
+  <div class="flow-arrow">▼</div>
+  <div class="flow-step"><span class="no">5</span><b>미리보기 & PPTX 생성 (사람 개입 지점 ②)</b>
+    <div class="desc">웹에서 도면 위에 점 오버레이 미리보기(공간 인식 결과도 색상 폴리곤으로 토글 표시) → "PPTX 생성" 클릭 → pptxgenjs로 도면 배경 + 빨간 점(개별 도형) + 총 대수 텍스트박스 슬라이드 생성 → S3 저장 + 다운로드. 잡 상태 <code>DONE</code>. 이후 최종 검토·수정은 PowerPoint에서</div>
+  </div>
+</div>
+
+<div class="warn"><b>재실행 지원</b>: 각 단계 결과를 잡 레코드에 저장하므로, 규칙 변경 후 "재배치"(4번부터), 스케일 수정 후 "재계산"(3번부터)을 AI 재호출 없이 수행 가능. AI 재분석(2번)만 토큰 비용 발생.</div>
+
+<h2>5. 기술 스택</h2>
+<table>
+  <tr><th>구성 요소</th><th>기술</th><th>구분</th><th>비고</th></tr>
+  <tr><td>프레임워크/언어</td><td>Next.js 14 App Router / TypeScript</td><td><span class="badge b-exist">기존</span></td><td>기존 앱 내 신규 라우트</td></tr>
+  <tr><td>PDF 래스터화</td><td>poppler-utils (<code>pdftoppm</code>)</td><td><span class="badge b-sys">시스템 패키지</span></td><td><code>apt install poppler-utils</code> — EC2/WSL2 모두 설치 필요. Node 라이브러리 대비 품질·메모리 안정성 우수</td></tr>
+  <tr><td>이미지 처리</td><td>sharp</td><td><span class="badge b-new">신규 npm</span></td><td>리사이즈·포맷 변환·(필요 시) 그리드 오버레이 합성</td></tr>
+  <tr><td>AI 공간 인식</td><td>Anthropic Claude API — <code>claude-fable-5</code> (Vision)</td><td><span class="badge b-exist">기존</span></td><td>기존 <code>ANTHROPIC_API_KEY</code>·<code>@anthropic-ai/sdk</code> 재사용. 모델은 정확도/비용 비교 후 확정</td></tr>
+  <tr><td>배치 엔진</td><td>자체 TypeScript (<code>lib/gateway-planner/placement.ts</code>)</td><td><span class="badge b-new">신규</span></td><td>외부 의존성 없음. 결정론적 계산</td></tr>
+  <tr><td>PPTX 생성</td><td>pptxgenjs</td><td><span class="badge b-new">신규 npm</span></td><td>순수 JS, 서버사이드 생성 가능. 도형을 개별 객체로 출력 → PowerPoint에서 편집 가능</td></tr>
+  <tr><td>파일 저장</td><td>AWS S3</td><td><span class="badge b-exist">기존</span></td><td><code>lib/s3.ts</code> 재사용. 키: <code>gateway-planner/{jobId}/…</code></td></tr>
+  <tr><td>DB</td><td>PostgreSQL + Prisma</td><td><span class="badge b-exist">기존</span></td><td>public 스키마 신규 테이블 1개 + AppSetting 규칙 JSON</td></tr>
+  <tr><td>백그라운드 처리</td><td>잡 테이블 + 비동기 실행 + 폴링</td><td><span class="badge b-exist">기존 패턴</span></td><td>HiraSyncJob 패턴 준용</td></tr>
+  <tr><td>미리보기 UI</td><td>HTML Canvas 또는 절대배치 오버레이</td><td><span class="badge b-new">신규</span></td><td>외부 라이브러리 없이 자체 구현 (MaintenanceVisitPicker 전례)</td></tr>
+</table>
+
+<h2>6. 데이터 모델</h2>
+<h3>6.1 GatewayPlanJob (신규 테이블 — public.gateway_plan_jobs)</h3>
+<pre><code>model GatewayPlanJob {
+  id            Int       @id @default(autoincrement())
+  title         String                       // 표시용 (기본: 원본 파일명)
+  status        String                       // PENDING | RASTERIZING | ANALYZING | NEED_SCALE
+                                             // | PLACED | GENERATING | DONE | ERROR
+  originalKey   String                       // S3: 업로드 원본
+  originalName  String
+  pageIndex     Int       @default(0)        // PDF 다중 페이지 중 처리 페이지
+  imageKey      String?                      // S3: 정규화 PNG
+  imageWidth    Int?
+  imageHeight   Int?
+
+  scaleMPerPx   Float?                       // 확정 스케일 (m / px)
+  scaleSource   String?                      // ai_dimension | manual_2point
+  scaleMeta     Json?                        // AI 치수 판독 근거·2점 보정 입력값
+
+  analysis      Json?                        // 공간 인식 결과 (spaces[] — §8.2 스키마)
+  placements    Json?                        // 배치 결과 (points[] — 좌표·소속 공간·근거)
+  gatewayCount  Int?
+  rulesSnapshot Json?                        // 배치 시점의 규칙 (재현성)
+
+  pptxKey       String?                      // S3: 생성된 PPTX
+  errorMessage  String?
+  tokenUsage    Json?                        // AI 호출 토큰 사용량 기록
+
+  createdById   Int
+  createdBy     User      @relation(fields: [createdById], references: [id])
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([createdById, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@map("gateway_plan_jobs")
+}</code></pre>
+<ul>
+  <li>공간·점 데이터는 정규화 테이블 대신 <b>JSONB</b> 채택 — 잡 단위로만 조회하고 관계 질의가 없으므로 스키마 단순성이 이득. 위키 <code>contentJson</code> 전례.</li>
+  <li>마이그레이션은 CLAUDE.md 규칙 준수: psql 직접 실행 + 수동 마이그레이션 파일 + <code>migrate resolve --applied</code>.</li>
+</ul>
+
+<h3>6.2 배치 규칙 (AppSetting — key: <code>gw_planner_rules</code>)</h3>
+<pre><code>{
+  "coverageDiameterM": 10,          // 게이트웨이 커버리지 직경 (m)
+  "corridorOverlapFactor": 0.8,     // 복도 점 간격 = 직경 × 계수 (기본 8m — 음영 방지 중첩)
+  "wardDefaultCount": 2,            // 병실 기본 설치 수
+  "wardSmallCount": 1,              // 소형 병실 설치 수
+  "wardSmallThresholdM2": 20,       // "매우 작은 병실" 면적 기준 (㎡) — 미확정 Q3
+  "toiletCount": 1,                 // 공용화장실 설치 수
+  "excludedSpaceTypes": ["stairs", "elevator", "outdoor"],
+  "placeUnknownRooms": true,        // 미분류 실도 배치 (면적 기준 1~2개) — 사람이 PPT에서 삭제 (확정)
+  "dot": { "diameterCm": 0.2, "color": "FF0000" }
+}</code></pre>
+<p>설정 화면(<code>/settings/gateway-planner</code>, ADMIN 이상)에서 편집. 기존 <code>notify_delay_rules</code>와 동일한 AppSetting JSON 패턴.</p>
+
+<h2>7. API & 페이지 설계</h2>
+<h3>7.1 API 엔드포인트</h3>
+<table>
+  <tr><th>Method</th><th>Endpoint</th><th>설명</th><th>권한</th></tr>
+  <tr><td>POST</td><td><code>/api/gateway-planner/jobs</code></td><td>도면 업로드 + 잡 생성 (multipart). 백그라운드 파이프라인 시작</td><td>ADMIN 이상</td></tr>
+  <tr><td>GET</td><td><code>/api/gateway-planner/jobs</code></td><td>잡 목록 (페이지네이션)</td><td>ADMIN 이상</td></tr>
+  <tr><td>GET</td><td><code>/api/gateway-planner/jobs/[id]</code></td><td>잡 상세 (상태 폴링 겸용 — 분석·배치 결과 포함)</td><td>ADMIN 이상</td></tr>
+  <tr><td>PATCH</td><td><code>/api/gateway-planner/jobs/[id]/scale</code></td><td>스케일 확정 (AI 후보 승인 or 2점 보정값) → 배치 재실행</td><td>ADMIN 이상</td></tr>
+  <tr><td>POST</td><td><code>/api/gateway-planner/jobs/[id]/replace</code></td><td>현재 규칙으로 재배치 (AI 재호출 없음)</td><td>ADMIN 이상</td></tr>
+  <tr><td>POST</td><td><code>/api/gateway-planner/jobs/[id]/reanalyze</code></td><td>AI 공간 인식 재실행 (토큰 비용 발생 — 확인 모달)</td><td>ADMIN 이상</td></tr>
+  <tr><td>POST</td><td><code>/api/gateway-planner/jobs/[id]/pptx</code></td><td>PPTX 생성 → S3 저장 + presigned URL 반환</td><td>ADMIN 이상</td></tr>
+  <tr><td>DELETE</td><td><code>/api/gateway-planner/jobs/[id]</code></td><td>잡 삭제 (S3 파일 포함)</td><td>ADMIN 이상</td></tr>
+  <tr><td>GET/PUT</td><td><code>/api/settings/gateway-planner</code></td><td>배치 규칙 조회/저장</td><td>GET 로그인 / PUT ADMIN</td></tr>
+</table>
+<p>모든 mutation은 감사 로그 <code>resource='gateway_plan'</code> 기록.</p>
+
+<h3>7.2 페이지</h3>
+<table>
+  <tr><th>경로</th><th>내용</th></tr>
+  <tr><td><code>/gateway-planner</code></td><td>메인 — 도면 업로드(드래그앤드롭) + 잡 목록(상태 뱃지·대수·날짜·다운로드). <b>신규 메인 네비 메뉴</b>로 등록 (<code>nav_menu_items</code>에 행 추가, <b>allowedRoles = SUPER_ADMIN·ADMIN</b> 초기값)</td></tr>
+  <tr><td><code>/gateway-planner/[id]</code></td><td>잡 상세 — ① 진행 상태(폴링) ② 스케일 확정 UI(AI 후보 표시 + 2점 클릭 보정) ③ 미리보기 캔버스(도면 + 빨간 점 + 공간 인식 폴리곤 토글) ④ 총 대수·공간별 집계 ⑤ [재배치] [AI 재분석] [PPTX 생성·다운로드]</td></tr>
+  <tr><td><code>/settings/gateway-planner</code></td><td>배치 규칙 설정 (ADMIN) — §6.2 값 편집. 설정 하위 메뉴 그룹 신설 또는 기존 그룹 편입</td></tr>
+</table>
+
+<h2>8. AI 공간 인식 전략 (핵심 리스크 구간)</h2>
+<h3>8.1 좌표 정확도 확보 기법</h3>
+<ul>
+  <li><b>그리드 오버레이</b>: 정규화 이미지에 좌표 눈금(px 단위 보조선·라벨)을 합성해 전달 → 모델이 상대 위치가 아닌 눈금 기준으로 bounding box를 보고하게 함. Vision 모델의 좌표 환각을 크게 줄이는 검증된 기법.</li>
+  <li><b>2-pass 검증</b>: 1차 인식 결과(공간 폴리곤을 색상으로 오버레이한 이미지)를 다시 모델에 보여주고 "잘못 잡힌 공간·누락 공간"을 교정하는 검증 패스 1회.</li>
+  <li><b>구조화 출력 강제</b>: tool use(JSON schema)로 응답 형식을 고정 — 파싱 실패·형식 이탈 방지.</li>
+  <li><b>대형 도면 타일링(후순위)</b>: 장변 3000px로 부족한 초대형 도면은 사분면 분할 분석 + 병합. MVP에서는 단일 이미지로 시작.</li>
+</ul>
+
+<h3>8.2 공간 인식 출력 스키마</h3>
+<pre><code>{
+  "dimensionReadings": [                    // 치수 판독 (스케일 후보 산출용)
+    { "text": "32,400", "meters": 32.4, "fromPx": [120, 80], "toPx": [2850, 80], "confidence": "high" }
+  ],
+  "spaces": [
+    {
+      "id": "s1",
+      "type": "corridor | ward | toilet | stairs | elevator | outdoor | other",
+      "label": "AI가 읽은 실명 표기 (예: '5인실', 'T/R')",
+      "bbox": [x1, y1, x2, y2],             // px, 정규화 이미지 기준
+      "polygon": [[x,y], ...],              // 가능 시 (복도의 L/T자 형태 등)
+      "confidence": "high | mid | low"      // low는 미리보기에서 강조 표시
+    }
+  ]
+}</code></pre>
+
+<h3>8.3 배치 엔진 규칙 (결정론적)</h3>
+<table>
+  <tr><th>공간 유형</th><th>배치 로직</th></tr>
+  <tr><td>복도 (corridor)</td><td>폴리곤/박스의 중심선(장축) 산출 → <code>커버리지 직경 × 중첩계수</code>(기본 8m) 간격으로 등분 배치. L/T자 복도는 세그먼트 분할 후 각 세그먼트 처리, 교차점 우선 배치. 세그먼트 길이가 간격 미만이어도 최소 1개</td></tr>
+  <tr><td>병실 (ward)</td><td>면적(스케일로 ㎡ 환산) ≥ 기준값 → 2개(장축 1/4·3/4 지점), 미만 → 1개(중심)</td></tr>
+  <tr><td>공용화장실 (toilet)</td><td>중심에 1개</td></tr>
+  <tr><td>계단·EV·야외</td><td>제외 (미리보기에 회색 빗금 표시 — 제외됐음을 시각 확인)</td></tr>
+  <tr><td>기타/미분류 (other)</td><td><b>배치함</b> — 면적 기준 병실과 동일 로직(1~2개). 불필요한 곳은 사람이 PPT에서 점 삭제 (2026-07-19 확정: "일단 다 표시하고 사람이 제거"). 미리보기에 "미분류" 뱃지로 구분 표시</td></tr>
+</table>
+
+<h2>9. PPTX 산출물 스펙</h2>
+<div class="card">
+  <ul>
+    <li><b>슬라이드 크기</b>: <b>A4 가로 (29.7 × 21.0cm)</b> — 설치계획 문서 규격과 일치 (2026-07-19 확정, pptxgenjs <code>defineLayout</code> 커스텀)</li>
+    <li><b>구성</b>:
+      <ul>
+        <li>배경: 도면 이미지 1장 (비율 유지 최대 크기, 중앙 배치)</li>
+        <li>게이트웨이: <span class="dot-sample"></span> 빨간(#FF0000) 원형 도형, <b>직경 0.2cm</b>, 각각 <b>독립 shape 객체</b> — PowerPoint에서 개별 선택·이동·삭제·복사 가능. 번호 라벨 없음 (확정)</li>
+        <li>우상단 텍스트박스: <code>게이트웨이 총 N대</code> (편집 가능한 일반 텍스트박스)</li>
+        <li>(후순위 옵션) 커버리지 반경 반투명 원</li>
+      </ul>
+    </li>
+    <li><b>좌표 변환</b>: 이미지 px 좌표 → 슬라이드 상 이미지 배치 영역 기준 cm 좌표로 선형 변환. 도면 이미지와 점의 상대 위치가 픽셀 정확도로 유지됨</li>
+    <li><b>파일명</b>: <code>GW배치_{잡제목}_{YYYYMMDD}.pptx</code></li>
+  </ul>
+</div>
+
+<h2>10. 개발 단계 (Phase)</h2>
+<table>
+  <tr><th>Phase</th><th>내용</th><th>완료 판정 (게이트)</th></tr>
+  <tr><td><b>0. 프로토타입 검증</b> <span class="badge b-p1">최우선</span></td><td>확보된 샘플 4종(<code>docs/gateway-planner-samples/</code>)으로 ①Claude Vision 공간 인식 정확도 ②치수 판독·스케일 산출 정확도 ③배치 엔진 시제품 → 점 오버레이 이미지 산출까지 <b>스크립트로만</b> 검증 (UI 없음). 그리드 기법·프롬프트·모델 선정 실험. good 2종은 전 파이프라인, bad 2종은 인식 한계 실측</td><td>샘플 도면에서 공간 유형 인식률·좌표 오차가 "사람 검토로 커버 가능한 수준"인지 <b>사용자가 결과 이미지를 보고 판정</b>. 여기서 막히면 설계 재검토 — UI 개발 착수 전 리스크 제거</td></tr>
+  <tr><td><b>1. 코어 파이프라인</b></td><td>잡 테이블·업로드·래스터화·AI 분석·배치 엔진·PPTX 생성 — API 레벨 E2E</td><td>도면 업로드 → PPTX 다운로드까지 API로 완주, 점이 PowerPoint에서 편집 가능</td></tr>
+  <tr><td><b>2. UI</b></td><td>메인 페이지(업로드·목록)·잡 상세(폴링·스케일 확정·2점 보정·미리보기)·네비 메뉴 등록</td><td>비개발자(사용자)가 화면만으로 전 과정 수행 가능</td></tr>
+  <tr><td><b>3. 규칙 설정화</b></td><td><code>/settings/gateway-planner</code> + 재배치 기능 + 규칙 스냅샷</td><td>규칙 변경 → 재배치가 AI 재호출 없이 동작</td></tr>
+  <tr><td><b>4. 보강 (후순위)</b></td><td>치수 없는 도면 대응(수동 스케일 전용 모드) · 다중 페이지 PDF 페이지 선택 · 대형 도면 타일링 · 웹 미리보기에서 점 편집 후 PPTX 반영 · 커버리지 원 표시</td><td>필요 시 개별 진행</td></tr>
+</table>
+<div class="warn"><b>Phase 0을 강하게 권장</b>: 이 기능의 성패는 "Claude Vision이 실제 병원 도면을 얼마나 잘 읽는가"에 달려 있고, 이는 실물 도면으로만 확인 가능. 반나절 수준의 스크립트 실험으로 최대 리스크를 먼저 제거한 뒤 UI에 투자하는 순서가 안전하다.</div>
+
+<h2>11. 리스크 및 완화</h2>
+<table>
+  <tr><th>리스크</th><th>수준</th><th>완화</th></tr>
+  <tr><td>Vision 모델의 공간 인식 오류 (병실↔창고 혼동, 복도 경계 부정확)</td><td class="risk-hi">높음</td><td>Phase 0 선검증 · 그리드 오버레이 + 2-pass · confidence 낮은 공간 미리보기 강조 · <b>최종 검토는 사람(설계 전제)</b></td></tr>
+  <tr><td>치수 판독 오류 → 스케일 오류 → 간격 전체 왜곡</td><td class="risk-hi">높음</td><td>스케일을 <b>사용자 확정 필수 단계</b>로 설계 (자동 진행 금지) · 2점 클릭 보정 폴백 · 판독 근거(치수 위치·값) 표시</td></tr>
+  <tr><td>스캔 품질 저하 (기울어짐·저해상도·손글씨 주석)</td><td class="risk-mid">중간</td><td>업로드 시 해상도 검사·경고 · Phase 0에서 품질별 한계 파악 · 한계 도면은 안내 후 수동 작업 유도</td></tr>
+  <tr><td>AI 호출 비용</td><td class="risk-lo">낮음</td><td>잡당 2회(인식+검증) 호출 · 재배치는 AI 미호출 · tokenUsage 기록으로 모니터링</td></tr>
+  <tr><td>서버 부하 (래스터화·이미지 처리)</td><td class="risk-lo">낮음</td><td>잡 순차 처리(동시 1건) · sharp 스트리밍 · 파일 크기 제한 30MB</td></tr>
+  <tr><td>기존 시스템 영향</td><td class="risk-lo">낮음</td><td>신규 라우트·테이블만 추가, 기존 모듈 무수정 · poppler는 시스템 패키지라 앱 의존성 오염 없음</td></tr>
+</table>
+
+<h2>12. 미확정 사항</h2>
+<h3>12.1 잔여 (Phase 0 결과와 함께 확정 예정)</h3>
+<div class="q"><b>Q2. 복도 배치 간격</b> — 설계 기본값 "커버리지 직경 × 0.8 = 8m"로 진행. Phase 0 배치 결과를 실물 도면 위에서 보고 사용자가 감각 대비 판정 후 확정. (설정값이라 언제든 변경 가능)</div>
+<div class="q"><b>Q3. "매우 작은 병실" 기준</b> — 설계 기본값 20㎡로 진행. good_1처럼 실별 면적·병상수가 표기된 도면이 많다면 병상수 기준 규칙(예: 2인실 이하 1개)으로의 전환도 Phase 0 후 검토.</div>
+<h3>12.2 확정 완료 (2026-07-19)</h3>
+<table>
+  <tr><th>항목</th><th>결정</th></tr>
+  <tr><td>Q1. 샘플 도면</td><td>확보 완료 — <code>docs/gateway-planner-samples/</code> 4종 (§2.1 검토 결과 참조)</td></tr>
+  <tr><td>Q4. 점 번호 표기</td><td><b>불필요</b> — 미구현</td></tr>
+  <tr><td>Q5. 슬라이드 규격</td><td><b>A4 가로</b></td></tr>
+  <tr><td>Q6. 접근 권한</td><td><b>ADMIN 이상</b> (메뉴·API 공통)</td></tr>
+  <tr><td>Q7. 배치 대상 공간</td><td>제외 목록(계단·EV·야외) 외 <b>전 공간 배치 후 사람이 제거</b> — 미분류 실 포함</td></tr>
+</table>
+
+</div>
+</body>
+</html>

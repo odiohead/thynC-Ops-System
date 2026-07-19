@@ -40,3 +40,4 @@ next-env.d.ts
 
 # 위키 협업 서버 번들 산출물 (배포 시 build:collab로 생성)
 collab-server/dist/
+scripts/gateway-planner-phase0/work/

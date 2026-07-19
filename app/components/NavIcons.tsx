@@ -159,6 +159,17 @@ export function PackageIcon() {
   )
 }
 
+export function WifiIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 13a10 10 0 0 1 14 0" />
+      <path d="M8.5 16.5a5 5 0 0 1 7 0" />
+      <path d="M2 8.82a15 15 0 0 1 20 0" />
+      <line x1="12" y1="20" x2="12.01" y2="20" />
+    </svg>
+  )
+}
+
 export const ICON_MAP: Record<string, () => ReactNode> = {
   'hira': HiraIcon,
   'hospital': HospitalIcon,
@@ -176,6 +187,7 @@ export const ICON_MAP: Record<string, () => ReactNode> = {
   'car': CarIcon,
   'briefcase': BriefcaseIcon,
   'package': PackageIcon,
+  'wifi': WifiIcon,
 }
 
 export function getMenuIcon(iconKey: string | null | undefined): ReactNode | null {
