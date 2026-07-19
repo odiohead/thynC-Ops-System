@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-07-20 | 자재관리 버그·개체 태그 + GW 배치 플래너 PROD 배포
+
+- 커밋 2건(`38dd972` GW 플래너 Phase 0~2, `1e2e374` 자재관리 수정) push → PROD pull → `npm install`(sharp·pptxgenjs) → poppler-utils 확인(기설치) → 마이그레이션 2건 psql 적용+resolve(`20260719120000_gateway_plan_jobs`, `20260720100000_wms_unit_tags`) → prisma generate → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- 검증: login 200 · /gateway-planner·/inventory 307(인증 리다이렉트 정상) · 네비 2행(GW 배치 플래너·GW 배치 규칙, ADMIN 전용) · `inventory_units.tags` 컬럼 존재 · 재시작 후 신규 에러 0
+- **GW 배치 플래너가 PROD에 함께 배포됨** (같은 main — ADMIN 전용 메뉴, 기존 모듈 무영향). 미노출 원하면 메뉴 관리에서 비활성 가능
+
 ## 2026-07-20 | 자재관리 — 출고 유형 400 버그 수정 + 태그를 개체(시리얼 단품) 단위로 이관
 
 - **출고 버그**: 재고 입출고 모달을 '출고' 버튼으로 바로 열면 "전표 유형에 맞지 않는 입출고 유형입니다"(400) — 마스터 로드 시 reasonId를 무조건 **입고 유형 1번으로 시드**해서, 출고 탭에서 select는 첫 출고 유형을 표시하지만 실제 전송값은 입고 유형 ID였음. 시드 제거 + 현재 탭 목록에 없는 reasonId면 첫 항목으로 교정하는 정합성 effect 추가 (BulkSerialTxModal은 전환 시 리셋 구조라 무관)
