@@ -10,6 +10,7 @@
 - **품목관리 테이블**: 컨테이너 max-w-6xl→screen-2xl, 셀 패딩 압축(px-3/py-3→px-2/py-2), 분류·품목명·모델명·제조사·규격·비고 truncate(+title 툴팁) — 일반 해상도에서 가로 스크롤 없이 표시
 - 검증: E2E 4케이스(이력 있는 품목 LOT ON 200 → OFF 200 → 시리얼 OFF 409 유지 → LOT ON 후 신규 입고 LOT 필수 400) 통과, 테스트 데이터 정리
 - 영향 파일: `app/api/inventory/items/[id]/route.ts`, `app/inventory/items/page.tsx`, README.md
+- **PROD 배포**: `f266c6d` push → pull → 빌드 → 재시작 (DB 변경 없음). login 200·신규 에러 0
 
 ## 2026-07-20 | 메인 대시보드 개편 + 통계 기준 전환 PROD 배포
 
