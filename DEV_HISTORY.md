@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-07-20 | AI 사용량 원장 PROD 배포
+
+- `455f1cc` push → PROD pull → 마이그레이션 `20260720230000` psql 적용+resolve(기존 usage **28건 백필** — 입력 278,939·출력 30,075 토큰) → prisma generate → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- 검증: login 200 · `/settings/ai-usage` 307(인증 리다이렉트 정상) · `_prisma_migrations` 기록 확인 · 신규 에러 0
+- 참고: PROD 에러 로그에 Anthropic API 크레딧 부족(`credit balance too low`) 이력 존재 — 배포와 무관, **AI 어시스턴트 응답 불가 상태이므로 Console 크레딧 충전 필요**
+
 ## 2026-07-20 | AI 사용 현황 보완 — 대화 삭제와 무관한 사용량 원장(`ai_usage_logs`) 도입
 
 - **배경**: 사용 현황이 `ai_chat_messages.usage` 실시간 집계라 사용자가 채팅 이력(세션)을 삭제하면 Cascade로 통계에서 빠지는 문제 (사용자 요청 — 삭제해도 집계 유지)
