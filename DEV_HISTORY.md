@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-07-20 | AI 어시스턴트 사용 현황 관리 페이지 (`/settings/ai-usage`)
+
+- **배경**: 사용자 요청 — 어시스턴트 사용 이력·토큰·비용 관리 필요. 기존 `ai_chat_messages.usage`(입력/출력/캐시읽기/캐시쓰기) 실시간 집계로 구현 — 신규 테이블 없음
+- **구성**: KPI 4종(이번달 질문·토큰·예상 비용·사용자, 전월 병기) / 월별 추이 12개월(질문 수·예상 비용 — 단일 축 차트 2개) / 사용자별 테이블(기간 필터, 비용 내림차순) / 병원 컨텍스트 Top 10 / **단가 설정**(AppSetting `ai_usage_pricing` — opus-4-8 기본값 $5·$25·$0.5·$6.25/MTok + 원화 환율, 감사 로그)
+- 비용은 추정치(실청구=Anthropic Console), 대화 내용 미노출(메타데이터만), 삭제 세션 통계 제외(Cascade) — 페이지에 명시
+- 네비: 설정 하위 '연동·알림' 그룹 'AI 사용 현황' (마이그레이션 `20260720200000_ai_usage_nav`, ADMIN)
+- 검증: tsc 0오류 → 빌드 → E2E(집계 GET 정확 — DEV 실데이터 질문 2건·토큰 합계 일치, 단가 PUT/원복, 페이지 200)
+- 영향 파일: `app/api/settings/ai-usage/route.ts`(신규), `app/settings/ai-usage/page.tsx`(신규), 마이그레이션, README.md
+- 2차 후보(미착수): AI 정제(summarize) 사용량 기록 추가 + GW 플래너 합산 "AI 비용 통합" 뷰, 월 예산 임계 Slack 알림
+
 ## 2026-07-20 | 입출고일·전표 수정 권한 강화 PROD 배포
 
 - **사전 백업**: PROD `~/backups/db/thync_ops_pre_txdate_20260720.dump` (inventory_transactions)

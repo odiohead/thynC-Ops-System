@@ -910,6 +910,12 @@ prisma/
 - **Flowise 제거**: 프록시 라우트·env 삭제 완료 (Flowise EC2 종료는 추후 결정)
 - **제품 지식 소스**: thynC 솔루션 자체 사양은 사내위키 `thync_1.3.0` 카테고리의 산출물 문서 세트(HTML 12종 — 기능정의서·API규격서·DB설계서·알람정책·외부연동·설치/설정·용어집)로 제공. `search_wiki`/`read_wiki_page`로 자동 참조하며, 원본은 `docs/thync-product-1.3.0/`에 보존(`scripts/publish-wiki-html-docs.mts`로 재게시)
 
+### AI 사용 현황 (`/settings/ai-usage`, ADMIN 이상 — 2026-07-20)
+- AI 어시스턴트 사용량 관리 — `ai_chat_messages.usage`(JSONB) 실시간 집계, 신규 테이블 없음
+- **KPI**(이번달 질문·토큰·예상 비용·사용자, 전월 병기) + **월별 추이 차트 12개월**(질문 수·예상 비용, 단일 축 2차트) + **사용자별 테이블**(기간 필터 — 질문·세션·입력/출력/캐시 토큰·예상 비용·최근 사용) + **병원 컨텍스트 Top 10**
+- 비용은 토큰 × 단가(AppSetting `ai_usage_pricing` — 입력/출력/캐시읽기/캐시쓰기 USD·환율, 페이지에서 편집) **추정치** — 실청구는 Anthropic Console 기준
+- 대화 내용 미노출(메타데이터만), 삭제된 세션은 통계 제외(메시지 Cascade)
+
 ### 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
 - DB 기반 동적 네비게이션 메뉴 시스템
 - **설정 하위 메뉴 기능별 그룹화** (`group_label`): 네비 설정 아코디언이 그룹 헤더(일반/조직·계정/병원·구축/업무 유형·상태/자재관리/차량/연동·알림)로 구분 표시. 메뉴 관리에서 그룹명 인라인 편집(자유 텍스트 — 새 그룹 즉시 생성)
@@ -1214,6 +1220,8 @@ npm run dev
 | POST | `/api/gateway-planner/jobs/[id]/reanalyze` | AI 재분석 (원본부터 파이프라인 재수행, 스케일 초기화) |
 | POST | `/api/gateway-planner/jobs/[id]/pptx` | PPTX 생성 → S3 저장 + presigned URL (PLACED 상태에서만) |
 | GET/PUT | `/api/settings/gateway-planner` | 배치 규칙 조회/저장 (AppSetting `gw_planner_rules`) |
+| GET | `/api/settings/ai-usage` | AI 어시스턴트 사용 집계 (`?from=&to=` — 월별 12개월·사용자별·병원별 Top10 + 단가) — ADMIN |
+| PUT | `/api/settings/ai-usage` | AI 사용 단가 저장 (AppSetting `ai_usage_pricing`) — ADMIN |
 
 ### AI 어시스턴트
 | Method | Endpoint | 설명 |
