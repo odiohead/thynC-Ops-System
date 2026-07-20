@@ -85,6 +85,7 @@ model Hospital {
   inventoryTransactions InventoryTransaction[]
   inventoryUnits        InventoryUnit[]
   aiChatSessions        AiChatSession[]
+  aiUsageLogs           AiUsageLog[]
 
   @@map("hospitals")
   @@schema("public")
@@ -226,6 +227,7 @@ model User {
   inventoryTxActed        InventoryTransaction[]       @relation("InventoryTxActor")
   inventoryTxCanceled     InventoryTransaction[]       @relation("InventoryTxCanceler")
   aiChatSessions          AiChatSession[]
+  aiUsageLogs             AiUsageLog[]
   gatewayPlanJobs         GatewayPlanJob[]             @relation("GatewayPlanJobCreator")
 
   @@map("users")
@@ -1440,5 +1442,31 @@ model AiChatMessage {
 
   @@index([sessionId, createdAt])
   @@map("ai_chat_messages")
+  @@schema("public")
+}
+
+// AI 어시스턴트 사용량 원장 — 대화(세션/메시지) 삭제와 무관하게 사용량 집계 보존
+// 계정 삭제 대비 이름·이메일 스냅샷, session/message는 FK 없이 ID만 보관
+model AiUsageLog {
+  id               Int      @id @default(autoincrement())
+  userId           String?  @map("user_id")
+  userName         String   @default("") @map("user_name") @db.VarChar(100)
+  userEmail        String   @default("") @map("user_email") @db.VarChar(255)
+  sessionId        String?  @map("session_id") @db.Uuid
+  messageId        String?  @unique @map("message_id") @db.Uuid
+  hospitalCode     String?  @map("hospital_code")
+  model            String   @default("") @db.VarChar(50)
+  inputTokens      Int      @default(0) @map("input_tokens")
+  outputTokens     Int      @default(0) @map("output_tokens")
+  cacheReadTokens  Int      @default(0) @map("cache_read_tokens")
+  cacheWriteTokens Int      @default(0) @map("cache_write_tokens")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  hospital Hospital? @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@map("ai_usage_logs")
   @@schema("public")
 }

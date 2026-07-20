@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-07-20 | AI 사용 현황 보완 — 대화 삭제와 무관한 사용량 원장(`ai_usage_logs`) 도입
+
+- **배경**: 사용 현황이 `ai_chat_messages.usage` 실시간 집계라 사용자가 채팅 이력(세션)을 삭제하면 Cascade로 통계에서 빠지는 문제 (사용자 요청 — 삭제해도 집계 유지)
+- **DB**: `ai_usage_logs` 신설 (마이그레이션 `20260720230000_ai_usage_logs`) — 답변 1건=1행. `user_id`(FK SetNull)+이름·이메일 **스냅샷**(계정 삭제 대비), `session_id`/`message_id`는 FK 없이 ID만 보관(삭제 후 세션 수 집계, message_id UNIQUE 백필 중복 방지), `hospital_code`(FK SetNull), model·토큰 4종. 기존 assistant 답변 백필(DEV 2건 — 토큰 합계 일치 확인)
+- **기록**: 채팅 라우트가 답변 저장 직후 원장 insert (best-effort — 실패해도 채팅 유지). 모델명은 `lib/ai/agent.ts` `AI_MODEL` export 공유
+- **집계 전환**: `/api/settings/ai-usage` 월별·사용자별·병원별 쿼리를 원장 기준으로 재작성 — 질문 수=답변 행 수, 사용자별은 `LEFT JOIN users`로 살아있는 계정은 최신 이름 우선·삭제 계정은 스냅샷 표시, 페이지 안내 문구 갱신("삭제해도 집계 유지")
+- **검증(dev2)**: tsc 0오류 → 힙 4GB 빌드 → 재시작 → E2E: 원장 집계 GET(백필 값 정확) → 테스트 세션 생성 후 세션 DELETE 204 → 메시지 Cascade 삭제·원장 잔존·집계 불변 확인 → user_id NULL(계정 삭제 시뮬레이션) 시 스냅샷 이름 표시 확인. 테스트 데이터 정리 (실채팅 검증은 API 크레딧 부족으로 불가 — insert 경로는 코드 단순 경로)
+- 영향 파일: prisma/schema.prisma(AiUsageLog), prisma/migrations/20260720230000_ai_usage_logs, lib/ai/agent.ts, app/api/ai-assistant/chat/route.ts, app/api/settings/ai-usage/route.ts, app/settings/ai-usage/page.tsx, README.md
+- **PROD 반영 시**: 마이그레이션 psql 적용+resolve 필요 (PROD 기존 usage 28건 백필됨)
+
 ## 2026-07-20 | AI 사용 현황 페이지 PROD 배포
 
 - `e53022f` push → PROD pull → 네비 마이그레이션 `20260720200000` 적용+resolve → 힙 4GB 빌드 → `pm2 restart thync-prod`

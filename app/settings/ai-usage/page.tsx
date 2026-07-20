@@ -183,7 +183,7 @@ export default function AiUsagePage() {
         </button>
       </div>
       <p className="mb-4 text-xs text-gray-400">
-        비용은 토큰 × 단가로 계산한 <b>추정치</b>입니다 (실제 청구는 Anthropic Console 기준). 삭제된 대화는 통계에서 제외됩니다.
+        비용은 토큰 × 단가로 계산한 <b>추정치</b>입니다 (실제 청구는 Anthropic Console 기준). 사용량은 별도 원장에 기록되어 대화를 삭제해도 집계에 유지됩니다.
       </p>
 
       {msg && <div className={`mb-3 rounded-lg border px-3 py-2 text-sm ${msg.type === 'ok' ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700'}`}>{msg.text}</div>}

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { runAgentChat } from '@/lib/ai/agent'
+import { runAgentChat, AI_MODEL } from '@/lib/ai/agent'
 
 export const dynamic = 'force-dynamic'
 
@@ -115,6 +115,27 @@ export async function POST(request: NextRequest) {
           where: { id: currentSession.id },
           data: { updatedAt: new Date() },
         })
+
+        // 사용량 원장 기록 — 대화 삭제와 무관하게 집계 보존 (실패해도 채팅 흐름은 유지)
+        try {
+          await prisma.aiUsageLog.create({
+            data: {
+              userId: authUser.userId,
+              userName: authUser.name,
+              userEmail: authUser.email,
+              sessionId: currentSession.id,
+              messageId: saved.id,
+              hospitalCode: currentSession.hospitalCode,
+              model: AI_MODEL,
+              inputTokens: result.usage.inputTokens,
+              outputTokens: result.usage.outputTokens,
+              cacheReadTokens: result.usage.cacheReadTokens,
+              cacheWriteTokens: result.usage.cacheWriteTokens,
+            },
+          })
+        } catch (e) {
+          console.error('[ai-chat] 사용량 원장 기록 실패:', e)
+        }
 
         controller.enqueue(
           sse('done', { sessionId: currentSession.id, messageId: saved.id, usage: result.usage }),

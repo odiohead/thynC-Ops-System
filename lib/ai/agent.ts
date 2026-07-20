@@ -7,7 +7,8 @@ import { AI_TOOLS, TOOL_LABELS, executeTool } from './tools'
  * - tool use 반복 (최대 8회), 텍스트 델타는 onEvent로 즉시 중계
  */
 
-const MODEL = 'claude-opus-4-8'
+export const AI_MODEL = 'claude-opus-4-8'
+const MODEL = AI_MODEL
 const MAX_TOKENS = 4096
 const MAX_ITERATIONS = 8
 

@@ -442,6 +442,13 @@ prisma/
 - `AiChatMessage`: 세션 1:N 메시지 — `role`(user|assistant), `content`(표시용 텍스트), `toolCalls`(JSONB — 도구 호출 기록 [{name,input,resultSummary}]), `usage`(JSONB — 토큰 사용량), 인덱스 `(session_id, created_at)`
 - 세션 삭제 = hard delete (개인 대화), 계정 삭제 시 Cascade
 
+### AiUsageLog (AI 사용량 원장 — 2026-07-20)
+- AI 어시스턴트 답변 1건 = 원장 1행. **대화(세션/메시지) 삭제와 무관하게 사용량 집계 보존** — `/settings/ai-usage` 집계의 진실
+- `userId`(→User, SetNull) + `userName`/`userEmail` **스냅샷**(계정 삭제 후에도 집계 표시), `sessionId`/`messageId`(FK 없이 ID만 보관 — 삭제 후에도 세션 수 집계, `messageId` UNIQUE 백필 중복 방지)
+- `hospitalCode`(→Hospital, SetNull), `model`, `inputTokens`/`outputTokens`/`cacheReadTokens`/`cacheWriteTokens`, `createdAt`
+- 채팅 응답 저장 시 best-effort 기록(실패해도 채팅 유지), 기존 대화는 마이그레이션 `20260720230000`에서 백필
+- 인덱스: `(created_at)`, `(user_id, created_at)`
+
 ### ConsultationQueue (상담 대기열)
 - AI 어시스턴트 상담이력 저장
 - Hospital 연결 (hospitalCode, 선택), 상담유형(StatusCode CONSULTATION_TYPE), 문서유형(StatusCode DOCUMENT_TYPE)
@@ -911,10 +918,10 @@ prisma/
 - **제품 지식 소스**: thynC 솔루션 자체 사양은 사내위키 `thync_1.3.0` 카테고리의 산출물 문서 세트(HTML 12종 — 기능정의서·API규격서·DB설계서·알람정책·외부연동·설치/설정·용어집)로 제공. `search_wiki`/`read_wiki_page`로 자동 참조하며, 원본은 `docs/thync-product-1.3.0/`에 보존(`scripts/publish-wiki-html-docs.mts`로 재게시)
 
 ### AI 사용 현황 (`/settings/ai-usage`, ADMIN 이상 — 2026-07-20)
-- AI 어시스턴트 사용량 관리 — `ai_chat_messages.usage`(JSONB) 실시간 집계, 신규 테이블 없음
+- AI 어시스턴트 사용량 관리 — **사용량 원장 `ai_usage_logs` 집계** (2026-07-20 전환: 대화를 삭제해도 집계 보존, 기존 대화 백필)
 - **KPI**(이번달 질문·토큰·예상 비용·사용자, 전월 병기) + **월별 추이 차트 12개월**(질문 수·예상 비용, 단일 축 2차트) + **사용자별 테이블**(기간 필터 — 질문·세션·입력/출력/캐시 토큰·예상 비용·최근 사용) + **병원 컨텍스트 Top 10**
 - 비용은 토큰 × 단가(AppSetting `ai_usage_pricing` — 입력/출력/캐시읽기/캐시쓰기 USD·환율, 페이지에서 편집) **추정치** — 실청구는 Anthropic Console 기준
-- 대화 내용 미노출(메타데이터만), 삭제된 세션은 통계 제외(메시지 Cascade)
+- 대화 내용 미노출(메타데이터만), 계정 삭제 시에도 원장 스냅샷(이름·이메일)으로 집계 유지
 
 ### 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
 - DB 기반 동적 네비게이션 메뉴 시스템

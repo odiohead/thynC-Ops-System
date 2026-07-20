@@ -5,9 +5,10 @@ import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
-// AI 어시스턴트 사용 현황 집계 (ADMIN 이상) — ai_chat_messages.usage(JSONB) 기반.
+// AI 어시스턴트 사용 현황 집계 (ADMIN 이상) — ai_usage_logs(사용량 원장, 답변 1건=1행) 기반.
+// 원장은 대화(세션/메시지) 삭제와 무관하게 보존되므로 대화를 지워도 집계가 유지된다.
+// 계정 삭제 시에도 원장의 이름·이메일 스냅샷으로 집계 표시 (살아있는 계정은 users 조인 최신값 우선).
 // 비용은 저장하지 않고 토큰 × 단가(AppSetting)를 클라이언트에서 계산 (실청구는 Anthropic Console 기준의 추정치).
-// 주의: 세션 삭제 시 메시지가 Cascade 삭제되므로 통계는 "현존 대화" 기준.
 
 const PRICING_KEY = 'ai_usage_pricing'
 
@@ -77,53 +78,52 @@ export async function GET(request: NextRequest) {
   const monthly = await prisma.$queryRaw<
     { month: string; questions: bigint; input_tokens: bigint; output_tokens: bigint; cache_read: bigint; cache_write: bigint; users: bigint }[]
   >`
-    SELECT to_char(m.created_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM') AS month,
-           count(*) FILTER (WHERE m.role = 'user') AS questions,
-           COALESCE(sum((m.usage->>'inputTokens')::bigint), 0) AS input_tokens,
-           COALESCE(sum((m.usage->>'outputTokens')::bigint), 0) AS output_tokens,
-           COALESCE(sum((m.usage->>'cacheReadTokens')::bigint), 0) AS cache_read,
-           COALESCE(sum((m.usage->>'cacheWriteTokens')::bigint), 0) AS cache_write,
-           count(DISTINCT s.user_id) AS users
-    FROM ai_chat_messages m
-    JOIN ai_chat_sessions s ON s.id = m.session_id
-    WHERE m.created_at >= now() - interval '12 months'
+    SELECT to_char(l.created_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM') AS month,
+           count(*) AS questions,
+           COALESCE(sum(l.input_tokens), 0)::bigint AS input_tokens,
+           COALESCE(sum(l.output_tokens), 0)::bigint AS output_tokens,
+           COALESCE(sum(l.cache_read_tokens), 0)::bigint AS cache_read,
+           COALESCE(sum(l.cache_write_tokens), 0)::bigint AS cache_write,
+           count(DISTINCT COALESCE(l.user_id, l.user_email)) AS users
+    FROM ai_usage_logs l
+    WHERE l.created_at >= now() - interval '12 months'
     GROUP BY 1
     ORDER BY 1
   `
 
-  // 사용자별 (기간 필터)
+  // 사용자별 (기간 필터) — 계정 삭제 시 원장 스냅샷(user_name/user_email)으로 표시
   const users = await prisma.$queryRaw<
     { user_id: string; name: string; email: string; sessions: bigint; questions: bigint; input_tokens: bigint; output_tokens: bigint; cache_read: bigint; cache_write: bigint; last_used: Date }[]
   >`
-    SELECT s.user_id, u.name, u.email,
-           count(DISTINCT s.id) AS sessions,
-           count(*) FILTER (WHERE m.role = 'user') AS questions,
-           COALESCE(sum((m.usage->>'inputTokens')::bigint), 0) AS input_tokens,
-           COALESCE(sum((m.usage->>'outputTokens')::bigint), 0) AS output_tokens,
-           COALESCE(sum((m.usage->>'cacheReadTokens')::bigint), 0) AS cache_read,
-           COALESCE(sum((m.usage->>'cacheWriteTokens')::bigint), 0) AS cache_write,
-           max(m.created_at) AS last_used
-    FROM ai_chat_messages m
-    JOIN ai_chat_sessions s ON s.id = m.session_id
-    JOIN users u ON u.id = s.user_id
-    WHERE m.created_at >= ${fromUtc} AND m.created_at < ${toUtc}
-    GROUP BY s.user_id, u.name, u.email
-    ORDER BY (COALESCE(sum((m.usage->>'outputTokens')::bigint), 0)) DESC
+    SELECT COALESCE(l.user_id, l.user_email) AS user_id,
+           max(COALESCE(u.name, l.user_name)) AS name,
+           max(COALESCE(u.email, l.user_email)) AS email,
+           count(DISTINCT l.session_id) AS sessions,
+           count(*) AS questions,
+           COALESCE(sum(l.input_tokens), 0)::bigint AS input_tokens,
+           COALESCE(sum(l.output_tokens), 0)::bigint AS output_tokens,
+           COALESCE(sum(l.cache_read_tokens), 0)::bigint AS cache_read,
+           COALESCE(sum(l.cache_write_tokens), 0)::bigint AS cache_write,
+           max(l.created_at) AS last_used
+    FROM ai_usage_logs l
+    LEFT JOIN users u ON u.id = l.user_id
+    WHERE l.created_at >= ${fromUtc} AND l.created_at < ${toUtc}
+    GROUP BY COALESCE(l.user_id, l.user_email)
+    ORDER BY (COALESCE(sum(l.output_tokens), 0)) DESC
   `
 
-  // 병원별 Top 10 (기간 필터, 병원 컨텍스트가 있는 세션만)
+  // 병원별 Top 10 (기간 필터, 병원 컨텍스트가 있는 사용만)
   const hospitals = await prisma.$queryRaw<
     { hospital_code: string; hospital_name: string; questions: bigint; sessions: bigint }[]
   >`
-    SELECT s.hospital_code, h.hospital_name,
-           count(*) FILTER (WHERE m.role = 'user') AS questions,
-           count(DISTINCT s.id) AS sessions
-    FROM ai_chat_messages m
-    JOIN ai_chat_sessions s ON s.id = m.session_id
-    JOIN hospitals h ON h.hospital_code = s.hospital_code
-    WHERE s.hospital_code IS NOT NULL
-      AND m.created_at >= ${fromUtc} AND m.created_at < ${toUtc}
-    GROUP BY s.hospital_code, h.hospital_name
+    SELECT l.hospital_code, h.hospital_name,
+           count(*) AS questions,
+           count(DISTINCT l.session_id) AS sessions
+    FROM ai_usage_logs l
+    JOIN hospitals h ON h.hospital_code = l.hospital_code
+    WHERE l.hospital_code IS NOT NULL
+      AND l.created_at >= ${fromUtc} AND l.created_at < ${toUtc}
+    GROUP BY l.hospital_code, h.hospital_name
     ORDER BY 3 DESC
     LIMIT 10
   `
