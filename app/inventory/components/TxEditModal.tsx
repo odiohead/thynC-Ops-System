@@ -13,6 +13,7 @@ interface EditableTx {
   destination: string | null
   lotNo: string | null
   note: string | null
+  txDate: string
 }
 
 /**
@@ -25,6 +26,7 @@ export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; o
   const [requester, setRequester] = useState(tx.requester ?? '')
   const [destination, setDestination] = useState(tx.destination ?? '')
   const [lotNo, setLotNo] = useState(tx.lotNo ?? '')
+  const [txDate, setTxDate] = useState(tx.txDate?.slice(0, 10) ?? '')
   const [note, setNote] = useState(tx.note ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -45,6 +47,7 @@ export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; o
     if (tx.txType === 'OUT' && !requester.trim()) { setError('출고 전표의 요청자는 비울 수 없습니다.'); return }
     setBusy(true); setError(null)
     const payload: Record<string, unknown> = { requester: requester.trim(), note, lotNo: lotNo.trim() }
+    if (txDate) payload.txDate = txDate
     if (hasReason && reasonId) payload.reasonId = reasonId
     if (tx.txType === 'OUT') payload.destination = destination
     const res = await fetch(`/api/inventory/transactions/${tx.id}`, {
@@ -77,9 +80,15 @@ export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; o
               )}
             </div>
           )}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-500">요청자 {tx.txType === 'OUT' && <span className="text-red-500">*</span>}</label>
-            <input value={requester} onChange={(e) => setRequester(e.target.value)} className={inputCls} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">요청자 {tx.txType === 'OUT' && <span className="text-red-500">*</span>}</label>
+              <input value={requester} onChange={(e) => setRequester(e.target.value)} className={inputCls} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">입출고일</label>
+              <input type="date" value={txDate} onChange={(e) => setTxDate(e.target.value)} className={inputCls} />
+            </div>
           </div>
           {tx.txType === 'OUT' && (
             <div>

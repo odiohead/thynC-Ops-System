@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { REASON_CATEGORY } from '@/lib/inventory'
+import { REASON_CATEGORY, canEditTxMeta, parseTxDate } from '@/lib/inventory'
 import { txInclude } from '@/lib/inventoryQuery'
 
 export const dynamic = 'force-dynamic'
@@ -10,14 +10,14 @@ export const dynamic = 'force-dynamic'
 type Params = { params: { id: string } }
 
 /**
- * 전표 메타 정보 수정 (ADMIN 이상).
+ * 전표 메타 정보 수정 — 관리자(ADMIN 이상)이면서 재고 담당자 풀 등록자만 (2026-07-20 권한 강화).
  * 수량·품목·위치·시리얼 개체는 재고 스냅샷과 얽혀 있어 수정 불가 — 취소 후 재등록으로 처리.
  * 유형(reason)은 같은 시스템 동작 부류(일반↔일반, 회수↔회수, 폐기↔폐기) 내에서만 변경 허용.
  */
 export async function PUT(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
-  if (!user || !isAdminOrAbove(user.role)) {
-    return NextResponse.json({ error: '전표 수정은 관리자만 가능합니다.' }, { status: 403 })
+  if (!user || !(await canEditTxMeta(user))) {
+    return NextResponse.json({ error: '전표 수정은 재고 담당자로 등록된 관리자만 가능합니다.' }, { status: 403 })
   }
 
   const id = parseInt(params.id)
@@ -66,6 +66,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
     data.requester = requester
   }
   if (body.note !== undefined) data.note = String(body.note ?? '').trim() || null
+  if (body.txDate !== undefined) {
+    const parsed = parseTxDate(body.txDate)
+    if (!parsed) return NextResponse.json({ error: '입출고일 형식이 잘못되었습니다. (YYYY-MM-DD)' }, { status: 400 })
+    data.txDate = new Date(parsed)
+  }
   if (body.lotNo !== undefined && existing.txType !== 'MOVE') {
     const newLot = String(body.lotNo ?? '').trim() || null
     // LOT 재고 차원 품목(비시리얼+LOT)은 전표 LOT가 재고 버킷 키 — 사후 수정 시 재고와 어긋나므로 금지

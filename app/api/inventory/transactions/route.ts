@@ -55,6 +55,7 @@ export async function POST(req: NextRequest) {
         workType: body.workType ?? null,
         refCode: body.refCode ?? null,
         note: body.note ?? null,
+        txDate: body.txDate ?? null,
         serials: body.serials ?? [],
         lotBySerial: body.lotBySerial ?? undefined,
         lotNo: body.lotNo ?? null,

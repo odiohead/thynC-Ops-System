@@ -33,7 +33,7 @@ interface Tx {
   id: number; txCode: string; txType: string; quantity: number
   reasonCode: { name: string } | null
   destination: string | null
-  canceledAt: string | null; createdAt: string
+  canceledAt: string | null; txDate: string; createdAt: string
   warehouse: { name: string } | null; toWarehouse: { name: string } | null
   inventory: { name: string } | null; toInventory: { name: string } | null
   hospital: { hospitalName: string } | null; actor: { name: string } | null
@@ -341,7 +341,7 @@ export default function ItemDetailPage() {
                     {tx.txCode}
                     {tx.parentTx && <span className="block text-[10px] text-emerald-600">└ 세트</span>}
                   </td>
-                  <td className="px-3 py-2 text-xs text-gray-500">{new Date(tx.createdAt).toLocaleDateString('ko-KR')}</td>
+                  <td className="px-3 py-2 text-xs text-gray-500 tabular-nums">{tx.txDate?.slice(0, 10) ?? new Date(tx.createdAt).toLocaleDateString('ko-KR')}</td>
                   <td className="px-3 py-2">
                     {TYPE_LABEL[tx.txType] ?? tx.txType}
                     {tx.txType === 'TRANSFER' && tx.inventory && tx.toInventory && (

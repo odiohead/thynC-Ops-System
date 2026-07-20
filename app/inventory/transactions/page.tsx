@@ -20,6 +20,7 @@ interface Tx {
   lotNo: string | null
   note: string | null
   canceledAt: string | null
+  txDate: string
   createdAt: string
   item: { id: number; itemCode: string; name: string; unit: string }
   warehouse: { name: string } | null
@@ -52,7 +53,7 @@ export default function TransactionsPage() {
   const limit = 50
   const [loading, setLoading] = useState(true)
   const [canManage, setCanManage] = useState(false)
-  const [isAdmin, setIsAdmin] = useState(false)
+  const [canEditTx, setCanEditTx] = useState(false)
   const [showBulk, setShowBulk] = useState(false)
   const [editTx, setEditTx] = useState<Tx | null>(null)
 
@@ -88,10 +89,7 @@ export default function TransactionsPage() {
     if (inv) setFilterInventory(inv)
     fetch('/api/settings/warehouses').then(async (r) => { if (r.ok) setWarehouses((await r.json()).warehouses) })
     fetch('/api/settings/inventories').then(async (r) => { if (r.ok) setInventories((await r.json()).inventories) })
-    fetch('/api/inventory/can-manage').then(async (r) => { if (r.ok) setCanManage((await r.json()).canManage) })
-    fetch('/api/auth/me').then(async (r) => {
-      if (r.ok) { const d = await r.json(); const role = d.role ?? d.user?.role; setIsAdmin(role === 'ADMIN' || role === 'SUPER_ADMIN') }
-    })
+    fetch('/api/inventory/can-manage').then(async (r) => { if (r.ok) { const d = await r.json(); setCanManage(d.canManage); setCanEditTx(!!d.canEditTx) } })
   }, [])
   useEffect(() => { setPage(1); fetchTxs(1) }, [fetchTxs])
 
@@ -162,7 +160,7 @@ export default function TransactionsPage() {
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               <th className="px-3 py-3">전표</th>
-              <th className="px-3 py-3">일시</th>
+              <th className="px-3 py-3">입출고일</th><th className="px-3 py-3">처리일시</th>
               <th className="px-3 py-3">유형</th>
               <th className="px-3 py-3">입출고 유형</th>
               <th className="px-3 py-3">품목</th>
@@ -179,9 +177,9 @@ export default function TransactionsPage() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading ? (
-              <tr><td colSpan={canManage ? 14 : 13} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td></tr>
+              <tr><td colSpan={canManage ? 15 : 14} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td></tr>
             ) : txs.length === 0 ? (
-              <tr><td colSpan={canManage ? 14 : 13} className="py-12 text-center text-sm text-gray-400">이력이 없습니다.</td></tr>
+              <tr><td colSpan={canManage ? 15 : 14} className="py-12 text-center text-sm text-gray-400">이력이 없습니다.</td></tr>
             ) : txs.map((tx) => (
               <tr key={tx.id} className={`hover:bg-gray-50 ${tx.canceledAt ? 'opacity-50 line-through' : ''}`}>
                 <td className="px-3 py-3 font-mono text-xs text-gray-500">
@@ -189,7 +187,8 @@ export default function TransactionsPage() {
                   {tx.parentTx && <span className="block text-[10px] text-emerald-600 no-underline">└ 세트 ({tx.parentTx.txCode})</span>}
                   {tx.childTxs.length > 0 && <span className="block text-[10px] text-emerald-600">세트출고 +{tx.childTxs.length}</span>}
                 </td>
-                <td className="px-3 py-3 text-gray-500 text-xs">{new Date(tx.createdAt).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                <td className="px-3 py-3 text-xs font-medium text-gray-700 tabular-nums">{tx.txDate?.slice(0, 10) ?? '-'}</td>
+                <td className="px-3 py-3 text-gray-400 text-xs">{new Date(tx.createdAt).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}</td>
                 <td className="px-3 py-3"><span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${TYPE_BADGE[tx.txType]}`}>{TYPE_LABEL[tx.txType]}</span></td>
                 <td className="px-3 py-3 text-gray-600">{tx.txType === 'MOVE' ? '이동' : tx.txType === 'TRANSFER' ? '이관(구)' : (tx.reasonCode?.name ?? '-')}</td>
                 <td className="px-3 py-3">
@@ -222,7 +221,7 @@ export default function TransactionsPage() {
                   <td className="px-3 py-3 text-right">
                     {!tx.canceledAt && tx.txType !== 'TRANSFER' && (
                       <span className="inline-flex gap-1">
-                        {isAdmin && (
+                        {canEditTx && (
                           <button onClick={() => setEditTx(tx)} className="rounded-md border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-50 no-underline">수정</button>
                         )}
                         <button onClick={() => handleCancel(tx)} className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 no-underline">취소</button>

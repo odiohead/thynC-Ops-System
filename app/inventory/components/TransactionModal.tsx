@@ -51,6 +51,7 @@ export default function TransactionModal({
   const [requester, setRequester] = useState('') // 요청자 — OUT 필수, IN 선택
   const [lotNo, setLotNo] = useState('') // LOT 관리 품목 입고 — 전표당 1개(시리얼은 전체 동일 적용)
   const [lotSel, setLotSel] = useState<string | null>(null) // 비시리얼 LOT 품목 OUT/MOVE — 보유 LOT 버킷 선택 (''=LOT 없음)
+  const [txDate, setTxDate] = useState(() => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10)) // 입출고일 — 소급 등록 지원
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -275,6 +276,7 @@ export default function TransactionModal({
       workType: canLinkHospital ? work?.workType ?? null : null,
       refCode: canLinkHospital ? work?.refCode ?? null : null,
       note,
+      txDate: txType === 'MOVE' ? null : txDate,
       serials: serial ? serialLines : [], // IN=신규/회수, OUT·MOVE=대상 개체 지정 (서버에서 위치 검증)
       lotBySerial: needLotInput ? Object.fromEntries(serialLines.map((sn) => [sn, lotNo.trim()])) : undefined,
       lotNo: lotPick ? (lotSel ?? '') : (needLotInput || lotInRequired ? lotNo.trim() || null : null),
@@ -380,14 +382,21 @@ export default function TransactionModal({
             </div>
           )}
 
-          {/* 요청자 — OUT 필수, IN 선택 */}
+          {/* 요청자 + 입출고일 — OUT 필수, IN 선택 / 입출고일은 소급 등록 지원 */}
           {txType !== 'MOVE' && (
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">
-                요청자 {txType === 'OUT' ? <span className="text-red-500">*</span> : <span className="text-gray-400">(선택)</span>}
-              </label>
-              <input value={requester} onChange={(e) => setRequester(e.target.value)} className={inputCls}
-                placeholder={txType === 'OUT' ? '예: 대웅 홍길동, ○○병원 김간호사, 자체 처리' : '요청자가 있으면 입력'} />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  요청자 {txType === 'OUT' ? <span className="text-red-500">*</span> : <span className="text-gray-400">(선택)</span>}
+                </label>
+                <input value={requester} onChange={(e) => setRequester(e.target.value)} className={inputCls}
+                  placeholder={txType === 'OUT' ? '예: 대웅 홍길동, 자체 처리' : '요청자가 있으면 입력'} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">{txType === 'IN' ? '입고일' : '출고일'}</label>
+                <input type="date" value={txDate} onChange={(e) => setTxDate(e.target.value)} className={inputCls} />
+                <p className="mt-0.5 text-[11px] text-gray-400">실제 {txType === 'IN' ? '입고' : '출고'}한 날짜 — 지난 날짜로 소급 등록 가능</p>
+              </div>
             </div>
           )}
 

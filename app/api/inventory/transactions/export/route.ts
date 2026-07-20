@@ -25,7 +25,8 @@ export async function GET(req: NextRequest) {
 
   const rows = txs.map((tx) => ({
     전표코드: tx.txCode,
-    일시: new Date(tx.createdAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }),
+    입출고일: tx.txDate.toISOString().slice(0, 10),
+    처리일시: new Date(tx.createdAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }),
     유형: TYPE_LABEL[tx.txType] ?? tx.txType,
     입출고유형: tx.txType === 'MOVE' ? '이동' : tx.txType === 'TRANSFER' ? '이관(구)' : (tx.reasonCode?.name ?? ''),
     품목코드: tx.item.itemCode,

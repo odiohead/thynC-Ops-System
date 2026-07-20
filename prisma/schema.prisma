@@ -784,6 +784,7 @@ model InventoryTransaction {
   inventoryId   Int       @map("inventory_id") // = item.inventoryId (비정규화 — 서버에서 강제)
   toInventoryId Int?      @map("to_inventory_id") // deprecated — 과거 TRANSFER 전표 표시용
   quantity      Int
+  txDate        DateTime  @default(now()) @map("tx_date") @db.Date // 입출고일 — 업무 기준일 (소급 등록 지원, 2026-07-20)
   transferDate  DateTime? @map("transfer_date") @db.Date // deprecated — 과거 TRANSFER 이관일자
   transferPrice Int?      @map("transfer_price") // deprecated — 과거 TRANSFER 이관 단가
   destination   String?   @db.VarChar(100) // OUT 출고처 (자유 텍스트 — 유관부서·거래처 등)

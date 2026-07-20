@@ -26,9 +26,10 @@ export function buildTxWhere(searchParams: URLSearchParams): Prisma.InventoryTra
   const from = searchParams.get('from') // YYYY-MM-DD
   const to = searchParams.get('to')
 
-  const createdAt: Prisma.DateTimeFilter = {}
-  if (from) createdAt.gte = new Date(`${from}T00:00:00+09:00`)
-  if (to) createdAt.lt = new Date(new Date(`${to}T00:00:00+09:00`).getTime() + 24 * 60 * 60 * 1000)
+  // 기간 필터는 입출고일(tx_date, DATE) 기준 — 소급 등록 전표도 업무 기준일로 조회 (2026-07-20)
+  const txDate: Prisma.DateTimeFilter = {}
+  if (from) txDate.gte = new Date(from)
+  if (to) txDate.lte = new Date(to)
 
   // warehouseId·inventoryId 필터는 출발/도착 어느 쪽이든 매칭 — 둘 다 있으면 AND로 결합
   const and: Prisma.InventoryTransactionWhereInput[] = []
@@ -40,7 +41,7 @@ export function buildTxWhere(searchParams: URLSearchParams): Prisma.InventoryTra
     ...(itemId ? { itemId: parseInt(itemId) } : {}),
     ...(hospitalCode ? { hospitalCode } : {}),
     ...(refCode ? { refCode } : {}),
-    ...(from || to ? { createdAt } : {}),
+    ...(from || to ? { txDate } : {}),
     ...(and.length > 0 ? { AND: and } : {}),
   }
 }

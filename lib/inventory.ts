@@ -25,6 +25,22 @@ export async function canManageStock(user: { userId: string; role: string }): Pr
   return !!mgr
 }
 
+/** 전표 메타 수정 권한 — 관리자(ADMIN 이상)이면서 재고 담당자 풀에도 등록된 사용자만 (2026-07-20) */
+export async function canEditTxMeta(user: { userId: string; role: string }): Promise<boolean> {
+  if (!isAdminOrAbove(user.role)) return false
+  const mgr = await prisma.inventoryManager.findUnique({ where: { userId: user.userId } })
+  return !!mgr
+}
+
+/** KST 오늘 날짜 (YYYY-MM-DD) */
+export const kstToday = () => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10)
+
+/** 입출고일 문자열 검증 (YYYY-MM-DD) */
+export function parseTxDate(value: unknown): string | null {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  return isNaN(new Date(value).getTime()) ? null : value
+}
+
 // ─── 전표 유형 (function_wms.md Phase 9 → Phase 10에서 TRANSFER 폐지) ───
 // TRANSFER(이관)는 인벤토리별 품목 완전 분리로 폐지 — 과거 전표만 이력에 남음 (신규 생성·취소 불가)
 
@@ -119,6 +135,7 @@ export interface CreateTxInput {
   workType?: string | null
   refCode?: string | null
   note?: string | null
+  txDate?: string | null // 입출고일 (YYYY-MM-DD) — 미입력 시 KST 오늘. 시스템 처리시각과 별개 (소급 등록)
   serials?: string[] // 시리얼 품목 IN (신규 또는 회수 대상)
   lotBySerial?: Record<string, string | null> // 시리얼 품목 신규 입고 시 시리얼별 LOT (LOT 관리 품목 필수)
   lotNo?: string | null // 전표 단위 LOT — 비시리얼 LOT 관리 품목(선택) / 시리얼 단건 입고 표기용
@@ -139,6 +156,7 @@ export interface TxPlan {
   reasonId: number | null
   reasonValue: string | null
   stockLot: string // 재고 버킷 LOT ('' = LOT 없음 — 시리얼·비LOT 품목은 항상 '')
+  txDate: string // 입출고일 (YYYY-MM-DD)
   componentPlans: { itemId: number; quantity: number; name: string; unit: string }[]
 }
 
@@ -160,6 +178,14 @@ export async function planInventoryTransaction(input: CreateTxInput): Promise<Tx
   }
   if (input.lotNo?.trim() && !item.isLotManaged) {
     throw new InventoryError('이 품목은 LOT 관리 대상이 아닙니다. LOT 입력을 제거하세요.')
+  }
+
+  // 입출고일 — 미입력 시 KST 오늘, 형식 검증
+  let txDate = kstToday()
+  if (input.txDate != null && input.txDate !== '') {
+    const parsed = parseTxDate(input.txDate)
+    if (!parsed) throw new InventoryError('입출고일 형식이 잘못되었습니다. (YYYY-MM-DD)')
+    txDate = parsed
   }
 
   // LOT 재고 차원 (비시리얼 LOT 품목) — IN: 새 LOT 필수 / OUT·MOVE: 보유 LOT 버킷 지정(''=LOT 없음 버킷)
@@ -251,6 +277,7 @@ export async function planInventoryTransaction(input: CreateTxInput): Promise<Tx
     reasonId,
     reasonValue,
     stockLot,
+    txDate,
     componentPlans,
   }
 }
@@ -276,6 +303,7 @@ export async function applyInventoryTransaction(client: Tx, plan: TxPlan, actorI
       toWarehouseId: input.txType === 'MOVE' ? (input.toWarehouseId ?? null) : null,
       inventoryId,
       quantity: qty,
+      txDate: new Date(plan.txDate),
       destination: input.txType === 'OUT' ? (input.destination?.trim() || null) : null,
       requester: input.txType === 'MOVE' ? null : (input.requester?.trim() || null),
       // LOT 버킷 품목은 MOVE에도 LOT 기록 (취소 시 역방향 버킷 식별) — 그 외엔 기존 표기 규칙
@@ -316,6 +344,7 @@ export async function applyInventoryTransaction(client: Tx, plan: TxPlan, actorI
         warehouseId: input.warehouseId,
         inventoryId,
         quantity: comp.quantity,
+        txDate: new Date(plan.txDate),
         destination: input.destination?.trim() || null,
         requester: input.requester?.trim() || null,
         hospitalCode: input.hospitalCode ?? null,

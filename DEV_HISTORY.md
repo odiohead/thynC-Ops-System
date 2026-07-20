@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-07-20 | 자재관리 — 입출고일(소급 등록) + 전표 수정 권한 강화
+
+- **입출고일(`tx_date` DATE)**: 시스템 처리시각과 별개의 업무 기준일 — 지난 날짜 소급 등록 지원 (사용자 요청). 단건 입출고 모달(입고일/출고일 date 입력, 기본 KST 오늘)·Excel 일괄 업로드에서 지정, 이동(MOVE)은 자동. 세트출고 자식 전표 상속. 이력 페이지 컬럼 분리(입출고일·처리일시)·품목 상세 이력·Excel export 반영, **기간 필터를 입출고일 기준으로 전환**. 기존 전표는 created_at의 KST 날짜로 백필 (마이그레이션 `20260720170000_wms_tx_date`)
+- **전표 수정 권한 강화**: 기존 ADMIN 이상 → **ADMIN 이상이면서 재고 담당자 풀 등록자만** (`canEditTxMeta`, can-manage API에 `canEditTx` 추가, 이력 페이지 수정 버튼 게이트 교체). 수정 모달에 입출고일 필드 추가
+- 검증: E2E 6케이스 — 소급 입고(7/1) 저장·미입력 시 오늘·형식 오류 400·기간 필터(입출고일 기준) 적중·풀 미등록 ADMIN 수정 403·풀 등록 ADMIN 입출고일 수정 200. 테스트 데이터·임시 풀 등록 정리
+- 영향 파일: prisma/schema.prisma, lib/inventory.ts(kstToday·parseTxDate·canEditTxMeta), lib/inventoryQuery.ts(기간 필터), transactions API 3종(route·[id]·bulk-serial), can-manage, TransactionModal, BulkSerialTxModal, TxEditModal, transactions/page, 품목 상세 2곳, transactions/export, README.md
+
 ## 2026-07-20 | LOT 재고 차원(A안) + 수량 쉼표 표기 PROD 배포
 
 - **사전 백업**: PROD `~/backups/db/thync_ops_pre_lot_dim_20260720.dump` (WMS 4테이블)

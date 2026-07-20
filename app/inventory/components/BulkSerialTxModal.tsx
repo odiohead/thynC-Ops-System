@@ -30,6 +30,7 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
   const [reasonId, setReasonId] = useState<number | null>(null)
   const [destination, setDestination] = useState('')
   const [requester, setRequester] = useState('')
+  const [txDate, setTxDate] = useState(() => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10)) // 입출고일 — 소급 등록 지원
   const [file, setFile] = useState<File | null>(null)
 
   const [preview, setPreview] = useState<PreviewResult | null>(null)
@@ -58,6 +59,7 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
     const fd = new FormData()
     fd.append('file', file!)
     fd.append('txType', txType)
+    fd.append('txDate', txDate)
     fd.append('warehouseId', String(warehouseId))
     fd.append('reasonId', String(reasonId))
     if (txType === 'OUT' && destination.trim()) fd.append('destination', destination.trim())
@@ -142,9 +144,13 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
               {activeWarehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
             </select>
           </div>
-          <div className={txType === 'OUT' ? '' : 'col-span-2'}>
+          <div>
             <label className="mb-1 block text-xs font-medium text-gray-500">요청자 {txType === 'OUT' ? '(필수)' : '(선택)'}</label>
             <input value={requester} onChange={(e) => setRequester(e.target.value)} placeholder={txType === 'OUT' ? '예: 대웅 홍길동, 자체 처리' : '요청자가 있으면 입력'} className={inputCls} />
+          </div>
+          <div className={txType === 'OUT' ? 'col-span-2' : ''}>
+            <label className="mb-1 block text-xs font-medium text-gray-500">{txType === 'IN' ? '입고일' : '출고일'} (소급 가능)</label>
+            <input type="date" value={txDate} onChange={(e) => { setTxDate(e.target.value); resetPreview() }} className={inputCls} />
           </div>
           {txType === 'OUT' && (
             <div>
