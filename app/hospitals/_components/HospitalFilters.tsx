@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter, usePathname } from 'next/navigation'
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 
 interface StatusOption {
   name: string
@@ -33,24 +33,6 @@ export default function HospitalFilters({
   const [sido, setSido] = useState(initialSido)
   const [statuses, setStatuses] = useState<string[]>(initialStatuses)
   const [types, setTypes] = useState<string[]>(initialTypes)
-  const [statusOpen, setStatusOpen] = useState(false)
-  const [typeOpen, setTypeOpen] = useState(false)
-  const statusRef = useRef<HTMLDivElement>(null)
-  const typeRef = useRef<HTMLDivElement>(null)
-
-  // 외부 클릭 시 드롭다운 닫기
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (statusRef.current && !statusRef.current.contains(e.target as Node)) {
-        setStatusOpen(false)
-      }
-      if (typeRef.current && !typeRef.current.contains(e.target as Node)) {
-        setTypeOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
 
   function apply(newSearch: string, newSido: string, newStatuses: string[], newTypes: string[]) {
     const params = new URLSearchParams()
@@ -78,34 +60,34 @@ export default function HospitalFilters({
     apply(search, sido, statuses, next)
   }
 
-  return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
-      {/* 검색 */}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          apply(search, sido, statuses, types)
-        }}
-        className="flex flex-1 gap-2"
-      >
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="병원명 검색..."
-          className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        />
-        <button
-          type="submit"
-          className="rounded-lg bg-gray-800 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-700"
-        >
-          검색
-        </button>
-      </form>
+  const checkboxCls = 'h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500'
 
-      {/* 시도·병원종·상태 필터 */}
-      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-3">
-        {/* 시도 필터 */}
+  return (
+    <div className="flex flex-col gap-3">
+      {/* 검색 + 시도 */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            apply(search, sido, statuses, types)
+          }}
+          className="flex flex-1 gap-2"
+        >
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="병원명 검색..."
+            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <button
+            type="submit"
+            className="rounded-lg bg-gray-800 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-700"
+          >
+            검색
+          </button>
+        </form>
+
         <select
           value={sido}
           onChange={(e) => {
@@ -121,138 +103,70 @@ export default function HospitalFilters({
             </option>
           ))}
         </select>
+      </div>
 
-        {/* 병원종 멀티선택 드롭다운 */}
-        <div className="relative" ref={typeRef}>
+      {/* 병원종·상태 체크박스 — 표 상단 상시 노출 (2026-07-21, 구 멀티선택 드롭다운 대체) */}
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-1.5">
+        <span className="mr-2 w-11 shrink-0 text-xs font-medium text-gray-500">병원종</span>
+        {typeOptions.map((opt) => {
+          const checked = types.includes(opt)
+          return (
+            <label
+              key={opt}
+              className={`flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-sm transition-colors ${
+                checked ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <input type="checkbox" checked={checked} onChange={() => toggleType(opt)} className={checkboxCls} />
+              {opt}
+            </label>
+          )
+        })}
+        {types.length > 0 && (
           <button
             type="button"
-            onClick={() => setTypeOpen((o) => !o)}
-            className={`flex w-full items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors sm:w-36 ${
-              types.length > 0
-                ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500'
-                : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-            }`}
+            onClick={() => {
+              setTypes([])
+              apply(search, sido, statuses, [])
+            }}
+            className="ml-1 rounded-md px-2 py-1 text-xs text-red-500 hover:bg-red-50"
           >
-            <span className="flex-1 text-left">
-              {types.length > 0 ? `병원종 (${types.length})` : '병원종'}
-            </span>
-            <svg
-              className={`h-4 w-4 transition-transform ${typeOpen ? 'rotate-180' : ''}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
+            초기화
           </button>
+        )}
+      </div>
 
-          {typeOpen && (
-            <div className="absolute right-0 z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-              {typeOptions.map((opt) => {
-                const checked = types.includes(opt)
-                return (
-                  <label
-                    key={opt}
-                    className="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleType(opt)}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="text-sm text-gray-700">{opt}</span>
-                  </label>
-                )
-              })}
-              {types.length > 0 && (
-                <>
-                  <div className="my-1 border-t border-gray-100" />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTypes([])
-                      apply(search, sido, statuses, [])
-                      setTypeOpen(false)
-                    }}
-                    className="w-full px-3 py-2 text-left text-sm text-red-500 hover:bg-gray-50"
-                  >
-                    선택 초기화
-                  </button>
-                </>
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-1.5">
+        <span className="mr-2 w-11 shrink-0 text-xs font-medium text-gray-500">상태</span>
+        {statusOptions.map((opt) => {
+          const checked = statuses.includes(opt.name)
+          return (
+            <label
+              key={opt.name}
+              className={`flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-sm transition-colors ${
+                checked ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <input type="checkbox" checked={checked} onChange={() => toggleStatus(opt.name)} className={checkboxCls} />
+              {opt.color && (
+                <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: opt.color }} />
               )}
-            </div>
-          )}
-        </div>
-
-        {/* 상태 멀티선택 드롭다운 */}
-        <div className="relative col-span-2 sm:col-span-1" ref={statusRef}>
+              {opt.name}
+            </label>
+          )
+        })}
+        {statuses.length > 0 && (
           <button
             type="button"
-            onClick={() => setStatusOpen((o) => !o)}
-            className={`flex w-full items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors sm:w-36 ${
-              statuses.length > 0
-                ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500'
-                : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-            }`}
+            onClick={() => {
+              setStatuses([])
+              apply(search, sido, [], types)
+            }}
+            className="ml-1 rounded-md px-2 py-1 text-xs text-red-500 hover:bg-red-50"
           >
-            <span className="flex-1 text-left">
-              {statuses.length > 0 ? `상태 (${statuses.length})` : '상태'}
-            </span>
-            <svg
-              className={`h-4 w-4 transition-transform ${statusOpen ? 'rotate-180' : ''}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
+            초기화
           </button>
-
-          {statusOpen && (
-            <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-              {statusOptions.map((opt) => {
-                const checked = statuses.includes(opt.name)
-                return (
-                  <label
-                    key={opt.name}
-                    className="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleStatus(opt.name)}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    {opt.color && (
-                      <span
-                        className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                        style={{ backgroundColor: opt.color }}
-                      />
-                    )}
-                    <span className="text-sm text-gray-700">{opt.name}</span>
-                  </label>
-                )
-              })}
-              {statuses.length > 0 && (
-                <>
-                  <div className="my-1 border-t border-gray-100" />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStatuses([])
-                      apply(search, sido, [], types)
-                      setStatusOpen(false)
-                    }}
-                    className="w-full px-3 py-2 text-left text-sm text-red-500 hover:bg-gray-50"
-                  >
-                    선택 초기화
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-        </div>
+        )}
       </div>
     </div>
   )

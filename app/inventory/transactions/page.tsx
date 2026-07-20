@@ -22,7 +22,7 @@ interface Tx {
   canceledAt: string | null
   txDate: string
   createdAt: string
-  item: { id: number; itemCode: string; name: string; unit: string }
+  item: { id: number; itemCode: string; name: string; unit: string; isSerialManaged: boolean }
   warehouse: { name: string } | null
   toWarehouse: { name: string } | null
   inventory: { name: string } | null
@@ -109,7 +109,7 @@ export default function TransactionsPage() {
   const inputCls = 'rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-6 max-w-screen-2xl mx-auto">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold text-gray-900">입출고 이력</h1>
         <div className="flex gap-2">
@@ -155,76 +155,85 @@ export default function TransactionsPage() {
         <input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className={inputCls} />
       </div>
 
+      {/* 한 화면 표시 — 컬럼 병합(입출고일+처리일시·유형+입출고유형·인벤토리+위치) + 패딩 압축 + truncate */}
       <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto">
         <table className="w-full text-sm whitespace-nowrap">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              <th className="px-3 py-3">전표</th>
-              <th className="px-3 py-3">입출고일</th><th className="px-3 py-3">처리일시</th>
-              <th className="px-3 py-3">유형</th>
-              <th className="px-3 py-3">입출고 유형</th>
-              <th className="px-3 py-3">품목</th>
-              <th className="px-3 py-3 text-right">수량</th>
-              <th className="px-3 py-3">인벤토리</th>
-              <th className="px-3 py-3">위치</th>
-              <th className="px-3 py-3">LOT</th>
-              <th className="px-3 py-3">요청자</th>
-              <th className="px-3 py-3">출고처</th>
-              <th className="px-3 py-3">병원/업무</th>
-              <th className="px-3 py-3">처리자</th>
-              {canManage && <th className="px-3 py-3 text-right">관리</th>}
+              <th className="px-2 py-2.5">전표</th>
+              <th className="px-2 py-2.5">입출고일</th>
+              <th className="px-2 py-2.5">유형</th>
+              <th className="px-2 py-2.5">품목</th>
+              <th className="px-2 py-2.5 text-right">수량</th>
+              <th className="px-2 py-2.5">인벤토리·위치</th>
+              <th className="px-2 py-2.5">LOT</th>
+              <th className="px-2 py-2.5">요청자</th>
+              <th className="px-2 py-2.5">출고처</th>
+              <th className="px-2 py-2.5">병원/업무</th>
+              <th className="px-2 py-2.5">처리자</th>
+              {canManage && <th className="px-2 py-2.5 text-right">관리</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading ? (
-              <tr><td colSpan={canManage ? 15 : 14} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td></tr>
+              <tr><td colSpan={canManage ? 12 : 11} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td></tr>
             ) : txs.length === 0 ? (
-              <tr><td colSpan={canManage ? 15 : 14} className="py-12 text-center text-sm text-gray-400">이력이 없습니다.</td></tr>
+              <tr><td colSpan={canManage ? 12 : 11} className="py-12 text-center text-sm text-gray-400">이력이 없습니다.</td></tr>
             ) : txs.map((tx) => (
               <tr key={tx.id} className={`hover:bg-gray-50 ${tx.canceledAt ? 'opacity-50 line-through' : ''}`}>
-                <td className="px-3 py-3 font-mono text-xs text-gray-500">
+                <td className="px-2 py-2 font-mono text-[11px] text-gray-500">
                   {tx.txCode}
                   {tx.parentTx && <span className="block text-[10px] text-emerald-600 no-underline">└ 세트 ({tx.parentTx.txCode})</span>}
                   {tx.childTxs.length > 0 && <span className="block text-[10px] text-emerald-600">세트출고 +{tx.childTxs.length}</span>}
                 </td>
-                <td className="px-3 py-3 text-xs font-medium text-gray-700 tabular-nums">{tx.txDate?.slice(0, 10) ?? '-'}</td>
-                <td className="px-3 py-3 text-gray-400 text-xs">{new Date(tx.createdAt).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}</td>
-                <td className="px-3 py-3"><span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${TYPE_BADGE[tx.txType]}`}>{TYPE_LABEL[tx.txType]}</span></td>
-                <td className="px-3 py-3 text-gray-600">{tx.txType === 'MOVE' ? '이동' : tx.txType === 'TRANSFER' ? '이관(구)' : (tx.reasonCode?.name ?? '-')}</td>
-                <td className="px-3 py-3">
-                  <Link href={filterInventory ? `/inventory/${filterInventory}/items/${tx.item.id}` : `/inventory/items/${tx.item.id}`} className="font-medium text-gray-900 hover:text-blue-600 no-underline">{tx.item.name}</Link>
-                  <span className="ml-1 font-mono text-xs text-gray-400">{tx.item.itemCode}</span>
+                <td className="px-2 py-2 text-xs">
+                  <span className="font-medium text-gray-700 tabular-nums">{tx.txDate?.slice(0, 10) ?? '-'}</span>
+                  <span className="block text-[10px] text-gray-400">{new Date(tx.createdAt).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}</span>
                 </td>
-                <td className="px-3 py-3 text-right tabular-nums font-medium">{tx.quantity.toLocaleString()}<span className="text-xs text-gray-400 ml-0.5">{tx.item.unit}</span></td>
-                <td className="px-3 py-3 text-xs text-gray-600">
-                  {tx.inventory?.name ?? '-'}{tx.txType === 'TRANSFER' && tx.toInventory && <span className="text-purple-600"> → {tx.toInventory.name}</span>}
+                <td className="px-2 py-2">
+                  <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${TYPE_BADGE[tx.txType]}`}>{TYPE_LABEL[tx.txType]}</span>
+                  {(tx.txType === 'IN' || tx.txType === 'OUT') && (
+                    <span className="block max-w-[7rem] truncate text-[10px] text-gray-500" title={tx.reasonCode?.name ?? ''}>{tx.reasonCode?.name ?? '-'}</span>
+                  )}
+                </td>
+                <td className="px-2 py-2 max-w-[14rem]">
+                  <Link href={filterInventory ? `/inventory/${filterInventory}/items/${tx.item.id}` : `/inventory/items/${tx.item.id}`} title={tx.item.name} className="block truncate font-medium text-gray-900 hover:text-blue-600 no-underline">{tx.item.name}</Link>
+                  <span className="block font-mono text-[10px] text-gray-400">{tx.item.itemCode}</span>
+                </td>
+                <td className="px-2 py-2 text-right tabular-nums font-medium">{tx.quantity.toLocaleString()}<span className="text-xs text-gray-400 ml-0.5">{tx.item.unit}</span></td>
+                <td className="px-2 py-2 text-xs text-gray-600 max-w-[11rem]">
+                  <span className="block truncate text-[10px] text-gray-400" title={tx.inventory?.name ?? ''}>
+                    {tx.inventory?.name ?? '-'}{tx.txType === 'TRANSFER' && tx.toInventory && <span className="text-purple-600"> → {tx.toInventory.name}</span>}
+                  </span>
+                  <span className="block truncate" title={`${tx.warehouse?.name ?? ''}${tx.toWarehouse ? ` → ${tx.toWarehouse.name}` : ''}`}>
+                    {tx.warehouse?.name}{tx.toWarehouse && <span className="text-gray-400"> → {tx.toWarehouse.name}</span>}
+                  </span>
                   {tx.txType === 'TRANSFER' && (
                     <span className="block text-[10px] text-gray-400">
                       {tx.transferDate ? new Date(tx.transferDate).toLocaleDateString('ko-KR') : ''}{tx.transferPrice != null && ` · 단가 ${tx.transferPrice.toLocaleString()}원`}
                     </span>
                   )}
                 </td>
-                <td className="px-3 py-3 text-gray-600 text-xs">
-                  {tx.warehouse?.name}{tx.toWarehouse && <span className="text-gray-400"> → {tx.toWarehouse.name}</span>}
+                <td className="px-2 py-2 font-mono text-[11px] text-gray-500 max-w-[6rem]"><span className="block truncate" title={tx.lotNo ?? ''}>{tx.lotNo ?? '-'}</span></td>
+                <td className="px-2 py-2 text-gray-600 text-xs max-w-[6rem]"><span className="block truncate" title={tx.requester ?? ''}>{tx.requester ?? '-'}</span></td>
+                <td className="px-2 py-2 text-gray-600 text-xs max-w-[8rem]"><span className="block truncate" title={tx.destination ?? ''}>{tx.destination ?? '-'}</span></td>
+                <td className="px-2 py-2 text-gray-600 text-xs max-w-[10rem]">
+                  <span className="block truncate" title={`${tx.hospital?.hospitalName ?? ''}${tx.refCode ? ` · ${tx.refCode}` : ''}`}>
+                    {tx.hospital?.hospitalName ?? '-'}{tx.refCode && <span className="text-gray-400"> · {tx.refCode}</span>}
+                  </span>
                 </td>
-                <td className="px-3 py-3 font-mono text-xs text-gray-500">{tx.lotNo ?? '-'}</td>
-                <td className="px-3 py-3 text-gray-600 text-xs">{tx.requester ?? '-'}</td>
-                <td className="px-3 py-3 text-gray-600 text-xs">{tx.destination ?? '-'}</td>
-                <td className="px-3 py-3 text-gray-600 text-xs">
-                  {tx.hospital?.hospitalName ?? '-'}{tx.refCode && <span className="text-gray-400"> · {tx.refCode}</span>}
-                </td>
-                <td className="px-3 py-3 text-gray-500 text-xs">
+                <td className="px-2 py-2 text-gray-500 text-xs">
                   {tx.actor?.name ?? '-'}
                   {tx.canceledAt && <span className="block text-red-400">취소: {tx.canceledBy?.name ?? ''}</span>}
                 </td>
                 {canManage && (
-                  <td className="px-3 py-3 text-right">
+                  <td className="px-2 py-2 text-right">
                     {!tx.canceledAt && tx.txType !== 'TRANSFER' && (
                       <span className="inline-flex gap-1">
                         {canEditTx && (
-                          <button onClick={() => setEditTx(tx)} className="rounded-md border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-50 no-underline">수정</button>
+                          <button onClick={() => setEditTx(tx)} className="rounded-md border border-gray-200 px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-50 no-underline">수정</button>
                         )}
-                        <button onClick={() => handleCancel(tx)} className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 no-underline">취소</button>
+                        <button onClick={() => handleCancel(tx)} className="rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-50 no-underline">취소</button>
                       </span>
                     )}
                   </td>

@@ -111,6 +111,19 @@ export default function VehicleLogsPanel({ me, vehicles, canWrite, isAdmin }: Pr
           <div className="text-sm text-gray-600">
             합계 주행거리 <span className="font-semibold tabular-nums text-gray-900">{totalDistance.toLocaleString()}</span> km
           </div>
+          <button
+            onClick={() => {
+              const params = new URLSearchParams()
+              if (vehicleId !== 'all') params.set('vehicleId', String(vehicleId))
+              if (from) params.set('from', from)
+              if (to) params.set('to', to)
+              window.open(`/vehicle-reservations/logs/print?${params.toString()}`, '_blank')
+            }}
+            className="rounded-lg border border-gray-300 px-4 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50"
+            title="현재 필터 기준 — 차량별 1장씩 A4 가로로 인쇄"
+          >
+            인쇄
+          </button>
           {canWrite && (
             <button
               onClick={() => setShowCreate(true)}

@@ -9,20 +9,25 @@ interface EditableTx {
   txCode: string
   txType: 'IN' | 'OUT' | 'MOVE' | 'TRANSFER'
   reasonCode: { id: number; name: string; value?: string | null } | null
+  quantity: number
   requester: string | null
   destination: string | null
   lotNo: string | null
   note: string | null
   txDate: string
+  item: { unit: string; isSerialManaged: boolean }
+  childTxs: { id: number }[]
 }
 
 /**
- * 전표 메타 정보 수정 모달 (ADMIN 전용).
- * 수량·품목·위치·시리얼은 수정 불가(취소 후 재등록) — 유형(같은 동작 부류)·요청자·출고처·비고만.
+ * 전표 메타 정보 수정 모달 (ADMIN + 재고 담당자).
+ * 수량은 비시리얼 품목만 수정 가능(변경분 재고 자동 반영) — 시리얼 품목·세트출고 부모는 취소 후 재등록.
+ * 품목·위치·시리얼 개체는 수정 불가 — 유형(같은 동작 부류)·요청자·출고처·비고만.
  */
 export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; onClose: () => void; onDone: () => void }) {
   const [reasons, setReasons] = useState<Reason[]>([])
   const [reasonId, setReasonId] = useState<number | null>(tx.reasonCode?.id ?? null)
+  const [quantity, setQuantity] = useState(String(tx.quantity))
   const [requester, setRequester] = useState(tx.requester ?? '')
   const [destination, setDestination] = useState(tx.destination ?? '')
   const [lotNo, setLotNo] = useState(tx.lotNo ?? '')
@@ -33,6 +38,8 @@ export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; o
 
   const hasReason = tx.txType === 'IN' || tx.txType === 'OUT'
   const currentValue = tx.reasonCode?.value ?? null
+  // 수량 수정 — 비시리얼 품목만, 세트출고 부모는 서버에서도 거부 (자식 정합)
+  const canEditQty = !tx.item.isSerialManaged && tx.txType !== 'TRANSFER' && tx.childTxs.length === 0
 
   useEffect(() => {
     if (!hasReason) return
@@ -45,8 +52,13 @@ export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; o
 
   async function save() {
     if (tx.txType === 'OUT' && !requester.trim()) { setError('출고 전표의 요청자는 비울 수 없습니다.'); return }
+    if (canEditQty) {
+      const q = Math.trunc(Number(quantity))
+      if (!Number.isFinite(q) || q <= 0) { setError('수량은 1 이상의 정수여야 합니다.'); return }
+    }
     setBusy(true); setError(null)
     const payload: Record<string, unknown> = { requester: requester.trim(), note, lotNo: lotNo.trim() }
+    if (canEditQty) payload.quantity = Math.trunc(Number(quantity))
     if (txDate) payload.txDate = txDate
     if (hasReason && reasonId) payload.reasonId = reasonId
     if (tx.txType === 'OUT') payload.destination = destination
@@ -65,7 +77,11 @@ export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; o
       <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4">
           <h2 className="text-base font-semibold text-gray-900">전표 수정 <span className="ml-1 font-mono text-xs font-normal text-gray-400">{tx.txCode}</span></h2>
-          <p className="mt-1 text-xs text-gray-400">수량·품목·위치·시리얼은 수정할 수 없습니다 — 잘못 입력된 전표는 취소 후 재등록하세요.</p>
+          <p className="mt-1 text-xs text-gray-400">
+            {canEditQty
+              ? '수량 변경분은 재고에 즉시 반영됩니다. 품목·위치는 수정할 수 없습니다 — 취소 후 재등록하세요.'
+              : '수량·품목·위치·시리얼은 수정할 수 없습니다 — 잘못 입력된 전표는 취소 후 재등록하세요.'}
+          </p>
         </div>
 
         <div className="space-y-3">
@@ -80,7 +96,13 @@ export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; o
               )}
             </div>
           )}
-          <div className="grid grid-cols-2 gap-3">
+          <div className={`grid gap-3 ${canEditQty ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            {canEditQty && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500">수량 <span className="font-normal text-gray-400">({tx.item.unit})</span></label>
+                <input type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className={inputCls} />
+              </div>
+            )}
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-500">요청자 {tx.txType === 'OUT' && <span className="text-red-500">*</span>}</label>
               <input value={requester} onChange={(e) => setRequester(e.target.value)} className={inputCls} />

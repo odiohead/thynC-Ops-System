@@ -517,6 +517,61 @@ async function applySerialUnits(
   await links(unitIds)
 }
 
+// ─── 전표 수량 수정 (2026-07-21) ───
+// 비시리얼 품목 전용 — 시리얼 품목은 수량=개체 수라 금지, 세트출고 부모는 자식 정합 문제로 금지 (취소 후 재등록).
+
+export type QuantityEditTx = Prisma.InventoryTransactionGetPayload<{
+  include: {
+    warehouse: { select: { name: true } }
+    toWarehouse: { select: { name: true } }
+    item: { select: { isSerialManaged: true; isLotManaged: true } }
+  }
+}> & { childTxs: { id: number }[] }
+
+/** 수량 수정 가능 여부 검증 — 불가 시 InventoryError. 반환값은 정규화된 새 수량. */
+export function assertQuantityEditable(tx: QuantityEditTx, newQuantity: unknown): number {
+  const qty = Math.trunc(Number(newQuantity))
+  if (!Number.isFinite(qty) || qty <= 0) throw new InventoryError('수량은 1 이상의 정수여야 합니다.')
+  if (tx.item.isSerialManaged) {
+    throw new InventoryError('시리얼 관리 품목은 수량을 수정할 수 없습니다(수량=개체 수). 전표를 취소 후 재등록하세요.', 409)
+  }
+  if (tx.childTxs.length > 0) {
+    throw new InventoryError('세트출고 주자재 전표는 수량을 수정할 수 없습니다. 전표를 취소 후 재등록하세요. (부자재 전표는 개별 수정 가능)', 409)
+  }
+  return qty
+}
+
+/**
+ * 수량 변경분(delta)을 재고 버킷에 반영 — 전표 update와 같은 트랜잭션에서 호출.
+ * 결과 재고가 음수가 되면 InventoryError(409) (예: 입고 축소인데 이미 출고된 경우).
+ */
+export async function applyQuantityDelta(client: Tx, tx: QuantityEditTx, delta: number) {
+  if (delta === 0) return
+  const bucket: Bucket = {
+    itemId: tx.itemId,
+    warehouseId: tx.warehouseId,
+    inventoryId: tx.inventoryId,
+    lotNo: tx.lotNo ?? '', // 비시리얼 전용 — LOT 버킷 품목은 전표 LOT가 버킷 키
+  }
+  if (tx.txType === 'IN') {
+    if (delta > 0) await increaseStock(client, bucket, delta)
+    else await decreaseStock(client, bucket, -delta, tx.warehouse.name)
+  } else if (tx.txType === 'OUT') {
+    if (delta > 0) await decreaseStock(client, bucket, delta, tx.warehouse.name)
+    else await increaseStock(client, bucket, -delta)
+  } else {
+    // MOVE: 출발지·도착지 양쪽 버킷 동시 반영
+    const dst: Bucket = { ...bucket, warehouseId: tx.toWarehouseId! }
+    if (delta > 0) {
+      await decreaseStock(client, bucket, delta, tx.warehouse.name)
+      await increaseStock(client, dst, delta)
+    } else {
+      await decreaseStock(client, dst, -delta, tx.toWarehouse?.name ?? '도착지')
+      await increaseStock(client, bucket, -delta)
+    }
+  }
+}
+
 type CancelableTx = Prisma.InventoryTransactionGetPayload<{
   include: {
     warehouse: { select: { name: true } }

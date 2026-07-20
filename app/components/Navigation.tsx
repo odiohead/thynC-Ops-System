@@ -149,8 +149,8 @@ export default function Navigation() {
     if (pathname.startsWith('/settings')) setSettingsOpen(true)
   }, [pathname])
 
-  // 로그인·사이니지 대시보드는 네비게이션 없이 전체 화면 사용
-  if (pathname === '/login' || pathname === '/dashboard') return null
+  // 로그인·사이니지 대시보드·운행일지 인쇄는 네비게이션 없이 전체 화면 사용
+  if (pathname === '/login' || pathname === '/dashboard' || pathname === '/vehicle-reservations/logs/print') return null
 
   function isActive(href: string) {
     return pathname === href || pathname.startsWith(href + '/')

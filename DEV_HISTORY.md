@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-07-21 | 자재관리 전표 수량 수정 + 병원 필터 상시 노출 + 입출고 이력 한 화면 + 운행일지 인쇄
+
+- **전표 수량 수정** (사용자 제안 → 추천안 승인): 전표 수정 모달에 수량 필드 추가 — **비시리얼 품목만**, 기존 `canEditTxMeta`(ADMIN+재고 담당자 풀) 게이트 재사용. `lib/inventory.ts`에 `assertQuantityEditable`(시리얼 품목·세트출고 부모 409) + `applyQuantityDelta`(변경분을 재고 버킷에 반영 — IN/OUT/MOVE별, LOT 버킷 포함, 결과 음수면 409) 추가, PUT 라우트에서 전표 update와 한 트랜잭션 처리·감사 로그 유지. 시리얼 품목은 개체 정정(기존)·취소 후 재등록 경로 유지
+- **hospitals 필터**: 병원종·상태 멀티선택 드롭다운 → **표 상단 체크박스 상시 노출**(HospitalFilters 재작성 — 클릭 즉시 적용, 선택 시 파란 배경, 초기화 버튼, 상태 색 점 유지)
+- **입출고 이력 한 화면**: max-w-7xl→screen-2xl, 컬럼 15→12 병합(입출고일+처리일시 / 유형+입출고유형 / 인벤토리+위치), 패딩 압축(px-2/py-2), 긴 텍스트 truncate(+title 툴팁) — 일반 해상도 가로 스크롤 제거
+- **운행일지 인쇄**: 운행일지 탭 '인쇄' 버튼 → `/vehicle-reservations/logs/print`(신규, 네비 제외 경로 추가) — **A4 가로(@page landscape), 차량별 1장 페이지 나눔**, 표준 양식(번호·운행일자·운행시간·운전자·목적·행선지·계기판·주행거리·비고+합계), 현재 필터(차량·기간) 전달, 화면 전용 인쇄/닫기 툴바
+- **검증(dev2)**: tsc 0오류 → 힙 4GB 빌드 → E2E 8케이스(IN 10→7 수정·재고 반영 / OUT 후 IN 축소 재고 부족 409 / OUT 5→3 / MOVE 2→3 양쪽 버킷 / 시리얼 품목 409 등) 전부 통과 + 재고 스냅샷 정합 확인, 페이지 4종 200. 테스트 데이터·임시 풀 등록 정리
+- 영향 파일: lib/inventory.ts, app/api/inventory/transactions/[id]/route.ts, TxEditModal, transactions/page, HospitalFilters, VehicleLogsPanel, app/vehicle-reservations/logs/print/page.tsx(신규), MainWrapper, Navigation, README.md
+
 ## 2026-07-20 | AI 사용량 원장 PROD 배포
 
 - `455f1cc` push → PROD pull → 마이그레이션 `20260720230000` psql 적용+resolve(기존 usage **28건 백필** — 입력 278,939·출력 30,075 토큰) → prisma generate → 힙 4GB 빌드 → `pm2 restart thync-prod`
