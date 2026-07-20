@@ -4,6 +4,11 @@
 
 ---
 
+## 2026-07-21 | 전표 수량 수정·병원 필터·이력 한 화면·운행일지 인쇄 PROD 배포
+
+- `753ee28` push → PROD pull → 힙 4GB 빌드 → `pm2 restart thync-prod` (DB 변경·신규 패키지 없음)
+- 검증: login 200 · /hospitals·/inventory/transactions·/vehicle-reservations/logs/print 307(인증 리다이렉트 정상) · 재시작 후 신규 에러 0 (기존 Anthropic 크레딧 부족 로그만 잔존)
+
 ## 2026-07-21 | 자재관리 전표 수량 수정 + 병원 필터 상시 노출 + 입출고 이력 한 화면 + 운행일지 인쇄
 
 - **전표 수량 수정** (사용자 제안 → 추천안 승인): 전표 수정 모달에 수량 필드 추가 — **비시리얼 품목만**, 기존 `canEditTxMeta`(ADMIN+재고 담당자 풀) 게이트 재사용. `lib/inventory.ts`에 `assertQuantityEditable`(시리얼 품목·세트출고 부모 409) + `applyQuantityDelta`(변경분을 재고 버킷에 반영 — IN/OUT/MOVE별, LOT 버킷 포함, 결과 음수면 409) 추가, PUT 라우트에서 전표 update와 한 트랜잭션 처리·감사 로그 유지. 시리얼 품목은 개체 정정(기존)·취소 후 재등록 경로 유지
