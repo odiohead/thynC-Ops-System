@@ -4,6 +4,11 @@
 
 ---
 
+## 2026-07-20 | AI 사용 현황 페이지 PROD 배포
+
+- `e53022f` push → PROD pull → 네비 마이그레이션 `20260720200000` 적용+resolve → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- 검증: login 200 · `/settings/ai-usage` 307(인증 리다이렉트 정상) · 네비 행 존재 · PROD에 usage 기록 28건(즉시 표시 가능) · 신규 에러 0
+
 ## 2026-07-20 | AI 어시스턴트 사용 현황 관리 페이지 (`/settings/ai-usage`)
 
 - **배경**: 사용자 요청 — 어시스턴트 사용 이력·토큰·비용 관리 필요. 기존 `ai_chat_messages.usage`(입력/출력/캐시읽기/캐시쓰기) 실시간 집계로 구현 — 신규 테이블 없음
