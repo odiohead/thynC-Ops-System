@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-07-20 | 입출고일·전표 수정 권한 강화 PROD 배포
+
+- **사전 백업**: PROD `~/backups/db/thync_ops_pre_txdate_20260720.dump` (inventory_transactions)
+- `ee69068` push → PROD pull → 마이그레이션 `20260720170000` psql 적용+resolve(기존 전표 25건 KST 백필: 7/19~7/20) → prisma generate → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- 검증: login 200 · tx_date 백필 확인 · 재고 담당자 풀 5명(수정 버튼 대상) · 재시작 후 신규 에러 0
+
 ## 2026-07-20 | 자재관리 — 입출고일(소급 등록) + 전표 수정 권한 강화
 
 - **입출고일(`tx_date` DATE)**: 시스템 처리시각과 별개의 업무 기준일 — 지난 날짜 소급 등록 지원 (사용자 요청). 단건 입출고 모달(입고일/출고일 date 입력, 기본 KST 오늘)·Excel 일괄 업로드에서 지정, 이동(MOVE)은 자동. 세트출고 자식 전표 상속. 이력 페이지 컬럼 분리(입출고일·처리일시)·품목 상세 이력·Excel export 반영, **기간 필터를 입출고일 기준으로 전환**. 기존 전표는 created_at의 KST 날짜로 백필 (마이그레이션 `20260720170000_wms_tx_date`)
