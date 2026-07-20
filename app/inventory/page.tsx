@@ -177,14 +177,14 @@ export default function InventoryPage() {
                               <div className="flex flex-wrap gap-1">
                                 {r.stocks.map((s) => (
                                   <span key={s.warehouseId} className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
-                                    {s.warehouseName} <b className="tabular-nums">{s.quantity}</b>
+                                    {s.warehouseName} <b className="tabular-nums">{s.quantity.toLocaleString()}</b>
                                   </span>
                                 ))}
                               </div>
                             )}
                           </td>
                           <td className="px-3 py-3 text-right">
-                            <span className="tabular-nums font-semibold text-gray-900">{r.total}</span> <span className="text-xs text-gray-400">{r.unit}</span>
+                            <span className="tabular-nums font-semibold text-gray-900">{r.total.toLocaleString()}</span> <span className="text-xs text-gray-400">{r.unit}</span>
                           </td>
                         </tr>
                       ))}

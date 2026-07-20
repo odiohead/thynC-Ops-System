@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
       warehouse: { select: { name: true } },
       inventory: { select: { name: true } },
     },
-    orderBy: [{ inventoryId: 'asc' }, { itemId: 'asc' }, { warehouseId: 'asc' }],
+    orderBy: [{ inventoryId: 'asc' }, { itemId: 'asc' }, { warehouseId: 'asc' }, { lotNo: 'asc' }],
   })
 
   const rows = stocks.map((s) => ({
@@ -59,11 +59,12 @@ export async function GET(req: NextRequest) {
     단위: s.item.unit,
     시리얼관리: s.item.isSerialManaged ? 'Y' : '',
     위치: s.warehouse.name,
+    LOT: s.lotNo,
     수량: s.quantity,
   }))
 
   const ws = XLSX.utils.json_to_sheet(rows)
-  ws['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 24 }, { wch: 20 }, { wch: 12 }, { wch: 20 }, { wch: 6 }, { wch: 8 }, { wch: 14 }, { wch: 8 }]
+  ws['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 24 }, { wch: 20 }, { wch: 12 }, { wch: 20 }, { wch: 6 }, { wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 8 }]
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, '재고현황')
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer

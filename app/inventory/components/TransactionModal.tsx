@@ -17,7 +17,7 @@ export interface ModalInventory {
 }
 interface Warehouse { id: number; name: string; isActive: boolean; inventoryId: number }
 interface Reason { id: number; name: string; value: string | null }
-interface Bucket { warehouseId: number; warehouseName: string; quantity: number }
+interface Bucket { warehouseId: number; warehouseName: string; lotNo: string; quantity: number } // LOT 재고 차원 — 위치×LOT 단위
 interface Unit { id: number; serialNo: string }
 interface Hospital { hospitalCode: string; hospitalName: string }
 interface Work { workType: string; refCode: string; label: string }
@@ -49,7 +49,8 @@ export default function TransactionModal({
   const [quantity, setQuantity] = useState('1')
   const [serialsText, setSerialsText] = useState('') // IN 신규/회수 + OUT·MOVE 시리얼 입력(스캔)
   const [requester, setRequester] = useState('') // 요청자 — OUT 필수, IN 선택
-  const [lotNo, setLotNo] = useState('') // LOT 관리 품목 신규 입고 — 전표당 1개(전체 시리얼 동일 적용)
+  const [lotNo, setLotNo] = useState('') // LOT 관리 품목 입고 — 전표당 1개(시리얼은 전체 동일 적용)
+  const [lotSel, setLotSel] = useState<string | null>(null) // 비시리얼 LOT 품목 OUT/MOVE — 보유 LOT 버킷 선택 (''=LOT 없음)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -97,7 +98,8 @@ export default function TransactionModal({
   const serialLines = serialsText.split('\n').map((s) => s.trim()).filter(Boolean)
   const isReturnIn = txType === 'IN' && currentReason?.value === 'RETURN'
   const needLotInput = !!item?.isLotManaged && serial && txType === 'IN' && !isReturnIn // 시리얼+LOT: 신규 입고 필수
-  const optionalLotInput = !!item?.isLotManaged && !serial && txType !== 'MOVE' // 비시리얼+LOT: 전표 단위 선택 기록
+  const lotInRequired = !!item?.isLotManaged && !serial && txType === 'IN' // 비시리얼+LOT: 입고 LOT 필수 (재고 버킷)
+  const lotPick = !!item?.isLotManaged && !serial && txType !== 'IN' // 비시리얼+LOT: 출고·이동 시 보유 LOT 선택
 
   // 마스터 로드 — 입출고 유형 + (품목 미고정 시) 이 인벤토리의 품목 목록
   useEffect(() => {
@@ -131,6 +133,7 @@ export default function TransactionModal({
 
   function switchType(t: TxType) {
     setTxType(t)
+    setLotSel(null)
     setReasonId(t === 'IN' ? (inReasons[0]?.id ?? null) : t === 'OUT' ? (outReasons[0]?.id ?? null) : null)
     setError(null)
     setSerialsText('')
@@ -143,6 +146,7 @@ export default function TransactionModal({
     const p = pickList.find((x) => x.id === id)
     setItem(p ? { id: p.id, itemCode: p.itemCode, name: p.name, unit: p.unit, isSerialManaged: p.isSerialManaged, isLotManaged: p.isLotManaged } : null)
     setLotNo('')
+    setLotSel(null)
     setSerialsText('')
     setSetOut(false)
     setError(null)
@@ -163,6 +167,9 @@ export default function TransactionModal({
     }
   }, [needBucketPick, item, warehouseId])
   useEffect(() => { loadBuckets() }, [loadBuckets])
+
+  // 위치가 바뀌면 LOT 선택 초기화 (위치별 보유 LOT가 다름)
+  useEffect(() => { setLotSel(null) }, [warehouseId])
 
   // 시리얼 OUT/MOVE: 선택 위치의 IN_STOCK 개체 로드 (가용 목록 표시용)
   const loadUnits = useCallback(async () => {
@@ -200,7 +207,14 @@ export default function TransactionModal({
     setSerialsText(Array.from(lines).join('\n'))
   }
 
-  const selectedBucket = buckets.find((b) => b.warehouseId === warehouseId)
+  // 위치 합산(위치 select 표시용) + 선택 위치의 LOT 버킷 목록
+  const whTotal = (wid: number) => buckets.filter((b) => b.warehouseId === wid).reduce((s, b) => s + b.quantity, 0)
+  const lotBuckets = buckets.filter((b) => b.warehouseId === warehouseId && b.quantity > 0)
+  const selectedBucket = warehouseId
+    ? (lotPick
+        ? (lotSel !== null ? lotBuckets.find((b) => b.lotNo === lotSel) ?? null : null)
+        : (buckets.some((b) => b.warehouseId === warehouseId) ? { quantity: whTotal(warehouseId) } : null))
+    : null
 
   const effectiveQty = serial ? serialLines.length : parseInt(quantity) || 0
 
@@ -237,7 +251,8 @@ export default function TransactionModal({
     if ((txType === 'IN' || txType === 'OUT') && !reasonId) { setError(`${TYPE_LABEL[txType]} 유형을 선택하세요.`); return }
     if (effectiveQty <= 0) { setError(serial ? '시리얼을 입력하세요.' : '수량을 입력하세요.'); return }
     if (txType === 'OUT' && !requester.trim()) { setError('출고 요청자를 입력하세요. (내부 처리는 "자체 처리" 등으로 기입)'); return }
-    if (needLotInput && !lotNo.trim()) { setError('LOT 관리 품목입니다. LOT 번호를 입력하세요.'); return }
+    if ((needLotInput || lotInRequired) && !lotNo.trim()) { setError('LOT 관리 품목입니다. LOT 번호를 입력하세요.'); return }
+    if (lotPick && lotSel === null) { setError(`${txType === 'OUT' ? '출고' : '이동'}할 LOT를 선택하세요.`); return }
 
     const compPayload = txType === 'OUT' && setOut
       ? normalComponents
@@ -262,7 +277,7 @@ export default function TransactionModal({
       note,
       serials: serial ? serialLines : [], // IN=신규/회수, OUT·MOVE=대상 개체 지정 (서버에서 위치 검증)
       lotBySerial: needLotInput ? Object.fromEntries(serialLines.map((sn) => [sn, lotNo.trim()])) : undefined,
-      lotNo: needLotInput || optionalLotInput ? lotNo.trim() || null : null,
+      lotNo: lotPick ? (lotSel ?? '') : (needLotInput || lotInRequired ? lotNo.trim() || null : null),
       unitIds: [],
       components: compPayload,
     }
@@ -344,8 +359,8 @@ export default function TransactionModal({
                 <select value={warehouseId ?? ''} onChange={(e) => setWarehouseId(e.target.value ? parseInt(e.target.value) : null)} className={inputCls}>
                   <option value="">선택하세요</option>
                   {activeWarehouses.map((w) => {
-                    const b = buckets.find((x) => x.warehouseId === w.id)
-                    return <option key={w.id} value={w.id}>{w.name}{b ? ` (재고 ${b.quantity})` : ' (재고 없음)'}</option>
+                    const q = whTotal(w.id)
+                    return <option key={w.id} value={w.id}>{w.name}{q > 0 ? ` (재고 ${q.toLocaleString()})` : ' (재고 없음)'}</option>
                   })}
                 </select>
               )}
@@ -381,13 +396,29 @@ export default function TransactionModal({
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
                 수량 ({item.unit})
-                {selectedBucket && needBucketPick && <span className="ml-1 text-gray-400">— 가용 {selectedBucket.quantity}</span>}
+                {selectedBucket && needBucketPick && <span className="ml-1 text-gray-400">— 가용 {selectedBucket.quantity.toLocaleString()}</span>}
               </label>
               <input type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className={inputCls} />
-              {optionalLotInput && (
+              {lotInRequired && (
                 <div className="mt-2">
-                  <label className="block text-xs font-medium text-gray-700 mb-1">LOT 번호 <span className="font-normal text-gray-400">(선택 — 이 전표에 기록)</span></label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">LOT 번호 <span className="text-red-500">*</span> <span className="font-normal text-gray-400">(이 전표 수량 전체에 적용)</span></label>
                   <input value={lotNo} onChange={(e) => setLotNo(e.target.value)} className={inputCls + ' font-mono'} placeholder="예: MP26010601" />
+                </div>
+              )}
+              {lotPick && (
+                <div className="mt-2">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">{txType === 'OUT' ? '출고' : '이동'} LOT <span className="text-red-500">*</span></label>
+                  <select
+                    value={lotSel === null ? '' : `L:${lotSel}`}
+                    onChange={(e) => setLotSel(e.target.value ? e.target.value.slice(2) : null)}
+                    className={inputCls + ' font-mono'}
+                  >
+                    <option value="">선택하세요 ({lotBuckets.length}개 LOT)</option>
+                    {lotBuckets.map((b) => (
+                      <option key={b.lotNo || '(none)'} value={`L:${b.lotNo}`}>{b.lotNo || '(LOT 없음)'} — 재고 {b.quantity.toLocaleString()}</option>
+                    ))}
+                  </select>
+                  {warehouseId != null && lotBuckets.length === 0 && <p className="mt-1 text-xs text-gray-400">이 위치에 재고가 없습니다.</p>}
                 </div>
               )}
             </div>

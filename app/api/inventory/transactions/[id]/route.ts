@@ -25,7 +25,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const existing = await prisma.inventoryTransaction.findUnique({
     where: { id },
-    include: { reasonCode: { select: { value: true } }, inventory: { select: { name: true, linkHospital: true } } },
+    include: {
+      reasonCode: { select: { value: true } },
+      inventory: { select: { name: true, linkHospital: true } },
+      item: { select: { isSerialManaged: true, isLotManaged: true } },
+    },
   })
   if (!existing) return NextResponse.json({ error: '전표를 찾을 수 없습니다.' }, { status: 404 })
   if (existing.canceledAt) return NextResponse.json({ error: '취소된 전표는 수정할 수 없습니다.' }, { status: 409 })
@@ -62,7 +66,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
     data.requester = requester
   }
   if (body.note !== undefined) data.note = String(body.note ?? '').trim() || null
-  if (body.lotNo !== undefined && existing.txType !== 'MOVE') data.lotNo = String(body.lotNo ?? '').trim() || null
+  if (body.lotNo !== undefined && existing.txType !== 'MOVE') {
+    const newLot = String(body.lotNo ?? '').trim() || null
+    // LOT 재고 차원 품목(비시리얼+LOT)은 전표 LOT가 재고 버킷 키 — 사후 수정 시 재고와 어긋나므로 금지
+    if (!existing.item.isSerialManaged && existing.item.isLotManaged && newLot !== existing.lotNo) {
+      return NextResponse.json(
+        { error: 'LOT 재고 관리 품목의 전표 LOT는 수정할 수 없습니다. 전표를 취소 후 올바른 LOT로 재등록하세요.' },
+        { status: 409 },
+      )
+    }
+    data.lotNo = newLot
+  }
 
   // OUT 전용 메타
   if (existing.txType === 'OUT') {

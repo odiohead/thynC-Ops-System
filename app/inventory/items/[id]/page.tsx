@@ -24,7 +24,7 @@ interface Item {
   categoryPath: string
   manufacturer: { id: number; name: string } | null
   deviceInfo: { deviceName: string; deviceModel: string } | null
-  stocks: { warehouseId: number; quantity: number; warehouse: { name: string } }[]
+  stocks: { warehouseId: number; lotNo: string; quantity: number; warehouse: { name: string } }[]
   components: { childItemId: number; quantity: number; child: { id: number; itemCode: string; name: string; unit: string; isSerialManaged: boolean } }[]
   usedIn: { parentItemId: number; quantity: number; parent: { id: number; itemCode: string; name: string } }[]
 }
@@ -153,7 +153,20 @@ export default function ItemDetailPage() {
 
   const inventory = item.inventory
   const modalItem: ModalItem = { id: item.id, itemCode: item.itemCode, name: item.name, unit: item.unit, isSerialManaged: item.isSerialManaged, isLotManaged: item.isLotManaged }
-  const activeStocks = item.stocks.filter((s) => s.quantity > 0)
+  // LOT 버킷을 위치 단위로 합산 + (비시리얼 LOT 품목) LOT별 잔량
+  const whAgg = (() => {
+    const m = new Map<number, { name: string; qty: number }>()
+    for (const s of item.stocks) {
+      if (s.quantity <= 0) continue
+      const cur = m.get(s.warehouseId)
+      if (cur) cur.qty += s.quantity
+      else m.set(s.warehouseId, { name: s.warehouse.name, qty: s.quantity })
+    }
+    return Array.from(m.entries()).map(([id, v]) => ({ warehouseId: id, ...v }))
+  })()
+  const lotStocks = item.isLotManaged && !item.isSerialManaged
+    ? item.stocks.filter((s) => s.quantity > 0).sort((a, b) => a.lotNo.localeCompare(b.lotNo))
+    : []
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -198,14 +211,26 @@ export default function ItemDetailPage() {
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
         <div className="rounded-xl border border-gray-200 bg-white p-4">
           <div className="text-xs text-gray-500">총재고 ({inventory?.name ?? '-'})</div>
-          <div className="mt-1 text-2xl font-bold text-gray-900">{total}<span className="text-sm font-normal text-gray-400 ml-1">{item.unit}</span></div>
+          <div className="mt-1 text-2xl font-bold text-gray-900">{total.toLocaleString()}<span className="text-sm font-normal text-gray-400 ml-1">{item.unit}</span></div>
           <div className="mt-1.5 flex flex-wrap gap-1">
-            {activeStocks.length === 0 ? (
+            {whAgg.length === 0 ? (
               <span className="text-xs text-gray-300">재고 없음</span>
-            ) : activeStocks.map((s) => (
-              <span key={s.warehouseId} className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">{s.warehouse.name} {s.quantity}</span>
+            ) : whAgg.map((s) => (
+              <span key={s.warehouseId} className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">{s.name} {s.qty.toLocaleString()}</span>
             ))}
           </div>
+          {lotStocks.length > 0 && (
+            <div className="mt-2 border-t border-gray-100 pt-1.5">
+              <div className="mb-1 text-[11px] font-medium text-teal-600">LOT별 잔량</div>
+              <div className="flex flex-wrap gap-1">
+                {lotStocks.map((s) => (
+                  <span key={`${s.lotNo}|${s.warehouseId}`} className="rounded bg-teal-50 px-1.5 py-0.5 font-mono text-xs text-teal-700">
+                    {s.lotNo || '(LOT 없음)'} · {s.warehouse.name} {s.quantity.toLocaleString()}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-4">
           <div className="text-xs text-gray-500">참고단가</div>
@@ -324,7 +349,7 @@ export default function ItemDetailPage() {
                     )}
                   </td>
                   <td className="px-3 py-2 text-gray-600">{tx.txType === 'MOVE' ? '이동' : tx.txType === 'TRANSFER' ? '이관(구)' : (tx.reasonCode?.name ?? '-')}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{tx.quantity}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{tx.quantity.toLocaleString()}</td>
                   <td className="px-3 py-2 text-gray-600">{tx.warehouse?.name}{tx.toWarehouse && ` → ${tx.toWarehouse.name}`}</td>
                   <td className="px-3 py-2 text-gray-500 text-xs">{tx.destination ?? tx.hospital?.hospitalName ?? '-'}</td>
                   <td className="px-3 py-2 text-gray-500 text-xs">{tx.actor?.name ?? '-'}</td>

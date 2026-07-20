@@ -761,13 +761,14 @@ model InventoryStock {
   itemId      Int      @map("item_id")
   warehouseId Int      @map("warehouse_id")
   inventoryId Int      @map("inventory_id")
+  lotNo       String   @default("") @map("lot_no") @db.VarChar(100) // LOT 재고 차원 (2026-07-20) — ''=LOT 없음. 비시리얼 LOT 품목만 실값 사용
   quantity    Int      @default(0)
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
   item        InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
   warehouse   Warehouse     @relation(fields: [warehouseId], references: [id])
   inventory   Inventory     @relation(fields: [inventoryId], references: [id])
 
-  @@id([itemId, warehouseId, inventoryId])
+  @@id([itemId, warehouseId, inventoryId, lotNo])
   @@map("inventory_stocks")
   @@schema("public")
 }

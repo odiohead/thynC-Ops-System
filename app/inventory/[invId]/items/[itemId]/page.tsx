@@ -23,7 +23,7 @@ interface Item {
   categoryPath: string
   manufacturer: { id: number; name: string } | null
   deviceInfo: { deviceName: string; deviceModel: string } | null
-  stocks: { warehouseId: number; quantity: number; warehouse: { name: string } }[]
+  stocks: { warehouseId: number; lotNo: string; quantity: number; warehouse: { name: string } }[]
 }
 interface Warehouse { id: number; name: string; isActive: boolean; inventoryId: number }
 interface Tx {
@@ -104,8 +104,20 @@ export default function InventoryScopedItemPage() {
   }
 
   const inventory = item.inventory!
-  const scopedStocks = item.stocks.filter((s) => s.quantity > 0)
+  const scopedStocks = (() => {
+    const m = new Map<number, { warehouseId: number; name: string; quantity: number }>()
+    for (const s of item.stocks) {
+      if (s.quantity <= 0) continue
+      const cur = m.get(s.warehouseId)
+      if (cur) cur.quantity += s.quantity
+      else m.set(s.warehouseId, { warehouseId: s.warehouseId, name: s.warehouse.name, quantity: s.quantity })
+    }
+    return Array.from(m.values())
+  })()
   const scopedTotal = item.stocks.reduce((sum, s) => sum + s.quantity, 0)
+  const lotStocks = item.isLotManaged && !item.isSerialManaged
+    ? item.stocks.filter((s) => s.quantity > 0).sort((a, b) => a.lotNo.localeCompare(b.lotNo))
+    : []
   const inStockUnits = units.filter((u) => u.status === 'IN_STOCK')
 
   const modalItem: ModalItem = { id: item.id, itemCode: item.itemCode, name: item.name, unit: item.unit, isSerialManaged: item.isSerialManaged, isLotManaged: item.isLotManaged }
@@ -150,7 +162,7 @@ export default function InventoryScopedItemPage() {
         <div className="flex flex-wrap items-center gap-6">
           <div>
             <div className="text-xs text-gray-500">{inventory.name} 재고</div>
-            <div className="mt-0.5 text-2xl font-bold text-gray-900">{scopedTotal}<span className="text-sm font-normal text-gray-400 ml-1">{item.unit}</span></div>
+            <div className="mt-0.5 text-2xl font-bold text-gray-900">{scopedTotal.toLocaleString()}<span className="text-sm font-normal text-gray-400 ml-1">{item.unit}</span></div>
           </div>
           <div className="flex-1">
             <div className="text-xs text-gray-500 mb-1">위치별</div>
@@ -160,9 +172,21 @@ export default function InventoryScopedItemPage() {
               <div className="flex flex-wrap gap-2">
                 {scopedStocks.map((s) => (
                   <span key={s.warehouseId} className="inline-flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-1.5 text-sm text-gray-700">
-                    {s.warehouse.name} <b className="tabular-nums">{s.quantity}</b>
+                    {s.name} <b className="tabular-nums">{s.quantity.toLocaleString()}</b>
                   </span>
                 ))}
+              </div>
+            )}
+            {lotStocks.length > 0 && (
+              <div className="mt-3 border-t border-gray-100 pt-2">
+                <div className="mb-1 text-xs font-medium text-teal-600">LOT별 잔량</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {lotStocks.map((s) => (
+                    <span key={`${s.lotNo}|${s.warehouseId}`} className="rounded bg-teal-50 px-2 py-1 font-mono text-xs text-teal-700">
+                      {s.lotNo || '(LOT 없음)'} · {s.warehouse.name} <b className="tabular-nums">{s.quantity.toLocaleString()}</b>
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -200,7 +224,7 @@ export default function InventoryScopedItemPage() {
                     )}
                   </td>
                   <td className="px-3 py-2 text-gray-600">{tx.txType === 'MOVE' ? '이동' : tx.txType === 'TRANSFER' ? '이관(구)' : (tx.reasonCode?.name ?? '-')}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{tx.quantity}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{tx.quantity.toLocaleString()}</td>
                   <td className="px-3 py-2 text-gray-600">{tx.warehouse?.name}{tx.toWarehouse && ` → ${tx.toWarehouse.name}`}</td>
                   <td className="px-3 py-2 text-gray-500 text-xs">{tx.destination ?? tx.hospital?.hospitalName ?? '-'}</td>
                   <td className="px-3 py-2 text-gray-500 text-xs">{tx.actor?.name ?? '-'}</td>

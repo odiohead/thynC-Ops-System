@@ -196,7 +196,7 @@ export default function TransactionsPage() {
                   <Link href={filterInventory ? `/inventory/${filterInventory}/items/${tx.item.id}` : `/inventory/items/${tx.item.id}`} className="font-medium text-gray-900 hover:text-blue-600 no-underline">{tx.item.name}</Link>
                   <span className="ml-1 font-mono text-xs text-gray-400">{tx.item.itemCode}</span>
                 </td>
-                <td className="px-3 py-3 text-right tabular-nums font-medium">{tx.quantity}<span className="text-xs text-gray-400 ml-0.5">{tx.item.unit}</span></td>
+                <td className="px-3 py-3 text-right tabular-nums font-medium">{tx.quantity.toLocaleString()}<span className="text-xs text-gray-400 ml-0.5">{tx.item.unit}</span></td>
                 <td className="px-3 py-3 text-xs text-gray-600">
                   {tx.inventory?.name ?? '-'}{tx.txType === 'TRANSFER' && tx.toInventory && <span className="text-purple-600"> → {tx.toInventory.name}</span>}
                   {tx.txType === 'TRANSFER' && (

@@ -65,18 +65,22 @@ async function nextTxCode(client: Tx): Promise<string> {
   return `${prefix}${String(seq).padStart(4, '0')}`
 }
 
-// ─── 재고 버킷 = (품목, 위치, 인벤토리) ───
+// ─── 재고 버킷 = (품목, 위치, 인벤토리, LOT) ───
+// lotNo ''=LOT 없음. 시리얼 품목·비LOT 품목은 항상 '' 버킷, 비시리얼 LOT 품목만 실값 버킷 사용 (2026-07-20 A안)
 
 interface Bucket {
   itemId: number
   warehouseId: number
   inventoryId: number
+  lotNo: string
 }
+
+const lotLabel = (lot: string) => (lot ? `LOT ${lot}` : 'LOT 없음')
 
 /** 재고 증가 (upsert). */
 async function increaseStock(client: Tx, b: Bucket, qty: number) {
   await client.inventoryStock.upsert({
-    where: { itemId_warehouseId_inventoryId: b },
+    where: { itemId_warehouseId_inventoryId_lotNo: b },
     create: { ...b, quantity: qty },
     update: { quantity: { increment: qty } },
   })
@@ -90,10 +94,10 @@ async function decreaseStock(client: Tx, b: Bucket, qty: number, label: string) 
   })
   if (res.count === 0) {
     const cur = await client.inventoryStock.findUnique({
-      where: { itemId_warehouseId_inventoryId: b },
+      where: { itemId_warehouseId_inventoryId_lotNo: b },
       select: { quantity: true },
     })
-    throw new InventoryError(`재고가 부족합니다. (${label} 현재 ${cur?.quantity ?? 0}개, 요청 ${qty}개)`, 409)
+    throw new InventoryError(`재고가 부족합니다. (${label}${b.lotNo ? ` · ${lotLabel(b.lotNo)}` : ''} 현재 ${cur?.quantity ?? 0}개, 요청 ${qty}개)`, 409)
   }
 }
 
@@ -134,6 +138,7 @@ export interface TxPlan {
   srcWhName: string
   reasonId: number | null
   reasonValue: string | null
+  stockLot: string // 재고 버킷 LOT ('' = LOT 없음 — 시리얼·비LOT 품목은 항상 '')
   componentPlans: { itemId: number; quantity: number; name: string; unit: string }[]
 }
 
@@ -155,6 +160,21 @@ export async function planInventoryTransaction(input: CreateTxInput): Promise<Tx
   }
   if (input.lotNo?.trim() && !item.isLotManaged) {
     throw new InventoryError('이 품목은 LOT 관리 대상이 아닙니다. LOT 입력을 제거하세요.')
+  }
+
+  // LOT 재고 차원 (비시리얼 LOT 품목) — IN: 새 LOT 필수 / OUT·MOVE: 보유 LOT 버킷 지정(''=LOT 없음 버킷)
+  // 시리얼 품목의 LOT는 개체 단위로 추적하므로 재고 버킷은 항상 ''
+  let stockLot = ''
+  if (item.isLotManaged && !item.isSerialManaged) {
+    if (input.txType === 'IN') {
+      if (!input.lotNo?.trim()) throw new InventoryError('LOT 관리 품목입니다. 입고 LOT 번호를 입력하세요.')
+      stockLot = input.lotNo.trim()
+    } else {
+      if (input.lotNo === undefined || input.lotNo === null) {
+        throw new InventoryError(`${input.txType === 'OUT' ? '출고' : '이동'}할 LOT를 선택하세요.`)
+      }
+      stockLot = input.lotNo.trim()
+    }
   }
 
   const srcWh = await prisma.warehouse.findUnique({ where: { id: input.warehouseId } })
@@ -203,7 +223,7 @@ export async function planInventoryTransaction(input: CreateTxInput): Promise<Tx
     if (input.txType !== 'OUT') throw new InventoryError('부자재 동시 출고는 출고 전표에서만 가능합니다.')
     const mappings = await prisma.inventoryItemComponent.findMany({
       where: { parentItemId: input.itemId },
-      include: { child: { select: { id: true, name: true, unit: true, isSerialManaged: true } } },
+      include: { child: { select: { id: true, name: true, unit: true, isSerialManaged: true, isLotManaged: true } } },
     })
     const byChild = new Map(mappings.map((m) => [m.childItemId, m]))
     for (const c of compInputs) {
@@ -211,6 +231,9 @@ export async function planInventoryTransaction(input: CreateTxInput): Promise<Tx
       if (!m) throw new InventoryError('주자재에 매핑되지 않은 부자재가 포함되어 있습니다.')
       if (m.child.isSerialManaged) {
         throw new InventoryError(`시리얼 관리 부자재(${m.child.name})는 세트출고 대상이 아닙니다. 개별 출고하세요.`)
+      }
+      if (m.child.isLotManaged) {
+        throw new InventoryError(`LOT 관리 부자재(${m.child.name})는 세트출고로 처리할 수 없습니다. LOT를 지정해 개별 출고하세요.`)
       }
       componentPlans.push({ itemId: c.itemId, quantity: Math.trunc(c.quantity), name: m.child.name, unit: m.child.unit })
     }
@@ -227,6 +250,7 @@ export async function planInventoryTransaction(input: CreateTxInput): Promise<Tx
     srcWhName: srcWh.name,
     reasonId,
     reasonValue,
+    stockLot,
     componentPlans,
   }
 }
@@ -236,8 +260,8 @@ export async function planInventoryTransaction(input: CreateTxInput): Promise<Tx
  * 일괄 처리(bulk)에서 여러 계획을 한 트랜잭션에 묶을 수 있도록 분리.
  */
 export async function applyInventoryTransaction(client: Tx, plan: TxPlan, actorId: string) {
-  const { input, qty, inventoryId, reasonId, reasonValue, componentPlans } = plan
-  const srcBucket: Bucket = { itemId: input.itemId, warehouseId: input.warehouseId, inventoryId }
+  const { input, qty, inventoryId, reasonId, reasonValue, componentPlans, stockLot } = plan
+  const srcBucket: Bucket = { itemId: input.itemId, warehouseId: input.warehouseId, inventoryId, lotNo: stockLot }
 
   const txCode = await nextTxCode(client)
 
@@ -254,7 +278,8 @@ export async function applyInventoryTransaction(client: Tx, plan: TxPlan, actorI
       quantity: qty,
       destination: input.txType === 'OUT' ? (input.destination?.trim() || null) : null,
       requester: input.txType === 'MOVE' ? null : (input.requester?.trim() || null),
-      lotNo: input.txType === 'MOVE' ? null : (input.lotNo?.trim() || null),
+      // LOT 버킷 품목은 MOVE에도 LOT 기록 (취소 시 역방향 버킷 식별) — 그 외엔 기존 표기 규칙
+      lotNo: stockLot || (input.txType === 'MOVE' ? null : (input.lotNo?.trim() || null)),
       hospitalCode: input.txType === 'OUT' ? (input.hospitalCode ?? null) : null,
       workType: input.txType === 'OUT' ? (input.workType ?? null) : null,
       refCode: input.txType === 'OUT' ? (input.refCode ?? null) : null,
@@ -303,7 +328,7 @@ export async function applyInventoryTransaction(client: Tx, plan: TxPlan, actorI
     })
     await decreaseStock(
       client,
-      { itemId: comp.itemId, warehouseId: input.warehouseId, inventoryId },
+      { itemId: comp.itemId, warehouseId: input.warehouseId, inventoryId, lotNo: '' },
       comp.quantity,
       `부자재 ${comp.name} — ${plan.srcWhName}`,
     )
@@ -477,7 +502,9 @@ type CancelableTx = Prisma.InventoryTransactionGetPayload<{
 
 /** 단일 전표의 재고·개체를 역방향으로 되돌린다 (취소 공용 — 세트출고 자식 포함). */
 async function reverseTransaction(client: Tx, tx: CancelableTx) {
-  const bucket: Bucket = { itemId: tx.itemId, warehouseId: tx.warehouseId, inventoryId: tx.inventoryId }
+  // LOT 버킷: 비시리얼 품목의 전표 lotNo가 버킷 키 (시리얼 품목의 lotNo는 표기용 — 버킷은 '')
+  const bucketLot = tx.item.isSerialManaged ? '' : (tx.lotNo ?? '')
+  const bucket: Bucket = { itemId: tx.itemId, warehouseId: tx.warehouseId, inventoryId: tx.inventoryId, lotNo: bucketLot }
 
   // 1) 재고 역방향
   if (tx.txType === 'IN') {

@@ -25,12 +25,14 @@ export async function GET(req: NextRequest) {
       include: {
         warehouse: { select: { id: true, name: true } },
       },
-      orderBy: [{ warehouseId: 'asc' }],
+      orderBy: [{ warehouseId: 'asc' }, { lotNo: 'asc' }],
     })
+    // LOT 재고 차원: 버킷은 (위치×LOT) 단위 — lotNo ''=LOT 없음. 소비처에서 위치 단위 합산 사용
     return NextResponse.json({
       buckets: buckets.map((b) => ({
         warehouseId: b.warehouseId,
         warehouseName: b.warehouse.name,
+        lotNo: b.lotNo,
         quantity: b.quantity,
       })),
     })
@@ -77,14 +79,15 @@ export async function GET(req: NextRequest) {
   const whFilter = warehouseId ? parseInt(warehouseId) : null
 
   const rows = items.map((item) => {
-    const stocks = item.stocks
-      .filter((s) => s.quantity > 0)
-      .map((s) => ({
-        warehouseId: s.warehouseId,
-        warehouseName: s.warehouse.name,
-        quantity: s.quantity,
-      }))
-      .sort((a, b) => b.quantity - a.quantity)
+    // LOT 버킷을 위치 단위로 합산 (현황 화면은 위치별 총량 표시)
+    const byWh = new Map<number, { warehouseId: number; warehouseName: string; quantity: number }>()
+    for (const s of item.stocks) {
+      if (s.quantity <= 0) continue
+      const cur = byWh.get(s.warehouseId)
+      if (cur) cur.quantity += s.quantity
+      else byWh.set(s.warehouseId, { warehouseId: s.warehouseId, warehouseName: s.warehouse.name, quantity: s.quantity })
+    }
+    const stocks = Array.from(byWh.values()).sort((a, b) => b.quantity - a.quantity)
     const total = stocks.reduce((sum, s) => sum + s.quantity, 0)
     return {
       id: item.id,
