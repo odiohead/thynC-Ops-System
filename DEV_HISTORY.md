@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-07-20 | LOT 재고 차원(A안) + 수량 쉼표 표기 PROD 배포
+
+- **사전 백업**: PROD `~/backups/db/thync_ops_pre_lot_dim_20260720.dump` (WMS 4테이블)
+- `851569c` push → PROD pull → 마이그레이션 `20260720150000` psql 적용+resolve → prisma generate → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- 검증: login 200 · `inventory_stocks` PK `(item_id, warehouse_id, inventory_id, lot_no)` 확인 · 기존 재고 5행 8,950개 전량 '' 버킷 보존 · 재시작 후 신규 에러 0
+
 ## 2026-07-20 | 자재관리 — LOT 재고 차원(A안): 비시리얼 LOT 품목의 LOT별 수량 관리·LOT별 출고
 
 - **배경**: 비시리얼 LOT 품목의 LOT가 "전표 기록"뿐이라 LOT별 잔량 추적·검증 불가 → 사용자 A안 승인(재고 스냅샷에 LOT 차원 추가)
