@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import StatusBadge from '@/app/components/StatusBadge'
+import { Tv } from 'lucide-react'
 import { useChartTheme } from '@/app/components/theme/useChartTheme'
 import * as XLSX from 'xlsx'
 import {
@@ -477,6 +478,18 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+
+        {/* 상단 헤더 — 사이니지 월보드 진입 */}
+        <div className="mb-3 flex items-center justify-end">
+          <Link
+            href="/dashboard"
+            target="_blank"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white"
+          >
+            <Tv className="h-3.5 w-3.5" />
+            사이니지 월보드
+          </Link>
+        </div>
 
         {/* KPI 스탯 타일 */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
