@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-07-21 | 자재관리 모달 튕김(의도치 않은 닫힘) 버그 수정
+
+- **증상**: 자재 이동(MOVE) 설정 중 모달이 갑자기 닫힘 (사용자 보고 — 이동 흐름에서 특히 빈발)
+- **원인**: WMS 모달 4종의 배경 클릭 닫힘 로직 결함 — 브라우저 `click` 이벤트는 mousedown/mouseup의 **공통 조상**에서 발생하므로, 모달 안에서 드래그(스크롤바·텍스트 선택·select 조작 중 미끄러짐)를 시작해 배경 위에서 마우스를 놓으면 배경 클릭으로 오판되어 `onClose()` 실행. 이동은 출발·도착 위치 select + 품목 리스트박스 + 긴 폼 스크롤 등 드래그성 조작이 가장 많아 증상이 집중됨
+- **수정**: `backdropDown` ref로 **mousedown과 click이 모두 배경에서 발생했을 때만 닫기** — TransactionModal·TxEditModal·BulkSerialTxModal·UnitEditModal 4종 동일 적용
+- **보강**: TransactionModal `submit()`을 try/finally로 감싸 네트워크 오류 시 "처리 중..." 버튼 고착 방지 + 비JSON 오류 응답 안전 처리
+- 검증(dev2): tsc 0오류 → 힙 4GB 빌드 → `pm2 restart thync-dev` → /inventory 307(인증 리다이렉트 정상). 서버 로직 무변경(UI 전용)
+- 영향 파일: app/inventory/components/TransactionModal.tsx·TxEditModal.tsx·BulkSerialTxModal.tsx·UnitEditModal.tsx
+
 ## 2026-07-21 | 사이니지 월보드 진입 버튼 PROD 배포
 
 - `5e75223` push → PROD pull → 힙 4GB 빌드 → `pm2 restart thync-prod` (DB 변경·신규 패키지 없음)

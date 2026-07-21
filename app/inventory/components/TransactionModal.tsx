@@ -88,6 +88,10 @@ export default function TransactionModal({
   const [compChecked, setCompChecked] = useState<Set<number>>(new Set())
   const [compQty, setCompQty] = useState<Record<number, string>>({})
 
+  // 배경 클릭 닫기 오판 방지 — 모달 안에서 드래그(스크롤바·텍스트 선택) 후 배경에서 놓으면
+  // click 이벤트가 공통 조상(배경)에서 발생해 닫히던 문제. mousedown도 배경에서 시작했을 때만 닫는다.
+  const backdropDown = useRef(false)
+
   const serial = item?.isSerialManaged ?? false
   const needSerialInput = serial && txType !== 'IN' // 출고·이동 — 시리얼 입력/스캔
   const needBucketPick = txType !== 'IN' // 기존 재고 위치에서 선택
@@ -284,19 +288,28 @@ export default function TransactionModal({
       components: compPayload,
     }
     setBusy(true)
-    const res = await fetch('/api/inventory/transactions', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-    })
-    const data = await res.json()
-    setBusy(false)
-    if (res.ok) onDone()
-    else setError(data.error ?? '처리에 실패했습니다.')
+    try {
+      const res = await fetch('/api/inventory/transactions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) { onDone(); return }
+      setError(data.error ?? '처리에 실패했습니다.')
+    } catch {
+      setError('네트워크 오류로 처리하지 못했습니다. 다시 시도하세요.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const inputCls = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onMouseDown={(e) => { backdropDown.current = e.target === e.currentTarget }}
+      onClick={(e) => { if (e.target === e.currentTarget && backdropDown.current) onClose(); backdropDown.current = false }}
+    >
       <div className="w-full max-w-lg rounded-xl bg-white shadow-xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 sticky top-0 bg-white z-10">
           <div>

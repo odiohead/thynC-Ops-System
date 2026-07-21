@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 
 interface Inventory { id: number; name: string; isActive: boolean }
 interface Warehouse { id: number; name: string; inventoryId: number; isActive: boolean }
@@ -28,6 +28,7 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
   const [inventoryId, setInventoryId] = useState<number | null>(null)
   const [warehouseId, setWarehouseId] = useState<number | null>(null)
   const [reasonId, setReasonId] = useState<number | null>(null)
+  const backdropDown = useRef(false) // 모달 안 드래그 후 배경에서 마우스를 놓아도 닫히지 않도록
   const [destination, setDestination] = useState('')
   const [requester, setRequester] = useState('')
   const [txDate, setTxDate] = useState(() => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10)) // 입출고일 — 소급 등록 지원
@@ -98,7 +99,11 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
   const shownRows = preview ? preview.rows.filter((r) => !errorsOnly || r.status === 'error').slice(0, 300) : []
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onMouseDown={(e) => { backdropDown.current = e.target === e.currentTarget }}
+      onClick={(e) => { if (e.target === e.currentTarget && backdropDown.current) onClose(); backdropDown.current = false }}
+    >
       <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold text-gray-900">Excel 일괄 입출고 (시리얼 품목)</h2>

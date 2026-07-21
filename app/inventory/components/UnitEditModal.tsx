@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 
 // 개체(시리얼 단품) 태그·메모 편집 모달 — PATCH /api/inventory/units/[id]
 interface UnitLite {
@@ -17,6 +17,7 @@ export default function UnitEditModal({ unit, onClose, onSaved }: {
 }) {
   const [tags, setTags] = useState((unit.tags ?? []).join(', '))
   const [memo, setMemo] = useState(unit.memo ?? '')
+  const backdropDown = useRef(false) // 모달 안 드래그 후 배경에서 마우스를 놓아도 닫히지 않도록
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -43,7 +44,11 @@ export default function UnitEditModal({ unit, onClose, onSaved }: {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onMouseDown={(e) => { backdropDown.current = e.target === e.currentTarget }}
+      onClick={(e) => { if (e.target === e.currentTarget && backdropDown.current) onClose(); backdropDown.current = false }}
+    >
       <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3">
           <h3 className="text-sm font-semibold text-gray-900">개체 편집</h3>
