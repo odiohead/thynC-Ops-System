@@ -33,6 +33,7 @@ interface Tx {
   id: number; txCode: string; txType: string; quantity: number
   reasonCode: { name: string } | null
   destination: string | null
+  note: string | null
   canceledAt: string | null; txDate: string; createdAt: string
   warehouse: { name: string } | null; toWarehouse: { name: string } | null
   inventory: { name: string } | null; toInventory: { name: string } | null
@@ -329,12 +330,12 @@ export default function ItemDetailPage() {
           <table className="w-full text-sm whitespace-nowrap">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <th className="px-3 py-2">전표</th><th className="px-3 py-2">일시</th><th className="px-3 py-2">유형</th><th className="px-3 py-2">입출고 유형</th><th className="px-3 py-2 text-right">수량</th><th className="px-3 py-2">위치</th><th className="px-3 py-2">출고처/병원</th><th className="px-3 py-2">처리자</th>
+                <th className="px-3 py-2">전표</th><th className="px-3 py-2">일시</th><th className="px-3 py-2">유형</th><th className="px-3 py-2">입출고 유형</th><th className="px-3 py-2 text-right">수량</th><th className="px-3 py-2">위치</th><th className="px-3 py-2">출고처/병원</th><th className="px-3 py-2">비고</th><th className="px-3 py-2">처리자</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {txs.length === 0 ? (
-                <tr><td colSpan={8} className="py-8 text-center text-sm text-gray-400">이력 없음</td></tr>
+                <tr><td colSpan={9} className="py-8 text-center text-sm text-gray-400">이력 없음</td></tr>
               ) : txs.map((tx) => (
                 <tr key={tx.id} className={tx.canceledAt ? 'opacity-50 line-through' : ''}>
                   <td className="px-3 py-2 font-mono text-xs text-gray-500">
@@ -352,6 +353,7 @@ export default function ItemDetailPage() {
                   <td className="px-3 py-2 text-right tabular-nums">{tx.quantity.toLocaleString()}</td>
                   <td className="px-3 py-2 text-gray-600">{tx.warehouse?.name}{tx.toWarehouse && ` → ${tx.toWarehouse.name}`}</td>
                   <td className="px-3 py-2 text-gray-500 text-xs">{tx.destination ?? tx.hospital?.hospitalName ?? '-'}</td>
+                  <td className="max-w-[8rem] truncate px-3 py-2 text-gray-500 text-xs" title={tx.note ?? undefined}>{tx.note ?? '-'}</td>
                   <td className="px-3 py-2 text-gray-500 text-xs">{tx.actor?.name ?? '-'}</td>
                 </tr>
               ))}

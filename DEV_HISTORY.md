@@ -12,6 +12,11 @@
 - 검증: `tsc --noEmit` 0오류. 빌드·git 안 함
 - 영향 파일: app/tickets/page.tsx, app/maintenances/page.tsx, app/inventory/transactions/page.tsx
 
+## 2026-07-24 | WMS 품목 상세 입출고 이력에도 비고 컬럼 추가 (사용자 추가 지적)
+
+- /inventory/[invId]/items/[itemId] · /inventory/items/[id] 두 품목 상세의 입출고 이력 탭에 비고 컬럼 추가(출고처/병원과 처리자 사이, truncate+툴팁, colSpan 9) — note는 동일 API 응답에 기포함이라 표시만 추가
+- tsc 0오류 → dev2·PROD 빌드·재시작
+
 ## 2026-07-24 | 표 가로스크롤·WMS 비고 컬럼 PROD 배포
 
 - `fe86828` push → PROD pull → 힙 4GB 빌드 → pm2 restart → /tickets·/inventory/transactions 307 정상 (DB 변경·신규 패키지 없음)
