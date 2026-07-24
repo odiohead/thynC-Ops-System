@@ -5,6 +5,7 @@
  */
 
 import { runDelayNotifications } from '@/lib/notify'
+import { runTicketAutoClose } from '@/lib/ticketDomain'
 
 const INTERVAL_MAP: Record<string, number> = {
   '1h': 60 * 60 * 1000,
@@ -17,10 +18,12 @@ let currentInterval = 'off'
 
 async function run() {
   try {
+    // RESOLVED 자동 종결(ticket_auto_close_days) → SLA 판정 순서 (종결분은 판정 제외)
+    await runTicketAutoClose()
     await runDelayNotifications()
-    console.log(`[notify-scheduler] 지연 감지 실행 완료 (${new Date().toISOString()})`)
+    console.log(`[notify-scheduler] SLA·자동종결 점검 완료 (${new Date().toISOString()})`)
   } catch (err) {
-    console.error('[notify-scheduler] 지연 감지 실패:', err)
+    console.error('[notify-scheduler] SLA 점검 실패:', err)
   }
 }
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
-import { notifyTaskStatusChanged } from '@/lib/notify'
+import { notifyTicketChanged } from '@/lib/notify'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
@@ -128,12 +128,14 @@ export async function PUT(request: NextRequest, { params }: Params) {
   }
 
   // 티켓 동기화 (P9 편입)
+  let syncedTicketId: number | null = null
   {
-    const p = await prisma.project.findUnique({ where: { projectCode: params.code }, select: { id: true } })
+    const p = await prisma.project.findUnique({ where: { projectCode: params.code }, select: { id: true, ticketId: true } })
     if (p) {
       await prisma.$transaction(async (tx) => {
         await syncProjectToTicket(tx, p.id, authUser.userId)
       })
+      syncedTicketId = p.ticketId
     }
   }
 
@@ -143,13 +145,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
     include: projectInclude,
   })
 
+  // Slack 알림 (P11 티켓 파이프라인) — sig 비교로 실변경(상태·배정)만 발송, best-effort
+  if (syncedTicketId) {
+    notifyTicketChanged({ ticketId: syncedTicketId, actorName: authUser.name }).catch(() => {})
+  }
+
   // 공사상태 변경 후속 처리: buildStatus 라벨에 '완료' 포함 → 구축완료
   if (buildStatusId !== undefined && updated) {
     const bsLabel = updated.buildStatus?.label ?? ''
     const isCompleted = bsLabel.includes('완료')
-
-    // Slack 알림 (상태 변경) — best-effort. 실제 상태 변경 시에만 발송(notify 내부 시그니처 비교)
-    notifyTaskStatusChanged({ taskType: 'PROJECT', refCode: params.code, actorName: authUser.name }).catch(() => {})
 
     // 구축완료 진입 시 병원 상태를 '운영'으로 진행
     if (isCompleted) {

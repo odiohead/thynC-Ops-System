@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { addTicketEvent } from '@/lib/ticket'
+import { notifyTicketChanged } from '@/lib/notify'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,6 +45,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     before: ticket,
     after: updated,
   })
+
+  // P11: 큐 이관 채널 알림 + 이관받은 큐 멤버 멘션 (sig 비교)
+  notifyTicketChanged({ ticketId: id, actorName: user.name }).catch(() => {})
 
   return NextResponse.json({ ticket: updated })
 }

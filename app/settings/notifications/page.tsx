@@ -7,25 +7,31 @@ interface FieldDef {
   key: string
   label: string
 }
-interface DelayRules {
-  siteVisitDays: number
-  installPlanDays: number
-  etcDays: number
-  projectGraceDays: number
-  maintenanceDays: Record<string, number>
+interface SlaRules {
+  days: Record<string, number> // SEV1~SEV5 → 목표일 (0 = SLA 미적용)
+  warnDays: number
 }
-type StatusDwell = Record<string, Record<string, number>>
+type StatusDwell = Record<string, number> // 티켓 상태 → 임계일 (0 = 미사용)
+interface Option {
+  value: string
+  label: string
+}
 interface Config {
   enabled: boolean
   eventsEnabled: boolean
   delayInterval: string
   activeDelayInterval: string
   dmEnabled: boolean
+  assignDm: boolean
+  queueMentions: boolean
+  sev1Channel: boolean
+  eventToggles: Record<string, boolean> // created/statusChanged/queueTransferred/sevEscalated
+  autoCloseDays: number
   typesEnabled: Record<string, boolean>
-  delayRules: DelayRules
+  slaRules: SlaRules
   statusDwell: StatusDwell
-  statusOptions: Record<string, string[]>
-  priorities: string[]
+  severities: Option[]
+  dwellStatuses: Option[]
   fields: Record<string, string[]>
   catalog: Record<string, FieldDef[]>
   labels: Record<string, string>
@@ -56,7 +62,8 @@ interface LogRow {
 const EVENT_LABEL: Record<string, string> = {
   task_created: '등록',
   task_status_changed: '상태변경',
-  delayed: '지연',
+  delayed: 'SLA·체류',
+  ticket_assigned: '배정 DM',
 }
 const STATUS_STYLE: Record<string, string> = {
   sent: 'bg-green-100 text-green-700',
@@ -92,11 +99,9 @@ export default function NotificationSettingsPage() {
       .catch(() => {})
   }
 
-  type DayKey = 'siteVisitDays' | 'installPlanDays' | 'etcDays' | 'projectGraceDays'
-  const setRule = (k: DayKey, v: number) => cfg && setCfg({ ...cfg, delayRules: { ...cfg.delayRules, [k]: v } })
-  const setMnt = (p: string, v: number) => cfg && setCfg({ ...cfg, delayRules: { ...cfg.delayRules, maintenanceDays: { ...cfg.delayRules.maintenanceDays, [p]: v } } })
-  const setDwell = (t: string, status: string, v: number) =>
-    cfg && setCfg({ ...cfg, statusDwell: { ...cfg.statusDwell, [t]: { ...(cfg.statusDwell[t] ?? {}), [status]: v } } })
+  const setSla = (sev: string, v: number) => cfg && setCfg({ ...cfg, slaRules: { ...cfg.slaRules, days: { ...cfg.slaRules.days, [sev]: v } } })
+  const setDwell = (status: string, v: number) =>
+    cfg && setCfg({ ...cfg, statusDwell: { ...cfg.statusDwell, [status]: v } })
   const numField = (label: string, value: number, onChange: (v: number) => void) => (
     <label className="block">
       <span className="mb-1 block text-xs text-muted-foreground">{label}</span>
@@ -143,7 +148,7 @@ export default function NotificationSettingsPage() {
       const res = await fetch('/api/settings/notifications', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: cfg.enabled, eventsEnabled: cfg.eventsEnabled, delayInterval: cfg.delayInterval, dmEnabled: cfg.dmEnabled, typesEnabled: cfg.typesEnabled, delayRules: cfg.delayRules, statusDwell: cfg.statusDwell, fields: cfg.fields }),
+        body: JSON.stringify({ enabled: cfg.enabled, eventsEnabled: cfg.eventsEnabled, delayInterval: cfg.delayInterval, dmEnabled: cfg.dmEnabled, assignDm: cfg.assignDm, queueMentions: cfg.queueMentions, sev1Channel: cfg.sev1Channel, eventToggles: cfg.eventToggles, autoCloseDays: cfg.autoCloseDays, typesEnabled: cfg.typesEnabled, slaRules: cfg.slaRules, statusDwell: cfg.statusDwell, fields: cfg.fields }),
       })
       if (res.ok) {
         router.refresh()
@@ -222,9 +227,9 @@ export default function NotificationSettingsPage() {
         <div className="mb-6 rounded-xl border bg-card p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-medium text-foreground">지연 업무 요약 알림</p>
+              <p className="text-sm font-medium text-foreground">SLA 요약 알림 (초과·임박·체류)</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                주기적으로 지연 업무를 점검해 지연 채널에 요약 발송 (타입별 기준일 초과·미완료·보류 제외).
+                주기적으로 열린 티켓의 SLA(처리기한)를 점검해 지연 채널에 요약 발송. Resolved 자동 종결도 이 주기에 실행.
                 {cfg.activeDelayInterval && cfg.activeDelayInterval !== 'off' && (
                   <span className="ml-1">현재 <b>{DELAY_OPTIONS.find((o) => o.value === cfg.activeDelayInterval)?.label}</b> 간격 실행 중.</span>
                 )}
@@ -243,49 +248,83 @@ export default function NotificationSettingsPage() {
           </div>
           <label className="mt-3 flex items-center justify-between cursor-pointer border-t pt-3">
             <span>
-              <span className="text-sm font-medium text-foreground">담당자 DM 리마인드</span>
-              <span className="block text-xs text-muted-foreground mt-0.5">지연 업무 담당자에게 개인 DM으로 알림(하루 1회, 해소될 때까지). 계정 이메일로 Slack 자동 매핑.</span>
+              <span className="text-sm font-medium text-foreground">SLA 초과 담당자 DM</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">SLA 초과 티켓의 담당자(Assignee)에게 개인 DM(하루 1회, 해소될 때까지). 계정 이메일로 Slack 자동 매핑.</span>
             </span>
             <input type="checkbox" className="h-5 w-5 accent-primary" checked={cfg.dmEnabled} onChange={(e) => setCfg({ ...cfg, dmEnabled: e.target.checked })} disabled={!cfg.enabled || cfg.delayInterval === 'off'} />
           </label>
+          <label className="mt-3 flex items-center justify-between cursor-pointer border-t pt-3">
+            <span>
+              <span className="text-sm font-medium text-foreground">배정 DM</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">티켓 담당자(Assignee)로 배정된 사람에게 즉시 개인 DM.</span>
+            </span>
+            <input type="checkbox" className="h-5 w-5 accent-primary" checked={cfg.assignDm} onChange={(e) => setCfg({ ...cfg, assignDm: e.target.checked })} disabled={!cfg.enabled} />
+          </label>
         </div>
 
-        {/* 지연 판정 기준 */}
+        {/* 티켓 이벤트별 채널 알림 */}
         <div className="mb-6 rounded-xl border bg-card p-4">
-          <p className="text-sm font-medium text-foreground mb-1">지연 판정 기준 (일수)</p>
-          <p className="text-xs text-muted-foreground mb-3">기준일이 지나도 완료/회신 안 되면 지연으로 봅니다. 완료·보류 상태는 제외.</p>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-            {numField('답사 (요청일+)', cfg.delayRules.siteVisitDays, (v) => setRule('siteVisitDays', v))}
-            {numField('설치계획 (요청일+)', cfg.delayRules.installPlanDays, (v) => setRule('installPlanDays', v))}
-            {numField('기타업무 (접수일+)', cfg.delayRules.etcDays, (v) => setRule('etcDays', v))}
-            {numField('프로젝트 (완료예정+)', cfg.delayRules.projectGraceDays, (v) => setRule('projectGraceDays', v))}
-          </div>
-          <p className="text-xs font-medium text-foreground mt-4 mb-2">유지보수 — 우선순위별 (접수일+)</p>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-            {cfg.priorities.map((p) => (
-              <div key={p}>{numField(p, cfg.delayRules.maintenanceDays[p] ?? 0, (v) => setMnt(p, v))}</div>
+          <p className="text-sm font-medium text-foreground mb-1">이벤트별 채널 알림</p>
+          <p className="text-xs text-muted-foreground mb-3">티켓 이벤트 종류별로 채널 발송을 제어합니다. 배정 DM·SLA 요약은 아래 별도 토글.</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
+            {([
+              ['created', '등록'],
+              ['statusChanged', '상태 변경'],
+              ['queueTransferred', '큐 이관'],
+              ['sevEscalated', 'Sev1·2 상향'],
+            ] as const).map(([key, label]) => (
+              <label key={key} className="flex items-center gap-2 cursor-pointer text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-primary"
+                  checked={cfg.eventToggles[key] !== false}
+                  onChange={(e) => setCfg({ ...cfg, eventToggles: { ...cfg.eventToggles, [key]: e.target.checked } })}
+                  disabled={!cfg.enabled || !cfg.eventsEnabled}
+                />
+                <span>{label}</span>
+              </label>
             ))}
           </div>
+          <div className="mt-3 grid grid-cols-1 gap-y-2 border-t pt-3 sm:grid-cols-2">
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-foreground">
+              <input type="checkbox" className="h-4 w-4 accent-primary" checked={cfg.queueMentions} onChange={(e) => setCfg({ ...cfg, queueMentions: e.target.checked })} disabled={!cfg.enabled || !cfg.eventsEnabled} />
+              <span>큐 멤버 멘션 <span className="text-xs text-muted-foreground">(등록·큐 이관·Sev 상향 시 해당 큐 멤버 태그)</span></span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-foreground">
+              <input type="checkbox" className="h-4 w-4 accent-primary" checked={cfg.sev1Channel} onChange={(e) => setCfg({ ...cfg, sev1Channel: e.target.checked })} disabled={!cfg.enabled || !cfg.eventsEnabled} />
+              <span>Sev1 @channel 전체 멘션 <span className="text-xs text-muted-foreground">(끄면 🚨 강조만)</span></span>
+            </label>
+          </div>
         </div>
 
-        {/* 단계(상태) 체류 지연 기준 */}
+        {/* SLA 목표 (Sev별) */}
         <div className="mb-6 rounded-xl border bg-card p-4">
-          <p className="text-sm font-medium text-foreground mb-1">단계 체류 지연 기준 (일수)</p>
+          <p className="text-sm font-medium text-foreground mb-1">SLA 목표 (Sev별 일수)</p>
           <p className="text-xs text-muted-foreground mb-3">
-            특정 상태(단계)에 지정 일수 이상 머물면 지연으로 봅니다. <b>0 = 사용 안 함</b>. 위 기준일 규칙과 별개로 동작(둘 중 하나만 걸려도 지연).
-            기존 데이터는 상태 변경 시점 기록이 없어 첫 판정은 요청/접수일(없으면 등록일) 기준입니다.
+            티켓 생성 시 처리기한(dueAt) = 생성일 + Sev별 목표일. <b>0 = SLA 미적용</b> (Sev5 백로그 등).
+            프로젝트 티켓은 완료예정일이 기한이라 이 규칙을 쓰지 않습니다. Pending 상태는 SLA 판정에서 제외(체류 기준으로 감지).
           </p>
-          <div className="space-y-3">
-            {(['PROJECT', 'SITE_VISIT', 'MAINTENANCE', 'ETC'] as const).map((t) => (
-              <div key={t}>
-                <p className="text-xs font-medium text-foreground mb-2">{cfg.labels[t]}</p>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-                  {(cfg.statusOptions[t] ?? []).map((status) => (
-                    <div key={status}>{numField(`'${status}' 상태`, cfg.statusDwell[t]?.[status] ?? 0, (v) => setDwell(t, status, v))}</div>
-                  ))}
-                  {(cfg.statusOptions[t] ?? []).length === 0 && <p className="text-xs text-muted-foreground col-span-full">설정 가능한 상태가 없습니다.</p>}
-                </div>
-              </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5">
+            {cfg.severities.map((s) => (
+              <div key={s.value}>{numField(s.label, cfg.slaRules.days[s.value] ?? 0, (v) => setSla(s.value, v))}</div>
+            ))}
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5">
+            {numField('임박 예고 (기한 D-N)', cfg.slaRules.warnDays, (v) => cfg && setCfg({ ...cfg, slaRules: { ...cfg.slaRules, warnDays: v } }))}
+            {numField('Resolved 자동 종결 (N일, 0=끔)', cfg.autoCloseDays, (v) => cfg && setCfg({ ...cfg, autoCloseDays: v }))}
+          </div>
+        </div>
+
+        {/* 티켓 상태 체류 기준 */}
+        <div className="mb-6 rounded-xl border bg-card p-4">
+          <p className="text-sm font-medium text-foreground mb-1">상태 체류 기준 (일수)</p>
+          <p className="text-xs text-muted-foreground mb-3">
+            티켓이 특정 상태에 지정 일수 이상 머물면 SLA 요약에 포함합니다. <b>0 = 사용 안 함</b>.
+            Pending에 오래 묶인 티켓 감지 등에 사용 — SLA 기한 규칙과 별개로 동작.
+          </p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5">
+            {cfg.dwellStatuses.map((s) => (
+              <div key={s.value}>{numField(s.label, cfg.statusDwell[s.value] ?? 0, (v) => setDwell(s.value, v))}</div>
             ))}
           </div>
         </div>

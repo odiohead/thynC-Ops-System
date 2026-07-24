@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser, isUserOrAbove } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { notifyTaskEvent } from '@/lib/notify'
+import { notifyTicketCreated } from '@/lib/notify'
 import { uploadToS3 } from '@/lib/s3'
 import { parseFormEmail, buildNoteHtml } from '@/lib/gmail'
 import { createCalendarEvent } from '@/lib/googleCalendar'
@@ -109,8 +109,8 @@ export async function PUT(
   }
 
   // 티켓 동시 생성 (P7 편입 — 메일 인입 큐 = 티켓 생성 채널)
-  await prisma.$transaction(async (tx) => {
-    await createTicketForSiteVisit(tx, {
+  const ticketId = await prisma.$transaction(async (tx) => {
+    return createTicketForSiteVisit(tx, {
       id: siteVisit.id,
       siteVisitCode,
       hospitalCode,
@@ -122,8 +122,8 @@ export async function PUT(
     }, authUser?.userId ?? null, 'domain')
   })
 
-  // Slack 알림 (메일큐 자동등록) — best-effort
-  notifyTaskEvent({ eventType: 'task_created', taskType: 'SITE_VISIT', refCode: siteVisitCode, autoRegistered: true }).catch(() => {})
+  // Slack 알림 (메일큐 자동등록, P11 티켓 파이프라인) — best-effort
+  notifyTicketCreated({ ticketId, autoRegistered: true }).catch(() => {})
 
   // Google Calendar 이벤트 생성 (비차단)
   if (siteVisit.visitDate) {

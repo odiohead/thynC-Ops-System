@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { notifyTaskEvent } from '@/lib/notify'
+import { notifyTicketCreated } from '@/lib/notify'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { advanceHospitalStatus } from '@/lib/hospitalStatus'
@@ -100,8 +100,8 @@ export async function POST(request: NextRequest) {
   })
 
   // 티켓 동시 생성 (P8 편입)
-  await prisma.$transaction(async (tx) => {
-    await createTicketForInstallPlan(tx, {
+  const ticketId = await prisma.$transaction(async (tx) => {
+    return createTicketForInstallPlan(tx, {
       id: installPlan.id,
       planCode,
       hospitalCode: installPlan.hospitalCode,
@@ -134,8 +134,8 @@ export async function POST(request: NextRequest) {
     source: '설치계획 등록',
   })
 
-  // Slack 알림 (등록) — best-effort
-  notifyTaskEvent({ eventType: 'task_created', taskType: 'INSTALL_PLAN', refCode: planCode, actorName: authUser.name }).catch(() => {})
+  // Slack 알림 (등록, P11 티켓 파이프라인) — best-effort
+  notifyTicketCreated({ ticketId, actorName: authUser.name }).catch(() => {})
 
   return NextResponse.json({ installPlan }, { status: 201 })
 }

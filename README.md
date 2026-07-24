@@ -61,7 +61,7 @@ app/
 │   ├── projects/                     # 프로젝트 CRUD + 장비/파일 관리
 │   ├── site-visits/                  # 답사 CRUD + 파일 업로드
 │   ├── maintenances/                 # 유지보수 CRUD + 파일 관리
-│   ├── tickets/                      # 티켓 CRUD + transition/assign/queue/participants/logs
+│   ├── tickets/                      # 티켓 CRUD + transition/assign/queue/participants/logs/parent + metrics(지표 집계)
 │   ├── tasks/                        # 업무(Task) 통합 조회
 │   ├── nav-menus/                    # 네비게이션 메뉴 조회 (Navigation 컴포넌트용)
 │   ├── constructors/                 # 시공사 관리
@@ -137,7 +137,7 @@ app/
 ├── site-visits/                      # 답사 목록·상세·등록
 ├── maintenances/                     # 유지보수 목록·상세·등록
 ├── etc-tasks/                        # 기타업무 목록·상세·등록 (다병원·비유지보수 업무)
-├── tickets/                          # 티켓 목록(큐 탭·상태 다중 토글)·생성(CTI 3단 셀렉트)·상세(전이 액션·타임라인)
+├── tickets/                          # 티켓 목록(큐 탭·저장된 뷰)·생성(CTI 3단)·상세(전이 액션·타임라인)·dashboard/(P12 지표)
 │   └── components/                   # TicketStatusBadge·TicketSeverityBadge·TicketLogPanel
 ├── tasks/                            # 업무(Task) 현황 (통합 조회)
 ├── gateway-planner/                  # GW 배치 플래너 — 도면 업로드·잡 목록 + [id](진행 폴링·스케일 확정·2점 보정·배치 미리보기·PPTX)
@@ -440,7 +440,7 @@ prisma/
 - `isActive` (활성/비활성 토글), `sortOrder` (정렬 순서)
 
 ### Task (통합 업무) — **폐기 (P10, 2026-07-24)**
-- 티켓 시스템이 롤업 역할을 대체 — `/tasks`는 `/tickets`로 리다이렉트, `/api/tasks` 제거, nav 메뉴 비활성. **테이블은 이력 보존(561건 동결)** — 원본 모듈들의 Task 생성/동기화/삭제 코드 전부 제거(ConsultationQueue 선례). 잔존 참조: `lib/workItemReassign.ts`의 동결 테이블 하우스키핑만(P13 정리 예정)
+- 티켓 시스템이 롤업 역할을 대체 — `/tasks`는 `/tickets`로 리다이렉트, `/api/tasks` 제거, nav 메뉴 비활성. **테이블은 이력 보존(561건 동결)** — 원본 모듈들의 Task 생성/동기화/삭제 코드 전부 제거(ConsultationQueue 선례). 잔존 참조 없음 — `lib/workItemReassign.ts`의 Task 미러 갱신도 P13에서 제거(연결 티켓 동기화로 대체)
 - (구 형상) `taskCode` TASK-YYYYMM-NNNNN, `taskType` 5종, `refCode` 느슨 연결
 - 기존 테이블은 변경 없이 유지, tasks는 참조용 통합 뷰
 
@@ -561,13 +561,13 @@ prisma/
 - `createdBy` → User. 인덱스 `(created_by, created_at DESC)`, `(created_at DESC)`
 - 배치 규칙은 AppSetting `gw_planner_rules` (커버리지 직경·복도 간격 계수·병실 개수·제외 공간 등)
 
-### 티켓 시스템 (P1 — `ticket_dev_schedule.md`, 2026-07-23)
+### 티켓 시스템 (P1~P13 완료 — `ticket_dev_schedule.md`·`ticket_system_design.md` §2)
 - AWS SIM식 티켓 레이어 — 티켓=공통 워크플로 껍데기, 도메인 레코드=구조화 본문(1:1). 전역 결정: `ticket_system_design.md` §2
-- **Ticket** (`tickets`): `ticketCode`(TK-YYYYMM-NNNNN, UNIQUE) · `status`(하드 enum `ticket_status`: OPEN/ASSIGNED/IN_PROGRESS/PENDING/RESOLVED/CLOSED — 전이표는 P2에서 코드 강제) · `severity`(enum `ticket_severity`: SEV1~SEV5, 기본 SEV4) · `queueId`(필수) · `ctiId`(DB nullable·API 필수) · `ownerId`(단일 책임자, NULL=큐 대기) · `pendingReasonId`+`pendingNote` · `hospitalCode?` · `statusChangedAt`/`resolvedAt`/`closedAt`/`reopenCount`/`dueAt`(SLA, P11) · 인덱스 (queue,status)/(owner,status)/(severity)/(statusChangedAt)/(hospitalCode)
+- **Ticket** (`tickets`): `ticketCode`(TK-YYYYMM-NNNNN, UNIQUE) · `status`(하드 enum `ticket_status`: OPEN/ASSIGNED/IN_PROGRESS/PENDING/RESOLVED/CLOSED — 전이표 코드 강제, `lib/ticket-shared.ts` 단일 소스) · `severity`(enum `ticket_severity`: SEV1~SEV5, 기본 SEV4) · `queueId`(필수) · `ctiId`(DB nullable·API 필수) · `ownerId`(단일 책임자, NULL=큐 대기) · `pendingReasonId`+`pendingNote` · `hospitalCode?` · `statusChangedAt`/`resolvedAt`/`closedAt`/`reopenCount`/`dueAt`(SLA — 생성일+Sev별 목표, PROJECT는 완료예정일) · 인덱스 (queue,status)/(owner,status)/(severity)/(statusChangedAt)/(hospitalCode)
 - Ticket 추가 필드: `parentId`(self-FK — **마스터-서브 2레벨 고정**, 마스터는 열린 서브 있으면 해결/종결 불가, 연결/해제는 양쪽 타임라인 link 이벤트) · `refType`(도메인 연결 유형: MAINTENANCE, NULL=순수 티켓)
 - **답사·설치계획·프로젝트 편입 (P7~P9, 2026-07-24)**: 각 `ticketId`(1:1) — 답사(상태 5종 매핑, 작성완료→Pending 회신대기, Gmail 큐 승격도 티켓 생성), 설치계획(2축 write/reply 매핑, mail-queue 승격 포함), 프로젝트(BuildStatus 라벨 앵커 매핑, dueAt=완료예정일, CTI 영업/신규도입/구축). refType 'SITE_VISIT'·'INSTALL_PLAN'·'PROJECT'. 백필 104+72+243건(`scripts/backfill-*-tickets.mts`). **도메인 편입 5/5 완료**
 - **기타업무 편입 (P6, 2026-07-24)**: `etc_tasks.ticketId`(1:1) — 존속 편입(방문일정·캘린더는 도메인 잔류), CTI 내부/기타업무/일반→내부운영 큐, 상태 체계는 유지보수와 동일 매핑, 병원은 첫 연결분→ticket.hospitalCode. 백필 29건(`scripts/backfill-etc-task-tickets.mts`). refType 'ETC'. 역할 구분: 일정·병원 연결 필요하면 기타업무, 아니면 순수 티켓
-- **유지보수 편입 (P5, 2026-07-24)**: `maintenances.ticketId`(1:1 FK) — 유지보수 생성 시 티켓 동시 생성(큐 '유지보수', 장애유형→CTI 고객지원/장애/*, 우선순위→Sev), 상태·담당 **양방향 동기화**(`lib/ticketDomain.ts`, 매핑: 접수↔OPEN/ASSIGNED·처리중↔IN_PROGRESS·보류↔PENDING·완료↔RESOLVED/CLOSED), 처리 기록은 티켓 타임라인으로 일원화(기존 30건 이관·maintenance_logs 보존), Slack은 MAINTENANCE 알림이 대표. 백필 219건 완료(`scripts/backfill-maintenance-tickets.mts`)
+- **유지보수 편입 (P5, 2026-07-24)**: `maintenances.ticketId`(1:1 FK) — 유지보수 생성 시 티켓 동시 생성(큐 '유지보수', 장애유형→CTI 고객지원/장애/*, 우선순위→Sev), 상태·담당 **양방향 동기화**(`lib/ticketDomain.ts`, 매핑: 접수↔OPEN/ASSIGNED·처리중↔IN_PROGRESS·보류↔PENDING·완료↔RESOLVED/CLOSED), 처리 기록은 티켓 타임라인으로 일원화(기존 30건 이관·maintenance_logs 보존), Slack은 P11부터 티켓 파이프라인 단일 발송. 백필 219건 완료(`scripts/backfill-maintenance-tickets.mts`)
 - **TicketQueue** (`ticket_queues`): AWS식 배정 큐 마스터 (기능 단위, 런타임 관리)
 - **TicketQueueMember** (`ticket_queue_members`): 큐 멤버 N:M (AWS resolver group — 담당자 선택 시 큐 멤버 우선 노출, 비멤버 배정도 허용)
 - **TicketCti** (`ticket_cti`): 3단계 분류 트리(parent_id 자기참조, level 1~3 CHECK) + `defaultQueueId`(CTI→큐 자동 라우팅)
@@ -575,7 +575,8 @@ prisma/
 - **TicketLog** (`ticket_logs`): 단일 타임라인 — `logType` comment(사람, Tiptap HTML)/status_change·assign·queue_transfer·sev_change 등 시스템 이벤트(`payload` JSONB). 프로세스 지표 원천 겸용
 - **TicketPendingReason** (`ticket_pending_reasons`): PENDING 사유 마스터
 - 초기 마스터 시드: `scripts/seed-ticket-masters.sql` (재실행 안전 — 큐 4종·CTI 3 Category·사유 5종·nav 메뉴 4행. PROD 최초 반영 시 실행)
-- Slack 알림: notify 파이프라인 taskType `'TICKET'` — 생성/상태변경 발송, `/settings/notifications`에서 필드·on/off 관리. 상태 표기는 영문(Open~Closed)
+- Slack 알림 (P11, 2026-07-24): **티켓 이벤트 단일 파이프라인** — 모든 업무 알림이 티켓 mutation(생성/상태·큐 변경/배정/Sev 에스컬레이션)에서 발생, 도메인 라우트 직접 발송 폐지. sig v2 4축 비교로 실변경만 발송. Sev1=@channel·Sev2=🔥+큐 멤버 멘션, 배정 시 owner DM(`notify_assign_dm`). 상태 표기는 영문(Open~Closed)
+- SLA (P11): `dueAt = 생성일 + Sev별 목표일`(`notify_sla_rules` 기본 SEV1:1/SEV2:1/SEV3:3/SEV4:7/SEV5:미적용, PROJECT는 완료예정일 유지) — 스케줄러가 초과/임박(D-N)/상태 체류를 지연 채널 요약 + SLA 초과 owner DM. PENDING은 SLA 시계 정지. RESOLVED는 `ticket_auto_close_days`(기본 0=끔) 경과 시 자동 CLOSED(타임라인 이벤트만). 백필: `scripts/backfill-ticket-dueat.sql`
 
 ### Wiki 모듈 — 별도 PostgreSQL 스키마 `wiki`
 - 사내 위키(Notion-like) 기능. 본문은 BlockNote JSON 블록 배열로 저장
@@ -707,8 +708,8 @@ prisma/
   - 미리보기(preview) 모드 지원
   - 같은 병원명 여러 행 → 도입형태 병합, 도입병상 수 합산
 - **병원 목록 Google Sheets 내보내기**: Drive Sheets API로 스프레드시트 직접 생성
-- **업무 병원 재지정(매핑 정정)** (ADMIN 이상): 프로젝트/답사/설치계획/유지보수 상세의 "병원 재지정" 버튼으로 잘못 지정된 병원을 올바른 병원으로 이전. 한 트랜잭션으로 업무 hospitalCode + Task 미러 동기화, 두 병원 현황 상태 자동 재계산(옛 병원 하향 포함), 프로젝트는 이름의 병원명도 선택 변경. 감사로그 기록
-- **병원 업무 일괄 이전** (SUPER_ADMIN): 병원 상세의 "업무 일괄 이전" 버튼으로 한 병원의 모든 업무(프로젝트·답사·설치계획·유지보수·상담)를 다른 병원으로 한 번에 이전(병원을 통째로 잘못 만든 경우 정리용)
+- **업무 병원 재지정(매핑 정정)** (ADMIN 이상): 프로젝트/답사/설치계획/유지보수 상세의 "병원 재지정" 버튼으로 잘못 지정된 병원을 올바른 병원으로 이전. 한 트랜잭션으로 업무 hospitalCode + **연결 티켓(병원·제목) 동기화**(P13 — Task 미러 갱신은 폐기), 두 병원 현황 상태 자동 재계산(옛 병원 하향 포함), 프로젝트는 이름의 병원명도 선택 변경. 감사로그 기록
+- **병원 업무 일괄 이전** (SUPER_ADMIN): 병원 상세의 "업무 일괄 이전" 버튼으로 한 병원의 모든 업무(프로젝트·답사·설치계획·유지보수·상담)를 다른 병원으로 한 번에 이전(병원을 통째로 잘못 만든 경우 정리용). **연결 티켓·순수 티켓도 함께 이전**(P13 — [답사]/[설치계획] 제목의 병원명 갱신 포함)
 
 ### 프로젝트 관리
 - 구축 공사 프로젝트 등록·수정·삭제 (삭제는 ADMIN 이상)
@@ -797,6 +798,7 @@ prisma/
 - **타임라인** (`TicketLogPanel`): 코멘트(Tiptap HTML, 본인·ADMIN 수정/삭제)와 시스템 이벤트(회색 한 줄 — payload를 상태/Sev 라벨·사용자/큐/CTI 이름으로 번역: "상태 접수 → 배정 · 작성자 · 시각") 시간순 단일 뷰 + 하단 코멘트 작성
 - 배지 색·라벨·전이표는 `lib/ticket-shared.ts`(클라이언트 안전) 단일 소스 — `TicketStatusBadge`/`TicketSeverityBadge` 공용 컴포넌트
 - **설정**: `/settings/ticket-queues`(큐 — 티켓 있으면 삭제 비활성+안내), `/settings/ticket-cti`(3컬럼 트리 — 각 레벨 추가/이름수정/활성/삭제, Item 기본 큐 지정), `/settings/ticket-pending-reasons`(대기 사유)
+- **지표 대시보드** (`/tickets/dashboard` — P12, 2026-07-25): 목록 우상단 '대시보드' 버튼으로 진입. KPI 6타일(열린/미배정/SLA 초과(적색 강조)/이번주 종결/평균 해결 소요 90일/재오픈율) + 필터(기간 3·6·12개월·전체, 큐, 유형) + 차트 4종(recharts, 다크 대응 — 월별 생성vs종결·해결 소요 중앙값 추이·SLA 준수율 추이·Sev/유형 분포) + 월별 표 토글 + 큐별 열린 티켓 바 + **담당별 처리량 표(ADMIN 이상만)** + 현 상태 장기 체류 Top 10. 지표 2계열: 필드 기반(전 기간 — 백필 원본 날짜 보존, 음수 소요는 0 클램프) / 상태·큐 체류 통계는 P11 이후 이벤트 축적 후 고도화
 
 ### 자재관리(WMS) (개발 중 — `function_wms.md`)
 - 구축·판매에서 취급하는 하드웨어 자재(게이트웨이·MC200M-T 등 자사기기, 사이니지·PC·모니터 등 전자제품, 케이블 등 잡자재) 재고관리. **자재 수량·입출고 관리에 집중**(안전재고·실사조정 등 부가기능 미채택)
@@ -887,19 +889,19 @@ prisma/
 - 후보: SEERS 소속·활성·해당 풀 미등록 사용자만 표시
 - 목록 테이블: 번호·이름·이메일·소속·부서·추가일·삭제
 
-### Slack 알림 (개발 중 — `function_notification.md`)
-- 주요 업무(프로젝트/답사/설치계획/유지보수/기타업무) **등록 시 + 이후 상태 변경 시마다 Slack 채널 알림** (Phase 2 완료). 완료도 "→ 완료" 상태 변경의 한 경우
+### Slack 알림 (P11 재편, 2026-07-24 — 티켓 이벤트 단일 파이프라인)
+- **이벤트 소스 = 티켓 레이어**: 순수 티켓·도메인 업무(유지보수/기타/답사/설치계획/프로젝트) 모두 티켓 mutation에서 알림 발생(`lib/notify.ts` `notifyTicketCreated`/`notifyTicketChanged`). 도메인 라우트는 저장 후 티켓 알림만 호출 — 이중 발송 구조 없음
 - 전송 어댑터 `lib/slack.ts`(의존성0 fetch) + 정책·로그 `lib/notify.ts`. 발송 실패는 업무 API를 절대 깨지 않는 best-effort
-- **발송 모드** (`SLACK_NOTIFY_MODE`): `off`(미발송) / `test`(전부 테스트 채널 + `[DEV]` prefix, 비-production은 live 자동 강등) / `live`(운영). DEV는 항상 test
-- **게이트**: AppSetting `notify_enabled`(기본 off) + `notify_events_enabled`(기본 on) + **업무 타입별 `notify_types_enabled`(기본 전부 on, 끈 타입은 등록·상태변경·지연·DM 전부 미발송)**. 채널은 `SLACK_CHANNEL_MAIN` 단일
-- **상태 변경 감지**: 타입별 상태 시그니처(프로젝트=공사상태, 답사/유지보수/기타업무=상태명, 설치계획=작성/회신여부)를 직전 발송 로그와 비교해 **실제 변경 시에만** 발송(from→to 표기). 등록 알림은 `refCode`당 1회 dedup. (업무현황 완료 체크박스는 원본 상태 미변경이라 알림 대상 아님)
-- 메시지: 고정(이모지+타입+병원명/제목+상세 링크, 등록 🆕 / 상태변경 🔄 `접수 → 처리중`) + **타입별 선택 필드**
-- **담당자 멘션**: 담당자 필드는 Slack 태그(`<@ID>`) — 단 계정 발송 플래그 on + 매핑 성공인 사람만, 그 외는 이름 텍스트 폴백
-- **지연 감지 요약** (Phase 3): 주기(`notify_delay_interval` off/1h/6h/24h) 점검 → 지연 업무 요약 1메시지(⏰ N건, 상세링크)를 지연 채널로. 기준(설정 페이지에서 편집 가능·`notify_delay_rules`) — 답사·설치계획 요청일+N / 기타업무 접수일+N / 프로젝트 완료예정일+N / 유지보수 우선순위별(긴급·높음·보통·낮음), 완료·보류 제외(KST 자정 기준). 12시간 내 동일 목록 재발송 스킵. 스케줄러는 `lib/notify-scheduler.ts`(mail-scheduler 패턴, instrumentation 기동), 판정은 `lib/delay-rules.ts`
-- **단계(상태) 체류 지연**: 특정 상태(단계)에 지정 일수 이상 머물면 지연 판정 — 기준일 규칙과 병행(둘 중 하나만 걸려도 지연). 타입별·상태별 임계일을 설정 페이지에서 지정(`notify_status_dwell`, 0=미사용, 기본 전체 미사용). 상태 진입 시각은 각 업무 테이블 `status_changed_at`(상태 실변경 시 기록, 레거시 NULL은 요청/접수일→등록일 fallback). 완료예정일 미입력 프로젝트도 체류 규칙으로 감지 가능. 설치계획은 작성/회신 2-플래그 구조라 제외
-- **담당자 DM** (Phase 4): 지연 업무 담당자에게 개인 DM 리마인드(`notify_dm_enabled`, 기본 off). 매핑 — 계정 이메일로 Slack `lookupByEmail` 후 `users.slack_user_id` 캐시(실패 시 그 사람만 스킵). 같은 건·같은 사람 24h 1회, 상한 없음(해소 시까지). test 모드는 실제 담당자 대신 테스트 채널로 `[DEV][DM→이름]`
-- **설정 페이지 `/settings/notifications`** (ADMIN 이상): 발송 모드(읽기전용) + 전역/이벤트 토글 + **지연 요약 주기·담당자 DM 토글** + **지연 판정 기준일 편집**(타입별·유지보수 우선순위별) + **업무 타입별 메시지 포함 필드 선택**(예: 답사에 '요청일') + **발송 이력**(최근 50건·상태 필터, `GET /api/settings/notifications/logs`). 저장은 AppSetting(`notify_enabled`/`notify_events_enabled`/`notify_delay_interval`/`notify_dm_enabled`/`notify_event_fields`/`notify_delay_rules`/`notify_dm_policy`)
-- **계정별 발송 차단**: `users.slackNotifyEnabled=false`인 계정은 DM 미발송(계정관리에서 제어)
+- **발송 모드** (`SLACK_NOTIFY_MODE`): `off` / `test`(전부 테스트 채널 + `[DEV]` prefix, 비-production은 live 자동 강등) / `live`. DEV는 항상 test
+- **게이트**: AppSetting `notify_enabled`(기본 off) + `notify_events_enabled`(기본 on) + **업무 타입별 `notify_types_enabled`**(refType 기준, 끈 타입은 전 알림 미발송). 채널은 `SLACK_CHANNEL_MAIN` 단일
+- **변경 감지 (sig v2)**: `v2|status|owner|sev|queue` 시그니처를 직전 발송 로그(refCode=티켓번호)와 비교 — 상태·큐 변경, Sev1·2 에스컬레이션은 채널 발송(복합 변경 1메시지), owner 변경은 **배정 DM**(`notify_assign_dm` 기본 on), 그 외는 조용히 기준선 갱신. 등록 알림은 티켓번호당 1회 dedup
+- 메시지(티켓 중심 통일): 이모지+`[유형] TK-번호 · Sev · 큐` 헤더 + 티켓 상세 링크(+도메인 상세 링크 병기) + 변경 축(Status/Queue/Severity from→to) + **타입별 선택 필드**(설정). 담당자 필드는 Slack 태그 — 계정 발송 플래그 on+매핑 성공자만, 그 외 이름 폴백
+- **Sev1·2 강조**: Sev1 = 🚨+`<!channel>` / Sev2 = 🔥. **큐 멤버 멘션**(`ticket_queue_members`): 생성·큐 이관·에스컬레이션 시 해당 큐 멤버 태그(멤버 0명이면 멘션 없이 발송)
+- **SLA 요약** (스케줄러): 주기(`notify_delay_interval` off/1h/6h/24h)로 열린 티켓의 dueAt 점검 → 초과(⏰)/임박(D-N, `warnDays`)/상태 체류(`notify_status_dwell`, 티켓 상태별·기본 미사용) 3섹션 요약을 지연 채널로(섹션당 10건 캡, 12h 동일 멤버십 스킵). PENDING은 SLA 판정 제외(체류 규칙으로 커버). SEV5 전체 제외. 판정은 `lib/delay-rules.ts` `findDelayedTickets`
+- **SLA 초과 owner DM**: `notify_dm_enabled`(기본 off) — 초과 티켓의 owner에게 개인 DM(같은 건·같은 사람 24h 1회, 해소 시까지). 매핑은 계정 이메일 lookup 후 `users.slack_user_id` 캐시. test 모드는 테스트 채널로 `[DEV][DM→이름]`
+- **RESOLVED 자동 종결**: `ticket_auto_close_days`(기본 0=끔) 경과한 RESOLVED 티켓을 스케줄러 주기에서 자동 CLOSED(열린 서브 있으면 스킵, Slack 미발송·타임라인 이벤트만) — `lib/ticketDomain.ts` `runTicketAutoClose`
+- **설정 페이지 `/settings/notifications`** (ADMIN 이상): 발송 모드(읽기전용) + 전역/이벤트 토글 + 업무별 on/off + **이벤트별 채널 알림 토글**(등록/상태 변경/큐 이관/Sev1·2 상향 — `notify_event_toggles`) + **큐 멤버 멘션·Sev1 @channel 토글**(`notify_queue_mentions`/`notify_sev1_channel`) + SLA 요약 주기·초과 DM·배정 DM 토글 + **SLA 목표(Sev별)·임박 D-N·자동종결 N일 편집**(`notify_sla_rules`/`ticket_auto_close_days`) + **상태 체류 기준(티켓 상태별)** + 타입별 메시지 필드 선택 + 발송 이력(최근 50건·상태 필터)
+- **계정별 발송 차단**: `users.slackNotifyEnabled=false`인 계정은 DM·멘션 미발송(계정관리에서 제어)
 
 ### 사내 위키 (Phase 2-13)
 - Notion-like 블록 에디터(BlockNote) 기반 사내 위키
@@ -1238,6 +1240,7 @@ npm run dev
 | GET/PUT | `/api/settings/ticket-queues/[id]/members` | 큐 멤버 조회·전체 설정 `{userIds[]}` |
 | GET/POST | `/api/tickets/[id]/logs` | 타임라인(코멘트+시스템 이벤트 시간순) · 코멘트 작성(sanitize) |
 | PUT/DELETE | `/api/tickets/[id]/logs/[logId]` | 코멘트 수정·삭제 (본인 or ADMIN, 시스템 이벤트 불변) |
+| GET | `/api/tickets/metrics` | 프로세스 지표 집계 (P12 — `?months=3\|6\|12\|0&queueId=&refType=`, raw SQL·KST 버킷. perOwner는 ADMIN 이상만 포함) |
 | GET/POST, PUT/DELETE | `/api/settings/ticket-queues(/[id])` | 큐 마스터 (티켓 있으면 삭제 불가) |
 | GET/POST, PUT/DELETE | `/api/settings/ticket-cti(/[id])` | CTI 3단계 트리 (하위·티켓 있으면 삭제 불가, 기본 큐 지정) |
 | GET/POST, PUT/DELETE | `/api/settings/ticket-pending-reasons(/[id])` | PENDING 사유 마스터 |

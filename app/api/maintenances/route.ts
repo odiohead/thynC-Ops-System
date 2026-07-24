@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { notifyTaskEvent } from '@/lib/notify'
+import { notifyTicketCreated } from '@/lib/notify'
 import { getAuthUser } from '@/lib/auth'
 import { createCalendarEvent } from '@/lib/googleCalendar'
 import { normalizeVisits, visitEventPayload } from '@/lib/maintenanceVisit'
@@ -146,8 +146,8 @@ export async function POST(request: NextRequest) {
 
   // 티켓 동시 생성 (P5 편입 — 실패 시 유지보수 생성 자체를 롤백하지 않도록 best-effort가 아니라
   // 명시 실패 처리: 티켓 없는 유지보수를 만들지 않는다)
-  await prisma.$transaction(async (tx) => {
-    await createTicketForMaintenance(tx, {
+  const ticketId = await prisma.$transaction(async (tx) => {
+    return createTicketForMaintenance(tx, {
       id: maintenance.id,
       maintenanceCode,
       title: maintenance.title,
@@ -200,8 +200,8 @@ export async function POST(request: NextRequest) {
     after: maintenance,
   })
 
-  // Slack 알림 (등록) — best-effort
-  notifyTaskEvent({ eventType: 'task_created', taskType: 'MAINTENANCE', refCode: maintenanceCode, actorName: user.name }).catch(() => {})
+  // Slack 알림 (등록, P11 티켓 파이프라인) — best-effort
+  notifyTicketCreated({ ticketId, actorName: user.name }).catch(() => {})
 
   return NextResponse.json({ maintenance }, { status: 201 })
 }

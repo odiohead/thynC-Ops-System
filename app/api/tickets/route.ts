@@ -5,7 +5,8 @@ import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { sanitizeRichTextHtml } from '@/lib/richtext'
 import { generateTicketCode, addTicketEvent } from '@/lib/ticket'
-import { notifyTaskEvent } from '@/lib/notify'
+import { notifyTicketCreated } from '@/lib/notify'
+import { getSlaRules, computeTicketDueAt } from '@/lib/delay-rules'
 
 export const dynamic = 'force-dynamic'
 
@@ -134,6 +135,7 @@ export async function POST(request: NextRequest) {
             ownerId,
             hospitalCode,
             parentId,
+            dueAt: computeTicketDueAt(await getSlaRules(), severity, new Date()), // Sev 기반 SLA (P11)
             status: ownerId ? 'ASSIGNED' : 'OPEN',
             createdBy: user.userId,
             participants: participantIds.length
@@ -167,7 +169,7 @@ export async function POST(request: NextRequest) {
     after: ticket,
   })
 
-  notifyTaskEvent({ eventType: 'task_created', taskType: 'TICKET', refCode: ticket.ticketCode, actorName: user.name }).catch(() => {})
+  notifyTicketCreated({ ticketId: ticket.id, actorName: user.name }).catch(() => {})
 
   return NextResponse.json({ ticket }, { status: 201 })
 }

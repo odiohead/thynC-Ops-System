@@ -4,8 +4,9 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { canTransition, addTicketEvent, TICKET_STATUS_LABELS } from '@/lib/ticket'
-import { notifyTaskStatusChanged } from '@/lib/notify'
-import { syncTicketToDomain, domainNotifyRef } from '@/lib/ticketDomain'
+import { notifyTicketChanged } from '@/lib/notify'
+import { syncTicketToDomain } from '@/lib/ticketDomain'
+import { advanceHospitalStatus } from '@/lib/hospitalStatus'
 
 export const dynamic = 'force-dynamic'
 
@@ -102,10 +103,20 @@ export async function POST(request: NextRequest, { params }: Params) {
     after: updated,
   })
 
-  // 도메인 연결 티켓은 도메인 알림이 대표 (이중 발송 방지 — P5 설계)
-  const domainRef = await domainNotifyRef(id, ticket.refType)
-  if (domainRef) notifyTaskStatusChanged({ ...domainRef, actorName: user.name }).catch(() => {})
-  else notifyTaskStatusChanged({ taskType: 'TICKET', refCode: ticket.ticketCode, actorName: user.name }).catch(() => {})
+  // P13: 프로젝트 티켓이 티켓 경로로 구축완료(해결/종결 → BuildStatus '완료' 동기화)되면
+  // 병원 상태 '운영' 전진 — 도메인 PUT 경로의 훅과 동일 규칙 (P9 한계 해소, best-effort)
+  if (ticket.refType === 'PROJECT' && (target === 'RESOLVED' || target === 'CLOSED') && ticket.hospitalCode) {
+    await advanceHospitalStatus({
+      hospitalCode: ticket.hospitalCode,
+      targetStatus: '운영',
+      req: request,
+      actor: auditActorFromJWT(user),
+      source: '티켓 전이(프로젝트 구축완료)',
+    })
+  }
+
+  // P11: 티켓 이벤트 단일 파이프라인 — sig 비교로 실변경만 발송
+  notifyTicketChanged({ ticketId: id, actorName: user.name }).catch(() => {})
 
   return NextResponse.json({ ticket: updated })
 }

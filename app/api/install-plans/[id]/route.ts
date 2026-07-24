@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { notifyTaskStatusChanged } from '@/lib/notify'
+import { notifyTicketChanged } from '@/lib/notify'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { syncInstallPlanToTicket } from '@/lib/ticketDomain'
@@ -76,9 +76,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
     },
   })
 
-  // Slack 알림 (상태 변경) — best-effort. 작성완료여부/회신여부 변경 시 발송
-  if ((writeStatus !== undefined || replyStatus !== undefined) && updated?.planCode) {
-    notifyTaskStatusChanged({ taskType: 'INSTALL_PLAN', refCode: updated.planCode, actorName: authUser.name }).catch(() => {})
+  // Slack 알림 (P11 티켓 파이프라인) — sig 비교로 실변경만 발송, best-effort
+  if (updated?.ticketId) {
+    notifyTicketChanged({ ticketId: updated.ticketId, actorName: authUser.name }).catch(() => {})
   }
 
   await logAudit({

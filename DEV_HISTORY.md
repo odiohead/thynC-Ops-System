@@ -4,6 +4,54 @@
 
 ---
 
+## 2026-07-25 | 티켓 P13 — 안정화·마무리 (전 Phase 종료, 사용자 최종 승인 대기)
+
+- 상세 설계 사용자 확정(이월 갭 2건 포함·CLAUDE.md 규칙 4개 추가) 후 착수 승인 받아 구현
+- **이월 갭 수정 ①**: `lib/workItemReassign.ts` — 폐기된 tasks 미러 갱신 코드 제거(P10 이월, 잔존 참조 0), **업무 병원 재지정/일괄 이전 시 연결 티켓 미동기화 버그 수정** — 단건은 sync*ToTicket 트랜잭션 재사용, 일괄은 티켓 hospital_code 일괄 이전(순수 티켓 포함) + [답사]/[설치계획] 제목 병원명 갱신(이관 전 from 기준이라 기존 대상 병원 티켓 미접촉)
+- **이월 갭 수정 ②(P9 한계)**: 티켓 transition으로 PROJECT 티켓이 RESOLVED/CLOSED 진입 시 `advanceHospitalStatus('운영')` 훅 추가(도메인 PUT 경로와 동일 규칙)
+- 검토 결론(코드 무변경): maintenances.typeId 병행 유지 / 재오픈 시 dueAt 원 기한 유지(AWS 관례) / 위키 이슈노트 링크만
+- CLAUDE.md 코딩 컨벤션에 **티켓 규칙 4개** 추가(알림은 notify.ts 티켓 파이프라인 단일 소스·전이표는 ticket-shared 단일 소스·동기화는 ticketDomain 경유·마스터 변경 시 시드 반영). README 정합화(디렉토리 구조·재지정/이관 설명·티켓 스키마 헤딩 P1~P13)
+- PROD 반영 체크리스트(P11~P13분 — DDL 없음) ticket_dev_schedule.md 하단 문서화: push→pull→build→restart + dueAt 백필 SQL + 큐 멤버 배정 + 알림 설정 확인
+- **회귀 매트릭스 전 항목 통과**(dev2 빌드·재시작 후, 테스트 병원 2곳 생성→검증→전체 삭제, 개인 대상 이준호만): 전이표 14케이스 · 마스터-서브 제약 · 큐 이관 연쇄 · 권한(VIEWER/USER 403) · auto-close(via auto_close 이벤트) · 유지보수 양방향 동기화+채널 발송 정확 3건(이중 발송 0) · 재지정/일괄 이전 티켓 동시 이동 · '운영' 훅(미계약→운영) · 도메인 삭제 시 티켓 동반 삭제. 종료 후 티켓 673건·설정 원상 복귀. tsc 0오류. git 안 함
+- 영향 파일: lib/workItemReassign.ts, app/api/tickets/[id]/transition/route.ts, CLAUDE.md, README.md, ticket_dev_schedule.md
+
+## 2026-07-25 | 티켓 P12 — 프로세스 지표·대시보드
+
+- 상세 설계 사용자 확정(독립 /tickets/dashboard·DB 뷰 없이 라우트 집계·**담당별 처리량 표는 ADMIN 이상만**·지표 구성 제안대로) 후 착수 승인 받아 구현
+- `GET /api/tickets/metrics` 신규: raw SQL 집계(KST 월 버킷·percentile_cont 중앙값), 파라미터 months(3/6/12/0)·queueId·refType(PURE=순수). KPI(열린/미배정/SLA 초과/이번주 종결/평균 소요 90일/재오픈율)·월별 생성vs종결·소요 추이·SLA 준수율·Sev/큐/유형 분포·담당별 처리량(ADMIN 한정 응답)·현 상태 장기 체류 Top 10
+- 지표 2계열 설계: 필드 기반은 전 기간(백필 667건도 원본 날짜 보존), 상태·큐 체류 통계는 P11 이후 이벤트 축적 후 고도화(현재는 statusChangedAt 기반 체류 Top 10으로 보완). **백필 보정**: 도메인 완료일<입력일 케이스의 음수 소요 → GREATEST(…,0) 클램프
+- `/tickets/dashboard` 화면: KPI 6타일(SLA 초과 적색 강조·타일 링크)·필터 바·recharts 차트 4종(월별 생성vs종결 2시리즈, 소요 중앙값·SLA 준수율 라인, Sev/유형 분포 단일 hue)·월별 표 토글·큐별 열린 티켓 바·담당별 표·체류 Top 10(티켓 링크+배지). 진입: 목록 우상단 '대시보드' 버튼(nav 하위 메뉴는 구조상 settings만 지원 — 시드 무변경). 다크모드는 useChartTheme 분기
+- 차트 팔레트 dataviz 검증 통과: light #2C5CE5/#10B981(대비 WARN→표 뷰 제공), dark #4B7BFF/#059669(emerald 스냅)
+- **게이트 검증 통과**: 독립 SQL 수기 대조 9지표 전부 일치 + 필터(PURE/큐별)·VIEWER perOwner 미포함 확인. tsc 0오류, dev2 빌드·재시작, 페이지 200. git 안 함
+- 영향 파일: app/api/tickets/metrics/route.ts(신규), app/tickets/dashboard/page.tsx(신규), app/tickets/page.tsx(버튼)
+
+## 2026-07-25 | 티켓 P11 후속 — 알림 세분화 토글 추가 (사용자 지시)
+
+- 이벤트별 채널 알림 토글 신설: `notify_event_toggles` JSON(created/statusChanged/queueTransferred/sevEscalated, 기본 전부 on) — 꺼진 이벤트는 채널 미발송하고 sig 기준선만 갱신(event_off·sig_update 로그)해 이후 감지 정확성 유지
+- 멘션 세분 토글: `notify_queue_mentions`(큐 멤버 태그, 기본 on) · `notify_sev1_channel`(Sev1 @channel 전체 멘션, 기본 on — 끄면 🚨 이모지 강조만)
+- 설정 화면에 '이벤트별 채널 알림' 카드 추가(4 이벤트 체크 + 멘션 토글 2종), 설정 API GET/PUT 확장
+- **dev2 빌드·재시작 후 P11 전체 스모크 통과** (test 모드 → 테스트 채널 실발송, 개인 대상은 이준호만·종료 후 원복):
+  - 순수 티켓 생성: created 채널+큐 멤버 멘션(`:bell: <@…>`)+배정 DM(`[DEV][DM→이준호]`)+dueAt(+7일) ✓
+  - 전이/Sev4→2 상향(🔥·dueAt 재산정 +1일)/큐 이관(Queue from→to) 각 채널 1건 ✓
+  - 유지보수 생성·상태변경: 채널 정확히 각 1건 — **이중 발송 0건** ✓ (도메인 링크 병기)
+  - 이벤트 토글 off → 무발송+sig_update 기준선 갱신, 재on 후 from 정확(Resolved→Closed) ✓
+  - 레거시(P4 sig) 티켓 첫 변경 → 무발송 v2 승격 ✓ · SLA 요약 발송(초과 64건, 꺼진 타입 제외) ✓ · 설정 GET 신규 필드 ✓
+  - SLA 초과 owner DM은 기본 off 유지(같은 DM 메커니즘은 배정 DM으로 검증됨) — 켜면 초과 티켓 owner 전원에게 발송되므로 티켓 정리 후 활성 권장
+  - 테스트 정리: 테스트 티켓·유지보수 삭제, notify_types_enabled·이준호 발송 플래그·큐 멤버십 원복 (이준호 slack_user_id 캐시 U072…는 정상 캐시로 유지)
+- 영향 파일: lib/notify.ts, app/api/settings/notifications/route.ts, app/settings/notifications/page.tsx
+
+## 2026-07-24 | 티켓 P11 — 알림·SLA 재편 (Sev 기반, 티켓 이벤트 단일 파이프라인)
+
+- 상세 설계 사용자 확정(4쟁점: 메인채널+멘션 차등 / 큐 멤버 멘션 on / 배정 DM on / SLA 1·1·3·7·없음) 후 구현
+- **알림 트리거를 티켓 레이어로 단일화**: notify.ts에 `notifyTicketCreated`/`notifyTicketChanged` 신설 — sig v2(`v2|status|owner|sev|queue`)를 직전 발송 로그와 비교해 상태/큐 변경·Sev1·2 에스컬레이션은 채널(복합 변경 1메시지, 티켓 중심 통일 빌더+도메인 필드·링크 병기), owner 변경은 배정 DM, 그 외 축은 조용히 sig 갱신. 도메인 라우트 7곳의 notifyTaskEvent/notifyTaskStatusChanged 직접 호출 제거(P5 이중 발송 방지 규칙 자연 소멸), 구 함수·domainNotifyRef 삭제. refCode=ticketCode 통일(전환 직후 티켓별 첫 변경 1회 baseline 스킵)
+- 강조: Sev1 = 🚨+`<!channel>`, Sev2 = 🔥. 큐 멤버 멘션(생성·큐 이관·에스컬레이션 시, `ticket_queue_members` 기반 — 멤버 배정 필요)
+- **SLA Sev 기반 재편**: delay-rules.ts 전면 재작성 — `notify_sla_rules`(기본 SEV1:1·SEV2:1·SEV3:3·SEV4:7·SEV5:0=미적용, 임박 D-1) · dueAt=생성일+SLA(티켓/도메인 생성 5경로, Sev 변경 시 재산정, PROJECT는 endDateExpected 유지) · `findDelayedTickets` 초과/임박/체류 판정(PENDING은 SLA 시계 정지, 체류 규칙은 티켓 상태 기준으로 재편) · 요약 3섹션+SLA 초과 owner DM. 구 도메인 5종 지연 규칙(findDelayedTasks) 폐기
+- **RESOLVED→CLOSED 자동 확정**(P2 이월): `runTicketAutoClose`(ticketDomain) — `ticket_auto_close_days`(기본 0=끔), notify-scheduler 주기에서 실행, 열린 서브 스킵, 타임라인 이벤트만
+- 설정 API·화면 개편: SLA 목표(Sev별)·임박 D-N·자동종결·배정 DM 토글·티켓 상태 체류(구 타입별 지연 기준일 편집 대체), 발송이력 라벨 추가
+- dueAt 백필 `scripts/backfill-ticket-dueat.sql`(재실행 안전): dev 98건 적용, 초기 SLA 초과 81건. **PROD 반영 시 실행 필요**
+- 검증: `tsc --noEmit` 0오류, 구 API 참조 0건. 발송 스모크(test 모드·이중 발송 0건)는 빌드·재시작 후 진행 예정. 빌드·git 안 함
+- 영향 파일: lib/{notify,delay-rules,ticketDomain,notify-scheduler}.ts, app/api/tickets/{route,[id]/route,[id]/transition,[id]/assign,[id]/queue}.ts, app/api/{maintenances,etc-tasks,site-visits,install-plans,projects}/{route,[id|code]/route}.ts, app/api/{site-visit-queue,mail-queue}/[id]/route.ts, app/api/settings/notifications/route.ts, app/settings/notifications/page.tsx, scripts/backfill-ticket-dueat.sql(신규)
+
 ## 2026-07-24 | 목록 가로스크롤 제거(티켓·유지보수) + WMS 입출고 이력 비고 컬럼
 
 - (1) `/tickets`·`/maintenances` 목록이 화면 폭을 넘어 가로스크롤 발생 → 표 전체가 폭 안에 들어오게 개편: `table-fixed w-full` + 컬럼 폭 배분, 셀 패딩 px-2.5·메타 컬럼 text-xs, 긴 텍스트(제목·병원·큐·담당자 등) truncate+title 툴팁, 중요도 낮은 컬럼은 좁은 화면에서만 숨김(`hidden lg/xl:table-cell` — 티켓 Hospital/Last Change, 유지보수 원격/완료일). overflow-x-auto 래퍼 제거

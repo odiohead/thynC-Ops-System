@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { notifyTaskStatusChanged } from '@/lib/notify'
+import { notifyTicketChanged } from '@/lib/notify'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
@@ -95,9 +95,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
   // 갱신된 데이터 다시 조회
   const updated = await prisma.siteVisit.findUnique({ where: { id }, include })
 
-  // Slack 알림 (상태 변경) — best-effort. 실제 상태 변경 시에만 발송
-  if (statusId !== undefined && updated?.siteVisitCode) {
-    notifyTaskStatusChanged({ taskType: 'SITE_VISIT', refCode: updated.siteVisitCode, actorName: user.name }).catch(() => {})
+  // Slack 알림 (P11 티켓 파이프라인) — sig 비교로 실변경만 발송, best-effort
+  if (updated?.ticketId) {
+    notifyTicketChanged({ ticketId: updated.ticketId, actorName: user.name }).catch(() => {})
   }
 
   // Google Calendar 동기화 (비차단)

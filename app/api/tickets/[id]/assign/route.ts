@@ -3,8 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { addTicketEvent } from '@/lib/ticket'
-import { notifyTaskStatusChanged } from '@/lib/notify'
-import { syncTicketToDomain, domainNotifyRef } from '@/lib/ticketDomain'
+import { notifyTicketChanged } from '@/lib/notify'
+import { syncTicketToDomain } from '@/lib/ticketDomain'
 
 export const dynamic = 'force-dynamic'
 
@@ -69,11 +69,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     after: updated,
   })
 
-  if (nextStatus !== ticket.status) {
-    const domainRef = await domainNotifyRef(id, ticket.refType)
-    if (domainRef) notifyTaskStatusChanged({ ...domainRef, actorName: user.name }).catch(() => {})
-    else notifyTaskStatusChanged({ taskType: 'TICKET', refCode: ticket.ticketCode, actorName: user.name }).catch(() => {})
-  }
+  // P11: 단일 파이프라인 — owner 변경(배정 DM)·자동 상태 전이(채널)를 sig 비교로 처리
+  notifyTicketChanged({ ticketId: id, actorName: user.name }).catch(() => {})
 
   return NextResponse.json({ ticket: updated })
 }

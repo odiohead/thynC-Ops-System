@@ -1,13 +1,20 @@
 import { prisma } from './prisma'
 import { logAudit, type AuditActor } from './audit'
 import { recomputeHospitalStatus } from './hospitalStatus'
+import {
+  syncMaintenanceToTicket,
+  syncSiteVisitToTicket,
+  syncInstallPlanToTicket,
+  syncProjectToTicket,
+} from './ticketDomain'
 
 /**
  * 업무(프로젝트/답사/설치계획/유지보수)를 다른 병원으로 재지정(매핑 정정)한다.
  *
  * 사람이 등록 시 병원을 헷갈려 잘못 매핑한 경우를 바로잡기 위한 기능.
- * 한 트랜잭션으로 업무의 hospital_code + Task 미러를 갱신하고,
+ * 한 트랜잭션으로 업무의 hospital_code + 연결 티켓(P13 — 병원·제목 동기화)을 갱신하고,
  * 이후 옛 병원은 완전 재계산(과진행 상태 하향), 새 병원은 전진 적용한다.
+ * (P10에서 tasks 롤업 폐기 — Task 미러 갱신 코드는 P13에서 제거)
  */
 
 export type WorkItemType = 'PROJECT' | 'SITE_VISIT' | 'INSTALL_PLAN' | 'MAINTENANCE'
@@ -46,35 +53,35 @@ export interface ReassignResult {
 async function loadItem(
   type: WorkItemType,
   code: string,
-): Promise<{ hospitalCode: string | null; title: string | null } | null> {
+): Promise<{ id: number; hospitalCode: string | null; title: string | null } | null> {
   switch (type) {
     case 'PROJECT': {
       const p = await prisma.project.findUnique({
         where: { projectCode: code },
-        select: { hospitalCode: true, projectName: true },
+        select: { id: true, hospitalCode: true, projectName: true },
       })
-      return p ? { hospitalCode: p.hospitalCode, title: p.projectName } : null
+      return p ? { id: p.id, hospitalCode: p.hospitalCode, title: p.projectName } : null
     }
     case 'SITE_VISIT': {
       const s = await prisma.siteVisit.findUnique({
         where: { siteVisitCode: code },
-        select: { hospitalCode: true },
+        select: { id: true, hospitalCode: true },
       })
-      return s ? { hospitalCode: s.hospitalCode, title: null } : null
+      return s ? { id: s.id, hospitalCode: s.hospitalCode, title: null } : null
     }
     case 'INSTALL_PLAN': {
       const i = await prisma.installPlan.findUnique({
         where: { planCode: code },
-        select: { hospitalCode: true },
+        select: { id: true, hospitalCode: true },
       })
-      return i ? { hospitalCode: i.hospitalCode, title: null } : null
+      return i ? { id: i.id, hospitalCode: i.hospitalCode, title: null } : null
     }
     case 'MAINTENANCE': {
       const m = await prisma.maintenance.findUnique({
         where: { maintenanceCode: code },
-        select: { hospitalCode: true, title: true },
+        select: { id: true, hospitalCode: true, title: true },
       })
-      return m ? { hospitalCode: m.hospitalCode, title: m.title } : null
+      return m ? { id: m.id, hospitalCode: m.hospitalCode, title: m.title } : null
     }
   }
 }
@@ -123,7 +130,7 @@ export async function reassignWorkItemHospital(params: ReassignParams): Promise<
     if (renamed !== item.title) newProjectName = renamed
   }
 
-  // 트랜잭션: 업무 hospital_code(+프로젝트명) + Task 미러 동기화
+  // 트랜잭션: 업무 hospital_code(+프로젝트명) + 연결 티켓 동기화 (P13 — 병원·제목 반영)
   try {
     await prisma.$transaction(async (tx) => {
       switch (type) {
@@ -135,33 +142,30 @@ export async function reassignWorkItemHospital(params: ReassignParams): Promise<
               ...(newProjectName !== undefined && { projectName: newProjectName }),
             },
           })
+          await syncProjectToTicket(tx, item.id, null)
           break
         case 'SITE_VISIT':
           await tx.siteVisit.update({
             where: { siteVisitCode: code },
             data: { hospitalCode: newHospitalCode },
           })
+          await syncSiteVisitToTicket(tx, item.id, null)
           break
         case 'INSTALL_PLAN':
           await tx.installPlan.update({
             where: { planCode: code },
             data: { hospitalCode: newHospitalCode },
           })
+          await syncInstallPlanToTicket(tx, item.id, null)
           break
         case 'MAINTENANCE':
           await tx.maintenance.update({
             where: { maintenanceCode: code },
             data: { hospitalCode: newHospitalCode },
           })
+          await syncMaintenanceToTicket(tx, item.id, null)
           break
       }
-      await tx.task.updateMany({
-        where: { refCode: code, taskType: type },
-        data: {
-          hospitalCode: newHospitalCode,
-          ...(newProjectName !== undefined && { title: newProjectName }),
-        },
-      })
     })
   } catch (err) {
     console.error('[reassign] transaction failed:', err)
@@ -257,7 +261,7 @@ export async function transferAllWorkItems(params: TransferAllParams): Promise<T
       if (updateProjectNames) {
         const projects = await tx.project.findMany({
           where: { hospitalCode: fromHospitalCode },
-          select: { projectCode: true, projectName: true },
+          select: { projectCode: true, projectName: true, ticketId: true },
         })
         for (const p of projects) {
           let renamed = p.projectName
@@ -271,15 +275,11 @@ export async function transferAllWorkItems(params: TransferAllParams): Promise<T
             where: { projectCode: p.projectCode },
             data: { hospitalCode: toHospitalCode, projectName: renamed },
           })
-          if (renamed !== p.projectName) {
-            await tx.task.updateMany({
-              where: { refCode: p.projectCode, taskType: 'PROJECT' },
-              data: { hospitalCode: toHospitalCode, title: renamed },
-            })
-          } else {
-            await tx.task.updateMany({
-              where: { refCode: p.projectCode, taskType: 'PROJECT' },
-              data: { hospitalCode: toHospitalCode },
+          // 연결 티켓 제목 동기화 (병원코드는 아래 일괄 UPDATE에서 처리)
+          if (renamed !== p.projectName && p.ticketId) {
+            await tx.ticket.update({
+              where: { id: p.ticketId },
+              data: { title: `[프로젝트] ${renamed}` },
             })
           }
         }
@@ -318,8 +318,17 @@ export async function transferAllWorkItems(params: TransferAllParams): Promise<T
         })
       ).count
 
-      // Task 미러 일괄 이전 (프로젝트 미변경분 + 나머지 유형 전부)
-      await tx.task.updateMany({
+      // 병원명이 제목에 들어가는 유형은 제목 먼저 갱신 (이관 대상=from 병원 티켓만 — 기존 to 병원 티켓 미접촉)
+      await tx.ticket.updateMany({
+        where: { refType: 'SITE_VISIT', hospitalCode: fromHospitalCode },
+        data: { title: `[답사] ${toName}` },
+      })
+      await tx.ticket.updateMany({
+        where: { refType: 'INSTALL_PLAN', hospitalCode: fromHospitalCode },
+        data: { title: `[설치계획] ${toName}` },
+      })
+      // 연결 티켓 일괄 이전 (P13 — 도메인 5종 + 순수 티켓 포함)
+      await tx.ticket.updateMany({
         where: { hospitalCode: fromHospitalCode },
         data: { hospitalCode: toHospitalCode },
       })

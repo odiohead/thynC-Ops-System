@@ -1,71 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { TicketSeverity, TicketStatus } from '@prisma/client'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { FIELD_CATALOG, DEFAULT_FIELDS, TASK_TYPES, TASK_TYPE_LABELS } from '@/lib/notifyFields'
 import { startNotifyScheduler, getNotifyInterval } from '@/lib/notify-scheduler'
-import { getDelayRules, getStatusDwellRules, DEFAULT_DELAY_RULES, type DelayRules, type StatusDwellRules } from '@/lib/delay-rules'
-import { getTypesEnabled, type TaskType } from '@/lib/notify'
+import { getSlaRules, getTicketDwellRules, DEFAULT_SLA_RULES, type SlaRules, type TicketDwellRules } from '@/lib/delay-rules'
+import { getTypesEnabled, getEventToggles, type TaskType, type TicketEventToggles } from '@/lib/notify'
+import { TICKET_STATUS_LABELS, TICKET_SEVERITY_LABELS } from '@/lib/ticket-shared'
 
 const DELAY_INTERVALS = ['off', '1h', '6h', '24h']
-const PRIORITIES = ['긴급', '높음', '보통', '낮음']
+const SEVERITIES = Object.values(TicketSeverity) as TicketSeverity[]
+// 체류 설정 대상 상태 (CLOSED는 터미널이라 제외)
+const DWELL_STATUSES = (Object.values(TicketStatus) as TicketStatus[]).filter((s) => s !== 'CLOSED')
 
-/** 지연 기준 규칙 정제(음수·비수치 방지, 미지정은 기본값) */
-function sanitizeDelayRules(input: unknown): DelayRules {
-  const r = (input ?? {}) as Partial<DelayRules>
+/** Sev별 SLA 규칙 정제 (음수·비수치 방지, 미지정은 기본값. 0 = SLA 미적용) */
+function sanitizeSlaRules(input: unknown): SlaRules {
+  const r = (input ?? {}) as Partial<SlaRules>
   const num = (v: unknown, def: number) => {
     const n = Math.floor(Number(v))
     return Number.isFinite(n) && n >= 0 ? n : def
   }
-  const md = (r.maintenanceDays ?? {}) as Record<string, unknown>
-  const maintenanceDays: Record<string, number> = {}
-  for (const p of PRIORITIES) maintenanceDays[p] = num(md[p], DEFAULT_DELAY_RULES.maintenanceDays[p])
-  return {
-    siteVisitDays: num(r.siteVisitDays, DEFAULT_DELAY_RULES.siteVisitDays),
-    installPlanDays: num(r.installPlanDays, DEFAULT_DELAY_RULES.installPlanDays),
-    etcDays: num(r.etcDays, DEFAULT_DELAY_RULES.etcDays),
-    projectGraceDays: num(r.projectGraceDays, DEFAULT_DELAY_RULES.projectGraceDays),
-    maintenanceDays,
-  }
+  const days = {} as Record<TicketSeverity, number>
+  const src = (r.days ?? {}) as Record<string, unknown>
+  for (const s of SEVERITIES) days[s] = num(src[s], DEFAULT_SLA_RULES.days[s])
+  return { days, warnDays: num(r.warnDays, DEFAULT_SLA_RULES.warnDays) }
 }
 
-const DWELL_TYPES = ['PROJECT', 'SITE_VISIT', 'MAINTENANCE', 'ETC'] as const
-
-/** 단계 체류 규칙 정제 — 값이 양의 정수인 항목만 유지 (0/빈값 = 미사용) */
-function sanitizeStatusDwell(input: unknown): StatusDwellRules {
-  const src = (input ?? {}) as Record<string, Record<string, unknown>>
-  const out: StatusDwellRules = {}
-  for (const t of DWELL_TYPES) {
-    const m = src[t]
-    if (!m || typeof m !== 'object') continue
-    const clean: Record<string, number> = {}
-    for (const [status, v] of Object.entries(m)) {
-      const n = Math.floor(Number(v))
-      if (Number.isFinite(n) && n > 0) clean[status] = n
-    }
-    if (Object.keys(clean).length) out[t] = clean
+/** 티켓 상태 체류 규칙 정제 — 값이 양의 정수인 상태만 유지 (0/빈값 = 미사용) */
+function sanitizeStatusDwell(input: unknown): TicketDwellRules {
+  const src = (input ?? {}) as Record<string, unknown>
+  const out: TicketDwellRules = {}
+  for (const s of DWELL_STATUSES) {
+    const n = Math.floor(Number(src[s]))
+    if (Number.isFinite(n) && n > 0) out[s] = n
   }
   return out
-}
-
-/** 단계 체류 설정 UI용 — 타입별 선택 가능한 상태 목록 (판정에서 제외되는 완료·보류성 상태는 뺌) */
-async function getStatusOptions(): Promise<Record<string, string[]>> {
-  const [codes, buildStatuses] = await Promise.all([
-    prisma.statusCode.findMany({
-      where: { category: { in: ['SITE_VISIT', 'MAINTENANCE_STATUS', 'ETC_TASK_STATUS'] } },
-      select: { category: true, name: true },
-      orderBy: { order: 'asc' },
-    }),
-    prisma.buildStatus.findMany({ select: { label: true }, orderBy: { sortOrder: 'asc' } }),
-  ])
-  const byCat = (cat: string, exclude: string[]) =>
-    codes.filter((c) => c.category === cat && !exclude.includes(c.name)).map((c) => c.name)
-  return {
-    PROJECT: buildStatuses.map((b) => b.label).filter((l) => !l.includes('완료') && !l.includes('보류')),
-    SITE_VISIT: byCat('SITE_VISIT', ['회신완료']),
-    MAINTENANCE: byCat('MAINTENANCE_STATUS', ['완료', '보류']),
-    ETC: byCat('ETC_TASK_STATUS', ['완료', '보류']),
-  }
 }
 
 /** notify_event_fields(JSON) → 타입별 필드 배열. 미지정 타입은 추천 기본값 */
@@ -86,6 +56,12 @@ async function readFields(): Promise<Record<TaskType, string[]>> {
   return result
 }
 
+async function readIntSetting(key: string, def: number): Promise<number> {
+  const row = await prisma.appSetting.findUnique({ where: { key } })
+  const n = Math.floor(Number(row?.value))
+  return Number.isFinite(n) && n >= 0 ? n : def
+}
+
 export async function GET(request: NextRequest) {
   const authUser = await getAuthUser(request)
   if (!authUser || !isAdminOrAbove(authUser.role)) {
@@ -93,7 +69,7 @@ export async function GET(request: NextRequest) {
   }
 
   const rows = await prisma.appSetting.findMany({
-    where: { key: { in: ['notify_enabled', 'notify_events_enabled', 'notify_delay_interval', 'notify_dm_enabled'] } },
+    where: { key: { in: ['notify_enabled', 'notify_events_enabled', 'notify_delay_interval', 'notify_dm_enabled', 'notify_assign_dm', 'notify_queue_mentions', 'notify_sev1_channel'] } },
   })
   const map = Object.fromEntries(rows.map((r) => [r.key, r.value]))
 
@@ -103,11 +79,16 @@ export async function GET(request: NextRequest) {
     delayInterval: map['notify_delay_interval'] ?? 'off',
     activeDelayInterval: getNotifyInterval(),
     dmEnabled: (map['notify_dm_enabled'] ?? 'off') === 'on',
+    assignDm: (map['notify_assign_dm'] ?? 'on') !== 'off',
+    queueMentions: (map['notify_queue_mentions'] ?? 'on') !== 'off',
+    sev1Channel: (map['notify_sev1_channel'] ?? 'on') !== 'off',
+    eventToggles: await getEventToggles(),
+    autoCloseDays: await readIntSetting('ticket_auto_close_days', 0),
     typesEnabled: await getTypesEnabled(),
-    delayRules: await getDelayRules(),
-    statusDwell: await getStatusDwellRules(),
-    statusOptions: await getStatusOptions(),
-    priorities: PRIORITIES,
+    slaRules: await getSlaRules(),
+    statusDwell: await getTicketDwellRules(),
+    severities: SEVERITIES.map((s) => ({ value: s, label: TICKET_SEVERITY_LABELS[s] })),
+    dwellStatuses: DWELL_STATUSES.map((s) => ({ value: s, label: TICKET_STATUS_LABELS[s] })),
     fields: await readFields(),
     catalog: FIELD_CATALOG,
     labels: TASK_TYPE_LABELS,
@@ -123,10 +104,22 @@ export async function PUT(request: NextRequest) {
   }
 
   const body = await request.json()
-  const { enabled, eventsEnabled, fields, delayInterval, dmEnabled, delayRules, statusDwell, typesEnabled } = body
+  const { enabled, eventsEnabled, fields, delayInterval, dmEnabled, assignDm, queueMentions, sev1Channel, eventToggles, autoCloseDays, slaRules, statusDwell, typesEnabled } = body
   const delayVal = DELAY_INTERVALS.includes(delayInterval) ? delayInterval : 'off'
   const dmVal = dmEnabled ? 'on' : 'off'
-  const cleanRules = sanitizeDelayRules(delayRules)
+  const assignDmVal = assignDm === false ? 'off' : 'on'
+  const queueMentionsVal = queueMentions === false ? 'off' : 'on'
+  const sev1ChannelVal = sev1Channel === false ? 'off' : 'on'
+  const et = (eventToggles ?? {}) as Partial<TicketEventToggles>
+  const cleanEventToggles: TicketEventToggles = {
+    created: et.created !== false,
+    statusChanged: et.statusChanged !== false,
+    queueTransferred: et.queueTransferred !== false,
+    sevEscalated: et.sevEscalated !== false,
+  }
+  const autoCloseNum = Math.floor(Number(autoCloseDays))
+  const autoCloseVal = String(Number.isFinite(autoCloseNum) && autoCloseNum >= 0 ? autoCloseNum : 0)
+  const cleanSla = sanitizeSlaRules(slaRules)
   const cleanDwell = sanitizeStatusDwell(statusDwell)
   // 업무 타입별 on/off — 명시적으로 false인 것만 off, 나머지 on
   const cleanTypes = {} as Record<TaskType, boolean>
@@ -143,15 +136,23 @@ export async function PUT(request: NextRequest) {
   const enabledVal = enabled ? 'on' : 'off'
   const eventsVal = eventsEnabled ? 'on' : 'off'
 
+  const upsert = (key: string, value: string) =>
+    prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } })
+
   await prisma.$transaction([
-    prisma.appSetting.upsert({ where: { key: 'notify_enabled' }, update: { value: enabledVal }, create: { key: 'notify_enabled', value: enabledVal } }),
-    prisma.appSetting.upsert({ where: { key: 'notify_events_enabled' }, update: { value: eventsVal }, create: { key: 'notify_events_enabled', value: eventsVal } }),
-    prisma.appSetting.upsert({ where: { key: 'notify_event_fields' }, update: { value: JSON.stringify(clean) }, create: { key: 'notify_event_fields', value: JSON.stringify(clean) } }),
-    prisma.appSetting.upsert({ where: { key: 'notify_delay_interval' }, update: { value: delayVal }, create: { key: 'notify_delay_interval', value: delayVal } }),
-    prisma.appSetting.upsert({ where: { key: 'notify_dm_enabled' }, update: { value: dmVal }, create: { key: 'notify_dm_enabled', value: dmVal } }),
-    prisma.appSetting.upsert({ where: { key: 'notify_delay_rules' }, update: { value: JSON.stringify(cleanRules) }, create: { key: 'notify_delay_rules', value: JSON.stringify(cleanRules) } }),
-    prisma.appSetting.upsert({ where: { key: 'notify_status_dwell' }, update: { value: JSON.stringify(cleanDwell) }, create: { key: 'notify_status_dwell', value: JSON.stringify(cleanDwell) } }),
-    prisma.appSetting.upsert({ where: { key: 'notify_types_enabled' }, update: { value: JSON.stringify(cleanTypes) }, create: { key: 'notify_types_enabled', value: JSON.stringify(cleanTypes) } }),
+    upsert('notify_enabled', enabledVal),
+    upsert('notify_events_enabled', eventsVal),
+    upsert('notify_event_fields', JSON.stringify(clean)),
+    upsert('notify_delay_interval', delayVal),
+    upsert('notify_dm_enabled', dmVal),
+    upsert('notify_assign_dm', assignDmVal),
+    upsert('notify_queue_mentions', queueMentionsVal),
+    upsert('notify_sev1_channel', sev1ChannelVal),
+    upsert('notify_event_toggles', JSON.stringify(cleanEventToggles)),
+    upsert('ticket_auto_close_days', autoCloseVal),
+    upsert('notify_sla_rules', JSON.stringify(cleanSla)),
+    upsert('notify_status_dwell', JSON.stringify(cleanDwell)),
+    upsert('notify_types_enabled', JSON.stringify(cleanTypes)),
   ])
 
   // 지연 감지 스케줄러 즉시 반영
@@ -164,7 +165,7 @@ export async function PUT(request: NextRequest) {
     resource: 'setting:notifications',
     resourceId: 'notifications',
     resourceLabel: 'Slack 알림 설정',
-    after: { enabled, eventsEnabled, delayInterval: delayVal, dmEnabled: dmVal, typesEnabled: cleanTypes, delayRules: cleanRules, statusDwell: cleanDwell, fields: clean },
+    after: { enabled, eventsEnabled, delayInterval: delayVal, dmEnabled: dmVal, assignDm: assignDmVal, queueMentions: queueMentionsVal, sev1Channel: sev1ChannelVal, eventToggles: cleanEventToggles, autoCloseDays: autoCloseVal, typesEnabled: cleanTypes, slaRules: cleanSla, statusDwell: cleanDwell, fields: clean },
   })
 
   return NextResponse.json({ message: '저장되었습니다.', fields: clean })

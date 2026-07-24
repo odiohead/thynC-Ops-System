@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { notifyTaskEvent } from '@/lib/notify'
+import { notifyTicketCreated } from '@/lib/notify'
 import { getAuthUser } from '@/lib/auth'
 import { createCalendarEvent } from '@/lib/googleCalendar'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
@@ -135,10 +135,11 @@ export async function POST(request: NextRequest) {
   }
 
   // 티켓 동시 생성 (P7 편입)
+  let ticketId: number
   {
     const h = await prisma.hospital.findUnique({ where: { hospitalCode }, select: { hospitalName: true, hiraHospitalName: true } })
-    await prisma.$transaction(async (tx) => {
-      await createTicketForSiteVisit(tx, {
+    ticketId = await prisma.$transaction(async (tx) => {
+      return createTicketForSiteVisit(tx, {
         id: siteVisit.id,
         siteVisitCode,
         hospitalCode,
@@ -190,8 +191,8 @@ export async function POST(request: NextRequest) {
     after: siteVisit,
   })
 
-  // Slack 알림 (등록) — best-effort
-  notifyTaskEvent({ eventType: 'task_created', taskType: 'SITE_VISIT', refCode: siteVisitCode, actorName: user.name }).catch(() => {})
+  // Slack 알림 (등록, P11 티켓 파이프라인) — best-effort
+  notifyTicketCreated({ ticketId, actorName: user.name }).catch(() => {})
 
   await advanceHospitalStatus({
     hospitalCode,

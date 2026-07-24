@@ -262,6 +262,13 @@ if (user.role !== 'ADMIN') return 403
 기존 Tiptap 사용처는 변경 금지. 데이터 형식 호환성과 마이그레이션 비용 때문.
 "통일해서 BlockNote로 가자" 같은 유혹은 거절. 두 에디터 공존이 정답.
 
+### 티켓 시스템 규칙 (P13 확정 — 상세는 `ticket_dev_schedule.md`·`ticket_system_design.md` §2)
+
+1. **Slack 알림은 티켓 파이프라인 단일 소스** — 업무 알림은 `lib/notify.ts`의 `notifyTicketCreated`/`notifyTicketChanged`만 사용. 도메인 라우트에서 채널로 직접 발송하는 코드 추가 금지 (이중 발송 방지 — P11)
+2. **상태 전이표·라벨은 `lib/ticket-shared.ts` 단일 소스** — 전이 규칙·상태/Sev 라벨을 다른 곳에 하드코딩 금지. 전이는 반드시 `canTransition` 검증 경유
+3. **도메인↔티켓 동기화는 `lib/ticketDomain.ts` 경유** — 도메인 레코드와 연결 티켓을 같은 트랜잭션에서 `sync*ToTicket`/`syncTicketToDomain`으로 갱신. 연결 티켓의 status/owner/severity/hospitalCode를 라우트에서 직접 UPDATE 금지
+4. **티켓 마스터(큐·CTI·대기 사유·nav) 변경 시 `scripts/seed-ticket-masters.sql`에도 반영** — PROD 최초 반영·데이터 동기화 후 재실행되는 파일(idempotent 유지)
+
 ---
 
 ## DEV_HISTORY.md 기록 형식

@@ -219,15 +219,24 @@ export default function TicketsPage() {
               총 {total.toLocaleString()}건{statuses.length === 0 ? ' (Open Tickets)' : ''}
             </p>
           </div>
-          {canWrite && (
+          <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => router.push('/tickets/new')}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+              onClick={() => router.push('/tickets/dashboard')}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
             >
-              + 티켓 생성
+              대시보드
             </button>
-          )}
+            {canWrite && (
+              <button
+                type="button"
+                onClick={() => router.push('/tickets/new')}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+              >
+                + 티켓 생성
+              </button>
+            )}
+          </div>
         </div>
 
         {/* 탭 — My Tickets(기본) / 전체 / 큐별 */}

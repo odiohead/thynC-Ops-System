@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { notifyTaskEvent } from '@/lib/notify'
+import { notifyTicketCreated } from '@/lib/notify'
 import { getAuthUser } from '@/lib/auth'
 import { createCalendarEvent } from '@/lib/googleCalendar'
 import { normalizeVisits } from '@/lib/maintenanceVisit'
@@ -130,8 +130,8 @@ export async function POST(request: NextRequest) {
   })
 
   // 티켓 동시 생성 (P6 편입)
-  await prisma.$transaction(async (tx) => {
-    await createTicketForEtcTask(tx, {
+  const ticketId = await prisma.$transaction(async (tx) => {
+    return createTicketForEtcTask(tx, {
       id: etcTask.id,
       etcTaskCode,
       title: etcTask.title,
@@ -181,7 +181,7 @@ export async function POST(request: NextRequest) {
   })
 
   // Slack 알림 (등록) — best-effort
-  notifyTaskEvent({ eventType: 'task_created', taskType: 'ETC', refCode: etcTaskCode, actorName: user.name }).catch(() => {})
+  notifyTicketCreated({ ticketId, actorName: user.name }).catch(() => {})
 
   return NextResponse.json({ etcTask }, { status: 201 })
 }

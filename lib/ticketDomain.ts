@@ -1,13 +1,15 @@
 /**
  * 도메인 ↔ 티켓 동기화 (P5~: 유지보수부터)
  *
- * 원칙 (ticket_dev_schedule.md P5 상세 설계):
+ * 원칙 (ticket_dev_schedule.md P5 상세 설계 · P11 개정):
  * - 각 API 핸들러가 한 트랜잭션에서 양쪽을 갱신한다 (DB 트리거 없음 → 루프 없음)
- * - 도메인 연결 티켓의 Slack 알림은 도메인 taskType이 대표한다 (TICKET 알림 미발송)
+ * - Slack 알림은 P11부터 티켓 레이어 단일 파이프라인(lib/notify.ts notifyTicket*) —
+ *   도메인 라우트는 mutation 후 notifyTicketCreated/notifyTicketChanged만 호출한다
  */
 import { Prisma, TicketStatus, TicketSeverity } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { generateTicketCode, addTicketEvent } from '@/lib/ticket'
+import { getSlaRules, computeTicketDueAt } from '@/lib/delay-rules'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
@@ -107,6 +109,8 @@ export async function createTicketForMaintenance(
   const ownerId = m.assigneeUserIds[0] ?? null
   const participants = m.assigneeUserIds.slice(1)
   const status = maintStatusToTicket(m.statusName, !!ownerId)
+  const severity = priorityToSeverity(m.priority)
+  const slaAnchor = via === 'backfill' ? m.createdAt : new Date()
 
   const ticketCode = await generateTicketCode(tx)
   const ticket = await tx.ticket.create({
@@ -114,12 +118,13 @@ export async function createTicketForMaintenance(
       ticketCode,
       title: m.title,
       status,
-      severity: priorityToSeverity(m.priority),
+      severity,
       queueId,
       ctiId,
       ownerId,
       hospitalCode: m.hospitalCode,
       refType: 'MAINTENANCE',
+      dueAt: computeTicketDueAt(await getSlaRules(), severity, slaAnchor),
       createdAt: via === 'backfill' ? m.createdAt : undefined,
       statusChangedAt: via === 'backfill' ? m.createdAt : undefined,
       resolvedAt: status === 'CLOSED' ? m.resolvedAt ?? undefined : undefined,
@@ -172,6 +177,7 @@ export async function syncMaintenanceToTicket(tx: Prisma.TransactionClient, main
   }
   if (nextSev !== ticket.severity) {
     data.severity = nextSev
+    data.dueAt = computeTicketDueAt(await getSlaRules(), nextSev, ticket.createdAt) // Sev 변경 → SLA 재산정
     await addTicketEvent(tx, ticket.id, 'sev_change', actorId, { from: ticket.severity, to: nextSev, via: 'domain_sync' })
   }
   if (nextCti && nextCti !== ticket.ctiId) {
@@ -203,32 +209,49 @@ export async function syncTicketToDomain(tx: Prisma.TransactionClient, ticketId:
   else if (refType === 'PROJECT') await syncTicketToProject(tx, ticketId)
 }
 
-/** 도메인 연결 티켓의 대표 Slack 알림 참조 (없으면 null → TICKET 알림 사용) */
-export async function domainNotifyRef(
-  ticketId: number,
-  refType: string | null
-): Promise<{ taskType: 'MAINTENANCE' | 'ETC' | 'SITE_VISIT' | 'INSTALL_PLAN' | 'PROJECT'; refCode: string } | null> {
-  if (refType === 'MAINTENANCE') {
-    const m = await prisma.maintenance.findUnique({ where: { ticketId }, select: { maintenanceCode: true } })
-    return m?.maintenanceCode ? { taskType: 'MAINTENANCE', refCode: m.maintenanceCode } : null
+/**
+ * RESOLVED → CLOSED 자동 확정 배치 (P2 부속 규칙의 P11 이행 — AWS 관례).
+ * AppSetting `ticket_auto_close_days`(기본 0=미사용) 경과한 RESOLVED 티켓을 종결.
+ * notify-scheduler 주기(run)에서 호출. 열린 서브 티켓이 있으면 스킵(마스터 규칙).
+ * Slack 미발송(타임라인 이벤트만) — CLOSED는 터미널이라 sig 정체 무해.
+ */
+export async function runTicketAutoClose(): Promise<number> {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: 'ticket_auto_close_days' } })
+    const days = Math.floor(Number(row?.value ?? 0))
+    if (!Number.isFinite(days) || days <= 0) return 0
+
+    const cutoff = new Date(Date.now() - days * 86400000)
+    const targets = await prisma.ticket.findMany({
+      where: { status: 'RESOLVED', statusChangedAt: { lte: cutoff } },
+      select: { id: true, ticketCode: true, refType: true },
+    })
+    let closed = 0
+    for (const t of targets) {
+      try {
+        const openChildren = await prisma.ticket.count({
+          where: { parentId: t.id, status: { notIn: ['RESOLVED', 'CLOSED'] } },
+        })
+        if (openChildren > 0) continue
+        await prisma.$transaction(async (tx) => {
+          await tx.ticket.update({
+            where: { id: t.id },
+            data: { status: 'CLOSED', statusChangedAt: new Date(), closedAt: new Date() },
+          })
+          await addTicketEvent(tx, t.id, 'status_change', null, { from: 'RESOLVED', to: 'CLOSED', via: 'auto_close', afterDays: days })
+          await syncTicketToDomain(tx, t.id, t.refType)
+        })
+        closed++
+      } catch (err) {
+        console.error(`[ticketDomain] auto-close 실패 (${t.ticketCode}):`, err)
+      }
+    }
+    if (closed) console.log(`[ticketDomain] RESOLVED ${days}일 경과 자동 종결: ${closed}건`)
+    return closed
+  } catch (err) {
+    console.error('[ticketDomain] runTicketAutoClose 예외:', err)
+    return 0
   }
-  if (refType === 'ETC') {
-    const e = await prisma.etcTask.findUnique({ where: { ticketId }, select: { etcTaskCode: true } })
-    return e?.etcTaskCode ? { taskType: 'ETC', refCode: e.etcTaskCode } : null
-  }
-  if (refType === 'SITE_VISIT') {
-    const s = await prisma.siteVisit.findUnique({ where: { ticketId }, select: { siteVisitCode: true } })
-    return s?.siteVisitCode ? { taskType: 'SITE_VISIT', refCode: s.siteVisitCode } : null
-  }
-  if (refType === 'INSTALL_PLAN') {
-    const ip = await prisma.installPlan.findUnique({ where: { ticketId }, select: { planCode: true } })
-    return ip?.planCode ? { taskType: 'INSTALL_PLAN', refCode: ip.planCode } : null
-  }
-  if (refType === 'PROJECT') {
-    const p = await prisma.project.findUnique({ where: { ticketId }, select: { projectCode: true } })
-    return p?.projectCode ? { taskType: 'PROJECT', refCode: p.projectCode } : null
-  }
-  return null
 }
 
 // ── 프로젝트 (P9 — BuildStatus 라벨 의미 앵커 매핑, assignee FK=projectCode) ──
@@ -474,6 +497,7 @@ export async function createTicketForInstallPlan(
       ownerId,
       hospitalCode: ip.hospitalCode,
       refType: 'INSTALL_PLAN',
+      dueAt: computeTicketDueAt(await getSlaRules(), 'SEV4', via === 'backfill' ? ip.createdAt : new Date()),
       pendingReasonId,
       pendingNote,
       createdAt: via === 'backfill' ? ip.createdAt : undefined,
@@ -649,6 +673,7 @@ export async function createTicketForSiteVisit(
       ownerId,
       hospitalCode: s.hospitalCode,
       refType: 'SITE_VISIT',
+      dueAt: computeTicketDueAt(await getSlaRules(), 'SEV4', via === 'backfill' ? s.createdAt : new Date()),
       pendingReasonId,
       pendingNote,
       createdAt: via === 'backfill' ? s.createdAt : undefined,
@@ -785,6 +810,8 @@ export async function createTicketForEtcTask(
   const ownerId = e.assigneeUserIds[0] ?? null
   const participants = e.assigneeUserIds.slice(1)
   const status = maintStatusToTicket(e.statusName, !!ownerId) // 상태 체계 동일 (접수/처리중/완료/보류)
+  const severity = priorityToSeverity(e.priority)
+  const slaAnchor = via === 'backfill' ? e.createdAt : new Date()
 
   const ticketCode = await generateTicketCode(tx)
   const ticket = await tx.ticket.create({
@@ -792,12 +819,13 @@ export async function createTicketForEtcTask(
       ticketCode,
       title: e.title,
       status,
-      severity: priorityToSeverity(e.priority),
+      severity,
       queueId: queue.id,
       ctiId,
       ownerId,
       hospitalCode: e.hospitalCodes[0] ?? null,
       refType: 'ETC',
+      dueAt: computeTicketDueAt(await getSlaRules(), severity, slaAnchor),
       createdAt: via === 'backfill' ? e.createdAt : undefined,
       statusChangedAt: via === 'backfill' ? e.createdAt : undefined,
       resolvedAt: status === 'CLOSED' ? e.resolvedAt ?? undefined : undefined,
@@ -845,6 +873,7 @@ export async function syncEtcTaskToTicket(tx: Prisma.TransactionClient, etcTaskI
   }
   if (nextSev !== ticket.severity) {
     data.severity = nextSev
+    data.dueAt = computeTicketDueAt(await getSlaRules(), nextSev, ticket.createdAt) // Sev 변경 → SLA 재산정
     await addTicketEvent(tx, ticket.id, 'sev_change', actorId, { from: ticket.severity, to: nextSev, via: 'domain_sync' })
   }
   if (ownerId !== ticket.ownerId) {
