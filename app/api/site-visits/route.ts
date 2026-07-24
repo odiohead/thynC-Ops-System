@@ -5,6 +5,7 @@ import { getAuthUser } from '@/lib/auth'
 import { createCalendarEvent } from '@/lib/googleCalendar'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { advanceHospitalStatus } from '@/lib/hospitalStatus'
+import { createTicketForSiteVisit } from '@/lib/ticketDomain'
 
 const PAGE_SIZE = 20
 
@@ -130,6 +131,23 @@ export async function POST(request: NextRequest) {
         siteVisitId: siteVisit.id,
         userId,
       })),
+    })
+  }
+
+  // 티켓 동시 생성 (P7 편입)
+  {
+    const h = await prisma.hospital.findUnique({ where: { hospitalCode }, select: { hospitalName: true, hiraHospitalName: true } })
+    await prisma.$transaction(async (tx) => {
+      await createTicketForSiteVisit(tx, {
+        id: siteVisit.id,
+        siteVisitCode,
+        hospitalCode,
+        hospitalName: h?.hospitalName ?? h?.hiraHospitalName ?? null,
+        statusName: siteVisit.status?.name ?? null,
+        assigneeUserIds: Array.isArray(assigneeIds) ? assigneeIds : [],
+        createdAt: siteVisit.createdAt,
+        replyDate: siteVisit.replyDate,
+      }, user.userId, 'domain')
     })
   }
 

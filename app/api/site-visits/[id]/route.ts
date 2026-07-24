@@ -4,6 +4,7 @@ import { notifyTaskStatusChanged } from '@/lib/notify'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import { syncSiteVisitToTicket } from '@/lib/ticketDomain'
 
 type Params = { params: { id: string } }
 
@@ -86,17 +87,16 @@ export async function PUT(request: NextRequest, { params }: Params) {
     ])
   }
 
+  // 티켓 동기화 (P7 편입)
+  await prisma.$transaction(async (tx) => {
+    await syncSiteVisitToTicket(tx, id, user.userId)
+  })
+
   // 갱신된 데이터 다시 조회
   const updated = await prisma.siteVisit.findUnique({ where: { id }, include })
 
-  // Task 완료 동기화: '회신완료' → 완료
+  // Slack 알림 (상태 변경) — best-effort. 실제 상태 변경 시에만 발송
   if (statusId !== undefined && updated?.siteVisitCode) {
-    const isCompleted = updated.status?.name === '회신완료'
-    await prisma.task.updateMany({
-      where: { refCode: updated.siteVisitCode, taskType: 'SITE_VISIT' },
-      data: { isCompleted, completedAt: isCompleted ? new Date() : null },
-    })
-    // Slack 알림 (상태 변경) — best-effort. 실제 상태 변경 시에만 발송
     notifyTaskStatusChanged({ taskType: 'SITE_VISIT', refCode: updated.siteVisitCode, actorName: user.name }).catch(() => {})
   }
 
@@ -168,6 +168,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     prisma.siteVisitQueue.updateMany({ where: { siteVisitId: id }, data: { siteVisitId: null } }),
     prisma.siteVisit.delete({ where: { id } }),
   ])
+
+  // 연결 티켓도 삭제 (P7 편입 — 생명주기 공유)
+  if (existing.ticketId) {
+    await prisma.ticket.delete({ where: { id: existing.ticketId } }).catch(() => {})
+  }
 
   await logAudit({
     req: request,

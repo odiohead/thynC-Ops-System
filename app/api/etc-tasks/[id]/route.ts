@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { notifyTaskStatusChanged } from '@/lib/notify'
+import { syncEtcTaskToTicket } from '@/lib/ticketDomain'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { deleteFromS3 } from '@/lib/s3'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
@@ -96,6 +97,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
     ])
   }
 
+  // 티켓 동기화 (P6 편입 — 상태·우선순위·담당·제목·병원 반영)
+  await prisma.$transaction(async (tx) => {
+    await syncEtcTaskToTicket(tx, id, user.userId)
+  })
+
   // 업무기간 reconcile — (시작,종료) 키로 매칭하여 삭제/유지/추가. 캘린더 이벤트ID는 유지 항목 보존
   const deletedVisitEventIds: string[] = []
   if (Array.isArray(visits)) {
@@ -132,24 +138,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const updated = await prisma.etcTask.findUnique({ where: { id }, include })
 
-  // Task 레코드 동기화
-  if (existing.etcTaskCode) {
-    const taskUpdate: Record<string, unknown> = {}
-    if (title !== undefined) taskUpdate.title = title.trim()
-    // 완료 동기화: status name = '완료' → isCompleted
-    if (statusId !== undefined) {
-      const isCompleted = updated?.status?.name === '완료'
-      taskUpdate.isCompleted = isCompleted
-      taskUpdate.completedAt = isCompleted ? new Date() : null
-      // Slack 알림 (상태 변경) — best-effort. 실제 상태 변경 시에만 발송
-      if (existing.etcTaskCode) notifyTaskStatusChanged({ taskType: 'ETC', refCode: existing.etcTaskCode, actorName: user.name }).catch(() => {})
-    }
-    if (Object.keys(taskUpdate).length > 0) {
-      await prisma.task.updateMany({
-        where: { refCode: existing.etcTaskCode, taskType: 'ETC' },
-        data: taskUpdate,
-      })
-    }
+  // Slack 알림 (상태 변경) — best-effort. 실제 상태 변경 시에만 발송
+  if (statusId !== undefined && existing.etcTaskCode) {
+    notifyTaskStatusChanged({ taskType: 'ETC', refCode: existing.etcTaskCode, actorName: user.name }).catch(() => {})
   }
 
   // Google Calendar 동기화 (비차단) — 업무기간 항목별 1개씩
@@ -223,14 +214,12 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     }
   }
 
-  // Task 레코드 삭제
-  if (existing.etcTaskCode) {
-    await prisma.task.deleteMany({
-      where: { refCode: existing.etcTaskCode, taskType: 'ETC' },
-    })
-  }
-
   await prisma.etcTask.delete({ where: { id } })
+
+  // 연결 티켓도 삭제 (P6 편입 — 생명주기 공유)
+  if (existing.ticketId) {
+    await prisma.ticket.delete({ where: { id: existing.ticketId } }).catch(() => {})
+  }
 
   await logAudit({
     req: request,

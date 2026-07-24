@@ -5,6 +5,7 @@ import { getAuthUser } from '@/lib/auth'
 import { createCalendarEvent } from '@/lib/googleCalendar'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { advanceHospitalStatus } from '@/lib/hospitalStatus'
+import { createTicketForProject } from '@/lib/ticketDomain'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -172,6 +173,23 @@ export async function POST(request: NextRequest) {
         projectCode: project.projectCode,
         userId,
       })),
+    })
+  }
+
+  // 티켓 동시 생성 (P9 편입 — 기존 Task 롤업 미생성 갭을 티켓이 해소)
+  {
+    const bs = buildStatusId ? await prisma.buildStatus.findUnique({ where: { id: Number(buildStatusId) }, select: { label: true } }) : null
+    await prisma.$transaction(async (tx) => {
+      await createTicketForProject(tx, {
+        id: project.id,
+        projectCode: project.projectCode,
+        projectName: project.projectName,
+        hospitalCode: project.hospitalCode,
+        buildStatusLabel: bs?.label ?? null,
+        assigneeUserIds: Array.isArray(assigneeIds) ? assigneeIds : [],
+        endDateExpected: project.endDateExpected,
+        createdAt: project.createdAt,
+      }, authUser.userId, 'domain')
     })
   }
 

@@ -19,6 +19,7 @@ export const TASK_TYPE_LABELS: Record<TaskType, string> = {
   INSTALL_PLAN: '설치계획',
   MAINTENANCE: '유지보수',
   ETC: '기타업무',
+  TICKET: '티켓',
 }
 
 /** 타입별 선택 가능한 필드 (순서 = 메시지 표시 순서) */
@@ -68,6 +69,14 @@ export const FIELD_CATALOG: Record<TaskType, FieldDef[]> = {
     { key: 'hospitals', label: '관련병원' },
     { key: 'visits', label: '업무기간' },
   ],
+  TICKET: [
+    { key: 'owner', label: '담당자' },
+    { key: 'severity', label: 'Severity' },
+    { key: 'status', label: '상태' },
+    { key: 'queue', label: '큐' },
+    { key: 'cti', label: '분류' },
+    { key: 'dueAt', label: '처리기한' },
+  ],
 }
 
 /** 타입별 추천 기본 노출 필드 (설정 미지정 시 적용) */
@@ -77,6 +86,7 @@ export const DEFAULT_FIELDS: Record<TaskType, string[]> = {
   INSTALL_PLAN: ['assignees', 'requestDate', 'writeStatus', 'replyStatus'],
   MAINTENANCE: ['assignees', 'priority', 'type', 'reportedAt'],
   ETC: ['assignees', 'priority', 'reportedAt'],
+  TICKET: ['owner', 'severity', 'queue'],
 }
 
-export const TASK_TYPES: TaskType[] = ['PROJECT', 'SITE_VISIT', 'INSTALL_PLAN', 'MAINTENANCE', 'ETC']
+export const TASK_TYPES: TaskType[] = ['PROJECT', 'SITE_VISIT', 'INSTALL_PLAN', 'MAINTENANCE', 'ETC', 'TICKET']

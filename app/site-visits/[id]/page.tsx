@@ -3,8 +3,11 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import type { TicketStatus } from '@prisma/client'
 import SiteVisitForm from '../SiteVisitForm'
 import ReassignHospitalButton from '@/app/components/ReassignHospitalButton'
+import TicketLogPanel from '@/app/tickets/components/TicketLogPanel'
+import TicketStatusBadge from '@/app/tickets/components/TicketStatusBadge'
 
 interface SiteVisitFile {
   id: number
@@ -38,6 +41,13 @@ interface SiteVisitData {
   floorPlanS3Key: string | null
   notes: string | null
   files: SiteVisitFile[]
+  ticketId: number | null
+}
+
+interface LinkedTicket {
+  id: number
+  ticketCode: string
+  status: TicketStatus
 }
 
 const labelClass = 'text-xs font-medium uppercase tracking-wider text-gray-400'
@@ -85,6 +95,7 @@ export default function EditSiteVisitPage() {
   const [data, setData] = useState<SiteVisitData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [linkedTicket, setLinkedTicket] = useState<LinkedTicket | null>(null)
 
   useEffect(() => {
     fetch(`/api/site-visits/${id}`)
@@ -92,6 +103,12 @@ export default function EditSiteVisitPage() {
       .then((d) => {
         if (d.siteVisit) {
           setData(d.siteVisit)
+          // 연결된 티켓 코드·상태 조회 (숫자 id 허용)
+          if (d.siteVisit.ticketId) {
+            fetch(`/api/tickets/${d.siteVisit.ticketId}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .then((t) => { if (t?.ticket) setLinkedTicket(t.ticket) })
+          }
         } else {
           setError('답사를 찾을 수 없습니다.')
         }
@@ -141,6 +158,22 @@ export default function EditSiteVisitPage() {
           <h1 className="text-2xl font-bold text-gray-900">답사 상세 / 수정</h1>
           <p className="mt-1 font-mono text-sm text-gray-400">{data.siteVisitCode ?? `SV-${String(data.id).padStart(5, '0')}`}</p>
         </div>
+
+        {/* 연결된 티켓 배너 */}
+        {linkedTicket && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+            <span className="font-medium">티켓:</span>
+            <span className="font-mono text-xs">{linkedTicket.ticketCode}</span>
+            <TicketStatusBadge status={linkedTicket.status} />
+            <Link
+              href={`/tickets/${linkedTicket.ticketCode}`}
+              className="ml-auto shrink-0 rounded-md border border-blue-300 bg-white px-2.5 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-700 dark:bg-transparent dark:text-blue-300 dark:hover:bg-blue-900/40"
+            >
+              보기 →
+            </Link>
+          </div>
+        )}
+
         {data.hospital && <HospitalCard hospital={data.hospital} />}
         {data.siteVisitCode && (
           <div className="mb-4 flex items-center gap-2">
@@ -156,6 +189,13 @@ export default function EditSiteVisitPage() {
         <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
           <SiteVisitForm mode="edit" initialData={initialData} />
         </div>
+
+        {/* 티켓 타임라인 — 폼(notes 필드)과 별개, 진행 기록은 여기에 */}
+        {data.ticketId && (
+          <div className="mt-4 rounded-xl bg-white p-6 shadow-sm border border-gray-200">
+            <TicketLogPanel ticketId={data.ticketId} />
+          </div>
+        )}
       </div>
     </div>
   )

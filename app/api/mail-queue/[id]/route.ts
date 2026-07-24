@@ -6,6 +6,7 @@ import { uploadToS3 } from '@/lib/s3'
 import { parseFormEmail, buildNoteHtml } from '@/lib/gmail'
 import { advanceHospitalStatus } from '@/lib/hospitalStatus'
 import { auditActorFromJWT } from '@/lib/audit'
+import { createTicketForInstallPlan } from '@/lib/ticketDomain'
 
 export async function PUT(
   request: NextRequest,
@@ -63,25 +64,19 @@ export async function PUT(
     },
   })
 
-  // Task 레코드 생성: TASK-YYYYMM-NNNNN
-  const taskPrefix = `TASK-${ym}-`
-  const lastTask = await prisma.task.findFirst({
-    where: { taskCode: { startsWith: taskPrefix } },
-    orderBy: { taskCode: 'desc' },
-    select: { taskCode: true },
-  })
-  const taskSeq = lastTask?.taskCode ? parseInt(lastTask.taskCode.slice(-5)) + 1 : 1
-  const taskCode = `${taskPrefix}${String(taskSeq).padStart(5, '0')}`
-
-  const hospitalName = installPlan.hospital?.hospitalName || installPlan.hospital?.hiraHospitalName || ''
-  await prisma.task.create({
-    data: {
-      taskCode,
-      taskType: 'INSTALL_PLAN',
-      refCode: planCode,
-      hospitalCode,
-      title: hospitalName ? `설치계획(가안) ${hospitalName}` : '설치계획(가안)',
-    },
+  // 티켓 동시 생성 (P8 편입 — 메일 인입 큐 = 티켓 생성 채널)
+  await prisma.$transaction(async (tx) => {
+    await createTicketForInstallPlan(tx, {
+      id: installPlan.id,
+      planCode,
+      hospitalCode: installPlan.hospitalCode,
+      hospitalName: installPlan.hospital?.hospitalName ?? installPlan.hospital?.hiraHospitalName ?? null,
+      writeStatus: installPlan.writeStatus,
+      replyStatus: installPlan.replyStatus,
+      assigneeUserIds: [],
+      createdAt: installPlan.createdAt,
+      replyDate: null,
+    }, authUser?.userId ?? null, 'domain')
   })
 
   // Slack 알림 (메일큐 자동등록) — best-effort

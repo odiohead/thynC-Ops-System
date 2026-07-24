@@ -5,6 +5,7 @@ import { getAuthUser } from '@/lib/auth'
 import { createCalendarEvent } from '@/lib/googleCalendar'
 import { normalizeVisits, visitEventPayload } from '@/lib/maintenanceVisit'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import { createTicketForMaintenance } from '@/lib/ticketDomain'
 
 export const dynamic = 'force-dynamic'
 
@@ -143,24 +144,22 @@ export async function POST(request: NextRequest) {
     include,
   })
 
-  // Task 레코드 생성: TASK-YYYYMM-NNNNN
-  const taskPrefix = `TASK-${ym}-`
-  const lastTask = await prisma.task.findFirst({
-    where: { taskCode: { startsWith: taskPrefix } },
-    orderBy: { taskCode: 'desc' },
-    select: { taskCode: true },
-  })
-  const taskSeq = lastTask?.taskCode ? parseInt(lastTask.taskCode.slice(-5)) + 1 : 1
-  const taskCode = `${taskPrefix}${String(taskSeq).padStart(5, '0')}`
-
-  await prisma.task.create({
-    data: {
-      taskCode,
-      taskType: 'MAINTENANCE',
-      refCode: maintenanceCode,
-      hospitalCode: hospitalCode || null,
-      title: title.trim(),
-    },
+  // 티켓 동시 생성 (P5 편입 — 실패 시 유지보수 생성 자체를 롤백하지 않도록 best-effort가 아니라
+  // 명시 실패 처리: 티켓 없는 유지보수를 만들지 않는다)
+  await prisma.$transaction(async (tx) => {
+    await createTicketForMaintenance(tx, {
+      id: maintenance.id,
+      maintenanceCode,
+      title: maintenance.title,
+      hospitalCode: maintenance.hospitalCode,
+      priority: maintenance.priority,
+      statusName: maintenance.status?.name ?? null,
+      typeName: maintenance.type?.name ?? null,
+      assigneeUserIds: maintenance.assignees.map((a) => a.user.id),
+      reportedAt: maintenance.reportedAt,
+      resolvedAt: maintenance.resolvedAt,
+      createdAt: maintenance.createdAt,
+    }, user.userId, 'domain')
   })
 
   // Google Calendar 이벤트 생성 (비차단) — 방문 항목별 1개씩

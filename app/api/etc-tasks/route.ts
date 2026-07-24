@@ -6,6 +6,7 @@ import { createCalendarEvent } from '@/lib/googleCalendar'
 import { normalizeVisits } from '@/lib/maintenanceVisit'
 import { etcTaskVisitEventPayload } from '@/lib/etcTask'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import { createTicketForEtcTask } from '@/lib/ticketDomain'
 
 export const dynamic = 'force-dynamic'
 
@@ -128,24 +129,19 @@ export async function POST(request: NextRequest) {
     include,
   })
 
-  // Task 레코드 생성: TASK-YYYYMM-NNNNN
-  const taskPrefix = `TASK-${ym}-`
-  const lastTask = await prisma.task.findFirst({
-    where: { taskCode: { startsWith: taskPrefix } },
-    orderBy: { taskCode: 'desc' },
-    select: { taskCode: true },
-  })
-  const taskSeq = lastTask?.taskCode ? parseInt(lastTask.taskCode.slice(-5)) + 1 : 1
-  const taskCode = `${taskPrefix}${String(taskSeq).padStart(5, '0')}`
-
-  await prisma.task.create({
-    data: {
-      taskCode,
-      taskType: 'ETC',
-      refCode: etcTaskCode,
-      hospitalCode: null, // 다병원 연결이라 단일 병원 미지정
-      title: title.trim(),
-    },
+  // 티켓 동시 생성 (P6 편입)
+  await prisma.$transaction(async (tx) => {
+    await createTicketForEtcTask(tx, {
+      id: etcTask.id,
+      etcTaskCode,
+      title: etcTask.title,
+      priority: etcTask.priority,
+      statusName: etcTask.status?.name ?? null,
+      hospitalCodes: etcTask.hospitals.map((h) => h.hospital.hospitalCode),
+      assigneeUserIds: etcTask.assignees.map((a) => a.user.id),
+      resolvedAt: etcTask.resolvedAt,
+      createdAt: etcTask.createdAt,
+    }, user.userId, 'domain')
   })
 
   // Google Calendar 이벤트 생성 (비차단) — 업무기간 항목별 1개씩

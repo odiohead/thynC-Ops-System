@@ -13,6 +13,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getSlackMode, resolveTargetChannel, slackPostMessage, slackLookupUserByEmail } from '@/lib/slack'
 import { FIELD_CATALOG, DEFAULT_FIELDS, TASK_TYPE_LABELS, TASK_TYPES } from '@/lib/notifyFields'
+import { TICKET_STATUS_LABELS, TICKET_SEVERITY_LABELS } from '@/lib/ticket-shared'
 import { findDelayedTasks, type DelayedItem, type AssigneeUser } from '@/lib/delay-rules'
 
 export type NotifyEventType = 'task_created' | 'task_status_changed' | 'delayed'
@@ -144,7 +145,7 @@ export async function sendConnectionTest(): Promise<void> {
 // Phase 2 — 이벤트 알림 (등록/완료 → 단일 채널 SLACK_CHANNEL_MAIN)
 // ─────────────────────────────────────────────────────────────
 
-export type TaskType = 'PROJECT' | 'SITE_VISIT' | 'INSTALL_PLAN' | 'MAINTENANCE' | 'ETC'
+export type TaskType = 'PROJECT' | 'SITE_VISIT' | 'INSTALL_PLAN' | 'MAINTENANCE' | 'ETC' | 'TICKET'
 
 /** 업무 타입별 Slack 사용 여부 (notify_types_enabled, 기본 전부 on). 이벤트·지연·DM 모두 이 게이트 적용 */
 export async function getTypesEnabled(): Promise<Record<TaskType, boolean>> {
@@ -354,6 +355,26 @@ async function enrichTask(taskType: TaskType, refCode: string): Promise<Enriched
       const vis = formatVisits(e.visits)
       if (vis) fv.visits = vis
       return { hospitalName, title: e.title ?? null, url: `${base}/etc-tasks/${e.id}`, fieldValues: fv, statusSignature: e.status?.name ?? null }
+    }
+    case 'TICKET': {
+      const t = await prisma.ticket.findUnique({
+        where: { ticketCode: refCode },
+        select: {
+          title: true, status: true, severity: true, dueAt: true,
+          queue: { select: { name: true } },
+          cti: { select: { name: true } },
+          owner: { select: { name: true } },
+          hospital: { select: { hospitalName: true } },
+        },
+      })
+      if (!t) return null
+      if (t.owner?.name) fv.owner = t.owner.name
+      fv.severity = TICKET_SEVERITY_LABELS[t.severity]
+      fv.status = TICKET_STATUS_LABELS[t.status]
+      if (t.queue?.name) fv.queue = t.queue.name
+      if (t.cti?.name) fv.cti = t.cti.name
+      if (t.dueAt) fv.dueAt = ymd(t.dueAt)!
+      return { hospitalName: t.hospital?.hospitalName ?? null, title: t.title, url: `${base}/tickets/${refCode}`, fieldValues: fv, statusSignature: t.status }
     }
     default:
       return null

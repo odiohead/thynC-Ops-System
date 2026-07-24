@@ -5,6 +5,8 @@ import { verifyToken, isAdminOrAbove } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import InstallPlanDetailClient from './DetailClient'
 import ReassignHospitalButton from '@/app/components/ReassignHospitalButton'
+import LinkedTicketBanner from '@/app/tickets/components/LinkedTicketBanner'
+import TicketLogPanel from '@/app/tickets/components/TicketLogPanel'
 
 export const dynamic = 'force-dynamic'
 export const metadata = { title: '설치계획(가안) 상세' }
@@ -68,6 +70,9 @@ export default async function InstallPlanDetailPage({ params }: Props) {
           )}
         </div>
 
+        {/* 연결된 티켓 배너 */}
+        {installPlan.ticketId && <LinkedTicketBanner ticketId={installPlan.ticketId} />}
+
         {/* 병원 기본정보 카드 */}
         {hospital && (
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm mb-4">
@@ -119,6 +124,13 @@ export default async function InstallPlanDetailPage({ params }: Props) {
         <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
           <InstallPlanDetailClient initialData={data} canAdmin={canAdmin} canEdit={canEdit} />
         </div>
+
+        {/* 티켓 타임라인 — 진행 기록은 여기에 */}
+        {installPlan.ticketId && (
+          <div className="mt-4 rounded-xl bg-white p-6 shadow-sm border border-gray-200">
+            <TicketLogPanel ticketId={installPlan.ticketId} />
+          </div>
+        )}
       </div>
     </div>
   )

@@ -61,6 +61,7 @@ app/
 │   ├── projects/                     # 프로젝트 CRUD + 장비/파일 관리
 │   ├── site-visits/                  # 답사 CRUD + 파일 업로드
 │   ├── maintenances/                 # 유지보수 CRUD + 파일 관리
+│   ├── tickets/                      # 티켓 CRUD + transition/assign/queue/participants/logs
 │   ├── tasks/                        # 업무(Task) 통합 조회
 │   ├── nav-menus/                    # 네비게이션 메뉴 조회 (Navigation 컴포넌트용)
 │   ├── constructors/                 # 시공사 관리
@@ -82,6 +83,9 @@ app/
 │   │   ├── maintenance-type/         # 장애유형 관리
 │   │   ├── maintenance-status/       # 유지보수 상태 관리
 │   │   ├── etc-task-status/          # 기타업무 상태 관리
+│   │   ├── ticket-queues/            # 티켓 큐 마스터 CRUD (티켓 있으면 삭제 400)
+│   │   ├── ticket-cti/               # 티켓 분류(CTI) 3단 트리 CRUD + 기본 큐 지정
+│   │   ├── ticket-pending-reasons/   # 티켓 대기(PENDING) 사유 마스터 CRUD
 │   │   ├── item-category/            # 품목 분류 트리 CRUD (대>중>소 3단계)
 │   │   ├── inventories/              # 인벤토리 마스터 CRUD (병원 연결 토글, 사용 중 삭제 409)
 │   │   ├── stock-in-type/            # 입고 유형 CRUD (시스템 유형·사용 중 삭제 409)
@@ -133,6 +137,8 @@ app/
 ├── site-visits/                      # 답사 목록·상세·등록
 ├── maintenances/                     # 유지보수 목록·상세·등록
 ├── etc-tasks/                        # 기타업무 목록·상세·등록 (다병원·비유지보수 업무)
+├── tickets/                          # 티켓 목록(큐 탭·상태 다중 토글)·생성(CTI 3단 셀렉트)·상세(전이 액션·타임라인)
+│   └── components/                   # TicketStatusBadge·TicketSeverityBadge·TicketLogPanel
 ├── tasks/                            # 업무(Task) 현황 (통합 조회)
 ├── gateway-planner/                  # GW 배치 플래너 — 도면 업로드·잡 목록 + [id](진행 폴링·스케일 확정·2점 보정·배치 미리보기·PPTX)
 ├── vehicle-reservations/             # 차량예약 주간 현황 보드 + 예약/반납 모달 + 내 예약 + 운행일지 탭(VehicleLogsPanel)
@@ -168,6 +174,9 @@ app/
 │   ├── maintenance-type/             # 장애유형 관리
 │   ├── maintenance-status/           # 유지보수 상태 관리
 │   ├── etc-task-status/              # 기타업무 상태 관리
+│   ├── ticket-queues/                # 티켓 큐 관리 (이름·설명·순서·활성·티켓 수)
+│   ├── ticket-cti/                   # 티켓 분류(CTI) 관리 (Category/Type/Item 3컬럼 + Item 기본 큐 지정)
+│   ├── ticket-pending-reasons/       # 티켓 대기 사유 관리
 │   ├── item-category/                # 품목 분류 관리 (ADMIN 이상 — 대>중>소 계층 트리)
 │   ├── inventories/                  # 인벤토리 관리 (ADMIN 이상 — 이름·병원 연결·활성·순서)
 │   ├── stock-reasons/                # 입출고 유형 관리 (ADMIN 이상 — 입고/출고 2섹션, StatusCodeManager 공용 컴포넌트)
@@ -430,12 +439,9 @@ prisma/
 - `allowedRoles` (TEXT[], 허용 역할 배열, 빈 배열=전체), `allowedOrgCodes` (TEXT[], 허용 소속 코드 배열, 빈 배열=전체)
 - `isActive` (활성/비활성 토글), `sortOrder` (정렬 순서)
 
-### Task (통합 업무)
-- 프로젝트, 답사, 설치계획(가안), 유지보수, 기타업무를 통합 관리하는 TASK 테이블
-- 고유 코드 `taskCode`: `TASK-YYYYMM-NNNNN` 형식 (월별 순번 통합 채번)
-- `taskType`: `PROJECT` / `SITE_VISIT` / `INSTALL_PLAN` / `MAINTENANCE` / `ETC`
-- `refCode`: 원본 테이블의 고유 코드 (projectCode / siteVisitCode / planCode / maintenanceCode / etcTaskCode)
-- `hospitalCode` (FK→Hospital, nullable), `title`
+### Task (통합 업무) — **폐기 (P10, 2026-07-24)**
+- 티켓 시스템이 롤업 역할을 대체 — `/tasks`는 `/tickets`로 리다이렉트, `/api/tasks` 제거, nav 메뉴 비활성. **테이블은 이력 보존(561건 동결)** — 원본 모듈들의 Task 생성/동기화/삭제 코드 전부 제거(ConsultationQueue 선례). 잔존 참조: `lib/workItemReassign.ts`의 동결 테이블 하우스키핑만(P13 정리 예정)
+- (구 형상) `taskCode` TASK-YYYYMM-NNNNN, `taskType` 5종, `refCode` 느슨 연결
 - 기존 테이블은 변경 없이 유지, tasks는 참조용 통합 뷰
 
 ### AiChatSession / AiChatMessage (AI 어시스턴트 v2 대화)
@@ -554,6 +560,22 @@ prisma/
 - `analysis`(JSONB — 공간 인식 spaces[]), `placements`(JSONB — 배치 points[]·skipped·notes), `gatewayCount`, `rulesSnapshot`, `tokenUsage`
 - `createdBy` → User. 인덱스 `(created_by, created_at DESC)`, `(created_at DESC)`
 - 배치 규칙은 AppSetting `gw_planner_rules` (커버리지 직경·복도 간격 계수·병실 개수·제외 공간 등)
+
+### 티켓 시스템 (P1 — `ticket_dev_schedule.md`, 2026-07-23)
+- AWS SIM식 티켓 레이어 — 티켓=공통 워크플로 껍데기, 도메인 레코드=구조화 본문(1:1). 전역 결정: `ticket_system_design.md` §2
+- **Ticket** (`tickets`): `ticketCode`(TK-YYYYMM-NNNNN, UNIQUE) · `status`(하드 enum `ticket_status`: OPEN/ASSIGNED/IN_PROGRESS/PENDING/RESOLVED/CLOSED — 전이표는 P2에서 코드 강제) · `severity`(enum `ticket_severity`: SEV1~SEV5, 기본 SEV4) · `queueId`(필수) · `ctiId`(DB nullable·API 필수) · `ownerId`(단일 책임자, NULL=큐 대기) · `pendingReasonId`+`pendingNote` · `hospitalCode?` · `statusChangedAt`/`resolvedAt`/`closedAt`/`reopenCount`/`dueAt`(SLA, P11) · 인덱스 (queue,status)/(owner,status)/(severity)/(statusChangedAt)/(hospitalCode)
+- Ticket 추가 필드: `parentId`(self-FK — **마스터-서브 2레벨 고정**, 마스터는 열린 서브 있으면 해결/종결 불가, 연결/해제는 양쪽 타임라인 link 이벤트) · `refType`(도메인 연결 유형: MAINTENANCE, NULL=순수 티켓)
+- **답사·설치계획·프로젝트 편입 (P7~P9, 2026-07-24)**: 각 `ticketId`(1:1) — 답사(상태 5종 매핑, 작성완료→Pending 회신대기, Gmail 큐 승격도 티켓 생성), 설치계획(2축 write/reply 매핑, mail-queue 승격 포함), 프로젝트(BuildStatus 라벨 앵커 매핑, dueAt=완료예정일, CTI 영업/신규도입/구축). refType 'SITE_VISIT'·'INSTALL_PLAN'·'PROJECT'. 백필 104+72+243건(`scripts/backfill-*-tickets.mts`). **도메인 편입 5/5 완료**
+- **기타업무 편입 (P6, 2026-07-24)**: `etc_tasks.ticketId`(1:1) — 존속 편입(방문일정·캘린더는 도메인 잔류), CTI 내부/기타업무/일반→내부운영 큐, 상태 체계는 유지보수와 동일 매핑, 병원은 첫 연결분→ticket.hospitalCode. 백필 29건(`scripts/backfill-etc-task-tickets.mts`). refType 'ETC'. 역할 구분: 일정·병원 연결 필요하면 기타업무, 아니면 순수 티켓
+- **유지보수 편입 (P5, 2026-07-24)**: `maintenances.ticketId`(1:1 FK) — 유지보수 생성 시 티켓 동시 생성(큐 '유지보수', 장애유형→CTI 고객지원/장애/*, 우선순위→Sev), 상태·담당 **양방향 동기화**(`lib/ticketDomain.ts`, 매핑: 접수↔OPEN/ASSIGNED·처리중↔IN_PROGRESS·보류↔PENDING·완료↔RESOLVED/CLOSED), 처리 기록은 티켓 타임라인으로 일원화(기존 30건 이관·maintenance_logs 보존), Slack은 MAINTENANCE 알림이 대표. 백필 219건 완료(`scripts/backfill-maintenance-tickets.mts`)
+- **TicketQueue** (`ticket_queues`): AWS식 배정 큐 마스터 (기능 단위, 런타임 관리)
+- **TicketQueueMember** (`ticket_queue_members`): 큐 멤버 N:M (AWS resolver group — 담당자 선택 시 큐 멤버 우선 노출, 비멤버 배정도 허용)
+- **TicketCti** (`ticket_cti`): 3단계 분류 트리(parent_id 자기참조, level 1~3 CHECK) + `defaultQueueId`(CTI→큐 자동 라우팅)
+- **TicketParticipant** (`ticket_participants`): 참여자 N:M (owner와 별개)
+- **TicketLog** (`ticket_logs`): 단일 타임라인 — `logType` comment(사람, Tiptap HTML)/status_change·assign·queue_transfer·sev_change 등 시스템 이벤트(`payload` JSONB). 프로세스 지표 원천 겸용
+- **TicketPendingReason** (`ticket_pending_reasons`): PENDING 사유 마스터
+- 초기 마스터 시드: `scripts/seed-ticket-masters.sql` (재실행 안전 — 큐 4종·CTI 3 Category·사유 5종·nav 메뉴 4행. PROD 최초 반영 시 실행)
+- Slack 알림: notify 파이프라인 taskType `'TICKET'` — 생성/상태변경 발송, `/settings/notifications`에서 필드·on/off 관리. 상태 표기는 영문(Open~Closed)
 
 ### Wiki 모듈 — 별도 PostgreSQL 스키마 `wiki`
 - 사내 위키(Notion-like) 기능. 본문은 BlockNote JSON 블록 배열로 저장
@@ -766,6 +788,15 @@ prisma/
 - 목록 컬럼: 접수일 | 제목 | 상태 | 우선순위 | 담당자 | 관련 병원(3곳↑ "외 N곳") | 업무기간 | 완료일. 필터: 제목 검색, 상태/우선순위 select
 - 네비 메뉴 기본 노출: SEERS 소속만 (메뉴 관리에서 변경 가능)
 - 감사 로그 `resource='etc_task'`로 모든 mutation 기록
+
+### 티켓 관리 (`/tickets` — P3 기본 UI, 2026-07-23)
+- **목록** (`/tickets`): 상단 큐 탭(전체+활성 큐별) · 필터 바 — 상태 다중 토글(선택 없음 = 열린 티켓 `open=true`), Sev 셀렉트, 내 티켓/미배정 토글(상호 배타), 티켓번호·제목 검색(300ms 디바운스) · 서버 페이지네이션(30건) · 컬럼: 티켓번호|Sev|제목|상태(PENDING이면 사유 병기)|큐|담당자|병원|접수일 · 행 클릭 → 상세
+- **생성** (`/tickets/new`): CTI 3단 셀렉트(Category→Type→Item, 전체 트리 1회 로드 후 클라이언트 구성) · 선택 Item의 기본 큐 표시 + 큐 수동 변경 · Sev(기본 SEV4) · 담당자(owner, 지정 시 ASSIGNED 시작) · 참여자 칩+셀렉트 · 병원 검색 모달(유지보수 폼과 동일 패턴) · 설명 Tiptap → 저장 후 상세로 이동
+- **상세** (`/tickets/[id]`): 헤더(티켓번호·상태/Sev 배지·재오픈 횟수) · 메타 패널(큐, CTI 전체 경로, 담당자, 참여자, 병원 링크, 접수자, 접수/해결/종결 시각) · PENDING이면 사유·메모 배너
+- **액션** (VIEWER 숨김): `canTransition` 전이표로 **현재 상태에서 허용된 전이 버튼만 노출** — PENDING 전환은 사유 셀렉트+메모 인라인 입력, CLOSED는 confirm · 담당자 변경(OPEN↔ASSIGNED 자동 연동) · 큐 이관 · Sev 변경 · 참여자 추가/제거 · 티켓 삭제(ADMIN) · 전이표 위반 등 API 400 메시지 그대로 alert
+- **타임라인** (`TicketLogPanel`): 코멘트(Tiptap HTML, 본인·ADMIN 수정/삭제)와 시스템 이벤트(회색 한 줄 — payload를 상태/Sev 라벨·사용자/큐/CTI 이름으로 번역: "상태 접수 → 배정 · 작성자 · 시각") 시간순 단일 뷰 + 하단 코멘트 작성
+- 배지 색·라벨·전이표는 `lib/ticket-shared.ts`(클라이언트 안전) 단일 소스 — `TicketStatusBadge`/`TicketSeverityBadge` 공용 컴포넌트
+- **설정**: `/settings/ticket-queues`(큐 — 티켓 있으면 삭제 비활성+안내), `/settings/ticket-cti`(3컬럼 트리 — 각 레벨 추가/이름수정/활성/삭제, Item 기본 큐 지정), `/settings/ticket-pending-reasons`(대기 사유)
 
 ### 자재관리(WMS) (개발 중 — `function_wms.md`)
 - 구축·판매에서 취급하는 하드웨어 자재(게이트웨이·MC200M-T 등 자사기기, 사이니지·PC·모니터 등 전자제품, 케이블 등 잡자재) 재고관리. **자재 수량·입출고 관리에 집중**(안전재고·실사조정 등 부가기능 미채택)
@@ -1192,6 +1223,24 @@ npm run dev
 | POST | `/api/maintenances/[id]/logs` | 처리 기록 추가 (USER 이상, sanitize 후 저장) |
 | PUT  | `/api/maintenances/[id]/logs/[logId]` | 처리 기록 수정 (본인 or ADMIN — 이관분은 ADMIN만) |
 | DELETE | `/api/maintenances/[id]/logs/[logId]` | 처리 기록 삭제 (본인 or ADMIN) |
+
+### 티켓 (P2 — 2026-07-23)
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET  | `/api/tickets` | 티켓 목록 (`?queueId=&status=`복수`&severity=&mine=&unassigned=&ownerId=&hospitalCode=&ctiId=&q=&open=&page=&pageSize=`) — Sev↑·최신순 |
+| POST | `/api/tickets` | 티켓 생성 (ctiId 필수 — L3, queueId 미지정 시 CTI 기본 큐 라우팅, `TK-YYYYMM-NNNNN` 채번, owner 지정 시 ASSIGNED 시작) |
+| GET/PUT/DELETE | `/api/tickets/[id]` | 상세 · 기본 필드 수정(sev/cti 변경 이벤트 기록) · 삭제(ADMIN 이상) |
+| POST | `/api/tickets/[id]/transition` | 상태 전이 `{to, pendingReasonId?, pendingNote?}` — **전이표 위반 400**, PENDING 사유 필수, RESOLVED→IN_PROGRESS=재오픈 |
+| POST | `/api/tickets/[id]/assign` | owner 배정/해제 `{ownerId\|null}` — OPEN↔ASSIGNED 자동 연동 |
+| POST | `/api/tickets/[id]/queue` | 큐 이관 `{queueId}` |
+| PUT  | `/api/tickets/[id]/participants` | 참여자 전체 설정 `{userIds[]}` |
+| POST | `/api/tickets/[id]/parent` | 마스터 연결/해제 `{parentId\|null}` — 2레벨 고정·CLOSED 부모 불가 |
+| GET/PUT | `/api/settings/ticket-queues/[id]/members` | 큐 멤버 조회·전체 설정 `{userIds[]}` |
+| GET/POST | `/api/tickets/[id]/logs` | 타임라인(코멘트+시스템 이벤트 시간순) · 코멘트 작성(sanitize) |
+| PUT/DELETE | `/api/tickets/[id]/logs/[logId]` | 코멘트 수정·삭제 (본인 or ADMIN, 시스템 이벤트 불변) |
+| GET/POST, PUT/DELETE | `/api/settings/ticket-queues(/[id])` | 큐 마스터 (티켓 있으면 삭제 불가) |
+| GET/POST, PUT/DELETE | `/api/settings/ticket-cti(/[id])` | CTI 3단계 트리 (하위·티켓 있으면 삭제 불가, 기본 큐 지정) |
+| GET/POST, PUT/DELETE | `/api/settings/ticket-pending-reasons(/[id])` | PENDING 사유 마스터 |
 
 ### 기타업무
 | Method | Endpoint | 설명 |

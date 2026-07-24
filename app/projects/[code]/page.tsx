@@ -7,6 +7,8 @@ import Link from 'next/link'
 import ProjectIssueNotePanel from '@/app/wiki/components/ProjectIssueNotePanel'
 import FieldEngineerSelectModal from '@/app/components/FieldEngineerSelectModal'
 import ReassignHospitalButton from '@/app/components/ReassignHospitalButton'
+import LinkedTicketBanner from '@/app/tickets/components/LinkedTicketBanner'
+import TicketLogPanel from '@/app/tickets/components/TicketLogPanel'
 
 interface DeviceInfo {
   id: number
@@ -51,6 +53,7 @@ interface IntroTypeOption {
 
 interface Project {
   id: number
+  ticketId: number | null
   projectCode: string
   projectName: string
   hospitalCode: string
@@ -392,6 +395,9 @@ export default function ProjectDetailPage() {
             )}
           </div>
         </div>
+
+        {/* 연결된 티켓 배너 */}
+        {project.ticketId && <LinkedTicketBanner ticketId={project.ticketId} />}
 
         {error && (
           <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
@@ -736,6 +742,13 @@ export default function ProjectDetailPage() {
               <ProjectIssueNotePanel projectCode={code} />
             </div>
           </div>
+
+          {/* 티켓 타임라인 — 진행 기록은 여기에 */}
+          {project.ticketId && (
+            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+              <TicketLogPanel ticketId={project.ticketId} />
+            </div>
+          )}
 
           {/* 하단 저장 버튼 */}
           <div className="flex justify-end gap-3 pb-4">

@@ -7,6 +7,7 @@ import { parseFormEmail, buildNoteHtml } from '@/lib/gmail'
 import { createCalendarEvent } from '@/lib/googleCalendar'
 import { advanceHospitalStatus } from '@/lib/hospitalStatus'
 import { auditActorFromJWT } from '@/lib/audit'
+import { createTicketForSiteVisit } from '@/lib/ticketDomain'
 
 export async function PUT(
   request: NextRequest,
@@ -107,24 +108,18 @@ export async function PUT(
     }
   }
 
-  // Task 레코드 생성
-  const taskPrefix = `TASK-${ym}-`
-  const lastTask = await prisma.task.findFirst({
-    where: { taskCode: { startsWith: taskPrefix } },
-    orderBy: { taskCode: 'desc' },
-    select: { taskCode: true },
-  })
-  const taskSeq = lastTask?.taskCode ? parseInt(lastTask.taskCode.slice(-5)) + 1 : 1
-  const taskCode = `${taskPrefix}${String(taskSeq).padStart(5, '0')}`
-
-  await prisma.task.create({
-    data: {
-      taskCode,
-      taskType: 'SITE_VISIT',
-      refCode: siteVisitCode,
+  // 티켓 동시 생성 (P7 편입 — 메일 인입 큐 = 티켓 생성 채널)
+  await prisma.$transaction(async (tx) => {
+    await createTicketForSiteVisit(tx, {
+      id: siteVisit.id,
+      siteVisitCode,
       hospitalCode,
-      title: `${siteVisit.hospital.hospitalName ?? siteVisit.hospital.hiraHospitalName ?? ''} 답사`,
-    },
+      hospitalName: siteVisit.hospital.hospitalName ?? siteVisit.hospital.hiraHospitalName ?? null,
+      statusName: null, // 큐 승격 직후는 접수
+      assigneeUserIds: siteVisit.assignees.map((a) => a.user.id),
+      createdAt: siteVisit.createdAt,
+      replyDate: null,
+    }, authUser?.userId ?? null, 'domain')
   })
 
   // Slack 알림 (메일큐 자동등록) — best-effort

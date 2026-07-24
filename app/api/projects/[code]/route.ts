@@ -6,6 +6,7 @@ import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { advanceHospitalStatus } from '@/lib/hospitalStatus'
+import { syncProjectToTicket } from '@/lib/ticketDomain'
 
 type Params = { params: { code: string } }
 
@@ -126,20 +127,26 @@ export async function PUT(request: NextRequest, { params }: Params) {
     ])
   }
 
+  // 티켓 동기화 (P9 편입)
+  {
+    const p = await prisma.project.findUnique({ where: { projectCode: params.code }, select: { id: true } })
+    if (p) {
+      await prisma.$transaction(async (tx) => {
+        await syncProjectToTicket(tx, p.id, authUser.userId)
+      })
+    }
+  }
+
   // 갱신된 데이터 다시 조회
   const updated = await prisma.project.findUnique({
     where: { projectCode: params.code },
     include: projectInclude,
   })
 
-  // Task 완료 동기화: buildStatus 라벨에 '완료' 포함 → 완료
+  // 공사상태 변경 후속 처리: buildStatus 라벨에 '완료' 포함 → 구축완료
   if (buildStatusId !== undefined && updated) {
     const bsLabel = updated.buildStatus?.label ?? ''
     const isCompleted = bsLabel.includes('완료')
-    await prisma.task.updateMany({
-      where: { refCode: params.code, taskType: 'PROJECT' },
-      data: { isCompleted, completedAt: isCompleted ? new Date() : null },
-    })
 
     // Slack 알림 (상태 변경) — best-effort. 실제 상태 변경 시에만 발송(notify 내부 시그니처 비교)
     notifyTaskStatusChanged({ taskType: 'PROJECT', refCode: params.code, actorName: authUser.name }).catch(() => {})
@@ -242,6 +249,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   await prisma.projectDevice.deleteMany({ where: { projectId: existing.id } })
   await prisma.projectFile.deleteMany({ where: { projectId: existing.id } })
   await prisma.project.delete({ where: { projectCode: params.code } })
+
+  // 연결 티켓도 삭제 (P9 편입 — 생명주기 공유)
+  if (existing.ticketId) {
+    await prisma.ticket.delete({ where: { id: existing.ticketId } }).catch(() => {})
+  }
 
   await logAudit({
     req: request,

@@ -4,6 +4,235 @@
 
 ---
 
+## 2026-07-24 | 티켓 P10 — 검증·마무리 (누락 0건 대조·리다이렉트 보정)
+
+- 폐기 전 대조 검증: 미완료 tasks 116건 중 유효분 전부 열린 도메인 티켓으로 커버 확인. 불일치 16건은 **티켓이 더 정확** — 고아 task 3건(과거 답사 삭제 시 미정리)·과거 완료 동기화 누락 13건(유지보수 '완료'인데 task 미완료)
+- nav 'tasks' 메뉴 비활성(is_active=false, 시드 파일에 PROD용 UPDATE 추가). `/tasks` 리다이렉트가 정적 프리렌더로 Location 헤더 없는 307이 되는 문제 발견 → `force-dynamic` 추가로 표준 307+Location 확인
+- 검증: /api/tasks 404 · /tasks→/tickets Location 정상 · 유지보수 생성/티켓 자동 생성 정상(제거 후 회귀 없음) · tasks 테이블 561건 동결 보존 · tsc 0오류 · 빌드·재시작 2회
+
+## 2026-07-24 | 티켓 P10 — tasks 롤업 코드 폐기 (테이블은 보존)
+
+- 전 모듈 티켓 편입 완료·누락 0건 검증에 따라 tasks 롤업 코드를 제거 (tasks 테이블·데이터는 frozen 보존, lib/workItemReassign.ts는 P13에서 정리 예정으로 미변경)
+- `app/api/tasks/` 폴더 삭제(route.ts·[id]/route.ts), `app/tasks/page.tsx`는 `/tickets` 서버 리다이렉트로 교체(하위 파일 없음)
+- 도메인 라우트 Task 동기화 블록 제거: maintenances(생성 채번/PUT 동기화/DELETE 삭제), etc-tasks(동일 3곳), site-visits [id](완료 동기화 — notifyTaskStatusChanged는 유지), site-visit-queue [id](생성 — notifyTaskEvent 유지), install-plans(생성 — hospitalName 상수는 logAudit용 유지 / [id] 완료 동기화 — notify 유지 / DELETE 트랜잭션의 task.deleteMany 항목만 제거), mail-queue [id](생성 — notifyTaskEvent 유지), projects [code](완료 동기화 — notify·병원 상태 '운영' 전진 훅·isCompleted 계산 유지)
+- 각 파일의 `ym`은 도메인 코드 채번(MNT/ETC/IP/VISIT-)에 계속 사용되어 유지, taskPrefix/lastTask/taskSeq/taskCode 등 롤업 전용 변수는 블록과 함께 제거
+- 삭제 라우트의 stale 산출물 `.next/types/app/api/tasks` 제거(다음 빌드 시 재생성 무관)
+- 검증: `prisma.task.` 참조 0건(workItemReassign 제외), `/api/tasks` 호출 0건, `tsc --noEmit` 0오류. 빌드·git 안 함
+- 영향 파일: app/api/tasks/**(삭제), app/tasks/page.tsx, app/api/maintenances/{route,[id]/route}.ts, app/api/etc-tasks/{route,[id]/route}.ts, app/api/site-visits/[id]/route.ts, app/api/site-visit-queue/[id]/route.ts, app/api/install-plans/{route,[id]/route}.ts, app/api/mail-queue/[id]/route.ts, app/api/projects/[code]/route.ts
+
+## 2026-07-24 | 티켓 P7~P9 — 답사·설치계획·프로젝트 편입 완료 (도메인 편입 5/5 종료)
+
+- **P7 답사**(104건): site_visits.ticket_id, 상태 5종 매핑(작성완료→Pending '외부 회신 대기'), 생성 2경로(직접 POST + site-visit-queue Gmail 승격 — 메일 인입의 티켓 생성 채널화), CTI 답사요청 기본 큐 '설치·답사' 지정. 스모크 17케이스(1차 실패 2건은 스크립트의 PUT hospitalCode 누락 — 코드 문제 아님 확인)
+- **P8 설치계획**(72건): install_plans.ticket_id, **2축 상태 매핑**(미완료→IN_PROGRESS/OPEN·작성완료+회신미완료→PENDING '외부 회신 대기'·완료/완료→CLOSED, 역방향 완전 복원), 생성 2경로(직접 + mail-queue 승격), statusChangedAt 갭 티켓이 해소. 스모크 9케이스
+- **P9 프로젝트**(243건): projects.ticket_id, BuildStatus **라벨 의미 앵커** 매핑(완료→CLOSED·보류→PENDING·준비→OPEN/ASSIGNED·기타→IN_PROGRESS, 역방향 findFirst best-effort), **dueAt=endDateExpected**(SLA 필드 첫 활용, 235건), CTI 영업/신규도입/구축 신설, ProjectAssignee FK=projectCode 특수 처리, Task 롤업 미생성 갭 해소. 한계 기록: 티켓 쪽 전이로 구축완료 시 병원 '운영' 전진 훅 미발동(P13 보완 검토). 스모크 9케이스+유형별 총계 5건
+- 백필 총 419건(각각 사전 백업 dev_before_p7/p8/p9_backfill), 매핑 분포 전부 설계 일치. tsc 0오류·빌드·재시작 완료
+- **도메인 편입 5/5 완료** — 전체 티켓 667건+순수 티켓 (MAINTENANCE 219·ETC 29·SITE_VISIT 104·INSTALL_PLAN 72·PROJECT 243)
+- 영향: prisma(마이그레이션 3·schema), lib/ticketDomain.ts(3도메인 추가), app/api/site-visits/**·site-visit-queue·install-plans/**·mail-queue·projects/**, app/api/tickets/**, scripts/backfill-*(3종 신규), seed-ticket-masters.sql
+
+## 2026-07-24 | 티켓 P8·P9 — 설치계획·프로젝트 편입 UI
+
+- 기존 편입 패턴(P5~P7)으로 두 도메인 동시 반영 (백엔드 refType 'INSTALL_PLAN'(72)·'PROJECT'(243)·installPlan/project 응답·양방향 동기화는 선행 작업분 사용)
+- 티켓 목록: Type 배지 emerald '설치계획'·rose '프로젝트'(dark 병기), Type 필터에 두 옵션 추가
+- 티켓 상세: 헤더 유형 배지 2종, Linked Work 밴드 2종 — 설치계획(emerald): planCode·요청일/작성·회신 상태/회신일 + `/install-plans/{id}` 이동 / 프로젝트(rose): projectCode·projectName·공사상태 라벨·구축시작/완료예정 + `/projects/{projectCode}` 이동
+- 공용 `LinkedTicketBanner` 신규(app/tickets/components) — ticketId로 자체 조회하는 연결 티켓 배너(서버 컴포넌트 페이지에도 삽입 가능)
+- 설치계획 상세(서버 컴포넌트 page.tsx): 헤더 아래 LinkedTicketBanner + DetailClient 카드 아래 TicketLogPanel 타임라인 섹션 (DetailClient 구조 훼손 없음)
+- 프로젝트 상세(대형 클라이언트 page.tsx): Project 인터페이스에 ticketId 추가, 헤더 아래 배너 + 이슈 노트 아래 TicketLogPanel 타임라인 섹션 — 위키 이슈노트 패널 등 기존 구조 무변경(최소 침습)
+- 검증: `tsc --noEmit` 0오류. 빌드·git 안 함
+- 영향 파일: app/tickets/page.tsx, app/tickets/[code]/page.tsx, app/tickets/components/LinkedTicketBanner.tsx(신규), app/install-plans/[id]/page.tsx, app/projects/[code]/page.tsx
+
+## 2026-07-24 | 티켓 P7 — 답사(SiteVisit) 편입 UI
+
+- P5/P6과 동일 패턴으로 답사 연결 화면 반영 (백엔드 refType 'SITE_VISIT'·백필 104건·siteVisit 응답·양방향 동기화는 선행 작업분 사용)
+- 티켓 목록: Type 배지에 refType==='SITE_VISIT' → sky '답사'(amber 유지보수·violet 기타업무와 구분, dark 병기), Type 필터에 '답사' 옵션 추가
+- 티켓 상세: 헤더에 sky '답사' 유형 배지, Linked Work 밴드(sky) — siteVisitCode·요청일/방문일/회신일/대웅담당자 요약 + [답사 상세로 이동] `/site-visits/{id}`
+- 답사 상세: 상단 연결 티켓 배너("티켓: TK-… [상태배지] 보기 →", GET /api/tickets/{ticketId}) + 폼 아래 TicketLogPanel(ticketId) 타임라인 섹션 신규 추가(자체 로드 모드 — notes 필드는 기존 폼 그대로)
+- 검증: `tsc --noEmit` 0오류. 빌드·git 안 함
+- 영향 파일: app/tickets/page.tsx, app/tickets/[code]/page.tsx, app/site-visits/[id]/page.tsx
+
+## 2026-07-24 | 티켓 P6 — 기타업무 편입 (백엔드·백필·검증 완료)
+
+- 사용자 확정 2건: **존속 편입**(전건 방문일정·캘린더 사용 — 티켓 미보유 기능, 역할 구분: 일정·병원 필요시 기타업무/아니면 순수 티켓), CTI `내부/기타업무/일반`→내부운영 큐
+- 스키마 `20260724170000`: etc_tasks.ticket_id(UNIQUE FK). ticketDomain.ts에 ETC 생성·양방향 동기화 + **공통 진입점**(syncTicketToDomain/domainNotifyRef — 티켓 라우트의 refType 분기 일반화). 기타업무 API 생성/수정/삭제 연동, Slack은 ETC 알림 대표. 병원 N:M→첫 병원(실측 복수 0건)
+- 백필 29건 전부 연결(접수19→ASSIGNED·완료10→CLOSED, 사전 백업 dev_before_p6_backfill). 검증: tsc 0오류 → 빌드·재시작 → **스모크 14케이스 전부 통과**(생성 자동·큐/CTI 라우팅·양방향 동기화·삭제 동반·ETC 총계 30)
+- 영향: prisma(마이그레이션·schema), lib/ticketDomain.ts, app/api/etc-tasks/**, app/api/tickets/**, scripts/backfill-etc-task-tickets.mts(신규), seed-ticket-masters.sql(기타업무 CTI)
+
+## 2026-07-24 | 티켓 P6 — 기타업무(EtcTask) 편입 UI
+
+- P5 유지보수 편입 UI와 동일 패턴으로 기타업무 연결 화면 반영 (백엔드 refType 'ETC'·백필 29건·etcTask 응답·양방향 동기화는 선행 작업분 사용)
+- 티켓 목록: Type 배지에 refType==='ETC' → violet '기타업무'(유지보수 amber와 구분, dark 병기), Type 필터에 '기타업무' 옵션 추가
+- 티켓 상세: 헤더에 violet '기타업무' 유형 배지, Linked Work 밴드(violet) — etcTaskCode·병원 "A 외 N곳" 요약·접수일 + [기타업무 상세로 이동] `/etc-tasks/{id}`
+- 기타업무 상세: 상단 연결 티켓 배너("티켓: TK-… [상태배지] 보기 →", GET /api/tickets/{ticketId}) + 하단에 TicketLogPanel(ticketId) 타임라인 섹션 신규 추가(자체 로드 모드 — note 필드는 기존 폼 그대로 유지)
+- 검증: `tsc --noEmit` 0오류. 빌드·git 안 함
+- 영향 파일: app/tickets/page.tsx, app/tickets/[code]/page.tsx, app/etc-tasks/[id]/page.tsx
+
+## 2026-07-24 | 티켓 UI 필드명 영문화 (티켓 시스템 한정)
+
+- 사용자 지시로 티켓 화면의 필드 라벨·컬럼 헤더·섹션 제목을 영어로 변경 (버튼·다이얼로그·오류·안내문은 한국어 유지, 도메인 화면도 한국어 유지)
+- 목록: 컬럼 Ticket #/Sev/Type/Title/Status/Queue/Owner/Hospital/Created/Age/Last Change, 필터 라벨 Status·Saved Views·My Tickets·Unassigned·(Open Tickets)
+- 상세: Details 패널 라벨 Owner/Queue/Severity/CTI/Participants/Hospital/Created by/Created/Resolved/Closed/Master/Pending Reason, 섹션 Description·Sub-tickets, Reopened 배지, 제목·설명 수정 폼 라벨 Title/Description
+- 생성: 폼 라벨 Title/CTI/Queue/Severity/Owner/Participants/Hospital/Description, Master 배너
+- TicketLogPanel: Timeline·Comments 헤딩, 이벤트 요약 프리픽스 영문화(Status/Owner/Queue/Severity/CTI/Master·Sub-ticket, Reason:)
+- OwnerSelect: optgroup 'Queue Members'/'All', 기본 'Unassigned'. lib/ticket-shared TICKET_SEVERITY_LABELS 설명부 영문화(Sev1 · Critical 등) — 상태값 라벨(접수/배정…)은 서버 오류 메시지와 공유되므로 한국어 유지
+- 설정 3종: 컬럼 Sort/Name/Description/Members/Active/Tickets, CTI 'Default Queue' ('관리' 액션 컬럼은 타 설정 화면과 일관되게 한국어 유지)
+- 검증: `tsc --noEmit` 0오류. 빌드·git 안 함
+- 영향 파일: app/tickets/page.tsx, app/tickets/[code]/page.tsx, app/tickets/new/page.tsx, app/tickets/components/{TicketLogPanel,OwnerSelect}.tsx, app/settings/{ticket-queues,ticket-cti,ticket-pending-reasons}/page.tsx, lib/ticket-shared.ts
+
+## 2026-07-24 | 티켓 P5 — 유지보수 편입 (백엔드·백필·검증)
+
+- 상세 설계(상태·Sev·CTI·owner 매핑) 사용자 4건 확정 후 구현: 완료→CLOSED, 첫 담당자→owner, 장애 CTI 4종 신설+자동 매핑, 처리기록 티켓 일원화
+- 스키마 `20260724150000`: tickets.ref_type + maintenances.ticket_id(UNIQUE FK). `lib/ticketDomain.ts` — 매핑 함수·createTicketForMaintenance·양방향 동기화(도메인↔티켓, 한 트랜잭션·트리거 없음)
+- 유지보수 API: 생성 시 티켓 동시 생성(큐='유지보수'·CTI=장애유형·우선순위→Sev), 수정 시 syncMaintenanceToTicket, 삭제 시 티켓 동반 삭제. 티켓 API(전이/배정/수정/참여자): MAINTENANCE 연결 시 역동기화 + **Slack은 도메인 taskType이 대표**(이중 발송 방지). 도메인 '보류' 동기화 시 PENDING 사유 '기타' 자동 채움
+- 백필 `scripts/backfill-maintenance-tickets.mts`: 219건 전부 연결 + maintenance_logs 30건 → ticket_logs 이관(원본 보존, createdAt 유지). 사전 백업 dev_before_p5_backfill_20260724.dump. 분포 검증: 접수36(OPEN2+ASSIGNED34)·처리중13·보류4(PENDING)·완료166(CLOSED), Sev 3/22/194, CTI 하드웨어83·기타72·네트워크46·소프트웨어18
+- 검증: tsc 0오류 → 빌드·pm2 재시작 → **동기화 스모크 17케이스 전부 통과**(생성→티켓 자동, 도메인→티켓, 티켓→도메인 역동기화, 삭제 동반, 백필 총계 220 확인, 테스트 데이터 정리)
+- 영향 파일: prisma(마이그레이션·schema), lib/ticketDomain.ts(신규)·ticket.ts, app/api/maintenances/route.ts·[id]/route.ts, app/api/tickets/**, scripts/backfill-maintenance-tickets.mts(신규), seed-ticket-masters.sql(장애 CTI 추가)
+
+## 2026-07-24 | 티켓 P5 — 유지보수 편입 UI (유형 배지·연결 밴드·타임라인 일원화)
+
+- 티켓 목록: '유형' 컬럼(refType==='MAINTENANCE' → amber '유지보수' 배지, 순수는 -) + 유형 필터 셀렉트(전체/순수/유지보수 — GET `/api/tickets`에 `refType=MAINTENANCE|none` 필터 추가, none=refType null) + 저장된 뷰에 유형 포함(구 뷰는 `refType ?? ''` 하위호환)
+- 티켓 상세: 헤더에 '유지보수' 유형 배지, 기본정보 패널 위 "연결된 업무" 밴드(amber) — 유지보수 코드·신고자·원격/방문·접수일 요약 + [유지보수 상세로 이동] 링크
+- 유지보수 상세: 상단에 연결 티켓 배너 "티켓: TK-… [상태배지] 보기 →"(GET /api/tickets/{ticketId} 숫자 id 조회, 링크는 코드 URL). 하단 처리 기록 패널을 `TicketLogPanel`(티켓 타임라인)로 교체 — 기록 일원화(기존 30건 티켓 이관 완료 전제), ticketId 없으면 구 MaintenanceLogPanel 폴백(파일은 미사용 보존)
+- `TicketLogPanel` 단독 사용 지원: refreshToken·me·userNames/queueNames/ctiNames props 옵션화 — 미전달 시 패널이 자체 로드(/api/auth/me·users·ticket-queues·ticket-cti). 티켓 상세는 기존처럼 전달(추가 fetch 없음)
+- 백엔드(refType 컬럼·백필·maintenance 포함 응답·양방향 동기화)는 선행 작업분 사용. 검증: `tsc --noEmit` 0오류, 빌드·git 안 함
+- 영향 파일: app/tickets/page.tsx, app/tickets/[code]/page.tsx, app/tickets/components/TicketLogPanel.tsx, app/maintenances/[id]/page.tsx, app/api/tickets/route.ts(refType 필터만)
+
+## 2026-07-24 | 티켓 상세 레이아웃 개편(기본정보 상단) + 티켓번호 기반 URL
+
+- 사용자 피드백 2건 반영. (1) 상세 우측 sticky 사이드바 제거 → 헤더·액션 바 바로 아래 '기본정보' 패널을 가로 그리드(sm:2/md:3/lg:4열, 라벨 위·값 아래)로: 담당자(OwnerSelect)·큐 이관·Sev 변경 셀렉트, CTI 경로, 참여자 칩, 병원 링크, 접수자, 접수/해결/종결 시각, 마스터 링크+해제(서브인 경우), PENDING 사유·메모. ADMIN 삭제 버튼은 패널 헤더 우측. 그 아래 전체 폭으로 설명 → 서브 티켓 → 타임라인
+- (2) URL 티켓번호 기반: `app/tickets/[id]` → `app/tickets/[code]` 폴더 이동, params.code로 GET(코드·숫자 id 겸용 — 백엔드 선행 반영분), 이후 mutation은 로드된 ticket.id 사용. 링크 전부 코드 기반 교체 — 목록 행 클릭·생성 후 리다이렉트·마스터 링크·서브 테이블 링크 → `/tickets/TK-…` (TicketLogPanel은 티켓 링크 없음, new의 parentId 쿼리는 내부 숫자 유지). 구 경로 stale 산출물 `.next/types/app/tickets/[id]` 제거
+- 검증: `tsc --noEmit` 0오류. 빌드·PM2·git 안 함
+- 영향 파일: app/tickets/[code]/page.tsx(구 [id] 이동+개편), app/tickets/page.tsx, app/tickets/new/page.tsx
+
+## 2026-07-24 | 티켓 P4 — 순수 티켓 운영 개시 (시드·알림 연결·상태 영문화)
+
+- P3 게이트 사용자 승인 → P4 진행. 도메인 연결 표시 방식 사용자 확정: 설명란 링크가 아닌 **ref_type + 전용 패널**(§2.1 보강 2 — 구현은 P5~)
+- 시드(사용자 확정): 큐 4종(영업/설치·답사/유지보수/내부운영), CTI 3 Category(고객지원·영업·내부, Item별 기본 큐 라우팅 — L2 6종·L3 16종), PENDING 사유 5종 — `scripts/seed-ticket-masters.sql`(재실행 안전, nav 4행 포함, **PROD 반영 시 사용**). 기존 사용자 테스트 데이터(필드엔지니어 큐 등) 보존 병합
+- Slack 알림: TaskType에 'TICKET' 추가 — notifyFields 카탈로그(담당자/Severity/상태/큐/분류/처리기한, 기본 owner·severity·queue)·enrichTask 티켓 분기(티켓번호 URL)·생성/전이/배정자동전이 발송. 설정 화면 '티켓' 타입 자동 노출. 지연 감지는 P11
+- 티켓 상태 표기 영문 전환(Open/Assigned/In Progress/Pending/Resolved/Closed) — 사용자 지시, ticket-shared 라벨 1곳 수정으로 전 화면 적용
+- 검증: tsc 0오류 → 힙 4GB 빌드 → pm2 재시작 → /tickets 307 정상
+- 영향 파일: lib/ticket-shared.ts, lib/notify.ts, lib/notifyFields.ts, app/api/tickets/route.ts·[id]/transition·[id]/assign, scripts/seed-ticket-masters.sql(신규)
+
+## 2026-07-24 | 티켓 제목·설명 수정 기능 추가 (상세 화면)
+
+- 사용자 지적: 설명란 수정 UI 부재(표시만 됨) — 설명 카드에 '제목·설명 수정' 버튼 추가(작성 권한 + 미종결 티켓만) → 제목 input + RichTextEditor(Tiptap) 인라인 편집 → PUT /api/tickets/[id](기존 API, sanitize 서버 처리). 설명 없을 때도 카드 표시("설명이 없습니다")로 추가 입력 진입점 확보
+- 검증: tsc 0오류 → 힙 4GB 빌드 → pm2 재시작 → /tickets 307 정상
+- 영향 파일: app/tickets/[code]/page.tsx
+
+## 2026-07-24 | 티켓 상세 레이아웃·티켓번호 URL 반영분 빌드·검증
+
+- 힙 4GB 빌드 → pm2 재시작. 검증: `/tickets/TK-…` 코드 URL로 API 200 + 상세 페이지 200(인증 상태), 테스트 데이터 자동 정리
+- 사용자 요청 2건 반영판: ① 상세 기본정보 상단 가로 그리드(우측 사이드바 제거) ② 티켓번호 기반 URL(숫자 id 호환 유지)
+
+## 2026-07-24 | 티켓 개선분 dev2 빌드·스모크 (UI 개선+멤버십+마스터-서브)
+
+- 힙 4GB 빌드(129페이지) → `pm2 restart thync-dev` → /tickets 307 정상
+- 신규 기능 스모크 14케이스 전부 통과: 큐 멤버 설정/조회/목록 포함, 서브 생성(parentId)·서브 아래 서브 거부·children/parent 응답·**열린 서브 시 마스터 RESOLVED 400**·서브 해결 후 마스터 해결·서브 보유 마스터의 서브화 거부·기존 티켓 연결/해제·link 이벤트 3건·큐 삭제 시 멤버 CASCADE. 테스트 데이터 자동 정리
+- P3 게이트: 사용자 UI 시연 승인 대기 (AWS 스타일 반영판)
+
+## 2026-07-24 | 티켓 큐 멤버십·마스터-서브 백엔드 (설계 §2.1·§2.4 보강, 사용자 지시)
+
+- **큐 멤버십**(AWS resolver group): 마이그레이션 `20260724100000_add_ticket_queue_members`(N:M, CASCADE) + Prisma `TicketQueueMember` + GET queues 응답에 members 포함 + `PUT /api/settings/ticket-queues/[id]/members`. 멤버 아니어도 배정 가능(강제 아님)
+- **마스터-서브 티켓**(AWS parent/child): 마이그레이션 `20260724110000_add_ticket_parent`(tickets.parent_id self-FK SET NULL) + 규칙 3종 — 2레벨 고정(서브 아래 서브 불가·서브 보유 마스터의 서브화 불가), 마스터는 열린 서브 있으면 RESOLVED/CLOSED 전이 400, 연결/해제 시 양쪽 타임라인 link 이벤트. `POST /api/tickets/[id]/parent`, 생성 시 parentId 수용, 상세 응답 parent/children 포함. logType 'link' 추가(ticket-shared)
+- 설계 문서 §2.1(마스터-서브)·§2.4(큐 멤버십) 보강 기록. 검증: tsc 0오류
+- 영향 파일: prisma(마이그레이션 2·schema), lib/ticket-shared.ts, app/api/tickets/route.ts·[id]/route.ts·[id]/transition·[id]/parent(신규), app/api/settings/ticket-queues/route.ts·[id]/members(신규)
+
+## 2026-07-24 | 티켓 마스터-서브 UI 연결 (2레벨 고정)
+
+- 상세(`/tickets/[id]`): 서브 티켓이면 헤더 아래 "마스터: TK-… 제목" 링크(+상태 배지)와 사이드바 '마스터' 블록+해제 버튼(POST `/parent` {parentId:null}). 마스터/일반이면 좌측 설명 아래 '서브 티켓' 섹션 — children 테이블(코드 링크·제목·상태/Sev 배지·담당자), [+ 서브 티켓 생성]→`/tickets/new?parentId=`, [기존 티켓 연결] 인라인 검색(GET /api/tickets?q= — 자기 자신·CLOSED·기존 서브 제외, 선택 시 대상 티켓에 POST `/parent`). 서브 없으면 한 줄(버튼만)로 표시, 규칙 위반은 API 400 메시지 alert
+- 생성(`/tickets/new`): `useSearchParams`로 parentId 수신(Suspense 경계 추가) → 상단 마스터 안내 배너(코드·제목·상태 배지) + POST body에 parentId 포함, 제목 '서브 티켓 생성'으로 전환
+- `TicketLogPanel`: logType 'link' 이벤트 번역 추가 — parent_set("마스터 지정 → TK-…")/parent_unset/child_added("서브 추가 ← TK-…")/child_removed
+- 백엔드(parentId 컬럼·`/api/tickets/[id]/parent`·생성 시 parentId·마스터 종결 가드)는 선행 작업분 사용. 검증: `tsc --noEmit` 0오류, 빌드·git 안 함
+- 영향 파일: app/tickets/[id]/page.tsx, app/tickets/new/page.tsx, app/tickets/components/TicketLogPanel.tsx
+
+## 2026-07-24 | 티켓 P3 개선 — AWS SIM 스타일 상세 레이아웃 + 큐 멤버십 UI
+
+- 상세(`/tickets/[id]`) 2컬럼 개편: 좌측 설명+타임라인, 우측 300px sticky 메타 사이드바(배지·담당자/큐 이관/Sev 변경 셀렉트·CTI 경로·참여자·병원·접수자·시각·재오픈·PENDING 사유·ADMIN 삭제) — 모바일(lg 미만)은 사이드바가 위. 상단 고정 액션 바: [나에게 배정](본인 owner거나 해결/종결이면 숨김) + canTransition 허용 전이 버튼 + PENDING 인라인 입력
+- 담당자 셀렉트 공용화: `app/tickets/components/OwnerSelect.tsx` — 큐 멤버를 optgroup '큐 멤버'로 우선 표시(비멤버도 선택 가능). 상세=현재 큐, 생성 폼=수동 지정 큐>CTI 기본 큐 기준
+- 목록(`/tickets`): 나이(접수 후 경과)·최근 변경(statusChangedAt 경과) 컬럼 추가(상대시간 헬퍼), SEV1 행 좌측 빨간 보더+옅은 배경·SEV2 주황 보더 액센트(배지 색은 ticket-shared 유지), 저장된 필터(뷰) — 현재 필터 조합(큐·상태·Sev·mine/unassigned·검색어)을 localStorage('ticket-saved-views')에 이름 저장/적용/삭제 칩
+- 큐 설정(`/settings/ticket-queues`): 멤버 칩 컬럼 + '멤버 관리' 모달(활성 사용자 검색·체크 → PUT `/api/settings/ticket-queues/[id]/members`) — 백엔드(ticket_queue_members·members API)는 선행 작업분 사용
+- 검증: `tsc --noEmit` 0오류. 빌드·PM2·git 작업 안 함
+- 영향 파일: app/tickets/[id]/page.tsx, app/tickets/page.tsx, app/tickets/new/page.tsx, app/tickets/components/OwnerSelect.tsx(신규), app/settings/ticket-queues/page.tsx
+
+## 2026-07-24 | 티켓 P2·P3 — dev2 빌드·스모크 테스트 (P2 게이트 통과)
+
+- 힙 4GB 빌드 → `pm2 restart thync-dev` → `/`·`/tickets`·`/api/tickets` 307(인증 리다이렉트 정상)
+- HTTP 스모크 30케이스 전부 통과 (SUPER_ADMIN JWT 서명 — 미들웨어가 `payload.isActive` 요구 확인): 마스터 CRUD·CTI 4단계 거부·L3 강제·기본 큐 라우팅·TK 채번 형식·전이표 위반 400 4종(OPEN→RESOLVED, owner 없이 ASSIGNED, 사유 없이 PENDING, CLOSED 터미널)·배정 자동 연동·진행 중 해제 거부·PENDING 사유 세트/클리어·resolvedAt/closedAt 스탬프·재오픈 카운트·타임라인 이벤트(created/status_change×8+/assign/comment)·시스템 이벤트 불변·목록 필터. 테스트 데이터 전량 자동 정리
+- P2 게이트(전이표 동작 검증) 통과. P3 게이트는 사용자 UI 시연 승인 대기
+- (보강) 설정 하위 메뉴 누락 발견 — nav_menu_items에 settings/ticket-queues·ticket-cti·ticket-pending-reasons 3행 추가(parent 'settings', group '티켓'). 티켓 관련 nav 행은 총 4개, PROD 반영 시 전부 재INSERT 필요
+
+## 2026-07-23 | 티켓 P3 — 기본 UI (목록·생성·상세·마스터 설정 3종)
+
+- P2 API 위에 티켓 기본 UI 구현. 기존 페이지 패턴(유지보수 목록/상세, etc-task-status 설정) 그대로 준수, 배지 색·라벨·전이표는 `lib/ticket-shared.ts`만 import(서버 전용 lib/ticket.ts 클라이언트 유입 방지)
+- `/tickets` 목록: 큐 탭(전체+활성 큐) + 상태 다중 토글(기본=열린 티켓 open=true)·Sev·내 티켓/미배정·검색(디바운스) 필터, 서버 페이지네이션(30건), 행 클릭 → 상세, VIEWER는 생성 버튼 숨김
+- `/tickets/new` 생성 폼: CTI 3단 셀렉트(트리 1회 로드 후 클라이언트 구성) + 선택 Item 기본 큐 표시·수동 변경, Sev(기본 SEV4), owner/참여자 셀렉트(`/api/users` 재사용), 병원 검색 모달(MaintenanceForm 패턴 재사용), 설명 Tiptap(RichTextEditor) → 저장 후 상세 이동
+- `/tickets/[id]` 상세: 헤더(코드·상태/Sev 배지·재오픈 횟수)·메타 패널(큐/CTI 경로/담당자/참여자/병원 링크/접수자/접수·해결·종결 시각)·PENDING 사유 배너·액션(canTransition으로 허용 전이 버튼만, PENDING은 사유+메모 인라인, 담당자/큐/Sev 변경, 참여자 관리, ADMIN 삭제)·타임라인. 모든 mutation 성공 시 재조회+타임라인 갱신+router.refresh(), 실패 시 API {error} alert(전이표 400 메시지 그대로)
+- `TicketLogPanel`: 코멘트(HTML 렌더, 본인·ADMIN 수정/삭제 — MaintenanceLogPanel 패턴)와 시스템 이벤트(payload를 상태/Sev 라벨·사용자/큐/CTI 이름으로 번역한 회색 한 줄) 단일 타임라인 + 코멘트 작성
+- 설정 3종: `/settings/ticket-queues`(etc-task-status 패턴 + 설명·활성 토글·티켓 수, 티켓 있으면 삭제 비활성+툴팁), `/settings/ticket-cti`(Category/Type/Item 3컬럼 트리 — 추가/이름수정/활성/삭제, Item 기본 큐 지정), `/settings/ticket-pending-reasons`(etc-task-status 패턴)
+- 검증: `tsc --noEmit` 0오류. 빌드·PM2·git 작업 안 함(사용자 요청 시)
+- 영향 파일: app/tickets/page.tsx, app/tickets/new/page.tsx, app/tickets/[id]/page.tsx, app/tickets/components/{TicketStatusBadge,TicketSeverityBadge,TicketLogPanel}.tsx, app/settings/{ticket-queues,ticket-cti,ticket-pending-reasons}/page.tsx, README.md
+
+## 2026-07-23 | 티켓 P2 — 코어 API (전이표 강제·배정·worklog·CTI 라우팅)
+
+- 상세 설계(전이표·API 시그니처·이벤트 payload)를 ticket_dev_schedule.md P2 섹션에 작성 후 구현 (UI 확인 게이트는 P3로 — 사용자 방침)
+- `lib/ticket.ts` — 전이표(OPEN→ASSIGNED/CLOSED … CLOSED 터미널), canTransition, TK-YYYYMM-NNNNN 채번(P2002 재시도), addTicketEvent(시스템 이벤트 기록), 상태/Sev 라벨
+- 티켓 API: `/api/tickets`(목록 필터·페이지네이션/생성 — CTI L3 필수·기본 큐 라우팅·owner 지정 시 ASSIGNED), `/[id]`(상세/수정/삭제), `/[id]/transition`(전이표 위반 400·PENDING 사유 필수·재오픈 reopen_count), `/[id]/assign`(OPEN↔ASSIGNED 자동 연동·IN_PROGRESS 이후 해제 거부), `/[id]/queue`(이관), `/[id]/participants`, `/[id]/logs`(+`/[logId]` — 코멘트 Tiptap sanitize, 시스템 이벤트 불변)
+- 마스터 API: `settings/ticket-queues`·`ticket-cti`(3단계 검증·기본 큐)·`ticket-pending-reasons` (+각 `[id]`) — 사용 중 삭제 방지
+- 모든 mutation: ticket_logs 시스템 이벤트 + logAudit. 기존 컨벤션(getAuthUser·VIEWER 403·한국어 오류) 준수
+- 검증: `tsc --noEmit` 0오류 · 전이표 20케이스 단위 테스트 통과(tsx). HTTP 스모크는 P3 빌드 시 수행 예정
+- 영향 파일: lib/ticket.ts, app/api/tickets/**(8), app/api/settings/ticket-*(6). 빌드·커밋 안 함. 다음: P3 티켓 기본 UI
+
+## 2026-07-23 | 티켓 P1 — DB 뼈대 (enum 2종 + 테이블 6종)
+
+- 상세 설계를 `ticket_dev_schedule.md` P1 섹션에 작성 후 사용자 승인 받아 구현
+- 마이그레이션 `20260723150000_add_ticket_core` 수동 생성·DEV 적용·resolve --applied: enum `ticket_status`(OPEN/ASSIGNED/IN_PROGRESS/PENDING/RESOLVED/CLOSED)·`ticket_severity`(SEV1~5), 테이블 `tickets`(TK-YYYYMM-NNNNN 채번, queue 필수, cti DB-nullable/API-필수, owner 단일, due_at 선반영)·`ticket_queues`·`ticket_cti`(parent_id 트리, level 1~3 CHECK, default_queue 라우팅)·`ticket_participants`·`ticket_logs`(comment+시스템 이벤트 JSONB)·`ticket_pending_reasons` + 인덱스 7종
+- Prisma 모델 6종 + User 역참조 4건(ownedTickets/createdTickets/ticketParticipations/ticketLogs) + Hospital.tickets 추가, `prisma generate`
+- 검증: `migrate status` 93개 up to date · `\dt ticket*` 6테이블 · `prisma.ticket.findMany()` 정상 · `tsc --noEmit` 0오류. 시드·API·화면 없음(P2~P4). README 스키마 섹션에 티켓 시스템 추가
+- 빌드·커밋 안 함(사용자 요청 시). 다음: P1 게이트(스키마 리뷰 승인) → P2 코어 API
+
+## 2026-07-23 | 티켓 설계 로드맵 승인(설계 종료) + PROD→dev2 데이터 동기화
+
+- 사용자 로드맵(P1~P13) 승인 — 설계 단계 D0~D3 완전 종료, 이후 마스터 문서는 `ticket_dev_schedule.md`
+- 티켓 개발 시작 전 PROD 데이터 동기화(dev2 절차): 금일 01:00 정기 백업 `thync_ops_20260723_010001.dump`(14MB) SCP → 마이그레이션 상태 일치 확인(양쪽 92개, 최신 20260720230000_ai_usage_logs) → pm2 stop → DEV 백업 `dev_before_sync_20260723_142900.dump` → 73개 테이블 TRUNCATE(_prisma_migrations 제외) → 풀덤프 TOC 필터 후 single-transaction data-only 복원(오류 0) → pm2 start, HTTP 307 정상
+- 주요 row: hospitals 79,738 · projects 243 · maintenances 219 · site_visits 104 · install_plans 71 · etc_tasks 29 · tasks 559 · wiki_pages 112 · inventory_transactions 168
+- 다음: 티켓 Phase 1(DB 뼈대) 시작 가능
+
+## 2026-07-23 | 티켓 시스템 설계 D3 — 구현 로드맵 P1~P13 작성
+
+- `ticket_dev_schedule.md` 신규 (위키 스케줄 형식) — P1 DB 뼈대 → P2 코어 API(전이표 강제) → P3 기본 UI(큐 뷰) → P4 순수 티켓 운영 개시 → P5~P9 도메인 편입(유지보수→기타→답사→설치→프로젝트, 모듈당 1Phase·병행 운영→백필→전환 공통 패턴) → P10 tasks 대체·폐기 → P11 알림·SLA 재편(Sev 기반) → P12 지표·대시보드 → P13 안정화
+- 각 Phase는 골자만 기재, 상세 설계는 Phase 시작 시 작성(전역 결정 원본은 ticket_system_design.md §2). 잠정 로드맵(ticket_design_plan.md P1~P11)은 이 문서로 대체
+- 코드·DB 변경 없음 (문서만). 게이트 대기: 사용자 로드맵 승인 → 승인 시 설계 단계(D0~D3) 종료, 구현 P1 시작 가능
+
+## 2026-07-23 | 티켓 시스템 설계 D2b — 전역 결정 11항목 사용자 확정 (게이트 통과)
+
+- 사용자 결정: 11개 권장안 일괄 채택 + 쟁점 4건 개별 확인 — ① 프로젝트 **완전 편입**(링크만 옵션 기각) ② Sev 백필 매핑 긴급→Sev2·**Sev1 신규 예약** ③ 티켓 상태 **하드 enum + 전이표 강제**(StatusCode 관례 미적용) ④ 나머지 ★안 그대로
+- `ticket_system_design.md` §2를 확정 상태로 갱신 — 이후 모든 구현 Phase의 전역 결정 원본(변경 시 사용자 승인 필요). 구현 코드 작성 해금
+- 코드·DB 변경 없음 (문서만). 다음: D3(구현 로드맵 → ticket_dev_schedule.md)
+
+## 2026-07-23 | 티켓 시스템 설계 D2a — 전역 결정 옵션 시트 (11항목)
+
+- D1b 인벤토리 게이트 사용자 승인(편입 5모듈: 유지보수·답사·설치계획·기타업무·프로젝트, tasks는 티켓으로 대체 검토)
+- `ticket_system_design.md` §2.1~2.11 옵션 시트 작성(전 항목 결정 보류, D2b 확정 대기) — 권장안 요지: 도메인→ticket_id FK(1:1), tasks 흡수·백필 후 폐기, AWS 6상태 하드 enum+전이표 강제, 큐 필수 소속+owner 단일+참여자 N:M, CTI 3단계+큐 자동 라우팅, **Sev1~5 5단계(사용자 명시 지시로 고정 — 기존 긴급/높음/보통/낮음→Sev2~5 매핑, Sev1 신규 예약)**, ticket_logs 단일 worklog(코멘트 Tiptap+시스템 이벤트 JSONB), public 스키마, 편입 순서 유지보수→기타→답사→설치→프로젝트(프로젝트 포함 여부는 D2b 쟁점), notify.ts 확장, 지표는 ticket_logs 겸용
+- 코드·DB 변경 없음 (문서만). 다음: D2b 결정 세션(한 세션 통으로)
+
+## 2026-07-23 | 티켓 시스템 설계 D1b — 잔여 모듈 인벤토리·경계 판별·공통 매트릭스
+
+- `ticket_system_design.md` 확장 — 1.2⑤⑥ 기타업무(병원 N:M 유일)·프로젝트(BuildStatus 별도 마스터, 이슈노트 위키 전환) 상세, 1.3.1 경계 판별(병원 영업 파이프라인=자동 파생 상태, 차량예약=셀프서비스, 상담큐=폐기 레거시 → 셋 다 티켓 제외), 1.4 공통 요소 매트릭스
+- 매트릭스 결론: 티켓 껍데기 승격 후보 = 상태+statusChangedAt·담당 N:M·우선순위/기한·worklog·Slack/지연감지(이미 taskType 횡단 추상화). 조직(큐) 배정은 전 시스템 부재로 순수 신규. 티켓이 해소할 실측 갭: 프로젝트·답사(직접생성) Task 롤업 누락, 설치계획 statusChangedAt 부재, 3개 모듈 처리 이력 부재
+- 코드·DB 변경 없음 (문서만). 다음: 인벤토리 사용자 승인 게이트 → D2a(전역 결정 옵션 시트)
+
+## 2026-07-23 | 티켓 시스템 설계 D1a — 핵심 4모듈 현황 인벤토리
+
+- `ticket_system_design.md` 신규 (설계안 본체) — 섹션 1.1 공통 워크플로 인프라(StatusCode·Slack notify·audit_logs·인입 큐), 1.2 핵심 4모듈 인벤토리(유지보수·답사·업무·설치계획), 1.3 워크플로 모듈 전수 스캔(모델 67개, DB 74테이블 row 실측)
+- 주요 발견: ① tasks는 독립 모듈이 아니라 5개 원본 모듈의 롤업 체크리스트(refCode 느슨 연결) ② 상태는 Prisma enum이 아닌 status_codes 테이블 기반, 전이 강제는 병원 영업 파이프라인(lib/hospitalStatus.ts)이 유일 ③ 알림은 Slack으로 이미 모듈 횡단 추상화(task_created/status_changed/delayed) ④ EtcTask·Project도 완전한 워크플로 모듈 ⑤ InstallPlan만 statusChangedAt 부재(지연 감지 갭)
+- 방침 추가: AWS 티켓시스템(SIM/tt) 충실 재현을 D2 기본 권장안으로 (`ticket_design_plan.md` 사전 합의 5)
+- 코드·DB 변경 없음 (문서만). 다음: D1b(EtcTask·Project·Hospital 파이프라인 등 잔여 조사 + 공통 매트릭스)
+
+## 2026-07-23 | 티켓 시스템 — 설계 작업 계획(메타 문서) 작성
+
+- **배경**: 전사 업무를 AWS식 티켓베이스로 고도화하되, 기존 도메인 모듈별 구조화 데이터(인사이트·대시보드)는 유지하기로 합의. 초대형 프로젝트라 설계 작업 자체도 Phase 분할 필요
+- `ticket_design_plan.md` 신규 — 설계안을 작성하기 위한 설계안: 사전 합의 사항(티켓=워크플로 껍데기 / 도메인 레코드=구조화 본문, 필드 소유권 규율), 문서 체계(design_plan → system_design → dev_schedule), 설계 Phase 로드맵(D1 현황 인벤토리 → D2 뼈대 설계·전역 결정 한 세션 통 확정 → D3 구현 로드맵), 세션 프로토콜·약속어("티켓 설계 Phase D-N 진행해줘")·게이트 체크리스트 정의
+- (같은 날 보강) 스텝 세분화: D1→D1a/D1b, D2→D2a(옵션 시트)/D2b(결정 한 세션 통), 잠정 구현 로드맵 P1~P11 추가 — 한 스텝 = 한 세션 크기 원칙
+- 코드·DB 변경 없음 (문서만)
+
 ## 2026-07-21 | 자재관리 모달 튕김 버그 수정 PROD 배포
 
 - `8fa60e5` push → PROD pull → 힙 4GB 빌드 → `pm2 restart thync-prod` (DB 변경·신규 패키지 없음)

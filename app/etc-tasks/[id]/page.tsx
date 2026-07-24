@@ -2,7 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
+import type { TicketStatus } from '@prisma/client'
 import EtcTaskForm from '../EtcTaskForm'
+import TicketLogPanel from '@/app/tickets/components/TicketLogPanel'
+import TicketStatusBadge from '@/app/tickets/components/TicketStatusBadge'
 
 interface EtcTaskFile {
   id: number
@@ -24,6 +28,13 @@ interface EtcTaskData {
   hospitals: { hospital: { hospitalCode: string; hospitalName: string; hiraHospitalName: string } }[]
   files: EtcTaskFile[]
   visits: { id: number; startDate: string; endDate: string }[]
+  ticketId: number | null
+}
+
+interface LinkedTicket {
+  id: number
+  ticketCode: string
+  status: TicketStatus
 }
 
 export default function EditEtcTaskPage() {
@@ -33,6 +44,7 @@ export default function EditEtcTaskPage() {
   const [data, setData] = useState<EtcTaskData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [linkedTicket, setLinkedTicket] = useState<LinkedTicket | null>(null)
 
   useEffect(() => {
     fetch(`/api/etc-tasks/${id}`)
@@ -40,6 +52,12 @@ export default function EditEtcTaskPage() {
       .then((d) => {
         if (d.etcTask) {
           setData(d.etcTask)
+          // 연결된 티켓 코드·상태 조회 (숫자 id 허용)
+          if (d.etcTask.ticketId) {
+            fetch(`/api/tickets/${d.etcTask.ticketId}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .then((t) => { if (t?.ticket) setLinkedTicket(t.ticket) })
+          }
         } else {
           setError('기타업무를 찾을 수 없습니다.')
         }
@@ -91,9 +109,32 @@ export default function EditEtcTaskPage() {
           <h1 className="text-2xl font-bold text-gray-900">기타업무 상세 / 수정</h1>
           <p className="mt-1 font-mono text-sm text-gray-400">{data.etcTaskCode ?? `ETC-${String(data.id).padStart(4, '0')}`}</p>
         </div>
+
+        {/* 연결된 티켓 배너 */}
+        {linkedTicket && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+            <span className="font-medium">티켓:</span>
+            <span className="font-mono text-xs">{linkedTicket.ticketCode}</span>
+            <TicketStatusBadge status={linkedTicket.status} />
+            <Link
+              href={`/tickets/${linkedTicket.ticketCode}`}
+              className="ml-auto shrink-0 rounded-md border border-blue-300 bg-white px-2.5 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-700 dark:bg-transparent dark:text-blue-300 dark:hover:bg-blue-900/40"
+            >
+              보기 →
+            </Link>
+          </div>
+        )}
+
         <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
           <EtcTaskForm mode="edit" initialData={initialData} />
         </div>
+
+        {/* 티켓 타임라인 — 폼(note 필드)과 별개, 진행 기록은 여기에 */}
+        {data.ticketId && (
+          <div className="mt-4 rounded-xl bg-white p-6 shadow-sm border border-gray-200">
+            <TicketLogPanel ticketId={data.ticketId} />
+          </div>
+        )}
       </div>
     </div>
   )

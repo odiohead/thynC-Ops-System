@@ -10,82 +10,83 @@ datasource db {
 }
 
 model HiraHospital {
-  id              Int      @id @default(autoincrement())
-  hiraId          String   @unique @map("hira_id")
-  name            String   @map("name")
-  typeCode        String   @map("type_code")
-  typeName        String   @map("type_name")
-  sidoCode        String   @map("sido_code")
-  sidoName        String   @map("sido_name")
-  sigunguCode     String   @map("sigungu_code")
-  sigunguName     String   @map("sigungu_name")
-  eupmyeondong    String?  @map("eupmyeondong")
-  postalCode      String?  @map("postal_code")
-  address         String?  @map("address")
-  phone           String?  @map("phone")
-  homepage        String?  @map("homepage")
-  totalDoctors    Int?     @map("total_doctors")
-  openedAt        String?  @map("opened_at")
-  coordinateX     String?  @map("coordinate_x")
-  coordinateY     String?  @map("coordinate_y")
-  mdeptGdrCnt     Int?     @map("mdept_gdr_cnt")
-  mdeptIntnCnt    Int?     @map("mdept_intn_cnt")
-  mdeptResdntCnt  Int?     @map("mdept_resdnt_cnt")
-  mdeptSdrCnt     Int?     @map("mdept_sdr_cnt")
-  detyGdrCnt      Int?     @map("dety_gdr_cnt")
-  detyIntnCnt     Int?     @map("dety_intn_cnt")
-  detyResdntCnt   Int?     @map("dety_resdnt_cnt")
-  detySdrCnt      Int?     @map("dety_sdr_cnt")
-  cmdcGdrCnt      Int?     @map("cmdc_gdr_cnt")
-  cmdcIntnCnt     Int?     @map("cmdc_intn_cnt")
-  cmdcResdntCnt   Int?     @map("cmdc_resdnt_cnt")
-  cmdcSdrCnt      Int?     @map("cmdc_sdr_cnt")
-  midwifeCnt      Int?     @map("midwife_cnt")
-  createdAt       DateTime @default(now()) @map("created_at")
-  hospital        Hospital?
+  id             Int       @id @default(autoincrement())
+  hiraId         String    @unique @map("hira_id")
+  name           String    @map("name")
+  typeCode       String    @map("type_code")
+  typeName       String    @map("type_name")
+  sidoCode       String    @map("sido_code")
+  sidoName       String    @map("sido_name")
+  sigunguCode    String    @map("sigungu_code")
+  sigunguName    String    @map("sigungu_name")
+  eupmyeondong   String?   @map("eupmyeondong")
+  postalCode     String?   @map("postal_code")
+  address        String?   @map("address")
+  phone          String?   @map("phone")
+  homepage       String?   @map("homepage")
+  totalDoctors   Int?      @map("total_doctors")
+  openedAt       String?   @map("opened_at")
+  coordinateX    String?   @map("coordinate_x")
+  coordinateY    String?   @map("coordinate_y")
+  mdeptGdrCnt    Int?      @map("mdept_gdr_cnt")
+  mdeptIntnCnt   Int?      @map("mdept_intn_cnt")
+  mdeptResdntCnt Int?      @map("mdept_resdnt_cnt")
+  mdeptSdrCnt    Int?      @map("mdept_sdr_cnt")
+  detyGdrCnt     Int?      @map("dety_gdr_cnt")
+  detyIntnCnt    Int?      @map("dety_intn_cnt")
+  detyResdntCnt  Int?      @map("dety_resdnt_cnt")
+  detySdrCnt     Int?      @map("dety_sdr_cnt")
+  cmdcGdrCnt     Int?      @map("cmdc_gdr_cnt")
+  cmdcIntnCnt    Int?      @map("cmdc_intn_cnt")
+  cmdcResdntCnt  Int?      @map("cmdc_resdnt_cnt")
+  cmdcSdrCnt     Int?      @map("cmdc_sdr_cnt")
+  midwifeCnt     Int?      @map("midwife_cnt")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  hospital       Hospital?
 
   @@map("hira_hospitals")
   @@schema("public")
 }
 
 model Hospital {
-  id                Int      @id @default(autoincrement())
-  hospitalCode      String   @unique @map("hospital_code")
-  hiraId            String?  @unique @map("hira_id")
-  hiraHospitalName  String   @map("hira_hospital_name")
-  hospitalName      String   @map("hospital_name")
-  type              String   @map("type")
-  sidoCode       String?  @map("sido_code")
-  sidoName       String?  @map("sido_name")
-  sigunguCode    String?  @map("sigungu_code")
-  sigunguName    String?  @map("sigungu_name")
-  eupmyeondong   String?  @map("eupmyeondong")
-  postalCode     String?  @map("postal_code")
-  address        String?  @map("address")
-  coordinateX    String?  @map("coordinate_x")
-  coordinateY    String?  @map("coordinate_y")
-  status         String   @map("status")
-  introType      String?  @map("intro_type")
-  introBeds      Int?     @map("intro_beds")
-  contractDate   DateTime? @map("contract_date")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-  hiraHospital        HiraHospital? @relation(fields: [hiraId], references: [hiraId])
-  daewoongAssignments DaewoongHospitalAssignment[]
-  projects            Project[]
-  meta                HospitalMeta?
-  hospitalDevices     HospitalDevice[]
-  siteVisits          SiteVisit[]
-  introTypes          HospitalIntroType[]
-  installPlans        InstallPlan[]
-  maintenances        Maintenance[]
-  consultationQueues  ConsultationQueue[]
-  tasks               Task[]
-  etcTaskHospitals    EtcTaskHospital[]
+  id                    Int                          @id @default(autoincrement())
+  hospitalCode          String                       @unique @map("hospital_code")
+  hiraId                String?                      @unique @map("hira_id")
+  hiraHospitalName      String                       @map("hira_hospital_name")
+  hospitalName          String                       @map("hospital_name")
+  type                  String                       @map("type")
+  sidoCode              String?                      @map("sido_code")
+  sidoName              String?                      @map("sido_name")
+  sigunguCode           String?                      @map("sigungu_code")
+  sigunguName           String?                      @map("sigungu_name")
+  eupmyeondong          String?                      @map("eupmyeondong")
+  postalCode            String?                      @map("postal_code")
+  address               String?                      @map("address")
+  coordinateX           String?                      @map("coordinate_x")
+  coordinateY           String?                      @map("coordinate_y")
+  status                String                       @map("status")
+  introType             String?                      @map("intro_type")
+  introBeds             Int?                         @map("intro_beds")
+  contractDate          DateTime?                    @map("contract_date")
+  createdAt             DateTime                     @default(now()) @map("created_at")
+  updatedAt             DateTime                     @updatedAt @map("updated_at")
+  hiraHospital          HiraHospital?                @relation(fields: [hiraId], references: [hiraId])
+  daewoongAssignments   DaewoongHospitalAssignment[]
+  projects              Project[]
+  meta                  HospitalMeta?
+  hospitalDevices       HospitalDevice[]
+  siteVisits            SiteVisit[]
+  introTypes            HospitalIntroType[]
+  installPlans          InstallPlan[]
+  maintenances          Maintenance[]
+  consultationQueues    ConsultationQueue[]
+  tasks                 Task[]
+  etcTaskHospitals      EtcTaskHospital[]
   inventoryTransactions InventoryTransaction[]
   inventoryUnits        InventoryUnit[]
   aiChatSessions        AiChatSession[]
   aiUsageLogs           AiUsageLog[]
+  tickets               Ticket[]
 
   @@map("hospitals")
   @@schema("public")
@@ -117,23 +118,23 @@ model DaewoongHospitalAssignment {
 }
 
 model StatusCode {
-  id        Int      @id @default(autoincrement())
-  name      String   @map("name")
-  value     String?  @map("value")
-  order     Int      @default(0) @map("order")
-  color     String?  @map("color")
-  category  String   @default("HOSPITAL") @map("category")
-  createdAt DateTime @default(now()) @map("created_at")
-  siteVisits                    SiteVisit[]
-  hospitalIntroTypes            HospitalIntroType[]
-  introTypeProjects             Project[]              @relation("ProjectIntroType")
-  consultationTypeQueues        ConsultationQueue[]    @relation("ConsultationTypeQueue")
-  documentTypeQueues            ConsultationQueue[]    @relation("DocumentTypeQueue")
-  maintenanceTypes              Maintenance[]          @relation("MaintenanceType")
-  maintenanceStatuses           Maintenance[]          @relation("MaintenanceStatus")
-  etcTaskStatuses               EtcTask[]              @relation("EtcTaskStatus")
-  manufacturerItems             InventoryItem[]        @relation("ItemManufacturer")
-  reasonTransactions            InventoryTransaction[] @relation("TxReason")
+  id                     Int                    @id @default(autoincrement())
+  name                   String                 @map("name")
+  value                  String?                @map("value")
+  order                  Int                    @default(0) @map("order")
+  color                  String?                @map("color")
+  category               String                 @default("HOSPITAL") @map("category")
+  createdAt              DateTime               @default(now()) @map("created_at")
+  siteVisits             SiteVisit[]
+  hospitalIntroTypes     HospitalIntroType[]
+  introTypeProjects      Project[]              @relation("ProjectIntroType")
+  consultationTypeQueues ConsultationQueue[]    @relation("ConsultationTypeQueue")
+  documentTypeQueues     ConsultationQueue[]    @relation("DocumentTypeQueue")
+  maintenanceTypes       Maintenance[]          @relation("MaintenanceType")
+  maintenanceStatuses    Maintenance[]          @relation("MaintenanceStatus")
+  etcTaskStatuses        EtcTask[]              @relation("EtcTaskStatus")
+  manufacturerItems      InventoryItem[]        @relation("ItemManufacturer")
+  reasonTransactions     InventoryTransaction[] @relation("TxReason")
 
   @@unique([name, category])
   @@map("status_codes")
@@ -141,22 +142,22 @@ model StatusCode {
 }
 
 model ConsultationQueue {
-  id                  Int         @id @default(autoincrement())
-  hospitalCode        String?     @map("hospital_code")
-  consultationTypeId  Int?        @map("consultation_type_id")
-  documentTypeId      Int?        @map("document_type_id")
-  conclusion          String?
-  chatHistory         Json        @default("[]") @map("chat_history")
-  aiSummary           String?     @map("ai_summary")
-  status              String      @default("PENDING")
-  consultedById       String      @map("consulted_by_id")
-  createdAt           DateTime    @default(now()) @map("created_at")
-  updatedAt           DateTime    @default(now()) @map("updated_at")
+  id                 Int      @id @default(autoincrement())
+  hospitalCode       String?  @map("hospital_code")
+  consultationTypeId Int?     @map("consultation_type_id")
+  documentTypeId     Int?     @map("document_type_id")
+  conclusion         String?
+  chatHistory        Json     @default("[]") @map("chat_history")
+  aiSummary          String?  @map("ai_summary")
+  status             String   @default("PENDING")
+  consultedById      String   @map("consulted_by_id")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @default(now()) @map("updated_at")
 
-  hospital            Hospital?   @relation(fields: [hospitalCode], references: [hospitalCode])
-  consultationType    StatusCode? @relation("ConsultationTypeQueue", fields: [consultationTypeId], references: [id])
-  documentType        StatusCode? @relation("DocumentTypeQueue", fields: [documentTypeId], references: [id])
-  consultedBy         User        @relation(fields: [consultedById], references: [id])
+  hospital         Hospital?   @relation(fields: [hospitalCode], references: [hospitalCode])
+  consultationType StatusCode? @relation("ConsultationTypeQueue", fields: [consultationTypeId], references: [id])
+  documentType     StatusCode? @relation("DocumentTypeQueue", fields: [documentTypeId], references: [id])
+  consultedBy      User        @relation(fields: [consultedById], references: [id])
 
   @@map("consultation_queue")
   @@schema("public")
@@ -186,49 +187,54 @@ model Organization {
 }
 
 model User {
-  id             String        @id @default(uuid())
-  email          String        @unique
-  password       String
-  name           String
-  phone          String
-  role           Role          @default(USER)
-  isActive       Boolean       @default(true) @map("is_active")
-  vehicleReservationBlocked Boolean @default(false) @map("vehicle_reservation_blocked")
-  organizationId Int?          @map("organization_id")
-  departmentId   Int?          @map("department_id")
-  slackUserId    String?       @map("slack_user_id") @db.VarChar(20) // Slack DM 매핑 캐시 (Phase 4)
-  slackNotifyEnabled Boolean   @default(true) @map("slack_notify_enabled") // 계정별 Slack 발송 유무(false=미발송)
-  createdAt      DateTime      @default(now()) @map("created_at")
-  lastLoginAt    DateTime?     @map("last_login_at")
-  organization            Organization?                @relation(fields: [organizationId], references: [id])
-  department              Department?                  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  fieldEngineers          FieldEngineer[]
-  daewoongSiteVisits      SiteVisit[]                  @relation("SiteVisitDaewoongUser")
-  hospitalAssignments     DaewoongHospitalAssignment[]
-  projectAssignees        ProjectAssignee[]
-  installPlanAssignees    InstallPlanAssignee[]
-  siteVisitAssignees      SiteVisitAssignee[]
-  maintenanceAssignees    MaintenanceAssignee[]
-  maintenanceLogs         MaintenanceLog[]             @relation("MaintenanceLogAuthor")
-  etcTaskAssignees        EtcTaskAssignee[]
-  consultationQueues      ConsultationQueue[]
-  wikiPagesAuthored       WikiPage[]                   @relation("WikiPageAuthor")
-  wikiPagesEdited         WikiPage[]                   @relation("WikiPageLastEditor")
-  wikiAttachmentsUploaded WikiAttachment[]             @relation("WikiAttachmentUploader")
-  wikiPageRefsCreated     WikiPageReference[]          @relation("WikiPageRefCreator")
-  wikiFavorites           WikiFavorite[]               @relation("WikiFavoriteUser")
-  wikiViewLogs            WikiViewLog[]                @relation("WikiViewLogUser")
-  wikiVersionsSaved       WikiVersion[]                @relation("WikiVersionSaver")
-  wikiCommentsAuthored    WikiComment[]                @relation("WikiCommentAuthor")
-  vehicleReservations     VehicleReservation[]         @relation("VehicleReservationUser")
-  vehicleLogsDriven       VehicleLog[]                 @relation("VehicleLogDriver")
-  vehicleLogsCreated      VehicleLog[]                 @relation("VehicleLogCreator")
-  inventoryManager        InventoryManager?
-  inventoryTxActed        InventoryTransaction[]       @relation("InventoryTxActor")
-  inventoryTxCanceled     InventoryTransaction[]       @relation("InventoryTxCanceler")
-  aiChatSessions          AiChatSession[]
-  aiUsageLogs             AiUsageLog[]
-  gatewayPlanJobs         GatewayPlanJob[]             @relation("GatewayPlanJobCreator")
+  id                        String                       @id @default(uuid())
+  email                     String                       @unique
+  password                  String
+  name                      String
+  phone                     String
+  role                      Role                         @default(USER)
+  isActive                  Boolean                      @default(true) @map("is_active")
+  vehicleReservationBlocked Boolean                      @default(false) @map("vehicle_reservation_blocked")
+  organizationId            Int?                         @map("organization_id")
+  departmentId              Int?                         @map("department_id")
+  slackUserId               String?                      @map("slack_user_id") @db.VarChar(20) // Slack DM 매핑 캐시 (Phase 4)
+  slackNotifyEnabled        Boolean                      @default(true) @map("slack_notify_enabled") // 계정별 Slack 발송 유무(false=미발송)
+  createdAt                 DateTime                     @default(now()) @map("created_at")
+  lastLoginAt               DateTime?                    @map("last_login_at")
+  organization              Organization?                @relation(fields: [organizationId], references: [id])
+  department                Department?                  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  fieldEngineers            FieldEngineer[]
+  daewoongSiteVisits        SiteVisit[]                  @relation("SiteVisitDaewoongUser")
+  hospitalAssignments       DaewoongHospitalAssignment[]
+  projectAssignees          ProjectAssignee[]
+  installPlanAssignees      InstallPlanAssignee[]
+  siteVisitAssignees        SiteVisitAssignee[]
+  maintenanceAssignees      MaintenanceAssignee[]
+  maintenanceLogs           MaintenanceLog[]             @relation("MaintenanceLogAuthor")
+  etcTaskAssignees          EtcTaskAssignee[]
+  consultationQueues        ConsultationQueue[]
+  wikiPagesAuthored         WikiPage[]                   @relation("WikiPageAuthor")
+  wikiPagesEdited           WikiPage[]                   @relation("WikiPageLastEditor")
+  wikiAttachmentsUploaded   WikiAttachment[]             @relation("WikiAttachmentUploader")
+  wikiPageRefsCreated       WikiPageReference[]          @relation("WikiPageRefCreator")
+  wikiFavorites             WikiFavorite[]               @relation("WikiFavoriteUser")
+  wikiViewLogs              WikiViewLog[]                @relation("WikiViewLogUser")
+  wikiVersionsSaved         WikiVersion[]                @relation("WikiVersionSaver")
+  wikiCommentsAuthored      WikiComment[]                @relation("WikiCommentAuthor")
+  vehicleReservations       VehicleReservation[]         @relation("VehicleReservationUser")
+  vehicleLogsDriven         VehicleLog[]                 @relation("VehicleLogDriver")
+  vehicleLogsCreated        VehicleLog[]                 @relation("VehicleLogCreator")
+  inventoryManager          InventoryManager?
+  inventoryTxActed          InventoryTransaction[]       @relation("InventoryTxActor")
+  inventoryTxCanceled       InventoryTransaction[]       @relation("InventoryTxCanceler")
+  aiChatSessions            AiChatSession[]
+  aiUsageLogs               AiUsageLog[]
+  gatewayPlanJobs           GatewayPlanJob[]             @relation("GatewayPlanJobCreator")
+  ownedTickets              Ticket[]                     @relation("TicketOwner")
+  createdTickets            Ticket[]                     @relation("TicketCreator")
+  ticketParticipations      TicketParticipant[]          @relation("TicketParticipantUser")
+  ticketLogs                TicketLog[]                  @relation("TicketLogAuthor")
+  ticketQueueMemberships    TicketQueueMember[]          @relation("TicketQueueMemberUser")
 
   @@map("users")
   @@schema("public")
@@ -261,13 +267,13 @@ model FieldEngineer {
 }
 
 model DeviceInfo {
-  id          Int      @id @default(autoincrement())
-  deviceModel String   @unique @map("device_model")
-  deviceName  String   @map("device_name")
-  isActive    Boolean  @default(true) @map("is_active")
-  sortOrder   Int      @default(0) @map("sort_order")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id              Int              @id @default(autoincrement())
+  deviceModel     String           @unique @map("device_model")
+  deviceName      String           @map("device_name")
+  isActive        Boolean          @default(true) @map("is_active")
+  sortOrder       Int              @default(0) @map("sort_order")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
   devices         ProjectDevice[]
   hospitalDevices HospitalDevice[]
   inventoryItems  InventoryItem[]
@@ -277,16 +283,16 @@ model DeviceInfo {
 }
 
 model Contractor {
-  id             Int       @id @default(autoincrement())
-  code           String    @unique @map("code")
-  name           String    @map("name")
-  bizRegNumber   String?   @map("biz_reg_number")
-  managerName    String?   @map("manager_name")
-  managerPhone   String?   @map("manager_phone")
-  managerEmail   String?   @map("manager_email")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
-  projects       Project[]
+  id           Int       @id @default(autoincrement())
+  code         String    @unique @map("code")
+  name         String    @map("name")
+  bizRegNumber String?   @map("biz_reg_number")
+  managerName  String?   @map("manager_name")
+  managerPhone String?   @map("manager_phone")
+  managerEmail String?   @map("manager_email")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  projects     Project[]
 
   @@map("constructors")
   @@schema("public")
@@ -306,38 +312,40 @@ model BuildStatus {
 }
 
 model Project {
-  id                  Int          @id @default(autoincrement())
-  projectCode         String       @unique @map("project_code")
-  projectName         String       @map("project_name")
-  hospitalCode        String       @map("hospital_code")
-  orderNumber         Int          @map("order_number")
-  contractDate        DateTime?    @map("contract_date")
-  contractType        String?      @map("contract_type")
-  wardCount           Int?         @map("ward_count")
-  bedCount            Int?         @map("bed_count")
-  gatewayCount        Int?         @map("gateway_count")
-  hasSurvey           Boolean      @default(false) @map("has_survey")
-  hasOrder            Boolean      @default(false) @map("has_order")
-  builderNameManual   String?      @map("builder_name_manual")
-  constructorId       Int?         @map("constructor_id")
-  startDate           DateTime?    @map("start_date")
-  endDateExpected     DateTime?    @map("end_date_expected")
-  buildStatusId       Int?         @map("build_status_id")
-  statusChangedAt     DateTime?    @default(now()) @map("status_changed_at") // 현재 공사상태 진입 시각 (단계 체류 지연 감지)
-  introTypeId         Int?         @map("intro_type_id")
-  issueNote           String?      @db.Text @map("issue_note")
-  remark              String?      @map("remark")
-  driveFolderId       String?      @map("drive_folder_id")
-  calendarEventId     String?      @map("calendar_event_id")
-  createdAt           DateTime     @default(now()) @map("created_at")
-  updatedAt           DateTime     @updatedAt @map("updated_at")
-  hospital            Hospital     @relation(fields: [hospitalCode], references: [hospitalCode])
-  contractor          Contractor?  @relation(fields: [constructorId], references: [id])
-  buildStatus         BuildStatus? @relation(fields: [buildStatusId], references: [id])
-  introType           StatusCode?  @relation("ProjectIntroType", fields: [introTypeId], references: [id])
-  devices             ProjectDevice[]
-  files               ProjectFile[]
-  assignees           ProjectAssignee[]
+  id                Int               @id @default(autoincrement())
+  projectCode       String            @unique @map("project_code")
+  projectName       String            @map("project_name")
+  hospitalCode      String            @map("hospital_code")
+  orderNumber       Int               @map("order_number")
+  contractDate      DateTime?         @map("contract_date")
+  contractType      String?           @map("contract_type")
+  wardCount         Int?              @map("ward_count")
+  bedCount          Int?              @map("bed_count")
+  gatewayCount      Int?              @map("gateway_count")
+  hasSurvey         Boolean           @default(false) @map("has_survey")
+  hasOrder          Boolean           @default(false) @map("has_order")
+  builderNameManual String?           @map("builder_name_manual")
+  constructorId     Int?              @map("constructor_id")
+  startDate         DateTime?         @map("start_date")
+  endDateExpected   DateTime?         @map("end_date_expected")
+  buildStatusId     Int?              @map("build_status_id")
+  statusChangedAt   DateTime?         @default(now()) @map("status_changed_at") // 현재 공사상태 진입 시각 (단계 체류 지연 감지)
+  introTypeId       Int?              @map("intro_type_id")
+  issueNote         String?           @map("issue_note") @db.Text
+  remark            String?           @map("remark")
+  driveFolderId     String?           @map("drive_folder_id")
+  calendarEventId   String?           @map("calendar_event_id")
+  ticketId          Int?              @unique @map("ticket_id") // P9 티켓 편입 — 1:1 연결
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  ticket            Ticket?           @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  hospital          Hospital          @relation(fields: [hospitalCode], references: [hospitalCode])
+  contractor        Contractor?       @relation(fields: [constructorId], references: [id])
+  buildStatus       BuildStatus?      @relation(fields: [buildStatusId], references: [id])
+  introType         StatusCode?       @relation("ProjectIntroType", fields: [introTypeId], references: [id])
+  devices           ProjectDevice[]
+  files             ProjectFile[]
+  assignees         ProjectAssignee[]
 
   @@map("projects")
   @@schema("public")
@@ -402,32 +410,34 @@ model ProjectFile {
 }
 
 model SiteVisit {
-  id              Int            @id @default(autoincrement())
-  siteVisitCode   String?        @unique @map("site_visit_code") @db.VarChar(50)
-  hospitalCode    String         @map("hospital_code")
-  daewoongUserId  String?        @map("daewoong_user_id")
-  requestDate     DateTime?      @map("request_date")
-  visitDate       DateTime?      @map("visit_date")
-  replyDate       DateTime?      @map("reply_date")
-  statusId        Int?           @map("status_id")
-  statusChangedAt DateTime?      @default(now()) @map("status_changed_at") // 현재 상태 진입 시각 (단계 체류 지연 감지)
-  installPlanUrl    String?  @map("install_plan_url")
-  installPlanFileId String?  @map("install_plan_file_id")
-  floorPlanUrl      String?  @map("floor_plan_url")
-  floorPlanFileId   String?  @map("floor_plan_file_id")
-  installPlanS3Key  String?  @map("install_plan_s3_key")
-  floorPlanS3Key    String?  @map("floor_plan_s3_key")
-  notes           String?        @db.Text @map("notes")
-  calendarEventId String?        @map("calendar_event_id")
-  createdAt       DateTime       @default(now()) @map("created_at")
-  updatedAt       DateTime       @updatedAt @map("updated_at")
+  id                Int       @id @default(autoincrement())
+  siteVisitCode     String?   @unique @map("site_visit_code") @db.VarChar(50)
+  hospitalCode      String    @map("hospital_code")
+  daewoongUserId    String?   @map("daewoong_user_id")
+  requestDate       DateTime? @map("request_date")
+  visitDate         DateTime? @map("visit_date")
+  replyDate         DateTime? @map("reply_date")
+  statusId          Int?      @map("status_id")
+  statusChangedAt   DateTime? @default(now()) @map("status_changed_at") // 현재 상태 진입 시각 (단계 체류 지연 감지)
+  installPlanUrl    String?   @map("install_plan_url")
+  installPlanFileId String?   @map("install_plan_file_id")
+  floorPlanUrl      String?   @map("floor_plan_url")
+  floorPlanFileId   String?   @map("floor_plan_file_id")
+  installPlanS3Key  String?   @map("install_plan_s3_key")
+  floorPlanS3Key    String?   @map("floor_plan_s3_key")
+  notes             String?   @map("notes") @db.Text
+  calendarEventId   String?   @map("calendar_event_id")
+  ticketId          Int?      @unique @map("ticket_id") // P7 티켓 편입 — 1:1 연결
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  hospital      Hospital         @relation(fields: [hospitalCode], references: [hospitalCode])
-  daewoongUser  User?            @relation("SiteVisitDaewoongUser", fields: [daewoongUserId], references: [id])
-  status        StatusCode?      @relation(fields: [statusId], references: [id])
-  files         SiteVisitFile[]
-  assignees     SiteVisitAssignee[]
-  queue         SiteVisitQueue?
+  ticket       Ticket?             @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  hospital     Hospital            @relation(fields: [hospitalCode], references: [hospitalCode])
+  daewoongUser User?               @relation("SiteVisitDaewoongUser", fields: [daewoongUserId], references: [id])
+  status       StatusCode?         @relation(fields: [statusId], references: [id])
+  files        SiteVisitFile[]
+  assignees    SiteVisitAssignee[]
+  queue        SiteVisitQueue?
 
   @@map("site_visits")
   @@schema("public")
@@ -455,8 +465,10 @@ model InstallPlan {
   replyStatus  String    @default("-") @map("reply_status")
   replyDate    DateTime? @map("reply_date") @db.Date
   note         String?
+  ticketId     Int?      @unique @map("ticket_id") // P8 티켓 편입 — 1:1 연결
 
-  hospital  Hospital?         @relation(fields: [hospitalCode], references: [hospitalCode])
+  ticket    Ticket?               @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  hospital  Hospital?             @relation(fields: [hospitalCode], references: [hospitalCode])
   files     InstallPlanFile[]
   assignees InstallPlanAssignee[]
   queueItem InstallPlanQueue?
@@ -604,11 +616,11 @@ model AppSetting {
 model NotificationLog {
   id         Int      @id @default(autoincrement())
   eventType  String   @map("event_type") @db.VarChar(30) // task_created | task_completed | delayed
-  taskType   String?  @map("task_type") @db.VarChar(20)  // PROJECT | SITE_VISIT | INSTALL_PLAN | MAINTENANCE | ETC
-  refCode    String?  @map("ref_code") @db.VarChar(50)   // 원본 업무 코드
+  taskType   String?  @map("task_type") @db.VarChar(20) // PROJECT | SITE_VISIT | INSTALL_PLAN | MAINTENANCE | ETC
+  refCode    String?  @map("ref_code") @db.VarChar(50) // 원본 업무 코드
   targetType String   @map("target_type") @db.VarChar(10) // channel | dm
-  targetId   String   @map("target_id") @db.VarChar(50)   // 채널 ID 또는 Slack user ID
-  status     String   @db.VarChar(10)                     // sent | failed | skipped
+  targetId   String   @map("target_id") @db.VarChar(50) // 채널 ID 또는 Slack user ID
+  status     String   @db.VarChar(10) // sent | failed | skipped
   error      String?
   payload    Json?
   createdAt  DateTime @default(now()) @map("created_at")
@@ -642,14 +654,14 @@ model NavMenuItem {
 
 // 위치(창고) — 인벤토리에 귀속 (인벤토리별 독립 추가/삭제, 위치명은 인벤토리 내 UNIQUE)
 model Warehouse {
-  id          Int      @id @default(autoincrement())
-  name        String   @db.VarChar(50)
-  inventoryId Int      @map("inventory_id")
+  id          Int                    @id @default(autoincrement())
+  name        String                 @db.VarChar(50)
+  inventoryId Int                    @map("inventory_id")
   memo        String?
-  isActive    Boolean  @default(true) @map("is_active")
-  sortOrder   Int      @default(0) @map("sort_order")
-  createdAt   DateTime @default(now()) @map("created_at")
-  inventory   Inventory @relation(fields: [inventoryId], references: [id])
+  isActive    Boolean                @default(true) @map("is_active")
+  sortOrder   Int                    @default(0) @map("sort_order")
+  createdAt   DateTime               @default(now()) @map("created_at")
+  inventory   Inventory              @relation(fields: [inventoryId], references: [id])
   stocks      InventoryStock[]
   txFrom      InventoryTransaction[] @relation("TxFromWarehouse")
   txTo        InventoryTransaction[] @relation("TxToWarehouse")
@@ -661,11 +673,11 @@ model Warehouse {
 }
 
 model InventoryCategory {
-  id        Int      @id @default(autoincrement())
-  name      String   @db.VarChar(50)
-  parentId  Int?     @map("parent_id")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
+  id        Int                 @id @default(autoincrement())
+  name      String              @db.VarChar(50)
+  parentId  Int?                @map("parent_id")
+  sortOrder Int                 @default(0) @map("sort_order")
+  createdAt DateTime            @default(now()) @map("created_at")
   parent    InventoryCategory?  @relation("CategoryTree", fields: [parentId], references: [id])
   children  InventoryCategory[] @relation("CategoryTree")
   items     InventoryItem[]
@@ -678,34 +690,34 @@ model InventoryCategory {
 
 // 품목 마스터 — 인벤토리에 귀속. 같은 물건(예: MC200M-T)도 인벤토리마다 별도 품목·별도 코드로 관리
 model InventoryItem {
-  id              Int         @id @default(autoincrement())
-  itemCode        String      @unique @map("item_code") @db.VarChar(20)
-  name            String      @db.VarChar(100)
-  modelName       String?     @map("model_name") @db.VarChar(100) // 제조사 모델명 (규격과 별개)
-  inventoryId     Int         @map("inventory_id") // 소속 인벤토리 (변경 불가)
-  categoryId      Int?        @map("category_id")
-  spec            String?     @db.VarChar(200)
-  unit            String      @default("EA") @db.VarChar(20)
-  isSerialManaged Boolean     @default(false) @map("is_serial_managed")
-  isLotManaged    Boolean     @default(false) @map("is_lot_managed") // LOT 추적 대상 — 시리얼 품목: 신규 입고 시 개체별 LOT 필수 / 비시리얼 품목: 전표 단위 LOT 선택 기록
-  tags            String[]    @default([]) // deprecated (2026-07-20) — 태그는 개체(InventoryUnit.tags) 단위로 이관, 백업 보존
-  deviceInfoId    Int?        @map("device_info_id")
-  manufacturerId  Int?        @map("manufacturer_id")
-  refPrice        Int?        @map("ref_price")
+  id              Int                      @id @default(autoincrement())
+  itemCode        String                   @unique @map("item_code") @db.VarChar(20)
+  name            String                   @db.VarChar(100)
+  modelName       String?                  @map("model_name") @db.VarChar(100) // 제조사 모델명 (규격과 별개)
+  inventoryId     Int                      @map("inventory_id") // 소속 인벤토리 (변경 불가)
+  categoryId      Int?                     @map("category_id")
+  spec            String?                  @db.VarChar(200)
+  unit            String                   @default("EA") @db.VarChar(20)
+  isSerialManaged Boolean                  @default(false) @map("is_serial_managed")
+  isLotManaged    Boolean                  @default(false) @map("is_lot_managed") // LOT 추적 대상 — 시리얼 품목: 신규 입고 시 개체별 LOT 필수 / 비시리얼 품목: 전표 단위 LOT 선택 기록
+  tags            String[]                 @default([]) // deprecated (2026-07-20) — 태그는 개체(InventoryUnit.tags) 단위로 이관, 백업 보존
+  deviceInfoId    Int?                     @map("device_info_id")
+  manufacturerId  Int?                     @map("manufacturer_id")
+  refPrice        Int?                     @map("ref_price")
   memo            String?
-  isActive        Boolean     @default(true) @map("is_active")
-  sortOrder       Int         @default(0) @map("sort_order")
-  createdAt       DateTime    @default(now()) @map("created_at")
-  updatedAt       DateTime    @updatedAt @map("updated_at")
-  inventory       Inventory   @relation("InventoryItems", fields: [inventoryId], references: [id])
-  category        InventoryCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  deviceInfo      DeviceInfo? @relation(fields: [deviceInfoId], references: [id], onDelete: SetNull)
-  manufacturer    StatusCode? @relation("ItemManufacturer", fields: [manufacturerId], references: [id], onDelete: SetNull)
+  isActive        Boolean                  @default(true) @map("is_active")
+  sortOrder       Int                      @default(0) @map("sort_order")
+  createdAt       DateTime                 @default(now()) @map("created_at")
+  updatedAt       DateTime                 @updatedAt @map("updated_at")
+  inventory       Inventory                @relation("InventoryItems", fields: [inventoryId], references: [id])
+  category        InventoryCategory?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  deviceInfo      DeviceInfo?              @relation(fields: [deviceInfoId], references: [id], onDelete: SetNull)
+  manufacturer    StatusCode?              @relation("ItemManufacturer", fields: [manufacturerId], references: [id], onDelete: SetNull)
   stocks          InventoryStock[]
   transactions    InventoryTransaction[]
   units           InventoryUnit[]
   components      InventoryItemComponent[] @relation("ComponentParent") // 이 품목이 주자재일 때의 부자재 구성
-  usedIn          InventoryItemComponent[] @relation("ComponentChild")  // 이 품목이 부자재로 소속된 주자재
+  usedIn          InventoryItemComponent[] @relation("ComponentChild") // 이 품목이 부자재로 소속된 주자재
 
   @@index([categoryId])
   @@index([inventoryId])
@@ -715,19 +727,19 @@ model InventoryItem {
 
 // 인벤토리 마스터 — 대웅제약재고 / 평가용재고 / 판매용재고 (품목·위치·재고·전표 전부 인벤토리별 완전 독립)
 model Inventory {
-  id               Int      @id @default(autoincrement())
-  name             String   @unique @db.VarChar(50)
-  linkHospital     Boolean  @default(false) @map("link_hospital") // true면 출고 시 병원 연결 허용 (대웅제약재고)
-  memo             String?
-  isActive         Boolean  @default(true) @map("is_active")
-  sortOrder        Int      @default(0) @map("sort_order")
-  createdAt        DateTime @default(now()) @map("created_at")
-  items            InventoryItem[] @relation("InventoryItems")
-  warehouses       Warehouse[]
-  stocks           InventoryStock[]
-  txFrom           InventoryTransaction[] @relation("TxInventory")
-  txTo             InventoryTransaction[] @relation("TxToInventory")
-  units            InventoryUnit[]
+  id           Int                    @id @default(autoincrement())
+  name         String                 @unique @db.VarChar(50)
+  linkHospital Boolean                @default(false) @map("link_hospital") // true면 출고 시 병원 연결 허용 (대웅제약재고)
+  memo         String?
+  isActive     Boolean                @default(true) @map("is_active")
+  sortOrder    Int                    @default(0) @map("sort_order")
+  createdAt    DateTime               @default(now()) @map("created_at")
+  items        InventoryItem[]        @relation("InventoryItems")
+  warehouses   Warehouse[]
+  stocks       InventoryStock[]
+  txFrom       InventoryTransaction[] @relation("TxInventory")
+  txTo         InventoryTransaction[] @relation("TxToInventory")
+  units        InventoryUnit[]
 
   @@map("inventories")
   @@schema("public")
@@ -735,11 +747,11 @@ model Inventory {
 
 // 주자재-부자재 매핑 (1단계 깊이 — 부자재는 다시 주자재가 될 수 없음, API 검증)
 model InventoryItemComponent {
-  parentItemId Int      @map("parent_item_id")
-  childItemId  Int      @map("child_item_id")
-  quantity     Int      @default(1) // 주자재 1개당 부자재 구성 수량
-  sortOrder    Int      @default(0) @map("sort_order")
-  createdAt    DateTime @default(now()) @map("created_at")
+  parentItemId Int           @map("parent_item_id")
+  childItemId  Int           @map("child_item_id")
+  quantity     Int           @default(1) // 주자재 1개당 부자재 구성 수량
+  sortOrder    Int           @default(0) @map("sort_order")
+  createdAt    DateTime      @default(now()) @map("created_at")
   parent       InventoryItem @relation("ComponentParent", fields: [parentItemId], references: [id], onDelete: Cascade)
   child        InventoryItem @relation("ComponentChild", fields: [childItemId], references: [id], onDelete: Cascade)
 
@@ -760,12 +772,12 @@ model InventoryManager {
 }
 
 model InventoryStock {
-  itemId      Int      @map("item_id")
-  warehouseId Int      @map("warehouse_id")
-  inventoryId Int      @map("inventory_id")
-  lotNo       String   @default("") @map("lot_no") @db.VarChar(100) // LOT 재고 차원 (2026-07-20) — ''=LOT 없음. 비시리얼 LOT 품목만 실값 사용
-  quantity    Int      @default(0)
-  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  itemId      Int           @map("item_id")
+  warehouseId Int           @map("warehouse_id")
+  inventoryId Int           @map("inventory_id")
+  lotNo       String        @default("") @map("lot_no") @db.VarChar(100) // LOT 재고 차원 (2026-07-20) — ''=LOT 없음. 비시리얼 LOT 품목만 실값 사용
+  quantity    Int           @default(0)
+  updatedAt   DateTime      @default(now()) @updatedAt @map("updated_at")
   item        InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
   warehouse   Warehouse     @relation(fields: [warehouseId], references: [id])
   inventory   Inventory     @relation(fields: [inventoryId], references: [id])
@@ -776,42 +788,42 @@ model InventoryStock {
 }
 
 model InventoryTransaction {
-  id            Int       @id @default(autoincrement())
-  txCode        String    @unique @map("tx_code") @db.VarChar(20)
-  txType        String    @map("tx_type") @db.VarChar(10) // IN | OUT | MOVE (TRANSFER는 폐지 — 과거 전표만 존재)
-  reasonId      Int?      @map("reason_id") // IN/OUT 유형 (StatusCode STOCK_IN_TYPE/STOCK_OUT_TYPE), MOVE는 NULL
-  itemId        Int       @map("item_id")
-  warehouseId   Int       @map("warehouse_id")
-  toWarehouseId Int?      @map("to_warehouse_id") // MOVE 도착 위치
-  inventoryId   Int       @map("inventory_id") // = item.inventoryId (비정규화 — 서버에서 강제)
-  toInventoryId Int?      @map("to_inventory_id") // deprecated — 과거 TRANSFER 전표 표시용
+  id            Int                        @id @default(autoincrement())
+  txCode        String                     @unique @map("tx_code") @db.VarChar(20)
+  txType        String                     @map("tx_type") @db.VarChar(10) // IN | OUT | MOVE (TRANSFER는 폐지 — 과거 전표만 존재)
+  reasonId      Int?                       @map("reason_id") // IN/OUT 유형 (StatusCode STOCK_IN_TYPE/STOCK_OUT_TYPE), MOVE는 NULL
+  itemId        Int                        @map("item_id")
+  warehouseId   Int                        @map("warehouse_id")
+  toWarehouseId Int?                       @map("to_warehouse_id") // MOVE 도착 위치
+  inventoryId   Int                        @map("inventory_id") // = item.inventoryId (비정규화 — 서버에서 강제)
+  toInventoryId Int?                       @map("to_inventory_id") // deprecated — 과거 TRANSFER 전표 표시용
   quantity      Int
-  txDate        DateTime  @default(now()) @map("tx_date") @db.Date // 입출고일 — 업무 기준일 (소급 등록 지원, 2026-07-20)
-  transferDate  DateTime? @map("transfer_date") @db.Date // deprecated — 과거 TRANSFER 이관일자
-  transferPrice Int?      @map("transfer_price") // deprecated — 과거 TRANSFER 이관 단가
-  destination   String?   @db.VarChar(100) // OUT 출고처 (자유 텍스트 — 유관부서·거래처 등)
-  requester     String?   @db.VarChar(100) // 요청자 (자유 텍스트 — OUT 필수, IN 선택)
-  lotNo         String?   @map("lot_no") @db.VarChar(100) // 전표 단위 LOT — 비시리얼 LOT 품목(선택) / 시리얼 품목 단건 입고 시 표기용
-  hospitalCode  String?   @map("hospital_code")
-  workType      String?   @map("work_type") @db.VarChar(20)
-  refCode       String?   @map("ref_code") @db.VarChar(50)
-  parentTxId    Int?      @map("parent_tx_id") // 세트출고 자식 전표 → 주자재 전표
+  txDate        DateTime                   @default(now()) @map("tx_date") @db.Date // 입출고일 — 업무 기준일 (소급 등록 지원, 2026-07-20)
+  transferDate  DateTime?                  @map("transfer_date") @db.Date // deprecated — 과거 TRANSFER 이관일자
+  transferPrice Int?                       @map("transfer_price") // deprecated — 과거 TRANSFER 이관 단가
+  destination   String?                    @db.VarChar(100) // OUT 출고처 (자유 텍스트 — 유관부서·거래처 등)
+  requester     String?                    @db.VarChar(100) // 요청자 (자유 텍스트 — OUT 필수, IN 선택)
+  lotNo         String?                    @map("lot_no") @db.VarChar(100) // 전표 단위 LOT — 비시리얼 LOT 품목(선택) / 시리얼 품목 단건 입고 시 표기용
+  hospitalCode  String?                    @map("hospital_code")
+  workType      String?                    @map("work_type") @db.VarChar(20)
+  refCode       String?                    @map("ref_code") @db.VarChar(50)
+  parentTxId    Int?                       @map("parent_tx_id") // 세트출고 자식 전표 → 주자재 전표
   note          String?
-  actorId       String    @map("actor_id")
-  canceledAt    DateTime? @map("canceled_at")
-  canceledById  String?   @map("canceled_by_id")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  item          InventoryItem @relation(fields: [itemId], references: [id])
-  warehouse     Warehouse     @relation("TxFromWarehouse", fields: [warehouseId], references: [id])
-  toWarehouse   Warehouse?    @relation("TxToWarehouse", fields: [toWarehouseId], references: [id])
-  inventory     Inventory     @relation("TxInventory", fields: [inventoryId], references: [id])
-  toInventory   Inventory?    @relation("TxToInventory", fields: [toInventoryId], references: [id])
-  reasonCode    StatusCode?   @relation("TxReason", fields: [reasonId], references: [id])
-  hospital      Hospital?     @relation(fields: [hospitalCode], references: [hospitalCode])
-  actor         User          @relation("InventoryTxActor", fields: [actorId], references: [id])
-  canceledBy    User?         @relation("InventoryTxCanceler", fields: [canceledById], references: [id])
-  parentTx      InventoryTransaction?  @relation("TxSetComponents", fields: [parentTxId], references: [id])
-  childTxs      InventoryTransaction[] @relation("TxSetComponents")
+  actorId       String                     @map("actor_id")
+  canceledAt    DateTime?                  @map("canceled_at")
+  canceledById  String?                    @map("canceled_by_id")
+  createdAt     DateTime                   @default(now()) @map("created_at")
+  item          InventoryItem              @relation(fields: [itemId], references: [id])
+  warehouse     Warehouse                  @relation("TxFromWarehouse", fields: [warehouseId], references: [id])
+  toWarehouse   Warehouse?                 @relation("TxToWarehouse", fields: [toWarehouseId], references: [id])
+  inventory     Inventory                  @relation("TxInventory", fields: [inventoryId], references: [id])
+  toInventory   Inventory?                 @relation("TxToInventory", fields: [toInventoryId], references: [id])
+  reasonCode    StatusCode?                @relation("TxReason", fields: [reasonId], references: [id])
+  hospital      Hospital?                  @relation(fields: [hospitalCode], references: [hospitalCode])
+  actor         User                       @relation("InventoryTxActor", fields: [actorId], references: [id])
+  canceledBy    User?                      @relation("InventoryTxCanceler", fields: [canceledById], references: [id])
+  parentTx      InventoryTransaction?      @relation("TxSetComponents", fields: [parentTxId], references: [id])
+  childTxs      InventoryTransaction[]     @relation("TxSetComponents")
   units         InventoryTransactionUnit[]
 
   @@index([itemId, createdAt(sort: Desc)])
@@ -825,22 +837,22 @@ model InventoryTransaction {
 }
 
 model InventoryUnit {
-  id           Int      @id @default(autoincrement())
-  itemId       Int      @map("item_id")
-  serialNo     String   @map("serial_no") @db.VarChar(100)
-  lotNo        String?  @map("lot_no") @db.VarChar(100) // LOT 관리 품목의 로트 번호 (신규 입고 시 기록)
-  status       String   @default("IN_STOCK") @db.VarChar(10)
-  warehouseId  Int?     @map("warehouse_id")
-  inventoryId  Int      @map("inventory_id")
-  hospitalCode String?  @map("hospital_code")
+  id           Int                        @id @default(autoincrement())
+  itemId       Int                        @map("item_id")
+  serialNo     String                     @map("serial_no") @db.VarChar(100)
+  lotNo        String?                    @map("lot_no") @db.VarChar(100) // LOT 관리 품목의 로트 번호 (신규 입고 시 기록)
+  status       String                     @default("IN_STOCK") @db.VarChar(10)
+  warehouseId  Int?                       @map("warehouse_id")
+  inventoryId  Int                        @map("inventory_id")
+  hospitalCode String?                    @map("hospital_code")
   memo         String?
-  tags         String[] @default([]) // 개체(단품) 자유 태그 — 예: DEMO, 각인 (2026-07-20)
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
-  item         InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  warehouse    Warehouse?    @relation(fields: [warehouseId], references: [id])
-  inventory    Inventory     @relation(fields: [inventoryId], references: [id])
-  hospital     Hospital?     @relation(fields: [hospitalCode], references: [hospitalCode])
+  tags         String[]                   @default([]) // 개체(단품) 자유 태그 — 예: DEMO, 각인 (2026-07-20)
+  createdAt    DateTime                   @default(now()) @map("created_at")
+  updatedAt    DateTime                   @default(now()) @updatedAt @map("updated_at")
+  item         InventoryItem              @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse    Warehouse?                 @relation(fields: [warehouseId], references: [id])
+  inventory    Inventory                  @relation(fields: [inventoryId], references: [id])
+  hospital     Hospital?                  @relation(fields: [hospitalCode], references: [hospitalCode])
   transactions InventoryTransactionUnit[]
 
   @@unique([itemId, serialNo])
@@ -852,8 +864,8 @@ model InventoryUnit {
 }
 
 model InventoryTransactionUnit {
-  transactionId Int @map("transaction_id")
-  unitId        Int @map("unit_id")
+  transactionId Int                  @map("transaction_id")
+  unitId        Int                  @map("unit_id")
   transaction   InventoryTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   unit          InventoryUnit        @relation(fields: [unitId], references: [id], onDelete: Cascade)
 
@@ -885,34 +897,36 @@ model Task {
 }
 
 model Maintenance {
-  id                Int       @id @default(autoincrement())
-  maintenanceCode   String?   @unique @map("maintenance_code")
-  hospitalCode      String    @map("hospital_code")
-  typeId            Int?      @map("type_id")
-  statusId          Int?      @map("status_id")
-  statusChangedAt   DateTime? @default(now()) @map("status_changed_at") // 현재 상태 진입 시각 (단계 체류 지연 감지)
-  priority          String    @default("보통") @map("priority")
-  title             String    @map("title")
-  reporterName      String?   @map("reporter_name")
-  isRemote          Boolean   @default(false) @map("is_remote")
-  reportedAt        DateTime? @map("reported_at") @db.Date
-  visitDate         DateTime? @map("visit_date") @db.Date // deprecated: 방문일정은 visits(MaintenanceVisit)로 이전
-  resolvedAt        DateTime? @map("resolved_at") @db.Date
-  symptoms          String?   @db.Text @map("symptoms")
-  cause             String?   @db.Text @map("cause") // deprecated: resolution(조치 요약)에 병합됨 — 백업용 보존, 앱에서 미사용
-  resolution        String?   @db.Text @map("resolution") // 조치 요약 (원인 포함, 종결 시 작성)
-  notes             String?   @db.Text @map("notes") // deprecated: maintenance_logs(처리 기록)로 이관됨 — 백업용 보존, 앱에서 미사용
-  calendarEventId   String?   @map("calendar_event_id") // deprecated: 캘린더 이벤트ID는 방문 항목별(MaintenanceVisit.calendarEventId)로 이전
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
+  id              Int       @id @default(autoincrement())
+  maintenanceCode String?   @unique @map("maintenance_code")
+  hospitalCode    String    @map("hospital_code")
+  typeId          Int?      @map("type_id")
+  statusId        Int?      @map("status_id")
+  statusChangedAt DateTime? @default(now()) @map("status_changed_at") // 현재 상태 진입 시각 (단계 체류 지연 감지)
+  priority        String    @default("보통") @map("priority")
+  title           String    @map("title")
+  reporterName    String?   @map("reporter_name")
+  isRemote        Boolean   @default(false) @map("is_remote")
+  reportedAt      DateTime? @map("reported_at") @db.Date
+  visitDate       DateTime? @map("visit_date") @db.Date // deprecated: 방문일정은 visits(MaintenanceVisit)로 이전
+  resolvedAt      DateTime? @map("resolved_at") @db.Date
+  symptoms        String?   @map("symptoms") @db.Text
+  cause           String?   @map("cause") @db.Text // deprecated: resolution(조치 요약)에 병합됨 — 백업용 보존, 앱에서 미사용
+  resolution      String?   @map("resolution") @db.Text // 조치 요약 (원인 포함, 종결 시 작성)
+  notes           String?   @map("notes") @db.Text // deprecated: maintenance_logs(처리 기록)로 이관됨 — 백업용 보존, 앱에서 미사용
+  calendarEventId String?   @map("calendar_event_id") // deprecated: 캘린더 이벤트ID는 방문 항목별(MaintenanceVisit.calendarEventId)로 이전
+  ticketId        Int?      @unique @map("ticket_id") // P5 티켓 편입 — 1:1 연결
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  hospital   Hospital    @relation(fields: [hospitalCode], references: [hospitalCode])
-  type       StatusCode? @relation("MaintenanceType", fields: [typeId], references: [id])
-  status     StatusCode? @relation("MaintenanceStatus", fields: [statusId], references: [id])
-  assignees  MaintenanceAssignee[]
-  files      MaintenanceFile[]
-  visits     MaintenanceVisit[]
-  logs       MaintenanceLog[]
+  ticket    Ticket?               @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  hospital  Hospital              @relation(fields: [hospitalCode], references: [hospitalCode])
+  type      StatusCode?           @relation("MaintenanceType", fields: [typeId], references: [id])
+  status    StatusCode?           @relation("MaintenanceStatus", fields: [statusId], references: [id])
+  assignees MaintenanceAssignee[]
+  files     MaintenanceFile[]
+  visits    MaintenanceVisit[]
+  logs      MaintenanceLog[]
 
   @@map("maintenances")
   @@schema("public")
@@ -963,18 +977,20 @@ model MaintenanceAssignee {
 }
 
 model EtcTask {
-  id          Int       @id @default(autoincrement())
-  etcTaskCode String?   @unique @map("etc_task_code")
-  title       String    @map("title")
-  statusId    Int?      @map("status_id")
+  id              Int       @id @default(autoincrement())
+  etcTaskCode     String?   @unique @map("etc_task_code")
+  title           String    @map("title")
+  statusId        Int?      @map("status_id")
   statusChangedAt DateTime? @default(now()) @map("status_changed_at") // 현재 상태 진입 시각 (단계 체류 지연 감지)
-  priority    String    @default("보통") @map("priority")
-  reportedAt  DateTime? @map("reported_at") @db.Date
-  resolvedAt  DateTime? @map("resolved_at") @db.Date
-  note        String?   @db.Text @map("note")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  priority        String    @default("보통") @map("priority")
+  reportedAt      DateTime? @map("reported_at") @db.Date
+  resolvedAt      DateTime? @map("resolved_at") @db.Date
+  note            String?   @map("note") @db.Text
+  ticketId        Int?      @unique @map("ticket_id") // P6 티켓 편입 — 1:1 연결
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
+  ticket    Ticket?           @relation(fields: [ticketId], references: [id], onDelete: SetNull)
   status    StatusCode?       @relation("EtcTaskStatus", fields: [statusId], references: [id])
   assignees EtcTaskAssignee[]
   hospitals EtcTaskHospital[]
@@ -1054,25 +1070,25 @@ model MaintenanceFile {
 }
 
 model AuditLog {
-  id            Int       @id @default(autoincrement())
+  id Int @id @default(autoincrement())
 
-  actorId       String?   @map("actor_id")
-  actorEmail    String?   @map("actor_email")
-  actorName     String?   @map("actor_name")
-  actorRole     String?   @map("actor_role")
+  actorId    String? @map("actor_id")
+  actorEmail String? @map("actor_email")
+  actorName  String? @map("actor_name")
+  actorRole  String? @map("actor_role")
 
   action        String
   resource      String
-  resourceId    String?   @map("resource_id")
-  resourceLabel String?   @map("resource_label")
+  resourceId    String? @map("resource_id")
+  resourceLabel String? @map("resource_label")
 
-  before        Json?
-  after         Json?
+  before Json?
+  after  Json?
 
-  ipAddress     String?   @map("ip_address")
-  userAgent     String?   @map("user_agent")
+  ipAddress String? @map("ip_address")
+  userAgent String? @map("user_agent")
 
-  createdAt     DateTime  @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
   @@index([actorId, createdAt])
   @@index([resource, resourceId, createdAt])
@@ -1102,30 +1118,30 @@ model WikiPage {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  plainText   String              @default("") @map("plain_text")
-  icon         String? @map("icon")
-  coverUrl     String? @map("cover_url")
-  coverOffsetY Int     @default(50) @map("cover_offset_y")
-  isTemplate   Boolean @default(false) @map("is_template")
-  deletedAt    DateTime? @map("deleted_at")
-  collabEnabled Boolean @default(false) @map("collab_enabled")
-  pageType     String  @default("block") @map("page_type") @db.VarChar(10)
-  contentHtml  String? @map("content_html")
-  aiExcluded   Boolean @default(false) @map("ai_excluded")
+  plainText     String    @default("") @map("plain_text")
+  icon          String?   @map("icon")
+  coverUrl      String?   @map("cover_url")
+  coverOffsetY  Int       @default(50) @map("cover_offset_y")
+  isTemplate    Boolean   @default(false) @map("is_template")
+  deletedAt     DateTime? @map("deleted_at")
+  collabEnabled Boolean   @default(false) @map("collab_enabled")
+  pageType      String    @default("block") @map("page_type") @db.VarChar(10)
+  contentHtml   String?   @map("content_html")
+  aiExcluded    Boolean   @default(false) @map("ai_excluded")
 
-  parent      WikiPage?           @relation("WikiPageTree", fields: [parentId], references: [id], onDelete: Cascade)
-  children    WikiPage[]          @relation("WikiPageTree")
-  author      User                @relation("WikiPageAuthor", fields: [authorId], references: [id])
-  lastEditor  User?               @relation("WikiPageLastEditor", fields: [lastEditorId], references: [id])
-  attachments WikiAttachment[]
-  references  WikiPageReference[]
-  tags        WikiPageTag[]
-  favorites   WikiFavorite[]
-  viewLogs    WikiViewLog[]
-  versions    WikiVersion[]
-  comments    WikiComment[]
-  outgoingLinks WikiPageLink[]    @relation("WikiPageLinkSource")
-  backlinks     WikiPageLink[]    @relation("WikiPageLinkTarget")
+  parent        WikiPage?           @relation("WikiPageTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children      WikiPage[]          @relation("WikiPageTree")
+  author        User                @relation("WikiPageAuthor", fields: [authorId], references: [id])
+  lastEditor    User?               @relation("WikiPageLastEditor", fields: [lastEditorId], references: [id])
+  attachments   WikiAttachment[]
+  references    WikiPageReference[]
+  tags          WikiPageTag[]
+  favorites     WikiFavorite[]
+  viewLogs      WikiViewLog[]
+  versions      WikiVersion[]
+  comments      WikiComment[]
+  outgoingLinks WikiPageLink[]      @relation("WikiPageLinkSource")
+  backlinks     WikiPageLink[]      @relation("WikiPageLinkTarget")
   ydoc          WikiPageYdoc?
 
   @@index([parentId, sortOrder])
@@ -1213,11 +1229,11 @@ model WikiPageReference {
 }
 
 model WikiTag {
-  id        String        @id @default(uuid())
-  name      String        @unique
+  id        String   @id @default(uuid())
+  name      String   @unique
   color     String?
-  sortOrder Int           @default(0) @map("sort_order")
-  createdAt DateTime      @default(now()) @map("created_at")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
 
   pages WikiPageTag[]
 
@@ -1304,18 +1320,18 @@ model WikiComment {
 // ===== 차량예약 =====
 
 model Vehicle {
-  id          Int      @id @default(autoincrement())
-  name        String
-  plateNumber String   @unique @map("plate_number")
-  model       String?
-  seatCount   Int?     @map("seat_count")
-  color       String?
-  memo        String?
-  isActive    Boolean  @default(true) @map("is_active")
-  sortOrder   Int      @default(0) @map("sort_order")
-  lastOdometer Int?    @map("last_odometer")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id           Int      @id @default(autoincrement())
+  name         String
+  plateNumber  String   @unique @map("plate_number")
+  model        String?
+  seatCount    Int?     @map("seat_count")
+  color        String?
+  memo         String?
+  isActive     Boolean  @default(true) @map("is_active")
+  sortOrder    Int      @default(0) @map("sort_order")
+  lastOdometer Int?     @map("last_odometer")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   reservations VehicleReservation[]
   logs         VehicleLog[]
@@ -1325,20 +1341,20 @@ model Vehicle {
 }
 
 model VehicleReservation {
-  id          Int      @id @default(autoincrement())
-  vehicleId   Int      @map("vehicle_id")
-  userId      String   @map("user_id")
-  startAt     DateTime @map("start_at")
-  endAt       DateTime @map("end_at")
+  id          Int       @id @default(autoincrement())
+  vehicleId   Int       @map("vehicle_id")
+  userId      String    @map("user_id")
+  startAt     DateTime  @map("start_at")
+  endAt       DateTime  @map("end_at")
   purpose     String?
   destination String?
-  status      String   @default("RESERVED")
+  status      String    @default("RESERVED")
   returnedAt  DateTime? @map("returned_at")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
-  user    User    @relation("VehicleReservationUser", fields: [userId], references: [id])
+  vehicle Vehicle     @relation(fields: [vehicleId], references: [id])
+  user    User        @relation("VehicleReservationUser", fields: [userId], references: [id])
   log     VehicleLog?
 
   @@index([vehicleId, startAt])
@@ -1348,20 +1364,20 @@ model VehicleReservation {
 }
 
 model VehicleLog {
-  id            Int       @id @default(autoincrement())
-  vehicleId     Int       @map("vehicle_id")
-  reservationId Int?      @unique @map("reservation_id")
-  driverId      String    @map("driver_id")
-  startAt       DateTime  @map("start_at")
-  endAt         DateTime  @map("end_at")
+  id            Int      @id @default(autoincrement())
+  vehicleId     Int      @map("vehicle_id")
+  reservationId Int?     @unique @map("reservation_id")
+  driverId      String   @map("driver_id")
+  startAt       DateTime @map("start_at")
+  endAt         DateTime @map("end_at")
   purpose       String?
   destination   String?
-  endOdometer   Int       @map("end_odometer")
-  distanceKm    Int?      @map("distance_km")
+  endOdometer   Int      @map("end_odometer")
+  distanceKm    Int?     @map("distance_km")
   note          String?
-  createdById   String    @map("created_by_id")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  createdById   String   @map("created_by_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   vehicle     Vehicle             @relation(fields: [vehicleId], references: [id])
   reservation VehicleReservation? @relation(fields: [reservationId], references: [id])
@@ -1394,8 +1410,8 @@ model GatewayPlanJob {
   scaleMPerPx   Float?   @map("scale_m_per_px") // 확정 스케일 (m / vision px)
   scaleSource   String?  @map("scale_source") @db.VarChar(20) // ai_dimension | manual_2point | none
   scaleMeta     Json?    @map("scale_meta") // AI 치수 후보·산포 등
-  analysis      Json?    // 공간 인식 결과 (spaces[], vision 좌표)
-  placements    Json?    // 배치 결과 (points[], vision 좌표)
+  analysis      Json? // 공간 인식 결과 (spaces[], vision 좌표)
+  placements    Json? // 배치 결과 (points[], vision 좌표)
   gatewayCount  Int?     @map("gateway_count")
   rulesSnapshot Json?    @map("rules_snapshot")
   pptxKey       String?  @map("pptx_key")
@@ -1468,5 +1484,174 @@ model AiUsageLog {
   @@index([createdAt])
   @@index([userId, createdAt])
   @@map("ai_usage_logs")
+  @@schema("public")
+}
+
+// ===== 티켓 시스템 (P1 — ticket_dev_schedule.md) =====
+
+enum TicketStatus {
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  PENDING
+  RESOLVED
+  CLOSED
+
+  @@map("ticket_status")
+  @@schema("public")
+}
+
+enum TicketSeverity {
+  SEV1
+  SEV2
+  SEV3
+  SEV4
+  SEV5
+
+  @@map("ticket_severity")
+  @@schema("public")
+}
+
+model TicketQueue {
+  id          Int                 @id @default(autoincrement())
+  name        String              @unique
+  description String?
+  isActive    Boolean             @default(true) @map("is_active")
+  sortOrder   Int                 @default(0) @map("sort_order")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+  tickets     Ticket[]
+  ctiDefaults TicketCti[]         @relation("CtiDefaultQueue")
+  members     TicketQueueMember[]
+
+  @@map("ticket_queues")
+  @@schema("public")
+}
+
+model TicketQueueMember {
+  id        Int         @id @default(autoincrement())
+  queueId   Int         @map("queue_id")
+  userId    String      @map("user_id")
+  createdAt DateTime    @default(now()) @map("created_at")
+  queue     TicketQueue @relation(fields: [queueId], references: [id], onDelete: Cascade)
+  user      User        @relation("TicketQueueMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([queueId, userId])
+  @@index([userId])
+  @@map("ticket_queue_members")
+  @@schema("public")
+}
+
+model TicketCti {
+  id             Int          @id @default(autoincrement())
+  parentId       Int?         @map("parent_id")
+  level          Int          @db.SmallInt
+  name           String
+  defaultQueueId Int?         @map("default_queue_id")
+  isActive       Boolean      @default(true) @map("is_active")
+  sortOrder      Int          @default(0) @map("sort_order")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  parent         TicketCti?   @relation("CtiHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children       TicketCti[]  @relation("CtiHierarchy")
+  defaultQueue   TicketQueue? @relation("CtiDefaultQueue", fields: [defaultQueueId], references: [id], onDelete: SetNull)
+  tickets        Ticket[]
+
+  @@unique([parentId, name])
+  @@index([parentId, sortOrder])
+  @@map("ticket_cti")
+  @@schema("public")
+}
+
+model TicketPendingReason {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  tickets   Ticket[]
+
+  @@map("ticket_pending_reasons")
+  @@schema("public")
+}
+
+model Ticket {
+  id              Int                  @id @default(autoincrement())
+  ticketCode      String               @unique @map("ticket_code")
+  title           String
+  descriptionHtml String?              @map("description_html")
+  status          TicketStatus         @default(OPEN)
+  severity        TicketSeverity       @default(SEV4)
+  queueId         Int                  @map("queue_id")
+  ctiId           Int?                 @map("cti_id")
+  ownerId         String?              @map("owner_id")
+  pendingReasonId Int?                 @map("pending_reason_id")
+  pendingNote     String?              @map("pending_note")
+  hospitalCode    String?              @map("hospital_code")
+  parentId        Int?                 @map("parent_id")
+  refType         String?              @map("ref_type") // 도메인 연결 유형 (MAINTENANCE 등, NULL=순수 티켓)
+  statusChangedAt DateTime             @default(now()) @map("status_changed_at")
+  resolvedAt      DateTime?            @map("resolved_at")
+  closedAt        DateTime?            @map("closed_at")
+  reopenCount     Int                  @default(0) @map("reopen_count")
+  dueAt           DateTime?            @map("due_at")
+  createdBy       String?              @map("created_by")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+  queue           TicketQueue          @relation(fields: [queueId], references: [id])
+  cti             TicketCti?           @relation(fields: [ctiId], references: [id], onDelete: SetNull)
+  owner           User?                @relation("TicketOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  pendingReason   TicketPendingReason? @relation(fields: [pendingReasonId], references: [id], onDelete: SetNull)
+  hospital        Hospital?            @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: SetNull)
+  creator         User?                @relation("TicketCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  participants    TicketParticipant[]
+  logs            TicketLog[]
+  parent          Ticket?              @relation("TicketHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children        Ticket[]             @relation("TicketHierarchy")
+  maintenance     Maintenance?
+  etcTask         EtcTask?
+  siteVisit       SiteVisit?
+  installPlan     InstallPlan?
+  project         Project?
+
+  @@index([queueId, status])
+  @@index([parentId])
+  @@index([refType])
+  @@index([ownerId, status])
+  @@index([severity])
+  @@index([statusChangedAt])
+  @@index([hospitalCode])
+  @@map("tickets")
+  @@schema("public")
+}
+
+model TicketParticipant {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int      @map("ticket_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user      User     @relation("TicketParticipantUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, userId])
+  @@map("ticket_participants")
+  @@schema("public")
+}
+
+model TicketLog {
+  id          Int      @id @default(autoincrement())
+  ticketId    Int      @map("ticket_id")
+  logType     String   @map("log_type")
+  authorId    String?  @map("author_id")
+  contentHtml String?  @map("content_html")
+  payload     Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author      User?    @relation("TicketLogAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_logs")
   @@schema("public")
 }

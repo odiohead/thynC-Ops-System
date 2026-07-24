@@ -3,9 +3,12 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import type { TicketStatus } from '@prisma/client'
 import MaintenanceForm from '../MaintenanceForm'
 import MaintenanceLogPanel from '../MaintenanceLogPanel'
 import ReassignHospitalButton from '@/app/components/ReassignHospitalButton'
+import TicketLogPanel from '@/app/tickets/components/TicketLogPanel'
+import TicketStatusBadge from '@/app/tickets/components/TicketStatusBadge'
 
 interface MaintenanceFile {
   id: number
@@ -42,6 +45,13 @@ interface MaintenanceData {
   assignees: { user: { id: string; name: string; email: string } }[]
   files: MaintenanceFile[]
   visits: { id: number; startDate: string; endDate: string }[]
+  ticketId: number | null
+}
+
+interface LinkedTicket {
+  id: number
+  ticketCode: string
+  status: TicketStatus
 }
 
 const labelClass = 'text-xs font-medium uppercase tracking-wider text-gray-400'
@@ -89,6 +99,7 @@ export default function EditMaintenancePage() {
   const [data, setData] = useState<MaintenanceData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [linkedTicket, setLinkedTicket] = useState<LinkedTicket | null>(null)
 
   useEffect(() => {
     fetch(`/api/maintenances/${id}`)
@@ -96,6 +107,12 @@ export default function EditMaintenancePage() {
       .then((d) => {
         if (d.maintenance) {
           setData(d.maintenance)
+          // 연결된 티켓 코드·상태 조회 (숫자 id 허용)
+          if (d.maintenance.ticketId) {
+            fetch(`/api/tickets/${d.maintenance.ticketId}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .then((t) => { if (t?.ticket) setLinkedTicket(t.ticket) })
+          }
         } else {
           setError('유지보수를 찾을 수 없습니다.')
         }
@@ -151,6 +168,21 @@ export default function EditMaintenancePage() {
           <h1 className="text-2xl font-bold text-gray-900">유지보수 상세 / 수정</h1>
           <p className="mt-1 font-mono text-sm text-gray-400">{data.maintenanceCode ?? `MNT-${String(data.id).padStart(4, '0')}`}</p>
         </div>
+
+        {/* 연결된 티켓 배너 */}
+        {linkedTicket && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+            <span className="font-medium">티켓:</span>
+            <span className="font-mono text-xs">{linkedTicket.ticketCode}</span>
+            <TicketStatusBadge status={linkedTicket.status} />
+            <Link
+              href={`/tickets/${linkedTicket.ticketCode}`}
+              className="ml-auto shrink-0 rounded-md border border-blue-300 bg-white px-2.5 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-700 dark:bg-transparent dark:text-blue-300 dark:hover:bg-blue-900/40"
+            >
+              보기 →
+            </Link>
+          </div>
+        )}
         {data.hospital && <HospitalCard hospital={data.hospital} />}
         {data.maintenanceCode && (
           <div className="mb-4 flex items-center gap-2">
@@ -167,9 +199,13 @@ export default function EditMaintenancePage() {
           <MaintenanceForm mode="edit" initialData={initialData} />
         </div>
 
-        {/* 처리 기록 타임라인 — 폼과 독립 저장 */}
+        {/* 처리 기록 — 티켓 타임라인으로 일원화 (기존 기록은 티켓으로 이관 완료). ticketId 없으면 구 패널 폴백 */}
         <div className="mt-4 rounded-xl bg-white p-6 shadow-sm border border-gray-200">
-          <MaintenanceLogPanel maintenanceId={data.id} />
+          {data.ticketId ? (
+            <TicketLogPanel ticketId={data.ticketId} />
+          ) : (
+            <MaintenanceLogPanel maintenanceId={data.id} />
+          )}
         </div>
       </div>
     </div>

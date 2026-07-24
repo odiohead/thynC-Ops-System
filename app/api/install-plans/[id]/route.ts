@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { notifyTaskStatusChanged } from '@/lib/notify'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import { syncInstallPlanToTicket } from '@/lib/ticketDomain'
 
 interface Params { params: { id: string } }
 
@@ -61,6 +62,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
     ])
   }
 
+  // 티켓 동기화 (P8 편입)
+  await prisma.$transaction(async (tx) => {
+    await syncInstallPlanToTicket(tx, id, authUser.userId)
+  })
+
   // 갱신된 데이터 다시 조회
   const updated = await prisma.installPlan.findUnique({
     where: { id },
@@ -70,14 +76,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
     },
   })
 
-  // Task 완료 동기화: writeStatus='완료' AND replyStatus='완료' → 완료
+  // Slack 알림 (상태 변경) — best-effort. 작성완료여부/회신여부 변경 시 발송
   if ((writeStatus !== undefined || replyStatus !== undefined) && updated?.planCode) {
-    const isCompleted = updated.writeStatus === '완료' && updated.replyStatus === '완료'
-    await prisma.task.updateMany({
-      where: { refCode: updated.planCode, taskType: 'INSTALL_PLAN' },
-      data: { isCompleted, completedAt: isCompleted ? new Date() : null },
-    })
-    // Slack 알림 (상태 변경) — best-effort. 작성완료여부/회신여부 변경 시 발송
     notifyTaskStatusChanged({ taskType: 'INSTALL_PLAN', refCode: updated.planCode, actorName: authUser.name }).catch(() => {})
   }
 
@@ -107,7 +107,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   })
   if (!existing) return NextResponse.json({ error: '설치계획을 찾을 수 없습니다.' }, { status: 404 })
 
-  // 연결된 메일큐 항목 해제 + Task 삭제 + 설치계획 삭제를 한 트랜잭션으로 처리
+  // 연결된 메일큐 항목 해제 + 설치계획 삭제를 한 트랜잭션으로 처리
   // install_plan_queue FK는 NO ACTION이라 먼저 링크를 끊어야 삭제 가능.
   // 링크 해제 후 'ignored' 처리 — 삭제된 설치계획의 출처 메일이 큐에 다시 노출되지 않도록 함(메일 원본은 보존).
   await prisma.$transaction([
@@ -115,11 +115,13 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       where: { installPlanId: id },
       data: { installPlanId: null, status: 'ignored' },
     }),
-    ...(existing.planCode
-      ? [prisma.task.deleteMany({ where: { refCode: existing.planCode, taskType: 'INSTALL_PLAN' } })]
-      : []),
     prisma.installPlan.delete({ where: { id } }),
   ])
+
+  // 연결 티켓도 삭제 (P8 편입 — 생명주기 공유)
+  if (existing.ticketId) {
+    await prisma.ticket.delete({ where: { id: existing.ticketId } }).catch(() => {})
+  }
 
   await logAudit({
     req: request,
