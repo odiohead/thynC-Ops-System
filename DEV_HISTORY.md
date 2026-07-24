@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-07-25 | 티켓 P11~P13 PROD 배포
+
+- dev2 커밋 `96166e0` push → PROD git pull(32파일, +1868/-574) → 패키지·마이그레이션 변경 없음 확인 → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- **dueAt 백필**(사용자 명시 허락): `scripts/backfill-ticket-dueat.sql` 실행 — 열린 티켓 91건에 `생성일+Sev SLA` 소급 부여(프로젝트·SEV5·기보유 제외). 실행 전 대상 91건 확인·후 미대상 0건 검증
+- 검증: `/`·`/tickets`·`/tickets/dashboard` 307 정상, 신규 `/api/tickets/metrics` 인증 응답 정상(열린 115·미배정 11·담당별 19행·백필 후 SLA 초과 75). 재시작 직후 로그의 `Failed to find Server Action "x"`는 구버전 탭 잔여 요청(무해, Next.js 자체 경고)
+- **후속 안내(사용자 작업)**: ① 큐 멤버 배정(설정 → 티켓 큐 관리 — 멘션·"내 큐" 동작 전제) ② SLA 요약 발송 원하면 `/settings/notifications`에서 `notify_delay_interval` 켜기(현 off — 켜면 SLA 초과 75건 요약·RESOLVED 자동 종결 동작) ③ 오래된 열린 티켓 정리
+- **티켓 시스템 P1~P13 전 Phase PROD 반영 완료**
+
+---
+
 ## 2026-07-25 | 티켓 P13 — 안정화·마무리 (전 Phase 종료, 사용자 최종 승인 대기)
 
 - 상세 설계 사용자 확정(이월 갭 2건 포함·CLAUDE.md 규칙 4개 추가) 후 착수 승인 받아 구현
