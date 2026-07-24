@@ -291,7 +291,7 @@ function NewTicketForm() {
 
               {/* 담당자 */}
               <div className={rowClass}>
-                <label className={labelClass}>Owner</label>
+                <label className={labelClass}>Assignee</label>
                 <div className="sm:col-span-2">
                   <OwnerSelect
                     value={ownerId}

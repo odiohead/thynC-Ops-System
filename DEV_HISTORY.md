@@ -4,6 +4,11 @@
 
 ---
 
+## 2026-07-24 | 티켓 담당자 라벨 Owner → Assignee (사용자 피드백)
+
+- 사용자 확인 요청: 목록·상세에 Assignee 필드가 없다 → 필드는 존재하나 라벨이 'Owner'였음(설계 용어). AWS SIM 화면 용어인 **Assignee**로 표시 라벨만 변경(데이터 모델 ownerId 유지) — 목록 컬럼·상세 Details·서브 티켓 테이블·생성 폼·타임라인 이벤트 프리픽스 5곳
+- tsc 0오류 → dev2·PROD 빌드·재시작
+
 ## 2026-07-24 | 티켓 시스템 P1~P10 PROD 배포
 
 - dev2 커밋 `829123d` push → PROD 사전 백업(`thync_ops_pre_ticket_p1-p10_20260724.dump`) → git pull → `prisma migrate deploy` 8개 적용 → 시드(seed-ticket-masters.sql: 큐4·CTI·사유5·nav 4행·tasks 메뉴 비활성) → prisma generate → **백필 5종 순차: 유지보수 220·기타업무 31·답사 107·설치계획 72·프로젝트 243 = 673건 전부 연결(미연결 0)** → 힙 4GB 빌드 → pm2 restart thync-prod

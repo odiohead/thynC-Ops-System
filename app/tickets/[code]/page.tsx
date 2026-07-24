@@ -663,7 +663,7 @@ export default function TicketDetailPage() {
           <div className="grid grid-cols-1 gap-x-6 gap-y-5 px-6 py-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
 
             <div>
-              <p className={labelClass}>Owner</p>
+              <p className={labelClass}>Assignee</p>
               {canWrite ? (
                 <OwnerSelect
                   value={ticket.ownerId ?? ''}
@@ -963,7 +963,7 @@ export default function TicketDetailPage() {
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      {['Ticket #', 'Title', 'Status', 'Sev', 'Owner'].map((label) => (
+                      {['Ticket #', 'Title', 'Status', 'Sev', 'Assignee'].map((label) => (
                         <th key={label} className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                           {label}
                         </th>

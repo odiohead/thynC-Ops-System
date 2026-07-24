@@ -150,7 +150,7 @@ export default function TicketLogPanel({
         return s
       }
       case 'assign':
-        return `Owner ${un(p.from)} → ${un(p.to)}`
+        return `Assignee ${un(p.from)} → ${un(p.to)}`
       case 'queue_transfer':
         return `Queue ${qn(p.from)} → ${qn(p.to)}`
       case 'sev_change':

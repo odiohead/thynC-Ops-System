@@ -351,7 +351,7 @@ export default function TicketsPage() {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  {['Ticket #', 'Sev', 'Type', 'Title', 'Status', 'Queue', 'Owner', 'Hospital', 'Created', 'Age', 'Last Change'].map((label) => (
+                  {['Ticket #', 'Sev', 'Type', 'Title', 'Status', 'Queue', 'Assignee', 'Hospital', 'Created', 'Age', 'Last Change'].map((label) => (
                     <th key={label} className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                       {label}
                     </th>
