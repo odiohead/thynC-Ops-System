@@ -12,6 +12,10 @@
 - 검증: `tsc --noEmit` 0오류. 빌드·git 안 함
 - 영향 파일: app/tickets/page.tsx, app/maintenances/page.tsx, app/inventory/transactions/page.tsx
 
+## 2026-07-24 | 표 가로스크롤·WMS 비고 컬럼 PROD 배포
+
+- `fe86828` push → PROD pull → 힙 4GB 빌드 → pm2 restart → /tickets·/inventory/transactions 307 정상 (DB 변경·신규 패키지 없음)
+
 ## 2026-07-24 | My Tickets 탭 PROD 배포
 
 - `75b4cb6` push → PROD pull → 힙 4GB 빌드 → pm2 restart → /tickets 307 정상 (Assignee 라벨 변경 `00cf3f7`에 이어 당일 2차 소규모 배포)
