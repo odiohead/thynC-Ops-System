@@ -4,6 +4,10 @@
 
 ---
 
+## 2026-07-24 | My Tickets 탭 PROD 배포
+
+- `75b4cb6` push → PROD pull → 힙 4GB 빌드 → pm2 restart → /tickets 307 정상 (Assignee 라벨 변경 `00cf3f7`에 이어 당일 2차 소규모 배포)
+
 ## 2026-07-24 | 티켓 목록 — My Tickets 탭 신설·진입 기본값 (사용자 요청)
 
 - 탭 모델 개편: `tab: 'mine' | 'all' | 큐id` — '전체' 앞에 'My Tickets' 탭 신설, **페이지 진입 기본 선택**. 선택 시 mine=true 조회(open=true 기본 유지, 큐 필터 미적용)
