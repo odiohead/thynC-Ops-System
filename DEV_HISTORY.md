@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-07-24 | 티켓 목록 — My Tickets 탭 신설·진입 기본값 (사용자 요청)
+
+- 탭 모델 개편: `tab: 'mine' | 'all' | 큐id` — '전체' 앞에 'My Tickets' 탭 신설, **페이지 진입 기본 선택**. 선택 시 mine=true 조회(open=true 기본 유지, 큐 필터 미적용)
+- 필터 바의 기존 My Tickets 토글 제거(탭으로 승격·중복 제거), Unassigned 토글은 유지 — My Tickets 탭에서는 비활성(모순 조합, disabled+툴팁) 및 파라미터 미전송, 탭 진입 시 해제
+- 저장된 뷰 하위호환: 구 뷰 mine=true → My Tickets 탭 매핑, 아니면 queueId/전체 탭. 새 저장 시 현재 탭 상태(mine·queueId) 포함
+- My Tickets 탭에 내 열린 티켓 수 뱃지(mount 시 `?mine=true&open=true&pageSize=1`의 total, 0이면 숨김, dark 병기)
+- 검증: `tsc --noEmit` 0오류. 빌드·git 안 함. 영향 파일: app/tickets/page.tsx
+
 ## 2026-07-24 | 티켓 담당자 라벨 Owner → Assignee (사용자 피드백)
 
 - 사용자 확인 요청: 목록·상세에 Assignee 필드가 없다 → 필드는 존재하나 라벨이 'Owner'였음(설계 용어). AWS SIM 화면 용어인 **Assignee**로 표시 라벨만 변경(데이터 모델 ownerId 유지) — 목록 컬럼·상세 Details·서브 티켓 테이블·생성 폼·타임라인 이벤트 프리픽스 5곳

@@ -93,12 +93,14 @@ export default function TicketsPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
 
+  // 탭: 'mine'(My Tickets, 진입 기본) | 'all'(전체) | 큐 id
+  const [tab, setTab] = useState<'mine' | 'all' | number>('mine')
+  const [myOpenCount, setMyOpenCount] = useState<number | null>(null)
+
   // 필터
-  const [queueId, setQueueId] = useState<number | null>(null) // null = 전체
   const [statuses, setStatuses] = useState<TicketStatus[]>([]) // 빈 배열 = 열린 티켓(open=true)
   const [severity, setSeverity] = useState('')
   const [refType, setRefType] = useState('') // '' 전체 | 'none' 순수 | 'MAINTENANCE' 유지보수
-  const [mine, setMine] = useState(false)
   const [unassigned, setUnassigned] = useState(false)
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
@@ -119,17 +121,26 @@ export default function TicketsPage() {
   function saveCurrentView() {
     const name = prompt('저장할 뷰 이름을 입력하세요.')?.trim()
     if (!name) return
-    const view: SavedView = { name, queueId, statuses, severity, refType, mine, unassigned, q }
+    const view: SavedView = {
+      name,
+      queueId: typeof tab === 'number' ? tab : null,
+      statuses,
+      severity,
+      refType,
+      mine: tab === 'mine',
+      unassigned,
+      q,
+    }
     persistViews([...savedViews.filter((v) => v.name !== name), view])
   }
 
   function applyView(v: SavedView) {
-    setQueueId(v.queueId ?? null)
+    // 하위호환: 구 뷰의 mine=true → My Tickets 탭, 아니면 큐/전체 탭
+    setTab(v.mine ? 'mine' : v.queueId ?? 'all')
     setStatuses(v.statuses ?? [])
     setSeverity(v.severity ?? '')
     setRefType(v.refType ?? '')
-    setMine(!!v.mine)
-    setUnassigned(!!v.unassigned)
+    setUnassigned(v.mine ? false : !!v.unassigned)
     setQInput(v.q ?? '')
     setQ(v.q ?? '')
     setPage(1)
@@ -145,6 +156,10 @@ export default function TicketsPage() {
     fetch('/api/settings/ticket-queues')
       .then((r) => (r.ok ? r.json() : { queues: [] }))
       .then((d) => setQueues((d.queues ?? []).filter((qu: Queue) => qu.isActive)))
+    // My Tickets 탭 뱃지 — 내 열린 티켓 수
+    fetch('/api/tickets?mine=true&open=true&pageSize=1')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && typeof d.total === 'number') setMyOpenCount(d.total) })
   }, [])
 
   // 검색어 디바운스
@@ -156,13 +171,13 @@ export default function TicketsPage() {
   useEffect(() => {
     setLoading(true)
     const params = new URLSearchParams()
-    if (queueId != null) params.set('queueId', String(queueId))
+    if (tab === 'mine') params.set('mine', 'true') // My Tickets 탭 — 큐 필터 미적용
+    else if (typeof tab === 'number') params.set('queueId', String(tab))
     if (statuses.length > 0) statuses.forEach((s) => params.append('status', s))
     else params.set('open', 'true')
     if (severity) params.set('severity', severity)
     if (refType) params.set('refType', refType)
-    if (mine) params.set('mine', 'true')
-    else if (unassigned) params.set('unassigned', 'true')
+    if (tab !== 'mine' && unassigned) params.set('unassigned', 'true')
     if (q) params.set('q', q)
     params.set('page', String(page))
     params.set('pageSize', String(PAGE_SIZE))
@@ -174,10 +189,10 @@ export default function TicketsPage() {
         setTotal(d.total ?? 0)
       })
       .finally(() => setLoading(false))
-  }, [queueId, statuses, severity, refType, mine, unassigned, q, page])
+  }, [tab, statuses, severity, refType, unassigned, q, page])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const hasFilter = statuses.length > 0 || !!severity || !!refType || mine || unassigned || !!q
+  const hasFilter = statuses.length > 0 || !!severity || !!refType || unassigned || !!q
 
   function toggleStatus(s: TicketStatus) {
     setPage(1)
@@ -185,7 +200,11 @@ export default function TicketsPage() {
   }
 
   const queueTabs = useMemo(
-    () => [{ id: null as number | null, name: '전체' }, ...queues.map((qu) => ({ id: qu.id as number | null, name: qu.name }))],
+    () => [
+      { id: 'mine' as const, name: 'My Tickets' },
+      { id: 'all' as const, name: '전체' },
+      ...queues.map((qu) => ({ id: qu.id, name: qu.name })),
+    ] as { id: 'mine' | 'all' | number; name: string }[],
     [queues]
   )
 
@@ -211,20 +230,29 @@ export default function TicketsPage() {
           )}
         </div>
 
-        {/* 큐 탭 */}
+        {/* 탭 — My Tickets(기본) / 전체 / 큐별 */}
         <div className="mb-4 flex flex-wrap gap-1 border-b border-gray-200">
-          {queueTabs.map((tab) => (
+          {queueTabs.map((t) => (
             <button
-              key={tab.id ?? 'all'}
+              key={t.id}
               type="button"
-              onClick={() => { setQueueId(tab.id); setPage(1) }}
-              className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
-                queueId === tab.id
+              onClick={() => {
+                setTab(t.id)
+                if (t.id === 'mine') setUnassigned(false) // My Tickets와 Unassigned는 모순 조합
+                setPage(1)
+              }}
+              className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+                tab === t.id
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
               }`}
             >
-              {tab.name}
+              {t.name}
+              {t.id === 'mine' && myOpenCount != null && myOpenCount > 0 && (
+                <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                  {myOpenCount}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -317,17 +345,10 @@ export default function TicketsPage() {
             </select>
             <button
               type="button"
-              onClick={() => { setMine((v) => !v); setUnassigned(false); setPage(1) }}
-              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                mine ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50'
-              }`}
-            >
-              My Tickets
-            </button>
-            <button
-              type="button"
-              onClick={() => { setUnassigned((v) => !v); setMine(false); setPage(1) }}
-              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              onClick={() => { setUnassigned((v) => !v); setPage(1) }}
+              disabled={tab === 'mine'}
+              title={tab === 'mine' ? 'My Tickets 탭에서는 사용할 수 없습니다.' : undefined}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                 unassigned ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50'
               }`}
             >
@@ -336,7 +357,7 @@ export default function TicketsPage() {
             {hasFilter && (
               <button
                 type="button"
-                onClick={() => { setStatuses([]); setSeverity(''); setRefType(''); setMine(false); setUnassigned(false); setQInput(''); setQ(''); setPage(1) }}
+                onClick={() => { setStatuses([]); setSeverity(''); setRefType(''); setUnassigned(false); setQInput(''); setQ(''); setPage(1) }}
                 className="rounded-md border border-gray-300 px-2.5 py-1 text-xs text-gray-500 transition-colors hover:bg-gray-100"
               >
                 필터 초기화
