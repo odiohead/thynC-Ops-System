@@ -366,79 +366,87 @@ export default function TicketsPage() {
           </div>
         </div>
 
-        {/* 테이블 */}
+        {/* 테이블 — table-fixed로 화면 폭 내 고정(가로스크롤 없음), 좁은 화면은 Hospital/Last Change 숨김 */}
         <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+          <table className="w-full table-fixed divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                {([
+                  ['Ticket #', 'w-[8rem]'],
+                  ['Sev', 'w-16'],
+                  ['Type', 'w-[5.2rem]'],
+                  ['Title', ''],
+                  ['Status', 'w-20'],
+                  ['Queue', 'w-24'],
+                  ['Assignee', 'w-20'],
+                  ['Hospital', 'hidden w-28 lg:table-cell'],
+                  ['Age', 'w-14'],
+                  ['Last Change', 'hidden w-20 xl:table-cell'],
+                ] as [string, string][]).map(([label, cls]) => (
+                  <th key={label} className={`px-2.5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 ${cls}`}>
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {loading ? (
                 <tr>
-                  {['Ticket #', 'Sev', 'Type', 'Title', 'Status', 'Queue', 'Assignee', 'Hospital', 'Created', 'Age', 'Last Change'].map((label) => (
-                    <th key={label} className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                      {label}
-                    </th>
-                  ))}
+                  <td colSpan={10} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {loading ? (
-                  <tr>
-                    <td colSpan={11} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td>
-                  </tr>
-                ) : tickets.length === 0 ? (
-                  <tr>
-                    <td colSpan={11} className="py-12 text-center text-sm text-gray-400">
-                      {hasFilter ? '조건에 맞는 티켓이 없습니다.' : '등록된 티켓이 없습니다.'}
+              ) : tickets.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="py-12 text-center text-sm text-gray-400">
+                    {hasFilter ? '조건에 맞는 티켓이 없습니다.' : '등록된 티켓이 없습니다.'}
+                  </td>
+                </tr>
+              ) : (
+                tickets.map((t) => (
+                  <tr key={t.id} className={`cursor-pointer hover:bg-gray-50 ${rowAccent(t.severity)}`} onClick={() => router.push(`/tickets/${t.ticketCode}`)}>
+                    <td className="truncate px-2.5 py-2.5 font-mono text-xs text-blue-600" title={t.ticketCode}>{t.ticketCode}</td>
+                    <td className="px-2.5 py-2.5"><TicketSeverityBadge severity={t.severity} short /></td>
+                    <td className="px-2.5 py-2.5">
+                      {t.refType === 'MAINTENANCE' ? (
+                        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                          유지보수
+                        </span>
+                      ) : t.refType === 'ETC' ? (
+                        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
+                          기타업무
+                        </span>
+                      ) : t.refType === 'SITE_VISIT' ? (
+                        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-sky-100 px-1.5 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+                          답사
+                        </span>
+                      ) : t.refType === 'INSTALL_PLAN' ? (
+                        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                          설치계획
+                        </span>
+                      ) : t.refType === 'PROJECT' ? (
+                        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-rose-100 px-1.5 py-0.5 text-xs font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
+                          프로젝트
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-300">-</span>
+                      )}
                     </td>
+                    <td className="truncate px-2.5 py-2.5 text-sm font-medium text-gray-900" title={t.title}>{t.title}</td>
+                    <td className="px-2.5 py-2.5">
+                      <TicketStatusBadge status={t.status} />
+                      {t.status === 'PENDING' && t.pendingReason && (
+                        <span className="mt-0.5 block truncate text-[11px] text-gray-400" title={t.pendingReason.name}>{t.pendingReason.name}</span>
+                      )}
+                    </td>
+                    <td className="truncate px-2.5 py-2.5 text-xs text-gray-700" title={t.queue?.name ?? ''}>{t.queue?.name ?? '-'}</td>
+                    <td className="truncate px-2.5 py-2.5 text-xs text-gray-700" title={t.owner?.name ?? ''}>{t.owner?.name ?? '-'}</td>
+                    <td className="hidden truncate px-2.5 py-2.5 text-xs text-gray-700 lg:table-cell" title={t.hospital?.hospitalName ?? ''}>{t.hospital?.hospitalName ?? '-'}</td>
+                    <td className="whitespace-nowrap px-2.5 py-2.5 text-xs text-gray-500" title={`접수 ${formatDate(t.createdAt)}`}>{timeAgo(t.createdAt)}</td>
+                    <td className="hidden whitespace-nowrap px-2.5 py-2.5 text-xs text-gray-500 xl:table-cell" title={`마지막 상태 변경 ${formatDate(t.statusChangedAt)}`}>{timeAgo(t.statusChangedAt)}</td>
                   </tr>
-                ) : (
-                  tickets.map((t) => (
-                    <tr key={t.id} className={`cursor-pointer hover:bg-gray-50 ${rowAccent(t.severity)}`} onClick={() => router.push(`/tickets/${t.ticketCode}`)}>
-                      <td className="whitespace-nowrap px-4 py-3 font-mono text-sm text-blue-600">{t.ticketCode}</td>
-                      <td className="whitespace-nowrap px-4 py-3"><TicketSeverityBadge severity={t.severity} short /></td>
-                      <td className="whitespace-nowrap px-4 py-3">
-                        {t.refType === 'MAINTENANCE' ? (
-                          <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
-                            유지보수
-                          </span>
-                        ) : t.refType === 'ETC' ? (
-                          <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
-                            기타업무
-                          </span>
-                        ) : t.refType === 'SITE_VISIT' ? (
-                          <span className="inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
-                            답사
-                          </span>
-                        ) : t.refType === 'INSTALL_PLAN' ? (
-                          <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                            설치계획
-                          </span>
-                        ) : t.refType === 'PROJECT' ? (
-                          <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
-                            프로젝트
-                          </span>
-                        ) : (
-                          <span className="text-xs text-gray-300">-</span>
-                        )}
-                      </td>
-                      <td className="max-w-md truncate px-4 py-3 text-sm font-medium text-gray-900">{t.title}</td>
-                      <td className="whitespace-nowrap px-4 py-3">
-                        <TicketStatusBadge status={t.status} />
-                        {t.status === 'PENDING' && t.pendingReason && (
-                          <span className="ml-1.5 text-xs text-gray-400">{t.pendingReason.name}</span>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-700">{t.queue?.name ?? '-'}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-700">{t.owner?.name ?? '-'}</td>
-                      <td className="max-w-[12rem] truncate px-4 py-3 text-sm text-gray-700">{t.hospital?.hospitalName ?? '-'}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-700">{formatDate(t.createdAt)}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500" title="접수 후 경과">{timeAgo(t.createdAt)}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500" title="마지막 상태 변경 후 경과">{timeAgo(t.statusChangedAt)}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
 
         {/* 페이지네이션 */}

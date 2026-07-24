@@ -224,17 +224,18 @@ export default function MaintenancesPage() {
   const hasFilter = JSON.stringify(filters) !== JSON.stringify(EMPTY_FILTERS)
   const set = (patch: Partial<Filters>) => setFilters((f) => ({ ...f, ...patch }))
 
-  const COLS: { key: SortKey; label: string }[] = [
-    { key: 'reportedAt', label: '접수일' },
-    { key: 'hospital', label: '병원명' },
-    { key: 'title', label: '제목' },
-    { key: 'type', label: '장애유형' },
-    { key: 'priority', label: '우선순위' },
-    { key: 'status', label: '상태' },
-    { key: 'remote', label: '원격' },
-    { key: 'assignees', label: '담당자' },
-    { key: 'visits', label: '방문일' },
-    { key: 'resolvedAt', label: '완료일' },
+  // cls: table-fixed 폭 배분 + 좁은 화면 숨김 (가로스크롤 방지 — 병원명·제목이 남은 폭을 나눠 가짐)
+  const COLS: { key: SortKey; label: string; cls: string }[] = [
+    { key: 'reportedAt', label: '접수일', cls: 'w-[5.5rem]' },
+    { key: 'hospital', label: '병원명', cls: 'w-[22%]' },
+    { key: 'title', label: '제목', cls: '' },
+    { key: 'type', label: '장애유형', cls: 'w-[5.5rem]' },
+    { key: 'priority', label: '우선순위', cls: 'w-16' },
+    { key: 'status', label: '상태', cls: 'w-[5.5rem]' },
+    { key: 'remote', label: '원격', cls: 'hidden w-12 lg:table-cell' },
+    { key: 'assignees', label: '담당자', cls: 'w-24' },
+    { key: 'visits', label: '방문일', cls: 'w-[6.5rem]' },
+    { key: 'resolvedAt', label: '완료일', cls: 'hidden w-[5.5rem] xl:table-cell' },
   ]
 
   return (
@@ -372,76 +373,75 @@ export default function MaintenancesPage() {
           )}
         </div>
 
+        {/* 테이블 — table-fixed로 화면 폭 내 고정(가로스크롤 없음), 좁은 화면은 원격/완료일 숨김 */}
         <div className="hidden overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm md:block">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+          <table className="w-full table-fixed divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                {COLS.map((col) => (
+                  <th key={col.key} className={`px-2.5 py-3 text-left ${col.cls}`}>
+                    <button
+                      type="button"
+                      onClick={() => toggleSort(col.key)}
+                      className={`inline-flex items-center gap-1 whitespace-nowrap text-xs font-medium uppercase tracking-wider transition-colors ${
+                        sort?.key === col.key ? 'text-blue-600' : 'text-gray-500 hover:text-gray-800'
+                      }`}
+                      title="클릭하여 정렬 (오름차순 → 내림차순 → 기본)"
+                    >
+                      {col.label}
+                      <span className="text-[10px]">
+                        {sort?.key === col.key ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'}
+                      </span>
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {loading ? (
                 <tr>
-                  {COLS.map((col) => (
-                    <th key={col.key} className="whitespace-nowrap px-4 py-3 text-left">
-                      <button
-                        type="button"
-                        onClick={() => toggleSort(col.key)}
-                        className={`inline-flex items-center gap-1 text-xs font-medium uppercase tracking-wider transition-colors ${
-                          sort?.key === col.key ? 'text-blue-600' : 'text-gray-500 hover:text-gray-800'
-                        }`}
-                        title="클릭하여 정렬 (오름차순 → 내림차순 → 기본)"
-                      >
-                        {col.label}
-                        <span className="text-[10px]">
-                          {sort?.key === col.key ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'}
-                        </span>
-                      </button>
-                    </th>
-                  ))}
+                  <td colSpan={10} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {loading ? (
-                  <tr>
-                    <td colSpan={10} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td>
-                  </tr>
-                ) : sorted.length === 0 ? (
-                  <tr>
-                    <td colSpan={10} className="py-12 text-center text-sm text-gray-400">
-                      {hasFilter ? '조건에 맞는 유지보수가 없습니다.' : '등록된 유지보수가 없습니다.'}
+              ) : sorted.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="py-12 text-center text-sm text-gray-400">
+                    {hasFilter ? '조건에 맞는 유지보수가 없습니다.' : '등록된 유지보수가 없습니다.'}
+                  </td>
+                </tr>
+              ) : (
+                sorted.map((m) => (
+                  <tr key={m.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/maintenances/${m.id}`)}>
+                    <td className="whitespace-nowrap px-2.5 py-2.5 text-xs text-gray-700">{formatDate(m.reportedAt)}</td>
+                    <td className="truncate px-2.5 py-2.5" title={hospitalName(m)}>
+                      <span className="text-sm font-medium text-blue-600">
+                        {hospitalName(m)}
+                      </span>
                     </td>
+                    <td className="truncate px-2.5 py-2.5 text-sm text-gray-700" title={m.title}>{m.title}</td>
+                    <td className="truncate px-2.5 py-2.5" title={m.type?.name ?? ''}>
+                      <StatusBadge status={m.type} />
+                    </td>
+                    <td className="px-2.5 py-2.5">
+                      <PriorityBadge priority={m.priority} />
+                    </td>
+                    <td className="truncate px-2.5 py-2.5" title={m.status?.name ?? ''}>
+                      <StatusBadge status={m.status} />
+                    </td>
+                    <td className="hidden px-2.5 py-2.5 text-sm text-gray-700 lg:table-cell">
+                      {m.isRemote ? (
+                        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-green-100 px-1.5 py-0.5 text-xs font-medium text-green-700">원격</span>
+                      ) : '-'}
+                    </td>
+                    <td className="truncate px-2.5 py-2.5 text-xs text-gray-700" title={assigneeNames(m)}>
+                      {assigneeNames(m) || '-'}
+                    </td>
+                    <td className="truncate px-2.5 py-2.5 text-xs text-gray-700" title={formatVisits(m.visits)}>{formatVisits(m.visits)}</td>
+                    <td className="hidden whitespace-nowrap px-2.5 py-2.5 text-xs text-gray-700 xl:table-cell">{formatDate(m.resolvedAt)}</td>
                   </tr>
-                ) : (
-                  sorted.map((m) => (
-                    <tr key={m.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/maintenances/${m.id}`)}>
-                      <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatDate(m.reportedAt)}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <span className="text-sm font-medium text-blue-600">
-                          {hospitalName(m)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-700 max-w-xs truncate">{m.title}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <StatusBadge status={m.type} />
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <PriorityBadge priority={m.priority} />
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <StatusBadge status={m.status} />
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">
-                        {m.isRemote ? (
-                          <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">원격</span>
-                        ) : '-'}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">
-                        {assigneeNames(m) || '-'}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatVisits(m.visits)}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatDate(m.resolvedAt)}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
 
       </div>

@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-07-24 | 목록 가로스크롤 제거(티켓·유지보수) + WMS 입출고 이력 비고 컬럼
+
+- (1) `/tickets`·`/maintenances` 목록이 화면 폭을 넘어 가로스크롤 발생 → 표 전체가 폭 안에 들어오게 개편: `table-fixed w-full` + 컬럼 폭 배분, 셀 패딩 px-2.5·메타 컬럼 text-xs, 긴 텍스트(제목·병원·큐·담당자 등) truncate+title 툴팁, 중요도 낮은 컬럼은 좁은 화면에서만 숨김(`hidden lg/xl:table-cell` — 티켓 Hospital/Last Change, 유지보수 원격/완료일). overflow-x-auto 래퍼 제거
+- 티켓 목록은 Created·Age 컬럼 병합(Age 표시 + title에 접수일) — Assignee·Status·Sev·Queue·Type은 항상 노출 유지, 11→10컬럼
+- (2) WMS 입출고 이력(`/inventory/transactions`)에 '비고' 컬럼 추가(병원/업무와 처리자 사이) — InventoryTransaction.note는 인터페이스·API(include 방식)에 이미 포함되어 표시만 추가, max-w-[8rem] truncate+title 툴팁으로 기존 압축 표 원칙 유지(colSpan 12/11→13/12). WMS는 기존 한국어 라벨·스타일 유지
+- 검증: `tsc --noEmit` 0오류. 빌드·git 안 함
+- 영향 파일: app/tickets/page.tsx, app/maintenances/page.tsx, app/inventory/transactions/page.tsx
+
 ## 2026-07-24 | My Tickets 탭 PROD 배포
 
 - `75b4cb6` push → PROD pull → 힙 4GB 빌드 → pm2 restart → /tickets 307 정상 (Assignee 라벨 변경 `00cf3f7`에 이어 당일 2차 소규모 배포)

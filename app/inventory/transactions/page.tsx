@@ -170,15 +170,16 @@ export default function TransactionsPage() {
               <th className="px-2 py-2.5">요청자</th>
               <th className="px-2 py-2.5">출고처</th>
               <th className="px-2 py-2.5">병원/업무</th>
+              <th className="px-2 py-2.5">비고</th>
               <th className="px-2 py-2.5">처리자</th>
               {canManage && <th className="px-2 py-2.5 text-right">관리</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading ? (
-              <tr><td colSpan={canManage ? 12 : 11} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td></tr>
+              <tr><td colSpan={canManage ? 13 : 12} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td></tr>
             ) : txs.length === 0 ? (
-              <tr><td colSpan={canManage ? 12 : 11} className="py-12 text-center text-sm text-gray-400">이력이 없습니다.</td></tr>
+              <tr><td colSpan={canManage ? 13 : 12} className="py-12 text-center text-sm text-gray-400">이력이 없습니다.</td></tr>
             ) : txs.map((tx) => (
               <tr key={tx.id} className={`hover:bg-gray-50 ${tx.canceledAt ? 'opacity-50 line-through' : ''}`}>
                 <td className="px-2 py-2 font-mono text-[11px] text-gray-500">
@@ -221,6 +222,9 @@ export default function TransactionsPage() {
                   <span className="block truncate" title={`${tx.hospital?.hospitalName ?? ''}${tx.refCode ? ` · ${tx.refCode}` : ''}`}>
                     {tx.hospital?.hospitalName ?? '-'}{tx.refCode && <span className="text-gray-400"> · {tx.refCode}</span>}
                   </span>
+                </td>
+                <td className="px-2 py-2 text-gray-600 text-xs max-w-[8rem]">
+                  <span className="block truncate" title={tx.note ?? ''}>{tx.note ?? '-'}</span>
                 </td>
                 <td className="px-2 py-2 text-gray-500 text-xs">
                   {tx.actor?.name ?? '-'}
