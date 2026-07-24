@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-07-24 | 티켓 시스템 P1~P10 PROD 배포
+
+- dev2 커밋 `829123d` push → PROD 사전 백업(`thync_ops_pre_ticket_p1-p10_20260724.dump`) → git pull → `prisma migrate deploy` 8개 적용 → 시드(seed-ticket-masters.sql: 큐4·CTI·사유5·nav 4행·tasks 메뉴 비활성) → prisma generate → **백필 5종 순차: 유지보수 220·기타업무 31·답사 107·설치계획 72·프로젝트 243 = 673건 전부 연결(미연결 0)** → 힙 4GB 빌드 → pm2 restart thync-prod
+- 검증: `/`·`/tickets` 307 정상 · login 401(오류 자격증명) 정상 · 유형별 티켓 수 정합 · nav tickets 활성/tasks 비활성 · 오류 로그의 Prisma 500 1건은 검증 중 빈 body 테스트가 원인(실제 이슈 아님)
+- 후속 안내: PROD 큐 멤버 배정 필요(설정 → 티켓 큐 관리), Slack 알림은 신규 티켓부터 발송
+
 ## 2026-07-24 | 티켓 P10 — 검증·마무리 (누락 0건 대조·리다이렉트 보정)
 
 - 폐기 전 대조 검증: 미완료 tasks 116건 중 유효분 전부 열린 도메인 티켓으로 커버 확인. 불일치 16건은 **티켓이 더 정확** — 고아 task 3건(과거 답사 삭제 시 미정리)·과거 완료 동기화 누락 13건(유지보수 '완료'인데 task 미완료)
