@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-07-25 | AI 어시스턴트 토큰 최적화 PROD 배포
+
+- dev2 커밋 `a442e9b` push → PROD git pull(`af14475`→`a442e9b`, 11파일 +1119/-149) → 패키지·마이그레이션 변경 없음 확인 → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- **PROD DB 작업**(사용자 명시 허락): `scripts/seed-ai-assistant-nav.sql` 실행 — nav 메뉴 1행 추가(`settings/ai-assistant`, 연동·알림 그룹 sort_order 107). 그 외 DDL/DML 없음
+- 검증: `/`·`/settings/ai-assistant`·`/settings/ai-usage`·`/ai-assistant`·`/tickets` 307 정상, 신규 라우트 2종(.next/server/app/{settings,api/settings}/ai-assistant) 빌드 확인, nav 5행 정상. **재시작 이후 신규 오류 로그 0건**(기존 `Failed to find Server Action` 에러는 07-24 20:35이 마지막으로 이번 배포와 무관)
+- **PROD 실동작 검증**(`scripts/ai-agent-smoke.mts`, 원장 미기록): 모델 `claude-opus-5`·effort medium 확인. 1회차(콜드 캐시) 유지보수 25건 정답·적중률 48%·$0.0511 → 2회차(워밍) 답사 27건 정답·**적중률 97.4%·$0.0134**. uncached input 양쪽 모두 4토큰
+- 모델 전환으로 기존 프롬프트 캐시가 1회 무효화되는 것은 예상된 동작(첫 질문만 cacheWrite 발생)
+- **후속 안내(사용자 작업)**: 설정 → AI 어시스턴트 설정에서 effort 조정 가능(기본 medium). 실사용 누적 후 `/settings/ai-usage`에서 절감 폭 확인 권장
+
+---
+
 ## 2026-07-25 | AI 어시스턴트 토큰 최적화 + 모델 전환 (설계 확정 후 착수)
 
 - 설계안 `ai_assistant_optimization_design.md` 작성 → 사용자 결정 5건 확정 후 구현. **위키 카테고리 스코프(Part B)는 폐기** — 요구사항인 "특정 카테고리만 제외"는 기존 `ai_excluded`(조회 시점 재귀 CTE·하위 cascade·3개 도구 전부 적용)로 이미 충족되어 추가 개발 불필요로 결론
