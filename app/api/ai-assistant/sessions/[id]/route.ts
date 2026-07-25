@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { checkAiAccess } from '@/lib/ai/access'
 import { TOOL_LABELS } from '@/lib/ai/tools'
 
 export const dynamic = 'force-dynamic'
@@ -11,6 +12,8 @@ type Ctx = { params: { id: string } }
 export async function GET(request: NextRequest, { params }: Ctx) {
   const authUser = await getAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const denied = await checkAiAccess(authUser)
+  if (denied) return NextResponse.json({ error: denied.error }, { status: denied.status })
 
   const session = await prisma.aiChatSession.findUnique({
     where: { id: params.id },
@@ -27,6 +30,13 @@ export async function GET(request: NextRequest, { params }: Ctx) {
     select: { id: true, role: true, content: true, toolCalls: true, createdAt: true },
   })
 
+  // 이미 남긴 피드백 복원 (ai_feedback은 FK가 없어 별도 조회)
+  const feedbacks = await prisma.aiFeedback.findMany({
+    where: { messageId: { in: messages.map((m) => m.id) } },
+    select: { messageId: true, verdict: true },
+  })
+  const verdictByMessage = new Map(feedbacks.map((f) => [f.messageId, f.verdict]))
+
   return NextResponse.json({
     session: {
       id: session.id,
@@ -42,6 +52,7 @@ export async function GET(request: NextRequest, { params }: Ctx) {
       tools: Array.isArray(m.toolCalls)
         ? (m.toolCalls as { name?: string }[]).map((t) => TOOL_LABELS[t.name ?? ''] ?? t.name ?? '조회')
         : [],
+      feedback: verdictByMessage.get(m.id) ?? null,
       createdAt: m.createdAt,
     })),
   })
@@ -51,6 +62,8 @@ export async function GET(request: NextRequest, { params }: Ctx) {
 export async function DELETE(request: NextRequest, { params }: Ctx) {
   const authUser = await getAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const denied = await checkAiAccess(authUser)
+  if (denied) return NextResponse.json({ error: denied.error }, { status: denied.status })
 
   const session = await prisma.aiChatSession.findUnique({ where: { id: params.id } })
   if (!session) return NextResponse.json({ error: 'Not found' }, { status: 404 })

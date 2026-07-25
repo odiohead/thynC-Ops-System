@@ -8,6 +8,7 @@ import { getIssuePageProtection } from '@/lib/wiki/projectIssueNote'
 import { getHospitalNotePageProtection } from '@/lib/wiki/hospitalNote'
 import { extractPlainTextFromBlocks, extractPageLinks, updatePageLinkTitles } from '@/lib/wiki/blockText'
 import { sanitizeHtmlDocument, extractPlainTextFromHtml, HTML_DOC_MAX_BYTES } from '@/lib/wiki/htmlText'
+import { rebuildPageChunks } from '@/lib/wiki/chunk'
 
 type Ctx = { params: { id: string } }
 
@@ -290,6 +291,12 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
     before: metaSnapshot(existing),
     after: { ...metaSnapshot(updated), contentChanged: contentJson !== undefined },
   })
+
+  // 본문·제목이 바뀌면 AI 검색용 청크 인덱스 재생성 (v3 W1)
+  // 트랜잭션 밖에서 실행 — 청크는 검색 가속 인덱스이므로 실패해도 저장을 되돌리지 않는다
+  if (contentJson !== undefined || contentHtml !== undefined || title !== undefined) {
+    await rebuildPageChunks(updated.id)
+  }
 
   return NextResponse.json({ id: updated.id, updatedAt: updated.updatedAt })
 }

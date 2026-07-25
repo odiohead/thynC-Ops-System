@@ -200,6 +200,8 @@ lib/
 ├── ai/                               # AI 어시스턴트 v2 (function_ai_assistant.html)
 │   ├── agent.ts                      # 에이전트 루프 — claude-opus-5 스트리밍 + tool use 반복(최대 8회) + 롤링 캐시 브레이크포인트
 │   ├── settings.ts                   # 모델 상수(채팅 opus-5 / 정리 sonnet-5) + 런타임 설정(effort·캐시 TTL, AppSetting)
+│   ├── access.ts                     # 어시스턴트 접근 권한 — 자사(SEERS) 전용 서버 강제 (DB 실시간 소속 검사)
+│   └── opsSearch.ts                  # 축2 운영 정보 전문 검색 — search_operation_history / find_similar_cases
 │   └── tools.ts                      # 도구 4종 (read-only Prisma SELECT — 병원검색/현황/프로젝트/유지보수)
 ├── auth.ts                           # JWT 인증 유틸리티 + 역할 헬퍼
 ├── prisma.ts                         # Prisma 클라이언트
@@ -229,6 +231,7 @@ lib/
 │   └── runner.ts                     # 백그라운드 파이프라인 러너 + 재배치
 └── wiki/
     ├── blockText.ts                  # BlockNote 블록 → plain text 추출·페이지 링크 인덱싱
+    ├── chunk.ts                      # 축1 위키 청크 인덱스 생성 (HTML h1~h4 / BlockNote heading 기준, 표 구조 보존)
     ├── htmlText.ts                   # HTML 문서 페이지 — sanitize(script 등 제거) + plain text·title 추출
     ├── wikiSchema.tsx                # BlockNote 커스텀 스키마 (콜아웃·구분선·페이지링크·mention·멀티컬럼)
     ├── projectIssueNote.ts           # 프로젝트 이슈노트 — 루트 카테고리 보장·보호 판정 (refType 'project_issue')
@@ -458,6 +461,20 @@ prisma/
 - `hospitalCode`(→Hospital, SetNull), `model`, `inputTokens`/`outputTokens`/`cacheReadTokens`/`cacheWriteTokens`, `createdAt`
 - 채팅 응답 저장 시 best-effort 기록(실패해도 채팅 유지), 기존 대화는 마이그레이션 `20260720230000`에서 백필
 - 인덱스: `(created_at)`, `(user_id, created_at)`
+
+### AiFeedback (어시스턴트 답변 피드백 — v3, 2026-07-25)
+- 답변 1건당 1행(`message_id` UNIQUE, 재전송 시 갱신). `ai_usage_logs`와 같은 이유로 메시지·세션에 **FK를 걸지 않아** 대화를 삭제해도 피드백은 보존
+- `verdict`(good|bad), `reason`(bad일 때만 — wrong|not_found|outdated|inappropriate), `comment`, `userId`(SetNull)+`userName` 스냅샷
+- 답변의 `toolCalls`와 `messageId`로 조인해 **어느 축·어느 도구에서 실패했는지** 사후 분류. 벡터DB 도입 판단(`ai_assistant_v3_design.md` §6)의 입력
+- 인덱스: `(created_at)`, `(verdict, reason)`
+
+### WikiChunk (위키 청크 인덱스 — v3, `wiki` 스키마)
+- 위키 본문을 헤딩 단위로 쪼갠 AI 검색용 인덱스. 검색·반환 단위를 문서에서 절로 내린다
+- `pageId`(→WikiPage, Cascade), `ordinal`, **`headingPath`**("문서명 > 상위 > 하위" — 랭킹 가중치 겸 표시용), `text`, `charStart`/`charEnd`
+- 분할: HTML은 h1~h4, BlockNote는 heading 블록 기준. 목표 1,200자·상한 2,000자, 200자 미만 절은 병합. **표는 `셀 | 셀` 줄로 보존**(평문 추출에서 표가 뭉개지던 문제 해소)
+- 페이지 저장(생성·수정) 시 전량 재생성 — 실패해도 저장을 되돌리지 않는다(검색 가속 인덱스이지 원본이 아님). 백필: `scripts/backfill-wiki-chunks.mts`
+- 현황: 109페이지 → 431청크 (API 규격서 68,772자 → 97청크)
+- UNIQUE `(page_id, ordinal)` + `text`/`heading_path` trigram GIN
 
 ### ConsultationQueue (상담 대기열)
 - AI 어시스턴트 상담이력 저장
@@ -948,10 +965,14 @@ prisma/
 
 ### AI 어시스턴트 v2 (에이전트형 — `function_ai_assistant.html`, Phase 1~4·6 완료 2026-07-18)
 - **에이전트**: Anthropic API(`claude-opus-5` + adaptive thinking, effort 기본 `medium`) 직접 호출, **tool use로 운영 DB·위키 실데이터 조회** 후 답변. 역할 3축 — ①CS 응대(위키 지식+병원 노트) ②정보 조회(병원 현황·형상) ③영업·운영 집계
-- **도구 12종(read-only, `lib/ai/tools.ts` 화이트리스트)**: `search_hospitals`(운영·계약 우선 랭킹) / `get_hospital_overview` / `list_projects` / `list_maintenances` / `list_site_visits` / `list_install_plans` / `list_etc_tasks` / `get_dashboard_summary` / **`aggregate_stats`**(신규계약·완료구축·유지보수·답사·신규병원 — 기간 집계) / `search_wiki` / `read_wiki_page` / `read_hospital_note`
+- **접근 권한 (v3, 2026-07-25)**: **자사(SEERS) 전용**. `lib/ai/access.ts`가 `/api/ai-assistant/*` 전 핸들러에서 소속을 **DB 실시간 조회**로 검사(JWT는 최대 7일 경과 가능). nav 메뉴의 `allowed_org_codes`는 UI 게이트일 뿐이라 서버에서 별도 강제
+- **지식 소스 2축 (v3 설계 원리 — `ai_assistant_v3_design.md`)**: 축1 **고정형**(사내위키 — 제품 사양·매뉴얼, 문서 단위가 아니라 **절 단위** 검색) / 축2 **운영**(운영관리 DB — 유지보수·답사·상담 이력, **자유 텍스트 전문 검색**). 두 축은 단위·정답 성격·갱신 빈도가 달라 검색 전략을 분리했다
+- **도구 15종(read-only, `lib/ai/tools.ts` 화이트리스트)**: `search_hospitals`(운영·계약 우선 랭킹) / `get_hospital_overview` / `list_projects` / `list_maintenances` / `list_site_visits` / `list_install_plans` / `list_etc_tasks` / `get_dashboard_summary` / **`aggregate_stats`**(기간 집계) / **`search_operation_history`**(v3 — 유지보수 증상·조치, 처리기록, 답사 노트, 기타업무 비고, 티켓 코멘트 통합 전문 검색) / **`find_similar_cases`**(v3 — 증상→과거 유사 장애+조치, CS 응대 특화) / `search_wiki` / **`read_wiki_chunk`**(v3) / `read_wiki_page` / `read_hospital_note`
+- **출처 표기 (v3)**: 지식 도구가 `link`(도메인 상세 경로)를 함께 반환하고, 시스템 프롬프트가 사실 진술에 근거 출처를 마크다운 링크로 제시하도록 규정 — 예: `[MNT-202605-0043](/maintenances/104)`
+- **답변 피드백 (v3)**: 답변 하단 👍/👎(👎는 사유 4종 — 틀림·못 찾음·오래된 정보·부적절) → `ai_feedback`. 대화를 삭제해도 보존되며, 벡터DB 도입 여부 판단의 근거 데이터로 쓴다
 - **목록 도구 5종 공통 파라미터 (2026-07-25)**: `limit`(기본 10·최대 30)·`detail`(`summary` 기본 / `full`). 요약 모드는 핵심 필드만 반환하고 증상·조치·비고 등 본문은 `full`에서만. 응답에 `total`을 항상 포함해 "몇 건인가"를 재조회 없이 답한다
-- **`search_wiki` 검색 품질 (2026-07-25)**: 질의를 공백 단위 토큰으로 나눠 **AND 매칭**(한국어 조사 때문에 전체 문자열 매칭은 리콜이 낮음), 정렬은 **관련도순**(제목 토큰 적중 수 → `pg_trgm` 제목 유사도 → 최신순). 결과에 **카테고리 경로(`path`)** 병기 → 읽을 문서 판단이 쉬워져 불필요한 `read_wiki_page` 감소
-- **`read_wiki_page` 분할 읽기 (2026-07-25)**: `offset`·`maxChars`(기본 6000·최대 12000) 지원, 잘리면 `nextOffset` 반환 → 긴 문서(최대 6만 자 이상)도 앞부분만 보고 포기하지 않음
+- **`search_wiki` 절 단위 검색 (v3)**: 문서가 아니라 **헤딩 청크** 단위로 검색·반환한다. 랭킹은 헤딩 경로 적중(3배) > 문서 제목(2배) > 본문 + `pg_trgm` 유사도. 결과에 위키 카테고리(`category`)와 문서 내 위치(`heading`)가 함께 와서 읽을 절을 정확히 고를 수 있다. 68,772자 API 규격서에서 `1. 공통 규격 > 1.2 인증 (TokenInterceptor)` 절을 도구 1회로 특정
+- **`read_wiki_chunk` (v3)**: 특정 절의 본문 전체 + 앞뒤 절(기본 1개)을 반환해 문맥이 끊기지 않게 한다. `read_wiki_page`(문서 전문, `offset`/`nextOffset`)는 문서 전체 조망용으로 존치
 - 에이전트 루프(`lib/ai/agent.ts`): 스트리밍 + tool use 반복(최대 8회), 도구 실패 is_error 전달, **프롬프트 캐싱** — 시스템+도구 정의 breakpoint(가변 컨텍스트는 캐시 뒤 배치) + **messages 롤링 브레이크포인트**(2026-07-25): 반복마다 마지막 블록에 마커를 갱신해 다음 반복이 직전 도구 결과까지를 캐시로 읽는다(직전 1개 유지 — lookback 20블록·상한 4개 제약). 적용 전에는 N번째 반복이 1~N-1번째 도구 결과를 전부 정가로 재처리했다
 - **SSE 스트리밍**: `POST /api/ai-assistant/chat` — `text`/`tool_start`/`done`/`error` + 15초 하트비트(프록시 타임아웃 보호), 도구 진행 상태("🔍 집계 중...") 인라인 표시
 - **세션 UX**: 좌측 사이드바(내 대화 목록·이어하기·삭제, 모바일 드로어), 세션 제목 자동(첫 질문 40자), 병원 컨텍스트 칩 복원
@@ -1308,6 +1329,8 @@ npm run dev
 | GET | `/api/ai-assistant/sessions/[id]` | 세션 메시지 전체 (본인만, 도구 라벨 포함) |
 | DELETE | `/api/ai-assistant/sessions/[id]` | 세션 삭제 (본인 또는 ADMIN) |
 | POST | `/api/ai-assistant/summarize` | AI 정제 (대화 → 마크다운 상담이력, `claude-sonnet-5`) |
+| POST | `/api/ai-assistant/feedback` | 답변 피드백 저장 (`{messageId, verdict, reason?}` — 답변당 1건, 재전송 시 갱신) |
+| GET | `/api/ai-assistant/feedback` | 피드백 집계 (최근 90일, 못 찾음 비율 포함) — ADMIN |
 
 ### 답사
 | Method | Endpoint | 설명 |

@@ -229,6 +229,7 @@ model User {
   inventoryTxCanceled       InventoryTransaction[]       @relation("InventoryTxCanceler")
   aiChatSessions            AiChatSession[]
   aiUsageLogs               AiUsageLog[]
+  aiFeedbacks               AiFeedback[]
   gatewayPlanJobs           GatewayPlanJob[]             @relation("GatewayPlanJobCreator")
   ownedTickets              Ticket[]                     @relation("TicketOwner")
   createdTickets            Ticket[]                     @relation("TicketCreator")
@@ -1143,11 +1144,33 @@ model WikiPage {
   outgoingLinks WikiPageLink[]      @relation("WikiPageLinkSource")
   backlinks     WikiPageLink[]      @relation("WikiPageLinkTarget")
   ydoc          WikiPageYdoc?
+  chunks        WikiChunk[]
 
   @@index([parentId, sortOrder])
   @@index([updatedAt(sort: Desc)])
   @@index([authorId])
   @@map("wiki_pages")
+  @@schema("wiki")
+}
+
+/// 위키 청크 인덱스 (v3 W1) — 검색·반환 단위를 문서에서 헤딩 청크로 내린다.
+/// 본문 저장 시 plainText 재계산과 같은 훅에서 재생성 (lib/wiki/chunk.ts)
+model WikiChunk {
+  id          Int      @id @default(autoincrement())
+  pageId      String   @map("page_id")
+  ordinal     Int
+  /// "3. 알람 정책 > 3.2 4단계 체계" — 랭킹 가중치이자 검색 결과 표시용
+  headingPath String   @default("") @map("heading_path")
+  text        String
+  charStart   Int      @default(0) @map("char_start")
+  charEnd     Int      @default(0) @map("char_end")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  page WikiPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@unique([pageId, ordinal])
+  @@index([pageId])
+  @@map("wiki_chunks")
   @@schema("wiki")
 }
 
@@ -1484,6 +1507,30 @@ model AiUsageLog {
   @@index([createdAt])
   @@index([userId, createdAt])
   @@map("ai_usage_logs")
+  @@schema("public")
+}
+
+/// AI 어시스턴트 답변 피드백 (v3 G2)
+/// ai_usage_logs와 같은 이유로 메시지/세션에 FK를 걸지 않는다 — 대화를 삭제해도 피드백은 남아야
+/// "무엇이 틀렸는가"의 근거가 보존된다. 답변의 toolCalls와 messageId로 조인해 실패 축·도구를 사후 분류한다.
+model AiFeedback {
+  id        Int      @id @default(autoincrement())
+  messageId String   @unique @map("message_id") @db.Uuid
+  sessionId String?  @map("session_id") @db.Uuid
+  userId    String?  @map("user_id")
+  userName  String   @default("") @map("user_name") @db.VarChar(100)
+  /// good | bad
+  verdict   String   @db.VarChar(10)
+  /// bad일 때만 — wrong(틀림) | not_found(못 찾음) | outdated(오래된 정보) | inappropriate(부적절)
+  reason    String?  @db.VarChar(20)
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([verdict, reason])
+  @@map("ai_feedback")
   @@schema("public")
 }
 

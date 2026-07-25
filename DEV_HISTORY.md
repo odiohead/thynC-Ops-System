@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-07-25 | AI 어시스턴트 v3 — 지식 아키텍처 재정비 (출시 전 고도화)
+
+- 설계안 `ai_assistant_v3_design.md` 작성 → 사용자 결정(자사 SEERS 전용) 후 V1·V2·V3 구현. **정보 소스 2축을 서로 다른 전략으로 다루는 것**이 설계 원리 — 축1 고정형(위키, 문서 단위 → 청킹), 축2 운영(DB, 검색 수단 부재 → 전문 검색 신설)
+- **V1-G3 데이터 격리**: `lib/ai/access.ts` 신설 — `/api/ai-assistant/*` 5개 핸들러에 소속 검사 추가. 기존에는 VIEWER만 막고 소속 검사가 없어 대웅 소속 USER 계정이 생기면 전 도구로 전사 데이터 열람 가능했음(현 노출 0 — 대웅 활성 1명이 VIEWER). 소속·활성은 JWT(최대 7일 경과)가 아니라 **DB 실시간 조회**로 판정(차량예약 선례). nav 메뉴 3종도 `{SEERS}` 스코핑
+- **V1-G1 출처 표기**: 모든 지식 도구가 `link`(도메인 상세 경로)를 반환하도록 규격 통일 + 시스템 프롬프트에 "사실 진술에는 근거 출처를 밝히고 link는 마크다운 링크로" 규정. 검증에서 `[MNT-202605-0043](/maintenances/104)` 형태 생성 확인
+- **V1-G2 피드백 수집**: `ai_feedback` 테이블(마이그레이션 `20260725120000`) + `/api/ai-assistant/feedback` POST/GET + 채팅 답변 하단 👍/👎(👎는 사유 4종: 틀림·못 찾음·오래된 정보·부적절). `ai_usage_logs` 선례대로 FK 없이 ID만 보관해 대화 삭제와 무관하게 보존. 벡터DB 도입 판단(설계 §6)의 근거 데이터
+- **V2 운영 정보 검색**: `lib/ai/opsSearch.ts` 신설 — `search_operation_history`(유지보수 증상·조치, 처리기록, 답사 노트, 기타업무 비고, 티켓 코멘트 통합 전문 검색)와 `find_similar_cases`(증상→과거 유사 장애+조치, CS 특화 랭킹) 2종. **기존에 검색 수단이 전혀 없던 432건/90,631자가 검색 가능해짐**. 규모가 작아 전용 인덱스 없이 순차 스캔 + 조회 시점 태그 제거로 처리. 짧은 레코드에는 토큰 AND가 리콜 0이라 1개 이상 매칭 통과 + 매칭 수·제목 가중 랭킹으로 조정
+- **V3 위키 청킹**: `wiki.wiki_chunks` 테이블(마이그레이션 `20260725120100`) + `lib/wiki/chunk.ts`(HTML h1~h4 / BlockNote heading 기준, 목표 1200자·상한 2000자, 짧은 절 병합) + 저장 훅(생성·수정 라우트) + 백필 스크립트. **109페이지 → 431청크**, API 규격서 68,772자 → 97청크(최대 1,954자). 새 파서 의존성 없이 기존 정규식 방식 유지. **표를 `셀 | 셀` 줄로 보존**해 평문 추출에서 표가 뭉개지던 문제 해소. `search_wiki`를 절 단위로 전환(헤딩 경로 3배 가중 랭킹)하고 `read_wiki_chunk`(앞뒤 절 동반) 신설. `read_wiki_page`는 문서 조망용 존치
+- 도구 12종 → **15종**
+- **검증**: tsc·lint 0오류. 회귀 질문셋을 2축 7건으로 개편(`scripts/ai-agent-smoke.mts`) 후 **전부 정답** — 캐시 적중률 82.8%, 건당 평균 $0.0609. "API 인증 방식"이 68,772자 문서에서 `1.2 인증 (TokenInterceptor)` 절을 도구 1회로 특정. "게이트웨이 통신 장애"는 관련 118건에서 원인 유형별 정리(이전에는 불가능)
+- **미채택 — G4 context editing**: 설계 전제가 실측과 달랐음. 도구 결과는 턴을 넘어 누적되지 않고(최종 텍스트만 저장), 반대로 context editing은 직전 배포에서 확보한 롤링 캐시를 무효화함. 이득 없고 손해 확실하여 적용하지 않음
+- **보류 — W3 제품 버전 스코프**: 1.4.0 릴리스 계획·병원별 설치 버전 입력 방식이 정해져야 확정 가능. 버전이 둘이 되기 전에는 오답이 없으나 그 시점보다 먼저 들어가야 함
+- 빌드·PM2·git 안 함. **PROD 반영 시 마이그레이션 2건 + nav 시드 재실행 + `backfill-wiki-chunks.mts` 필수**(백필 누락 시 위키 검색 0건)
+- 영향 파일: lib/ai/{access,opsSearch}.ts(신규), lib/ai/{agent,tools}.ts, lib/wiki/chunk.ts(신규), app/api/ai-assistant/{chat,summarize,sessions,sessions/[id],feedback}/route.ts, app/api/wiki/pages/{route,[id]/route}.ts, app/ai-assistant/page.tsx, prisma/schema.prisma + migrations 2건, scripts/{backfill-wiki-chunks.mts(신규),ai-agent-smoke.mts,seed-ai-assistant-nav.sql}, ai_assistant_v3_design.md(신규)
+
+---
+
 ## 2026-07-25 | AI 어시스턴트 토큰 최적화 PROD 배포
 
 - dev2 커밋 `a442e9b` push → PROD git pull(`af14475`→`a442e9b`, 11파일 +1119/-149) → 패키지·마이그레이션 변경 없음 확인 → 힙 4GB 빌드 → `pm2 restart thync-prod`

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { checkAiAccess } from '@/lib/ai/access'
 import { runAgentChat, AI_MODEL } from '@/lib/ai/agent'
 
 export const dynamic = 'force-dynamic'
@@ -16,9 +17,8 @@ function sse(event: string, data: unknown): Uint8Array {
 export async function POST(request: NextRequest) {
   const authUser = await getAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (authUser.role === 'VIEWER') {
-    return NextResponse.json({ error: 'VIEWER는 어시스턴트를 사용할 수 없습니다.' }, { status: 403 })
-  }
+  const denied = await checkAiAccess(authUser)
+  if (denied) return NextResponse.json({ error: denied.error }, { status: denied.status })
 
   const body = await request.json().catch(() => ({}))
   const { sessionId, message, hospitalCode } = body as {

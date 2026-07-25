@@ -27,7 +27,19 @@ interface Message {
   content: string
   /** assistant 턴에서 실행된 도구 진행 라벨 (예: "병원 검색 중") */
   tools?: string[]
+  /** ai_chat_messages.id — 피드백 전송 키 (assistant 턴에만, done 이벤트로 수신) */
+  id?: string
+  /** 이미 남긴 피드백 (재방문 시 복원) */
+  feedback?: 'good' | 'bad' | null
 }
+
+/** 👎 사유 — ai_feedback.reason과 동일 코드 */
+const FEEDBACK_REASONS: { value: string; label: string }[] = [
+  { value: 'wrong', label: '틀림' },
+  { value: 'not_found', label: '못 찾음' },
+  { value: 'outdated', label: '오래된 정보' },
+  { value: 'inappropriate', label: '부적절' },
+]
 
 interface HospitalResult {
   hospitalCode: string
@@ -85,6 +97,8 @@ async function readSseStream(
 export default function AiAssistantPage() {
   // 채팅 상태
   const [messages, setMessages] = useState<Message[]>([])
+  /** 👎 사유 선택지를 펼친 메시지 id */
+  const [reasonFor, setReasonFor] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -117,9 +131,21 @@ export default function AiAssistantPage() {
       const data = await res.json()
       setSessionId(data.session.id)
       setMessages(
-        (data.messages as { role: 'user' | 'assistant'; content: string; tools?: string[] }[]).map(
-          (m) => ({ role: m.role, content: m.content, tools: m.tools }),
-        ),
+        (
+          data.messages as {
+            id?: string
+            role: 'user' | 'assistant'
+            content: string
+            tools?: string[]
+            feedback?: 'good' | 'bad' | null
+          }[]
+        ).map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          tools: m.tools,
+          feedback: m.feedback ?? null,
+        })),
       )
       if (data.session.hospitalCode && data.session.hospitalName) {
         setSelectedHospital({
@@ -286,6 +312,8 @@ export default function AiAssistantPage() {
           patchLast((m) => ({ ...m, tools: [...(m.tools ?? []), String(data.label ?? '조회 중')] }))
         } else if (event === 'done') {
           if (typeof data.sessionId === 'string') setSessionId(data.sessionId)
+          // 피드백 전송 키 — 이 시점에 붙여야 답변 하단 👍/👎가 활성화된다
+          if (typeof data.messageId === 'string') patchLast((m) => ({ ...m, id: data.messageId as string }))
         } else if (event === 'error') {
           failed = true
           patchLast((m) => ({
@@ -303,6 +331,25 @@ export default function AiAssistantPage() {
     } finally {
       setLoading(false)
       inputRef.current?.focus()
+    }
+  }
+
+  /**
+   * 답변 피드백 전송 (v3 G2)
+   * 👎는 사유까지 받아야 "무엇이 틀렸는지"를 분류할 수 있으므로 1차 클릭에서 사유 선택지를 연다.
+   * 전송 실패는 조용히 무시한다 — 피드백 때문에 대화가 막히면 안 된다.
+   */
+  const sendFeedback = async (messageId: string, verdict: 'good' | 'bad', reason?: string) => {
+    setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, feedback: verdict } : m)))
+    setReasonFor(verdict === 'bad' && !reason ? messageId : null)
+    try {
+      await fetch('/api/ai-assistant/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId, verdict, reason }),
+      })
+    } catch {
+      /* 무시 */
     }
   }
 
@@ -590,6 +637,45 @@ export default function AiAssistantPage() {
                       <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                     </div>
                   ) : null}
+
+                  {/* 답변 피드백 (v3 G2) — 무엇이 틀리는지 알아야 다음 개선을 정할 수 있다 */}
+                  {msg.id && msg.content && (
+                    <div className="mt-2 border-t border-gray-200 pt-1.5">
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => sendFeedback(msg.id!, 'good')}
+                          title="도움이 됨"
+                          className={`rounded px-1.5 py-0.5 text-xs ${msg.feedback === 'good' ? 'bg-green-100' : 'opacity-40 hover:opacity-100 hover:bg-gray-200'}`}
+                        >
+                          👍
+                        </button>
+                        <button
+                          onClick={() => sendFeedback(msg.id!, 'bad')}
+                          title="문제 있음"
+                          className={`rounded px-1.5 py-0.5 text-xs ${msg.feedback === 'bad' ? 'bg-red-100' : 'opacity-40 hover:opacity-100 hover:bg-gray-200'}`}
+                        >
+                          👎
+                        </button>
+                        {msg.feedback === 'good' && (
+                          <span className="ml-1 text-xs text-gray-400">감사합니다</span>
+                        )}
+                      </div>
+                      {reasonFor === msg.id && (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                          <span className="text-xs text-gray-500">무엇이 문제였나요?</span>
+                          {FEEDBACK_REASONS.map((r) => (
+                            <button
+                              key={r.value}
+                              onClick={() => sendFeedback(msg.id!, 'bad', r.value)}
+                              className="rounded border border-gray-300 px-1.5 py-0.5 text-xs text-gray-600 hover:bg-gray-200"
+                            >
+                              {r.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

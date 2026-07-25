@@ -2,6 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk'
 import { prisma } from '@/lib/prisma'
 import { findHospitalNotePage } from '@/lib/wiki/hospitalNote'
 import { getAiExcludedPageIds, isPageAiExcluded } from '@/lib/wiki/aiExclusion'
+import { searchOperationHistory, findSimilarCases, tokenize, excerpt } from './opsSearch'
 
 /**
  * AI 어시스턴트 도구 레이어 (function_ai_assistant.html §5)
@@ -177,15 +178,64 @@ export const AI_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'search_operation_history',
+    description:
+      '운영 이력의 **본문 내용**을 전문 검색한다. 대상은 유지보수 증상·조치, 처리 기록, 답사 노트, 기타업무 비고, 티켓 코멘트다. "게이트웨이 오프라인 사례 있어?", "케이블 교체한 적 있나", "그 병원 답사 때 특이사항" 처럼 내용으로 찾아야 하는 질문에 사용하라. list_* 도구는 상태·기간·병원 같은 구조화 필터만 가능해 내용 검색을 하지 못하므로, 본문을 찾아야 할 때는 반드시 이 도구를 쓴다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '검색어 (핵심 명사 1~3개). 조사·어미는 빼라.' },
+        workType: {
+          type: 'string',
+          enum: ['MAINTENANCE', 'MAINTENANCE_LOG', 'SITE_VISIT', 'ETC', 'TICKET'],
+          description: '업무 유형으로 한정 (선택)',
+        },
+        hospitalCode: { type: 'string', description: '병원 코드로 한정 (선택)' },
+        from: { type: 'string', description: '발생일 범위 시작 YYYY-MM-DD (선택)' },
+        to: { type: 'string', description: '발생일 범위 끝 YYYY-MM-DD (선택)' },
+        limit: { type: 'number', description: '반환 건수 (기본 8, 최대 20)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'find_similar_cases',
+    description:
+      '증상을 입력하면 **과거 유사 장애와 그때의 조치**를 찾는다. 병원이 장애를 문의했을 때 가장 먼저 호출하라. 조치 내용(resolution)이 함께 오므로 바로 응대에 활용할 수 있다. 증상 문장을 그대로 넣어도 된다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        symptoms: { type: 'string', description: '증상 설명 (문장 그대로 가능)' },
+        hospitalCode: { type: 'string', description: '같은 병원 사례에 가중치 부여 (선택)' },
+        limit: { type: 'number', description: '반환 건수 (기본 5, 최대 15)' },
+      },
+      required: ['symptoms'],
+    },
+  },
+  {
     name: 'search_wiki',
     description:
-      '사내위키를 검색한다. thynC 제품 기능·알람 기준·장애 조치 방법·매뉴얼·업무 노하우·사내 문서(기능정의서 등) 질문 시 호출하라. 검색어의 각 단어가 모두 포함된 페이지를 관련도순으로 반환하며, 결과에는 카테고리 경로(path)가 함께 온다. 읽을 문서를 판단한 뒤 그 pageId로 read_wiki_page를 호출하라.',
+      '사내위키를 **문서 안의 절(節) 단위로** 검색한다. thynC 제품 기능·알람 기준·API 규격·설치 절차·매뉴얼 등 고정형 지식 질문에 호출하라. 결과는 문서 전체가 아니라 해당 내용이 있는 절이며, 위키 카테고리(category)와 문서 내 위치(heading)가 함께 온다. 발췌만으로 답할 수 있으면 그대로 답하고, 본문 전체가 필요할 때만 chunkId로 read_wiki_chunk를 호출하라.',
     input_schema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: '검색어 (핵심 키워드 1~3개, 예: "알람 기준", "게이트웨이 오프라인"). 조사·어미는 빼고 명사 위주로 넣어라.' },
+        limit: { type: 'number', description: '반환 절 개수 (기본 6, 최대 12)' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'read_wiki_chunk',
+    description:
+      'search_wiki 결과 중 특정 절의 본문 전체를 읽는다. 앞뒤 절이 함께 오므로 문맥이 끊기지 않는다. 발췌로 충분하면 호출하지 마라.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        chunkId: { type: 'number', description: 'search_wiki 결과의 chunkId' },
+        neighbors: { type: 'number', description: '앞뒤로 함께 읽을 절 수 (기본 1, 최대 3)' },
+      },
+      required: ['chunkId'],
     },
   },
   {
@@ -227,7 +277,10 @@ export const TOOL_LABELS: Record<string, string> = {
   list_etc_tasks: '기타업무 조회 중',
   get_dashboard_summary: '전사 현황 조회 중',
   aggregate_stats: '집계 중',
+  search_operation_history: '운영 이력 검색 중',
+  find_similar_cases: '유사 장애 사례 찾는 중',
   search_wiki: '위키 검색 중',
+  read_wiki_chunk: '위키 문서 읽는 중',
   read_wiki_page: '위키 문서 읽는 중',
   read_hospital_note: '병원 노트 확인 중',
 }
@@ -731,13 +784,73 @@ async function aggregateStats(input: ToolInput) {
   return { error: `지원하지 않는 metric: ${metric}` }
 }
 
+// ===== 축 2 — 운영 정보 전문 검색 (v3 O1·O2) =====
+
+async function searchOperationHistoryTool(input: ToolInput) {
+  const query = str(input.query)
+  if (!query) return { error: 'query가 필요합니다.' }
+  const rows = await searchOperationHistory({
+    query,
+    workType: str(input.workType),
+    hospitalCode: str(input.hospitalCode),
+    from: str(input.from),
+    to: str(input.to),
+    limit: int(input.limit, 8, 1, 20),
+  })
+  const terms = tokenize(query)
+  const total = rows[0]?.total ?? 0
+  return {
+    count: rows.length,
+    total,
+    note: total > rows.length ? `관련 ${total}건 중 상위 ${rows.length}건 (검색어를 좁히면 정확도가 올라감)` : undefined,
+    records: rows.map((r) => ({
+      workType: r.work_type,
+      code: r.code, // 출처 — 답변에 이 코드를 함께 제시할 것
+      link: r.ref_path,
+      hospital: r.hospital_name,
+      date: ymd(r.occurred_at),
+      title: r.title,
+      excerpt: excerpt(r.body, terms),
+    })),
+  }
+}
+
+async function findSimilarCasesTool(input: ToolInput) {
+  const symptoms = str(input.symptoms)
+  if (!symptoms) return { error: 'symptoms가 필요합니다.' }
+  const rows = await findSimilarCases({
+    symptoms,
+    hospitalCode: str(input.hospitalCode),
+    limit: int(input.limit, 5, 1, 15),
+  })
+  return {
+    count: rows.length,
+    candidates: rows[0]?.total ?? 0,
+    note: rows.length === 0 ? '유사한 과거 사례를 찾지 못했습니다.' : undefined,
+    cases: rows.map((r) => ({
+      maintenanceCode: r.maintenance_code, // 출처
+      link: r.ref_path,
+      hospital: r.hospital_name,
+      type: r.type_name,
+      status: r.status_name,
+      priority: r.priority,
+      reportedAt: ymd(r.reported_at),
+      resolvedAt: ymd(r.resolved_at),
+      symptoms: r.symptoms,
+      resolution: r.resolution, // 조치 = 답의 본체
+    })),
+  }
+}
+
 type WikiSearchRow = {
-  id: string
+  chunk_id: number
+  page_id: string
   title: string
-  plain_text: string
+  heading_path: string
+  text: string
+  ordinal: number
   updated_at: Date
-  title_hits: number
-  title_sim: number
+  score: number
   total: number
 }
 
@@ -761,6 +874,13 @@ async function wikiPathResolver(): Promise<(id: string) => string> {
   }
 }
 
+/**
+ * 축 1 — 위키 청크 검색 (v3 W2)
+ *
+ * 검색 단위를 문서에서 헤딩 청크로 내렸다. 문서 단위였을 때는 68,772자 문서가 통째로
+ * 한 건이라 "어디에 답이 있는지"를 알 수 없어 6,000자씩 선형으로 읽어야 했다.
+ * 헤딩 경로는 제목보다 강한 관련도 신호이므로 랭킹에서 가장 큰 가중치를 준다.
+ */
 async function searchWiki(input: ToolInput) {
   const query = str(input.query)
   if (!query) return { error: 'query가 필요합니다.' }
@@ -769,53 +889,85 @@ async function searchWiki(input: ToolInput) {
   const excludedIds = Array.from(await getAiExcludedPageIds())
 
   // 한국어는 조사·어미 때문에 질의 전체 문자열 매칭의 리콜이 낮다
-  // ("게이트웨이 오프라인" ↛ "게이트웨이가 오프라인") → 공백 단위 토큰 AND 매칭
-  const tokens = query.split(/\s+/).filter(Boolean).slice(0, 5)
-  const terms = tokens.length > 0 ? tokens : [query]
+  // ("게이트웨이 오프라인" ↛ "게이트웨이가 오프라인") → 공백 단위 토큰 매칭
+  const terms = tokenize(query)
+  const limit = int(input.limit, 6, 1, 12)
 
-  // 정렬은 관련도 우선(제목에 걸린 토큰 수 → 제목 유사도 → 최신순).
-  // 기존 updatedAt 정렬은 "최근 수정된 10건"을 줄 뿐 관련도를 반영하지 못했다.
   const rows = await prisma.$queryRaw<WikiSearchRow[]>`
-    SELECT p.id, p.title, p.plain_text, p.updated_at,
-           (SELECT count(*) FROM unnest(${terms}::text[]) tk
-              WHERE p.title ILIKE '%' || tk || '%')::int AS title_hits,
-           similarity(p.title, ${query})::float8 AS title_sim,
+    SELECT c.id AS chunk_id, c.page_id, p.title, c.heading_path, c.text, c.ordinal, p.updated_at,
+           ( (SELECT count(*) FROM unnest(${terms}::text[]) tk
+                WHERE c.heading_path ILIKE '%' || tk || '%')::float8 * 3
+             + (SELECT count(*) FROM unnest(${terms}::text[]) tk
+                  WHERE p.title ILIKE '%' || tk || '%')::float8 * 2
+             + (SELECT count(*) FROM unnest(${terms}::text[]) tk
+                  WHERE c.text ILIKE '%' || tk || '%')::float8
+             + similarity(c.heading_path, ${query})::float8
+           ) AS score,
            count(*) OVER ()::int AS total
-      FROM wiki.wiki_pages p
+      FROM wiki.wiki_chunks c
+      JOIN wiki.wiki_pages p ON p.id = c.page_id
      WHERE p.deleted_at IS NULL
        AND p.is_template = false
        AND NOT (p.id = ANY(${excludedIds}::text[]))
-       AND (SELECT bool_and(p.title ILIKE '%' || tk || '%' OR p.plain_text ILIKE '%' || tk || '%')
-              FROM unnest(${terms}::text[]) tk)
-     ORDER BY title_hits DESC, title_sim DESC, p.updated_at DESC
-     LIMIT 10
+       AND (SELECT count(*) FROM unnest(${terms}::text[]) tk
+              WHERE c.heading_path || ' ' || p.title || ' ' || c.text ILIKE '%' || tk || '%') > 0
+     ORDER BY score DESC, p.updated_at DESC
+     LIMIT ${limit}
   `
 
   const pathOf = rows.length > 0 ? await wikiPathResolver() : () => ''
-  const lowerTerms = terms.map((t) => t.toLowerCase())
 
   return {
     count: rows.length,
     total: rows[0]?.total ?? 0,
-    pages: rows.map((p) => {
-      // 스니펫은 가장 먼저 등장하는 토큰 주변을 보여준다
-      const lower = p.plain_text.toLowerCase()
-      const idx = lowerTerms
-        .map((t) => lower.indexOf(t))
-        .filter((i) => i >= 0)
-        .sort((a, b) => a - b)[0]
-      const snippet =
-        idx === undefined
-          ? p.plain_text.slice(0, 150)
-          : p.plain_text.slice(Math.max(0, idx - 60), idx + 120)
-      return {
-        pageId: p.id,
-        title: p.title,
-        path: pathOf(p.id),
-        updatedAt: ymd(p.updated_at),
-        snippet,
-      }
-    }),
+    note:
+      rows.length === 0
+        ? '일치하는 내용이 없습니다. 검색어를 바꾸거나 더 일반적인 단어로 시도하세요.'
+        : '본문 전체가 필요하면 chunkId로 read_wiki_chunk를 호출하라.',
+    chunks: rows.map((r) => ({
+      chunkId: r.chunk_id,
+      pageId: r.page_id, // 출처
+      category: pathOf(r.page_id), // 위키 트리상 위치
+      heading: r.heading_path, // 문서 내 위치
+      link: `/wiki/${r.page_id}`,
+      updatedAt: ymd(r.updated_at),
+      excerpt: excerpt(r.text, terms, 400),
+    })),
+  }
+}
+
+/** 청크 본문 정밀 조회 — 앞뒤 청크를 함께 반환해 문맥이 끊기지 않게 한다 */
+async function readWikiChunk(input: ToolInput) {
+  const chunkId = int(input.chunkId, 0, 1, Number.MAX_SAFE_INTEGER)
+  if (!chunkId) return { error: 'chunkId가 필요합니다.' }
+  const neighbors = int(input.neighbors, 1, 0, 3)
+
+  const base = await prisma.wikiChunk.findUnique({
+    where: { id: chunkId },
+    select: { pageId: true, ordinal: true, page: { select: { title: true, deletedAt: true } } },
+  })
+  if (!base || base.page.deletedAt) return { error: '청크를 찾을 수 없습니다.' }
+  if (await isPageAiExcluded(base.pageId)) return { error: '청크를 찾을 수 없습니다.' }
+
+  const rows = await prisma.wikiChunk.findMany({
+    where: {
+      pageId: base.pageId,
+      ordinal: { gte: base.ordinal - neighbors, lte: base.ordinal + neighbors },
+    },
+    orderBy: { ordinal: 'asc' },
+    select: { id: true, ordinal: true, headingPath: true, text: true },
+  })
+
+  return {
+    pageId: base.pageId,
+    pageTitle: base.page.title,
+    link: `/wiki/${base.pageId}`,
+    chunks: rows.map((r) => ({
+      chunkId: r.id,
+      heading: r.headingPath,
+      text: r.text,
+      isRequested: r.ordinal === base.ordinal,
+    })),
   }
 }
 
@@ -892,10 +1044,16 @@ export async function executeTool(name: string, input: ToolInput): Promise<unkno
         return await getDashboardSummary()
       case 'aggregate_stats':
         return await aggregateStats(input)
+      case 'search_operation_history':
+        return await searchOperationHistoryTool(input)
+      case 'find_similar_cases':
+        return await findSimilarCasesTool(input)
       case 'search_wiki':
         return await searchWiki(input)
       case 'read_wiki_page':
         return await readWikiPage(input)
+      case 'read_wiki_chunk':
+        return await readWikiChunk(input)
       case 'read_hospital_note':
         return await readHospitalNote(input)
       default:

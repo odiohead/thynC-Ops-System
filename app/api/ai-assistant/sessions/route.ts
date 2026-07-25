@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { checkAiAccess } from '@/lib/ai/access'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,6 +9,8 @@ export const dynamic = 'force-dynamic'
 export async function GET(request: NextRequest) {
   const authUser = await getAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const denied = await checkAiAccess(authUser)
+  if (denied) return NextResponse.json({ error: denied.error }, { status: denied.status })
 
   const sessions = await prisma.aiChatSession.findMany({
     where: { userId: authUser.userId },

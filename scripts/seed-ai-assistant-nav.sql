@@ -15,3 +15,10 @@ ON CONFLICT (menu_key) DO UPDATE
        group_label   = EXCLUDED.group_label,
        sort_order    = EXCLUDED.sort_order,
        updated_at    = CURRENT_TIMESTAMP;
+
+-- v3: 어시스턴트를 자사(SEERS) 전용으로 스코핑 (2026-07-25 확정)
+-- 서버 강제는 lib/ai/access.ts가 담당하고, 이것은 메뉴 노출 정리용이다.
+UPDATE nav_menu_items
+   SET allowed_org_codes = '{SEERS}', updated_at = CURRENT_TIMESTAMP
+ WHERE menu_key IN ('ai-assistant', 'settings/ai-assistant', 'settings/ai-usage')
+   AND allowed_org_codes <> '{SEERS}';

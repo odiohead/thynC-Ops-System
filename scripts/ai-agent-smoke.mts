@@ -14,11 +14,21 @@ import { prisma } from '@/lib/prisma'
 // opus-5 단가 (USD / 1M tokens)
 const PRICE = { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 }
 
+/**
+ * 회귀 질문셋 — 정보 소스 2축을 나눠 커버 (v3 설계 §5 검증)
+ * [축1] 고정형 지식(위키 청크) / [축2] 운영 정보(DB 전문 검색)
+ */
 const DEFAULT_QUESTIONS = [
-  '제주한라병원 현황 알려줘',
+  // 축 1 — 고정형 지식
+  'thynC 알람 4단계 체계가 어떻게 되나?',
+  'API 인증은 어떤 방식이야?',
+  '부정맥 종류별 알람 분류 알려줘',
+  // 축 2 — 운영 정보
+  '게이트웨이 통신 장애 사례랑 어떻게 조치했는지 알려줘',
+  '심전계가 자꾸 끊긴다고 문의가 왔는데 과거 유사 사례 찾아줘',
   '이번달 유지보수 몇 건이야?',
-  '진행중인 구축 프로젝트 알려줘',
-  'thynC 알람 정책 기준이 어떻게 되는지 위키에서 찾아줘',
+  // 교차 — 두 축을 함께 봐야 하는 질문
+  '제주한라병원 현황이랑 최근 장애 이력 정리해줘',
 ]
 
 const cost = (u: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }) =>

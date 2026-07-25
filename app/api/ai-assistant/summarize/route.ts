@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
+import { checkAiAccess } from '@/lib/ai/access'
 import Anthropic from '@anthropic-ai/sdk'
 import { AI_SUMMARIZE_MODEL } from '@/lib/ai/settings'
 
 export async function POST(request: NextRequest) {
   const authUser = await getAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const denied = await checkAiAccess(authUser)
+  if (denied) return NextResponse.json({ error: denied.error }, { status: denied.status })
 
   const { chatHistory, hospitalName, consultationType } = await request.json()
 

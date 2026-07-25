@@ -5,6 +5,7 @@ import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { extractPlainTextFromBlocks } from '@/lib/wiki/blockText'
 import { sanitizeHtmlDocument, extractPlainTextFromHtml, HTML_DOC_MAX_BYTES } from '@/lib/wiki/htmlText'
+import { rebuildPageChunks } from '@/lib/wiki/chunk'
 import { getIssueNoteRootSetting } from '@/lib/wiki/projectIssueNote'
 import { getHospitalNoteRootSetting } from '@/lib/wiki/hospitalNote'
 
@@ -148,6 +149,9 @@ export async function POST(request: NextRequest) {
     },
     select: { id: true, title: true, parentId: true, isPublished: true },
   })
+
+  // AI 검색용 청크 인덱스 생성 (v3 W1)
+  await rebuildPageChunks(created.id)
 
   await logAudit({
     req: request,
