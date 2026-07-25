@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-07-25 | AI 어시스턴트 v3 PROD 배포
+
+- dev2 커밋 `23af856` push → PROD git pull(`10f1371`→`23af856`, 22파일) → 신규 패키지 없음 확인
+- **PROD DB 작업**(사용자 명시 허락, 배포 필수분): ① `prisma migrate deploy` 2건 — `ai_feedback`(public)·`wiki_chunks`(wiki) 생성, 순수 추가 DDL이라 롤백은 DROP ② `prisma generate` ③ nav 시드 재실행 — 어시스턴트 메뉴 3종 `allowed_org_codes` `{}`→`{SEERS}` ④ **청크 백필** `backfill-wiki-chunks.mts` — 위키 110페이지 → **432청크**(API 규격서 68,772자 → 97청크)
+- 힙 4GB 빌드 → `pm2 restart thync-prod`. 신규 라우트 `/api/ai-assistant/feedback` 빌드 확인
+- 검증: `/`·`/ai-assistant`·`/settings/ai-assistant`·`/wiki`·`/maintenances`·`/tickets` 307 정상, `wiki_chunks` 432행, **재시작 이후 신규 오류 로그 0건**
+- **PROD 실동작 2축 검증**: 축1 "API 인증 방식" → search_wiki+read_wiki_chunk로 `05. API 규격서 > 1. 공통 규격 > 1.2 인증 (TokenInterceptor)` 절 특정·출처 링크 생성 / 축2 "게이트웨이 통신 장애 사례" → 관련 **135건**에서 원인 4유형 분류. 캐시 적중률 64.6%는 도구 정의 변경으로 캐시가 1회 무효화된 정상 동작
+- **접근 권한 변경 영향(PROD 활성 40계정)**: 허용 32명(SEERS ADMIN 8·USER 23·SUPER_ADMIN 1) / 차단 8명 — 대웅 VIEWER 1, SEERS VIEWER 5(기존과 동일), **무소속 ADMIN 1·USER 1은 이번 배포로 신규 차단**. 소속 미지정 계정은 자사 여부를 확인할 수 없어 정책상 차단됨
+- **후속 안내(사용자 작업)**: ① 무소속 2계정에 어시스턴트 접근이 필요하면 소속을 SEERS로 지정 ② 출처는 답변 본문 인라인 마크다운 링크로만 표시되며 같은 탭으로 이동함(별도 출처 패널·새 탭 열기는 미구현 — 개선안 협의 대기) ③ 피드백(👍/👎) 데이터가 쌓이면 벡터DB 도입 판단에 활용
+
+---
+
 ## 2026-07-25 | AI 어시스턴트 v3 — 지식 아키텍처 재정비 (출시 전 고도화)
 
 - 설계안 `ai_assistant_v3_design.md` 작성 → 사용자 결정(자사 SEERS 전용) 후 V1·V2·V3 구현. **정보 소스 2축을 서로 다른 전략으로 다루는 것**이 설계 원리 — 축1 고정형(위키, 문서 단위 → 청킹), 축2 운영(DB, 검색 수단 부재 → 전문 검색 신설)
