@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import Anthropic from '@anthropic-ai/sdk'
+import { AI_SUMMARIZE_MODEL } from '@/lib/ai/settings'
 
 export async function POST(request: NextRequest) {
   const authUser = await getAuthUser(request)
@@ -26,8 +27,9 @@ export async function POST(request: NextRequest) {
 
     const client = new Anthropic({ apiKey })
 
+    // 단발 요약 작업이라 Opus까지 필요 없음 — Sonnet 5($3/$15)로 처리 (채팅 본체는 Opus 5)
     const message = await client.messages.create({
-      model: 'claude-opus-4-8',
+      model: AI_SUMMARIZE_MODEL,
       max_tokens: 2048,
       messages: [
         {

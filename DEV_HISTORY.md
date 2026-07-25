@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-07-25 | AI 어시스턴트 토큰 최적화 + 모델 전환 (설계 확정 후 착수)
+
+- 설계안 `ai_assistant_optimization_design.md` 작성 → 사용자 결정 5건 확정 후 구현. **위키 카테고리 스코프(Part B)는 폐기** — 요구사항인 "특정 카테고리만 제외"는 기존 `ai_excluded`(조회 시점 재귀 CTE·하위 cascade·3개 도구 전부 적용)로 이미 충족되어 추가 개발 불필요로 결론
+- **실측 진단**(DEV `ai_usage_logs` 33건): 답변 1건당 uncached input 11,417 / cacheRead 14,069 / cacheWrite 1,972 / output 1,139 토큰, 약 $0.105. **비용의 54%가 uncached input** — 렌더 순서(tools→system→messages)상 브레이크포인트가 시스템 프롬프트 1곳뿐이라 messages가 캐시 밖이었고, 루프가 도구 결과를 누적하며 최대 8회 재호출하는 동안 이전 결과를 매번 정가로 재처리 (cacheRead 14,069 ÷ prefix 1,972 ≈ 7.1회 = 캐시가 prefix만 반복 조회)
+- **P1 롤링 캐시 브레이크포인트**(`lib/ai/agent.ts`): 반복 직전 messages 마지막 블록에 마커를 갱신, 직전 1개만 남기고 회수(lookback 20블록·상한 4개 제약 대응, thinking 계열 블록은 마킹 제외). 문자열 content는 블록 배열로 승격
+- **P2 도구 페이로드·검색 품질**(`lib/ai/tools.ts`): 목록 5종에 `limit`(기본 10·최대 30)·`detail`(summary 기본/full) 추가 + `total` 항상 반환(재조회 방지). `read_wiki_page`에 `offset`/`maxChars`(기본 6000)·`nextOffset` 추가(8,000자 초과 페이지 11건, 최대 68,772자 대응). `search_wiki`는 공백 토큰 AND 매칭 + 관련도 정렬(제목 적중수→pg_trgm 유사도→최신순) + 카테고리 경로 병기로 재작성 — 기존은 전체 문자열 단일 매칭 + `updatedAt` 정렬이라 리콜·랭킹 모두 취약
+- **P3 모델·설정**: 채팅 `claude-opus-4-8`→`claude-opus-5`(동일 단가, max_tokens 4096→16000 — 사고 토큰 포함 상한), 상담 정리 `claude-sonnet-5`로 하향. `output_config.effort` 명시(기본 medium, 기존 미지정=high). 신규 `lib/ai/settings.ts`(모델 상수 + AppSetting `ai_assistant_settings`), `/settings/ai-assistant` 설정 API·화면(nav 시드 `scripts/seed-ai-assistant-nav.sql`, 재실행 안전). opus-5 성향에 맞춰 시스템 프롬프트에 도구 호출 절약·답변 범위 지시 추가
+- **검증**: `tsc --noEmit` 0오류. 회귀 질문셋 5건 실행(`scripts/ai-agent-smoke.mts` 신규 — 원장 미기록이라 집계 오염 없음) 전부 정답. **uncached input 11,417 → 4~6 토큰**, 캐시 적중률 51%→74~95%, 건당 $0.105→$0.059(**44%↓**). 도구 5회 호출 질문에서 적중률 95.2%·$0.0285. 동일 질문 A/B(캐시 로직만 일시 해제 후 즉시 복원, 잔여 0건 확인): uncached input 1,722→6
+- 검색 리콜 실측: `"게이트웨이 설치"` 기준 구 방식 4건 → 신 방식 26건
+- 빌드·PM2 재시작·git 안 함. **PROD 반영 시 `scripts/seed-ai-assistant-nav.sql` 실행 필요**(DDL·마이그레이션 없음)
+- 영향 파일: lib/ai/{agent,tools,settings}.ts, app/api/ai-assistant/summarize/route.ts, app/api/settings/ai-assistant/route.ts(신규), app/settings/ai-assistant/page.tsx(신규), scripts/{seed-ai-assistant-nav.sql,ai-agent-smoke.mts}(신규), README.md, ai_assistant_optimization_design.md(신규)
+
+---
+
 ## 2026-07-25 | 티켓 P11~P13 PROD 배포
 
 - dev2 커밋 `96166e0` push → PROD git pull(32파일, +1868/-574) → 패키지·마이그레이션 변경 없음 확인 → 힙 4GB 빌드 → `pm2 restart thync-prod`

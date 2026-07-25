@@ -27,6 +27,23 @@ function stripHtml(html: string | null | undefined, maxLen: number): string | nu
 
 // ===== 도구 정의 (Anthropic tool schema) =====
 
+/**
+ * 목록 도구 5종 공통 파라미터 — 응답 토큰 제어
+ * 기본을 요약·소량으로 두고, 상세가 실제로 필요할 때만 모델이 올려 부르게 한다.
+ */
+const LIST_PARAMS = {
+  limit: {
+    type: 'number',
+    description: '반환 건수 (기본 10, 최대 30). 건수만 필요한 질문이면 응답의 total을 쓰고 늘리지 마라.',
+  },
+  detail: {
+    type: 'string',
+    enum: ['summary', 'full'],
+    description:
+      "기본 'summary'(핵심 필드만). 증상·조치 내용·비고 등 본문이 실제로 필요할 때만 'full'로 재호출하라.",
+  },
+} as const
+
 export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'search_hospitals',
@@ -63,6 +80,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         buildStatusName: { type: 'string', description: "공사 상태명 필터 (예: '진행중', '구축완료') (선택)" },
         from: { type: 'string', description: '구축 시작일 범위 시작 YYYY-MM-DD (선택)' },
         to: { type: 'string', description: '구축 시작일 범위 끝 YYYY-MM-DD (선택)' },
+        ...LIST_PARAMS,
       },
       required: [],
     },
@@ -79,6 +97,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         priority: { type: 'string', description: '우선순위 필터: 긴급|높음|보통|낮음 (선택)' },
         from: { type: 'string', description: '접수일 범위 시작 YYYY-MM-DD (선택)' },
         to: { type: 'string', description: '접수일 범위 끝 YYYY-MM-DD (선택)' },
+        ...LIST_PARAMS,
       },
       required: [],
     },
@@ -94,6 +113,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         statusName: { type: 'string', description: "상태명 필터 (예: '접수', '답사예정', '작성완료', '회신완료') (선택)" },
         from: { type: 'string', description: '요청일 범위 시작 YYYY-MM-DD (선택)' },
         to: { type: 'string', description: '요청일 범위 끝 YYYY-MM-DD (선택)' },
+        ...LIST_PARAMS,
       },
       required: [],
     },
@@ -110,6 +130,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         replyStatus: { type: 'string', description: "회신여부 필터: '완료'|'미완료' (선택)" },
         from: { type: 'string', description: '요청일 범위 시작 YYYY-MM-DD (선택)' },
         to: { type: 'string', description: '요청일 범위 끝 YYYY-MM-DD (선택)' },
+        ...LIST_PARAMS,
       },
       required: [],
     },
@@ -125,6 +146,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         priority: { type: 'string', description: '우선순위 필터: 긴급|높음|보통|낮음 (선택)' },
         from: { type: 'string', description: '접수일 범위 시작 YYYY-MM-DD (선택)' },
         to: { type: 'string', description: '접수일 범위 끝 YYYY-MM-DD (선택)' },
+        ...LIST_PARAMS,
       },
       required: [],
     },
@@ -157,22 +179,25 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'search_wiki',
     description:
-      '사내위키를 검색한다. thynC 제품 기능·알람 기준·장애 조치 방법·매뉴얼·업무 노하우·사내 문서(기능정의서 등) 질문 시 호출하라. 결과의 pageId로 read_wiki_page를 호출해 본문 전체를 읽을 수 있다.',
+      '사내위키를 검색한다. thynC 제품 기능·알람 기준·장애 조치 방법·매뉴얼·업무 노하우·사내 문서(기능정의서 등) 질문 시 호출하라. 검색어의 각 단어가 모두 포함된 페이지를 관련도순으로 반환하며, 결과에는 카테고리 경로(path)가 함께 온다. 읽을 문서를 판단한 뒤 그 pageId로 read_wiki_page를 호출하라.',
     input_schema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '검색어 (핵심 키워드 1~3개, 예: "알람 기준", "게이트웨이 오프라인")' },
+        query: { type: 'string', description: '검색어 (핵심 키워드 1~3개, 예: "알람 기준", "게이트웨이 오프라인"). 조사·어미는 빼고 명사 위주로 넣어라.' },
       },
       required: ['query'],
     },
   },
   {
     name: 'read_wiki_page',
-    description: 'search_wiki 결과 중 특정 페이지의 본문 전체가 필요할 때 호출한다.',
+    description:
+      'search_wiki 결과 중 특정 페이지의 본문을 읽는다. 긴 문서는 잘려서 오며(truncated=true), 이어 읽으려면 응답의 nextOffset을 offset으로 넣어 다시 호출하라.',
     input_schema: {
       type: 'object',
       properties: {
         pageId: { type: 'string', description: '위키 페이지 id (search_wiki 결과의 pageId)' },
+        offset: { type: 'number', description: '읽기 시작 위치(문자 수, 기본 0). 이어 읽을 때 직전 응답의 nextOffset을 넣어라.' },
+        maxChars: { type: 'number', description: '한 번에 읽을 문자 수 (기본 6000, 최대 12000)' },
       },
       required: ['pageId'],
     },
@@ -213,6 +238,29 @@ type ToolInput = Record<string, unknown>
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v.trim() : undefined
+}
+
+function int(v: unknown, def: number, min: number, max: number): number {
+  const n = typeof v === 'number' ? v : parseInt(String(v ?? ''), 10)
+  if (!Number.isFinite(n)) return def
+  return Math.min(Math.max(Math.trunc(n), min), max)
+}
+
+/** 목록 도구 반환 건수 — 기본 10, 최대 30 */
+const listLimit = (input: ToolInput) => int(input.limit, 10, 1, 30)
+/** 상세 모드 여부 — 기본은 요약(핵심 필드만) */
+const isFull = (input: ToolInput) => str(input.detail) === 'full'
+
+/** 목록 응답 공통 메타 — total을 항상 주어 "몇 건인가"를 재조회 없이 답하게 한다 */
+function listMeta(shown: number, total: number) {
+  return {
+    count: shown,
+    total,
+    note:
+      total > shown
+        ? `전체 ${total}건 중 ${shown}건 표시 (더 필요하면 limit을 올리거나 필터를 좁혀 재조회)`
+        : undefined,
+  }
 }
 
 function dateRange(input: ToolInput, field: string) {
@@ -309,70 +357,80 @@ async function getHospitalOverview(input: ToolInput) {
 }
 
 async function listProjects(input: ToolInput) {
-  const rows = await prisma.project.findMany({
-    where: {
-      ...(str(input.hospitalCode) && { hospitalCode: str(input.hospitalCode) }),
-      ...(str(input.buildStatusName) && {
-        buildStatus: { label: { contains: str(input.buildStatusName)! } },
-      }),
-      ...dateRange(input, 'startDate'),
-    },
-    take: 30,
-    orderBy: [{ startDate: { sort: 'desc', nulls: 'first' } }],
-    include: {
-      hospital: { select: { hospitalName: true } },
-      buildStatus: { select: { label: true } },
-      contractor: { select: { name: true } },
-      assignees: { include: { user: { select: { name: true } } } },
-    },
-  })
+  const where = {
+    ...(str(input.hospitalCode) && { hospitalCode: str(input.hospitalCode) }),
+    ...(str(input.buildStatusName) && {
+      buildStatus: { label: { contains: str(input.buildStatusName)! } },
+    }),
+    ...dateRange(input, 'startDate'),
+  }
+  const full = isFull(input)
+  const [total, rows] = await Promise.all([
+    prisma.project.count({ where }),
+    prisma.project.findMany({
+      where,
+      take: listLimit(input),
+      orderBy: [{ startDate: { sort: 'desc', nulls: 'first' } }],
+      include: {
+        hospital: { select: { hospitalName: true } },
+        buildStatus: { select: { label: true } },
+        contractor: { select: { name: true } },
+        assignees: { include: { user: { select: { name: true } } } },
+      },
+    }),
+  ])
   return {
-    count: rows.length,
-    note: rows.length === 30 ? '상위 30건만 표시 (더 있을 수 있음 — 필터를 좁혀 재조회)' : undefined,
+    ...listMeta(rows.length, total),
     projects: rows.map((p) => ({
       projectCode: p.projectCode,
       name: p.projectName,
       hospital: p.hospital.hospitalName,
       buildStatus: p.buildStatus?.label ?? null,
-      contractDate: ymd(p.contractDate),
       startDate: ymd(p.startDate),
       endDateExpected: ymd(p.endDateExpected),
-      wardCount: p.wardCount,
       bedCount: p.bedCount,
-      gatewayCount: p.gatewayCount,
       assignees: p.assignees.map((a) => a.user.name),
-      constructor: p.contractor?.name ?? p.builderNameManual ?? null,
-      remark: stripHtml(p.remark, 120),
+      ...(full && {
+        contractDate: ymd(p.contractDate),
+        wardCount: p.wardCount,
+        gatewayCount: p.gatewayCount,
+        constructor: p.contractor?.name ?? p.builderNameManual ?? null,
+        remark: stripHtml(p.remark, 120),
+      }),
     })),
   }
 }
 
 async function listMaintenances(input: ToolInput) {
-  const rows = await prisma.maintenance.findMany({
-    where: {
-      ...(str(input.hospitalCode) && { hospitalCode: str(input.hospitalCode) }),
-      ...(str(input.statusName) && { status: { name: { contains: str(input.statusName)! } } }),
-      ...(str(input.priority) && { priority: str(input.priority) }),
-      ...dateRange(input, 'reportedAt'),
-    },
-    take: 30,
-    orderBy: { reportedAt: 'desc' },
-    include: {
-      hospital: { select: { hospitalName: true } },
-      type: { select: { name: true } },
-      status: { select: { name: true } },
-      assignees: { include: { user: { select: { name: true } } } },
-      visits: { orderBy: { startDate: 'asc' }, select: { startDate: true, endDate: true } },
-      logs: {
-        orderBy: { createdAt: 'desc' },
-        take: 3,
-        select: { content: true, createdAt: true, author: { select: { name: true } } },
+  const where = {
+    ...(str(input.hospitalCode) && { hospitalCode: str(input.hospitalCode) }),
+    ...(str(input.statusName) && { status: { name: { contains: str(input.statusName)! } } }),
+    ...(str(input.priority) && { priority: str(input.priority) }),
+    ...dateRange(input, 'reportedAt'),
+  }
+  const full = isFull(input)
+  const [total, rows] = await Promise.all([
+    prisma.maintenance.count({ where }),
+    prisma.maintenance.findMany({
+      where,
+      take: listLimit(input),
+      orderBy: { reportedAt: 'desc' },
+      include: {
+        hospital: { select: { hospitalName: true } },
+        type: { select: { name: true } },
+        status: { select: { name: true } },
+        assignees: { include: { user: { select: { name: true } } } },
+        visits: { orderBy: { startDate: 'asc' }, select: { startDate: true, endDate: true } },
+        logs: {
+          orderBy: { createdAt: 'desc' },
+          take: 3,
+          select: { content: true, createdAt: true, author: { select: { name: true } } },
+        },
       },
-    },
-  })
+    }),
+  ])
   return {
-    count: rows.length,
-    note: rows.length === 30 ? '상위 30건만 표시 (더 있을 수 있음 — 필터를 좁혀 재조회)' : undefined,
+    ...listMeta(rows.length, total),
     maintenances: rows.map((m) => ({
       maintenanceCode: m.maintenanceCode,
       hospital: m.hospital.hospitalName,
@@ -380,39 +438,47 @@ async function listMaintenances(input: ToolInput) {
       type: m.type?.name ?? null,
       status: m.status?.name ?? null,
       priority: m.priority,
-      isRemote: m.isRemote,
       reportedAt: ymd(m.reportedAt),
       resolvedAt: ymd(m.resolvedAt),
-      symptoms: stripHtml(m.symptoms, 200),
-      resolution: stripHtml(m.resolution, 300),
-      recentLogs: m.logs.map((l) => `${ymd(l.createdAt)} ${l.author?.name ?? '미상'}: ${stripHtml(l.content, 150)}`),
       assignees: m.assignees.map((a) => a.user.name),
-      visits: m.visits.map((v) =>
-        ymd(v.startDate) === ymd(v.endDate) ? ymd(v.startDate) : `${ymd(v.startDate)}~${ymd(v.endDate)}`,
-      ),
+      ...(full && {
+        isRemote: m.isRemote,
+        symptoms: stripHtml(m.symptoms, 200),
+        resolution: stripHtml(m.resolution, 300),
+        recentLogs: m.logs.map(
+          (l) => `${ymd(l.createdAt)} ${l.author?.name ?? '미상'}: ${stripHtml(l.content, 150)}`,
+        ),
+        visits: m.visits.map((v) =>
+          ymd(v.startDate) === ymd(v.endDate) ? ymd(v.startDate) : `${ymd(v.startDate)}~${ymd(v.endDate)}`,
+        ),
+      }),
     })),
   }
 }
 
 async function listSiteVisits(input: ToolInput) {
-  const rows = await prisma.siteVisit.findMany({
-    where: {
-      ...(str(input.hospitalCode) && { hospitalCode: str(input.hospitalCode) }),
-      ...(str(input.statusName) && { status: { name: { contains: str(input.statusName)! } } }),
-      ...dateRange(input, 'requestDate'),
-    },
-    take: 30,
-    orderBy: { requestDate: 'desc' },
-    include: {
-      hospital: { select: { hospitalName: true } },
-      status: { select: { name: true } },
-      daewoongUser: { select: { name: true } },
-      assignees: { include: { user: { select: { name: true } } } },
-    },
-  })
+  const where = {
+    ...(str(input.hospitalCode) && { hospitalCode: str(input.hospitalCode) }),
+    ...(str(input.statusName) && { status: { name: { contains: str(input.statusName)! } } }),
+    ...dateRange(input, 'requestDate'),
+  }
+  const full = isFull(input)
+  const [total, rows] = await Promise.all([
+    prisma.siteVisit.count({ where }),
+    prisma.siteVisit.findMany({
+      where,
+      take: listLimit(input),
+      orderBy: { requestDate: 'desc' },
+      include: {
+        hospital: { select: { hospitalName: true } },
+        status: { select: { name: true } },
+        daewoongUser: { select: { name: true } },
+        assignees: { include: { user: { select: { name: true } } } },
+      },
+    }),
+  ])
   return {
-    count: rows.length,
-    note: rows.length === 30 ? '상위 30건만 표시 (필터를 좁혀 재조회 가능)' : undefined,
+    ...listMeta(rows.length, total),
     siteVisits: rows.map((v) => ({
       siteVisitCode: v.siteVisitCode,
       hospital: v.hospital.hospitalName,
@@ -420,31 +486,37 @@ async function listSiteVisits(input: ToolInput) {
       requestDate: ymd(v.requestDate),
       visitDate: ymd(v.visitDate),
       replyDate: ymd(v.replyDate),
-      daewoongStaff: v.daewoongUser?.name ?? null,
       assignees: v.assignees.map((a) => a.user.name),
-      notes: stripHtml(v.notes, 150),
+      ...(full && {
+        daewoongStaff: v.daewoongUser?.name ?? null,
+        notes: stripHtml(v.notes, 150),
+      }),
     })),
   }
 }
 
 async function listInstallPlans(input: ToolInput) {
-  const rows = await prisma.installPlan.findMany({
-    where: {
-      ...(str(input.hospitalCode) && { hospitalCode: str(input.hospitalCode) }),
-      ...(str(input.writeStatus) && { writeStatus: str(input.writeStatus) }),
-      ...(str(input.replyStatus) && { replyStatus: str(input.replyStatus) }),
-      ...dateRange(input, 'requestDate'),
-    },
-    take: 30,
-    orderBy: { requestDate: 'desc' },
-    include: {
-      hospital: { select: { hospitalName: true } },
-      assignees: { include: { user: { select: { name: true } } } },
-    },
-  })
+  const where = {
+    ...(str(input.hospitalCode) && { hospitalCode: str(input.hospitalCode) }),
+    ...(str(input.writeStatus) && { writeStatus: str(input.writeStatus) }),
+    ...(str(input.replyStatus) && { replyStatus: str(input.replyStatus) }),
+    ...dateRange(input, 'requestDate'),
+  }
+  const full = isFull(input)
+  const [total, rows] = await Promise.all([
+    prisma.installPlan.count({ where }),
+    prisma.installPlan.findMany({
+      where,
+      take: listLimit(input),
+      orderBy: { requestDate: 'desc' },
+      include: {
+        hospital: { select: { hospitalName: true } },
+        assignees: { include: { user: { select: { name: true } } } },
+      },
+    }),
+  ])
   return {
-    count: rows.length,
-    note: rows.length === 30 ? '상위 30건만 표시' : undefined,
+    ...listMeta(rows.length, total),
     installPlans: rows.map((p) => ({
       planCode: p.planCode,
       hospital: p.hospital?.hospitalName ?? null,
@@ -452,31 +524,37 @@ async function listInstallPlans(input: ToolInput) {
       replyDate: ymd(p.replyDate),
       writeStatus: p.writeStatus,
       replyStatus: p.replyStatus,
-      assignees: p.assignees.map((a) => a.user.name),
-      note: stripHtml(p.note, 150),
+      ...(full && {
+        assignees: p.assignees.map((a) => a.user.name),
+        note: stripHtml(p.note, 150),
+      }),
     })),
   }
 }
 
 async function listEtcTasks(input: ToolInput) {
-  const rows = await prisma.etcTask.findMany({
-    where: {
-      ...(str(input.statusName) && { status: { name: { contains: str(input.statusName)! } } }),
-      ...(str(input.priority) && { priority: str(input.priority) }),
-      ...dateRange(input, 'reportedAt'),
-    },
-    take: 30,
-    orderBy: { reportedAt: 'desc' },
-    include: {
-      status: { select: { name: true } },
-      assignees: { include: { user: { select: { name: true } } } },
-      hospitals: { include: { hospital: { select: { hospitalName: true } } } },
-      visits: { orderBy: { startDate: 'asc' }, select: { startDate: true, endDate: true } },
-    },
-  })
+  const where = {
+    ...(str(input.statusName) && { status: { name: { contains: str(input.statusName)! } } }),
+    ...(str(input.priority) && { priority: str(input.priority) }),
+    ...dateRange(input, 'reportedAt'),
+  }
+  const full = isFull(input)
+  const [total, rows] = await Promise.all([
+    prisma.etcTask.count({ where }),
+    prisma.etcTask.findMany({
+      where,
+      take: listLimit(input),
+      orderBy: { reportedAt: 'desc' },
+      include: {
+        status: { select: { name: true } },
+        assignees: { include: { user: { select: { name: true } } } },
+        hospitals: { include: { hospital: { select: { hospitalName: true } } } },
+        visits: { orderBy: { startDate: 'asc' }, select: { startDate: true, endDate: true } },
+      },
+    }),
+  ])
   return {
-    count: rows.length,
-    note: rows.length === 30 ? '상위 30건만 표시' : undefined,
+    ...listMeta(rows.length, total),
     etcTasks: rows.map((t) => ({
       etcTaskCode: t.etcTaskCode,
       title: t.title,
@@ -484,11 +562,13 @@ async function listEtcTasks(input: ToolInput) {
       priority: t.priority,
       reportedAt: ymd(t.reportedAt),
       resolvedAt: ymd(t.resolvedAt),
-      hospitals: t.hospitals.map((h) => h.hospital.hospitalName),
-      assignees: t.assignees.map((a) => a.user.name),
-      periods: t.visits.map((v) =>
-        ymd(v.startDate) === ymd(v.endDate) ? ymd(v.startDate) : `${ymd(v.startDate)}~${ymd(v.endDate)}`,
-      ),
+      ...(full && {
+        hospitals: t.hospitals.map((h) => h.hospital.hospitalName),
+        assignees: t.assignees.map((a) => a.user.name),
+        periods: t.visits.map((v) =>
+          ymd(v.startDate) === ymd(v.endDate) ? ymd(v.startDate) : `${ymd(v.startDate)}~${ymd(v.endDate)}`,
+        ),
+      }),
     })),
   }
 }
@@ -651,37 +731,97 @@ async function aggregateStats(input: ToolInput) {
   return { error: `지원하지 않는 metric: ${metric}` }
 }
 
+type WikiSearchRow = {
+  id: string
+  title: string
+  plain_text: string
+  updated_at: Date
+  title_hits: number
+  title_sim: number
+  total: number
+}
+
+/** 검색 결과 페이지의 카테고리 경로("상위 > 하위 > 페이지") 계산기 */
+async function wikiPathResolver(): Promise<(id: string) => string> {
+  const tree = await prisma.wikiPage.findMany({
+    where: { deletedAt: null },
+    select: { id: true, parentId: true, title: true },
+  })
+  const byId = new Map(tree.map((t) => [t.id, t]))
+  return (id: string) => {
+    const parts: string[] = []
+    const seen = new Set<string>()
+    let cur = byId.get(id)
+    while (cur && !seen.has(cur.id)) {
+      seen.add(cur.id)
+      parts.unshift(cur.title)
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined
+    }
+    return parts.join(' > ')
+  }
+}
+
 async function searchWiki(input: ToolInput) {
   const query = str(input.query)
   if (!query) return { error: 'query가 필요합니다.' }
+
   // AI 검색 제외로 표시된 페이지(및 그 하위 전체)는 대상에서 뺀다
-  const excluded = await getAiExcludedPageIds()
-  const rows = await prisma.wikiPage.findMany({
-    where: {
-      deletedAt: null,
-      isTemplate: false,
-      ...(excluded.size > 0 ? { id: { notIn: Array.from(excluded) } } : {}),
-      OR: [
-        { title: { contains: query, mode: 'insensitive' } },
-        { plainText: { contains: query, mode: 'insensitive' } },
-      ],
-    },
-    take: 10,
-    orderBy: { updatedAt: 'desc' },
-    select: { id: true, title: true, plainText: true, updatedAt: true },
-  })
+  const excludedIds = Array.from(await getAiExcludedPageIds())
+
+  // 한국어는 조사·어미 때문에 질의 전체 문자열 매칭의 리콜이 낮다
+  // ("게이트웨이 오프라인" ↛ "게이트웨이가 오프라인") → 공백 단위 토큰 AND 매칭
+  const tokens = query.split(/\s+/).filter(Boolean).slice(0, 5)
+  const terms = tokens.length > 0 ? tokens : [query]
+
+  // 정렬은 관련도 우선(제목에 걸린 토큰 수 → 제목 유사도 → 최신순).
+  // 기존 updatedAt 정렬은 "최근 수정된 10건"을 줄 뿐 관련도를 반영하지 못했다.
+  const rows = await prisma.$queryRaw<WikiSearchRow[]>`
+    SELECT p.id, p.title, p.plain_text, p.updated_at,
+           (SELECT count(*) FROM unnest(${terms}::text[]) tk
+              WHERE p.title ILIKE '%' || tk || '%')::int AS title_hits,
+           similarity(p.title, ${query})::float8 AS title_sim,
+           count(*) OVER ()::int AS total
+      FROM wiki.wiki_pages p
+     WHERE p.deleted_at IS NULL
+       AND p.is_template = false
+       AND NOT (p.id = ANY(${excludedIds}::text[]))
+       AND (SELECT bool_and(p.title ILIKE '%' || tk || '%' OR p.plain_text ILIKE '%' || tk || '%')
+              FROM unnest(${terms}::text[]) tk)
+     ORDER BY title_hits DESC, title_sim DESC, p.updated_at DESC
+     LIMIT 10
+  `
+
+  const pathOf = rows.length > 0 ? await wikiPathResolver() : () => ''
+  const lowerTerms = terms.map((t) => t.toLowerCase())
+
   return {
     count: rows.length,
+    total: rows[0]?.total ?? 0,
     pages: rows.map((p) => {
-      const idx = p.plainText.toLowerCase().indexOf(query.toLowerCase())
+      // 스니펫은 가장 먼저 등장하는 토큰 주변을 보여준다
+      const lower = p.plain_text.toLowerCase()
+      const idx = lowerTerms
+        .map((t) => lower.indexOf(t))
+        .filter((i) => i >= 0)
+        .sort((a, b) => a - b)[0]
       const snippet =
-        idx >= 0
-          ? p.plainText.slice(Math.max(0, idx - 60), idx + 120)
-          : p.plainText.slice(0, 150)
-      return { pageId: p.id, title: p.title, updatedAt: ymd(p.updatedAt), snippet }
+        idx === undefined
+          ? p.plain_text.slice(0, 150)
+          : p.plain_text.slice(Math.max(0, idx - 60), idx + 120)
+      return {
+        pageId: p.id,
+        title: p.title,
+        path: pathOf(p.id),
+        updatedAt: ymd(p.updated_at),
+        snippet,
+      }
     }),
   }
 }
+
+/** read_wiki_page 1회 반환 문자 수 */
+const WIKI_CHARS_DEFAULT = 6000
+const WIKI_CHARS_MAX = 12000
 
 async function readWikiPage(input: ToolInput) {
   const pageId = str(input.pageId)
@@ -693,13 +833,23 @@ async function readWikiPage(input: ToolInput) {
   if (!page || page.deletedAt) return { error: '페이지를 찾을 수 없습니다.' }
   // AI 검색 제외 영역의 페이지는 직접 id로도 열람 불가
   if (await isPageAiExcluded(pageId)) return { error: '페이지를 찾을 수 없습니다.' }
+
   const text = page.plainText
+  const offset = int(input.offset, 0, 0, Math.max(text.length, 0))
+  const maxChars = int(input.maxChars, WIKI_CHARS_DEFAULT, 500, WIKI_CHARS_MAX)
+  const content = text.slice(offset, offset + maxChars)
+  const end = offset + content.length
+  const truncated = end < text.length
+
   return {
     pageId: page.id,
     title: page.title,
     updatedAt: ymd(page.updatedAt),
-    truncated: text.length > 8000,
-    content: text.slice(0, 8000),
+    totalChars: text.length,
+    offset,
+    truncated,
+    ...(truncated && { nextOffset: end }),
+    content,
   }
 }
 

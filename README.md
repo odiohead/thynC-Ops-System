@@ -95,6 +95,7 @@ app/
 │   │   ├── inventory-managers/       # 재고 담당자 풀 CRUD + candidates
 │   │   ├── nav-menus/                # 네비게이션 메뉴 관리 CRUD (SUPER_ADMIN)
 │   │   ├── notifications/            # Slack 알림 설정 GET/PUT (ADMIN — 토글·주기·DM·타입별 필드) + logs/ 발송 이력 조회
+│   │   ├── ai-assistant/             # AI 어시스턴트 런타임 설정 GET/PUT (ADMIN — effort·캐시 TTL)
 │   │   └── audit-logs/               # 감사 로그 조회 (SUPER_ADMIN)
 │   ├── ai-assistant/                 # AI 어시스턴트 (Flowise 프록시 + 정제 + 상담이력 저장)
 │   │   ├── summarize/                # AI 정제 (Anthropic Claude API)
@@ -186,6 +187,7 @@ app/
 │   ├── vehicles/                     # 차량 관리 (ADMIN 이상)
 │   ├── nav-menus/                    # 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
 │   ├── notifications/                # Slack 알림 설정 (ADMIN 이상 — 전역/이벤트 토글 + 타입별 포함 필드)
+│   ├── ai-assistant/                 # AI 어시스턴트 설정 (ADMIN 이상 — effort·캐시 TTL, 모델은 읽기 전용 표시)
 │   └── audit-logs/                   # 감사 로그 (SUPER_ADMIN 전용)
 ├── inventory/                        # 자재 현황(인벤토리별 카드 섹션 + 섹션 입고/출고/이동 버튼) + [invId]/items/[itemId](인벤토리 자재 상세) + transactions/(이력) + items/(관리·[id] 품목 마스터 상세) + components/TransactionModal(품목 선택 모드)
 ├── login/                            # 로그인 페이지
@@ -196,7 +198,8 @@ app/
 
 lib/
 ├── ai/                               # AI 어시스턴트 v2 (function_ai_assistant.html)
-│   ├── agent.ts                      # 에이전트 루프 — claude-opus-4-8 스트리밍 + tool use 반복(최대 8회)
+│   ├── agent.ts                      # 에이전트 루프 — claude-opus-5 스트리밍 + tool use 반복(최대 8회) + 롤링 캐시 브레이크포인트
+│   ├── settings.ts                   # 모델 상수(채팅 opus-5 / 정리 sonnet-5) + 런타임 설정(effort·캐시 TTL, AppSetting)
 │   └── tools.ts                      # 도구 4종 (read-only Prisma SELECT — 병원검색/현황/프로젝트/유지보수)
 ├── auth.ts                           # JWT 인증 유틸리티 + 역할 헬퍼
 ├── prisma.ts                         # Prisma 클라이언트
@@ -944,15 +947,25 @@ prisma/
 - 인라인 mention 검색은 검색 plain_text 인덱스에도 포함됨 (label 추출)
 
 ### AI 어시스턴트 v2 (에이전트형 — `function_ai_assistant.html`, Phase 1~4·6 완료 2026-07-18)
-- **에이전트**: Anthropic API(`claude-opus-4-8` + adaptive thinking) 직접 호출, **tool use로 운영 DB·위키 실데이터 조회** 후 답변. 역할 3축 — ①CS 응대(위키 지식+병원 노트) ②정보 조회(병원 현황·형상) ③영업·운영 집계
+- **에이전트**: Anthropic API(`claude-opus-5` + adaptive thinking, effort 기본 `medium`) 직접 호출, **tool use로 운영 DB·위키 실데이터 조회** 후 답변. 역할 3축 — ①CS 응대(위키 지식+병원 노트) ②정보 조회(병원 현황·형상) ③영업·운영 집계
 - **도구 12종(read-only, `lib/ai/tools.ts` 화이트리스트)**: `search_hospitals`(운영·계약 우선 랭킹) / `get_hospital_overview` / `list_projects` / `list_maintenances` / `list_site_visits` / `list_install_plans` / `list_etc_tasks` / `get_dashboard_summary` / **`aggregate_stats`**(신규계약·완료구축·유지보수·답사·신규병원 — 기간 집계) / `search_wiki` / `read_wiki_page` / `read_hospital_note`
-- 에이전트 루프(`lib/ai/agent.ts`): 스트리밍 + tool use 반복(최대 8회), 도구 실패 is_error 전달, **프롬프트 캐싱**(시스템+도구 정의 breakpoint, 가변 컨텍스트는 캐시 뒤 배치)
+- **목록 도구 5종 공통 파라미터 (2026-07-25)**: `limit`(기본 10·최대 30)·`detail`(`summary` 기본 / `full`). 요약 모드는 핵심 필드만 반환하고 증상·조치·비고 등 본문은 `full`에서만. 응답에 `total`을 항상 포함해 "몇 건인가"를 재조회 없이 답한다
+- **`search_wiki` 검색 품질 (2026-07-25)**: 질의를 공백 단위 토큰으로 나눠 **AND 매칭**(한국어 조사 때문에 전체 문자열 매칭은 리콜이 낮음), 정렬은 **관련도순**(제목 토큰 적중 수 → `pg_trgm` 제목 유사도 → 최신순). 결과에 **카테고리 경로(`path`)** 병기 → 읽을 문서 판단이 쉬워져 불필요한 `read_wiki_page` 감소
+- **`read_wiki_page` 분할 읽기 (2026-07-25)**: `offset`·`maxChars`(기본 6000·최대 12000) 지원, 잘리면 `nextOffset` 반환 → 긴 문서(최대 6만 자 이상)도 앞부분만 보고 포기하지 않음
+- 에이전트 루프(`lib/ai/agent.ts`): 스트리밍 + tool use 반복(최대 8회), 도구 실패 is_error 전달, **프롬프트 캐싱** — 시스템+도구 정의 breakpoint(가변 컨텍스트는 캐시 뒤 배치) + **messages 롤링 브레이크포인트**(2026-07-25): 반복마다 마지막 블록에 마커를 갱신해 다음 반복이 직전 도구 결과까지를 캐시로 읽는다(직전 1개 유지 — lookback 20블록·상한 4개 제약). 적용 전에는 N번째 반복이 1~N-1번째 도구 결과를 전부 정가로 재처리했다
 - **SSE 스트리밍**: `POST /api/ai-assistant/chat` — `text`/`tool_start`/`done`/`error` + 15초 하트비트(프록시 타임아웃 보호), 도구 진행 상태("🔍 집계 중...") 인라인 표시
 - **세션 UX**: 좌측 사이드바(내 대화 목록·이어하기·삭제, 모바일 드로어), 세션 제목 자동(첫 질문 40자), 병원 컨텍스트 칩 복원
-- **상담 정리 → 병원 노트**: AI 정제(`claude-opus-4-8`) 후 **"병원 노트에 추가"** — 위키 '병원 노트' 카테고리의 병원별 페이지에 날짜·상담자 헤더와 함께 append → 다음 상담에서 `read_hospital_note`로 재활용 (상담 대기열은 폐기 — API·UI 제거, `consultation_queue` 테이블은 이력 보존)
+- **상담 정리 → 병원 노트**: AI 정제(`claude-sonnet-5` — 단발 요약이라 Opus 불필요, 2026-07-25 전환) 후 **"병원 노트에 추가"** — 위키 '병원 노트' 카테고리의 병원별 페이지에 날짜·상담자 헤더와 함께 append → 다음 상담에서 `read_hospital_note`로 재활용 (상담 대기열은 폐기 — API·UI 제거, `consultation_queue` 테이블은 이력 보존)
 - 권한: VIEWER 사용 불가(403), 세션은 소유자만 접근(삭제는 본인 또는 ADMIN)
 - **Flowise 제거**: 프록시 라우트·env 삭제 완료 (Flowise EC2 종료는 추후 결정)
 - **제품 지식 소스**: thynC 솔루션 자체 사양은 사내위키 `thync_1.3.0` 카테고리의 산출물 문서 세트(HTML 12종 — 기능정의서·API규격서·DB설계서·알람정책·외부연동·설치/설정·용어집)로 제공. `search_wiki`/`read_wiki_page`로 자동 참조하며, 원본은 `docs/thync-product-1.3.0/`에 보존(`scripts/publish-wiki-html-docs.mts`로 재게시)
+
+### AI 어시스턴트 설정 (`/settings/ai-assistant`, ADMIN 이상 — 2026-07-25)
+- **사용 모델(읽기 전용)**: 채팅 `claude-opus-5` / 상담 정리 `claude-sonnet-5`. 모델 ID는 코드 상수로 고정(오타 하나로 전 요청이 실패하므로 설정으로 열지 않음)
+- **사고 깊이(effort)**: `low`/`medium`(기본·권장)/`high`/`max` — 미지정 시 API 기본값이 `high`라 단순 조회에도 사고 토큰이 과다 청구되던 것을 기본 `medium`으로 고정
+- **프롬프트 캐시 TTL**: `5m`(기본) / `1h` — 쓰기 단가가 1.25배/2배로 달라 대화 간격에 따라 손익이 갈림
+- AppSetting `ai_assistant_settings`(JSON 단일 키), 변경은 다음 질문부터 적용. 감사 로그 `resource='setting:ai-assistant'`
+- 효과 측정은 `/settings/ai-usage`(사용량 원장 집계)와 `npx tsx scripts/ai-agent-smoke.mts`(회귀 질문셋 — 도구 호출·토큰·캐시 적중률·추정 비용 출력, 원장에 기록되지 않아 집계 오염 없음)로 확인
 
 ### AI 사용 현황 (`/settings/ai-usage`, ADMIN 이상 — 2026-07-20)
 - AI 어시스턴트 사용량 관리 — **사용량 원장 `ai_usage_logs` 집계** (2026-07-20 전환: 대화를 삭제해도 집계 보존, 기존 대화 백필)
@@ -1285,6 +1298,7 @@ npm run dev
 | GET/PUT | `/api/settings/gateway-planner` | 배치 규칙 조회/저장 (AppSetting `gw_planner_rules`) |
 | GET | `/api/settings/ai-usage` | AI 어시스턴트 사용 집계 (`?from=&to=` — 월별 12개월·사용자별·병원별 Top10 + 단가) — ADMIN |
 | PUT | `/api/settings/ai-usage` | AI 사용 단가 저장 (AppSetting `ai_usage_pricing`) — ADMIN |
+| GET/PUT | `/api/settings/ai-assistant` | AI 어시스턴트 런타임 설정 — effort·캐시 TTL (AppSetting `ai_assistant_settings`, 모델 ID는 읽기 전용) — ADMIN |
 
 ### AI 어시스턴트
 | Method | Endpoint | 설명 |
@@ -1293,7 +1307,7 @@ npm run dev
 | GET | `/api/ai-assistant/sessions` | 내 세션 목록 (최근순 50개) |
 | GET | `/api/ai-assistant/sessions/[id]` | 세션 메시지 전체 (본인만, 도구 라벨 포함) |
 | DELETE | `/api/ai-assistant/sessions/[id]` | 세션 삭제 (본인 또는 ADMIN) |
-| POST | `/api/ai-assistant/summarize` | AI 정제 (대화 → 마크다운 상담이력, `claude-opus-4-8`) |
+| POST | `/api/ai-assistant/summarize` | AI 정제 (대화 → 마크다운 상담이력, `claude-sonnet-5`) |
 
 ### 답사
 | Method | Endpoint | 설명 |
