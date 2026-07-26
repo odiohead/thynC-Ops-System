@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-07-26 | 티켓 자동생성 규칙 PROD 배포
+
+- dev2 커밋 `73837f0` push → PROD git pull(`d56ec3a`→`73837f0`, 30파일) → **의존성 변경 없음**(package.json 무변경)
+- **PROD DB 작업**(배포 필수분):
+  ① `prisma migrate deploy` **1건** — `20260726220000_add_ticket_domain_cti_rules`(`ticket_domain_cti_rules` 1테이블). **순수 추가 DDL**, 롤백은 DROP TABLE
+  ② `prisma generate`
+  ③ 시드 2건 — `seed-ticket-cti-rules.sql`(규칙 **9행**: 기본 5 + 유지보수 장애유형 4) / `seed-ticket-masters.sql`(nav 1행 `settings/ticket-cti-rules` 추가, 나머지는 기존 유지 — CTI·그룹 INSERT 0)
+- 힙 4GB 빌드 → `pm2 restart thync-prod`. 신규 라우트 확인(`/settings/ticket-cti-rules`·`/api/settings/ticket-cti-rules`)
+- **배포 후 검증**: PROD DB에서 규칙 해석 실행(읽기 전용) — 답사→답사요청/설치·답사, 설치계획→설치계획(가안)요청, 프로젝트→구축, 기타업무→일반/내부운영, 유지보수→기타/유지보수, **장애유형 4종 전부 조건 적중**(하드웨어·소프트웨어·네트워크·기타). 배포 전 하드코딩 동작과 완전 일치
+- 경로 확인: `/`·`/tickets`·`/site-visits`·`/install-plans`·`/projects`·`/etc-tasks`·`/maintenances`·`/settings/ticket-cti`·`/settings/ticket-cti-rules` 307 정상, 공개 URL(ops.seersthync.com) 307. **재시작 이후 신규 오류 로그 0건**(마지막 기록 07-25 19:37 — 이전 배포분)
+- 기존 티켓 CTI **백필 없음**(비소급 원칙). 운영자가 `/settings/ticket-cti-rules` 또는 각 목록의 `티켓 설정` 버튼에서 분류를 조정하면 **이후 등록분부터** 적용된다
+
+---
+
 ## 2026-07-26 | 티켓 자동생성 규칙 — 업무별 CTI·Assignment Group 설정화 + 도메인 비고 → 티켓 설명
 
 - 도메인 업무(답사·설치계획·프로젝트·기타업무·유지보수)에서 티켓이 자동 생성될 때 붙는 **CTI·Assignment Group이 코드 하드코딩**이라 운영자가 바꿀 수 없던 것을 **DB 규칙**으로 이관. 설계: `ticket_cti_rule_design.md`
