@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-07-26 | 위키 청크 주기 갱신 PROD 배포
+
+- dev2 커밋 `573f8f4` push → PROD git pull(`c1e1d9b`→`573f8f4`, 7파일 +154) → 패키지 변경 없음
+- **PROD DB 작업**(배포 필수분): `prisma migrate deploy` 1건 — `20260726140000_add_wiki_chunks_synced_at`. `wiki_pages.chunks_synced_at` 컬럼 추가 + 백필(**synced 90 / pending 20 / 전체 110**). 순수 추가 DDL, 롤백은 DROP COLUMN
+- 힙 4GB 빌드 → `pm2 restart thync-prod` → 기동 로그 `[wiki-chunk-scheduler] 청크 주기 갱신 시작: 10m 간격` 확인
+- 검증: `/`·`/wiki`·`/hospitals`·`/ai-assistant`·`/tickets` 307 정상, **재시작 이후 신규 오류 로그 0건**(마지막 기록 07-25 19:37)
+- pending 20건은 본문이 비었거나 10~18자뿐인 카테고리성 페이지 — 첫 주기에 1회 소진되고 이후 stale 0 유지
+- **후속 안내**: 주기 변경이 필요하면 AppSetting `wiki_chunk_interval` 값을 off/5m/10m/30m/1h 중 하나로 바꾸고 PM2 재시작(설정 UI는 미구현). 즉시 전량 재색인이 필요하면 `npx tsx scripts/backfill-wiki-chunks.mts`
+
+---
+
 ## 2026-07-26 | 위키 청크 인덱스 주기 갱신 스케줄러 (검색 인덱스 정지 문제 해소)
 
 - 상담이력 배포 후 이월돼 있던 별건. 사용자 질문("주기적으로 갱신할 수 없나")에 두 안(주기 배치 vs 협업 저장 훅)을 제시하고 **주기 배치**로 승인받아 착수
