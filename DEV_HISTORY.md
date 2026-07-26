@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-07-26 | 상담이력 저장 재설계 PROD 배포
+
+- dev2 커밋 `48db355` push → PROD git pull(`91e332a`→`48db355`, 17파일) → 패키지 변경 없음 확인
+- **PROD DB 작업**(배포 필수분): `prisma migrate deploy` 1건 — `20260726090000_add_consultations` 적용. `consultations` 테이블 생성(인덱스 7·FK 4 확인), 순수 추가 DDL이라 롤백은 DROP. `prisma generate` 재실행
+- **이관 불필요 확정**: PROD 병원 노트 3건의 `plain_text`가 각각 3자·0자·0자로 **실제 상담이력 축적분 없음**(`consultation_queue`도 0행). 헤딩 파싱 이관 스크립트 미필요 — 미결로 남겨뒀던 §8 판단 종료
+- 힙 4GB 빌드 → `pm2 restart thync-prod`. 신규 라우트 `/api/consultations`(+`[id]`) 빌드 확인
+- 검증: `/`·`/hospitals`·`/ai-assistant`·`/wiki`·`/tickets`·`/api/consultations` 307 정상. **재시작(00:07) 이후 신규 오류 로그 0건**(마지막 기록 07-25 19:37)
+- **PROD 실동작 확인(읽기 전용 — DB 쓰기 없음)**: 도구 **16종** 등록·`read_consultations` 실행 정상(`상담이력이 아직 없습니다`) · `search_operation_history` workType enum에 `CONSULTATION` 반영 · 축2 전체 검색 회귀 정상(5건 검출)
+- 저장(쓰기) 경로는 PROD DML을 피하기 위해 실사용 전 테스트를 하지 않음 — DEV에서 E2E 18항목·권한 매트릭스·라이브 에이전트로 검증 완료된 동일 코드
+- **후속 안내(사용자 작업)**: ① AI 어시스턴트에서 병원 지정 후 상담 정리 → `💾 상담이력 저장` → 병원 상세 '상담이력' 카드에서 확인 ② 위키 '병원 노트'는 이제 담당자가 직접 쓰는 특이사항 메모 용도 ③ 상담이력 카드는 SEERS 소속에게만 보임(대웅 계정은 카드 자체 미노출)
+- **별건 이월(미착수)**: 위키 청크 인덱스 갱신 누락 — 협업 서버 `store()`가 `rebuildPageChunks` 미호출로 백필 이후 편집된 위키 본문이 AI 검색에서 정지 상태
+
+---
+
 ## 2026-07-26 | 상담이력 저장 재설계 — 위키 append → DB 원본 (설계 확정 후 착수)
 
 - 사용자 질문("상담이력을 병원 위키에 저장하는 게 최선인가")에서 출발해 현 구조를 진단 → 설계안 `consultation_history_design.md` 작성 → 결정 5건 확정 후 구현
