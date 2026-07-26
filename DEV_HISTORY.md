@@ -4,6 +4,27 @@
 
 ---
 
+## 2026-07-26 | 1.1 알림체계 개선 P1~P7 PROD 배포
+
+- dev2 커밋 `d56ec3a` push → PROD git pull(`fcd2d6a`→`d56ec3a`, 40+파일) → 의존성 변경 없음(package.json은 버전 `0.1.0`→`1.0.0` 표기만)
+- **PROD DB 작업**(배포 필수분, 사용자 "prod에 바로 진행" 지시):
+  ① `prisma migrate deploy` **3건** — `20260726150000_add_sla_engine`(sla_policies·sla_targets·ticket_sla_clocks) / `20260726180000_add_notify_routes`(notify_channels·notify_routes) / `20260726200000_add_notifications`(notifications·notification_prefs). **전부 순수 추가 DDL**, 롤백은 DROP
+  ② `prisma generate`
+  ③ 시드 2건 — `seed-sla-policies.sql`(폴백 정책 = 1.0 값 1/1/3/7일 이관 + PROJECT 정책, 타깃 5) / `seed-notify-routes.sql`(PROD 채널 ID 주입 — 채널 2·규칙 6으로 **1.0 동작 재현**)
+  ④ nav 라벨 1행 — `settings/ticket-queues` → 'Assignment Group 관리'
+  ⑤ **quiet backfill** — 열린 티켓 114건 → 시계 **106개**(RESOLVE 90·DOMAIN_DUE 16). 과거 초과분 74건은 `notified_breach_at` 선점으로 **알림 없이 마킹** → 검증: 알림 대기 **0건**
+- 힙 4GB 빌드 → `pm2 restart thync-prod`. 신규 라우트 확인(`/notifications`·`/api/notifications(+prefs)`·`/api/me/dashboard`·`/api/settings/{sla-policies,notify-routes}`·`/api/tickets/[id]/sla`)
+- 검증: `/`·`/notifications`·`/tickets`·`/tickets/dashboard`·`/settings/notifications`·`/wiki`·`/hospitals` 307 정상, 공개 URL(ops·dev.ops) 307. **재시작 이후 신규 오류 로그 0건**(마지막 기록 07-25 19:37). PROD 지표 API 실동작 확인(열린 114·미배정 11·SLA 초과 74)
+- **알림 tick은 OFF 상태로 배포됨** — 1.0에서 `notify_delay_interval='off'`였던 환경은 tick도 off로 시작하도록 설계했다(배포 직후 live 채널에 의도치 않은 발송 방지). PROD는 `SLACK_NOTIFY_MODE=live`라 켜는 순간 실제 채널로 나간다
+- **후속 안내(사용자 결정 필요)**:
+  ① **알림 켜기** — 설정 → 알림 설정 → 전역·DM·이력 탭에서 tick 주기를 `5m`으로 지정(또는 `notify_tick_interval` = 5m). 켜면 새로 초과되는 건이 5분 내 SLA 지연 채널로, 매일 09:00에 초과 목록 요약이 나간다. **과거 초과 74건은 quiet 마킹돼 있어 쏟아지지 않는다**
+  ② **SLA 기준 입력** — 설정 → 알림 설정 → SLA 기준 탭에서 유형×상태 매트릭스에 값 입력(현재는 폴백 정책만: 해결 목표 Sev별 1/1/3/7일). CS 배정 목표(예: Sev1 30분)는 여기서
+  ③ **채널 분리** — 채널·라우팅 탭에서 유형별 채널 규칙 추가(현재는 1.0과 동일한 단일 채널 구성)
+  ④ **Assignment Group 멤버 배정** — 현재 0명. 미배정 티켓 알림·그룹 멘션·owner 없는 SLA 알림 수신자가 여기에 의존한다
+  ⑤ 내부 알림함(벨)은 tick과 무관하게 **즉시 동작** — 배정·상태변경·코멘트 알림이 지금부터 쌓인다
+
+---
+
 ## 2026-07-26 | 1.1 P7 — SLA 시계 기반 지표 확장
 
 - 티켓 대시보드(`/tickets/dashboard`)에 **SLA 시계 기반 지표** 추가. 1.0의 단일 준수율(`dueAt` 보유 종결 건)을 metric별로 분해
