@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 /**
  * 축 2 — 운영 정보 자유 텍스트 검색 (v3 O1·O2)
  *
- * 유지보수 증상·조치, 처리 기록, 답사 노트, 기타업무 비고, 티켓 코멘트는
+ * 유지보수 증상·조치, 처리 기록, 답사 노트, 기타업무 비고, 티켓 코멘트, 상담이력은
  * 실제 운영 노하우가 쌓이는 곳인데 기존 도구로는 **검색 수단이 전혀 없었다**
  * (구조화 필드 — 병원·상태·기간 — 로만 필터 가능).
  *
@@ -51,6 +51,14 @@ const OPS_SOURCE = Prisma.sql`
     JOIN tickets t ON t.id = tl.ticket_id
     LEFT JOIN hospitals h ON h.hospital_code = t.hospital_code
    WHERE tl.log_type = 'comment'
+  UNION ALL
+  -- 상담이력 (2026-07-26) — 본문이 마크다운 평문이라 태그 제거가 필요 없다
+  SELECT 'CONSULTATION', c.consultation_code,
+         ('/hospitals/' || c.hospital_code || '#consultations'),
+         c.hospital_code, h.hospital_name,
+         c.consulted_at, c.title::text, c.content
+    FROM consultations c
+    JOIN hospitals h ON h.hospital_code = c.hospital_code
 `
 
 export type OpsSearchRow = {

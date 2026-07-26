@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
-import { verifyToken } from '@/lib/auth'
+import { verifyToken, isAdminOrAbove } from '@/lib/auth'
 import DeleteButton from './_components/DeleteButton'
 import TransferAllWorkButton from '@/app/components/TransferAllWorkButton'
 import DaewoongStaffTab from './_components/DaewoongStaffTab'
@@ -15,6 +15,7 @@ import RelatedWikiPagesCard from './_components/RelatedWikiPagesCard'
 // 병원 노트 임베드 — 메인→위키 import 승인 예외 (CLAUDE.md 규칙 7, 데이터 교환은 전부 HTTP)
 import HospitalNotePanel from '@/app/wiki/components/HospitalNotePanel'
 import InventoryUsageCard from './_components/InventoryUsageCard'
+import ConsultationsCard from './_components/ConsultationsCard'
 
 
 
@@ -307,7 +308,14 @@ export default async function HospitalDetailPage({ params }: PageProps) {
 
         <InventoryUsageCard hospitalCode={hospital.hospitalCode} />
 
-        {/* 병원 노트 — 위키 '병원 노트' 페이지 임베드 (상담이력·특이사항 축적) */}
+        {/* 상담이력 — AI 어시스턴트 상담 정리 산출물 (SEERS 소속만 조회, 서버에서 강제) */}
+        <ConsultationsCard
+          hospitalCode={hospital.hospitalCode}
+          currentUserId={user?.userId ?? null}
+          isAdmin={isAdminOrAbove(user?.role ?? '')}
+        />
+
+        {/* 병원 노트 — 위키 '병원 노트' 페이지 임베드 (사람이 쓰는 병원 특이사항 메모) */}
         <div className="bg-white shadow-sm ring-1 ring-gray-900/5 rounded-xl p-6">
           <h2 className="mb-3 text-sm font-semibold text-gray-700">🗒️ 병원 노트</h2>
           <HospitalNotePanel hospitalCode={hospital.hospitalCode} />

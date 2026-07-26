@@ -311,12 +311,20 @@ export async function transferAllWorkItems(params: TransferAllParams): Promise<T
           data: { hospitalCode: toHospitalCode },
         })
       ).count
-      moved.consultations = (
-        await tx.consultationQueue.updateMany({
-          where: { hospitalCode: fromHospitalCode },
-          data: { hospitalCode: toHospitalCode },
-        })
-      ).count
+      // 상담이력 — 현행 `consultations` + 동결된 구 대기열(consultation_queue) 양쪽 이전
+      moved.consultations =
+        (
+          await tx.consultation.updateMany({
+            where: { hospitalCode: fromHospitalCode },
+            data: { hospitalCode: toHospitalCode },
+          })
+        ).count +
+        (
+          await tx.consultationQueue.updateMany({
+            where: { hospitalCode: fromHospitalCode },
+            data: { hospitalCode: toHospitalCode },
+          })
+        ).count
 
       // 병원명이 제목에 들어가는 유형은 제목 먼저 갱신 (이관 대상=from 병원 티켓만 — 기존 to 병원 티켓 미접촉)
       await tx.ticket.updateMany({

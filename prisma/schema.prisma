@@ -80,6 +80,7 @@ model Hospital {
   installPlans          InstallPlan[]
   maintenances          Maintenance[]
   consultationQueues    ConsultationQueue[]
+  consultations         Consultation[]
   tasks                 Task[]
   etcTaskHospitals      EtcTaskHospital[]
   inventoryTransactions InventoryTransaction[]
@@ -130,6 +131,8 @@ model StatusCode {
   introTypeProjects      Project[]              @relation("ProjectIntroType")
   consultationTypeQueues ConsultationQueue[]    @relation("ConsultationTypeQueue")
   documentTypeQueues     ConsultationQueue[]    @relation("DocumentTypeQueue")
+  consultationTypes      Consultation[]         @relation("ConsultationType")
+  documentTypes          Consultation[]         @relation("ConsultationDocumentType")
   maintenanceTypes       Maintenance[]          @relation("MaintenanceType")
   maintenanceStatuses    Maintenance[]          @relation("MaintenanceStatus")
   etcTaskStatuses        EtcTask[]              @relation("EtcTaskStatus")
@@ -160,6 +163,41 @@ model ConsultationQueue {
   consultedBy      User        @relation(fields: [consultedById], references: [id])
 
   @@map("consultation_queue")
+  @@schema("public")
+}
+
+/// 상담이력 — AI 어시스턴트 상담 정리 결과의 **원본**.
+/// 구 방식(위키 '병원 노트' 마크다운 append)을 2026-07-26에 대체했다.
+/// 상담이력은 문서가 아니라 운영 이벤트(v3 축2)이므로 DB가 원본이고,
+/// 위키 병원 노트는 '사람이 쓰는 병원 메모'로 역할이 분리되었다.
+/// 설계: consultation_history_design.md
+model Consultation {
+  id                 Int      @id @default(autoincrement())
+  consultationCode   String   @unique @map("consultation_code") @db.VarChar(20)
+  hospitalCode       String   @map("hospital_code")
+  consultationTypeId Int?     @map("consultation_type_id")
+  documentTypeId     Int?     @map("document_type_id")
+  title              String   @db.VarChar(200)
+  content            String
+  aiSummary          String?  @map("ai_summary")
+  /// AiChatSession id — FK를 걸지 않는다. 대화를 삭제해도 상담이력은 보존(ai_usage_logs 선례)
+  sessionId          String?  @map("session_id")
+  consultedById      String   @map("consulted_by_id")
+  /// 계정 삭제 후에도 목록에 표시하기 위한 스냅샷
+  consultedByName    String   @map("consulted_by_name") @db.VarChar(100)
+  consultedAt        DateTime @map("consulted_at") @db.Date
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at")
+
+  hospital         Hospital    @relation(fields: [hospitalCode], references: [hospitalCode])
+  consultationType StatusCode? @relation("ConsultationType", fields: [consultationTypeId], references: [id])
+  documentType     StatusCode? @relation("ConsultationDocumentType", fields: [documentTypeId], references: [id])
+  consultedBy      User        @relation(fields: [consultedById], references: [id])
+
+  @@index([hospitalCode, consultedAt(sort: Desc)])
+  @@index([consultedById, consultedAt(sort: Desc)])
+  @@index([consultedAt(sort: Desc)])
+  @@map("consultations")
   @@schema("public")
 }
 
@@ -213,6 +251,7 @@ model User {
   maintenanceLogs           MaintenanceLog[]             @relation("MaintenanceLogAuthor")
   etcTaskAssignees          EtcTaskAssignee[]
   consultationQueues        ConsultationQueue[]
+  consultations             Consultation[]
   wikiPagesAuthored         WikiPage[]                   @relation("WikiPageAuthor")
   wikiPagesEdited           WikiPage[]                   @relation("WikiPageLastEditor")
   wikiAttachmentsUploaded   WikiAttachment[]             @relation("WikiAttachmentUploader")

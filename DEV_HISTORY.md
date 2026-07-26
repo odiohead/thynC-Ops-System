@@ -4,6 +4,24 @@
 
 ---
 
+## 2026-07-26 | 상담이력 저장 재설계 — 위키 append → DB 원본 (설계 확정 후 착수)
+
+- 사용자 질문("상담이력을 병원 위키에 저장하는 게 최선인가")에서 출발해 현 구조를 진단 → 설계안 `consultation_history_design.md` 작성 → 결정 5건 확정 후 구현
+- **진단**: v1의 Flowise/벡터DB는 v2에서 이미 제거됐고(현 저장소 벡터·임베딩 코드 0건), 상담이력 저장은 위키 '병원 노트' 마크다운 append로 대체돼 **동작은 하고 있었다**. 그러나 결함 4가지 — ① **v3 2축 원리 위반**(운영 이벤트인데 축1 위키에 저장 → `search_operation_history` 소스에도 없고 append 시 `rebuildPageChunks` 미호출로 `search_wiki`에도 안 잡히는 사각지대) ② **유실 경로**(협업 Y.Doc이 진실의 원천인데 REST가 content_json 직접 갱신 → 노트가 열려 있으면 덮임, 라우트 주석에 기명시) ③ **구조 부재**(작성자·시각·유형이 헤딩 문자열, 집계·필터 불가, documentType은 유실) ④ **역할 혼선**(사람 메모와 시스템 원장이 한 페이지)
+- **결정(사용자 확정)**: D1 위키 append 중단 / D2 새 `consultations` 테이블 신설(`consultation_queue`는 동결 보존 — `tasks` 선례) / D3 조회는 SEERS 소속만 / D4 병원 필수 / D5 전용 목록 페이지 안 만듦
+- **데이터 모델**: 마이그레이션 `20260726090000_add_consultations` — `CS-YYYYMM-NNNN` 코드, 병원·상담유형·문서유형 FK, `title`(본문 첫 줄 자동 추출)·`content`·`aiSummary`(AI 원문 별도 보관), `sessionId`는 **FK 없이 ID만**(대화 삭제해도 이력 보존 — `ai_usage_logs` 선례), `consultedByName` 스냅샷, `consultedAt`(DATE·소급 가능). content/title trigram GIN 선제 부여
+- **API**: `/api/consultations`(GET 목록·필터·페이지네이션 / POST 생성) + `/api/consultations/[id]`(GET/PUT/DELETE). 권한 3단 — 조회는 `checkConsultationRead`(SEERS+활성, VIEWER 포함), 생성은 `checkAiAccess` 재사용(SEERS+USER 이상), 수정·삭제는 본인 or ADMIN(`MaintenanceLog` 선례). 감사 로그 `resource='consultation'`
+- **AI 통합**: `opsSearch`의 `OPS_SOURCE`에 `CONSULTATION` 갈래 추가 → `search_operation_history`(workType enum 확장)·`find_similar_cases`에 **동시 편입**. 신규 도구 `read_consultations`(병원별 최근순, 도구 15종 → **16종**). `read_hospital_note`는 존치하되 설명을 '담당자가 직접 쓰는 메모'로 재정의해 상담이력과 분리. 시스템 프롬프트에 두 도구 구분 명시
+- **UI**: 어시스턴트 패널 버튼 `📋 병원 노트에 추가` → `💾 상담이력 저장`(sessionId 동봉). 병원 상세에 `ConsultationsCard` 신규(자재 카드 아래, 앵커 `#consultations`) — 목록 표 + 상세 모달(마크다운 렌더·수정·삭제). **403이면 카드 자체를 렌더하지 않아** 대웅 계정엔 존재가 드러나지 않음
+- 병원 업무 일괄 이전(`workItemReassign`)에 `consultations` 포함 — 구 `consultation_queue`와 합산
+- **검증**: tsc·lint 0오류, 빌드 성공. E2E 18항목 전부 통과(발번·제목추출·스냅샷·목록·수정·삭제·축2 검색 도달·출처 link 규격·위키 append 무시). 권한 매트릭스 통과(대웅 403 / SEERS VIEWER 조회 200·생성 403). **라이브 에이전트 실동작**: "한라성심의원 과거 상담이력" → `read_consultations` 호출·2건 정확 요약 / "산소포화도 센서 페어링 유사 상담" → `search_operation_history`로 검출 + 출처 링크 생성. 테스트 데이터 전량 삭제 확인
+- 빌드·PM2 재시작은 검증 위해 dev2에서 수행. **git·PROD 반영 안 함** — PROD 반영 시 `prisma migrate deploy` 필요(순수 추가 DDL), 신규 패키지·시드 없음
+- **미결(사용자 확인 필요)**: PROD 병원 노트에 실제 상담이력이 쌓여 있으면 헤딩 파싱 이관 스크립트 1건 추가 필요 (dev2에서 PROD SSH 불가로 미확인)
+- **별건 이월**: 위키 청크 인덱스 갱신 누락 — 협업 서버 `store()`가 `rebuildPageChunks`를 호출하지 않아 백필 이후 편집된 위키 본문이 AI 검색에서 정지 상태. 상담이력과 무관한 위키 전체 문제
+- 영향 파일: prisma/{schema.prisma, migrations/20260726090000_add_consultations}, lib/consultation.ts(신규), app/api/consultations/{route,[id]/route}.ts(신규), app/hospitals/[code]/_components/ConsultationsCard.tsx(신규), app/hospitals/[code]/page.tsx, app/ai-assistant/page.tsx, app/api/wiki/hospital-notes/route.ts, app/wiki/components/HospitalNotePanel.tsx, lib/ai/{agent,tools,opsSearch}.ts, lib/workItemReassign.ts, consultation_history_design.md(신규)
+
+---
+
 ## 2026-07-25 | AI 어시스턴트 v3 PROD 배포
 
 - dev2 커밋 `23af856` push → PROD git pull(`10f1371`→`23af856`, 22파일) → 신규 패키지 없음 확인

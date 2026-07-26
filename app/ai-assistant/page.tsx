@@ -196,6 +196,7 @@ export default function AiAssistantPage() {
   const [consultationTypes, setConsultationTypes] = useState<StatusCodeOption[]>([])
   const [selectedConsultationType, setSelectedConsultationType] = useState('')
   const [conclusion, setConclusion] = useState('')
+  const [aiSummary, setAiSummary] = useState('')
   const [summarizing, setSummarizing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -388,6 +389,8 @@ export default function AiAssistantPage() {
         return
       }
       setConclusion(data.summary)
+      // 사람이 손댔을 때를 대비해 AI 원문을 따로 보관 (상담이력 aiSummary로 저장)
+      setAiSummary(data.summary)
     } catch {
       showToast('AI 정제에 실패했습니다.')
     } finally {
@@ -395,8 +398,8 @@ export default function AiAssistantPage() {
     }
   }
 
-  // 병원 노트에 상담이력 추가 (위키 '병원 노트' 페이지에 append)
-  async function handleAddToHospitalNote() {
+  // 상담이력 저장 (DB `consultations` — 병원 상세 '상담이력' 카드에서 조회)
+  async function handleSaveConsultation() {
     if (!selectedHospital) {
       showToast('병원을 먼저 지정하세요.')
       return
@@ -407,28 +410,28 @@ export default function AiAssistantPage() {
     }
     setSaving(true)
     try {
-      const consultationTypeName = selectedConsultationType
-        ? consultationTypes.find((c) => String(c.id) === selectedConsultationType)?.name ?? undefined
-        : undefined
-      const res = await fetch('/api/wiki/hospital-notes', {
+      const res = await fetch('/api/consultations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           hospitalCode: selectedHospital.hospitalCode,
-          appendMd: conclusion,
-          consultationType: consultationTypeName,
+          content: conclusion,
+          aiSummary: aiSummary || undefined,
+          consultationTypeId: selectedConsultationType || null,
+          sessionId,
         }),
       })
       const data = await res.json()
       if (!res.ok) {
-        showToast(data.error || '병원 노트 추가에 실패했습니다.')
+        showToast(data.error || '상담이력 저장에 실패했습니다.')
         return
       }
-      showToast('병원 노트에 추가되었습니다.')
+      showToast(`상담이력이 저장되었습니다. (${data.consultationCode})`)
       setConclusion('')
+      setAiSummary('')
       setSelectedConsultationType('')
     } catch {
-      showToast('병원 노트 추가에 실패했습니다.')
+      showToast('상담이력 저장에 실패했습니다.')
     } finally {
       setSaving(false)
     }
@@ -767,19 +770,19 @@ export default function AiAssistantPage() {
             </div>
           </div>
 
-          {/* 병원 노트 추가 버튼 */}
+          {/* 상담이력 저장 버튼 */}
           <div className="shrink-0 pt-3 border-t border-gray-200 mt-3">
             <button
-              onClick={handleAddToHospitalNote}
+              onClick={handleSaveConsultation}
               disabled={saving || !selectedHospital}
               className="w-full rounded-lg bg-green-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {saving ? '추가 중...' : '📋 병원 노트에 추가'}
+              {saving ? '저장 중...' : '💾 상담이력 저장'}
             </button>
             <p className="mt-1.5 text-xs text-gray-400">
               {selectedHospital
-                ? `위키 '병원 노트 > ${selectedHospital.hospitalName}' 페이지에 상담이력으로 기록됩니다.`
-                : '병원을 지정하면 해당 병원의 노트에 상담이력을 기록할 수 있습니다.'}
+                ? `'${selectedHospital.hospitalName}' 상담이력으로 저장되어 병원 상세에서 조회되고, 다음 상담 때 어시스턴트가 참고합니다.`
+                : '병원을 지정하면 해당 병원의 상담이력으로 저장할 수 있습니다.'}
             </p>
           </div>
         </div>

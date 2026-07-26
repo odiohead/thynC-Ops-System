@@ -97,9 +97,11 @@ app/
 │   │   ├── notifications/            # Slack 알림 설정 GET/PUT (ADMIN — 토글·주기·DM·타입별 필드) + logs/ 발송 이력 조회
 │   │   ├── ai-assistant/             # AI 어시스턴트 런타임 설정 GET/PUT (ADMIN — effort·캐시 TTL)
 │   │   └── audit-logs/               # 감사 로그 조회 (SUPER_ADMIN)
-│   ├── ai-assistant/                 # AI 어시스턴트 (Flowise 프록시 + 정제 + 상담이력 저장)
+│   ├── ai-assistant/                 # AI 어시스턴트 (에이전트 채팅 + 정제 + 세션 + 피드백)
 │   │   ├── summarize/                # AI 정제 (Anthropic Claude API)
-│   │   └── consultation/             # 상담이력 저장 (ConsultationQueue)
+│   │   ├── sessions/                 # 대화 세션 목록·상세·삭제
+│   │   └── feedback/                 # 답변 피드백 (👍/👎)
+│   ├── consultations/                # 상담이력 CRUD (SEERS 전용 — 어시스턴트 상담 정리 산출물)
 │   ├── wiki/                         # 사내 위키
 │   │   ├── pages/
 │   │   │   ├── route.ts              # GET 목록 / POST 생성
@@ -201,8 +203,9 @@ lib/
 │   ├── agent.ts                      # 에이전트 루프 — claude-opus-5 스트리밍 + tool use 반복(최대 8회) + 롤링 캐시 브레이크포인트
 │   ├── settings.ts                   # 모델 상수(채팅 opus-5 / 정리 sonnet-5) + 런타임 설정(effort·캐시 TTL, AppSetting)
 │   ├── access.ts                     # 어시스턴트 접근 권한 — 자사(SEERS) 전용 서버 강제 (DB 실시간 소속 검사)
-│   └── opsSearch.ts                  # 축2 운영 정보 전문 검색 — search_operation_history / find_similar_cases
-│   └── tools.ts                      # 도구 4종 (read-only Prisma SELECT — 병원검색/현황/프로젝트/유지보수)
+│   └── opsSearch.ts                  # 축2 운영 정보 전문 검색 — search_operation_history / find_similar_cases (상담이력 포함)
+│   └── tools.ts                      # 도구 16종 (read-only Prisma SELECT — 병원·업무·집계·위키·상담이력)
+├── consultation.ts                   # 상담이력 — 조회 권한(SEERS)·코드 발번(CS-YYYYMM-NNNN)·제목 추출
 ├── auth.ts                           # JWT 인증 유틸리티 + 역할 헬퍼
 ├── prisma.ts                         # Prisma 클라이언트
 ├── s3.ts                             # AWS S3 연동 유틸리티 (업로드/삭제/presigned URL)
@@ -476,11 +479,20 @@ prisma/
 - 현황: 109페이지 → 431청크 (API 규격서 68,772자 → 97청크)
 - UNIQUE `(page_id, ordinal)` + `text`/`heading_path` trigram GIN
 
-### ConsultationQueue (상담 대기열)
-- AI 어시스턴트 상담이력 저장
-- Hospital 연결 (hospitalCode, 선택), 상담유형(StatusCode CONSULTATION_TYPE), 문서유형(StatusCode DOCUMENT_TYPE)
-- 결론(`conclusion`), 대화이력(`chatHistory`, JSONB), AI 정제 결과(`aiSummary`)
-- 상태(`status`: PENDING 등), 상담자(`consultedById` → User)
+### Consultation (상담이력 — 2026-07-26)
+- AI 어시스턴트 '상담이력 저장'의 **원본**. 구 방식(위키 '병원 노트' 마크다운 append)을 대체 — 상담이력은 문서가 아니라 운영 이벤트(v3 축2)이므로 DB가 원본이고, 위키 병원 노트는 '사람이 쓰는 특이사항 메모'로 역할 분리
+- 고유 코드 `consultationCode`: `CS-YYYYMM-NNNN` (생성 시 자동 발번)
+- 병원 연결 (`hospitalCode`, **필수**), 상담유형(StatusCode CONSULTATION_TYPE), 문서유형(StatusCode DOCUMENT_TYPE — 컬럼 유지·UI 미노출)
+- `title`(본문 첫 줄에서 자동 추출, 60자), `content`(최종 본문 마크다운), `aiSummary`(AI 정제 원문 — 사람이 수정했을 때 비교용)
+- `sessionId`: AiChatSession id를 **FK 없이 ID만 보관** — 대화를 삭제해도 상담이력은 보존 (`AiUsageLog` 선례)
+- `consultedById` → User + `consultedByName` **스냅샷**(계정 삭제 후에도 목록 표시), `consultedAt`(DATE, 소급 입력 가능)
+- 인덱스: `(hospital_code, consulted_at DESC)`, `(consulted_by_id, consulted_at DESC)`, `(consulted_at DESC)` + `content`/`title` trigram GIN(축2 전문 검색 가속)
+- 권한: 조회 = SEERS 소속 + 활성(VIEWER 포함) / 생성 = SEERS + USER 이상(어시스턴트가 유일 경로) / 수정·삭제 = 본인 or ADMIN
+- 설계: `consultation_history_design.md`
+
+### ConsultationQueue (상담 대기열) — **동결 (2026-07-26)**
+- v1 상담이력 대기열. `Consultation` 신설로 역할 종료 — **테이블은 이력 보존**, 앱은 병원 일괄 이전 시 hospitalCode 갱신만 수행
+- (구 형상) hospitalCode·상담유형·문서유형·`conclusion`·`chatHistory`(JSONB)·`aiSummary`·`status`(PENDING)·`consultedById`
 
 ### Vehicle (법인차량)
 - 차량예약에 사용되는 차량 마스터
@@ -717,7 +729,7 @@ prisma/
 
 ### 병원 관리
 - HIRA 병원 데이터 검색 및 조회 (모달 방식)
-- 병원 상세 → 답사 관리 카드 + 설치계획(가안) 관리 카드 + 구축 프로젝트 카드 순으로 표시 (각 카드에서 해당 병원 데이터 직접 조회, 행 클릭 상세 이동, ADMIN 이상 등록 버튼 제공)
+- 병원 상세 → 답사 관리 카드 + 설치계획(가안) 관리 카드 + 유지보수 카드 + 구축 프로젝트 카드 + 사용 자재 카드 + **상담이력 카드**(SEERS 전용) + 병원 노트 순으로 표시 (각 카드에서 해당 병원 데이터 직접 조회, 행 클릭 상세 이동, ADMIN 이상 등록 버튼 제공)
 - 운영 병원 등록·수정·삭제
   - 등록: 병원명+상태만으로 즉시 등록, HIRA 연결은 선택
   - 수정: HIRA 병원 연결 변경·해제 지원
@@ -948,7 +960,7 @@ prisma/
 - **메인 메뉴 등록**: `nav_menu_items`에 `wiki` 행 (sort_order=15)
 - **감사 로그**: CREATE/UPDATE/DELETE 모두 `resource='wiki_page'`로 기록
 - **명시적 참조 (WikiPageReference)**: 병원/프로젝트를 chip 형태로 명시적 연결, 병원 상세 역참조 카드
-- **병원 노트 시스템 카테고리 (2026-07-18)**: 최상위 '병원 노트' 카테고리(AppSetting `wiki_hospital_note_root_id`) 아래 병원별 노트 페이지(`WikiPageReference` refType `hospital_note` 1:1). 병원 상세에 임베드(HospitalNotePanel, 협업 편집), AI 어시스턴트 상담 정리가 상담이력을 append, 어시스턴트 `read_hospital_note` 도구가 재활용. 보호 규칙은 이슈노트와 동일(루트 이동·삭제 차단, 노트 이동 차단·삭제 ADMIN만, 카테고리 직속 생성 차단, 복제 시 참조 미복사)
+- **병원 노트 시스템 카테고리 (2026-07-18, 역할 조정 2026-07-26)**: 최상위 '병원 노트' 카테고리(AppSetting `wiki_hospital_note_root_id`) 아래 병원별 노트 페이지(`WikiPageReference` refType `hospital_note` 1:1). 병원 상세에 임베드(HospitalNotePanel, 협업 편집). **담당자가 직접 쓰는 특이사항 메모**이며 어시스턴트 `read_hospital_note` 도구가 참조 — 상담이력 자동 append는 2026-07-26에 폐지(`consultations` 테이블로 분리). 보호 규칙은 이슈노트와 동일(루트 이동·삭제 차단, 노트 이동 차단·삭제 ADMIN만, 카테고리 직속 생성 차단, 복제 시 참조 미복사)
 - **프로젝트 이슈노트 시스템 카테고리**: 최상위 '프로젝트 이슈노트' 카테고리(AppSetting `wiki_project_issue_root_id`) 아래 프로젝트별 이슈노트 페이지 수용 — 프로젝트 상세에서 생성·임베드 편집. 루트는 이동·이름변경·삭제·복제 차단, 이슈노트 페이지는 카테고리 밖 이동·템플릿화 차단 + 삭제는 ADMIN 이상만(서버 검증 + 사이드바/상세 메뉴 숨김). 일반 페이지를 카테고리 안으로 이동·생성하는 것도 차단. 이슈노트 페이지 복제 시 사본은 일반 페이지로 최상위 생성(`project_issue` 참조 미복사). 프로젝트가 삭제돼도 페이지는 카테고리에서 계속 접근 가능
 - **태그**: 페이지에 다중 태그 추가, 검색에서 태그 필터 가능 (`WikiTag`/`WikiPageTag`)
 - **즐겨찾기**: 페이지 상단 ☆ 토글, `/wiki/favorites` 전용 페이지
@@ -967,7 +979,7 @@ prisma/
 - **에이전트**: Anthropic API(`claude-opus-5` + adaptive thinking, effort 기본 `medium`) 직접 호출, **tool use로 운영 DB·위키 실데이터 조회** 후 답변. 역할 3축 — ①CS 응대(위키 지식+병원 노트) ②정보 조회(병원 현황·형상) ③영업·운영 집계
 - **접근 권한 (v3, 2026-07-25)**: **자사(SEERS) 전용**. `lib/ai/access.ts`가 `/api/ai-assistant/*` 전 핸들러에서 소속을 **DB 실시간 조회**로 검사(JWT는 최대 7일 경과 가능). nav 메뉴의 `allowed_org_codes`는 UI 게이트일 뿐이라 서버에서 별도 강제
 - **지식 소스 2축 (v3 설계 원리 — `ai_assistant_v3_design.md`)**: 축1 **고정형**(사내위키 — 제품 사양·매뉴얼, 문서 단위가 아니라 **절 단위** 검색) / 축2 **운영**(운영관리 DB — 유지보수·답사·상담 이력, **자유 텍스트 전문 검색**). 두 축은 단위·정답 성격·갱신 빈도가 달라 검색 전략을 분리했다
-- **도구 15종(read-only, `lib/ai/tools.ts` 화이트리스트)**: `search_hospitals`(운영·계약 우선 랭킹) / `get_hospital_overview` / `list_projects` / `list_maintenances` / `list_site_visits` / `list_install_plans` / `list_etc_tasks` / `get_dashboard_summary` / **`aggregate_stats`**(기간 집계) / **`search_operation_history`**(v3 — 유지보수 증상·조치, 처리기록, 답사 노트, 기타업무 비고, 티켓 코멘트 통합 전문 검색) / **`find_similar_cases`**(v3 — 증상→과거 유사 장애+조치, CS 응대 특화) / `search_wiki` / **`read_wiki_chunk`**(v3) / `read_wiki_page` / `read_hospital_note`
+- **도구 16종(read-only, `lib/ai/tools.ts` 화이트리스트)**: `search_hospitals`(운영·계약 우선 랭킹) / `get_hospital_overview` / `list_projects` / `list_maintenances` / `list_site_visits` / `list_install_plans` / `list_etc_tasks` / `get_dashboard_summary` / **`aggregate_stats`**(기간 집계) / **`search_operation_history`**(v3 — 유지보수 증상·조치, 처리기록, 답사 노트, 기타업무 비고, 티켓 코멘트, **상담이력** 통합 전문 검색) / **`find_similar_cases`**(v3 — 증상→과거 유사 장애+조치, CS 응대 특화) / **`read_consultations`**(2026-07-26 — 병원별 과거 상담이력 최근순) / `search_wiki` / **`read_wiki_chunk`**(v3) / `read_wiki_page` / `read_hospital_note`(담당자가 직접 쓴 병원 메모 — 상담이력과 별개)
 - **출처 표기 (v3)**: 지식 도구가 `link`(도메인 상세 경로)를 함께 반환하고, 시스템 프롬프트가 사실 진술에 근거 출처를 마크다운 링크로 제시하도록 규정 — 예: `[MNT-202605-0043](/maintenances/104)`
 - **답변 피드백 (v3)**: 답변 하단 👍/👎(👎는 사유 4종 — 틀림·못 찾음·오래된 정보·부적절) → `ai_feedback`. 대화를 삭제해도 보존되며, 벡터DB 도입 여부 판단의 근거 데이터로 쓴다
 - **목록 도구 5종 공통 파라미터 (2026-07-25)**: `limit`(기본 10·최대 30)·`detail`(`summary` 기본 / `full`). 요약 모드는 핵심 필드만 반환하고 증상·조치·비고 등 본문은 `full`에서만. 응답에 `total`을 항상 포함해 "몇 건인가"를 재조회 없이 답한다
@@ -976,7 +988,9 @@ prisma/
 - 에이전트 루프(`lib/ai/agent.ts`): 스트리밍 + tool use 반복(최대 8회), 도구 실패 is_error 전달, **프롬프트 캐싱** — 시스템+도구 정의 breakpoint(가변 컨텍스트는 캐시 뒤 배치) + **messages 롤링 브레이크포인트**(2026-07-25): 반복마다 마지막 블록에 마커를 갱신해 다음 반복이 직전 도구 결과까지를 캐시로 읽는다(직전 1개 유지 — lookback 20블록·상한 4개 제약). 적용 전에는 N번째 반복이 1~N-1번째 도구 결과를 전부 정가로 재처리했다
 - **SSE 스트리밍**: `POST /api/ai-assistant/chat` — `text`/`tool_start`/`done`/`error` + 15초 하트비트(프록시 타임아웃 보호), 도구 진행 상태("🔍 집계 중...") 인라인 표시
 - **세션 UX**: 좌측 사이드바(내 대화 목록·이어하기·삭제, 모바일 드로어), 세션 제목 자동(첫 질문 40자), 병원 컨텍스트 칩 복원
-- **상담 정리 → 병원 노트**: AI 정제(`claude-sonnet-5` — 단발 요약이라 Opus 불필요, 2026-07-25 전환) 후 **"병원 노트에 추가"** — 위키 '병원 노트' 카테고리의 병원별 페이지에 날짜·상담자 헤더와 함께 append → 다음 상담에서 `read_hospital_note`로 재활용 (상담 대기열은 폐기 — API·UI 제거, `consultation_queue` 테이블은 이력 보존)
+- **상담 정리 → 상담이력 저장 (2026-07-26 재설계)**: AI 정제(`claude-sonnet-5` — 단발 요약이라 Opus 불필요) 후 **"💾 상담이력 저장"** → `consultations` 테이블에 저장(병원 필수, 원 대화 `sessionId` 연결). 병원 상세 '상담이력' 카드에서 조회·수정·삭제하고, 다음 상담에서 `read_consultations`·`search_operation_history`로 재활용
+  - 구 방식(위키 '병원 노트' 마크다운 append)은 **폐지** — 협업 Y.Doc과 이중 기록이라 노트가 열려 있으면 덮이는 유실 경로가 있었고, 구조가 없어 집계·필터가 불가능했으며, 청크 인덱스가 갱신되지 않아 AI 검색에도 안 잡혔다. 상세는 `consultation_history_design.md`
+  - 위키 '병원 노트'는 **담당자가 직접 쓰는 특이사항 메모**로 역할 분리 (임베드 패널 유지)
 - 권한: VIEWER 사용 불가(403), 세션은 소유자만 접근(삭제는 본인 또는 ADMIN)
 - **Flowise 제거**: 프록시 라우트·env 삭제 완료 (Flowise EC2 종료는 추후 결정)
 - **제품 지식 소스**: thynC 솔루션 자체 사양은 사내위키 `thync_1.3.0` 카테고리의 산출물 문서 세트(HTML 12종 — 기능정의서·API규격서·DB설계서·알람정책·외부연동·설치/설정·용어집)로 제공. `search_wiki`/`read_wiki_page`로 자동 참조하며, 원본은 `docs/thync-product-1.3.0/`에 보존(`scripts/publish-wiki-html-docs.mts`로 재게시)
@@ -1331,6 +1345,15 @@ npm run dev
 | POST | `/api/ai-assistant/summarize` | AI 정제 (대화 → 마크다운 상담이력, `claude-sonnet-5`) |
 | POST | `/api/ai-assistant/feedback` | 답변 피드백 저장 (`{messageId, verdict, reason?}` — 답변당 1건, 재전송 시 갱신) |
 | GET | `/api/ai-assistant/feedback` | 피드백 집계 (최근 90일, 못 찾음 비율 포함) — ADMIN |
+
+### 상담이력 (2026-07-26)
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET  | `/api/consultations` | 목록 (`?hospitalCode=&consultedById=&from=&to=&q=&page=&pageSize=`) — 상담일 최신순. **SEERS 소속만**(VIEWER 포함) |
+| POST | `/api/consultations` | 저장 (`{hospitalCode, content, aiSummary?, consultationTypeId?, sessionId?, consultedAt?}`) — `checkAiAccess`(SEERS + USER 이상), `CS-YYYYMM-NNNN` 발번 |
+| GET  | `/api/consultations/[id]` | 상세 — SEERS 소속만 |
+| PUT  | `/api/consultations/[id]` | 수정 (본문 변경 시 title 재추출) — 본인 or ADMIN |
+| DELETE | `/api/consultations/[id]` | 삭제 — 본인 or ADMIN |
 
 ### 답사
 | Method | Endpoint | 설명 |

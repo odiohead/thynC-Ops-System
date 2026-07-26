@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { extractPlainTextFromBlocks } from '@/lib/wiki/blockText'
 import {
   HOSPITAL_NOTE_REF_TYPE,
   HOSPITAL_NOTE_PAGE_ICON,
@@ -12,14 +10,18 @@ import {
 } from '@/lib/wiki/hospitalNote'
 
 /**
- * 병원 노트 조회/생성/상담이력 append (function_ai_assistant.html §6.3)
+ * 병원 노트 조회/생성 (function_ai_assistant.html §6.3)
  * - GET  ?hospitalCode= : 해당 병원의 노트 페이지(본문 포함) 또는 null
- * - POST { hospitalCode }               : 노트 페이지 생성 (USER+, 병원당 1개 멱등)
- * - POST { hospitalCode, appendMd, consultationType?, consultedBy? } :
- *     상담 정제 마크다운을 노트 하단에 append (노트 없으면 자동 생성)
+ * - POST { hospitalCode } : 노트 페이지 생성 (USER+, 병원당 1개 멱등)
  *
- * ⚠️ 협업(Y.Doc) 정합성: append는 content_json 직접 갱신 방식.
- *    노트가 협업 세션으로 열려 있는 동안의 append는 다음 협업 저장에 덮일 수 있음(설계서 리스크 명시).
+ * 병원 노트는 **담당자가 직접 쓰는 병원 특이사항 메모**다. 편집은 협업 서버(Y.Doc)가 담당한다.
+ *
+ * ⚠️ 상담이력 append는 2026-07-26에 폐지되었다.
+ *    상담이력의 원본은 `consultations` 테이블이며 병원 상세 '상담이력' 카드에서 조회한다.
+ *    구 방식(마크다운 append)은 ① 협업 Y.Doc과 content_json 이중 기록이라 노트가 열려 있으면
+ *    덮여 사라졌고 ② 작성자·유형이 헤딩 문자열이라 구조화 조회가 불가능했으며
+ *    ③ 청크 인덱스가 갱신되지 않아 AI 검색에 잡히지 않았다.
+ *    설계·근거: consultation_history_design.md
  */
 
 export async function GET(request: NextRequest) {
@@ -71,11 +73,7 @@ export async function POST(request: NextRequest) {
   if (authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json().catch(() => ({}))
-  const { hospitalCode, appendMd, consultationType } = body as {
-    hospitalCode?: string
-    appendMd?: string
-    consultationType?: string
-  }
+  const { hospitalCode } = body as { hospitalCode?: string }
   if (!hospitalCode) {
     return NextResponse.json({ error: 'hospitalCode is required' }, { status: 400 })
   }
@@ -100,69 +98,8 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  // ── append 없는 호출 = 생성만 ──
-  if (!appendMd || !appendMd.trim()) {
-    return NextResponse.json({ id: note.id, existed: !note.created }, { status: note.created ? 201 : 200 })
-  }
-
-  // ── 상담이력 append ──
-  const todayKst = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
-  const heading = `${todayKst} 상담 (${authUser.name})${consultationType ? ` — ${consultationType}` : ''}`
-
-  // server-util은 빌드 페이지 수집과 충돌해 런타임 동적 로드 (실패 시 문단 폴백)
-  let bodyBlocks: unknown[]
-  try {
-    const { ServerBlockNoteEditor } = await import('@blocknote/server-util')
-    const editor = ServerBlockNoteEditor.create()
-    bodyBlocks = await editor.tryParseMarkdownToBlocks(appendMd)
-  } catch (e) {
-    console.error('[hospital-notes] markdown→blocks 변환 실패, 문단 폴백 사용:', e)
-    bodyBlocks = appendMd.split(/\n{2,}/).map((p) => ({
-      type: 'paragraph',
-      content: [{ type: 'text', text: p, styles: {} }],
-    }))
-  }
-  const appendBlocks: unknown[] = [
-    { type: 'heading', props: { level: 2 }, content: [{ type: 'text', text: heading, styles: {} }] },
-    ...bodyBlocks,
-  ]
-
-  const page = await prisma.wikiPage.findUnique({
-    where: { id: note.id },
-    select: { contentJson: true, title: true },
-  })
-  const current = Array.isArray(page?.contentJson) ? (page!.contentJson as unknown[]) : []
-  const nextContent = [...current, ...appendBlocks]
-
-  await prisma.$transaction(async (tx) => {
-    // 직전 상태 버전 스냅샷 (append 이력 추적)
-    await tx.wikiVersion.create({
-      data: {
-        pageId: note.id,
-        title: page?.title ?? hospital.hospitalName,
-        contentJson: (page?.contentJson ?? []) as Prisma.InputJsonValue,
-        savedById: authUser.userId,
-      },
-    })
-    await tx.wikiPage.update({
-      where: { id: note.id },
-      data: {
-        contentJson: nextContent as Prisma.InputJsonValue,
-        plainText: extractPlainTextFromBlocks(nextContent),
-        lastEditorId: authUser.userId,
-      },
-    })
-  })
-
-  await logAudit({
-    req: request,
-    actor: auditActorFromJWT(authUser),
-    action: 'UPDATE',
-    resource: 'wiki_page',
-    resourceId: note.id,
-    resourceLabel: `${hospital.hospitalName} (병원 노트 — 상담이력 추가)`,
-    after: { hospitalCode, appended: heading },
-  })
-
-  return NextResponse.json({ id: note.id, appended: true })
+  return NextResponse.json(
+    { id: note.id, existed: !note.created },
+    { status: note.created ? 201 : 200 },
+  )
 }

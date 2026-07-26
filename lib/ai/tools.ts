@@ -180,14 +180,14 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'search_operation_history',
     description:
-      '운영 이력의 **본문 내용**을 전문 검색한다. 대상은 유지보수 증상·조치, 처리 기록, 답사 노트, 기타업무 비고, 티켓 코멘트다. "게이트웨이 오프라인 사례 있어?", "케이블 교체한 적 있나", "그 병원 답사 때 특이사항" 처럼 내용으로 찾아야 하는 질문에 사용하라. list_* 도구는 상태·기간·병원 같은 구조화 필터만 가능해 내용 검색을 하지 못하므로, 본문을 찾아야 할 때는 반드시 이 도구를 쓴다.',
+      '운영 이력의 **본문 내용**을 전문 검색한다. 대상은 유지보수 증상·조치, 처리 기록, 답사 노트, 기타업무 비고, 티켓 코멘트, 상담이력이다. "게이트웨이 오프라인 사례 있어?", "케이블 교체한 적 있나", "그 병원 답사 때 특이사항" 처럼 내용으로 찾아야 하는 질문에 사용하라. list_* 도구는 상태·기간·병원 같은 구조화 필터만 가능해 내용 검색을 하지 못하므로, 본문을 찾아야 할 때는 반드시 이 도구를 쓴다.',
     input_schema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: '검색어 (핵심 명사 1~3개). 조사·어미는 빼라.' },
         workType: {
           type: 'string',
-          enum: ['MAINTENANCE', 'MAINTENANCE_LOG', 'SITE_VISIT', 'ETC', 'TICKET'],
+          enum: ['MAINTENANCE', 'MAINTENANCE_LOG', 'SITE_VISIT', 'ETC', 'TICKET', 'CONSULTATION'],
           description: '업무 유형으로 한정 (선택)',
         },
         hospitalCode: { type: 'string', description: '병원 코드로 한정 (선택)' },
@@ -253,9 +253,22 @@ export const AI_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'read_consultations',
+    description:
+      '특정 병원의 **과거 상담이력**을 최근순으로 읽는다. 상담 응대 시 "이 병원 지난번에 뭘 물어봤나", "과거 상담 내용"이 필요하면 가장 먼저 호출하라. 내용으로 찾아야 하면(병원 불문) search_operation_history를 workType=CONSULTATION으로 쓴다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        hospitalCode: { type: 'string', description: '병원 코드 (search_hospitals로 조회)' },
+        limit: { type: 'number', description: '반환 건수 (기본 5, 최대 20)' },
+      },
+      required: ['hospitalCode'],
+    },
+  },
+  {
     name: 'read_hospital_note',
     description:
-      '특정 병원의 병원 노트(과거 상담이력·특이사항이 축적된 위키 페이지)를 읽는다. "이 병원 지난번 문의", "과거 상담이력", "병원 특이사항" 질문이나 CS 응대 시 해당 병원 맥락이 필요할 때 호출하라.',
+      '특정 병원의 병원 노트(담당자가 직접 적어둔 특이사항 메모 위키 페이지)를 읽는다. 상담이력은 여기가 아니라 read_consultations에 있다. 병원별 주의사항·현장 메모가 필요할 때 호출하라.',
     input_schema: {
       type: 'object',
       properties: {
@@ -282,6 +295,7 @@ export const TOOL_LABELS: Record<string, string> = {
   search_wiki: '위키 검색 중',
   read_wiki_chunk: '위키 문서 읽는 중',
   read_wiki_page: '위키 문서 읽는 중',
+  read_consultations: '상담이력 확인 중',
   read_hospital_note: '병원 노트 확인 중',
 }
 
@@ -1005,6 +1019,47 @@ async function readWikiPage(input: ToolInput) {
   }
 }
 
+/** 병원별 상담이력 — 최근순. 위키 노트가 아니라 `consultations` 원본을 읽는다 */
+async function readConsultations(input: ToolInput) {
+  const code = str(input.hospitalCode)
+  if (!code) return { error: 'hospitalCode가 필요합니다.' }
+  const limit = int(input.limit, 5, 1, 20)
+
+  const [rows, total] = await Promise.all([
+    prisma.consultation.findMany({
+      where: { hospitalCode: code },
+      orderBy: [{ consultedAt: 'desc' }, { id: 'desc' }],
+      take: limit,
+      select: {
+        consultationCode: true,
+        hospitalCode: true,
+        title: true,
+        content: true,
+        consultedByName: true,
+        consultedAt: true,
+        consultationType: { select: { name: true } },
+      },
+    }),
+    prisma.consultation.count({ where: { hospitalCode: code } }),
+  ])
+
+  if (rows.length === 0) return { count: 0, total: 0, note: '이 병원의 상담이력이 아직 없습니다.' }
+
+  return {
+    count: rows.length,
+    total,
+    consultations: rows.map((r) => ({
+      code: r.consultationCode,
+      consultedAt: ymd(r.consultedAt),
+      consultationType: r.consultationType?.name ?? null,
+      consultedBy: r.consultedByName,
+      title: r.title,
+      content: r.content.length > 4000 ? r.content.slice(0, 4000) + '…' : r.content,
+      link: `/hospitals/${r.hospitalCode}#consultations`, // 출처
+    })),
+  }
+}
+
 async function readHospitalNote(input: ToolInput) {
   const code = str(input.hospitalCode)
   if (!code) return { error: 'hospitalCode가 필요합니다.' }
@@ -1054,6 +1109,8 @@ export async function executeTool(name: string, input: ToolInput): Promise<unkno
         return await readWikiPage(input)
       case 'read_wiki_chunk':
         return await readWikiChunk(input)
+      case 'read_consultations':
+        return await readConsultations(input)
       case 'read_hospital_note':
         return await readHospitalNote(input)
       default:
