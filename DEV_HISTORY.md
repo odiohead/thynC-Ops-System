@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-07-26 | 티켓·AI 어시스턴트 모바일 UI 최적화 PROD 배포
+
+- dev2 힙 4GB 빌드 → `pm2 restart thync-dev` → 커밋 `fcd2d6a` push → PROD git pull(`142c2f3`→`fcd2d6a`, 10파일 +504/-367)
+- **패키지·마이그레이션·PROD DB 작업 없음** — `package.json`/`package-lock.json`/`prisma/` 변경 0건 확인 후 진행(반응형 마크업 전용 배포)
+- PROD 힙 4GB 빌드 → `pm2 restart thync-prod`(↺109) → 기동 로그 정상(`Ready in 1130ms`, mail 30m·notify OFF·wiki-chunk 10m 스케줄러 기동)
+- 검증: dev2·PROD 모두 `/`·`/tickets`·`/tickets/dashboard`·`/tickets/new`·`/ai-assistant`·`/maintenances`·`/wiki`·`/hospitals` 307 정상, 공개 URL(`ops.seersthync.com`·`dev.ops.seersthync.com`) 307 정상
+- **재시작 이후 신규 오류 로그 0건** — 에러 로그 최종 수정 07-25 19:37로 직전 배포 때와 동일(현재 07-26 02:31 UTC)
+- **후속 안내(사용자 확인 요청)**: 실제 폰에서 ① 티켓 목록 카드·큐 탭 가로 스크롤 ② 티켓 상세 전이 버튼·서브 티켓 카드 ③ 티켓 생성 병원 검색 바텀시트 ④ 어시스턴트 대화 목록 드로어·**대화 삭제(×) 버튼**(이전엔 터치로 누를 수 없었음) 확인 권장
+
+---
+
 ## 2026-07-26 | 티켓·AI 어시스턴트 모바일 UI 최적화
 
 - 최근 개발한 두 모듈만 모바일 대응이 빠져 있어(다른 목록·상세는 이미 카드 뷰/드로어 패턴 적용) 기존 패턴에 맞춰 후행 적용. **기능·API·DB 변경 없음, 반응형 클래스와 마크업 구조만 변경**
