@@ -1168,6 +1168,9 @@ model WikiPage {
   pageType      String    @default("block") @map("page_type") @db.VarChar(10)
   contentHtml   String?   @map("content_html")
   aiExcluded    Boolean   @default(false) @map("ai_excluded")
+  /// 청크 인덱스를 마지막으로 재생성한 시각. `chunks_synced_at < updated_at`이면 재생성 대상.
+  /// 갱신은 raw SQL로만 한다 — Prisma update를 쓰면 @updatedAt이 함께 올라 무한 재생성이 된다.
+  chunksSyncedAt DateTime? @map("chunks_synced_at")
 
   parent        WikiPage?           @relation("WikiPageTree", fields: [parentId], references: [id], onDelete: Cascade)
   children      WikiPage[]          @relation("WikiPageTree")
@@ -1194,6 +1197,8 @@ model WikiPage {
 
 /// 위키 청크 인덱스 (v3 W1) — 검색·반환 단위를 문서에서 헤딩 청크로 내린다.
 /// 본문 저장 시 plainText 재계산과 같은 훅에서 재생성 (lib/wiki/chunk.ts)
+/// 청크 인덱스 동기화 시각 — `chunks_synced_at < updated_at`이면 재생성 대상.
+/// 본문 저장 주체가 협업 서버라 REST 훅만으로는 누락되므로 주기 스케줄러가 이 값으로 판정한다.
 model WikiChunk {
   id          Int      @id @default(autoincrement())
   pageId      String   @map("page_id")

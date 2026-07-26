@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-07-26 | 위키 청크 인덱스 주기 갱신 스케줄러 (검색 인덱스 정지 문제 해소)
+
+- 상담이력 배포 후 이월돼 있던 별건. 사용자 질문("주기적으로 갱신할 수 없나")에 두 안(주기 배치 vs 협업 저장 훅)을 제시하고 **주기 배치**로 승인받아 착수
+- **문제**: 위키 본문의 저장 주체는 Next 앱이 아니라 협업 서버(Hocuspocus, Y.Doc)다. `collab-server/index.mts`의 `store()`가 `content_json`·`plain_text`·백링크만 갱신하고 청크는 안 만들며, `WikiPageView`는 본문 변경 시 PUT 자체를 보내지 않는다. 그 결과 **본문 편집 = 청크 미갱신**. 반대로 제목·아이콘 변경 시엔 PUT의 `title` 분기로 그 시점 본문까지 딸려 갱신되던 상태
+- **해결 방향**: 경로마다 훅을 다는 대신 **상태 비교로 전환** — `wiki_pages.chunks_synced_at`을 두고 `chunks_synced_at < updated_at`이면 재생성. 새 저장 경로가 생겨도 누락되지 않는다(이번 누락이 정확히 훅 방식의 실패였음)
+- 마이그레이션 `20260726140000_add_wiki_chunks_synced_at`: 컬럼 추가 + 백필(청크가 페이지보다 확실히 최신인 경우만 synced 표시, 애매하면 NULL로 남겨 1회 재생성 유도)
+- `lib/wiki/chunk-scheduler.ts` 신설 — AppSetting `wiki_chunk_interval`(off/5m/**10m 기본**/30m/1h), 한 주기 최대 50페이지, 중첩 실행 방지(running 가드), 처리 0건이면 무로그. `instrumentation.ts`에서 기동(notify-scheduler 패턴). **다른 스케줄러와 달리 기본값이 'off'가 아닌 '10m'** — 설정 UI가 없어 off 기본이면 아무도 켜지 않아 기능이 죽은 채 남기 때문
+- `rebuildPageChunks`가 재생성 후 `chunks_synced_at`을 표시(청크 0개여도 표시 — 안 하면 빈 페이지를 매 주기 재시도). 표시는 **raw SQL 필수**(Prisma update는 `@updatedAt`이 함께 올라 무한 재생성)
+- **검증 중 발견·수정한 버그**: 표시 값을 `${new Date()}` 파라미터로 넘겼더니 드라이버가 **서버 로컬시각(KST)** 으로 기록 → `updated_at`(Prisma가 쓰는 UTC)보다 9시간 앞서 **이후 편집이 9시간 동안 감지되지 않는** 상태가 됨(PROD는 UTC라 안 드러났을 문제). `timezone('UTC', now())`로 교체 후 시각차 0.0초 확인
+- **검증**: tsc·lint 0오류, 빌드 성공. 협업 저장 시뮬레이션(store()와 동일하게 content_json/plain_text만 갱신) 기준 — 편집→감지→재색인 사이클 **2회 반복 모두 정확히 1건**, 연속 실행 시 0건(무한 재생성 없음), 원복 편집도 감지. 백로그 20건(빈 페이지) 1회 소진 후 stale 0. 전체 청크 431행 유지. PM2 재시작 후 `[wiki-chunk-scheduler] 청크 주기 갱신 시작: 10m 간격` 로그 확인
+- 영향 파일: prisma/{schema.prisma, migrations/20260726140000_add_wiki_chunks_synced_at}, lib/wiki/{chunk.ts, chunk-scheduler.ts(신규)}, instrumentation.ts, README.md
+
+---
+
 ## 2026-07-26 | 상담이력 저장 재설계 PROD 배포
 
 - dev2 커밋 `48db355` push → PROD git pull(`91e332a`→`48db355`, 17파일) → 패키지 변경 없음 확인

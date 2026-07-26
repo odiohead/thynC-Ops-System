@@ -235,6 +235,7 @@ lib/
 └── wiki/
     ├── blockText.ts                  # BlockNote 블록 → plain text 추출·페이지 링크 인덱싱
     ├── chunk.ts                      # 축1 위키 청크 인덱스 생성 (HTML h1~h4 / BlockNote heading 기준, 표 구조 보존)
+    ├── chunk-scheduler.ts            # 청크 주기 갱신 스케줄러 (chunks_synced_at < updated_at 판정, 기본 10분)
     ├── htmlText.ts                   # HTML 문서 페이지 — sanitize(script 등 제거) + plain text·title 추출
     ├── wikiSchema.tsx                # BlockNote 커스텀 스키마 (콜아웃·구분선·페이지링크·mention·멀티컬럼)
     ├── projectIssueNote.ts           # 프로젝트 이슈노트 — 루트 카테고리 보장·보호 판정 (refType 'project_issue')
@@ -476,6 +477,8 @@ prisma/
 - `pageId`(→WikiPage, Cascade), `ordinal`, **`headingPath`**("문서명 > 상위 > 하위" — 랭킹 가중치 겸 표시용), `text`, `charStart`/`charEnd`
 - 분할: HTML은 h1~h4, BlockNote는 heading 블록 기준. 목표 1,200자·상한 2,000자, 200자 미만 절은 병합. **표는 `셀 | 셀` 줄로 보존**(평문 추출에서 표가 뭉개지던 문제 해소)
 - 페이지 저장(생성·수정) 시 전량 재생성 — 실패해도 저장을 되돌리지 않는다(검색 가속 인덱스이지 원본이 아님). 백필: `scripts/backfill-wiki-chunks.mts`
+- **주기 갱신 (2026-07-26)**: 본문 저장 주체가 협업 서버(Y.Doc)라 REST 훅만으로는 본문 편집이 누락된다. `wiki_pages.chunks_synced_at`을 두고 **`chunks_synced_at < updated_at`이면 재생성**하는 스케줄러(`lib/wiki/chunk-scheduler.ts`)가 AppSetting `wiki_chunk_interval`(off/5m/**10m 기본**/30m/1h) 주기로 돌며, 한 주기 최대 50페이지를 처리한다. 경로별 훅이 아니라 상태 비교라서 **새 저장 경로가 생겨도 누락되지 않는다**
+- `chunks_synced_at` 갱신은 **raw SQL + `timezone('UTC', now())` 필수** — Prisma `update`를 쓰면 `@updatedAt`이 함께 올라 무한 재생성이 되고, JS `Date` 파라미터를 쓰면 KST 서버에서 9시간 앞선 값이 기록돼 이후 편집이 감지되지 않는다
 - 현황: 109페이지 → 431청크 (API 규격서 68,772자 → 97청크)
 - UNIQUE `(page_id, ordinal)` + `text`/`heading_path` trigram GIN
 

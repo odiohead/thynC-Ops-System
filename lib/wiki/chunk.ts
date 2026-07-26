@@ -246,6 +246,13 @@ export async function rebuildPageChunks(pageId: string): Promise<number> {
       ...(chunks.length > 0
         ? [prisma.wikiChunk.createMany({ data: chunks.map((c) => ({ pageId, ...c })) })]
         : []),
+      // 동기화 시각 표시 — 청크가 0개여도 표시해야 스케줄러가 같은 페이지를 매 주기 재시도하지 않는다.
+      // ⚠️ raw SQL 필수: prisma.wikiPage.update를 쓰면 @updatedAt이 함께 올라
+      //    updated_at > chunks_synced_at 조건이 영원히 참이 되어 무한 재생성에 빠진다.
+      // ⚠️ timezone('UTC', now()) 필수: updated_at은 Prisma가 UTC를 naive timestamp로 넣는데,
+      //    JS Date를 파라미터로 넘기면 드라이버가 서버 로컬시각으로 써서 KST 서버에서 9시간 앞선다.
+      //    그러면 chunks_synced_at > updated_at이 계속 참이 되어 이후 편집이 9시간 동안 감지되지 않는다.
+      prisma.$executeRaw`UPDATE "wiki"."wiki_pages" SET "chunks_synced_at" = timezone('UTC', now()) WHERE "id" = ${pageId}`,
     ])
     return chunks.length
   } catch (e) {
