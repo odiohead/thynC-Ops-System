@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { X } from 'lucide-react'
+import { useOverlayDismiss } from '@/app/components/useOverlayDismiss'
 
 // 어시스턴트 답변의 GFM 표(파이프 테이블)를 가로 스크롤·테두리·헤더 강조가 있는
 // 실제 표로 렌더링. remark-gfm 없이는 `|`·`---`가 평문으로 노출돼 가시성이 떨어졌음.
@@ -106,6 +107,10 @@ export default function AiAssistantPage() {
   // 세션 사이드바
   const [sessions, setSessions] = useState<SessionItem[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false) // 모바일 오버레이
+
+  // 모바일 드로어 공통 동작 — 배경 스크롤 잠금 + ESC 닫기 (다른 오버레이와 동일 규칙)
+  const closeSidebar = useCallback(() => setSidebarOpen(false), [])
+  useOverlayDismiss(sidebarOpen, closeSidebar)
 
   const loadSessions = async () => {
     try {
@@ -459,10 +464,12 @@ export default function AiAssistantPage() {
           >
             <div className="flex items-center justify-between gap-1">
               <span className="truncate text-sm">{s.title}</span>
+              {/* 모바일은 hover가 없어 항상 노출, lg 이상은 기존대로 hover 시 노출 */}
               <button
                 onClick={(e) => deleteSession(s.id, e)}
-                className="hidden shrink-0 rounded p-0.5 text-gray-400 hover:text-red-500 group-hover:block"
+                className="block shrink-0 rounded p-1 text-gray-400 hover:text-red-500 lg:hidden lg:p-0.5 lg:group-hover:block"
                 title="대화 삭제"
+                aria-label="대화 삭제"
               >
                 <X size={13} />
               </button>
@@ -478,7 +485,7 @@ export default function AiAssistantPage() {
   )
 
   return (
-    <div className="flex gap-6 h-[calc(100dvh-3.5rem)] lg:h-[calc(100vh-2rem)] px-4 py-4 sm:px-6 lg:px-8 lg:py-6">
+    <div className="flex h-[calc(100dvh-3.5rem)] gap-0 px-3 py-3 sm:px-6 sm:py-4 lg:h-[calc(100vh-2rem)] lg:gap-6 lg:px-8 lg:py-6">
       {/* 토스트 */}
       {toast && (
         <div className="fixed top-4 right-4 z-[60] rounded-lg bg-gray-900 px-4 py-2.5 text-sm text-white shadow-lg">
@@ -495,53 +502,56 @@ export default function AiAssistantPage() {
       {/* ===== 세션 사이드바 (모바일 오버레이) ===== */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-50 flex lg:hidden">
-          <div className="flex w-72 max-w-[80vw] flex-col bg-white p-4 shadow-xl">
+          <div className="flex w-72 max-w-[80vw] flex-col bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl">
             <div className="mb-2 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-gray-700">대화 목록</h2>
-              <button onClick={() => setSidebarOpen(false)} className="rounded p-1 hover:bg-gray-100">
+              <button onClick={closeSidebar} aria-label="대화 목록 닫기" className="rounded p-2 hover:bg-gray-100">
                 <X size={18} />
               </button>
             </div>
             {sessionList}
           </div>
-          <div className="flex-1 bg-black/30" onClick={() => setSidebarOpen(false)} />
+          <div className="flex-1 bg-black/30" onClick={closeSidebar} />
         </div>
       )}
 
       {/* ===== 좌측: 채팅 영역 ===== */}
       <div className="flex flex-col flex-1 min-w-0 max-w-4xl">
         {/* 헤더 */}
-        <div className="shrink-0 mb-4">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
+        <div className="shrink-0 mb-3 sm:mb-4">
+          <div className="mb-3 flex items-start justify-between gap-2 sm:mb-4 sm:items-center">
+            <div className="flex min-w-0 items-center gap-2">
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-50 lg:hidden"
+                className="shrink-0 rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-50 lg:hidden"
                 title="대화 목록"
+                aria-label="대화 목록"
               >
                 ☰
               </button>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">AI 어시스턴트</h1>
-                <p className="mt-1 text-sm text-gray-500">
+              <div className="min-w-0">
+                <h1 className="text-lg font-bold text-gray-900 sm:text-2xl">AI 어시스턴트</h1>
+                {/* 설명은 세로 공간이 귀한 모바일에서 숨김 */}
+                <p className="mt-1 hidden text-sm text-gray-500 sm:block">
                   병원 현황·유지보수·구축·집계·제품 지식(위키)을 실데이터로 답합니다.
                 </p>
               </div>
             </div>
             <button
               onClick={() => setPanelOpen((v) => !v)}
-              className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${
+              className={`shrink-0 whitespace-nowrap rounded-lg border px-3 py-2 text-xs font-medium transition-colors sm:py-1.5 ${
                 panelOpen
                   ? 'bg-blue-50 text-blue-700 border-blue-200'
                   : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
               }`}
             >
-              {panelOpen ? '상담 정리 닫기' : '상담 정리 열기'}
+              <span className="sm:hidden">상담 정리</span>
+              <span className="hidden sm:inline">{panelOpen ? '상담 정리 닫기' : '상담 정리 열기'}</span>
             </button>
           </div>
 
           {/* 병원 선택 영역 */}
-          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
             <span className="text-sm font-medium text-gray-500 shrink-0">병원</span>
             {selectedHospital ? (
               <span className="inline-flex items-center gap-1.5 rounded-md bg-blue-50 border border-blue-200 px-2.5 py-1 text-sm font-medium text-blue-700">
@@ -559,14 +569,15 @@ export default function AiAssistantPage() {
             ) : (
               <>
                 <span className="inline-flex items-center rounded-md bg-gray-100 px-2.5 py-1 text-sm text-gray-600">공통</span>
-                <div ref={hospitalDropdownRef} className="relative flex-1 max-w-xs">
+                {/* 모바일: 검색 입력이 한 줄을 차지 (좁은 폭에서 병원명이 안 보이던 문제) */}
+                <div ref={hospitalDropdownRef} className="relative w-full sm:max-w-xs sm:flex-1">
                   <input
                     type="text"
                     value={hospitalSearch}
                     onChange={(e) => handleHospitalSearchChange(e.target.value)}
                     onFocus={() => { if (hospitalResults.length > 0) setShowHospitalDropdown(true) }}
                     placeholder="병원명으로 검색하여 지정..."
-                    className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent sm:py-1.5"
                   />
                   {searching && (
                     <div className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -593,7 +604,7 @@ export default function AiAssistantPage() {
         </div>
 
         {/* 대화 영역 */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-4 pb-4 rounded-lg border border-gray-200 bg-white p-4">
+        <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto rounded-lg border border-gray-200 bg-white p-3 pb-4 sm:p-4">
           {messages.length === 0 && !loading && (
             <div className="flex items-center justify-center h-full">
               <div className="text-center text-gray-400">
@@ -613,11 +624,11 @@ export default function AiAssistantPage() {
           {messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               {msg.role === 'user' ? (
-                <div className="max-w-[75%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap bg-blue-600 text-white">
+                <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-blue-600 px-3.5 py-2.5 text-sm leading-relaxed text-white sm:max-w-[75%] sm:px-4">
                   {msg.content}
                 </div>
               ) : (
-                <div className="max-w-[88%] rounded-2xl px-4 py-2.5 bg-gray-100 text-gray-900">
+                <div className="max-w-[94%] rounded-2xl bg-gray-100 px-3.5 py-2.5 text-gray-900 sm:max-w-[88%] sm:px-4">
                   {msg.tools && msg.tools.length > 0 && (
                     <div className="mb-1.5 space-y-0.5">
                       {msg.tools.map((t, j) => (
@@ -648,14 +659,14 @@ export default function AiAssistantPage() {
                         <button
                           onClick={() => sendFeedback(msg.id!, 'good')}
                           title="도움이 됨"
-                          className={`rounded px-1.5 py-0.5 text-xs ${msg.feedback === 'good' ? 'bg-green-100' : 'opacity-40 hover:opacity-100 hover:bg-gray-200'}`}
+                          className={`rounded px-2 py-1 text-xs sm:px-1.5 sm:py-0.5 ${msg.feedback === 'good' ? 'bg-green-100' : 'opacity-40 hover:opacity-100 hover:bg-gray-200'}`}
                         >
                           👍
                         </button>
                         <button
                           onClick={() => sendFeedback(msg.id!, 'bad')}
                           title="문제 있음"
-                          className={`rounded px-1.5 py-0.5 text-xs ${msg.feedback === 'bad' ? 'bg-red-100' : 'opacity-40 hover:opacity-100 hover:bg-gray-200'}`}
+                          className={`rounded px-2 py-1 text-xs sm:px-1.5 sm:py-0.5 ${msg.feedback === 'bad' ? 'bg-red-100' : 'opacity-40 hover:opacity-100 hover:bg-gray-200'}`}
                         >
                           👎
                         </button>
@@ -670,7 +681,7 @@ export default function AiAssistantPage() {
                             <button
                               key={r.value}
                               onClick={() => sendFeedback(msg.id!, 'bad', r.value)}
-                              className="rounded border border-gray-300 px-1.5 py-0.5 text-xs text-gray-600 hover:bg-gray-200"
+                              className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-200 sm:px-1.5 sm:py-0.5"
                             >
                               {r.label}
                             </button>
@@ -686,8 +697,8 @@ export default function AiAssistantPage() {
         </div>
 
         {/* 입력 영역 */}
-        <div className="shrink-0 pt-4 pb-[env(safe-area-inset-bottom)]">
-          <div className="flex gap-2 items-end">
+        <div className="shrink-0 pt-3 pb-[env(safe-area-inset-bottom)] sm:pt-4">
+          <div className="flex items-end gap-2">
             <textarea
               ref={inputRef}
               value={input}
@@ -695,7 +706,7 @@ export default function AiAssistantPage() {
               onKeyDown={handleKeyDown}
               placeholder="질문을 입력하세요... (Shift+Enter로 줄바꿈)"
               rows={1}
-              className="flex-1 resize-none rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-400"
+              className="min-w-0 flex-1 resize-none rounded-xl border border-gray-300 px-3.5 py-2.5 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400 sm:px-4"
               disabled={loading}
             />
             <button
@@ -755,7 +766,7 @@ export default function AiAssistantPage() {
                 <button
                   onClick={handleSummarize}
                   disabled={summarizing || messages.length === 0}
-                  className="text-xs font-medium text-blue-600 hover:text-blue-700 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+                  className="rounded px-1 py-1 text-xs font-medium text-blue-600 transition-colors hover:text-blue-700 disabled:cursor-not-allowed disabled:text-gray-400 sm:py-0"
                 >
                   {summarizing ? 'AI 정제 중...' : 'AI 정제'}
                 </button>
@@ -765,7 +776,7 @@ export default function AiAssistantPage() {
                 onChange={(e) => setConclusion(e.target.value)}
                 placeholder="AI 정제 버튼을 클릭하거나 직접 입력하세요..."
                 rows={10}
-                className="w-full resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="min-h-[9rem] w-full resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
           </div>

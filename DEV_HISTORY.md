@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-07-26 | 티켓·AI 어시스턴트 모바일 UI 최적화
+
+- 최근 개발한 두 모듈만 모바일 대응이 빠져 있어(다른 목록·상세는 이미 카드 뷰/드로어 패턴 적용) 기존 패턴에 맞춰 후행 적용. **기능·API·DB 변경 없음, 반응형 클래스와 마크업 구조만 변경**
+- **`/tickets` 목록**: 10컬럼 `table-fixed`가 모바일에서 판독 불가였던 것을 **md 미만 카드 리스트**로 전환(유지보수 목록과 동일 패턴 — 티켓번호·Sev·유형·상태 배지 + 큐/담당/병원/경과/접수일, SEV1·2 좌측 액센트 규율 유지). 큐 탭은 줄바꿈 대신 **가로 스크롤**, 필터 셀렉트는 2열 그리드, 헤더 버튼은 전폭 분할, Status 힌트 문구는 모바일에서 숨김
+- **`/tickets/[code]` 상세**: 전이 버튼·PENDING 인라인 폼·제목 수정 버튼을 모바일 전폭 분할(터치 타겟 py-2), 카드 패딩 `px-6`→`px-4 sm:px-6`, 제목 `text-xl sm:text-2xl`, **서브 티켓 표를 모바일 카드로 전환**(가로 스크롤 제거), 기존 티켓 연결 검색 결과는 제목이 한 줄을 차지하도록 wrap
+- **`/tickets/new`**: 자체 구현 병원 검색 모달(중앙 고정·모바일 여백 0·ESC/스크롤잠금 없음)을 **공통 `ui/Modal`(바텀시트)** 로 교체 — 오버레이 동작이 다른 모듈과 통일됨. 폼 행 패딩·하단 버튼(`flex-col-reverse`로 주 버튼을 엄지 위치에) 모바일 대응
+- **`/tickets/dashboard`**: 헤더 세로 스택, 필터 2열 그리드, KPI 타일 패딩·값 크기 축소, **Sev/유형 2열 차트를 모바일에서 세로 스택**(축 라벨 겹침 해소), 월별·담당별·체류 표에 `min-w` 부여로 컬럼 뭉개짐 방지
+- **`/ai-assistant`**: 헤더 압축(제목 `text-lg`, 설명 모바일 숨김, '상담 정리' 라벨 단축), 병원 검색 입력 전폭, 답변 버블 `max-w` 94%로 확대, 대화 목록 드로어에 **`useOverlayDismiss`**(배경 스크롤 잠금·ESC) 적용. **버그 수정**: 대화 삭제(×) 버튼이 `group-hover:block`이라 hover가 없는 터치 기기에서 아예 누를 수 없었음 → 모바일 상시 노출·lg 이상은 기존 hover 동작 유지. 피드백 👍/👎·사유·AI 정제 버튼 터치 타겟 확대
+- **중복 제거(모바일 수정을 한 곳에서 하기 위한 선행 정리)**: 유형 배지 5분기가 목록·상세에 중복돼 있던 것을 `TicketRefTypeBadge`(색·라벨 단일 소스)로, 연결 업무 배너 5블록(색만 다른 동일 구조 ~110줄)을 `LinkedWorkBanner`로 통합. 색 클래스는 Tailwind JIT 스캔을 위해 전체 문자열로 보관
+- **검증**: `tsc --noEmit` 0오류, `next lint`(변경 8파일) 0경고. 빌드·PM2 재시작·git은 미실행(사용자 요청 시)
+- 영향 파일: app/tickets/{page.tsx, [code]/page.tsx, new/page.tsx, dashboard/page.tsx}, app/tickets/components/{TicketRefTypeBadge.tsx(신규), LinkedWorkBanner.tsx(신규), TicketLogPanel.tsx}, app/ai-assistant/page.tsx, README.md
+
+---
+
 ## 2026-07-26 | 위키 청크 주기 갱신 PROD 배포
 
 - dev2 커밋 `573f8f4` push → PROD git pull(`c1e1d9b`→`573f8f4`, 7파일 +154) → 패키지 변경 없음

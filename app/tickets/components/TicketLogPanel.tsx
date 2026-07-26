@@ -257,20 +257,20 @@ export default function TicketLogPanel({
                   {canModify(log) && editingId !== log.id && (
                     <div className="flex shrink-0 gap-1">
                       <button type="button" onClick={() => { setEditingId(log.id); setEditDraft(log.contentHtml ?? '') }}
-                        className="rounded px-2 py-0.5 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-600">수정</button>
+                        className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-600 sm:py-0.5">수정</button>
                       <button type="button" onClick={() => handleDelete(log.id)}
-                        className="rounded px-2 py-0.5 text-xs text-red-300 hover:bg-red-50 hover:text-red-500">삭제</button>
+                        className="rounded px-2 py-1 text-xs text-red-300 hover:bg-red-50 hover:text-red-500 sm:py-0.5">삭제</button>
                     </div>
                   )}
                 </div>
                 {editingId === log.id ? (
                   <div>
                     <RichTextEditor value={editDraft} onChange={setEditDraft} />
-                    <div className="mt-2 flex justify-end gap-2">
+                    <div className="mt-2 flex gap-2 sm:justify-end">
                       <button type="button" onClick={() => setEditingId(null)} disabled={busy}
-                        className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">취소</button>
+                        className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 sm:flex-none sm:py-1.5">취소</button>
                       <button type="button" onClick={() => handleUpdate(log.id)} disabled={busy || isEmptyHtml(editDraft)}
-                        className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                        className="flex-1 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 sm:flex-none sm:py-1.5">
                         {busy ? '저장 중...' : '수정 저장'}
                       </button>
                     </div>
@@ -294,11 +294,11 @@ export default function TicketLogPanel({
       {composing && (
         <div className="mt-4">
           <RichTextEditor value={draft} onChange={setDraft} placeholder="코멘트를 입력하세요. 작성자와 시각은 자동으로 기록됩니다." />
-          <div className="mt-2 flex justify-end gap-2">
+          <div className="mt-2 flex gap-2 sm:justify-end">
             <button type="button" onClick={() => { setComposing(false); setDraft('') }} disabled={busy}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">취소</button>
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 sm:flex-none sm:py-1.5">취소</button>
             <button type="button" onClick={handleAdd} disabled={busy || isEmptyHtml(draft)}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+              className="flex-1 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 sm:flex-none sm:py-1.5">
               {busy ? '등록 중...' : '코멘트 등록'}
             </button>
           </div>

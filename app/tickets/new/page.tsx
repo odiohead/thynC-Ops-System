@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import type { TicketStatus, TicketSeverity } from '@prisma/client'
 import RichTextEditor from '@/app/components/RichTextEditor'
+import Modal from '@/app/components/ui/Modal'
 import OwnerSelect from '../components/OwnerSelect'
 import TicketStatusBadge from '../components/TicketStatusBadge'
 import { TICKET_SEVERITY_LABELS } from '@/lib/ticket-shared'
@@ -175,14 +176,14 @@ function NewTicketForm() {
 
   const inputClass = 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500'
   const selectClass = inputClass
-  const rowClass = 'grid grid-cols-1 gap-1.5 px-6 py-4 sm:grid-cols-3 sm:gap-4'
+  const rowClass = 'grid grid-cols-1 gap-1.5 px-4 py-4 sm:grid-cols-3 sm:gap-4 sm:px-6'
   const labelClass = 'flex items-center text-sm font-medium text-gray-700'
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">{parentId != null ? '서브 티켓 생성' : '티켓 생성'}</h1>
+      <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        <div className="mb-5 sm:mb-6">
+          <h1 className="text-xl font-bold text-gray-900 sm:text-2xl">{parentId != null ? '서브 티켓 생성' : '티켓 생성'}</h1>
           <p className="mt-1 text-sm text-gray-500">분류(CTI)를 선택하면 기본 큐로 자동 배정됩니다.</p>
         </div>
 
@@ -343,7 +344,8 @@ function NewTicketForm() {
                 <label className={labelClass}>Hospital</label>
                 <div className="sm:col-span-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="min-h-[38px] flex-1 rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                    {/* 모바일: 선택된 병원 표시가 한 줄을 차지하고 버튼이 아래로 내려감 */}
+                    <div className="min-h-[38px] w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 sm:w-auto sm:flex-1">
                       {hospital ? (
                         <span>
                           {hospital.hospitalName || hospital.hiraHospitalName}
@@ -374,7 +376,7 @@ function NewTicketForm() {
               </div>
 
               {/* 설명 */}
-              <div className="px-6 py-4">
+              <div className="px-4 py-4 sm:px-6">
                 <label className="mb-2 block text-sm font-medium text-gray-700">Description</label>
                 <RichTextEditor
                   value={descriptionHtml}
@@ -386,81 +388,70 @@ function NewTicketForm() {
             </div>
           </div>
 
-          <div className="flex justify-end gap-3">
+          {/* 모바일: 주 버튼을 아래(엄지 위치)에 두고 전폭 */}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
             <button
               type="button"
               onClick={() => router.push('/tickets')}
-              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50"
+              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 sm:w-auto sm:py-2"
             >
               취소
             </button>
             <button
               type="submit"
               disabled={busy || !canWrite}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+              className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50 sm:w-auto sm:py-2"
             >
               {busy ? '저장 중...' : '티켓 생성'}
             </button>
           </div>
         </form>
 
-        {/* 병원 검색 모달 */}
-        {hospitalModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-            <div className="w-full max-w-lg rounded-xl bg-white shadow-xl">
-              <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
-                <h2 className="text-base font-semibold text-gray-900">병원 검색</h2>
-                <button
-                  type="button"
-                  onClick={() => { setHospitalModalOpen(false); setHospitalSearch(''); setHospitalResults([]) }}
-                  className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100"
-                >
-                  ✕
-                </button>
-              </div>
-              <div className="p-5">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={hospitalSearch}
-                    onChange={(e) => setHospitalSearch(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), searchHospitals())}
-                    placeholder="병원명 검색..."
-                    className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-                    autoFocus
-                  />
-                  <button
-                    type="button"
-                    onClick={searchHospitals}
-                    disabled={hospitalSearching}
-                    className="rounded-lg bg-gray-800 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-60"
-                  >
-                    검색
-                  </button>
-                </div>
-                <div className="mt-3 max-h-72 divide-y divide-gray-100 overflow-y-auto">
-                  {hospitalResults.length === 0 ? (
-                    <p className="py-8 text-center text-sm text-gray-400">
-                      {hospitalSearching ? '검색 중...' : '검색어를 입력하고 검색 버튼을 눌러주세요.'}
-                    </p>
-                  ) : (
-                    hospitalResults.map((h) => (
-                      <button
-                        key={h.hospitalCode}
-                        type="button"
-                        onClick={() => selectHospital(h)}
-                        className="flex w-full flex-col px-2 py-2.5 text-left hover:bg-blue-50"
-                      >
-                        <span className="text-sm font-medium text-gray-900">{h.hospitalName || h.hiraHospitalName}</span>
-                        <span className="text-xs text-gray-400">{h.hospitalCode}</span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
+        {/* 병원 검색 모달 — 공통 Modal (모바일 바텀시트 + ESC·배경 스크롤 잠금) */}
+        <Modal
+          open={hospitalModalOpen}
+          onClose={() => { setHospitalModalOpen(false); setHospitalSearch(''); setHospitalResults([]) }}
+          title="병원 검색"
+        >
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={hospitalSearch}
+              onChange={(e) => setHospitalSearch(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), searchHospitals())}
+              placeholder="병원명 검색..."
+              className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+              autoFocus
+            />
+            <button
+              type="button"
+              onClick={searchHospitals}
+              disabled={hospitalSearching}
+              className="shrink-0 rounded-lg bg-gray-800 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-60"
+            >
+              검색
+            </button>
           </div>
-        )}
+          <div className="mt-3 divide-y divide-gray-100">
+            {hospitalResults.length === 0 ? (
+              <p className="py-8 text-center text-sm text-gray-400">
+                {hospitalSearching ? '검색 중...' : '검색어를 입력하고 검색 버튼을 눌러주세요.'}
+              </p>
+            ) : (
+              hospitalResults.map((h) => (
+                <button
+                  key={h.hospitalCode}
+                  type="button"
+                  onClick={() => selectHospital(h)}
+                  className="flex w-full flex-col px-2 py-3 text-left hover:bg-blue-50 sm:py-2.5"
+                >
+                  <span className="text-sm font-medium text-gray-900">{h.hospitalName || h.hiraHospitalName}</span>
+                  <span className="text-xs text-gray-400">{h.hospitalCode}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </Modal>
       </div>
     </div>
   )

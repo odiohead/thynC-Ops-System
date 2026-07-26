@@ -7,6 +7,8 @@ import type { TicketStatus, TicketSeverity } from '@prisma/client'
 import { TICKET_TRANSITIONS, TICKET_STATUS_LABELS, TICKET_SEVERITY_LABELS } from '@/lib/ticket-shared'
 import TicketStatusBadge from '../components/TicketStatusBadge'
 import TicketSeverityBadge from '../components/TicketSeverityBadge'
+import TicketRefTypeBadge from '../components/TicketRefTypeBadge'
+import LinkedWorkBanner from '../components/LinkedWorkBanner'
 import TicketLogPanel from '../components/TicketLogPanel'
 import OwnerSelect from '../components/OwnerSelect'
 import RichTextEditor from '@/app/components/RichTextEditor'
@@ -109,6 +111,11 @@ function formatDateTime(iso: string | null): string {
   return new Date(iso).toLocaleString('ko-KR', {
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
   })
+}
+
+/** 연결 업무 배너용 날짜(YYYY-MM-DD) */
+function dateOnly(val: string | null): string {
+  return val ? val.slice(0, 10) : '-'
 }
 
 const labelClass = 'text-xs font-medium uppercase tracking-wider text-gray-400'
@@ -415,7 +422,7 @@ export default function TicketDetailPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
         <style>{descContentStyle}</style>
 
         {/* 헤더 */}
@@ -427,50 +434,27 @@ export default function TicketDetailPage() {
             <span className="font-mono text-sm text-gray-400">{ticket.ticketCode}</span>
             <TicketStatusBadge status={ticket.status} />
             <TicketSeverityBadge severity={ticket.severity} short />
-            {ticket.refType === 'MAINTENANCE' && (
-              <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
-                유지보수
-              </span>
-            )}
-            {ticket.refType === 'ETC' && (
-              <span className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
-                기타업무
-              </span>
-            )}
-            {ticket.refType === 'SITE_VISIT' && (
-              <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
-                답사
-              </span>
-            )}
-            {ticket.refType === 'INSTALL_PLAN' && (
-              <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                설치계획
-              </span>
-            )}
-            {ticket.refType === 'PROJECT' && (
-              <span className="inline-flex items-center rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
-                프로젝트
-              </span>
-            )}
+            <TicketRefTypeBadge refType={ticket.refType} />
             {ticket.reopenCount > 0 && (
               <span className="inline-flex items-center rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-medium text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">
                 Reopened {ticket.reopenCount}
               </span>
             )}
           </div>
-          <h1 className="mt-1 text-2xl font-bold text-gray-900">{ticket.title}</h1>
+          <h1 className="mt-1 text-xl font-bold text-gray-900 sm:text-2xl">{ticket.title}</h1>
         </div>
 
         {/* 상단 액션 바 — 항상 같은 자리 */}
         {canWrite && (
           <div className="mb-4 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
+            {/* 모바일은 버튼이 남는 폭을 나눠 가져 터치 타겟을 키움 */}
             <div className="flex flex-wrap items-center gap-2">
               {canAssignToMe && (
                 <button
                   type="button"
                   onClick={() => me && changeOwner(me.userId)}
                   disabled={busy}
-                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                  className="flex-1 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50 sm:flex-none sm:py-1.5"
                 >
                   나에게 배정
                 </button>
@@ -484,7 +468,7 @@ export default function TicketDetailPage() {
                     type="button"
                     onClick={() => doTransition(to)}
                     disabled={busy}
-                    className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+                    className="flex-1 whitespace-nowrap rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 sm:flex-none sm:py-1.5"
                   >
                     → {TICKET_STATUS_LABELS[to]}
                   </button>
@@ -517,7 +501,7 @@ export default function TicketDetailPage() {
                       type="button"
                       onClick={submitPending}
                       disabled={busy || !pendingReasonId}
-                      className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                      className="flex-1 rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50 sm:flex-none sm:py-1.5"
                     >
                       대기 전환
                     </button>
@@ -525,7 +509,7 @@ export default function TicketDetailPage() {
                       type="button"
                       onClick={() => { setPendingOpen(false); setPendingReasonId(''); setPendingNote('') }}
                       disabled={busy}
-                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
+                      className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 sm:flex-none sm:py-1.5"
                     >
                       취소
                     </button>
@@ -536,118 +520,86 @@ export default function TicketDetailPage() {
           </div>
         )}
 
-        {/* 연결된 업무 — 유지보수 편입 티켓 */}
+        {/* 연결된 업무(도메인 레코드) 배너 — 유형별 색·부가정보만 다르고 형태는 공통 */}
         {ticket.refType === 'MAINTENANCE' && ticket.maintenance && (
-          <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
-            <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
-              유지보수
-            </span>
-            <span className="font-mono text-xs">{ticket.maintenance.maintenanceCode ?? `MNT-${String(ticket.maintenance.id).padStart(4, '0')}`}</span>
-            <span className="text-xs text-amber-800 dark:text-amber-300">
-              신고자 {ticket.maintenance.reporterName || '-'}
-              {' · '}{ticket.maintenance.isRemote ? '원격' : '방문'}
-              {' · '}접수일 {ticket.maintenance.reportedAt ? ticket.maintenance.reportedAt.slice(0, 10) : '-'}
-            </span>
-            <Link
-              href={`/maintenances/${ticket.maintenance.id}`}
-              className="ml-auto shrink-0 rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-700 dark:bg-transparent dark:text-amber-300 dark:hover:bg-amber-900/40"
-            >
-              유지보수 상세로 이동 →
-            </Link>
-          </div>
+          <LinkedWorkBanner
+            refType="MAINTENANCE"
+            code={ticket.maintenance.maintenanceCode ?? `MNT-${String(ticket.maintenance.id).padStart(4, '0')}`}
+            meta={[
+              `신고자 ${ticket.maintenance.reporterName || '-'}`,
+              ticket.maintenance.isRemote ? '원격' : '방문',
+              `접수일 ${dateOnly(ticket.maintenance.reportedAt)}`,
+            ].join(' · ')}
+            href={`/maintenances/${ticket.maintenance.id}`}
+            linkLabel="유지보수 상세로 이동 →"
+          />
         )}
 
-        {/* Linked Work — 기타업무 편입 티켓 */}
         {ticket.refType === 'ETC' && ticket.etcTask && (
-          <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900 dark:border-violet-800 dark:bg-violet-900/20 dark:text-violet-200">
-            <span className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
-              기타업무
-            </span>
-            <span className="font-mono text-xs">{ticket.etcTask.etcTaskCode ?? `ETC-${String(ticket.etcTask.id).padStart(4, '0')}`}</span>
-            <span className="text-xs text-violet-800 dark:text-violet-300">
-              병원 {ticket.etcTask.hospitals.length === 0
-                ? '-'
-                : `${ticket.etcTask.hospitals[0].hospital.hospitalName}${ticket.etcTask.hospitals.length > 1 ? ` 외 ${ticket.etcTask.hospitals.length - 1}곳` : ''}`}
-              {' · '}접수일 {ticket.etcTask.reportedAt ? ticket.etcTask.reportedAt.slice(0, 10) : '-'}
-            </span>
-            <Link
-              href={`/etc-tasks/${ticket.etcTask.id}`}
-              className="ml-auto shrink-0 rounded-md border border-violet-300 bg-white px-2.5 py-1 text-xs font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:border-violet-700 dark:bg-transparent dark:text-violet-300 dark:hover:bg-violet-900/40"
-            >
-              기타업무 상세로 이동 →
-            </Link>
-          </div>
+          <LinkedWorkBanner
+            refType="ETC"
+            code={ticket.etcTask.etcTaskCode ?? `ETC-${String(ticket.etcTask.id).padStart(4, '0')}`}
+            meta={[
+              `병원 ${
+                ticket.etcTask.hospitals.length === 0
+                  ? '-'
+                  : `${ticket.etcTask.hospitals[0].hospital.hospitalName}${ticket.etcTask.hospitals.length > 1 ? ` 외 ${ticket.etcTask.hospitals.length - 1}곳` : ''}`
+              }`,
+              `접수일 ${dateOnly(ticket.etcTask.reportedAt)}`,
+            ].join(' · ')}
+            href={`/etc-tasks/${ticket.etcTask.id}`}
+            linkLabel="기타업무 상세로 이동 →"
+          />
         )}
 
-        {/* Linked Work — 답사 편입 티켓 */}
         {ticket.refType === 'SITE_VISIT' && ticket.siteVisit && (
-          <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 dark:border-sky-800 dark:bg-sky-900/20 dark:text-sky-200">
-            <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
-              답사
-            </span>
-            <span className="font-mono text-xs">{ticket.siteVisit.siteVisitCode ?? `SV-${String(ticket.siteVisit.id).padStart(5, '0')}`}</span>
-            <span className="text-xs text-sky-800 dark:text-sky-300">
-              요청일 {ticket.siteVisit.requestDate ? ticket.siteVisit.requestDate.slice(0, 10) : '-'}
-              {' · '}방문일 {ticket.siteVisit.visitDate ? ticket.siteVisit.visitDate.slice(0, 10) : '-'}
-              {' · '}회신일 {ticket.siteVisit.replyDate ? ticket.siteVisit.replyDate.slice(0, 10) : '-'}
-              {' · '}대웅담당자 {ticket.siteVisit.daewoongUser?.name ?? '-'}
-            </span>
-            <Link
-              href={`/site-visits/${ticket.siteVisit.id}`}
-              className="ml-auto shrink-0 rounded-md border border-sky-300 bg-white px-2.5 py-1 text-xs font-medium text-sky-700 transition-colors hover:bg-sky-100 dark:border-sky-700 dark:bg-transparent dark:text-sky-300 dark:hover:bg-sky-900/40"
-            >
-              답사 상세로 이동 →
-            </Link>
-          </div>
+          <LinkedWorkBanner
+            refType="SITE_VISIT"
+            code={ticket.siteVisit.siteVisitCode ?? `SV-${String(ticket.siteVisit.id).padStart(5, '0')}`}
+            meta={[
+              `요청일 ${dateOnly(ticket.siteVisit.requestDate)}`,
+              `방문일 ${dateOnly(ticket.siteVisit.visitDate)}`,
+              `회신일 ${dateOnly(ticket.siteVisit.replyDate)}`,
+              `대웅담당자 ${ticket.siteVisit.daewoongUser?.name ?? '-'}`,
+            ].join(' · ')}
+            href={`/site-visits/${ticket.siteVisit.id}`}
+            linkLabel="답사 상세로 이동 →"
+          />
         )}
 
-        {/* Linked Work — 설치계획 편입 티켓 */}
         {ticket.refType === 'INSTALL_PLAN' && ticket.installPlan && (
-          <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
-            <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-              설치계획
-            </span>
-            <span className="font-mono text-xs">{ticket.installPlan.planCode ?? `#${ticket.installPlan.id}`}</span>
-            <span className="text-xs text-emerald-800 dark:text-emerald-300">
-              요청일 {ticket.installPlan.requestDate ? ticket.installPlan.requestDate.slice(0, 10) : '-'}
-              {' · '}작성 {ticket.installPlan.writeStatus || '-'}
-              {' · '}회신 {ticket.installPlan.replyStatus || '-'}
-              {' · '}회신일 {ticket.installPlan.replyDate ? ticket.installPlan.replyDate.slice(0, 10) : '-'}
-            </span>
-            <Link
-              href={`/install-plans/${ticket.installPlan.id}`}
-              className="ml-auto shrink-0 rounded-md border border-emerald-300 bg-white px-2.5 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-700 dark:bg-transparent dark:text-emerald-300 dark:hover:bg-emerald-900/40"
-            >
-              설치계획 상세로 이동 →
-            </Link>
-          </div>
+          <LinkedWorkBanner
+            refType="INSTALL_PLAN"
+            code={ticket.installPlan.planCode ?? `#${ticket.installPlan.id}`}
+            meta={[
+              `요청일 ${dateOnly(ticket.installPlan.requestDate)}`,
+              `작성 ${ticket.installPlan.writeStatus || '-'}`,
+              `회신 ${ticket.installPlan.replyStatus || '-'}`,
+              `회신일 ${dateOnly(ticket.installPlan.replyDate)}`,
+            ].join(' · ')}
+            href={`/install-plans/${ticket.installPlan.id}`}
+            linkLabel="설치계획 상세로 이동 →"
+          />
         )}
 
-        {/* Linked Work — 프로젝트 편입 티켓 */}
         {ticket.refType === 'PROJECT' && ticket.project && (
-          <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-200">
-            <span className="inline-flex items-center rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
-              프로젝트
-            </span>
-            <span className="font-mono text-xs">{ticket.project.projectCode}</span>
-            <span className="text-xs text-rose-800 dark:text-rose-300">
-              {ticket.project.projectName}
-              {' · '}공사상태 {ticket.project.buildStatus?.label ?? '-'}
-              {' · '}구축시작 {ticket.project.startDate ? ticket.project.startDate.slice(0, 10) : '-'}
-              {' · '}완료예정 {ticket.project.endDateExpected ? ticket.project.endDateExpected.slice(0, 10) : '-'}
-            </span>
-            <Link
-              href={`/projects/${ticket.project.projectCode}`}
-              className="ml-auto shrink-0 rounded-md border border-rose-300 bg-white px-2.5 py-1 text-xs font-medium text-rose-700 transition-colors hover:bg-rose-100 dark:border-rose-700 dark:bg-transparent dark:text-rose-300 dark:hover:bg-rose-900/40"
-            >
-              프로젝트 상세로 이동 →
-            </Link>
-          </div>
+          <LinkedWorkBanner
+            refType="PROJECT"
+            code={ticket.project.projectCode}
+            meta={[
+              ticket.project.projectName,
+              `공사상태 ${ticket.project.buildStatus?.label ?? '-'}`,
+              `구축시작 ${dateOnly(ticket.project.startDate)}`,
+              `완료예정 ${dateOnly(ticket.project.endDateExpected)}`,
+            ].join(' · ')}
+            href={`/projects/${ticket.project.projectCode}`}
+            linkLabel="프로젝트 상세로 이동 →"
+          />
         )}
 
         {/* 기본정보 패널 — 상단 가로 그리드 */}
         <div className="mb-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3.5 sm:px-6 sm:py-4">
             <h2 className="text-sm font-semibold text-gray-700">Details</h2>
             {isAdmin && (
               <button
@@ -660,7 +612,7 @@ export default function TicketDetailPage() {
               </button>
             )}
           </div>
-          <div className="grid grid-cols-1 gap-x-6 gap-y-5 px-6 py-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-x-6 gap-y-4 px-4 py-4 sm:grid-cols-2 sm:gap-y-5 sm:px-6 sm:py-5 md:grid-cols-3 lg:grid-cols-4">
 
             <div>
               <p className={labelClass}>Assignee</p>
@@ -825,7 +777,7 @@ export default function TicketDetailPage() {
 
         {/* 설명 */}
         <div className="mb-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3.5 sm:px-6 sm:py-4">
             <h2 className="text-sm font-semibold text-gray-700">Description</h2>
             {canWrite && !editOpen && ticket.status !== 'CLOSED' && (
               <button
@@ -838,7 +790,7 @@ export default function TicketDetailPage() {
             )}
           </div>
           {editOpen ? (
-            <div className="space-y-3 px-6 py-5">
+            <div className="space-y-3 px-4 py-4 sm:px-6 sm:py-5">
               <div>
                 <label className={labelClass}>Title</label>
                 <input
@@ -854,34 +806,34 @@ export default function TicketDetailPage() {
                   <RichTextEditor value={editDesc} onChange={setEditDesc} />
                 </div>
               </div>
-              <div className="flex justify-end gap-2">
+              <div className="flex gap-2 sm:justify-end">
                 <button
                   onClick={() => setEditOpen(false)}
                   disabled={busy}
-                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                  className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50 sm:flex-none sm:py-1.5"
                 >
                   취소
                 </button>
                 <button
                   onClick={saveEdit}
                   disabled={busy}
-                  className="rounded-md bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+                  className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50 sm:flex-none sm:py-1.5"
                 >
                   저장
                 </button>
               </div>
             </div>
           ) : ticket.descriptionHtml ? (
-            <div className="tdesc-content px-6 py-5 text-sm text-gray-800" dangerouslySetInnerHTML={{ __html: ticket.descriptionHtml }} />
+            <div className="tdesc-content px-4 py-4 text-sm text-gray-800 sm:px-6 sm:py-5" dangerouslySetInnerHTML={{ __html: ticket.descriptionHtml }} />
           ) : (
-            <div className="px-6 py-5 text-sm text-gray-400">설명이 없습니다.</div>
+            <div className="px-4 py-4 text-sm text-gray-400 sm:px-6 sm:py-5">설명이 없습니다.</div>
           )}
         </div>
 
         {/* 서브 티켓 — 서브 티켓 자신에게는 표시하지 않음 (2레벨 고정) */}
         {!ticket.parent && (
           <div className="mb-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2 px-6 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3.5 sm:px-6 sm:py-4">
               <h2 className="text-sm font-semibold text-gray-700">
                 Sub-tickets
                 {ticket.children.length > 0 ? (
@@ -891,12 +843,12 @@ export default function TicketDetailPage() {
                 )}
               </h2>
               {canWrite && (
-                <div className="flex gap-2">
+                <div className="flex w-full gap-2 sm:w-auto">
                   <button
                     type="button"
                     onClick={() => router.push(`/tickets/new?parentId=${ticket.id}`)}
                     disabled={busy}
-                    className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                    className="flex-1 whitespace-nowrap rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 sm:flex-none sm:py-1.5"
                   >
                     + 서브 티켓 생성
                   </button>
@@ -904,7 +856,7 @@ export default function TicketDetailPage() {
                     type="button"
                     onClick={() => { setLinkOpen((v) => !v); setLinkQ(''); setLinkResults([]) }}
                     disabled={busy}
-                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                    className="flex-1 whitespace-nowrap rounded-lg border border-gray-300 px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 sm:flex-none sm:py-1.5"
                   >
                     기존 티켓 연결
                   </button>
@@ -913,7 +865,7 @@ export default function TicketDetailPage() {
             </div>
 
             {linkOpen && (
-              <div className="border-t border-gray-100 bg-gray-50/50 px-6 py-4">
+              <div className="border-t border-gray-100 bg-gray-50/50 px-4 py-4 sm:px-6">
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -945,10 +897,11 @@ export default function TicketDetailPage() {
                         type="button"
                         onClick={() => linkChild(t.id)}
                         disabled={busy}
-                        className="flex w-full items-center gap-2 px-2 py-2 text-left hover:bg-blue-50 disabled:opacity-50"
+                        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-2 py-2.5 text-left hover:bg-blue-50 disabled:opacity-50 sm:flex-nowrap"
                       >
                         <span className="font-mono text-xs text-blue-600">{t.ticketCode}</span>
-                        <span className="min-w-0 flex-1 truncate text-sm text-gray-900">{t.title}</span>
+                        {/* 모바일: 제목이 한 줄을 차지 / sm 이상: 기존 한 줄 배치 */}
+                        <span className="w-full min-w-0 truncate text-sm text-gray-900 sm:w-auto sm:flex-1">{t.title}</span>
                         <TicketStatusBadge status={t.status} />
                         <TicketSeverityBadge severity={t.severity} short />
                       </button>
@@ -958,8 +911,29 @@ export default function TicketDetailPage() {
               </div>
             )}
 
+            {/* 모바일 카드 — 서브 티켓 표는 좁은 화면에서 가로 스크롤이 되어 카드로 전환 */}
             {ticket.children.length > 0 && (
-              <div className="overflow-x-auto border-t border-gray-100">
+              <ul className="divide-y divide-gray-100 border-t border-gray-100 md:hidden">
+                {ticket.children.map((c) => (
+                  <li key={c.id} className="px-4 py-3">
+                    <Link href={`/tickets/${c.ticketCode}`} className="block">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-mono text-xs text-blue-600">{c.ticketCode}</span>
+                        <TicketSeverityBadge severity={c.severity} short />
+                        <span className="ml-auto shrink-0"><TicketStatusBadge status={c.status} /></span>
+                      </div>
+                      <p className="mt-1 text-sm text-gray-900">{c.title}</p>
+                      <p className="mt-0.5 text-xs text-gray-400">
+                        담당 {c.ownerId ? userNames[c.ownerId] ?? '-' : 'Unassigned'}
+                      </p>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {ticket.children.length > 0 && (
+              <div className="hidden overflow-x-auto border-t border-gray-100 md:block">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
@@ -994,7 +968,7 @@ export default function TicketDetailPage() {
         )}
 
         {/* 타임라인 */}
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
           <TicketLogPanel
             ticketId={ticket.id}
             refreshToken={logsRefresh}

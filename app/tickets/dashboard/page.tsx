@@ -141,28 +141,28 @@ export default function TicketDashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
 
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-5 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">티켓 대시보드</h1>
+            <h1 className="text-xl font-bold text-gray-900 sm:text-2xl">티켓 대시보드</h1>
             <p className="mt-1 text-sm text-gray-500">프로세스 지표 — 해결 소요·SLA·처리량·체류 (P12)</p>
           </div>
           <Link
             href="/tickets"
-            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-center text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
           >
             ← 티켓 목록
           </Link>
         </div>
 
         {/* KPI 타일 */}
-        <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="mb-6 grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-6">
           {kpiTiles.map((t) => {
             const inner = (
-              <div className={`rounded-xl border bg-white p-4 ${t.danger ? 'border-red-300' : 'border-gray-200'} ${t.href ? 'transition-shadow hover:shadow-md' : ''}`}>
+              <div className={`h-full rounded-xl border bg-white p-3 sm:p-4 ${t.danger ? 'border-red-300' : 'border-gray-200'} ${t.href ? 'transition-shadow hover:shadow-md' : ''}`}>
                 <p className="text-xs text-gray-500">{t.label}</p>
-                <p className={`mt-1 text-2xl font-bold ${t.danger ? 'text-red-600' : 'text-gray-900'}`}>{t.value}</p>
+                <p className={`mt-1 text-xl font-bold sm:text-2xl ${t.danger ? 'text-red-600' : 'text-gray-900'}`}>{t.value}</p>
                 {t.sub && <p className="mt-0.5 text-xs text-gray-400">{t.sub}</p>}
               </div>
             )
@@ -170,53 +170,55 @@ export default function TicketDashboardPage() {
           })}
         </div>
 
-        {/* 필터 바 */}
-        <div className="mb-6 flex flex-wrap items-center gap-2">
-          <select
-            value={months}
-            onChange={(e) => setMonths(parseInt(e.target.value))}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700"
-          >
-            {MONTH_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          {queues.length > 0 && (
+        {/* 필터 바 — 모바일은 셀렉트 2열 그리드 */}
+        <div className="mb-6 space-y-2 sm:space-y-0">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
             <select
-              value={queueId}
-              onChange={(e) => setQueueId(e.target.value === '' ? '' : parseInt(e.target.value))}
-              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700"
+              value={months}
+              onChange={(e) => setMonths(parseInt(e.target.value))}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 sm:py-1.5"
             >
-              <option value="">전체 큐</option>
-              {queues.map((q) => (
-                <option key={q.id} value={q.id}>{q.name}</option>
+              {MONTH_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
-          )}
-          <select
-            value={refType}
-            onChange={(e) => setRefType(e.target.value)}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700"
-          >
-            <option value="">전체 유형</option>
-            {Object.entries(REF_TYPE_LABELS).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
-          {loading && <span className="text-xs text-gray-400">갱신 중…</span>}
-          <button
-            type="button"
-            onClick={() => setShowTable((v) => !v)}
-            className="ml-auto rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
-          >
-            {showTable ? '표 닫기' : '월별 표로 보기'}
-          </button>
+            {queues.length > 0 && (
+              <select
+                value={queueId}
+                onChange={(e) => setQueueId(e.target.value === '' ? '' : parseInt(e.target.value))}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 sm:py-1.5"
+              >
+                <option value="">전체 큐</option>
+                {queues.map((q) => (
+                  <option key={q.id} value={q.id}>{q.name}</option>
+                ))}
+              </select>
+            )}
+            <select
+              value={refType}
+              onChange={(e) => setRefType(e.target.value)}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 sm:py-1.5"
+            >
+              <option value="">전체 유형</option>
+              {Object.entries(REF_TYPE_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setShowTable((v) => !v)}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 sm:ml-auto sm:py-1.5"
+            >
+              {showTable ? '표 닫기' : '월별 표로 보기'}
+            </button>
+          </div>
+          {loading && <span className="block text-xs text-gray-400 sm:mt-1">갱신 중…</span>}
         </div>
 
         {/* 월별 표 (차트 색 대비 보완 — 표 뷰) */}
         {showTable && (
           <div className="mb-6 overflow-x-auto rounded-xl border border-gray-200 bg-white">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[34rem] text-sm">
               <thead>
                 <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
                   <th className="px-3 py-2">월</th>
@@ -282,7 +284,8 @@ export default function TicketDashboardPage() {
           </ChartCard>
 
           <ChartCard title="열린 티켓 분포 — Sev · 유형">
-            <div className="grid grid-cols-2 gap-2">
+            {/* 모바일은 두 차트를 위아래로 — 2열로는 축 라벨이 겹친다 */}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={sevData} margin={{ top: 8, right: 8, left: -24, bottom: 0 }}>
                   <CartesianGrid stroke={chart.grid} vertical={false} />
@@ -338,7 +341,7 @@ export default function TicketDashboardPage() {
                 <h2 className="mb-1 text-sm font-semibold text-gray-900">담당별 처리량</h2>
                 <p className="mb-3 text-xs text-gray-400">기간 내 종결 기준 · ADMIN 이상에게만 표시</p>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="w-full min-w-[26rem] text-sm">
                     <thead>
                       <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
                         <th className="py-1.5 pr-2">담당자</th>
@@ -370,7 +373,7 @@ export default function TicketDashboardPage() {
               현재 상태에 머문 일수 기준. 상태·큐 체류 통계는 P11 전환 이후 이벤트가 축적되면 고도화 예정
             </p>
             <div className="overflow-x-auto">
-              <table className="w-full table-fixed text-sm">
+              <table className="w-full min-w-[30rem] table-fixed text-sm">
                 <thead>
                   <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
                     <th className="w-32 py-1.5 pr-2">Ticket #</th>

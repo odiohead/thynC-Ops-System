@@ -6,6 +6,7 @@ import type { TicketStatus, TicketSeverity } from '@prisma/client'
 import { TICKET_STATUS_LABELS, TICKET_SEVERITY_LABELS } from '@/lib/ticket-shared'
 import TicketStatusBadge from './components/TicketStatusBadge'
 import TicketSeverityBadge from './components/TicketSeverityBadge'
+import TicketRefTypeBadge from './components/TicketRefTypeBadge'
 
 interface Queue {
   id: number
@@ -81,6 +82,13 @@ function timeAgo(iso: string | null): string {
 /** Sev 시각 규율 — SEV1/2 행 좌측 액센트 (배지 색은 ticket-shared 유지) */
 function rowAccent(sev: TicketSeverity): string {
   if (sev === 'SEV1') return 'border-l-4 border-l-red-500 bg-red-50/60 hover:bg-red-100/50 dark:bg-red-900/10'
+  if (sev === 'SEV2') return 'border-l-4 border-l-orange-400'
+  return ''
+}
+
+/** 모바일 카드용 Sev 액센트 — 테이블 행과 같은 규율(SEV1 적색·SEV2 주황 좌측 보더) */
+function cardAccent(sev: TicketSeverity): string {
+  if (sev === 'SEV1') return 'border-l-4 border-l-red-500'
   if (sev === 'SEV2') return 'border-l-4 border-l-orange-400'
   return ''
 }
@@ -210,11 +218,11 @@ export default function TicketsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
 
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-5 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">티켓</h1>
+            <h1 className="text-xl font-bold text-gray-900 sm:text-2xl">티켓</h1>
             <p className="mt-1 text-sm text-gray-500">
               총 {total.toLocaleString()}건{statuses.length === 0 ? ' (Open Tickets)' : ''}
             </p>
@@ -223,7 +231,7 @@ export default function TicketsPage() {
             <button
               type="button"
               onClick={() => router.push('/tickets/dashboard')}
-              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+              className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 sm:flex-none"
             >
               대시보드
             </button>
@@ -231,7 +239,7 @@ export default function TicketsPage() {
               <button
                 type="button"
                 onClick={() => router.push('/tickets/new')}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 sm:flex-none"
               >
                 + 티켓 생성
               </button>
@@ -239,8 +247,8 @@ export default function TicketsPage() {
           </div>
         </div>
 
-        {/* 탭 — My Tickets(기본) / 전체 / 큐별 */}
-        <div className="mb-4 flex flex-wrap gap-1 border-b border-gray-200">
+        {/* 탭 — My Tickets(기본) / 전체 / 큐별. 모바일은 가로 스크롤(줄바꿈 대신) */}
+        <div className="-mx-4 mb-4 flex gap-1 overflow-x-auto border-b border-gray-200 px-4 sm:mx-0 sm:flex-wrap sm:overflow-x-visible sm:px-0">
           {queueTabs.map((t) => (
             <button
               key={t.id}
@@ -250,7 +258,7 @@ export default function TicketsPage() {
                 if (t.id === 'mine') setUnassigned(false) // My Tickets와 Unassigned는 모순 조합
                 setPage(1)
               }}
-              className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+              className={`-mb-px inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors sm:px-4 ${
                 tab === t.id
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
@@ -318,7 +326,7 @@ export default function TicketsPage() {
               </button>
             ))}
             {statuses.length === 0 && (
-              <span className="text-xs text-gray-400">(선택 없음 = 해결·종결 제외 전체)</span>
+              <span className="hidden text-xs text-gray-400 sm:inline">(선택 없음 = 해결·종결 제외 전체)</span>
             )}
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
@@ -327,56 +335,101 @@ export default function TicketsPage() {
               placeholder="티켓번호·제목 검색..."
               value={qInput}
               onChange={(e) => setQInput(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:w-52"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:w-52 sm:py-1.5"
             />
-            <select
-              value={severity}
-              onChange={(e) => { setSeverity(e.target.value); setPage(1) }}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="">Severity 전체</option>
-              {ALL_SEVERITIES.map((s) => (
-                <option key={s} value={s}>{TICKET_SEVERITY_LABELS[s]}</option>
-              ))}
-            </select>
-            <select
-              value={refType}
-              onChange={(e) => { setRefType(e.target.value); setPage(1) }}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="">Type 전체</option>
-              <option value="none">순수 티켓</option>
-              <option value="MAINTENANCE">유지보수</option>
-              <option value="ETC">기타업무</option>
-              <option value="SITE_VISIT">답사</option>
-              <option value="INSTALL_PLAN">설치계획</option>
-              <option value="PROJECT">프로젝트</option>
-            </select>
-            <button
-              type="button"
-              onClick={() => { setUnassigned((v) => !v); setPage(1) }}
-              disabled={tab === 'mine'}
-              title={tab === 'mine' ? 'My Tickets 탭에서는 사용할 수 없습니다.' : undefined}
-              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                unassigned ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50'
-              }`}
-            >
-              Unassigned
-            </button>
-            {hasFilter && (
+            {/* 모바일: 셀렉트 2열 그리드 (유지보수·답사 목록과 동일 패턴) */}
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
+              <select
+                value={severity}
+                onChange={(e) => { setSeverity(e.target.value); setPage(1) }}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:py-1.5"
+              >
+                <option value="">Severity 전체</option>
+                {ALL_SEVERITIES.map((s) => (
+                  <option key={s} value={s}>{TICKET_SEVERITY_LABELS[s]}</option>
+                ))}
+              </select>
+              <select
+                value={refType}
+                onChange={(e) => { setRefType(e.target.value); setPage(1) }}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:py-1.5"
+              >
+                <option value="">Type 전체</option>
+                <option value="none">순수 티켓</option>
+                <option value="MAINTENANCE">유지보수</option>
+                <option value="ETC">기타업무</option>
+                <option value="SITE_VISIT">답사</option>
+                <option value="INSTALL_PLAN">설치계획</option>
+                <option value="PROJECT">프로젝트</option>
+              </select>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => { setStatuses([]); setSeverity(''); setRefType(''); setUnassigned(false); setQInput(''); setQ(''); setPage(1) }}
-                className="rounded-md border border-gray-300 px-2.5 py-1 text-xs text-gray-500 transition-colors hover:bg-gray-100"
+                onClick={() => { setUnassigned((v) => !v); setPage(1) }}
+                disabled={tab === 'mine'}
+                title={tab === 'mine' ? 'My Tickets 탭에서는 사용할 수 없습니다.' : undefined}
+                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:py-1 ${
+                  unassigned ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50'
+                }`}
               >
-                필터 초기화
+                Unassigned
               </button>
-            )}
+              {hasFilter && (
+                <button
+                  type="button"
+                  onClick={() => { setStatuses([]); setSeverity(''); setRefType(''); setUnassigned(false); setQInput(''); setQ(''); setPage(1) }}
+                  className="rounded-md border border-gray-300 px-2.5 py-1.5 text-xs text-gray-500 transition-colors hover:bg-gray-100 sm:py-1"
+                >
+                  필터 초기화
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
+        {/* 모바일 카드 리스트 — 10컬럼 표는 좁은 화면에서 읽을 수 없어 카드로 전환 */}
+        <div className="space-y-2.5 md:hidden">
+          {loading ? (
+            <div className="rounded-xl border border-border bg-card py-12 text-center text-sm text-muted-foreground">불러오는 중...</div>
+          ) : tickets.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card py-12 text-center text-sm text-muted-foreground">
+              {hasFilter ? '조건에 맞는 티켓이 없습니다.' : '등록된 티켓이 없습니다.'}
+            </div>
+          ) : (
+            tickets.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => router.push(`/tickets/${t.ticketCode}`)}
+                className={`block w-full rounded-xl border border-border bg-card p-4 text-left shadow-xs transition active:scale-[0.99] ${cardAccent(t.severity)}`}
+              >
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-mono text-xs text-blue-600">{t.ticketCode}</span>
+                  <TicketSeverityBadge severity={t.severity} short />
+                  <TicketRefTypeBadge refType={t.refType} />
+                  <span className="ml-auto shrink-0">
+                    <TicketStatusBadge status={t.status} />
+                  </span>
+                </div>
+                <p className="mt-1.5 text-sm font-semibold text-foreground">{t.title}</p>
+                {t.status === 'PENDING' && t.pendingReason && (
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">대기 사유 — {t.pendingReason.name}</p>
+                )}
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span>큐 <span className="text-foreground">{t.queue?.name ?? '-'}</span></span>
+                  <span>담당 <span className="text-foreground">{t.owner?.name ?? 'Unassigned'}</span></span>
+                  {t.hospital && <span>병원 <span className="text-foreground">{t.hospital.hospitalName}</span></span>}
+                  <span>경과 <span className="text-foreground">{timeAgo(t.createdAt)}</span></span>
+                  <span>접수 <span className="text-foreground">{formatDate(t.createdAt)}</span></span>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+
         {/* 테이블 — table-fixed로 화면 폭 내 고정(가로스크롤 없음), 좁은 화면은 Hospital/Last Change 숨김 */}
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div className="hidden overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm md:block">
           <table className="w-full table-fixed divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -415,29 +468,7 @@ export default function TicketsPage() {
                     <td className="truncate px-2.5 py-2.5 font-mono text-xs text-blue-600" title={t.ticketCode}>{t.ticketCode}</td>
                     <td className="px-2.5 py-2.5"><TicketSeverityBadge severity={t.severity} short /></td>
                     <td className="px-2.5 py-2.5">
-                      {t.refType === 'MAINTENANCE' ? (
-                        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
-                          유지보수
-                        </span>
-                      ) : t.refType === 'ETC' ? (
-                        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
-                          기타업무
-                        </span>
-                      ) : t.refType === 'SITE_VISIT' ? (
-                        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-sky-100 px-1.5 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
-                          답사
-                        </span>
-                      ) : t.refType === 'INSTALL_PLAN' ? (
-                        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                          설치계획
-                        </span>
-                      ) : t.refType === 'PROJECT' ? (
-                        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-rose-100 px-1.5 py-0.5 text-xs font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
-                          프로젝트
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-300">-</span>
-                      )}
+                      <TicketRefTypeBadge refType={t.refType} fallback={<span className="text-xs text-gray-300">-</span>} />
                     </td>
                     <td className="truncate px-2.5 py-2.5 text-sm font-medium text-gray-900" title={t.title}>{t.title}</td>
                     <td className="px-2.5 py-2.5">
@@ -465,7 +496,7 @@ export default function TicketsPage() {
               type="button"
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1 || loading}
-              className="rounded-md border border-gray-300 px-3 py-1 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40 sm:px-3 sm:py-1"
             >
               이전
             </button>
@@ -474,7 +505,7 @@ export default function TicketsPage() {
               type="button"
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages || loading}
-              className="rounded-md border border-gray-300 px-3 py-1 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40 sm:px-3 sm:py-1"
             >
               다음
             </button>
