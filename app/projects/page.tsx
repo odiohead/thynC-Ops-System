@@ -5,6 +5,7 @@ import { verifyToken } from '@/lib/auth'
 import { CalendarDays } from 'lucide-react'
 import ProjectFilters from './_components/ProjectFilters'
 import StatusBadge from '@/app/components/StatusBadge'
+import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -108,6 +109,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
               <CalendarDays size={15} />
               캘린더 보기
             </a>
+            <TicketRuleSettingButton refType="PROJECT" />
             {isAdmin && (
               <Link
                 href="/projects/new"

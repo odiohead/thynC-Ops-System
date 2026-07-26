@@ -110,6 +110,7 @@ export async function POST(request: NextRequest) {
       writeStatus: installPlan.writeStatus,
       replyStatus: installPlan.replyStatus,
       assigneeUserIds: Array.isArray(assigneeIds) ? assigneeIds : [],
+      note: installPlan.note,
       createdAt: installPlan.createdAt,
       replyDate: installPlan.replyDate,
     }, authUser.userId, 'domain')

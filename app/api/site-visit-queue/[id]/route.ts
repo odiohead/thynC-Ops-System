@@ -118,6 +118,7 @@ export async function PUT(
       hospitalName: siteVisit.hospital.hospitalName ?? siteVisit.hospital.hiraHospitalName ?? null,
       statusName: null, // 큐 승격 직후는 접수
       assigneeUserIds: siteVisit.assignees.map((a) => a.user.id),
+      notes: siteVisit.notes,
       createdAt: siteVisit.createdAt,
       replyDate: null,
     }, authUser?.userId ?? null, 'domain')

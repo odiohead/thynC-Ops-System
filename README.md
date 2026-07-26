@@ -96,6 +96,7 @@ app/
 │   │   ├── ticket-queues/            # Assignment Group 마스터 CRUD (티켓 있으면 삭제 400)
 │   │   ├── ticket-cti/               # 티켓 분류(CTI) 3단 트리 CRUD + 기본 그룹 지정
 │   │   ├── ticket-pending-reasons/   # 티켓 대기(PENDING) 사유 마스터 CRUD
+│   │   ├── ticket-cti-rules/         # 티켓 자동생성 규칙 GET/PUT (업무별 CTI·Group·설명 자동입력, ADMIN)
 │   │   ├── sla-policies/             # SLA 정책·타깃 CRUD + preview(영향 미리보기) — 1.1 P2, ADMIN
 │   │   ├── notify-routes/            # 발송 채널·라우팅 규칙 CRUD + 연결 테스트 발송 — 1.1 P3, ADMIN
 │   │   ├── item-category/            # 품목 분류 트리 CRUD (대>중>소 3단계)
@@ -192,6 +193,7 @@ app/
 │   ├── ticket-queues/                # Assignment Group 관리 (이름·설명·순서·활성·티켓 수)
 │   ├── ticket-cti/                   # 티켓 분류(CTI) 관리 (Category/Type/Item 3컬럼 + Item 기본 Assignment Group 지정)
 │   ├── ticket-pending-reasons/       # 티켓 대기 사유 관리
+│   ├── ticket-cti-rules/             # 티켓 자동생성 규칙 (ADMIN — 업무 5종 통합, 목록 페이지 버튼과 같은 모달)
 │   ├── item-category/                # 품목 분류 관리 (ADMIN 이상 — 대>중>소 계층 트리)
 │   ├── inventories/                  # 인벤토리 관리 (ADMIN 이상 — 이름·병원 연결·활성·순서)
 │   ├── stock-reasons/                # 입출고 유형 관리 (ADMIN 이상 — 입고/출고 2섹션, StatusCodeManager 공용 컴포넌트)
@@ -231,6 +233,7 @@ lib/
 ├── vehicleLog.ts                     # 운행일지 거리 재계산(recalcVehicleLogs) + 주행거리 무결성 검사(checkOdometerConsistency)
 ├── maintenanceVisit.ts               # 유지보수 방문일정 정규화(normalizeVisits) + 캘린더 페이로드(visitEventPayload) + ymd/visitKey — 기타업무 업무기간도 공유
 ├── etcTask.ts                        # 기타업무 캘린더 이벤트 페이로드(etcTaskVisitEventPayload)
+├── ticketCtiRules.ts                 # 티켓 자동생성 규칙 해석 (업무별 CTI·Group·설명 자동입력 — 조건 행 > 기본 행 > 코드 폴백)
 ├── slack.ts                          # Slack Web API 전송 어댑터 (의존성0 fetch, 모드 라우팅 off/test/live, lookupByEmail)
 ├── notify.ts                         # 알림 정책·로그 레이어 (이벤트·상태변경·지연요약·enrich·dedup + notification_logs, best-effort)
 ├── notifyFields.ts                   # Slack 알림 메시지 필드 카탈로그·타입별 추천 기본값 (설정 페이지·notify 공유)
@@ -627,6 +630,13 @@ prisma/
 - **TicketParticipant** (`ticket_participants`): 참여자 N:M (owner와 별개)
 - **TicketLog** (`ticket_logs`): 단일 타임라인 — `logType` comment(사람, Tiptap HTML)/status_change·assign·queue_transfer·sev_change 등 시스템 이벤트(`payload` JSONB). 프로세스 지표 원천 겸용
 - **TicketPendingReason** (`ticket_pending_reasons`): PENDING 사유 마스터
+- **TicketDomainCtiRule** (`ticket_domain_cti_rules`, 2026-07-26 — `ticket_cti_rule_design.md`): 도메인 업무 → 티켓 자동생성 시 붙는 **CTI·Assignment Group·설명 자동입력**을 코드 하드코딩에서 DB로 이관
+  - `refType`(SITE_VISIT/INSTALL_PLAN/PROJECT/ETC/MAINTENANCE) × `matchStatusCodeId`(NULL=업무 기본, 값=유지보수 장애유형별) → `ctiId`(**ON DELETE RESTRICT** — 규칙에 물린 CTI 삭제 차단의 DB 근거) + `queueId`(NULL=CTI 기본 그룹) + `fillDescription`
+  - 해석 순서: 조건 행 > 기본 행 > **기존 하드코딩 폴백**(시드 유실·신규 환경에서도 티켓 생성 실패 없음). Group은 `규칙 → CTI 기본 → 이름 폴백`
+  - CTI는 **level 3(Item)만** 지정 가능·비활성 CTI 금지(API 검증). UNIQUE `(ref_type, match_status_code_id)` + 부분 UNIQUE `(ref_type) WHERE match_status_code_id IS NULL`
+  - **규칙 변경은 소급 적용하지 않는다** — 기존 티켓 CTI 백필 없음(SLA 정책과 동일 원칙). 유지보수만 장애유형 변경 시 CTI 재동기화 유지
+  - 유지보수 장애유형 매칭이 **이름 문자열 → status_code_id(FK)** 로 바뀌면서, 유형 이름 변경 시 조용히 '기타'로 떨어지던 결함 해소
+  - 시드 `scripts/seed-ticket-cti-rules.sql`(9행, idempotent·이름 조회 기반) — 배포 직후 동작이 이전과 동일
 - 초기 마스터 시드: `scripts/seed-ticket-masters.sql` (재실행 안전 — Assignment Group 4종·CTI 3 Category·사유 5종·nav 메뉴 4행. PROD 최초 반영 시 실행)
 - Slack 알림 (P11, 2026-07-24): **티켓 이벤트 단일 파이프라인** — 모든 업무 알림이 티켓 mutation(생성/상태·그룹 변경/배정/Sev 에스컬레이션)에서 발생, 도메인 라우트 직접 발송 폐지. sig v2 4축 비교로 실변경만 발송. Sev1=@channel·Sev2=🔥+그룹 멤버 멘션, 배정 시 owner DM(`notify_assign_dm`). 상태 표기는 영문(Open~Closed)
 - SLA (P11): `dueAt = 생성일 + Sev별 목표일`(`notify_sla_rules` 기본 SEV1:1/SEV2:1/SEV3:3/SEV4:7/SEV5:미적용, PROJECT는 완료예정일 유지) — 스케줄러가 초과/임박(D-N)/상태 체류를 지연 채널 요약 + SLA 초과 owner DM. PENDING은 SLA 시계 정지. RESOLVED는 `ticket_auto_close_days`(기본 0=끔) 경과 시 자동 CLOSED(타임라인 이벤트만). 백필: `scripts/backfill-ticket-dueat.sql`
@@ -896,7 +906,12 @@ prisma/
 - **액션** (VIEWER 숨김): `canTransition` 전이표로 **현재 상태에서 허용된 전이 버튼만 노출** — PENDING 전환은 사유 셀렉트+메모 인라인 입력, CLOSED는 confirm · 담당자 변경(OPEN↔ASSIGNED 자동 연동) · 큐 이관 · Sev 변경 · 참여자 추가/제거 · 티켓 삭제(ADMIN) · 전이표 위반 등 API 400 메시지 그대로 alert
 - **타임라인** (`TicketLogPanel`): 코멘트(Tiptap HTML, 본인·ADMIN 수정/삭제)와 시스템 이벤트(회색 한 줄 — payload를 상태/Sev 라벨·사용자/큐/CTI 이름으로 번역: "상태 접수 → 배정 · 작성자 · 시각") 시간순 단일 뷰 + 하단 코멘트 작성
 - 배지 색·라벨·전이표는 `lib/ticket-shared.ts`(클라이언트 안전) 단일 소스 — `TicketStatusBadge`/`TicketSeverityBadge` 공용 컴포넌트
-- **설정**: `/settings/ticket-queues`(큐 — 티켓 있으면 삭제 비활성+안내), `/settings/ticket-cti`(3컬럼 트리 — 각 레벨 추가/이름수정/활성/삭제, Item 기본 큐 지정), `/settings/ticket-pending-reasons`(대기 사유)
+- **설정**: `/settings/ticket-queues`(큐 — 티켓 있으면 삭제 비활성+안내), `/settings/ticket-cti`(3컬럼 트리 — 각 레벨 추가/이름수정/활성/삭제, Item 기본 큐 지정, **규칙 사용처 배지·삭제 차단**), `/settings/ticket-pending-reasons`(대기 사유), `/settings/ticket-cti-rules`(자동생성 규칙)
+- **업무 → 티켓 자동생성 규칙** (2026-07-26 — `ticket_cti_rule_design.md`): 답사·설치계획·프로젝트·기타업무·유지보수 등록 시 만들어지는 티켓의 **CTI·Assignment Group·설명 자동입력**을 운영자가 지정
+  - 진입: 각 목록 페이지 **우측 상단 `티켓 설정` 버튼**(ADMIN 이상에만 노출 — 버튼이 스스로 역할 확인) + `/settings/ticket-cti-rules` 통합 페이지. 화면은 공용 모달 1개(`TicketRuleSettingModal`)를 5곳이 재사용
+  - 유지보수는 **장애유형별 규칙 표**가 추가되며, 규칙 없는 장애유형은 `규칙 미지정` 배지로 드러난다(기본 규칙으로 폴백)
+  - **설명 자동 채움**: 답사 노트 / 설치계획·기타업무 비고(Tiptap HTML 그대로) / 유지보수 증상 · 프로젝트 비고(plain → 문단 변환)를 sanitize 후 `tickets.description_html`로 이관 + 출처 한 줄(`※ 답사 VISIT-… 노트에서 자동 입력`). 메일큐 승격 경로 2곳 포함. **생성 시 1회 스냅샷**(티켓에서 편집한 설명을 덮어쓰지 않기 위해 이후 도메인 비고 수정은 미반영)
+  - 변경은 **이후 새로 등록되는 업무부터** 적용 — 이미 만들어진 티켓의 분류는 바뀌지 않는다
 - **지표 대시보드** (`/tickets/dashboard` — P12, 2026-07-25): 목록 우상단 '대시보드' 버튼으로 진입. KPI 6타일(열린/미배정/SLA 초과(적색 강조)/이번주 종결/평균 해결 소요 90일/재오픈율) + 필터(기간 3·6·12개월·전체, 큐, 유형) + 차트 4종(recharts, 다크 대응 — 월별 생성vs종결·해결 소요 중앙값 추이·SLA 준수율 추이·Sev/유형 분포) + 월별 표 토글 + 큐별 열린 티켓 바 + **담당별 처리량 표(ADMIN 이상만)** + 현 상태 장기 체류 Top 10. 지표 2계열: 필드 기반(전 기간 — 백필 원본 날짜 보존, 음수 소요는 0 클램프) / 상태·큐 체류 통계는 P11 이후 이벤트 축적 후 고도화
 
 ### 자재관리(WMS) (개발 중 — `function_wms.md`)
@@ -1357,7 +1372,8 @@ npm run dev
 | PUT/DELETE | `/api/tickets/[id]/logs/[logId]` | 코멘트 수정·삭제 (본인 or ADMIN, 시스템 이벤트 불변) |
 | GET | `/api/tickets/metrics` | 프로세스 지표 집계 (P12 — `?months=3\|6\|12\|0&queueId=&refType=`, raw SQL·KST 버킷. perOwner는 ADMIN 이상만 포함) |
 | GET/POST, PUT/DELETE | `/api/settings/ticket-queues(/[id])` | 큐 마스터 (티켓 있으면 삭제 불가) |
-| GET/POST, PUT/DELETE | `/api/settings/ticket-cti(/[id])` | CTI 3단계 트리 (하위·티켓 있으면 삭제 불가, 기본 큐 지정) |
+| GET/POST, PUT/DELETE | `/api/settings/ticket-cti(/[id])` | CTI 3단계 트리 (하위·티켓·**자동생성 규칙** 있으면 삭제 불가, 기본 큐 지정, 목록에 `ruleUsage` 사용처 포함) |
+| GET, PUT | `/api/settings/ticket-cti-rules` | 업무별 티켓 자동생성 규칙 (CTI·Assignment Group·설명 자동입력 — 조회 로그인, 변경 ADMIN) |
 | GET/POST, PUT/DELETE | `/api/settings/ticket-pending-reasons(/[id])` | PENDING 사유 마스터 |
 
 ### SLA 기준 (1.1 P2 — 전체 ADMIN 이상)

@@ -190,6 +190,7 @@ export async function POST(request: NextRequest) {
         buildStatusLabel: bs?.label ?? null,
         assigneeUserIds: Array.isArray(assigneeIds) ? assigneeIds : [],
         endDateExpected: project.endDateExpected,
+        remark: project.remark,
         createdAt: project.createdAt,
       }, authUser.userId, 'domain')
     })

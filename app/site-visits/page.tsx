@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
 
 interface StatusCode {
   id: number
@@ -235,6 +236,7 @@ export default function SiteVisitsPage() {
             <p className="mt-1 text-sm text-gray-500">총 {sorted.length.toLocaleString()}건{hasFilter ? ` (전체 ${siteVisits.length.toLocaleString()}건)` : ''}</p>
           </div>
           <div className="flex gap-2">
+            <TicketRuleSettingButton refType="SITE_VISIT" />
             <button
               type="button"
               onClick={() => router.push('/site-visit-queue')}

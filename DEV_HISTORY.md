@@ -4,6 +4,26 @@
 
 ---
 
+## 2026-07-26 | 티켓 자동생성 규칙 — 업무별 CTI·Assignment Group 설정화 + 도메인 비고 → 티켓 설명
+
+- 도메인 업무(답사·설치계획·프로젝트·기타업무·유지보수)에서 티켓이 자동 생성될 때 붙는 **CTI·Assignment Group이 코드 하드코딩**이라 운영자가 바꿀 수 없던 것을 **DB 규칙**으로 이관. 설계: `ticket_cti_rule_design.md`
+- **P1 규칙 엔진**: 마이그레이션 `20260726220000_add_ticket_domain_cti_rules`(1테이블, 순수 추가) + `lib/ticketCtiRules.ts`
+  - 해석 순서: `(refType, 조건)` 일치 → `(refType, NULL)` 기본 → 없으면 **기존 하드코딩 폴백**(시드 유실·신규 환경에서도 티켓 생성이 실패하지 않게)
+  - `cti_id`는 `ON DELETE RESTRICT` — 삭제 가드의 DB 근거. Group은 `규칙 지정 → CTI 기본 그룹 → 이름 폴백` 순
+  - 시드 `scripts/seed-ticket-cti-rules.sql` 9행(기본 5 + 유지보수 장애유형 4)으로 **배포 직후 동작 100% 동일**
+- **발견·해소한 기존 결함**: 유지보수 장애유형→CTI 매칭이 **이름 문자열 기반**이라 `/settings/maintenance-type`에서 유형 이름을 바꾸면 **경고 없이 '기타' CTI로 떨어지고** 있었다. 규칙이 `status_code_id`(FK)로 물리면서 해소
+- **P2 설정 UI**: 공용 모달 `TicketRuleSettingModal`(props=refType) 1개를 5곳이 재사용 — 목록 우측 상단 `티켓 설정` 버튼(`TicketRuleSettingButton`, 스스로 ADMIN 확인) + `/settings/ticket-cti-rules` 통합 페이지(전 업무 형상 한눈에, 규칙 미지정 장애유형 앰버 표기)
+  - 서버 검증: CTI는 **level 3(Item)만**, 비활성 CTI 금지, 조건 규칙은 조건 축을 가진 업무(유지보수)만
+- **P3 설명 자동 채움**: 도메인 자동생성 티켓은 `description_html`이 **항상 비어 있었다**. 답사 노트/설치계획·기타업무 비고(HTML 그대로)·유지보수 증상·프로젝트 비고(plain→문단 변환)를 sanitize 후 이관 + 출처 한 줄(`※ 답사 VISIT-… 노트에서 자동 입력`). 생성 5경로 + 메일큐 승격 2경로
+  - **생성 시 1회 스냅샷** — 티켓 상세에서 설명을 편집할 수 있으므로 계속 미러하면 사용자가 쓴 내용을 덮어쓴다
+- **P4 CTI 가드**: 규칙에 물린 CTI 삭제 400(앱) + RESTRICT(DB), 비활성화는 경고 후 진행, CTI 관리 화면에 `규칙 답사` 형태 사용처 배지 + 삭제 버튼 비활성. 검사 순서는 **규칙 → 티켓 보유** 순(둘 다 걸릴 때 조치할 화면을 알려주는 쪽이 유용 — E2E에서 잡아 수정)
+- **비소급 원칙**: 규칙 변경은 이후 생성분에만 적용, 기존 티켓 CTI 백필 없음(SLA 정책과 동일 — 과거 지표 보호). 유지보수만 장애유형 변경 시 CTI 재동기화 유지(현행 동작 보존)
+- **검증**: 스모크 `scripts/ticket-cti-rules-smoke.mts` **35/35**(우선순위·비활성 무시·그룹 3단 폴백·설명 변환 8종·RESTRICT·시드 9행 대조) + 실 API E2E **21/21**(답사·유지보수 실제 등록 → CTI·Group·설명 확인, 설정 API 400 케이스, 삭제 가드, 사용처 배지). 테스트 데이터 전량 삭제(잔여 0, 기존 티켓 674건 무변화)
+- tsc·lint 0오류, 빌드 성공, dev2 PM2 재시작 완료. **git·PROD 반영 안 함**
+- 영향 파일: prisma/{schema.prisma, migrations/20260726220000_add_ticket_domain_cti_rules}, lib/{ticketCtiRules.ts(신규), ticketDomain.ts}, app/api/{settings/ticket-cti-rules(신규), settings/ticket-cti/{route.ts,[id]/route.ts}, site-visits, install-plans, projects, etc-tasks, maintenances, mail-queue/[id], site-visit-queue/[id]}, app/components/{TicketRuleSettingModal.tsx, TicketRuleSettingButton.tsx}(신규), app/settings/{ticket-cti-rules(신규), ticket-cti}, app/{site-visits,install-plans,projects,etc-tasks,maintenances}/page.tsx, scripts/{seed-ticket-cti-rules.sql(신규), seed-ticket-masters.sql, ticket-cti-rules-smoke.mts(신규)}, ticket_cti_rule_design.md(신규), README.md
+
+---
+
 ## 2026-07-26 | 1.1 알림체계 개선 P1~P7 PROD 배포
 
 - dev2 커밋 `d56ec3a` push → PROD git pull(`fcd2d6a`→`d56ec3a`, 40+파일) → 의존성 변경 없음(package.json은 버전 `0.1.0`→`1.0.0` 표기만)

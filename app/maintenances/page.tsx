@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
 
 interface StatusCode {
   id: number
@@ -247,13 +248,16 @@ export default function MaintenancesPage() {
             <h1 className="text-2xl font-bold text-gray-900">유지보수</h1>
             <p className="mt-1 text-sm text-gray-500">총 {sorted.length.toLocaleString()}건{hasFilter ? ` (전체 ${maintenances.length.toLocaleString()}건)` : ''}</p>
           </div>
-          <button
-            type="button"
-            onClick={() => router.push('/maintenances/new')}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-          >
-            + 유지보수 등록
-          </button>
+          <div className="flex gap-2">
+            <TicketRuleSettingButton refType="MAINTENANCE" />
+            <button
+              type="button"
+              onClick={() => router.push('/maintenances/new')}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+            >
+              + 유지보수 등록
+            </button>
+          </div>
         </div>
 
         {/* 필터 */}

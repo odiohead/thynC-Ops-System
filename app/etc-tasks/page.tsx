@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
 
 interface StatusCode {
   id: number
@@ -119,13 +120,16 @@ export default function EtcTasksPage() {
 
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">기타업무</h1>
-          <button
-            type="button"
-            onClick={() => router.push('/etc-tasks/new')}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-          >
-            + 기타업무 등록
-          </button>
+          <div className="flex gap-2">
+            <TicketRuleSettingButton refType="ETC" />
+            <button
+              type="button"
+              onClick={() => router.push('/etc-tasks/new')}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+            >
+              + 기타업무 등록
+            </button>
+          </div>
         </div>
 
         {/* 필터 */}

@@ -156,6 +156,8 @@ export async function POST(request: NextRequest) {
       priority: maintenance.priority,
       statusName: maintenance.status?.name ?? null,
       typeName: maintenance.type?.name ?? null,
+      typeId: maintenance.typeId,
+      symptoms: maintenance.symptoms,
       assigneeUserIds: maintenance.assignees.map((a) => a.user.id),
       reportedAt: maintenance.reportedAt,
       resolvedAt: maintenance.resolvedAt,

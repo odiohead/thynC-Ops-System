@@ -138,6 +138,7 @@ model StatusCode {
   etcTaskStatuses        EtcTask[]              @relation("EtcTaskStatus")
   manufacturerItems      InventoryItem[]        @relation("ItemManufacturer")
   reasonTransactions     InventoryTransaction[] @relation("TxReason")
+  ctiRuleMatches         TicketDomainCtiRule[]  @relation("CtiRuleMatchStatus")
 
   @@unique([name, category])
   @@map("status_codes")
@@ -236,9 +237,9 @@ model User {
   organizationId            Int?                         @map("organization_id")
   departmentId              Int?                         @map("department_id")
   slackUserId               String?                      @map("slack_user_id") @db.VarChar(20) // Slack DM 매핑 캐시 (Phase 4)
-  notifications      Notification[]     @relation("NotificationRecipient")
-  notificationsActed Notification[]     @relation("NotificationActor")
-  notificationPrefs  NotificationPref[]
+  notifications             Notification[]               @relation("NotificationRecipient")
+  notificationsActed        Notification[]               @relation("NotificationActor")
+  notificationPrefs         NotificationPref[]
   slackNotifyEnabled        Boolean                      @default(true) @map("slack_notify_enabled") // 계정별 Slack 발송 유무(false=미발송)
   createdAt                 DateTime                     @default(now()) @map("created_at")
   lastLoginAt               DateTime?                    @map("last_login_at")
@@ -278,6 +279,7 @@ model User {
   ticketParticipations      TicketParticipant[]          @relation("TicketParticipantUser")
   ticketLogs                TicketLog[]                  @relation("TicketLogAuthor")
   ticketQueueMemberships    TicketQueueMember[]          @relation("TicketQueueMemberUser")
+  ticketCtiRuleUpdates      TicketDomainCtiRule[]        @relation("CtiRuleUpdater")
 
   @@map("users")
   @@schema("public")
@@ -1161,16 +1163,16 @@ model WikiPage {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  plainText     String    @default("") @map("plain_text")
-  icon          String?   @map("icon")
-  coverUrl      String?   @map("cover_url")
-  coverOffsetY  Int       @default(50) @map("cover_offset_y")
-  isTemplate    Boolean   @default(false) @map("is_template")
-  deletedAt     DateTime? @map("deleted_at")
-  collabEnabled Boolean   @default(false) @map("collab_enabled")
-  pageType      String    @default("block") @map("page_type") @db.VarChar(10)
-  contentHtml   String?   @map("content_html")
-  aiExcluded    Boolean   @default(false) @map("ai_excluded")
+  plainText      String    @default("") @map("plain_text")
+  icon           String?   @map("icon")
+  coverUrl       String?   @map("cover_url")
+  coverOffsetY   Int       @default(50) @map("cover_offset_y")
+  isTemplate     Boolean   @default(false) @map("is_template")
+  deletedAt      DateTime? @map("deleted_at")
+  collabEnabled  Boolean   @default(false) @map("collab_enabled")
+  pageType       String    @default("block") @map("page_type") @db.VarChar(10)
+  contentHtml    String?   @map("content_html")
+  aiExcluded     Boolean   @default(false) @map("ai_excluded")
   /// 청크 인덱스를 마지막으로 재생성한 시각. `chunks_synced_at < updated_at`이면 재생성 대상.
   /// 갱신은 raw SQL로만 한다 — Prisma update를 쓰면 @updatedAt이 함께 올라 무한 재생성이 된다.
   chunksSyncedAt DateTime? @map("chunks_synced_at")
@@ -1607,16 +1609,17 @@ enum TicketSeverity {
 }
 
 model TicketQueue {
-  id          Int                 @id @default(autoincrement())
-  name        String              @unique
+  id          Int                   @id @default(autoincrement())
+  name        String                @unique
   description String?
-  isActive    Boolean             @default(true) @map("is_active")
-  sortOrder   Int                 @default(0) @map("sort_order")
-  createdAt   DateTime            @default(now()) @map("created_at")
-  updatedAt   DateTime            @updatedAt @map("updated_at")
+  isActive    Boolean               @default(true) @map("is_active")
+  sortOrder   Int                   @default(0) @map("sort_order")
+  createdAt   DateTime              @default(now()) @map("created_at")
+  updatedAt   DateTime              @updatedAt @map("updated_at")
   tickets     Ticket[]
-  ctiDefaults TicketCti[]         @relation("CtiDefaultQueue")
+  ctiDefaults TicketCti[]           @relation("CtiDefaultQueue")
   members     TicketQueueMember[]
+  domainRules TicketDomainCtiRule[] @relation("CtiRuleQueue")
 
   @@map("ticket_queues")
   @@schema("public")
@@ -1637,23 +1640,49 @@ model TicketQueueMember {
 }
 
 model TicketCti {
-  id             Int          @id @default(autoincrement())
-  parentId       Int?         @map("parent_id")
-  level          Int          @db.SmallInt
+  id             Int                   @id @default(autoincrement())
+  parentId       Int?                  @map("parent_id")
+  level          Int                   @db.SmallInt
   name           String
-  defaultQueueId Int?         @map("default_queue_id")
-  isActive       Boolean      @default(true) @map("is_active")
-  sortOrder      Int          @default(0) @map("sort_order")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
-  parent         TicketCti?   @relation("CtiHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  children       TicketCti[]  @relation("CtiHierarchy")
-  defaultQueue   TicketQueue? @relation("CtiDefaultQueue", fields: [defaultQueueId], references: [id], onDelete: SetNull)
+  defaultQueueId Int?                  @map("default_queue_id")
+  isActive       Boolean               @default(true) @map("is_active")
+  sortOrder      Int                   @default(0) @map("sort_order")
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @updatedAt @map("updated_at")
+  parent         TicketCti?            @relation("CtiHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children       TicketCti[]           @relation("CtiHierarchy")
+  defaultQueue   TicketQueue?          @relation("CtiDefaultQueue", fields: [defaultQueueId], references: [id], onDelete: SetNull)
   tickets        Ticket[]
+  domainRules    TicketDomainCtiRule[] @relation("CtiRuleCti")
 
   @@unique([parentId, name])
   @@index([parentId, sortOrder])
   @@map("ticket_cti")
+  @@schema("public")
+}
+
+/// 도메인 업무 → 티켓 자동생성 시 붙는 CTI·Assignment Group·설명 자동입력 규칙 (ticket_cti_rule_design.md)
+/// 해석 순서: (refType, matchStatusCodeId) 일치 → (refType, NULL) 기본 → 없으면 코드 폴백
+model TicketDomainCtiRule {
+  id                Int          @id @default(autoincrement())
+  refType           String       @map("ref_type") // SITE_VISIT | INSTALL_PLAN | PROJECT | ETC | MAINTENANCE
+  matchStatusCodeId Int?         @map("match_status_code_id") // 유지보수 장애유형별. NULL=업무 기본 규칙
+  ctiId             Int          @map("cti_id")
+  queueId           Int?         @map("queue_id") // NULL=CTI 기본 그룹 → 그것도 없으면 코드 폴백
+  fillDescription   Boolean      @default(true) @map("fill_description")
+  isActive          Boolean      @default(true) @map("is_active")
+  updatedBy         String?      @map("updated_by")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  matchStatusCode   StatusCode?  @relation("CtiRuleMatchStatus", fields: [matchStatusCodeId], references: [id], onDelete: Cascade)
+  cti               TicketCti    @relation("CtiRuleCti", fields: [ctiId], references: [id], onDelete: Restrict)
+  queue             TicketQueue? @relation("CtiRuleQueue", fields: [queueId], references: [id], onDelete: SetNull)
+  updater           User?        @relation("CtiRuleUpdater", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@unique([refType, matchStatusCodeId], map: "ticket_domain_cti_rules_scope_uniq")
+  @@index([ctiId], map: "ticket_domain_cti_rules_cti_idx")
+  @@index([refType], map: "ticket_domain_cti_rules_ref_idx")
+  @@map("ticket_domain_cti_rules")
   @@schema("public")
 }
 
@@ -1808,14 +1837,14 @@ model NotificationPref {
 
 /// 발송 채널 마스터 — Slack 채널 ID를 런타임에 등록·비활성
 model NotifyChannel {
-  id             Int            @id @default(autoincrement())
-  name           String         @unique @db.VarChar(60)
-  slackChannelId String         @map("slack_channel_id") @db.VarChar(40)
+  id             Int           @id @default(autoincrement())
+  name           String        @unique @db.VarChar(60)
+  slackChannelId String        @map("slack_channel_id") @db.VarChar(40)
   description    String?
-  isActive       Boolean        @default(true) @map("is_active")
-  sortOrder      Int            @default(0) @map("sort_order")
-  createdAt      DateTime       @default(now()) @map("created_at")
-  updatedAt      DateTime       @updatedAt @map("updated_at")
+  isActive       Boolean       @default(true) @map("is_active")
+  sortOrder      Int           @default(0) @map("sort_order")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
   routes         NotifyRoute[]
 
   @@map("notify_channels")

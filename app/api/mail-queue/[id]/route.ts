@@ -75,6 +75,7 @@ export async function PUT(
       writeStatus: installPlan.writeStatus,
       replyStatus: installPlan.replyStatus,
       assigneeUserIds: [],
+      note: installPlan.note,
       createdAt: installPlan.createdAt,
       replyDate: null,
     }, authUser?.userId ?? null, 'domain')

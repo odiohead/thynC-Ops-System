@@ -270,6 +270,7 @@ if (user.role !== 'ADMIN') return 403
 2. **상태 전이표·라벨은 `lib/ticket-shared.ts` 단일 소스** — 전이 규칙·상태/Sev 라벨을 다른 곳에 하드코딩 금지. 전이는 반드시 `canTransition` 검증 경유
 3. **도메인↔티켓 동기화는 `lib/ticketDomain.ts` 경유** — 도메인 레코드와 연결 티켓을 같은 트랜잭션에서 `sync*ToTicket`/`syncTicketToDomain`으로 갱신. 연결 티켓의 status/owner/severity/hospitalCode를 라우트에서 직접 UPDATE 금지
 4. **티켓 마스터(Assignment Group·CTI·대기 사유·nav) 변경 시 `scripts/seed-ticket-masters.sql`에도 반영** — PROD 최초 반영·데이터 동기화 후 재실행되는 파일(idempotent 유지)
+5. **도메인 자동생성 티켓의 CTI·Assignment Group은 `ticket_domain_cti_rules` 단일 소스** (`lib/ticketCtiRules.ts` 경유 — `ticket_cti_rule_design.md`). 새 업무를 티켓에 편입할 때 CTI를 코드에 하드코딩하지 말 것. 기존 `*CtiId()` 함수는 **규칙 유실 시 폴백 전용**이며, 규칙 변경은 소급 적용하지 않는다(기존 티켓 CTI 백필 금지)
 
 ---
 

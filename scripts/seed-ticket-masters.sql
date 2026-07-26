@@ -119,7 +119,8 @@ ON CONFLICT (menu_key) DO NOTHING;
 INSERT INTO nav_menu_items (menu_key, label, href, parent_key, sort_order, group_label) VALUES
   ('settings/ticket-queues', 'Assignment Group 관리', '/settings/ticket-queues', 'settings', 60, '티켓'),
   ('settings/ticket-cti', '티켓 분류(CTI) 관리', '/settings/ticket-cti', 'settings', 62, '티켓'),
-  ('settings/ticket-pending-reasons', '티켓 대기 사유 관리', '/settings/ticket-pending-reasons', 'settings', 64, '티켓')
+  ('settings/ticket-pending-reasons', '티켓 대기 사유 관리', '/settings/ticket-pending-reasons', 'settings', 64, '티켓'),
+  ('settings/ticket-cti-rules', '티켓 자동생성 규칙', '/settings/ticket-cti-rules', 'settings', 66, '티켓')
 ON CONFLICT (menu_key) DO NOTHING;
 
 -- P10: tasks 롤업 메뉴 비활성 (티켓 목록이 대체 — /tasks는 /tickets로 리다이렉트)

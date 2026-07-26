@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
 
 interface Hospital {
   hospitalCode: string
@@ -111,6 +112,7 @@ export default function InstallPlansPage() {
           </div>
           {isAdmin && (
             <div className="flex gap-2">
+              <TicketRuleSettingButton refType="INSTALL_PLAN" />
               <button
                 onClick={() => router.push('/mail-queue')}
                 className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"

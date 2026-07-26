@@ -12,6 +12,8 @@ interface CtiNode {
   sortOrder: number
   defaultQueue: { id: number; name: string } | null
   _count: { tickets: number; children: number }
+  /** 이 분류를 쓰는 티켓 자동생성 규칙의 업무 라벨 (ticket_cti_rule_design.md §7) */
+  ruleUsage?: string[]
 }
 
 interface Queue {
@@ -107,6 +109,16 @@ export default function TicketCtiSettingsPage() {
   }
 
   async function handleToggleActive(node: CtiNode) {
+    // 규칙에 물린 분류를 끄면 비활성 분류가 신규 티켓에 계속 붙는다 — 막지는 않고 경고만 (설계 §7)
+    if (node.isActive && node.ruleUsage?.length) {
+      if (
+        !confirm(
+          `'${node.name}'은 ${node.ruleUsage.join('·')} 티켓 자동생성 규칙에 사용 중입니다.\n` +
+            '비활성화해도 규칙은 유지되어 신규 티켓에 이 분류가 계속 붙습니다.\n\n비활성화하시겠습니까?'
+        )
+      )
+        return
+    }
     setBusy(true)
     const res = await fetch(`/api/settings/ticket-cti/${node.id}`, {
       method: 'PUT',
@@ -194,6 +206,14 @@ export default function TicketCtiSettingsPage() {
                       {node._count.tickets > 0 && (
                         <span className="ml-1.5 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-normal text-gray-500">티켓 {node._count.tickets}</span>
                       )}
+                      {!!node.ruleUsage?.length && (
+                        <span
+                          className="ml-1.5 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-normal text-blue-700"
+                          title={`${node.ruleUsage.join('·')} 티켓 자동생성 규칙에 사용 중`}
+                        >
+                          규칙 {node.ruleUsage.join('·')}
+                        </span>
+                      )}
                     </span>
                   )}
                   <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -239,8 +259,14 @@ export default function TicketCtiSettingsPage() {
                         <button
                           type="button"
                           onClick={() => handleDelete(node)}
-                          disabled={busy || node._count.children > 0 || node._count.tickets > 0}
-                          title={node._count.children > 0 || node._count.tickets > 0 ? '하위 분류 또는 연결된 티켓이 있어 삭제할 수 없습니다. 비활성화하세요.' : undefined}
+                          disabled={busy || node._count.children > 0 || node._count.tickets > 0 || !!node.ruleUsage?.length}
+                          title={
+                            node.ruleUsage?.length
+                              ? `${node.ruleUsage.join('·')} 티켓 자동생성 규칙에 사용 중입니다. 규칙을 먼저 변경하세요.`
+                              : node._count.children > 0 || node._count.tickets > 0
+                                ? '하위 분류 또는 연결된 티켓이 있어 삭제할 수 없습니다. 비활성화하세요.'
+                                : undefined
+                          }
                           className="rounded px-1.5 py-0.5 text-xs text-red-300 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           삭제

@@ -147,6 +147,7 @@ export async function POST(request: NextRequest) {
         hospitalName: h?.hospitalName ?? h?.hiraHospitalName ?? null,
         statusName: siteVisit.status?.name ?? null,
         assigneeUserIds: Array.isArray(assigneeIds) ? assigneeIds : [],
+        notes: siteVisit.notes,
         createdAt: siteVisit.createdAt,
         replyDate: siteVisit.replyDate,
       }, user.userId, 'domain')

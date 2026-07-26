@@ -140,6 +140,7 @@ export async function POST(request: NextRequest) {
       statusName: etcTask.status?.name ?? null,
       hospitalCodes: etcTask.hospitals.map((h) => h.hospital.hospitalCode),
       assigneeUserIds: etcTask.assignees.map((a) => a.user.id),
+      note: etcTask.note,
       resolvedAt: etcTask.resolvedAt,
       createdAt: etcTask.createdAt,
     }, user.userId, 'domain')

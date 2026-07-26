@@ -10,6 +10,13 @@ import { Prisma, TicketStatus, TicketSeverity } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { generateTicketCode, addTicketEvent } from '@/lib/ticket'
 import { getSlaRules, computeTicketDueAt } from '@/lib/delay-rules'
+import {
+  resolveDomainTicketRule,
+  resolveDomainQueueId,
+  buildTicketDescription,
+  DOMAIN_META,
+  type DomainRefType,
+} from '@/lib/ticketCtiRules'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
@@ -79,6 +86,27 @@ export async function maintenanceQueueId(client: DbClient): Promise<number | nul
   return q?.id ?? null
 }
 
+// ── 자동생성 규칙 해석 (ticket_cti_rule_design.md §4) ─────────
+
+/**
+ * 규칙 테이블 → 없으면 기존 하드코딩 폴백.
+ * 규칙이 유실되거나 시드 전이어도 티켓 생성이 실패하지 않게 코드 폴백을 남긴다.
+ */
+async function resolveRuleWithFallback(
+  tx: Prisma.TransactionClient,
+  refType: DomainRefType,
+  fallbackCti: () => Promise<number | null>,
+  opts: { statusCodeId?: number | null } = {}
+): Promise<{ ctiId: number | null; queueId: number | null; fillDescription: boolean }> {
+  const rule = await resolveDomainTicketRule(tx, refType, opts)
+  const queueId = await resolveDomainQueueId(tx, rule, DOMAIN_META[refType].fallbackQueueName)
+  return {
+    ctiId: rule?.ctiId ?? (await fallbackCti()),
+    queueId,
+    fillDescription: rule ? rule.fillDescription : true,
+  }
+}
+
 // ── 생성·동기화 ───────────────────────────────────────────────
 
 interface MaintForTicket {
@@ -89,6 +117,8 @@ interface MaintForTicket {
   priority: string | null
   statusName: string | null
   typeName: string | null
+  typeId?: number | null // 장애유형 status_code id — 자동생성 규칙 조건 축
+  symptoms?: string | null // 증상 → 티켓 설명 자동 입력 소스
   assigneeUserIds: string[] // 등록 순서 — 첫 번째가 owner
   reportedAt: Date | null
   resolvedAt: Date | null
@@ -102,9 +132,12 @@ export async function createTicketForMaintenance(
   actorId: string | null,
   via: 'domain' | 'backfill'
 ): Promise<number> {
-  const queueId = await maintenanceQueueId(tx)
+  const rule = await resolveRuleWithFallback(tx, 'MAINTENANCE', () => maintTypeToCtiId(tx, m.typeName), {
+    statusCodeId: m.typeId ?? null,
+  })
+  const queueId = rule.queueId
   if (!queueId) throw new Error("Assignment Group '유지보수'가 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
-  const ctiId = await maintTypeToCtiId(tx, m.typeName)
+  const ctiId = rule.ctiId
 
   const ownerId = m.assigneeUserIds[0] ?? null
   const participants = m.assigneeUserIds.slice(1)
@@ -117,6 +150,9 @@ export async function createTicketForMaintenance(
     data: {
       ticketCode,
       title: m.title,
+      descriptionHtml: rule.fillDescription
+        ? buildTicketDescription({ refType: 'MAINTENANCE', source: m.symptoms, refCode: m.maintenanceCode })
+        : null,
       status,
       severity,
       queueId,
@@ -145,7 +181,7 @@ export async function syncMaintenanceToTicket(tx: Prisma.TransactionClient, main
   const m = await tx.maintenance.findUnique({
     where: { id: maintenanceId },
     select: {
-      id: true, ticketId: true, title: true, hospitalCode: true, priority: true, resolvedAt: true,
+      id: true, ticketId: true, title: true, hospitalCode: true, priority: true, resolvedAt: true, typeId: true,
       status: { select: { name: true } },
       type: { select: { name: true } },
       assignees: { select: { userId: true }, orderBy: { id: 'asc' } },
@@ -159,7 +195,12 @@ export async function syncMaintenanceToTicket(tx: Prisma.TransactionClient, main
   const participantIds = m.assignees.slice(1).map((a) => a.userId)
   const nextStatus = maintStatusToTicket(m.status?.name ?? null, !!ownerId)
   const nextSev = priorityToSeverity(m.priority)
-  const nextCti = await maintTypeToCtiId(tx, m.type?.name ?? null)
+  // 장애유형 변경 → CTI 재동기화 (유지보수만 유지되는 예외 — 규칙 테이블 경유로 ID 기반 매칭)
+  const nextCti = (
+    await resolveRuleWithFallback(tx, 'MAINTENANCE', () => maintTypeToCtiId(tx, m.type?.name ?? null), {
+      statusCodeId: m.typeId ?? null,
+    })
+  ).ctiId
 
   const data: Prisma.TicketUncheckedUpdateInput = { title: m.title, hospitalCode: m.hospitalCode }
   if (nextStatus !== ticket.status) {
@@ -282,6 +323,7 @@ interface ProjectForTicket {
   buildStatusLabel: string | null
   assigneeUserIds: string[]
   endDateExpected: Date | null
+  remark?: string | null // 비고 → 티켓 설명 자동 입력 소스
   createdAt: Date
 }
 
@@ -292,9 +334,9 @@ export async function createTicketForProject(
   actorId: string | null,
   via: 'domain' | 'backfill'
 ): Promise<number> {
-  const queue = await tx.ticketQueue.findUnique({ where: { name: '설치·답사' }, select: { id: true } })
-  if (!queue) throw new Error("Assignment Group '설치·답사'가 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
-  const ctiId = await projectCtiId(tx)
+  const rule = await resolveRuleWithFallback(tx, 'PROJECT', () => projectCtiId(tx))
+  if (!rule.queueId) throw new Error("Assignment Group '설치·답사'가 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
+  const ctiId = rule.ctiId
 
   const ownerId = p.assigneeUserIds[0] ?? null
   const participants = p.assigneeUserIds.slice(1)
@@ -313,9 +355,12 @@ export async function createTicketForProject(
     data: {
       ticketCode,
       title: `[프로젝트] ${p.projectName}`,
+      descriptionHtml: rule.fillDescription
+        ? buildTicketDescription({ refType: 'PROJECT', source: p.remark, refCode: p.projectCode })
+        : null,
       status,
       severity: 'SEV4',
-      queueId: queue.id,
+      queueId: rule.queueId,
       ctiId,
       ownerId,
       hospitalCode: p.hospitalCode,
@@ -458,6 +503,7 @@ interface InstallPlanForTicket {
   writeStatus: string
   replyStatus: string
   assigneeUserIds: string[]
+  note?: string | null // 비고 → 티켓 설명 자동 입력 소스
   createdAt: Date
   replyDate: Date | null
 }
@@ -469,9 +515,9 @@ export async function createTicketForInstallPlan(
   actorId: string | null,
   via: 'domain' | 'backfill'
 ): Promise<number> {
-  const queue = await tx.ticketQueue.findUnique({ where: { name: '설치·답사' }, select: { id: true } })
-  if (!queue) throw new Error("Assignment Group '설치·답사'가 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
-  const ctiId = await installPlanCtiId(tx)
+  const rule = await resolveRuleWithFallback(tx, 'INSTALL_PLAN', () => installPlanCtiId(tx))
+  if (!rule.queueId) throw new Error("Assignment Group '설치·답사'가 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
+  const ctiId = rule.ctiId
 
   const ownerId = ip.assigneeUserIds[0] ?? null
   const participants = ip.assigneeUserIds.slice(1)
@@ -490,9 +536,12 @@ export async function createTicketForInstallPlan(
     data: {
       ticketCode,
       title: `[설치계획] ${ip.hospitalName ?? ip.hospitalCode ?? ip.planCode ?? ''}`.trim(),
+      descriptionHtml: rule.fillDescription
+        ? buildTicketDescription({ refType: 'INSTALL_PLAN', source: ip.note, refCode: ip.planCode })
+        : null,
       status,
       severity: 'SEV4',
-      queueId: queue.id,
+      queueId: rule.queueId,
       ctiId,
       ownerId,
       hospitalCode: ip.hospitalCode,
@@ -633,6 +682,7 @@ interface SiteVisitForTicket {
   hospitalName: string | null
   statusName: string | null
   assigneeUserIds: string[]
+  notes?: string | null // 노트 → 티켓 설명 자동 입력 소스
   createdAt: Date
   replyDate: Date | null
 }
@@ -644,9 +694,9 @@ export async function createTicketForSiteVisit(
   actorId: string | null,
   via: 'domain' | 'backfill'
 ): Promise<number> {
-  const queue = await tx.ticketQueue.findUnique({ where: { name: '설치·답사' }, select: { id: true } })
-  if (!queue) throw new Error("Assignment Group '설치·답사'가 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
-  const ctiId = await siteVisitCtiId(tx)
+  const rule = await resolveRuleWithFallback(tx, 'SITE_VISIT', () => siteVisitCtiId(tx))
+  if (!rule.queueId) throw new Error("Assignment Group '설치·답사'가 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
+  const ctiId = rule.ctiId
 
   const ownerId = s.assigneeUserIds[0] ?? null
   const participants = s.assigneeUserIds.slice(1)
@@ -666,9 +716,12 @@ export async function createTicketForSiteVisit(
     data: {
       ticketCode,
       title: `[답사] ${s.hospitalName ?? s.hospitalCode}`,
+      descriptionHtml: rule.fillDescription
+        ? buildTicketDescription({ refType: 'SITE_VISIT', source: s.notes, refCode: s.siteVisitCode })
+        : null,
       status,
       severity: 'SEV4',
-      queueId: queue.id,
+      queueId: rule.queueId,
       ctiId,
       ownerId,
       hospitalCode: s.hospitalCode,
@@ -792,6 +845,7 @@ interface EtcTaskForTicket {
   statusName: string | null
   hospitalCodes: string[] // 첫 병원 → ticket.hospitalCode (실측 복수 0건)
   assigneeUserIds: string[]
+  note?: string | null // 비고 → 티켓 설명 자동 입력 소스
   resolvedAt: Date | null
   createdAt: Date
 }
@@ -803,9 +857,9 @@ export async function createTicketForEtcTask(
   actorId: string | null,
   via: 'domain' | 'backfill'
 ): Promise<number> {
-  const queue = await tx.ticketQueue.findUnique({ where: { name: '내부운영' }, select: { id: true } })
-  if (!queue) throw new Error("Assignment Group '내부운영'이 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
-  const ctiId = await etcTaskCtiId(tx)
+  const rule = await resolveRuleWithFallback(tx, 'ETC', () => etcTaskCtiId(tx))
+  if (!rule.queueId) throw new Error("Assignment Group '내부운영'이 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
+  const ctiId = rule.ctiId
 
   const ownerId = e.assigneeUserIds[0] ?? null
   const participants = e.assigneeUserIds.slice(1)
@@ -818,9 +872,12 @@ export async function createTicketForEtcTask(
     data: {
       ticketCode,
       title: e.title,
+      descriptionHtml: rule.fillDescription
+        ? buildTicketDescription({ refType: 'ETC', source: e.note, refCode: e.etcTaskCode })
+        : null,
       status,
       severity,
-      queueId: queue.id,
+      queueId: rule.queueId,
       ctiId,
       ownerId,
       hospitalCode: e.hospitalCodes[0] ?? null,

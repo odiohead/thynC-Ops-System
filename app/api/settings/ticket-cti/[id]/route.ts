@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import { DOMAIN_META, type DomainRefType } from '@/lib/ticketCtiRules'
 
 export const dynamic = 'force-dynamic'
 
@@ -67,6 +68,21 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     include: { _count: { select: { tickets: true, children: true } } },
   })
   if (!before) return NextResponse.json({ error: '분류를 찾을 수 없습니다.' }, { status: 404 })
+  // 자동생성 규칙에 물린 분류는 삭제 금지 (ticket_cti_rule_design.md §7)
+  // DB도 ON DELETE RESTRICT로 막지만, 어느 업무 규칙인지 알려주려면 앱에서 검사해야 한다.
+  // 티켓 보유 검사보다 **먼저** 본다 — 둘 다 걸릴 때 조치할 곳(규칙 화면)을 알려주는 쪽이 유용하다.
+  const usedBy = await prisma.ticketDomainCtiRule.findMany({
+    where: { ctiId: id },
+    select: { refType: true },
+  })
+  if (usedBy.length > 0) {
+    const labels = Array.from(new Set(usedBy.map((r) => DOMAIN_META[r.refType as DomainRefType]?.label ?? r.refType)))
+    return NextResponse.json(
+      { error: `${labels.join('·')} 티켓 자동생성 규칙에 사용 중입니다. 규칙을 먼저 변경하세요.` },
+      { status: 400 }
+    )
+  }
+
   if (before._count.tickets > 0 || before._count.children > 0) {
     return NextResponse.json({ error: '하위 분류 또는 연결된 티켓이 있어 삭제할 수 없습니다. 비활성화하세요.' }, { status: 400 })
   }
