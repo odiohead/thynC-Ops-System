@@ -103,7 +103,7 @@ export async function createTicketForMaintenance(
   via: 'domain' | 'backfill'
 ): Promise<number> {
   const queueId = await maintenanceQueueId(tx)
-  if (!queueId) throw new Error("티켓 큐 '유지보수'가 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
+  if (!queueId) throw new Error("Assignment Group '유지보수'가 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
   const ctiId = await maintTypeToCtiId(tx, m.typeName)
 
   const ownerId = m.assigneeUserIds[0] ?? null
@@ -293,7 +293,7 @@ export async function createTicketForProject(
   via: 'domain' | 'backfill'
 ): Promise<number> {
   const queue = await tx.ticketQueue.findUnique({ where: { name: '설치·답사' }, select: { id: true } })
-  if (!queue) throw new Error("티켓 큐 '설치·답사'가 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
+  if (!queue) throw new Error("Assignment Group '설치·답사'가 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
   const ctiId = await projectCtiId(tx)
 
   const ownerId = p.assigneeUserIds[0] ?? null
@@ -470,7 +470,7 @@ export async function createTicketForInstallPlan(
   via: 'domain' | 'backfill'
 ): Promise<number> {
   const queue = await tx.ticketQueue.findUnique({ where: { name: '설치·답사' }, select: { id: true } })
-  if (!queue) throw new Error("티켓 큐 '설치·답사'가 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
+  if (!queue) throw new Error("Assignment Group '설치·답사'가 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
   const ctiId = await installPlanCtiId(tx)
 
   const ownerId = ip.assigneeUserIds[0] ?? null
@@ -645,7 +645,7 @@ export async function createTicketForSiteVisit(
   via: 'domain' | 'backfill'
 ): Promise<number> {
   const queue = await tx.ticketQueue.findUnique({ where: { name: '설치·답사' }, select: { id: true } })
-  if (!queue) throw new Error("티켓 큐 '설치·답사'가 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
+  if (!queue) throw new Error("Assignment Group '설치·답사'가 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
   const ctiId = await siteVisitCtiId(tx)
 
   const ownerId = s.assigneeUserIds[0] ?? null
@@ -804,7 +804,7 @@ export async function createTicketForEtcTask(
   via: 'domain' | 'backfill'
 ): Promise<number> {
   const queue = await tx.ticketQueue.findUnique({ where: { name: '내부운영' }, select: { id: true } })
-  if (!queue) throw new Error("티켓 큐 '내부운영'이 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
+  if (!queue) throw new Error("Assignment Group '내부운영'이 없습니다. seed-ticket-masters.sql을 먼저 적용하세요.")
   const ctiId = await etcTaskCtiId(tx)
 
   const ownerId = e.assigneeUserIds[0] ?? null

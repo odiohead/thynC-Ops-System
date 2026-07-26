@@ -10,14 +10,14 @@ interface Props {
   onChange: (userId: string) => void
   /** 선택 가능한 전체 사용자 (활성) */
   users: UserOption[]
-  /** 현재(또는 라우팅 예정) 큐의 멤버 userId 목록 — 상단 optgroup으로 우선 표시 */
+  /** 현재(또는 라우팅 예정) Assignment Group의 멤버 userId 목록 — 상단 optgroup으로 우선 표시 */
   memberIds: string[]
   disabled?: boolean
   className?: string
   emptyLabel?: string
 }
 
-/** 담당자 셀렉트 — 큐 멤버를 상단 그룹으로 우선 표시, 멤버가 아니어도 선택 가능 */
+/** 담당자 셀렉트 — Assignment Group 멤버를 상단 그룹으로 우선 표시, 멤버가 아니어도 선택 가능 */
 export default function OwnerSelect({
   value,
   onChange,
@@ -41,7 +41,7 @@ export default function OwnerSelect({
       <option value="">{emptyLabel}</option>
       {members.length > 0 ? (
         <>
-          <optgroup label="Queue Members">
+          <optgroup label="Group Members">
             {members.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </optgroup>
           <optgroup label="All">

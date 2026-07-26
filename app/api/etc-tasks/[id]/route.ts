@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { notifyTicketChanged } from '@/lib/notify'
+import { syncTicketClocksSafe } from '@/lib/sla'
 import { syncEtcTaskToTicket } from '@/lib/ticketDomain'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { deleteFromS3 } from '@/lib/s3'
@@ -140,7 +141,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   // Slack 알림 (P11 티켓 파이프라인) — sig 비교로 실변경만 발송, best-effort
   if (existing.ticketId) {
-    notifyTicketChanged({ ticketId: existing.ticketId, actorName: user.name }).catch(() => {})
+    syncTicketClocksSafe(existing.ticketId) // SLA 시계 갱신 (알림과 독립 — lib/sla.ts)
+    notifyTicketChanged({ ticketId: existing.ticketId, actorName: user.name, actorId: user.userId }).catch(() => {})
   }
 
   // Google Calendar 동기화 (비차단) — 업무기간 항목별 1개씩

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { notifyTicketChanged } from '@/lib/notify'
+import { syncTicketClocksSafe } from '@/lib/sla'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
@@ -147,7 +148,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   // Slack 알림 (P11 티켓 파이프라인) — sig 비교로 실변경(상태·배정)만 발송, best-effort
   if (syncedTicketId) {
-    notifyTicketChanged({ ticketId: syncedTicketId, actorName: authUser.name }).catch(() => {})
+    syncTicketClocksSafe(syncedTicketId) // SLA 시계 갱신 (알림과 독립 — lib/sla.ts)
+    notifyTicketChanged({ ticketId: syncedTicketId, actorName: authUser.name, actorId: authUser.userId }).catch(() => {})
   }
 
   // 공사상태 변경 후속 처리: buildStatus 라벨에 '완료' 포함 → 구축완료

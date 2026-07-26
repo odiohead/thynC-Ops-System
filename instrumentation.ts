@@ -14,15 +14,13 @@ export async function register() {
       console.error('[instrumentation] 메일 스케줄러 초기화 실패:', err)
     }
 
-    // Slack 지연 감지 스케줄러 (function_notification.md Phase 3)
+    // 알림 tick 스케줄러 (1.1 P4 — SLA 초과 즉시 알림 + 일일 요약 + 자동 종결)
+    // 주기는 notify_tick_interval(기본 5m), 1.0에서 지연 감지를 꺼 뒀던 환경은 off로 시작
     try {
-      const { startNotifyScheduler } = await import('@/lib/notify-scheduler')
-      const ds = await prisma.appSetting.findUnique({
-        where: { key: 'notify_delay_interval' },
-      })
-      startNotifyScheduler(ds?.value || 'off')
+      const { startNotifyScheduler, resolveTickInterval } = await import('@/lib/notify-scheduler')
+      startNotifyScheduler(await resolveTickInterval())
     } catch (err) {
-      console.error('[instrumentation] 지연 감지 스케줄러 초기화 실패:', err)
+      console.error('[instrumentation] 알림 tick 스케줄러 초기화 실패:', err)
     }
 
     // 위키 청크 인덱스 주기 갱신 (본문 저장은 협업 서버가 하므로 REST 훅만으로는 누락됨)

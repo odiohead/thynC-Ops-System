@@ -126,7 +126,7 @@ export default function TicketQueuesSettingsPage() {
   }
 
   async function handleDelete(q: Queue) {
-    if (!confirm(`'${q.name}' 큐를 삭제하시겠습니까?`)) return
+    if (!confirm(`'${q.name}' 그룹을 삭제하시겠습니까?`)) return
     setBusy(true)
     const res = await fetch(`/api/settings/ticket-queues/${q.id}`, { method: 'DELETE' })
     if (res.ok) {
@@ -191,8 +191,8 @@ export default function TicketQueuesSettingsPage() {
 
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">티켓 큐 관리</h1>
-            <p className="mt-1 text-sm text-gray-500">티켓이 배정되는 처리 그룹(큐)을 관리합니다.</p>
+            <h1 className="text-2xl font-bold text-gray-900">Assignment Group 관리</h1>
+            <p className="mt-1 text-sm text-gray-500">티켓이 배정되는 처리 그룹(Assignment Group)을 관리합니다. AWS SIM의 assigned/resolver group에 해당합니다.</p>
           </div>
           {!isAdding && (
             <button
@@ -200,7 +200,7 @@ export default function TicketQueuesSettingsPage() {
               onClick={() => { setIsAdding(true); setEditId(null) }}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
             >
-              + 큐 추가
+              + 그룹 추가
             </button>
           )}
         </div>
@@ -231,7 +231,7 @@ export default function TicketQueuesSettingsPage() {
                 </tr>
               ) : queues.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-sm text-gray-400">등록된 큐가 없습니다.</td>
+                  <td colSpan={7} className="py-12 text-center text-sm text-gray-400">등록된 Assignment Group이 없습니다.</td>
                 </tr>
               ) : (
                 queues.map((q, index) => (
@@ -366,7 +366,7 @@ export default function TicketQueuesSettingsPage() {
                           <button
                             onClick={() => handleDelete(q)}
                             disabled={busy || q._count.tickets > 0}
-                            title={q._count.tickets > 0 ? '티켓이 있는 큐는 삭제할 수 없습니다. 비활성화하거나 티켓을 이관하세요.' : undefined}
+                            title={q._count.tickets > 0 ? '티켓이 있는 그룹은 삭제할 수 없습니다. 비활성화하거나 티켓을 이관하세요.' : undefined}
                             className="rounded-md border border-red-200 px-3 py-1 text-xs font-medium text-red-500 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             삭제
@@ -390,7 +390,7 @@ export default function TicketQueuesSettingsPage() {
                         if (e.key === 'Enter') handleAdd()
                         if (e.key === 'Escape') { setIsAdding(false); setAddName(''); setAddDescription('') }
                       }}
-                      placeholder="큐 이름 입력"
+                      placeholder="그룹 이름 입력"
                       autoFocus
                       className="w-full rounded border border-blue-400 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
@@ -440,7 +440,7 @@ export default function TicketQueuesSettingsPage() {
             <div className="flex max-h-[80dvh] w-full max-w-md flex-col rounded-xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
                 <h2 className="text-base font-semibold text-gray-900">
-                  큐 멤버 관리 <span className="ml-1 text-sm font-normal text-gray-400">— {memberQueue.name}</span>
+                  그룹 멤버 관리 <span className="ml-1 text-sm font-normal text-gray-400">— {memberQueue.name}</span>
                 </h2>
                 <button
                   type="button"
@@ -458,7 +458,7 @@ export default function TicketQueuesSettingsPage() {
                   placeholder="이름 또는 이메일로 검색..."
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
-                <p className="mt-2 text-xs text-gray-400">선택 {memberIds.length}명 — 이 큐의 담당자 셀렉트에서 상단 그룹으로 우선 표시됩니다.</p>
+                <p className="mt-2 text-xs text-gray-400">선택 {memberIds.length}명 — 이 그룹의 담당자 셀렉트에서 상단 그룹으로 우선 표시됩니다.</p>
                 <ul className="mt-2 divide-y divide-gray-100">
                   {users
                     .filter((u) => {

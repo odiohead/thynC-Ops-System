@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { notifyTicketCreated } from '@/lib/notify'
+import { syncTicketClocksSafe } from '@/lib/sla'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { advanceHospitalStatus } from '@/lib/hospitalStatus'
@@ -135,7 +136,8 @@ export async function POST(request: NextRequest) {
   })
 
   // Slack 알림 (등록, P11 티켓 파이프라인) — best-effort
-  notifyTicketCreated({ ticketId, actorName: authUser.name }).catch(() => {})
+  syncTicketClocksSafe(ticketId) // SLA 시계 생성 (알림과 독립 — lib/sla.ts)
+  notifyTicketCreated({ ticketId, actorName: authUser.name, actorId: authUser.userId }).catch(() => {})
 
   return NextResponse.json({ installPlan }, { status: 201 })
 }

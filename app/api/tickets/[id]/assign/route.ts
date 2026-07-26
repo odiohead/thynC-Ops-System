@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { addTicketEvent } from '@/lib/ticket'
 import { notifyTicketChanged } from '@/lib/notify'
+import { syncTicketClocksSafe } from '@/lib/sla'
 import { syncTicketToDomain } from '@/lib/ticketDomain'
 
 export const dynamic = 'force-dynamic'
@@ -70,7 +71,8 @@ export async function POST(request: NextRequest, { params }: Params) {
   })
 
   // P11: 단일 파이프라인 — owner 변경(배정 DM)·자동 상태 전이(채널)를 sig 비교로 처리
-  notifyTicketChanged({ ticketId: id, actorName: user.name }).catch(() => {})
+  syncTicketClocksSafe(id) // SLA 시계 갱신 (알림과 독립 — lib/sla.ts)
+  notifyTicketChanged({ ticketId: id, actorName: user.name, actorId: user.userId }).catch(() => {})
 
   return NextResponse.json({ ticket: updated })
 }

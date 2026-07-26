@@ -3,6 +3,16 @@
 thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 병원 정보 관리, 프로젝트(구축 공사) 관리, 답사 관리, 유지보수 관리, 조직/사용자 권한 관리 기능을 제공합니다.
 
+> ## 운영관리시스템 1.0 — 2026-07-26 마감
+>
+> 계획했던 전 모듈이 개발·PROD 반영 완료되어 **1.0으로 마감**되었습니다.
+> 포함 범위: 병원·프로젝트·답사·설치계획·유지보수·기타업무 / **티켓 시스템(P1~P13, 도메인 편입 5/5)** /
+> 사내 위키(+협업 편집·HTML 문서·AI 청크 인덱스) / AI 어시스턴트 v3 + 상담이력 / 자재관리(WMS) /
+> 차량예약·운행일지 / Slack 알림·SLA / GW 배치 플래너 / 전 화면 모바일 대응.
+>
+> 이후 작업은 1.0 유지보수(버그·운영 요청)와 **신규 설계 건**으로 구분해 처리합니다.
+> 미착수 고도화 제안(`enhancement_analysis_202607.md`)은 1.0 범위 외이며, 필요 시 그 시점 데이터로 새로 설계합니다.
+
 ---
 
 ## 기술 스택
@@ -83,9 +93,11 @@ app/
 │   │   ├── maintenance-type/         # 장애유형 관리
 │   │   ├── maintenance-status/       # 유지보수 상태 관리
 │   │   ├── etc-task-status/          # 기타업무 상태 관리
-│   │   ├── ticket-queues/            # 티켓 큐 마스터 CRUD (티켓 있으면 삭제 400)
-│   │   ├── ticket-cti/               # 티켓 분류(CTI) 3단 트리 CRUD + 기본 큐 지정
+│   │   ├── ticket-queues/            # Assignment Group 마스터 CRUD (티켓 있으면 삭제 400)
+│   │   ├── ticket-cti/               # 티켓 분류(CTI) 3단 트리 CRUD + 기본 그룹 지정
 │   │   ├── ticket-pending-reasons/   # 티켓 대기(PENDING) 사유 마스터 CRUD
+│   │   ├── sla-policies/             # SLA 정책·타깃 CRUD + preview(영향 미리보기) — 1.1 P2, ADMIN
+│   │   ├── notify-routes/            # 발송 채널·라우팅 규칙 CRUD + 연결 테스트 발송 — 1.1 P3, ADMIN
 │   │   ├── item-category/            # 품목 분류 트리 CRUD (대>중>소 3단계)
 │   │   ├── inventories/              # 인벤토리 마스터 CRUD (병원 연결 토글, 사용 중 삭제 409)
 │   │   ├── stock-in-type/            # 입고 유형 CRUD (시스템 유형·사용 중 삭제 409)
@@ -140,7 +152,7 @@ app/
 ├── site-visits/                      # 답사 목록·상세·등록
 ├── maintenances/                     # 유지보수 목록·상세·등록
 ├── etc-tasks/                        # 기타업무 목록·상세·등록 (다병원·비유지보수 업무)
-├── tickets/                          # 티켓 목록(큐 탭·저장된 뷰)·생성(CTI 3단)·상세(전이 액션·타임라인)·dashboard/(P12 지표)
+├── tickets/                          # 티켓 목록(Assignment Group 탭·저장된 뷰)·생성(CTI 3단)·상세(전이 액션·타임라인)·dashboard/(P12 지표)
 │   └── components/                   # TicketStatusBadge·TicketSeverityBadge·TicketRefTypeBadge(유형 배지 단일 소스)·LinkedWorkBanner(연결 업무 배너)·TicketLogPanel·OwnerSelect
 ├── tasks/                            # 업무(Task) 현황 (통합 조회)
 ├── gateway-planner/                  # GW 배치 플래너 — 도면 업로드·잡 목록 + [id](진행 폴링·스케일 확정·2점 보정·배치 미리보기·PPTX)
@@ -177,8 +189,8 @@ app/
 │   ├── maintenance-type/             # 장애유형 관리
 │   ├── maintenance-status/           # 유지보수 상태 관리
 │   ├── etc-task-status/              # 기타업무 상태 관리
-│   ├── ticket-queues/                # 티켓 큐 관리 (이름·설명·순서·활성·티켓 수)
-│   ├── ticket-cti/                   # 티켓 분류(CTI) 관리 (Category/Type/Item 3컬럼 + Item 기본 큐 지정)
+│   ├── ticket-queues/                # Assignment Group 관리 (이름·설명·순서·활성·티켓 수)
+│   ├── ticket-cti/                   # 티켓 분류(CTI) 관리 (Category/Type/Item 3컬럼 + Item 기본 Assignment Group 지정)
 │   ├── ticket-pending-reasons/       # 티켓 대기 사유 관리
 │   ├── item-category/                # 품목 분류 관리 (ADMIN 이상 — 대>중>소 계층 트리)
 │   ├── inventories/                  # 인벤토리 관리 (ADMIN 이상 — 이름·병원 연결·활성·순서)
@@ -188,12 +200,13 @@ app/
 │   ├── inventory-managers/           # 재고 담당자 관리 (ADMIN 이상 — 담당자 풀)
 │   ├── vehicles/                     # 차량 관리 (ADMIN 이상)
 │   ├── nav-menus/                    # 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
-│   ├── notifications/                # Slack 알림 설정 (ADMIN 이상 — 전역/이벤트 토글 + 타입별 포함 필드)
+│   ├── notifications/                # 알림 설정 (ADMIN 이상) — 탭① SLA 기준(SlaMatrixTab) / 탭② 채널·라우팅(RoutesTab) / 탭③ 전역·DM·이력
 │   ├── ai-assistant/                 # AI 어시스턴트 설정 (ADMIN 이상 — effort·캐시 TTL, 모델은 읽기 전용 표시)
 │   └── audit-logs/                   # 감사 로그 (SUPER_ADMIN 전용)
 ├── inventory/                        # 자재 현황(인벤토리별 카드 섹션 + 섹션 입고/출고/이동 버튼) + [invId]/items/[itemId](인벤토리 자재 상세) + transactions/(이력) + items/(관리·[id] 품목 마스터 상세) + components/TransactionModal(품목 선택 모드)
 ├── login/                            # 로그인 페이지
-└── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper, StatusBadge 등)
+├── notifications/                    # 알림함 (1.1 P5 — 목록·미읽음/종류 필터·일괄 읽음·개인 수신 설정)
+└── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper, StatusBadge, NotificationBell, MyWorkPanel 등)
     ├── useOverlayDismiss.ts          # 오버레이(드로어·모달) 공통 훅 — 배경 스크롤 잠금 + ESC 닫기
     ├── theme/                        # ThemeProvider, ThemeToggle, useChartTheme (다크모드)
     └── ui/                           # 디자인 프리미티브 (Button, Card, Badge, Input, Table, Modal(모바일 바텀시트), PageHeader, EmptyState)
@@ -223,6 +236,11 @@ lib/
 ├── notifyFields.ts                   # Slack 알림 메시지 필드 카탈로그·타입별 추천 기본값 (설정 페이지·notify 공유)
 ├── delay-rules.ts                    # 지연 업무 판정 (타입별 기준일·임계일수, findDelayedTasks — KST 기준·보류 제외)
 ├── notify-scheduler.ts               # 지연 감지 인터벌 스케줄러 (mail-scheduler 패턴, notify_delay_interval 제어)
+├── sla.ts                            # SLA 시계 엔진 (1.1 P1 — 정책 매칭·시계 생성/갱신·정지/재개·달성/초과, 알림과 독립)
+├── sla-alerts.ts                     # SLA 알림 발송 (1.1 P4 — 초과 즉시 알림 1회성 + 지정 시각 일일 요약)
+├── notify-routes.ts                  # 채널 라우팅 매칭 (1.1 P3 — 이벤트×조건 → 채널 N개, 같은 채널 1건 합침)
+├── notify-center.ts                  # 내부 알림 생성 단일 진입점 (1.1 P5 — emit·수신자 산출·dedup·개인 설정)
+├── slaSettings.ts                    # SLA 설정 입력 검증·정규화·CTI 서브트리 확장 (1.1 P2)
 ├── inventory.ts                      # 자재관리 — 품목 채번(nextItemCode) + 재고 처리 권한(canManageStock: ADMIN or 재고 담당자 풀)
 ├── gateway-planner/                  # GW 배치 플래너 (function_gateway_planner.html)
 │   ├── types.ts                      # 공용 타입 + 기본 배치 규칙
@@ -598,20 +616,64 @@ prisma/
 
 ### 티켓 시스템 (P1~P13 완료 — `ticket_dev_schedule.md`·`ticket_system_design.md` §2)
 - AWS SIM식 티켓 레이어 — 티켓=공통 워크플로 껍데기, 도메인 레코드=구조화 본문(1:1). 전역 결정: `ticket_system_design.md` §2
-- **Ticket** (`tickets`): `ticketCode`(TK-YYYYMM-NNNNN, UNIQUE) · `status`(하드 enum `ticket_status`: OPEN/ASSIGNED/IN_PROGRESS/PENDING/RESOLVED/CLOSED — 전이표 코드 강제, `lib/ticket-shared.ts` 단일 소스) · `severity`(enum `ticket_severity`: SEV1~SEV5, 기본 SEV4) · `queueId`(필수) · `ctiId`(DB nullable·API 필수) · `ownerId`(단일 책임자, NULL=큐 대기) · `pendingReasonId`+`pendingNote` · `hospitalCode?` · `statusChangedAt`/`resolvedAt`/`closedAt`/`reopenCount`/`dueAt`(SLA — 생성일+Sev별 목표, PROJECT는 완료예정일) · 인덱스 (queue,status)/(owner,status)/(severity)/(statusChangedAt)/(hospitalCode)
+- **Ticket** (`tickets`): `ticketCode`(TK-YYYYMM-NNNNN, UNIQUE) · `status`(하드 enum `ticket_status`: OPEN/ASSIGNED/IN_PROGRESS/PENDING/RESOLVED/CLOSED — 전이표 코드 강제, `lib/ticket-shared.ts` 단일 소스) · `severity`(enum `ticket_severity`: SEV1~SEV5, 기본 SEV4) · `queueId`(필수) · `ctiId`(DB nullable·API 필수) · `ownerId`(단일 책임자, NULL=그룹 대기) · `pendingReasonId`+`pendingNote` · `hospitalCode?` · `statusChangedAt`/`resolvedAt`/`closedAt`/`reopenCount`/`dueAt`(SLA — 생성일+Sev별 목표, PROJECT는 완료예정일) · 인덱스 (queue,status)/(owner,status)/(severity)/(statusChangedAt)/(hospitalCode)
 - Ticket 추가 필드: `parentId`(self-FK — **마스터-서브 2레벨 고정**, 마스터는 열린 서브 있으면 해결/종결 불가, 연결/해제는 양쪽 타임라인 link 이벤트) · `refType`(도메인 연결 유형: MAINTENANCE, NULL=순수 티켓)
-- **답사·설치계획·프로젝트 편입 (P7~P9, 2026-07-24)**: 각 `ticketId`(1:1) — 답사(상태 5종 매핑, 작성완료→Pending 회신대기, Gmail 큐 승격도 티켓 생성), 설치계획(2축 write/reply 매핑, mail-queue 승격 포함), 프로젝트(BuildStatus 라벨 앵커 매핑, dueAt=완료예정일, CTI 영업/신규도입/구축). refType 'SITE_VISIT'·'INSTALL_PLAN'·'PROJECT'. 백필 104+72+243건(`scripts/backfill-*-tickets.mts`). **도메인 편입 5/5 완료**
-- **기타업무 편입 (P6, 2026-07-24)**: `etc_tasks.ticketId`(1:1) — 존속 편입(방문일정·캘린더는 도메인 잔류), CTI 내부/기타업무/일반→내부운영 큐, 상태 체계는 유지보수와 동일 매핑, 병원은 첫 연결분→ticket.hospitalCode. 백필 29건(`scripts/backfill-etc-task-tickets.mts`). refType 'ETC'. 역할 구분: 일정·병원 연결 필요하면 기타업무, 아니면 순수 티켓
-- **유지보수 편입 (P5, 2026-07-24)**: `maintenances.ticketId`(1:1 FK) — 유지보수 생성 시 티켓 동시 생성(큐 '유지보수', 장애유형→CTI 고객지원/장애/*, 우선순위→Sev), 상태·담당 **양방향 동기화**(`lib/ticketDomain.ts`, 매핑: 접수↔OPEN/ASSIGNED·처리중↔IN_PROGRESS·보류↔PENDING·완료↔RESOLVED/CLOSED), 처리 기록은 티켓 타임라인으로 일원화(기존 30건 이관·maintenance_logs 보존), Slack은 P11부터 티켓 파이프라인 단일 발송. 백필 219건 완료(`scripts/backfill-maintenance-tickets.mts`)
-- **TicketQueue** (`ticket_queues`): AWS식 배정 큐 마스터 (기능 단위, 런타임 관리)
-- **TicketQueueMember** (`ticket_queue_members`): 큐 멤버 N:M (AWS resolver group — 담당자 선택 시 큐 멤버 우선 노출, 비멤버 배정도 허용)
-- **TicketCti** (`ticket_cti`): 3단계 분류 트리(parent_id 자기참조, level 1~3 CHECK) + `defaultQueueId`(CTI→큐 자동 라우팅)
+- **답사·설치계획·프로젝트 편입 (P7~P9, 2026-07-24)**: 각 `ticketId`(1:1) — 답사(상태 5종 매핑, 작성완료→Pending 회신대기, Gmail 대기열 승격도 티켓 생성), 설치계획(2축 write/reply 매핑, mail-queue 승격 포함), 프로젝트(BuildStatus 라벨 앵커 매핑, dueAt=완료예정일, CTI 영업/신규도입/구축). refType 'SITE_VISIT'·'INSTALL_PLAN'·'PROJECT'. 백필 104+72+243건(`scripts/backfill-*-tickets.mts`). **도메인 편입 5/5 완료**
+- **기타업무 편입 (P6, 2026-07-24)**: `etc_tasks.ticketId`(1:1) — 존속 편입(방문일정·캘린더는 도메인 잔류), CTI 내부/기타업무/일반→내부운영 그룹, 상태 체계는 유지보수와 동일 매핑, 병원은 첫 연결분→ticket.hospitalCode. 백필 29건(`scripts/backfill-etc-task-tickets.mts`). refType 'ETC'. 역할 구분: 일정·병원 연결 필요하면 기타업무, 아니면 순수 티켓
+- **유지보수 편입 (P5, 2026-07-24)**: `maintenances.ticketId`(1:1 FK) — 유지보수 생성 시 티켓 동시 생성(Assignment Group '유지보수', 장애유형→CTI 고객지원/장애/*, 우선순위→Sev), 상태·담당 **양방향 동기화**(`lib/ticketDomain.ts`, 매핑: 접수↔OPEN/ASSIGNED·처리중↔IN_PROGRESS·보류↔PENDING·완료↔RESOLVED/CLOSED), 처리 기록은 티켓 타임라인으로 일원화(기존 30건 이관·maintenance_logs 보존), Slack은 P11부터 티켓 파이프라인 단일 발송. 백필 219건 완료(`scripts/backfill-maintenance-tickets.mts`)
+- **TicketQueue** (`ticket_queues`): **Assignment Group** 마스터 — AWS SIM의 assigned/resolver group에 대응하는 배정 그룹(기능 단위, 런타임 관리). **UI 표기는 'Assignment Group'**, 테이블·API 경로는 `ticket_queues`/`ticket-queues` 유지(2026-07-26 명칭 변경)
+- **TicketQueueMember** (`ticket_queue_members`): Assignment Group 멤버 N:M (담당자 선택 시 그룹 멤버 우선 노출, 비멤버 배정도 허용)
+- **TicketCti** (`ticket_cti`): 3단계 분류 트리(parent_id 자기참조, level 1~3 CHECK) + `defaultQueueId`(CTI→Assignment Group 자동 라우팅, Item 레벨에 지정)
 - **TicketParticipant** (`ticket_participants`): 참여자 N:M (owner와 별개)
 - **TicketLog** (`ticket_logs`): 단일 타임라인 — `logType` comment(사람, Tiptap HTML)/status_change·assign·queue_transfer·sev_change 등 시스템 이벤트(`payload` JSONB). 프로세스 지표 원천 겸용
 - **TicketPendingReason** (`ticket_pending_reasons`): PENDING 사유 마스터
-- 초기 마스터 시드: `scripts/seed-ticket-masters.sql` (재실행 안전 — 큐 4종·CTI 3 Category·사유 5종·nav 메뉴 4행. PROD 최초 반영 시 실행)
-- Slack 알림 (P11, 2026-07-24): **티켓 이벤트 단일 파이프라인** — 모든 업무 알림이 티켓 mutation(생성/상태·큐 변경/배정/Sev 에스컬레이션)에서 발생, 도메인 라우트 직접 발송 폐지. sig v2 4축 비교로 실변경만 발송. Sev1=@channel·Sev2=🔥+큐 멤버 멘션, 배정 시 owner DM(`notify_assign_dm`). 상태 표기는 영문(Open~Closed)
+- 초기 마스터 시드: `scripts/seed-ticket-masters.sql` (재실행 안전 — Assignment Group 4종·CTI 3 Category·사유 5종·nav 메뉴 4행. PROD 최초 반영 시 실행)
+- Slack 알림 (P11, 2026-07-24): **티켓 이벤트 단일 파이프라인** — 모든 업무 알림이 티켓 mutation(생성/상태·그룹 변경/배정/Sev 에스컬레이션)에서 발생, 도메인 라우트 직접 발송 폐지. sig v2 4축 비교로 실변경만 발송. Sev1=@channel·Sev2=🔥+그룹 멤버 멘션, 배정 시 owner DM(`notify_assign_dm`). 상태 표기는 영문(Open~Closed)
 - SLA (P11): `dueAt = 생성일 + Sev별 목표일`(`notify_sla_rules` 기본 SEV1:1/SEV2:1/SEV3:3/SEV4:7/SEV5:미적용, PROJECT는 완료예정일 유지) — 스케줄러가 초과/임박(D-N)/상태 체류를 지연 채널 요약 + SLA 초과 owner DM. PENDING은 SLA 시계 정지. RESOLVED는 `ticket_auto_close_days`(기본 0=끔) 경과 시 자동 CLOSED(타임라인 이벤트만). 백필: `scripts/backfill-ticket-dueat.sql`
+
+### SLA 시계 엔진 (1.1 P1 — `projects/notification_v1.1_design.md` §4)
+
+- 1.0의 단일 시계(`dueAt = 생성일 + Sev별 목표일`)를 **정책 × 타깃 × 시계** 3계층으로 재설계. 티켓 1건이 metric별 여러 시계를 동시에 갖는다
+- **SlaPolicy** (`sla_policies`): "어떤 티켓에 적용되나" — `priority`(낮을수록 우선, **매칭되면 1개만 승리·병합 없음**), 스코프 `refTypes[]`/`queueIds[]`/`ctiIds[]`(서브트리 상속)/`severities[]`(빈 배열=전체), `clockType`(CALENDAR_24H — 영업시간 시계는 1.1 범위 외)
+- **SlaTarget** (`sla_targets`): "무엇을 몇 분 안에" — `metric`(ASSIGN·FIRST_RESPONSE·RESOLVE·UPDATE_STALE·DWELL·DOMAIN_DUE), `statusScope`(DWELL 전용), `severity`(NULL=전 Sev 공통), `thresholdMin`(분 단일 단위), `warnRatio`(임박 예고 %). UNIQUE `(policy, metric, statusScope, severity)`
+- **TicketSlaClock** (`ticket_sla_clocks`): 티켓별 실측 인스턴스 — `startedAt`/`dueAt`/`pausedMs`, `state`(RUNNING·PAUSED·MET·BREACHED·CANCELED), `satisfiedAt`/`breachedAt`, **`notifiedBreachAt`**(즉시 알림 1회성 보장 + quiet 백필 마킹 겸용). UNIQUE `(ticket, metric, statusScope)` + 초과 스캔 전용 부분 인덱스(`state='RUNNING' AND notified_breach_at IS NULL`)
+- metric 성격: `UPDATE_STALE`은 활동 발생 시 **리셋**(달성 아님) / `DWELL`은 상태 이탈 시 종료 / `DOMAIN_DUE`는 도메인 필드가 기한 소유(PROJECT=완료예정일·SITE_VISIT=방문일·INSTALL_PLAN=회신일, **코드 고정 매핑**)
+- **PENDING은 시계 정지**(`pausedMs` 누적 후 기한 이월). 정책 변경은 진행 중 시계를 소급 변경하지 않고, 목표가 늘어 기한이 미래가 되면 초과가 해소된다(유령 위험 방지)
+- `tickets.due_at`은 대표 시계(DOMAIN_DUE > RESOLVE)의 **캐시로 유지** — 목록·상세·기존 지표 무영향. 캐시 쓰기는 raw SQL이며 **ISO 문자열 + `timestamptz AT TIME ZONE 'UTC'` 캐스팅 필수**(JS Date 파라미터는 KST로 직렬화돼 9시간 어긋남)
+- 시드 `scripts/seed-ticket-masters.sql`과 별개로 `scripts/seed-sla-policies.sql`(폴백 정책 = 1.0 값 이관 + PROJECT 정책), 백필 `scripts/backfill-sla-clocks.mts`(**quiet 기본** — 과거 초과분 알림 억제), 스모크 `scripts/sla-smoke.mts`(31케이스)
+
+### Slack 채널 라우팅 (1.1 P3 — `projects/notification_v1.1_design.md` §5.1)
+
+- 1.0은 채널이 env 상수(`SLACK_CHANNEL_MAIN`/`DELAY`)에 고정돼 유형별 분리가 불가능했다. 1.1은 **채널·규칙을 DB로** 옮겨 런타임 관리
+- **NotifyChannel** (`notify_channels`): `name`(UNIQUE)·`slackChannelId`·활성·순서. 설정 화면에서 **연결 테스트 발송** 가능
+- **NotifyRoute** (`notify_routes`): `eventType`(TICKET_CREATED·TICKET_STATUS_CHANGED·TICKET_QUEUE_TRANSFERRED·SEV_ESCALATED·SLA_BREACH·SLA_WARNING·DAILY_DIGEST) × 조건(`refTypes`/`queueIds`/`ctiIds`(서브트리)/`severities`/`statusTo`(전이 후 상태)/`metrics`) → `channelId`. `mentionMode`(none·queue_members·here·channel), **`digestHour`**(KST 0~23)·`digestOpts`(포함 섹션·그룹 기준·섹션 상한)
+- 매칭 의미론은 SLA 정책과 동일(축 간 AND, 배열 내부 OR, 빈 배열=전체)이나 **매칭된 규칙을 전부 실행**한다(다중 채널). 같은 채널 중복은 1건으로 합치고 멘션은 강한 쪽 채택. 규칙 0건이면 미발송 + `no_route` 스킵 로그
+- 시드 `scripts/seed-notify-routes.sql` — 기존 env 채널을 규칙 6행(등록·상태변경·그룹이관·Sev상향·일일요약 09:00·초과 즉시)으로 재현해 **배포 직후 동작이 1.0과 동일**
+
+### SLA 알림 발송 (1.1 P4 — §5.2·§5.3)
+
+- **초과 즉시 알림**: tick(기본 5분)마다 기한 지난 시계를 BREACHED로 확정하고, `notified_breach_at`이 NULL인 건만 발송 후 마킹 → **1회성 보장**. tick당 상한 `notify_breach_tick_cap`(기본 20)
+- **일 1회 요약**: 규칙별 `digestHour` 도달 + **KST 당일 발송 로그 없음**(`notification_logs.payload.digestRouteId`)일 때 1회 발송 → 서버 재시작·재배포에도 중복되지 않는다(1.0 `setInterval` 24h의 약점 해소). 본문은 Assignment Group·유형별 섹션 + 섹션 상한
+- **스케줄러**: `notify_tick_interval`(off·1m·5m·10m·15m, 기본 5m) — 1.0의 `notify_delay_interval`이 'off'였던 환경은 tick도 off로 시작(의도치 않은 발송 방지). 설정 저장 시 재시작 없이 즉시 반영
+- 1.0의 지연 채널 요약(12시간 dedup)·`runDelayNotifications`는 제거. SLA 초과 owner DM은 `runSlaOwnerDms`로 분리해 tick에서 호출
+
+### 시스템 내부 알림 (1.1 P5 — `projects/notification_v1.1_design.md` §6)
+
+- **알림의 원본을 DB로**: 1.0은 "알림 = Slack 발송"이라 시스템 안에 사용자가 볼 알림이 없었다. 1.1은 티켓 이벤트 → `notifications` 적재 → Slack은 그 중 일부를 내보내는 어댑터. **Slack이 꺼져 있어도 내부 알림은 남는다**
+- **Notification** (`notifications`): `userId`·`kind`·`title`·`body`·`link`(앱 내부 경로)·`ticketId`(**FK 없이 ID만** — 티켓 삭제 후에도 이력 보존)·`refType`/`refCode`/`severity`·`actorId`+`actorName`(스냅샷)·`dedupKey`(부분 UNIQUE)·`readAt`
+- **NotificationPref** (`notification_prefs`): `(userId, kind)` PK, `inApp`/`slackDm`. **행이 없으면 코드 기본값**(계정마다 미리 만들지 않는다)
+- kind 6종: `TICKET_ASSIGNED`·`TICKET_UNASSIGNED_IN_MY_QUEUE`(내 그룹 미배정 유입)·`TICKET_STATUS_CHANGED`·`TICKET_COMMENT`·`SLA_WARNING`·`SLA_BREACH`
+- 수신자 규칙: owner + 참여자, **owner가 없으면 Assignment Group 멤버로 폴백**(그룹 대기 티켓의 알림이 사라지지 않게). **본인 행동은 제외**(actor == 수신자면 스킵 — 전 호출부에 `actorId` 전달)
+- UI: 전역 벨(`app/components/NotificationBell.tsx` — 데스크톱 사이드바·모바일 헤더, 60초 폴링) + `/notifications` 알림함 + 개인 수신 설정. **위키 알림은 HTTP로 합산 표시**(`/api/wiki/notifications`) — 테이블 통합 없이 모듈 경계(규칙 #7·#8) 유지
+- 향후 페이저 앱은 이 테이블을 소스로 푸시한다(설계 §12)
+
+### 첫 화면 개인화 — My Work (1.1 P6 — §7)
+
+- `app/page.tsx` 최상단 `MyWorkPanel` — 기존 전사 KPI는 그대로 아래 유지
+- 타일 4종(내 티켓 / **SLA 초과**(적색) / SLA 임박(앰버) / 내 그룹 미배정) → 클릭 시 필터된 `/tickets`로 이동
+- **SLA 위험 목록**(최대 5건, metric별 초과·임박 라벨) + 최근 알림 5건
+- 데이터는 `GET /api/me/dashboard` **1콜**. `hasWork=false`(담당 티켓·그룹 멤버십·SLA 위험 전부 없음)면 **블록 자체를 렌더하지 않는다** — 0건 카드 나열은 소음
+- 티켓 목록에 **SLA 필터**(초과·임박), 티켓 상세에 **SLA 시계 패널**(metric별 기한·잔여/초과·정지 누적·적용 정책)
 
 ### Wiki 모듈 — 별도 PostgreSQL 스키마 `wiki`
 - 사내 위키(Notion-like) 기능. 본문은 BlockNote JSON 블록 배열로 저장
@@ -706,7 +768,7 @@ prisma/
 - **모달**: `ui/Modal`은 모바일에서 바텀시트로 전환. 폼(유지보수·답사·기타업무·티켓)은 모바일 1컬럼 스택
 - **위키**: lg 미만에서 사이드바가 오프캔버스 드로어로 전환 (좌하단 플로팅 버튼)
 - **간트차트·차량보드**: min-width 기반 가로 스크롤, 모바일 헤더 높이 보정(dvh)
-- **티켓 (2026-07-26)**: 목록 = 모바일 카드(티켓번호·Sev·유형·상태 배지 + 큐/담당/병원/경과, SEV1·2 좌측 액센트 유지) + 큐 탭 가로 스크롤 + 필터 셀렉트 2열 · 상세 = 전이 버튼 전폭 분할·연결 업무 배너 CTA 전폭·서브 티켓 카드 전환 · 생성 = 병원 검색이 공통 `ui/Modal`(바텀시트) · 대시보드 = 필터 2열, Sev/유형 차트 세로 스택, 표는 min-width 가로 스크롤
+- **티켓 (2026-07-26)**: 목록 = 모바일 카드(티켓번호·Sev·유형·상태 배지 + 그룹/담당/병원/경과, SEV1·2 좌측 액센트 유지) + 그룹 탭 가로 스크롤 + 필터 셀렉트 2열 · 상세 = 전이 버튼 전폭 분할·연결 업무 배너 CTA 전폭·서브 티켓 카드 전환 · 생성 = 병원 검색이 공통 `ui/Modal`(바텀시트) · 대시보드 = 필터 2열, Sev/유형 차트 세로 스택, 표는 min-width 가로 스크롤
 - **AI 어시스턴트 (2026-07-26)**: 모바일 헤더 압축(제목 축소·설명 숨김·버튼 라벨 단축), 병원 검색 입력 전폭, 답변 버블 폭 확대(94%), 대화 목록 드로어에 `useOverlayDismiss` 적용, **hover 없는 터치에서 접근 불가였던 대화 삭제 버튼 상시 노출**, 피드백(👍/👎)·정제 버튼 터치 타겟 확대
 - 공통 오버레이 동작은 `useOverlayDismiss` 훅으로 통일
 
@@ -828,9 +890,9 @@ prisma/
 - 감사 로그 `resource='etc_task'`로 모든 mutation 기록
 
 ### 티켓 관리 (`/tickets` — P3 기본 UI, 2026-07-23)
-- **목록** (`/tickets`): 상단 큐 탭(전체+활성 큐별) · 필터 바 — 상태 다중 토글(선택 없음 = 열린 티켓 `open=true`), Sev 셀렉트, 내 티켓/미배정 토글(상호 배타), 티켓번호·제목 검색(300ms 디바운스) · 서버 페이지네이션(30건) · 컬럼: 티켓번호|Sev|제목|상태(PENDING이면 사유 병기)|큐|담당자|병원|접수일 · 행 클릭 → 상세
-- **생성** (`/tickets/new`): CTI 3단 셀렉트(Category→Type→Item, 전체 트리 1회 로드 후 클라이언트 구성) · 선택 Item의 기본 큐 표시 + 큐 수동 변경 · Sev(기본 SEV4) · 담당자(owner, 지정 시 ASSIGNED 시작) · 참여자 칩+셀렉트 · 병원 검색 모달(유지보수 폼과 동일 패턴) · 설명 Tiptap → 저장 후 상세로 이동
-- **상세** (`/tickets/[id]`): 헤더(티켓번호·상태/Sev 배지·재오픈 횟수) · 메타 패널(큐, CTI 전체 경로, 담당자, 참여자, 병원 링크, 접수자, 접수/해결/종결 시각) · PENDING이면 사유·메모 배너
+- **목록** (`/tickets`): 상단 Assignment Group 탭(전체+활성 그룹별) · 필터 바 — 상태 다중 토글(선택 없음 = 열린 티켓 `open=true`), Sev 셀렉트, 내 티켓/미배정 토글(상호 배타), 티켓번호·제목 검색(300ms 디바운스) · 서버 페이지네이션(30건) · 컬럼: 티켓번호|Sev|제목|상태(PENDING이면 사유 병기)|Assign Group|담당자|병원|접수일 · 행 클릭 → 상세
+- **생성** (`/tickets/new`): CTI 3단 셀렉트(Category→Type→Item, 전체 트리 1회 로드 후 클라이언트 구성) · 선택 Item의 기본 Assignment Group 표시 + 그룹 수동 변경 · Sev(기본 SEV4) · 담당자(owner, 지정 시 ASSIGNED 시작) · 참여자 칩+셀렉트 · 병원 검색 모달(유지보수 폼과 동일 패턴) · 설명 Tiptap → 저장 후 상세로 이동
+- **상세** (`/tickets/[id]`): 헤더(티켓번호·상태/Sev 배지·재오픈 횟수) · 메타 패널(Assignment Group, CTI 전체 경로, 담당자, 참여자, 병원 링크, 접수자, 접수/해결/종결 시각) · PENDING이면 사유·메모 배너
 - **액션** (VIEWER 숨김): `canTransition` 전이표로 **현재 상태에서 허용된 전이 버튼만 노출** — PENDING 전환은 사유 셀렉트+메모 인라인 입력, CLOSED는 confirm · 담당자 변경(OPEN↔ASSIGNED 자동 연동) · 큐 이관 · Sev 변경 · 참여자 추가/제거 · 티켓 삭제(ADMIN) · 전이표 위반 등 API 400 메시지 그대로 alert
 - **타임라인** (`TicketLogPanel`): 코멘트(Tiptap HTML, 본인·ADMIN 수정/삭제)와 시스템 이벤트(회색 한 줄 — payload를 상태/Sev 라벨·사용자/큐/CTI 이름으로 번역: "상태 접수 → 배정 · 작성자 · 시각") 시간순 단일 뷰 + 하단 코멘트 작성
 - 배지 색·라벨·전이표는 `lib/ticket-shared.ts`(클라이언트 안전) 단일 소스 — `TicketStatusBadge`/`TicketSeverityBadge` 공용 컴포넌트
@@ -1298,6 +1360,23 @@ npm run dev
 | GET/POST, PUT/DELETE | `/api/settings/ticket-cti(/[id])` | CTI 3단계 트리 (하위·티켓 있으면 삭제 불가, 기본 큐 지정) |
 | GET/POST, PUT/DELETE | `/api/settings/ticket-pending-reasons(/[id])` | PENDING 사유 마스터 |
 
+### SLA 기준 (1.1 P2 — 전체 ADMIN 이상)
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET  | `/api/settings/sla-policies` | 정책+타깃 목록(매트릭스 소스) + 편집 마스터(Assignment Group·CTI·상태·Sev·metric) |
+| POST | `/api/settings/sla-policies` | 정책 행 추가 (스코프·우선순위, 타깃 검증 — DWELL 상태 필수·DOMAIN_DUE 지원 유형 검사) |
+| PUT  | `/api/settings/sla-policies/[id]` | 스코프·우선순위·활성 + **타깃 전체 재설정**(빈 셀=감지 안 함). `applyToOpen:true`면 열린 티켓 **quiet 재계산**(알림 미발송) |
+| DELETE | `/api/settings/sla-policies/[id]` | 정책 삭제 (타깃 cascade, 시계는 `policy_id` SET NULL로 이력 보존 후 다음 동기화에서 정리) |
+| POST | `/api/settings/sla-policies/preview` | 저장 전 영향 미리보기 — 매칭 열린 티켓 수 + 즉시 초과가 될 건수 + 상위 10건 |
+
+### 발송 채널·라우팅 (1.1 P3 — 전체 ADMIN 이상)
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET  | `/api/settings/notify-routes` | 채널·규칙 목록 + 편집 마스터(이벤트·멘션 모드·Assignment Group·CTI·상태·Sev·metric) |
+| POST | `/api/settings/notify-routes` | `{kind:'channel'}` 채널 추가 / `{kind:'route'}` 규칙 추가(일일 요약은 발송 시각 필수) / `{kind:'test'}` **연결 테스트 발송** |
+| PUT  | `/api/settings/notify-routes/[id]?kind=channel\|route` | 채널·규칙 수정 (규칙은 조건·채널·멘션·발송 시각·활성) |
+| DELETE | `/api/settings/notify-routes/[id]?kind=channel\|route` | 삭제 (채널 삭제 시 연결 규칙 cascade — 발송 대상 없는 규칙을 남기지 않음) |
+
 ### 기타업무
 | Method | Endpoint | 설명 |
 |--------|----------|------|
@@ -1359,6 +1438,15 @@ npm run dev
 | GET  | `/api/consultations/[id]` | 상세 — SEERS 소속만 |
 | PUT  | `/api/consultations/[id]` | 수정 (본문 변경 시 title 재추출) — 본인 or ADMIN |
 | DELETE | `/api/consultations/[id]` | 삭제 — 본인 or ADMIN |
+
+### 내부 알림·개인 대시보드 (1.1 P5·P6)
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET  | `/api/notifications` | 내 알림 목록 + 미읽음 수 (`?unread=1&kind=&limit=`) — 본인 것만 |
+| PATCH | `/api/notifications` | 읽음 처리 (`{ids?}` 없으면 전체) |
+| GET/PUT | `/api/notifications/prefs` | 개인 수신 설정 (kind별 알림함·Slack DM, 행 없으면 기본값 반환) |
+| GET  | `/api/me/dashboard` | 첫 화면 My Work 1콜 — 내 티켓 상태별·SLA 위험·내 그룹 미배정·최근 알림 |
+| GET  | `/api/tickets/[id]/sla` | 티켓 SLA 시계 목록 (상세 패널용, 읽기 전용) |
 
 ### 답사
 | Method | Endpoint | 설명 |

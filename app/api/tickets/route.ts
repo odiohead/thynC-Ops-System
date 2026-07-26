@@ -6,6 +6,7 @@ import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { sanitizeRichTextHtml } from '@/lib/richtext'
 import { generateTicketCode, addTicketEvent } from '@/lib/ticket'
 import { notifyTicketCreated } from '@/lib/notify'
+import { syncTicketClocksSafe } from '@/lib/sla'
 import { getSlaRules, computeTicketDueAt } from '@/lib/delay-rules'
 
 export const dynamic = 'force-dynamic'
@@ -50,6 +51,19 @@ export async function GET(request: NextRequest) {
   const ctiId = sp.get('ctiId')
   if (ctiId) where.ctiId = parseInt(ctiId)
 
+  // SLA 필터 (1.1 P6) — 시계 상태로 조인 필터. 초과=BREACHED / 임박=목표의 warnRatio 경과
+  // 임박은 시각 계산이 필요해 서비스 계층(findSlaRisk)과 같은 규칙을 쓰되, 목록에서는
+  // "RUNNING이면서 기한이 임박" 조건을 근사(due_at <= now + 남은 시간 기준)한다.
+  const slaFilter = sp.get('sla')
+  if (slaFilter === 'overdue') {
+    where.slaClocks = { some: { state: 'BREACHED' } }
+  } else if (slaFilter === 'warning') {
+    const { findSlaRisk } = await import('@/lib/sla')
+    const risk = await findSlaRisk({ includeWarning: true })
+    const codes = risk.filter((r) => r.kind === 'warning').map((r) => r.ticketCode)
+    where.ticketCode = codes.length > 0 ? { in: codes } : { in: ['__none__'] }
+  }
+
   const q = sp.get('q')?.trim()
   if (q) {
     where.OR = [
@@ -92,9 +106,9 @@ export async function POST(request: NextRequest) {
 
   // 큐: 명시 지정 > CTI 기본 큐 (라우팅)
   const queueId: number | null = typeof body.queueId === 'number' ? body.queueId : cti.defaultQueueId
-  if (!queueId) return NextResponse.json({ error: '배정할 큐가 없습니다. 큐를 지정하거나 분류에 기본 큐를 설정하세요.' }, { status: 400 })
+  if (!queueId) return NextResponse.json({ error: '배정할 Assignment Group이 없습니다. 그룹을 지정하거나 분류에 기본 그룹을 설정하세요.' }, { status: 400 })
   const queue = await prisma.ticketQueue.findUnique({ where: { id: queueId } })
-  if (!queue || !queue.isActive) return NextResponse.json({ error: '유효하지 않은 큐입니다.' }, { status: 400 })
+  if (!queue || !queue.isActive) return NextResponse.json({ error: '유효하지 않은 Assignment Group입니다.' }, { status: 400 })
 
   const severity: TicketSeverity =
     typeof body.severity === 'string' && body.severity in TicketSeverity ? body.severity : 'SEV4'
@@ -169,7 +183,8 @@ export async function POST(request: NextRequest) {
     after: ticket,
   })
 
-  notifyTicketCreated({ ticketId: ticket.id, actorName: user.name }).catch(() => {})
+  syncTicketClocksSafe(ticket.id) // SLA 시계 갱신 (알림과 독립 — lib/sla.ts)
+  notifyTicketCreated({ ticketId: ticket.id, actorName: user.name, actorId: user.userId }).catch(() => {})
 
   return NextResponse.json({ ticket }, { status: 201 })
 }

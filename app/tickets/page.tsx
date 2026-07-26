@@ -110,6 +110,7 @@ export default function TicketsPage() {
   const [severity, setSeverity] = useState('')
   const [refType, setRefType] = useState('') // '' 전체 | 'none' 순수 | 'MAINTENANCE' 유지보수
   const [unassigned, setUnassigned] = useState(false)
+  const [sla, setSla] = useState('') // '' | 'overdue' | 'warning' — 1.1 P6 개인 블록의 착지점
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
@@ -120,6 +121,15 @@ export default function TicketsPage() {
   const canWrite = !!role && role !== 'VIEWER'
 
   useEffect(() => { setSavedViews(loadSavedViews()) }, [])
+
+  // 첫 화면 My Work에서 ?sla=overdue / ?unassigned=true 로 들어오는 경로
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const sp = new URLSearchParams(window.location.search)
+    const s = sp.get('sla')
+    if (s === 'overdue' || s === 'warning') { setSla(s); setTab('mine') }
+    if (sp.get('unassigned') === 'true') { setTab('all'); setUnassigned(true) }
+  }, [])
 
   function persistViews(views: SavedView[]) {
     setSavedViews(views)
@@ -186,6 +196,7 @@ export default function TicketsPage() {
     if (severity) params.set('severity', severity)
     if (refType) params.set('refType', refType)
     if (tab !== 'mine' && unassigned) params.set('unassigned', 'true')
+    if (sla) params.set('sla', sla)
     if (q) params.set('q', q)
     params.set('page', String(page))
     params.set('pageSize', String(PAGE_SIZE))
@@ -197,10 +208,10 @@ export default function TicketsPage() {
         setTotal(d.total ?? 0)
       })
       .finally(() => setLoading(false))
-  }, [tab, statuses, severity, refType, unassigned, q, page])
+  }, [tab, statuses, severity, refType, unassigned, sla, q, page])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const hasFilter = statuses.length > 0 || !!severity || !!refType || unassigned || !!q
+  const hasFilter = statuses.length > 0 || !!severity || !!refType || unassigned || !!sla || !!q
 
   function toggleStatus(s: TicketStatus) {
     setPage(1)
@@ -247,7 +258,7 @@ export default function TicketsPage() {
           </div>
         </div>
 
-        {/* 탭 — My Tickets(기본) / 전체 / 큐별. 모바일은 가로 스크롤(줄바꿈 대신) */}
+        {/* 탭 — My Tickets(기본) / 전체 / Assignment Group별. 모바일은 가로 스크롤(줄바꿈 대신) */}
         <div className="-mx-4 mb-4 flex gap-1 overflow-x-auto border-b border-gray-200 px-4 sm:mx-0 sm:flex-wrap sm:overflow-x-visible sm:px-0">
           {queueTabs.map((t) => (
             <button
@@ -350,6 +361,15 @@ export default function TicketsPage() {
                 ))}
               </select>
               <select
+                value={sla}
+                onChange={(e) => { setSla(e.target.value); setPage(1) }}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:py-1.5"
+              >
+                <option value="">SLA 전체</option>
+                <option value="overdue">SLA 초과</option>
+                <option value="warning">SLA 임박</option>
+              </select>
+              <select
                 value={refType}
                 onChange={(e) => { setRefType(e.target.value); setPage(1) }}
                 className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:py-1.5"
@@ -378,7 +398,7 @@ export default function TicketsPage() {
               {hasFilter && (
                 <button
                   type="button"
-                  onClick={() => { setStatuses([]); setSeverity(''); setRefType(''); setUnassigned(false); setQInput(''); setQ(''); setPage(1) }}
+                  onClick={() => { setStatuses([]); setSeverity(''); setRefType(''); setUnassigned(false); setSla(''); setQInput(''); setQ(''); setPage(1) }}
                   className="rounded-md border border-gray-300 px-2.5 py-1.5 text-xs text-gray-500 transition-colors hover:bg-gray-100 sm:py-1"
                 >
                   필터 초기화
@@ -417,7 +437,7 @@ export default function TicketsPage() {
                   <p className="mt-0.5 truncate text-xs text-muted-foreground">대기 사유 — {t.pendingReason.name}</p>
                 )}
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  <span>큐 <span className="text-foreground">{t.queue?.name ?? '-'}</span></span>
+                  <span>그룹 <span className="text-foreground">{t.queue?.name ?? '-'}</span></span>
                   <span>담당 <span className="text-foreground">{t.owner?.name ?? 'Unassigned'}</span></span>
                   {t.hospital && <span>병원 <span className="text-foreground">{t.hospital.hospitalName}</span></span>}
                   <span>경과 <span className="text-foreground">{timeAgo(t.createdAt)}</span></span>
@@ -439,7 +459,7 @@ export default function TicketsPage() {
                   ['Type', 'w-[5.2rem]'],
                   ['Title', ''],
                   ['Status', 'w-20'],
-                  ['Queue', 'w-24'],
+                  ['Assign Group', 'w-24'],
                   ['Assignee', 'w-20'],
                   ['Hospital', 'hidden w-28 lg:table-cell'],
                   ['Age', 'w-14'],

@@ -4,7 +4,7 @@ import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { FIELD_CATALOG, DEFAULT_FIELDS, TASK_TYPES, TASK_TYPE_LABELS } from '@/lib/notifyFields'
-import { startNotifyScheduler, getNotifyInterval } from '@/lib/notify-scheduler'
+import { startNotifyScheduler, getNotifyInterval, TICK_OPTIONS, DEFAULT_TICK } from '@/lib/notify-scheduler'
 import { getSlaRules, getTicketDwellRules, DEFAULT_SLA_RULES, type SlaRules, type TicketDwellRules } from '@/lib/delay-rules'
 import { getTypesEnabled, getEventToggles, type TaskType, type TicketEventToggles } from '@/lib/notify'
 import { TICKET_STATUS_LABELS, TICKET_SEVERITY_LABELS } from '@/lib/ticket-shared'
@@ -69,14 +69,18 @@ export async function GET(request: NextRequest) {
   }
 
   const rows = await prisma.appSetting.findMany({
-    where: { key: { in: ['notify_enabled', 'notify_events_enabled', 'notify_delay_interval', 'notify_dm_enabled', 'notify_assign_dm', 'notify_queue_mentions', 'notify_sev1_channel'] } },
+    where: { key: { in: ['notify_enabled', 'notify_events_enabled', 'notify_delay_interval', 'notify_tick_interval', 'notify_breach_tick_cap', 'notify_dm_enabled', 'notify_assign_dm', 'notify_queue_mentions', 'notify_sev1_channel'] } },
   })
   const map = Object.fromEntries(rows.map((r) => [r.key, r.value]))
 
   return NextResponse.json({
     enabled: (map['notify_enabled'] ?? 'off') === 'on',
     eventsEnabled: (map['notify_events_enabled'] ?? 'on') !== 'off',
-    delayInterval: map['notify_delay_interval'] ?? 'off',
+    delayInterval: map['notify_delay_interval'] ?? 'off', // 1.0 키 — 하위호환 표시용
+    // 1.1 P4: tick 주기(초과 즉시 알림·일일 요약 판정 주기) + tick당 즉시 알림 상한
+    tickInterval: map['notify_tick_interval'] ?? DEFAULT_TICK,
+    breachTickCap: parseInt(map['notify_breach_tick_cap'] ?? '20') || 20,
+    tickOptions: TICK_OPTIONS,
     activeDelayInterval: getNotifyInterval(),
     dmEnabled: (map['notify_dm_enabled'] ?? 'off') === 'on',
     assignDm: (map['notify_assign_dm'] ?? 'on') !== 'off',
@@ -104,8 +108,10 @@ export async function PUT(request: NextRequest) {
   }
 
   const body = await request.json()
-  const { enabled, eventsEnabled, fields, delayInterval, dmEnabled, assignDm, queueMentions, sev1Channel, eventToggles, autoCloseDays, slaRules, statusDwell, typesEnabled } = body
+  const { enabled, eventsEnabled, fields, delayInterval, tickInterval, breachTickCap, dmEnabled, assignDm, queueMentions, sev1Channel, eventToggles, autoCloseDays, slaRules, statusDwell, typesEnabled } = body
   const delayVal = DELAY_INTERVALS.includes(delayInterval) ? delayInterval : 'off'
+  const tickVal = (TICK_OPTIONS as readonly string[]).includes(tickInterval) ? tickInterval : DEFAULT_TICK
+  const capVal = Number.isFinite(breachTickCap) && breachTickCap > 0 ? Math.floor(breachTickCap) : 20
   const dmVal = dmEnabled ? 'on' : 'off'
   const assignDmVal = assignDm === false ? 'off' : 'on'
   const queueMentionsVal = queueMentions === false ? 'off' : 'on'
@@ -144,6 +150,8 @@ export async function PUT(request: NextRequest) {
     upsert('notify_events_enabled', eventsVal),
     upsert('notify_event_fields', JSON.stringify(clean)),
     upsert('notify_delay_interval', delayVal),
+    upsert('notify_tick_interval', tickVal),
+    upsert('notify_breach_tick_cap', String(capVal)),
     upsert('notify_dm_enabled', dmVal),
     upsert('notify_assign_dm', assignDmVal),
     upsert('notify_queue_mentions', queueMentionsVal),
@@ -156,7 +164,8 @@ export async function PUT(request: NextRequest) {
   ])
 
   // 지연 감지 스케줄러 즉시 반영
-  startNotifyScheduler(delayVal)
+  // tick 주기 변경 즉시 반영 (재시작 없이)
+  startNotifyScheduler(tickVal)
 
   await logAudit({
     req: request,
@@ -165,7 +174,7 @@ export async function PUT(request: NextRequest) {
     resource: 'setting:notifications',
     resourceId: 'notifications',
     resourceLabel: 'Slack 알림 설정',
-    after: { enabled, eventsEnabled, delayInterval: delayVal, dmEnabled: dmVal, assignDm: assignDmVal, queueMentions: queueMentionsVal, sev1Channel: sev1ChannelVal, eventToggles: cleanEventToggles, autoCloseDays: autoCloseVal, typesEnabled: cleanTypes, slaRules: cleanSla, statusDwell: cleanDwell, fields: clean },
+    after: { enabled, eventsEnabled, delayInterval: delayVal, tickInterval: tickVal, breachTickCap: capVal, dmEnabled: dmVal, assignDm: assignDmVal, queueMentions: queueMentionsVal, sev1Channel: sev1ChannelVal, eventToggles: cleanEventToggles, autoCloseDays: autoCloseVal, typesEnabled: cleanTypes, slaRules: cleanSla, statusDwell: cleanDwell, fields: clean },
   })
 
   return NextResponse.json({ message: '저장되었습니다.', fields: clean })

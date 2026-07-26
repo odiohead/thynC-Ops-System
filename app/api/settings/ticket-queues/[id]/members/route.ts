@@ -34,7 +34,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     where: { id },
     include: { members: { select: { userId: true } } },
   })
-  if (!queue) return NextResponse.json({ error: '큐를 찾을 수 없습니다.' }, { status: 404 })
+  if (!queue) return NextResponse.json({ error: 'Assignment Group을 찾을 수 없습니다.' }, { status: 404 })
 
   const body = await request.json()
   const userIds: string[] = Array.isArray(body.userIds)

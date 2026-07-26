@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import StatusBadge from '@/app/components/StatusBadge'
+import MyWorkPanel from '@/app/components/MyWorkPanel'
 import { Tv } from 'lucide-react'
 import { useChartTheme } from '@/app/components/theme/useChartTheme'
 import * as XLSX from 'xlsx'
@@ -490,6 +491,9 @@ export default function Home() {
             사이니지 월보드
           </Link>
         </div>
+
+        {/* 개인화 블록 — 내 업무 (1.1 P6). 담당·그룹이 없는 계정에는 렌더되지 않는다 */}
+        <MyWorkPanel />
 
         {/* KPI 스탯 타일 */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">

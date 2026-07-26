@@ -111,7 +111,7 @@ function NewTicketForm() {
     [participantIds, users]
   )
 
-  /** 배정될 큐(수동 지정 > CTI 기본 큐)의 멤버 — 담당자 셀렉트 상단 그룹 */
+  /** 배정될 Assignment Group(수동 지정 > CTI 기본 그룹)의 멤버 — 담당자 셀렉트 상단 그룹 */
   const queueMemberIds = useMemo(() => {
     const effectiveQueueId = queueId ? Number(queueId) : selectedL3?.defaultQueue?.id ?? null
     if (effectiveQueueId == null) return []
@@ -184,7 +184,7 @@ function NewTicketForm() {
       <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
         <div className="mb-5 sm:mb-6">
           <h1 className="text-xl font-bold text-gray-900 sm:text-2xl">{parentId != null ? '서브 티켓 생성' : '티켓 생성'}</h1>
-          <p className="mt-1 text-sm text-gray-500">분류(CTI)를 선택하면 기본 큐로 자동 배정됩니다.</p>
+          <p className="mt-1 text-sm text-gray-500">분류(CTI)를 선택하면 기본 Assignment Group으로 자동 배정됩니다.</p>
         </div>
 
         {parentId != null && (
@@ -264,18 +264,18 @@ function NewTicketForm() {
 
               {/* 큐 */}
               <div className={rowClass}>
-                <label className={labelClass}>Queue</label>
+                <label className={labelClass}>Assignment Group</label>
                 <div className="sm:col-span-2">
                   <select value={queueId} onChange={(e) => setQueueId(e.target.value)} className={selectClass}>
                     <option value="">
                       {selectedL3?.defaultQueue
-                        ? `기본 큐 사용 — ${selectedL3.defaultQueue.name}`
-                        : '기본 큐 사용 (분류 선택 시 자동)'}
+                        ? `기본 그룹 사용 — ${selectedL3.defaultQueue.name}`
+                        : '기본 그룹 사용 (분류 선택 시 자동)'}
                     </option>
                     {queues.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
                   </select>
                   {selectedL3 && !selectedL3.defaultQueue && !queueId && (
-                    <p className="mt-1.5 text-xs text-amber-600">선택한 분류에 기본 큐가 없습니다. 큐를 직접 지정해주세요.</p>
+                    <p className="mt-1.5 text-xs text-amber-600">선택한 분류에 기본 Assignment Group이 없습니다. 그룹을 직접 지정해주세요.</p>
                   )}
                 </div>
               </div>

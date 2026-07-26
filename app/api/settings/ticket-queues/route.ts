@@ -22,10 +22,10 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json()
   const name = typeof body.name === 'string' ? body.name.trim() : ''
-  if (!name) return NextResponse.json({ error: '큐 이름을 입력하세요.' }, { status: 400 })
+  if (!name) return NextResponse.json({ error: '그룹 이름을 입력하세요.' }, { status: 400 })
 
   const existing = await prisma.ticketQueue.findUnique({ where: { name } })
-  if (existing) return NextResponse.json({ error: '이미 존재하는 큐 이름입니다.' }, { status: 409 })
+  if (existing) return NextResponse.json({ error: '이미 존재하는 그룹 이름입니다.' }, { status: 409 })
 
   const queue = await prisma.ticketQueue.create({
     data: {

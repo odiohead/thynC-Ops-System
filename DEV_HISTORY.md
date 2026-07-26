@@ -4,6 +4,110 @@
 
 ---
 
+## 2026-07-26 | 1.1 P7 — SLA 시계 기반 지표 확장
+
+- 티켓 대시보드(`/tickets/dashboard`)에 **SLA 시계 기반 지표** 추가. 1.0의 단일 준수율(`dueAt` 보유 종결 건)을 metric별로 분해
+- API `/api/tickets/metrics` 확장 4종: `slaByMetric`(metric별 준수율 — 기간 내 **확정 시계** MET/BREACHED 기준, 기준이 해제된 CANCELED는 제외) · `assignAvg`(**평균 배정 소요** 실측, CS 응답성 핵심) · `breachTopQueues`(초과 발생 Top Assignment Group) · `clockNow`(지금 돌고 있는 시계 metric×상태 스냅샷)
+- 화면: 준수율 막대(90%↑ 초록·70%↑ 앰버·미만 적색) + 평균 배정 소요 + 초과 Top 그룹 + "지금 돌고 있는 SLA 시계" 표(진행·정지·초과)
+- **해석 주의**: 백필로 생성된 ASSIGN 시계는 달성 시각을 `statusChangedAt`으로 근사하므로 초기 평균 배정 소요는 0에 가깝게 나온다. 실제 값은 1.1 배포 이후 신규 배정분이 쌓이면서 의미를 갖는다
+- DEV 정리: 삭제된 P2 검증용 정책의 **고아 시계 108건**(policy_id NULL) 제거 — 지표에 유령 데이터로 잡히던 것
+- tsc·lint 0오류, 빌드 성공
+
+---
+
+## 2026-07-26 | 1.1 P5·P6 — 시스템 내부 알림함 + 첫 화면 개인화 (요구 R2·R8·R9 충족)
+
+- **P5 내부 알림**: 마이그레이션 `20260726200000_add_notifications` — `notifications`·`notification_prefs` 2종(순수 추가). **알림의 원본을 DB로 옮겨** 1.0의 "알림=Slack 발송" 구조를 뒤집었다. Slack이 꺼져 있어도 시스템 안에 알림이 남는다(R2)
+  - `lib/notify-center.ts` `emitNotification()` 단일 진입점 — 수신자 정리(중복·**본인 행동 제외**·비활성 계정 제외), `dedupKey` 부분 UNIQUE로 중복 적재 차단, kind별 개인 설정(`inApp`) 반영. best-effort(업무 API를 깨지 않음)
+  - kind 6종(배정·내 그룹 미배정 유입·상태 변경·코멘트·SLA 임박·SLA 초과). 수신자는 owner+참여자, **owner 없으면 Assignment Group 멤버 폴백**(그룹 대기 티켓 알림이 사라지지 않게)
+  - 훅: 티켓 생성·배정·상태 변경(`notify.ts`), 코멘트(`logs/route.ts`), SLA 초과(`sla-alerts.ts` — Slack 채널 규칙·타입 킬스위치와 **무관하게** 적재. R9는 시스템 내 인지가 요구사항이므로)
+  - API 3종 + UI: 전역 벨(데스크톱 사이드바·모바일 헤더, 60초 폴링, **위키 알림 HTTP 합산** — 테이블 통합 없이 모듈 경계 유지) + `/notifications` 알림함(필터·일괄 읽음·개인 수신 설정)
+- **P6 첫 화면 개인화**: `GET /api/me/dashboard` **1콜**(기존 대시보드가 이미 5콜을 쓰므로 늘리지 않음) + `MyWorkPanel` — 타일 4종(내 티켓·**SLA 초과**·임박·내 그룹 미배정) + SLA 위험 목록 5건 + 최근 알림 5건. **`hasWork=false`면 블록 자체를 렌더하지 않는다**(0건 카드 나열은 소음 — 대웅·무관 계정은 기존 화면과 동일)
+  - 착지점: 티켓 목록 **SLA 필터**(초과·임박, `?sla=` 진입 지원) + 티켓 상세 **SLA 시계 패널**(metric별 기한·잔여/초과·정지 누적·적용 정책) + `GET /api/tickets/[id]/sla`
+- **E2E에서 발견·수정한 결함 2건** (스모크만으로는 안 잡혔고 실제 호출 경로에서 드러남):
+  ① **채널 멱등성 체크가 내부 알림까지 막음** — `notifyTicketCreated`의 "이미 발송했으면 스킵"이 `ticketCode` 기준이라, 삭제 후 **코드가 재사용되면** 과거 로그에 걸려 배정 알림이 영원히 안 생겼다. 내부 알림을 멱등성 체크 **앞으로** 옮기고(내부는 ticketId 기반 dedup) 채널 체크에는 **1시간 시간창** 추가
+  ② **"본인 행동 제외"가 동작하지 않음** — 호출부가 `actorName`만 넘기고 `actorId`를 안 넘겨서, 자기가 한 배정·상태 변경 알림을 자기가 받았다. 전 호출부 15곳에 `actorId` 전달(자동등록 경로 2곳은 actor 없음이 정상)
+- **검증**: 스모크 3종 **62/62 통과**(sla 31 · routes 18 · **notify-center 13** 신규). 실 API E2E — 티켓 생성(owner 지정) → 담당자에게 배정 알림 / 코멘트 → 담당자에게 코멘트 알림 / **행위자 본인에게는 0건** / 개인 대시보드 `hasWork=true·내티켓 1` 확인. 테스트 데이터 전량 삭제(알림·설정·티켓 잔여 0)
+- tsc·lint 0오류, 빌드 성공, dev2 PM2 재시작 완료. **git·PROD 반영 안 함**
+- 영향 파일: prisma/{schema.prisma, migrations/20260726200000_add_notifications}, lib/{notify-center.ts(신규), notify.ts, sla-alerts.ts}, app/api/{notifications/**(신규 2), me/dashboard(신규), tickets/[id]/sla(신규), tickets/route.ts, **/route.ts(actorId 15곳)}, app/{notifications/page.tsx(신규), page.tsx, tickets/page.tsx, tickets/[code]/page.tsx}, app/components/{NotificationBell.tsx, MyWorkPanel.tsx}(신규), app/tickets/components/SlaClockPanel.tsx(신규), app/components/Navigation.tsx, scripts/notify-center-smoke.mts(신규), README.md, projects/notification_v1.1_design.md
+
+---
+
+## 2026-07-26 | 1.1 P3·P4 — Slack 채널 라우팅 + SLA 초과 즉시 알림 + 일 1회 요약(지정 시각)
+
+- 사용자 확인 요청("지연 요약 발송 시각은 어디서 설정하나")에 **없다(미구현)**고 답한 뒤 이어서 P3·P4 구현. 1.0에는 주기(`notify_delay_interval` off/1h/6h/24h)만 있었고 시각 지정이 불가했으며, DEV는 `off` 상태로 아예 발송되지 않고 있었다
+- **P3 채널·라우팅**: 마이그레이션 `20260726180000_add_notify_routes` — `notify_channels`·`notify_routes` 2종(순수 추가). 채널을 env 상수(`SLACK_CHANNEL_MAIN`/`DELAY`)에서 **DB로 이관**
+  - `lib/notify-routes.ts` 매칭 엔진 — 이벤트 7종 × 조건 6축(유형·그룹·CTI 서브트리·Sev·전이 후 상태·metric). SLA 정책과 **같은 의미론**(축 간 AND·배열 내부 OR·빈 배열=전체)이되 **매칭된 규칙 전부 실행**(다중 채널이 요구사항). 같은 채널 중복은 1건으로 합치고 **멘션은 강한 쪽 채택**(none<queue_members<here<channel)
+  - `notify.ts` 전환 — 생성·변경 알림의 채널 결정을 라우팅으로 교체. sig v2 4축 비교(실변경만 발송)·이벤트별 토글·타입별 킬스위치는 그대로 유지. 규칙 0건이면 미발송 + `no_route` 스킵 로그(조용한 실패 방지)
+  - 시드 `scripts/seed-notify-routes.sql` — env 채널 2개 + 규칙 6행으로 **1.0 동작 재현**(배포 직후 동일). 유형별 분리는 운영자가 규칙 추가로 점진 적용
+  - 설정 탭② `RoutesTab.tsx` — 채널 등록·활성·**연결 테스트 발송**(잘못된 채널 노출 사고를 등록 시점에 차단)·삭제(연결 규칙 cascade 안내), 규칙 추가(조건 칩·멘션·발송 시각)·활성·삭제, **일일 요약 시각 인라인 변경**
+- **P4 초과 즉시 알림 + 일 1회 요약**: `lib/sla-alerts.ts` 신설, 스케줄러를 tick 방식으로 재설계
+  - **초과 즉시**: tick(기본 5분)마다 기한 지난 시계를 BREACHED 확정 → `notified_breach_at`이 NULL인 건만 발송 후 마킹(**1회성 보장**). tick당 상한 `notify_breach_tick_cap`(기본 20)으로 도배 방지
+  - **일 1회 요약**: 규칙별 `digest_hour`(KST) 도달 + **당일 발송 로그 없음**(`payload.digestRouteId`)일 때만 발송 → **서버 재시작·재배포에도 중복 없음**(1.0 `setInterval` 24h는 기동 시각 기준이라 밀렸음). 본문은 Assignment Group·유형별 섹션 + 섹션 상한(기본 20, 1.0은 10)
+  - `notify_tick_interval`(off·1m·5m·10m·15m, 기본 5m) — **1.0에서 지연 감지를 꺼 뒀던 환경은 tick도 off로 시작**(배포 직후 의도치 않은 발송 방지). 설정 저장 시 재시작 없이 즉시 반영
+  - 1.0의 지연 요약 경로(`buildDelaySummary`·`sendDelayChannelSummary` 12h dedup·`runDelayNotifications`) 제거, SLA 초과 owner DM은 `runSlaOwnerDms`로 분리해 tick에서 호출
+- **검증**: 스모크 `scripts/notify-routes-smoke.mts` **18/18 통과**(다중 채널·같은 채널 dedup·멘션 승격·6축 필터·CTI 상속·규칙 0건 미발송·요약 본문·시각 판정·당일 중복 스킵). **실 발송 확인**(DEV test 모드 → 테스트 채널): 일일 요약 1건(초과 16·임박 3, 그룹별 섹션) + 초과 즉시 1건(`TK-202607-00602` DOMAIN_DUE) 로그 `sent`. 추가 tick 후 delayed 로그 3→3 **증가 없음**(재발송 방지 확인)
+- **검증 중 발견·수정**: 스모크가 "당일 중복 스킵"을 확인하려고 **실제 채널 ID로 발송 로그를 심었는데** 정리 단계가 `targetId` 기준이라 지워지지 않아 **그날 실제 요약을 막았다**(검증이 운영을 막는 사고). 심은 로그 id를 기억해 삭제하도록 수정
+- 유지보수 유형의 초과 알림이 스킵된 것은 DEV `notify_types_enabled`에서 MAINTENANCE가 false인 정상 동작(킬스위치가 꺼진 유형은 발송하지 않지만 재시도 루프를 막기 위해 마킹은 한다)
+- tsc·lint 0오류, 빌드 성공, dev2 PM2 재시작 완료 — tick 5m 기동 로그 확인. **git·PROD 반영 안 함**
+- PROD 반영 시 필요: 마이그레이션 2건(`20260726150000_add_sla_engine`·`20260726180000_add_notify_routes`) + `scripts/seed-sla-policies.sql` + `scripts/seed-notify-routes.sql`(채널 ID 치환) + `backfill-sla-clocks.mts`(quiet) + `notify_tick_interval` 결정
+- 영향 파일: prisma/{schema.prisma, migrations/20260726180000_add_notify_routes}, lib/{notify-routes.ts, sla-alerts.ts(신규), notify.ts, notify-scheduler.ts, sla.ts}, instrumentation.ts, app/api/settings/{notify-routes/**(신규 2), notifications/route.ts}, app/settings/notifications/{page.tsx, RoutesTab.tsx(신규)}, scripts/{seed-notify-routes.sql, notify-routes-smoke.mts}(신규), README.md, projects/notification_v1.1_design.md
+
+---
+
+## 2026-07-26 | 1.1 P2 — SLA 설정 화면(매트릭스) + 명칭 변경: 티켓 큐 → Assignment Group
+
+### 명칭 변경 (사용자 지시)
+- "티켓 큐"가 와닿지 않는다는 지적 → **UI 표기를 Assignment Group으로 통일**(AWS SIM의 assigned/resolver group 대응). 사용자 질문에서 출발: 큐가 AWS Assign Group 역할인가 → 그렇다(멤버십=`ticket_queue_members`, 개인 배정=`ownerId`, CTI→그룹 매핑=`ticket_cti.default_queue_id` Item 레벨 25/25 지정됨)
+- **DB 테이블(`ticket_queues`)·API 경로·코드 식별자(`queueId`)는 유지** — PROD 운영 중이라 rename은 nav 행·저장된 뷰·API 계약까지 번지는데 얻는 건 라벨뿐. 1.0의 '티켓 UI 필드명 영문화' 선례와 동일 방식. CLAUDE.md에 이 규칙 명문화
+- 범위: 설정 페이지 제목·목록 컬럼(`Queue`→`Assign Group`)·상세 라벨·생성 폼·대시보드·Slack 메시지(`Assignment Group: A → B`)·API 오류 메시지 20건·nav 라벨(DB+`seed-ticket-masters.sql` 동시)·README 20건·설계안
+- 정정 기록: 직전 답변에서 "CTI 기본 큐가 전부 NULL"이라 했으나 **Level 2(Type)를 조회한 오류** — 매핑은 Level 3(Item)에 있고 25개 전부 지정돼 있었다. AWS식 라우팅 체인은 이미 동작 중이며, 비어 있는 것은 큐 멤버(0명)뿐
+
+### P2 — SLA 설정 화면
+- **요구 재확인 반영**: "상세 알림 제어를 설정 메뉴에서" → 설계 재검토 중 **순서 결함 발견**. SLA 설정 UI가 P6인데 알림 발송이 P3라, 그 사이 구간은 기준값을 SQL로만 바꿀 수 있었다 → **설정 화면을 P2로 앞당기고 발송을 P4로** 미룸. 설계안에 §4.8(매트릭스 편집 UX)·§5.6(관리자 제어 항목 전수표) 추가
+- **API 3종**: `GET/POST /api/settings/sla-policies`(목록+마스터, 행 추가) · `PUT/DELETE /[id]`(타깃 전체 재설정 + `applyToOpen` quiet 재계산) · `POST /preview`(영향 미리보기). 검증·정규화는 `lib/slaSettings.ts`로 분리 — **Route 파일은 핸들러만 export 가능**(빌드 실패로 확인: `"validateTargets" is not a valid Route export field`)
+- **설정 화면** `app/settings/notifications/SlaMatrixTab.tsx`: 탭 구조 신설(① SLA 기준 / ② Slack 발송·이력). 화면1 **상태 지연 매트릭스**(정책 행 × 상태 열, 셀=숫자+단위 분·시간·일 → 분 저장, 빈 셀=감지 안 함), 화면2 **처리 목표 매트릭스**(행 × metric + 도메인 기한 체크박스), 행 추가(유형·Assignment Group·Sev 스코프 칩), 우선순위 ▲▼, 활성/삭제, 저장 시 **적용 범위 라디오**(신규 티켓부터 / 열린 티켓에 지금 적용) + 영향 미리보기 패널
+- **검증 중 발견·수정한 갭 2건**(둘 다 "유령 위험" — 기준이 없어졌는데 초과로 남는 문제):
+  ① 정책·타깃이 사라져도 **BREACHED 시계가 위험 목록에 계속 노출** → `!want` 분기에서 BREACHED도 CANCELED 처리(`breachedAt`은 보존해 지표 집계는 유지)
+  ② 목표 시간을 늘려 기한이 미래가 됐는데 **초과 상태 유지** → 재산정 시 BREACHED를 RUNNING으로 되돌리고 초과 마킹 초기화
+- **UI 보완**: 정책은 1개만 승리(병합 없음)라 유형 행에 해결 목표를 빼면 그 유형은 해결 SLA가 사라진다 → 해당 행에 경고 표시("기본 행 값은 상속되지 않음"). 검증에서 실제로 발생한 상황
+- **게이트 검증**: 스모크 `scripts/sla-smoke.mts` **31/31 통과**(폴백 정책 인수·초과 해소 케이스 추가). 실 API 검증 — 정책 행 추가 → 셀 저장 → **신규 유지보수 티켓에 새 정책 시계 3종 자동 생성**(ASSIGN 1440·DWELL(OPEN) 240·UPDATE_STALE 4320) / `applyToOpen` **54건 재계산 후 알림 대기 0건 유지**(quiet 동작) / 미리보기 "매칭 53건·즉시 초과 5건" 산출 / 잘못된 조합 3종 400 거부 / 검증 데이터·정책 전량 삭제 후 재백필로 상태 정합
+- tsc·lint 0오류, 빌드 성공, dev2 PM2 재시작 완료(`/`·`/settings/notifications`·`/tickets`·`/tickets/dashboard` 307). **git·PROD 반영 안 함**
+- 영향 파일: lib/{sla.ts, slaSettings.ts(신규), notify.ts, notifyFields.ts, ticketDomain.ts}, app/api/settings/sla-policies/**(신규 3), app/settings/notifications/{page.tsx, SlaMatrixTab.tsx(신규)}, app/tickets/**(라벨), app/settings/{ticket-queues,ticket-cti}/page.tsx, app/api/**(메시지 20건), scripts/{sla-smoke.mts, seed-ticket-masters.sql}, README.md, CLAUDE.md, projects/notification_v1.1_design.{md,html}
+
+---
+
+## 2026-07-26 | 1.1 알림체계 개선 — 설계 확정 + P1 SLA 시계 엔진
+
+- 1.1 첫 기능으로 알림체계 개선 착수. 설계안 `projects/notification_v1.1_design.md`(+열람용 HTML) 작성 → 사용자 검토 → **"상세 알림 제어를 설정 메뉴에서" 요구 재확인 후 보완** → 승인받아 P1 구현
+- **기능개발 문서 디렉토리 신설**: `projects/`(루트 산재 방지). 1.0 문서들은 참조가 여러 곳에 걸려 있어 이동은 별도 작업으로 분리(`projects/README.md`에 명시)
+- **설계 원칙 전환**: 1.0은 "알림 = Slack 발송 행위"였고 시스템 안에 사용자가 볼 알림이 0개였다. 1.1은 **알림 원본을 DB(`notifications`)로 옮기고 Slack을 어댑터로 격하** — 이 구조가 향후 페이저 앱의 전제
+- **검토 중 발견·수정한 설계 결함**: SLA 정책 설정 UI가 P6(마지막)인데 알림 발송은 P3에 켜지는 순서였다 → 그 구간에서는 기준값을 SQL로만 바꿀 수 있어 요구사항과 어긋남. **설정 화면을 P2로 앞당기고 발송을 P4로 미룸**(P1~P3은 알림 동작 무변화 구간)
+- **설정 제어 스펙 구체화(§4.8·§5.5·§5.6)**: 상태 지연 기준을 **유형(행) × 상태(열) 매트릭스**로 편집(셀=`sla_targets` 1행, 빈 셀=감지 안 함, 숫자+단위 입력→분 저장), 행 추가로 큐·CTI 스코프 정책, 행 드래그=우선순위, Sev 세분은 고급 토글. 저장 시 **적용 범위 선택**(신규 티켓부터 / 열린 티켓에 지금 적용→quiet 재계산) + 영향 미리보기. 관리자가 코드 배포 없이 바꿀 수 있는 항목 전수표 작성
+- **P1 SLA 시계 엔진**: 마이그레이션 `20260726150000_add_sla_engine` — `sla_policies`·`sla_targets`·`ticket_sla_clocks` 3종(순수 추가, 기존 테이블 무변경). metric 6종(ASSIGN·FIRST_RESPONSE·RESOLVE·UPDATE_STALE·DWELL·DOMAIN_DUE), 정책 매칭은 5축 AND·**우선순위 1개만 승리**(병합 없음 — 어느 값이 이겼는지 추적 불가를 피함), 매칭 결과를 시계에 박아 저장해 정책 변경이 진행 중 시계를 소급 변경하지 않음
+- **장기 프로젝트 왜곡 해소**: PROJECT는 `RESOLVE`(생성→완료) 대신 **`DOMAIN_DUE`(완료예정일) + `UPDATE_STALE`(무응답)** 정책으로 전환 — 1.0의 코드 하드코딩 예외를 정책으로 승격
+- 훅 연결 17곳(티켓 6 + 도메인 라우트 10 + 코멘트 1) — `syncTicketClocksSafe()`를 알림 호출과 같은 자리에 배치. **알림 모듈과 독립**(Slack이 꺼져 있어도 시계는 갱신)
+- **검증 중 발견·수정한 버그**: `tickets.due_at` 캐시를 raw SQL로 쓸 때 **JS `Date` 파라미터가 KST로 직렬화돼 9시간 앞선 값**이 기록됨(위키 청크 `chunks_synced_at`과 동일한 함정). ISO 문자열 + `timestamptz AT TIME ZONE 'UTC'` 캐스팅으로 수정 → 재백필 후 **1.0 값과 673/674 완전 일치**(1건은 2ms 차 — 1.0은 메모리 시각, 시계는 저장된 createdAt 사용)
+- **quiet backfill**: 열린 티켓 123건 → 시계 115개(RESOLVE 99·DOMAIN_DUE 16). 과거 초과분 81건은 `notified_breach_at` 선점으로 **알림 없이 마킹** → P4에서 즉시 알림을 켜도 과거분이 쏟아지지 않음. 검증: 알림 대기(초과·미발송) **0건**
+- **스모크 `scripts/sla-smoke.mts` 28/28 통과**: 전용 큐·정책·임시 티켓으로 격리 검증 후 전량 삭제(잔여 0). 생성·중복실행 무변화·달성(ASSIGN)·초과 감지·정지/재개(정지시간 10분 보상·기한 이월)·UPDATE_STALE 리셋(초과 마킹 초기화)·종결 확정·정책 비활성 시 취소. **테스트 설계 오류 1건 수정** — 정지 누적은 앵커가 고정된 RESOLVE로 검증해야 함(UPDATE_STALE은 상태 변경 자체가 활동이라 리셋이 정상)
+- 라이브 훅 확인: API로 티켓 생성 → RESOLVE 시계 자동 생성(SEV3=4320분)·`due_at` 캐시 일치, 코멘트 201, 삭제 시 시계 cascade. `OPEN→PENDING` 400은 전이표(OPEN은 ASSIGNED/CLOSED만)에 의한 정상 거부
+- tsc·lint 0오류. 검증 위해 dev2 빌드·PM2 재시작 수행. **git·PROD 반영 안 함** — PROD 반영 시 마이그레이션 1건 + `scripts/seed-sla-policies.sql` + `backfill-sla-clocks.mts`(quiet) 필요
+- 영향 파일: projects/{notification_v1.1_design.md, .html, README.md}(신규), prisma/{schema.prisma, migrations/20260726150000_add_sla_engine}, lib/sla.ts(신규), scripts/{seed-sla-policies.sql, backfill-sla-clocks.mts, sla-smoke.mts}(신규), app/api/**/route.ts 17곳(훅 1줄)
+
+---
+
+## 2026-07-26 | 🏁 운영관리시스템 1.0 마감 (마일스톤)
+
+- 사용자 결정으로 **2026-07-26 기준 운영관리시스템 1.0 마감**. 계획했던 전 모듈이 개발·PROD 반영 완료됨
+- **1.0 포함 범위**: 병원·프로젝트·답사·설치계획·유지보수·기타업무 / 티켓 시스템(P1~P13, 도메인 편입 5/5·알림·SLA·지표 대시보드) / 사내 위키(Phase 0~14 + 협업 편집·HTML 문서 페이지·AI 청크 인덱스·주기 갱신) / AI 어시스턴트 v3(2축 지식·출처·피드백) + 상담이력 / 자재관리 WMS(Phase 1~10) / 차량예약·운행일지 / Slack 알림·SLA / GW 배치 플래너(Phase 0~2) / 전 화면 모바일 대응
+- **승인 처리(문서 정리)**: ① `ticket_dev_schedule.md` P13 게이트 → **2026-07-26 사용자 최종 승인**·프로젝트 종료 명시 ② `wiki_enhancement_design.md` Phase 14 체크 누락분 정리(실제 PROD 반영은 2026-06-16 완료분)
+- **1.0 범위 외로 확정(착수 안 함)**: `enhancement_analysis_202607.md`의 A(유지보수 2.0 — 장비 개체 연동·정기점검 PM·완료 품질 게이트) / B(데이터 정합성 자동 점검). 문서 상단에 **보류·추후 신규 설계** 상태 명시 — 이 문서를 근거로 착수·제안하지 않음(작성 시점 이후 티켓 시스템·상담이력 재설계로 전제 변경). A Phase 2(SLA 지표)는 티켓 P12 대시보드가 대체, "AI 상담저장 0건" 진단은 상담이력 재설계로 해소
+- **소규모 미구현 항목은 백로그에서 제외**(사용자 지시 — 필요 시 재요청): 위키 청크 주기 설정 UI, 어시스턴트 출처 패널·새 탭, AI 정제 사용량 원장 기록·AI 비용 통합 뷰
+- 이후 작업 구분: **1.0 유지보수(버그·운영 요청)** vs **신규 설계 건**. 신규 건은 기존 컨벤션대로 설계안 작성 → 사용자 검토·착수 승인 후 구현
+- 영향 파일: README.md(1.0 마감 배너), DEV_HISTORY.md, ticket_dev_schedule.md, wiki_enhancement_design.md, enhancement_analysis_202607.md
+
+---
+
 ## 2026-07-26 | 티켓·AI 어시스턴트 모바일 UI 최적화 PROD 배포
 
 - dev2 힙 4GB 빌드 → `pm2 restart thync-dev` → 커밋 `fcd2d6a` push → PROD git pull(`142c2f3`→`fcd2d6a`, 10파일 +504/-367)

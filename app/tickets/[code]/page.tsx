@@ -10,6 +10,7 @@ import TicketSeverityBadge from '../components/TicketSeverityBadge'
 import TicketRefTypeBadge from '../components/TicketRefTypeBadge'
 import LinkedWorkBanner from '../components/LinkedWorkBanner'
 import TicketLogPanel from '../components/TicketLogPanel'
+import SlaClockPanel from '../components/SlaClockPanel'
 import OwnerSelect from '../components/OwnerSelect'
 import RichTextEditor from '@/app/components/RichTextEditor'
 
@@ -227,7 +228,7 @@ export default function TicketDetailPage() {
     return map
   }, [ctiNodes])
 
-  /** 현재 티켓 큐의 멤버 userId — 담당자 셀렉트 상단 그룹 */
+  /** 현재 티켓 Assignment Group의 멤버 userId — 담당자 셀렉트 상단 그룹 */
   const queueMemberIds = useMemo(() => {
     if (!ticket) return []
     const q = queues.find((qu) => qu.id === ticket.queueId)
@@ -631,14 +632,14 @@ export default function TicketDetailPage() {
             </div>
 
             <div>
-              <p className={labelClass}>Queue</p>
+              <p className={labelClass}>Assignment Group</p>
               {canWrite ? (
                 <select
                   value={String(ticket.queueId)}
                   onChange={(e) => changeQueue(e.target.value)}
                   disabled={busy}
                   className={infoSelectClass}
-                  title="큐 이관"
+                  title="Assignment Group 이관"
                 >
                   {queues.filter((q) => q.isActive || q.id === ticket.queueId).map((q) => (
                     <option key={q.id} value={q.id}>{q.name}</option>
@@ -774,6 +775,9 @@ export default function TicketDetailPage() {
 
           </div>
         </div>
+
+        {/* SLA 시계 (1.1 P6) — 무엇 때문에 위반인지 담당자가 알 수 있어야 한다 */}
+        <SlaClockPanel ticketId={ticket.id} />
 
         {/* 설명 */}
         <div className="mb-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">

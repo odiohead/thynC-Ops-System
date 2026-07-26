@@ -171,6 +171,45 @@ export async function GET(request: NextRequest) {
     }
   })
 
+
+  // ── SLA 시계 기반 지표 (1.1 P7 — §8) ────────────────────────
+  // 1.0의 단일 준수율(dueAt 보유 종결 건)을 metric별로 분해한다.
+  // 대상: 기간 내 확정된 시계(MET/BREACHED). CANCELED는 기준이 사라진 건이라 제외
+  const slaPeriod = months > 0 ? Prisma.sql`AND COALESCE(c.satisfied_at, c.breached_at) >= ${periodStart}` : Prisma.empty
+  const slaByMetric = await prisma.$queryRaw<
+    { metric: string; met: bigint; breached: bigint }[]
+  >(Prisma.sql`
+    SELECT c.metric,
+           count(*) FILTER (WHERE c.state = 'MET') AS met,
+           count(*) FILTER (WHERE c.state = 'BREACHED') AS breached
+    FROM ticket_sla_clocks c JOIN tickets t ON t.id = c.ticket_id
+    WHERE c.state IN ('MET','BREACHED') ${whereBase} ${slaPeriod}
+    GROUP BY c.metric ORDER BY c.metric
+  `)
+
+  // 평균 배정 소요 — ASSIGN 시계 실측(분). CS 응답성의 핵심 지표
+  const [assignRow] = await prisma.$queryRaw<{ avg_min: number | null; n: bigint }[]>(Prisma.sql`
+    SELECT avg(EXTRACT(EPOCH FROM (c.satisfied_at - c.started_at)) / 60.0) AS avg_min, count(*) AS n
+    FROM ticket_sla_clocks c JOIN tickets t ON t.id = c.ticket_id
+    WHERE c.metric = 'ASSIGN' AND c.satisfied_at IS NOT NULL ${whereBase} ${slaPeriod}
+  `)
+
+  // 초과 발생 Top Assignment Group (기간 내 확정 초과 기준)
+  const breachTopQueues = await prisma.$queryRaw<{ name: string; breached: bigint }[]>(Prisma.sql`
+    SELECT q.name, count(*) AS breached
+    FROM ticket_sla_clocks c JOIN tickets t ON t.id = c.ticket_id JOIN ticket_queues q ON q.id = t.queue_id
+    WHERE c.state = 'BREACHED' ${whereBase} ${slaPeriod}
+    GROUP BY q.name ORDER BY breached DESC LIMIT 5
+  `)
+
+  // 현재 진행 중 시계 분포 (스냅샷) — 지금 무엇이 돌고 있는지
+  const clockNow = await prisma.$queryRaw<{ metric: string; state: string; cnt: bigint }[]>(Prisma.sql`
+    SELECT c.metric, c.state, count(*) AS cnt
+    FROM ticket_sla_clocks c JOIN tickets t ON t.id = c.ticket_id
+    WHERE c.state IN ('RUNNING','PAUSED','BREACHED') AND t.status NOT IN ('RESOLVED','CLOSED') ${whereBase}
+    GROUP BY c.metric, c.state
+  `)
+
   const reopened = Number(kpiRow.reopened)
   const resolvedEver = Number(kpiRow.resolved_ever)
 
@@ -197,6 +236,14 @@ export async function GET(request: NextRequest) {
       refType: r.ref_type,
       days: Number(r.days),
     })),
+    // 1.1 P7 — SLA 시계 기반
+    slaByMetric: slaByMetric.map((r) => {
+      const met = Number(r.met), breached = Number(r.breached), total = met + breached
+      return { metric: r.metric, met, breached, total, rate: total > 0 ? Math.round((met / total) * 1000) / 10 : null }
+    }),
+    assignAvg: { minutes: assignRow?.avg_min == null ? null : Math.round(Number(assignRow.avg_min)), count: Number(assignRow?.n ?? 0) },
+    breachTopQueues: breachTopQueues.map((r) => ({ name: r.name, breached: Number(r.breached) })),
+    clockNow: clockNow.map((r) => ({ metric: r.metric, state: r.state, count: Number(r.cnt) })),
     filters: { months, queueId, refType: refType ?? null },
   })
 }

@@ -5,6 +5,7 @@ import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { canTransition, addTicketEvent, TICKET_STATUS_LABELS } from '@/lib/ticket'
 import { notifyTicketChanged } from '@/lib/notify'
+import { syncTicketClocksSafe } from '@/lib/sla'
 import { syncTicketToDomain } from '@/lib/ticketDomain'
 import { advanceHospitalStatus } from '@/lib/hospitalStatus'
 
@@ -116,7 +117,8 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   // P11: 티켓 이벤트 단일 파이프라인 — sig 비교로 실변경만 발송
-  notifyTicketChanged({ ticketId: id, actorName: user.name }).catch(() => {})
+  syncTicketClocksSafe(id) // SLA 시계 갱신 (알림과 독립 — lib/sla.ts)
+  notifyTicketChanged({ ticketId: id, actorName: user.name, actorId: user.userId }).catch(() => {})
 
   return NextResponse.json({ ticket: updated })
 }

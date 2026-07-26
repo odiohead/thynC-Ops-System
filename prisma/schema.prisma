@@ -236,6 +236,9 @@ model User {
   organizationId            Int?                         @map("organization_id")
   departmentId              Int?                         @map("department_id")
   slackUserId               String?                      @map("slack_user_id") @db.VarChar(20) // Slack DM 매핑 캐시 (Phase 4)
+  notifications      Notification[]     @relation("NotificationRecipient")
+  notificationsActed Notification[]     @relation("NotificationActor")
+  notificationPrefs  NotificationPref[]
   slackNotifyEnabled        Boolean                      @default(true) @map("slack_notify_enabled") // 계정별 Slack 발송 유무(false=미발송)
   createdAt                 DateTime                     @default(now()) @map("created_at")
   lastLoginAt               DateTime?                    @map("last_login_at")
@@ -1698,6 +1701,7 @@ model Ticket {
   creator         User?                @relation("TicketCreator", fields: [createdBy], references: [id], onDelete: SetNull)
   participants    TicketParticipant[]
   logs            TicketLog[]
+  slaClocks       TicketSlaClock[]
   parent          Ticket?              @relation("TicketHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
   children        Ticket[]             @relation("TicketHierarchy")
   maintenance     Maintenance?
@@ -1744,5 +1748,176 @@ model TicketLog {
 
   @@index([ticketId, createdAt])
   @@map("ticket_logs")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────
+// SLA 시계 엔진 (1.1 P1 — projects/notification_v1.1_design.md §4)
+// 정책(어떤 티켓에) × 타깃(무엇을 몇 분 안에) × 시계(티켓별 실측 인스턴스)
+// ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// 시스템 내부 알림 (1.1 P5 — projects/notification_v1.1_design.md §6)
+// 알림의 원본은 이 테이블이고 Slack은 어댑터. 향후 페이저 앱도 같은 소스를 쓴다
+// ─────────────────────────────────────────────────────────────
+
+/// 개인 알림함 — 사용자별 1행. 티켓은 FK 없이 ID만 보관(삭제 후에도 이력 보존)
+model Notification {
+  id        BigInt    @id @default(autoincrement())
+  userId    String    @map("user_id")
+  kind      String    @db.VarChar(40) // NOTIFY_KINDS (lib/notify-center.ts)
+  title     String    @db.VarChar(200)
+  body      String?
+  link      String    @db.VarChar(300) // 앱 내부 경로
+  ticketId  Int?      @map("ticket_id")
+  refType   String?   @map("ref_type") @db.VarChar(20)
+  refCode   String?   @map("ref_code") @db.VarChar(50)
+  severity  String?   @db.VarChar(10)
+  actorId   String?   @map("actor_id")
+  actorName String?   @map("actor_name") @db.VarChar(60) // 스냅샷
+  dedupKey  String?   @map("dedup_key") @db.VarChar(200) // 부분 UNIQUE (SQL 전용 인덱스)
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      User      @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor     User?     @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([ticketId])
+  @@map("notifications")
+  @@schema("public")
+}
+
+/// 개인 수신 설정 — 행이 없으면 코드 기본값(NOTIFY_KIND_DEFAULTS) 적용
+model NotificationPref {
+  userId  String  @map("user_id")
+  kind    String  @db.VarChar(40)
+  inApp   Boolean @default(true) @map("in_app")
+  slackDm Boolean @default(false) @map("slack_dm")
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, kind])
+  @@map("notification_prefs")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Slack 채널 라우팅 (1.1 P3 — projects/notification_v1.1_design.md §5.1)
+// 채널을 env 상수에서 DB로. 이벤트×조건 → 채널 N개 (매칭된 규칙 전부 실행, 같은 채널은 1건으로 합침)
+// ─────────────────────────────────────────────────────────────
+
+/// 발송 채널 마스터 — Slack 채널 ID를 런타임에 등록·비활성
+model NotifyChannel {
+  id             Int            @id @default(autoincrement())
+  name           String         @unique @db.VarChar(60)
+  slackChannelId String         @map("slack_channel_id") @db.VarChar(40)
+  description    String?
+  isActive       Boolean        @default(true) @map("is_active")
+  sortOrder      Int            @default(0) @map("sort_order")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  routes         NotifyRoute[]
+
+  @@map("notify_channels")
+  @@schema("public")
+}
+
+/// 라우팅 규칙 — 매칭 축은 SLA 정책과 동일 의미론(축 간 AND, 배열 내부 OR, 빈 배열=전체)
+model NotifyRoute {
+  id          Int           @id @default(autoincrement())
+  name        String        @db.VarChar(100)
+  eventType   String        @map("event_type") @db.VarChar(30) // TICKET_CREATED|TICKET_STATUS_CHANGED|TICKET_QUEUE_TRANSFERRED|SEV_ESCALATED|SLA_BREACH|SLA_WARNING|DAILY_DIGEST
+  channelId   Int           @map("channel_id")
+  refTypes    String[]      @default([]) @map("ref_types")
+  queueIds    Int[]         @default([]) @map("queue_ids")
+  ctiIds      Int[]         @default([]) @map("cti_ids")
+  severities  String[]      @default([])
+  statusTo    String[]      @default([]) @map("status_to") // 상태변경: 이 상태로 바뀔 때만
+  metrics     String[]      @default([]) // SLA 이벤트: 대상 metric 한정
+  mentionMode String        @default("none") @map("mention_mode") @db.VarChar(20) // none|queue_members|channel|here
+  digestHour  Int?          @map("digest_hour") @db.SmallInt // DAILY_DIGEST 전용 (KST 0~23)
+  digestOpts  Json?         @map("digest_opts")
+  isActive    Boolean       @default(true) @map("is_active")
+  sortOrder   Int           @default(0) @map("sort_order")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  channel     NotifyChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@index([eventType, isActive])
+  @@index([channelId])
+  @@map("notify_routes")
+  @@schema("public")
+}
+
+/// SLA 정책 — 매칭 스코프(빈 배열=전체) + 우선순위(낮을수록 우선, 1개만 승리)
+model SlaPolicy {
+  id          Int              @id @default(autoincrement())
+  name        String           @db.VarChar(100)
+  description String?
+  priority    Int              @default(100)
+  refTypes    String[]         @default([]) @map("ref_types")
+  queueIds    Int[]            @default([]) @map("queue_ids")
+  ctiIds      Int[]            @default([]) @map("cti_ids") // 서브트리 상속
+  severities  String[]         @default([])
+  clockType   String           @default("CALENDAR_24H") @map("clock_type") @db.VarChar(20) // CALENDAR_24H | BUSINESS_HOURS(1.1 미구현)
+  isActive    Boolean          @default(true) @map("is_active")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  targets     SlaTarget[]
+  clocks      TicketSlaClock[]
+
+  @@index([isActive, priority])
+  @@map("sla_policies")
+  @@schema("public")
+}
+
+/// 정책별 목표 — metric×상태×Sev 조합당 1행. severity NULL = 정책 스코프 전 Sev 공통
+model SlaTarget {
+  id           Int              @id @default(autoincrement())
+  policyId     Int              @map("policy_id")
+  metric       String           @db.VarChar(20) // ASSIGN|FIRST_RESPONSE|RESOLVE|UPDATE_STALE|DWELL|DOMAIN_DUE
+  statusScope  String?          @map("status_scope") @db.VarChar(20) // DWELL 전용(대상 상태)
+  severity     String?          @db.VarChar(10)
+  thresholdMin Int              @map("threshold_min") // 목표(분). DOMAIN_DUE는 기한 대비 오프셋
+  warnRatio    Int              @default(80) @map("warn_ratio") @db.SmallInt // 목표의 N% 경과 시 임박(0=미사용)
+  isActive     Boolean          @default(true) @map("is_active")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+  policy       SlaPolicy        @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  clocks       TicketSlaClock[]
+
+  @@index([policyId])
+  @@map("sla_targets")
+  @@schema("public")
+}
+
+/// 티켓별 SLA 시계 — 알림·지표의 근거. 파생 데이터(삭제 후 재백필 가능)
+/// UNIQUE (ticket_id, metric, COALESCE(status_scope,'')) 는 SQL 전용 인덱스로 관리
+model TicketSlaClock {
+  id               BigInt     @id @default(autoincrement())
+  ticketId         Int        @map("ticket_id")
+  metric           String     @db.VarChar(20)
+  statusScope      String?    @map("status_scope") @db.VarChar(20)
+  policyId         Int?       @map("policy_id")
+  targetId         Int?       @map("target_id")
+  thresholdMin     Int        @map("threshold_min")
+  startedAt        DateTime   @map("started_at")
+  dueAt            DateTime   @map("due_at")
+  pausedAt         DateTime?  @map("paused_at")
+  pausedMs         BigInt     @default(0) @map("paused_ms")
+  state            String     @default("RUNNING") @db.VarChar(12) // RUNNING|PAUSED|MET|BREACHED|CANCELED
+  satisfiedAt      DateTime?  @map("satisfied_at")
+  breachedAt       DateTime?  @map("breached_at")
+  notifiedWarnAt   DateTime?  @map("notified_warn_at")
+  notifiedBreachAt DateTime?  @map("notified_breach_at") // 1회성 보장 · quiet backfill 마킹 겸용
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+  ticket           Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  policy           SlaPolicy? @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  target           SlaTarget? @relation(fields: [targetId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId])
+  @@index([state, metric])
+  @@map("ticket_sla_clocks")
   @@schema("public")
 }

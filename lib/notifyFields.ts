@@ -73,7 +73,7 @@ export const FIELD_CATALOG: Record<TaskType, FieldDef[]> = {
     { key: 'owner', label: '담당자' },
     { key: 'severity', label: 'Severity' },
     { key: 'status', label: '상태' },
-    { key: 'queue', label: '큐' },
+    { key: 'queue', label: 'Assignment Group' },
     { key: 'cti', label: '분류' },
     { key: 'dueAt', label: '처리기한' },
   ],

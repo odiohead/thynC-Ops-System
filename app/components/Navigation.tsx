@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { getMenuIcon } from './NavIcons'
 import ThemeToggle from './theme/ThemeToggle'
+import NotificationBell from './NotificationBell'
 import { useOverlayDismiss } from './useOverlayDismiss'
 
 /* ── 구조적 아이콘 (메뉴 아이콘이 아닌 UI용) ── */
@@ -284,7 +285,10 @@ export default function Navigation() {
               </p>
             </div>
           ) : <span />}
-          <ThemeToggle className="shrink-0" />
+          <div className="flex shrink-0 items-center gap-0.5">
+            <NotificationBell />
+            <ThemeToggle className="shrink-0" />
+          </div>
         </div>
         <button
           type="button"
@@ -309,6 +313,7 @@ export default function Navigation() {
       <header className="fixed left-0 right-0 top-0 z-40 flex h-14 items-center justify-between border-b border-border bg-card pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] lg:hidden">
         <Link href="/" className="px-1 py-2 text-base font-bold tracking-tight text-foreground hover:text-primary transition-colors">{process.env.NEXT_PUBLIC_APP_NAME}</Link>
         <div className="flex items-center gap-1">
+          <NotificationBell compact />
           <ThemeToggle />
           <button
             type="button"

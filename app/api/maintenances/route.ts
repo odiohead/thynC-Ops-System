@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { notifyTicketCreated } from '@/lib/notify'
+import { syncTicketClocksSafe } from '@/lib/sla'
 import { getAuthUser } from '@/lib/auth'
 import { createCalendarEvent } from '@/lib/googleCalendar'
 import { normalizeVisits, visitEventPayload } from '@/lib/maintenanceVisit'
@@ -201,7 +202,8 @@ export async function POST(request: NextRequest) {
   })
 
   // Slack 알림 (등록, P11 티켓 파이프라인) — best-effort
-  notifyTicketCreated({ ticketId, actorName: user.name }).catch(() => {})
+  syncTicketClocksSafe(ticketId) // SLA 시계 생성 (알림과 독립 — lib/sla.ts)
+  notifyTicketCreated({ ticketId, actorName: user.name, actorId: user.userId }).catch(() => {})
 
   return NextResponse.json({ maintenance }, { status: 201 })
 }

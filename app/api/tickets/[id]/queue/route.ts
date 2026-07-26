@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { addTicketEvent } from '@/lib/ticket'
 import { notifyTicketChanged } from '@/lib/notify'
+import { syncTicketClocksSafe } from '@/lib/sla'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,11 +24,11 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const body = await request.json()
   const queueId = typeof body.queueId === 'number' ? body.queueId : null
-  if (!queueId) return NextResponse.json({ error: '큐를 선택하세요.' }, { status: 400 })
+  if (!queueId) return NextResponse.json({ error: 'Assignment Group을 선택하세요.' }, { status: 400 })
   if (queueId === ticket.queueId) return NextResponse.json({ ticket })
 
   const queue = await prisma.ticketQueue.findUnique({ where: { id: queueId } })
-  if (!queue || !queue.isActive) return NextResponse.json({ error: '유효하지 않은 큐입니다.' }, { status: 400 })
+  if (!queue || !queue.isActive) return NextResponse.json({ error: '유효하지 않은 Assignment Group입니다.' }, { status: 400 })
 
   const updated = await prisma.$transaction(async (tx) => {
     const t = await tx.ticket.update({ where: { id }, data: { queueId } })
@@ -41,13 +42,14 @@ export async function POST(request: NextRequest, { params }: Params) {
     action: 'UPDATE',
     resource: 'ticket',
     resourceId: id,
-    resourceLabel: `${ticket.ticketCode} 큐 이관 → ${queue.name}`,
+    resourceLabel: `${ticket.ticketCode} Assignment Group 이관 → ${queue.name}`,
     before: ticket,
     after: updated,
   })
 
   // P11: 큐 이관 채널 알림 + 이관받은 큐 멤버 멘션 (sig 비교)
-  notifyTicketChanged({ ticketId: id, actorName: user.name }).catch(() => {})
+  syncTicketClocksSafe(id) // SLA 시계 갱신 (알림과 독립 — lib/sla.ts)
+  notifyTicketChanged({ ticketId: id, actorName: user.name, actorId: user.userId }).catch(() => {})
 
   return NextResponse.json({ ticket: updated })
 }

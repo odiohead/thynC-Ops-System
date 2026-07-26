@@ -34,6 +34,11 @@ interface Metrics {
   byRefType: { refType: string | null; open: number }[]
   perOwner?: { ownerId: string; name: string; closed: number; avgDays: number | null; openLoad: number }[]
   dwellTop: { ticketCode: string; title: string; status: string; severity: string; queueName: string; refType: string | null; days: number }[]
+  // 1.1 P7 — SLA 시계 기반 지표
+  slaByMetric: { metric: string; met: number; breached: number; total: number; rate: number | null }[]
+  assignAvg: { minutes: number | null; count: number }
+  breachTopQueues: { name: string; breached: number }[]
+  clockNow: { metric: string; state: string; count: number }[]
   filters: { months: number; queueId: number | null; refType: string | null }
 }
 
@@ -55,6 +60,12 @@ const REF_TYPE_LABELS: Record<string, string> = {
 
 const SEV_ORDER = ['SEV1', 'SEV2', 'SEV3', 'SEV4', 'SEV5']
 
+/** SLA metric 라벨 (lib/sla.ts SLA_METRIC_LABELS와 동일 — 클라이언트 컴포넌트라 상수 복제) */
+const SLA_METRIC_LABELS: Record<string, string> = {
+  ASSIGN: '배정까지', FIRST_RESPONSE: '첫 응답', RESOLVE: '해결까지',
+  UPDATE_STALE: '무응답', DWELL: '상태 체류', DOMAIN_DUE: '도메인 기한',
+}
+
 export default function TicketDashboardPage() {
   const chart = useChartTheme()
   const [data, setData] = useState<Metrics | null>(null)
@@ -70,7 +81,7 @@ export default function TicketDashboardPage() {
   const createdColor = chart.blue
 
   useEffect(() => {
-    // 큐 필터 옵션 (VIEWER는 403 → 필터 숨김)
+    // Assignment Group 필터 옵션 (VIEWER는 403 → 필터 숨김)
     fetch('/api/settings/ticket-queues')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setQueues((d?.queues ?? []).filter((q: { isActive: boolean }) => q.isActive)))
@@ -188,7 +199,7 @@ export default function TicketDashboardPage() {
                 onChange={(e) => setQueueId(e.target.value === '' ? '' : parseInt(e.target.value))}
                 className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 sm:py-1.5"
               >
-                <option value="">전체 큐</option>
+                <option value="">전체 그룹</option>
                 {queues.map((q) => (
                   <option key={q.id} value={q.id}>{q.name}</option>
                 ))}
@@ -308,11 +319,86 @@ export default function TicketDashboardPage() {
           </ChartCard>
         </div>
 
+        {/* SLA 지표 (1.1 P7) — metric별 준수율·평균 배정 소요·초과 Top 그룹 */}
+        <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="rounded-xl border border-gray-200 bg-white p-4">
+            <h2 className="mb-1 text-sm font-semibold text-gray-900">SLA 준수율 (metric별)</h2>
+            <p className="mb-3 text-xs text-gray-400">기간 내 확정된 시계 기준 · 기준이 해제된 시계(CANCELED)는 제외</p>
+            {(data.slaByMetric ?? []).length === 0 ? (
+              <p className="text-sm text-gray-400">확정된 SLA 시계가 없습니다.</p>
+            ) : (
+              <div className="space-y-2">
+                {(data.slaByMetric ?? []).map((m) => (
+                  <div key={m.metric} className="flex items-center gap-2 text-sm">
+                    <span className="w-28 shrink-0 text-gray-600">{SLA_METRIC_LABELS[m.metric] ?? m.metric}</span>
+                    <div className="h-4 flex-1 rounded bg-gray-100">
+                      <div className="h-4 rounded" style={{ width: `${m.rate ?? 0}%`, backgroundColor: (m.rate ?? 0) >= 90 ? closedColor : (m.rate ?? 0) >= 70 ? chart.amber : '#dc2626' }} />
+                    </div>
+                    <span className="w-24 shrink-0 text-right text-xs text-gray-600">
+                      {m.rate === null ? '—' : `${m.rate}%`} <span className="text-gray-400">({m.met}/{m.total})</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-3 flex flex-wrap gap-4 border-t pt-3 text-sm">
+              <div>
+                <p className="text-xs text-gray-500">평균 배정 소요</p>
+                <p className="mt-0.5 text-lg font-bold text-gray-900">
+                  {data.assignAvg?.minutes == null ? '—' : data.assignAvg.minutes < 60 ? `${data.assignAvg.minutes}분` : `${Math.round(data.assignAvg.minutes / 60)}시간`}
+                  <span className="ml-1 text-xs font-normal text-gray-400">({data.assignAvg?.count ?? 0}건)</span>
+                </p>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-gray-500">초과 발생 Top 그룹</p>
+                <p className="mt-0.5 truncate text-sm text-gray-700">
+                  {(data.breachTopQueues ?? []).length === 0 ? '—' : data.breachTopQueues.map((q) => `${q.name} ${q.breached}`).join(' · ')}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-white p-4">
+            <h2 className="mb-1 text-sm font-semibold text-gray-900">지금 돌고 있는 SLA 시계</h2>
+            <p className="mb-3 text-xs text-gray-400">열린 티켓 기준 · 대기(PENDING) 상태에서는 시계가 멈춘다</p>
+            {(data.clockNow ?? []).length === 0 ? (
+              <p className="text-sm text-gray-400">진행 중인 시계가 없습니다.</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
+                    <th className="py-1.5 pr-2">metric</th>
+                    <th className="py-1.5 pr-2 text-right">진행</th>
+                    <th className="py-1.5 pr-2 text-right">정지</th>
+                    <th className="py-1.5 text-right">초과</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(
+                    (data.clockNow ?? []).reduce<Record<string, Record<string, number>>>((acc, c) => {
+                      acc[c.metric] = acc[c.metric] ?? {}
+                      acc[c.metric][c.state] = c.count
+                      return acc
+                    }, {})
+                  ).map(([metric, states]) => (
+                    <tr key={metric} className="border-b border-gray-100 last:border-0">
+                      <td className="py-1.5 pr-2 text-gray-700">{SLA_METRIC_LABELS[metric] ?? metric}</td>
+                      <td className="py-1.5 pr-2 text-right text-gray-700">{states.RUNNING ?? 0}</td>
+                      <td className="py-1.5 pr-2 text-right text-gray-400">{states.PAUSED ?? 0}</td>
+                      <td className={`py-1.5 text-right font-medium ${(states.BREACHED ?? 0) > 0 ? 'text-red-600' : 'text-gray-400'}`}>{states.BREACHED ?? 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {/* 큐별 열린 티켓 + 담당별 처리량 (ADMIN) */}
           <div className="space-y-4">
             <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <h2 className="mb-3 text-sm font-semibold text-gray-900">큐별 열린 티켓</h2>
+              <h2 className="mb-3 text-sm font-semibold text-gray-900">Assignment Group별 열린 티켓</h2>
               {data.byQueue.length === 0 ? (
                 <p className="text-sm text-gray-400">열린 티켓이 없습니다.</p>
               ) : (
@@ -370,7 +456,7 @@ export default function TicketDashboardPage() {
           <div className="rounded-xl border border-gray-200 bg-white p-4">
             <h2 className="mb-1 text-sm font-semibold text-gray-900">현 상태 장기 체류 Top 10</h2>
             <p className="mb-3 text-xs text-gray-400">
-              현재 상태에 머문 일수 기준. 상태·큐 체류 통계는 P11 전환 이후 이벤트가 축적되면 고도화 예정
+              현재 상태에 머문 일수 기준. 상태·그룹 체류 통계는 P11 전환 이후 이벤트가 축적되면 고도화 예정
             </p>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[30rem] table-fixed text-sm">

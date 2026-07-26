@@ -23,6 +23,8 @@ import {
   type DelayedTicketItem,
   type AssigneeUser,
 } from '@/lib/delay-rules'
+import { resolveChannels, type NotifyRouteEvent, type ResolvedChannel } from '@/lib/notify-routes'
+import { emitNotification, ticketRecipients, queueMemberIds } from '@/lib/notify-center'
 
 export type NotifyEventType = 'task_created' | 'task_status_changed' | 'delayed' | 'ticket_assigned'
 type NotifyStatus = 'sent' | 'failed' | 'skipped'
@@ -61,6 +63,11 @@ async function recordLog(entry: LogEntry): Promise<void> {
 
 interface ChannelDispatch {
   intendedChannel: string
+  /** 라우팅으로 결정된 채널일 때 — 로그 payload에 규칙 추적 정보를 남긴다 */
+  routeIds?: number[]
+  channelName?: string
+  /** DAILY_DIGEST 발송 로그 표식 — "오늘 이 규칙으로 이미 보냈는가" 판정 근거 (1.1 P4) */
+  digestRouteId?: number
   eventType: NotifyEventType
   taskType?: string | null
   refCode?: string | null
@@ -130,10 +137,82 @@ export async function dispatchToChannel(d: ChannelDispatch): Promise<void> {
       targetId: channel,
       status: res.ok ? 'sent' : res.skipped ? 'skipped' : 'failed',
       error: res.error,
-      payload: { mode, textPreview: bodyPreview.slice(0, 400), sig: d.sig ?? null },
+      payload: {
+        mode, textPreview: bodyPreview.slice(0, 400), sig: d.sig ?? null,
+        ...(d.routeIds ? { routeIds: d.routeIds } : {}),
+        ...(d.channelName ? { channelName: d.channelName } : {}),
+        ...(d.digestRouteId != null ? { digestRouteId: d.digestRouteId } : {}),
+      },
     })
   } catch (err) {
     console.error('[notify] dispatchToChannel 예외:', err)
+  }
+}
+
+/**
+ * 라우팅 규칙으로 결정된 채널 전부에 발송 (1.1 P3).
+ * - 매칭 규칙 0건이면 미발송 + `no_route` 스킵 로그(조용한 실패가 아니라 근거를 남긴다)
+ * - 멘션은 채널별 mention_mode에 따라 본문 마지막 줄에 덧붙인다(전역 킬스위치 통과 시에만)
+ * `render(mentionLine)`은 채널별 멘션 문구를 받아 메시지를 만드는 콜백.
+ */
+async function dispatchToRoutes(args: {
+  eventTypes: NotifyRouteEvent[]
+  match: Parameters<typeof resolveChannels>[1]
+  eventType: NotifyEventType
+  taskType?: string | null
+  refCode?: string | null
+  sig?: string | null
+  queueId?: number
+  queueName?: string
+  render: (mentionLine: string | null) => { text: string; blocks: unknown[] }
+}): Promise<number> {
+  const channels = await resolveChannels(args.eventTypes, args.match)
+  if (channels.length === 0) {
+    await recordLog({
+      eventType: args.eventType,
+      taskType: args.taskType,
+      refCode: args.refCode,
+      targetType: 'channel',
+      targetId: '(no-route)',
+      status: 'skipped',
+      error: 'no_route',
+      payload: { sig: args.sig ?? null, eventTypes: args.eventTypes },
+    })
+    return 0
+  }
+
+  for (const ch of channels) {
+    const mentionLine = await buildMentionLine(ch, args.queueId, args.queueName)
+    const { text, blocks } = args.render(mentionLine)
+    await dispatchToChannel({
+      intendedChannel: ch.slackChannelId,
+      channelName: ch.channelName,
+      routeIds: ch.routeIds,
+      eventType: args.eventType,
+      taskType: args.taskType,
+      refCode: args.refCode,
+      text,
+      blocks,
+      sig: args.sig ?? null,
+    })
+  }
+  return channels.length
+}
+
+/** 채널의 mention_mode → 멘션 문구. 전역 토글(notify_queue_mentions·notify_sev1_channel)이 킬스위치로 남는다 */
+async function buildMentionLine(ch: ResolvedChannel, queueId?: number, queueName?: string): Promise<string | null> {
+  switch (ch.mentionMode) {
+    case 'channel':
+      return (await sev1ChannelOn()) ? '<!channel>' : null
+    case 'here':
+      return (await sev1ChannelOn()) ? '<!here>' : null
+    case 'queue_members': {
+      if (queueId == null || !(await queueMentionsOn())) return null
+      const m = await queueMemberMentions(queueId)
+      return m ? `${queueName ?? 'Assignment Group'}: ${m}` : null
+    }
+    default:
+      return null
   }
 }
 
@@ -472,7 +551,7 @@ async function getEventFields(taskType: TaskType): Promise<string[]> {
 
 const TICKET_CORE_SELECT = {
   id: true, ticketCode: true, title: true, status: true, severity: true, refType: true,
-  queueId: true, ownerId: true, dueAt: true,
+  queueId: true, ctiId: true, ownerId: true, dueAt: true, statusChangedAt: true, // ctiId: 라우팅 매칭 / statusChangedAt: 내부 알림 dedup
   queue: { select: { name: true } },
   owner: { select: { id: true, name: true, email: true, slackUserId: true, slackNotifyEnabled: true } },
   hospital: { select: { hospitalName: true } },
@@ -599,7 +678,7 @@ function buildTicketMessage(
     if (ch.status.to === 'PENDING' && core.pendingReason?.name) line += ` (사유: ${core.pendingReason.name})`
     lines.push(line)
   }
-  if (ch?.queue) lines.push(`:inbox_tray: Queue: ${ch.queue.fromName ? `${ch.queue.fromName} → ` : ''}*${ch.queue.toName}*`)
+  if (ch?.queue) lines.push(`:inbox_tray: Assignment Group: ${ch.queue.fromName ? `${ch.queue.fromName} → ` : ''}*${ch.queue.toName}*`)
   if (ch?.sev) {
     const fromLbl = ch.sev.from && ch.sev.from in TICKET_SEVERITY_LABELS ? sevShort(ch.sev.from as TicketSeverity) : ch.sev.from
     lines.push(`:vertical_traffic_light: Severity: ${fromLbl ? `${fromLbl} → ` : ''}*${sevShort(ch.sev.to)}*`)
@@ -659,6 +738,39 @@ async function sendTicketAssignDm(core: TicketCore, taskType: TaskType, actorNam
   })
 }
 
+/** 티켓 생성 시 내부 알림 — 배정됐으면 owner, 미배정이면 Assignment Group 멤버가 수신 (P5) */
+async function emitTicketCreatedNotification(
+  core: TicketCore,
+  taskType: TaskType,
+  input: { actorId?: string | null; actorName?: string | null }
+): Promise<void> {
+  const label = TASK_TYPE_LABELS[taskType]
+  const linkLabel = [core.hospital?.hospitalName, core.title].filter(Boolean).join(' — ') || core.ticketCode
+  if (core.ownerId) {
+    await emitNotification({
+      kind: 'TICKET_ASSIGNED',
+      userIds: [core.ownerId],
+      title: `[${label}] ${core.ticketCode} 배정`,
+      body: linkLabel,
+      link: `/tickets/${core.ticketCode}`,
+      ticketId: core.id, refType: core.refType, refCode: core.ticketCode, severity: core.severity,
+      actorId: input.actorId ?? null, actorName: input.actorName ?? null,
+      dedupKey: `assigned:${core.id}:${core.ownerId}`,
+    })
+  } else {
+    await emitNotification({
+      kind: 'TICKET_UNASSIGNED_IN_MY_QUEUE',
+      userIds: await queueMemberIds(core.queueId),
+      title: `[${label}] ${core.ticketCode} 미배정 유입 — ${core.queue.name}`,
+      body: linkLabel,
+      link: `/tickets/${core.ticketCode}`,
+      ticketId: core.id, refType: core.refType, refCode: core.ticketCode, severity: core.severity,
+      actorId: input.actorId ?? null, actorName: input.actorName ?? null,
+      dedupKey: `unassigned:${core.id}`,
+    })
+  }
+}
+
 /**
  * 티켓 생성 알림 (순수 생성·도메인 동시 생성·메일큐 승격 공통).
  * 채널 발송 + 큐 멤버 멘션, owner 선지정 시 배정 DM. best-effort — 절대 throw하지 않음.
@@ -666,6 +778,8 @@ async function sendTicketAssignDm(core: TicketCore, taskType: TaskType, actorNam
 export async function notifyTicketCreated(input: {
   ticketId: number
   actorName?: string | null
+  /** 본인 행동 제외용 — 내부 알림에서 actor 자신은 수신자에서 빠진다 (P5) */
+  actorId?: string | null
   autoRegistered?: boolean
 }): Promise<void> {
   try {
@@ -675,9 +789,18 @@ export async function notifyTicketCreated(input: {
     const taskType = refTypeToTaskType(core.refType)
     if (!(await typeEnabled(taskType))) return
 
-    // 멱등성: 같은 티켓의 등록 알림이 이미 발송(sent)됐으면 스킵(재시도·중복 POST 차단)
+    // 내부 알림 (P5) — Slack 게이트·멱등성 체크보다 **앞에서** 적재한다.
+    // (아래 채널 멱등성은 ticketCode 기준이라 삭제 후 코드가 재사용되면 과거 로그에 걸린다.
+    //  내부 알림은 ticketId 기반 dedupKey를 쓰므로 그 영향을 받으면 안 된다)
+    await emitTicketCreatedNotification(core, taskType, input)
+
+    // 멱등성: 같은 티켓의 등록 알림이 이미 발송(sent)됐으면 스킵(재시도·중복 POST 차단).
+    // 최근 1시간 이내만 본다 — 재시도는 초 단위이고, 티켓 코드는 삭제 후 재사용될 수 있다
     const already = await prisma.notificationLog.findFirst({
-      where: { eventType: 'task_created', refCode: core.ticketCode, status: 'sent' },
+      where: {
+        eventType: 'task_created', refCode: core.ticketCode, status: 'sent',
+        createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+      },
       select: { id: true },
     })
     if (already) return
@@ -698,28 +821,30 @@ export async function notifyTicketCreated(input: {
     } else {
       const enriched = await enrichTask(taskType, domainRefCode(core) ?? core.ticketCode)
       const selectedKeys = await getEventFields(taskType)
-      const mentions = (await queueMentionsOn()) ? await queueMemberMentions(core.queueId) : null
       const emphasize = core.severity === 'SEV1' || core.severity === 'SEV2'
-      const channelMention = core.severity === 'SEV1' && (await sev1ChannelOn())
-      const { text, blocks } = buildTicketMessage('created', core, taskType, enriched, selectedKeys, {
-        actorName: input.actorName,
-        autoRegistered: input.autoRegistered,
-        emphasize,
-        channelMention,
-        mentions,
-      })
-      await dispatchToChannel({
-        intendedChannel: process.env.SLACK_CHANNEL_MAIN || '',
+      // 채널은 라우팅 규칙이 결정한다(1.1 P3) — 멘션 문구도 채널별로 달라 render 콜백으로 받는다
+      await dispatchToRoutes({
+        eventTypes: ['TICKET_CREATED'],
+        match: { refType: core.refType, queueId: core.queueId, ctiId: core.ctiId, severity: core.severity },
         eventType: 'task_created',
         taskType,
         refCode: core.ticketCode,
-        text,
-        blocks,
         sig: ticketSig(core),
+        queueId: core.queueId,
+        queueName: core.queue.name,
+        render: (mentionLine) =>
+          buildTicketMessage('created', core, taskType, enriched, selectedKeys, {
+            actorName: input.actorName,
+            autoRegistered: input.autoRegistered,
+            emphasize,
+            channelMention: mentionLine === '<!channel>' || mentionLine === '<!here>',
+            mentions: mentionLine && !mentionLine.startsWith('<!') ? mentionLine : null,
+          }),
       })
     }
 
     if (core.ownerId) await sendTicketAssignDm(core, taskType, input.actorName)
+
   } catch (err) {
     console.error('[notify] notifyTicketCreated 예외:', err)
   }
@@ -737,6 +862,8 @@ export async function notifyTicketCreated(input: {
 export async function notifyTicketChanged(input: {
   ticketId: number
   actorName?: string | null
+  /** 본인 행동 제외용 (P5) */
+  actorId?: string | null
 }): Promise<void> {
   try {
     if (!(await eventsEnabled())) return
@@ -788,6 +915,36 @@ export async function notifyTicketChanged(input: {
     // 신규 배정 DM (해제는 DM 없음)
     if (ownerChanged && core.ownerId) await sendTicketAssignDm(core, taskType, input.actorName)
 
+    // 내부 알림 (P5) — Slack 채널 발송 여부와 무관하게 적재
+    const label2 = TASK_TYPE_LABELS[taskType]
+    const linkLabel2 = [core.hospital?.hospitalName, core.title].filter(Boolean).join(' — ') || core.ticketCode
+    if (ownerChanged && core.ownerId) {
+      await emitNotification({
+        kind: 'TICKET_ASSIGNED',
+        userIds: [core.ownerId],
+        title: `[${label2}] ${core.ticketCode} 배정`,
+        body: linkLabel2,
+        link: `/tickets/${core.ticketCode}`,
+        ticketId: core.id, refType: core.refType, refCode: core.ticketCode, severity: core.severity,
+        actorId: input.actorId ?? null, actorName: input.actorName ?? null,
+        dedupKey: `assigned:${core.id}:${core.ownerId}`,
+      })
+    }
+    if (statusChanged) {
+      const fromLbl = prev.status && prev.status in TICKET_STATUS_LABELS
+        ? TICKET_STATUS_LABELS[prev.status as TicketStatus] : prev.status
+      await emitNotification({
+        kind: 'TICKET_STATUS_CHANGED',
+        userIds: await ticketRecipients(core.id),
+        title: `[${label2}] ${core.ticketCode} ${fromLbl ? `${fromLbl} → ` : ''}${TICKET_STATUS_LABELS[core.status]}`,
+        body: linkLabel2,
+        link: `/tickets/${core.ticketCode}`,
+        ticketId: core.id, refType: core.refType, refCode: core.ticketCode, severity: core.severity,
+        actorId: input.actorId ?? null, actorName: input.actorName ?? null,
+        dedupKey: `status:${core.id}:${core.status}:${core.statusChangedAt?.getTime() ?? ''}`,
+      })
+    }
+
     // 이벤트별 토글(설정 세분 제어) — 꺼진 이벤트는 채널 발송에서 제외
     const toggles = await getEventToggles()
     const channelWorthy =
@@ -823,88 +980,44 @@ export async function notifyTicketChanged(input: {
 
     const enriched = await enrichTask(taskType, domainRefCode(core) ?? core.ticketCode)
     const selectedKeys = await getEventFields(taskType)
-    // 큐 멤버 멘션: 새 큐로의 이관 또는 Sev1·2 에스컬레이션 시 (notify_queue_mentions 게이트)
-    const mentions =
-      (queueChanged || escalated) && (await queueMentionsOn()) ? await queueMemberMentions(core.queueId) : null
-    const channelMention = escalated && core.severity === 'SEV1' && (await sev1ChannelOn())
-    const { text, blocks } = buildTicketMessage('changed', core, taskType, enriched, selectedKeys, {
-      actorName: input.actorName,
-      changes,
-      emphasize: escalated,
-      channelMention,
-      mentions,
-    })
-    await dispatchToChannel({
-      intendedChannel: process.env.SLACK_CHANNEL_MAIN || '',
+
+    // 변경 축 → 라우팅 이벤트. 복합 변경(상태+큐 동시)이면 두 이벤트의 매칭 채널을 합쳐 1메시지로 보낸다
+    const routeEvents: NotifyRouteEvent[] = []
+    if (statusChanged && toggles.statusChanged) routeEvents.push('TICKET_STATUS_CHANGED')
+    if (queueChanged && toggles.queueTransferred) routeEvents.push('TICKET_QUEUE_TRANSFERRED')
+    if (escalated && toggles.sevEscalated) routeEvents.push('SEV_ESCALATED')
+
+    await dispatchToRoutes({
+      eventTypes: routeEvents,
+      match: {
+        refType: core.refType, queueId: core.queueId, ctiId: core.ctiId, severity: core.severity,
+        statusTo: core.status,
+      },
       eventType: 'task_status_changed',
       taskType,
       refCode: core.ticketCode,
-      text,
-      blocks,
       sig: currentSig,
+      queueId: core.queueId,
+      queueName: core.queue.name,
+      render: (mentionLine) =>
+        buildTicketMessage('changed', core, taskType, enriched, selectedKeys, {
+          actorName: input.actorName,
+          changes,
+          emphasize: escalated,
+          channelMention: mentionLine === '<!channel>' || mentionLine === '<!here>',
+          mentions: mentionLine && !mentionLine.startsWith('<!') ? mentionLine : null,
+        }),
     })
   } catch (err) {
     console.error('[notify] notifyTicketChanged 예외:', err)
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// SLA 요약 (스케줄러 → 지연 채널) — P11: Sev 기반 티켓 판정
-// ─────────────────────────────────────────────────────────────
-
-const KIND_HEAD: Record<DelayedTicketItem['kind'], string> = {
-  overdue: ':alarm_clock: *SLA 초과',
-  warning: ':hourglass_flowing_sand: *SLA 임박',
-  dwell: ':pause_button: *상태 체류',
-}
-
-function delayLine(i: DelayedTicketItem): string {
-  const label = TASK_TYPE_LABELS[i.taskType]
-  const name = [i.hospitalName, i.title].filter(Boolean).join(' — ') || i.ticketCode
-  const meta =
-    i.kind === 'overdue' ? `*${i.days}일 초과* (${i.baseLabel})`
-    : i.kind === 'warning' ? `*${i.days === 0 ? '오늘 마감' : `D-${i.days}`}* (${i.baseLabel})`
-    : `*${i.baseLabel}*`
-  return `• [${label}] <${i.url}|${i.ticketCode} ${name}> — ${sevShort(i.severity)} · ${meta}`
-}
-
-function buildDelaySummary(items: DelayedTicketItem[]): { text: string; blocks: unknown[] } {
-  const MAX_PER_SECTION = 10
-  const sections: string[] = []
-  const counts: Record<string, number> = { overdue: 0, warning: 0, dwell: 0 }
-  for (const kind of ['overdue', 'warning', 'dwell'] as const) {
-    const group = items.filter((i) => i.kind === kind)
-    counts[kind] = group.length
-    if (!group.length) continue
-    const lines = group.slice(0, MAX_PER_SECTION).map(delayLine)
-    if (group.length > MAX_PER_SECTION) lines.push(`… 외 ${group.length - MAX_PER_SECTION}건`)
-    sections.push(`${KIND_HEAD[kind]} ${group.length}건*\n${lines.join('\n')}`)
-  }
-  const text = `⏰ SLA 초과 ${counts.overdue} · 임박 ${counts.warning} · 체류 ${counts.dwell}건`
-  return { text, blocks: [{ type: 'section', text: { type: 'mrkdwn', text: sections.join('\n\n') } }] }
-}
-
-/** 지연 채널 요약 발송 (12시간 내 동일 멤버십 재발송 방지) */
-async function sendDelayChannelSummary(items: DelayedTicketItem[]): Promise<void> {
-  const sig = items.map((i) => `${i.kind}:${i.ticketCode}`).sort().join(',')
-  const recent = await prisma.notificationLog.findFirst({
-    where: { eventType: 'delayed', targetType: 'channel', status: 'sent', createdAt: { gte: new Date(Date.now() - 12 * 3600 * 1000) } },
-    orderBy: { id: 'desc' },
-    select: { payload: true },
-  })
-  if (((recent?.payload as { sig?: string } | null)?.sig) === sig) {
-    console.log('[notify] SLA 요약 동일 멤버십 — 재발송 스킵')
-    return
-  }
-  const { text, blocks } = buildDelaySummary(items)
-  await dispatchToChannel({
-    intendedChannel: process.env.SLACK_CHANNEL_DELAY || process.env.SLACK_CHANNEL_MAIN || '',
-    eventType: 'delayed',
-    text,
-    blocks,
-    sig,
-  })
-}
+/*
+ * 1.0의 지연 채널 요약(KIND_HEAD·delayLine·buildDelaySummary·sendDelayChannelSummary, 12시간 dedup)은
+ * 1.1 P4에서 `lib/sla-alerts.ts`의 **초과 즉시 알림 + 지정 시각 일일 다이제스트**로 대체됐다.
+ * 새 요약 빌더는 `buildDigestMessage`(Assignment Group·유형별 섹션, 규칙별 섹션 상한).
+ */
 
 // ─────────────────────────────────────────────────────────────
 // SLA 초과 owner DM
@@ -1016,25 +1129,22 @@ async function sendDelayDMs(items: DelayedTicketItem[]): Promise<void> {
 }
 
 /**
- * SLA·체류 알림 실행 (notify-scheduler가 주기적으로 호출).
- * 전역 off·대상 0건이면 미발송. 채널 요약 + (DM 사용 시) SLA 초과 owner DM.
+ * SLA 초과 owner DM 실행 (1.1 P4 — tick에서 호출).
+ * 채널 발송은 `lib/sla-alerts.ts`가 담당하고 이 함수는 **개인 DM만** 처리한다.
+ * (내부 알림함이 생기는 P5 이후에는 DM 비중을 줄일 수 있다 — 설계 D9)
  * best-effort — throw하지 않음.
  */
-export async function runDelayNotifications(): Promise<void> {
+export async function runSlaOwnerDms(): Promise<void> {
   try {
     const g = await prisma.appSetting.findUnique({ where: { key: 'notify_enabled' } })
     if ((g?.value ?? 'off') !== 'on') return
+    if (!(await dmEnabled())) return
 
     const types = await getTypesEnabled()
-    const items = (await findDelayedTickets()).filter((i) => types[i.taskType])
-    if (items.length === 0) {
-      console.log('[notify] SLA 초과·임박·체류 티켓 없음(또는 전 타입 비활성) — 미발송')
-      return
-    }
-
-    await sendDelayChannelSummary(items)
-    if (await dmEnabled()) await sendDelayDMs(items)
+    const items = (await findDelayedTickets()).filter((i) => types[i.taskType] && i.kind === 'overdue')
+    if (items.length === 0) return
+    await sendDelayDMs(items)
   } catch (err) {
-    console.error('[notify] runDelayNotifications 예외:', err)
+    console.error('[notify] runSlaOwnerDms 예외:', err)
   }
 }

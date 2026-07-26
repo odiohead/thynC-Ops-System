@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { sanitizeRichTextHtml, isEmptyRichText } from '@/lib/richtext'
+import { syncTicketClocksSafe } from '@/lib/sla'
+import { emitNotification, ticketRecipients } from '@/lib/notify-center'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,6 +59,21 @@ export async function POST(request: NextRequest, { params }: Params) {
     resourceLabel: `${ticket.ticketCode} 코멘트`,
     after: log,
   })
+
+  // 코멘트는 FIRST_RESPONSE 달성·UPDATE_STALE 리셋의 앵커 (lib/sla.ts)
+  syncTicketClocksSafe(id)
+
+  // 내부 알림 (P5) — owner·참여자에게. 본인(작성자)은 notify-center가 제외한다
+  emitNotification({
+    kind: 'TICKET_COMMENT',
+    userIds: await ticketRecipients(id),
+    title: `${ticket.ticketCode} 새 코멘트`,
+    body: `${user.name}님이 코멘트를 남겼습니다.`,
+    link: `/tickets/${ticket.ticketCode}`,
+    ticketId: id, refCode: ticket.ticketCode,
+    actorId: user.userId, actorName: user.name,
+    dedupKey: `comment:${log.id}`,
+  }).catch(() => {})
 
   return NextResponse.json({ log }, { status: 201 })
 }

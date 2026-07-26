@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser, isUserOrAbove } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { notifyTicketCreated } from '@/lib/notify'
+import { syncTicketClocksSafe } from '@/lib/sla'
 import { uploadToS3 } from '@/lib/s3'
 import { parseFormEmail, buildNoteHtml } from '@/lib/gmail'
 import { advanceHospitalStatus } from '@/lib/hospitalStatus'
@@ -80,6 +81,7 @@ export async function PUT(
   })
 
   // Slack 알림 (메일큐 자동등록, P11 티켓 파이프라인) — best-effort
+  syncTicketClocksSafe(ticketId) // SLA 시계 생성 (알림과 독립 — lib/sla.ts)
   notifyTicketCreated({ ticketId, autoRegistered: true }).catch(() => {})
 
   // 파일 링크가 있으면 다운로드 → S3 업로드 → InstallPlanFile 생성

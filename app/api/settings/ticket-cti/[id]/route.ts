@@ -32,7 +32,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (body.defaultQueueId === null) data.defaultQueueId = null
     else if (typeof body.defaultQueueId === 'number') {
       const queue = await prisma.ticketQueue.findUnique({ where: { id: body.defaultQueueId } })
-      if (!queue) return NextResponse.json({ error: '기본 큐를 찾을 수 없습니다.' }, { status: 400 })
+      if (!queue) return NextResponse.json({ error: '기본 Assignment Group을 찾을 수 없습니다.' }, { status: 400 })
       data.defaultQueueId = queue.id
     }
   }

@@ -250,7 +250,7 @@ export default function TicketCtiSettingsPage() {
                   </div>
                 </div>
 
-                {/* Item(L3)에만 기본 큐 지정 */}
+                {/* Item(L3)에만 기본 Assignment Group 지정 */}
                 {level === 3 && (
                   <div className="mt-1.5 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                     <span className="shrink-0 text-xs text-gray-400">Default Queue</span>
@@ -302,7 +302,7 @@ export default function TicketCtiSettingsPage() {
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">티켓 분류(CTI) 관리</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Category → Type → Item 3단 분류를 관리합니다. Item에 기본 큐를 지정하면 티켓 생성 시 해당 큐로 자동 배정됩니다.
+            Category → Type → Item 3단 분류를 관리합니다. Item에 기본 Assignment Group을 지정하면 티켓 생성 시 해당 그룹으로 자동 배정됩니다.
           </p>
         </div>
 

@@ -1,8 +1,8 @@
 -- 티켓 마스터 시드 (P4 — 2026-07-24 사용자 확정안)
 -- 재실행 안전(idempotent): 존재하면 건너뜀. PROD 최초 반영 시에도 이 파일 사용.
--- 큐 4종 / PENDING 사유 5종 / CTI: 고객지원·영업·내부 3 Category, 각 Item에 기본 큐 라우팅
+-- Assignment Group 4종 / PENDING 사유 5종 / CTI: 고객지원·영업·내부 3 Category, 각 Item에 기본 그룹 라우팅
 
--- 1) 큐
+-- 1) Assignment Group (ticket_queues — AWS SIM의 assigned/resolver group)
 INSERT INTO ticket_queues (name, description, sort_order) VALUES
   ('영업', '영업·견적·고객사 관계', 10),
   ('설치·답사', '현장 답사, 설치 계획·구축', 20),
@@ -76,7 +76,7 @@ BEGIN
   PERFORM pg_temp.ensure_l3(typ, '견적지원', q_sales, 20);
   PERFORM pg_temp.ensure_l3(typ, '기타', q_sales, 90);
 
-  -- 영업/신규도입 — P7 답사·P8 설치계획 편입용 (dev2에는 사용자 생성분 존재 — 기본 큐만 보정)
+  -- 영업/신규도입 — P7 답사·P8 설치계획 편입용 (dev2에는 사용자 생성분 존재 — 기본 그룹만 보정)
   typ := pg_temp.ensure_l2(cat, '신규도입', 20);
   PERFORM pg_temp.ensure_l3(typ, '답사요청', q_install, 10);
   PERFORM pg_temp.ensure_l3(typ, '설치계획(가안)요청', q_install, 20);
@@ -117,7 +117,7 @@ INSERT INTO nav_menu_items (menu_key, label, href, icon_key, sort_order) VALUES
   ('tickets', '티켓', '/tickets', 'ticket', 18)
 ON CONFLICT (menu_key) DO NOTHING;
 INSERT INTO nav_menu_items (menu_key, label, href, parent_key, sort_order, group_label) VALUES
-  ('settings/ticket-queues', '티켓 큐 관리', '/settings/ticket-queues', 'settings', 60, '티켓'),
+  ('settings/ticket-queues', 'Assignment Group 관리', '/settings/ticket-queues', 'settings', 60, '티켓'),
   ('settings/ticket-cti', '티켓 분류(CTI) 관리', '/settings/ticket-cti', 'settings', 62, '티켓'),
   ('settings/ticket-pending-reasons', '티켓 대기 사유 관리', '/settings/ticket-pending-reasons', 'settings', 64, '티켓')
 ON CONFLICT (menu_key) DO NOTHING;

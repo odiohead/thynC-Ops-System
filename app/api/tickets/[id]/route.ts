@@ -7,6 +7,7 @@ import { sanitizeRichTextHtml } from '@/lib/richtext'
 import { addTicketEvent } from '@/lib/ticket'
 import { syncTicketToDomain } from '@/lib/ticketDomain'
 import { notifyTicketChanged } from '@/lib/notify'
+import { syncTicketClocksSafe } from '@/lib/sla'
 import { getSlaRules, computeTicketDueAt } from '@/lib/delay-rules'
 
 export const dynamic = 'force-dynamic'
@@ -126,7 +127,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
   })
 
   // Sev1·2 에스컬레이션 등 sig 변경 감지·발송 (best-effort)
-  notifyTicketChanged({ ticketId: id, actorName: user.name }).catch(() => {})
+  syncTicketClocksSafe(id) // SLA 시계 갱신 (알림과 독립 — lib/sla.ts)
+  notifyTicketChanged({ ticketId: id, actorName: user.name, actorId: user.userId }).catch(() => {})
 
   return NextResponse.json({ ticket })
 }

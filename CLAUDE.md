@@ -264,10 +264,12 @@ if (user.role !== 'ADMIN') return 403
 
 ### 티켓 시스템 규칙 (P13 확정 — 상세는 `ticket_dev_schedule.md`·`ticket_system_design.md` §2)
 
+> **명칭 (2026-07-26)**: 배정 그룹의 **UI 표기는 'Assignment Group'**(AWS SIM assigned/resolver group에 대응). DB 테이블 `ticket_queues`·API 경로 `/api/settings/ticket-queues`·코드 식별자 `queueId`는 그대로 유지한다 — 라벨만 변경(1.0의 '티켓 UI 필드명 영문화' 선례와 동일 방식).
+
 1. **Slack 알림은 티켓 파이프라인 단일 소스** — 업무 알림은 `lib/notify.ts`의 `notifyTicketCreated`/`notifyTicketChanged`만 사용. 도메인 라우트에서 채널로 직접 발송하는 코드 추가 금지 (이중 발송 방지 — P11)
 2. **상태 전이표·라벨은 `lib/ticket-shared.ts` 단일 소스** — 전이 규칙·상태/Sev 라벨을 다른 곳에 하드코딩 금지. 전이는 반드시 `canTransition` 검증 경유
 3. **도메인↔티켓 동기화는 `lib/ticketDomain.ts` 경유** — 도메인 레코드와 연결 티켓을 같은 트랜잭션에서 `sync*ToTicket`/`syncTicketToDomain`으로 갱신. 연결 티켓의 status/owner/severity/hospitalCode를 라우트에서 직접 UPDATE 금지
-4. **티켓 마스터(큐·CTI·대기 사유·nav) 변경 시 `scripts/seed-ticket-masters.sql`에도 반영** — PROD 최초 반영·데이터 동기화 후 재실행되는 파일(idempotent 유지)
+4. **티켓 마스터(Assignment Group·CTI·대기 사유·nav) 변경 시 `scripts/seed-ticket-masters.sql`에도 반영** — PROD 최초 반영·데이터 동기화 후 재실행되는 파일(idempotent 유지)
 
 ---
 

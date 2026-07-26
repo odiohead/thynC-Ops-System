@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import SlaMatrixTab from './SlaMatrixTab'
+import RoutesTab from './RoutesTab'
 
 interface FieldDef {
   key: string
@@ -84,6 +86,7 @@ const MODE_LABEL: Record<string, string> = {
 }
 
 export default function NotificationSettingsPage() {
+  const [tab, setTab] = useState<'sla' | 'routes' | 'slack'>('sla')
   const router = useRouter()
   const [cfg, setCfg] = useState<Config | null>(null)
   const [saving, setSaving] = useState(false)
@@ -166,12 +169,39 @@ export default function NotificationSettingsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
-        <h1 className="text-2xl font-bold text-foreground mb-1">Slack 알림 설정</h1>
-        <p className="text-sm text-muted-foreground mb-6">
-          주요 업무 등록·완료 시 Slack 채널로 보내는 알림을 제어합니다.
+      {/* SLA 기준 탭은 매트릭스 폭이 필요해 컨테이너를 넓게 (알림 설정 탭은 기존 3xl 유지) */}
+      <div className={`mx-auto px-4 py-8 sm:px-6 lg:px-8 ${tab === 'slack' ? 'max-w-3xl' : 'max-w-6xl'}`}>
+        <h1 className="text-2xl font-bold text-foreground mb-1">알림 설정</h1>
+        <p className="text-sm text-muted-foreground mb-4">
+          SLA 지연 기준과 Slack 발송 정책을 제어합니다.
         </p>
 
+        {/* 탭 — ① SLA 기준(1.1 P2) / ② Slack 발송(기존). 채널·규칙 탭은 P3, 내부 알림 탭은 P5에서 추가 */}
+        <div className="mb-6 flex gap-1 border-b border-border">
+          {([
+            ['sla', 'SLA 기준'],
+            ['routes', '채널·라우팅'],
+            ['slack', '전역·DM·이력'],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+                tab === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'sla' && <SlaMatrixTab />}
+
+        {tab === 'routes' && <RoutesTab />}
+
+        {tab === 'slack' && (
+        <>
         {/* 발송 모드 (읽기전용, .env) */}
         <div className="mb-4 rounded-xl border bg-card p-4">
           <div className="flex items-center justify-between">
@@ -270,7 +300,7 @@ export default function NotificationSettingsPage() {
             {([
               ['created', '등록'],
               ['statusChanged', '상태 변경'],
-              ['queueTransferred', '큐 이관'],
+              ['queueTransferred', '그룹 이관'],
               ['sevEscalated', 'Sev1·2 상향'],
             ] as const).map(([key, label]) => (
               <label key={key} className="flex items-center gap-2 cursor-pointer text-sm text-foreground">
@@ -288,7 +318,7 @@ export default function NotificationSettingsPage() {
           <div className="mt-3 grid grid-cols-1 gap-y-2 border-t pt-3 sm:grid-cols-2">
             <label className="flex items-center gap-2 cursor-pointer text-sm text-foreground">
               <input type="checkbox" className="h-4 w-4 accent-primary" checked={cfg.queueMentions} onChange={(e) => setCfg({ ...cfg, queueMentions: e.target.checked })} disabled={!cfg.enabled || !cfg.eventsEnabled} />
-              <span>큐 멤버 멘션 <span className="text-xs text-muted-foreground">(등록·큐 이관·Sev 상향 시 해당 큐 멤버 태그)</span></span>
+              <span>그룹 멤버 멘션 <span className="text-xs text-muted-foreground">(등록·그룹 이관·Sev 상향 시 해당 Assignment Group 멤버 태그)</span></span>
             </label>
             <label className="flex items-center gap-2 cursor-pointer text-sm text-foreground">
               <input type="checkbox" className="h-4 w-4 accent-primary" checked={cfg.sev1Channel} onChange={(e) => setCfg({ ...cfg, sev1Channel: e.target.checked })} disabled={!cfg.enabled || !cfg.eventsEnabled} />
@@ -406,6 +436,8 @@ export default function NotificationSettingsPage() {
             )}
           </div>
         </div>
+        </>
+        )}
       </div>
     </div>
   )
