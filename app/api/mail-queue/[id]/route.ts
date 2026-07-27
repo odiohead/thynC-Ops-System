@@ -34,12 +34,17 @@ export async function PUT(
   const parsed = parseFormEmail(queueItem.rawBody)
   const note = buildNoteHtml(queueItem, parsed.fullText)
 
+  // 단일 상태 축 (2026-07-27 전환) — 승격 직후는 '접수'
+  const acceptStatus = await prisma.statusCode.findFirst({
+    where: { category: 'INSTALL_PLAN_STATUS', name: '접수' },
+    select: { id: true },
+  })
+
   const created = await prisma.installPlan.create({
     data: {
       hospitalCode,
       requestDate: queueItem.requestDate || new Date(),
-      writeStatus: '미완료',
-      replyStatus: '미완료',
+      statusId: acceptStatus?.id ?? null,
       note,
     },
   })
@@ -72,8 +77,8 @@ export async function PUT(
       planCode,
       hospitalCode: installPlan.hospitalCode,
       hospitalName: installPlan.hospital?.hospitalName ?? installPlan.hospital?.hiraHospitalName ?? null,
-      writeStatus: installPlan.writeStatus,
-      replyStatus: installPlan.replyStatus,
+      statusId: installPlan.statusId,
+      statusName: '접수',
       assigneeUserIds: [],
       note: installPlan.note,
       createdAt: installPlan.createdAt,

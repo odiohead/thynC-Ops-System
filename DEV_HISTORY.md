@@ -4,6 +4,27 @@
 
 ---
 
+## 2026-07-27 | 자재 현황 인벤토리 표시 순서 변경
+
+- `/inventory` 인벤토리 섹션 순서: 대웅제약재고 → **thynC운영팀재고** → 평가용재고 → 판매용재고 (구: 대웅제약 → 평가용 → 판매용 → thynC운영팀)
+- 코드 변경 없음 — `inventories.sort_order` 데이터 갱신 (DEV·PROD 동일 적용). `/settings/inventories`에서 언제든 재조정 가능
+
+---
+
+## 2026-07-27 | 도메인↔티켓 상태 매핑 설정화 + 설치계획 단일 상태 축 전환
+
+- 도메인↔티켓 상태 동기화가 **하드코딩 switch + 이름/라벨 문자열 매칭**이라 생기던 결함들을 DB 매핑으로 이관. 설계: `ticket_status_map_design.md` (결정①A 완료→CLOSED 유지 / ②B 설치계획 단일 축 / ③티켓 상태 미병기)
+- **P1 매핑 컬럼**: 마이그레이션 `20260727100000`(순수 추가) — `status_codes.ticket_status`(+`ticket_pending_reason_id`), `build_statuses.ticket_status`. 시드 `scripts/seed-ticket-status-map.sql`(NULL만 채움 — 운영자 변경 보존, 재실행 안전)로 기존 하드코딩 값 그대로 이관 → **적용 직후 동작 100% 동일**
+- **엔진 개정** (`lib/ticketDomain.ts`): 순방향 = 매핑 컬럼 우선 + 하드코딩 폴백(시드 유실에도 티켓 생성 불실패), OPEN 계열은 owner 유무로 ASSIGNED 자동 판정. 역방향 = ①**keep-if-consistent**(현 도메인 상태가 같은 버킷이면 유지 — 작성완료(회신대기) 답사가 티켓 PENDING 조작에 '보류'로 강등되던 결함 해소) ②PENDING 사유 일치 행 우선 ③order 최소 행, RESOLVED·CLOSED는 같은 버킷. 버킷만 비면 no-op(설정 경고로 노출), 카테고리 전체 미시드일 때만 이름 폴백
+- **해소된 기존 결함**: ①운영자가 새 상태 추가 시 코드가 몰라 **조용히 접수(OPEN) 처리** ②프로젝트 BuildStatus **라벨 contains 매칭**(라벨 변경 시 무경고 파손 — CTI 규칙에서 고친 이름 매칭과 동일 부류) ③답사 역방향 PENDING→무조건 보류 ④설치계획 owner 시 ASSIGNED 아닌 IN_PROGRESS 비일관
+- **P2 설정 UI**: 공용 `WorkflowStatusManager`(신규 — 유지보수/기타업무/답사/설치계획 상태 페이지 4곳이 thin wrapper로 공유) + build-status 페이지에 '티켓 상태' 필수 셀렉트(PENDING이면 대기 사유 셀렉트)·`매핑 미지정` 앰버 배지·역방향 버킷 부재 경고 배너. API는 POST 매핑 필수 400, PUT은 미전송 시 유지(순서 교환 보호), ASSIGNED 매핑 거부
+- **P3 설치계획 단일 상태 축**: 마이그레이션 `20260727120000` — `INSTALL_PLAN_STATUS` 4종(접수·작성완료·회신완료·보류) + `install_plans.status_id` + 백필 73건((완,완)→회신완료 67 / 나머지→접수 6). `write_status`/`reply_status`는 **백업 보존(deprecated)**. 목록 2배지→단일 상태 배지·필터/정렬 정비, 폼 2셀렉트→1셀렉트(신규 기본 접수), 메일큐 승격=접수, 병원 상세 카드·티켓 연결 배너·AI 도구(`list_install_plans` statusName 필터)·Slack 메시지 필드(작성/회신→상태) 전환. `/settings/install-plan-status` 신설(+nav '업무 유형·상태' 그룹 sort 51)
+- **비소급**: 매핑 변경은 이후 저장·전이부터 — 기존 티켓 상태 백필 없음 (CTI 규칙·SLA 정책과 동일 원칙)
+- **검증**: 스모크 `scripts/ticket-status-map-smoke.mts` **31/31**(순방향 컬럼/폴백·커스텀 상태·역방향 keep-if-consistent/사유 우선/버킷·프로젝트·설치계획·시드 대조, 테스트 데이터 잔여 0) + 실 API E2E **18/18**(답사 등록→상태 3회 변경→티켓 확인, 티켓 RESOLVED 전이→답사 회신완료, 설치계획 등록/수정/타 카테고리 400, 설정 API 400·201·삭제). tsc·lint 0오류, 힙 4GB 빌드, dev2 PM2 재시작·HTTP 200 확인. **git·PROD 반영 안 함**
+- 영향 파일: prisma/{schema.prisma, migrations/20260727100000·20260727120000}, lib/{ticketDomain.ts, ticket-shared.ts, notify.ts, notifyFields.ts, ai/tools.ts}, scripts/{seed-ticket-status-map.sql(신규), ticket-status-map-smoke.mts(신규)}, app/settings/{_components/WorkflowStatusManager.tsx(신규), maintenance-status, etc-task-status, site-visit-status, install-plan-status(신규), build-status}, app/api/settings/{maintenance-status, etc-task-status, site-visit-status, install-plan-status(신규), build-status}, app/api/{install-plans, mail-queue/[id], maintenances, site-visits, etc-tasks, projects, tickets/[id]}, app/install-plans/{page.tsx, InstallPlanForm.tsx, [id]}, app/hospitals/[code]/{page.tsx, _components/InstallPlansCard.tsx}, app/tickets/[code]/page.tsx, ticket_status_map_design.md(신규)
+
+---
+
 ## 2026-07-26 | 티켓 자동생성 규칙 PROD 배포
 
 - dev2 커밋 `73837f0` push → PROD git pull(`d56ec3a`→`73837f0`, 30파일) → **의존성 변경 없음**(package.json 무변경)

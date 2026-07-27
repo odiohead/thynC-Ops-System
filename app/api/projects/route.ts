@@ -188,6 +188,7 @@ export async function POST(request: NextRequest) {
         projectName: project.projectName,
         hospitalCode: project.hospitalCode,
         buildStatusLabel: bs?.label ?? null,
+        buildStatusId: buildStatusId ? Number(buildStatusId) : null,
         assigneeUserIds: Array.isArray(assigneeIds) ? assigneeIds : [],
         endDateExpected: project.endDateExpected,
         remark: project.remark,

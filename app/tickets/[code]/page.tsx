@@ -67,8 +67,7 @@ interface TicketDetail {
     id: number
     planCode: string | null
     requestDate: string | null
-    writeStatus: string
-    replyStatus: string
+    status: { name: string } | null
     replyDate: string | null
   } | null
   project: {
@@ -574,8 +573,7 @@ export default function TicketDetailPage() {
             code={ticket.installPlan.planCode ?? `#${ticket.installPlan.id}`}
             meta={[
               `요청일 ${dateOnly(ticket.installPlan.requestDate)}`,
-              `작성 ${ticket.installPlan.writeStatus || '-'}`,
-              `회신 ${ticket.installPlan.replyStatus || '-'}`,
+              `상태 ${ticket.installPlan.status?.name ?? '-'}`,
               `회신일 ${dateOnly(ticket.installPlan.replyDate)}`,
             ].join(' · ')}
             href={`/install-plans/${ticket.installPlan.id}`}

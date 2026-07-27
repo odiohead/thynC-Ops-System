@@ -125,6 +125,10 @@ model StatusCode {
   order                  Int                    @default(0) @map("order")
   color                  String?                @map("color")
   category               String                 @default("HOSPITAL") @map("category")
+  // 도메인↔티켓 상태 매핑 (ticket_status_map_design.md — 워크플로 카테고리만 사용, ASSIGNED는 owner 유무로 엔진 판정)
+  ticketStatus           TicketStatus?          @map("ticket_status")
+  ticketPendingReasonId  Int?                   @map("ticket_pending_reason_id")
+  ticketPendingReason    TicketPendingReason?   @relation("StatusCodePendingReason", fields: [ticketPendingReasonId], references: [id], onDelete: SetNull)
   createdAt              DateTime               @default(now()) @map("created_at")
   siteVisits             SiteVisit[]
   hospitalIntroTypes     HospitalIntroType[]
@@ -136,6 +140,7 @@ model StatusCode {
   maintenanceTypes       Maintenance[]          @relation("MaintenanceType")
   maintenanceStatuses    Maintenance[]          @relation("MaintenanceStatus")
   etcTaskStatuses        EtcTask[]              @relation("EtcTaskStatus")
+  installPlanStatuses    InstallPlan[]          @relation("InstallPlanStatus")
   manufacturerItems      InventoryItem[]        @relation("ItemManufacturer")
   reasonTransactions     InventoryTransaction[] @relation("TxReason")
   ctiRuleMatches         TicketDomainCtiRule[]  @relation("CtiRuleMatchStatus")
@@ -344,9 +349,11 @@ model Contractor {
 }
 
 model BuildStatus {
-  id        Int       @id @default(autoincrement())
-  label     String    @map("label")
-  color     String?   @map("color")
+  id           Int           @id @default(autoincrement())
+  label        String        @map("label")
+  color        String?       @map("color")
+  // 도메인↔티켓 상태 매핑 (ticket_status_map_design.md)
+  ticketStatus TicketStatus? @map("ticket_status")
   sortOrder Int       @default(0) @map("sort_order")
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
@@ -506,13 +513,15 @@ model InstallPlan {
   planCode     String?   @unique @map("plan_code")
   hospitalCode String?   @map("hospital_code")
   requestDate  DateTime? @map("request_date") @db.Date
-  writeStatus  String    @default("-") @map("write_status")
-  replyStatus  String    @default("-") @map("reply_status")
+  writeStatus  String    @default("-") @map("write_status") // deprecated: 2026-07-27 단일 상태 축(statusId) 전환 — 백업용 보존, 앱 미사용
+  replyStatus  String    @default("-") @map("reply_status") // deprecated: 상동
+  statusId     Int?      @map("status_id") // 단일 상태 (StatusCode INSTALL_PLAN_STATUS — ticket_status_map_design.md §7)
   replyDate    DateTime? @map("reply_date") @db.Date
   note         String?
   ticketId     Int?      @unique @map("ticket_id") // P8 티켓 편입 — 1:1 연결
 
   ticket    Ticket?               @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  status    StatusCode?           @relation("InstallPlanStatus", fields: [statusId], references: [id])
   hospital  Hospital?             @relation(fields: [hospitalCode], references: [hospitalCode])
   files     InstallPlanFile[]
   assignees InstallPlanAssignee[]
@@ -521,6 +530,7 @@ model InstallPlan {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  @@index([statusId])
   @@map("install_plans")
   @@schema("public")
 }
@@ -1687,13 +1697,14 @@ model TicketDomainCtiRule {
 }
 
 model TicketPendingReason {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique
-  isActive  Boolean  @default(true) @map("is_active")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  tickets   Ticket[]
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  isActive    Boolean      @default(true) @map("is_active")
+  sortOrder   Int          @default(0) @map("sort_order")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  tickets     Ticket[]
+  statusCodes StatusCode[] @relation("StatusCodePendingReason")
 
   @@map("ticket_pending_reasons")
   @@schema("public")

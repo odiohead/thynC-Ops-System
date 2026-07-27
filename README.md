@@ -91,8 +91,9 @@ app/
 │   │   ├── consultation-type/        # 상담유형 관리
 │   │   ├── document-type/            # 문서유형 관리
 │   │   ├── maintenance-type/         # 장애유형 관리
-│   │   ├── maintenance-status/       # 유지보수 상태 관리
-│   │   ├── etc-task-status/          # 기타업무 상태 관리
+│   │   ├── maintenance-status/       # 유지보수 상태 관리 (+티켓 상태 매핑)
+│   │   ├── etc-task-status/          # 기타업무 상태 관리 (+티켓 상태 매핑)
+│   │   ├── install-plan-status/      # 설치계획 상태 관리 (2026-07-27 단일 축 — +티켓 상태 매핑)
 │   │   ├── ticket-queues/            # Assignment Group 마스터 CRUD (티켓 있으면 삭제 400)
 │   │   ├── ticket-cti/               # 티켓 분류(CTI) 3단 트리 CRUD + 기본 그룹 지정
 │   │   ├── ticket-pending-reasons/   # 티켓 대기(PENDING) 사유 마스터 CRUD
@@ -175,6 +176,7 @@ app/
 │       └── MovePageModal.tsx         # 페이지 이동 모달 (새 부모 트리 선택)
 ├── users/                            # 사용자 관리 (ADMIN 이상)
 ├── settings/
+│   ├── _components/                  # StatusCodeManager · WorkflowStatusManager(워크플로 상태 + 티켓 상태 매핑 공용, 2026-07-27)
 │   ├── profile/                      # 내 계정 정보
 │   ├── organizations/                # 소속 관리 (SUPER_ADMIN 전용)
 │   ├── field-engineers/              # 필드 엔지니어 리스트 (ADMIN 이상)
@@ -188,8 +190,9 @@ app/
 │   ├── consultation-type/            # 상담유형 관리
 │   ├── document-type/                # 문서유형 관리
 │   ├── maintenance-type/             # 장애유형 관리
-│   ├── maintenance-status/           # 유지보수 상태 관리
-│   ├── etc-task-status/              # 기타업무 상태 관리
+│   ├── maintenance-status/           # 유지보수 상태 관리 (WorkflowStatusManager)
+│   ├── etc-task-status/              # 기타업무 상태 관리 (WorkflowStatusManager)
+│   ├── install-plan-status/          # 설치계획 상태 관리 (WorkflowStatusManager, 2026-07-27)
 │   ├── ticket-queues/                # Assignment Group 관리 (이름·설명·순서·활성·티켓 수)
 │   ├── ticket-cti/                   # 티켓 분류(CTI) 관리 (Category/Type/Item 3컬럼 + Item 기본 Assignment Group 지정)
 │   ├── ticket-pending-reasons/       # 티켓 대기 사유 관리
@@ -350,8 +353,8 @@ prisma/
 - 고유 코드 `planCode`: `IP-YYYYMM-NNNNN` 형식 (생성 시 자동 발번)
 - 병원 연결 (hospitalCode, 선택사항)
 - 요청일 (`requestDate`), 회신일 (`replyDate`)
-- 작성완료여부 (`writeStatus`): `-` / `미완료` / `완료`
-- 회신여부 (`replyStatus`): `-` / `미완료` / `완료`
+- **상태 (`statusId` → StatusCode INSTALL_PLAN_STATUS, 2026-07-27 단일 축 전환)**: 접수 → 작성완료(회신대기) → 회신완료 + 보류. 신규 등록 기본 '접수', 메일큐 승격도 '접수'
+- ~~`writeStatus`/`replyStatus`~~ — **deprecated** (2026-07-27 단일 상태 축 전환으로 동결·백업 보존, 앱 미사용). 백필: (완료,완료)→회신완료 / (완료,그 외)→작성완료 / 나머지→접수
 - 담당자 N:M (`InstallPlanAssignee`), 비고 (`note`, 리치 텍스트)
 
 ### InstallPlanAssignee (설치계획 담당자)
@@ -445,11 +448,13 @@ prisma/
 
 ### BuildStatus (공사 상태)
 - 공사 진행 상태 정의 (레이블, 색상)
+- `ticketStatus` (TicketStatus?, 2026-07-27): 이 상태가 소속되는 **티켓 상태 매핑** — 프로젝트↔티켓 상태 동기화의 단일 소스 (구 라벨 문자열 앵커 매칭 대체, `ticket_status_map_design.md`)
 
 ### StatusCode (상태코드)
 - 병원/답사/상담유형/문서유형/장애유형/유지보수상태 등 다용도 상태값 정의 (커스터마이징 가능, 색상 포함)
-- category: `HOSPITAL` / `SITE_VISIT` / `INTRO_TYPE` / `CONSULTATION_TYPE` / `DOCUMENT_TYPE` / `MAINTENANCE_TYPE` / `MAINTENANCE_STATUS` / `ETC_TASK_STATUS`
+- category: `HOSPITAL` / `SITE_VISIT` / `INTRO_TYPE` / `CONSULTATION_TYPE` / `DOCUMENT_TYPE` / `MAINTENANCE_TYPE` / `MAINTENANCE_STATUS` / `ETC_TASK_STATUS` / `INSTALL_PLAN_STATUS`(2026-07-27 신설)
 - value: 코드값 (String?, nullable) — 문서유형 등에서 내부 식별자로 사용
+- **티켓 상태 매핑 (2026-07-27 — `ticket_status_map_design.md`)**: 워크플로 카테고리(SITE_VISIT·MAINTENANCE_STATUS·ETC_TASK_STATUS·INSTALL_PLAN_STATUS) 행에 `ticketStatus`(OPEN/IN_PROGRESS/PENDING/RESOLVED/CLOSED 5종 — ASSIGNED는 owner 유무로 엔진 자동 판정) + `ticketPendingReasonId`(PENDING 매핑의 대기 사유 — 답사 작성완료↔보류 구분) 부여. 도메인↔티켓 상태 동기화(`lib/ticketDomain.ts`)의 단일 소스이며, 컬럼 NULL이면 기존 하드코딩 폴백. 시드 `scripts/seed-ticket-status-map.sql`(NULL만 채움 — 운영자 변경 보존)
 
 ### Contractor (시공사)
 - 시공사 코드, 이름, 연락처 등
@@ -637,6 +642,7 @@ prisma/
   - **규칙 변경은 소급 적용하지 않는다** — 기존 티켓 CTI 백필 없음(SLA 정책과 동일 원칙). 유지보수만 장애유형 변경 시 CTI 재동기화 유지
   - 유지보수 장애유형 매칭이 **이름 문자열 → status_code_id(FK)** 로 바뀌면서, 유형 이름 변경 시 조용히 '기타'로 떨어지던 결함 해소
   - 시드 `scripts/seed-ticket-cti-rules.sql`(9행, idempotent·이름 조회 기반) — 배포 직후 동작이 이전과 동일
+- **도메인↔티켓 상태 매핑 (2026-07-27 — `ticket_status_map_design.md`)**: 도메인 상태코드(`status_codes.ticket_status`+`ticket_pending_reason_id`)·BuildStatus(`build_statuses.ticket_status`)가 소속 티켓 상태를 명시 선언 — 하드코딩 switch·라벨 문자열 매칭 대체. 순방향은 매핑 컬럼 우선(+하드코딩 폴백, OPEN 계열은 owner로 ASSIGNED 자동 판정), 역방향은 keep-if-consistent → PENDING 사유 일치 → order 최소(RESOLVED·CLOSED 같은 버킷, 버킷 부재 시 no-op). 설정 4페이지+build-status에서 매핑 관리(신규 상태는 매핑 필수), 변경은 비소급. 시드 `scripts/seed-ticket-status-map.sql`
 - 초기 마스터 시드: `scripts/seed-ticket-masters.sql` (재실행 안전 — Assignment Group 4종·CTI 3 Category·사유 5종·nav 메뉴 4행. PROD 최초 반영 시 실행)
 - Slack 알림 (P11, 2026-07-24): **티켓 이벤트 단일 파이프라인** — 모든 업무 알림이 티켓 mutation(생성/상태·그룹 변경/배정/Sev 에스컬레이션)에서 발생, 도메인 라우트 직접 발송 폐지. sig v2 4축 비교로 실변경만 발송. Sev1=@channel·Sev2=🔥+그룹 멤버 멘션, 배정 시 owner DM(`notify_assign_dm`). 상태 표기는 영문(Open~Closed)
 - SLA (P11): `dueAt = 생성일 + Sev별 목표일`(`notify_sla_rules` 기본 SEV1:1/SEV2:1/SEV3:3/SEV4:7/SEV5:미적용, PROJECT는 완료예정일 유지) — 스케줄러가 초과/임박(D-N)/상태 체류를 지연 채널 요약 + SLA 초과 owner DM. PENDING은 SLA 시계 정지. RESOLVED는 `ticket_auto_close_days`(기본 0=끔) 경과 시 자동 CLOSED(타임라인 이벤트만). 백필: `scripts/backfill-ticket-dueat.sql`
@@ -848,10 +854,10 @@ prisma/
 ### 설치계획(가안) 관리
 - 설치계획(가안) 등록·수정·삭제 (삭제는 ADMIN 이상)
 - 병원 검색 모달로 병원 연결 (선택사항)
-- 요청일 / 작성완료여부 / 회신여부 / 담당자(씨어스, 복수 지정) / 회신일 / 비고(Tiptap 리치 텍스트)
-- 작성완료여부·회신여부 색상 뱃지: 완료(초록) / 미완료(노랑) / -(회색)
-- 등록 시 작성완료여부·회신여부 기본값: '미완료'
-- 목록 컬럼 헤더 클릭으로 오름차순/내림차순 정렬 토글
+- 요청일 / **상태(단일 축, 2026-07-27 — 접수·작성완료·회신완료·보류, `/settings/install-plan-status`에서 관리)** / 담당자(씨어스, 복수 지정) / 회신일 / 비고(Tiptap 리치 텍스트)
+- 상태 색상 뱃지(상태코드 색), 등록 시 상태 기본값: '접수'
+- 구 작성완료여부/회신여부 2축은 단일 상태로 통합 (컬럼은 백업 보존)
+- 목록 컬럼 헤더 클릭으로 오름차순/내림차순 정렬 토글 (요청일·회신일·등록일), 상태·작성자 필터
 
 ### 답사 관리 (구 답사 현황)
 - 병원 방문 답사 기록 등록·수정·삭제 (삭제는 ADMIN 이상)
@@ -1115,6 +1121,8 @@ prisma/
 - 공사 상태(BuildStatus) 관리
 - 장비 정보(DeviceInfo) 관리
 - 시공사(Contractor) 관리
+- **설치계획 상태 관리** (2026-07-27): 단일 축 상태(접수·작성완료·회신완료·보류) 추가·수정·삭제
+- **워크플로 상태 티켓 매핑** (2026-07-27): 유지보수/기타업무/답사/설치계획 상태·공사 상태에 티켓 상태 매핑 지정(신규 상태는 필수, PENDING은 대기 사유 지정) — 미매핑 앰버 배지·역방향 버킷 부재 경고
 - **도입형태(IntroType) 관리**: 구축형·구독형·사용량비례형 등 동적 추가·수정·삭제·순서 변경
 - **상담유형(ConsultationType) 관리**: AI 어시스턴트 상담유형 동적 추가·수정·삭제·순서 변경
 - **문서유형(DocumentType) 관리**: AI 어시스턴트 문서유형 동적 추가·수정·삭제·순서 변경 (value 코드값 포함)
@@ -1336,7 +1344,7 @@ npm run dev
 ### 설치계획(가안)
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| GET  | `/api/install-plans` | 설치계획 목록 (필터·정렬, 전체 반환) |
+| GET  | `/api/install-plans` | 설치계획 목록 (`?search=&hospitalCode=&statusId=&authorId=&orderBy=&order=` — 전체 반환) |
 | POST | `/api/install-plans` | 설치계획 등록 |
 | GET  | `/api/install-plans/[id]` | 설치계획 상세 |
 | PUT  | `/api/install-plans/[id]` | 설치계획 수정 |
@@ -1541,6 +1549,10 @@ npm run dev
 | POST | `/api/settings/etc-task-status` | 기타업무 상태 추가 |
 | PUT  | `/api/settings/etc-task-status/[id]` | 기타업무 상태 수정 |
 | DELETE | `/api/settings/etc-task-status/[id]` | 기타업무 상태 삭제 (ADMIN 이상) |
+| GET  | `/api/settings/install-plan-status` | 설치계획 상태 목록 (2026-07-27 단일 축) |
+| POST | `/api/settings/install-plan-status` | 설치계획 상태 추가 (티켓 상태 매핑 필수) |
+| PUT  | `/api/settings/install-plan-status/[id]` | 설치계획 상태 수정 |
+| DELETE | `/api/settings/install-plan-status/[id]` | 설치계획 상태 삭제 (ADMIN 이상, 사용 중 409) |
 | GET  | `/api/settings/audit-logs` | 감사 로그 목록 (SUPER_ADMIN 전용, `?page=&limit=&search=&action=&resource=&from=&to=`) |
 
 ### 네비게이션 메뉴

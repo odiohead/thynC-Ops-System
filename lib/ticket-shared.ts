@@ -34,6 +34,10 @@ export const TICKET_STATUS_COLORS: Record<TicketStatus, string> = {
   CLOSED: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400',
 }
 
+// 도메인 상태코드에 매핑 가능한 티켓 상태 — ASSIGNED는 OPEN 계열에서 owner 유무로 엔진이 자동 판정
+// (ticket_status_map_design.md §3 — status_codes.ticket_status / build_statuses.ticket_status)
+export const MAPPABLE_TICKET_STATUSES: TicketStatus[] = ['OPEN', 'IN_PROGRESS', 'PENDING', 'RESOLVED', 'CLOSED']
+
 export const TICKET_SEVERITY_LABELS: Record<TicketSeverity, string> = {
   SEV1: 'Sev1 · Critical',
   SEV2: 'Sev2 · Urgent',

@@ -17,14 +17,21 @@ interface InstallPlanFileItem {
   s3Key: string
 }
 
+interface StatusOption {
+  id: number
+  name: string
+  color: string | null
+  order: number
+}
+
 interface InstallPlanData {
   id: number
   planCode?: string | null
   hospitalCode: string | null
   hospital: Hospital | null
   requestDate: string | null
-  writeStatus: string
-  replyStatus: string
+  statusId: number | null
+  status: StatusOption | null
   assignees: { user: { id: string; name: string; email: string } }[]
   replyDate: string | null
   note: string | null

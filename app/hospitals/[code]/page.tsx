@@ -69,6 +69,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
       where: { hospitalCode: params.code },
       orderBy: { requestDate: { sort: 'desc', nulls: 'last' } },
       include: {
+        status: { select: { id: true, name: true, color: true } },
         assignees: { include: { user: { select: { id: true, name: true } } } },
       },
     }),
@@ -104,8 +105,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
     id: ip.id,
     planCode: ip.planCode ?? null,
     requestDate: ip.requestDate ? ip.requestDate.toISOString() : null,
-    writeStatus: ip.writeStatus,
-    replyStatus: ip.replyStatus,
+    status: ip.status ?? null,
     replyDate: ip.replyDate ? ip.replyDate.toISOString() : null,
     assignees: ip.assignees ?? [],
   }))

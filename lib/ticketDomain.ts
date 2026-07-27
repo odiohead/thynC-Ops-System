@@ -20,6 +20,109 @@ import {
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
+// ── 상태 매핑 해석 (ticket_status_map_design.md §5 — 컬럼 우선·하드코딩 폴백) ──
+// 도메인 상태코드 행의 ticket_status/ticket_pending_reason_id가 단일 소스.
+// 컬럼 NULL(시드 유실·신규 환경)이면 기존 하드코딩 switch로 폴백 — 동기화는 절대 실패하지 않는다.
+
+/** OPEN 계열 owner 자동 판정 (티켓 자체의 OPEN↔ASSIGNED 자동 연동과 동일 규칙) */
+function applyOwnerRule(status: TicketStatus, hasOwner: boolean): TicketStatus {
+  if (status === 'OPEN' && hasOwner) return 'ASSIGNED'
+  if (status === 'ASSIGNED' && !hasOwner) return 'OPEN'
+  return status
+}
+
+interface StatusMappingRow {
+  name: string
+  ticketStatus: TicketStatus | null
+  ticketPendingReasonId: number | null
+}
+
+const STATUS_MAPPING_SELECT = { name: true, ticketStatus: true, ticketPendingReasonId: true } as const
+
+/** status_codes id → 매핑 행 조회 (create 경로용 — sync 경로는 relation select로 함께 로드) */
+async function getStatusMapping(tx: DbClient, statusCodeId: number | null | undefined): Promise<StatusMappingRow | null> {
+  if (!statusCodeId) return null
+  return tx.statusCode.findUnique({ where: { id: statusCodeId }, select: STATUS_MAPPING_SELECT })
+}
+
+/** 순방향: 매핑 행 우선, 미매핑이면 fallback(기존 하드코딩 switch) */
+function mappedTicketStatus(row: StatusMappingRow | null | undefined, hasOwner: boolean, fallback: () => TicketStatus): TicketStatus {
+  if (row?.ticketStatus) return applyOwnerRule(row.ticketStatus, hasOwner)
+  return fallback()
+}
+
+/** RESOLVED·CLOSED는 역방향에서 같은 버킷 (결정①A — 도메인 완료는 단일 상태) */
+function bucketOf(status: TicketStatus): TicketStatus[] {
+  if (status === 'OPEN' || status === 'ASSIGNED') return ['OPEN']
+  if (status === 'RESOLVED' || status === 'CLOSED') return ['RESOLVED', 'CLOSED']
+  return [status]
+}
+
+/**
+ * 역방향: 티켓 상태 → 도메인 상태코드 선택 (반환 null = 변경 불필요 또는 대상 없음 no-op)
+ * 1) keep-if-consistent — 현재 도메인 상태가 같은 버킷에 매핑돼 있으면 변경 없음
+ *    (예: '작성완료'(PENDING) 답사의 티켓을 PENDING으로 재조작해도 '보류'로 강등되지 않음)
+ * 2) PENDING은 티켓 pendingReason 일치 행 우선
+ * 3) 그 외 order 최소 행
+ * 4) 매핑 행이 전무하면 fallbackName(기존 이름 매칭)으로 조회
+ */
+async function pickDomainStatus(
+  tx: DbClient,
+  category: string,
+  currentStatusId: number | null,
+  ticket: { status: TicketStatus; pendingReasonId?: number | null },
+  fallbackName: string
+): Promise<number | null> {
+  const bucket = bucketOf(ticket.status)
+  const candidates = await tx.statusCode.findMany({
+    where: { category, ticketStatus: { in: bucket } },
+    select: { id: true, ticketPendingReasonId: true },
+    orderBy: { order: 'asc' },
+  })
+  if (!candidates.length) {
+    // 버킷만 비었으면(카테고리에 다른 매핑은 있음) 도메인 상태 유지 — 설정 UI 경고로 노출 (§5 no-op)
+    const mappedAny = await tx.statusCode.count({ where: { category, ticketStatus: { not: null } } })
+    if (mappedAny > 0) return null
+    // 카테고리 전체 미시드 환경 — 기존 이름 매칭 폴백
+    const byName = await tx.statusCode.findFirst({ where: { category, name: fallbackName }, select: { id: true } })
+    return byName && byName.id !== currentStatusId ? byName.id : null
+  }
+  if (currentStatusId && candidates.some((c) => c.id === currentStatusId)) return null // 일치 유지
+  if (ticket.status === 'PENDING' && ticket.pendingReasonId) {
+    const byReason = candidates.find((c) => c.ticketPendingReasonId === ticket.pendingReasonId)
+    if (byReason) return byReason.id
+  }
+  return candidates[0].id
+}
+
+/** 역방향(프로젝트): 티켓 상태 → BuildStatus 선택. 규칙은 pickDomainStatus와 동일, 폴백은 기존 라벨 앵커 */
+async function pickBuildStatus(tx: DbClient, currentId: number | null, ticketStatus: TicketStatus): Promise<number | null> {
+  const bucket = bucketOf(ticketStatus)
+  const candidates = await tx.buildStatus.findMany({
+    where: { ticketStatus: { in: bucket } },
+    select: { id: true },
+    orderBy: { sortOrder: 'asc' },
+  })
+  if (!candidates.length) {
+    const anchor =
+      ticketStatus === 'RESOLVED' || ticketStatus === 'CLOSED' ? '완료'
+      : ticketStatus === 'PENDING' ? '보류'
+      : ticketStatus === 'IN_PROGRESS' ? '진행'
+      : '준비'
+    const byLabel = await tx.buildStatus.findFirst({ where: { label: { contains: anchor } }, select: { id: true } })
+    return byLabel && byLabel.id !== currentId ? byLabel.id : null
+  }
+  if (currentId && candidates.some((c) => c.id === currentId)) return null // 일치 유지
+  return candidates[0].id
+}
+
+/** PENDING 사유 id 확정: 매핑 행 지정 사유 → 이름 폴백 */
+async function resolvePendingReasonId(tx: DbClient, mapped: number | null | undefined, fallbackName: string): Promise<number | null> {
+  if (mapped) return mapped
+  const reason = await tx.ticketPendingReason.findUnique({ where: { name: fallbackName }, select: { id: true } })
+  return reason?.id ?? null
+}
+
 // ── 유지보수 매핑 ─────────────────────────────────────────────
 
 /** 유지보수 상태명 → 티켓 상태 (P5 확정 매핑) */
@@ -116,6 +219,7 @@ interface MaintForTicket {
   hospitalCode: string
   priority: string | null
   statusName: string | null
+  statusId?: number | null // 상태 status_code id — 티켓 상태 매핑 컬럼 조회용 (없으면 이름 폴백)
   typeName: string | null
   typeId?: number | null // 장애유형 status_code id — 자동생성 규칙 조건 축
   symptoms?: string | null // 증상 → 티켓 설명 자동 입력 소스
@@ -141,9 +245,17 @@ export async function createTicketForMaintenance(
 
   const ownerId = m.assigneeUserIds[0] ?? null
   const participants = m.assigneeUserIds.slice(1)
-  const status = maintStatusToTicket(m.statusName, !!ownerId)
+  const statusMap = await getStatusMapping(tx, m.statusId)
+  const status = mappedTicketStatus(statusMap, !!ownerId, () => maintStatusToTicket(m.statusName, !!ownerId))
   const severity = priorityToSeverity(m.priority)
   const slaAnchor = via === 'backfill' ? m.createdAt : new Date()
+
+  let pendingReasonId: number | null = null
+  let pendingNote: string | null = null
+  if (status === 'PENDING') {
+    pendingReasonId = await resolvePendingReasonId(tx, statusMap?.ticketPendingReasonId, '기타')
+    pendingNote = '유지보수 보류 (도메인 동기화)'
+  }
 
   const ticketCode = await generateTicketCode(tx)
   const ticket = await tx.ticket.create({
@@ -161,6 +273,8 @@ export async function createTicketForMaintenance(
       hospitalCode: m.hospitalCode,
       refType: 'MAINTENANCE',
       dueAt: computeTicketDueAt(await getSlaRules(), severity, slaAnchor),
+      pendingReasonId,
+      pendingNote,
       createdAt: via === 'backfill' ? m.createdAt : undefined,
       statusChangedAt: via === 'backfill' ? m.createdAt : undefined,
       resolvedAt: status === 'CLOSED' ? m.resolvedAt ?? undefined : undefined,
@@ -182,7 +296,7 @@ export async function syncMaintenanceToTicket(tx: Prisma.TransactionClient, main
     where: { id: maintenanceId },
     select: {
       id: true, ticketId: true, title: true, hospitalCode: true, priority: true, resolvedAt: true, typeId: true,
-      status: { select: { name: true } },
+      status: { select: STATUS_MAPPING_SELECT },
       type: { select: { name: true } },
       assignees: { select: { userId: true }, orderBy: { id: 'asc' } },
     },
@@ -193,7 +307,7 @@ export async function syncMaintenanceToTicket(tx: Prisma.TransactionClient, main
 
   const ownerId = m.assignees[0]?.userId ?? null
   const participantIds = m.assignees.slice(1).map((a) => a.userId)
-  const nextStatus = maintStatusToTicket(m.status?.name ?? null, !!ownerId)
+  const nextStatus = mappedTicketStatus(m.status, !!ownerId, () => maintStatusToTicket(m.status?.name ?? null, !!ownerId))
   const nextSev = priorityToSeverity(m.priority)
   // 장애유형 변경 → CTI 재동기화 (유지보수만 유지되는 예외 — 규칙 테이블 경유로 ID 기반 매칭)
   const nextCti = (
@@ -209,9 +323,8 @@ export async function syncMaintenanceToTicket(tx: Prisma.TransactionClient, main
     if (nextStatus === 'CLOSED') { data.resolvedAt = m.resolvedAt ?? new Date(); data.closedAt = m.resolvedAt ?? new Date() }
     else { data.resolvedAt = null; data.closedAt = null }
     if (nextStatus === 'PENDING') {
-      // 도메인 '보류'는 사유 미보유 — '기타' 사유로 채움 (티켓 PENDING 사유 필수 규칙 충족)
-      const etc = await tx.ticketPendingReason.findUnique({ where: { name: '기타' }, select: { id: true } })
-      data.pendingReasonId = etc?.id ?? null
+      // 사유: 매핑 행 지정 → '기타' 폴백 (티켓 PENDING 사유 필수 규칙 충족)
+      data.pendingReasonId = await resolvePendingReasonId(tx, m.status?.ticketPendingReasonId, '기타')
       data.pendingNote = '유지보수 보류 (도메인 동기화)'
     } else { data.pendingReasonId = null; data.pendingNote = null }
     await addTicketEvent(tx, ticket.id, 'status_change', actorId, { from: ticket.status, to: nextStatus, via: 'domain_sync' })
@@ -321,6 +434,7 @@ interface ProjectForTicket {
   projectName: string
   hospitalCode: string
   buildStatusLabel: string | null
+  buildStatusId?: number | null // build_statuses id — 티켓 상태 매핑 컬럼 조회용 (없으면 라벨 앵커 폴백)
   assigneeUserIds: string[]
   endDateExpected: Date | null
   remark?: string | null // 비고 → 티켓 설명 자동 입력 소스
@@ -340,13 +454,17 @@ export async function createTicketForProject(
 
   const ownerId = p.assigneeUserIds[0] ?? null
   const participants = p.assigneeUserIds.slice(1)
-  const status = projectStatusToTicket(p.buildStatusLabel, !!ownerId)
+  const bs = p.buildStatusId
+    ? await tx.buildStatus.findUnique({ where: { id: p.buildStatusId }, select: { ticketStatus: true } })
+    : null
+  const status = bs?.ticketStatus
+    ? applyOwnerRule(bs.ticketStatus, !!ownerId)
+    : projectStatusToTicket(p.buildStatusLabel, !!ownerId)
 
   let pendingReasonId: number | null = null
   let pendingNote: string | null = null
   if (status === 'PENDING') {
-    const reason = await tx.ticketPendingReason.findUnique({ where: { name: '기타' }, select: { id: true } })
-    pendingReasonId = reason?.id ?? null
+    pendingReasonId = await resolvePendingReasonId(tx, null, '기타')
     pendingNote = '프로젝트 보류 (도메인 동기화)'
   }
 
@@ -386,7 +504,7 @@ export async function syncProjectToTicket(tx: Prisma.TransactionClient, projectI
     where: { id: projectId },
     select: {
       id: true, ticketId: true, projectCode: true, projectName: true, hospitalCode: true, endDateExpected: true,
-      buildStatus: { select: { label: true } },
+      buildStatus: { select: { label: true, ticketStatus: true } },
       assignees: { select: { userId: true }, orderBy: { id: 'asc' } },
     },
   })
@@ -396,7 +514,9 @@ export async function syncProjectToTicket(tx: Prisma.TransactionClient, projectI
 
   const ownerId = p.assignees[0]?.userId ?? null
   const participantIds = p.assignees.slice(1).map((a) => a.userId)
-  const nextStatus = projectStatusToTicket(p.buildStatus?.label ?? null, !!ownerId)
+  const nextStatus = p.buildStatus?.ticketStatus
+    ? applyOwnerRule(p.buildStatus.ticketStatus, !!ownerId)
+    : projectStatusToTicket(p.buildStatus?.label ?? null, !!ownerId)
 
   const data: Prisma.TicketUncheckedUpdateInput = {
     title: `[프로젝트] ${p.projectName}`,
@@ -429,7 +549,7 @@ export async function syncProjectToTicket(tx: Prisma.TransactionClient, projectI
   }
 }
 
-/** 티켓 전이/배정 → 프로젝트 역동기화 (BuildStatus는 라벨 앵커 findFirst best-effort) */
+/** 티켓 전이/배정 → 프로젝트 역동기화 (ticket_status 매핑 우선·keep-if-consistent, 라벨 앵커 폴백) */
 export async function syncTicketToProject(tx: Prisma.TransactionClient, ticketId: number) {
   const ticket = await tx.ticket.findUnique({
     where: { id: ticketId },
@@ -442,15 +562,10 @@ export async function syncTicketToProject(tx: Prisma.TransactionClient, ticketId
   if (!ticket?.project) return
   const p = ticket.project
 
-  const anchor =
-    ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? '완료'
-    : ticket.status === 'PENDING' ? '보류'
-    : ticket.status === 'IN_PROGRESS' ? '진행'
-    : '준비'
-  const build = await tx.buildStatus.findFirst({ where: { label: { contains: anchor } }, select: { id: true } })
+  const nextBuildStatusId = await pickBuildStatus(tx, p.buildStatusId, ticket.status)
   const data: Prisma.ProjectUncheckedUpdateInput = {}
-  if (build && build.id !== p.buildStatusId) {
-    data.buildStatusId = build.id
+  if (nextBuildStatusId) {
+    data.buildStatusId = nextBuildStatusId
     data.statusChangedAt = new Date()
   }
   if (Object.keys(data).length) await tx.project.update({ where: { id: p.id }, data })
@@ -466,22 +581,36 @@ export async function syncTicketToProject(tx: Prisma.TransactionClient, ticketId
   }
 }
 
-// ── 설치계획 (P8 — 2축 상태 write/reply ↔ 티켓 단일 상태) ──
+// ── 설치계획 (2026-07-27 단일 상태 축 전환 — ticket_status_map_design.md §7, 구 2축 write/reply는 폴백 전용) ──
 
+/** 구 2축 매핑 — statusId 없는 레거시 호출(백필 스크립트)용 폴백 */
 export function installPlanStatusToTicket(writeStatus: string, replyStatus: string, hasOwner: boolean): TicketStatus {
   const w = writeStatus === '완료'
   const r = replyStatus === '완료'
   if (w && r) return 'CLOSED'
   if (w) return 'PENDING' // 작성 완료, 회신 대기
-  return hasOwner ? 'IN_PROGRESS' : 'OPEN'
+  return hasOwner ? 'ASSIGNED' : 'OPEN' // 단일 축 전환과 함께 owner 판정을 타 도메인과 통일 (구 IN_PROGRESS 비일관 해소)
 }
 
-export function ticketStatusToInstallPlan(status: TicketStatus): { writeStatus: string; replyStatus: string } {
+/** 단일 축 상태명 → 티켓 상태 (매핑 컬럼 NULL일 때 이름 폴백) */
+export function installPlanNameToTicket(statusName: string | null, hasOwner: boolean): TicketStatus {
+  switch (statusName) {
+    case '작성완료': return 'PENDING' // 회신 대기
+    case '보류': return 'PENDING'
+    case '회신완료': return 'CLOSED'
+    case '접수':
+    default:
+      return hasOwner ? 'ASSIGNED' : 'OPEN'
+  }
+}
+
+/** 티켓 상태 → 설치계획 상태명 (역방향 이름 폴백 — 매핑 행 전무 환경) */
+export function ticketStatusToInstallPlanName(status: TicketStatus): string {
   switch (status) {
+    case 'PENDING': return '작성완료'
     case 'RESOLVED':
-    case 'CLOSED': return { writeStatus: '완료', replyStatus: '완료' }
-    case 'PENDING': return { writeStatus: '완료', replyStatus: '미완료' }
-    default: return { writeStatus: '미완료', replyStatus: '미완료' }
+    case 'CLOSED': return '회신완료'
+    default: return '접수'
   }
 }
 
@@ -500,8 +629,10 @@ interface InstallPlanForTicket {
   planCode: string | null
   hospitalCode: string | null
   hospitalName: string | null
-  writeStatus: string
-  replyStatus: string
+  statusId?: number | null // 단일 축 상태 (INSTALL_PLAN_STATUS) — 티켓 상태 매핑 컬럼 조회용
+  statusName?: string | null // 이름 폴백용
+  writeStatus?: string // deprecated — statusId 없는 레거시 호출(백필 스크립트) 폴백 전용
+  replyStatus?: string // deprecated — 상동
   assigneeUserIds: string[]
   note?: string | null // 비고 → 티켓 설명 자동 입력 소스
   createdAt: Date
@@ -521,14 +652,19 @@ export async function createTicketForInstallPlan(
 
   const ownerId = ip.assigneeUserIds[0] ?? null
   const participants = ip.assigneeUserIds.slice(1)
-  const status = installPlanStatusToTicket(ip.writeStatus, ip.replyStatus, !!ownerId)
+  const statusMap = await getStatusMapping(tx, ip.statusId)
+  const status = mappedTicketStatus(statusMap, !!ownerId, () =>
+    ip.statusName !== undefined
+      ? installPlanNameToTicket(ip.statusName, !!ownerId)
+      : installPlanStatusToTicket(ip.writeStatus ?? '-', ip.replyStatus ?? '-', !!ownerId) // 레거시(백필) 폴백
+  )
+  const statusName = statusMap?.name ?? ip.statusName ?? null
 
   let pendingReasonId: number | null = null
   let pendingNote: string | null = null
   if (status === 'PENDING') {
-    const reason = await tx.ticketPendingReason.findUnique({ where: { name: '외부 회신 대기' }, select: { id: true } })
-    pendingReasonId = reason?.id ?? null
-    pendingNote = '설치계획 회신 대기'
+    pendingReasonId = await resolvePendingReasonId(tx, statusMap?.ticketPendingReasonId, statusName === '보류' ? '기타' : '외부 회신 대기')
+    pendingNote = statusName === '보류' ? '설치계획 보류' : '설치계획 회신 대기'
   }
 
   const ticketCode = await generateTicketCode(tx)
@@ -566,7 +702,8 @@ export async function syncInstallPlanToTicket(tx: Prisma.TransactionClient, inst
   const ip = await tx.installPlan.findUnique({
     where: { id: installPlanId },
     select: {
-      id: true, ticketId: true, hospitalCode: true, writeStatus: true, replyStatus: true, replyDate: true,
+      id: true, ticketId: true, hospitalCode: true, replyDate: true,
+      status: { select: STATUS_MAPPING_SELECT },
       hospital: { select: { hospitalName: true } },
       assignees: { select: { userId: true }, orderBy: { id: 'asc' } },
     },
@@ -577,7 +714,7 @@ export async function syncInstallPlanToTicket(tx: Prisma.TransactionClient, inst
 
   const ownerId = ip.assignees[0]?.userId ?? null
   const participantIds = ip.assignees.slice(1).map((a) => a.userId)
-  const nextStatus = installPlanStatusToTicket(ip.writeStatus, ip.replyStatus, !!ownerId)
+  const nextStatus = mappedTicketStatus(ip.status, !!ownerId, () => installPlanNameToTicket(ip.status?.name ?? null, !!ownerId))
 
   const data: Prisma.TicketUncheckedUpdateInput = {
     title: `[설치계획] ${ip.hospital?.hospitalName ?? ip.hospitalCode ?? ''}`.trim(),
@@ -589,9 +726,8 @@ export async function syncInstallPlanToTicket(tx: Prisma.TransactionClient, inst
     if (nextStatus === 'CLOSED') { data.resolvedAt = ip.replyDate ?? new Date(); data.closedAt = ip.replyDate ?? new Date() }
     else { data.resolvedAt = null; data.closedAt = null }
     if (nextStatus === 'PENDING') {
-      const reason = await tx.ticketPendingReason.findUnique({ where: { name: '외부 회신 대기' }, select: { id: true } })
-      data.pendingReasonId = reason?.id ?? null
-      data.pendingNote = '설치계획 회신 대기'
+      data.pendingReasonId = await resolvePendingReasonId(tx, ip.status?.ticketPendingReasonId, ip.status?.name === '보류' ? '기타' : '외부 회신 대기')
+      data.pendingNote = ip.status?.name === '보류' ? '설치계획 보류' : '설치계획 회신 대기'
     } else { data.pendingReasonId = null; data.pendingNote = null }
     await addTicketEvent(tx, ticket.id, 'status_change', actorId, { from: ticket.status, to: nextStatus, via: 'domain_sync' })
   }
@@ -609,23 +745,22 @@ export async function syncInstallPlanToTicket(tx: Prisma.TransactionClient, inst
   }
 }
 
-/** 티켓 전이/배정 → 설치계획 역동기화 */
+/** 티켓 전이/배정 → 설치계획 역동기화 (단일 축 statusId — keep-if-consistent·사유 우선) */
 export async function syncTicketToInstallPlan(tx: Prisma.TransactionClient, ticketId: number) {
   const ticket = await tx.ticket.findUnique({
     where: { id: ticketId },
     select: {
-      id: true, status: true, ownerId: true,
+      id: true, status: true, ownerId: true, pendingReasonId: true,
       participants: { select: { userId: true } },
-      installPlan: { select: { id: true, writeStatus: true, replyStatus: true, replyDate: true } },
+      installPlan: { select: { id: true, statusId: true, replyDate: true } },
     },
   })
   if (!ticket?.installPlan) return
   const ip = ticket.installPlan
 
-  const mapped = ticketStatusToInstallPlan(ticket.status)
+  const nextStatusId = await pickDomainStatus(tx, 'INSTALL_PLAN_STATUS', ip.statusId, ticket, ticketStatusToInstallPlanName(ticket.status))
   const data: Prisma.InstallPlanUncheckedUpdateInput = {}
-  if (mapped.writeStatus !== ip.writeStatus) data.writeStatus = mapped.writeStatus
-  if (mapped.replyStatus !== ip.replyStatus) data.replyStatus = mapped.replyStatus
+  if (nextStatusId) data.statusId = nextStatusId
   if ((ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') && !ip.replyDate) data.replyDate = new Date()
   if (Object.keys(data).length) await tx.installPlan.update({ where: { id: ip.id }, data })
 
@@ -681,6 +816,7 @@ interface SiteVisitForTicket {
   hospitalCode: string
   hospitalName: string | null
   statusName: string | null
+  statusId?: number | null // 상태 status_code id — 티켓 상태 매핑 컬럼 조회용 (없으면 이름 폴백)
   assigneeUserIds: string[]
   notes?: string | null // 노트 → 티켓 설명 자동 입력 소스
   createdAt: Date
@@ -700,14 +836,13 @@ export async function createTicketForSiteVisit(
 
   const ownerId = s.assigneeUserIds[0] ?? null
   const participants = s.assigneeUserIds.slice(1)
-  const status = siteVisitStatusToTicket(s.statusName, !!ownerId)
+  const statusMap = await getStatusMapping(tx, s.statusId)
+  const status = mappedTicketStatus(statusMap, !!ownerId, () => siteVisitStatusToTicket(s.statusName, !!ownerId))
 
   let pendingReasonId: number | null = null
   let pendingNote: string | null = null
   if (status === 'PENDING') {
-    const reasonName = s.statusName === '작성완료' ? '외부 회신 대기' : '기타'
-    const reason = await tx.ticketPendingReason.findUnique({ where: { name: reasonName }, select: { id: true } })
-    pendingReasonId = reason?.id ?? null
+    pendingReasonId = await resolvePendingReasonId(tx, statusMap?.ticketPendingReasonId, s.statusName === '작성완료' ? '외부 회신 대기' : '기타')
     pendingNote = s.statusName === '작성완료' ? '답사 회신 대기' : '답사 보류'
   }
 
@@ -748,7 +883,7 @@ export async function syncSiteVisitToTicket(tx: Prisma.TransactionClient, siteVi
     select: {
       id: true, ticketId: true, hospitalCode: true, replyDate: true,
       hospital: { select: { hospitalName: true } },
-      status: { select: { name: true } },
+      status: { select: STATUS_MAPPING_SELECT },
       assignees: { select: { userId: true }, orderBy: { id: 'asc' } },
     },
   })
@@ -758,7 +893,7 @@ export async function syncSiteVisitToTicket(tx: Prisma.TransactionClient, siteVi
 
   const ownerId = s.assignees[0]?.userId ?? null
   const participantIds = s.assignees.slice(1).map((a) => a.userId)
-  const nextStatus = siteVisitStatusToTicket(s.status?.name ?? null, !!ownerId)
+  const nextStatus = mappedTicketStatus(s.status, !!ownerId, () => siteVisitStatusToTicket(s.status?.name ?? null, !!ownerId))
 
   const data: Prisma.TicketUncheckedUpdateInput = {
     title: `[답사] ${s.hospital?.hospitalName ?? s.hospitalCode}`,
@@ -770,9 +905,7 @@ export async function syncSiteVisitToTicket(tx: Prisma.TransactionClient, siteVi
     if (nextStatus === 'CLOSED') { data.resolvedAt = s.replyDate ?? new Date(); data.closedAt = s.replyDate ?? new Date() }
     else { data.resolvedAt = null; data.closedAt = null }
     if (nextStatus === 'PENDING') {
-      const reasonName = s.status?.name === '작성완료' ? '외부 회신 대기' : '기타'
-      const reason = await tx.ticketPendingReason.findUnique({ where: { name: reasonName }, select: { id: true } })
-      data.pendingReasonId = reason?.id ?? null
+      data.pendingReasonId = await resolvePendingReasonId(tx, s.status?.ticketPendingReasonId, s.status?.name === '작성완료' ? '외부 회신 대기' : '기타')
       data.pendingNote = s.status?.name === '작성완료' ? '답사 회신 대기' : '답사 보류'
     } else { data.pendingReasonId = null; data.pendingNote = null }
     await addTicketEvent(tx, ticket.id, 'status_change', actorId, { from: ticket.status, to: nextStatus, via: 'domain_sync' })
@@ -796,7 +929,7 @@ export async function syncTicketToSiteVisit(tx: Prisma.TransactionClient, ticket
   const ticket = await tx.ticket.findUnique({
     where: { id: ticketId },
     select: {
-      id: true, status: true, ownerId: true,
+      id: true, status: true, ownerId: true, pendingReasonId: true,
       participants: { select: { userId: true } },
       siteVisit: { select: { id: true, statusId: true, replyDate: true } },
     },
@@ -804,12 +937,11 @@ export async function syncTicketToSiteVisit(tx: Prisma.TransactionClient, ticket
   if (!ticket?.siteVisit) return
   const s = ticket.siteVisit
 
-  const statusName = ticketStatusToSiteVisit(ticket.status)
-  const statusCode = await tx.statusCode.findFirst({ where: { category: 'SITE_VISIT', name: statusName }, select: { id: true } })
+  const nextStatusId = await pickDomainStatus(tx, 'SITE_VISIT', s.statusId, ticket, ticketStatusToSiteVisit(ticket.status))
 
   const data: Prisma.SiteVisitUncheckedUpdateInput = {}
-  if (statusCode && statusCode.id !== s.statusId) {
-    data.statusId = statusCode.id
+  if (nextStatusId) {
+    data.statusId = nextStatusId
     data.statusChangedAt = new Date()
     if ((ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') && !s.replyDate) data.replyDate = new Date()
   }
@@ -843,6 +975,7 @@ interface EtcTaskForTicket {
   title: string
   priority: string | null
   statusName: string | null
+  statusId?: number | null // 상태 status_code id — 티켓 상태 매핑 컬럼 조회용 (없으면 이름 폴백)
   hospitalCodes: string[] // 첫 병원 → ticket.hospitalCode (실측 복수 0건)
   assigneeUserIds: string[]
   note?: string | null // 비고 → 티켓 설명 자동 입력 소스
@@ -863,9 +996,17 @@ export async function createTicketForEtcTask(
 
   const ownerId = e.assigneeUserIds[0] ?? null
   const participants = e.assigneeUserIds.slice(1)
-  const status = maintStatusToTicket(e.statusName, !!ownerId) // 상태 체계 동일 (접수/처리중/완료/보류)
+  const statusMap = await getStatusMapping(tx, e.statusId)
+  const status = mappedTicketStatus(statusMap, !!ownerId, () => maintStatusToTicket(e.statusName, !!ownerId)) // 폴백 상태 체계 동일 (접수/처리중/완료/보류)
   const severity = priorityToSeverity(e.priority)
   const slaAnchor = via === 'backfill' ? e.createdAt : new Date()
+
+  let pendingReasonId: number | null = null
+  let pendingNote: string | null = null
+  if (status === 'PENDING') {
+    pendingReasonId = await resolvePendingReasonId(tx, statusMap?.ticketPendingReasonId, '기타')
+    pendingNote = '기타업무 보류 (도메인 동기화)'
+  }
 
   const ticketCode = await generateTicketCode(tx)
   const ticket = await tx.ticket.create({
@@ -883,6 +1024,8 @@ export async function createTicketForEtcTask(
       hospitalCode: e.hospitalCodes[0] ?? null,
       refType: 'ETC',
       dueAt: computeTicketDueAt(await getSlaRules(), severity, slaAnchor),
+      pendingReasonId,
+      pendingNote,
       createdAt: via === 'backfill' ? e.createdAt : undefined,
       statusChangedAt: via === 'backfill' ? e.createdAt : undefined,
       resolvedAt: status === 'CLOSED' ? e.resolvedAt ?? undefined : undefined,
@@ -901,7 +1044,7 @@ export async function syncEtcTaskToTicket(tx: Prisma.TransactionClient, etcTaskI
     where: { id: etcTaskId },
     select: {
       id: true, ticketId: true, title: true, priority: true, resolvedAt: true,
-      status: { select: { name: true } },
+      status: { select: STATUS_MAPPING_SELECT },
       hospitals: { select: { hospitalCode: true }, orderBy: { id: 'asc' } },
       assignees: { select: { userId: true }, orderBy: { id: 'asc' } },
     },
@@ -912,7 +1055,7 @@ export async function syncEtcTaskToTicket(tx: Prisma.TransactionClient, etcTaskI
 
   const ownerId = e.assignees[0]?.userId ?? null
   const participantIds = e.assignees.slice(1).map((a) => a.userId)
-  const nextStatus = maintStatusToTicket(e.status?.name ?? null, !!ownerId)
+  const nextStatus = mappedTicketStatus(e.status, !!ownerId, () => maintStatusToTicket(e.status?.name ?? null, !!ownerId))
   const nextSev = priorityToSeverity(e.priority)
 
   const data: Prisma.TicketUncheckedUpdateInput = { title: e.title, hospitalCode: e.hospitals[0]?.hospitalCode ?? null }
@@ -922,8 +1065,7 @@ export async function syncEtcTaskToTicket(tx: Prisma.TransactionClient, etcTaskI
     if (nextStatus === 'CLOSED') { data.resolvedAt = e.resolvedAt ?? new Date(); data.closedAt = e.resolvedAt ?? new Date() }
     else { data.resolvedAt = null; data.closedAt = null }
     if (nextStatus === 'PENDING') {
-      const etcReason = await tx.ticketPendingReason.findUnique({ where: { name: '기타' }, select: { id: true } })
-      data.pendingReasonId = etcReason?.id ?? null
+      data.pendingReasonId = await resolvePendingReasonId(tx, e.status?.ticketPendingReasonId, '기타')
       data.pendingNote = '기타업무 보류 (도메인 동기화)'
     } else { data.pendingReasonId = null; data.pendingNote = null }
     await addTicketEvent(tx, ticket.id, 'status_change', actorId, { from: ticket.status, to: nextStatus, via: 'domain_sync' })
@@ -952,7 +1094,7 @@ export async function syncTicketToEtcTask(tx: Prisma.TransactionClient, ticketId
   const ticket = await tx.ticket.findUnique({
     where: { id: ticketId },
     select: {
-      id: true, status: true, severity: true, ownerId: true,
+      id: true, status: true, severity: true, ownerId: true, pendingReasonId: true,
       participants: { select: { userId: true } },
       etcTask: { select: { id: true, statusId: true, resolvedAt: true } },
     },
@@ -960,12 +1102,11 @@ export async function syncTicketToEtcTask(tx: Prisma.TransactionClient, ticketId
   if (!ticket?.etcTask) return
   const e = ticket.etcTask
 
-  const statusName = ticketStatusToMaint(ticket.status)
-  const statusCode = await tx.statusCode.findFirst({ where: { category: 'ETC_TASK_STATUS', name: statusName }, select: { id: true } })
+  const nextStatusId = await pickDomainStatus(tx, 'ETC_TASK_STATUS', e.statusId, ticket, ticketStatusToMaint(ticket.status))
 
   const data: Prisma.EtcTaskUncheckedUpdateInput = { priority: severityToPriority(ticket.severity) }
-  if (statusCode && statusCode.id !== e.statusId) {
-    data.statusId = statusCode.id
+  if (nextStatusId) {
+    data.statusId = nextStatusId
     data.statusChangedAt = new Date()
     if ((ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') && !e.resolvedAt) data.resolvedAt = new Date()
     if (ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED') data.resolvedAt = null
@@ -990,7 +1131,7 @@ export async function syncTicketToMaintenance(tx: Prisma.TransactionClient, tick
   const ticket = await tx.ticket.findUnique({
     where: { id: ticketId },
     select: {
-      id: true, status: true, severity: true, ownerId: true,
+      id: true, status: true, severity: true, ownerId: true, pendingReasonId: true,
       participants: { select: { userId: true } },
       maintenance: { select: { id: true, statusId: true, resolvedAt: true } },
     },
@@ -998,12 +1139,11 @@ export async function syncTicketToMaintenance(tx: Prisma.TransactionClient, tick
   if (!ticket?.maintenance) return
   const m = ticket.maintenance
 
-  const statusName = ticketStatusToMaint(ticket.status)
-  const statusCode = await tx.statusCode.findFirst({ where: { category: 'MAINTENANCE_STATUS', name: statusName }, select: { id: true } })
+  const nextStatusId = await pickDomainStatus(tx, 'MAINTENANCE_STATUS', m.statusId, ticket, ticketStatusToMaint(ticket.status))
 
   const data: Prisma.MaintenanceUncheckedUpdateInput = { priority: severityToPriority(ticket.severity) }
-  if (statusCode && statusCode.id !== m.statusId) {
-    data.statusId = statusCode.id
+  if (nextStatusId) {
+    data.statusId = nextStatusId
     data.statusChangedAt = new Date()
     if ((ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') && !m.resolvedAt) data.resolvedAt = new Date()
     if (ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED') data.resolvedAt = null

@@ -46,8 +46,7 @@ export const FIELD_CATALOG: Record<TaskType, FieldDef[]> = {
     { key: 'assignees', label: '담당자' },
     { key: 'requestDate', label: '요청일' },
     { key: 'replyDate', label: '회신일' },
-    { key: 'writeStatus', label: '작성완료여부' },
-    { key: 'replyStatus', label: '회신여부' },
+    { key: 'status', label: '상태' },
   ],
   MAINTENANCE: [
     { key: 'assignees', label: '담당자' },
@@ -83,7 +82,7 @@ export const FIELD_CATALOG: Record<TaskType, FieldDef[]> = {
 export const DEFAULT_FIELDS: Record<TaskType, string[]> = {
   PROJECT: ['assignees', 'buildStatus', 'startDate'],
   SITE_VISIT: ['assignees', 'requestDate', 'visitDate'],
-  INSTALL_PLAN: ['assignees', 'requestDate', 'writeStatus', 'replyStatus'],
+  INSTALL_PLAN: ['assignees', 'requestDate', 'status'],
   MAINTENANCE: ['assignees', 'priority', 'type', 'reportedAt'],
   ETC: ['assignees', 'priority', 'reportedAt'],
   TICKET: ['owner', 'severity', 'queue'],

@@ -155,6 +155,7 @@ export async function POST(request: NextRequest) {
       hospitalCode: maintenance.hospitalCode,
       priority: maintenance.priority,
       statusName: maintenance.status?.name ?? null,
+      statusId: maintenance.statusId,
       typeName: maintenance.type?.name ?? null,
       typeId: maintenance.typeId,
       symptoms: maintenance.symptoms,

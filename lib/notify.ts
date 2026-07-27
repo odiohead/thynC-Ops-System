@@ -440,7 +440,8 @@ async function enrichTask(taskType: TaskType, refCode: string): Promise<Enriched
       const ip = await prisma.installPlan.findUnique({
         where: { planCode: refCode },
         select: {
-          id: true, requestDate: true, replyDate: true, writeStatus: true, replyStatus: true,
+          id: true, requestDate: true, replyDate: true,
+          status: { select: { name: true } },
           hospital: { select: { hospitalName: true } },
           assignees: ASSIGNEE_FULL,
         },
@@ -450,8 +451,7 @@ async function enrichTask(taskType: TaskType, refCode: string): Promise<Enriched
       if (asn) fv.assignees = asn
       if (ip.requestDate) fv.requestDate = ymd(ip.requestDate)!
       if (ip.replyDate) fv.replyDate = ymd(ip.replyDate)!
-      if (ip.writeStatus && ip.writeStatus !== '-') fv.writeStatus = ip.writeStatus
-      if (ip.replyStatus && ip.replyStatus !== '-') fv.replyStatus = ip.replyStatus
+      if (ip.status?.name) fv.status = ip.status.name
       return { hospitalName: ip.hospital?.hospitalName ?? null, title: null, url: `${base}/install-plans/${ip.id}`, fieldValues: fv }
     }
     case 'MAINTENANCE': {

@@ -271,6 +271,7 @@ if (user.role !== 'ADMIN') return 403
 3. **도메인↔티켓 동기화는 `lib/ticketDomain.ts` 경유** — 도메인 레코드와 연결 티켓을 같은 트랜잭션에서 `sync*ToTicket`/`syncTicketToDomain`으로 갱신. 연결 티켓의 status/owner/severity/hospitalCode를 라우트에서 직접 UPDATE 금지
 4. **티켓 마스터(Assignment Group·CTI·대기 사유·nav) 변경 시 `scripts/seed-ticket-masters.sql`에도 반영** — PROD 최초 반영·데이터 동기화 후 재실행되는 파일(idempotent 유지)
 5. **도메인 자동생성 티켓의 CTI·Assignment Group은 `ticket_domain_cti_rules` 단일 소스** (`lib/ticketCtiRules.ts` 경유 — `ticket_cti_rule_design.md`). 새 업무를 티켓에 편입할 때 CTI를 코드에 하드코딩하지 말 것. 기존 `*CtiId()` 함수는 **규칙 유실 시 폴백 전용**이며, 규칙 변경은 소급 적용하지 않는다(기존 티켓 CTI 백필 금지)
+6. **도메인↔티켓 상태 매핑은 `status_codes.ticket_status`·`build_statuses.ticket_status` 단일 소스** (2026-07-27 — `ticket_status_map_design.md`). 상태명·라벨 문자열로 티켓 상태를 판정하는 코드 추가 금지. 기존 `*StatusToTicket()`/`ticketStatusTo*()` 함수는 **매핑 유실 시 폴백 전용**. 워크플로 상태코드(유지보수·기타업무·답사·설치계획·공사 상태) 신설 시 티켓 상태 매핑 필수(API가 400으로 강제), 매핑 마스터 변경 시 `scripts/seed-ticket-status-map.sql` 동반 갱신. 매핑 변경은 비소급(기존 티켓 상태 백필 금지). 설치계획은 단일 상태 축(`statusId`) — `writeStatus`/`replyStatus`는 deprecated(앱에서 사용 금지)
 
 ---
 

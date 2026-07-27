@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import RichTextEditor from '@/app/components/RichTextEditor'
 import FieldEngineerSelectModal from '@/app/components/FieldEngineerSelectModal'
@@ -18,14 +18,21 @@ interface InstallPlanFileItem {
   s3Key: string
 }
 
+interface StatusOption {
+  id: number
+  name: string
+  color: string | null
+  order: number
+}
+
 interface InstallPlanData {
   id: number
   planCode?: string | null
   hospitalCode: string | null
   hospital: Hospital | null
   requestDate: string | null
-  writeStatus: string
-  replyStatus: string
+  statusId: number | null
+  status: StatusOption | null
   assignees: { user: { id: string; name: string; email: string } }[]
   replyDate: string | null
   note: string | null
@@ -39,8 +46,6 @@ interface Props {
   initialHospital?: Hospital | null
   canEdit?: boolean
 }
-
-const STATUS_OPTIONS = ['-', '미완료', '완료']
 
 // ─── FileField 컴포넌트 ───────────────────────────────────────────────────────
 
@@ -172,8 +177,8 @@ export default function InstallPlanForm({ initialData, mode, initialHospitalCode
   const [hospitalCode, setHospitalCode] = useState(initialData?.hospitalCode ?? initialHospitalCode ?? '')
   const [hospital, setHospital] = useState<Hospital | null>(initialData?.hospital ?? initialHospital ?? null)
   const [requestDate, setRequestDate] = useState(initialData?.requestDate?.slice(0, 10) ?? '')
-  const [writeStatus, setWriteStatus] = useState(initialData?.writeStatus ?? (mode === 'new' ? '미완료' : '-'))
-  const [replyStatus, setReplyStatus] = useState(initialData?.replyStatus ?? (mode === 'new' ? '미완료' : '-'))
+  const [statusOptions, setStatusOptions] = useState<StatusOption[]>([])
+  const [statusId, setStatusId] = useState<number | ''>(initialData?.statusId ?? '')
   const [assignees, setAssignees] = useState<{ id: string; name: string; email: string }[]>(
     (initialData?.assignees ?? []).map((a) => a.user)
   )
@@ -184,6 +189,22 @@ export default function InstallPlanForm({ initialData, mode, initialHospitalCode
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  // 상태 옵션 (INSTALL_PLAN_STATUS — 2026-07-27 단일 축 전환)
+  useEffect(() => {
+    fetch('/api/settings/install-plan-status')
+      .then((r) => (r.ok ? r.json() : { statusCodes: [] }))
+      .then((d) => {
+        const codes: StatusOption[] = d.statusCodes ?? []
+        setStatusOptions(codes)
+        if (mode === 'new') {
+          const accept = codes.find((c) => c.name === '접수')
+          if (accept) setStatusId((prev) => (prev === '' ? accept.id : prev))
+        }
+      })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // 병원 검색 모달
   const [hospitalModalOpen, setHospitalModalOpen] = useState(false)
@@ -225,8 +246,7 @@ export default function InstallPlanForm({ initialData, mode, initialHospitalCode
     const body = {
       hospitalCode: hospitalCode || null,
       requestDate: requestDate || null,
-      writeStatus,
-      replyStatus,
+      statusId: statusId || null,
       assigneeIds: assignees.map((a) => a.id),
       replyDate: replyDate || null,
       note: note || null,
@@ -300,20 +320,13 @@ export default function InstallPlanForm({ initialData, mode, initialHospitalCode
           <input type="date" value={requestDate} onChange={(e) => setRequestDate(e.target.value)} className={inputClass} />
         </div>
 
-        {/* 작성완료여부 + 회신여부 */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className={labelClass}>작성완료여부</label>
-            <select value={writeStatus} onChange={(e) => setWriteStatus(e.target.value)} className={selectClass}>
-              {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={labelClass}>회신여부</label>
-            <select value={replyStatus} onChange={(e) => setReplyStatus(e.target.value)} className={selectClass}>
-              {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
+        {/* 상태 (단일 축 — 접수/작성완료/회신완료/보류) */}
+        <div>
+          <label className={labelClass}>상태</label>
+          <select value={statusId} onChange={(e) => setStatusId(e.target.value ? Number(e.target.value) : '')} className={selectClass}>
+            <option value="">선택</option>
+            {statusOptions.map((sc) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
+          </select>
         </div>
 
         {/* 담당자 */}

@@ -32,7 +32,7 @@ const detailInclude = {
   siteVisit: {
     select: { id: true, siteVisitCode: true, requestDate: true, visitDate: true, replyDate: true, daewoongUser: { select: { name: true } } },
   },
-  installPlan: { select: { id: true, planCode: true, requestDate: true, writeStatus: true, replyStatus: true, replyDate: true } },
+  installPlan: { select: { id: true, planCode: true, requestDate: true, status: { select: { name: true } }, replyDate: true } },
   project: { select: { id: true, projectCode: true, projectName: true, startDate: true, endDateExpected: true, buildStatus: { select: { label: true } } } },
   parent: { select: { id: true, ticketCode: true, title: true, status: true } },
   children: {

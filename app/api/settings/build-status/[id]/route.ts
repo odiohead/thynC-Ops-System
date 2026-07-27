@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import { MAPPABLE_TICKET_STATUSES } from '@/lib/ticket-shared'
 
 type Params = { params: { id: string } }
 
@@ -12,7 +13,12 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const id = parseInt(params.id)
   if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })
 
-  const { label, color, sortOrder } = await request.json()
+  const { label, color, sortOrder, ticketStatus } = await request.json()
+
+  // ticketStatus 미전송(undefined)이면 매핑 유지 — 순서 교환 등 부분 수정 경로 보호
+  if (ticketStatus !== undefined && !MAPPABLE_TICKET_STATUSES.includes(ticketStatus)) {
+    return NextResponse.json({ error: '잘못된 티켓 상태 매핑입니다.' }, { status: 400 })
+  }
 
   if (!label?.trim()) {
     return NextResponse.json({ error: '상태명을 입력해주세요.' }, { status: 400 })
@@ -22,7 +28,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const buildStatus = await prisma.buildStatus.update({
     where: { id },
-    data: { label: label.trim(), color: color !== undefined ? (color || null) : undefined, sortOrder },
+    data: { label: label.trim(), color: color !== undefined ? (color || null) : undefined, sortOrder, ticketStatus: ticketStatus !== undefined ? ticketStatus : undefined },
   })
 
   await logAudit({

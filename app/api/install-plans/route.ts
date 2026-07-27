@@ -14,13 +14,12 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const search = searchParams.get('search') ?? ''
   const hospitalCode = searchParams.get('hospitalCode') ?? ''
-  const writeStatus = searchParams.get('writeStatus') ?? ''
-  const replyStatus = searchParams.get('replyStatus') ?? ''
+  const statusId = searchParams.get('statusId') ?? ''
   const authorId = searchParams.get('authorId') ?? ''
   const orderBy = searchParams.get('orderBy') ?? 'createdAt'
   const order = (searchParams.get('order') ?? 'desc') as 'asc' | 'desc'
 
-  const validOrderBy = ['requestDate', 'replyDate', 'writeStatus', 'replyStatus', 'createdAt']
+  const validOrderBy = ['requestDate', 'replyDate', 'createdAt']
   const safeOrderBy = validOrderBy.includes(orderBy) ? orderBy : 'createdAt'
 
   const where = {
@@ -33,8 +32,7 @@ export async function GET(request: NextRequest) {
         ],
       },
     }),
-    ...(writeStatus && { writeStatus }),
-    ...(replyStatus && { replyStatus }),
+    ...(statusId && { statusId: Number(statusId) }),
     ...(authorId && { assignees: { some: { userId: authorId } } }),
   }
 
@@ -43,6 +41,7 @@ export async function GET(request: NextRequest) {
     orderBy: { [safeOrderBy]: order },
     include: {
       hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
+      status: { select: { id: true, name: true, color: true, order: true } },
       assignees: { include: { user: { select: { id: true, name: true } } } },
     },
   })
@@ -56,14 +55,24 @@ export async function POST(request: NextRequest) {
   if (authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()
-  const { hospitalCode, requestDate, writeStatus, replyStatus, assigneeIds, replyDate, note } = body
+  const { hospitalCode, requestDate, statusId, assigneeIds, replyDate, note } = body
+
+  // 단일 상태 축 (2026-07-27 전환) — 미지정 시 '접수'. write/reply 2축 컬럼은 deprecated(동결)
+  let resolvedStatusId: number | null = null
+  if (statusId) {
+    const sc = await prisma.statusCode.findFirst({ where: { id: Number(statusId), category: 'INSTALL_PLAN_STATUS' }, select: { id: true } })
+    if (!sc) return NextResponse.json({ error: '잘못된 상태입니다.' }, { status: 400 })
+    resolvedStatusId = sc.id
+  } else {
+    const sc = await prisma.statusCode.findFirst({ where: { category: 'INSTALL_PLAN_STATUS', name: '접수' }, select: { id: true } })
+    resolvedStatusId = sc?.id ?? null
+  }
 
   const created = await prisma.installPlan.create({
     data: {
       hospitalCode: hospitalCode || null,
       requestDate: requestDate ? new Date(requestDate) : null,
-      writeStatus: writeStatus ?? '-',
-      replyStatus: replyStatus ?? '-',
+      statusId: resolvedStatusId,
       replyDate: replyDate ? new Date(replyDate) : null,
       note: note || null,
     },
@@ -96,6 +105,7 @@ export async function POST(request: NextRequest) {
     data: { planCode },
     include: {
       hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true } },
+      status: { select: { id: true, name: true, color: true, order: true } },
       assignees: { include: { user: { select: { id: true, name: true } } } },
     },
   })
@@ -107,8 +117,8 @@ export async function POST(request: NextRequest) {
       planCode,
       hospitalCode: installPlan.hospitalCode,
       hospitalName: installPlan.hospital?.hospitalName ?? installPlan.hospital?.hiraHospitalName ?? null,
-      writeStatus: installPlan.writeStatus,
-      replyStatus: installPlan.replyStatus,
+      statusId: installPlan.statusId,
+      statusName: installPlan.status?.name ?? null,
       assigneeUserIds: Array.isArray(assigneeIds) ? assigneeIds : [],
       note: installPlan.note,
       createdAt: installPlan.createdAt,

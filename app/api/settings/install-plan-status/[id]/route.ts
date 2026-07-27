@@ -21,14 +21,14 @@ export async function PUT(request: NextRequest, { params }: Params) {
   }
 
   if (!name?.trim()) {
-    return NextResponse.json({ error: '기타업무 상태명을 입력해주세요.' }, { status: 400 })
+    return NextResponse.json({ error: '설치계획 상태명을 입력해주세요.' }, { status: 400 })
   }
 
   const duplicate = await prisma.statusCode.findFirst({
-    where: { name: name.trim(), category: 'ETC_TASK_STATUS', id: { not: id } },
+    where: { name: name.trim(), category: 'INSTALL_PLAN_STATUS', id: { not: id } },
   })
   if (duplicate) {
-    return NextResponse.json({ error: '이미 존재하는 기타업무 상태명입니다.' }, { status: 409 })
+    return NextResponse.json({ error: '이미 존재하는 설치계획 상태명입니다.' }, { status: 409 })
   }
 
   const before = await prisma.statusCode.findUnique({ where: { id } })
@@ -46,7 +46,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     req: request,
     actor: auditActorFromJWT(user),
     action: 'UPDATE',
-    resource: 'setting:etc_task_status',
+    resource: 'setting:install_plan_status',
     resourceId: id,
     resourceLabel: statusCode.name,
     before,
@@ -64,8 +64,13 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })
 
   const sc = await prisma.statusCode.findUnique({ where: { id } })
-  if (!sc || sc.category !== 'ETC_TASK_STATUS') {
-    return NextResponse.json({ error: '기타업무 상태를 찾을 수 없습니다.' }, { status: 404 })
+  if (!sc || sc.category !== 'INSTALL_PLAN_STATUS') {
+    return NextResponse.json({ error: '설치계획 상태를 찾을 수 없습니다.' }, { status: 404 })
+  }
+
+  const inUse = await prisma.installPlan.count({ where: { statusId: id } })
+  if (inUse > 0) {
+    return NextResponse.json({ error: `이 상태를 사용 중인 설치계획이 ${inUse}건 있어 삭제할 수 없습니다.` }, { status: 409 })
   }
 
   await prisma.statusCode.delete({ where: { id } })
@@ -74,7 +79,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     req: request,
     actor: auditActorFromJWT(user),
     action: 'DELETE',
-    resource: 'setting:etc_task_status',
+    resource: 'setting:install_plan_status',
     resourceId: id,
     resourceLabel: sc.name,
     before: sc,

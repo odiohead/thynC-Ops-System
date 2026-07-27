@@ -127,8 +127,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
       type: 'object',
       properties: {
         hospitalCode: { type: 'string', description: '병원 코드 (선택)' },
-        writeStatus: { type: 'string', description: "작성완료여부 필터: '완료'|'미완료' (선택)" },
-        replyStatus: { type: 'string', description: "회신여부 필터: '완료'|'미완료' (선택)" },
+        statusName: { type: 'string', description: "상태 필터: '접수'|'작성완료'|'회신완료'|'보류' (부분 일치, 선택)" },
         from: { type: 'string', description: '요청일 범위 시작 YYYY-MM-DD (선택)' },
         to: { type: 'string', description: '요청일 범위 끝 YYYY-MM-DD (선택)' },
         ...LIST_PARAMS,
@@ -565,8 +564,7 @@ async function listSiteVisits(input: ToolInput) {
 async function listInstallPlans(input: ToolInput) {
   const where = {
     ...(str(input.hospitalCode) && { hospitalCode: str(input.hospitalCode) }),
-    ...(str(input.writeStatus) && { writeStatus: str(input.writeStatus) }),
-    ...(str(input.replyStatus) && { replyStatus: str(input.replyStatus) }),
+    ...(str(input.statusName) && { status: { name: { contains: str(input.statusName)! } } }),
     ...dateRange(input, 'requestDate'),
   }
   const full = isFull(input)
@@ -578,6 +576,7 @@ async function listInstallPlans(input: ToolInput) {
       orderBy: { requestDate: 'desc' },
       include: {
         hospital: { select: { hospitalName: true } },
+        status: { select: { name: true } },
         assignees: { include: { user: { select: { name: true } } } },
       },
     }),
@@ -589,8 +588,7 @@ async function listInstallPlans(input: ToolInput) {
       hospital: p.hospital?.hospitalName ?? null,
       requestDate: ymd(p.requestDate),
       replyDate: ymd(p.replyDate),
-      writeStatus: p.writeStatus,
-      replyStatus: p.replyStatus,
+      status: p.status?.name ?? null,
       ...(full && {
         assignees: p.assignees.map((a) => a.user.name),
         note: stripHtml(p.note, 150),

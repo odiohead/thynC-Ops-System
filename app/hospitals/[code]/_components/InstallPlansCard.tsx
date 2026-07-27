@@ -3,12 +3,17 @@
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
+interface StatusOption {
+  id: number
+  name: string
+  color: string | null
+}
+
 interface InstallPlan {
   id: number
   planCode: string | null
   requestDate: string | null
-  writeStatus: string
-  replyStatus: string
+  status: StatusOption | null
   replyDate: string | null
   assignees: { user: { id: string; name: string } }[]
 }
@@ -24,10 +29,16 @@ function fmt(d: string | null) {
   return d.slice(0, 10)
 }
 
-function StatusBadge({ value }: { value: string }) {
-  if (value === '완료') return <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">완료</span>
-  if (value === '미완료') return <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700">미완료</span>
-  return <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">-</span>
+function StatusBadge({ status }: { status: StatusOption | null }) {
+  if (!status) return <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">-</span>
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium text-white"
+      style={{ backgroundColor: status.color ?? '#9CA3AF' }}
+    >
+      {status.name}
+    </span>
+  )
 }
 
 export default function InstallPlansCard({ hospitalCode, installPlans, isAdmin }: Props) {
@@ -53,7 +64,7 @@ export default function InstallPlansCard({ hospitalCode, installPlans, isAdmin }
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                {['코드', '요청일', '작성완료여부', '회신여부', '작성자', '회신일'].map((col) => (
+                {['코드', '요청일', '상태', '작성자', '회신일'].map((col) => (
                   <th key={col} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">{col}</th>
                 ))}
               </tr>
@@ -67,8 +78,7 @@ export default function InstallPlansCard({ hospitalCode, installPlans, isAdmin }
                 >
                   <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-gray-500">{ip.planCode ?? '-'}</td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-700">{fmt(ip.requestDate)}</td>
-                  <td className="whitespace-nowrap px-4 py-3"><StatusBadge value={ip.writeStatus} /></td>
-                  <td className="whitespace-nowrap px-4 py-3"><StatusBadge value={ip.replyStatus} /></td>
+                  <td className="whitespace-nowrap px-4 py-3"><StatusBadge status={ip.status} /></td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">{ip.assignees?.length > 0 ? ip.assignees.map((a) => a.user.name).join(', ') : '-'}</td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-700">{fmt(ip.replyDate)}</td>
                 </tr>

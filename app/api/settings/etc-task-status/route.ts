@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import { MAPPABLE_TICKET_STATUSES } from '@/lib/ticket-shared'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,10 +18,15 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const user = await getAuthUser(request)
   if (!user || user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  const { name, order, color } = await request.json()
+  const { name, order, color, ticketStatus, ticketPendingReasonId } = await request.json()
 
   if (!name?.trim()) {
     return NextResponse.json({ error: '기타업무 상태명을 입력해주세요.' }, { status: 400 })
+  }
+
+  // 티켓 상태 매핑 필수 (ticket_status_map_design.md §6 — 미매핑 신규 상태의 조용한 오동작 차단)
+  if (!ticketStatus || !MAPPABLE_TICKET_STATUSES.includes(ticketStatus)) {
+    return NextResponse.json({ error: '티켓 상태 매핑을 선택해주세요.' }, { status: 400 })
   }
 
   const existing = await prisma.statusCode.findFirst({ where: { name, category: 'ETC_TASK_STATUS' } })
@@ -29,7 +35,11 @@ export async function POST(request: NextRequest) {
   }
 
   const statusCode = await prisma.statusCode.create({
-    data: { name: name.trim(), order: order ?? 0, color: color ?? null, category: 'ETC_TASK_STATUS' },
+    data: {
+      name: name.trim(), order: order ?? 0, color: color ?? null, category: 'ETC_TASK_STATUS',
+      ticketStatus,
+      ticketPendingReasonId: ticketStatus === 'PENDING' ? (ticketPendingReasonId ?? null) : null,
+    },
   })
 
   await logAudit({

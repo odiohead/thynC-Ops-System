@@ -17,6 +17,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     where: { id },
     include: {
       hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true, sidoName: true, sigunguName: true, address: true, status: true } },
+      status: { select: { id: true, name: true, color: true, order: true } },
       assignees: { include: { user: { select: { id: true, name: true, email: true } } } },
     },
   })
@@ -32,18 +33,23 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const id = parseInt(params.id)
   const body = await request.json()
-  const { hospitalCode, requestDate, writeStatus, replyStatus, assigneeIds, replyDate, note } = body
+  const { hospitalCode, requestDate, statusId, assigneeIds, replyDate, note } = body
 
   const existing = await prisma.installPlan.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: '설치계획을 찾을 수 없습니다.' }, { status: 404 })
+
+  // 단일 상태 축 (2026-07-27 전환) — write/reply 2축 컬럼은 deprecated(동결)
+  if (statusId) {
+    const sc = await prisma.statusCode.findFirst({ where: { id: Number(statusId), category: 'INSTALL_PLAN_STATUS' }, select: { id: true } })
+    if (!sc) return NextResponse.json({ error: '잘못된 상태입니다.' }, { status: 400 })
+  }
 
   await prisma.installPlan.update({
     where: { id },
     data: {
       hospitalCode: hospitalCode || null,
       requestDate: requestDate ? new Date(requestDate) : null,
-      writeStatus: writeStatus ?? '-',
-      replyStatus: replyStatus ?? '-',
+      ...(statusId !== undefined && { statusId: statusId ? Number(statusId) : null }),
       replyDate: replyDate ? new Date(replyDate) : null,
       note: note || null,
       updatedAt: new Date(),
@@ -73,6 +79,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     where: { id },
     include: {
       hospital: { select: { hospitalCode: true, hospitalName: true, hiraHospitalName: true, sidoName: true, sigunguName: true, address: true, status: true } },
+      status: { select: { id: true, name: true, color: true, order: true } },
       assignees: { include: { user: { select: { id: true, name: true, email: true } } } },
     },
   })

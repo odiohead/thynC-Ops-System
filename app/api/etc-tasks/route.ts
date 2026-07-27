@@ -138,6 +138,7 @@ export async function POST(request: NextRequest) {
       title: etcTask.title,
       priority: etcTask.priority,
       statusName: etcTask.status?.name ?? null,
+      statusId: etcTask.statusId,
       hospitalCodes: etcTask.hospitals.map((h) => h.hospital.hospitalCode),
       assigneeUserIds: etcTask.assignees.map((a) => a.user.id),
       note: etcTask.note,

@@ -16,13 +16,19 @@ interface UserOption {
   name: string
 }
 
+interface StatusOption {
+  id: number
+  name: string
+  color: string | null
+  order: number
+}
+
 interface InstallPlan {
   id: number
   planCode: string | null
   hospital: Hospital | null
   requestDate: string | null
-  writeStatus: string
-  replyStatus: string
+  status: StatusOption | null
   assignees: { user: { id: string; name: string } }[]
   replyDate: string | null
   createdAt: string
@@ -33,13 +39,19 @@ function fmt(d: string | null | undefined) {
   return d.slice(0, 10)
 }
 
-function StatusBadge({ value }: { value: string }) {
-  if (value === '완료') return <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">완료</span>
-  if (value === '미완료') return <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700">미완료</span>
-  return <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">-</span>
+function StatusBadge({ status }: { status: StatusOption | null }) {
+  if (!status) return <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">-</span>
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium text-white"
+      style={{ backgroundColor: status.color ?? '#9CA3AF' }}
+    >
+      {status.name}
+    </span>
+  )
 }
 
-type SortKey = 'requestDate' | 'replyDate' | 'writeStatus' | 'replyStatus' | 'createdAt'
+type SortKey = 'requestDate' | 'replyDate' | 'createdAt'
 
 export default function InstallPlansPage() {
   const router = useRouter()
@@ -48,8 +60,8 @@ export default function InstallPlansPage() {
   const [isAdmin, setIsAdmin] = useState(false)
 
   const [search, setSearch] = useState('')
-  const [writeStatusFilter, setWriteStatusFilter] = useState('')
-  const [replyStatusFilter, setReplyStatusFilter] = useState('')
+  const [statusOptions, setStatusOptions] = useState<StatusOption[]>([])
+  const [statusFilter, setStatusFilter] = useState('')
   const [authorIdFilter, setAuthorIdFilter] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('createdAt')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
@@ -57,8 +69,7 @@ export default function InstallPlansPage() {
   const fetchPlans = useCallback(async () => {
     const params = new URLSearchParams()
     if (search) params.set('search', search)
-    if (writeStatusFilter) params.set('writeStatus', writeStatusFilter)
-    if (replyStatusFilter) params.set('replyStatus', replyStatusFilter)
+    if (statusFilter) params.set('statusId', statusFilter)
     if (authorIdFilter) params.set('authorId', authorIdFilter)
     params.set('orderBy', sortKey)
     params.set('order', sortOrder)
@@ -66,7 +77,7 @@ export default function InstallPlansPage() {
     const res = await fetch(`/api/install-plans?${params}`)
     const data = await res.json()
     setPlans(data.installPlans ?? [])
-  }, [search, writeStatusFilter, replyStatusFilter, authorIdFilter, sortKey, sortOrder])
+  }, [search, statusFilter, authorIdFilter, sortKey, sortOrder])
 
   useEffect(() => {
     fetchPlans()
@@ -76,9 +87,11 @@ export default function InstallPlansPage() {
     Promise.all([
       fetch('/api/users?organization=SEERS').then((r) => r.json()),
       fetch('/api/auth/me').then((r) => r.json()),
-    ]).then(([userData, me]) => {
+      fetch('/api/settings/install-plan-status').then((r) => (r.ok ? r.json() : { statusCodes: [] })),
+    ]).then(([userData, me, statusData]) => {
       setUsers(Array.isArray(userData) ? userData : [])
       setIsAdmin(!!me?.role && me?.role !== 'VIEWER')
+      setStatusOptions(statusData.statusCodes ?? [])
     })
   }, [])
 
@@ -150,17 +163,9 @@ export default function InstallPlansPage() {
             </button>
           </form>
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-            <select value={writeStatusFilter} onChange={(e) => setWriteStatusFilter(e.target.value)} className={selectClass}>
-              <option value="">작성완료여부 전체</option>
-              <option value="-">-</option>
-              <option value="미완료">미완료</option>
-              <option value="완료">완료</option>
-            </select>
-            <select value={replyStatusFilter} onChange={(e) => setReplyStatusFilter(e.target.value)} className={selectClass}>
-              <option value="">회신여부 전체</option>
-              <option value="-">-</option>
-              <option value="미완료">미완료</option>
-              <option value="완료">완료</option>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectClass}>
+              <option value="">상태 전체</option>
+              {statusOptions.map((sc) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
             </select>
             <select value={authorIdFilter} onChange={(e) => setAuthorIdFilter(e.target.value)} className={`${selectClass} col-span-2 sm:col-span-1`}>
               <option value="">작성자 전체</option>
@@ -190,12 +195,11 @@ export default function InstallPlansPage() {
                       : '-'}
                   </span>
                   <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-                    회신 <StatusBadge value={p.replyStatus} />
+                    <StatusBadge status={p.status} />
                   </span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   <span>코드 <span className="font-mono text-foreground">{p.planCode ?? '-'}</span></span>
-                  <span className="flex items-center gap-1">작성 <StatusBadge value={p.writeStatus} /></span>
                   <span>작성자 <span className="text-foreground">{p.assignees?.length > 0 ? p.assignees.map((a) => a.user.name).join(', ') : '-'}</span></span>
                   <span>요청일 <span className="text-foreground">{fmt(p.requestDate)}</span></span>
                   <span>회신일 <span className="text-foreground">{fmt(p.replyDate)}</span></span>
@@ -215,8 +219,7 @@ export default function InstallPlansPage() {
                   <th className={thStaticClass}>코드</th>
                   <th className={thStaticClass}>병원명</th>
                   <th className={thClass} onClick={() => handleSort('requestDate')}>요청일 <SortIndicator col="requestDate" /></th>
-                  <th className={thClass} onClick={() => handleSort('writeStatus')}>작성완료여부 <SortIndicator col="writeStatus" /></th>
-                  <th className={thClass} onClick={() => handleSort('replyStatus')}>회신여부 <SortIndicator col="replyStatus" /></th>
+                  <th className={thStaticClass}>상태</th>
                   <th className={thStaticClass}>작성자</th>
                   <th className={thClass} onClick={() => handleSort('replyDate')}>회신일 <SortIndicator col="replyDate" /></th>
                   <th className={thClass} onClick={() => handleSort('createdAt')}>등록일 <SortIndicator col="createdAt" /></th>
@@ -225,7 +228,7 @@ export default function InstallPlansPage() {
               <tbody className="divide-y divide-gray-200">
                 {plans.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-16 text-center text-sm text-gray-400">
+                    <td colSpan={7} className="py-16 text-center text-sm text-gray-400">
                       등록된 설치계획(가안)이 없습니다.
                     </td>
                   </tr>
@@ -245,8 +248,7 @@ export default function InstallPlansPage() {
                           : <span className="text-gray-400">-</span>}
                       </td>
                       <td className="whitespace-nowrap px-3 py-3 text-gray-600">{fmt(p.requestDate)}</td>
-                      <td className="whitespace-nowrap px-3 py-3"><StatusBadge value={p.writeStatus} /></td>
-                      <td className="whitespace-nowrap px-3 py-3"><StatusBadge value={p.replyStatus} /></td>
+                      <td className="whitespace-nowrap px-3 py-3"><StatusBadge status={p.status} /></td>
                       <td className="whitespace-nowrap px-3 py-3 text-gray-600">{p.assignees?.length > 0 ? p.assignees.map((a) => a.user.name).join(', ') : '-'}</td>
                       <td className="whitespace-nowrap px-3 py-3 text-gray-600">{fmt(p.replyDate)}</td>
                       <td className="whitespace-nowrap px-3 py-3 text-gray-600">{fmt(p.createdAt)}</td>
