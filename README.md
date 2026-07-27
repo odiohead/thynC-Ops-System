@@ -222,7 +222,7 @@ lib/
 │   ├── settings.ts                   # 모델 상수(채팅 opus-5 / 정리 sonnet-5) + 런타임 설정(effort·캐시 TTL, AppSetting)
 │   ├── access.ts                     # 어시스턴트 접근 권한 — 자사(SEERS) 전용 서버 강제 (DB 실시간 소속 검사)
 │   └── opsSearch.ts                  # 축2 운영 정보 전문 검색 — search_operation_history / find_similar_cases (상담이력 포함)
-│   └── tools.ts                      # 도구 16종 (read-only Prisma SELECT — 병원·업무·집계·위키·상담이력)
+│   └── tools.ts                      # 도구 26종 (read-only Prisma SELECT — 병원·업무·집계·위키·상담이력 + 자재·티켓·차량·조직·GW 플래너)
 ├── consultation.ts                   # 상담이력 — 조회 권한(SEERS)·코드 발번(CS-YYYYMM-NNNN)·제목 추출
 ├── auth.ts                           # JWT 인증 유틸리티 + 역할 헬퍼
 ├── prisma.ts                         # Prisma 클라이언트
@@ -1067,7 +1067,8 @@ prisma/
 - **에이전트**: Anthropic API(`claude-opus-5` + adaptive thinking, effort 기본 `medium`) 직접 호출, **tool use로 운영 DB·위키 실데이터 조회** 후 답변. 역할 3축 — ①CS 응대(위키 지식+병원 노트) ②정보 조회(병원 현황·형상) ③영업·운영 집계
 - **접근 권한 (v3, 2026-07-25)**: **자사(SEERS) 전용**. `lib/ai/access.ts`가 `/api/ai-assistant/*` 전 핸들러에서 소속을 **DB 실시간 조회**로 검사(JWT는 최대 7일 경과 가능). nav 메뉴의 `allowed_org_codes`는 UI 게이트일 뿐이라 서버에서 별도 강제
 - **지식 소스 2축 (v3 설계 원리 — `ai_assistant_v3_design.md`)**: 축1 **고정형**(사내위키 — 제품 사양·매뉴얼, 문서 단위가 아니라 **절 단위** 검색) / 축2 **운영**(운영관리 DB — 유지보수·답사·상담 이력, **자유 텍스트 전문 검색**). 두 축은 단위·정답 성격·갱신 빈도가 달라 검색 전략을 분리했다
-- **도구 16종(read-only, `lib/ai/tools.ts` 화이트리스트)**: `search_hospitals`(운영·계약 우선 랭킹) / `get_hospital_overview` / `list_projects` / `list_maintenances` / `list_site_visits` / `list_install_plans` / `list_etc_tasks` / `get_dashboard_summary` / **`aggregate_stats`**(기간 집계) / **`search_operation_history`**(v3 — 유지보수 증상·조치, 처리기록, 답사 노트, 기타업무 비고, 티켓 코멘트, **상담이력** 통합 전문 검색) / **`find_similar_cases`**(v3 — 증상→과거 유사 장애+조치, CS 응대 특화) / **`read_consultations`**(2026-07-26 — 병원별 과거 상담이력 최근순) / `search_wiki` / **`read_wiki_chunk`**(v3) / `read_wiki_page` / `read_hospital_note`(담당자가 직접 쓴 병원 메모 — 상담이력과 별개)
+- **도구 26종(read-only, `lib/ai/tools.ts` 화이트리스트)**: `search_hospitals`(운영·계약 우선 랭킹) / `get_hospital_overview` / `list_projects` / `list_maintenances` / `list_site_visits` / `list_install_plans` / `list_etc_tasks` / `get_dashboard_summary` / **`aggregate_stats`**(기간 집계) / **`search_operation_history`**(v3 — 유지보수 증상·조치, 처리기록, 답사 노트, 기타업무 비고, 티켓 코멘트, **상담이력** 통합 전문 검색) / **`find_similar_cases`**(v3 — 증상→과거 유사 장애+조치, CS 응대 특화) / **`read_consultations`**(2026-07-26 — 병원별 과거 상담이력 최근순) / `search_wiki` / **`read_wiki_chunk`**(v3) / `read_wiki_page` / `read_hospital_note`(담당자가 직접 쓴 병원 메모 — 상담이력과 별개)
+- **도구 확장 10종 (2026-07-27 — 운영시스템 전 데이터 커버)**: 자재관리 `search_inventory_items`(품목 검색+현재고·위치별 잔량) / `get_stock_summary`(인벤토리×위치 집계) / `list_stock_transactions`(입출고 전표 — 병원별 사용 자재 포함) / `find_serial_unit`(시리얼 개체 추적+이력) · 티켓 `list_tickets`(상태·그룹·Sev·SLA 초과 필터) / `get_ticket`(상세+타임라인+SLA 시계+연결 업무) · 차량 `list_vehicle_reservations` / `list_vehicle_logs`(합계 주행거리) · 조직 `search_users`(이름·부서·역할·담당 풀 — **연락처 미제공**) · `list_gateway_plan_jobs`. **의도적 제외**: 감사 로그·AI 사용량(ADMIN 전용 데이터 — 권한 우회 방지), 개인 알림함·대화 세션, 폐기 테이블
 - **출처 표기 (v3)**: 지식 도구가 `link`(도메인 상세 경로)를 함께 반환하고, 시스템 프롬프트가 사실 진술에 근거 출처를 마크다운 링크로 제시하도록 규정 — 예: `[MNT-202605-0043](/maintenances/104)`
 - **답변 피드백 (v3)**: 답변 하단 👍/👎(👎는 사유 4종 — 틀림·못 찾음·오래된 정보·부적절) → `ai_feedback`. 대화를 삭제해도 보존되며, 벡터DB 도입 여부 판단의 근거 데이터로 쓴다
 - **목록 도구 5종 공통 파라미터 (2026-07-25)**: `limit`(기본 10·최대 30)·`detail`(`summary` 기본 / `full`). 요약 모드는 핵심 필드만 반환하고 증상·조치·비고 등 본문은 `full`에서만. 응답에 `total`을 항상 포함해 "몇 건인가"를 재조회 없이 답한다

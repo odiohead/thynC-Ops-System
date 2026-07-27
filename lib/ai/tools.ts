@@ -276,6 +276,163 @@ export const AI_TOOLS: Anthropic.Tool[] = [
       required: ['hospitalCode'],
     },
   },
+  // ===== 자재관리(WMS) — 2026-07-27 도구 확장 =====
+  {
+    name: 'search_inventory_items',
+    description:
+      '자재 품목을 검색한다. "MC200M-T 재고 몇 개야?", "게이트웨이 어느 창고에 있어?" 같은 품목·재고 질문에 먼저 호출하라. 품목명·모델명·품목코드·규격으로 검색하며 품목별 현재고 합계와 위치별 잔량을 함께 반환한다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '품목명·모델명·품목코드·규격 일부 (예: "MC200M", "게이트웨이")' },
+        inventoryName: { type: 'string', description: "인벤토리 이름 필터 (예: '대웅제약', '평가용', '판매용', 'thynC운영팀' — 부분 일치, 선택)" },
+        ...LIST_PARAMS,
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'get_stock_summary',
+    description:
+      '재고 전체 현황을 집계한다. "전체 재고 현황", "대웅제약재고에 뭐가 얼마나 있어?", "창고별 재고" 같은 큰 그림 질문에 호출하라. 인벤토리별·위치(창고)별 품목 수와 총 수량을 반환한다. 특정 품목의 재고는 search_inventory_items를 쓴다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        inventoryName: { type: 'string', description: '인벤토리 이름 필터 (부분 일치, 선택)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'list_stock_transactions',
+    description:
+      '자재 입출고 전표 이력을 조회한다. "이번달 출고 내역", "OO병원에 나간 자재", "누가 언제 입고했나" 같은 질문에 호출하라. 기간 필터는 입출고일(txDate) 기준. 취소된 전표는 기본 제외.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        itemQuery: { type: 'string', description: '품목명·모델명·품목코드 일부 (선택)' },
+        inventoryName: { type: 'string', description: '인벤토리 이름 필터 (부분 일치, 선택)' },
+        txType: { type: 'string', enum: ['IN', 'OUT', 'MOVE'], description: '전표 유형: IN(입고)|OUT(출고)|MOVE(이동) (선택)' },
+        hospitalCode: { type: 'string', description: '출고 연결 병원 코드 — 병원별 사용 자재 질문에 사용 (선택)' },
+        requester: { type: 'string', description: '요청자 이름 일부 (선택)' },
+        from: { type: 'string', description: '입출고일 범위 시작 YYYY-MM-DD (선택)' },
+        to: { type: 'string', description: '입출고일 범위 끝 YYYY-MM-DD (선택)' },
+        ...LIST_PARAMS,
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'find_serial_unit',
+    description:
+      '시리얼 번호로 자재 개체(단품)를 추적한다. "시리얼 XXX 어디 있어?", "이 장비 어느 병원에 설치됐어?" 같은 개체 단위 질문에 호출하라. 개체의 상태(재고/출고/폐기)·위치·설치 병원·LOT·태그와 입출고 이력을 반환한다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        serialNo: { type: 'string', description: '시리얼 번호 (부분 일치 검색 지원)' },
+      },
+      required: ['serialNo'],
+    },
+  },
+  // ===== 티켓 =====
+  {
+    name: 'list_tickets',
+    description:
+      '티켓 목록을 조회한다. "열린 티켓 몇 건?", "SLA 초과 티켓", "OO 담당 티켓", "유지보수 그룹 대기 티켓" 같은 질문에 호출하라. 도메인 업무(유지보수·답사 등)의 상세 내용이 필요하면 해당 list_* 도구를, 특정 티켓 심층 조회는 get_ticket을 쓴다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: "상태 필터 (쉼표 구분 복수 가능): OPEN|ASSIGNED|IN_PROGRESS|PENDING|RESOLVED|CLOSED. 미지정+open=true면 열린 티켓 전체" },
+        open: { type: 'boolean', description: 'true면 미종결(RESOLVED·CLOSED 제외) 티켓만 (선택)' },
+        overdue: { type: 'boolean', description: 'true면 SLA 기한(dueAt) 초과 미종결 티켓만 (선택)' },
+        queueName: { type: 'string', description: "Assignment Group 이름 일부 (예: '유지보수', '설치·답사') (선택)" },
+        severity: { type: 'string', description: 'SEV1~SEV5 (선택)' },
+        refType: { type: 'string', description: '업무 유형: MAINTENANCE|SITE_VISIT|INSTALL_PLAN|PROJECT|ETC, NONE=순수 티켓 (선택)' },
+        hospitalCode: { type: 'string', description: '병원 코드 (선택)' },
+        ownerName: { type: 'string', description: '담당자(owner) 이름 일부 (선택)' },
+        unassigned: { type: 'boolean', description: 'true면 담당자 미배정 티켓만 (선택)' },
+        q: { type: 'string', description: '티켓번호·제목 검색어 (선택)' },
+        from: { type: 'string', description: '접수일 범위 시작 YYYY-MM-DD (선택)' },
+        to: { type: 'string', description: '접수일 범위 끝 YYYY-MM-DD (선택)' },
+        ...LIST_PARAMS,
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_ticket',
+    description:
+      '티켓 1건의 상세를 조회한다. 티켓번호(TK-YYYYMM-NNNNN)를 알 때 호출하라. 메타(상태·Sev·그룹·CTI·담당·병원)와 SLA 시계, 연결 업무, 최근 타임라인(코멘트·이벤트)을 반환한다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ticketCode: { type: 'string', description: '티켓번호 (예: TK-202607-00123)' },
+      },
+      required: ['ticketCode'],
+    },
+  },
+  // ===== 차량 =====
+  {
+    name: 'list_vehicle_reservations',
+    description:
+      '법인차량 예약 현황을 조회한다. "이번주 차량 예약", "카니발 누가 쓰고 있어?", "내일 쓸 수 있는 차" 같은 질문에 호출하라. 기간 미지정 시 오늘부터 7일. 취소된 예약은 제외.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vehicleName: { type: 'string', description: '차량 이름·차량번호 일부 (선택)' },
+        userName: { type: 'string', description: '예약자 이름 일부 (선택)' },
+        from: { type: 'string', description: '기간 시작 YYYY-MM-DD (기본 오늘)' },
+        to: { type: 'string', description: '기간 끝 YYYY-MM-DD (기본 from+7일)' },
+        ...LIST_PARAMS,
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'list_vehicle_logs',
+    description:
+      '차량 운행일지를 조회한다. "지난달 카니발 주행거리", "OO이 언제 어디 운행했나" 같은 질문에 호출하라. 기간 필터는 운행 종료 시각 기준이며 합계 주행거리를 함께 반환한다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vehicleName: { type: 'string', description: '차량 이름·차량번호 일부 (선택)' },
+        driverName: { type: 'string', description: '운전자 이름 일부 (선택)' },
+        from: { type: 'string', description: '기간 시작 YYYY-MM-DD (선택)' },
+        to: { type: 'string', description: '기간 끝 YYYY-MM-DD (선택)' },
+        ...LIST_PARAMS,
+      },
+      required: [],
+    },
+  },
+  // ===== 조직 디렉토리 =====
+  {
+    name: 'search_users',
+    description:
+      '사내 구성원을 검색한다. "OO 어느 부서야?", "유지보수 담당자 풀 누구야?", "재고 처리 권한 있는 사람" 같은 질문에 호출하라. 이름·소속·부서·역할과 업무별 담당 풀(프로젝트/설치계획/유지보수/기타업무)·재고 담당 여부를 반환한다. 연락처는 제공하지 않는다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '이름·부서명·소속명 일부 (예: "이준호", "운영팀"). 비우면 활성 계정 전체에서 필터만 적용' },
+        workType: { type: 'string', enum: ['PROJECT', 'INSTALL_PLAN', 'MAINTENANCE', 'ETC_TASK'], description: '이 업무의 담당자 풀 소속만 (선택)' },
+        ...LIST_PARAMS,
+      },
+      required: [],
+    },
+  },
+  // ===== GW 배치 플래너 =====
+  {
+    name: 'list_gateway_plan_jobs',
+    description:
+      'GW 배치 플래너의 도면 분석 잡 목록을 조회한다. "OO병원 도면 분석했었나?", "최근 배치 플래너 작업" 같은 질문에 호출하라. 잡 제목·상태·게이트웨이 수·공간 인식 요약을 반환한다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '잡 제목 일부 (선택)' },
+        ...LIST_PARAMS,
+      },
+      required: [],
+    },
+  },
 ]
 
 /** 도구별 한국어 진행 표시 라벨 */
@@ -296,6 +453,16 @@ export const TOOL_LABELS: Record<string, string> = {
   read_wiki_page: '위키 문서 읽는 중',
   read_consultations: '상담이력 확인 중',
   read_hospital_note: '병원 노트 확인 중',
+  search_inventory_items: '자재 품목 검색 중',
+  get_stock_summary: '재고 현황 집계 중',
+  list_stock_transactions: '입출고 이력 조회 중',
+  find_serial_unit: '시리얼 개체 추적 중',
+  list_tickets: '티켓 조회 중',
+  get_ticket: '티켓 상세 확인 중',
+  list_vehicle_reservations: '차량 예약 조회 중',
+  list_vehicle_logs: '운행일지 조회 중',
+  search_users: '구성원 검색 중',
+  list_gateway_plan_jobs: 'GW 플래너 잡 조회 중',
 }
 
 // ===== 실행기 =====
@@ -1075,6 +1242,548 @@ async function readHospitalNote(input: ToolInput) {
   }
 }
 
+// ===== 자재관리(WMS)·티켓·차량·조직·GW 플래너 — 2026-07-27 도구 확장 =====
+
+const TX_TYPE_LABELS: Record<string, string> = { IN: '입고', OUT: '출고', MOVE: '이동', TRANSFER: '이관(구)' }
+const UNIT_STATUS_LABELS: Record<string, string> = { IN_STOCK: '재고', OUT: '출고됨', DISPOSED: '폐기' }
+
+/** KST 기준 분 단위 표기 (차량 예약·운행 시각) */
+const kstMinute = (d: Date | null | undefined) =>
+  d ? d.toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16) : null
+
+async function searchInventoryItems(input: ToolInput) {
+  const query = str(input.query)
+  if (!query) return { error: 'query가 필요합니다.' }
+  const invName = str(input.inventoryName)
+  const where = {
+    isActive: true,
+    OR: [
+      { name: { contains: query, mode: 'insensitive' as const } },
+      { modelName: { contains: query, mode: 'insensitive' as const } },
+      { itemCode: { contains: query, mode: 'insensitive' as const } },
+      { spec: { contains: query, mode: 'insensitive' as const } },
+    ],
+    ...(invName && { inventory: { name: { contains: invName } } }),
+  }
+  const full = isFull(input)
+  const [total, rows] = await Promise.all([
+    prisma.inventoryItem.count({ where }),
+    prisma.inventoryItem.findMany({
+      where,
+      take: listLimit(input),
+      orderBy: [{ inventoryId: 'asc' }, { sortOrder: 'asc' }, { id: 'asc' }],
+      include: {
+        inventory: { select: { name: true } },
+        category: { select: { name: true } },
+        manufacturer: { select: { name: true } },
+        stocks: { include: { warehouse: { select: { name: true } } } },
+      },
+    }),
+  ])
+  return {
+    ...listMeta(rows.length, total),
+    items: rows.map((it) => {
+      const totalQty = it.stocks.reduce((s, x) => s + x.quantity, 0)
+      const byWh = new Map<string, number>()
+      for (const s of it.stocks) byWh.set(s.warehouse.name, (byWh.get(s.warehouse.name) ?? 0) + s.quantity)
+      return {
+        itemCode: it.itemCode,
+        name: it.name,
+        modelName: it.modelName,
+        inventory: it.inventory.name,
+        totalQty,
+        unit: it.unit,
+        stocksByWarehouse: Array.from(byWh.entries()).filter(([, q]) => q > 0).map(([w, q]) => `${w}: ${q}`),
+        serialManaged: it.isSerialManaged,
+        link: `/inventory/${it.inventoryId}/items/${it.id}`, // 출처
+        ...(full && {
+          category: it.category?.name ?? null,
+          manufacturer: it.manufacturer?.name ?? null,
+          spec: it.spec,
+          lotManaged: it.isLotManaged,
+          memo: it.memo,
+        }),
+      }
+    }),
+  }
+}
+
+async function getStockSummary(input: ToolInput) {
+  const invName = str(input.inventoryName)
+  const inventories = await prisma.inventory.findMany({
+    where: { isActive: true, ...(invName && { name: { contains: invName } }) },
+    orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+    select: { id: true, name: true },
+  })
+  if (!inventories.length) return { error: `인벤토리(${invName ?? ''})를 찾을 수 없습니다.` }
+  const result = []
+  for (const inv of inventories) {
+    const [itemCount, stocks] = await Promise.all([
+      prisma.inventoryItem.count({ where: { inventoryId: inv.id, isActive: true } }),
+      prisma.inventoryStock.findMany({
+        where: { inventoryId: inv.id, quantity: { gt: 0 } },
+        include: { warehouse: { select: { name: true } } },
+      }),
+    ])
+    const byWh = new Map<string, { qty: number; items: Set<number> }>()
+    let totalQty = 0
+    for (const s of stocks) {
+      totalQty += s.quantity
+      const b = byWh.get(s.warehouse.name) ?? { qty: 0, items: new Set<number>() }
+      b.qty += s.quantity
+      b.items.add(s.itemId)
+      byWh.set(s.warehouse.name, b)
+    }
+    result.push({
+      inventory: inv.name,
+      itemCount,
+      totalQty,
+      warehouses: Array.from(byWh.entries()).map(([w, b]) => ({ warehouse: w, qty: b.qty, itemKinds: b.items.size })),
+    })
+  }
+  return { inventories: result, note: '수량은 현재고(취소 반영) 기준. 시리얼 개체 수는 수량과 동일 관리', link: '/inventory' }
+}
+
+async function listStockTransactions(input: ToolInput) {
+  const itemQuery = str(input.itemQuery)
+  const invName = str(input.inventoryName)
+  const txType = str(input.txType)?.toUpperCase()
+  const where = {
+    canceledAt: null,
+    ...(txType && ['IN', 'OUT', 'MOVE'].includes(txType) && { txType }),
+    ...(str(input.hospitalCode) && { hospitalCode: str(input.hospitalCode) }),
+    ...(str(input.requester) && { requester: { contains: str(input.requester)!, mode: 'insensitive' as const } }),
+    ...(itemQuery && {
+      item: {
+        OR: [
+          { name: { contains: itemQuery, mode: 'insensitive' as const } },
+          { modelName: { contains: itemQuery, mode: 'insensitive' as const } },
+          { itemCode: { contains: itemQuery, mode: 'insensitive' as const } },
+        ],
+      },
+    }),
+    ...(invName && { inventory: { name: { contains: invName } } }),
+    ...dateRange(input, 'txDate'),
+  }
+  const full = isFull(input)
+  const [total, rows] = await Promise.all([
+    prisma.inventoryTransaction.count({ where }),
+    prisma.inventoryTransaction.findMany({
+      where,
+      take: listLimit(input),
+      orderBy: [{ txDate: 'desc' }, { id: 'desc' }],
+      include: {
+        item: { select: { name: true, itemCode: true, unit: true } },
+        warehouse: { select: { name: true } },
+        toWarehouse: { select: { name: true } },
+        inventory: { select: { name: true } },
+        reasonCode: { select: { name: true } },
+        hospital: { select: { hospitalName: true } },
+        _count: { select: { units: true } },
+      },
+    }),
+  ])
+  return {
+    ...listMeta(rows.length, total),
+    link: '/inventory/transactions', // 출처
+    transactions: rows.map((t) => ({
+      txCode: t.txCode,
+      date: ymd(t.txDate),
+      type: TX_TYPE_LABELS[t.txType] ?? t.txType,
+      item: `${t.item.name}(${t.item.itemCode})`,
+      qty: `${t.quantity}${t.item.unit}`,
+      warehouse: t.toWarehouse ? `${t.warehouse.name} → ${t.toWarehouse.name}` : t.warehouse.name,
+      inventory: t.inventory.name,
+      reason: t.reasonCode?.name ?? null,
+      requester: t.requester,
+      hospital: t.hospital?.hospitalName ?? null,
+      destination: t.destination,
+      ...(full && {
+        workRef: t.refCode ? `${t.workType ?? ''} ${t.refCode}`.trim() : null,
+        lotNo: t.lotNo,
+        serialCount: t._count.units || undefined,
+        note: stripHtml(t.note, 120),
+      }),
+    })),
+  }
+}
+
+async function findSerialUnit(input: ToolInput) {
+  const serial = str(input.serialNo)
+  if (!serial) return { error: 'serialNo가 필요합니다.' }
+  const units = await prisma.inventoryUnit.findMany({
+    where: { serialNo: { contains: serial, mode: 'insensitive' } },
+    take: 10,
+    include: {
+      item: { select: { id: true, name: true, itemCode: true, inventoryId: true } },
+      inventory: { select: { name: true } },
+      warehouse: { select: { name: true } },
+      hospital: { select: { hospitalName: true } },
+      transactions: {
+        orderBy: { transactionId: 'asc' },
+        include: {
+          transaction: { select: { txCode: true, txType: true, txDate: true, requester: true, canceledAt: true } },
+        },
+      },
+    },
+  })
+  if (!units.length) return { count: 0, note: `시리얼 '${serial}'과 일치하는 개체가 없습니다.` }
+  return {
+    count: units.length,
+    units: units.map((u) => ({
+      serialNo: u.serialNo,
+      item: `${u.item.name}(${u.item.itemCode})`,
+      inventory: u.inventory.name,
+      status: UNIT_STATUS_LABELS[u.status] ?? u.status,
+      warehouse: u.warehouse?.name ?? null,
+      hospital: u.hospital?.hospitalName ?? null,
+      lotNo: u.lotNo,
+      tags: u.tags.length ? u.tags : undefined,
+      memo: u.memo,
+      history: u.transactions
+        .filter((t) => !t.transaction.canceledAt)
+        .map(
+          (t) =>
+            `${ymd(t.transaction.txDate)} ${TX_TYPE_LABELS[t.transaction.txType] ?? t.transaction.txType}(${t.transaction.txCode})${t.transaction.requester ? ` 요청자:${t.transaction.requester}` : ''}`,
+        ),
+      link: `/inventory/${u.item.inventoryId}/items/${u.item.id}`, // 출처
+    })),
+  }
+}
+
+const TICKET_STATUS_VALUES = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'PENDING', 'RESOLVED', 'CLOSED'] as const
+type TicketStatusValue = (typeof TICKET_STATUS_VALUES)[number]
+
+async function listTickets(input: ToolInput) {
+  const statuses = (str(input.status) ?? '')
+    .split(',')
+    .map((s) => s.trim().toUpperCase())
+    .filter((s): s is TicketStatusValue => (TICKET_STATUS_VALUES as readonly string[]).includes(s))
+  const refType = str(input.refType)?.toUpperCase()
+  const where = {
+    ...(statuses.length && { status: { in: statuses } }),
+    ...(!statuses.length && input.open === true && { status: { notIn: ['RESOLVED', 'CLOSED'] as TicketStatusValue[] } }),
+    ...(str(input.severity) && { severity: str(input.severity)!.toUpperCase() as never }),
+    ...(str(input.queueName) && { queue: { name: { contains: str(input.queueName)! } } }),
+    ...(str(input.hospitalCode) && { hospitalCode: str(input.hospitalCode) }),
+    ...(str(input.ownerName) && { owner: { name: { contains: str(input.ownerName)! } } }),
+    ...(input.unassigned === true && { ownerId: null }),
+    ...(refType && { refType: refType === 'NONE' ? null : refType }),
+    ...(str(input.q) && {
+      OR: [
+        { ticketCode: { contains: str(input.q)!, mode: 'insensitive' as const } },
+        { title: { contains: str(input.q)!, mode: 'insensitive' as const } },
+      ],
+    }),
+    ...dateRange(input, 'createdAt'),
+    // overdue는 마지막에 적용 — 미종결 강제 포함
+    ...(input.overdue === true && {
+      dueAt: { lt: new Date() },
+      status: { notIn: ['RESOLVED', 'CLOSED'] as TicketStatusValue[] },
+    }),
+  }
+  const full = isFull(input)
+  const [total, rows] = await Promise.all([
+    prisma.ticket.count({ where }),
+    prisma.ticket.findMany({
+      where,
+      take: listLimit(input),
+      orderBy: [{ severity: 'asc' }, { createdAt: 'desc' }],
+      include: {
+        queue: { select: { name: true } },
+        cti: { select: { name: true } },
+        owner: { select: { name: true } },
+        hospital: { select: { hospitalName: true } },
+        pendingReason: { select: { name: true } },
+      },
+    }),
+  ])
+  const now = Date.now()
+  return {
+    ...listMeta(rows.length, total),
+    tickets: rows.map((t) => ({
+      ticketCode: t.ticketCode,
+      title: t.title,
+      status: t.status,
+      severity: t.severity,
+      queue: t.queue.name,
+      owner: t.owner?.name ?? null,
+      hospital: t.hospital?.hospitalName ?? null,
+      refType: t.refType ?? 'NONE',
+      createdAt: ymd(t.createdAt),
+      dueAt: ymd(t.dueAt),
+      overdue: !!t.dueAt && t.dueAt.getTime() < now && t.status !== 'RESOLVED' && t.status !== 'CLOSED' ? true : undefined,
+      link: `/tickets/${t.ticketCode}`, // 출처
+      ...(full && {
+        cti: t.cti?.name ?? null,
+        pendingReason: t.pendingReason?.name ?? null,
+        pendingNote: t.pendingNote,
+        reopenCount: t.reopenCount || undefined,
+        resolvedAt: ymd(t.resolvedAt),
+        closedAt: ymd(t.closedAt),
+      }),
+    })),
+  }
+}
+
+async function getTicket(input: ToolInput) {
+  const code = str(input.ticketCode)?.toUpperCase()
+  if (!code) return { error: 'ticketCode가 필요합니다.' }
+  const t = await prisma.ticket.findUnique({
+    where: { ticketCode: code },
+    include: {
+      queue: { select: { name: true } },
+      cti: { select: { name: true, parent: { select: { name: true, parent: { select: { name: true } } } } } },
+      owner: { select: { name: true } },
+      creator: { select: { name: true } },
+      hospital: { select: { hospitalCode: true, hospitalName: true } },
+      pendingReason: { select: { name: true } },
+      participants: { include: { user: { select: { name: true } } } },
+      parent: { select: { ticketCode: true, title: true } },
+      children: { select: { ticketCode: true, title: true, status: true } },
+      slaClocks: { orderBy: { id: 'asc' } },
+      logs: {
+        take: 10,
+        orderBy: { createdAt: 'desc' },
+        include: { author: { select: { name: true } } },
+      },
+      maintenance: { select: { maintenanceCode: true, id: true } },
+      siteVisit: { select: { siteVisitCode: true, id: true } },
+      installPlan: { select: { planCode: true, id: true } },
+      project: { select: { projectCode: true } },
+      etcTask: { select: { etcTaskCode: true, id: true } },
+    },
+  })
+  if (!t) return { error: `티켓(${code})을 찾을 수 없습니다.` }
+  const linked =
+    t.maintenance ? { type: 'MAINTENANCE', code: t.maintenance.maintenanceCode, link: `/maintenances/${t.maintenance.id}` }
+    : t.siteVisit ? { type: 'SITE_VISIT', code: t.siteVisit.siteVisitCode, link: `/site-visits/${t.siteVisit.id}` }
+    : t.installPlan ? { type: 'INSTALL_PLAN', code: t.installPlan.planCode, link: `/install-plans/${t.installPlan.id}` }
+    : t.project ? { type: 'PROJECT', code: t.project.projectCode, link: `/projects/${t.project.projectCode}` }
+    : t.etcTask ? { type: 'ETC', code: t.etcTask.etcTaskCode, link: `/etc-tasks/${t.etcTask.id}` }
+    : null
+  return {
+    ticketCode: t.ticketCode,
+    title: t.title,
+    status: t.status,
+    severity: t.severity,
+    queue: t.queue.name,
+    ctiPath: t.cti
+      ? [t.cti.parent?.parent?.name, t.cti.parent?.name, t.cti.name].filter(Boolean).join(' > ')
+      : null,
+    owner: t.owner?.name ?? null,
+    participants: t.participants.map((p) => p.user.name),
+    creator: t.creator?.name ?? null,
+    hospital: t.hospital ? { code: t.hospital.hospitalCode, name: t.hospital.hospitalName } : null,
+    pending: t.status === 'PENDING' ? { reason: t.pendingReason?.name ?? null, note: t.pendingNote } : undefined,
+    createdAt: ymd(t.createdAt),
+    dueAt: ymd(t.dueAt),
+    resolvedAt: ymd(t.resolvedAt),
+    closedAt: ymd(t.closedAt),
+    reopenCount: t.reopenCount || undefined,
+    description: stripHtml(t.descriptionHtml, 300),
+    linkedWork: linked,
+    parent: t.parent ? `${t.parent.ticketCode} ${t.parent.title}` : undefined,
+    children: t.children.length ? t.children.map((c) => `${c.ticketCode} [${c.status}] ${c.title}`) : undefined,
+    slaClocks: t.slaClocks.map((c) => ({
+      metric: c.metric,
+      statusScope: c.statusScope ?? undefined,
+      state: c.state,
+      dueAt: c.dueAt.toISOString().slice(0, 16).replace('T', ' ') + ' UTC',
+    })),
+    recentLogs: t.logs.map((l) => ({
+      date: ymd(l.createdAt),
+      type: l.logType,
+      author: l.author?.name ?? null,
+      content: l.logType === 'comment' ? stripHtml(l.contentHtml, 150) : (l.payload ? JSON.stringify(l.payload).slice(0, 150) : null),
+    })),
+    link: `/tickets/${t.ticketCode}`, // 출처
+  }
+}
+
+/** KST 오늘 00:00 */
+function kstToday(): Date {
+  const s = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
+  return new Date(s + 'T00:00:00+09:00')
+}
+
+async function listVehicleReservations(input: ToolInput) {
+  const fromD = str(input.from) ? new Date(str(input.from)! + 'T00:00:00+09:00') : kstToday()
+  const toD = str(input.to)
+    ? new Date(str(input.to)! + 'T23:59:59+09:00')
+    : new Date(fromD.getTime() + 7 * 86400000)
+  const where = {
+    status: 'RESERVED',
+    startAt: { lt: toD },
+    endAt: { gt: fromD },
+    ...(str(input.vehicleName) && {
+      vehicle: {
+        OR: [
+          { name: { contains: str(input.vehicleName)!, mode: 'insensitive' as const } },
+          { plateNumber: { contains: str(input.vehicleName)! } },
+        ],
+      },
+    }),
+    ...(str(input.userName) && { user: { name: { contains: str(input.userName)! } } }),
+  }
+  const [total, rows] = await Promise.all([
+    prisma.vehicleReservation.count({ where }),
+    prisma.vehicleReservation.findMany({
+      where,
+      take: listLimit(input),
+      orderBy: { startAt: 'asc' },
+      include: {
+        vehicle: { select: { name: true, plateNumber: true } },
+        user: { select: { name: true } },
+      },
+    }),
+  ])
+  const now = new Date()
+  return {
+    ...listMeta(rows.length, total),
+    period: `${kstMinute(fromD)} ~ ${kstMinute(toD)} (KST)`,
+    link: '/vehicle-reservations', // 출처
+    reservations: rows.map((r) => ({
+      vehicle: `${r.vehicle.name}(${r.vehicle.plateNumber})`,
+      user: r.user.name,
+      start: kstMinute(r.startAt),
+      end: kstMinute(r.endAt),
+      purpose: r.purpose,
+      destination: r.destination,
+      returned: r.returnedAt ? '반납완료' : r.endAt < now ? '반납필요' : undefined,
+    })),
+  }
+}
+
+async function listVehicleLogs(input: ToolInput) {
+  const where = {
+    ...(str(input.vehicleName) && {
+      vehicle: {
+        OR: [
+          { name: { contains: str(input.vehicleName)!, mode: 'insensitive' as const } },
+          { plateNumber: { contains: str(input.vehicleName)! } },
+        ],
+      },
+    }),
+    ...(str(input.driverName) && { driver: { name: { contains: str(input.driverName)! } } }),
+    ...dateRange(input, 'endAt'),
+  }
+  const full = isFull(input)
+  const [agg, rows] = await Promise.all([
+    prisma.vehicleLog.aggregate({ where, _count: { id: true }, _sum: { distanceKm: true } }),
+    prisma.vehicleLog.findMany({
+      where,
+      take: listLimit(input),
+      orderBy: { endAt: 'desc' },
+      include: {
+        vehicle: { select: { name: true, plateNumber: true } },
+        driver: { select: { name: true } },
+      },
+    }),
+  ])
+  return {
+    ...listMeta(rows.length, agg._count.id),
+    totalDistanceKm: agg._sum.distanceKm ?? 0,
+    link: '/vehicle-reservations', // 출처 (운행일지 탭)
+    logs: rows.map((l) => ({
+      vehicle: `${l.vehicle.name}(${l.vehicle.plateNumber})`,
+      driver: l.driver.name,
+      start: kstMinute(l.startAt),
+      end: kstMinute(l.endAt),
+      purpose: l.purpose,
+      destination: l.destination,
+      distanceKm: l.distanceKm,
+      ...(full && { endOdometer: l.endOdometer, note: l.note }),
+    })),
+  }
+}
+
+async function searchUsers(input: ToolInput) {
+  const query = str(input.query)
+  const workType = str(input.workType)?.toUpperCase()
+  const where = {
+    isActive: true,
+    ...(query && {
+      OR: [
+        { name: { contains: query, mode: 'insensitive' as const } },
+        { department: { name: { contains: query, mode: 'insensitive' as const } } },
+        { organization: { name: { contains: query, mode: 'insensitive' as const } } },
+      ],
+    }),
+    ...(workType && { fieldEngineers: { some: { workType } } }),
+  }
+  const [total, rows] = await Promise.all([
+    prisma.user.count({ where }),
+    prisma.user.findMany({
+      where,
+      take: listLimit(input),
+      orderBy: [{ organizationId: 'asc' }, { name: 'asc' }],
+      // 연락처(이메일·전화)는 의도적으로 미반환 — 2026-07-27 사용자 결정
+      select: {
+        name: true,
+        role: true,
+        organization: { select: { name: true } },
+        department: { select: { name: true } },
+        fieldEngineers: { select: { workType: true } },
+        inventoryManager: { select: { userId: true } },
+      },
+    }),
+  ])
+  const POOL_LABELS: Record<string, string> = {
+    PROJECT: '프로젝트', INSTALL_PLAN: '설치계획', MAINTENANCE: '유지보수', ETC_TASK: '기타업무',
+  }
+  return {
+    ...listMeta(rows.length, total),
+    note: '연락처는 제공하지 않는다 (사내 정책)',
+    users: rows.map((u) => ({
+      name: u.name,
+      organization: u.organization?.name ?? null,
+      department: u.department?.name ?? null,
+      role: u.role,
+      workPools: u.fieldEngineers.length ? u.fieldEngineers.map((f) => POOL_LABELS[f.workType] ?? f.workType) : undefined,
+      stockManager: u.inventoryManager ? true : undefined,
+    })),
+  }
+}
+
+async function listGatewayPlanJobs(input: ToolInput) {
+  const query = str(input.query)
+  const where = query ? { title: { contains: query, mode: 'insensitive' as const } } : {}
+  const GW_STATUS_LABELS: Record<string, string> = {
+    PENDING: '대기', RASTERIZING: '변환 중', ANALYZING: '분석 중',
+    NEED_SCALE: '스케일 확정 대기', PLACED: '배치 완료', ERROR: '오류',
+  }
+  const [total, rows] = await Promise.all([
+    prisma.gatewayPlanJob.count({ where }),
+    prisma.gatewayPlanJob.findMany({
+      where,
+      take: listLimit(input),
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true, title: true, status: true, gatewayCount: true, scaleSource: true,
+        analysis: true, createdAt: true,
+        createdBy: { select: { name: true } },
+      },
+    }),
+  ])
+  return {
+    ...listMeta(rows.length, total),
+    jobs: rows.map((j) => {
+      const spaces = (j.analysis as { spaces?: unknown[] } | null)?.spaces
+      return {
+        title: j.title,
+        status: GW_STATUS_LABELS[j.status] ?? j.status,
+        gatewayCount: j.gatewayCount,
+        spacesDetected: Array.isArray(spaces) ? spaces.length : undefined,
+        scaleSource: j.scaleSource ?? undefined,
+        createdBy: j.createdBy.name,
+        createdAt: ymd(j.createdAt),
+        link: `/gateway-planner/${j.id}`, // 출처
+      }
+    }),
+  }
+}
+
 /** 도구 실행 디스패처 — 실패는 throw하지 않고 error 객체 반환 (agent가 is_error로 전달) */
 export async function executeTool(name: string, input: ToolInput): Promise<unknown> {
   try {
@@ -1111,6 +1820,26 @@ export async function executeTool(name: string, input: ToolInput): Promise<unkno
         return await readConsultations(input)
       case 'read_hospital_note':
         return await readHospitalNote(input)
+      case 'search_inventory_items':
+        return await searchInventoryItems(input)
+      case 'get_stock_summary':
+        return await getStockSummary(input)
+      case 'list_stock_transactions':
+        return await listStockTransactions(input)
+      case 'find_serial_unit':
+        return await findSerialUnit(input)
+      case 'list_tickets':
+        return await listTickets(input)
+      case 'get_ticket':
+        return await getTicket(input)
+      case 'list_vehicle_reservations':
+        return await listVehicleReservations(input)
+      case 'list_vehicle_logs':
+        return await listVehicleLogs(input)
+      case 'search_users':
+        return await searchUsers(input)
+      case 'list_gateway_plan_jobs':
+        return await listGatewayPlanJobs(input)
       default:
         return { error: `알 수 없는 도구: ${name}` }
     }

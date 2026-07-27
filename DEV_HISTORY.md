@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-07-27 | AI 어시스턴트 도구 확장 — 자재·티켓·차량·조직·GW 플래너 (16 → 26종)
+
+- 어시스턴트가 운영시스템 적재 데이터 전체를 활용할 수 있도록 도구 10종 추가 (`lib/ai/tools.ts` — 전부 기존 패턴 동일: read-only Prisma SELECT 화이트리스트, `limit`/`detail` 공통 파라미터, `link` 출처 반환, SEERS 전용 접근 유지)
+- **자재관리(WMS) 4종**: `search_inventory_items`(품목명·모델명·코드·규격 검색 + 현재고 합계·위치별 잔량) / `get_stock_summary`(인벤토리×위치 집계) / `list_stock_transactions`(입출고 전표 — txDate 기간·유형·병원·요청자 필터, 취소 제외) / `find_serial_unit`(시리얼 → 상태·위치·설치 병원·LOT·태그 + 전표 이력)
+- **티켓 2종**: `list_tickets`(상태 복수·open·**overdue**(SLA 초과)·그룹·Sev·refType·담당·미배정·검색) / `get_ticket`(메타+CTI 경로+SLA 시계+연결 업무+최근 타임라인 10건)
+- **차량 2종**: `list_vehicle_reservations`(기간 겹침 조회, 기본 오늘~7일, 반납필요 표기) / `list_vehicle_logs`(합계 주행거리 동시 반환)
+- **조직 1종**: `search_users`(이름·부서·소속 검색 + 업무별 담당 풀·재고 담당 여부). **연락처(이메일·전화)는 의도적 미반환 — 사용자 결정**
+- **GW 플래너 1종**: `list_gateway_plan_jobs`(잡 상태 한글 라벨·GW 수·공간 인식 수)
+- **의도적 제외 (사용자 결정)**: 감사 로그·AI 사용량 원장(UI ADMIN 전용 — 어시스턴트는 USER 이상 전원이라 권한 우회 방지), 개인 알림함·타인 대화 세션, 폐기·동결 테이블
+- 시스템 프롬프트(`lib/ai/agent.ts`)에 축2 확장 안내 추가, 회귀 질문셋(`ai-agent-smoke.mts`)에 신규 도메인 3문항 추가
+- **검증**: 도구 스모크 `scripts/ai-tools-ext-smoke.mts` **38/38**(LLM 미호출 — 등록 정합·디스패처·실데이터 조회·total=DB 실측 대조·연락처 미반환·에러 케이스) + **라이브 에이전트 E2E 3/3**(재고→search_inventory_items·SLA 초과→list_tickets·차량→예약+운행일지 2도구, 전부 정확한 도구 선택·출처 링크 포함, 건당 평균 $0.06)
+- tsc·lint 0오류
+
+---
+
 ## 2026-07-27 | 도메인↔티켓 상태 매핑 + 설치계획 단일 축 + 인벤토리 순서 PROD 배포
 
 - dev2 커밋 `de9812f`(45파일) push → PROD git pull(`73837f0`→`de9812f`) → **의존성 변경 없음**

@@ -29,6 +29,10 @@ const DEFAULT_QUESTIONS = [
   '이번달 유지보수 몇 건이야?',
   // 교차 — 두 축을 함께 봐야 하는 질문
   '제주한라병원 현황이랑 최근 장애 이력 정리해줘',
+  // 축 2 확장 (2026-07-27) — 자재·티켓·차량
+  'MC200M 재고 얼마나 남았어? 어느 창고에 있어?',
+  'SLA 초과된 열린 티켓 몇 건이야?',
+  '이번주 차량 예약 현황 알려줘',
 ]
 
 const cost = (u: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }) =>
