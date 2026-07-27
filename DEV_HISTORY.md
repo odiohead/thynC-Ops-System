@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-07-27 | 도메인↔티켓 상태 매핑 + 설치계획 단일 축 + 인벤토리 순서 PROD 배포
+
+- dev2 커밋 `de9812f`(45파일) push → PROD git pull(`73837f0`→`de9812f`) → **의존성 변경 없음**
+- **PROD DB 작업**(배포 필수분, 사용자 "커밋 푸시 PROD배포까지" 지시):
+  ① `prisma migrate deploy` **2건** — `20260727100000_add_ticket_status_mapping`(매핑 컬럼 2테이블) / `20260727120000_add_install_plan_status`(INSTALL_PLAN_STATUS 4행 + `install_plans.status_id` + 백필). **전부 순수 추가 DDL**
+  ② `prisma generate`
+  ③ 시드 `seed-ticket-status-map.sql` — 매핑 17행 + nav 1행(`settings/install-plan-status`). psql 대신 **`npx prisma db execute`로 실행**(.env DATABASE_URL 직접 사용 — 비밀번호 추출 불필요, 이후 배포에도 권장)
+  ④ `inventories.sort_order` 갱신 — 대웅제약(0)→**thynC운영팀(1)**→평가용(2)→판매용(3)
+- **배포 후 검증**(read-only): 워크플로 상태코드 17행 매핑 완료·미매핑 0, build_statuses 5행 전부 매핑, 설치계획 백필 **회신완료 70 + 접수 2 = 구 2축 조합(완/완 70·미/미 2)과 정확히 일치**, nav 행 생성, 인벤토리 순서 확인
+- 힙 4GB 빌드 → `pm2 restart thync-prod`. 주요 라우트 9종 + 공개 URL 307 정상, **재시작 이후 신규 오류 로그 0건**(기존 로그의 캘린더 env 미설정·Server Action 스테일은 이번 배포와 무관한 기존 건)
+- 기존 티켓 상태 **백필 없음**(비소급 원칙). 매핑 조정은 `/settings/{maintenance,etc-task,site-visit,install-plan}-status`·`/settings/build-status`에서, 인벤토리 순서는 `/settings/inventories`에서 가능
+
+---
+
 ## 2026-07-27 | 자재 현황 인벤토리 표시 순서 변경
 
 - `/inventory` 인벤토리 섹션 순서: 대웅제약재고 → **thynC운영팀재고** → 평가용재고 → 판매용재고 (구: 대웅제약 → 평가용 → 판매용 → thynC운영팀)
