@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-07-27 | AI 어시스턴트 도구 확장 PROD 배포
+
+- dev2 커밋 `72d546d`(6파일) push → PROD git pull(`55e632c`→`72d546d`) → 의존성·DB 변경 없음(순수 코드 배포, migrate status 최신 확인)
+- 힙 4GB 빌드 → `pm2 restart thync-prod`. `/`·`/ai-assistant`·`/inventory`·`/tickets` + 공개 URL 307 정상
+- **배포 후 검증**: 도구 스모크 `ai-tools-ext-smoke.mts`를 PROD DB에서 실행(read-only) — **38/38 통과**(유지보수 풀 18명 실측 대조 포함). 재시작 이후 신규 오류 로그 0건
+- 어시스턴트는 다음 질문부터 자재 재고·입출고·시리얼 추적, 티켓(SLA 초과 포함), 차량 예약·운행일지, 구성원 디렉토리(연락처 제외), GW 플래너 잡을 실데이터로 답한다
+
+---
+
 ## 2026-07-27 | AI 어시스턴트 도구 확장 — 자재·티켓·차량·조직·GW 플래너 (16 → 26종)
 
 - 어시스턴트가 운영시스템 적재 데이터 전체를 활용할 수 있도록 도구 10종 추가 (`lib/ai/tools.ts` — 전부 기존 패턴 동일: read-only Prisma SELECT 화이트리스트, `limit`/`detail` 공통 파라미터, `link` 출처 반환, SEERS 전용 접근 유지)
