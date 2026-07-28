@@ -1,0 +1,94 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
+import { getAuthUser } from '@/lib/auth'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import { checkSalesAccess } from '@/lib/sales'
+import { parseDealBody, validateDealCodes, parseDealDevices } from '../shared'
+
+export const dynamic = 'force-dynamic'
+
+type Params = { params: { code: string; id: string } }
+
+async function guard(request: NextRequest, params: Params['params']) {
+  const user = await getAuthUser(request)
+  if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
+  const denial = await checkSalesAccess(user)
+  if (denial) return { error: NextResponse.json({ error: denial.error }, { status: denial.status }) }
+  const id = parseInt(params.id)
+  if (isNaN(id)) return { error: NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 }) }
+  const deal = await prisma.salesDeal.findUnique({ where: { id } })
+  if (!deal || deal.hospitalCode !== params.code) return { error: NextResponse.json({ error: '딜을 찾을 수 없습니다.' }, { status: 404 }) }
+  return { user, id, deal }
+}
+
+const auditSafe = (d: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(d).map(([k, v]) => [k, typeof v === 'bigint' ? v.toString() : v]))
+
+export async function PUT(request: NextRequest, { params }: Params) {
+  const g = await guard(request, params)
+  if ('error' in g) return g.error
+
+  const body = await request.json()
+  const data = parseDealBody(body)
+  const codeError = await validateDealCodes(data)
+  if (codeError) return NextResponse.json({ error: codeError }, { status: 400 })
+  const devices = parseDealDevices(body.devices)
+
+  const roundNo = Number.isInteger(body.roundNo) && body.roundNo > 0 ? body.roundNo : g.deal.roundNo
+
+  if (data.projectCode) {
+    const project = await prisma.project.findUnique({ where: { projectCode: data.projectCode }, select: { hospitalCode: true } })
+    if (!project || project.hospitalCode !== params.code) return NextResponse.json({ error: '이 병원의 프로젝트만 연결할 수 있습니다.' }, { status: 400 })
+  }
+
+  try {
+    const deal = await prisma.$transaction(async (tx) => {
+      const updated = await tx.salesDeal.update({ where: { id: g.id }, data: { ...data, roundNo } })
+      await tx.salesDealDevice.deleteMany({ where: { dealId: g.id } })
+      if (devices.length > 0) {
+        await tx.salesDealDevice.createMany({ data: devices.map((d) => ({ ...d, dealId: g.id })) })
+      }
+      return updated
+    })
+
+    await logAudit({
+      req: request,
+      actor: auditActorFromJWT(g.user),
+      action: 'UPDATE',
+      resource: 'sales_deal',
+      resourceId: g.id,
+      resourceLabel: `${deal.dealCode} (${deal.roundNo}차)`,
+      before: auditSafe(g.deal as unknown as Record<string, unknown>),
+      after: auditSafe(deal as unknown as Record<string, unknown>),
+    })
+
+    return NextResponse.json({ deal: { id: deal.id, dealCode: deal.dealCode, roundNo: deal.roundNo } })
+  } catch (e: unknown) {
+    const err = e as { code?: string; meta?: { target?: string[] } }
+    if (err.code === 'P2002') {
+      const target = err.meta?.target ?? []
+      if (target.includes('round_no')) return NextResponse.json({ error: `이미 ${roundNo}차 딜이 있습니다.` }, { status: 409 })
+      if (target.includes('project_code')) return NextResponse.json({ error: '해당 프로젝트에 이미 연결된 딜이 있습니다.' }, { status: 409 })
+    }
+    throw e
+  }
+}
+
+export async function DELETE(request: NextRequest, { params }: Params) {
+  const g = await guard(request, params)
+  if ('error' in g) return g.error
+
+  await prisma.salesDeal.delete({ where: { id: g.id } })
+
+  await logAudit({
+    req: request,
+    actor: auditActorFromJWT(g.user),
+    action: 'DELETE',
+    resource: 'sales_deal',
+    resourceId: g.id,
+    resourceLabel: `${g.deal.dealCode} (${g.deal.roundNo}차)`,
+    before: auditSafe(g.deal as unknown as Record<string, unknown>),
+  })
+
+  return NextResponse.json({ ok: true })
+}

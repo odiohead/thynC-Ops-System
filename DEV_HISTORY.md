@@ -4,6 +4,39 @@
 
 ---
 
+## 2026-07-28 | 영업/CRM Phase 1+2 구현 — 병원 영업 프로필·키맨·대웅 채널·딜 원장·영업일지
+
+- `sales_crm_design.md` P1(병원 영업 프로필 기반)+P2(딜·매출 원장) 동시 구현. 이전 세션 비정상종료로 기록 누락됐던 건을 검증 후 정리 커밋
+- **DB**: 마이그레이션 `20260728120000_add_sales_crm_phase1` (순수 추가 DDL, dev 적용 완료) — `hospital_sales_profiles`(전체 병상/병동수·등급·메모, 병원당 1행) / `hospital_contacts`(병원 키맨) / `sales_offices`·`sales_reps`(대웅 영업조직 — 비계정 마스터) / `hospital_daewoong_channels`(병원별 사업소·담당자 이력) / `sales_deals`(차수(round_no) 단위 딜 원장 — 판매모델 2축·금액 5종(BIGINT)·인입/계약/납품일·정산/세금계산서/매출인식, `(hospital_code, round_no)` UNIQUE, 프로젝트 연결 선택) / `sales_deal_devices`(딜별 디바이스 종별 수량·단가) / `sales_activities`(영업일지)
+- **시드** `scripts/seed-sales-masters.sql`(idempotent, 실행 완료): SALES StatusCode 7카테고리 25행 + nav 2행(`/settings/sales-offices`·`/settings/sales-codes`)
+- **권한 (`lib/sales.ts`)**: 금액 포함 영업 섹션 전체 = **ADMIN 이상 + SEERS 소속** (사용자 확정, 오픈 이슈 ①). 소속은 JWT 아닌 DB 실시간 판정, 서버 컴포넌트 렌더 게이트 + 모든 API 재검증. 딜 코드 발번 `DEAL-YYYYMM-NNNN`(상담이력 CS- 패턴)
+- **API**: 병원별 `/api/hospitals/[code]/sales/{profile(PUT upsert), contacts, channels, deals, deals/[id](디바이스 수량 포함), activities}` + 설정 `/api/settings/{sales-offices, sales-reps, sales-codes/[category]}` (카테고리 화이트리스트 `SALES_CODE_CATEGORIES`)
+- **UI**: 병원 상세 '영업 정보' 섹션 `SalesSection.tsx`(권한 통과 시에만 렌더) — 영업 프로필·병원 키맨·대웅 관리 채널·도입 차수(딜)·매출(합계 파생)·영업일지 5블록. 설정 `/settings/sales-offices`(사업소+담당자)·`/settings/sales-codes`(7카테고리)
+- **검증**: tsc 0오류. Phase 1·2 게이트(병원 2~3곳 수기 입력·실딜 3~5건)는 화면 확인과 함께 진행 예정
+- 영향 파일: prisma/{schema.prisma, migrations/20260728120000}, lib/sales.ts(신규), scripts/seed-sales-masters.sql(신규), app/hospitals/[code]/{page.tsx, _components/SalesSection.tsx(신규)}, app/api/hospitals/[code]/sales/*(신규), app/api/settings/{sales-offices, sales-reps, sales-codes}(신규), app/settings/{sales-offices, sales-codes}(신규)
+
+---
+
+## 2026-07-28 | 주차 웹할인 등록 도구 (`/parking`)
+
+- 방문차량 주차 할인권 등록을 위한 사내 유틸 — pweb.kr(아마노) 주차 웹할인 사이트를 서버가 대행 호출(stateless: 액션마다 로그인→검색→조회→등록). 메인 도메인과 무관한 독립 기능, DB 테이블 없음
+- `lib/parking.ts`(server-only): env `PARKING_ACCOUNTS`(JSON 배열, 4개 계정)·`PARKING_BASE_URL`·`PARKING_LOT_AREA`, sha256 로그인·쿠키잼·관대한 응답 파서
+- API 3종(USER 이상): `/api/parking/search`(차량번호+입차일 검색) / `coupons`(선택 차량에 대해 전 계정 할인권·잔여 병렬 조회) / `register`(계정 1개로 할인권 1건 등록 — 입차ID 재확인 후 저장)
+- UI `/parking`: 차량번호 검색 → 입차 차량 선택 → 계정별 할인권 카드에서 등록. nav 메뉴 미등록(URL 직접 접근)
+- 영향 파일: lib/parking.ts(신규), app/parking/page.tsx(신규), app/api/parking/{search,coupons,register}(신규)
+
+---
+
+## 2026-07-28 | 영업/CRM 모듈 설계안 작성 (P0 — 구현 미착수)
+
+- 운영(task) 축 외에 **영업 정보 축**을 추가하기 위한 설계안 작성 — 병원 페이지 고도화(전체 병상수·키맨·영업조직), 딜(도입 건)·매출 원장, 엑셀 이관, 영업 대시보드를 Phase 0~5로 세분화
+- 소스 분석: 영업담당자 관리 엑셀 `thynC_sales_260724.xlsx` (도입 현황 258행 원장·요약 KPI·사용량 등 15시트) — 일정류는 운영 축과 중복이라 미저장, 금액·인입·계약·정산·영업조직만 신규 축으로 설계
+- 오픈 이슈 6건(금액 열람 권한·딜 단위·리드 시점·전체 병상수 출처·납품/오더 연동·사용량 데이터) 정리 — **사용자 결정 및 착수 승인 대기**
+- 산출물: `projects/sales_crm_design.md` / `projects/sales_crm_design.html` (코드·DB 변경 없음). 설계 문서 위치 규칙(`projects/` 디렉토리)을 CLAUDE.md에 명문화
+- **v2 보완 (데이터 모델 중심)**: ①매출을 병원별 차수(round_no 1·2·N차) 단위로 — 병원 총매출은 딜 합산 파생 ②차수별 디바이스 종별 수량(sales_deal_devices, 기존 device_infos 재사용, ProjectDevice와 역할 분리) ③대웅 관리체계(사업소·담당자)를 프로필 FK에서 병원 하위 테이블(hospital_daewoong_channels, 전 컬럼 선택·이력)로 분리 ④영업일지 병원노트 vs 구조화 테이블 비교표 추가(구조화 추천). UI 상세는 의도적으로 축소, 오픈 이슈 6→8건
+
+---
+
 ## 2026-07-27 | AI 어시스턴트 도구 확장 PROD 배포
 
 - dev2 커밋 `72d546d`(6파일) push → PROD git pull(`55e632c`→`72d546d`) → 의존성·DB 변경 없음(순수 코드 배포, migrate status 최신 확인)

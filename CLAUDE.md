@@ -202,6 +202,13 @@ const res = await fetch(`/api/wiki/pages?refType=hospital&refCode=${code}`)
 
 ## 개발 작업 절차
 
+### 설계 문서 위치 — `projects/` 디렉토리
+
+기능 단위 설계안·개발 일정 문서는 **레포 루트가 아니라 `projects/` 디렉토리에** 생성하세요 (2026-07-26 규칙, 상세는 `projects/README.md`).
+- 파일명: `<기능>_design.md` (+ 필요 시 같은 이름의 `.html` 열람용 사본)
+- 문서 상단에 상태 명시, 생성 후 `projects/README.md` 문서 목록 표에 행 추가
+- 루트에 남아 있는 1.0 문서들은 참조가 걸려 있어 이동 금지 (별도 작업으로만)
+
 ### 작업 시작 시
 1. `CLAUDE.md` 읽기 (이 파일)
 2. `README.md` 읽기 (스택·스키마·API 전체 형상)

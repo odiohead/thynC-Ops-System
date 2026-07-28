@@ -67,6 +67,7 @@ app/
 │   ├── auth/                         # 인증 (login, logout, me)
 │   ├── dashboard/                    # 대시보드 집계 API (공사현황·summary·monthly·maintenance·hospital-stats)
 │   ├── hospitals/                    # 병원 CRUD + 장비 배정 + 담당자 배정 + Excel 가져오기
+│   │   └── [code]/sales/             # 병원 영업 정보 — 통합 GET + profile/contacts/channels/deals/activities (ADMIN+SEERS)
 │   ├── hira-hospitals/               # HIRA 병원 데이터 조회
 │   ├── projects/                     # 프로젝트 CRUD + 장비/파일 관리
 │   ├── site-visits/                  # 답사 CRUD + 파일 업로드
@@ -94,6 +95,9 @@ app/
 │   │   ├── maintenance-status/       # 유지보수 상태 관리 (+티켓 상태 매핑)
 │   │   ├── etc-task-status/          # 기타업무 상태 관리 (+티켓 상태 매핑)
 │   │   ├── install-plan-status/      # 설치계획 상태 관리 (2026-07-27 단일 축 — +티켓 상태 매핑)
+│   │   ├── sales-offices/            # 영업 사업소 마스터 CRUD (ADMIN+SEERS)
+│   │   ├── sales-reps/               # 영업 담당자 마스터 CRUD (ADMIN+SEERS)
+│   │   ├── sales-codes/              # 영업 StatusCode 7카테고리 CRUD (화이트리스트, ADMIN+SEERS)
 │   │   ├── ticket-queues/            # Assignment Group 마스터 CRUD (티켓 있으면 삭제 400)
 │   │   ├── ticket-cti/               # 티켓 분류(CTI) 3단 트리 CRUD + 기본 그룹 지정
 │   │   ├── ticket-pending-reasons/   # 티켓 대기(PENDING) 사유 마스터 CRUD
@@ -131,6 +135,7 @@ app/
 │   ├── vehicle-reservations/         # 차량예약 CRUD (충돌 검사 + soft 취소)
 │   │   └── [id]/return/              # 반납(POST: 주행거리 입력→운행일지 생성) / 반납취소(DELETE, ADMIN)
 │   ├── vehicle-logs/                 # 운행일지 목록·작성 + [id] 조회/수정/삭제
+│   ├── parking/                      # 주차 웹할인 — search/coupons/register (pweb.kr 대행, USER 이상)
 │   ├── install-plans/                # 설치계획(가안) CRUD
 │   ├── etc-tasks/                    # 기타업무 CRUD + 파일 관리 (다병원·비유지보수 업무)
 │   ├── inventory/                    # 자재관리(WMS)
@@ -146,7 +151,7 @@ app/
 │   └── drive/                        # Google Drive 연동 (파일 업로드/목록/삭제/병원목록 내보내기)
 ├── (대시보드)/                        # 메인 대시보드 (이번 주/다음 주 공사 현황)
 ├── dashboard/                        # 사이니지 월보드 (50인치 상시 표시, 네비 없음)
-├── hospitals/                        # 병원 목록·상세·등록·수정
+├── hospitals/                        # 병원 목록·상세·등록·수정 ([code]/_components/SalesSection — 영업 정보 섹션, ADMIN+SEERS)
 ├── hira-hospitals/                   # HIRA 병원 조회
 ├── install-plans/                    # 설치계획(가안) 목록·상세·등록
 ├── projects/                         # 프로젝트 목록·상세·등록
@@ -161,6 +166,7 @@ app/
 ├── vehicle-reservations/             # 차량예약 주간 현황 보드 + 예약/반납 모달 + 내 예약 + 운행일지 탭(VehicleLogsPanel)
 │   └── logs/print/                   # 운행일지 인쇄 (A4 가로, 차량별 1장 — 네비 없는 전체 화면)
 │   └── mobile/                       # 빠른 예약·반납 모바일 페이지 (가능 차량 실시간 검색 + 인라인 반납)
+├── parking/                          # 주차 웹할인 등록 (차량 검색 → 계정별 할인권 → 등록, nav 미등록)
 ├── ai-assistant/                     # AI 어시스턴트 채팅
 ├── wiki/                             # 사내 위키 (Phase 2-3)
 │   ├── layout.tsx                    # 사이드바 + 콘텐츠 flex 레이아웃 (모든 /wiki/* 적용)
@@ -193,6 +199,8 @@ app/
 │   ├── maintenance-status/           # 유지보수 상태 관리 (WorkflowStatusManager)
 │   ├── etc-task-status/              # 기타업무 상태 관리 (WorkflowStatusManager)
 │   ├── install-plan-status/          # 설치계획 상태 관리 (WorkflowStatusManager, 2026-07-27)
+│   ├── sales-offices/                # 영업 조직 관리 — 사업소+담당자 (ADMIN+SEERS)
+│   ├── sales-codes/                  # 영업 코드 관리 — 7카테고리 (ADMIN+SEERS)
 │   ├── ticket-queues/                # Assignment Group 관리 (이름·설명·순서·활성·티켓 수)
 │   ├── ticket-cti/                   # 티켓 분류(CTI) 관리 (Category/Type/Item 3컬럼 + Item 기본 Assignment Group 지정)
 │   ├── ticket-pending-reasons/       # 티켓 대기 사유 관리
@@ -224,6 +232,8 @@ lib/
 │   └── opsSearch.ts                  # 축2 운영 정보 전문 검색 — search_operation_history / find_similar_cases (상담이력 포함)
 │   └── tools.ts                      # 도구 26종 (read-only Prisma SELECT — 병원·업무·집계·위키·상담이력 + 자재·티켓·차량·조직·GW 플래너)
 ├── consultation.ts                   # 상담이력 — 조회 권한(SEERS)·코드 발번(CS-YYYYMM-NNNN)·제목 추출
+├── sales.ts                          # 영업/CRM — 접근 권한(checkSalesAccess: ADMIN+SEERS)·딜 코드 발번(DEAL-YYYYMM-NNNN)·금액/날짜 파서·코드 카테고리
+├── parking.ts                        # 주차 웹할인 — pweb.kr 대행 클라이언트 (env 계정, 로그인→검색→할인권 조회→등록)
 ├── auth.ts                           # JWT 인증 유틸리티 + 역할 헬퍼
 ├── prisma.ts                         # Prisma 클라이언트
 ├── s3.ts                             # AWS S3 연동 유틸리티 (업로드/삭제/presigned URL)
@@ -522,6 +532,37 @@ prisma/
 ### ConsultationQueue (상담 대기열) — **동결 (2026-07-26)**
 - v1 상담이력 대기열. `Consultation` 신설로 역할 종료 — **테이블은 이력 보존**, 앱은 병원 일괄 이전 시 hospitalCode 갱신만 수행
 - (구 형상) hospitalCode·상담유형·문서유형·`conclusion`·`chatHistory`(JSONB)·`aiSummary`·`status`(PENDING)·`consultedById`
+
+### 영업/CRM 모듈 (P1+P2, 2026-07-28 — `projects/sales_crm_design.md`)
+
+> 접근 권한(열람·편집 공통): **ADMIN 이상 + SEERS 소속** (`lib/sales.ts` `checkSalesAccess` — 소속은 DB 실시간 판정, 모든 영업 API에서 재검증)
+
+#### HospitalSalesProfile (병원 영업 프로필)
+- 병원당 1행(upsert). `totalBeds`/`totalWards`(병원 **전체** 병상·병동수 — 도입 병상과 구분, 수기 입력), `grade`, `salesMemo`
+
+#### HospitalContact (병원 키맨)
+- 병원 측 담당자: `name`·`title`·`department`·`phone`·`email`·`roleNote`·`isPrimary`·`isActive`·`sortOrder`
+
+#### SalesOffice / SalesRep (대웅 영업조직 마스터)
+- 비계정 마스터(시스템 User와 무관). 사업소(`division`+`name` UNIQUE)와 소속 담당자(`officeId`·`phone`), `isActive`
+- 관리: `/settings/sales-offices` (사업소+담당자 통합)
+
+#### HospitalDaewoongChannel (병원별 대웅 관리 채널)
+- 병원 하위 이력 테이블 — `officeId`·`repId`(FK, SET NULL)·`isCurrent`·`note`. hospitals 본체에 FK를 심지 않음 (운영용 DaewoongHospitalAssignment와 역할 분리)
+
+#### SalesDeal (도입 차수 딜 원장)
+- 1행 = 병원의 1도입 건. `dealCode`(`DEAL-YYYYMM-NNNN` 자동 발번), `(hospitalCode, roundNo)` UNIQUE — 병원 총매출은 딜 합산 파생
+- 판매모델 2축(`hospitalSaleModelId`/`seersSaleModelId`), 계약 스냅샷(`wardCount`/`bedCount`/`wardsText`/`deptsText`), 금액 5종 BIGINT(`amountProduct`/`amountConstruction`/`amountTotal`/`amountService`/`amountActual`), `priceTypeId`, 인입/계약/납품일·보증개월, 정산·세금계산서·매출인식(StatusCode), `projectCode`(선택 연결, UNIQUE)
+
+#### SalesDealDevice (딜 디바이스 수량)
+- 차수별 디바이스 종별 수량·단가 — `(dealId, deviceInfoId)` UNIQUE. ProjectDevice(설치 실측)와 역할 분리(계약/판매 스냅샷)
+
+#### SalesActivity (영업일지)
+- `activityDate`·`activityTypeId`(StatusCode SALES_ACTIVITY_TYPE)·`content`·`authorId`·`dealId`(선택)
+
+#### 영업 StatusCode 카테고리 (7종 — `/settings/sales-codes`)
+- `SALES_MODEL_HOSPITAL`(병원 판매모델)·`SALES_MODEL_SEERS`(씨어스 판매방식)·`SALES_PRICE_TYPE`(판매가 유형)·`SALES_SETTLEMENT`(정산 상태)·`SALES_TAX_INVOICE`(세금계산서 발행)·`SALES_REVENUE_RECOG`(매출 인식)·`SALES_ACTIVITY_TYPE`(영업 활동 유형)
+- 시드: `scripts/seed-sales-masters.sql` (idempotent — 코드 25행 + nav 2행)
 
 ### Vehicle (법인차량)
 - 차량예약에 사용되는 차량 마스터
@@ -825,6 +866,20 @@ prisma/
 - **병원 목록 Google Sheets 내보내기**: Drive Sheets API로 스프레드시트 직접 생성
 - **업무 병원 재지정(매핑 정정)** (ADMIN 이상): 프로젝트/답사/설치계획/유지보수 상세의 "병원 재지정" 버튼으로 잘못 지정된 병원을 올바른 병원으로 이전. 한 트랜잭션으로 업무 hospitalCode + **연결 티켓(병원·제목) 동기화**(P13 — Task 미러 갱신은 폐기), 두 병원 현황 상태 자동 재계산(옛 병원 하향 포함), 프로젝트는 이름의 병원명도 선택 변경. 감사로그 기록
 - **병원 업무 일괄 이전** (SUPER_ADMIN): 병원 상세의 "업무 일괄 이전" 버튼으로 한 병원의 모든 업무(프로젝트·답사·설치계획·유지보수·상담)를 다른 병원으로 한 번에 이전(병원을 통째로 잘못 만든 경우 정리용). **연결 티켓·순수 티켓도 함께 이전**(P13 — [답사]/[설치계획] 제목의 병원명 갱신 포함)
+
+### 병원 영업 정보 (영업/CRM P1+P2, 2026-07-28 — ADMIN 이상 + SEERS 전용)
+- 병원 상세에 '영업 정보' 섹션 — 권한 통과 시에만 렌더(서버 컴포넌트 게이트 + API 재검증)
+- **영업 프로필**: 전체 병상수·병동수(도입 병상과 구분)·등급·영업 메모
+- **병원 키맨**: 병원 측 담당자 리스트(직함·부서·연락처·주담당 표시) 등록·수정·삭제
+- **대웅 관리 채널**: 사업소·담당자 이력 관리 (`/settings/sales-offices` 마스터 참조)
+- **도입 차수(딜)·매출**: 차수(1차·2차·N차) 단위 딜 원장 — 판매모델 2축·금액 5종·인입/계약/납품일·정산/세금계산서/매출인식·디바이스 종별 수량, 병원 합계는 딜 합산 파생. 프로젝트 연결 선택
+- **영업일지**: 일자·활동 유형·내용 타임라인 (딜 연결 선택)
+- 설정: `/settings/sales-offices`(영업 조직)·`/settings/sales-codes`(영업 코드 7카테고리) — nav '설정' 그룹
+
+### 주차 웹할인 등록 (`/parking`, USER 이상)
+- 방문차량 주차 할인권 등록 유틸 — pweb.kr(아마노) 주차 웹할인 사이트를 서버가 대행 호출 (stateless, DB 미사용)
+- 차량번호+입차일 검색 → 입차 차량 선택 → 계정별(env `PARKING_ACCOUNTS`) 사용 가능 할인권·잔여 조회 → 할인권 1건 등록
+- nav 메뉴 미등록 (URL 직접 접근)
 
 ### 프로젝트 관리
 - 구축 공사 프로젝트 등록·수정·삭제 (삭제는 ADMIN 이상)
@@ -1315,6 +1370,26 @@ npm run dev
 | POST | `/api/hospitals/[code]/daewoong-staff` | 담당자 배정 |
 | DELETE | `/api/hospitals/[code]/daewoong-staff/[sid]` | 담당자 해제 |
 | POST | `/api/hospitals/[code]/drive-folder` | Drive 폴더 연결 |
+
+### 영업/CRM (전 엔드포인트 ADMIN 이상 + SEERS 소속 — `checkSalesAccess`)
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET  | `/api/hospitals/[code]/sales` | 영업 정보 통합 조회 (프로필·키맨·채널·딜(+디바이스)·일지 + 마스터를 1회 반환) |
+| PUT  | `/api/hospitals/[code]/sales/profile` | 영업 프로필 upsert |
+| POST, PUT/DELETE | `/api/hospitals/[code]/sales/contacts(/[id])` | 병원 키맨 |
+| POST, DELETE | `/api/hospitals/[code]/sales/channels(/[id])` | 대웅 관리 채널 |
+| POST, PUT/DELETE | `/api/hospitals/[code]/sales/deals(/[id])` | 딜(차수) + 디바이스 수량 — `DEAL-YYYYMM-NNNN` 발번, round_no 자동 |
+| POST, PUT/DELETE | `/api/hospitals/[code]/sales/activities(/[id])` | 영업일지 |
+| GET/POST, PUT/DELETE | `/api/settings/sales-offices(/[id])` | 영업 사업소 마스터 (담당자 포함 반환) |
+| POST, PUT/DELETE | `/api/settings/sales-reps(/[id])` | 영업 담당자 마스터 |
+| GET/POST, PUT/DELETE | `/api/settings/sales-codes/[category](/[id])` | 영업 StatusCode 7카테고리 (화이트리스트 검증) |
+
+### 주차 웹할인 (USER 이상 — pweb.kr 대행 호출, DB 미사용)
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| POST | `/api/parking/search` | 차량번호+입차일로 입차 차량 검색 |
+| POST | `/api/parking/coupons` | 선택 차량에 대한 전 계정 할인권·잔여 병렬 조회 |
+| POST | `/api/parking/register` | 계정 1개로 할인권 1건 등록 |
 
 ### HIRA 병원
 | Method | Endpoint | 설명 |

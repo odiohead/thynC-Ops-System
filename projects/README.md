@@ -13,6 +13,7 @@
 | 문서 | 대상 | 상태 |
 |---|---|---|
 | [notification_v1.1_design.md](notification_v1.1_design.md) · [HTML](notification_v1.1_design.html) | 1.1 알림체계 개선 (SLA 세분화·채널 라우팅·내부 알림·첫 화면 개인화) | **P1~P6 구현 완료 / P7 지표·PROD 배포 대기** |
+| [sales_crm_design.md](sales_crm_design.md) · [HTML](sales_crm_design.html) | 영업/CRM 모듈 (병원 영업 프로필·키맨·딜 원장·엑셀 이관·영업 대시보드, P0~P5) | **P1+P2 구현 완료 (dev2, 2026-07-28) — 검증 게이트·P3 이관 대기** |
 
 ## 루트에 남아 있는 1.0 문서
 
