@@ -106,6 +106,7 @@ export async function POST(request: NextRequest) {
     constructorId,
     startDate,
     endDateExpected,
+    educationDate,
     buildStatusId,
     issueNote,
   } = body
@@ -158,6 +159,7 @@ export async function POST(request: NextRequest) {
       constructorId: constructorId ? Number(constructorId) : null,
       startDate: startDate ? new Date(startDate) : null,
       endDateExpected: endDateExpected ? new Date(endDateExpected) : null,
+      educationDate: educationDate ? new Date(educationDate) : null,
       buildStatusId: buildStatusId ? Number(buildStatusId) : null,
       issueNote: issueNote ?? null,
     },

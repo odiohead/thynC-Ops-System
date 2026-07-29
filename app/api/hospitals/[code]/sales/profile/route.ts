@@ -8,7 +8,14 @@ export const dynamic = 'force-dynamic'
 
 type Params = { params: { code: string } }
 
-/** 영업 프로필 upsert */
+const intOrNull = (v: unknown) => {
+  if (v === null || v === undefined || v === '') return null
+  const n = typeof v === 'number' ? v : parseInt(String(v))
+  return Number.isInteger(n) && n >= 0 ? n : null
+}
+const strOrNull = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null)
+
+/** 영업 프로필 upsert — 단계·담당·전체 병상/병동·다음 액션·메모 */
 export async function PUT(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -19,15 +26,25 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if (!hospital) return NextResponse.json({ error: '병원을 찾을 수 없습니다.' }, { status: 404 })
 
   const body = await request.json()
-  const totalBeds = body.totalBeds === null || body.totalBeds === '' || body.totalBeds === undefined ? null : parseInt(body.totalBeds)
-  const totalWards = body.totalWards === null || body.totalWards === '' || body.totalWards === undefined ? null : parseInt(body.totalWards)
-  if (totalBeds !== null && (isNaN(totalBeds) || totalBeds < 0)) return NextResponse.json({ error: '전체 병상수가 올바르지 않습니다.' }, { status: 400 })
-  if (totalWards !== null && (isNaN(totalWards) || totalWards < 0)) return NextResponse.json({ error: '전체 병동수가 올바르지 않습니다.' }, { status: 400 })
+  const stageId = intOrNull(body.stageId)
+  const ownerId = strOrNull(body.ownerId)
+  const totalBeds = intOrNull(body.totalBeds)
+  const totalWards = intOrNull(body.totalWards)
+
+  if (stageId !== null) {
+    const stage = await prisma.statusCode.findUnique({ where: { id: stageId }, select: { category: true } })
+    if (stage?.category !== 'SALES_STAGE') return NextResponse.json({ error: '영업 단계 값이 올바르지 않습니다.' }, { status: 400 })
+  }
+  if (ownerId !== null) {
+    const owner = await prisma.user.findUnique({ where: { id: ownerId }, select: { isActive: true } })
+    if (!owner || !owner.isActive) return NextResponse.json({ error: '담당 영업 값이 올바르지 않습니다.' }, { status: 400 })
+  }
 
   const data = {
+    stageId,
+    ownerId,
     totalBeds,
     totalWards,
-    grade: typeof body.grade === 'string' && body.grade.trim() ? body.grade.trim() : null,
     salesMemo: typeof body.salesMemo === 'string' && body.salesMemo.trim() ? body.salesMemo : null,
   }
 

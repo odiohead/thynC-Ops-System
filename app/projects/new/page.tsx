@@ -51,6 +51,7 @@ function NewProjectForm() {
 
   const [startDate, setStartDate] = useState('')
   const [endDateExpected, setEndDateExpected] = useState('')
+  const [educationDate, setEducationDate] = useState('')
   const [buildStatusId, setBuildStatusId] = useState('')
   const [buildStatuses, setBuildStatuses] = useState<BuildStatusOption[]>([])
   const [introTypeOptions, setIntroTypeOptions] = useState<{ id: number; name: string }[]>([])
@@ -109,6 +110,7 @@ function NewProjectForm() {
           constructorId: constructorId ? Number(constructorId) : null,
           startDate: startDate || null,
           endDateExpected: endDateExpected || null,
+          educationDate: educationDate || null,
           buildStatusId: buildStatusId ? Number(buildStatusId) : null,
         }),
       })
@@ -330,6 +332,10 @@ function NewProjectForm() {
               <div>
                 <label className={labelClass}>구축 종료 예상일</label>
                 <input type="date" value={endDateExpected} onChange={(e) => setEndDateExpected(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className={labelClass}>교육일</label>
+                <input type="date" value={educationDate} onChange={(e) => setEducationDate(e.target.value)} className={inputClass} />
               </div>
               <div>
                 <label className={labelClass}>구축 진행상태</label>

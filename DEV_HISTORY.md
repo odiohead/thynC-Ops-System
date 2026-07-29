@@ -4,6 +4,112 @@
 
 ---
 
+## 2026-07-30 | 영업/CRM 접근 SUPER_ADMIN 임시 제한 + PROD 배포
+
+- 영업 기능이 미완(컨셉 비교 중)이라 **최고관리자(SUPER_ADMIN) + SEERS만 접근**하도록 임시 제한 (사용자 지시). `checkSalesAccess` 역할 게이트 isAdminOrAbove → isSuperAdmin, nav 4행(`/sales`·`/sales2`·`/sales3`·`/settings/sales-codes`) allowed_roles `{SUPER_ADMIN}`, 접근 거부 문구 "기능 개발 중으로 최고관리자만" — 기능 확정 후 ADMIN 이상 완화 예정
+- 시드 v4에 sales2·sales3 nav 행 추가(idempotent). 영업 v3~v4 전체 작업분 커밋·push + **PROD 배포**(주차 기능 커밋 포함) — 배포 내역은 별도 기록
+
+---
+
+## 2026-07-29 | 영업/CRM — `/sales3` 병원 요약 뷰 신설 (컨셉 실험 3안, dev2 반영)
+
+- 세 번째 컨셉: **병원당 1행** — 핵심 컬럼은 **도입 라이프사이클 상태**(딜 상태에서 파생, 저장 안 함): 미도입 / 최초 도입 검토중 / N차 도입완료 / 추가도입 검토중(+"N차 완료" 보조) / 중단·해지 — 고정 팔레트 배지
+- 누적 지표: 전체 병상(프로필)·도입 병상(운영 축)·침투율·누적 병동(계약완료 딜 합)·**누적 기기**(연결 프로젝트 ProjectDevice 수량 합 — 설치 실측)·계약 완료/진행 건수·누적 판매(제품+공사)·누적 실판매액·최근 계약일 + 합계 행
+- 범위: 영업 프로필 또는 딜이 있는 병원 (hospitals 테이블은 HIRA 전수 7.9만 행이라 전체 병원 노출은 범위 밖 — '미도입'은 접점 생긴 병원부터 표시)
+- 필터 5종(상태·종별·지역·담당·검색) + 정렬 셀렉트(실판매액·도입병상·침투율·전체병상·최근계약일·병원명), 행 클릭 → 병원 상세. nav '도입 현황 v3'(sort 23)
+- 3개 컨셉 병행 중: `/sales`(차수 원장) · `/sales2`(영업 파이프라인+등록/매핑) · `/sales3`(병원 요약) — 채택안 확정 후 통합 예정
+- 힙 4GB 빌드 + PM2 재시작·HTTP 정상
+
+---
+
+## 2026-07-29 | 영업/CRM — `/sales2` 영업 파이프라인 뷰 신설 (실험, dev2 반영)
+
+- 사용자 문제 제기: 도입현황이 "완료 건 확인"이면 프로젝트 기준이 맞지만, **영업 과정까지 보려면 레코드 출발점이 영업이어야 함** — 2차 완료 병원의 3차 추진을 영업담당자가 직접 등록 → 계약 후 프로젝트 매핑 → 자동/수기 필드 공존. 비교용 실험 페이지로 `/sales2` 구현 (기존 `/sales` 유지)
+- **`/sales2` (도입 현황 v2 — 영업 파이프라인)**: 병원 그룹 뷰 기반 +
+  ① **[+ 계약 등록]** — 페이지에서 병원 검색 → 새 차수 생성(차수 자동 안내, 기본 상태 '영업중', 판매모델·병동/병상 예상·비고만 간단 입력, 상세는 병원 상세에서)
+  ② **프로젝트 매핑 컬럼** — 미매핑 딜은 [매핑] 버튼(같은 병원 프로젝트 라디오 선택·해제 가능), 매핑 딜은 프로젝트 링크+[변경]
+  ③ 병원 셀에 계약 전 운영 항목 **답사 N건·설치계획 N건** 표시(병원 레벨 — 딜별 연결은 미도입)
+- API 보강: 딜 POST에 statusId 미지정 시 **기본 '영업중'** 부여 / `POST .../deals/[id]/map-project` 신설 — **다른 필드를 건드리지 않는 매핑 전용 액션**(PUT 전체수정과 분리, 같은 병원 검증·중복 연결 409)
+- nav '도입 현황 v2'(sort 22) 추가. 두 페이지 비교 후 채택안으로 통합 예정
+- 힙 4GB 빌드 + PM2 재시작·HTTP 정상
+
+---
+
+## 2026-07-29 | 영업/CRM — 딜 수기 입력 흐름 명확화·답사 표시 제거 (dev2 반영)
+
+- 사용자 피드백 반영: ①도입현황(딜)은 **영업 수기 입력이 원본**, 프로젝트는 계약 완료 후 구축 실무자가 만들고 딜에 **사후 매핑**(계약으로 이어지지 않는 딜도 존재) ②답사는 계약 추진 건마다·건당 여러 번 발생 — 병원 셀 단일 답사일 표시는 오해 소지
+- 딜 상태 기본값 '협의중' → **'영업중'** 개명(DB+시드 — 영업 진행 중인 딜의 어휘 정합). 파이프라인: 영업중 → 계약완료 / 해지·중단(무산)
+- `/sales`: 병원 셀 답사일 표시·조인 제거, 페이지 설명을 수기 입력·사후 매핑 기준으로 정정. 딜 모달 프로젝트 라벨 "연결 프로젝트 (계약 완료 후 매핑)"·기본 옵션 "없음 — 영업 단계"
+- 데이터 구조 변경 없음 (projectCode는 원래 선택·사후 연결 가능). 딜↔답사 연결은 필요성 확인 시 별도 설계
+- 힙 4GB 빌드 + PM2 재시작·HTTP 정상
+
+---
+
+## 2026-07-29 | 영업/CRM — `/sales` 도입 현황 병원 기준 그룹 뷰 전환 (dev2 반영)
+
+- 사용자 피드백: 기준점은 병원 — 한 병원의 1·2·3차 계약이 흩어져 보이면 확장 이력이 안 읽힘
+- `SalesLedgerTable` 개편: **병원 단위 rowspan 그룹**(병원명+단계 배지+담당+답사일·종별·지역) + 행 = 도입계약(차수, 프로젝트 링크). 차수 오름차순, 그룹 정렬은 최신 계약일 내림차순, 그룹 경계 구분선·배경 교차
+- 2건 이상 병원은 **소계 행**(병동·병상·금액 4종), 하단 고정 합계는 "병원 N곳 · 계약 M건" 병기. 답사일은 병원 레벨로 이동(딜 행 반복 제거)
+- 힙 4GB 빌드 + PM2 재시작·HTTP 정상 (첫 빌드가 OOM(137)으로 중단 → 재실행 성공)
+
+---
+
+## 2026-07-29 | 영업/CRM — 운영 데이터 기반 딜 백필 (dev2 DB)
+
+- `/sales` 도입 현황을 기존 운영 데이터로 선적재: **프로젝트 1건 = 딜 1건(차수)** 전제로 `scripts/backfill-sales-deals-from-projects.sql`(idempotent — 연결된 프로젝트/(병원,차수) 존재 시 skip) 실행
+- 결과: **딜 243건 / 병원 210곳** — 채움: round_no(=order_number)·프로젝트 연결·계약일 236·딜 상태(계약일 있으면 '계약완료') 236·병원 판매모델(도입형태 이름 매칭) 148·병동 196·병상 234
+- 누락(수기 입력 대상, 비고에 마커 기록): 금액 3종·도입병동/진료과·세금계산서·정산·씨어스 판매방식 + 프로필(단계·담당·전체 병상)
+- 공사 단계·답사일·공사일·교육일·지역·종별은 저장 없이 운영 축 조인으로 자동 표시. 코드 변경 없음(데이터만) — PROD 미반영
+
+---
+
+## 2026-07-29 | 영업/CRM v4 P1~P3 구현 — 인적정보·딜 확장·도입 현황 목록 (dev2 반영)
+
+- v4 설계안(사용자 승인) P1~P3를 순차 구현, 각 Phase마다 힙 4GB 빌드 + dev2 PM2 재시작 완료. P4(실데이터 검증 게이트)는 사용자 확인 대기
+- **P1 — 병원 축: 인적정보** (마이그레이션 `20260729100000_sales_crm_v4_p1`)
+  - `persons`(인물 마스터 — 직군 PERSON_GROUP·진료과·개인 연락처·메모) + `person_affiliations`(병원 소속 이력 — 직책·부서·주요·기간·is_current) 신설, `hospital_contacts` DROP(0행), 프로필 `next_action`/`next_action_date` 제거(사용자 결정)
+  - API: `/api/hospitals/[code]/sales/persons` POST(인물+소속 동시), `/[affId]` PUT(동시 수정)·DELETE(오입력 정정), `/[affId]/transfer` POST(**전원 — 소속 종료+새 병원 소속 생성 1액션**), `/[affId]/end` POST(퇴직)
+  - UI: '키맨' 탭 → **'인적정보' 탭** — 컬럼(이름·직군·직책·부서·진료과·전화·이메일) 상시 노출, 행 액션 수정/전원(병원 검색 모달)/소속종료/삭제, 타 병원 이력 '이력' 뱃지(툴팁), 과거 인물 접힘 목록(재직기간·현재 병원 표시). 요약 스트립 D-day 제거
+- **P2 — 차수 축: 딜 확장 + 교육일** (마이그레이션 `20260729110000_sales_crm_v4_p2`)
+  - `sales_deals`: +도입병동/진료과(`wards_text`/`depts_text`), +판매모델 2관점(`hospital_model_id`/`seers_model_id` — **SALES_MODEL 단일 마스터, 설정 제어·차수별 혼재 허용**), +금액 3종(`amount_product`/`amount_construction`/`amount_actual` — '판매'합계는 파생), +세금계산서/정산(`tax_invoice_id`/`settlement_id`), −`intro_type_id`/`amount_total`/`amount_service`
+  - `projects.education_date` 신설(운영 축) — 프로젝트 등록/수정 폼·API에 교육일 필드 추가
+  - UI: 계약 이력 탭 15컬럼(판매모델 병원/씨어스·도입병동·제품가·공사비·판매(파생)·실판매액·세금계산서·정산…) + 합계 행, 딜 모달 2단 구성(규모·계약 / 금액·정산). 요약 스트립 누적 계약액 → **누적 실판매액**. 설정 `/settings/sales-codes` 7카테고리(신설 SALES_MODEL·SALES_TAX_INVOICE·SALES_SETTLEMENT·PERSON_GROUP 포함)
+- **P3 — `/sales` 도입 현황 목록** (엑셀 `thynC_status.xlsx` 와꾸 재현)
+  - 1행 = 1차수(딜), 22컬럼 — 영업 축 + **운영 축 조인**(공사 단계·답사일(최근)·공사시작/완료예정·교육일·종별·지역, 저장 없음). 필터 6종(병원명·딜 상태·판매모델·지역·담당·세금계산서) + 하단 고정 합계 행 + 행 클릭 → 병원 상세. nav 최상위 '도입 현황'(sort 21, ADMIN) 추가
+  - 참고: 엑셀 '납품일'은 시스템에 저장처가 없어 컬럼 제외 (필요 시 딜 필드 추가 검토)
+- **마스터**: 시드 `seed-sales-masters.sql` v4 재작성·실행 — StatusCode 7카테고리 27행 + nav 2행(idempotent)
+- **검증**: tsc 0오류, Phase별 빌드 3회 성공·PM2 재시작·HTTP 정상. **git push·PROD 반영 안 함**
+- 영향 파일: prisma/{schema.prisma, migrations/20260729100000·20260729110000}, lib/sales.ts, scripts/seed-sales-masters.sql, app/hospitals/[code]/_components/SalesSection.tsx, app/api/hospitals/[code]/sales/{route, profile, persons/*(신규), deals/*}, app/api/projects/{route, [code]/route}, app/projects/{new/page, [code]/page}, app/api/settings/sales-codes/*, app/settings/sales-codes/page.tsx, app/sales/{page, _components/SalesLedgerTable}(신규) / 삭제: app/api/hospitals/[code]/sales/contacts
+
+---
+
+## 2026-07-29 | 영업/CRM v4 설계안 작성 — 병원 축·차수 축 2데이터셋 (구현 미착수)
+
+- v3 사용자 검토 반영 전면 개정: `projects/sales_crm_design.md`/`.html` — **착수 승인 대기**
+- 반영된 결정: ①키맨 → **인적정보**(persons/person_affiliations 분리 — 직군 코드·진료과·**전원 이력**, 전원=소속 종료+신규 소속 1액션) ②프로필 다음 액션 2필드 제거 ③2데이터셋 구도(병원 축=프로필·인적정보·도입현황 파생 / 차수 축=딜) ④엑셀 `thynC_status.xlsx` 와꾸 구현(이관 없음 — 부정확 데이터)
+- 엑셀 분석(시트 1·데이터 238행·36컬럼): 17컬럼은 운영 축 기존 커버(조인 표시), 공백 = 금액 3종(제품가·공사비·실판매액 — 용역매출 0행 제외, '판매'는 파생)·도입병동(72%)/진료과(20%)·세금계산서/정산(각 36%)·교육일(47%)
+- 딜 확장: 판매모델 2관점 필드(병원/씨어스) — **SALES_MODEL 단일 마스터 설정 제어, 차수별 혼재 허용**(intro_type_id 대체), 도입병동/진료과, 금액 3필드 교체, 세금계산서·정산 재도입. 교육일은 운영 축 `projects.education_date`
+- Phase 계획: P1 인적정보+프로필 정리 → P2 딜 확장+교육일 → P3 `/sales` 도입 현황 목록(엑셀 와꾸, 1행=1차수, 운영 축 조인) → P4 검증·마감 → P5 후보. **각 Phase에 UI 목업·게이트 포함 (UI 후순위 금지)**
+- 코드·DB 변경 없음 (설계 문서만)
+
+---
+
+## 2026-07-28 | 영업/CRM v3 전면 재설계 — 엑셀 이식형 폐기, CRM 원점 재검토 (dev2 반영)
+
+- **사용자 피드백으로 v2 폐기**: ①카드 5장 나열(정보 구조 부재) ②엑셀 컬럼 무비판 이식(필드 유의미성 미검토) ③빈 상태에서 필드가 안 보여 피드백 불가 ④기존 '대웅담당자' 카드와 중복되는 '대웅 관리 채널' 신설. 설계안 v3 전면 개정: `projects/sales_crm_design.md`(+html)
+- **v3 원칙**: CRM이 답해야 할 질문 5가지(단계·다음 액션·침투 여지·키맨·이력)에서 출발 / 빈 상태에도 필드·컬럼 상시 노출 / 기존 축(대웅담당자·INTRO_TYPE·프로젝트 실측) 재사용 / 백오피스(정산·세금계산서·매출인식)는 범위 밖
+- **DB** (마이그레이션 `20260728150000_sales_crm_v3_rework`, dev 적용 — v2 테이블 전부 0행이라 유실 없음):
+  - 삭제 4테이블: `hospital_daewoong_channels`(대웅담당자와 중복)·`sales_offices`·`sales_reps`(엑셀 조직표)·`sales_deal_devices`(ProjectDevice가 단일 소스)
+  - `hospital_sales_profiles`: +`stage_id`(영업 단계 — **v3 중심 축, v2에는 파이프라인 개념 자체가 없었음**)·`owner_id`(담당 영업)·`next_action`·`next_action_date`, −`grade`
+  - `sales_deals` 슬림화(14컬럼 삭제): 유지 차수·계약일·병동/병상 스냅샷·비고·프로젝트 연결, +`status_id`(SALES_DEAL_STATUS)·`intro_type_id`(**기존 INTRO_TYPE 재사용**), 금액은 계약금액·용역/유지 2필드만
+  - StatusCode 7→3 카테고리: 신설 SALES_STAGE(7단계, 색상)·SALES_DEAL_STATUS(3종), 유지 SALES_ACTIVITY_TYPE, 폐기 6카테고리 DELETE. nav `/settings/sales-offices` 행 삭제. 시드 `seed-sales-masters.sql` v3 재작성·실행
+- **UI 전면 개편** (`SalesSection.tsx` 재작성): 카드 나열 → **요약 스트립(단계 배지·담당·전체/도입 병상·침투율·누적 계약액·다음 액션 D-day) + 탭 4개(개요·키맨·영업 활동·계약 이력)** 단일 카드. 개요는 필드 그리드 상시 노출(값 없으면 —, 수정 토글로 같은 그리드가 폼 전환), 키맨·계약 이력은 컬럼 헤더 상시 노출 + 빈 상태 안내 행 → **등록 전에도 전체 필드 확인 가능**
+- **API**: 통합 GET에 파생 지표(도입 병상 `hospitals.intro_beds`·침투율·누적 계약액)·마스터(SEERS 활성 유저·INTRO_TYPE 포함) 동봉, profile PUT(단계·담당 검증)·deals(디바이스 로직 제거) 개편, channels·settings/sales-offices·sales-reps 라우트/페이지 삭제, sales-codes 3카테고리 + 색상 지원
+- **검증**: tsc 0오류, 힙 4GB 빌드 성공, dev2 PM2 재시작·HTTP 정상. **git push·PROD 반영 안 함** (사용자 필드 검토 대기)
+- 영향 파일: prisma/{schema.prisma, migrations/20260728150000}, lib/sales.ts, scripts/seed-sales-masters.sql, app/hospitals/[code]/_components/SalesSection.tsx, app/api/hospitals/[code]/sales/{route, profile, deals/*}, app/api/settings/sales-codes/*, app/settings/sales-codes/page.tsx, projects/sales_crm_design.{md,html} / 삭제: app/api/hospitals/[code]/sales/channels, app/api/settings/{sales-offices,sales-reps}, app/settings/sales-offices
+
+---
+
 ## 2026-07-28 | 영업/CRM Phase 1+2 구현 — 병원 영업 프로필·키맨·대웅 채널·딜 원장·영업일지
 
 - `sales_crm_design.md` P1(병원 영업 프로필 기반)+P2(딜·매출 원장) 동시 구현. 이전 세션 비정상종료로 기록 누락됐던 건을 검증 후 정리 커밋

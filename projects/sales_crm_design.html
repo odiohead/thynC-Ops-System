@@ -3,261 +3,163 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>영업/CRM 모듈 설계안 v2 — thynC Operations System</title>
+<title>영업/CRM 모듈 설계안 v4 — 병원 축·차수 축 2데이터셋</title>
 <style>
-  :root {
-    --ink: #1a2233; --sub: #5a6478; --line: #e3e7ef; --bg: #f7f8fb;
-    --card: #ffffff; --accent: #2563eb; --accent-soft: #eff4ff;
-    --amber: #b45309; --amber-soft: #fef3c7; --green: #047857; --green-soft: #d1fae5;
-    --red: #b91c1c; --red-soft: #fee2e2;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: 'Pretendard', 'Pretendard Variable', -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif; background: var(--bg); color: var(--ink); line-height: 1.65; }
-  .wrap { max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
-  header.doc { border-bottom: 2px solid var(--ink); padding-bottom: 18px; margin-bottom: 28px; }
-  header.doc h1 { margin: 0 0 6px; font-size: 26px; }
-  header.doc .meta { color: var(--sub); font-size: 13px; }
-  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; vertical-align: 2px; }
-  .badge.p0 { background: var(--amber-soft); color: var(--amber); }
-  h2 { font-size: 19px; margin: 40px 0 12px; padding-left: 10px; border-left: 4px solid var(--accent); }
-  h3 { font-size: 15px; margin: 24px 0 8px; }
-  p, li { font-size: 14px; }
-  section.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 20px 24px; margin-bottom: 8px; }
-  table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 10px 0 16px; background: #fff; }
-  th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
-  th { background: var(--accent-soft); font-weight: 600; white-space: nowrap; }
-  td.center, th.center { text-align: center; }
-  code { background: #eef1f6; border-radius: 4px; padding: 1px 6px; font-size: 12.5px; font-family: 'D2Coding', Consolas, monospace; }
-  pre { background: #0f1420; color: #d7e0f0; border-radius: 8px; padding: 16px 18px; font-size: 12.5px; line-height: 1.55; overflow-x: auto; font-family: 'D2Coding', Consolas, monospace; }
-  .callout { border-radius: 8px; padding: 12px 16px; font-size: 13.5px; margin: 12px 0; }
-  .callout.warn { background: var(--amber-soft); color: var(--amber); }
-  .callout.info { background: var(--accent-soft); color: #1e40af; }
-  .tbl-scroll { overflow-x: auto; }
-  .phase { border: 1px solid var(--line); border-left: 5px solid var(--accent); border-radius: 8px; background: #fff; padding: 14px 18px; margin: 12px 0; }
-  .phase h4 { margin: 0 0 6px; font-size: 14.5px; }
-  .phase .gate { font-size: 12.5px; color: var(--green); background: var(--green-soft); display: inline-block; padding: 1px 8px; border-radius: 999px; margin-top: 6px; }
-  .phase.current { border-left-color: var(--amber); }
-  .phase.future { border-left-color: #94a3b8; }
-  ul, ol { margin: 6px 0; padding-left: 22px; }
-  .tag { font-size: 11.5px; font-weight: 700; border-radius: 4px; padding: 1px 6px; }
-  .tag.new { background: var(--green-soft); color: var(--green); }
-  .tag.dup { background: var(--red-soft); color: var(--red); }
-  footer { margin-top: 48px; color: var(--sub); font-size: 12px; border-top: 1px solid var(--line); padding-top: 14px; }
-  @media (prefers-color-scheme: dark) {
-    :root { --ink: #e6eaf2; --sub: #9aa4b8; --line: #2c3446; --bg: #12151c; --card: #1a1f2b; --accent-soft: #1e2a45; --amber-soft: #3a2c10; --green-soft: #0e2f26; --red-soft: #3a1616; }
-    table, .phase { background: var(--card); } code { background: #232a3a; }
-    .callout.info { color: #93b4f5; }
-  }
+  body{font-family:'Segoe UI','Malgun Gothic',sans-serif;max-width:980px;margin:0 auto;padding:32px 24px;color:#1f2937;line-height:1.7}
+  h1{font-size:1.6rem;border-bottom:3px solid #2563eb;padding-bottom:8px}
+  h2{font-size:1.2rem;margin-top:2.2em;border-left:4px solid #2563eb;padding-left:10px}
+  h3{font-size:1.02rem;margin-top:1.6em}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:.9rem}
+  th,td{border:1px solid #d1d5db;padding:6px 10px;text-align:left;vertical-align:top}
+  th{background:#eff6ff}
+  code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:.88em}
+  pre{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;overflow-x:auto;font-size:.8rem;line-height:1.45}
+  .status{background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;font-size:.93rem}
+  .del{color:#b91c1c;text-decoration:line-through}.add{color:#047857;font-weight:600}
+  .gate{background:#eef2ff;border-left:3px solid #6366f1;padding:6px 12px;margin:8px 0;font-size:.9rem}
+  ul{padding-left:1.3em}
 </style>
 </head>
 <body>
-<div class="wrap">
+<h1>영업/CRM 모듈 설계안 v4 — 병원 축 · 차수 축 2데이터셋</h1>
+<p class="status"><b>상태: P1~P3 구현 완료 (dev2, 2026-07-29) — P4 실데이터 검증 게이트 대기</b> · 작성일 2026-07-29<br>
+이력: v1·v2(엑셀 이식형) 폐기 → v3(원점 재검토) dev2 반영 → <b>v4 = v3 + 사용자 검토 4건 반영</b><br>
+권한(유지): 열람·편집 = <b>ADMIN 이상 + SEERS 소속</b></p>
 
-<header class="doc">
-  <h1>영업/CRM 모듈 설계안 <span class="badge p0">v2 · 설계 검토 대기 — 미착수</span></h1>
-  <div class="meta">thynC Operations System · 2026-07-28 (v2 — 데이터 모델 중심 보완) · 소스 참고: <code>thynC_sales_260724.xlsx</code> · <b>사용자 승인 전 구현 착수 금지</b></div>
-</header>
+<h2>1. v4에 반영된 사용자 결정</h2>
+<table>
+<tr><th>#</th><th>결정</th><th>반영</th></tr>
+<tr><td>1</td><td>키맨 → <b>병원별 인적정보</b> — 교수 중심 + 의공·전산·구매 등 직군, <b>전원(轉院) 이력</b> 처리</td><td>인물(persons) / 소속 이력(person_affiliations) 2테이블 분리</td></tr>
+<tr><td>2</td><td>다음 액션·예정일 불필요</td><td>프로필 <code>next_action</code>·<code>next_action_date</code> 제거</td></tr>
+<tr><td>3</td><td>세일즈 데이터는 2데이터셋 — ①병원 자체 정보 ②차수별 영업 데이터</td><td>병원 축 / 차수 축 구도로 정리 (§2)</td></tr>
+<tr><td>4</td><td>엑셀 양식(와꾸) 구현이 목적 — 데이터 이관 아님(부정확)</td><td>컬럼 36종 매핑 — 공백만 신규, 나머지 운영 축 조인. <b>/sales 도입 현황 목록</b>으로 와꾸 재현</td></tr>
+<tr><td>4-1</td><td>판매모델은 <b>설정 제어</b>·값 증가 대응·병원 내 <b>혼재 허용</b></td><td>StatusCode <code>SALES_MODEL</code> 단일 마스터 + 딜(차수) 단위 2필드(병원/씨어스 관점)</td></tr>
+<tr><td>4-2</td><td>정산 상태 재도입</td><td>딜에 세금계산서 발행 + 정산 상태 (설정 관리)</td></tr>
+<tr><td>4-3</td><td>교육일은 운영 축</td><td><code>projects.education_date</code> 추가</td></tr>
+</table>
 
-<h2>1. 배경·목표</h2>
-<section class="card">
-  <p>운영관리시스템 1.0은 <b>운영 실무(task) 데이터</b>를 축적해 왔다. 이번 개발은 새 업무 모듈이 아니라 <b>영업(Sales/CRM) 정보 축</b>을 시스템에 추가하는 것이다. 중심은 병원(hospitals)이며, <b>핵심은 데이터 모델</b> — UI는 각 Phase에서 화면을 보며 확정한다.</p>
-  <h3>v2 보완 관점 (사용자 피드백 반영)</h3>
-  <ol>
-    <li><b>매출은 차수(1차·2차·N차) 단위</b> — 한 병원에 도입이 여러 번. 차수별 가격 + 병원 전체 매출(합계) 둘 다 필요</li>
-    <li><b>웨어러블 디바이스 종별 수량</b> — 어떤 디바이스가 몇 개씩 들어갔는지 차수별·병원별 파악</li>
-    <li><b>대웅 관리체계(사업소·담당자)는 필수 아님</b> — 병원 마스터의 <b>하위 테이블</b>로 분리 (본체에 FK 안 심음)</li>
-    <li><b>영업일지</b> — 구조화 테이블 vs 병원노트(위키) 비교·추천 (§5.5)</li>
-  </ol>
-</section>
+<h2>2. 전체 구도 — 2데이터셋 + 운영 축 조인</h2>
+<pre>
+┌─ ① 병원 축 (병원당 1세트) ───────────────────────────────┐
+│  영업 프로필: 단계·씨어스 담당·전체 병상/병동·메모        │
+│  인적정보: 인물(직군·진료과·연락처) × 소속 이력(전원 처리)│
+│  도입현황(파생): 차수 수·누적 병동/병상·누적 실판매액·침투율│
+├─ ② 차수 축 (도입 1건 = 딜 1행, 1차·2차·N차) ─────────────┤
+│  규모: 도입병동/진료과·병동수·병상수                      │
+│  계약: 판매모델(병원/씨어스)·계약일·상태                  │
+│  금액: 제품가·공사비·실판매액 (판매합계는 파생)           │
+│  정산: 세금계산서 발행·정산 상태                          │
+├─ 운영 축 (기존 — 저장 없이 조인 표시) ────────────────────┤
+│  단계(공사상태)·답사일·공사시작/완료·납품·교육일(신설)·   │
+│  지역·종별·오더현황                                       │
+└──────────────────────────────────────────────────────────┘
+</pre>
+<p>원칙(유지): 빈 상태에도 필드·컬럼 상시 노출 / 기존 축 재사용·이중 저장 금지 / 파생값(판매합계·침투율) 저장 안 함</p>
 
-<h2>2. 소스 분석 — 영업 엑셀</h2>
-<section class="card">
-  <div class="tbl-scroll">
-  <table>
-    <tr><th>시트</th><th>내용</th><th>반영 판단</th></tr>
-    <tr><td><b>도입 현황</b> (258행)</td><td><b>핵심 원장.</b> 1행 = 1도입 건(확장 별도 행). 판매모델 2축·<b>제품금액·공사비·판매합계·용역매출·실판매액</b>·최초인입일·계약일·납품일·<b>정산·세금계산서·판매가유형</b>·<b>사업부·사무소·담당자</b> 등</td><td><b>핵심 반영.</b> 일정류는 운영 축과 중복 → 금액·인입·계약·정산 중심만 신규</td></tr>
-    <tr><td>요약</td><td>KPI(146병원/14,304병상/실판매액 약 404.5억), 목표 달성도(5만 병상, 38.15%), 분포·월별 추이</td><td>대시보드 Phase에서 재현</td></tr>
-    <tr><td>25년 발주기반 실매출정리</td><td>병원×<b>자재명×수량×단가</b>, 용역비, 단가표</td><td><b>디바이스 종별 수량의 소스</b> (§4.5)</td></tr>
-    <tr><td>금주사용량 2종</td><td>병원별 주간 사용량(심전계/산소포화도)</td><td>P5 후보 — 별도 소스(제품 서버)</td></tr>
-    <tr><td>전체 현황판 (숨김)</td><td><b>매출인식(수금시작/입금완료/수금완료)</b>·VAT제외</td><td>매출인식·VAT 필드만 채택</td></tr>
-    <tr><td>진행 상황 (숨김)</td><td>주간 보고 텍스트</td><td>P5 후보 (영업일지 결정과 연동)</td></tr>
-    <tr><td>대웅납품 집계 (숨김)</td><td>제품 구성별 발주/납품 수량·금액</td><td>미반영 (WMS 영역)</td></tr>
-  </table>
-  </div>
-  <h3>기존 시스템과의 중복 → 경계 원칙</h3>
-  <div class="tbl-scroll">
-  <table>
-    <tr><th>엑셀 정보</th><th>기존 시스템</th><th>처리</th></tr>
-    <tr><td>답사일·공사일·교육일·단계</td><td>SiteVisit·Project(buildStatus)</td><td><span class="tag dup">중복</span> 운영 축 단일 소스 — 영업 축 저장 안 함, 조인 표시</td></tr>
-    <tr><td>병동수·병상수(도입)</td><td>Project, intro_beds</td><td><span class="tag dup">중복</span> 딜에는 계약 시점 스냅샷만</td></tr>
-    <tr><td>디바이스 설치 수량</td><td>ProjectDevice·HospitalDevice</td><td>ProjectDevice = <b>설치 실측</b> / 딜 하위 수량 = <b>계약·판매 스냅샷</b> — 역할 분리 (이슈 ⑦)</td></tr>
-    <tr><td>대웅 담당자</td><td>DaewoongHospitalAssignment (계정 기반)</td><td>유지(운영용) + 영업조직은 <b>비계정 하위 테이블</b> 신규 (§4.3)</td></tr>
-    <tr><td>금액·정산·매출인식·판매가유형·최초인입일</td><td>없음</td><td><span class="tag new">신규</span> 영업 축 핵심</td></tr>
-    <tr><td>병원 전체 병상수 / 병원 측 키맨</td><td>없음 (HIRA는 의사 수만)</td><td><span class="tag new">신규</span> 수기 입력</td></tr>
-  </table>
-  </div>
-</section>
+<h2>3. 데이터 모델</h2>
+<h3>3.1 hospital_sales_profiles (변경)</h3>
+<p>유지: stage_id(영업 단계) · owner_id(씨어스 담당) · total_beds/total_wards · sales_memo — <span class="del">next_action / next_action_date</span> 삭제</p>
 
-<h2>3. 설계 원칙</h2>
-<section class="card">
-  <ol style="font-size:14px">
-    <li><b>운영 축과 분리, 연결로 통합</b> — 영업 데이터는 별도 테이블군, 기존 테이블 컬럼 추가 없음</li>
-    <li><b>병원 = 마스터, 영업 정보 = 하위 테이블</b> — 프로필(1:1)·키맨·대웅 채널·딜·영업일지(각 1:N) 전부 hospitals 하위. <b>필수 입력 없음 — 아는 만큼만 쌓는다</b></li>
-    <li><b>일정·상태의 단일 소스는 운영 축</b> — 중복 저장 금지, 조인 표시</li>
-    <li><b>금액·계약의 단일 소스는 딜</b> — 병원 총매출·디바이스 총수량은 전부 <b>딜 합산 파생값</b> (별도 저장 금지)</li>
-    <li><b>마스터 코드화</b> — 판매가유형·정산·매출인식 등은 StatusCode 신규 카테고리</li>
-    <li><b>티켓 미편입</b> — 영업 정보는 task가 아님 (티켓·Slack·SLA 대상 아님)</li>
-    <li><b>민감정보 권한 게이트</b> — 매출 금액 열람 권한은 좁게 시작 (§6)</li>
-    <li><b>비소급·안전 마이그레이션</b> — 순수 추가 DDL, 기존 화면 무변경</li>
-  </ol>
-</section>
+<h3>3.2 persons / person_affiliations (신설 — hospital_contacts 대체)</h3>
+<table>
+<tr><th>테이블</th><th>컬럼</th></tr>
+<tr><td><b>persons</b> (인물 마스터 — 병원 독립)</td><td>name(필수) · person_group_id → <code>PERSON_GROUP</code>(의사·간호·의공·전산·구매·원무·기타) · specialty(진료과) · phone · email · memo · is_active</td></tr>
+<tr><td><b>person_affiliations</b> (병원 소속 이력)</td><td>person_id FK(CASCADE) · hospital_code FK · title(직책) · department · is_primary(주요) · is_current · started_on/ended_on · note — 인덱스 (hospital_code,is_current)·(person_id)</td></tr>
+</table>
+<ul>
+<li><b>전원 처리</b>: 액션 1회 — 기존 소속 종료(is_current=false·ended_on) + 새 병원 소속 생성. 예: 신촌세브→용인세브 이동 시 용인세브 목록에서 과거 이력 표시 = 리드 신호</li>
+<li>hospital_contacts는 DROP (현재 0행)</li>
+</ul>
 
-<h2>4. 데이터 모델 (핵심)</h2>
-<section class="card">
-  <h3>4.0 전체 구조</h3>
-<pre>hospitals (기존 마스터) ─┬─ 1:1  hospital_sales_profiles   영업 프로필 (전체 병상수·등급·메모)
-                         ├─ 1:N  hospital_contacts          병원 측 키맨
-                         ├─ 1:N  hospital_daewoong_channels 대웅 관리체계 ── N:1 sales_offices / sales_reps (마스터)
-                         ├─ 1:N  sales_deals                도입 차수(딜) 원장 ★ ── 0..1 projects (운영 연결)
-                         │        └─ 1:N  sales_deal_devices  차수별 디바이스 수량 ── N:1 device_infos (기존 마스터)
-                         └─ 1:N  sales_activities           영업일지 (이슈 ⑧ 채택 시)
+<h3>3.3 sales_deals (차수 축 — 확장)</h3>
+<table>
+<tr><th>컬럼</th><th>상태</th><th>비고</th></tr>
+<tr><td>deal_code / hospital_code+round_no UNIQUE / status_id / contract_date / project_code / remark / ward_count / bed_count</td><td>유지</td><td></td></tr>
+<tr><td class="add">wards_text / depts_text</td><td>신설</td><td>도입병동(IM, ICU… 콤마 다중)·도입진료과 — 엑셀 핵심 공백</td></tr>
+<tr><td class="add">hospital_model_id / seers_model_id</td><td>신설</td><td>판매모델 2관점 — 둘 다 <code>SALES_MODEL</code> 단일 마스터(설정 제어). 차수마다 달라도 됨 = 혼재 허용</td></tr>
+<tr><td class="add">amount_product / amount_construction / amount_actual</td><td>교체</td><td>제품가·공사비·실판매액(BIGINT 원). '판매' = 제품+공사 파생 표시. 용역매출은 0행 → 제외</td></tr>
+<tr><td class="add">tax_invoice_id / settlement_id</td><td>신설</td><td>세금계산서 발행·정산 — 차수 단위 관리</td></tr>
+<tr><td class="del">intro_type_id / amount_total / amount_service</td><td>삭제</td><td>도입형태는 판매모델 2필드가 대체(운영 도입형태는 프로젝트 조인), 금액 2필드 → 3필드</td></tr>
+</table>
 
-sales_targets (연도별 목표 — 병원 비종속)</pre>
-  <div class="callout info"><b>파생값(저장 안 함)</b> — 병원 총매출 = Σ 딜 실판매액 · 디바이스 종별 총수량 = Σ 딜 디바이스 수량 · 침투율 = intro_beds / total_beds</div>
+<h3>3.4 projects (운영 축 — 최소 추가)</h3>
+<p><span class="add">education_date</span>(교육일, DATE) — 프로젝트 폼·상세 노출. 영업 축은 조인 표시만</p>
 
-  <h3>4.1 hospital_sales_profiles — 병원 영업 프로필 (1:1) <span class="tag new">P1</span></h3>
-  <p style="font-size:13.5px"><code>total_beds</code>(<b>전체 허가 병상수</b> — 침투율 분모)·<code>total_wards</code>·<code>grade</code>(A/B/C)·<code>sales_memo</code>. <b>v2 변경: 사무소/담당자 FK 제거</b> — 대웅 관리체계는 §4.3 하위 테이블로 분리.</p>
+<h3>3.5 StatusCode 카테고리 (전부 /settings/sales-codes 제어)</h3>
+<table>
+<tr><th>카테고리</th><th>초기값</th><th>색상</th></tr>
+<tr><td>SALES_STAGE (유지)</td><td>리드·접촉상담·제안견적·계약진행·도입운영중·확장협의·보류중단</td><td>O</td></tr>
+<tr><td>SALES_DEAL_STATUS (유지)</td><td>협의중·계약완료·해지중단</td><td>O</td></tr>
+<tr><td>SALES_ACTIVITY_TYPE (유지)</td><td>방문·전화·메일·데모시연·기타</td><td>X</td></tr>
+<tr><td class="add">SALES_MODEL (신설)</td><td>구축형·구독형·분납형·사용량비례형</td><td>X</td></tr>
+<tr><td class="add">SALES_TAX_INVOICE (신설)</td><td>미발행·발행완료·씨어스 계약</td><td>X</td></tr>
+<tr><td class="add">SALES_SETTLEMENT (신설)</td><td>미정산·진행중·완료</td><td>X</td></tr>
+<tr><td class="add">PERSON_GROUP (신설)</td><td>의사·간호·의공·전산·구매·원무·기타</td><td>X</td></tr>
+</table>
 
-  <h3>4.2 hospital_contacts — 병원 측 키맨 (1:N) <span class="tag new">P1</span></h3>
-  <p style="font-size:13.5px">name·title·department·phone·email·role_note(구매결정권자/실무 창구)·is_primary·is_active — 퇴사·이동 시 <b>비활성 처리</b>(이력 보존)</p>
+<h2>4. 범위 밖 (명시)</h2>
+<ul>
+<li><b>엑셀 데이터 이관 없음</b> — 양식(컬럼)만 구현, 데이터는 수기 입력</li>
+<li>보증기간(0행)·용역매출(0행)·판매가 유형(19%)·최초 인입일(15%)·공사지연일(실시간 판정 대체)·대웅 영업조직 4컬럼(대웅담당자 카드 유지) — 미반영</li>
+</ul>
 
-  <h3>4.3 대웅 관리체계 — 병원 하위 테이블 + 조직 마스터 <span class="tag new">P1</span></h3>
-  <table>
-    <tr><th>테이블</th><th>구성</th></tr>
-    <tr><td><code>hospital_daewoong_channels</code> (병원 1:N)</td><td>office_id?·rep_id?·<b>is_current</b>(담당 변경 시 이전 행 false — 이력 보존)·note. <b>전 컬럼 선택 입력</b> — 대웅 정보 없는 병원도 문제 없음</td></tr>
-    <tr><td><code>sales_offices</code> (마스터)</td><td>사업부(서울1/서울2/지방1~3)·사무소명(병원강원·병원광주2 …)</td></tr>
-    <tr><td><code>sales_reps</code> (마스터)</td><td>사무소 소속 담당자 이름·연락처 — <b>시스템 User 아님</b></td></tr>
-  </table>
-  <p style="font-size:13px">마스터를 두는 이유: 사무소·담당자별 <b>집계 축</b>이 필요 — 자유 텍스트면 표기 흔들림("병원광주2" vs "광주2")으로 집계가 깨짐. 기존 DaewoongHospitalAssignment(계정 기반, 운영용)는 유지.</p>
+<h2>5. Phase 계획 — 각 Phase에 UI 포함</h2>
 
-  <h3>4.4 sales_deals — 도입 차수(딜) 원장 (병원 1:N) <span class="tag new">P2 ★핵심</span></h3>
-  <p style="font-size:13.5px">엑셀 '도입 현황' 1행 = 1딜. <b>한 병원의 N번째 도입 = N차 딜.</b></p>
-  <div class="tbl-scroll">
-  <table>
-    <tr><th>그룹</th><th>컬럼</th><th>비고</th></tr>
-    <tr><td>식별</td><td>deal_code(DEAL-YYYYMM-NNNN)·hospital_code·<b>round_no</b></td><td><b>round_no = 병원 내 차수(1,2,…N)</b>, UNIQUE(hospital, round). 다음 차수 자동 제안(수정 가능). 확장 = round_no ≥ 2로 파생</td></tr>
-    <tr><td>운영 연결</td><td>project_code? (UNIQUE)</td><td>선택 — 계약 전 딜 존재 가능. 일정·공사는 이 연결로 조인</td></tr>
-    <tr><td>분류</td><td>병원판매모델·씨어스판매방식 (StatusCode 2축)</td><td>구축형/구독형/분납형/사용량</td></tr>
-    <tr><td>규모</td><td>ward_count·bed_count·wards_text·depts_text</td><td>계약 시점 스냅샷</td></tr>
-    <tr><td>금액</td><td>제품금액·공사비·판매합계·용역매출·<b>실판매액</b>·VAT제외?</td><td>BigInt(원). <b>실판매액이 집계 기준</b> — 병원 총매출 = Σ 차수별 실판매액</td></tr>
-    <tr><td>가격</td><td>판매가유형 (기존/권장/최소/사용량비례/미정)</td><td>StatusCode</td></tr>
-    <tr><td>일정</td><td>최초 인입일·계약일·납품일·보증기간</td><td>영업 소유분만</td></tr>
-    <tr><td>정산</td><td>정산상태·세금계산서발행·매출인식(수금시작/입금완료/수금완료)</td><td>StatusCode 3종</td></tr>
-  </table>
-  </div>
+<h3>Phase 1 — 병원 축: 인적정보 + 프로필 정리</h3>
+<ul>
+<li>DB: persons·person_affiliations 신설, hospital_contacts DROP, 프로필 next_action* 제거, PERSON_GROUP 시드</li>
+<li>API: 인물/소속 CRUD + <b>전원 액션</b>, 통합 GET 개편</li>
+</ul>
+<pre>
+[영업 정보] 요약 스트립: 단계배지 · 담당 · 전체/도입 병상 · 침투율 · 누적 실판매액  (D-day 제거)
+탭: 개요 | 인적정보 | 영업 활동 | 계약 이력
+┌ 인적정보 탭 ─────────────────────────────────────────────┐
+│ 이름 | 직군 | 직책 | 부서 | 진료과 | 전화 | 이메일 | 주요 | 액션(수정·전원·소속종료) │
+│ (빈 상태에도 컬럼 상시 노출)                    [+ 인물 등록] │
+│ ▸ 과거 인물 (N) — 접힘: 이름·직군·재직기간·현재 병원          │
+└──────────────────────────────────────────────────────────┘
+전원 모달: 병원 검색 → 새 직책/부서 → [전원 처리] (기존 소속 자동 종료)
+</pre>
+<p class="gate"><b>게이트</b>: 인물 등록 → 전원 → 과거 이력 시나리오를 화면으로 확인, 직군·필드 과부족 확정</p>
 
-  <h3>4.5 sales_deal_devices — 차수별 디바이스 종별 수량 (딜 1:N) <span class="tag new">P2</span></h3>
-  <p style="font-size:13.5px"><code>device_info_id</code>(<b>기존 장비 마스터 재사용</b> — 심전계 MC200M·산소포화도 MP100W·게이트웨이 MGW1000 등)·<code>quantity</code>·<code>unit_price?</code>. UNIQUE(deal, device). 병원별·전사 종별 누적 = 조인 합산(파생). <b>ProjectDevice와 분리</b> — 판매 수량(계약) vs 설치 실측(운영)은 다를 수 있음 (이슈 ⑦).</p>
+<h3>Phase 2 — 차수 축: 딜 확장 + 운영 축 교육일</h3>
+<ul>
+<li>DB: 딜 컬럼 신설 6·삭제 3, 코드 3카테고리 시드, projects.education_date</li>
+<li>API: 딜 파싱·검증 개정, 프로젝트 API 교육일</li>
+</ul>
+<pre>
+┌ 계약 이력 탭 ────────────────────────────────────────────────────────────┐
+│ 차수 | 상태 | 판매모델(병원/씨어스) | 계약일 | 도입병동 | 병동 | 병상 |   │
+│ 제품가 | 공사비 | 판매(파생) | 실판매액 | 세금계산서 | 정산 | 프로젝트 | 비고 │
+│ 합계 행(계약완료 기준)                                                    │
+└─────────────────────────────────────────────────────────────────────────┘
+딜 모달(2단): [규모·계약] 차수·상태·판매모델2·계약일·도입병동·진료과·병동/병상
+             [금액·정산] 제품가·공사비·실판매액·세금계산서·정산 · 프로젝트 연결·비고
+프로젝트 폼: 교육일 추가 / 설정: sales-codes에 신설 4카테고리 섹션
+</pre>
+<p class="gate"><b>게이트</b>: 딜 등록 모달에서 필드 과부족 확정 — <i>다듬기 최다 예상 구간</i></p>
 
-  <h3>4.6 sales_activities — 영업일지 (병원 1:N) — 이슈 ⑧ 채택 시</h3>
-  <p style="font-size:13.5px">MaintenanceLog 패턴: <code>activity_date</code>(활동일 — 소급 허용)·<code>activity_type_id?</code>(방문/전화/메일/데모)·<code>content</code>(Tiptap, sanitize)·<code>author_id</code>(자동)·<code>deal_id?</code>(차수 연결 선택)</p>
+<h3>Phase 3 — /sales 도입 현황 목록 (엑셀 와꾸 재현)</h3>
+<ul><li>1행 = 1차수(딜). 영업 축 + 운영 축(연결 프로젝트·답사) 조인으로 엑셀 36컬럼 커버. nav '영업' 그룹 신설</li></ul>
+<pre>
+[도입 현황]  필터: 단계(운영) | 판매모델 | 지역 | 담당 | 세금계산서 | 검색    [열 설정]
+병원명 | 차수 | 단계 | 종별 | 지역 | 판매모델 | 계약일 | 도입병동 | 병동 | 병상 |
+제품가 | 공사비 | 판매 | 실판매액 | 세금계산서 | 정산 | 답사 | 공사시작 | 공사완료 |
+납품 | 교육일 | 씨어스 담당                                   (하단 고정 합계 행)
+</pre>
+<p class="gate"><b>게이트</b>: 엑셀 원본과 컬럼 1:1 대조 — 영업직원이 엑셀 대신 쓸 수 있는지</p>
 
-  <h3>4.7 sales_targets — 연도별 목표 <span class="tag new">P4</span></h3>
-  <p style="font-size:13.5px">year UNIQUE·target_beds(예: 50,000)·target_hospitals? → 달성도 = 누계 실적 / 목표</p>
-</section>
+<h3>Phase 4 — 검증·마감</h3>
+<ul><li>병원 2~3곳 수기 입력(전원 케이스 포함) → 실사용 승인 → 엑셀 동결. PROD 반영은 사용자 지시 시</li></ul>
 
-<h2>5. UI 방향 (최소 기술 — 각 Phase에서 화면 보며 확정)</h2>
-<section class="card">
-  <ul>
-    <li><b>병원 상세</b> — 기존 카드 유지 + '영업 정보' 섹션(권한자만): 프로필·키맨·대웅 채널·<b>차수별 딜 리스트(1차/2차/N차 + 합계 행)</b>·디바이스 누적 수량</li>
-    <li><b>딜 등록·수정</b> — 병원 상세에서 진입(차수 자동 제안). 전사 딜 목록은 P2 후반 화면 보고 결정</li>
-    <li><b>설정</b> — <code>/settings/sales-offices</code> + StatusCode 신규 카테고리 관리 + nav + 시드(idempotent)</li>
-    <li><b>대시보드(P4)</b> — KPI·종별/판매모델/사무소별 분포·월별 추이·목표 달성도·디바이스 종별 누적</li>
-  </ul>
-  <h3>5.5 영업일지 방식 비교 (오픈 이슈 ⑧)</h3>
-  <div class="tbl-scroll">
-  <table>
-    <tr><th></th><th>A. 병원노트(위키) 활용</th><th>B. 구조화 테이블 (sales_activities) ★추천</th></tr>
-    <tr><td>구현 비용</td><td>0 (이미 있음)</td><td>소 (MaintenanceLog 패턴 복제)</td></tr>
-    <tr><td>형식</td><td>자유 서식 (BlockNote·협업편집)</td><td>엔트리 단위 (날짜·유형·작성자 자동)</td></tr>
-    <tr><td>시간순 이력·필터</td><td>불가 (한 문서에 덧붙임)</td><td>가능 (타임라인·기간·유형·작성자)</td></tr>
-    <tr><td>추이·대시보드 활용</td><td>불가</td><td>가능 ("이번 달 영업활동 N건")</td></tr>
-    <tr><td>권한 분리</td><td>어려움 (위키 열람 체계 따름)</td><td>영업 권한 게이트 그대로 적용</td></tr>
-    <tr><td>딜(차수) 연결</td><td>불가</td><td>가능 (deal_id 선택 연결)</td></tr>
-  </table>
-  </div>
-  <p style="font-size:13.5px"><b>추천: B</b> — "쌓아서 추이로 활용" 목표에 부합. 병원노트는 자유 메모/협업 문서로 공존 (노트 = 서술형 문서, 영업일지 = 활동 이력). 별도 페이지 없이 <b>병원 상세 영업 섹션 내 타임라인</b>으로 시작.</p>
-</section>
+<h3>Phase 5 — 후보 (별도 승인 시에만)</h3>
+<ul><li>영업 대시보드(파이프라인·침투율 순위·월별 추이) / AI 어시스턴트 영업 도구 / 선별 이관 스크립트</li></ul>
 
-<h2>6. 권한 설계 (제안 — 오픈 이슈 ①)</h2>
-<section class="card">
-  <table>
-    <tr><th>데이터</th><th>열람</th><th>편집</th></tr>
-    <tr><td>영업 프로필·키맨·대웅 채널·영업일지</td><td>SEERS 소속 전원</td><td>ADMIN 이상 (또는 영업담당 풀)</td></tr>
-    <tr><td>딜 <b>금액·정산</b></td><td>ADMIN 이상 (또는 별도 영업 풀)</td><td>동일</td></tr>
-    <tr><td>대시보드(집계 금액 포함)</td><td>금액 열람 권한자와 동일</td><td>—</td></tr>
-  </table>
-  <p style="font-size:13.5px">DAEWOONG 계정은 영업 섹션 비노출. 필요 시 <b>SALES 담당자 풀</b>(FieldEngineer 패턴) 신설. AI 어시스턴트 편입은 권한 결정에 종속 (P5 후보).</p>
-</section>
-
-<h2>7. Phase 계획</h2>
-<div class="callout info">각 Phase 종료 시 화면·데이터 확인 → <b>사용자 게이트 통과 후</b> 다음 Phase. 빌드·git push는 명시 요청 시에만.</div>
-
-<div class="phase current">
-  <h4>Phase 0 — 설계 확정 (현재)</h4>
-  <ul><li>본 문서 검토, 오픈 이슈 ①~⑧ 결정</li></ul>
-  <span class="gate">게이트: 사용자 승인 ("착수해" 명시)</span>
-</div>
-<div class="phase">
-  <h4>Phase 1 — 병원 영업 프로필 기반</h4>
-  <ul>
-    <li>hospital_sales_profiles / hospital_contacts / hospital_daewoong_channels / sales_offices / sales_reps</li>
-    <li>병원 상세 '영업 정보' 섹션(전체 병상수·침투율·키맨·대웅 채널) + 권한 게이트, <code>/settings/sales-offices</code> + 시드</li>
-  </ul>
-  <span class="gate">게이트: 병원 2~3곳 수기 입력 → 항목 과부족 확정</span>
-</div>
-<div class="phase">
-  <h4>Phase 2 — 딜(차수)·매출 원장 + 디바이스 수량</h4>
-  <ul>
-    <li>sales_deals(round_no) + sales_deal_devices + StatusCode 신규 카테고리 + 설정 UI</li>
-    <li>병원 상세 차수별 딜 리스트·합계·디바이스 누적, 등록·수정 폼, 프로젝트 연결(선택), (⑧ 채택 시) 영업일지 타임라인</li>
-  </ul>
-  <span class="gate">게이트: 실딜 3~5건 등록(1차+2차 확장+계약전, 디바이스 포함) → 컬럼 과부족 점검 (다듬기 최다 예상)</span>
-</div>
-<div class="phase">
-  <h4>Phase 3 — 엑셀 데이터 이관</h4>
-  <ul>
-    <li><code>scripts/import-sales-excel.mts</code> — '도입 현황' 258행 → 딜(계약일 순 round_no 부여)+프로필+대웅 채널, '실매출정리' → 딜 디바이스 수량(매칭 가능분)</li>
-    <li>병원명 매칭·미매칭 리포트, 금액 합계 대조(실판매액 총 40,454,025,288원). 드라이런 → 승인 후 실적재. 이관 후 엑셀 동결</li>
-  </ul>
-  <span class="gate">게이트: 건수·합계 일치 검수</span>
-</div>
-<div class="phase">
-  <h4>Phase 4 — 영업 대시보드·추이</h4>
-  <ul><li><code>/sales</code> 대시보드 (KPI·분포·월별 추이·목표 달성도·디바이스 누적·Urgent) + sales_targets</li></ul>
-  <span class="gate">게이트: 엑셀 '요약' 시트와 수치 대조, 차트 구성 확정</span>
-</div>
-<div class="phase future">
-  <h4>Phase 5 — 확장 (후보 예약, 착수 시 별도 설계)</h4>
-  <ul><li>사용량 주간 데이터 / 주간 진행보고 / AI 어시스턴트 영업 도구 / 계약 전 파이프라인(리드) / 발주·납품(WMS 연계) / 매출 추이 스냅샷</li></ul>
-</div>
-
-<h2>8. 오픈 이슈 (P0에서 결정)</h2>
-<section class="card">
-  <table>
-    <tr><th class="center">#</th><th>이슈</th><th>제안</th></tr>
-    <tr><td class="center">①</td><td><b>금액 열람 권한 범위</b> — SEERS 전원 vs ADMIN 이상 vs 별도 영업 풀</td><td>ADMIN 이상으로 시작, 필요 시 풀 확대</td></tr>
-    <tr><td class="center">②</td><td><b>차수(round_no) 부여 방식</b> — 자동 vs 수동</td><td>자동 제안 + 수정 가능. 이관 시 계약일 순 부여</td></tr>
-    <tr><td class="center">③</td><td><b>계약 전 리드 관리 시점</b></td><td>P5로 연기 — 딜은 '계약(예정) 확정 건'부터</td></tr>
-    <tr><td class="center">④</td><td><b>전체 병상수 출처</b> — 수기 vs 심평원 API 확장</td><td>수기 시작</td></tr>
-    <tr><td class="center">⑤</td><td><b>납품일·오더현황</b> — 수기 vs WMS 연동</td><td>수기 시작, WMS 연동은 P5</td></tr>
-    <tr><td class="center">⑥</td><td><b>사용량 데이터</b> — 반영 여부·소스·주기</td><td>P5 보류 (제품 서버 소스 확인 필요)</td></tr>
-    <tr><td class="center">⑦</td><td><b>디바이스 수량 소스</b> — 딜 스냅샷 vs ProjectDevice 단일화</td><td><b>분리 유지</b> — 판매 수량(계약)과 설치 실측(운영)은 다를 수 있음. 화면에서 둘 다 표시</td></tr>
-    <tr><td class="center">⑧</td><td><b>영업일지 방식</b> — 병원노트(위키) vs 구조화 테이블</td><td><b>구조화 테이블(sales_activities)</b> — §5.5 비교. 병원노트는 자유 문서로 공존</td></tr>
-  </table>
-</section>
-
-<footer>thynC Operations System · 영업/CRM 모듈 설계안 v2 · 2026-07-28 · md 버전: <code>projects/sales_crm_design.md</code></footer>
-</div>
+<h2>6. 마이그레이션 요약</h2>
+<ol>
+<li>P1: persons·person_affiliations CREATE, hospital_contacts DROP, 프로필 컬럼 2 DROP, PERSON_GROUP 시드</li>
+<li>P2: sales_deals +6/−3, projects.education_date, 코드 3카테고리 시드</li>
+</ol>
+<p>현재 영업 테이블 전부 0행 → 데이터 이전 불필요. dev 선반영 → 검증 후 PROD. 시드 <code>seed-sales-masters.sql</code> v4 갱신(idempotent)</p>
 </body>
 </html>

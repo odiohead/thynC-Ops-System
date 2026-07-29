@@ -89,8 +89,7 @@ model Hospital {
   aiUsageLogs           AiUsageLog[]
   tickets               Ticket[]
   salesProfile          HospitalSalesProfile?
-  salesContacts         HospitalContact[]
-  daewoongChannels      HospitalDaewoongChannel[]
+  personAffiliations    PersonAffiliation[]
   salesDeals            SalesDeal[]
   salesActivities       SalesActivity[]
 
@@ -149,13 +148,14 @@ model StatusCode {
   manufacturerItems      InventoryItem[]        @relation("ItemManufacturer")
   reasonTransactions     InventoryTransaction[] @relation("TxReason")
   ctiRuleMatches         TicketDomainCtiRule[]  @relation("CtiRuleMatchStatus")
-  dealHospitalSaleModels SalesDeal[]            @relation("DealHospitalSaleModel")
-  dealSeersSaleModels    SalesDeal[]            @relation("DealSeersSaleModel")
-  dealPriceTypes         SalesDeal[]            @relation("DealPriceType")
-  dealSettlements        SalesDeal[]            @relation("DealSettlement")
+  salesStageProfiles     HospitalSalesProfile[] @relation("SalesProfileStage")
+  dealStatuses           SalesDeal[]            @relation("DealStatus")
+  dealHospitalModels     SalesDeal[]            @relation("DealHospitalModel")
+  dealSeersModels        SalesDeal[]            @relation("DealSeersModel")
   dealTaxInvoices        SalesDeal[]            @relation("DealTaxInvoice")
-  dealRevenueRecogs      SalesDeal[]            @relation("DealRevenueRecog")
+  dealSettlements        SalesDeal[]            @relation("DealSettlement")
   salesActivityTypes     SalesActivity[]        @relation("SalesActivityType")
+  persons                Person[]               @relation("PersonGroup")
 
   @@unique([name, category])
   @@map("status_codes")
@@ -298,6 +298,7 @@ model User {
   ticketQueueMemberships    TicketQueueMember[]          @relation("TicketQueueMemberUser")
   ticketCtiRuleUpdates      TicketDomainCtiRule[]        @relation("CtiRuleUpdater")
   salesActivities           SalesActivity[]              @relation("SalesActivityAuthor")
+  salesOwnedProfiles        HospitalSalesProfile[]       @relation("SalesProfileOwner")
 
   @@map("users")
   @@schema("public")
@@ -340,7 +341,6 @@ model DeviceInfo {
   devices         ProjectDevice[]
   hospitalDevices HospitalDevice[]
   inventoryItems  InventoryItem[]
-  salesDealDevices SalesDealDevice[]
 
   @@map("device_info")
   @@schema("public")
@@ -394,6 +394,7 @@ model Project {
   constructorId     Int?              @map("constructor_id")
   startDate         DateTime?         @map("start_date")
   endDateExpected   DateTime?         @map("end_date_expected")
+  educationDate     DateTime?         @map("education_date") // 교육일 (영업/CRM v4 — 운영 축 귀속)
   buildStatusId     Int?              @map("build_status_id")
   statusChangedAt   DateTime?         @default(now()) @map("status_changed_at") // 현재 공사상태 진입 시각 (단계 체류 지연 감지)
   introTypeId       Int?              @map("intro_type_id")
@@ -1980,144 +1981,97 @@ model TicketSlaClock {
 // ─── 영업/CRM Phase 1+2 ─── (projects/sales_crm_design.md — 영업 정보 축, 열람은 SEERS+ADMIN 이상)
 
 model HospitalSalesProfile {
-  id           Int      @id @default(autoincrement())
-  hospitalCode String   @unique @map("hospital_code")
-  totalBeds    Int?     @map("total_beds") // 병원 전체(허가) 병상수 — 침투율 분모
-  totalWards   Int?     @map("total_wards")
-  grade        String?  @map("grade")
-  salesMemo    String?  @map("sales_memo") @db.Text
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-  hospital     Hospital @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: Cascade)
+  id             Int         @id @default(autoincrement())
+  hospitalCode   String      @unique @map("hospital_code")
+  stageId        Int?        @map("stage_id") // 영업 단계 (SALES_STAGE) — CRM 중심 축
+  ownerId        String?     @map("owner_id") // 담당 영업 (씨어스 User)
+  totalBeds      Int?        @map("total_beds") // 병원 전체(허가) 병상수 — 침투율 분모
+  totalWards     Int?        @map("total_wards")
+  salesMemo      String?     @map("sales_memo") @db.Text
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+  hospital       Hospital    @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: Cascade)
+  stage          StatusCode? @relation("SalesProfileStage", fields: [stageId], references: [id], onDelete: SetNull)
+  owner          User?       @relation("SalesProfileOwner", fields: [ownerId], references: [id], onDelete: SetNull)
 
   @@map("hospital_sales_profiles")
   @@schema("public")
 }
 
-model HospitalContact {
-  id           Int      @id @default(autoincrement())
-  hospitalCode String   @map("hospital_code")
-  name         String   @map("name")
-  title        String?  @map("title")
-  department   String?  @map("department")
-  phone        String?  @map("phone")
-  email        String?  @map("email")
-  roleNote     String?  @map("role_note")
-  isPrimary    Boolean  @default(false) @map("is_primary")
-  isActive     Boolean  @default(true) @map("is_active") // 퇴사·이동 시 비활성 (삭제 대신)
-  sortOrder    Int      @default(0) @map("sort_order")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-  hospital     Hospital @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: Cascade)
+model Person {
+  id            Int                 @id @default(autoincrement())
+  name          String              @map("name")
+  personGroupId Int?                @map("person_group_id") // 직군 (PERSON_GROUP — 의사·간호·의공·전산·구매·원무·기타)
+  specialty     String?             @map("specialty") // 진료과 (의사인 경우)
+  phone         String?             @map("phone") // 개인 연락처 — 병원 이동해도 유지되므로 인물에 귀속
+  email         String?             @map("email")
+  memo          String?             @map("memo") @db.Text // 성향·관계 메모
+  isActive      Boolean             @default(true) @map("is_active")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+  personGroup   StatusCode?         @relation("PersonGroup", fields: [personGroupId], references: [id], onDelete: SetNull)
+  affiliations  PersonAffiliation[]
 
-  @@index([hospitalCode])
-  @@map("hospital_contacts")
+  @@map("persons")
   @@schema("public")
 }
 
-model SalesOffice {
-  id        Int                       @id @default(autoincrement())
-  division  String?                   @map("division") // 사업부 (서울1·지방2 …)
-  name      String                    @unique @map("name") // 사무소명 (병원강원 …)
-  sortOrder Int                       @default(0) @map("sort_order")
-  isActive  Boolean                   @default(true) @map("is_active")
-  createdAt DateTime                  @default(now()) @map("created_at")
-  reps      SalesRep[]
-  channels  HospitalDaewoongChannel[]
+model PersonAffiliation {
+  id           Int       @id @default(autoincrement())
+  personId     Int       @map("person_id")
+  hospitalCode String    @map("hospital_code")
+  title        String?   @map("title") // 그 병원에서의 직책
+  department   String?   @map("department")
+  isPrimary    Boolean   @default(false) @map("is_primary") // 그 병원의 주요 인물
+  isCurrent    Boolean   @default(true) @map("is_current") // 전원·퇴직 시 false (이력 보존)
+  startedOn    DateTime? @map("started_on") @db.Date
+  endedOn      DateTime? @map("ended_on") @db.Date
+  note         String?   @map("note")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  person       Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
+  hospital     Hospital  @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: Cascade)
 
-  @@map("sales_offices")
-  @@schema("public")
-}
-
-model SalesRep {
-  id        Int                       @id @default(autoincrement())
-  officeId  Int?                      @map("office_id")
-  name      String                    @map("name")
-  phone     String?                   @map("phone")
-  isActive  Boolean                   @default(true) @map("is_active")
-  createdAt DateTime                  @default(now()) @map("created_at")
-  office    SalesOffice?              @relation(fields: [officeId], references: [id], onDelete: SetNull)
-  channels  HospitalDaewoongChannel[]
-
-  @@index([officeId])
-  @@map("sales_reps")
-  @@schema("public")
-}
-
-model HospitalDaewoongChannel {
-  id           Int          @id @default(autoincrement())
-  hospitalCode String       @map("hospital_code")
-  officeId     Int?         @map("office_id")
-  repId        Int?         @map("rep_id")
-  isCurrent    Boolean      @default(true) @map("is_current") // 담당 변경 시 이전 행 false (이력 보존)
-  note         String?      @map("note")
-  createdAt    DateTime     @default(now()) @map("created_at")
-  hospital     Hospital     @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: Cascade)
-  office       SalesOffice? @relation(fields: [officeId], references: [id], onDelete: SetNull)
-  rep          SalesRep?    @relation(fields: [repId], references: [id], onDelete: SetNull)
-
-  @@index([hospitalCode])
-  @@map("hospital_daewoong_channels")
+  @@index([hospitalCode, isCurrent])
+  @@index([personId])
+  @@map("person_affiliations")
   @@schema("public")
 }
 
 model SalesDeal {
-  id                   Int         @id @default(autoincrement())
-  dealCode             String      @unique @map("deal_code") // DEAL-YYYYMM-NNNN
-  hospitalCode         String      @map("hospital_code")
-  roundNo              Int         @map("round_no") // 병원 내 차수 (1,2,…N) — 갭 허용, 재부여 없음
-  projectCode          String?     @unique @map("project_code") // 운영 프로젝트 연결 (선택, 1:1)
-  hospitalSaleModelId  Int?        @map("hospital_sale_model_id")
-  seersSaleModelId     Int?        @map("seers_sale_model_id")
-  wardCount            Int?        @map("ward_count") // 계약 시점 스냅샷 (운영 실측은 연결 프로젝트)
-  bedCount             Int?        @map("bed_count")
-  wardsText            String?     @map("wards_text")
-  deptsText            String?     @map("depts_text")
-  amountProduct        BigInt?     @map("amount_product") // 원 단위
-  amountConstruction   BigInt?     @map("amount_construction")
-  amountTotal          BigInt?     @map("amount_total")
-  amountService        BigInt?     @map("amount_service")
-  amountActual         BigInt?     @map("amount_actual") // 실판매액 — 매출 집계 기준
-  priceTypeId          Int?        @map("price_type_id")
-  firstContactDate     DateTime?   @map("first_contact_date") @db.Date
-  contractDate         DateTime?   @map("contract_date") @db.Date
-  deliveryDate         DateTime?   @map("delivery_date") @db.Date
-  warrantyMonths       Int?        @map("warranty_months")
-  settlementStatusId   Int?        @map("settlement_status_id")
-  taxInvoiceStatusId   Int?        @map("tax_invoice_status_id")
-  revenueRecognitionId Int?        @map("revenue_recognition_id")
-  remark               String?     @map("remark") @db.Text
-  createdAt            DateTime    @default(now()) @map("created_at")
-  updatedAt            DateTime    @updatedAt @map("updated_at")
-  hospital             Hospital    @relation(fields: [hospitalCode], references: [hospitalCode])
-  project              Project?    @relation(fields: [projectCode], references: [projectCode], onDelete: SetNull)
-  hospitalSaleModel    StatusCode? @relation("DealHospitalSaleModel", fields: [hospitalSaleModelId], references: [id], onDelete: SetNull)
-  seersSaleModel       StatusCode? @relation("DealSeersSaleModel", fields: [seersSaleModelId], references: [id], onDelete: SetNull)
-  priceType            StatusCode? @relation("DealPriceType", fields: [priceTypeId], references: [id], onDelete: SetNull)
-  settlementStatus     StatusCode? @relation("DealSettlement", fields: [settlementStatusId], references: [id], onDelete: SetNull)
-  taxInvoiceStatus     StatusCode? @relation("DealTaxInvoice", fields: [taxInvoiceStatusId], references: [id], onDelete: SetNull)
-  revenueRecognition   StatusCode? @relation("DealRevenueRecog", fields: [revenueRecognitionId], references: [id], onDelete: SetNull)
-  devices              SalesDealDevice[]
-  activities           SalesActivity[]
+  id                 Int         @id @default(autoincrement())
+  dealCode           String      @unique @map("deal_code") // DEAL-YYYYMM-NNNN
+  hospitalCode       String      @map("hospital_code")
+  roundNo            Int         @map("round_no") // 병원 내 차수 (1,2,…N) — 갭 허용, 재부여 없음
+  projectCode        String?     @unique @map("project_code") // 운영 프로젝트 연결 (선택, 1:1)
+  statusId           Int?        @map("status_id") // 딜 상태 (SALES_DEAL_STATUS)
+  hospitalModelId    Int?        @map("hospital_model_id") // 병원 관점 판매모델 (SALES_MODEL)
+  seersModelId       Int?        @map("seers_model_id") // 씨어스 관점 판매방식 (SALES_MODEL 공용 마스터)
+  wardsText          String?     @map("wards_text") // 도입병동 (IM, ICU… 콤마 다중)
+  deptsText          String?     @map("depts_text") // 도입진료과
+  wardCount          Int?        @map("ward_count") // 계약 시점 스냅샷 (운영 실측은 연결 프로젝트)
+  bedCount           Int?        @map("bed_count")
+  amountProduct      BigInt?     @map("amount_product") // 제품(구성품) 금액 (원)
+  amountConstruction BigInt?     @map("amount_construction") // 공사비 (원) — '판매' 합계는 제품+공사 파생
+  amountActual       BigInt?     @map("amount_actual") // 실판매액 (원) — 매출 집계 기준
+  taxInvoiceId       Int?        @map("tax_invoice_id") // 세금계산서 발행 (SALES_TAX_INVOICE)
+  settlementId       Int?        @map("settlement_id") // 정산 상태 (SALES_SETTLEMENT)
+  contractDate       DateTime?   @map("contract_date") @db.Date
+  remark             String?     @map("remark") @db.Text
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+  hospital           Hospital    @relation(fields: [hospitalCode], references: [hospitalCode])
+  project            Project?    @relation(fields: [projectCode], references: [projectCode], onDelete: SetNull)
+  status             StatusCode? @relation("DealStatus", fields: [statusId], references: [id], onDelete: SetNull)
+  hospitalModel      StatusCode? @relation("DealHospitalModel", fields: [hospitalModelId], references: [id], onDelete: SetNull)
+  seersModel         StatusCode? @relation("DealSeersModel", fields: [seersModelId], references: [id], onDelete: SetNull)
+  taxInvoice         StatusCode? @relation("DealTaxInvoice", fields: [taxInvoiceId], references: [id], onDelete: SetNull)
+  settlement         StatusCode? @relation("DealSettlement", fields: [settlementId], references: [id], onDelete: SetNull)
+  activities         SalesActivity[]
 
   @@unique([hospitalCode, roundNo])
   @@index([hospitalCode])
   @@map("sales_deals")
-  @@schema("public")
-}
-
-model SalesDealDevice {
-  id           Int        @id @default(autoincrement())
-  dealId       Int        @map("deal_id")
-  deviceInfoId Int        @map("device_info_id")
-  quantity     Int        @default(0) @map("quantity")
-  unitPrice    BigInt?    @map("unit_price")
-  createdAt    DateTime   @default(now()) @map("created_at")
-  deal         SalesDeal  @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  deviceInfo   DeviceInfo @relation(fields: [deviceInfoId], references: [id])
-
-  @@unique([dealId, deviceInfoId])
-  @@map("sales_deal_devices")
   @@schema("public")
 }
 

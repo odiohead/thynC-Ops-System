@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { checkSalesAccess } from '@/lib/sales'
-import { parseDealBody, validateDealCodes, parseDealDevices } from '../shared'
+import { parseDealBody, validateDealCodes } from '../shared'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,7 +32,6 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const data = parseDealBody(body)
   const codeError = await validateDealCodes(data)
   if (codeError) return NextResponse.json({ error: codeError }, { status: 400 })
-  const devices = parseDealDevices(body.devices)
 
   const roundNo = Number.isInteger(body.roundNo) && body.roundNo > 0 ? body.roundNo : g.deal.roundNo
 
@@ -42,14 +41,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   }
 
   try {
-    const deal = await prisma.$transaction(async (tx) => {
-      const updated = await tx.salesDeal.update({ where: { id: g.id }, data: { ...data, roundNo } })
-      await tx.salesDealDevice.deleteMany({ where: { dealId: g.id } })
-      if (devices.length > 0) {
-        await tx.salesDealDevice.createMany({ data: devices.map((d) => ({ ...d, dealId: g.id })) })
-      }
-      return updated
-    })
+    const deal = await prisma.salesDeal.update({ where: { id: g.id }, data: { ...data, roundNo } })
 
     await logAudit({
       req: request,

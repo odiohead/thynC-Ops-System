@@ -13,38 +13,31 @@ const intOrNull = (v: unknown) => {
 export function parseDealBody(body: Record<string, unknown>) {
   return {
     projectCode: str(body.projectCode),
-    hospitalSaleModelId: intOrNull(body.hospitalSaleModelId),
-    seersSaleModelId: intOrNull(body.seersSaleModelId),
-    wardCount: intOrNull(body.wardCount),
-    bedCount: intOrNull(body.bedCount),
+    statusId: intOrNull(body.statusId),
+    hospitalModelId: intOrNull(body.hospitalModelId),
+    seersModelId: intOrNull(body.seersModelId),
     wardsText: str(body.wardsText),
     deptsText: str(body.deptsText),
+    wardCount: intOrNull(body.wardCount),
+    bedCount: intOrNull(body.bedCount),
     amountProduct: parseAmount(body.amountProduct),
     amountConstruction: parseAmount(body.amountConstruction),
-    amountTotal: parseAmount(body.amountTotal),
-    amountService: parseAmount(body.amountService),
     amountActual: parseAmount(body.amountActual),
-    priceTypeId: intOrNull(body.priceTypeId),
-    firstContactDate: parseDateOnly(body.firstContactDate),
+    taxInvoiceId: intOrNull(body.taxInvoiceId),
+    settlementId: intOrNull(body.settlementId),
     contractDate: parseDateOnly(body.contractDate),
-    deliveryDate: parseDateOnly(body.deliveryDate),
-    warrantyMonths: intOrNull(body.warrantyMonths),
-    settlementStatusId: intOrNull(body.settlementStatusId),
-    taxInvoiceStatusId: intOrNull(body.taxInvoiceStatusId),
-    revenueRecognitionId: intOrNull(body.revenueRecognitionId),
     remark: str(body.remark),
   }
 }
 
-/** StatusCode FK가 올바른 영업 카테고리를 가리키는지 검증 — 오류 메시지 or null */
+/** StatusCode FK가 올바른 카테고리를 가리키는지 검증 — 오류 메시지 or null */
 export async function validateDealCodes(data: ReturnType<typeof parseDealBody>): Promise<string | null> {
   const checks: Array<[number | null, string, string]> = [
-    [data.hospitalSaleModelId, 'SALES_MODEL_HOSPITAL', '병원 판매모델'],
-    [data.seersSaleModelId, 'SALES_MODEL_SEERS', '씨어스 판매방식'],
-    [data.priceTypeId, 'SALES_PRICE_TYPE', '판매가 유형'],
-    [data.settlementStatusId, 'SALES_SETTLEMENT', '정산 상태'],
-    [data.taxInvoiceStatusId, 'SALES_TAX_INVOICE', '세금계산서 발행'],
-    [data.revenueRecognitionId, 'SALES_REVENUE_RECOG', '매출 인식'],
+    [data.statusId, 'SALES_DEAL_STATUS', '딜 상태'],
+    [data.hospitalModelId, 'SALES_MODEL', '병원 판매모델'],
+    [data.seersModelId, 'SALES_MODEL', '씨어스 판매방식'],
+    [data.taxInvoiceId, 'SALES_TAX_INVOICE', '세금계산서 발행'],
+    [data.settlementId, 'SALES_SETTLEMENT', '정산 상태'],
   ]
   const ids = checks.map(([id]) => id).filter((id): id is number => id !== null)
   if (ids.length === 0) return null
@@ -54,19 +47,4 @@ export async function validateDealCodes(data: ReturnType<typeof parseDealBody>):
     if (id !== null && map.get(id) !== category) return `${label} 값이 올바르지 않습니다.`
   }
   return null
-}
-
-/** 디바이스 배열 정규화 — 유효 항목만 (수량 1 이상, 중복 디바이스 제거) */
-export function parseDealDevices(raw: unknown): Array<{ deviceInfoId: number; quantity: number; unitPrice: bigint | null }> {
-  if (!Array.isArray(raw)) return []
-  const seen = new Set<number>()
-  const out: Array<{ deviceInfoId: number; quantity: number; unitPrice: bigint | null }> = []
-  for (const r of raw) {
-    const deviceInfoId = intOrNull((r as Record<string, unknown>)?.deviceInfoId)
-    const quantity = intOrNull((r as Record<string, unknown>)?.quantity)
-    if (deviceInfoId === null || quantity === null || quantity <= 0 || seen.has(deviceInfoId)) continue
-    seen.add(deviceInfoId)
-    out.push({ deviceInfoId, quantity, unitPrice: parseAmount((r as Record<string, unknown>)?.unitPrice) })
-  }
-  return out
 }

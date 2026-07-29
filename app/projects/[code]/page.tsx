@@ -69,6 +69,7 @@ interface Project {
   constructorId: number | null
   startDate: string | null
   endDateExpected: string | null
+  educationDate: string | null
   buildStatusId: number | null
   remark: string | null
   driveFolderId: string | null
@@ -140,6 +141,7 @@ export default function ProjectDetailPage() {
   const [constructorId, setConstructorId] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDateExpected, setEndDateExpected] = useState('')
+  const [educationDate, setEducationDate] = useState('')
   const [buildStatusId, setBuildStatusId] = useState('')
   const [remark, setRemark] = useState('')
   const [deviceQty, setDeviceQty] = useState<Record<number, number>>({})
@@ -187,6 +189,7 @@ export default function ProjectDetailPage() {
     setConstructorId(p.constructorId ? String(p.constructorId) : '')
     setStartDate(toDateInput(p.startDate))
     setEndDateExpected(toDateInput(p.endDateExpected))
+    setEducationDate(toDateInput(p.educationDate))
     setBuildStatusId(p.buildStatusId ? String(p.buildStatusId) : '')
     setRemark(p.remark ?? '')
 
@@ -233,6 +236,7 @@ export default function ProjectDetailPage() {
         constructorId: constructorId ? Number(constructorId) : null,
         startDate: startDate || null,
         endDateExpected: endDateExpected || null,
+        educationDate: educationDate || null,
         buildStatusId: buildStatusId ? Number(buildStatusId) : null,
         remark: remark || null,
       }),
@@ -632,6 +636,10 @@ export default function ProjectDetailPage() {
               <div>
                 <label className={labelClass}>구축 종료 예상일</label>
                 <input type="date" value={endDateExpected} onChange={(e) => setEndDateExpected(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className={labelClass}>교육일</label>
+                <input type="date" value={educationDate} onChange={(e) => setEducationDate(e.target.value)} className={inputClass} />
               </div>
               <div>
                 <label className={labelClass}>구축 진행상태</label>

@@ -26,14 +26,14 @@ export async function POST(request: NextRequest, { params }: Params) {
   const category = resolveCategory(params.category)
   if (!category) return NextResponse.json({ error: '잘못된 카테고리입니다.' }, { status: 400 })
 
-  const { name, order } = await request.json()
+  const { name, order, color } = await request.json()
   if (!name?.trim()) return NextResponse.json({ error: '이름을 입력해주세요.' }, { status: 400 })
 
   const existing = await prisma.statusCode.findFirst({ where: { name: name.trim(), category } })
   if (existing) return NextResponse.json({ error: '이미 존재하는 값입니다.' }, { status: 409 })
 
   const statusCode = await prisma.statusCode.create({
-    data: { name: name.trim(), order: order ?? 0, category },
+    data: { name: name.trim(), order: order ?? 0, category, color: typeof color === 'string' && color ? color : null },
   })
 
   await logAudit({

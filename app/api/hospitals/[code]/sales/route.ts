@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 
 type Params = { params: { code: string } }
 
-/** 병원 영업 정보 통합 조회 — 섹션 렌더에 필요한 전부를 1회로 반환 */
+/** 병원 영업 정보 통합 조회 — 섹션 렌더에 필요한 전부(데이터+마스터+파생)를 1회로 반환 */
 export async function GET(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -20,32 +20,40 @@ export async function GET(request: NextRequest, { params }: Params) {
   })
   if (!hospital) return NextResponse.json({ error: '병원을 찾을 수 없습니다.' }, { status: 404 })
 
-  const [profile, contacts, channels, deals, activities, offices, codes, devices, projects] = await Promise.all([
-    prisma.hospitalSalesProfile.findUnique({ where: { hospitalCode: params.code } }),
-    prisma.hospitalContact.findMany({
+  const [profile, affiliations, deals, activities, codes, owners, projects] = await Promise.all([
+    prisma.hospitalSalesProfile.findUnique({
       where: { hospitalCode: params.code },
-      orderBy: [{ isActive: 'desc' }, { isPrimary: 'desc' }, { sortOrder: 'asc' }, { id: 'asc' }],
-    }),
-    prisma.hospitalDaewoongChannel.findMany({
-      where: { hospitalCode: params.code },
-      orderBy: [{ isCurrent: 'desc' }, { id: 'desc' }],
       include: {
-        office: { select: { id: true, division: true, name: true } },
-        rep: { select: { id: true, name: true, phone: true } },
+        stage: { select: { id: true, name: true, color: true } },
+        owner: { select: { id: true, name: true } },
+      },
+    }),
+    // 인적정보 — 이 병원의 소속 전체(현재+과거). person에 전체 소속 이력 동봉(전원 추적 표시용)
+    prisma.personAffiliation.findMany({
+      where: { hospitalCode: params.code },
+      orderBy: [{ isCurrent: 'desc' }, { isPrimary: 'desc' }, { id: 'asc' }],
+      include: {
+        person: {
+          include: {
+            personGroup: { select: { id: true, name: true } },
+            affiliations: {
+              orderBy: { id: 'desc' },
+              include: { hospital: { select: { hospitalCode: true, hospitalName: true } } },
+            },
+          },
+        },
       },
     }),
     prisma.salesDeal.findMany({
       where: { hospitalCode: params.code },
       orderBy: { roundNo: 'asc' },
       include: {
-        hospitalSaleModel: { select: { id: true, name: true } },
-        seersSaleModel: { select: { id: true, name: true } },
-        priceType: { select: { id: true, name: true } },
-        settlementStatus: { select: { id: true, name: true } },
-        taxInvoiceStatus: { select: { id: true, name: true } },
-        revenueRecognition: { select: { id: true, name: true } },
-        project: { select: { projectCode: true, orderNumber: true } },
-        devices: { include: { deviceInfo: { select: { id: true, deviceModel: true, deviceName: true } } }, orderBy: { id: 'asc' } },
+        status: { select: { id: true, name: true, color: true } },
+        hospitalModel: { select: { id: true, name: true } },
+        seersModel: { select: { id: true, name: true } },
+        taxInvoice: { select: { id: true, name: true } },
+        settlement: { select: { id: true, name: true } },
+        project: { select: { projectCode: true, projectName: true } },
       },
     }),
     prisma.salesActivity.findMany({
@@ -57,45 +65,53 @@ export async function GET(request: NextRequest, { params }: Params) {
         deal: { select: { id: true, dealCode: true, roundNo: true } },
       },
     }),
-    prisma.salesOffice.findMany({
-      where: { isActive: true },
-      orderBy: { sortOrder: 'asc' },
-      include: { reps: { where: { isActive: true }, orderBy: { name: 'asc' } } },
-    }),
     prisma.statusCode.findMany({
       where: { category: { in: [...SALES_CODE_CATEGORIES] } },
       orderBy: { order: 'asc' },
-      select: { id: true, name: true, category: true },
+      select: { id: true, name: true, category: true, color: true },
     }),
-    prisma.deviceInfo.findMany({ where: { isActive: true }, orderBy: { sortOrder: 'asc' }, select: { id: true, deviceModel: true, deviceName: true } }),
+    // 담당 영업 후보 — SEERS 활성 계정
+    prisma.user.findMany({
+      where: { isActive: true, organization: { code: 'SEERS' } },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    }),
     prisma.project.findMany({
       where: { hospitalCode: params.code },
       orderBy: { orderNumber: 'asc' },
-      select: { projectCode: true, orderNumber: true, contractDate: true },
+      select: { projectCode: true, projectName: true },
     }),
   ])
 
-  const codesByCategory: Record<string, { id: number; name: string }[]> = {}
+  const codesByCategory: Record<string, { id: number; name: string; color: string | null }[]> = {}
   for (const c of codes) {
-    ;(codesByCategory[c.category] ??= []).push({ id: c.id, name: c.name })
+    ;(codesByCategory[c.category] ??= []).push({ id: c.id, name: c.name, color: c.color })
   }
+
+  // 파생 지표 — 도입 병상(운영 축)·침투율·누적 실판매액(계약완료 딜 합산)
+  const introBeds = hospital.introBeds
+  const totalBeds = profile?.totalBeds ?? null
+  const penetration =
+    totalBeds && totalBeds > 0 && introBeds !== null ? Math.round((introBeds / totalBeds) * 1000) / 10 : null
+  const contractedTotal = deals
+    .filter((d) => d.status?.name === '계약완료')
+    .reduce((sum, d) => sum + (d.amountActual !== null ? Number(d.amountActual) : 0), 0)
 
   return NextResponse.json({
     canEdit: true,
-    introBeds: hospital.introBeds,
     profile,
-    contacts,
-    channels,
+    persons: {
+      current: affiliations.filter((a) => a.isCurrent),
+      past: affiliations.filter((a) => !a.isCurrent),
+    },
     deals: deals.map((d) => ({
       ...d,
       amountProduct: toAmount(d.amountProduct),
       amountConstruction: toAmount(d.amountConstruction),
-      amountTotal: toAmount(d.amountTotal),
-      amountService: toAmount(d.amountService),
       amountActual: toAmount(d.amountActual),
-      devices: d.devices.map((dd) => ({ ...dd, unitPrice: toAmount(dd.unitPrice) })),
     })),
     activities,
-    masters: { offices, codes: codesByCategory, devices, projects },
+    derived: { introBeds, penetration, contractedTotal },
+    masters: { codes: codesByCategory, owners, projects },
   })
 }

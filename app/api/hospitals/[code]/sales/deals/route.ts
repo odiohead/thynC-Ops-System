@@ -3,7 +3,10 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { checkSalesAccess, nextDealCode } from '@/lib/sales'
-import { parseDealBody, validateDealCodes, parseDealDevices } from './shared'
+import { parseDealBody, validateDealCodes } from './shared'
+
+const auditSafe = (d: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(d).map(([k, v]) => [k, typeof v === 'bigint' ? v.toString() : v]))
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +25,12 @@ export async function POST(request: NextRequest, { params }: Params) {
   const data = parseDealBody(body)
   const codeError = await validateDealCodes(data)
   if (codeError) return NextResponse.json({ error: codeError }, { status: 400 })
-  const devices = parseDealDevices(body.devices)
+
+  // 신규 딜 기본 상태 = '영업중' (수기 입력 원본 — 계약 전 파이프라인 시작점)
+  if (data.statusId === null) {
+    const def = await prisma.statusCode.findFirst({ where: { category: 'SALES_DEAL_STATUS', name: '영업중' }, select: { id: true } })
+    if (def) data.statusId = def.id
+  }
 
   // 차수: 미지정 시 다음 차수 자동
   let roundNo = Number.isInteger(body.roundNo) && body.roundNo > 0 ? body.roundNo : null
@@ -39,14 +47,8 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   try {
     const dealCode = await nextDealCode()
-    const deal = await prisma.$transaction(async (tx) => {
-      const created = await tx.salesDeal.create({
-        data: { ...data, dealCode, hospitalCode: params.code, roundNo: roundNo as number },
-      })
-      if (devices.length > 0) {
-        await tx.salesDealDevice.createMany({ data: devices.map((d) => ({ ...d, dealId: created.id })) })
-      }
-      return created
+    const deal = await prisma.salesDeal.create({
+      data: { ...data, dealCode, hospitalCode: params.code, roundNo: roundNo as number },
     })
 
     await logAudit({
@@ -56,7 +58,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       resource: 'sales_deal',
       resourceId: deal.id,
       resourceLabel: `${hospital.hospitalName} ${deal.roundNo}차 딜 (${deal.dealCode})`,
-      after: { ...deal, amountActual: deal.amountActual?.toString() ?? null, amountProduct: deal.amountProduct?.toString() ?? null, amountConstruction: deal.amountConstruction?.toString() ?? null, amountTotal: deal.amountTotal?.toString() ?? null, amountService: deal.amountService?.toString() ?? null },
+      after: auditSafe(deal as unknown as Record<string, unknown>),
     })
 
     return NextResponse.json({ deal: { id: deal.id, dealCode: deal.dealCode, roundNo: deal.roundNo } }, { status: 201 })

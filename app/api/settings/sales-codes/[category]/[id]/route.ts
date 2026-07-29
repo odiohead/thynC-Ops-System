@@ -25,16 +25,16 @@ async function guard(request: NextRequest, params: Params['params']) {
   return { user, category, id, statusCode }
 }
 
-/** 카테고리별 딜·일지 사용 건수 (삭제 가드) */
+/** 카테고리별 프로필·딜·활동·인물 사용 건수 (삭제 가드) */
 async function usageCount(category: SalesCodeCategory, id: number): Promise<number> {
   switch (category) {
-    case 'SALES_MODEL_HOSPITAL': return prisma.salesDeal.count({ where: { hospitalSaleModelId: id } })
-    case 'SALES_MODEL_SEERS': return prisma.salesDeal.count({ where: { seersSaleModelId: id } })
-    case 'SALES_PRICE_TYPE': return prisma.salesDeal.count({ where: { priceTypeId: id } })
-    case 'SALES_SETTLEMENT': return prisma.salesDeal.count({ where: { settlementStatusId: id } })
-    case 'SALES_TAX_INVOICE': return prisma.salesDeal.count({ where: { taxInvoiceStatusId: id } })
-    case 'SALES_REVENUE_RECOG': return prisma.salesDeal.count({ where: { revenueRecognitionId: id } })
+    case 'SALES_STAGE': return prisma.hospitalSalesProfile.count({ where: { stageId: id } })
+    case 'SALES_DEAL_STATUS': return prisma.salesDeal.count({ where: { statusId: id } })
     case 'SALES_ACTIVITY_TYPE': return prisma.salesActivity.count({ where: { activityTypeId: id } })
+    case 'PERSON_GROUP': return prisma.person.count({ where: { personGroupId: id } })
+    case 'SALES_MODEL': return prisma.salesDeal.count({ where: { OR: [{ hospitalModelId: id }, { seersModelId: id }] } })
+    case 'SALES_TAX_INVOICE': return prisma.salesDeal.count({ where: { taxInvoiceId: id } })
+    case 'SALES_SETTLEMENT': return prisma.salesDeal.count({ where: { settlementId: id } })
   }
 }
 
@@ -42,7 +42,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const g = await guard(request, params)
   if ('error' in g) return g.error
 
-  const { name, order } = await request.json()
+  const body = await request.json()
+  const { name, order } = body
   if (!name?.trim()) return NextResponse.json({ error: '이름을 입력해주세요.' }, { status: 400 })
 
   const duplicate = await prisma.statusCode.findFirst({ where: { name: name.trim(), category: g.category, id: { not: g.id } } })
@@ -50,7 +51,12 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const statusCode = await prisma.statusCode.update({
     where: { id: g.id },
-    data: { name: name.trim(), order: Number.isInteger(order) ? order : g.statusCode.order },
+    data: {
+      name: name.trim(),
+      order: Number.isInteger(order) ? order : g.statusCode.order,
+      // color 미전송(undefined) 시 유지, null 전송 시 제거
+      ...('color' in body ? { color: typeof body.color === 'string' && body.color ? body.color : null } : {}),
+    },
   })
 
   await logAudit({

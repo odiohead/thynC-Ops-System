@@ -1,11 +1,11 @@
 import { prisma } from '@/lib/prisma'
-import { isAdminOrAbove, type JWTPayload } from '@/lib/auth'
+import { isSuperAdmin, type JWTPayload } from '@/lib/auth'
 
 /**
  * 영업/CRM 접근 권한 (서버 강제) — projects/sales_crm_design.md §6
  *
- * 매출 금액을 포함한 영업 섹션 전체를 **ADMIN 이상 + SEERS 소속**만 열람·편집한다
- * (2026-07-28 사용자 확정). DAEWOONG 등 타 소속은 역할과 무관하게 차단.
+ * 【임시 제한, 2026-07-30】 기능 미완 상태라 **SUPER_ADMIN(최고관리자) + SEERS 소속**만
+ * 열람·편집한다 (사용자 지시). 기능 확정 후 ADMIN 이상으로 완화 예정 (isSuperAdmin → isAdminOrAbove).
  * 소속·활성 여부는 JWT가 아니라 DB 실시간 조회로 판정 (AI 어시스턴트 access.ts 선례).
  */
 
@@ -15,8 +15,8 @@ export type SalesAccessDenial = { status: number; error: string }
 
 /** 통과면 null, 차단이면 응답에 쓸 상태코드·메시지 */
 export async function checkSalesAccess(user: JWTPayload): Promise<SalesAccessDenial | null> {
-  if (!isAdminOrAbove(user.role)) {
-    return { status: 403, error: '영업 정보는 ADMIN 이상만 열람할 수 있습니다.' }
+  if (!isSuperAdmin(user.role)) {
+    return { status: 403, error: '영업 정보는 최고관리자만 열람할 수 있습니다 (기능 개발 중).' }
   }
   const row = await prisma.user.findUnique({
     where: { id: user.userId },
@@ -74,24 +74,24 @@ export function parseDateOnly(v: unknown): Date | null {
   return isNaN(d.getTime()) ? null : d
 }
 
-/** 영업 StatusCode 카테고리 화이트리스트 (설정 API·통합 GET 공유) */
+/** 영업 StatusCode 카테고리 화이트리스트 (설정 API·통합 GET 공유) — v4: 7종 */
 export const SALES_CODE_CATEGORIES = [
-  'SALES_MODEL_HOSPITAL',
-  'SALES_MODEL_SEERS',
-  'SALES_PRICE_TYPE',
-  'SALES_SETTLEMENT',
-  'SALES_TAX_INVOICE',
-  'SALES_REVENUE_RECOG',
+  'SALES_STAGE',
+  'SALES_DEAL_STATUS',
   'SALES_ACTIVITY_TYPE',
+  'SALES_MODEL',
+  'SALES_TAX_INVOICE',
+  'SALES_SETTLEMENT',
+  'PERSON_GROUP',
 ] as const
 export type SalesCodeCategory = (typeof SALES_CODE_CATEGORIES)[number]
 
 export const SALES_CODE_CATEGORY_LABELS: Record<SalesCodeCategory, string> = {
-  SALES_MODEL_HOSPITAL: '병원 판매모델',
-  SALES_MODEL_SEERS: '씨어스 판매방식',
-  SALES_PRICE_TYPE: '판매가 유형',
-  SALES_SETTLEMENT: '정산 상태',
-  SALES_TAX_INVOICE: '세금계산서 발행',
-  SALES_REVENUE_RECOG: '매출 인식',
+  SALES_STAGE: '영업 단계',
+  SALES_DEAL_STATUS: '딜(계약 건) 상태',
   SALES_ACTIVITY_TYPE: '영업 활동 유형',
+  SALES_MODEL: '판매모델',
+  SALES_TAX_INVOICE: '세금계산서 발행',
+  SALES_SETTLEMENT: '정산 상태',
+  PERSON_GROUP: '직군 (인적정보)',
 }
