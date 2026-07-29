@@ -8,7 +8,8 @@
 
 - `/vehicle-reservations` 헤더의 '📱 빠른 예약·반납' 옆에 **'🅿️ 주차 웹할인'** 버튼 추가 (`/parking` 진입)
 - 도입현황 nav 정리: '도입 현황 v2'·'v3' 메뉴 삭제(dev DB + 시드) — **nav는 '도입 현황'(/sales) 하나만**, 세 페이지 상단에 공용 **컨셉 탭**(`SalesConceptTabs` — 차수 원장 | 영업 파이프라인 | 병원 요약) 추가로 전환. 컨셉 확정 시 채택안만 남기고 탭 제거 예정
-- 힙 4GB 빌드 + PM2 재시작·HTTP 정상. **PROD 미반영** (PROD nav의 v2·v3 행은 다음 배포 시 DELETE 필요)
+- 힙 4GB 빌드 + PM2 재시작·HTTP 정상
+- **PROD 배포 완료** (같은 날): 커밋 `2ec8770` push → PROD git pull → PROD nav `sales2`·`sales3` 행 DELETE('도입 현황' 1행만 잔존) → 힙 4GB 빌드 → `pm2 restart thync-prod`. 주요 라우트 6종 정상·Ready 1.2s·신규 오류 없음. 마이그레이션 변경 없음
 
 ---
 
