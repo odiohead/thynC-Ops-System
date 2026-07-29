@@ -185,6 +185,12 @@ export default function VehicleReservationsPage() {
             >
               📱 빠른 예약·반납
             </Link>
+            <Link
+              href="/parking"
+              className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50"
+            >
+              🅿️ 주차 웹할인
+            </Link>
             {canReserve && (
               <button
                 type="button"

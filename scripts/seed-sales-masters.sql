@@ -66,9 +66,7 @@ ON CONFLICT (name, category) DO NOTHING;
 INSERT INTO nav_menu_items (menu_key, label, href, parent_key, group_label, allowed_roles, sort_order, is_active)
 VALUES
   ('settings/sales-codes', '영업 코드 관리', '/settings/sales-codes', 'settings', '영업', '{SUPER_ADMIN}', 60, true),
-  ('sales', '도입 현황', '/sales', NULL, NULL, '{SUPER_ADMIN}', 21, true),
-  ('sales2', '도입 현황 v2', '/sales2', NULL, NULL, '{SUPER_ADMIN}', 22, true),
-  ('sales3', '도입 현황 v3', '/sales3', NULL, NULL, '{SUPER_ADMIN}', 23, true)
+  ('sales', '도입 현황', '/sales', NULL, NULL, '{SUPER_ADMIN}', 21, true)
 ON CONFLICT (menu_key) DO NOTHING;
 
 -- 확인

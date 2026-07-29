@@ -3,6 +3,7 @@ import { verifyToken } from '@/lib/auth'
 import { canAccessSales, toAmount } from '@/lib/sales'
 import { prisma } from '@/lib/prisma'
 import SalesLedgerTable, { type LedgerRow } from './_components/SalesLedgerTable'
+import SalesConceptTabs from './_components/SalesConceptTabs'
 
 export const dynamic = 'force-dynamic'
 
@@ -95,5 +96,10 @@ export default async function SalesPage() {
     remark: d.remark,
   }))
 
-  return <SalesLedgerTable rows={rows} />
+  return (
+    <div>
+      <SalesConceptTabs />
+      <SalesLedgerTable rows={rows} />
+    </div>
+  )
 }

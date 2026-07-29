@@ -3,6 +3,7 @@ import { verifyToken } from '@/lib/auth'
 import { canAccessSales, toAmount } from '@/lib/sales'
 import { prisma } from '@/lib/prisma'
 import SalesPipelineTable, { type PipelineRow, type PipelineMasters } from './_components/SalesPipelineTable'
+import SalesConceptTabs from '@/app/sales/_components/SalesConceptTabs'
 
 export const dynamic = 'force-dynamic'
 
@@ -121,5 +122,10 @@ export default async function Sales2Page() {
     models: codes.filter((c) => c.category === 'SALES_MODEL').map((c) => ({ id: c.id, name: c.name })),
   }
 
-  return <SalesPipelineTable rows={rows} masters={masters} />
+  return (
+    <div>
+      <SalesConceptTabs />
+      <SalesPipelineTable rows={rows} masters={masters} />
+    </div>
+  )
 }

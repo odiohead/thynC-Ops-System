@@ -3,6 +3,7 @@ import { verifyToken } from '@/lib/auth'
 import { canAccessSales } from '@/lib/sales'
 import { prisma } from '@/lib/prisma'
 import SalesOverviewTable, { type OverviewRow } from './_components/SalesOverviewTable'
+import SalesConceptTabs from '@/app/sales/_components/SalesConceptTabs'
 
 export const dynamic = 'force-dynamic'
 
@@ -110,5 +111,10 @@ export default async function Sales3Page() {
     }
   })
 
-  return <SalesOverviewTable rows={rows} />
+  return (
+    <div>
+      <SalesConceptTabs />
+      <SalesOverviewTable rows={rows} />
+    </div>
+  )
 }
