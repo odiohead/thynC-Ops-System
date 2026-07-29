@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-07-30 | 주차 웹할인 + 영업/CRM v4 PROD 배포
+
+- dev2 커밋 4건 push → PROD git pull(`b9498f7`→`a3960f0`) — 주차(`9657e61` 등록 도구 + `0b29104` 자동 할인 조합·순차 등록) / 영업(`bbfb07f` v2 + `a3960f0` v3→v4·SUPER_ADMIN 제한). **의존성 변경 없음**
+- **PROD DB 작업** (사용자 "이 형태로 PROD에 반영" 지시):
+  ① `prisma migrate deploy` **4건** — `20260728120000`(영업 v2 테이블 8종) / `20260728150000`(v3 재구성 — 4테이블 삭제·프로필/딜 개편) / `20260729100000`(v4 P1 — persons·person_affiliations·contacts 삭제) / `20260729110000`(v4 P2 — 딜 확장·projects.education_date)
+  ② `prisma generate` ③ 시드 `seed-sales-masters.sql` — SALES/PERSON_GROUP 코드 32행 + nav 4행(전부 `{SUPER_ADMIN}`) ④ 딜 백필 `backfill-sales-deals-from-projects.sql` — **243건/210병원** (PROD 프로젝트 기반, 비고에 자동생성 마커 — 원치 않으면 마커 기준 삭제 가능)
+- 힙 4GB 빌드 → `pm2 restart thync-prod`. `/`·`/hospitals`·`/sales`·`/sales2`·`/sales3`·`/parking`·`/settings/sales-codes` 전부 307 정상, Ready 1.2s, 신규 오류 로그 없음
+- **영업 기능은 미완(도입현황 3컨셉 비교 중)이라 최고관리자+SEERS만 접근** — nav도 SUPER_ADMIN 전용이라 일반 사용자에게는 보이지 않음. 주차(/parking)는 USER 이상 사용 가능
+
+---
+
 ## 2026-07-30 | 영업/CRM 접근 SUPER_ADMIN 임시 제한 + PROD 배포
 
 - 영업 기능이 미완(컨셉 비교 중)이라 **최고관리자(SUPER_ADMIN) + SEERS만 접근**하도록 임시 제한 (사용자 지시). `checkSalesAccess` 역할 게이트 isAdminOrAbove → isSuperAdmin, nav 4행(`/sales`·`/sales2`·`/sales3`·`/settings/sales-codes`) allowed_roles `{SUPER_ADMIN}`, 접근 거부 문구 "기능 개발 중으로 최고관리자만" — 기능 확정 후 ADMIN 이상 완화 예정
