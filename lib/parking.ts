@@ -227,6 +227,15 @@ async function getForDiscountRaw(jar: Jar, carId: string, userId: string): Promi
   return asRec(await res.json().catch(() => ({})))
 }
 
+// 무료권을 사용하면 함께 쓸 수 없는 유료권(사이트 규칙) — UI·자동계산에서 제외.
+// 무료+나머지 6종(일반요금 30분/1시간/2시간/3시간 + 유료 24시간·72시간)만 사용.
+const BLOCKED_WITH_FREE = new Set(['유료 30분 할인권', '유료 1시간 할인', '유료 2시간 할인', '유료 3시간 할인'])
+
+/** 무료권과 함께 사용 가능한 유료권인지 (무료 제외·차단 4종 제외) */
+function isUsablePaid(d: DiscountType): boolean {
+  return !d.free && d.value > 0 && !BLOCKED_WITH_FREE.has(d.name)
+}
+
 function discountTypesFrom(data: Record<string, unknown>): DiscountType[] {
   const list = Array.isArray(data.listDiscountType) ? data.listDiscountType : []
   return list.map((raw) => {
@@ -381,7 +390,8 @@ export async function carDiscountState(carId: string): Promise<CarDiscountState>
         paidEnabled: !!r.a.paid,
       }
     }
-    const dts = discountTypesFrom(r.data)
+    // 무료 + 사용 가능한 유료권만 노출(차단 4종 제외). 분 매핑은 위에서 전체로 이미 구성됨.
+    const dts = discountTypesFrom(r.data).filter((d) => d.free || isUsablePaid(d))
     const member = asRec(r.data.member)
     const freeApplied = appliedDiscounts.some((ad) => ad.account === r.a.userId && ad.free)
     return {
@@ -471,9 +481,9 @@ export async function registerDiscount(params: {
 
 // ── 자동 계산 (주차시간 기반 최적 할인권 조합) ────────────────────────────
 
-/** 유료권 대상: '유료XX시간'만 (무료·'일반요금' 제외) */
+/** 자동계산 유료권 대상: 무료와 함께 쓸 수 있는 6종(일반요금 4종 + 유료 24/72시간) */
 function isPaidEligible(d: DiscountType): boolean {
-  return !d.free && d.value > 0 && d.name.startsWith('유료')
+  return isUsablePaid(d)
 }
 
 export interface PlanStep {
