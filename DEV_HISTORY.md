@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-07-30 | 스크롤 UX + 영업 대시보드 3종 PROD 배포
+
+- 커밋 `dfc9eab`(이관 SQL 기록)·`418f353`(스크롤 UX + 대시보드 A/B/C) push → PROD git pull → 마이그레이션 변경 없음 확인 → 힙 4GB 빌드(145 라우트) → `pm2 restart thync-prod`
+- 검증: `/sales`(+dashboard·dashboard2·dashboard3)·`/sales2`·`/sales3` 전부 정상 응답. PROD 상용(이관) 데이터 기준 대시보드 확인 가능 상태
+
+---
+
 ## 2026-07-30 | 영업/CRM — 대시보드 C '인사이트' (모던 CRM 레이아웃, dev2 반영)
 
 - 사용자 피드백(막대그래프 일변도 허접) → CRM 솔루션 스타일 3안 `/sales/dashboard3` 신설 (탭 '대시보드 C · 인사이트')
