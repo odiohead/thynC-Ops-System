@@ -181,6 +181,15 @@ export function TicketIcon() {
   )
 }
 
+export function TrendingUpIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 7 13.5 15.5 8.5 10.5 2 17" />
+      <path d="M16 7h6v6" />
+    </svg>
+  )
+}
+
 export const ICON_MAP: Record<string, () => ReactNode> = {
   'hira': HiraIcon,
   'hospital': HospitalIcon,
@@ -200,6 +209,7 @@ export const ICON_MAP: Record<string, () => ReactNode> = {
   'package': PackageIcon,
   'wifi': WifiIcon,
   'ticket': TicketIcon,
+  'trending-up': TrendingUpIcon,
 }
 
 export function getMenuIcon(iconKey: string | null | undefined): ReactNode | null {

@@ -4,6 +4,27 @@
 
 ---
 
+## 2026-07-30 | 영업현황 nav 아이콘 추가 + AI 영업 도구 PROD 배포
+
+- nav '영업현황'(구 도입 현황 — 라벨은 사용자가 PROD에서 직접 변경) 아이콘 부재 → `NavIcons.tsx`에 `trending-up` 아이콘 신설, dev·PROD nav `icon_key` 설정, 시드에 icon_key·새 라벨 반영
+- AI 영업 도구 3종 + 아이콘을 선별 커밋·push → PROD git pull → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- **주의**: dev2 작업트리에 진행 중인 자재관리 일괄 전표 작업분(별도 세션, 타입 오류 상태)이 있어 dev2 로컬 빌드는 보류 — 커밋에서 제외했고 PROD 빌드는 영향 없음
+
+---
+
+## 2026-07-30 | AI 어시스턴트 영업 도구 3종 추가 — 사용자별 권한 게이트 (dev2 반영)
+
+- 원인: 어시스턴트 도구 26종에 영업 축(v4) 조회 도구가 없어 영업 데이터를 못 봄 (영업 축이 도구 확장 이후 신설)
+- **도구 3종 추가** (`lib/ai/tools.ts`, 26 → 29종 — 기존 패턴 동일: read-only·limit/detail·link 출처):
+  ① `get_hospital_sales` — 병원 영업 정보(단계·담당·전체 병상/침투율·키맨(현재 소속 인적정보)·딜 전체(금액 3종·정산·세금계산서)·최근 활동 5건)
+  ② `list_sales_deals` — 딜 목록(상태·판매모델(양 관점)·지역·병원명·계약일 기간 필터) + **합계**(실판매액·제품가·공사비·병상·병동 — aggregate)
+  ③ `get_sales_summary` — 전사 KPI(도입/확장 병원·계약완료/영업중·병상·실판매액/판매 합)·단계 분포·판매모델 분포·지역 Top5
+- **권한 게이트**: 어시스턴트는 SEERS USER 이상 전원 사용 → 영업 임시 제한(SUPER_ADMIN)의 권한 우회 방지를 위해 **도구 실행 시점에 `checkSalesAccess(user)` 재검증**(`salesGate`). `executeTool`에 user 파라미터 추가 → `runAgentChat` opts.user → chat 라우트에서 authUser 전달. 게이트는 lib/sales.ts를 따르므로 **접근 완화 시 자동 동반 완화**
+- 시스템 프롬프트에 '축 3 — 영업/CRM' 섹션 추가 (권한 오류 시 추측 금지·금액 억 단위 요약+정확 수치 병기)
+- **검증**: 일회용 스모크 6/6 — USER 차단·user 미전달 차단·요약(실판매액 합계 DB 실측 일치 40,310,613,908)·필터 목록(사용량비례형 178건)·병원 영업 정보(양평병원). tsc 0오류, 힙 4GB 빌드, dev2 PM2 재시작 → 같은 날 PROD 배포
+
+---
+
 ## 2026-07-30 | 스크롤 UX + 영업 대시보드 3종 PROD 배포
 
 - 커밋 `dfc9eab`(이관 SQL 기록)·`418f353`(스크롤 UX + 대시보드 A/B/C) push → PROD git pull → 마이그레이션 변경 없음 확인 → 힙 4GB 빌드(145 라우트) → `pm2 restart thync-prod`
