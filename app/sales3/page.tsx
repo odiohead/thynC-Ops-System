@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
  * 컨셉: 병원의 도입 라이프사이클 상태('미도입'·'최초 도입 검토중'·'N차 도입완료'·'추가도입 검토중')와
  *       누적 지표(전체 병상·도입 병상·침투율·기기수·매출)를 한 줄로 스캔.
  * 범위: 영업 접점(영업 프로필 또는 딜)이 있는 병원 — 병원 전체(HIRA 7.9만)는 범위 밖.
- * 권한: SUPER_ADMIN + SEERS 소속 (임시 — 기능 미완, 확정 후 ADMIN 이상 완화)
+ * 권한: ADMIN 이상 + SEERS 소속
  */
 export default async function Sales3Page() {
   const cookieStore = cookies()
@@ -24,7 +24,7 @@ export default async function Sales3Page() {
     return (
       <div className="p-6">
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
-          도입 현황은 기능 개발 중으로 최고관리자만 열람할 수 있습니다.
+          영업 현황은 ADMIN 이상 + 씨어스(SEERS) 소속만 열람할 수 있습니다.
         </div>
       </div>
     )

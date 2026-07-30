@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 /**
  * 영업 대시보드 B — 영업 파이프라인 (활동·기회)
  * 단계 분포·라이프사이클·담당자별 성과·확장 기회(침투 여지)·활동 추이·방치 딜.
- * 권한: SUPER_ADMIN + SEERS (임시 — 영업 섹션 공통 게이트)
+ * 권한: ADMIN 이상 + SEERS (영업 섹션 공통 게이트)
  */
 export default async function SalesDashboard2Page() {
   const cookieStore = cookies()
@@ -21,7 +21,7 @@ export default async function SalesDashboard2Page() {
     return (
       <div className="p-6">
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
-          도입 현황은 기능 개발 중으로 최고관리자만 열람할 수 있습니다.
+          영업 현황은 ADMIN 이상 + 씨어스(SEERS) 소속만 열람할 수 있습니다.
         </div>
       </div>
     )

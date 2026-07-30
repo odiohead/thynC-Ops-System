@@ -1,11 +1,11 @@
 import { prisma } from '@/lib/prisma'
-import { isSuperAdmin, type JWTPayload } from '@/lib/auth'
+import { isAdminOrAbove, type JWTPayload } from '@/lib/auth'
 
 /**
  * 영업/CRM 접근 권한 (서버 강제) — projects/sales_crm_design.md §6
  *
- * 【임시 제한, 2026-07-30】 기능 미완 상태라 **SUPER_ADMIN(최고관리자) + SEERS 소속**만
- * 열람·편집한다 (사용자 지시). 기능 확정 후 ADMIN 이상으로 완화 예정 (isSuperAdmin → isAdminOrAbove).
+ * **ADMIN 이상 + SEERS 소속** 열람·편집 (2026-07-30 관리자 개방 — 임시 SUPER_ADMIN 제한 해제).
+ * nav 허용 역할은 메뉴 노출만 제어하며, 실제 접근은 이 게이트가 단일 소스다.
  * 소속·활성 여부는 JWT가 아니라 DB 실시간 조회로 판정 (AI 어시스턴트 access.ts 선례).
  */
 
@@ -15,8 +15,8 @@ export type SalesAccessDenial = { status: number; error: string }
 
 /** 통과면 null, 차단이면 응답에 쓸 상태코드·메시지 */
 export async function checkSalesAccess(user: JWTPayload): Promise<SalesAccessDenial | null> {
-  if (!isSuperAdmin(user.role)) {
-    return { status: 403, error: '영업 정보는 최고관리자만 열람할 수 있습니다 (기능 개발 중).' }
+  if (!isAdminOrAbove(user.role)) {
+    return { status: 403, error: '영업 정보는 ADMIN 이상만 열람할 수 있습니다.' }
   }
   const row = await prisma.user.findUnique({
     where: { id: user.userId },

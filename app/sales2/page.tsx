@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
  * 취지: 레코드의 출발점 = 영업. 영업담당자가 이 화면에서 직접 차수를 등록(기본 '영업중')하고,
  *       계약 완료 후 프로젝트를 매핑하면 공사 단계·일정이 자동으로 붙는다.
  *       미매핑(영업 중) 딜에는 계약 전 운영 항목(답사·설치계획 건수)을 병원 레벨로 표시.
- * 권한: SUPER_ADMIN + SEERS 소속 (임시 — 기능 미완, 확정 후 ADMIN 이상 완화)
+ * 권한: ADMIN 이상 + SEERS 소속
  */
 export default async function Sales2Page() {
   const cookieStore = cookies()
@@ -24,7 +24,7 @@ export default async function Sales2Page() {
     return (
       <div className="p-6">
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
-          도입 현황은 기능 개발 중으로 최고관리자만 열람할 수 있습니다.
+          영업 현황은 ADMIN 이상 + 씨어스(SEERS) 소속만 열람할 수 있습니다.
         </div>
       </div>
     )

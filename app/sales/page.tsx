@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 /**
  * 도입 현황 목록 (영업/CRM v4 P3 — 엑셀 '도입 현황' 와꾸 재현)
  * 1행 = 1차수(딜). 영업 축 + 운영 축(연결 프로젝트·답사) 조인 — 이중 저장 없음.
- * 권한: SUPER_ADMIN + SEERS 소속 (임시 — 기능 미완, 확정 후 ADMIN 이상 완화)
+ * 권한: ADMIN 이상 + SEERS 소속
  */
 export default async function SalesPage() {
   const cookieStore = cookies()
@@ -22,7 +22,7 @@ export default async function SalesPage() {
     return (
       <div className="p-6">
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
-          도입 현황은 기능 개발 중으로 최고관리자만 열람할 수 있습니다.
+          영업 현황은 ADMIN 이상 + 씨어스(SEERS) 소속만 열람할 수 있습니다.
         </div>
       </div>
     )

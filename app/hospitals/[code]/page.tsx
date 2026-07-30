@@ -41,7 +41,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
   const token = cookieStore.get('auth-token')?.value
   const user = token ? await verifyToken(token) : null
   const isAdmin = !!user && user.role !== 'VIEWER'
-  const showSales = await canAccessSales(user) // 영업 섹션 — 임시 SUPER_ADMIN + SEERS만 (기능 미완)
+  const showSales = await canAccessSales(user) // 영업 섹션 — ADMIN 이상 + SEERS 소속만
 
   const [hospital, projects, siteVisits, installPlans, maintenances, allDevices, hospitalDevices, statusCodes] = await Promise.all([
     prisma.hospital.findUnique({
@@ -227,7 +227,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
           </div>
         </div>
 
-        {/* 영업 정보 (영업/CRM v4 — 임시 SUPER_ADMIN+SEERS만 렌더, API에서 재검증) */}
+        {/* 영업 정보 (영업/CRM v4 — ADMIN 이상+SEERS만 렌더, API에서 재검증) */}
         {showSales && <SalesSection hospitalCode={hospital.hospitalCode} currentUserId={user?.userId ?? null} />}
 
         {/* thynC 시스템 현황 */}

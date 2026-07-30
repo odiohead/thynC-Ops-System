@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 /**
  * 영업 대시보드 A — 도입 실적 (경영 요약)
  * 계약완료 딜 기준 누적 실적·월별 추이·구성(판매모델·종별·지역)·정산 현황.
- * 권한: SUPER_ADMIN + SEERS (임시 — 영업 섹션 공통 게이트)
+ * 권한: ADMIN 이상 + SEERS (영업 섹션 공통 게이트)
  */
 export default async function SalesDashboardPage() {
   const cookieStore = cookies()
@@ -21,7 +21,7 @@ export default async function SalesDashboardPage() {
     return (
       <div className="p-6">
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
-          도입 현황은 기능 개발 중으로 최고관리자만 열람할 수 있습니다.
+          영업 현황은 ADMIN 이상 + 씨어스(SEERS) 소속만 열람할 수 있습니다.
         </div>
       </div>
     )

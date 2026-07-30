@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
  * 영업 대시보드 C — 인사이트 (모던 CRM 레이아웃 실험)
  * 히어로 KPI(스파크라인·전월 대비) + 매출 에어리어 + 목표 게이지 + 파이프라인 + 도넛 +
  * 담당자 리더보드 + 최근 활동 피드 + 지역/확장 기회.
- * 권한: SUPER_ADMIN + SEERS (임시)
+ * 권한: ADMIN 이상 + SEERS
  */
 export default async function SalesDashboard3Page() {
   const cookieStore = cookies()
@@ -22,7 +22,7 @@ export default async function SalesDashboard3Page() {
     return (
       <div className="p-6">
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
-          도입 현황은 기능 개발 중으로 최고관리자만 열람할 수 있습니다.
+          영업 현황은 ADMIN 이상 + 씨어스(SEERS) 소속만 열람할 수 있습니다.
         </div>
       </div>
     )

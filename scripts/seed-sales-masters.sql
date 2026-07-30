@@ -65,8 +65,8 @@ ON CONFLICT (name, category) DO NOTHING;
 -- nav: 설정 하위 '영업' 그룹 + 도입 현황 목록(P3)
 INSERT INTO nav_menu_items (menu_key, label, href, parent_key, group_label, allowed_roles, sort_order, is_active, icon_key)
 VALUES
-  ('settings/sales-codes', '영업 코드 관리', '/settings/sales-codes', 'settings', '영업', '{SUPER_ADMIN}', 60, true, NULL),
-  ('sales', '영업현황', '/sales', NULL, NULL, '{SUPER_ADMIN}', 21, true, 'trending-up')
+  ('settings/sales-codes', '영업 코드 관리', '/settings/sales-codes', 'settings', '영업', '{SUPER_ADMIN,ADMIN}', 60, true, NULL),
+  ('sales', '영업현황', '/sales', NULL, NULL, '{SUPER_ADMIN,ADMIN}', 21, true, 'trending-up')
 ON CONFLICT (menu_key) DO NOTHING;
 
 -- 확인
