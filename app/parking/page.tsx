@@ -264,19 +264,19 @@ export default function ParkingPage() {
           type="date"
           value={searchDate}
           onChange={(e) => setSearchDate(e.target.value)}
-          className="w-40"
+          className="w-36 shrink-0"
           title="입차일 (입차한 날짜 기준으로 검색)"
         />
         <Input
           value={carNo}
           onChange={(e) => setCarNo(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && doSearch()}
-          placeholder="차량번호 (뒤 4자리 이상)"
+          placeholder="차량번호 뒤 4자리"
           inputMode="numeric"
           autoFocus
-          className="max-w-xs"
+          className="min-w-0 flex-1 sm:max-w-xs"
         />
-        <Button onClick={doSearch} disabled={loading}>
+        <Button onClick={doSearch} disabled={loading} className="w-full sm:w-auto">
           {loading ? '조회 중…' : '조회'}
         </Button>
       </div>
@@ -316,12 +316,12 @@ export default function ParkingPage() {
             <button
               key={c.id}
               onClick={() => selectCar(c)}
-              className={`flex w-full items-center justify-between rounded-md border px-4 py-2 text-left text-sm transition-colors hover:bg-accent ${
+              className={`flex w-full flex-col gap-0.5 rounded-md border px-4 py-2.5 text-left text-sm transition-colors hover:bg-accent sm:flex-row sm:items-center sm:justify-between sm:gap-2 ${
                 selected?.id === c.id ? 'border-primary bg-accent' : 'border-border'
               }`}
             >
               <span className="font-semibold">{c.carNo}</span>
-              <span className="text-muted-foreground">
+              <span className="text-xs text-muted-foreground sm:text-sm">
                 입차 {c.entryTime} · 주차 {c.elapsed}
                 {c.dscntCnt > 0 && ` · 기등록 ${c.dscntCnt}건`}
               </span>
@@ -333,22 +333,22 @@ export default function ParkingPage() {
       {/* 선택 차량 요약 (주차시간 강조) */}
       {selected && (
         <Card className="mb-4">
-          <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
-            <div>
+          <CardContent className="flex items-start justify-between gap-3 py-4">
+            <div className="min-w-0">
               <span className="text-lg font-bold">{car?.carNo ?? selected.carNo}</span>
-              <div className="mt-0.5 text-sm text-muted-foreground">
+              <div className="mt-0.5 break-words text-sm text-muted-foreground">
                 입차 {selected.entryTime}
                 {car?.gate ? ` · ${car.gate}` : ''}
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="text-right">
+            <div className="shrink-0 space-y-1.5 text-right">
+              <div>
                 <div className="text-xs text-muted-foreground">주차시간</div>
                 <div className="text-lg font-bold tabular-nums text-primary">
                   {car?.elapsed || selected.elapsed || '-'}
                 </div>
               </div>
-              <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800">
+              <span className="inline-block rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800">
                 기등록 {applied.length}건
               </span>
             </div>
@@ -395,13 +395,13 @@ export default function ParkingPage() {
                     <div className="divide-y divide-border rounded-md border border-border">
                       {groupSteps(plan.steps).map((g, i) => (
                         <div key={i} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
-                          <span>
+                          <span className="min-w-0 truncate">
                             <span className={g.price === 0 ? 'font-medium text-emerald-700 dark:text-emerald-400' : 'font-medium'}>
                               {g.label}호 · {g.name}
                             </span>
                             {g.count > 1 && <span className="ml-1 text-muted-foreground">×{g.count}</span>}
                           </span>
-                          <span className="text-xs text-muted-foreground">
+                          <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
                             {fmtMin(g.minutes)} · {g.price === 0 ? '무료' : `${g.price.toLocaleString()}원`}
                           </span>
                         </div>
@@ -463,14 +463,14 @@ export default function ParkingPage() {
             <div className="divide-y divide-border">
               {applied.map((a) => (
                 <div key={a.seq} className="flex items-center justify-between gap-2 py-2 text-sm">
-                  <span className="flex items-center gap-2">
-                    <span className="w-5 text-right text-xs text-muted-foreground">{a.seq}</span>
-                    <span className={a.free ? 'font-medium text-emerald-700 dark:text-emerald-400' : 'font-medium'}>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="w-4 shrink-0 text-right text-xs text-muted-foreground">{a.seq}</span>
+                    <span className={`truncate ${a.free ? 'font-medium text-emerald-700 dark:text-emerald-400' : 'font-medium'}`}>
                       {a.discountName}
                     </span>
-                    <span className="text-xs text-muted-foreground">{a.account}호</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{a.account}호</span>
                   </span>
-                  <span className="text-xs text-muted-foreground">{a.time}</span>
+                  <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{a.time}</span>
                 </div>
               ))}
             </div>
@@ -492,8 +492,8 @@ export default function ParkingPage() {
               const paids = acc.discountTypes.filter((d) => !d.free)
               return (
                 <Card key={acc.userId}>
-                  <CardHeader className="flex-row items-center justify-between py-3">
-                    <CardTitle>
+                  <CardHeader className="flex-row items-center justify-between gap-2 py-3">
+                    <CardTitle className="min-w-0">
                       {acc.label}호
                       {acc.freeApplied && (
                         <span className="ml-2 text-xs font-normal text-emerald-600 dark:text-emerald-400">
@@ -502,10 +502,10 @@ export default function ParkingPage() {
                       )}
                     </CardTitle>
                     {!acc.ok ? (
-                      <span className="text-xs text-destructive">오류</span>
+                      <span className="shrink-0 text-xs text-destructive">오류</span>
                     ) : (
                       (acc.paidEnabled || (acc.remainCharge ?? 0) > 0) && (
-                        <span className="text-xs text-muted-foreground">
+                        <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
                           잔액 {(acc.remainCharge ?? 0).toLocaleString()}원
                         </span>
                       )
