@@ -33,6 +33,7 @@ interface Tx {
   id: number; txCode: string; txType: string; quantity: number
   reasonCode: { name: string } | null
   destination: string | null
+  lotNo: string | null
   note: string | null
   canceledAt: string | null; txDate: string; createdAt: string
   warehouse: { name: string } | null; toWarehouse: { name: string } | null
@@ -60,6 +61,7 @@ export default function ItemDetailPage() {
   const [item, setItem] = useState<Item | null>(null)
   const [total, setTotal] = useState(0)
   const [txs, setTxs] = useState<Tx[]>([])
+  const [lotHistory, setLotHistory] = useState<{ lotNo: string; inQty: number; outQty: number; remain: number }[]>([])
   const [units, setUnits] = useState<Unit[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [canManage, setCanManage] = useState(false)
@@ -98,6 +100,11 @@ export default function ItemDetailPage() {
     fetch('/api/auth/me').then(async (r) => { if (r.ok) { const d = await r.json(); setIsAdmin(d.role === 'SUPER_ADMIN' || d.role === 'ADMIN') } })
   }, [])
   useEffect(() => { fetchAll() }, [fetchAll])
+  useEffect(() => {
+    if (item?.isLotManaged && !item?.isSerialManaged) {
+      fetch(`/api/inventory/items/${item.id}/lot-history`).then(async (r) => { if (r.ok) setLotHistory((await r.json()).lots) })
+    }
+  }, [item?.id, item?.isLotManaged, item?.isSerialManaged])
   useEffect(() => { if (item?.isSerialManaged) fetchUnits() }, [item?.isSerialManaged, fetchUnits])
 
   async function openAddComp() {
@@ -326,20 +333,47 @@ export default function ItemDetailPage() {
       </div>
 
       {tab === 'history' ? (
-        <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto">
+        <>
+          {/* LOT별 입출고 요약 (LOT 관리 품목) */}
+          {lotHistory.length > 0 && (
+            <div className="mb-3 rounded-xl border border-teal-200 bg-teal-50/40 overflow-x-auto">
+              <div className="px-3 py-2 text-xs font-medium text-teal-700">LOT별 입출고</div>
+              <table className="w-full text-sm whitespace-nowrap">
+                <thead>
+                  <tr className="border-y border-teal-100 bg-teal-50 text-left text-xs font-medium text-teal-700">
+                    <th className="px-3 py-1.5">LOT</th>
+                    <th className="px-3 py-1.5 text-right">입고</th>
+                    <th className="px-3 py-1.5 text-right">출고</th>
+                    <th className="px-3 py-1.5 text-right">잔량</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-teal-100">
+                  {lotHistory.map((l) => (
+                    <tr key={l.lotNo}>
+                      <td className="px-3 py-1.5 font-mono text-xs text-gray-700">{l.lotNo || '(LOT 없음)'}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-green-700">{l.inQty.toLocaleString()}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-red-600">{l.outQty.toLocaleString()}</td>
+                      <td className="px-3 py-1.5 text-right font-medium tabular-nums">{l.remain.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto">
           <table className="w-full text-sm whitespace-nowrap">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <th className="px-3 py-2">전표</th><th className="px-3 py-2">일시</th><th className="px-3 py-2">유형</th><th className="px-3 py-2">입출고 유형</th><th className="px-3 py-2 text-right">수량</th><th className="px-3 py-2">위치</th><th className="px-3 py-2">출고처/병원</th><th className="px-3 py-2">비고</th><th className="px-3 py-2">처리자</th>
+                <th className="px-3 py-2">전표</th><th className="px-3 py-2">일시</th><th className="px-3 py-2">유형</th><th className="px-3 py-2">입출고 유형</th><th className="px-3 py-2 text-right">수량</th>{item.isLotManaged && !item.isSerialManaged && <th className="px-3 py-2">LOT</th>}<th className="px-3 py-2">위치</th><th className="px-3 py-2">출고처/병원</th><th className="px-3 py-2">비고</th><th className="px-3 py-2">처리자</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {txs.length === 0 ? (
-                <tr><td colSpan={9} className="py-8 text-center text-sm text-gray-400">이력 없음</td></tr>
+                <tr><td colSpan={item.isLotManaged && !item.isSerialManaged ? 10 : 9} className="py-8 text-center text-sm text-gray-400">이력 없음</td></tr>
               ) : txs.map((tx) => (
                 <tr key={tx.id} className={tx.canceledAt ? 'opacity-50 line-through' : ''}>
-                  <td className="px-3 py-2 font-mono text-xs text-gray-500">
-                    {tx.txCode}
+                  <td className="px-3 py-2 font-mono text-xs">
+                    <Link href={`/inventory/transactions/${tx.id}`} className="text-blue-600 hover:underline">{tx.txCode}</Link>
                     {tx.parentTx && <span className="block text-[10px] text-emerald-600">└ 세트</span>}
                   </td>
                   <td className="px-3 py-2 text-xs text-gray-500 tabular-nums">{tx.txDate?.slice(0, 10) ?? new Date(tx.createdAt).toLocaleDateString('ko-KR')}</td>
@@ -351,6 +385,7 @@ export default function ItemDetailPage() {
                   </td>
                   <td className="px-3 py-2 text-gray-600">{tx.txType === 'MOVE' ? '이동' : tx.txType === 'TRANSFER' ? '이관(구)' : (tx.reasonCode?.name ?? '-')}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{tx.quantity.toLocaleString()}</td>
+                  {item.isLotManaged && !item.isSerialManaged && <td className="px-3 py-2 font-mono text-xs text-gray-500">{tx.lotNo ?? '-'}</td>}
                   <td className="px-3 py-2 text-gray-600">{tx.warehouse?.name}{tx.toWarehouse && ` → ${tx.toWarehouse.name}`}</td>
                   <td className="px-3 py-2 text-gray-500 text-xs">{tx.destination ?? tx.hospital?.hospitalName ?? '-'}</td>
                   <td className="max-w-[8rem] truncate px-3 py-2 text-gray-500 text-xs" title={tx.note ?? undefined}>{tx.note ?? '-'}</td>
@@ -359,7 +394,8 @@ export default function ItemDetailPage() {
               ))}
             </tbody>
           </table>
-        </div>
+          </div>
+        </>
       ) : (
         <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto">
           <table className="w-full text-sm whitespace-nowrap">

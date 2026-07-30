@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import BulkSerialTxModal from '../components/BulkSerialTxModal'
+import BulkTxModal from '../components/BulkTxModal'
 import TxEditModal from '../components/TxEditModal'
 
 interface Warehouse { id: number; name: string; inventoryId: number }
@@ -55,6 +56,7 @@ export default function TransactionsPage() {
   const [canManage, setCanManage] = useState(false)
   const [canEditTx, setCanEditTx] = useState(false)
   const [showBulk, setShowBulk] = useState(false)
+  const [showBulkForm, setShowBulkForm] = useState(false)
   const [editTx, setEditTx] = useState<Tx | null>(null)
 
   const [filterType, setFilterType] = useState('')
@@ -114,7 +116,10 @@ export default function TransactionsPage() {
         <h1 className="text-xl font-semibold text-gray-900">입출고 이력</h1>
         <div className="flex gap-2">
           {canManage && (
-            <button onClick={() => setShowBulk(true)} className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100">Excel 일괄 입출고</button>
+            <>
+              <button onClick={() => setShowBulkForm(true)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">다품목 입출고</button>
+              <button onClick={() => setShowBulk(true)} className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100">Excel 일괄 입출고</button>
+            </>
           )}
           <button onClick={exportExcel} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Excel 다운로드</button>
           <Link href={`/inventory${filterInventory ? `?inv=${filterInventory}` : ''}`} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">자재 현황</Link>
@@ -182,8 +187,8 @@ export default function TransactionsPage() {
               <tr><td colSpan={canManage ? 13 : 12} className="py-12 text-center text-sm text-gray-400">이력이 없습니다.</td></tr>
             ) : txs.map((tx) => (
               <tr key={tx.id} className={`hover:bg-gray-50 ${tx.canceledAt ? 'opacity-50 line-through' : ''}`}>
-                <td className="px-2 py-2 font-mono text-[11px] text-gray-500">
-                  {tx.txCode}
+                <td className="px-2 py-2 font-mono text-[11px]">
+                  <Link href={`/inventory/transactions/${tx.id}`} className="text-blue-600 hover:underline no-underline" title="전표 상세 보기">{tx.txCode}</Link>
                   {tx.parentTx && <span className="block text-[10px] text-emerald-600 no-underline">└ 세트 ({tx.parentTx.txCode})</span>}
                   {tx.childTxs.length > 0 && <span className="block text-[10px] text-emerald-600">세트출고 +{tx.childTxs.length}</span>}
                 </td>
@@ -254,6 +259,10 @@ export default function TransactionsPage() {
           <span className="text-sm text-gray-600">{page} / {totalPages}</span>
           <button onClick={() => { setPage(page + 1); fetchTxs(page + 1) }} disabled={page === totalPages} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40">다음</button>
         </div>
+      )}
+
+      {showBulkForm && (
+        <BulkTxModal onClose={() => setShowBulkForm(false)} onDone={() => { setPage(1); fetchTxs(1) }} />
       )}
 
       {showBulk && (

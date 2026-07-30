@@ -4,6 +4,29 @@
 
 ---
 
+## 2026-07-30 | 영업 접근 ADMIN 이상 개방 — 임시 SUPER_ADMIN 제한 해제 + PROD 배포
+
+- 사용자 리포트: 메뉴 관리에서 '영업현황' 허용 역할에 ADMIN을 추가했는데 관리자 접근이 여전히 차단됨
+- 원인: **nav 허용 역할은 메뉴 노출만 제어** — 실제 접근은 서버 게이트 `checkSalesAccess`(임시 SUPER_ADMIN 하드 제한, 2026-07-30 오전)가 별도로 강제. 관리자 개방 의사 확인으로 게이트 완화
+- 조치: `lib/sales.ts` isSuperAdmin → **isAdminOrAbove**(+SEERS 유지, 접근 단일 소스 주석 명문화), 영업 페이지 6곳 거부 문구·주석 정리, README 권한 표기 갱신, 시드·dev nav `{SUPER_ADMIN,ADMIN}` (PROD nav는 사용자가 메뉴 관리에서 이미 설정). **AI 어시스턴트 영업 도구 게이트도 자동 동반 완화** (checkSalesAccess 공유)
+- PROD 배포: 선별 커밋 push → git pull → 힙 4GB 빌드 → `pm2 restart thync-prod`
+
+---
+
+## 2026-07-30 | 자재관리 — 전표 상세 페이지·LOT별 입출고 요약 + 다품목 일괄 입출고
+
+- **기능 A: 이력 상세·가시성**
+  - `GET /api/inventory/transactions/[id]` 신설(기존 PUT만) — 전표 + 연결 시리얼 개체(InventoryTransactionUnit→Unit) + 세트 부모/자식 포함
+  - 전표 상세 페이지 `/inventory/transactions/[id]` 신규 — 전표 전체 정보 + **시리얼 품목이면 시리얼번호 목록**(개체별 시리얼·LOT·현재 상태·위치) + 세트출고 부모/자식 링크
+  - 입출고 이력 목록·품목상세 이력의 **전표코드 클릭 → 상세**로 이동(A1)
+  - `GET /api/inventory/items/[id]/lot-history` 신설 — LOT 관리 품목의 **LOT번호별 입고·출고·잔량 요약**(취소 전표 제외, groupBy). 품목 상세(스코프·마스터 양쪽)에 'LOT별 입출고' 표 + 이력 행 LOT 컬럼 추가(A2)
+- **기능 B: 다품목 일괄 입출고**(폼)
+  - `POST /api/inventory/transactions/bulk` 신설 — 입고/출고만. 인벤토리·유형·요청자·출고처·일자 공통 + **위치·품목·수량/시리얼·LOT는 줄별**. 각 줄을 `planInventoryTransaction`으로 검증 후 단일 `$transaction`에서 `applyInventoryTransaction` 루프(전부 성공/전부 롤백, txCode 중복 재시도) — 기존 bulk-serial 패턴 재사용
+  - `BulkTxModal.tsx` 신규 — 인벤토리 선택 후 품목 줄 추가(품목·위치·수량 또는 시리얼·LOT), 비시리얼+시리얼 혼합 지원. 입출고 이력 상단 '다품목 입출고' 버튼(기존 'Excel 일괄 입출고'와 별개)
+  - 결정(사용자): 위치=품목별 지정 / 입고·출고만 / 세트출고·병원연결 미포함
+- tsc 0오류, dev2 빌드·PM2 재시작 완료. **2026-07-31 README 반영 후 커밋·push·PROD 배포 완료** (마이그레이션·패키지 변경 없음)
+- 영향 파일: app/api/inventory/transactions/{[id]/route.ts(GET 추가), bulk/route.ts(신규)}, app/api/inventory/items/[id]/lot-history/route.ts(신규), app/inventory/transactions/{[id]/page.tsx(신규), page.tsx}, app/inventory/components/BulkTxModal.tsx(신규), app/inventory/{[invId]/items/[itemId], items/[id]}/page.tsx
+
 ## 2026-07-30 | 영업현황 nav 아이콘 추가 + AI 영업 도구 PROD 배포
 
 - nav '영업현황'(구 도입 현황 — 라벨은 사용자가 PROD에서 직접 변경) 아이콘 부재 → `NavIcons.tsx`에 `trending-up` 아이콘 신설, dev·PROD nav `icon_key` 설정, 시드에 icon_key·새 라벨 반영

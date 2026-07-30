@@ -137,8 +137,8 @@ app/
 │   ├── install-plans/                # 설치계획(가안) CRUD
 │   ├── etc-tasks/                    # 기타업무 CRUD + 파일 관리 (다병원·비유지보수 업무)
 │   ├── inventory/                    # 자재관리(WMS)
-│   │   ├── items/                    # 품목 마스터 route/[id](재고·부자재 포함)/import + [id]/components(주자재-부자재 매핑)
-│   │   ├── transactions/            # 입출고 원장 route + [id]/cancel + export(Excel)
+│   │   ├── items/                    # 품목 마스터 route/[id](재고·부자재 포함)/import + [id]/components(주자재-부자재 매핑) + [id]/lot-history(LOT별 입출고 요약)
+│   │   ├── transactions/            # 입출고 원장 route + [id](GET 상세·PUT 수정)/cancel + bulk(다품목 일괄) + bulk-serial(Excel 시리얼 일괄) + export(Excel)
 │   │   ├── stocks/                   # 인벤토리·위치별 현재고 집계 + export(Excel)
 │   │   ├── units/                    # 시리얼 개체 조회 + [id] 정정
 │   │   ├── hospital-works/           # 출고 업무연결 후보
@@ -216,7 +216,7 @@ app/
 │   ├── notifications/                # 알림 설정 (ADMIN 이상) — 탭① SLA 기준(SlaMatrixTab) / 탭② 채널·라우팅(RoutesTab) / 탭③ 전역·DM·이력
 │   ├── ai-assistant/                 # AI 어시스턴트 설정 (ADMIN 이상 — effort·캐시 TTL, 모델은 읽기 전용 표시)
 │   └── audit-logs/                   # 감사 로그 (SUPER_ADMIN 전용)
-├── inventory/                        # 자재 현황(인벤토리별 카드 섹션 + 섹션 입고/출고/이동 버튼) + [invId]/items/[itemId](인벤토리 자재 상세) + transactions/(이력) + items/(관리·[id] 품목 마스터 상세) + components/TransactionModal(품목 선택 모드)
+├── inventory/                        # 자재 현황(인벤토리별 카드 섹션 + 섹션 입고/출고/이동 버튼) + [invId]/items/[itemId](인벤토리 자재 상세) + transactions/(이력·[id] 전표 상세) + items/(관리·[id] 품목 마스터 상세) + components/TransactionModal(품목 선택 모드)·BulkTxModal(다품목 일괄 입출고)
 ├── login/                            # 로그인 페이지
 ├── notifications/                    # 알림함 (1.1 P5 — 목록·미읽음/종류 필터·일괄 읽음·개인 수신 설정)
 └── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper, StatusBadge, NotificationBell, MyWorkPanel 등)
@@ -998,6 +998,9 @@ prisma/
 - **전표 수량 수정 (2026-07-21)**: 같은 수정 모달에서 **비시리얼 품목만** 수량 변경 가능 — 변경분(delta)을 재고 버킷(LOT 포함)에 즉시 반영, 결과 재고가 음수가 되면 409(예: 입고 축소인데 이미 출고됨), MOVE는 출발·도착 양쪽 반영. **시리얼 품목(수량=개체 수)·세트출고 주자재는 금지**(취소 후 재등록 — 부자재 전표는 개별 수정 가능)
 - **입출고 이력** (`/inventory/transactions`): 인벤토리 탭 + 유형·위치(탭 인벤토리 스코프)·**기간 필터(입출고일 기준)**, **입출고일·처리일시 컬럼 분리**, **수정(ADMIN+재고담당자)**·취소(권한자, 과거 이관 전표는 취소 불가 409), 요청자 컬럼, **Excel 다운로드**(필터 반영, 최대 1만 행)
 - **Excel 일괄 입출고 (시리얼 품목 마이그레이션)**: 이력 페이지 'Excel 일괄 입출고' 버튼(처리 권한자) — **A열=품목명·B열=시리얼번호·C열=LOT번호**(1행 헤더) 업로드로 입고/출고 일괄 처리(`POST /api/inventory/transactions/bulk-serial`, preview 모드). 구분(입고/출고)·인벤토리·위치·유형·요청자(출고 필수) 선택 후 **시리얼 관리 품목만** 대상. 품목명은 선택 인벤토리 내 정확 일치(동명 2건 이상이면 매칭 거부), 품목별 전표 1건씩 생성(최대 2000행). 미리보기에서 행 단위 검증(미등록 품목·비시리얼 품목·파일 내 중복·기등록/미등록 시리얼·위치 불일치·**LOT 규칙**: 입고 시 LOT 관리 품목 C열 필수/비관리 금지, 회수·출고 시 값 있으면 개체 LOT 대조) 후 **오류 0건일 때만 실행, 전체 단일 트랜잭션(all-or-nothing)**
+- **전표 상세 페이지 (2026-07-30)**: `GET /api/inventory/transactions/[id]` + `/inventory/transactions/[id]` — 전표 전체 정보 + 시리얼 품목이면 연결 개체 목록(시리얼·LOT·현재 상태·위치) + 세트출고 부모/자식 전표 링크. 입출고 이력·품목 상세 이력의 전표코드 클릭으로 진입
+- **LOT별 입출고 요약 (2026-07-30)**: `GET /api/inventory/items/[id]/lot-history` — LOT 관리 품목의 LOT번호별 입고·출고·잔량 요약(취소 전표 제외). 품목 상세(인벤토리 스코프·마스터 양쪽)에 'LOT별 입출고' 표 + 이력 행 LOT 컬럼
+- **다품목 일괄 입출고 (2026-07-30)**: 이력 페이지 '다품목 입출고' 버튼(`BulkTxModal`) — 인벤토리·유형·요청자·출고처·일자 공통 입력 + 위치·품목·수량(비시리얼)/시리얼·LOT(시리얼)는 줄별 지정, 혼합 지원. `POST /api/inventory/transactions/bulk`(입고/출고만, 세트출고·병원연결 미포함) — 줄별 검증 후 단일 트랜잭션 전부 성공/전부 롤백, 품목별 전표 1건씩 생성
 - **품목 마스터** (`/inventory/items`, ADMIN): 인벤토리 탭 + 인벤토리 컬럼. `ITEM-NNNN` 자동 발번(전체 순번), **등록 시 인벤토리 필수·수정 불가**. **모델명**·대>중>소 분류 트리·제조사·규격·단위·시리얼 여부·DeviceInfo 연결·참고단가. 검색은 품목명·모델명·코드·규격 통합. **Excel 일괄 가져오기**(가져올 인벤토리 선택 필수, 같은 인벤토리 내 품목명 중복만 스킵, K열=LOT여부)
 - **위치(창고) 관리** (`/settings/warehouses`, ADMIN): **인벤토리별 섹션으로 독립 추가/수정/삭제** — 위치명 UNIQUE는 인벤토리 내에서만(다른 인벤토리엔 같은 이름 허용)
 - **처리 권한**: 입고/출고/이동/취소 = 재고 담당자 풀(`/settings/inventory-managers`) + ADMIN 이상(`canManageStock` 서버 실시간 검사). 조회=전 로그인. 감사 로그 `resource='inventory_tx'`/`inventory_item`/`setting:*`

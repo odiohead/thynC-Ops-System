@@ -16,6 +16,40 @@ export const dynamic = 'force-dynamic'
 
 type Params = { params: { id: string } }
 
+/** 전표 단건 상세 — 시리얼 개체(있으면)·세트 부모/자식 포함. 로그인 사용자 조회 가능. */
+export async function GET(request: NextRequest, { params }: Params) {
+  const user = await getAuthUser(request)
+  if (!user) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const id = parseInt(params.id)
+  if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })
+
+  const tx = await prisma.inventoryTransaction.findUnique({
+    where: { id },
+    include: {
+      ...txInclude,
+      units: {
+        include: {
+          unit: {
+            select: {
+              id: true,
+              serialNo: true,
+              lotNo: true,
+              status: true,
+              warehouse: { select: { name: true } },
+              hospital: { select: { hospitalName: true } },
+            },
+          },
+        },
+        orderBy: { unitId: 'asc' },
+      },
+    },
+  })
+  if (!tx) return NextResponse.json({ error: '전표를 찾을 수 없습니다.' }, { status: 404 })
+
+  return NextResponse.json({ transaction: tx })
+}
+
 /**
  * 전표 메타 정보 수정 — 관리자(ADMIN 이상)이면서 재고 담당자 풀 등록자만 (2026-07-20 권한 강화).
  * 수량 수정(2026-07-21): 비시리얼 품목만 — 변경분을 재고 버킷에 반영, 결과 음수면 409.
