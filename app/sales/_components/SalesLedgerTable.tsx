@@ -144,11 +144,11 @@ export default function SalesLedgerTable({ rows }: { rows: LedgerRow[] }) {
         <span className="ml-auto text-sm text-gray-500">병원 {groups.length}곳 · 계약 {filtered.length}건 / 전체 {rows.length}건</span>
       </div>
 
-      <div className="mt-3 overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+      <div className="mt-3 overflow-auto rounded-lg border border-gray-200 bg-white shadow-sm" style={{ maxHeight: 'calc(100vh - 15rem)' }}>
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
+          <thead className="sticky top-0 z-20 bg-gray-50">
             <tr>
-              <th className={thCls}>병원명</th>
+              <th className={`${thCls} sticky left-0 z-30 bg-gray-50`}>병원명</th>
               <th className={thCls}>종별</th>
               <th className={thCls}>지역</th>
               <th className={thCls}>도입계약</th>
@@ -185,7 +185,7 @@ export default function SalesLedgerTable({ rows }: { rows: LedgerRow[] }) {
                     <tr key={r.id} className={`border-t ${i === 0 ? 'border-gray-300' : 'border-gray-100'} ${groupBg} hover:bg-blue-50/40`} title={r.remark ?? undefined}>
                       {i === 0 && (
                         <>
-                          <td rowSpan={span} className={`${tdCls} cursor-pointer align-top`} onClick={() => goHospital(g.key)}>
+                          <td rowSpan={span} className={`${tdCls} sticky left-0 z-10 cursor-pointer align-top ${gi % 2 === 1 ? 'bg-gray-50' : 'bg-white'}`} onClick={() => goHospital(g.key)}>
                             <div className="font-medium text-blue-700 hover:underline">{h.hospitalName}</div>
                             <div className="mt-0.5 flex items-center gap-1.5">
                               <Badge v={h.stage} />

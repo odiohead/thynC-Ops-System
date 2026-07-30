@@ -12,6 +12,9 @@ const TABS = [
   { href: '/sales', label: '차수 원장' },
   { href: '/sales2', label: '영업 파이프라인' },
   { href: '/sales3', label: '병원 요약' },
+  { href: '/sales/dashboard', label: '대시보드 A · 실적' },
+  { href: '/sales/dashboard2', label: '대시보드 B · 파이프라인' },
+  { href: '/sales/dashboard3', label: '대시보드 C · 인사이트' },
 ]
 
 export default function SalesConceptTabs() {

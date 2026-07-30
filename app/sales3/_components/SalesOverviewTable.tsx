@@ -143,11 +143,11 @@ export default function SalesOverviewTable({ rows }: { rows: OverviewRow[] }) {
         <span className="ml-auto text-sm text-gray-500">{filtered.length}곳 / 전체 {rows.length}곳</span>
       </div>
 
-      <div className="mt-3 overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+      <div className="mt-3 overflow-auto rounded-lg border border-gray-200 bg-white shadow-sm" style={{ maxHeight: 'calc(100vh - 15rem)' }}>
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
+          <thead className="sticky top-0 z-20 bg-gray-50">
             <tr>
-              <th className={thCls}>병원명</th>
+              <th className={`${thCls} sticky left-0 z-30 bg-gray-50`}>병원명</th>
               <th className={thCls}>상태</th>
               <th className={thCls}>영업 단계</th>
               <th className={thCls}>종별</th>
@@ -170,7 +170,7 @@ export default function SalesOverviewTable({ rows }: { rows: OverviewRow[] }) {
             )}
             {filtered.map((r) => (
               <tr key={r.hospitalCode} className="cursor-pointer hover:bg-blue-50/40" onClick={() => router.push(`/hospitals/${r.hospitalCode}`)}>
-                <td className={`${tdCls} font-medium text-gray-900`}>{r.hospitalName}</td>
+                <td className={`${tdCls} sticky left-0 z-10 bg-white font-medium text-gray-900`}>{r.hospitalName}</td>
                 <td className={tdCls}><LifecycleBadge v={r.lifecycle} /></td>
                 <td className={tdCls}>
                   {r.stage ? (
