@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { AI_TOOLS, TOOL_LABELS, executeTool } from './tools'
 import { AI_CHAT_MODEL, getAiSettings, type AiCacheTtl } from './settings'
+import type { JWTPayload } from '@/lib/auth'
 
 /**
  * AI 어시스턴트 에이전트 루프 (function_ai_assistant.html §4)
@@ -38,6 +39,12 @@ const SYSTEM_PROMPT = `당신은 thynC Operations System의 업무 어시스턴�
 - 차량: 예약 현황은 list_vehicle_reservations, 운행일지·주행거리는 list_vehicle_logs.
 - 구성원: 이름·부서·역할·업무 담당 풀은 search_users (연락처는 제공하지 않는다).
 - 도면 분석: GW 배치 플래너 잡은 list_gateway_plan_jobs.
+
+[축 3 — 영업/CRM, 2026-07-30] 영업 데이터도 조회할 수 있다 (권한 있는 사용자만 — 도구가 오류를 반환하면 "영업 정보는 현재 접근 권한이 제한되어 있다"고 그대로 안내하고 추측하지 마라).
+- 특정 병원의 영업 단계·담당·키맨(인적정보)·도입 계약(차수·금액)·영업 활동: get_hospital_sales.
+- 도입 계약(딜) 목록·실판매액 합계 (상태·판매모델·지역·기간 필터): list_sales_deals. "계약완료 실적", "영업중 병원" 질문에 쓴다.
+- 영업 전사 요약(누적 실판매액·도입 병원·단계/판매모델 분포): get_sales_summary.
+- 금액은 원 단위 숫자다 — 답변에서는 억 단위로 요약하되 정확한 수치도 병기하라.
 
 두 축을 함께 봐야 하는 질문이 많다. 예: "A병원에서 알람이 안 울린다" → find_similar_cases(과거 사례) + search_wiki(알람 정책 기준) + read_consultations(그 병원 과거 상담).
 read_hospital_note는 담당자가 직접 적어둔 병원 메모다 — 상담이력과 다르며, 현장 특이사항이 필요할 때만 쓴다.
@@ -139,6 +146,7 @@ function rollCacheBreakpoints(messages: Anthropic.MessageParam[], ttl: AiCacheTt
 export async function runAgentChat(opts: {
   history: { role: 'user' | 'assistant'; content: string }[]
   hospitalContext?: { code: string; name: string } | null
+  user?: JWTPayload // 영업 등 권한 게이트 도구의 사용자별 재검증용
   onEvent: (e: AgentEvent) => void
 }): Promise<AgentResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY
@@ -212,7 +220,7 @@ export async function runAgentChat(opts: {
     const results: Anthropic.ToolResultBlockParam[] = []
     for (const tu of toolUses) {
       opts.onEvent({ type: 'tool_start', name: tu.name, label: TOOL_LABELS[tu.name] ?? tu.name })
-      const result = await executeTool(tu.name, tu.input as Record<string, unknown>)
+      const result = await executeTool(tu.name, tu.input as Record<string, unknown>, opts.user)
       const isError = !!(result && typeof result === 'object' && 'error' in result)
       const serialized = JSON.stringify(result)
       toolCalls.push({

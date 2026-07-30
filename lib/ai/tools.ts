@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { findHospitalNotePage } from '@/lib/wiki/hospitalNote'
 import { getAiExcludedPageIds, isPageAiExcluded } from '@/lib/wiki/aiExclusion'
 import { searchOperationHistory, findSimilarCases, tokenize, excerpt } from './opsSearch'
+import { checkSalesAccess } from '@/lib/sales'
+import type { JWTPayload } from '@/lib/auth'
 
 /**
  * AI 어시스턴트 도구 레이어 (function_ai_assistant.html §5)
@@ -433,6 +435,42 @@ export const AI_TOOLS: Anthropic.Tool[] = [
       required: [],
     },
   },
+  {
+    name: 'get_hospital_sales',
+    description:
+      '특정 병원의 영업/CRM 정보를 조회한다. 영업 단계·담당 영업·전체 병상/침투율·병원 키맨(인적정보)·도입 계약(차수·금액·판매모델·정산)·최근 영업 활동 질문 시 호출하라. 접근 권한이 없는 사용자에게는 오류가 반환된다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        hospitalCode: { type: 'string', description: '병원 코드 (search_hospitals로 조회)' },
+      },
+      required: ['hospitalCode'],
+    },
+  },
+  {
+    name: 'list_sales_deals',
+    description:
+      '도입 계약(딜) 목록을 조회한다. "계약완료 건", "영업중인 병원", "구독형 계약", "올해 계약 실적·실판매액" 같은 영업 질문 시 호출하라. 상태·판매모델·지역·기간 필터와 금액 합계를 반환한다. 접근 권한이 없는 사용자에게는 오류가 반환된다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        hospitalName: { type: 'string', description: '병원명 일부 (선택)' },
+        statusName: { type: 'string', description: "딜 상태 (예: '영업중', '계약완료', '해지·중단')" },
+        modelName: { type: 'string', description: "판매모델 (예: '구축형', '구독형', '사용량비례형') — 병원/씨어스 관점 모두 매칭" },
+        sido: { type: 'string', description: "지역 시도 (예: '경기', '전남')" },
+        contractFrom: { type: 'string', description: '계약일 시작 YYYY-MM-DD (선택)' },
+        contractTo: { type: 'string', description: '계약일 끝 YYYY-MM-DD (선택)' },
+        ...LIST_PARAMS,
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_sales_summary',
+    description:
+      '영업 전사 요약을 조회한다. "누적 실판매액", "도입 병원 몇 곳", "영업 단계별 현황", "판매모델 구성" 같은 영업 집계 질문 시 호출하라. KPI·단계 분포·판매모델 분포·지역 Top5를 반환한다. 접근 권한이 없는 사용자에게는 오류가 반환된다.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
 ]
 
 /** 도구별 한국어 진행 표시 라벨 */
@@ -463,6 +501,9 @@ export const TOOL_LABELS: Record<string, string> = {
   list_vehicle_logs: '운행일지 조회 중',
   search_users: '구성원 검색 중',
   list_gateway_plan_jobs: 'GW 플래너 잡 조회 중',
+  get_hospital_sales: '병원 영업 정보 조회 중',
+  list_sales_deals: '도입 계약 조회 중',
+  get_sales_summary: '영업 요약 집계 중',
 }
 
 // ===== 실행기 =====
@@ -1785,7 +1826,217 @@ async function listGatewayPlanJobs(input: ToolInput) {
 }
 
 /** 도구 실행 디스패처 — 실패는 throw하지 않고 error 객체 반환 (agent가 is_error로 전달) */
-export async function executeTool(name: string, input: ToolInput): Promise<unknown> {
+
+// ===== 영업/CRM 도구 (v4 — 사용자별 권한 게이트) =====
+
+/**
+ * 영업 데이터는 UI와 동일하게 checkSalesAccess로 사용자별 재검증한다
+ * (어시스턴트는 SEERS USER 이상 전원 사용 — 임시 SUPER_ADMIN 제한의 권한 우회 방지).
+ * 통과 시 null, 차단 시 도구 응답용 에러 객체.
+ */
+async function salesGate(user?: JWTPayload): Promise<{ error: string } | null> {
+  if (!user) return { error: '영업 정보 조회 권한을 확인할 수 없습니다.' }
+  const denial = await checkSalesAccess(user)
+  if (denial) return { error: `${denial.error} 영업 기능이 정식 오픈되면 접근 범위가 완화됩니다.` }
+  return null
+}
+
+const amt = (v: bigint | null) => (v === null ? null : Number(v))
+
+async function getHospitalSales(input: ToolInput) {
+  const hospitalCode = str(input.hospitalCode)
+  if (!hospitalCode) return { error: 'hospitalCode가 필요합니다. search_hospitals로 먼저 조회하세요.' }
+  const hospital = await prisma.hospital.findUnique({
+    where: { hospitalCode },
+    select: {
+      hospitalCode: true, hospitalName: true, introBeds: true,
+      salesProfile: {
+        include: {
+          stage: { select: { name: true } },
+          owner: { select: { name: true } },
+        },
+      },
+      personAffiliations: {
+        where: { isCurrent: true },
+        orderBy: [{ isPrimary: 'desc' }, { id: 'asc' }],
+        take: 15,
+        include: { person: { include: { personGroup: { select: { name: true } } } } },
+      },
+      salesDeals: {
+        orderBy: { roundNo: 'asc' },
+        include: {
+          status: { select: { name: true } },
+          hospitalModel: { select: { name: true } },
+          seersModel: { select: { name: true } },
+          taxInvoice: { select: { name: true } },
+          settlement: { select: { name: true } },
+          project: { select: { projectName: true } },
+        },
+      },
+      salesActivities: {
+        orderBy: [{ activityDate: 'desc' }, { id: 'desc' }],
+        take: 5,
+        include: { activityType: { select: { name: true } }, author: { select: { name: true } } },
+      },
+    },
+  })
+  if (!hospital) return { error: '병원을 찾을 수 없습니다.' }
+  const p = hospital.salesProfile
+  const totalBeds = p?.totalBeds ?? null
+  return {
+    hospital: hospital.hospitalName,
+    profile: {
+      stage: p?.stage?.name ?? null,
+      owner: p?.owner?.name ?? null,
+      totalBeds,
+      totalWards: p?.totalWards ?? null,
+      introBeds: hospital.introBeds,
+      penetrationPct: totalBeds && totalBeds > 0 && hospital.introBeds !== null ? Math.round((hospital.introBeds / totalBeds) * 1000) / 10 : null,
+      memo: p?.salesMemo ?? null,
+    },
+    persons: hospital.personAffiliations.map((a) => ({
+      name: a.person.name,
+      group: a.person.personGroup?.name ?? null,
+      title: a.title,
+      department: a.department,
+      specialty: a.person.specialty,
+      isPrimary: a.isPrimary,
+    })),
+    deals: hospital.salesDeals.map((d) => ({
+      round: d.roundNo,
+      dealCode: d.dealCode,
+      status: d.status?.name ?? null,
+      hospitalModel: d.hospitalModel?.name ?? null,
+      seersModel: d.seersModel?.name ?? null,
+      contractDate: ymd(d.contractDate),
+      wards: d.wardCount,
+      beds: d.bedCount,
+      wardsText: d.wardsText,
+      amountProduct: amt(d.amountProduct),
+      amountConstruction: amt(d.amountConstruction),
+      amountActual: amt(d.amountActual),
+      taxInvoice: d.taxInvoice?.name ?? null,
+      settlement: d.settlement?.name ?? null,
+      project: d.project?.projectName ?? null,
+    })),
+    recentActivities: hospital.salesActivities.map((a) => ({
+      date: ymd(a.activityDate),
+      type: a.activityType?.name ?? null,
+      author: a.author?.name ?? null,
+      content: stripHtml(a.content, 150),
+    })),
+    link: `/hospitals/${hospital.hospitalCode}`,
+  }
+}
+
+async function listSalesDeals(input: ToolInput) {
+  const limit = int(input.limit, 10, 1, 30)
+  const detail = str(input.detail) === 'full' ? 'full' : 'summary'
+  const modelName = str(input.modelName)
+  const from = str(input.contractFrom)
+  const to = str(input.contractTo)
+  const where = {
+    ...(str(input.statusName) && { status: { name: { contains: str(input.statusName)! } } }),
+    ...(modelName && { OR: [{ hospitalModel: { name: { contains: modelName } } }, { seersModel: { name: { contains: modelName } } }] }),
+    ...(str(input.hospitalName) || str(input.sido)
+      ? { hospital: {
+          ...(str(input.hospitalName) && { hospitalName: { contains: str(input.hospitalName)! } }),
+          ...(str(input.sido) && { sidoName: { contains: str(input.sido)! } }),
+        } }
+      : {}),
+    ...((from || to) && { contractDate: { ...(from && { gte: new Date(from) }), ...(to && { lte: new Date(to + 'T23:59:59Z') }) } }),
+  }
+  const [total, sums, rows] = await Promise.all([
+    prisma.salesDeal.count({ where }),
+    prisma.salesDeal.aggregate({ where, _sum: { amountActual: true, amountProduct: true, amountConstruction: true, bedCount: true, wardCount: true } }),
+    prisma.salesDeal.findMany({
+      where,
+      orderBy: [{ contractDate: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
+      take: limit,
+      include: {
+        status: { select: { name: true } },
+        hospitalModel: { select: { name: true } },
+        seersModel: { select: { name: true } },
+        taxInvoice: { select: { name: true } },
+        settlement: { select: { name: true } },
+        hospital: { select: { hospitalName: true, sidoName: true } },
+      },
+    }),
+  ])
+  return {
+    total,
+    totals: {
+      amountActual: amt(sums._sum.amountActual),
+      amountProduct: amt(sums._sum.amountProduct),
+      amountConstruction: amt(sums._sum.amountConstruction),
+      beds: sums._sum.bedCount,
+      wards: sums._sum.wardCount,
+    },
+    deals: rows.map((d) => ({
+      hospital: d.hospital.hospitalName,
+      sido: d.hospital.sidoName,
+      round: d.roundNo,
+      status: d.status?.name ?? null,
+      hospitalModel: d.hospitalModel?.name ?? null,
+      contractDate: ymd(d.contractDate),
+      beds: d.bedCount,
+      amountActual: amt(d.amountActual),
+      ...(detail === 'full' && {
+        dealCode: d.dealCode,
+        seersModel: d.seersModel?.name ?? null,
+        wards: d.wardCount,
+        wardsText: d.wardsText,
+        deptsText: d.deptsText,
+        amountProduct: amt(d.amountProduct),
+        amountConstruction: amt(d.amountConstruction),
+        taxInvoice: d.taxInvoice?.name ?? null,
+        settlement: d.settlement?.name ?? null,
+        remark: d.remark,
+      }),
+    })),
+    link: '/sales',
+  }
+}
+
+async function getSalesSummary() {
+  const [deals, profiles] = await Promise.all([
+    prisma.salesDeal.findMany({
+      include: {
+        status: { select: { name: true } },
+        hospitalModel: { select: { name: true } },
+        hospital: { select: { sidoName: true } },
+      },
+    }),
+    prisma.hospitalSalesProfile.findMany({ include: { stage: { select: { name: true, order: true } } } }),
+  ])
+  const completed = deals.filter((d) => d.status?.name === '계약완료')
+  const perHosp = new Map<string, number>()
+  completed.forEach((d) => perHosp.set(d.hospitalCode, (perHosp.get(d.hospitalCode) ?? 0) + 1))
+  const count = (map: Map<string, number>, k: string) => map.set(k, (map.get(k) ?? 0) + 1)
+  const stageMap = new Map<string, number>()
+  profiles.forEach((pf) => { if (pf.stage) count(stageMap, pf.stage.name) })
+  const modelMap = new Map<string, number>()
+  completed.forEach((d) => count(modelMap, d.hospitalModel?.name ?? '미지정'))
+  const regionMap = new Map<string, number>()
+  completed.forEach((d) => regionMap.set(d.hospital.sidoName ?? '기타', (regionMap.get(d.hospital.sidoName ?? '기타') ?? 0) + (amt(d.amountActual) ?? 0)))
+  return {
+    kpi: {
+      adoptedHospitals: perHosp.size,
+      expandedHospitals: Array.from(perHosp.values()).filter((c) => c >= 2).length,
+      completedDeals: completed.length,
+      activeDeals: deals.filter((d) => d.status?.name === '영업중' || !d.status).length,
+      bedsSum: completed.reduce((a, d) => a + (d.bedCount ?? 0), 0),
+      amountActualSum: completed.reduce((a, d) => a + (amt(d.amountActual) ?? 0), 0),
+      amountSaleSum: completed.reduce((a, d) => a + (amt(d.amountProduct) ?? 0) + (amt(d.amountConstruction) ?? 0), 0),
+    },
+    stageDist: Array.from(stageMap.entries()).map(([name, n2]) => ({ stage: name, hospitals: n2 })),
+    modelDist: Array.from(modelMap.entries()).map(([name, n2]) => ({ model: name, deals: n2 })).sort((a, b) => b.deals - a.deals),
+    regionTop5: Array.from(regionMap.entries()).map(([name, actual]) => ({ sido: name, amountActual: actual })).sort((a, b) => b.amountActual - a.amountActual).slice(0, 5),
+    link: '/sales/dashboard',
+  }
+}
+
+export async function executeTool(name: string, input: ToolInput, user?: JWTPayload): Promise<unknown> {
   try {
     switch (name) {
       case 'search_hospitals':
@@ -1840,6 +2091,15 @@ export async function executeTool(name: string, input: ToolInput): Promise<unkno
         return await searchUsers(input)
       case 'list_gateway_plan_jobs':
         return await listGatewayPlanJobs(input)
+      case 'get_hospital_sales':
+      case 'list_sales_deals':
+      case 'get_sales_summary': {
+        const denied = await salesGate(user)
+        if (denied) return denied
+        if (name === 'get_hospital_sales') return await getHospitalSales(input)
+        if (name === 'list_sales_deals') return await listSalesDeals(input)
+        return await getSalesSummary()
+      }
       default:
         return { error: `알 수 없는 도구: ${name}` }
     }

@@ -95,6 +95,7 @@ export async function POST(request: NextRequest) {
         const result = await runAgentChat({
           history,
           hospitalContext,
+          user: authUser ?? undefined,
           onEvent: (e) => {
             if (e.type === 'text') controller.enqueue(sse('text', { delta: e.delta }))
             else controller.enqueue(sse('tool_start', { name: e.name, label: e.label }))
