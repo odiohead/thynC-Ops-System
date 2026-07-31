@@ -95,7 +95,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     totalBeds && totalBeds > 0 && introBeds !== null ? Math.round((introBeds / totalBeds) * 1000) / 10 : null
   const contractedTotal = deals
     .filter((d) => d.status?.name === '계약완료')
-    .reduce((sum, d) => sum + (d.amountActual !== null ? Number(d.amountActual) : 0), 0)
+    .reduce((sum, d) => sum + (d.daewoongAmountActual !== null ? Number(d.daewoongAmountActual) : 0), 0) // 대웅 실판매액 기준 (2026-07-31 — 씨어스 금액 수기 입력 전)
 
   return NextResponse.json({
     canEdit: true,

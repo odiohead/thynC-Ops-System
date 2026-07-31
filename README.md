@@ -553,7 +553,8 @@ prisma/
 - 도입규모: `wardsText`(도입병동, 콤마 다중)/`deptsText`(도입진료과)·`wardCount`/`bedCount`(계약 스냅샷)
 - 금액 3종(BIGINT 원): `amountProduct`(제품가)/`amountConstruction`(공사비)/`amountActual`(실판매액) — **'판매' 합계 = 제품+공사 파생 표시**
 - 정산: `taxInvoiceId`(SALES_TAX_INVOICE)/`settlementId`(SALES_SETTLEMENT), `projectCode`(선택 연결, UNIQUE), `remark`
-- 엑셀 보강 컬럼 8종 (2026-07-31 — 도입현황 입력 페이지): `warrantyText`(보증기간)·`firstContactDate`(최초 인입일)·`amountService`(용역매출 BIGINT)·`priceTypeText`(판매가 유형)·`daewoongDivision`/`daewoongOffice`/`daewoongManager`/`daewoongPhone`(대웅 영업조직)
+- 보강 컬럼 (2026-07-31): `warrantyText`(보증기간)·`firstContactDate`(최초 인입일)
+- **대웅 축 (2026-07-31 — 원천: `thynC_status_DW.xlsx` 대웅 원장 232행 + 구파일 보강, 씨어스 금액과 분리)**: `daewoongClientCode`(거래처코드, 재동기화 키)·`daewoongCountType`(병원/추가/로컬/이슈)·`daewoongOrderStatus`(완료/미완료)·`daewoongModelKind`/`daewoongModel`(판매모델)·`daewoongDeviceCount`·`daewoongAmountTotal`(계약금액 총견적가)·`daewoongBuildDate`(공사일)·`daewoongAmountProduct/Construction/Actual/Service`(금액 4종)·`daewoongTaxInvoice`/`daewoongSettlement`(원문 텍스트)·`daewoongPriceType`·`daewoongDivision/Office/Manager/Phone`(영업조직). **/sales 원장·대시보드·AI 도구 금액 지표는 대웅 필드 기준 표시** — 씨어스 금액 필드(amountProduct/Construction/Actual·taxInvoiceId·settlementId)는 수기 입력용
 
 #### SalesDealDevice (딜별 도입 기기 수량 — 2026-07-31)
 - SalesDeal ↔ DeviceInfo N:M + `quantity` — 계약 스냅샷 (운영 실측은 ProjectDevice와 별개)

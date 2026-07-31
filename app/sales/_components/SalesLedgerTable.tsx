@@ -167,10 +167,10 @@ export default function SalesLedgerTable({ rows }: { rows: LedgerRow[] }) {
               <th className={thCls}>도입병동</th>
               <th className={`${thCls} text-right`}>병동</th>
               <th className={`${thCls} text-right`}>병상</th>
-              <th className={`${thCls} text-right`}>제품가</th>
-              <th className={`${thCls} text-right`}>공사비</th>
-              <th className={`${thCls} text-right`}>판매</th>
-              <th className={`${thCls} text-right`}>실판매액</th>
+              <th className={`${thCls} text-right`}>제품가(대웅)</th>
+              <th className={`${thCls} text-right`}>공사비(대웅)</th>
+              <th className={`${thCls} text-right`}>판매(대웅)</th>
+              <th className={`${thCls} text-right`}>실판매액(대웅)</th>
               <th className={thCls}>세금계산서</th>
               <th className={thCls}>정산</th>
               <th className={thCls}>공사시작</th>

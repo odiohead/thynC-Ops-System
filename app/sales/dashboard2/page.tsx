@@ -92,7 +92,7 @@ export default async function SalesDashboard2Page() {
     const cur = ownerMap.get(k) ?? { hospitals: new Set<string>(), active: 0, done: 0, actual: 0 }
     cur.hospitals.add(d.hospitalCode)
     if (d.status?.name === '영업중' || !d.status) cur.active++
-    if (d.status?.name === '계약완료') { cur.done++; cur.actual += n(d.amountActual) }
+    if (d.status?.name === '계약완료') { cur.done++; cur.actual += n(d.daewoongAmountActual) }
     ownerMap.set(k, cur)
   })
   const ownerStats = Array.from(ownerMap.entries())

@@ -1912,11 +1912,11 @@ async function getHospitalSales(input: ToolInput) {
       wards: d.wardCount,
       beds: d.bedCount,
       wardsText: d.wardsText,
-      amountProduct: amt(d.amountProduct),
-      amountConstruction: amt(d.amountConstruction),
-      amountActual: amt(d.amountActual),
-      taxInvoice: d.taxInvoice?.name ?? null,
-      settlement: d.settlement?.name ?? null,
+      amountProduct: amt(d.daewoongAmountProduct),
+      amountConstruction: amt(d.daewoongAmountConstruction),
+      amountActual: amt(d.daewoongAmountActual),
+      taxInvoice: d.daewoongTaxInvoice,
+      settlement: d.daewoongSettlement,
       project: d.project?.projectName ?? null,
     })),
     recentActivities: hospital.salesActivities.map((a) => ({
@@ -1948,7 +1948,7 @@ async function listSalesDeals(input: ToolInput) {
   }
   const [total, sums, rows] = await Promise.all([
     prisma.salesDeal.count({ where }),
-    prisma.salesDeal.aggregate({ where, _sum: { amountActual: true, amountProduct: true, amountConstruction: true, bedCount: true, wardCount: true } }),
+    prisma.salesDeal.aggregate({ where, _sum: { daewoongAmountActual: true, daewoongAmountProduct: true, daewoongAmountConstruction: true, bedCount: true, wardCount: true } }),
     prisma.salesDeal.findMany({
       where,
       orderBy: [{ contractDate: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
@@ -1966,9 +1966,9 @@ async function listSalesDeals(input: ToolInput) {
   return {
     total,
     totals: {
-      amountActual: amt(sums._sum.amountActual),
-      amountProduct: amt(sums._sum.amountProduct),
-      amountConstruction: amt(sums._sum.amountConstruction),
+      amountActual: amt(sums._sum.daewoongAmountActual),
+      amountProduct: amt(sums._sum.daewoongAmountProduct),
+      amountConstruction: amt(sums._sum.daewoongAmountConstruction),
       beds: sums._sum.bedCount,
       wards: sums._sum.wardCount,
     },
@@ -1980,17 +1980,17 @@ async function listSalesDeals(input: ToolInput) {
       hospitalModel: d.hospitalModel?.name ?? null,
       contractDate: ymd(d.contractDate),
       beds: d.bedCount,
-      amountActual: amt(d.amountActual),
+      amountActual: amt(d.daewoongAmountActual),
       ...(detail === 'full' && {
         dealCode: d.dealCode,
         seersModel: d.seersModel?.name ?? null,
         wards: d.wardCount,
         wardsText: d.wardsText,
         deptsText: d.deptsText,
-        amountProduct: amt(d.amountProduct),
-        amountConstruction: amt(d.amountConstruction),
-        taxInvoice: d.taxInvoice?.name ?? null,
-        settlement: d.settlement?.name ?? null,
+        amountProduct: amt(d.daewoongAmountProduct),
+        amountConstruction: amt(d.daewoongAmountConstruction),
+        taxInvoice: d.daewoongTaxInvoice,
+        settlement: d.daewoongSettlement,
         remark: d.remark,
       }),
     })),
@@ -2018,7 +2018,7 @@ async function getSalesSummary() {
   const modelMap = new Map<string, number>()
   completed.forEach((d) => count(modelMap, d.hospitalModel?.name ?? '미지정'))
   const regionMap = new Map<string, number>()
-  completed.forEach((d) => regionMap.set(d.hospital.sidoName ?? '기타', (regionMap.get(d.hospital.sidoName ?? '기타') ?? 0) + (amt(d.amountActual) ?? 0)))
+  completed.forEach((d) => regionMap.set(d.hospital.sidoName ?? '기타', (regionMap.get(d.hospital.sidoName ?? '기타') ?? 0) + (amt(d.daewoongAmountActual) ?? 0)))
   return {
     kpi: {
       adoptedHospitals: perHosp.size,
@@ -2026,8 +2026,8 @@ async function getSalesSummary() {
       completedDeals: completed.length,
       activeDeals: deals.filter((d) => d.status?.name === '영업중' || !d.status).length,
       bedsSum: completed.reduce((a, d) => a + (d.bedCount ?? 0), 0),
-      amountActualSum: completed.reduce((a, d) => a + (amt(d.amountActual) ?? 0), 0),
-      amountSaleSum: completed.reduce((a, d) => a + (amt(d.amountProduct) ?? 0) + (amt(d.amountConstruction) ?? 0), 0),
+      amountActualSum: completed.reduce((a, d) => a + (amt(d.daewoongAmountActual) ?? 0), 0),
+      amountSaleSum: completed.reduce((a, d) => a + (amt(d.daewoongAmountProduct) ?? 0) + (amt(d.daewoongAmountConstruction) ?? 0), 0),
     },
     stageDist: Array.from(stageMap.entries()).map(([name, n2]) => ({ stage: name, hospitals: n2 })),
     modelDist: Array.from(modelMap.entries()).map(([name, n2]) => ({ model: name, deals: n2 })).sort((a, b) => b.deals - a.deals),

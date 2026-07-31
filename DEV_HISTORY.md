@@ -15,6 +15,19 @@
 
 ---
 
+## 2026-07-31 | 영업/CRM — 대웅 원장(thynC_status_DW.xlsx) 딜 전면 재적재 + 대웅 축 분리 (dev2)
+
+- **원천 확정(사용자)**: `/sales/deals` 레코드 수 = `thynC_status_DW.xlsx` '1. 거래처별 종합현황' **232행** (병원195+추가26+로컬8+이슈3). 기존 딜(백필 243건) 전건 삭제 후 재적재. DW에 없는 건은 추후 수기. 초기 착수 시 구파일(thynC_status.xlsx)을 원천으로 오인 → 사용자 지적(삼성서울 순번58·220)으로 정정
+- **병원 매핑**: 208명 전수 — 완전일치 187 + 확정 21(동명 6은 운영 신호 유일 코드, 표기 변형 15 — 사용자 승인). 추가 확정: 연세오케이정형외과→**HOSP-000100 연세오케이병원**(사용자). 거래처코드(대웅) 232행 전수 보존 → 향후 재동기화 키
+- **DB**: `sales_deals` 대웅 축 13컬럼 신설(거래처코드·카운팅/오더구분·판매모델2·디바이스수·계약금액총견적가·공사일·제품가·공사비·실판매액·세금계산서·정산 원문) + `amount_service`/`price_type_text` → `daewoong_amount_service`/`daewoong_price_type` 개명. 마이그레이션 `20260731150000_daewoong_deal_axis`
+- **적재(1단계)**: `scripts/migrate-daewoong-deals-20260731.sql` — 232딜/206병원, 상태 전부 '계약완료', 차수=병원 내 원장 순서. 검증: 계약금액 합 **144,496,906,934**·디바이스 18,738 엑셀 실측 일치. 프로젝트 재연결 225/232(계약일 일치→건수 동일 순서 페어링, 보수적 2규칙)
+- **보강(2단계)**: `scripts/enrich-deals-from-status-excel-20260731.sql` — 구파일 237행 중 **227건 페어링**(건수 동일→계약일 일치→±7일 근사→순서). 실판매액 122건(합 40,310,613,908 — 7/30 이관과 일치)·판매모델 227·세금계산서 84 채움. 미보강: 구파일 잉여 4(광명중앙대194·여수제일177·명지성모24·나은필222 — DW에 없는 계약, 수기 후보)+취소 천안리턴, DW에 딜 없음 5(연세오케이→해소, 곡성사랑·광주열린·담양사랑), 미매핑 2(덕천부민·대전웰니스), DW만 존재 2(분당제생 2차·삼성서울 순환기 2차)
+- **UI/API**: 딜 상세 '대웅 영업조직' 카드 → **'대웅제약' 카드**(19필드), '금액·정산(씨어스)' 카드는 수기용으로 유지. 입력 표(/sales/deals)는 DW 컬럼 순서 30컬럼으로 재편. **금액 지표 대웅 필드 기준 전환**(사용자 결정): /sales 원장(라벨 '(대웅)'), 대시보드 A/B/C, AI 도구 3종(list_sales_deals 합계·get_sales_summary·get_hospital_sales), 병원 상세 누적 실판매액
+- tsc 0오류. **빌드·git·PROD 미반영** — dev2 DB만 적재 완료
+- 영향 파일: prisma/{schema.prisma, migrations/20260731150000_…}, scripts/{migrate-daewoong-deals…, enrich-deals-from-status-excel…}.sql, app/api/hospitals/[code]/sales/{route.ts, deals/shared.ts}, app/sales/{page.tsx, _components/SalesLedgerTable.tsx, deals/**, dashboard*/page.tsx}, lib/ai/tools.ts, projects/daewoong_deal_migration_design.md
+
+---
+
 ## 2026-07-31 | 영업/CRM — 딜 상세 '규모·계약'에 도입 기기 수량 입력 (기기 마스터 연동)
 
 - 요구: 딜 상세에서 설정>장비 정보(기기 관리) 마스터 기준으로 기기별 수량 입력. 기기가 나중에 늘어나도 기존 딜 조회 시 새 기기 필드가 0으로 보여야 함

@@ -2059,15 +2059,28 @@ model SalesDeal {
   settlementId       Int?        @map("settlement_id") // 정산 상태 (SALES_SETTLEMENT)
   contractDate       DateTime?   @map("contract_date") @db.Date
   remark             String?     @map("remark") @db.Text
-  // 엑셀(thynC_status.xlsx) B~AK 보강 컬럼 (2026-07-31 — /sales/deals 입력 전용 페이지)
-  warrantyText       String?     @map("warranty_text") // 보증기간 (엑셀 J열)
-  firstContactDate   DateTime?   @map("first_contact_date") @db.Date // 최초 인입일 (엑셀 R열)
-  amountService      BigInt?     @map("amount_service") // 용역매출 (원, 엑셀 AB열)
-  priceTypeText      String?     @map("price_type_text") // 판매가 유형 (엑셀 AE열 — 기존/권장/최소판매가 등)
-  daewoongDivision   String?     @map("daewoong_division") // 대웅 사업부 (엑셀 AG열)
-  daewoongOffice     String?     @map("daewoong_office") // 대웅 사무소 (엑셀 AH열)
-  daewoongManager    String?     @map("daewoong_manager") // 대웅 담당자 (엑셀 AI열)
-  daewoongPhone      String?     @map("daewoong_phone") // 대웅 담당자 연락처 (엑셀 AJ열)
+  warrantyText       String?     @map("warranty_text") // 보증기간 (구파일)
+  firstContactDate   DateTime?   @map("first_contact_date") @db.Date // 최초 인입일 (구파일)
+  // ── 대웅 축 (2026-07-31 — 원천: thynC_status_DW.xlsx 대웅 원장 + 구파일 보강. 씨어스 금액과 분리 관리) ──
+  daewoongClientCode   String?   @map("daewoong_client_code") // 거래처코드 (DW 매핑 키)
+  daewoongCountType    String?   @map("daewoong_count_type") // 카운팅 구분 (병원/추가/로컬/이슈)
+  daewoongOrderStatus  String?   @map("daewoong_order_status") // 오더 구분 (완료/미완료)
+  daewoongModelKind    String?   @map("daewoong_model_kind") // 판매모델 구분 (일반/사용량)
+  daewoongModel        String?   @map("daewoong_model") // 판매모델 (구독형/구축형/분납형/사용량/씨어스 월 납입)
+  daewoongDeviceCount  Int?      @map("daewoong_device_count") // 디바이스수
+  daewoongAmountTotal  BigInt?   @map("daewoong_amount_total") // 계약금액(총견적가) 원
+  daewoongBuildDate    DateTime? @map("daewoong_build_date") @db.Date // 공사일 (원장 정렬기준)
+  daewoongAmountProduct      BigInt? @map("daewoong_amount_product") // 제품가 원 (구파일)
+  daewoongAmountConstruction BigInt? @map("daewoong_amount_construction") // 공사비 원 (구파일)
+  daewoongAmountActual       BigInt? @map("daewoong_amount_actual") // 실판매액 원 (구파일)
+  daewoongAmountService      BigInt? @map("daewoong_amount_service") // 용역매출 원 (구파일)
+  daewoongTaxInvoice   String?   @map("daewoong_tax_invoice") // 세금계산서 발행 (구파일 원문)
+  daewoongSettlement   String?   @map("daewoong_settlement") // 정산 상태 (구파일 원문)
+  daewoongPriceType    String?   @map("daewoong_price_type") // 판매가 유형 (구파일 — 기존/권장/최소판매가 등)
+  daewoongDivision   String?     @map("daewoong_division") // 대웅 사업부
+  daewoongOffice     String?     @map("daewoong_office") // 대웅 사무소
+  daewoongManager    String?     @map("daewoong_manager") // 대웅 담당자
+  daewoongPhone      String?     @map("daewoong_phone") // 대웅 담당자 연락처
   createdAt          DateTime    @default(now()) @map("created_at")
   updatedAt          DateTime    @updatedAt @map("updated_at")
   hospital           Hospital    @relation(fields: [hospitalCode], references: [hospitalCode])

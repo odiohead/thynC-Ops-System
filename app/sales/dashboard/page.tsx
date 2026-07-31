@@ -48,8 +48,8 @@ export default async function SalesDashboardPage() {
   const expandedHosp = Array.from(roundsPerHosp.values()).filter((c) => c >= 2).length
   const bedSum = completed.reduce((a, d) => a + (d.bedCount ?? 0), 0)
   const wardSum = completed.reduce((a, d) => a + (d.wardCount ?? 0), 0)
-  const actualSum = completed.reduce((a, d) => a + n(d.amountActual), 0)
-  const saleSum = completed.reduce((a, d) => a + n(d.amountProduct) + n(d.amountConstruction), 0)
+  const actualSum = completed.reduce((a, d) => a + n(d.daewoongAmountActual), 0)
+  const saleSum = completed.reduce((a, d) => a + n(d.daewoongAmountProduct) + n(d.daewoongAmountConstruction), 0)
   const BED_TARGET = 50000 // 영업 목표 병상 (엑셀 '요약' 기준) — 설정화 필요 시 AppSetting으로 이전
 
   // 월별 추이 (최근 24개월, 계약일 기준)
@@ -59,7 +59,7 @@ export default async function SalesDashboardPage() {
     const ym = d.contractDate.toISOString().slice(0, 7)
     const cur = monthMap.get(ym) ?? { count: 0, actual: 0 }
     cur.count += 1
-    cur.actual += n(d.amountActual)
+    cur.actual += n(d.daewoongAmountActual)
     monthMap.set(ym, cur)
   }
   const months = Array.from(monthMap.keys()).sort().slice(-24)
@@ -83,14 +83,14 @@ export default async function SalesDashboardPage() {
   const regionMap = new Map<string, number>()
   completed.forEach((d) => {
     const k = d.hospital.sidoName ?? '미지정'
-    regionMap.set(k, (regionMap.get(k) ?? 0) + n(d.amountActual))
+    regionMap.set(k, (regionMap.get(k) ?? 0) + n(d.daewoongAmountActual))
   })
   const regionTop = Array.from(regionMap.entries()).map(([name, actual]) => ({ name, actual }))
     .sort((a, b) => b.actual - a.actual).slice(0, 10)
 
   // 정산·세금계산서 (계약완료 딜 기준)
-  const settleDist = Array.from(countBy(completed, (d) => d.settlement?.name).entries()).map(([name, count]) => ({ name, count }))
-  const taxDist = Array.from(countBy(completed, (d) => d.taxInvoice?.name).entries()).map(([name, count]) => ({ name, count }))
+  const settleDist = Array.from(countBy(completed, (d) => d.daewoongSettlement).entries()).map(([name, count]) => ({ name, count }))
+  const taxDist = Array.from(countBy(completed, (d) => d.daewoongTaxInvoice).entries()).map(([name, count]) => ({ name, count }))
 
   const data: DashboardAData = {
     kpi: {

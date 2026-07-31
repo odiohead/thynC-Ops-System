@@ -14,6 +14,7 @@
 |---|---|---|
 | [notification_v1.1_design.md](notification_v1.1_design.md) · [HTML](notification_v1.1_design.html) | 1.1 알림체계 개선 (SLA 세분화·채널 라우팅·내부 알림·첫 화면 개인화) | **P1~P6 구현 완료 / P7 지표·PROD 배포 대기** |
 | [sales_crm_design.md](sales_crm_design.md) · [HTML](sales_crm_design.html) | 영업/CRM 모듈 v4 — 병원 축·차수 축 2데이터셋 (인적정보/전원 이력·딜 확장·`/sales` 도입 현황 목록, P1~P5) | **v4 P1~P3 구현 완료 (dev2, 2026-07-29) — P4 실데이터 검증 대기** |
+| [daewoong_deal_migration_design.md](daewoong_deal_migration_design.md) | 대웅 원장(thynC_status.xlsx) 딜 전면 재적재 + 대웅 축 필드 분리·'대웅제약' 카드 | **검토 대기 (착수 승인 전)** |
 
 ## 루트에 남아 있는 1.0 문서
 

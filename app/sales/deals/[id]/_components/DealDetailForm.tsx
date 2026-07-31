@@ -42,11 +42,24 @@ export interface DealDetail {
   deviceQuantities: Record<number, number>
   amountProduct: number | null
   amountConstruction: number | null
-  amountService: number | null
   amountActual: number | null
   taxInvoiceId: number | null
   settlementId: number | null
-  priceTypeText: string | null
+  daewoongClientCode: string | null
+  daewoongCountType: string | null
+  daewoongOrderStatus: string | null
+  daewoongModelKind: string | null
+  daewoongModel: string | null
+  daewoongDeviceCount: number | null
+  daewoongAmountTotal: number | null
+  daewoongBuildDate: string | null
+  daewoongAmountProduct: number | null
+  daewoongAmountConstruction: number | null
+  daewoongAmountActual: number | null
+  daewoongAmountService: number | null
+  daewoongTaxInvoice: string | null
+  daewoongSettlement: string | null
+  daewoongPriceType: string | null
   daewoongDivision: string | null
   daewoongOffice: string | null
   daewoongManager: string | null
@@ -88,11 +101,24 @@ export default function DealDetailForm({ deal, masters }: { deal: DealDetail; ma
     bedCount: deal.bedCount?.toString() ?? '',
     amountProduct: deal.amountProduct?.toString() ?? '',
     amountConstruction: deal.amountConstruction?.toString() ?? '',
-    amountService: deal.amountService?.toString() ?? '',
     amountActual: deal.amountActual?.toString() ?? '',
     taxInvoiceId: deal.taxInvoiceId?.toString() ?? '',
     settlementId: deal.settlementId?.toString() ?? '',
-    priceTypeText: deal.priceTypeText ?? '',
+    daewoongClientCode: deal.daewoongClientCode ?? '',
+    daewoongCountType: deal.daewoongCountType ?? '',
+    daewoongOrderStatus: deal.daewoongOrderStatus ?? '',
+    daewoongModelKind: deal.daewoongModelKind ?? '',
+    daewoongModel: deal.daewoongModel ?? '',
+    daewoongDeviceCount: deal.daewoongDeviceCount?.toString() ?? '',
+    daewoongAmountTotal: deal.daewoongAmountTotal?.toString() ?? '',
+    daewoongBuildDate: deal.daewoongBuildDate ?? '',
+    daewoongAmountProduct: deal.daewoongAmountProduct?.toString() ?? '',
+    daewoongAmountConstruction: deal.daewoongAmountConstruction?.toString() ?? '',
+    daewoongAmountActual: deal.daewoongAmountActual?.toString() ?? '',
+    daewoongAmountService: deal.daewoongAmountService?.toString() ?? '',
+    daewoongTaxInvoice: deal.daewoongTaxInvoice ?? '',
+    daewoongSettlement: deal.daewoongSettlement ?? '',
+    daewoongPriceType: deal.daewoongPriceType ?? '',
     daewoongDivision: deal.daewoongDivision ?? '',
     daewoongOffice: deal.daewoongOffice ?? '',
     daewoongManager: deal.daewoongManager ?? '',
@@ -110,6 +136,7 @@ export default function DealDetailForm({ deal, masters }: { deal: DealDetail; ma
 
   const num = (s: string) => (s === '' ? null : Number(s.replace(/,/g, '')))
   const sale = (num(form.amountProduct) ?? 0) + (num(form.amountConstruction) ?? 0)
+  const dwSale = (num(form.daewoongAmountProduct) ?? 0) + (num(form.daewoongAmountConstruction) ?? 0)
 
   const save = async () => {
     setBusy(true); setError(null); setSaved(false)
@@ -130,11 +157,24 @@ export default function DealDetailForm({ deal, masters }: { deal: DealDetail; ma
         bedCount: form.bedCount === '' ? null : form.bedCount,
         amountProduct: form.amountProduct,
         amountConstruction: form.amountConstruction,
-        amountService: form.amountService,
         amountActual: form.amountActual,
         taxInvoiceId: form.taxInvoiceId === '' ? null : parseInt(form.taxInvoiceId),
         settlementId: form.settlementId === '' ? null : parseInt(form.settlementId),
-        priceTypeText: form.priceTypeText,
+        daewoongClientCode: form.daewoongClientCode,
+        daewoongCountType: form.daewoongCountType,
+        daewoongOrderStatus: form.daewoongOrderStatus,
+        daewoongModelKind: form.daewoongModelKind,
+        daewoongModel: form.daewoongModel,
+        daewoongDeviceCount: form.daewoongDeviceCount === '' ? null : parseInt(form.daewoongDeviceCount),
+        daewoongAmountTotal: form.daewoongAmountTotal,
+        daewoongBuildDate: form.daewoongBuildDate || null,
+        daewoongAmountProduct: form.daewoongAmountProduct,
+        daewoongAmountConstruction: form.daewoongAmountConstruction,
+        daewoongAmountActual: form.daewoongAmountActual,
+        daewoongAmountService: form.daewoongAmountService,
+        daewoongTaxInvoice: form.daewoongTaxInvoice,
+        daewoongSettlement: form.daewoongSettlement,
+        daewoongPriceType: form.daewoongPriceType,
         daewoongDivision: form.daewoongDivision,
         daewoongOffice: form.daewoongOffice,
         daewoongManager: form.daewoongManager,
@@ -157,6 +197,19 @@ export default function DealDetailForm({ deal, masters }: { deal: DealDetail; ma
     router.refresh()
     router.push('/sales/deals')
   }
+
+  // 금액 입력 — 표시값은 천 단위 쉼표, 상태값은 숫자만 보관
+  const Money = ({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) => (
+    <div>
+      <label className={labelCls}>{label}</label>
+      <input
+        inputMode="numeric"
+        className={inputCls}
+        value={value === '' ? '' : Number(value).toLocaleString('ko-KR')}
+        onChange={(e) => onChange(e.target.value.replace(/[^\d]/g, ''))}
+      />
+    </div>
+  )
 
   const Sel = ({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: { id: number; name: string }[] }) => (
     <div>
@@ -245,24 +298,37 @@ export default function DealDetailForm({ deal, masters }: { deal: DealDetail; ma
         </div>
       </div>
 
-      {/* 금액 · 정산 */}
+      {/* 금액 · 정산 (씨어스 축 — 수기 입력) */}
       <div className={`${cardCls} mt-4`}>
-        <h3 className={sectionTitle}>금액 · 정산 <span className="text-xs font-normal text-gray-400">— &lsquo;판매&rsquo; 합계 = 제품가+공사비 자동 계산: {sale ? sale.toLocaleString('ko-KR') : '—'}원</span></h3>
+        <h3 className={sectionTitle}>금액 · 정산 (씨어스) <span className="text-xs font-normal text-gray-400">— 씨어스 자체 관리 금액 (대웅 원장 금액은 아래 대웅제약 카드) · &lsquo;판매&rsquo; 합계 = 제품가+공사비: {sale ? sale.toLocaleString('ko-KR') : '—'}원</span></h3>
         <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-          <div><label className={labelCls}>제품(구성품) 금액 (원)</label><input className={inputCls} placeholder="예: 93,172,509" value={form.amountProduct} onChange={(e) => setForm({ ...form, amountProduct: e.target.value })} /></div>
-          <div><label className={labelCls}>공사비 (원)</label><input className={inputCls} value={form.amountConstruction} onChange={(e) => setForm({ ...form, amountConstruction: e.target.value })} /></div>
-          <div><label className={labelCls}>용역매출 (원)</label><input className={inputCls} value={form.amountService} onChange={(e) => setForm({ ...form, amountService: e.target.value })} /></div>
-          <div><label className={labelCls}>실판매액 (원)</label><input className={inputCls} value={form.amountActual} onChange={(e) => setForm({ ...form, amountActual: e.target.value })} /></div>
-          <div><label className={labelCls}>판매가 유형</label><input className={inputCls} placeholder="예: 기존판매가·권장판매가·최소판매가" value={form.priceTypeText} onChange={(e) => setForm({ ...form, priceTypeText: e.target.value })} /></div>
+          <Money label="제품(구성품) 금액 (원)" value={form.amountProduct} onChange={(v) => setForm({ ...form, amountProduct: v })} />
+          <Money label="공사비 (원)" value={form.amountConstruction} onChange={(v) => setForm({ ...form, amountConstruction: v })} />
+          <Money label="실판매액 (원)" value={form.amountActual} onChange={(v) => setForm({ ...form, amountActual: v })} />
           <Sel label="세금계산서 발행" value={form.taxInvoiceId} onChange={(v) => setForm({ ...form, taxInvoiceId: v })} options={masters.taxInvoices} />
           <Sel label="정산 상태" value={form.settlementId} onChange={(v) => setForm({ ...form, settlementId: v })} options={masters.settlements} />
         </div>
       </div>
 
-      {/* 대웅 영업조직 */}
+      {/* 대웅제약 (대웅 축 — DW 원장 + 구파일 보강) */}
       <div className={`${cardCls} mt-4`}>
-        <h3 className={sectionTitle}>대웅 영업조직</h3>
+        <h3 className={sectionTitle}>대웅제약 <span className="text-xs font-normal text-gray-400">— 원천: 대웅 원장(thynC_status_DW) · 씨어스 금액과 분리 관리 · 대웅 판매 = 제품가+공사비: {dwSale ? dwSale.toLocaleString('ko-KR') : '—'}원</span></h3>
         <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div><label className={labelCls}>거래처코드</label><input className={inputCls} value={form.daewoongClientCode} onChange={(e) => setForm({ ...form, daewoongClientCode: e.target.value })} /></div>
+          <div><label className={labelCls}>카운팅 구분</label><input className={inputCls} placeholder="병원/추가/로컬/이슈" value={form.daewoongCountType} onChange={(e) => setForm({ ...form, daewoongCountType: e.target.value })} /></div>
+          <div><label className={labelCls}>오더 구분</label><input className={inputCls} placeholder="완료/미완료" value={form.daewoongOrderStatus} onChange={(e) => setForm({ ...form, daewoongOrderStatus: e.target.value })} /></div>
+          <div><label className={labelCls}>공사일 (대웅)</label><input type="date" className={inputCls} value={form.daewoongBuildDate} onChange={(e) => setForm({ ...form, daewoongBuildDate: e.target.value })} /></div>
+          <div><label className={labelCls}>판매모델 구분</label><input className={inputCls} placeholder="일반/사용량" value={form.daewoongModelKind} onChange={(e) => setForm({ ...form, daewoongModelKind: e.target.value })} /></div>
+          <div><label className={labelCls}>판매모델</label><input className={inputCls} placeholder="구독형/구축형/분납형/사용량" value={form.daewoongModel} onChange={(e) => setForm({ ...form, daewoongModel: e.target.value })} /></div>
+          <div><label className={labelCls}>디바이스수</label><input type="number" min={0} className={inputCls} value={form.daewoongDeviceCount} onChange={(e) => setForm({ ...form, daewoongDeviceCount: e.target.value })} /></div>
+          <Money label="계약금액(총견적가) (원)" value={form.daewoongAmountTotal} onChange={(v) => setForm({ ...form, daewoongAmountTotal: v })} />
+          <Money label="제품(구성품) 금액 (원)" value={form.daewoongAmountProduct} onChange={(v) => setForm({ ...form, daewoongAmountProduct: v })} />
+          <Money label="공사비 (원)" value={form.daewoongAmountConstruction} onChange={(v) => setForm({ ...form, daewoongAmountConstruction: v })} />
+          <Money label="실판매액 (원)" value={form.daewoongAmountActual} onChange={(v) => setForm({ ...form, daewoongAmountActual: v })} />
+          <Money label="용역매출 (원)" value={form.daewoongAmountService} onChange={(v) => setForm({ ...form, daewoongAmountService: v })} />
+          <div><label className={labelCls}>세금계산서</label><input className={inputCls} placeholder="완료/미정/씨어스 계약" value={form.daewoongTaxInvoice} onChange={(e) => setForm({ ...form, daewoongTaxInvoice: e.target.value })} /></div>
+          <div><label className={labelCls}>정산</label><input className={inputCls} placeholder="완료/미완" value={form.daewoongSettlement} onChange={(e) => setForm({ ...form, daewoongSettlement: e.target.value })} /></div>
+          <div><label className={labelCls}>판매가 유형</label><input className={inputCls} placeholder="기존/권장/최소판매가" value={form.daewoongPriceType} onChange={(e) => setForm({ ...form, daewoongPriceType: e.target.value })} /></div>
           <div><label className={labelCls}>사업부</label><input className={inputCls} placeholder="예: 서울1" value={form.daewoongDivision} onChange={(e) => setForm({ ...form, daewoongDivision: e.target.value })} /></div>
           <div><label className={labelCls}>사무소</label><input className={inputCls} placeholder="예: 병원강원" value={form.daewoongOffice} onChange={(e) => setForm({ ...form, daewoongOffice: e.target.value })} /></div>
           <div><label className={labelCls}>담당자</label><input className={inputCls} value={form.daewoongManager} onChange={(e) => setForm({ ...form, daewoongManager: e.target.value })} /></div>

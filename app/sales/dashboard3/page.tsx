@@ -76,7 +76,7 @@ export default async function SalesDashboard3Page() {
     if (!d.contractDate) return
     const ym = ymOf(d.contractDate)
     const cur = mAgg.get(ym) ?? { actual: 0, count: 0 }
-    cur.actual += n(d.amountActual)
+    cur.actual += n(d.daewoongAmountActual)
     cur.count += 1
     mAgg.set(ym, cur)
   })
@@ -89,7 +89,7 @@ export default async function SalesDashboard3Page() {
   const perHosp = new Map<string, number>()
   completed.forEach((d) => perHosp.set(d.hospitalCode, (perHosp.get(d.hospitalCode) ?? 0) + 1))
   const bedSum = completed.reduce((a, d) => a + (d.bedCount ?? 0), 0)
-  const actualSum = completed.reduce((a, d) => a + n(d.amountActual), 0)
+  const actualSum = completed.reduce((a, d) => a + n(d.daewoongAmountActual), 0)
   const BED_TARGET = 50000
 
   // 파이프라인 (설정 마스터 순서·색)
@@ -107,7 +107,7 @@ export default async function SalesDashboard3Page() {
   deals.forEach((d) => {
     const k = d.hospital.salesProfile?.owner?.name ?? '미지정'
     const o = ownerMap.get(k) ?? { actual: 0, done: 0, active: 0 }
-    if (d.status?.name === '계약완료') { o.done++; o.actual += n(d.amountActual) }
+    if (d.status?.name === '계약완료') { o.done++; o.actual += n(d.daewoongAmountActual) }
     if (d.status?.name === '영업중' || !d.status) o.active++
     ownerMap.set(k, o)
   })
@@ -120,7 +120,7 @@ export default async function SalesDashboard3Page() {
 
   // 지역 Top 8 (실판매액)
   const regionMap = new Map<string, number>()
-  completed.forEach((d) => { const k = d.hospital.sidoName ?? '기타'; regionMap.set(k, (regionMap.get(k) ?? 0) + n(d.amountActual)) })
+  completed.forEach((d) => { const k = d.hospital.sidoName ?? '기타'; regionMap.set(k, (regionMap.get(k) ?? 0) + n(d.daewoongAmountActual)) })
   const regionTop = Array.from(regionMap.entries()).map(([name, actual]) => ({ name, actual })).sort((a, b) => b.actual - a.actual).slice(0, 8)
 
   // 확장 기회 Top 5
