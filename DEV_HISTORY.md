@@ -15,6 +15,15 @@
 
 ---
 
+## 2026-07-31 | 대웅 원장 딜 재적재 + 대웅 축 분리 PROD 배포
+
+- 금액 입력 쉼표 처리(딜 상세 Money 컴포넌트 8곳) 추가 후 커밋 `e282df8` push
+- **PROD DB**: 영업 4테이블 pg_dump 백업(`~/backups/sales_before_dw_migration_20260731_040537.dump`) → `migrate deploy`(대웅 축 컬럼) → `migrate-daewoong-deals-20260731.sql` + `enrich-deals-from-status-excel-20260731.sql` 실행
+- **검증 (dev2와 완전 동일)**: 232딜/206병원/계약금액 합 144,496,906,934/디바이스 18,738/프로젝트 연결 225 + 보강 실판매액 122건(40,310,613,908)·판매모델 227·세금계산서 84
+- 힙 4GB 빌드(146 라우트) → `pm2 restart thync-prod`. 스모크: `/`·`/sales`(+deals·대시보드 3종)·`/hospitals` 전부 307 정상, 외부 HTTPS 정상
+
+---
+
 ## 2026-07-31 | 영업/CRM — 대웅 원장(thynC_status_DW.xlsx) 딜 전면 재적재 + 대웅 축 분리 (dev2)
 
 - **원천 확정(사용자)**: `/sales/deals` 레코드 수 = `thynC_status_DW.xlsx` '1. 거래처별 종합현황' **232행** (병원195+추가26+로컬8+이슈3). 기존 딜(백필 243건) 전건 삭제 후 재적재. DW에 없는 건은 추후 수기. 초기 착수 시 구파일(thynC_status.xlsx)을 원천으로 오인 → 사용자 지적(삼성서울 순번58·220)으로 정정
