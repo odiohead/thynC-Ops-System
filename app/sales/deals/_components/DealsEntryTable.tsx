@@ -7,7 +7,6 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import PageHeader from '@/app/components/ui/PageHeader'
 
@@ -188,12 +187,7 @@ export default function DealsEntryTable({ rows }: { rows: DealEntryRow[] }) {
       <PageHeader
         title="도입현황 입력"
         description="대웅 원장(거래처별 종합현황) 컬럼 순서의 계약 이력(차수) 원장입니다. 금액은 대웅 축 값이며 씨어스 금액은 행 클릭 → 상세에서 별도 관리합니다. 단계·종별·지역은 병원·프로젝트에서 자동 표시됩니다."
-        actions={
-          <>
-            <Link href="/sales" className={btnGhost}>도입 현황으로</Link>
-            <button onClick={() => setModalOpen(true)} className={btnPrimary}>+ 등록</button>
-          </>
-        }
+        actions={<button onClick={() => setModalOpen(true)} className={btnPrimary}>+ 등록</button>}
       />
 
       <div className="mt-4 flex flex-wrap items-center gap-2">

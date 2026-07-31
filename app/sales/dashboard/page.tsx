@@ -46,24 +46,39 @@ export default async function SalesDashboardPage() {
   const roundsPerHosp = new Map<string, number>()
   completed.forEach((d) => roundsPerHosp.set(d.hospitalCode, (roundsPerHosp.get(d.hospitalCode) ?? 0) + 1))
   const expandedHosp = Array.from(roundsPerHosp.values()).filter((c) => c >= 2).length
+  const deviceSum = completed.reduce((a, d) => a + (d.daewoongDeviceCount ?? 0), 0) // 누적 도입 병상 = 대웅 디바이스 수량 (2026-07-31 사용자 결정)
   const bedSum = completed.reduce((a, d) => a + (d.bedCount ?? 0), 0)
   const wardSum = completed.reduce((a, d) => a + (d.wardCount ?? 0), 0)
   const actualSum = completed.reduce((a, d) => a + n(d.daewoongAmountActual), 0)
   const saleSum = completed.reduce((a, d) => a + n(d.daewoongAmountProduct) + n(d.daewoongAmountConstruction), 0)
-  const BED_TARGET = 50000 // 영업 목표 병상 (엑셀 '요약' 기준) — 설정화 필요 시 AppSetting으로 이전
+  const dwTotalSum = completed.reduce((a, d) => a + n(d.daewoongAmountTotal), 0) // 대웅제약 매출액 = 계약금액(총견적가) 합
 
-  // 월별 추이 (최근 24개월, 계약일 기준)
-  const monthMap = new Map<string, { count: number; actual: number }>()
+  // 월별 추이 (계약일 기준) — 건수 + 신규 병원·병상(디바이스) + 누적
+  const monthMap = new Map<string, { count: number; hosp: number; beds: number }>()
+  const firstMonthByHosp = new Map<string, string>() // 병원별 최초 계약월 (신규 병원 판정)
   for (const d of completed) {
     if (!d.contractDate) continue
     const ym = d.contractDate.toISOString().slice(0, 7)
-    const cur = monthMap.get(ym) ?? { count: 0, actual: 0 }
+    const prev = firstMonthByHosp.get(d.hospitalCode)
+    if (!prev || ym < prev) firstMonthByHosp.set(d.hospitalCode, ym)
+  }
+  for (const d of completed) {
+    if (!d.contractDate) continue
+    const ym = d.contractDate.toISOString().slice(0, 7)
+    const cur = monthMap.get(ym) ?? { count: 0, hosp: 0, beds: 0 }
     cur.count += 1
-    cur.actual += n(d.daewoongAmountActual)
+    cur.beds += d.daewoongDeviceCount ?? 0
     monthMap.set(ym, cur)
   }
-  const months = Array.from(monthMap.keys()).sort().slice(-24)
-  const monthly = months.map((ym) => ({ ym: ym.slice(2).replace('-', '.'), ...monthMap.get(ym)! }))
+  firstMonthByHosp.forEach((ym) => { const cur = monthMap.get(ym); if (cur) cur.hosp += 1 })
+  const allMonths = Array.from(monthMap.keys()).sort()
+  let cumHosp = 0, cumBeds = 0
+  const monthlyAll = allMonths.map((ym) => {
+    const m = monthMap.get(ym)!
+    cumHosp += m.hosp; cumBeds += m.beds
+    return { ym: ym.slice(2).replace('-', '.'), count: m.count, hosp: m.hosp, beds: m.beds, cumHosp, cumBeds }
+  })
+  const monthly = monthlyAll.slice(-24)
 
   const countBy = <T,>(list: T[], key: (t: T) => string | null | undefined) => {
     const m = new Map<string, number>()
@@ -73,11 +88,19 @@ export default async function SalesDashboardPage() {
 
   const modelDist = Array.from(countBy(completed, (d) => d.hospitalModel?.name).entries())
     .map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
-  // 종별: 병원 단위 (딜 다건 중복 제거)
+  // 종별: 병원 단위 (딜 다건 중복 제거) — 종별 전체 병원 수 대비 도입 수, 종별 위계 순 고정 (2026-07-31)
   const typeMap = new Map<string, string>()
   completed.forEach((d) => typeMap.set(d.hospitalCode, d.hospital.type))
-  const typeDist = Array.from(countBy(Array.from(typeMap.values()), (t) => t).entries())
-    .map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
+  const introByType = countBy(Array.from(typeMap.values()), (t) => t)
+  const typeTotals = await prisma.hospital.groupBy({ by: ['type'], _count: { _all: true } })
+  const totalByType = new Map(typeTotals.map((t) => [t.type, t._count._all]))
+  const TYPE_ORDER = ['상급종합', '종합병원', '병원', '요양병원', '정신병원', '치과병원', '한방병원', '의원', '치과의원', '한의원']
+  const typeDist = Array.from(introByType.entries())
+    .map(([name, count]) => ({ name, count, total: totalByType.get(name) ?? 0 }))
+    .sort((a, b) => {
+      const ia = TYPE_ORDER.indexOf(a.name), ib = TYPE_ORDER.indexOf(b.name)
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+    })
 
   // 지역별 실판매액 Top 10
   const regionMap = new Map<string, number>()
@@ -98,7 +121,8 @@ export default async function SalesDashboardPage() {
       expanded: expandedHosp,
       wards: wardSum,
       beds: bedSum,
-      bedTarget: BED_TARGET,
+      devices: deviceSum,
+      dwTotalSum,
       actualSum,
       saleSum,
       activeDeals: active.length,

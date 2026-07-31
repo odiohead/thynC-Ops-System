@@ -9,6 +9,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const TABS = [
+  { href: '/sales/deals', label: '도입현황' },
   { href: '/sales', label: '차수 원장' },
   { href: '/sales2', label: '영업 파이프라인' },
   { href: '/sales3', label: '병원 요약' },

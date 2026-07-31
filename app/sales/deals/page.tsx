@@ -2,6 +2,7 @@ import { cookies } from 'next/headers'
 import { verifyToken } from '@/lib/auth'
 import { canAccessSales, toAmount } from '@/lib/sales'
 import { prisma } from '@/lib/prisma'
+import SalesConceptTabs from '../_components/SalesConceptTabs'
 import DealsEntryTable, { type DealEntryRow } from './_components/DealsEntryTable'
 
 export const dynamic = 'force-dynamic'
@@ -94,5 +95,10 @@ export default async function SalesDealsEntryPage() {
     remark: d.remark,
   }))
 
-  return <DealsEntryTable rows={rows} />
+  return (
+    <div>
+      <SalesConceptTabs />
+      <DealsEntryTable rows={rows} />
+    </div>
+  )
 }
