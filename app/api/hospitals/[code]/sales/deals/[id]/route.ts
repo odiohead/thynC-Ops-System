@@ -40,8 +40,26 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (!project || project.hospitalCode !== params.code) return NextResponse.json({ error: '이 병원의 프로젝트만 연결할 수 있습니다.' }, { status: 400 })
   }
 
+  // 기기 수량 (딜 상세 폼) — devices 배열이 온 경우에만 전체 교체 (병원 상세 계약 이력 모달 등 미전송 PUT은 기존 값 보존)
+  let devices: Array<{ deviceInfoId: number; quantity: number }> | null = null
+  if (Array.isArray(body.devices)) {
+    devices = (body.devices as Array<{ deviceId?: unknown; quantity?: unknown }>)
+      .map((d) => ({ deviceInfoId: Number(d.deviceId), quantity: Number(d.quantity) }))
+      .filter((d) => Number.isInteger(d.deviceInfoId) && Number.isInteger(d.quantity) && d.quantity > 0)
+    if (devices.length > 0) {
+      const found = await prisma.deviceInfo.count({ where: { id: { in: devices.map((d) => d.deviceInfoId) } } })
+      if (found !== devices.length) return NextResponse.json({ error: '기기 목록에 없는 항목이 있습니다.' }, { status: 400 })
+    }
+  }
+
   try {
     const deal = await prisma.salesDeal.update({ where: { id: g.id }, data: { ...data, roundNo } })
+    if (devices !== null) {
+      await prisma.$transaction([
+        prisma.salesDealDevice.deleteMany({ where: { dealId: g.id } }),
+        prisma.salesDealDevice.createMany({ data: devices.map((d) => ({ dealId: g.id, ...d })) }),
+      ])
+    }
 
     await logAudit({
       req: request,
@@ -51,7 +69,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       resourceId: g.id,
       resourceLabel: `${deal.dealCode} (${deal.roundNo}차)`,
       before: auditSafe(g.deal as unknown as Record<string, unknown>),
-      after: auditSafe(deal as unknown as Record<string, unknown>),
+      after: { ...auditSafe(deal as unknown as Record<string, unknown>), ...(devices !== null ? { devices } : {}) },
     })
 
     return NextResponse.json({ deal: { id: deal.id, dealCode: deal.dealCode, roundNo: deal.roundNo } })

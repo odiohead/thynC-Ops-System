@@ -112,7 +112,15 @@ export default function SalesLedgerTable({ rows }: { rows: LedgerRow[] }) {
 
   return (
     <div className="p-6">
-      <PageHeader title="도입 현황" description="병원 기준 그룹 뷰 — 행은 도입계약(차수, 영업 수기 입력이 원본). 계약 완료 후 프로젝트를 매핑하면 공사 단계·일정이 자동 표시됩니다. 등록·수정은 병원 상세 > 영업 정보 > 계약 이력에서." />
+      <PageHeader
+        title="도입 현황"
+        description="병원 기준 그룹 뷰 — 행은 도입계약(차수, 영업 수기 입력이 원본). 계약 완료 후 프로젝트를 매핑하면 공사 단계·일정이 자동 표시됩니다. 등록·수정은 '도입현황 입력' 또는 병원 상세 > 영업 정보 > 계약 이력에서."
+        actions={
+          <Link href="/sales/deals" className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700">
+            도입현황 입력
+          </Link>
+        }
+      />
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <input

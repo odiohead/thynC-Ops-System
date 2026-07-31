@@ -4,6 +4,31 @@
 
 ---
 
+## 2026-07-31 | 영업/CRM — 딜 상세 '규모·계약'에 도입 기기 수량 입력 (기기 마스터 연동)
+
+- 요구: 딜 상세에서 설정>장비 정보(기기 관리) 마스터 기준으로 기기별 수량 입력. 기기가 나중에 늘어나도 기존 딜 조회 시 새 기기 필드가 0으로 보여야 함
+- **DB**: `sales_deal_devices` 신설 (ProjectDevice 패턴 — dealId·deviceInfoId·quantity, `(dealId, deviceInfoId)` UNIQUE, 딜 삭제 CASCADE). 계약 스냅샷으로 운영 실측(ProjectDevice)과 별개. **수량 0은 행 미저장** → 마스터 확장 시 기존 딜은 자동으로 0 표시. 마이그레이션 `20260731120000_sales_deal_devices`
+- **API**: 딜 PUT에 `devices` 배열 처리 — **배열이 온 경우에만** 전체 교체(deleteMany+createMany, 미전송 PUT(병원 상세 모달)은 기존 값 보존), 기기 ID 마스터 존재 검증, 감사로그 after에 devices 포함
+- **UI**: 딜 상세 '규모·계약' 카드 하단에 '도입 기기 수량' 블록 — 기기 마스터(활성 전체 + 비활성이어도 이 딜에 수량 있으면 표시, sortOrder 순) 그리드 입력 + 합계 N대 실시간 표시
+- tsc 0오류. 빌드·git·PROD 미반영
+- 영향 파일: prisma/{schema.prisma, migrations/20260731120000_…}, app/api/hospitals/[code]/sales/deals/[id]/route.ts, app/sales/deals/[id]/{page.tsx, _components/DealDetailForm.tsx}, README.md
+
+---
+
+## 2026-07-31 | 영업/CRM — 도입현황 입력 전용 페이지 (/sales/deals) + 딜 엑셀 보강 컬럼 8종
+
+- 요구: 계약 이력 입력이 병원 상세로만 가능한 구조 → `/sales` 우측 상단 **'도입현황 입력'** 버튼 + 엑셀(thynC_status.xlsx) 표 기반 전용 입력 페이지. 사용자 결정 2건: ① 등록 시 병원 선택 필수(스키마 유지) ② v4 미반영 엑셀 컬럼도 일단 생성(불필요분은 추후 삭제·연동 가능분은 추후 연동)
+- **DB**: `sales_deals`에 엑셀 B~AK 미반영 컬럼 8종 신설 — `warranty_text`(보증기간 J)·`first_contact_date`(최초 인입일 R)·`amount_service`(용역매출 AB, BIGINT)·`price_type_text`(판매가 AE)·`daewoong_division/office/manager/phone`(사업부 AG·사무소 AH·담당자 AI·연락처 AJ). 수동 마이그레이션 `20260731090000_sales_deal_excel_columns` + resolve --applied + prisma generate (엑셀 원본은 `/mnt/c/Users/USER/Documents/thynC_status.xlsx`에서 헤더 실측 — 36컬럼 B~AK 확정)
+- **API**: 딜 파싱 `shared.ts` parseDealBody에 신규 8필드 추가 (POST/PUT 공용 — 신규 엔드포인트 없음, 기존 병원 스코프 딜 API 재사용)
+- **페이지**:
+  - `/sales/deals` (도입현황 입력) — 엑셀 컬럼 순서 flat 표(순번~지역 35컬럼, 1행=1딜) + 병원명 sticky + 합계 행 + 병원명/딜 상태 필터. '+ 등록' 모달(병원 검색·매핑 → 차수 자동 → 생성) → 상세로 이동. 단계·답사·공사·교육일·오더·지역은 운영 축 자동 표시, 납품일·공사지연일은 컬럼만 노출(추후 연동)
+  - `/sales/deals/[id]` (딜 상세 편집) — 카드형 폼 5섹션(병원(읽기 전용·지역/종별 자동)/규모·계약/금액·정산('판매' 합계 실시간 파생 표시)/대웅 영업조직/프로젝트 연결·비고) + 삭제. 병원 재매핑은 삭제 후 재등록 안내
+  - `/sales` 헤더에 '도입현황 입력' 버튼(PageHeader actions) + 안내 문구 갱신
+- tsc 0오류 (힙 4GB — 기본 힙 OOM). 빌드·PM2 재시작·git·PROD 미반영 (사용자 요청 대기)
+- 영향 파일: prisma/{schema.prisma, migrations/20260731090000_…}, app/api/hospitals/[code]/sales/deals/shared.ts, app/sales/deals/{page.tsx, _components/DealsEntryTable.tsx, [id]/page.tsx, [id]/_components/DealDetailForm.tsx}(신규), app/sales/_components/SalesLedgerTable.tsx, README.md
+
+---
+
 ## 2026-07-30 | 영업 접근 ADMIN 이상 개방 — 임시 SUPER_ADMIN 제한 해제 + PROD 배포
 
 - 사용자 리포트: 메뉴 관리에서 '영업현황' 허용 역할에 ADMIN을 추가했는데 관리자 접근이 여전히 차단됨

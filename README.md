@@ -164,7 +164,7 @@ app/
 ├── vehicle-reservations/             # 차량예약 주간 현황 보드 + 예약/반납 모달 + 내 예약 + 운행일지 탭(VehicleLogsPanel)
 │   └── logs/print/                   # 운행일지 인쇄 (A4 가로, 차량별 1장 — 네비 없는 전체 화면)
 │   └── mobile/                       # 빠른 예약·반납 모바일 페이지 (가능 차량 실시간 검색 + 인라인 반납)
-├── sales/                            # 영업현황 — 차수 원장(1행=1차수, 운영 축 조인) + dashboard/·dashboard2/·dashboard3/ (ADMIN+SEERS)
+├── sales/                            # 영업현황 — 차수 원장(1행=1차수, 운영 축 조인) + deals/(도입현황 입력 — 엑셀 B~AK 표·등록 모달, [id] 딜 상세 편집) + dashboard/·dashboard2/·dashboard3/ (ADMIN+SEERS)
 ├── sales2/                           # 도입 현황 v2 — 영업 파이프라인 (계약 등록·프로젝트 매핑, 실험)
 ├── sales3/                           # 도입 현황 v3 — 병원당 1행 요약 (라이프사이클 상태·누적 지표, 실험)
 ├── parking/                          # 주차 웹할인 등록 (차량 검색 → 계정별 할인권 → 등록, nav 미등록)
@@ -553,6 +553,12 @@ prisma/
 - 도입규모: `wardsText`(도입병동, 콤마 다중)/`deptsText`(도입진료과)·`wardCount`/`bedCount`(계약 스냅샷)
 - 금액 3종(BIGINT 원): `amountProduct`(제품가)/`amountConstruction`(공사비)/`amountActual`(실판매액) — **'판매' 합계 = 제품+공사 파생 표시**
 - 정산: `taxInvoiceId`(SALES_TAX_INVOICE)/`settlementId`(SALES_SETTLEMENT), `projectCode`(선택 연결, UNIQUE), `remark`
+- 엑셀 보강 컬럼 8종 (2026-07-31 — 도입현황 입력 페이지): `warrantyText`(보증기간)·`firstContactDate`(최초 인입일)·`amountService`(용역매출 BIGINT)·`priceTypeText`(판매가 유형)·`daewoongDivision`/`daewoongOffice`/`daewoongManager`/`daewoongPhone`(대웅 영업조직)
+
+#### SalesDealDevice (딜별 도입 기기 수량 — 2026-07-31)
+- SalesDeal ↔ DeviceInfo N:M + `quantity` — 계약 스냅샷 (운영 실측은 ProjectDevice와 별개)
+- `(dealId, deviceInfoId)` UNIQUE, 딜 삭제 시 CASCADE. 수량 0은 행 미저장 — 기기 마스터가 늘어나면 기존 딜 상세에 0으로 표시
+- 딜 상세(`/sales/deals/[id]`) '규모·계약'에서 입력, PUT에 `devices` 배열이 온 경우에만 전체 교체(미전송 PUT은 보존)
 
 #### SalesActivity (영업 활동)
 - `activityDate`·`activityTypeId`(SALES_ACTIVITY_TYPE)·`content`(sanitize된 리치텍스트)·`authorId`·`dealId`(선택)
@@ -877,6 +883,7 @@ prisma/
 ### 영업현황 (`/sales`·`/sales2`·`/sales3` + 대시보드 3종, 영업/CRM v4 — ADMIN 이상 + SEERS 전용, 컨셉 비교 중)
 - 엑셀 '도입 현황' 양식 재현 — **1행 = 1차수(딜)**, 22컬럼. 운영 축(공사 단계·답사일·공사시작/완료예정·교육일·종별·지역)은 연결 프로젝트·답사에서 **조인 표시(이중 저장 없음)**
 - 필터 6종(병원명 검색·딜 상태·판매모델·지역·담당·세금계산서) + 하단 고정 합계 행(병동·병상·금액 4종) + 행 클릭 → 병원 상세
+- **도입현황 입력 (`/sales/deals`, 2026-07-31)**: `/sales` 우측 상단 '도입현황 입력' 버튼 → 계약 이력 전용 입력 페이지. 엑셀 B~AK 컬럼 순서 flat 표(1행=1딜) + '+ 등록'(병원 검색·매핑 → 딜 생성 → 상세 이동) + 행 클릭 → 딜 상세 편집(`/sales/deals/[id]` — 전 필드 카드형 폼, 병원·지역·종별 자동 표시, 운영 축 읽기 전용, 삭제). 엑셀 보강 컬럼 8종(보증기간·최초 인입일·용역매출·판매가 유형·대웅 사업부/사무소/담당자/연락처)은 `sales_deals`에 신설, 도입 기기 수량은 기기 마스터(설정>장비 정보) 기준 `SalesDealDevice`로 입력(새 기기 추가 시 기존 딜은 0 표시). 납품일·공사지연일은 추후 연동
 - nav 최상위 '도입 현황'·'도입 현황 v2'·'도입 현황 v3' (병원 목록 다음, SUPER_ADMIN)
 - **`/sales2` (영업 파이프라인, 실험)**: [+ 계약 등록](병원 검색 → 새 차수, 기본 '영업중') + 행별 프로젝트 매핑/해제(전용 API — 다른 필드 불변) + 병원 셀에 답사·설치계획 건수
 - **`/sales3` (병원 요약, 실험)**: 병원당 1행 — 도입 라이프사이클 상태(미도입/최초 도입 검토중/N차 도입완료/추가도입 검토중/중단·해지, 딜 상태 파생) + 누적 지표(병상·침투율·기기·매출) + 정렬 셀렉트

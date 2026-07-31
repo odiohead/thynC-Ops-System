@@ -341,6 +341,7 @@ model DeviceInfo {
   devices         ProjectDevice[]
   hospitalDevices HospitalDevice[]
   inventoryItems  InventoryItem[]
+  salesDealDevices SalesDealDevice[]
 
   @@map("device_info")
   @@schema("public")
@@ -2058,6 +2059,15 @@ model SalesDeal {
   settlementId       Int?        @map("settlement_id") // 정산 상태 (SALES_SETTLEMENT)
   contractDate       DateTime?   @map("contract_date") @db.Date
   remark             String?     @map("remark") @db.Text
+  // 엑셀(thynC_status.xlsx) B~AK 보강 컬럼 (2026-07-31 — /sales/deals 입력 전용 페이지)
+  warrantyText       String?     @map("warranty_text") // 보증기간 (엑셀 J열)
+  firstContactDate   DateTime?   @map("first_contact_date") @db.Date // 최초 인입일 (엑셀 R열)
+  amountService      BigInt?     @map("amount_service") // 용역매출 (원, 엑셀 AB열)
+  priceTypeText      String?     @map("price_type_text") // 판매가 유형 (엑셀 AE열 — 기존/권장/최소판매가 등)
+  daewoongDivision   String?     @map("daewoong_division") // 대웅 사업부 (엑셀 AG열)
+  daewoongOffice     String?     @map("daewoong_office") // 대웅 사무소 (엑셀 AH열)
+  daewoongManager    String?     @map("daewoong_manager") // 대웅 담당자 (엑셀 AI열)
+  daewoongPhone      String?     @map("daewoong_phone") // 대웅 담당자 연락처 (엑셀 AJ열)
   createdAt          DateTime    @default(now()) @map("created_at")
   updatedAt          DateTime    @updatedAt @map("updated_at")
   hospital           Hospital    @relation(fields: [hospitalCode], references: [hospitalCode])
@@ -2068,6 +2078,7 @@ model SalesDeal {
   taxInvoice         StatusCode? @relation("DealTaxInvoice", fields: [taxInvoiceId], references: [id], onDelete: SetNull)
   settlement         StatusCode? @relation("DealSettlement", fields: [settlementId], references: [id], onDelete: SetNull)
   activities         SalesActivity[]
+  devices            SalesDealDevice[]
 
   @@unique([hospitalCode, roundNo])
   @@index([hospitalCode])
@@ -2092,5 +2103,19 @@ model SalesActivity {
 
   @@index([hospitalCode, activityDate(sort: Desc)])
   @@map("sales_activities")
+  @@schema("public")
+}
+
+model SalesDealDevice {
+  id           Int        @id @default(autoincrement())
+  dealId       Int        @map("deal_id")
+  deviceInfoId Int        @map("device_info_id")
+  quantity     Int        @default(0) // 계약 스냅샷 수량 (운영 실측은 ProjectDevice) — 0은 행 미저장
+  createdAt    DateTime   @default(now()) @map("created_at")
+  deal         SalesDeal  @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  deviceInfo   DeviceInfo @relation(fields: [deviceInfoId], references: [id])
+
+  @@unique([dealId, deviceInfoId])
+  @@map("sales_deal_devices")
   @@schema("public")
 }

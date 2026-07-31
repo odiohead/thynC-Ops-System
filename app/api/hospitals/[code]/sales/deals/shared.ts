@@ -27,6 +27,15 @@ export function parseDealBody(body: Record<string, unknown>) {
     settlementId: intOrNull(body.settlementId),
     contractDate: parseDateOnly(body.contractDate),
     remark: str(body.remark),
+    // 엑셀 B~AK 보강 필드 (2026-07-31)
+    warrantyText: str(body.warrantyText),
+    firstContactDate: parseDateOnly(body.firstContactDate),
+    amountService: parseAmount(body.amountService),
+    priceTypeText: str(body.priceTypeText),
+    daewoongDivision: str(body.daewoongDivision),
+    daewoongOffice: str(body.daewoongOffice),
+    daewoongManager: str(body.daewoongManager),
+    daewoongPhone: str(body.daewoongPhone),
   }
 }
 
