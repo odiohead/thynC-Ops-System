@@ -5,7 +5,7 @@
  * 계약완료 딜 기준. 축 금액은 억 단위 표기(툴팁은 원 단위 풀 자릿수).
  */
 
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, ComposedChart, Line, LabelList } from 'recharts'
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, AreaChart, Area, LabelList } from 'recharts'
 import { useChartTheme } from '@/app/components/theme/useChartTheme'
 
 export interface DashboardAData {
@@ -76,6 +76,52 @@ function StatusBar({ items, colors }: { items: Array<{ name: string; count: numb
   )
 }
 
+/** 누적+월별 트렌드 카드 — 상단 누적 히어로 숫자, 누적 그라데이션 에어리어(끝점 강조), 하단 월별 막대(값 라벨 상시) */
+function TrendCard({ title, unit, cum, rows, color, gradId, chart }: {
+  title: string; unit: string; cum: number; color: string; gradId: string
+  rows: Array<{ ym: string; v: number; cum: number }>
+  chart: ReturnType<typeof useChartTheme>
+}) {
+  const thisMonth = rows.length > 0 ? rows[rows.length - 1].v : 0
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="flex items-baseline justify-between">
+        <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
+        <span className="text-[11px] text-gray-400">최근 12개월</span>
+      </div>
+      <div className="mt-1 flex items-baseline gap-2">
+        <span className="text-2xl font-bold tabular-nums text-gray-900">{cum.toLocaleString()}<span className="ml-0.5 text-sm font-medium text-gray-500">{unit}</span></span>
+        <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">누적 · 이번달 +{thisMonth.toLocaleString()}</span>
+      </div>
+      <ResponsiveContainer width="100%" height={104}>
+        <AreaChart data={rows} margin={{ top: 14, right: 34, left: 8, bottom: 0 }}>
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.35} />
+              <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <XAxis dataKey="ym" hide />
+          <YAxis hide domain={['auto', 'auto']} />
+          <Tooltip contentStyle={chart.tooltip} formatter={(v) => [`${Number(v).toLocaleString()}${unit}`, '누적']} />
+          <Area type="monotone" dataKey="cum" stroke={color} strokeWidth={2.5} fill={`url(#${gradId})`} dot={false} activeDot={{ r: 4 }} />
+        </AreaChart>
+      </ResponsiveContainer>
+      <ResponsiveContainer width="100%" height={96}>
+        <BarChart data={rows} margin={{ top: 14, right: 8, left: 8, bottom: 0 }}>
+          <XAxis dataKey="ym" tick={{ fontSize: 9, fill: chart.tick }} tickLine={false} axisLine={false} interval={0} />
+          <YAxis hide />
+          <Tooltip contentStyle={chart.tooltip} formatter={(v) => [`${Number(v).toLocaleString()}${unit}`, '월별']} />
+          <Bar dataKey="v" fill={color} radius={[3, 3, 0, 0]} maxBarSize={16}>
+            <LabelList dataKey="v" position="top" fontSize={9} fill={chart.tick} formatter={(v: unknown) => (Number(v) > 0 ? Number(v).toLocaleString() : '')} />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+      <p className="mt-1 text-right text-[10px] text-gray-400">위 = 누적 · 아래 = 월별</p>
+    </div>
+  )
+}
+
 export default function SalesDashboardA({ data }: { data: DashboardAData }) {
   const chart = useChartTheme()
   const { kpi } = data
@@ -106,10 +152,10 @@ export default function SalesDashboardA({ data }: { data: DashboardAData }) {
         <Kpi label="영업중 딜" value={`${kpi.activeDeals}건`} />
       </div>
 
-      {/* 월별 추이 — ① 계약 건수 ② 누적·월별 병원/병상 (한 축 원칙: 지표별 차트 분리) */}
-      <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-2">
+      {/* 월별 추이 — 3등분: 계약 건수 / 도입 병원(누적+월별) / 도입 병상(누적+월별) */}
+      <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-3">
         <Card title="월별 계약 건수" note="계약일 기준 · 최근 24개월">
-          <ResponsiveContainer width="100%" height={220}>
+          <ResponsiveContainer width="100%" height={244}>
             <BarChart data={data.monthly} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid stroke={chart.grid} vertical={false} />
               <XAxis dataKey="ym" tick={{ fontSize: 11, fill: chart.tick }} tickLine={false} axisLine={false} />
@@ -119,36 +165,10 @@ export default function SalesDashboardA({ data }: { data: DashboardAData }) {
             </BarChart>
           </ResponsiveContainer>
         </Card>
-        <Card title="누적·월별 병원/병상" note="막대 = 월별 신규 · 선 = 누적 (병상 = 대웅 디바이스 수량)">
-          <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-            <div>
-              <p className="text-[11px] font-medium text-gray-500">병원 (곳)</p>
-              <ResponsiveContainer width="100%" height={190}>
-                <ComposedChart data={data.monthly} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke={chart.grid} vertical={false} />
-                  <XAxis dataKey="ym" tick={{ fontSize: 10, fill: chart.tick }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: chart.tick }} tickLine={false} axisLine={false} allowDecimals={false} width={34} />
-                  <Tooltip contentStyle={chart.tooltip} formatter={(v, name) => [`${Number(v).toLocaleString()}곳`, name === 'hosp' ? '월별 신규 병원' : '누적 병원']} />
-                  <Bar dataKey="hosp" fill={chart.blue} radius={[3, 3, 0, 0]} maxBarSize={16} />
-                  <Line type="monotone" dataKey="cumHosp" stroke={chart.indigo} strokeWidth={2} dot={false} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-            <div>
-              <p className="text-[11px] font-medium text-gray-500">병상 (대웅 디바이스)</p>
-              <ResponsiveContainer width="100%" height={190}>
-                <ComposedChart data={data.monthly} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke={chart.grid} vertical={false} />
-                  <XAxis dataKey="ym" tick={{ fontSize: 10, fill: chart.tick }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: chart.tick }} tickLine={false} axisLine={false} allowDecimals={false} width={44} />
-                  <Tooltip contentStyle={chart.tooltip} formatter={(v, name) => [`${Number(v).toLocaleString()}병상`, name === 'beds' ? '월별 병상' : '누적 병상']} />
-                  <Bar dataKey="beds" fill={chart.amber} radius={[3, 3, 0, 0]} maxBarSize={16} />
-                  <Line type="monotone" dataKey="cumBeds" stroke={chart.indigo} strokeWidth={2} dot={false} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </Card>
+        <TrendCard title="도입 병원 수" unit="곳" color={chart.blue} gradId="gradHosp" chart={chart}
+          cum={kpi.hospitals} rows={data.monthly.slice(-12).map((m) => ({ ym: m.ym, v: m.hosp, cum: m.cumHosp }))} />
+        <TrendCard title="도입 병상 수 (대웅 디바이스)" unit="병상" color={chart.amber} gradId="gradBeds" chart={chart}
+          cum={kpi.devices} rows={data.monthly.slice(-12).map((m) => ({ ym: m.ym, v: m.beds, cum: m.cumBeds }))} />
       </div>
 
       <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3">
@@ -164,30 +184,31 @@ export default function SalesDashboardA({ data }: { data: DashboardAData }) {
           </ResponsiveContainer>
         </Card>
         <Card title="종별 도입 병원" note="도입 수 / 종별 전체 병원 수 · 종별 위계 순">
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={data.typeDist} layout="vertical" margin={{ top: 4, right: 64, left: 8, bottom: 0 }}>
-              <CartesianGrid stroke={chart.grid} horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 11, fill: chart.tick }} tickLine={false} axisLine={false} allowDecimals={false} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: chart.tick }} tickLine={false} axisLine={false} width={92} />
-              <Tooltip
-                contentStyle={chart.tooltip}
-                formatter={(v, _n, item) => {
-                  const t = (item?.payload as { total?: number } | undefined)?.total ?? 0
-                  const pct = t > 0 ? ` (${Math.round((Number(v) / t) * 1000) / 10}%)` : ''
-                  return [`도입 ${v}곳 / 전체 ${t.toLocaleString()}곳${pct}`, '종별']
-                }}
-              />
-              <Bar dataKey="count" fill={chart.indigo} radius={[0, 4, 4, 0]} maxBarSize={18}>
-                <LabelList
-                  position="right"
-                  fill={chart.tick}
-                  fontSize={11}
-                  valueAccessor={(entry: { payload?: { count?: number; total?: number } }) =>
-                    `${entry.payload?.count ?? ''} / ${(entry.payload?.total ?? 0).toLocaleString()}`}
-                />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="space-y-2">
+            {data.typeDist.length === 0 && <p className="text-sm text-gray-400">데이터 없음</p>}
+            {data.typeDist.map((t, i) => {
+              const colors = [chart.indigo, chart.blue, '#0ea5e9', chart.emerald, chart.amber, '#64748b']
+              const c = colors[i % colors.length]
+              const pct = t.total > 0 ? (t.count / t.total) * 100 : 0
+              return (
+                <div key={t.name} className="relative overflow-hidden rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/40">
+                  {/* 침투율 배경 게이지 */}
+                  <div className="absolute inset-y-0 left-0 opacity-15" style={{ width: `${Math.max(pct, 1.5)}%`, backgroundColor: c }} />
+                  <div className="relative flex items-center justify-between">
+                    <span className="inline-flex items-center gap-2 text-[13px] font-medium text-gray-700">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: c }} />
+                      {t.name}
+                    </span>
+                    <span className="text-[12px] tabular-nums text-gray-500">
+                      <b className="text-[15px] font-bold" style={{ color: c }}>{t.count.toLocaleString()}</b>
+                      <span className="mx-1 text-gray-400">/</span>{t.total.toLocaleString()}곳
+                      <span className="ml-2 rounded-full bg-white px-1.5 py-0.5 text-[11px] font-semibold text-gray-600 shadow-sm dark:bg-gray-900">{Math.round(pct * 10) / 10}%</span>
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </Card>
         <Card title="지역별 실판매액 Top 10">
           <ResponsiveContainer width="100%" height={200}>
