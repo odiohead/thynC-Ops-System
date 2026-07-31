@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-07-31 | 도입현황 입력 페이지 + 딜 기기 수량 PROD 배포
+
+- 커밋 `b45cdc5` push → PROD `git pull`(`a84f7af`→`b45cdc5`) — 의존성 변경 없음
+- **PROD DB**: `prisma migrate deploy` **2건** — `20260731090000_sales_deal_excel_columns`(sales_deals 컬럼 8종 추가) / `20260731120000_sales_deal_devices`(테이블 신설). 둘 다 추가형(ADD COLUMN/CREATE TABLE)이라 기존 데이터 무영향 → `prisma generate`
+- 힙 4GB 빌드(146 라우트) → `pm2 restart thync-prod` (Ready 1.1s). 스모크: `/`·`/sales`·`/sales/deals`·`/sales/deals/1`·`/hospitals`·`/inventory`·`/inventory/transactions`·`/tickets` 전부 307 정상, 외부 HTTPS 정상, **재시작 후 신규 오류 로그 0건**
+- 검증: PROD 신규 컬럼 8/8 존재, `sales_deal_devices` 테이블·UNIQUE·FK 확인. 기존 딜 243건 무손상, 기기 수량 행 0(신규 입력 대기)
+- **동반 배포**: 앞선 커밋 `a84f7af`(자재관리 전표 상세·LOT 요약·다품목 일괄 입출고, 다른 세션에서 커밋·push)가 이번 PROD 빌드에 함께 포함됨 — DB 변경 없는 코드 전용
+- **주의**: PROD 기기 마스터(`device_info`) 활성 2종 — 딜 상세의 '도입 기기 수량'은 이 2종만 노출. 기기 추가는 설정 > 장비 정보에서
+
+---
+
 ## 2026-07-31 | 영업/CRM — 딜 상세 '규모·계약'에 도입 기기 수량 입력 (기기 마스터 연동)
 
 - 요구: 딜 상세에서 설정>장비 정보(기기 관리) 마스터 기준으로 기기별 수량 입력. 기기가 나중에 늘어나도 기존 딜 조회 시 새 기기 필드가 0으로 보여야 함
