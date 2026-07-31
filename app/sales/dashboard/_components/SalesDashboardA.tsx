@@ -5,7 +5,7 @@
  * 계약완료 딜 기준. 축 금액은 억 단위 표기(툴팁은 원 단위 풀 자릿수).
  */
 
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, AreaChart, Area, LabelList } from 'recharts'
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, Area, LabelList } from 'recharts'
 import { useChartTheme } from '@/app/components/theme/useChartTheme'
 
 export interface DashboardAData {
@@ -21,15 +21,68 @@ export interface DashboardAData {
     activeDeals: number
   }
   monthly: Array<{ ym: string; count: number; hosp: number; beds: number; cumHosp: number; cumBeds: number }>
-  modelDist: Array<{ name: string; count: number }>
+  monthDeals: DealListRow[]
+  weekDeals: DealListRow[]
   typeDist: Array<{ name: string; count: number; total: number }>
-  regionTop: Array<{ name: string; actual: number }>
   settleDist: Array<{ name: string; count: number }>
   taxDist: Array<{ name: string; count: number }>
 }
 
+export interface DealListRow {
+  name: string
+  type: string
+  model: string | null
+  devices: number | null
+  date: string
+  sido: string | null
+}
+
 const won = (v: number) => `${v.toLocaleString('ko-KR')}원`
 const eok = (v: number) => `${(v / 1e8).toFixed(v >= 1e9 ? 0 : 1)}억`
+
+/** 이번달·이번주 계약내역 리스트 카드 */
+function DealListCard({ title, note, rows }: { title: string; note: string; rows: DealListRow[] }) {
+  const th = 'whitespace-nowrap px-2 py-1.5 text-left text-[11px] font-medium text-gray-400'
+  const td = 'whitespace-nowrap px-2 py-1.5 text-[12px] text-gray-700'
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="flex items-baseline justify-between">
+        <h3 className="text-sm font-semibold text-gray-700">{title} <span className="ml-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">{rows.length}건</span></h3>
+        <span className="text-[11px] text-gray-400">{note}</span>
+      </div>
+      <div className="mt-2 max-h-[200px] overflow-auto">
+        {rows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-gray-400">계약 내역이 없습니다.</p>
+        ) : (
+          <table className="min-w-full">
+            <thead className="sticky top-0 bg-white">
+              <tr>
+                <th className={th}>병원명</th>
+                <th className={th}>병원종</th>
+                <th className={th}>판매모델</th>
+                <th className={`${th} text-right`}>도입병상 수</th>
+                <th className={th}>계약일</th>
+                <th className={th}>지역</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {rows.map((r, i) => (
+                <tr key={i}>
+                  <td className={`${td} max-w-[140px] truncate font-medium text-gray-900`} title={r.name}>{r.name}</td>
+                  <td className={td}>{r.type}</td>
+                  <td className={td}>{r.model ?? '—'}</td>
+                  <td className={`${td} text-right tabular-nums`}>{r.devices?.toLocaleString() ?? '—'}</td>
+                  <td className={`${td} tabular-nums`}>{r.date}</td>
+                  <td className={td}>{r.sido ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -172,17 +225,8 @@ export default function SalesDashboardA({ data }: { data: DashboardAData }) {
       </div>
 
       <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3">
-        <Card title="판매모델별 계약" note="병원 판매모델 · 딜 수">
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={data.modelDist} layout="vertical" margin={{ top: 4, right: 28, left: 8, bottom: 0 }}>
-              <CartesianGrid stroke={chart.grid} horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 11, fill: chart.tick }} tickLine={false} axisLine={false} allowDecimals={false} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: chart.tick }} tickLine={false} axisLine={false} width={92} />
-              <Tooltip contentStyle={chart.tooltip} formatter={(v) => [`${v}건`, '계약']} />
-              <Bar dataKey="count" fill={chart.blue} radius={[0, 4, 4, 0]} maxBarSize={18} label={{ position: 'right', fontSize: 11, fill: chart.tick }} />
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
+        <DealListCard title="이번달 계약내역" note="계약일 기준 · 이번달" rows={data.monthDeals} />
+        <DealListCard title="이번주 계약내역" note="계약일 기준 · 이번주(월~일)" rows={data.weekDeals} />
         <Card title="종별 도입 병원" note="도입 수 / 종별 전체 병원 수 · 종별 위계 순">
           <div className="space-y-2">
             {data.typeDist.length === 0 && <p className="text-sm text-gray-400">데이터 없음</p>}
@@ -209,19 +253,6 @@ export default function SalesDashboardA({ data }: { data: DashboardAData }) {
               )
             })}
           </div>
-        </Card>
-        <Card title="지역별 실판매액 Top 10">
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={data.regionTop} layout="vertical" margin={{ top: 4, right: 40, left: 8, bottom: 0 }}>
-              <CartesianGrid stroke={chart.grid} horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 11, fill: chart.tick }} tickLine={false} axisLine={false} tickFormatter={(v: number) => eok(v)} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: chart.tick }} tickLine={false} axisLine={false} width={64} />
-              <Tooltip contentStyle={chart.tooltip} formatter={(v) => [won(Number(v)), '실판매액']} />
-              <Bar dataKey="actual" fill={chart.blue} radius={[0, 4, 4, 0]} maxBarSize={14}>
-                {data.regionTop.map((r) => <Cell key={r.name} fill={chart.blue} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
         </Card>
       </div>
 

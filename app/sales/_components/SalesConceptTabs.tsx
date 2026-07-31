@@ -1,28 +1,44 @@
 'use client'
 
 /**
- * 도입 현황 컨셉 탭 — nav는 '도입 현황' 하나만 두고, 세 컨셉(/sales·/sales2·/sales3)을
- * 페이지 상단 탭으로 전환한다. 컨셉 확정 시 채택안만 남기고 이 탭은 제거 예정.
+ * 영업현황 탭 — 기본 노출은 도입현황(/sales/deals)·대시보드 A 2개.
+ * 나머지 컨셉 탭(차수 원장·파이프라인·병원 요약·대시보드 B/C)은 SUPER_ADMIN에게만 노출 (2026-08-01).
+ * 노출만 제어하며 실제 접근 권한은 각 페이지의 checkSalesAccess가 강제한다.
  */
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-const TABS = [
+const MAIN_TABS = [
   { href: '/sales/deals', label: '도입현황' },
+  { href: '/sales/dashboard', label: '대시보드 A · 실적' },
+]
+
+const SUPER_ADMIN_TABS = [
   { href: '/sales', label: '차수 원장' },
   { href: '/sales2', label: '영업 파이프라인' },
   { href: '/sales3', label: '병원 요약' },
-  { href: '/sales/dashboard', label: '대시보드 A · 실적' },
   { href: '/sales/dashboard2', label: '대시보드 B · 파이프라인' },
   { href: '/sales/dashboard3', label: '대시보드 C · 인사이트' },
 ]
 
 export default function SalesConceptTabs() {
   const pathname = usePathname()
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((u) => setIsSuperAdmin(u?.role === 'SUPER_ADMIN'))
+      .catch(() => setIsSuperAdmin(false))
+  }, [])
+
+  const tabs = isSuperAdmin ? [...MAIN_TABS, ...SUPER_ADMIN_TABS] : MAIN_TABS
+
   return (
-    <div className="flex items-center gap-1 border-b border-gray-200 px-6 pt-4">
-      {TABS.map((t) => (
+    <div className="flex flex-wrap items-center gap-1 border-b border-gray-200 px-6 pt-4">
+      {tabs.map((t) => (
         <Link
           key={t.href}
           href={t.href}
@@ -35,7 +51,7 @@ export default function SalesConceptTabs() {
           {t.label}
         </Link>
       ))}
-      <span className="ml-2 pb-1 text-[11px] text-gray-400">컨셉 비교 중 — 확정 후 하나로 통합</span>
+      {isSuperAdmin && <span className="ml-2 pb-1 text-[11px] text-gray-400">컨셉 탭(차수 원장~대시보드 C)은 최고관리자만 표시</span>}
     </div>
   )
 }

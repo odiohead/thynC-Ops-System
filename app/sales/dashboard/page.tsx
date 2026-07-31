@@ -86,8 +86,25 @@ export default async function SalesDashboardPage() {
     return m
   }
 
-  const modelDist = Array.from(countBy(completed, (d) => d.hospitalModel?.name).entries())
-    .map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
+  // 이번달·이번주 계약내역 (KST 기준, 계약일)
+  const kstNow = new Date(Date.now() + 9 * 3600 * 1000)
+  const thisMonth = kstNow.toISOString().slice(0, 7)
+  const dow = (kstNow.getUTCDay() + 6) % 7 // 월요일 시작
+  const weekStart = new Date(kstNow.getTime() - dow * 86400000).toISOString().slice(0, 10)
+  const weekEnd = new Date(kstNow.getTime() + (6 - dow) * 86400000).toISOString().slice(0, 10)
+  const dealRow = (d: (typeof completed)[number]) => ({
+    name: d.hospital.hospitalName,
+    type: d.hospital.type,
+    model: d.daewoongModel ?? d.hospitalModel?.name ?? null,
+    devices: d.daewoongDeviceCount,
+    date: d.contractDate!.toISOString().slice(0, 10),
+    sido: d.hospital.sidoName,
+  })
+  const dated = completed.filter((d) => d.contractDate !== null)
+  const monthDeals = dated.filter((d) => d.contractDate!.toISOString().slice(0, 7) === thisMonth)
+    .sort((a, b) => b.contractDate!.getTime() - a.contractDate!.getTime()).map(dealRow)
+  const weekDeals = dated.filter((d) => { const s = d.contractDate!.toISOString().slice(0, 10); return s >= weekStart && s <= weekEnd })
+    .sort((a, b) => b.contractDate!.getTime() - a.contractDate!.getTime()).map(dealRow)
   // 종별: 병원 단위 (딜 다건 중복 제거) — 종별 전체 병원 수 대비 도입 수, 종별 위계 순 고정 (2026-07-31)
   const typeMap = new Map<string, string>()
   completed.forEach((d) => typeMap.set(d.hospitalCode, d.hospital.type))
@@ -101,15 +118,6 @@ export default async function SalesDashboardPage() {
       const ia = TYPE_ORDER.indexOf(a.name), ib = TYPE_ORDER.indexOf(b.name)
       return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
     })
-
-  // 지역별 실판매액 Top 10
-  const regionMap = new Map<string, number>()
-  completed.forEach((d) => {
-    const k = d.hospital.sidoName ?? '미지정'
-    regionMap.set(k, (regionMap.get(k) ?? 0) + n(d.daewoongAmountActual))
-  })
-  const regionTop = Array.from(regionMap.entries()).map(([name, actual]) => ({ name, actual }))
-    .sort((a, b) => b.actual - a.actual).slice(0, 10)
 
   // 정산·세금계산서 (계약완료 딜 기준)
   const settleDist = Array.from(countBy(completed, (d) => d.daewoongSettlement).entries()).map(([name, count]) => ({ name, count }))
@@ -128,9 +136,9 @@ export default async function SalesDashboardPage() {
       activeDeals: active.length,
     },
     monthly,
-    modelDist,
+    monthDeals,
+    weekDeals,
     typeDist,
-    regionTop,
     settleDist,
     taxDist,
   }
