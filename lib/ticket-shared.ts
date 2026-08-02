@@ -38,6 +38,11 @@ export const TICKET_STATUS_COLORS: Record<TicketStatus, string> = {
 // (ticket_status_map_design.md §3 — status_codes.ticket_status / build_statuses.ticket_status)
 export const MAPPABLE_TICKET_STATUSES: TicketStatus[] = ['OPEN', 'IN_PROGRESS', 'PENDING', 'RESOLVED', 'CLOSED']
 
+// 개인 업무 Assignment Group 이름 (2026-08-03 방안 2 — 단일 소스)
+// 생성 폼 '개인 업무' 토글의 CTI 탐색 키이자 티켓 대시보드 집계 제외 기준.
+// seed-ticket-masters.sql §5와 일치해야 함 (그룹명 변경 시 동반 수정).
+export const PERSONAL_QUEUE_NAME = '개인 업무'
+
 export const TICKET_SEVERITY_LABELS: Record<TicketSeverity, string> = {
   SEV1: 'Sev1 · Critical',
   SEV2: 'Sev2 · Urgent',

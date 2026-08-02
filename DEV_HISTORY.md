@@ -4,6 +4,45 @@
 
 ---
 
+## 2026-08-03 | 티켓 개인 업무 지원 — '개인 업무' 그룹 + 생성 폼 토글 (dev2·PROD)
+
+- 배경: 티켓 생성이 CTI→Assignment Group 전제라 개인 단위 업무를 담을 곳이 없었음. 방안 검토(queueId nullable/개인그룹 1개/사용자별 그룹) 후 **시스템 그룹 1개 방안 확정**(사용자) — AWS SIM 철학(개인 업무 = 그룹 무소속이 아니라 본인 즉시 배정)과 일치, 스키마 변경 0
+- **마스터**: `seed-ticket-masters.sql` §5 추가 — Assignment Group '개인 업무'(sort 50) + CTI '내부>개인>업무'(기본 그룹=개인 업무), 멱등. dev·PROD DB 적용
+- **생성 폼**(`/tickets/new`): '개인 업무' 토글 — CTI·그룹 자동 지정 + 본인 담당 배정(즉시 ASSIGNED), CTI·그룹 셀렉트 비활성화. 마스터에 개인 업무 그룹 없거나 서브 티켓 생성 시 토글 미노출
+- **지표**: `/api/tickets/metrics` — 큐 미지정 조회 시 개인 업무 그룹 제외(팀 지표 희석 방지), 큐 필터로 명시 선택하면 조회 가능
+- 단일 소스: 그룹명 `PERSONAL_QUEUE_NAME`(`lib/ticket-shared.ts`) — 폼 토글·지표 제외가 공유
+- tsc 0오류 · dev2/PROD 빌드·재시작
+- 영향 파일: lib/ticket-shared.ts, app/tickets/new/page.tsx, app/api/tickets/metrics/route.ts, scripts/seed-ticket-masters.sql, README.md
+
+---
+
+## 2026-08-03 | PROD hospitals.intro_beds 딜 기준 동기화 (사용자 승인 DML)
+
+- 배경: "/"·"/dashboard"(병원 축 intro_beds)와 대시보드 A(딜 축 대웅 디바이스 합)의 도입병상 차이 912 분석 — 보류 3곳 328 + 병원별 값 불일치 34곳 584
+- `scripts/sync-intro-beds-from-deals-20260803.sql` 신규 — intro_beds = 계약완료 딜의 대웅 디바이스 수량 합 (멱등, 딜 없는 병원 미변경). PROD 실행 `UPDATE 34` (백업: PROD `~/backups/hospitals_before_intro_beds_deal_sync_20260803.dump`)
+- 검증: 병원 축 17,826→18,410, 대시보드 A와 잔여 차이 328 = 보류 3곳(좋은삼정·강릉고려·좋은강안) 디바이스 합과 정확히 일치, 병원별 불일치 0건
+- **주의**: 기존 `sync-intro-beds-from-projects.sql`(프로젝트 bed_count 기준, 2026-07-13 원칙)과 기준 상충 — 재실행 시 이번 값을 되덮음. 향후 기준 확정(딜 vs 프로젝트)은 사용자 결정 대기
+
+---
+
+## 2026-08-03 | 기능 역할(RBAC Lite) 권한 체계 설계안 작성 (문서만 — 코드 변경 없음)
+
+- `projects/rbac_design.md` 신규 — 현행 권한 4축(등급·소속·지정 풀·개인 플래그) 진단 후, 등급(`User.role`)은 유지하고 그 위에 **가산 전용(additive-only) 역할 체계**를 얹는 설계 (2.0 기획 테마 F 권한 항목 구체화)
+- 골격: `app_roles`·`app_role_permissions`·`app_user_roles` 3테이블 + 권한 카탈로그 코드 단일 소스(`lib/permissions.ts`) + `hasPermission` 헬퍼(DB 조회+60초 캐시, SUPER_ADMIN 전권) + `/settings/roles`(SUPER_ADMIN) + `nav_menu_items.allowed_permissions` 메뉴 연동
+- Phase 1 기반(무영향) → Phase 2 파일럿(자재관리 `canManageStock` OR 편입 + 메뉴) → Phase 3 모듈별 순차 확산. `field_engineers`(배정 후보 풀)·SEERS 소속 게이트·JWT는 범위 제외
+- 상태: 설계 검토 대기 — 착수 승인 전. projects/README.md 목록 갱신
+
+---
+
+## 2026-08-02 | 운영관리시스템 2.0 기획안 작성 (문서만 — 코드 변경 없음)
+
+- `projects/ops_system_2.0_plan.html` 신규 — 1.0 이후 고도화 방향 기획안(설계안 아님, 항목별 착수 전 별도 설계·승인 필요)
+- dev DB(PROD 07-31 동기화본) 실측 진단 기반: 사용량비례형 131 vs 구축형 38(반복 매출 모듈 부재), WMS 시리얼 19,363개 중 병원 설치 연결 0건(Install Base 공백), 유지보수 월 ~54건·HW 장애 최다(예방 체계 부재) 등 5개 구조 신호
+- 6테마 18항목: A 설치 기반(장비 개체·정기점검·텔레메트리) / B 반복 매출(정산 원장·계약 달력·MRR) / C 고객 경험(포털·건강도·운영 리포트) / D 현장 운영(디스패치·완료 보고·플레이북) / E 인텔리전스(정합성·KPI·AI 부조종사·통합검색) / F 기반(연동·권한·규제 조사) + Wave 1~3 우선순위·결정 필요 항목
+- `enhancement_analysis_202607.md`는 계승하지 않고 신규 진단(1.0 마감 시 결정 준수). projects/README.md 목록 갱신
+
+---
+
 ## 2026-07-31 | 도입현황 입력 페이지 + 딜 기기 수량 PROD 배포
 
 - 커밋 `b45cdc5` push → PROD `git pull`(`a84f7af`→`b45cdc5`) — 의존성 변경 없음

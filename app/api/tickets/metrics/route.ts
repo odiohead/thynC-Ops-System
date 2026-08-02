@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { PERSONAL_QUEUE_NAME } from '@/lib/ticket-shared'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,6 +32,11 @@ export async function GET(request: NextRequest) {
   // 공통 필터 (큐·유형) — 스냅샷·기간 지표 모두 적용
   const filters: Prisma.Sql[] = []
   if (queueId && Number.isFinite(queueId)) filters.push(Prisma.sql`t.queue_id = ${queueId}`)
+  else {
+    // '개인 업무' 그룹은 팀 지표에서 제외 (2026-08-03) — 큐를 명시 선택하면 그대로 조회 가능
+    const personalQueue = await prisma.ticketQueue.findUnique({ where: { name: PERSONAL_QUEUE_NAME }, select: { id: true } })
+    if (personalQueue) filters.push(Prisma.sql`t.queue_id <> ${personalQueue.id}`)
+  }
   if (refType === 'PURE') filters.push(Prisma.sql`t.ref_type IS NULL`)
   else if (refType && ['MAINTENANCE', 'ETC', 'SITE_VISIT', 'INSTALL_PLAN', 'PROJECT'].includes(refType)) {
     filters.push(Prisma.sql`t.ref_type = ${refType}`)

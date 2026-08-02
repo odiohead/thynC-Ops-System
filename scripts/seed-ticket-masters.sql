@@ -125,3 +125,32 @@ ON CONFLICT (menu_key) DO NOTHING;
 
 -- P10: tasks 롤업 메뉴 비활성 (티켓 목록이 대체 — /tasks는 /tickets로 리다이렉트)
 UPDATE nav_menu_items SET is_active = false WHERE menu_key = 'tasks' AND is_active = true;
+
+-- 5) 개인 업무 (2026-08-03 — 개인 업무 티켓 방안 2)
+--    시스템 그룹 '개인 업무' + CTI 내부>개인>업무(기본 그룹=개인 업무).
+--    생성 폼의 '개인 업무' 토글이 이 CTI·그룹을 자동 지정하고 본인을 담당자로 배정한다.
+--    이름은 lib/ticket-shared.ts의 PERSONAL_QUEUE_NAME과 일치해야 함 (변경 시 동반 수정).
+INSERT INTO ticket_queues (name, description, sort_order)
+SELECT '개인 업무', '개인 단위 업무 — 본인 배정 전용 (티켓 대시보드 집계 제외)', 50
+WHERE NOT EXISTS (SELECT 1 FROM ticket_queues WHERE name = '개인 업무');
+
+DO $$
+DECLARE
+  q_personal INT; cat INT; typ INT;
+BEGIN
+  SELECT id INTO q_personal FROM ticket_queues WHERE name = '개인 업무';
+
+  SELECT id INTO cat FROM ticket_cti WHERE level = 1 AND name = '내부' AND parent_id IS NULL;
+  IF cat IS NULL THEN
+    INSERT INTO ticket_cti (name, level, sort_order) VALUES ('내부', 1, 30) RETURNING id INTO cat;
+  END IF;
+
+  SELECT id INTO typ FROM ticket_cti WHERE parent_id = cat AND name = '개인';
+  IF typ IS NULL THEN
+    INSERT INTO ticket_cti (name, level, parent_id, sort_order) VALUES ('개인', 2, cat, 50) RETURNING id INTO typ;
+  END IF;
+
+  INSERT INTO ticket_cti (name, level, parent_id, default_queue_id, sort_order)
+  SELECT '업무', 3, typ, q_personal, 10
+  WHERE NOT EXISTS (SELECT 1 FROM ticket_cti WHERE parent_id = typ AND name = '업무');
+END $$;

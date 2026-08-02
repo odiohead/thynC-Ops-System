@@ -7,7 +7,7 @@ import RichTextEditor from '@/app/components/RichTextEditor'
 import Modal from '@/app/components/ui/Modal'
 import OwnerSelect from '../components/OwnerSelect'
 import TicketStatusBadge from '../components/TicketStatusBadge'
-import { TICKET_SEVERITY_LABELS } from '@/lib/ticket-shared'
+import { TICKET_SEVERITY_LABELS, PERSONAL_QUEUE_NAME } from '@/lib/ticket-shared'
 
 interface Hospital {
   hospitalCode: string
@@ -58,6 +58,8 @@ function NewTicketForm() {
   const parentId = parentIdParam && /^\d+$/.test(parentIdParam) ? Number(parentIdParam) : null
   const [parentTicket, setParentTicket] = useState<ParentTicket | null>(null)
   const [role, setRole] = useState<string | null>(null)
+  const [meId, setMeId] = useState<string | null>(null)
+  const [personal, setPersonal] = useState(false)
   const [ctiNodes, setCtiNodes] = useState<CtiNode[]>([])
   const [queues, setQueues] = useState<Queue[]>([])
   const [users, setUsers] = useState<AppUser[]>([])
@@ -84,7 +86,7 @@ function NewTicketForm() {
   const canWrite = !!role && role !== 'VIEWER'
 
   useEffect(() => {
-    fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => setRole(d?.role ?? null))
+    fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => { setRole(d?.role ?? null); setMeId(d?.id ?? null) })
     fetch('/api/settings/ticket-cti')
       .then((r) => (r.ok ? r.json() : { nodes: [] }))
       .then((d) => setCtiNodes((d.nodes ?? []).filter((n: CtiNode) => n.isActive)))
@@ -100,6 +102,27 @@ function NewTicketForm() {
         .then((d) => { if (d?.ticket) setParentTicket(d.ticket) })
     }
   }, [parentId])
+
+  /** 개인 업무 CTI — 기본 그룹이 '개인 업무'인 Item (마스터에 없으면 토글 미노출) */
+  const personalL3 = useMemo(
+    () => ctiNodes.find((n) => n.level === 3 && n.defaultQueue?.name === PERSONAL_QUEUE_NAME) ?? null,
+    [ctiNodes]
+  )
+
+  function togglePersonal(on: boolean) {
+    setPersonal(on)
+    if (on && personalL3) {
+      const l2 = ctiNodes.find((n) => n.id === personalL3.parentId)
+      setL1Id(l2?.parentId != null ? String(l2.parentId) : '')
+      setL2Id(l2 ? String(l2.id) : '')
+      setL3Id(String(personalL3.id))
+      setQueueId('') // CTI 기본 그룹(개인 업무) 사용
+      if (meId) setOwnerId(meId)
+    } else {
+      setL1Id(''); setL2Id(''); setL3Id('')
+      setOwnerId('')
+    }
+  }
 
   const l1Options = useMemo(() => ctiNodes.filter((n) => n.level === 1), [ctiNodes])
   const l2Options = useMemo(() => ctiNodes.filter((n) => n.level === 2 && String(n.parentId) === l1Id), [ctiNodes, l1Id])
@@ -227,6 +250,29 @@ function NewTicketForm() {
                 </div>
               </div>
 
+              {/* 개인 업무 토글 — CTI·그룹 자동 지정 + 본인 배정 (마스터에 개인 업무 그룹이 있을 때만) */}
+              {personalL3 && parentId == null && (
+                <div className={rowClass}>
+                  <label className={labelClass}>개인 업무</label>
+                  <div className="sm:col-span-2">
+                    <label className="flex cursor-pointer items-center gap-2.5">
+                      <input
+                        type="checkbox"
+                        checked={personal}
+                        onChange={(e) => togglePersonal(e.target.checked)}
+                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-gray-700">개인 업무 티켓으로 생성</span>
+                    </label>
+                    {personal && (
+                      <p className="mt-1.5 text-xs text-blue-600">
+                        분류·Assignment Group이 &lsquo;{PERSONAL_QUEUE_NAME}&rsquo;으로 자동 지정되고 본인이 담당자로 배정됩니다.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* 분류 (CTI) */}
               <div className={rowClass}>
                 <label className="flex items-start pt-2 text-sm font-medium text-gray-700">
@@ -236,7 +282,8 @@ function NewTicketForm() {
                   <select
                     value={l1Id}
                     onChange={(e) => { setL1Id(e.target.value); setL2Id(''); setL3Id('') }}
-                    className={selectClass}
+                    disabled={personal}
+                    className={`${selectClass} disabled:bg-gray-50 disabled:text-gray-400`}
                   >
                     <option value="">Category 선택</option>
                     {l1Options.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
@@ -244,7 +291,7 @@ function NewTicketForm() {
                   <select
                     value={l2Id}
                     onChange={(e) => { setL2Id(e.target.value); setL3Id('') }}
-                    disabled={!l1Id}
+                    disabled={!l1Id || personal}
                     className={`${selectClass} disabled:bg-gray-50 disabled:text-gray-400`}
                   >
                     <option value="">Type 선택</option>
@@ -253,7 +300,7 @@ function NewTicketForm() {
                   <select
                     value={l3Id}
                     onChange={(e) => setL3Id(e.target.value)}
-                    disabled={!l2Id}
+                    disabled={!l2Id || personal}
                     className={`${selectClass} disabled:bg-gray-50 disabled:text-gray-400`}
                   >
                     <option value="">Item 선택</option>
@@ -266,7 +313,12 @@ function NewTicketForm() {
               <div className={rowClass}>
                 <label className={labelClass}>Assignment Group</label>
                 <div className="sm:col-span-2">
-                  <select value={queueId} onChange={(e) => setQueueId(e.target.value)} className={selectClass}>
+                  <select
+                    value={queueId}
+                    onChange={(e) => setQueueId(e.target.value)}
+                    disabled={personal}
+                    className={`${selectClass} disabled:bg-gray-50 disabled:text-gray-400`}
+                  >
                     <option value="">
                       {selectedL3?.defaultQueue
                         ? `기본 그룹 사용 — ${selectedL3.defaultQueue.name}`

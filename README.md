@@ -976,6 +976,7 @@ prisma/
 ### 티켓 관리 (`/tickets` — P3 기본 UI, 2026-07-23)
 - **목록** (`/tickets`): 상단 Assignment Group 탭(전체+활성 그룹별) · 필터 바 — 상태 다중 토글(선택 없음 = 열린 티켓 `open=true`), Sev 셀렉트, 내 티켓/미배정 토글(상호 배타), 티켓번호·제목 검색(300ms 디바운스) · 서버 페이지네이션(30건) · 컬럼: 티켓번호|Sev|제목|상태(PENDING이면 사유 병기)|Assign Group|담당자|병원|접수일 · 행 클릭 → 상세
 - **생성** (`/tickets/new`): CTI 3단 셀렉트(Category→Type→Item, 전체 트리 1회 로드 후 클라이언트 구성) · 선택 Item의 기본 Assignment Group 표시 + 그룹 수동 변경 · Sev(기본 SEV4) · 담당자(owner, 지정 시 ASSIGNED 시작) · 참여자 칩+셀렉트 · 병원 검색 모달(유지보수 폼과 동일 패턴) · 설명 Tiptap → 저장 후 상세로 이동
+- **개인 업무 티켓** (2026-08-03): 생성 폼 상단 '개인 업무' 토글 — 켜면 CTI '내부>개인>업무'·Assignment Group '개인 업무'가 자동 지정되고 본인이 담당자로 배정(즉시 ASSIGNED). 시스템 그룹 '개인 업무'·해당 CTI는 `seed-ticket-masters.sql` §5 마스터, 그룹명은 `lib/ticket-shared.ts`의 `PERSONAL_QUEUE_NAME` 단일 소스. 개인 업무 그룹은 **티켓 대시보드(P12) 지표에서 제외**(큐 필터로 명시 선택 시에만 조회). 서브 티켓 생성 시에는 토글 미노출
 - **상세** (`/tickets/[id]`): 헤더(티켓번호·상태/Sev 배지·재오픈 횟수) · 메타 패널(Assignment Group, CTI 전체 경로, 담당자, 참여자, 병원 링크, 접수자, 접수/해결/종결 시각) · PENDING이면 사유·메모 배너
 - **액션** (VIEWER 숨김): `canTransition` 전이표로 **현재 상태에서 허용된 전이 버튼만 노출** — PENDING 전환은 사유 셀렉트+메모 인라인 입력, CLOSED는 confirm · 담당자 변경(OPEN↔ASSIGNED 자동 연동) · 큐 이관 · Sev 변경 · 참여자 추가/제거 · 티켓 삭제(ADMIN) · 전이표 위반 등 API 400 메시지 그대로 alert
 - **타임라인** (`TicketLogPanel`): 코멘트(Tiptap HTML, 본인·ADMIN 수정/삭제)와 시스템 이벤트(회색 한 줄 — payload를 상태/Sev 라벨·사용자/큐/CTI 이름으로 번역: "상태 접수 → 배정 · 작성자 · 시각") 시간순 단일 뷰 + 하단 코멘트 작성
