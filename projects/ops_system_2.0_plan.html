@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>thynC 운영관리시스템 2.0 기획안</title>
+<style>
+  :root {
+    --ink: #1a1f2e; --sub: #5a6478; --line: #e3e7ef; --bg: #ffffff; --bg-soft: #f6f8fb;
+    --accent: #2563eb; --accent-soft: #eff4ff; --green: #16a34a; --green-soft: #f0fdf4;
+    --amber: #d97706; --amber-soft: #fffbeb; --red: #dc2626; --red-soft: #fef2f2;
+    --purple: #7c3aed; --purple-soft: #f5f3ff; --teal: #0d9488; --teal-soft: #f0fdfa;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Pretendard Variable', Pretendard, -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif;
+         color: var(--ink); background: var(--bg); line-height: 1.75; font-size: 15px; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 48px 32px 120px; }
+  h1 { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; line-height: 1.3; }
+  h2 { font-size: 22px; font-weight: 800; letter-spacing: -0.3px; margin: 72px 0 20px;
+       padding-top: 24px; border-top: 3px solid var(--ink); }
+  h2 .no { color: var(--accent); margin-right: 8px; }
+  h3 { font-size: 17px; font-weight: 700; margin: 40px 0 12px; }
+  h4 { font-size: 15px; font-weight: 700; margin: 24px 0 8px; }
+  p { margin: 12px 0; }
+  ul, ol { margin: 12px 0 12px 22px; }
+  li { margin: 6px 0; }
+  strong { font-weight: 700; }
+  em { font-style: normal; background: linear-gradient(transparent 65%, #fde68a 65%); }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13.5px; }
+  th { background: var(--bg-soft); text-align: left; font-weight: 700; padding: 9px 12px;
+       border: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 9px 12px; border: 1px solid var(--line); vertical-align: top; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .meta { display: flex; gap: 10px; flex-wrap: wrap; margin: 18px 0 0; }
+  .chip { display: inline-block; padding: 3px 12px; border-radius: 999px; font-size: 12.5px;
+          font-weight: 600; background: var(--bg-soft); border: 1px solid var(--line); color: var(--sub); }
+  .chip.blue { background: var(--accent-soft); border-color: #c7d9ff; color: var(--accent); }
+  .chip.amber { background: var(--amber-soft); border-color: #fcd34d; color: var(--amber); }
+  .callout { border-radius: 12px; padding: 18px 22px; margin: 20px 0; border: 1px solid; }
+  .callout.blue { background: var(--accent-soft); border-color: #c7d9ff; }
+  .callout.amber { background: var(--amber-soft); border-color: #fde68a; }
+  .callout.green { background: var(--green-soft); border-color: #bbf7d0; }
+  .callout.red { background: var(--red-soft); border-color: #fecaca; }
+  .callout .t { font-weight: 800; font-size: 13.5px; margin-bottom: 6px; letter-spacing: 0.2px; }
+  .toc { background: var(--bg-soft); border: 1px solid var(--line); border-radius: 12px;
+         padding: 24px 28px; margin: 32px 0; }
+  .toc ol { margin-left: 18px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 20px 0; }
+  .kpi { border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; background: var(--bg); }
+  .kpi .v { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; font-variant-numeric: tabular-nums; }
+  .kpi .l { font-size: 12.5px; color: var(--sub); margin-top: 2px; }
+  .theme-head { display: flex; align-items: center; gap: 12px; margin: 56px 0 8px; }
+  .theme-badge { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center;
+                 justify-content: center; font-weight: 800; font-size: 18px; color: #fff; flex-shrink: 0; }
+  .feat { border: 1px solid var(--line); border-radius: 14px; padding: 24px 28px; margin: 20px 0; }
+  .feat-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+  .feat-head .code { font-weight: 800; font-size: 13px; padding: 2px 10px; border-radius: 6px; color: #fff; }
+  .feat-head .name { font-size: 17px; font-weight: 800; letter-spacing: -0.3px; }
+  .feat dl { margin: 14px 0 0; }
+  .feat dt { font-weight: 800; font-size: 12.5px; color: var(--sub); text-transform: uppercase;
+             letter-spacing: 0.6px; margin-top: 16px; }
+  .feat dd { margin: 4px 0 0 0; }
+  .tag { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 2px 9px;
+         border-radius: 999px; margin-left: 4px; vertical-align: 2px; }
+  .tag.quick { background: var(--green-soft); color: var(--green); border: 1px solid #bbf7d0; }
+  .tag.mid { background: var(--amber-soft); color: var(--amber); border: 1px solid #fde68a; }
+  .tag.big { background: var(--red-soft); color: var(--red); border: 1px solid #fecaca; }
+  .tag.dep { background: var(--purple-soft); color: var(--purple); border: 1px solid #ddd6fe; }
+  .matrix { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 24px 0; }
+  .quad { border-radius: 14px; padding: 18px 22px; border: 1px solid var(--line); min-height: 150px; }
+  .quad .qt { font-weight: 800; font-size: 13.5px; margin-bottom: 10px; }
+  .quad ul { margin-left: 18px; font-size: 13.5px; }
+  .wave { border-left: 4px solid var(--accent); padding: 4px 0 4px 20px; margin: 28px 0; }
+  .wave h3 { margin-top: 0; }
+  .footer-note { margin-top: 80px; padding-top: 24px; border-top: 1px solid var(--line);
+                 font-size: 13px; color: var(--sub); }
+  code { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 0.88em; background: var(--bg-soft);
+         padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line); }
+  @media print { body { font-size: 12px; } .wrap { padding: 0; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- ============================================================ -->
+<header>
+  <div class="chip blue" style="margin-bottom:14px;">기획안 (설계안 아님 — 착수 전 항목별 설계·승인 별도)</div>
+  <h1>thynC 운영관리시스템 2.0 기획안<br>
+  <span style="font-size:20px; color:var(--sub); font-weight:600;">— 기록 시스템(System of Record)에서 운영 인텔리전스(System of Intelligence)로</span></h1>
+  <div class="meta">
+    <span class="chip">작성일 2026-08-02</span>
+    <span class="chip">작성 Claude (dev2)</span>
+    <span class="chip">근거 데이터: dev DB (PROD 2026-07-31 동기화본) 실측</span>
+    <span class="chip amber">상태: 기획 검토 대기</span>
+  </div>
+</header>
+
+<div class="toc">
+  <div style="font-weight:800; margin-bottom:10px;">목차</div>
+  <ol>
+    <li><a href="#s1">이 문서의 성격과 읽는 법</a></li>
+    <li><a href="#s2">비전 — 2.0은 무엇이 달라지는가</a></li>
+    <li><a href="#s3">현재(1.0) 진단 — 실측 데이터가 말하는 것</a></li>
+    <li><a href="#s4">업계 관점 — 이 사업이 속한 소프트웨어 카테고리들</a></li>
+    <li><a href="#s5">2.0 후보 기능 — 6개 테마 18개 항목</a></li>
+    <li><a href="#s6">우선순위 — 가치×난이도 매트릭스와 추천 Wave</a></li>
+    <li><a href="#s7">전제·리스크·결정 필요 항목</a></li>
+    <li><a href="#s8">부록 — 실측 데이터 상세</a></li>
+  </ol>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s1"><span class="no">1.</span>이 문서의 성격과 읽는 법</h2>
+
+<p>이 문서는 <strong>기획안</strong>입니다. "무엇을, 왜 만들 가치가 있는가"를 다루며,
+"어떻게 만들 것인가"(테이블 설계, API 명세, 화면 설계)는 다루지 않습니다.
+각 항목은 사용자가 방향을 선택한 뒤에 <strong>별도의 설계안(<code>projects/*_design.md</code>)을 작성하고
+검토·승인을 거쳐야 착수</strong>합니다 (기존 설계 게이트 규칙 그대로).</p>
+
+<p>18개 후보를 전부 하자는 제안이 아닙니다. 오히려 반대로, <em>대부분은 하지 않아도 됩니다.</em>
+이 문서의 목적은 "전 세계에서 비슷한 사업을 하는 회사들이 어떤 도구를 쓰는가"라는 지도를 펼쳐놓고,
+그 위에 우리 실측 데이터를 겹쳐서 <strong>어디에 갭이 크고 어디는 이미 충분한지</strong>를 보여주는 것입니다.
+읽고 나서 "이 중 2~3개가 와닿는다"면 그 항목만 골라 다음 단계(설계)로 넘어가면 됩니다.</p>
+
+<div class="callout amber">
+  <div class="t">⚠ 과거 고도화 문서와의 관계</div>
+  2026-07-17에 작성된 <code>enhancement_analysis_202607.md</code>(유지보수 2.0 + 정합성 점검 제안)는
+  1.0 마감 시 "이어받지 않고 그 시점 데이터로 새로 설계"로 확정되었습니다. 이 문서는 그 문서를 계승하지
+  않으며, <strong>2026-07-31 동기화본 데이터로 새로 진단</strong>했습니다. 다만 당시 제안 중 데이터가
+  여전히 같은 방향을 가리키는 것(장비 개체 연동, 정기점검, 정합성 점검)은 이 문서에도 다시 등장합니다 —
+  근거가 유효하기 때문이지, 과거 문서를 근거로 삼은 것이 아닙니다.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s2"><span class="no">2.</span>비전 — 2.0은 무엇이 달라지는가</h2>
+
+<h3>2.1 사업의 실체를 다시 정의하면</h3>
+
+<p>이 회사의 사업을 한 문장으로 쓰면 이렇습니다:</p>
+
+<div class="callout blue">
+  <div class="t">사업 정의</div>
+  <strong>실시간 입원환자 모니터링 솔루션(thynC)을 병원에 구축하고, 그 하드웨어(디바이스·게이트웨이)를
+  현장에서 유지하며, 상당수 고객에게서 사용량에 비례한 반복 매출을 얻는 사업.</strong><br><br>
+  즉 ① 프로젝트 사업(구축) ② 필드 서비스 사업(유지보수) ③ 구독/사용량 사업(반복 과금)이라는
+  성격이 다른 세 사업이 한 회사 안에 겹쳐 있고, 판매 채널로 대웅제약이라는 대형 파트너가 끼어 있습니다.
+</div>
+
+<p>1.0은 이 중 <strong>①구축과 ②필드 서비스의 "기록"</strong>을 완성했습니다. 병원·프로젝트·답사·설치계획·
+유지보수·티켓·자재까지, "무슨 일이 있었는가"는 이제 시스템에 남습니다. 이것은 절대 작은 일이 아닙니다 —
+대부분의 중소 규모 회사가 이 단계(스프레드시트 탈출)를 넘지 못합니다.</p>
+
+<p>그런데 실측 데이터를 보면 사업의 무게중심과 시스템의 무게중심이 어긋나 있습니다:</p>
+
+<ul>
+  <li>도입형태 실측: <strong>사용량비례형 131개 병원 vs 구축형 38개 병원</strong>.
+      매출의 미래는 반복 과금 쪽에 있는데, 시스템에는 <em>월 정산·청구·미수를 다루는 모듈이 없습니다.</em></li>
+  <li>유지보수 월 ~54건, 하드웨어 장애 최다(86건 누적)인데, <em>어떤 장비 개체가 몇 번째 고장인지</em>를
+      아는 구조가 없습니다. WMS에 시리얼 개체 19,363개가 등록되어 있지만 병원 설치 연결은 0건입니다.</li>
+  <li>도입 병상 18,230개·디바이스 18,738대 규모의 설치 기반이 있는데, 이 자산이 "지금 잘 돌고 있는지"는
+      병원이 전화로 알려줘야 알 수 있습니다.</li>
+</ul>
+
+<h3>2.2 2.0의 세 가지 전환</h3>
+
+<table>
+  <tr><th style="width:200px;">전환</th><th>1.0 (현재)</th><th>2.0 (지향)</th></tr>
+  <tr>
+    <td><strong>① 사후 → 예방</strong><br><span style="color:var(--sub);font-size:12.5px;">Reactive → Proactive</span></td>
+    <td>병원이 신고하면 접수하고 출동한다. 장애는 "사건"으로만 기록된다.</td>
+    <td>어떤 장비가 어디서 몇 번 고장났는지 이력이 쌓이고, 정기점검이 시스템에 의해 굴러가며,
+        (장기적으로) 장비 상태 신호를 받아 병원보다 먼저 안다.</td>
+  </tr>
+  <tr>
+    <td><strong>② 계약 → 반복 매출</strong><br><span style="color:var(--sub);font-size:12.5px;">Deal → Recurring Revenue</span></td>
+    <td>계약(딜)은 1회성 레코드. 계약 이후의 돈 흐름(월 정산·세금계산서·미수)은 시스템 밖(엑셀/수기).</td>
+    <td>사용량비례·구독 병원의 월별 정산 원장이 시스템 안에 있고, 갱신·만기·미수가 대시보드에 보인다.
+        "이번 달 반복 매출이 얼마인가"에 시스템이 답한다.</td>
+  </tr>
+  <tr>
+    <td><strong>③ 기록 → 판단</strong><br><span style="color:var(--sub);font-size:12.5px;">Record → Intelligence</span></td>
+    <td>데이터는 쌓이지만, 읽고 판단하는 것은 사람. 정합성도 사람이 주기적으로 맞춘다.</td>
+    <td>시스템이 이상(정합성 위반·SLA 위험·이탈 신호)을 먼저 표시하고, AI가 축적된 이력으로
+        "이 병원 브리핑·유사 장애 사례·조치 가이드"를 제공한다.</td>
+  </tr>
+</table>
+
+<div class="callout green">
+  <div class="t">✦ 한 문장 비전</div>
+  <strong>"병원에 설치된 모든 장비의 일생과, 그 장비가 만들어내는 모든 매출의 흐름을,
+  사람이 묻기 전에 시스템이 먼저 말해주는 운영 플랫폼."</strong>
+</div>
+
+<h3>2.3 2.0이 의도적으로 하지 않는 것</h3>
+<ul>
+  <li><strong>환자 데이터·임상 기능</strong> — 이 시스템의 경계 밖입니다. 텔레메트리(A3)를 도입하더라도
+      수집 대상은 장비 상태 신호(하트비트·버전·에러코드)이지 환자 신호가 아닙니다.</li>
+  <li><strong>thynC 제품 자체의 기능</strong> — 제품 소스는 별개입니다. 2.0은 제품을 파는·유지하는 회사의 도구입니다.</li>
+  <li><strong>범용 그룹웨어化</strong> — 전자결재·근태 같은 것은 기존 도구를 쓰는 것이 맞습니다.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="s3"><span class="no">3.</span>현재(1.0) 진단 — 실측 데이터가 말하는 것</h2>
+
+<h3>3.1 사업 규모 스냅샷 (2026-07-31 PROD 동기화본 실측)</h3>
+
+<div class="kpi-grid">
+  <div class="kpi"><div class="v">206</div><div class="l">도입 병원 (딜 보유)</div></div>
+  <div class="kpi"><div class="v">232</div><div class="l">누적 딜(계약 차수)</div></div>
+  <div class="kpi"><div class="v">1,445억</div><div class="l">계약금액 합 (대웅 총견적)</div></div>
+  <div class="kpi"><div class="v">18,738</div><div class="l">판매 디바이스 (대웅 축)</div></div>
+  <div class="kpi"><div class="v">18,230</div><div class="l">도입 병상 수</div></div>
+  <div class="kpi"><div class="v">131 : 38</div><div class="l">사용량비례형 : 구축형 병원</div></div>
+  <div class="kpi"><div class="v">~54건/월</div><div class="l">유지보수 (최근 3개월 평균)</div></div>
+  <div class="kpi"><div class="v">5.9일</div><div class="l">유지보수 평균 처리일</div></div>
+  <div class="kpi"><div class="v">709</div><div class="l">누적 티켓</div></div>
+  <div class="kpi"><div class="v">19,363</div><div class="l">WMS 시리얼 개체</div></div>
+  <div class="kpi"><div class="v">0</div><div class="l">시리얼 ↔ 병원 설치 연결</div></div>
+  <div class="kpi"><div class="v">45</div><div class="l">시스템 사용자</div></div>
+</div>
+
+<h3>3.2 구조적 신호 다섯 가지</h3>
+
+<h4>신호 1 — 반복 매출 사업인데 반복 매출 모듈이 없다</h4>
+<p>도입형태가 기록된 169개 병원 중 <strong>131곳(78%)이 사용량비례형</strong>입니다. 사용량비례라는 것은
+매달 "이번 달 얼마"를 계산하고, 청구하고, 세금계산서를 발행하고, 수금을 확인하는 <em>운영 사이클이
+매달 돈다</em>는 뜻입니다. 그런데 시스템에는 딜(계약 시점 스냅샷)까지만 있고 그 이후의 월 단위 흐름이 없습니다.
+딜 232건 중 84건에 정산 관련 텍스트가 남아 있는 것이 이 업무가 실재한다는 흔적입니다.
+현재 이 사이클은 시스템 밖 어딘가(엑셀·대웅 정산 자료·담당자 머릿속)에서 돌고 있을 것입니다.</p>
+
+<h4>신호 2 — 설치 기반(Install Base)이 장부에 없다</h4>
+<p>디바이스 1.8만 대가 병원에 나가 있는데, "삼성서울병원에 지금 어떤 시리얼의 게이트웨이가 몇 대 설치되어
+있는가"에 시스템이 답하지 못합니다. WMS가 시리얼 개체 19,363개를 추적하고 있음에도 <strong>병원 설치
+연결(<code>hospital_code</code>)은 0건</strong> — 창고를 나가는 순간까지는 보이고, 나간 뒤에는 안 보입니다.
+하드웨어 장애가 유지보수의 최대 항목(86건)인 사업에서, 장애와 장비 개체가 연결되지 않으면
+"불량 로트 식별", "3회 이상 고장 장비 선제 교체", "무상보증 기간 판정" 같은 판단이 전부 불가능합니다.</p>
+
+<h4>신호 3 — 유지보수는 성숙, 그 다음 단계가 비어 있다</h4>
+<p>유지보수 프로세스 자체는 잘 돌고 있습니다(누적 230건, 완료율 90%, 티켓·SLA 시계·Slack 알림 연동 완비).
+1.0이 잘 만든 부분입니다. 비어 있는 것은 그 위층입니다 — <em>같은 장애가 반복되는 병원/장비를 식별하는 눈</em>,
+<em>고장 나기 전에 도는 정기점검</em>, <em>월 54건을 처리하는 엔지니어들의 부하·동선 관리</em>.
+사후 대응의 품질은 확보됐고, 이제 사후 대응의 <strong>양을 줄이는 것</strong>이 다음 문제입니다.</p>
+
+<h4>신호 4 — 고객 접점이 전부 사람을 통과한다</h4>
+<p>병원이 장애를 알리는 방법은 전화/메신저→담당자→시스템 입력입니다. 병원 입장에서는 접수했는지,
+언제 오는지, 어떻게 처리됐는지 보이지 않고, 회사 입장에서는 접수 채널이 사람에 묶여 있습니다.
+206개 병원 규모에서는 버틸 수 있지만, 300~400개가 되면 이 구조가 병목이 됩니다.
+또한 병원에 "우리가 이만큼 관리해주고 있다"를 보여줄 정기 산출물(운영 리포트)이 없어,
+갱신 협상에서 쓸 근거가 담당자 개인의 기억에 있습니다.</p>
+
+<h4>신호 5 — 데이터는 모였는데 경영의 질문에 답하는 층이 얇다</h4>
+<p>대시보드 A/B/C(영업), 티켓 대시보드(P12), 메인 대시보드가 있지만 각각 자기 모듈만 봅니다.
+"이번 분기 신규 계약과 반복 매출은? 병원당 유지보수 원가는 어느 방향인가? 어떤 병원이 위험 신호를
+보내는가?" 같은 경영 질문은 여전히 여러 화면을 사람이 종합해야 합니다. 정합성 관리도 수동입니다
+(과거 병상 집계 정합화에 3세션이 들어간 전례가 있고, 규칙은 알려져 있는데 감지가 자동화되지 않았습니다).</p>
+
+<h3>3.3 1.0에서 이미 충분한 것 (2.0에서 건드리지 않을 것)</h3>
+<ul>
+  <li><strong>티켓 시스템</strong> — P1~P13 완결, 도메인 편입 5/5, SLA·라우팅까지. 2.0 항목들은 티켓을 재설계하지 않고 <em>위에 얹습니다.</em></li>
+  <li><strong>위키·AI 어시스턴트 기반</strong> — 콘텐츠 백본과 도구 26종 에이전트가 이미 있습니다. E3은 이 기반의 활용 확장이지 재구축이 아닙니다.</li>
+  <li><strong>워크플로 상태·코드 관리 체계</strong> — StatusCode·WorkflowStatusManager·티켓 상태 매핑의 단일 소스 구조는 그대로 확장 사용합니다.</li>
+  <li><strong>차량·주차·GW 플래너 등 지원 도구</strong> — 정착 단계이며 고도화 대상 아님.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="s4"><span class="no">4.</span>업계 관점 — 이 사업이 속한 소프트웨어 카테고리들</h2>
+
+<p>"우리 같은 회사"는 전 세계적으로 정확한 산업 카테고리가 존재하고, 각 카테고리마다 성숙한 소프트웨어
+시장이 있습니다. 이 절은 <strong>그 도구들을 도입하거나 구조를 이식하자는 것이 아니라</strong>,
+그들이 공통적으로 해결하는 문제가 무엇인지 = 우리보다 먼저 이 길을 간 회사들이 무엇에 돈을 썼는지를
+관점으로 빌리는 것입니다. (기능은 5장에서 우리 데이터와 현재 시스템에 맞게 다시 정의합니다.)</p>
+
+<table>
+  <tr><th style="width:210px;">카테고리</th><th>대표 제품 (관점 참조용)</th><th>공통적으로 푸는 문제</th><th>우리의 현재 위치</th></tr>
+  <tr>
+    <td><strong>Install Base Management</strong><br>설치 자산 관리</td>
+    <td>ServiceMax, Salesforce Asset Mgmt</td>
+    <td>"고객 현장에 우리 장비가 뭐가, 언제부터, 어떤 상태로 있는가". 장비 개체별 이력(설치→장애→교체→폐기), 보증 판정.</td>
+    <td><span style="color:var(--red);font-weight:700;">공백</span> — WMS가 창고까지만 추적</td>
+  </tr>
+  <tr>
+    <td><strong>Field Service Management</strong><br>필드 서비스</td>
+    <td>ServiceNow FSM, Salesforce Field Service, 국내 다수</td>
+    <td>접수→배정→출동→처리→보고의 사이클, 엔지니어 일정·부하·동선, 정기점검(PM), 현장 모바일.</td>
+    <td><span style="color:var(--amber);font-weight:700;">절반</span> — 접수·처리 기록은 완비, 배정 최적화·PM·현장 도구는 공백</td>
+  </tr>
+  <tr>
+    <td><strong>Subscription / Usage Billing</strong><br>구독·사용량 과금</td>
+    <td>Zuora, Stripe Billing, 국내 빌링 솔루션</td>
+    <td>사용량 집계→요율 적용→청구→수금→미수 관리, MRR/ARR 지표, 갱신·해지 추적.</td>
+    <td><span style="color:var(--red);font-weight:700;">공백</span> — 계약 스냅샷까지만 존재</td>
+  </tr>
+  <tr>
+    <td><strong>Customer Success</strong><br>고객 성공 관리</td>
+    <td>Gainsight, ChurnZero</td>
+    <td>고객 건강도 스코어, 이탈 위험 조기 감지, 정기 리뷰(QBR) 산출물, 확장 판매 신호.</td>
+    <td><span style="color:var(--red);font-weight:700;">공백</span> — 개념 자체가 없음 (병원별 이력은 있으나 종합 판정 없음)</td>
+  </tr>
+  <tr>
+    <td><strong>Customer Portal</strong><br>고객 셀프서비스</td>
+    <td>Zendesk Guide, ServiceNow CSM Portal</td>
+    <td>고객이 직접 접수·조회·이력 열람. 접수 채널의 표준화·기록화.</td>
+    <td><span style="color:var(--red);font-weight:700;">공백</span> — 전 접점이 유선/메신저</td>
+  </tr>
+  <tr>
+    <td><strong>CRM / Sales</strong><br>영업 관리</td>
+    <td>Salesforce, HubSpot</td>
+    <td>리드→기회→계약 파이프라인, 활동 기록, 예측.</td>
+    <td><span style="color:var(--green);font-weight:700;">진행 중</span> — 영업/CRM v4가 이 축. 2.0에서 별도 신규 제안 없음 (진행 중인 것 완성이 우선)</td>
+  </tr>
+  <tr>
+    <td><strong>ITSM / Ticketing</strong></td>
+    <td>ServiceNow, Jira SM (참조: AWS SIM)</td>
+    <td>단일 업무 파이프라인, SLA, 라우팅.</td>
+    <td><span style="color:var(--green);font-weight:700;">완비</span> — 1.0의 티켓 P1~P13이 이 역할</td>
+  </tr>
+  <tr>
+    <td><strong>Remote Monitoring (RMM/IoT)</strong><br>원격 장비 모니터링</td>
+    <td>Datadog(서버), Medigate·Armis(의료기기), 각사 자체 구축</td>
+    <td>장비가 스스로 상태를 보고 → 사람이 알기 전에 감지. 예지 정비의 전제.</td>
+    <td><span style="color:var(--red);font-weight:700;">공백</span> — 제품(thynC) 협업 필요, 최장기 과제</td>
+  </tr>
+</table>
+
+<div class="callout blue">
+  <div class="t">✦ 요약 — 갭의 지도</div>
+  영업 기록(CRM)·업무 파이프라인(ITSM)·창고(WMS)는 이미 만들었거나 만드는 중입니다.
+  세계의 동종 업계가 돈을 쓰는데 우리에게 아예 없는 것은 <strong>④설치 자산(Install Base),
+  ⑤반복 과금(Billing), ⑥고객 성공(CS), ⑦고객 포털, ⑧원격 모니터링</strong>이고,
+  이것들이 5장의 뼈대가 됩니다. 순서에 주목하세요 — ④가 ⑤~⑧ 대부분의 데이터 전제입니다.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s5"><span class="no">5.</span>2.0 후보 기능 — 6개 테마 18개 항목</h2>
+
+<p>각 항목에 붙은 규모 태그: <span class="tag quick">퀵윈 (수일)</span> <span class="tag mid">중형 (1~3주)</span>
+<span class="tag big">대형 (1개월+·단계 분할 필수)</span> <span class="tag dep">외부/제품 협업 전제</span></p>
+
+<!-- ── Theme A ─────────────────────────────── -->
+<div class="theme-head">
+  <div class="theme-badge" style="background:var(--accent);">A</div>
+  <h3 style="margin:0;">설치 기반(Install Base) — "병원에 나가 있는 장비의 장부"</h3>
+</div>
+<p style="color:var(--sub);">2.0의 주춧돌. 이 테마가 만들어지면 예방 정비(A2·A3), 보증 판정(B2), 건강도 스코어(C2),
+운영 리포트(C3)가 전부 이 위에 서게 됩니다.</p>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--accent);">A1</span>
+    <span class="name">장비 개체 수명주기 관리 (시리얼 → 병원 설치 자산)</span>
+    <span class="tag mid">중형</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>WMS 시리얼 개체(<code>InventoryUnit</code>)가 출고되어 병원에 설치되는 순간부터의 삶을 추적:
+        <strong>설치(어느 병원 어느 병동)→ 가동 → 장애(유지보수 건과 연결) → 수리/교체 → 회수/폐기</strong>.
+        병원 상세에 "설치 장비" 탭, 유지보수 등록 시 해당 병원의 설치 개체를 선택 연결, 장비 개체 상세에
+        장애 이력 타임라인.</dd>
+    <dt>왜 (의도)</dt>
+    <dd>하드웨어 장애가 유지보수 1위(86건)인데 "몇 번째 고장인지"를 아무도 모릅니다. 이 연결 하나로
+        <em>불량 다발 개체·로트 식별, 3진 아웃 선제 교체, 무상보증 판정, 병원별 설치 자산 실사</em>가
+        전부 가능해집니다. WMS에 이미 투자한 시리얼 추적(19,363개)의 회수이기도 합니다.</dd>
+    <dt>현재 갭</dt>
+    <dd><code>inventory_units.hospital_code</code> 컬럼은 있으나 연결 0건. 출고 전표는 유지보수에 연결되지만
+        (workType) 역방향(유지보수→장비)이 없음.</dd>
+    <dt>기대 효과</dt>
+    <dd>단기: 유지보수 화면에서 장비 이력 즉시 확인. 중기: 월 54건 중 반복 장애 비중 파악 → 선제 교체로
+        출동 감소. 장기: A2·A3·C2의 데이터 기반.</dd>
+    <dt>기존 기능과의 경계</dt>
+    <dd>WMS 재고·전표 로직은 손대지 않음. "창고 밖" 상태를 추가하는 것. 기존 <code>HospitalDevice</code>
+        (병원-장비종 N:M)와의 관계 정리가 설계 쟁점.</dd>
+    <dt>착수 전 결정 필요</dt>
+    <dd>과거 설치분(1.8만 대)의 소급 등록 범위 — 전수 실사는 비현실적이므로 "신규 출고분부터 + 장애 발생 시
+        소급 등록" 같은 점진 전략 권장.</dd>
+  </dl>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--accent);">A2</span>
+    <span class="name">정기점검(PM) 스케줄링 — 사후 대응에서 예방으로</span>
+    <span class="tag mid">중형</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>병원별 점검 주기(분기/반기 등)·체크리스트 템플릿·담당자를 정의하면, 스케줄러가 예정일 도래 시
+        점검 건을 자동 생성(기존 유지보수/티켓 파이프라인에 태워서)하고 Slack 알림·캘린더 표시.
+        점검 결과는 체크리스트 형태로 저장되어 병원별 점검 이력이 됨.</dd>
+    <dt>왜 (의도)</dt>
+    <dd>206개 병원의 점검 누락을 사람 기억이 아니라 시스템이 방지. 의료기관 고객 특성상 "정기적으로
+        와서 봐준다"는 것 자체가 계약 갱신의 핵심 근거이며, C3(운영 리포트)의 콘텐츠가 됩니다.
+        장애 신고 기반(월 54건)에서 점검 기반으로 무게를 옮기는 첫 걸음.</dd>
+    <dt>기존 기능과의 경계</dt>
+    <dd>새 업무 유형을 만들지 않고 기존 유지보수(또는 티켓 CTI '정기점검')로 태우는 것이 원칙 —
+        티켓 자동생성 규칙(<code>ticket_domain_cti_rules</code>)·상태 매핑 등 기존 단일 소스 재사용.
+        스케줄러는 <code>notify-scheduler</code> 패턴 재사용.</dd>
+    <dt>착수 전 결정 필요</dt>
+    <dd>주기 정책(전 병원 일괄 vs 병원별·계약별), 점검 인력 캐파와 주기의 현실성 검증
+        (분기 주기 × 206병원 = 월 ~69건 추가 — 현 유지보수보다 많음. 반기·등급제 검토 필요).</dd>
+  </dl>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--accent);">A3</span>
+    <span class="name">장비 텔레메트리 수집 — 병원보다 먼저 아는 시스템</span>
+    <span class="tag big">대형</span><span class="tag dep">제품 협업 전제</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>현장 게이트웨이가 상태 신호(하트비트·펌웨어 버전·에러 코드·연결 디바이스 수 — <strong>환자 데이터
+        아님</strong>)를 운영 시스템으로 보고. 무응답·이상 패턴 감지 시 티켓 자동 생성. 병원 상세에
+        실시간 장비 상태 보드.</dd>
+    <dt>왜 (의도)</dt>
+    <dd>필드 서비스 업계의 종착지입니다. "장애 접수의 상당수가 '안 돼요' 전화"인 구조에서, 게이트웨이
+        다운을 병원 간호사보다 먼저 아는 구조로. 고객 신뢰(“전화하기 전에 연락이 왔다”)는 이 사업에서
+        가장 강한 갱신·확장 근거가 됩니다.</dd>
+    <dt>전제 (그래서 장기 과제)</dt>
+    <dd>제품(thynC) 측 펌웨어/서버의 발신 기능, 병원 네트워크의 아웃바운드 정책, 수집 엔드포인트 운영.
+        운영 시스템 단독으로 착수 불가 — <strong>제품 로드맵과의 합의가 선행</strong>. 2.0 기간에는
+        "수신 스키마 정의 + 소수 병원 파일럿"까지가 현실적 목표.</dd>
+    <dt>기존 기능과의 경계</dt>
+    <dd>감지→티켓 생성은 기존 티켓 파이프라인 재사용. A1(장비 개체 장부)이 선행돼야 신호를 개체에 귀속 가능.</dd>
+  </dl>
+</div>
+
+<!-- ── Theme B ─────────────────────────────── -->
+<div class="theme-head">
+  <div class="theme-badge" style="background:var(--green);">B</div>
+  <h3 style="margin:0;">반복 매출 운영(Revenue Operations) — "계약 이후의 돈 흐름"</h3>
+</div>
+<p style="color:var(--sub);">사용량비례형 131개 병원이라는 실측이 가리키는, 2.0에서 사업 가치가 가장 직접적인 테마.</p>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--green);">B1</span>
+    <span class="name">사용량·구독 정산 원장 (Recurring Billing Ledger)</span>
+    <span class="tag big">대형</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>병원×월 단위의 정산 원장: 해당 월 사용량(초기에는 수기/엑셀 업로드 입력) → 계약 요율 적용 →
+        청구 예정액 → 세금계산서 발행 여부 → 입금 확인 → 미수 잔액. 월 마감 프로세스와 대웅 정산 자료
+        대사(양쪽 금액 차이 자동 표시). 딜(계약 조건)과 연결되어 요율 근거 추적.</dd>
+    <dt>왜 (의도)</dt>
+    <dd>78%의 병원이 매달 돈이 계산되는 계약인데 이 계산이 시스템 밖에 있습니다. 이 원장이 생기면:
+        ① 월 반복 매출(MRR)이 처음으로 시스템 지표가 됨 ② 미수·발행 누락이 자동 감지 ③ 대웅과의
+        정산 대사가 사람 눈이 아닌 diff가 됨 ④ C2(건강도)의 핵심 입력(사용량 추세)이 생김.
+        <em>회사의 재무 실체를 시스템이 처음으로 보게 되는 기능입니다.</em></dd>
+    <dt>현재 갭</dt>
+    <dd>딜에 계약 시점 금액·정산 조건 텍스트(84건)만 존재. 월별 흐름 테이블 없음.</dd>
+    <dt>기존 기능과의 경계</dt>
+    <dd>영업/CRM v4의 딜 구조를 변경하지 않고 그 아래층(월 원장)을 추가. 회계 시스템을 대체하지 않음 —
+        "운영 측 원장"이며 회계 처리는 기존 도구 유지.</dd>
+    <dt>착수 전 결정 필요</dt>
+    <dd>① 사용량 데이터의 원천(대웅 정산 자료? 제품 서버 집계? 병원 보고?)과 입수 주기
+        ② 요율 구조의 실제 다양성(딜 텍스트 필드 실사 필요) ③ 정산 주체(자사↔대웅↔병원 3자 구조에서
+        이 시스템이 기록할 범위). <strong>이 세 가지가 확정되기 전에는 설계 착수 불가</strong> —
+        2.0에서 가장 가치가 크지만 가장 도메인 확인이 필요한 항목.</dd>
+  </dl>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--green);">B2</span>
+    <span class="name">계약 수명주기 관리 — 만기·갱신·보증의 달력</span>
+    <span class="tag mid">중형</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>딜에 계약 기간(시작–만료)·갱신 조건·보증 조건을 구조화 필드로 승격(현재 <code>warranty_text</code>
+        텍스트). 계약서 파일 첨부(S3, 기존 파일 패턴). 만기 D-90/60/30 알림(기존 notify 인프라),
+        갱신 파이프라인 뷰(만기 도래 계약 목록 → 갱신 협상 중 → 갱신 완료/해지). 보증 기간은 A1과 연결되어
+        유지보수 등록 시 무상/유상 자동 판정 힌트.</dd>
+    <dt>왜 (의도)</dt>
+    <dd>구독·사용량 사업의 손실은 대부분 "갱신을 놓쳐서"가 아니라 "갱신 협상을 준비 없이 맞아서" 발생합니다.
+        만기가 달력에 있고, 그 병원의 운영 이력(C3 리포트)이 협상 자료로 준비되는 구조.
+        B1보다 도메인 전제가 가벼워 <strong>B 테마의 착수점으로 적합</strong>합니다.</dd>
+    <dt>착수 전 결정 필요</dt>
+    <dd>기존 232건 딜의 계약 기간 정보가 어디에 있는지(대웅 원장? 계약서 원본?) — 소급 입력 범위.</dd>
+  </dl>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--green);">B3</span>
+    <span class="name">경영 매출 지표 — MRR/ARR·코호트 뷰</span>
+    <span class="tag quick">퀵윈 (B1 이후)</span><span class="tag dep">B1 의존</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>B1 원장 위의 집계 층: 월 반복 매출 추이, 병원 코호트별(도입 연도별) 매출 유지율, 신규/확장/해지
+        분해, 병원당 평균 매출. 기존 대시보드 A에 통합하거나 경영 탭 신설.</dd>
+    <dt>왜</dt>
+    <dd>"우리 회사가 커지고 있는가"를 계약 누계(스톡)가 아니라 반복 매출(플로우)로 보는 것 —
+        구독형 사업 가치평가의 표준 언어이기도 합니다(투자 유치·파트너 협상 시 그대로 쓰입니다).</dd>
+  </dl>
+</div>
+
+<!-- ── Theme C ─────────────────────────────── -->
+<div class="theme-head">
+  <div class="theme-badge" style="background:var(--teal);">C</div>
+  <h3 style="margin:0;">고객 경험(Customer-facing) — "병원이 보는 우리"</h3>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--teal);">C1</span>
+    <span class="name">고객(병원) 포털 — 셀프서비스 접수·조회</span>
+    <span class="tag big">대형</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>병원 담당자용 외부 웹(별도 인증 체계): 장애 접수(→기존 티켓/유지보수 파이프라인으로 유입),
+        진행 상태 조회, 방문 예정 확인, 완료 보고서·정기점검 리포트 열람. 1차 범위는 읽기+접수 최소 기능.</dd>
+    <dt>왜 (의도)</dt>
+    <dd>현재 전 접점이 유선/메신저→사람. 포털은 ① 접수 표준화(증상·위치가 처음부터 구조화)
+        ② 상태 문의 전화 소멸 ③ "관리받고 있다"는 가시성 = 갱신 근거 ④ 300병원 규모 대비.
+        신호 4의 정면 해결책입니다.</dd>
+    <dt>전제·리스크</dt>
+    <dd>외부 노출 = 보안 표면 확대(별도 인증·권한 격리·감사 필수). 병원 담당자 계정 관리라는 새 운영 업무 발생.
+        <em>병원들이 실제로 쓸 것인가</em>가 최대 리스크 — 파일럿 병원 5~10곳으로 검증 후 확대 권장.
+        대웅 영업망과의 접점 정리(병원이 대웅을 거치는 관행과의 충돌 여부)도 사전 확인 필요.</dd>
+    <dt>기존 기능과의 경계</dt>
+    <dd>내부 시스템의 별도 앱(또는 별도 라우트 그룹+격리 인증)으로. 위키 모듈 경계 규칙처럼 단방향 의존 원칙.</dd>
+  </dl>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--teal);">C2</span>
+    <span class="name">병원 건강도 스코어 — 이탈·리스크 조기 신호</span>
+    <span class="tag mid">중형</span><span class="tag dep">A1·B1 이후 가치 극대화</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>병원별 종합 점수(예: 장애 빈도·심각도 추세 + 미해결 건 체류 + 사용량 추세(B1) + 정기점검 이행 +
+        계약 만기 근접). 병원 목록·상세에 신호등 표시, 악화 병원 주간 리포트.</dd>
+    <dt>왜 (의도)</dt>
+    <dd>"어느 병원이 위험한가"가 현재는 담당자 감. 스코어는 감을 대체하는 것이 아니라 <em>감이 미치지 않는
+        나머지 180개 병원을 커버</em>하는 장치입니다. 사용량비례 계약에서는 사용량 하락 = 매출 하락이므로
+        조기 신호의 금전 가치가 직접적입니다.</dd>
+    <dt>주의</dt>
+    <dd>초기부터 ML 같은 것을 쓰지 않습니다 — <strong>규칙 기반 가중합으로 시작</strong>해서 지표가 실제
+        이탈·클레임과 맞는지 1~2분기 검증 후 정교화. 입력 데이터가 얇으면(A1·B1 전) 장애 지표만으로도
+        축소 시작 가능.</dd>
+  </dl>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--teal);">C3</span>
+    <span class="name">병원 정기 운영 리포트 자동 생성</span>
+    <span class="tag mid">중형</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>병원별 월간/분기 운영 리포트(해당 기간 장애 처리 내역·처리 시간·정기점검 결과·설치 자산 현황)를
+        시스템이 자동 조판(PDF 또는 포털 페이지). 담당자는 검토·코멘트만 얹어 발송.</dd>
+    <dt>왜 (의도)</dt>
+    <dd>갱신 협상과 대웅 채널 관리에서 "우리가 한 일"의 증빙을 담당자 기억→표준 산출물로. 데이터는 전부
+        이미 시스템에 있습니다(유지보수·티켓·SLA 시계). GW 플래너의 PPTX 생성처럼 산출물 자동화는
+        이미 이 시스템이 해 본 패턴입니다.</dd>
+  </dl>
+</div>
+
+<!-- ── Theme D ─────────────────────────────── -->
+<div class="theme-head">
+  <div class="theme-badge" style="background:var(--amber);">D</div>
+  <h3 style="margin:0;">현장 운영(Field Ops) — "월 54건을 처리하는 사람들의 도구"</h3>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--amber);">D1</span>
+    <span class="name">디스패치 보드 — 엔지니어 부하·일정 한 화면</span>
+    <span class="tag mid">중형</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>주간 타임라인에 엔지니어(FieldEngineer 풀)×일자로 유지보수 방문·답사·설치·기타업무 일정을 겹쳐
+        보여주는 배정 보드. 미배정 건 대기열, 드래그 배정, 지역(병원 좌표 기존 보유) 힌트, 개인별 부하
+        집계. 차량예약과의 연계 표시.</dd>
+    <dt>왜 (의도)</dt>
+    <dd>배정이 현재 각 건 상세 화면 단위로 이뤄져 전체 부하가 보이지 않습니다. 월 54건+답사+설치 규모에서
+        "이번 주 누가 비는가, 대구 가는 김에 근처 병원 점검을 붙일 수 있는가"를 시스템이 보여주면 출동
+        효율이 직접 개선됩니다. A2(정기점검)가 추가되면 배정량이 늘어나므로 그 전에 필요해집니다.</dd>
+    <dt>기존 기능과의 경계</dt>
+    <dd>새 데이터 없음 — 기존 방문일정·담당자 데이터의 <strong>뷰+배정 UI</strong>. 간트 캘린더(프로젝트)와
+        역할 구분: 그쪽은 공사 진행, 이쪽은 인력 배정.</dd>
+  </dl>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--amber);">D2</span>
+    <span class="name">현장 완료 보고 강화 — 체크리스트·사진·서명</span>
+    <span class="tag mid">중형</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>모바일(기존 반응형 위에서)에서 처리 완료 시: 유형별 체크리스트, 현장 사진 첨부 간소화(카메라 직접),
+        병원 담당자 전자서명(확인 서명), 완료 즉시 보고서화(C3 소스). A2 점검 체크리스트와 같은 뼈대 공유.</dd>
+    <dt>왜 (의도)</dt>
+    <dd>완료 품질의 표준화. "처리했다"는 텍스트에서 "무엇을 확인했고 고객이 확인했다"는 구조화 기록으로.
+        분쟁(처리 여부 다툼)·보증 판정·리포트 신뢰도의 기반. 운행일지 정착 사례에서 봤듯 <em>현장 입력은
+        마찰이 조금만 높아도 사장</em>되므로, 입력 단계 최소화가 설계의 전부입니다.</dd>
+  </dl>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--amber);">D3</span>
+    <span class="name">구축 플레이북 — 프로젝트 템플릿·마일스톤·Go-live 체크리스트</span>
+    <span class="tag mid">중형</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>표준 구축 절차(답사→발주→공사→설치→교육→검수→Go-live)를 템플릿화하여 프로젝트 생성 시 마일스톤·
+        체크리스트가 자동 세팅. 단계별 표준 리드타임 대비 실적 표시(지연 감지), 유형별(신규/증설) 템플릿.</dd>
+    <dt>왜 (의도)</dt>
+    <dd>구축 244건의 경험이 아직 사람에게 있습니다. 인력이 늘거나 물량이 몰릴 때 품질 편차를 막는 것은
+        문서(위키)가 아니라 <em>워크플로에 박힌 절차</em>입니다. 설치 리드타임이라는 핵심 지표(E2)도 이
+        마일스톤 데이터에서 나옵니다.</dd>
+  </dl>
+</div>
+
+<!-- ── Theme E ─────────────────────────────── -->
+<div class="theme-head">
+  <div class="theme-badge" style="background:var(--purple);">E</div>
+  <h3 style="margin:0;">인텔리전스(Intelligence) — "시스템이 먼저 말하게 하기"</h3>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--purple);">E1</span>
+    <span class="name">데이터 정합성 자동 점검</span>
+    <span class="tag quick">퀵윈</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>알려진 정합성 규칙(완료인데 완료일 없음, 완료 프로젝트인데 병상 미입력, <code>intro_beds</code> ≠
+        프로젝트 합, 담당자 없는 진행 건, 딜↔프로젝트 미연결 등)을 카탈로그화한 점검 엔진 + 대시보드 위반
+        카드 + 주간 Slack 요약. 감지·보고만, 자동 수정 없음(권장).</dd>
+    <dt>왜 (의도)</dt>
+    <dd>병상 정합화 3세션 같은 수동 조사 작업의 소멸. 2.0에서 데이터 위에 쌓는 층(지표·스코어·리포트)이
+        늘어날수록 <em>바닥 데이터의 신뢰가 전체의 신뢰</em>가 되므로, 가장 먼저 까는 것이 맞습니다.
+        기존 제안(2026-07) 중 유일하게 그대로 유효하며, 영업/CRM v4 신설 테이블 관련 규칙
+        (딜↔프로젝트 연결 등)이 추가된 새 버전으로.</dd>
+  </dl>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--purple);">E2</span>
+    <span class="name">경영 KPI 통합 대시보드 — 회사 한 장</span>
+    <span class="tag mid">중형</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>모듈 대시보드(영업 A/B/C·티켓·메인)와 별개의 경영 층: 신규 계약·(B1 후)반복 매출·설치 기반 성장·
+        유지보수 MTTR/SLA 준수율·설치 리드타임(D3 후)·병원 건강도 분포(C2 후)를 월 단위 한 화면에.
+        지표 정의를 코드 단일 소스로 문서화(어느 화면과도 숫자가 다르지 않게).</dd>
+    <dt>왜 (의도)</dt>
+    <dd>신호 5의 해결. 각 지표는 각 테마가 만들어질 때마다 채워지는 <em>그릇</em>이므로, 뼈대(레이아웃과
+        지표 정의)는 일찍 만들고 내용은 Wave를 따라 차오르게 하는 접근이 좋습니다.</dd>
+  </dl>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--purple);">E3</span>
+    <span class="name">AI 운영 부조종사 — 축적 이력의 활용 전환</span>
+    <span class="tag mid">중형 (단계별)</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>기존 AI 어시스턴트(도구 26종·상담이력)의 역할을 "질문에 답하는 챗"에서 업무 파이프라인 안으로:
+        ① 티켓/유지보수 등록 시 <strong>유사 과거 사례 자동 제시</strong>(같은 병원·같은 유형·같은 장비
+        이력) ② 조치 요약에서 <strong>지식화</strong>(해결된 건의 원인·조치를 위키 지식으로 승격 제안)
+        ③ <strong>주간 운영 브리핑 자동 생성</strong>(신규/지연/반복 장애·정합성 위반을 Slack으로)
+        ④ (C2 연계) 악화 병원의 원인 요약 브리핑.</dd>
+    <dt>왜 (의도)</dt>
+    <dd>유지보수 230건·티켓 709건·위키 114페이지의 축적이 검색되기를 기다리는 상태입니다. 신입 엔지니어가
+        베테랑의 기억에 접근하는 통로이자, AI 인프라 투자(v3까지 완료)의 활용 극대화. 새 모델 도입이 아니라
+        <em>기존 에이전트의 호출 지점을 업무 흐름 안으로 옮기는 것</em>이 핵심.</dd>
+  </dl>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--purple);">E4</span>
+    <span class="name">통합 검색 (Cmd+K)</span>
+    <span class="tag quick">퀵윈</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>어디서든 Cmd+K → 병원·프로젝트·티켓·유지보수·딜·위키·장비 시리얼을 코드/이름으로 즉시 점프.</dd>
+    <dt>왜</dt>
+    <dd>모듈이 12개를 넘으면서 "그 건이 어디 있더라"의 탐색 비용이 전 직원×매일 발생. 구현 대비 체감이
+        가장 큰 편의 기능. 과거 보류됐지만 모듈 수가 그때보다 늘어 근거가 강해졌습니다.</dd>
+  </dl>
+</div>
+
+<!-- ── Theme F ─────────────────────────────── -->
+<div class="theme-head">
+  <div class="theme-badge" style="background:var(--sub);">F</div>
+  <h3 style="margin:0;">기반·거버넌스(Foundation) — "커지기 전에 깔아야 하는 것"</h3>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--sub);">F1</span>
+    <span class="name">외부 연동 허브 — 회계·전자세금계산서·대웅 데이터 교환</span>
+    <span class="tag mid">중형 (연동처별)</span><span class="tag dep">B1과 병행 검토</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>B1(정산)이 생기면 자연히 필요해지는 연결: 전자세금계산서 발행 연동(국세청 ASP), 회계 소프트웨어로의
+        내보내기, 대웅 정산 자료의 정형 수입(현재 엑셀 수작업 이관의 상시화). 일회성 스크립트가 아닌
+        관리되는 연동(로그·재시도·대사).</dd>
+    <dt>왜</dt>
+    <dd>대웅 원장 이관 작업에서 봤듯 외부 데이터와의 대사는 이미 반복 업무입니다. 연동은 기능이 아니라
+        <em>운영 비용 절감</em>이므로, 반복 빈도가 확인된 것부터 하나씩.</dd>
+  </dl>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--sub);">F2</span>
+    <span class="name">권한·감사 고도화 — 역할 4단계의 한계 대비</span>
+    <span class="tag mid">중형</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>현재 SUPER_ADMIN/ADMIN/USER/VIEWER + 소속(SEERS/DAEWOONG) 조합으로 버티고 있으나, 이미 예외가
+        자라는 중(영업 탭 SUPER_ADMIN 게이트, SEERS 전용 체크, ETC_TASK 풀 소속 제한 등).
+        기능 단위 권한(예: '영업 조회'·'정산 관리'·'설정 변경')을 역할에 매핑하는 층을 도입해 코드 산재를
+        정리. C1(외부 포털) 전 필수 선행.</dd>
+    <dt>왜</dt>
+    <dd>권한 예외가 코드 곳곳의 if문으로 늘어나면 보안 사고는 기능이 아니라 <em>누락</em>에서 납니다.
+        정산(B)·포털(C1)처럼 민감도 높은 모듈 전에 정리하는 것이 순서.</dd>
+  </dl>
+</div>
+
+<div class="feat">
+  <div class="feat-head"><span class="code" style="background:var(--sub);">F3</span>
+    <span class="name">의료기기 유통 규제 대응 점검 (조사 과제)</span>
+    <span class="tag quick">조사 먼저</span></div>
+  <dl>
+    <dt>무엇</dt>
+    <dd>thynC 구성품이 의료기기법상 의료기기에 해당한다면, 판매·유통 단계에서 공급내역 보고(의료기기통합
+        정보시스템·UDI) 등 유통업체 측 의무가 있을 수 있습니다. <strong>기능 개발이 아니라 "우리에게 적용되는
+        의무가 무엇인지" 확인하는 조사 과제</strong>로 제안. 적용된다면 A1(시리얼 장부)·WMS가 바로 그 보고의
+        데이터 원천이 되므로 시스템 정합이 좋습니다.</dd>
+    <dt>왜</dt>
+    <dd>적용 여부를 모르는 상태가 리스크. 확인 결과 "해당 없음/대웅이 수행"이면 그것대로 문서화하고 종료 —
+        비용이 거의 들지 않는 리스크 제거입니다.</dd>
+  </dl>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s6"><span class="no">6.</span>우선순위 — 가치×난이도 매트릭스와 추천 Wave</h2>
+
+<h3>6.1 매트릭스</h3>
+<div class="matrix">
+  <div class="quad" style="background:var(--green-soft);">
+    <div class="qt">🎯 높은 가치 × 낮은 난이도 — 먼저</div>
+    <ul>
+      <li><strong>E1</strong> 정합성 점검 (모든 것의 바닥)</li>
+      <li><strong>A1</strong> 장비 개체 연동 (2.0의 주춧돌)</li>
+      <li><strong>B2</strong> 계약 만기·갱신 달력</li>
+      <li><strong>E4</strong> 통합 검색</li>
+    </ul>
+  </div>
+  <div class="quad" style="background:var(--accent-soft);">
+    <div class="qt">🏗 높은 가치 × 높은 난이도 — 준비하고 착수</div>
+    <ul>
+      <li><strong>B1</strong> 정산 원장 (도메인 확인 선행)</li>
+      <li><strong>C1</strong> 고객 포털 (F2 선행·파일럿)</li>
+      <li><strong>A3</strong> 텔레메트리 (제품 협업, 최장기)</li>
+    </ul>
+  </div>
+  <div class="quad" style="background:var(--bg-soft);">
+    <div class="qt">🧩 중간 가치 × 낮은~중간 난이도 — 사이사이</div>
+    <ul>
+      <li><strong>A2</strong> 정기점검 / <strong>D1</strong> 디스패치 보드 (짝으로)</li>
+      <li><strong>C3</strong> 운영 리포트 / <strong>E3</strong> AI 부조종사</li>
+      <li><strong>E2</strong> KPI 뼈대 / <strong>F3</strong> 규제 조사</li>
+    </ul>
+  </div>
+  <div class="quad" style="background:var(--amber-soft);">
+    <div class="qt">⏸ 뒤로 미뤄도 되는 것</div>
+    <ul>
+      <li><strong>C2</strong> 건강도 (입력 데이터가 쌓인 뒤)</li>
+      <li><strong>D2·D3</strong> 현장·플레이북 (물량 증가 신호 시)</li>
+      <li><strong>B3</strong> MRR 지표 (B1 완료 후 자동)</li>
+      <li><strong>F1</strong> 연동 허브 (B1 형태 확정 후)</li>
+    </ul>
+  </div>
+</div>
+
+<h3>6.2 추천 Wave (순서의 논리)</h3>
+
+<div class="wave">
+  <h3>Wave 1 — 바닥 다지기 + 장부 만들기 <span class="chip">퀵윈 중심</span></h3>
+  <p><strong>E1 정합성 점검 → A1 장비 개체 연동 → B2 계약 달력 → E4 통합 검색</strong></p>
+  <p>공통점: 외부 전제가 없고, 기존 데이터·인프라 위에서 바로 서며, 이후 모든 Wave의 데이터 기반이 됩니다.
+  A1은 신규 출고분부터 축적을 시작해야 하므로 <em>빠를수록 이득</em>입니다(늦게 시작하면 그만큼 이력이 비어 갑니다).</p>
+</div>
+
+<div class="wave">
+  <h3>Wave 2 — 예방 운영 + 돈 흐름 <span class="chip">2.0의 본론</span></h3>
+  <p><strong>A2 정기점검 + D1 디스패치 보드 (짝) → B1 정산 원장 (도메인 확인 완료 시) → E2 KPI 뼈대</strong></p>
+  <p>A2가 배정량을 늘리므로 D1과 짝으로 갑니다. B1은 §7의 결정 항목이 풀리는 시점에 착수하되,
+  Wave 2 기간 내 도메인 확인(정산 실무 인터뷰·요율 실사)을 반드시 진행합니다.</p>
+</div>
+
+<div class="wave">
+  <h3>Wave 3 — 고객 접점 + 지능화 <span class="chip">차별화</span></h3>
+  <p><strong>C3 운영 리포트 → E3 AI 부조종사 → C2 건강도 → C1 포털 파일럿 (F2 선행)</strong></p>
+  <p>Wave 1~2가 만든 데이터(장비 이력·점검 결과·정산)를 고객이 보는 형태로 바꾸는 단계.
+  C1은 파일럿 5~10개 병원으로 실사용 검증 후 확대.</p>
+</div>
+
+<div class="wave" style="border-color:var(--sub);">
+  <h3>상시 트랙 — F3 규제 조사(즉시, 조사만) · A3 텔레메트리(제품팀과 논의 시작만)</h3>
+  <p>둘 다 "지금 개발"이 아니라 "지금 확인"입니다. A3은 제품 로드맵 합의에 시간이 걸리므로 대화만 먼저 시작해 둡니다.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s7"><span class="no">7.</span>전제·리스크·결정 필요 항목</h2>
+
+<h3>7.1 이 기획 전체의 전제</h3>
+<ul>
+  <li><strong>사용자는 그대로 45명 내외</strong> — 2.0은 사용자 수가 아니라 <em>병원 수·장비 수·매출 흐름의
+      복잡도</em> 성장에 대비하는 것입니다. 화면 수를 늘리는 것 자체는 목적이 아닙니다.</li>
+  <li><strong>1.0 원칙 유지</strong> — 단일 소스 규칙(티켓·상태 매핑), 위키 경계, 설계 게이트, Phase·게이트
+      진행 방식은 2.0에서도 그대로.</li>
+  <li><strong>한 번에 한 Wave</strong> — 18개는 지도이지 백로그가 아닙니다. Wave 1의 4개도 순차 진행입니다.</li>
+</ul>
+
+<h3>7.2 주요 리스크</h3>
+<table>
+  <tr><th style="width:240px;">리스크</th><th>내용과 완화</th></tr>
+  <tr><td><strong>현장 입력 부담 증가</strong></td>
+    <td>A1(장비 연결)·A2(체크리스트)·D2(완료 보고)는 전부 현장의 손을 요구합니다. 운행일지(예약 69 vs 일지 16)의
+        전례처럼 마찰이 높으면 사장됩니다. → 모든 현장 입력은 "3탭 이내" 원칙으로 설계, 미입력 시 막기보다
+        나중에 정합성 점검(E1)으로 회수.</td></tr>
+  <tr><td><strong>B1 도메인 오해</strong></td>
+    <td>정산 구조(자사↔대웅↔병원)를 잘못 모델링하면 원장 전체가 쓸모없어집니다. → 개발 전 정산 실무자
+        인터뷰 + 최근 3개월 실데이터로 종이 모델 검증을 설계 게이트로.</td></tr>
+  <tr><td><strong>C1 외부 노출</strong></td>
+    <td>보안 표면·계정 운영 부담. → F2(권한 정리) 선행, 파일럿 한정, 읽기 중심 1차 범위.</td></tr>
+  <tr><td><strong>A3 의존성</strong></td>
+    <td>제품팀 로드맵에 종속 — 운영 시스템 쪽에서 통제 불가. → 2.0 성공 기준에서 제외하고 "논의 시작"만 목표로.</td></tr>
+  <tr><td><strong>지표 불신</strong></td>
+    <td>E2·C2의 숫자가 실제와 다르면 신뢰를 영구히 잃습니다. → E1(정합성)이 항상 선행하는 이유.</td></tr>
+</table>
+
+<h3>7.3 사용자 결정이 필요한 것 (기획 단계)</h3>
+<ol>
+  <li><strong>방향 선택</strong> — 6개 테마 중 2.0의 중심을 어디에 둘 것인가.
+      이 문서의 추천은 <strong>A(설치 기반)+B(반복 매출)를 본론으로, E를 바닥으로</strong>지만,
+      회사 우선순위(예: 영업 확장기라면 C보다 CRM 완성)에 따라 달라질 수 있습니다.</li>
+  <li><strong>B1의 실현 가능성 확인 주체</strong> — 정산 실무(사용량 원천·요율·대웅과의 역할 분담)를 누가
+      확인해줄 수 있는가.</li>
+  <li><strong>A1 소급 정책</strong> — 기존 설치분 1.8만 대의 등록 범위(신규분부터 vs 주요 병원 실사 병행).</li>
+  <li><strong>A2 점검 주기의 현실성</strong> — 현재 인력으로 감당 가능한 주기(분기×206병원 = 월 69건 추가는
+        비현실적일 수 있음 — 반기·병원 등급제 검토).</li>
+  <li><strong>C1 파일럿 후보</strong> — 포털을 실제로 써 줄 우호 병원이 있는가 + 대웅 채널과의 관계 정리.</li>
+</ol>
+
+<!-- ============================================================ -->
+<h2 id="s8"><span class="no">8.</span>부록 — 실측 데이터 상세 (2026-08-02 조회, dev DB = PROD 07-31 동기화본)</h2>
+
+<table>
+  <tr><th>항목</th><th class="num">값</th><th>비고</th></tr>
+  <tr><td>딜(계약 차수)</td><td class="num">232건</td><td>대웅 원장 재적재분 (2026-07-31)</td></tr>
+  <tr><td>도입 병원 (딜 보유 기준)</td><td class="num">206곳</td><td>도입 병상 보유 기준으로는 193곳</td></tr>
+  <tr><td>계약금액 합 (대웅 총견적)</td><td class="num">₩144,496,906,934</td><td>실판매액 합 ₩40,310,613,908 (122건 보강분)</td></tr>
+  <tr><td>판매 디바이스 (대웅 축)</td><td class="num">18,738대</td><td>도입 병상 합 18,230개</td></tr>
+  <tr><td>도입형태 분포</td><td class="num">사용량비례 131 / 구축형 38</td><td>병원-도입형태 연결 169건 기준. 정산 텍스트 보유 딜 84건</td></tr>
+  <tr><td>프로젝트</td><td class="num">244건</td><td>딜↔프로젝트 연결 225/232</td></tr>
+  <tr><td>유지보수 누적</td><td class="num">230건</td><td>완료 206 / 접수 17 / 처리중 4 / 보류 3</td></tr>
+  <tr><td>유지보수 월평균 (최근 3개월)</td><td class="num">~54건</td><td>평균 처리일 5.9일 (완료건 기준)</td></tr>
+  <tr><td>장애 유형 분포</td><td class="num">HW 86 / 기타 69 / NW 49 / SW 19</td><td>하드웨어가 최다 — A1의 근거</td></tr>
+  <tr><td>티켓 누적</td><td class="num">709건</td><td>SLA 시계 144건 가동</td></tr>
+  <tr><td>WMS 시리얼 개체</td><td class="num">19,363개</td><td><strong>병원 설치 연결 0건</strong> — A1의 근거</td></tr>
+  <tr><td>WMS 입출고 전표</td><td class="num">268건</td><td>전표-개체 연결 19,950건</td></tr>
+  <tr><td>답사 / 설치계획 / 기타업무</td><td class="num">110 / 75 / 38건</td><td></td></tr>
+  <tr><td>위키 페이지</td><td class="num">114개</td><td>청크 인덱스 433, 열람 로그 2,057</td></tr>
+  <tr><td>AI 어시스턴트</td><td class="num">세션 40 / 메시지 125</td><td>사용량 로그 60건</td></tr>
+  <tr><td>시스템 사용자</td><td class="num">45명</td><td>필드 엔지니어 풀 66건 (업무 유형별 중복 포함)</td></tr>
+  <tr><td>감사 로그</td><td class="num">4,100건</td><td>알림 발송 이력 233건</td></tr>
+</table>
+
+<div class="footer-note">
+  <p><strong>다음 단계</strong> — 이 문서를 읽고 ① 공감되는 테마/항목 선택 ② §7.3 결정 항목 회신 ③ 선택된
+  항목에 대해서만 개별 설계안(<code>projects/*_design.md</code>) 작성 → 검토·승인 → 착수. 기존 설계 게이트
+  규칙이 그대로 적용됩니다.</p>
+  <p>이 문서는 <code>projects/ops_system_2.0_plan.html</code>로 저장되어 있으며, 논의 결과에 따라 개정판을
+  같은 파일에 갱신합니다.</p>
+</div>
+
+</div>
+</body>
+</html>
