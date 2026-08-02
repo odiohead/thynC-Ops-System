@@ -5,6 +5,7 @@
  * 계약완료 딜 기준. 축 금액은 억 단위 표기(툴팁은 원 단위 풀 자릿수).
  */
 
+import { useState } from 'react'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, Area, LabelList } from 'recharts'
 import { useChartTheme } from '@/app/components/theme/useChartTheme'
 
@@ -21,8 +22,7 @@ export interface DashboardAData {
     activeDeals: number
   }
   monthly: Array<{ ym: string; count: number; hosp: number; beds: number; cumHosp: number; cumBeds: number }>
-  monthDeals: DealListRow[]
-  weekDeals: DealListRow[]
+  allDeals: DealListRow[]
   typeDist: Array<{ name: string; count: number; total: number }>
   settleDist: Array<{ name: string; count: number }>
   taxDist: Array<{ name: string; count: number }>
@@ -40,15 +40,44 @@ export interface DealListRow {
 const won = (v: number) => `${v.toLocaleString('ko-KR')}원`
 const eok = (v: number) => `${(v / 1e8).toFixed(v >= 1e9 ? 0 : 1)}억`
 
-/** 이번달·이번주 계약내역 리스트 카드 */
-function DealListCard({ title, note, rows }: { title: string; note: string; rows: DealListRow[] }) {
+const pad2 = (n: number) => String(n).padStart(2, '0')
+const dstr = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+
+/** 월/주 계약내역 리스트 카드 — ◀▶로 기간 이동 (KST 로컬 기준, offset 0 = 이번달/이번주) */
+function DealListCard({ title, mode, deals }: { title: string; mode: 'month' | 'week'; deals: DealListRow[] }) {
+  const [offset, setOffset] = useState(0)
   const th = 'whitespace-nowrap px-2 py-1.5 text-left text-[11px] font-medium text-gray-400'
   const td = 'whitespace-nowrap px-2 py-1.5 text-[12px] text-gray-700'
+
+  const now = new Date()
+  let from: string, to: string, label: string
+  if (mode === 'month') {
+    const base = new Date(now.getFullYear(), now.getMonth() + offset, 1)
+    from = dstr(base)
+    to = dstr(new Date(base.getFullYear(), base.getMonth() + 1, 0))
+    label = `${base.getFullYear()}.${pad2(base.getMonth() + 1)}`
+  } else {
+    const dow = (now.getDay() + 6) % 7 // 월요일 시작
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow + offset * 7)
+    const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6)
+    from = dstr(start)
+    to = dstr(end)
+    label = `${pad2(start.getMonth() + 1)}.${pad2(start.getDate())}~${pad2(end.getMonth() + 1)}.${pad2(end.getDate())}`
+  }
+  const rows = deals.filter((r) => r.date >= from && r.date <= to)
+  const navBtn = 'rounded-md border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-500 transition-colors hover:bg-gray-100'
+
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-700">{title} <span className="ml-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">{rows.length}건</span></h3>
-        <span className="text-[11px] text-gray-400">{note}</span>
+        <span className="inline-flex items-center gap-1">
+          <button className={navBtn} onClick={() => setOffset(offset - 1)} aria-label={mode === 'month' ? '지난달' : '지난주'}>◀</button>
+          <span className="min-w-[92px] text-center text-[11px] font-medium tabular-nums text-gray-600">
+            {label}{offset === 0 && <span className="ml-1 text-blue-600">{mode === 'month' ? '이번달' : '이번주'}</span>}
+          </span>
+          <button className={navBtn} onClick={() => setOffset(offset + 1)} aria-label={mode === 'month' ? '다음달' : '다음주'}>▶</button>
+        </span>
       </div>
       <div className="mt-2 max-h-[200px] overflow-auto">
         {rows.length === 0 ? (
@@ -225,8 +254,8 @@ export default function SalesDashboardA({ data }: { data: DashboardAData }) {
       </div>
 
       <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3">
-        <DealListCard title="이번달 계약내역" note="계약일 기준 · 이번달" rows={data.monthDeals} />
-        <DealListCard title="이번주 계약내역" note="계약일 기준 · 이번주(월~일)" rows={data.weekDeals} />
+        <DealListCard title="월 계약내역" mode="month" deals={data.allDeals} />
+        <DealListCard title="주 계약내역" mode="week" deals={data.allDeals} />
         <Card title="종별 도입 병원" note="도입 수 / 종별 전체 병원 수 · 종별 위계 순">
           <div className="space-y-2">
             {data.typeDist.length === 0 && <p className="text-sm text-gray-400">데이터 없음</p>}

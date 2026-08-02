@@ -150,16 +150,59 @@ function CreateModal({ existingRounds, onClose }: { existingRounds: Map<string, 
   )
 }
 
+const dwSale = (r: DealEntryRow): number | null =>
+  r.dwAmountProduct === null && r.dwAmountConstruction === null ? null : (r.dwAmountProduct ?? 0) + (r.dwAmountConstruction ?? 0)
+
+/** 정렬 가능 컬럼 정의 (표 순서) — accessor 값으로 정렬, null은 항상 마지막 */
+const COLS: Array<{ key: string; label: string; right?: boolean; acc: (r: DealEntryRow) => string | number | null }> = [
+  { key: 'hospitalName', label: '병원명', acc: (r) => r.hospitalName },
+  { key: 'roundNo', label: '확장', acc: (r) => r.roundNo },
+  { key: 'dealStatus', label: '딜 상태', acc: (r) => r.dealStatus?.name ?? null },
+  { key: 'buildStatus', label: '공사 단계', acc: (r) => r.buildStatus?.name ?? null },
+  { key: 'dwCountType', label: '카운팅', acc: (r) => r.dwCountType },
+  { key: 'dwOrderStatus', label: '오더', acc: (r) => r.dwOrderStatus },
+  { key: 'hospitalType', label: '종별', acc: (r) => r.hospitalType },
+  { key: 'dwDivision', label: '사업부', acc: (r) => r.dwDivision },
+  { key: 'dwOffice', label: '사무소', acc: (r) => r.dwOffice },
+  { key: 'dwManager', label: '담당자', acc: (r) => r.dwManager },
+  { key: 'dwClientCode', label: '거래처코드', acc: (r) => r.dwClientCode },
+  { key: 'dwModelKind', label: '모델구분', acc: (r) => r.dwModelKind },
+  { key: 'dwModel', label: '판매모델', acc: (r) => r.dwModel },
+  { key: 'wardsText', label: '도입병동', acc: (r) => r.wardsText },
+  { key: 'dwDeviceCount', label: '디바이스', right: true, acc: (r) => r.dwDeviceCount },
+  { key: 'bedCount', label: '병상수', right: true, acc: (r) => r.bedCount },
+  { key: 'dwAmountTotal', label: '계약금액(총견적가)', right: true, acc: (r) => r.dwAmountTotal },
+  { key: 'contractDate', label: '계약일', acc: (r) => r.contractDate },
+  { key: 'dwBuildDate', label: '공사일', acc: (r) => r.dwBuildDate },
+  { key: 'dwAmountProduct', label: '제품가', right: true, acc: (r) => r.dwAmountProduct },
+  { key: 'dwAmountConstruction', label: '공사비', right: true, acc: (r) => r.dwAmountConstruction },
+  { key: 'dwSale', label: '판매', right: true, acc: (r) => dwSale(r) },
+  { key: 'dwAmountActual', label: '실판매액', right: true, acc: (r) => r.dwAmountActual },
+  { key: 'dwAmountService', label: '용역매출', right: true, acc: (r) => r.dwAmountService },
+  { key: 'dwTaxInvoice', label: '세금계산서', acc: (r) => r.dwTaxInvoice },
+  { key: 'dwSettlement', label: '정산', acc: (r) => r.dwSettlement },
+  { key: 'dwPriceType', label: '판매가', acc: (r) => r.dwPriceType },
+  { key: 'remark', label: '비고', acc: (r) => r.remark },
+  { key: 'sido', label: '지역', acc: (r) => r.sido },
+]
+
 export default function DealsEntryTable({ rows }: { rows: DealEntryRow[] }) {
   const router = useRouter()
   const [q, setQ] = useState('')
   const [dealStatus, setDealStatus] = useState('')
   const [countType, setCountType] = useState('')
+  const [orderStatus, setOrderStatus] = useState('')
+  const [htype, setHtype] = useState('')
+  const [division, setDivision] = useState('')
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'contractDate', dir: 'desc' })
   const [modalOpen, setModalOpen] = useState(false)
 
   const options = useMemo(() => ({
     dealStatuses: uniq(rows.map((r) => r.dealStatus?.name ?? null)),
     countTypes: uniq(rows.map((r) => r.dwCountType)),
+    orderStatuses: uniq(rows.map((r) => r.dwOrderStatus)),
+    types: uniq(rows.map((r) => r.hospitalType)),
+    divisions: uniq(rows.map((r) => r.dwDivision)),
   }), [rows])
 
   const existingRounds = useMemo(() => {
@@ -172,12 +215,30 @@ export default function DealsEntryTable({ rows }: { rows: DealEntryRow[] }) {
     if (q && !r.hospitalName.toLowerCase().includes(q.trim().toLowerCase())) return false
     if (dealStatus && r.dealStatus?.name !== dealStatus) return false
     if (countType && r.dwCountType !== countType) return false
+    if (orderStatus && r.dwOrderStatus !== orderStatus) return false
+    if (htype && r.hospitalType !== htype) return false
+    if (division && r.dwDivision !== division) return false
     return true
-  }), [rows, q, dealStatus, countType])
+  }), [rows, q, dealStatus, countType, orderStatus, htype, division])
+
+  const sorted = useMemo(() => {
+    const col = COLS.find((c) => c.key === sort.key)
+    if (!col) return filtered
+    const dir = sort.dir === 'asc' ? 1 : -1
+    return [...filtered].sort((a, b) => {
+      const va = col.acc(a), vb = col.acc(b)
+      if (va === null && vb === null) return 0
+      if (va === null) return 1 // null은 방향 무관 마지막
+      if (vb === null) return -1
+      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir
+      return String(va).localeCompare(String(vb), 'ko') * dir
+    })
+  }, [filtered, sort])
+
+  const toggleSort = (key: string) =>
+    setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }))
 
   const sum = (f: (r: DealEntryRow) => number | null) => filtered.reduce((a, r) => a + (f(r) ?? 0), 0)
-  const dwSale = (r: DealEntryRow): number | null =>
-    r.dwAmountProduct === null && r.dwAmountConstruction === null ? null : (r.dwAmountProduct ?? 0) + (r.dwAmountConstruction ?? 0)
 
   const go = (id: number) => router.push(`/sales/deals/${id}`)
   const sumTd = 'px-2.5 py-2 text-right text-[13px] font-semibold text-gray-900'
@@ -205,6 +266,18 @@ export default function DealsEntryTable({ rows }: { rows: DealEntryRow[] }) {
           <option value="">카운팅 전체</option>
           {options.countTypes.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
+        <select className={selCls} value={orderStatus} onChange={(e) => setOrderStatus(e.target.value)}>
+          <option value="">오더 전체</option>
+          {options.orderStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select className={selCls} value={htype} onChange={(e) => setHtype(e.target.value)}>
+          <option value="">병원종 전체</option>
+          {options.types.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select className={selCls} value={division} onChange={(e) => setDivision(e.target.value)}>
+          <option value="">사업부 전체</option>
+          {options.divisions.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
         <span className="ml-auto text-sm text-gray-500">계약 {filtered.length}건 / 전체 {rows.length}건</span>
       </div>
 
@@ -213,42 +286,24 @@ export default function DealsEntryTable({ rows }: { rows: DealEntryRow[] }) {
           <thead className="sticky top-0 z-20 bg-gray-50">
             <tr>
               <th className={`${thCls} text-right`}>순번</th>
-              <th className={`${thCls} sticky left-0 z-30 bg-gray-50`}>병원명</th>
-              <th className={thCls}>확장</th>
-              <th className={thCls}>딜 상태</th>
-              <th className={thCls}>공사 단계</th>
-              <th className={thCls}>카운팅</th>
-              <th className={thCls}>오더</th>
-              <th className={thCls}>종별</th>
-              <th className={thCls}>사업부</th>
-              <th className={thCls}>사무소</th>
-              <th className={thCls}>담당자</th>
-              <th className={thCls}>거래처코드</th>
-              <th className={thCls}>모델구분</th>
-              <th className={thCls}>판매모델</th>
-              <th className={thCls}>도입병동</th>
-              <th className={`${thCls} text-right`}>디바이스</th>
-              <th className={`${thCls} text-right`}>병상수</th>
-              <th className={`${thCls} text-right`}>계약금액(총견적가)</th>
-              <th className={thCls}>계약일</th>
-              <th className={thCls}>공사일</th>
-              <th className={`${thCls} text-right`}>제품가</th>
-              <th className={`${thCls} text-right`}>공사비</th>
-              <th className={`${thCls} text-right`}>판매</th>
-              <th className={`${thCls} text-right`}>실판매액</th>
-              <th className={`${thCls} text-right`}>용역매출</th>
-              <th className={thCls}>세금계산서</th>
-              <th className={thCls}>정산</th>
-              <th className={thCls}>판매가</th>
-              <th className={thCls}>비고</th>
-              <th className={thCls}>지역</th>
+              {COLS.map((c) => (
+                <th
+                  key={c.key}
+                  className={`${thCls} cursor-pointer select-none hover:text-gray-600 ${c.right ? 'text-right' : ''} ${c.key === 'hospitalName' ? 'sticky left-0 z-30 bg-gray-50' : ''}`}
+                  onClick={() => toggleSort(c.key)}
+                  title="클릭 정렬 · 다시 클릭 시 역순"
+                >
+                  {c.label}
+                  {sort.key === c.key && <span className="ml-0.5 text-blue-500">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {filtered.length === 0 && (
               <tr><td colSpan={30} className="px-3 py-8 text-center text-sm text-gray-400">표시할 도입 건이 없습니다. 우측 상단 &lsquo;+ 등록&rsquo;으로 계약 이력을 만드세요.</td></tr>
             )}
-            {filtered.map((r, i) => (
+            {sorted.map((r, i) => (
               <tr key={r.id} className="cursor-pointer hover:bg-blue-50/40" onClick={() => go(r.id)}>
                 <td className={`${tdCls} text-right text-gray-400`}>{i + 1}</td>
                 <td className={`${tdCls} sticky left-0 z-10 bg-white font-medium text-blue-700`}>
