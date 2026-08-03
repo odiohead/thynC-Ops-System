@@ -4,7 +4,16 @@
 
 ---
 
-## 2026-08-03 | 알림 v2 — 티켓 단일 소스 재편 P1~P5 구현 (dev2, PROD 배포 대기)
+## 2026-08-03 | 알림 v2 PROD 배포
+
+- 커밋 `ec4914c` push → PROD `git pull`(`b449e6e`→`ec4914c`) — 의존성 변경 없음
+- **PROD DB**: `prisma migrate deploy` 3건(notify_sig+백필 718건 / 채널 컬럼 2종 / 구 설정 키 정리·DIGEST 규칙 비활성) → `prisma generate`. 전역 요약 기본값 시드(09:00 KST → 'SLA 지연' 채널 — 구 09:00 DIGEST 규칙 동작 승계)
+- 힙 4GB 빌드(146 라우트) → `pm2 restart thync-prod` (Ready 1.2s, notify-tick 5m 가동). 스모크: `/`·`/tickets`·`/tickets/new`·`/settings/notifications`·`/settings/ticket-queues`·`/maintenances`·`/sales/deals` 전부 307 정상, 외부 HTTPS 정상, 신규 오류 로그 0건
+- PROD 상태: `SLACK_NOTIFY_MODE=live`·봇 토큰 설정·notify_enabled=on·채널 2종(운영 공지/SLA 지연) — 즉시 가동. **남은 운영 작업(선택)**: 그룹별 채널·SLA 정책별 채널 지정은 설정 화면에서
+
+---
+
+## 2026-08-03 | 알림 v2 — 티켓 단일 소스 재편 P1~P5 구현 (dev2·PROD 배포 완료)
 
 - 설계: `projects/notification_v2_design.md` (사용자 확정 11건 — 티켓 축 일원화·env 발송모드·달력시간·DM 폐기·채널ID+표시명·전역 요약 등)
 - **P1 정리**: `lib/delay-rules.ts` 삭제(판정은 SLA 시계 단일 소스, `refTypeToTaskType`은 notifyFields로 이동) · 배정/SLA owner DM 폐기 · `tickets.due_at` SLA 단일 소유(구 Sev 규칙 계산 8곳 제거, 시계 없으면 NULL 정리) · sig를 `tickets.notify_sig` 컬럼으로 이전(마이그레이션+709건 백필, 로그 purge 안전) · 결함 수정: 설정 저장 시 tick 5m 리셋(F3), Slack off 시 SLA 내부 알림 차단(F4), 로그 필터 ticket_assigned 누락(F5) · BUSINESS_HOURS 옵션 제거 · `sendConnectionTest`/`SLACK_CHANNEL_MAIN`/`notify_delay_interval` 제거
