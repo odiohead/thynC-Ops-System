@@ -4,6 +4,26 @@
 
 ---
 
+## 2026-08-03 | 주차 웹할인 자동 계산 — 기본 무료 30분·출차 여유 10분 반영
+
+- `planAutoDiscount` 차감 계산식 수정: 기존 `주차시간 − 기적용분` → **`(주차시간 + 출차 여유 10분) − 기본 무료 30분 − 기적용분`**. 상수 `FREE_BASE_MIN`(30)·`EXIT_BUFFER_MIN`(10) 신설, `AutoPlan`에 `targetMin`·`chargeableMin` 필드 추가
+- 부과 대상 0분이면 "기본 무료 30분 이내 — 등록 불필요" 안내로 등록 없이 종료 (auto-apply도 동일하게 스킵)
+- 미리보기 UI: 요약 그리드 3→4열(주차시간|**부과 대상**|기적용|이번 커버 대상) + 계산 기준 캡션, '여유 N분' 표기는 부과 대상 기준으로 변경
+- tsc 0오류. 빌드·PROD 미반영 (사용자 요청 대기)
+- 영향 파일: lib/parking.ts, app/parking/page.tsx, README.md(기능·API 섹션 — plan/auto-apply 엔드포인트 누락 보강)
+
+---
+
+## 2026-08-03 | SLA 정책 탭 간소화 — 상태 지연 매트릭스 제거 (dev2)
+
+- 사용자 피드백("어수선함") + 실측(상태 지연 DWELL 타깃 0건·시계 이력 0건, dev/PROD 공통) → **상태 지연 알림 기준 매트릭스 UI 제거**, 정책 관리 컨트롤(우선순위 이동·활성/삭제·정책 채널·영향 보기)을 처리 목표 표로 통합해 단일 화면화
+- 엔진의 DWELL metric·API는 유지(비파괴) — 기존 DWELL 타깃은 행 저장 시에도 보존되도록 buildTargets에 보존 로직 추가. 필요 시 UI만 복원 가능
+- Sev별 세분(고급 토글)은 유지 — 유지보수·기타업무가 우선순위→Sev 동적 매핑으로 실사용 중(PROD Sev별 타깃 4건)
+- tsc 0오류 · dev2 빌드·재시작. PROD 미반영
+- 영향 파일: app/settings/notifications/SlaMatrixTab.tsx
+
+---
+
 ## 2026-08-03 | 알림 v2 PROD 배포
 
 - 커밋 `ec4914c` push → PROD `git pull`(`b449e6e`→`ec4914c`) — 의존성 변경 없음

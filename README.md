@@ -893,6 +893,7 @@ prisma/
 ### 주차 웹할인 등록 (`/parking`, USER 이상)
 - 방문차량 주차 할인권 등록 유틸 — pweb.kr(아마노) 주차 웹할인 사이트를 서버가 대행 호출 (stateless, DB 미사용)
 - 차량번호+입차일 검색 → 입차 차량 선택 → 계정별(env `PARKING_ACCOUNTS`) 사용 가능 할인권·잔여 조회 → 할인권 1건 등록
+- **자동 계산·등록**: 주차시간 기반 무료+유료 최적 조합 미리보기(plan) → 순차 등록(auto-apply). 커버 목표 = 주차시간 + **출차 여유 10분**, 차감(부과) 대상 = 목표 − **기본 무료 30분** − 기적용분 (2026-08-03). 무료권 우선, 잔여는 903 계정 유료권 DP 최소비용 커버
 - nav 메뉴 미등록 (URL 직접 접근)
 
 ### 프로젝트 관리
@@ -1406,6 +1407,8 @@ npm run dev
 | POST | `/api/parking/search` | 차량번호+입차일로 입차 차량 검색 |
 | POST | `/api/parking/coupons` | 선택 차량에 대한 전 계정 할인권·잔여 병렬 조회 |
 | POST | `/api/parking/register` | 계정 1개로 할인권 1건 등록 |
+| POST | `/api/parking/plan` | 주차시간 기반 자동 할인권 조합 미리보기 (무료 30분·출차 여유 10분 반영, 읽기 전용) |
+| POST | `/api/parking/auto-apply` | 자동 계산 조합 순차 등록 (무료 먼저 → 903 유료, 실패 시 중단) |
 
 ### HIRA 병원
 | Method | Endpoint | 설명 |

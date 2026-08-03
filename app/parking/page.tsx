@@ -64,6 +64,8 @@ interface AutoPlan {
   ok: boolean
   reason?: string
   elapsedMin: number
+  targetMin: number
+  chargeableMin: number
   alreadyMin: number
   deficitMin: number
   steps: PlanStep[]
@@ -371,10 +373,14 @@ export default function ParkingPage() {
                 <CardTitle>자동 계산 미리보기</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="grid grid-cols-3 gap-2 text-center text-sm">
+                <div className="grid grid-cols-4 gap-2 text-center text-sm">
                   <div>
                     <div className="text-xs text-muted-foreground">주차시간</div>
                     <div className="font-semibold">{fmtMin(plan.elapsedMin)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">부과 대상</div>
+                    <div className="font-semibold">{fmtMin(plan.chargeableMin)}</div>
                   </div>
                   <div>
                     <div className="text-xs text-muted-foreground">기적용</div>
@@ -385,6 +391,9 @@ export default function ParkingPage() {
                     <div className="font-semibold">{fmtMin(plan.deficitMin)}</div>
                   </div>
                 </div>
+                <p className="text-center text-xs text-muted-foreground">
+                  기본 무료 30분 · 출차 여유 10분 반영 (부과 대상 = 주차시간 + 10분 − 30분)
+                </p>
 
                 {plan.reason && plan.steps.length === 0 && (
                   <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">{plan.reason}</p>
@@ -411,7 +420,7 @@ export default function ParkingPage() {
                     <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                       <span className="text-muted-foreground">
                         무료 {plan.freeCount}장 · 유료 {plan.paidCount}장 · 총 커버 {fmtMin(plan.coveredAfterMin)}
-                        {plan.coveredAfterMin > plan.elapsedMin && ` (여유 ${plan.coveredAfterMin - plan.elapsedMin}분)`}
+                        {plan.coveredAfterMin > plan.chargeableMin && ` (여유 ${plan.coveredAfterMin - plan.chargeableMin}분)`}
                       </span>
                       <span className="font-semibold">합계 {plan.totalCost.toLocaleString()}원</span>
                     </div>

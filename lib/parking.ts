@@ -481,6 +481,11 @@ export async function registerDiscount(params: {
 
 // ── 자동 계산 (주차시간 기반 최적 할인권 조합) ────────────────────────────
 
+/** 주차장 기본 무료시간(분) — 최초 30분은 요금 미부과이므로 차감 대상에서 제외 */
+export const FREE_BASE_MIN = 30
+/** 등록 후 출차까지 여유시간(분) — 등록 시점 주차시간에 더해 커버 목표를 잡음 */
+export const EXIT_BUFFER_MIN = 10
+
 /** 자동계산 유료권 대상: 무료와 함께 쓸 수 있는 6종(일반요금 4종 + 유료 24/72시간) */
 function isPaidEligible(d: DiscountType): boolean {
   return isUsablePaid(d)
@@ -499,6 +504,8 @@ export interface AutoPlan {
   ok: boolean
   reason?: string
   elapsedMin: number
+  targetMin: number // 커버 목표 시간 = 주차시간 + 출차 여유 10분
+  chargeableMin: number // 요금 부과 대상 = 목표 − 무료 30분
   alreadyMin: number
   deficitMin: number
   steps: PlanStep[] // 무료 먼저, 그 뒤 903 유료
@@ -549,15 +556,20 @@ function coverPaid(
   return out
 }
 
-/** 주차시간·기적용분 기준으로 무료+유료 최적 조합 계획 (부작용 없음) */
+/** 주차시간·기적용분 기준으로 무료+유료 최적 조합 계획 (부작용 없음)
+ *  커버 목표 = 주차시간 + 출차 여유 10분, 차감 대상 = 목표 − 무료 30분 − 기적용분 */
 export async function planAutoDiscount(carId: string): Promise<AutoPlan> {
   const state = await carDiscountState(carId)
   const elapsedMin = state.car?.elapsedMin ?? 0
+  const targetMin = elapsedMin + EXIT_BUFFER_MIN
+  const chargeableMin = Math.max(0, targetMin - FREE_BASE_MIN)
   const alreadyMin = state.appliedDiscounts.reduce((s, a) => s + (a.minutes || 0), 0)
-  const deficitMin = Math.max(0, elapsedMin - alreadyMin)
+  const deficitMin = Math.max(0, chargeableMin - alreadyMin)
   const balance = state.accounts.find((a) => a.paidEnabled)?.remainCharge ?? null
   const empty = {
     elapsedMin,
+    targetMin,
+    chargeableMin,
     alreadyMin,
     deficitMin,
     balance,
@@ -572,10 +584,18 @@ export async function planAutoDiscount(carId: string): Promise<AutoPlan> {
   if (elapsedMin === 0) {
     return { ok: false, reason: '주차시간을 확인할 수 없습니다.', steps: [], ...empty }
   }
+  if (chargeableMin === 0) {
+    return {
+      ok: true,
+      reason: `기본 무료 ${FREE_BASE_MIN}분 이내 — 등록이 필요 없습니다 (주차 ${elapsedMin}분 + 여유 ${EXIT_BUFFER_MIN}분)`,
+      steps: [],
+      ...empty,
+    }
+  }
   if (deficitMin === 0) {
     return {
       ok: true,
-      reason: `이미 충분히 적용됨 (적용 ${alreadyMin}분 ≥ 주차 ${elapsedMin}분)`,
+      reason: `이미 충분히 적용됨 (적용 ${alreadyMin}분 ≥ 부과 대상 ${chargeableMin}분)`,
       steps: [],
       ...empty,
     }
@@ -615,6 +635,8 @@ export async function planAutoDiscount(carId: string): Promise<AutoPlan> {
   return {
     ok: true,
     elapsedMin,
+    targetMin,
+    chargeableMin,
     alreadyMin,
     deficitMin,
     steps,
