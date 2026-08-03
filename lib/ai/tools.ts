@@ -1994,7 +1994,7 @@ async function listSalesDeals(input: ToolInput) {
         remark: d.remark,
       }),
     })),
-    link: '/sales',
+    link: '/sales/deals',
   }
 }
 

@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-08-03 | 영업현황 메뉴 재편 — 대시보드 A 메인화 + 컨셉 탭 5종 폐기 (dev2)
+
+- 사용자 요청: 영업현황 메인을 실적 대시보드로 올리고, 컨셉 비교용으로 만들어 두었던 SUPER_ADMIN 전용 탭 5개를 영구 제거(재사용 계획 없음)
+- **탭 구조**: `SalesConceptTabs` 재작성 — 2개 탭(`대시보드`(/sales/dashboard) → `도입현황`(/sales/deals)), 대시보드가 첫 번째. SUPER_ADMIN 분기(`/api/auth/me` 조회·안내 문구) 전부 제거
+- **nav 메뉴**: `nav_menu_items` menu_key `sales` href `/sales/deals` → `/sales/dashboard` (DEV DB UPDATE 1건). **PROD DB 미반영** — 배포 시 동일 UPDATE 필요
+- **삭제 화면 5종**(페이지+전용 컴포넌트): 차수 원장(`app/sales/page.tsx`+`SalesLedgerTable`) / 영업 파이프라인(`app/sales2/`) / 병원 요약(`app/sales3/`) / 대시보드 B(`app/sales/dashboard2/`) / 대시보드 C(`app/sales/dashboard3/`)
+- **데이터 무영향**: 5종 모두 Prisma 읽기 전용 조회 화면 — `sales_deals` 등 테이블·행·API 라우트 변경 없음. `/sales2`에만 있던 쓰기 2종은 이미 대체 경로 존재(딜 생성 → `/sales/deals` 등록 모달, 프로젝트 연결 → 딜 상세 폼 `projectCode` 셀렉트)
+- `/sales`는 삭제 대신 **`/sales/dashboard` 리다이렉트 스텁**으로 대체 (구 북마크·모듈 루트 404 방지)
+- `lib/ai/tools.ts` 딜 검색 결과 링크 `/sales` → `/sales/deals` (폐기 화면 가리키지 않도록)
+- **잔존 항목**: `POST /api/hospitals/[code]/sales/deals/[id]/map-project` 라우트는 호출처가 사라졌으나 보존(README에 표기). 정리 여부는 사용자 판단
+- tsc 0오류. 빌드·PM2 재시작·git push 미실행 (사용자 요청 대기)
+- 영향 파일: app/sales/_components/SalesConceptTabs.tsx, app/sales/page.tsx(리다이렉트로 교체), lib/ai/tools.ts, README.md, DEV DB `nav_menu_items` 1행 / 삭제: app/sales2/**, app/sales3/**, app/sales/dashboard2/**, app/sales/dashboard3/**, app/sales/_components/SalesLedgerTable.tsx
+
+---
+
 ## 2026-08-03 | 주차 자동계산 + SLA 탭 재편 PROD 배포
 
 - 커밋 2건 push → PROD `git pull`(`0e02618`→`58f4486`) — 의존성·DB 변경 없음
