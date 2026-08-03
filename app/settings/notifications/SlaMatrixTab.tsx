@@ -1,10 +1,11 @@
 'use client'
 
 /**
- * SLA 기준 편집 탭 (1.1 P2 — projects/notification_v1.1_design.md §4.8)
+ * SLA 정책 편집 탭 (v2 재편 — projects/notification_v2_design.md)
  *
- * 화면 1: 상태 지연 매트릭스 (정책 행 × 티켓 상태 열, metric=DWELL)
- * 화면 2: 처리 목표 매트릭스 (정책 행 × metric 열)
+ * 처리 목표 매트릭스 (정책 행 × metric 열) 단일 화면.
+ * 상태 지연(DWELL) 매트릭스는 v2에서 UI 제거 (2026-08-03 사용자 결정 — 실사용 0건·임박 알림이 별도 배선됨.
+ * 엔진의 DWELL metric은 유지되며 기존 타깃도 저장 시 보존 — 필요해지면 UI만 복원).
  *
  * 저장 단위는 **정책 1행** — 그 행의 모든 셀(타깃)을 한 번에 PUT한다(빈 셀 = 감지 안 함).
  * 저장 시 적용 범위를 고르게 하고(신규 티켓부터 / 열린 티켓에 지금 적용), 후자는 quiet 재계산이라
@@ -12,12 +13,6 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-
-const TICKET_STATUS_LABELS: Record<string, string> = {
-  OPEN: '접수', ASSIGNED: '배정', IN_PROGRESS: '처리중', PENDING: '대기', RESOLVED: '해결', CLOSED: '종결',
-}
-/** 상태 지연 매트릭스 열 — 종결(CLOSED)은 체류 개념이 없어 제외 */
-const DWELL_STATUSES = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'PENDING', 'RESOLVED']
 
 const GOAL_METRICS = [
   { metric: 'ASSIGN', label: '배정까지', hint: '생성 → 담당자 지정. CS 미배정 방치 감지' },
@@ -184,8 +179,12 @@ export default function SlaMatrixTab() {
     }
 
     for (const sev of sevList) {
-      for (const st of DWELL_STATUSES) push('DWELL', st, sev)
       for (const g of GOAL_METRICS) push(g.metric, null, sev)
+    }
+
+    // DWELL(상태 체류)은 v2에서 UI 제거 — 기존 타깃이 있다면 저장 시 그대로 보존(전체 재설정 의미론에서 유실 방지)
+    for (const t of p.targets) {
+      if (t.metric === 'DWELL') out.push({ metric: t.metric, statusScope: t.statusScope, severity: t.severity, thresholdMin: t.thresholdMin, warnRatio: t.warnRatio })
     }
 
     // 고급 토글 OFF에서는 편집하지 않은 Sev별 타깃을 보존한다(폴백 정책의 RESOLVE Sev별 1/1/3/7일 등)
@@ -368,27 +367,30 @@ export default function SlaMatrixTab() {
         </div>
       </div>
 
-      {/* 화면 1 — 상태 지연 매트릭스 */}
+      {/* 처리 목표 매트릭스 — v2 단일 화면 (상태 지연 매트릭스는 제거, 정책 관리 컨트롤을 이 표로 통합) */}
       <section className="rounded-xl border bg-card">
         <div className="flex items-center justify-between border-b px-4 py-3">
-          <h3 className="text-sm font-semibold text-foreground">상태 지연 알림 기준</h3>
-          <span className="text-xs text-muted-foreground">각 상태에 머문 시간이 기준을 넘으면 지연으로 감지</span>
+          <h3 className="text-sm font-semibold text-foreground">처리 목표 (SLA)</h3>
+          <span className="text-xs text-muted-foreground">대기(PENDING) 상태에서는 시계가 멈춥니다</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[52rem] text-sm">
             <thead>
               <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
                 <th className="px-3 py-2">적용 대상</th>
-                {DWELL_STATUSES.map((s) => (
-                  <th key={s} className="px-2 py-2 whitespace-nowrap">{TICKET_STATUS_LABELS[s]}<span className="ml-1 text-[10px] opacity-60">{s}</span></th>
+                {GOAL_METRICS.map((g) => (
+                  <th key={g.metric} className="px-2 py-2 whitespace-nowrap" title={g.hint}>{g.label}</th>
                 ))}
+                <th className="px-2 py-2 whitespace-nowrap">도메인 기한</th>
                 <th className="px-2 py-2">저장</th>
               </tr>
             </thead>
             <tbody>
-              {sorted.map((p) => (
-                sevList.map((sev, si) => (
-                  <tr key={`${p.id}-${sev ?? 'all'}`} className={`border-b last:border-0 ${p.isActive ? '' : 'opacity-50'}`}>
+              {sorted.map((p) => {
+                const ddSupported = p.refTypes.length > 0 && p.refTypes.every((r) => masters?.domainDueRefTypes.includes(r))
+                const hasDd = p.targets.some((t) => t.metric === 'DOMAIN_DUE')
+                return sevList.map((sev, si) => (
+                  <tr key={`g-${p.id}-${sev ?? 'all'}`} className={`border-b last:border-0 ${p.isActive ? '' : 'opacity-50'}`}>
                     {si === 0 && (
                       <td rowSpan={sevList.length} className="px-3 py-2 align-top">
                         <div className="flex items-start gap-1.5">
@@ -419,71 +421,14 @@ export default function SlaMatrixTab() {
                               </button>
                               <button type="button" onClick={() => removePolicy(p)} className="text-[11px] text-red-400 hover:text-red-600">삭제</button>
                             </div>
+                            {/* 정책은 1개만 승리(병합 없음) → 이 행이 이기면 기본 행의 해결 목표는 적용되지 않는다 */}
+                            {!hasResolveGoal(p) && (
+                              <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                                ⚠ 해결 목표 없음 — 이 대상은 해결 SLA가 적용되지 않습니다(기본 행 값은 상속되지 않음)
+                              </p>
+                            )}
                           </div>
                         </div>
-                      </td>
-                    )}
-                    {DWELL_STATUSES.map((st) => (
-                      <td key={st} className="px-2 py-2">
-                        {advanced && <span className="mr-1 text-[10px] text-muted-foreground">{sev}</span>}
-                        {cellInput(p, 'DWELL', st, sev)}
-                      </td>
-                    ))}
-                    {si === 0 && (
-                      <td rowSpan={sevList.length} className="px-2 py-2 align-top">
-                        <div className="flex flex-col gap-1">
-                          <button type="button" onClick={() => saveRow(p)} disabled={busyRow === p.id}
-                            className="rounded-md bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-                            {busyRow === p.id ? '저장 중' : '행 저장'}
-                          </button>
-                          <button type="button" onClick={() => runPreview(p)} className="rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent">
-                            영향 보기
-                          </button>
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                ))
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {/* 화면 2 — 처리 목표 매트릭스 */}
-      <section className="rounded-xl border bg-card">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <h3 className="text-sm font-semibold text-foreground">처리 목표 (SLA)</h3>
-          <span className="text-xs text-muted-foreground">대기(PENDING) 상태에서는 시계가 멈춥니다</span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[52rem] text-sm">
-            <thead>
-              <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
-                <th className="px-3 py-2">적용 대상</th>
-                {GOAL_METRICS.map((g) => (
-                  <th key={g.metric} className="px-2 py-2 whitespace-nowrap" title={g.hint}>{g.label}</th>
-                ))}
-                <th className="px-2 py-2 whitespace-nowrap">도메인 기한</th>
-                <th className="px-2 py-2">저장</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((p) => {
-                const ddSupported = p.refTypes.length > 0 && p.refTypes.every((r) => masters?.domainDueRefTypes.includes(r))
-                const hasDd = p.targets.some((t) => t.metric === 'DOMAIN_DUE')
-                return sevList.map((sev, si) => (
-                  <tr key={`g-${p.id}-${sev ?? 'all'}`} className={`border-b last:border-0 ${p.isActive ? '' : 'opacity-50'}`}>
-                    {si === 0 && (
-                      <td rowSpan={sevList.length} className="px-3 py-2 align-top">
-                        <p className="text-sm font-medium text-foreground">{p.name}</p>
-                        <p className="text-xs text-muted-foreground">{scopeLabel(p, masters)}</p>
-                        {/* 정책은 1개만 승리(병합 없음) → 이 행이 이기면 기본 행의 해결 목표는 적용되지 않는다 */}
-                        {!hasResolveGoal(p) && (
-                          <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
-                            ⚠ 해결 목표 없음 — 이 대상은 해결 SLA가 적용되지 않습니다(기본 행 값은 상속되지 않음)
-                          </p>
-                        )}
                       </td>
                     )}
                     {GOAL_METRICS.map((g) => {
@@ -513,10 +458,15 @@ export default function SlaMatrixTab() {
                     )}
                     {si === 0 && (
                       <td rowSpan={sevList.length} className="px-2 py-2 align-top">
-                        <button type="button" onClick={() => saveRow(p)} disabled={busyRow === p.id}
-                          className="rounded-md bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-                          {busyRow === p.id ? '저장 중' : '행 저장'}
-                        </button>
+                        <div className="flex flex-col gap-1">
+                          <button type="button" onClick={() => saveRow(p)} disabled={busyRow === p.id}
+                            className="rounded-md bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                            {busyRow === p.id ? '저장 중' : '행 저장'}
+                          </button>
+                          <button type="button" onClick={() => runPreview(p)} className="rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent">
+                            영향 보기
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
