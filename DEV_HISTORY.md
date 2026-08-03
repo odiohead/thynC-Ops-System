@@ -4,7 +4,17 @@
 
 ---
 
-## 2026-08-03 | 영업현황 메뉴 재편 — 대시보드 A 메인화 + 컨셉 탭 5종 폐기 (dev2)
+## 2026-08-04 | 영업현황 메뉴 재편 PROD 배포 + dev2 PM2 복구
+
+- 커밋 `b67cfad` push → PROD `git pull`(`58f4486`→`b67cfad`) — 패키지·Prisma 변경 없음, 마이그레이션 불필요
+- **PROD DB DML 1건**(배포 필수): `UPDATE nav_menu_items SET href='/sales/dashboard' WHERE menu_key='sales'` (id=57, 배포 전 값 `/sales/deals` 기록). 이거 없으면 메뉴가 폐기 전 경로로 감
+- PROD 힙 4GB 빌드 → `pm2 restart thync-prod` (Ready 1.3s). 스모크: `/`·`/sales`·`/sales/dashboard`·`/sales/deals`·`/tickets`·`/hospitals`·`/wiki`·`/settings/notifications` 전부 307 정상, 외부 HTTPS 307, **재시작 후 신규 오류 0건**. 빌드 라우트에 `/sales2`·`/sales3`·`dashboard2`·`dashboard3` 없음 확인
+- **dev2 장애 복구**: 2026-08-03 20:17 WSL 재부팅으로 PM2 프로세스 전멸(`thync-dev`·`thync-collab`) — `dump.pm2`가 6/30자 빈 배열이라 자동 복구 실패. `.next` 삭제 후 재빌드(325 라우트) → 두 프로세스 재기동(3000·1234 리스닝, collab Ready) → **`pm2 save`로 dump 갱신**(재발 시 `pm2 resurrect` 가능). 재부팅이 앞선 빌드를 중단시킨 것일 뿐 소스·DB 손상 없음
+- 탭 라벨은 사용자 요청으로 `대시보드 A · 실적` → **`대시보드`** 확정 (README·아래 항목 반영)
+
+---
+
+## 2026-08-03 | 영업현황 메뉴 재편 — 대시보드 메인화 + 컨셉 탭 5종 폐기 (dev2)
 
 - 사용자 요청: 영업현황 메인을 실적 대시보드로 올리고, 컨셉 비교용으로 만들어 두었던 SUPER_ADMIN 전용 탭 5개를 영구 제거(재사용 계획 없음)
 - **탭 구조**: `SalesConceptTabs` 재작성 — 2개 탭(`대시보드`(/sales/dashboard) → `도입현황`(/sales/deals)), 대시보드가 첫 번째. SUPER_ADMIN 분기(`/api/auth/me` 조회·안내 문구) 전부 제거
