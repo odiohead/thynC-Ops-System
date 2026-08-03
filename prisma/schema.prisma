@@ -1636,17 +1636,19 @@ enum TicketSeverity {
 }
 
 model TicketQueue {
-  id          Int                   @id @default(autoincrement())
-  name        String                @unique
-  description String?
-  isActive    Boolean               @default(true) @map("is_active")
-  sortOrder   Int                   @default(0) @map("sort_order")
-  createdAt   DateTime              @default(now()) @map("created_at")
-  updatedAt   DateTime              @updatedAt @map("updated_at")
-  tickets     Ticket[]
-  ctiDefaults TicketCti[]           @relation("CtiDefaultQueue")
-  members     TicketQueueMember[]
-  domainRules TicketDomainCtiRule[] @relation("CtiRuleQueue")
+  id              Int                   @id @default(autoincrement())
+  name            String                @unique
+  description     String?
+  isActive        Boolean               @default(true) @map("is_active")
+  sortOrder       Int                   @default(0) @map("sort_order")
+  notifyChannelId Int?                  @map("notify_channel_id") // 그룹 알림 채널 (알림 v2 P2 — 할당·배정 알림 발송처)
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
+  notifyChannel   NotifyChannel?        @relation("QueueNotifyChannel", fields: [notifyChannelId], references: [id], onDelete: SetNull)
+  tickets         Ticket[]
+  ctiDefaults     TicketCti[]           @relation("CtiDefaultQueue")
+  members         TicketQueueMember[]
+  domainRules     TicketDomainCtiRule[] @relation("CtiRuleQueue")
 
   @@map("ticket_queues")
   @@schema("public")
@@ -1747,6 +1749,7 @@ model Ticket {
   closedAt        DateTime?            @map("closed_at")
   reopenCount     Int                  @default(0) @map("reopen_count")
   dueAt           DateTime?            @map("due_at")
+  notifySig       String?              @map("notify_sig") // 알림 변경 감지 시그니처 (v2 P1 — lib/notify.ts 전용)
   createdBy       String?              @map("created_by")
   createdAt       DateTime             @default(now()) @map("created_at")
   updatedAt       DateTime             @updatedAt @map("updated_at")
@@ -1874,6 +1877,8 @@ model NotifyChannel {
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
   routes         NotifyRoute[]
+  queues         TicketQueue[] @relation("QueueNotifyChannel") // 그룹 알림 채널 역참조 (v2 P2)
+  slaPolicies    SlaPolicy[]   @relation("SlaPolicyNotifyChannel") // 정책 알림 채널 역참조 (v2 P3)
 
   @@map("notify_channels")
   @@schema("public")
@@ -1916,10 +1921,12 @@ model SlaPolicy {
   queueIds    Int[]            @default([]) @map("queue_ids")
   ctiIds      Int[]            @default([]) @map("cti_ids") // 서브트리 상속
   severities  String[]         @default([])
-  clockType   String           @default("CALENDAR_24H") @map("clock_type") @db.VarChar(20) // CALENDAR_24H | BUSINESS_HOURS(1.1 미구현)
+  clockType   String           @default("CALENDAR_24H") @map("clock_type") @db.VarChar(20) // CALENDAR_24H 단일 (v2 P1 — 달력시간 확정)
+  notifyChannelId Int?          @map("notify_channel_id") // 정책별 SLA 초과 알림 채널 (v2 P3 — 없으면 SLA_BREACH 라우팅 폴백)
   isActive    Boolean          @default(true) @map("is_active")
   createdAt   DateTime         @default(now()) @map("created_at")
   updatedAt   DateTime         @updatedAt @map("updated_at")
+  notifyChannel NotifyChannel? @relation("SlaPolicyNotifyChannel", fields: [notifyChannelId], references: [id], onDelete: SetNull)
   targets     SlaTarget[]
   clocks      TicketSlaClock[]
 

@@ -7,7 +7,6 @@ import { sanitizeRichTextHtml } from '@/lib/richtext'
 import { generateTicketCode, addTicketEvent } from '@/lib/ticket'
 import { notifyTicketCreated } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
-import { getSlaRules, computeTicketDueAt } from '@/lib/delay-rules'
 
 export const dynamic = 'force-dynamic'
 
@@ -149,7 +148,7 @@ export async function POST(request: NextRequest) {
             ownerId,
             hospitalCode,
             parentId,
-            dueAt: computeTicketDueAt(await getSlaRules(), severity, new Date()), // Sev 기반 SLA (P11)
+            // dueAt은 SLA 시계(syncTicketDueAtCache)가 단일 소유 (v2 P1) — 생성 후 syncTicketClocksSafe가 채움
             status: ownerId ? 'ASSIGNED' : 'OPEN',
             createdBy: user.userId,
             participants: participantIds.length

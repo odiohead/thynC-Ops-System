@@ -711,12 +711,13 @@ prisma/
 - 매칭 의미론은 SLA 정책과 동일(축 간 AND, 배열 내부 OR, 빈 배열=전체)이나 **매칭된 규칙을 전부 실행**한다(다중 채널). 같은 채널 중복은 1건으로 합치고 멘션은 강한 쪽 채택. 규칙 0건이면 미발송 + `no_route` 스킵 로그
 - 시드 `scripts/seed-notify-routes.sql` — 기존 env 채널을 규칙 6행(등록·상태변경·그룹이관·Sev상향·일일요약 09:00·초과 즉시)으로 재현해 **배포 직후 동작이 1.0과 동일**
 
-### SLA 알림 발송 (1.1 P4 — §5.2·§5.3)
+### SLA 알림 발송 (v2 재편 — 초과·임박·전역 요약)
 
-- **초과 즉시 알림**: tick(기본 5분)마다 기한 지난 시계를 BREACHED로 확정하고, `notified_breach_at`이 NULL인 건만 발송 후 마킹 → **1회성 보장**. tick당 상한 `notify_breach_tick_cap`(기본 20)
-- **일 1회 요약**: 규칙별 `digestHour` 도달 + **KST 당일 발송 로그 없음**(`notification_logs.payload.digestRouteId`)일 때 1회 발송 → 서버 재시작·재배포에도 중복되지 않는다(1.0 `setInterval` 24h의 약점 해소). 본문은 Assignment Group·유형별 섹션 + 섹션 상한
-- **스케줄러**: `notify_tick_interval`(off·1m·5m·10m·15m, 기본 5m) — 1.0의 `notify_delay_interval`이 'off'였던 환경은 tick도 off로 시작(의도치 않은 발송 방지). 설정 저장 시 재시작 없이 즉시 반영
-- 1.0의 지연 채널 요약(12시간 dedup)·`runDelayNotifications`는 제거. SLA 초과 owner DM은 `runSlaOwnerDms`로 분리해 tick에서 호출
+- **초과 즉시 알림**: tick(기본 5분)마다 기한 지난 시계를 BREACHED로 확정하고, `notified_breach_at`이 NULL인 건만 발송 후 마킹 → **1회성 보장 + 재시작·미스 캐치업**. tick당 상한 `notify_breach_tick_cap`(기본 20)
+- **발송 채널 (v2 P3)**: **정책별 채널(`sla_policies.notify_channel_id`) 우선**, 없으면 `SLA_BREACH`/`SLA_WARNING` 라우팅 규칙 폴백
+- **임박(WARNING) 알림 (v2 P3 신규 배선)**: `warnRatio`(기본 80%) 경과 시점 1회 발송(`notified_warn_at` 마킹) — 1.1에서 상수·컬럼만 있고 발송 코드가 없던 결함 해소
+- **전역 일일 요약 (v2 P4)**: 구 규칙별 DAILY_DIGEST를 폐기하고 **AppSetting `notify_digest_hour`(KST) + `notify_digest_channel_id` 전역 1건**으로 단순화. KST 당일 발송 로그(payload.digestRouteId=0)로 하루 1회 보장. 본문은 초과·임박 × Assignment Group 섹션
+- **스케줄러**: `notify_tick_interval`(off·1m·5m·10m·15m, 기본 5m) — 설정 저장 시 재시작 없이 즉시 반영. Slack off여도 초과 확정·내부 알림은 진행(v2 F4 — 채널 발송만 mode_off 스킵)
 
 ### 시스템 내부 알림 (1.1 P5 — `projects/notification_v1.1_design.md` §6)
 
@@ -1081,19 +1082,17 @@ prisma/
 - 후보: SEERS 소속·활성·해당 풀 미등록 사용자만 표시
 - 목록 테이블: 번호·이름·이메일·소속·부서·추가일·삭제
 
-### Slack 알림 (P11 재편, 2026-07-24 — 티켓 이벤트 단일 파이프라인)
-- **이벤트 소스 = 티켓 레이어**: 순수 티켓·도메인 업무(유지보수/기타/답사/설치계획/프로젝트) 모두 티켓 mutation에서 알림 발생(`lib/notify.ts` `notifyTicketCreated`/`notifyTicketChanged`). 도메인 라우트는 저장 후 티켓 알림만 호출 — 이중 발송 구조 없음
-- 전송 어댑터 `lib/slack.ts`(의존성0 fetch) + 정책·로그 `lib/notify.ts`. 발송 실패는 업무 API를 절대 깨지 않는 best-effort
-- **발송 모드** (`SLACK_NOTIFY_MODE`): `off` / `test`(전부 테스트 채널 + `[DEV]` prefix, 비-production은 live 자동 강등) / `live`. DEV는 항상 test
-- **게이트**: AppSetting `notify_enabled`(기본 off) + `notify_events_enabled`(기본 on) + **업무 타입별 `notify_types_enabled`**(refType 기준, 끈 타입은 전 알림 미발송). 채널은 `SLACK_CHANNEL_MAIN` 단일
-- **변경 감지 (sig v2)**: `v2|status|owner|sev|queue` 시그니처를 직전 발송 로그(refCode=티켓번호)와 비교 — 상태·큐 변경, Sev1·2 에스컬레이션은 채널 발송(복합 변경 1메시지), owner 변경은 **배정 DM**(`notify_assign_dm` 기본 on), 그 외는 조용히 기준선 갱신. 등록 알림은 티켓번호당 1회 dedup
-- 메시지(티켓 중심 통일): 이모지+`[유형] TK-번호 · Sev · 큐` 헤더 + 티켓 상세 링크(+도메인 상세 링크 병기) + 변경 축(Status/Queue/Severity from→to) + **타입별 선택 필드**(설정). 담당자 필드는 Slack 태그 — 계정 발송 플래그 on+매핑 성공자만, 그 외 이름 폴백
-- **Sev1·2 강조**: Sev1 = 🚨+`<!channel>` / Sev2 = 🔥. **큐 멤버 멘션**(`ticket_queue_members`): 생성·큐 이관·에스컬레이션 시 해당 큐 멤버 태그(멤버 0명이면 멘션 없이 발송)
-- **SLA 요약** (스케줄러): 주기(`notify_delay_interval` off/1h/6h/24h)로 열린 티켓의 dueAt 점검 → 초과(⏰)/임박(D-N, `warnDays`)/상태 체류(`notify_status_dwell`, 티켓 상태별·기본 미사용) 3섹션 요약을 지연 채널로(섹션당 10건 캡, 12h 동일 멤버십 스킵). PENDING은 SLA 판정 제외(체류 규칙으로 커버). SEV5 전체 제외. 판정은 `lib/delay-rules.ts` `findDelayedTickets`
-- **SLA 초과 owner DM**: `notify_dm_enabled`(기본 off) — 초과 티켓의 owner에게 개인 DM(같은 건·같은 사람 24h 1회, 해소 시까지). 매핑은 계정 이메일 lookup 후 `users.slack_user_id` 캐시. test 모드는 테스트 채널로 `[DEV][DM→이름]`
-- **RESOLVED 자동 종결**: `ticket_auto_close_days`(기본 0=끔) 경과한 RESOLVED 티켓을 스케줄러 주기에서 자동 CLOSED(열린 서브 있으면 스킵, Slack 미발송·타임라인 이벤트만) — `lib/ticketDomain.ts` `runTicketAutoClose`
-- **설정 페이지 `/settings/notifications`** (ADMIN 이상): 발송 모드(읽기전용) + 전역/이벤트 토글 + 업무별 on/off + **이벤트별 채널 알림 토글**(등록/상태 변경/큐 이관/Sev1·2 상향 — `notify_event_toggles`) + **큐 멤버 멘션·Sev1 @channel 토글**(`notify_queue_mentions`/`notify_sev1_channel`) + SLA 요약 주기·초과 DM·배정 DM 토글 + **SLA 목표(Sev별)·임박 D-N·자동종결 N일 편집**(`notify_sla_rules`/`ticket_auto_close_days`) + **상태 체류 기준(티켓 상태별)** + 타입별 메시지 필드 선택 + 발송 이력(최근 50건·상태 필터)
-- **계정별 발송 차단**: `users.slackNotifyEnabled=false`인 계정은 DM·멘션 미발송(계정관리에서 제어)
+### Slack 알림 (v2 재편, 2026-08-03 — `projects/notification_v2_design.md`)
+- **이벤트 소스 = 티켓 레이어** (P11 유지): 순수 티켓·도메인 업무 모두 티켓 mutation에서 알림 발생(`lib/notify.ts` `notifyTicketCreated`/`notifyTicketChanged`). 도메인 라우트는 저장 후 티켓 알림만 호출 — 이중 발송 구조 없음
+- **발송 모드는 env 소유** (`SLACK_NOTIFY_MODE`): `off` / `test`(전량 테스트 채널로 리라우팅 + **`[DEV→#원채널명]` 표식** — 라우팅 검증 가능, 비-production은 live 자동 강등) / `live`. 채널·정책은 전부 DB(설정 화면) — PROD 데이터 동기화로 DEV에 실채널 ID가 복사돼도 모드 게이트가 오발송을 차단
+- **DM 폐기 (v2)**: 배정 DM·SLA 초과 owner DM 제거. 대신 **채널 메시지에 담당자 @멘션**(`<@Uxxx>`, 이메일 lookup + `users.slack_user_id` 캐시, 매핑 실패 시 이름 폴백). `slackNotifyEnabled=false`도 채널 멘션은 발송(DM 아님)
+- **그룹 알림 채널** (`ticket_queues.notify_channel_id`): Assignment Group마다 채널 지정 — 생성·배정·이관·상태변경 알림이 라우팅 규칙 매칭 채널과 **병합 발송**(같은 채널 1건). **'개인 업무' 그룹은 채널 알림 제외**(`personal_queue` 스킵 로그). 그룹 관리 화면에서 채널 지정+테스트 발송
+- **변경 감지 (sig)**: `v2|status|owner|sev|queue` 시그니처를 **`tickets.notify_sig` 컬럼**과 비교(v2 — 로그 의존 제거, 로그 purge에 안전). 상태·큐 변경, Sev1·2 에스컬레이션, **담당자 배정**(`assigned` 토글)은 채널 발송(복합 변경 1메시지), 그 외는 조용히 기준선 갱신
+- 메시지(티켓 중심 통일): 이모지+`[유형] TK-번호 · Sev · 큐` 헤더 + 티켓 상세 링크(+도메인 상세 링크) + 변경 축(Status/Queue/Severity/Assignee) + **타입별 선택 필드**(카탈로그 유지)
+- **Sev1·2 강조**: Sev1 = 🚨+`<!channel>` / Sev2 = 🔥. 큐 멤버 멘션(`notify_queue_mentions`) 유지
+- **RESOLVED 자동 종결**: `ticket_auto_close_days`(기본 0=끔) — `runTicketAutoClose`, tick 주기 실행
+- **설정 페이지 `/settings/notifications`** (ADMIN 이상) 3탭: ① **SLA 정책**(정책×타깃 매트릭스 + CTI 스코프 + 정책별 알림 채널) ② **채널·발송 규칙**(notify_channels CRUD·테스트 발송 + 이벤트 라우팅) ③ **전역·이력**(전역/이벤트/타입 토글 · tick 주기·상한 · **전역 SLA 요약 시각+채널** · 자동종결 · 메시지 필드 · 발송 이력)
+- 폐기(v2 P1): `lib/delay-rules.ts`(구 지연 판정 — SLA 시계로 일원화), 배정/SLA DM, `notify_delay_interval`·`notify_dm_*`·`notify_assign_dm`·`notify_sla_rules`·`notify_status_dwell` 설정 키, `SLACK_CHANNEL_MAIN`·`sendConnectionTest`
 
 ### 사내 위키 (Phase 2-13)
 - Notion-like 블록 에디터(BlockNote) 기반 사내 위키

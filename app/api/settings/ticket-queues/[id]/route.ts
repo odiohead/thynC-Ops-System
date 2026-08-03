@@ -18,7 +18,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if (!before) return NextResponse.json({ error: 'Assignment Group을 찾을 수 없습니다.' }, { status: 404 })
 
   const body = await request.json()
-  const data: { name?: string; description?: string | null; sortOrder?: number; isActive?: boolean } = {}
+  const data: { name?: string; description?: string | null; sortOrder?: number; isActive?: boolean; notifyChannelId?: number | null } = {}
   if (typeof body.name === 'string') {
     const name = body.name.trim()
     if (!name) return NextResponse.json({ error: '그룹 이름을 입력하세요.' }, { status: 400 })
@@ -29,6 +29,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if (body.description !== undefined) data.description = typeof body.description === 'string' ? body.description.trim() || null : null
   if (typeof body.sortOrder === 'number') data.sortOrder = body.sortOrder
   if (typeof body.isActive === 'boolean') data.isActive = body.isActive
+  // 그룹 알림 채널 (v2 P2) — null이면 해제, 지정 시 채널 존재 검증
+  if (body.notifyChannelId !== undefined) {
+    if (body.notifyChannelId === null) data.notifyChannelId = null
+    else {
+      const chId = Math.floor(Number(body.notifyChannelId))
+      if (!Number.isFinite(chId)) return NextResponse.json({ error: '잘못된 채널입니다.' }, { status: 400 })
+      const ch = await prisma.notifyChannel.findUnique({ where: { id: chId }, select: { id: true } })
+      if (!ch) return NextResponse.json({ error: '존재하지 않는 채널입니다.' }, { status: 400 })
+      data.notifyChannelId = chId
+    }
+  }
 
   const queue = await prisma.ticketQueue.update({ where: { id }, data })
 

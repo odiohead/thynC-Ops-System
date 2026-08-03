@@ -2,11 +2,18 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { PERSONAL_QUEUE_NAME } from '@/lib/ticket-shared'
 
 interface QueueMember {
   id: number
   userId: string
   user: { id: string; name: string }
+}
+
+interface NotifyChannelOpt {
+  id: number
+  name: string
+  slackChannelId: string
 }
 
 interface Queue {
@@ -16,6 +23,7 @@ interface Queue {
   isActive: boolean
   sortOrder: number
   members: QueueMember[]
+  notifyChannel: NotifyChannelOpt | null
   _count: { tickets: number }
 }
 
@@ -42,6 +50,9 @@ export default function TicketQueuesSettingsPage() {
 
   const [busy, setBusy] = useState(false)
 
+  // 알림 채널 목록 (v2 P2)
+  const [channels, setChannels] = useState<NotifyChannelOpt[]>([])
+
   // 멤버 관리 모달
   const [users, setUsers] = useState<AppUser[]>([])
   const [memberQueue, setMemberQueue] = useState<Queue | null>(null)
@@ -60,7 +71,43 @@ export default function TicketQueuesSettingsPage() {
     fetch('/api/users')
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => setUsers((Array.isArray(d) ? d : []).filter((u: AppUser) => u.isActive)))
+    // 알림 채널 목록 (v2 P2 — 그룹별 알림 채널 지정용, 채널 마스터는 알림 설정에서 관리)
+    fetch('/api/settings/notify-routes')
+      .then((r) => (r.ok ? r.json() : { channels: [] }))
+      .then((d) => setChannels((d.channels ?? []).filter((c: NotifyChannelOpt & { isActive?: boolean }) => c.isActive !== false)))
   }, [])
+
+  async function handleChannelChange(q: Queue, value: string) {
+    setBusy(true)
+    const res = await fetch(`/api/settings/ticket-queues/${q.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notifyChannelId: value ? Number(value) : null }),
+    })
+    if (res.ok) {
+      router.refresh()
+      await fetchQueues()
+    } else {
+      showError((await res.json()).error)
+    }
+    setBusy(false)
+  }
+
+  async function handleTestChannel(channelId: number) {
+    setBusy(true)
+    const res = await fetch('/api/settings/notify-routes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'test', channelId }),
+    })
+    if (res.ok) {
+      const d = await res.json()
+      alert(`테스트 발송 완료. ${d.note ?? ''}`)
+    } else {
+      showError((await res.json()).error)
+    }
+    setBusy(false)
+  }
 
   function openMemberModal(q: Queue) {
     setMemberQueue(q)
@@ -219,6 +266,7 @@ export default function TicketQueuesSettingsPage() {
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Name</th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Description</th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Members</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">알림 채널</th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Active</th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Tickets</th>
                 <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">관리</th>
@@ -227,11 +275,11 @@ export default function TicketQueuesSettingsPage() {
             <tbody className="divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td>
+                  <td colSpan={8} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td>
                 </tr>
               ) : queues.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-sm text-gray-400">등록된 Assignment Group이 없습니다.</td>
+                  <td colSpan={8} className="py-12 text-center text-sm text-gray-400">등록된 Assignment Group이 없습니다.</td>
                 </tr>
               ) : (
                 queues.map((q, index) => (
@@ -317,6 +365,34 @@ export default function TicketQueuesSettingsPage() {
                           멤버 관리
                         </button>
                       </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {q.name === PERSONAL_QUEUE_NAME ? (
+                        <span className="text-xs text-gray-400" title="개인 업무 그룹은 채널 알림에서 제외됩니다">채널 알림 제외</span>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <select
+                            value={q.notifyChannel?.id ?? ''}
+                            onChange={(e) => handleChannelChange(q, e.target.value)}
+                            disabled={busy}
+                            className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+                          >
+                            <option value="">없음</option>
+                            {channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                          {q.notifyChannel && (
+                            <button
+                              type="button"
+                              onClick={() => handleTestChannel(q.notifyChannel!.id)}
+                              disabled={busy}
+                              title="이 채널로 테스트 메시지 발송"
+                              className="rounded-md border border-gray-300 px-2 py-0.5 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100 disabled:opacity-50"
+                            >
+                              테스트
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <button

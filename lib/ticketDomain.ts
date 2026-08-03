@@ -9,7 +9,6 @@
 import { Prisma, TicketStatus, TicketSeverity } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { generateTicketCode, addTicketEvent } from '@/lib/ticket'
-import { getSlaRules, computeTicketDueAt } from '@/lib/delay-rules'
 import {
   resolveDomainTicketRule,
   resolveDomainQueueId,
@@ -248,7 +247,6 @@ export async function createTicketForMaintenance(
   const statusMap = await getStatusMapping(tx, m.statusId)
   const status = mappedTicketStatus(statusMap, !!ownerId, () => maintStatusToTicket(m.statusName, !!ownerId))
   const severity = priorityToSeverity(m.priority)
-  const slaAnchor = via === 'backfill' ? m.createdAt : new Date()
 
   let pendingReasonId: number | null = null
   let pendingNote: string | null = null
@@ -272,7 +270,6 @@ export async function createTicketForMaintenance(
       ownerId,
       hospitalCode: m.hospitalCode,
       refType: 'MAINTENANCE',
-      dueAt: computeTicketDueAt(await getSlaRules(), severity, slaAnchor),
       pendingReasonId,
       pendingNote,
       createdAt: via === 'backfill' ? m.createdAt : undefined,
@@ -331,7 +328,6 @@ export async function syncMaintenanceToTicket(tx: Prisma.TransactionClient, main
   }
   if (nextSev !== ticket.severity) {
     data.severity = nextSev
-    data.dueAt = computeTicketDueAt(await getSlaRules(), nextSev, ticket.createdAt) // Sev 변경 → SLA 재산정
     await addTicketEvent(tx, ticket.id, 'sev_change', actorId, { from: ticket.severity, to: nextSev, via: 'domain_sync' })
   }
   if (nextCti && nextCti !== ticket.ctiId) {
@@ -682,7 +678,6 @@ export async function createTicketForInstallPlan(
       ownerId,
       hospitalCode: ip.hospitalCode,
       refType: 'INSTALL_PLAN',
-      dueAt: computeTicketDueAt(await getSlaRules(), 'SEV4', via === 'backfill' ? ip.createdAt : new Date()),
       pendingReasonId,
       pendingNote,
       createdAt: via === 'backfill' ? ip.createdAt : undefined,
@@ -861,7 +856,6 @@ export async function createTicketForSiteVisit(
       ownerId,
       hospitalCode: s.hospitalCode,
       refType: 'SITE_VISIT',
-      dueAt: computeTicketDueAt(await getSlaRules(), 'SEV4', via === 'backfill' ? s.createdAt : new Date()),
       pendingReasonId,
       pendingNote,
       createdAt: via === 'backfill' ? s.createdAt : undefined,
@@ -999,7 +993,6 @@ export async function createTicketForEtcTask(
   const statusMap = await getStatusMapping(tx, e.statusId)
   const status = mappedTicketStatus(statusMap, !!ownerId, () => maintStatusToTicket(e.statusName, !!ownerId)) // 폴백 상태 체계 동일 (접수/처리중/완료/보류)
   const severity = priorityToSeverity(e.priority)
-  const slaAnchor = via === 'backfill' ? e.createdAt : new Date()
 
   let pendingReasonId: number | null = null
   let pendingNote: string | null = null
@@ -1023,7 +1016,6 @@ export async function createTicketForEtcTask(
       ownerId,
       hospitalCode: e.hospitalCodes[0] ?? null,
       refType: 'ETC',
-      dueAt: computeTicketDueAt(await getSlaRules(), severity, slaAnchor),
       pendingReasonId,
       pendingNote,
       createdAt: via === 'backfill' ? e.createdAt : undefined,
@@ -1072,7 +1064,6 @@ export async function syncEtcTaskToTicket(tx: Prisma.TransactionClient, etcTaskI
   }
   if (nextSev !== ticket.severity) {
     data.severity = nextSev
-    data.dueAt = computeTicketDueAt(await getSlaRules(), nextSev, ticket.createdAt) // Sev 변경 → SLA 재산정
     await addTicketEvent(tx, ticket.id, 'sev_change', actorId, { from: ticket.severity, to: nextSev, via: 'domain_sync' })
   }
   if (ownerId !== ticket.ownerId) {

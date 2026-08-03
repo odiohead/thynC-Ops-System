@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-08-03 | 알림 v2 — 티켓 단일 소스 재편 P1~P5 구현 (dev2, PROD 배포 대기)
+
+- 설계: `projects/notification_v2_design.md` (사용자 확정 11건 — 티켓 축 일원화·env 발송모드·달력시간·DM 폐기·채널ID+표시명·전역 요약 등)
+- **P1 정리**: `lib/delay-rules.ts` 삭제(판정은 SLA 시계 단일 소스, `refTypeToTaskType`은 notifyFields로 이동) · 배정/SLA owner DM 폐기 · `tickets.due_at` SLA 단일 소유(구 Sev 규칙 계산 8곳 제거, 시계 없으면 NULL 정리) · sig를 `tickets.notify_sig` 컬럼으로 이전(마이그레이션+709건 백필, 로그 purge 안전) · 결함 수정: 설정 저장 시 tick 5m 리셋(F3), Slack off 시 SLA 내부 알림 차단(F4), 로그 필터 ticket_assigned 누락(F5) · BUSINESS_HOURS 옵션 제거 · `sendConnectionTest`/`SLACK_CHANNEL_MAIN`/`notify_delay_interval` 제거
+- **P2 그룹 채널**: `ticket_queues.notify_channel_id` 신설 — 그룹 관리 화면에서 채널 지정+테스트 발송, 생성/변경 알림에 라우팅 채널과 병합 발송, '개인 업무' 그룹 채널 알림 제외, 담당자 채널 @멘션(구 DM 대체, `assigned` 이벤트 토글 신설), test 모드 `[DEV→#원채널명]` 표식
+- **P3 SLA 정책**: `sla_policies.notify_channel_id` 신설(초과·임박 발송 채널, 없으면 라우팅 폴백) · SLA 정책 탭에 CTI 스코프 선택(하위 상속)·정책별 채널 셀렉트 추가 · **SLA_WARNING 임박 알림 배선**(warnRatio 경과 1회, `notified_warn_at` — 1.1의 미배선 결함 해소)
+- **P4 전역 요약**: 규칙별 DAILY_DIGEST 폐기 → AppSetting `notify_digest_hour`+`notify_digest_channel_id` 전역 1건 (전역 탭에서 시각·채널 지정)
+- **P5**: 설정 탭 재편(SLA 정책|채널·발송 규칙|전역·이력 — 구 Sev별 SLA·상태체류·DM 카드 제거, tick 주기·상한·요약 설정 추가) · 정리 마이그레이션(구 설정 키 삭제·DIGEST 규칙 비활성) · `seed-notify-routes.sql` v2 갱신 · `.env.example` Slack 변수 문서화
+- 마이그레이션 3건(전부 추가형/정리형): `20260803150000_ticket_notify_sig` / `20260803153000_notify_v2_channels` / `20260803160000_notify_v2_cleanup`
+- tsc 0오류 · dev2 빌드(146 라우트)·PM2 재시작·스모크 정상. **PROD 미반영** — 사용자 확인 후 일괄 배포 예정
+- 영향 파일: lib/{notify.ts, notify-scheduler.ts, sla.ts, sla-alerts.ts, notifyFields.ts, slaSettings.ts, ticketDomain.ts}, app/api/tickets/{route.ts,[id]/route.ts}, app/api/settings/{notifications/**, sla-policies/**, ticket-queues/**, notify-routes/route.ts}, app/settings/{notifications/**, ticket-queues/page.tsx}, prisma/{schema.prisma, migrations/…3건}, scripts/seed-notify-routes.sql, .env.example, README.md
+
+---
+
 ## 2026-08-03 | 티켓 개인 업무 지원 — '개인 업무' 그룹 + 생성 폼 토글 (dev2·PROD)
 
 - 배경: 티켓 생성이 CTI→Assignment Group 전제라 개인 단위 업무를 담을 곳이 없었음. 방안 검토(queueId nullable/개인그룹 1개/사용자별 그룹) 후 **시스템 그룹 1개 방안 확정**(사용자) — AWS SIM 철학(개인 업무 = 그룹 무소속이 아니라 본인 즉시 배정)과 일치, 스키마 변경 0

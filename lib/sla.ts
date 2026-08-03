@@ -467,7 +467,11 @@ async function syncTicketDueAtCache(ticketId: number): Promise<void> {
     select: { metric: true, dueAt: true },
   })
   const pick = clocks.find((c) => c.metric === 'DOMAIN_DUE') ?? clocks.find((c) => c.metric === 'RESOLVE')
-  if (!pick) return
+  if (!pick) {
+    // 시계 없음 → due_at 비움 (v2 P1 — SLA가 due_at 단일 소유. 구 Sev 규칙 잔존값 정리 포함)
+    await prisma.$executeRaw`UPDATE tickets SET due_at = NULL WHERE id = ${ticketId} AND due_at IS NOT NULL`
+    return
+  }
   const iso = pick.dueAt.toISOString()
   await prisma.$executeRaw`
     UPDATE tickets

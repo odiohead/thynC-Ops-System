@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   const logs = await prisma.notificationLog.findMany({
     where: {
       ...(status && ['sent', 'failed', 'skipped'].includes(status) ? { status } : {}),
-      ...(eventType && ['task_created', 'task_status_changed', 'delayed'].includes(eventType) ? { eventType } : {}),
+      ...(eventType && ['task_created', 'task_status_changed', 'delayed', 'ticket_assigned'].includes(eventType) ? { eventType } : {}),
     },
     orderBy: { id: 'desc' },
     take: limit,

@@ -45,6 +45,18 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     if (err) return NextResponse.json({ error: err }, { status: 400 })
   }
 
+  // 정책별 초과 알림 채널 (v2 P3) — undefined면 유지, null이면 해제, 지정 시 존재 검증
+  let channelUpdate: { notifyChannelId: number | null } | Record<string, never> = {}
+  if (body.notifyChannelId !== undefined) {
+    if (body.notifyChannelId === null) channelUpdate = { notifyChannelId: null }
+    else {
+      const chNum = Math.floor(Number(body.notifyChannelId))
+      const ch = Number.isFinite(chNum) ? await prisma.notifyChannel.findUnique({ where: { id: chNum }, select: { id: true } }) : null
+      if (!ch) return NextResponse.json({ error: '존재하지 않는 채널입니다.' }, { status: 400 })
+      channelUpdate = { notifyChannelId: ch.id }
+    }
+  }
+
   const updated = await prisma.$transaction(async (tx) => {
     await tx.slaPolicy.update({
       where: { id },
@@ -53,6 +65,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         ...(typeof body.description === 'string' ? { description: body.description } : {}),
         ...(Number.isFinite(body.priority) ? { priority: Math.floor(body.priority) } : {}),
         ...(typeof body.isActive === 'boolean' ? { isActive: body.isActive } : {}),
+        ...channelUpdate,
         ...scope,
       },
     })

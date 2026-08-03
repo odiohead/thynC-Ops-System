@@ -10,7 +10,7 @@ import { SLA_METRICS, type SlaMetric } from '@/lib/sla'
 
 export const TICKET_STATUSES = Object.values(TicketStatus) as string[]
 export const TICKET_SEVERITIES = Object.values(TicketSeverity) as string[]
-export const CLOCK_TYPES = ['CALENDAR_24H', 'BUSINESS_HOURS'] as const
+export const CLOCK_TYPES = ['CALENDAR_24H'] as const // v2 P1: BUSINESS_HOURS 제거 (달력시간 확정 — 엔진 미구현 옵션이었음)
 /** DOMAIN_DUE를 걸 수 있는 refType — 앵커 필드가 코드에 고정된 것만 (§4.2) */
 export const DOMAIN_DUE_REF_TYPES = ['PROJECT', 'SITE_VISIT', 'INSTALL_PLAN'] as const
 

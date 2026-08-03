@@ -13,10 +13,10 @@
 
 import { prisma } from '@/lib/prisma'
 import { getSlackMode } from '@/lib/slack'
-import { dispatchToChannel, getTypesEnabled, runSlaOwnerDms, type TaskType } from '@/lib/notify'
-import { resolveChannels, listDigestRoutes, type DigestOpts } from '@/lib/notify-routes'
+import { dispatchToChannel, getTypesEnabled, type TaskType } from '@/lib/notify'
+import { resolveChannels, type DigestOpts } from '@/lib/notify-routes'
 import { findSlaRisk, formatDuration, SLA_METRIC_LABELS, type SlaMetric, type SlaRiskItem } from '@/lib/sla'
-import { refTypeToTaskType } from '@/lib/delay-rules'
+import { refTypeToTaskType } from '@/lib/notifyFields'
 import { emitNotification, ticketRecipients } from '@/lib/notify-center'
 import { TASK_TYPE_LABELS } from '@/lib/notifyFields'
 import { TICKET_SEVERITY_LABELS } from '@/lib/ticket-shared'
@@ -62,6 +62,8 @@ function kstYmd(now = new Date()): string {
 
 const CLOCK_TICKET_SELECT = {
   metric: true, statusScope: true, dueAt: true, thresholdMin: true,
+  // 정책별 초과 알림 채널 (v2 P3) — 지정 시 라우팅보다 우선
+  policy: { select: { notifyChannel: { select: { id: true, name: true, slackChannelId: true, isActive: true } } } },
   ticket: {
     select: {
       id: true, ticketCode: true, title: true, status: true, severity: true, refType: true,
@@ -72,6 +74,21 @@ const CLOCK_TICKET_SELECT = {
     },
   },
 } as const
+
+/** 시계의 발송 채널 결정 (v2 P3) — 정책 채널 우선, 없으면 이벤트 라우팅 폴백 */
+async function clockChannels(
+  c: { policy: { notifyChannel: { id: number; name: string; slackChannelId: string; isActive: boolean } | null } | null; metric: string },
+  t: { refType: string | null; queueId: number; ctiId: number | null; severity: TicketSeverity },
+  event: 'SLA_BREACH' | 'SLA_WARNING'
+) {
+  const pc = c.policy?.notifyChannel
+  if (pc && pc.isActive) {
+    return [{ channelId: pc.id, channelName: pc.name, slackChannelId: pc.slackChannelId, mentionMode: 'none' as const, routeIds: [] }]
+  }
+  return resolveChannels([event], {
+    refType: t.refType, queueId: t.queueId, ctiId: t.ctiId, severity: t.severity, metric: c.metric,
+  })
+}
 
 function breachMessage(args: {
   ticketCode: string
@@ -153,10 +170,7 @@ export async function runSlaBreachAlerts(): Promise<{ marked: number; sent: numb
     const allowed = types[taskType]
     if (allowed) {
       const overdueMin = Math.max(0, (now.getTime() - c.dueAt.getTime()) / 60_000)
-      const channels = await resolveChannels(['SLA_BREACH'], {
-        refType: t.refType, queueId: t.queueId, ctiId: t.ctiId, severity: t.severity,
-        metric: c.metric,
-      })
+      const channels = await clockChannels(c, t, 'SLA_BREACH')
       if (channels.length === 0) {
         await prisma.ticketSlaClock.update({ where: { id: c.id }, data: { notifiedBreachAt: now } })
         continue
@@ -202,6 +216,92 @@ export async function runSlaBreachAlerts(): Promise<{ marked: number; sent: numb
   }
 
   return { marked: overdue.length, sent, pending: pendingAll }
+}
+
+// ─────────────────────────────────────────────────────────────
+// ①-b 임박(WARNING) 알림 (v2 P3 — F2 배선. 1.1에서 상수·컬럼만 있고 발송 코드가 없던 것)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * warnRatio(기본 80%) 경과 시점에 1회 알림. `notified_warn_at`으로 1회성 보장.
+ * 채널은 초과 알림과 동일 규칙(정책 채널 우선 → SLA_WARNING 라우팅 폴백) —
+ * 라우팅 규칙도 정책 채널도 없으면 발송하지 않는다(마킹만).
+ */
+export async function runSlaWarnAlerts(): Promise<{ sent: number }> {
+  const now = new Date()
+  const cap = await breachTickCap()
+
+  const candidates = await prisma.ticketSlaClock.findMany({
+    where: {
+      state: 'RUNNING',
+      notifiedWarnAt: null,
+      dueAt: { gt: now },
+      ticket: { status: { notIn: ['RESOLVED', 'CLOSED'] } },
+    },
+    select: { id: true, target: { select: { warnRatio: true } }, ...CLOCK_TICKET_SELECT },
+    orderBy: { dueAt: 'asc' },
+    take: cap * 5,
+  })
+
+  const types = await getTypesEnabled()
+  let sent = 0
+
+  for (const c of candidates) {
+    if (sent >= cap) break
+    const warnRatio = c.target?.warnRatio ?? 80
+    // 임박 시점 = 기한 - 목표시간의 (100-warnRatio)% (정지 누적은 dueAt에 이미 반영돼 있음)
+    const warnAt = new Date(c.dueAt.getTime() - c.thresholdMin * 60_000 * (1 - warnRatio / 100))
+    if (now < warnAt) continue
+
+    const t = c.ticket
+    const taskType = refTypeToTaskType(t.refType)
+    if (types[taskType]) {
+      const remainMin = Math.max(0, (c.dueAt.getTime() - now.getTime()) / 60_000)
+      const channels = await clockChannels(c, t, 'SLA_WARNING')
+      if (channels.length > 0) {
+        const metricLabel = SLA_METRIC_LABELS[c.metric as SlaMetric] + (c.statusScope ? `(${c.statusScope})` : '')
+        const base = process.env.NEXT_PUBLIC_APP_URL || ''
+        const name = [t.hospital?.hospitalName, t.title].filter(Boolean).join(' — ') || t.ticketCode
+        for (const ch of channels) {
+          await dispatchToChannel({
+            intendedChannel: ch.slackChannelId,
+            channelName: ch.channelName,
+            routeIds: ch.routeIds,
+            eventType: 'delayed',
+            taskType,
+            refCode: t.ticketCode,
+            text: `⏳ SLA 임박 [${TASK_TYPE_LABELS[taskType]}] ${t.ticketCode} ${name} — ${metricLabel} 남은 시간 ${formatDuration(remainMin)}`,
+            blocks: [{
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: [
+                  `:hourglass_flowing_sand: *SLA 임박* — *[${TASK_TYPE_LABELS[taskType]}] ${t.ticketCode}* · ${sevShort(t.severity)} · ${t.queue.name}`,
+                  `<${base}/tickets/${t.ticketCode}|${name}>`,
+                  `:dart: ${metricLabel} 기한까지 *${formatDuration(remainMin)}* 남음 (${warnRatio}% 경과)`,
+                  `:bust_in_silhouette: 담당 ${t.owner?.name ?? '미배정'}`,
+                ].join('\n'),
+              },
+            }],
+            sig: `warn|${c.metric}|${c.statusScope ?? ''}`,
+          })
+        }
+        sent++
+      }
+      // 내부 알림 — Slack 여부와 무관하게 적재
+      await emitNotification({
+        kind: 'SLA_WARNING',
+        userIds: await ticketRecipients(t.id),
+        title: `SLA 임박 — ${t.ticketCode} ${SLA_METRIC_LABELS[c.metric as SlaMetric]} 기한 임박`,
+        body: [t.hospital?.hospitalName, t.title].filter(Boolean).join(' — ') || t.ticketCode,
+        link: `/tickets/${t.ticketCode}`,
+        ticketId: t.id, refType: t.refType, refCode: t.ticketCode, severity: t.severity,
+        dedupKey: `warn:${c.id}`,
+      })
+    }
+    await prisma.ticketSlaClock.update({ where: { id: c.id }, data: { notifiedWarnAt: now } })
+  }
+  return { sent }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -258,85 +358,82 @@ export function buildDigestMessage(items: SlaRiskItem[], opts: DigestOpts, route
   }
 }
 
+const GLOBAL_DIGEST_OPTS: DigestOpts = { kinds: ['overdue', 'warning'], groupBy: 'queue', maxPerSection: 20 }
+const GLOBAL_DIGEST_MARK = 0 // notification_logs payload.digestRouteId — 전역 요약 표식 (v2 P4)
+
 /**
- * 지정 시각이 지난 다이제스트 규칙을 찾아 그날 첫 1회만 발송한다.
- * "오늘 이미 보냈는가"는 notification_logs(payload.routeId + KST 당일)로 판정 →
+ * 전역 SLA 초과 요약 (v2 P4 — 확정 10: 전역 채널 1개 + 관리자 지정 시각).
+ * 구 규칙별(DAILY_DIGEST 라우트) 방식을 대체 — 설정은 AppSetting
+ * `notify_digest_hour`(KST 0~23, -1=off) + `notify_digest_channel_id`(notify_channels FK).
+ * "오늘 이미 보냈는가"는 notification_logs(payload.digestRouteId=0 + KST 당일)로 판정 →
  * 서버 재시작·배포와 무관하게 하루 1회가 보장된다.
  */
 export async function runDailyDigests(opts: { force?: boolean; dryRun?: boolean } = {}): Promise<
   { routeName: string; hour: number; status: 'sent' | 'skipped_not_due' | 'skipped_already' | 'dry'; count: number }[]
 > {
-  const results: { routeName: string; hour: number; status: 'sent' | 'skipped_not_due' | 'skipped_already' | 'dry'; count: number }[] = []
-  const routes = await listDigestRoutes()
-  if (routes.length === 0) return results
+  const rows = await prisma.appSetting.findMany({
+    where: { key: { in: ['notify_digest_hour', 'notify_digest_channel_id'] } },
+  })
+  const map = Object.fromEntries(rows.map((r) => [r.key, r.value]))
+  const digestHour = parseInt(map['notify_digest_hour'] ?? '-1')
+  const channelId = parseInt(map['notify_digest_channel_id'] ?? '')
+  if (!Number.isFinite(digestHour) || digestHour < 0 || digestHour > 23) return []
+  if (!Number.isFinite(channelId)) return []
+
+  const channel = await prisma.notifyChannel.findUnique({ where: { id: channelId } })
+  if (!channel || !channel.isActive) return []
 
   const now = new Date()
   const hour = kstHour(now)
-  const midnight = kstMidnight(now)
-  const types = await getTypesEnabled()
-  const allRisk = await findSlaRisk({ includeWarning: true })
+  const routeName = 'SLA 일일 요약'
 
-  for (const r of routes) {
-    if (!opts.force && hour < r.digestHour) {
-      results.push({ routeName: r.routeName, hour: r.digestHour, status: 'skipped_not_due', count: 0 })
-      continue
-    }
-
-    // 오늘 이 규칙으로 이미 발송했는지 (KST 당일 기준)
-    if (!opts.force) {
-      const already = await prisma.notificationLog.findFirst({
-        where: {
-          eventType: 'delayed', targetType: 'channel', status: 'sent',
-          createdAt: { gte: midnight },
-          payload: { path: ['digestRouteId'], equals: r.routeId },
-        },
-        select: { id: true },
-      })
-      if (already) {
-        results.push({ routeName: r.routeName, hour: r.digestHour, status: 'skipped_already', count: 0 })
-        continue
-      }
-    }
-
-    // 규칙 스코프로 필터 (빈 배열 = 전체) + 업무 타입 킬스위치
-    const items = allRisk.filter((i) => {
-      if (!r.opts.kinds.includes(i.kind)) return false
-      if (!types[refTypeToTaskType(i.refType)]) return false
-      const refKey = i.refType ?? 'NONE'
-      if (r.refTypes.length > 0 && !r.refTypes.includes(refKey)) return false
-      if (r.severities.length > 0 && !r.severities.includes(i.severity)) return false
-      return true
-    })
-
-    const { text, blocks } = buildDigestMessage(items, r.opts, r.routeName)
-
-    if (opts.dryRun) {
-      results.push({ routeName: r.routeName, hour: r.digestHour, status: 'dry', count: items.length })
-      console.log(`[sla-digest][dry] ${r.routeName} → ${r.channelName}\n${text}`)
-      continue
-    }
-
-    await dispatchToChannel({
-      intendedChannel: r.slackChannelId,
-      channelName: r.channelName,
-      routeIds: [r.routeId],
-      eventType: 'delayed',
-      taskType: null,
-      refCode: null,
-      text,
-      blocks,
-      sig: `digest|${kstYmd(now)}|${r.routeId}`,
-      digestRouteId: r.routeId,
-    })
-    results.push({ routeName: r.routeName, hour: r.digestHour, status: 'sent', count: items.length })
+  if (!opts.force && hour < digestHour) {
+    return [{ routeName, hour: digestHour, status: 'skipped_not_due', count: 0 }]
   }
-  return results
+
+  // 오늘 이미 발송했는지 (KST 당일 기준)
+  if (!opts.force) {
+    const already = await prisma.notificationLog.findFirst({
+      where: {
+        eventType: 'delayed', targetType: 'channel', status: 'sent',
+        createdAt: { gte: kstMidnight(now) },
+        payload: { path: ['digestRouteId'], equals: GLOBAL_DIGEST_MARK },
+      },
+      select: { id: true },
+    })
+    if (already) return [{ routeName, hour: digestHour, status: 'skipped_already', count: 0 }]
+  }
+
+  const types = await getTypesEnabled()
+  const items = (await findSlaRisk({ includeWarning: true })).filter((i) => types[refTypeToTaskType(i.refType)])
+  const { text, blocks } = buildDigestMessage(items, GLOBAL_DIGEST_OPTS, routeName)
+
+  if (opts.dryRun) {
+    console.log(`[sla-digest][dry] ${routeName} → ${channel.name}\n${text}`)
+    return [{ routeName, hour: digestHour, status: 'dry', count: items.length }]
+  }
+
+  await dispatchToChannel({
+    intendedChannel: channel.slackChannelId,
+    channelName: channel.name,
+    eventType: 'delayed',
+    taskType: null,
+    refCode: null,
+    text,
+    blocks,
+    sig: `digest|${kstYmd(now)}|global`,
+    digestRouteId: GLOBAL_DIGEST_MARK,
+  })
+  return [{ routeName, hour: digestHour, status: 'sent', count: items.length }]
 }
 
-/** 스케줄러 진입점 — 전역 off거나 Slack off면 아무것도 하지 않는다 */
+/**
+ * 스케줄러 진입점 — 전역(notify_enabled) off면 아무것도 하지 않는다.
+ * Slack off는 여기서 막지 않는다 (v2 P1 F4) — 초과 확정·내부 알림은 Slack과 독립이어야 하고,
+ * 채널 발송은 dispatchToChannel이 mode_off로 스킵한다. Slack 전용인 다이제스트만 아래에서 게이트.
+ */
 export async function runSlaAlertTick(): Promise<void> {
   if (!(await globalEnabled())) return
-  if (getSlackMode() === 'off') return
 
   try {
     const breach = await runSlaBreachAlerts()
@@ -348,10 +445,13 @@ export async function runSlaAlertTick(): Promise<void> {
   }
 
   try {
-    await runSlaOwnerDms() // SLA 초과 owner 개인 DM (notify_dm_enabled 게이트)
+    const warn = await runSlaWarnAlerts() // 임박 알림 (v2 P3 — F2 배선)
+    if (warn.sent > 0) console.log(`[sla-alerts] 임박 발송 ${warn.sent}`)
   } catch (err) {
-    console.error('[sla-alerts] owner DM 실패:', err)
+    console.error('[sla-alerts] 임박 알림 실패:', err)
   }
+
+  if (getSlackMode() === 'off') return // 다이제스트는 Slack 전용
 
   try {
     const digests = await runDailyDigests()

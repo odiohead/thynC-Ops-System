@@ -293,7 +293,8 @@ export default function RoutesTab() {
                 <label className="text-xs text-muted-foreground">이벤트
                   <select value={rEvent} onChange={(e) => setREvent(e.target.value)}
                     className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground">
-                    {(masters?.events ?? []).map((e) => <option key={e} value={e}>{EVENT_LABELS[e] ?? e}</option>)}
+                    {/* DAILY_DIGEST는 전역 요약 설정(전역 탭)으로 대체 (v2 P4) — 신규 생성 불가, 기존 규칙 표시만 유지 */}
+                    {(masters?.events ?? []).filter((e) => e !== 'DAILY_DIGEST').map((e) => <option key={e} value={e}>{EVENT_LABELS[e] ?? e}</option>)}
                   </select>
                 </label>
                 <label className="text-xs text-muted-foreground">채널

@@ -53,11 +53,13 @@ interface Policy {
   clockType: string
   isActive: boolean
   targets: Target[]
+  notifyChannel: { id: number; name: string } | null // 정책별 초과·임박 알림 채널 (v2 P3)
   _count?: { clocks: number }
 }
 interface Masters {
   queues: { id: number; name: string }[]
   ctiNodes: { id: number; parentId: number | null; level: number; name: string; isActive: boolean }[]
+  channels: { id: number; name: string }[]
   statuses: string[]
   severities: string[]
   metrics: string[]
@@ -124,7 +126,9 @@ export default function SlaMatrixTab() {
   const [newPriority, setNewPriority] = useState(50)
   const [newRefTypes, setNewRefTypes] = useState<string[]>([])
   const [newQueueIds, setNewQueueIds] = useState<number[]>([])
+  const [newCtiIds, setNewCtiIds] = useState<number[]>([]) // CTI 스코프 (v2 P3 — 하위 분류 상속)
   const [newSeverities, setNewSeverities] = useState<string[]>([])
+  const [newChannelId, setNewChannelId] = useState<number | ''>('') // 정책 알림 채널 (v2 P3)
 
   const load = useCallback(async () => {
     const res = await fetch('/api/settings/sla-policies')
@@ -263,12 +267,28 @@ export default function SlaMatrixTab() {
     if (!newName.trim()) { flash('정책 이름을 입력하세요.'); return }
     const res = await fetch('/api/settings/sla-policies', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newName.trim(), priority: newPriority, refTypes: newRefTypes, queueIds: newQueueIds, severities: newSeverities, targets: [] }),
+      body: JSON.stringify({
+        name: newName.trim(), priority: newPriority, refTypes: newRefTypes, queueIds: newQueueIds,
+        ctiIds: newCtiIds, severities: newSeverities, targets: [],
+        ...(newChannelId ? { notifyChannelId: newChannelId } : {}),
+      }),
     })
     const d = await res.json().catch(() => ({}))
     if (!res.ok) { flash(d.error ?? '추가 실패'); return }
-    setAddOpen(false); setNewName(''); setNewRefTypes([]); setNewQueueIds([]); setNewSeverities([]); setNewPriority(50)
+    setAddOpen(false); setNewName(''); setNewRefTypes([]); setNewQueueIds([]); setNewCtiIds([]); setNewSeverities([]); setNewPriority(50); setNewChannelId('')
     flash('정책 행을 추가했습니다. 셀에 시간을 입력하고 저장하세요.')
+    await load()
+  }
+
+  /** 정책 알림 채널 변경 (v2 P3) — 즉시 저장 */
+  async function changeChannel(p: Policy, value: string) {
+    setBusyRow(p.id)
+    const res = await fetch(`/api/settings/sla-policies/${p.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notifyChannelId: value ? Number(value) : null }),
+    })
+    setBusyRow(null)
+    if (!res.ok) { flash((await res.json().catch(() => ({}))).error ?? '채널 변경 실패'); return }
     await load()
   }
 
@@ -382,6 +402,17 @@ export default function SlaMatrixTab() {
                             <p className="mt-0.5 text-[11px] text-muted-foreground">
                               우선순위 {p.priority} · 시계 {p._count?.clocks ?? 0}
                             </p>
+                            {/* 정책별 초과·임박 알림 채널 (v2 P3) — 없으면 SLA_BREACH/WARNING 라우팅 규칙 폴백 */}
+                            <select
+                              value={p.notifyChannel?.id ?? ''}
+                              onChange={(e) => changeChannel(p, e.target.value)}
+                              disabled={busyRow === p.id}
+                              title="이 정책의 초과·임박 알림을 보낼 채널 (없으면 발송 규칙 폴백)"
+                              className="mt-1 w-full max-w-[10rem] rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-muted-foreground disabled:opacity-40"
+                            >
+                              <option value="">채널: 규칙 폴백</option>
+                              {(masters?.channels ?? []).map((c) => <option key={c.id} value={c.id}>채널: {c.name}</option>)}
+                            </select>
                             <div className="mt-1 flex gap-1.5">
                               <button type="button" onClick={() => toggleActive(p)} className="text-[11px] text-muted-foreground hover:text-foreground">
                                 {p.isActive ? '비활성' : '활성'}
@@ -578,6 +609,30 @@ export default function SlaMatrixTab() {
                 ))}
               </div>
             </div>
+            {/* CTI 스코프 (v2 P3 — 요구 5 "특정 CTI마다 상세 SLA") — 선택 분류의 하위 분류까지 상속 적용 */}
+            <div>
+              <p className="text-xs text-muted-foreground">티켓 분류(CTI) <span className="opacity-70">(선택 없음 = 전체 · 하위 분류 자동 포함)</span></p>
+              <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border p-2">
+                {(masters?.ctiNodes ?? []).filter((n) => n.isActive).map((n) => (
+                  <label key={n.id} className="flex items-center gap-1.5 py-0.5 text-xs text-foreground" style={{ paddingLeft: `${(n.level - 1) * 16}px` }}>
+                    <input
+                      type="checkbox"
+                      checked={newCtiIds.includes(n.id)}
+                      onChange={() => setNewCtiIds((cur) => cur.includes(n.id) ? cur.filter((x) => x !== n.id) : [...cur, n.id])}
+                    />
+                    <span className={n.level === 1 ? 'font-medium' : n.level === 2 ? '' : 'text-muted-foreground'}>{n.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <label className="block text-xs text-muted-foreground">
+              초과·임박 알림 채널 <span className="opacity-70">(비우면 발송 규칙 폴백)</span>
+              <select value={newChannelId} onChange={(e) => setNewChannelId(e.target.value ? Number(e.target.value) : '')}
+                className="mt-1 w-full max-w-xs rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground">
+                <option value="">발송 규칙 폴백</option>
+                {(masters?.channels ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
             <div className="flex gap-2">
               <button type="button" onClick={addPolicy} className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">추가</button>
               <button type="button" onClick={() => setAddOpen(false)} className="rounded-lg border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent">취소</button>

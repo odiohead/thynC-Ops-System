@@ -8,7 +8,6 @@ import { addTicketEvent } from '@/lib/ticket'
 import { syncTicketToDomain } from '@/lib/ticketDomain'
 import { notifyTicketChanged } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
-import { getSlaRules, computeTicketDueAt } from '@/lib/delay-rules'
 
 export const dynamic = 'force-dynamic'
 
@@ -96,15 +95,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
     data.hospitalCode = typeof body.hospitalCode === 'string' && body.hospitalCode ? body.hospitalCode : null
   }
 
-  // Sev 변경 → SLA(dueAt) 재산정 (PROJECT는 endDateExpected 소유 — 재산정 제외, P11)
+  // dueAt은 SLA 시계가 단일 소유 (v2 P1) — Sev 변경 시 아래 syncTicketClocksSafe가 재산정한다
   const sevChanged = !!data.severity && data.severity !== before.severity
-  const dueAtUpdate =
-    sevChanged && before.refType !== 'PROJECT'
-      ? { dueAt: computeTicketDueAt(await getSlaRules(), data.severity!, before.createdAt) }
-      : {}
 
   const ticket = await prisma.$transaction(async (tx) => {
-    const updated = await tx.ticket.update({ where: { id }, data: { ...data, ...dueAtUpdate }, include: detailInclude })
+    const updated = await tx.ticket.update({ where: { id }, data, include: detailInclude })
     if (sevChanged) {
       await addTicketEvent(tx, id, 'sev_change', user.userId, { from: before.severity, to: data.severity })
     }

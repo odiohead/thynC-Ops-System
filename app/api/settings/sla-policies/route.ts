@@ -28,14 +28,16 @@ export async function GET(request: NextRequest) {
     orderBy: [{ priority: 'asc' }, { id: 'asc' }],
     include: {
       targets: { orderBy: [{ metric: 'asc' }, { statusScope: 'asc' }, { severity: 'asc' }] },
+      notifyChannel: { select: { id: true, name: true } }, // 정책별 초과 알림 채널 (v2 P3)
       _count: { select: { clocks: true } },
     },
   })
 
-  // 매트릭스 편집용 마스터 (Assignment Group·CTI 선택지)
-  const [queues, ctiNodes] = await Promise.all([
+  // 매트릭스 편집용 마스터 (Assignment Group·CTI·채널 선택지)
+  const [queues, ctiNodes, channels] = await Promise.all([
     prisma.ticketQueue.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { sortOrder: 'asc' } }),
     prisma.ticketCti.findMany({ select: { id: true, parentId: true, level: true, name: true, isActive: true }, orderBy: [{ level: 'asc' }, { sortOrder: 'asc' }] }),
+    prisma.notifyChannel.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] }),
   ])
 
   return NextResponse.json({
@@ -43,6 +45,7 @@ export async function GET(request: NextRequest) {
     masters: {
       queues,
       ctiNodes,
+      channels,
       statuses: TICKET_STATUSES,
       severities: TICKET_SEVERITIES,
       metrics: SLA_METRICS,
@@ -66,10 +69,17 @@ export async function POST(request: NextRequest) {
   const err = validateTargets(targets, scope.refTypes)
   if (err) return NextResponse.json({ error: err }, { status: 400 })
 
-  const clockType = (CLOCK_TYPES as readonly string[]).includes(body.clockType) ? body.clockType : 'CALENDAR_24H'
-  // 1.1은 24시간 시계만 구현 (§4.4 D3) — 영업시간 시계는 후속
-  if (clockType === 'BUSINESS_HOURS') {
-    return NextResponse.json({ error: '영업시간 시계는 아직 지원하지 않습니다(1.1 범위 외).' }, { status: 400 })
+  // v2 P1: 달력시간(CALENDAR_24H) 단일 — 사용자 확정 2026-08-03
+  const clockType = 'CALENDAR_24H'
+  void CLOCK_TYPES
+
+  // 정책별 초과 알림 채널 (v2 P3) — 지정 시 존재 검증
+  let notifyChannelId: number | null = null
+  const chNum = Math.floor(Number(body.notifyChannelId))
+  if (Number.isFinite(chNum) && chNum > 0) {
+    const ch = await prisma.notifyChannel.findUnique({ where: { id: chNum }, select: { id: true } })
+    if (!ch) return NextResponse.json({ error: '존재하지 않는 채널입니다.' }, { status: 400 })
+    notifyChannelId = ch.id
   }
 
   const created = await prisma.slaPolicy.create({
@@ -79,6 +89,7 @@ export async function POST(request: NextRequest) {
       priority: Number.isFinite(body.priority) ? Math.floor(body.priority) : 50,
       ...scope,
       clockType,
+      notifyChannelId,
       isActive: body.isActive !== false,
       targets: { create: targets.map(targetCreateData) },
     },

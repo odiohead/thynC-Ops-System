@@ -89,3 +89,15 @@ export const DEFAULT_FIELDS: Record<TaskType, string[]> = {
 }
 
 export const TASK_TYPES: TaskType[] = ['PROJECT', 'SITE_VISIT', 'INSTALL_PLAN', 'MAINTENANCE', 'ETC', 'TICKET']
+
+/** refType → 알림 taskType (순수 티켓 = TICKET) — 구 delay-rules에서 이동 (알림 v2 P1) */
+export function refTypeToTaskType(refType: string | null): TaskType {
+  switch (refType) {
+    case 'MAINTENANCE': return 'MAINTENANCE'
+    case 'ETC': return 'ETC'
+    case 'SITE_VISIT': return 'SITE_VISIT'
+    case 'INSTALL_PLAN': return 'INSTALL_PLAN'
+    case 'PROJECT': return 'PROJECT'
+    default: return 'TICKET'
+  }
+}

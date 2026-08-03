@@ -11,6 +11,7 @@ export async function GET() {
     include: {
       _count: { select: { tickets: true } },
       members: { include: { user: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' } },
+      notifyChannel: { select: { id: true, name: true, slackChannelId: true } }, // 그룹 알림 채널 (v2 P2)
     },
   })
   return NextResponse.json({ queues })

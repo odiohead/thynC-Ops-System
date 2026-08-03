@@ -30,10 +30,8 @@ FROM (
   UNION ALL SELECT '전체 상태 변경',      'TICKET_STATUS_CHANGED',     (SELECT id FROM main),  'none',          NULL, NULL, 20
   UNION ALL SELECT '전체 그룹 이관',      'TICKET_QUEUE_TRANSFERRED',  (SELECT id FROM main),  'queue_members', NULL, NULL, 30
   UNION ALL SELECT 'Sev1·2 에스컬레이션', 'SEV_ESCALATED',             (SELECT id FROM main),  'queue_members', NULL, NULL, 40
-  -- 하루 1회 지연 요약 — 기본 09:00 KST, 초과+임박 포함, Assignment Group별 그룹
-  UNION ALL SELECT 'SLA 일일 요약',       'DAILY_DIGEST',              (SELECT id FROM delay), 'none',          9,
-                   '{"kinds":["overdue","warning"],"groupBy":"queue","maxPerSection":20}', 50
-  -- SLA 초과 즉시 알림 — 초과된 그 시점에 1건씩
+  -- (v2 P4) 일일 요약은 규칙이 아니라 전역 설정으로 이동 — 아래 ③ app_settings 참조
+  -- SLA 초과 즉시 알림 — 초과된 그 시점에 1건씩 (정책별 채널 미지정 시 폴백)
   UNION ALL SELECT 'SLA 초과 즉시',       'SLA_BREACH',                (SELECT id FROM delay), 'none',          NULL, NULL, 60
 ) v
 WHERE NOT EXISTS (SELECT 1 FROM notify_routes r WHERE r.name = v.name);
@@ -42,3 +40,11 @@ WHERE NOT EXISTS (SELECT 1 FROM notify_routes r WHERE r.name = v.name);
 SELECT r.sort_order, r.name, r.event_type, c.name AS 채널, r.mention_mode, r.digest_hour, r.is_active
 FROM notify_routes r JOIN notify_channels c ON c.id = r.channel_id
 ORDER BY r.sort_order;
+
+-- ③ (v2 P4) 전역 SLA 일일 요약 기본값 — 09:00 KST, 'SLA 지연' 채널 (idempotent)
+INSERT INTO app_settings (key, value)
+SELECT 'notify_digest_hour', '9' WHERE NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'notify_digest_hour');
+INSERT INTO app_settings (key, value)
+SELECT 'notify_digest_channel_id', (SELECT id::text FROM notify_channels WHERE name = 'SLA 지연')
+WHERE NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'notify_digest_channel_id')
+  AND EXISTS (SELECT 1 FROM notify_channels WHERE name = 'SLA 지연');

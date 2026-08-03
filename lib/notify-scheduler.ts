@@ -50,17 +50,12 @@ async function tick() {
   }
 }
 
-/** 시작 시 사용할 tick 주기 결정 — 신규 키 우선, 없으면 구 키에서 유추 */
+/** 시작 시 사용할 tick 주기 결정 (v2 P1 — 구 notify_delay_interval 호환 제거) */
 export async function resolveTickInterval(): Promise<string> {
   try {
-    const rows = await prisma.appSetting.findMany({
-      where: { key: { in: ['notify_tick_interval', 'notify_delay_interval'] } },
-    })
-    const map = Object.fromEntries(rows.map((r) => [r.key, r.value]))
-    const explicit = map['notify_tick_interval']
+    const row = await prisma.appSetting.findUnique({ where: { key: 'notify_tick_interval' } })
+    const explicit = row?.value
     if (explicit && (TICK_OPTIONS as readonly string[]).includes(explicit)) return explicit
-    // 1.0에서 지연 감지를 꺼 둔 환경은 tick도 꺼진 상태로 시작(의도치 않은 발송 방지)
-    if ((map['notify_delay_interval'] ?? 'off') === 'off') return 'off'
     return DEFAULT_TICK
   } catch {
     return 'off'
