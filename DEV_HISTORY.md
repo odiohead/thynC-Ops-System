@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-08-03 | 주차 자동계산 + SLA 탭 재편 PROD 배포
+
+- 커밋 2건 push → PROD `git pull`(`0e02618`→`58f4486`) — 의존성·DB 변경 없음
+  - `c173c50` 주차 웹할인 자동계산 무료 30분·출차 여유 10분 (아래 항목)
+  - `58f4486` 알림 v2 후속 — SLA 탭 상태 지연(DWELL) 매트릭스 UI 제거·처리 목표 단일 화면(영향 보기 버튼 통합, DWELL 타깃은 저장 시 보존) — 별도 세션 작업분 커밋
+- dev2·PROD 힙 4GB 빌드 → PM2 재시작. 스모크: `/`·`/parking`·`/sales/deals`·`/tickets`·`/settings/notifications` 전부 307 정상, 재시작 후 신규 오류 로그 0건
+- **기존 이슈 발견 (이번 배포 무관)**: PROD 에러 로그에 `GOOGLE_CALENDAR_ETC_TASK_ID` 미설정으로 기타업무 캘린더 동기화 실패 106회 누적 — dev2에도 미설정(전 환경 미프로비저닝). 캘린더 생성·env 설정은 사용자 결정 대기
+
+---
+
 ## 2026-08-03 | 주차 웹할인 자동 계산 — 기본 무료 30분·출차 여유 10분 반영
 
 - `planAutoDiscount` 차감 계산식 수정: 기존 `주차시간 − 기적용분` → **`(주차시간 + 출차 여유 10분) − 기본 무료 30분 − 기적용분`**. 상수 `FREE_BASE_MIN`(30)·`EXIT_BUFFER_MIN`(10) 신설, `AutoPlan`에 `targetMin`·`chargeableMin` 필드 추가
