@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-08-04 | RBAC Lite Phase 1~3 PROD 배포
+
+- 커밋 `894ed09` push → PROD `git pull`(`3ecbc3c`→`894ed09`) — 신규 패키지 없음(`npm install` 불필요)
+- **PROD DB**: `prisma migrate deploy` 3건 적용(`_add_rbac_tables`·`_add_rbac_nav_menu`·`_add_nav_allowed_permissions`) → `prisma generate`
+  - 검증: nav `settings/roles`('역할 관리', 조직·계정 그룹, SUPER_ADMIN) 생성 확인, `app_roles` 0행(역할 정의는 운영자 몫), `nav_menu_items.allowed_permissions` 컬럼 추가
+- 힙 4GB 빌드(145 라우트) → `pm2 restart thync-prod`. 스모크: `/`·`/settings/roles`·`/inventory`·`/sales/dashboard`·`/tickets`·`/vehicle-reservations` 전부 307 정상, 외부 HTTPS 307, **재시작 후 신규 오류 0건**(로그의 Google Calendar/Drive env 미설정 2건은 기존 이슈)
+- **커밋 제외분**: dev2 워킹트리의 `app/parking/page.tsx`·`lib/parking.ts` 수정(주차 재입차 무료 차단 판정 — 별도 작업분)은 RBAC와 무관해 이번 커밋·배포에서 제외, dev2에 미커밋 상태로 보존
+- 배포 직후 동작: 기존 사용자 영향 0(가산 전용 — 역할을 만들기 전까지 시스템 동작 불변). SUPER_ADMIN이 설정 > 역할 관리에서 역할 정의부터 시작
+
+---
+
 ## 2026-08-04 | RBAC Lite Phase 3 — 확산: 차량·영업 편입 + 권한 설명 표시 + 컨벤션 등재 (dev2)
 
 - Phase 1·2에 이어 같은 날 사용자 승인으로 Phase 3 진행. **DB 변경 없음**(권한 키는 카탈로그 코드 — 마이그레이션 불필요)
@@ -84,6 +95,17 @@
 2. **설정 > 기기 관리의 UDI 진입점 제거** — 자재관리와 무관한 메뉴에 UDI를 얹었다가 사용자 지적으로 철거(해당 페이지·API는 `git diff` 0줄로 원상복구). 입력은 품목 관리 한 곳으로 통일
 3. **문서 단위를 모델×LOT → 모델 1부로 변경** — 원 양식의 UDI·LOT NO 컬럼이 행마다 있는 이유가 한 장에 여러 UDI×LOT을 담기 위한 것이었음
 - 영향 파일: lib/itemUdi.ts·lib/inventoryLot.ts·lib/udiLedger.ts·lib/udiLedgerDocx.ts(신규) / app/inventory/ledger/·app/settings/udi-ledger/·app/api/inventory/ledger/{route,check,docx}·app/api/settings/udi-ledger/(신규) / app/inventory/items/{page,[id]/page}.tsx·app/api/inventory/items/{route,[id]/route}.ts·app/api/inventory/items/[id]/lot-history·app/api/inventory/transactions/[id]·app/inventory/components/{TransactionModal,BulkTxModal,TxEditModal}·app/inventory/{page,transactions/page,transactions/[id]/page}·app/api/inventory/transactions/export / prisma/schema.prisma·마이그레이션 4건·assets/templates/
+
+---
+
+## 2026-08-04 | 기타업무 캘린더 — 유지보수 캘린더 공용 (env만, dev2)
+
+- 배경: `GOOGLE_CALENDAR_ETC_TASK_ID`가 전 환경 미프로비저닝이라 기타업무 업무기간 저장 시 캘린더 동기화가 매번 실패(PROD 에러 로그 106회 누적). 업무 저장 자체는 try/catch로 정상 동작했고 캘린더만 스킵되던 상태
+- 결정(사용자): 기타업무 전용 캘린더를 새로 만들지 않고 **유지보수 캘린더를 공용**으로 사용. 담당자는 이벤트 초대로 개인 캘린더에서 확인하며 공용 캘린더는 잘 보지 않으므로 분리 실익이 없다는 판단 → 제목 접두사 등 구분 표기도 불필요
+- 조치: dev2 `.env`에 `GOOGLE_CALENDAR_ETC_TASK_ID = GOOGLE_CALENDAR_MAINTENANCE_ID` 동일 값 추가(코드 변경 0 — `getCalendarId`가 env 값을 그대로 캘린더 ID로 사용). 백업 `.env.bak-<ts>` 생성, `pm2 restart thync-dev --update-env`로 반영, `@next/env` 로더가 값을 읽는 것 확인
+- 미소급: 기존에 동기화 실패한 업무기간은 `calendarEventId`가 NULL로 남음. 소급 등록하려면 별도 백필 필요(미실시)
+- **PROD 미반영** — PROD `.env`에도 같은 줄 추가 + `pm2 restart thync-prod` 필요(사용자 요청 대기)
+- 영향 파일: .env(dev2), README.md
 
 ---
 
