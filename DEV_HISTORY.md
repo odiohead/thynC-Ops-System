@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-08-04 | UDI 입출고대장 PROD 배포
+
+- 커밋 `3ecbc3c` push → PROD `git pull`(`b67cfad`→`3ecbc3c`)
+- **신규 패키지**: `jszip` → PROD `npm install`
+- **PROD DB**: `prisma migrate deploy` 4건 적용 → `prisma generate`
+  - 결과 검증: UDI 15건(5모델 × 인벤토리 3) 적용 / `device_info` 2행·7컬럼으로 원상 유지(UDI 컬럼 없음) / nav 메뉴 `settings/udi-ledger` 추가
+  - 마이그레이션 1이 `inventory_items.device_info_id`를 모델명 일치로 백필(빈 값만) — 장비 마스터 연결은 원래 있던 필드라 무해한 추가분
+- 힙 4GB 빌드 → `pm2 restart thync-prod`. 스모크: `/`·`/inventory`·`/inventory/ledger`·`/inventory/items`·`/settings/udi-ledger`·`/tickets` 전부 307 정상, 외부 HTTPS 307 정상, 재시작 후 에러 로그 0건
+- **PROD 실데이터 검증**: 대장 대상 5종 조회 정상, MP100W 대장 입고 14건/9,285 · 출고 11건/336 · 현재고 8,949 · UDI×LOT 소계 6행, docx 생성 203KB 성공
+- 후속(운영 입력 사항): MP100W 외 모델의 대장 표기명·품명 구분·원자재식별 NO / MGW1010 UDI / MP1000F 자릿수 통일 여부
+
 ## 2026-08-04 | 자재관리 UDI 입출고대장 — GMP 양식(F707-1) docx 자동 생성
 
 - 배경: 사내에서 Word로 수기 작성하던 의료기기 입출고대장을 WMS 데이터로 생성. 설계안 `projects/inventory_udi_ledger_design.md` 검토·승인 후 착수
