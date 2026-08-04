@@ -214,12 +214,6 @@ export interface DiscountType {
   free: boolean
 }
 
-export interface CouponInfo {
-  discountTypes: DiscountType[]
-  remainBasic: number | null
-  remainCharge: number | null
-}
-
 /** getForDiscount 원시 파싱 결과 (parkEntry·parkVisitCar 포함) */
 async function getForDiscountRaw(jar: Jar, carId: string, userId: string): Promise<Record<string, unknown>> {
   const body = new URLSearchParams({ id: carId, member_id: userId }).toString()
@@ -250,17 +244,90 @@ function discountTypesFrom(data: Record<string, unknown>): DiscountType[] {
   })
 }
 
-async function getCoupons(jar: Jar, carId: string, userId: string): Promise<CouponInfo> {
-  const data = await getForDiscountRaw(jar, carId, userId)
-  const member = asRec(data.member)
-  return {
-    discountTypes: discountTypesFrom(data),
-    remainBasic: member.dcTimeRemainBasic != null ? num(member.dcTimeRemainBasic) : null,
-    remainCharge: member.dcTimeRemainCharge != null ? num(member.dcTimeRemainCharge) : null,
-  }
+// ── 공개 API ─────────────────────────────────────────────────────────────
+
+// ── 할인등록현황(/state/doListMst) — 재입차 무료 차단 판정용 ─────────────
+// 사이트 규칙: 한 차량이 그날 무료권을 1장이라도 쓰면, 출차 후 재입차해도 무료권을 다시 쓸 수 없다.
+// 입차 차량 검색(listForDiscount)은 '현재 주차 중'만 반환해 이전 입차건을 볼 수 없으므로,
+// 출차분까지 남는 할인등록현황을 조회해 판정한다. account_no=''로 조회하면 전 호실 등록분이 나온다.
+
+export interface DayDiscountRow {
+  carNo: string
+  entryAt: string // 입차시각 YYYYMMDDHHMMSS — 입차건 구분 키
+  discountName: string
+  price: number
+  minutes: number
+  accountNo: string // 등록 호실
+  regTime: string
+  free: boolean
 }
 
-// ── 공개 API ─────────────────────────────────────────────────────────────
+/** 특정 차량의 기간 내 할인등록 이력 조회. 권한 없으면 throw(다음 계정으로 재시도하기 위함). */
+async function listDayDiscounts(jar: Jar, carNo: string, startDate: string, endDate: string): Promise<DayDiscountRow[]> {
+  const body = new URLSearchParams({
+    startDate: startDate.replace(/-/g, ''),
+    endDate: endDate.replace(/-/g, ''),
+    account_no: '', // 빈 값 = 전 호실 등록분
+    dc_id: '',
+    carno: carNo,
+    corp: '',
+    paid_stat: '',
+    master_id: '',
+    rowcount: '1000',
+  }).toString()
+  const res = await req(jar, '/state/doListMst', { method: 'POST', body, headers: AJAX_HEADERS })
+  if (!res.ok) throw new Error(`할인등록현황 조회 실패(status=${res.status})`)
+  const data = asRec(await res.json().catch(() => ({})))
+  const rows = Array.isArray(data.data) ? data.data : []
+  return rows
+    .filter((raw) => str(asRec(raw).del_yn) !== '1') // 취소분 제외
+    .map((raw) => {
+      const r = asRec(raw)
+      return {
+        carNo: str(r.carno),
+        entryAt: str(r.entry_date),
+        discountName: str(r.discount_name),
+        price: num(r.discount_price),
+        minutes: num(r.dc_time),
+        accountNo: str(r.account_no),
+        regTime: str(r.create_tm),
+        free: num(r.discount_price) === 0,
+      }
+    })
+    .filter((r) => !carNo || r.carNo === carNo)
+}
+
+/**
+ * 같은 차량의 '해당 영업일' 할인등록 이력 조회.
+ * 조회 구간은 입차일과 사이트 영업일(등록 페이지 기본값)을 함께 덮는다 —
+ * 영업일 경계가 자정을 넘겨서(예: 08-04 08시에도 영업일이 08-03) 어긋나는 것을 방지.
+ * 이력 조회 권한이 없는 계정(903 등)은 건너뛴다. 전부 실패하면 null = 판정 불가.
+ */
+async function fetchDayDiscounts(carNo: string, entryDt14: string): Promise<DayDiscountRow[] | null> {
+  for (const a of getParkingAccounts()) {
+    try {
+      const jar = await login(a)
+      const businessDay = (await fetchEntryDate(jar)).replace(/-/g, '')
+      const entryDay = /^\d{8}/.test(entryDt14 || '') ? entryDt14.slice(0, 8) : businessDay
+      const from = entryDay <= businessDay ? entryDay : businessDay
+      const to = entryDay <= businessDay ? businessDay : entryDay
+      return await listDayDiscounts(jar, carNo, from, to)
+    } catch {
+      continue
+    }
+  }
+  return null
+}
+
+/**
+ * 이번 입차건 이전에 '우리 계정'이 무료권을 쓴 이력.
+ * 타 입주사(예: B133·611) 계정의 무료권은 계약별로 재사용 가능한 경우가 실측 확인되어(2026-08-04)
+ * 판정에서 제외한다 — 우리 계정의 무료권만 재입차 시 사용 불가.
+ */
+function earlierFreeRows(rows: DayDiscountRow[], currentEntryAt: string): DayDiscountRow[] {
+  const ours = new Set(getParkingAccounts().map((a) => a.userId))
+  return rows.filter((r) => r.free && r.entryAt && r.entryAt !== currentEntryAt && ours.has(r.accountNo))
+}
 
 export interface SearchResult {
   entryDate: string
@@ -316,6 +383,9 @@ export interface CarDiscountState {
   appliedDiscounts: AppliedDiscount[]
   accounts: AccountState[]
   paidUnlocked: boolean // 4개 계정 무료권을 모두 등록해야 true (유료 노출 게이트)
+  freeBlocked: boolean // 그날 이전 입차건에서 무료권을 써서 이번 입차건은 무료 불가
+  freeBlockReason?: string // 차단 근거 (호실·등록시각)
+  freeCheckFailed: boolean // 이력 조회 실패로 판정 불가 (차단하지 않음 — 종전 동작 유지)
 }
 
 /** 특정 차량(carId)에 대해 4개 계정 상태 + 할인내역 + 주차정보 종합 (읽기 전용). */
@@ -348,8 +418,10 @@ export async function carDiscountState(carId: string): Promise<CarDiscountState>
   const firstOk = raw.find((r) => r.ok)
   let car: CarInfo | null = null
   let appliedDiscounts: AppliedDiscount[] = []
+  let entryAt = '' // 이번 입차건 식별 키 (dtInDate, YYYYMMDDHHMMSS)
   if (firstOk && firstOk.ok) {
     const pe = asRec(firstOk.data.parkEntry)
+    entryAt = str(pe.dtInDate)
     const elapsedStr = str(pe.different_time)
     const elapsedMin = parseDurationMin(elapsedStr) ?? elapsedMinFromEntry(str(pe.dtInDate)) ?? 0
     car = {
@@ -407,12 +479,31 @@ export async function carDiscountState(carId: string): Promise<CarDiscountState>
     }
   })
 
-  // 유료 게이트: (로그인 성공한) 모든 계정이 무료권을 등록했거나, 무료권이 아예 없을 때만 해제
-  const paidUnlocked = accountStates
-    .filter((a) => a.ok)
-    .every((a) => a.freeApplied || !a.hasFree)
+  // 재입차 무료 차단 판정 — 그날 다른 입차건에서 무료를 쓴 이력이 있으면 이번 입차건은 무료 불가
+  let freeBlocked = false
+  let freeBlockReason: string | undefined
+  let freeCheckFailed = false
+  if (car?.carNo) {
+    const rows = await fetchDayDiscounts(car.carNo, entryAt)
+    if (rows == null) {
+      freeCheckFailed = true // 조회 실패 시 차단하지 않음(fail-open) — 종전 동작 유지
+    } else {
+      const earlier = earlierFreeRows(rows, entryAt)
+      if (earlier.length > 0) {
+        freeBlocked = true
+        const who = Array.from(new Set(earlier.map((r) => r.accountNo))).join('·')
+        freeBlockReason = `오늘 이전 입차건에서 무료권 ${earlier.length}건 사용(${who}호, ${earlier[0].regTime.slice(0, 16)}) — 재입차 시 무료권 사용 불가`
+      }
+    }
+  }
 
-  return { car, appliedDiscounts, accounts: accountStates, paidUnlocked }
+  // 유료 게이트: 모든 계정이 무료를 등록했거나 무료권이 없을 때 해제.
+  // 무료가 차단된 재입차 건은 게이트를 영원히 못 넘으므로 즉시 해제한다.
+  const paidUnlocked =
+    freeBlocked ||
+    accountStates.filter((a) => a.ok).every((a) => a.freeApplied || !a.hasFree)
+
+  return { car, appliedDiscounts, accounts: accountStates, paidUnlocked, freeBlocked, freeBlockReason, freeCheckFailed }
 }
 
 export interface RegisterResult {
@@ -447,10 +538,25 @@ export async function registerDiscount(params: {
     (cars.length === 1 ? cars[0] : undefined)
   if (!target) return { ok: false, message: '대상 차량이 여러 건이라 특정할 수 없습니다.' }
 
-  // 할인권 유효성 확인
-  const info = await getCoupons(jar, target.id, params.userId)
-  const dt = info.discountTypes.find((d) => d.id === params.discountType)
+  // 할인권 유효성 확인 (parkEntry도 함께 확보 — 재입차 무료 차단 판정에 입차시각 필요)
+  const rawInfo = await getForDiscountRaw(jar, target.id, params.userId)
+  const dt = discountTypesFrom(rawInfo).find((d) => d.id === params.discountType)
   if (!dt) return { ok: false, message: '해당 계정에서 사용할 수 없는 할인권입니다.' }
+
+  // 무료권 게이트: 그날 이전 입차건에서 무료를 썼으면 사이트가 등록을 거부한다.
+  // 자동적용(assumeUnlocked)은 계획 단계에서 이미 제외하므로 재조회를 생략한다.
+  if (dt.price === 0 && !params.assumeUnlocked) {
+    const entryAt = str(asRec(rawInfo.parkEntry).dtInDate)
+    const rows = await fetchDayDiscounts(target.carNo, entryAt)
+    const earlier = rows ? earlierFreeRows(rows, entryAt) : []
+    if (earlier.length > 0) {
+      const who = Array.from(new Set(earlier.map((r) => r.accountNo))).join('·')
+      return {
+        ok: false,
+        message: `오늘 이미 무료권을 사용한 차량입니다(${who}호, ${earlier[0].regTime.slice(0, 16)}). 재입차 건은 유료권만 등록할 수 있습니다.`,
+      }
+    }
+  }
 
   // 유료권 게이트: 구매 계정(paid)만 + 4개 계정 무료권 모두 등록 후에만 유료 등록 허용(프론트 우회 방지)
   if (dt.price > 0) {
@@ -516,6 +622,8 @@ export interface AutoPlan {
   totalCost: number
   balance: number | null
   insufficientBalance: boolean
+  freeBlocked: boolean // 재입차 무료 차단 — 무료권을 계획에서 제외했음
+  freeBlockReason?: string
 }
 
 /** 유료권 최소 비용 커버(>= need) — DP 후 재구성 */
@@ -579,6 +687,8 @@ export async function planAutoDiscount(carId: string): Promise<AutoPlan> {
     coveredAfterMin: alreadyMin,
     totalCost: 0,
     insufficientBalance: false,
+    freeBlocked: state.freeBlocked,
+    freeBlockReason: state.freeBlockReason,
   }
 
   if (elapsedMin === 0) {
@@ -601,8 +711,9 @@ export async function planAutoDiscount(carId: string): Promise<AutoPlan> {
     }
   }
 
-  // 무료: 이 차량에 아직 무료 미등록 + 무료권 보유 계정, 필요한 만큼만
-  const freeAccts = state.accounts.filter((a) => a.ok && a.hasFree && !a.freeApplied)
+  // 무료: 이 차량에 아직 무료 미등록 + 무료권 보유 계정, 필요한 만큼만.
+  // 단 재입차 무료 차단(freeBlocked)이면 무료를 아예 계획에서 제외하고 전부 유료로 커버한다.
+  const freeAccts = state.freeBlocked ? [] : state.accounts.filter((a) => a.ok && a.hasFree && !a.freeApplied)
   const freeUse = Math.min(Math.ceil(deficitMin / 60), freeAccts.length)
   const steps: PlanStep[] = []
   for (let i = 0; i < freeUse; i++) {
@@ -647,6 +758,8 @@ export async function planAutoDiscount(carId: string): Promise<AutoPlan> {
     totalCost,
     balance,
     insufficientBalance: balance != null && totalCost > balance,
+    freeBlocked: state.freeBlocked,
+    freeBlockReason: state.freeBlockReason,
   }
 }
 

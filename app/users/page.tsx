@@ -340,7 +340,7 @@ export default function UsersPage() {
     : users.filter((u) => u.organization?.code === activeTab)
 
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-gray-900">계정 관리</h1>
         {isAdmin && (
@@ -463,85 +463,86 @@ export default function UsersPage() {
         )}
       </div>
 
-      <div className="hidden md:block rounded-xl border border-gray-200 bg-white overflow-x-auto">
+      {/* 가로 스크롤 제거 (2026-08-04) — 셀 줄바꿈 허용 + 패딩 축소로 한 화면에 표시 */}
+      <div className="hidden md:block rounded-xl border border-gray-200 bg-white">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">이름</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">이메일</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">연락처</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">소속</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">부서</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">역할</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">상태</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">마지막 로그인</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">작업</th>
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">이름</th>
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">이메일</th>
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">연락처</th>
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">소속</th>
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">부서</th>
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">역할</th>
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">상태</th>
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">마지막 로그인</th>
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">작업</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {filteredUsers.map((user) => (
               <tr key={user.id} className={`hover:bg-gray-50 ${user.id === currentUser?.id ? 'bg-blue-50/40' : ''}`}>
-                <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
+                <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">
                   {user.name}
                   {user.id === currentUser?.id && (
                     <span className="ml-2 text-xs text-blue-500">(나)</span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{user.email}</td>
-                <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{user.phone || '-'}</td>
-                <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{user.organization?.name ?? '-'}</td>
-                <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{user.department?.name ?? '-'}</td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  <div className="flex items-center gap-1">
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${ROLE_CLASS[user.role] ?? 'bg-gray-100 text-gray-700'}`}>
+                <td className="px-3 py-3 text-xs text-gray-600 break-all">{user.email}</td>
+                <td className="px-3 py-3 text-xs text-gray-600 whitespace-nowrap">{user.phone || '-'}</td>
+                <td className="px-3 py-3 text-gray-600">{user.organization?.name ?? '-'}</td>
+                <td className="px-3 py-3 text-gray-600">{user.department?.name ?? '-'}</td>
+                <td className="px-3 py-3">
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${ROLE_CLASS[user.role] ?? 'bg-gray-100 text-gray-700'}`}>
                       {ROLE_LABEL[user.role] ?? user.role}
                     </span>
                     {/* RBAC Lite 보유 역할 배지 (읽기 전용 — 편집은 설정 > 역할 관리) */}
                     {user.appRoles?.filter((r) => r.role.isActive).map((r) => (
-                      <span key={r.role.id} className="inline-flex items-center rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-700" title={`역할: ${r.role.code}`}>
+                      <span key={r.role.id} className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700" title={`역할: ${r.role.code}`}>
                         {r.role.name}
                       </span>
                     ))}
                   </div>
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  <div className="flex items-center gap-1">
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${user.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                <td className="px-3 py-3">
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${user.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                       {user.isActive ? '활성' : '비활성'}
                     </span>
                     {user.vehicleReservationBlocked && (
-                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700" title="차량예약 사용 제한">
+                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700" title="차량예약 사용 제한">
                         예약제한
                       </span>
                     )}
                   </div>
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
+                <td className="px-3 py-3 text-xs text-gray-500">
                   {user.lastLoginAt
                     ? new Date(user.lastLoginAt).toLocaleString('ko-KR', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
                     : <span className="text-gray-300">-</span>}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap">
+                <td className="px-3 py-3">
                   {user.id === currentUser?.id ? (
                     <button
                       onClick={openEditModal}
-                      className="text-xs font-medium px-3 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                      className="text-xs font-medium px-2.5 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
                     >
                       수정
                     </button>
                   ) : isAdmin ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-1">
                       {currentUser?.role === 'SUPER_ADMIN' && (
                         <button
                           onClick={() => openEditOtherModal(user)}
-                          className="text-xs font-medium px-3 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                          className="text-xs font-medium px-2.5 py-1 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
                         >
                           수정
                         </button>
                       )}
                       <button
                         onClick={() => handleToggle(user)}
-                        className={`text-xs font-medium px-3 py-1 rounded-lg transition-colors ${
+                        className={`text-xs font-medium px-2.5 py-1 rounded-lg whitespace-nowrap transition-colors ${
                           user.isActive
                             ? 'bg-red-50 text-red-600 hover:bg-red-100'
                             : 'bg-green-50 text-green-600 hover:bg-green-100'
@@ -552,7 +553,7 @@ export default function UsersPage() {
                       <button
                         onClick={() => handleDelete(user)}
                         disabled={deletingId === user.id}
-                        className="text-xs font-medium px-3 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50 transition-colors"
+                        className="text-xs font-medium px-2.5 py-1 rounded-lg whitespace-nowrap bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50 transition-colors"
                       >
                         {deletingId === user.id ? '삭제 중...' : '삭제'}
                       </button>

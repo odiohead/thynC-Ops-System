@@ -114,7 +114,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
             <p className="mt-1 text-sm text-gray-500">총 {total.toLocaleString()}개</p>
           </div>
           <div className="flex items-center gap-2">
-            <ExportExcelButton total={total} />
+            <ExportExcelButton statusOptions={statusCodes} typeOptions={typeOptions} />
             {isAdmin && <ExportToDriveButton />}
             {isAdmin && <ImportButton />}
             <Link

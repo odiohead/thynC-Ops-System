@@ -51,6 +51,9 @@ interface CarDiscountState {
   appliedDiscounts: AppliedDiscount[]
   accounts: AccountState[]
   paidUnlocked: boolean
+  freeBlocked: boolean
+  freeBlockReason?: string
+  freeCheckFailed: boolean
 }
 interface PlanStep {
   userId: string
@@ -76,6 +79,8 @@ interface AutoPlan {
   totalCost: number
   balance: number | null
   insufficientBalance: boolean
+  freeBlocked: boolean
+  freeBlockReason?: string
 }
 
 function fmtMin(m: number): string {
@@ -395,6 +400,14 @@ export default function ParkingPage() {
                   기본 무료 30분 · 출차 여유 10분 반영 (부과 대상 = 주차시간 + 10분 − 30분)
                 </p>
 
+                {plan.freeBlocked && (
+                  <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                    <b>재입차 — 무료권 제외</b>
+                    <br />
+                    {plan.freeBlockReason ?? '오늘 이미 무료권을 사용한 차량이라 유료권만 계산했습니다.'}
+                  </p>
+                )}
+
                 {plan.reason && plan.steps.length === 0 && (
                   <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">{plan.reason}</p>
                 )}
@@ -490,10 +503,18 @@ export default function ParkingPage() {
       {/* 계정별 카드 */}
       {state && (
         <>
-          {!paidUnlocked && (
-            <p className="mb-3 text-xs text-amber-700 dark:text-amber-500">
-              먼저 모든 호실의 <b>무료 1시간할인</b>을 등록해야 유료권 버튼이 열립니다.
+          {state.freeBlocked ? (
+            <p className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+              <b>재입차 차량 — 무료권 사용 불가</b>
+              <br />
+              {state.freeBlockReason ?? '오늘 이미 무료권을 사용했습니다.'} 유료권으로만 등록하세요.
             </p>
+          ) : (
+            !paidUnlocked && (
+              <p className="mb-3 text-xs text-amber-700 dark:text-amber-500">
+                먼저 모든 호실의 <b>무료 1시간할인</b>을 등록해야 유료권 버튼이 열립니다.
+              </p>
+            )
           )}
           <div className="grid gap-4 sm:grid-cols-2">
             {state.accounts.map((acc) => {
@@ -530,16 +551,18 @@ export default function ParkingPage() {
                         variant="primary"
                         size="sm"
                         className="w-full justify-between"
-                        disabled={busyKey === `${acc.userId}:${dt.id}` || acc.freeApplied}
+                        disabled={busyKey === `${acc.userId}:${dt.id}` || acc.freeApplied || state.freeBlocked}
                         onClick={() => register(acc, dt)}
                       >
                         <span>{dt.name}</span>
                         <span className="text-xs opacity-80">
                           {acc.freeApplied
                             ? '등록됨'
-                            : busyKey === `${acc.userId}:${dt.id}`
-                              ? '등록 중…'
-                              : '무료'}
+                            : state.freeBlocked
+                              ? '사용 불가(재입차)'
+                              : busyKey === `${acc.userId}:${dt.id}`
+                                ? '등록 중…'
+                                : '무료'}
                         </span>
                       </Button>
                     ))}
