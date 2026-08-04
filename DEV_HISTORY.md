@@ -4,6 +4,28 @@
 
 ---
 
+## 2026-08-04 | 병원 목록·도입현황 엑셀 다운로드 (dev2·PROD 배포)
+
+- 요청: `/sales/deals`·`/hospitals`에 엑셀 다운로드 추가, **필터를 걸면 필터 건 버전으로** 받을 것
+- 두 화면의 필터 방식이 달라 구현을 나눔
+  - **`/hospitals`**(서버 필터 — URL searchParams + 20건 페이지네이션): `GET /api/hospitals/export` 신설. 목록 페이지와 **동일한 where**(search/sido/status/type)를 재현하고 페이지네이션 없이 조건 전체를 내보냄. 12컬럼, 정렬도 목록과 동일(등록 최신순). 버튼은 현재 URL의 필터 파라미터만 골라 전달(page 제외)
+  - **`/sales/deals`**(클라이언트 필터 — 전체 로드 후 6종 필터+정렬): 서버에 필터 로직을 복제하면 드리프트 위험이 있어 **화면에 보이는 `sorted`를 그대로** 내보냄. 컬럼 정의(`COLS`)의 label·accessor를 재사용해 표와 100% 일치(29컬럼+순번). xlsx는 클릭 시점 `await import('xlsx')`로 동적 로드 — 페이지 번들 5.24→5.57kB로 영향 최소
+- **용량 실측 후 판단**: 병원 테이블에 HIRA 전수가 있어 무필터 전체는 79,738행·45MB·3.7초·피크 힙 247MB. 하드 상한을 두면 종별 '의원'(37,763건)·시도 '서울'(19,773건) 같은 **정당한 필터도 막히므로 상한은 두지 않고**, 1만 건 초과 시 브라우저 확인 대화상자로 실수 클릭만 차단
+- 검증: dev2에서 실제 Prisma 쿼리+xlsx 생성으로 3개 필터 조합 확인(무필터 79,738 / 상급종합 47 / 서울+'병원' 562행), tsc 0오류, dev2·PROD 빌드 성공
+- **PROD 배포**: 커밋 `b95147b` push → PROD `git pull`(`a4c9c35`→`b95147b`, 4파일만) → 힙 4GB 빌드 → `pm2 restart thync-prod`. 의존성·DB 변경 없음(xlsx는 기존 의존성). 스모크 `/`·`/hospitals`·`/sales/deals`·`/api/hospitals/export`·`/tickets`·`/inventory` 전부 307 정상, 외부 HTTPS 정상, 신규 오류 0건
+- 영향 파일: app/api/hospitals/export/route.ts(신규), app/hospitals/_components/ExportExcelButton.tsx(신규), app/hospitals/page.tsx, app/sales/deals/_components/DealsEntryTable.tsx, README.md
+
+---
+
+## 2026-08-04 | 계정관리(/users) 표 가로 스크롤 제거 (dev2)
+
+- 데스크톱 표가 9컬럼 nowrap으로 `max-w-6xl`을 넘쳐 가로 스크롤 발생 (역할 배지 추가로 심화) — 사용자 수정 요청
+- 셀 줄바꿈 허용(이메일 break-all, 소속·부서, 역할/상태 배지·작업 버튼 flex-wrap) + 패딩 px-4→px-3 + 이메일·연락처·로그인시각 text-xs + 컨테이너 max-w-7xl 확장, overflow-x-auto 래퍼 제거
+- tsc 0오류·빌드·PM2 재시작. 커밋·PROD 미반영 (사용자 확인 대기)
+- 영향 파일: app/users/page.tsx
+
+---
+
 ## 2026-08-04 | RBAC Lite Phase 1~3 PROD 배포
 
 - 커밋 `894ed09` push → PROD `git pull`(`3ecbc3c`→`894ed09`) — 신규 패키지 없음(`npm install` 불필요)
