@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic'
 import HospitalFilters from './_components/HospitalFilters'
 import Pagination from './_components/Pagination'
 import ExportToDriveButton from './_components/ExportToDriveButton'
+import ExportExcelButton from './_components/ExportExcelButton'
 import ImportButton from './_components/ImportButton'
 
 const PAGE_SIZE = 20
@@ -113,6 +114,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
             <p className="mt-1 text-sm text-gray-500">총 {total.toLocaleString()}개</p>
           </div>
           <div className="flex items-center gap-2">
+            <ExportExcelButton total={total} />
             {isAdmin && <ExportToDriveButton />}
             {isAdmin && <ImportButton />}
             <Link

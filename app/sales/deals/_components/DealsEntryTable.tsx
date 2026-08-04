@@ -238,6 +238,29 @@ export default function DealsEntryTable({ rows }: { rows: DealEntryRow[] }) {
   const toggleSort = (key: string) =>
     setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }))
 
+  // 엑셀 다운로드 — 화면에 보이는 그대로(필터·정렬 적용된 sorted)를 COLS 순서로 내보낸다.
+  // xlsx는 용량이 커서 클릭 시점에 동적 로드(초기 번들 제외).
+  const [exporting, setExporting] = useState(false)
+  const exportExcel = async () => {
+    setExporting(true)
+    try {
+      const XLSX = await import('xlsx')
+      const data = sorted.map((r, i) => {
+        const o: Record<string, string | number> = { 순번: i + 1 }
+        for (const c of COLS) o[c.label] = c.acc(r) ?? ''
+        return o
+      })
+      const ws = XLSX.utils.json_to_sheet(data)
+      ws['!cols'] = [{ wch: 6 }, ...COLS.map((c) => ({ wch: c.right ? 14 : c.key === 'remark' ? 30 : 16 }))]
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, '도입현황')
+      const stamp = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, '')
+      XLSX.writeFile(wb, `도입현황_${stamp}.xlsx`)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const sum = (f: (r: DealEntryRow) => number | null) => filtered.reduce((a, r) => a + (f(r) ?? 0), 0)
 
   const go = (id: number) => router.push(`/sales/deals/${id}`)
@@ -248,7 +271,14 @@ export default function DealsEntryTable({ rows }: { rows: DealEntryRow[] }) {
       <PageHeader
         title="도입현황 입력"
         description="대웅 원장(거래처별 종합현황) 컬럼 순서의 계약 이력(차수) 원장입니다. 금액은 대웅 축 값이며 씨어스 금액은 행 클릭 → 상세에서 별도 관리합니다. 단계·종별·지역은 병원·프로젝트에서 자동 표시됩니다."
-        actions={<button onClick={() => setModalOpen(true)} className={btnPrimary}>+ 등록</button>}
+        actions={
+          <div className="flex items-center gap-2">
+            <button onClick={exportExcel} disabled={exporting || sorted.length === 0} className={btnGhost}>
+              {exporting ? '생성 중…' : '엑셀 다운로드'}
+            </button>
+            <button onClick={() => setModalOpen(true)} className={btnPrimary}>+ 등록</button>
+          </div>
+        }
       />
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
