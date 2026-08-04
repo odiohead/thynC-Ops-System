@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 export async function GET(request: NextRequest) {
@@ -34,7 +35,8 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const user = await getAuthUser(request)
-  if (!user || !isAdminOrAbove(user.role)) {
+  // ADMIN 이상 또는 (USER 이상 + vehicle.manage 권한) — RBAC Phase 3 가산, VIEWER 제외
+  if (!user || (!isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'vehicle.manage'))))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

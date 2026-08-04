@@ -269,6 +269,13 @@ if (user.role !== 'ADMIN') return 403
 기존 Tiptap 사용처는 변경 금지. 데이터 형식 호환성과 마이그레이션 비용 때문.
 "통일해서 BlockNote로 가자" 같은 유혹은 거절. 두 에디터 공존이 정답.
 
+### 기능 권한 — RBAC Lite (2026-08-04, `projects/rbac_design.md`)
+
+1. **권한 키는 `lib/permissions.ts` 카탈로그 + `lib/appRoles.ts` `hasPermission` 단일 소스** — 신규 기능의 권한 요구는 **전용 풀 테이블 신설 금지**, 카탈로그에 키 추가(label·module·description)로 처리
+2. **역할은 가산 전용(additive-only)** — 기존 등급·소속·풀의 접근을 빼앗는 편입 금지. 합성은 호출부 책임: 가산 = `등급체크 OR hasPermission`, 자격 요건 = `등급체크 AND hasPermission`. 신규 권한 경로는 VIEWER 읽기 전용 원칙 보호를 위해 `isUserOrAbove AND hasPermission` 형태 권장
+3. 역할·권한·멤버를 변경하는 API는 성공 시 `invalidatePermissionCache()` 호출 필수
+4. SEERS 소속 게이트·`field_engineers`(배정 후보 데이터)는 권한이 아님 — RBAC로 대체 금지
+
 ### 티켓 시스템 규칙 (P13 확정 — 상세는 `ticket_dev_schedule.md`·`ticket_system_design.md` §2)
 
 > **명칭 (2026-07-26)**: 배정 그룹의 **UI 표기는 'Assignment Group'**(AWS SIM assigned/resolver group에 대응). DB 테이블 `ticket_queues`·API 경로 `/api/settings/ticket-queues`·코드 식별자 `queueId`는 그대로 유지한다 — 라벨만 변경(1.0의 '티켓 UI 필드명 영문화' 선례와 동일 방식).

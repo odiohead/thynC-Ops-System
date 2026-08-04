@@ -37,6 +37,8 @@ export async function GET(req: NextRequest) {
     lastLoginAt: true,
     organization: { select: { id: true, name: true, code: true } },
     department: { select: { id: true, name: true } },
+    // RBAC Lite — 보유 역할 배지 표시용 (읽기 전용, 편집은 /settings/roles)
+    appRoles: { select: { role: { select: { id: true, code: true, name: true, isActive: true } } } },
   }
 
   // 페이지네이션 모드: page 또는 limit 파라미터가 있을 때

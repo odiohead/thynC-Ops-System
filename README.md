@@ -110,6 +110,7 @@ app/
 │   │   ├── manufacturers/            # 제조사 CRUD (사용 중 삭제 409)
 │   │   ├── warehouses/               # 창고(위치) CRUD (인벤토리 귀속, 재고 잔존 409·이력 시 비활성화)
 │   │   ├── inventory-managers/       # 재고 담당자 풀 CRUD + candidates
+│   │   ├── app-roles/                # RBAC Lite 역할 CRUD + [id](수정·삭제)/permissions(권한 교체)/members(멤버 추가·회수) + candidates (SUPER_ADMIN)
 │   │   ├── nav-menus/                # 네비게이션 메뉴 관리 CRUD (SUPER_ADMIN)
 │   │   ├── notifications/            # Slack 알림 설정 GET/PUT (ADMIN — 토글·주기·DM·타입별 필드) + logs/ 발송 이력 조회
 │   │   ├── ai-assistant/             # AI 어시스턴트 런타임 설정 GET/PUT (ADMIN — effort·캐시 TTL)
@@ -213,6 +214,7 @@ app/
 │   ├── inventory-managers/           # 재고 담당자 관리 (ADMIN 이상 — 담당자 풀)
 │   ├── udi-ledger/                   # 입출고대장 문서 설정 (ADMIN 이상 — 문서번호·양식번호·개정이력)
 │   ├── vehicles/                     # 차량 관리 (ADMIN 이상)
+│   ├── roles/                        # 역할 관리 (SUPER_ADMIN 전용 — RBAC Lite 역할·권한·멤버 3구역)
 │   ├── nav-menus/                    # 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
 │   ├── notifications/                # 알림 설정 (ADMIN 이상) — 탭① SLA 기준(SlaMatrixTab) / 탭② 채널·라우팅(RoutesTab) / 탭③ 전역·DM·이력
 │   ├── ai-assistant/                 # AI 어시스턴트 설정 (ADMIN 이상 — effort·캐시 TTL, 모델은 읽기 전용 표시)
@@ -236,6 +238,8 @@ lib/
 ├── sales.ts                          # 영업/CRM v3 — 접근 권한(checkSalesAccess: ADMIN+SEERS)·딜 코드 발번(DEAL-YYYYMM-NNNN)·금액/날짜 파서·코드 3카테고리
 ├── parking.ts                        # 주차 웹할인 — pweb.kr 대행 클라이언트 (env 계정, 로그인→검색→할인권 조회→등록)
 ├── auth.ts                           # JWT 인증 유틸리티 + 역할 헬퍼
+├── permissions.ts                    # RBAC Lite 권한 키 카탈로그 (단일 소스 — 라벨·모듈 그룹, 클라이언트 안전)
+├── appRoles.ts                       # RBAC Lite 판정 헬퍼 (hasPermission·getUserPermissions — 60초 캐시·fail-closed)
 ├── prisma.ts                         # Prisma 클라이언트
 ├── s3.ts                             # AWS S3 연동 유틸리티 (업로드/삭제/presigned URL)
 ├── googleDrive.ts                    # Google Drive 연동 유틸리티
@@ -498,7 +502,17 @@ prisma/
 - `menuKey` (고유 식별자), `label` (표시 이름, 변경 가능), `href` (URL 경로)
 - `iconKey` (아이콘 매핑 키), `parentKey` (상위 메뉴 키, NULL=최상위, `settings`=설정 하위)
 - `allowedRoles` (TEXT[], 허용 역할 배열, 빈 배열=전체), `allowedOrgCodes` (TEXT[], 허용 소속 코드 배열, 빈 배열=전체)
+- `allowedPermissions` (TEXT[], 2026-08-04 RBAC Lite — 빈 배열=권한 무관, 있으면 1개 이상 보유(또는 SUPER_ADMIN)해야 노출. 판정은 기존 역할·소속 조건에 AND 추가)
 - `isActive` (활성/비활성 토글), `sortOrder` (정렬 순서)
+
+### RBAC Lite — AppRole / AppRolePermission / AppUserRole (2026-08-04, `projects/rbac_design.md`)
+- 기존 등급(`User.role` 4단계) **위에 얹는 가산 전용(additive-only)** 기능 역할 체계 — 역할은 권한을 더해줄 뿐 기존 접근을 빼앗지 않는다
+- **AppRole** (`app_roles`): 직무 단위 역할 정의 — `code`(UNIQUE, 대문자 스네이크·생성 후 변경 불가), `name`, `description`, `isActive`, `sortOrder`
+- **AppRolePermission** (`app_role_permissions`): 역할 ↔ 권한 키. UNIQUE `(roleId, permKey)` — **권한 키 카탈로그는 `lib/permissions.ts`가 단일 소스**(DB에는 키 문자열만, 카탈로그 밖 키는 판정 시 무시). 카탈로그 v1.1(Phase 3): `inventory.manage`(재고 입출고 처리)·`vehicle.manage`(차량 마스터 관리)·`sales.access`(영업 정보 접근 — SEERS 소속 축은 불변). 각 키에 `description`(적용 범위 설명 — 역할 관리 화면 표시)
+- **AppUserRole** (`app_user_roles`): 사용자 ↔ 역할 N:M. UNIQUE `(userId, roleId)`, 양쪽 Cascade
+- 판정은 `lib/appRoles.ts` `hasPermission(user, perm)` — SUPER_ADMIN 무조건 true, 활성 역할 권한 합집합, **60초 인메모리 캐시**(역할·멤버 변경 API에서 무효화), 실패 시 빈 집합(fail-closed). 권한은 JWT에 넣지 않고 DB 조회
+- 등급과의 합성은 호출부 책임 — 파일럿(자재관리): `canManageStock` = ADMIN 이상 OR 풀 OR `inventory.manage`(가산) / `canEditTxMeta` = ADMIN 이상 AND (풀 OR `inventory.manage`)(자격 요건)
+- **Phase 3 편입 (2026-08-04)**: 차량 마스터 쓰기(`/api/vehicles` 3게이트) = ADMIN OR (USER 이상 + `vehicle.manage`) / 영업 게이트(`checkSalesAccess` 등급 축) = ADMIN OR (USER 이상 + `sales.access`) — 신규 권한 경로는 `isUserOrAbove` 동반(VIEWER 읽기 전용 원칙). 티켓 담당 지정은 이미 USER 전원 개방이라 편입 보류. 컨벤션은 CLAUDE.md '기능 권한 — RBAC Lite' 참조
 
 ### Task (통합 업무) — **폐기 (P10, 2026-07-24)**
 - 티켓 시스템이 롤업 역할을 대체 — `/tasks`는 `/tickets`로 리다이렉트, `/api/tasks` 제거, nav 메뉴 비활성. **테이블은 이력 보존(561건 동결)** — 원본 모듈들의 Task 생성/동기화/삭제 코드 전부 제거(ConsultationQueue 선례). 잔존 참조 없음 — `lib/workItemReassign.ts`의 Task 미러 갱신도 P13에서 제거(연결 티켓 동기화로 대체)
@@ -550,7 +564,7 @@ prisma/
 
 ### 영업/CRM 모듈 (v4, 2026-07-29 — `projects/sales_crm_design.md`)
 
-> 접근 권한(열람·편집 공통): **ADMIN 이상 + SEERS 소속** (2026-07-30 관리자 개방 — `lib/sales.ts` `checkSalesAccess` 단일 소스, 소속은 DB 실시간 판정·모든 영업 API 재검증. nav 허용 역할은 메뉴 노출만 제어)
+> 접근 권한(열람·편집 공통): **(ADMIN 이상 또는 RBAC `sales.access` 권한 보유 USER) + SEERS 소속** (2026-07-30 관리자 개방 → 2026-08-04 RBAC Phase 3 가산 — `lib/sales.ts` `checkSalesAccess` 단일 소스, 소속은 DB 실시간 판정·모든 영업 API 재검증. nav 허용 역할은 메뉴 노출만 제어)
 > v4 구도: **병원 축**(프로필·인적정보·도입현황 파생) / **차수 축**(딜 1행 = 1도입 건) + 운영 축 조인(공사·답사·교육일 — 저장 없음). 백오피스 중 정산·세금계산서는 차수 단위로 관리(사용자 결정)
 
 #### HospitalSalesProfile (병원 영업 프로필 — 병원 축 헤더)
@@ -910,6 +924,7 @@ prisma/
 - 방문차량 주차 할인권 등록 유틸 — pweb.kr(아마노) 주차 웹할인 사이트를 서버가 대행 호출 (stateless, DB 미사용)
 - 차량번호+입차일 검색 → 입차 차량 선택 → 계정별(env `PARKING_ACCOUNTS`) 사용 가능 할인권·잔여 조회 → 할인권 1건 등록
 - **자동 계산·등록**: 주차시간 기반 무료+유료 최적 조합 미리보기(plan) → 순차 등록(auto-apply). 커버 목표 = 주차시간 + **출차 여유 10분**, 차감(부과) 대상 = 목표 − **기본 무료 30분** − 기적용분 (2026-08-03). 무료권 우선, 잔여는 903 계정 유료권 DP 최소비용 커버
+- **재입차 무료권 차단 (2026-08-04)**: 사이트 규칙상 한 차량이 그날 무료권을 쓰면 출차 후 재입차해도 무료권을 다시 못 쓴다. 입차 차량 검색은 '현재 주차 중'만 반환해 이전 입차건이 안 보이므로, **할인등록현황(`/state/doListMst`, `account_no=''` → 전 호실·출차분 포함)** 을 조회해 판정 — 이번 입차건과 `entry_date`가 다른 무료 등록이 우리 계정(`PARKING_ACCOUNTS`)에 있으면 `freeBlocked`. 자동계산은 무료를 빼고 전부 유료로 커버하고, 수동 무료 버튼은 비활성화되며 유료 게이트(`paidUnlocked`)는 즉시 해제된다. 타 입주사 계정의 무료권은 재사용 사례가 확인되어 판정에서 제외. 이력 조회 실패 시 차단하지 않음(fail-open)
 - nav 메뉴 미등록 (URL 직접 접근)
 
 ### 프로젝트 관리
@@ -1035,7 +1050,7 @@ prisma/
 - **다품목 일괄 입출고 (2026-07-30)**: 이력 페이지 '다품목 입출고' 버튼(`BulkTxModal`) — 인벤토리·유형·요청자·출고처·일자 공통 입력 + 위치·품목·수량(비시리얼)/시리얼·LOT(시리얼)는 줄별 지정, 혼합 지원. `POST /api/inventory/transactions/bulk`(입고/출고만, 세트출고·병원연결 미포함) — 줄별 검증 후 단일 트랜잭션 전부 성공/전부 롤백, 품목별 전표 1건씩 생성
 - **품목 마스터** (`/inventory/items`, ADMIN): 인벤토리 탭 + 인벤토리 컬럼. `ITEM-NNNN` 자동 발번(전체 순번), **등록 시 인벤토리 필수·수정 불가**. **모델명**·대>중>소 분류 트리·제조사·규격·단위·시리얼 여부·DeviceInfo 연결·참고단가. 검색은 품목명·모델명·코드·규격 통합. **Excel 일괄 가져오기**(가져올 인벤토리 선택 필수, 같은 인벤토리 내 품목명 중복만 스킵, K열=LOT여부)
 - **위치(창고) 관리** (`/settings/warehouses`, ADMIN): **인벤토리별 섹션으로 독립 추가/수정/삭제** — 위치명 UNIQUE는 인벤토리 내에서만(다른 인벤토리엔 같은 이름 허용)
-- **처리 권한**: 입고/출고/이동/취소 = 재고 담당자 풀(`/settings/inventory-managers`) + ADMIN 이상(`canManageStock` 서버 실시간 검사). 조회=전 로그인. 감사 로그 `resource='inventory_tx'`/`inventory_item`/`setting:*`
+- **처리 권한**: 입고/출고/이동/취소 = 재고 담당자 풀(`/settings/inventory-managers`) + ADMIN 이상 + **RBAC `inventory.manage` 권한 보유자**(2026-08-04 가산 편입 — `canManageStock` 서버 실시간 검사). 조회=전 로그인. 감사 로그 `resource='inventory_tx'`/`inventory_item`/`setting:*`
 - **PROD 배포**: Phase 10(인벤토리 완전 분리, 마이그레이션 `20260716100000`)까지 배포 완료
 
 ### GW 배치 플래너 (`/gateway-planner`, ADMIN 이상 — `function_gateway_planner.html` Phase 1·2)
@@ -1067,7 +1082,7 @@ prisma/
 - 권한: 조회=로그인 전체(VIEWER 포함), 예약·본인 수정·취소=USER 이상, 타인 예약 취소=ADMIN 이상
 - **계정별 사용 제한**: 계정관리에서 `vehicleReservationBlocked` 지정 시 해당 계정은 등록·수정·취소 불가(조회만). 서버에서 POST/PUT/DELETE 진입 시 DB 조회로 실시간 차단(403), 페이지 상단 안내 배너 노출
 - 더블부킹 방지: 앱 레벨 트랜잭션 검사 + DB EXCLUDE 제약 이중 장치
-- **차량 관리** (`/settings/vehicles`, ADMIN 이상): 차량 등록·수정·삭제·순서·활성 토글, 보드 표시 색상(ColorPicker)
+- **차량 관리** (`/settings/vehicles`, ADMIN 이상 또는 RBAC `vehicle.manage` 권한 보유 USER — 2026-08-04): 차량 등록·수정·삭제·순서·활성 토글, 보드 표시 색상(ColorPicker)
   - 예약 이력 있는 차량 삭제 → 자동 비활성화 (이력 보존)
 - 감사 로그: `resource='vehicle'` / `'vehicle_reservation'` 으로 모든 mutation 기록
 
@@ -1189,6 +1204,15 @@ prisma/
 - **KPI**(이번달 질문·토큰·예상 비용·사용자, 전월 병기) + **월별 추이 차트 12개월**(질문 수·예상 비용, 단일 축 2차트) + **사용자별 테이블**(기간 필터 — 질문·세션·입력/출력/캐시 토큰·예상 비용·최근 사용) + **병원 컨텍스트 Top 10**
 - 비용은 토큰 × 단가(AppSetting `ai_usage_pricing` — 입력/출력/캐시읽기/캐시쓰기 USD·환율, 페이지에서 편집) **추정치** — 실청구는 Anthropic Console 기준
 - 대화 내용 미노출(메타데이터만), 계정 삭제 시에도 원장 스냅샷(이름·이메일)으로 집계 유지
+
+### 역할 관리 (RBAC Lite — SUPER_ADMIN 전용, 2026-08-04)
+- 직무 단위 **역할**(권한 키 묶음)을 정의하고 사용자에게 N:M 부여 — 기존 등급 체계 위에 얹는 **가산 전용**(기존 접근 불변, `projects/rbac_design.md`)
+- `/settings/roles` 한 페이지 3구역: ① 역할 목록(추가·이름/설명 수정·활성·순서·삭제) ② 권한 할당(카탈로그 모듈별 체크박스, 토글 즉시 저장) ③ 멤버 할당(활성 사용자 검색 추가/회수)
+- 계정관리(`/users`) 목록·카드에 보유 역할 보라색 배지 표시(읽기 전용, 활성 역할만)
+- 메뉴 노출 연동: 메뉴 관리 '허용 권한' 필드 — 지정 시 해당 권한 보유자(또는 SUPER_ADMIN)에게만 노출. `/api/auth/me`가 `permissions[]`를 반환(SUPER_ADMIN은 카탈로그 전체). **메뉴 노출은 UX일 뿐, 보안은 각 API 게이트가 담당**
+- 파일럿 편입(자재관리): 역할에 `inventory.manage`를 주면 재고 담당자 풀 미등록이어도 재고 처리 가능 — 풀 등록자·ADMIN은 기존 동작 그대로
+- 모든 역할·권한·멤버 변경은 감사 로그 `resource='setting:app-roles'` 기록. 역할 회수·비활성은 60초 내(캐시 TTL) 반영, 같은 프로세스의 변경은 즉시 반영
+- 신규 기능의 권한 요구는 전용 풀 신설 대신 **카탈로그 키 추가**로 처리 (기존 모듈 편입은 Phase 3에서 건별 승인)
 
 ### 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
 - DB 기반 동적 네비게이션 메뉴 시스템
@@ -1672,6 +1696,18 @@ npm run dev
 | PUT  | `/api/settings/install-plan-status/[id]` | 설치계획 상태 수정 |
 | DELETE | `/api/settings/install-plan-status/[id]` | 설치계획 상태 삭제 (ADMIN 이상, 사용 중 409) |
 | GET  | `/api/settings/audit-logs` | 감사 로그 목록 (SUPER_ADMIN 전용, `?page=&limit=&search=&action=&resource=&from=&to=`) |
+
+### 역할 관리 (RBAC Lite — SUPER_ADMIN 전용, 2026-08-04)
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET | `/api/settings/app-roles` | 역할 전체 목록 (권한 키·멤버 포함) |
+| POST | `/api/settings/app-roles` | 역할 생성 (`code` 대문자 스네이크·`name`·`description`) |
+| PUT | `/api/settings/app-roles/[id]` | 역할 수정 (이름·설명·활성·순서 — 코드는 변경 불가) |
+| DELETE | `/api/settings/app-roles/[id]` | 역할 삭제 (권한·멤버십 Cascade) |
+| PUT | `/api/settings/app-roles/[id]/permissions` | 권한 키 전체 교체 (`lib/permissions.ts` 카탈로그 키만 허용) |
+| POST | `/api/settings/app-roles/[id]/members` | 멤버 추가 (`{userId}`) |
+| DELETE | `/api/settings/app-roles/[id]/members?userId=` | 멤버 제거(역할 회수) |
+| GET | `/api/settings/app-roles/candidates` | 멤버 추가 후보 검색 (`?roleId=&search=` — 활성·미보유 사용자) |
 
 ### 네비게이션 메뉴
 | Method | Endpoint | 설명 |

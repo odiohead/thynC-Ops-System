@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { ICON_MAP, getMenuIcon } from '@/app/components/NavIcons'
+import { PERMISSIONS, PERM_KEYS } from '@/lib/permissions'
 
 const ALL_ROLES = ['SUPER_ADMIN', 'ADMIN', 'USER', 'VIEWER'] as const
 const ROLE_LABEL: Record<string, string> = {
@@ -23,6 +24,7 @@ interface NavItem {
   groupLabel: string | null
   allowedRoles: string[]
   allowedOrgCodes: string[]
+  allowedPermissions: string[]
   isActive: boolean
   sortOrder: number
 }
@@ -45,6 +47,7 @@ export default function NavMenuSettingsPage() {
   const [addData, setAddData] = useState({
     menuKey: '', label: '', href: '', iconKey: '', groupLabel: '',
     parentKey: '', allowedRoles: [] as string[], allowedOrgCodes: [] as string[],
+    allowedPermissions: [] as string[],
   })
 
   async function fetchData() {
@@ -79,6 +82,7 @@ export default function NavMenuSettingsPage() {
       groupLabel: item.groupLabel,
       allowedRoles: [...item.allowedRoles],
       allowedOrgCodes: [...item.allowedOrgCodes],
+      allowedPermissions: [...(item.allowedPermissions ?? [])],
     })
   }
 
@@ -190,7 +194,7 @@ export default function NavMenuSettingsPage() {
         return
       }
       setIsAdding(false)
-      setAddData({ menuKey: '', label: '', href: '', iconKey: '', groupLabel: '', parentKey: '', allowedRoles: [], allowedOrgCodes: [] })
+      setAddData({ menuKey: '', label: '', href: '', iconKey: '', groupLabel: '', parentKey: '', allowedRoles: [], allowedOrgCodes: [], allowedPermissions: [] })
       await fetchData()
     } finally {
       setBusy(false)
@@ -213,6 +217,38 @@ export default function NavMenuSettingsPage() {
           <span key={r} className="inline-block rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700">
             {ROLE_LABEL[r] || r}
           </span>
+        ))}
+      </div>
+    )
+  }
+
+  // RBAC Lite — 허용 권한 (lib/permissions.ts 카탈로그)
+  function PermBadges({ perms }: { perms: string[] }) {
+    if (!perms || perms.length === 0) return <span className="text-xs text-gray-400">권한 무관</span>
+    return (
+      <div className="flex flex-wrap gap-1">
+        {perms.map(p => (
+          <span key={p} className="inline-block rounded bg-purple-100 px-1.5 py-0.5 text-xs text-purple-700">
+            {PERMISSIONS[p as keyof typeof PERMISSIONS]?.label ?? p}
+          </span>
+        ))}
+      </div>
+    )
+  }
+
+  function PermCheckboxes({ selected, onChange }: { selected: string[], onChange: (perms: string[]) => void }) {
+    return (
+      <div className="flex flex-wrap gap-2">
+        {PERM_KEYS.map(key => (
+          <label key={key} className="flex items-center gap-1 text-xs cursor-pointer" title={`${key} — ${PERMISSIONS[key].description}`}>
+            <input
+              type="checkbox"
+              checked={selected.includes(key)}
+              onChange={() => onChange(toggleRole(selected, key))}
+              className="rounded border-gray-300"
+            />
+            {PERMISSIONS[key].label}
+          </label>
         ))}
       </div>
     )
@@ -285,6 +321,7 @@ export default function NavMenuSettingsPage() {
                 <th className="px-3 py-2 text-left w-44">경로</th>
                 <th className="px-3 py-2 text-left">허용 역할</th>
                 <th className="px-3 py-2 text-left">허용 소속</th>
+                <th className="px-3 py-2 text-left">허용 권한</th>
                 <th className="px-3 py-2 text-center w-16">활성</th>
                 <th className="px-3 py-2 text-center w-28">액션</th>
               </tr>
@@ -384,6 +421,17 @@ export default function NavMenuSettingsPage() {
                         <OrgBadges codes={item.allowedOrgCodes} />
                       )}
                     </td>
+                    {/* 허용 권한 (RBAC Lite) */}
+                    <td className="px-3 py-2">
+                      {isEditing ? (
+                        <PermCheckboxes
+                          selected={editData.allowedPermissions ?? []}
+                          onChange={perms => setEditData({ ...editData, allowedPermissions: perms })}
+                        />
+                      ) : (
+                        <PermBadges perms={item.allowedPermissions} />
+                      )}
+                    </td>
                     {/* 활성 토글 */}
                     <td className="px-3 py-2 text-center">
                       <button
@@ -449,6 +497,7 @@ export default function NavMenuSettingsPage() {
 
       <p className="text-xs text-gray-500 mb-4">
         허용 역할이 비어있으면 모든 역할에게 노출됩니다. 허용 소속이 비어있으면 전체 소속에게 노출됩니다.
+        허용 권한을 지정하면 해당 기능 권한 보유자(또는 최고관리자)에게만 노출됩니다 — 메뉴 노출은 UX일 뿐, 보안은 각 API가 검사합니다.
       </p>
 
       {/* 새 메뉴 추가 */}
@@ -528,6 +577,13 @@ export default function NavMenuSettingsPage() {
               <OrgCheckboxes
                 selected={addData.allowedOrgCodes}
                 onChange={codes => setAddData({ ...addData, allowedOrgCodes: codes })}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-600 block mb-1">허용 권한 (비어있으면 권한 무관)</label>
+              <PermCheckboxes
+                selected={addData.allowedPermissions}
+                onChange={perms => setAddData({ ...addData, allowedPermissions: perms })}
               />
             </div>
           </div>

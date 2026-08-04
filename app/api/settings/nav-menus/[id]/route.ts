@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import { PERMISSIONS } from '@/lib/permissions'
 
 type Params = { params: { id: string } }
 
@@ -24,7 +25,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   }
 
   const body = await request.json()
-  const { label, iconKey, allowedRoles, allowedOrgCodes, isActive, sortOrder, groupLabel } = body
+  const { label, iconKey, allowedRoles, allowedOrgCodes, allowedPermissions, isActive, sortOrder, groupLabel } = body
 
   if (label !== undefined && !label?.trim()) {
     return NextResponse.json({ error: '메뉴명을 입력해주세요.' }, { status: 400 })
@@ -37,11 +38,19 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
   }
 
+  if (allowedPermissions !== undefined && allowedPermissions?.length) {
+    const invalid = allowedPermissions.filter((p: string) => !(p in PERMISSIONS))
+    if (invalid.length) {
+      return NextResponse.json({ error: `카탈로그에 없는 권한 키: ${invalid.join(', ')}` }, { status: 400 })
+    }
+  }
+
   const data: Record<string, unknown> = {}
   if (label !== undefined) data.label = label.trim()
   if (iconKey !== undefined) data.iconKey = iconKey || null
   if (allowedRoles !== undefined) data.allowedRoles = allowedRoles
   if (allowedOrgCodes !== undefined) data.allowedOrgCodes = allowedOrgCodes
+  if (allowedPermissions !== undefined) data.allowedPermissions = allowedPermissions
   if (isActive !== undefined) data.isActive = isActive
   if (sortOrder !== undefined) data.sortOrder = sortOrder
   if (groupLabel !== undefined) data.groupLabel = groupLabel?.trim() || null

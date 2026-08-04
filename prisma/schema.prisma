@@ -288,6 +288,7 @@ model User {
   inventoryTxActed          InventoryTransaction[]       @relation("InventoryTxActor")
   inventoryTxCanceled       InventoryTransaction[]       @relation("InventoryTxCanceler")
   udiLedgerChecks           UdiLedgerCheck[]             @relation("UdiLedgerChecker")
+  appRoles                  AppUserRole[]
   aiChatSessions            AiChatSession[]
   aiUsageLogs               AiUsageLog[]
   aiFeedbacks               AiFeedback[]
@@ -714,12 +715,60 @@ model NavMenuItem {
   groupLabel      String?  @map("group_label") @db.VarChar(50) // 설정 하위 메뉴 기능별 그룹 (네비 그룹 헤더)
   allowedRoles    String[] @default([]) @map("allowed_roles")
   allowedOrgCodes String[] @default([]) @map("allowed_org_codes")
+  allowedPermissions String[] @default([]) @map("allowed_permissions") // RBAC Lite — 비면 통과, 있으면 1개 이상 보유(또는 SUPER_ADMIN) 필요
   isActive        Boolean  @default(true) @map("is_active")
   sortOrder       Int      @default(0) @map("sort_order")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("nav_menu_items")
+  @@schema("public")
+}
+
+// ─── RBAC Lite (projects/rbac_design.md) ───
+// 역할(직무 단위 권한 묶음)을 기존 등급(User.role) 위에 가산 전용으로 얹는다.
+// 권한 키 카탈로그는 lib/permissions.ts가 단일 소스 — DB에는 키 문자열만 저장.
+
+// 역할 정의 (예: 재고담당)
+model AppRole {
+  id          Int                 @id @default(autoincrement())
+  code        String              @unique @db.VarChar(50) // 대문자 스네이크 (예: INVENTORY_MANAGER)
+  name        String              @db.VarChar(100)
+  description String?             @db.VarChar(300)
+  isActive    Boolean             @default(true) @map("is_active")
+  sortOrder   Int                 @default(0) @map("sort_order")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+  permissions AppRolePermission[]
+  users       AppUserRole[]
+
+  @@map("app_roles")
+  @@schema("public")
+}
+
+// 역할 ↔ 권한 키
+model AppRolePermission {
+  id      Int     @id @default(autoincrement())
+  roleId  Int     @map("role_id")
+  permKey String  @map("perm_key") @db.VarChar(100) // lib/permissions.ts 카탈로그의 키
+  role    AppRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permKey])
+  @@map("app_role_permissions")
+  @@schema("public")
+}
+
+// 사용자 ↔ 역할
+model AppUserRole {
+  id        Int      @id @default(autoincrement())
+  userId    String   @map("user_id")
+  roleId    Int      @map("role_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      AppRole  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@map("app_user_roles")
   @@schema("public")
 }
 

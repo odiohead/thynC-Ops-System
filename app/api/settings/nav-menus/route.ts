@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import { PERMISSIONS } from '@/lib/permissions'
 
 export async function GET(request: NextRequest) {
   const user = await getAuthUser(request)
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json()
-  const { menuKey, label, href, iconKey, parentKey, allowedRoles, allowedOrgCodes, sortOrder, groupLabel } = body
+  const { menuKey, label, href, iconKey, parentKey, allowedRoles, allowedOrgCodes, allowedPermissions, sortOrder, groupLabel } = body
 
   if (!menuKey?.trim()) {
     return NextResponse.json({ error: '메뉴 키를 입력해주세요.' }, { status: 400 })
@@ -50,6 +51,13 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  if (allowedPermissions?.length) {
+    const invalid = allowedPermissions.filter((p: string) => !(p in PERMISSIONS))
+    if (invalid.length) {
+      return NextResponse.json({ error: `카탈로그에 없는 권한 키: ${invalid.join(', ')}` }, { status: 400 })
+    }
+  }
+
   const existing = await prisma.navMenuItem.findUnique({ where: { menuKey: menuKey.trim() } })
   if (existing) {
     return NextResponse.json({ error: '이미 존재하는 메뉴 키입니다.' }, { status: 409 })
@@ -65,6 +73,7 @@ export async function POST(request: NextRequest) {
       groupLabel: groupLabel?.trim() || null,
       allowedRoles: allowedRoles ?? [],
       allowedOrgCodes: allowedOrgCodes ?? [],
+      allowedPermissions: allowedPermissions ?? [],
       sortOrder: sortOrder ?? 0,
     },
   })

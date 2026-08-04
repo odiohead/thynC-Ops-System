@@ -1,10 +1,12 @@
 import { prisma } from '@/lib/prisma'
-import { isAdminOrAbove, type JWTPayload } from '@/lib/auth'
+import { isAdminOrAbove, isUserOrAbove, type JWTPayload } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 
 /**
  * 영업/CRM 접근 권한 (서버 강제) — projects/sales_crm_design.md §6
  *
- * **ADMIN 이상 + SEERS 소속** 열람·편집 (2026-07-30 관리자 개방 — 임시 SUPER_ADMIN 제한 해제).
+ * **(ADMIN 이상 또는 RBAC `sales.access` 권한) + SEERS 소속** 열람·편집
+ * (2026-07-30 관리자 개방 → 2026-08-04 RBAC Phase 3 가산 — 등급 축만 확장, 소속 축 불변).
  * nav 허용 역할은 메뉴 노출만 제어하며, 실제 접근은 이 게이트가 단일 소스다.
  * 소속·활성 여부는 JWT가 아니라 DB 실시간 조회로 판정 (AI 어시스턴트 access.ts 선례).
  */
@@ -15,8 +17,9 @@ export type SalesAccessDenial = { status: number; error: string }
 
 /** 통과면 null, 차단이면 응답에 쓸 상태코드·메시지 */
 export async function checkSalesAccess(user: JWTPayload): Promise<SalesAccessDenial | null> {
-  if (!isAdminOrAbove(user.role)) {
-    return { status: 403, error: '영업 정보는 ADMIN 이상만 열람할 수 있습니다.' }
+  // 권한 경로는 USER 등급 이상만 (VIEWER 읽기 전용 원칙 — 영업 게이트는 열람·편집 공통이라 VIEWER 개방 불가)
+  if (!isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'sales.access')))) {
+    return { status: 403, error: '영업 정보는 ADMIN 이상 또는 영업 정보 접근 권한 보유자만 열람할 수 있습니다.' }
   }
   const row = await prisma.user.findUnique({
     where: { id: user.userId },

@@ -4,6 +4,47 @@
 
 ---
 
+## 2026-08-04 | RBAC Lite Phase 3 — 확산: 차량·영업 편입 + 권한 설명 표시 + 컨벤션 등재 (dev2)
+
+- Phase 1·2에 이어 같은 날 사용자 승인으로 Phase 3 진행. **DB 변경 없음**(권한 키는 카탈로그 코드 — 마이그레이션 불필요)
+- **카탈로그 확장** (`lib/permissions.ts`): `description` 필드 신설(권한이 어디까지 가능한지 화면에 명시 — 사용자 지적 반영) + 키 2종 추가
+  - `vehicle.manage`(차량): 차량 마스터 등록·수정·삭제 — `/api/vehicles` POST·PUT·DELETE 3게이트를 `ADMIN OR (USER 이상 + 권한)`으로 확장
+  - `sales.access`(영업): 영업현황·병원 영업 정보 열람·편집 — `lib/sales.ts` `checkSalesAccess` **등급 축만** `ADMIN OR (USER 이상 + 권한)`으로 확장. **SEERS 소속 축 불변**(비SEERS는 권한 있어도 403), 게이트 단일 소스라 사용처 16파일 자동 반영
+- **VIEWER 보호**: 신규 권한 경로에 `isUserOrAbove` 요건 동반 — VIEWER는 권한을 부여받아도 쓰기 게이트 통과 불가(읽기 전용 원칙). 스모크로 검증
+- **티켓 편입 보류**: 후보였던 '티켓 담당 지정'은 현행 게이트가 이미 USER 이상 전원 개방(VIEWER만 제외)이라 **가산할 것이 없음** — 키 추가 안 함(유령 권한 방지). 티켓에서 등급 제한이 새로 필요해지면 그때 건별 설계
+- **역할 관리 UI**: 권한 체크박스 아래 적용 범위 설명 표시, 메뉴 관리 권한 체크박스 title에도 설명
+- **CLAUDE.md 코딩 컨벤션 등재**: "기능 권한은 카탈로그+`hasPermission` 단일 소스, 전용 풀 신설 금지, 가산 전용, 캐시 무효화 필수, SEERS 게이트·field_engineers는 RBAC 대체 금지"
+- **메뉴 노출 참고**: `/settings/vehicles`·영업 nav 행은 허용 역할이 ADMIN으로 제한돼 있어, 권한 보유 USER에게 메뉴를 보이려면 메뉴 관리에서 해당 행의 허용 역할을 비우고 허용 권한을 지정(운영자 셀프서비스 — DB 변경 안 함)
+- 검증: tsc 0오류 · P3 스모크 6/6(SEERS USER 영업 개통/회수, VIEWER 403 유지, 비SEERS 소속 축 403, vehicle.manage 판정) · 힙 4GB 빌드 · PM2 재시작
+- 선택적 후속(재고 풀→역할 이관·풀 폐기, 라벨 '역할→등급' 정리, 개인 플래그 정리)은 별도 승인 대기
+- 영향 파일: lib/permissions.ts·lib/sales.ts / app/api/vehicles/{route,[id]/route}.ts / app/settings/roles/page.tsx·app/settings/nav-menus/page.tsx / CLAUDE.md·README.md·projects/rbac_design.md
+
+---
+
+## 2026-08-04 | RBAC Lite Phase 1·2 — 기능 역할 권한 체계 + 자재관리 파일럿 (dev2)
+
+- 설계안 `projects/rbac_design.md` 검토·승인 후 Phase 1+2 동시 착수 (설계 게이트 통과)
+- **원칙**: 역할은 기존 등급(`User.role`) 위에 얹는 **가산 전용(additive-only)** — 권한을 더해줄 뿐 기존 접근을 빼앗지 않음. 등급 4단계·SEERS 소속 게이트·`field_engineers` 풀은 불변
+- **Phase 1 — 기반**
+  - 3테이블 신설: `app_roles`(역할) / `app_role_permissions`(역할↔권한 키) / `app_user_roles`(사용자↔역할 N:M). 마이그레이션 `20260804180000_add_rbac_tables`
+  - `lib/permissions.ts`(신설): 권한 키 카탈로그 **단일 소스** — v1은 `inventory.manage` 1키(빈 체계 방지, 모듈 편입 시 추가). 클라이언트 안전
+  - `lib/appRoles.ts`(신설): `hasPermission`(SUPER_ADMIN 무조건 true, 활성 역할 권한 합집합)·`getUserPermissions`(60초 인메모리 캐시, fail-closed)·`invalidatePermissionCache`(변경 API에서 호출)
+  - 설정 UI `/settings/roles`(SUPER_ADMIN): 역할 목록 CRUD(순서↑↓·활성 토글) + 권한 모듈별 체크박스(토글 즉시 저장) + 멤버 검색 추가/회수
+  - API: `/api/settings/app-roles`(GET/POST) + `[id]`(PUT/DELETE — 코드 변경 불가·삭제 Cascade) + `[id]/permissions`(PUT 전체 교체) + `[id]/members`(POST/DELETE) + `candidates`(후보 검색). 전부 SUPER_ADMIN 게이트 + `logAudit`(`setting:app-roles`)
+  - nav '역할 관리' 행 (조직·계정 그룹, sort 22) — 마이그레이션 `20260804180100_add_rbac_nav_menu`
+  - 계정관리(`/users`): 목록·모바일 카드에 보유 역할 보라 배지(활성 역할만, 읽기 전용)
+- **Phase 2 — 파일럿·메뉴 연동**
+  - `canManageStock` = ADMIN OR 풀 **OR `inventory.manage`**(가산) / `canEditTxMeta` = ADMIN AND (풀 **OR `inventory.manage`**)(자격 요건) — 풀 등록자·ADMIN 기존 동작 불변, 수정은 `lib/inventory.ts` 한 곳(호출 10파일 전부 헬퍼 경유)
+  - `nav_menu_items.allowed_permissions TEXT[]` 컬럼(`20260804180200`) — 비면 통과, 있으면 1개 이상 보유(또는 SUPER_ADMIN) 필요. Navigation `isMenuVisible`에 AND 조건 추가 + 폴백 메뉴 타입 갱신
+  - `/api/auth/me`에 `permissions[]` 추가(SUPER_ADMIN은 카탈로그 전체) — 기존 응답 필드 불변
+  - 메뉴 관리(`/settings/nav-menus`): '허용 권한' 컬럼·체크박스·배지 + 추가 폼 필드 + API 카탈로그 키 검증
+- **검증**: tsc 0오류 · 스모크 12/12 통과(USER 등급·풀 미등록자가 역할 부여로 canManageStock true, canEditTxMeta는 등급 요건대로 false, 역할 비활성·삭제 Cascade·캐시 무효화 왕복, 테스트 데이터 원상복구)
+- 빌드·PM2 재시작(dev2)까지 실행. **PROD 미반영** — 배포 시 `prisma migrate deploy` 3건이면 됨(DML 별도 없음)
+- Phase 3(모듈 확산·CLAUDE.md 컨벤션 등재)·선택 후속(풀 이관·라벨 정리)은 건별 승인 대기
+- 영향 파일: prisma/schema.prisma·마이그레이션 3건 / lib/permissions.ts·lib/appRoles.ts(신규)·lib/inventory.ts / app/api/settings/app-roles/**(신규)·app/api/settings/nav-menus/{route,[id]/route}.ts·app/api/auth/me/route.ts·app/api/users/route.ts / app/settings/roles/page.tsx(신규)·app/settings/nav-menus/page.tsx·app/users/page.tsx·app/components/Navigation.tsx / README.md·projects/rbac_design.md
+
+---
+
 ## 2026-08-04 | UDI 입출고대장 PROD 배포
 
 - 커밋 `3ecbc3c` push → PROD `git pull`(`b67cfad`→`3ecbc3c`)
@@ -43,6 +84,22 @@
 2. **설정 > 기기 관리의 UDI 진입점 제거** — 자재관리와 무관한 메뉴에 UDI를 얹었다가 사용자 지적으로 철거(해당 페이지·API는 `git diff` 0줄로 원상복구). 입력은 품목 관리 한 곳으로 통일
 3. **문서 단위를 모델×LOT → 모델 1부로 변경** — 원 양식의 UDI·LOT NO 컬럼이 행마다 있는 이유가 한 장에 여러 UDI×LOT을 담기 위한 것이었음
 - 영향 파일: lib/itemUdi.ts·lib/inventoryLot.ts·lib/udiLedger.ts·lib/udiLedgerDocx.ts(신규) / app/inventory/ledger/·app/settings/udi-ledger/·app/api/inventory/ledger/{route,check,docx}·app/api/settings/udi-ledger/(신규) / app/inventory/items/{page,[id]/page}.tsx·app/api/inventory/items/{route,[id]/route}.ts·app/api/inventory/items/[id]/lot-history·app/api/inventory/transactions/[id]·app/inventory/components/{TransactionModal,BulkTxModal,TxEditModal}·app/inventory/{page,transactions/page,transactions/[id]/page}·app/api/inventory/transactions/export / prisma/schema.prisma·마이그레이션 4건·assets/templates/
+
+---
+
+## 2026-08-04 | 주차 자동계산 — 재입차 무료권 차단 판정 추가 (dev2)
+
+- 증상: 그날 무료권을 이미 쓴 차량이 출차 후 재입차하면 사이트가 무료권 재사용을 거부하는데, 자동계산은 매번 무료를 포함시켜 등록 단계에서 실패
+- **원인**: 입차 차량 검색(`listForDiscount`)은 '현재 주차 중'만 반환 → 이전 입차건의 무료 사용 이력을 볼 수 없었음
+- **판정 소스 발견**: 사이트 메뉴 '할인등록현황' → `POST /state/doListMst`. `account_no=''`로 조회하면 **출차 차량 포함·전 호실 등록분**이 나오고, 행에 `entry_date`(입차시각)·`discount_price`(0이면 무료)·`account_no`·`del_yn`이 있어 입차건별 무료 사용 판정 가능
+- **구현**(`lib/parking.ts`): `listDayDiscounts`/`fetchDayDiscounts`/`earlierFreeRows` 신설. `carDiscountState`에 `freeBlocked`·`freeBlockReason`·`freeCheckFailed` 추가 → `planAutoDiscount`가 차단 시 무료를 계획에서 제외하고 전부 유료로 커버, `registerDiscount`는 수동 무료 등록을 사이트 에러 대신 명확한 안내로 차단, `paidUnlocked`는 차단 시 즉시 해제(무료 게이트를 영원히 못 넘는 문제 방지)
+- **조회 구간**: 입차일 + 사이트 영업일(등록 페이지 기본값)을 함께 덮음 — 영업일 경계가 자정을 넘겨(08-04 08시에도 영업일이 08-03) 어긋나는 것 방지
+- **판정 범위를 우리 계정으로 한정**: 실측 중 타 입주사(B133·B137)가 같은 날 같은 차량에 무료권을 재등록한 사례 확인 → 계약별로 규칙이 달라, `PARKING_ACCOUNTS`(901·902·903·909) 등록분만 차단 근거로 사용. 이력 조회 실패 시 차단하지 않음(fail-open — 과다 차단은 불필요한 유료 지출)
+- **실데이터 검증**: 07-20~08-03 이력에서 우리 계정 관여 재입차 3건(196호2841·49다2834·108도4804) 전부 "첫 입차 무료 등록 → 재입차 유료만" 패턴이었고, 판정 결과가 실제와 100% 일치. 모순(차단 판정인데 무료가 실제 등록됨) 0건
+- UI(`app/parking/page.tsx`): 자동계산 미리보기·계정 카드 상단에 재입차 안내 배너, 무료 버튼 비활성('사용 불가(재입차)')
+- 정리: 미사용이 된 `getCoupons`·`CouponInfo` 제거(registerDiscount가 원시 응답 재사용)
+- tsc 0오류 · dev2 빌드·재시작·스모크 정상. **PROD 미반영** (사용자 요청 대기)
+- 영향 파일: lib/parking.ts, app/parking/page.tsx, README.md
 
 ---
 

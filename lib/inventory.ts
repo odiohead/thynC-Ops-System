@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { isAdminOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { Prisma } from '@prisma/client'
 
 /**
@@ -16,20 +17,26 @@ export async function nextItemCode(): Promise<string> {
 }
 
 /**
- * 재고 처리 권한: ADMIN 이상이거나 재고 담당자 풀(inventory_managers) 등록자.
+ * 재고 처리 권한: ADMIN 이상이거나 재고 담당자 풀(inventory_managers) 등록자,
+ * 또는 RBAC 역할로 'inventory.manage' 권한 보유자 (rbac_design.md Phase 2 — 가산 전용).
  * function_wms.md §5 — 서버에서 DB 실시간 조회로 확인 (JWT에 넣지 않음).
  */
 export async function canManageStock(user: { userId: string; role: string }): Promise<boolean> {
   if (isAdminOrAbove(user.role)) return true
   const mgr = await prisma.inventoryManager.findUnique({ where: { userId: user.userId } })
-  return !!mgr
+  if (mgr) return true
+  return hasPermission(user, 'inventory.manage')
 }
 
-/** 전표 메타 수정 권한 — 관리자(ADMIN 이상)이면서 재고 담당자 풀에도 등록된 사용자만 (2026-07-20) */
+/**
+ * 전표 메타 수정 권한 — 관리자(ADMIN 이상)이면서 재고 담당자 풀 등록 또는
+ * 'inventory.manage' 권한 보유자 (2026-07-20, RBAC 편입 2026-08-04 — 등급은 자격 요건으로 유지)
+ */
 export async function canEditTxMeta(user: { userId: string; role: string }): Promise<boolean> {
   if (!isAdminOrAbove(user.role)) return false
   const mgr = await prisma.inventoryManager.findUnique({ where: { userId: user.userId } })
-  return !!mgr
+  if (mgr) return true
+  return hasPermission(user, 'inventory.manage')
 }
 
 /** KST 오늘 날짜 (YYYY-MM-DD) */

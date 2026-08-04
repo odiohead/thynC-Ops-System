@@ -27,6 +27,7 @@ interface User {
   lastLoginAt: string | null
   organization: Organization | null
   department: Department | null
+  appRoles?: { role: { id: number; code: string; name: string; isActive: boolean } }[]
 }
 
 const ROLE_LABEL: Record<string, string> = {
@@ -411,6 +412,11 @@ export default function UsersPage() {
                     예약제한
                   </span>
                 )}
+                {user.appRoles?.filter((r) => r.role.isActive).map((r) => (
+                  <span key={r.role.id} className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 font-medium text-purple-700" title={`역할: ${r.role.code}`}>
+                    {r.role.name}
+                  </span>
+                ))}
               </div>
               {(user.id === currentUser?.id || isAdmin) && (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -486,9 +492,17 @@ export default function UsersPage() {
                 <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{user.organization?.name ?? '-'}</td>
                 <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{user.department?.name ?? '-'}</td>
                 <td className="px-4 py-3 whitespace-nowrap">
-                  <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${ROLE_CLASS[user.role] ?? 'bg-gray-100 text-gray-700'}`}>
-                    {ROLE_LABEL[user.role] ?? user.role}
-                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${ROLE_CLASS[user.role] ?? 'bg-gray-100 text-gray-700'}`}>
+                      {ROLE_LABEL[user.role] ?? user.role}
+                    </span>
+                    {/* RBAC Lite 보유 역할 배지 (읽기 전용 — 편집은 설정 > 역할 관리) */}
+                    {user.appRoles?.filter((r) => r.role.isActive).map((r) => (
+                      <span key={r.role.id} className="inline-flex items-center rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-700" title={`역할: ${r.role.code}`}>
+                        {r.role.name}
+                      </span>
+                    ))}
+                  </div>
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap">
                   <div className="flex items-center gap-1">

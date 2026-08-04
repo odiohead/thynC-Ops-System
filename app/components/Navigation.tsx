@@ -61,6 +61,7 @@ interface NavItem {
   groupLabel?: string | null // 설정 하위 메뉴 기능별 그룹 헤더
   allowedRoles: string[]
   allowedOrgCodes: string[]
+  allowedPermissions?: string[] // RBAC Lite — 비면 통과, 있으면 1개 이상 보유(또는 SUPER_ADMIN) 필요
   sortOrder: number
 }
 
@@ -86,12 +87,21 @@ const FALLBACK_MENUS: NavItem[] = [
 ]
 
 /* ── 메뉴 노출 여부 판단 ── */
+/* 메뉴 노출은 UX일 뿐, 보안은 각 API 게이트가 담당 (rbac_design.md §8) */
 
-function isMenuVisible(item: NavItem, role: UserRole | null, orgCode: string | null): boolean {
+function isMenuVisible(
+  item: NavItem,
+  role: UserRole | null,
+  orgCode: string | null,
+  permissions: string[]
+): boolean {
   if (!role) return false
   if (item.allowedRoles.length > 0 && !item.allowedRoles.includes(role)) return false
   if (item.allowedOrgCodes.length > 0) {
     if (!orgCode || !item.allowedOrgCodes.includes(orgCode)) return false
+  }
+  if (item.allowedPermissions && item.allowedPermissions.length > 0 && role !== 'SUPER_ADMIN') {
+    if (!item.allowedPermissions.some((p) => permissions.includes(p))) return false
   }
   return true
 }
@@ -106,6 +116,7 @@ export default function Navigation() {
   const [userRole, setUserRole] = useState<UserRole | null>(null)
   const [userName, setUserName] = useState('')
   const [userOrgCode, setUserOrgCode] = useState<string | null>(null)
+  const [userPermissions, setUserPermissions] = useState<string[]>([]) // RBAC Lite 권한 키
   const [menuItems, setMenuItems] = useState<NavItem[]>([])
   const [menuLoaded, setMenuLoaded] = useState(false)
   const menuFetched = useRef(false)
@@ -120,10 +131,12 @@ export default function Navigation() {
           setUserRole(data.role)
           setUserName(data.name)
           setUserOrgCode(data.organization?.code ?? null)
+          setUserPermissions(Array.isArray(data.permissions) ? data.permissions : [])
         } else {
           setUserRole(null)
           setUserName('')
           setUserOrgCode(null)
+          setUserPermissions([])
         }
       })
       .catch(() => {})
@@ -173,14 +186,14 @@ export default function Navigation() {
   // 메뉴 분류
   const topLevelItems = menuItems
     .filter(i => i.parentKey === null && i.menuKey !== 'settings' && i.menuKey !== 'users')
-    .filter(i => isMenuVisible(i, userRole, userOrgCode))
+    .filter(i => isMenuVisible(i, userRole, userOrgCode, userPermissions))
     .sort((a, b) => a.sortOrder - b.sortOrder)
 
   const settingsGroup = menuItems.find(i => i.menuKey === 'settings')
-  const settingsVisible = settingsGroup && isMenuVisible(settingsGroup, userRole, userOrgCode)
+  const settingsVisible = settingsGroup && isMenuVisible(settingsGroup, userRole, userOrgCode, userPermissions)
   const settingsChildren = menuItems
     .filter(i => i.parentKey === 'settings')
-    .filter(i => isMenuVisible(i, userRole, userOrgCode))
+    .filter(i => isMenuVisible(i, userRole, userOrgCode, userPermissions))
     .sort((a, b) => a.sortOrder - b.sortOrder)
 
   // 설정 하위 메뉴를 기능별 그룹으로 묶기 (그룹 순서 = 정렬 후 첫 등장 순, 그룹 없는 항목은 맨 앞 무제목 그룹)
@@ -194,7 +207,7 @@ export default function Navigation() {
   }
 
   const usersItem = menuItems.find(i => i.menuKey === 'users')
-  const usersVisible = usersItem && isMenuVisible(usersItem, userRole, userOrgCode)
+  const usersVisible = usersItem && isMenuVisible(usersItem, userRole, userOrgCode, userPermissions)
 
   const sidebarContent = (
     <div className="flex h-full flex-col">
