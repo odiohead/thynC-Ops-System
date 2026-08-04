@@ -18,6 +18,7 @@
 | [ops_system_2.0_plan.html](ops_system_2.0_plan.html) | **2.0 기획안** (설계안 아님) — 6테마 18항목 고도화 지도 (설치 기반·반복 매출·고객 경험·현장 운영·인텔리전스·기반), 실측 데이터 진단 + Wave 우선순위 | **기획 검토 대기** |
 | [rbac_design.md](rbac_design.md) | 기능 역할(Role) 권한 체계 — RBAC Lite (등급 위에 가산 전용 역할·권한 카탈로그·`hasPermission`, 파일럿 자재관리, 2.0 테마 F 연계) | **설계 검토 대기 — 미착수** |
 | [notification_v2_design.md](notification_v2_design.md) | 알림 v2 — 티켓 단일 소스 재편 (delay-rules 폐기·그룹/SLA정책별 채널·CTI SLA·임박 배선·전역 요약, P1~P5) | **완료 (PROD 배포 2026-08-03)** |
+| [inventory_udi_ledger_design.md](inventory_udi_ledger_design.md) | 자재관리 UDI 입출고대장 — GMP 양식 F707-1(rev.4) docx 자동 생성 (device_info 모델 마스터 승격·LOT 해석 이원화 해소·문서 메타 편집, P0~P5) | **P0~P5 구현 완료 (dev2, 2026-08-04) — PROD 미반영** |
 
 ## 루트에 남아 있는 1.0 문서
 

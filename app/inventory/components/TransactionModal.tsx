@@ -274,7 +274,8 @@ export default function TransactionModal({
       warehouseId,
       toWarehouseId: txType === 'MOVE' ? toWarehouseId : null,
       quantity: effectiveQty,
-      destination: txType === 'OUT' ? destination.trim() || null : null,
+      // 상대처 — IN=발송처 / OUT=출고처 (MOVE는 사내 이동이라 미사용)
+      destination: txType === 'MOVE' ? null : destination.trim() || null,
       requester: txType === 'MOVE' ? null : requester.trim() || null,
       hospitalCode: canLinkHospital ? hospital?.hospitalCode ?? null : null,
       workType: canLinkHospital ? work?.workType ?? null : null,
@@ -410,6 +411,18 @@ export default function TransactionModal({
                 <input type="date" value={txDate} onChange={(e) => setTxDate(e.target.value)} className={inputCls} />
                 <p className="mt-0.5 text-[11px] text-gray-400">실제 {txType === 'IN' ? '입고' : '출고'}한 날짜 — 지난 날짜로 소급 등록 가능</p>
               </div>
+            </div>
+          )}
+
+          {/* 입고: 발송처 — UDI 입출고대장 '발송처정보' 칸 소스 */}
+          {item && txType === 'IN' && (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                발송처 <span className="font-normal text-gray-400">(선택)</span>
+              </label>
+              <input value={destination} onChange={(e) => setDestination(e.target.value)} className={inputCls}
+                placeholder="예: 평택본사(판매용), ○○병원(반납)" />
+              <p className="mt-0.5 text-[11px] text-gray-400">물건을 보내온 곳 — 입출고대장의 발송처정보로 출력됩니다.</p>
             </div>
           )}
 

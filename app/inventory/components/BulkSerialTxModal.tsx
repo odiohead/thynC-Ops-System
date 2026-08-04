@@ -63,7 +63,7 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
     fd.append('txDate', txDate)
     fd.append('warehouseId', String(warehouseId))
     fd.append('reasonId', String(reasonId))
-    if (txType === 'OUT' && destination.trim()) fd.append('destination', destination.trim())
+    if (destination.trim()) fd.append('destination', destination.trim()) // IN=발송처 / OUT=출고처
     if (requester.trim()) fd.append('requester', requester.trim())
     return fd
   }
@@ -153,16 +153,22 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
             <label className="mb-1 block text-xs font-medium text-gray-500">요청자 {txType === 'OUT' ? '(필수)' : '(선택)'}</label>
             <input value={requester} onChange={(e) => setRequester(e.target.value)} placeholder={txType === 'OUT' ? '예: 대웅 홍길동, 자체 처리' : '요청자가 있으면 입력'} className={inputCls} />
           </div>
-          <div className={txType === 'OUT' ? 'col-span-2' : ''}>
+          <div>
             <label className="mb-1 block text-xs font-medium text-gray-500">{txType === 'IN' ? '입고일' : '출고일'} (소급 가능)</label>
             <input type="date" value={txDate} onChange={(e) => { setTxDate(e.target.value); resetPreview() }} className={inputCls} />
           </div>
-          {txType === 'OUT' && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-gray-500">출고처 (선택)</label>
-              <input value={destination} onChange={(e) => { setDestination(e.target.value) }} placeholder="예: OO병원, 유관부서" className={inputCls} />
-            </div>
-          )}
+          {/* 상대처 — IN=발송처 / OUT=출고처 (UDI 입출고대장의 발송처·입고처정보 소스) */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">
+              {txType === 'IN' ? '발송처' : '출고처'} (선택)
+            </label>
+            <input
+              value={destination}
+              onChange={(e) => { setDestination(e.target.value) }}
+              placeholder={txType === 'IN' ? '예: 평택본사(판매용), OO병원(반납)' : '예: OO병원, 유관부서'}
+              className={inputCls}
+            />
+          </div>
           <div className="col-span-2">
             <label className="mb-1 block text-xs font-medium text-gray-500">Excel 파일 (.xlsx)</label>
             <input

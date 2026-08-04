@@ -287,6 +287,7 @@ model User {
   inventoryManager          InventoryManager?
   inventoryTxActed          InventoryTransaction[]       @relation("InventoryTxActor")
   inventoryTxCanceled       InventoryTransaction[]       @relation("InventoryTxCanceler")
+  udiLedgerChecks           UdiLedgerCheck[]             @relation("UdiLedgerChecker")
   aiChatSessions            AiChatSession[]
   aiUsageLogs               AiUsageLog[]
   aiFeedbacks               AiFeedback[]
@@ -775,6 +776,15 @@ model InventoryItem {
   tags            String[]                 @default([]) // deprecated (2026-07-20) — 태그는 개체(InventoryUnit.tags) 단위로 이관, 백업 보존
   deviceInfoId    Int?                     @map("device_info_id")
   manufacturerId  Int?                     @map("manufacturer_id")
+  // UDI 입출고대장 (2026-08-04 — projects/inventory_udi_ledger_design.md)
+  // UDI-DI는 품목 속성이다: 같은 모델이라도 사양·포장 변경으로 UDI가 바뀌면 신규 품목으로 분리한다.
+  // 재고 버킷 PK가 (item_id, warehouse_id, inventory_id, lot_no)이므로 재고 차원이 곧 UDI × LOT이 된다.
+  // 인벤토리별로 품목이 분리되어 같은 UDI가 복수 품목에 존재 → UNIQUE 아님(부분 인덱스만)
+  udiDi           String?                  @map("udi_di") @db.VarChar(50) // UDI-DI (GS1 GTIN). NULL=미등록 → 대장 생성 대상 아님
+  ledgerName      String?                  @map("ledger_name") @db.VarChar(100) // 대장 표기 상품명 (미입력 시 modelName 폴백)
+  productClass    String?                  @map("product_class") @db.VarChar(20) // 완제품 | 반제품 | 원자재
+  materialNo      String?                  @map("material_no") @db.VarChar(50) // 원자재식별 NO (완제품은 NULL → '-' 출력)
+  packUnit        String                   @default("EA") @map("pack_unit") @db.VarChar(20) // 포장단위
   refPrice        Int?                     @map("ref_price")
   memo            String?
   isActive        Boolean                  @default(true) @map("is_active")
@@ -793,6 +803,7 @@ model InventoryItem {
 
   @@index([categoryId])
   @@index([inventoryId])
+  @@index([udiDi]) // 대장은 UDI-DI로 품목을 묶는다 (SQL은 udi_di IS NOT NULL 부분 인덱스)
   @@map("inventory_items")
   @@schema("public")
 }
@@ -873,7 +884,7 @@ model InventoryTransaction {
   txDate        DateTime                   @default(now()) @map("tx_date") @db.Date // 입출고일 — 업무 기준일 (소급 등록 지원, 2026-07-20)
   transferDate  DateTime?                  @map("transfer_date") @db.Date // deprecated — 과거 TRANSFER 이관일자
   transferPrice Int?                       @map("transfer_price") // deprecated — 과거 TRANSFER 이관 단가
-  destination   String?                    @db.VarChar(100) // OUT 출고처 (자유 텍스트 — 유관부서·거래처 등)
+  destination   String?                    @db.VarChar(100) // 상대처 (자유 텍스트) — OUT: 출고처 / IN: 발송처(2026-08-04 UDI 대장 도입 시 겸용). MOVE는 미사용
   requester     String?                    @db.VarChar(100) // 요청자 (자유 텍스트 — OUT 필수, IN 선택)
   lotNo         String?                    @map("lot_no") @db.VarChar(100) // 전표 단위 LOT — 비시리얼 LOT 품목(선택) / 시리얼 품목 단건 입고 시 표기용
   hospitalCode  String?                    @map("hospital_code")
@@ -897,6 +908,7 @@ model InventoryTransaction {
   parentTx      InventoryTransaction?      @relation("TxSetComponents", fields: [parentTxId], references: [id])
   childTxs      InventoryTransaction[]     @relation("TxSetComponents")
   units         InventoryTransactionUnit[]
+  ledgerChecks  UdiLedgerCheck[]
 
   @@index([itemId, createdAt(sort: Desc)])
   @@index([hospitalCode])
@@ -932,6 +944,22 @@ model InventoryUnit {
   @@index([hospitalCode])
   @@index([inventoryId])
   @@map("inventory_units")
+  @@schema("public")
+}
+
+// UDI 입출고대장 — '동일 LOT NO 제품 출고완료' 수동 체크 (2026-08-04)
+// 자동 판정(LOT 잔량 0)은 원본 수기 대장과 값이 달라져 수동 체크로 확정. 입고 전표 × LOT 단위
+model UdiLedgerCheck {
+  transactionId Int                  @map("transaction_id")
+  lotNo         String               @default("") @map("lot_no") @db.VarChar(100)
+  checked       Boolean              @default(false)
+  checkedById   String?              @map("checked_by_id")
+  checkedAt     DateTime?            @map("checked_at")
+  transaction   InventoryTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  checkedBy     User?                @relation("UdiLedgerChecker", fields: [checkedById], references: [id], onDelete: SetNull)
+
+  @@id([transactionId, lotNo])
+  @@map("udi_ledger_checks")
   @@schema("public")
 }
 

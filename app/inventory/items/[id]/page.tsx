@@ -24,6 +24,11 @@ interface Item {
   categoryPath: string
   manufacturer: { id: number; name: string } | null
   deviceInfo: { deviceName: string; deviceModel: string } | null
+  udiDi: string | null
+  ledgerName: string | null
+  productClass: string | null
+  materialNo: string | null
+  packUnit: string
   stocks: { warehouseId: number; lotNo: string; quantity: number; warehouse: { name: string } }[]
   components: { childItemId: number; quantity: number; child: { id: number; itemCode: string; name: string; unit: string; isSerialManaged: boolean } }[]
   usedIn: { parentItemId: number; quantity: number; parent: { id: number; itemCode: string; name: string } }[]
@@ -250,7 +255,47 @@ export default function ItemDetailPage() {
         </div>
       </div>
 
-      {item.memo && <div className="rounded-xl border border-gray-200 bg-white p-4 mb-6 text-sm text-gray-600">{item.memo}</div>}
+      {/* UDI · 입출고대장 정보 — 품목 속성 (품목 관리에서 입력) */}
+      <div className="rounded-xl border border-gray-200 bg-white p-4 mb-6">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-sm font-semibold text-gray-900">UDI · 입출고대장 정보</div>
+          {item.udiDi && (
+            <Link href="/inventory/ledger" className="text-xs text-blue-600 no-underline hover:underline">
+              입출고대장 보기 →
+            </Link>
+          )}
+        </div>
+        {!item.udiDi ? (
+          <p className="text-sm text-gray-500">
+            UDI 미등록 — <Link href="/inventory/items" className="text-blue-600 hover:underline">품목 관리</Link>에서 이 품목을 수정해 UDI-DI를 입력하면 입출고대장을 생성할 수 있습니다.
+          </p>
+        ) : (
+          <>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
+              <div>
+                <dt className="text-xs text-gray-500">UDI-DI</dt>
+                <dd className="mt-0.5 font-mono text-gray-900">{item.udiDi}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-gray-500">대장 표기명</dt>
+                <dd className="mt-0.5 text-gray-900">{item.ledgerName || item.modelName || item.name}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-gray-500">품명 구분</dt>
+                <dd className="mt-0.5 text-gray-900">{item.productClass || '-'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-gray-500">원자재식별 NO</dt>
+                <dd className="mt-0.5 text-gray-900">{item.materialNo || '-'}</dd>
+              </div>
+            </dl>
+            <p className="mt-3 text-xs text-gray-400">
+              UDI는 품목 단위입니다 — 사양·포장 변경으로 UDI가 바뀌면 신규 품목으로 등록하세요. 대장 문서는 모델
+              단위로 생성되며 내용은 UDI · LOT으로 구분됩니다.
+            </p>
+          </>
+        )}
+      </div>
 
       {/* 주자재-부자재 구성 */}
       <div className="rounded-xl border border-gray-200 bg-white p-4 mb-6">

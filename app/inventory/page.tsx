@@ -97,6 +97,7 @@ export default function InventoryPage() {
         <div className="flex gap-2">
           <button onClick={() => exportExcel()} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Excel 다운로드</button>
           <Link href="/inventory/transactions" className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">입출고 이력</Link>
+          {canManage && <Link href="/inventory/ledger" className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">입출고대장</Link>}
           {isAdmin && <Link href="/inventory/items" className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">품목 관리</Link>}
         </div>
       </div>

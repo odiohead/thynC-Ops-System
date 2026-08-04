@@ -4,6 +4,37 @@
 
 ---
 
+## 2026-08-04 | 자재관리 UDI 입출고대장 — GMP 양식(F707-1) docx 자동 생성
+
+- 배경: 사내에서 Word로 수기 작성하던 의료기기 입출고대장을 WMS 데이터로 생성. 설계안 `projects/inventory_udi_ledger_design.md` 검토·승인 후 착수
+- **⚠️ 설계 정정 2회** (아래 '정정 경위' 참조) — 최종 형상만 정리하면:
+  - **UDI-DI는 품목(`inventory_items`) 속성** — `udi_di`·`ledger_name`·`product_class`·`material_no`·`pack_unit` 5컬럼 추가(UNIQUE 아님, 부분 인덱스). 사양·포장 변경으로 UDI가 바뀌면 **신규 품목으로 등록**해 재고·이력을 분리한다
+  - **문서 1부 = 모델 1종**(예: 'MP100W Series 입출고대장.docx'), 문서 안의 각 행은 **UDI × LOT** 단위. 인벤토리는 필터로만 좁힘(미선택=전체 합산)
+  - 입력 경로는 **자재관리 > 품목 관리 등록/수정 폼** 한 곳 (목록에 UDI 컬럼, 상세에 UDI 카드)
+- **UDI-DI 등록값**(사용자 제공, GTIN 체크디지트 전부 검증): MC200M-T `08800096401314` / MP100W `08800096401536` / MP2000F `08800096401642` / MP2000R `08800096401680` / MP1000F `8800096400508`. 인벤토리별 품목 3개씩 총 15건 적용. MGW1010은 UDI 미제공 → 대장 대상 아님
+  - 원본 문서의 MP100W UDI(`0880096401536`)는 제공값과 다름 — 선행 0 제거 시 12자리로 나머지 `8800096…` 패턴에서 이탈(문서 오기로 판단, 제공값 채택)
+- **LOT 해석 결함 수정(기존 버그)**: `/api/inventory/items/[id]/lot-history`가 `transaction.lot_no`만 조회 → 시리얼 관리 품목은 OUT 전표 27건 전부 해당 값이 비어 있어(LOT은 개체에 기록) LOT별 요약이 '(빈 LOT)' 한 줄로 뭉개지던 문제. `lib/inventoryLot.ts`(전표→개체 이중 경로 해석·복수 LOT 전표 행 분해·LOT 잔량 집계) 신설 후 교체
+- **입고 발송처**: `destination`을 OUT 전용에서 **상대처(IN=발송처/OUT=출고처)** 로 의미 확장. 기존 IN 111건이 전부 공란이라 데이터 충돌 없음. 입고 모달·일괄 모달·전표 수정·이력 화면·Excel export 라벨 반영
+- **대장 조립**(`lib/udiLedger.ts`): 모델명으로 품목을 묶고 행마다 그 품목의 UDI를 표기, 취소 전표·사내 이동(MOVE/TRANSFER) 제외, 복수 LOT 전표는 행 분해. 현재고는 UDI×LOT 소계 + 총합
+- **docx 출력**: 라이브러리로 새로 그리지 않고 **원본 양식을 템플릿으로 재사용**(`assets/templates/udi-ledger-F707-1.docx`) — 중첩 표 0개·데이터 셀 109개 전부 단일 run임을 확인하고 채택. 글꼴·테두리·머리글/바닥글 100% 보존. 행 템플릿 복제 + `<w:t>` 인덱스 치환, 출고 표는 24행까지 빈 행 패딩. 문서번호·양식번호·개정이력은 AppSetting(`udi_ledger_doc_meta`)로 분리해 `/settings/udi-ledger`에서 편집
+- **'동일 LOT NO 제품 출고완료'는 수동 체크**(`udi_ledger_checks`, 입고 전표×LOT 복합키) — 자동 판정(잔량 0)은 원본 수기 대장과 값이 어긋나 사용자 결정으로 수동 확정
+- 권한: 대장 조회·출력은 `canManageStock`(관리자 또는 재고 담당자), 문서 메타 수정은 ADMIN 이상. 출력 시 감사 로그 기록
+- **실데이터 검증**: MP100W 대장 × 판매용재고 필터 → 입고 169 / 출고 40 / **현재고 129로 원본 문서와 일치**. 전체 합산 시 7개 LOT·현재고 9,079로 UDI×LOT 소계 정상. 생성 docx를 XML 재파싱해 구조 유효성 확인
+- 마이그레이션 4건(`_add_device_udi_ledger_fields` → `_add_udi_ledger_checks` → `_add_udi_ledger_nav_menu` → `_move_udi_to_inventory_items`) — nav 메뉴도 포함해 PROD는 `prisma migrate deploy`만으로 반영
+- 신규 패키지: `jszip`(직접 의존성 승격 — pptxgenjs 전이 의존성으로만 설치되어 있어 취약)
+- **Excel 일괄 시리얼 입고에도 발송처 입력 개방**: `BulkSerialTxModal`이 `txType==='OUT'`일 때만 상대처 칸을 노출해 입고 시 발송처를 못 넣던 문제. 서버(`bulk-serial/route.ts`)는 이미 `destination`을 읽어 저장하고 있어 UI 조건만 해제 + 라벨 tx_type 분기
+- **`bulk-serial/route.ts` 원시 NUL 바이트 5개 → `\u0000` 이스케이프 치환**: 복합키 구분자(`${itemId}<NUL>${serial}`)를 원시 바이트로 써서 파일이 바이너리로 인식돼 **grep 검색에서 통째로 누락**되던 문제(기존 이슈). 런타임 문자열은 동일함을 확인, 의도를 남기는 주석 추가
+- tsc 0오류 · dev2 힙 4GB 빌드 · PM2 재시작 · 신규 에러 로그 0건
+
+### 정정 경위 (같은 날 2회)
+
+1. **UDI를 모델(`device_info`)에 뒀다가 품목으로 이전** — 최초에 "같은 MP100W가 인벤토리 때문에 품목 3개로 쪼개져 있으니 UDI는 모델 단위"로 판단했으나, **같은 모델이라도 UDI가 바뀔 수 있다**는 축을 빠뜨렸다. 재고 버킷 PK가 이미 `(item_id, warehouse_id, inventory_id, lot_no)`이라 UDI를 품목에 두면 재고가 곧 UDI×LOT이 되고, 모델에 두면 재고 PK에 udi 차원 추가 + 입출고 전 경로 수정이 필요했다. `device_info`에 넣었던 UDI 컬럼 6개·모델 4행·관련 API/UI는 전량 원복
+2. **설정 > 기기 관리의 UDI 진입점 제거** — 자재관리와 무관한 메뉴에 UDI를 얹었다가 사용자 지적으로 철거(해당 페이지·API는 `git diff` 0줄로 원상복구). 입력은 품목 관리 한 곳으로 통일
+3. **문서 단위를 모델×LOT → 모델 1부로 변경** — 원 양식의 UDI·LOT NO 컬럼이 행마다 있는 이유가 한 장에 여러 UDI×LOT을 담기 위한 것이었음
+- 영향 파일: lib/itemUdi.ts·lib/inventoryLot.ts·lib/udiLedger.ts·lib/udiLedgerDocx.ts(신규) / app/inventory/ledger/·app/settings/udi-ledger/·app/api/inventory/ledger/{route,check,docx}·app/api/settings/udi-ledger/(신규) / app/inventory/items/{page,[id]/page}.tsx·app/api/inventory/items/{route,[id]/route}.ts·app/api/inventory/items/[id]/lot-history·app/api/inventory/transactions/[id]·app/inventory/components/{TransactionModal,BulkTxModal,TxEditModal}·app/inventory/{page,transactions/page,transactions/[id]/page}·app/api/inventory/transactions/export / prisma/schema.prisma·마이그레이션 4건·assets/templates/
+
+---
+
 ## 2026-08-04 | 영업현황 메뉴 재편 PROD 배포 + dev2 PM2 복구
 
 - 커밋 `b67cfad` push → PROD `git pull`(`58f4486`→`b67cfad`) — 패키지·Prisma 변경 없음, 마이그레이션 불필요

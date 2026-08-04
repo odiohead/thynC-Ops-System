@@ -173,7 +173,7 @@ export default function TransactionsPage() {
               <th className="px-2 py-2.5">인벤토리·위치</th>
               <th className="px-2 py-2.5">LOT</th>
               <th className="px-2 py-2.5">요청자</th>
-              <th className="px-2 py-2.5">출고처</th>
+              <th className="px-2 py-2.5">발송처/출고처</th>
               <th className="px-2 py-2.5">병원/업무</th>
               <th className="px-2 py-2.5">비고</th>
               <th className="px-2 py-2.5">처리자</th>

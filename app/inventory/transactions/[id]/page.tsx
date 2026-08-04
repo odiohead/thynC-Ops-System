@@ -130,7 +130,7 @@ export default function TransactionDetailPage() {
         {tx.lotNo && <Field label="LOT">{tx.lotNo}</Field>}
         <Field label="입출고일">{tx.txDate?.slice(0, 10) ?? '-'}</Field>
         {tx.requester && <Field label="요청자">{tx.requester}</Field>}
-        {tx.destination && <Field label="출고처">{tx.destination}</Field>}
+        {tx.destination && <Field label={tx.txType === 'IN' ? '발송처' : '출고처'}>{tx.destination}</Field>}
         {(tx.hospital || tx.refCode) && (
           <Field label="병원·업무">
             {tx.hospital?.hospitalName ?? ''}

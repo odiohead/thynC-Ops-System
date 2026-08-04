@@ -128,9 +128,13 @@ export async function PUT(request: NextRequest, { params }: Params) {
     data.lotNo = newLot
   }
 
+  // 상대처 — IN(발송처)·OUT(출고처) 공통. MOVE는 사내 이동이라 미사용
+  if (existing.txType !== 'MOVE' && body.destination !== undefined) {
+    data.destination = String(body.destination ?? '').trim() || null
+  }
+
   // OUT 전용 메타
   if (existing.txType === 'OUT') {
-    if (body.destination !== undefined) data.destination = String(body.destination ?? '').trim() || null
     if (body.hospitalCode !== undefined) {
       const hospitalCode = body.hospitalCode ? String(body.hospitalCode) : null
       if (hospitalCode) {

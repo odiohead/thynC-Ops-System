@@ -181,17 +181,21 @@ export default function BulkTxModal({ onClose, onDone }: { onClose: () => void; 
               <input type="date" value={txDate} onChange={(e) => setTxDate(e.target.value)} className={inputCls} />
             </label>
             {txType === 'OUT' && (
-              <>
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-medium text-gray-500">요청자 *</span>
-                  <input value={requester} onChange={(e) => setRequester(e.target.value)} placeholder="요청자" className={inputCls} />
-                </label>
-                <label className="flex flex-col gap-1 sm:col-span-2">
-                  <span className="text-xs font-medium text-gray-500">출고처</span>
-                  <input value={destination} onChange={(e) => setDestination(e.target.value)} placeholder="출고처 (선택)" className={inputCls} />
-                </label>
-              </>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-gray-500">요청자 *</span>
+                <input value={requester} onChange={(e) => setRequester(e.target.value)} placeholder="요청자" className={inputCls} />
+              </label>
             )}
+            {/* 상대처 — IN=발송처 / OUT=출고처 (입출고대장 발송처·입고처정보 소스) */}
+            <label className="flex flex-col gap-1 sm:col-span-2">
+              <span className="text-xs font-medium text-gray-500">{txType === 'IN' ? '발송처' : '출고처'}</span>
+              <input
+                value={destination}
+                onChange={(e) => setDestination(e.target.value)}
+                placeholder={txType === 'IN' ? '예: 평택본사(판매용) (선택)' : '출고처 (선택)'}
+                className={inputCls}
+              />
+            </label>
           </div>
 
           {/* 품목 줄 */}

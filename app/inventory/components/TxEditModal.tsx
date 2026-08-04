@@ -22,7 +22,7 @@ interface EditableTx {
 /**
  * 전표 메타 정보 수정 모달 (ADMIN + 재고 담당자).
  * 수량은 비시리얼 품목만 수정 가능(변경분 재고 자동 반영) — 시리얼 품목·세트출고 부모는 취소 후 재등록.
- * 품목·위치·시리얼 개체는 수정 불가 — 유형(같은 동작 부류)·요청자·출고처·비고만.
+ * 품목·위치·시리얼 개체는 수정 불가 — 유형(같은 동작 부류)·요청자·상대처(발송처/출고처)·비고만.
  */
 export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; onClose: () => void; onDone: () => void }) {
   const [reasons, setReasons] = useState<Reason[]>([])
@@ -62,7 +62,7 @@ export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; o
     if (canEditQty) payload.quantity = Math.trunc(Number(quantity))
     if (txDate) payload.txDate = txDate
     if (hasReason && reasonId) payload.reasonId = reasonId
-    if (tx.txType === 'OUT') payload.destination = destination
+    if (tx.txType === 'IN' || tx.txType === 'OUT') payload.destination = destination
     const res = await fetch(`/api/inventory/transactions/${tx.id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
     })
@@ -117,10 +117,11 @@ export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; o
               <input type="date" value={txDate} onChange={(e) => setTxDate(e.target.value)} className={inputCls} />
             </div>
           </div>
-          {tx.txType === 'OUT' && (
+          {(tx.txType === 'IN' || tx.txType === 'OUT') && (
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-500">출고처</label>
-              <input value={destination} onChange={(e) => setDestination(e.target.value)} className={inputCls} />
+              <label className="mb-1 block text-xs font-medium text-gray-500">{tx.txType === 'IN' ? '발송처' : '출고처'}</label>
+              <input value={destination} onChange={(e) => setDestination(e.target.value)} className={inputCls}
+                placeholder={tx.txType === 'IN' ? '예: 평택본사(판매용)' : ''} />
             </div>
           )}
           <div>

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { categoryPath } from '@/lib/inventory'
+import { buildItemUdiUpdate, validateUdiDi } from '@/lib/itemUdi'
 import { Prisma } from '@prisma/client'
 
 type Params = { params: { id: string } }
@@ -81,11 +82,16 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
   }
 
+  const udiError = 'udiDi' in body ? validateUdiDi(body.udiDi) : null
+  if (udiError) return NextResponse.json({ error: udiError }, { status: 400 })
+
   const item = await prisma.inventoryItem.update({
     where: { id },
     data: {
       name,
       modelName: body.modelName?.trim() || null,
+      // UDI·대장 정보 — body에 키가 있을 때만 갱신 (UDI를 다루지 않는 기존 PUT이 값을 지우지 않도록)
+      ...buildItemUdiUpdate(body),
       categoryId: body.categoryId ?? null,
       spec: body.spec?.trim() || null,
       unit: body.unit?.trim() || 'EA',

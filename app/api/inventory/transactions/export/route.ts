@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
     위치: tx.warehouse.name + (tx.toWarehouse ? ` → ${tx.toWarehouse.name}` : ''),
     LOT: tx.lotNo ?? '',
     요청자: tx.requester ?? '',
-    출고처: tx.destination ?? '',
+    '발송처/출고처': tx.destination ?? '',
     병원: tx.hospital?.hospitalName ?? '',
     업무코드: tx.refCode ?? '',
     세트출고: tx.parentTx ? `부자재 (${tx.parentTx.txCode})` : tx.childTxs.length > 0 ? `주자재 (부자재 ${tx.childTxs.length}종)` : '',

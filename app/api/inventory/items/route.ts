@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { nextItemCode, categoryPath, categoryWithDescendants } from '@/lib/inventory'
+import { buildItemUdiUpdate, validateUdiDi } from '@/lib/itemUdi'
 import { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -81,6 +82,9 @@ export async function POST(req: NextRequest) {
   if (!inventory) return NextResponse.json({ error: '인벤토리를 찾을 수 없습니다.' }, { status: 404 })
   if (!inventory.isActive) return NextResponse.json({ error: '비활성 인벤토리에는 품목을 등록할 수 없습니다.' }, { status: 400 })
 
+  const udiError = 'udiDi' in body ? validateUdiDi(body.udiDi) : null
+  if (udiError) return NextResponse.json({ error: udiError }, { status: 400 })
+
   const itemCode = await nextItemCode()
 
   const item = await prisma.inventoryItem.create({
@@ -89,6 +93,8 @@ export async function POST(req: NextRequest) {
       name,
       inventoryId,
       modelName: body.modelName?.trim() || null,
+      // UDI·대장 정보 (projects/inventory_udi_ledger_design.md — UDI는 품목 속성)
+      ...buildItemUdiUpdate(body),
       categoryId: body.categoryId ?? null,
       spec: body.spec?.trim() || null,
       unit: body.unit?.trim() || 'EA',

@@ -27,6 +27,11 @@ interface Item {
   categoryPath: string
   manufacturer: { id: number; name: string } | null
   deviceInfo: { id: number; deviceName: string; deviceModel: string } | null
+  udiDi: string | null
+  ledgerName: string | null
+  productClass: string | null
+  materialNo: string | null
+  packUnit: string
 }
 
 interface ItemForm {
@@ -42,6 +47,11 @@ interface ItemForm {
   isSerialManaged: boolean
   isLotManaged: boolean
   deviceInfoId: number | null
+  udiDi: string
+  ledgerName: string
+  productClass: string
+  materialNo: string
+  packUnit: string
   refPrice: string
   memo: string
   isActive: boolean
@@ -49,8 +59,12 @@ interface ItemForm {
 
 const emptyForm: ItemForm = {
   inventoryId: null, name: '', modelName: '', cat1: null, cat2: null, cat3: null, manufacturerId: null, spec: '', unit: 'EA',
-  isSerialManaged: false, isLotManaged: false, deviceInfoId: null, refPrice: '', memo: '', isActive: true,
+  isSerialManaged: false, isLotManaged: false, deviceInfoId: null,
+  udiDi: '', ledgerName: '', productClass: '', materialNo: '', packUnit: 'EA',
+  refPrice: '', memo: '', isActive: true,
 }
+
+const PRODUCT_CLASSES = ['완제품', '반제품', '원자재']
 
 interface PreviewResult {
   total: number
@@ -172,6 +186,11 @@ export default function InventoryItemsPage() {
       isSerialManaged: item.isSerialManaged,
       isLotManaged: item.isLotManaged,
       deviceInfoId: item.deviceInfo?.id ?? null,
+      udiDi: item.udiDi ?? '',
+      ledgerName: item.ledgerName ?? '',
+      productClass: item.productClass ?? '',
+      materialNo: item.materialNo ?? '',
+      packUnit: item.packUnit || 'EA',
       refPrice: item.refPrice != null ? String(item.refPrice) : '',
       memo: item.memo ?? '',
       isActive: item.isActive,
@@ -195,6 +214,11 @@ export default function InventoryItemsPage() {
       isSerialManaged: form.isSerialManaged,
       isLotManaged: form.isLotManaged,
       deviceInfoId: form.deviceInfoId,
+      udiDi: form.udiDi,
+      ledgerName: form.ledgerName,
+      productClass: form.productClass,
+      materialNo: form.materialNo,
+      packUnit: form.packUnit,
       refPrice: form.refPrice.trim() ? parseInt(form.refPrice) : null,
       memo: form.memo,
       isActive: form.isActive,
@@ -344,6 +368,7 @@ export default function InventoryItemsPage() {
               <th className="px-2 py-2.5">분류</th>
               <th className="px-2 py-2.5">품목명</th>
               <th className="px-2 py-2.5">모델명</th>
+              <th className="px-2 py-2.5">UDI</th>
               <th className="px-2 py-2.5">제조사</th>
               <th className="px-2 py-2.5">규격</th>
               <th className="px-2 py-2.5">단위</th>
@@ -367,6 +392,12 @@ export default function InventoryItemsPage() {
                   {item.deviceInfo && <span className="ml-1 text-xs text-gray-400">({item.deviceInfo.deviceModel})</span>}
                 </td>
                 <td className="px-2 py-2 text-gray-600 text-xs max-w-[120px] truncate" title={item.modelName ?? ''}>{item.modelName ?? '-'}</td>
+                {/* UDI — 품목 속성 (UDI가 바뀌면 신규 품목으로 분리) */}
+                <td className="px-2 py-2 text-xs">
+                  {item.udiDi
+                    ? <span className="font-mono text-gray-600">{item.udiDi}</span>
+                    : <span className="text-gray-300">-</span>}
+                </td>
                 <td className="px-2 py-2 text-gray-600 text-xs max-w-[90px] truncate" title={item.manufacturer?.name ?? ''}>{item.manufacturer?.name ?? '-'}</td>
                 <td className="px-2 py-2 text-gray-600 text-xs max-w-[100px] truncate" title={item.spec ?? ''}>{item.spec || '-'}</td>
                 <td className="px-2 py-2 text-gray-600 text-xs">{item.unit}</td>
@@ -481,6 +512,43 @@ export default function InventoryItemsPage() {
                   <option value="">연결 안 함</option>
                   {devices.map((d) => <option key={d.id} value={d.id}>{d.deviceModel} · {d.deviceName}</option>)}
                 </select>
+              </div>
+
+              {/* UDI · 입출고대장 정보 — 품목 속성. UDI가 바뀌면 신규 품목으로 등록한다 */}
+              <div className="sm:col-span-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="mb-2 text-xs font-semibold text-gray-700">UDI · 입출고대장 정보</div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">UDI-DI</label>
+                    <input type="text" value={form.udiDi} onChange={(e) => setForm((f) => ({ ...f, udiDi: e.target.value }))}
+                      className={selectCls + ' font-mono'} placeholder="예: 08800096401536 (미입력 시 대장 생성 대상 아님)" />
+                    <p className="mt-1 text-xs text-gray-400">
+                      사양·포장 변경으로 UDI가 바뀌면 이 품목을 수정하지 말고 <b>신규 품목으로 등록</b>하세요. 재고·이력이 UDI별로 분리됩니다.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">대장 표기 상품명</label>
+                    <input type="text" value={form.ledgerName} onChange={(e) => setForm((f) => ({ ...f, ledgerName: e.target.value }))}
+                      className={selectCls} placeholder="미입력 시 모델명으로 표기" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">품명 구분</label>
+                    <select value={form.productClass} onChange={(e) => setForm((f) => ({ ...f, productClass: e.target.value }))} className={selectCls}>
+                      <option value="">선택 안 함</option>
+                      {PRODUCT_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">원자재식별 NO</label>
+                    <input type="text" value={form.materialNo} onChange={(e) => setForm((f) => ({ ...f, materialNo: e.target.value }))}
+                      className={selectCls} placeholder="완제품은 비워두세요" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">포장단위</label>
+                    <input type="text" value={form.packUnit} onChange={(e) => setForm((f) => ({ ...f, packUnit: e.target.value }))}
+                      className={selectCls} placeholder="EA" />
+                  </div>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">참고 단가 (원)</label>

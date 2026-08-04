@@ -40,6 +40,7 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 | AI 정제 | Anthropic Claude API (`@anthropic-ai/sdk`) |
 | 이미지 처리 (GW 플래너) | sharp + poppler-utils(`pdftoppm`·`pdfinfo`, 시스템 패키지) |
 | PPTX 생성 (GW 플래너) | pptxgenjs |
+| DOCX 생성 (UDI 입출고대장) | jszip — 원본 양식 docx를 템플릿으로 열어 행 복제·텍스트 치환 (양식 100% 보존) |
 | 런타임 | Node.js 20 |
 
 ---
@@ -142,6 +143,7 @@ app/
 │   │   ├── stocks/                   # 인벤토리·위치별 현재고 집계 + export(Excel)
 │   │   ├── units/                    # 시리얼 개체 조회 + [id] 정정
 │   │   ├── hospital-works/           # 출고 업무연결 후보
+│   │   ├── ledger/                   # UDI 입출고대장 — route(모델 목록·대장) + check/(출고완료 체크) + docx/(문서 생성)
 │   │   └── can-manage/               # 재고 처리 권한 여부 (UI 게이트)
 │   ├── hira-hospitals/
 │   │   └── sync/                     # 심평원 연동 (POST: 백그라운드 시작, GET: 히스토리 목록)
@@ -209,12 +211,13 @@ app/
 │   ├── manufacturers/                # 제조사 관리 (ADMIN 이상)
 │   ├── warehouses/                   # 창고(위치) 관리 (ADMIN 이상 — 인벤토리별 섹션)
 │   ├── inventory-managers/           # 재고 담당자 관리 (ADMIN 이상 — 담당자 풀)
+│   ├── udi-ledger/                   # 입출고대장 문서 설정 (ADMIN 이상 — 문서번호·양식번호·개정이력)
 │   ├── vehicles/                     # 차량 관리 (ADMIN 이상)
 │   ├── nav-menus/                    # 네비게이션 메뉴 관리 (SUPER_ADMIN 전용)
 │   ├── notifications/                # 알림 설정 (ADMIN 이상) — 탭① SLA 기준(SlaMatrixTab) / 탭② 채널·라우팅(RoutesTab) / 탭③ 전역·DM·이력
 │   ├── ai-assistant/                 # AI 어시스턴트 설정 (ADMIN 이상 — effort·캐시 TTL, 모델은 읽기 전용 표시)
 │   └── audit-logs/                   # 감사 로그 (SUPER_ADMIN 전용)
-├── inventory/                        # 자재 현황(인벤토리별 카드 섹션 + 섹션 입고/출고/이동 버튼) + [invId]/items/[itemId](인벤토리 자재 상세) + transactions/(이력·[id] 전표 상세) + items/(관리·[id] 품목 마스터 상세) + components/TransactionModal(품목 선택 모드)·BulkTxModal(다품목 일괄 입출고)
+├── inventory/                        # 자재 현황(인벤토리별 카드 섹션 + 섹션 입고/출고/이동 버튼) + [invId]/items/[itemId](인벤토리 자재 상세) + transactions/(이력·[id] 전표 상세) + items/(관리·[id] 품목 마스터 상세) + ledger/(UDI 입출고대장 — 모델별 조회·docx 출력) + components/TransactionModal(품목 선택 모드)·BulkTxModal(다품목 일괄 입출고)
 ├── login/                            # 로그인 페이지
 ├── notifications/                    # 알림함 (1.1 P5 — 목록·미읽음/종류 필터·일괄 읽음·개인 수신 설정)
 └── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper, StatusBadge, NotificationBell, MyWorkPanel 등)
@@ -256,6 +259,10 @@ lib/
 ├── notify-center.ts                  # 내부 알림 생성 단일 진입점 (1.1 P5 — emit·수신자 산출·dedup·개인 설정)
 ├── slaSettings.ts                    # SLA 설정 입력 검증·정규화·CTI 서브트리 확장 (1.1 P2)
 ├── inventory.ts                      # 자재관리 — 품목 채번(nextItemCode) + 재고 처리 권한(canManageStock: ADMIN or 재고 담당자 풀)
+├── inventoryLot.ts                   # LOT 해석 단일 소스 — 전표/개체 이중 경로(resolveTxLotRows)·복수 LOT 행 분해·LOT 잔량(getLotStocks)·LOT 요약(summarizeLots)
+├── itemUdi.ts                        # 품목 UDI 필드 부분 갱신·UDI-DI 검증(GTIN 체크디지트)·대장 표기명 폴백
+├── udiLedger.ts                      # UDI 입출고대장 조립 — 문서 1부=모델 1종, 행은 UDI×LOT, 인벤토리 필터, MOVE·취소 제외
+├── udiLedgerDocx.ts                  # 대장 docx 생성 — 원본 양식 템플릿 재사용(jszip, 행 복제·<w:t> 치환) + 문서 메타(AppSetting)
 ├── gateway-planner/                  # GW 배치 플래너 (function_gateway_planner.html)
 │   ├── types.ts                      # 공용 타입 + 기본 배치 규칙
 │   ├── rules.ts                      # 규칙 로드/저장 (AppSetting gw_planner_rules)
@@ -453,6 +460,16 @@ prisma/
 
 ### DeviceInfo (장비 정보)
 - 장비 모델명, 이름, 정렬 순서
+
+### InventoryItem UDI 필드 (2026-08-04)
+- `udiDi`(UDI-DI, GS1 GTIN) · `ledgerName`(대장 표기 상품명) · `productClass`(완제품/반제품/원자재) · `materialNo`(원자재식별 NO) · `packUnit`(포장단위)
+- **UDI는 품목 속성이다** — 같은 모델이라도 사양·포장 변경으로 UDI-DI가 바뀌면 **신규 품목으로 등록**해 재고·이력을 분리한다. 재고 버킷 PK가 `(item_id, warehouse_id, inventory_id, lot_no)`이므로 재고 차원이 곧 **UDI × LOT**이 된다
+- 인벤토리별로 품목이 분리되어 같은 UDI가 복수 품목에 존재 → **UNIQUE 아님**(`udi_di IS NOT NULL` 부분 인덱스만)
+- `udiDi`가 있는 품목만 입출고대장 생성 대상
+
+### UdiLedgerCheck (입출고대장 출고완료 체크)
+- 대장의 '동일 LOT NO 제품 출고완료' 칸 — **수동 체크** (자동 판정은 원본 수기 대장과 값이 어긋나 2026-08-04 사용자 결정으로 수동 확정)
+- PK `(transactionId, lotNo)` — 한 입고 전표가 복수 LOT으로 분해될 수 있어 복합키. `checked`, `checkedById`(users SetNull), `checkedAt`
 
 ### BuildStatus (공사 상태)
 - 공사 진행 상태 정의 (레이블, 색상)
@@ -997,6 +1014,7 @@ prisma/
   - **인벤토리 자재 상세** (`/inventory/[invId]/items/[itemId]`): 현황 섹션에서 자재 클릭 시 진입 — 품목 소속 인벤토리와 URL 불일치 시 안내. 그 품목의 재고·이력·개체 + 입출고 모달(품목·인벤토리 고정). **품목 마스터 상세**(`/inventory/items/[id]`)는 기준정보·부자재 구성 관리 + 재고 요약·이력·개체
 - **입출고 원장**: 입고(IN)/출고(OUT)/이동(MOVE, 같은 인벤토리 내 위치 이동) 전표 3종, 전표코드 `STK-YYYYMM-NNNN`. **인벤토리는 품목에서 파생**(전표 입력값 아님), 위치도 품목과 같은 인벤토리 소속이어야 함(서버 400). **원장은 불변(append-only)** — 잘못 입력은 취소(역방향 되돌림)로 보정, 취소가 재고를 음수로 만들면 거부. 재고 음수 방지 이중장치(앱 조건부 차감 + DB `CHECK quantity>=0`). 출고/이동 모달은 현재 위치에 재고가 없으면 재고 있는 위치 자동 선택
 - **입고/출고 유형 설정화** (`/settings/stock-reasons`, ADMIN): 입고(구매/회수(반품)/기타)·출고(설치/판매/폐기/불량/기타) 유형을 설정에서 추가·삭제. 시스템 동작이 걸린 유형(회수=개체 복귀, 폐기·불량=DISPOSED)과 사용 중 유형은 삭제 409
+- **상대처 기재 (2026-08-04 확장)**: `destination`은 **입고=발송처 / 출고=출고처** 겸용(구 OUT 전용). 입고 발송처는 UDI 입출고대장의 '발송처정보' 칸 소스. 이동(MOVE)은 사내 이동이라 미사용
 - **출고처 기재**: 출고 전표에 출고처 자유 텍스트(`destination`). **병원·업무 연결은 병원 연결 허용 인벤토리(대웅제약재고) 품목 출고에서만 가능**(UI 숨김 + 서버 400) — 평가용/판매용은 출고처 텍스트만. 병원 상세 **'사용 자재' 카드**(출고 이력 + 설치 개체)
 - **주자재/부자재 (BOM)**: 품목 상세에서 주자재 아래 부자재 N개 매핑(구성 수량 포함, 1단계 깊이, **같은 인벤토리 품목끼리만** — 서버 409). 출고 모달 **"부자재 함께 출고"(세트출고)** — 비시리얼 부자재를 같은 위치에서 자동 동시 출고(수량=출고수량×구성수량, 수정 가능), 자식 전표 `parent_tx_id` 연결·부모 취소 시 일괄 취소. 시리얼 부자재는 개별 출고
 - **시리얼 개체 추적 (바코드 스캔 대량 처리)**: `is_serial_managed` 품목은 개체 단위 관리(IN_STOCK/OUT/DISPOSED). 입고·출고·이동 모두 **시리얼 직접 입력 textarea**(줄 단위 붙여넣기·바코드 리더기 연속 스캔) — 재고 1만 개·1회 100~200개 출고 대응. 서버가 시리얼→개체 해석 후 위치·재고 상태 검증(미등록/불일치 시리얼 명시 거부 — 시리얼은 품목 단위라 타 인벤토리 개체는 자동 격리), 가용 개체 목록 클릭 선택 병행. 수량↔개체 정합 보장, 동시성 가드(조건부 updateMany+건수 검증)
@@ -1009,7 +1027,11 @@ prisma/
 - **입출고 이력** (`/inventory/transactions`): 인벤토리 탭 + 유형·위치(탭 인벤토리 스코프)·**기간 필터(입출고일 기준)**, **입출고일·처리일시 컬럼 분리**, **수정(ADMIN+재고담당자)**·취소(권한자, 과거 이관 전표는 취소 불가 409), 요청자 컬럼, **Excel 다운로드**(필터 반영, 최대 1만 행)
 - **Excel 일괄 입출고 (시리얼 품목 마이그레이션)**: 이력 페이지 'Excel 일괄 입출고' 버튼(처리 권한자) — **A열=품목명·B열=시리얼번호·C열=LOT번호**(1행 헤더) 업로드로 입고/출고 일괄 처리(`POST /api/inventory/transactions/bulk-serial`, preview 모드). 구분(입고/출고)·인벤토리·위치·유형·요청자(출고 필수) 선택 후 **시리얼 관리 품목만** 대상. 품목명은 선택 인벤토리 내 정확 일치(동명 2건 이상이면 매칭 거부), 품목별 전표 1건씩 생성(최대 2000행). 미리보기에서 행 단위 검증(미등록 품목·비시리얼 품목·파일 내 중복·기등록/미등록 시리얼·위치 불일치·**LOT 규칙**: 입고 시 LOT 관리 품목 C열 필수/비관리 금지, 회수·출고 시 값 있으면 개체 LOT 대조) 후 **오류 0건일 때만 실행, 전체 단일 트랜잭션(all-or-nothing)**
 - **전표 상세 페이지 (2026-07-30)**: `GET /api/inventory/transactions/[id]` + `/inventory/transactions/[id]` — 전표 전체 정보 + 시리얼 품목이면 연결 개체 목록(시리얼·LOT·현재 상태·위치) + 세트출고 부모/자식 전표 링크. 입출고 이력·품목 상세 이력의 전표코드 클릭으로 진입
-- **LOT별 입출고 요약 (2026-07-30)**: `GET /api/inventory/items/[id]/lot-history` — LOT 관리 품목의 LOT번호별 입고·출고·잔량 요약(취소 전표 제외). 품목 상세(인벤토리 스코프·마스터 양쪽)에 'LOT별 입출고' 표 + 이력 행 LOT 컬럼
+- **LOT별 입출고 요약 (2026-07-30, 2026-08-04 결함 수정)**: `GET /api/inventory/items/[id]/lot-history` — LOT 관리 품목의 LOT번호별 입고·출고·잔량 요약(취소 전표 제외). 품목 상세(인벤토리 스코프·마스터 양쪽)에 'LOT별 입출고' 표 + 이력 행 LOT 컬럼. **LOT 해석은 `lib/inventoryLot.ts` 단일 소스** — 시리얼 품목은 개체(`inventory_units.lot_no`), 비시리얼은 전표(`transactions.lot_no`)로 이원화되어 있어 전표만 보면 시리얼 품목의 LOT이 통째로 소실됨(구 구현 결함). 한 전표에 복수 LOT이 섞인 경우 행 분해
+- **UDI 입출고대장 (2026-08-04 — `projects/inventory_udi_ledger_design.md`)**: `/inventory/ledger` — 의료기기 GMP 품질기록 **F707-1「입출고대장」**을 시스템 데이터로 생성해 **docx 다운로드**. **문서 1부 = 모델 1종**(예: 'MP100W Series 입출고대장.docx')이고, 문서 안의 각 행은 **UDI × LOT** 단위로 구분된다(원 양식에 UDI·LOT NO 컬럼이 행마다 있는 이유). **인벤토리 필터**로 범위를 좁힐 수 있고 미선택 시 전체 합산. 취소 전표·사내 이동(MOVE/TRANSFER) 제외. '동일 LOT NO 제품 출고완료'는 **수동 체크**. 현재고는 UDI×LOT 소계와 총합을 함께 표시. docx는 **원본 양식을 템플릿으로 재사용**(`assets/templates/udi-ledger-F707-1.docx` — 행 복제 + `<w:t>` 치환)해 글꼴·테두리·머리글/바닥글을 100% 보존하며, 문서번호·양식번호·개정이력은 `/settings/udi-ledger`에서 편집. 권한: 조회·출력 `canManageStock`(재고 담당자 또는 ADMIN 이상), 문서 메타 ADMIN 이상. 출력 시 감사 로그 기록
+  - **UDI 입력 경로**: 자재관리 > **품목 관리**의 등록/수정 폼(목록에 UDI 컬럼, 품목 상세에 UDI 카드). UDI는 품목 속성이므로 인벤토리별 품목에 각각 입력한다
+  - API: `GET /api/inventory/ledger`(모델 목록 / 대장 데이터) · `PUT /api/inventory/ledger/check`(출고완료 체크 토글) · `GET /api/inventory/ledger/docx`(문서 다운로드)
+  - **대장 시작점은 2026-07-01** — 시스템 도입 시 재고를 스냅샷으로 적재해 그 이전 입출고 이력이 없음(소급 입력 미실시)
 - **다품목 일괄 입출고 (2026-07-30)**: 이력 페이지 '다품목 입출고' 버튼(`BulkTxModal`) — 인벤토리·유형·요청자·출고처·일자 공통 입력 + 위치·품목·수량(비시리얼)/시리얼·LOT(시리얼)는 줄별 지정, 혼합 지원. `POST /api/inventory/transactions/bulk`(입고/출고만, 세트출고·병원연결 미포함) — 줄별 검증 후 단일 트랜잭션 전부 성공/전부 롤백, 품목별 전표 1건씩 생성
 - **품목 마스터** (`/inventory/items`, ADMIN): 인벤토리 탭 + 인벤토리 컬럼. `ITEM-NNNN` 자동 발번(전체 순번), **등록 시 인벤토리 필수·수정 불가**. **모델명**·대>중>소 분류 트리·제조사·규격·단위·시리얼 여부·DeviceInfo 연결·참고단가. 검색은 품목명·모델명·코드·규격 통합. **Excel 일괄 가져오기**(가져올 인벤토리 선택 필수, 같은 인벤토리 내 품목명 중복만 스킵, K열=LOT여부)
 - **위치(창고) 관리** (`/settings/warehouses`, ADMIN): **인벤토리별 섹션으로 독립 추가/수정/삭제** — 위치명 UNIQUE는 인벤토리 내에서만(다른 인벤토리엔 같은 이름 허용)
@@ -1615,6 +1637,8 @@ npm run dev
 | POST | `/api/settings/devices` | 장비 정보 추가 |
 | PUT  | `/api/settings/devices/[id]` | 장비 정보 수정 |
 | DELETE | `/api/settings/devices/[id]` | 장비 정보 삭제 |
+| GET  | `/api/settings/udi-ledger` | 입출고대장 문서 메타(문서번호·양식번호·개정이력) 조회 |
+| PUT  | `/api/settings/udi-ledger` | 입출고대장 문서 메타 수정 (ADMIN 이상) |
 | GET  | `/api/settings/build-status` | 공사 상태 목록 |
 | POST | `/api/settings/build-status` | 공사 상태 추가 |
 | PUT  | `/api/settings/build-status/[id]` | 공사 상태 수정 |
