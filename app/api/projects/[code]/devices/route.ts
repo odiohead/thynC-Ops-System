@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getAuthUser, isUserOrAbove } from '@/lib/auth'
 
 type Params = { params: { code: string } }
 
@@ -17,6 +18,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
+  const user = await getAuthUser(request)
+  if (!user || !isUserOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
   const project = await prisma.project.findUnique({ where: { projectCode: params.code } })
   if (!project) return NextResponse.json({ error: '프로젝트를 찾을 수 없습니다.' }, { status: 404 })
 

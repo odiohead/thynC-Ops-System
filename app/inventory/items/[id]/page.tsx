@@ -102,7 +102,8 @@ export default function ItemDetailPage() {
   useEffect(() => {
     fetch('/api/settings/warehouses').then(async (r) => { if (r.ok) setWarehouses((await r.json()).warehouses) })
     fetch('/api/inventory/can-manage').then(async (r) => { if (r.ok) setCanManage((await r.json()).canManage) })
-    fetch('/api/auth/me').then(async (r) => { if (r.ok) { const d = await r.json(); setIsAdmin(d.role === 'SUPER_ADMIN' || d.role === 'ADMIN') } })
+    // ADMIN 이상 또는 inventory.admin 권한 보유자 (RBAC 가산 — 서버 canAdminInventory와 동일 판정)
+    fetch('/api/inventory/can-manage').then(async (r) => { if (r.ok) { const d = await r.json(); setIsAdmin(!!d.canAdmin) } })
   }, [])
   useEffect(() => { fetchAll() }, [fetchAll])
   useEffect(() => {

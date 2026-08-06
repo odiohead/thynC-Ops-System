@@ -1,7 +1,8 @@
 import { cookies } from 'next/headers'
 import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
-import { verifyToken, isAdminOrAbove } from '@/lib/auth'
+import { verifyToken, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { prisma } from '@/lib/prisma'
 import InstallPlanDetailClient from './DetailClient'
 import ReassignHospitalButton from '@/app/components/ReassignHospitalButton'
@@ -38,6 +39,8 @@ export default async function InstallPlanDetailPage({ params }: Props) {
   if (!installPlan) notFound()
 
   const canAdmin = isAdminOrAbove(user.role)
+  // 삭제 버튼: ADMIN 이상 또는 (USER 이상 + install_plan.admin 권한) — 서버 DELETE 게이트와 동일 판정
+  const canDelete = canAdmin || (isUserOrAbove(user.role) && (await hasPermission(user, 'install_plan.admin')))
   const canEdit = user.role !== 'VIEWER'
 
   const data = {
@@ -123,7 +126,7 @@ export default async function InstallPlanDetailPage({ params }: Props) {
         )}
 
         <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-200">
-          <InstallPlanDetailClient initialData={data} canAdmin={canAdmin} canEdit={canEdit} />
+          <InstallPlanDetailClient initialData={data} canAdmin={canDelete} canEdit={canEdit} />
         </div>
 
         {/* 티켓 타임라인 — 진행 기록은 여기에 */}

@@ -32,6 +32,7 @@ interface AppUser {
   name: string
   email: string
   isActive: boolean
+  department: { id: number; name: string } | null
 }
 
 export default function TicketQueuesSettingsPage() {
@@ -534,36 +535,84 @@ export default function TicketQueuesSettingsPage() {
                   placeholder="이름 또는 이메일로 검색..."
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
-                <p className="mt-2 text-xs text-gray-400">선택 {memberIds.length}명 — 이 그룹의 담당자 셀렉트에서 상단 그룹으로 우선 표시됩니다.</p>
-                <ul className="mt-2 divide-y divide-gray-100">
-                  {users
-                    .filter((u) => {
-                      const s = memberSearch.trim().toLowerCase()
-                      if (!s) return true
-                      return u.name.toLowerCase().includes(s) || u.email.toLowerCase().includes(s)
-                    })
-                    .map((u) => (
-                      <li key={u.id}>
-                        <label className="flex cursor-pointer items-center gap-3 px-1 py-2 hover:bg-gray-50">
-                          <input
-                            type="checkbox"
-                            checked={memberIds.includes(u.id)}
-                            onChange={() =>
-                              setMemberIds((prev) =>
-                                prev.includes(u.id) ? prev.filter((id) => id !== u.id) : [...prev, u.id]
-                              )
-                            }
-                            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <span className="text-sm text-gray-900">{u.name}</span>
-                          <span className="text-xs text-gray-400">{u.email}</span>
-                        </label>
-                      </li>
-                    ))}
-                  {users.length === 0 && (
-                    <li className="py-6 text-center text-sm text-gray-400">활성 사용자가 없습니다.</li>
-                  )}
-                </ul>
+                <p className="mt-2 text-xs text-gray-400">
+                  선택 {memberIds.length}명 — 이 그룹의 담당자 셀렉트에서 상단 그룹으로 우선 표시됩니다. 팀 이름 체크박스로 팀 전체를 한 번에 추가/해제할 수 있습니다.
+                </p>
+                {(() => {
+                  const s = memberSearch.trim().toLowerCase()
+                  const filtered = users.filter(
+                    (u) => !s || u.name.toLowerCase().includes(s) || u.email.toLowerCase().includes(s)
+                  )
+                  const groups = new Map<string, AppUser[]>()
+                  for (const u of filtered) {
+                    const key = u.department?.name ?? '팀 미지정'
+                    if (!groups.has(key)) groups.set(key, [])
+                    groups.get(key)!.push(u)
+                  }
+                  const sorted = Array.from(groups.entries()).sort(([a], [b]) => {
+                    if (a === '팀 미지정') return 1
+                    if (b === '팀 미지정') return -1
+                    return a.localeCompare(b, 'ko')
+                  })
+                  return (
+                    <div className="mt-2">
+                      {sorted.map(([deptName, deptUsers]) => {
+                        const selectedCount = deptUsers.filter((u) => memberIds.includes(u.id)).length
+                        const allSelected = selectedCount === deptUsers.length
+                        return (
+                          <div key={deptName} className="mb-1">
+                            <label className="flex cursor-pointer items-center gap-3 rounded-lg bg-gray-50 px-2 py-2 hover:bg-gray-100">
+                              <input
+                                type="checkbox"
+                                checked={allSelected}
+                                ref={(el) => {
+                                  if (el) el.indeterminate = selectedCount > 0 && !allSelected
+                                }}
+                                onChange={() =>
+                                  setMemberIds((prev) => {
+                                    const deptIds = deptUsers.map((u) => u.id)
+                                    if (allSelected) return prev.filter((id) => !deptIds.includes(id))
+                                    return [...prev, ...deptIds.filter((id) => !prev.includes(id))]
+                                  })
+                                }
+                                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="text-sm font-semibold text-gray-800">{deptName}</span>
+                              <span className="ml-auto text-xs text-gray-400">
+                                {selectedCount}/{deptUsers.length}명 선택
+                              </span>
+                            </label>
+                            <ul className="divide-y divide-gray-100">
+                              {deptUsers.map((u) => (
+                                <li key={u.id}>
+                                  <label className="flex cursor-pointer items-center gap-3 py-2 pl-8 pr-1 hover:bg-gray-50">
+                                    <input
+                                      type="checkbox"
+                                      checked={memberIds.includes(u.id)}
+                                      onChange={() =>
+                                        setMemberIds((prev) =>
+                                          prev.includes(u.id) ? prev.filter((id) => id !== u.id) : [...prev, u.id]
+                                        )
+                                      }
+                                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                    />
+                                    <span className="text-sm text-gray-900">{u.name}</span>
+                                    <span className="text-xs text-gray-400">{u.email}</span>
+                                  </label>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )
+                      })}
+                      {filtered.length === 0 && (
+                        <p className="py-6 text-center text-sm text-gray-400">
+                          {users.length === 0 ? '활성 사용자가 없습니다.' : '검색 결과가 없습니다.'}
+                        </p>
+                      )}
+                    </div>
+                  )
+                })()}
               </div>
               <div className="flex items-center justify-end gap-2 border-t border-gray-200 px-5 py-4">
                 <button

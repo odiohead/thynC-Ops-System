@@ -26,7 +26,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const cookieStore = cookies();
   const token = cookieStore.get('auth-token')?.value;
   const user = token ? await verifyToken(token) : null;
-  if (!user) {
+  if (!user || user.role === 'VIEWER') {
     return NextResponse.json({ error: '인증이 필요합니다.' }, { status: 401 });
   }
 
@@ -80,7 +80,7 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
   const cookieStore = cookies();
   const token = cookieStore.get('auth-token')?.value;
   const user = token ? await verifyToken(token) : null;
-  if (!user) {
+  if (!user || user.role === 'VIEWER') {
     return NextResponse.json({ error: '인증이 필요합니다.' }, { status: 401 });
   }
 

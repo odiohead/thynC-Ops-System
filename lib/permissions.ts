@@ -28,6 +28,43 @@ export const PERMISSIONS = {
     description:
       '영업현황(대시보드·도입현황)·병원 영업 정보 열람과 편집. 단 SEERS 소속 요건은 별개 축이라 이 권한으로 풀리지 않음',
   },
+  // 카탈로그 v1.2 (2026-08-06)
+  'inventory.admin': {
+    label: '자재 관리자',
+    module: '자재관리',
+    description:
+      '재고 입출고 처리(inventory.manage 포함) + 품목 마스터 등록·수정·삭제·Excel 가져오기·부자재 매핑 + 자재 기초 설정(품목 분류·인벤토리·입출고 유형·제조사·창고). 전표 사후 수정·재고 담당자 풀·UDI 문서 메타는 ADMIN 등급 필요(불포함)',
+  },
+  'maintenance.admin': {
+    label: '유지보수 관리',
+    module: '유지보수',
+    description:
+      '유지보수 건 삭제. 조회·등록·수정·완료 처리·파일·처리 기록은 원래 USER 등급 전원 가능이라 이 권한과 무관',
+  },
+  'install_plan.admin': {
+    label: '설치계획 관리',
+    module: '설치계획',
+    description:
+      '설치계획(가안) 건 삭제. 조회·등록·수정·상태 변경·파일은 원래 USER 등급 전원 가능이라 이 권한과 무관',
+  },
+  'project.admin': {
+    label: '프로젝트 관리',
+    module: '프로젝트',
+    description:
+      '프로젝트 삭제. 조회·등록·수정·장비·파일은 원래 USER 등급 전원 가능이라 이 권한과 무관',
+  },
+  'site_visit.admin': {
+    label: '답사 관리',
+    module: '답사',
+    description:
+      '답사 건 삭제. 조회·등록·수정·파일은 원래 USER 등급 전원 가능이라 이 권한과 무관',
+  },
+  'etc_task.admin': {
+    label: '기타업무 관리',
+    module: '기타업무',
+    description:
+      '기타업무 건 삭제. 조회·등록·수정·파일은 원래 USER 등급 전원 가능이라 이 권한과 무관',
+  },
 } as const
 
 export type PermKey = keyof typeof PERMISSIONS

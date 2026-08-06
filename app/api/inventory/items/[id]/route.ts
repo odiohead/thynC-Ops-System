@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { categoryPath } from '@/lib/inventory'
+import { categoryPath, canAdminInventory } from '@/lib/inventory'
 import { buildItemUdiUpdate, validateUdiDi } from '@/lib/itemUdi'
 import { Prisma } from '@prisma/client'
 
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
 export async function PUT(req: NextRequest, { params }: Params) {
   const user = await getAuthUser(req)
-  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!user || !(await canAdminInventory(user))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const id = parseInt(params.id)
   if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })
@@ -124,7 +124,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
 export async function DELETE(req: NextRequest, { params }: Params) {
   const user = await getAuthUser(req)
-  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!user || !(await canAdminInventory(user))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const id = parseInt(params.id)
   if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser } from '@/lib/auth'
+import { canAdminInventory } from '@/lib/inventory'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { categoryDepth, categoryPath } from '@/lib/inventory'
 
@@ -27,7 +28,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   const user = await getAuthUser(request)
-  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!user || !(await canAdminInventory(user))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { name, parentId, sortOrder } = await request.json()
   if (!name?.trim()) return NextResponse.json({ error: '분류명을 입력해주세요.' }, { status: 400 })

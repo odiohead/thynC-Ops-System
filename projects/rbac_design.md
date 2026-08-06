@@ -3,6 +3,7 @@
 > **상태: Phase 1·2·3 구현 완료 (2026-08-04, dev2) — 선택적 후속만 승인 대기**
 > 작성 2026-08-03, 승인·착수 2026-08-04. 검증: tsc 0오류 + 스모크 12/12·6/6 (DEV_HISTORY 2026-08-04 참조). PROD 미반영(마이그레이션 3건 `migrate deploy`로 배포 가능 — Phase 3는 DB 변경 없음).
 > 카탈로그 v1.1: `inventory.manage`(자재) · `vehicle.manage`(차량) · `sales.access`(영업 — SEERS 축 불변). 티켓 담당 지정은 이미 USER 전원 개방이라 편입 보류(가산할 것 없음). CLAUDE.md 컨벤션 등재 완료.
+> **카탈로그 v1.2 (2026-08-06, 사용자 요청)**: `inventory.admin`(자재 관리자 — manage 상위집합 + 품목 마스터·자재 기초 설정, `canAdminInventory` 신설) + 워크플로 5모듈 삭제 권한 `maintenance.admin`/`install_plan.admin`/`project.admin`/`site_visit.admin`/`etc_task.admin`(각 모듈 DELETE 게이트 가산 — 조회·생성·수정·완료 처리는 원래 USER 전원 개방이라 유령 권한 방지 원칙에 따라 삭제만 편입). 요청 중 '재고담당자'는 기존 `inventory.manage`로 이미 충족. 검증: 스모크 11/11 (`scripts/rbac-v12-smoke.mts`). DB 변경 없음(카탈로그는 코드 단일 소스).
 
 ---
 

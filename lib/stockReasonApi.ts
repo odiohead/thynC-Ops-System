@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser } from '@/lib/auth'
+import { canAdminInventory } from '@/lib/inventory'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Params = { params: { id: string } }
@@ -21,7 +22,7 @@ export function stockReasonHandlers(category: 'STOCK_IN_TYPE' | 'STOCK_OUT_TYPE'
 
   async function POST(request: NextRequest) {
     const user = await getAuthUser(request)
-    if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!user || !(await canAdminInventory(user))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     const { name, order } = await request.json()
 
     if (!name?.trim()) return NextResponse.json({ error: `${label} 이름을 입력해주세요.` }, { status: 400 })
@@ -48,7 +49,7 @@ export function stockReasonHandlers(category: 'STOCK_IN_TYPE' | 'STOCK_OUT_TYPE'
 
   async function PUT(request: NextRequest, { params }: Params) {
     const user = await getAuthUser(request)
-    if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!user || !(await canAdminInventory(user))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const id = parseInt(params.id)
     if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })
@@ -87,7 +88,7 @@ export function stockReasonHandlers(category: 'STOCK_IN_TYPE' | 'STOCK_OUT_TYPE'
 
   async function DELETE(request: NextRequest, { params }: Params) {
     const user = await getAuthUser(request)
-    if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!user || !(await canAdminInventory(user))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const id = parseInt(params.id)
     if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })

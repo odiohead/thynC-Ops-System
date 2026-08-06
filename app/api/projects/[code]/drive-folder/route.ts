@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getAuthUser, isUserOrAbove } from '@/lib/auth'
 import { createDriveFolder } from '@/lib/googleDrive'
 
 type Params = { params: { code: string } }
 
 // POST: 기존 프로젝트에 Drive 폴더를 생성하고 연결
-export async function POST(_req: NextRequest, { params }: Params) {
+export async function POST(req: NextRequest, { params }: Params) {
+  const user = await getAuthUser(req)
+  if (!user || !isUserOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
   const project = await prisma.project.findUnique({
     where: { projectCode: params.code },
     include: { hospital: true },

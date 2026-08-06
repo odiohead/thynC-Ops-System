@@ -140,11 +140,12 @@ export default function InventoryItemsPage() {
   }
 
   async function fetchMe() {
-    const res = await fetch('/api/auth/me')
+    // ADMIN 이상 또는 inventory.admin 권한 보유자 (RBAC 가산 — 서버 canAdminInventory와 동일 판정)
+    const res = await fetch('/api/inventory/can-manage')
     if (res.ok) {
       const data = await res.json()
-      setUserRole(data.role ?? null)
-      if (data.role !== 'SUPER_ADMIN' && data.role !== 'ADMIN') router.push('/inventory')
+      setUserRole(data.canAdmin ? 'ALLOWED' : 'DENIED')
+      if (!data.canAdmin) router.push('/inventory')
     }
   }
 
@@ -289,7 +290,7 @@ export default function InventoryItemsPage() {
   }
 
   if (loading && items.length === 0) return <div className="p-8 text-sm text-gray-500">로딩 중...</div>
-  if (userRole && userRole !== 'SUPER_ADMIN' && userRole !== 'ADMIN') return null
+  if (userRole === 'DENIED') return null
 
   const selectCls = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500'
 

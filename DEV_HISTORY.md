@@ -4,6 +4,31 @@
 
 ---
 
+## 2026-08-06 | 버그 수정: 입고 전표 발송처(destination) 유실 (dev2)
+
+- 사용자 신고: 입고(회수) 처리 시 발송처를 기재해도 저장 안 됨 — PROD `STK-202608-0036`으로 확인(입고 전표 전건 destination 공란)
+- 원인: 2026-08-04 UDI 대장 작업에서 `destination`을 상대처(IN=발송처/OUT=출고처)로 확장할 때 **모달·API·전표 수정은 반영했으나 실제 전표 생성 지점(`lib/inventory.ts` `applyInventoryTransaction`)이 누락** — `txType === 'OUT' ? destination : null`로 IN 입력값을 무조건 버림. 단건·일괄 모두 이 경로를 지나므로 입고 발송처가 전부 유실
+- 수정: `MOVE ? null : destination`으로 교체(모달 페이로드 주석과 동일 의미). 전표 수정 PUT·이력/상세 표시 라벨은 이미 정상이라 변경 없음
+- 검증: 롤백 트랜잭션 스모크로 IN+회수 전표에 발송처 저장 확인(잔존 데이터 없음), tsc 0오류
+- 참고: 기존 PROD 입고 전표의 빈 발송처는 소급 백필하지 않음 — 필요 건은 배포 후 전표 수정 화면에서 입력하면 됨(수정 경로는 정상 동작)
+- 영향 파일: lib/inventory.ts
+
+---
+
+## 2026-08-06 | Assignment Group 팀 단위 멤버 할당 + RBAC 카탈로그 v1.2 (dev2)
+
+- 작업 전 PROD 정기 백업(`thync_ops_20260806_010001.dump`)으로 dev2 DB 동기화 (테이블 102개 일치 확인, DEV 백업 `dev_before_sync_20260806_142327.sql.gz`)
+- **① Assignment Group 팀 단위 할당**: 설정 > Assignment Group 멤버 모달을 팀(부서)별 그룹핑으로 개편 — 팀 헤더 체크박스(전체/일부 선택 시 indeterminate)로 팀 전체 일괄 추가/해제, 검색 시 필터된 인원에만 적용. 서버·DB 변경 없음(기존 전체 교체 PUT 그대로, 팀은 스냅샷 방식 — 부서 이동이 그룹 멤버십을 자동 변경하지 않음). `/api/users`가 이미 내려주던 department를 UI에서 활용
+- **② RBAC 카탈로그 v1.2 — 6키 추가** (사용자 요청 5개 컨셉 중 '재고담당자'는 기존 `inventory.manage`로 이미 충족):
+  - `inventory.admin`(자재 관리자): `canAdminInventory` 신설(`lib/inventory.ts`) — 품목 마스터 4라우트(등록·수정·삭제·Excel·부자재 매핑) + 자재 기초 설정 5종(품목 분류·인벤토리·입출고 유형·제조사·창고) 게이트를 ADMIN OR (USER 이상 + 권한)으로 교체. `canManageStock`에 상위집합 가산(관리자 키만으로 입출고 처리 가능). 전표 사후 수정·재고 담당자 풀·UDI 문서 메타는 ADMIN 등급 유지
+  - `maintenance.admin`/`install_plan.admin`/`project.admin`/`site_visit.admin`/`etc_task.admin`: 워크플로 5모듈 DELETE 게이트 가산. **조회·생성·수정·완료 처리는 원래 USER 전원 개방이라 삭제만 편입** (유령 권한 방지 — 티켓 편입 보류 선례). 답사·기타업무는 대칭성 차원에서 추가 제안분
+- **UI 게이트 동기화**: 품목 관리 2페이지(`/inventory/items`·`[id]`)를 등급 체크 → `/api/inventory/can-manage`의 신설 `canAdmin` 필드로 교체, 설치계획 상세 삭제 버튼 `canDelete`(서버 판정) 분리(Reassign 버튼은 ADMIN 유지), 프로젝트 상세 삭제 버튼 `canDelete`(me.permissions 활용)
+- **보안 수리 (탐색 중 발견)**: 인증/등급 게이트 누락 라우트에 USER 이상 게이트 추가 — 프로젝트 장비 POST·파일 업로드 POST·Drive 폴더 POST(종전 무인증), 병원 Excel 가져오기 POST(종전 무인증), 병원 Drive 폴더 POST/PUT(VIEWER 차단). 프로젝트 PUT은 VIEWER의 이슈노트·비고 제한 수정이 의도된 설계라 유지
+- 검증: tsc 0오류 · 스모크 11/11 (`scripts/rbac-v12-smoke.mts` — 부여 전 false/부여 후 true/미부여 키 false/VIEWER 차단/비활성 역할 false/원상복구). **DB 마이그레이션 없음**(권한 키는 코드 카탈로그). 빌드·PM2 재시작·커밋 미실행 (사용자 확인 대기)
+- 영향 파일: app/settings/ticket-queues/page.tsx / lib/permissions.ts·lib/inventory.ts / app/api/inventory/{items/**,can-manage}/route.ts·app/api/settings/{item-category,inventories,manufacturers,warehouses}/**·lib/stockReasonApi.ts / app/api/{maintenances,install-plans,site-visits,etc-tasks}/[id]/route.ts·app/api/projects/[code]/**·app/api/hospitals/{import,[code]/drive-folder}/route.ts / app/inventory/items/{page,[id]/page}.tsx·app/install-plans/[id]/page.tsx·app/projects/[code]/page.tsx / scripts/rbac-v12-smoke.mts(신규) / README.md·projects/rbac_design.md
+
+---
+
 ## 2026-08-04 | 병원 엑셀 다운로드 — 대상 선택 모달 + 무필터 차단 (dev2·PROD)
 
 - 요청: 필터 없이 받으면 용량 부하가 크니, '엑셀 다운로드' 클릭 시 **병원종·상태 체크 UI**를 띄우고 체크한 항목만 받도록 개선

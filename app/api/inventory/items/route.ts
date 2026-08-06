@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { nextItemCode, categoryPath, categoryWithDescendants } from '@/lib/inventory'
+import { nextItemCode, categoryPath, categoryWithDescendants, canAdminInventory } from '@/lib/inventory'
 import { buildItemUdiUpdate, validateUdiDi } from '@/lib/itemUdi'
 import { Prisma } from '@prisma/client'
 
@@ -69,7 +69,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const user = await getAuthUser(req)
-  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  // ADMIN 이상 또는 (USER 이상 + inventory.admin 권한) — RBAC 가산
+  if (!user || !(await canAdminInventory(user))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await req.json()
   const name = body.name?.trim()

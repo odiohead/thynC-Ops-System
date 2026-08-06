@@ -123,6 +123,7 @@ export default function ProjectDetailPage() {
   const [buildStatuses, setBuildStatuses] = useState<BuildStatusOption[]>([])
   const [introTypeOptions, setIntroTypeOptions] = useState<IntroTypeOption[]>([])
   const [isAdmin, setIsAdmin] = useState(false)
+  const [canDelete, setCanDelete] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
@@ -211,6 +212,11 @@ export default function ProjectDetailPage() {
       setConstructors(conData.constructors ?? [])
       setBuildStatuses(bsData.buildStatuses ?? [])
       setIsAdmin(meData?.role === 'ADMIN' || meData?.role === 'SUPER_ADMIN')
+      // 삭제 버튼: ADMIN 이상 또는 project.admin 권한 보유자(VIEWER 제외) — 서버 DELETE 게이트와 동일 판정
+      setCanDelete(
+        meData?.role === 'ADMIN' || meData?.role === 'SUPER_ADMIN' ||
+        (meData?.role === 'USER' && (meData?.permissions ?? []).includes('project.admin'))
+      )
       setIntroTypeOptions(introData.introTypes ?? [])
       setLoading(false)
     })
@@ -388,7 +394,7 @@ export default function ProjectDetailPage() {
             >
               {saving ? '저장 중...' : '저장'}
             </button>
-            {isAdmin && (
+            {canDelete && (
               <button
                 onClick={handleDelete}
                 disabled={deleting}

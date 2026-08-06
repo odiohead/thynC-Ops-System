@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma'
-import { isAdminOrAbove } from '@/lib/auth'
+import { isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
 import { hasPermission } from '@/lib/appRoles'
 import { Prisma } from '@prisma/client'
 
@@ -18,14 +18,26 @@ export async function nextItemCode(): Promise<string> {
 
 /**
  * 재고 처리 권한: ADMIN 이상이거나 재고 담당자 풀(inventory_managers) 등록자,
- * 또는 RBAC 역할로 'inventory.manage' 권한 보유자 (rbac_design.md Phase 2 — 가산 전용).
+ * 또는 RBAC 역할로 'inventory.manage'/'inventory.admin' 권한 보유자 (rbac_design.md Phase 2 — 가산 전용).
+ * 'inventory.admin'은 'inventory.manage'의 상위 집합 — 관리자 권한만 부여해도 입출고 처리 가능.
  * function_wms.md §5 — 서버에서 DB 실시간 조회로 확인 (JWT에 넣지 않음).
  */
 export async function canManageStock(user: { userId: string; role: string }): Promise<boolean> {
   if (isAdminOrAbove(user.role)) return true
   const mgr = await prisma.inventoryManager.findUnique({ where: { userId: user.userId } })
   if (mgr) return true
-  return hasPermission(user, 'inventory.manage')
+  return (await hasPermission(user, 'inventory.manage')) || hasPermission(user, 'inventory.admin')
+}
+
+/**
+ * 자재 관리자 권한 — 품목 마스터(등록·수정·삭제·Excel·부자재 매핑)와 자재 기초 설정
+ * (품목 분류·인벤토리·입출고 유형·제조사·창고). ADMIN 이상 또는 (USER 이상 + 'inventory.admin') —
+ * RBAC 가산 전용, VIEWER는 권한이 있어도 쓰기 불가 (읽기 전용 원칙)
+ */
+export async function canAdminInventory(user: { userId: string; role: string }): Promise<boolean> {
+  if (isAdminOrAbove(user.role)) return true
+  if (!isUserOrAbove(user.role)) return false
+  return hasPermission(user, 'inventory.admin')
 }
 
 /**
@@ -136,7 +148,7 @@ export interface CreateTxInput {
   warehouseId: number
   toWarehouseId?: number | null // MOVE 필수
   quantity: number
-  destination?: string | null // OUT 출고처 (자유 텍스트)
+  destination?: string | null // 상대처 — IN=발송처 / OUT=출고처 (자유 텍스트)
   requester?: string | null // 요청자 (자유 텍스트) — OUT 필수, IN 선택
   hospitalCode?: string | null
   workType?: string | null
@@ -311,7 +323,8 @@ export async function applyInventoryTransaction(client: Tx, plan: TxPlan, actorI
       inventoryId,
       quantity: qty,
       txDate: new Date(plan.txDate),
-      destination: input.txType === 'OUT' ? (input.destination?.trim() || null) : null,
+      // 상대처 — IN=발송처 / OUT=출고처 (MOVE는 사내 이동이라 미사용). 2026-08-06: IN 발송처 유실 버그 수정
+      destination: input.txType === 'MOVE' ? null : (input.destination?.trim() || null),
       requester: input.txType === 'MOVE' ? null : (input.requester?.trim() || null),
       // LOT 버킷 품목은 MOVE에도 LOT 기록 (취소 시 역방향 버킷 식별) — 그 외엔 기존 표기 규칙
       lotNo: stockLot || (input.txType === 'MOVE' ? null : (input.lotNo?.trim() || null)),

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getAuthUser, isUserOrAbove } from '@/lib/auth'
 import * as XLSX from 'xlsx'
 
 export interface HospitalImportRow {
@@ -51,6 +52,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const user = await getAuthUser(request)
+  if (!user || !isUserOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
   const preview = request.nextUrl.searchParams.get('preview') === 'true'
 
   try {

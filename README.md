@@ -202,7 +202,7 @@ app/
 │   ├── etc-task-status/              # 기타업무 상태 관리 (WorkflowStatusManager)
 │   ├── install-plan-status/          # 설치계획 상태 관리 (WorkflowStatusManager, 2026-07-27)
 │   ├── sales-codes/                  # 영업 코드 관리 — 7카테고리 (단계·딜 상태·판매모델·세금계산서·정산·활동 유형·직군)
-│   ├── ticket-queues/                # Assignment Group 관리 (이름·설명·순서·활성·티켓 수)
+│   ├── ticket-queues/                # Assignment Group 관리 (이름·설명·순서·활성·티켓 수, 멤버 모달 팀(부서) 단위 일괄 선택)
 │   ├── ticket-cti/                   # 티켓 분류(CTI) 관리 (Category/Type/Item 3컬럼 + Item 기본 Assignment Group 지정)
 │   ├── ticket-pending-reasons/       # 티켓 대기 사유 관리
 │   ├── ticket-cti-rules/             # 티켓 자동생성 규칙 (ADMIN — 업무 5종 통합, 목록 페이지 버튼과 같은 모달)
@@ -508,11 +508,12 @@ prisma/
 ### RBAC Lite — AppRole / AppRolePermission / AppUserRole (2026-08-04, `projects/rbac_design.md`)
 - 기존 등급(`User.role` 4단계) **위에 얹는 가산 전용(additive-only)** 기능 역할 체계 — 역할은 권한을 더해줄 뿐 기존 접근을 빼앗지 않는다
 - **AppRole** (`app_roles`): 직무 단위 역할 정의 — `code`(UNIQUE, 대문자 스네이크·생성 후 변경 불가), `name`, `description`, `isActive`, `sortOrder`
-- **AppRolePermission** (`app_role_permissions`): 역할 ↔ 권한 키. UNIQUE `(roleId, permKey)` — **권한 키 카탈로그는 `lib/permissions.ts`가 단일 소스**(DB에는 키 문자열만, 카탈로그 밖 키는 판정 시 무시). 카탈로그 v1.1(Phase 3): `inventory.manage`(재고 입출고 처리)·`vehicle.manage`(차량 마스터 관리)·`sales.access`(영업 정보 접근 — SEERS 소속 축은 불변). 각 키에 `description`(적용 범위 설명 — 역할 관리 화면 표시)
+- **AppRolePermission** (`app_role_permissions`): 역할 ↔ 권한 키. UNIQUE `(roleId, permKey)` — **권한 키 카탈로그는 `lib/permissions.ts`가 단일 소스**(DB에는 키 문자열만, 카탈로그 밖 키는 판정 시 무시). 카탈로그 v1.2(2026-08-06): `inventory.manage`(재고 입출고 처리)·`inventory.admin`(자재 관리자 — manage 상위집합 + 품목 마스터·자재 기초 설정)·`vehicle.manage`(차량 마스터 관리)·`sales.access`(영업 정보 접근 — SEERS 소속 축은 불변)·`maintenance.admin`/`install_plan.admin`/`project.admin`/`site_visit.admin`/`etc_task.admin`(각 모듈 건 삭제 — 조회·생성·수정은 원래 USER 전원 개방이라 무관). 각 키에 `description`(적용 범위 설명 — 역할 관리 화면 표시)
 - **AppUserRole** (`app_user_roles`): 사용자 ↔ 역할 N:M. UNIQUE `(userId, roleId)`, 양쪽 Cascade
 - 판정은 `lib/appRoles.ts` `hasPermission(user, perm)` — SUPER_ADMIN 무조건 true, 활성 역할 권한 합집합, **60초 인메모리 캐시**(역할·멤버 변경 API에서 무효화), 실패 시 빈 집합(fail-closed). 권한은 JWT에 넣지 않고 DB 조회
 - 등급과의 합성은 호출부 책임 — 파일럿(자재관리): `canManageStock` = ADMIN 이상 OR 풀 OR `inventory.manage`(가산) / `canEditTxMeta` = ADMIN 이상 AND (풀 OR `inventory.manage`)(자격 요건)
 - **Phase 3 편입 (2026-08-04)**: 차량 마스터 쓰기(`/api/vehicles` 3게이트) = ADMIN OR (USER 이상 + `vehicle.manage`) / 영업 게이트(`checkSalesAccess` 등급 축) = ADMIN OR (USER 이상 + `sales.access`) — 신규 권한 경로는 `isUserOrAbove` 동반(VIEWER 읽기 전용 원칙). 티켓 담당 지정은 이미 USER 전원 개방이라 편입 보류. 컨벤션은 CLAUDE.md '기능 권한 — RBAC Lite' 참조
+- **v1.2 편입 (2026-08-06)**: 자재 관리자 `canAdminInventory`(`lib/inventory.ts`) = ADMIN OR (USER 이상 + `inventory.admin`) — 품목 마스터 4라우트·자재 설정 5종(분류·인벤토리·입출고 유형·제조사·창고) 게이트 교체, `canManageStock`에 `inventory.admin` 상위집합 가산. 워크플로 5모듈(유지보수·설치계획·프로젝트·답사·기타업무) DELETE = ADMIN OR (USER 이상 + `<모듈>.admin`). 전표 사후 수정(`canEditTxMeta`)·재고 담당자 풀 관리·UDI 문서 메타는 ADMIN 등급 유지
 
 ### Task (통합 업무) — **폐기 (P10, 2026-07-24)**
 - 티켓 시스템이 롤업 역할을 대체 — `/tasks`는 `/tickets`로 리다이렉트, `/api/tasks` 제거, nav 메뉴 비활성. **테이블은 이력 보존(561건 동결)** — 원본 모듈들의 Task 생성/동기화/삭제 코드 전부 제거(ConsultationQueue 선례). 잔존 참조 없음 — `lib/workItemReassign.ts`의 Task 미러 갱신도 P13에서 제거(연결 티켓 동기화로 대체)
@@ -704,7 +705,7 @@ prisma/
 - **기타업무 편입 (P6, 2026-07-24)**: `etc_tasks.ticketId`(1:1) — 존속 편입(방문일정·캘린더는 도메인 잔류), CTI 내부/기타업무/일반→내부운영 그룹, 상태 체계는 유지보수와 동일 매핑, 병원은 첫 연결분→ticket.hospitalCode. 백필 29건(`scripts/backfill-etc-task-tickets.mts`). refType 'ETC'. 역할 구분: 일정·병원 연결 필요하면 기타업무, 아니면 순수 티켓
 - **유지보수 편입 (P5, 2026-07-24)**: `maintenances.ticketId`(1:1 FK) — 유지보수 생성 시 티켓 동시 생성(Assignment Group '유지보수', 장애유형→CTI 고객지원/장애/*, 우선순위→Sev), 상태·담당 **양방향 동기화**(`lib/ticketDomain.ts`, 매핑: 접수↔OPEN/ASSIGNED·처리중↔IN_PROGRESS·보류↔PENDING·완료↔RESOLVED/CLOSED), 처리 기록은 티켓 타임라인으로 일원화(기존 30건 이관·maintenance_logs 보존), Slack은 P11부터 티켓 파이프라인 단일 발송. 백필 219건 완료(`scripts/backfill-maintenance-tickets.mts`)
 - **TicketQueue** (`ticket_queues`): **Assignment Group** 마스터 — AWS SIM의 assigned/resolver group에 대응하는 배정 그룹(기능 단위, 런타임 관리). **UI 표기는 'Assignment Group'**, 테이블·API 경로는 `ticket_queues`/`ticket-queues` 유지(2026-07-26 명칭 변경)
-- **TicketQueueMember** (`ticket_queue_members`): Assignment Group 멤버 N:M (담당자 선택 시 그룹 멤버 우선 노출, 비멤버 배정도 허용)
+- **TicketQueueMember** (`ticket_queue_members`): Assignment Group 멤버 N:M (담당자 선택 시 그룹 멤버 우선 노출, 비멤버 배정도 허용). 설정 멤버 모달은 팀(부서)별 그룹핑 + 팀 헤더 체크박스로 일괄 추가/해제 (2026-08-06 — 데이터는 개인 단위 유지, 팀 스냅샷 방식)
 - **TicketCti** (`ticket_cti`): 3단계 분류 트리(parent_id 자기참조, level 1~3 CHECK) + `defaultQueueId`(CTI→Assignment Group 자동 라우팅, Item 레벨에 지정)
 - **TicketParticipant** (`ticket_participants`): 참여자 N:M (owner와 별개)
 - **TicketLog** (`ticket_logs`): 단일 타임라인 — `logType` comment(사람, Tiptap HTML)/status_change·assign·queue_transfer·sev_change 등 시스템 이벤트(`payload` JSONB). 프로세스 지표 원천 겸용
@@ -1054,9 +1055,9 @@ prisma/
   - API: `GET /api/inventory/ledger`(모델 목록 / 대장 데이터) · `PUT /api/inventory/ledger/check`(출고완료 체크 토글) · `GET /api/inventory/ledger/docx`(문서 다운로드)
   - **대장 시작점은 2026-07-01** — 시스템 도입 시 재고를 스냅샷으로 적재해 그 이전 입출고 이력이 없음(소급 입력 미실시)
 - **다품목 일괄 입출고 (2026-07-30)**: 이력 페이지 '다품목 입출고' 버튼(`BulkTxModal`) — 인벤토리·유형·요청자·출고처·일자 공통 입력 + 위치·품목·수량(비시리얼)/시리얼·LOT(시리얼)는 줄별 지정, 혼합 지원. `POST /api/inventory/transactions/bulk`(입고/출고만, 세트출고·병원연결 미포함) — 줄별 검증 후 단일 트랜잭션 전부 성공/전부 롤백, 품목별 전표 1건씩 생성
-- **품목 마스터** (`/inventory/items`, ADMIN): 인벤토리 탭 + 인벤토리 컬럼. `ITEM-NNNN` 자동 발번(전체 순번), **등록 시 인벤토리 필수·수정 불가**. **모델명**·대>중>소 분류 트리·제조사·규격·단위·시리얼 여부·DeviceInfo 연결·참고단가. 검색은 품목명·모델명·코드·규격 통합. **Excel 일괄 가져오기**(가져올 인벤토리 선택 필수, 같은 인벤토리 내 품목명 중복만 스킵, K열=LOT여부)
+- **품목 마스터** (`/inventory/items`, ADMIN 또는 `inventory.admin` 권한): 인벤토리 탭 + 인벤토리 컬럼. `ITEM-NNNN` 자동 발번(전체 순번), **등록 시 인벤토리 필수·수정 불가**. **모델명**·대>중>소 분류 트리·제조사·규격·단위·시리얼 여부·DeviceInfo 연결·참고단가. 검색은 품목명·모델명·코드·규격 통합. **Excel 일괄 가져오기**(가져올 인벤토리 선택 필수, 같은 인벤토리 내 품목명 중복만 스킵, K열=LOT여부)
 - **위치(창고) 관리** (`/settings/warehouses`, ADMIN): **인벤토리별 섹션으로 독립 추가/수정/삭제** — 위치명 UNIQUE는 인벤토리 내에서만(다른 인벤토리엔 같은 이름 허용)
-- **처리 권한**: 입고/출고/이동/취소 = 재고 담당자 풀(`/settings/inventory-managers`) + ADMIN 이상 + **RBAC `inventory.manage` 권한 보유자**(2026-08-04 가산 편입 — `canManageStock` 서버 실시간 검사). 조회=전 로그인. 감사 로그 `resource='inventory_tx'`/`inventory_item`/`setting:*`
+- **처리 권한**: 입고/출고/이동/취소 = 재고 담당자 풀(`/settings/inventory-managers`) + ADMIN 이상 + **RBAC `inventory.manage`/`inventory.admin` 권한 보유자**(2026-08-04 가산 편입, 2026-08-06 admin 상위집합 — `canManageStock` 서버 실시간 검사). **품목 마스터·자재 기초 설정** = ADMIN 이상 또는 (USER 이상 + `inventory.admin`) (`canAdminInventory`). 조회=전 로그인. 감사 로그 `resource='inventory_tx'`/`inventory_item`/`setting:*`
 - **PROD 배포**: Phase 10(인벤토리 완전 분리, 마이그레이션 `20260716100000`)까지 배포 완료
 
 ### GW 배치 플래너 (`/gateway-planner`, ADMIN 이상 — `function_gateway_planner.html` Phase 1·2)

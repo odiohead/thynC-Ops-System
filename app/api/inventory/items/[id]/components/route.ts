@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser } from '@/lib/auth'
+import { canAdminInventory } from '@/lib/inventory'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 /** 부자재 추가 — 1단계 깊이만 허용 (주자재는 부자재가 될 수 없고, 부자재는 주자재가 될 수 없음) */
 export async function POST(req: NextRequest, { params }: Params) {
   const user = await getAuthUser(req)
-  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!user || !(await canAdminInventory(user))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const parentId = parseInt(params.id)
   if (isNaN(parentId)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })
@@ -94,7 +95,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 /** 구성 수량 수정 */
 export async function PUT(req: NextRequest, { params }: Params) {
   const user = await getAuthUser(req)
-  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!user || !(await canAdminInventory(user))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const parentId = parseInt(params.id)
   const body = await req.json()
@@ -126,7 +127,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 /** 부자재 매핑 해제 (?childItemId=) */
 export async function DELETE(req: NextRequest, { params }: Params) {
   const user = await getAuthUser(req)
-  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!user || !(await canAdminInventory(user))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const parentId = parseInt(params.id)
   const childId = parseInt(new URL(req.url).searchParams.get('childItemId') ?? '')

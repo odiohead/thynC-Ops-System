@@ -3,7 +3,8 @@ import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { notifyTicketChanged } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/googleCalendar'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { advanceHospitalStatus } from '@/lib/hospitalStatus'
@@ -39,6 +40,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
 export async function PUT(request: NextRequest, { params }: Params) {
   const authUser = await getAuthUser(request)
+  // VIEWER도 통과 — 아래에서 issueNote·remark만 수정 가능한 제한 분기로 처리
   if (!authUser) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const existing = await prisma.project.findUnique({ where: { projectCode: params.code } })
@@ -244,7 +246,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
 export async function DELETE(request: NextRequest, { params }: Params) {
   const authUser = await getAuthUser(request)
   if (!authUser) return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
-  if (!isAdminOrAbove(authUser.role)) return NextResponse.json({ error: '삭제 권한이 없습니다. 관리자(ADMIN)에게 문의하세요.' }, { status: 403 })
+  if (!isAdminOrAbove(authUser.role) && !(isUserOrAbove(authUser.role) && (await hasPermission(authUser, 'project.admin'))))
+    return NextResponse.json({ error: '삭제 권한이 없습니다. 관리자 또는 삭제 권한 보유자에게 문의하세요.' }, { status: 403 })
   const existing = await prisma.project.findUnique({ where: { projectCode: params.code } })
   if (!existing) return NextResponse.json({ error: '프로젝트를 찾을 수 없습니다.' }, { status: 404 })
 
