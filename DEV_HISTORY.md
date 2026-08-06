@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-08-06 | PROD 배포: 팀 단위 할당 + RBAC v1.2 + 발송처 수정 (커밋 067634d)
+
+- dev2 커밋 `067634d` push → PROD `git pull`(`27d505d`→`067634d`, 35파일) → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- 신규 패키지 없음(`npm install` 불필요), **DB 마이그레이션 없음**(권한 키는 코드 카탈로그)
+- 스모크: `/`·`/settings/ticket-queues`·`/settings/roles`·`/inventory/items`·`/install-plans`·`/projects`·`/tickets` 전부 307 정상, 외부 HTTPS 307 정상. 에러 로그의 Google Calendar 이벤트 404는 기존 이슈(이번 변경과 무관)
+- 배포 직후 동작: 권한은 SUPER_ADMIN이 역할 관리에서 정의·부여 전까지 시스템 동작 불변(가산 전용). 입고 발송처는 배포 시점부터 저장 — 기존 빈 전표는 전표 수정에서 건별 입력
+
+---
+
 ## 2026-08-06 | 버그 수정: 입고 전표 발송처(destination) 유실 (dev2)
 
 - 사용자 신고: 입고(회수) 처리 시 발송처를 기재해도 저장 안 됨 — PROD `STK-202608-0036`으로 확인(입고 전표 전건 destination 공란)
