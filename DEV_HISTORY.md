@@ -4,7 +4,9 @@
 
 ---
 
-## 2026-08-07 | 영업 게이트 열람/편집 분리 — VIEWER+sales.access 열람 허용 (dev2)
+## 2026-08-07 | 영업 게이트 열람/편집 분리 — VIEWER+sales.access 열람 허용 (dev2·PROD)
+
+> PROD 배포: 커밋 `c58e017` — pull → 힙 4GB 빌드 → 재시작, 스모크(/sales/dashboard·/sales/deals·/hospitals 307, 외부 HTTPS 307) 정상. DB 변경 없음
 
 - 사용자 신고: 영업 메뉴를 전 역할에 열고 VIEWER 계정에 `sales.access` 역할을 부여했는데 페이지에서 "ADMIN 이상만" 차단
 - 원인은 버그가 아니라 설계 — Phase 3 편입 시 영업 게이트가 열람·편집 공통이라 권한 경로에 `isUserOrAbove`(VIEWER 제외)를 걸었음. 운영 의도(뷰어에게 열람만 부여)가 타당해 **게이트를 열람/편집으로 분리**
