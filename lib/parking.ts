@@ -323,10 +323,19 @@ async function fetchDayDiscounts(carNo: string, entryDt14: string): Promise<DayD
  * 이번 입차건 이전에 '우리 계정'이 무료권을 쓴 이력.
  * 타 입주사(예: B133·611) 계정의 무료권은 계약별로 재사용 가능한 경우가 실측 확인되어(2026-08-04)
  * 판정에서 제외한다 — 우리 계정의 무료권만 재입차 시 사용 불가.
+ *
+ * 2026-08-07 입차 달력일 기준으로 고정: 사이트 영업일이 실제 날짜를 지연 추적해(13시에도 전날로 표시 실측)
+ * 조회 범위가 전날까지 벌어지는데, 전날 다른 입차건의 무료권이 오늘 새 입차를 차단하는 오판이 발생(47서1581).
+ * 현재 입차건과 같은 입차일(YYYYMMDD)의 이력만 차단 사유로 인정한다. 입차시각을 모르면 차단하지 않음(fail-open).
+ * 스모크(scripts/parking-free-block-smoke.mts)용으로 export.
  */
-function earlierFreeRows(rows: DayDiscountRow[], currentEntryAt: string): DayDiscountRow[] {
+export function earlierFreeRows(rows: DayDiscountRow[], currentEntryAt: string): DayDiscountRow[] {
+  const day = /^\d{8}/.test(currentEntryAt || '') ? currentEntryAt.slice(0, 8) : null
+  if (!day) return []
   const ours = new Set(getParkingAccounts().map((a) => a.userId))
-  return rows.filter((r) => r.free && r.entryAt && r.entryAt !== currentEntryAt && ours.has(r.accountNo))
+  return rows.filter(
+    (r) => r.free && r.entryAt && r.entryAt !== currentEntryAt && r.entryAt.slice(0, 8) === day && ours.has(r.accountNo)
+  )
 }
 
 export interface SearchResult {
