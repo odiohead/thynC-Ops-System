@@ -1054,7 +1054,7 @@ prisma/
   - **UDI 입력 경로**: 자재관리 > **품목 관리**의 등록/수정 폼(목록에 UDI 컬럼, 품목 상세에 UDI 카드). UDI는 품목 속성이므로 인벤토리별 품목에 각각 입력한다
   - API: `GET /api/inventory/ledger`(모델 목록 / 대장 데이터) · `PUT /api/inventory/ledger/check`(출고완료 체크 토글) · `GET /api/inventory/ledger/docx`(문서 다운로드)
   - **대장 시작점은 2026-07-01** — 시스템 도입 시 재고를 스냅샷으로 적재해 그 이전 입출고 이력이 없음(소급 입력 미실시)
-- **다품목 일괄 입출고 (2026-07-30)**: 이력 페이지 '다품목 입출고' 버튼(`BulkTxModal`) — 인벤토리·유형·요청자·출고처·일자 공통 입력 + 위치·품목·수량(비시리얼)/시리얼·LOT(시리얼)는 줄별 지정, 혼합 지원. `POST /api/inventory/transactions/bulk`(입고/출고만, 세트출고·병원연결 미포함) — 줄별 검증 후 단일 트랜잭션 전부 성공/전부 롤백, 품목별 전표 1건씩 생성
+- **다품목 일괄 입출고 (2026-07-30)**: 이력 페이지 '다품목 입출고' 버튼(`BulkTxModal`) — 인벤토리·유형·요청자·출고처·일자 공통 입력 + 위치·품목·수량(비시리얼)/시리얼·LOT(시리얼)는 줄별 지정, 혼합 지원. `POST /api/inventory/transactions/bulk`(입고/출고만, 세트출고·병원연결 미포함) — 줄별 검증 후 단일 트랜잭션 전부 성공/전부 롤백, 품목별 전표 1건씩 생성. **비시리얼 LOT 품목 출고 시 보유 LOT 버킷 드롭다운 선택**(2026-08-07 — 단품목 출고 모달과 동일, 위치 선택 후 활성화·잔량 표시·'(LOT 없음)' 버킷 포함. 수동 입력은 입고 신규 LOT만)
 - **품목 마스터** (`/inventory/items`, ADMIN 또는 `inventory.admin` 권한): 인벤토리 탭 + 인벤토리 컬럼. `ITEM-NNNN` 자동 발번(전체 순번), **등록 시 인벤토리 필수·수정 불가**. **모델명**·대>중>소 분류 트리·제조사·규격·단위·시리얼 여부·DeviceInfo 연결·참고단가. 검색은 품목명·모델명·코드·규격 통합. **Excel 일괄 가져오기**(가져올 인벤토리 선택 필수, 같은 인벤토리 내 품목명 중복만 스킵, K열=LOT여부)
 - **위치(창고) 관리** (`/settings/warehouses`, ADMIN): **인벤토리별 섹션으로 독립 추가/수정/삭제** — 위치명 UNIQUE는 인벤토리 내에서만(다른 인벤토리엔 같은 이름 허용)
 - **처리 권한**: 입고/출고/이동/취소 = 재고 담당자 풀(`/settings/inventory-managers`) + ADMIN 이상 + **RBAC `inventory.manage`/`inventory.admin` 권한 보유자**(2026-08-04 가산 편입, 2026-08-06 admin 상위집합 — `canManageStock` 서버 실시간 검사). **품목 마스터·자재 기초 설정** = ADMIN 이상 또는 (USER 이상 + `inventory.admin`) (`canAdminInventory`). 조회=전 로그인. 감사 로그 `resource='inventory_tx'`/`inventory_item`/`setting:*`

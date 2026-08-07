@@ -6,6 +6,7 @@ interface Inventory { id: number; name: string; isActive: boolean }
 interface Warehouse { id: number; name: string; inventoryId: number; isActive: boolean }
 interface Reason { id: number; name: string; value: string | null }
 interface Item { id: number; itemCode: string; name: string; unit: string; isSerialManaged: boolean; isLotManaged: boolean }
+interface Bucket { warehouseId: number; warehouseName: string; lotNo: string; quantity: number } // LOT 재고 차원 — 위치×LOT 단위
 
 interface Line {
   key: number
@@ -13,11 +14,12 @@ interface Line {
   warehouseId: number | ''
   quantity: string
   serialsText: string
-  lotNo: string
+  lotNo: string // IN — 신규 LOT 수동 입력
+  lotSel: string | null // OUT 비시리얼 LOT — 보유 LOT 버킷 선택 (''=LOT 없음, null=미선택)
 }
 
 let keySeq = 1
-const newLine = (): Line => ({ key: keySeq++, itemId: '', warehouseId: '', quantity: '', serialsText: '', lotNo: '' })
+const newLine = (): Line => ({ key: keySeq++, itemId: '', warehouseId: '', quantity: '', serialsText: '', lotNo: '', lotSel: null })
 
 function todayLocal(): string {
   const d = new Date()
@@ -70,15 +72,41 @@ export default function BulkTxModal({ onClose, onDone }: { onClose: () => void; 
   )
   const itemMap = useMemo(() => new Map(items.map((i) => [i.id, i])), [items])
 
+  // OUT 비시리얼 LOT 품목 — 보유 LOT 버킷 캐시 (단품목 모달의 LOT 선택과 동일 소스: /api/inventory/stocks)
+  const [bucketsByItem, setBucketsByItem] = useState<Record<number, Bucket[]>>({})
+  useEffect(() => { setBucketsByItem({}) }, [inventoryId])
+  useEffect(() => {
+    if (txType !== 'OUT') return
+    const need = Array.from(new Set(
+      lines
+        .map((l) => (l.itemId !== '' ? itemMap.get(l.itemId) : undefined))
+        .filter((it): it is Item => !!it && it.isLotManaged && !it.isSerialManaged)
+        .map((it) => it.id),
+    )).filter((id) => bucketsByItem[id] === undefined)
+    for (const id of need) {
+      setBucketsByItem((m) => ({ ...m, [id]: [] })) // 중복 요청 방지 선점
+      fetch(`/api/inventory/stocks?itemId=${id}`).then(async (r) => {
+        if (r.ok) {
+          const buckets: Bucket[] = (await r.json()).buckets ?? []
+          setBucketsByItem((m) => ({ ...m, [id]: buckets }))
+        }
+      })
+    }
+  }, [txType, lines, itemMap, bucketsByItem])
+
   function updateLine(key: number, patch: Partial<Line>) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)))
   }
 
-  // 줄별 LOT 입력 필요 여부: 비시리얼 LOT 품목 / 시리얼 LOT 품목 입고
-  function needsLot(item: Item | undefined): boolean {
+  // 줄별 LOT 수동 입력 필요 여부: LOT 품목 입고 (비시리얼=재고 버킷, 시리얼=개체 LOT)
+  function needsLotInput(item: Item | undefined): boolean {
     if (!item || !item.isLotManaged) return false
-    if (!item.isSerialManaged) return true
     return txType === 'IN'
+  }
+
+  // 줄별 LOT 선택 필요 여부: 비시리얼 LOT 품목 출고 — 보유 LOT 버킷에서 선택
+  function needsLotPick(item: Item | undefined): boolean {
+    return !!item && item.isLotManaged && !item.isSerialManaged && txType === 'OUT'
   }
 
   async function submit() {
@@ -100,15 +128,17 @@ export default function BulkTxModal({ onClose, onDone }: { onClose: () => void; 
         const q = Number(l.quantity)
         if (!q || q <= 0) return setError(`${i + 1}번째 줄(${item?.name ?? ''}): 수량을 입력하세요.`)
       }
-      if (needsLot(item) && !l.lotNo.trim()) return setError(`${i + 1}번째 줄(${item?.name}): LOT를 입력하세요.`)
+      if (needsLotInput(item) && !l.lotNo.trim()) return setError(`${i + 1}번째 줄(${item?.name}): LOT를 입력하세요.`)
+      if (needsLotPick(item) && l.lotSel === null) return setError(`${i + 1}번째 줄(${item?.name}): 출고할 LOT를 선택하세요.`)
 
       const line: Record<string, unknown> = { itemId: l.itemId, warehouseId: l.warehouseId }
       if (item?.isSerialManaged) {
         line.serials = serials
-        if (needsLot(item)) line.lotBySerial = Object.fromEntries(serials.map((s) => [s, l.lotNo.trim()]))
+        if (needsLotInput(item)) line.lotBySerial = Object.fromEntries(serials.map((s) => [s, l.lotNo.trim()]))
       } else {
         line.quantity = Number(l.quantity)
-        if (needsLot(item)) line.lotNo = l.lotNo.trim()
+        if (needsLotInput(item)) line.lotNo = l.lotNo.trim()
+        if (needsLotPick(item)) line.lotNo = l.lotSel // ''=LOT 없음 버킷
       }
       payloadLines.push(line)
     }
@@ -215,27 +245,45 @@ export default function BulkTxModal({ onClose, onDone }: { onClose: () => void; 
                   <div key={l.key} className="rounded-lg border border-gray-200 p-2.5">
                     <div className="flex flex-wrap items-start gap-2">
                       <span className="pt-2 text-xs text-gray-400">{idx + 1}</span>
-                      <select value={l.itemId} onChange={(e) => updateLine(l.key, { itemId: e.target.value ? Number(e.target.value) : '', quantity: '', serialsText: '', lotNo: '' })} className={`${inputCls} min-w-0 flex-1`}>
+                      <select value={l.itemId} onChange={(e) => updateLine(l.key, { itemId: e.target.value ? Number(e.target.value) : '', quantity: '', serialsText: '', lotNo: '', lotSel: null })} className={`${inputCls} min-w-0 flex-1`}>
                         <option value="">품목 선택</option>
                         {items.map((i) => <option key={i.id} value={i.id}>{i.name} ({i.itemCode})</option>)}
                       </select>
-                      <select value={l.warehouseId} onChange={(e) => updateLine(l.key, { warehouseId: e.target.value ? Number(e.target.value) : '' })} className={`${inputCls} w-32`}>
+                      <select value={l.warehouseId} onChange={(e) => updateLine(l.key, { warehouseId: e.target.value ? Number(e.target.value) : '', lotSel: null })} className={`${inputCls} w-32`}>
                         <option value="">위치</option>
                         {invWarehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
                       </select>
                       {!isSerial && (
                         <input type="number" min={1} value={l.quantity} onChange={(e) => updateLine(l.key, { quantity: e.target.value })} placeholder="수량" className={`${inputCls} w-20 text-right`} />
                       )}
-                      {item && needsLot(item) && (
+                      {item && needsLotInput(item) && (
                         <input value={l.lotNo} onChange={(e) => updateLine(l.key, { lotNo: e.target.value })} placeholder="LOT" className={`${inputCls} w-28 font-mono`} />
                       )}
+                      {item && needsLotPick(item) && (() => {
+                        // 보유 LOT 버킷 선택 — 단품목 출고 모달과 동일 동작 (위치 선택 후 활성화)
+                        const lotBuckets = (bucketsByItem[item.id] ?? []).filter((b) => b.warehouseId === l.warehouseId && b.quantity > 0)
+                        return (
+                          <select
+                            value={l.lotSel === null ? '' : `L:${l.lotSel}`}
+                            onChange={(e) => updateLine(l.key, { lotSel: e.target.value ? e.target.value.slice(2) : null })}
+                            disabled={l.warehouseId === ''}
+                            className={`${inputCls} w-44 font-mono`}
+                            title={l.warehouseId === '' ? '위치를 먼저 선택하세요' : undefined}
+                          >
+                            <option value="">{l.warehouseId === '' ? '위치 먼저 선택' : lotBuckets.length === 0 ? '이 위치에 재고 없음' : `LOT 선택 (${lotBuckets.length}개)`}</option>
+                            {lotBuckets.map((b) => (
+                              <option key={b.lotNo || '(none)'} value={`L:${b.lotNo}`}>{b.lotNo || '(LOT 없음)'} — 재고 {b.quantity.toLocaleString()}</option>
+                            ))}
+                          </select>
+                        )
+                      })()}
                       <button onClick={() => setLines((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== l.key) : ls))} className="pt-1.5 text-gray-300 hover:text-red-500" title="줄 삭제">✕</button>
                     </div>
                     {isSerial && (
                       <div className="mt-2 pl-5">
                         <textarea value={l.serialsText} onChange={(e) => updateLine(l.key, { serialsText: e.target.value })} rows={2}
                           placeholder="시리얼번호 (줄바꿈/쉼표로 구분, 스캔 입력)" className={`${inputCls} w-full font-mono`} />
-                        <span className="text-[11px] text-gray-400">{serialCount}개 · {txType === 'IN' ? '신규 입고' : '출고 대상'}{needsLot(item) && ' · LOT는 이 줄 전체 공통'}</span>
+                        <span className="text-[11px] text-gray-400">{serialCount}개 · {txType === 'IN' ? '신규 입고' : '출고 대상'}{needsLotInput(item) && ' · LOT는 이 줄 전체 공통'}</span>
                       </div>
                     )}
                   </div>

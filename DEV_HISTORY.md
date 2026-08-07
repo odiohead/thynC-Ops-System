@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-08-07 | 다품목 일괄 출고 — LOT 품목 보유 LOT 선택으로 개선 (dev2·PROD)
+
+- 사용자 요청: 일괄 출고에서 LOT 관리 품목의 LOT가 수동 입력이라 오입력 여지 — 단품목 출고 모달처럼 **현재 재고에 존재하는 LOT를 선택**하게 수정
+- `BulkTxModal`: 출고+비시리얼 LOT 품목 줄의 수동 입력을 **보유 LOT 버킷 드롭다운**으로 교체 — `/api/inventory/stocks?itemId=`(단품목 모달과 동일 소스)를 품목별 1회 캐시, 선택 위치의 잔량>0 버킷만 표시(잔량 병기, '(LOT 없음)' 버킷 포함), 위치 미선택 시 비활성. 품목·위치 변경 시 선택 초기화. LOT 수동 입력은 입고(신규 LOT)만 유지. 미선택 제출 시 줄 번호로 안내
+- 서버 변경 없음 — bulk API·`planInventoryTransaction`의 기존 LOT 검증(미지정 거부·잔량 부족 409) 그대로 활용
+- 검증: tsc 0오류 · 롤백 스모크 3종(LOT 지정 출고 시 해당 버킷 7→5 차감 / LOT 미지정 거부 / 잔량 초과 거부, 잔존 데이터 없음)
+- 영향 파일: app/inventory/components/BulkTxModal.tsx, README.md
+
+---
+
 ## 2026-08-06 | PROD 배포: 팀 단위 할당 + RBAC v1.2 + 발송처 수정 (커밋 067634d)
 
 - dev2 커밋 `067634d` push → PROD `git pull`(`27d505d`→`067634d`, 35파일) → 힙 4GB 빌드 → `pm2 restart thync-prod`
