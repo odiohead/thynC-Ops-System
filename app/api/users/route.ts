@@ -73,7 +73,9 @@ export async function POST(req: NextRequest) {
   const user = await getAuthUser(req)
   if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { email, password, name, phone, role, organizationId, departmentId, vehicleReservationBlocked, slackNotifyEnabled } = await req.json()
+  const { email: rawEmail, password, name, phone, role, organizationId, departmentId, vehicleReservationBlocked, slackNotifyEnabled } = await req.json()
+  // 이메일은 소문자·공백 제거로 정규화 저장 (로그인 정규화 조회와 불변식 공유)
+  const email = String(rawEmail ?? '').trim().toLowerCase()
 
   if (!email || !password || !name) {
     return NextResponse.json({ error: '필수 항목을 입력해주세요.' }, { status: 400 })

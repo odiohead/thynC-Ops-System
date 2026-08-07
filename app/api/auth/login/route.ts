@@ -7,8 +7,11 @@ import { logAudit } from '@/lib/audit'
 export async function POST(req: NextRequest) {
   const { email, password } = await req.json()
 
+  // 이메일 정규화 — 모바일 자동 대문자·복사 공백으로 인한 로그인 실패 방지 (DB 이메일은 소문자 저장이 불변식)
+  const normalizedEmail = String(email ?? '').trim().toLowerCase()
+
   const user = await prisma.user.findUnique({
-    where: { email },
+    where: { email: normalizedEmail },
     include: { organization: { select: { id: true, name: true, code: true } } },
   })
   if (!user) {

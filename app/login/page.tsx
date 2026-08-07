@@ -239,11 +239,14 @@ export default function LoginPage() {
                   </label>
                   <input
                     className="lp-input"
-                    type="text"
+                    type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
                     autoComplete="email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     placeholder="아이디를 입력하세요"
                   />
                 </div>
