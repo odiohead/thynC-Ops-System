@@ -19,7 +19,7 @@ const strOrNull = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() 
 export async function PUT(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const denial = await checkSalesAccess(user)
+  const denial = await checkSalesAccess(user, { write: true })
   if (denial) return NextResponse.json({ error: denial.error }, { status: denial.status })
 
   const hospital = await prisma.hospital.findUnique({ where: { hospitalCode: params.code }, select: { hospitalCode: true, hospitalName: true } })

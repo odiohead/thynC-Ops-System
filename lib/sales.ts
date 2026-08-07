@@ -7,6 +7,8 @@ import { hasPermission } from '@/lib/appRoles'
  *
  * **(ADMIN 이상 또는 RBAC `sales.access` 권한) + SEERS 소속** 열람·편집
  * (2026-07-30 관리자 개방 → 2026-08-04 RBAC Phase 3 가산 — 등급 축만 확장, 소속 축 불변).
+ * 2026-08-07 열람/편집 분리: 열람은 VIEWER도 권한 보유 시 가능, 편집(write)은 USER 등급 이상
+ * (VIEWER 읽기 전용 원칙 — 쓰기 API는 { write: true }로 호출).
  * nav 허용 역할은 메뉴 노출만 제어하며, 실제 접근은 이 게이트가 단일 소스다.
  * 소속·활성 여부는 JWT가 아니라 DB 실시간 조회로 판정 (AI 어시스턴트 access.ts 선례).
  */
@@ -16,10 +18,15 @@ export const SALES_ALLOWED_ORG_CODES: readonly string[] = ['SEERS']
 export type SalesAccessDenial = { status: number; error: string }
 
 /** 통과면 null, 차단이면 응답에 쓸 상태코드·메시지 */
-export async function checkSalesAccess(user: JWTPayload): Promise<SalesAccessDenial | null> {
-  // 권한 경로는 USER 등급 이상만 (VIEWER 읽기 전용 원칙 — 영업 게이트는 열람·편집 공통이라 VIEWER 개방 불가)
-  if (!isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'sales.access')))) {
-    return { status: 403, error: '영업 정보는 ADMIN 이상 또는 영업 정보 접근 권한 보유자만 열람할 수 있습니다.' }
+export async function checkSalesAccess(user: JWTPayload, opts?: { write?: boolean }): Promise<SalesAccessDenial | null> {
+  const gradeOk = opts?.write ? isUserOrAbove(user.role) : true // 편집은 VIEWER 제외
+  if (!isAdminOrAbove(user.role) && !(gradeOk && (await hasPermission(user, 'sales.access')))) {
+    return {
+      status: 403,
+      error: opts?.write
+        ? '영업 정보 편집은 ADMIN 이상 또는 영업 접근 권한 보유자(USER 등급 이상)만 가능합니다.'
+        : '영업 정보는 ADMIN 이상 또는 영업 접근 권한 보유자만 열람할 수 있습니다.',
+    }
   }
   const row = await prisma.user.findUnique({
     where: { id: user.userId },

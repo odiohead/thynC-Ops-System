@@ -48,7 +48,7 @@ export type PersonGuard =
 export async function guardAffiliation(request: NextRequest, code: string, rawAffId: string): Promise<PersonGuard> {
   const user = await getAuthUser(request)
   if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
-  const denial = await checkSalesAccess(user)
+  const denial = await checkSalesAccess(user, { write: true })
   if (denial) return { error: NextResponse.json({ error: denial.error }, { status: denial.status }) }
   const affId = parseInt(rawAffId)
   if (isNaN(affId)) return { error: NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 }) }

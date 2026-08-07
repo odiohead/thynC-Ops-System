@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-08-07 | 영업 게이트 열람/편집 분리 — VIEWER+sales.access 열람 허용 (dev2)
+
+- 사용자 신고: 영업 메뉴를 전 역할에 열고 VIEWER 계정에 `sales.access` 역할을 부여했는데 페이지에서 "ADMIN 이상만" 차단
+- 원인은 버그가 아니라 설계 — Phase 3 편입 시 영업 게이트가 열람·편집 공통이라 권한 경로에 `isUserOrAbove`(VIEWER 제외)를 걸었음. 운영 의도(뷰어에게 열람만 부여)가 타당해 **게이트를 열람/편집으로 분리**
+- `checkSalesAccess(user, { write? })`: 열람(기본) = ADMIN 이상 OR `sales.access`(**VIEWER 포함**) / 편집(`write: true`) = ADMIN 이상 OR (USER 이상 + 권한) — VIEWER 읽기 전용 원칙은 쓰기 축에서 유지. SEERS 소속 축 불변
+- 쓰기 API 8곳에 `{ write: true }` 지정: profile PUT / persons POST·guardAffiliation / activities POST·[id] guard(PUT·DELETE) / deals POST·[id] guard(PUT·DELETE) / map-project POST. 통합 GET·서버 컴포넌트·AI 도구는 열람 게이트 그대로
+- 안내 문구 3페이지(대시보드·도입현황·딜 상세) 및 카탈로그 `sales.access` description에 "VIEWER는 열람만" 명시
+- 알려진 한계: VIEWER가 딜 상세의 편집 폼은 볼 수 있고 저장 시 403 명확 안내 — 폼 read-only 처리는 필요 시 후속
+- 검증: tsc 0오류 · 스모크 4/4(VIEWER+권한 열람 통과/편집 차단/USER+권한 편집 통과/무권한 VIEWER 차단, 임시 역할 원상복구)
+- 영향 파일: lib/sales.ts·lib/permissions.ts / app/api/hospitals/[code]/sales/{profile,persons,activities,deals}/**·persons/shared.ts / app/sales/{dashboard,deals,deals/[id]}/page.tsx / README.md
+
+---
+
 ## 2026-08-07 | 다품목 일괄 출고 — LOT 품목 보유 LOT 선택으로 개선 (dev2·PROD)
 
 - 사용자 요청: 일괄 출고에서 LOT 관리 품목의 LOT가 수동 입력이라 오입력 여지 — 단품목 출고 모달처럼 **현재 재고에 존재하는 LOT를 선택**하게 수정

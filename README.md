@@ -565,7 +565,7 @@ prisma/
 
 ### 영업/CRM 모듈 (v4, 2026-07-29 — `projects/sales_crm_design.md`)
 
-> 접근 권한(열람·편집 공통): **(ADMIN 이상 또는 RBAC `sales.access` 권한 보유 USER) + SEERS 소속** (2026-07-30 관리자 개방 → 2026-08-04 RBAC Phase 3 가산 — `lib/sales.ts` `checkSalesAccess` 단일 소스, 소속은 DB 실시간 판정·모든 영업 API 재검증. nav 허용 역할은 메뉴 노출만 제어)
+> 접근 권한: **(ADMIN 이상 또는 RBAC `sales.access` 권한) + SEERS 소속** (2026-07-30 관리자 개방 → 2026-08-04 RBAC Phase 3 가산 → **2026-08-07 열람/편집 분리** — 열람은 VIEWER도 권한 보유 시 가능, 편집(쓰기 API 8곳 `{ write: true }`)은 USER 등급 이상. `lib/sales.ts` `checkSalesAccess` 단일 소스, 소속은 DB 실시간 판정·모든 영업 API 재검증. nav 허용 역할은 메뉴 노출만 제어)
 > v4 구도: **병원 축**(프로필·인적정보·도입현황 파생) / **차수 축**(딜 1행 = 1도입 건) + 운영 축 조인(공사·답사·교육일 — 저장 없음). 백오피스 중 정산·세금계산서는 차수 단위로 관리(사용자 결정)
 
 #### HospitalSalesProfile (병원 영업 프로필 — 병원 축 헤더)

@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
  * 도입현황 입력 (계약 이력 전용 입력 페이지) — 엑셀(thynC_status.xlsx) B~AK 컬럼 순서 재현.
  * 1행 = 1차수(딜). 행 클릭 → 딜 상세 편집(/sales/deals/[id]), 우측 상단 등록 → 병원 매핑 후 상세로 이동.
  * 답사·공사·교육일·오더현황·지역은 운영 축(연결 프로젝트·병원) 조인 — 저장 없음.
- * 권한: ADMIN 이상 + SEERS 소속
+ * 권한: (ADMIN 이상 또는 sales.access 권한) + SEERS 소속 — 편집은 USER 등급 이상
  */
 export default async function SalesDealsEntryPage() {
   const cookieStore = cookies()
@@ -23,7 +23,7 @@ export default async function SalesDealsEntryPage() {
     return (
       <div className="p-6">
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
-          영업 현황은 ADMIN 이상 + 씨어스(SEERS) 소속만 열람할 수 있습니다.
+          영업 현황은 ADMIN 이상 또는 영업 접근 권한 보유자 + 씨어스(SEERS) 소속만 열람할 수 있습니다.
         </div>
       </div>
     )

@@ -12,7 +12,7 @@ type Params = { params: { code: string; id: string } }
 async function guard(request: NextRequest, params: Params['params']) {
   const user = await getAuthUser(request)
   if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
-  const denial = await checkSalesAccess(user)
+  const denial = await checkSalesAccess(user, { write: true })
   if (denial) return { error: NextResponse.json({ error: denial.error }, { status: denial.status }) }
   const id = parseInt(params.id)
   if (isNaN(id)) return { error: NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 }) }

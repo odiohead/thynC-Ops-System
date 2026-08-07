@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
  * 딜(계약 이력) 상세 편집 — 도입현황 입력 전용 페이지의 행 단위 편집 화면.
  * 병원은 등록 시 매핑 완료(변경 불가 — 잘못 매핑 시 삭제 후 재등록), 지역·종별은 병원에서 자동 표시.
  * 운영 축(공사 단계·일정·교육일)은 연결 프로젝트에서 읽기 전용 표시.
- * 권한: ADMIN 이상 + SEERS 소속
+ * 권한: (ADMIN 이상 또는 sales.access 권한) + SEERS 소속 — 편집은 USER 등급 이상
  */
 export default async function SalesDealDetailPage({ params }: { params: { id: string } }) {
   const cookieStore = cookies()
@@ -23,7 +23,7 @@ export default async function SalesDealDetailPage({ params }: { params: { id: st
     return (
       <div className="p-6">
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
-          영업 현황은 ADMIN 이상 + 씨어스(SEERS) 소속만 열람할 수 있습니다.
+          영업 현황은 ADMIN 이상 또는 영업 접근 권한 보유자 + 씨어스(SEERS) 소속만 열람할 수 있습니다.
         </div>
       </div>
     )
