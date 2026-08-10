@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-08-10 | 병원상세정보연동 — 심평원 허가병상수 수집 기능 (dev2)
+
+- 요청: 병원별 전체병상수를 심평원 데이터로 관리 — `/settings/hira-sync`에 기존 병원목록 연동과 **분리된 버튼**("병원상세정보연동")으로 추가, 종별 다중 선택, 백그라운드+로그 방식 동일 적용
+- API 확정: `MadmDtlInfoService2.8/getEqpInfo2.8` (의료기관별상세정보서비스 — 오퍼레이션명과 달리 응답이 시설·병상 정보). `ykiho`(= `hira_id`)당 1콜, 목록 조회 미지원 실확인. `permSbdCnt`(허가병상수)가 유형별 병상 합계와 일치하는 단일 필드(서울아산병원 2,446 실측 검증). 활용신청 완료 상태·일일 한도 10,000건
+- 범위 확정(사용자): 종별은 **병원급 7종만**(상급종합·종합병원·병원·요양병원·정신병원·치과병원·한방병원, 합계 약 4,300건) — 의원급(의원 38k·치과의원 19k·한의원 15k)은 일일 한도 초과로 제외. 저장 필드는 허가병상수만
+- DB: `hira_hospitals.perm_sbd_cnt INT`·`detail_synced_at TIMESTAMP` + `hira_sync_jobs.job_type TEXT DEFAULT 'basis'` (마이그레이션 `20260810115322_hira_detail_sync`, 수동 패턴)
+- 라우트 `POST /api/hira-hospitals/detail-sync`: 종별 배열 검증(화이트리스트) → 잡 생성(`jobType: 'detail'`) → 백그라운드 러너. **미연동(NULL) 우선 정렬**이라 한도 초과·중단 후 재실행 시 남은 병원부터 이어서 진행. 병원 단위 실패는 스킵+카운트(그룹당 5건까지 로그), 게이트웨이 오류(한도 초과 22 등)는 치명 중단 처리. 진행 로그는 100건 단위. 목록/상세 연동은 기존 running 검사 공유로 상호 배타
+- UI: 별도 카드(종별 체크박스+건수·전체 선택·선택 합계/예상 소요), 히스토리 표에 '유형' 컬럼(병원목록/상세정보). 로그 패널·2초 폴링은 기존 재사용
+- 검증: tsc 0오류(힙 4GB) · 스모크 7/7(`scripts/hira-detail-sync-smoke.mts` — 3개 종별 6개 병원 실호출·저장·재조회 + 서울아산병원 2,446 교차검증). 빌드·PM2 재시작·커밋 미실행 (사용자 확인 대기)
+- 영향 파일: prisma/schema.prisma, prisma/migrations/20260810115322_hira_detail_sync/, app/api/hira-hospitals/detail-sync/route.ts(신규), app/settings/hira-sync/page.tsx, app/settings/hira-sync/_components/HiraSyncPageClient.tsx, scripts/hira-detail-sync-smoke.mts(신규), README.md
+
+---
+
 ## 2026-08-07 | 주차 재입차 무료권 차단 — 입차 달력일 기준으로 수정 (dev2·PROD)
 
 - 신고: 47서1581이 오늘(08-07 08:17) 새로 입차했는데 무료권 없이 유료 24시간권(15,000원)만 등록됨 — pweb.kr 할인등록현황 조회로 이력 확인(어제 입차건: 무료4+유료24h 정상 / 오늘 입차건: 유료24h 단독, 취소분 없음)

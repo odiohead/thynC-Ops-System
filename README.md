@@ -147,8 +147,9 @@ app/
 │   │   ├── ledger/                   # UDI 입출고대장 — route(모델 목록·대장) + check/(출고완료 체크) + docx/(문서 생성)
 │   │   └── can-manage/               # 재고 처리 권한 여부 (UI 게이트)
 │   ├── hira-hospitals/
-│   │   └── sync/                     # 심평원 연동 (POST: 백그라운드 시작, GET: 히스토리 목록)
-│   │       └── [id]/                 # 연동 잡 상세 + 로그
+│   │   ├── sync/                     # 심평원 연동 (POST: 백그라운드 시작, GET: 히스토리 목록)
+│   │   │   └── [id]/                 # 연동 잡 상세 + 로그
+│   │   └── detail-sync/              # 병원상세정보연동 (POST: 종별 선택 → 허가병상수 갱신, 백그라운드)
 │   └── drive/                        # Google Drive 연동 (파일 업로드/목록/삭제/병원목록 내보내기)
 ├── (대시보드)/                        # 메인 대시보드 (이번 주/다음 주 공사 현황)
 ├── dashboard/                        # 사이니지 월보드 (50인치 상시 표시, 네비 없음)
@@ -323,6 +324,7 @@ prisma/
 ### HiraHospital (건강보험심사평가원 병원 원본 데이터)
 - HIRA에서 가져온 공공 병원 데이터 원본
 - hiraId, 병원명, 종별코드, 시도/시군구, 주소, 전화번호, 의사 수 등
+- 허가 병상수 (`permSbdCnt`) + 상세정보 연동 시각 (`detailSyncedAt`) — 병원상세정보연동(`getEqpInfo2.8`)으로 갱신, 미연동 시 NULL
 
 ### Hospital (운영 병원)
 - hospitalCode (고유 코드), HiraHospital과 연결 (hiraId)
@@ -491,10 +493,11 @@ prisma/
 ### HiraSyncJob (심평원 연동 잡)
 - 심평원 연동 실행 단위 (백그라운드 비동기 처리)
 - 시작시간 (`startedAt`), 종료시간 (`endedAt`), 상태 (`status`: running/done/error), 연동건수 (`totalCount`)
+- 잡 유형 (`jobType`: basis 병원목록 / detail 병원상세정보) — 목록·상세 연동은 동시에 하나만 실행 (공통 배타)
 
 ### HiraSyncLog (심평원 연동 로그)
 - HiraSyncJob 1:N 관계
-- 이벤트 타입 (`type`: init/group_start/group_api_done/group_db_done/done/error)
+- 이벤트 타입 (`type`: init/group_start/group_api_done/group_db_done/group_progress/done/error)
 - 메시지 (`message`), 추가 데이터 (`stats`, JSONB)
 
 ### NavMenuItem (네비게이션 메뉴 설정)
@@ -1253,9 +1256,10 @@ prisma/
 - **문서유형(DocumentType) 관리**: AI 어시스턴트 문서유형 동적 추가·수정·삭제·순서 변경 (value 코드값 포함)
 - **심평원 연동 관리** (SUPER_ADMIN 전용): 심평원 Open API 병원 데이터 동기화
   - 연동 시작 버튼 → 백그라운드 비동기 처리 (브라우저 닫아도 서버에서 계속 실행)
-  - 연동 히스토리 목록 (시작시간·종료시간·상태·연동건수)
+  - 연동 히스토리 목록 (시작시간·종료시간·유형·상태·연동건수)
   - 히스토리 행 클릭 시 상세 로그 패널 표시 (이벤트 타입별 색상 구분)
   - 진행 중 잡에 대해 2초 간격 폴링으로 실시간 로그 갱신
+  - **병원상세정보연동**: 종별 다중 선택(병원급 7종 — 상급종합·종합병원·병원·요양병원·정신병원·치과병원·한방병원) → 병원별 허가 병상수(`permSbdCnt`)를 `MadmDtlInfoService2.8/getEqpInfo2.8`로 조회·갱신 (병원당 API 1콜, 백그라운드 + 로그). 미연동 병원 우선 처리라 중단 후 재실행 시 이어서 진행. 일일 트래픽 한도 10,000건 — 의원급(의원·치과의원·한의원 등)은 건수 초과로 범위 제외
 
 ### Google Drive 연동 (선택)
 - Service Account 기반 파일 업로드 (`POST /api/drive/upload`)
@@ -1470,6 +1474,7 @@ npm run dev
 | GET | `/api/hira-hospitals/sync` | 연동 잡 히스토리 목록 (최근 50건) |
 | POST | `/api/hira-hospitals/sync` | 연동 잡 시작 (백그라운드 비동기, SUPER_ADMIN) |
 | GET | `/api/hira-hospitals/sync/[id]` | 연동 잡 상세 + 로그 목록 (SUPER_ADMIN) |
+| POST | `/api/hira-hospitals/detail-sync` | 병원상세정보연동 시작 — 종별 선택(병원급 7종), 허가병상수 갱신 (백그라운드 비동기, SUPER_ADMIN) |
 
 ### 프로젝트
 | Method | Endpoint | 설명 |

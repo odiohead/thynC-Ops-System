@@ -8,6 +8,13 @@ type Job = {
   endedAt: string | null
   status: string
   totalCount: number
+  jobType: string
+}
+
+type DetailType = {
+  code: string
+  name: string
+  count: number
 }
 
 type Log = {
@@ -62,7 +69,7 @@ function LogLine({ log }: { log: Log }) {
   }
 }
 
-export default function HiraSyncPageClient({ initialJobs }: { initialJobs: Job[] }) {
+export default function HiraSyncPageClient({ initialJobs, detailTypes }: { initialJobs: Job[]; detailTypes: DetailType[] }) {
   const [jobs, setJobs] = useState<Job[]>(initialJobs)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -72,6 +79,9 @@ export default function HiraSyncPageClient({ initialJobs }: { initialJobs: Job[]
   const logRef = useRef<HTMLDivElement>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<string | null>(null)
+  const [selectedTypes, setSelectedTypes] = useState<string[]>([])
+  const [detailStarting, setDetailStarting] = useState(false)
+  const [detailError, setDetailError] = useState<string | null>(null)
 
   const hasRunning = jobs.some((j) => j.status === 'running')
 
@@ -155,6 +165,32 @@ export default function HiraSyncPageClient({ initialJobs }: { initialJobs: Job[]
     }
   }
 
+  function toggleType(code: string) {
+    setSelectedTypes((prev) => prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code])
+  }
+
+  async function startDetailSync() {
+    setDetailStarting(true)
+    setDetailError(null)
+    try {
+      const res = await fetch('/api/hira-hospitals/detail-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ typeCodes: selectedTypes }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setDetailError(json.error ?? '시작 실패')
+        return
+      }
+      await fetchJobs()
+      setSelectedJobId(json.jobId)
+      setSelectedLogs([])
+    } finally {
+      setDetailStarting(false)
+    }
+  }
+
   function selectJob(jobId: number) {
     if (selectedJobId === jobId) {
       setSelectedJobId(null)
@@ -211,6 +247,68 @@ export default function HiraSyncPageClient({ initialJobs }: { initialJobs: Job[]
         )}
       </div>
 
+      {/* 병원상세정보연동 카드 */}
+      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-6 py-4">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-700">병원상세정보연동</h2>
+            <p className="mt-0.5 text-xs text-gray-400">
+              선택한 종별의 병원별 허가 병상수를 가져옵니다. 병원 1곳당 API 1회 호출로 시간이 소요됩니다.
+            </p>
+          </div>
+          <button
+            onClick={startDetailSync}
+            disabled={detailStarting || hasRunning || selectedTypes.length === 0}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {detailStarting ? '시작 중...' : hasRunning ? '연동 진행 중' : '병원상세정보연동'}
+          </button>
+        </div>
+        <div className="px-6 py-4">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <label className="flex cursor-pointer items-center gap-1.5 text-sm font-medium text-gray-600">
+              <input
+                type="checkbox"
+                checked={selectedTypes.length === detailTypes.length}
+                onChange={() =>
+                  setSelectedTypes(selectedTypes.length === detailTypes.length ? [] : detailTypes.map((t) => t.code))
+                }
+                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              전체
+            </label>
+            <span className="h-4 w-px bg-gray-200" />
+            {detailTypes.map((t) => (
+              <label key={t.code} className="flex cursor-pointer items-center gap-1.5 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={selectedTypes.includes(t.code)}
+                  onChange={() => toggleType(t.code)}
+                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                {t.name}
+                <span className="text-xs text-gray-400">{t.count.toLocaleString()}</span>
+              </label>
+            ))}
+          </div>
+          {selectedTypes.length > 0 && (
+            <p className="mt-3 text-xs text-gray-500">
+              선택 종별 합계{' '}
+              <span className="font-medium text-gray-700">
+                {detailTypes.filter((t) => selectedTypes.includes(t.code)).reduce((s, t) => s + t.count, 0).toLocaleString()}개
+              </span>{' '}
+              병원 — 약{' '}
+              {Math.max(1, Math.round(
+                detailTypes.filter((t) => selectedTypes.includes(t.code)).reduce((s, t) => s + t.count, 0) * 0.3 / 60,
+              ))}분 소요 예상
+            </p>
+          )}
+        </div>
+        {detailError && (
+          <div className="border-t border-red-100 bg-red-50 px-6 py-3 text-sm text-red-600">{detailError}</div>
+        )}
+      </div>
+
       {/* 히스토리 테이블 + 로그 패널 */}
       <div className="flex gap-4">
 
@@ -226,7 +324,7 @@ export default function HiraSyncPageClient({ initialJobs }: { initialJobs: Job[]
               <table className="min-w-full divide-y divide-gray-100">
                 <thead className="bg-gray-50">
                   <tr>
-                    {['시작시간', '종료시간', '상태', '연동건수'].map((col) => (
+                    {['시작시간', '종료시간', '유형', '상태', '연동건수'].map((col) => (
                       <th key={col} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                         {col}
                       </th>
@@ -245,6 +343,9 @@ export default function HiraSyncPageClient({ initialJobs }: { initialJobs: Job[]
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-xs tabular-nums text-gray-500">
                         {fmt(job.endedAt)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-xs text-gray-600">
+                        {job.jobType === 'detail' ? '상세정보' : '병원목록'}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">
                         <StatusBadge status={job.status} />

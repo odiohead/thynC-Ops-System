@@ -41,6 +41,8 @@ model HiraHospital {
   cmdcResdntCnt  Int?      @map("cmdc_resdnt_cnt")
   cmdcSdrCnt     Int?      @map("cmdc_sdr_cnt")
   midwifeCnt     Int?      @map("midwife_cnt")
+  permSbdCnt     Int?      @map("perm_sbd_cnt")
+  detailSyncedAt DateTime? @map("detail_synced_at")
   createdAt      DateTime  @default(now()) @map("created_at")
   hospital       Hospital?
 
@@ -573,6 +575,7 @@ model HiraSyncJob {
   endedAt    DateTime?     @map("ended_at")
   status     String        @default("running") @map("status")
   totalCount Int           @default(0) @map("total_count")
+  jobType    String        @default("basis") @map("job_type")
   logs       HiraSyncLog[]
 
   @@map("hira_sync_jobs")
