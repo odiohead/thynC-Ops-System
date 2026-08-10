@@ -49,6 +49,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
       include: {
         meta: true,
         introTypes: { include: { statusCode: true }, orderBy: { statusCode: { order: 'asc' } } },
+        hiraHospital: { select: { permSbdCnt: true, detailSyncedAt: true } },
       },
     }),
     prisma.project.findMany({
@@ -177,8 +178,16 @@ export default async function HospitalDetailPage({ params }: PageProps) {
             <Field label="심평원 병원명" value={hospital.hiraHospitalName} />
             <Field label="병원명" value={hospital.hospitalName} />
           </dl>
-          <dl className="grid grid-cols-1 gap-6 border-t border-gray-100 px-6 py-5 sm:grid-cols-2">
+          <dl className="grid grid-cols-1 gap-6 border-t border-gray-100 px-6 py-5 sm:grid-cols-3">
             <Field label="종별" value={hospital.type || <span className="text-gray-400">-</span>} />
+            <Field
+              label="전체 병상수 (심평원)"
+              value={
+                hospital.hiraHospital?.permSbdCnt != null
+                  ? `${hospital.hiraHospital.permSbdCnt.toLocaleString()}병상`
+                  : null
+              }
+            />
             <Field label="주소" value={hospital.address} />
           </dl>
         </div>

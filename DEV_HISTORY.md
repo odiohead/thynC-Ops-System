@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-08-10 | 병원 목록·상세에 전체 병상수 표기 (dev2·PROD)
+
+- 사용자 지적: 허가병상수를 수집해도 화면에 표기가 없음 — 수집 기능(아래 항목)은 저장까지만이 범위였음
+- `/hospitals` 목록: 데스크탑 표에 '전체병상' 컬럼(주소·상태 사이, 우측 정렬 tabular-nums), 모바일 카드에 값 있는 병원만 '전체병상' 항목 추가. `hiraHospital.permSbdCnt` select 조인
+- 병원 상세 기본 정보: 종별·주소 행을 3컬럼으로 확장해 '전체 병상수 (심평원)' 필드 추가 (`N,NNN병상`, 미연동 시 '-')
+- 검증: tsc 0오류, dev2 빌드·재시작 후 스모크 조인 확인(성빈센트 796·인천성모 717 등 스모크 데이터 표시 대상 확인)
+- 영향 파일: app/hospitals/page.tsx, app/hospitals/[code]/page.tsx, README.md
+
+---
+
 ## 2026-08-10 | PROD 배포: 병원상세정보연동 (커밋 48c926b)
 
 - dev2 커밋 `48c926b` push → PROD `git pull`(`372febf`→`48c926b`, 8파일) → `npx prisma migrate deploy`(`20260810115322_hira_detail_sync` 적용 — 미적용 1건뿐인 클린 상태 확인 후 표준 절차 사용) → `prisma generate` → 힙 4GB 빌드 → `pm2 restart thync-prod`

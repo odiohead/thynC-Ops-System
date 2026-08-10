@@ -73,6 +73,9 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
         address: true,
         status: true,
         contractDate: true,
+        hiraHospital: {
+          select: { permSbdCnt: true },
+        },
         meta: {
           select: { driveProjectFolderId: true },
         },
@@ -163,6 +166,9 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
                   {h.type && (
                     <span>병원종 <span className="text-foreground">{h.type}</span></span>
                   )}
+                  {h.hiraHospital?.permSbdCnt != null && (
+                    <span>전체병상 <span className="text-foreground">{h.hiraHospital.permSbdCnt.toLocaleString()}</span></span>
+                  )}
                   <span>계약일 <span className="text-foreground">{fmtDate(h.contractDate)}</span></span>
                   <span className="w-full truncate">주소 <span className="text-foreground">{h.address ?? '-'}</span></span>
                 </div>
@@ -177,7 +183,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  {['병원코드', '병원명', '주소', '상태', '계약일', '관리폴더'].map((col) => (
+                  {['병원코드', '병원명', '주소', '전체병상', '상태', '계약일', '관리폴더'].map((col) => (
                     <th
                       key={col}
                       className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500"
@@ -190,7 +196,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
               <tbody className="divide-y divide-gray-200">
                 {hospitals.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-16 text-center text-sm text-gray-400">
+                    <td colSpan={7} className="py-16 text-center text-sm text-gray-400">
                       검색 결과가 없습니다.
                     </td>
                   </tr>
@@ -214,6 +220,9 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600">
                           {h.address ?? '-'}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right text-sm tabular-nums text-gray-600">
+                          {h.hiraHospital?.permSbdCnt != null ? h.hiraHospital.permSbdCnt.toLocaleString() : '-'}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3">
                           <StatusBadge label={h.status} color={statusColorMap.get(h.status)} />
