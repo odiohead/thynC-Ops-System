@@ -23,7 +23,7 @@ export interface DashboardAData {
   }
   monthly: Array<{ ym: string; count: number; hosp: number; beds: number; cumHosp: number; cumBeds: number }>
   allDeals: DealListRow[]
-  typeDist: Array<{ name: string; count: number; total: number }>
+  typeDist: Array<{ name: string; count: number; total: number; beds: number; totalBeds: number }>
   settleDist: Array<{ name: string; count: number }>
   taxDist: Array<{ name: string; count: number }>
 }
@@ -256,13 +256,14 @@ export default function SalesDashboardA({ data }: { data: DashboardAData }) {
       <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3">
         <DealListCard title="월 계약내역" mode="month" deals={data.allDeals} />
         <DealListCard title="주 계약내역" mode="week" deals={data.allDeals} />
-        <Card title="종별 도입 병원" note="도입 수 / 종별 전체 병원 수 · 종별 위계 순">
+        <Card title="종별 도입 병원" note="도입 수 / 종별 전체 병원 수 · 병상: 도입 병상(딜) / 종별 전체 병상(심평원) · 종별 위계 순">
           <div className="space-y-2">
             {data.typeDist.length === 0 && <p className="text-sm text-gray-400">데이터 없음</p>}
             {data.typeDist.map((t, i) => {
               const colors = [chart.indigo, chart.blue, '#0ea5e9', chart.emerald, chart.amber, '#64748b']
               const c = colors[i % colors.length]
               const pct = t.total > 0 ? (t.count / t.total) * 100 : 0
+              const bedPct = t.totalBeds > 0 ? (t.beds / t.totalBeds) * 100 : 0
               return (
                 <div key={t.name} className="relative overflow-hidden rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/40">
                   {/* 침투율 배경 게이지 */}
@@ -278,6 +279,22 @@ export default function SalesDashboardA({ data }: { data: DashboardAData }) {
                       <span className="ml-2 rounded-full bg-white px-1.5 py-0.5 text-[11px] font-semibold text-gray-600 shadow-sm dark:bg-gray-900">{Math.round(pct * 10) / 10}%</span>
                     </span>
                   </div>
+                  <div className="relative mt-1 flex items-center justify-between">
+                    <span className="text-[11px] text-gray-400">병상</span>
+                    <span className="text-[11px] tabular-nums text-gray-500">
+                      <b className="font-semibold" style={{ color: c }}>{t.beds.toLocaleString()}</b>
+                      <span className="mx-1 text-gray-400">/</span>
+                      {t.totalBeds > 0 ? `${t.totalBeds.toLocaleString()}병상` : '-'}
+                      <span className="ml-2 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 shadow-sm dark:bg-gray-900">
+                        {t.totalBeds > 0 ? `${Math.round(bedPct * 10) / 10}%` : '-%'}
+                      </span>
+                    </span>
+                  </div>
+                  {t.totalBeds > 0 && (
+                    <div className="relative mt-1 h-1 overflow-hidden rounded-full bg-gray-200/70 dark:bg-gray-700/50">
+                      <div className="h-full rounded-full opacity-70" style={{ width: `${Math.max(Math.min(bedPct, 100), 0.5)}%`, backgroundColor: c }} />
+                    </div>
+                  )}
                 </div>
               )
             })}

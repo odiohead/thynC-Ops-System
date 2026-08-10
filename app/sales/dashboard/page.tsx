@@ -104,9 +104,28 @@ export default async function SalesDashboardPage() {
   const introByType = countBy(Array.from(typeMap.values()), (t) => t)
   const typeTotals = await prisma.hospital.groupBy({ by: ['type'], _count: { _all: true } })
   const totalByType = new Map(typeTotals.map((t) => [t.type, t._count._all]))
+  // 종별 도입 병상 합 (deals 원천 — 대웅 디바이스 수량, KPI '도입 병상'과 동일 기준)
+  const introBedsByType = new Map<string, number>()
+  completed.forEach((d) => {
+    const t = d.hospital.type ?? '미지정'
+    introBedsByType.set(t, (introBedsByType.get(t) ?? 0) + (d.daewoongDeviceCount ?? 0))
+  })
+  // 종별 전체 병상 합 (심평원 허가병상 — 병원상세정보연동 결과, 미연동 병원은 NULL 제외)
+  const bedTotalRows = await prisma.$queryRaw<Array<{ type: string | null; total: bigint }>>`
+    SELECT h.type AS type, COALESCE(SUM(hh.perm_sbd_cnt), 0) AS total
+    FROM hospitals h
+    JOIN hira_hospitals hh ON hh.hira_id = h.hira_id
+    GROUP BY h.type`
+  const bedTotalByType = new Map(bedTotalRows.filter((r) => r.type).map((r) => [r.type!, Number(r.total)]))
   const TYPE_ORDER = ['상급종합', '종합병원', '병원', '요양병원', '정신병원', '치과병원', '한방병원', '의원', '치과의원', '한의원']
   const typeDist = Array.from(introByType.entries())
-    .map(([name, count]) => ({ name, count, total: totalByType.get(name) ?? 0 }))
+    .map(([name, count]) => ({
+      name,
+      count,
+      total: totalByType.get(name) ?? 0,
+      beds: introBedsByType.get(name) ?? 0,
+      totalBeds: bedTotalByType.get(name) ?? 0,
+    }))
     .sort((a, b) => {
       const ia = TYPE_ORDER.indexOf(a.name), ib = TYPE_ORDER.indexOf(b.name)
       return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
