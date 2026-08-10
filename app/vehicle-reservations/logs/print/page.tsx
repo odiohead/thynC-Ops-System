@@ -106,7 +106,7 @@ function PrintContent() {
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="bg-gray-100 text-xs">
-                  {['번호', '운행일자', '운행시간', '운전자', '운행목적', '행선지', '계기판거리(km)', '주행거리(km)', '비고'].map((h) => (
+                  {['번호', '운행일자', '반납일', '운행시간', '운전자', '운행목적', '행선지', '계기판거리(km)', '주행거리(km)', '비고'].map((h) => (
                     <th key={h} className="border border-gray-400 px-2 py-1.5 font-semibold">{h}</th>
                   ))}
                 </tr>
@@ -116,6 +116,7 @@ function PrintContent() {
                   <tr key={log.id}>
                     <td className="border border-gray-400 px-2 py-1 text-center tabular-nums">{i + 1}</td>
                     <td className="border border-gray-400 px-2 py-1 text-center whitespace-nowrap tabular-nums">{fmtDate(log.startAt)}</td>
+                    <td className="border border-gray-400 px-2 py-1 text-center whitespace-nowrap tabular-nums">{fmtDate(log.endAt)}</td>
                     <td className="border border-gray-400 px-2 py-1 text-center whitespace-nowrap tabular-nums">{fmtTime(log.startAt)} ~ {fmtTime(log.endAt)}</td>
                     <td className="border border-gray-400 px-2 py-1 text-center">{log.driver.name}</td>
                     <td className="border border-gray-400 px-2 py-1">{log.purpose || ''}</td>
@@ -126,7 +127,7 @@ function PrintContent() {
                   </tr>
                 ))}
                 <tr className="bg-gray-50 font-semibold">
-                  <td colSpan={7} className="border border-gray-400 px-2 py-1.5 text-right">합계 주행거리</td>
+                  <td colSpan={8} className="border border-gray-400 px-2 py-1.5 text-right">합계 주행거리</td>
                   <td className="border border-gray-400 px-2 py-1.5 text-right tabular-nums">{total.toLocaleString()}</td>
                   <td className="border border-gray-400 px-2 py-1.5" />
                 </tr>
