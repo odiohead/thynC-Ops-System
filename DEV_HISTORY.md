@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-08-10 | PROD 배포: 병원상세정보연동 (커밋 48c926b)
+
+- dev2 커밋 `48c926b` push → PROD `git pull`(`372febf`→`48c926b`, 8파일) → `npx prisma migrate deploy`(`20260810115322_hira_detail_sync` 적용 — 미적용 1건뿐인 클린 상태 확인 후 표준 절차 사용) → `prisma generate` → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- 신규 패키지 없음(`npm install` 불필요). PROD DB 컬럼 생성 확인(`perm_sbd_cnt`·`detail_synced_at`·`job_type`)
+- 스모크: `/`·`/settings/hira-sync`·`/hospitals`·`/tickets` 전부 307 정상, 외부 HTTPS 307 정상. 에러 로그의 gaxios 404는 기존 Google Calendar 이슈(이번 변경과 무관)
+- 배포 직후 동작: PROD `hira_hospitals.perm_sbd_cnt`는 전건 NULL — `/settings/hira-sync`에서 종별 선택 후 "병원상세정보연동" 실행 시부터 채워짐 (병원급 7종 약 4,300건, 약 20~30분 소요)
+
+---
+
 ## 2026-08-10 | 병원상세정보연동 — 심평원 허가병상수 수집 기능 (dev2)
 
 - 요청: 병원별 전체병상수를 심평원 데이터로 관리 — `/settings/hira-sync`에 기존 병원목록 연동과 **분리된 버튼**("병원상세정보연동")으로 추가, 종별 다중 선택, 백그라운드+로그 방식 동일 적용
