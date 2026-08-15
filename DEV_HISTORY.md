@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-08-15 | PROD 배포: 영업 대시보드(지도) v1~v3 (커밋 a6986c3)
+
+- dev2 커밋 `a6986c3` push → PROD `git pull`(`c3ce69f`→`a6986c3`, 신규 페이지·koreaGeo·베이스맵 PNG 포함) → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- 신규 패키지 없음(`npm install` 불필요) · **DB 마이그레이션 없음** (읽기 전용 신규 페이지, PROD는 허가병상 데이터 기보유라 dev2 백필 단계 불필요)
+- 배포 직전 진입 디폴트를 '도입 수치'로 재변경(사용자 재확정, dev2 재빌드 포함)
+- 스모크: `/`·`/sales/dashboard`·`/sales/deals`·`/sales/dashboard_map`·`/geo/korea-map-E1-muted-earth.png`·`/hospitals`·`/tickets` 전부 307 정상, 외부 HTTPS 307 정상, 에러 로그 없음 (Ready 1213ms)
+- 참고: 사용자 별도 미커밋 작업(projects/cs_ticket_workflow_design.md·html)은 커밋에서 제외 (dev2 워킹트리에 유지)
+
+---
+
 ## 2026-08-15 | 영업 대시보드(지도) v3 — 병상 전체대비 실데이터 + muted-earth 베이스맵 (dev2)
 
 - 요청 2건: ① '전체 대비' 모드에서 병상 분모도 표시(전체 병상수 반영) ② 지도를 `korea-map-E1-muted-earth.png` 디자인으로 교체
