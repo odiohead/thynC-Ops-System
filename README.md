@@ -137,6 +137,8 @@ app/
 │   ├── vehicle-logs/                 # 운행일지 목록·작성 + [id] 조회/수정/삭제
 │   ├── parking/                      # 주차 웹할인 — search/coupons/register (pweb.kr 대행, USER 이상)
 │   ├── install-plans/                # 설치계획(가안) CRUD
+│   ├── voc-receipts/                 # VOC접수 CRUD (등록 시 CS 마스터 티켓 자동 생성 — 단일 트랜잭션, 생성자 기록)
+│   ├── voc-masters/                  # VOC 접수 채널 조회 (channels)
 │   ├── etc-tasks/                    # 기타업무 CRUD + 파일 관리 (다병원·비유지보수 업무)
 │   ├── inventory/                    # 자재관리(WMS)
 │   │   ├── items/                    # 품목 마스터 route/[id](재고·부자재 포함)/import + [id]/components(주자재-부자재 매핑) + [id]/lot-history(LOT별 입출고 요약)
@@ -159,6 +161,7 @@ app/
 ├── projects/                         # 프로젝트 목록·상세·등록
 │   └── calendar/                     # 구축 일정 간트 캘린더 (새 탭)
 ├── site-visits/                      # 답사 목록·상세·등록
+├── voc/                              # VOC 접수 — 목록·등록(new)·상세([id] — 하위 티켓 패널·처리 결과 Tiptap) (CS 워크플로)
 ├── maintenances/                     # 유지보수 목록·상세·등록
 ├── etc-tasks/                        # 기타업무 목록·상세·등록 (다병원·비유지보수 업무)
 ├── tickets/                          # 티켓 목록(Assignment Group 탭·저장된 뷰)·생성(CTI 3단)·상세(전이 액션·타임라인)·dashboard/(P12 지표)
@@ -201,6 +204,8 @@ app/
 │   ├── maintenance-type/             # 장애유형 관리
 │   ├── maintenance-status/           # 유지보수 상태 관리 (WorkflowStatusManager)
 │   ├── etc-task-status/              # 기타업무 상태 관리 (WorkflowStatusManager)
+│   ├── voc-status/                   # VOC 상태 관리 (WorkflowStatusManager — 티켓 상태 매핑, CS 워크플로)
+│   ├── voc-type/                     # VOC 분류 관리 (StatusCodeManager)
 │   ├── install-plan-status/          # 설치계획 상태 관리 (WorkflowStatusManager, 2026-07-27)
 │   ├── sales-codes/                  # 영업 코드 관리 — 7카테고리 (단계·딜 상태·판매모델·세금계산서·정산·활동 유형·직군)
 │   ├── ticket-queues/                # Assignment Group 관리 (이름·설명·순서·활성·티켓 수, 멤버 모달 팀(부서) 단위 일괄 선택)
@@ -247,6 +252,12 @@ lib/
 ├── gmail.ts                          # Gmail API 클라이언트 + 메일 파싱 유틸
 ├── mail-sync.ts                      # 설치계획·답사 메일 큐 동기화 로직 (Gmail → DB INSERT)
 ├── mail-scheduler.ts                 # 메일 동기화 인터벌 스케줄러 (mail-sync 함수 직접 호출)
+├── ticket-domains/                   # 티켓 도메인 어댑터 레지스트리 (CS 워크플로 P0 — cs_ticket_workflow_design.md §3)
+│   ├── meta.ts                       # [클라 안전] 도메인 메타 단일 소스 (refType·라벨·경로·taskType·childCreate)
+│   ├── types.ts / shared.ts          # 어댑터 계약 + 공용 헬퍼(상태 매핑 해석·규칙 폴백)
+│   ├── registry.ts                   # 어댑터 조립 — syncTicketToDomain 디스패치·detailInclude 병합·linkedWork 조립
+│   └── maintenance·etcTask·siteVisit·installPlan·project·voc.ts  # 도메인별 생성·양방향 동기화·배너
+├── csCodes.ts                        # CS 코드 발번 (VOC-YYYYMM-NNNN, KST)
 ├── audit.ts                          # 감사 로그 헬퍼 (logAudit, auditActorFromJWT, redact)
 ├── hospitalStatus.ts                 # 병원 thynC 현황상태 단방향 자동 진행 헬퍼 (advanceHospitalStatus)
 ├── vehicleLog.ts                     # 운행일지 거리 재계산(recalcVehicleLogs) + 주행거리 무결성 검사(checkOdometerConsistency)
@@ -724,6 +735,12 @@ prisma/
 - 초기 마스터 시드: `scripts/seed-ticket-masters.sql` (재실행 안전 — Assignment Group 4종·CTI 3 Category·사유 5종·nav 메뉴 4행. PROD 최초 반영 시 실행)
 - Slack 알림 (P11, 2026-07-24): **티켓 이벤트 단일 파이프라인** — 모든 업무 알림이 티켓 mutation(생성/상태·그룹 변경/배정/Sev 에스컬레이션)에서 발생, 도메인 라우트 직접 발송 폐지. sig v2 4축 비교로 실변경만 발송. Sev1=@channel·Sev2=🔥+그룹 멤버 멘션, 배정 시 owner DM(`notify_assign_dm`). 상태 표기는 영문(Open~Closed)
 - SLA (P11): `dueAt = 생성일 + Sev별 목표일`(`notify_sla_rules` 기본 SEV1:1/SEV2:1/SEV3:3/SEV4:7/SEV5:미적용, PROJECT는 완료예정일 유지) — 스케줄러가 초과/임박(D-N)/상태 체류를 지연 채널 요약 + SLA 초과 owner DM. PENDING은 SLA 시계 정지. RESOLVED는 `ticket_auto_close_days`(기본 0=끔) 경과 시 자동 CLOSED(타임라인 이벤트만). 백필: `scripts/backfill-ticket-dueat.sql`
+
+### CS 워크플로 — VOC접수 (2026-08-15 — `projects/cs_ticket_workflow_design.md`, 콜기록지는 같은 날 사용자 결정으로 제거)
+- **도메인 어댑터 레지스트리 (P0)**: 구 `lib/ticketDomain.ts`(~1,150줄)의 도메인별 블록을 `lib/ticket-domains/` 어댑터로 분리 — `meta.ts`(클라이언트 안전 단일 소스: 라벨·경로·taskType·statusCategory·childCreate) + `registry.ts`(어댑터 조립·`syncTicketToDomain` 디스패치·`domainDetailIncludes`·`buildTicketLinkedWork`) + 도메인당 1파일. `ticketDomain.ts`는 재-export 파사드(기존 import 경로 호환). **신규 도메인 편입 = 어댑터 1파일 + 레지스트리 등록 + 마스터 시드** (SOP: 설계문서 §3.4). 티켓 상세 배너(`linkedWork`)는 서버(어댑터)가 조립 — 클라이언트는 refType 지식 없음
+- **VocReceipt** (`voc_receipts`): CS 사건의 원본 도메인 레코드 (6번째 도메인, refType `VOC`) — `vocCode`(VOC-YYYYMM-NNNN) · 병원(nullable+`hospitalNameRaw`) · 고객명/연락처 · 채널(`VOC_CHANNEL`) · 분류(`VOC_TYPE`, 규칙 조건 축) · 상태(`VOC_STATUS` — 접수→OPEN/처리중→IN_PROGRESS/보류→PENDING/회신완료→**RESOLVED**(자동 종결 배치 대상)/종결→CLOSED 매핑) · `resolution`(Tiptap) · **생성자(`createdById`)** · `ticketId`(1:1). **담당 배정은 티켓이 단독 소유** (2026-08-15 개정 — 담당자 N:M 없음, 도메인→티켓 동기화도 owner 미접촉). **연결 티켓 = CS 마스터 티켓** — 하위 도메인 티켓(P3)의 parentId 대상. Assignment Group 'CS' + CTI 고객지원>VOC>일반 (규칙 시드)
+- **하위 티켓 생성 (P3)**: 마스터 티켓·VOC 상세의 '서브/하위 티켓 생성' 드롭다운 — 순수 티켓(`/tickets/new?parentId=`) + `childCreate` 선언 도메인(유지보수 `/maintenances/new?parentTicketId=` — POST가 같은 트랜잭션에서 parentId 연결+link 이벤트)
+- 마스터 시드: `scripts/seed-cs-masters.sql` (idempotent — 상태코드 3카테고리·CS 그룹·CTI·VOC 규칙·nav 3행). 스모크: `scripts/cs-workflow-smoke.mts`
 
 ### SLA 시계 엔진 (1.1 P1 — `projects/notification_v1.1_design.md` §4)
 
@@ -1540,6 +1557,17 @@ npm run dev
 | GET/POST, PUT/DELETE | `/api/settings/ticket-cti(/[id])` | CTI 3단계 트리 (하위·티켓·**자동생성 규칙** 있으면 삭제 불가, 기본 큐 지정, 목록에 `ruleUsage` 사용처 포함) |
 | GET, PUT | `/api/settings/ticket-cti-rules` | 업무별 티켓 자동생성 규칙 (CTI·Assignment Group·설명 자동입력 — 조회 로그인, 변경 ADMIN) |
 | GET/POST, PUT/DELETE | `/api/settings/ticket-pending-reasons(/[id])` | PENDING 사유 마스터 |
+
+### CS 워크플로 — VOC접수 (2026-08-15 — `projects/cs_ticket_workflow_design.md`, 콜기록지는 같은 날 사용자 결정으로 제거)
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET/POST | `/api/voc-receipts` | VOC 목록(`?from=&to=&statusId=&vocTypeId=&hospitalCode=&createdById=&q=`) · 등록(`VOC-YYYYMM-NNNN` 채번 + **연결 티켓 자동 생성**=CS 마스터, 단일 트랜잭션 — 생성자 자동 기록) |
+| GET/PUT/DELETE | `/api/voc-receipts/[id]` | 상세(+하위 티켓 현황) · 수정(어댑터 동기화 — 담당은 티켓 단독 소유라 미포함) · 삭제(ADMIN — 연결 티켓 동반 삭제) |
+| GET | `/api/voc-masters/channels` | VOC 접수 채널(VOC_CHANNEL) 조회 |
+| GET/POST, PUT/DELETE | `/api/settings/voc-status(/[id])` | VOC 워크플로 상태 (+티켓 상태 매핑 필수, 사용 중 삭제 409) |
+| GET/POST, PUT/DELETE | `/api/settings/voc-type(/[id])` | VOC 분류 마스터 (자동생성 규칙 조건 축, 사용 중 삭제 409) |
+
+※ `/api/maintenances` POST는 `parentTicketId` 옵션 수용 (P3 — 생성 티켓을 마스터의 하위로 연결, 2레벨·CLOSED 검증). `/api/tickets/[id]` GET/PUT 응답에 `linkedWork`(어댑터 조립 배너 데이터) 포함. `/api/tickets` GET은 `sort`(code/severity/type/title/status/queue/owner/hospital/created/changed)+`order` 컬럼 정렬 지원 (2026-08-15)
 
 ### SLA 기준 (1.1 P2 — 전체 ADMIN 이상)
 | Method | Endpoint | 설명 |

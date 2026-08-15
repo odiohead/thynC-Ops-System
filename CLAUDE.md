@@ -282,8 +282,8 @@ if (user.role !== 'ADMIN') return 403
 
 1. **Slack 알림은 티켓 파이프라인 단일 소스** — 업무 알림은 `lib/notify.ts`의 `notifyTicketCreated`/`notifyTicketChanged`만 사용. 도메인 라우트에서 채널로 직접 발송하는 코드 추가 금지 (이중 발송 방지 — P11)
 2. **상태 전이표·라벨은 `lib/ticket-shared.ts` 단일 소스** — 전이 규칙·상태/Sev 라벨을 다른 곳에 하드코딩 금지. 전이는 반드시 `canTransition` 검증 경유
-3. **도메인↔티켓 동기화는 `lib/ticketDomain.ts` 경유** — 도메인 레코드와 연결 티켓을 같은 트랜잭션에서 `sync*ToTicket`/`syncTicketToDomain`으로 갱신. 연결 티켓의 status/owner/severity/hospitalCode를 라우트에서 직접 UPDATE 금지
-4. **티켓 마스터(Assignment Group·CTI·대기 사유·nav) 변경 시 `scripts/seed-ticket-masters.sql`에도 반영** — PROD 최초 반영·데이터 동기화 후 재실행되는 파일(idempotent 유지)
+3. **도메인↔티켓 동기화는 도메인 어댑터(`lib/ticket-domains/*`) 경유** (2026-08-15 개정 — 구 `lib/ticketDomain.ts`는 재-export 파사드로 유지) — 도메인 레코드와 연결 티켓을 같은 트랜잭션에서 `sync*ToTicket`/`syncTicketToDomain`으로 갱신. 연결 티켓의 status/owner/severity/hospitalCode를 라우트에서 직접 UPDATE 금지. **신규 도메인 편입은 어댑터 SOP(`projects/cs_ticket_workflow_design.md` §3.4)를 따를 것** — 공용 코드에 refType switch 신설 금지, 레지스트리(`lib/ticket-domains/registry.ts`)·메타(`meta.ts`) 등록으로 처리
+4. **티켓 마스터(Assignment Group·CTI·대기 사유·nav) 변경 시 `scripts/seed-ticket-masters.sql`에도 반영** — PROD 최초 반영·데이터 동기화 후 재실행되는 파일(idempotent 유지). CS 워크플로(VOC) 마스터는 `scripts/seed-cs-masters.sql` 담당(동일 규칙)
 5. **도메인 자동생성 티켓의 CTI·Assignment Group은 `ticket_domain_cti_rules` 단일 소스** (`lib/ticketCtiRules.ts` 경유 — `ticket_cti_rule_design.md`). 새 업무를 티켓에 편입할 때 CTI를 코드에 하드코딩하지 말 것. 기존 `*CtiId()` 함수는 **규칙 유실 시 폴백 전용**이며, 규칙 변경은 소급 적용하지 않는다(기존 티켓 CTI 백필 금지)
 6. **도메인↔티켓 상태 매핑은 `status_codes.ticket_status`·`build_statuses.ticket_status` 단일 소스** (2026-07-27 — `ticket_status_map_design.md`). 상태명·라벨 문자열로 티켓 상태를 판정하는 코드 추가 금지. 기존 `*StatusToTicket()`/`ticketStatusTo*()` 함수는 **매핑 유실 시 폴백 전용**. 워크플로 상태코드(유지보수·기타업무·답사·설치계획·공사 상태) 신설 시 티켓 상태 매핑 필수(API가 400으로 강제), 매핑 마스터 변경 시 `scripts/seed-ticket-status-map.sql` 동반 갱신. 매핑 변경은 비소급(기존 티켓 상태 백필 금지). 설치계획은 단일 상태 축(`statusId`) — `writeStatus`/`replyStatus`는 deprecated(앱에서 사용 금지)
 

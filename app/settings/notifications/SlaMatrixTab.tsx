@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { refTypeLabelMap } from '@/lib/ticket-domains/meta'
 
 const GOAL_METRICS = [
   { metric: 'ASSIGN', label: '배정까지', hint: '생성 → 담당자 지정. CS 미배정 방치 감지' },
@@ -21,10 +22,7 @@ const GOAL_METRICS = [
   { metric: 'UPDATE_STALE', label: '무응답', hint: '마지막 활동 후 경과. 활동이 생기면 리셋' },
 ] as const
 
-const REF_TYPE_LABELS: Record<string, string> = {
-  MAINTENANCE: '유지보수', ETC: '기타업무', SITE_VISIT: '답사',
-  INSTALL_PLAN: '설치계획', PROJECT: '프로젝트', NONE: '순수 티켓',
-}
+const REF_TYPE_LABELS: Record<string, string> = refTypeLabelMap('NONE')
 const ALL_REF_TYPES = Object.keys(REF_TYPE_LABELS)
 
 interface Target {

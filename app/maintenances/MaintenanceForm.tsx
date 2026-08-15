@@ -47,6 +47,8 @@ interface Props {
     visits?: VisitInput[]
   }
   mode: 'create' | 'edit'
+  /** CS 마스터 티켓의 하위로 생성 (cs_ticket_workflow_design.md P3) — 생성 티켓에 parentId 연결 */
+  parentTicket?: { id: number; ticketCode: string; title: string } | null
 }
 
 // ─── MultiFileField 컴포넌트 ───────────────────────────────────────────────────
@@ -200,7 +202,7 @@ function MultiFileField({
 
 // ─── MaintenanceForm 본체 ────────────────────────────────────────────────────
 
-export default function MaintenanceForm({ initialData, mode }: Props) {
+export default function MaintenanceForm({ initialData, mode, parentTicket }: Props) {
   const router = useRouter()
   const [types, setTypes] = useState<StatusCode[]>([])
   const [statuses, setStatuses] = useState<StatusCode[]>([])
@@ -332,6 +334,7 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
       symptoms: form.symptoms || null,
       resolution: form.resolution || null,
       assigneeIds: assignees.map((a) => a.id),
+      ...(mode === 'create' && parentTicket ? { parentTicketId: parentTicket.id } : {}),
     }
 
     const url = mode === 'create' ? '/api/maintenances' : `/api/maintenances/${initialData?.id}`
@@ -345,7 +348,8 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
 
     if (res.ok) {
       router.refresh()
-      router.push('/maintenances')
+      // 하위 생성 경로는 마스터 티켓으로 복귀 (사건 뷰 유지)
+      router.push(mode === 'create' && parentTicket ? `/tickets/${parentTicket.ticketCode}` : '/maintenances')
     } else {
       const data = await res.json()
       setError(data.error ?? '저장 실패')
@@ -376,6 +380,15 @@ export default function MaintenanceForm({ initialData, mode }: Props) {
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
+          </div>
+        )}
+
+        {mode === 'create' && parentTicket && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+            마스터 티켓 <span className="font-mono">{parentTicket.ticketCode}</span>
+            <span className="mx-1 text-blue-400">·</span>
+            {parentTicket.title}
+            <span className="ml-1 text-blue-500">— 저장하면 이 티켓의 하위 티켓으로 연결됩니다.</span>
           </div>
         )}
 

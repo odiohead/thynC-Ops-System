@@ -74,6 +74,7 @@ model Hospital {
   updatedAt             DateTime                     @updatedAt @map("updated_at")
   hiraHospital          HiraHospital?                @relation(fields: [hiraId], references: [hiraId])
   daewoongAssignments   DaewoongHospitalAssignment[]
+  vocReceipts           VocReceipt[]
   projects              Project[]
   meta                  HospitalMeta?
   hospitalDevices       HospitalDevice[]
@@ -158,6 +159,9 @@ model StatusCode {
   dealSettlements        SalesDeal[]            @relation("DealSettlement")
   salesActivityTypes     SalesActivity[]        @relation("SalesActivityType")
   persons                Person[]               @relation("PersonGroup")
+  vocChannels            VocReceipt[]           @relation("VocChannel")
+  vocTypes               VocReceipt[]           @relation("VocType")
+  vocStatuses            VocReceipt[]           @relation("VocStatus")
 
   @@unique([name, category])
   @@map("status_codes")
@@ -301,6 +305,7 @@ model User {
   ticketLogs                TicketLog[]                  @relation("TicketLogAuthor")
   ticketQueueMemberships    TicketQueueMember[]          @relation("TicketQueueMemberUser")
   ticketCtiRuleUpdates      TicketDomainCtiRule[]        @relation("CtiRuleUpdater")
+  vocReceiptsCreated        VocReceipt[]                 @relation("VocCreator")
   salesActivities           SalesActivity[]              @relation("SalesActivityAuthor")
   salesOwnedProfiles        HospitalSalesProfile[]       @relation("SalesProfileOwner")
 
@@ -1795,6 +1800,44 @@ model TicketDomainCtiRule {
   @@schema("public")
 }
 
+/// VOC접수 — CS 사건의 원본 도메인 레코드. 연결 티켓(refType 'VOC')이 CS 마스터 티켓 (cs_ticket_workflow_design.md §5)
+/// 도메인 어댑터: lib/ticket-domains/voc.ts — 어댑터 SOP(§3.4)의 첫 적용 사례
+/// 담당 배정은 티켓이 단독 소유 (2026-08-15 개정 — 도메인에는 생성자만 기록, 담당자 N:M 제거)
+model VocReceipt {
+  id              Int       @id @default(autoincrement())
+  vocCode         String    @unique @map("voc_code") @db.VarChar(20) // VOC-YYYYMM-NNNN
+  hospitalCode    String?   @map("hospital_code") // 비고객 VOC 허용
+  hospitalNameRaw String?   @map("hospital_name_raw")
+  customerName    String?   @map("customer_name") // 고객(제기자)
+  customerPhone   String?   @map("customer_phone")
+  channelId       Int?      @map("channel_id") // 접수 채널 — StatusCode VOC_CHANNEL (콜 승격 시 '전화')
+  vocTypeId       Int?      @map("voc_type_id") // VOC 분류 — StatusCode VOC_TYPE (자동생성 규칙 조건 축)
+  statusId        Int?      @map("status_id") // 워크플로 상태 — StatusCode VOC_STATUS (+ticket_status 매핑 필수)
+  statusChangedAt DateTime? @default(now()) @map("status_changed_at") // 현재 상태 진입 시각
+  title           String    @map("title")
+  content         String?   @map("content") @db.Text
+  resolution      String?   @map("resolution") @db.Text // 처리 결과 요약 (Tiptap — 유지보수 resolution 선례)
+  receivedAt      DateTime  @default(now()) @map("received_at")
+  resolvedAt      DateTime? @map("resolved_at") @db.Date
+  createdById     String?   @map("created_by_id") // 생성자 — 배정이 아니라 기록 (계정 삭제 시 NULL)
+  ticketId        Int?      @unique @map("ticket_id") // 도메인 1:1 연결 — CS 마스터 티켓
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  hospital  Hospital?   @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: SetNull)
+  channel   StatusCode? @relation("VocChannel", fields: [channelId], references: [id], onDelete: SetNull)
+  vocType   StatusCode? @relation("VocType", fields: [vocTypeId], references: [id], onDelete: SetNull)
+  status    StatusCode? @relation("VocStatus", fields: [statusId], references: [id], onDelete: SetNull)
+  createdBy User?       @relation("VocCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  ticket    Ticket?     @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  @@index([receivedAt])
+  @@index([hospitalCode])
+  @@index([statusId])
+  @@map("voc_receipts")
+  @@schema("public")
+}
+
 model TicketPendingReason {
   id          Int          @id @default(autoincrement())
   name        String       @unique
@@ -1849,6 +1892,7 @@ model Ticket {
   siteVisit       SiteVisit?
   installPlan     InstallPlan?
   project         Project?
+  voc             VocReceipt?
 
   @@index([queueId, status])
   @@index([parentId])

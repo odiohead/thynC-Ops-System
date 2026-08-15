@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { PERSONAL_QUEUE_NAME } from '@/lib/ticket-shared'
+import { isDomainRefType } from '@/lib/ticket-domains/meta'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,7 +39,7 @@ export async function GET(request: NextRequest) {
     if (personalQueue) filters.push(Prisma.sql`t.queue_id <> ${personalQueue.id}`)
   }
   if (refType === 'PURE') filters.push(Prisma.sql`t.ref_type IS NULL`)
-  else if (refType && ['MAINTENANCE', 'ETC', 'SITE_VISIT', 'INSTALL_PLAN', 'PROJECT'].includes(refType)) {
+  else if (isDomainRefType(refType)) {
     filters.push(Prisma.sql`t.ref_type = ${refType}`)
   }
   const whereBase = filters.length ? Prisma.sql`AND ${Prisma.join(filters, ' AND ')}` : Prisma.empty

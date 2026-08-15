@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import type { TicketStatus, TicketSeverity } from '@prisma/client'
 import { TICKET_STATUS_LABELS, TICKET_SEVERITY_LABELS } from '@/lib/ticket-shared'
+import { DOMAIN_REF_TYPES, TICKET_DOMAIN_META, PURE_TICKET_LABEL } from '@/lib/ticket-domains/meta'
 import TicketStatusBadge from './components/TicketStatusBadge'
 import TicketSeverityBadge from './components/TicketSeverityBadge'
 import TicketRefTypeBadge from './components/TicketRefTypeBadge'
@@ -111,6 +112,9 @@ export default function TicketsPage() {
   const [refType, setRefType] = useState('') // '' 전체 | 'none' 순수 | 'MAINTENANCE' 유지보수
   const [unassigned, setUnassigned] = useState(false)
   const [sla, setSla] = useState('') // '' | 'overdue' | 'warning' — 1.1 P6 개인 블록의 착지점
+  // 컬럼 정렬 (2026-08-15) — null = 기본(Sev↑·최신순). 헤더 클릭: 오름 → 내림 → 기본 3단 순환
+  const [sortKey, setSortKey] = useState<string | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
@@ -198,6 +202,7 @@ export default function TicketsPage() {
     if (tab !== 'mine' && unassigned) params.set('unassigned', 'true')
     if (sla) params.set('sla', sla)
     if (q) params.set('q', q)
+    if (sortKey) { params.set('sort', sortKey); params.set('order', sortDir) }
     params.set('page', String(page))
     params.set('pageSize', String(PAGE_SIZE))
 
@@ -208,7 +213,7 @@ export default function TicketsPage() {
         setTotal(d.total ?? 0)
       })
       .finally(() => setLoading(false))
-  }, [tab, statuses, severity, refType, unassigned, sla, q, page])
+  }, [tab, statuses, severity, refType, unassigned, sla, q, page, sortKey, sortDir])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const hasFilter = statuses.length > 0 || !!severity || !!refType || unassigned || !!sla || !!q
@@ -216,6 +221,14 @@ export default function TicketsPage() {
   function toggleStatus(s: TicketStatus) {
     setPage(1)
     setStatuses((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]))
+  }
+
+  /** 헤더 클릭 정렬 — 같은 컬럼: 오름 → 내림 → 기본 해제, 다른 컬럼: 오름차순 시작 */
+  function toggleSort(key: string) {
+    setPage(1)
+    if (sortKey !== key) { setSortKey(key); setSortDir('asc') }
+    else if (sortDir === 'asc') setSortDir('desc')
+    else { setSortKey(null); setSortDir('asc') }
   }
 
   const queueTabs = useMemo(
@@ -375,12 +388,10 @@ export default function TicketsPage() {
                 className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:py-1.5"
               >
                 <option value="">Type 전체</option>
-                <option value="none">순수 티켓</option>
-                <option value="MAINTENANCE">유지보수</option>
-                <option value="ETC">기타업무</option>
-                <option value="SITE_VISIT">답사</option>
-                <option value="INSTALL_PLAN">설치계획</option>
-                <option value="PROJECT">프로젝트</option>
+                <option value="none">{PURE_TICKET_LABEL}</option>
+                {DOMAIN_REF_TYPES.map((rt) => (
+                  <option key={rt} value={rt}>{TICKET_DOMAIN_META[rt].label}</option>
+                ))}
               </select>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -454,19 +465,27 @@ export default function TicketsPage() {
             <thead className="bg-gray-50">
               <tr>
                 {([
-                  ['Ticket #', 'w-[8rem]'],
-                  ['Sev', 'w-16'],
-                  ['Type', 'w-[5.2rem]'],
-                  ['Title', ''],
-                  ['Status', 'w-20'],
-                  ['Assign Group', 'w-24'],
-                  ['Assignee', 'w-20'],
-                  ['Hospital', 'hidden w-28 lg:table-cell'],
-                  ['Age', 'w-14'],
-                  ['Last Change', 'hidden w-20 xl:table-cell'],
-                ] as [string, string][]).map(([label, cls]) => (
+                  ['Ticket #', 'w-[8rem]', 'code'],
+                  ['Sev', 'w-16', 'severity'],
+                  ['Type', 'w-[5.2rem]', 'type'],
+                  ['Title', '', 'title'],
+                  ['Status', 'w-20', 'status'],
+                  ['Assign Group', 'w-24', 'queue'],
+                  ['Assignee', 'w-20', 'owner'],
+                  ['Hospital', 'hidden w-28 lg:table-cell', 'hospital'],
+                  ['Age', 'w-14', 'created'],
+                  ['Last Change', 'hidden w-20 xl:table-cell', 'changed'],
+                ] as [string, string, string][]).map(([label, cls, key]) => (
                   <th key={label} className={`px-2.5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 ${cls}`}>
-                    {label}
+                    <button
+                      type="button"
+                      onClick={() => toggleSort(key)}
+                      className={`inline-flex items-center gap-0.5 uppercase tracking-wider hover:text-gray-800 ${sortKey === key ? 'text-blue-600' : ''}`}
+                      title={`${label} 정렬`}
+                    >
+                      {label}
+                      <span className="w-2.5 text-[10px]">{sortKey === key ? (sortDir === 'asc' ? '▲' : '▼') : ''}</span>
+                    </button>
                   </th>
                 ))}
               </tr>

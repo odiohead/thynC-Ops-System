@@ -7,6 +7,7 @@ import { createCalendarEvent } from '@/lib/googleCalendar'
 import { normalizeVisits, visitEventPayload } from '@/lib/maintenanceVisit'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { createTicketForMaintenance } from '@/lib/ticketDomain'
+import { addTicketEvent } from '@/lib/ticket'
 
 export const dynamic = 'force-dynamic'
 
@@ -78,6 +79,7 @@ export async function POST(request: NextRequest) {
     symptoms,
     resolution,
     assigneeIds,
+    parentTicketId,
   } = body
 
   const normalizedVisits = normalizeVisits(visits)
@@ -87,6 +89,21 @@ export async function POST(request: NextRequest) {
   }
   if (!title?.trim()) {
     return NextResponse.json({ error: '제목을 입력해주세요.' }, { status: 400 })
+  }
+
+  // CS 마스터 티켓의 하위로 생성 (cs_ticket_workflow_design.md P3) — 검증은 서브 연결 규칙(2레벨·CLOSED 방지)과 동일
+  let parentTicket: { id: number; ticketCode: string } | null = null
+  if (parentTicketId !== undefined && parentTicketId !== null) {
+    const ptId = Number(parentTicketId)
+    if (!Number.isInteger(ptId)) return NextResponse.json({ error: 'parentTicketId가 올바르지 않습니다.' }, { status: 400 })
+    const pt = await prisma.ticket.findUnique({
+      where: { id: ptId },
+      select: { id: true, ticketCode: true, parentId: true, status: true },
+    })
+    if (!pt) return NextResponse.json({ error: '마스터 티켓을 찾을 수 없습니다.' }, { status: 400 })
+    if (pt.parentId) return NextResponse.json({ error: '서브 티켓 아래에는 서브를 둘 수 없습니다 (2레벨 고정).' }, { status: 400 })
+    if (pt.status === 'CLOSED') return NextResponse.json({ error: '종결된 티켓의 서브로 연결할 수 없습니다.' }, { status: 400 })
+    parentTicket = { id: pt.id, ticketCode: pt.ticketCode }
   }
 
   const created = await prisma.maintenance.create({
@@ -148,7 +165,7 @@ export async function POST(request: NextRequest) {
   // 티켓 동시 생성 (P5 편입 — 실패 시 유지보수 생성 자체를 롤백하지 않도록 best-effort가 아니라
   // 명시 실패 처리: 티켓 없는 유지보수를 만들지 않는다)
   const ticketId = await prisma.$transaction(async (tx) => {
-    return createTicketForMaintenance(tx, {
+    const tid = await createTicketForMaintenance(tx, {
       id: maintenance.id,
       maintenanceCode,
       title: maintenance.title,
@@ -164,6 +181,14 @@ export async function POST(request: NextRequest) {
       resolvedAt: maintenance.resolvedAt,
       createdAt: maintenance.createdAt,
     }, user.userId, 'domain')
+
+    // 하위 티켓 연결 (P3) — parent API와 동일한 이벤트 페이로드
+    if (parentTicket) {
+      const child = await tx.ticket.update({ where: { id: tid }, data: { parentId: parentTicket.id }, select: { ticketCode: true } })
+      await addTicketEvent(tx, tid, 'link', user.userId, { event: 'parent_set', parentId: parentTicket.id, parentCode: parentTicket.ticketCode })
+      await addTicketEvent(tx, parentTicket.id, 'link', user.userId, { event: 'child_added', childId: tid, childCode: child.ticketCode })
+    }
+    return tid
   })
 
   // Google Calendar 이벤트 생성 (비차단) — 방문 항목별 1개씩

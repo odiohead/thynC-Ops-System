@@ -7,6 +7,7 @@ import { sanitizeRichTextHtml } from '@/lib/richtext'
 import { generateTicketCode, addTicketEvent } from '@/lib/ticket'
 import { notifyTicketCreated } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
+import { isDomainRefType } from '@/lib/ticket-domains/meta'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,10 +36,10 @@ export async function GET(request: NextRequest) {
   const severity = sp.get('severity')
   if (severity && severity in TicketSeverity) where.severity = severity as TicketSeverity
 
-  // 유형 필터 — 'none'=순수 티켓(refType null), 그 외 도메인 유형(MAINTENANCE/ETC …)
+  // 유형 필터 — 'none'=순수 티켓(refType null), 그 외 도메인 유형(레지스트리 단일 소스)
   const refType = sp.get('refType')
   if (refType === 'none') where.refType = null
-  else if (refType && ['MAINTENANCE', 'ETC', 'SITE_VISIT', 'INSTALL_PLAN', 'PROJECT'].includes(refType)) where.refType = refType
+  else if (isDomainRefType(refType)) where.refType = refType
 
   if (sp.get('mine') === 'true') where.ownerId = user.userId
   else if (sp.get('unassigned') === 'true') where.ownerId = null
@@ -74,11 +75,28 @@ export async function GET(request: NextRequest) {
   const page = Math.max(1, parseInt(sp.get('page') ?? '1') || 1)
   const pageSize = Math.min(100, Math.max(1, parseInt(sp.get('pageSize') ?? '30') || 30))
 
+  // 컬럼 정렬 (2026-08-15) — 화이트리스트 키만 허용, 미지정 시 기존 기본(Sev↑·최신순) 유지
+  const dir: Prisma.SortOrder = sp.get('order') === 'asc' ? 'asc' : 'desc'
+  const SORTS: Record<string, Prisma.TicketOrderByWithRelationInput[]> = {
+    code: [{ ticketCode: dir }],
+    severity: [{ severity: dir }, { createdAt: 'desc' }],
+    type: [{ refType: dir }, { createdAt: 'desc' }],
+    title: [{ title: dir }],
+    status: [{ status: dir }, { createdAt: 'desc' }],
+    queue: [{ queue: { name: dir } }, { createdAt: 'desc' }],
+    owner: [{ owner: { name: dir } }, { createdAt: 'desc' }],
+    hospital: [{ hospital: { hospitalName: dir } }, { createdAt: 'desc' }],
+    created: [{ createdAt: dir }],
+    changed: [{ statusChangedAt: dir }],
+  }
+  const sortKey = sp.get('sort')
+  const orderBy = (sortKey && SORTS[sortKey]) || [{ severity: 'asc' as const }, { createdAt: 'desc' as const }]
+
   const [tickets, total] = await Promise.all([
     prisma.ticket.findMany({
       where,
       include: listInclude,
-      orderBy: [{ severity: 'asc' }, { createdAt: 'desc' }],
+      orderBy,
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),

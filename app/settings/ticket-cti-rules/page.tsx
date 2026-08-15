@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Settings2 } from 'lucide-react'
 import TicketRuleSettingModal, { type DomainRefType } from '@/app/components/TicketRuleSettingModal'
+import { DOMAIN_REF_TYPES } from '@/lib/ticket-domains/meta'
 
 interface RuleRow {
   id: number
@@ -28,7 +29,7 @@ interface Meta {
   fallbackQueueName: string
 }
 
-const ORDER: DomainRefType[] = ['SITE_VISIT', 'INSTALL_PLAN', 'PROJECT', 'ETC', 'MAINTENANCE']
+const ORDER: DomainRefType[] = [...DOMAIN_REF_TYPES]
 
 export default function TicketCtiRulesPage() {
   const [rules, setRules] = useState<RuleRow[]>([])

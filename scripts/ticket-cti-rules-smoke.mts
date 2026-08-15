@@ -166,6 +166,7 @@ async function main() {
       PROJECT: { cti: '구축', queue: '설치·답사' },
       ETC: { cti: '일반', queue: '내부운영' },
       MAINTENANCE: { cti: '기타', queue: '유지보수' },
+      VOC: { cti: '일반', queue: 'CS' }, // cs_ticket_workflow_design.md P2 — seed-cs-masters.sql
     }
     for (const [refType, exp] of Object.entries(expect)) {
       const rule = await resolveDomainTicketRule(prisma, refType as keyof typeof DOMAIN_META)

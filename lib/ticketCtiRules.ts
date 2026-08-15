@@ -13,81 +13,14 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { sanitizeRichTextHtml, isEmptyRichText } from '@/lib/richtext'
+import { TICKET_DOMAIN_META, type DomainRefType } from '@/lib/ticket-domains/meta'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
-/** 도메인 연결 유형 — tickets.ref_type과 동일 값 */
-export const DOMAIN_REF_TYPES = ['SITE_VISIT', 'INSTALL_PLAN', 'PROJECT', 'ETC', 'MAINTENANCE'] as const
-export type DomainRefType = (typeof DOMAIN_REF_TYPES)[number]
-
-export function isDomainRefType(v: unknown): v is DomainRefType {
-  return typeof v === 'string' && (DOMAIN_REF_TYPES as readonly string[]).includes(v)
-}
-
-/** 업무별 표시 정보 (설정 화면·API 공용 단일 소스) */
-export const DOMAIN_META: Record<
-  DomainRefType,
-  {
-    label: string
-    /** 목록 경로 (설정 버튼이 붙는 화면) */
-    listPath: string
-    /** 설명으로 옮길 도메인 필드의 사람용 이름 */
-    descriptionSource: string
-    /** 소스 필드가 리치텍스트(Tiptap HTML)인지 — false면 plain text */
-    descriptionIsHtml: boolean
-    /** 조건 축(장애유형 등)을 갖는 업무인지 */
-    matchCategory: string | null
-    matchLabel: string | null
-    /** 규칙이 없을 때 코드 폴백이 쓰는 Assignment Group 이름 (안내 표시용) */
-    fallbackQueueName: string
-  }
-> = {
-  SITE_VISIT: {
-    label: '답사',
-    listPath: '/site-visits',
-    descriptionSource: '노트',
-    descriptionIsHtml: true,
-    matchCategory: null,
-    matchLabel: null,
-    fallbackQueueName: '설치·답사',
-  },
-  INSTALL_PLAN: {
-    label: '설치계획',
-    listPath: '/install-plans',
-    descriptionSource: '비고',
-    descriptionIsHtml: true,
-    matchCategory: null,
-    matchLabel: null,
-    fallbackQueueName: '설치·답사',
-  },
-  PROJECT: {
-    label: '프로젝트',
-    listPath: '/projects',
-    descriptionSource: '비고',
-    descriptionIsHtml: false,
-    matchCategory: null,
-    matchLabel: null,
-    fallbackQueueName: '설치·답사',
-  },
-  ETC: {
-    label: '기타업무',
-    listPath: '/etc-tasks',
-    descriptionSource: '비고',
-    descriptionIsHtml: true,
-    matchCategory: null,
-    matchLabel: null,
-    fallbackQueueName: '내부운영',
-  },
-  MAINTENANCE: {
-    label: '유지보수',
-    listPath: '/maintenances',
-    descriptionSource: '증상',
-    descriptionIsHtml: false,
-    matchCategory: 'MAINTENANCE_TYPE',
-    matchLabel: '장애유형',
-    fallbackQueueName: '유지보수',
-  },
-}
+// 도메인 유형·메타 단일 소스는 lib/ticket-domains/meta.ts 로 이동 (P0 리팩토링) — 기존 호출부 호환 재-export
+export { DOMAIN_REF_TYPES, isDomainRefType, type DomainRefType } from '@/lib/ticket-domains/meta'
+/** @deprecated TICKET_DOMAIN_META(lib/ticket-domains/meta.ts) 사용 — 별칭 유지 */
+export const DOMAIN_META = TICKET_DOMAIN_META
 
 export interface ResolvedDomainRule {
   ruleId: number

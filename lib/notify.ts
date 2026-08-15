@@ -244,7 +244,7 @@ async function buildMentionLine(ch: ResolvedChannel, queueId?: number, queueName
 // 설정 게이트
 // ─────────────────────────────────────────────────────────────
 
-export type TaskType = 'PROJECT' | 'SITE_VISIT' | 'INSTALL_PLAN' | 'MAINTENANCE' | 'ETC' | 'TICKET'
+export type TaskType = 'PROJECT' | 'SITE_VISIT' | 'INSTALL_PLAN' | 'MAINTENANCE' | 'ETC' | 'VOC' | 'TICKET'
 
 /** 업무 타입별 Slack 사용 여부 (notify_types_enabled, 기본 전부 on). 이벤트·지연·DM 모두 이 게이트 적용 */
 export async function getTypesEnabled(): Promise<Record<TaskType, boolean>> {
@@ -509,6 +509,28 @@ async function enrichTask(taskType: TaskType, refCode: string): Promise<Enriched
       if (vis) fv.visits = vis
       return { hospitalName, title: e.title ?? null, url: `${base}/etc-tasks/${e.id}`, fieldValues: fv }
     }
+    case 'VOC': {
+      const v = await prisma.vocReceipt.findUnique({
+        where: { vocCode: refCode },
+        select: {
+          id: true, title: true, customerName: true, receivedAt: true, resolvedAt: true, hospitalNameRaw: true,
+          hospital: { select: { hospitalName: true } },
+          createdBy: { select: { name: true } },
+          channel: { select: { name: true } },
+          vocType: { select: { name: true } },
+          status: { select: { name: true } },
+        },
+      })
+      if (!v) return null
+      if (v.createdBy?.name) fv.createdBy = v.createdBy.name
+      if (v.vocType?.name) fv.vocType = v.vocType.name
+      if (v.channel?.name) fv.channel = v.channel.name
+      if (v.status?.name) fv.status = v.status.name
+      if (v.customerName) fv.customerName = v.customerName
+      if (v.receivedAt) fv.receivedAt = ymd(v.receivedAt)!
+      if (v.resolvedAt) fv.resolvedAt = ymd(v.resolvedAt)!
+      return { hospitalName: v.hospital?.hospitalName ?? v.hospitalNameRaw ?? null, title: v.title ?? null, url: `${base}/voc/${v.id}`, fieldValues: fv }
+    }
     case 'TICKET': {
       const t = await prisma.ticket.findUnique({
         where: { ticketCode: refCode },
@@ -566,6 +588,7 @@ const TICKET_CORE_SELECT = {
   siteVisit: { select: { siteVisitCode: true } },
   installPlan: { select: { planCode: true } },
   project: { select: { projectCode: true } },
+  voc: { select: { vocCode: true } },
 } as const
 
 type TicketCore = NonNullable<Awaited<ReturnType<typeof loadTicketCore>>>
@@ -582,6 +605,7 @@ function domainRefCode(core: TicketCore): string | null {
     case 'SITE_VISIT': return core.siteVisit?.siteVisitCode ?? null
     case 'INSTALL_PLAN': return core.installPlan?.planCode ?? null
     case 'PROJECT': return core.project?.projectCode ?? null
+    case 'VOC': return core.voc?.vocCode ?? null
     default: return null
   }
 }

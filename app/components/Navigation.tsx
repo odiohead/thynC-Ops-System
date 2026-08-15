@@ -75,11 +75,13 @@ const ROLE_LABEL: Record<UserRole, string> = {
 /* ── API 실패 시 폴백 메뉴 ── */
 
 const FALLBACK_MENUS: NavItem[] = [
-  { id: 0, menuKey: 'hospitals', label: '병원 목록', href: '/hospitals', iconKey: 'hospital', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 20 },
-  { id: 0, menuKey: 'projects', label: '프로젝트 관리', href: '/projects', iconKey: 'project', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 30 },
-  { id: 0, menuKey: 'install-plans', label: '설치계획(가안) 관리', href: '/install-plans', iconKey: 'file-text', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 40 },
-  { id: 0, menuKey: 'site-visits', label: '답사 관리', href: '/site-visits', iconKey: 'site-visit', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 50 },
-  { id: 0, menuKey: 'ai-assistant', label: 'AI 어시스턴트', href: '/ai-assistant', iconKey: 'bot', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 60 },
+  { id: 0, menuKey: 'ai-assistant', label: 'AI 어시스턴트', href: '/ai-assistant', iconKey: 'bot', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 10 },
+  { id: 0, menuKey: 'tickets', label: '티켓', href: '/tickets', iconKey: 'ticket', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 12 },
+  { id: 0, menuKey: 'operations', label: '운영현황', href: '/operations', iconKey: 'clipboard-list', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 18 },
+  { id: 0, menuKey: 'hospitals', label: '병원 목록', href: '/hospitals', iconKey: 'hospital', parentKey: 'operations', allowedRoles: [], allowedOrgCodes: [], sortOrder: 10 },
+  { id: 0, menuKey: 'install-plans', label: '설치계획(가안) 관리', href: '/install-plans', iconKey: 'file-text', parentKey: 'operations', allowedRoles: [], allowedOrgCodes: [], sortOrder: 20 },
+  { id: 0, menuKey: 'site-visits', label: '답사 관리', href: '/site-visits', iconKey: 'site-visit', parentKey: 'operations', allowedRoles: [], allowedOrgCodes: [], sortOrder: 30 },
+  { id: 0, menuKey: 'projects', label: '프로젝트 관리', href: '/projects', iconKey: 'project', parentKey: 'operations', allowedRoles: [], allowedOrgCodes: [], sortOrder: 40 },
   { id: 0, menuKey: 'settings', label: '설정', href: '/settings', iconKey: 'settings', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 70 },
   { id: 0, menuKey: 'users', label: '계정 관리', href: '/users', iconKey: 'users', parentKey: null, allowedRoles: [], allowedOrgCodes: [], sortOrder: 80 },
   { id: 0, menuKey: 'settings/nav-menus', label: '메뉴 관리', href: '/settings/nav-menus', iconKey: null, parentKey: 'settings', allowedRoles: ['SUPER_ADMIN'], allowedOrgCodes: [], sortOrder: 5 },
@@ -112,7 +114,8 @@ export default function Navigation() {
   const pathname = usePathname()
   const router = useRouter()
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(pathname.startsWith('/settings'))
+  // 2depth 아코디언 열림 상태 (parentKey → open) — 하위 경로 진입 시 자동 열림, 토글로 닫기 가능
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   const [userRole, setUserRole] = useState<UserRole | null>(null)
   const [userName, setUserName] = useState('')
   const [userOrgCode, setUserOrgCode] = useState<string | null>(null)
@@ -159,9 +162,19 @@ export default function Navigation() {
   // 드로어 열림: 배경 스크롤 잠금 + ESC 닫기
   useOverlayDismiss(mobileOpen, () => setMobileOpen(false))
 
+  // 현재 경로가 속한 그룹 자동 열기 (하위 항목 href 매칭 — 설정·운영현황 등 아코디언 공통)
   useEffect(() => {
-    if (pathname.startsWith('/settings')) setSettingsOpen(true)
-  }, [pathname])
+    setOpenGroups((prev) => {
+      const next = { ...prev }
+      for (const parent of menuItems.filter((i) => i.parentKey === null)) {
+        const active = menuItems.some(
+          (c) => c.parentKey === parent.menuKey && (pathname === c.href || pathname.startsWith(c.href + '/'))
+        )
+        if (active) next[parent.menuKey] = true
+      }
+      return next
+    })
+  }, [pathname, menuItems])
 
   // 로그인·사이니지 대시보드·운행일지 인쇄는 네비게이션 없이 전체 화면 사용
   if (pathname === '/login' || pathname === '/dashboard' || pathname === '/vehicle-reservations/logs/print') return null
@@ -183,31 +196,35 @@ export default function Navigation() {
     router.refresh()
   }
 
-  // 메뉴 분류
+  // 메뉴 분류 — 1depth는 sortOrder 순, 하위(parentKey 일치)가 있으면 아코디언으로 렌더 (설정·운영현황 공통)
   const topLevelItems = menuItems
-    .filter(i => i.parentKey === null && i.menuKey !== 'settings' && i.menuKey !== 'users')
+    .filter(i => i.parentKey === null)
     .filter(i => isMenuVisible(i, userRole, userOrgCode, userPermissions))
     .sort((a, b) => a.sortOrder - b.sortOrder)
 
-  const settingsGroup = menuItems.find(i => i.menuKey === 'settings')
-  const settingsVisible = settingsGroup && isMenuVisible(settingsGroup, userRole, userOrgCode, userPermissions)
-  const settingsChildren = menuItems
-    .filter(i => i.parentKey === 'settings')
-    .filter(i => isMenuVisible(i, userRole, userOrgCode, userPermissions))
-    .sort((a, b) => a.sortOrder - b.sortOrder)
-
-  // 설정 하위 메뉴를 기능별 그룹으로 묶기 (그룹 순서 = 정렬 후 첫 등장 순, 그룹 없는 항목은 맨 앞 무제목 그룹)
-  const settingsGrouped: { label: string | null; items: NavItem[] }[] = []
-  for (const child of settingsChildren) {
-    const key = child.groupLabel?.trim() || null
-    const g = settingsGrouped.find((x) => x.label === key)
-    if (g) g.items.push(child)
-    else if (key === null) settingsGrouped.unshift({ label: null, items: [child] })
-    else settingsGrouped.push({ label: key, items: [child] })
+  function visibleChildrenOf(parentKey: string): NavItem[] {
+    return menuItems
+      .filter(i => i.parentKey === parentKey)
+      .filter(i => isMenuVisible(i, userRole, userOrgCode, userPermissions))
+      .sort((a, b) => a.sortOrder - b.sortOrder)
   }
 
-  const usersItem = menuItems.find(i => i.menuKey === 'users')
-  const usersVisible = usersItem && isMenuVisible(usersItem, userRole, userOrgCode, userPermissions)
+  function hasAnyChildren(parentKey: string): boolean {
+    return menuItems.some(i => i.parentKey === parentKey)
+  }
+
+  // 하위 메뉴를 기능별 그룹으로 묶기 (그룹 순서 = 정렬 후 첫 등장 순, 그룹 없는 항목은 맨 앞 무제목 그룹)
+  function groupChildren(children: NavItem[]): { label: string | null; items: NavItem[] }[] {
+    const grouped: { label: string | null; items: NavItem[] }[] = []
+    for (const child of children) {
+      const key = child.groupLabel?.trim() || null
+      const g = grouped.find((x) => x.label === key)
+      if (g) g.items.push(child)
+      else if (key === null) grouped.unshift({ label: null, items: [child] })
+      else grouped.push({ label: key, items: [child] })
+    }
+    return grouped
+  }
 
   const sidebarContent = (
     <div className="flex h-full flex-col">
@@ -227,62 +244,62 @@ export default function Navigation() {
           </div>
         ) : (
           <>
-            {/* 최상위 메뉴 */}
-            {topLevelItems.map(item => (
-              <Link key={item.menuKey} href={item.href} className={navItemClass(isActive(item.href))}>
-                {getMenuIcon(item.iconKey)}
-                {item.label}
-              </Link>
-            ))}
+            {topLevelItems.map(item => {
+              // 하위 메뉴 보유 → 아코디언 (설정·운영현황 공통), 없으면 일반 링크
+              if (!hasAnyChildren(item.menuKey)) {
+                return (
+                  <Link key={item.menuKey} href={item.href} className={navItemClass(isActive(item.href))}>
+                    {getMenuIcon(item.iconKey)}
+                    {item.label}
+                  </Link>
+                )
+              }
 
-            {/* 설정 아코디언 */}
-            {settingsVisible && settingsChildren.length > 0 && (
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setSettingsOpen((v) => !v)}
-                  className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 lg:py-2 text-sm transition-colors ${
-                    pathname.startsWith('/settings')
-                      ? 'text-foreground font-medium'
-                      : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                  }`}
-                >
-                  {getMenuIcon(settingsGroup!.iconKey)}
-                  <span className="flex-1 text-left">{settingsGroup!.label}</span>
-                  <ChevronIcon open={settingsOpen} />
-                </button>
+              const children = visibleChildrenOf(item.menuKey)
+              if (children.length === 0) return null // 보이는 하위가 없으면 부모도 숨김
 
-                {settingsOpen && (
-                  <div className="ml-7 mt-0.5 space-y-0.5 border-l border-border pl-3">
-                    {settingsGrouped.map((group, gi) => (
-                      <div key={group.label ?? '_'} className={gi > 0 ? 'pt-1' : ''}>
-                        {group.label && (
-                          <div className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70 select-none">
-                            {group.label}
+              const open = !!openGroups[item.menuKey]
+              const groupActive = children.some((c) => isActive(c.href))
+              return (
+                <div key={item.menuKey}>
+                  <button
+                    type="button"
+                    onClick={() => setOpenGroups((prev) => ({ ...prev, [item.menuKey]: !prev[item.menuKey] }))}
+                    className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 lg:py-2 text-sm transition-colors ${
+                      groupActive
+                        ? 'text-foreground font-medium'
+                        : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                    }`}
+                  >
+                    {getMenuIcon(item.iconKey)}
+                    <span className="flex-1 text-left">{item.label}</span>
+                    <ChevronIcon open={open} />
+                  </button>
+
+                  {open && (
+                    <div className="ml-7 mt-0.5 space-y-0.5 border-l border-border pl-3">
+                      {groupChildren(children).map((group, gi) => (
+                        <div key={group.label ?? '_'} className={gi > 0 ? 'pt-1' : ''}>
+                          {group.label && (
+                            <div className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70 select-none">
+                              {group.label}
+                            </div>
+                          )}
+                          <div className="space-y-0.5">
+                            {group.items.map(child => (
+                              <Link key={child.menuKey} href={child.href} className={navItemClass(isActive(child.href))}>
+                                {getMenuIcon(child.iconKey)}
+                                {child.label}
+                              </Link>
+                            ))}
                           </div>
-                        )}
-                        <div className="space-y-0.5">
-                          {group.items.map(child => (
-                            <Link key={child.menuKey} href={child.href} className={navItemClass(isActive(child.href))}>
-                              {getMenuIcon(child.iconKey)}
-                              {child.label}
-                            </Link>
-                          ))}
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* 계정 관리 */}
-            {usersVisible && usersItem && (
-              <Link href={usersItem.href} className={navItemClass(isActive(usersItem.href))}>
-                {getMenuIcon(usersItem.iconKey)}
-                {usersItem.label}
-              </Link>
-            )}
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </>
         )}
       </nav>

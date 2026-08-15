@@ -10,6 +10,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { refTypeLabelMap } from '@/lib/ticket-domains/meta'
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend,
@@ -49,14 +50,7 @@ const MONTH_OPTIONS = [
   { value: 0, label: '전체 기간' },
 ]
 
-const REF_TYPE_LABELS: Record<string, string> = {
-  MAINTENANCE: '유지보수',
-  ETC: '기타업무',
-  SITE_VISIT: '답사',
-  INSTALL_PLAN: '설치계획',
-  PROJECT: '프로젝트',
-  PURE: '순수 티켓',
-}
+const REF_TYPE_LABELS: Record<string, string> = refTypeLabelMap('PURE')
 
 const SEV_ORDER = ['SEV1', 'SEV2', 'SEV3', 'SEV4', 'SEV5']
 

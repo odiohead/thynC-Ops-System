@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { TicketSeverity } from '@prisma/client'
+import { Prisma, TicketSeverity } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { sanitizeRichTextHtml } from '@/lib/richtext'
 import { addTicketEvent } from '@/lib/ticket'
 import { syncTicketToDomain } from '@/lib/ticketDomain'
+import { domainDetailIncludes, buildTicketLinkedWork } from '@/lib/ticket-domains/registry'
 import { notifyTicketChanged } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
 
@@ -13,6 +14,7 @@ export const dynamic = 'force-dynamic'
 
 type Params = { params: { id: string } }
 
+// 도메인 relation include는 어댑터 레지스트리가 기여 (P0) — 새 도메인은 어댑터 detailInclude로 자동 병합
 const detailInclude = {
   queue: { select: { id: true, name: true } },
   cti: { select: { id: true, name: true, level: true, parentId: true } },
@@ -21,24 +23,13 @@ const detailInclude = {
   hospital: { select: { hospitalCode: true, hospitalName: true } },
   pendingReason: { select: { id: true, name: true } },
   participants: { include: { user: { select: { id: true, name: true } } } },
-  maintenance: { select: { id: true, maintenanceCode: true, reporterName: true, isRemote: true, reportedAt: true } },
-  etcTask: {
-    select: {
-      id: true, etcTaskCode: true, reportedAt: true,
-      hospitals: { select: { hospital: { select: { hospitalCode: true, hospitalName: true } } } },
-    },
-  },
-  siteVisit: {
-    select: { id: true, siteVisitCode: true, requestDate: true, visitDate: true, replyDate: true, daewoongUser: { select: { name: true } } },
-  },
-  installPlan: { select: { id: true, planCode: true, requestDate: true, status: { select: { name: true } }, replyDate: true } },
-  project: { select: { id: true, projectCode: true, projectName: true, startDate: true, endDateExpected: true, buildStatus: { select: { label: true } } } },
+  ...domainDetailIncludes(),
   parent: { select: { id: true, ticketCode: true, title: true, status: true } },
   children: {
-    select: { id: true, ticketCode: true, title: true, status: true, severity: true, ownerId: true },
+    select: { id: true, ticketCode: true, title: true, status: true, severity: true, ownerId: true, refType: true },
     orderBy: { id: 'asc' as const },
   },
-} as const
+} satisfies Prisma.TicketInclude
 
 export async function GET(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
@@ -51,7 +42,8 @@ export async function GET(request: NextRequest, { params }: Params) {
   const ticket = await prisma.ticket.findUnique({ where, include: detailInclude })
   if (!ticket) return NextResponse.json({ error: '티켓을 찾을 수 없습니다.' }, { status: 404 })
 
-  return NextResponse.json({ ticket })
+  // 연결 업무 배너 데이터 — 어댑터가 서버에서 조립 (클라이언트는 refType별 지식 불필요)
+  return NextResponse.json({ ticket: { ...ticket, linkedWork: buildTicketLinkedWork(ticket) } })
 }
 
 export async function PUT(request: NextRequest, { params }: Params) {
@@ -125,7 +117,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   syncTicketClocksSafe(id) // SLA 시계 갱신 (알림과 독립 — lib/sla.ts)
   notifyTicketChanged({ ticketId: id, actorName: user.name, actorId: user.userId }).catch(() => {})
 
-  return NextResponse.json({ ticket })
+  return NextResponse.json({ ticket: { ...ticket, linkedWork: buildTicketLinkedWork(ticket) } })
 }
 
 export async function DELETE(request: NextRequest, { params }: Params) {

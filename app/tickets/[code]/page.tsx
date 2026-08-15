@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import type { TicketStatus, TicketSeverity } from '@prisma/client'
 import { TICKET_TRANSITIONS, TICKET_STATUS_LABELS, TICKET_SEVERITY_LABELS } from '@/lib/ticket-shared'
+import { DOMAIN_REF_TYPES, TICKET_DOMAIN_META, type LinkedWorkData } from '@/lib/ticket-domains/meta'
 import TicketStatusBadge from '../components/TicketStatusBadge'
 import TicketSeverityBadge from '../components/TicketSeverityBadge'
 import TicketRefTypeBadge from '../components/TicketRefTypeBadge'
@@ -42,42 +43,8 @@ interface TicketDetail {
   parent: { id: number; ticketCode: string; title: string; status: TicketStatus } | null
   children: TicketChild[]
   refType: string | null
-  maintenance: {
-    id: number
-    maintenanceCode: string | null
-    reporterName: string | null
-    isRemote: boolean
-    reportedAt: string | null
-  } | null
-  etcTask: {
-    id: number
-    etcTaskCode: string | null
-    reportedAt: string | null
-    hospitals: { hospital: { hospitalCode: string; hospitalName: string } }[]
-  } | null
-  siteVisit: {
-    id: number
-    siteVisitCode: string | null
-    requestDate: string | null
-    visitDate: string | null
-    replyDate: string | null
-    daewoongUser: { name: string } | null
-  } | null
-  installPlan: {
-    id: number
-    planCode: string | null
-    requestDate: string | null
-    status: { name: string } | null
-    replyDate: string | null
-  } | null
-  project: {
-    id: number
-    projectCode: string
-    projectName: string
-    startDate: string | null
-    endDateExpected: string | null
-    buildStatus: { label: string } | null
-  } | null
+  /** 연결 업무 배너 — 서버(도메인 어댑터)가 조립. 미연결/순수 티켓이면 null */
+  linkedWork: LinkedWorkData | null
 }
 
 interface TicketChild {
@@ -87,6 +54,7 @@ interface TicketChild {
   status: TicketStatus
   severity: TicketSeverity
   ownerId: string | null
+  refType: string | null
 }
 
 interface TicketSearchItem {
@@ -111,11 +79,6 @@ function formatDateTime(iso: string | null): string {
   return new Date(iso).toLocaleString('ko-KR', {
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
   })
-}
-
-/** 연결 업무 배너용 날짜(YYYY-MM-DD) */
-function dateOnly(val: string | null): string {
-  return val ? val.slice(0, 10) : '-'
 }
 
 const labelClass = 'text-xs font-medium uppercase tracking-wider text-gray-400'
@@ -161,6 +124,7 @@ export default function TicketDetailPage() {
 
   // 기존 티켓 연결(서브로 편입) 검색
   const [linkOpen, setLinkOpen] = useState(false)
+  const [childMenuOpen, setChildMenuOpen] = useState(false) // 하위 생성 유형 선택 드롭다운 (P3)
   const [linkQ, setLinkQ] = useState('')
   const [linkResults, setLinkResults] = useState<TicketSearchItem[]>([])
   const [linkSearching, setLinkSearching] = useState(false)
@@ -520,79 +484,14 @@ export default function TicketDetailPage() {
           </div>
         )}
 
-        {/* 연결된 업무(도메인 레코드) 배너 — 유형별 색·부가정보만 다르고 형태는 공통 */}
-        {ticket.refType === 'MAINTENANCE' && ticket.maintenance && (
+        {/* 연결된 업무(도메인 레코드) 배너 — 데이터는 서버(도메인 어댑터)가 조립, 여기는 렌더만 (P0) */}
+        {ticket.linkedWork && (
           <LinkedWorkBanner
-            refType="MAINTENANCE"
-            code={ticket.maintenance.maintenanceCode ?? `MNT-${String(ticket.maintenance.id).padStart(4, '0')}`}
-            meta={[
-              `신고자 ${ticket.maintenance.reporterName || '-'}`,
-              ticket.maintenance.isRemote ? '원격' : '방문',
-              `접수일 ${dateOnly(ticket.maintenance.reportedAt)}`,
-            ].join(' · ')}
-            href={`/maintenances/${ticket.maintenance.id}`}
-            linkLabel="유지보수 상세로 이동 →"
-          />
-        )}
-
-        {ticket.refType === 'ETC' && ticket.etcTask && (
-          <LinkedWorkBanner
-            refType="ETC"
-            code={ticket.etcTask.etcTaskCode ?? `ETC-${String(ticket.etcTask.id).padStart(4, '0')}`}
-            meta={[
-              `병원 ${
-                ticket.etcTask.hospitals.length === 0
-                  ? '-'
-                  : `${ticket.etcTask.hospitals[0].hospital.hospitalName}${ticket.etcTask.hospitals.length > 1 ? ` 외 ${ticket.etcTask.hospitals.length - 1}곳` : ''}`
-              }`,
-              `접수일 ${dateOnly(ticket.etcTask.reportedAt)}`,
-            ].join(' · ')}
-            href={`/etc-tasks/${ticket.etcTask.id}`}
-            linkLabel="기타업무 상세로 이동 →"
-          />
-        )}
-
-        {ticket.refType === 'SITE_VISIT' && ticket.siteVisit && (
-          <LinkedWorkBanner
-            refType="SITE_VISIT"
-            code={ticket.siteVisit.siteVisitCode ?? `SV-${String(ticket.siteVisit.id).padStart(5, '0')}`}
-            meta={[
-              `요청일 ${dateOnly(ticket.siteVisit.requestDate)}`,
-              `방문일 ${dateOnly(ticket.siteVisit.visitDate)}`,
-              `회신일 ${dateOnly(ticket.siteVisit.replyDate)}`,
-              `대웅담당자 ${ticket.siteVisit.daewoongUser?.name ?? '-'}`,
-            ].join(' · ')}
-            href={`/site-visits/${ticket.siteVisit.id}`}
-            linkLabel="답사 상세로 이동 →"
-          />
-        )}
-
-        {ticket.refType === 'INSTALL_PLAN' && ticket.installPlan && (
-          <LinkedWorkBanner
-            refType="INSTALL_PLAN"
-            code={ticket.installPlan.planCode ?? `#${ticket.installPlan.id}`}
-            meta={[
-              `요청일 ${dateOnly(ticket.installPlan.requestDate)}`,
-              `상태 ${ticket.installPlan.status?.name ?? '-'}`,
-              `회신일 ${dateOnly(ticket.installPlan.replyDate)}`,
-            ].join(' · ')}
-            href={`/install-plans/${ticket.installPlan.id}`}
-            linkLabel="설치계획 상세로 이동 →"
-          />
-        )}
-
-        {ticket.refType === 'PROJECT' && ticket.project && (
-          <LinkedWorkBanner
-            refType="PROJECT"
-            code={ticket.project.projectCode}
-            meta={[
-              ticket.project.projectName,
-              `공사상태 ${ticket.project.buildStatus?.label ?? '-'}`,
-              `구축시작 ${dateOnly(ticket.project.startDate)}`,
-              `완료예정 ${dateOnly(ticket.project.endDateExpected)}`,
-            ].join(' · ')}
-            href={`/projects/${ticket.project.projectCode}`}
-            linkLabel="프로젝트 상세로 이동 →"
+            refType={ticket.linkedWork.refType}
+            code={ticket.linkedWork.code}
+            meta={ticket.linkedWork.meta}
+            href={ticket.linkedWork.href}
+            linkLabel={ticket.linkedWork.linkLabel}
           />
         )}
 
@@ -846,14 +745,38 @@ export default function TicketDetailPage() {
               </h2>
               {canWrite && (
                 <div className="flex w-full gap-2 sm:w-auto">
-                  <button
-                    type="button"
-                    onClick={() => router.push(`/tickets/new?parentId=${ticket.id}`)}
-                    disabled={busy}
-                    className="flex-1 whitespace-nowrap rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 sm:flex-none sm:py-1.5"
-                  >
-                    + 서브 티켓 생성
-                  </button>
+                  {/* 하위 생성 — 순수 티켓 + childCreate 선언 도메인 (레지스트리 순회, P3) */}
+                  <div className="relative flex-1 sm:flex-none">
+                    <button
+                      type="button"
+                      onClick={() => setChildMenuOpen((v) => !v)}
+                      disabled={busy}
+                      className="w-full whitespace-nowrap rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 sm:py-1.5"
+                    >
+                      + 서브 티켓 생성
+                    </button>
+                    {childMenuOpen && (
+                      <div className="absolute right-0 z-10 mt-1 w-40 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
+                        <button
+                          type="button"
+                          className="block w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50"
+                          onClick={() => router.push(`/tickets/new?parentId=${ticket.id}`)}
+                        >
+                          순수 티켓
+                        </button>
+                        {DOMAIN_REF_TYPES.filter((rt) => TICKET_DOMAIN_META[rt].childCreate).map((rt) => (
+                          <button
+                            key={rt}
+                            type="button"
+                            className="block w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50"
+                            onClick={() => router.push(`${TICKET_DOMAIN_META[rt].childCreate!.formPath}?parentTicketId=${ticket.id}`)}
+                          >
+                            {TICKET_DOMAIN_META[rt].label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => { setLinkOpen((v) => !v); setLinkQ(''); setLinkResults([]) }}
@@ -921,6 +844,7 @@ export default function TicketDetailPage() {
                     <Link href={`/tickets/${c.ticketCode}`} className="block">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="font-mono text-xs text-blue-600">{c.ticketCode}</span>
+                        <TicketRefTypeBadge refType={c.refType} />
                         <TicketSeverityBadge severity={c.severity} short />
                         <span className="ml-auto shrink-0"><TicketStatusBadge status={c.status} /></span>
                       </div>
@@ -939,7 +863,7 @@ export default function TicketDetailPage() {
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      {['Ticket #', 'Title', 'Status', 'Sev', 'Assignee'].map((label) => (
+                      {['Ticket #', 'Type', 'Title', 'Status', 'Sev', 'Assignee'].map((label) => (
                         <th key={label} className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                           {label}
                         </th>
@@ -953,6 +877,9 @@ export default function TicketDetailPage() {
                           <Link href={`/tickets/${c.ticketCode}`} className="font-mono text-sm text-blue-600 hover:underline">
                             {c.ticketCode}
                           </Link>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2">
+                          <TicketRefTypeBadge refType={c.refType} fallback={<span className="text-xs text-gray-300">-</span>} />
                         </td>
                         <td className="max-w-xs truncate px-4 py-2 text-sm text-gray-900">{c.title}</td>
                         <td className="whitespace-nowrap px-4 py-2"><TicketStatusBadge status={c.status} /></td>

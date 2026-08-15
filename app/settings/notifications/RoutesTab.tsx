@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { refTypeLabelMap } from '@/lib/ticket-domains/meta'
 
 const EVENT_LABELS: Record<string, string> = {
   TICKET_CREATED: '티켓 등록',
@@ -26,10 +27,7 @@ const MENTION_LABELS: Record<string, string> = {
   here: '@here',
   channel: '@channel',
 }
-const REF_TYPE_LABELS: Record<string, string> = {
-  MAINTENANCE: '유지보수', ETC: '기타업무', SITE_VISIT: '답사',
-  INSTALL_PLAN: '설치계획', PROJECT: '프로젝트', NONE: '순수 티켓',
-}
+const REF_TYPE_LABELS: Record<string, string> = refTypeLabelMap('NONE')
 const STATUS_LABELS: Record<string, string> = {
   OPEN: '접수', ASSIGNED: '배정', IN_PROGRESS: '처리중', PENDING: '대기', RESOLVED: '해결', CLOSED: '종결',
 }

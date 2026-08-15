@@ -8,8 +8,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import Modal from '@/app/components/ui/Modal'
 import Button from '@/app/components/ui/Button'
+import type { DomainRefType } from '@/lib/ticket-domains/meta'
 
-export type DomainRefType = 'SITE_VISIT' | 'INSTALL_PLAN' | 'PROJECT' | 'ETC' | 'MAINTENANCE'
+// 도메인 유형 단일 소스는 lib/ticket-domains/meta.ts (P0) — 기존 import 경로 호환 재-export
+export type { DomainRefType } from '@/lib/ticket-domains/meta'
 
 interface CtiNode {
   id: number

@@ -7,6 +7,7 @@
  */
 
 import type { TaskType } from '@/lib/notify'
+import { TICKET_DOMAIN_META, isDomainRefType } from '@/lib/ticket-domains/meta'
 
 export interface FieldDef {
   key: string
@@ -19,6 +20,7 @@ export const TASK_TYPE_LABELS: Record<TaskType, string> = {
   INSTALL_PLAN: '설치계획',
   MAINTENANCE: '유지보수',
   ETC: '기타업무',
+  VOC: 'VOC접수',
   TICKET: '티켓',
 }
 
@@ -68,6 +70,15 @@ export const FIELD_CATALOG: Record<TaskType, FieldDef[]> = {
     { key: 'hospitals', label: '관련병원' },
     { key: 'visits', label: '업무기간' },
   ],
+  VOC: [
+    { key: 'vocType', label: 'VOC 분류' },
+    { key: 'channel', label: '접수 채널' },
+    { key: 'status', label: '상태' },
+    { key: 'customerName', label: '고객' },
+    { key: 'createdBy', label: '생성자' },
+    { key: 'receivedAt', label: '접수일' },
+    { key: 'resolvedAt', label: '완료일' },
+  ],
   TICKET: [
     { key: 'owner', label: '담당자' },
     { key: 'severity', label: 'Severity' },
@@ -85,19 +96,14 @@ export const DEFAULT_FIELDS: Record<TaskType, string[]> = {
   INSTALL_PLAN: ['assignees', 'requestDate', 'status'],
   MAINTENANCE: ['assignees', 'priority', 'type', 'reportedAt'],
   ETC: ['assignees', 'priority', 'reportedAt'],
+  VOC: ['vocType', 'channel', 'receivedAt'],
   TICKET: ['owner', 'severity', 'queue'],
 }
 
-export const TASK_TYPES: TaskType[] = ['PROJECT', 'SITE_VISIT', 'INSTALL_PLAN', 'MAINTENANCE', 'ETC', 'TICKET']
+export const TASK_TYPES: TaskType[] = ['PROJECT', 'SITE_VISIT', 'INSTALL_PLAN', 'MAINTENANCE', 'ETC', 'VOC', 'TICKET']
 
-/** refType → 알림 taskType (순수 티켓 = TICKET) — 구 delay-rules에서 이동 (알림 v2 P1) */
+/** refType → 알림 taskType (순수 티켓 = TICKET) — 도메인 메타 단일 소스 (P0 레지스트리 전환) */
 export function refTypeToTaskType(refType: string | null): TaskType {
-  switch (refType) {
-    case 'MAINTENANCE': return 'MAINTENANCE'
-    case 'ETC': return 'ETC'
-    case 'SITE_VISIT': return 'SITE_VISIT'
-    case 'INSTALL_PLAN': return 'INSTALL_PLAN'
-    case 'PROJECT': return 'PROJECT'
-    default: return 'TICKET'
-  }
+  if (refType && isDomainRefType(refType)) return TICKET_DOMAIN_META[refType].taskType as TaskType
+  return 'TICKET'
 }

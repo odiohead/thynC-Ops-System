@@ -4,6 +4,40 @@
 
 ---
 
+## 2026-08-16 | 네비게이션 개편 — '운영현황' 1depth 신설 + 범용 2depth 아코디언 (dev2)
+
+- 요청: 1depth를 AI 어시스턴트/티켓/사내 위키/영업 현황/**운영현황**/설정/계정 관리로 정리하고, 운영 메뉴 11종(병원 목록·설치계획·답사·프로젝트·VOC 접수·유지보수·기타업무·자재관리·간트차트·차량예약·심평원 병원목록)을 운영현황 하위 2depth로 이동 (VOC 접수는 요청 목록 미기재 — 운영 업무 성격상 유지보수 앞 배치)
+- Navigation 컴포넌트: '설정' 전용 특수 처리(아코디언)를 **범용화** — parentKey 하위를 가진 1depth는 전부 아코디언(토글 버튼+Chevron), 하위 경로 진입 시 자동 열림, groupLabel 그룹 헤더는 기존 설정 방식 그대로 재사용. 보이는 하위가 없으면 부모 숨김. 데스크탑·모바일 드로어 공통
+- 데이터: `scripts/nav-reorg-20260816.sql` (idempotent — 'operations' 부모 신설·1depth 순서 재정렬·운영 메뉴 11종 parent_key 이동, dev2 적용 완료. PROD 배포 시 실행). `seed-cs-masters.sql` voc nav 행도 운영현황 하위로 갱신. 비활성 항목(업무 현황·GW 플래너)은 1depth 잔류(미노출)
+- 검증: tsc 0오류, 빌드·PM2 재시작
+- 영향 파일: app/components/Navigation.tsx, scripts/nav-reorg-20260816.sql(신규), scripts/seed-cs-masters.sql
+
+---
+
+## 2026-08-15 | CS 워크플로 수정 — 콜기록 제거·VOC 생성자 전환 + 티켓 목록 컬럼 정렬 (dev2)
+
+- **콜기록 기능 전면 삭제** (사용자 결정 — 콜센터 원장 불요, CS 접수는 VOC 직접 등록으로 시작): `call_logs` 테이블·CRUD API·`/call-logs` 페이지·콜 문의 유형 마스터/설정·VOC 승격(callLogId) 경로·티켓/VOC 상세의 콜 이력 패널·nav 2행 제거. 마이그레이션 `20260815120000_cs_drop_call_logs_voc_creator`(수동 패턴)
+- **VOC 담당자 지정 제거 → 생성자 기록** (사용자 결정 — 배정은 티켓이 단독 소유): `voc_receipt_assignees` 드랍, `voc_receipts.created_by_id` 신설(등록 시 자동 기록). 어댑터 동기화에서 owner/참여자 접촉 제거(도메인→티켓은 상태·분류·제목·병원만, 역동기화는 상태·완료일만), VOC 폼 담당자 UI 삭제, 목록·상세는 '담당(티켓 owner)·생성자' 표기. VOC 생성은 레코드+티켓 단일 트랜잭션 유지
+- **티켓 목록 컬럼 정렬 추가** (`/tickets` 전 탭 공통): 데스크탑 표 헤더 10컬럼 클릭 정렬 — 오름→내림→기본(Sev↑·최신순) 3단 순환, 활성 컬럼 파란색+▲▼ 표시. API `GET /api/tickets`에 `sort`/`order` 파라미터(화이트리스트 10키, 관계 컬럼은 이름 기준 — queue/owner/hospital)
+- 검증: tsc 0오류 · `scripts/cs-workflow-smoke.mts` 개정판 **23/23**(생성자 기록·CLOSED 완료일 백필 검증 추가) · 빌드·PM2 재시작
+- 영향 파일: prisma/schema.prisma, prisma/migrations/20260815120000_*/, app/api/call-logs·app/call-logs·app/api/settings/call-inquiry-type·app/settings/call-inquiry-type(삭제), app/api/voc-receipts/*, app/voc/*, lib/ticket-domains/voc.ts, lib/csCodes.ts, lib/notify.ts, lib/notifyFields.ts, app/api/tickets/route.ts, app/api/tickets/[id]/route.ts, app/tickets/{page,[code]}, app/components/NavIcons.tsx, scripts/{seed-cs-masters.sql,cs-workflow-smoke.mts}, README.md
+
+---
+
+## 2026-08-15 | CS 티켓 워크플로 P0~P3 — 도메인 어댑터 레지스트리·콜기록지·VOC접수·하위 티켓 (dev2)
+
+- 설계: `projects/cs_ticket_workflow_design.md` (2026-08-14 검토, 2026-08-15 착수 승인 — D1 5종 전부 이관·D2 VOC 단일 경유·D5 SEERS 담당 풀 등 전 권장안 채택)
+- **P0 어댑터 레지스트리**: `lib/ticketDomain.ts`(~1,150줄)의 도메인 5종 블록을 `lib/ticket-domains/`(meta·types·shared·registry + 도메인당 1파일)로 **동작 불변 이관**, ticketDomain은 재-export 파사드로 축소. 소비처 전환: refType 화이트리스트 2곳(목록·지표)·배지/필터/대시보드/알림설정 2탭의 라벨 사본 5개→`meta.ts` 단일 소스, 티켓 상세 배너 5블록→서버(어댑터) 조립 `linkedWork` 단일 렌더, `refTypeToTaskType`→meta, 규칙 설정 화면 ORDER·중복 타입 유니온→meta. 신규 도메인 편입 SOP는 설계문서 §3.4, CLAUDE.md 티켓 규칙 3·4 문구 개정. 미이관(의도): SLA DOMAIN_DUE 앵커(정적 select 타입 보존)·workItemReassign(도메인 테이블 직접 조작)·배지 색상(Tailwind content 글롭이 app/**만 스캔 — Record<DomainRefType,…> 타입으로 누락=컴파일 오류)
+- **P1 콜기록지**: `call_logs` 원장(CALL- 채번, 상태 DONE/OPEN 2값, 티켓 N:1) + CRUD API + `/call-logs`(목록+모달, 콜백 대기 고정 섹션, VOC 승격/기존 티켓 연결/해제) + `CALL_INQUIRY_TYPE` 마스터·설정 페이지
+- **P2 VOC접수**: 6번째 도메인 — `voc_receipts`(+assignees, 1:1 티켓 refType 'VOC') + **어댑터 SOP 첫 적용 검증**(공용 코드 수정 없이 어댑터 1파일+meta 1항목+시드로 편입 완료, 예외는 알림 enrich의 VOC case·notifyFields 카탈로그 — 설계 예고대로). 상태 매핑 접수→OPEN·처리중→IN_PROGRESS·보류→PENDING·회신완료→RESOLVED(자동 종결 배치 대상)·종결→CLOSED. Assignment Group 'CS'·CTI 고객지원>VOC>일반·규칙 시드. `/voc` 목록·등록(콜 승격 프리필)·상세(하위 티켓·콜 이력 패널). 티켓 상세에 연결 콜 이력 패널 추가
+- **P3 하위 티켓**: `/api/maintenances` POST `parentTicketId`(2레벨·CLOSED 검증, 같은 트랜잭션에서 parentId+link 이벤트) + 유지보수 폼 마스터 배너·프리필·복귀 + 마스터 티켓/VOC 상세 '서브 티켓 생성' 드롭다운(레지스트리 childCreate 순회) + 서브 목록 유형 배지
+- DB: 마이그레이션 `20260815010000_cs_call_log_voc`(수동 패턴 — call_logs·voc_receipts·voc_receipt_assignees), 시드 `scripts/seed-cs-masters.sql`(idempotent — 상태코드 4카테고리·CS 그룹·CTI·VOC 규칙·nav 5행, dev2 적용 완료)
+- 검증: tsc 0오류 · 신규 `scripts/cs-workflow-smoke.mts` **24/24**(P0 유지보수 왕복 회귀 포함) · `scripts/ticket-cti-rules-smoke.mts` **36/36**(VOC 규칙 기대값 추가) · 힙 4GB 빌드·PM2 재시작·주요 페이지 307 확인
+- **적대적 리뷰(멀티에이전트) 확정 15건 전부 수정**: ①콜 승격 race — VOC 생성·담당·티켓·콜 연결을 단일 트랜잭션화 + `ticketId IS NULL` 조건부 갱신(패자 409 롤백, 고아 VOC 원천 차단) ②규칙 설정 matchOptions MAINTENANCE 하드코딩 → meta.matchCategory 순회(VOC 분류 조건 규칙 UI 개통) ③재콜 티켓 연결 검색이 RESOLVED 마스터 제외 → CLOSED만 제외로 정정 ④VOC 완료일 미기록(keep-if-consistent 버킷에서 backfill 게이트) → 상태 변경과 독립 백필 + PUT 종결 버킷 진입 시 자동 기록 ⑤NaN/`new Date(null)` 등 검증 갭 5곳(400 처리) ⑥VOC 수정 시 빈 상태 선택이 NULL 저장 → '현재 상태 유지'(undefined) ⑦무효 parentTicketId 조용한 유실 → 경고 배너 ⑧콜기록 수정 버튼 작성자/ADMIN 게이팅 ⑨VOC 목록 접수일 UTC→KST. 반박 기각 4건(중복명 공백·드롭다운 닫힘·시드 분리·updated_at DEFAULT)은 비결함 확인
+- 영향 파일: lib/ticket-domains/*(신규 10), lib/ticketDomain.ts, lib/ticketCtiRules.ts, lib/csCodes.ts(신규), lib/notify.ts, lib/notifyFields.ts, app/api/tickets/{route,[id],metrics}, app/api/call-logs/*(신규), app/api/voc-receipts/*(신규), app/api/voc-masters/*(신규), app/api/settings/{call-inquiry-type,voc-status,voc-type}(신규), app/api/maintenances/route.ts, app/tickets/{page,[code],dashboard,components/TicketRefTypeBadge}, app/call-logs/*(신규), app/voc/*(신규), app/settings/{notifications 2탭,ticket-cti-rules,call-inquiry-type,voc-status,voc-type}, app/components/{NavIcons,TicketRuleSettingModal}, app/maintenances/{MaintenanceForm,new}, prisma/schema.prisma, scripts/{seed-cs-masters.sql,cs-workflow-smoke.mts}(신규), CLAUDE.md, README.md
+
+---
+
 ## 2026-08-15 | PROD 배포: 영업 대시보드(지도) v1~v3 (커밋 a6986c3)
 
 - dev2 커밋 `a6986c3` push → PROD `git pull`(`c3ce69f`→`a6986c3`, 신규 페이지·koreaGeo·베이스맵 PNG 포함) → 힙 4GB 빌드 → `pm2 restart thync-prod`

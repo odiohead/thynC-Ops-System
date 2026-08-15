@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
   const refTypeParam = request.nextUrl.searchParams.get('refType')
   const refType = isDomainRefType(refTypeParam) ? refTypeParam : undefined
 
-  const [rules, ctiNodes, queues, maintTypes] = await Promise.all([
+  const [rules, ctiNodes, queues] = await Promise.all([
     loadRules(refType),
     prisma.ticketCti.findMany({
       orderBy: [{ level: 'asc' }, { sortOrder: 'asc' }, { id: 'asc' }],
@@ -59,12 +59,19 @@ export async function GET(request: NextRequest) {
       orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
       select: { id: true, name: true },
     }),
-    prisma.statusCode.findMany({
-      where: { category: 'MAINTENANCE_TYPE' },
+  ])
+
+  // 조건 축 후보 — 메타에 matchCategory를 선언한 업무 전부 (유지보수 장애유형·VOC 분류 등, 레지스트리 단일 소스)
+  const matchOptions: Record<string, { id: number; name: string }[]> = {}
+  for (const rt of DOMAIN_REF_TYPES) {
+    const category = DOMAIN_META[rt].matchCategory
+    if (!category) continue
+    matchOptions[rt] = await prisma.statusCode.findMany({
+      where: { category },
       orderBy: [{ order: 'asc' }, { id: 'asc' }],
       select: { id: true, name: true },
-    }),
-  ])
+    })
+  }
 
   return NextResponse.json({
     rules: rules.map((r) => ({
@@ -74,7 +81,7 @@ export async function GET(request: NextRequest) {
     })),
     ctiNodes,
     queues,
-    matchOptions: { MAINTENANCE: maintTypes },
+    matchOptions,
     meta: DOMAIN_META,
     refTypes: DOMAIN_REF_TYPES,
   })
@@ -119,7 +126,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: `'${inactive.name}'은 비활성 분류입니다. 활성 분류를 선택하세요.` }, { status: 400 })
   }
 
-  // 조건 축 검증 — 유지보수(장애유형) 외에는 조건 규칙을 허용하지 않는다
+  // 조건 축 검증 — meta.matchCategory를 선언한 업무만 조건 규칙 허용 (유지보수 장애유형·VOC 분류)
   const matchIds = rows.map((r) => r.matchStatusCodeId).filter((v): v is number => typeof v === 'number')
   if (matchIds.length && !meta.matchCategory) {
     return NextResponse.json({ error: `${meta.label}는 조건별 규칙을 지원하지 않습니다.` }, { status: 400 })
