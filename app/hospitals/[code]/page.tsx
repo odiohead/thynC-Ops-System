@@ -17,6 +17,7 @@ import HospitalNotePanel from '@/app/wiki/components/HospitalNotePanel'
 import InventoryUsageCard from './_components/InventoryUsageCard'
 import ConsultationsCard from './_components/ConsultationsCard'
 import SalesSection from './_components/SalesSection'
+import SystemStatusCard from './_components/SystemStatusCard'
 import { canAccessSales } from '@/lib/sales'
 
 
@@ -239,13 +240,8 @@ export default async function HospitalDetailPage({ params }: PageProps) {
         {/* 영업 정보 (영업/CRM v4 — ADMIN 이상+SEERS만 렌더, API에서 재검증) */}
         {showSales && <SalesSection hospitalCode={hospital.hospitalCode} currentUserId={user?.userId ?? null} />}
 
-        {/* thynC 시스템 현황 */}
-        <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-          <div className="border-b border-gray-200 px-6 py-4">
-            <h2 className="text-sm font-semibold text-gray-700">thynC 시스템 현황</h2>
-          </div>
-          <div className="px-6 py-8 text-center text-sm text-gray-400">추후 개발 예정</div>
-        </div>
+        {/* thynC 시스템 현황 — 서버 현황 + EMR 연동 정보 (2026-08-16) */}
+        <SystemStatusCard hospitalCode={hospital.hospitalCode} canWrite={isAdmin} />
 
         {/* 답사 관리 */}
         <SiteVisitsCard

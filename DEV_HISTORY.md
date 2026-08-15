@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-08-16 | 병원 상세 'thynC 시스템 현황' 카드 보강 — 서버 현황 + EMR 연동 정보 (dev2)
+
+- 기존 "추후 개발 예정" placeholder를 실기능으로 교체 (`SystemStatusCard` 클라이언트 컴포넌트, 편집 USER 이상 — 사용자 확정)
+- **서버 현황** (`hospital_servers` 1:N): 서버이름(필수)·병동정보·모니터링 URL·원격접속 URL을 1줄 레코드로 — 추가/인라인 수정/삭제, URL은 새 탭 링크 버튼(http(s)만 허용, javascript: 등 차단). 구 `hospital_meta.remote_*_url`은 코드 미사용 휴면 확인 — 미접촉
+- **EMR 연동 정보** (`hospital_emr_info` 1:1): 연동상태 단일 선택 4종(ACK연동/EMR직접연동/개발중/미연동 — 사용자 확정, 기본 미연동, 체크박스 UI지만 1개만 선택)·EMR 업체(설정 마스터에서 선택)·데이터 연동 범위 복수 4종·연동방식 복수 3종·메모. 선택지 화이트리스트는 `lib/hospitalSystem.ts` 단일 소스(서버 검증 공용)
+- **EMR 업체 마스터**: status_codes `EMR_VENDOR` 카테고리 — `/settings/emr-vendor`(StatusCodeManager 재사용, ADMIN, 사용 중 삭제 409) + nav '병원·구축' 그룹 (`scripts/seed-hospital-system-nav.sql`, dev2 적용)
+- API: `GET /api/hospitals/[code]/system-info`(통합 조회) · `POST /servers`·`PUT/DELETE /servers/[id]` · `PUT /emr`(upsert) · `/api/settings/emr-vendor(/[id])` — 전 mutation 감사 로그
+- DB: 마이그레이션 `20260816100000_hospital_system_info` (수동 패턴, dev2 적용). 검증: tsc 0오류 · prisma 왕복 스모크(서버 생성·EMR upsert·정리) · 빌드·PM2 재시작
+- 영향 파일: prisma/schema.prisma, prisma/migrations/20260816100000_*/, lib/hospitalSystem.ts(신규), app/api/hospitals/[code]/{system-info,servers,servers/[id],emr}(신규), app/api/settings/emr-vendor(신규), app/settings/emr-vendor(신규), app/hospitals/[code]/_components/SystemStatusCard.tsx(신규), app/hospitals/[code]/page.tsx, scripts/seed-hospital-system-nav.sql(신규), projects/hospitals_erd.html, README.md
+
+---
+
 ## 2026-08-16 | PROD 배포: CS 티켓 워크플로·티켓 정렬·nav 개편 (커밋 3f99549)
 
 - 배포 전 확인: PROD 심평원 연동 잡 running 0건 (8/10 재시작 충돌 교훈)

@@ -68,6 +68,7 @@ app/
 │   ├── auth/                         # 인증 (login, logout, me)
 │   ├── dashboard/                    # 대시보드 집계 API (공사현황·summary·monthly·maintenance·hospital-stats)
 │   ├── hospitals/                    # 병원 CRUD + 장비 배정 + 담당자 배정 + Excel 가져오기
+│   │   └── [code]/system-info·servers·emr  # thynC 시스템 현황 — 서버 현황 CRUD + EMR 연동 정보 upsert (2026-08-16)
 │   │   └── [code]/sales/             # 병원 영업 정보 — 통합 GET + profile/persons(전원·소속종료)/deals/activities (ADMIN+SEERS)
 │   ├── hira-hospitals/               # HIRA 병원 데이터 조회
 │   ├── projects/                     # 프로젝트 CRUD + 장비/파일 관리
@@ -206,6 +207,7 @@ app/
 │   ├── etc-task-status/              # 기타업무 상태 관리 (WorkflowStatusManager)
 │   ├── voc-status/                   # VOC 상태 관리 (WorkflowStatusManager — 티켓 상태 매핑, CS 워크플로)
 │   ├── voc-type/                     # VOC 분류 관리 (StatusCodeManager)
+│   ├── emr-vendor/                   # EMR 업체 관리 (StatusCodeManager — 병원 EMR 연동 정보에서 선택, 2026-08-16)
 │   ├── install-plan-status/          # 설치계획 상태 관리 (WorkflowStatusManager, 2026-07-27)
 │   ├── sales-codes/                  # 영업 코드 관리 — 7카테고리 (단계·딜 상태·판매모델·세금계산서·정산·활동 유형·직군)
 │   ├── ticket-queues/                # Assignment Group 관리 (이름·설명·순서·활성·티켓 수, 멤버 모달 팀(부서) 단위 일괄 선택)
@@ -347,6 +349,10 @@ prisma/
 ### HospitalIntroType (병원 도입형태)
 - Hospital ↔ StatusCode(INTRO_TYPE) N:M 조인 테이블
 - 구축형 / 구독형 / 사용량비례형 등 다중 선택 가능
+
+### HospitalServer / HospitalEmrInfo (thynC 시스템 현황 — 2026-08-16)
+- **HospitalServer** (`hospital_servers`): 병원 서버 현황 1:N — 서버이름(필수)·병동정보·모니터링 URL·원격접속 URL·정렬. 병원 상세 카드에서 추가/인라인 수정/삭제 (USER 이상)
+- **HospitalEmrInfo** (`hospital_emr_info`): 병원 EMR 연동 정보 1:1 — 연동상태(단일: ACK연동/EMR직접연동/개발중/미연동, 기본 미연동)·EMR 업체(`emrVendorId` → StatusCode **EMR_VENDOR**, 설정에서 리스트 관리)·데이터 연동 범위 TEXT[](복수: 환자정보조회/일일레포트/이벤트 심전도/생체신호)·연동방식 TEXT[](복수: API/HL7(TCP/IP)/SFTP)·메모. 선택지 단일 소스 `lib/hospitalSystem.ts`
 
 ### HospitalMeta (병원 메타 정보)
 - Hospital과 1:1 관계
@@ -1465,6 +1471,11 @@ npm run dev
 | POST | `/api/hospitals/[code]/daewoong-staff` | 담당자 배정 |
 | DELETE | `/api/hospitals/[code]/daewoong-staff/[sid]` | 담당자 해제 |
 | POST | `/api/hospitals/[code]/drive-folder` | Drive 폴더 연결 |
+| GET  | `/api/hospitals/[code]/system-info` | thynC 시스템 현황 통합 조회 — 서버 현황+EMR 연동 정보+EMR 업체 마스터 (2026-08-16) |
+| POST | `/api/hospitals/[code]/servers` | 병원 서버 등록 (USER 이상 — 이름 필수, URL은 http(s)만 허용) |
+| PUT/DELETE | `/api/hospitals/[code]/servers/[id]` | 서버 수정·삭제 (USER 이상) |
+| PUT  | `/api/hospitals/[code]/emr` | EMR 연동 정보 upsert (USER 이상 — 연동상태·업체·범위·방식 화이트리스트는 `lib/hospitalSystem.ts` 단일 소스) |
+| GET/POST, PUT/DELETE | `/api/settings/emr-vendor(/[id])` | EMR 업체 마스터 (ADMIN — status_codes EMR_VENDOR, 사용 중 삭제 409) |
 
 ### 영업/CRM (전 엔드포인트 ADMIN 이상 + SEERS 소속 — `checkSalesAccess`)
 | Method | Endpoint | 설명 |

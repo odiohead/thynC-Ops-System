@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>병원(hospitals) ERD — thynC Operations System</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root { --ink:#1a202c; --sub:#4a5568; --line:#e2e8f0; --bg:#f7fafc; --accent:#2b6cb0; --accent-bg:#ebf4ff; --code:#f1f5f9; }
+  * { box-sizing:border-box; }
+  body { font-family:'Pretendard Variable',Pretendard,-apple-system,'Segoe UI',sans-serif; color:var(--ink); margin:0; background:var(--bg); line-height:1.6; }
+  .wrap { max-width:1100px; margin:0 auto; padding:36px 24px 90px; }
+  header.doc { border-bottom:3px solid var(--accent); padding-bottom:16px; margin-bottom:28px; }
+  h1 { font-size:24px; margin:0 0 6px; }
+  .meta-line { color:var(--sub); font-size:13px; }
+  h2 { font-size:19px; margin:40px 0 12px; padding:7px 12px; background:var(--accent-bg); border-left:4px solid var(--accent); border-radius:4px; }
+  h3 { font-size:16px; margin:28px 0 8px; color:var(--accent); }
+  h3 code { font-size:14px; }
+  p, li { font-size:14px; }
+  table { border-collapse:collapse; width:100%; margin:10px 0 4px; font-size:13px; background:#fff; }
+  th, td { border:1px solid var(--line); padding:6px 9px; text-align:left; vertical-align:top; }
+  th { background:#edf2f7; font-weight:700; white-space:nowrap; }
+  td code, p code, li code { background:var(--code); padding:1px 5px; border-radius:4px; font-family:'JetBrains Mono',Consolas,monospace; font-size:12px; }
+  .pk { color:#b7791f; font-weight:700; }
+  .fk { color:#2b6cb0; font-weight:600; }
+  .uq { color:#2f855a; font-weight:600; }
+  .dep { color:#a0aec0; }
+  .tbl-note { font-size:12.5px; color:var(--sub); margin:0 0 12px; }
+  .legend { display:flex; flex-wrap:wrap; gap:14px; font-size:12.5px; color:var(--sub); background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px 16px; margin:14px 0; }
+  .diagram-card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:16px; overflow-x:auto; }
+  .callout { background:#fffaf0; border:1px solid #ed8936; border-radius:8px; padding:12px 16px; font-size:13.5px; margin:14px 0; }
+  .toc { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 20px; font-size:13.5px; }
+  .toc a { color:var(--accent); text-decoration:none; }
+  .rel-badge { display:inline-block; font-size:11px; font-weight:700; padding:1px 7px; border-radius:999px; background:#e6fffa; color:#234e52; border:1px solid #38b2ac; margin-left:6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <h1>병원(hospitals) 관련 테이블 ERD</h1>
+  <div class="meta-line">작성일 2026-08-16 · 기준: <code>prisma/schema.prisma</code> (커밋 3f99549 이후) · PostgreSQL <code>public</code> 스키마</div>
+  <div class="meta-line">병원은 이 시스템의 <b>고객사 마스터</b> — 심평원 원본(hira_hospitals)과 1:1로 연결되고, 모든 업무·영업 테이블이 <code>hospital_code</code>로 병원을 참조한다.</div>
+</header>
+
+<nav class="toc">
+  <b>목차</b> —
+  <a href="#erd">ERD 다이어그램</a> ·
+  <a href="#t-hospitals">hospitals</a> ·
+  <a href="#t-hira">hira_hospitals</a> ·
+  <a href="#t-meta">hospital_meta</a> ·
+  <a href="#t-devices">hospital_devices / device_info</a> ·
+  <a href="#t-intro">hospital_intro_types</a> ·
+  <a href="#t-daewoong">daewoong_hospital_assignments</a> ·
+  <a href="#t-servers">hospital_servers</a> ·
+  <a href="#t-emr">hospital_emr_info</a> ·
+  <a href="#t-sales">hospital_sales_profiles</a> ·
+  <a href="#refs">업무·영업 참조 테이블</a>
+</nav>
+
+<div class="legend">
+  <span><span class="pk">PK</span> 기본키</span>
+  <span><span class="fk">FK</span> 외래키</span>
+  <span><span class="uq">UQ</span> 유니크</span>
+  <span><span class="dep">회색</span> deprecated (백업 보존, 앱 미사용)</span>
+  <span>타입은 PostgreSQL 실제 타입 (Prisma String→TEXT, DateTime→TIMESTAMP(3))</span>
+</div>
+
+<h2 id="erd">ERD 다이어그램</h2>
+<p class="tbl-note">핵심 테이블은 주요 컬럼만 표기 — 전체 컬럼은 아래 상세 명세 참조. 다이어그램이 보이지 않으면 인터넷 연결(mermaid CDN)을 확인하세요.</p>
+<div class="diagram-card">
+<pre class="mermaid">
+erDiagram
+    hira_hospitals ||--o| hospitals : "hira_id (1:1, 선택)"
+    hospitals ||--o| hospital_meta : "hospital_code (1:1)"
+    hospitals ||--o| hospital_sales_profiles : "hospital_code (1:1)"
+    hospitals ||--o{ hospital_devices : "hospital_code"
+    device_info ||--o{ hospital_devices : "device_info_id"
+    hospitals ||--o{ hospital_intro_types : "hospital_id"
+    status_codes ||--o{ hospital_intro_types : "status_code_id (INTRO_TYPE)"
+    hospitals ||--o{ daewoong_hospital_assignments : "hospital_code"
+    users ||--o{ daewoong_hospital_assignments : "assigned_user_id"
+    hospitals ||--o{ hospital_servers : "hospital_code"
+    hospitals ||--o| hospital_emr_info : "hospital_code (1:1)"
+    status_codes ||--o{ hospital_emr_info : "emr_vendor_id (EMR_VENDOR)"
+    hospitals ||--o{ work_tables : "hospital_code (업무 5+1종·티켓)"
+    hospitals ||--o{ sales_tables : "hospital_code (영업 축)"
+
+    hira_hospitals {
+        SERIAL id PK
+        TEXT hira_id UK "심평원 암호화 요양기호(ykiho)"
+        TEXT name "병원명"
+        TEXT type_name "종별 (상급종합 등)"
+        INT perm_sbd_cnt "허가병상수 (상세연동)"
+        TIMESTAMP detail_synced_at
+    }
+    hospitals {
+        SERIAL id PK
+        TEXT hospital_code UK "HOSP-NNNNNN"
+        TEXT hira_id FK "UK, nullable"
+        TEXT hospital_name "운영상 병원명"
+        TEXT type "종별"
+        TEXT status "thynC 현황상태"
+        INT intro_beds "도입 병상수"
+        DATE contract_date "최초 계약일"
+    }
+    hospital_meta {
+        SERIAL id PK
+        TEXT hospital_code FK "UK"
+        TEXT drive_project_folder_id
+        TEXT remote_access_url
+    }
+    hospital_sales_profiles {
+        SERIAL id PK
+        TEXT hospital_code FK "UK"
+        INT stage_id FK "영업 단계"
+        TEXT owner_id FK "담당 영업"
+        INT total_beds "전체 병상 (수기)"
+    }
+    hospital_devices {
+        SERIAL id PK
+        TEXT hospital_code FK
+        INT device_info_id FK
+        INT quantity
+    }
+    device_info {
+        SERIAL id PK
+        TEXT device_model UK
+        TEXT device_name
+    }
+    hospital_intro_types {
+        SERIAL id PK
+        INT hospital_id FK
+        INT status_code_id FK
+    }
+    daewoong_hospital_assignments {
+        UUID id PK
+        TEXT hospital_code FK
+        TEXT assigned_user_id FK
+    }
+    hospital_servers {
+        SERIAL id PK
+        TEXT hospital_code FK
+        TEXT name "서버이름"
+        TEXT ward_info "병동정보"
+        TEXT monitoring_url
+        TEXT remote_url
+    }
+    hospital_emr_info {
+        SERIAL id PK
+        TEXT hospital_code FK "UK"
+        TEXT link_status "ACK연동 등 4종"
+        INT emr_vendor_id FK
+        TEXT_ARR data_scopes "연동 범위 (복수)"
+        TEXT_ARR link_methods "연동 방식 (복수)"
+    }
+    work_tables {
+        _ projects "프로젝트(구축)"
+        _ site_visits "답사"
+        _ install_plans "설치계획"
+        _ maintenances "유지보수"
+        _ etc_task_hospitals "기타업무 N:M"
+        _ voc_receipts "VOC접수"
+        _ tickets "티켓 (hospital_code nullable)"
+    }
+    sales_tables {
+        _ sales_deals "딜(차수)"
+        _ sales_activities "영업 활동"
+        _ person_affiliations "인물 소속 이력"
+        _ consultations "상담이력"
+    }
+</pre>
+</div>
+
+<h2 id="t-hospitals">hospitals — 운영 병원 마스터 (모델 <code>Hospital</code>)</h2>
+<p class="tbl-note">시스템의 고객사(병원) 마스터. 심평원 원본 데이터와 별개로 운영상 이름·상태·도입 정보를 관리한다. 코드 <code>HOSP-NNNNNN</code>이 전 모듈의 병원 참조 키.</p>
+<table>
+  <tr><th>컬럼</th><th>타입</th><th>NULL</th><th>기본값</th><th>키</th><th>설명</th></tr>
+  <tr><td><code>id</code></td><td>SERIAL</td><td>N</td><td>auto</td><td><span class="pk">PK</span></td><td>내부 ID (hospital_intro_types만 이 ID를 FK로 사용)</td></tr>
+  <tr><td><code>hospital_code</code></td><td>TEXT</td><td>N</td><td>—</td><td><span class="uq">UQ</span></td><td>병원 고유 코드 (<code>HOSP-NNNNNN</code>) — 대부분의 관계 테이블이 참조하는 <b>사실상의 비즈니스 PK</b></td></tr>
+  <tr><td><code>hira_id</code></td><td>TEXT</td><td>Y</td><td>—</td><td><span class="fk">FK</span> <span class="uq">UQ</span></td><td>→ <code>hira_hospitals.hira_id</code>. 심평원 원본 1:1 연결 (미연동 병원은 NULL)</td></tr>
+  <tr><td><code>hira_hospital_name</code></td><td>TEXT</td><td>N</td><td>—</td><td></td><td>심평원 등록 병원명 (연동 시점 스냅샷)</td></tr>
+  <tr><td><code>hospital_name</code></td><td>TEXT</td><td>N</td><td>—</td><td></td><td>운영상 병원명 (화면 표시 기본값)</td></tr>
+  <tr><td><code>type</code></td><td>TEXT</td><td>N</td><td>—</td><td></td><td>종별 (상급종합·종합병원·병원·요양병원 등)</td></tr>
+  <tr><td><code>sido_code</code> / <code>sido_name</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>시도 코드/이름</td></tr>
+  <tr><td><code>sigungu_code</code> / <code>sigungu_name</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>시군구 코드/이름</td></tr>
+  <tr><td><code>eupmyeondong</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>읍면동</td></tr>
+  <tr><td><code>postal_code</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>우편번호</td></tr>
+  <tr><td><code>address</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>주소</td></tr>
+  <tr><td><code>coordinate_x</code> / <code>coordinate_y</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>좌표 (지도 표시용)</td></tr>
+  <tr><td><code>status</code></td><td>TEXT</td><td>N</td><td>—</td><td></td><td>thynC 현황상태 — <code>lib/hospitalStatus.ts</code>가 업무 진행에 따라 단방향 자동 진행 (상태 목록은 status_codes HOSPITAL 카테고리)</td></tr>
+  <tr><td class="dep"><code>intro_type</code></td><td class="dep">TEXT</td><td class="dep">Y</td><td class="dep">—</td><td></td><td class="dep">구 단일 도입형태 — <code>hospital_intro_types</code> N:M으로 대체 (보존)</td></tr>
+  <tr><td><code>intro_beds</code></td><td>INTEGER</td><td>Y</td><td>—</td><td></td><td>도입 병상수 — 2026-08-03부터 딜(대웅 디바이스 합) 기준으로 동기화</td></tr>
+  <tr><td><code>contract_date</code></td><td>TIMESTAMP(3)</td><td>Y</td><td>—</td><td></td><td>최초 계약일</td></tr>
+  <tr><td><code>created_at</code> / <code>updated_at</code></td><td>TIMESTAMP(3)</td><td>N</td><td>now() / @updatedAt</td><td></td><td>생성·수정 시각</td></tr>
+</table>
+
+<h2 id="t-hira">hira_hospitals — 심평원 병원 원본 (모델 <code>HiraHospital</code>)</h2>
+<p class="tbl-note">건강보험심사평가원 공공데이터 원본. <code>/settings/hira-sync</code> 연동(병원목록·상세정보)으로 적재·갱신되며, 앱에서는 읽기 전용.</p>
+<table>
+  <tr><th>컬럼</th><th>타입</th><th>NULL</th><th>기본값</th><th>키</th><th>설명</th></tr>
+  <tr><td><code>id</code></td><td>SERIAL</td><td>N</td><td>auto</td><td><span class="pk">PK</span></td><td></td></tr>
+  <tr><td><code>hira_id</code></td><td>TEXT</td><td>N</td><td>—</td><td><span class="uq">UQ</span></td><td>심평원 암호화 요양기호(<code>ykiho</code>) — hospitals가 참조</td></tr>
+  <tr><td><code>name</code></td><td>TEXT</td><td>N</td><td>—</td><td></td><td>병원명 (심평원 등록명)</td></tr>
+  <tr><td><code>type_code</code> / <code>type_name</code></td><td>TEXT</td><td>N</td><td>—</td><td></td><td>종별 코드/이름 (01 상급종합 ~ 한방병원 등)</td></tr>
+  <tr><td><code>sido_code</code> / <code>sido_name</code> / <code>sigungu_code</code> / <code>sigungu_name</code></td><td>TEXT</td><td>N</td><td>—</td><td></td><td>행정구역</td></tr>
+  <tr><td><code>eupmyeondong</code> / <code>postal_code</code> / <code>address</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>상세 주소 정보</td></tr>
+  <tr><td><code>phone</code> / <code>homepage</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>대표전화·홈페이지</td></tr>
+  <tr><td><code>total_doctors</code></td><td>INTEGER</td><td>Y</td><td>—</td><td></td><td>총 의사 수</td></tr>
+  <tr><td><code>opened_at</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>개설일 (원본 문자열 그대로)</td></tr>
+  <tr><td><code>coordinate_x</code> / <code>coordinate_y</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>좌표</td></tr>
+  <tr><td><code>mdept_gdr_cnt</code> ~ <code>mdept_sdr_cnt</code> (4)</td><td>INTEGER</td><td>Y</td><td>—</td><td></td><td>의과 일반의·인턴·레지던트·전문의 수</td></tr>
+  <tr><td><code>dety_gdr_cnt</code> ~ <code>dety_sdr_cnt</code> (4)</td><td>INTEGER</td><td>Y</td><td>—</td><td></td><td>치과 일반의·인턴·레지던트·전문의 수</td></tr>
+  <tr><td><code>cmdc_gdr_cnt</code> ~ <code>cmdc_sdr_cnt</code> (4)</td><td>INTEGER</td><td>Y</td><td>—</td><td></td><td>한방 일반의·인턴·레지던트·전문의 수</td></tr>
+  <tr><td><code>midwife_cnt</code></td><td>INTEGER</td><td>Y</td><td>—</td><td></td><td>조산사 수</td></tr>
+  <tr><td><code>perm_sbd_cnt</code></td><td>INTEGER</td><td>Y</td><td>—</td><td></td><td><b>허가병상수</b> — 병원상세정보연동(<code>getEqpInfo2.8</code>)으로 수집 (2026-08-10, 병원급 7종 대상). 병원 목록·영업 대시보드의 '전체 병상' 소스</td></tr>
+  <tr><td><code>detail_synced_at</code></td><td>TIMESTAMP(3)</td><td>Y</td><td>—</td><td></td><td>상세정보 연동 시각 (NULL = 미연동)</td></tr>
+  <tr><td><code>created_at</code></td><td>TIMESTAMP(3)</td><td>N</td><td>now()</td><td></td><td></td></tr>
+</table>
+
+<h2 id="t-meta">hospital_meta — 병원 메타 정보 <span class="rel-badge">1:1</span> (모델 <code>HospitalMeta</code>)</h2>
+<p class="tbl-note">외부 연동 포인터 모음 — Google Drive 산출물 위치와 원격 접속 정보. 병원당 최대 1행.</p>
+<table>
+  <tr><th>컬럼</th><th>타입</th><th>NULL</th><th>기본값</th><th>키</th><th>설명</th></tr>
+  <tr><td><code>id</code></td><td>SERIAL</td><td>N</td><td>auto</td><td><span class="pk">PK</span></td><td></td></tr>
+  <tr><td><code>hospital_code</code></td><td>TEXT</td><td>N</td><td>—</td><td><span class="fk">FK</span> <span class="uq">UQ</span></td><td>→ <code>hospitals.hospital_code</code></td></tr>
+  <tr><td><code>drive_project_folder_id</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>Google Drive 병원 폴더 ID</td></tr>
+  <tr><td><code>drive_status_file_id</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>Drive 상태 파일 ID</td></tr>
+  <tr><td><code>drive_install_plan_file_id</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>Drive 설치계획 파일 ID</td></tr>
+  <tr><td><code>remote_access_url</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>원격 접속 URL</td></tr>
+  <tr><td><code>remote_control_url</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>원격 제어 URL</td></tr>
+  <tr><td><code>updated_at</code></td><td>TIMESTAMP(3)</td><td>N</td><td>@updatedAt</td><td></td><td></td></tr>
+</table>
+
+<h2 id="t-devices">hospital_devices / device_info — 병원 설치 장비 <span class="rel-badge">N:M</span></h2>
+<h3><code>hospital_devices</code> (모델 <code>HospitalDevice</code>)</h3>
+<table>
+  <tr><th>컬럼</th><th>타입</th><th>NULL</th><th>기본값</th><th>키</th><th>설명</th></tr>
+  <tr><td><code>id</code></td><td>SERIAL</td><td>N</td><td>auto</td><td><span class="pk">PK</span></td><td></td></tr>
+  <tr><td><code>hospital_code</code></td><td>TEXT</td><td>N</td><td>—</td><td><span class="fk">FK</span></td><td>→ <code>hospitals.hospital_code</code></td></tr>
+  <tr><td><code>device_info_id</code></td><td>INTEGER</td><td>N</td><td>—</td><td><span class="fk">FK</span></td><td>→ <code>device_info.id</code></td></tr>
+  <tr><td><code>quantity</code></td><td>INTEGER</td><td>N</td><td>0</td><td></td><td>설치 수량</td></tr>
+  <tr><td><code>updated_at</code></td><td>TIMESTAMP(3)</td><td>N</td><td>@updatedAt</td><td></td><td></td></tr>
+  <tr><td colspan="6">UNIQUE <code>(hospital_code, device_info_id)</code> — 병원×장비 1행</td></tr>
+</table>
+<h3><code>device_info</code> (모델 <code>DeviceInfo</code> — 장비 마스터)</h3>
+<table>
+  <tr><th>컬럼</th><th>타입</th><th>NULL</th><th>기본값</th><th>키</th><th>설명</th></tr>
+  <tr><td><code>id</code></td><td>SERIAL</td><td>N</td><td>auto</td><td><span class="pk">PK</span></td><td></td></tr>
+  <tr><td><code>device_model</code></td><td>TEXT</td><td>N</td><td>—</td><td><span class="uq">UQ</span></td><td>장비 모델명 — 자재관리(inventory_items)·딜 디바이스(sales_deal_devices)도 이 마스터 참조</td></tr>
+  <tr><td><code>device_name</code></td><td>TEXT</td><td>N</td><td>—</td><td></td><td>장비명</td></tr>
+  <tr><td><code>is_active</code></td><td>BOOLEAN</td><td>N</td><td>true</td><td></td><td>사용 여부</td></tr>
+  <tr><td><code>sort_order</code></td><td>INTEGER</td><td>N</td><td>0</td><td></td><td>표시 순서</td></tr>
+  <tr><td><code>created_at</code> / <code>updated_at</code></td><td>TIMESTAMP(3)</td><td>N</td><td>now() / @updatedAt</td><td></td><td></td></tr>
+</table>
+
+<h2 id="t-intro">hospital_intro_types — 도입형태 <span class="rel-badge">N:M</span> (모델 <code>HospitalIntroType</code>)</h2>
+<p class="tbl-note">병원 ↔ 도입형태(status_codes의 <code>INTRO_TYPE</code> 카테고리: 구축형·구독형·사용량비례형 등) 다대다. <b>주의: 이 테이블만 <code>hospitals.id</code>(정수)를 참조</b> — 나머지는 전부 hospital_code.</p>
+<table>
+  <tr><th>컬럼</th><th>타입</th><th>NULL</th><th>기본값</th><th>키</th><th>설명</th></tr>
+  <tr><td><code>id</code></td><td>SERIAL</td><td>N</td><td>auto</td><td><span class="pk">PK</span></td><td></td></tr>
+  <tr><td><code>hospital_id</code></td><td>INTEGER</td><td>N</td><td>—</td><td><span class="fk">FK</span></td><td>→ <code>hospitals.id</code> (ON DELETE CASCADE)</td></tr>
+  <tr><td><code>status_code_id</code></td><td>INTEGER</td><td>N</td><td>—</td><td><span class="fk">FK</span></td><td>→ <code>status_codes.id</code>, INTRO_TYPE 카테고리 (ON DELETE CASCADE)</td></tr>
+  <tr><td colspan="6">UNIQUE <code>(hospital_id, status_code_id)</code></td></tr>
+</table>
+
+<h2 id="t-daewoong">daewoong_hospital_assignments — 대웅 담당자 배정 <span class="rel-badge">N:M</span> (모델 <code>DaewoongHospitalAssignment</code>)</h2>
+<p class="tbl-note">병원별 대웅(DAEWOONG 소속) 담당자 배정.</p>
+<table>
+  <tr><th>컬럼</th><th>타입</th><th>NULL</th><th>기본값</th><th>키</th><th>설명</th></tr>
+  <tr><td><code>id</code></td><td>UUID</td><td>N</td><td>uuid()</td><td><span class="pk">PK</span></td><td></td></tr>
+  <tr><td><code>hospital_code</code></td><td>TEXT</td><td>N</td><td>—</td><td><span class="fk">FK</span></td><td>→ <code>hospitals.hospital_code</code></td></tr>
+  <tr><td><code>assigned_user_id</code></td><td>TEXT</td><td>N</td><td>—</td><td><span class="fk">FK</span></td><td>→ <code>users.id</code> (DAEWOONG 소속 사용자)</td></tr>
+  <tr><td><code>created_at</code></td><td>TIMESTAMP(3)</td><td>N</td><td>now()</td><td></td><td></td></tr>
+  <tr><td colspan="6">UNIQUE <code>(hospital_code, assigned_user_id)</code></td></tr>
+</table>
+
+<h2 id="t-servers">hospital_servers — 서버 현황 <span class="rel-badge">1:N</span> (모델 <code>HospitalServer</code>, 2026-08-16)</h2>
+<p class="tbl-note">thynC 시스템 현황 카드의 서버 레코드 — 병원 상세에서 추가/수정/삭제 (USER 이상).</p>
+<table>
+  <tr><th>컬럼</th><th>타입</th><th>NULL</th><th>기본값</th><th>키</th><th>설명</th></tr>
+  <tr><td><code>id</code></td><td>SERIAL</td><td>N</td><td>auto</td><td><span class="pk">PK</span></td><td></td></tr>
+  <tr><td><code>hospital_code</code></td><td>TEXT</td><td>N</td><td>—</td><td><span class="fk">FK</span></td><td>→ <code>hospitals.hospital_code</code> (ON DELETE CASCADE)</td></tr>
+  <tr><td><code>name</code></td><td>TEXT</td><td>N</td><td>—</td><td></td><td>서버이름</td></tr>
+  <tr><td><code>ward_info</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>병동정보 (자유 텍스트)</td></tr>
+  <tr><td><code>monitoring_url</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>모니터링시스템 URL (http(s)만 허용)</td></tr>
+  <tr><td><code>remote_url</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>원격접속시스템 URL (http(s)만 허용)</td></tr>
+  <tr><td><code>sort_order</code></td><td>INTEGER</td><td>N</td><td>0</td><td></td><td>표시 순서</td></tr>
+  <tr><td><code>created_at</code> / <code>updated_at</code></td><td>TIMESTAMP(3)</td><td>N</td><td>now() / @updatedAt</td><td></td><td></td></tr>
+</table>
+
+<h2 id="t-emr">hospital_emr_info — EMR 연동 정보 <span class="rel-badge">1:1</span> (모델 <code>HospitalEmrInfo</code>, 2026-08-16)</h2>
+<p class="tbl-note">선택지 화이트리스트는 <code>lib/hospitalSystem.ts</code> 단일 소스. EMR 업체 마스터는 status_codes <code>EMR_VENDOR</code> 카테고리 (설정 &gt; EMR 업체 관리).</p>
+<table>
+  <tr><th>컬럼</th><th>타입</th><th>NULL</th><th>기본값</th><th>키</th><th>설명</th></tr>
+  <tr><td><code>id</code></td><td>SERIAL</td><td>N</td><td>auto</td><td><span class="pk">PK</span></td><td></td></tr>
+  <tr><td><code>hospital_code</code></td><td>TEXT</td><td>N</td><td>—</td><td><span class="fk">FK</span> <span class="uq">UQ</span></td><td>→ <code>hospitals.hospital_code</code> (ON DELETE CASCADE)</td></tr>
+  <tr><td><code>link_status</code></td><td>TEXT</td><td>N</td><td>'미연동'</td><td></td><td>연동상태 (단일): ACK연동 / EMR직접연동 / 개발중 / 미연동</td></tr>
+  <tr><td><code>emr_vendor_id</code></td><td>INTEGER</td><td>Y</td><td>—</td><td><span class="fk">FK</span></td><td>→ <code>status_codes.id</code>, EMR_VENDOR 카테고리 (ON DELETE SET NULL)</td></tr>
+  <tr><td><code>data_scopes</code></td><td>TEXT[]</td><td>N</td><td>'{}'</td><td></td><td>데이터 연동 범위 (복수): 환자정보조회 / 일일레포트 / 이벤트 심전도 / 생체신호</td></tr>
+  <tr><td><code>link_methods</code></td><td>TEXT[]</td><td>N</td><td>'{}'</td><td></td><td>연동방식 (복수): API / HL7(TCP/IP) / SFTP</td></tr>
+  <tr><td><code>memo</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>연동 관련 메모</td></tr>
+  <tr><td><code>created_at</code> / <code>updated_at</code></td><td>TIMESTAMP(3)</td><td>N</td><td>now() / @updatedAt</td><td></td><td></td></tr>
+</table>
+
+<h2 id="t-sales">hospital_sales_profiles — 영업 프로필 <span class="rel-badge">1:1</span> (모델 <code>HospitalSalesProfile</code>)</h2>
+<p class="tbl-note">영업/CRM 축의 병원 단위 프로필 (ADMIN+SEERS 전용 화면). 딜·활동·인물은 별도 영업 테이블 참조.</p>
+<table>
+  <tr><th>컬럼</th><th>타입</th><th>NULL</th><th>기본값</th><th>키</th><th>설명</th></tr>
+  <tr><td><code>id</code></td><td>SERIAL</td><td>N</td><td>auto</td><td><span class="pk">PK</span></td><td></td></tr>
+  <tr><td><code>hospital_code</code></td><td>TEXT</td><td>N</td><td>—</td><td><span class="fk">FK</span> <span class="uq">UQ</span></td><td>→ <code>hospitals.hospital_code</code> (ON DELETE CASCADE)</td></tr>
+  <tr><td><code>stage_id</code></td><td>INTEGER</td><td>Y</td><td>—</td><td><span class="fk">FK</span></td><td>→ <code>status_codes.id</code>, SALES_STAGE 카테고리 (영업 단계)</td></tr>
+  <tr><td><code>owner_id</code></td><td>TEXT</td><td>Y</td><td>—</td><td><span class="fk">FK</span></td><td>→ <code>users.id</code> (담당 영업 — 씨어스)</td></tr>
+  <tr><td><code>total_beds</code></td><td>INTEGER</td><td>Y</td><td>—</td><td></td><td>전체 병상수 (수기 — 침투율 분모, hira 허가병상과 별개)</td></tr>
+  <tr><td><code>total_wards</code></td><td>INTEGER</td><td>Y</td><td>—</td><td></td><td>전체 병동수</td></tr>
+  <tr><td><code>sales_memo</code></td><td>TEXT</td><td>Y</td><td>—</td><td></td><td>영업 메모</td></tr>
+  <tr><td><code>created_at</code> / <code>updated_at</code></td><td>TIMESTAMP(3)</td><td>N</td><td>now() / @updatedAt</td><td></td><td></td></tr>
+</table>
+
+<h2 id="refs">병원을 참조하는 업무·영업·시스템 테이블 (요약)</h2>
+<p class="tbl-note">아래 테이블은 각자의 도메인 소속이지만 <code>hospital_code</code>(또는 병원 N:M)로 병원을 참조한다 — 병원 삭제·재지정 시 영향 범위이기도 하다 (재지정: <code>lib/workItemReassign.ts</code>).</p>
+<table>
+  <tr><th>테이블</th><th>FK 컬럼</th><th>NULL</th><th>관계</th><th>설명</th></tr>
+  <tr><td><code>projects</code></td><td><code>hospital_code</code></td><td>N</td><td>N:1</td><td>구축 프로젝트 — 병원 필수</td></tr>
+  <tr><td><code>site_visits</code></td><td><code>hospital_code</code></td><td>N</td><td>N:1</td><td>답사</td></tr>
+  <tr><td><code>install_plans</code></td><td><code>hospital_code</code></td><td>Y</td><td>N:1</td><td>설치계획(가안) — 병원 미정 허용</td></tr>
+  <tr><td><code>maintenances</code></td><td><code>hospital_code</code></td><td>N</td><td>N:1</td><td>유지보수</td></tr>
+  <tr><td><code>etc_task_hospitals</code></td><td><code>hospital_code</code></td><td>N</td><td>N:M</td><td>기타업무 ↔ 병원 조인 (다병원 업무)</td></tr>
+  <tr><td><code>voc_receipts</code></td><td><code>hospital_code</code></td><td>Y</td><td>N:1 (SetNull)</td><td>VOC접수 — 비고객 허용(<code>hospital_name_raw</code> 병행)</td></tr>
+  <tr><td><code>tickets</code></td><td><code>hospital_code</code></td><td>Y</td><td>N:1 (SetNull)</td><td>티켓 — 도메인 동기화로 자동 반영</td></tr>
+  <tr><td><code>consultations</code> / <code>consultation_queue</code></td><td><code>hospital_code</code></td><td>N / Y</td><td>N:1</td><td>상담이력(AI 어시스턴트 산출물) / 동결된 구 대기열</td></tr>
+  <tr><td><code>sales_deals</code></td><td><code>hospital_code</code></td><td>N</td><td>N:1</td><td>딜(도입 차수) — 도입 병상(intro_beds)의 원천</td></tr>
+  <tr><td><code>sales_activities</code></td><td><code>hospital_code</code></td><td>N</td><td>N:1</td><td>영업 활동 기록</td></tr>
+  <tr><td><code>person_affiliations</code></td><td><code>hospital_code</code></td><td>N</td><td>N:M</td><td>인물(persons) ↔ 병원 소속 이력 (전원·소속종료 추적)</td></tr>
+  <tr><td><code>inventory_transactions</code> / <code>inventory_units</code></td><td><code>hospital_code</code></td><td>Y</td><td>N:1</td><td>자재 입출고·시리얼 개체의 출고처 병원</td></tr>
+  <tr><td><code>ai_chat_sessions</code> / <code>ai_usage_logs</code></td><td><code>hospital_code</code></td><td>Y</td><td>N:1</td><td>AI 어시스턴트 세션·사용 로그의 병원 컨텍스트</td></tr>
+  <tr><td class="dep"><code>tasks</code></td><td class="dep"><code>hospital_code</code></td><td class="dep">Y</td><td class="dep">N:1</td><td class="dep">구 업무 롤업 — P10에서 티켓으로 대체 (동결)</td></tr>
+</table>
+
+<div class="callout">
+  <b>설계 노트</b><br>
+  ① 병원 참조 키는 <code>hospital_code</code>(문자열)가 표준 — 예외는 <code>hospital_intro_types.hospital_id</code>(정수 id) 하나.<br>
+  ② <code>hospitals.status</code>는 업무 진행(답사→구축→운영 등)에 따라 <code>advanceHospitalStatus</code>가 단방향 자동 진행하며, 병원 재지정 시에는 재계산된다.<br>
+  ③ 병상수는 3계층: <code>hira_hospitals.perm_sbd_cnt</code>(심평원 허가병상) / <code>hospital_sales_profiles.total_beds</code>(영업 수기) / <code>hospitals.intro_beds</code>(도입 병상 = 계약완료 딜의 대웅 디바이스 합).
+</div>
+
+<script>mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script>
+</div>
+</body>
+</html>

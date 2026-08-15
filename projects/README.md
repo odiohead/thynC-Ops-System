@@ -21,6 +21,7 @@
 | [inventory_udi_ledger_design.md](inventory_udi_ledger_design.md) | 자재관리 UDI 입출고대장 — GMP 양식 F707-1(rev.4) docx 자동 생성 (device_info 모델 마스터 승격·LOT 해석 이원화 해소·문서 메타 편집, P0~P5) | **P0~P5 구현 완료 (dev2, 2026-08-04) — PROD 미반영** |
 | [cs_ticket_workflow_design.md](cs_ticket_workflow_design.md) · [HTML](cs_ticket_workflow_design.html) | CS 티켓 워크플로 — 도메인 어댑터 레지스트리(편입 플러그인화)·신규 도메인 VOC접수(CS 마스터 티켓)·하위 도메인 티켓 생성 (P0~P3, 콜기록지는 2026-08-15 개정으로 제거) | **구현 완료 (dev2, 2026-08-15 개정 반영) — PROD 미반영** |
 | [sales_dashboard_map_design.md](sales_dashboard_map_design.md) | 영업 대시보드(지도) — `/sales/dashboard_map` 7개 권역 지도(muted-earth 베이스맵)+표+드릴다운·종별 필터·막대 3모드, koreaGeo.ts 재생성 절차 포함 | **완료 (PROD 배포 2026-08-15)** |
+| [hospitals_erd.html](hospitals_erd.html) | **참조 문서** (설계안 아님) — 병원(hospitals) 관련 테이블 ERD + 컬럼 상세 명세 (hira/meta/devices/intro_types/대웅배정/영업프로필 + 참조 업무 테이블 요약) | 참조용 (2026-08-16 작성, 스키마 변경 시 갱신) |
 
 ## 루트에 남아 있는 1.0 문서
 

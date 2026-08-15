@@ -74,6 +74,8 @@ model Hospital {
   updatedAt             DateTime                     @updatedAt @map("updated_at")
   hiraHospital          HiraHospital?                @relation(fields: [hiraId], references: [hiraId])
   daewoongAssignments   DaewoongHospitalAssignment[]
+  servers               HospitalServer[]
+  emrInfo               HospitalEmrInfo?
   vocReceipts           VocReceipt[]
   projects              Project[]
   meta                  HospitalMeta?
@@ -159,6 +161,7 @@ model StatusCode {
   dealSettlements        SalesDeal[]            @relation("DealSettlement")
   salesActivityTypes     SalesActivity[]        @relation("SalesActivityType")
   persons                Person[]               @relation("PersonGroup")
+  emrVendorInfos         HospitalEmrInfo[]      @relation("EmrVendor")
   vocChannels            VocReceipt[]           @relation("VocChannel")
   vocTypes               VocReceipt[]           @relation("VocType")
   vocStatuses            VocReceipt[]           @relation("VocStatus")
@@ -469,6 +472,43 @@ model HospitalMeta {
   updatedAt              DateTime @updatedAt @map("updated_at")
 
   @@map("hospital_meta")
+  @@schema("public")
+}
+
+/// 병원 서버 현황 — thynC 시스템 현황 카드 (2026-08-16)
+model HospitalServer {
+  id            Int      @id @default(autoincrement())
+  hospitalCode  String   @map("hospital_code")
+  name          String   @map("name") // 서버이름
+  wardInfo      String?  @map("ward_info") // 병동정보 (자유 텍스트)
+  monitoringUrl String?  @map("monitoring_url") // 모니터링시스템 URL
+  remoteUrl     String?  @map("remote_url") // 원격접속시스템 URL
+  sortOrder     Int      @default(0) @map("sort_order")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  hospital      Hospital @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: Cascade)
+
+  @@index([hospitalCode])
+  @@map("hospital_servers")
+  @@schema("public")
+}
+
+/// 병원 EMR 연동 정보 (1:1) — thynC 시스템 현황 카드 (2026-08-16)
+/// 업체 마스터는 status_codes EMR_VENDOR 카테고리 (설정 > EMR 업체 관리)
+model HospitalEmrInfo {
+  id           Int         @id @default(autoincrement())
+  hospitalCode String      @unique @map("hospital_code")
+  linkStatus   String      @default("미연동") @map("link_status") // ACK연동 / EMR직접연동 / 개발중 / 미연동 (단일)
+  emrVendorId  Int?        @map("emr_vendor_id")
+  dataScopes   String[]    @default([]) @map("data_scopes") // 환자정보조회 / 일일레포트 / 이벤트 심전도 / 생체신호 (복수)
+  linkMethods  String[]    @default([]) @map("link_methods") // API / HL7(TCP/IP) / SFTP (복수)
+  memo         String?     @map("memo") @db.Text
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  hospital     Hospital    @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: Cascade)
+  emrVendor    StatusCode? @relation("EmrVendor", fields: [emrVendorId], references: [id], onDelete: SetNull)
+
+  @@map("hospital_emr_info")
   @@schema("public")
 }
 
