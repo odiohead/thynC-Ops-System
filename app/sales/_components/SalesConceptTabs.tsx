@@ -12,6 +12,7 @@ import { usePathname } from 'next/navigation'
 const TABS = [
   { href: '/sales/dashboard', label: '대시보드' },
   { href: '/sales/deals', label: '도입현황' },
+  { href: '/sales/dashboard_map', label: '대시보드(지도)' },
 ]
 
 export default function SalesConceptTabs() {
