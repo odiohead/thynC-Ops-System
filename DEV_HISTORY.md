@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-08-16 | PROD 배포: 병원 상세 thynC 시스템 현황 (커밋 2fa003d)
+
+- 배포 전 확인: PROD 심평원 연동 잡 running 0건
+- dev2 push → PROD `git pull`(176342f→2fa003d, 17파일) → `npx prisma migrate deploy`(`20260816100000_hospital_system_info` 적용) → `prisma generate` → 시드 `seed-hospital-system-nav.sql`(설정>EMR 업체 관리 nav) → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- 신규 패키지 없음. 스모크: `/`·`/hospitals`·`/settings/emr-vendor` 307 정상, 외부 HTTPS 307 정상, 에러 로그 신규 발생 0건
+- 배포 직후 안내: EMR 업체 리스트는 비어 있음 — 설정 > EMR 업체 관리에서 등록 후 병원 상세에서 선택
+
+---
+
 ## 2026-08-16 | 병원 상세 'thynC 시스템 현황' 카드 보강 — 서버 현황 + EMR 연동 정보 (dev2)
 
 - 기존 "추후 개발 예정" placeholder를 실기능으로 교체 (`SystemStatusCard` 클라이언트 컴포넌트, 편집 USER 이상 — 사용자 확정)
