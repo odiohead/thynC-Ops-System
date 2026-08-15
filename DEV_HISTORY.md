@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-08-16 | PROD 배포: CS 티켓 워크플로·티켓 정렬·nav 개편 (커밋 3f99549)
+
+- 배포 전 확인: PROD 심평원 연동 잡 running 0건 (8/10 재시작 충돌 교훈)
+- dev2 push → PROD `git pull`(008096c→3f99549, 58파일) → `npx prisma migrate deploy`(`20260815010000_cs_call_log_voc`·`20260815120000_cs_drop_call_logs_voc_creator` 2건 적용) → `prisma generate` → 시드 `seed-cs-masters.sql`(VOC 마스터 3카테고리·CS 그룹·CTI·규칙)+`nav-reorg-20260816.sql`(운영현황 2depth) → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- 신규 패키지 없음(`npm install` 불필요). 시드 검증 출력 정상(VOC 규칙 = 고객지원>VOC>일반 / CS, nav 1depth 7·운영현황 하위 11)
+- 스모크: `/`·`/tickets`·`/voc`·`/voc/new`·`/settings/voc-status`·`/hospitals` 전부 307 정상, 외부 HTTPS 307 정상. 에러 로그 신규 발생 0건 (로그 말미의 BigInt/Server Action 에러는 8/15 이전 기존 건 — BigInt는 영업 대시보드 `$queryRaw` 병상 집계 의심, 별도 확인 대상)
+
+---
+
 ## 2026-08-16 | 네비게이션 개편 — '운영현황' 1depth 신설 + 범용 2depth 아코디언 (dev2)
 
 - 요청: 1depth를 AI 어시스턴트/티켓/사내 위키/영업 현황/**운영현황**/설정/계정 관리로 정리하고, 운영 메뉴 11종(병원 목록·설치계획·답사·프로젝트·VOC 접수·유지보수·기타업무·자재관리·간트차트·차량예약·심평원 병원목록)을 운영현황 하위 2depth로 이동 (VOC 접수는 요청 목록 미기재 — 운영 업무 성격상 유지보수 앞 배치)
