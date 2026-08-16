@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-08-16 | 버그 수정 + PROD 배포: 영업 대시보드 월/주 계약내역 카드 잘림·스크롤 (커밋 399fff0)
+
+- 증상(스크린샷 제보): `/sales/dashboard` 월 계약내역 리스트가 잘리고 내부 스크롤 발생, 옆 '종별 도입 병원' 카드와 높이 불일치
+- 원인: `DealListCard` 리스트 영역 `max-h-[200px]` 고정 상한 — 행 7~8개 초과 시 스크롤·마지막 행 절단
+- 수정: 카드 루트 `flex h-full flex-col`, 리스트 `min-h-0 flex-1 overflow-auto` — 그리드 행 높이(가장 긴 이웃 카드)를 채워 전 행 노출, 초과 시에만 스크롤. 모바일(1열)은 내용 높이대로 자연 확장
+- 검증: tsc 0오류 · dev2 빌드·PM2 재시작·307 스모크 → PROD `git pull`(2fa003d→399fff0) → 힙 4GB 빌드 → `pm2 restart thync-prod` → `/`·`/sales/dashboard`·`/hospitals` 307·외부 HTTPS 307·에러 로그 0건 (마이그레이션·신규 패키지 없음)
+- 영향 파일: app/sales/dashboard/_components/SalesDashboardA.tsx
+
+---
+
 ## 2026-08-16 | PROD 배포: 병원 상세 thynC 시스템 현황 (커밋 2fa003d)
 
 - 배포 전 확인: PROD 심평원 연동 잡 running 0건
