@@ -68,7 +68,7 @@ function DealListCard({ title, mode, deals }: { title: string; mode: 'month' | '
   const navBtn = 'rounded-md border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-500 transition-colors hover:bg-gray-100'
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+    <div className="flex h-full flex-col rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-700">{title} <span className="ml-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">{rows.length}건</span></h3>
         <span className="inline-flex items-center gap-1">
@@ -79,7 +79,7 @@ function DealListCard({ title, mode, deals }: { title: string; mode: 'month' | '
           <button className={navBtn} onClick={() => setOffset(offset + 1)} aria-label={mode === 'month' ? '다음달' : '다음주'}>▶</button>
         </span>
       </div>
-      <div className="mt-2 max-h-[200px] overflow-auto">
+      <div className="mt-2 min-h-0 flex-1 overflow-auto">
         {rows.length === 0 ? (
           <p className="py-6 text-center text-sm text-gray-400">계약 내역이 없습니다.</p>
         ) : (
