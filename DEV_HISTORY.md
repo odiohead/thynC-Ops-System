@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-08-18 | 영업 대시보드 '종별 도입 병원' 카드 — 2026년 목표현황 탭 + 목표 설정 (dev2)
+
+- 종별 카드에 탭 2종 신설 (좌상단 아이콘 탭): `종별 도입 병원`(기존 그대로) | `2026년 목표현황`(신규). 카드 우상단 ⚙ 설정 아이콘(ADMIN 이상 표시)으로 종별 목표 병상수 입력 모달
+- 목표현황 탭: **계약일 2026년 계약완료 딜** 기준(사용자 확정 — KPI와 동일 축) — 병상(대웅 디바이스 합)이 메인으로 목표 대비 진척률 게이지·% 배지(초과 시 105%처럼 그대로 표기 + 에메랄드 '달성' 배지, 게이지는 100% 캡), 병원 수(중복 제거)는 실적 서브 표시. 목표 입력된 종별만 + 최상단 합계 행 (사용자 확정)
+- 저장: AppSetting `sales_bed_targets_2026`(JSON, 연도별 키 — `lib/salesTargets.ts` 단일 소스: 종별 화이트리스트·정수 검증·조회). API `GET/PUT /api/settings/sales-targets`(열람 영업 게이트 / 수정 ADMIN 이상 + 감사 로그). 저장 후 `router.refresh()`
+- **진척률 신호등 (추가 요청)**: % 배지 색상 — 50% 미만 적색 / 50~100% 미만 주황 / 100% 이상 녹색('달성')
+- 검증: tsc 0오류 · dev2 빌드·PM2 재시작·`/sales/dashboard` 307 스모크
+- 위키 청크 P2002 점검: 전 시퀀스 81개 last_value ≥ max(id) 정합 확인 — 실패 insert도 시퀀스를 소모해 자가 복구된 과거 이력(8/10)으로 판명, stale 페이지 0건 (보정 불필요)
+- 영향 파일: lib/salesTargets.ts(신규), app/api/settings/sales-targets/route.ts(신규), app/sales/dashboard/page.tsx, app/sales/dashboard/_components/SalesDashboardA.tsx, README.md
+
+---
+
 ## 2026-08-16 | 버그 수정 + PROD 배포: 영업 대시보드 월/주 계약내역 카드 잘림·스크롤 (커밋 399fff0)
 
 - 증상(스크린샷 제보): `/sales/dashboard` 월 계약내역 리스트가 잘리고 내부 스크롤 발생, 옆 '종별 도입 병원' 카드와 높이 불일치

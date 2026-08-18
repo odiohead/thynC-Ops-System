@@ -6,8 +6,11 @@
  */
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, Area, LabelList } from 'recharts'
+import { Building2, Target, Settings } from 'lucide-react'
 import { useChartTheme } from '@/app/components/theme/useChartTheme'
+import { useOverlayDismiss } from '@/app/components/useOverlayDismiss'
 
 export interface DashboardAData {
   kpi: {
@@ -24,6 +27,11 @@ export interface DashboardAData {
   monthly: Array<{ ym: string; count: number; hosp: number; beds: number; cumHosp: number; cumBeds: number }>
   allDeals: DealListRow[]
   typeDist: Array<{ name: string; count: number; total: number; beds: number; totalBeds: number }>
+  target: {
+    year: number
+    dist: Array<{ name: string; targetBeds: number; beds: number; hospitals: number }>
+    canEdit: boolean
+  }
   settleDist: Array<{ name: string; count: number }>
   taxDist: Array<{ name: string; count: number }>
 }
@@ -204,6 +212,251 @@ function TrendCard({ title, unit, cum, rows, color, gradId, chart }: {
   )
 }
 
+/** 종별 도입 병원(누적) / 연도 목표현황(연간 진척) 탭 카드 — 우상단 ⚙로 종별 목표 병상수 설정 (2026-08-18) */
+function TypeDistCard({ typeDist, target, chart }: {
+  typeDist: DashboardAData['typeDist']
+  target: DashboardAData['target']
+  chart: ReturnType<typeof useChartTheme>
+}) {
+  const [tab, setTab] = useState<'dist' | 'target'>('dist')
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const colors = [chart.indigo, chart.blue, '#0ea5e9', chart.emerald, chart.amber, '#64748b']
+
+  const tabBtn = (active: boolean) =>
+    `inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[12px] font-semibold transition-colors ${
+      active ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
+    }`
+
+  const totalTarget = target.dist.reduce((a, t) => a + t.targetBeds, 0)
+  const totalBeds = target.dist.reduce((a, t) => a + t.beds, 0)
+  const totalHosp = target.dist.reduce((a, t) => a + t.hospitals, 0)
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1">
+          <button className={tabBtn(tab === 'dist')} onClick={() => setTab('dist')}>
+            <Building2 className="h-3.5 w-3.5" /> 종별 도입 병원
+          </button>
+          <button className={tabBtn(tab === 'target')} onClick={() => setTab('target')}>
+            <Target className="h-3.5 w-3.5" /> {target.year}년 목표현황
+          </button>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="hidden text-[11px] text-gray-400 xl:inline">
+            {tab === 'dist'
+              ? '도입 수 / 종별 전체 · 병상: 딜 / 심평원'
+              : `계약일 ${target.year}년 계약완료 딜 · 병상: 대웅 디바이스`}
+          </span>
+          {target.canEdit && (
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+              title="종별 목표 병상수 설정"
+              aria-label="종별 목표 병상수 설정"
+            >
+              <Settings className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3">
+        {tab === 'dist' ? (
+          <div className="space-y-2">
+            {typeDist.length === 0 && <p className="text-sm text-gray-400">데이터 없음</p>}
+            {typeDist.map((t, i) => {
+              const c = colors[i % colors.length]
+              const pct = t.total > 0 ? (t.count / t.total) * 100 : 0
+              const bedPct = t.totalBeds > 0 ? (t.beds / t.totalBeds) * 100 : 0
+              return (
+                <div key={t.name} className="relative overflow-hidden rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/40">
+                  {/* 침투율 배경 게이지 */}
+                  <div className="absolute inset-y-0 left-0 opacity-15" style={{ width: `${Math.max(pct, 1.5)}%`, backgroundColor: c }} />
+                  <div className="relative flex items-center justify-between">
+                    <span className="inline-flex items-center gap-2 text-[13px] font-medium text-gray-700">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: c }} />
+                      {t.name}
+                    </span>
+                    <span className="text-[12px] tabular-nums text-gray-500">
+                      <b className="text-[15px] font-bold" style={{ color: c }}>{t.count.toLocaleString()}</b>
+                      <span className="mx-1 text-gray-400">/</span>{t.total.toLocaleString()}곳
+                      <span className="ml-2 rounded-full bg-white px-1.5 py-0.5 text-[11px] font-semibold text-gray-600 shadow-sm dark:bg-gray-900">{Math.round(pct * 10) / 10}%</span>
+                    </span>
+                  </div>
+                  <div className="relative mt-1 flex items-center justify-between">
+                    <span className="text-[11px] text-gray-400">병상</span>
+                    <span className="text-[11px] tabular-nums text-gray-500">
+                      <b className="font-semibold" style={{ color: c }}>{t.beds.toLocaleString()}</b>
+                      <span className="mx-1 text-gray-400">/</span>
+                      {t.totalBeds > 0 ? `${t.totalBeds.toLocaleString()}병상` : '-'}
+                      <span className="ml-2 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 shadow-sm dark:bg-gray-900">
+                        {t.totalBeds > 0 ? `${Math.round(bedPct * 10) / 10}%` : '-%'}
+                      </span>
+                    </span>
+                  </div>
+                  {t.totalBeds > 0 && (
+                    <div className="relative mt-1 h-1 overflow-hidden rounded-full bg-gray-200/70 dark:bg-gray-700/50">
+                      <div className="h-full rounded-full opacity-70" style={{ width: `${Math.max(Math.min(bedPct, 100), 0.5)}%`, backgroundColor: c }} />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {target.dist.length === 0 ? (
+              <p className="py-6 text-center text-sm text-gray-400">
+                {target.year}년 종별 목표가 아직 없습니다.
+                {target.canEdit && (
+                  <>
+                    <br />우측 상단 설정(⚙)에서 목표 병상수를 입력하세요.
+                  </>
+                )}
+              </p>
+            ) : (
+              <>
+                <TargetRow name="합계" beds={totalBeds} targetBeds={totalTarget} hospitals={totalHosp} color={chart.indigo} bold />
+                {target.dist.map((t, i) => (
+                  <TargetRow key={t.name} name={t.name} beds={t.beds} targetBeds={t.targetBeds} hospitals={t.hospitals} color={colors[i % colors.length]} />
+                ))}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {settingsOpen && (
+        <TargetSettingsModal
+          year={target.year}
+          initial={Object.fromEntries(target.dist.map((t) => [t.name, t.targetBeds]))}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+/** 목표현황 행 — 병상이 메인(목표 대비 진척률·초과 시 100% 이상 그대로 표기), 병원 수는 서브 */
+function TargetRow({ name, beds, targetBeds, hospitals, color, bold }: {
+  name: string; beds: number; targetBeds: number; hospitals: number; color: string; bold?: boolean
+}) {
+  const pct = targetBeds > 0 ? (beds / targetBeds) * 100 : 0
+  const over = pct >= 100
+  // 진척률 신호등: 50% 미만 적색 / 100% 미만 주황 / 100% 이상 녹색
+  const pctBadge = over ? 'bg-emerald-600 text-white' : pct >= 50 ? 'bg-amber-500 text-white' : 'bg-red-600 text-white'
+  return (
+    <div className={`relative overflow-hidden rounded-lg px-3 py-2 ${bold ? 'bg-indigo-50/60 dark:bg-indigo-900/20' : 'bg-gray-50 dark:bg-gray-800/40'}`}>
+      {/* 진척률 배경 게이지 (표시는 100% 캡, 라벨은 초과분 그대로) */}
+      <div className="absolute inset-y-0 left-0 opacity-15" style={{ width: `${Math.max(Math.min(pct, 100), 1.5)}%`, backgroundColor: color }} />
+      <div className="relative flex items-center justify-between">
+        <span className={`inline-flex items-center gap-2 text-[13px] ${bold ? 'font-bold text-gray-900' : 'font-medium text-gray-700'}`}>
+          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
+          {name}
+        </span>
+        <span className="text-[12px] tabular-nums text-gray-500">
+          <b className="text-[15px] font-bold" style={{ color }}>{beds.toLocaleString()}</b>
+          <span className="mx-1 text-gray-400">/</span>{targetBeds.toLocaleString()}병상
+          <span className={`ml-2 rounded-full px-1.5 py-0.5 text-[11px] font-semibold shadow-sm ${pctBadge}`}>
+            {Math.round(pct * 10) / 10}%{over && ' 달성'}
+          </span>
+        </span>
+      </div>
+      <div className="relative mt-1 flex items-center justify-between">
+        <span className="text-[11px] text-gray-400">병원</span>
+        <span className="text-[11px] tabular-nums text-gray-500">
+          <b className="font-semibold" style={{ color }}>{hospitals.toLocaleString()}</b>곳
+        </span>
+      </div>
+      <div className="relative mt-1 h-1 overflow-hidden rounded-full bg-gray-200/70 dark:bg-gray-700/50">
+        <div className="h-full rounded-full opacity-70" style={{ width: `${Math.max(Math.min(pct, 100), 0.5)}%`, backgroundColor: color }} />
+      </div>
+    </div>
+  )
+}
+
+/** 종별 목표 병상수 설정 모달 — 빈칸 = 목표 없음, 저장은 ADMIN 이상 (PUT /api/settings/sales-targets) */
+const TARGET_TYPE_ORDER = ['상급종합', '종합병원', '병원', '요양병원', '정신병원', '치과병원', '한방병원', '의원', '치과의원', '한의원']
+
+function TargetSettingsModal({ year, initial, onClose }: {
+  year: number
+  initial: Record<string, number>
+  onClose: () => void
+}) {
+  const router = useRouter()
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(TARGET_TYPE_ORDER.map((t) => [t, initial[t] !== undefined ? String(initial[t]) : '']))
+  )
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useOverlayDismiss(true, onClose)
+
+  const save = async () => {
+    const targets: Record<string, number> = {}
+    for (const [t, v] of Object.entries(values)) {
+      if (v.trim() === '') continue
+      const n = Number(v)
+      if (!Number.isInteger(n) || n < 0) {
+        setError(`${t}: 0 이상 정수만 입력할 수 있습니다.`)
+        return
+      }
+      if (n > 0) targets[t] = n
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/settings/sales-targets', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ year, targets }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => null)
+        throw new Error(d?.error ?? '저장에 실패했습니다.')
+      }
+      router.refresh()
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '저장에 실패했습니다.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl dark:bg-gray-900" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-semibold text-gray-900">{year}년 종별 목표 병상수 설정</h3>
+        <p className="mt-0.5 text-[11px] text-gray-400">빈칸 = 목표 없음 (목표현황 탭에서 제외)</p>
+        <div className="mt-3 max-h-[55vh] space-y-1.5 overflow-auto pr-1">
+          {TARGET_TYPE_ORDER.map((t) => (
+            <label key={t} className="flex items-center justify-between gap-3">
+              <span className="text-[13px] text-gray-700">{t}</span>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={values[t]}
+                placeholder="목표 없음"
+                onChange={(e) => setValues((v) => ({ ...v, [t]: e.target.value }))}
+                className="w-32 rounded-md border border-gray-300 px-2 py-1 text-right text-[13px] tabular-nums focus:border-blue-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800"
+              />
+            </label>
+          ))}
+        </div>
+        {error && <p className="mt-2 text-[12px] text-red-600">{error}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-md border border-gray-300 px-3 py-1.5 text-[13px] text-gray-600 transition-colors hover:bg-gray-50">취소</button>
+          <button onClick={save} disabled={saving} className="rounded-md bg-blue-600 px-3 py-1.5 text-[13px] font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50">
+            {saving ? '저장 중…' : '저장'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function SalesDashboardA({ data }: { data: DashboardAData }) {
   const chart = useChartTheme()
   const { kpi } = data
@@ -256,50 +509,7 @@ export default function SalesDashboardA({ data }: { data: DashboardAData }) {
       <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3">
         <DealListCard title="월 계약내역" mode="month" deals={data.allDeals} />
         <DealListCard title="주 계약내역" mode="week" deals={data.allDeals} />
-        <Card title="종별 도입 병원" note="도입 수 / 종별 전체 병원 수 · 병상: 도입 병상(딜) / 종별 전체 병상(심평원) · 종별 위계 순">
-          <div className="space-y-2">
-            {data.typeDist.length === 0 && <p className="text-sm text-gray-400">데이터 없음</p>}
-            {data.typeDist.map((t, i) => {
-              const colors = [chart.indigo, chart.blue, '#0ea5e9', chart.emerald, chart.amber, '#64748b']
-              const c = colors[i % colors.length]
-              const pct = t.total > 0 ? (t.count / t.total) * 100 : 0
-              const bedPct = t.totalBeds > 0 ? (t.beds / t.totalBeds) * 100 : 0
-              return (
-                <div key={t.name} className="relative overflow-hidden rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/40">
-                  {/* 침투율 배경 게이지 */}
-                  <div className="absolute inset-y-0 left-0 opacity-15" style={{ width: `${Math.max(pct, 1.5)}%`, backgroundColor: c }} />
-                  <div className="relative flex items-center justify-between">
-                    <span className="inline-flex items-center gap-2 text-[13px] font-medium text-gray-700">
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: c }} />
-                      {t.name}
-                    </span>
-                    <span className="text-[12px] tabular-nums text-gray-500">
-                      <b className="text-[15px] font-bold" style={{ color: c }}>{t.count.toLocaleString()}</b>
-                      <span className="mx-1 text-gray-400">/</span>{t.total.toLocaleString()}곳
-                      <span className="ml-2 rounded-full bg-white px-1.5 py-0.5 text-[11px] font-semibold text-gray-600 shadow-sm dark:bg-gray-900">{Math.round(pct * 10) / 10}%</span>
-                    </span>
-                  </div>
-                  <div className="relative mt-1 flex items-center justify-between">
-                    <span className="text-[11px] text-gray-400">병상</span>
-                    <span className="text-[11px] tabular-nums text-gray-500">
-                      <b className="font-semibold" style={{ color: c }}>{t.beds.toLocaleString()}</b>
-                      <span className="mx-1 text-gray-400">/</span>
-                      {t.totalBeds > 0 ? `${t.totalBeds.toLocaleString()}병상` : '-'}
-                      <span className="ml-2 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 shadow-sm dark:bg-gray-900">
-                        {t.totalBeds > 0 ? `${Math.round(bedPct * 10) / 10}%` : '-%'}
-                      </span>
-                    </span>
-                  </div>
-                  {t.totalBeds > 0 && (
-                    <div className="relative mt-1 h-1 overflow-hidden rounded-full bg-gray-200/70 dark:bg-gray-700/50">
-                      <div className="h-full rounded-full opacity-70" style={{ width: `${Math.max(Math.min(bedPct, 100), 0.5)}%`, backgroundColor: c }} />
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </Card>
+        <TypeDistCard typeDist={data.typeDist} target={data.target} chart={chart} />
       </div>
 
       <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">

@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers'
-import { verifyToken } from '@/lib/auth'
+import { verifyToken, isAdminOrAbove } from '@/lib/auth'
 import { canAccessSales } from '@/lib/sales'
+import { getSalesBedTargets } from '@/lib/salesTargets'
 import { prisma } from '@/lib/prisma'
 import SalesConceptTabs from '../_components/SalesConceptTabs'
 import SalesDashboardA, { type DashboardAData } from './_components/SalesDashboardA'
@@ -131,6 +132,25 @@ export default async function SalesDashboardPage() {
       return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
     })
 
+  // 2026년 목표현황 — 계약일 2026년 계약완료 딜 기준 (병상 = 대웅 디바이스, 병원 = 중복 제거) (2026-08-18)
+  const TARGET_YEAR = 2026
+  const yearDeals = completed.filter((d) => d.contractDate?.toISOString().slice(0, 4) === String(TARGET_YEAR))
+  const yearBedsByType = new Map<string, number>()
+  const yearHospByType = new Map<string, Set<string>>()
+  for (const d of yearDeals) {
+    const t = d.hospital.type ?? '미지정'
+    yearBedsByType.set(t, (yearBedsByType.get(t) ?? 0) + (d.daewoongDeviceCount ?? 0))
+    if (!yearHospByType.has(t)) yearHospByType.set(t, new Set())
+    yearHospByType.get(t)!.add(d.hospitalCode)
+  }
+  const bedTargets = await getSalesBedTargets(TARGET_YEAR)
+  const targetDist = TYPE_ORDER.filter((t) => bedTargets[t] !== undefined).map((name) => ({
+    name,
+    targetBeds: bedTargets[name],
+    beds: yearBedsByType.get(name) ?? 0,
+    hospitals: yearHospByType.get(name)?.size ?? 0,
+  }))
+
   // 정산·세금계산서 (계약완료 딜 기준)
   const settleDist = Array.from(countBy(completed, (d) => d.daewoongSettlement).entries()).map(([name, count]) => ({ name, count }))
   const taxDist = Array.from(countBy(completed, (d) => d.daewoongTaxInvoice).entries()).map(([name, count]) => ({ name, count }))
@@ -150,6 +170,7 @@ export default async function SalesDashboardPage() {
     monthly,
     allDeals,
     typeDist,
+    target: { year: TARGET_YEAR, dist: targetDist, canEdit: user ? isAdminOrAbove(user.role) : false },
     settleDist,
     taxDist,
   }
