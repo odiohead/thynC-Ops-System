@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-08-18 | PROD 배포: 영업 대시보드 2026년 목표현황 탭 (커밋 d3f36a9)
+
+- 배포 전 확인: PROD 심평원 연동 잡 running 0건
+- dev2 push → PROD `git pull`(d5c00e9→d3f36a9, 6파일) → 힙 4GB 빌드 → `pm2 restart thync-prod` (신규 패키지·마이그레이션 없음 — 목표는 AppSetting 런타임 저장이라 DDL 불요)
+- 스모크: `/`·`/sales/dashboard`·`/api/settings/sales-targets`·`/hospitals` 307 정상, 외부 HTTPS 307 정상
+- 배포 직후 안내: 목표는 비어 있음 — `/sales/dashboard` 종별 카드 ⚙(ADMIN)에서 2026년 종별 목표 병상수 입력
+- 기존 이슈 위치 특정: PROD 에러 로그의 BigInt 직렬화 오류(8/16 기록 '별도 확인 대상')는 `/api/hospitals/[code]/sales` GET에서 발생 — 이번 배포와 무관, 별도 수정 필요
+
+---
+
 ## 2026-08-18 | 영업 대시보드 '종별 도입 병원' 카드 — 2026년 목표현황 탭 + 목표 설정 (dev2)
 
 - 종별 카드에 탭 2종 신설 (좌상단 아이콘 탭): `종별 도입 병원`(기존 그대로) | `2026년 목표현황`(신규). 카드 우상단 ⚙ 설정 아이콘(ADMIN 이상 표시)으로 종별 목표 병상수 입력 모달
