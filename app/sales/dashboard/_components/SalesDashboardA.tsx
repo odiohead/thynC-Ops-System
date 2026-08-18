@@ -30,6 +30,8 @@ export interface DashboardAData {
   target: {
     year: number
     dist: Array<{ name: string; targetBeds: number; beds: number; hospitals: number }>
+    totalColor: string
+    typeColors: Record<string, string>
     canEdit: boolean
   }
   settleDist: Array<{ name: string; count: number }>
@@ -218,9 +220,11 @@ function TypeDistCard({ typeDist, target, chart }: {
   target: DashboardAData['target']
   chart: ReturnType<typeof useChartTheme>
 }) {
-  const [tab, setTab] = useState<'dist' | 'target'>('dist')
+  const [tab, setTab] = useState<'dist' | 'target'>('target')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const colors = [chart.indigo, chart.blue, '#0ea5e9', chart.emerald, chart.amber, '#64748b']
+  // 종별 색: 설정에서 지정한 색 우선, 미지정은 기본 팔레트 순환 (양쪽 탭 공통)
+  const colorOf = (name: string, i: number) => target.typeColors[name] ?? colors[i % colors.length]
 
   const tabBtn = (active: boolean) =>
     `inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[12px] font-semibold transition-colors ${
@@ -266,7 +270,7 @@ function TypeDistCard({ typeDist, target, chart }: {
           <div className="space-y-2">
             {typeDist.length === 0 && <p className="text-sm text-gray-400">데이터 없음</p>}
             {typeDist.map((t, i) => {
-              const c = colors[i % colors.length]
+              const c = colorOf(t.name, i)
               const pct = t.total > 0 ? (t.count / t.total) * 100 : 0
               const bedPct = t.totalBeds > 0 ? (t.beds / t.totalBeds) * 100 : 0
               return (
@@ -317,9 +321,10 @@ function TypeDistCard({ typeDist, target, chart }: {
               </p>
             ) : (
               <>
-                <TargetRow name="합계" beds={totalBeds} targetBeds={totalTarget} hospitals={totalHosp} color={chart.indigo} bold />
+                {/* 합계 색상은 설정(⚙)에서 변경 가능 */}
+                <TargetRow name="합계" beds={totalBeds} targetBeds={totalTarget} hospitals={totalHosp} color={target.totalColor} bold />
                 {target.dist.map((t, i) => (
-                  <TargetRow key={t.name} name={t.name} beds={t.beds} targetBeds={t.targetBeds} hospitals={t.hospitals} color={colors[i % colors.length]} />
+                  <TargetRow key={t.name} name={t.name} beds={t.beds} targetBeds={t.targetBeds} hospitals={t.hospitals} color={colorOf(t.name, i)} />
                 ))}
               </>
             )}
@@ -331,6 +336,8 @@ function TypeDistCard({ typeDist, target, chart }: {
         <TargetSettingsModal
           year={target.year}
           initial={Object.fromEntries(target.dist.map((t) => [t.name, t.targetBeds]))}
+          initialColor={target.totalColor}
+          initialTypeColors={target.typeColors}
           onClose={() => setSettingsOpen(false)}
         />
       )}
@@ -347,7 +354,10 @@ function TargetRow({ name, beds, targetBeds, hospitals, color, bold }: {
   // 진척률 신호등: 50% 미만 적색 / 100% 미만 주황 / 100% 이상 녹색
   const pctBadge = over ? 'bg-emerald-600 text-white' : pct >= 50 ? 'bg-amber-500 text-white' : 'bg-red-600 text-white'
   return (
-    <div className={`relative overflow-hidden rounded-lg px-3 py-2 ${bold ? 'bg-indigo-50/60 dark:bg-indigo-900/20' : 'bg-gray-50 dark:bg-gray-800/40'}`}>
+    <div
+      className={`relative overflow-hidden rounded-lg px-3 py-2 ${bold ? '' : 'bg-gray-50 dark:bg-gray-800/40'}`}
+      style={bold ? { backgroundColor: `${color}14` } : undefined}
+    >
       {/* 진척률 배경 게이지 (표시는 100% 캡, 라벨은 초과분 그대로) */}
       <div className="absolute inset-y-0 left-0 opacity-15" style={{ width: `${Math.max(Math.min(pct, 100), 1.5)}%`, backgroundColor: color }} />
       <div className="relative flex items-center justify-between">
@@ -379,18 +389,59 @@ function TargetRow({ name, beds, targetBeds, hospitals, color, bold }: {
 /** 종별 목표 병상수 설정 모달 — 빈칸 = 목표 없음, 저장은 ADMIN 이상 (PUT /api/settings/sales-targets) */
 const TARGET_TYPE_ORDER = ['상급종합', '종합병원', '병원', '요양병원', '정신병원', '치과병원', '한방병원', '의원', '치과의원', '한의원']
 
-function TargetSettingsModal({ year, initial, onClose }: {
+/** 색상 프리셋 20색 — 무지개 순 (합계·종별 공용) */
+const COLOR_PRESETS = [
+  '#dc2626', '#e11d48', '#db2777', '#c026d3', '#9333ea',
+  '#7c3aed', '#4f46e5', '#2563eb', '#0ea5e9', '#0891b2',
+  '#0d9488', '#059669', '#16a34a', '#65a30d', '#ca8a04',
+  '#d97706', '#ea580c', '#78716c', '#64748b', '#334155',
+]
+
+const TOTAL_KEY = '__total__' // 색상 팝오버에서 합계 행 식별자
+
+function TargetSettingsModal({ year, initial, initialColor, initialTypeColors, onClose }: {
   year: number
   initial: Record<string, number>
+  initialColor: string
+  initialTypeColors: Record<string, string>
   onClose: () => void
 }) {
   const router = useRouter()
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(TARGET_TYPE_ORDER.map((t) => [t, initial[t] !== undefined ? String(initial[t]) : '']))
   )
+  const [color, setColor] = useState(initialColor)
+  const [typeColors, setTypeColors] = useState<Record<string, string>>(initialTypeColors)
+  const [pickerFor, setPickerFor] = useState<string | null>(null) // TOTAL_KEY 또는 종별명
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   useOverlayDismiss(true, onClose)
+
+  /** 색 선택 적용 — null이면 기본 팔레트로 되돌림 (합계는 기본색) */
+  const applyColor = (c: string | null) => {
+    if (pickerFor === TOTAL_KEY) setColor(c ?? '#c026d3')
+    else if (pickerFor) {
+      setTypeColors((prev) => {
+        const next = { ...prev }
+        if (c) next[pickerFor] = c
+        else delete next[pickerFor]
+        return next
+      })
+    }
+    setPickerFor(null)
+  }
+
+  /** 색상 도트 버튼 — 클릭 시 팔레트 팝오버 */
+  const colorDot = (key: string, current: string | undefined, label: string) => (
+    <button
+      type="button"
+      onClick={() => setPickerFor(pickerFor === key ? null : key)}
+      className={`h-5 w-5 shrink-0 rounded-full border transition-transform hover:scale-110 ${current ? 'border-gray-300 dark:border-gray-600' : 'border-dashed border-gray-400'}`}
+      style={current ? { backgroundColor: current } : undefined}
+      title={current ? `${label} 색상: ${current}` : `${label} 색상: 기본`}
+      aria-label={`${label} 색상 선택`}
+    />
+  )
 
   const save = async () => {
     const targets: Record<string, number> = {}
@@ -409,7 +460,7 @@ function TargetSettingsModal({ year, initial, onClose }: {
       const res = await fetch('/api/settings/sales-targets', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ year, targets }),
+        body: JSON.stringify({ year, targets, totalColor: color, typeColors }),
       })
       if (!res.ok) {
         const d = await res.json().catch(() => null)
@@ -428,11 +479,22 @@ function TargetSettingsModal({ year, initial, onClose }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl dark:bg-gray-900" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-semibold text-gray-900">{year}년 종별 목표 병상수 설정</h3>
-        <p className="mt-0.5 text-[11px] text-gray-400">빈칸 = 목표 없음 (목표현황 탭에서 제외)</p>
+        <p className="mt-0.5 text-[11px] text-gray-400">빈칸 = 목표 없음 (목표현황 탭에서 제외) · ● 클릭 = 그래프 색상 변경</p>
         <div className="mt-3 max-h-[55vh] space-y-1.5 overflow-auto pr-1">
+          {/* 합계 행 색상 */}
+          <div className="flex items-center justify-between gap-3 border-b border-gray-100 pb-1.5 dark:border-gray-800">
+            <span className="inline-flex items-center gap-2 text-[13px] font-semibold text-gray-900">
+              {colorDot(TOTAL_KEY, color, '합계')}
+              합계
+            </span>
+            <span className="text-[11px] text-gray-400">색상만 설정</span>
+          </div>
           {TARGET_TYPE_ORDER.map((t) => (
-            <label key={t} className="flex items-center justify-between gap-3">
-              <span className="text-[13px] text-gray-700">{t}</span>
+            <div key={t} className="flex items-center justify-between gap-3">
+              <span className="inline-flex items-center gap-2 text-[13px] text-gray-700">
+                {colorDot(t, typeColors[t], t)}
+                {t}
+              </span>
               <input
                 type="number"
                 min={0}
@@ -442,9 +504,52 @@ function TargetSettingsModal({ year, initial, onClose }: {
                 onChange={(e) => setValues((v) => ({ ...v, [t]: e.target.value }))}
                 className="w-32 rounded-md border border-gray-300 px-2 py-1 text-right text-[13px] tabular-nums focus:border-blue-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800"
               />
-            </label>
+            </div>
           ))}
         </div>
+        {pickerFor && (
+          <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/60">
+            <p className="text-[12px] font-medium text-gray-700">
+              {pickerFor === TOTAL_KEY ? '합계' : pickerFor} 그래프 색상
+            </p>
+            <div className="mt-1.5 grid grid-cols-10 gap-1.5">
+              {COLOR_PRESETS.map((c) => {
+                const selected = (pickerFor === TOTAL_KEY ? color : typeColors[pickerFor]) === c
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => applyColor(c)}
+                    className={`h-6 w-6 rounded-full border-2 transition-transform hover:scale-110 ${selected ? 'border-gray-900 dark:border-white' : 'border-transparent'}`}
+                    style={{ backgroundColor: c }}
+                    aria-label={`색상 ${c}`}
+                    title={c}
+                  />
+                )
+              })}
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                type="color"
+                value={(pickerFor === TOTAL_KEY ? color : typeColors[pickerFor]) ?? '#c026d3'}
+                onChange={(e) => applyColor(e.target.value)}
+                className="h-6 w-8 cursor-pointer rounded border border-gray-300 bg-transparent p-0 dark:border-gray-700"
+                title="직접 선택"
+                aria-label="색상 직접 선택"
+              />
+              <span className="text-[11px] text-gray-400">직접 선택</span>
+              {pickerFor !== TOTAL_KEY && (
+                <button
+                  type="button"
+                  onClick={() => applyColor(null)}
+                  className="ml-auto rounded-md border border-gray-300 px-2 py-0.5 text-[11px] text-gray-500 transition-colors hover:bg-gray-100 dark:border-gray-600"
+                >
+                  기본색으로
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {error && <p className="mt-2 text-[12px] text-red-600">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-md border border-gray-300 px-3 py-1.5 text-[13px] text-gray-600 transition-colors hover:bg-gray-50">취소</button>

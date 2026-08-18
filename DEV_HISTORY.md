@@ -20,6 +20,7 @@
 - 목표현황 탭: **계약일 2026년 계약완료 딜** 기준(사용자 확정 — KPI와 동일 축) — 병상(대웅 디바이스 합)이 메인으로 목표 대비 진척률 게이지·% 배지(초과 시 105%처럼 그대로 표기 + 에메랄드 '달성' 배지, 게이지는 100% 캡), 병원 수(중복 제거)는 실적 서브 표시. 목표 입력된 종별만 + 최상단 합계 행 (사용자 확정)
 - 저장: AppSetting `sales_bed_targets_2026`(JSON, 연도별 키 — `lib/salesTargets.ts` 단일 소스: 종별 화이트리스트·정수 검증·조회). API `GET/PUT /api/settings/sales-targets`(열람 영업 게이트 / 수정 ADMIN 이상 + 감사 로그). 저장 후 `router.refresh()`
 - **진척률 신호등 (추가 요청)**: % 배지 색상 — 50% 미만 적색 / 50~100% 미만 주황 / 100% 이상 녹색('달성')
+- **추가 수정 (클레임 반영)**: 카드 기본 탭을 '2026년 목표현황'으로 변경 · 합계가 첫 종별 행(상급종합 indigo)과 동일색이던 문제 → **설정 모달에 그래프 색상 지정 기능** — 합계 + **종별 각각** 색상 도트(●) 클릭 → 프리셋 20색(무지개 순) + 컬러 피커 + '기본색으로' 리셋. 저장 형식 `{ targets, totalColor, typeColors }`로 확장(구 flat JSON 하위호환), 종별 지정색은 '종별 도입 병원' 탭에도 공통 적용, 합계 행 배경 틴트도 선택색 연동
 - 검증: tsc 0오류 · dev2 빌드·PM2 재시작·`/sales/dashboard` 307 스모크
 - 위키 청크 P2002 점검: 전 시퀀스 81개 last_value ≥ max(id) 정합 확인 — 실패 insert도 시퀀스를 소모해 자가 복구된 과거 이력(8/10)으로 판명, stale 페이지 0건 (보정 불필요)
 - 영향 파일: lib/salesTargets.ts(신규), app/api/settings/sales-targets/route.ts(신규), app/sales/dashboard/page.tsx, app/sales/dashboard/_components/SalesDashboardA.tsx, README.md

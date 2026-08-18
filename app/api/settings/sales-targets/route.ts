@@ -5,10 +5,12 @@ import { checkSalesAccess } from '@/lib/sales'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import {
   SALES_TARGET_TYPE_ORDER,
-  getSalesBedTargets,
+  getSalesTargetSettings,
   parseSalesTargetYear,
   salesTargetKey,
   sanitizeSalesTargets,
+  sanitizeTotalColor,
+  sanitizeTypeColors,
 } from '@/lib/salesTargets'
 
 export const dynamic = 'force-dynamic'
@@ -25,7 +27,8 @@ export async function GET(request: NextRequest) {
   if (denial) return NextResponse.json({ error: denial.error }, { status: denial.status })
 
   const year = parseSalesTargetYear(request.nextUrl.searchParams.get('year')) ?? 2026
-  return NextResponse.json({ year, targets: await getSalesBedTargets(year), types: SALES_TARGET_TYPE_ORDER })
+  const settings = await getSalesTargetSettings(year)
+  return NextResponse.json({ year, ...settings, types: SALES_TARGET_TYPE_ORDER })
 }
 
 export async function PUT(request: NextRequest) {
@@ -37,13 +40,16 @@ export async function PUT(request: NextRequest) {
   const year = parseSalesTargetYear(body?.year) ?? 2026
   const targets = sanitizeSalesTargets(body?.targets)
   if (!targets) return NextResponse.json({ error: '잘못된 목표 값입니다. (종별별 0 이상 정수)' }, { status: 400 })
+  const before = await getSalesTargetSettings(year)
+  const totalColor = sanitizeTotalColor(body?.totalColor) ?? before.totalColor
+  const typeColors = body?.typeColors === undefined ? before.typeColors : sanitizeTypeColors(body.typeColors)
+  const settings = { targets, totalColor, typeColors }
 
   const key = salesTargetKey(year)
-  const before = await getSalesBedTargets(year)
   await prisma.appSetting.upsert({
     where: { key },
-    update: { value: JSON.stringify(targets) },
-    create: { key, value: JSON.stringify(targets) },
+    update: { value: JSON.stringify(settings) },
+    create: { key, value: JSON.stringify(settings) },
   })
 
   await logAudit({
@@ -54,7 +60,7 @@ export async function PUT(request: NextRequest) {
     resourceId: key,
     resourceLabel: `${year}년 종별 목표 병상수`,
     before,
-    after: targets,
+    after: settings,
   })
-  return NextResponse.json({ year, targets })
+  return NextResponse.json({ year, ...settings })
 }

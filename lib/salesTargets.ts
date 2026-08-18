@@ -28,12 +28,46 @@ export function sanitizeSalesTargets(raw: unknown): Record<string, number> | nul
   return out
 }
 
-export async function getSalesBedTargets(year: number): Promise<Record<string, number>> {
+/** 합계 행 그래프 색상 기본값 (설정에서 변경 가능) */
+export const DEFAULT_TOTAL_COLOR = '#c026d3'
+
+export type SalesTargetSettings = {
+  targets: Record<string, number>
+  totalColor: string
+  typeColors: Record<string, string> // 종별별 그래프 색 (미지정 종별은 기본 팔레트)
+}
+
+export function sanitizeTotalColor(v: unknown): string | null {
+  return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : null
+}
+
+/** 종별 색상 맵 — 화이트리스트 밖 종별·hex 형식 위반 항목은 버린다 */
+export function sanitizeTypeColors(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: Record<string, string> = {}
+  for (const [type, v] of Object.entries(raw as Record<string, unknown>)) {
+    const c = sanitizeTotalColor(v)
+    if (SALES_TARGET_TYPE_ORDER.includes(type) && c) out[type] = c
+  }
+  return out
+}
+
+/** 저장 형식 호환: 구(flat targets JSON) / 신({ targets, totalColor }) 모두 해석 */
+export async function getSalesTargetSettings(year: number): Promise<SalesTargetSettings> {
+  const fallback: SalesTargetSettings = { targets: {}, totalColor: DEFAULT_TOTAL_COLOR, typeColors: {} }
   const row = await prisma.appSetting.findUnique({ where: { key: salesTargetKey(year) } })
-  if (!row?.value) return {}
+  if (!row?.value) return fallback
   try {
-    return sanitizeSalesTargets(JSON.parse(row.value)) ?? {}
+    const raw = JSON.parse(row.value)
+    if (raw && typeof raw === 'object' && 'targets' in raw) {
+      return {
+        targets: sanitizeSalesTargets(raw.targets) ?? {},
+        totalColor: sanitizeTotalColor(raw.totalColor) ?? DEFAULT_TOTAL_COLOR,
+        typeColors: sanitizeTypeColors(raw.typeColors),
+      }
+    }
+    return { ...fallback, targets: sanitizeSalesTargets(raw) ?? {} }
   } catch {
-    return {}
+    return fallback
   }
 }

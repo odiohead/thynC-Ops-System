@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers'
 import { verifyToken, isAdminOrAbove } from '@/lib/auth'
 import { canAccessSales } from '@/lib/sales'
-import { getSalesBedTargets } from '@/lib/salesTargets'
+import { getSalesTargetSettings } from '@/lib/salesTargets'
 import { prisma } from '@/lib/prisma'
 import SalesConceptTabs from '../_components/SalesConceptTabs'
 import SalesDashboardA, { type DashboardAData } from './_components/SalesDashboardA'
@@ -143,7 +143,7 @@ export default async function SalesDashboardPage() {
     if (!yearHospByType.has(t)) yearHospByType.set(t, new Set())
     yearHospByType.get(t)!.add(d.hospitalCode)
   }
-  const bedTargets = await getSalesBedTargets(TARGET_YEAR)
+  const { targets: bedTargets, totalColor, typeColors } = await getSalesTargetSettings(TARGET_YEAR)
   const targetDist = TYPE_ORDER.filter((t) => bedTargets[t] !== undefined).map((name) => ({
     name,
     targetBeds: bedTargets[name],
@@ -170,7 +170,7 @@ export default async function SalesDashboardPage() {
     monthly,
     allDeals,
     typeDist,
-    target: { year: TARGET_YEAR, dist: targetDist, canEdit: user ? isAdminOrAbove(user.role) : false },
+    target: { year: TARGET_YEAR, dist: targetDist, totalColor, typeColors, canEdit: user ? isAdminOrAbove(user.role) : false },
     settleDist,
     taxDist,
   }
