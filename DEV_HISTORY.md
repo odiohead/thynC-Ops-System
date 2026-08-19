@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-08-19 | PROD 배포: 주간업무 관리툴 `/weekly` 신설 (커밋 1fc2964)
+
+- 배포 전 확인: PROD 심평원 연동 잡 running 0건
+- dev2 push → PROD `git pull`(aef2aec→1fc2964, 24파일) → `npx prisma migrate deploy`(weekly 마이그레이션 3건 적용 — weekly_items·weekly_item_updates·weekly_week_notes, 최종 스키마에 biz_type·owner_team_id 포함/project_code 부재 확인) → `prisma generate` → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- 신규 패키지·시드 없음 (nav 미등록 기능 — nav_menu_items 시드 불필요, 담당 팀은 기존 SEERS departments 재사용)
+- 스모크: `/`·`/weekly`·`/hospitals`·`/api/weekly/board` 로컬 307 정상, 외부 HTTPS(`ops.seersthync.com`) 307 정상. 에러 로그 신규 발생 0건 (로그 말미 BigInt 건은 8/16 기록된 기존 `/api/hospitals/[code]/sales` 이슈 — 이번 배포 무관, 별도 수정 대상 유지)
+- 배포 직후 안내: `/weekly`는 nav에 없음 — URL 직접 진입, SEERS 소속 로그인 계정만 접근 가능 (VIEWER는 조회 전용)
+
+---
+
 ## 2026-08-19 | 주간업무 관리툴 개정 — 안건 워딩·담당 팀·업무구분 + 프로젝트 연결 제거 (dev2)
 
 - 1차 검토 피드백 반영: ① '주요 프로젝트' → **'주요 안건'** (라벨만 — DB kind 'PROJECT' 유지, 보드 컬럼 '항목'→'안건') ② 주간 특이사항 섹션 보드 **최하단** 이동 ③ 추가 행 날짜 input에 '목표일' 라벨 ④ 기존 운영 시스템 **프로젝트 연결 제거** (weekly_items.project_code DROP — 쟁점 H 번복, 관련 DTO·API·UI·masters 정리) ⑤ '배경 설명' → '설명 (안건의 기본 정보)'
