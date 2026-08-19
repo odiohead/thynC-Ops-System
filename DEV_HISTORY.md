@@ -4,6 +4,49 @@
 
 ---
 
+## 2026-08-19 | 주간업무 관리툴 개정 — 안건 워딩·담당 팀·업무구분 + 프로젝트 연결 제거 (dev2)
+
+- 1차 검토 피드백 반영: ① '주요 프로젝트' → **'주요 안건'** (라벨만 — DB kind 'PROJECT' 유지, 보드 컬럼 '항목'→'안건') ② 주간 특이사항 섹션 보드 **최하단** 이동 ③ 추가 행 날짜 input에 '목표일' 라벨 ④ 기존 운영 시스템 **프로젝트 연결 제거** (weekly_items.project_code DROP — 쟁점 H 번복, 관련 DTO·API·UI·masters 정리) ⑤ '배경 설명' → '설명 (안건의 기본 정보)'
+- 신규 파라미터: **담당 팀**(`owner_team_id` → departments FK, masters에 SEERS 부서) + **업무구분**(`biz_type` — 'thynC'/'mobiCARE'/'공통' 코드 상수, 기본 공통, 색 배지). 보드·병원별·아카이브 컬럼, 추가 행·상세 모달 select 반영
+- 마이그레이션 `20260819171543_weekly_items_revise` (수동 패턴, dev2 적용 — 기존 2행 biz_type '공통' 백필 무손실)
+- 배포 전 검증(2렌즈): 스크래치 DB에 weekly 마이그레이션 3건 순서 replay 성공 실증(PROD 최초 배포 대비), dev DB·schema·SQL 3자 정합, 계약 왕복(생성→조회→수정) 실증. 지적 반영 — ownerTeamId 불량값 400(무시→해제되던 비대칭), isYmd 달력 무효 일자('2026-02-31' 롤오버) 거부
+- 영향 파일: prisma/schema.prisma, prisma/migrations/20260819171543_*/(신규), lib/weekly.ts, app/api/weekly/(shared·items·items/[id]·masters), app/weekly/(page·AddItemRow·ItemDetailModal), README.md, projects/weekly_ops_design.md
+
+---
+
+## 2026-08-19 | 주간업무 관리툴 1차 검토 반영 — 입력 버그 수정 + 주간 특이사항 보드 (dev2)
+
+- **입력 버그 진단**: API·DB는 정상(항목 1건 실제 저장 확인). 원인은 UI — ① 병원 선택이 3,600건 검색 불가 일반 select(사용자가 가나다 첫 항목 '123내과의원'으로 겨우 테스트한 정황), ② 타이핑마다 페이지 전체(3,600 option 포함) 리렌더로 한글 IME 버벅임
+- **수정**: `SearchSelect`(검색형 콤보박스 — 필터 50건 표시, 항목 추가 행·상세 모달의 병원/프로젝트에 적용) 신설 + 입력 상태를 로컬 컴포넌트로 분리(`AddItemRow`·`CellEditor` — 키 입력이 보드 리렌더를 유발하지 않음)
+- **주간 특이사항 보드 (사용자 요청)**: 구 '주간 리뷰 메모(주차당 1건)'를 **주차별 N건 자유 기재 엔트리 보드**로 개정 — "엄격한 레코드가 아니라 그 주에 말할 컨텐츠" 수용처. 보드 최상단 섹션, 작성자 표기, 추가/수정/삭제. 마이그레이션 `20260819152518_weekly_notes_entries`(UNIQUE 해제·created_by 추가), API `POST /api/weekly/notes`·`PUT/DELETE /notes/[id]`(구 week-note 라우트 삭제), board 응답 `weekNotes` 배열
+- **2차 적대적 검증 반영**: (blocker) 추가 행 SearchSelect 드롭다운이 테이블 overflow-x-auto 래퍼에 세로 클리핑 → AddItemRow를 래퍼 밖 div로 이동 / (major) 드롭다운 Escape가 모달까지 닫음 → stopPropagation, 스크롤바 클릭 시 blur 닫힘 → 컨테이너 onMouseDown preventDefault / (minor) 전 mutation try-finally(busy 고착 방지)+세션만료 redirect 가드, 주차 전환 중 stale 보드 표시 차단(board.week 일치 시만 렌더), 저장 완료 후 에디터 닫기(stale 재편집 방지), CellEditor IME Escape 가드
+- 검증: tsc 0오류·빌드·PM2 재시작·비로그인 307 + **인증 스모크**(테스트 서명 JWT, dev 전용 — 고윤서 계정 명의로 특이사항 생성/수정/보드 조회/삭제 왕복 성공, 테스트 데이터 정리·감사로그에 흔적 잔존). git push·PROD 미반영
+- 영향 파일: app/weekly/_components/SearchSelect·AddItemRow·CellEditor·NotesSection(신규 4), page.tsx·ItemDetailModal.tsx, app/api/weekly/notes(신규 2)·board·(week-note 삭제), lib/weekly.ts, prisma/schema.prisma, prisma/migrations/20260819152518_*/, README.md, projects/weekly_ops_design.md
+
+---
+
+## 2026-08-19 | 주간업무 관리툴 드래프트 구현 — `/weekly` (dev2 반영, 1차 검토 대기)
+
+- 설계 확정(쟁점 A~H 전부 추천안 채택 — SEERS 게이트·2섹션 고정·단일 담당·우선순위 없음·plain text·주간 메모 포함·회의 주 기록 규약·프로젝트 연결 포함) 후 P1+P2 드래프트 구현
+- DB: 마이그레이션 `20260819144024_weekly_ops` (수동 패턴, dev2 적용) — weekly_items·weekly_item_updates(UNIQUE(item_id, week_start))·weekly_week_notes. Prisma 모델 3종 + User(4)·Hospital·Project 역방향 relation
+- lib: `lib/weekly.ts`(kind/status 상수·주차 유틸·API DTO 계약 — 클라이언트 안전) + `lib/weeklyAccess.ts`(checkWeeklyAccess — SEERS 실시간 조회, 쓰기 USER 이상)
+- API 7파일: board(주차 통합)·items(+[id] complete/reopen/move/필드·[id]/update upsert)·week-note·masters + shared(DTO 조립). 전 mutation 감사 로그, 미래 주 완료 400
+- 화면: `/weekly` (nav 미등록·일반 셸) — 주간 보드(주차 네비·?week= 동기화·지난주|금주 병렬·셀 인라인 편집·amber 미업데이트 강조·↑↓ 정렬·인라인 추가·완료 confirm 주차 귀속·주간 메모 접이식) + 병원별 탭(완료 포함 토글) + 완료 아카이브 탭 + 항목 상세 모달(타임라인·완료/재개/삭제)
+- 적대적 리뷰(정확성·컨벤션·UX 3렌즈) 반영: ↑↓ 이동 경계를 서버 move와 동일 목록(같은 kind·미완료·필터 미적용) 기준으로 통일 + 담당 필터 중 숨김, 모달 완료도 보드 조회 주차로 귀속, 미래 주 완료 차단(서버 400+버튼 숨김), 세션 만료 redirect 가드, 주차 빠른 전환 race 시퀀스 가드, Enter 연타/IME 중복 생성 방지, 완료 행 셀 편집 차단, 병원 그룹 key 등
+- 검증: tsc 0오류(힙 4GB) · 빌드 · Prisma 왕복 스모크(생성·upsert·보드 필터·CASCADE) · PM2 재시작 · `/weekly`·API 307 스모크. **git push·PROD 미반영** (드래프트 1차 검토용)
+- 영향 파일: prisma/schema.prisma, prisma/migrations/20260819144024_weekly_ops/(신규), lib/weekly.ts·weeklyAccess.ts(신규), app/api/weekly/*(신규 7), app/weekly/page.tsx·_components/ItemDetailModal.tsx(신규), README.md, projects/weekly_ops_design.md·README.md
+
+---
+
+## 2026-08-19 | 주간업무 관리툴 설계안 작성 (구현 미착수 — 검토 대기)
+
+- `projects/weekly_ops_design.md` 신규 — 사업본부 주간 리뷰 도구 `/weekly` (nav 미등록·URL 직접 진입, 기존 계정 인증). 핵심 모델: 지속 항목(weekly_items — 과제/이슈 2섹션) + 주차별 진행 upsert(weekly_item_updates, (item, week) UNIQUE) + 주간 리뷰 메모. 보드는 지난주|금주 진행 병렬 컬럼, 병원별 이슈 뷰·완료 아카이브 탭. 완료 단일 소스 = completed_week(status는 진행/보류 2값). 티켓 파이프라인 미편입·위키 무관(public 신규 테이블) — 기존 기능 중복 검토 포함
+- 코드베이스 조사(인증·중복기능·UI·DB 컨벤션 4영역) + 3관점 적대적 검토(원칙·기술·제품)를 거쳐 확정 이슈 반영 (완료 상태 이중 소스 제거, 상세 API 추가, 기록 시점 규약 명시, 과거 주 렌더 규칙, amber 경고 피로 한정, 시간대 파스 규칙 등)
+- 쟁점 A~H는 사용자 확인 대기 (접근 범위·섹션 구성·담당 단/복수·우선순위·텍스트 형식·주간 메모·기록 시점 규약·프로젝트 연결 v1 포함)
+- 영향 파일: projects/weekly_ops_design.md(신규), projects/README.md(목록 행 추가)
+
+---
+
 ## 2026-08-18 | PROD 배포: 영업 대시보드 2026년 목표현황 탭 (커밋 d3f36a9)
 
 - 배포 전 확인: PROD 심평원 연동 잡 running 0건

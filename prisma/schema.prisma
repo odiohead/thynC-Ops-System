@@ -97,6 +97,7 @@ model Hospital {
   personAffiliations    PersonAffiliation[]
   salesDeals            SalesDeal[]
   salesActivities       SalesActivity[]
+  weeklyItems           WeeklyItem[]
 
   @@map("hospitals")
   @@schema("public")
@@ -311,6 +312,11 @@ model User {
   vocReceiptsCreated        VocReceipt[]                 @relation("VocCreator")
   salesActivities           SalesActivity[]              @relation("SalesActivityAuthor")
   salesOwnedProfiles        HospitalSalesProfile[]       @relation("SalesProfileOwner")
+  weeklyItemsOwned          WeeklyItem[]                 @relation("WeeklyItemOwner")
+  weeklyItemsCreated        WeeklyItem[]                 @relation("WeeklyItemCreator")
+  weeklyUpdatesEdited       WeeklyItemUpdate[]           @relation("WeeklyUpdateEditor")
+  weeklyNotesEdited         WeeklyWeekNote[]             @relation("WeeklyNoteEditor")
+  weeklyNotesAuthored       WeeklyWeekNote[]             @relation("WeeklyNoteAuthor")
 
   @@map("users")
   @@schema("public")
@@ -324,6 +330,7 @@ model Department {
   createdAt      DateTime     @default(now()) @map("created_at")
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   users          User[]
+  weeklyItems    WeeklyItem[]
 
   @@map("departments")
   @@schema("public")
@@ -2301,5 +2308,75 @@ model SalesDealDevice {
 
   @@unique([dealId, deviceInfoId])
   @@map("sales_deal_devices")
+  @@schema("public")
+}
+
+/// 주간업무 관리 항목(안건) (2026-08-19) — 사업본부 주간 리뷰, projects/weekly_ops_design.md
+/// kind·status·bizType 값은 lib/weekly.ts 코드 상수. 완료 여부의 단일 소스는 completedWeek (status는 진행/보류만)
+model WeeklyItem {
+  id            Int       @id @default(autoincrement())
+  kind          String // 'PROJECT'(주요 안건) | 'ISSUE'(주요 이슈)
+  title         String
+  detail        String?   @db.Text
+  status        String    @default("진행") // '진행' | '보류'
+  bizType       String    @default("공통") @map("biz_type") // 'thynC' | 'mobiCARE' | '공통'
+  hospitalCode  String?   @map("hospital_code")
+  ownerTeamId   Int?      @map("owner_team_id") // 담당 팀 (departments)
+  ownerId       String?   @map("owner_id")
+  targetDate    DateTime? @map("target_date") @db.Date
+  completedWeek DateTime? @map("completed_week") @db.Date // 완료 주차(월요일) — NULL이면 미완료
+  completedAt   DateTime? @map("completed_at")
+  sortOrder     Int       @default(0) @map("sort_order")
+  createdById   String?   @map("created_by")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  hospital  Hospital?   @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: SetNull)
+  ownerTeam Department? @relation(fields: [ownerTeamId], references: [id], onDelete: SetNull)
+  owner     User?       @relation("WeeklyItemOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdBy User?       @relation("WeeklyItemCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updates   WeeklyItemUpdate[]
+
+  @@index([kind])
+  @@index([hospitalCode])
+  @@index([status])
+  @@map("weekly_items")
+  @@schema("public")
+}
+
+/// 주간업무 항목 × 주차별 진행 기록 — (item, week) 당 1건 upsert
+model WeeklyItemUpdate {
+  id          Int      @id @default(autoincrement())
+  itemId      Int      @map("item_id")
+  weekStart   DateTime @map("week_start") @db.Date // 주차 키(월요일)
+  content     String   @db.Text
+  updatedById String?  @map("updated_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  item      WeeklyItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  updatedBy User?      @relation("WeeklyUpdateEditor", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([itemId, weekStart])
+  @@index([weekStart])
+  @@map("weekly_item_updates")
+  @@schema("public")
+}
+
+/// 주간 특이사항 — 주차별 N건 자유 기재 엔트리 (2026-08-19 보드 전환 — 구 주차당 1건 리뷰 메모)
+model WeeklyWeekNote {
+  id          Int      @id @default(autoincrement())
+  weekStart   DateTime @map("week_start") @db.Date
+  content     String   @default("") @db.Text
+  createdById String?  @map("created_by")
+  updatedById String?  @map("updated_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  createdBy User? @relation("WeeklyNoteAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User? @relation("WeeklyNoteEditor", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([weekStart])
+  @@map("weekly_week_notes")
   @@schema("public")
 }

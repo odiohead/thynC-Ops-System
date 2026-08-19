@@ -22,6 +22,7 @@
 | [cs_ticket_workflow_design.md](cs_ticket_workflow_design.md) · [HTML](cs_ticket_workflow_design.html) | CS 티켓 워크플로 — 도메인 어댑터 레지스트리(편입 플러그인화)·신규 도메인 VOC접수(CS 마스터 티켓)·하위 도메인 티켓 생성 (P0~P3, 콜기록지는 2026-08-15 개정으로 제거) | **구현 완료 (dev2, 2026-08-15 개정 반영) — PROD 미반영** |
 | [sales_dashboard_map_design.md](sales_dashboard_map_design.md) | 영업 대시보드(지도) — `/sales/dashboard_map` 7개 권역 지도(muted-earth 베이스맵)+표+드릴다운·종별 필터·막대 3모드, koreaGeo.ts 재생성 절차 포함 | **완료 (PROD 배포 2026-08-15)** |
 | [hospitals_erd.html](hospitals_erd.html) | **참조 문서** (설계안 아님) — 병원(hospitals) 관련 테이블 ERD + 컬럼 상세 명세 (hira/meta/devices/intro_types/대웅배정/영업프로필 + 참조 업무 테이블 요약) | 참조용 (2026-08-16 작성, 스키마 변경 시 갱신) |
+| [weekly_ops_design.md](weekly_ops_design.md) | 주간업무 관리툴 — `/weekly` (nav 미등록·URL 직접 진입) 사업본부 주간 리뷰: 지속 항목 + 주차별 진행 upsert(지난주\|금주 병렬 보드), 병원별 이슈 뷰, 완료 아카이브, 티켓 미편입 | **1차 검토 반영 완료 (dev2, 2026-08-19 — 특이사항 보드·검색 셀렉트·안건 개정) — PROD 배포 진행** |
 
 ## 루트에 남아 있는 1.0 문서
 

@@ -153,6 +153,7 @@ app/
 │   │   ├── sync/                     # 심평원 연동 (POST: 백그라운드 시작, GET: 히스토리 목록)
 │   │   │   └── [id]/                 # 연동 잡 상세 + 로그
 │   │   └── detail-sync/              # 병원상세정보연동 (POST: 종별 선택 → 허가병상수 갱신, 백그라운드)
+│   ├── weekly/                       # 주간업무 관리 (2026-08-19) — board(주차 통합)·items(+[id]/update)·notes(특이사항)·masters (SEERS 게이트)
 │   └── drive/                        # Google Drive 연동 (파일 업로드/목록/삭제/병원목록 내보내기)
 ├── (대시보드)/                        # 메인 대시보드 (이번 주/다음 주 공사 현황)
 ├── dashboard/                        # 사이니지 월보드 (50인치 상시 표시, 네비 없음)
@@ -174,6 +175,7 @@ app/
 │   └── mobile/                       # 빠른 예약·반납 모바일 페이지 (가능 차량 실시간 검색 + 인라인 반납)
 ├── sales/                            # 영업현황 (ADMIN+SEERS) — dashboard/(대시보드 A·실적, 메인) + deals/(도입현황 — 엑셀 B~AK 표·등록 모달, [id] 딜 상세 편집) + dashboard_map/(지역별 도입현황 지도 — 7개 권역 SVG 지도+표+드릴다운) + page.tsx(→ dashboard 리다이렉트) + _components/SalesConceptTabs(탭 3개)
 ├── parking/                          # 주차 웹할인 등록 (차량 검색 → 계정별 할인권 → 등록, nav 미등록)
+├── weekly/                           # 주간업무 관리 (사업본부 주간 리뷰 — nav 미등록·URL 직접 진입, SEERS) + _components/(ItemDetailModal·SearchSelect·AddItemRow·CellEditor·NotesSection)
 ├── ai-assistant/                     # AI 어시스턴트 채팅
 ├── wiki/                             # 사내 위키 (Phase 2-3)
 │   ├── layout.tsx                    # 사이드바 + 콘텐츠 flex 레이아웃 (모든 /wiki/* 적용)
@@ -245,6 +247,8 @@ lib/
 ├── consultation.ts                   # 상담이력 — 조회 권한(SEERS)·코드 발번(CS-YYYYMM-NNNN)·제목 추출
 ├── sales.ts                          # 영업/CRM v3 — 접근 권한(checkSalesAccess: ADMIN+SEERS)·딜 코드 발번(DEAL-YYYYMM-NNNN)·금액/날짜 파서·코드 3카테고리
 ├── salesTargets.ts                   # 영업 연도별 종별 목표 병상수 — AppSetting 키·검증·조회 (영업 대시보드 목표현황 탭)
+├── weekly.ts                         # 주간업무 관리 — kind/status 상수·주차 유틸·API DTO 계약 (클라이언트 안전)
+├── weeklyAccess.ts                   # 주간업무 접근 게이트 (checkWeeklyAccess: SEERS 소속 + 쓰기는 USER 이상)
 ├── parking.ts                        # 주차 웹할인 — pweb.kr 대행 클라이언트 (env 계정, 로그인→검색→할인권 조회→등록)
 ├── auth.ts                           # JWT 인증 유틸리티 + 역할 헬퍼
 ├── permissions.ts                    # RBAC Lite 권한 키 카탈로그 (단일 소스 — 라벨·모듈 그룹, 클라이언트 안전)
@@ -619,6 +623,12 @@ prisma/
 - `SALES_STAGE`(단계 7종, 색상)·`SALES_DEAL_STATUS`(딜 상태 3종, 색상)·`SALES_MODEL`(판매모델 4종)·`SALES_TAX_INVOICE`(3종)·`SALES_SETTLEMENT`(3종)·`SALES_ACTIVITY_TYPE`(5종)·`PERSON_GROUP`(직군 7종)
 - 시드: `scripts/seed-sales-masters.sql` (idempotent — 코드 27행 + nav 2행: `/settings/sales-codes`·`/sales`)
 
+### WeeklyItem / WeeklyItemUpdate / WeeklyWeekNote (주간업무 관리 — 2026-08-19, `projects/weekly_ops_design.md`)
+- **WeeklyItem** (`weekly_items`): 사업본부 주간 리뷰 관리 항목(지속 레코드) — kind(`PROJECT`=주요 안건/`ISSUE`=주요 이슈)·title·detail(설명)·status(`진행`/`보류`)·bizType(`thynC`/`mobiCARE`/`공통` — 코드 상수 `lib/weekly.ts`)·병원/담당 팀(departments)/담당 FK(선택, SET NULL)·targetDate·`completedWeek`(**완료 여부 단일 소스** — 완료 주차 월요일 DATE, NULL이면 미완료)·completedAt·sortOrder·createdBy. 구 project_code 연결은 2026-08-19 1차 검토에서 제거(`20260819171543_weekly_items_revise`)
+- **WeeklyItemUpdate** (`weekly_item_updates`): 항목×주차별 진행 기록 — `UNIQUE(item_id, week_start)` 주차당 1건 upsert, content TEXT, 항목 삭제 시 CASCADE
+- **WeeklyWeekNote** (`weekly_week_notes`): 주간 특이사항 — 주차별 N건 자유 기재 엔트리 (week_start INDEX, created_by/updated_by — 2026-08-19 1차 검토에서 주차당 1건 메모에서 개정)
+- 티켓 파이프라인 미편입(경영 리뷰 레이어) — ticket_status 매핑·어댑터 비대상
+
 ### Vehicle (법인차량)
 - 차량예약에 사용되는 차량 마스터
 - `name` (표시 이름), `plateNumber` (차량번호, UNIQUE), `model`, `seatCount`, `color` (보드 표시 색), `memo`
@@ -965,6 +975,13 @@ prisma/
 - **자동 계산·등록**: 주차시간 기반 무료+유료 최적 조합 미리보기(plan) → 순차 등록(auto-apply). 커버 목표 = 주차시간 + **출차 여유 10분**, 차감(부과) 대상 = 목표 − **기본 무료 30분** − 기적용분 (2026-08-03). 무료권 우선, 잔여는 903 계정 유료권 DP 최소비용 커버
 - **재입차 무료권 차단 (2026-08-04)**: 사이트 규칙상 한 차량이 그날 무료권을 쓰면 출차 후 재입차해도 무료권을 다시 못 쓴다. 입차 차량 검색은 '현재 주차 중'만 반환해 이전 입차건이 안 보이므로, **할인등록현황(`/state/doListMst`, `account_no=''` → 전 호실·출차분 포함)** 을 조회해 판정 — 이번 입차건과 `entry_date`가 다른 무료 등록이 우리 계정(`PARKING_ACCOUNTS`)에 있으면 `freeBlocked`. 자동계산은 무료를 빼고 전부 유료로 커버하고, 수동 무료 버튼은 비활성화되며 유료 게이트(`paidUnlocked`)는 즉시 해제된다. 타 입주사 계정의 무료권은 재사용 사례가 확인되어 판정에서 제외. 이력 조회 실패 시 차단하지 않음(fail-open). **판정은 입차 달력일 기준(2026-08-07)** — 사이트 영업일이 실제 날짜를 지연 추적해(13시에도 전날 표시 실측) 전날 입차건 무료권이 새 날짜 입차를 차단하던 오판(47서1581) 수정: 현재 입차건과 같은 입차일(YYYYMMDD) 이력만 차단 사유로 인정
 - nav 메뉴 미등록 (URL 직접 접근)
+
+### 주간업무 관리 (`/weekly` — 2026-08-19 드래프트, SEERS 소속 전용·nav 미등록)
+- 사업본부 주간 리뷰 도구 — 관리 항목(**주요 안건**/주요 이슈 2섹션, 업무구분 thynC/mobiCARE/공통·담당 팀·담당·목표일)은 지속 레코드로 유지하고 주차별 진행내용만 쌓는 구조 (스프레드시트 주간 복사 방식 대체, `projects/weekly_ops_design.md`)
+- **주간 보드**: 주차 네비(월요일 시작, `?week=` URL 동기화) + 항목별 [지난주 진행(주차 라벨) | 금주 진행(셀 클릭 인라인 편집, 주차당 1건 upsert)] 병렬 컬럼. 진행·미완료·금주 미입력 항목 amber 강조, 목표일 경과 적색, 섹션 내 ↑↓ 수동 정렬, 인라인 항목 추가(병원은 검색형 SearchSelect — 3,600건 마스터 대응), **주간 특이사항 보드**(주차별 N건 자유 기재·작성자 표기 — 엄격한 관리 항목이 아닌 '그 주에 말할 컨텐츠' 수용처, 보드 최하단 배치)
+- **완료 처리**: 보고 있는 주차로 귀속(completedWeek — 단일 소스, 미래 주 차단) → 해당 주 보드에 취소선·완료 배지 잔류, 다음 주부터 제외, 아카이브 탭에서 재개 가능
+- **병원별 탭**(완료 포함 토글)·**완료 아카이브 탭** + 항목 상세 모달(전 필드 편집·주차별 타임라인·삭제)
+- 접근: 로그인+SEERS 소속 조회, USER 이상 쓰기 (`checkWeeklyAccess` — nav 미등록이므로 API 게이트가 단일 소스)
 
 ### 프로젝트 관리
 - 구축 공사 프로젝트 등록·수정·삭제 (삭제는 ADMIN 이상)
@@ -1501,6 +1518,14 @@ npm run dev
 | POST | `/api/parking/register` | 계정 1개로 할인권 1건 등록 |
 | POST | `/api/parking/plan` | 주차시간 기반 자동 할인권 조합 미리보기 (무료 30분·출차 여유 10분 반영, 읽기 전용) |
 | POST | `/api/parking/auto-apply` | 자동 계산 조합 순차 등록 (무료 먼저 → 903 유료, 실패 시 중단) |
+
+### 주간업무 관리 (2026-08-19 — 조회 SEERS 소속, 쓰기 USER 이상 `checkWeeklyAccess`)
+- `GET /api/weekly/board?week=YYYY-MM-DD` - 주차 통합 조회 (항목+금주/직전 update+주간 메모, week는 월요일만)
+- `GET /api/weekly/items?scope=archive|hospital&includeDone=1` - 아카이브·병원별 뷰 조회
+- `POST /api/weekly/items` - 항목 생성 / `GET·PUT·DELETE /api/weekly/items/[id]` - 상세(updates 전체)·수정(complete/reopen/move/필드 — 미래 주 완료 400)·삭제
+- `PUT /api/weekly/items/[id]/update` - 주차 진행 upsert (빈 content면 삭제)
+- `POST /api/weekly/notes` / `PUT·DELETE /api/weekly/notes/[id]` - 주간 특이사항 엔트리 생성·수정·삭제
+- `GET /api/weekly/masters` - 셀렉트 마스터 (병원·SEERS 활성 사용자·SEERS 부서=담당 팀)
 
 ### HIRA 병원
 | Method | Endpoint | 설명 |
