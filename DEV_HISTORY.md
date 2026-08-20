@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-08-20 | PROD 배포: 주간업무 관리툴 3·4차 개선 (커밋 eb1f6e6)
+
+- 배포 전 확인: PROD 로그 200줄 심평원 활동 0건 (DB 직접 조회는 이 세션 권한 분류기 차단 지속 — 로그 간접 확인)
+- dev2 push → PROD `git pull`(9687546→eb1f6e6, 10파일) → `npx prisma migrate deploy`(`20260820120000_weekly_kind_restructure` 적용 — 데이터 확인: BIZ 2건·OPS 1건으로 변환 완료) → 힙 4GB 빌드 → `pm2 restart thync-prod` (신규 패키지 없음)
+- 스모크: `/`·`/weekly`·`/hospitals` 로컬 307, 외부 HTTPS `/`·`/weekly` 307 정상. 에러 로그 신규 0건 (BigInt 건은 기존 이슈)
+
+---
+
 ## 2026-08-20 | 주간업무 관리툴 4차 개선 — 섹션 3분류·지연 안건 탭·진행 이력 수정 (dev2)
 
 - **섹션 구조 개정**: 주요 안건(PROJECT)/주요 이슈(ISSUE) 2섹션 → **사업(BIZ)/운영(OPS)/개발(DEV) 안건** 3섹션. 마이그레이션 `20260820120000_weekly_kind_restructure`(수동 패턴, dev2 적용) — 기존 데이터 PROJECT→BIZ, ISSUE→OPS 매핑(DEV는 신규 빈 섹션). 주간 특이사항은 여전히 보드 최하단
