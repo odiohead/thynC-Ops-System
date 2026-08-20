@@ -342,3 +342,12 @@ CREATE TABLE weekly_week_notes (
   updated_at TIMESTAMP(3) NOT NULL
 );
 ```
+
+---
+
+## 개정 이력 (구현 후)
+
+- **2026-08-20 — 2차 검토 반영**
+  1. 보드 필드 순서: `업무구분 · 안건 · 지난주 진행 · 금주 진행`을 앞 4개로 고정(한 화면 노출 보장), 담당 팀·담당·상태·목표일·완료는 후열(횡스크롤 허용, min-w 1512px). 병원별·아카이브 리스트도 '최근 진행'을 안건 뒤로 이동
+  2. 주간 특이사항에 작성자 소속팀 필드 추가 (`WeeklyNoteDto.createdByTeamName` — 표시 전용)
+  3. 진행내용·특이사항 입력을 리치텍스트로 전환 — `WeeklyRichEditor`(Tiptap: 마크다운 입력 규칙 + 글자색·형광펜), 저장 HTML(서버 sanitize), 표시 `RichContent`(구 plain text 하위호환). §5의 "plain text 저장" 결정을 대체

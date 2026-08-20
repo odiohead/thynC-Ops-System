@@ -3,7 +3,7 @@
 // 주간업무 관리 (projects/weekly_ops_design.md) — 사업본부 주간 리뷰 보드
 // nav 미등록·URL 직접 진입(/weekly). 항목은 지속 레코드, 주차별 진행내용만 쌓인다.
 // 주차 네비·?week= URL 동기화는 차량예약 주간 보드 패턴 차용.
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import PageHeader from '@/app/components/ui/PageHeader'
 import Button from '@/app/components/ui/Button'
@@ -14,6 +14,7 @@ import ItemDetailModal from './_components/ItemDetailModal'
 import AddItemRow, { type AddItemForm } from './_components/AddItemRow'
 import CellEditor from './_components/CellEditor'
 import NotesSection from './_components/NotesSection'
+import RichContent from './_components/RichContent'
 import {
   WEEKLY_ITEM_KINDS,
   WEEKLY_KIND_LABELS,
@@ -41,11 +42,25 @@ const BIZ_VARIANT: Record<string, 'primary' | 'success' | 'default'> = {
   공통: 'default',
 }
 
-const CLAMP_STYLE: CSSProperties = {
-  display: '-webkit-box',
-  WebkitLineClamp: 4,
-  WebkitBoxOrient: 'vertical',
-  overflow: 'hidden',
+// ── 보드 컬럼 정의 — 순서·기본 폭 (2026-08-20 리사이즈 도입) ─────────────
+// 기본 폭 합계 중 담당 팀까지(1288px)가 1400px 컨테이너 안에 들어오고, 이후는 횡스크롤.
+const BOARD_COLS: { key: string; label: string; w: number; resizable: boolean }[] = [
+  { key: 'move', label: '', w: 40, resizable: false },
+  { key: 'biz', label: '업무구분', w: 96, resizable: true },
+  { key: 'title', label: '안건', w: 280, resizable: true },
+  { key: 'last', label: '지난주 진행', w: 380, resizable: true },
+  { key: 'this', label: '금주 진행', w: 380, resizable: true },
+  { key: 'team', label: '담당 팀', w: 112, resizable: true },
+  { key: 'owner', label: '담당', w: 96, resizable: true },
+  { key: 'status', label: '상태', w: 80, resizable: true },
+  { key: 'target', label: '목표일', w: 112, resizable: true },
+  { key: 'done', label: '', w: 96, resizable: false },
+]
+const COL_WIDTH_STORAGE_KEY = 'weekly_board_col_widths_v1'
+const COL_MIN_WIDTH = 56
+
+function defaultColWidths(): Record<string, number> {
+  return Object.fromEntries(BOARD_COLS.map((c) => [c.key, c.w]))
 }
 
 function addDays(d: Date, n: number): Date {
@@ -72,6 +87,64 @@ export default function WeeklyPage() {
   const [adding, setAdding] = useState<WeeklyItemKind | null>(null)
   const [detailId, setDetailId] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
+  /** 펼쳐진 행 — 지난주·금주 진행을 2줄 clamp 대신 전체 표시 */
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
+
+  // ── 컬럼 폭 — localStorage 영속 + 마우스 드래그 리사이즈 ──────────
+  const [colWidths, setColWidths] = useState<Record<string, number>>(defaultColWidths)
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(COL_WIDTH_STORAGE_KEY) ?? '')
+      if (saved && typeof saved === 'object') {
+        setColWidths((w) => {
+          const next = { ...w }
+          for (const c of BOARD_COLS) {
+            const v = (saved as Record<string, unknown>)[c.key]
+            if (typeof v === 'number' && v >= COL_MIN_WIDTH && v <= 2000) next[c.key] = Math.round(v)
+          }
+          return next
+        })
+      }
+    } catch {
+      // 저장값 없음/파손 — 기본 폭 사용
+    }
+  }, [])
+
+  const startResize = (key: string) => (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const startW = colWidths[key]
+    let latest = colWidths
+    const onMove = (ev: MouseEvent) => {
+      const w = Math.max(COL_MIN_WIDTH, startW + ev.clientX - startX)
+      setColWidths((prev) => {
+        latest = { ...prev, [key]: w }
+        return latest
+      })
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      try {
+        localStorage.setItem(COL_WIDTH_STORAGE_KEY, JSON.stringify(latest))
+      } catch {
+        // 저장 실패는 무시 (다음 세션에 기본 폭)
+      }
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'col-resize'
+  }
+
+  const toggleExpand = (id: number) =>
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
 
   const weekYmd = ymdLocal(weekStart)
   const todayMondayYmd = ymdLocal(mondayOfLocal(new Date()))
@@ -321,8 +394,9 @@ export default function WeeklyPage() {
   // ── 렌더 ────────────────────────────────────────────────────
   const weekRangeLabel = `${weekStart.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })} ~ ${addDays(weekStart, 6).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })}`
 
-  const thCls = 'px-3 py-2 text-left text-xs font-medium text-muted-foreground'
-  const tdCls = 'px-3 py-2.5 align-top text-sm'
+  const thCls = 'px-4 py-2 text-left text-xs font-medium text-muted-foreground'
+  const tdCls = 'px-4 py-3 align-top text-sm'
+  const totalColWidth = BOARD_COLS.reduce((sum, c) => sum + colWidths[c.key], 0)
 
   const renderBoardRow = (it: WeeklyItemDto, activeList: WeeklyItemDto[]) => {
     const st = displayStatus(it)
@@ -334,6 +408,7 @@ export default function WeeklyPage() {
     const prevWeekYmd = addDaysYmd(weekYmd, -7)
     const isEditing = editingId === it.id
     const editable = canWrite && active
+    const expanded = expandedIds.has(it.id)
     // ↑↓ 경계는 서버 move와 동일 목록(같은 kind·미완료 전체, 담당 필터 미적용) 기준으로 판정
     const activeIdx = activeList.findIndex((x) => x.id === it.id)
 
@@ -377,32 +452,31 @@ export default function WeeklyPage() {
             </div>
           )}
         </td>
-        <td className={`${tdCls} whitespace-nowrap`}>{it.ownerTeamName ?? '—'}</td>
-        <td className={`${tdCls} whitespace-nowrap`}>{it.ownerName ?? '—'}</td>
-        <td className={`${tdCls} whitespace-nowrap`}>
-          <Badge variant={STATUS_VARIANT[st]}>{st}</Badge>
-        </td>
-        <td className={`${tdCls} whitespace-nowrap ${overdue ? 'font-medium text-destructive' : ''}`}>
-          {it.targetDate ?? '—'}
-        </td>
-        <td className={tdCls}>
+        {/* 지난주·금주 진행 — 기본 2줄 clamp, 셀 클릭으로 펼침/접기. 편집은 ✎ 버튼으로만 진입 (2026-08-20) */}
+        <td
+          className={`${tdCls} ${it.lastWeek ? 'cursor-pointer' : ''}`}
+          onClick={() => it.lastWeek && toggleExpand(it.id)}
+          title={it.lastWeek && !expanded ? '클릭하여 펼치기' : undefined}
+        >
           {it.lastWeek ? (
-            <div className="whitespace-pre-wrap" style={CLAMP_STYLE}>
+            <div>
               {it.lastWeek.weekStart !== prevWeekYmd && (
-                <span className="mr-1 font-medium text-warning">{weekLabel(it.lastWeek.weekStart)}:</span>
+                <div className="mb-0.5 text-xs font-medium text-warning">{weekLabel(it.lastWeek.weekStart)}:</div>
               )}
-              {it.lastWeek.content}
+              <RichContent content={it.lastWeek.content} clampLines={expanded ? undefined : 2} />
             </div>
           ) : (
             <span className="text-muted-foreground">—</span>
           )}
         </td>
         <td
-          className={`${tdCls} ${needsUpdate && !isEditing ? 'bg-warning-subtle/60' : ''} ${editable && !isEditing ? 'cursor-pointer' : ''}`}
+          className={`group ${tdCls} ${needsUpdate && !isEditing ? 'bg-warning-subtle/60' : ''} ${!isEditing && (it.thisWeek || editable) ? 'cursor-pointer' : ''}`}
           onClick={() => {
-            if (!editable || isEditing) return
-            setEditingId(it.id)
+            if (isEditing) return
+            if (it.thisWeek) toggleExpand(it.id) // 내용 있으면 클릭=펼침/접기
+            else if (editable) setEditingId(it.id) // 빈 셀은 바로 입력 진입
           }}
+          title={it.thisWeek && !expanded ? '클릭하여 펼치기' : undefined}
         >
           {isEditing ? (
             <CellEditor
@@ -412,12 +486,32 @@ export default function WeeklyPage() {
               onCancel={() => setEditingId(null)}
             />
           ) : it.thisWeek ? (
-            <div className="whitespace-pre-wrap" style={CLAMP_STYLE}>
-              {it.thisWeek.content}
+            <div className="flex items-start gap-1">
+              <RichContent content={it.thisWeek.content} clampLines={expanded ? undefined : 2} className="min-w-0 flex-1" />
+              {editable && (
+                <button
+                  className="shrink-0 rounded px-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100"
+                  title="수정"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setEditingId(it.id)
+                  }}
+                >
+                  ✎
+                </button>
+              )}
             </div>
           ) : (
             <span className="text-muted-foreground">{editable ? '클릭하여 입력' : '—'}</span>
           )}
+        </td>
+        <td className={`${tdCls} whitespace-nowrap`}>{it.ownerTeamName ?? '—'}</td>
+        <td className={`${tdCls} whitespace-nowrap`}>{it.ownerName ?? '—'}</td>
+        <td className={`${tdCls} whitespace-nowrap`}>
+          <Badge variant={STATUS_VARIANT[st]}>{st}</Badge>
+        </td>
+        <td className={`${tdCls} whitespace-nowrap ${overdue ? 'font-medium text-destructive' : ''}`}>
+          {it.targetDate ?? '—'}
         </td>
         <td className={`${tdCls} w-28 whitespace-nowrap text-right`}>
           {canWrite && !it.completedWeek && weekYmd <= todayMondayYmd && (
@@ -442,31 +536,27 @@ export default function WeeklyPage() {
           <span className="text-xs text-muted-foreground">{items.length}건</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1220px] table-fixed text-sm">
+          {/* 기본 폭에서 담당 팀까지 한 화면 노출, 나머지는 횡스크롤. 헤더 경계 드래그로 폭 조절 (2026-08-20) */}
+          <table className="w-full table-fixed text-sm" style={{ minWidth: totalColWidth }}>
             <colgroup>
-              <col className="w-10" />
-              <col className="w-24" />
-              <col className="w-[220px]" />
-              <col className="w-24" />
-              <col className="w-20" />
-              <col className="w-16" />
-              <col className="w-24" />
-              <col />
-              <col />
-              <col className="w-24" />
+              {BOARD_COLS.map((c) => (
+                <col key={c.key} style={{ width: colWidths[c.key] }} />
+              ))}
             </colgroup>
             <thead className="bg-muted/60">
               <tr>
-                <th className={thCls}></th>
-                <th className={thCls}>업무구분</th>
-                <th className={thCls}>안건</th>
-                <th className={thCls}>담당 팀</th>
-                <th className={thCls}>담당</th>
-                <th className={thCls}>상태</th>
-                <th className={thCls}>목표일</th>
-                <th className={thCls}>지난주 진행</th>
-                <th className={thCls}>금주 진행</th>
-                <th className={thCls}></th>
+                {BOARD_COLS.map((c) => (
+                  <th key={c.key} className={`relative ${thCls}`}>
+                    {c.label}
+                    {c.resizable && (
+                      <span
+                        className="absolute -right-1 top-0 z-10 h-full w-2 cursor-col-resize select-none hover:bg-primary/30"
+                        onMouseDown={startResize(c.key)}
+                        title="드래그로 폭 조절"
+                      />
+                    )}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -512,11 +602,11 @@ export default function WeeklyPage() {
             <th className={thCls}>업무구분</th>
             <th className={thCls}>안건</th>
             {mode === 'archive' && <th className={thCls}>병원</th>}
+            <th className={thCls}>최근 진행</th>
             <th className={thCls}>담당 팀</th>
             <th className={thCls}>담당</th>
             <th className={thCls}>상태</th>
             <th className={thCls}>목표일</th>
-            <th className={thCls}>최근 진행</th>
           </tr>
         </thead>
         <tbody>
@@ -541,22 +631,22 @@ export default function WeeklyPage() {
                 </td>
                 <td className={`${tdCls} font-medium`}>{it.title}</td>
                 {mode === 'archive' && <td className={`${tdCls} whitespace-nowrap`}>{it.hospitalName ?? '—'}</td>}
+                <td className={tdCls}>
+                  {it.latestUpdate ? (
+                    <div>
+                      <div className="mb-0.5 text-xs text-muted-foreground">{weekLabel(it.latestUpdate.weekStart)}:</div>
+                      <RichContent content={it.latestUpdate.content} clampLines={2} />
+                    </div>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </td>
                 <td className={`${tdCls} whitespace-nowrap`}>{it.ownerTeamName ?? '—'}</td>
                 <td className={`${tdCls} whitespace-nowrap`}>{it.ownerName ?? '—'}</td>
                 <td className={`${tdCls} whitespace-nowrap`}>
                   <Badge variant={STATUS_VARIANT[st]}>{st}</Badge>
                 </td>
                 <td className={`${tdCls} whitespace-nowrap`}>{it.targetDate ?? '—'}</td>
-                <td className={tdCls}>
-                  {it.latestUpdate ? (
-                    <div className="whitespace-pre-wrap" style={CLAMP_STYLE}>
-                      <span className="mr-1 text-xs text-muted-foreground">{weekLabel(it.latestUpdate.weekStart)}:</span>
-                      {it.latestUpdate.content}
-                    </div>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </td>
               </tr>
             )
           })}

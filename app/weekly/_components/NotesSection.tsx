@@ -4,6 +4,8 @@
 // 부모에서 key={weekYmd}로 렌더해 주차 전환 시 편집 상태가 자동 초기화된다.
 import { useState } from 'react'
 import CellEditor from './CellEditor'
+import RichContent from './RichContent'
+import { isEmptyRichText } from '@/lib/richtext'
 import type { WeeklyNoteDto } from '@/lib/weekly'
 
 interface Props {
@@ -45,7 +47,7 @@ export default function NotesSection({ weekYmd, notes, canWrite, onChanged }: Pr
   }
 
   const create = async (content: string) => {
-    if (!content.trim()) {
+    if (isEmptyRichText(content)) {
       alert('내용을 입력하세요.')
       return
     }
@@ -56,7 +58,7 @@ export default function NotesSection({ weekYmd, notes, canWrite, onChanged }: Pr
   }
 
   const update = async (id: number, content: string) => {
-    if (!content.trim()) {
+    if (isEmptyRichText(content)) {
       alert('내용을 입력하세요.')
       return
     }
@@ -95,7 +97,11 @@ export default function NotesSection({ weekYmd, notes, canWrite, onChanged }: Pr
             />
           ) : (
             <div className="flex items-start gap-3">
-              <div className="min-w-0 flex-1 whitespace-pre-wrap text-sm">{n.content}</div>
+              {/* 작성자 소속팀 — 내용 앞 필드 (2026-08-20) */}
+              <span className="mt-0.5 w-24 shrink-0 truncate rounded bg-muted px-1.5 py-0.5 text-center text-[11px] text-muted-foreground" title={n.createdByTeamName ?? undefined}>
+                {n.createdByTeamName ?? '—'}
+              </span>
+              <RichContent content={n.content} className="min-w-0 flex-1 text-sm" />
               <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
                 <span>
                   {n.createdByName ?? '—'} ·{' '}

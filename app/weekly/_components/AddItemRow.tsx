@@ -87,7 +87,7 @@ export default function AddItemRow({ masters, busy, onSave, onCancel }: Props) {
               </option>
             ))}
           </Select>
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
             목표일
             <Input type="date" className="w-36" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} />
           </label>

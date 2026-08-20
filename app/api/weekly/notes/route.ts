@@ -3,8 +3,9 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { checkWeeklyAccess } from '@/lib/weeklyAccess'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { isMondayYmd, type WeeklyNoteDto } from '@/lib/weekly'
-import { ymd } from '../shared'
+import { isMondayYmd } from '@/lib/weekly'
+import { isEmptyRichText, sanitizeRichTextHtml } from '@/lib/richtext'
+import { NOTE_INCLUDE, toNoteDto } from '../shared'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,12 +26,15 @@ export async function POST(request: NextRequest) {
   if (!isMondayYmd(week)) {
     return NextResponse.json({ error: 'week는 월요일 날짜(YYYY-MM-DD)여야 합니다.' }, { status: 400 })
   }
-  const content = typeof body.content === 'string' ? body.content.trim() : ''
-  if (!content) return NextResponse.json({ error: '내용을 입력하세요.' }, { status: 400 })
+  // 리치텍스트(HTML) 저장 — sanitize 후 태그 제거 기준으로 빈 내용 판정 (2026-08-20)
+  const content = typeof body.content === 'string' ? sanitizeRichTextHtml(body.content.trim()) : ''
+  if (!content || isEmptyRichText(content)) {
+    return NextResponse.json({ error: '내용을 입력하세요.' }, { status: 400 })
+  }
 
   const row = await prisma.weeklyWeekNote.create({
     data: { weekStart: new Date(week), content, createdById: user.userId, updatedById: user.userId },
-    include: { createdBy: { select: { name: true } }, updatedBy: { select: { name: true } } },
+    include: NOTE_INCLUDE,
   })
 
   await logAudit({
@@ -43,14 +47,5 @@ export async function POST(request: NextRequest) {
     after: row,
   })
 
-  const note: WeeklyNoteDto = {
-    id: row.id,
-    weekStart: ymd(row.weekStart),
-    content: row.content,
-    createdByName: row.createdBy?.name ?? null,
-    updatedByName: row.updatedBy?.name ?? null,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-  }
-  return NextResponse.json({ note }, { status: 201 })
+  return NextResponse.json({ note: toNoteDto(row) }, { status: 201 })
 }

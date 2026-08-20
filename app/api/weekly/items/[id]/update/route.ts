@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { checkWeeklyAccess } from '@/lib/weeklyAccess'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { isMondayYmd, type WeeklyUpdateDto } from '@/lib/weekly'
+import { isEmptyRichText, sanitizeRichTextHtml } from '@/lib/richtext'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,7 +35,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if (typeof body.content !== 'string') {
     return NextResponse.json({ error: 'content는 문자열이어야 합니다.' }, { status: 400 })
   }
-  const content: string = body.content
+  // 리치텍스트(HTML) 저장 — sanitize, 빈 판정은 태그 제거 기준 (2026-08-20)
+  const content: string = sanitizeRichTextHtml(body.content)
 
   const item = await prisma.weeklyItem.findUnique({ where: { id }, select: { id: true, title: true } })
   if (!item) return NextResponse.json({ error: '항목을 찾을 수 없습니다.' }, { status: 404 })
@@ -44,8 +46,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
     where: { itemId_weekStart: { itemId: id, weekStart } },
   })
 
-  // 빈 내용 → 해당 주차 기록 삭제
-  if (content.trim() === '') {
+  // 빈 내용(빈 문자열 또는 태그뿐인 HTML) → 해당 주차 기록 삭제
+  if (isEmptyRichText(content)) {
     if (existing) {
       await prisma.weeklyItemUpdate.delete({ where: { id: existing.id } })
       await logAudit({

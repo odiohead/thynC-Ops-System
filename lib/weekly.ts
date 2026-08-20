@@ -144,6 +144,8 @@ export interface WeeklyNoteDto {
   weekStart: string // YYYY-MM-DD
   content: string
   createdByName: string | null
+  /** 작성자 소속팀(departments) — 표시 전용 (2026-08-20) */
+  createdByTeamName: string | null
   updatedByName: string | null
   createdAt: string
   updatedAt: string

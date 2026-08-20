@@ -3,8 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { checkWeeklyAccess } from '@/lib/weeklyAccess'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { type WeeklyNoteDto } from '@/lib/weekly'
-import { ymd } from '../../shared'
+import { isEmptyRichText, sanitizeRichTextHtml } from '@/lib/richtext'
+import { NOTE_INCLUDE, toNoteDto, ymd } from '../../shared'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,8 +24,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: '잘못된 id입니다.' }, { status: 400 })
   }
   const body = await request.json().catch(() => null)
-  const content = typeof body?.content === 'string' ? body.content.trim() : ''
-  if (!content) return NextResponse.json({ error: '내용을 입력하세요.' }, { status: 400 })
+  // 리치텍스트(HTML) 저장 — sanitize 후 태그 제거 기준으로 빈 내용 판정 (2026-08-20)
+  const content = typeof body?.content === 'string' ? sanitizeRichTextHtml(body.content.trim()) : ''
+  if (!content || isEmptyRichText(content)) {
+    return NextResponse.json({ error: '내용을 입력하세요.' }, { status: 400 })
+  }
 
   const before = await prisma.weeklyWeekNote.findUnique({ where: { id } })
   if (!before) return NextResponse.json({ error: '특이사항을 찾을 수 없습니다.' }, { status: 404 })
@@ -33,7 +36,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const row = await prisma.weeklyWeekNote.update({
     where: { id },
     data: { content, updatedById: user.userId },
-    include: { createdBy: { select: { name: true } }, updatedBy: { select: { name: true } } },
+    include: NOTE_INCLUDE,
   })
 
   await logAudit({
@@ -47,16 +50,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     after: row,
   })
 
-  const note: WeeklyNoteDto = {
-    id: row.id,
-    weekStart: ymd(row.weekStart),
-    content: row.content,
-    createdByName: row.createdBy?.name ?? null,
-    updatedByName: row.updatedBy?.name ?? null,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-  }
-  return NextResponse.json({ note })
+  return NextResponse.json({ note: toNoteDto(row) })
 }
 
 export async function DELETE(request: NextRequest, { params }: Params) {

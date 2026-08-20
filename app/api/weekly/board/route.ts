@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { checkWeeklyAccess } from '@/lib/weeklyAccess'
 import { addDaysYmd, isMondayYmd, kstMidnight, type WeeklyBoardResponse } from '@/lib/weekly'
-import { ITEM_INCLUDE, toItemDto, ymd } from '../shared'
+import { ITEM_INCLUDE, NOTE_INCLUDE, toItemDto, toNoteDto, ymd } from '../shared'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     prisma.weeklyWeekNote.findMany({
       where: { weekStart: weekDate },
       orderBy: { id: 'asc' },
-      include: { createdBy: { select: { name: true } }, updatedBy: { select: { name: true } } },
+      include: NOTE_INCLUDE,
     }),
   ])
 
@@ -57,15 +57,7 @@ export async function GET(request: NextRequest) {
   const response: WeeklyBoardResponse = {
     week,
     items,
-    weekNotes: noteRows.map((n) => ({
-      id: n.id,
-      weekStart: ymd(n.weekStart),
-      content: n.content,
-      createdByName: n.createdBy?.name ?? null,
-      updatedByName: n.updatedBy?.name ?? null,
-      createdAt: n.createdAt.toISOString(),
-      updatedAt: n.updatedAt.toISOString(),
-    })),
+    weekNotes: noteRows.map(toNoteDto),
   }
   return NextResponse.json(response)
 }

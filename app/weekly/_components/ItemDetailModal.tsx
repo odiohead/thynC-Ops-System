@@ -8,6 +8,7 @@ import Button from '@/app/components/ui/Button'
 import Badge from '@/app/components/ui/Badge'
 import { Input, Select, Textarea } from '@/app/components/ui/Input'
 import SearchSelect from './SearchSelect'
+import RichContent from './RichContent'
 import {
   WEEKLY_ITEM_KINDS,
   WEEKLY_KIND_LABELS,
@@ -332,7 +333,7 @@ export default function ItemDetailModal({ itemId, onClose, masters, canWrite, on
                       <span>{u.weekStart} 주</span>
                       {u.updatedByName && <span className="ml-auto">작성 {u.updatedByName}</span>}
                     </div>
-                    <div className="whitespace-pre-wrap text-sm">{u.content}</div>
+                    <RichContent content={u.content} className="text-sm" />
                   </li>
                 ))}
               </ul>

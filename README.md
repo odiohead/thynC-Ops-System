@@ -30,7 +30,7 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 | 파일 스토리지 | AWS S3 (`@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`) |
 | 차트 | Recharts |
 | 아이콘 | lucide-react |
-| 리치 텍스트 에디터 | Tiptap (`@tiptap/react` + 확장) — 기존 모듈용 |
+| 리치 텍스트 에디터 | Tiptap (`@tiptap/react` + 확장) — 기존 모듈 + 주간업무(/weekly, `@tiptap/extension-text-style` 색상·형광펜) |
 | 블록 에디터 (위키) | BlockNote (`@blocknote/core`, `@blocknote/react`, `@blocknote/ariakit`, `@blocknote/xl-multi-column`) — 위키 전용 |
 | 드래그앤드롭 (위키) | `@dnd-kit/core` — 위키 사이드바 트리 이동 전용 |
 | 프로세스 관리 | PM2 |
@@ -175,7 +175,7 @@ app/
 │   └── mobile/                       # 빠른 예약·반납 모바일 페이지 (가능 차량 실시간 검색 + 인라인 반납)
 ├── sales/                            # 영업현황 (ADMIN+SEERS) — dashboard/(대시보드 A·실적, 메인) + deals/(도입현황 — 엑셀 B~AK 표·등록 모달, [id] 딜 상세 편집) + dashboard_map/(지역별 도입현황 지도 — 7개 권역 SVG 지도+표+드릴다운) + page.tsx(→ dashboard 리다이렉트) + _components/SalesConceptTabs(탭 3개)
 ├── parking/                          # 주차 웹할인 등록 (차량 검색 → 계정별 할인권 → 등록, nav 미등록)
-├── weekly/                           # 주간업무 관리 (사업본부 주간 리뷰 — nav 미등록·URL 직접 진입, SEERS) + _components/(ItemDetailModal·SearchSelect·AddItemRow·CellEditor·NotesSection)
+├── weekly/                           # 주간업무 관리 (사업본부 주간 리뷰 — nav 미등록·URL 직접 진입, SEERS) + _components/(ItemDetailModal·SearchSelect·AddItemRow·CellEditor·NotesSection·WeeklyRichEditor·RichContent — 진행내용·특이사항은 Tiptap 리치텍스트(색상·형광펜) HTML 저장)
 ├── ai-assistant/                     # AI 어시스턴트 채팅
 ├── wiki/                             # 사내 위키 (Phase 2-3)
 │   ├── layout.tsx                    # 사이드바 + 콘텐츠 flex 레이아웃 (모든 /wiki/* 적용)

@@ -480,3 +480,52 @@
   background: hsl(var(--muted-foreground) / 0.5);
   background-clip: content-box;
 }
+
+/* ── 주간업무(/weekly) 리치텍스트 — 에디터·표시 공용 컴팩트 타이포 ── */
+.weekly-rich p {
+  margin: 0.125rem 0;
+}
+.weekly-rich ul {
+  list-style-type: disc;
+  padding-left: 1.25rem;
+  margin: 0.125rem 0;
+}
+.weekly-rich ol {
+  list-style-type: decimal;
+  padding-left: 1.25rem;
+  margin: 0.125rem 0;
+}
+.weekly-rich a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+}
+.weekly-rich blockquote {
+  border-left: 3px solid hsl(var(--border));
+  padding-left: 0.75rem;
+  color: hsl(var(--muted-foreground));
+  margin: 0.25rem 0;
+}
+.weekly-rich code {
+  background: hsl(var(--muted));
+  border-radius: 3px;
+  padding: 0.1em 0.3em;
+  font-size: 0.875em;
+  font-family: monospace;
+}
+/* 다크모드: 밝은 형광펜 배경 위 글자는 어두운 색으로 (인라인 style 배경은 라이트 팔레트) */
+.dark .weekly-rich span[style*="background-color"] {
+  color: hsl(222 47% 11%);
+}
+.weekly-rich-editor .ProseMirror {
+  min-height: 5rem;
+  padding: 0.5rem 0.75rem;
+  outline: none;
+  font-size: 0.875rem;
+}
+.weekly-rich-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: hsl(var(--muted-foreground));
+  pointer-events: none;
+  height: 0;
+}

@@ -1,4 +1,4 @@
-import type { WeeklyItemDto, WeeklyItemKind, WeeklyUpdateDto } from '@/lib/weekly'
+import type { WeeklyItemDto, WeeklyItemKind, WeeklyNoteDto, WeeklyUpdateDto } from '@/lib/weekly'
 
 /**
  * 주간업무 API 공용 — prisma row → DTO 조립 (projects/weekly_ops_design.md)
@@ -42,6 +42,35 @@ export type ItemRow = {
   hospital?: { hospitalName: string } | null
   ownerTeam?: { name: string } | null
   owner?: { name: string } | null
+}
+
+/** 주간 특이사항 조회 공통 include — 작성자 소속팀 포함 (2026-08-20) */
+export const NOTE_INCLUDE = {
+  createdBy: { select: { name: true, department: { select: { name: true } } } },
+  updatedBy: { select: { name: true } },
+} as const
+
+export type NoteRow = {
+  id: number
+  weekStart: Date
+  content: string
+  createdAt: Date
+  updatedAt: Date
+  createdBy?: { name: string; department: { name: string } | null } | null
+  updatedBy?: { name: string } | null
+}
+
+export function toNoteDto(n: NoteRow): WeeklyNoteDto {
+  return {
+    id: n.id,
+    weekStart: ymd(n.weekStart),
+    content: n.content,
+    createdByName: n.createdBy?.name ?? null,
+    createdByTeamName: n.createdBy?.department?.name ?? null,
+    updatedByName: n.updatedBy?.name ?? null,
+    createdAt: n.createdAt.toISOString(),
+    updatedAt: n.updatedAt.toISOString(),
+  }
 }
 
 export function toUpdateDto(u: UpdateRow): WeeklyUpdateDto {

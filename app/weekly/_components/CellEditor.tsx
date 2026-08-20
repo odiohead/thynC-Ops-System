@@ -1,9 +1,10 @@
 'use client'
 
-// 여러 줄 텍스트 인라인 에디터 — draft를 로컬 상태로 격리 (금주 진행 셀·주간 특이사항 공용)
+// 인라인 리치텍스트 에디터 — draft를 로컬 상태로 격리 (금주 진행 셀·주간 특이사항 공용)
+// 2026-08-20: Textarea → WeeklyRichEditor (마크다운 입력 규칙 + 글자색·형광펜)
 import { useState } from 'react'
 import Button from '@/app/components/ui/Button'
-import { Textarea } from '@/app/components/ui/Input'
+import WeeklyRichEditor, { toEditableHtml } from './WeeklyRichEditor'
 
 interface Props {
   initial: string
@@ -14,19 +15,14 @@ interface Props {
 }
 
 export default function CellEditor({ initial, busy, placeholder, onSave, onCancel }: Props) {
-  const [draft, setDraft] = useState(initial)
+  const [draft, setDraft] = useState(() => toEditableHtml(initial))
   return (
-    <div onClick={(e) => e.stopPropagation()}>
-      <Textarea
-        autoFocus
-        rows={4}
-        value={draft}
+    <div onClick={(e) => e.stopPropagation()} className="min-w-[240px]">
+      <WeeklyRichEditor
+        initial={initial}
         placeholder={placeholder}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.nativeEvent.isComposing) return // IME 조합 취소 Escape로 draft 소실 방지
-          if (e.key === 'Escape') onCancel()
-        }}
+        onChange={setDraft}
+        onEscape={onCancel}
       />
       <div className="mt-1.5 flex gap-1.5">
         <Button size="sm" onClick={() => onSave(draft)} disabled={busy}>

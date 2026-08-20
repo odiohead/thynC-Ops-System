@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-08-20 | 주간업무 관리툴 개선 — 필드 순서·특이사항 소속팀·리치텍스트 에디터 (dev2)
+
+- **보드 필드 순서 개정**: 업무구분 → 안건 → 지난주 진행 → 금주 진행을 앞 4개로 (한 화면 안에 들어오도록 폭 배분 — 진행 컬럼 각 320px 고정), 담당 팀·담당·상태·목표일·완료는 뒤로 이동해 횡스크롤 허용(min-w 1512px). 셀 패딩 확대(px-3→px-4). 병원별·아카이브 리스트도 동일하게 '최근 진행'을 안건 뒤로 이동
+- **주간 특이사항 소속팀 표시**: 작성자 소속팀(departments)을 내용 앞 필드로 추가 — `WeeklyNoteDto.createdByTeamName` 신설, notes 조회·생성·수정 API에 `NOTE_INCLUDE`/`toNoteDto` 공용화(shared.ts)
+- **리치텍스트 에디터 도입**: 금주 진행 셀·주간 특이사항 입력을 Textarea → Tiptap 컴팩트 에디터(`WeeklyRichEditor`)로 교체 — 굵게/기울임/밑줄/취소선/목록 + 글자색 7색·형광펜 5색, 마크다운 입력 규칙(`**굵게**`·`- 목록`) 자동 변환. 저장 형식 HTML(서버 `sanitizeRichTextHtml` 정화, 빈 판정 `isEmptyRichText` — 금주 진행 빈 저장=주차 기록 삭제 규칙 유지). 표시는 `RichContent`(HTML/구 plain text 하위호환 렌더 + 줄수 clamp), 다크모드 형광펜 글자색 보정(globals.css `.weekly-rich`)
+- 신규 패키지: `@tiptap/extension-text-style` (Color·BackgroundColor — Tiptap v3 계열)
+- **2차 수정 (같은 날 피드백)**: ① 안건 280px·지난주/금주 380px로 기본 폭 확대 — 기본 화면에서 담당 팀까지(1,288px) 노출, 이후 횡스크롤 ② **컬럼 리사이즈** — 헤더 경계 드래그로 폭 조절(BOARD_COLS 단일 정의, localStorage `weekly_board_col_widths_v1` 영속, 최소 56px) ③ 진행 셀 기본 **2줄 clamp('…')** — 셀 클릭=펼침/접기 토글, 편집은 hover ✎ 버튼으로 분리(빈 셀만 클릭 즉시 입력). 병원별·아카이브 최근 진행도 2줄 clamp ④ 항목 추가 행 '목표일' 라벨 줄바꿈 수정(shrink-0·nowrap)
+- 검증: tsc 0오류 · 힙 4GB 빌드 · PM2 재시작 · `/weekly` 307 스모크 (dev2 로컬 3000 포트). git push·PROD 미반영
+- 영향 파일: lib/weekly.ts, app/api/weekly/(shared·board·notes·notes/[id]·items/[id]/update), app/weekly/page.tsx, app/weekly/_components/(WeeklyRichEditor·RichContent 신규, CellEditor·NotesSection·ItemDetailModal·AddItemRow), app/globals.css, package.json, README.md
+
+---
+
 ## 2026-08-19 | PROD 배포: 주간업무 관리툴 `/weekly` 신설 (커밋 1fc2964)
 
 - 배포 전 확인: PROD 심평원 연동 잡 running 0건
