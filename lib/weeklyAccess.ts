@@ -1,10 +1,11 @@
 import { prisma } from '@/lib/prisma'
 import { isUserOrAbove, type JWTPayload } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 
 /**
  * 주간업무 관리 접근 권한 (서버 강제) — projects/weekly_ops_design.md §8
  *
- * 조회: 로그인 + SEERS 소속 전원 (사업본부 내부 리뷰 자료 — 고객사 소속 계정 차단)
+ * 조회: 로그인 + (SEERS 소속 OR `weekly.access` 권한) — RBAC Lite 가산 합성 (2026-08-21)
  * 쓰기: 위 + USER 등급 이상 (VIEWER 읽기 전용 원칙)
  * 소속·활성 여부는 JWT가 아니라 DB 실시간 조회로 판정 (checkSalesAccess 선례 — JWT는 최대 7일 stale).
  * nav 미등록·URL 직접 진입 페이지이므로 이 게이트가 접근 제어의 단일 소스다.
@@ -26,8 +27,8 @@ export async function checkWeeklyAccess(user: JWTPayload, opts?: { write?: boole
   if (!row) return { status: 403, error: '계정을 찾을 수 없습니다.' }
   if (!row.isActive) return { status: 403, error: '비활성 계정입니다.' }
   const code = row.organization?.code
-  if (!code || !WEEKLY_ALLOWED_ORG_CODES.includes(code)) {
-    return { status: 403, error: '소속 정책에 따라 주간업무 관리에 접근할 수 없습니다.' }
-  }
-  return null
+  if (code && WEEKLY_ALLOWED_ORG_CODES.includes(code)) return null
+  // 소속 미충족 — RBAC Lite 가산: weekly.access 권한 보유 시 허용 (기존 접근을 빼앗지 않는 additive-only)
+  if (await hasPermission(user, 'weekly.access')) return null
+  return { status: 403, error: '소속 정책에 따라 주간업무 관리에 접근할 수 없습니다.' }
 }

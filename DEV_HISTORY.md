@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-08-21 | 주간업무 `weekly.access` 권한 + 메인 대시보드 진입 아이콘 (dev2)
+
+- **권한 카탈로그 v1.3**: `weekly.access`(주간업무 관리 접근, 모듈 '주간업무') 신설 — 사용자가 만든 '직책자' 역할에 붙일 UI 게이트 권한 (RBAC Lite, 풀 테이블 없음)
+- **접근 게이트 가산**: `checkWeeklyAccess` — SEERS 소속 OR `hasPermission(weekly.access)` (additive-only 원칙, 기존 SEERS 접근 불변). 쓰기 USER 등급 이상 원칙 유지
+- **진입 아이콘**: 메인 대시보드(`/`) 우측 상단 '사이니지 월보드' 왼쪽에 '주간업무 관리' 아이콘(CalendarCheck2) — **`weekly.access` 권한 보유자에게만 표시** (SEERS 소속만으로는 미표시, SUPER_ADMIN은 전권 등급이라 항상 표시). 표시 여부는 신규 `GET /api/weekly/can-access`(inventory/can-manage 패턴)
+- 검증: tsc 0오류. 빌드·PM2 재시작·git push 미실행 (사용자 요청 대기 — 권한 부여는 설정 > 역할 관리에서 체크박스로)
+- 영향 파일: lib/permissions.ts, lib/weeklyAccess.ts, app/api/weekly/can-access/route.ts(신규), app/page.tsx, README.md
+
+---
+
 ## 2026-08-20 | PROD 배포: 주간업무 관리툴 3·4차 개선 (커밋 eb1f6e6)
 
 - 배포 전 확인: PROD 로그 200줄 심평원 활동 0건 (DB 직접 조회는 이 세션 권한 분류기 차단 지속 — 로그 간접 확인)

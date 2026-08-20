@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import StatusBadge from '@/app/components/StatusBadge'
 import MyWorkPanel from '@/app/components/MyWorkPanel'
-import { Tv } from 'lucide-react'
+import { Tv, CalendarCheck2 } from 'lucide-react'
 import { useChartTheme } from '@/app/components/theme/useChartTheme'
 import * as XLSX from 'xlsx'
 import {
@@ -416,6 +416,8 @@ export default function Home() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [maintenance, setMaintenance] = useState<MaintenanceData | null>(null)
   const [showMonthlyTable, setShowMonthlyTable] = useState(false)
+  // 주간업무 관리 진입 아이콘 — weekly.access 권한 보유자에게만 표시 (RBAC Lite)
+  const [weeklyEntry, setWeeklyEntry] = useState(false)
 
   const loadData = useCallback(async () => {
     const res = await fetch('/api/dashboard', { cache: 'no-store' })
@@ -450,6 +452,10 @@ export default function Home() {
     loadHospitalStats()
     loadSummary()
     loadMaintenance()
+    fetch('/api/weekly/can-access', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d?.entry === true && setWeeklyEntry(true))
+      .catch(() => {})
   }, [loadData, loadMonthly, loadHospitalStats, loadSummary, loadMaintenance])
 
   function handleRemarkSaved(code: string, remark: string) {
@@ -480,8 +486,17 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
 
-        {/* 상단 헤더 — 사이니지 월보드 진입 */}
-        <div className="mb-3 flex items-center justify-end">
+        {/* 상단 헤더 — 주간업무 관리(weekly.access 권한자만) + 사이니지 월보드 진입 */}
+        <div className="mb-3 flex items-center justify-end gap-2">
+          {weeklyEntry && (
+            <Link
+              href="/weekly"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white"
+            >
+              <CalendarCheck2 className="h-3.5 w-3.5" />
+              주간업무 관리
+            </Link>
+          )}
           <Link
             href="/dashboard"
             target="_blank"

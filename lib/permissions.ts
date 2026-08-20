@@ -65,6 +65,13 @@ export const PERMISSIONS = {
     description:
       '기타업무 건 삭제. 조회·등록·수정·파일은 원래 USER 등급 전원 가능이라 이 권한과 무관',
   },
+  // 카탈로그 v1.3 (2026-08-21)
+  'weekly.access': {
+    label: '주간업무 관리 접근',
+    module: '주간업무',
+    description:
+      '메인 대시보드 우측 상단에 주간업무 관리(/weekly) 진입 아이콘 표시 + 페이지 접근 허용 (SEERS 소속 요건과 가산 — 소속으로 이미 접근 가능한 계정에도 아이콘 노출용으로 부여 가능). 편집은 USER 등급 이상(VIEWER 조회 전용) 원칙 유지',
+  },
 } as const
 
 export type PermKey = keyof typeof PERMISSIONS

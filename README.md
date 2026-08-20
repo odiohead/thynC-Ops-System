@@ -153,7 +153,7 @@ app/
 │   │   ├── sync/                     # 심평원 연동 (POST: 백그라운드 시작, GET: 히스토리 목록)
 │   │   │   └── [id]/                 # 연동 잡 상세 + 로그
 │   │   └── detail-sync/              # 병원상세정보연동 (POST: 종별 선택 → 허가병상수 갱신, 백그라운드)
-│   ├── weekly/                       # 주간업무 관리 (2026-08-19) — board(주차 통합)·items(+[id]/update)·notes(특이사항)·masters (SEERS 게이트)
+│   ├── weekly/                       # 주간업무 관리 (2026-08-19) — board(주차 통합)·items(+[id]/update)·notes(특이사항)·masters·can-access(진입 아이콘 게이트) (SEERS 소속 OR weekly.access 권한)
 │   └── drive/                        # Google Drive 연동 (파일 업로드/목록/삭제/병원목록 내보내기)
 ├── (대시보드)/                        # 메인 대시보드 (이번 주/다음 주 공사 현황)
 ├── dashboard/                        # 사이니지 월보드 (50인치 상시 표시, 네비 없음)
