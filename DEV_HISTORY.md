@@ -4,6 +4,27 @@
 
 ---
 
+## 2026-08-20 | 주간업무 관리툴 4차 개선 — 섹션 3분류·지연 안건 탭·진행 이력 수정 (dev2)
+
+- **섹션 구조 개정**: 주요 안건(PROJECT)/주요 이슈(ISSUE) 2섹션 → **사업(BIZ)/운영(OPS)/개발(DEV) 안건** 3섹션. 마이그레이션 `20260820120000_weekly_kind_restructure`(수동 패턴, dev2 적용) — 기존 데이터 PROJECT→BIZ, ISSUE→OPS 매핑(DEV는 신규 빈 섹션). 주간 특이사항은 여전히 보드 최하단
+- **지연중인 안건 탭**: 완료 아카이브 왼쪽에 신설 — 미완료+목표일 경과(KST 오늘 기준) 안건을 목표일 오름차순으로 표시 (items GET `scope=overdue` 추가, 병원 컬럼 포함·목표일 적색)
+- **상세 모달 진행 이력 수정**: 주차별 이력 카드 hover 시 '✎ 수정' — CellEditor(리치)로 인라인 수정, 기존 upsert API 재사용. 빈 내용 저장은 confirm 후 해당 주차 기록 삭제(보드 셀과 동일 규칙)
+- 검증: tsc 0오류 · 힙 4GB 빌드 · PM2 재시작 · `/weekly`·`scope=overdue` 307 스모크
+- 영향 파일: lib/weekly.ts, prisma/schema.prisma, prisma/migrations/20260820120000_*/(신규), app/api/weekly/items/(route·[id]/route), app/weekly/page.tsx, app/weekly/_components/ItemDetailModal.tsx
+
+---
+
+## 2026-08-20 | 주간업무 관리툴 3차 개선 — 상태 컬럼 전진·목표일 경과 강조·상세 모달 대형화 (dev2)
+
+- **보드 컬럼 순서**: 담당 자리에 상태를 전진 배치 (… 금주 진행 → 담당 팀 → **상태** → 담당 → 목표일) — 기본 폭에서 상태까지(1,348px) 첫 화면 노출 (지난주/금주 370px로 미세 조정, 저장 키 `weekly_board_col_widths_v2`로 리셋). 병원별·아카이브 리스트 동일 순서
+- **목표일 경과 강조**: 미완료+목표일 경과 행은 빨간 테두리(`border-destructive/50`) + 연분홍 배경(`bg-destructive/10`)
+- **상세 모달 대형화**: max-w 92vw(최대 1500px) 2컬럼 — 좌측 기본정보(제목·구분·업무구분·상태·목표일·병원[상세 링크 ↗]·담당 팀·담당)+설명+메타(등록자·진행 기록 n건·최근 작성), 우측 주차별 진행 이력 타임라인(자체 스크롤·작성자/작성일 표기·RichContent 렌더). 요약 스트립에 구분·업무구분·상태·**목표일 D-day 배지**(경과 시 적색 'D+n 지남')
+- **설명 리치텍스트 전환**: 상세 모달 설명을 WeeklyRichEditor로 교체 (autoFocus·minHeight 옵션 추가) — items POST/PUT의 detail도 sanitize+빈값 판정 서버 적용
+- 검증: tsc 0오류 · 힙 4GB 빌드 · PM2 재시작 · `/weekly` 307 스모크. git push·PROD 미반영
+- 영향 파일: app/weekly/page.tsx, app/weekly/_components/(ItemDetailModal 전면 개정·WeeklyRichEditor), app/api/weekly/items/(route·[id]/route)
+
+---
+
 ## 2026-08-20 | PROD 배포: 주간업무 관리툴 개선 (커밋 9687546)
 
 - 배포 전 확인: PROD DB 직접 조회가 권한 분류기에 차단되어 심평원 잡은 PM2 로그 200줄로 간접 확인(연동 활동 없음)

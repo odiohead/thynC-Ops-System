@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { checkWeeklyAccess } from '@/lib/weeklyAccess'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { isWeeklyBizType, isWeeklyItemKind, isWeeklyItemStatus, isYmd } from '@/lib/weekly'
+import { isEmptyRichText, sanitizeRichTextHtml } from '@/lib/richtext'
 import { ITEM_INCLUDE, toItemDto } from '../shared'
 
 export const dynamic = 'force-dynamic'
@@ -12,7 +13,7 @@ export const dynamic = 'force-dynamic'
  * 주간업무 항목 목록(아카이브·병원 스코프)·생성 (weekly_ops_design.md §5)
  */
 
-// GET ?scope=archive|hospital&includeDone=1
+// GET ?scope=archive|hospital|overdue&includeDone=1
 export async function GET(request: NextRequest) {
   const user = await getAuthUser(request)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -20,18 +21,23 @@ export async function GET(request: NextRequest) {
   if (denial) return NextResponse.json({ error: denial.error }, { status: denial.status })
 
   const scope = request.nextUrl.searchParams.get('scope')
-  if (scope !== 'archive' && scope !== 'hospital') {
-    return NextResponse.json({ error: 'scope는 archive 또는 hospital이어야 합니다.' }, { status: 400 })
+  if (scope !== 'archive' && scope !== 'hospital' && scope !== 'overdue') {
+    return NextResponse.json({ error: 'scope는 archive·hospital·overdue 중 하나여야 합니다.' }, { status: 400 })
   }
+
+  // overdue: 미완료 + 목표일이 오늘(KST) 이전 — 보드 행 강조와 동일 판정 축
+  const todayKstYmd = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10)
 
   const includeDone = request.nextUrl.searchParams.get('includeDone') === '1'
   const rows = await prisma.weeklyItem.findMany({
     where:
       scope === 'archive'
         ? { completedWeek: { not: null } }
-        : includeDone
-          ? {}
-          : { completedWeek: null },
+        : scope === 'overdue'
+          ? { completedWeek: null, targetDate: { lt: new Date(todayKstYmd) } }
+          : includeDone
+            ? {}
+            : { completedWeek: null },
     include: {
       ...ITEM_INCLUDE,
       updates: {
@@ -43,7 +49,9 @@ export async function GET(request: NextRequest) {
     orderBy:
       scope === 'archive'
         ? [{ completedWeek: 'desc' }, { completedAt: 'desc' }]
-        : [{ sortOrder: 'asc' }, { id: 'asc' }],
+        : scope === 'overdue'
+          ? [{ targetDate: 'asc' }, { id: 'asc' }]
+          : [{ sortOrder: 'asc' }, { id: 'asc' }],
   })
 
   const items = rows.map((row) => toItemDto(row, { latestUpdate: row.updates[0] ?? null }))
@@ -63,7 +71,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (!isWeeklyItemKind(body.kind)) {
-    return NextResponse.json({ error: 'kind가 올바르지 않습니다. (PROJECT | ISSUE)' }, { status: 400 })
+    return NextResponse.json({ error: 'kind가 올바르지 않습니다. (BIZ | OPS | DEV)' }, { status: 400 })
   }
   const title = typeof body.title === 'string' ? body.title.trim() : ''
   if (!title) return NextResponse.json({ error: '제목을 입력하세요.' }, { status: 400 })
@@ -118,7 +126,11 @@ export async function POST(request: NextRequest) {
     data: {
       kind: body.kind,
       title,
-      detail: typeof body.detail === 'string' && body.detail.trim() ? body.detail : null,
+      // 설명은 리치텍스트(HTML) — sanitize 후 빈 값 판정 (2026-08-20)
+      detail: (() => {
+        const html = typeof body.detail === 'string' ? sanitizeRichTextHtml(body.detail.trim()) : ''
+        return html && !isEmptyRichText(html) ? html : null
+      })(),
       ...(status ? { status } : {}),
       ...(bizType ? { bizType } : {}),
       hospitalCode,

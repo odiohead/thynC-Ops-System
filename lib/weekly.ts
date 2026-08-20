@@ -8,12 +8,15 @@
  * '완료' 배지는 completedWeek 유무에서 파생한다 (이중 소스 desync 차단).
  */
 
-export const WEEKLY_ITEM_KINDS = ['PROJECT', 'ISSUE'] as const
+// 2026-08-20 구조 개정: 주요 안건/주요 이슈 2섹션 → 사업/운영/개발 안건 3섹션
+// (마이그레이션 20260820_weekly_kind_restructure — PROJECT→BIZ, ISSUE→OPS 데이터 변환)
+export const WEEKLY_ITEM_KINDS = ['BIZ', 'OPS', 'DEV'] as const
 export type WeeklyItemKind = (typeof WEEKLY_ITEM_KINDS)[number]
 
 export const WEEKLY_KIND_LABELS: Record<WeeklyItemKind, string> = {
-  PROJECT: '주요 안건', // 2026-08-19 1차 검토: '주요 프로젝트' → '주요 안건' (라벨만 변경, DB 값 유지)
-  ISSUE: '주요 이슈',
+  BIZ: '사업 안건',
+  OPS: '운영 안건',
+  DEV: '개발 안건',
 }
 
 export const WEEKLY_ITEM_STATUSES = ['진행', '보류'] as const

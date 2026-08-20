@@ -45,6 +45,10 @@ interface Props {
   placeholder?: string
   onChange: (html: string) => void
   onEscape?: () => void
+  /** 마운트 시 포커스 (기본 true — 인라인 셀 편집용). 모달 폼 안에서는 false */
+  autoFocus?: boolean
+  /** 본문 최소 높이 (기본 5rem) */
+  minHeightClass?: string
 }
 
 function ToolBtn({
@@ -136,7 +140,14 @@ function ColorMenu({
   )
 }
 
-export default function WeeklyRichEditor({ initial, placeholder, onChange, onEscape }: Props) {
+export default function WeeklyRichEditor({
+  initial,
+  placeholder,
+  onChange,
+  onEscape,
+  autoFocus = true,
+  minHeightClass,
+}: Props) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: false, codeBlock: false }),
@@ -146,7 +157,7 @@ export default function WeeklyRichEditor({ initial, placeholder, onChange, onEsc
       Placeholder.configure({ placeholder: placeholder ?? '내용을 입력하세요' }),
     ],
     content: toEditableHtml(initial),
-    autofocus: 'end',
+    autofocus: autoFocus ? 'end' : false,
     editorProps: {
       attributes: { class: 'weekly-rich' },
       handleKeyDown: (_view, event) => {
@@ -211,7 +222,12 @@ export default function WeeklyRichEditor({ initial, placeholder, onChange, onEsc
           지우기
         </ToolBtn>
       </div>
-      <EditorContent editor={editor} />
+      {/* minHeightClass는 래퍼에 적용 — 여백 클릭 시에도 포커스되도록 위임 */}
+      <EditorContent
+        editor={editor}
+        className={`cursor-text ${minHeightClass ?? ''}`}
+        onClick={() => editor.commands.focus()}
+      />
     </div>
   )
 }

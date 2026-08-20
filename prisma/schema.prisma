@@ -2315,7 +2315,7 @@ model SalesDealDevice {
 /// kind·status·bizType 값은 lib/weekly.ts 코드 상수. 완료 여부의 단일 소스는 completedWeek (status는 진행/보류만)
 model WeeklyItem {
   id            Int       @id @default(autoincrement())
-  kind          String // 'PROJECT'(주요 안건) | 'ISSUE'(주요 이슈)
+  kind          String // 'BIZ'(사업 안건) | 'OPS'(운영 안건) | 'DEV'(개발 안건) — 2026-08-20 개정 (구 PROJECT/ISSUE)
   title         String
   detail        String?   @db.Text
   status        String    @default("진행") // '진행' | '보류'

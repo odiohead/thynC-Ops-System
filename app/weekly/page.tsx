@@ -28,7 +28,7 @@ import {
   type WeeklyMastersResponse,
 } from '@/lib/weekly'
 
-type Tab = 'board' | 'hospital' | 'archive'
+type Tab = 'board' | 'hospital' | 'overdue' | 'archive'
 
 const STATUS_VARIANT: Record<string, 'primary' | 'warning' | 'success'> = {
   진행: 'primary',
@@ -43,20 +43,21 @@ const BIZ_VARIANT: Record<string, 'primary' | 'success' | 'default'> = {
 }
 
 // ── 보드 컬럼 정의 — 순서·기본 폭 (2026-08-20 리사이즈 도입) ─────────────
-// 기본 폭 합계 중 담당 팀까지(1288px)가 1400px 컨테이너 안에 들어오고, 이후는 횡스크롤.
+// 기본 폭 합계 중 상태까지(1348px)가 1400px 컨테이너 안에 들어오고, 담당·목표일·완료는 횡스크롤.
 const BOARD_COLS: { key: string; label: string; w: number; resizable: boolean }[] = [
   { key: 'move', label: '', w: 40, resizable: false },
   { key: 'biz', label: '업무구분', w: 96, resizable: true },
   { key: 'title', label: '안건', w: 280, resizable: true },
-  { key: 'last', label: '지난주 진행', w: 380, resizable: true },
-  { key: 'this', label: '금주 진행', w: 380, resizable: true },
+  { key: 'last', label: '지난주 진행', w: 370, resizable: true },
+  { key: 'this', label: '금주 진행', w: 370, resizable: true },
   { key: 'team', label: '담당 팀', w: 112, resizable: true },
-  { key: 'owner', label: '담당', w: 96, resizable: true },
   { key: 'status', label: '상태', w: 80, resizable: true },
+  { key: 'owner', label: '담당', w: 96, resizable: true },
   { key: 'target', label: '목표일', w: 112, resizable: true },
   { key: 'done', label: '', w: 96, resizable: false },
 ]
-const COL_WIDTH_STORAGE_KEY = 'weekly_board_col_widths_v1'
+// v2 (2026-08-20): 상태 컬럼 전진 배치에 맞춰 저장 폭 리셋
+const COL_WIDTH_STORAGE_KEY = 'weekly_board_col_widths_v2'
 const COL_MIN_WIDTH = 56
 
 function defaultColWidths(): Record<string, number> {
@@ -198,7 +199,7 @@ export default function WeeklyPage() {
   const loadList = useCallback(async () => {
     if (tab === 'board') return
     setListItems(null)
-    const scope = tab === 'archive' ? 'archive' : 'hospital'
+    const scope = tab === 'archive' ? 'archive' : tab === 'overdue' ? 'overdue' : 'hospital'
     const qs = tab === 'hospital' && includeDone ? '&includeDone=1' : ''
     const res = await fetch(`/api/weekly/items?scope=${scope}${qs}`)
     if (res.redirected) {
@@ -413,7 +414,16 @@ export default function WeeklyPage() {
     const activeIdx = activeList.findIndex((x) => x.id === it.id)
 
     return (
-      <tr key={it.id} className={`border-t border-border ${doneThisWeek ? 'bg-muted/40' : 'hover:bg-accent/40'}`}>
+      <tr
+        key={it.id}
+        className={
+          doneThisWeek
+            ? 'border-t border-border bg-muted/40'
+            : overdue
+              ? 'border border-destructive/50 bg-destructive/10 hover:bg-destructive/15' // 목표일 경과 — 빨간 테두리 + 연분홍 배경
+              : 'border-t border-border hover:bg-accent/40'
+        }
+      >
         <td className={`${tdCls} w-10 whitespace-nowrap`}>
           {canWrite && active && !ownerFilter && (
             <span className="flex flex-col leading-none">
@@ -506,10 +516,10 @@ export default function WeeklyPage() {
           )}
         </td>
         <td className={`${tdCls} whitespace-nowrap`}>{it.ownerTeamName ?? '—'}</td>
-        <td className={`${tdCls} whitespace-nowrap`}>{it.ownerName ?? '—'}</td>
         <td className={`${tdCls} whitespace-nowrap`}>
           <Badge variant={STATUS_VARIANT[st]}>{st}</Badge>
         </td>
+        <td className={`${tdCls} whitespace-nowrap`}>{it.ownerName ?? '—'}</td>
         <td className={`${tdCls} whitespace-nowrap ${overdue ? 'font-medium text-destructive' : ''}`}>
           {it.targetDate ?? '—'}
         </td>
@@ -592,7 +602,7 @@ export default function WeeklyPage() {
     )
   }
 
-  const renderListTable = (items: WeeklyItemDto[], mode: 'hospital' | 'archive') => (
+  const renderListTable = (items: WeeklyItemDto[], mode: 'hospital' | 'archive' | 'overdue') => (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[1020px] text-sm">
         <thead className="bg-muted/60">
@@ -601,11 +611,11 @@ export default function WeeklyPage() {
             <th className={thCls}>구분</th>
             <th className={thCls}>업무구분</th>
             <th className={thCls}>안건</th>
-            {mode === 'archive' && <th className={thCls}>병원</th>}
+            {mode !== 'hospital' && <th className={thCls}>병원</th>}
             <th className={thCls}>최근 진행</th>
             <th className={thCls}>담당 팀</th>
-            <th className={thCls}>담당</th>
             <th className={thCls}>상태</th>
+            <th className={thCls}>담당</th>
             <th className={thCls}>목표일</th>
           </tr>
         </thead>
@@ -630,7 +640,7 @@ export default function WeeklyPage() {
                   <Badge variant={BIZ_VARIANT[it.bizType] ?? 'default'}>{it.bizType}</Badge>
                 </td>
                 <td className={`${tdCls} font-medium`}>{it.title}</td>
-                {mode === 'archive' && <td className={`${tdCls} whitespace-nowrap`}>{it.hospitalName ?? '—'}</td>}
+                {mode !== 'hospital' && <td className={`${tdCls} whitespace-nowrap`}>{it.hospitalName ?? '—'}</td>}
                 <td className={tdCls}>
                   {it.latestUpdate ? (
                     <div>
@@ -642,11 +652,13 @@ export default function WeeklyPage() {
                   )}
                 </td>
                 <td className={`${tdCls} whitespace-nowrap`}>{it.ownerTeamName ?? '—'}</td>
-                <td className={`${tdCls} whitespace-nowrap`}>{it.ownerName ?? '—'}</td>
                 <td className={`${tdCls} whitespace-nowrap`}>
                   <Badge variant={STATUS_VARIANT[st]}>{st}</Badge>
                 </td>
-                <td className={`${tdCls} whitespace-nowrap`}>{it.targetDate ?? '—'}</td>
+                <td className={`${tdCls} whitespace-nowrap`}>{it.ownerName ?? '—'}</td>
+                <td className={`${tdCls} whitespace-nowrap ${mode === 'overdue' ? 'font-medium text-destructive' : ''}`}>
+                  {it.targetDate ?? '—'}
+                </td>
               </tr>
             )
           })}
@@ -706,6 +718,7 @@ export default function WeeklyPage() {
               [
                 ['board', '주간 보드'],
                 ['hospital', '병원별'],
+                ['overdue', '지연중인 안건'],
                 ['archive', '완료 아카이브'],
               ] as [Tab, string][]
             ).map(([key, label]) => (
@@ -767,6 +780,22 @@ export default function WeeklyPage() {
                 ))
               )}
             </div>
+          )}
+
+          {tab === 'overdue' && (
+            <section className="rounded-lg border border-border bg-card">
+              <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+                <h2 className="text-sm font-semibold text-destructive">지연중인 안건</h2>
+                <span className="text-xs text-muted-foreground">목표일이 지난 미완료 안건 (목표일 오름차순)</span>
+              </div>
+              {listItems === null ? (
+                <div className="py-16 text-center text-sm text-muted-foreground">불러오는 중…</div>
+              ) : listItems.length === 0 ? (
+                <div className="py-10 text-center text-sm text-muted-foreground">지연중인 안건이 없습니다.</div>
+              ) : (
+                renderListTable(listItems, 'overdue')
+              )}
+            </section>
           )}
 
           {tab === 'archive' && (

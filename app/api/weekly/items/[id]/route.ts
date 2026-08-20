@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { checkWeeklyAccess } from '@/lib/weeklyAccess'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { currentMondayKstYmd, isMondayYmd, isWeeklyBizType, isWeeklyItemKind, isWeeklyItemStatus, isYmd, type WeeklyItemDetailDto } from '@/lib/weekly'
+import { isEmptyRichText, sanitizeRichTextHtml } from '@/lib/richtext'
 import { ITEM_INCLUDE, toItemDto, toUpdateDto } from '../../shared'
 
 export const dynamic = 'force-dynamic'
@@ -169,11 +170,13 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (body.detail !== null && typeof body.detail !== 'string') {
       return NextResponse.json({ error: 'detail이 올바르지 않습니다.' }, { status: 400 })
     }
-    data.detail = typeof body.detail === 'string' && body.detail.trim() ? body.detail : null
+    // 설명은 리치텍스트(HTML) — sanitize 후 태그 제거 기준으로 빈 값 판정 (2026-08-20)
+    const detailHtml = typeof body.detail === 'string' ? sanitizeRichTextHtml(body.detail.trim()) : ''
+    data.detail = detailHtml && !isEmptyRichText(detailHtml) ? detailHtml : null
   }
   if (body.kind !== undefined) {
     if (!isWeeklyItemKind(body.kind)) {
-      return NextResponse.json({ error: 'kind가 올바르지 않습니다. (PROJECT | ISSUE)' }, { status: 400 })
+      return NextResponse.json({ error: 'kind가 올바르지 않습니다. (BIZ | OPS | DEV)' }, { status: 400 })
     }
     data.kind = body.kind
   }
