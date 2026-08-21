@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-08-21 | PROD 배포: 영업 대시보드 하반기 탭 + 주간업무 보드 개선 (커밋 d1de780)
+
+- 배포 전 확인: PROD 로그 심평원 연동 활동 0건 (에러 로그는 기존 BigInt `/api/hospitals/[code]/sales` 건·Slack lookup 노이즈만)
+- dev2 커밋(d1de780, 13파일)·push → PROD `git pull`(8fb272c→d1de780) → 힙 4GB 빌드 → `pm2 restart thync-prod` (마이그레이션·신규 패키지 없음 — 하반기 목표는 AppSetting 키)
+- 스모크: 로컬 `/`·`/weekly`·`/sales/dashboard` 307, 외부 HTTPS `/`·`/sales/dashboard` 307 정상. 신규 에러 0건
+
+---
+
 ## 2026-08-21 | 주간업무 보드 — 전체 폭 사용·안건 확대·펼침 시 설명 병기·W주차 표기 (dev2)
 
 - **메인 카드영역 전체 폭 사용**: 컨테이너 `max-w-[1400px]` 해제 — 네비 제외 메인프레임 가로폭 전부 사용(px-6)
