@@ -84,7 +84,7 @@ export function toUpdateDto(u: UpdateRow): WeeklyUpdateDto {
 
 export function toItemDto(
   item: ItemRow,
-  updates?: { thisWeek?: UpdateRow | null; lastWeek?: UpdateRow | null; latestUpdate?: UpdateRow | null }
+  updates?: { thisWeek?: UpdateRow | null; lastWeek?: UpdateRow | null; latestUpdate?: UpdateRow | null; all?: UpdateRow[] | null }
 ): WeeklyItemDto {
   return {
     id: item.id,
@@ -107,5 +107,6 @@ export function toItemDto(
     thisWeek: updates?.thisWeek ? toUpdateDto(updates.thisWeek) : null,
     lastWeek: updates?.lastWeek ? toUpdateDto(updates.lastWeek) : null,
     latestUpdate: updates?.latestUpdate ? toUpdateDto(updates.latestUpdate) : null,
+    updates: updates?.all ? updates.all.map(toUpdateDto) : null,
   }
 }

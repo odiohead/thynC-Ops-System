@@ -7,7 +7,18 @@ import { prisma } from '@/lib/prisma'
 
 export const SALES_TARGET_TYPE_ORDER = ['상급종합', '종합병원', '병원', '요양병원', '정신병원', '치과병원', '한방병원', '의원', '치과의원', '한의원']
 
-export const salesTargetKey = (year: number) => `sales_bed_targets_${year}`
+/** 목표 기간 — year: 연간 / h2: 하반기 (하반기 목표는 별도 AppSetting 키에 저장) */
+export type SalesTargetPeriod = 'year' | 'h2'
+
+export const salesTargetKey = (year: number, period: SalesTargetPeriod = 'year') =>
+  period === 'year' ? `sales_bed_targets_${year}` : `sales_bed_targets_${year}_h2`
+
+export function parseSalesTargetPeriod(v: unknown): SalesTargetPeriod {
+  return v === 'h2' ? 'h2' : 'year'
+}
+
+/** 하반기 실적 집계 시작일 — 2026-08-21 사용자 결정: 8월 1일부터 (통상 하반기 7/1과 다름) */
+export const salesH2From = (year: number) => `${year}-08-01`
 
 export function parseSalesTargetYear(v: unknown): number | null {
   const n = parseInt(String(v ?? ''), 10)
@@ -53,9 +64,9 @@ export function sanitizeTypeColors(raw: unknown): Record<string, string> {
 }
 
 /** 저장 형식 호환: 구(flat targets JSON) / 신({ targets, totalColor }) 모두 해석 */
-export async function getSalesTargetSettings(year: number): Promise<SalesTargetSettings> {
+export async function getSalesTargetSettings(year: number, period: SalesTargetPeriod = 'year'): Promise<SalesTargetSettings> {
   const fallback: SalesTargetSettings = { targets: {}, totalColor: DEFAULT_TOTAL_COLOR, typeColors: {} }
-  const row = await prisma.appSetting.findUnique({ where: { key: salesTargetKey(year) } })
+  const row = await prisma.appSetting.findUnique({ where: { key: salesTargetKey(year, period) } })
   if (!row?.value) return fallback
   try {
     const raw = JSON.parse(row.value)

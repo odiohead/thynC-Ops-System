@@ -31,10 +31,9 @@ export async function GET(request: NextRequest) {
       },
       include: {
         ...ITEM_INCLUDE,
+        // 전체 이력 반환 — 진행 컬럼 주차 네비(◀▶)가 임의 주차를 클라이언트에서 조회 (2026-08-21)
         updates: {
-          where: { weekStart: { lte: weekDate } },
           orderBy: { weekStart: 'desc' },
-          take: 2,
           include: { updatedBy: { select: { name: true } } },
         },
       },
@@ -51,6 +50,7 @@ export async function GET(request: NextRequest) {
     toItemDto(row, {
       thisWeek: row.updates.find((u) => ymd(u.weekStart) === week) ?? null,
       lastWeek: row.updates.find((u) => u.weekStart.getTime() < weekDate.getTime()) ?? null,
+      all: row.updates,
     })
   )
 

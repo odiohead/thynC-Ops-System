@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers'
 import { verifyToken, isAdminOrAbove } from '@/lib/auth'
 import { canAccessSales } from '@/lib/sales'
-import { getSalesTargetSettings } from '@/lib/salesTargets'
+import { getSalesTargetSettings, salesH2From } from '@/lib/salesTargets'
 import { prisma } from '@/lib/prisma'
 import SalesConceptTabs from '../_components/SalesConceptTabs'
 import SalesDashboardA, { type DashboardAData } from './_components/SalesDashboardA'
@@ -134,22 +134,34 @@ export default async function SalesDashboardPage() {
 
   // 2026년 목표현황 — 계약일 2026년 계약완료 딜 기준 (병상 = 대웅 디바이스, 병원 = 중복 제거) (2026-08-18)
   const TARGET_YEAR = 2026
-  const yearDeals = completed.filter((d) => d.contractDate?.toISOString().slice(0, 4) === String(TARGET_YEAR))
-  const yearBedsByType = new Map<string, number>()
-  const yearHospByType = new Map<string, Set<string>>()
-  for (const d of yearDeals) {
-    const t = d.hospital.type ?? '미지정'
-    yearBedsByType.set(t, (yearBedsByType.get(t) ?? 0) + (d.daewoongDeviceCount ?? 0))
-    if (!yearHospByType.has(t)) yearHospByType.set(t, new Set())
-    yearHospByType.get(t)!.add(d.hospitalCode)
+  const distByType = (list: typeof completed, bedTargets: Record<string, number>) => {
+    const bedsByType = new Map<string, number>()
+    const hospByType = new Map<string, Set<string>>()
+    for (const d of list) {
+      const t = d.hospital.type ?? '미지정'
+      bedsByType.set(t, (bedsByType.get(t) ?? 0) + (d.daewoongDeviceCount ?? 0))
+      if (!hospByType.has(t)) hospByType.set(t, new Set())
+      hospByType.get(t)!.add(d.hospitalCode)
+    }
+    return TYPE_ORDER.filter((t) => bedTargets[t] !== undefined).map((name) => ({
+      name,
+      targetBeds: bedTargets[name],
+      beds: bedsByType.get(name) ?? 0,
+      hospitals: hospByType.get(name)?.size ?? 0,
+    }))
   }
+  const yearDeals = completed.filter((d) => d.contractDate?.toISOString().slice(0, 4) === String(TARGET_YEAR))
   const { targets: bedTargets, totalColor, typeColors } = await getSalesTargetSettings(TARGET_YEAR)
-  const targetDist = TYPE_ORDER.filter((t) => bedTargets[t] !== undefined).map((name) => ({
-    name,
-    targetBeds: bedTargets[name],
-    beds: yearBedsByType.get(name) ?? 0,
-    hospitals: yearHospByType.get(name)?.size ?? 0,
-  }))
+  const targetDist = distByType(yearDeals, bedTargets)
+
+  // 2026년 하반기 영업현황 — 실적 집계는 8/1부터 (2026-08-21 사용자 결정), 목표는 하반기 전용 키
+  const H2_FROM = salesH2From(TARGET_YEAR)
+  const halfDeals = completed.filter((d) => {
+    const ds = d.contractDate?.toISOString().slice(0, 10)
+    return ds !== undefined && ds >= H2_FROM && ds <= `${TARGET_YEAR}-12-31`
+  })
+  const half = await getSalesTargetSettings(TARGET_YEAR, 'h2')
+  const halfDist = distByType(halfDeals, half.targets)
 
   // 정산·세금계산서 (계약완료 딜 기준)
   const settleDist = Array.from(countBy(completed, (d) => d.daewoongSettlement).entries()).map(([name, count]) => ({ name, count }))
@@ -171,6 +183,7 @@ export default async function SalesDashboardPage() {
     allDeals,
     typeDist,
     target: { year: TARGET_YEAR, dist: targetDist, totalColor, typeColors, canEdit: user ? isAdminOrAbove(user.role) : false },
+    halfTarget: { year: TARGET_YEAR, from: H2_FROM, dist: halfDist, totalColor: half.totalColor, typeColors: half.typeColors, canEdit: user ? isAdminOrAbove(user.role) : false },
     settleDist,
     taxDist,
   }

@@ -396,17 +396,17 @@ export default function ItemDetailModal({ itemId, onClose, masters, canWrite, on
                     ))}
                   </Select>
                 </label>
-                <label className="block text-sm">
+                <div className="block text-sm">
                   <span className={fieldLabel}>담당 (선택)</span>
-                  <Select value={form.ownerId} onChange={(e) => set('ownerId', e.target.value)} disabled={!canWrite}>
-                    <option value="">— 담당 미지정 —</option>
-                    {(masters?.users ?? []).map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
+                  <SearchSelect
+                    value={form.ownerId}
+                    onChange={(v) => set('ownerId', v)}
+                    options={(masters?.users ?? []).map((u) => ({ value: u.id, label: u.name }))}
+                    placeholder="담당 검색"
+                    emptyLabel="— 담당 미지정 —"
+                    disabled={!canWrite}
+                  />
+                </div>
               </div>
 
               <div className="block text-sm">

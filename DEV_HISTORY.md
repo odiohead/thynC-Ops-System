@@ -4,6 +4,47 @@
 
 ---
 
+## 2026-08-21 | 주간업무 보드 — 전체 폭 사용·안건 확대·펼침 시 설명 병기·W주차 표기 (dev2)
+
+- **메인 카드영역 전체 폭 사용**: 컨테이너 `max-w-[1400px]` 해제 — 네비 제외 메인프레임 가로폭 전부 사용(px-6)
+- **안건 기본 폭 확대**: 280→340px
+- **행 펼침 시 설명 병기**: 진행 내용 셀 클릭으로 펼치면 안건 필드 하단에 상세 모달의 '설명'(detail 리치텍스트)을 muted 소형으로 표시 (빈 리치텍스트는 숨김)
+- **연간 주차(W) 병기**: `isoWeekNum`(ISO 8601) 신설 — 상단 주차 라벨 "… ~ 8월 23일 · W34", `weekLabel`은 기간형 "8/17~21 W34"(월~금, 월 넘어가면 "8/31~9/4 W36")로 개정(진행 컬럼 네비·폴백·아카이브 완료주차·상세 타임라인 등 사용처 일괄 반영 — 같은 날 2차 피드백로 '8/17주(W34)'→기간형 전환)
+- 검증: tsc 0오류 · 힙 4GB 빌드 · PM2 재시작 · `/weekly` 307 스모크. git push·PROD 미반영
+- 영향 파일: lib/weekly.ts, app/weekly/page.tsx
+
+---
+
+## 2026-08-21 | 주간업무 보드 — 진행 컬럼 병합·주차 네비 (dev2)
+
+- **컬럼 병합**: '지난주 진행'(370px)·'금주 진행'(370px) 2컬럼 → **'진행 내용' 1컬럼(555px = 기존 한 컬럼의 150%)** — 우측 공간 확보로 담당·목표일·완료가 횡스크롤 없이 노출(기본 폭 총합 1652→1467px). 저장 폭 키 `weekly_board_col_widths_v3`로 리셋
+- **주차 네비**: 진행 컬럼 헤더에 ◀ ▶ — 표시 주차를 주 단위로 이동해 전주·다음주 진행을 그 자리에서 열람(오프셋 라벨 '8/17주 진행', 클릭=금주 복귀). **편집·amber 미입력 신호·빈 셀 입력 진입은 금주(오프셋 0)에서만** — 과거 주 이력 수정은 기존 상세 모달 경로 유지. 표시 주차에 기록이 없으면 이전 최근 기록을 주차 라벨과 함께 표시(구 지난주 컬럼 폴백 규칙 계승)
+- **보드 API**: 항목별 updates를 전체 이력(weekStart 역순)으로 반환 — DTO `updates` 필드 신설(board 전용), thisWeek/lastWeek 계산 유지. 보드/주차 이동 시 오프셋·인라인 편집 초기화
+- 검증: tsc 0오류 · 힙 4GB 빌드 · PM2 재시작 · `/weekly` 307 스모크. git push·PROD 미반영 (dev2까지만 — 사용자 요청)
+- 영향 파일: lib/weekly.ts, app/api/weekly/(shared·board/route), app/weekly/page.tsx
+
+---
+
+## 2026-08-21 | 주간업무 — 담당 선택 검색형 전환·리치텍스트 공백 줄 표시 수정 (dev2)
+
+- **담당 선택 검색 가능**: 항목 추가 행(AddItemRow)·상세 모달(ItemDetailModal)의 담당 `<select>`를 기존 `SearchSelect`(병원 검색과 동일 컴포넌트)로 교체, 보드 상단 담당 필터도 동일 전환
+- **공백 줄 사라짐 수정**: Tiptap이 빈 줄을 `<p></p>`로 저장하는데 표시(RichContent)에서 높이 0으로 접혀 사라져 보이던 문제 — `.weekly-rich p:empty::before { content: '\00a0' }` CSS로 줄 높이 유지 (저장 데이터는 온전했음, 표시만 수정)
+- 부수: page.tsx 미사용 `Select` import 제거 (lint 빌드 실패 해소)
+- 검증: tsc 0오류 · 힙 4GB 빌드 · PM2 재시작 · `/weekly` 307 스모크. git push·PROD 미반영
+- 영향 파일: app/weekly/page.tsx, app/weekly/_components/(AddItemRow·ItemDetailModal), app/globals.css
+
+---
+
+## 2026-08-21 | 영업 대시보드 — '하반기 영업현황' 탭 신설·디폴트 전환 (dev2)
+
+- **종별 카드 탭 2종 → 3종**: `하반기 영업현황`(신규, **첫 탭·페이지 진입 시 디폴트**) | `2026년 목표현황` | `종별 도입 병원` 순서로 재배치
+- **하반기 영업현황**: 계약일 **2026-08-01~12-31**(사용자 결정 — 통상 하반기 7/1 아님) 계약완료 딜 기준 종별 진척, 연간 목표현황과 동일한 목표 대비 렌더(합계 행·진척률 신호등·TargetPanel 공용 추출)
+- **하반기 목표 설정**: 연간과 별도 AppSetting 키 `sales_bed_targets_<year>_h2` — `lib/salesTargets.ts`에 period('year'|'h2') 개념·`salesH2From`(8/1) 추가, `/api/settings/sales-targets` GET/PUT에 `period` 파라미터 확장(감사 로그 라벨에 '하반기' 병기). 카드 ⚙는 활성 탭 기준으로 연간/하반기 목표 모달 분기
+- 검증: tsc 0오류 · 힙 4GB 빌드 · PM2 재시작 · `/sales/dashboard` 307 스모크. git push·PROD 미반영 (DDL 없음 — AppSetting 키만)
+- 영향 파일: lib/salesTargets.ts, app/api/settings/sales-targets/route.ts, app/sales/dashboard/page.tsx, app/sales/dashboard/_components/SalesDashboardA.tsx, README.md
+
+---
+
 ## 2026-08-21 | PROD 배포: weekly.access 권한 + 진입 아이콘 (커밋 8fb272c)
 
 - 배포 전 확인: PROD 로그 200줄 심평원 활동 0건

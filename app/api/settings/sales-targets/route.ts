@@ -6,6 +6,7 @@ import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import {
   SALES_TARGET_TYPE_ORDER,
   getSalesTargetSettings,
+  parseSalesTargetPeriod,
   parseSalesTargetYear,
   salesTargetKey,
   sanitizeSalesTargets,
@@ -27,8 +28,9 @@ export async function GET(request: NextRequest) {
   if (denial) return NextResponse.json({ error: denial.error }, { status: denial.status })
 
   const year = parseSalesTargetYear(request.nextUrl.searchParams.get('year')) ?? 2026
-  const settings = await getSalesTargetSettings(year)
-  return NextResponse.json({ year, ...settings, types: SALES_TARGET_TYPE_ORDER })
+  const period = parseSalesTargetPeriod(request.nextUrl.searchParams.get('period'))
+  const settings = await getSalesTargetSettings(year, period)
+  return NextResponse.json({ year, period, ...settings, types: SALES_TARGET_TYPE_ORDER })
 }
 
 export async function PUT(request: NextRequest) {
@@ -38,14 +40,15 @@ export async function PUT(request: NextRequest) {
   }
   const body = await request.json().catch(() => null)
   const year = parseSalesTargetYear(body?.year) ?? 2026
+  const period = parseSalesTargetPeriod(body?.period)
   const targets = sanitizeSalesTargets(body?.targets)
   if (!targets) return NextResponse.json({ error: '잘못된 목표 값입니다. (종별별 0 이상 정수)' }, { status: 400 })
-  const before = await getSalesTargetSettings(year)
+  const before = await getSalesTargetSettings(year, period)
   const totalColor = sanitizeTotalColor(body?.totalColor) ?? before.totalColor
   const typeColors = body?.typeColors === undefined ? before.typeColors : sanitizeTypeColors(body.typeColors)
   const settings = { targets, totalColor, typeColors }
 
-  const key = salesTargetKey(year)
+  const key = salesTargetKey(year, period)
   await prisma.appSetting.upsert({
     where: { key },
     update: { value: JSON.stringify(settings) },
@@ -58,9 +61,9 @@ export async function PUT(request: NextRequest) {
     action: 'UPDATE',
     resource: 'setting:sales-targets',
     resourceId: key,
-    resourceLabel: `${year}년 종별 목표 병상수`,
+    resourceLabel: `${year}년${period === 'h2' ? ' 하반기' : ''} 종별 목표 병상수`,
     before,
     after: settings,
   })
-  return NextResponse.json({ year, ...settings })
+  return NextResponse.json({ year, period, ...settings })
 }

@@ -100,10 +100,23 @@ export function ymdLocal(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
-/** 주차 라벨 — "8/17주" (지난주 진행 컬럼의 주차 병기용) */
-export function weekLabel(ymd: string): string {
+/** ISO 8601 연간 주차 번호 (W34 표기용 — 목요일 기준, UTC 날짜 산술) */
+export function isoWeekNum(ymd: string): number {
   const d = new Date(ymd)
-  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}주`
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 3) // 해당 주 목요일
+  const firstThu = new Date(Date.UTC(d.getUTCFullYear(), 0, 4))
+  firstThu.setUTCDate(firstThu.getUTCDate() - ((firstThu.getUTCDay() + 6) % 7) + 3)
+  return 1 + Math.round((d.getTime() - firstThu.getTime()) / (7 * 86400000))
+}
+
+/** 주차 라벨 — "8/17~21 W34" (월~금 기간 + 연간 주차 병기, 월이 바뀌면 "8/31~9/4 W36") */
+export function weekLabel(ymd: string): string {
+  const mon = new Date(ymd)
+  const fri = new Date(ymd)
+  fri.setUTCDate(fri.getUTCDate() + 4)
+  const sameMonth = mon.getUTCMonth() === fri.getUTCMonth()
+  const friPart = sameMonth ? `${fri.getUTCDate()}` : `${fri.getUTCMonth() + 1}/${fri.getUTCDate()}`
+  return `${mon.getUTCMonth() + 1}/${mon.getUTCDate()}~${friPart} W${isoWeekNum(ymd)}`
 }
 
 // ── API 응답 DTO (라우트·페이지 공용 계약) ──────────────────────
@@ -137,6 +150,8 @@ export interface WeeklyItemDto {
   thisWeek: WeeklyUpdateDto | null
   /** board 전용 — 선택 주차 이전의 최근 update */
   lastWeek: WeeklyUpdateDto | null
+  /** board 전용 — 전체 진행 이력 (weekStart 역순, 진행 컬럼 주차 네비용 — 2026-08-21) */
+  updates?: WeeklyUpdateDto[] | null
   /** archive·hospital 스코프 전용 — 가장 최근 update */
   latestUpdate: WeeklyUpdateDto | null
 }

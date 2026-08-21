@@ -8,7 +8,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, Area, LabelList } from 'recharts'
-import { Building2, Target, Settings } from 'lucide-react'
+import { Building2, Target, Settings, TrendingUp } from 'lucide-react'
 import { useChartTheme } from '@/app/components/theme/useChartTheme'
 import { useOverlayDismiss } from '@/app/components/useOverlayDismiss'
 
@@ -27,15 +27,19 @@ export interface DashboardAData {
   monthly: Array<{ ym: string; count: number; hosp: number; beds: number; cumHosp: number; cumBeds: number }>
   allDeals: DealListRow[]
   typeDist: Array<{ name: string; count: number; total: number; beds: number; totalBeds: number }>
-  target: {
-    year: number
-    dist: Array<{ name: string; targetBeds: number; beds: number; hospitals: number }>
-    totalColor: string
-    typeColors: Record<string, string>
-    canEdit: boolean
-  }
+  target: TargetBlock
+  halfTarget: TargetBlock & { from: string } // 하반기 영업현황 — 실적 집계 시작일 포함
+
   settleDist: Array<{ name: string; count: number }>
   taxDist: Array<{ name: string; count: number }>
+}
+
+export interface TargetBlock {
+  year: number
+  dist: Array<{ name: string; targetBeds: number; beds: number; hospitals: number }>
+  totalColor: string
+  typeColors: Record<string, string>
+  canEdit: boolean
 }
 
 export interface DealListRow {
@@ -214,50 +218,87 @@ function TrendCard({ title, unit, cum, rows, color, gradId, chart }: {
   )
 }
 
-/** 종별 도입 병원(누적) / 연도 목표현황(연간 진척) 탭 카드 — 우상단 ⚙로 종별 목표 병상수 설정 (2026-08-18) */
-function TypeDistCard({ typeDist, target, chart }: {
+/** 목표현황 패널 — 합계 + 종별 진척 행 (연간·하반기 공용) */
+function TargetPanel({ t, emptyMsg, colorOf }: {
+  t: TargetBlock
+  emptyMsg: string
+  colorOf: (name: string, i: number) => string
+}) {
+  const totalTarget = t.dist.reduce((a, r) => a + r.targetBeds, 0)
+  const totalBeds = t.dist.reduce((a, r) => a + r.beds, 0)
+  const totalHosp = t.dist.reduce((a, r) => a + r.hospitals, 0)
+  if (t.dist.length === 0) {
+    return (
+      <p className="py-6 text-center text-sm text-gray-400">
+        {emptyMsg}
+        {t.canEdit && (
+          <>
+            <br />우측 상단 설정(⚙)에서 목표 병상수를 입력하세요.
+          </>
+        )}
+      </p>
+    )
+  }
+  return (
+    <div className="space-y-2">
+      {/* 합계 색상은 설정(⚙)에서 변경 가능 */}
+      <TargetRow name="합계" beds={totalBeds} targetBeds={totalTarget} hospitals={totalHosp} color={t.totalColor} bold />
+      {t.dist.map((r, i) => (
+        <TargetRow key={r.name} name={r.name} beds={r.beds} targetBeds={r.targetBeds} hospitals={r.hospitals} color={colorOf(r.name, i)} />
+      ))}
+    </div>
+  )
+}
+
+/** 하반기 영업현황 / 연도 목표현황 / 종별 도입 병원 탭 카드 — 우상단 ⚙로 활성 탭의 종별 목표 병상수 설정 (2026-08-21 하반기 탭 추가·디폴트) */
+function TypeDistCard({ typeDist, target, halfTarget, chart }: {
   typeDist: DashboardAData['typeDist']
   target: DashboardAData['target']
+  halfTarget: DashboardAData['halfTarget']
   chart: ReturnType<typeof useChartTheme>
 }) {
-  const [tab, setTab] = useState<'dist' | 'target'>('target')
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [tab, setTab] = useState<'half' | 'target' | 'dist'>('half')
+  const [settingsFor, setSettingsFor] = useState<'year' | 'h2' | null>(null)
   const colors = [chart.indigo, chart.blue, '#0ea5e9', chart.emerald, chart.amber, '#64748b']
-  // 종별 색: 설정에서 지정한 색 우선, 미지정은 기본 팔레트 순환 (양쪽 탭 공통)
-  const colorOf = (name: string, i: number) => target.typeColors[name] ?? colors[i % colors.length]
+  // 종별 색: 설정에서 지정한 색 우선, 미지정은 기본 팔레트 순환
+  const colorOfWith = (typeColors: Record<string, string>) => (name: string, i: number) => typeColors[name] ?? colors[i % colors.length]
+  const colorOf = colorOfWith(target.typeColors)
 
   const tabBtn = (active: boolean) =>
     `inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[12px] font-semibold transition-colors ${
       active ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
     }`
 
-  const totalTarget = target.dist.reduce((a, t) => a + t.targetBeds, 0)
-  const totalBeds = target.dist.reduce((a, t) => a + t.beds, 0)
-  const totalHosp = target.dist.reduce((a, t) => a + t.hospitals, 0)
+  const h2FromLabel = halfTarget.from.slice(5).replace('-', '/') // 'MM/DD'
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1">
-          <button className={tabBtn(tab === 'dist')} onClick={() => setTab('dist')}>
-            <Building2 className="h-3.5 w-3.5" /> 종별 도입 병원
+          <button className={tabBtn(tab === 'half')} onClick={() => setTab('half')}>
+            <TrendingUp className="h-3.5 w-3.5" /> 하반기 영업현황
           </button>
           <button className={tabBtn(tab === 'target')} onClick={() => setTab('target')}>
             <Target className="h-3.5 w-3.5" /> {target.year}년 목표현황
+          </button>
+          <button className={tabBtn(tab === 'dist')} onClick={() => setTab('dist')}>
+            <Building2 className="h-3.5 w-3.5" /> 종별 도입 병원
           </button>
         </div>
         <div className="flex items-center gap-2">
           <span className="hidden text-[11px] text-gray-400 xl:inline">
             {tab === 'dist'
               ? '도입 수 / 종별 전체 · 병상: 딜 / 심평원'
-              : `계약일 ${target.year}년 계약완료 딜 · 병상: 대웅 디바이스`}
+              : tab === 'half'
+                ? `계약일 ${halfTarget.from}~ 계약완료 딜 · 병상: 대웅 디바이스`
+                : `계약일 ${target.year}년 계약완료 딜 · 병상: 대웅 디바이스`}
           </span>
           {target.canEdit && (
             <button
-              onClick={() => setSettingsOpen(true)}
+              onClick={() => setSettingsFor(tab === 'half' ? 'h2' : 'year')}
               className="rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
-              title="종별 목표 병상수 설정"
-              aria-label="종별 목표 병상수 설정"
+              title={tab === 'half' ? '하반기 종별 목표 병상수 설정' : '종별 목표 병상수 설정'}
+              aria-label={tab === 'half' ? '하반기 종별 목표 병상수 설정' : '종별 목표 병상수 설정'}
             >
               <Settings className="h-4 w-4" />
             </button>
@@ -266,7 +307,13 @@ function TypeDistCard({ typeDist, target, chart }: {
       </div>
 
       <div className="mt-3">
-        {tab === 'dist' ? (
+        {tab === 'half' ? (
+          <TargetPanel
+            t={halfTarget}
+            colorOf={colorOfWith(halfTarget.typeColors)}
+            emptyMsg={`${halfTarget.year}년 하반기 종별 목표가 아직 없습니다.`}
+          />
+        ) : tab === 'dist' ? (
           <div className="space-y-2">
             {typeDist.length === 0 && <p className="text-sm text-gray-400">데이터 없음</p>}
             {typeDist.map((t, i) => {
@@ -309,36 +356,19 @@ function TypeDistCard({ typeDist, target, chart }: {
             })}
           </div>
         ) : (
-          <div className="space-y-2">
-            {target.dist.length === 0 ? (
-              <p className="py-6 text-center text-sm text-gray-400">
-                {target.year}년 종별 목표가 아직 없습니다.
-                {target.canEdit && (
-                  <>
-                    <br />우측 상단 설정(⚙)에서 목표 병상수를 입력하세요.
-                  </>
-                )}
-              </p>
-            ) : (
-              <>
-                {/* 합계 색상은 설정(⚙)에서 변경 가능 */}
-                <TargetRow name="합계" beds={totalBeds} targetBeds={totalTarget} hospitals={totalHosp} color={target.totalColor} bold />
-                {target.dist.map((t, i) => (
-                  <TargetRow key={t.name} name={t.name} beds={t.beds} targetBeds={t.targetBeds} hospitals={t.hospitals} color={colorOf(t.name, i)} />
-                ))}
-              </>
-            )}
-          </div>
+          <TargetPanel t={target} colorOf={colorOf} emptyMsg={`${target.year}년 종별 목표가 아직 없습니다.`} />
         )}
       </div>
 
-      {settingsOpen && (
+      {settingsFor && (
         <TargetSettingsModal
           year={target.year}
-          initial={Object.fromEntries(target.dist.map((t) => [t.name, t.targetBeds]))}
-          initialColor={target.totalColor}
-          initialTypeColors={target.typeColors}
-          onClose={() => setSettingsOpen(false)}
+          period={settingsFor}
+          titleSuffix={settingsFor === 'h2' ? ` 하반기 (실적 ${h2FromLabel}~)` : ''}
+          initial={Object.fromEntries((settingsFor === 'h2' ? halfTarget : target).dist.map((t) => [t.name, t.targetBeds]))}
+          initialColor={(settingsFor === 'h2' ? halfTarget : target).totalColor}
+          initialTypeColors={(settingsFor === 'h2' ? halfTarget : target).typeColors}
+          onClose={() => setSettingsFor(null)}
         />
       )}
     </div>
@@ -399,8 +429,10 @@ const COLOR_PRESETS = [
 
 const TOTAL_KEY = '__total__' // 색상 팝오버에서 합계 행 식별자
 
-function TargetSettingsModal({ year, initial, initialColor, initialTypeColors, onClose }: {
+function TargetSettingsModal({ year, period, titleSuffix, initial, initialColor, initialTypeColors, onClose }: {
   year: number
+  period: 'year' | 'h2'
+  titleSuffix: string
   initial: Record<string, number>
   initialColor: string
   initialTypeColors: Record<string, string>
@@ -460,7 +492,7 @@ function TargetSettingsModal({ year, initial, initialColor, initialTypeColors, o
       const res = await fetch('/api/settings/sales-targets', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ year, targets, totalColor: color, typeColors }),
+        body: JSON.stringify({ year, period, targets, totalColor: color, typeColors }),
       })
       if (!res.ok) {
         const d = await res.json().catch(() => null)
@@ -478,7 +510,7 @@ function TargetSettingsModal({ year, initial, initialColor, initialTypeColors, o
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl dark:bg-gray-900" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-sm font-semibold text-gray-900">{year}년 종별 목표 병상수 설정</h3>
+        <h3 className="text-sm font-semibold text-gray-900">{year}년{titleSuffix} 종별 목표 병상수 설정</h3>
         <p className="mt-0.5 text-[11px] text-gray-400">빈칸 = 목표 없음 (목표현황 탭에서 제외) · ● 클릭 = 그래프 색상 변경</p>
         <div className="mt-3 max-h-[55vh] space-y-1.5 overflow-auto pr-1">
           {/* 합계 행 색상 */}
@@ -614,7 +646,7 @@ export default function SalesDashboardA({ data }: { data: DashboardAData }) {
       <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3">
         <DealListCard title="월 계약내역" mode="month" deals={data.allDeals} />
         <DealListCard title="주 계약내역" mode="week" deals={data.allDeals} />
-        <TypeDistCard typeDist={data.typeDist} target={data.target} chart={chart} />
+        <TypeDistCard typeDist={data.typeDist} target={data.target} halfTarget={data.halfTarget} chart={chart} />
       </div>
 
       <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">

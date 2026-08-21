@@ -9,12 +9,13 @@ import PageHeader from '@/app/components/ui/PageHeader'
 import Button from '@/app/components/ui/Button'
 import Badge from '@/app/components/ui/Badge'
 import EmptyState from '@/app/components/ui/EmptyState'
-import { Select } from '@/app/components/ui/Input'
 import ItemDetailModal from './_components/ItemDetailModal'
 import AddItemRow, { type AddItemForm } from './_components/AddItemRow'
 import CellEditor from './_components/CellEditor'
+import SearchSelect from './_components/SearchSelect'
 import NotesSection from './_components/NotesSection'
 import RichContent from './_components/RichContent'
+import { isEmptyRichText } from '@/lib/richtext'
 import {
   WEEKLY_ITEM_KINDS,
   WEEKLY_KIND_LABELS,
@@ -23,6 +24,7 @@ import {
   ymdLocal,
   addDaysYmd,
   weekLabel,
+  isoWeekNum,
   type WeeklyBoardResponse,
   type WeeklyItemDto,
   type WeeklyMastersResponse,
@@ -43,21 +45,21 @@ const BIZ_VARIANT: Record<string, 'primary' | 'success' | 'default'> = {
 }
 
 // ── 보드 컬럼 정의 — 순서·기본 폭 (2026-08-20 리사이즈 도입) ─────────────
-// 기본 폭 합계 중 상태까지(1348px)가 1400px 컨테이너 안에 들어오고, 담당·목표일·완료는 횡스크롤.
+// 2026-08-21: 지난주/금주 진행 2컬럼(370×2) → 진행 내용 1컬럼(555 = 기존 한 컬럼의 150%)으로 병합.
+// 헤더 ◀▶로 표시 주차를 이동해 전주·다음주 진행을 그 자리에서 열람 (편집은 금주만).
 const BOARD_COLS: { key: string; label: string; w: number; resizable: boolean }[] = [
   { key: 'move', label: '', w: 40, resizable: false },
   { key: 'biz', label: '업무구분', w: 96, resizable: true },
-  { key: 'title', label: '안건', w: 280, resizable: true },
-  { key: 'last', label: '지난주 진행', w: 370, resizable: true },
-  { key: 'this', label: '금주 진행', w: 370, resizable: true },
+  { key: 'title', label: '안건', w: 340, resizable: true },
+  { key: 'prog', label: '진행 내용', w: 555, resizable: true },
   { key: 'team', label: '담당 팀', w: 112, resizable: true },
   { key: 'status', label: '상태', w: 80, resizable: true },
   { key: 'owner', label: '담당', w: 96, resizable: true },
   { key: 'target', label: '목표일', w: 112, resizable: true },
   { key: 'done', label: '', w: 96, resizable: false },
 ]
-// v2 (2026-08-20): 상태 컬럼 전진 배치에 맞춰 저장 폭 리셋
-const COL_WIDTH_STORAGE_KEY = 'weekly_board_col_widths_v2'
+// v3 (2026-08-21): 진행 컬럼 병합에 맞춰 저장 폭 리셋
+const COL_WIDTH_STORAGE_KEY = 'weekly_board_col_widths_v3'
 const COL_MIN_WIDTH = 56
 
 function defaultColWidths(): Record<string, number> {
@@ -88,8 +90,10 @@ export default function WeeklyPage() {
   const [adding, setAdding] = useState<WeeklyItemKind | null>(null)
   const [detailId, setDetailId] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
-  /** 펼쳐진 행 — 지난주·금주 진행을 2줄 clamp 대신 전체 표시 */
+  /** 펼쳐진 행 — 진행 내용을 2줄 clamp 대신 전체 표시 */
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
+  /** 진행 컬럼 표시 주차 오프셋 — 0 = 보드 주차(금주, 편집 가능), 음수 = 과거·양수 = 미래 (열람 전용) */
+  const [progOffset, setProgOffset] = useState(0)
 
   // ── 컬럼 폭 — localStorage 영속 + 마우스 드래그 리사이즈 ──────────
   const [colWidths, setColWidths] = useState<Record<string, number>>(defaultColWidths)
@@ -230,11 +234,17 @@ export default function WeeklyPage() {
       .catch(() => {})
   }, [denied])
 
-  // 주차 이동 시 진행 중이던 인라인 편집 초기화
+  // 주차 이동 시 진행 중이던 인라인 편집·진행 컬럼 오프셋 초기화
   useEffect(() => {
     setEditingId(null)
     setAdding(null)
+    setProgOffset(0)
   }, [weekYmd])
+
+  // 진행 컬럼 주차 이동 시 인라인 편집 종료 (편집은 금주 오프셋 0에서만)
+  useEffect(() => {
+    setEditingId(null)
+  }, [progOffset])
 
   const reloadAll = useCallback(() => {
     loadBoard()
@@ -393,11 +403,13 @@ export default function WeeklyPage() {
   }, [listItems])
 
   // ── 렌더 ────────────────────────────────────────────────────
-  const weekRangeLabel = `${weekStart.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })} ~ ${addDays(weekStart, 6).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })}`
+  const weekRangeLabel = `${weekStart.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })} ~ ${addDays(weekStart, 6).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })} · W${isoWeekNum(weekYmd)}`
 
   const thCls = 'px-4 py-2 text-left text-xs font-medium text-muted-foreground'
   const tdCls = 'px-4 py-3 align-top text-sm'
   const totalColWidth = BOARD_COLS.reduce((sum, c) => sum + colWidths[c.key], 0)
+  /** 진행 컬럼에 표시할 주차 — 보드 주차 + 오프셋(주 단위) */
+  const progWeekYmd = addDaysYmd(weekYmd, progOffset * 7)
 
   const renderBoardRow = (it: WeeklyItemDto, activeList: WeeklyItemDto[]) => {
     const st = displayStatus(it)
@@ -406,7 +418,14 @@ export default function WeeklyPage() {
     const overdue = !!it.targetDate && !it.completedWeek && it.targetDate < todayYmd
     // amber는 진행·미완료·금주 미입력에만 — 미래 주는 당연히 미입력이라 신호가 무의미하므로 제외
     const needsUpdate = active && it.status === '진행' && !it.thisWeek && weekYmd <= todayMondayYmd
-    const prevWeekYmd = addDaysYmd(weekYmd, -7)
+    // 진행 컬럼 표시 주차 데이터 — 오프셋 0은 금주(thisWeek), 그 외는 전체 이력에서 조회
+    const isCurrentProg = progOffset === 0
+    const progUpdate = isCurrentProg
+      ? it.thisWeek
+      : ((it.updates ?? []).find((u) => u.weekStart === progWeekYmd) ?? null)
+    // 표시 주차에 기록이 없으면 그 이전 최근 기록을 주차 라벨과 함께 표시 (구 '지난주 진행' 폴백 규칙)
+    const progFallback =
+      !isCurrentProg && !progUpdate ? ((it.updates ?? []).find((u) => u.weekStart < progWeekYmd) ?? null) : null
     const isEditing = editingId === it.id
     const editable = canWrite && active
     const expanded = expandedIds.has(it.id)
@@ -461,32 +480,21 @@ export default function WeeklyPage() {
               <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{it.hospitalName}</span>
             </div>
           )}
-        </td>
-        {/* 지난주·금주 진행 — 기본 2줄 clamp, 셀 클릭으로 펼침/접기. 편집은 ✎ 버튼으로만 진입 (2026-08-20) */}
-        <td
-          className={`${tdCls} ${it.lastWeek ? 'cursor-pointer' : ''}`}
-          onClick={() => it.lastWeek && toggleExpand(it.id)}
-          title={it.lastWeek && !expanded ? '클릭하여 펼치기' : undefined}
-        >
-          {it.lastWeek ? (
-            <div>
-              {it.lastWeek.weekStart !== prevWeekYmd && (
-                <div className="mb-0.5 text-xs font-medium text-warning">{weekLabel(it.lastWeek.weekStart)}:</div>
-              )}
-              <RichContent content={it.lastWeek.content} clampLines={expanded ? undefined : 2} />
-            </div>
-          ) : (
-            <span className="text-muted-foreground">—</span>
+          {/* 행 펼침 시 상세의 '설명'을 안건 하단에 병기 (2026-08-21) */}
+          {expanded && it.detail && !isEmptyRichText(it.detail) && (
+            <RichContent content={it.detail} className="mt-1.5 text-xs text-muted-foreground" />
           )}
         </td>
+        {/* 진행 내용 — 헤더 ◀▶로 표시 주차 이동 (2026-08-21 병합). 기본 2줄 clamp, 셀 클릭=펼침/접기.
+            금주(오프셋 0)만 편집 가능 — 과거 주 이력 수정은 상세 모달에서 */}
         <td
-          className={`group ${tdCls} ${needsUpdate && !isEditing ? 'bg-warning-subtle/60' : ''} ${!isEditing && (it.thisWeek || editable) ? 'cursor-pointer' : ''}`}
+          className={`group ${tdCls} ${isCurrentProg && needsUpdate && !isEditing ? 'bg-warning-subtle/60' : ''} ${!isEditing && (progUpdate || progFallback || (isCurrentProg && editable)) ? 'cursor-pointer' : ''}`}
           onClick={() => {
             if (isEditing) return
-            if (it.thisWeek) toggleExpand(it.id) // 내용 있으면 클릭=펼침/접기
-            else if (editable) setEditingId(it.id) // 빈 셀은 바로 입력 진입
+            if (progUpdate || progFallback) toggleExpand(it.id) // 내용 있으면 클릭=펼침/접기
+            else if (isCurrentProg && editable) setEditingId(it.id) // 빈 금주 셀은 바로 입력 진입
           }}
-          title={it.thisWeek && !expanded ? '클릭하여 펼치기' : undefined}
+          title={(progUpdate || progFallback) && !expanded ? '클릭하여 펼치기' : undefined}
         >
           {isEditing ? (
             <CellEditor
@@ -495,10 +503,10 @@ export default function WeeklyPage() {
               onSave={(c) => saveUpdate(it.id, c)}
               onCancel={() => setEditingId(null)}
             />
-          ) : it.thisWeek ? (
+          ) : progUpdate ? (
             <div className="flex items-start gap-1">
-              <RichContent content={it.thisWeek.content} clampLines={expanded ? undefined : 2} className="min-w-0 flex-1" />
-              {editable && (
+              <RichContent content={progUpdate.content} clampLines={expanded ? undefined : 2} className="min-w-0 flex-1" />
+              {isCurrentProg && editable && (
                 <button
                   className="shrink-0 rounded px-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100"
                   title="수정"
@@ -511,8 +519,13 @@ export default function WeeklyPage() {
                 </button>
               )}
             </div>
+          ) : progFallback ? (
+            <div>
+              <div className="mb-0.5 text-xs font-medium text-warning">{weekLabel(progFallback.weekStart)}:</div>
+              <RichContent content={progFallback.content} clampLines={expanded ? undefined : 2} />
+            </div>
           ) : (
-            <span className="text-muted-foreground">{editable ? '클릭하여 입력' : '—'}</span>
+            <span className="text-muted-foreground">{isCurrentProg && editable ? '클릭하여 입력' : '—'}</span>
           )}
         </td>
         <td className={`${tdCls} whitespace-nowrap`}>{it.ownerTeamName ?? '—'}</td>
@@ -557,7 +570,34 @@ export default function WeeklyPage() {
               <tr>
                 {BOARD_COLS.map((c) => (
                   <th key={c.key} className={`relative ${thCls}`}>
-                    {c.label}
+                    {c.key === 'prog' ? (
+                      // 진행 내용 주차 네비 — ◀▶로 전주·다음주 진행 열람, 라벨 클릭=금주 복귀
+                      <span className="inline-flex items-center gap-1.5">
+                        <button
+                          className="rounded border border-border px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          onClick={() => setProgOffset((o) => o - 1)}
+                          title="이전 주 진행 보기"
+                        >
+                          ◀
+                        </button>
+                        <button
+                          className={`rounded px-1 font-medium tabular-nums ${progOffset === 0 ? 'text-muted-foreground' : 'text-warning hover:underline'}`}
+                          onClick={() => setProgOffset(0)}
+                          title={progOffset === 0 ? undefined : '클릭하여 금주로 복귀'}
+                        >
+                          {progOffset === 0 ? '금주 진행' : `${weekLabel(progWeekYmd)} 진행`}
+                        </button>
+                        <button
+                          className="rounded border border-border px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          onClick={() => setProgOffset((o) => o + 1)}
+                          title="다음 주 진행 보기"
+                        >
+                          ▶
+                        </button>
+                      </span>
+                    ) : (
+                      c.label
+                    )}
                     {c.resizable && (
                       <span
                         className="absolute -right-1 top-0 z-10 h-full w-2 cursor-col-resize select-none hover:bg-primary/30"
@@ -572,7 +612,7 @@ export default function WeeklyPage() {
             <tbody>
               {items.length === 0 && adding !== kind && (
                 <tr className="border-t border-border">
-                  <td colSpan={10} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                  <td colSpan={BOARD_COLS.length} className="px-3 py-8 text-center text-sm text-muted-foreground">
                     등록된 항목이 없습니다.
                   </td>
                 </tr>
@@ -671,7 +711,8 @@ export default function WeeklyPage() {
   )
 
   return (
-    <div className="mx-auto max-w-[1400px] px-4 py-6">
+    // 메인프레임 전체 폭 사용 (2026-08-21 — 구 max-w-[1400px] 해제)
+    <div className="px-6 py-6">
       <PageHeader
         title="주간업무 관리"
         description="사업본부 주간 리뷰 — 주요 안건 진척과 주요 이슈를 주차별로 관리합니다."
@@ -697,18 +738,14 @@ export default function WeeklyPage() {
               {weekYmd === todayMondayYmd && <Badge variant="primary" className="ml-2">이번 주</Badge>}
             </span>
             {tab === 'board' && (
-              <Select
+              <SearchSelect
                 className="ml-auto w-36"
                 value={ownerFilter}
-                onChange={(e) => setOwnerFilter(e.target.value)}
-              >
-                <option value="">담당 전체</option>
-                {(masters?.users ?? []).map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </Select>
+                onChange={setOwnerFilter}
+                options={(masters?.users ?? []).map((u) => ({ value: u.id, label: u.name }))}
+                placeholder="담당 전체"
+                emptyLabel="담당 전체"
+              />
             )}
           </div>
 

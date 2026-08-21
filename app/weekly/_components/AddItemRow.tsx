@@ -79,14 +79,14 @@ export default function AddItemRow({ masters, busy, onSave, onCancel }: Props) {
               </option>
             ))}
           </Select>
-          <Select className="w-32" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
-            <option value="">담당 (선택)</option>
-            {(masters?.users ?? []).map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </Select>
+          <SearchSelect
+            className="w-32"
+            value={ownerId}
+            onChange={setOwnerId}
+            options={(masters?.users ?? []).map((u) => ({ value: u.id, label: u.name }))}
+            placeholder="담당 검색 (선택)"
+            emptyLabel="— 담당 미지정 —"
+          />
           <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
             목표일
             <Input type="date" className="w-36" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} />

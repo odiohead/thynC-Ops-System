@@ -246,7 +246,7 @@ lib/
 │   └── tools.ts                      # 도구 26종 (read-only Prisma SELECT — 병원·업무·집계·위키·상담이력 + 자재·티켓·차량·조직·GW 플래너)
 ├── consultation.ts                   # 상담이력 — 조회 권한(SEERS)·코드 발번(CS-YYYYMM-NNNN)·제목 추출
 ├── sales.ts                          # 영업/CRM v3 — 접근 권한(checkSalesAccess: ADMIN+SEERS)·딜 코드 발번(DEAL-YYYYMM-NNNN)·금액/날짜 파서·코드 3카테고리
-├── salesTargets.ts                   # 영업 연도별 종별 목표 병상수 — AppSetting 키·검증·조회 (영업 대시보드 목표현황 탭)
+├── salesTargets.ts                   # 영업 연도별·하반기 종별 목표 병상수 — AppSetting 키(period year/h2)·검증·조회·하반기 집계 시작일(8/1) (영업 대시보드 목표현황·하반기 탭)
 ├── weekly.ts                         # 주간업무 관리 — kind/status 상수·주차 유틸·API DTO 계약 (클라이언트 안전)
 ├── weeklyAccess.ts                   # 주간업무 접근 게이트 (checkWeeklyAccess: SEERS 소속 + 쓰기는 USER 이상)
 ├── parking.ts                        # 주차 웹할인 — pweb.kr 대행 클라이언트 (env 계정, 로그인→검색→할인권 조회→등록)
@@ -957,7 +957,7 @@ prisma/
 ### 영업현황 (`/sales/dashboard`·`/sales/deals`·`/sales/dashboard_map`, 영업/CRM v4 — ADMIN 이상 + SEERS 전용)
 - nav '영업 현황(개발중)' → **메인 화면은 대시보드(`/sales/dashboard`, 구 대시보드 A)**, 탭 3개 구성: `대시보드` | `도입현황` | `대시보드(지도)`. `/sales`는 대시보드로 리다이렉트(구 북마크 호환)
 - **대시보드 (`/sales/dashboard`)**: 딜 축 실적 집계 — 요약 지표(계약·병상·디바이스·금액)·월별 추이·이번달/이번주 계약내역 리스트(◀▶ 기간 이동)·종별 도입 병원 게이지·판매/정산/세금계산서 분포
-  - **종별 카드 탭 2종 (2026-08-18)**: `종별 도입 병원`(누적 침투율 — 병원수 메인·병상 서브) | `2026년 목표현황`(계약일 2026년 계약완료 딜 기준 — **병상 메인**(목표 대비 진척률, 초과 시 105%처럼 그대로 표기 + '달성' 배지)·병원수 서브, 목표 입력 종별만 + 합계 행). 카드 우상단 ⚙(ADMIN 이상)로 종별 목표 병상수 설정 — `lib/salesTargets.ts` + `/api/settings/sales-targets`
+  - **종별 카드 탭 3종 (2026-08-21 하반기 탭 추가)**: `하반기 영업현황`(**디폴트·첫 탭** — 계약일 2026-08-01~12-31 계약완료 딜 기준, 하반기 전용 목표 대비 진척) | `2026년 목표현황`(계약일 2026년 계약완료 딜 기준 — **병상 메인**(목표 대비 진척률, 초과 시 105%처럼 그대로 표기 + '달성' 배지)·병원수 서브, 목표 입력 종별만 + 합계 행) | `종별 도입 병원`(누적 침투율 — 병원수 메인·병상 서브). 카드 우상단 ⚙(ADMIN 이상)로 **활성 탭의** 종별 목표 병상수 설정(연간/하반기 별도 저장) — `lib/salesTargets.ts` + `/api/settings/sales-targets`
   - 종별 도입 병원 카드에 **병상 침투율** 병기 (2026-08-10): 종별 도입 병상(계약완료 딜의 대웅 디바이스 수량 합, KPI '도입 병상'과 동일 기준) / 종별 전체 병상(심평원 `perm_sbd_cnt` 합) + 보조 게이지. 전체 병상 미연동(0) 종별은 분모 '-'·배지 '-%' 표시(게이지 생략)
 - **엑셀 다운로드 (2026-08-04)**: 두 탭 모두 우측 상단 '엑셀 다운로드' — **화면에 걸린 필터가 그대로 반영된 결과**를 받는다. 도입현황은 필터·정렬이 적용된 표를 컬럼 정의(`COLS`) 순서 그대로 29컬럼+순번으로 내보내며, xlsx 라이브러리는 클릭 시점에 동적 로드(초기 번들 제외)
 - **도입현황 (`/sales/deals`)**: 계약 이력 전용 입력 페이지. 엑셀 B~AK 컬럼 순서 flat 표(**1행 = 1차수(딜)**) + '+ 등록'(병원 검색·매핑 → 딜 생성 → 상세 이동) + 행 클릭 → 딜 상세 편집(`/sales/deals/[id]` — 전 필드 카드형 폼, 병원·지역·종별 자동 표시, 운영 축 읽기 전용, 프로젝트 연결 셀렉트, 삭제)
@@ -1508,7 +1508,7 @@ npm run dev
 | POST, PUT/DELETE | `/api/hospitals/[code]/sales/deals(/[id])` | 계약 건(차수) — `DEAL-YYYYMM-NNNN` 발번, round_no 자동, 같은 병원 프로젝트만 연결, 코드 FK 카테고리 검증 |
 | POST, PUT/DELETE | `/api/hospitals/[code]/sales/activities(/[id])` | 영업 활동 |
 | GET/POST, PUT/DELETE | `/api/settings/sales-codes/[category](/[id])` | 영업 StatusCode 7카테고리 (화이트리스트 검증, 색상 지원, 사용 중 삭제 409) |
-| GET/PUT | `/api/settings/sales-targets` | 연도별 종별 목표 병상수 (AppSetting `sales_bed_targets_<year>` JSON — 열람: 영업 게이트, 수정: ADMIN 이상) |
+| GET/PUT | `/api/settings/sales-targets` | 연도별 종별 목표 병상수 (AppSetting `sales_bed_targets_<year>` JSON, `period=h2`는 하반기 키 `sales_bed_targets_<year>_h2` — 열람: 영업 게이트, 수정: ADMIN 이상) |
 
 ### 주차 웹할인 (USER 이상 — pweb.kr 대행 호출, DB 미사용)
 | Method | Endpoint | 설명 |
