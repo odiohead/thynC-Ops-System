@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { checkSalesAccess, nextDealCode } from '@/lib/sales'
+import { checkSalesAccess, nextDealCode, syncHospitalIntroTypesFromDeals } from '@/lib/sales'
 import { parseDealBody, validateDealCodes } from './shared'
 
 const auditSafe = (d: Record<string, unknown>) =>
@@ -50,6 +50,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     const deal = await prisma.salesDeal.create({
       data: { ...data, dealCode, hospitalCode: params.code, roundNo: roundNo as number },
     })
+
+    // 도입형태 자동 동기화 (딜 판매모델 → INTRO_TYPE) — 실패해도 딜 생성은 유지
+    await syncHospitalIntroTypesFromDeals(params.code).catch((e) => console.error('[deals] intro-type sync 실패:', e))
 
     await logAudit({
       req: request,

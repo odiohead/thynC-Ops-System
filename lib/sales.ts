@@ -105,3 +105,51 @@ export const SALES_CODE_CATEGORY_LABELS: Record<SalesCodeCategory, string> = {
   SALES_SETTLEMENT: '정산 상태',
   PERSON_GROUP: '직군 (인적정보)',
 }
+
+/**
+ * 딜 판매모델(daewoong_model) → 도입형태(INTRO_TYPE StatusCode) 매핑 — 2026-08-31 확정
+ * scripts/migrate-intro-types-from-deals.sql 과 단일 규칙 유지 (변경 시 양쪽 동반 수정)
+ */
+const DEAL_MODEL_TO_INTRO_TYPE: Record<string, string> = {
+  사용량: '사용량비례형',
+  구축형: '구축형',
+  분납형: '구축형',
+  구독형: '구독형',
+  '씨어스 월 납입': '구독형',
+}
+
+/**
+ * 병원 도입형태를 딜 판매모델 기준으로 재계산해 전체 교체 (딜 저장/삭제 후 호출).
+ * 매핑 가능한 판매모델이 하나도 없으면 현행 유지 — 일회성 마이그와 동일 규칙
+ * (판매모델 미입력 병원의 수동 도입형태 보호). 실패해도 딜 저장 자체는 성공 유지(호출부에서 로그만).
+ */
+export async function syncHospitalIntroTypesFromDeals(hospitalCode: string): Promise<void> {
+  const deals = await prisma.salesDeal.findMany({
+    where: { hospitalCode },
+    select: { daewoongModel: true },
+  })
+  const introNames = Array.from(
+    new Set(
+      deals
+        .map((d) => (d.daewoongModel ? DEAL_MODEL_TO_INTRO_TYPE[d.daewoongModel] : undefined))
+        .filter((n): n is string => !!n)
+    )
+  )
+  if (introNames.length === 0) return
+
+  const [hospital, codes] = await Promise.all([
+    prisma.hospital.findUnique({ where: { hospitalCode }, select: { id: true } }),
+    prisma.statusCode.findMany({
+      where: { category: 'INTRO_TYPE', name: { in: introNames } },
+      select: { id: true },
+    }),
+  ])
+  if (!hospital || codes.length === 0) return
+
+  await prisma.$transaction([
+    prisma.hospitalIntroType.deleteMany({ where: { hospitalId: hospital.id } }),
+    prisma.hospitalIntroType.createMany({
+      data: codes.map((c) => ({ hospitalId: hospital.id, statusCodeId: c.id })),
+    }),
+  ])
+}

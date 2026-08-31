@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { checkSalesAccess } from '@/lib/sales'
+import { checkSalesAccess, syncHospitalIntroTypesFromDeals } from '@/lib/sales'
 import { parseDealBody, validateDealCodes } from '../shared'
 
 export const dynamic = 'force-dynamic'
@@ -54,6 +54,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   try {
     const deal = await prisma.salesDeal.update({ where: { id: g.id }, data: { ...data, roundNo } })
+
+    // 도입형태 자동 동기화 (딜 판매모델 → INTRO_TYPE) — 실패해도 딜 수정은 유지
+    await syncHospitalIntroTypesFromDeals(params.code).catch((e) => console.error('[deals] intro-type sync 실패:', e))
+
     if (devices !== null) {
       await prisma.$transaction([
         prisma.salesDealDevice.deleteMany({ where: { dealId: g.id } }),
@@ -89,6 +93,9 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   if ('error' in g) return g.error
 
   await prisma.salesDeal.delete({ where: { id: g.id } })
+
+  // 도입형태 자동 동기화 — 남은 딜 기준 재계산 (매핑 근거 없으면 현행 유지)
+  await syncHospitalIntroTypesFromDeals(params.code).catch((e) => console.error('[deals] intro-type sync 실패:', e))
 
   await logAudit({
     req: request,

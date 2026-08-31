@@ -355,6 +355,7 @@ prisma/
 - Hospital ↔ StatusCode(INTRO_TYPE) N:M 조인 테이블
 - 구축형 / 구독형 / 사용량비례형 등 다중 선택 가능
 - 2026-08-31 데이터 재구성: 딜 판매모델(`sales_deals.daewoong_model`) 기준 매핑(사용량→사용량비례형, 구축형·분납형→구축형, 구독형·씨어스 월 납입→구독형) — `scripts/migrate-intro-types-from-deals.sql`(idempotent), 딜 없는 병원은 현행 유지. 병원 상세 thynC 현황 카드에 '판매상품유형'(딜 productType 합집합, 일반/라이트 공존 표시) 병기
+- **딜 저장 시 자동 동기화 (2026-08-31, A안)**: 딜 POST/PUT/DELETE 성공 시 `syncHospitalIntroTypesFromDeals`(`lib/sales.ts`)가 해당 병원 도입형태를 딜 판매모델 기준으로 전체 교체 — 딜이 단일 소스. 매핑 가능한 판매모델이 없으면 현행 유지(수동 값 보호), 매핑 규칙은 마이그 스크립트와 동반 수정
 
 ### HospitalServer / HospitalEmrInfo (thynC 시스템 현황 — 2026-08-16)
 - **HospitalServer** (`hospital_servers`): 병원 서버 현황 1:N — 서버이름(필수)·병동정보·모니터링 URL·원격접속 URL·정렬. 병원 상세 카드에서 추가/인라인 수정/삭제 (USER 이상)

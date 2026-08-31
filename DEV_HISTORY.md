@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-08-31 | 도입형태 ← 딜 판매모델 자동 동기화 (A안, dev2)
+
+- **딜 저장 시 자동 동기화**: 딜 POST/PUT/DELETE 성공 후 `syncHospitalIntroTypesFromDeals`(lib/sales.ts 신설) 호출 — 해당 병원의 `hospital_intro_types`를 딜 판매모델 매핑(사용량→사용량비례형/구축형·분납형→구축형/구독형·씨어스 월 납입→구독형) 기준으로 전체 교체. **딜이 도입형태의 단일 소스**가 됨 (병원 화면 수동 편집은 다음 딜 저장 시 덮어써짐)
+- 매핑 가능한 판매모델이 하나도 없으면 현행 유지 (일회성 마이그와 동일 규칙 — 미입력 병원 수동 값 보호). 동기화 실패는 로그만 남기고 딜 저장은 성공 유지
+- 매핑 규칙은 `scripts/migrate-intro-types-from-deals.sql`과 단일 규칙 — 변경 시 양쪽 동반 수정
+- 검증: tsc 0오류 · 힙 4GB 빌드 · PM2 재시작 · `/hospitals` 307 스모크
+- 영향 파일: lib/sales.ts, app/api/hospitals/[code]/sales/deals/(route·[id]/route), README.md
+
+---
+
 ## 2026-08-31 | PROD 배포: 병원 목록 판매모델·상품유형 컬럼 + 배지 통일 (커밋 caa3bc1)
 
 - dev2 커밋(caa3bc1, 3파일)·push → PROD `git pull`(3adf2d9→caa3bc1) → 힙 4GB 빌드 → `pm2 restart thync-prod` (마이그레이션·신규 패키지 없음)
