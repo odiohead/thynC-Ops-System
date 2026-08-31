@@ -2236,6 +2236,7 @@ model SalesDeal {
   taxInvoiceId       Int?        @map("tax_invoice_id") // 세금계산서 발행 (SALES_TAX_INVOICE)
   settlementId       Int?        @map("settlement_id") // 정산 상태 (SALES_SETTLEMENT)
   contractDate       DateTime?   @map("contract_date") @db.Date
+  productType        String      @default("일반") @map("product_type") // 상품유형 (일반/라이트)
   remark             String?     @map("remark") @db.Text
   warrantyText       String?     @map("warranty_text") // 보증기간 (구파일)
   firstContactDate   DateTime?   @map("first_contact_date") @db.Date // 최초 인입일 (구파일)

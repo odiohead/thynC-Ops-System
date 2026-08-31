@@ -95,6 +95,7 @@ export default async function SalesDealDetailPage({ params }: { params: { id: st
     statusId: deal.statusId,
     hospitalModelId: deal.hospitalModelId,
     seersModelId: deal.seersModelId,
+    productType: deal.productType,
     contractDate: d2s(deal.contractDate),
     firstContactDate: d2s(deal.firstContactDate),
     warrantyText: deal.warrantyText,

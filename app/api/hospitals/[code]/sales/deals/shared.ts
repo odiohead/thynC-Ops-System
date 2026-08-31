@@ -26,6 +26,8 @@ export function parseDealBody(body: Record<string, unknown>) {
     taxInvoiceId: intOrNull(body.taxInvoiceId),
     settlementId: intOrNull(body.settlementId),
     contractDate: parseDateOnly(body.contractDate),
+    // 상품유형 (일반/라이트) — 키 미전송 PUT(병원 상세 딜 모달 등)은 기존 값 보존
+    ...(body.productType !== undefined ? { productType: body.productType === '라이트' ? '라이트' : '일반' } : {}),
     remark: str(body.remark),
     warrantyText: str(body.warrantyText),
     firstContactDate: parseDateOnly(body.firstContactDate),

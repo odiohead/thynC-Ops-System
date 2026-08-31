@@ -79,6 +79,7 @@ export default async function SalesDealsEntryPage() {
     dwClientCode: d.daewoongClientCode,
     dwModelKind: d.daewoongModelKind,
     dwModel: d.daewoongModel,
+    productType: d.productType,
     wardsText: d.wardsText,
     dwDeviceCount: d.daewoongDeviceCount,
     bedCount: d.bedCount,

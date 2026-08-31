@@ -4,6 +4,25 @@
 
 ---
 
+## 2026-08-31 | 병원 상세 판매상품유형 표기 + 도입형태 딜 기준 재구성 (dev2)
+
+- **병원 상세 thynC 현황 카드 '판매상품유형'**: 해당 병원 딜들의 productType 합집합을 도입형태와 같은 칩 UI로 표시(일반 슬레이트/라이트 스카이, 공존 시 둘 다) — 카드 그리드 3→4열
+- **도입형태 데이터 재구성**: `scripts/migrate-intro-types-from-deals.sql`(신규, idempotent) — 딜 있는 병원의 `hospital_intro_types` 전체 교체, 딜 판매모델(daewoong_model) 매핑: 사용량→사용량비례형 / 구축형·분납형→구축형 / 구독형·씨어스 월 납입→구독형 (사용자 확정). 딜 없는 병원 현행 유지
+- dev2 적용 결과: 169행 삭제 → 212행 재구성 (사용량비례형 168 · 구축형 29 · 구독형 17), 딜 병원 206곳 매핑
+- 영향 파일: app/hospitals/[code]/page.tsx, scripts/migrate-intro-types-from-deals.sql(신규)
+
+---
+
+## 2026-08-31 | 딜 상품유형(일반/라이트) 필드 추가 (dev2)
+
+- **`sales_deals.product_type` 컬럼 신설**: TEXT NOT NULL DEFAULT '일반' — 기존 232건 전부 '일반' 백필. 마이그레이션 `20260831100000_sales_deal_product_type`(수동 패턴, dev2 적용·resolve)
+- **API**: `parseDealBody`에 productType 추가 — '라이트' 외 값은 '일반'으로 정규화, **키 미전송 PUT(병원 상세 딜 모달 등)은 기존 값 보존**(조건부 spread)
+- **UI**: 도입현황 입력(/sales/deals) 등록 모달에 상품유형 select(기본 '일반'), 목록 테이블 '판매모델' 뒤 '상품유형' 컬럼(정렬·엑셀 포함), 딜 상세 '규모 · 계약' 카드에 select. 목록 셀은 딜 상태와 동일한 컬러 배지(코드 매핑: 일반 #64748b, 라이트 #0ea5e9)
+- 검증: tsc 0오류 · 힙 4GB 빌드 · PM2 재시작 · `/sales/deals` 307 스모크. git push·PROD 미반영
+- 영향 파일: prisma/schema.prisma, prisma/migrations/20260831100000_*/(신규), app/api/hospitals/[code]/sales/deals/shared.ts, app/sales/deals/(page·[id]/page), app/sales/deals/_components/DealsEntryTable.tsx, app/sales/deals/[id]/_components/DealDetailForm.tsx
+
+---
+
 ## 2026-08-31 | PROD 배포: 주간 특이사항 주차 ◀▶ 네비 (커밋 670a3a5)
 
 - 배포 전 확인: PROD 로그 심평원 연동 활동 0건

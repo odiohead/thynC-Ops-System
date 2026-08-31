@@ -28,6 +28,7 @@ export interface DealEntryRow {
   dwClientCode: string | null
   dwModelKind: string | null
   dwModel: string | null
+  productType: string
   wardsText: string | null
   dwDeviceCount: number | null
   bedCount: number | null
@@ -62,6 +63,9 @@ function Badge({ v }: { v: { name: string; color: string | null } | null }) {
 }
 
 const uniq = (vals: Array<string | null>) => Array.from(new Set(vals.filter((v): v is string => !!v))).sort()
+
+// 상품유형 배지 색 — 값 2종 고정(마스터 없음)이라 코드 매핑
+const PRODUCT_TYPE_COLORS: Record<string, string> = { 일반: '#64748b', 라이트: '#0ea5e9' }
 
 interface HospitalPick { hospitalCode: string; hospitalName: string }
 
@@ -110,6 +114,7 @@ function HospitalSearch({ target, setTarget }: { target: HospitalPick | null; se
 function CreateModal({ existingRounds, onClose }: { existingRounds: Map<string, number>; onClose: () => void }) {
   const router = useRouter()
   const [target, setTarget] = useState<HospitalPick | null>(null)
+  const [productType, setProductType] = useState('일반')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -121,7 +126,7 @@ function CreateModal({ existingRounds, onClose }: { existingRounds: Map<string, 
     const res = await fetch(`/api/hospitals/${target.hospitalCode}/sales/deals`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ productType }),
     })
     setBusy(false)
     if (!res.ok) { setError((await res.json().catch(() => ({}))).error ?? '등록에 실패했습니다.'); return }
@@ -139,6 +144,13 @@ function CreateModal({ existingRounds, onClose }: { existingRounds: Map<string, 
           <label className="mb-1 block text-xs font-medium text-gray-500">병원 *</label>
           <HospitalSearch target={target} setTarget={setTarget} />
           {nextRound !== null && <p className="mt-1 text-xs text-blue-600">{nextRound}차로 등록됩니다</p>}
+        </div>
+        <div className="mt-4">
+          <label className="mb-1 block text-xs font-medium text-gray-500">상품유형</label>
+          <select className={inputCls} value={productType} onChange={(e) => setProductType(e.target.value)}>
+            <option value="일반">일반</option>
+            <option value="라이트">라이트</option>
+          </select>
         </div>
         {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
@@ -168,6 +180,7 @@ const COLS: Array<{ key: string; label: string; right?: boolean; acc: (r: DealEn
   { key: 'dwClientCode', label: '거래처코드', acc: (r) => r.dwClientCode },
   { key: 'dwModelKind', label: '모델구분', acc: (r) => r.dwModelKind },
   { key: 'dwModel', label: '판매모델', acc: (r) => r.dwModel },
+  { key: 'productType', label: '상품유형', acc: (r) => r.productType },
   { key: 'wardsText', label: '도입병동', acc: (r) => r.wardsText },
   { key: 'dwDeviceCount', label: '디바이스', right: true, acc: (r) => r.dwDeviceCount },
   { key: 'bedCount', label: '병상수', right: true, acc: (r) => r.bedCount },
@@ -331,7 +344,7 @@ export default function DealsEntryTable({ rows }: { rows: DealEntryRow[] }) {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {filtered.length === 0 && (
-              <tr><td colSpan={30} className="px-3 py-8 text-center text-sm text-gray-400">표시할 도입 건이 없습니다. 우측 상단 &lsquo;+ 등록&rsquo;으로 계약 이력을 만드세요.</td></tr>
+              <tr><td colSpan={31} className="px-3 py-8 text-center text-sm text-gray-400">표시할 도입 건이 없습니다. 우측 상단 &lsquo;+ 등록&rsquo;으로 계약 이력을 만드세요.</td></tr>
             )}
             {sorted.map((r, i) => (
               <tr key={r.id} className="cursor-pointer hover:bg-blue-50/40" onClick={() => go(r.id)}>
@@ -351,6 +364,7 @@ export default function DealsEntryTable({ rows }: { rows: DealEntryRow[] }) {
                 <td className={tdCls}>{r.dwClientCode ?? '—'}</td>
                 <td className={tdCls}>{r.dwModelKind ?? '—'}</td>
                 <td className={tdCls}>{r.dwModel ?? '—'}</td>
+                <td className={tdCls}><Badge v={{ name: r.productType, color: PRODUCT_TYPE_COLORS[r.productType] ?? null }} /></td>
                 <td className={`${tdCls} max-w-[110px] truncate`} title={r.wardsText ?? undefined}>{r.wardsText ?? '—'}</td>
                 <td className={`${tdCls} text-right`}>{r.dwDeviceCount ?? '—'}</td>
                 <td className={`${tdCls} text-right`}>{r.bedCount ?? '—'}</td>
@@ -373,7 +387,7 @@ export default function DealsEntryTable({ rows }: { rows: DealEntryRow[] }) {
           {filtered.length > 0 && (
             <tfoot className="sticky bottom-0 border-t border-gray-300 bg-gray-50">
               <tr>
-                <td colSpan={15} className="px-2.5 py-2 text-xs font-medium text-gray-500">합계 ({filtered.length}건)</td>
+                <td colSpan={16} className="px-2.5 py-2 text-xs font-medium text-gray-500">합계 ({filtered.length}건)</td>
                 <td className={sumTd}>{sum((r) => r.dwDeviceCount) || '—'}</td>
                 <td className={sumTd}>{sum((r) => r.bedCount) || '—'}</td>
                 <td className={sumTd}>{fmtWon(sum((r) => r.dwAmountTotal))}</td>

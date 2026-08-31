@@ -354,6 +354,7 @@ prisma/
 ### HospitalIntroType (병원 도입형태)
 - Hospital ↔ StatusCode(INTRO_TYPE) N:M 조인 테이블
 - 구축형 / 구독형 / 사용량비례형 등 다중 선택 가능
+- 2026-08-31 데이터 재구성: 딜 판매모델(`sales_deals.daewoong_model`) 기준 매핑(사용량→사용량비례형, 구축형·분납형→구축형, 구독형·씨어스 월 납입→구독형) — `scripts/migrate-intro-types-from-deals.sql`(idempotent), 딜 없는 병원은 현행 유지. 병원 상세 thynC 현황 카드에 '판매상품유형'(딜 productType 합집합, 일반/라이트 공존 표시) 병기
 
 ### HospitalServer / HospitalEmrInfo (thynC 시스템 현황 — 2026-08-16)
 - **HospitalServer** (`hospital_servers`): 병원 서버 현황 1:N — 서버이름(필수)·병동정보·모니터링 URL·원격접속 URL·정렬. 병원 상세 카드에서 추가/인라인 수정/삭제 (USER 이상)
@@ -609,6 +610,7 @@ prisma/
 - 금액 3종(BIGINT 원): `amountProduct`(제품가)/`amountConstruction`(공사비)/`amountActual`(실판매액) — **'판매' 합계 = 제품+공사 파생 표시**
 - 정산: `taxInvoiceId`(SALES_TAX_INVOICE)/`settlementId`(SALES_SETTLEMENT), `projectCode`(선택 연결, UNIQUE), `remark`
 - 보강 컬럼 (2026-07-31): `warrantyText`(보증기간)·`firstContactDate`(최초 인입일)
+- `productType`(상품유형, 2026-08-31): '일반'/'라이트' 2종, NOT NULL DEFAULT '일반' — 등록 모달·딜 상세에서 선택, PUT에 키 미전송 시 기존 값 보존
 - **대웅 축 (2026-07-31 — 원천: `thynC_status_DW.xlsx` 대웅 원장 232행 + 구파일 보강, 씨어스 금액과 분리)**: `daewoongClientCode`(거래처코드, 재동기화 키)·`daewoongCountType`(병원/추가/로컬/이슈)·`daewoongOrderStatus`(완료/미완료)·`daewoongModelKind`/`daewoongModel`(판매모델)·`daewoongDeviceCount`·`daewoongAmountTotal`(계약금액 총견적가)·`daewoongBuildDate`(공사일)·`daewoongAmountProduct/Construction/Actual/Service`(금액 4종)·`daewoongTaxInvoice`/`daewoongSettlement`(원문 텍스트)·`daewoongPriceType`·`daewoongDivision/Office/Manager/Phone`(영업조직). **/sales 원장·대시보드·AI 도구 금액 지표는 대웅 필드 기준 표시** — 씨어스 금액 필드(amountProduct/Construction/Actual·taxInvoiceId·settlementId)는 수기 입력용
 
 #### SalesDealDevice (딜별 도입 기기 수량 — 2026-07-31)

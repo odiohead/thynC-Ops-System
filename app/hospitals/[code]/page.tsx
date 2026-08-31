@@ -44,7 +44,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
   const isAdmin = !!user && user.role !== 'VIEWER'
   const showSales = await canAccessSales(user) // 영업 섹션 — ADMIN 이상 + SEERS 소속만
 
-  const [hospital, projects, siteVisits, installPlans, maintenances, allDevices, hospitalDevices, statusCodes] = await Promise.all([
+  const [hospital, projects, siteVisits, installPlans, maintenances, allDevices, hospitalDevices, statusCodes, dealProductTypes] = await Promise.all([
     prisma.hospital.findUnique({
       where: { hospitalCode: params.code },
       include: {
@@ -90,11 +90,14 @@ export default async function HospitalDetailPage({ params }: PageProps) {
     prisma.deviceInfo.findMany({ orderBy: { sortOrder: 'asc' } }),
     prisma.hospitalDevice.findMany({ where: { hospitalCode: params.code } }),
     prisma.statusCode.findMany({ where: { category: 'HOSPITAL' }, select: { name: true, color: true } }),
+    prisma.salesDeal.findMany({ where: { hospitalCode: params.code }, select: { productType: true }, distinct: ['productType'] }),
   ])
   if (!hospital) notFound()
 
   const statusColor = statusCodes.find((sc) => sc.name === hospital.status)?.color ?? null
   const introTypeList = hospital.introTypes ?? []
+  // 판매상품유형 — 이 병원 딜들의 productType 합집합 (일반/라이트 공존 시 둘 다 표시)
+  const productTypes = ['일반', '라이트'].filter((t) => dealProductTypes.some((d) => d.productType === t))
 
   const siteVisitsData = siteVisits.map((sv) => ({
     id: sv.id,
@@ -203,10 +206,27 @@ export default async function HospitalDetailPage({ params }: PageProps) {
           <div className="border-b border-gray-200 px-6 py-4">
             <h2 className="text-sm font-semibold text-gray-700">thynC 현황</h2>
           </div>
-          <dl className="grid grid-cols-1 gap-6 px-6 py-5 sm:grid-cols-3">
+          <dl className="grid grid-cols-1 gap-6 px-6 py-5 sm:grid-cols-4">
             <Field
               label="상태"
               value={<StatusBadge label={hospital.status} color={statusColor} />}
+            />
+            <Field
+              label="판매상품유형"
+              value={
+                productTypes.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {productTypes.map((t) => (
+                      <span
+                        key={t}
+                        className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${t === '라이트' ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-700'}`}
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                ) : null
+              }
             />
             <Field
               label="도입형태"

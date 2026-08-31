@@ -32,6 +32,7 @@ export interface DealDetail {
   statusId: number | null
   hospitalModelId: number | null
   seersModelId: number | null
+  productType: string
   contractDate: string | null
   firstContactDate: string | null
   warrantyText: string | null
@@ -92,6 +93,7 @@ export default function DealDetailForm({ deal, masters }: { deal: DealDetail; ma
     statusId: deal.statusId?.toString() ?? '',
     hospitalModelId: deal.hospitalModelId?.toString() ?? '',
     seersModelId: deal.seersModelId?.toString() ?? '',
+    productType: deal.productType,
     contractDate: deal.contractDate ?? '',
     firstContactDate: deal.firstContactDate ?? '',
     warrantyText: deal.warrantyText ?? '',
@@ -148,6 +150,7 @@ export default function DealDetailForm({ deal, masters }: { deal: DealDetail; ma
         statusId: form.statusId === '' ? null : parseInt(form.statusId),
         hospitalModelId: form.hospitalModelId === '' ? null : parseInt(form.hospitalModelId),
         seersModelId: form.seersModelId === '' ? null : parseInt(form.seersModelId),
+        productType: form.productType,
         contractDate: form.contractDate || null,
         firstContactDate: form.firstContactDate || null,
         warrantyText: form.warrantyText,
@@ -260,6 +263,13 @@ export default function DealDetailForm({ deal, masters }: { deal: DealDetail; ma
           <Sel label="딜 상태" value={form.statusId} onChange={(v) => setForm({ ...form, statusId: v })} options={masters.dealStatuses} />
           <Sel label="병원 판매모델" value={form.hospitalModelId} onChange={(v) => setForm({ ...form, hospitalModelId: v })} options={masters.models} />
           <Sel label="씨어스 판매방식" value={form.seersModelId} onChange={(v) => setForm({ ...form, seersModelId: v })} options={masters.models} />
+          <div>
+            <label className={labelCls}>상품유형</label>
+            <select className={inputCls} value={form.productType} onChange={(e) => setForm({ ...form, productType: e.target.value })}>
+              <option value="일반">일반</option>
+              <option value="라이트">라이트</option>
+            </select>
+          </div>
           <div><label className={labelCls}>보증기간</label><input className={inputCls} placeholder="예: 1년" value={form.warrantyText} onChange={(e) => setForm({ ...form, warrantyText: e.target.value })} /></div>
           <div><label className={labelCls}>최초 인입일</label><input type="date" className={inputCls} value={form.firstContactDate} onChange={(e) => setForm({ ...form, firstContactDate: e.target.value })} /></div>
           <div><label className={labelCls}>계약일</label><input type="date" className={inputCls} value={form.contractDate} onChange={(e) => setForm({ ...form, contractDate: e.target.value })} /></div>
