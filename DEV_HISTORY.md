@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-08-31 | PROD 배포: 딜 상품유형 + 판매상품유형 표기 + 도입형태 재구성 (커밋 3adf2d9)
+
+- dev2 커밋(3adf2d9, 11파일)·push → PROD `git pull`(670a3a5→3adf2d9) → `npx prisma migrate deploy`(product_type 컬럼, 249건 '일반' 백필) → **`npx prisma generate`**(migrate deploy는 클라이언트 재생성 안 함 — 1차 빌드 실패 원인) → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- **도입형태 데이터 마이그 (PROD, 사용자 허락)**: 사전 백업 `~/backups/db-sync/hospital_intro_types_before_dealmig_20260831.sql` → `scripts/migrate-intro-types-from-deals.sql` 실행(172삭제→213재구성) → **daewoong_model 전부 NULL인 병원 10곳**(dev엔 없던 케이스)이 도입형태 유실 → 백업에서 해당 병원만 복원(+2건, 나머지 8곳은 원래 미지정). 최종: 사용량비례형 173 · 구축형 30 · 구독형 18. 시퀀스 되감김 사고 setval(max id)로 보정
+- 스모크: 로컬·외부 HTTPS `/`·`/hospitals`·`/sales/deals` 307, flush 후 에러 로그 0건
+
+---
+
 ## 2026-08-31 | 병원 상세 판매상품유형 표기 + 도입형태 딜 기준 재구성 (dev2)
 
 - **병원 상세 thynC 현황 카드 '판매상품유형'**: 해당 병원 딜들의 productType 합집합을 도입형태와 같은 칩 UI로 표시(일반 슬레이트/라이트 스카이, 공존 시 둘 다) — 카드 그리드 3→4열
