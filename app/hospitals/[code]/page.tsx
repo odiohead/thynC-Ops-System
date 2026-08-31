@@ -219,7 +219,8 @@ export default async function HospitalDetailPage({ params }: PageProps) {
                     {productTypes.map((t) => (
                       <span
                         key={t}
-                        className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${t === '라이트' ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-700'}`}
+                        className="inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold text-white"
+                        style={{ backgroundColor: t === '라이트' ? '#0ea5e9' : '#64748b' }}
                       >
                         {t}
                       </span>

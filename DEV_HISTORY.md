@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-08-31 | 병원 목록 — 판매모델·상품유형 컬럼 추가, 계약일·관리폴더 미노출 (dev2)
+
+- **테이블 컬럼 개편**: 계약일·관리폴더 컬럼 제거(데이터·API 불변, 표시만 제외) → '판매모델'(도입형태 칩 — 딜 판매모델 기준 재구성값)·'상품유형'(딜 productType 합집합) 추가
+- **상품유형 배지 통일 (2차 피드백)**: 병원 목록·병원 상세 카드 모두 /sales/deals와 동일한 솔리드 컬러 pill(일반 #64748b·라이트 #0ea5e9, 흰 글자)로 전환 — 연한 칩 스타일 폐기, 복수 공존 표시 유지
+- **모바일 카드**: 계약일 제거, 판매모델·상품유형 칩 병기
+- 쿼리: introTypes(order 정렬)·salesDeals(productType distinct) select 추가, contractDate·meta(driveProjectFolderId) select 제거
+- 검증: tsc 0오류 · 힙 4GB 빌드 · PM2 재시작 · `/hospitals` 307 스모크. git push·PROD 미반영
+- 영향 파일: app/hospitals/page.tsx
+
+---
+
 ## 2026-08-31 | PROD 배포: 딜 상품유형 + 판매상품유형 표기 + 도입형태 재구성 (커밋 3adf2d9)
 
 - dev2 커밋(3adf2d9, 11파일)·push → PROD `git pull`(670a3a5→3adf2d9) → `npx prisma migrate deploy`(product_type 컬럼, 249건 '일반' 백필) → **`npx prisma generate`**(migrate deploy는 클라이언트 재생성 안 함 — 1차 빌드 실패 원인) → 힙 4GB 빌드 → `pm2 restart thync-prod`

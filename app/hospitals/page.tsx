@@ -13,7 +13,19 @@ import ImportButton from './_components/ImportButton'
 
 const PAGE_SIZE = 20
 
-const fmtDate = (d: Date | null) => (d ? new Date(d).toISOString().slice(0, 10) : '-')
+// 상품유형 배지 — /sales/deals 목록과 동일한 솔리드 컬러 pill (일반/라이트 복수 공존 표시)
+const PRODUCT_TYPE_COLORS: Record<string, string> = { 일반: '#64748b', 라이트: '#0ea5e9' }
+
+function ProductTypeBadge({ t }: { t: string }) {
+  return (
+    <span
+      className="inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold text-white"
+      style={{ backgroundColor: PRODUCT_TYPE_COLORS[t] ?? '#94a3b8' }}
+    >
+      {t}
+    </span>
+  )
+}
 
 interface PageProps {
   searchParams: { [key: string]: string | string[] | undefined }
@@ -72,13 +84,11 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
         type: true,
         address: true,
         status: true,
-        contractDate: true,
         hiraHospital: {
           select: { permSbdCnt: true },
         },
-        meta: {
-          select: { driveProjectFolderId: true },
-        },
+        introTypes: { select: { statusCode: { select: { name: true } } }, orderBy: { statusCode: { order: 'asc' } } },
+        salesDeals: { select: { productType: true }, distinct: ['productType'] },
       },
     }),
     prisma.hospital.count({ where }),
@@ -100,6 +110,11 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
   ])
 
   const statusColorMap = new Map(statusCodes.map((sc) => [sc.name, sc.color]))
+
+  // 병원별 판매모델(도입형태)·상품유형(딜 합집합, 일반/라이트 순 고정)
+  const introNames = (h: (typeof hospitals)[number]) => h.introTypes.map((it) => it.statusCode.name)
+  const productTypes = (h: (typeof hospitals)[number]) =>
+    ['일반', '라이트'].filter((t) => h.salesDeals.some((d) => d.productType === t))
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
   const sidoOptions = sidoRows.map((r) => r.sidoName!).filter(Boolean)
@@ -169,9 +184,18 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
                   {h.hiraHospital?.permSbdCnt != null && (
                     <span>전체병상 <span className="text-foreground">{h.hiraHospital.permSbdCnt.toLocaleString()}</span></span>
                   )}
-                  <span>계약일 <span className="text-foreground">{fmtDate(h.contractDate)}</span></span>
                   <span className="w-full truncate">주소 <span className="text-foreground">{h.address ?? '-'}</span></span>
                 </div>
+                {(introNames(h).length > 0 || productTypes(h).length > 0) && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {introNames(h).map((n) => (
+                      <span key={n} className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">{n}</span>
+                    ))}
+                    {productTypes(h).map((t) => (
+                      <ProductTypeBadge key={t} t={t} />
+                    ))}
+                  </div>
+                )}
               </Link>
             ))
           )}
@@ -183,7 +207,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  {['병원코드', '병원명', '주소', '전체병상', '상태', '계약일', '관리폴더'].map((col) => (
+                  {['병원코드', '병원명', '주소', '전체병상', '상태', '판매모델', '상품유형'].map((col) => (
                     <th
                       key={col}
                       className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500"
@@ -227,21 +251,28 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
                         <td className="whitespace-nowrap px-4 py-3">
                           <StatusBadge label={h.status} color={statusColorMap.get(h.status)} />
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">
-                          {fmtDate(h.contractDate)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-sm">
-                          {h.meta?.driveProjectFolderId ? (
-                            <a
-                              href={`https://drive.google.com/drive/folders/${h.meta.driveProjectFolderId}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-blue-600 hover:underline"
-                            >
-                              바로가기
-                            </a>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          {introNames(h).length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {introNames(h).map((n) => (
+                                <span key={n} className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                                  {n}
+                                </span>
+                              ))}
+                            </div>
                           ) : (
-                            <span className="text-gray-400">-</span>
+                            <span className="text-sm text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          {productTypes(h).length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {productTypes(h).map((t) => (
+                                <ProductTypeBadge key={t} t={t} />
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-sm text-gray-400">-</span>
                           )}
                         </td>
                       </tr>
