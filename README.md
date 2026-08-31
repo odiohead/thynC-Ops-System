@@ -1524,7 +1524,7 @@ npm run dev
 - `GET /api/weekly/items?scope=archive|hospital&includeDone=1` - 아카이브·병원별 뷰 조회
 - `POST /api/weekly/items` - 항목 생성 / `GET·PUT·DELETE /api/weekly/items/[id]` - 상세(updates 전체)·수정(complete/reopen/move/필드 — 미래 주 완료 400)·삭제
 - `PUT /api/weekly/items/[id]/update` - 주차 진행 upsert (빈 content면 삭제)
-- `POST /api/weekly/notes` / `PUT·DELETE /api/weekly/notes/[id]` - 주간 특이사항 엔트리 생성·수정·삭제
+- `GET /api/weekly/notes?week=` - 주차별 특이사항 조회 (보드 ◀▶ 주차 네비용) / `POST /api/weekly/notes` / `PUT·DELETE /api/weekly/notes/[id]` - 주간 특이사항 엔트리 생성·수정·삭제
 - `GET /api/weekly/masters` - 셀렉트 마스터 (병원·SEERS 활성 사용자·SEERS 부서=담당 팀)
 
 ### HIRA 병원

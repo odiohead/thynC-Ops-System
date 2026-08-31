@@ -10,6 +10,28 @@ import { NOTE_INCLUDE, toNoteDto } from '../shared'
 export const dynamic = 'force-dynamic'
 
 /**
+ * 주간 특이사항 — 주차별 조회 (특이사항 보드 ◀▶ 주차 네비용, 2026-08-24)
+ * 보드 API는 선택 주차 것만 내려주므로 다른 주차 열람은 이 GET으로 조회한다.
+ */
+export async function GET(request: NextRequest) {
+  const user = await getAuthUser(request)
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const denial = await checkWeeklyAccess(user)
+  if (denial) return NextResponse.json({ error: denial.error }, { status: denial.status })
+
+  const week = request.nextUrl.searchParams.get('week')
+  if (!isMondayYmd(week)) {
+    return NextResponse.json({ error: 'week는 월요일 날짜(YYYY-MM-DD)여야 합니다.' }, { status: 400 })
+  }
+  const rows = await prisma.weeklyWeekNote.findMany({
+    where: { weekStart: new Date(week) },
+    orderBy: { id: 'asc' },
+    include: NOTE_INCLUDE,
+  })
+  return NextResponse.json({ week, notes: rows.map(toNoteDto) })
+}
+
+/**
  * 주간 특이사항 엔트리 생성 (weekly_ops_design.md §6a 개정 — 주차별 N건 자유 기재)
  */
 export async function POST(request: NextRequest) {

@@ -2,11 +2,12 @@
 
 // 주간 특이사항 보드 — 주차별 N건 자유 기재 (엄격한 관리 항목이 아닌 '그 주에 말할 컨텐츠')
 // 부모에서 key={weekYmd}로 렌더해 주차 전환 시 편집 상태가 자동 초기화된다.
-import { useState } from 'react'
+// 헤더 ◀▶로 다른 주차 특이사항을 열람 가능 (진행 컬럼 네비와 동일 패턴 — 편집·추가는 보드 주차에서만, 2026-08-24)
+import { useEffect, useState } from 'react'
 import CellEditor from './CellEditor'
 import RichContent from './RichContent'
 import { isEmptyRichText } from '@/lib/richtext'
-import type { WeeklyNoteDto } from '@/lib/weekly'
+import { addDaysYmd, weekLabel, type WeeklyNoteDto } from '@/lib/weekly'
 
 interface Props {
   weekYmd: string
@@ -19,6 +20,35 @@ export default function NotesSection({ weekYmd, notes, canWrite, onChanged }: Pr
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
+  /** 표시 주차 오프셋 — 0 = 보드 주차(편집 가능), 그 외 주차는 열람 전용 */
+  const [offset, setOffset] = useState(0)
+  const [viewNotes, setViewNotes] = useState<WeeklyNoteDto[] | null>(null)
+  const viewWeek = addDaysYmd(weekYmd, offset * 7)
+
+  // 오프셋 이동 시 해당 주차 특이사항 조회 + 편집 상태 종료
+  useEffect(() => {
+    setAdding(false)
+    setEditingId(null)
+    if (offset === 0) {
+      setViewNotes(null)
+      return
+    }
+    let alive = true
+    setViewNotes(null)
+    fetch(`/api/weekly/notes?week=${viewWeek}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (alive && d) setViewNotes(d.notes ?? [])
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [offset, viewWeek])
+
+  const isCurrent = offset === 0
+  const shown = isCurrent ? notes : viewNotes
+  const editable = canWrite && isCurrent
 
   const call = async (url: string, method: string, body?: unknown): Promise<boolean> => {
     setBusy(true)
@@ -76,17 +106,47 @@ export default function NotesSection({ weekYmd, notes, canWrite, onChanged }: Pr
   return (
     <section className="rounded-lg border border-border bg-card">
       <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-        <h2 className="text-sm font-semibold">주간 특이사항</h2>
-        <span className="text-xs text-muted-foreground">{notes.length}건</span>
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold">주간 특이사항</h2>
+          {/* 주차 네비 — ◀▶로 다른 주차 열람, 라벨 클릭=보드 주차 복귀 */}
+          <span className="inline-flex items-center gap-1.5 text-xs">
+            <button
+              className="rounded border border-border px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              onClick={() => setOffset((o) => o - 1)}
+              title="이전 주 특이사항 보기"
+            >
+              ◀
+            </button>
+            <button
+              className={`rounded px-1 font-medium tabular-nums ${isCurrent ? 'text-muted-foreground' : 'text-warning hover:underline'}`}
+              onClick={() => setOffset(0)}
+              title={isCurrent ? undefined : '클릭하여 금주로 복귀'}
+            >
+              {isCurrent ? '금주' : weekLabel(viewWeek)}
+            </button>
+            <button
+              className="rounded border border-border px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              onClick={() => setOffset((o) => o + 1)}
+              title="다음 주 특이사항 보기"
+            >
+              ▶
+            </button>
+          </span>
+        </div>
+        <span className="text-xs text-muted-foreground">{(shown ?? []).length}건</span>
       </div>
 
-      {notes.length === 0 && !adding && (
+      {shown === null && (
+        <div className="px-4 py-5 text-center text-sm text-muted-foreground">불러오는 중…</div>
+      )}
+
+      {shown !== null && shown.length === 0 && !adding && (
         <div className="px-4 py-5 text-center text-sm text-muted-foreground">
-          이번 주 특이사항이 없습니다.
+          {isCurrent ? '이번 주 특이사항이 없습니다.' : '해당 주 특이사항이 없습니다.'}
         </div>
       )}
 
-      {notes.map((n) => (
+      {(shown ?? []).map((n) => (
         <div key={n.id} className="border-b border-border px-4 py-2.5 last:border-b-0">
           {editingId === n.id ? (
             <CellEditor
@@ -107,7 +167,7 @@ export default function NotesSection({ weekYmd, notes, canWrite, onChanged }: Pr
                   {n.createdByName ?? '—'} ·{' '}
                   {new Date(n.updatedAt).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })}
                 </span>
-                {canWrite && (
+                {editable && (
                   <>
                     <button className="hover:text-foreground hover:underline" onClick={() => setEditingId(n.id)}>
                       수정
@@ -135,7 +195,7 @@ export default function NotesSection({ weekYmd, notes, canWrite, onChanged }: Pr
         </div>
       )}
 
-      {canWrite && !adding && (
+      {editable && !adding && (
         <button
           className="w-full border-t border-border px-4 py-2 text-left text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground"
           onClick={() => setAdding(true)}

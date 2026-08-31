@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-08-24 | 주간 특이사항 — 주차 ◀▶ 네비 (전주 내용 열람) (dev2)
+
+- **특이사항 주차 네비**: 보드 API가 선택 주차 특이사항만 내려줘 전주 내용을 볼 수 없던 문제 — 헤더에 ◀ ▶ 추가(진행 컬럼 네비와 동일 패턴), 다른 주차 특이사항을 그 자리에서 열람. 라벨 '8/17~21 W34', 클릭=금주 복귀. **수정·삭제·추가는 보드 주차(금주)에서만** — 다른 주차는 열람 전용
+- **API**: `GET /api/weekly/notes?week=` 신설 (주차별 특이사항 조회 — 읽기 게이트)
+- 검증: tsc 0오류 · 힙 4GB 빌드 · PM2 재시작 · `/weekly` 307 스모크. git push·PROD 미반영
+- 영향 파일: app/api/weekly/notes/route.ts, app/weekly/_components/NotesSection.tsx
+
+---
+
 ## 2026-08-21 | PROD 배포: 영업 대시보드 하반기 탭 + 주간업무 보드 개선 (커밋 d1de780)
 
 - 배포 전 확인: PROD 로그 심평원 연동 활동 0건 (에러 로그는 기존 BigInt `/api/hospitals/[code]/sales` 건·Slack lookup 노이즈만)
