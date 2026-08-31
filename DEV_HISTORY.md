@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-08-31 | PROD 배포: 도입형태 자동 동기화 (커밋 5a6c036)
+
+- dev2 커밋(5a6c036, 5파일)·push → PROD `git pull`(caa3bc1→5a6c036) → 힙 4GB 빌드 → `pm2 restart thync-prod` (마이그레이션·신규 패키지 없음)
+- 스모크: 로컬 `/`·`/hospitals` 307, 외부 HTTPS `/hospitals` 307 정상
+
+---
+
 ## 2026-08-31 | 도입형태 ← 딜 판매모델 자동 동기화 (A안, dev2)
 
 - **딜 저장 시 자동 동기화**: 딜 POST/PUT/DELETE 성공 후 `syncHospitalIntroTypesFromDeals`(lib/sales.ts 신설) 호출 — 해당 병원의 `hospital_intro_types`를 딜 판매모델 매핑(사용량→사용량비례형/구축형·분납형→구축형/구독형·씨어스 월 납입→구독형) 기준으로 전체 교체. **딜이 도입형태의 단일 소스**가 됨 (병원 화면 수동 편집은 다음 딜 저장 시 덮어써짐)
