@@ -187,6 +187,22 @@ function unitsQuery(params: UnitsQueryParams): Record<string, QueryValue> {
   }
 }
 
+/** 전역 [디바이스] 뷰 모델 필터 옵션 — `GET /api/settings/devices`(로그인 전원) 중 원장 대상(serialTracked) 모델. 없으면 전체 활성 모델 */
+export interface DeviceModelOption {
+  id: number
+  deviceModel: string
+  deviceName: string
+  deviceClass: string
+  isActive: boolean
+  serialTracked: boolean
+}
+
+export async function getDeviceModels(): Promise<DeviceModelOption[]> {
+  const r = await apiFetch<{ devices: DeviceModelOption[] }>('/api/settings/devices')
+  const tracked = r.devices.filter((d) => d.serialTracked)
+  return tracked.length > 0 ? tracked : r.devices.filter((d) => d.isActive)
+}
+
 export function getUnits(params: UnitsQueryParams): Promise<UnitsResponse> {
   return apiFetch<UnitsResponse>(`/api/devices/units${buildQuery(unitsQuery(params))}`)
 }

@@ -279,6 +279,21 @@ model HospitalDeviceEvent {
 원칙: 빈 상태에서도 전 헤더·필드 노출, 요약 스트립 + 탭/패널(카드 나열 아님), 병원은 검색 콤보, 서버 페이지네이션. `app/devices/page.tsx` + `_components/*`. **URL 동기화** `?hospital=&tab=list|history|wards|import`(병원 선택 시) / `?tab=coverage|events`(병원 미선택 시) `&status=&model=&ward=&q=&page=&device=<id>`(드로어 딥링크).
 
 ### 6.1 `/devices`
+
+**v1 단순화(2026-09-01 사용자 피드백 — "기능이 너무 많아 복잡하다. 구현된 기능은 지우지 말고 UI는 단순한 초기 버전으로 시작해 개선")**
+
+현재 노출 형상은 **메인 탭 2개**(`?view=hospital|devices`, 기본 hospital)이며, 아래 원 와이어프레임(A·B)은 '전체 기능 레이아웃(후속 노출)'로 보존한다 — 컴포넌트·API는 전부 살아 있고 오케스트레이터(`DevicesClient`)가 그리지 않을 뿐이다.
+- **헤더**: 제목 '디바이스 원장' + 메인 탭 **[병원별] [디바이스]**만. 전역 요약 줄·헤더 시리얼 조회(`SerialLookup`)·헤더 [Excel]은 제거(Excel은 각 뷰 안으로 이동).
+- **[병원별]**(`?view=hospital&hospital=&tab=list|history|wards|import&status=&model=&ward=&q=&page=&device=`)
+  - 1행 병원 콤보(기존 `HospitalPicker`, '전체 병원 검색' 토글 유지) … 우측(USER+) **[+ 등록] [임포트]**(임포트는 하위 탭 전환). 헤더 [교체]는 제거 — 행 ⋯·드로어 [교체]로만.
+  - 2행 **요약 한 줄** `배치 중 18 · 계약 60 · 회수 2 · 병동 3` — '계약' 클릭 → 팝오버(모델별 hard/soft 대조·근거 딜 목록·평가용 제외 문구·상품유형별·교체 집계 = 구 `SummaryStrip` 내용). 매트릭스 표·WMS 열·평가용 칩은 노출하지 않음(`SummaryStrip.tsx`는 보존, 미사용).
+  - 3행 소형 탭 **기기 목록 | 이력 | 병동 | 임포트**(기본 기기 목록) — `EventsTab`/`WardPanel`/`ImportPanel`은 그대로. 우측에 [선택] 토글(USER+, 기기 목록 탭) + [Excel](기기 목록/이력 탭 기준).
+  - 기기 목록 = `DeviceTable compact showSelection={선택 토글}`: 기본 열 `시리얼 | 모델 | 병동 | 상태 | 상품유형 | 배치일 | 최근 이벤트 | ⋯`, 용도·회수일·사유·연결·창고 개체·메모·원문 2행은 **[열 더보기]**; 필터는 상태(배치 중/회수됨/전체) + 시리얼 검색만 기본, 모델 칩·병동·WMS·용도·상품유형·정렬·행수는 **[필터 더보기]**(숨은 필터에 값이 있으면 자동 펼침). 체크박스·선택 바(`BulkActionBar`)는 [선택] 토글을 켤 때만(기본 off). 행 ⋯ 메뉴(이동/회수/교체/정정)·빈 상태 문구는 동일.
+  - 병원 미선택: EmptyState '병원을 선택하세요'(+ [디바이스 전체 목록] 버튼). **커버리지/백필 진행판(`GlobalCoverage`)·전역 최근 이벤트 탭은 v1 UI 어디에도 렌더하지 않음**(파일·API `/api/devices/summary`는 보존 — 병원 콤보 모집단 로드에 계속 사용). `MobileActionBar`도 렌더하지 않음.
+- **[디바이스]**(`?view=devices&status=&model=&usage=&productType=&q=&page=&device=`) — 신규 `DeviceListTab`: 병원 무관 전 기기 평면 목록. 툴바 검색 [시리얼/병원명] · 모델 · 상태(배치 중|회수됨|전체) · 용도 · 상품유형 · [Excel](같은 필터 `/api/devices/export`). 표 `시리얼 | 모델 | 용도 | 상품유형 | 현재 병원(RECOVERED는 '회수 전 X') | 병동 | 상태 | 배치일 | 최근 이벤트`, 행 클릭 → `DeviceHistoryDrawer`(양쪽 뷰 `?device=` 딥링크 공통), 페이지 50. 쓰기 버튼 없음(등록·이동·회수는 병원 문맥 — 드로어에서 액션을 누르면 그 기기의 병원별 뷰로 전환 안내). 시리얼 검색이 구 헤더 '시리얼 조회'를 대체: `GET /api/devices/units?q=`가 hospital 미지정이면 현재/마지막 **병원명**도 매치하고, 정렬 기본 시리얼 오름차순 + 페이지 내 정확 일치 행 상단 고정.
+- URL 구 링크(`tab=coverage|events`, `view` 없음)는 기본값(view=hospital, tab=list)으로 관대하게 매핑.
+
+**전체 기능 레이아웃(후속 노출)** — 아래는 P3~P4에서 구현된 원 설계. 컴포넌트는 전부 존재하며 사용자 피드백에 따라 단계적으로 다시 노출한다.
 ```
 ┌ PageHeader: 디바이스 원장 ─────────────────────────────── [Excel]  시리얼 조회 [A126861     ] ↵ ┐
 │ 병원: [🔎 병원 검색 (고객 병원 사전 로드 · ☐ 전체 병원 검색) ▾ ]                                     │

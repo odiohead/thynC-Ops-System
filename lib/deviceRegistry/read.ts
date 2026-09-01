@@ -564,7 +564,7 @@ export interface UnitsQuery {
   ward?: number | 'unassigned' | null
   /** 기본 active. recovered = 이 병원에서 회수됨(미재배치, last_hospital_code) */
   status?: UnitsStatusFilter | null
-  /** 시리얼 키·원문·닉네임(ext_device_code)·메모 부분 일치 */
+  /** 시리얼 키·원문·닉네임(ext_device_code)·메모 부분 일치. `hospital` 미지정(전역 디바이스 목록)이면 현재/마지막 병원명(ILIKE)도 매치 */
   q?: string | null
   /** WMS 일시 매칭 기준(§7.1) — 후보 집합을 먼저 매칭한 뒤 id로 좁힌다 */
   wms?: UnitsWmsFilter | null
@@ -597,14 +597,17 @@ export function buildUnitsWhere(params: UnitsQuery): Prisma.HospitalDeviceWhereI
     const raw = params.q.trim()
     const key = normalizeSerial(raw).serialNo
     const up = raw.replace(/\s+/g, '').toUpperCase()
-    and.push({
-      OR: [
-        { unit: { serialNo: { contains: key || up } } },
-        { unit: { serialRaw: { contains: up } } },
-        { extDeviceCode: { contains: raw, mode: 'insensitive' } },
-        { unit: { memo: { contains: raw, mode: 'insensitive' } } },
-      ],
-    })
+    const or: Prisma.HospitalDeviceWhereInput[] = [
+      { unit: { serialNo: { contains: key || up } } },
+      { unit: { serialRaw: { contains: up } } },
+      { extDeviceCode: { contains: raw, mode: 'insensitive' } },
+      { unit: { memo: { contains: raw, mode: 'insensitive' } } },
+    ]
+    // 전역(병원 미지정) 목록의 '시리얼/병원명' 검색 — 현재 병원(ACTIVE) 또는 마지막 병원(RECOVERED) 이름
+    if (!params.hospital) {
+      or.push({ hospital: { is: { hospitalName: { contains: raw, mode: 'insensitive' } } } }, { lastHospital: { is: { hospitalName: { contains: raw, mode: 'insensitive' } } } })
+    }
+    and.push({ OR: or })
   }
   if (params.ids && params.ids.length > 0) and.push({ deviceId: { in: params.ids } })
   return and.length === 0 ? {} : { AND: and }
@@ -667,9 +670,13 @@ export interface UnitView {
   extSyncedAt: Date | null
   status: string
   hospitalCode: string | null
+  /** 현재 병원명(ACTIVE) — `hospital.hospitalName` 평탄화(전역 목록 표시용, 추가 필드) */
+  hospitalName: string | null
   wardId: number | null
   placedOn: Date | null
   lastHospitalCode: string | null
+  /** 마지막 병원명(RECOVERED '회수 전 X') — `lastHospital.hospitalName` 평탄화 */
+  lastHospitalName: string | null
   recoveredOn: Date | null
   recoverReasonId: number | null
   lastEventType: string | null
@@ -705,9 +712,11 @@ export function toUnitView(p: PlacementWithUnit): UnitView {
     extSyncedAt: placement.extSyncedAt,
     status: placement.status,
     hospitalCode: placement.hospitalCode,
+    hospitalName: placement.hospital?.hospitalName ?? null,
     wardId: placement.wardId,
     placedOn: placement.placedOn,
     lastHospitalCode: placement.lastHospitalCode,
+    lastHospitalName: placement.lastHospital?.hospitalName ?? null,
     recoveredOn: placement.recoveredOn,
     recoverReasonId: placement.recoverReasonId,
     lastEventType: placement.lastEventType,

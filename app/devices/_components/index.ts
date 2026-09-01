@@ -11,7 +11,7 @@ export type { DevicesClientProps } from './DevicesClient'
 
 export * from './types'
 export * from './api'
-export { useDevicesUrlState, parseDevicesParams, serializeDevicesParams, resolveTab, DEFAULT_URL_STATE } from './useDevicesUrlState'
+export { useDevicesUrlState, parseDevicesParams, serializeDevicesParams, resolveTab, resolveView, DEFAULT_URL_STATE } from './useDevicesUrlState'
 export type { DevicesUrlState, DevicesUrlApi, SetHospitalOptions } from './useDevicesUrlState'
 export { DevicesToastProvider, useDevicesToast } from './toast'
 export type { NotifyFn, ToastKind, ToastOptions } from './toast'
@@ -55,6 +55,10 @@ export { MaintenanceCodeCombo } from './MaintenanceCodeCombo'
 export type { MaintenanceCodeComboProps } from './MaintenanceCodeCombo'
 export { MobileActionBar } from './MobileActionBar'
 export type { MobileActionBarProps } from './MobileActionBar'
+
+// v1 단순화(2026-09-01) — 전역 [디바이스] 뷰
+export { DeviceListTab } from './DeviceListTab'
+export type { DeviceListTabProps } from './DeviceListTab'
 
 // GROUP D
 export { ImportPanel } from './ImportPanel'

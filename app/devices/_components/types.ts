@@ -278,10 +278,14 @@ export interface DeviceRaw {
   extSyncedAt: string | null
   status: DeviceStatus
   hospitalCode: string | null
+  /** 현재 병원명 평탄화(전역 [디바이스] 뷰 표시용, 2026-09-01 추가 — 구 응답엔 없을 수 있어 optional) */
+  hospitalName?: string | null
   wardId: number | null
   /** @db.Date → ISO 자정 문자열, `toYmd()`로 표시 */
   placedOn: string | null
   lastHospitalCode: string | null
+  /** 마지막 병원명 평탄화(RECOVERED '회수 전 X') */
+  lastHospitalName?: string | null
   recoveredOn: string | null
   recoverReasonId: number | null
   lastEventType: DeviceEventType | null
@@ -1014,7 +1018,16 @@ export interface ImportBatchCancelResponse {
 // 화면 상태 (orchestrator ↔ 탭/모달 계약)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** 메인 탭(2026-09-01 v1 단순화) — `?view=hospital|devices`. 병원별 뷰(기본) / 전 기기 평면 목록 */
+export type DevicesView = 'hospital' | 'devices'
+export const DEVICE_VIEWS: readonly DevicesView[] = ['hospital', 'devices']
+export const DEVICE_VIEW_LABELS: Record<DevicesView, string> = {
+  hospital: '병원별',
+  devices: '디바이스',
+}
+
 export type HospitalTab = 'list' | 'history' | 'wards' | 'import'
+/** 구 전역 탭(커버리지·최근 이벤트) — v1 UI에서는 노출하지 않음(URL 구 링크는 기본값으로 매핑). 컴포넌트 계약 보존용 */
 export type GlobalTab = 'coverage' | 'events'
 export type DevicesTab = HospitalTab | GlobalTab
 
@@ -1045,6 +1058,17 @@ export interface ListFilters {
   wms: UnitsWmsFilter | null
   usage: UsageFilter | null
   productType: ProductTypeFilter | null
+}
+
+/** 전역 [디바이스] 뷰(v1 단순화) 필터 — 전부 URL 동기화(`?view=devices&status=&model=&usage=&productType=&q=&page=`) */
+export interface GlobalListFilters {
+  status: UnitsStatusFilter
+  model: number | null
+  usage: UsageFilter | null
+  productType: ProductTypeFilter | null
+  /** 시리얼(키·원문·닉네임) 또는 병원명 */
+  q: string
+  page: number
 }
 
 /** 이력 탭·전역 최근 이벤트 필터 — q/page는 URL 동기화, 나머지 로컬 */

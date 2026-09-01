@@ -9,10 +9,15 @@
  * 빈 상태: 헤더 + "등록된 기기가 없습니다. [+ 등록] 또는 [임포트] 탭에서 시작하세요." (onRegister / onOpenTab('import'))
  * 모바일: md:hidden 카드(시리얼 크게+상태, 모델·병동, 최근 이벤트, 카드 체크박스 · ⋯).
  * 조회 후 기본 필터(배치 중·조건 없음)일 때만 onTotalChange(total)로 탭 카운트 갱신. reloadKey 변경 시 재조회.
+ *
+ * v1 단순화(2026-09-01 사용자 피드백) — props 추가(기본값은 구 동작 유지):
+ *  - `compact`: 기본 열을 `시리얼 | 모델 | 병동 | 상태 | 상품유형 | 배치일 | 최근 이벤트 | ⋯`로 줄이고(용도·회수일·연결·창고 개체·메모·원문 2행은 [열 더보기]),
+ *    필터도 상태 + 시리얼 검색만 기본 노출(모델·병동·WMS·용도·상품유형·정렬·행수는 [필터 더보기] — 숨은 필터에 값이 있으면 자동 펼침)
+ *  - `showSelection=false`: 체크박스·전체 선택 안내를 그리지 않음(오케스트레이터 [선택] 토글이 켤 때만 true)
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import Link from 'next/link'
-import { AlertTriangle, ChevronLeft, ChevronRight, MoreHorizontal, Search, X } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MoreHorizontal, Search, SlidersHorizontal, X } from 'lucide-react'
 import Badge from '@/app/components/ui/Badge'
 import Button from '@/app/components/ui/Button'
 import EmptyState from '@/app/components/ui/EmptyState'
@@ -61,6 +66,10 @@ export interface DeviceTableProps {
   onMutated: () => void
   onTotalChange?: (total: number) => void
   reloadKey: number
+  /** v1 단순 모드 — 기본 7열 + [열 더보기], 필터는 상태·검색 + [필터 더보기]. 기본 false(구 전체 열·필터) */
+  compact?: boolean
+  /** 체크박스·전체 선택 안내 표시. 기본 true(구 동작) */
+  showSelection?: boolean
 }
 
 const STATUS_OPTIONS: { value: UnitsStatusFilter; label: string }[] = [
@@ -98,7 +107,12 @@ const SORT_OPTIONS: { value: UnitsSort; label: string }[] = [
 
 const LIMIT_OPTIONS = [50, 100, 200, 500]
 
-const COLUMNS: { key: string; label: string; sort?: UnitsSort; className?: string }[] = [
+type ColumnKey = 'serial' | 'model' | 'usage' | 'productType' | 'ward' | 'status' | 'placedOn' | 'recovered' | 'lastEvent' | 'ref' | 'wms' | 'memo'
+
+/** compact 기본 열 순서(v1) — 나머지는 [열 더보기] */
+const COMPACT_COLUMN_KEYS: readonly ColumnKey[] = ['serial', 'model', 'ward', 'status', 'productType', 'placedOn', 'lastEvent']
+
+const COLUMNS: { key: ColumnKey; label: string; sort?: UnitsSort; className?: string }[] = [
   { key: 'serial', label: '시리얼', sort: 'serial' },
   { key: 'model', label: '모델' },
   { key: 'usage', label: '용도' },
@@ -132,10 +146,20 @@ export function DeviceTable({
   onMutated,
   onTotalChange,
   reloadKey,
+  compact = false,
+  showSelection = true,
 }: DeviceTableProps) {
   const notify = useDevicesToast()
   const { canWrite, canAdmin } = capabilities
   const today = summary?.today ?? todayKst()
+
+  // ── v1 단순 모드: 열/필터 더보기 (compact가 아니면 항상 전체)
+  const [moreCols, setMoreCols] = useState(false)
+  const [moreFilters, setMoreFilters] = useState(false)
+  const advancedFilterActive = filters.model != null || filters.ward != null || filters.wms != null || filters.usage != null || filters.productType != null
+  const showAdvancedFilters = !compact || moreFilters || advancedFilterActive
+  const showAllColumns = !compact || moreCols
+  const visibleColumns = useMemo(() => (showAllColumns ? COLUMNS : COMPACT_COLUMN_KEYS.map((k) => COLUMNS.find((c) => c.key === k)!)), [showAllColumns])
 
   // ── 데이터
   const [rows, setRows] = useState<DeviceListRow[]>([])
@@ -301,7 +325,7 @@ export function DeviceTable({
 
   return (
     <div>
-      {/* ── 필터 */}
+      {/* ── 필터 (row 1: 상태 · 검색 · 더보기 토글 · 초기화 · 합계 / row 2: 모델·병동·WMS·용도·상품유형·정렬·행수) */}
       <div className="mb-3 flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <div role="radiogroup" aria-label="상태" className="inline-flex rounded-md border border-border bg-card p-0.5 text-xs">
@@ -322,45 +346,6 @@ export function DeviceTable({
               )
             })}
           </div>
-          <div className="flex flex-wrap items-center gap-1" aria-label="모델">
-            <Chip active={filters.model == null} onClick={() => setFilters({ model: null })}>
-              전체 모델
-            </Chip>
-            {models.map((m) => (
-              <Chip key={m.deviceInfoId} active={filters.model === m.deviceInfoId} onClick={() => setFilters({ model: filters.model === m.deviceInfoId ? null : m.deviceInfoId })} title={m.deviceModel}>
-                {m.deviceName}
-                <span className={cn('ml-1 tabular-nums', filters.model === m.deviceInfoId ? 'opacity-80' : 'text-muted-foreground')}>{m.active.toLocaleString()}</span>
-              </Chip>
-            ))}
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Select
-            aria-label="병동"
-            value={filters.ward == null ? '' : String(filters.ward)}
-            onChange={(e) => {
-              const v = e.target.value
-              setFilters({ ward: v === '' ? null : v === 'unassigned' ? 'unassigned' : Number(v) })
-            }}
-            className="h-8 w-auto min-w-[9rem] text-xs"
-          >
-            <option value="">전체 병동</option>
-            <option value="unassigned">미지정{summary ? ` (${summary.unassigned.toLocaleString()})` : ''}</option>
-            {activeWards.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name} ({w.active.toLocaleString()})
-              </option>
-            ))}
-            {closedWards.length > 0 && (
-              <optgroup label="폐쇄 병동">
-                {closedWards.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name} (폐쇄)
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </Select>
           <div className="relative">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input
@@ -382,52 +367,115 @@ export function DeviceTable({
               </button>
             )}
           </div>
-          <Select aria-label="WMS" value={filters.wms ?? ''} onChange={(e) => setFilters({ wms: (e.target.value || null) as UnitsWmsFilter | null })} className="h-8 w-auto text-xs">
-            {WMS_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
-          <Select aria-label="용도" value={filters.usage ?? ''} onChange={(e) => setFilters({ usage: (e.target.value || null) as UsageFilter | null })} className="h-8 w-auto text-xs">
-            {USAGE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
-          <Select aria-label="상품유형" value={filters.productType ?? ''} onChange={(e) => setFilters({ productType: (e.target.value || null) as ProductTypeFilter | null })} className="h-8 w-auto text-xs">
-            {PRODUCT_TYPE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
-          <Select aria-label="정렬" value={filters.sort} onChange={(e) => setSort(e.target.value as UnitsSort)} className="h-8 w-auto text-xs">
-            {SORT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                정렬: {o.label}
-              </option>
-            ))}
-          </Select>
-          <Select aria-label="페이지 크기" value={filters.limit} onChange={(e) => setFilters({ limit: Number(e.target.value) })} className="h-8 w-auto text-xs">
-            {LIMIT_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                {n}행
-              </option>
-            ))}
-          </Select>
+          {compact && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setMoreFilters((v) => !v)}
+              aria-expanded={showAdvancedFilters}
+              className={cn('h-8 gap-1 text-xs', advancedFilterActive && 'text-primary')}
+              title="모델·병동·WMS·용도·상품유형·정렬·행수"
+            >
+              <SlidersHorizontal size={13} aria-hidden="true" />
+              필터 더보기
+              {showAdvancedFilters ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
+            </Button>
+          )}
           {hasFilter && (
             <Button size="sm" variant="ghost" onClick={resetFilters} className="h-8 text-xs">
               필터 초기화
             </Button>
           )}
-          <span className="ml-auto text-xs text-muted-foreground tabular-nums">{loading ? '불러오는 중…' : `총 ${total.toLocaleString()}대`}</span>
+          <span className="ml-auto inline-flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
+            {loading ? '불러오는 중…' : `총 ${total.toLocaleString()}대`}
+            {compact && (
+              <button type="button" onClick={() => setMoreCols((v) => !v)} aria-pressed={moreCols} className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground" title="용도·회수일·사유·연결·창고 개체·메모·원문">
+                {moreCols ? '열 접기' : '열 더보기'}
+                {moreCols ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
+              </button>
+            )}
+          </span>
         </div>
+        {showAdvancedFilters && (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1" aria-label="모델">
+              <Chip active={filters.model == null} onClick={() => setFilters({ model: null })}>
+                전체 모델
+              </Chip>
+              {models.map((m) => (
+                <Chip key={m.deviceInfoId} active={filters.model === m.deviceInfoId} onClick={() => setFilters({ model: filters.model === m.deviceInfoId ? null : m.deviceInfoId })} title={m.deviceModel}>
+                  {m.deviceName}
+                  <span className={cn('ml-1 tabular-nums', filters.model === m.deviceInfoId ? 'opacity-80' : 'text-muted-foreground')}>{m.active.toLocaleString()}</span>
+                </Chip>
+              ))}
+            </div>
+            <Select
+              aria-label="병동"
+              value={filters.ward == null ? '' : String(filters.ward)}
+              onChange={(e) => {
+                const v = e.target.value
+                setFilters({ ward: v === '' ? null : v === 'unassigned' ? 'unassigned' : Number(v) })
+              }}
+              className="h-8 w-auto min-w-[9rem] text-xs"
+            >
+              <option value="">전체 병동</option>
+              <option value="unassigned">미지정{summary ? ` (${summary.unassigned.toLocaleString()})` : ''}</option>
+              {activeWards.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name} ({w.active.toLocaleString()})
+                </option>
+              ))}
+              {closedWards.length > 0 && (
+                <optgroup label="폐쇄 병동">
+                  {closedWards.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} (폐쇄)
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </Select>
+            <Select aria-label="WMS" value={filters.wms ?? ''} onChange={(e) => setFilters({ wms: (e.target.value || null) as UnitsWmsFilter | null })} className="h-8 w-auto text-xs">
+              {WMS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+            <Select aria-label="용도" value={filters.usage ?? ''} onChange={(e) => setFilters({ usage: (e.target.value || null) as UsageFilter | null })} className="h-8 w-auto text-xs">
+              {USAGE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+            <Select aria-label="상품유형" value={filters.productType ?? ''} onChange={(e) => setFilters({ productType: (e.target.value || null) as ProductTypeFilter | null })} className="h-8 w-auto text-xs">
+              {PRODUCT_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+            <Select aria-label="정렬" value={filters.sort} onChange={(e) => setSort(e.target.value as UnitsSort)} className="h-8 w-auto text-xs">
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  정렬: {o.label}
+                </option>
+              ))}
+            </Select>
+            <Select aria-label="페이지 크기" value={filters.limit} onChange={(e) => setFilters({ limit: Number(e.target.value) })} className="h-8 w-auto text-xs">
+              {LIMIT_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n}행
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
       </div>
 
       {/* ── 전체 선택 안내 */}
-      {filters.status === 'active' && allPageSelected && total > selectableRows.length && (
+      {showSelection && filters.status === 'active' && allPageSelected && total > selectableRows.length && (
         <div className="mb-2 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
           이 페이지의 배치 중 기기 {selectableRows.length.toLocaleString()}대가 선택되었습니다.{' '}
           {canSelectAllResults ? (
@@ -455,18 +503,20 @@ export function DeviceTable({
         <table className="w-full text-sm">
           <THead>
             <TR className="hover:bg-transparent">
-              <TH className="w-8 px-3">
-                <input
-                  ref={headerCheckbox}
-                  type="checkbox"
-                  aria-label="이 페이지 전체 선택"
-                  checked={allPageSelected}
-                  onChange={togglePage}
-                  disabled={selectableRows.length === 0}
-                  className="h-4 w-4 rounded border-input accent-primary"
-                />
-              </TH>
-              {COLUMNS.map((c) => (
+              {showSelection && (
+                <TH className="w-8 px-3">
+                  <input
+                    ref={headerCheckbox}
+                    type="checkbox"
+                    aria-label="이 페이지 전체 선택"
+                    checked={allPageSelected}
+                    onChange={togglePage}
+                    disabled={selectableRows.length === 0}
+                    className="h-4 w-4 rounded border-input accent-primary"
+                  />
+                </TH>
+              )}
+              {visibleColumns.map((c) => (
                 <TH key={c.key} className={c.className}>
                   {c.sort ? (
                     <button type="button" onClick={() => setSort(c.sort as UnitsSort)} className={cn('inline-flex items-center gap-0.5 hover:text-foreground', filters.sort === c.sort && 'text-foreground')} title={`${c.label} 순 정렬`}>
@@ -484,124 +534,163 @@ export function DeviceTable({
           {rows.length > 0 && (
             <TBody>
               {rows.map((row) => {
-                const selected = selection.has(row.id)
+                const selected = showSelection && selection.has(row.id)
                 const selectable = row.status === 'ACTIVE'
                 const badFormat = matchesSerialPattern(row.serialNo, row.deviceInfo?.serialPattern) === false
                 const wms = wmsCell(row.wms ?? row.wmsTransient)
                 const refHref = row.lastRef ? refLink(row.lastRef.type, row.lastRef.code) : null
                 const editing = memoEdit?.id === row.id
+                const cell = (key: ColumnKey): ReactNode => {
+                  switch (key) {
+                    case 'serial':
+                      return (
+                        <TD>
+                          <div className="flex items-center gap-1 font-mono font-medium">
+                            <button type="button" className="hover:underline" onClick={(e) => { e.stopPropagation(); onOpenDevice(row.id) }}>
+                              {row.serialNo}
+                            </button>
+                            {badFormat && <AlertTriangle size={13} className="text-warning" aria-label="형식 불일치" />}
+                          </div>
+                          {showAllColumns && row.serialRaw && <div className="font-mono text-[11px] text-muted-foreground">{row.serialRaw}</div>}
+                        </TD>
+                      )
+                    case 'model':
+                      return (
+                        <TD>
+                          <div>{row.deviceInfo?.deviceName ?? '—'}</div>
+                          <div className="text-[11px] text-muted-foreground">{row.deviceInfo?.deviceModel}</div>
+                        </TD>
+                      )
+                    case 'usage':
+                      return (
+                        <TD className="whitespace-nowrap">
+                          <UsageBadge usage={row.usageType} />
+                        </TD>
+                      )
+                    case 'productType':
+                      return (
+                        <TD className="whitespace-nowrap">
+                          <ProductTypeBadge value={row.productType} recovered={row.status === 'RECOVERED'} />
+                        </TD>
+                      )
+                    case 'ward':
+                      return <TD className="whitespace-nowrap">{wardText(row)}</TD>
+                    case 'status':
+                      return (
+                        <TD>
+                          <StatusBadge status={row.status} />
+                        </TD>
+                      )
+                    case 'placedOn':
+                      return <TD className="whitespace-nowrap tabular-nums">{ymdOrDash(row.placedOn)}</TD>
+                    case 'recovered':
+                      return (
+                        <TD className="whitespace-nowrap">
+                          {row.recoveredOn ? (
+                            <>
+                              <span className="tabular-nums">{ymdOrDash(row.recoveredOn)}</span>
+                              {row.recoverReason && <span className="text-muted-foreground"> · {row.recoverReason.name}</span>}
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                          {row.replacedBy && (
+                            <div className="text-[11px] text-muted-foreground">
+                              → 교체{' '}
+                              <button type="button" className="font-mono text-primary hover:underline" onClick={(e) => { e.stopPropagation(); onOpenDevice(row.replacedBy!.id) }}>
+                                {row.replacedBy.serialNo}
+                              </button>
+                            </div>
+                          )}
+                        </TD>
+                      )
+                    case 'lastEvent':
+                      return <TD className="whitespace-nowrap tabular-nums">{lastEventText(row.lastEventType, row.lastEventOn, today)}</TD>
+                    case 'ref':
+                      return (
+                        <TD className="whitespace-nowrap" onClick={stop}>
+                          {row.lastRef ? (
+                            refHref ? (
+                              <Link href={refHref} className="font-mono text-xs text-primary hover:underline" title={REGISTRY_REF_TYPE_LABELS[row.lastRef.type as RegistryRefType] ?? row.lastRef.type}>
+                                {row.lastRef.code}
+                              </Link>
+                            ) : (
+                              <span className="font-mono text-xs" title={row.lastRef.type}>
+                                {row.lastRef.code}
+                              </span>
+                            )
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TD>
+                      )
+                    case 'wms':
+                      return (
+                        <TD className="whitespace-nowrap text-xs">
+                          {wms ? (
+                            <span className="inline-flex items-center gap-1">
+                              {row.wmsWarning && <AlertTriangle size={13} className="shrink-0 text-warning" aria-label={row.wmsWarning} />}
+                              <span title={row.wmsWarning ?? undefined}>{wms.text}</span>
+                              {wms.transient && <span className="text-muted-foreground">(자동 매칭)</span>}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TD>
+                      )
+                    case 'memo':
+                      return (
+                        <TD className="max-w-[14rem]" onClick={stop}>
+                          {editing ? (
+                            <Input
+                              autoFocus
+                              value={memoEdit.value}
+                              maxLength={500}
+                              onChange={(e) => setMemoEdit({ id: row.id, value: e.target.value })}
+                              onBlur={() => saveMemo(row, memoEdit.value)}
+                              onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+                                if (e.key === 'Enter') saveMemo(row, memoEdit.value)
+                                if (e.key === 'Escape') setMemoEdit(null)
+                              }}
+                              className="h-7 text-xs"
+                              placeholder="각인·스티커 번호 등"
+                            />
+                          ) : canWrite ? (
+                            <button
+                              type="button"
+                              onClick={() => setMemoEdit({ id: row.id, value: row.memo ?? '' })}
+                              title={row.memo ? `${row.memo}\n(클릭하여 편집)` : '메모 추가'}
+                              className={cn('block max-w-full truncate rounded px-1 text-left text-xs hover:bg-accent', row.memo ? 'text-foreground' : 'text-muted-foreground/70')}
+                            >
+                              {row.memo || '메모 추가'}
+                            </button>
+                          ) : (
+                            <span className="block truncate text-xs" title={row.memo ?? undefined}>
+                              {row.memo || <span className="text-muted-foreground">—</span>}
+                            </span>
+                          )}
+                        </TD>
+                      )
+                  }
+                }
                 return (
                   <TR key={row.id} className={cn('cursor-pointer', selected && 'bg-primary-subtle/40 hover:bg-primary-subtle/60')} onClick={() => onOpenDevice(row.id)}>
-                    <TD className="px-3" onClick={stop}>
-                      <input
-                        type="checkbox"
-                        aria-label={`${row.serialNo} 선택`}
-                        checked={selected}
-                        disabled={!selectable}
-                        title={selectable ? undefined : '회수된 기기는 일괄 이동·회수 대상이 아닙니다'}
-                        onChange={() => toggleRow(row)}
-                        className="h-4 w-4 rounded border-input accent-primary disabled:opacity-40"
-                      />
-                    </TD>
-                    <TD>
-                      <div className="flex items-center gap-1 font-mono font-medium">
-                        <button type="button" className="hover:underline" onClick={(e) => { e.stopPropagation(); onOpenDevice(row.id) }}>
-                          {row.serialNo}
-                        </button>
-                        {badFormat && <AlertTriangle size={13} className="text-warning" aria-label="형식 불일치" />}
-                      </div>
-                      {row.serialRaw && <div className="font-mono text-[11px] text-muted-foreground">{row.serialRaw}</div>}
-                    </TD>
-                    <TD>
-                      <div>{row.deviceInfo?.deviceName ?? '—'}</div>
-                      <div className="text-[11px] text-muted-foreground">{row.deviceInfo?.deviceModel}</div>
-                    </TD>
-                    <TD className="whitespace-nowrap">
-                      <UsageBadge usage={row.usageType} />
-                    </TD>
-                    <TD className="whitespace-nowrap">
-                      <ProductTypeBadge value={row.productType} recovered={row.status === 'RECOVERED'} />
-                    </TD>
-                    <TD className="whitespace-nowrap">{wardText(row)}</TD>
-                    <TD>
-                      <StatusBadge status={row.status} />
-                    </TD>
-                    <TD className="whitespace-nowrap tabular-nums">{ymdOrDash(row.placedOn)}</TD>
-                    <TD className="whitespace-nowrap">
-                      {row.recoveredOn ? (
-                        <>
-                          <span className="tabular-nums">{ymdOrDash(row.recoveredOn)}</span>
-                          {row.recoverReason && <span className="text-muted-foreground"> · {row.recoverReason.name}</span>}
-                        </>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                      {row.replacedBy && (
-                        <div className="text-[11px] text-muted-foreground">
-                          → 교체{' '}
-                          <button type="button" className="font-mono text-primary hover:underline" onClick={(e) => { e.stopPropagation(); onOpenDevice(row.replacedBy!.id) }}>
-                            {row.replacedBy.serialNo}
-                          </button>
-                        </div>
-                      )}
-                    </TD>
-                    <TD className="whitespace-nowrap tabular-nums">{lastEventText(row.lastEventType, row.lastEventOn, today)}</TD>
-                    <TD className="whitespace-nowrap" onClick={stop}>
-                      {row.lastRef ? (
-                        refHref ? (
-                          <Link href={refHref} className="font-mono text-xs text-primary hover:underline" title={REGISTRY_REF_TYPE_LABELS[row.lastRef.type as RegistryRefType] ?? row.lastRef.type}>
-                            {row.lastRef.code}
-                          </Link>
-                        ) : (
-                          <span className="font-mono text-xs" title={row.lastRef.type}>
-                            {row.lastRef.code}
-                          </span>
-                        )
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TD>
-                    <TD className="whitespace-nowrap text-xs">
-                      {wms ? (
-                        <span className="inline-flex items-center gap-1">
-                          {row.wmsWarning && <AlertTriangle size={13} className="shrink-0 text-warning" aria-label={row.wmsWarning} />}
-                          <span title={row.wmsWarning ?? undefined}>{wms.text}</span>
-                          {wms.transient && <span className="text-muted-foreground">(자동 매칭)</span>}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TD>
-                    <TD className="max-w-[14rem]" onClick={stop}>
-                      {editing ? (
-                        <Input
-                          autoFocus
-                          value={memoEdit.value}
-                          maxLength={500}
-                          onChange={(e) => setMemoEdit({ id: row.id, value: e.target.value })}
-                          onBlur={() => saveMemo(row, memoEdit.value)}
-                          onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
-                            if (e.key === 'Enter') saveMemo(row, memoEdit.value)
-                            if (e.key === 'Escape') setMemoEdit(null)
-                          }}
-                          className="h-7 text-xs"
-                          placeholder="각인·스티커 번호 등"
+                    {showSelection && (
+                      <TD className="px-3" onClick={stop}>
+                        <input
+                          type="checkbox"
+                          aria-label={`${row.serialNo} 선택`}
+                          checked={selected}
+                          disabled={!selectable}
+                          title={selectable ? undefined : '회수된 기기는 일괄 이동·회수 대상이 아닙니다'}
+                          onChange={() => toggleRow(row)}
+                          className="h-4 w-4 rounded border-input accent-primary disabled:opacity-40"
                         />
-                      ) : canWrite ? (
-                        <button
-                          type="button"
-                          onClick={() => setMemoEdit({ id: row.id, value: row.memo ?? '' })}
-                          title={row.memo ? `${row.memo}\n(클릭하여 편집)` : '메모 추가'}
-                          className={cn('block max-w-full truncate rounded px-1 text-left text-xs hover:bg-accent', row.memo ? 'text-foreground' : 'text-muted-foreground/70')}
-                        >
-                          {row.memo || '메모 추가'}
-                        </button>
-                      ) : (
-                        <span className="block truncate text-xs" title={row.memo ?? undefined}>
-                          {row.memo || <span className="text-muted-foreground">—</span>}
-                        </span>
-                      )}
-                    </TD>
+                      </TD>
+                    )}
+                    {visibleColumns.map((c) => (
+                      <Fragment key={c.key}>{cell(c.key)}</Fragment>
+                    ))}
                     <TD className="px-2 text-center" onClick={stop}>
                       <button type="button" aria-label="행 메뉴" aria-haspopup="menu" onClick={openMenu(row)} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
                         <MoreHorizontal size={16} />
@@ -622,22 +711,24 @@ export function DeviceTable({
         {rows.length > 0 && (
           <ul className="space-y-2">
             {rows.map((row) => {
-              const selected = selection.has(row.id)
+              const selected = showSelection && selection.has(row.id)
               const selectable = row.status === 'ACTIVE'
               const badFormat = matchesSerialPattern(row.serialNo, row.deviceInfo?.serialPattern) === false
               const refHref = row.lastRef ? refLink(row.lastRef.type, row.lastRef.code) : null
               return (
                 <li key={row.id} className={cn('rounded-lg border border-border bg-card p-3', selected && 'border-primary/50 bg-primary-subtle/30')} onClick={() => onOpenDevice(row.id)}>
                   <div className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      aria-label={`${row.serialNo} 선택`}
-                      checked={selected}
-                      disabled={!selectable}
-                      onChange={() => toggleRow(row)}
-                      onClick={stop}
-                      className="mt-1 h-5 w-5 rounded border-input accent-primary disabled:opacity-40"
-                    />
+                    {showSelection && (
+                      <input
+                        type="checkbox"
+                        aria-label={`${row.serialNo} 선택`}
+                        checked={selected}
+                        disabled={!selectable}
+                        onChange={() => toggleRow(row)}
+                        onClick={stop}
+                        className="mt-1 h-5 w-5 rounded border-input accent-primary disabled:opacity-40"
+                      />
+                    )}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
                         <span className="inline-flex items-center gap-1 font-mono text-base font-semibold">
