@@ -180,6 +180,7 @@ function unitsQuery(params: UnitsQueryParams): Record<string, QueryValue> {
     q: params.q,
     wms: params.wms,
     usage: params.usage,
+    productType: params.productType,
     page: params.page,
     limit: params.limit,
     sort: params.sort,
@@ -283,7 +284,7 @@ export function bulkDeviceAction(body: BulkBody): Promise<BulkResponse> {
   return apiFetch<BulkResponse>('/api/devices/units/bulk', { method: 'POST', body })
 }
 
-/** memo(write) / usageTypeId(write → CORRECT) / 식별 보정(admin → CORRECT) — 상태·병원·병동 키는 400 */
+/** memo(write) / usageTypeId·productType(write → CORRECT) / 식별 보정(admin → CORRECT) — 상태·병원·병동 키는 400 */
 export function patchDevice(id: number, body: DevicePatchBody): Promise<DevicePatchResponse> {
   return apiFetch<DevicePatchResponse>(`/api/devices/units/${id}`, { method: 'PATCH', body })
 }

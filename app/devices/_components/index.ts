@@ -37,6 +37,8 @@ export { DeviceHistoryDrawer } from './DeviceHistoryDrawer'
 export type { DeviceHistoryDrawerProps } from './DeviceHistoryDrawer'
 export { CorrectionModal } from './CorrectionModal'
 export type { CorrectionModalProps } from './CorrectionModal'
+export { ProductTypeModal } from './ProductTypeModal'
+export type { ProductTypeModalProps } from './ProductTypeModal'
 
 // GROUP C
 export { RegisterModal } from './RegisterModal'

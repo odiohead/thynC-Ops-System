@@ -26,6 +26,7 @@ function toRow(r: CoverageRow): Record<string, unknown> {
     GW: reg ? r.activeGw : DASH,
     제3자: reg ? r.activeThird : DASH,
     '배치 중 합계': reg ? r.activeTotal : DASH,
+    '상품유형 혼합': r.productTypeMixed ? `혼합${r.unassignedProductType > 0 ? ` (미지정 ${r.unassignedProductType})` : ''}` : '',
     '회수(30일)': reg ? r.recovered30d : DASH,
     '마지막 이벤트': r.lastEvent ? `${r.lastEvent.on} ${DEVICE_EVENT_TYPE_LABELS[r.lastEvent.type as DeviceEventType] ?? r.lastEvent.type}` : DASH,
     '마지막 임포트': r.lastImport ? `${r.lastImport.occurredOn ?? r.lastImport.at.slice(0, 10)} (${r.lastImport.rowCount}행)` : DASH,
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest) {
       return badRequest(`필터를 좁혀 ${COVERAGE_MAX_LIMIT.toLocaleString()}행 이하로 내보내세요 (현재 ${result.total.toLocaleString()}행)`)
     }
     const rows = result.data.map(toRow)
-    return xlsxResponse(rows, '병원 커버리지', registryFileName(null, FILTER_LABEL[filter]), [14, 24, 8, 10, 12, 8, 10, 11, 6, 6, 12, 10, 16, 20])
+    return xlsxResponse(rows, '병원 커버리지', registryFileName(null, FILTER_LABEL[filter]), [14, 24, 8, 10, 12, 8, 10, 11, 6, 6, 12, 14, 10, 16, 20])
   } catch (e) {
     return readErrorResponse(e, 'summary/export')
   }

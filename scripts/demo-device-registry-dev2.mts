@@ -8,6 +8,7 @@
  *
  * 데모 시나리오(설계 §6 화면 상태를 모두 볼 수 있게):
  *   1) go-live 임포트(붙여넣기, 2026-06-10): ECG 8 · SpO2 8 · GW 2 → 6병동/7병동/ICU — P990107·P990108은 평가용(EVAL), 나머지 판매용(폼 기본)
+ *      상품유형(B-22): 문산중앙병원 계약완료 딜은 '일반'만(12+18+30=60) → 기본값 일반. 매트릭스 확인용으로 A990107·A990108만 '라이트'로 명시 등록(계약 딜에 없는 유형 → 경고만)
  *   2) 병동 이동 A990103 6병동→7병동 (2026-07-02)
  *   3) 분실 회수 P990105 (2026-07-20)
  *   4) AS 교체 A990104 → A990201 (불량, 2026-08-12, 유지보수 MNT-202608-0011 연결)
@@ -65,9 +66,10 @@ async function seed() {
 
   // 1) go-live 임포트 (붙여넣기 형식)
   const sale = await prisma.statusCode.findFirstOrThrow({ where: { category: 'DEVICE_USAGE_TYPE', value: 'SALE' } })
-  const rows: { row: number; serialInput: string; wardInput?: string; usageTypeInput?: string }[] = []
+  const rows: { row: number; serialInput: string; wardInput?: string; usageTypeInput?: string; productTypeInput?: string }[] = []
   let r = 1
-  for (let i = 1; i <= 8; i++) rows.push({ row: r++, serialInput: `A9901${String(i).padStart(2, '0')}`, wardInput: i <= 4 ? '6병동' : '7병동' })
+  // A990107·A990108은 상품유형 '라이트' 명시 — 요약 스트립 '└ 일반 | 라이트' 매트릭스·목록 배지·필터 확인용(병원 딜은 일반만 → 나머지는 기본값 일반)
+  for (let i = 1; i <= 8; i++) rows.push({ row: r++, serialInput: `A9901${String(i).padStart(2, '0')}`, wardInput: i <= 4 ? '6병동' : '7병동', ...(i >= 7 ? { productTypeInput: '라이트' } : {}) })
   // P990107·P990108은 평가용(EVAL) — 요약 스트립 '(평가용 2 별도)'·커버리지 '평가용' 열·목록 용도 배지 확인용
   for (let i = 1; i <= 8; i++) rows.push({ row: r++, serialInput: `P9901${String(i).padStart(2, '0')}`, wardInput: i <= 4 ? '6병동' : '7병동', ...(i >= 7 ? { usageTypeInput: '평가용' } : {}) })
   rows.push({ row: r++, serialInput: 'GW6420-B990101', wardInput: '6병동' })
@@ -75,7 +77,7 @@ async function seed() {
   const imp = await reg.importBatch(ctx('2026-06-10', { memo: 'go-live 1차(데모)' }), {
     rows, sourceKind: 'PASTE', mode: 'REGISTER', fileName: null, defaults: { wardMode: 'column', usageTypeId: sale.id },
   })
-  console.log(`1) 임포트 배치 #${imp.batch.id}: 등록 ${imp.batch.registeredCount} · 병동 ${imp.result.newWards.map((w) => w.name).join(',')} · 용도 판매용 기본, P990107·P990108 평가용`)
+  console.log(`1) 임포트 배치 #${imp.batch.id}: 등록 ${imp.batch.registeredCount} · 병동 ${imp.result.newWards.map((w) => w.name).join(',')} · 용도 판매용 기본, P990107·P990108 평가용 · 상품유형 기본 ${imp.preview.summary.productTypeContext.default ?? '미지정'}, A990107·A990108 라이트`)
 
   const dev = async (serialNo: string) => (await prisma.deviceUnit.findUniqueOrThrow({ where: { serialNo } })).id // 공개 device id = 유닛 id
   // 2) 병동 이동
@@ -109,6 +111,13 @@ async function seed() {
       .filter((m: { active: number }) => m.active > 0)
       .map((m: { deviceModel: string; active: number; activeEval: number; activeForCompare: number; expected: number | null; diff: number | null }) => `${m.deviceModel} 배치 ${m.active}(대조 ${m.activeForCompare}·평가 ${m.activeEval})/계약 ${m.expected ?? '—'} (차이 ${m.diff ?? '—'})`)
       .join(' · ')
+  )
+  const ecg = summary.models.find((m) => m.onpremDeviceType === 1)
+  console.log(
+    `상품유형(B-22): 딜 ${summary.productTypeContext.types.join('/') || '없음'}(기본 ${summary.productTypeContext.default ?? '미지정'}) · 매트릭스 ${summary.productTypeMixed ? 'ON' : 'OFF'} ·`,
+    'ECG:',
+    Object.entries(ecg?.byProductType ?? {}).map(([k, c]) => `${k} 배치 ${c!.activeForCompare}/계약 ${c!.expected ?? '—'} (차이 ${c!.diff ?? '—'})`).join(' · '),
+    `· 교체 전체 ${summary.replacements.total} (일반 ${summary.replacements.byType['일반']} · 라이트 ${summary.replacements.byType['라이트']} · 미지정 ${summary.replacements.byType['미지정']}) · 최근 30일 ${summary.replacements.last30d.total}`
   )
 }
 

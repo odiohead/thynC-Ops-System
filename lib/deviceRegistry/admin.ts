@@ -137,9 +137,9 @@ export interface CancelEventResult {
   restored?: ChangeSet
 }
 
-/** CORRECT 복원 대상 — 유닛 컬럼(시리얼·원문·모델·MAC) / 배치 컬럼(닉네임) */
+/** CORRECT 복원 대상 — 유닛 컬럼(시리얼·원문·모델·MAC·용도) / 배치 컬럼(닉네임·상품유형) */
 const CORRECT_UNIT_FIELDS = new Set(['serialNo', 'serialRaw', 'deviceInfoId', 'macAddress', 'usageTypeId'])
-const CORRECT_PLACEMENT_FIELDS = new Set(['extDeviceCode'])
+const CORRECT_PLACEMENT_FIELDS = new Set(['extDeviceCode', 'productType'])
 
 async function cancelCorrectEvent(tx: DbClient, ev: EventRow): Promise<CancelEventResult> {
   const device = await getDeviceOr404(tx, ev.deviceId)

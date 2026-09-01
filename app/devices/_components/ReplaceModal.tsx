@@ -9,6 +9,7 @@
  *  (d) 이 병원 RECOVERED: 'RECOVER 없이 교체 기기만 등록' 안내
  * 신 시리얼(모델 자동·⚠접두 불일치·회수 이력 있으면 "재등록으로 이력 연결" 힌트·타 병원 ACTIVE면 [이관 처리]=newConflict:'TRANSFER'·이 병원 배치 중이면 '이미 등록된 기기 — 회수만 기록하고 병동을 맞춥니다')
  * · 병동(구 기본) · 신 기기 용도(구 기기 용도 기본 — 사용자가 손대지 않으면 구 기기 조회 결과를 따라감; 신규 유닛일 때만 부여) · 사유(DEFECT 기본) · 업무일자 · 코드. Tab 구→신→제출.
+ * · 상품유형(B-22): 구 배치 값 상속 — '구 기기와 동일(라이트)' 읽기 전용. 구 기기 소급 등록(원장에 없음)일 때만 select(기본값 = 병원 딜 규칙, 혼합 병원은 필수)
  * replaceDevice(code, body) → onDone({ message:'교체 기록: P018363 회수(불량) · P020418 등록(3병동)', openDeviceId: newDevice.id, warnings })
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
@@ -17,8 +18,9 @@ import Button from '@/app/components/ui/Button'
 import Badge from '@/app/components/ui/Badge'
 import { Input, Select, Textarea } from '@/app/components/ui/Input'
 import { cn } from '@/lib/cn'
-import { guessDeviceClassByPrefix, normalizeSerial, todayKst, toYmd, type OccurredOnBasis } from '@/lib/deviceRegistryShared'
+import { PRODUCT_TYPES, PRODUCT_TYPE_UNSET_LABEL, guessDeviceClassByPrefix, normalizeSerial, todayKst, toYmd, type OccurredOnBasis, type ProductType, type ProductTypeContext } from '@/lib/deviceRegistryShared'
 import { errorMessage, isApiError, getRecoveryReasons, getUsageTypes, lookupSerial, replaceDevice } from './api'
+import { productTypeDefaultLabel } from './deviceDisplay'
 import type { DeviceRef, DeviceRowBase, ModelSummary, MutationDone, RecoveryReason, RegistryRef, ReplaceBody, UsageType, WardOption, WardValue } from './types'
 import { WardCombo } from './WardCombo'
 import { MaintenanceCodeCombo } from './MaintenanceCodeCombo'
@@ -33,6 +35,8 @@ export interface ReplaceModalProps {
   models: ModelSummary[]
   wards: WardOption[]
   today: string | null
+  /** 병원 딜 기준 상품유형 문맥(summary.productTypeContext) — 구 기기 소급 등록 경로의 기본값 라벨·필수 판정 */
+  productTypeContext?: ProductTypeContext | null
   onDone: (result: MutationDone) => void
 }
 
@@ -79,7 +83,7 @@ export function ReplaceModal(props: ReplaceModalProps) {
   )
 }
 
-function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: todayProp, onDone }: ReplaceModalProps) {
+function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: todayProp, productTypeContext, onDone }: ReplaceModalProps) {
   const today = todayProp ?? todayKst()
 
   // ── 구 기기
@@ -107,6 +111,8 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
   /** 신 기기 용도 — 사용자가 고르기 전까지는 구 기기 용도를 따라간다 */
   const [newUsageId, setNewUsageId] = useState<number | ''>(oldDevice?.usageTypeId ?? '')
   const [newUsageDirty, setNewUsageDirty] = useState(false)
+  /** 상품유형 — 소급 경로(구 기기 원장에 없음)에서만 입력. '' = 병원 딜 기본값 규칙 */
+  const [backfillProductType, setBackfillProductType] = useState<ProductType | ''>('')
   const occ = useOccurredOn(today)
   const [memo, setMemo] = useState('')
   const [refCode, setRefCode] = useState('')
@@ -265,7 +271,10 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
   const newGuessHint = newState.kind === 'create' && newModelId === '' ? guessModel(newKey, models).hint : null
   const oldGuessHint = oldState.kind === 'not_found' && oldModelId === '' ? guessModel(oldKey, models).hint : null
 
-  const oldOk = oldState.kind === 'active_here' || oldState.kind === 'recovered_here' || (oldState.kind === 'not_found' && oldModelId !== '')
+  const backfillNeedsProductType = oldState.kind === 'not_found' && !!productTypeContext?.mixed && backfillProductType === ''
+  const oldOk = oldState.kind === 'active_here' || oldState.kind === 'recovered_here' || (oldState.kind === 'not_found' && oldModelId !== '' && !backfillNeedsProductType)
+  /** 신 배치에 적용될 상품유형(표시) — 구 배치 상속 / 소급은 입력·기본값 */
+  const inheritedProductType: string | null = oldDeviceRow ? (oldDeviceRow.productType ?? null) : oldState.kind === 'not_found' ? (backfillProductType || productTypeContext?.default || null) : null
   const newOk = newState.kind === 'reregister' || newState.kind === 'active_here' || (newState.kind === 'create' && newModelId !== '') || (newState.kind === 'other_hospital' && newConflict)
   const reason = useMemo(() => (reasons ?? []).find((r) => r.id === reasonId) ?? null, [reasons, reasonId])
   const disabled = submitting || !oldOk || !newOk || !!occ.error
@@ -294,6 +303,7 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
       ...(reasonId !== '' ? { reasonCodeId: reasonId } : {}),
       ...(newUsageId !== '' ? { newUsageTypeId: newUsageId } : {}),
       ...(oldState.kind === 'not_found' && newUsageId !== '' ? { oldUsageTypeId: newUsageId } : {}),
+      ...(oldState.kind === 'not_found' && backfillProductType !== '' ? { productType: backfillProductType } : {}),
       occurredOn: occ.value,
       memo: memo.trim() || null,
       ref,
@@ -381,6 +391,9 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
             <span>
               병동 <span className="font-medium">{oldState.device.ward?.name ?? '미지정'}</span>
             </span>
+            <span>
+              상품유형 <span className="font-medium">{oldState.device.productType ?? PRODUCT_TYPE_UNSET_LABEL}</span>
+            </span>
             {oldState.device.placedOn && <span className="text-muted-foreground">배치일 {toYmd(oldState.device.placedOn)}</span>}
           </div>
         )}
@@ -394,6 +407,27 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
                   {models.map((m) => (
                     <option key={m.deviceInfoId} value={m.deviceInfoId}>
                       {modelLabel(m)}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField
+                label="상품유형(소급 배치)"
+                htmlFor="replace-old-pt"
+                required={!!productTypeContext?.mixed}
+                hint={
+                  backfillNeedsProductType ? (
+                    <span className="text-destructive">일반·라이트 딜이 함께 있는 병원 — 상품유형을 선택하세요 (구·신 배치 모두 이 값)</span>
+                  ) : (
+                    '구 기기 소급 배치와 신 기기 배치에 같은 값 적용 — 비우면 병원 계약 딜 기준 기본값'
+                  )
+                }
+              >
+                <Select id="replace-old-pt" value={backfillProductType} disabled={submitting} onChange={(e) => setBackfillProductType(e.target.value as ProductType | '')}>
+                  <option value="">{productTypeDefaultLabel(productTypeContext)}</option>
+                  {PRODUCT_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
                     </option>
                   ))}
                 </Select>
@@ -555,6 +589,21 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
               </option>
             ))}
           </Select>
+        </FormField>
+        <FormField label="상품유형" hint={oldState.kind === 'not_found' ? '소급 배치 값(위에서 지정)과 동일' : '자리의 판매 조건 — 신 배치는 구 기기 배치 값을 상속합니다 (변경은 등록 후 상품유형 지정)'}>
+          <div className="flex h-9 items-center rounded-md border border-border bg-muted/40 px-3 text-sm text-foreground" aria-readonly="true">
+            {oldDeviceRow || oldState.kind === 'not_found' ? (
+              <>
+                {oldState.kind === 'not_found' ? '소급 배치와 동일' : '구 기기와 동일'}
+                <span className="ml-1 font-medium">({inheritedProductType ?? PRODUCT_TYPE_UNSET_LABEL})</span>
+                {newState.kind === 'active_here' && (newState.device.productType ?? null) !== (inheritedProductType ?? null) && (
+                  <span className="ml-2 text-xs text-warning-subtle-foreground">신 기기는 이미 {newState.device.productType ?? PRODUCT_TYPE_UNSET_LABEL}(으)로 배치 중 — 상속하지 않음</span>
+                )}
+              </>
+            ) : (
+              <span className="text-muted-foreground">구 시리얼 조회 후 표시</span>
+            )}
+          </div>
         </FormField>
         <FormField label="회수 사유" htmlFor="replace-reason" hint="기본 불량(DEFECT)">
           <Select id="replace-reason" value={reasonId} disabled={submitting || !reasons} onChange={(e) => setReasonId(e.target.value ? Number(e.target.value) : '')}>

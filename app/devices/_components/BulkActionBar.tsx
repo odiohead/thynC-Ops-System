@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * 선택 액션 바 (§6.1-B '선택 시: [병동 이동] [회수]') — GROUP B
+ * 선택 액션 바 (§6.1-B '선택 시: [병동 이동] [회수] [상품유형 지정]') — GROUP B
  * 선택 > 0 이면 탭 콘텐츠 상단에 sticky로 뜬다. count = 선택 기기 수(전체 선택 포함), note = '검색 결과 전체 선택 2,000건(상한)' 같은 안내.
  * 쓰기 권한이 없으면 버튼 대신 안내 문구 + [선택 해제]만.
  */
@@ -13,11 +13,13 @@ export interface BulkActionBarProps {
   canWrite: boolean
   onMove: () => void
   onRecover: () => void
+  /** 상품유형(일반/라이트) 일괄 지정 — B-22 */
+  onSetProductType?: () => void
   onClear: () => void
   note?: string | null
 }
 
-export function BulkActionBar({ count, canWrite, onMove, onRecover, onClear, note }: BulkActionBarProps) {
+export function BulkActionBar({ count, canWrite, onMove, onRecover, onSetProductType, onClear, note }: BulkActionBarProps) {
   if (count === 0) return null
   return (
     <div
@@ -37,6 +39,11 @@ export function BulkActionBar({ count, canWrite, onMove, onRecover, onClear, not
             <Button size="sm" variant="outline" onClick={onRecover}>
               회수
             </Button>
+            {onSetProductType && (
+              <Button size="sm" variant="outline" onClick={onSetProductType} title="선택 기기의 상품유형(일반/라이트)을 한 번에 지정 — 기기마다 정정 이벤트">
+                상품유형 지정
+              </Button>
+            )}
           </>
         ) : (
           <span className="text-xs opacity-80">일괄 이동·회수는 USER 등급부터 가능합니다</span>

@@ -17,13 +17,19 @@ import type {
   ImportVerdict,
   OccurredOnBasis,
   OnpremHeaderMap,
+  ProductType,
+  ProductTypeContext,
+  ProductTypeFilter,
   RegistryRefType,
   RegistrySource,
   UsageFilter,
   UsageTypeRef,
 } from '@/lib/deviceRegistryShared'
 
-export type { UsageFilter, UsageTypeRef }
+export type { ProductType, ProductTypeContext, ProductTypeFilter, UsageFilter, UsageTypeRef }
+
+/** 상품유형 축 키(요약 매트릭스) — '일반' | '라이트' | '미지정' */
+export type ProductTypeKey = ProductType | '미지정'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 권한 · 병원 옵션
@@ -140,6 +146,10 @@ export interface CoverageRow {
   recovered30d: number
   lastEvent: { type: string; on: string } | null
   lastImport: { id: number; at: string; occurredOn: string | null; rowCount: number; registeredCount: number } | null
+  /** 계약완료 딜 상품유형이 일반+라이트 혼합(B-22) → '상품유형 혼합' 배지 */
+  productTypeMixed: boolean
+  /** 혼합 병원의 상품유형 미지정 ACTIVE 배치 수(혼합 아니면 0) */
+  unassignedProductType: number
 }
 
 export interface CoverageTotals {
@@ -148,6 +158,7 @@ export interface CoverageTotals {
   active: { ecg: number; spo2: number; gw: number; third: number; total: number; eval: number }
   events30d: number
   recovered30d: number
+  mixedProductTypeHospitals: number
 }
 
 export interface CoverageResponse {
@@ -190,6 +201,15 @@ export interface ModelSummary {
   /** 배치 중 유닛의 WMS 일시 매칭 집계(out=OUT · inStock=IN_STOCK · unmatched=매치 없음) */
   wms: { out: number; inStock: number; unmatched: number }
   lastEvent: { type: string; on: string } | null
+  /** 상품유형별 소계(B-22) — 키는 계약 딜 유형 ∪ 배치 유형(+'미지정'은 배치가 있을 때). expected는 그 유형 딜 Σ(ECG hard·SpO2 soft) */
+  byProductType: Partial<Record<ProductTypeKey, ProductTypeCell>>
+}
+
+export interface ProductTypeCell {
+  active: number
+  activeForCompare: number
+  expected: number | null
+  diff: number | null
 }
 
 export interface SummaryWard {
@@ -221,6 +241,14 @@ export interface HospitalDeviceSummary {
   recovered30dTotal: number
   /** 서버 KST 오늘(YYYY-MM-DD) — 업무일자 기본값·미래 판정 */
   today: string
+  /** 병원 계약완료 딜 기준 상품유형 문맥(등록 기본값·혼합 필수 — B-22) */
+  productTypeContext: ProductTypeContext
+  /** 계약 딜 2종이거나 배치에 상품유형이 있으면 true → 요약을 매트릭스로 */
+  productTypeMixed: boolean
+  /** 병원 단위 상품유형 축(ECG 기준) */
+  productTypes: { type: ProductTypeKey; active: number; activeForCompare: number; expected: number | null; diff: number | null }[]
+  /** 교체 건수(RECOVER 스냅샷 상품유형 기준) — 전체·최근 30일 */
+  replacements: { total: number; byType: Record<ProductTypeKey, number>; last30d: { total: number; byType: Record<ProductTypeKey, number> } }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -259,6 +287,8 @@ export interface DeviceRaw {
   lastEventType: DeviceEventType | null
   lastEventOn: string | null
   replacedById: number | null
+  /** 상품유형(일반/라이트) — 배치 속성(B-22), null=미지정. RECOVERED 행은 회수 전 마지막 값 */
+  productType: ProductType | null
   createdAt: string
   updatedAt: string
 }
@@ -309,6 +339,8 @@ export interface UnitsQueryParams {
   wms?: UnitsWmsFilter | null
   /** 용도 — SALE | EVAL | none(미지정) */
   usage?: UsageFilter | null
+  /** 상품유형 — 일반 | 라이트 | none(미지정) */
+  productType?: ProductTypeFilter | null
   page?: number
   limit?: number
   sort?: UnitsSort
@@ -387,6 +419,8 @@ export interface DeviceEventRaw {
   actorName: string | null
   editedAt: string | null
   editedById: string | null
+  /** 이벤트 시점 상품유형 스냅샷(REGISTER=지정값·MOVE/RECOVER=당시 배치 값·CORRECT=변경 후 값) */
+  productType: ProductType | null
   /** 기록 시각 — 업무일자와 다르면 회색 병기(D7) */
   createdAt: string
 }
@@ -409,6 +443,8 @@ export interface DeviceEvent extends DeviceDetailEvent {
     serialRaw: string | null
     status: DeviceStatus
     hospitalCode: string | null
+    /** 현재 배치 상품유형(행 스냅샷과 비교용) */
+    productType: ProductType | null
     deviceInfo: { id: number; deviceModel: string; deviceName: string; deviceClass: string }
     usageType: UsageTypeRef | null
   }
@@ -534,6 +570,8 @@ export interface RegisterItemInput {
   usageTypeId?: number
   /** 항목 용도 입력(문자열 '판매용'·'EVAL' 등 — 붙여넣기 열) */
   usageType?: string
+  /** 항목 상품유형('일반'·'라이트'·'lite' 등 — 붙여넣기 열) — 공통값보다 우선 */
+  productType?: string
 }
 
 export interface RegisterBody extends RegistryFields {
@@ -546,6 +584,8 @@ export interface RegisterBody extends RegistryFields {
   wardName?: string
   /** 공통 용도(폼 기본, 생략=미지정) — 신규 유닛에 부여, 기존 유닛은 비어 있을 때만 */
   usageTypeId?: number
+  /** 공통 상품유형(일반/라이트) — 생략 시 서버 기본값 규칙(병원 딜 1종 → 그 값 · 0종 → 미지정 · 혼합 → 400 필수) */
+  productType?: ProductType
   /** 타 병원 ACTIVE 시리얼의 이관 opt-in — { [serialNo]: 'TRANSFER' } */
   conflicts?: Record<string, 'TRANSFER'>
   /** 미리보기 행(1부터=items index+1) 액션 */
@@ -559,6 +599,7 @@ export interface RegisteredRef {
   serialNo: string
   eventId: number
   wardId: number | null
+  productType?: ProductType | null
 }
 
 export interface TransferredRef extends RegisteredRef {
@@ -607,6 +648,8 @@ export interface RegisterResponse {
 export interface RegisterPreviewResponse {
   rows: ImportPreviewRow[]
   summary: ImportPreviewSummary
+  /** = summary.productTypeContext (폼 라벨 '계약 딜 기준 기본값: 라이트' / 혼합 → 필수) */
+  productTypeContext: ProductTypeContext
 }
 
 export interface ReplaceBody extends RegistryFields {
@@ -629,6 +672,8 @@ export interface ReplaceBody extends RegistryFields {
   oldUsageTypeId?: number
   /** 신 기기 용도 — 생략 시 구 기기 용도 승계 */
   newUsageTypeId?: number
+  /** 상품유형 — 구 기기가 원장에 없어 소급 등록할 때만 적용(그 외 구 배치 값 상속, B-22) */
+  productType?: ProductType
 }
 
 /** POST …/devices/replace 201 */
@@ -646,6 +691,8 @@ export interface ReplaceResponse {
   eventIds: number[]
   oldDevice: DeviceRaw
   newDevice: DeviceRaw
+  /** 신 배치에 적용된 상품유형 */
+  productType: ProductType | null
   warnings: string[]
   wms: Record<string, WmsMatch | null>
 }
@@ -677,7 +724,7 @@ export interface RecoverResponse {
   warnings: string[]
 }
 
-export type BulkAction = 'MOVE_WARD' | 'RECOVER'
+export type BulkAction = 'MOVE_WARD' | 'RECOVER' | 'SET_PRODUCT_TYPE'
 
 export interface BulkBody extends RegistryFields {
   action: BulkAction
@@ -686,6 +733,8 @@ export interface BulkBody extends RegistryFields {
   toWardId?: number
   toWardName?: string
   reasonCodeId?: number
+  /** SET_PRODUCT_TYPE — 일반/라이트(null=미지정으로) */
+  productType?: ProductType | null
   /** 생략 시 선택 기기의 ACTIVE 병원에서 유도 */
   hospitalCode?: string
 }
@@ -711,6 +760,8 @@ export interface DevicePatchBody {
   extDeviceCode?: string | null
   /** 용도 id(null=미지정) — USER+ 허용, CORRECT 이벤트 기록 */
   usageTypeId?: number | null
+  /** 상품유형(일반/라이트, null=미지정) — USER+ 허용, CORRECT 이벤트 기록(배치 속성 B-22) */
+  productType?: ProductType | null
   /** CORRECT 이벤트 문맥(식별 보정 시) */
   occurredOn?: string
   ref?: RegistryRef | null
@@ -783,6 +834,8 @@ export interface ImportPreviewRow {
   /** 해석된 용도(행 입력 > 폼 기본 > 기존 유닛 값), null=미지정 */
   usageTypeId: number | null
   usageTypeName: string | null
+  /** 해석된 상품유형(행 입력 > 폼 기본 > 병원 딜 규칙), null=미지정(혼합 병원이면 error 판정) */
+  productType: ProductType | null
   wardInput: string | null
   wardId: number | null
   wardName: string | null
@@ -826,6 +879,7 @@ export interface ImportPreviewSummary {
   orgs: { org: string; rows: number; selected: boolean }[]
   occurredOn: string
   mode: ImportBatchMode
+  productTypeContext: ProductTypeContext
 }
 
 export type ImportInputFormat = 'excel' | 'excel_headerless' | 'onprem_excel' | 'paste' | 'onprem_json' | 'onprem_table'
@@ -859,6 +913,8 @@ export interface ImportOptions {
   deviceInfoId?: number
   /** 폼 공통 용도(행 용도 열이 없을 때 적용) */
   usageTypeId?: number
+  /** 폼 공통 상품유형(F열/붙여넣기 셀이 없을 때) — 생략 시 병원 딜 기본값 규칙 */
+  productType?: ProductType
   wardMode?: ImportWardMode
   wardId?: number
   emptyWardCell?: ImportEmptyWardCell
@@ -988,6 +1044,7 @@ export interface ListFilters {
   sort: UnitsSort
   wms: UnitsWmsFilter | null
   usage: UsageFilter | null
+  productType: ProductTypeFilter | null
 }
 
 /** 이력 탭·전역 최근 이벤트 필터 — q/page는 URL 동기화, 나머지 로컬 */
@@ -1026,6 +1083,8 @@ export interface DeviceRef {
   /** 용도(모달 기본값용) — 조회 결과에 없으면 undefined */
   usageTypeId?: number | null
   usageTypeName?: string | null
+  /** 배치 상품유형(교체 폼 '구 기기와 동일' 표시용) */
+  productType?: ProductType | null
 }
 
 /**
@@ -1093,5 +1152,6 @@ export function toDeviceRef(d: DeviceRowBase | DeviceListRow | DeviceDetail): De
     hospitalCode: d.hospitalCode,
     usageTypeId: d.usageTypeId ?? null,
     usageTypeName: d.usageType?.name ?? null,
+    productType: d.productType ?? null,
   }
 }

@@ -376,8 +376,8 @@ prisma/
 ### 디바이스 원장 — DeviceUnit / HospitalDevice / HospitalWard / HospitalDeviceEvent / HospitalDeviceImportBatch (2026-09-01, `projects/hospital_device_registry_design.md` §5 · 3층 구조 B-20)
 - **3층 구조**: `device_info`(모델 마스터) → `device_units`(시리얼 정체성, 1층) → 상태 하위표 `hospital_devices`(병원 배치 프로젝션, 2층). **API 공개 device id = `device_units.id`**(`/api/devices/units/[id]`·이벤트 `deviceId`·교체 상대 전부 유닛 id). 원장↔WMS 영속 링크는 없음(구 `inventory_unit_id` 제거 — WMS 편입은 후속 `inventory_units.device_id`), WMS 매칭은 표시·집계용 일시 계산
 - **DeviceUnit (`device_units`)**: 시리얼당 1행 — `serial_no`(정규화 키, 전역 UNIQUE + CHECK `upper(btrim)`·비공백)·`serial_raw`(합성/바코드 원문)·`device_info_id`(FK RESTRICT)·`mac_address`·`memo`(개체 메모)·`source`(MANUAL/IMPORT/WMS/ONPREM/BACKFILL — 유닛이 처음 생긴 경로)·`usage_type_id`(FK status_codes `DEVICE_USAGE_TYPE` — 용도 판매용 SALE / 평가용 EVAL, NULL=미지정; 위치가 아닌 물건의 속성, 계약 대조에서 EVAL 제외, 변경은 CORRECT). 이벤트·배치가 참조하는 동안 삭제 불가(FK RESTRICT). 서비스는 유닛을 자동 삭제하지 않는다 — 이벤트가 0건이 되면 배치 행만 지우고 유닛은 고아 정체성으로 남아 재등록 시 같은 id를 재사용
-- **HospitalDevice (`hospital_devices`, 이름 승계 — 배치 프로젝션)**: 유닛당 0..1행(`device_id` UNIQUE FK → device_units) — `status`(ACTIVE/RECOVERED, 이벤트 fold 파생값)·`hospital_code`/`ward_id`(ACTIVE 위치, 복합 FK DEFERRABLE)·`last_hospital_code`·`placed_on`·`recovered_on`·`recover_reason_id`·`last_event_type/on`·`replaced_by_id`(→ 교체기 유닛)·`ext_device_code`(온프렘 닉네임 — 병원 문맥 값이라 배치에 둠)·`ext_last_seen_at`/`ext_synced_at`. 식별 컬럼(serial·model·mac·memo)은 갖지 않는다. 구 병원×모델 수량표는 마이그 내 `hospital_devices_qty_backup_202609`로 보존 후 DROP
-- **HospitalDeviceEvent (`hospital_device_events`)**: append-first 이력 — `device_id`(→ **device_units**)·`event_type`(REGISTER/MOVE_WARD/RECOVER/CORRECT)·`occurred_on`(업무일자)·`from_ward_id`/`to_ward_id`·`reason_code_id`·`related_device_id`(교체·이관 상대 → device_units)·`action_group`(교체·이관·일괄·임포트 묶음)·`ref_type/ref_code`(MAINTENANCE 등 연결)·`source`(MANUAL/IMPORT/WMS/ONPREM)·`import_batch_id`·`actor_*`·`edited_*`·`changes`(CORRECT)
+- **HospitalDevice (`hospital_devices`, 이름 승계 — 배치 프로젝션)**: 유닛당 0..1행(`device_id` UNIQUE FK → device_units) — `status`(ACTIVE/RECOVERED, 이벤트 fold 파생값)·`hospital_code`/`ward_id`(ACTIVE 위치, 복합 FK DEFERRABLE)·`last_hospital_code`·`placed_on`·`recovered_on`·`recover_reason_id`·`last_event_type/on`·`replaced_by_id`(→ 교체기 유닛)·`ext_device_code`(온프렘 닉네임 — 병원 문맥 값이라 배치에 둠)·`ext_last_seen_at`/`ext_synced_at`. 식별 컬럼(serial·model·mac·memo)은 갖지 않는다. 구 병원×모델 수량표는 마이그 내 `hospital_devices_qty_backup_202609`로 보존 후 DROP · `product_type`(TEXT CHECK 일반/라이트, NULL=미지정 — **상품유형은 자리의 판매 조건: 배치 속성**(B-22, 2026-09-01), REGISTER 이벤트 fold·CORRECT 갱신, 교체 시 신 배치가 상속, 회수 시 마지막 값 보존 후 재등록이 재지정; 인덱스 (hospital_code, product_type, status))
+- **HospitalDeviceEvent (`hospital_device_events`)**: append-first 이력 — `device_id`(→ **device_units**)·`event_type`(REGISTER/MOVE_WARD/RECOVER/CORRECT)·`occurred_on`(업무일자)·`from_ward_id`/`to_ward_id`·`reason_code_id`·`related_device_id`(교체·이관 상대 → device_units)·`action_group`(교체·이관·일괄·임포트 묶음)·`ref_type/ref_code`(MAINTENANCE 등 연결)·`source`(MANUAL/IMPORT/WMS/ONPREM)·`import_batch_id`·`actor_*`·`edited_*`·`changes`(CORRECT) · `product_type`(이벤트 시점 상품유형 스냅샷 — REGISTER 지정값·MOVE/RECOVER 당시 배치 값·CORRECT 변경 후 값; RECOVER 스냅샷이 교체 집계 축)
 - **HospitalWard (`hospital_wards`)**: 병원별 병동 마스터 — `name`·`name_norm`(병원 내 UNIQUE)·`ext_ward_code`(온프렘 코드)·`sort_order`·`is_active`
 - **HospitalDeviceImportBatch (`hospital_device_import_batches`)**: 임포트 취소 단위 — 모드(REGISTER/ONPREM_DRAFT)·출처·업무일자·행/등록/재등록/건너뜀/이관 카운트·`summary`(excludeRows·rowActions·wardAliases·orgs)·`cancel_summary`
 - 회수 사유는 StatusCode `DEVICE_RECOVERY_REASON`(value 행 삭제 불가), 계약 대조는 Σ계약완료 딜 `daewoong_device_count`(ECG hard·SpO2 soft)
@@ -971,6 +971,7 @@ prisma/
   - 임포트 탭(입력 → 미리보기 → 결과 + 이력): 모드(신규 등록 / 온프렘 export 초안 자동 감지), 텍스트 붙여넣기 | Excel 업로드(템플릿), 업무일자·병동(열에서 읽기|고정)·모델·메모, 판정 6종(ok/reregister/skip/warn/conflict/error) + 생성 예정 병동 매핑(wardAliases) + 초안 모드 org 선택 게이트, 미제외 오류·미해결 충돌이 있으면 [실행] 비활성, 단일 트랜잭션, 임포트 이력([업무일자 정정][취소] admin). VIEWER는 EmptyState + 이력만
   - 병동 탭: 순서 ↑↓ | 병동명 ✎ | 온프렘 코드 | 배치 중 | 회수(누계) | 활성 | [기기 일괄 이동] [비활성](admin, 배치 0) [삭제](admin, 참조 0) + 추가
   - 모바일: md:hidden 카드, 하단 고정 액션바 [등록][교체][회수](선택 0건이면 스캔 모드), 임포트·Excel은 데스크톱 권장
+- **상품유형(일반/라이트, 2026-09-01 B-22)**: 배치 속성(`hospital_devices.product_type`) — 등록·임포트에 '상품유형 [기본값(계약 딜 기준: X)|일반|라이트]'(병원 계약완료 딜이 1종이면 기본값, 0종이면 미지정 경고, 일반·라이트 혼합이면 선택 필수 — 임포트는 미지정 행 error), 붙여넣기 3열 이후/Excel F열 '일반·라이트·lite' 셀 우선. 목록 '상품유형' 열+필터, 드로어 헤더 배지 인라인 변경(USER+ CORRECT), 선택 바 [상품유형 지정](일괄 CORRECT), 교체는 구 배치 값 상속(읽기 전용 표시), 요약 스트립·병원 상세 카드는 혼합/상품유형 존재 시 모델 행 아래 '└ 일반 | 라이트 | 미지정' 매트릭스(유형별 계약 수량 대조) + '교체: 전체 n (일반 a · 라이트 b) · 최근 30일 m', 커버리지 '상품유형 혼합'·'미지정 n' 배지, Excel 내보내기 '상품유형' 열. 교체 허용량 규칙은 보류(데이터·집계만)
 - **연동**: 병원 상세 도입 현황 카드(§6.2) · 병원 업무 일괄 이전에 원장 포함(§9.6) · AI `get_hospital_overview` devices 문자열('배치 n대 / 계약 m') · 설정 `/settings/device-recovery-reason`(회수 사유, ADMIN+)·`/settings/device-usage-type`(기기 용도 판매용/평가용, ADMIN+)·`/settings/devices` 5필드(ADMIN+ 편집)
 
 ### 병원 영업 정보 (영업/CRM v4, 2026-07-29 — ADMIN 이상 + SEERS 전용)
@@ -1529,11 +1530,11 @@ npm run dev
 | GET  | `/api/devices/can-manage` | UI 게이트 프로브 `{canWrite, canAdmin}` |
 | GET  | `/api/devices/summary` | 전역 커버리지 표 + totals (`?page&limit&filter=all\|unregistered\|diff\|registered&q&sort=diff\|name\|lastEvent`) |
 | GET  | `/api/devices/summary/export` | 커버리지 xlsx (캡 1,000행) |
-| GET  | `/api/devices/units` | 기기 목록 (`?hospital&model&ward=<id>\|unassigned&status=active\|recovered\|all&q&wms=linked\|unlinked\|in_stock&page&limit≤500&sort&idsOnly=1`(≤2,000)) |
+| GET  | `/api/devices/units` | 기기 목록 (`?hospital&model&ward=<id>\|unassigned&status=active\|recovered\|all&q&wms=linked\|unlinked\|in_stock&usage=SALE\|EVAL\|none&productType=일반\|라이트\|none&page&limit≤500&sort&idsOnly=1`(≤2,000)) |
 | GET  | `/api/devices/units/[id]` | 개체 상세 + 전체 이벤트 + WMS + 상대 기기 (드로어) |
-| PATCH | `/api/devices/units/[id]` | memo(write) / 식별 보정 모델·시리얼·MAC·닉네임(admin → CORRECT 이벤트, 유니크 409) |
+| PATCH | `/api/devices/units/[id]` | memo(write) / 용도 `usageTypeId`·상품유형 `productType`(일반/라이트/null, write → CORRECT) / 식별 보정 모델·시리얼·MAC·닉네임(admin → CORRECT 이벤트, 유니크 409) |
 | POST | `/api/devices/units/[id]/move` · `/recover` | 병동 이동 / 회수 (write — 같은 병동 400, 사유 없음 400, 이미 회수 409) |
-| POST | `/api/devices/units/bulk` | 일괄 이동·회수 (write — 같은 병원 ACTIVE만 단일 tx, 타 병원·RECOVERED 섞이면 409, 이미 대상 병동은 `skipped[]`) |
+| POST | `/api/devices/units/bulk` | 일괄 이동·회수·상품유형 지정 `action=MOVE_WARD\|RECOVER\|SET_PRODUCT_TYPE` (write — 같은 병원 ACTIVE만 단일 tx, 타 병원·RECOVERED 섞이면 409, 이미 대상 병동/상품유형은 `skipped[]`; SET_PRODUCT_TYPE은 기기마다 CORRECT `changes.productType`) |
 | GET  | `/api/devices/lookup` | 시리얼 조회 `?serial=` — 1건 또는 원장 접두 일치 ≤10 + WMS 개체 ≤10 |
 | GET  | `/api/devices/maintenance-lookup` | 유지보수 코드 자동완성 `?hospital=&q=` (정확 코드는 병원 필터 무시 + `hospitalMismatch`) |
 | GET  | `/api/devices/events` | 이벤트 목록 (`?hospital&device&type&from&to&refType&refCode&source&q&page&limit`) |
@@ -1542,8 +1543,8 @@ npm run dev
 | DELETE | `/api/devices/events/[id]` | 마지막 이벤트 취소 (admin — LIFO, 교체·이관 짝 동시 취소) |
 | GET  | `/api/devices/export` | 기기 목록 xlsx (units 필터 동일, 캡 10,000행, 초과 400) |
 | GET  | `/api/hospitals/[code]/devices/summary` | 병원 요약 스트립 (모델별 배치/계약/차이·WMS·병동·최근) |
-| POST | `/api/hospitals/[code]/devices/register` | N개 등록·재등록·opt-in 이관 (write, `?preview=true` 판별만) — 409 `conflicts[]` |
-| POST | `/api/hospitals/[code]/devices/replace` | 교체 1폼 → RECOVER+REGISTER(+소급 REGISTER) (write, 타 병원 ACTIVE 409) |
+| POST | `/api/hospitals/[code]/devices/register` | N개 등록·재등록·opt-in 이관 (write, `?preview=true` 판별만 — 응답에 `productTypeContext`) — 409 `conflicts[]` · `productType`(항목/공통, 생략 시 병원 계약 딜 기본값 규칙: 1종 기본·0종 미지정·혼합 400 필수) |
+| POST | `/api/hospitals/[code]/devices/replace` | 교체 1폼 → RECOVER+REGISTER(+소급 REGISTER) (write, 타 병원 ACTIVE 409) — 신 배치 상품유형은 구 배치 값 상속, 소급 경로만 `productType` 입력 |
 | POST | `/api/hospitals/[code]/devices/import` | 임포트 (write, `?preview=true` 판정 6종 · 실행은 서버 재검증 후 단일 tx — 미제외 오류 400·미지정 conflict 409·소급 불성립 409 `rows[]`) |
 | GET  | `/api/hospitals/[code]/devices/imports` | 임포트 배치 목록 |
 | PATCH | `/api/hospitals/[code]/devices/imports/[batchId]` | 배치 업무일자 일괄 정정 (admin) |

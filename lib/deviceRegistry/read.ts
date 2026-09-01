@@ -10,13 +10,18 @@ import { prisma } from '@/lib/prisma'
 import {
   DEAL_STATUS_CATEGORY,
   DEAL_STATUS_CONTRACTED,
+  PRODUCT_TYPES,
+  PRODUCT_TYPE_UNSET_LABEL,
   normalizeSerial,
   todayKst,
   type DeviceEventType,
+  type ProductType,
+  type ProductTypeContext,
+  type ProductTypeFilter,
   type UsageFilter,
   type UsageTypeRef,
 } from '@/lib/deviceRegistryShared'
-import { RegistryError, loadTrackedModels, ymd, ymdMinusDays, ymdToDate, type DbClient } from './core'
+import { RegistryError, getHospitalProductTypeContext, loadTrackedModels, ymd, ymdMinusDays, ymdToDate, type DbClient } from './core'
 import { matchInventoryUnits, queryWmsUnits, wmsWarning, type WmsMatch, type WmsMatchInput, type WmsUnitRow } from './wms'
 
 /** 커버리지 모집단 — 고객 병원 상태(§6.1-A: 운영·계약완료·보류) ∪ 원장 보유 병원 */
@@ -47,8 +52,59 @@ export async function getExpectedDeviceCount(hospitalCode: string, client: DbCli
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 교체 집계 (B-22) — RECOVER 이벤트 가운데 같은 병원의 REGISTER와 교체 짝(related_device_id 또는 같은 action_group)이 있는 것
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 상품유형 축 키 — '일반' | '라이트' | '미지정' */
+export type ProductTypeKey = ProductType | typeof PRODUCT_TYPE_UNSET_LABEL
+
+export interface ReplacementCount {
+  total: number
+  /** RECOVER 이벤트의 상품유형 스냅샷(회수된 자리) 기준 */
+  byType: Record<ProductTypeKey, number>
+}
+
+function emptyByType(): Record<ProductTypeKey, number> {
+  return { 일반: 0, 라이트: 0, [PRODUCT_TYPE_UNSET_LABEL]: 0 }
+}
+
+/**
+ * 교체 건수 = 이 병원 RECOVER 이벤트 e 가운데, 같은 병원 REGISTER r(다른 기기)이 `r.related_device_id = e.device_id`(교체 등록)
+ * 또는 같은 action_group에서 `e.related_device_id = r.device_id`(교체 회수)로 짝지어진 것. 이관(TRANSFER) 쌍은 병원이 달라 제외된다.
+ * `from`/`to`는 업무일자(occurred_on) 범위(YYYY-MM-DD, 포함).
+ */
+export async function countReplacements(hospitalCode: string, range?: { from?: string | null; to?: string | null }, client: DbClient = prisma): Promise<ReplacementCount> {
+  const fromSql = range?.from ? Prisma.sql`AND e.occurred_on >= ${ymdToDate(range.from)}::date` : Prisma.empty
+  const toSql = range?.to ? Prisma.sql`AND e.occurred_on <= ${ymdToDate(range.to)}::date` : Prisma.empty
+  const rows = await client.$queryRaw<{ t: string | null; cnt: bigint }[]>(Prisma.sql`
+    SELECT e.product_type AS t, count(*) AS cnt
+      FROM hospital_device_events e
+     WHERE e.event_type = 'RECOVER' AND e.hospital_code = ${hospitalCode} ${fromSql} ${toSql}
+       AND EXISTS (SELECT 1 FROM hospital_device_events r
+                    WHERE r.event_type = 'REGISTER' AND r.hospital_code = e.hospital_code AND r.device_id <> e.device_id
+                      AND (r.related_device_id = e.device_id OR (e.action_group IS NOT NULL AND r.action_group = e.action_group AND e.related_device_id = r.device_id)))
+     GROUP BY 1`)
+  const byType = emptyByType()
+  for (const r of rows) {
+    const key: ProductTypeKey = r.t && (PRODUCT_TYPES as readonly string[]).includes(r.t) ? (r.t as ProductType) : PRODUCT_TYPE_UNSET_LABEL
+    byType[key] += n(r.cnt)
+  }
+  return { total: Object.values(byType).reduce((a, b) => a + b, 0), byType }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 병원 요약 (§7.1 summary 응답 요지 · §6.1-B 스트립 · §6.2 상세 카드)
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** 모델 × 상품유형 셀(B-22 매트릭스) — expected는 그 상품유형 계약완료 딜의 Σ daewoong_device_count(ECG hard·SpO2 soft·그 외 null) */
+export interface ProductTypeCell {
+  active: number
+  /** 계약 대조용(평가용 제외) */
+  activeForCompare: number
+  expected: number | null
+  /** hard(ECG)만 activeForCompare − expected */
+  diff: number | null
+}
 
 export interface ModelSummary {
   deviceInfoId: number
@@ -70,6 +126,8 @@ export interface ModelSummary {
   /** 배치 중 유닛의 WMS 일시 매칭 집계 — out=OUT 매치, inStock=IN_STOCK 매치, unmatched=매치 없음(그 외 상태 포함) */
   wms: { out: number; inStock: number; unmatched: number }
   lastEvent: { type: string; on: string } | null
+  /** 상품유형별 소계(B-22) — 키는 계약 딜에 있는 유형 ∪ 배치에 있는 유형(+ '미지정'은 배치가 있을 때만). 모델 합계는 위 필드 그대로 */
+  byProductType: Partial<Record<ProductTypeKey, ProductTypeCell>>
 }
 
 export interface HospitalDeviceSummary {
@@ -89,6 +147,14 @@ export interface HospitalDeviceSummary {
   evalTotal: number
   recovered30dTotal: number
   today: string
+  /** 병원 계약완료 딜 기준 상품유형 문맥(등록 기본값·필수 판정 — B-22) */
+  productTypeContext: ProductTypeContext
+  /** 계약 딜이 2종이거나 배치에 상품유형이 하나라도 있으면 true — UI가 매트릭스로 그린다 */
+  productTypeMixed: boolean
+  /** 병원 단위 상품유형 축(ECG hard 기준) — 계약 딜 유형 ∪ 배치 유형(+미지정은 배치 있을 때) */
+  productTypes: { type: ProductTypeKey; active: number; activeForCompare: number; expected: number | null; diff: number | null }[]
+  /** 교체 건수(전체·최근 30일) — RECOVER 스냅샷 상품유형 기준 */
+  replacements: { total: number; byType: Record<ProductTypeKey, number>; last30d: { total: number; byType: Record<ProductTypeKey, number> } }
 }
 
 export async function getHospitalDeviceSummary(hospitalCode: string, client: DbClient = prisma): Promise<HospitalDeviceSummary | null> {
@@ -96,12 +162,12 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
   if (!hospital) return null
   const today = todayKst()
   const since = ymdMinusDays(today, 30)
-  const [expected, models, activeUnits, recRows, lastRows, wards, unassigned, lastEvent, lastImport] = await Promise.all([
+  const [expected, models, activeUnits, recRows, lastRows, wards, unassigned, lastEvent, lastImport, ptCtx, replAll, repl30] = await Promise.all([
     getExpectedDeviceCount(hospitalCode, client),
     loadTrackedModels(client),
     client.hospitalDevice.findMany({
       where: { hospitalCode, status: 'ACTIVE' },
-      select: { deviceId: true, unit: { select: { deviceInfoId: true, serialNo: true, serialRaw: true, usageType: { select: { value: true } } } } },
+      select: { deviceId: true, productType: true, unit: { select: { deviceInfoId: true, serialNo: true, serialRaw: true, usageType: { select: { value: true } } } } },
     }),
     client.$queryRaw<{ device_info_id: number; cnt: bigint }[]>`
       SELECT u.device_info_id, count(*) AS cnt
@@ -125,12 +191,20 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
       orderBy: { createdAt: 'desc' },
       select: { id: true, createdAt: true, occurredOn: true, rowCount: true, registeredCount: true },
     }),
+    getHospitalProductTypeContext(hospitalCode, client),
+    countReplacements(hospitalCode, undefined, client),
+    countReplacements(hospitalCode, { from: since }, client),
   ])
 
-  // 배치 중 유닛의 모델별 수 + WMS 일시 매칭 집계(배치 1쿼리)
+  // 배치 중 유닛의 모델별 수 + WMS 일시 매칭 집계(배치 1쿼리) + 상품유형별 소계(B-22)
   const modelById = new Map(models.map((m) => [m.id, m]))
   const activeBy = new Map<number, number>()
   const evalBy = new Map<number, number>()
+  const ptKeyOf = (v: string | null): ProductTypeKey => (v && (PRODUCT_TYPES as readonly string[]).includes(v) ? (v as ProductType) : PRODUCT_TYPE_UNSET_LABEL)
+  /** 모델 → 상품유형 → { active, eval } */
+  const ptBy = new Map<number, Map<ProductTypeKey, { active: number; evalN: number }>>()
+  const expectedByType = new Map<ProductTypeKey, number>(ptCtx.byType.map((b) => [b.type, b.devices]))
+  const anyPlacementTyped = activeUnits.some((r) => r.productType != null)
   const wmsBy = new Map<number, { out: number; inStock: number; unmatched: number }>()
   const wmsInputs: WmsMatchInput[] = activeUnits.map((r) => ({
     id: r.deviceId,
@@ -144,6 +218,12 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     const mid = r.unit.deviceInfoId
     activeBy.set(mid, (activeBy.get(mid) ?? 0) + 1)
     if (r.unit.usageType?.value === 'EVAL') evalBy.set(mid, (evalBy.get(mid) ?? 0) + 1)
+    const ptm = ptBy.get(mid) ?? new Map<ProductTypeKey, { active: number; evalN: number }>()
+    const cell = ptm.get(ptKeyOf(r.productType)) ?? { active: 0, evalN: 0 }
+    cell.active += 1
+    if (r.unit.usageType?.value === 'EVAL') cell.evalN += 1
+    ptm.set(ptKeyOf(r.productType), cell)
+    ptBy.set(mid, ptm)
     const agg = wmsBy.get(mid) ?? { out: 0, inStock: 0, unmatched: 0 }
     const m = matches.get(r.deviceId) ?? null
     if (!m) agg.unmatched += 1
@@ -174,6 +254,16 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
       exp = expected.expected
       diff = null
     }
+    // 상품유형 소계 — 키: 계약 딜 유형 ∪ 이 모델 배치 유형(+미지정은 배치가 있을 때만)
+    const ptm = ptBy.get(m.id) ?? new Map<ProductTypeKey, { active: number; evalN: number }>()
+    const keys: ProductTypeKey[] = [...PRODUCT_TYPES.filter((t) => expectedByType.has(t) || ptm.has(t)), ...(ptm.has(PRODUCT_TYPE_UNSET_LABEL) ? [PRODUCT_TYPE_UNSET_LABEL as ProductTypeKey] : [])]
+    const byProductType: Partial<Record<ProductTypeKey, ProductTypeCell>> = {}
+    for (const k of keys) {
+      const c = ptm.get(k) ?? { active: 0, evalN: 0 }
+      const forCompare = c.active - c.evalN
+      const expT = k !== PRODUCT_TYPE_UNSET_LABEL && compare !== 'none' ? (expectedByType.get(k) ?? 0) : null
+      byProductType[k] = { active: c.active, activeForCompare: forCompare, expected: expT, diff: compare === 'hard' && expT != null ? forCompare - expT : null }
+    }
     out.push({
       deviceInfoId: m.id,
       deviceModel: m.deviceModel,
@@ -189,8 +279,21 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
       compare,
       wms: wmsBy.get(m.id) ?? { out: 0, inStock: 0, unmatched: active },
       lastEvent: lastBy.get(m.id) ?? null,
+      byProductType,
     })
   }
+  // 병원 단위 상품유형 축 — ECG(hard) 기준. 계약 딜 유형 ∪ ECG 배치 유형(+미지정은 배치 있을 때)
+  const ecgModel = out.find((m) => m.onpremDeviceType === 1) ?? null
+  const ecgPt = ecgModel ? ecgModel.byProductType : {}
+  const hospitalKeys: ProductTypeKey[] = [
+    ...PRODUCT_TYPES.filter((t) => expectedByType.has(t) || ecgPt[t] != null),
+    ...(ecgPt[PRODUCT_TYPE_UNSET_LABEL] ? [PRODUCT_TYPE_UNSET_LABEL as ProductTypeKey] : []),
+  ]
+  const productTypes = hospitalKeys.map((k) => {
+    const c = ecgPt[k] ?? { active: 0, activeForCompare: 0, expected: null, diff: null }
+    const expT = k !== PRODUCT_TYPE_UNSET_LABEL && expected.expected != null ? (expectedByType.get(k) ?? 0) : null
+    return { type: k, active: c.active, activeForCompare: c.activeForCompare, expected: expT, diff: expT == null ? null : c.activeForCompare - expT }
+  })
   return {
     hospitalCode: hospital.hospitalCode,
     hospitalName: hospital.hospitalName,
@@ -209,6 +312,10 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     evalTotal: out.reduce((s, m) => s + m.activeEval, 0),
     recovered30dTotal: out.reduce((s, m) => s + m.recovered30d, 0),
     today,
+    productTypeContext: ptCtx,
+    productTypeMixed: ptCtx.mixed || anyPlacementTyped,
+    productTypes,
+    replacements: { total: replAll.total, byType: replAll.byType, last30d: { total: repl30.total, byType: repl30.byType } },
   }
 }
 
@@ -249,6 +356,10 @@ export interface CoverageRow {
   recovered30d: number
   lastEvent: { type: string; on: string } | null
   lastImport: { id: number; at: string; occurredOn: string | null; rowCount: number; registeredCount: number } | null
+  /** 계약완료 딜의 상품유형이 2종(일반+라이트) — B-22 '상품유형 혼합' 배지 */
+  productTypeMixed: boolean
+  /** 혼합 병원에서 상품유형 미지정 ACTIVE 배치 수(혼합이 아니면 0) */
+  unassignedProductType: number
 }
 
 export interface CoverageTotals {
@@ -257,6 +368,8 @@ export interface CoverageTotals {
   active: { ecg: number; spo2: number; gw: number; third: number; total: number; eval: number }
   events30d: number
   recovered30d: number
+  /** 계약완료 딜 상품유형이 혼합인 병원 수 */
+  mixedProductTypeHospitals: number
 }
 
 export interface CoverageResult {
@@ -286,12 +399,14 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
           OR EXISTS (SELECT 1 FROM hospital_devices d WHERE d.hospital_code = h.hospital_code OR d.last_hospital_code = h.hospital_code)
           OR EXISTS (SELECT 1 FROM hospital_device_events e WHERE e.hospital_code = h.hospital_code)
     ), dl AS (
-      SELECT sd.hospital_code, count(*)::int AS deals, sum(coalesce(sd.daewoong_device_count, 0))::int AS expected
+      SELECT sd.hospital_code, count(*)::int AS deals, sum(coalesce(sd.daewoong_device_count, 0))::int AS expected,
+             count(DISTINCT sd.product_type) FILTER (WHERE sd.product_type IN ('일반','라이트'))::int AS pt_kinds
         FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
        WHERE sc.category = ${DEAL_STATUS_CATEGORY} AND sc.name = ${DEAL_STATUS_CONTRACTED}
        GROUP BY 1
     ), act AS (
       SELECT d.hospital_code,
+             count(*) FILTER (WHERE d.product_type IS NULL)::int AS pt_unassigned,
              count(*) FILTER (WHERE di.onprem_device_type = 1 AND coalesce(ut.value, '') <> 'EVAL')::int AS ecg,
              count(*) FILTER (WHERE di.onprem_device_type = 1 AND ut.value = 'EVAL')::int AS ecg_eval,
              count(*) FILTER (WHERE di.onprem_device_type = 3)::int AS spo2,
@@ -326,6 +441,8 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
              coalesce(act.total, 0) AS total, coalesce(act.eval_total, 0) AS eval_total,
              CASE WHEN coalesce(dl.deals, 0) > 0 THEN coalesce(act.ecg, 0) - dl.expected END AS diff,   -- ecg는 평가용 제외(§9.1)
              coalesce(rec.recovered30d, 0) AS recovered30d,
+             coalesce(dl.pt_kinds, 0) >= 2 AS product_type_mixed,
+             CASE WHEN coalesce(dl.pt_kinds, 0) >= 2 THEN coalesce(act.pt_unassigned, 0) ELSE 0 END AS unassigned_product_type,
              lev.event_type AS last_event_type, lev.occurred_on AS last_event_on,
              limp.id AS imp_id, limp.created_at AS imp_at, limp.occurred_on AS imp_on, limp.row_count AS imp_rows, limp.registered_count AS imp_reg
         FROM pop p
@@ -364,6 +481,8 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
     eval_total: number
     diff: number | null
     recovered30d: number
+    product_type_mixed: boolean
+    unassigned_product_type: number
     last_event_type: string | null
     last_event_on: Date | null
     imp_id: number | null
@@ -376,8 +495,11 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
   const [rows, countRows, totalsRows] = await Promise.all([
     client.$queryRaw<Raw[]>(Prisma.sql`${base} SELECT * FROM rows WHERE ${where} ORDER BY ${orderBy} LIMIT ${limit} OFFSET ${(page - 1) * limit}`),
     client.$queryRaw<{ cnt: bigint }[]>(Prisma.sql`${base} SELECT count(*) AS cnt FROM rows WHERE ${where}`),
-    client.$queryRaw<{ customers: bigint; registered: bigint; ecg: bigint; spo2: bigint; gw: bigint; third: bigint; total: bigint; eval_total: bigint; events30d: bigint; recovered30d: bigint }[]>`
+    client.$queryRaw<{ customers: bigint; registered: bigint; ecg: bigint; spo2: bigint; gw: bigint; third: bigint; total: bigint; eval_total: bigint; events30d: bigint; recovered30d: bigint; mixed_pt: bigint }[]>`
       SELECT (SELECT count(*) FROM hospitals WHERE status = ANY(${statuses}::text[])) AS customers,
+             (SELECT count(*) FROM (SELECT sd.hospital_code FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
+                                     WHERE sc.category = ${DEAL_STATUS_CATEGORY} AND sc.name = ${DEAL_STATUS_CONTRACTED} AND sd.product_type IN ('일반','라이트')
+                                     GROUP BY 1 HAVING count(DISTINCT sd.product_type) >= 2) m) AS mixed_pt,
              (SELECT count(*) FROM (SELECT hospital_code FROM hospital_devices WHERE hospital_code IS NOT NULL
                                      UNION SELECT hospital_code FROM hospital_device_events WHERE hospital_code IS NOT NULL) x) AS registered,
              (SELECT count(*) ${activeJoin} AND di.onprem_device_type = 1 AND coalesce(ut.value, '') <> 'EVAL') AS ecg,
@@ -409,6 +531,8 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
       recovered30d: n(r.recovered30d),
       lastEvent: r.last_event_type ? { type: r.last_event_type, on: ymd(r.last_event_on)! } : null,
       lastImport: r.imp_id != null ? { id: r.imp_id, at: r.imp_at!.toISOString(), occurredOn: ymd(r.imp_on), rowCount: n(r.imp_rows), registeredCount: n(r.imp_reg) } : null,
+      productTypeMixed: !!r.product_type_mixed,
+      unassignedProductType: n(r.unassigned_product_type),
     })),
     total: n(countRows[0]?.cnt),
     page,
@@ -419,6 +543,7 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
       active: { ecg: n(t?.ecg), spo2: n(t?.spo2), gw: n(t?.gw), third: n(t?.third), total: n(t?.total), eval: n(t?.eval_total) },
       events30d: n(t?.events30d),
       recovered30d: n(t?.recovered30d),
+      mixedProductTypeHospitals: n(t?.mixed_pt),
     },
   }
 }
@@ -445,6 +570,8 @@ export interface UnitsQuery {
   wms?: UnitsWmsFilter | null
   /** 용도 — SALE/EVAL(usageType.value) 또는 none(미지정) */
   usage?: UsageFilter | null
+  /** 상품유형 — 일반/라이트(배치 product_type) 또는 none(미지정) */
+  productType?: ProductTypeFilter | null
   /** 공개 device id(유닛 id) */
   ids?: number[] | null
 }
@@ -462,6 +589,8 @@ export function buildUnitsWhere(params: UnitsQuery): Prisma.HospitalDeviceWhereI
   if (params.model != null) and.push({ unit: { deviceInfoId: Number(params.model) } })
   if (params.usage === 'none') and.push({ unit: { usageTypeId: null } })
   else if (params.usage) and.push({ unit: { usageType: { is: { value: params.usage } } } })
+  if (params.productType === 'none') and.push({ productType: null })
+  else if (params.productType) and.push({ productType: params.productType })
   if (params.ward === 'unassigned') and.push({ wardId: null })
   else if (params.ward != null) and.push({ wardId: Number(params.ward) })
   if (params.q && params.q.trim()) {
@@ -546,6 +675,8 @@ export interface UnitView {
   lastEventType: string | null
   lastEventOn: Date | null
   replacedById: number | null
+  /** 상품유형(일반/라이트) — 배치 속성(B-22), null=미지정 */
+  productType: string | null
   createdAt: Date
   updatedAt: Date
   deviceInfo: PlacementWithUnit['unit']['deviceInfo']
@@ -582,6 +713,7 @@ export function toUnitView(p: PlacementWithUnit): UnitView {
     lastEventType: placement.lastEventType,
     lastEventOn: placement.lastEventOn,
     replacedById: placement.replacedById,
+    productType: placement.productType,
     createdAt: placement.createdAt,
     updatedAt: placement.updatedAt,
     deviceInfo: unit.deviceInfo,
@@ -731,7 +863,7 @@ export const EVENTS_INCLUDE = {
       serialRaw: true,
       deviceInfo: { select: { id: true, deviceModel: true, deviceName: true, deviceClass: true } },
       usageType: { select: { id: true, name: true, value: true } },
-      placement: { select: { status: true, hospitalCode: true } },
+      placement: { select: { status: true, hospitalCode: true, productType: true } },
     },
   },
   hospital: { select: { hospitalCode: true, hospitalName: true } },
@@ -752,6 +884,8 @@ export type EventListRow = Omit<EventRawRow, 'device'> & {
     serialRaw: string | null
     status: string | null
     hospitalCode: string | null
+    /** 현재 배치의 상품유형(이벤트 행 `productType` 스냅샷과 비교용) */
+    productType: string | null
     deviceInfo: EventRawRow['device']['deviceInfo']
     usageType: UsageTypeRef | null
   }
@@ -767,6 +901,7 @@ export function toEventListRow(e: EventRawRow): EventListRow {
       serialRaw: device.serialRaw,
       status: device.placement?.status ?? null,
       hospitalCode: device.placement?.hospitalCode ?? null,
+      productType: device.placement?.productType ?? null,
       deviceInfo: device.deviceInfo,
       usageType: device.usageType,
     },

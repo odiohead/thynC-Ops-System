@@ -160,6 +160,23 @@ function LastImportCell({ row, today }: { row: CoverageRow; today: string }) {
   )
 }
 
+/** '상품유형 혼합' 배지(+혼합 병원의 미지정 배치 수) — B-22. 계약완료 딜이 일반·라이트 둘 다인 병원 */
+function MixedBadge({ row }: { row: CoverageRow }) {
+  if (!row.productTypeMixed) return null
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Badge variant="primary" title="계약완료 딜에 일반·라이트가 함께 있는 병원 — 등록 시 상품유형 선택 필수, 요약은 상품유형별 매트릭스">
+        상품유형 혼합
+      </Badge>
+      {row.registered && row.unassignedProductType > 0 && (
+        <Badge variant="warning" title="상품유형 미지정 상태로 배치 중인 기기 — 선택 바 [상품유형 지정]으로 정리">
+          미지정 {fmtInt(row.unassignedProductType)}
+        </Badge>
+      )}
+    </span>
+  )
+}
+
 function RowAction({ row, onOpenHospital, onOpenImport }: { row: CoverageRow; onOpenHospital: (code: string) => void; onOpenImport: (code: string) => void }) {
   const stop = (e: MouseEvent) => e.stopPropagation()
   if (!row.registered) {
@@ -329,7 +346,10 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
                   title={row.registered ? '클릭 → 기기 목록' : '원장 미등록 병원 — 클릭 → 병원 뷰'}
                 >
                   <TD>
-                    <div className={cn('font-medium', row.registered ? 'text-foreground' : 'text-muted-foreground')}>{row.hospitalName}</div>
+                    <div className={cn('flex flex-wrap items-center gap-1.5 font-medium', row.registered ? 'text-foreground' : 'text-muted-foreground')}>
+                      {row.hospitalName}
+                      <MixedBadge row={row} />
+                    </div>
                     <div className="font-mono text-[11px] text-muted-foreground">{row.hospitalCode}</div>
                   </TD>
                   <TD>{row.status ? <Badge variant={statusVariant(row.status)}>{row.status}</Badge> : DASH}</TD>
@@ -386,7 +406,10 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="truncate font-medium text-foreground">{row.hospitalName}</div>
+                  <div className="flex flex-wrap items-center gap-1.5 font-medium text-foreground">
+                    <span className="truncate">{row.hospitalName}</span>
+                    <MixedBadge row={row} />
+                  </div>
                   <div className="font-mono text-[11px] text-muted-foreground">{row.hospitalCode}</div>
                 </div>
                 {row.status ? <Badge variant={statusVariant(row.status)}>{row.status}</Badge> : null}

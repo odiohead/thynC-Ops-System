@@ -336,6 +336,106 @@ export function usageTypeLabel(u: UsageTypeRef | null | undefined, opts?: { unse
   return u.name || (u.value && u.value in USAGE_TYPE_LABELS ? USAGE_TYPE_LABELS[u.value as UsageTypeValue] : u.value) || '—'
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 상품유형(product type) — 일반/라이트 (2026-09-01 결정 B-22, `sales_deals.product_type`과 같은 어휘, NULL=미지정)
+// **자리의 판매 조건 = 배치(hospital_devices) 속성** — 물건(유닛)이 아니라 팔린 자리에 붙는다. 이벤트에 시점 스냅샷.
+// 교체 시 신 배치가 구 배치 값을 상속, 회수는 배치 행에 마지막 값을 남기되 재등록 시 새 REGISTER가 다시 정한다.
+// 기본값 규칙: 병원 계약완료 딜의 상품유형이 1종이면 그 값 · 0종이면 미지정(경고) · 혼합이면 명시 필수(오류)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const PRODUCT_TYPES = ['일반', '라이트'] as const
+export type ProductType = (typeof PRODUCT_TYPES)[number]
+
+export const PRODUCT_TYPE_UNSET_LABEL = '미지정'
+
+/** 배지 톤 — 일반 default · 라이트 info(primary) */
+export const PRODUCT_TYPE_COLORS: Record<ProductType, string> = {
+  일반: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200',
+  라이트: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+}
+
+/** 임포트·등록 입력 별칭(대소문자·공백 무시) */
+export const PRODUCT_TYPE_INPUT_ALIASES: Record<ProductType, readonly string[]> = {
+  일반: ['일반', 'standard', 'STANDARD', 'std'],
+  라이트: ['라이트', 'lite', 'LITE', 'light', 'LIGHT'],
+}
+
+export const PRODUCT_TYPE_INVALID_MESSAGE = '상품유형 값이 올바르지 않습니다 (일반/라이트)'
+export const PRODUCT_TYPE_REQUIRED_MESSAGE = '상품유형 필수 — 이 병원은 일반·라이트 딜이 함께 있습니다'
+export const PRODUCT_TYPE_NO_DEAL_WARNING = '병원 계약완료 딜 없음 — 상품유형 미지정'
+
+/** 목록 필터 `productType=` 어휘 — 일반/라이트 또는 none(미지정) */
+export const PRODUCT_TYPE_FILTERS = ['일반', '라이트', 'none'] as const
+export type ProductTypeFilter = (typeof PRODUCT_TYPE_FILTERS)[number]
+
+function normProductToken(s: string): string {
+  return s.normalize('NFC').replace(/[\s　]+/g, '').toUpperCase()
+}
+
+/** 입력 토큰이 상품유형 별칭인가(붙여넣기 열 판별용 — '라이트'·'lite' 등) */
+export function isProductTypeToken(s: string | null | undefined): boolean {
+  if (!s) return false
+  const t = normProductToken(s)
+  return PRODUCT_TYPES.some((v) => PRODUCT_TYPE_INPUT_ALIASES[v].some((a) => normProductToken(a) === t))
+}
+
+/**
+ * 입력 문자열 → 상품유형. 빈 입력은 null(미지정), 미매칭은 undefined(호출부가 오류 판정 — `PRODUCT_TYPE_INVALID_MESSAGE`).
+ */
+export function matchProductType(input: string | null | undefined): ProductType | null | undefined {
+  const raw = (input ?? '').trim()
+  if (!raw) return null
+  const t = normProductToken(raw)
+  return PRODUCT_TYPES.find((v) => PRODUCT_TYPE_INPUT_ALIASES[v].some((a) => normProductToken(a) === t))
+}
+
+export function isProductType(v: unknown): v is ProductType {
+  return typeof v === 'string' && (PRODUCT_TYPES as readonly string[]).includes(v)
+}
+
+/** 상품유형 라벨 — null은 '미지정'(opts.unset으로 '—' 등 대체) */
+export function productTypeLabel(v: string | null | undefined, opts?: { unset?: string }): string {
+  return v && isProductType(v) ? v : (v ?? opts?.unset ?? PRODUCT_TYPE_UNSET_LABEL)
+}
+
+/** 병원 계약완료 딜 기준 상품유형 문맥 — 서비스 `getHospitalProductTypeContext` 반환 형상(클라이언트도 같은 형상을 받는다) */
+export interface ProductTypeContext {
+  /** 계약완료 딜에 등장하는 상품유형(중복 제거, PRODUCT_TYPES 순) */
+  types: ProductType[]
+  /** 1종이면 그 값, 0종·혼합이면 null */
+  default: ProductType | null
+  /** 2종 이상 — 등록 시 명시 필수 */
+  mixed: boolean
+  /** 계약완료 딜 수(상품유형 무관) */
+  deals: number
+  /** 상품유형별 계약 수량(Σ daewoong_device_count)·딜 수 */
+  byType: { type: ProductType; deals: number; devices: number }[]
+}
+
+export interface ProductTypeResolution {
+  productType: ProductType | null
+  /** 명시 없음 + 혼합 → PRODUCT_TYPE_REQUIRED_MESSAGE */
+  error: string | null
+  /** 명시 없음 + 딜 0건 → PRODUCT_TYPE_NO_DEAL_WARNING · 명시값이 계약 딜에 없는 유형 → 안내 */
+  warning: string | null
+  /** 문맥 기본값이 적용됐는지 */
+  fromDefault: boolean
+}
+
+/**
+ * 기본값 규칙(순수 함수 — 서버·클라이언트·스모크 공용).
+ * explicit가 있으면 그대로(계약 딜에 없는 유형이면 경고만) / 없으면 문맥: 1종 → 기본값 · 0종 → null+경고 · 혼합 → 오류.
+ */
+export function resolveProductTypeDefault(ctx: ProductTypeContext | null | undefined, explicit: ProductType | null | undefined): ProductTypeResolution {
+  if (explicit) {
+    const known = !ctx || ctx.types.length === 0 || ctx.types.includes(explicit)
+    return { productType: explicit, error: null, warning: known ? null : `상품유형 ${explicit} — 이 병원 계약완료 딜에 없는 상품유형입니다`, fromDefault: false }
+  }
+  if (!ctx || ctx.deals === 0 || ctx.types.length === 0) return { productType: null, error: null, warning: PRODUCT_TYPE_NO_DEAL_WARNING, fromDefault: false }
+  if (ctx.mixed) return { productType: null, error: PRODUCT_TYPE_REQUIRED_MESSAGE, warning: null, fromDefault: false }
+  return { productType: ctx.default, error: null, warning: null, fromDefault: true }
+}
+
 /**
  * 계약완료 딜 상태명 — 기대 수량(Σ계약완료 딜 daewoong_device_count) 조인 조건(§9.1).
  * 2026-08-03 도입 병상 동기화 스크립트와 동일 규칙: `status_codes.category='SALES_DEAL_STATUS' AND name='계약완료'`.
@@ -464,6 +564,8 @@ export interface ParsedSerialLine {
   memo?: string
   /** 3열 이후 중 용도 별칭(판매용/평가용/SALE/EVAL)인 셀 — 메모에서 분리 */
   usageInput?: string
+  /** 3열 이후 중 상품유형 별칭(일반/라이트/lite…)인 셀 — 메모에서 분리 */
+  productTypeInput?: string
 }
 
 /** 열 구분: 탭 또는 2칸 이상 공백 */
@@ -473,7 +575,7 @@ const TOKEN_SPLIT_RE = /[,;\s　]+/
 
 /**
  * 줄당 1건 — `A126861` / `A126862<TAB>6병동` / `A126863, A126864 A126865`(탭 없으면 토큰 전부 시리얼)
- * / `gw4c11-b008381<TAB>6병동<TAB>신관 GW` / `A126866<TAB>6병동<TAB>평가용`(3열 이후 용도 별칭 셀은 usageInput으로 분리).
+ * / `gw4c11-b008381<TAB>6병동<TAB>신관 GW` / `A126866<TAB>6병동<TAB>평가용<TAB>라이트`(3열 이후 용도 별칭 셀은 usageInput, 상품유형 별칭 셀은 productTypeInput으로 분리).
  * `#` 뒤는 주석(줄 시작 또는 공백 뒤), 빈 줄 무시, 줄 번호 보존.
  * 열 모드의 첫 열에 시리얼이 여럿이면 같은 병동·메모·용도로 각각 행이 된다.
  *
@@ -494,11 +596,12 @@ export function parseSerialLines(text: string | null | undefined, max: number = 
       const wardInput = cols[1] || undefined
       const rest = cols.slice(2).filter(Boolean)
       const usageInput = rest.find((c) => isUsageTypeToken(c))
-      const memo = rest.filter((c) => c !== usageInput).join(' ') || undefined
+      const productTypeInput = rest.find((c) => c !== usageInput && isProductTypeToken(c))
+      const memo = rest.filter((c) => c !== usageInput && c !== productTypeInput).join(' ') || undefined
       const serials = cols[0].split(TOKEN_SPLIT_RE).filter(Boolean)
       for (const serialInput of serials) {
         if (rows.length >= limit) break
-        rows.push({ row, serialInput, ...(wardInput ? { wardInput } : {}), ...(memo ? { memo } : {}), ...(usageInput ? { usageInput } : {}) })
+        rows.push({ row, serialInput, ...(wardInput ? { wardInput } : {}), ...(memo ? { memo } : {}), ...(usageInput ? { usageInput } : {}), ...(productTypeInput ? { productTypeInput } : {}) })
       }
     } else {
       const serials = line.trim().split(TOKEN_SPLIT_RE).filter(Boolean)

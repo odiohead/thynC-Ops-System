@@ -4,6 +4,7 @@
  * 등록 폼 (§6.1-B 폼 · 등록) — GROUP C
  * 시리얼 textarea(parseSerialLines — 줄당 1건, `시리얼<TAB>병동<TAB>메모`, 3열 이후 '평가용'/'판매용' 셀은 용도로 분리, 자동 대문자, 중복 줄 병합) · 모델(자동/고정 select: models) · 병동(WardCombo, allowNew)
  * · 용도 [미지정|판매용|평가용](폼 공통 — 줄에 용도가 있으면 그 값이 우선, 기본 미지정 → body.usageTypeId)
+ * · 상품유형 [기본값(계약 딜 기준: 라이트)|일반|라이트](B-22 — 줄에 '일반/라이트' 셀이 있으면 우선; 혼합 병원은 선택 필수 → body.productType). 문맥은 preview 응답 productTypeContext
  * · 업무일자(기본 today, 과거 허용) · 메모 · 유지보수 코드(MaintenanceCodeCombo — 선택 시 업무일자 자동 채움, 사용자가 고친 값은 유지)
  * 실시간 판별 = previewRegister(code, body) (500ms 디바운스, 200줄 초과 시 수동 [판별]) → 판정 패널: 모델별 카운트 · ⚠형식 · 재등록(이전 회수 사유·일자) · 이미 배치 중(skip)
  * · ✖ 타 병원 배치 중 → 행별 [제외][이관 처리](excludeRows / conflicts{serial:'TRANSFER'}) · 폐쇄 병동 → [미지정으로 등록](rowActions[row]='UNASSIGN_WARD')
@@ -19,8 +20,9 @@ import Button from '@/app/components/ui/Button'
 import Badge from '@/app/components/ui/Badge'
 import { Select, Textarea } from '@/app/components/ui/Input'
 import { cn } from '@/lib/cn'
-import { IMPORT_MAX_ROWS, IMPORT_VERDICT_COLORS, IMPORT_VERDICT_LABELS, normalizeSerial, parseSerialLines, todayKst, toYmd, type ImportRowAction, type ImportVerdict, type OccurredOnBasis } from '@/lib/deviceRegistryShared'
+import { IMPORT_MAX_ROWS, IMPORT_VERDICT_COLORS, IMPORT_VERDICT_LABELS, PRODUCT_TYPES, normalizeSerial, parseSerialLines, todayKst, toYmd, type ImportRowAction, type ImportVerdict, type OccurredOnBasis, type ProductType } from '@/lib/deviceRegistryShared'
 import { errorMessage, getUsageTypes, isApiError, previewRegister, registerDevices } from './api'
+import { productTypeDefaultLabel } from './deviceDisplay'
 import type { ImportPreviewRow, ModelSummary, MutationDone, RegisterBody, RegisterPreviewResponse, RegistryRef, UsageType, WardOption, WardValue } from './types'
 import { WardCombo } from './WardCombo'
 import { MaintenanceCodeCombo } from './MaintenanceCodeCombo'
@@ -51,6 +53,7 @@ interface ParsedItem {
   wardInput?: string
   memo?: string
   usageInput?: string
+  productTypeInput?: string
   line: number
 }
 
@@ -70,6 +73,8 @@ function RegisterForm({ onClose, hospitalCode, models, wards, today: todayProp, 
   const [ward, setWard] = useState<WardValue>({})
   const [usageId, setUsageId] = useState<number | ''>('')
   const [usageTypes, setUsageTypes] = useState<UsageType[] | null>(null)
+  /** 상품유형 공통값 — '' = 서버 기본값 규칙(병원 딜 기준) */
+  const [productType, setProductType] = useState<ProductType | ''>('')
   const occ = useOccurredOn(today)
   const [memo, setMemo] = useState('')
   const [refCode, setRefCode] = useState('')
@@ -116,7 +121,7 @@ function RegisterForm({ onClose, hospitalCode, models, wards, today: todayProp, 
         continue
       }
       seen.add(key)
-      items.push({ key, serialInput: l.serialInput, wardInput: l.wardInput, memo: l.memo, usageInput: l.usageInput, line: l.row })
+      items.push({ key, serialInput: l.serialInput, wardInput: l.wardInput, memo: l.memo, usageInput: l.usageInput, productTypeInput: l.productTypeInput, line: l.row })
     }
     return { items, dup, overflow }
   }, [text])
@@ -141,9 +146,10 @@ function RegisterForm({ onClose, hospitalCode, models, wards, today: todayProp, 
     const excludeRows = items.map((it, i) => (effectiveExcluded(it.key) ? i + 1 : 0)).filter((n) => n > 0)
     const ref: RegistryRef | null = refCode ? { type: 'MAINTENANCE', code: refCode } : null
     return {
-      items: items.map((it) => ({ serialInput: it.serialInput, ...(it.wardInput ? { wardName: it.wardInput } : {}), ...(it.memo ? { memo: it.memo } : {}), ...(it.usageInput ? { usageType: it.usageInput } : {}) })),
+      items: items.map((it) => ({ serialInput: it.serialInput, ...(it.wardInput ? { wardName: it.wardInput } : {}), ...(it.memo ? { memo: it.memo } : {}), ...(it.usageInput ? { usageType: it.usageInput } : {}), ...(it.productTypeInput ? { productType: it.productTypeInput } : {}) })),
       ...(modelId !== '' ? { deviceInfoId: modelId } : {}),
       ...(usageId !== '' ? { usageTypeId: usageId } : {}),
+      ...(productType !== '' ? { productType } : {}),
       ...wardBody(ward),
       occurredOn: occ.value,
       memo: memo.trim() || null,
@@ -152,13 +158,14 @@ function RegisterForm({ onClose, hospitalCode, models, wards, today: todayProp, 
       ...(Object.keys(rowActions).length > 0 ? { rowActions } : {}),
       ...(excludeRows.length > 0 ? { excludeRows } : {}),
     }
-  }, [items, unassign, transfers, effectiveExcluded, refCode, modelId, usageId, ward, occ.value, memo])
+  }, [items, unassign, transfers, effectiveExcluded, refCode, modelId, usageId, productType, ward, occ.value, memo])
 
   // 판별 입력 키 — 제외 목록은 클라이언트가 계산하므로 키에 넣지 않는다(재판별 불필요)
   const currentKey = useMemo(
-    () => JSON.stringify({ items: items.map((it) => [it.serialInput, it.wardInput ?? '', it.memo ?? '', it.usageInput ?? '']), modelId, usageId, ward, occurredOn: occ.value, transfers: Array.from(transfers).sort(), unassign: Array.from(unassign).sort(), nonce }),
-    [items, modelId, usageId, ward, occ.value, transfers, unassign, nonce]
+    () => JSON.stringify({ items: items.map((it) => [it.serialInput, it.wardInput ?? '', it.memo ?? '', it.usageInput ?? '', it.productTypeInput ?? '']), modelId, usageId, productType, ward, occurredOn: occ.value, transfers: Array.from(transfers).sort(), unassign: Array.from(unassign).sort(), nonce }),
+    [items, modelId, usageId, productType, ward, occ.value, transfers, unassign, nonce]
   )
+  const ptCtx = preview?.productTypeContext ?? null
   const stale = preview != null && previewKey !== currentKey
 
   const runPreview = useCallback(async () => {
@@ -367,6 +374,29 @@ function RegisterForm({ onClose, hospitalCode, models, wards, today: todayProp, 
         <FormField label="병동" htmlFor="register-ward" hint="공통 병동 — 줄에 병동이 있으면 그 값이 우선. 비우면 미지정(경고)">
           <WardCombo id="register-ward" hospitalCode={hospitalCode} value={ward} onChange={setWard} allowNew wards={wards} disabled={submitting} />
         </FormField>
+        <FormField
+          label="상품유형"
+          htmlFor="register-product-type"
+          required={!!ptCtx?.mixed}
+          hint={
+            ptCtx?.mixed && productType === '' ? (
+              <span className="text-destructive">이 병원은 일반·라이트 딜이 함께 있습니다 — 상품유형을 선택해야 등록할 수 있습니다 (줄에 &apos;일반&apos;/&apos;라이트&apos; 셀이 있으면 그 값 우선)</span>
+            ) : ptCtx ? (
+              `계약완료 딜: ${ptCtx.byType.length ? ptCtx.byType.map((b) => `${b.type} ${b.devices.toLocaleString()}대`).join(' · ') : '없음'} — 자리의 판매 조건(배치 속성). 줄의 3번째 열 이후 '일반'/'라이트' 셀이 우선`
+            ) : (
+              '자리의 판매 조건(배치 속성) — 비우면 병원 계약 딜 기준 기본값(1종이면 그 값, 없으면 미지정, 혼합이면 선택 필수)'
+            )
+          }
+        >
+          <Select id="register-product-type" value={productType} disabled={submitting} onChange={(e) => setProductType(e.target.value as ProductType | '')}>
+            <option value="">{productTypeDefaultLabel(ptCtx)}</option>
+            {PRODUCT_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </Select>
+        </FormField>
         <FormField label="용도" htmlFor="register-usage" hint="공통 용도 — 줄의 3번째 열 이후에 '판매용'/'평가용'이 있으면 그 값이 우선. 평가용은 계약 대조에서 제외">
           <Select id="register-usage" value={usageId} disabled={submitting || usageTypes == null} onChange={(e) => setUsageId(e.target.value ? Number(e.target.value) : '')}>
             <option value="">미지정</option>
@@ -450,6 +480,7 @@ function RegisterForm({ onClose, hospitalCode, models, wards, today: todayProp, 
                   <th className="px-2 py-1.5 font-medium">시리얼</th>
                   <th className="px-2 py-1.5 font-medium">모델</th>
                   <th className="px-2 py-1.5 font-medium">용도</th>
+                  <th className="px-2 py-1.5 font-medium">상품유형</th>
                   <th className="px-2 py-1.5 font-medium">병동</th>
                   <th className="px-2 py-1.5 font-medium">판정</th>
                   <th className="px-2 py-1.5 font-medium">메시지 / 행 액션</th>
@@ -473,6 +504,7 @@ function RegisterForm({ onClose, hospitalCode, models, wards, today: todayProp, 
                       </td>
                       <td className="px-2 py-1.5">{r.deviceModel ?? <span className="text-muted-foreground">—</span>}</td>
                       <td className="px-2 py-1.5">{r.usageTypeName ?? <span className="text-muted-foreground">미지정</span>}</td>
+                      <td className="px-2 py-1.5">{r.productType ?? <span className={cn('text-muted-foreground', ptCtx?.mixed && r.status !== 'skip' && 'text-destructive')}>미지정</span>}</td>
                       <td className="px-2 py-1.5">
                         {r.actionEff === 'UNASSIGN_WARD' ? (
                           <span className="text-muted-foreground">미지정 (강제)</span>

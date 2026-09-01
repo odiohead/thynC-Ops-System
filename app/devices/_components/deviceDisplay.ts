@@ -2,7 +2,7 @@
  * 디바이스 원장 표시 헬퍼 (GROUP B 소유 — SummaryStrip · DeviceTable · DeviceHistoryDrawer · CorrectionModal 공용)
  * 순수 함수만. 날짜는 lib/deviceRegistryShared 의 toYmd 기준(@db.Date = UTC 자정 ISO), 기록 시각은 KST 표시.
  */
-import { DEVICE_EVENT_TYPE_LABELS, toYmd, todayKst, type DeviceEventType, type UsageTypeRef } from '@/lib/deviceRegistryShared'
+import { DEVICE_EVENT_TYPE_LABELS, PRODUCT_TYPE_UNSET_LABEL, toYmd, todayKst, type DeviceEventType, type ProductType, type ProductTypeContext, type UsageTypeRef } from '@/lib/deviceRegistryShared'
 import type { ChangeSet, ContractedDeal, ModelSummary, WmsMatch } from './types'
 
 /** @db.Date ISO → 'YYYY-MM-DD', 없으면 '—' */
@@ -71,10 +71,11 @@ export const CORRECT_FIELD_LABELS: Record<string, string> = {
   macAddress: 'MAC',
   extDeviceCode: '닉네임',
   usageTypeId: '용도',
+  productType: '상품유형',
 }
 
 function changeValue(field: string, v: unknown, models?: readonly ModelSummary[], usageTypes?: readonly UsageTypeRef[]): string {
-  if (v === null || v === undefined || v === '') return field === 'usageTypeId' ? '미지정' : '(없음)'
+  if (v === null || v === undefined || v === '') return field === 'usageTypeId' || field === 'productType' ? PRODUCT_TYPE_UNSET_LABEL : '(없음)'
   if (field === 'deviceInfoId' && models) {
     const m = models.find((x) => x.deviceInfoId === Number(v))
     if (m) return `${m.deviceName} ${m.deviceModel}`
@@ -92,6 +93,20 @@ export function changeSummaryLines(changes: ChangeSet | null | undefined, models
   return Object.entries(changes)
     .filter(([field]) => field !== 'serialRaw')
     .map(([field, c]) => `${CORRECT_FIELD_LABELS[field] ?? field}: ${changeValue(field, c?.before, models, usageTypes)} → ${changeValue(field, c?.after, models, usageTypes)}`)
+}
+
+/** 상품유형 배지 톤 — 일반 default · 라이트 info(primary) · 미지정 없음 (B-22) */
+export function productTypeBadgeVariant(v: ProductType | string | null | undefined): 'default' | 'primary' | null {
+  if (!v) return null
+  return v === '라이트' ? 'primary' : 'default'
+}
+
+/** 상품유형 옵션 라벨 — '기본값 (계약 딜 기준: 라이트)' / '기본값 (계약 딜 없음: 미지정)' / 혼합 '선택 필수 (일반·라이트 딜 혼합)' */
+export function productTypeDefaultLabel(ctx: ProductTypeContext | null | undefined): string {
+  if (!ctx) return '기본값 (병원 딜 기준)'
+  if (ctx.mixed) return '— 선택 필수 (일반·라이트 딜 혼합) —'
+  if (ctx.default) return `기본값 (계약 딜 기준: ${ctx.default})`
+  return '기본값 (계약완료 딜 없음: 미지정)'
 }
 
 /** 용도 배지 톤 — 판매용 default · 평가용 warning · 미지정 없음 */

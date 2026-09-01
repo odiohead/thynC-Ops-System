@@ -4,6 +4,7 @@
  * 이력 드로어 (§6.1-B, 우측 슬라이드 / 모바일 바텀시트) — GROUP B
  * getUnitDetail(deviceId) → 헤더 'A126861 · 심전계 MC200M-T · 배치 중 @ 병원 병동 (배치일) · 창고 개체: …'
  *  - 헤더 용도 배지(판매용/평가용/미지정) — USER+는 인라인 select로 변경(patchDevice({usageTypeId}) → CORRECT 이벤트)
+ *  - 헤더 상품유형 배지(일반/라이트/미지정, 배치 속성 B-22) — USER+ 인라인 변경(patchDevice({productType}) → CORRECT). 이벤트 행은 스냅샷이 현재 값과 다를 때만 '(당시 라이트)' 병기
  *  - '온프렘 스냅샷 ▸'(macAddress·extDeviceCode·ext_* 값 있을 때만) · 메모 인라인 저장(USER+, patchDevice({memo}))
  *  - 버튼 [병동 이동] [회수] [교체](canWrite, ACTIVE) → onAction · 관리 ▾(canAdmin): 이벤트 정정(patchEvent, §8.2 허용 필드) · 마지막 이벤트 취소(cancelEvent) · 모델/시리얼 정정(onAction('correct'))
  *  - 이벤트 목록 최신순(서버 순서 그대로): 업무일자 · 타입 배지 · 요약(병동 from→to / 사유 / 교체·이관 상대 링크 → 그 기기 드로어) · 연결(refLink) · 기록자 · 기록 시각(업무일자와 다르면 회색 병기)
@@ -25,6 +26,8 @@ import {
   DEVICE_STATUS_LABELS,
   REGISTRY_REF_TYPES,
   REGISTRY_REF_TYPE_LABELS,
+  PRODUCT_TYPES,
+  PRODUCT_TYPE_UNSET_LABEL,
   REGISTRY_SOURCE_LABELS,
   isFutureYmd,
   isYmd,
@@ -32,12 +35,13 @@ import {
   toYmd,
   todayKst,
   type DeviceEventType,
+  type ProductType,
   type RegistryRefType,
 } from '@/lib/deviceRegistryShared'
 import { cancelEvent, errorMessage, getRecoveryReasons, getUnitDetail, getUsageTypes, getWards, patchDevice, patchEvent } from './api'
 import { useDevicesToast } from './toast'
 import { RegistryFloatingPanel, RegistryMenuItem } from './RegistryFloatingPanel'
-import { changeSummaryLines, fmtKstDateTime, kstYmd, modelLabel, usageBadgeVariant, wmsCell, ymdOrDash } from './deviceDisplay'
+import { changeSummaryLines, fmtKstDateTime, kstYmd, modelLabel, productTypeBadgeVariant, usageBadgeVariant, wmsCell, ymdOrDash } from './deviceDisplay'
 import { toDeviceRef, type Capabilities, type DeviceAction, type DeviceDetail, type DeviceDetailEvent, type DeviceRef, type EventPatchBody, type RecoveryReason, type UsageType, type Ward } from './types'
 
 export interface DeviceHistoryDrawerProps {
@@ -120,7 +124,32 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
     setMemoEditing(false)
     setSnapshotOpen(false)
     setUsageEditing(false)
+    setPtEditing(false)
   }, [deviceId])
+
+  // ── 상품유형(일반/라이트) — 배치 속성(B-22), USER+ 인라인 변경(CORRECT)
+  const [ptEditing, setPtEditing] = useState(false)
+  const [ptSaving, setPtSaving] = useState(false)
+  const savePt = async (raw: string) => {
+    if (!device || ptSaving) return
+    const next = (raw || null) as ProductType | null
+    if (next === (device.productType ?? null)) {
+      setPtEditing(false)
+      return
+    }
+    setPtSaving(true)
+    try {
+      const r = await patchDevice(device.id, { productType: next })
+      setDevice({ ...device, productType: r.device.productType ?? next })
+      setPtEditing(false)
+      notify(`${device.serialNo} 상품유형 → ${next ?? PRODUCT_TYPE_UNSET_LABEL}`, 'success')
+      onMutated()
+    } catch (e) {
+      notify(errorMessage(e, '상품유형 변경에 실패했습니다.'), 'error')
+    } finally {
+      setPtSaving(false)
+    }
+  }
 
   // ── 용도(판매용/평가용) — 마스터는 드로어가 열려 있는 동안 1회 로드, USER+ 인라인 변경(CORRECT)
   const [usageTypes, setUsageTypes] = useState<UsageType[] | null>(null)
@@ -297,6 +326,35 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
                     ) : device.usageType ? (
                       <Badge variant={usageBadgeVariant(device.usageType) ?? 'default'} title={device.usageType.value === 'EVAL' ? '평가용 — 계약 대조 제외' : undefined}>
                         {device.usageType.name}
+                      </Badge>
+                    ) : null}
+                    {canWrite && device.status === 'ACTIVE' && ptEditing ? (
+                      <Select
+                        aria-label="상품유형"
+                        autoFocus
+                        value={device.productType ?? ''}
+                        disabled={ptSaving}
+                        onChange={(e) => void savePt(e.target.value)}
+                        onBlur={() => !ptSaving && setPtEditing(false)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') setPtEditing(false)
+                        }}
+                        className="h-7 w-auto text-xs"
+                      >
+                        <option value="">{PRODUCT_TYPE_UNSET_LABEL}</option>
+                        {PRODUCT_TYPES.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </Select>
+                    ) : canWrite && device.status === 'ACTIVE' ? (
+                      <button type="button" onClick={() => setPtEditing(true)} className="rounded hover:bg-accent" title="상품유형 변경 (일반/라이트 — 자리의 판매 조건, CORRECT 이벤트로 기록)" aria-label="상품유형 변경">
+                        {device.productType ? <Badge variant={productTypeBadgeVariant(device.productType) ?? 'default'}>{device.productType}</Badge> : <Badge variant="outline">상품유형 미지정</Badge>}
+                      </button>
+                    ) : device.productType ? (
+                      <Badge variant={device.status === 'RECOVERED' ? 'outline' : (productTypeBadgeVariant(device.productType) ?? 'default')} title={device.status === 'RECOVERED' ? '회수 전 상품유형 — 재등록 시 다시 지정' : '상품유형 (자리의 판매 조건)'}>
+                        {device.status === 'RECOVERED' ? `회수 전 ${device.productType}` : device.productType}
                       </Badge>
                     ) : null}
                   </div>
@@ -588,6 +646,7 @@ function renderTimeline(a: TimelineArgs): ReactNode[] {
         onCancelEdit={() => a.onEdit(null)}
         notify={a.notify}
         usageTypes={a.usageTypes}
+        currentProductType={a.device.productType ?? null}
       />
     )
   })
@@ -608,6 +667,7 @@ function EventRow({
   onCancelEdit,
   notify,
   usageTypes,
+  currentProductType,
 }: {
   ev: DeviceDetailEvent
   isLatest: boolean
@@ -622,6 +682,8 @@ function EventRow({
   onCancelEdit: () => void
   notify: ReturnType<typeof useDevicesToast>
   usageTypes: readonly UsageType[]
+  /** 현재 배치 상품유형 — 이벤트 스냅샷과 다르면 '(당시 …)' 병기 */
+  currentProductType: string | null
 }) {
   const occurred = toYmd(ev.occurredOn)
   const createdKst = fmtKstDateTime(ev.createdAt)
@@ -629,6 +691,8 @@ function EventRow({
   const href = refLink(ev.refType, ev.refCode)
   const importLocked = ev.importBatchId != null && ev.eventType === 'REGISTER'
   const editedKst = fmtKstDateTime(ev.editedAt)
+  // 상품유형 스냅샷 — 현재 배치 값과 다를 때만 표시(CORRECT는 요약에 before→after가 이미 있으므로 생략)
+  const productTypeSnapshotNote = ev.eventType !== 'CORRECT' && (ev.productType ?? null) !== (currentProductType ?? null) ? `당시 ${ev.productType ?? PRODUCT_TYPE_UNSET_LABEL}` : null
 
   return (
     <li className={cn('px-3 py-2 text-xs', isLatest && 'bg-primary-subtle/20')}>
@@ -663,6 +727,7 @@ function EventRow({
               </span>
             )}
             {ev.source !== 'MANUAL' && <span className="rounded bg-muted px-1 py-px text-[10px]">{REGISTRY_SOURCE_LABELS[ev.source] ?? ev.source}</span>}
+            {productTypeSnapshotNote && <span className="rounded bg-muted px-1 py-px text-[10px]" title="이벤트 시점 상품유형 스냅샷(현재 값과 다름)">{productTypeSnapshotNote}</span>}
             <span>{ev.actorName ?? '—'}</span>
             {createdKst && <span className={cn(createdDiffers ? 'text-muted-foreground/80' : 'text-muted-foreground')}>(기록 {createdKst.slice(5)})</span>}
             {editedKst && <span title={`정정 ${editedKst}`}>· 정정됨 {editedKst.slice(5, 10)}</span>}

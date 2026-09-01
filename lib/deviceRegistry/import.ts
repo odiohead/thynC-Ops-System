@@ -15,7 +15,10 @@ import {
   RECOVERY_REASON_FALLBACK_LABELS,
   normalizeSerial,
   normalizeWardName,
+  resolveProductTypeDefault,
   type ImportBatchMode,
+  type ProductType,
+  type ProductTypeContext,
   type ImportRowAction,
   type ImportSourceKind,
   type ImportVerdict,
@@ -24,11 +27,13 @@ import { prisma } from '@/lib/prisma'
 import {
   RegistryError,
   findUnitsBySerial,
+  getHospitalProductTypeContext,
   hospitalNames,
   listHospitalWards,
   loadRecoveryReasons,
   loadTrackedModels,
   loadUsageTypes,
+  parseProductTypeInput,
   prepareCtx,
   requireOccurredOn,
   resolveModel,
@@ -71,6 +76,8 @@ export interface ImportRowInput {
   usageTypeInput?: string | null
   /** 항목별 용도 id(등록 폼 items[i].usageTypeId 경유) — usageTypeInput보다 우선 */
   usageTypeId?: number | null
+  /** F열/붙여넣기 상품유형 열('일반'·'라이트'·'lite'…) — 미매칭은 error 판정 */
+  productTypeInput?: string | null
 }
 
 export interface PreviewDefaults {
@@ -78,6 +85,10 @@ export interface PreviewDefaults {
   deviceInfoId?: number | null
   /** 용도 기본값(폼 공통) — 행에 용도 입력이 없을 때 적용. 없으면 미지정 */
   usageTypeId?: number | null
+  /** 상품유형 기본값(폼 공통, 별칭 허용) — 행 입력이 없을 때. 없으면 병원 계약완료 딜 기본값 규칙(1종 기본·0종 미지정 warn·혼합 error 필수) */
+  productType?: string | null
+  /** 테스트 전용 — 병원 딜 대신 이 문맥으로 규칙 적용(혼합 병원 판정 검증용). undefined면 DB 조회 */
+  productTypeContextOverride?: ProductTypeContext | null
   wardMode: 'column' | 'fixed'
   /** wardMode=fixed */
   wardId?: number | null
@@ -119,6 +130,8 @@ export interface PreviewRow {
   /** 해석된 용도(행 입력 > 기본값 > 기존 유닛 값). null=미지정 */
   usageTypeId: number | null
   usageTypeName: string | null
+  /** 해석된 상품유형(행 입력 > 폼 기본 > 병원 딜 규칙). null=미지정. 혼합 병원에서 미지정이면 error 판정 */
+  productType: ProductType | null
   wardInput: string | null
   wardId: number | null
   wardName: string | null
@@ -161,6 +174,8 @@ export interface PreviewSummary {
   orgs: { org: string; rows: number; selected: boolean }[]
   occurredOn: string
   mode: ImportBatchMode
+  /** 병원 계약완료 딜 기준 상품유형 문맥(폼 라벨 '계약 딜 기준 기본값: 라이트' / 혼합 → 필수) */
+  productTypeContext: ProductTypeContext
 }
 
 export interface PreviewResult {
@@ -212,6 +227,13 @@ export async function previewRows(
     throw new RegistryError(400, '고정 모델이 원장 대상 모델이 아닙니다')
   }
   if (defaults.usageTypeId != null && !usageById.has(Number(defaults.usageTypeId))) throw new RegistryError(400, '기본 용도가 올바르지 않습니다 (판매용/평가용)')
+  let defaultProductType: ProductType | null
+  try {
+    defaultProductType = parseProductTypeInput(defaults.productType)
+  } catch {
+    throw new RegistryError(400, '기본 상품유형이 올바르지 않습니다 (일반/라이트)')
+  }
+  const ptCtx = defaults.productTypeContextOverride !== undefined ? defaults.productTypeContextOverride : await getHospitalProductTypeContext(hospitalCode, client)
   let fixedWard: WardRef | null = null
   if (defaults.wardMode === 'fixed' && defaults.wardId != null) {
     fixedWard = wardsById.get(Number(defaults.wardId)) ?? null
@@ -241,6 +263,9 @@ export async function previewRows(
     wardWarns: string[]
     /** WMS·분실 등 — skip 행에서는 무시 */
     warns: string[]
+    /** 상품유형 규칙(혼합 병원 미지정 error · 딜 0건 warn) — 배치가 바뀌지 않는 skip 행에서는 무시 */
+    ptErrors: string[]
+    ptWarns: string[]
     modelId: number | null
     modelName: string | null
   }
@@ -262,6 +287,7 @@ export async function previewRows(
       deviceModel: null,
       usageTypeId: null,
       usageTypeName: null,
+      productType: null,
       wardInput: null,
       wardId: null,
       wardName: null,
@@ -282,7 +308,7 @@ export async function previewRows(
       executable: false,
       extWardCodeToSet: null,
     }
-    const w: Work = { input: r, out, kind: 'ok', errors: [], modelError: null, modelWarns: [], wardErrors: [], wardWarns: [], warns: [], modelId: null, modelName: null }
+    const w: Work = { input: r, out, kind: 'ok', errors: [], modelError: null, modelWarns: [], wardErrors: [], wardWarns: [], warns: [], ptErrors: [], ptWarns: [], modelId: null, modelName: null }
     works.push(w)
 
     if (!ns.serialNo) {
@@ -320,6 +346,16 @@ export async function previewRows(
       const u = resolveUsageTypeInput(usageTypes, { usageTypeId: r.usageTypeId ?? null, usageTypeInput: r.usageTypeInput ?? null }, defaults.usageTypeId ?? null)
       out.usageTypeId = u?.id ?? null
       out.usageTypeName = u?.name ?? null
+    } catch (e) {
+      w.errors.push(e instanceof RegistryError ? e.message : String(e))
+    }
+    // 상품유형 — 행 입력(별칭) > 폼 기본 > 병원 딜 규칙. 미매칭은 error(항상), 혼합+미지정 error·딜 0건 warn은 skip 행에서 무시(3차에서 판정)
+    try {
+      const explicit = parseProductTypeInput(r.productTypeInput) ?? defaultProductType
+      const res = resolveProductTypeDefault(ptCtx ?? null, explicit)
+      out.productType = res.productType
+      if (res.error) w.ptErrors.push(res.error)
+      else if (res.warning) w.ptWarns.push(res.warning)
     } catch (e) {
       w.errors.push(e instanceof RegistryError ? e.message : String(e))
     }
@@ -531,6 +567,7 @@ export async function previewRows(
       .map(([org, n]) => ({ org, rows: n, selected: !selectedOrgs || selectedOrgs.has(org.toUpperCase()) })),
     occurredOn,
     mode: defaults.mode,
+    productTypeContext: ptCtx ?? { types: [], default: null, mixed: false, deals: 0, byType: [] },
   }
   const newWardAgg = new Map<string, { name: string; rows: number; fromCode: boolean }>()
   for (const w of works) {
@@ -542,8 +579,8 @@ export async function previewRows(
       out.wardInactive = false
       out.actions = out.actions.filter((a) => a !== 'UNASSIGN_WARD')
     }
-    const errors = [...w.errors, ...(w.modelError ? [w.modelError] : []), ...(skip ? [] : w.wardErrors)]
-    const warns = [...w.modelWarns, ...(skip ? [] : [...w.wardWarns, ...w.warns])]
+    const errors = [...w.errors, ...(w.modelError ? [w.modelError] : []), ...(skip ? [] : [...w.wardErrors, ...w.ptErrors])]
+    const warns = [...w.modelWarns, ...(skip ? [] : [...w.wardWarns, ...w.warns, ...w.ptWarns])]
     let status: ImportVerdict
     if (errors.length > 0) status = 'error'
     else if (w.kind === 'conflict') status = 'conflict'
@@ -695,6 +732,7 @@ export async function importBatch(ctx: RegistryCtx, input: ImportInput, opts?: R
       macAddress: r.macAddress,
       extDeviceCode: r.extDeviceCode,
       usageTypeId: r.usageTypeId,
+      productType: r.productType,
     }))
     const conflicts = Object.fromEntries(executing.filter((r) => r.action === 'TRANSFER').map((r) => [r.serialNo, 'TRANSFER' as const]))
     let result: RegisterResult
@@ -703,7 +741,7 @@ export async function importBatch(ctx: RegistryCtx, input: ImportInput, opts?: R
         tx,
         { hospitalCode: here, actor: p.actor, occurredOn: p.occurredOn, ref: p.ref, source: 'IMPORT', memo: p.memo, actionGroup: p.actionGroup },
         items,
-        { client: tx, importBatchId: batch0.id, conflicts, autoCreateWard: true }
+        { client: tx, importBatchId: batch0.id, conflicts, autoCreateWard: true, productTypeResolved: true }
       )
     } catch (e) {
       // 미리보기 이후 데이터 변동으로 소급 불성립 → 행 번호로 되돌려 409 { error, rows[] } (§7.1)

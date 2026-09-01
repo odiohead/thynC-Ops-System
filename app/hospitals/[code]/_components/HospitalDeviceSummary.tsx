@@ -1,6 +1,6 @@
 import Link from 'next/link'
-import { getHospitalDeviceSummary, type ModelSummary } from '@/lib/deviceRegistry'
-import { DEVICE_EVENT_TYPE_LABELS, toYmd, type DeviceEventType } from '@/lib/deviceRegistryShared'
+import { getHospitalDeviceSummary, type ModelSummary, type ProductTypeKey } from '@/lib/deviceRegistry'
+import { DEVICE_EVENT_TYPE_LABELS, PRODUCT_TYPES, PRODUCT_TYPE_UNSET_LABEL, toYmd, type DeviceEventType } from '@/lib/deviceRegistryShared'
 
 /**
  * 병원 상세 '도입 현황' — 디바이스 원장 요약 (hospital_device_registry_design.md §6.2, D12)
@@ -9,9 +9,11 @@ import { DEVICE_EVENT_TYPE_LABELS, toYmd, type DeviceEventType } from '@/lib/dev
  * - 모델(serial_tracked) 행: 배치 중(계약 축 행은 평가용 제외 수 + '(평가용 n 별도)') / 계약(hard=수치·soft='참고 n'·none='—') / 차이(hard만, 평가용 제외 §9.1) / 최근 이벤트
  * - 원장 없음(activeTotal=0): 헤더·계약 열 유지 + '[디바이스 원장에서 임포트]' 링크
  * - 계약완료 딜 없음: 계약 축 모델(ECG·SpO2) 계약 열 '— (계약완료 딜 없음)'
+ * - 상품유형 매트릭스(B-22): productTypeMixed면 모델 행 아래 '└ 일반 | 라이트 | 미지정' 소행(byProductType) + 하단 '교체 n건(일반 a · 라이트 b)'
  * 도입 병상 수(`hospitals.intro_beds`) 입력은 병원 수정 폼·Excel 가져오기·병원 PUT에 있으므로 여기서는 표시만 한다.
  */
 const COLUMNS = ['모델', '배치 중', '계약', '차이', '최근 이벤트'] as const
+const PT_KEYS: readonly ProductTypeKey[] = [...PRODUCT_TYPES, PRODUCT_TYPE_UNSET_LABEL]
 
 /** 계약 축이 있는 모델(온프렘 type 1=ECG hard, 3=SpO2 soft) — 딜 0건이면 compare='none'이 되므로 타입으로 판별 */
 const CONTRACT_AXIS_TYPES = new Set([1, 3])
@@ -104,6 +106,8 @@ export default async function HospitalDeviceSummary({
   const noDeals = (summary?.contractedDeals.length ?? 0) === 0
   const empty = !summary || summary.activeTotal === 0
   const lastImportMd = summary?.lastImport ? fmtMd(summary.lastImport.createdAt) : null
+  const matrix = !!summary?.productTypeMixed && !empty
+  const repl = summary?.replacements ?? null
 
   return (
     <div className="flex flex-col gap-3">
@@ -163,7 +167,7 @@ export default async function HospitalDeviceSummary({
                 ))}
               </tr>
             ) : (
-              models.map((m) => (
+              models.flatMap((m) => [
                 <tr key={m.deviceInfoId}>
                   <td className="whitespace-nowrap px-4 py-2.5 text-sm text-gray-900">
                     {m.deviceName}
@@ -181,8 +185,35 @@ export default async function HospitalDeviceSummary({
                   <td className="whitespace-nowrap px-4 py-2.5 text-sm text-gray-600">
                     {m.lastEvent ? eventLabel(m.lastEvent) : <Dash />}
                   </td>
-                </tr>
-              ))
+                </tr>,
+                ...(matrix
+                  ? PT_KEYS.filter((k) => m.byProductType?.[k]).map((k) => {
+                      const c = m.byProductType[k]!
+                      const hard = m.compare === 'hard'
+                      const unset = k === PRODUCT_TYPE_UNSET_LABEL
+                      return (
+                        <tr key={`${m.deviceInfoId}-${k}`} className="bg-gray-50/70">
+                          <td className="whitespace-nowrap px-4 py-1.5 pl-8 text-xs text-gray-600">
+                            <span className="mr-1 text-gray-400">└</span>
+                            {unset ? <span className="text-amber-700">{PRODUCT_TYPE_UNSET_LABEL}</span> : <span className={k === '라이트' ? 'rounded bg-blue-50 px-1.5 py-0.5 text-blue-700' : 'rounded bg-gray-100 px-1.5 py-0.5 text-gray-700'}>{k}</span>}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-1.5 text-right text-xs tabular-nums text-gray-800">{(m.compare === 'none' ? c.active : c.activeForCompare).toLocaleString()}</td>
+                          <td className="whitespace-nowrap px-4 py-1.5 text-right text-xs tabular-nums text-gray-600">
+                            {unset || c.expected == null ? '—' : hard ? c.expected.toLocaleString() : `참고 ${c.expected.toLocaleString()}`}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-1.5 text-right text-xs tabular-nums">
+                            {hard && c.diff != null ? (
+                              <span className={c.diff === 0 ? 'text-green-700' : c.diff < 0 ? 'text-red-600' : 'text-amber-600'}>{c.diff === 0 ? '0' : c.diff < 0 ? `−${Math.abs(c.diff).toLocaleString()}` : `+${c.diff.toLocaleString()}`}</span>
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-1.5 text-xs text-gray-400">—</td>
+                        </tr>
+                      )
+                    })
+                  : []),
+              ])
             )}
           </tbody>
         </table>
@@ -204,6 +235,24 @@ export default async function HospitalDeviceSummary({
               <span aria-hidden>·</span>
               <span title="평가용(EVAL) 기기 — 배치 중이지만 계약 대조에서 제외">
                 평가용 <span className="tabular-nums font-medium text-amber-700">{summary!.evalTotal}</span>대 별도
+              </span>
+            </>
+          )}
+          {summary?.productTypeContext?.mixed && (
+            <>
+              <span aria-hidden>·</span>
+              <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700" title="계약완료 딜에 일반·라이트가 함께 있는 병원">
+                상품유형 혼합
+              </span>
+            </>
+          )}
+          {repl && (matrix || repl.total > 0) && (
+            <>
+              <span aria-hidden>·</span>
+              <span title="교체 = 같은 병원 회수와 짝지어진 교체 등록 건수(회수 시점 상품유형 기준)">
+                교체 <span className="tabular-nums font-medium text-gray-700">{repl.total}</span>건
+                {matrix ? ` (${PT_KEYS.filter((k) => k !== PRODUCT_TYPE_UNSET_LABEL || repl.byType[k] > 0).map((k) => `${k} ${repl.byType[k] ?? 0}`).join(' · ')})` : ''}
+                {repl.last30d.total > 0 ? ` · 최근 30일 ${repl.last30d.total}` : ''}
               </span>
             </>
           )}

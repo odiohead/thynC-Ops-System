@@ -17,13 +17,23 @@ import { Prisma, type DeviceUnit, type HospitalDevice, type HospitalDeviceEvent,
 import { randomUUID } from 'crypto'
 import { prisma } from '@/lib/prisma'
 import {
+  DEAL_STATUS_CATEGORY,
+  DEAL_STATUS_CONTRACTED,
   DEVICE_EVENT_TYPE_LABELS,
   DEVICE_TRANSITIONS,
   DEVICE_USAGE_TYPE_CATEGORY,
   IDEMPOTENT_SOURCES,
+  PRODUCT_TYPE_INVALID_MESSAGE,
+  PRODUCT_TYPES,
   RECOVERY_REASON_CATEGORY,
   USAGE_TYPE_INVALID_MESSAGE,
+  isProductType,
+  matchProductType,
   matchUsageType,
+  resolveProductTypeDefault,
+  type ProductType,
+  type ProductTypeContext,
+  type ProductTypeResolution,
   type UsageTypeRef,
   REGISTRY_REF_TYPES,
   REGISTRY_SOURCES,
@@ -294,6 +304,10 @@ export interface FoldEvent {
   reasonCodeId: number | null
   occurredOn: Date | string
   relatedDeviceId: number | null
+  /** 이벤트 시점 상품유형 스냅샷 — REGISTER가 배치 값을 정한다(B-22) */
+  productType?: string | null
+  /** CORRECT changes — `productType.after`가 있으면 fold가 배치 값을 갱신한다 */
+  changes?: unknown
 }
 
 export interface FoldState {
@@ -305,6 +319,8 @@ export interface FoldState {
   recoveredOn: string | null
   recoverReasonId: number | null
   replacedById: number | null
+  /** 상품유형(일반/라이트) — REGISTER 이벤트 값, CORRECT(changes.productType)로 갱신, RECOVER는 마지막 값 유지(표시용) */
+  productType: string | null
   lastEventType: string | null
   lastEventOn: string | null
   /** CORRECT 제외 상태 이벤트 수 */
@@ -320,9 +336,19 @@ export const EMPTY_STATE: FoldState = {
   recoveredOn: null,
   recoverReasonId: null,
   replacedById: null,
+  productType: null,
   lastEventType: null,
   lastEventOn: null,
   stateEventCount: 0,
+}
+
+/** CORRECT changes JSON에서 상품유형 변경 후 값을 꺼낸다(없으면 undefined) */
+function productTypeAfterOf(changes: unknown): string | null | undefined {
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes)) return undefined
+  const c = (changes as Record<string, unknown>).productType
+  if (!c || typeof c !== 'object') return undefined
+  const after = (c as { after?: unknown }).after
+  return after == null ? null : isProductType(after) ? after : undefined
 }
 
 /** (occurred_on ASC, id ASC) — 같은 일자 순서는 id (불변식 3) */
@@ -385,6 +411,7 @@ export function foldEvents(events: readonly FoldEvent[], illegal: (ev: FoldEvent
           recoverReasonId: null,
           lastHospitalCode: null,
           replacedById: null,
+          productType: ev.productType ?? null, // 자리의 판매 조건은 새 REGISTER가 다시 정한다(회수 전 값 승계 없음)
         }
         break
       case 'MOVE_WARD':
@@ -402,8 +429,11 @@ export function foldEvents(events: readonly FoldEvent[], illegal: (ev: FoldEvent
           replacedById: ev.relatedDeviceId,
         }
         break
-      case 'CORRECT':
-        continue // 식별 컬럼만 — 프로젝션·last_event 미반영
+      case 'CORRECT': {
+        const pt = productTypeAfterOf(ev.changes)
+        if (pt !== undefined) s = { ...s, productType: pt }
+        continue // 식별 컬럼만 — 프로젝션·last_event 미반영(상품유형 정정만 배치 값 갱신)
+      }
     }
     s.lastEventType = ev.eventType
     s.lastEventOn = on
@@ -497,6 +527,8 @@ export interface DeviceRow {
   lastEventOn: Date | null
   /** 교체기 유닛 id */
   replacedById: number | null
+  /** 상품유형(일반/라이트) — 배치 속성(B-22), null=미지정. RECOVERED 행은 회수 전 마지막 값 */
+  productType: string | null
   createdAt: Date
   updatedAt: Date
   unitCreatedAt: Date
@@ -529,6 +561,7 @@ export function flattenDevice(unit: UnitRow, placement: PlacementRow): DeviceRow
     lastEventType: placement.lastEventType,
     lastEventOn: placement.lastEventOn,
     replacedById: placement.replacedById,
+    productType: placement.productType,
     createdAt: placement.createdAt,
     updatedAt: placement.updatedAt,
     unitCreatedAt: unit.createdAt,
@@ -551,6 +584,8 @@ export interface EventInput {
   source: RegistrySource
   importBatchId?: number | null
   changes?: Prisma.InputJsonValue | null
+  /** 이벤트 시점 상품유형 스냅샷(REGISTER=지정값·MOVE/RECOVER=당시 배치 값·CORRECT=변경 후 값) */
+  productType?: string | null
   actor: RegistryActor
 }
 
@@ -571,6 +606,7 @@ function toEventData(input: EventInput): Prisma.HospitalDeviceEventUncheckedCrea
     source: input.source,
     importBatchId: input.importBatchId ?? null,
     changes: input.changes ?? undefined,
+    productType: input.productType ?? null,
     actorId: input.actor.userId,
     actorName: input.actor.name,
   }
@@ -636,6 +672,7 @@ export interface ProjectionColumns {
   lastEventType: string | null
   lastEventOn: Date | null
   replacedById: number | null
+  productType: string | null
 }
 
 export function projectionData(s: FoldState): ProjectionColumns {
@@ -650,6 +687,7 @@ export function projectionData(s: FoldState): ProjectionColumns {
     lastEventType: s.lastEventType,
     lastEventOn: s.lastEventOn ? ymdToDate(s.lastEventOn) : null,
     replacedById: s.replacedById,
+    productType: s.productType,
   }
 }
 
@@ -988,6 +1026,54 @@ export function resolveUsageTypeInput(
   if (matched) return matched
   if (defaultId != null) return types.find((x) => x.id === Number(defaultId)) ?? null
   return null
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 상품유형(일반/라이트) — 배치 속성(B-22, 2026-09-01). 기본값은 병원 계약완료 딜의 상품유형 분포(§9.1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 병원의 계약완료 딜을 `sales_deals.product_type`으로 묶어 상품유형 문맥을 만든다(§9.1 per-type expected 공용).
+ * 어휘 밖의 값(NULL 등)은 types에서 제외하되 deals 수에는 포함한다.
+ */
+export async function getHospitalProductTypeContext(hospitalCode: string, client: DbClient = prisma): Promise<ProductTypeContext> {
+  const rows = await client.$queryRaw<{ product_type: string | null; deals: number; devices: number | null }[]>`
+    SELECT sd.product_type, count(*)::int AS deals, sum(coalesce(sd.daewoong_device_count, 0))::int AS devices
+      FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
+     WHERE sd.hospital_code = ${hospitalCode} AND sc.category = ${DEAL_STATUS_CATEGORY} AND sc.name = ${DEAL_STATUS_CONTRACTED}
+     GROUP BY 1`
+  const byType = PRODUCT_TYPES.flatMap((t) => {
+    const r = rows.find((x) => x.product_type === t)
+    return r ? [{ type: t, deals: Number(r.deals), devices: Number(r.devices ?? 0) }] : []
+  })
+  const types = byType.map((b) => b.type)
+  return {
+    types,
+    default: types.length === 1 ? types[0] : null,
+    mixed: types.length >= 2,
+    deals: rows.reduce((s, r) => s + Number(r.deals), 0),
+    byType,
+  }
+}
+
+/** 상품유형 입력(별칭 매칭) — 빈 값 null, 미매칭 400 */
+export function parseProductTypeInput(input: string | null | undefined): ProductType | null {
+  const m = matchProductType(input)
+  if (m === undefined) throw new RegistryError(400, PRODUCT_TYPE_INVALID_MESSAGE)
+  return m
+}
+
+/**
+ * 행 단위 상품유형 해석 — `explicit`(입력 별칭, 미매칭 400) > 폼 기본값 > 병원 문맥 규칙(`resolveProductTypeDefault`).
+ * 오류(혼합 병원 + 미지정)는 던지지 않고 결과에 실어 호출부가 400/판정 error로 바꾼다.
+ */
+export function resolveProductTypeInput(
+  ctx: ProductTypeContext | null,
+  input: { productTypeInput?: string | null; productType?: ProductType | null },
+  formDefault: ProductType | null | undefined
+): ProductTypeResolution {
+  const explicit = input.productType ?? parseProductTypeInput(input.productTypeInput) ?? formDefault ?? null
+  return resolveProductTypeDefault(ctx, explicit)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

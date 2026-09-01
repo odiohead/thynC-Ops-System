@@ -59,7 +59,10 @@ const {
   flattenDevice,
   loadTrackedModels,
   loadUsageTypes,
+  getHospitalProductTypeContext,
+  countReplacements,
 } = reg
+const shared = await import('../lib/deviceRegistryShared')
 const access = await import('../lib/deviceRegistryAccess')
 const auth = await import('../lib/auth')
 
@@ -118,19 +121,21 @@ async function maxIds() {
 
 const pre = { counts: await counts(), max: await maxIds() }
 
-type HospRow = { hospital_code: string; hospital_name: string; deals: number; expected: number }
+type HospRow = { hospital_code: string; hospital_name: string; deals: number; expected: number; pt_kinds: number }
 const candidates = await prisma.$queryRaw<HospRow[]>`
-  WITH dl AS (SELECT sd.hospital_code, count(*)::int c, sum(coalesce(sd.daewoong_device_count,0))::int s
+  WITH dl AS (SELECT sd.hospital_code, count(*)::int c, sum(coalesce(sd.daewoong_device_count,0))::int s,
+                     count(DISTINCT sd.product_type) FILTER (WHERE sd.product_type IN ('일반','라이트'))::int k
                 FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
                WHERE sc.category = 'SALES_DEAL_STATUS' AND sc.name = '계약완료' GROUP BY 1)
-  SELECT h.hospital_code, h.hospital_name, coalesce(dl.c,0) deals, coalesce(dl.s,0) expected
+  SELECT h.hospital_code, h.hospital_name, coalesce(dl.c,0) deals, coalesce(dl.s,0) expected, coalesce(dl.k,0) pt_kinds
     FROM hospitals h LEFT JOIN dl ON dl.hospital_code = h.hospital_code
    WHERE h.status = '운영'
      AND NOT EXISTS (SELECT 1 FROM hospital_wards w WHERE w.hospital_code = h.hospital_code)
      AND NOT EXISTS (SELECT 1 FROM hospital_devices d WHERE d.hospital_code = h.hospital_code OR d.last_hospital_code = h.hospital_code)
      AND NOT EXISTS (SELECT 1 FROM hospital_device_events e WHERE e.hospital_code = h.hospital_code)
    ORDER BY coalesce(dl.c,0) DESC, coalesce(dl.s,0) DESC, h.hospital_code`
-const h1 = candidates.find((c) => c.deals > 0)
+// H1은 상품유형 단일(혼합이면 미지정 등록이 400이라 기존 시나리오가 깨진다 — 혼합 규칙은 [1c]에서 문맥 주입으로 검증)
+const h1 = candidates.find((c) => c.deals > 0 && c.pt_kinds < 2)
 const h3 = candidates.find((c) => c.deals === 0)
 const h2 = candidates.find((c) => c !== h1 && c !== h3)
 if (!h1 || !h2 || !h3) {
@@ -364,6 +369,162 @@ async function main() {
   ok(luNone.total >= 1 && luNone.data.every((r) => r.usageTypeId === null && r.usageType === null), 'listUnits usage=none 필터(미지정)')
   const luSale = await listUnits({ hospital: H1, status: 'all', usage: 'SALE' }, { page: 1, limit: 50 })
   ok(luSale.total >= 1 && luSale.data.every((r) => r.usageType?.value === 'SALE'), 'listUnits usage=SALE 필터')
+
+
+  section('[1c] 상품유형(일반/라이트) — 배치 속성(B-22) · 기본값 규칙 · 스냅샷 · 교체 상속 · 일괄 지정 · 정정')
+  {
+    // 순수 규칙 함수 — 가짜 문맥
+    const mk = (types: ('일반' | '라이트')[], deals = types.length): shared.ProductTypeContext => ({ types, default: types.length === 1 ? types[0] : null, mixed: types.length >= 2, deals, byType: types.map((t) => ({ type: t, deals: 1, devices: 10 })) })
+    const single = shared.resolveProductTypeDefault(mk(['라이트']), null)
+    const none = shared.resolveProductTypeDefault(mk([], 0), null)
+    const mixed = shared.resolveProductTypeDefault(mk(['일반', '라이트']), null)
+    const mixedExplicit = shared.resolveProductTypeDefault(mk(['일반', '라이트']), '일반')
+    const foreign = shared.resolveProductTypeDefault(mk(['일반']), '라이트')
+    ok(single.productType === '라이트' && single.fromDefault && !single.error && !single.warning, '규칙: 1종 → 기본값(라이트)')
+    ok(none.productType === null && !none.error && none.warning === shared.PRODUCT_TYPE_NO_DEAL_WARNING, '규칙: 딜 0건 → 미지정 + 경고')
+    ok(mixed.productType === null && mixed.error === shared.PRODUCT_TYPE_REQUIRED_MESSAGE, '규칙: 혼합 + 미지정 → 오류(필수)')
+    ok(mixedExplicit.productType === '일반' && !mixedExplicit.error && !mixedExplicit.warning, '규칙: 혼합 + 명시 → 그대로')
+    ok(foreign.productType === '라이트' && !foreign.error && !!foreign.warning, '규칙: 계약 딜에 없는 유형 명시 → 경고만')
+    ok(shared.matchProductType('lite') === '라이트' && shared.matchProductType(' LIGHT ') === '라이트' && shared.matchProductType('standard') === '일반' && shared.matchProductType('일 반') === '일반' && shared.matchProductType('') === null && shared.matchProductType('프로') === undefined, 'matchProductType 별칭(lite/LIGHT/standard/공백) · 빈 값 null · 미매칭 undefined')
+    const lines = shared.parseSerialLines(`${S(63)}\t6병동\t평가용\t라이트\t각인 12\n${S(64)}\t7병동\tlite`)
+    ok(lines[0].usageInput === '평가용' && lines[0].productTypeInput === '라이트' && lines[0].memo === '각인 12' && lines[1].productTypeInput === 'lite' && lines[1].memo === undefined, 'parseSerialLines — 3열 이후 상품유형 셀 분리(용도·메모와 공존)')
+  }
+  const ptH1 = await getHospitalProductTypeContext(H1)
+  const ptH2 = await getHospitalProductTypeContext(H2)
+  const ptH3 = await getHospitalProductTypeContext(H3)
+  {
+    const rows = await prisma.$queryRaw<{ product_type: string | null; c: bigint }[]>`
+      SELECT sd.product_type, count(*) c FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
+       WHERE sd.hospital_code = ${H1} AND sc.category = 'SALES_DEAL_STATUS' AND sc.name = '계약완료' GROUP BY 1`
+    const kinds = rows.filter((r) => r.product_type === '일반' || r.product_type === '라이트').map((r) => r.product_type)
+    ok(ptH1.deals === h1!.deals && ptH1.types.length === kinds.length && ptH1.mixed === (kinds.length >= 2) && (ptH1.mixed ? ptH1.default === null : ptH1.default === (kinds[0] ?? null)), `getHospitalProductTypeContext(H1) = 딜 ${ptH1.deals}건 · 유형 ${ptH1.types.join('/') || '없음'} · 기본 ${ptH1.default ?? '없음'}`, ptH1)
+    ok(ptH3.deals === 0 && ptH3.types.length === 0 && ptH3.default === null && !ptH3.mixed, 'getHospitalProductTypeContext(H3) — 딜 0건')
+  }
+  console.log(`  H1 상품유형 문맥: ${JSON.stringify(ptH1)} · H2: ${ptH2.types.join('/') || '없음'}${ptH2.mixed ? '(혼합)' : ''}`)
+  const MIXED_CTX: shared.ProductTypeContext = { types: ['일반', '라이트'], default: null, mixed: true, deals: 2, byType: [{ type: '일반', deals: 1, devices: 50 }, { type: '라이트', deals: 1, devices: 50 }] }
+  const LITE_CTX: shared.ProductTypeContext = { types: ['라이트'], default: '라이트', mixed: false, deals: 1, byType: [{ type: '라이트', deals: 1, devices: 50 }] }
+  // 등록 — 명시(별칭) · 기본값 규칙(H1 실제 딜) · 오류
+  const rP = await registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(63), productType: 'lite', wardName: '6병동' }, { serialInput: S(64), productType: '일반' }])
+  ok(rP.created.length === 2 && rP.created.find((c) => c.serialNo === S(63))!.productType === '라이트' && rP.created.find((c) => c.serialNo === S(64))!.productType === '일반', '등록 productType 명시(별칭 lite → 라이트) → RegisteredRef.productType')
+  const p63 = (await dev({ serialNo: S(63) }))!
+  const ev63 = (await prisma.hospitalDeviceEvent.findUnique({ where: { id: rP.created.find((c) => c.serialNo === S(63))!.eventId } }))!
+  ok(p63.productType === '라이트' && ev63.productType === '라이트' && ev63.eventType === 'REGISTER', '배치 행 product_type + REGISTER 이벤트 스냅샷 = 라이트')
+  await expectErr('등록 알 수 없는 상품유형', () => registerDevices(ctx(H1), [{ serialInput: S(65), productType: '프로' }]), 400, '상품유형 값이 올바르지 않습니다 (일반/라이트)')
+  if (ptH1.mixed) {
+    await expectErr('혼합 병원(H1 실제) 미지정 등록 → 400 필수', () => registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(65) }]), 400, shared.PRODUCT_TYPE_REQUIRED_MESSAGE)
+    const rD = await registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(65), productType: '일반' }])
+    ok(rD.created[0].productType === '일반', '혼합 병원 명시 등록 OK')
+  } else {
+    const rD = await registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(65) }])
+    ok(rD.created[0].productType === (ptH1.default ?? null) && (await dev({ serialNo: S(65) }))!.productType === (ptH1.default ?? null), `등록 미지정 → 병원 딜 기본값(${ptH1.default ?? '미지정'})`, rD.warnings)
+    ok(ptH1.deals === 0 ? rD.warnings.includes(shared.PRODUCT_TYPE_NO_DEAL_WARNING) : !rD.warnings.includes(shared.PRODUCT_TYPE_NO_DEAL_WARNING), '기본값 적용 시 경고 유무(딜 0건일 때만)')
+  }
+  // 주입 문맥 — 혼합 병원 시나리오(실데이터 수정 없음)
+  await expectErr('혼합 문맥 주입 + 미지정 → 400 필수', () => registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(66) }], { productTypeContextOverride: MIXED_CTX }), 400, shared.PRODUCT_TYPE_REQUIRED_MESSAGE)
+  await expectErr('혼합 문맥 다건 — 하나라도 미지정이면 400', () => registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(66), productType: '일반' }, { serialInput: S(67) }], { productTypeContextOverride: MIXED_CTX }), 400, shared.PRODUCT_TYPE_REQUIRED_MESSAGE)
+  ok((await prisma.deviceUnit.count({ where: { serialNo: { in: [S(66), S(67)] } } })) === 0, '400 시 유닛·배치 미생성(롤백)')
+  const rM = await registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(66), productType: '일반' }, { serialInput: S(67), productType: '라이트' }], { productTypeContextOverride: MIXED_CTX })
+  ok(rM.created.length === 2 && rM.created.map((c) => c.productType).sort().join() === '라이트,일반', '혼합 문맥 + 전부 명시 → 201 (한 병원에 일반·라이트 공존)')
+  const rL = await registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(68) }], { productTypeContextOverride: LITE_CTX })
+  ok(rL.created[0].productType === '라이트' && rL.warnings.every((w) => !w.includes('상품유형')), '라이트 단일 문맥 주입 → 기본값 라이트(경고 없음)')
+  const rZ = await registerDevices(ctx(H3, '2026-08-01'), [{ serialInput: S(69) }])
+  ok(rZ.created[0].productType === null && rZ.warnings.includes(shared.PRODUCT_TYPE_NO_DEAL_WARNING), 'H3(딜 0건) 미지정 등록 → null + 경고')
+  // 스냅샷 — 이동·회수, 회수 후 배치 행은 마지막 값 보존, 재등록은 새 병원 규칙
+  const mvP = await moveDeviceWard(ctx(null, '2026-08-05'), { deviceId: p63.id, toWardName: '7병동' })
+  ok(mvP.event.productType === '라이트', 'MOVE_WARD 이벤트 스냅샷 = 배치 상품유형(라이트)')
+  const rcP = await recoverDevice(ctx(null, '2026-08-10'), { deviceId: p63.id, reasonCodeId: defect.id })
+  ok(rcP.event.productType === '라이트' && rcP.device.status === 'RECOVERED' && rcP.device.productType === '라이트', 'RECOVER 스냅샷 라이트 · 회수 후 배치 행은 마지막 값(회수 전 라이트) 보존')
+  const luRecPt = await listUnits({ hospital: H1, status: 'recovered', productType: '라이트' }, { page: 1, limit: 10 })
+  ok(luRecPt.data.some((r) => r.id === p63.id && r.productType === '라이트'), '회수됨 목록에서도 productType(회수 전 값) 노출·필터')
+  const expectH2 = shared.resolveProductTypeDefault(ptH2, null)
+  if (expectH2.error) {
+    await expectErr('타 병원(H2, 혼합) 재등록 미지정 → 400', () => registerDevices(ctx(H2, '2026-08-20'), [{ serialInput: S(63) }]), 400, shared.PRODUCT_TYPE_REQUIRED_MESSAGE)
+    const rr = await registerDevices(ctx(H2, '2026-08-20'), [{ serialInput: S(63), productType: '일반' }])
+    ok(rr.reregistered[0].productType === '일반' && (await dev({ id: p63.id }))!.productType === '일반', '재등록은 새 REGISTER가 상품유형을 다시 정한다(회수 전 라이트 → 일반)')
+  } else {
+    const rr = await registerDevices(ctx(H2, '2026-08-20'), [{ serialInput: S(63) }])
+    ok(rr.reregistered[0].productType === expectH2.productType && (await dev({ id: p63.id }))!.productType === expectH2.productType, `재등록은 회수 전 값을 승계하지 않고 새 병원 규칙(${expectH2.productType ?? '미지정'})을 따른다`, rr.warnings)
+  }
+  ok(await projectionEqualsRebuild(p63.id) && (await dev({ id: p63.id }))!.productType === (expectH2.error ? '일반' : expectH2.productType), 'fold: REGISTER 이벤트 product_type → 배치 행(rebuild 멱등)')
+  // 교체 상속
+  const rpP = await replaceDevice(ctx(H1, '2026-08-15'), { oldDeviceId: (await dev({ serialNo: S(67) }))!.id, newSerial: S(72), productType: '일반' })
+  ok(rpP.productType === '라이트' && rpP.newDevice.productType === '라이트' && rpP.recoverEvent!.productType === '라이트' && rpP.registerEvent!.productType === '라이트' && rpP.warnings.some((w) => w.includes('상속')), '교체: 신 배치는 구 배치 상품유형(라이트) 상속 · 지정값(일반)은 무시+경고 · RECOVER/REGISTER 스냅샷', rpP.warnings)
+  await expectErr('교체 소급 경로 + 혼합 문맥 + 미지정 → 400', () => replaceDevice(ctx(H1, '2026-08-15'), { oldSerial: S(73), oldWardName: '6병동', newSerial: S(74), productTypeContextOverride: MIXED_CTX }), 400, shared.PRODUCT_TYPE_REQUIRED_MESSAGE)
+  const rpB = await replaceDevice(ctx(H1, '2026-08-15'), { oldSerial: S(73), oldWardName: '6병동', newSerial: S(74), productType: 'lite', productTypeContextOverride: MIXED_CTX })
+  ok(rpB.backfillEvent!.productType === '라이트' && rpB.recoverEvent!.productType === '라이트' && rpB.registerEvent!.productType === '라이트' && rpB.newDevice.productType === '라이트' && rpB.oldDevice.productType === '라이트', '교체 소급 경로: 입력 상품유형(lite)이 구 소급 REGISTER·RECOVER·신 REGISTER 전부에 적용')
+  // 일괄 지정
+  const t66 = (await dev({ serialNo: S(66) }))! // 일반
+  const t72 = (await dev({ serialNo: S(72) }))! // 라이트(상속)
+  const bk = await bulkDeviceAction(ctx(H1, '2026-08-16'), { action: 'SET_PRODUCT_TYPE', deviceIds: [t66.id, t72.id], productType: '라이트' })
+  ok(bk.events.length === 1 && bk.events[0].eventType === 'CORRECT' && bk.events[0].deviceId === t66.id && bk.events[0].productType === '라이트' && bk.skipped.length === 1 && bk.skipped[0].deviceId === t72.id, 'bulk SET_PRODUCT_TYPE — 바뀌는 기기만 CORRECT(1건) · 이미 같은 값은 skipped', bk.skipped)
+  const bkCh = bk.events[0].changes as { productType: { before: string | null; after: string | null } }
+  ok(bkCh.productType.before === '일반' && bkCh.productType.after === '라이트' && (await dev({ id: t66.id }))!.productType === '라이트', 'CORRECT changes.productType {before 일반, after 라이트} + 배치 행 갱신')
+  await rebuildUnitProjection(prisma, t66.id)
+  ok((await dev({ id: t66.id }))!.productType === '라이트', 'fold가 CORRECT changes.productType.after를 반영(rebuild 후에도 라이트 유지)')
+  await expectErr('bulk SET_PRODUCT_TYPE 전부 같은 값 → 409', () => bulkDeviceAction(ctx(H1), { action: 'SET_PRODUCT_TYPE', deviceIds: [t66.id, t72.id], productType: '라이트' }), 409, '이미 상품유형')
+  await expectErr('bulk SET_PRODUCT_TYPE 잘못된 값', () => bulkDeviceAction(ctx(H1), { action: 'SET_PRODUCT_TYPE', deviceIds: [t66.id], productType: 'PRO' }), 400, '상품유형 값이')
+  const bkNull = await bulkDeviceAction(ctx(H1, '2026-08-16'), { action: 'SET_PRODUCT_TYPE', deviceIds: [t66.id], productType: null })
+  ok(bkNull.events.length === 1 && (await dev({ id: t66.id }))!.productType === null, 'bulk SET_PRODUCT_TYPE null → 미지정')
+  // 정정 · 취소 복원
+  const cP = await correctDevice(ctx(null, '2026-08-17'), { deviceId: t66.id, changes: { productType: '일반' } })
+  ok(cP.event.eventType === 'CORRECT' && cP.event.productType === '일반' && (cP.changes.productType as { before: unknown }).before === null && (cP.changes.productType as { after: unknown }).after === '일반' && cP.device.productType === '일반', 'correctDevice productType → CORRECT changes + 스냅샷 = after')
+  await expectErr('correctDevice 변경 없음(같은 상품유형)', () => correctDevice(ctx(null), { deviceId: t66.id, changes: { productType: '일반' } }), 400, '변경 사항')
+  const cPc = await cancelLastEvent(ctx(null), { eventId: cP.event.id })
+  ok(cPc.restored != null && (await dev({ id: t66.id }))!.productType === null, 'CORRECT(상품유형) 취소 → before(미지정) 복원')
+  await correctDevice(ctx(null, '2026-08-17'), { deviceId: t66.id, changes: { productType: '일반' } })
+  // 임포트 미리보기·실행
+  const pvP = await previewRows(
+    H1,
+    [
+      { row: 1, serialInput: S(75), productTypeInput: 'lite' },
+      { row: 2, serialInput: S(76) },
+      { row: 3, serialInput: S(77), productTypeInput: '프로' },
+      { row: 4, serialInput: S(66) },
+    ],
+    { wardMode: 'fixed', mode: 'REGISTER', occurredOn: '2026-08-20', productTypeContextOverride: MIXED_CTX }
+  )
+  ok(pvP.rows[0].productType === '라이트' && pvP.rows[0].status === 'warn' && !pvP.rows[0].messages.includes(shared.PRODUCT_TYPE_REQUIRED_MESSAGE), '미리보기 행 상품유형 열(lite → 라이트) — 혼합 문맥에서도 필수 오류 없음(병동 미지정 warn만)')
+  ok(pvP.rows[1].productType === null && pvP.rows[1].status === 'error' && pvP.rows[1].messages.includes(shared.PRODUCT_TYPE_REQUIRED_MESSAGE), '미리보기 혼합 문맥 + 미지정 행 → error 필수 메시지')
+  ok(pvP.rows[2].status === 'error' && pvP.rows[2].messages.some((m) => m.includes('상품유형 값이 올바르지 않습니다')), '미리보기 알 수 없는 상품유형 → error')
+  ok(pvP.rows[3].status === 'skip' && !pvP.rows[3].messages.includes(shared.PRODUCT_TYPE_REQUIRED_MESSAGE), '이미 배치 중(skip) 행은 상품유형 규칙 무시')
+  ok(pvP.summary.productTypeContext.mixed === true, '미리보기 summary.productTypeContext(주입 문맥) 노출')
+  const pvP2 = await previewRows(H1, [{ row: 1, serialInput: S(76) }], { wardMode: 'fixed', mode: 'REGISTER', occurredOn: '2026-08-20', productType: '일반', productTypeContextOverride: MIXED_CTX })
+  ok(pvP2.rows[0].productType === '일반' && pvP2.rows[0].status !== 'error', '미리보기 폼 기본 상품유형(일반)이 혼합 문맥 오류를 해소')
+  const pvP3 = await previewRows(H3, [{ row: 1, serialInput: S(78) }], { wardMode: 'fixed', mode: 'REGISTER', occurredOn: '2026-08-20' })
+  ok(pvP3.rows[0].productType === null && pvP3.rows[0].status === 'warn' && pvP3.rows[0].messages.includes(shared.PRODUCT_TYPE_NO_DEAL_WARNING) && pvP3.summary.productTypeContext.deals === 0, 'H3(딜 0건) 미리보기 → warn 미지정')
+  await expectErr('미리보기 기본 상품유형 오류', () => previewRows(H1, [{ row: 1, serialInput: S(78) }], { wardMode: 'fixed', mode: 'REGISTER', occurredOn: today, productType: '프로' }), 400, '기본 상품유형')
+  const impP = await importBatch(ctx(H1, '2026-08-20'), { rows: [{ row: 1, serialInput: S(75), productTypeInput: 'lite' }, { row: 2, serialInput: S(76) }], sourceKind: 'PASTE', mode: 'REGISTER', defaults: { wardMode: 'fixed', productType: '일반' } })
+  ok(impP.batch.registeredCount === 2 && (await dev({ serialNo: S(75) }))!.productType === '라이트' && (await dev({ serialNo: S(76) }))!.productType === '일반', '임포트 실행 — 행 상품유형(lite) > 폼 기본(일반), 배치 행 반영')
+  // 요약 매트릭스 · 교체 집계 · 목록 필터
+  const sumP = (await getHospitalDeviceSummary(H1))!
+  const ecgP = sumP.models.find((m) => m.onpremDeviceType === 1)!
+  const cells = Object.values(ecgP.byProductType)
+  ok(cells.length >= 2 && cells.reduce((s, c) => s + c!.active, 0) === ecgP.active && cells.reduce((s, c) => s + c!.activeForCompare, 0) === ecgP.activeForCompare, '요약 byProductType — 유형별 active/activeForCompare 합 = 모델 합계', ecgP.byProductType)
+  ok(ecgP.byProductType['라이트']!.active >= 2 && ecgP.byProductType['일반']!.active >= 1 && (ecgP.byProductType['미지정']?.active ?? 0) >= 0, '요약 byProductType 일반·라이트 키 존재')
+  for (const t of ptH1.types) ok(ecgP.byProductType[t]!.expected === ptH1.byType.find((b) => b.type === t)!.devices && (ecgP.compare !== 'hard' || ecgP.byProductType[t]!.diff === ecgP.byProductType[t]!.activeForCompare - ecgP.byProductType[t]!.expected!), `요약 byProductType.${t}.expected = 그 유형 딜 Σ(§9.1) · diff`)
+  ok(sumP.productTypeMixed === true && sumP.productTypeContext.deals === ptH1.deals && sumP.productTypes.length >= 2 && sumP.productTypes.every((p) => typeof p.activeForCompare === 'number'), '요약 productTypeMixed(배치에 상품유형 있음) · productTypeContext · productTypes 축')
+  const replP = await countReplacements(H1)
+  const repl30P = await countReplacements(H1, { from: '2026-08-15', to: '2026-08-15' })
+  ok(replP.total >= 2 && replP.byType['라이트'] >= 2 && repl30P.total >= 2 && sumP.replacements.total === replP.total && sumP.replacements.byType['라이트'] === replP.byType['라이트'], '교체 집계 — RECOVER 스냅샷 기준(라이트 ≥2: 교체·소급 교체), 기간 필터, 요약과 일치', { replP, repl30P, sum: sumP.replacements })
+  const luLite = await listUnits({ hospital: H1, status: 'all', productType: '라이트' }, { page: 1, limit: 50 })
+  ok(luLite.total >= 3 && luLite.data.every((r) => r.productType === '라이트'), 'listUnits productType=라이트 필터')
+  const luNonePt = await listUnits({ hospital: H1, status: 'all', productType: 'none' }, { page: 1, limit: 50 })
+  ok(luNonePt.data.every((r) => r.productType === null), 'listUnits productType=none 필터')
+  const evP = await listEvents({ hospital: H1, device: t66.id }, { page: 1, limit: 20 })
+  ok(evP.data.every((e) => 'productType' in e) && evP.data.some((e) => e.eventType === 'CORRECT' && e.productType === '일반') && evP.data[0].device.productType === '일반', '이벤트 목록 행 productType 스냅샷 + device.productType(현재)')
+  // 실데이터 혼합 병원(있으면) — 읽기만
+  const realMixed = await prisma.$queryRaw<{ hospital_code: string }[]>`
+    SELECT sd.hospital_code FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
+     WHERE sc.category = 'SALES_DEAL_STATUS' AND sc.name = '계약완료' AND sd.product_type IN ('일반','라이트')
+     GROUP BY 1 HAVING count(DISTINCT sd.product_type) >= 2 ORDER BY 1 LIMIT 1`
+  if (realMixed[0]) {
+    const mc = await getHospitalProductTypeContext(realMixed[0].hospital_code)
+    const covM = await getGlobalCoverage({ q: realMixed[0].hospital_code, limit: 5 })
+    const rowM = covM.data.find((r) => r.hospitalCode === realMixed[0].hospital_code)
+    ok(mc.mixed && mc.default === null && mc.types.length === 2 && !!rowM && rowM.productTypeMixed && typeof rowM.unassignedProductType === 'number' && covM.totals.mixedProductTypeHospitals >= 1, `실데이터 혼합 병원 ${realMixed[0].hospital_code} — 문맥 mixed · 커버리지 productTypeMixed 플래그`, { mc, rowM: rowM && [rowM.productTypeMixed, rowM.unassignedProductType], totals: covM.totals.mixedProductTypeHospitals })
+  } else console.log('  (실데이터 혼합 병원 없음 — 주입 문맥으로만 검증)')
+  const covH1 = (await getGlobalCoverage({ q: H1, limit: 5 })).data.find((r) => r.hospitalCode === H1)!
+  ok(covH1.productTypeMixed === ptH1.mixed && (ptH1.mixed ? covH1.unassignedProductType >= 1 : covH1.unassignedProductType === 0), '커버리지 H1 productTypeMixed = 문맥 · unassignedProductType(혼합일 때만 계수)', covH1)
 
   section('[2] 소급·미래·불법 전이')
   await expectErr('미래 일자', () => moveDeviceWard(ctx(H2, '2099-01-01'), { deviceId: d1.id, toWardName: 'X' }), 400, '미래')
@@ -883,6 +1044,29 @@ async function main() {
   ok(r.status === 400 && /용도 값이/.test(r.json.error), 'PATCH 없는 용도 id → 400')
   r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id80}`, { ...UW, params: { id: String(id80) }, body: { usageTypeId: null } })
   ok(r.status === 200 && r.json.device.usageTypeId === null && r.json.changes.usageTypeId.before === evalT.id, 'PATCH 용도 null → 미지정(CORRECT)')
+  // 상품유형(B-22) — write(USER+) PATCH · 목록 필터 · bulk SET_PRODUCT_TYPE · register/preview pass-through
+  r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id80}`, { ...UW, params: { id: String(id80) }, body: { productType: 'lite' } })
+  ok(r.status === 200 && r.json.event.eventType === 'CORRECT' && r.json.changes.productType.after === '라이트' && r.json.device.productType === '라이트' && r.json.event.productType === '라이트', 'PATCH 상품유형 USER(write) → 200 CORRECT(별칭 lite → 라이트)', r.json)
+  r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id80}`, { ...UW, params: { id: String(id80) }, body: { productType: '프로' } })
+  ok(r.status === 400 && r.json.error === '상품유형 값이 올바르지 않습니다 (일반/라이트)', 'PATCH 잘못된 상품유형 → 400')
+  r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id80}`, { ...U, params: { id: String(id80) }, body: { productType: '일반', serialNo: S(80) } })
+  ok(r.status === 403, 'PATCH 상품유형 + 식별 키(시리얼) USER → 403(admin)')
+  r = await call(h(R.units.GET), 'GET', `${B}/api/devices/units?hospital=${H1}&productType=라이트&q=${S(80)}`, A)
+  ok(r.status === 200 && r.json.total === 1 && r.json.data[0].productType === '라이트', 'units ?productType=라이트 필터')
+  r = await call(h(R.units.GET), 'GET', `${B}/api/devices/units?hospital=${H1}&productType=bogus`, A)
+  ok(r.status === 400, 'units 잘못된 productType → 400')
+  r = await call(h(R.bulk.POST), 'POST', `${B}/api/devices/units/bulk`, { ...UW, body: { action: 'SET_PRODUCT_TYPE', deviceIds: [id80, id81], productType: '일반', occurredOn: today } })
+  ok(r.status === 201 && r.json.events.length >= 1 && r.json.events.every((e: { eventType: string; productType: string }) => e.eventType === 'CORRECT' && e.productType === '일반'), 'bulk SET_PRODUCT_TYPE USER → 201 CORRECT', r.json)
+  r = await call(h(R.bulk.POST), 'POST', `${B}/api/devices/units/bulk`, { ...UW, body: { action: 'SET_PRODUCT_TYPE', deviceIds: [id80] } })
+  ok(r.status === 400 && /상품유형/.test(r.json.error), 'bulk SET_PRODUCT_TYPE productType 누락 → 400')
+  r = await call(h(R.register.POST), 'POST', `${B}/api/hospitals/${H1}/devices/register?preview=true`, { ...A, ...P1, body: { items: [{ serial: S(92), productType: 'lite' }, S(93)], occurredOn: '2026-08-01', productType: '일반' } })
+  ok(r.status === 200 && r.json.rows[0].productType === '라이트' && r.json.rows[1].productType === '일반' && r.json.productTypeContext && typeof r.json.productTypeContext.mixed === 'boolean' && r.json.summary.productTypeContext.deals === ptH1.deals, 'register preview — 항목 productType > 공통 productType · 응답 productTypeContext', r.json.productTypeContext)
+  r = await call(h(R.register.POST), 'POST', `${B}/api/hospitals/${H1}/devices/register`, { ...A, ...P1, body: { items: [S(92)], occurredOn: '2026-08-01', productType: '라이트' } })
+  ok(r.status === 201 && r.json.created[0].productType === '라이트', 'register 실행 body.productType → created[].productType')
+  r = await call(h(R.register.POST), 'POST', `${B}/api/hospitals/${H1}/devices/register`, { ...A, ...P1, body: { items: [S(93)], productType: '프로' } })
+  ok(r.status === 400 && /상품유형 값이 올바르지 않습니다/.test(r.json.error), 'register 잘못된 productType → 400')
+  r = await call(h(R.hSummary.GET), 'GET', `${B}/api/hospitals/${H1}/devices/summary`, { ...V, ...P1 })
+  ok(r.status === 200 && r.json.productTypeContext && Array.isArray(r.json.productTypes) && r.json.replacements && typeof r.json.replacements.total === 'number' && r.json.models.every((m: { byProductType: unknown }) => typeof m.byProductType === 'object'), 'hospital summary — productTypeContext·productTypes·replacements·models[].byProductType')
   r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id80}`, { ...A, params: { id: String(id80) }, body: { macAddress: '11:22' } })
   ok(r.status === 200 && r.json.event.eventType === 'CORRECT' && r.json.changes.macAddress.after === '11:22', 'PATCH 식별 보정 ADMIN → CORRECT')
   r = await call(h(R.move.POST), 'POST', `${B}/api/devices/units/${id80}/move`, { ...A, params: { id: String(id80) }, body: { toWardName: 'RT-B', occurredOn: '2026-08-05' } })
@@ -896,7 +1080,7 @@ async function main() {
   r = await call(h(R.recover.POST), 'POST', `${B}/api/devices/units/${id80}/recover`, { ...A, params: { id: String(id80) }, body: { reasonCodeId: defect.id } })
   ok(r.status === 409, 'recover 재회수 → 409')
   r = await call(h(R.events.GET), 'GET', `${B}/api/devices/events?device=${id80}`, A)
-  ok(r.status === 200 && r.json.total === 6 && r.json.data[0].eventType === 'CORRECT' && r.json.data[3].eventType === 'RECOVER' && 'usageType' in r.json.data[0].device, 'events?device= (REGISTER·CORRECT×3·MOVE·RECOVER, 최신순 — CORRECT는 오늘, device.usageType 포함)')
+  ok(r.status === 200 && r.json.total === 8 && r.json.data[0].eventType === 'CORRECT' && r.json.data[5].eventType === 'RECOVER' && 'usageType' in r.json.data[0].device && 'productType' in r.json.data[0], 'events?device= (REGISTER·CORRECT×5(용도3·상품유형2)·MOVE·RECOVER, 최신순 — CORRECT는 오늘, device.usageType·productType 포함)')
   r = await call(h(R.events.GET), 'GET', `${B}/api/devices/events?type=BOGUS`, A)
   ok(r.status === 400, 'events 잘못된 type → 400')
   r = await call(h(R.event.DELETE), 'DELETE', `${B}/api/devices/events/${recEvId}`, { ...U, params: { id: String(recEvId) } })

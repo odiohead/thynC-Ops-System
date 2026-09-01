@@ -546,6 +546,7 @@ model HospitalDevice {
   lastEventType   String?               @map("last_event_type")
   lastEventOn     DateTime?             @map("last_event_on") @db.Date
   replacedById    Int?                  @map("replaced_by_id") // 교체기 유닛(device_units.id)
+  productType     String?               @map("product_type") // 상품유형(일반/라이트, B-22) — 자리의 판매 조건(배치 속성). SQL CHECK. REGISTER 이벤트 fold, 교체 상속, 회수 시 마지막 값 보존
   createdAt       DateTime              @default(now()) @map("created_at")
   updatedAt       DateTime              @default(now()) @updatedAt @map("updated_at")
   unit            DeviceUnit            @relation("UnitPlacement", fields: [deviceId], references: [id], onDelete: Restrict)
@@ -558,6 +559,7 @@ model HospitalDevice {
   @@index([hospitalCode, status])
   @@index([wardId])
   @@index([lastHospitalCode, status])
+  @@index([hospitalCode, productType, status], map: "hospital_devices_hospital_product_type_status_idx")
   @@map("hospital_devices")
   @@schema("public")
 }
@@ -617,6 +619,7 @@ model HospitalDeviceEvent {
   actorName       String?                    @map("actor_name")
   editedAt        DateTime?                  @map("edited_at")
   editedById      String?                    @map("edited_by")
+  productType     String?                    @map("product_type") // 이벤트 시점 상품유형 스냅샷(일반/라이트, SQL CHECK) — REGISTER=지정값·MOVE/RECOVER=당시 배치 값·CORRECT=변경 후 값
   createdAt       DateTime                   @default(now()) @map("created_at")
   device          DeviceUnit                 @relation("DeviceEvents", fields: [deviceId], references: [id], onDelete: Restrict)
   hospital        Hospital?                  @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: Restrict)

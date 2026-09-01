@@ -13,7 +13,7 @@ import Modal from '@/app/components/ui/Modal'
 import Button from '@/app/components/ui/Button'
 import { Input, Select } from '@/app/components/ui/Input'
 import { cn } from '@/lib/cn'
-import { isFutureYmd, isYmd, matchesSerialPattern, normalizeSerial, todayKst } from '@/lib/deviceRegistryShared'
+import { PRODUCT_TYPES, isFutureYmd, isYmd, matchesSerialPattern, normalizeSerial, todayKst, type ProductType } from '@/lib/deviceRegistryShared'
 import { errorMessage, getUnitDetail, getUsageTypes, patchDevice } from './api'
 import { modelLabel } from './deviceDisplay'
 import type { DevicePatchBody, DeviceRef, ModelSummary, MutationDone, UsageType } from './types'
@@ -35,6 +35,8 @@ interface FormState {
   extDeviceCode: string
   /** 용도 id 문자열, '' = 미지정 */
   usageTypeId: string
+  /** 상품유형(일반/라이트), '' = 미지정 */
+  productType: string
   occurredOn: string
 }
 
@@ -44,6 +46,7 @@ interface Baseline {
   macAddress: string | null
   extDeviceCode: string | null
   usageTypeId: number | null
+  productType: string | null
   serialPattern: string | null
   deviceName: string
   deviceModel: string
@@ -51,7 +54,7 @@ interface Baseline {
   hospitalCode: string | null
 }
 
-const EMPTY_FORM: FormState = { deviceInfoId: '', serialNo: '', macAddress: '', extDeviceCode: '', usageTypeId: '', occurredOn: '' }
+const EMPTY_FORM: FormState = { deviceInfoId: '', serialNo: '', macAddress: '', extDeviceCode: '', usageTypeId: '', productType: '', occurredOn: '' }
 
 export function CorrectionModal({ open, onClose, hospitalCode, device, models, onDone }: CorrectionModalProps) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
@@ -89,6 +92,7 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
       macAddress: '',
       extDeviceCode: '',
       usageTypeId: device.usageTypeId != null ? String(device.usageTypeId) : '',
+      productType: device.productType ?? '',
       occurredOn: todayKst(),
     })
     getUnitDetail(device.id)
@@ -102,6 +106,7 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
           macAddress: d.macAddress,
           extDeviceCode: d.extDeviceCode,
           usageTypeId: d.usageTypeId ?? null,
+          productType: d.productType ?? null,
           serialPattern: d.deviceInfo?.serialPattern ?? null,
           deviceName: d.deviceInfo?.deviceName ?? '',
           deviceModel: d.deviceInfo?.deviceModel ?? '',
@@ -114,6 +119,7 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
           macAddress: d.macAddress ?? '',
           extDeviceCode: d.extDeviceCode ?? '',
           usageTypeId: d.usageTypeId != null ? String(d.usageTypeId) : '',
+          productType: d.productType ?? '',
           occurredOn: todayKst(),
         })
       })
@@ -150,6 +156,8 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
     if ((ext || null) !== (base.extDeviceCode ?? null)) out.extDeviceCode = ext || null
     const usage = form.usageTypeId ? Number(form.usageTypeId) : null
     if (usage !== (base.usageTypeId ?? null)) out.usageTypeId = usage
+    const pt = (form.productType || null) as ProductType | null
+    if (pt !== (base.productType ?? null)) out.productType = pt
     return out
   }, [base, form, serialChanged, normalized.serialNo])
 
@@ -184,6 +192,7 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
       if ('macAddress' in body) parts.push(body.macAddress ? `MAC ${body.macAddress}` : 'MAC 삭제')
       if ('extDeviceCode' in body) parts.push(body.extDeviceCode ? `닉네임 ${body.extDeviceCode}` : '닉네임 삭제')
       if ('usageTypeId' in body) parts.push(body.usageTypeId == null ? '용도 미지정' : `용도 ${usageTypes?.find((u) => u.id === body.usageTypeId)?.name ?? body.usageTypeId}`)
+      if ('productType' in body) parts.push(body.productType == null ? '상품유형 미지정' : `상품유형 ${body.productType}`)
       onDone({ message: `식별 정정: ${parts.length ? parts.join(' · ') : base.serialNo}`, openDeviceId: device.id })
     } catch (err) {
       setError(errorMessage(err, '정정에 실패했습니다.'))
@@ -201,7 +210,7 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
       ) : (
         <form onSubmit={submit} className="space-y-4 text-sm">
           <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            식별 속성(모델·시리얼·MAC·닉네임·용도)의 <b>오타 보정</b>용입니다. CORRECT 이벤트로 기록되며 드로어에서 취소할 수 있습니다. 상태·병원·병동은 등록/이동/회수 이벤트로만 바뀝니다.
+            식별 속성(모델·시리얼·MAC·닉네임·용도·상품유형)의 <b>오타 보정</b>용입니다. CORRECT 이벤트로 기록되며 드로어에서 취소할 수 있습니다. 상태·병원·병동은 등록/이동/회수 이벤트로만 바뀝니다.
             {hospitalCode && base?.hospitalCode && base.hospitalCode !== hospitalCode && (
               <span className="mt-1 block text-warning-subtle-foreground">이 기기는 현재 선택한 병원({hospitalCode})이 아닌 {base.hospitalCode} 소속입니다.</span>
             )}
@@ -284,6 +293,20 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
                 ))}
               </Select>
               <p className="mt-1 text-xs text-muted-foreground">판매용/평가용 — 평가용은 계약 대조에서 제외. 용도만 바꾸는 것은 USER 등급도 드로어에서 가능합니다.</p>
+            </div>
+            <div>
+              <label htmlFor="corr-pt" className="mb-1 block text-xs font-medium text-muted-foreground">
+                상품유형
+              </label>
+              <Select id="corr-pt" value={form.productType} onChange={(e) => set('productType', e.target.value)} disabled={loading || !base}>
+                <option value="">미지정</option>
+                {PRODUCT_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground">일반/라이트 — 자리의 판매 조건(배치 속성). 상품유형만 바꾸는 것은 USER 등급도 드로어·선택 바에서 가능합니다.</p>
             </div>
           </div>
 

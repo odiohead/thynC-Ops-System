@@ -3,12 +3,12 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { checkDeviceRegistryAccess } from '@/lib/deviceRegistryAccess'
-import { BULK_MAX, RegistryError, bulkDeviceAction, hospitalNames, uniqInts } from '@/lib/deviceRegistry'
+import { BULK_ACTIONS, BULK_MAX, RegistryError, bulkDeviceAction, hospitalNames, uniqInts, type BulkActionKind } from '@/lib/deviceRegistry'
 import { optionalInt, parseRegistryFields, readJsonObject, registryActor, registryErrorResponse } from '@/lib/deviceRegistryRoute'
 
 export const dynamic = 'force-dynamic'
 
-const ACTION_LABEL: Record<'MOVE_WARD' | 'RECOVER', string> = { MOVE_WARD: '일괄 병동 이동', RECOVER: '일괄 회수' }
+const ACTION_LABEL: Record<BulkActionKind, string> = { MOVE_WARD: '일괄 병동 이동', RECOVER: '일괄 회수', SET_PRODUCT_TYPE: '일괄 상품유형 지정' }
 
 /**
  * 병원 문맥 유도 — body.hospitalCode가 없으면 선택 개체의 ACTIVE 병원에서 유도(§4.2 "개체에서 유도").
@@ -28,9 +28,9 @@ async function deriveBulkHospital(ids: number[]): Promise<string> {
 }
 
 /**
- * POST /api/devices/units/bulk — 일괄 이동/회수 (write, 단일 tx)
- * body `{ action: 'MOVE_WARD'|'RECOVER', deviceIds[], toWardId?|toWardName?, reasonCodeId?, occurredOn?, memo?, ref?, hospitalCode? }`
- * 같은 병원 ACTIVE만 — 타 병원·RECOVERED가 섞이면 전체 409, 이미 대상 병동인 개체는 `skipped[]`
+ * POST /api/devices/units/bulk — 일괄 이동/회수/상품유형 지정 (write, 단일 tx)
+ * body `{ action: 'MOVE_WARD'|'RECOVER'|'SET_PRODUCT_TYPE', deviceIds[], toWardId?|toWardName?, reasonCodeId?, productType?('일반'|'라이트'|null), occurredOn?, memo?, ref?, hospitalCode? }`
+ * 같은 병원 ACTIVE만 — 타 병원·RECOVERED가 섞이면 전체 409, 이미 대상 병동/상품유형인 개체는 `skipped[]`. SET_PRODUCT_TYPE은 기기마다 CORRECT(changes.productType) — B-22
  * audit: `hospital_device_event` 1행(action_group, eventIds·시리얼 ≤50) — §8.3
  */
 export async function POST(request: NextRequest) {
@@ -41,8 +41,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await readJsonObject(request)
-    const action = body.action
-    if (action !== 'MOVE_WARD' && action !== 'RECOVER') return NextResponse.json({ error: '일괄 액션은 MOVE_WARD 또는 RECOVER만 가능합니다' }, { status: 400 })
+    const action = body.action as BulkActionKind
+    if (!(BULK_ACTIONS as readonly unknown[]).includes(action)) return NextResponse.json({ error: '일괄 액션은 MOVE_WARD·RECOVER·SET_PRODUCT_TYPE만 가능합니다' }, { status: 400 })
     if (!Array.isArray(body.deviceIds)) return NextResponse.json({ error: 'deviceIds 배열이 필요합니다' }, { status: 400 })
     const deviceIds = uniqInts(body.deviceIds)
     if (deviceIds.length === 0) return NextResponse.json({ error: '대상 기기를 선택하세요' }, { status: 400 })
@@ -54,13 +54,20 @@ export async function POST(request: NextRequest) {
     const reasonCodeId = optionalInt(body.reasonCodeId, '회수 사유')
     if (action === 'MOVE_WARD' && toWardId === undefined && !toWardName) return NextResponse.json({ error: '이동할 병동을 지정하세요' }, { status: 400 })
     if (action === 'RECOVER' && reasonCodeId === undefined) return NextResponse.json({ error: '회수 사유를 선택하세요' }, { status: 400 })
+    let productType: string | null | undefined
+    if (action === 'SET_PRODUCT_TYPE') {
+      if (!('productType' in body)) return NextResponse.json({ error: '상품유형을 지정하세요 (일반/라이트)' }, { status: 400 })
+      if (body.productType === null || body.productType === '') productType = null
+      else if (typeof body.productType !== 'string') return NextResponse.json({ error: '상품유형 값이 올바르지 않습니다 (일반/라이트)' }, { status: 400 })
+      else productType = body.productType
+    }
 
     const hospitalCode =
       typeof body.hospitalCode === 'string' && body.hospitalCode.trim() ? body.hospitalCode.trim() : await deriveBulkHospital(deviceIds)
 
     const r = await bulkDeviceAction(
       { hospitalCode, actor: registryActor(user), ...fields },
-      { action, deviceIds, toWardId, toWardName, reasonCodeId }
+      { action, deviceIds, toWardId, toWardName, reasonCodeId, productType }
     )
 
     const serials = await prisma.deviceUnit.findMany({ where: { id: { in: r.affectedDeviceIds.slice(0, 50) } }, select: { serialNo: true } })
@@ -78,6 +85,7 @@ export async function POST(request: NextRequest) {
         occurredOn: r.events[0]?.occurredOn ?? fields.occurredOn ?? null,
         toWardId: action === 'MOVE_WARD' ? (r.events[0]?.toWardId ?? null) : undefined,
         reasonCodeId: action === 'RECOVER' ? (r.events[0]?.reasonCodeId ?? null) : undefined,
+        productType: action === 'SET_PRODUCT_TYPE' ? (r.events[0]?.productType ?? null) : undefined,
         memo: fields.memo ?? null,
         ref: fields.ref ?? null,
         eventIds: r.eventIds,

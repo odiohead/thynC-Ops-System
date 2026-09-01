@@ -9,6 +9,8 @@
  *  - 'soft'(SpO2): 계약 '(참고 n)' 회색, 차이 '—' / 'none'(GW): '—' / 제3자(THIRD_PARTY)는 1행으로 접어 '제3자 기기 ▸' + 펼치면 모델별 세부 행
  *  - expected null: '— (계약완료 딜 없음)'
  *  - 마지막 행 '병동 n개 (미지정 m대)' 클릭 → onWardsClick
+ *  - 상품유형 매트릭스(B-22): summary.productTypeMixed(계약 딜 2종 또는 배치에 상품유형 있음)면 모델 행 아래 '└ 일반 | 라이트 | 미지정' 소행(배치(대조)/계약/차이 = byProductType),
+ *    하단에 '교체: 전체 n (일반 a · 라이트 b) · 최근 30일 m'. 혼합이 아니면 단일 행 + 계약 팝오버에 상품유형 라벨
  * 빈 상태(원장 0건)에도 전 헤더·모델 행 노출(배치 0). loading 시 스켈레톤.
  */
 import { useCallback, useMemo, useState, type MouseEvent } from 'react'
@@ -17,8 +19,13 @@ import { ChevronDown, ChevronRight, Info } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { Table, TBody, TD, TH, THead, TR } from '@/app/components/ui/Table'
 import { RegistryFloatingPanel } from './RegistryFloatingPanel'
-import { diffText, fmtDeal, fmtShortDate, lastEventText, modelLabel } from './deviceDisplay'
-import type { HospitalDeviceSummary, ModelSummary } from './types'
+import { PRODUCT_TYPES, PRODUCT_TYPE_UNSET_LABEL } from '@/lib/deviceRegistryShared'
+import { diffText, fmtDeal, fmtShortDate, lastEventText, modelLabel, productTypeBadgeVariant } from './deviceDisplay'
+import Badge from '@/app/components/ui/Badge'
+import type { HospitalDeviceSummary, ModelSummary, ProductTypeKey } from './types'
+
+/** 매트릭스 소행 키 순서 — 일반 · 라이트 · 미지정(있을 때만) */
+const PT_KEYS: readonly ProductTypeKey[] = [...PRODUCT_TYPES, PRODUCT_TYPE_UNSET_LABEL]
 
 export interface SummaryStripProps {
   summary: HospitalDeviceSummary | null
@@ -99,7 +106,7 @@ export function SummaryStrip({ summary, loading, error, onContractClick, onWards
           )}
           {summary &&
             regular.map((m) => (
-              <ModelRow key={m.deviceInfoId} m={m} today={today} onContractClick={openContract} contractOpen={popAnchor != null} />
+              <ModelRow key={m.deviceInfoId} m={m} today={today} onContractClick={openContract} contractOpen={popAnchor != null} matrix={summary.productTypeMixed} />
             ))}
           {summary && third.length > 0 && (
             <>
@@ -173,6 +180,25 @@ export function SummaryStrip({ summary, loading, error, onContractClick, onWards
             평가용 {summary.evalTotal.toLocaleString()}
           </span>
         )}
+        {summary && summary.productTypeContext?.mixed && (
+          <Badge variant="primary" title="계약완료 딜에 일반·라이트가 함께 있는 병원 — 등록 시 상품유형 선택 필수">
+            상품유형 혼합
+          </Badge>
+        )}
+        {summary && summary.replacements && (summary.productTypeMixed || summary.replacements.total > 0) && (
+          <span className="text-xs text-muted-foreground tabular-nums" title="교체 = 같은 병원 RECOVER와 짝지어진 교체 등록(REGISTER) 건수 — RECOVER 시점 상품유형 기준">
+            교체: 전체 {summary.replacements.total.toLocaleString()}
+            {summary.productTypeMixed && (
+              <>
+                {' '}
+                ({PT_KEYS.filter((k) => k !== PRODUCT_TYPE_UNSET_LABEL || summary.replacements.byType[k] > 0)
+                  .map((k) => `${k} ${(summary.replacements.byType[k] ?? 0).toLocaleString()}`)
+                  .join(' · ')})
+              </>
+            )}{' '}
+            · 최근 30일 {summary.replacements.last30d.total.toLocaleString()}
+          </span>
+        )}
         <span className="text-xs text-muted-foreground tabular-nums">
           {summary ? (
             <>
@@ -202,6 +228,18 @@ export function SummaryStrip({ summary, loading, error, onContractClick, onWards
               </li>
             ))}
             <li className="border-t border-border pt-1 text-right font-medium tabular-nums">합계 {expected == null ? '—' : `${expected.toLocaleString()}대`}</li>
+            {summary?.productTypeContext && summary.productTypeContext.byType.length > 0 && (
+              <li className="flex flex-wrap items-center gap-1 pt-0.5 text-muted-foreground">
+                상품유형:
+                {summary.productTypeContext.byType.map((b) => (
+                  <span key={b.type} className="inline-flex items-center gap-1">
+                    <Badge variant={productTypeBadgeVariant(b.type) ?? 'default'}>{b.type}</Badge>
+                    <span className="tabular-nums">{b.devices.toLocaleString()}대 ({b.deals}건)</span>
+                  </span>
+                ))}
+                {summary.productTypeContext.mixed && <span>— 혼합(등록 시 선택 필수)</span>}
+              </li>
+            )}
           </ul>
         ) : (
           <p className="mb-2 text-muted-foreground">— (계약완료 딜 없음)</p>
@@ -215,9 +253,10 @@ export function SummaryStrip({ summary, loading, error, onContractClick, onWards
   )
 }
 
-function ModelRow({ m, today, onContractClick, contractOpen }: { m: ModelSummary; today?: string; onContractClick: (e: MouseEvent<HTMLElement>) => void; contractOpen: boolean }) {
+function ModelRow({ m, today, onContractClick, contractOpen, matrix }: { m: ModelSummary; today?: string; onContractClick: (e: MouseEvent<HTMLElement>) => void; contractOpen: boolean; matrix: boolean }) {
   const hard = m.compare === 'hard'
   const soft = m.compare === 'soft'
+  const ptRows = matrix ? PT_KEYS.filter((k) => m.byProductType?.[k]) : []
   const contractCell = (() => {
     if (hard) {
       return (
@@ -246,22 +285,55 @@ function ModelRow({ m, today, onContractClick, contractOpen }: { m: ModelSummary
   const shown = m.compare === 'none' ? m.active : (m.activeForCompare ?? m.active - activeEval)
 
   return (
-    <TR>
-      <TD className="font-medium">
-        {modelLabel(m.deviceName, m.deviceModel)}
-        {m.lastEvent && <span className="ml-2 text-xs font-normal text-muted-foreground">{lastEventText(m.lastEvent.type, m.lastEvent.on, today)}</span>}
-      </TD>
-      <TD className="text-right tabular-nums font-medium" title={activeEval > 0 ? `배치 중 전체 ${m.active.toLocaleString()}대 (평가용 ${activeEval.toLocaleString()}대는 계약 대조 제외)` : undefined}>
-        {shown.toLocaleString()}
-        <EvalNote n={activeEval} />
-      </TD>
-      <TD className="text-right">{contractCell}</TD>
-      <TD className="text-right">{diffCell}</TD>
-      <TD className="text-right tabular-nums">{m.recovered30d.toLocaleString()}</TD>
-      <TD className="text-right tabular-nums">
-        <WmsCounts wms={m.wms} />
-      </TD>
-    </TR>
+    <>
+      <TR>
+        <TD className="font-medium">
+          {modelLabel(m.deviceName, m.deviceModel)}
+          {m.lastEvent && <span className="ml-2 text-xs font-normal text-muted-foreground">{lastEventText(m.lastEvent.type, m.lastEvent.on, today)}</span>}
+        </TD>
+        <TD className="text-right tabular-nums font-medium" title={activeEval > 0 ? `배치 중 전체 ${m.active.toLocaleString()}대 (평가용 ${activeEval.toLocaleString()}대는 계약 대조 제외)` : undefined}>
+          {shown.toLocaleString()}
+          <EvalNote n={activeEval} />
+        </TD>
+        <TD className="text-right">{contractCell}</TD>
+        <TD className="text-right">{diffCell}</TD>
+        <TD className="text-right tabular-nums">{m.recovered30d.toLocaleString()}</TD>
+        <TD className="text-right tabular-nums">
+          <WmsCounts wms={m.wms} />
+        </TD>
+      </TR>
+      {ptRows.map((k) => {
+        const c = m.byProductType[k]!
+        const evalN = c.active - c.activeForCompare
+        const unset = k === PRODUCT_TYPE_UNSET_LABEL
+        return (
+          <TR key={`${m.deviceInfoId}-${k}`} className="bg-muted/30 text-xs hover:bg-muted/40">
+            <TD className="pl-8">
+              <span className="mr-1 text-muted-foreground">└</span>
+              {unset ? (
+                <span className="text-warning-subtle-foreground" title="상품유형 미지정 배치 — 선택 바 [상품유형 지정]으로 정리">
+                  {PRODUCT_TYPE_UNSET_LABEL}
+                </span>
+              ) : (
+                <Badge variant={productTypeBadgeVariant(k) ?? 'default'}>{k}</Badge>
+              )}
+            </TD>
+            <TD className="text-right tabular-nums" title={evalN > 0 ? `배치 중 ${c.active.toLocaleString()}대 (평가용 ${evalN.toLocaleString()}대 제외)` : undefined}>
+              {(m.compare === 'none' ? c.active : c.activeForCompare).toLocaleString()}
+              <EvalNote n={evalN} />
+            </TD>
+            <TD className="text-right tabular-nums">
+              {unset || c.expected == null ? <span className="text-muted-foreground">—</span> : hard ? c.expected.toLocaleString() : <span className="text-muted-foreground">(참고 {c.expected.toLocaleString()})</span>}
+            </TD>
+            <TD className="text-right">
+              {hard && c.diff != null ? <span className={cn('tabular-nums font-medium', c.diff === 0 ? 'text-success-subtle-foreground' : 'text-warning-subtle-foreground')}>{diffText(c.diff)}</span> : <span className="text-muted-foreground">—</span>}
+            </TD>
+            <TD className="text-right text-muted-foreground">—</TD>
+            <TD className="text-right text-muted-foreground">—</TD>
+          </TR>
+        )
+      })}
+    </>
   )
 }
 

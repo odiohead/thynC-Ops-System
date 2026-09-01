@@ -28,6 +28,7 @@ function toRow(r: UnitListRow): Record<string, unknown> {
     모델: r.deviceInfo.deviceModel,
     모델명: r.deviceInfo.deviceName,
     용도: r.usageType?.name ?? '',
+    상품유형: r.productType ?? '',
     병동: r.ward ? `${r.ward.name}${r.ward.isActive ? '' : ' (폐쇄)'}` : r.status === 'ACTIVE' ? '미지정' : '',
     상태: DEVICE_STATUS_LABELS[r.status as DeviceStatus] ?? r.status,
     배치일: toYmd(r.placedOn) ?? '',
@@ -67,7 +68,7 @@ export async function GET(req: NextRequest) {
     ])
     const rows = data.map(toRow)
     const filterLabel = STATUS_FILTER_LABEL[params.status ?? 'active']
-    return xlsxResponse(rows, '기기 목록', registryFileName(hospitalName, filterLabel), [13, 20, 12, 16, 12, 16, 8, 12, 8, 11, 11, 16, 12, 10, 12, 22, 26, 30, 24])
+    return xlsxResponse(rows, '기기 목록', registryFileName(hospitalName, filterLabel), [13, 20, 12, 16, 12, 16, 8, 8, 12, 8, 11, 11, 16, 12, 10, 12, 22, 26, 30, 24])
   } catch (e) {
     return readErrorResponse(e, 'export')
   }

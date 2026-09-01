@@ -92,12 +92,13 @@ function templateRow(row: number, cells: readonly unknown[]): ImportRowInput | n
   const wardInput = cellStr(cells[2]) || null
   const memo = cellStr(cells[3]) || null
   const usageTypeInput = cellStr(cells[4]) || null
-  if (!serialInput && !modelInput && !wardInput && !memo && !usageTypeInput) return null
-  return { row, serialInput, modelInput, wardInput, memo, ...(usageTypeInput ? { usageTypeInput } : {}) }
+  const productTypeInput = cellStr(cells[5]) || null
+  if (!serialInput && !modelInput && !wardInput && !memo && !usageTypeInput && !productTypeInput) return null
+  return { row, serialInput, modelInput, wardInput, memo, ...(usageTypeInput ? { usageTypeInput } : {}), ...(productTypeInput ? { productTypeInput } : {}) }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Excel (B-1) — 첫 시트. A1이 시리얼이면 헤더 없음 / 온프렘 별칭 헤더면 초안 열 / 그 외 A 시리얼·B 모델·C 병동·D 메모·E 용도(판매용/평가용, 선택)
+// Excel (B-1) — 첫 시트. A1이 시리얼이면 헤더 없음 / 온프렘 별칭 헤더면 초안 열 / 그 외 A 시리얼·B 모델·C 병동·D 메모·E 용도(판매용/평가용, 선택)·F 상품유형(일반/라이트, 선택)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function parseImportExcel(buffer: ArrayBuffer): ParsedImportInput {
@@ -250,6 +251,7 @@ export function parseImportText(text: string): ParsedImportInput {
     wardInput: p.wardInput ?? null,
     memo: p.memo ?? null,
     ...(p.usageInput ? { usageTypeInput: p.usageInput } : {}),
+    ...(p.productTypeInput ? { productTypeInput: p.productTypeInput } : {}),
   }))
   return { rows, shape: { format: 'paste', onprem: false, header, columns: null, overflow } }
 }

@@ -14,7 +14,7 @@ import { authOr401, badRequest, fmtKst, hospitalDisplayName, parseEventsQuery, r
 
 export const dynamic = 'force-dynamic'
 
-const CORRECT_FIELD_LABELS: Record<string, string> = { deviceInfoId: '모델', serialNo: '시리얼', serialRaw: '원문', macAddress: 'MAC', extDeviceCode: '닉네임' }
+const CORRECT_FIELD_LABELS: Record<string, string> = { deviceInfoId: '모델', serialNo: '시리얼', serialRaw: '원문', macAddress: 'MAC', extDeviceCode: '닉네임', usageTypeId: '용도', productType: '상품유형' }
 
 /** 이력 탭 '내용' 열 — 병동 from→to · 교체/이관 상대 · CORRECT 변경 요약 */
 function contentOf(e: EventListRow): string {
@@ -54,6 +54,7 @@ function toRow(e: EventListRow): Record<string, unknown> {
     원문: e.device.serialRaw ?? '',
     모델: e.device.deviceInfo.deviceModel,
     내용: contentOf(e),
+    상품유형: e.productType ?? '',
     사유: e.reasonCode?.name ?? '',
     연결: e.refType && e.refCode ? `${REGISTRY_REF_TYPE_LABELS[e.refType as RegistryRefType] ?? e.refType} ${e.refCode}` : '',
     메모: e.memo ?? '',
@@ -87,7 +88,7 @@ export async function GET(req: NextRequest) {
     ])
     const rows = data.map(toRow)
     const filterLabel = params.type ? `이력_${DEVICE_EVENT_TYPE_LABELS[params.type as DeviceEventType] ?? params.type}` : '이력'
-    return xlsxResponse(rows, '이벤트 이력', registryFileName(hospitalName, filterLabel), [11, 8, 13, 20, 12, 16, 12, 30, 14, 22, 24, 6, 10, 20, 20, 7, 38, 8])
+    return xlsxResponse(rows, '이벤트 이력', registryFileName(hospitalName, filterLabel), [11, 8, 13, 20, 12, 16, 12, 30, 8, 14, 22, 24, 6, 10, 20, 20, 7, 38, 8])
   } catch (e) {
     return readErrorResponse(e, 'events/export')
   }

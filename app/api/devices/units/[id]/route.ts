@@ -47,9 +47,9 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 }
 
-const IDENTITY_KEYS = ['deviceInfoId', 'serialNo', 'macAddress', 'extDeviceCode', 'usageTypeId'] as const
-/** 식별 보정 중 write(USER+)로 허용되는 키 — 용도는 운영 속성이라 admin 게이트 밖(2026-09-01 결정) */
-const WRITE_LEVEL_IDENTITY_KEYS: readonly (typeof IDENTITY_KEYS)[number][] = ['usageTypeId']
+const IDENTITY_KEYS = ['deviceInfoId', 'serialNo', 'macAddress', 'extDeviceCode', 'usageTypeId', 'productType'] as const
+/** 식별 보정 중 write(USER+)로 허용되는 키 — 용도·상품유형은 운영 속성이라 admin 게이트 밖(2026-09-01 결정 B-21·B-22) */
+const WRITE_LEVEL_IDENTITY_KEYS: readonly (typeof IDENTITY_KEYS)[number][] = ['usageTypeId', 'productType']
 const EVENT_ONLY_KEYS = ['status', 'hospitalCode', 'wardId', 'placedOn', 'recoveredOn', 'lastHospitalCode', 'recoverReasonId', 'replacedById'] as const
 
 /**
@@ -57,6 +57,7 @@ const EVENT_ONLY_KEYS = ['status', 'hospitalCode', 'wardId', 'placedOn', 'recove
  * - `{ memo }`                                   : 유닛 메모(`device_units.memo`) UPDATE (write, 이벤트 아님)
  * - `{ deviceInfoId?|serialNo?|macAddress?|extDeviceCode? }` : 식별 보정 → CORRECT 이벤트 (admin) — 시리얼·모델·MAC은 유닛, 닉네임은 배치. 시리얼 충돌 409, 이력 있는 개체의 시리얼 정정 409
  * - `{ usageTypeId }`                            : 용도(판매용/평가용/null=미지정) → CORRECT 이벤트 (**write** — USER+, 다른 식별 키와 함께 보내면 admin)
+ * - `{ productType }`                            : 상품유형(일반/라이트/null=미지정, 배치 속성 B-22) → CORRECT 이벤트 (**write** — USER+, 잘못된 값 400)
  *   선택: `occurredOn`·`ref`는 CORRECT 이벤트 문맥(기본 오늘)
  * 두 종류를 함께 보내면 단일 tx로 처리(식별 보정 → 메모). 상태·병원·병동 키는 400(이벤트로만 변경).
  * 병원 문맥은 개체에서 유도(body hospitalCode 무시). audit `hospital_device` UPDATE(resourceId=시리얼, before/after 스냅샷)
@@ -78,7 +79,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const identityKeys = IDENTITY_KEYS.filter((k) => k in body)
     const hasMemo = 'memo' in body
     if (identityKeys.length === 0 && !hasMemo) {
-      return NextResponse.json({ error: '변경할 항목이 없습니다 (memo·usageTypeId 또는 식별 필드 deviceInfoId·serialNo·macAddress·extDeviceCode)' }, { status: 400 })
+      return NextResponse.json({ error: '변경할 항목이 없습니다 (memo·usageTypeId·productType 또는 식별 필드 deviceInfoId·serialNo·macAddress·extDeviceCode)' }, { status: 400 })
     }
     if (hasMemo && body.memo !== null && typeof body.memo !== 'string') {
       return NextResponse.json({ error: '메모는 문자열이어야 합니다' }, { status: 400 })
@@ -102,6 +103,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           if (v === undefined) changes.usageTypeId = null
           else changes.usageTypeId = v
         }
+      }
+      if ('productType' in body) {
+        // null/'' = 미지정, 문자열은 서비스가 별칭 매칭(일반/라이트, 미매칭 400)
+        if (body.productType === null || body.productType === '') changes.productType = null
+        else if (typeof body.productType !== 'string') return NextResponse.json({ error: '상품유형 값이 올바르지 않습니다 (일반/라이트)' }, { status: 400 })
+        else changes.productType = body.productType
       }
       if ('deviceInfoId' in body) {
         const v = optionalInt(body.deviceInfoId, '모델')
@@ -154,9 +161,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       ? new Map((await prisma.statusCode.findMany({ where: { category: DEVICE_USAGE_TYPE_CATEGORY }, select: { id: true, name: true } })).map((s) => [s.id, s.name]))
       : new Map<number, string>()
     const usagePart = r.correct?.changes.usageTypeId ? `용도 ${usageLabel(r.correct.changes.usageTypeId.before)} → ${usageLabel(r.correct.changes.usageTypeId.after)}` : null
+    const ptPart = r.correct?.changes.productType ? `상품유형 ${String(r.correct.changes.productType.before ?? '미지정')} → ${String(r.correct.changes.productType.after ?? '미지정')}` : null
+    const OPS_KEYS = ['usageTypeId', 'productType']
     const parts = [
-      r.correct && changeKeys.some((k) => k !== 'usageTypeId') ? `식별 보정(${changeKeys.filter((k) => k !== 'usageTypeId').join(', ')})` : null,
+      r.correct && changeKeys.some((k) => !OPS_KEYS.includes(k)) ? `식별 보정(${changeKeys.filter((k) => !OPS_KEYS.includes(k)).join(', ')})` : null,
       usagePart,
+      ptPart,
       r.memo ? '메모' : null,
     ].filter(Boolean)
     await logAudit({

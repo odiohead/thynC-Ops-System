@@ -3,7 +3,8 @@
 /**
  * 임포트 탭 (입력 → 미리보기 → 결과 + 이력, §6.1-B 임포트 탭 · §7.2) — GROUP D
  * 입력: 모드(● 신규 등록 ○ 온프렘 export 초안 — preview.input.onprem이면 초안 제안) · [텍스트 붙여넣기] | [Excel 업로드 · 템플릿 ↓] · 업무일자(오늘+행≥50이면 확인 배지)
- *  · 병동 [열에서 읽기 ▾ | 고정](WardCombo) · 열 모드 빈 셀(● 미지정 warn / ○ 오류) · 모델 [자동 ▾](summary.models) · 용도 [미지정|판매용|평가용](폼 공통 — E열/붙여넣기 용도 셀이 우선) · 메모 → [미리보기] = previewImport(code, source, options)
+ *  · 병동 [열에서 읽기 ▾ | 고정](WardCombo) · 열 모드 빈 셀(● 미지정 warn / ○ 오류) · 모델 [자동 ▾](summary.models) · 용도 [미지정|판매용|평가용](폼 공통 — E열/붙여넣기 용도 셀이 우선)
+ *  · 상품유형 [기본값(계약 딜 기준)|일반|라이트](B-22 — F열/붙여넣기 '일반·라이트' 셀 우선, 혼합 병원은 미지정 행 error) · 메모 → [미리보기] = previewImport(code, source, options)
  * 미리보기: 요약(총·신규·재등록·건너뜀·경고·충돌(기본 제외)·오류) + 판정 필터 칩 · 생성 예정 병동 표(새로 생성 | 기존 병동 매핑 → wardAliases)
  *  · (초안) org ≥2 → 체크 + [이 기관만 등록](재검증 전 [실행] 비활성) · 행 표(☑ | 행 | 시리얼 | 원문 | 모델 | 병동(해석) | 판정 | 메시지/행 액션 [제외▾|이관] [미지정으로 등록])
  *  · [입력으로 돌아가기] [오류 행 제외하고 다시 검증] [실행 (n 등록 · m 재등록)](미제외 오류 있으면 비활성) = executeImport(code, source, { …options, excludeRows, rowActions, wardAliases, orgs })
@@ -29,8 +30,8 @@ import {
   todayKst,
   type ImportBatchMode,
   type ImportRowAction,
-  type ImportVerdict,
-} from '@/lib/deviceRegistryShared'
+  type ImportVerdict, PRODUCT_TYPES, type ProductType, } from '@/lib/deviceRegistryShared'
+import { productTypeDefaultLabel } from './deviceDisplay'
 import { cancelImportBatch, errorMessage, executeImport, getImportBatches, getUsageTypes, isApiError, patchImportBatchDate, previewImport, type ImportSource } from './api'
 import { Pager, StatChip, TableMessageRow, fmtDateTimeKst, ymdOrDash } from './groupd-shared'
 import { useDevicesToast } from './toast'
@@ -98,7 +99,7 @@ function sameSet(a: readonly string[] | null, b: readonly string[]): boolean {
 async function downloadTemplate() {
   const XLSX = await import('xlsx')
   const wb = XLSX.utils.book_new()
-  const sheet = XLSX.utils.aoa_to_sheet([['시리얼', '모델', '병동', '메모', '용도']])
+  const sheet = XLSX.utils.aoa_to_sheet([['시리얼', '모델', '병동', '메모', '용도', '상품유형']])
   sheet['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 30 }, { wch: 10 }]
   XLSX.utils.book_append_sheet(wb, sheet, '기기 목록')
   const guide = XLSX.utils.aoa_to_sheet([
@@ -110,6 +111,7 @@ async function downloadTemplate() {
     ['C 병동', '아니오', '병동 이름 또는 온프렘 병동 코드. 없는 이름은 새로 생성(미리보기에서 기존 병동으로 매핑 가능)', '6병동'],
     ['D 메모', '아니오', '등록 이벤트 메모(개체 메모는 드로어에서 입력)', 'go-live 1차'],
     ['E 용도', '아니오', '판매용 또는 평가용(SALE/EVAL). 비우면 임포트 옵션의 용도, 그것도 없으면 미지정. 평가용은 계약 대조에서 제외', '평가용'],
+    ['F 상품유형', '아니오', '일반 또는 라이트(자리의 판매 조건). 비우면 임포트 옵션의 상품유형, 그것도 없으면 병원 계약 딜 기준 기본값(일반·라이트 딜이 함께 있으면 필수)', '라이트'],
     [''],
     ['· 첫 시트만 읽습니다. 1행은 헤더, 2행부터 데이터. 한 번에 최대 ' + IMPORT_MAX_ROWS.toLocaleString() + '행.'],
     ['· 관리자 콘솔 xlsx(A열만·헤더 없음)는 A1이 시리얼이면 자동 인식됩니다.'],
@@ -151,6 +153,8 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
   const [deviceInfoId, setDeviceInfoId] = useState<number | null>(null)
   const [usageTypeId, setUsageTypeId] = useState<number | null>(null)
   const [usageTypes, setUsageTypes] = useState<UsageType[] | null>(null)
+  /** 상품유형 공통값 — null = 서버 기본값 규칙(병원 딜 기준) */
+  const [productType, setProductType] = useState<ProductType | null>(null)
   const [memo, setMemo] = useState('')
   const [inputError, setInputError] = useState<string | null>(null)
 
@@ -185,6 +189,8 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
   const [result, setResult] = useState<ImportExecuteResponse | null>(null)
 
   const effectiveMode: ImportBatchMode = mode ?? preview?.input.mode ?? 'REGISTER'
+  /** 병원 딜 기준 상품유형 문맥 — 요약(summary) 우선, 미리보기 응답으로 갱신 */
+  const ptCtx = preview?.summary.productTypeContext ?? summary?.productTypeContext ?? null
   const isDraft = effectiveMode === 'ONPREM_DRAFT'
 
   const source: ImportSource | null = useMemo(() => {
@@ -202,9 +208,10 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
     if (wardMode === 'fixed' && fixedWard.wardId) o.wardId = fixedWard.wardId
     if (deviceInfoId) o.deviceInfoId = deviceInfoId
     if (usageTypeId) o.usageTypeId = usageTypeId
+    if (productType) o.productType = productType
     if (memo.trim()) o.memo = memo.trim()
     return o
-  }, [wardMode, emptyWardCell, occurredOn, mode, fixedWard.wardId, deviceInfoId, usageTypeId, memo])
+  }, [wardMode, emptyWardCell, occurredOn, mode, fixedWard.wardId, deviceInfoId, usageTypeId, productType, memo])
 
   /** 미리보기 상태(제외·행 액션·별칭·org)를 옵션에 얹는다 — 재검증·실행 공용 */
   const reviewOptions = useCallback(
@@ -636,6 +643,30 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
           <span className="text-[11px]">E열/붙여넣기의 &apos;판매용·평가용&apos; 셀이 우선. 평가용은 계약 대조에서 제외.</span>
         </label>
         <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          상품유형{ptCtx?.mixed && <span className="ml-0.5 text-destructive">*</span>}
+          <Select
+            className="h-9"
+            value={productType ?? ''}
+            disabled={optionsDisabled}
+            onChange={(e) => {
+              setProductType((e.target.value || null) as ProductType | null)
+              markStale()
+            }}
+          >
+            <option value="">{productTypeDefaultLabel(ptCtx)}</option>
+            {PRODUCT_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </Select>
+          <span className={cn('text-[11px]', ptCtx?.mixed && !productType && 'text-destructive')}>
+            {ptCtx?.mixed && !productType
+              ? '일반·라이트 딜이 함께 있는 병원 — F열/붙여넣기 셀이 없는 행은 오류로 판정됩니다. 공통값을 고르거나 행마다 지정하세요.'
+              : `자리의 판매 조건(배치 속성). F열/붙여넣기의 '일반·라이트' 셀이 우선${ptCtx?.byType.length ? ` · 계약완료 딜: ${ptCtx.byType.map((b) => `${b.type} ${b.devices.toLocaleString()}대`).join(' · ')}` : ''}`}
+          </span>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           메모(배치)
           <Input className="h-9" value={memo} placeholder="go-live 1차" maxLength={200} disabled={optionsDisabled} onChange={(e) => setMemo(e.target.value)} />
           <span className="text-[11px]">배치 이력에 남는 메모. 행별 메모는 D열/3번째 열.</span>
@@ -912,6 +943,7 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
                         <TH>원문</TH>
                         <TH>모델</TH>
                         <TH>용도</TH>
+                        <TH>상품유형</TH>
                         <TH>병동(해석)</TH>
                         <TH>판정</TH>
                         <TH>메시지 / 행 액션</TH>
@@ -919,7 +951,7 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
                     </THead>
                     <TBody>
                       {visibleRows.length === 0 ? (
-                        <TableMessageRow colSpan={9}>{verdictFilter === 'all' ? '판정된 행이 없습니다.' : `${IMPORT_VERDICT_LABELS[verdictFilter]} 행이 없습니다.`}</TableMessageRow>
+                        <TableMessageRow colSpan={10}>{verdictFilter === 'all' ? '판정된 행이 없습니다.' : `${IMPORT_VERDICT_LABELS[verdictFilter]} 행이 없습니다.`}</TableMessageRow>
                       ) : (
                         visibleRows.map((r, idx) => {
                           const ex = excluded.has(r.row)
@@ -950,6 +982,7 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
                               <TD className="align-top font-mono text-xs text-muted-foreground">{raw}</TD>
                               <TD className="whitespace-nowrap align-top text-xs">{r.deviceModel ?? <span className="text-muted-foreground">—</span>}</TD>
                               <TD className="whitespace-nowrap align-top text-xs">{r.usageTypeName ?? <span className="text-muted-foreground">미지정</span>}</TD>
+                              <TD className="whitespace-nowrap align-top text-xs">{r.productType ?? <span className={cn('text-muted-foreground', ptCtx?.mixed && !isSkip && 'text-destructive')}>미지정</span>}</TD>
                               <TD className="whitespace-nowrap align-top text-xs">
                                 <span className={cn(w.tone === 'new' && 'text-primary', w.tone === 'inactive' && 'text-destructive', w.tone === 'unresolved' && 'text-warning-subtle-foreground', w.tone === 'none' && 'text-muted-foreground')}>
                                   {action === 'UNASSIGN_WARD' ? '미지정(액션)' : w.text}

@@ -56,6 +56,7 @@ import { DeviceTable } from './DeviceTable'
 import { BulkActionBar } from './BulkActionBar'
 import { DeviceHistoryDrawer } from './DeviceHistoryDrawer'
 import { CorrectionModal } from './CorrectionModal'
+import { ProductTypeModal } from './ProductTypeModal'
 import { RegisterModal } from './RegisterModal'
 import { MoveWardModal } from './MoveWardModal'
 import { RecoverModal } from './RecoverModal'
@@ -80,13 +81,14 @@ type ModalState =
   | { kind: 'recover'; devices: DeviceRef[]; ids: number[]; scanMode?: boolean }
   | { kind: 'replace'; oldDevice: DeviceRef | null }
   | { kind: 'correct'; device: DeviceRef }
+  | { kind: 'productType'; devices: DeviceRef[]; ids: number[]; note?: string | null }
   | null
 
-type ListLocal = Pick<ListFilters, 'limit' | 'sort' | 'wms' | 'usage'>
+type ListLocal = Pick<ListFilters, 'limit' | 'sort' | 'wms' | 'usage' | 'productType'>
 type EventLocal = Omit<EventFilters, 'q' | 'page'>
 type CoverageLocal = Pick<CoverageFilters, 'filter' | 'sort' | 'limit'>
 
-const DEFAULT_LIST_LOCAL: ListLocal = { limit: 50, sort: 'ward', wms: null, usage: null }
+const DEFAULT_LIST_LOCAL: ListLocal = { limit: 50, sort: 'ward', wms: null, usage: null, productType: null }
 const DEFAULT_EVENT_LOCAL: EventLocal = { limit: 50, type: null, from: null, to: null, refType: null, source: null }
 /** 이벤트 로컬 필터 기본값 — 전역 '최근 이벤트'는 기본 30일(§6.1-A), 병원 이력은 전체 기간 */
 function defaultEventLocal(hospital: string | null): EventLocal {
@@ -377,6 +379,7 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
     (scanMode = false) => setModal({ kind: 'recover', devices: selectedRefs, ids: selectedIds, scanMode: scanMode && selectedIds.length === 0 }),
     [selectedRefs, selectedIds]
   )
+  const openBulkProductType = useCallback(() => setModal({ kind: 'productType', devices: selectedRefs, ids: selectedIds, note: selectionNote }), [selectedRefs, selectedIds, selectionNote])
 
   /** 병동 탭 [기기 일괄 이동] — 그 병동 배치 중 전체를 선택해 이동 모달 */
   const onBulkMoveWard = useCallback(
@@ -491,7 +494,7 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
           </div>
 
           <div className="mt-3">
-            <BulkActionBar count={selection.size} canWrite={canWrite} onMove={openBulkMove} onRecover={() => openBulkRecover(false)} onClear={clearSelection} note={selectionNote} />
+            <BulkActionBar count={selection.size} canWrite={canWrite} onMove={openBulkMove} onRecover={() => openBulkRecover(false)} onSetProductType={openBulkProductType} onClear={clearSelection} note={selectionNote} />
 
             {tab === 'list' && (
               <DeviceTable
@@ -584,6 +587,18 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
             models={models}
             wards={wardOptions}
             today={today}
+            productTypeContext={summary?.productTypeContext ?? null}
+            onDone={onDone}
+          />
+          <ProductTypeModal
+            open={modal?.kind === 'productType'}
+            onClose={closeModal}
+            hospitalCode={hospital}
+            devices={modal?.kind === 'productType' ? modal.devices : []}
+            deviceIds={modal?.kind === 'productType' ? modal.ids : []}
+            context={summary?.productTypeContext ?? null}
+            today={today}
+            note={modal?.kind === 'productType' ? modal.note : null}
             onDone={onDone}
           />
         </>

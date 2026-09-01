@@ -39,7 +39,7 @@ function parseConflicts(v: unknown): Record<string, 'TRANSFER'> {
 interface ParsedBody {
   items: RegisterItem[]
   /** 항목별 지정이 없을 때만 쓰는 공통값(미리보기 fixed 모드 판정용) */
-  common: { deviceInfoId: number | null; wardId: number | null; wardName: string | null; usageTypeId: number | null }
+  common: { deviceInfoId: number | null; wardId: number | null; wardName: string | null; usageTypeId: number | null; productType: string | null }
   anyItemWard: boolean
   anyItemModel: boolean
   occurredOn: string | null
@@ -52,9 +52,10 @@ interface ParsedBody {
 }
 
 /**
- * body `{ items[], occurredOn, memo?, ref?, conflicts?, deviceInfoId?, wardId?|wardName?, usageTypeId?, rowActions?, excludeRows?, wardAliases? }`
- * items[i]: 문자열(시리얼) 또는 `{ serialInput|serial|serialNo, deviceInfoId?, modelInput?, wardId?|wardName?, memo?, macAddress?, extDeviceCode?, usageTypeId?|usageType? }`
+ * body `{ items[], occurredOn, memo?, ref?, conflicts?, deviceInfoId?, wardId?|wardName?, usageTypeId?, productType?, rowActions?, excludeRows?, wardAliases? }`
+ * items[i]: 문자열(시리얼) 또는 `{ serialInput|serial|serialNo, deviceInfoId?, modelInput?, wardId?|wardName?, memo?, macAddress?, extDeviceCode?, usageTypeId?|usageType?, productType? }`
  * 병동 우선순위: item.wardId > item.wardName > body.wardId > body.wardName (모델·용도도 동일 — 용도는 item.usageTypeId > item.usageType(문자열) > body.usageTypeId)
+ * 상품유형(B-22): item.productType > body.productType > 서비스 기본값 규칙(병원 계약완료 딜 1종 → 그 값 · 0종 → 미지정 경고 · 혼합 → 400 필수)
  */
 function parseBody(body: Record<string, unknown>): ParsedBody {
   const rawItems = body.items
@@ -66,6 +67,7 @@ function parseBody(body: Record<string, unknown>): ParsedBody {
     wardId: optPositiveInt(body.wardId, '병동(wardId)'),
     wardName: optString(body.wardName),
     usageTypeId: optPositiveInt(body.usageTypeId, '용도(usageTypeId)'),
+    productType: optString(body.productType),
   }
   let anyItemWard = false
   let anyItemModel = false
@@ -107,6 +109,9 @@ function parseBody(body: Record<string, unknown>): ParsedBody {
     if (usageTypeId != null) item.usageTypeId = usageTypeId
     else if (usageTypeInput) item.usageTypeInput = usageTypeInput
     else if (common.usageTypeId != null) item.usageTypeId = common.usageTypeId
+    const productType = optString(o.productType ?? o.productTypeInput)
+    if (productType) item.productType = productType
+    else if (common.productType) item.productType = common.productType
     return item
   })
 
@@ -168,12 +173,14 @@ async function previewItems(hospitalCode: string, p: ParsedBody) {
       extDeviceCode: it.extDeviceCode ?? null,
       usageTypeId: it.usageTypeId ?? null,
       usageTypeInput: it.usageTypeInput ?? null,
+      productTypeInput: it.productType ?? null,
     }
   })
 
   return previewRows(hospitalCode, rows, {
     deviceInfoId: useFixedModel ? p.common.deviceInfoId : null,
     usageTypeId: p.common.usageTypeId,
+    productType: p.common.productType,
     wardMode: useFixedWard ? 'fixed' : 'column',
     wardId: useFixedWard ? p.common.wardId : null,
     emptyWardCell: 'warn',
@@ -203,7 +210,7 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     if (preview) {
       const result = await previewItems(hospital.hospitalCode, p)
-      return NextResponse.json({ rows: result.rows, summary: result.summary })
+      return NextResponse.json({ rows: result.rows, summary: result.summary, productTypeContext: result.summary.productTypeContext })
     }
 
     // 실행 — rowActions의 TRANSFER(행 기준)도 conflicts(시리얼 기준)로 합친다(판별 패널 [이관 처리]와 같은 입력)
@@ -247,6 +254,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           kind: t.kind,
           eventId: t.eventId,
           wardId: t.wardId,
+          productType: t.productType,
           fromHospitalCode: 'fromHospitalCode' in t ? t.fromHospitalCode : undefined,
           actionGroup: result.actionGroup,
           occurredOn: p.occurredOn ?? todayKst(),
@@ -271,6 +279,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           serials: capList(serials),
           truncated: result.events.length > 50 || serials.length > 50,
           newWards: result.newWards,
+          productType: p.common.productType,
           occurredOn: p.occurredOn ?? todayKst(),
           ref: p.ref,
           memo: p.memo,

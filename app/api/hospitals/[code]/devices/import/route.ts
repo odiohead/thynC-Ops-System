@@ -27,6 +27,8 @@ interface ImportOptions {
   deviceInfoId: number | null
   /** 폼 공통 용도(행에 용도 열이 없을 때 적용) */
   usageTypeId: number | null
+  /** 폼 공통 상품유형(일반/라이트 — 행 F열/붙여넣기 셀이 없을 때, 없으면 병원 딜 기본값 규칙) */
+  productType: string | null
   wardMode: 'column' | 'fixed'
   wardId: number | null
   emptyWardCell: 'warn' | 'error'
@@ -56,6 +58,7 @@ function parseOptions(raw: Record<string, unknown>): ImportOptions {
     mode: (modeRaw as ImportBatchMode | null) ?? null,
     deviceInfoId: optPositiveInt(raw.deviceInfoId, '모델(deviceInfoId)'),
     usageTypeId: optPositiveInt(raw.usageTypeId, '용도(usageTypeId)'),
+    productType: optString(raw.productType),
     wardMode: wardModeRaw,
     wardId: optPositiveInt(raw.wardId, '고정 병동(wardId)'),
     emptyWardCell: emptyRaw,
@@ -124,7 +127,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (input.rows.length === 0) {
       throw new BadRequest(
         sourceKind === 'EXCEL'
-          ? '파일에 유효한 데이터가 없습니다. 첫 시트 A열=시리얼(B 모델·C 병동·D 메모, 1행 헤더)을 확인하세요.'
+          ? '파일에 유효한 데이터가 없습니다. 첫 시트 A열=시리얼(B 모델·C 병동·D 메모·E 용도·F 상품유형, 1행 헤더)을 확인하세요.'
           : '유효한 시리얼 줄이 없습니다. 줄당 1건(시리얼<TAB>병동<TAB>메모) 또는 온프렘 export 목록을 붙여넣으세요.'
       )
     }
@@ -135,6 +138,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const defaults = {
       deviceInfoId: options.deviceInfoId,
       usageTypeId: options.usageTypeId,
+      productType: options.productType,
       wardMode: options.wardMode,
       wardId: options.wardId,
       emptyWardCell: options.emptyWardCell,
@@ -192,6 +196,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         sourceKind,
         fileName,
         usageTypeId: options.usageTypeId,
+        productType: options.productType,
         occurredOn: verified.summary.occurredOn,
         counts: {
           rows: batch.rowCount,

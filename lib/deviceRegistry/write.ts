@@ -6,13 +6,14 @@
  * 불성립이면 409로 트랜잭션 롤백. WMS 매칭은 표시용 일시 계산(DB 쓰기 없음 — §9.2).
  */
 import { Prisma } from '@prisma/client'
-import { normalizeSerial, normalizeWardName, type DeviceEventType } from '@/lib/deviceRegistryShared'
+import { normalizeSerial, normalizeWardName, resolveProductTypeDefault, type DeviceEventType, type ProductType, type ProductTypeContext } from '@/lib/deviceRegistryShared'
 import {
   RegistryError,
   assertTransition,
   eventLabel,
   findUnitsBySerial,
   getDeviceOr404,
+  getHospitalProductTypeContext,
   getOrCreateUnit,
   getWardById,
   guardOf,
@@ -24,6 +25,7 @@ import {
   loadTrackedModels,
   loadUsageTypes,
   mapDbError,
+  parseProductTypeInput,
   prepareCtx,
   reasonByValue,
   rebuildUnitProjection,
@@ -137,6 +139,12 @@ export interface RegisterItem {
   usageTypeId?: number | null
   /** 용도 입력(name/value 별칭 — '판매용'·'EVAL' 등). 미매칭은 400 '용도 값이 올바르지 않습니다 (판매용/평가용)' */
   usageTypeInput?: string | null
+  /**
+   * 상품유형(일반/라이트 — 별칭 허용, 미매칭 400). 배치 속성(B-22): 이 REGISTER가 만드는 배치 행의 값.
+   * 생략(undefined)이면 병원 계약완료 딜 기준 기본값 규칙(1종 → 그 값 · 0종 → 미지정+경고 · 혼합 → 400 필수).
+   * `opts.productTypeResolved`가 true면(임포트 실행 경로) 규칙을 건너뛰고 값(null 포함)을 그대로 쓴다
+   */
+  productType?: string | null
 }
 
 export interface RegisterOpts extends RegistryOpts {
@@ -144,6 +152,10 @@ export interface RegisterOpts extends RegistryOpts {
   conflicts?: Record<string, 'TRANSFER'> | null
   /** 임포트 실행에서만 — 이벤트에 import_batch_id 부여, skip은 집계(409 없음) */
   importBatchId?: number | null
+  /** 항목 productType이 이미 규칙을 거친 값(임포트 미리보기 결과) — 기본값 규칙·혼합 400을 다시 적용하지 않는다 */
+  productTypeResolved?: boolean
+  /** 테스트 전용 — 병원 딜 대신 이 문맥으로 기본값 규칙을 적용(스모크에서 혼합 병원 시나리오 주입) */
+  productTypeContextOverride?: ProductTypeContext | null
 }
 
 export interface RegisteredRef {
@@ -156,6 +168,8 @@ export interface RegisteredRef {
   unitCreated: boolean
   /** 등록 후 유닛의 용도 id(null=미지정) */
   usageTypeId: number | null
+  /** 이 REGISTER가 정한 배치 상품유형(null=미지정) */
+  productType: string | null
 }
 
 export interface TransferredRef extends RegisteredRef {
@@ -187,6 +201,10 @@ interface PreparedItem {
   modelExplicit: boolean
   /** 행 용도(해석 완료) — 기존 유닛에 다른 용도가 있으면 유지 + 경고 */
   usage: UsageType | null
+  /** 명시 상품유형(별칭 매칭 완료) — undefined면 규칙 적용 대상 */
+  productTypeExplicit: ProductType | null | undefined
+  /** 최종 배치 상품유형(규칙 적용 후) */
+  productType: ProductType | null
   /** 배치 행이 있는 기존 개체 */
   existing: DeviceRow | null
   /** 기존 유닛(배치 유무 무관) */
@@ -230,8 +248,10 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
     if (!res.model) throw new RegistryError(400, `${ns.serialNo}: ${res.error}`, { serial: ns.serialNo })
     for (const w of res.warnings) warnings.push(`${ns.serialNo}: ${w}`)
     let usage: UsageType | null
+    let productTypeExplicit: ProductType | null | undefined
     try {
       usage = resolveUsageTypeInput(usageTypes, { usageTypeId: item.usageTypeId, usageTypeInput: item.usageTypeInput }, null)
+      productTypeExplicit = item.productType === undefined ? undefined : parseProductTypeInput(item.productType)
     } catch (e) {
       if (e instanceof RegistryError) throw new RegistryError(e.status, `${ns.serialNo}: ${e.message}`, { serial: ns.serialNo })
       throw e
@@ -244,6 +264,8 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
       model: res.model,
       modelExplicit: item.deviceInfoId != null || !!item.modelInput || item.onpremDeviceType != null,
       usage,
+      productTypeExplicit,
+      productType: null,
       existing: null,
       unit: null,
       unitCreated: false,
@@ -292,8 +314,23 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
     throw new RegistryError(409, '이미 이 병원에 배치 중인 시리얼입니다', { skipped })
   }
 
-  // 3) 병동 해석 — id는 개별 검증, 이름은 일괄(name_norm 오름차순 생성)
+  // 2b) 상품유형(배치 속성, B-22) — 명시값 > 병원 계약완료 딜 기본값 규칙(혼합 병원 + 미지정 → 400 필수). skip 항목은 배치가 바뀌지 않으므로 제외
   const work = prepared.filter((x) => x.kind !== 'skip')
+  if (opts?.productTypeResolved) {
+    for (const x of work) x.productType = x.productTypeExplicit ?? null
+  } else if (work.length > 0) {
+    const ptCtx = opts?.productTypeContextOverride !== undefined ? opts.productTypeContextOverride : await getHospitalProductTypeContext(here, tx)
+    const ptWarnings = new Set<string>()
+    for (const x of work) {
+      const res = resolveProductTypeDefault(ptCtx, x.productTypeExplicit ?? null)
+      if (res.error) throw new RegistryError(400, res.error, { serial: x.serialNo })
+      if (res.warning) ptWarnings.add(res.warning)
+      x.productType = res.productType
+    }
+    for (const w of Array.from(ptWarnings)) warnings.push(w)
+  }
+
+  // 3) 병동 해석 — id는 개별 검증, 이름은 일괄(name_norm 오름차순 생성)
   const wardIdCache = new Map<number, WardRef>()
   for (const id of uniqInts(work.map((x) => x.item.wardId))) wardIdCache.set(id, await getWardById(tx, here, id))
   const nameMap = await resolveWardsByName(
@@ -360,6 +397,7 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
         actionGroup: p.actionGroup,
         source: p.source,
         importBatchId: opts?.importBatchId ?? null,
+        productType: x.existing!.productType, // 상대 병원 배치의 상품유형 스냅샷
         actor: p.actor,
       })
     }
@@ -375,6 +413,7 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
       actionGroup: p.actionGroup,
       source: p.source,
       importBatchId: opts?.importBatchId ?? null,
+      productType: x.productType, // 이 병원 자리의 판매 조건(새 REGISTER가 정한다)
       actor: p.actor,
     })
     slots.push({ x, deviceId, recoverIdx, registerIdx })
@@ -409,7 +448,7 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
     wms: Object.fromEntries(Array.from(wmsMap.entries())),
   }
   for (const s of slots) {
-    const ref: RegisteredRef = { id: s.deviceId, serialNo: s.x.serialNo, eventId: events[s.registerIdx].id, wardId: s.x.ward?.id ?? null, unitCreated: s.x.unitCreated, usageTypeId: s.x.unit?.usageTypeId ?? null }
+    const ref: RegisteredRef = { id: s.deviceId, serialNo: s.x.serialNo, eventId: events[s.registerIdx].id, wardId: s.x.ward?.id ?? null, unitCreated: s.x.unitCreated, usageTypeId: s.x.unit?.usageTypeId ?? null, productType: s.x.productType }
     if (s.x.kind === 'create') result.created.push(ref)
     else if (s.x.kind === 'reregister') result.reregistered.push(ref)
     else if (s.x.kind === 'transfer') {
@@ -462,6 +501,7 @@ export async function moveDeviceWard(
       ref: p.ref,
       actionGroup: p.actionGroup,
       source: p.source,
+      productType: device.productType, // 기록 시점 배치 상품유형 스냅샷
       actor: p.actor,
     })
     if (!event) throw new RegistryError(409, '같은 연결 키의 이벤트가 이미 기록되어 있습니다')
@@ -511,6 +551,7 @@ export async function recoverDevice(
       relatedDeviceId,
       actionGroup: p.actionGroup,
       source: p.source,
+      productType: device.productType, // 회수되는 자리의 상품유형 스냅샷(교체 집계 축)
       actor: p.actor,
     })
     if (!event) throw new RegistryError(409, '같은 연결 키의 이벤트가 이미 기록되어 있습니다')
@@ -544,6 +585,13 @@ export interface ReplaceInput {
   oldUsageTypeId?: number | null
   /** 신 기기 용도 — 신규 유닛일 때 부여. 생략 시 구 기기 용도를 승계(교체기는 같은 용도가 일반적) */
   newUsageTypeId?: number | null
+  /**
+   * 상품유형(일반/라이트) — 신 배치는 **구 배치의 상품유형을 상속**한다(B-22). 구 기기가 원장에 없어 소급 등록하는 경우에만 이 값을 쓰고
+   * (생략 시 병원 딜 기본값 규칙 — 혼합 병원이면 400 필수), 구 배치가 있는 경우 지정값은 무시(경고)
+   */
+  productType?: string | null
+  /** 테스트 전용 — 소급 경로 기본값 규칙에 쓸 문맥 주입 */
+  productTypeContextOverride?: ProductTypeContext | null
 }
 
 export interface ReplaceResult {
@@ -562,6 +610,8 @@ export interface ReplaceResult {
   linkedRecoverEventId: number | null
   oldDevice: DeviceRow
   newDevice: DeviceRow
+  /** 신 배치에 적용된 상품유형(구 배치 상속 / 소급 경로는 입력·기본값) */
+  productType: string | null
   eventIds: number[]
   warnings: string[]
   wms: Record<number, WmsMatch | null>
@@ -577,6 +627,7 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
     const reason = input.reasonCodeId != null ? await requireRecoveryReason(tx, Number(input.reasonCodeId)) : await reasonByValue(tx, 'DEFECT')
     const oldUsage = await requireUsageType(tx, input.oldUsageTypeId == null ? null : Number(input.oldUsageTypeId))
     const newUsage = await requireUsageType(tx, input.newUsageTypeId == null ? null : Number(input.newUsageTypeId))
+    const productTypeInput = input.productType === undefined ? undefined : parseProductTypeInput(input.productType)
 
     // ── 구 기기 식별 (유닛 + 배치)
     let old: DeviceRow | null = null
@@ -611,6 +662,8 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
     let linkedRecover: EventRow | null = null
     let oldWardAtTime: number | null = null
     const oldEvents = old ? (await loadDeviceEvents(tx, [old.id])).get(old.id) ?? [] : []
+    /** 신 배치 상품유형 — 구 배치 상속(B-22). 소급 경로만 입력·병원 기본값 규칙 */
+    let inheritedProductType: string | null = null
     if (!old) {
       oldCase = 'backfill'
       const res = resolveModel(models, { serialNo: oldKey, deviceInfoId: input.oldDeviceInfoId ?? oldUnit?.deviceInfoId ?? null })
@@ -620,11 +673,17 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
       oldWard = await resolveWardInput(tx, here, { wardId: input.oldWardId, wardName: input.oldWardName }, { autoCreate })
       oldWardAtTime = oldWard?.id ?? null
       warnings.push(`구 기기 ${oldKey}는 원장에 없어 업무일자로 소급 등록했습니다 (실제 설치일은 기록되지 않음)`)
+      const ptCtx = input.productTypeContextOverride !== undefined ? input.productTypeContextOverride : await getHospitalProductTypeContext(here, tx)
+      const ptRes = resolveProductTypeDefault(ptCtx, productTypeInput ?? null)
+      if (ptRes.error) throw new RegistryError(400, ptRes.error)
+      if (ptRes.warning) warnings.push(ptRes.warning)
+      inheritedProductType = ptRes.productType
     } else if (old.status === 'ACTIVE' && old.hospitalCode === here) {
       oldCase = 'active_here'
       const st = stateAt(oldEvents, p.occurredOn)
       assertTransition(st, 'RECOVER', here, { serial: old.serialNo })
       oldWardAtTime = st.wardId
+      inheritedProductType = old.productType
     } else if (old.status === 'ACTIVE') {
       const name = (await hospitalNames(tx, [old.hospitalCode])).get(old.hospitalCode!) ?? old.hospitalCode
       throw new RegistryError(409, `구 기기가 ${name}에 배치 중 — 그 병원에서 회수(또는 이관) 기록 후 신 기기를 등록으로 처리하세요`) // (2)
@@ -635,6 +694,10 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
       oldCase = 'recovered_here'
       linkedRecover = [...sortEvents(oldEvents)].reverse().find((e) => e.eventType === 'RECOVER') ?? null
       oldWardAtTime = linkedRecover?.fromWardId ?? null
+      inheritedProductType = old.productType // 회수 전 마지막 값(배치 행 보존분)
+    }
+    if (oldCase !== 'backfill' && productTypeInput !== undefined && productTypeInput !== inheritedProductType) {
+      warnings.push(`상품유형은 구 기기 배치 값(${inheritedProductType ?? '미지정'})을 상속합니다 — 지정값(${productTypeInput ?? '미지정'})은 무시`)
     }
 
     // ── 신 기기 병동(기본 구 병동)
@@ -699,7 +762,7 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
     let linkedRecoverEventId: number | null = null
 
     if (oldCase === 'backfill') {
-      backfillEvent = await insertEvent(tx, { ...base, deviceId: oldId, eventType: 'REGISTER', hospitalCode: here, toWardId: oldWardAtTime, memo: '교체 시 소급 등록' })
+      backfillEvent = await insertEvent(tx, { ...base, deviceId: oldId, eventType: 'REGISTER', hospitalCode: here, toWardId: oldWardAtTime, memo: '교체 시 소급 등록', productType: inheritedProductType })
       eventIds.push(backfillEvent!.id)
     }
     if (oldCase !== 'recovered_here') {
@@ -712,6 +775,7 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
         reasonCodeId: reason.id,
         relatedDeviceId: newId,
         memo: p.memo,
+        productType: inheritedProductType, // 회수되는 자리의 상품유형(교체 집계 축)
       })
       eventIds.push(recoverEvent!.id)
     } else if (linkedRecover) {
@@ -728,18 +792,22 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
         fromWardId: transferFromWard,
         reasonCodeId: transferReason.id,
         memo: p.memo,
+        productType: newDev!.productType, // 상대 병원 배치의 상품유형 스냅샷
       })
       eventIds.push(transferRecoverEvent!.id)
     }
     if (newCase === 'active_here') {
+      if ((newDev!.productType ?? null) !== (inheritedProductType ?? null)) {
+        warnings.push(`신 기기 ${newDev!.serialNo}는 이미 이 병원에 상품유형 ${newDev!.productType ?? '미지정'}(으)로 배치 중 — 구 기기 값(${inheritedProductType ?? '미지정'})을 상속하지 않습니다 (변경은 상품유형 지정)`)
+      }
       if (targetWardId != null && newDev!.wardId !== targetWardId) {
         const st = stateAt(newEvents, p.occurredOn)
         assertTransition(st, 'MOVE_WARD', here, { serial: newDev!.serialNo })
-        movedNewEvent = await insertEvent(tx, { ...base, deviceId: newId, eventType: 'MOVE_WARD', hospitalCode: here, fromWardId: st.wardId, toWardId: targetWardId, memo: p.memo })
+        movedNewEvent = await insertEvent(tx, { ...base, deviceId: newId, eventType: 'MOVE_WARD', hospitalCode: here, fromWardId: st.wardId, toWardId: targetWardId, memo: p.memo, productType: newDev!.productType })
         eventIds.push(movedNewEvent!.id)
       }
     } else {
-      registerEvent = await insertEvent(tx, { ...base, deviceId: newId, eventType: 'REGISTER', hospitalCode: here, toWardId: targetWardId, relatedDeviceId: oldId, memo: p.memo })
+      registerEvent = await insertEvent(tx, { ...base, deviceId: newId, eventType: 'REGISTER', hospitalCode: here, toWardId: targetWardId, relatedDeviceId: oldId, memo: p.memo, productType: inheritedProductType })
       eventIds.push(registerEvent!.id)
     }
 
@@ -762,6 +830,7 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
       linkedRecoverEventId,
       oldDevice,
       newDevice,
+      productType: newDevice.productType,
       eventIds,
       warnings,
       wms: Object.fromEntries(Array.from(wmsMap.entries())),
@@ -770,15 +839,21 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// bulkDeviceAction — 일괄 이동/회수 (§7.1 bulk 행: 같은 병원 ACTIVE만, 단일 tx)
+// bulkDeviceAction — 일괄 이동/회수/상품유형 지정 (§7.1 bulk 행: 같은 병원 ACTIVE만, 단일 tx)
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const BULK_ACTIONS = ['MOVE_WARD', 'RECOVER', 'SET_PRODUCT_TYPE'] as const
+export type BulkActionKind = (typeof BULK_ACTIONS)[number]
+
 export interface BulkInput {
-  action: 'MOVE_WARD' | 'RECOVER'
+  /** SET_PRODUCT_TYPE(B-22): 기기마다 CORRECT 이벤트(changes.productType {before,after}) — write(USER+), 같은 action_group */
+  action: BulkActionKind
   deviceIds: number[]
   toWardId?: number | null
   toWardName?: string | null
   reasonCodeId?: number | null
+  /** SET_PRODUCT_TYPE — 일반/라이트(별칭 허용) 또는 null(미지정으로) */
+  productType?: string | null
 }
 
 export interface BulkResult {
@@ -794,7 +869,7 @@ export const BULK_MAX = 2000
 
 export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?: RegistryOpts): Promise<BulkResult> {
   return withRegistryTx(opts, async (tx) => {
-    if (input.action !== 'MOVE_WARD' && input.action !== 'RECOVER') throw new RegistryError(400, '일괄 액션은 MOVE_WARD 또는 RECOVER만 가능합니다')
+    if (!BULK_ACTIONS.includes(input.action)) throw new RegistryError(400, '일괄 액션은 MOVE_WARD·RECOVER·SET_PRODUCT_TYPE만 가능합니다')
     const p = await prepareCtx(tx, ctx, { requireHospital: true })
     const here = p.hospitalCode!
     const ids = uniqInts(input.deviceIds ?? [])
@@ -814,6 +889,31 @@ export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?
     let reasonId: number | null = null
     let targets = devices
     const skipped: SkippedItem[] = []
+    if (input.action === 'SET_PRODUCT_TYPE') {
+      // 상품유형 일괄 지정 — 상태 전이 없음. 기기마다 CORRECT(changes.productType) + 배치 행 갱신(fold도 같은 값을 낸다)
+      const after = input.productType === undefined ? null : parseProductTypeInput(input.productType)
+      for (const d of devices) if ((d.productType ?? null) === after) skipped.push({ deviceId: d.id, serialNo: d.serialNo, reason: `이미 상품유형 ${after ?? '미지정'}` })
+      targets = devices.filter((d) => (d.productType ?? null) !== after)
+      if (targets.length === 0) throw new RegistryError(409, `선택한 기기가 모두 이미 상품유형 ${after ?? '미지정'}입니다`, { skipped })
+      const events = await insertEvents(
+        tx,
+        targets.map((d) => ({
+          deviceId: d.id,
+          eventType: 'CORRECT' as const,
+          hospitalCode: here,
+          occurredOn: p.occurredOn,
+          memo: p.memo,
+          ref: p.ref,
+          actionGroup: p.actionGroup,
+          source: p.source,
+          changes: { productType: { before: d.productType ?? null, after } } as unknown as Prisma.InputJsonValue,
+          productType: after,
+          actor: p.actor,
+        }))
+      )
+      await tx.hospitalDevice.updateMany({ where: { deviceId: { in: targets.map((d) => d.id) }, status: 'ACTIVE', hospitalCode: here }, data: { productType: after } })
+      return { actionGroup: p.actionGroup, events, eventIds: events.map((e) => e.id), skipped, affectedDeviceIds: targets.map((d) => d.id), warnings: p.warnings }
+    }
     if (input.action === 'MOVE_WARD') {
       toWard = await resolveWardInput(tx, here, { wardId: input.toWardId, wardName: input.toWardName }, { autoCreate: opts?.autoCreateWard ?? true })
       if (!toWard) throw new RegistryError(400, '이동할 병동을 지정하세요')
@@ -848,6 +948,7 @@ export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?
         ref: p.ref,
         actionGroup: p.actionGroup,
         source: p.source,
+        productType: d.productType, // 기록 시점 배치 상품유형 스냅샷
         actor: p.actor,
       })
     }
@@ -875,6 +976,8 @@ export interface CorrectChanges {
   extDeviceCode?: string | null
   /** 용도(DEVICE_USAGE_TYPE id, null=미지정) — 유닛 속성. 라우트 권한은 write(USER+) — 나머지 식별 보정은 admin */
   usageTypeId?: number | null
+  /** 상품유형(일반/라이트, null=미지정) — 배치 속성(B-22). 라우트 권한은 write(USER+) */
+  productType?: string | null
 }
 
 export type ChangeSet = Record<string, { before: unknown; after: unknown }>
@@ -948,6 +1051,15 @@ export async function correctDevice(ctx: RegistryCtx, input: { deviceId: number;
         unitData.usageTypeId = v
       }
     }
+    let productTypeSnapshot: string | null = device.productType ?? null
+    if (ch.productType !== undefined) {
+      const v = parseProductTypeInput(ch.productType)
+      if (v !== (device.productType ?? null)) {
+        changes.productType = { before: device.productType ?? null, after: v }
+        placementData.productType = v
+        productTypeSnapshot = v
+      }
+    }
     if (Object.keys(changes).length === 0) throw new RegistryError(400, '변경 사항이 없습니다')
 
     try {
@@ -966,6 +1078,7 @@ export async function correctDevice(ctx: RegistryCtx, input: { deviceId: number;
       actionGroup: p.actionGroup,
       source: p.source,
       changes: changes as unknown as Prisma.InputJsonValue,
+      productType: productTypeSnapshot,
       actor: p.actor,
     })
     const updated = await getDeviceOr404(tx, device.id)
