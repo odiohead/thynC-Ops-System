@@ -1,15 +1,19 @@
 /**
  * 디바이스 원장 서비스 — 공통 코어 (projects/hospital_device_registry_design.md §4 · §7.0 · §7.3)
  *
- * 이 폴더(`lib/deviceRegistry/*`)가 `hospital_devices`·`hospital_device_events`·`hospital_wards`·
+ * 이 폴더(`lib/deviceRegistry/*`)가 `device_units`·`hospital_devices`·`hospital_device_events`·`hospital_wards`·
  * `hospital_device_import_batches`의 **유일한 쓰기자**다. 라우트는 얇게(파싱·권한·logAudit) 유지한다.
+ *
+ * 3층 구조(B-20, 2026-09-01): `device_info`(모델) → `device_units`(시리얼 정체성, **공개 device id**) → `hospital_devices`(병원 배치 프로젝션, 유닛당 0..1행).
+ * 서비스 내부·API가 다루는 `DeviceRow`는 유닛 + 배치 프로젝션을 평탄화한 형상이며 `id`는 항상 `device_units.id`다.
  *
  * - 불변식 1: 이벤트가 단일 소스, 프로젝션은 `rebuildUnitProjection`의 (occurred_on ASC, id ASC) fold 파생값
  * - 불변식 3: 소급 입력 허용 — 삽입 시점 상태로 전이 검증(`assertTransition`) + 삽입 후 전체 재-fold(불성립 409)
  * - 동시성: 프로젝션 UPDATE는 이전 (status, hospital_code, ward_id) 가드 updateMany, count≠1 → 409
+ * - 유닛은 자동 삭제하지 않는다 — 이벤트 0건이면 배치 행만 지우고 유닛(시리얼 정체성)은 남는다(고아 유닛 = 원장 밖 식별자)
  * - 서비스는 logAudit·Slack을 호출하지 않는다(라우트 책임). inventory_* 테이블에 쓰지 않는다(D9)
  */
-import { Prisma, type HospitalDevice, type HospitalDeviceEvent, type PrismaClient } from '@prisma/client'
+import { Prisma, type DeviceUnit, type HospitalDevice, type HospitalDeviceEvent, type PrismaClient } from '@prisma/client'
 import { randomUUID } from 'crypto'
 import { prisma } from '@/lib/prisma'
 import {
@@ -23,6 +27,7 @@ import {
   isFutureYmd,
   isYmd,
   matchesSerialPattern,
+  normalizeSerial,
   normalizeWardName,
   resolveTransitionFrom,
   todayKst,
@@ -125,7 +130,7 @@ export function isRegistryError(e: unknown): e is RegistryError {
 
 /**
  * DB 예외 → RegistryError 매핑 (§7.0·§5.6·§7.3)
- * - P2002 serial_no → 409 '이미 등록된 시리얼' / inventory_unit_id → 409
+ * - P2002 serial_no → 409 '이미 등록된 시리얼' / device_id(유닛당 배치 1행) → 409 / CHECK 23514(시리얼 미정규화 등) → 409
  * - P2003 또는 커밋 시 복합 FK(23503) → 409 '병동이 이 병원에 속하지 않습니다'
  * - P2034(데드락·직렬화 실패, 40P01) → 409 '동시 임포트 충돌 — 다시 실행하세요'
  */
@@ -134,9 +139,9 @@ export function mapDbError(e: unknown): unknown {
   if (e instanceof Prisma.PrismaClientKnownRequestError) {
     const target = String((e.meta as { target?: unknown } | undefined)?.target ?? '')
     if (e.code === 'P2002') {
-      if (target.includes('inventory_unit_id')) return new RegistryError(409, '창고 개체가 이미 다른 기기에 연결되어 있습니다')
       if (target.includes('name_norm')) return new RegistryError(409, '같은 이름의 병동이 이미 있습니다')
       if (target.includes('ext_ward_code')) return new RegistryError(409, '같은 온프렘 병동 코드가 이미 있습니다')
+      if (target.includes('device_id')) return new RegistryError(409, '다른 사용자가 이 기기를 먼저 등록했습니다 — 새로고침 후 다시 시도하세요')
       return new RegistryError(409, '이미 등록된 시리얼입니다')
     }
     if (e.code === 'P2003') {
@@ -149,6 +154,8 @@ export function mapDbError(e: unknown): unknown {
   }
   if (e instanceof Prisma.PrismaClientUnknownRequestError) {
     if (e.message.includes('23503') && e.message.includes('ward')) return new RegistryError(409, '병동이 이 병원에 속하지 않습니다')
+    if (e.message.includes('23514') && e.message.includes('serial_no_normalized')) return new RegistryError(409, '시리얼이 정규화되지 않았습니다 (대문자·공백 제거 키만 저장)')
+    if (e.message.includes('23514')) return new RegistryError(409, '데이터 무결성 제약 위반 — 입력을 확인하세요')
     if (e.message.includes('40P01')) return new RegistryError(409, '동시 임포트 충돌 — 다시 실행하세요')
     if (e.message.includes('23505')) return new RegistryError(409, '이미 존재하는 값입니다 (유니크 충돌)')
   }
@@ -447,7 +454,75 @@ export function assertTransition(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type EventRow = HospitalDeviceEvent
-export type DeviceRow = HospitalDevice
+/** `device_units` 원행(1층) */
+export type UnitRow = DeviceUnit
+/** `hospital_devices` 원행(2층 배치 프로젝션) */
+export type PlacementRow = HospitalDevice
+
+/**
+ * 공개 기기 형상 — 유닛(식별) + 배치 프로젝션(상태)을 평탄화. `id` = `device_units.id`(공개 device id), `placementId` = `hospital_devices.id`(내부).
+ * 라우트 응답·audit 스냅샷·서비스 반환값이 모두 이 형상을 쓴다(구 단일 테이블 시절의 JSON 키 유지).
+ */
+export interface DeviceRow {
+  id: number
+  placementId: number
+  deviceInfoId: number
+  serialNo: string
+  serialRaw: string | null
+  macAddress: string | null
+  memo: string | null
+  /** 유닛이 처음 생긴 경로 */
+  source: string
+  extDeviceCode: string | null
+  extLastSeenAt: Date | null
+  extSyncedAt: Date | null
+  status: string
+  hospitalCode: string | null
+  wardId: number | null
+  placedOn: Date | null
+  lastHospitalCode: string | null
+  recoveredOn: Date | null
+  recoverReasonId: number | null
+  lastEventType: string | null
+  lastEventOn: Date | null
+  /** 교체기 유닛 id */
+  replacedById: number | null
+  createdAt: Date
+  updatedAt: Date
+  unitCreatedAt: Date
+  unitUpdatedAt: Date
+}
+
+/** 유닛 + 배치 → DeviceRow */
+export function flattenDevice(unit: UnitRow, placement: PlacementRow): DeviceRow {
+  return {
+    id: unit.id,
+    placementId: placement.id,
+    deviceInfoId: unit.deviceInfoId,
+    serialNo: unit.serialNo,
+    serialRaw: unit.serialRaw,
+    macAddress: unit.macAddress,
+    memo: unit.memo,
+    source: unit.source,
+    extDeviceCode: placement.extDeviceCode,
+    extLastSeenAt: placement.extLastSeenAt,
+    extSyncedAt: placement.extSyncedAt,
+    status: placement.status,
+    hospitalCode: placement.hospitalCode,
+    wardId: placement.wardId,
+    placedOn: placement.placedOn,
+    lastHospitalCode: placement.lastHospitalCode,
+    recoveredOn: placement.recoveredOn,
+    recoverReasonId: placement.recoverReasonId,
+    lastEventType: placement.lastEventType,
+    lastEventOn: placement.lastEventOn,
+    replacedById: placement.replacedById,
+    createdAt: placement.createdAt,
+    updatedAt: placement.updatedAt,
+    unitCreatedAt: unit.createdAt,
+    unitUpdatedAt: unit.updatedAt,
+  }
+}
 
 export interface EventInput {
   deviceId: number
@@ -537,8 +612,21 @@ export function guardOf(d: Pick<DeviceRow, 'status' | 'hospitalCode' | 'wardId'>
   return { status: d.status, hospitalCode: d.hospitalCode, wardId: d.wardId }
 }
 
-/** fold 상태 → hospital_devices 프로젝션 컬럼 */
-export function projectionData(s: FoldState): Prisma.HospitalDeviceUncheckedUpdateInput {
+/** fold 상태 → hospital_devices 프로젝션 컬럼(스칼라만 — create·update 입력 양쪽에 그대로 쓴다) */
+export interface ProjectionColumns {
+  status: string
+  hospitalCode: string | null
+  wardId: number | null
+  placedOn: Date | null
+  lastHospitalCode: string | null
+  recoveredOn: Date | null
+  recoverReasonId: number | null
+  lastEventType: string | null
+  lastEventOn: Date | null
+  replacedById: number | null
+}
+
+export function projectionData(s: FoldState): ProjectionColumns {
   return {
     status: s.status ?? 'ACTIVE',
     hospitalCode: s.hospitalCode,
@@ -554,18 +642,19 @@ export function projectionData(s: FoldState): Prisma.HospitalDeviceUncheckedUpda
 }
 
 /**
- * 프로젝션 재계산 — 이벤트를 다시 접어 hospital_devices 행을 UPDATE 한다(불변식 1).
- * - 이벤트 0건이면 UPDATE 없이 EMPTY 상태 반환(호출부가 개체 행을 삭제)
+ * 프로젝션 재계산 — 유닛의 이벤트를 다시 접어 배치 행(`hospital_devices.device_id = unitId`)을 UPDATE 한다(불변식 1).
+ * - 이벤트 0건이면 쓰지 않고 EMPTY 상태 반환(호출부가 배치 행을 삭제 — `rebuildOrDelete`)
+ * - 배치 행이 없는데 이벤트가 있으면 생성(첫 REGISTER 직후 경로) — `device_id` UNIQUE 충돌은 mapDbError → 409
  * - `guard`가 있으면 이전 (status, hospital_code, ward_id) 조건 updateMany, count≠1 → 409 (§7.0 동시성)
  * - fold 불성립은 `illegal`이 만든 409 (기본 문구 / 소급 삽입은 retroIllegal)
  */
 export async function rebuildUnitProjection(
   client: DbClient,
-  deviceId: number,
+  unitId: number,
   opts?: { guard?: ProjectionGuard; illegal?: (ev: FoldEvent, state: FoldState) => RegistryError }
 ): Promise<{ state: FoldState; events: EventRow[] }> {
   const events = await client.hospitalDeviceEvent.findMany({
-    where: { deviceId },
+    where: { deviceId: unitId },
     orderBy: [{ occurredOn: 'asc' }, { id: 'asc' }],
   })
   if (events.length === 0) return { state: { ...EMPTY_STATE }, events }
@@ -573,41 +662,124 @@ export async function rebuildUnitProjection(
   const data = projectionData(state)
   if (opts?.guard) {
     const res = await client.hospitalDevice.updateMany({
-      where: { id: deviceId, status: opts.guard.status, hospitalCode: opts.guard.hospitalCode, wardId: opts.guard.wardId },
+      where: { deviceId: unitId, status: opts.guard.status, hospitalCode: opts.guard.hospitalCode, wardId: opts.guard.wardId },
       data,
     })
     if (res.count !== 1) {
       throw new RegistryError(409, '다른 사용자가 이 기기를 먼저 변경했습니다 — 새로고침 후 다시 시도하세요')
     }
   } else {
-    await client.hospitalDevice.update({ where: { id: deviceId }, data })
+    await client.hospitalDevice.upsert({ where: { deviceId: unitId }, update: data, create: { deviceId: unitId, ...data } })
   }
   return { state, events }
 }
 
-/** 이벤트 0건이면 개체 행 삭제, 아니면 재계산. 삭제 여부 반환. */
+/** 이벤트 0건이면 배치 행 삭제(유닛은 남김), 아니면 재계산. 삭제 여부 반환. */
 export async function rebuildOrDelete(
   client: DbClient,
-  deviceId: number,
+  unitId: number,
   opts?: { illegal?: (ev: FoldEvent, state: FoldState) => RegistryError }
 ): Promise<{ deleted: boolean; state: FoldState }> {
-  const { state, events } = await rebuildUnitProjection(client, deviceId, opts)
+  const { state, events } = await rebuildUnitProjection(client, unitId, opts)
   if (events.length === 0) {
-    await client.hospitalDevice.delete({ where: { id: deviceId } })
+    await client.hospitalDevice.deleteMany({ where: { deviceId: unitId } })
     return { deleted: true, state }
   }
   return { deleted: false, state }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 유닛(시리얼 정체성) — 조회·생성 (§5.2b)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface UnitUpsertInput {
+  /** 원문 입력(정규화는 여기서) — `serialNo`가 이미 정규화 키면 그대로 */
+  serialInput?: string | null
+  serialNo?: string | null
+  serialRaw?: string | null
+  deviceInfoId: number
+  macAddress?: string | null
+  source: RegistrySource
+}
+
+/**
+ * 시리얼 → 유닛 찾기/만들기. 정규화 키(`normalizeSerial`)로 조회하고 없으면 생성한다.
+ * - 같은 시리얼이 **다른 모델**로 이미 등록돼 있으면 409(시리얼은 전역 정체성 — 모델 정정은 CORRECT로)
+ * - 기존 유닛의 mac/serialRaw가 비어 있으면 입력값으로 채운다(덮어쓰지 않음)
+ * 반환 `created`는 이번 호출에서 새로 만들었는지.
+ */
+export async function getOrCreateUnit(client: DbClient, input: UnitUpsertInput): Promise<{ unit: UnitRow; created: boolean }> {
+  let serialNo: string
+  let serialRaw: string | null
+  if (input.serialNo) {
+    const ns = normalizeSerial(input.serialNo)
+    serialNo = ns.serialNo
+    serialRaw = input.serialRaw ?? ns.serialRaw
+  } else {
+    const ns = normalizeSerial(input.serialInput)
+    serialNo = ns.serialNo
+    serialRaw = ns.serialRaw
+  }
+  if (!serialNo) throw new RegistryError(400, '시리얼이 비어 있습니다')
+  const mac = input.macAddress?.trim() || null
+  const existing = await client.deviceUnit.findUnique({ where: { serialNo } })
+  if (existing) {
+    if (existing.deviceInfoId !== input.deviceInfoId) {
+      const models = await client.deviceInfo.findMany({ where: { id: { in: [existing.deviceInfoId, input.deviceInfoId] } }, select: { id: true, deviceModel: true } })
+      const name = (id: number) => models.find((m) => m.id === id)?.deviceModel ?? `#${id}`
+      throw new RegistryError(409, `이미 다른 모델로 등록된 시리얼입니다 (${serialNo}: ${name(existing.deviceInfoId)} ≠ ${name(input.deviceInfoId)})`, { serial: serialNo })
+    }
+    const fill: Prisma.DeviceUnitUncheckedUpdateInput = {}
+    if (mac && !existing.macAddress) fill.macAddress = mac
+    if (serialRaw && !existing.serialRaw) fill.serialRaw = serialRaw
+    if (Object.keys(fill).length === 0) return { unit: existing, created: false }
+    return { unit: await client.deviceUnit.update({ where: { id: existing.id }, data: fill }), created: false }
+  }
+  try {
+    const unit = await client.deviceUnit.create({ data: { serialNo, serialRaw, deviceInfoId: input.deviceInfoId, macAddress: mac, source: input.source } })
+    return { unit, created: true }
+  } catch (e) {
+    throw mapDbError(e)
+  }
+}
+
+/** 유닛 id → 유닛 원행(배치 무관) */
+export async function loadUnits(client: DbClient, unitIds: readonly number[]): Promise<Map<number, UnitRow>> {
+  const ids = Array.from(new Set(unitIds))
+  if (ids.length === 0) return new Map()
+  const rows = await client.deviceUnit.findMany({ where: { id: { in: ids } } })
+  return new Map(rows.map((u) => [u.id, u]))
+}
+
+/** 유닛 id → DeviceRow(배치 행이 있는 유닛만) */
+export async function loadDevices(client: DbClient, unitIds: readonly number[]): Promise<Map<number, DeviceRow>> {
+  const ids = Array.from(new Set(unitIds))
+  if (ids.length === 0) return new Map()
+  const rows = await client.hospitalDevice.findMany({ where: { deviceId: { in: ids } }, include: { unit: true } })
+  return new Map(rows.map((p) => [p.deviceId, flattenDevice(p.unit, p)]))
+}
+
+/** 정규화 시리얼 → 유닛(+배치). 배치 없는 고아 유닛은 `device: null` */
+export async function findUnitsBySerial(
+  client: DbClient,
+  serials: readonly string[]
+): Promise<Map<string, { unit: UnitRow; device: DeviceRow | null }>> {
+  const keys = Array.from(new Set(serials.filter(Boolean)))
+  if (keys.length === 0) return new Map()
+  const rows = await client.deviceUnit.findMany({ where: { serialNo: { in: keys } }, include: { placement: true } })
+  return new Map(rows.map((u) => [u.serialNo, { unit: u, device: u.placement ? flattenDevice(u, u.placement) : null }]))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 개체 조회 · 병원 유도
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** 공개 device id(유닛 id) → DeviceRow. 유닛이 없거나 배치 행(이벤트)이 없으면 404 '원장에 없는 기기' */
 export async function getDeviceOr404(client: DbClient, deviceId: number): Promise<DeviceRow> {
   if (!Number.isInteger(deviceId) || deviceId <= 0) throw new RegistryError(400, '기기 id가 올바르지 않습니다')
-  const d = await client.hospitalDevice.findUnique({ where: { id: deviceId } })
-  if (!d) throw new RegistryError(404, '원장에 없는 기기입니다')
-  return d
+  const p = await client.hospitalDevice.findUnique({ where: { deviceId }, include: { unit: true } })
+  if (!p) throw new RegistryError(404, '원장에 없는 기기입니다')
+  return flattenDevice(p.unit, p)
 }
 
 /**

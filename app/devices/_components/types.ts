@@ -89,7 +89,10 @@ export interface RecoveryReason {
   category: string
 }
 
-/** WMS 매칭(lib/deviceRegistry/wms.ts WmsMatch) — 표시 전용 */
+/**
+ * WMS 매칭(lib/deviceRegistry/wms.ts WmsMatch) — 표시 전용 일시 계산. 3층 구조(B-20) 이후 원장↔WMS 영속 링크는 없다
+ * (`unitId`는 inventory_units.id — 원장 device id가 아님).
+ */
 export interface WmsMatch {
   unitId: number
   serialNo: string
@@ -97,15 +100,6 @@ export interface WmsMatch {
   status: string
   itemCode: string
   modelName: string | null
-}
-
-/** 영속 링크 inventory_units (UNITS_INCLUDE.inventoryUnit) */
-export interface LinkedInventoryUnit {
-  id: number
-  serialNo: string
-  status: string
-  item: { itemCode: string; modelName: string | null }
-  inventory: { name: string }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,7 +170,7 @@ export interface ModelSummary {
   /** hard만 active − expected, 그 외 null */
   diff: number | null
   compare: 'hard' | 'soft' | 'none'
-  /** 영속 inventory_unit_id 조인 집계(임시 매칭 미사용) */
+  /** 배치 중 유닛의 WMS 일시 매칭 집계(out=OUT · inStock=IN_STOCK · unmatched=매치 없음) */
   wms: { out: number; inStock: number; unmatched: number }
   lastEvent: { type: string; on: string } | null
 }
@@ -214,16 +208,22 @@ export interface HospitalDeviceSummary {
 // 개체 (GET /api/devices/units · /units/[id] · /lookup)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** hospital_devices 스칼라 컬럼(JSON) — 프로젝션은 이벤트 fold 파생값이며 UI가 직접 바꾸지 않는다 */
+/**
+ * 기기 공개 형상(JSON) — 3층 구조(B-20): 유닛(`device_units`: id·deviceInfoId·serialNo·serialRaw·macAddress·memo·source)
+ * + 배치 프로젝션(`hospital_devices`: 상태 컬럼)을 서버가 평탄화. **`id`는 device_units.id(공개 device id)**, `placementId`는 내부 배치 행 id.
+ * 프로젝션은 이벤트 fold 파생값이며 UI가 직접 바꾸지 않는다
+ */
 export interface DeviceRaw {
   id: number
+  placementId?: number
   deviceInfoId: number
   serialNo: string
   serialRaw: string | null
   macAddress: string | null
   extDeviceCode: string | null
-  inventoryUnitId: number | null
   memo: string | null
+  /** 유닛이 처음 생긴 경로(MANUAL/IMPORT/WMS/ONPREM/BACKFILL) */
+  source?: string
   extLastSeenAt: string | null
   extSyncedAt: string | null
   status: DeviceStatus
@@ -248,15 +248,17 @@ export interface DeviceRowBase extends DeviceRaw {
   hospital: HospitalRef | null
   lastHospital: HospitalRef | null
   recoverReason: ReasonRef | null
+  /** 교체기(유닛 id·시리얼) */
   replacedBy: { id: number; serialNo: string } | null
-  inventoryUnit: LinkedInventoryUnit | null
 }
 
 /** GET /api/devices/units 행 */
 export interface DeviceListRow extends DeviceRowBase {
   /** 최근 상태 이벤트의 소프트 참조(MNT 링크 등) */
   lastRef: { type: string; code: string } | null
-  /** inventory_unit_id NULL일 때만 표시용 임시 매칭(DB 쓰기 없음) */
+  /** 표시용 WMS 일시 매칭(DB 쓰기 없음) — '창고 개체' 열 */
+  wms: WmsMatch | null
+  /** = wms (구 필드명 호환) */
   wmsTransient: WmsMatch | null
   /** ACTIVE+IN_STOCK / DISPOSED ⚠ 문구 */
   wmsWarning: string | null
@@ -264,8 +266,9 @@ export interface DeviceListRow extends DeviceRowBase {
 
 /** GET /api/devices/units/[id] → device */
 export interface DeviceDetail extends DeviceRowBase {
-  /** 이 개체가 대체한 구기기들 */
+  /** 이 개체가 대체한 구기기들(유닛 id·시리얼) */
   replaces: { id: number; serialNo: string }[]
+  wms: WmsMatch | null
   wmsTransient: WmsMatch | null
   wmsWarning: string | null
 }
@@ -325,7 +328,7 @@ export interface LookupResponse {
   device: DeviceRowBase | null
   /** 0건일 때 원장 접두 일치 ≤10 */
   candidates: DeviceRowBase[]
-  /** 0건일 때 WMS 정확·접미 일치 ≤10 */
+  /** 0건일 때 WMS 정확·접미 일치 ≤10 (`linkedDeviceId`는 영속 링크가 없어 항상 null) */
   wmsCandidates: LookupWmsCandidate[]
 }
 

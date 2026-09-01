@@ -1,8 +1,9 @@
 /**
  * 디바이스 원장 쓰기 — 등록·이동·회수·교체·일괄·식별 정정·메모 (§7.0 계약, §4.1 불변식, §4.2 전이표)
  *
- * 모든 경로: 이벤트 INSERT → `rebuildUnitProjection`(fold) → 불성립이면 409로 트랜잭션 롤백.
- * 신규 개체 행의 초기 프로젝션도 같은 `foldEvents`로 계산한다(REGISTER 1건).
+ * 3층 구조(B-20): 모든 쓰기 경로는 **유닛(`device_units`) 찾기/만들기 → 이벤트 INSERT → `rebuildUnitProjection`(fold → 배치 행 upsert)** 순서다.
+ * 공개 device id = 유닛 id. 배치 행(`hospital_devices`)은 첫 REGISTER의 fold에서 생성되고 RECOVERED 행은 그대로 남는다(ACTIVE-only 변형 미채택).
+ * 불성립이면 409로 트랜잭션 롤백. WMS 매칭은 표시용 일시 계산(DB 쓰기 없음 — §9.2).
  */
 import { Prisma } from '@prisma/client'
 import { normalizeSerial, normalizeWardName, type DeviceEventType } from '@/lib/deviceRegistryShared'
@@ -10,18 +11,19 @@ import {
   RegistryError,
   assertTransition,
   eventLabel,
-  foldEvents,
+  findUnitsBySerial,
   getDeviceOr404,
+  getOrCreateUnit,
   getWardById,
   guardOf,
   hospitalNames,
   insertEvent,
   insertEvents,
   loadDeviceEvents,
+  loadDevices,
   loadTrackedModels,
   mapDbError,
   prepareCtx,
-  projectionData,
   reasonByValue,
   rebuildUnitProjection,
   requireRecoveryReason,
@@ -41,11 +43,11 @@ import {
   type DeviceRow,
   type EventInput,
   type EventRow,
-  type FoldEvent,
   type RegistryCtx,
   type RegistryOpts,
   type SkippedItem,
   type TrackedModel,
+  type UnitRow,
   type WardRef,
 } from './core'
 import { matchInventoryUnits, type WmsMatch } from './wms'
@@ -53,38 +55,6 @@ import { matchInventoryUnits, type WmsMatch } from './wms'
 // ─────────────────────────────────────────────────────────────────────────────
 // 공용 소도구
 // ─────────────────────────────────────────────────────────────────────────────
-
-/** 신규 개체 행 생성 입력 — 프로젝션은 REGISTER 1건 fold 결과 */
-function newDeviceData(args: {
-  model: TrackedModel
-  serialNo: string
-  serialRaw: string | null
-  macAddress?: string | null
-  extDeviceCode?: string | null
-  hospitalCode: string
-  wardId: number | null
-  occurredOn: string
-}): Prisma.HospitalDeviceUncheckedCreateInput {
-  const synthetic: FoldEvent = {
-    id: 0,
-    eventType: 'REGISTER',
-    hospitalCode: args.hospitalCode,
-    fromWardId: null,
-    toWardId: args.wardId,
-    reasonCodeId: null,
-    occurredOn: args.occurredOn,
-    relatedDeviceId: null,
-  }
-  const proj = projectionData(foldEvents([synthetic])) as Prisma.HospitalDeviceUncheckedCreateInput
-  return {
-    ...proj,
-    deviceInfoId: args.model.id,
-    serialNo: args.serialNo,
-    serialRaw: args.serialRaw,
-    macAddress: args.macAddress?.trim() || null,
-    extDeviceCode: args.extDeviceCode?.trim() || null,
-  }
-}
 
 function toWmsInput(d: Pick<DeviceRow, 'id' | 'serialNo' | 'serialRaw' | 'deviceInfoId'>, models: readonly TrackedModel[]) {
   return {
@@ -169,10 +139,13 @@ export interface RegisterOpts extends RegistryOpts {
 }
 
 export interface RegisteredRef {
+  /** 공개 device id(유닛 id) */
   id: number
   serialNo: string
   eventId: number
   wardId: number | null
+  /** 이번 호출에서 유닛(시리얼 정체성)을 새로 만들었는지 — 재등록·고아 유닛 재사용이면 false */
+  unitCreated: boolean
 }
 
 export interface TransferredRef extends RegisteredRef {
@@ -190,7 +163,7 @@ export interface RegisterResult {
   events: number[]
   warnings: string[]
   newWards: { id: number; name: string }[]
-  /** WMS 자동 연결 결과 (deviceId → 매치) */
+  /** WMS 표시용 매칭(일시 계산) — deviceId(유닛 id) → 매치 */
   wms: Record<number, WmsMatch | null>
 }
 
@@ -200,7 +173,13 @@ interface PreparedItem {
   serialNo: string
   serialRaw: string | null
   model: TrackedModel
+  /** 모델을 명시(deviceInfoId·modelInput·onpremDeviceType)했는지 — 기존 유닛과 다르면 경고 */
+  modelExplicit: boolean
+  /** 배치 행이 있는 기존 개체 */
   existing: DeviceRow | null
+  /** 기존 유닛(배치 유무 무관) */
+  unit: UnitRow | null
+  unitCreated: boolean
   kind: 'create' | 'reregister' | 'transfer' | 'skip'
   ward: WardRef | null
 }
@@ -217,7 +196,7 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
   const importMode = opts?.importBatchId != null
   if (!Array.isArray(items) || items.length === 0) throw new RegistryError(400, '등록할 시리얼이 없습니다')
 
-  // 1) 시리얼 정규화·중복 병합
+  // 1) 시리얼 정규화·중복 병합·모델 판별
   const models = await loadTrackedModels(tx)
   const prepared: PreparedItem[] = []
   const seen = new Set<string>()
@@ -237,16 +216,36 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
     })
     if (!res.model) throw new RegistryError(400, `${ns.serialNo}: ${res.error}`, { serial: ns.serialNo })
     for (const w of res.warnings) warnings.push(`${ns.serialNo}: ${w}`)
-    prepared.push({ index, item, serialNo: ns.serialNo, serialRaw: ns.serialRaw, model: res.model, existing: null, kind: 'create', ward: null })
+    prepared.push({
+      index,
+      item,
+      serialNo: ns.serialNo,
+      serialRaw: ns.serialRaw,
+      model: res.model,
+      modelExplicit: item.deviceInfoId != null || !!item.modelInput || item.onpremDeviceType != null,
+      existing: null,
+      unit: null,
+      unitCreated: false,
+      kind: 'create',
+      ward: null,
+    })
   })
 
-  // 2) 기존 개체 조회 → 분류 (현재 프로젝션 기준: 같은 병원 ACTIVE=skip · 타 병원 ACTIVE=conflict/transfer · RECOVERED=reregister)
-  const existingRows = await tx.hospitalDevice.findMany({ where: { serialNo: { in: prepared.map((x) => x.serialNo) } } })
-  const existingBySerial = new Map(existingRows.map((d) => [d.serialNo, d]))
+  // 2) 기존 유닛·배치 조회 → 분류 (현재 프로젝션 기준: 같은 병원 ACTIVE=skip · 타 병원 ACTIVE=conflict/transfer · RECOVERED=reregister · 배치 없음=create)
+  const found = await findUnitsBySerial(tx, prepared.map((x) => x.serialNo))
   const skipped: SkippedItem[] = []
   const conflictDevices: DeviceRow[] = []
   for (const x of prepared) {
-    const d = existingBySerial.get(x.serialNo) ?? null
+    const hit = found.get(x.serialNo)
+    if (!hit) continue
+    x.unit = hit.unit
+    // 원장에 있는 유닛은 모델이 확정돼 있다 — 입력 모델은 무시(불일치는 경고), 시리얼 정체성이 우선
+    if (hit.unit.deviceInfoId !== x.model.id) {
+      const unitModel = models.find((m) => m.id === hit.unit.deviceInfoId)
+      if (x.modelExplicit) warnings.push(`${x.serialNo}: 이미 ${unitModel?.deviceModel ?? `#${hit.unit.deviceInfoId}`}(으)로 등록된 시리얼 — 지정 모델(${x.model.deviceModel})은 무시합니다`)
+      if (unitModel) x.model = unitModel
+    }
+    const d = hit.device
     x.existing = d
     if (!d) continue
     if (d.status === 'ACTIVE' && d.hospitalCode === here) {
@@ -300,36 +299,24 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
     }
   }
 
-  // 5) 신규 개체 행 생성 (프로젝션 = REGISTER 1건 fold)
-  const creates = work.filter((x) => x.kind === 'create')
-  let createdRows: DeviceRow[] = []
-  if (creates.length > 0) {
-    try {
-      createdRows = await tx.hospitalDevice.createManyAndReturn({
-        data: creates.map((x) =>
-          newDeviceData({
-            model: x.model,
-            serialNo: x.serialNo,
-            serialRaw: x.serialRaw,
-            macAddress: x.item.macAddress,
-            extDeviceCode: x.item.extDeviceCode,
-            hospitalCode: here,
-            wardId: x.ward?.id ?? null,
-            occurredOn: p.occurredOn,
-          })
-        ),
-      })
-    } catch (e) {
-      throw mapDbError(e)
-    }
+  // 5) 유닛 찾기/만들기 (시리얼 정체성 — 배치 행은 fold가 만든다)
+  for (const x of work) {
+    const r = await getOrCreateUnit(tx, {
+      serialNo: x.serialNo,
+      serialRaw: x.serialRaw,
+      deviceInfoId: x.unit?.deviceInfoId ?? x.model.id,
+      macAddress: x.item.macAddress,
+      source: p.source,
+    })
+    x.unit = r.unit
+    x.unitCreated = r.created
   }
-  const createdBySerial = new Map(createdRows.map((d) => [d.serialNo, d]))
 
   // 6) 이벤트 적재 — 이관은 RECOVER(TRANSFER)@상대 → REGISTER@이 병원 순(같은 일자 순서 = id)
   const inputs: EventInput[] = []
   const slots: { x: PreparedItem; deviceId: number; recoverIdx: number | null; registerIdx: number }[] = []
   for (const x of work) {
-    const deviceId = x.existing?.id ?? createdBySerial.get(x.serialNo)!.id
+    const deviceId = x.unit!.id
     let recoverIdx: number | null = null
     if (x.kind === 'transfer') {
       recoverIdx = inputs.length
@@ -366,32 +353,20 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
   }
   const events = await insertEvents(tx, inputs)
 
-  // 7) 기존 개체 프로젝션 재계산(가드 + 소급 재-fold) · 식별 보조값 채움
+  // 7) 프로젝션 — 기존 배치 행은 가드 + 소급 재-fold, 신규는 fold로 생성. 닉네임(ext_device_code)은 배치 속성이라 fold 뒤에 채운다
   for (const s of slots) {
-    if (!s.x.existing) continue
-    await rebuildUnitProjection(tx, s.deviceId, { guard: guardOf(s.x.existing), illegal: retroIllegal })
-    const mac = s.x.item.macAddress?.trim() || null
+    await rebuildUnitProjection(tx, s.deviceId, { guard: s.x.existing ? guardOf(s.x.existing) : undefined, illegal: retroIllegal })
     const ext = s.x.item.extDeviceCode?.trim() || null
-    if ((mac && !s.x.existing.macAddress) || (ext && !s.x.existing.extDeviceCode)) {
-      await tx.hospitalDevice.update({
-        where: { id: s.deviceId },
-        data: {
-          ...(mac && !s.x.existing.macAddress ? { macAddress: mac } : {}),
-          ...(ext && !s.x.existing.extDeviceCode ? { extDeviceCode: ext } : {}),
-        },
-      })
+    if (ext && !s.x.existing?.extDeviceCode) {
+      await tx.hospitalDevice.updateMany({ where: { deviceId: s.deviceId, extDeviceCode: null }, data: { extDeviceCode: ext } })
     }
   }
 
-  // 8) WMS 조인 키 영속 매칭 (쓰기 경로 — §9.2)
-  const wmsTargets = slots.map((s) => ({
-    id: s.deviceId,
-    serialNo: s.x.serialNo,
-    serialRaw: s.x.serialRaw ?? s.x.existing?.serialRaw ?? null,
-    deviceInfoId: s.x.existing?.deviceInfoId ?? s.x.model.id,
-    deviceModel: models.find((m) => m.id === (s.x.existing?.deviceInfoId ?? s.x.model.id))?.deviceModel ?? null,
-  }))
-  const wmsMap = await matchInventoryUnits(tx, wmsTargets, { persist: true })
+  // 8) WMS 표시용 매칭(일시 계산 — §9.2)
+  const wmsMap = await matchInventoryUnits(
+    tx,
+    slots.map((s) => toWmsInput({ id: s.deviceId, serialNo: s.x.unit!.serialNo, serialRaw: s.x.unit!.serialRaw, deviceInfoId: s.x.unit!.deviceInfoId }, models))
+  )
 
   // 9) 결과
   const result: RegisterResult = {
@@ -406,7 +381,7 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
     wms: Object.fromEntries(Array.from(wmsMap.entries())),
   }
   for (const s of slots) {
-    const ref: RegisteredRef = { id: s.deviceId, serialNo: s.x.serialNo, eventId: events[s.registerIdx].id, wardId: s.x.ward?.id ?? null }
+    const ref: RegisteredRef = { id: s.deviceId, serialNo: s.x.serialNo, eventId: events[s.registerIdx].id, wardId: s.x.ward?.id ?? null, unitCreated: s.x.unitCreated }
     if (s.x.kind === 'create') result.created.push(ref)
     else if (s.x.kind === 'reregister') result.reregistered.push(ref)
     else if (s.x.kind === 'transfer') {
@@ -569,24 +544,30 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
     const models = await loadTrackedModels(tx)
     const reason = input.reasonCodeId != null ? await requireRecoveryReason(tx, Number(input.reasonCodeId)) : await reasonByValue(tx, 'DEFECT')
 
-    // ── 구 기기 식별
+    // ── 구 기기 식별 (유닛 + 배치)
     let old: DeviceRow | null = null
+    let oldUnit: UnitRow | null = null
     let oldKey: string
     let oldRaw: string | null = null
     if (input.oldDeviceId != null) {
       old = await getDeviceOr404(tx, Number(input.oldDeviceId))
       oldKey = old.serialNo
+      oldUnit = (await tx.deviceUnit.findUnique({ where: { id: old.id } }))!
     } else {
       const ns = normalizeSerial(input.oldSerial)
       if (!ns.serialNo) throw new RegistryError(400, '구 기기 시리얼을 입력하세요')
       oldKey = ns.serialNo
       oldRaw = ns.serialRaw
-      old = await tx.hospitalDevice.findUnique({ where: { serialNo: oldKey } })
+      const hit = (await findUnitsBySerial(tx, [oldKey])).get(oldKey)
+      oldUnit = hit?.unit ?? null
+      old = hit?.device ?? null
     }
     const newNs = normalizeSerial(input.newSerial)
     if (!newNs.serialNo) throw new RegistryError(400, '신 기기 시리얼을 입력하세요')
     if (newNs.serialNo === oldKey) throw new RegistryError(400, '구 기기와 신 기기가 같습니다') // (4)
-    let newDev = await tx.hospitalDevice.findUnique({ where: { serialNo: newNs.serialNo } })
+    const newHit = (await findUnitsBySerial(tx, [newNs.serialNo])).get(newNs.serialNo)
+    let newUnit: UnitRow | null = newHit?.unit ?? null
+    const newDev: DeviceRow | null = newHit?.device ?? null
 
     // ── 구 기기 분류 (2)(3)(6)
     type OldCase = 'backfill' | 'active_here' | 'recovered_here'
@@ -598,7 +579,7 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
     const oldEvents = old ? (await loadDeviceEvents(tx, [old.id])).get(old.id) ?? [] : []
     if (!old) {
       oldCase = 'backfill'
-      const res = resolveModel(models, { serialNo: oldKey, deviceInfoId: input.oldDeviceInfoId ?? null })
+      const res = resolveModel(models, { serialNo: oldKey, deviceInfoId: input.oldDeviceInfoId ?? oldUnit?.deviceInfoId ?? null })
       if (!res.model) throw new RegistryError(400, `구 기기 ${oldKey}: ${res.error}`)
       oldModel = res.model
       for (const w of res.warnings) warnings.push(`구 기기 ${oldKey}: ${w}`)
@@ -634,7 +615,7 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
     let transferFromWard: number | null = null
     if (!newDev) {
       newCase = 'create'
-      const res = resolveModel(models, { serialNo: newNs.serialNo, deviceInfoId: input.newDeviceInfoId ?? null })
+      const res = resolveModel(models, { serialNo: newNs.serialNo, deviceInfoId: input.newDeviceInfoId ?? newUnit?.deviceInfoId ?? null })
       if (!res.model) throw new RegistryError(400, `신 기기 ${newNs.serialNo}: ${res.error}`)
       newModel = res.model
       for (const w of res.warnings) warnings.push(`신 기기 ${newNs.serialNo}: ${w}`)
@@ -655,25 +636,17 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
       warnings.push(`신 기기 ${newDev.serialNo}는 회수 이력이 있어 재등록으로 이력을 연결합니다`)
     }
 
-    // ── 개체 행 생성 (이벤트가 아닌 행) — 이벤트 related_device_id에 id가 필요
-    try {
-      if (oldCase === 'backfill') {
-        old = await tx.hospitalDevice.create({
-          data: newDeviceData({ model: oldModel!, serialNo: oldKey, serialRaw: oldRaw, hospitalCode: here, wardId: oldWardAtTime, occurredOn: p.occurredOn }),
-        })
-      }
-      if (newCase === 'create') {
-        newDev = await tx.hospitalDevice.create({
-          data: newDeviceData({ model: newModel!, serialNo: newNs.serialNo, serialRaw: newNs.serialRaw, hospitalCode: here, wardId: targetWardId, occurredOn: p.occurredOn }),
-        })
-      }
-    } catch (e) {
-      throw mapDbError(e)
+    // ── 유닛 확보 (이벤트 related_device_id에 유닛 id가 필요) — 배치 행은 fold가 만든다
+    if (oldCase === 'backfill') {
+      oldUnit = (await getOrCreateUnit(tx, { serialNo: oldKey, serialRaw: oldRaw, deviceInfoId: oldUnit?.deviceInfoId ?? oldModel!.id, source: 'BACKFILL' })).unit
     }
-    const oldRow = old!
-    const newRow = newDev!
-    const oldSnapshot = oldCase === 'backfill' ? null : guardOf(oldRow)
-    const newSnapshot = newCase === 'create' ? null : guardOf(newRow)
+    if (newCase === 'create') {
+      newUnit = (await getOrCreateUnit(tx, { serialNo: newNs.serialNo, serialRaw: newNs.serialRaw, deviceInfoId: newUnit?.deviceInfoId ?? newModel!.id, source: p.source })).unit
+    }
+    const oldId = oldUnit!.id
+    const newId = newUnit!.id
+    const oldSnapshot = old ? guardOf(old) : null
+    const newSnapshot = newDev ? guardOf(newDev) : null
 
     // ── 이벤트 순서: REGISTER(구 소급) → RECOVER(구) → RECOVER TRANSFER(신) → REGISTER(신) | MOVE_WARD(신)
     const base = { occurredOn: p.occurredOn, ref: p.ref, actionGroup: p.actionGroup, source: p.source, actor: p.actor } as const
@@ -686,32 +659,32 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
     let linkedRecoverEventId: number | null = null
 
     if (oldCase === 'backfill') {
-      backfillEvent = await insertEvent(tx, { ...base, deviceId: oldRow.id, eventType: 'REGISTER', hospitalCode: here, toWardId: oldWardAtTime, memo: '교체 시 소급 등록' })
+      backfillEvent = await insertEvent(tx, { ...base, deviceId: oldId, eventType: 'REGISTER', hospitalCode: here, toWardId: oldWardAtTime, memo: '교체 시 소급 등록' })
       eventIds.push(backfillEvent!.id)
     }
     if (oldCase !== 'recovered_here') {
       recoverEvent = await insertEvent(tx, {
         ...base,
-        deviceId: oldRow.id,
+        deviceId: oldId,
         eventType: 'RECOVER',
         hospitalCode: here,
         fromWardId: oldWardAtTime,
         reasonCodeId: reason.id,
-        relatedDeviceId: newRow.id,
+        relatedDeviceId: newId,
         memo: p.memo,
       })
       eventIds.push(recoverEvent!.id)
     } else if (linkedRecover) {
-      await tx.hospitalDeviceEvent.update({ where: { id: linkedRecover.id }, data: { relatedDeviceId: newRow.id } })
+      await tx.hospitalDeviceEvent.update({ where: { id: linkedRecover.id }, data: { relatedDeviceId: newId } })
       linkedRecoverEventId = linkedRecover.id
     }
     if (newCase === 'transfer') {
       const transferReason = await reasonByValue(tx, 'TRANSFER')
       transferRecoverEvent = await insertEvent(tx, {
         ...base,
-        deviceId: newRow.id,
+        deviceId: newId,
         eventType: 'RECOVER',
-        hospitalCode: newRow.hospitalCode,
+        hospitalCode: newDev!.hospitalCode,
         fromWardId: transferFromWard,
         reasonCodeId: transferReason.id,
         memo: p.memo,
@@ -719,23 +692,25 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
       eventIds.push(transferRecoverEvent!.id)
     }
     if (newCase === 'active_here') {
-      if (targetWardId != null && newRow.wardId !== targetWardId) {
+      if (targetWardId != null && newDev!.wardId !== targetWardId) {
         const st = stateAt(newEvents, p.occurredOn)
-        assertTransition(st, 'MOVE_WARD', here, { serial: newRow.serialNo })
-        movedNewEvent = await insertEvent(tx, { ...base, deviceId: newRow.id, eventType: 'MOVE_WARD', hospitalCode: here, fromWardId: st.wardId, toWardId: targetWardId, memo: p.memo })
+        assertTransition(st, 'MOVE_WARD', here, { serial: newDev!.serialNo })
+        movedNewEvent = await insertEvent(tx, { ...base, deviceId: newId, eventType: 'MOVE_WARD', hospitalCode: here, fromWardId: st.wardId, toWardId: targetWardId, memo: p.memo })
         eventIds.push(movedNewEvent!.id)
       }
     } else {
-      registerEvent = await insertEvent(tx, { ...base, deviceId: newRow.id, eventType: 'REGISTER', hospitalCode: here, toWardId: targetWardId, relatedDeviceId: oldRow.id, memo: p.memo })
+      registerEvent = await insertEvent(tx, { ...base, deviceId: newId, eventType: 'REGISTER', hospitalCode: here, toWardId: targetWardId, relatedDeviceId: oldId, memo: p.memo })
       eventIds.push(registerEvent!.id)
     }
 
-    // ── 프로젝션 재계산 (기존 행은 가드, 새 행은 fold 그대로)
-    await rebuildUnitProjection(tx, oldRow.id, { guard: oldSnapshot ?? undefined, illegal: retroIllegal })
-    await rebuildUnitProjection(tx, newRow.id, { guard: newSnapshot ?? undefined, illegal: retroIllegal })
+    // ── 프로젝션 재계산 (기존 배치 행은 가드, 새 행은 fold로 생성)
+    await rebuildUnitProjection(tx, oldId, { guard: oldSnapshot ?? undefined, illegal: retroIllegal })
+    await rebuildUnitProjection(tx, newId, { guard: newSnapshot ?? undefined, illegal: retroIllegal })
 
-    // ── WMS 조인 키
-    const wmsMap = await matchInventoryUnits(tx, [toWmsInput(newRow, models), ...(oldCase === 'backfill' ? [toWmsInput(oldRow, models)] : [])], { persist: true })
+    const oldDevice = await getDeviceOr404(tx, oldId)
+    const newDevice = await getDeviceOr404(tx, newId)
+    // ── WMS 표시용 매칭(일시 계산)
+    const wmsMap = await matchInventoryUnits(tx, [toWmsInput(newDevice, models), ...(oldCase === 'backfill' ? [toWmsInput(oldDevice, models)] : [])])
 
     return {
       actionGroup: p.actionGroup,
@@ -745,8 +720,8 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
       registerEvent,
       movedNewEvent,
       linkedRecoverEventId,
-      oldDevice: await getDeviceOr404(tx, oldRow.id),
-      newDevice: await getDeviceOr404(tx, newRow.id),
+      oldDevice,
+      newDevice,
       eventIds,
       warnings,
       wms: Object.fromEntries(Array.from(wmsMap.entries())),
@@ -786,7 +761,8 @@ export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?
     if (ids.length === 0) throw new RegistryError(400, '대상 기기를 선택하세요')
     if (ids.length > BULK_MAX) throw new RegistryError(400, `일괄 처리는 최대 ${BULK_MAX}대까지 가능합니다`)
 
-    const devices = await tx.hospitalDevice.findMany({ where: { id: { in: ids } } })
+    const deviceMap = await loadDevices(tx, ids)
+    const devices = ids.map((id) => deviceMap.get(id)).filter((d): d is DeviceRow => !!d)
     if (devices.length !== ids.length) throw new RegistryError(404, `기기 ${ids.length - devices.length}건을 찾을 수 없습니다`)
     const notHere = devices.filter((d) => !(d.status === 'ACTIVE' && d.hospitalCode === here))
     if (notHere.length > 0) {
@@ -849,6 +825,7 @@ export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?
 
 // ─────────────────────────────────────────────────────────────────────────────
 // correctDevice — 식별 속성 정정 → CORRECT 이벤트 (§8.2)
+// 시리얼·모델·MAC은 유닛(`device_units`) 속성, 닉네임(ext_device_code)은 배치(`hospital_devices`) 속성
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface CorrectChanges {
@@ -864,6 +841,7 @@ export interface CorrectResult {
   event: EventRow
   device: DeviceRow
   changes: ChangeSet
+  /** 정정 후 WMS 표시용 매칭(일시 계산) */
   wms: WmsMatch | null
 }
 
@@ -874,29 +852,28 @@ export async function correctDevice(ctx: RegistryCtx, input: { deviceId: number;
     const models = await loadTrackedModels(tx)
     const ch = input.changes ?? {}
     const changes: ChangeSet = {}
-    const data: Prisma.HospitalDeviceUncheckedUpdateInput = {}
-    let serialChanged = false
+    const unitData: Prisma.DeviceUnitUncheckedUpdateInput = {}
+    const placementData: Prisma.HospitalDeviceUncheckedUpdateInput = {}
 
     if (ch.serialNo !== undefined) {
       const ns = normalizeSerial(ch.serialNo)
       if (!ns.serialNo) throw new RegistryError(400, '시리얼이 비어 있습니다')
       if (ns.serialNo !== device.serialNo || (ns.serialRaw ?? null) !== (device.serialRaw ?? null)) {
+        // 시리얼 정정은 상태 이벤트가 이 병원 REGISTER 1건뿐인 개체만 — 이력이 있으면 정체성 변경이므로 409
         const events = (await loadDeviceEvents(tx, [device.id])).get(device.id) ?? []
         const stateEvents = events.filter((e) => e.eventType !== 'CORRECT')
         const sole = stateEvents.length === 1 && stateEvents[0].eventType === 'REGISTER' && device.status === 'ACTIVE' && stateEvents[0].hospitalCode === device.hospitalCode
         if (!sole) throw new RegistryError(409, '이력이 있는 개체 — 오입력이면 이벤트 취소를 사용하세요')
         if (ns.serialNo !== device.serialNo) {
-          const dup = await tx.hospitalDevice.findUnique({ where: { serialNo: ns.serialNo }, select: { id: true } })
+          const dup = await tx.deviceUnit.findUnique({ where: { serialNo: ns.serialNo }, select: { id: true } })
           if (dup) throw new RegistryError(409, '이미 등록된 시리얼입니다')
           changes.serialNo = { before: device.serialNo, after: ns.serialNo }
-          data.serialNo = ns.serialNo
+          unitData.serialNo = ns.serialNo
         }
         if ((ns.serialRaw ?? null) !== (device.serialRaw ?? null)) {
           changes.serialRaw = { before: device.serialRaw, after: ns.serialRaw }
-          data.serialRaw = ns.serialRaw
+          unitData.serialRaw = ns.serialRaw
         }
-        serialChanged = true
-        data.inventoryUnitId = null
       }
     }
     if (ch.deviceInfoId !== undefined && ch.deviceInfoId !== null) {
@@ -904,27 +881,28 @@ export async function correctDevice(ctx: RegistryCtx, input: { deviceId: number;
       if (!models.some((m) => m.id === id)) throw new RegistryError(400, '원장 대상 모델이 아닙니다 (serial_tracked)')
       if (id !== device.deviceInfoId) {
         changes.deviceInfoId = { before: device.deviceInfoId, after: id }
-        data.deviceInfoId = id
+        unitData.deviceInfoId = id
       }
     }
     if (ch.macAddress !== undefined) {
       const v = ch.macAddress?.trim() || null
       if (v !== (device.macAddress ?? null)) {
         changes.macAddress = { before: device.macAddress, after: v }
-        data.macAddress = v
+        unitData.macAddress = v
       }
     }
     if (ch.extDeviceCode !== undefined) {
       const v = ch.extDeviceCode?.trim() || null
       if (v !== (device.extDeviceCode ?? null)) {
         changes.extDeviceCode = { before: device.extDeviceCode, after: v }
-        data.extDeviceCode = v
+        placementData.extDeviceCode = v
       }
     }
     if (Object.keys(changes).length === 0) throw new RegistryError(400, '변경 사항이 없습니다')
 
     try {
-      await tx.hospitalDevice.update({ where: { id: device.id }, data })
+      if (Object.keys(unitData).length > 0) await tx.deviceUnit.update({ where: { id: device.id }, data: unitData })
+      if (Object.keys(placementData).length > 0) await tx.hospitalDevice.update({ where: { deviceId: device.id }, data: placementData })
     } catch (e) {
       throw mapDbError(e)
     }
@@ -941,17 +919,13 @@ export async function correctDevice(ctx: RegistryCtx, input: { deviceId: number;
       actor: p.actor,
     })
     const updated = await getDeviceOr404(tx, device.id)
-    let wms: WmsMatch | null = null
-    if (serialChanged || updated.inventoryUnitId == null) {
-      const m = await matchInventoryUnits(tx, [toWmsInput(updated, models)], { persist: true })
-      wms = m.get(updated.id) ?? null
-    }
-    return { event: event!, device: await getDeviceOr404(tx, device.id), changes, wms }
+    const wms = (await matchInventoryUnits(tx, [toWmsInput(updated, models)])).get(updated.id) ?? null
+    return { event: event!, device: updated, changes, wms }
   })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// updateDeviceMemo — 개체 속성(이벤트 아님)
+// updateDeviceMemo — 유닛 속성(이벤트 아님, `device_units.memo`)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function updateDeviceMemo(
@@ -964,8 +938,7 @@ export async function updateDeviceMemo(
     const device = await getDeviceOr404(tx, input.deviceId)
     const after = input.memo != null && String(input.memo).trim() ? String(input.memo).trim() : null
     if (after && after.length > 500) throw new RegistryError(400, '메모는 500자 이내로 입력하세요')
-    const updated = await tx.hospitalDevice.update({ where: { id: device.id }, data: { memo: after } })
-    return { device: updated, before: device.memo, after }
+    await tx.deviceUnit.update({ where: { id: device.id }, data: { memo: after } })
+    return { device: await getDeviceOr404(tx, device.id), before: device.memo, after }
   })
 }
-

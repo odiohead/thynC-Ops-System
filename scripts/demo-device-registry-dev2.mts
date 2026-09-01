@@ -2,7 +2,9 @@
  * 디바이스 원장 — dev2 형상 검토용 데모 데이터 (DEV 전용, PROD 실행 금지)
  *
  *   npx tsx scripts/demo-device-registry-dev2.mts seed      # 문산중앙병원(HOSP-000046)에 가짜 시리얼(A990xxx/P990xxx/B990xxx) 데모 이력 생성
- *   npx tsx scripts/demo-device-registry-dev2.mts cleanup   # 위 데모 데이터 전부 삭제(개체·이벤트·배치·병동)
+ *   npx tsx scripts/demo-device-registry-dev2.mts cleanup   # 위 데모 데이터 전부 삭제(이벤트·배치 행·유닛·배치·병동)
+ *
+ * 3층 구조(B-20): 시리얼 정체성은 device_units(공개 device id), 병원 배치는 hospital_devices(device_id UNIQUE). cleanup은 유닛까지 지운다.
  *
  * 데모 시나리오(설계 §6 화면 상태를 모두 볼 수 있게):
  *   1) go-live 임포트(붙여넣기, 2026-06-10): ECG 8 · SpO2 8 · GW 2 → 6병동/7병동/ICU
@@ -32,17 +34,18 @@ const PREFIX = ['A990', 'P990', 'B990']
 const mode = process.argv[2]
 
 async function cleanup() {
-  const devices = await prisma.hospitalDevice.findMany({
+  const units = await prisma.deviceUnit.findMany({
     where: { OR: PREFIX.map((p) => ({ serialNo: { startsWith: p } })) },
     select: { id: true, serialNo: true },
   })
-  const ids = devices.map((d) => d.id)
+  const ids = units.map((d) => d.id)
   const batchIds = (await prisma.hospitalDeviceEvent.findMany({ where: { deviceId: { in: ids }, importBatchId: { not: null } }, select: { importBatchId: true }, distinct: ['importBatchId'] }))
     .map((e) => e.importBatchId!)
   await prisma.$transaction(async (tx) => {
-    await tx.hospitalDevice.updateMany({ where: { id: { in: ids } }, data: { replacedById: null } })
+    await tx.hospitalDevice.updateMany({ where: { replacedById: { in: ids } }, data: { replacedById: null } })
     await tx.hospitalDeviceEvent.deleteMany({ where: { OR: [{ deviceId: { in: ids } }, { relatedDeviceId: { in: ids } }] } })
-    await tx.hospitalDevice.deleteMany({ where: { id: { in: ids } } })
+    await tx.hospitalDevice.deleteMany({ where: { deviceId: { in: ids } } })
+    await tx.deviceUnit.deleteMany({ where: { id: { in: ids } } })
     if (batchIds.length) await tx.hospitalDeviceImportBatch.deleteMany({ where: { id: { in: batchIds } } })
     const wards = await tx.hospitalWard.findMany({ where: { hospitalCode: { in: [H, H2] }, name: { in: DEMO_WARDS } }, select: { id: true } })
     const wardIds = wards.map((w) => w.id)
@@ -51,11 +54,11 @@ async function cleanup() {
     if (stillUsed === 0 && stillUsedEv === 0) await tx.hospitalWard.deleteMany({ where: { id: { in: wardIds } } })
     else console.log(`  (병동 유지 — 데모 외 참조 ${stillUsed + stillUsedEv}건)`)
   })
-  console.log(`cleanup: 개체 ${ids.length}건 · 배치 ${batchIds.length}건 삭제`)
+  console.log(`cleanup: 유닛 ${ids.length}건(배치 행 포함) · 배치 ${batchIds.length}건 삭제`)
 }
 
 async function seed() {
-  const existing = await prisma.hospitalDevice.count({ where: { OR: PREFIX.map((p) => ({ serialNo: { startsWith: p } })) } })
+  const existing = await prisma.deviceUnit.count({ where: { OR: PREFIX.map((p) => ({ serialNo: { startsWith: p } })) } })
   if (existing) { console.log(`이미 데모 데이터 ${existing}건 존재 — 먼저 cleanup 하세요`); return }
   const mnt = await prisma.maintenance.findFirst({ where: { hospitalCode: H }, orderBy: { id: 'desc' }, select: { maintenanceCode: true } })
   const ctx = (occurredOn: string, extra: Partial<Parameters<typeof reg.registerDevices>[0]> = {}) => ({ hospitalCode: H, actor: ACTOR, occurredOn, ...extra })
@@ -72,7 +75,7 @@ async function seed() {
   })
   console.log(`1) 임포트 배치 #${imp.batch.id}: 등록 ${imp.batch.registeredCount} · 병동 ${imp.result.newWards.map((w) => w.name).join(',')}`)
 
-  const dev = async (serialNo: string) => (await prisma.hospitalDevice.findUniqueOrThrow({ where: { serialNo } })).id
+  const dev = async (serialNo: string) => (await prisma.deviceUnit.findUniqueOrThrow({ where: { serialNo } })).id // 공개 device id = 유닛 id
   // 2) 병동 이동
   await reg.moveDeviceWard(ctx('2026-07-02', { memo: '병동 재배치(데모)' }), { deviceId: await dev('A990103'), toWardName: '7병동' })
   console.log('2) 병동 이동 A990103 6병동→7병동')
@@ -94,8 +97,10 @@ async function seed() {
     { serialInput: 'A990901', wardName: '6병동' }, { serialInput: 'A990902', wardName: '6병동' },
   ])
   console.log('6) 타 병원 HOSP-000059 ECG 2대 등록')
-  const summary = await reg.getHospitalDeviceSummary(H)
-  console.log('요약:', summary.models.filter((m: { active: number }) => m.active > 0).map((m: { deviceModel: string; active: number; expected: number | null; diff: number | null }) => `${m.deviceModel} 배치 ${m.active}/계약 ${m.expected ?? '—'} (차이 ${m.diff ?? '—'})`).join(' · '))
+  const summary = (await reg.getHospitalDeviceSummary(H))!
+  const units = await prisma.deviceUnit.count({ where: { OR: PREFIX.map((p) => ({ serialNo: { startsWith: p } })) } })
+  const placements = await prisma.hospitalDevice.count({ where: { unit: { OR: PREFIX.map((p) => ({ serialNo: { startsWith: p } })) } } })
+  console.log(`데모 유닛 ${units}건 / 배치 행 ${placements}건 ·`, '요약:', summary.models.filter((m: { active: number }) => m.active > 0).map((m: { deviceModel: string; active: number; expected: number | null; diff: number | null }) => `${m.deviceModel} 배치 ${m.active}/계약 ${m.expected ?? '—'} (차이 ${m.diff ?? '—'})`).join(' · '))
 }
 
 try {

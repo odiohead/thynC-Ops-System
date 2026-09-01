@@ -22,8 +22,8 @@ type Params = { params: { id: string } }
 /**
  * 개체 상세(이력 드로어, §6.1) — 개체 + 이벤트 전체(병원 경계 무관) + 교체 상대 + WMS 표시
  * 응답 `{ device, events }`
- * - `device`: 프로젝션 + deviceInfo·ward·hospital·lastHospital·recoverReason·replacedBy(→ 교체됨)·replaces[](이 개체가 대체한 구기기)
- *   ·inventoryUnit(영속 링크)·wmsTransient(링크 없을 때 표시용 매칭, DB 쓰기 없음)·wmsWarning
+ * - `device`: 유닛 식별 + 배치 프로젝션 평탄화(`id` = 유닛 id) + deviceInfo·ward·hospital·lastHospital·recoverReason·replacedBy(→ 교체됨)·replaces[](이 개체가 대체한 구기기)
+ *   ·wms(=wmsTransient, 표시용 일시 매칭, DB 쓰기 없음)·wmsWarning
  * - `events`: **최신순(occurred_on DESC, id DESC)** — 드로어가 그대로 렌더. fold 순서가 필요하면 클라이언트에서 뒤집는다.
  *   각 행에 hospital·fromWard·toWard·reasonCode·relatedDevice·importBatch + actorName 스냅샷
  * 로그인 전체. 읽기이므로 logAudit 없음.
@@ -51,8 +51,8 @@ const EVENT_ONLY_KEYS = ['status', 'hospitalCode', 'wardId', 'placedOn', 'recove
 
 /**
  * PATCH /api/devices/units/[id] — 개체 속성 수정 (§7.1·§8.2)
- * - `{ memo }`                                   : 개체 메모 UPDATE (write, 이벤트 아님)
- * - `{ deviceInfoId?|serialNo?|macAddress?|extDeviceCode? }` : 식별 보정 → CORRECT 이벤트 (admin) — 시리얼 충돌 409, 이력 있는 개체의 시리얼 정정 409, WMS 재매칭(영속)
+ * - `{ memo }`                                   : 유닛 메모(`device_units.memo`) UPDATE (write, 이벤트 아님)
+ * - `{ deviceInfoId?|serialNo?|macAddress?|extDeviceCode? }` : 식별 보정 → CORRECT 이벤트 (admin) — 시리얼·모델·MAC은 유닛, 닉네임은 배치. 시리얼 충돌 409, 이력 있는 개체의 시리얼 정정 409
  *   선택: `occurredOn`·`ref`는 CORRECT 이벤트 문맥(기본 오늘)
  * 두 종류를 함께 보내면 단일 tx로 처리(식별 보정 → 메모). 상태·병원·병동 키는 400(이벤트로만 변경).
  * 병원 문맥은 개체에서 유도(body hospitalCode 무시). audit `hospital_device` UPDATE(resourceId=시리얼, before/after 스냅샷)

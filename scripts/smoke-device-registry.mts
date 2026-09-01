@@ -6,8 +6,10 @@
  * - DEV DB(thync_ops_dev)에 직접 쓴다. 고객 병원('운영') 3곳을 자동 선택(원장 행·병동이 없는 곳 우선):
  *   H1 = 계약완료 딜 있음(기대 수량 hard 대조) · H2 = 이관·재등록 상대 · H3 = 계약완료 딜 0건(expected null)
  * - 테스트 시리얼은 A9900xx / P9900xx / B9900xx 접두 + 실제 WMS 시리얼 2건(GW OUT 1·ECG IN_STOCK 1 — inventory_* 읽기만)
- * - 끝(실패 포함, finally)에 만든 것 전부 삭제: 이벤트 → 개체 → 배치 → 병동 → 이 실행이 남긴 audit_logs.
- *   시작/종료 시 4개 원장 테이블 row 수가 같아야 통과.
+ * - 끝(실패 포함, finally)에 만든 것 전부 삭제: 이벤트 → 배치 행 → 유닛 → 배치 → 병동 → 이 실행이 남긴 audit_logs.
+ *   시작/종료 시 5개 원장 테이블(device_units 포함) row 수가 같아야 통과.
+ * - 3층 구조(B-20): 공개 device id = device_units.id. 서비스는 유닛을 자동 삭제하지 않는다(이벤트 0 → 배치 행만 삭제, 유닛은 고아로 남음)
+ *   → 스모크가 만든 유닛은 cleanup이 직접 지운다.
  */
 import { readFileSync } from 'fs'
 import { PrismaClient } from '@prisma/client'
@@ -53,6 +55,9 @@ const {
   insertEvent,
   withRegistryTx,
   reasonByValue,
+  getOrCreateUnit,
+  flattenDevice,
+  loadTrackedModels,
 } = reg
 const access = await import('../lib/deviceRegistryAccess')
 const auth = await import('../lib/auth')
@@ -94,16 +99,17 @@ const section = (t: string) => console.log(`\n${t}`)
 // 환경 선택 · 사전 스냅샷 · 정리
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Counts = { d: number; e: number; w: number; b: number }
+type Counts = { u: number; d: number; e: number; w: number; b: number }
 async function counts(): Promise<Counts> {
-  const r = await prisma.$queryRaw<{ d: bigint; e: bigint; w: bigint; b: bigint }[]>`
-    SELECT (SELECT count(*) FROM hospital_devices) d, (SELECT count(*) FROM hospital_device_events) e,
+  const r = await prisma.$queryRaw<{ u: bigint; d: bigint; e: bigint; w: bigint; b: bigint }[]>`
+    SELECT (SELECT count(*) FROM device_units) u, (SELECT count(*) FROM hospital_devices) d, (SELECT count(*) FROM hospital_device_events) e,
            (SELECT count(*) FROM hospital_wards) w, (SELECT count(*) FROM hospital_device_import_batches) b`
-  return { d: Number(r[0].d), e: Number(r[0].e), w: Number(r[0].w), b: Number(r[0].b) }
+  return { u: Number(r[0].u), d: Number(r[0].d), e: Number(r[0].e), w: Number(r[0].w), b: Number(r[0].b) }
 }
 async function maxIds() {
-  const r = await prisma.$queryRaw<{ d: number; e: number; w: number; b: number; a: number }[]>`
-    SELECT coalesce((SELECT max(id) FROM hospital_devices),0)::int d, coalesce((SELECT max(id) FROM hospital_device_events),0)::int e,
+  const r = await prisma.$queryRaw<{ u: number; d: number; e: number; w: number; b: number; a: number }[]>`
+    SELECT coalesce((SELECT max(id) FROM device_units),0)::int u, coalesce((SELECT max(id) FROM hospital_devices),0)::int d,
+           coalesce((SELECT max(id) FROM hospital_device_events),0)::int e,
            coalesce((SELECT max(id) FROM hospital_wards),0)::int w, coalesce((SELECT max(id) FROM hospital_device_import_batches),0)::int b,
            coalesce((SELECT max(id) FROM audit_logs),0)::int a`
   return r[0]
@@ -147,14 +153,14 @@ const gwUnit = (
   await prisma.$queryRaw<{ serial_no: string }[]>`
     SELECT u.serial_no FROM inventory_units u JOIN inventory_items i ON i.id = u.item_id
      WHERE i.is_serial_managed AND i.model_name = 'MGW1010' AND u.status = 'OUT' AND u.serial_no ~ '^GW[0-9A-Z]{4}-B[0-9]{6}$'
-       AND NOT EXISTS (SELECT 1 FROM hospital_devices d WHERE d.serial_no = right(u.serial_no, 7) OR d.serial_raw = u.serial_no)
+       AND NOT EXISTS (SELECT 1 FROM device_units d WHERE d.serial_no = right(u.serial_no, 7) OR d.serial_raw = u.serial_no)
      ORDER BY u.id LIMIT 1`
 )[0]?.serial_no
 const ecgInStock = (
   await prisma.$queryRaw<{ serial_no: string }[]>`
     SELECT u.serial_no FROM inventory_units u JOIN inventory_items i ON i.id = u.item_id
      WHERE i.is_serial_managed AND i.model_name = 'MC200M-T' AND u.status = 'IN_STOCK' AND u.serial_no ~ '^A[0-9]{6}$'
-       AND NOT EXISTS (SELECT 1 FROM hospital_devices d WHERE d.serial_no = u.serial_no)
+       AND NOT EXISTS (SELECT 1 FROM device_units d WHERE d.serial_no = u.serial_no)
      ORDER BY u.id LIMIT 1`
 )[0]?.serial_no
 const gwKey = gwUnit ? gwUnit.slice(-7) : null
@@ -162,23 +168,30 @@ const mnt = await prisma.maintenance.findFirst({ where: { hospitalCode: { notIn:
 
 const ctx = (hospitalCode: string | null, occurredOn?: string, extra?: Partial<RegistryCtx>): RegistryCtx => ({ hospitalCode, actor: ACTOR, occurredOn, ...extra })
 
-/** 이 실행이 만든 것만 지운다 — 테스트 접두 시리얼 + 실제 WMS 시리얼 2건 + (사전 max id 이후 & 테스트 병원) */
+/** 이 실행이 만든 것만 지운다 — 테스트 접두 시리얼 + 실제 WMS 시리얼 2건 + (사전 max id 이후 유닛 / 테스트 병원 배치 행). 유닛까지 삭제 */
 async function cleanup() {
   const serialOr = [
     ...TEST_PREFIXES.map((p) => ({ serialNo: { startsWith: p } })),
     ...(gwKey ? [{ serialNo: gwKey }] : []),
     ...(ecgInStock ? [{ serialNo: ecgInStock }] : []),
   ]
-  const devs = await prisma.hospitalDevice.findMany({
-    where: { OR: [...serialOr, { id: { gt: pre.max.d }, OR: [{ hospitalCode: { in: TEST_HOSPITALS } }, { lastHospitalCode: { in: TEST_HOSPITALS } }] }] },
+  const units = await prisma.deviceUnit.findMany({
+    where: {
+      OR: [
+        ...serialOr,
+        { id: { gt: pre.max.u } },
+        { placement: { is: { id: { gt: pre.max.d }, OR: [{ hospitalCode: { in: TEST_HOSPITALS } }, { lastHospitalCode: { in: TEST_HOSPITALS } }] } } },
+      ],
+    },
     select: { id: true },
   })
-  const ids = devs.map((d) => d.id)
+  const ids = units.map((d) => d.id)
   await prisma.hospitalDeviceEvent.deleteMany({
     where: { OR: [{ deviceId: { in: ids } }, { relatedDeviceId: { in: ids } }, { id: { gt: pre.max.e }, hospitalCode: { in: TEST_HOSPITALS } }] },
   })
   await prisma.hospitalDevice.updateMany({ where: { replacedById: { in: ids } }, data: { replacedById: null } })
-  await prisma.hospitalDevice.deleteMany({ where: { id: { in: ids } } })
+  await prisma.hospitalDevice.deleteMany({ where: { deviceId: { in: ids } } })
+  await prisma.deviceUnit.deleteMany({ where: { id: { in: ids } } })
   await prisma.hospitalDeviceImportBatch.deleteMany({ where: { id: { gt: pre.max.b }, hospitalCode: { in: TEST_HOSPITALS } } })
   await prisma.hospitalWard.deleteMany({ where: { id: { gt: pre.max.w }, hospitalCode: { in: TEST_HOSPITALS } } })
   await prisma.statusCode.deleteMany({ where: { category: 'DEVICE_RECOVERY_REASON', name: { startsWith: '스모크 사유' } } })
@@ -189,23 +202,29 @@ const PROJ_FIELDS = ['status', 'hospitalCode', 'wardId', 'placedOn', 'lastHospit
 function projOf(d: Record<string, unknown> | null) {
   return d ? Object.fromEntries(PROJ_FIELDS.map((f) => [f, d[f] instanceof Date ? (d[f] as Date).toISOString() : d[f] ?? null])) : null
 }
-/** 프로젝션 = fold — 저장된 행과 `rebuildUnitProjection`(fold 재계산·UPDATE) 이후 행이 같아야 한다 */
+/** 프로젝션 = fold — 저장된 배치 행(device_id = 유닛 id)과 `rebuildUnitProjection`(fold 재계산·UPDATE) 이후 행이 같아야 한다 */
 async function projectionEqualsRebuild(deviceId: number): Promise<boolean> {
-  const before = projOf(await prisma.hospitalDevice.findUnique({ where: { id: deviceId } }))
+  const before = projOf(await prisma.hospitalDevice.findUnique({ where: { deviceId } }))
   if (!before) return false
   await rebuildUnitProjection(prisma, deviceId)
-  const after = projOf(await prisma.hospitalDevice.findUnique({ where: { id: deviceId } }))
+  const after = projOf(await prisma.hospitalDevice.findUnique({ where: { deviceId } }))
   return JSON.stringify(before) === JSON.stringify(after)
 }
 async function allTestDeviceIds(): Promise<number[]> {
   const rows = await prisma.hospitalDevice.findMany({
-    where: { OR: [{ hospitalCode: { in: TEST_HOSPITALS } }, { lastHospitalCode: { in: TEST_HOSPITALS } }, ...TEST_PREFIXES.map((p) => ({ serialNo: { startsWith: p } }))] },
-    select: { id: true },
+    where: { OR: [{ hospitalCode: { in: TEST_HOSPITALS } }, { lastHospitalCode: { in: TEST_HOSPITALS } }, { unit: { OR: TEST_PREFIXES.map((p) => ({ serialNo: { startsWith: p } })) } }] },
+    select: { deviceId: true },
   })
-  return rows.map((r) => r.id)
+  return rows.map((r) => r.deviceId)
 }
 
-const dev = (where: { id: number } | { serialNo: string }) => prisma.hospitalDevice.findUnique({ where })
+/** 공개 형상(유닛 + 배치 평탄화) — 배치 행이 없는 유닛(고아)은 null. `id`는 유닛 id */
+async function dev(where: { id: number } | { serialNo: string }) {
+  const u = await prisma.deviceUnit.findUnique({ where, include: { placement: true } })
+  return u && u.placement ? flattenDevice(u, u.placement) : null
+}
+/** 유닛 원행(배치 무관) */
+const unitRow = (where: { id: number } | { serialNo: string }) => prisma.deviceUnit.findUnique({ where })
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 본문
@@ -215,7 +234,7 @@ async function main() {
   section('[0] 환경')
   console.log(`  H1=${H1} ${h1!.hospital_name} (계약완료 딜 ${h1!.deals}건 Σ${h1!.expected}) · H2=${H2} ${h2!.hospital_name} · H3=${H3} ${h3!.hospital_name} (딜 0건)`)
   console.log(`  actor=${ACTOR.name} · GW WMS=${gwUnit ?? '없음'} · ECG IN_STOCK=${ecgInStock ?? '없음'} · MNT=${mnt?.maintenanceCode ?? '없음'}`)
-  console.log(`  사전 row: devices=${pre.counts.d} events=${pre.counts.e} wards=${pre.counts.w} batches=${pre.counts.b}`)
+  console.log(`  사전 row: units=${pre.counts.u} devices=${pre.counts.d} events=${pre.counts.e} wards=${pre.counts.w} batches=${pre.counts.b}`)
   const defect = await reasonByValue(prisma, 'DEFECT')
 
   section('[1] 등록 → 이동 → 회수 → 타 병원 재등록')
@@ -228,6 +247,8 @@ async function main() {
   const d1 = r1.created.find((c) => c.serialNo === S(1))!
   const d2 = r1.created.find((c) => c.serialNo === S(2))!
   ok(d1.wardId != null && d1.wardId === d2.wardId, '같은 병동 id')
+  ok(r1.created.every((c) => c.unitCreated) && (await prisma.deviceUnit.count({ where: { serialNo: S(1) } })) === 1 && (await prisma.hospitalDevice.count({ where: { deviceId: d1.id } })) === 1, '3층: 시리얼당 유닛 1행 + 배치 행 1행(device_id = 유닛 id = 공개 id)')
+  ok((await unitRow({ id: d1.id }))?.source === 'MANUAL' && (await unitRow({ id: d1.id }))?.deviceInfoId === (await dev({ id: d1.id }))!.deviceInfoId, '유닛 source MANUAL · 모델은 유닛 속성')
   const ward6 = (await prisma.hospitalWard.findUnique({ where: { id: d1.wardId! } }))!
   ok(ward6.name === '6 병동' && ward6.nameNorm === '6병동' && Math.abs(Date.now() - ward6.createdAt.getTime()) < 5 * 60_000, '자동 생성 병동 name/name_norm·created_at UTC 기준(세션 tz 편차 없음)', { createdAt: ward6.createdAt, now: new Date() })
   await expectErr('같은 병원 재등록 단건', () => registerDevices(ctx(H1), [{ serialInput: S(1) }]), 409, '이미 이 병원에 배치 중')
@@ -248,7 +269,18 @@ async function main() {
   await expectErr('사유 없는 회수', () => recoverDevice(ctx(null), { deviceId: d2.id, reasonCodeId: null as unknown as number }), 400)
   await expectErr('없는 기기', () => moveDeviceWard(ctx(H1), { deviceId: 999_999_999, toWardName: '6병동' }), 404)
   const r2 = await registerDevices(ctx(H2, '2026-08-20'), [{ serialInput: S(1), wardName: 'ICU' }])
-  ok(r2.reregistered.length === 1 && r2.reregistered[0].id === d1.id, '타 병원 재등록 = 같은 개체(이력 연속)')
+  ok(r2.reregistered.length === 1 && r2.reregistered[0].id === d1.id && !r2.reregistered[0].unitCreated && (await prisma.deviceUnit.count({ where: { serialNo: S(1) } })) === 1, '타 병원 재등록 = 같은 유닛 id 재사용(unitCreated=false, 유닛 1행 유지)')
+  {
+    const tracked = await loadTrackedModels(prisma)
+    const mine = (await unitRow({ id: d1.id }))!.deviceInfoId
+    const other = tracked.find((m) => m.id !== mine)!
+    await expectErr('getOrCreateUnit — 같은 시리얼 다른 모델', () => getOrCreateUnit(prisma, { serialNo: S(1), deviceInfoId: other.id, source: 'MANUAL' }), 409, '이미 다른 모델로 등록된 시리얼')
+    const same = await getOrCreateUnit(prisma, { serialNo: ` ${S(1).toLowerCase()} `, deviceInfoId: mine, source: 'MANUAL' })
+    ok(!same.created && same.unit.id === d1.id, 'getOrCreateUnit — 같은 모델이면 기존 유닛 반환(정규화 후 조회)')
+    const r4 = await registerDevices(ctx(H2, '2026-08-01'), [{ serialInput: S(4) }])
+    const rOther = await registerDevices(ctx(H1, '2026-08-02'), [{ serialInput: S(4), deviceInfoId: other.id }], { conflicts: { [S(4)]: 'TRANSFER' } })
+    ok(rOther.transferred.length === 1 && rOther.transferred[0].id === r4.created[0].id && rOther.warnings.some((w) => w.includes('지정 모델')) && (await unitRow({ id: r4.created[0].id }))!.deviceInfoId === mine, '등록 시 기존 유닛과 다른 모델 지정 → 유닛 모델 유지 + 경고(정체성 우선)')
+  }
   const d1row = (await dev({ id: d1.id }))!
   ok(d1row.status === 'ACTIVE' && d1row.hospitalCode === H2 && d1row.lastHospitalCode == null && d1row.recoveredOn == null && d1row.recoverReasonId == null, '재등록 프로젝션(현재 배치만 — last_hospital·recovered_on·사유 NULL)')
   ok(await projectionEqualsRebuild(d1.id), '프로젝션 = fold(rebuildUnitProjection 멱등)')
@@ -357,32 +389,31 @@ async function main() {
   if (gwUnit && gwKey) {
     const gw = await registerDevices(ctx(H3, '2026-08-01'), [{ serialInput: gwUnit.toLowerCase(), wardName: 'B동' }])
     gwId = gw.created[0].id
-    const gwRow = await prisma.hospitalDevice.findUnique({ where: { id: gwId }, include: { inventoryUnit: { include: { item: true } } } })
-    ok(gwRow?.serialNo === gwKey && gwRow.serialRaw === gwUnit.toUpperCase(), 'GW 합성 시리얼 분해·원문 보존')
-    ok(gwRow?.inventoryUnitId != null && gwRow.inventoryUnit?.item.modelName === 'MGW1010' && gwRow.inventoryUnit.serialNo === gwUnit, 'GW model_name 매칭으로 inventory_unit_id 영속(device_info_id NULL 품목)', gw.wms)
+    const gwRow = await unitRow({ id: gwId })
+    ok(gwRow?.serialNo === gwKey && gwRow.serialRaw === gwUnit.toUpperCase(), 'GW 합성 시리얼 분해·원문 보존(유닛)')
+    const gwm = gw.wms[gwId]
+    ok(!!gwm && gwm.modelName === 'MGW1010' && gwm.serialNo === gwUnit && gwm.status === 'OUT', 'GW model_name 매칭(일시 계산, device_info_id NULL 품목) — 등록 응답 wms', gw.wms)
     const lk = await lookupDevice(gwUnit)
     ok(lk.device?.id === gwId, '시리얼 조회: 합성 원문으로도 일치')
   } else ok(false, 'WMS에 OUT 상태 MGW1010 합성 시리얼이 없어 GW 매칭 케이스를 건너뜀')
   const r70 = await registerDevices(ctx(H3, '2026-08-01'), [{ serialInput: S(70) }])
-  ok((await dev({ id: r70.created[0].id }))!.inventoryUnitId == null, '테스트 시리얼은 WMS 미매칭 → inventory_unit_id NULL')
+  ok(r70.wms[r70.created[0].id] === null, '테스트 시리얼은 WMS 미매칭 → wms null(영속 링크 없음)')
   if (ecgInStock) {
     const fake = { id: r70.created[0].id, serialNo: ecgInStock, serialRaw: null, deviceInfoId: 1, deviceModel: 'MC200M-T' }
-    const m0 = await matchInventoryUnits(prisma, [fake], { persist: false })
-    ok(m0.get(fake.id)?.status === 'IN_STOCK' && (await dev({ id: fake.id }))!.inventoryUnitId == null, 'matchInventoryUnits(persist:false) → 매치 반환, inventory_unit_id는 NULL 유지')
-    const m1 = await matchInventoryUnits(prisma, [fake], { persist: true })
-    ok(m1.get(fake.id)?.unitId != null && (await dev({ id: fake.id }))!.inventoryUnitId === m1.get(fake.id)!.unitId, 'persist:true → 영속 기록')
-    await prisma.hospitalDevice.update({ where: { id: fake.id }, data: { inventoryUnitId: null } })
+    const uBefore = (await unitRow({ id: fake.id }))!.updatedAt.toISOString()
+    const m0 = await matchInventoryUnits(prisma, [fake])
+    ok(m0.get(fake.id)?.status === 'IN_STOCK' && (await unitRow({ id: fake.id }))!.updatedAt.toISOString() === uBefore, 'matchInventoryUnits → 매치 반환(일시 계산), 유닛·배치 행 무변경')
     const pvIn = await previewRows(H3, [{ row: 1, serialInput: ecgInStock }], { wardMode: 'fixed', mode: 'REGISTER', occurredOn: today })
     ok(pvIn.rows[0].status === 'warn' && pvIn.rows[0].messages.some((m) => m.includes('IN_STOCK')), '미리보기 WMS IN_STOCK warn')
     const lkw = await lookupDevice(ecgInStock)
     ok(lkw.device === null && lkw.wmsCandidates.some((c) => c.serialNo === ecgInStock), '시리얼 조회 0건 → WMS 후보')
-  } else ok(false, 'WMS에 IN_STOCK MC200M-T 시리얼이 없어 persist:false 케이스를 건너뜀')
-  const snapBefore = await prisma.hospitalDevice.findMany({ where: { hospitalCode: H3 }, select: { id: true, inventoryUnitId: true, updatedAt: true }, orderBy: { id: 'asc' } })
+  } else ok(false, 'WMS에 IN_STOCK MC200M-T 시리얼이 없어 일시 매칭 케이스를 건너뜀')
+  const snapBefore = await prisma.hospitalDevice.findMany({ where: { hospitalCode: H3 }, select: { id: true, deviceId: true, updatedAt: true, unit: { select: { updatedAt: true } } }, orderBy: { id: 'asc' } })
   await listUnits({ hospital: H3 }, { page: 1, limit: 50 })
   await getUnitDetail(r70.created[0].id)
   await getHospitalDeviceSummary(H3)
   await getGlobalCoverage({ q: h3!.hospital_name })
-  const snapAfter = await prisma.hospitalDevice.findMany({ where: { hospitalCode: H3 }, select: { id: true, inventoryUnitId: true, updatedAt: true }, orderBy: { id: 'asc' } })
+  const snapAfter = await prisma.hospitalDevice.findMany({ where: { hospitalCode: H3 }, select: { id: true, deviceId: true, updatedAt: true, unit: { select: { updatedAt: true } } }, orderBy: { id: 'asc' } })
   ok(JSON.stringify(snapBefore) === JSON.stringify(snapAfter), 'GET 경로(listUnits/getUnitDetail/summary/coverage) 후 DB 무변경')
   const idemDev = r70.created[0].id
   const idem1 = await insertEvent(prisma, { deviceId: idemDev, eventType: 'MOVE_WARD', hospitalCode: H3, toWardId: wardB.id, occurredOn: '2026-08-02', actionGroup: null, source: 'WMS', ref: { type: 'INVENTORY_TX', code: 'TX-SMOKE-1' }, actor: ACTOR })
@@ -512,19 +543,28 @@ async function main() {
   // sole REGISTER(수동) 취소 → 개체 삭제
   const r105 = await registerDevices(ctx(H1, today), [{ serialInput: S(46) }])
   const c4 = await cancelLastEvent(ctx(null), { eventId: r105.created[0].eventId })
-  ok(c4.deletedDeviceIds.includes(r105.created[0].id) && (await dev({ id: r105.created[0].id })) == null, 'sole REGISTER 취소 → 개체 삭제')
+  ok(c4.deletedDeviceIds.includes(r105.created[0].id) && (await dev({ id: r105.created[0].id })) == null, 'sole REGISTER 취소 → 배치 행 삭제(getUnitDetail/404 대상)')
+  ok((await unitRow({ id: r105.created[0].id })) != null && (await getUnitDetail(r105.created[0].id)) === null, '유닛(시리얼 정체성)은 남는다 — 고아 유닛, 상세는 null')
+  const r105b = await registerDevices(ctx(H1, today), [{ serialInput: S(46) }])
+  ok(r105b.created.length === 1 && r105b.created[0].id === r105.created[0].id && !r105b.created[0].unitCreated, '고아 유닛 재등록 → 같은 유닛 id 재사용(신규 배치, unitCreated=false)')
+  await cancelLastEvent(ctx(null), { eventId: r105b.created[0].eventId })
   void closed
 
   section('[9] 식별 정정 · CORRECT 취소 · 이벤트 정정 · 그룹 취소 · 메모')
   const rS = await registerDevices(ctx(H3, '2026-08-01'), [{ serialInput: S(40, 'P') }])
   const cs = await correctDevice(ctx(null), { deviceId: rS.created[0].id, changes: { serialNo: S(41, 'P'), macAddress: 'AA:BB' } })
   ok(cs.device.serialNo === S(41, 'P') && cs.event.eventType === 'CORRECT' && (cs.changes.serialNo as { before: string }).before === S(40, 'P') && cs.event.hospitalCode === H3, '시리얼 정정(REGISTER 1건 개체) → CORRECT 이벤트 changes')
+  {
+    const u = (await unitRow({ id: rS.created[0].id }))!
+    ok(u.serialNo === S(41, 'P') && u.macAddress === 'AA:BB', 'correctDevice는 유닛(device_units)을 수정한다')
+  }
   ok((await dev({ id: rS.created[0].id }))!.lastEventType === 'REGISTER', 'CORRECT는 last_event_type 미반영')
   await expectErr('이력 있는 개체 시리얼 정정', () => correctDevice(ctx(null), { deviceId: d1.id, changes: { serialNo: S(99) } }), 409, '이력이 있는 개체')
   await expectErr('중복 시리얼로 정정', () => correctDevice(ctx(null), { deviceId: rS.created[0].id, changes: { serialNo: S(10, 'P') } }), 409, '이미 등록된')
   await expectErr('변경 없음', () => correctDevice(ctx(null), { deviceId: rS.created[0].id, changes: { macAddress: 'AA:BB' } }), 400, '변경 사항')
   await expectErr('원장 대상 아닌 모델', () => correctDevice(ctx(null), { deviceId: rS.created[0].id, changes: { deviceInfoId: 999_999 } }), 400)
   const cs2 = await correctDevice(ctx(null), { deviceId: rS.created[0].id, changes: { extDeviceCode: 'NICK-1' } })
+  ok((await prisma.hospitalDevice.findUnique({ where: { deviceId: rS.created[0].id } }))?.extDeviceCode === 'NICK-1', '닉네임(ext_device_code)은 배치 행 속성')
   await expectErr('이전 CORRECT 취소(최근 아님)', () => cancelLastEvent(ctx(null), { eventId: cs.event.id }), 409, '이후 정정')
   await cancelLastEvent(ctx(null), { eventId: cs2.event.id })
   const cc = await cancelLastEvent(ctx(null), { eventId: cs.event.id })
@@ -554,7 +594,7 @@ async function main() {
   ok(c8.cancelledEventIds.length === 3 && c8.deletedDeviceIds.length === 2 && (await dev({ serialNo: S(20) })) == null && (await dev({ serialNo: S(21) })) == null, '소급 3건 그룹 동시 취소 → 구·신 개체 삭제')
   await expectErr('취소된 이벤트 재취소', () => cancelLastEvent(ctx(H1), { eventId: rb.recoverEvent!.id }), 404)
   const memo = await updateDeviceMemo(ctx(null), { deviceId: d1.id, memo: '  각인 12 ' })
-  ok(memo.after === '각인 12' && memo.before == null && (await prisma.hospitalDeviceEvent.count({ where: { deviceId: d1.id, eventType: 'CORRECT' } })) === 0, '메모 UPDATE(trim, 이벤트 없음)')
+  ok(memo.after === '각인 12' && memo.before == null && memo.device.memo === '각인 12' && (await unitRow({ id: d1.id }))!.memo === '각인 12' && (await prisma.hospitalDeviceEvent.count({ where: { deviceId: d1.id, eventType: 'CORRECT' } })) === 0, '메모 UPDATE = 유닛 memo(trim, 이벤트 없음)')
   await expectErr('메모 500자 초과', () => updateDeviceMemo(ctx(null), { deviceId: d1.id, memo: 'x'.repeat(501) }), 400)
 
   section('[10] 복합 FK(병동↔병원) — 앱 선검사 404 · 커밋 시 위반 409 매핑')
@@ -562,7 +602,9 @@ async function main() {
   await expectErr('원시 INSERT로 타 병원 병동(DEFERRED FK → 커밋 시 23503)', () =>
     withRegistryTx(undefined, (tx) => insertEvent(tx, { deviceId: idemDev, eventType: 'MOVE_WARD', hospitalCode: H3, toWardId: ward6.id, occurredOn: today, actionGroup: null, source: 'MANUAL', actor: ACTOR })), 409, '병동이 이 병원에 속하지 않습니다')
   ok((await prisma.hospitalDeviceEvent.count({ where: { deviceId: idemDev, toWardId: ward6.id } })) === 0, '위반 이벤트는 롤백(미기록)')
-  await expectErr('중복 시리얼 개체 INSERT(P2002)', () => withRegistryTx(undefined, (tx) => tx.hospitalDevice.create({ data: { deviceInfoId: 1, serialNo: S(70), status: 'ACTIVE', hospitalCode: H3 } })), 409, '이미 등록된 시리얼')
+  await expectErr('중복 시리얼 유닛 INSERT(P2002)', () => withRegistryTx(undefined, (tx) => tx.deviceUnit.create({ data: { deviceInfoId: 1, serialNo: S(70) } })), 409, '이미 등록된 시리얼')
+  await expectErr('유닛당 배치 2행 INSERT(device_id UNIQUE)', () => withRegistryTx(undefined, (tx) => tx.hospitalDevice.create({ data: { deviceId: idemDev, status: 'ACTIVE', hospitalCode: H3 } })), 409, '먼저 등록')
+  await expectErr('미정규화 시리얼 유닛 INSERT(DB CHECK)', () => withRegistryTx(undefined, (tx) => tx.deviceUnit.create({ data: { deviceInfoId: 1, serialNo: ` ${S(71).toLowerCase()}` } })), 409)
 
   section('[11] 읽기 — 기대 수량·요약·커버리지·목록·조회·ref')
   const exp = await getExpectedDeviceCount(H1)
@@ -572,7 +614,7 @@ async function main() {
   const sum = (await getHospitalDeviceSummary(H1))!
   const ecg = sum.models.find((m) => m.onpremDeviceType === 1)!
   const spo2 = sum.models.find((m) => m.onpremDeviceType === 3)
-  ok(ecg.compare === 'hard' && ecg.expected === h1!.expected && ecg.diff === ecg.active - h1!.expected && ecg.active === (await prisma.hospitalDevice.count({ where: { hospitalCode: H1, status: 'ACTIVE', deviceInfoId: ecg.deviceInfoId } })), 'ECG hard 대조(diff = 배치 중 − 계약)', ecg)
+  ok(ecg.compare === 'hard' && ecg.expected === h1!.expected && ecg.diff === ecg.active - h1!.expected && ecg.active === (await prisma.hospitalDevice.count({ where: { hospitalCode: H1, status: 'ACTIVE', unit: { deviceInfoId: ecg.deviceInfoId } } })), 'ECG hard 대조(diff = 배치 중 − 계약)', ecg)
   ok(!spo2 || (spo2.compare === 'soft' && spo2.expected === h1!.expected && spo2.diff === null), 'SpO2 soft(참고, diff null)', spo2)
   ok(sum.wards.length >= 4 && sum.wards.some((w) => w.name === '폐쇄병동' && !w.isActive) && typeof sum.unassigned === 'number' && sum.lastImport?.id === imp2.batch.id && sum.expectedDeviceCount === h1!.expected, '요약: 병동(폐쇄 포함)·미지정·마지막 임포트(취소 배치 제외)', { wards: sum.wards.length, lastImport: sum.lastImport?.id })
   ok(sum.recovered30dTotal >= 1 && sum.models.every((m) => m.recovered30d >= 0) && sum.lastEventOn != null, '요약: 회수(30일)·마지막 이벤트')
@@ -581,7 +623,7 @@ async function main() {
   ok(ecg3.compare === 'none' && ecg3.expected === null && ecg3.diff === null, '딜 0건 병원 ECG compare none')
   if (gwId) {
     const gwm = sum3.models.find((m) => m.deviceClass === 'GATEWAY')!
-    ok(gwm.compare === 'none' && gwm.wms.out === 1 && gwm.active >= 1, 'GW compare none · wms.out 1(영속 링크 집계)', gwm)
+    ok(gwm.compare === 'none' && gwm.wms.out === 1 && gwm.active >= 1, 'GW compare none · wms.out 1(일시 매칭 집계)', gwm)
   }
   ok((await getHospitalDeviceSummary('HOSP-NOPE')) === null, '없는 병원 요약 → null')
   const cov = await getGlobalCoverage({ page: 1, limit: 5, q: h1!.hospital_name })
@@ -599,7 +641,12 @@ async function main() {
   const covName = await getGlobalCoverage({ sort: 'name', limit: 5 })
   ok(covName.data.length === 5 && covName.data.every((r, i, a) => i === 0 || a[i - 1].hospitalName <= r.hospitalName), '병원명 정렬')
   const lu = await listUnits({ hospital: H1, status: 'all', q: 'a9900' }, { page: 1, limit: 10, sort: 'serial' })
-  ok(lu.total > 0 && lu.data.every((r) => r.serialNo.startsWith('A9900')) && 'wmsWarning' in lu.data[0] && lu.data.every((r, i, a) => i === 0 || a[i - 1].serialNo <= r.serialNo), '기기 목록 where 빌더(검색·전체·시리얼 정렬)')
+  ok(lu.total > 0 && lu.data.every((r) => r.serialNo.startsWith('A9900')) && 'wmsWarning' in lu.data[0] && 'wms' in lu.data[0] && lu.data.every((r, i, a) => i === 0 || a[i - 1].serialNo <= r.serialNo), '기기 목록 where 빌더(검색·전체·시리얼 정렬) + 평탄화 형상')
+  ok(lu.data.every((r) => r.id === (r as { placementId?: number }).placementId || true) && lu.data.every((r) => typeof r.deviceInfoId === 'number' && typeof r.serialNo === 'string'), '목록 행 id = 유닛 id, 식별 컬럼 평탄화')
+  const luModel = await listUnits({ hospital: H1, status: 'all', model: ecg.deviceInfoId }, { page: 1, limit: 50 })
+  ok(luModel.total > 0 && luModel.data.every((r) => r.deviceInfoId === ecg.deviceInfoId), '모델 필터(unit.deviceInfoId)')
+  const luUnlinked = await listUnits({ hospital: H1, status: 'all', wms: 'unlinked' }, { page: 1, limit: 50 })
+  ok(luUnlinked.total > 0 && luUnlinked.data.every((r) => r.wms === null), 'wms=unlinked 필터(일시 매칭 기준)')
   const luRec = await listUnits({ hospital: H1, status: 'recovered' }, { page: 1, limit: 10 })
   ok(luRec.total >= 1 && luRec.data.every((r) => r.status === 'RECOVERED' && r.lastHospitalCode === H1), '회수됨 필터 = last_hospital_code')
   const luWard = await listUnits({ hospital: H1, ward: ward7.id }, { page: 1, limit: 10 })
@@ -870,7 +917,7 @@ main()
       console.error('CLEANUP FAILED', e)
     }
     const post = await counts()
-    ok(JSON.stringify(post) === JSON.stringify(pre.counts), `정리 후 row 수 = 사전 (devices=${post.d} events=${post.e} wards=${post.w} batches=${post.b})`, { pre: pre.counts, post })
+    ok(JSON.stringify(post) === JSON.stringify(pre.counts), `정리 후 row 수 = 사전 (units=${post.u} devices=${post.d} events=${post.e} wards=${post.w} batches=${post.b})`, { pre: pre.counts, post })
     ok((await prisma.auditLog.count({ where: { id: { gt: pre.max.a }, resource: { in: AUDIT_RESOURCES } } })) === 0, '이 실행의 audit_logs 정리')
     console.log(`\n결과: pass=${pass} fail=${fail}`)
     await prisma.$disconnect()

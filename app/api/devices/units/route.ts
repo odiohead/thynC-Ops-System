@@ -6,9 +6,9 @@ export const dynamic = 'force-dynamic'
 
 /**
  * 기기 목록 (§7.1) — `?hospital&model&ward(id|unassigned)&status=active|recovered|all&q&wms=linked|unlinked|in_stock&page&limit(50, ≤500)&sort=ward|serial|placedOn|lastEvent&idsOnly`
- * - 응답 `{ data, total, page, limit }` — 행에 deviceInfo·ward·hospital·lastHospital·recoverReason·replacedBy·inventoryUnit(영속 링크)
- *   + `lastRef`(마지막 연결 ref) + `wmsTransient`/`wmsWarning`(`inventory_unit_id IS NULL`인 행의 표시용 배치 매칭 — persist:false, DB 쓰기 없음 §9.2)
- * - `wms=` 필터는 영속 `inventory_unit_id`만 기준(임시 매칭은 필터·집계에 쓰지 않음)
+ * - 행 `id` = 공개 device id(`device_units.id`). 행에 deviceInfo·ward·hospital·lastHospital·recoverReason·replacedBy
+ *   + `lastRef`(마지막 연결 ref) + `wms`(=`wmsTransient`, 표시용 배치 매칭 — 일시 계산, DB 쓰기 없음 §9.2) + `wmsWarning`
+ * - `wms=` 필터도 같은 일시 매칭 기준(후보 ≤10,000대 — 초과 400)
  * - `idsOnly=1` → `{ ids[], total, truncated }` (검색 결과 전체 선택, ≤2,000)
  * 로그인 전체
  */

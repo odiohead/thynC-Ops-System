@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { UNITS_EXPORT_MAX, buildUnitsWhere, listUnits, type UnitListRow } from '@/lib/deviceRegistry'
+import { UNITS_EXPORT_MAX, listUnits, resolveUnitsWhere, type UnitListRow } from '@/lib/deviceRegistry'
 import {
   DEVICE_EVENT_TYPE_LABELS,
   DEVICE_STATUS_LABELS,
@@ -19,8 +19,7 @@ const STATUS_FILTER_LABEL = { active: '배치중', recovered: '회수됨', all: 
 /** 기기 목록 열(§6.1 Excel) — 회수된 개체는 병원 열에 마지막 병원(last_hospital_code)을 적는다 */
 function toRow(r: UnitListRow): Record<string, unknown> {
   const hospital = r.hospital ?? r.lastHospital
-  const linked = r.inventoryUnit
-  const wms = linked ? { inventoryName: linked.inventory.name, status: linked.status } : r.wmsTransient
+  const wms = r.wms
   return {
     병원코드: hospital?.hospitalCode ?? '',
     병원명: hospital?.hospitalName ?? '',
@@ -37,7 +36,7 @@ function toRow(r: UnitListRow): Record<string, unknown> {
     '최근 이벤트': r.lastEventType ? DEVICE_EVENT_TYPE_LABELS[r.lastEventType as DeviceEventType] ?? r.lastEventType : '',
     '최근 이벤트 일자': toYmd(r.lastEventOn) ?? '',
     연결: r.lastRef ? `${REGISTRY_REF_TYPE_LABELS[r.lastRef.type as RegistryRefType] ?? r.lastRef.type} ${r.lastRef.code}` : '',
-    '창고 개체': wms ? `${wms.inventoryName} · ${wms.status}${linked ? '' : ' (자동 매칭)'}` : '',
+    '창고 개체': wms ? `${wms.inventoryName} · ${wms.status} (자동 매칭)` : '',
     '창고 경고': r.wmsWarning ?? '',
     메모: r.memo ?? '',
   }
@@ -45,7 +44,7 @@ function toRow(r: UnitListRow): Record<string, unknown> {
 
 /**
  * 기기 목록 Excel — 목록과 같은 필터(where 빌더 공용), page/limit 무시, 10,000행 캡(초과 400)
- * 창고 개체 열은 export 1회당 배치 매칭 1쿼리(persist:false, DB 쓰기 없음 §9.2). 로그인 전체
+ * 창고 개체 열은 export 1회당 배치 매칭 1쿼리(일시 계산, DB 쓰기 없음 §9.2). 로그인 전체
  */
 export async function GET(req: NextRequest) {
   const auth = await authOr401(req)
@@ -57,7 +56,7 @@ export async function GET(req: NextRequest) {
   const { params, sort } = parsed
 
   try {
-    const total = await prisma.hospitalDevice.count({ where: buildUnitsWhere(params) })
+    const total = await prisma.hospitalDevice.count({ where: await resolveUnitsWhere(params) })
     if (total > UNITS_EXPORT_MAX) {
       return badRequest(`필터를 좁혀 ${UNITS_EXPORT_MAX.toLocaleString()}행 이하로 내보내세요 (현재 ${total.toLocaleString()}행)`)
     }

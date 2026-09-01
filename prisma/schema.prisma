@@ -374,7 +374,7 @@ model DeviceInfo {
   createdAt       DateTime         @default(now()) @map("created_at")
   updatedAt       DateTime         @updatedAt @map("updated_at")
   devices         ProjectDevice[]
-  hospitalDevices HospitalDevice[] // 의미 변경(2026-09-01): 병원×모델 수량 → 시리얼 개체
+  deviceUnits     DeviceUnit[]     // 시리얼 유닛(3층 구조 B-20, 2026-09-01) — 구 hospitalDevices(병원×모델 수량) 역관계 대체
   inventoryItems  InventoryItem[]
   salesDealDevices SalesDealDevice[]
 
@@ -497,18 +497,39 @@ model HospitalWard {
   @@schema("public")
 }
 
-// 물리 개체 — 시리얼당 1행(전역 UNIQUE), 프로젝션(status·hospital_code·ward_id…)은 이벤트 fold의 파생값 (D1/D3)
+// 시리얼 정체성(유닛) — 시리얼당 1행, 전역 UNIQUE (3층 구조 B-20: device_info → device_units → hospital_devices / inventory_units)
+// API 공개 device id = device_units.id. source 어휘 MANUAL/IMPORT/WMS/ONPREM/BACKFILL는 코드 상수(CHECK 없음)
+// SQL-only CHECK: serial_no <> '' AND serial_no = upper(btrim(serial_no)) (정규화 키 강제)
+// SQL-only 인덱스: serial_no text_pattern_ops / 부분 (serial_raw) WHERE serial_raw IS NOT NULL
+model DeviceUnit {
+  id           Int                   @id @default(autoincrement())
+  deviceInfoId Int                   @map("device_info_id")
+  serialNo     String                @unique @map("serial_no")
+  serialRaw    String?               @map("serial_raw")
+  macAddress   String?               @map("mac_address")
+  memo         String?
+  source       String                @default("MANUAL")
+  createdAt    DateTime              @default(now()) @map("created_at")
+  updatedAt    DateTime              @default(now()) @updatedAt @map("updated_at")
+  deviceInfo   DeviceInfo            @relation(fields: [deviceInfoId], references: [id], onDelete: Restrict)
+  placement    HospitalDevice?       @relation("UnitPlacement")      // 병원 배치 프로젝션 (유닛당 0..1행)
+  replacedPlacements HospitalDevice[] @relation("DeviceReplacement") // 이 유닛이 교체기로 들어간 구기기 프로젝션들(replaced_by_id)
+  events       HospitalDeviceEvent[] @relation("DeviceEvents")
+  relatedEvents HospitalDeviceEvent[] @relation("EventRelatedDevice")
+
+  @@index([deviceInfoId])
+  @@map("device_units")
+  @@schema("public")
+}
+
+// 병원 배치 프로젝션 — 유닛(DeviceUnit)당 0..1행(device_id UNIQUE). 상태 컬럼(status·hospital_code·ward_id…)은 이벤트 fold의 파생값 (D1/D3)
+// 식별 속성(device_info_id·serial_no·serial_raw·mac_address·memo)은 DeviceUnit으로 이동 — 이 모델에는 없음
 // SQL-only CHECK: status IN (ACTIVE, RECOVERED) / (status='ACTIVE') = (hospital_code IS NOT NULL) / ward_id IS NULL OR status='ACTIVE'
-// SQL-only: 복합 FK (ward_id, hospital_code) → hospital_wards(id, hospital_code) DEFERRABLE INITIALLY DEFERRED / serial_no text_pattern_ops 인덱스
+// SQL-only: 복합 FK (ward_id, hospital_code) → hospital_wards(id, hospital_code) DEFERRABLE INITIALLY DEFERRED
 model HospitalDevice {
   id              Int                   @id @default(autoincrement())
-  deviceInfoId    Int                   @map("device_info_id")
-  serialNo        String                @unique @map("serial_no")
-  serialRaw       String?               @map("serial_raw")
-  macAddress      String?               @map("mac_address")
+  deviceId        Int                   @unique @map("device_id")
   extDeviceCode   String?               @map("ext_device_code")
-  inventoryUnitId Int?                  @unique @map("inventory_unit_id")
-  memo            String?
   extLastSeenAt   DateTime?             @map("ext_last_seen_at")
   extSyncedAt     DateTime?             @map("ext_synced_at")
   status          String                @default("ACTIVE") // ACTIVE / RECOVERED
@@ -520,26 +541,19 @@ model HospitalDevice {
   recoverReasonId Int?                  @map("recover_reason_id")
   lastEventType   String?               @map("last_event_type")
   lastEventOn     DateTime?             @map("last_event_on") @db.Date
-  replacedById    Int?                  @map("replaced_by_id")
+  replacedById    Int?                  @map("replaced_by_id") // 교체기 유닛(device_units.id)
   createdAt       DateTime              @default(now()) @map("created_at")
   updatedAt       DateTime              @default(now()) @updatedAt @map("updated_at")
-  deviceInfo      DeviceInfo            @relation(fields: [deviceInfoId], references: [id], onDelete: Restrict)
-  inventoryUnit   InventoryUnit?        @relation(fields: [inventoryUnitId], references: [id], onDelete: SetNull)
+  unit            DeviceUnit            @relation("UnitPlacement", fields: [deviceId], references: [id], onDelete: Restrict)
   hospital        Hospital?             @relation("DeviceCurrentHospital", fields: [hospitalCode], references: [hospitalCode], onDelete: Restrict)
   ward            HospitalWard?         @relation("DeviceWard", fields: [wardId, hospitalCode], references: [id, hospitalCode], onDelete: Restrict, map: "hospital_devices_ward_fkey")
   lastHospital    Hospital?             @relation("DeviceLastHospital", fields: [lastHospitalCode], references: [hospitalCode], onDelete: SetNull)
   recoverReason   StatusCode?           @relation("DeviceRecoverReason", fields: [recoverReasonId], references: [id], onDelete: Restrict)
-  replacedBy      HospitalDevice?       @relation("DeviceReplacement", fields: [replacedById], references: [id], onDelete: SetNull)
-  replaces        HospitalDevice[]      @relation("DeviceReplacement")
-  events          HospitalDeviceEvent[] @relation("DeviceEvents")
-  relatedEvents   HospitalDeviceEvent[] @relation("EventRelatedDevice")
+  replacedBy      DeviceUnit?           @relation("DeviceReplacement", fields: [replacedById], references: [id], onDelete: SetNull)
 
   @@index([hospitalCode, status])
-  @@index([hospitalCode, deviceInfoId, status], map: "hospital_devices_hospital_model_status_idx")
-  @@index([deviceInfoId, status])
   @@index([wardId])
   @@index([lastHospitalCode, status])
-  @@index([serialNo(ops: raw("text_pattern_ops"))], map: "hospital_devices_serial_no_pattern_idx") // 시리얼 접두 LIKE 조회
   @@map("hospital_devices")
   @@schema("public")
 }
@@ -574,7 +588,7 @@ model HospitalDeviceImportBatch {
   @@schema("public")
 }
 
-// 이벤트 이력 — append-first, 단일 소스 (§4.1). event_type REGISTER/MOVE_WARD/RECOVER/CORRECT
+// 이벤트 이력 — append-first, 단일 소스 (§4.1). device_id·related_device_id는 유닛(DeviceUnit) 참조. event_type REGISTER/MOVE_WARD/RECOVER/CORRECT
 // SQL-only CHECK: event_type 어휘 / CORRECT 외 hospital_code 필수 / 병동 있으면 hospital_code 필수 / RECOVER 사유 필수 / CORRECT changes 필수 / (ref_type IS NULL)=(ref_code IS NULL)
 // SQL-only: 복합 FK (from_ward_id|to_ward_id, hospital_code) DEFERRABLE INITIALLY DEFERRED
 // SQL-only 부분 인덱스: (ref_type, ref_code) / (import_batch_id) / (action_group) / 멱등 UNIQUE (ref_type, ref_code, device_id, event_type) WHERE source IN ('WMS','ONPREM')
@@ -600,12 +614,12 @@ model HospitalDeviceEvent {
   editedAt        DateTime?                  @map("edited_at")
   editedById      String?                    @map("edited_by")
   createdAt       DateTime                   @default(now()) @map("created_at")
-  device          HospitalDevice             @relation("DeviceEvents", fields: [deviceId], references: [id], onDelete: Restrict)
+  device          DeviceUnit                 @relation("DeviceEvents", fields: [deviceId], references: [id], onDelete: Restrict)
   hospital        Hospital?                  @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: Restrict)
   fromWard        HospitalWard?              @relation("EventFromWard", fields: [fromWardId, hospitalCode], references: [id, hospitalCode], onDelete: Restrict, map: "hospital_device_events_from_ward_fkey")
   toWard          HospitalWard?              @relation("EventToWard", fields: [toWardId, hospitalCode], references: [id, hospitalCode], onDelete: Restrict, map: "hospital_device_events_to_ward_fkey")
   reasonCode      StatusCode?                @relation("DeviceEventReason", fields: [reasonCodeId], references: [id], onDelete: Restrict)
-  relatedDevice   HospitalDevice?            @relation("EventRelatedDevice", fields: [relatedDeviceId], references: [id], onDelete: SetNull)
+  relatedDevice   DeviceUnit?                @relation("EventRelatedDevice", fields: [relatedDeviceId], references: [id], onDelete: SetNull)
   importBatch     HospitalDeviceImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: Restrict)
   actor           User?                      @relation("DeviceEventActor", fields: [actorId], references: [id], onDelete: SetNull)
   editedBy        User?                      @relation("DeviceEventEditor", fields: [editedById], references: [id], onDelete: SetNull)
@@ -1192,7 +1206,6 @@ model InventoryUnit {
   inventory    Inventory                  @relation(fields: [inventoryId], references: [id])
   hospital     Hospital?                  @relation(fields: [hospitalCode], references: [hospitalCode])
   transactions InventoryTransactionUnit[]
-  hospitalDevice HospitalDevice?          // 디바이스 원장 조인 키 역관계 (D9 — WMS 쓰기 없음)
 
   @@unique([itemId, serialNo])
   @@index([itemId, status])

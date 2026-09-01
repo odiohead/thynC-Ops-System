@@ -1,7 +1,8 @@
 /**
  * 검토형 임포트 — 미리보기 판정(§7.2 서버 단일 소스) + 실행(§7.2 실행 규칙 · §5.4 배치)
  *
- * - `previewRows`는 DB에 쓰지 않는다(병동 생성은 시뮬레이션, WMS 매칭 persist:false)
+ * - `previewRows`는 DB에 쓰지 않는다(병동 생성은 시뮬레이션, WMS 매칭은 일시 계산)
+ * - 3층 구조: 원장 상태는 유닛(`device_units`)+배치(`hospital_devices`)로 본다 — 배치 없는 고아 유닛은 신규(ok)로 판정하되 모델은 유닛의 모델을 쓴다
  * - `importBatch`는 같은 트랜잭션에서 미리보기를 다시 돌려(클라이언트 판정 불신) 배치 행을 만들고 `registerDevicesIn`으로 실행한다
  * - 판정: ok | reregister | skip | warn | conflict | error — 우선순위 error > conflict > skip > reregister > warn > ok
  */
@@ -22,6 +23,7 @@ import {
 import { prisma } from '@/lib/prisma'
 import {
   RegistryError,
+  findUnitsBySerial,
   hospitalNames,
   listHospitalWards,
   loadRecoveryReasons,
@@ -375,7 +377,8 @@ export async function previewRows(
 
   // ── 3차: 원장 상태 (현재 프로젝션 기준) + 소급 정합
   const serials = Array.from(new Set(works.map((w) => w.out.serialNo).filter(Boolean)))
-  const existing = serials.length ? await client.hospitalDevice.findMany({ where: { serialNo: { in: serials } } }) : []
+  const unitsBySerial = await findUnitsBySerial(client, serials)
+  const existing = Array.from(unitsBySerial.values()).map((x) => x.device).filter((d): d is DeviceRow => !!d)
   const existingBySerial = new Map(existing.map((d) => [d.serialNo, d]))
   const hNames = await hospitalNames(client, existing.flatMap((d) => [d.hospitalCode, d.lastHospitalCode]))
   const wNames = await wardNames(client, existing.map((d) => d.wardId))
@@ -398,18 +401,21 @@ export async function previewRows(
     if (!out.serialNo) continue
     const action = rowActions[out.row] ?? null
     const d = existingBySerial.get(out.serialNo)
+    const unit = unitsBySerial.get(out.serialNo)?.unit
+    if (unit) {
+      // 원장에 있는 유닛(배치 유무 무관)은 모델이 확정되어 있다 — 행의 모델 판별 오류·형식 경고는 무시
+      w.modelError = null
+      w.modelWarns = []
+      w.modelId = unit.deviceInfoId
+      w.modelName = models.find((m) => m.id === unit.deviceInfoId)?.deviceModel ?? null
+      out.deviceInfoId = unit.deviceInfoId
+      out.deviceModel = w.modelName
+    }
     if (!d) {
       if (action === 'TRANSFER') throw new RegistryError(400, `행 ${out.row}: TRANSFER 액션은 타 병원 배치 중(conflict) 행에만 지정할 수 있습니다`)
       continue
     }
     out.existing = toExisting(d, hNames, wNames, reasonById)
-    // 원장에 있는 개체는 모델이 확정되어 있다 — 행의 모델 판별 오류·형식 경고는 무시
-    w.modelError = null
-    w.modelWarns = []
-    w.modelId = d.deviceInfoId
-    w.modelName = models.find((m) => m.id === d.deviceInfoId)?.deviceModel ?? null
-    out.deviceInfoId = d.deviceInfoId
-    out.deviceModel = w.modelName
     if (d.status === 'ACTIVE' && d.hospitalCode === hospitalCode) {
       if (action === 'TRANSFER') throw new RegistryError(400, `행 ${out.row}: TRANSFER 액션은 타 병원 배치 중(conflict) 행에만 지정할 수 있습니다`)
       w.kind = 'skip'
@@ -454,7 +460,7 @@ export async function previewRows(
     }
   }
 
-  // ── 4차: WMS 배치 매칭(persist:false) → IN_STOCK warn
+  // ── 4차: WMS 배치 매칭(일시 계산) → IN_STOCK warn
   const wmsInputs = works
     .filter((w) => w.out.serialNo && w.modelId != null && w.kind !== 'skip')
     .map((w, i) => ({
@@ -466,7 +472,7 @@ export async function previewRows(
       work: w,
     }))
   if (wmsInputs.length > 0) {
-    const m = await matchInventoryUnits(client, wmsInputs, { persist: false })
+    const m = await matchInventoryUnits(client, wmsInputs)
     for (const x of wmsInputs) {
       const match = m.get(x.id) ?? null
       x.work.out.wms = match

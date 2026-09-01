@@ -1,7 +1,9 @@
 -- 병원별 웨어러블 디바이스 원장 (projects/hospital_device_registry_design.md 부록 A.1)
--- 파괴적 마이그: 기존 hospital_devices(병원×모델 수량)를 같은 DB에 백업 후 DROP → 시리얼 개체 테이블이 이름 승계(D1)
+-- 3층 구조(B-20, 2026-09-01): device_info(모델 마스터) → device_units(시리얼 정체성, 전역 UNIQUE) → 상태 하위표
+--   hospital_devices(병원 배치 프로젝션, device_id UNIQUE 1:1) / inventory_units.device_id(WMS 편입 — 후속 마이그, 본 파일 범위 밖)
+-- 파괴적 마이그: 기존 hospital_devices(병원×모델 수량)를 같은 DB에 백업 후 DROP → 배치 프로젝션 테이블이 이름 승계(D1)
 -- 적용: psql "$DATABASE_URL" --single-transaction -v ON_ERROR_STOP=1 -f <this file> → npx prisma migrate resolve --applied 20260901120000_hospital_device_registry
--- 롤백 런북: 설계안 부록 A.0 ②
+-- 롤백 런북: 설계안 부록 A.0 ② (dev2에서 2026-09-01 리허설 완료)
 
 -- 1) D1: 수량표 백업(같은 DB) 후 DROP — 백업 테이블은 원장이 채워진 뒤 후속 마이그에서 삭제
 CREATE TABLE hospital_devices_qty_backup_202609 AS SELECT * FROM hospital_devices;
@@ -32,34 +34,41 @@ CREATE TABLE hospital_wards (
   CONSTRAINT hospital_wards_id_hospital_code_key UNIQUE (id, hospital_code));
 CREATE UNIQUE INDEX hospital_wards_hospital_code_ext_ward_code_key ON hospital_wards(hospital_code, ext_ward_code) WHERE ext_ward_code IS NOT NULL;
 
--- 4) D1/D3: 물리 개체(이름 승계)
-CREATE TABLE hospital_devices (
+-- 4) 시리얼 정체성(유닛) — 시리얼당 1행, 전역 UNIQUE. source 어휘 MANUAL/IMPORT/WMS/ONPREM/BACKFILL는 코드 상수(CHECK 없음)
+CREATE TABLE device_units (
   id SERIAL PRIMARY KEY,
   device_info_id INTEGER NOT NULL REFERENCES device_info(id) ON DELETE RESTRICT ON UPDATE CASCADE,
-  serial_no TEXT NOT NULL, serial_raw TEXT, mac_address TEXT, ext_device_code TEXT,
-  inventory_unit_id INTEGER REFERENCES inventory_units(id) ON DELETE SET NULL,
-  memo TEXT, ext_last_seen_at TIMESTAMP(3), ext_synced_at TIMESTAMP(3),
+  serial_no TEXT NOT NULL, serial_raw TEXT, mac_address TEXT, memo TEXT,
+  source TEXT NOT NULL DEFAULT 'MANUAL',
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT device_units_serial_no_key UNIQUE (serial_no),
+  CONSTRAINT device_units_serial_no_normalized_check CHECK (serial_no <> '' AND serial_no = upper(btrim(serial_no))));
+CREATE INDEX device_units_device_info_id_idx   ON device_units(device_info_id);
+CREATE INDEX device_units_serial_no_pattern_idx ON device_units(serial_no text_pattern_ops);
+CREATE INDEX device_units_serial_raw_idx        ON device_units(serial_raw) WHERE serial_raw IS NOT NULL;
+
+-- 4') D1/D3: 병원 배치 프로젝션(이름 승계) — 유닛당 0..1행, 상태 컬럼은 이벤트 fold의 파생값
+CREATE TABLE hospital_devices (
+  id SERIAL PRIMARY KEY,
+  device_id INTEGER NOT NULL REFERENCES device_units(id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  ext_device_code TEXT, ext_last_seen_at TIMESTAMP(3), ext_synced_at TIMESTAMP(3),
   status TEXT NOT NULL DEFAULT 'ACTIVE',
   hospital_code TEXT REFERENCES hospitals(hospital_code) ON DELETE RESTRICT ON UPDATE CASCADE,
   ward_id INTEGER, placed_on DATE,
   last_hospital_code TEXT REFERENCES hospitals(hospital_code) ON DELETE SET NULL ON UPDATE CASCADE,
   recovered_on DATE, recover_reason_id INTEGER REFERENCES status_codes(id) ON DELETE RESTRICT,
   last_event_type TEXT, last_event_on DATE,
-  replaced_by_id INTEGER REFERENCES hospital_devices(id) ON DELETE SET NULL,
+  replaced_by_id INTEGER REFERENCES device_units(id) ON DELETE SET NULL,
   created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT hospital_devices_serial_no_key UNIQUE (serial_no),
-  CONSTRAINT hospital_devices_inventory_unit_id_key UNIQUE (inventory_unit_id),
+  CONSTRAINT hospital_devices_device_id_key UNIQUE (device_id),
   CONSTRAINT hospital_devices_status_check CHECK (status IN ('ACTIVE','RECOVERED')),
   CONSTRAINT hospital_devices_active_hospital_check CHECK ((status='ACTIVE') = (hospital_code IS NOT NULL)),
   CONSTRAINT hospital_devices_ward_only_active_check CHECK (ward_id IS NULL OR status='ACTIVE'),
   CONSTRAINT hospital_devices_ward_fkey FOREIGN KEY (ward_id, hospital_code) REFERENCES hospital_wards(id, hospital_code)
     ON DELETE RESTRICT ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED);
-CREATE INDEX hospital_devices_hospital_code_status_idx     ON hospital_devices(hospital_code, status);
-CREATE INDEX hospital_devices_hospital_model_status_idx    ON hospital_devices(hospital_code, device_info_id, status);
-CREATE INDEX hospital_devices_device_info_id_status_idx    ON hospital_devices(device_info_id, status);
-CREATE INDEX hospital_devices_ward_id_idx                  ON hospital_devices(ward_id);
+CREATE INDEX hospital_devices_hospital_code_status_idx      ON hospital_devices(hospital_code, status);
+CREATE INDEX hospital_devices_ward_id_idx                   ON hospital_devices(ward_id);
 CREATE INDEX hospital_devices_last_hospital_code_status_idx ON hospital_devices(last_hospital_code, status);
-CREATE INDEX hospital_devices_serial_no_pattern_idx        ON hospital_devices(serial_no text_pattern_ops);
 
 -- 5) D6: 임포트 배치
 CREATE TABLE hospital_device_import_batches (
@@ -73,16 +82,16 @@ CREATE TABLE hospital_device_import_batches (
   CONSTRAINT hospital_device_import_batches_source_kind_check CHECK (source_kind IN ('EXCEL','PASTE')));
 CREATE INDEX hospital_device_import_batches_hospital_created_idx ON hospital_device_import_batches(hospital_code, created_at DESC);
 
--- 6) 이벤트(append-first)
+-- 6) 이벤트(append-first) — device_id·related_device_id는 유닛(device_units) 참조
 CREATE TABLE hospital_device_events (
   id SERIAL PRIMARY KEY,
-  device_id INTEGER NOT NULL REFERENCES hospital_devices(id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  device_id INTEGER NOT NULL REFERENCES device_units(id) ON DELETE RESTRICT ON UPDATE CASCADE,
   event_type TEXT NOT NULL,
   hospital_code TEXT REFERENCES hospitals(hospital_code) ON DELETE RESTRICT ON UPDATE CASCADE,
   from_ward_id INTEGER, to_ward_id INTEGER,
   reason_code_id INTEGER REFERENCES status_codes(id) ON DELETE RESTRICT,
   occurred_on DATE NOT NULL, memo TEXT, ref_type TEXT, ref_code TEXT,
-  related_device_id INTEGER REFERENCES hospital_devices(id) ON DELETE SET NULL,
+  related_device_id INTEGER REFERENCES device_units(id) ON DELETE SET NULL,
   action_group UUID, source TEXT NOT NULL DEFAULT 'MANUAL',
   import_batch_id INTEGER REFERENCES hospital_device_import_batches(id) ON DELETE RESTRICT,
   changes JSONB, actor_id TEXT REFERENCES users(id) ON DELETE SET NULL, actor_name TEXT,

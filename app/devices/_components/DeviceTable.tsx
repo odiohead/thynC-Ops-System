@@ -3,7 +3,7 @@
 /**
  * 기기 목록 탭 (§6.1-B) — GROUP B
  * 필터: 상태(● 배치 중 / 회수됨(미재배치) / 전체) · 모델 칩(summary.models) · 병동(summary.wards + 미지정 + 폐쇄 포함) · 시리얼 검색(키·원문·닉네임, 디바운스 → setFilters({q})) · WMS(linked/unlinked/in_stock)
- * 컬럼: ☐ | 시리얼(mono, ⚠형식 불일치 = matchesSerialPattern(serialNo, deviceInfo.serialPattern)===false, 원문 2행) | 모델 | 병동 | 상태 | 배치일 | 회수일·사유 | 최근 이벤트 | 연결(refLink) | 창고 개체(inventoryUnit ?? wmsTransient '(자동 매칭)', wmsWarning ⚠) | 메모(USER+ 인라인 저장 → patchDevice({memo}) → onMutated) | ⋯(onAction)
+ * 컬럼: ☐ | 시리얼(mono, ⚠형식 불일치 = matchesSerialPattern(serialNo, deviceInfo.serialPattern)===false, 원문 2행) | 모델 | 병동 | 상태 | 배치일 | 회수일·사유 | 최근 이벤트 | 연결(refLink) | 창고 개체(wms 일시 매칭 '(자동 매칭)', wmsWarning ⚠) | 메모(USER+ 인라인 저장 → patchDevice({memo}) → onMutated) | ⋯(onAction)
  * 정렬: 병동→시리얼(기본)/시리얼/배치일/최근 이벤트 (filters.sort — 헤더 클릭·셀렉트). page/limit 50(≤500) 서버 페이지네이션.
  * 다중 선택(ACTIVE 행만) + '검색 결과 전체 선택 N건'(getUnitIds ≤2,000 → Map에 id→(행 있으면 ref, 없으면 null)) → selection/setSelection.
  * 빈 상태: 헤더 + "등록된 기기가 없습니다. [+ 등록] 또는 [임포트] 탭에서 시작하세요." (onRegister / onOpenTab('import'))
@@ -456,7 +456,7 @@ export function DeviceTable({
                 const selected = selection.has(row.id)
                 const selectable = row.status === 'ACTIVE'
                 const badFormat = matchesSerialPattern(row.serialNo, row.deviceInfo?.serialPattern) === false
-                const wms = wmsCell(row.inventoryUnit, row.wmsTransient)
+                const wms = wmsCell(row.wms ?? row.wmsTransient)
                 const refHref = row.lastRef ? refLink(row.lastRef.type, row.lastRef.code) : null
                 const editing = memoEdit?.id === row.id
                 return (

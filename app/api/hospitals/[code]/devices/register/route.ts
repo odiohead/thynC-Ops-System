@@ -222,9 +222,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     const serials = touched.map((t) => t.serialNo)
 
     if (p.items.length === 1 && touched.length === 1) {
-      // 단건 등록 — hospital_device(id=serial) CREATE (§8.3)
+      // 단건 등록 — hospital_device(id=serial) CREATE (§8.3). t.id = 공개 device id(유닛 id)
       const t = touched[0]
-      const device = await prisma.hospitalDevice.findUnique({ where: { id: t.id }, include: { deviceInfo: { select: { deviceModel: true } } } })
+      const device = await prisma.deviceUnit.findUnique({ where: { id: t.id }, select: { deviceInfo: { select: { deviceModel: true } } } })
       await logAudit({
         req: request,
         actor: auditActorFromJWT(user),

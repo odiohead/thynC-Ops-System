@@ -201,7 +201,7 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
 
   const ref = device ? toDeviceRef(device) : null
   const currentHospital = device?.hospitalCode ?? device?.lastHospitalCode ?? null
-  const wms = device ? wmsCell(device.inventoryUnit, device.wmsTransient) : null
+  const wms = device ? wmsCell(device.wms ?? device.wmsTransient) : null
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-stretch sm:justify-end">

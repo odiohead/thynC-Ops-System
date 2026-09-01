@@ -6,7 +6,7 @@
  * - registryErrorResponse: RegistryError → 그 status + `toJSON()` 본문, 그 외 500
  * - parseIdParam         : 경로 파라미터 정수 검증
  * - deviceAuditLabel     : audit resourceLabel `{병원} {모델} {시리얼}` (§8.3)
- * - projectionSnapshot   : audit before/after용 프로젝션 스냅샷(식별·상태 컬럼만)
+ * - projectionSnapshot   : audit before/after용 스냅샷(유닛 식별 + 배치 상태 컬럼만) — `id`는 공개 device id(유닛 id)
  */
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
@@ -75,26 +75,26 @@ export function registryErrorResponse(e: unknown, context: string): NextResponse
   return NextResponse.json({ error: '처리 중 오류가 발생했습니다.' }, { status: 500 })
 }
 
-/** audit resourceLabel — `{병원} {모델} {시리얼}` (회수 개체는 마지막 병원) */
+/** audit resourceLabel — `{병원} {모델} {시리얼}` (회수 개체는 마지막 병원). `deviceId`는 공개 device id(유닛 id) */
 export async function deviceAuditLabel(deviceId: number): Promise<string> {
-  const d = await prisma.hospitalDevice.findUnique({
+  const d = await prisma.deviceUnit.findUnique({
     where: { id: deviceId },
     select: {
       serialNo: true,
-      hospital: { select: { hospitalName: true } },
-      lastHospital: { select: { hospitalName: true } },
       deviceInfo: { select: { deviceModel: true } },
+      placement: { select: { hospital: { select: { hospitalName: true } }, lastHospital: { select: { hospitalName: true } } } },
     },
   })
   if (!d) return `#${deviceId}`
-  const hosp = d.hospital?.hospitalName ?? d.lastHospital?.hospitalName ?? '-'
+  const hosp = d.placement?.hospital?.hospitalName ?? d.placement?.lastHospital?.hospitalName ?? '-'
   return `${hosp} ${d.deviceInfo?.deviceModel ?? '-'} ${d.serialNo}`
 }
 
-/** audit before/after용 — 프로젝션·식별 컬럼만 (타임스탬프 제외) */
+/** audit before/after용 — 유닛 식별 + 배치 프로젝션 컬럼만 (타임스탬프 제외) */
 export function projectionSnapshot(d: DeviceRow) {
   return {
     id: d.id,
+    placementId: d.placementId,
     serialNo: d.serialNo,
     deviceInfoId: d.deviceInfoId,
     status: d.status,
@@ -109,7 +109,6 @@ export function projectionSnapshot(d: DeviceRow) {
     lastEventOn: d.lastEventOn,
     macAddress: d.macAddress,
     extDeviceCode: d.extDeviceCode,
-    inventoryUnitId: d.inventoryUnitId,
     memo: d.memo,
   }
 }

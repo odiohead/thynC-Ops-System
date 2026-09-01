@@ -1,7 +1,9 @@
 /**
  * 디바이스 원장 읽기 — 병원 요약(§7.1 summary)·전역 커버리지(§6.1-A)·시리얼 조회(§6.1)·목록 where 빌더(units/events/export 공용)
  *
- * GET 경로는 DB에 쓰지 않는다 — WMS 매칭은 표시용(persist:false)만 계산한다(§9.2).
+ * 3층 구조(B-20): 목록·상세는 배치 행(`hospital_devices`, 병원 인덱스) WHERE + 유닛(`device_units`) 조인으로 읽고
+ * **공개 형상으로 평탄화**한다 — `id`는 유닛 id, 식별 컬럼(serialNo·serialRaw·deviceInfoId·macAddress·memo)은 유닛에서 온다.
+ * GET 경로는 DB에 쓰지 않는다 — WMS 매칭은 표시·집계용 일시 계산(§9.2, 영속 링크 없음).
  */
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
@@ -13,7 +15,7 @@ import {
   type DeviceEventType,
 } from '@/lib/deviceRegistryShared'
 import { RegistryError, loadTrackedModels, ymd, ymdMinusDays, ymdToDate, type DbClient } from './core'
-import { matchInventoryUnits, queryWmsUnits, wmsWarning, type WmsMatch, type WmsUnitRow } from './wms'
+import { matchInventoryUnits, queryWmsUnits, wmsWarning, type WmsMatch, type WmsMatchInput, type WmsUnitRow } from './wms'
 
 /** 커버리지 모집단 — 고객 병원 상태(§6.1-A: 운영·계약완료·보류) ∪ 원장 보유 병원 */
 export const CUSTOMER_HOSPITAL_STATUSES = ['운영', '계약완료', '보류'] as const
@@ -57,6 +59,7 @@ export interface ModelSummary {
   expected: number | null
   diff: number | null
   compare: 'hard' | 'soft' | 'none'
+  /** 배치 중 유닛의 WMS 일시 매칭 집계 — out=OUT 매치, inStock=IN_STOCK 매치, unmatched=매치 없음(그 외 상태 포함) */
   wms: { out: number; inStock: number; unmatched: number }
   lastEvent: { type: string; on: string } | null
 }
@@ -83,28 +86,23 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
   if (!hospital) return null
   const today = todayKst()
   const since = ymdMinusDays(today, 30)
-  const [expected, models, activeGroups, recRows, wmsRows, lastRows, wards, unassigned, lastEvent, lastImport] = await Promise.all([
+  const [expected, models, activeUnits, recRows, lastRows, wards, unassigned, lastEvent, lastImport] = await Promise.all([
     getExpectedDeviceCount(hospitalCode, client),
     loadTrackedModels(client),
-    client.hospitalDevice.groupBy({ by: ['deviceInfoId'], where: { hospitalCode, status: 'ACTIVE' }, _count: { _all: true } }),
+    client.hospitalDevice.findMany({
+      where: { hospitalCode, status: 'ACTIVE' },
+      select: { deviceId: true, unit: { select: { deviceInfoId: true, serialNo: true, serialRaw: true } } },
+    }),
     client.$queryRaw<{ device_info_id: number; cnt: bigint }[]>`
-      SELECT d.device_info_id, count(*) AS cnt
-        FROM hospital_device_events e JOIN hospital_devices d ON d.id = e.device_id
+      SELECT u.device_info_id, count(*) AS cnt
+        FROM hospital_device_events e JOIN device_units u ON u.id = e.device_id
        WHERE e.event_type = 'RECOVER' AND e.hospital_code = ${hospitalCode} AND e.occurred_on >= ${ymdToDate(since)}::date
        GROUP BY 1`,
-    client.$queryRaw<{ device_info_id: number; out_cnt: bigint; in_stock: bigint; unmatched: bigint }[]>`
-      SELECT d.device_info_id,
-             count(*) FILTER (WHERE u.status = 'OUT') AS out_cnt,
-             count(*) FILTER (WHERE u.status = 'IN_STOCK') AS in_stock,
-             count(*) FILTER (WHERE d.inventory_unit_id IS NULL) AS unmatched
-        FROM hospital_devices d LEFT JOIN inventory_units u ON u.id = d.inventory_unit_id
-       WHERE d.hospital_code = ${hospitalCode} AND d.status = 'ACTIVE'
-       GROUP BY 1`,
     client.$queryRaw<{ device_info_id: number; event_type: string; occurred_on: Date }[]>`
-      SELECT DISTINCT ON (d.device_info_id) d.device_info_id, e.event_type, e.occurred_on
-        FROM hospital_device_events e JOIN hospital_devices d ON d.id = e.device_id
+      SELECT DISTINCT ON (u.device_info_id) u.device_info_id, e.event_type, e.occurred_on
+        FROM hospital_device_events e JOIN device_units u ON u.id = e.device_id
        WHERE e.hospital_code = ${hospitalCode} AND e.event_type <> 'CORRECT'
-       ORDER BY d.device_info_id, e.occurred_on DESC, e.id DESC`,
+       ORDER BY u.device_info_id, e.occurred_on DESC, e.id DESC`,
     client.hospitalWard.findMany({
       where: { hospitalCode },
       select: { id: true, name: true, extWardCode: true, isActive: true, sortOrder: true, _count: { select: { devices: { where: { status: 'ACTIVE' } } } } },
@@ -119,9 +117,30 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     }),
   ])
 
-  const activeBy = new Map(activeGroups.map((g) => [g.deviceInfoId, g._count._all]))
+  // 배치 중 유닛의 모델별 수 + WMS 일시 매칭 집계(배치 1쿼리)
+  const modelById = new Map(models.map((m) => [m.id, m]))
+  const activeBy = new Map<number, number>()
+  const wmsBy = new Map<number, { out: number; inStock: number; unmatched: number }>()
+  const wmsInputs: WmsMatchInput[] = activeUnits.map((r) => ({
+    id: r.deviceId,
+    serialNo: r.unit.serialNo,
+    serialRaw: r.unit.serialRaw,
+    deviceInfoId: r.unit.deviceInfoId,
+    deviceModel: modelById.get(r.unit.deviceInfoId)?.deviceModel ?? null,
+  }))
+  const matches = await matchInventoryUnits(client, wmsInputs)
+  for (const r of activeUnits) {
+    const mid = r.unit.deviceInfoId
+    activeBy.set(mid, (activeBy.get(mid) ?? 0) + 1)
+    const agg = wmsBy.get(mid) ?? { out: 0, inStock: 0, unmatched: 0 }
+    const m = matches.get(r.deviceId) ?? null
+    if (!m) agg.unmatched += 1
+    else if (m.status === 'OUT') agg.out += 1
+    else if (m.status === 'IN_STOCK') agg.inStock += 1
+    else agg.unmatched += 1
+    wmsBy.set(mid, agg)
+  }
   const recBy = new Map(recRows.map((r) => [r.device_info_id, n(r.cnt)]))
-  const wmsBy = new Map(wmsRows.map((r) => [r.device_info_id, { out: n(r.out_cnt), inStock: n(r.in_stock), unmatched: n(r.unmatched) }]))
   const lastBy = new Map(lastRows.map((r) => [r.device_info_id, { type: r.event_type, on: ymd(r.occurred_on)! }]))
 
   const out: ModelSummary[] = []
@@ -255,7 +274,7 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
              count(*) FILTER (WHERE di.device_class = 'GATEWAY')::int AS gw,
              count(*) FILTER (WHERE di.device_class = 'THIRD_PARTY')::int AS third,
              count(*)::int AS total
-        FROM hospital_devices d JOIN device_info di ON di.id = d.device_info_id
+        FROM hospital_devices d JOIN device_units u ON u.id = d.device_id JOIN device_info di ON di.id = u.device_info_id
        WHERE d.status = 'ACTIVE'
        GROUP BY 1
     ), rec AS (
@@ -324,6 +343,7 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
     imp_rows: number | null
     imp_reg: number | null
   }
+  const activeJoin = Prisma.sql`FROM hospital_devices d JOIN device_units u ON u.id = d.device_id JOIN device_info di ON di.id = u.device_info_id WHERE d.status = 'ACTIVE'`
   const [rows, countRows, totalsRows] = await Promise.all([
     client.$queryRaw<Raw[]>(Prisma.sql`${base} SELECT * FROM rows WHERE ${where} ORDER BY ${orderBy} LIMIT ${limit} OFFSET ${(page - 1) * limit}`),
     client.$queryRaw<{ cnt: bigint }[]>(Prisma.sql`${base} SELECT count(*) AS cnt FROM rows WHERE ${where}`),
@@ -331,10 +351,10 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
       SELECT (SELECT count(*) FROM hospitals WHERE status = ANY(${statuses}::text[])) AS customers,
              (SELECT count(*) FROM (SELECT hospital_code FROM hospital_devices WHERE hospital_code IS NOT NULL
                                      UNION SELECT hospital_code FROM hospital_device_events WHERE hospital_code IS NOT NULL) x) AS registered,
-             (SELECT count(*) FROM hospital_devices d JOIN device_info di ON di.id = d.device_info_id WHERE d.status = 'ACTIVE' AND di.onprem_device_type = 1) AS ecg,
-             (SELECT count(*) FROM hospital_devices d JOIN device_info di ON di.id = d.device_info_id WHERE d.status = 'ACTIVE' AND di.onprem_device_type = 3) AS spo2,
-             (SELECT count(*) FROM hospital_devices d JOIN device_info di ON di.id = d.device_info_id WHERE d.status = 'ACTIVE' AND di.device_class = 'GATEWAY') AS gw,
-             (SELECT count(*) FROM hospital_devices d JOIN device_info di ON di.id = d.device_info_id WHERE d.status = 'ACTIVE' AND di.device_class = 'THIRD_PARTY') AS third,
+             (SELECT count(*) ${activeJoin} AND di.onprem_device_type = 1) AS ecg,
+             (SELECT count(*) ${activeJoin} AND di.onprem_device_type = 3) AS spo2,
+             (SELECT count(*) ${activeJoin} AND di.device_class = 'GATEWAY') AS gw,
+             (SELECT count(*) ${activeJoin} AND di.device_class = 'THIRD_PARTY') AS third,
              (SELECT count(*) FROM hospital_devices WHERE status = 'ACTIVE') AS total,
              (SELECT count(*) FROM hospital_device_events WHERE occurred_on >= ${since}::date AND event_type <> 'CORRECT') AS events30d,
              (SELECT count(*) FROM hospital_device_events WHERE event_type = 'RECOVER' AND occurred_on >= ${since}::date) AS recovered30d`,
@@ -376,6 +396,7 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type UnitsStatusFilter = 'active' | 'recovered' | 'all'
+/** WMS 일시 매칭 기준 — linked=매치 있음 · unlinked=매치 없음 · in_stock=매치가 IN_STOCK */
 export type UnitsWmsFilter = 'linked' | 'unlinked' | 'in_stock'
 export type UnitsSort = 'ward' | 'serial' | 'placedOn' | 'lastEvent'
 
@@ -386,13 +407,15 @@ export interface UnitsQuery {
   ward?: number | 'unassigned' | null
   /** 기본 active. recovered = 이 병원에서 회수됨(미재배치, last_hospital_code) */
   status?: UnitsStatusFilter | null
-  /** 시리얼 키·원문·닉네임(ext_device_code) 부분 일치 */
+  /** 시리얼 키·원문·닉네임(ext_device_code)·메모 부분 일치 */
   q?: string | null
-  /** 영속 inventory_unit_id 기준 (§7.1) */
+  /** WMS 일시 매칭 기준(§7.1) — 후보 집합을 먼저 매칭한 뒤 id로 좁힌다 */
   wms?: UnitsWmsFilter | null
+  /** 공개 device id(유닛 id) */
   ids?: number[] | null
 }
 
+/** `wms` 필터를 제외한 where — 배치 행 기준, 식별 조건은 `unit` 관계로 */
 export function buildUnitsWhere(params: UnitsQuery): Prisma.HospitalDeviceWhereInput {
   const and: Prisma.HospitalDeviceWhereInput[] = []
   const status = params.status ?? 'active'
@@ -402,7 +425,7 @@ export function buildUnitsWhere(params: UnitsQuery): Prisma.HospitalDeviceWhereI
     else and.push({ OR: [{ status: 'ACTIVE', hospitalCode: params.hospital }, { status: 'RECOVERED', lastHospitalCode: params.hospital }] })
   } else if (status === 'active') and.push({ status: 'ACTIVE' })
   else if (status === 'recovered') and.push({ status: 'RECOVERED' })
-  if (params.model != null) and.push({ deviceInfoId: Number(params.model) })
+  if (params.model != null) and.push({ unit: { deviceInfoId: Number(params.model) } })
   if (params.ward === 'unassigned') and.push({ wardId: null })
   else if (params.ward != null) and.push({ wardId: Number(params.ward) })
   if (params.q && params.q.trim()) {
@@ -411,47 +434,128 @@ export function buildUnitsWhere(params: UnitsQuery): Prisma.HospitalDeviceWhereI
     const up = raw.replace(/\s+/g, '').toUpperCase()
     and.push({
       OR: [
-        { serialNo: { contains: key || up } },
-        { serialRaw: { contains: up } },
+        { unit: { serialNo: { contains: key || up } } },
+        { unit: { serialRaw: { contains: up } } },
         { extDeviceCode: { contains: raw, mode: 'insensitive' } },
-        { memo: { contains: raw, mode: 'insensitive' } },
+        { unit: { memo: { contains: raw, mode: 'insensitive' } } },
       ],
     })
   }
-  if (params.wms === 'linked') and.push({ inventoryUnitId: { not: null } })
-  else if (params.wms === 'unlinked') and.push({ inventoryUnitId: null })
-  else if (params.wms === 'in_stock') and.push({ inventoryUnit: { is: { status: 'IN_STOCK' } } })
-  if (params.ids && params.ids.length > 0) and.push({ id: { in: params.ids } })
+  if (params.ids && params.ids.length > 0) and.push({ deviceId: { in: params.ids } })
   return and.length === 0 ? {} : { AND: and }
 }
 
 export function buildUnitsOrderBy(sort: UnitsSort | null | undefined): Prisma.HospitalDeviceOrderByWithRelationInput[] {
   switch (sort) {
     case 'serial':
-      return [{ serialNo: 'asc' }]
+      return [{ unit: { serialNo: 'asc' } }]
     case 'placedOn':
-      return [{ placedOn: 'desc' }, { serialNo: 'asc' }]
+      return [{ placedOn: 'desc' }, { unit: { serialNo: 'asc' } }]
     case 'lastEvent':
-      return [{ lastEventOn: 'desc' }, { id: 'desc' }]
+      return [{ lastEventOn: 'desc' }, { deviceId: 'desc' }]
     case 'ward':
     default:
-      return [{ ward: { sortOrder: 'asc' } }, { ward: { name: 'asc' } }, { serialNo: 'asc' }]
+      return [{ ward: { sortOrder: 'asc' } }, { ward: { name: 'asc' } }, { unit: { serialNo: 'asc' } }]
   }
 }
 
-export const UNITS_INCLUDE = {
+export const UNIT_SELECT = {
+  id: true,
+  deviceInfoId: true,
+  serialNo: true,
+  serialRaw: true,
+  macAddress: true,
+  memo: true,
+  source: true,
+  createdAt: true,
+  updatedAt: true,
   deviceInfo: { select: { id: true, deviceModel: true, deviceName: true, deviceClass: true, onpremDeviceType: true, serialPattern: true } },
+} satisfies Prisma.DeviceUnitSelect
+
+export const UNITS_INCLUDE = {
+  unit: { select: UNIT_SELECT },
   ward: { select: { id: true, name: true, isActive: true } },
   hospital: { select: { hospitalCode: true, hospitalName: true } },
   lastHospital: { select: { hospitalCode: true, hospitalName: true } },
   recoverReason: { select: { id: true, name: true, value: true } },
   replacedBy: { select: { id: true, serialNo: true } },
-  inventoryUnit: { select: { id: true, serialNo: true, status: true, item: { select: { itemCode: true, modelName: true } }, inventory: { select: { name: true } } } },
 } satisfies Prisma.HospitalDeviceInclude
 
-export type UnitListRow = Prisma.HospitalDeviceGetPayload<{ include: typeof UNITS_INCLUDE }> & {
+type PlacementWithUnit = Prisma.HospitalDeviceGetPayload<{ include: typeof UNITS_INCLUDE }>
+
+/** 공개 기기 형상(조인 포함) — `id`는 유닛 id, `placementId`는 내부 배치 행 id */
+export interface UnitView {
+  id: number
+  placementId: number
+  deviceInfoId: number
+  serialNo: string
+  serialRaw: string | null
+  macAddress: string | null
+  memo: string | null
+  source: string
+  extDeviceCode: string | null
+  extLastSeenAt: Date | null
+  extSyncedAt: Date | null
+  status: string
+  hospitalCode: string | null
+  wardId: number | null
+  placedOn: Date | null
+  lastHospitalCode: string | null
+  recoveredOn: Date | null
+  recoverReasonId: number | null
+  lastEventType: string | null
+  lastEventOn: Date | null
+  replacedById: number | null
+  createdAt: Date
+  updatedAt: Date
+  deviceInfo: PlacementWithUnit['unit']['deviceInfo']
+  ward: PlacementWithUnit['ward']
+  hospital: PlacementWithUnit['hospital']
+  lastHospital: PlacementWithUnit['lastHospital']
+  recoverReason: PlacementWithUnit['recoverReason']
+  replacedBy: PlacementWithUnit['replacedBy']
+}
+
+export function toUnitView(p: PlacementWithUnit): UnitView {
+  const { unit, ...placement } = p
+  return {
+    id: unit.id,
+    placementId: placement.id,
+    deviceInfoId: unit.deviceInfoId,
+    serialNo: unit.serialNo,
+    serialRaw: unit.serialRaw,
+    macAddress: unit.macAddress,
+    memo: unit.memo,
+    source: unit.source,
+    extDeviceCode: placement.extDeviceCode,
+    extLastSeenAt: placement.extLastSeenAt,
+    extSyncedAt: placement.extSyncedAt,
+    status: placement.status,
+    hospitalCode: placement.hospitalCode,
+    wardId: placement.wardId,
+    placedOn: placement.placedOn,
+    lastHospitalCode: placement.lastHospitalCode,
+    recoveredOn: placement.recoveredOn,
+    recoverReasonId: placement.recoverReasonId,
+    lastEventType: placement.lastEventType,
+    lastEventOn: placement.lastEventOn,
+    replacedById: placement.replacedById,
+    createdAt: placement.createdAt,
+    updatedAt: placement.updatedAt,
+    deviceInfo: unit.deviceInfo,
+    ward: placement.ward,
+    hospital: placement.hospital,
+    lastHospital: placement.lastHospital,
+    recoverReason: placement.recoverReason,
+    replacedBy: placement.replacedBy,
+  }
+}
+
+export type UnitListRow = UnitView & {
   lastRef: { type: string; code: string } | null
-  /** 영속 링크가 없을 때 표시용 임시 매칭(§9.2 — DB 쓰기 없음) */
+  /** WMS 표시용 일시 매칭(§9.2 — 영속 링크 없음, DB 쓰기 없음) */
+  wms: WmsMatch | null
+  /** = `wms` (구 필드명 호환) */
   wmsTransient: WmsMatch | null
   wmsWarning: string | null
 }
@@ -459,6 +563,44 @@ export type UnitListRow = Prisma.HospitalDeviceGetPayload<{ include: typeof UNIT
 export const UNITS_MAX_LIMIT = 500
 export const UNITS_IDS_MAX = 2000
 export const UNITS_EXPORT_MAX = 10_000
+/** `wms` 필터의 후보 매칭 상한 — 이보다 큰 집합은 필터를 좁히라고 400 */
+export const UNITS_WMS_FILTER_MAX = 10_000
+
+function wmsInputOf(p: { deviceId: number; unit: { serialNo: string; serialRaw: string | null; deviceInfoId: number; deviceInfo: { deviceModel: string } } }): WmsMatchInput {
+  return { id: p.deviceId, serialNo: p.unit.serialNo, serialRaw: p.unit.serialRaw, deviceInfoId: p.unit.deviceInfoId, deviceModel: p.unit.deviceInfo.deviceModel }
+}
+
+/**
+ * `wms` 필터 해석 — 나머지 조건으로 후보를 뽑아 배치 매칭한 뒤 통과한 유닛 id 목록을 돌려준다(없으면 null = 필터 없음).
+ * 목록·건수·idsOnly·export가 같은 함수를 써서 결과가 일치한다.
+ */
+async function resolveWmsFilter(params: UnitsQuery, client: DbClient): Promise<number[] | null> {
+  if (!params.wms) return null
+  const where = buildUnitsWhere({ ...params, wms: null })
+  const total = await client.hospitalDevice.count({ where })
+  if (total > UNITS_WMS_FILTER_MAX) throw new RegistryError(400, `창고 필터는 ${UNITS_WMS_FILTER_MAX.toLocaleString()}대 이하에서만 가능합니다 — 병원·모델로 먼저 좁히세요`)
+  const cands = await client.hospitalDevice.findMany({
+    where,
+    select: { deviceId: true, unit: { select: { serialNo: true, serialRaw: true, deviceInfoId: true, deviceInfo: { select: { deviceModel: true } } } } },
+  })
+  const matches = await matchInventoryUnits(client, cands.map(wmsInputOf))
+  const ids = cands
+    .filter((c) => {
+      const m = matches.get(c.deviceId) ?? null
+      if (params.wms === 'linked') return !!m
+      if (params.wms === 'unlinked') return !m
+      return m?.status === 'IN_STOCK'
+    })
+    .map((c) => c.deviceId)
+  return ids
+}
+
+/** 최종 where — `wms` 필터가 있으면 id 집합으로 좁힌다(빈 집합이면 어떤 행도 매치하지 않는 조건) */
+export async function resolveUnitsWhere(params: UnitsQuery, client: DbClient = prisma): Promise<Prisma.HospitalDeviceWhereInput> {
+  const ids = await resolveWmsFilter(params, client)
+  if (ids == null) return buildUnitsWhere(params)
+  return buildUnitsWhere({ ...params, wms: null, ids: ids.length > 0 ? (params.ids?.length ? ids.filter((i) => params.ids!.includes(i)) : ids) : [-1] })
+}
 
 /** 목록 페이지 — 총건수·행(+마지막 연결 ref·표시용 WMS 매칭) */
 export async function listUnits(
@@ -468,7 +610,7 @@ export async function listUnits(
 ): Promise<{ data: UnitListRow[]; total: number; page: number; limit: number }> {
   const page = Math.max(1, Number(paging.page) || 1)
   const limit = Math.min(paging.maxLimit ?? UNITS_MAX_LIMIT, Math.max(1, Number(paging.limit) || 50))
-  const where = buildUnitsWhere(params)
+  const where = await resolveUnitsWhere(params, client)
   const [total, rows] = await Promise.all([
     client.hospitalDevice.count({ where }),
     client.hospitalDevice.findMany({ where, include: UNITS_INCLUDE, orderBy: buildUnitsOrderBy(paging.sort), skip: (page - 1) * limit, take: limit }),
@@ -477,40 +619,34 @@ export async function listUnits(
   return { data, total, page, limit }
 }
 
-/** 검색 결과 전체 id(일괄 선택 ≤2,000) */
+/** 검색 결과 전체 id(일괄 선택 ≤2,000) — 공개 device id(유닛 id) */
 export async function listUnitIds(params: UnitsQuery, client: DbClient = prisma): Promise<{ ids: number[]; total: number; truncated: boolean }> {
-  const where = buildUnitsWhere(params)
+  const where = await resolveUnitsWhere(params, client)
   const total = await client.hospitalDevice.count({ where })
-  const rows = await client.hospitalDevice.findMany({ where, select: { id: true }, orderBy: buildUnitsOrderBy('ward'), take: UNITS_IDS_MAX })
-  return { ids: rows.map((r) => r.id), total, truncated: total > rows.length }
+  const rows = await client.hospitalDevice.findMany({ where, select: { deviceId: true }, orderBy: buildUnitsOrderBy('ward'), take: UNITS_IDS_MAX })
+  return { ids: rows.map((r) => r.deviceId), total, truncated: total > rows.length }
 }
 
-async function decorateUnits(rows: Prisma.HospitalDeviceGetPayload<{ include: typeof UNITS_INCLUDE }>[], client: DbClient): Promise<UnitListRow[]> {
+async function decorateUnits(rows: PlacementWithUnit[], client: DbClient): Promise<UnitListRow[]> {
   if (rows.length === 0) return []
-  const ids = rows.map((r) => r.id)
+  const ids = rows.map((r) => r.deviceId)
   const refRows = await client.$queryRaw<{ device_id: number; ref_type: string | null; ref_code: string | null }[]>`
     SELECT DISTINCT ON (device_id) device_id, ref_type, ref_code
       FROM hospital_device_events
      WHERE device_id = ANY(${ids}::int[]) AND event_type <> 'CORRECT' AND ref_type IS NOT NULL
      ORDER BY device_id, occurred_on DESC, id DESC`
   const refBy = new Map(refRows.map((r) => [r.device_id, r.ref_type && r.ref_code ? { type: r.ref_type, code: r.ref_code } : null]))
-  const unlinked = rows.filter((r) => r.inventoryUnitId == null)
-  const transient = await matchInventoryUnits(
-    client,
-    unlinked.map((r) => ({ id: r.id, serialNo: r.serialNo, serialRaw: r.serialRaw, deviceInfoId: r.deviceInfoId, deviceModel: r.deviceInfo.deviceModel })),
-    { persist: false }
-  )
+  const matches = await matchInventoryUnits(client, rows.map(wmsInputOf))
   return rows.map((r) => {
-    const wmsTransient = r.inventoryUnitId == null ? transient.get(r.id) ?? null : null
-    const linked: WmsMatch | null = r.inventoryUnit
-      ? { unitId: r.inventoryUnit.id, serialNo: r.inventoryUnit.serialNo, inventoryName: r.inventoryUnit.inventory.name, status: r.inventoryUnit.status, itemCode: r.inventoryUnit.item.itemCode, modelName: r.inventoryUnit.item.modelName }
-      : null
-    return { ...r, lastRef: refBy.get(r.id) ?? null, wmsTransient, wmsWarning: wmsWarning(linked ?? wmsTransient, r.status) }
+    const view = toUnitView(r)
+    const wms = matches.get(r.deviceId) ?? null
+    return { ...view, lastRef: refBy.get(r.deviceId) ?? null, wms, wmsTransient: wms, wmsWarning: wmsWarning(wms, r.status) }
   })
 }
 
 export interface EventsQuery {
   hospital?: string | null
+  /** 공개 device id(유닛 id) */
   device?: number | null
   type?: DeviceEventType | string | null
   /** YYYY-MM-DD (occurred_on 기준) */
@@ -544,8 +680,17 @@ export function buildEventsWhere(params: EventsQuery): Prisma.HospitalDeviceEven
   return and.length === 0 ? {} : { AND: and }
 }
 
+/** 이벤트 행의 `device` — 유닛 + 현재 배치 상태(status·hospitalCode는 배치 프로젝션에서, 없으면 null) */
 export const EVENTS_INCLUDE = {
-  device: { select: { id: true, serialNo: true, serialRaw: true, status: true, hospitalCode: true, deviceInfo: { select: { id: true, deviceModel: true, deviceName: true, deviceClass: true } } } },
+  device: {
+    select: {
+      id: true,
+      serialNo: true,
+      serialRaw: true,
+      deviceInfo: { select: { id: true, deviceModel: true, deviceName: true, deviceClass: true } },
+      placement: { select: { status: true, hospitalCode: true } },
+    },
+  },
   hospital: { select: { hospitalCode: true, hospitalName: true } },
   fromWard: { select: { id: true, name: true } },
   toWard: { select: { id: true, name: true } },
@@ -554,7 +699,34 @@ export const EVENTS_INCLUDE = {
   importBatch: { select: { id: true, mode: true, fileName: true, cancelledAt: true } },
 } satisfies Prisma.HospitalDeviceEventInclude
 
-export type EventListRow = Prisma.HospitalDeviceEventGetPayload<{ include: typeof EVENTS_INCLUDE }>
+type EventRawRow = Prisma.HospitalDeviceEventGetPayload<{ include: typeof EVENTS_INCLUDE }>
+
+/** 공개 이벤트 행 — `device.status`/`device.hospitalCode`를 평탄화(구 단일 테이블 형상 유지) */
+export type EventListRow = Omit<EventRawRow, 'device'> & {
+  device: {
+    id: number
+    serialNo: string
+    serialRaw: string | null
+    status: string | null
+    hospitalCode: string | null
+    deviceInfo: EventRawRow['device']['deviceInfo']
+  }
+}
+
+export function toEventListRow(e: EventRawRow): EventListRow {
+  const { device, ...rest } = e
+  return {
+    ...rest,
+    device: {
+      id: device.id,
+      serialNo: device.serialNo,
+      serialRaw: device.serialRaw,
+      status: device.placement?.status ?? null,
+      hospitalCode: device.placement?.hospitalCode ?? null,
+      deviceInfo: device.deviceInfo,
+    },
+  }
+}
 
 export const EVENTS_MAX_LIMIT = 500
 export const EVENTS_EXPORT_MAX = 10_000
@@ -567,59 +739,69 @@ export async function listEvents(
   const page = Math.max(1, Number(paging.page) || 1)
   const limit = Math.min(paging.maxLimit ?? EVENTS_MAX_LIMIT, Math.max(1, Number(paging.limit) || 50))
   const where = buildEventsWhere(params)
-  const [total, data] = await Promise.all([
+  const [total, rows] = await Promise.all([
     client.hospitalDeviceEvent.count({ where }),
     client.hospitalDeviceEvent.findMany({ where, include: EVENTS_INCLUDE, orderBy: [{ occurredOn: 'desc' }, { id: 'desc' }], skip: (page - 1) * limit, take: limit }),
   ])
-  return { data, total, page, limit }
+  return { data: rows.map(toEventListRow), total, page, limit }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 개체 상세(드로어) · 시리얼 조회 · 임포트 배치 목록
 // ─────────────────────────────────────────────────────────────────────────────
 
+const DETAIL_EVENT_INCLUDE = {
+  hospital: { select: { hospitalCode: true, hospitalName: true } },
+  fromWard: { select: { id: true, name: true } },
+  toWard: { select: { id: true, name: true } },
+  reasonCode: { select: { id: true, name: true, value: true } },
+  relatedDevice: { select: { id: true, serialNo: true } },
+  importBatch: { select: { id: true, mode: true, fileName: true, cancelledAt: true } },
+} satisfies Prisma.HospitalDeviceEventInclude
+
 export const UNIT_DETAIL_INCLUDE = {
   ...UNITS_INCLUDE,
-  replaces: { select: { id: true, serialNo: true } },
-  events: {
-    include: {
-      hospital: { select: { hospitalCode: true, hospitalName: true } },
-      fromWard: { select: { id: true, name: true } },
-      toWard: { select: { id: true, name: true } },
-      reasonCode: { select: { id: true, name: true, value: true } },
-      relatedDevice: { select: { id: true, serialNo: true } },
-      importBatch: { select: { id: true, mode: true, fileName: true, cancelledAt: true } },
+  unit: {
+    select: {
+      ...UNIT_SELECT,
+      // 이 유닛이 교체기로 들어간 구기기 배치들 → replaces[] (구기기 유닛 id·시리얼)
+      replacedPlacements: { select: { unit: { select: { id: true, serialNo: true } } } },
+      events: { include: DETAIL_EVENT_INCLUDE, orderBy: [{ occurredOn: 'desc' as const }, { id: 'desc' as const }] },
     },
-    orderBy: [{ occurredOn: 'desc' as const }, { id: 'desc' as const }],
   },
 } satisfies Prisma.HospitalDeviceInclude
 
-export type UnitDetail = Prisma.HospitalDeviceGetPayload<{ include: typeof UNIT_DETAIL_INCLUDE }> & {
+type DetailRaw = Prisma.HospitalDeviceGetPayload<{ include: typeof UNIT_DETAIL_INCLUDE }>
+
+export type UnitDetailEvent = DetailRaw['unit']['events'][number]
+
+export type UnitDetail = UnitView & {
+  /** 이 개체가 대체한 구기기들(유닛 id·시리얼) */
+  replaces: { id: number; serialNo: string }[]
+  /** 병원 경계 무관 전체 이벤트 — 최신순 */
+  events: UnitDetailEvent[]
+  wms: WmsMatch | null
   wmsTransient: WmsMatch | null
   wmsWarning: string | null
 }
 
+/** 공개 device id(유닛 id) → 상세. 배치 행이 없는 유닛(이벤트 0)은 null */
 export async function getUnitDetail(deviceId: number, client: DbClient = prisma): Promise<UnitDetail | null> {
-  const d = await client.hospitalDevice.findUnique({ where: { id: deviceId }, include: UNIT_DETAIL_INCLUDE })
+  const d = await client.hospitalDevice.findUnique({ where: { deviceId }, include: UNIT_DETAIL_INCLUDE })
   if (!d) return null
-  let wmsTransient: WmsMatch | null = null
-  if (d.inventoryUnitId == null) {
-    const m = await matchInventoryUnits(client, [{ id: d.id, serialNo: d.serialNo, serialRaw: d.serialRaw, deviceInfoId: d.deviceInfoId, deviceModel: d.deviceInfo.deviceModel }], { persist: false })
-    wmsTransient = m.get(d.id) ?? null
-  }
-  const linked: WmsMatch | null = d.inventoryUnit
-    ? { unitId: d.inventoryUnit.id, serialNo: d.inventoryUnit.serialNo, inventoryName: d.inventoryUnit.inventory.name, status: d.inventoryUnit.status, itemCode: d.inventoryUnit.item.itemCode, modelName: d.inventoryUnit.item.modelName }
-    : null
-  return { ...d, wmsTransient, wmsWarning: wmsWarning(linked ?? wmsTransient, d.status) }
+  const { replacedPlacements, events, ...unitCore } = d.unit
+  const view = toUnitView({ ...d, unit: unitCore })
+  const wms = (await matchInventoryUnits(client, [wmsInputOf(d)])).get(d.deviceId) ?? null
+  return { ...view, replaces: replacedPlacements.map((r) => r.unit), events, wms, wmsTransient: wms, wmsWarning: wmsWarning(wms, d.status) }
 }
 
 export interface LookupResult {
   input: { serialNo: string; serialRaw: string | null }
-  /** 정확 일치 개체(키 또는 원문) */
-  device: Prisma.HospitalDeviceGetPayload<{ include: typeof UNITS_INCLUDE }> | null
+  /** 정확 일치 개체(키 또는 원문) — 배치 행이 있는 유닛만 */
+  device: UnitView | null
   /** 0건일 때 — 원장 접두 일치 ≤10 */
-  candidates: Prisma.HospitalDeviceGetPayload<{ include: typeof UNITS_INCLUDE }>[]
-  /** 0건일 때 — WMS 정확·접미 일치 ≤10 */
+  candidates: UnitView[]
+  /** 0건일 때 — WMS 정확·접미 일치 ≤10. `linkedDeviceId`는 영속 링크가 없어 항상 null(호환 유지) */
   wmsCandidates: { unitId: number; serialNo: string; status: string; inventoryName: string; itemCode: string; modelName: string | null; linkedDeviceId: number | null }[]
 }
 
@@ -629,20 +811,20 @@ export async function lookupDevice(serialInput: string, client: DbClient = prism
   if (!ns.serialNo) throw new RegistryError(400, '시리얼을 입력하세요')
   const compact = (serialInput ?? '').replace(/\s+/g, '').toUpperCase()
   const device = await client.hospitalDevice.findFirst({
-    where: { OR: [{ serialNo: ns.serialNo }, { serialRaw: compact }, ...(ns.serialRaw ? [{ serialRaw: ns.serialRaw }] : [])] },
+    where: { unit: { OR: [{ serialNo: ns.serialNo }, { serialRaw: compact }, ...(ns.serialRaw ? [{ serialRaw: ns.serialRaw }] : [])] } },
     include: UNITS_INCLUDE,
   })
-  if (device) return { input: { serialNo: ns.serialNo, serialRaw: ns.serialRaw }, device, candidates: [], wmsCandidates: [] }
+  if (device) return { input: { serialNo: ns.serialNo, serialRaw: ns.serialRaw }, device: toUnitView(device), candidates: [], wmsCandidates: [] }
   const prefix = ns.serialNo.slice(0, Math.min(5, ns.serialNo.length))
   const [candidates, wms] = await Promise.all([
-    client.hospitalDevice.findMany({ where: { serialNo: { startsWith: prefix } }, include: UNITS_INCLUDE, orderBy: { serialNo: 'asc' }, take: 10 }),
+    client.hospitalDevice.findMany({ where: { unit: { serialNo: { startsWith: prefix } } }, include: UNITS_INCLUDE, orderBy: { unit: { serialNo: 'asc' } }, take: 10 }),
     queryWmsUnits(client, { keys: [ns.serialNo], raws: ns.serialRaw ? [ns.serialRaw, compact] : [compact], limit: 10 }),
   ])
   return {
     input: { serialNo: ns.serialNo, serialRaw: ns.serialRaw },
     device: null,
-    candidates,
-    wmsCandidates: wms.map((u: WmsUnitRow) => ({ unitId: u.id, serialNo: u.serial_no, status: u.status, inventoryName: u.inventory_name, itemCode: u.item_code, modelName: u.model_name, linkedDeviceId: u.linked_device_id })),
+    candidates: candidates.map(toUnitView),
+    wmsCandidates: wms.map((u: WmsUnitRow) => ({ unitId: u.id, serialNo: u.serial_no, status: u.status, inventoryName: u.inventory_name, itemCode: u.item_code, modelName: u.model_name, linkedDeviceId: null })),
   }
 }
 

@@ -87,10 +87,10 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   const device = await prisma.deviceInfo.findUnique({ where: { id } })
   if (!device) return NextResponse.json({ error: '기기를 찾을 수 없습니다.' }, { status: 404 })
 
-  // 참조 합산: 프로젝트 수량행 + 원장 개체(시리얼, hospital_devices.device_info_id) + 딜 수량행 (§5.1)
+  // 참조 합산: 프로젝트 수량행 + 원장 유닛(시리얼, device_units.device_info_id) + 딜 수량행 (§5.1)
   const [projectCount, registryCount, dealCount] = await Promise.all([
     prisma.projectDevice.count({ where: { deviceInfoId: id } }),
-    prisma.hospitalDevice.count({ where: { deviceInfoId: id } }),
+    prisma.deviceUnit.count({ where: { deviceInfoId: id } }),
     prisma.salesDealDevice.count({ where: { deviceInfoId: id } }),
   ])
   const usageCount = projectCount + registryCount + dealCount

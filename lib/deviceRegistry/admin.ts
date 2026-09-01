@@ -3,7 +3,9 @@
  *
  * - editEvent          : 인플레이스 UPDATE(허용 필드만) + edited_* + fold 재검증(불성립 409)
  * - cancelLastEvent    : LIFO 물리 DELETE(CORRECT 제외 판정) — 교체·이관 그룹은 짝 동시 취소, 임포트 행은 배치 카운트 감소
- * - cancelImportBatch  : 배치 밖 상태 이벤트가 있으면 409, 아니면 이벤트→개체 DELETE·재등록 RECOVERED 복원·이관 원복
+ * - cancelImportBatch  : 배치 밖 상태 이벤트가 있으면 409, 아니면 이벤트→배치 행 DELETE·재등록 RECOVERED 복원·이관 원복
+ * 3층 구조: 취소로 이벤트가 0건이 되면 **배치 행(`hospital_devices`)만 삭제**하고 유닛(`device_units`)은 남긴다(시리얼 정체성은 자동 삭제하지 않음).
+ * `deletedDeviceIds`는 배치 행이 사라진 유닛 id 목록이다.
  * - editImportBatchDate: 배치 이벤트 occurred_on 일괄 UPDATE + 각 개체 fold 재검증
  * 서비스는 logAudit을 부르지 않는다 — 반환값의 before 스냅샷을 라우트가 기록한다.
  */
@@ -14,7 +16,8 @@ import {
   eventLabel,
   getDeviceOr404,
   loadDeviceEvents,
-  loadTrackedModels,
+  loadDevices,
+  loadUnits,
   mapDbError,
   rebuildOrDelete,
   rebuildUnitProjection,
@@ -31,7 +34,6 @@ import {
   type RegistryOpts,
   type RegistryRef,
 } from './core'
-import { matchInventoryUnits } from './wms'
 import type { ChangeSet } from './write'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -135,41 +137,37 @@ export interface CancelEventResult {
   restored?: ChangeSet
 }
 
-const CORRECT_FIELDS = new Set(['serialNo', 'serialRaw', 'deviceInfoId', 'macAddress', 'extDeviceCode'])
+/** CORRECT 복원 대상 — 유닛 컬럼(시리얼·원문·모델·MAC) / 배치 컬럼(닉네임) */
+const CORRECT_UNIT_FIELDS = new Set(['serialNo', 'serialRaw', 'deviceInfoId', 'macAddress'])
+const CORRECT_PLACEMENT_FIELDS = new Set(['extDeviceCode'])
 
 async function cancelCorrectEvent(tx: DbClient, ev: EventRow): Promise<CancelEventResult> {
   const device = await getDeviceOr404(tx, ev.deviceId)
   const later = await tx.hospitalDeviceEvent.findFirst({ where: { deviceId: ev.deviceId, eventType: 'CORRECT', id: { gt: ev.id } }, select: { id: true } })
   if (later) throw new RegistryError(409, '이후 정정 이벤트가 있습니다 — 최근 정정부터 취소하세요')
   const changes = (ev.changes ?? {}) as ChangeSet
-  const data: Prisma.HospitalDeviceUncheckedUpdateInput = {}
+  const unitData: Record<string, unknown> = {}
+  const placementData: Record<string, unknown> = {}
   const restored: ChangeSet = {}
   for (const [field, v] of Object.entries(changes)) {
-    if (!CORRECT_FIELDS.has(field) || !v || typeof v !== 'object') continue
+    const isUnit = CORRECT_UNIT_FIELDS.has(field)
+    if ((!isUnit && !CORRECT_PLACEMENT_FIELDS.has(field)) || !v || typeof v !== 'object') continue
     const before = (v as { before: unknown }).before
     restored[field] = { before: (device as unknown as Record<string, unknown>)[field], after: before }
-    ;(data as Record<string, unknown>)[field] = before ?? null
+    ;(isUnit ? unitData : placementData)[field] = before ?? null
   }
-  if (data.serialNo !== undefined && data.serialNo !== device.serialNo) {
-    const dup = await tx.hospitalDevice.findUnique({ where: { serialNo: String(data.serialNo) }, select: { id: true } })
-    if (dup && dup.id !== device.id) throw new RegistryError(409, `복원할 시리얼(${String(data.serialNo)})이 이미 다른 기기에 등록되어 있습니다`)
+  if (unitData.serialNo !== undefined && unitData.serialNo !== device.serialNo) {
+    const dup = await tx.deviceUnit.findUnique({ where: { serialNo: String(unitData.serialNo) }, select: { id: true } })
+    if (dup && dup.id !== device.id) throw new RegistryError(409, `복원할 시리얼(${String(unitData.serialNo)})이 이미 다른 기기에 등록되어 있습니다`)
   }
-  if (data.serialNo !== undefined || data.serialRaw !== undefined) data.inventoryUnitId = null
   try {
-    if (Object.keys(data).length > 0) await tx.hospitalDevice.update({ where: { id: device.id }, data })
+    if (Object.keys(unitData).length > 0) await tx.deviceUnit.update({ where: { id: device.id }, data: unitData as Prisma.DeviceUnitUncheckedUpdateInput })
+    if (Object.keys(placementData).length > 0) await tx.hospitalDevice.update({ where: { deviceId: device.id }, data: placementData as Prisma.HospitalDeviceUncheckedUpdateInput })
   } catch (e) {
     throw mapDbError(e)
   }
   await tx.hospitalDeviceEvent.delete({ where: { id: ev.id } })
   const updated = await getDeviceOr404(tx, device.id)
-  if (updated.inventoryUnitId == null) {
-    const models = await loadTrackedModels(tx)
-    await matchInventoryUnits(
-      tx,
-      [{ id: updated.id, serialNo: updated.serialNo, serialRaw: updated.serialRaw, deviceInfoId: updated.deviceInfoId, deviceModel: models.find((m) => m.id === updated.deviceInfoId)?.deviceModel ?? null }],
-      { persist: true }
-    )
-  }
   return {
     cancelledEvents: [ev],
     cancelledEventIds: [ev.id],
@@ -228,15 +226,15 @@ export async function cancelLastEvent(ctx: RegistryCtx, input: { eventId: number
     const group = ev.actionGroup ? await tx.hospitalDeviceEvent.findMany({ where: { actionGroup: ev.actionGroup } }) : [ev]
     const { deviceIds, toCancel } = expandCancelSet(ev, group)
     const cancelIds = new Set(toCancel.map((e) => e.id))
-    const devices = await tx.hospitalDevice.findMany({ where: { id: { in: Array.from(deviceIds) } } })
-    const deviceById = new Map(devices.map((d) => [d.id, d]))
+    const deviceById = await loadDevices(tx, Array.from(deviceIds))
+    const unitById = await loadUnits(tx, Array.from(deviceIds))
+    const serialOf = (id: number) => deviceById.get(id)?.serialNo ?? unitById.get(id)?.serialNo ?? String(id)
     const eventsMap = await loadDeviceEvents(tx, Array.from(deviceIds))
 
     // LIFO — 개체별로 취소 이벤트가 접미여야 한다 (신 기기에 다른 이벤트가 있으면 409)
     for (const id of Array.from(deviceIds)) {
-      const d = deviceById.get(id)
-      if (!d) continue
-      assertSuffix(d.serialNo, (eventsMap.get(id) ?? []).filter((e) => e.eventType !== 'CORRECT'), cancelIds, '취소')
+      if (!deviceById.has(id)) continue
+      assertSuffix(serialOf(id), (eventsMap.get(id) ?? []).filter((e) => e.eventType !== 'CORRECT'), cancelIds, '취소')
     }
 
     // (3)(d) 시스템 짝 연결 해제 — 취소되는 REGISTER(신)의 related=구 → 구의 RECOVER.related_device_id=신 을 NULL
@@ -252,22 +250,21 @@ export async function cancelLastEvent(ctx: RegistryCtx, input: { eventId: number
 
     await tx.hospitalDeviceEvent.deleteMany({ where: { id: { in: Array.from(cancelIds) } } })
 
-    // 이벤트 0 개체 먼저 삭제(FK SET NULL 반영) → 나머지 재계산
+    // 이벤트 0 유닛은 배치 행 삭제(유닛은 남김, FK SET NULL 반영) → 나머지 재계산
     const deletedDeviceIds: number[] = []
     const remaining: number[] = []
     for (const id of Array.from(deviceIds)) {
-      if (!deviceById.has(id) && !(await tx.hospitalDevice.findUnique({ where: { id }, select: { id: true } }))) continue
+      if (!deviceById.has(id) && !(await tx.hospitalDevice.findUnique({ where: { deviceId: id }, select: { id: true } }))) continue
       const cnt = await tx.hospitalDeviceEvent.count({ where: { deviceId: id } })
       if (cnt === 0) {
-        await tx.hospitalDevice.delete({ where: { id } })
+        await tx.hospitalDevice.deleteMany({ where: { deviceId: id } })
         deletedDeviceIds.push(id)
       } else remaining.push(id)
     }
     const restoredDevices: CancelEventResult['restoredDevices'] = []
     for (const id of remaining) {
       const { state } = await rebuildUnitProjection(tx, id)
-      const d = deviceById.get(id) ?? (await getDeviceOr404(tx, id))
-      restoredDevices.push({ id, serialNo: d.serialNo, status: state.status ?? 'ACTIVE', hospitalCode: state.hospitalCode })
+      restoredDevices.push({ id, serialNo: serialOf(id), status: state.status ?? 'ACTIVE', hospitalCode: state.hospitalCode })
     }
 
     // 임포트 행 단건 취소 — 배치 카운트 감소 + summary.cancelledRows (§8.2)
@@ -282,7 +279,7 @@ export async function cancelLastEvent(ctx: RegistryCtx, input: { eventId: number
       const dec = { registeredCount: 0, reregisteredCount: 0, transferredCount: 0 }
       const cancelledRows: unknown[] = []
       for (const [deviceId, des] of Array.from(perDevice)) {
-        const serialNo = deviceById.get(deviceId)?.serialNo ?? String(deviceId)
+        const serialNo = serialOf(deviceId)
         let kind: 'new' | 'reregister' | 'transfer'
         if (des.some((e) => e.eventType === 'RECOVER')) kind = 'transfer'
         else if (deletedDeviceIds.includes(deviceId)) kind = 'new'
@@ -346,11 +343,10 @@ export async function cancelImportBatch(ctx: RegistryCtx, input: { batchId: numb
     const batchEvents = await tx.hospitalDeviceEvent.findMany({ where: { importBatchId: batch.id } })
     const batchIds = new Set(batchEvents.map((e) => e.id))
     const deviceIds = Array.from(new Set(batchEvents.map((e) => e.deviceId)))
-    const devices = await tx.hospitalDevice.findMany({ where: { id: { in: deviceIds } } })
-    const deviceById = new Map(devices.map((d) => [d.id, d]))
+    const deviceById = await loadDevices(tx, deviceIds)
     const eventsMap = await loadDeviceEvents(tx, deviceIds)
 
-    // 차단: 배치 밖 상태 이벤트가 배치 이벤트 뒤에 있는 기기 (CORRECT·memo·inventory_unit_id는 차단 사유 아님)
+    // 차단: 배치 밖 상태 이벤트가 배치 이벤트 뒤에 있는 기기 (CORRECT·memo는 차단 사유 아님)
     const blockers: string[] = []
     for (const id of Array.from(deviceIds)) {
       const d = deviceById.get(id)!
@@ -400,7 +396,7 @@ export async function cancelImportBatch(ctx: RegistryCtx, input: { batchId: numb
     await tx.hospitalDeviceEvent.deleteMany({ where: { importBatchId: batch.id } })
     if (willDelete.length > 0) {
       await tx.hospitalDeviceEvent.deleteMany({ where: { deviceId: { in: willDelete }, eventType: 'CORRECT' } })
-      await tx.hospitalDevice.deleteMany({ where: { id: { in: willDelete } } })
+      await tx.hospitalDevice.deleteMany({ where: { deviceId: { in: willDelete } } }) // 배치 행만 — 유닛은 남긴다
       summary.deletedDeviceIds = willDelete
     }
     for (const id of willRebuild) {
@@ -446,8 +442,8 @@ export async function editImportBatchDate(ctx: RegistryCtx, input: { batchId: nu
     const events = await tx.hospitalDeviceEvent.findMany({ where: { importBatchId: batch.id }, select: { id: true, deviceId: true } })
     await tx.hospitalDeviceEvent.updateMany({ where: { importBatchId: batch.id }, data: { occurredOn: ymdToDate(after) } })
     const deviceIds = Array.from(new Set(events.map((e) => e.deviceId)))
-    const devices = await tx.hospitalDevice.findMany({ where: { id: { in: deviceIds } }, select: { id: true, serialNo: true } })
-    const serialById = new Map(devices.map((d) => [d.id, d.serialNo]))
+    const units = await loadUnits(tx, deviceIds)
+    const serialById = new Map(Array.from(units.values()).map((u) => [u.id, u.serialNo]))
     for (const id of Array.from(deviceIds)) {
       await rebuildUnitProjection(tx, id, {
         illegal: (bad) => new RegistryError(409, `${serialById.get(id) ?? id}: 업무일자를 ${after}로 바꾸면 이벤트 순서가 성립하지 않습니다 — ${eventLabel(bad)}`),

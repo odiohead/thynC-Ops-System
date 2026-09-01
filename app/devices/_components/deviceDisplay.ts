@@ -3,7 +3,7 @@
  * 순수 함수만. 날짜는 lib/deviceRegistryShared 의 toYmd 기준(@db.Date = UTC 자정 ISO), 기록 시각은 KST 표시.
  */
 import { DEVICE_EVENT_TYPE_LABELS, toYmd, todayKst, type DeviceEventType } from '@/lib/deviceRegistryShared'
-import type { ChangeSet, ContractedDeal, LinkedInventoryUnit, ModelSummary, WmsMatch } from './types'
+import type { ChangeSet, ContractedDeal, ModelSummary, WmsMatch } from './types'
 
 /** @db.Date ISO → 'YYYY-MM-DD', 없으면 '—' */
 export function ymdOrDash(v: string | null | undefined): string {
@@ -57,9 +57,9 @@ export interface WmsCell {
 }
 
 /** '창고 개체' 셀 — 영속 링크 우선, 없으면 임시 매칭 '(자동 매칭)' */
-export function wmsCell(inventoryUnit: LinkedInventoryUnit | null | undefined, wmsTransient: WmsMatch | null | undefined): WmsCell | null {
-  if (inventoryUnit) return { text: `${inventoryUnit.inventory.name} · ${inventoryUnit.status}`, transient: false, status: inventoryUnit.status }
-  if (wmsTransient) return { text: `${wmsTransient.inventoryName} · ${wmsTransient.status}`, transient: true, status: wmsTransient.status }
+/** '창고 개체' 셀 — WMS 일시 매칭만(영속 링크 없음 → 항상 '(자동 매칭)') */
+export function wmsCell(wms: WmsMatch | null | undefined): WmsCell | null {
+  if (wms) return { text: `${wms.inventoryName} · ${wms.status}`, transient: true, status: wms.status }
   return null
 }
 
@@ -70,7 +70,6 @@ export const CORRECT_FIELD_LABELS: Record<string, string> = {
   serialRaw: '원문',
   macAddress: 'MAC',
   extDeviceCode: '닉네임',
-  inventoryUnitId: '창고 개체',
 }
 
 function changeValue(field: string, v: unknown, models?: readonly ModelSummary[]): string {
@@ -82,11 +81,11 @@ function changeValue(field: string, v: unknown, models?: readonly ModelSummary[]
   return String(v)
 }
 
-/** CORRECT changes → ['시리얼: A12016 → A120160', …] (내부 키 inventoryUnitId는 숨김) */
+/** CORRECT changes → ['시리얼: A12016 → A120160', …] (serialRaw는 시리얼 행에 함께 표시되므로 숨김) */
 export function changeSummaryLines(changes: ChangeSet | null | undefined, models?: readonly ModelSummary[]): string[] {
   if (!changes) return []
   return Object.entries(changes)
-    .filter(([field]) => field !== 'inventoryUnitId' && field !== 'serialRaw')
+    .filter(([field]) => field !== 'serialRaw')
     .map(([field, c]) => `${CORRECT_FIELD_LABELS[field] ?? field}: ${changeValue(field, c?.before, models)} → ${changeValue(field, c?.after, models)}`)
 }
 

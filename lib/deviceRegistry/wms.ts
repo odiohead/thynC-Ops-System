@@ -1,10 +1,12 @@
 /**
- * WMS(inventory_units) 읽기 매칭 — §9.2 (D9: 조인 키만, WMS 테이블 쓰기 없음)
+ * WMS(inventory_units) 읽기 매칭 — §9.2 (D9: WMS 테이블 쓰기 없음)
+ *
+ * 3층 구조(B-20) 이후 원장 ↔ WMS 사이에 **영속 링크가 없다**(구 `hospital_devices`의 WMS 조인 키 컬럼 제거 — WMS 편입은 후속
+ * `inventory_units.device_id`). 매칭은 표시·집계용 **일시 계산(transient)** 뿐이며 GET/쓰기 경로 어디에서도 DB에 기록하지 않는다.
  *
  * - 행 단위 LIKE 금지 → 배치 1쿼리(`= ANY` + `right(serial_no, 7)`)
  * - `device_info_id` 일치 우선, `model_name` 폴백(GW 품목은 device_info_id NULL·model_name='MGW1010')
- * - 후보 1건 또는 OUT 1건이면 연결. `inventory_units.status`는 후보 우선순위·⚠ 표시에만 읽는다
- * - `persist:true`는 쓰기 경로(register/import/replace/CORRECT)에서만 — GET은 표시용 매칭만
+ * - 후보 1건 또는 OUT 1건이면 매치. `inventory_units.status`는 후보 우선순위·⚠ 표시에만 읽는다
  */
 import { Prisma } from '@prisma/client'
 import type { DbClient } from './core'
@@ -18,9 +20,9 @@ export interface WmsUnitRow {
   item_code: string
   device_info_id: number | null
   model_name: string | null
-  linked_device_id: number | null
 }
 
+/** 표시용 매치 — `unitId`는 **inventory_units.id**(WMS 개체 id, 원장 유닛 id가 아님) */
 export interface WmsMatch {
   unitId: number
   serialNo: string
@@ -30,6 +32,7 @@ export interface WmsMatch {
   modelName: string | null
 }
 
+/** 매칭 입력 — `id`는 호출부의 대응 키(원장 유닛 id 또는 미리보기 임시 음수 id) */
 export interface WmsMatchInput {
   id: number
   serialNo: string
@@ -58,12 +61,10 @@ export async function queryWmsUnits(
   const limit = params.limit && params.limit > 0 ? Prisma.sql`LIMIT ${params.limit}` : Prisma.empty
   return client.$queryRaw<WmsUnitRow[]>`
     SELECT u.id, u.serial_no::text AS serial_no, u.status::text AS status, u.inventory_id,
-           inv.name::text AS inventory_name, i.item_code::text AS item_code, i.device_info_id, i.model_name::text AS model_name,
-           hd.id AS linked_device_id
+           inv.name::text AS inventory_name, i.item_code::text AS item_code, i.device_info_id, i.model_name::text AS model_name
       FROM inventory_units u
       JOIN inventory_items i ON i.id = u.item_id
       JOIN inventories inv ON inv.id = u.inventory_id
-      LEFT JOIN hospital_devices hd ON hd.inventory_unit_id = u.id
      WHERE i.is_serial_managed
        ${modelFilter}
        AND (u.serial_no = ANY(${exact}::text[]) OR right(u.serial_no, 7) = ANY(${suffix}::text[]))
@@ -75,12 +76,11 @@ function toMatch(u: WmsUnitRow): WmsMatch {
   return { unitId: u.id, serialNo: u.serial_no, inventoryName: u.inventory_name, status: u.status, itemCode: u.item_code, modelName: u.model_name }
 }
 
-/** 메모리 판정 — 후보 중 모델 우선(device_info_id → model_name), 1건 또는 OUT 1건이면 연결 */
+/** 메모리 판정 — 후보 중 모델 우선(device_info_id → model_name), 1건 또는 OUT 1건이면 매치 */
 export function pickWmsMatch(device: WmsMatchInput, candidates: readonly WmsUnitRow[]): WmsMatch | null {
-  const usable = candidates.filter((u) => u.linked_device_id == null || u.linked_device_id === device.id)
-  if (usable.length === 0) return null
-  const byModelId = device.deviceInfoId != null ? usable.filter((u) => u.device_info_id === device.deviceInfoId) : []
-  const byModelName = device.deviceModel ? usable.filter((u) => u.model_name != null && u.model_name.toUpperCase() === device.deviceModel!.toUpperCase()) : []
+  if (candidates.length === 0) return null
+  const byModelId = device.deviceInfoId != null ? candidates.filter((u) => u.device_info_id === device.deviceInfoId) : []
+  const byModelName = device.deviceModel ? candidates.filter((u) => u.model_name != null && u.model_name.toUpperCase() === device.deviceModel!.toUpperCase()) : []
   const pool = byModelId.length > 0 ? byModelId : byModelName.length > 0 ? byModelName : []
   if (pool.length === 0) return null
   if (pool.length === 1) return toMatch(pool[0])
@@ -90,14 +90,9 @@ export function pickWmsMatch(device: WmsMatchInput, candidates: readonly WmsUnit
 }
 
 /**
- * 기기 배열 → WMS 개체 매칭(배치 1쿼리). `persist`면 매칭된 행의 `hospital_devices.inventory_unit_id`를 기록한다
- * (이미 다른 값이 있는 행은 덮지 않는다 — 연결은 쓰기 경로에서 한 번). 반환: deviceId → 매치 | null.
+ * 기기 배열 → WMS 개체 매칭(배치 1쿼리, **일시 계산 — DB 쓰기 없음**). 반환: 입력 `id` → 매치 | null.
  */
-export async function matchInventoryUnits(
-  client: DbClient,
-  devices: readonly WmsMatchInput[],
-  opts: { persist: boolean }
-): Promise<Map<number, WmsMatch | null>> {
+export async function matchInventoryUnits(client: DbClient, devices: readonly WmsMatchInput[]): Promise<Map<number, WmsMatch | null>> {
   const result = new Map<number, WmsMatch | null>()
   if (devices.length === 0) return result
   const keys = devices.map((d) => d.serialNo).filter(Boolean)
@@ -118,28 +113,12 @@ export async function matchInventoryUnits(
     }
   }
 
-  const persistUpdates: { id: number; unitId: number }[] = []
   for (const d of devices) {
     const cands = new Map<number, WmsUnitRow>()
     for (const u of byExact.get(d.serialNo) ?? []) cands.set(u.id, u)
     if (d.serialRaw) for (const u of byExact.get(d.serialRaw) ?? []) cands.set(u.id, u)
     if (d.serialNo.length === 7) for (const u of bySuffix.get(d.serialNo) ?? []) cands.set(u.id, u)
-    const m = pickWmsMatch(d, Array.from(cands.values()))
-    result.set(d.id, m)
-    if (m && opts.persist) persistUpdates.push({ id: d.id, unitId: m.unitId })
-  }
-
-  if (opts.persist && persistUpdates.length > 0) {
-    // 같은 unit이 두 기기에 배정되는 극단 케이스(UNIQUE) 방지 — unit당 첫 기기만
-    const seenUnit = new Set<number>()
-    for (const p of persistUpdates) {
-      if (seenUnit.has(p.unitId)) continue
-      seenUnit.add(p.unitId)
-      await client.hospitalDevice.updateMany({
-        where: { id: p.id, inventoryUnitId: null },
-        data: { inventoryUnitId: p.unitId },
-      })
-    }
+    result.set(d.id, pickWmsMatch(d, Array.from(cands.values())))
   }
   return result
 }

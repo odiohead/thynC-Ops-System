@@ -126,7 +126,8 @@ export function canTransition(
 // 출처 · 소프트 참조 · 분류 · 배치 · 온프렘 코드 · 임포트 판정 (CHECK 없음 — 상수만)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const REGISTRY_SOURCES = ['MANUAL', 'IMPORT', 'WMS', 'ONPREM'] as const
+/** 이벤트·유닛 `source` 어휘 — BACKFILL은 유닛 생성 경로(교체 시 구기기 소급 등록)에만 쓴다 */
+export const REGISTRY_SOURCES = ['MANUAL', 'IMPORT', 'WMS', 'ONPREM', 'BACKFILL'] as const
 export type RegistrySource = (typeof REGISTRY_SOURCES)[number]
 
 export const REGISTRY_SOURCE_LABELS: Record<RegistrySource, string> = {
@@ -134,6 +135,7 @@ export const REGISTRY_SOURCE_LABELS: Record<RegistrySource, string> = {
   IMPORT: '임포트',
   WMS: 'WMS',
   ONPREM: '온프렘',
+  BACKFILL: '소급',
 }
 
 /** 멱등 부분 UNIQUE(ref_type, ref_code, device_id, event_type)가 적용되는 자동 출처 (§4.1-8 — MANUAL은 제외) */

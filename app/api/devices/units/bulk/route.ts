@@ -15,9 +15,10 @@ const ACTION_LABEL: Record<'MOVE_WARD' | 'RECOVER', string> = { MOVE_WARD: '일�
  * 병원이 2곳 이상 섞이면 409, ACTIVE 개체가 없으면 409 (세부 검증·skipped는 서비스가 담당)
  */
 async function deriveBulkHospital(ids: number[]): Promise<string> {
+  // ids = 공개 device id(유닛 id) — 배치 행은 device_id로 찾는다
   const rows = await prisma.hospitalDevice.findMany({
-    where: { id: { in: ids } },
-    select: { id: true, serialNo: true, status: true, hospitalCode: true },
+    where: { deviceId: { in: ids } },
+    select: { deviceId: true, status: true, hospitalCode: true },
   })
   if (rows.length !== ids.length) throw new RegistryError(404, `기기 ${ids.length - rows.length}건을 찾을 수 없습니다`)
   const codes = Array.from(new Set(rows.filter((r) => r.status === 'ACTIVE' && r.hospitalCode).map((r) => r.hospitalCode as string)))
@@ -62,7 +63,7 @@ export async function POST(request: NextRequest) {
       { action, deviceIds, toWardId, toWardName, reasonCodeId }
     )
 
-    const serials = await prisma.hospitalDevice.findMany({ where: { id: { in: r.affectedDeviceIds.slice(0, 50) } }, select: { serialNo: true } })
+    const serials = await prisma.deviceUnit.findMany({ where: { id: { in: r.affectedDeviceIds.slice(0, 50) } }, select: { serialNo: true } })
     const hospName = (await hospitalNames(prisma, [hospitalCode])).get(hospitalCode) ?? hospitalCode
     await logAudit({
       req: request,

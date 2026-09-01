@@ -72,19 +72,22 @@ thynC 도입 병원에는 시리얼이 부여된 웨어러블 본체·게이트�
 ```
 DeviceInfo(확장: device_class·onprem_device_type·serial_pattern·serial_tracked·quantity_tracked)   HospitalWard(신설)
    1 ──▶ N                                                                                             1 ──▶ N
-HospitalDevice — 물리 개체, 시리얼당 1행, 전역 UNIQUE serial_no
-  [식별]   device_info_id · serial_no · serial_raw · mac_address · ext_device_code · memo · inventory_unit_id · ext_*
-  [프로젝션 = fold(이벤트)]  status ACTIVE|RECOVERED · hospital_code · ward_id · placed_on · last_hospital_code
-                            · recovered_on · recover_reason_id · last_event_type/on · replaced_by_id
-   1 ──▶ N (append-first — 정정은 §8.2 한정)
-HospitalDeviceEvent — event_type REGISTER|MOVE_WARD|RECOVER|CORRECT · hospital_code(사건 병원 비정규화) · from/to_ward_id
-   · reason_code_id · occurred_on · memo · ref_type/ref_code · related_device_id · action_group · source · import_batch_id · changes · actor
+DeviceUnit — 시리얼 정체성(1층), 시리얼당 1행, 전역 UNIQUE serial_no  ← API 공개 device id = device_units.id
+  [식별]   device_info_id · serial_no · serial_raw · mac_address · memo · source(MANUAL|IMPORT|WMS|ONPREM|BACKFILL)
+   1 ──▶ 0..1 (device_id UNIQUE)                                    1 ──▶ 0..1 (후속: inventory_units.device_id — WMS 편입, 본 설계 범위 밖)
+HospitalDevice — 병원 배치 프로젝션(2층 상태 하위표) = fold(이벤트)
+  [프로젝션]  status ACTIVE|RECOVERED · hospital_code · ward_id · placed_on · last_hospital_code
+              · recovered_on · recover_reason_id · last_event_type/on · replaced_by_id(→ DeviceUnit) · ext_device_code · ext_*
+DeviceUnit 1 ──▶ N (append-first — 정정은 §8.2 한정)
+HospitalDeviceEvent — device_id(→ DeviceUnit) · event_type REGISTER|MOVE_WARD|RECOVER|CORRECT · hospital_code(사건 병원 비정규화) · from/to_ward_id
+   · reason_code_id · occurred_on · memo · ref_type/ref_code · related_device_id(→ DeviceUnit) · action_group · source · import_batch_id · changes · actor
 HospitalDeviceImportBatch — 취소 단위 · mode · 카운트 · summary · cancel_summary
 ```
+**3층 구조(B-20, 2026-09-01 사용자 결정)**: `device_info`(모델 마스터) → `device_units`(시리얼 정체성) → 상태 하위표 `hospital_devices`(병원 배치) / `inventory_units`(WMS — `inventory_units.device_id` 편입은 후속). 시리얼·모델·MAC·메모는 유닛의 속성, 병원·병동·상태는 배치 프로젝션의 속성. 이벤트·교체 상대는 유닛을 가리킨다.
 
 ### 4.1 단일 소스 불변식
 1. **이벤트가 단일 소스, 프로젝션은 파생값.** `rebuildUnitProjection`이 `(occurred_on ASC, id ASC)` fold로 언제든 재계산. 이벤트 INSERT + 프로젝션 UPDATE는 같은 트랜잭션, 라우트의 직접 UPDATE 금지.
-2. **시리얼 1개 = 개체 1행**(전역 UNIQUE) → D3 '활성 배치 1건'이 구조적으로 성립.
+2. **시리얼 1개 = 유닛 1행**(`device_units.serial_no` 전역 UNIQUE) + 유닛당 배치 프로젝션 0..1행(`hospital_devices.device_id` UNIQUE) → D3 '활성 배치 1건'이 구조적으로 성립.
 3. **소급 입력 허용 + 결정적 fold**(D7): 과거 `occurred_on` 허용(미래 400). 삽입 위치 시점 상태로 전이 검증 후 **이후 이벤트를 다시 접어 전부 성립하는지 확인**, 불성립이면 409("이 일자에 기록하면 이후 이벤트(08-20 병동 이동)가 성립하지 않습니다"). 같은 일자 순서는 id. go-live 임포트 뒤에 그보다 이른 AS 회수를 나중에 정리 입력하는 실무가 막히지 않는다.
 4. **이벤트는 append-first** — 지우는 경로는 §8.2의 취소 4종(① 마지막 이벤트 취소 ② 교체·이관 그룹 짝 취소 ③ CORRECT 취소 ④ 임포트 배치 취소)뿐이고 인플레이스 UPDATE는 admin 허용 필드에 한정(D10이 명시한 예외). 사실의 번복은 새 이벤트.
 5. **병동은 병원에 속한다** — `(ward_id, hospital_code)` 복합 FK. 이벤트는 병동이 있으면 `hospital_code` 필수 CHECK.
@@ -118,7 +121,7 @@ fold 규칙: REGISTER → ACTIVE·hospital_code·ward_id=to·placed_on·(recover
 | `serial_tracked` | BOOLEAN NOT NULL DEFAULT false | **원장 대상 모델의 단일 소스**(선택지·요약 스트립·대조 행). 시드 6행 true |
 | `quantity_tracked` | BOOLEAN NOT NULL DEFAULT true | 프로젝트·딜 수량 폼 노출 여부. 시드 4행(GW·제3자) false |
 
-기존 2행 UPDATE + 4행 INSERT(MGW1010·SL-MPF1K07·H2-ABPM·RTLS-TAG). `/settings/devices`에 5필드 편집 추가(정규식 컴파일 검증 400). **5필드 변경은 `isAdminOrAbove`**(원장 대상·수량 폼 범위를 바꾸는 시스템 플래그), 기존 필드는 USER+ 유지(인라인 `role==='VIEWER'` → `isUserOrAbove` 헬퍼 교체). `DELETE /api/settings/devices/[id]` usageCount에 `hospitalDevice.count`·`salesDealDevice.count` 합산.
+기존 2행 UPDATE + 4행 INSERT(MGW1010·SL-MPF1K07·H2-ABPM·RTLS-TAG). `/settings/devices`에 5필드 편집 추가(정규식 컴파일 검증 400). **5필드 변경은 `isAdminOrAbove`**(원장 대상·수량 폼 범위를 바꾸는 시스템 플래그), 기존 필드는 USER+ 유지(인라인 `role==='VIEWER'` → `isUserOrAbove` 헬퍼 교체). `DELETE /api/settings/devices/[id]` usageCount에 `deviceUnit.count`(3층 구조 후 — 구 `hospitalDevice.count`)·`salesDealDevice.count` 합산.
 
 ### 5.2 `hospital_wards`(신설)
 `id` PK / `hospital_code` NOT NULL FK **RESTRICT** / `name` NOT NULL(원문 trim, 표시) / **`name_norm` NOT NULL**(`normalizeWardName` 결과 — 매칭·유니크 키) / `ext_ward_code` NULL(온프렘 예약) / `is_active` DEFAULT true(폐병동은 비활성) / `sort_order` INTEGER NOT NULL DEFAULT 0 / `created_at`·`updated_at`.
@@ -127,16 +130,27 @@ fold 규칙: REGISTER → ACTIVE·hospital_code·ward_id=to·placed_on·(recover
 - 자동 생성은 `INSERT … ON CONFLICT (hospital_code, name_norm) DO UPDATE SET name_norm=EXCLUDED.name_norm RETURNING id, is_active`(동시 임포트 안전). `is_active=false`가 돌아오면 폐쇄 병동 매칭 → 409 `폐쇄된 병동입니다`(임포트는 `error`). 생성 예정 병동이 여럿이면 `name_norm` 오름차순 순차 INSERT(락 순서 고정).
 - 삭제는 참조 0건만(409). 층·병실·병상 계층 없음.
 
-### 5.3 `hospital_devices`(이름 승계 — 물리 개체)
+### 5.2b `device_units`(신설 — 시리얼 정체성, 1층)
 | 컬럼 | 타입/제약 | 근거 |
 |---|---|---|
-| `id` | SERIAL PK | |
+| `id` | SERIAL PK | **API 공개 device id**(`/api/devices/units/[id]` 등의 `id`는 유닛 id — 서비스 리팩터 결정) |
 | `device_info_id` | NOT NULL FK RESTRICT | 모델 축 |
-| `serial_no` | TEXT NOT NULL **UNIQUE(전역)** | 정규화 키(대문자·trim, GW는 `B######`) — Q2 |
-| `serial_raw` | TEXT NULL | 키와 다른 원문(`GW4C11-B008381`, 바코드형) — WMS 매칭·표시 |
-| `mac_address` / `ext_device_code` | TEXT NULL | 온프렘 export 식별자·닉네임(예약 — 붙여넣기 유입값만) |
-| `inventory_unit_id` | NULL FK `inventory_units` **SET NULL**, UNIQUE | WMS 조인 키(D9). 쓰기 경로에서만 기록(§9.2) |
+| `serial_no` | TEXT NOT NULL **UNIQUE(전역)**, CHECK `serial_no <> '' AND serial_no = upper(btrim(serial_no))` | 정규화 키(대문자·trim, GW는 `B######`) — Q2. 정규화되지 않은 키 저장을 DB가 차단 |
+| `serial_raw` | TEXT NULL, 부분 인덱스 WHERE NOT NULL | 키와 다른 원문(`GW4C11-B008381`, 바코드형) — WMS 매칭·표시 |
+| `mac_address` | TEXT NULL | 온프렘 export 식별자(예약 — 붙여넣기 유입값만) |
 | `memo` | TEXT NULL | 개체 속성(이벤트 아님) — 현장 식별 보조 |
+| `source` | TEXT NOT NULL DEFAULT 'MANUAL' (MANUAL/IMPORT/WMS/ONPREM/BACKFILL — 코드 상수, CHECK 없음) | 유닛이 처음 생긴 경로(후속 WMS 편입 시 유닛을 만든 쪽 구분) |
+| `created_at` / `updated_at` | | |
+
+인덱스: (device_info_id) / serial_no `text_pattern_ops` / 부분 (serial_raw). 유닛 삭제는 배치·이벤트 참조 0건일 때만(FK RESTRICT). `inventory_unit_id` 컬럼은 두지 않는다 — WMS 편입은 반대 방향(`inventory_units.device_id → device_units`, 후속 마이그).
+
+### 5.3 `hospital_devices`(이름 승계 — 병원 배치 프로젝션, 2층)
+유닛당 0..1행. 식별 속성은 5.2b로 이동했고 이 표는 **상태만** 가진다.
+| 컬럼 | 타입/제약 | 근거 |
+|---|---|---|
+| `id` | SERIAL PK | 내부 키(API에는 노출하지 않음 — 공개 id는 `device_id`) |
+| `device_id` | NOT NULL FK `device_units` RESTRICT, **UNIQUE** | 유닛당 배치 1행 |
+| `ext_device_code` | TEXT NULL | 온프렘 닉네임(병원 문맥 값이라 유닛이 아닌 배치에 둠) |
 | `ext_last_seen_at` / `ext_synced_at` | TIMESTAMP(3) NULL | 온프렘 스냅샷 예약(v2 '온프렘 미확인 n일' 근거, 자동 회수 금지) |
 | `status` | NOT NULL DEFAULT 'ACTIVE' CHECK (ACTIVE, RECOVERED) | |
 | `hospital_code` | NULL FK RESTRICT, **CHECK `(status='ACTIVE') = (hospital_code IS NOT NULL)`** | 현재 배치 병원의 단일 의미 |
@@ -145,10 +159,12 @@ fold 규칙: REGISTER → ACTIVE·hospital_code·ward_id=to·placed_on·(recover
 | `last_hospital_code` | NULL FK **SET NULL** | 회수 시 마지막 병원('회수됨' 필터 축), 재등록 시 NULL. 회수 이력 병원의 삭제 보호는 §9.6 앱 선검사 409로 |
 | `recovered_on` / `recover_reason_id` | DATE / FK status_codes RESTRICT | 목록 '회수일·사유' 열(조인 없이) |
 | `last_event_type` / `last_event_on` | TEXT / DATE | 목록 '최근 이벤트' |
-| `replaced_by_id` | FK self SET NULL | "→ A130001로 교체됨" |
+| `replaced_by_id` | FK **`device_units`** SET NULL | "→ A130001로 교체됨" — 교체 상대는 유닛 |
 | `created_at` / `updated_at` | | |
 
-인덱스: (hospital_code, status) / (hospital_code, device_info_id, status) / (device_info_id, status) / (ward_id) / (last_hospital_code, status) / serial_no `text_pattern_ops`.
+**제거된 컬럼(구 단일 테이블 초안 대비)**: `device_info_id`·`serial_no`·`serial_raw`·`mac_address`·`memo`(→ `device_units`), `inventory_unit_id`(→ 후속 `inventory_units.device_id`로 방향 반전). 함께 제거된 제약·인덱스: `hospital_devices_serial_no_key`, `hospital_devices_inventory_unit_id_key`, `hospital_devices_serial_no_pattern_idx`, `hospital_devices_device_info_id_status_idx`, `hospital_devices_hospital_model_status_idx`(모델 축 조회는 `device_units` 조인).
+인덱스: (hospital_code, status) / (ward_id) / (last_hospital_code, status).
+**미결정(B-20)**: ACTIVE-only 변형(회수 요약 `last_hospital_code`·`recovered_on`·`recover_reason_id`를 유닛으로 옮기고 배치 행은 ACTIVE만 보유)은 채택하지 않았고 추후 검토.
 
 ### 5.4 `hospital_device_import_batches`(신설 — 임포트 취소 단위)
 `id` PK(이벤트 `import_batch_id` 하드 FK 대상) / `hospital_code` NOT NULL FK RESTRICT / `source_kind` NOT NULL CHECK(EXCEL, PASTE) / `mode` DEFAULT 'REGISTER'(REGISTER / ONPREM_DRAFT) / `file_name` / `occurred_on` NOT NULL(배치 업무일자, admin 일괄 정정 가능) / `note` / `row_count`·`registered_count`·`reregistered_count`·`skipped_count`·`transferred_count` / `summary` JSONB(미리보기 요약·생성 병동·병동 별칭·선택 org·취소된 단건) / `created_by`·`created_at` / `cancelled_at`·`cancelled_by` / `cancel_summary` JSONB(삭제 시리얼·복원 개체·복원 이관·남긴 병동). 인덱스 (hospital_code, created_at DESC).
@@ -157,7 +173,7 @@ fold 규칙: REGISTER → ACTIVE·hospital_code·ward_id=to·placed_on·(recover
 | 컬럼 | 타입/제약 | 근거 |
 |---|---|---|
 | `id` | SERIAL PK(같은 일자 순서 키) | |
-| `device_id` | NOT NULL FK RESTRICT | 개체 삭제는 이벤트 0일 때만 |
+| `device_id` | NOT NULL FK **`device_units`** RESTRICT | 유닛 삭제는 이벤트 0일 때만 |
 | `event_type` | TEXT NOT NULL CHECK (REGISTER, MOVE_WARD, RECOVER, CORRECT) | |
 | `hospital_code` | NULL FK RESTRICT, CHECK `event_type='CORRECT' OR hospital_code IS NOT NULL`, CHECK `hospital_code IS NOT NULL OR (from_ward_id IS NULL AND to_ward_id IS NULL)` | **사건 병원 비정규화(D8)** — 유지보수 병원 변경·하드 삭제에 불변(유일한 예외: §9.6 일괄 이전 — 같은 실체의 병원 코드 통합이므로 이벤트도 대상 병원으로 이동, 드로어의 '이전 병원' 구분은 사라짐). 두 번째 CHECK는 복합 FK MATCH SIMPLE 우회 차단 |
 | `from_ward_id` / `to_ward_id` | 각각 복합 FK (x, hospital_code) RESTRICT DEFERRABLE | MOVE(from→to)·REGISTER(to)·RECOVER(from). RESTRICT라 병동 개명이 이력에 자연 반영 |
@@ -165,7 +181,7 @@ fold 규칙: REGISTER → ACTIVE·hospital_code·ward_id=to·placed_on·(recover
 | `occurred_on` | DATE NOT NULL | 업무일자(과거 허용·미래 400) |
 | `memo` | TEXT | |
 | `ref_type` / `ref_code` | TEXT, CHECK `(ref_type IS NULL)=(ref_code IS NULL)`; 어휘 상수 MAINTENANCE/VOC/INVENTORY_TX/ONPREM_SYNC | 소프트 참조. 임포트는 `import_batch_id` 하드 FK |
-| `related_device_id` | FK self SET NULL | 교체·이관 상대 |
+| `related_device_id` | FK **`device_units`** SET NULL | 교체·이관 상대(유닛) |
 | `action_group` | UUID | 한 액션의 묶음(교체 2건·이관 2건·소급 교체 3건·일괄 N건) |
 | `source` | NOT NULL DEFAULT 'MANUAL'(MANUAL/IMPORT/WMS/ONPREM) | |
 | `import_batch_id` | FK RESTRICT | 배치 취소 단위(이관 쌍의 RECOVER에도 부여) |
@@ -180,10 +196,10 @@ fold 규칙: REGISTER → ACTIVE·hospital_code·ward_id=to·placed_on·(recover
 - **→ hospitals**: devices.hospital_code / events.hospital_code / batches / wards = **RESTRICT**(DELETE 라우트 409 선검사 — 병동만 있는 병원도 409, §9.6) / devices.last_hospital_code = **SET NULL**.
 - devices·events → wards: 복합 FK RESTRICT, ON UPDATE CASCADE, DEFERRABLE INITIALLY DEFERRED. **DEFERRED가 유예하는 것은 참조 존재 검사뿐**이고 RESTRICT/CASCADE 동작은 즉시 실행된다 → transferAll은 반드시 '재지정 → 원본 병동 삭제' 순서. 위반은 COMMIT 시 발생하므로 `$transaction` 예외의 P2003/23503을 409 `병동이 이 병원에 속하지 않습니다`로 매핑.
 - **복합 FK ON UPDATE CASCADE의 의미**: 병동의 `hospital_code`를 바꾸면 그 병동을 참조하는 기기·이벤트의 `hospital_code`가 함께 바뀐다 — 일괄 이전(§9.6) 전용 경로이며 의도된 동작. 따라서 `PUT /api/hospitals/[code]/wards/[id]`는 `hospital_code`를 받지 않는다.
-- events → devices RESTRICT / → device_info·status_codes RESTRICT / → inventory_units SET NULL / replaced_by·related SET NULL / → users SET NULL(+actor_name).
+- devices.device_id·events.device_id → **device_units RESTRICT** / device_units → device_info RESTRICT / → status_codes RESTRICT / devices.replaced_by_id·events.related_device_id → device_units SET NULL / → users SET NULL(+actor_name). inventory_units 방향 FK는 본 마이그에 없음(후속 `inventory_units.device_id`).
 
 ### 5b. Prisma 모델 스케치
-4모델 모두 `@@schema("public")`. CHECK·DEFERRABLE·부분 인덱스는 SQL이 단일 소스(모델 주석으로만 표기 — `udi_di` 선례).
+5모델 모두 `@@schema("public")`. CHECK·DEFERRABLE·부분 인덱스는 SQL이 단일 소스(모델 주석으로만 표기 — `udi_di` 선례). 아래는 실제 `schema.prisma`와 동일 형상(2026-09-01 3층 구조 반영, `validate`·`generate` 통과).
 ```prisma
 model DeviceInfo {            // 기존 + 5필드
   deviceClass       String   @default("WEARABLE") @map("device_class")
@@ -191,7 +207,7 @@ model DeviceInfo {            // 기존 + 5필드
   serialPattern     String?  @map("serial_pattern")
   serialTracked     Boolean  @default(false) @map("serial_tracked")
   quantityTracked   Boolean  @default(true)  @map("quantity_tracked")
-  hospitalDevices   HospitalDevice[]         // 의미 변경: 수량 → 개체
+  deviceUnits       DeviceUnit[]             // 구 hospitalDevices HospitalDevice[] 역관계 대체 (usageCount는 _count.deviceUnits)
 }
 model HospitalWard {
   id Int @id @default(autoincrement())
@@ -201,12 +217,20 @@ model HospitalWard {
   devices HospitalDevice[] @relation("DeviceWard");  eventsFrom HospitalDeviceEvent[] @relation("EventFromWard");  eventsTo HospitalDeviceEvent[] @relation("EventToWard")
   @@unique([hospitalCode, nameNorm])  @@unique([id, hospitalCode])  @@map("hospital_wards")  @@schema("public")
 }
-model HospitalDevice {
+model DeviceUnit {           // 1층 — 시리얼 정체성
   id Int @id @default(autoincrement())
   deviceInfoId Int @map("device_info_id");  deviceInfo DeviceInfo @relation(fields:[deviceInfoId], references:[id], onDelete: Restrict)
-  serialNo String @unique @map("serial_no");  serialRaw String? @map("serial_raw");  macAddress String? @map("mac_address");  extDeviceCode String? @map("ext_device_code")
-  inventoryUnitId Int? @unique @map("inventory_unit_id");  inventoryUnit InventoryUnit? @relation(fields:[inventoryUnitId], references:[id], onDelete: SetNull)
-  memo String?;  extLastSeenAt DateTime? @map("ext_last_seen_at");  extSyncedAt DateTime? @map("ext_synced_at")
+  serialNo String @unique @map("serial_no");  serialRaw String? @map("serial_raw");  macAddress String? @map("mac_address");  memo String?
+  source String @default("MANUAL");  createdAt/updatedAt
+  placement HospitalDevice? @relation("UnitPlacement")                 // 배치 프로젝션 0..1
+  replacedPlacements HospitalDevice[] @relation("DeviceReplacement")   // 이 유닛이 교체기로 들어간 구기기 배치들
+  events HospitalDeviceEvent[] @relation("DeviceEvents");  relatedEvents HospitalDeviceEvent[] @relation("EventRelatedDevice")
+  @@index([deviceInfoId])  @@map("device_units")  @@schema("public")
+}
+model HospitalDevice {       // 2층 — 병원 배치 프로젝션
+  id Int @id @default(autoincrement())
+  deviceId Int @unique @map("device_id");  unit DeviceUnit @relation("UnitPlacement", fields:[deviceId], references:[id], onDelete: Restrict)
+  extDeviceCode String? @map("ext_device_code");  extLastSeenAt DateTime? @map("ext_last_seen_at");  extSyncedAt DateTime? @map("ext_synced_at")
   status String @default("ACTIVE")
   hospitalCode String? @map("hospital_code");  hospital Hospital? @relation("DeviceCurrentHospital", fields:[hospitalCode], references:[hospitalCode], onDelete: Restrict)
   wardId Int? @map("ward_id");  ward HospitalWard? @relation("DeviceWard", fields:[wardId, hospitalCode], references:[id, hospitalCode], onDelete: Restrict)
@@ -214,22 +238,22 @@ model HospitalDevice {
   lastHospitalCode String? @map("last_hospital_code");  lastHospital Hospital? @relation("DeviceLastHospital", fields:[lastHospitalCode], references:[hospitalCode], onDelete: SetNull)
   recoveredOn DateTime? @map("recovered_on") @db.Date;  recoverReasonId Int? @map("recover_reason_id");  recoverReason StatusCode? @relation("DeviceRecoverReason", …, onDelete: Restrict)
   lastEventType String? @map("last_event_type");  lastEventOn DateTime? @map("last_event_on") @db.Date
-  replacedById Int? @map("replaced_by_id");  replacedBy HospitalDevice? @relation("DeviceReplacement", fields:[replacedById], references:[id], onDelete: SetNull);  replaces HospitalDevice[] @relation("DeviceReplacement")
-  events HospitalDeviceEvent[] @relation("DeviceEvents");  relatedEvents HospitalDeviceEvent[] @relation("EventRelatedDevice")
+  replacedById Int? @map("replaced_by_id");  replacedBy DeviceUnit? @relation("DeviceReplacement", fields:[replacedById], references:[id], onDelete: SetNull)
   createdAt/updatedAt
-  @@index([hospitalCode, status]) …(§5.3)  @@map("hospital_devices")  @@schema("public")
+  @@index([hospitalCode, status])  @@index([wardId])  @@index([lastHospitalCode, status])  @@map("hospital_devices")  @@schema("public")
 }
 model HospitalDeviceImportBatch { …§5.4 컬럼, summary Json?, cancelSummary Json?;  hospital(Restrict);  createdById String? @map("created_by");  createdBy User? @relation("DeviceImportCreatedBy", …, onDelete: SetNull);  cancelledById String? @map("cancelled_by");  cancelledBy User? @relation("DeviceImportCancelledBy", …, onDelete: SetNull);  events HospitalDeviceEvent[];  @@map("hospital_device_import_batches")  @@schema("public") }
 model HospitalDeviceEvent {
   …§5.5 컬럼;  actionGroup String? @db.Uuid @map("action_group");  changes Json?
-  device HospitalDevice @relation("DeviceEvents", …, onDelete: Restrict);  hospital Hospital?;  fromWard/toWard HospitalWard? (복합, "EventFromWard"/"EventToWard")
-  reasonCode StatusCode? @relation("DeviceEventReason");  relatedDevice HospitalDevice? @relation("EventRelatedDevice", onDelete: SetNull);  importBatch HospitalDeviceImportBatch?
+  device DeviceUnit @relation("DeviceEvents", …, onDelete: Restrict);  hospital Hospital?;  fromWard/toWard HospitalWard? (복합, "EventFromWard"/"EventToWard")
+  reasonCode StatusCode? @relation("DeviceEventReason");  relatedDevice DeviceUnit? @relation("EventRelatedDevice", onDelete: SetNull);  importBatch HospitalDeviceImportBatch?
   actor User? @relation("DeviceEventActor");  editedBy User? @relation("DeviceEventEditor")
   @@index(…§5.5)  @@map("hospital_device_events")  @@schema("public")
 }
 ```
-- 역관계: `Hospital`의 기존 무명 `hospitalDevices HospitalDevice[]`(L82)를 `@relation("DeviceCurrentHospital")`로 교체 + `lastHospitalDevices @relation("DeviceLastHospital")` 추가(같은 모델 쌍 관계 2개 → 이름 필수) + `hospitalWards`·`deviceEvents`·`deviceImportBatches` / `User` 4개(DeviceImportCreatedBy·DeviceImportCancelledBy·DeviceEventActor·DeviceEventEditor — 같은 모델 쌍에 관계 2개라 이름 필수, 임시 스키마 `validate`·`generate` 통과 확인) / `StatusCode` 2개 / `InventoryUnit.hospitalDevice?`.
-- **복합 FK와 Prisma 5.22**: 두 관계가 `hospitalCode`를 공유하는 형태는 임시 스키마로 `validate`·`generate` 통과 확인. checked/unchecked 입력 혼용 불가 → **서비스는 전부 스칼라(unchecked) 입력**으로 쓴다(P1 첫 작업에서 재검증).
+- 관계명(서비스 계층이 그대로 쓰는 이름): `DeviceUnit.placement` ↔ `HospitalDevice.unit`("UnitPlacement") / `HospitalDevice.replacedBy` ↔ `DeviceUnit.replacedPlacements`("DeviceReplacement") / `HospitalDeviceEvent.device` ↔ `DeviceUnit.events`("DeviceEvents") / `HospitalDeviceEvent.relatedDevice` ↔ `DeviceUnit.relatedEvents`("EventRelatedDevice").
+- 역관계: `Hospital`의 기존 무명 `hospitalDevices HospitalDevice[]`(L82)를 `@relation("DeviceCurrentHospital")`로 교체 + `lastHospitalDevices @relation("DeviceLastHospital")` 추가(같은 모델 쌍 관계 2개 → 이름 필수) + `hospitalWards`·`deviceEvents`·`deviceImportBatches` / `User` 4개(DeviceImportCreatedBy·DeviceImportCancelledBy·DeviceEventActor·DeviceEventEditor) / `StatusCode` 2개 / `DeviceInfo.deviceUnits`. **`InventoryUnit.hospitalDevice?` 역관계는 제거**(WMS 편입은 후속 `inventory_units.device_id`).
+- **복합 FK와 Prisma 5.22**: 두 관계가 `hospitalCode`를 공유하는 형태는 `validate`·`generate` 통과 확인. checked/unchecked 입력 혼용 불가 → **서비스는 전부 스칼라(unchecked) 입력**으로 쓴다.
 
 ### 5c. 코드 상수 vs DB 마스터
 | 어휘 | 위치 |
@@ -243,7 +267,7 @@ model HospitalDeviceEvent {
 
 ### 5d. 기존 `hospital_devices` 폐기 경로(D1)
 1. 마이그레이션 첫 문장에서 **`CREATE TABLE hospital_devices_qty_backup_202609 AS SELECT * FROM hospital_devices`** → `DROP TABLE hospital_devices`(나가는 FK 2개뿐) → 새 테이블 CREATE. 같은 DB 안에 원본 행이 그대로 남으므로 별도 게이트 없이 어느 DB에서 실행해도 안전하고, 롤백은 백업 테이블 RENAME + 제약·시퀀스 복원(부록 A.0 ②, 8문장 — `CREATE TABLE AS`는 PK·FK·UNIQUE·NOT NULL·DEFAULT·시퀀스를 복사하지 않음). PROD 배포 직전 전체 덤프(`pg_dump -Fc`)는 표준 절차대로 추가.
-2. Prisma는 `HospitalDevice`를 새 형상으로 재정의(모델명 유지). **tsc는 `quantity` 참조(`page.tsx:133`, `tools.ts:622`)만 잡는다** — where-only 호출(`route.ts:145` deleteMany, `page.tsx:91` findMany)은 새 모델에도 `hospitalCode`가 있어 통과하므로 아래 팬아웃을 수동 제거하고 P1 검증에서 `grep -rn "hospitalDevice\." app lib`가 신규 코드 외 0건임을 확인한다.
+2. Prisma는 `HospitalDevice`를 새 형상(배치 프로젝션)으로 재정의(모델명 유지) + `DeviceUnit` 신설. **tsc는 `quantity` 참조(`page.tsx:133`, `tools.ts:622`)만 잡는다** — where-only 호출(`route.ts:145` deleteMany, `page.tsx:91` findMany)은 새 모델에도 `hospitalCode`가 있어 통과하므로 아래 팬아웃을 수동 제거하고 P1 검증에서 `grep -rn "hospitalDevice\." app lib`가 신규 코드 외 0건임을 확인한다.
 3. **팬아웃**: `app/api/hospitals/[code]/devices/route.ts` **파일 삭제**(GET·PUT — 소비처는 재작성되는 상세 페이지·교체되는 섹션뿐) / `app/hospitals/[code]/page.tsx:9,17,47,90-91,133-138,252-257,341` / `HospitalDevicesSection.tsx`(교체)·`InventoryUsageCard.tsx`(삭제) / `app/api/hospitals/[code]/route.ts:145` / `lib/ai/tools.ts:602,621-623` / 수량 폼 3곳 필터 / `app/settings/devices/*`·`app/api/settings/devices/*`(5필드·헬퍼·usageCount·DELETE 가드) / `schema.prisma:82,352-367,456-468` / `README.md`(369·491·538·929-949·1490-1491) / `projects/hospitals_erd.html` / 문서 3건(`inventory_udi_ledger_design.md:166` 정오표 1줄, `ops_system_2.0_plan.html` A1 링크, `projects/README.md` 2.0 행).
 4. **구현 중 위험 — 파괴적 마이그레이션이 main에 있는 동안의 핫픽스 배포**: dev/dev2는 main을 공유하고 "prod에 반영해줘" 절차는 `migrate deploy`를 동반하므로, P1~P4 변경분이 P5 전에 main에 올라가면 무관한 핫픽스 배포가 이 마이그를 함께 실행한다(백업 테이블 덕에 데이터는 남지만 구 코드가 있으면 병원 상세 500). **확정(A-6): feature 브랜치 `feat/device-registry`에서 P1~P4 진행, P5에 마이그 폴더 포함 일괄 머지. dev2 DB는 `thync_ops_dev`에 바로 적용**(P1~P5 사이 main 체크아웃 시 병원 상세만 로컬 500 — 감수). 마이그 폴더명은 P1에 고정(`20260901120000_hospital_device_registry`)하고 개명하지 않음. 긴급 핫픽스는 main에서 만들어 브랜치로 cherry-pick.
 
@@ -541,6 +565,7 @@ nav `('devices','디바이스 원장','/devices','device','operations',55,'{SEER
 | B-17 | 기회수 상태 구기기의 교체는 RECOVER 재생성 없이 신 REGISTER + 시스템 연결 | '먼저 회수 → 교체기 뒤늦게 도착'이 실무 흔함 |
 | B-18 | GW·제3자 기대치 축 없음(`compare:'none'`) | D1은 ECG hard·SpO2 soft만 정의. 구축 계획 수량(projects.gateway_count)은 계약이 아님 |
 | B-19 | 자재 품목 폼 모델 셀렉터는 필터하지 않음 | GW 품목을 MGW1010에 연결할 수 있게(연결은 WMS 사용자 행위) |
+| B-20 | **3층 구조** `device_info` → `device_units` → `hospital_devices` / `inventory_units` — 2026-09-01 사용자 결정: 시리얼 정체성은 `device_units`, 병원 상태는 `hospital_devices`(device_id UNIQUE 프로젝션), WMS 편입(`inventory_units.device_id`)은 후속. **API 공개 device id = `device_units.id`**. ACTIVE-only 변형(회수 요약을 유닛으로)은 미결정 | 한 시리얼이 병원 배치와 창고 개체 양쪽에 같은 정체성으로 걸리도록 — 단일 테이블 초안은 WMS 편입 시 `inventory_unit_id` 양방향 링크가 필요했음. dev2에서 롤백 런북(A.0 ②) 리허설 후 마이그 폴더 그대로 재적용 |
 
 ---
 
@@ -560,11 +585,20 @@ npx prisma migrate deploy && pm2 restart thync-prod
 psql -h localhost -U thync -d thync_ops -f scripts/seed-device-registry.sql      # DDL 없음, 재실행 안전
 curl -sI https://ops.seersthync.com/devices | head -1                              # 307
 ```
-**롤백**(down 스크립트가 없는 수동 패턴): ① 코드 `git revert` → pull → generate → build ② DB 단일 트랜잭션: `DROP TABLE hospital_device_events, hospital_device_import_batches, hospital_devices, hospital_wards; ALTER TABLE device_info DROP COLUMN device_class, DROP COLUMN onprem_device_type, DROP COLUMN serial_pattern, DROP COLUMN serial_tracked, DROP COLUMN quantity_tracked; DELETE FROM device_info WHERE device_model IN ('MGW1010','SL-MPF1K07','H2-ABPM','RTLS-TAG')`(딜·프로젝트·품목 참조가 생겼으면 DELETE 대신 `is_active=false`)`; DELETE FROM status_codes WHERE category='DEVICE_RECOVERY_REASON'; DELETE FROM nav_menu_items WHERE menu_key IN ('devices','settings/device-recovery-reason'); ALTER TABLE hospital_devices_qty_backup_202609 RENAME TO hospital_devices; ALTER TABLE hospital_devices ALTER COLUMN id SET NOT NULL, ALTER COLUMN hospital_code SET NOT NULL, ALTER COLUMN device_info_id SET NOT NULL, ALTER COLUMN quantity SET NOT NULL, ALTER COLUMN quantity SET DEFAULT 0, ALTER COLUMN updated_at SET NOT NULL, ADD CONSTRAINT hospital_devices_pkey PRIMARY KEY (id), ADD CONSTRAINT hospital_devices_hospital_code_fkey FOREIGN KEY (hospital_code) REFERENCES hospitals(hospital_code) ON UPDATE CASCADE ON DELETE RESTRICT, ADD CONSTRAINT hospital_devices_device_info_id_fkey FOREIGN KEY (device_info_id) REFERENCES device_info(id) ON UPDATE CASCADE ON DELETE RESTRICT; CREATE UNIQUE INDEX hospital_devices_hospital_code_device_info_id_key ON hospital_devices(hospital_code, device_info_id); CREATE SEQUENCE hospital_devices_id_seq OWNED BY hospital_devices.id; ALTER TABLE hospital_devices ALTER COLUMN id SET DEFAULT nextval('hospital_devices_id_seq'); SELECT setval('hospital_devices_id_seq', COALESCE((SELECT max(id) FROM hospital_devices),0)+1, false);` `DELETE FROM _prisma_migrations WHERE migration_name='20260901120000_hospital_device_registry'` ③ `pm2 restart`. migrate deploy가 중간 실패한 상태면 먼저 `npx prisma migrate resolve --rolled-back <이름>`.
+**롤백**(down 스크립트가 없는 수동 패턴): ① 코드 `git revert` → pull → generate → build ② DB 단일 트랜잭션: `DROP TABLE hospital_device_events, hospital_device_import_batches, hospital_devices, hospital_wards; DROP TABLE IF EXISTS device_units; ALTER TABLE device_info DROP COLUMN device_class, DROP COLUMN onprem_device_type, DROP COLUMN serial_pattern, DROP COLUMN serial_tracked, DROP COLUMN quantity_tracked; DELETE FROM device_info WHERE device_model IN ('MGW1010','SL-MPF1K07','H2-ABPM','RTLS-TAG')`(딜·프로젝트·품목 참조가 생겼으면 DELETE 대신 `is_active=false`)`; DELETE FROM status_codes WHERE category='DEVICE_RECOVERY_REASON'; DELETE FROM nav_menu_items WHERE menu_key IN ('devices','settings/device-recovery-reason'); ALTER TABLE hospital_devices_qty_backup_202609 RENAME TO hospital_devices; ALTER TABLE hospital_devices ALTER COLUMN id SET NOT NULL, ALTER COLUMN hospital_code SET NOT NULL, ALTER COLUMN device_info_id SET NOT NULL, ALTER COLUMN quantity SET NOT NULL, ALTER COLUMN quantity SET DEFAULT 0, ALTER COLUMN updated_at SET NOT NULL, ADD CONSTRAINT hospital_devices_pkey PRIMARY KEY (id), ADD CONSTRAINT hospital_devices_hospital_code_fkey FOREIGN KEY (hospital_code) REFERENCES hospitals(hospital_code) ON UPDATE CASCADE ON DELETE RESTRICT, ADD CONSTRAINT hospital_devices_device_info_id_fkey FOREIGN KEY (device_info_id) REFERENCES device_info(id) ON UPDATE CASCADE ON DELETE RESTRICT; CREATE UNIQUE INDEX hospital_devices_hospital_code_device_info_id_key ON hospital_devices(hospital_code, device_info_id); CREATE SEQUENCE hospital_devices_id_seq OWNED BY hospital_devices.id; ALTER TABLE hospital_devices ALTER COLUMN id SET DEFAULT nextval('hospital_devices_id_seq'); SELECT setval('hospital_devices_id_seq', COALESCE((SELECT max(id) FROM hospital_devices),0)+1, false);` `DELETE FROM _prisma_migrations WHERE migration_name='20260901120000_hospital_device_registry'` ③ `pm2 restart`. migrate deploy가 중간 실패한 상태면 먼저 `npx prisma migrate resolve --rolled-back <이름>`.
+**롤백 리허설 결과(dev2 `thync_ops_dev`, 2026-09-01 — 3층 구조 전환 시 실행)**: 위 ② 전체를 `psql --single-transaction -v ON_ERROR_STOP=1` 1회로 실행 → 성공. 사전 검사: 시드 4모델(MGW1010·SL-MPF1K07·H2-ABPM·RTLS-TAG)을 참조하는 `project_devices`·`sales_deal_devices`·`inventory_items` 0건(참조가 있으면 `inventory_items.device_info_id`는 같은 트랜잭션에서 NULL 처리 — FK가 SET NULL이라 DELETE도 통과하지만 명시). 결과: 구 `hospital_devices` 132행 복원(컬럼 5개 전부 NOT NULL, quantity DEFAULT 0, PK·FK 2·UNIQUE(hospital_code, device_info_id)·시퀀스 156 복원), device_info 6→2행, `_prisma_migrations` 1행 삭제, 회수 사유 7행·nav 2행 삭제. 테스트로 넣었던 배치 22행·이벤트 25행·병동 4행·배치 1건은 함께 소실(의도). 이후 수정된 A.1을 같은 방식으로 재적용 → `migrate resolve --applied` → `migrate status` up to date → `seed-device-registry.sql` 재실행 UPDATE 0/INSERT 0(no-op 확인). 재적용 후 카운트: 백업 132 / device_units 0 / hospital_devices 0 / wards 0 / events 0 / batches 0 / device_info 6 / 회수 사유 7 / nav 2. **주의**: 롤백 DELETE 뒤 재시드하면 4모델의 `device_info.id`가 바뀐다(시퀀스 미복원 — 7~10 → 11~14). 코드가 모델 id를 하드코딩하지 않으므로 무해하나, PROD 롤백 후 재배포 시 딜·품목이 그 사이 새 id를 참조했을 가능성만 확인. 부정 테스트(롤백 트랜잭션): 시리얼 미정규화(공백·소문자·빈 문자열) → `device_units_serial_no_normalized_check`, 중복 시리얼 → `device_units_serial_no_key`, 없는 device_id 배치 → `hospital_devices_device_id_fkey`, 유닛당 배치 2행 → `hospital_devices_device_id_key`, RECOVERED+hospital_code → `hospital_devices_active_hospital_check`, RECOVER 사유 없음 → `hospital_device_events_reason_check`, hospital_code NULL+to_ward_id → `hospital_device_events_ward_requires_hospital_check`(CORRECT는 `changes` 없으면 `changes_check`가 먼저 걸림), 없는 device_id 이벤트 → `hospital_device_events_device_id_fkey` — 8건 전부 기대대로 거부.
 **DEV**: dev2 `psql -d thync_ops_dev --single-transaction -v ON_ERROR_STOP=1 -f prisma/migrations/…/migration.sql` → `migrate resolve --applied` → schema → generate → seed. EC2 dev: `git pull` → `migrate deploy` → `generate` → 힙 4GB 빌드 → `pm2 restart thync-dev` → seed. **P1 적용 후 P5 전까지 PROD→DEV 데이터 동기화 금지**(dev2 절차는 TRUNCATE 후 data-only 복원이라 구 `hospital_devices` TABLE DATA가 새 형상에 COPY되며 실패 → 전체 롤백; 불가피하면 TOC 필터에 그 라인 제거 후 seed 재실행).
 
 ### A.1 `prisma/migrations/20260901120000_hospital_device_registry/migration.sql`
+파일 전문(2026-09-01 3층 구조 최종형 — 파일과 1:1 동일).
 ```sql
+-- 병원별 웨어러블 디바이스 원장 (projects/hospital_device_registry_design.md 부록 A.1)
+-- 3층 구조(B-20, 2026-09-01): device_info(모델 마스터) → device_units(시리얼 정체성, 전역 UNIQUE) → 상태 하위표
+--   hospital_devices(병원 배치 프로젝션, device_id UNIQUE 1:1) / inventory_units.device_id(WMS 편입 — 후속 마이그, 본 파일 범위 밖)
+-- 파괴적 마이그: 기존 hospital_devices(병원×모델 수량)를 같은 DB에 백업 후 DROP → 배치 프로젝션 테이블이 이름 승계(D1)
+-- 적용: psql "$DATABASE_URL" --single-transaction -v ON_ERROR_STOP=1 -f <this file> → npx prisma migrate resolve --applied 20260901120000_hospital_device_registry
+-- 롤백 런북: 설계안 부록 A.0 ② (dev2에서 2026-09-01 리허설 완료)
+
 -- 1) D1: 수량표 백업(같은 DB) 후 DROP — 백업 테이블은 원장이 채워진 뒤 후속 마이그에서 삭제
 CREATE TABLE hospital_devices_qty_backup_202609 AS SELECT * FROM hospital_devices;
 DROP TABLE hospital_devices;
@@ -573,7 +607,7 @@ DROP TABLE hospital_devices;
 ALTER TABLE device_info
   ADD COLUMN device_class TEXT NOT NULL DEFAULT 'WEARABLE', ADD COLUMN onprem_device_type INTEGER, ADD COLUMN serial_pattern TEXT,
   ADD COLUMN serial_tracked BOOLEAN NOT NULL DEFAULT false, ADD COLUMN quantity_tracked BOOLEAN NOT NULL DEFAULT true;
--- 2') 시드(A.2에도 동일 — onprem_device_type IS NULL 가드로 사용자 편집 보존)
+-- 2') 시드(scripts/seed-device-registry.sql에도 동일 — onprem_device_type IS NULL 가드로 사용자 편집 보존)
 UPDATE device_info SET onprem_device_type=1, serial_pattern='^A[0-9]{6}$', serial_tracked=true WHERE device_model='MC200M-T' AND onprem_device_type IS NULL;
 UPDATE device_info SET onprem_device_type=3, serial_pattern='^P[0-9]{6}$', serial_tracked=true WHERE device_model='MP100W'   AND onprem_device_type IS NULL;
 INSERT INTO device_info (device_model, device_name, device_class, onprem_device_type, serial_pattern, serial_tracked, quantity_tracked, is_active, sort_order, updated_at) VALUES
@@ -594,34 +628,41 @@ CREATE TABLE hospital_wards (
   CONSTRAINT hospital_wards_id_hospital_code_key UNIQUE (id, hospital_code));
 CREATE UNIQUE INDEX hospital_wards_hospital_code_ext_ward_code_key ON hospital_wards(hospital_code, ext_ward_code) WHERE ext_ward_code IS NOT NULL;
 
--- 4) D1/D3: 물리 개체(이름 승계)
-CREATE TABLE hospital_devices (
+-- 4) 시리얼 정체성(유닛) — 시리얼당 1행, 전역 UNIQUE. source 어휘 MANUAL/IMPORT/WMS/ONPREM/BACKFILL는 코드 상수(CHECK 없음)
+CREATE TABLE device_units (
   id SERIAL PRIMARY KEY,
   device_info_id INTEGER NOT NULL REFERENCES device_info(id) ON DELETE RESTRICT ON UPDATE CASCADE,
-  serial_no TEXT NOT NULL, serial_raw TEXT, mac_address TEXT, ext_device_code TEXT,
-  inventory_unit_id INTEGER REFERENCES inventory_units(id) ON DELETE SET NULL,
-  memo TEXT, ext_last_seen_at TIMESTAMP(3), ext_synced_at TIMESTAMP(3),
+  serial_no TEXT NOT NULL, serial_raw TEXT, mac_address TEXT, memo TEXT,
+  source TEXT NOT NULL DEFAULT 'MANUAL',
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT device_units_serial_no_key UNIQUE (serial_no),
+  CONSTRAINT device_units_serial_no_normalized_check CHECK (serial_no <> '' AND serial_no = upper(btrim(serial_no))));
+CREATE INDEX device_units_device_info_id_idx   ON device_units(device_info_id);
+CREATE INDEX device_units_serial_no_pattern_idx ON device_units(serial_no text_pattern_ops);
+CREATE INDEX device_units_serial_raw_idx        ON device_units(serial_raw) WHERE serial_raw IS NOT NULL;
+
+-- 4') D1/D3: 병원 배치 프로젝션(이름 승계) — 유닛당 0..1행, 상태 컬럼은 이벤트 fold의 파생값
+CREATE TABLE hospital_devices (
+  id SERIAL PRIMARY KEY,
+  device_id INTEGER NOT NULL REFERENCES device_units(id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  ext_device_code TEXT, ext_last_seen_at TIMESTAMP(3), ext_synced_at TIMESTAMP(3),
   status TEXT NOT NULL DEFAULT 'ACTIVE',
   hospital_code TEXT REFERENCES hospitals(hospital_code) ON DELETE RESTRICT ON UPDATE CASCADE,
   ward_id INTEGER, placed_on DATE,
   last_hospital_code TEXT REFERENCES hospitals(hospital_code) ON DELETE SET NULL ON UPDATE CASCADE,
   recovered_on DATE, recover_reason_id INTEGER REFERENCES status_codes(id) ON DELETE RESTRICT,
   last_event_type TEXT, last_event_on DATE,
-  replaced_by_id INTEGER REFERENCES hospital_devices(id) ON DELETE SET NULL,
+  replaced_by_id INTEGER REFERENCES device_units(id) ON DELETE SET NULL,
   created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT hospital_devices_serial_no_key UNIQUE (serial_no),
-  CONSTRAINT hospital_devices_inventory_unit_id_key UNIQUE (inventory_unit_id),
+  CONSTRAINT hospital_devices_device_id_key UNIQUE (device_id),
   CONSTRAINT hospital_devices_status_check CHECK (status IN ('ACTIVE','RECOVERED')),
   CONSTRAINT hospital_devices_active_hospital_check CHECK ((status='ACTIVE') = (hospital_code IS NOT NULL)),
   CONSTRAINT hospital_devices_ward_only_active_check CHECK (ward_id IS NULL OR status='ACTIVE'),
   CONSTRAINT hospital_devices_ward_fkey FOREIGN KEY (ward_id, hospital_code) REFERENCES hospital_wards(id, hospital_code)
     ON DELETE RESTRICT ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED);
-CREATE INDEX hospital_devices_hospital_code_status_idx     ON hospital_devices(hospital_code, status);
-CREATE INDEX hospital_devices_hospital_model_status_idx    ON hospital_devices(hospital_code, device_info_id, status);
-CREATE INDEX hospital_devices_device_info_id_status_idx    ON hospital_devices(device_info_id, status);
-CREATE INDEX hospital_devices_ward_id_idx                  ON hospital_devices(ward_id);
+CREATE INDEX hospital_devices_hospital_code_status_idx      ON hospital_devices(hospital_code, status);
+CREATE INDEX hospital_devices_ward_id_idx                   ON hospital_devices(ward_id);
 CREATE INDEX hospital_devices_last_hospital_code_status_idx ON hospital_devices(last_hospital_code, status);
-CREATE INDEX hospital_devices_serial_no_pattern_idx        ON hospital_devices(serial_no text_pattern_ops);
 
 -- 5) D6: 임포트 배치
 CREATE TABLE hospital_device_import_batches (
@@ -635,16 +676,16 @@ CREATE TABLE hospital_device_import_batches (
   CONSTRAINT hospital_device_import_batches_source_kind_check CHECK (source_kind IN ('EXCEL','PASTE')));
 CREATE INDEX hospital_device_import_batches_hospital_created_idx ON hospital_device_import_batches(hospital_code, created_at DESC);
 
--- 6) 이벤트(append-first)
+-- 6) 이벤트(append-first) — device_id·related_device_id는 유닛(device_units) 참조
 CREATE TABLE hospital_device_events (
   id SERIAL PRIMARY KEY,
-  device_id INTEGER NOT NULL REFERENCES hospital_devices(id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  device_id INTEGER NOT NULL REFERENCES device_units(id) ON DELETE RESTRICT ON UPDATE CASCADE,
   event_type TEXT NOT NULL,
   hospital_code TEXT REFERENCES hospitals(hospital_code) ON DELETE RESTRICT ON UPDATE CASCADE,
   from_ward_id INTEGER, to_ward_id INTEGER,
   reason_code_id INTEGER REFERENCES status_codes(id) ON DELETE RESTRICT,
   occurred_on DATE NOT NULL, memo TEXT, ref_type TEXT, ref_code TEXT,
-  related_device_id INTEGER REFERENCES hospital_devices(id) ON DELETE SET NULL,
+  related_device_id INTEGER REFERENCES device_units(id) ON DELETE SET NULL,
   action_group UUID, source TEXT NOT NULL DEFAULT 'MANUAL',
   import_batch_id INTEGER REFERENCES hospital_device_import_batches(id) ON DELETE RESTRICT,
   changes JSONB, actor_id TEXT REFERENCES users(id) ON DELETE SET NULL, actor_name TEXT,
