@@ -3,7 +3,7 @@
  * 'use client' 없음: 서버에서 import 시 클라이언트 참조 프록시가 되지 않도록 useDevicesUrlState.ts에서 분리.
  *
  * v1 단순화(2026-09-01 사용자 피드백) — 메인 탭 2개:
- *  - `?view=hospital&hospital=&tab=list|history|wards|import&status=&model=&ward=&q=&page=&device=`
+ *  - `?view=hospital&hospital=&tab=list|history|wards|import&status=&model=&ward=&q=&page=&device=` (병원 미선택이면 q/page = 축약 커버리지 표의 병원명 검색·페이지)
  *  - `?view=devices&status=&model=&usage=&productType=&q=&page=&device=`
  * 구 링크(`tab=coverage|events`, view 없음)는 기본값(view=hospital, tab=list)으로 관대하게 매핑.
  */
@@ -116,9 +116,10 @@ export function serializeDevicesParams(s: DevicesUrlState): string {
       if (s.status !== 'active') sp.set('status', s.status)
       if (s.model != null) sp.set('model', String(s.model))
       if (s.ward != null) sp.set('ward', String(s.ward))
-      if (s.q) sp.set('q', s.q)
-      if (s.page > 1) sp.set('page', String(s.page))
     }
+    // 병원 미선택이면 q=병원명 검색·page는 축약 커버리지 표의 것(병원 선택 시 setHospital이 초기화)
+    if (s.q) sp.set('q', s.q)
+    if (s.page > 1) sp.set('page', String(s.page))
   } else {
     if (s.status !== 'active') sp.set('status', s.status)
     if (s.model != null) sp.set('model', String(s.model))

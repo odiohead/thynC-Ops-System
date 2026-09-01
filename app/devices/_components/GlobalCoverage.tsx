@@ -8,6 +8,10 @@
  *  - expected=null: 계약 열 '— (계약완료 딜 없음)' · diff 0 → '0 ✔' · 음수 → '−12 ▲' (배치 중 ECG·차이는 평가용 EVAL 제외 §9.1)
  * 서버 페이지네이션(page/limit 50). 빈 상태에도 전 헤더 노출. 모바일 md:hidden 카드.
  * 요약 줄('고객 병원 n · …')과 탭 바는 orchestrator(DevicesClient)가 렌더한다 — 여기는 표만.
+ *
+ * v1 단순화(2026-09-01 사용자 피드백 2차 "병원 미선택 첫 화면에도 병원별 기기현황 리스트가 보여야") — `compact` prop(기본 false = 구 전체 표):
+ *  컬럼 `병원 | 상태 | 배치 중 | 계약 | 차이 | 회수(30일) | 마지막 이벤트 | →`만. '배치 중'은 병원 요약 한 줄과 같은 수(전 모델 activeTotal, 평가용 n 병기), 계약·차이는 ECG 대조(평가용 제외).
+ *  SpO2/GW/평가용/마지막 임포트 열·'상품유형 혼합' 배지·정렬 셀렉트(기본 '차이 큰 순' 고정) 숨김. 행 클릭 → onOpenHospital, 미등록 행만 [임포트] 유지. 모바일 카드도 축약.
  */
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import Badge from '@/app/components/ui/Badge'
@@ -27,6 +31,8 @@ export interface GlobalCoverageProps {
   onOpenImport: (code: string) => void
   /** 값이 바뀌면 재조회 */
   reloadKey: number
+  /** v1 단순 표(7열 + 미등록 [임포트]) — 기본 false(구 12열 전체 표) */
+  compact?: boolean
 }
 
 const FILTER_OPTIONS: { value: CoverageFilter; label: string }[] = [
@@ -43,10 +49,14 @@ const SORT_OPTIONS: { value: CoverageSort; label: string }[] = [
 ]
 
 const COLUMNS = ['병원', '상태', '계약 ECG', '배치 중 ECG', '차이', '평가용', 'SpO2(참고)', 'GW', '회수(30일)', '마지막 이벤트', '마지막 임포트', '→'] as const
-const COLUMN_TITLES: Partial<Record<(typeof COLUMNS)[number], string>> = {
+/** compact 열 — 숫자 열(2~5)은 우측 정렬 */
+const COMPACT_COLUMNS = ['병원', '상태', '배치 중', '계약', '차이', '회수(30일)', '마지막 이벤트', '→'] as const
+const COLUMN_TITLES: Partial<Record<(typeof COLUMNS)[number] | (typeof COMPACT_COLUMNS)[number], string>> = {
   '배치 중 ECG': '배치 중 ECG(평가용 제외 — 계약 대조 기준)',
   차이: '배치 중 ECG(평가용 제외) − 계약 ECG',
   평가용: '배치 중 평가용(EVAL) 기기 수(전 모델) — 계약 대조 제외',
+  '배치 중': '배치 중 전 모델 합계(병원 요약과 같은 수) — 평가용은 괄호 병기',
+  계약: '계약완료 딜의 대웅 디바이스 수 합(ECG 기준)',
 }
 const SEARCH_DEBOUNCE_MS = 300
 
@@ -134,6 +144,18 @@ function EvalCell({ row }: { row: CoverageRow }) {
   )
 }
 
+/** compact '배치 중' — 병원 요약 한 줄(`summary.activeTotal` + '(평가용 n)')과 같은 수 */
+function ActiveTotalCell({ row }: { row: CoverageRow }) {
+  if (!row.registered) return <span className="text-xs text-muted-foreground">미등록</span>
+  const models = [`ECG ${fmtInt(row.activeEcg + (row.activeEcgEval ?? 0))}`, `SpO2 ${fmtInt(row.activeSpo2)}`, `GW ${fmtInt(row.activeGw)}`, row.activeThird > 0 ? `제3자 ${fmtInt(row.activeThird)}` : null].filter(Boolean).join(' · ')
+  return (
+    <span className="tabular-nums font-medium" title={models}>
+      {fmtInt(row.activeTotal)}
+      {(row.evalTotal ?? 0) > 0 && <span className="ml-1 text-[11px] font-normal text-muted-foreground">(평가용 {fmtInt(row.evalTotal)})</span>}
+    </span>
+  )
+}
+
 function LastEventCell({ row, today }: { row: CoverageRow; today: string }) {
   if (!row.registered || !row.lastEvent) return DASH
   const d = fmtDay(row.lastEvent.on, today)
@@ -177,8 +199,9 @@ function MixedBadge({ row }: { row: CoverageRow }) {
   )
 }
 
-function RowAction({ row, onOpenHospital, onOpenImport }: { row: CoverageRow; onOpenHospital: (code: string) => void; onOpenImport: (code: string) => void }) {
+function RowAction({ row, onOpenHospital, onOpenImport, compact }: { row: CoverageRow; onOpenHospital: (code: string) => void; onOpenImport: (code: string) => void; compact?: boolean }) {
   const stop = (e: MouseEvent) => e.stopPropagation()
+  if (compact && row.registered) return null
   if (!row.registered) {
     return (
       <Button
@@ -213,7 +236,8 @@ function RowAction({ row, onOpenHospital, onOpenImport }: { row: CoverageRow; on
 // 본체
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImport, reloadKey }: GlobalCoverageProps) {
+export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImport, reloadKey, compact = false }: GlobalCoverageProps) {
+  const columns: readonly string[] = compact ? COMPACT_COLUMNS : COLUMNS
   const [res, setRes] = useState<CoverageResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -302,6 +326,7 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
           <span className="whitespace-nowrap">검색</span>
           <Input value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="병원명/코드" aria-label="병원명/코드 검색" className="min-w-0" />
         </label>
+        {!compact && (
         <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
           <span className="whitespace-nowrap">정렬</span>
           <Select className="w-36" value={filters.sort} onChange={(e) => setFilters({ sort: e.target.value as CoverageSort })} aria-label="정렬">
@@ -312,6 +337,7 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
             ))}
           </Select>
         </label>
+        )}
         <span className="ml-auto text-xs tabular-nums text-muted-foreground" aria-live="polite">
           {res ? `병원 ${fmtInt(total)}개` : ''}
           {loading && res ? ' · 갱신 중…' : ''}
@@ -323,8 +349,8 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
         <Table className="whitespace-nowrap">
           <THead>
             <tr>
-              {COLUMNS.map((c, i) => (
-                <TH key={c} className={cn(i >= 2 && i <= 8 && 'text-right', i === 11 && 'text-right')} title={COLUMN_TITLES[c]}>
+              {columns.map((c, i) => (
+                <TH key={c} className={cn((compact ? i >= 2 && i <= 5 : i >= 2 && i <= 8) && 'text-right', i === columns.length - 1 && 'text-right')} title={COLUMN_TITLES[c as keyof typeof COLUMN_TITLES]}>
                   {c}
                 </TH>
               ))}
@@ -333,7 +359,7 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
           <TBody>
             {statusRow ? (
               <tr>
-                <TD colSpan={COLUMNS.length} className="py-12 text-center text-sm">
+                <TD colSpan={columns.length} className="py-12 text-center text-sm">
                   {statusRow}
                 </TD>
               </tr>
@@ -348,11 +374,34 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
                   <TD>
                     <div className={cn('flex flex-wrap items-center gap-1.5 font-medium', row.registered ? 'text-foreground' : 'text-muted-foreground')}>
                       {row.hospitalName}
-                      <MixedBadge row={row} />
+                      {!compact && <MixedBadge row={row} />}
                     </div>
                     <div className="font-mono text-[11px] text-muted-foreground">{row.hospitalCode}</div>
                   </TD>
                   <TD>{row.status ? <Badge variant={statusVariant(row.status)}>{row.status}</Badge> : DASH}</TD>
+                  {compact ? (
+                    <>
+                      <TD className="text-right">
+                        <ActiveTotalCell row={row} />
+                      </TD>
+                      <TD className="text-right">
+                        <ExpectedCell row={row} />
+                      </TD>
+                      <TD className="text-right">
+                        <DiffCell row={row} />
+                      </TD>
+                      <TD className="text-right">
+                        <RegisteredNum row={row} value={row.recovered30d} />
+                      </TD>
+                      <TD>
+                        <LastEventCell row={row} today={today} />
+                      </TD>
+                      <TD className="text-right">
+                        <RowAction row={row} onOpenHospital={onOpenHospital} onOpenImport={onOpenImport} compact />
+                      </TD>
+                    </>
+                  ) : (
+                  <>
                   <TD className="text-right">
                     <ExpectedCell row={row} />
                   </TD>
@@ -381,6 +430,8 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
                   <TD className="text-right">
                     <RowAction row={row} onOpenHospital={onOpenHospital} onOpenImport={onOpenImport} />
                   </TD>
+                  </>
+                  )}
                 </TR>
               ))
             )}
@@ -408,12 +459,42 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-1.5 font-medium text-foreground">
                     <span className="truncate">{row.hospitalName}</span>
-                    <MixedBadge row={row} />
+                    {!compact && <MixedBadge row={row} />}
                   </div>
                   <div className="font-mono text-[11px] text-muted-foreground">{row.hospitalCode}</div>
                 </div>
                 {row.status ? <Badge variant={statusVariant(row.status)}>{row.status}</Badge> : null}
               </div>
+              {compact ? (
+                <>
+                  <dl className="mt-2 grid grid-cols-4 gap-x-2 gap-y-1 text-xs">
+                    <dt className="text-muted-foreground">배치 중</dt>
+                    <dt className="text-muted-foreground">계약</dt>
+                    <dt className="text-muted-foreground">차이</dt>
+                    <dt className="text-muted-foreground">회수(30일)</dt>
+                    <dd>
+                      <ActiveTotalCell row={row} />
+                    </dd>
+                    <dd>
+                      <ExpectedCell row={row} />
+                    </dd>
+                    <dd>
+                      <DiffCell row={row} />
+                    </dd>
+                    <dd>
+                      <RegisteredNum row={row} value={row.recovered30d} />
+                    </dd>
+                  </dl>
+                  <div className="mt-2 flex items-end justify-between gap-2 text-xs">
+                    <div>
+                      <span className="text-muted-foreground">마지막 이벤트 </span>
+                      <LastEventCell row={row} today={today} />
+                    </div>
+                    <RowAction row={row} onOpenHospital={onOpenHospital} onOpenImport={onOpenImport} compact />
+                  </div>
+                </>
+              ) : (
+              <>
               <dl className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1 text-xs">
                 <dt className="text-muted-foreground">계약 ECG</dt>
                 <dt className="text-muted-foreground">배치 중 ECG</dt>
@@ -459,6 +540,8 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
                 </div>
                 <RowAction row={row} onOpenHospital={onOpenHospital} onOpenImport={onOpenImport} />
               </div>
+              </>
+              )}
             </div>
           ))
         )}

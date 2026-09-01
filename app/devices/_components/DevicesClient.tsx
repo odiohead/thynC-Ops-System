@@ -12,9 +12,9 @@
  *
  * 레이아웃(v1): 헤더 = 제목 + 메인 탭 [병원별][디바이스](`?view=`)만.
  *   [병원별] 1행 병원 콤보 … (USER+) [+ 등록][임포트] / 2행 요약 한 줄 `배치 중 n · 계약 m(팝오버) · 회수 k · 병동 w` / 3행 소형 탭 [기기 목록|이력|병동|임포트](+ Excel·[선택] 토글)
- *             병원 미선택 → EmptyState '병원을 선택하세요'
+ *             병원 미선택 → 축약 병원 커버리지 표(GlobalCoverage compact — 병원 | 상태 | 배치 중 | 계약 | 차이 | 회수(30일) | 마지막 이벤트, 행 클릭 → 병원 선택)
  *   [디바이스] DeviceListTab(전 기기 평면 목록 — 병원 무관)
- * v1에서 렌더하지 않는 것(파일은 보존): SummaryStrip(매트릭스 표) · GlobalCoverage(커버리지/백필 진행판) · 전역 최근 이벤트 탭 · SerialLookup(헤더 시리얼 조회 → [디바이스] 검색이 대체) · MobileActionBar · GlobalTotalsLine
+ * v1에서 렌더하지 않는 것(파일은 보존): SummaryStrip(매트릭스 표) · GlobalCoverage 전체 12열 모드 · 전역 최근 이벤트 탭 · SerialLookup(헤더 시리얼 조회 → [디바이스] 검색이 대체) · MobileActionBar · GlobalTotalsLine
  *
  * P3-0 스켈레톤 소유 파일 — P3 Verify(2026-09-01)에서 배선 보강: 등록 프리필(RECOVERED 재등록)·요약 로드 전 등록/교체 가드·드로어 onOpenDevice·콤보 '배치 중 n대'.
  */
@@ -25,7 +25,6 @@ import { CheckSquare, Info } from 'lucide-react'
 import PageHeader from '@/app/components/ui/PageHeader'
 import Button from '@/app/components/ui/Button'
 import Badge from '@/app/components/ui/Badge'
-import EmptyState from '@/app/components/ui/EmptyState'
 import { cn } from '@/lib/cn'
 import { PRODUCT_TYPE_UNSET_LABEL, todayKst } from '@/lib/deviceRegistryShared'
 import { errorMessage, exportEventsUrl, exportUnitsUrl, getCapabilities, getCoverage, getEvents, getHospitalOption, getHospitalSummary, getImportBatches, getUnitIds } from './api'
@@ -39,6 +38,7 @@ import {
   READ_ONLY_CAPABILITIES,
   toWardOption,
   type Capabilities,
+  type CoverageFilters,
   type DeviceAction,
   type DeviceRef,
   type DevicesTab,
@@ -56,6 +56,7 @@ import {
 import { diffText, fmtDeal, modelLabel, productTypeBadgeVariant } from './deviceDisplay'
 import { RegistryFloatingPanel } from './RegistryFloatingPanel'
 import { HospitalPicker } from './HospitalPicker'
+import { GlobalCoverage } from './GlobalCoverage'
 import { ExcelButton } from './ExcelButton'
 import { DeviceTable } from './DeviceTable'
 import { DeviceListTab } from './DeviceListTab'
@@ -91,10 +92,13 @@ type ModalState =
 
 type ListLocal = Pick<ListFilters, 'limit' | 'sort' | 'wms' | 'usage' | 'productType'>
 type EventLocal = Omit<EventFilters, 'q' | 'page'>
+type CoverageLocal = Pick<CoverageFilters, 'filter' | 'sort' | 'limit'>
 
 const DEFAULT_LIST_LOCAL: ListLocal = { limit: 50, sort: 'ward', wms: null, usage: null, productType: null }
 /** 병원 이력 탭 로컬 필터 기본값 — 전체 기간 */
 const DEFAULT_EVENT_LOCAL: EventLocal = { limit: 50, type: null, from: null, to: null, refType: null, source: null }
+/** 병원 미선택 축약 커버리지 표 — 정렬은 '차이 큰 순' 고정(compact에서 셀렉트 미노출), 50행 */
+const DEFAULT_COVERAGE_LOCAL: CoverageLocal = { filter: 'all', sort: 'diff', limit: 50 }
 
 export default function DevicesClient({ initialParams }: DevicesClientProps) {
   return (
@@ -290,6 +294,22 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
     [url]
   )
 
+  /** 병원 미선택 축약 커버리지 표 필터 — q/page는 URL, filter는 로컬 */
+  const [coverageLocal, setCoverageLocal] = useState<CoverageLocal>(DEFAULT_COVERAGE_LOCAL)
+  const coverageFilters = useMemo<CoverageFilters>(() => ({ q: url.state.q, page: url.state.page, ...coverageLocal }), [url.state.q, url.state.page, coverageLocal])
+  const setCoverageFilters = useCallback(
+    (patch: Partial<CoverageFilters>) => {
+      const { q, page, ...local } = patch
+      if (Object.keys(local).length > 0) setCoverageLocal((prev) => ({ ...prev, ...local }))
+      const urlPatch: Partial<Pick<DevicesUrlState, 'q' | 'page'>> = {}
+      if (q !== undefined) urlPatch.q = q
+      if (page !== undefined) urlPatch.page = page
+      if (Object.keys(urlPatch).length > 0) url.setFilters(urlPatch)
+      else if (Object.keys(local).length > 0 && url.state.page !== 1) url.setFilters({ page: 1 })
+    },
+    [url]
+  )
+
   /** [디바이스] 뷰 필터 — 전부 URL */
   const globalListFilters = useMemo<GlobalListFilters>(
     () => ({ status: url.state.status, model: url.state.model, usage: url.state.usage, productType: url.state.productType, q: url.state.q, page: url.state.page }),
@@ -405,6 +425,8 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
     [hospital, summary, notify]
   )
 
+  const openHospital = useCallback((code: string) => url.setHospital(code), [url])
+  const openImport = useCallback((code: string) => url.setHospital(code, { tab: 'import' }), [url])
   const openDevice = useCallback((id: number) => url.setDevice(id), [url])
   const closeDrawer = useCallback(() => url.setDevice(null), [url])
 
@@ -585,16 +607,9 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
               />
             </>
           ) : (
-            <div className="mt-4 rounded-lg border border-border bg-card">
-              <EmptyState
-                title="병원을 선택하세요"
-                description="병원을 선택하면 기기 목록·이력·병동·임포트를 봅니다. 시리얼로 찾으려면 [디바이스] 탭에서 검색하세요."
-                action={
-                  <Button size="sm" variant="outline" onClick={() => changeView('devices')}>
-                    디바이스 전체 목록
-                  </Button>
-                }
-              />
+            <div className="mt-4">
+              <p className="mb-2 text-xs text-muted-foreground">병원별 기기 현황 — 행을 클릭하면 그 병원의 기기 목록으로 이동합니다. 시리얼로 찾으려면 [디바이스] 탭에서 검색하세요.</p>
+              <GlobalCoverage compact filters={coverageFilters} setFilters={setCoverageFilters} onOpenHospital={openHospital} onOpenImport={openImport} reloadKey={reloadKey} />
             </div>
           )}
         </>
