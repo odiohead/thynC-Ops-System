@@ -2,7 +2,11 @@
 
 // 검색형 셀렉트 — 수천 건 마스터(병원 등)를 텍스트 필터로 고르는 콤보박스
 // (일반 <select>는 3,600개 병원 목록에서 사용 불가 — weekly_ops_design.md §6a '병원 select(검색)')
-import { useMemo, useRef, useState } from 'react'
+//
+// `onSearch?(q)` (선택, 2026-09 디바이스 원장 §6.1) — 비동기 검색 훅. 지정 시 검색어가 있으면 로컬 `options` 필터 대신
+// onSearch(q) 결과(디바운스 250ms, 최신 요청만 반영)를 목록으로 쓴다. 검색어가 비어 있으면 종전처럼 `options`를 보여
+// 주므로 기존 호출부(/weekly)는 동작 변화가 없다. 비동기 결과에서 고른 값은 라벨을 내부에 기억해 `options` 밖이어도 표시된다.
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/cn'
 
 export interface SearchSelectOption {
@@ -10,7 +14,7 @@ export interface SearchSelectOption {
   label: string
 }
 
-interface Props {
+export interface SearchSelectProps {
   value: string // '' = 미지정
   onChange: (value: string) => void
   options: SearchSelectOption[]
@@ -18,24 +22,77 @@ interface Props {
   emptyLabel: string // 미지정 옵션 라벨 (예: '— 병원 미지정 —')
   disabled?: boolean
   className?: string
+  /** 비동기 검색(검색어가 있을 때만 호출) — 결과 캡은 호출부 책임(예: 병원 20건) */
+  onSearch?: (q: string) => Promise<SearchSelectOption[]>
 }
 
 const MAX_RESULTS = 50
+const SEARCH_DEBOUNCE_MS = 250
 
-export default function SearchSelect({ value, onChange, options, placeholder, emptyLabel, disabled, className }: Props) {
+interface AsyncState {
+  q: string
+  list: SearchSelectOption[]
+  loading: boolean
+  error: string | null
+}
+
+const ASYNC_IDLE: AsyncState = { q: '', list: [], loading: false, error: null }
+
+export default function SearchSelect({ value, onChange, options, placeholder, emptyLabel, disabled, className, onSearch }: SearchSelectProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const selectedLabel = useMemo(() => options.find((o) => o.value === value)?.label ?? '', [options, value])
+  // 비동기 결과에서 고른 옵션(로컬 options 밖) — 라벨 표시용
+  const [asyncPicked, setAsyncPicked] = useState<SearchSelectOption | null>(null)
+  const [asyncState, setAsyncState] = useState<AsyncState>(ASYNC_IDLE)
+  const onSearchRef = useRef(onSearch)
+  onSearchRef.current = onSearch
+  const hasSearch = typeof onSearch === 'function'
+  const trimmed = query.trim()
+  const asyncMode = hasSearch && trimmed.length > 0
+
+  const selectedLabel = useMemo(() => {
+    const local = options.find((o) => o.value === value)?.label
+    if (local) return local
+    if (asyncPicked && asyncPicked.value === value) return asyncPicked.label
+    return ''
+  }, [options, value, asyncPicked])
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
+    const q = trimmed.toLowerCase()
     const matched = q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options
     return { list: matched.slice(0, MAX_RESULTS), total: matched.length }
-  }, [options, query])
+  }, [options, trimmed])
 
-  const pick = (v: string) => {
+  // 비동기 검색 — 디바운스 + 최신 요청만 반영
+  useEffect(() => {
+    if (!hasSearch || !open) return
+    if (!trimmed) {
+      setAsyncState(ASYNC_IDLE)
+      return
+    }
+    let alive = true
+    setAsyncState((s) => ({ ...s, loading: true, error: null }))
+    const t = window.setTimeout(async () => {
+      try {
+        const list = await onSearchRef.current!(trimmed)
+        if (alive) setAsyncState({ q: trimmed, list, loading: false, error: null })
+      } catch (e) {
+        if (alive) setAsyncState({ q: trimmed, list: [], loading: false, error: e instanceof Error && e.message ? e.message : '검색에 실패했습니다' })
+      }
+    }, SEARCH_DEBOUNCE_MS)
+    return () => {
+      alive = false
+      window.clearTimeout(t)
+    }
+  }, [hasSearch, open, trimmed])
+
+  const visible = asyncMode ? asyncState.list : filtered.list
+  const asyncLoading = asyncMode && (asyncState.loading || asyncState.q !== trimmed)
+
+  const pick = (v: string, fromAsync = false) => {
+    if (fromAsync) setAsyncPicked(asyncState.list.find((o) => o.value === v) ?? null)
     onChange(v)
     setOpen(false)
     setQuery('')
@@ -44,6 +101,7 @@ export default function SearchSelect({ value, onChange, options, placeholder, em
   const openDropdown = () => {
     if (disabled) return
     setQuery('')
+    setAsyncState(ASYNC_IDLE)
     setOpen(true)
     // 렌더 후 검색 input 포커스
     requestAnimationFrame(() => inputRef.current?.focus())
@@ -60,6 +118,7 @@ export default function SearchSelect({ value, onChange, options, placeholder, em
           onChange={(e) => setQuery(e.target.value)}
           onBlur={() => setOpen(false)}
           aria-label={placeholder}
+          aria-busy={asyncLoading || undefined}
           onKeyDown={(e) => {
             if (e.nativeEvent.isComposing) return
             if (e.key === 'Escape') {
@@ -68,7 +127,8 @@ export default function SearchSelect({ value, onChange, options, placeholder, em
             }
             if (e.key === 'Enter') {
               e.preventDefault()
-              if (query.trim() && filtered.list.length > 0) pick(filtered.list[0].value)
+              if (asyncMode && asyncLoading) return
+              if (trimmed && visible.length > 0) pick(visible[0].value, asyncMode)
             }
           }}
         />
@@ -102,7 +162,7 @@ export default function SearchSelect({ value, onChange, options, placeholder, em
           >
             {emptyLabel}
           </button>
-          {filtered.list.map((o) => (
+          {visible.map((o) => (
             <button
               key={o.value}
               type="button"
@@ -112,18 +172,30 @@ export default function SearchSelect({ value, onChange, options, placeholder, em
               )}
               onMouseDown={(e) => {
                 e.preventDefault()
-                pick(o.value)
+                pick(o.value, asyncMode)
               }}
             >
               {o.label}
             </button>
           ))}
-          {filtered.total > MAX_RESULTS && (
-            <div className="px-3 py-1.5 text-xs text-muted-foreground">
-              외 {filtered.total - MAX_RESULTS}건 — 검색어로 좁혀 주세요
-            </div>
+          {asyncMode ? (
+            <>
+              {asyncLoading && <div className="px-3 py-1.5 text-xs text-muted-foreground">검색 중…</div>}
+              {!asyncLoading && asyncState.error && <div className="px-3 py-1.5 text-xs text-destructive">{asyncState.error}</div>}
+              {!asyncLoading && !asyncState.error && visible.length === 0 && (
+                <div className="px-3 py-1.5 text-sm text-muted-foreground">검색 결과 없음</div>
+              )}
+            </>
+          ) : (
+            <>
+              {filtered.total > MAX_RESULTS && (
+                <div className="px-3 py-1.5 text-xs text-muted-foreground">
+                  외 {filtered.total - MAX_RESULTS}건 — 검색어로 좁혀 주세요
+                </div>
+              )}
+              {filtered.total === 0 && <div className="px-3 py-1.5 text-sm text-muted-foreground">검색 결과 없음</div>}
+            </>
           )}
-          {filtered.total === 0 && <div className="px-3 py-1.5 text-sm text-muted-foreground">검색 결과 없음</div>}
         </div>
       )}
     </div>

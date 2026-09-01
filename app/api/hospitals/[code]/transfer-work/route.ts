@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 type Params = { params: { code: string } }
 
 /**
- * 병원의 모든 업무(프로젝트/답사/설치계획/유지보수/상담)를 다른 병원으로 일괄 이전.
+ * 병원의 모든 업무(프로젝트/답사/설치계획/유지보수/상담/디바이스 원장)를 다른 병원으로 일괄 이전.
  * 병원을 통째로 잘못 만든 경우 정리용. 권한: SUPER_ADMIN.
  * body: { toHospitalCode, updateProjectNames? }
  */

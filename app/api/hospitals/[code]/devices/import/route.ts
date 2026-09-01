@@ -30,6 +30,8 @@ interface ImportOptions {
   emptyWardCell: 'warn' | 'error'
   occurredOn: string | null
   excludeRows: number[]
+  /** excludeRows 필드가 배열로 명시됐는지(빈 배열 포함) — 미리보기에서 명시면 기본 제외 대신 그 기준(실행은 항상 명시 기준) */
+  excludeRowsExplicit: boolean
   rowActions: ReturnType<typeof parseRowActions>
   wardAliases: Record<string, number>
   /** null = 미지정(초안 모드 distinct org ≥2면 서비스가 400) */
@@ -47,6 +49,7 @@ function parseOptions(raw: Record<string, unknown>): ImportOptions {
   const emptyRaw = optString(raw.emptyWardCell) ?? 'warn'
   if (emptyRaw !== 'warn' && emptyRaw !== 'error') throw new BadRequest('빈 병동 셀 처리(emptyWardCell)가 올바르지 않습니다 (warn|error).')
   const orgsField = jsonField(raw.orgs, 'orgs')
+  const excludeField = jsonField(raw.excludeRows, 'excludeRows')
   return {
     mode: (modeRaw as ImportBatchMode | null) ?? null,
     deviceInfoId: optPositiveInt(raw.deviceInfoId, '모델(deviceInfoId)'),
@@ -54,7 +57,8 @@ function parseOptions(raw: Record<string, unknown>): ImportOptions {
     wardId: optPositiveInt(raw.wardId, '고정 병동(wardId)'),
     emptyWardCell: emptyRaw,
     occurredOn: optString(raw.occurredOn),
-    excludeRows: parseIntArray(jsonField(raw.excludeRows, 'excludeRows'), 'excludeRows'),
+    excludeRows: parseIntArray(excludeField, 'excludeRows'),
+    excludeRowsExplicit: Array.isArray(excludeField),
     rowActions: parseRowActions(jsonField(raw.rowActions, 'rowActions')),
     wardAliases: parseWardAliases(jsonField(raw.wardAliases, 'wardAliases')),
     orgs: orgsField == null ? null : parseStringArray(orgsField, 'orgs'),
@@ -140,7 +144,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         wardAliases: Object.keys(options.wardAliases).length ? options.wardAliases : null,
         occurredOn: options.occurredOn ?? todayKst(),
         rowActions: options.rowActions,
-        excludeRows: options.excludeRows.length ? options.excludeRows : null,
+        excludeRows: options.excludeRowsExplicit ? options.excludeRows : null,
       })
       return NextResponse.json({
         rows: result.rows,

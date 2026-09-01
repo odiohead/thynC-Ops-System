@@ -17,7 +17,7 @@ type Props = {
 }
 
 /**
- * Phase 2: 이 병원의 모든 업무(프로젝트/답사/설치계획/유지보수/상담)를 다른 병원으로 일괄 이전.
+ * Phase 2: 이 병원의 모든 업무(프로젝트/답사/설치계획/유지보수/상담/디바이스 원장)를 다른 병원으로 일괄 이전.
  * 병원을 통째로 잘못 만든 경우 정리용. SUPER_ADMIN 전용.
  */
 export default function TransferAllWorkButton({
@@ -140,7 +140,7 @@ export default function TransferAllWorkButton({
                 <span className="font-medium text-gray-800">
                   {fromHospitalName || fromHospitalCode}
                 </span>
-                <br />이 병원의 <b>모든 업무</b>(프로젝트·답사·설치계획·유지보수·상담)를 다른 병원으로 옮깁니다.
+                <br />이 병원의 <b>모든 업무</b>(프로젝트·답사·설치계획·유지보수·상담·디바이스 원장)를 다른 병원으로 옮깁니다.
               </p>
 
               {step === 'search' && (
@@ -204,6 +204,10 @@ export default function TransferAllWorkButton({
 
                   <p className="mt-3 text-xs text-gray-500">
                     두 병원 상태가 자동 재계산됩니다. 되돌리려면 반대로 다시 이전해야 합니다.
+                    <br />
+                    디바이스 원장(기기·이력·병동·임포트 배치)도 함께 옮겨지며, 동명 병동은 대상 병원 병동으로 합쳐집니다.
+                    <br />
+                    딜은 이동하지 않으므로 대상 병원 계약 대조에 차이가 표시될 수 있습니다.
                   </p>
                   {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
 

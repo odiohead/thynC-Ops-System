@@ -67,8 +67,11 @@ app/
 ├── api/                              # API Routes
 │   ├── auth/                         # 인증 (login, logout, me)
 │   ├── dashboard/                    # 대시보드 집계 API (공사현황·summary·monthly·maintenance·hospital-stats)
-│   ├── hospitals/                    # 병원 CRUD + 장비 배정 + 담당자 배정 + Excel 가져오기
-│   │   └── [code]/system-info·servers·emr  # thynC 시스템 현황 — 서버 현황 CRUD + EMR 연동 정보 upsert (2026-08-16)
+│   ├── hospitals/                    # 병원 CRUD + 담당자 배정 + Excel 가져오기
+│   │   ├── [code]/system-info·servers·emr  # thynC 시스템 현황 — 서버 현황 CRUD + EMR 연동 정보 upsert (2026-08-16)
+│   │   ├── [code]/devices/           # 디바이스 원장 병원 쓰기 — summary·register(+preview)·replace·import(+preview)·imports(+[batchId] PATCH·cancel) (2026-09-01)
+│   │   └── [code]/wards/             # 병동 CRUD (+[id] PUT/DELETE)
+│   ├── devices/                      # 디바이스 원장 전역 — can-manage·summary(+export)·units(+[id] GET/PATCH·move·recover·bulk)·lookup·maintenance-lookup·events(+[id] PATCH/DELETE·export)·export
 │   │   └── [code]/sales/             # 병원 영업 정보 — 통합 GET + profile/persons(전원·소속종료)/deals/activities (ADMIN+SEERS)
 │   ├── hira-hospitals/               # HIRA 병원 데이터 조회
 │   ├── projects/                     # 프로젝트 CRUD + 장비/파일 관리
@@ -157,7 +160,8 @@ app/
 │   └── drive/                        # Google Drive 연동 (파일 업로드/목록/삭제/병원목록 내보내기)
 ├── (대시보드)/                        # 메인 대시보드 (이번 주/다음 주 공사 현황)
 ├── dashboard/                        # 사이니지 월보드 (50인치 상시 표시, 네비 없음)
-├── hospitals/                        # 병원 목록·상세·등록·수정 ([code]/_components/SalesSection — 영업 정보 v3: 요약 스트립+탭 4개, ADMIN+SEERS)
+├── hospitals/                        # 병원 목록·상세·등록·수정 ([code]/_components/SalesSection — 영업 정보 v3: 요약 스트립+탭 4개, ADMIN+SEERS · HospitalDeviceSummary — 도입 현황 카드, lib 직접 호출)
+├── devices/                          # 디바이스 원장 (2026-09-01, `projects/hospital_device_registry_design.md` §6) — page.tsx(searchParams 파싱) + _components/(DevicesClient 오케스트레이터·useDevicesUrlState·api·types·toast / HospitalPicker·SerialLookup·GlobalCoverage·ExcelButton / SummaryStrip·DeviceTable·BulkActionBar·DeviceHistoryDrawer·CorrectionModal / RegisterModal·MoveWardModal·RecoverModal·ReplaceModal·WardCombo·MaintenanceCodeCombo·MobileActionBar / ImportPanel·WardPanel·EventsTab + 헬퍼 deviceDisplay·RegistryFloatingPanel·registryFormKit·groupd-shared)
 ├── hira-hospitals/                   # HIRA 병원 조회
 ├── install-plans/                    # 설치계획(가안) 목록·상세·등록
 ├── projects/                         # 프로젝트 목록·상세·등록
@@ -248,6 +252,9 @@ lib/
 ├── sales.ts                          # 영업/CRM v3 — 접근 권한(checkSalesAccess: ADMIN+SEERS)·딜 코드 발번(DEAL-YYYYMM-NNNN)·금액/날짜 파서·코드 3카테고리
 ├── salesTargets.ts                   # 영업 연도별·하반기 종별 목표 병상수 — AppSetting 키(period year/h2)·검증·조회·하반기 집계 시작일(8/1) (영업 대시보드 목표현황·하반기 탭)
 ├── weekly.ts                         # 주간업무 관리 — kind/status 상수·주차 유틸·API DTO 계약 (클라이언트 안전)
+├── deviceRegistry/                   # 디바이스 원장 서비스 계층(유일한 쓰기자 — core·wms·write·import·admin·read·hooks, index 재수출; `lib/deviceRegistry` 임포트)
+├── deviceRegistryShared.ts           # 디바이스 원장 클라이언트 안전 상수 — 상태/이벤트 라벨·전이표·normalizeSerial·parseSerialLines·normalizeWardName·detectOnpremHeader·refLink
+├── deviceRegistryAccess.ts           # 디바이스 원장 권한 게이트 checkDeviceRegistryAccess(read 로그인 / write USER+ / admin ADMIN+ 또는 device.admin)
 ├── weeklyAccess.ts                   # 주간업무 접근 게이트 (checkWeeklyAccess: SEERS 소속 + 쓰기는 USER 이상)
 ├── parking.ts                        # 주차 웹할인 — pweb.kr 대행 클라이언트 (env 계정, 로그인→검색→할인권 조회→등록)
 ├── auth.ts                           # JWT 인증 유틸리티 + 역할 헬퍼
@@ -366,8 +373,12 @@ prisma/
 - Google Drive 폴더 ID (`driveProjectFolderId`), Drive 상태 파일 ID (`driveStatusFileId`), Drive 설치계획 파일 ID (`driveInstallPlanFileId`)
 - 원격 접속 URL (`remoteAccessUrl`), 원격 제어 URL (`remoteControlUrl`)
 
-### HospitalDevice (병원 장비)
-- Hospital ↔ DeviceInfo N:M 관계 테이블
+### 디바이스 원장 — HospitalWard / HospitalDevice / HospitalDeviceEvent / HospitalDeviceImportBatch (2026-09-01, `projects/hospital_device_registry_design.md` §5)
+- **HospitalDevice (`hospital_devices`, 이름 승계)**: 시리얼 = 전역 물리 개체 1행 — `serial_no`(정규화 키, 전역 UNIQUE)·`serial_raw`·`device_info_id`·`status`(ACTIVE/RECOVERED, 이벤트 fold 프로젝션)·`hospital_code`/`ward_id`(ACTIVE 위치, 복합 FK DEFERRABLE)·`last_hospital_code`·`placed_on`·`recovered_on`·`recover_reason_id`·`inventory_unit_id`(WMS 조인 키, 읽기 매칭)·`memo`·온프렘 예약(`mac_address`·`ext_*`). 구 병원×모델 수량표는 마이그 내 `hospital_devices_qty_backup_202609`로 보존 후 DROP
+- **HospitalDeviceEvent (`hospital_device_events`)**: append-first 이력 — `event_type`(REGISTER/MOVE_WARD/RECOVER/CORRECT)·`occurred_on`(업무일자)·`from_ward_id`/`to_ward_id`·`reason_code_id`·`related_device_id`(교체·이관 상대)·`action_group`(교체·이관·일괄·임포트 묶음)·`ref_type/ref_code`(MAINTENANCE 등 연결)·`source`(MANUAL/IMPORT/WMS/ONPREM)·`import_batch_id`·`actor_*`·`edited_*`·`changes`(CORRECT)
+- **HospitalWard (`hospital_wards`)**: 병원별 병동 마스터 — `name`·`name_norm`(병원 내 UNIQUE)·`ext_ward_code`(온프렘 코드)·`sort_order`·`is_active`
+- **HospitalDeviceImportBatch (`hospital_device_import_batches`)**: 임포트 취소 단위 — 모드(REGISTER/ONPREM_DRAFT)·출처·업무일자·행/등록/재등록/건너뜀/이관 카운트·`summary`(excludeRows·rowActions·wardAliases·orgs)·`cancel_summary`
+- 회수 사유는 StatusCode `DEVICE_RECOVERY_REASON`(value 행 삭제 불가), 계약 대조는 Σ계약완료 딜 `daewoong_device_count`(ECG hard·SpO2 soft)
 
 ### Project (프로젝트)
 - 구축 공사 프로젝트 단위
@@ -489,7 +500,7 @@ prisma/
 - User(DAEWOONG 소속) ↔ Hospital N:M 관계 테이블
 
 ### DeviceInfo (장비 정보)
-- 장비 모델명, 이름, 정렬 순서
+- 장비 모델명, 이름, 정렬 순서 + 디바이스 원장 5필드(2026-09-01, ADMIN+ 편집): `device_class`(WEARABLE/GATEWAY/THIRD_PARTY)·`onprem_device_type`·`serial_pattern`·`serial_tracked`(원장 대상)·`quantity_tracked`(수량 집계 대상)
 
 ### InventoryItem UDI 필드 (2026-08-04)
 - `udiDi`(UDI-DI, GS1 GTIN) · `ledgerName`(대장 표기 상품명) · `productClass`(완제품/반제품/원자재) · `materialNo`(원자재식별 NO) · `packUnit`(포장단위)
@@ -933,7 +944,7 @@ prisma/
   - 등록: 병원명+상태만으로 즉시 등록, HIRA 연결은 선택
   - 수정: HIRA 병원 연결 변경·해제 지원
 - 병원별 대웅 담당자(DAEWOONG 소속 User) 복수 선택 배정·해제 (DaewoongSelectModal 체크박스 방식)
-- 병원별 장비 관리
+- 병원 상세 **도입 현황 카드**(`HospitalDeviceSummary`, 2026-09-01): 디바이스 원장 요약(모델 | 배치 중 | 계약 | 차이 | 최근 이벤트 + 최근 30일 회수·마지막 임포트)을 서버 컴포넌트가 `getHospitalDeviceSummary` 직접 호출로 표시, [디바이스 원장 열기 →]. 도입 병상 수는 표시만(수정은 병원 수정 폼). 원장 없음이면 헤더·계약 열 유지 + [디바이스 원장에서 임포트 →]
 - 시도/시군구/상태 필터, 페이지네이션 — 병원종·상태 필터는 표 상단 **체크박스 상시 노출** (2026-07-21, 구 멀티선택 드롭다운 대체. 선택 시 즉시 적용 + 초기화 버튼)
 - **전체 병상수 표기** (2026-08-10): 목록 '전체병상' 컬럼(모바일 카드 포함)·상세 기본 정보 '전체 병상수 (심평원)' — `hira_hospitals.perm_sbd_cnt` 조인 표시, 병원상세정보연동 미실행 병원은 '-'
 - **Excel 일괄 가져오기** (ADMIN 이상): `병원명`, `도입형태`, `도입병상 수` 컬럼 기준 일괄 교체
@@ -945,7 +956,20 @@ prisma/
   - **병원종·상태 최소 1개 필수** — 병원 테이블에 HIRA 전수(약 8만건, 미계약 79,458)가 들어 있어 무필터 전량은 45MB·약 4초·피크 힙 247MB. **서버(400)와 UI 양쪽에서 강제**한다. 건수 상한은 두지 않음(종별 '의원' 37,763건 등 정당한 필터도 큼) — 대신 1만 건 초과 시 모달에 경고 표시
   - **선택 즉시 대상 건수 미리보기**: 같은 엔드포인트에 `countOnly=1`로 조회(디바운스 250ms·이전 요청 abort). 0건이면 다운로드 버튼 비활성
 - **업무 병원 재지정(매핑 정정)** (ADMIN 이상): 프로젝트/답사/설치계획/유지보수 상세의 "병원 재지정" 버튼으로 잘못 지정된 병원을 올바른 병원으로 이전. 한 트랜잭션으로 업무 hospitalCode + **연결 티켓(병원·제목) 동기화**(P13 — Task 미러 갱신은 폐기), 두 병원 현황 상태 자동 재계산(옛 병원 하향 포함), 프로젝트는 이름의 병원명도 선택 변경. 감사로그 기록
-- **병원 업무 일괄 이전** (SUPER_ADMIN): 병원 상세의 "업무 일괄 이전" 버튼으로 한 병원의 모든 업무(프로젝트·답사·설치계획·유지보수·상담)를 다른 병원으로 한 번에 이전(병원을 통째로 잘못 만든 경우 정리용). **연결 티켓·순수 티켓도 함께 이전**(P13 — [답사]/[설치계획] 제목의 병원명 갱신 포함)
+- **병원 업무 일괄 이전** (SUPER_ADMIN): 병원 상세의 "업무 일괄 이전" 버튼으로 한 병원의 모든 업무(프로젝트·답사·설치계획·유지보수·상담·**디바이스 원장**)를 다른 병원으로 한 번에 이전(병원을 통째로 잘못 만든 경우 정리용). **연결 티켓·순수 티켓도 함께 이전**(P13 — [답사]/[설치계획] 제목의 병원명 갱신 포함). 디바이스 원장(2026-09-01)은 같은 트랜잭션에서 병동 이동(동명 병동은 대상 병원 병동으로 병합, 온프렘 코드 충돌 시 원본 코드 해제)·개체·이벤트·임포트 배치의 병원 코드를 이전 — 딜은 이동하지 않으므로 대상 병원 계약 대조에 차이가 표시될 수 있음(확인 단계에 안내)
+
+### 디바이스 원장 (`/devices`, 2026-09-01 — `projects/hospital_device_registry_design.md`, feat/device-registry)
+- **목적**: 병원별 웨어러블·게이트웨이 시리얼 단위 배치·회수·교체 이력(§2 Q1~Q8). 조회는 로그인 전원, 등록·이동·회수·교체·임포트·병동 추가·메모는 USER 이상, 정정·취소·배치 취소·식별 보정·병동 비활성/삭제는 ADMIN 이상 또는 `device.admin`(UI는 `GET /api/devices/can-manage` `{canWrite, canAdmin}` 프로브로 게이트 — 읽기 전용 사용자는 쓰기 컨트롤을 렌더하지 않음)
+- **URL 동기화**: `?hospital=&tab=list|history|wards|import`(병원 선택) / `?tab=coverage|events`(미선택) `&status=&model=&ward=&q=&page=&device=<id>`(드로어 딥링크). 헤더: [Excel](활성 탭 기준 — 기기 목록/이력/커버리지) · 시리얼 조회(ACTIVE → 그 병원 + 드로어, RECOVERED → 마지막 병원 + '회수됨' 필터 + 드로어, 0건 → '원장에 없음' + 접두 일치 ≤10 + WMS 개체 ≤10) · 병원 콤보(고객 ∪ 원장 보유 사전 로드 + '전체 병원 검색' 토글)
+- **전역 뷰(백필 진행판)**: 요약 줄(고객 병원·원장 등록 병원·배치 중 ECG/SpO2/GW/제3자·최근 30일 이벤트·회수(30일)) + 탭 [병원 커버리지](필터 전체|미등록만|차이 있음|등록 완료 · 검색 · 정렬, 11열 — 계약 ECG는 원장 0건이어도 채워짐, 미등록 행은 [임포트]) [최근 이벤트](기본 30일)
+- **병원 뷰**: 요약 스트립(모델 | 배치 중 | 계약(hard 수치 / soft '(참고 n)' / '—' / '— (계약완료 딜 없음)') | 차이 | 회수(30일) | WMS 매칭 출고/재고⚠/미매칭, 제3자 기기 ▸ 접이식, 계약 셀 클릭 → 근거 딜 팝오버, '병동 n개 (미지정 m대)') + 탭 [기기 목록 (n)] [이력 (n)] [병동 (n)] [임포트 (n)] + USER+ [+ 등록] [교체] [임포트], 선택 시 [병동 이동] [회수] 일괄 바('검색 결과 전체 선택 N건' ≤2,000)
+  - 기기 목록: 상태(● 배치 중/회수됨(미재배치)/전체)·모델 칩·병동(미지정·폐쇄)·시리얼 검색·WMS 필터, 12열(☐ | 시리얼(mono·⚠형식·원문) | 모델 | 병동 | 상태 | 배치일 | 회수일·사유 | 최근 이벤트 | 연결 | 창고 개체 | 메모(인라인) | ⋯), 빈 상태에도 헤더 유지
+  - 이력 드로어(우측 슬라이드/모바일 바텀시트): 병원 경계 무관 전체 이벤트 최신순('─ 이전 병원 ─' 구분), 온프렘 스냅샷(값 있을 때만), [병동 이동][회수][교체], 관리 ▾(admin: 이벤트 인플레이스 정정·마지막 이벤트 취소·모델/시리얼 정정)
+  - 폼(Modal, 스캐너 친화 — autoFocus·자동 대문자·Enter·중복 병합): 등록(textarea → `?preview=true` 실시간 판별, 행별 [제외][이관 처리][미지정으로 등록]) · 병동 이동 · 회수(사유 마스터, LOST 안내, **DEFECT → [교체 폼으로 전환]**) · 교체(구 시리얼 조회 → 이 병원 ACTIVE / 원장에 없음(소급 등록 후 교체) / 타 병원 409 / 이미 RECOVERED(신 기기만 등록) 분기, 1폼 → 2~3이벤트) — 공통 업무일자·메모·유지보수 코드 자동완성(선택 시 업무일자 제안)·병동 콤보(+새 병동)
+  - 임포트 탭(입력 → 미리보기 → 결과 + 이력): 모드(신규 등록 / 온프렘 export 초안 자동 감지), 텍스트 붙여넣기 | Excel 업로드(템플릿), 업무일자·병동(열에서 읽기|고정)·모델·메모, 판정 6종(ok/reregister/skip/warn/conflict/error) + 생성 예정 병동 매핑(wardAliases) + 초안 모드 org 선택 게이트, 미제외 오류·미해결 충돌이 있으면 [실행] 비활성, 단일 트랜잭션, 임포트 이력([업무일자 정정][취소] admin). VIEWER는 EmptyState + 이력만
+  - 병동 탭: 순서 ↑↓ | 병동명 ✎ | 온프렘 코드 | 배치 중 | 회수(누계) | 활성 | [기기 일괄 이동] [비활성](admin, 배치 0) [삭제](admin, 참조 0) + 추가
+  - 모바일: md:hidden 카드, 하단 고정 액션바 [등록][교체][회수](선택 0건이면 스캔 모드), 임포트·Excel은 데스크톱 권장
+- **연동**: 병원 상세 도입 현황 카드(§6.2) · 병원 업무 일괄 이전에 원장 포함(§9.6) · AI `get_hospital_overview` devices 문자열('배치 n대 / 계약 m') · 설정 `/settings/device-recovery-reason`(회수 사유, ADMIN+)·`/settings/devices` 5필드(ADMIN+ 편집)
 
 ### 병원 영업 정보 (영업/CRM v4, 2026-07-29 — ADMIN 이상 + SEERS 전용)
 - 병원 상세 '영업 정보' 단일 카드 — 권한 통과 시에만 렌더(서버 컴포넌트 게이트 + API 재검증)
@@ -1497,6 +1521,34 @@ npm run dev
 | PUT  | `/api/hospitals/[code]/emr` | EMR 연동 정보 upsert (USER 이상 — 연동상태·업체·범위·방식 화이트리스트는 `lib/hospitalSystem.ts` 단일 소스) |
 | GET/POST, PUT/DELETE | `/api/settings/emr-vendor(/[id])` | EMR 업체 마스터 (ADMIN — status_codes EMR_VENDOR, 사용 중 삭제 409) |
 
+### 디바이스 원장 (2026-09-01 — 읽기 로그인 전원 / write USER+ / admin ADMIN+ 또는 `device.admin`, `checkDeviceRegistryAccess`)
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET  | `/api/devices/can-manage` | UI 게이트 프로브 `{canWrite, canAdmin}` |
+| GET  | `/api/devices/summary` | 전역 커버리지 표 + totals (`?page&limit&filter=all\|unregistered\|diff\|registered&q&sort=diff\|name\|lastEvent`) |
+| GET  | `/api/devices/summary/export` | 커버리지 xlsx (캡 1,000행) |
+| GET  | `/api/devices/units` | 기기 목록 (`?hospital&model&ward=<id>\|unassigned&status=active\|recovered\|all&q&wms=linked\|unlinked\|in_stock&page&limit≤500&sort&idsOnly=1`(≤2,000)) |
+| GET  | `/api/devices/units/[id]` | 개체 상세 + 전체 이벤트 + WMS + 상대 기기 (드로어) |
+| PATCH | `/api/devices/units/[id]` | memo(write) / 식별 보정 모델·시리얼·MAC·닉네임(admin → CORRECT 이벤트, 유니크 409) |
+| POST | `/api/devices/units/[id]/move` · `/recover` | 병동 이동 / 회수 (write — 같은 병동 400, 사유 없음 400, 이미 회수 409) |
+| POST | `/api/devices/units/bulk` | 일괄 이동·회수 (write — 같은 병원 ACTIVE만 단일 tx, 타 병원·RECOVERED 섞이면 409, 이미 대상 병동은 `skipped[]`) |
+| GET  | `/api/devices/lookup` | 시리얼 조회 `?serial=` — 1건 또는 원장 접두 일치 ≤10 + WMS 개체 ≤10 |
+| GET  | `/api/devices/maintenance-lookup` | 유지보수 코드 자동완성 `?hospital=&q=` (정확 코드는 병원 필터 무시 + `hospitalMismatch`) |
+| GET  | `/api/devices/events` | 이벤트 목록 (`?hospital&device&type&from&to&refType&refCode&source&q&page&limit`) |
+| GET  | `/api/devices/events/export` | 이력 xlsx (캡 10,000행) |
+| PATCH | `/api/devices/events/[id]` | 이벤트 인플레이스 정정 (admin — occurred_on·memo·reason·ref·to/from ward, fold 재검증 409) |
+| DELETE | `/api/devices/events/[id]` | 마지막 이벤트 취소 (admin — LIFO, 교체·이관 짝 동시 취소) |
+| GET  | `/api/devices/export` | 기기 목록 xlsx (units 필터 동일, 캡 10,000행, 초과 400) |
+| GET  | `/api/hospitals/[code]/devices/summary` | 병원 요약 스트립 (모델별 배치/계약/차이·WMS·병동·최근) |
+| POST | `/api/hospitals/[code]/devices/register` | N개 등록·재등록·opt-in 이관 (write, `?preview=true` 판별만) — 409 `conflicts[]` |
+| POST | `/api/hospitals/[code]/devices/replace` | 교체 1폼 → RECOVER+REGISTER(+소급 REGISTER) (write, 타 병원 ACTIVE 409) |
+| POST | `/api/hospitals/[code]/devices/import` | 임포트 (write, `?preview=true` 판정 6종 · 실행은 서버 재검증 후 단일 tx — 미제외 오류 400·미지정 conflict 409·소급 불성립 409 `rows[]`) |
+| GET  | `/api/hospitals/[code]/devices/imports` | 임포트 배치 목록 |
+| PATCH | `/api/hospitals/[code]/devices/imports/[batchId]` | 배치 업무일자 일괄 정정 (admin) |
+| POST | `/api/hospitals/[code]/devices/imports/[batchId]/cancel` | 배치 취소 (admin — 배치 밖 상태 이벤트 있으면 409) |
+| GET/POST | `/api/hospitals/[code]/wards` | 병동 목록 / 추가 (write, 동명 409) |
+| PUT/DELETE | `/api/hospitals/[code]/wards/[id]` | 병동 수정(write, 비활성은 admin) / 삭제(admin, 참조 있으면 409) |
+
 ### 영업/CRM (전 엔드포인트 ADMIN 이상 + SEERS 소속 — `checkSalesAccess`)
 | Method | Endpoint | 설명 |
 |--------|----------|------|
@@ -1745,7 +1797,9 @@ npm run dev
 | GET  | `/api/settings/devices` | 장비 정보 목록 |
 | POST | `/api/settings/devices` | 장비 정보 추가 |
 | PUT  | `/api/settings/devices/[id]` | 장비 정보 수정 |
-| DELETE | `/api/settings/devices/[id]` | 장비 정보 삭제 |
+| DELETE | `/api/settings/devices/[id]` | 장비 정보 삭제 (원장 사용 중 가드) |
+| GET/POST | `/api/settings/device-recovery-reason` | 기기 회수 사유 마스터 목록 / 추가 (ADMIN 이상 — StatusCode `DEVICE_RECOVERY_REASON`) |
+| PUT/DELETE | `/api/settings/device-recovery-reason/[id]` | 회수 사유 수정 / 삭제 (ADMIN 이상 — value 행·사용 중 삭제 불가) |
 | GET  | `/api/settings/udi-ledger` | 입출고대장 문서 메타(문서번호·양식번호·개정이력) 조회 |
 | PUT  | `/api/settings/udi-ledger` | 입출고대장 문서 메타 수정 (ADMIN 이상) |
 | GET  | `/api/settings/build-status` | 공사 상태 목록 |

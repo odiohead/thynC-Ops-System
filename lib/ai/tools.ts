@@ -4,6 +4,7 @@ import { findHospitalNotePage } from '@/lib/wiki/hospitalNote'
 import { getAiExcludedPageIds, isPageAiExcluded } from '@/lib/wiki/aiExclusion'
 import { searchOperationHistory, findSimilarCases, tokenize, excerpt } from './opsSearch'
 import { checkSalesAccess } from '@/lib/sales'
+import { getHospitalDeviceSummary } from '@/lib/deviceRegistry'
 import type { JWTPayload } from '@/lib/auth'
 
 /**
@@ -605,20 +606,23 @@ async function getHospitalOverview(input: ToolInput) {
     },
   })
   if (!h) return { error: `병원(${code})을 찾을 수 없습니다.` }
-  // 디바이스 원장 집계 — 이 병원에 배치 중(ACTIVE)인 시리얼 개체를 모델별로 센다 (hospital_device_registry_design.md §9.5 P1; 계약 대조·v2 도구는 후속)
-  const activeByModel = await prisma.hospitalDevice.groupBy({
-    by: ['deviceInfoId'],
-    where: { hospitalCode: code, status: 'ACTIVE' },
-    _count: { _all: true },
+  // 디바이스 원장 요약 — 모델별 배치 중(ACTIVE) 개체 수 + 계약 대조 (hospital_device_registry_design.md §9.5 P1; 읽기 전용 1회 호출)
+  //   ECG hard → '/ 계약 n', SpO2 soft → '/ 참고 n', GW·제3자 none → 접미 없음. 배치 0대라도 계약 축이 있으면 노출(미등록 격차 확인용)
+  const registry = await getHospitalDeviceSummary(code).catch((err) => {
+    console.error('[ai/tools] getHospitalDeviceSummary failed:', err)
+    return null
   })
-  const deviceInfos = activeByModel.length
-    ? await prisma.deviceInfo.findMany({
-        where: { id: { in: activeByModel.map((g) => g.deviceInfoId) } },
-        orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
-        select: { id: true, deviceName: true, deviceModel: true },
-      })
-    : []
-  const activeCountByInfoId = new Map(activeByModel.map((g) => [g.deviceInfoId, g._count._all]))
+  const devices = (registry?.models ?? [])
+    .filter((m) => m.active > 0 || m.compare !== 'none')
+    .map((m) => {
+      const suffix =
+        m.compare === 'hard' && m.expected != null
+          ? ` / 계약 ${m.expected}`
+          : m.compare === 'soft' && m.expected != null
+            ? ` / 참고 ${m.expected}`
+            : ''
+      return `${m.deviceName}(${m.deviceModel}) 배치 ${m.active}대${suffix}`
+    })
   return {
     hospitalCode: h.hospitalCode,
     name: h.hospitalName,
@@ -631,7 +635,7 @@ async function getHospitalOverview(input: ToolInput) {
     introBeds: h.introBeds,
     contractDate: ymd(h.contractDate),
     daewoongStaff: h.daewoongAssignments.map((a) => a.assignedUser.name),
-    devices: deviceInfos.map((d) => `${d.deviceName}(${d.deviceModel}) 배치 ${activeCountByInfoId.get(d.id) ?? 0}대`),
+    devices,
     workCounts: {
       projects: h._count.projects,
       maintenances: h._count.maintenances,
