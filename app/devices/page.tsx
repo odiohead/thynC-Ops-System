@@ -1,6 +1,6 @@
 import { Suspense } from 'react'
 import DevicesClient from './_components/DevicesClient'
-import { parseDevicesParams } from './_components/useDevicesUrlState'
+import { parseDevicesParams } from './_components/urlState'
 
 /**
  * /devices — 디바이스 원장 (projects/hospital_device_registry_design.md §6.1)
