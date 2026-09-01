@@ -1,0 +1,155 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { getAuthUser } from '@/lib/auth'
+import { prisma } from '@/lib/prisma'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import { checkDeviceRegistryAccess } from '@/lib/deviceRegistryAccess'
+import { correctDevice, getUnitDetail, updateDeviceMemo, type CorrectChanges } from '@/lib/deviceRegistry'
+import {
+  deviceAuditLabel,
+  optionalInt,
+  parseIdParam,
+  parseRef,
+  projectionSnapshot,
+  readJsonObject,
+  registryActor,
+  registryErrorResponse,
+} from '@/lib/deviceRegistryRoute'
+
+export const dynamic = 'force-dynamic'
+
+type Params = { params: { id: string } }
+
+/**
+ * 개체 상세(이력 드로어, §6.1) — 개체 + 이벤트 전체(병원 경계 무관) + 교체 상대 + WMS 표시
+ * 응답 `{ device, events }`
+ * - `device`: 프로젝션 + deviceInfo·ward·hospital·lastHospital·recoverReason·replacedBy(→ 교체됨)·replaces[](이 개체가 대체한 구기기)
+ *   ·inventoryUnit(영속 링크)·wmsTransient(링크 없을 때 표시용 매칭, DB 쓰기 없음)·wmsWarning
+ * - `events`: **최신순(occurred_on DESC, id DESC)** — 드로어가 그대로 렌더. fold 순서가 필요하면 클라이언트에서 뒤집는다.
+ *   각 행에 hospital·fromWard·toWard·reasonCode·relatedDevice·importBatch + actorName 스냅샷
+ * 로그인 전체. 읽기이므로 logAudit 없음.
+ */
+export async function GET(req: NextRequest, { params }: Params) {
+  const user = await getAuthUser(req)
+  if (!user) return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
+
+  const id = Number(params.id)
+  if (!Number.isInteger(id) || id <= 0) return NextResponse.json({ error: '기기 id가 올바르지 않습니다.' }, { status: 400 })
+
+  try {
+    const detail = await getUnitDetail(id)
+    if (!detail) return NextResponse.json({ error: '기기를 찾을 수 없습니다.' }, { status: 404 })
+    const { events, ...device } = detail
+    return NextResponse.json({ device, events })
+  } catch (e) {
+    console.error('[devices:units/[id]]', e)
+    return NextResponse.json({ error: '디바이스 원장 조회 중 오류가 발생했습니다.' }, { status: 500 })
+  }
+}
+
+const IDENTITY_KEYS = ['deviceInfoId', 'serialNo', 'macAddress', 'extDeviceCode'] as const
+const EVENT_ONLY_KEYS = ['status', 'hospitalCode', 'wardId', 'placedOn', 'recoveredOn', 'lastHospitalCode', 'recoverReasonId', 'replacedById'] as const
+
+/**
+ * PATCH /api/devices/units/[id] — 개체 속성 수정 (§7.1·§8.2)
+ * - `{ memo }`                                   : 개체 메모 UPDATE (write, 이벤트 아님)
+ * - `{ deviceInfoId?|serialNo?|macAddress?|extDeviceCode? }` : 식별 보정 → CORRECT 이벤트 (admin) — 시리얼 충돌 409, 이력 있는 개체의 시리얼 정정 409, WMS 재매칭(영속)
+ *   선택: `occurredOn`·`ref`는 CORRECT 이벤트 문맥(기본 오늘)
+ * 두 종류를 함께 보내면 단일 tx로 처리(식별 보정 → 메모). 상태·병원·병동 키는 400(이벤트로만 변경).
+ * 병원 문맥은 개체에서 유도(body hospitalCode 무시). audit `hospital_device` UPDATE(resourceId=시리얼, before/after 스냅샷)
+ */
+export async function PATCH(request: NextRequest, { params }: Params) {
+  const user = await getAuthUser(request)
+  if (!user) return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
+  const denied = await checkDeviceRegistryAccess(user, { write: true })
+  if (denied) return NextResponse.json({ error: denied.error }, { status: denied.status })
+
+  try {
+    const deviceId = parseIdParam(params.id, '기기 ID')
+    const body = await readJsonObject(request)
+
+    const blocked = EVENT_ONLY_KEYS.filter((k) => k in body)
+    if (blocked.length > 0) {
+      return NextResponse.json({ error: `상태·병원·병동은 이벤트(등록/이동/회수)로만 변경할 수 있습니다: ${blocked.join(', ')}` }, { status: 400 })
+    }
+    const identityKeys = IDENTITY_KEYS.filter((k) => k in body)
+    const hasMemo = 'memo' in body
+    if (identityKeys.length === 0 && !hasMemo) {
+      return NextResponse.json({ error: '변경할 항목이 없습니다 (memo 또는 식별 필드 deviceInfoId·serialNo·macAddress·extDeviceCode)' }, { status: 400 })
+    }
+    if (hasMemo && body.memo !== null && typeof body.memo !== 'string') {
+      return NextResponse.json({ error: '메모는 문자열이어야 합니다' }, { status: 400 })
+    }
+
+    let changes: CorrectChanges | null = null
+    let occurredOn: string | undefined
+    let ref: ReturnType<typeof parseRef> | undefined
+    if (identityKeys.length > 0) {
+      const adminDenied = await checkDeviceRegistryAccess(user, { admin: true })
+      if (adminDenied) return NextResponse.json({ error: adminDenied.error }, { status: adminDenied.status })
+      changes = {}
+      if ('deviceInfoId' in body) {
+        const v = optionalInt(body.deviceInfoId, '모델')
+        if (v === undefined) return NextResponse.json({ error: '모델을 선택하세요' }, { status: 400 })
+        changes.deviceInfoId = v
+      }
+      if ('serialNo' in body) {
+        if (typeof body.serialNo !== 'string' || !body.serialNo.trim()) return NextResponse.json({ error: '시리얼이 비어 있습니다' }, { status: 400 })
+        changes.serialNo = body.serialNo
+      }
+      for (const k of ['macAddress', 'extDeviceCode'] as const) {
+        if (!(k in body)) continue
+        if (body[k] !== null && typeof body[k] !== 'string') return NextResponse.json({ error: `${k}은(는) 문자열이어야 합니다` }, { status: 400 })
+        changes[k] = (body[k] as string | null) ?? null
+      }
+      if (body.occurredOn != null && body.occurredOn !== '') {
+        if (typeof body.occurredOn !== 'string') return NextResponse.json({ error: '업무일자 형식이 올바르지 않습니다 (YYYY-MM-DD)' }, { status: 400 })
+        occurredOn = body.occurredOn.trim()
+      }
+      if ('ref' in body) ref = parseRef(body.ref)
+    }
+
+    const actor = registryActor(user)
+    const memoValue = hasMemo ? ((body.memo as string | null) ?? null) : undefined
+    const r = await prisma.$transaction(
+      async (tx) => {
+        const correct = changes ? await correctDevice({ actor, occurredOn, ref }, { deviceId, changes }, { client: tx }) : null
+        const memo = memoValue !== undefined ? await updateDeviceMemo({ actor }, { deviceId, memo: memoValue }, { client: tx }) : null
+        return { correct, memo }
+      },
+      { timeout: 30_000, maxWait: 10_000 }
+    )
+
+    const device = r.memo?.device ?? r.correct!.device
+    const beforeSnap = projectionSnapshot(device) as Record<string, unknown>
+    const afterSnap = projectionSnapshot(device) as Record<string, unknown>
+    if (r.correct) {
+      for (const [field, v] of Object.entries(r.correct.changes)) {
+        beforeSnap[field] = v.before
+        afterSnap[field] = v.after
+      }
+    }
+    if (r.memo) {
+      beforeSnap.memo = r.memo.before
+      afterSnap.memo = r.memo.after
+    }
+    const parts = [r.correct ? `식별 보정(${Object.keys(r.correct.changes).join(', ')})` : null, r.memo ? '메모' : null].filter(Boolean)
+    await logAudit({
+      req: request,
+      actor: auditActorFromJWT(user),
+      action: 'UPDATE',
+      resource: 'hospital_device',
+      resourceId: device.serialNo,
+      resourceLabel: `${await deviceAuditLabel(device.id)} ${parts.join('·')}`,
+      before: beforeSnap,
+      after: { ...afterSnap, ...(r.correct ? { correctEventId: r.correct.event.id, changes: r.correct.changes } : {}) },
+    })
+
+    return NextResponse.json({
+      device,
+      ...(r.correct ? { event: r.correct.event, changes: r.correct.changes, wms: r.correct.wms } : {}),
+      ...(r.memo ? { memo: { before: r.memo.before, after: r.memo.after } } : {}),
+    })
+  } catch (e) {
+    return registryErrorResponse(e, `units/${params.id} PATCH`)
+  }
+}
