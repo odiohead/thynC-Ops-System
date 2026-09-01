@@ -9,13 +9,17 @@
  * 서버 페이지네이션(page/limit 50). 빈 상태에도 전 헤더 노출. 모바일 md:hidden 카드.
  * 요약 줄('고객 병원 n · …')과 탭 바는 orchestrator(DevicesClient)가 렌더한다 — 여기는 표만.
  *
- * v1 단순화(2026-09-01~02 사용자 피드백) — `compact` prop(기본 false = 구 전체 표):
- *  병원마다 블록 — 1행 병원명(+코드)·상태 배지·마지막 이벤트(우측), 그 아래 상품유형 소행 `일반 | 심전계 n | 산소포화도 n | 혈압계 n` / `라이트 | …`(+ 미지정 배치가 있으면 `미지정` 소행).
- *  혈압계 = **링 혈압계(CART BP) SL-MPF1K07**(onprem_device_type 10, MBP100U 아님). 수치는 ACTIVE 배치 수(평가용 포함 — 배치 현황이지 계약 대조가 아님), 0은 '—'.
- *  심전계 셀 툴팁에 그 유형 계약 수(expectedByType). 미등록 병원은 1행 '미등록' + [임포트]. GW·제3자(링 제외) 수는 이 표에 없음.
- *  툴바 = 필터 + 병원명 검색(정렬 '차이 큰 순' 고정, 셀렉트 숨김), 50행, 블록 클릭 → onOpenHospital. 모바일 카드는 '일반 E n · S n · BP n' 축약 줄.
+ * v1 단순화(2026-09-01~02 사용자 피드백, 3차 개정: 병원당 1행) — `compact` prop(기본 false = 구 전체 표):
+ *  열 `병원명 | 상태 | 판매유형 | 심전계 | 심전계(라이트) | 산소포화도 | 산소포화도(라이트) | 혈압계 | 혈압계(라이트) | 마지막 이벤트` — 병원당 **1행**.
+ *  - 판매유형: 일반/라이트 배지 — (계약완료 딜 유형 ∪ ACTIVE 배치 유형) 합집합, 둘 다면 두 배지(일반 먼저), 없으면 '—'
+ *  - 기기 6셀: ACTIVE 배치 수(평가용 포함) — 기본 열 = product_type '일반', (라이트) 열 = '라이트'. 혈압계 = **링 혈압계(CART BP) SL-MPF1K07**(onprem_device_type 10, MBP100U 아님).
+ *    고정 폭(w-20)·우측 정렬 tabular-nums로 그리드 정렬, 0은 회색 '0'(원장 없는 병원도 '미등록' 문구 없이 전부 0). 심전계 셀 툴팁에 그 유형 계약 수(expectedByType)
+ *  - 미지정 ACTIVE 배치는 어느 열에도 합산하지 않음 — 병원명 옆 warning 배지 `미지정 n`(툴팁 '기기 목록에서 지정하세요')
+ *  - [임포트] 퀵 액션 없음(등록은 병원 진입 후). GW·제3자(링 제외) 수는 이 표에 없음
+ *  툴바 = 필터(전체|등록 0|차이 있음|등록 완료 — 'unregistered' 값·동작 유지, 라벨만) + 병원명 검색(정렬 '차이 큰 순' 고정, 셀렉트 숨김), 50행, 행 클릭 → onOpenHospital.
+ *  모바일 카드: 병원+상태+판매유형 배지, '일반 E n · S n · BP n' / '라이트 …' 두 줄.
  */
-import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import Badge from '@/app/components/ui/Badge'
 import Button from '@/app/components/ui/Button'
 import { Input, Select } from '@/app/components/ui/Input'
@@ -39,7 +43,7 @@ export interface GlobalCoverageProps {
 
 const FILTER_OPTIONS: { value: CoverageFilter; label: string }[] = [
   { value: 'all', label: '전체' },
-  { value: 'unregistered', label: '미등록만' },
+  { value: 'unregistered', label: '등록 0' },
   { value: 'diff', label: '차이 있음' },
   { value: 'complete', label: '등록 완료' },
 ]
@@ -51,15 +55,19 @@ const SORT_OPTIONS: { value: CoverageSort; label: string }[] = [
 ]
 
 const COLUMNS = ['병원', '상태', '계약 ECG', '배치 중 ECG', '차이', '평가용', 'SpO2(참고)', 'GW', '회수(30일)', '마지막 이벤트', '마지막 임포트', '→'] as const
-/** compact 열 — 숫자 열(2~4)은 우측 정렬. 병원 블록 = 헤더 행 + 상품유형 소행(일반/라이트/미지정) */
-const COMPACT_COLUMNS = ['병원', '상태', '심전계', '산소포화도', '혈압계', '마지막 이벤트', '→'] as const
+/** compact 열 — 병원당 1행. 기기 6셀(3~8)은 고정 폭(w-20)·우측 정렬 */
+const COMPACT_COLUMNS = ['병원명', '상태', '판매유형', '심전계', '심전계(라이트)', '산소포화도', '산소포화도(라이트)', '혈압계', '혈압계(라이트)', '마지막 이벤트'] as const
 const COLUMN_TITLES: Partial<Record<(typeof COLUMNS)[number] | (typeof COMPACT_COLUMNS)[number], string>> = {
   '배치 중 ECG': '배치 중 ECG(평가용 제외 — 계약 대조 기준)',
   차이: '배치 중 ECG(평가용 제외) − 계약 ECG',
   평가용: '배치 중 평가용(EVAL) 기기 수(전 모델) — 계약 대조 제외',
-  심전계: '배치 중 심전계(ECG) — 상품유형별, 평가용 포함',
-  산소포화도: '배치 중 산소포화도(SpO2) — 상품유형별, 평가용 포함',
-  혈압계: '배치 중 링 혈압계(CART BP) SL-MPF1K07 — 상품유형별, 평가용 포함',
+  판매유형: '계약완료 딜 유형 ∪ 배치 중 상품유형',
+  심전계: "배치 중 심전계(ECG) — 상품유형 '일반', 평가용 포함",
+  '심전계(라이트)': "배치 중 심전계(ECG) — 상품유형 '라이트', 평가용 포함",
+  산소포화도: "배치 중 산소포화도(SpO2) — 상품유형 '일반', 평가용 포함",
+  '산소포화도(라이트)': "배치 중 산소포화도(SpO2) — 상품유형 '라이트', 평가용 포함",
+  혈압계: "배치 중 링 혈압계(CART BP) SL-MPF1K07 — 상품유형 '일반', 평가용 포함",
+  '혈압계(라이트)': "배치 중 링 혈압계(CART BP) SL-MPF1K07 — 상품유형 '라이트', 평가용 포함",
 }
 const SEARCH_DEBOUNCE_MS = 300
 
@@ -149,23 +157,28 @@ function EvalCell({ row }: { row: CoverageRow }) {
 
 const EMPTY_PT_COUNTS: CoverageModelCounts = { ecg: 0, spo2: 0, bp: 0 }
 
-/** compact 소행 데이터 — 일반·라이트 항상, 미지정은 그 병원에 미지정 ACTIVE 배치가 있을 때만 */
-function compactSubRows(row: CoverageRow): { key: CoverageProductTypeKey; counts: CoverageModelCounts; expected: number | null }[] {
-  const pt = row.byProductType
-  const rows: { key: CoverageProductTypeKey; counts: CoverageModelCounts; expected: number | null }[] = [
-    { key: '일반', counts: pt?.일반 ?? EMPTY_PT_COUNTS, expected: row.expectedByType?.일반 ?? null },
-    { key: '라이트', counts: pt?.라이트 ?? EMPTY_PT_COUNTS, expected: row.expectedByType?.라이트 ?? null },
-  ]
-  const u = pt?.미지정 ?? EMPTY_PT_COUNTS
-  if (u.ecg + u.spo2 + u.bp > 0) rows.push({ key: '미지정', counts: u, expected: null })
-  return rows
+function ptCounts(row: CoverageRow, key: CoverageProductTypeKey): CoverageModelCounts {
+  return row.byProductType?.[key] ?? EMPTY_PT_COUNTS
 }
 
-/** compact 수치 셀 — 0은 '—' */
+/** 판매유형 — (계약완료 딜 유형 expectedByType non-null) ∪ (ACTIVE 배치 유형), 일반 먼저 */
+function saleTypes(row: CoverageRow): ('일반' | '라이트')[] {
+  return (['일반', '라이트'] as const).filter((k) => {
+    const c = ptCounts(row, k)
+    return row.expectedByType?.[k] != null || c.ecg + c.spo2 + c.bp > 0
+  })
+}
+
+/** 상품유형 미지정 ACTIVE 배치 수(ECG+SpO2+BP) */
+function unassignedPtCount(row: CoverageRow): number {
+  const u = ptCounts(row, '미지정')
+  return u.ecg + u.spo2 + u.bp
+}
+
+/** compact 수치 셀 — 0은 회색 '0'(미등록 문구 없음) */
 function PtCount({ n: v, title }: { n: number; title?: string }) {
-  if (v === 0) return DASH
   return (
-    <span className="tabular-nums" title={title}>
+    <span className={cn('tabular-nums', v === 0 && 'text-muted-foreground')} title={title}>
       {fmtInt(v)}
     </span>
   )
@@ -214,9 +227,8 @@ function MixedBadge({ row }: { row: CoverageRow }) {
   )
 }
 
-function RowAction({ row, onOpenHospital, onOpenImport, compact }: { row: CoverageRow; onOpenHospital: (code: string) => void; onOpenImport: (code: string) => void; compact?: boolean }) {
+function RowAction({ row, onOpenHospital, onOpenImport }: { row: CoverageRow; onOpenHospital: (code: string) => void; onOpenImport: (code: string) => void }) {
   const stop = (e: MouseEvent) => e.stopPropagation()
-  if (compact && row.registered) return null
   if (!row.registered) {
     return (
       <Button
@@ -365,7 +377,7 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
           <THead>
             <tr>
               {columns.map((c, i) => (
-                <TH key={c} className={cn((compact ? i >= 2 && i <= 4 : i >= 2 && i <= 8) && 'text-right', i === columns.length - 1 && 'text-right')} title={COLUMN_TITLES[c as keyof typeof COLUMN_TITLES]}>
+                <TH key={c} className={cn(compact ? i >= 3 && i <= 8 && 'w-20 text-right' : cn(i >= 2 && i <= 8 && 'text-right', i === columns.length - 1 && 'text-right'))} title={COLUMN_TITLES[c as keyof typeof COLUMN_TITLES]}>
                   {c}
                 </TH>
               ))}
@@ -379,7 +391,7 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
                 </TD>
               </tr>
             ) : compact ? (
-              rows.map((row) => <CompactHospitalRows key={row.hospitalCode} row={row} today={today} onOpenHospital={onOpenHospital} onOpenImport={onOpenImport} />)
+              rows.map((row) => <CompactHospitalRow key={row.hospitalCode} row={row} today={today} onOpenHospital={onOpenHospital} />)
             ) : (
               rows.map((row) => (
                 <TR
@@ -459,24 +471,25 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
               </div>
               {compact ? (
                 <>
-                  <div className="mt-2 space-y-0.5 text-xs tabular-nums">
-                    {row.registered ? (
-                      compactSubRows(row).map((r) => (
-                        <div key={r.key}>
-                          <span className={cn('mr-1 inline-block w-10', r.key === '미지정' ? 'text-warning-subtle-foreground' : 'text-muted-foreground')}>{r.key}</span>
-                          <span title={r.expected != null ? `${r.key} 계약 ${fmtInt(r.expected)}대` : undefined}>E {fmtInt(r.counts.ecg)}</span> · S {fmtInt(r.counts.spo2)} · BP {fmtInt(r.counts.bp)}
-                        </div>
-                      ))
-                    ) : (
-                      <span className="text-muted-foreground">미등록</span>
-                    )}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                    <SaleTypeBadges row={row} />
+                    <UnassignedPtBadge row={row} />
                   </div>
-                  <div className="mt-2 flex items-end justify-between gap-2 text-xs">
-                    <div>
-                      <span className="text-muted-foreground">마지막 이벤트 </span>
-                      <LastEventCell row={row} today={today} />
-                    </div>
-                    <RowAction row={row} onOpenHospital={onOpenHospital} onOpenImport={onOpenImport} compact />
+                  <div className="mt-1.5 space-y-0.5 text-xs tabular-nums">
+                    {(['일반', '라이트'] as const).map((k) => {
+                      const c = ptCounts(row, k)
+                      const expected = row.expectedByType?.[k] ?? null
+                      return (
+                        <div key={k}>
+                          <span className="mr-1 inline-block w-10 text-muted-foreground">{k}</span>
+                          <span title={expected != null ? `${k} 계약 ${fmtInt(expected)}대` : undefined}>E {fmtInt(c.ecg)}</span> · S {fmtInt(c.spo2)} · BP {fmtInt(c.bp)}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div className="mt-2 text-xs">
+                    <span className="text-muted-foreground">마지막 이벤트 </span>
+                    <LastEventCell row={row} today={today} />
                   </div>
                 </>
               ) : (
@@ -553,66 +566,66 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
   )
 }
 
-/**
- * compact 병원 블록(데스크톱) — 헤더 행(병원명+상태 · 마지막 이벤트 · [임포트]) + 상품유형 소행(일반/라이트/미지정).
- * 미등록 병원은 1행 '미등록'. 블록 전체 클릭 → onOpenHospital.
- */
-function CompactHospitalRows({ row, today, onOpenHospital, onOpenImport }: { row: CoverageRow; today: string; onOpenHospital: (code: string) => void; onOpenImport: (code: string) => void }) {
-  const open = () => onOpenHospital(row.hospitalCode)
-  const nameCell = (
-    <div className="flex flex-wrap items-center gap-1.5 font-medium" title={row.hospitalCode}>
-      <span className={row.registered ? 'text-foreground' : 'text-muted-foreground'}>{row.hospitalName}</span>
-      {row.status ? <Badge variant={statusVariant(row.status)}>{row.status}</Badge> : null}
-    </div>
-  )
-  if (!row.registered) {
-    return (
-      <TR className="cursor-pointer text-muted-foreground" onClick={open} title="원장 미등록 병원 — 클릭 → 병원 뷰">
-        <TD colSpan={2}>{nameCell}</TD>
-        <TD colSpan={3} className="text-center text-xs text-muted-foreground">
-          미등록
-        </TD>
-        <TD>{DASH}</TD>
-        <TD className="text-right">
-          <RowAction row={row} onOpenHospital={onOpenHospital} onOpenImport={onOpenImport} compact />
-        </TD>
-      </TR>
-    )
-  }
-  const subRows = compactSubRows(row)
+/** 판매유형 배지 — 일반/라이트(합집합), 없으면 '—' */
+function SaleTypeBadges({ row }: { row: CoverageRow }) {
+  const types = saleTypes(row)
+  if (types.length === 0) return DASH
   return (
-    <Fragment>
-      <TR className="cursor-pointer border-b-0" onClick={open} title="클릭 → 기기 목록">
-        <TD colSpan={2} className="pb-1">
-          {nameCell}
-        </TD>
-        <TD colSpan={3} className="pb-1" />
-        <TD className="pb-1">
-          <LastEventCell row={row} today={today} />
-        </TD>
-        <TD className="pb-1 text-right">
-          <RowAction row={row} onOpenHospital={onOpenHospital} onOpenImport={onOpenImport} compact />
-        </TD>
-      </TR>
-      {subRows.map((r, i) => (
-        <TR key={r.key} className={cn('cursor-pointer text-xs hover:bg-accent/50', i < subRows.length - 1 && 'border-b-0')} onClick={open}>
-          <TD colSpan={2} className={cn('py-1 pl-8', r.key === '미지정' ? 'text-warning-subtle-foreground' : 'text-muted-foreground')}>
-            {r.key === '미지정' ? <span title="상품유형 미지정 상태로 배치 중 — 선택 바 [상품유형 지정]으로 정리">미지정</span> : r.key}
-          </TD>
-          <TD className="py-1 text-right">
-            <PtCount n={r.counts.ecg} title={r.expected != null ? `${r.key} 계약 ${fmtInt(r.expected)}대 (계약완료 딜 기준)` : undefined} />
-          </TD>
-          <TD className="py-1 text-right">
-            <PtCount n={r.counts.spo2} />
-          </TD>
-          <TD className="py-1 text-right">
-            <PtCount n={r.counts.bp} title="링 혈압계(CART BP) SL-MPF1K07" />
-          </TD>
-          <TD className="py-1" />
-          <TD className="py-1" />
-        </TR>
+    <span className="inline-flex items-center gap-1">
+      {types.map((t) => (
+        <Badge key={t} variant={t === '라이트' ? 'primary' : 'default'}>
+          {t}
+        </Badge>
       ))}
-    </Fragment>
+    </span>
+  )
+}
+
+/** '미지정 n' warning 배지 — 상품유형 미지정 ACTIVE 배치가 있을 때만 */
+function UnassignedPtBadge({ row }: { row: CoverageRow }) {
+  const n = unassignedPtCount(row)
+  if (n === 0) return null
+  return (
+    <Badge variant="warning" title={`상품유형 미지정 배치 ${fmtInt(n)}대 — 기기 목록에서 지정하세요`}>
+      미지정 {fmtInt(n)}
+    </Badge>
+  )
+}
+
+/** compact 병원 1행(데스크톱) — 병원명(+미지정 배지) | 상태 | 판매유형 | 기기 6셀(일반/라이트) | 마지막 이벤트 */
+function CompactHospitalRow({ row, today, onOpenHospital }: { row: CoverageRow; today: string; onOpenHospital: (code: string) => void }) {
+  const normal = ptCounts(row, '일반')
+  const lite = ptCounts(row, '라이트')
+  const cells: { key: string; n: number; title?: string }[] = [
+    { key: 'ecg', n: normal.ecg, title: row.expectedByType?.일반 != null ? `일반 계약 ${fmtInt(row.expectedByType.일반)}대 (계약완료 딜 기준)` : undefined },
+    { key: 'ecg-lite', n: lite.ecg, title: row.expectedByType?.라이트 != null ? `라이트 계약 ${fmtInt(row.expectedByType.라이트)}대 (계약완료 딜 기준)` : undefined },
+    { key: 'spo2', n: normal.spo2 },
+    { key: 'spo2-lite', n: lite.spo2 },
+    { key: 'bp', n: normal.bp, title: '링 혈압계(CART BP) SL-MPF1K07' },
+    { key: 'bp-lite', n: lite.bp, title: '링 혈압계(CART BP) SL-MPF1K07' },
+  ]
+  return (
+    <TR className="cursor-pointer" onClick={() => onOpenHospital(row.hospitalCode)} title="클릭 → 기기 목록">
+      <TD>
+        <div className="flex flex-wrap items-center gap-1.5 font-medium text-foreground" title={row.hospitalCode}>
+          {row.hospitalName}
+          <UnassignedPtBadge row={row} />
+        </div>
+        <div className="font-mono text-[11px] text-muted-foreground">{row.hospitalCode}</div>
+      </TD>
+      <TD>{row.status ? <Badge variant={statusVariant(row.status)}>{row.status}</Badge> : DASH}</TD>
+      <TD className="whitespace-nowrap">
+        <SaleTypeBadges row={row} />
+      </TD>
+      {cells.map((c) => (
+        <TD key={c.key} className="w-20 text-right">
+          <PtCount n={c.n} title={c.title} />
+        </TD>
+      ))}
+      <TD>
+        <LastEventCell row={row} today={today} />
+      </TD>
+    </TR>
   )
 }
 
