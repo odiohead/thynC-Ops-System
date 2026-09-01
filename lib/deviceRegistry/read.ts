@@ -360,6 +360,17 @@ export interface CoverageRow {
   productTypeMixed: boolean
   /** 혼합 병원에서 상품유형 미지정 ACTIVE 배치 수(혼합이 아니면 0) */
   unassignedProductType: number
+  /** 상품유형별 ACTIVE 배치 수(용도 무관 — 평가용 포함, 2026-09-02 v1 축약 표) — ecg/spo2/bp = onprem_device_type 1/3/10(bp = 링 혈압계 CART BP SL-MPF1K07). id 하드코딩 없음 */
+  byProductType: Record<CoverageProductTypeKey, CoverageModelCounts>
+  /** 상품유형별 계약완료 딜 대웅 디바이스 수 합(축약 표 심전계 셀 툴팁용) — 그 유형 딜이 없으면 null */
+  expectedByType: Record<'일반' | '라이트', number | null>
+}
+
+export type CoverageProductTypeKey = '일반' | '라이트' | '미지정'
+export interface CoverageModelCounts {
+  ecg: number
+  spo2: number
+  bp: number
 }
 
 export interface CoverageTotals {
@@ -400,6 +411,8 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
           OR EXISTS (SELECT 1 FROM hospital_device_events e WHERE e.hospital_code = h.hospital_code)
     ), dl AS (
       SELECT sd.hospital_code, count(*)::int AS deals, sum(coalesce(sd.daewoong_device_count, 0))::int AS expected,
+             sum(coalesce(sd.daewoong_device_count, 0)) FILTER (WHERE sd.product_type = '일반')::int AS expected_normal,
+             sum(coalesce(sd.daewoong_device_count, 0)) FILTER (WHERE sd.product_type = '라이트')::int AS expected_lite,
              count(DISTINCT sd.product_type) FILTER (WHERE sd.product_type IN ('일반','라이트'))::int AS pt_kinds
         FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
        WHERE sc.category = ${DEAL_STATUS_CATEGORY} AND sc.name = ${DEAL_STATUS_CONTRACTED}
@@ -413,7 +426,16 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
              count(*) FILTER (WHERE di.device_class = 'GATEWAY')::int AS gw,
              count(*) FILTER (WHERE di.device_class = 'THIRD_PARTY')::int AS third,
              count(*)::int AS total,
-             count(*) FILTER (WHERE ut.value = 'EVAL')::int AS eval_total
+             count(*) FILTER (WHERE ut.value = 'EVAL')::int AS eval_total,
+             count(*) FILTER (WHERE di.onprem_device_type = 1 AND d.product_type = '일반')::int AS pt_n_ecg,
+             count(*) FILTER (WHERE di.onprem_device_type = 3 AND d.product_type = '일반')::int AS pt_n_spo2,
+             count(*) FILTER (WHERE di.onprem_device_type = 10 AND d.product_type = '일반')::int AS pt_n_bp,
+             count(*) FILTER (WHERE di.onprem_device_type = 1 AND d.product_type = '라이트')::int AS pt_l_ecg,
+             count(*) FILTER (WHERE di.onprem_device_type = 3 AND d.product_type = '라이트')::int AS pt_l_spo2,
+             count(*) FILTER (WHERE di.onprem_device_type = 10 AND d.product_type = '라이트')::int AS pt_l_bp,
+             count(*) FILTER (WHERE di.onprem_device_type = 1 AND d.product_type IS NULL)::int AS pt_u_ecg,
+             count(*) FILTER (WHERE di.onprem_device_type = 3 AND d.product_type IS NULL)::int AS pt_u_spo2,
+             count(*) FILTER (WHERE di.onprem_device_type = 10 AND d.product_type IS NULL)::int AS pt_u_bp
         FROM hospital_devices d JOIN device_units u ON u.id = d.device_id JOIN device_info di ON di.id = u.device_info_id
         LEFT JOIN status_codes ut ON ut.id = u.usage_type_id
        WHERE d.status = 'ACTIVE'
@@ -439,6 +461,10 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
              (act.total IS NOT NULL OR lev.hospital_code IS NOT NULL) AS registered,
              coalesce(act.ecg, 0) AS ecg, coalesce(act.ecg_eval, 0) AS ecg_eval, coalesce(act.spo2, 0) AS spo2, coalesce(act.gw, 0) AS gw, coalesce(act.third, 0) AS third,
              coalesce(act.total, 0) AS total, coalesce(act.eval_total, 0) AS eval_total,
+             coalesce(act.pt_n_ecg, 0) AS pt_n_ecg, coalesce(act.pt_n_spo2, 0) AS pt_n_spo2, coalesce(act.pt_n_bp, 0) AS pt_n_bp,
+             coalesce(act.pt_l_ecg, 0) AS pt_l_ecg, coalesce(act.pt_l_spo2, 0) AS pt_l_spo2, coalesce(act.pt_l_bp, 0) AS pt_l_bp,
+             coalesce(act.pt_u_ecg, 0) AS pt_u_ecg, coalesce(act.pt_u_spo2, 0) AS pt_u_spo2, coalesce(act.pt_u_bp, 0) AS pt_u_bp,
+             dl.expected_normal, dl.expected_lite,
              CASE WHEN coalesce(dl.deals, 0) > 0 THEN coalesce(act.ecg, 0) - dl.expected END AS diff,   -- ecg는 평가용 제외(§9.1)
              coalesce(rec.recovered30d, 0) AS recovered30d,
              coalesce(dl.pt_kinds, 0) >= 2 AS product_type_mixed,
@@ -479,6 +505,17 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
     third: number
     total: number
     eval_total: number
+    pt_n_ecg: number
+    pt_n_spo2: number
+    pt_n_bp: number
+    pt_l_ecg: number
+    pt_l_spo2: number
+    pt_l_bp: number
+    pt_u_ecg: number
+    pt_u_spo2: number
+    pt_u_bp: number
+    expected_normal: number | null
+    expected_lite: number | null
     diff: number | null
     recovered30d: number
     product_type_mixed: boolean
@@ -527,6 +564,15 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
       activeThird: n(r.third),
       activeTotal: n(r.total),
       evalTotal: n(r.eval_total),
+      byProductType: {
+        일반: { ecg: n(r.pt_n_ecg), spo2: n(r.pt_n_spo2), bp: n(r.pt_n_bp) },
+        라이트: { ecg: n(r.pt_l_ecg), spo2: n(r.pt_l_spo2), bp: n(r.pt_l_bp) },
+        미지정: { ecg: n(r.pt_u_ecg), spo2: n(r.pt_u_spo2), bp: n(r.pt_u_bp) },
+      },
+      expectedByType: {
+        일반: r.expected_normal == null ? null : n(r.expected_normal),
+        라이트: r.expected_lite == null ? null : n(r.expected_lite),
+      },
       diff: r.diff == null ? null : n(r.diff),
       recovered30d: n(r.recovered30d),
       lastEvent: r.last_event_type ? { type: r.last_event_type, on: ymd(r.last_event_on)! } : null,

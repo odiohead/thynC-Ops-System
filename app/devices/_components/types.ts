@@ -150,6 +150,17 @@ export interface CoverageRow {
   productTypeMixed: boolean
   /** 혼합 병원의 상품유형 미지정 ACTIVE 배치 수(혼합 아니면 0) */
   unassignedProductType: number
+  /** 상품유형별 ACTIVE 배치 수(평가용 포함, 2026-09-02 v1 축약 표) — bp = 링 혈압계(CART BP, onprem_device_type 10). 구 응답 호환 optional */
+  byProductType?: Record<CoverageProductTypeKey, CoverageModelCounts>
+  /** 상품유형별 계약완료 딜 대웅 디바이스 수 합(심전계 셀 툴팁) */
+  expectedByType?: Record<'일반' | '라이트', number | null>
+}
+
+export type CoverageProductTypeKey = '일반' | '라이트' | '미지정'
+export interface CoverageModelCounts {
+  ecg: number
+  spo2: number
+  bp: number
 }
 
 export interface CoverageTotals {
