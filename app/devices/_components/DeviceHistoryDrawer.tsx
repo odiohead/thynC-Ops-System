@@ -3,6 +3,7 @@
 /**
  * 이력 드로어 (§6.1-B, 우측 슬라이드 / 모바일 바텀시트) — GROUP B
  * getUnitDetail(deviceId) → 헤더 'A126861 · 심전계 MC200M-T · 배치 중 @ 병원 병동 (배치일) · 창고 개체: …'
+ *  - 헤더 용도 배지(판매용/평가용/미지정) — USER+는 인라인 select로 변경(patchDevice({usageTypeId}) → CORRECT 이벤트)
  *  - '온프렘 스냅샷 ▸'(macAddress·extDeviceCode·ext_* 값 있을 때만) · 메모 인라인 저장(USER+, patchDevice({memo}))
  *  - 버튼 [병동 이동] [회수] [교체](canWrite, ACTIVE) → onAction · 관리 ▾(canAdmin): 이벤트 정정(patchEvent, §8.2 허용 필드) · 마지막 이벤트 취소(cancelEvent) · 모델/시리얼 정정(onAction('correct'))
  *  - 이벤트 목록 최신순(서버 순서 그대로): 업무일자 · 타입 배지 · 요약(병동 from→to / 사유 / 교체·이관 상대 링크 → 그 기기 드로어) · 연결(refLink) · 기록자 · 기록 시각(업무일자와 다르면 회색 병기)
@@ -33,11 +34,11 @@ import {
   type DeviceEventType,
   type RegistryRefType,
 } from '@/lib/deviceRegistryShared'
-import { cancelEvent, errorMessage, getRecoveryReasons, getUnitDetail, getWards, patchDevice, patchEvent } from './api'
+import { cancelEvent, errorMessage, getRecoveryReasons, getUnitDetail, getUsageTypes, getWards, patchDevice, patchEvent } from './api'
 import { useDevicesToast } from './toast'
 import { RegistryFloatingPanel, RegistryMenuItem } from './RegistryFloatingPanel'
-import { changeSummaryLines, fmtKstDateTime, kstYmd, modelLabel, wmsCell, ymdOrDash } from './deviceDisplay'
-import { toDeviceRef, type Capabilities, type DeviceAction, type DeviceDetail, type DeviceDetailEvent, type DeviceRef, type EventPatchBody, type RecoveryReason, type Ward } from './types'
+import { changeSummaryLines, fmtKstDateTime, kstYmd, modelLabel, usageBadgeVariant, wmsCell, ymdOrDash } from './deviceDisplay'
+import { toDeviceRef, type Capabilities, type DeviceAction, type DeviceDetail, type DeviceDetailEvent, type DeviceRef, type EventPatchBody, type RecoveryReason, type UsageType, type Ward } from './types'
 
 export interface DeviceHistoryDrawerProps {
   /** URL ?device= — null이면 닫힘 */
@@ -118,7 +119,44 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
     setEditingEventId(null)
     setMemoEditing(false)
     setSnapshotOpen(false)
+    setUsageEditing(false)
   }, [deviceId])
+
+  // ── 용도(판매용/평가용) — 마스터는 드로어가 열려 있는 동안 1회 로드, USER+ 인라인 변경(CORRECT)
+  const [usageTypes, setUsageTypes] = useState<UsageType[] | null>(null)
+  const [usageEditing, setUsageEditing] = useState(false)
+  const [usageSaving, setUsageSaving] = useState(false)
+  useEffect(() => {
+    if (!open || usageTypes) return
+    let alive = true
+    getUsageTypes()
+      .then((r) => alive && setUsageTypes(r))
+      .catch(() => alive && setUsageTypes([]))
+    return () => {
+      alive = false
+    }
+  }, [open, usageTypes])
+  const saveUsage = async (raw: string) => {
+    if (!device || usageSaving) return
+    const next = raw ? Number(raw) : null
+    if (next === (device.usageTypeId ?? null)) {
+      setUsageEditing(false)
+      return
+    }
+    setUsageSaving(true)
+    try {
+      const r = await patchDevice(device.id, { usageTypeId: next })
+      const u = usageTypes?.find((x) => x.id === next) ?? null
+      setDevice({ ...device, usageTypeId: r.device.usageTypeId ?? next, usageType: u ? { id: u.id, name: u.name, value: u.value } : null })
+      setUsageEditing(false)
+      notify(`${device.serialNo} 용도 → ${u?.name ?? '미지정'}`, 'success')
+      onMutated()
+    } catch (e) {
+      notify(errorMessage(e, '용도 변경에 실패했습니다.'), 'error')
+    } finally {
+      setUsageSaving(false)
+    }
+  }
 
   // ── 메모
   const [memoEditing, setMemoEditing] = useState(false)
@@ -226,6 +264,41 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
                     <span className="font-mono text-lg font-semibold leading-tight">{device.serialNo}</span>
                     {device.serialRaw && <span className="font-mono text-xs text-muted-foreground">원문 {device.serialRaw}</span>}
                     <Badge variant={device.status === 'ACTIVE' ? 'success' : 'default'}>{DEVICE_STATUS_LABELS[device.status]}</Badge>
+                    {canWrite && usageEditing ? (
+                      <Select
+                        aria-label="용도"
+                        autoFocus
+                        value={device.usageTypeId != null ? String(device.usageTypeId) : ''}
+                        disabled={usageSaving || usageTypes == null}
+                        onChange={(e) => void saveUsage(e.target.value)}
+                        onBlur={() => !usageSaving && setUsageEditing(false)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') setUsageEditing(false)
+                        }}
+                        className="h-7 w-auto text-xs"
+                      >
+                        <option value="">미지정</option>
+                        {(usageTypes ?? []).map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name}
+                          </option>
+                        ))}
+                      </Select>
+                    ) : canWrite ? (
+                      <button
+                        type="button"
+                        onClick={() => setUsageEditing(true)}
+                        className="rounded hover:bg-accent"
+                        title="용도 변경 (판매용/평가용 — CORRECT 이벤트로 기록, 평가용은 계약 대조 제외)"
+                        aria-label="용도 변경"
+                      >
+                        {device.usageType ? <Badge variant={usageBadgeVariant(device.usageType) ?? 'default'}>{device.usageType.name}</Badge> : <Badge variant="outline">용도 미지정</Badge>}
+                      </button>
+                    ) : device.usageType ? (
+                      <Badge variant={usageBadgeVariant(device.usageType) ?? 'default'} title={device.usageType.value === 'EVAL' ? '평가용 — 계약 대조 제외' : undefined}>
+                        {device.usageType.name}
+                      </Badge>
+                    ) : null}
                   </div>
                   <div className="mt-1 text-sm text-foreground">
                     {modelLabel(device.deviceInfo?.deviceName, device.deviceInfo?.deviceModel)}
@@ -451,6 +524,7 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
                         onMutated()
                       },
                       notify,
+                      usageTypes: usageTypes ?? [],
                     })}
                   </ol>
                 )}
@@ -479,6 +553,8 @@ interface TimelineArgs {
   onOpenDevice: (id: number) => void
   onSaved: () => void
   notify: ReturnType<typeof useDevicesToast>
+  /** CORRECT 용도 변경 라벨 해석용 */
+  usageTypes: readonly UsageType[]
 }
 
 function renderTimeline(a: TimelineArgs): ReactNode[] {
@@ -511,6 +587,7 @@ function renderTimeline(a: TimelineArgs): ReactNode[] {
         onSaved={a.onSaved}
         onCancelEdit={() => a.onEdit(null)}
         notify={a.notify}
+        usageTypes={a.usageTypes}
       />
     )
   })
@@ -530,6 +607,7 @@ function EventRow({
   onSaved,
   onCancelEdit,
   notify,
+  usageTypes,
 }: {
   ev: DeviceDetailEvent
   isLatest: boolean
@@ -543,6 +621,7 @@ function EventRow({
   onSaved: () => void
   onCancelEdit: () => void
   notify: ReturnType<typeof useDevicesToast>
+  usageTypes: readonly UsageType[]
 }) {
   const occurred = toYmd(ev.occurredOn)
   const createdKst = fmtKstDateTime(ev.createdAt)
@@ -561,7 +640,7 @@ function EventRow({
         <div className="min-w-0 flex-1">
           <div className="text-foreground">
             {showHospital && ev.hospital && <span className="mr-1 text-muted-foreground">{ev.hospital.hospitalName}</span>}
-            <EventSummary ev={ev} onOpenDevice={onOpenDevice} />
+            <EventSummary ev={ev} onOpenDevice={onOpenDevice} usageTypes={usageTypes} />
             {importLocked && ev.importBatch && (
               <span className="ml-1 text-muted-foreground">
                 (임포트 #{ev.importBatch.id}
@@ -622,7 +701,7 @@ function DeviceLink({ id, serial, onOpenDevice }: { id: number; serial: string; 
   )
 }
 
-function EventSummary({ ev, onOpenDevice }: { ev: DeviceDetailEvent; onOpenDevice: (id: number) => void }) {
+function EventSummary({ ev, onOpenDevice, usageTypes }: { ev: DeviceDetailEvent; onOpenDevice: (id: number) => void; usageTypes: readonly UsageType[] }) {
   switch (ev.eventType) {
     case 'REGISTER':
       return (
@@ -655,7 +734,7 @@ function EventSummary({ ev, onOpenDevice }: { ev: DeviceDetailEvent; onOpenDevic
         </>
       )
     case 'CORRECT': {
-      const lines = changeSummaryLines(ev.changes)
+      const lines = changeSummaryLines(ev.changes, undefined, usageTypes)
       return <>{lines.length ? lines.join(' · ') : '식별 정정'}</>
     }
     default:

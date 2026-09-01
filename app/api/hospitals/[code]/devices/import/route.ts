@@ -25,6 +25,8 @@ type Params = { params: { code: string } }
 interface ImportOptions {
   mode: ImportBatchMode | null
   deviceInfoId: number | null
+  /** 폼 공통 용도(행에 용도 열이 없을 때 적용) */
+  usageTypeId: number | null
   wardMode: 'column' | 'fixed'
   wardId: number | null
   emptyWardCell: 'warn' | 'error'
@@ -53,6 +55,7 @@ function parseOptions(raw: Record<string, unknown>): ImportOptions {
   return {
     mode: (modeRaw as ImportBatchMode | null) ?? null,
     deviceInfoId: optPositiveInt(raw.deviceInfoId, '모델(deviceInfoId)'),
+    usageTypeId: optPositiveInt(raw.usageTypeId, '용도(usageTypeId)'),
     wardMode: wardModeRaw,
     wardId: optPositiveInt(raw.wardId, '고정 병동(wardId)'),
     emptyWardCell: emptyRaw,
@@ -131,6 +134,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const mode: ImportBatchMode = options.mode ?? (input.shape.onprem ? 'ONPREM_DRAFT' : 'REGISTER')
     const defaults = {
       deviceInfoId: options.deviceInfoId,
+      usageTypeId: options.usageTypeId,
       wardMode: options.wardMode,
       wardId: options.wardId,
       emptyWardCell: options.emptyWardCell,
@@ -187,6 +191,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         mode,
         sourceKind,
         fileName,
+        usageTypeId: options.usageTypeId,
         occurredOn: verified.summary.occurredOn,
         counts: {
           rows: batch.rowCount,

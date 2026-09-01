@@ -260,6 +260,82 @@ export const RECOVERY_REASON_FALLBACK_LABELS: Record<RecoveryReasonValue, string
   TRANSFER: '이관',
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 용도(usage type) — StatusCode DEVICE_USAGE_TYPE (2026-09-01 결정: 판매용/평가용 2값, NULL=미지정)
+// 유닛(device_units) 속성 — 위치가 아닌 물건의 속성. 계약 대조(§9.1)에서 EVAL은 제외한다. '대웅제약재고'는 판매용 창고이지 제3의 값이 아님
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const DEVICE_USAGE_TYPE_CATEGORY = 'DEVICE_USAGE_TYPE'
+
+export const USAGE_TYPE_VALUES = ['SALE', 'EVAL'] as const
+export type UsageTypeValue = (typeof USAGE_TYPE_VALUES)[number]
+
+/** value별 기본 표시명 — 실제 표시는 status_codes.name(설정에서 편집), 마스터 조인 불가 시 폴백용 */
+export const USAGE_TYPE_LABELS: Record<UsageTypeValue, string> = {
+  SALE: '판매용',
+  EVAL: '평가용',
+}
+
+export const USAGE_TYPE_UNSET_LABEL = '미지정'
+
+/** 임포트·등록 입력 별칭(대소문자·공백 무시) → value. name 정확 일치는 `matchUsageType`이 마스터로 처리 */
+export const USAGE_TYPE_INPUT_ALIASES: Record<UsageTypeValue, readonly string[]> = {
+  SALE: ['SALE', '판매용', '판매'],
+  EVAL: ['EVAL', '평가용', '평가'],
+}
+
+export const USAGE_TYPE_INVALID_MESSAGE = '용도 값이 올바르지 않습니다 (판매용/평가용)'
+
+export interface UsageTypeRef {
+  id: number
+  name: string
+  value: string | null
+}
+
+/** 목록 필터 `usage=` 어휘 — SALE/EVAL(value) 또는 none(미지정) */
+export const USAGE_FILTERS = ['SALE', 'EVAL', 'none'] as const
+export type UsageFilter = (typeof USAGE_FILTERS)[number]
+
+function normUsageToken(s: string): string {
+  return s.normalize('NFC').replace(/[\s　]+/g, '').toUpperCase()
+}
+
+/** 입력 토큰이 용도 별칭인가(붙여넣기 열 판별용 — '평가용'·'EVAL' 등) */
+export function isUsageTypeToken(s: string | null | undefined): boolean {
+  if (!s) return false
+  const t = normUsageToken(s)
+  return USAGE_TYPE_VALUES.some((v) => USAGE_TYPE_INPUT_ALIASES[v].some((a) => normUsageToken(a) === t))
+}
+
+/** 입력 토큰 → value (별칭 매칭). 미매칭 null */
+export function usageValueFromInput(s: string | null | undefined): UsageTypeValue | null {
+  if (!s) return null
+  const t = normUsageToken(s)
+  return USAGE_TYPE_VALUES.find((v) => USAGE_TYPE_INPUT_ALIASES[v].some((a) => normUsageToken(a) === t)) ?? null
+}
+
+/**
+ * 입력 문자열 → 용도 마스터 행. value 별칭(SALE/EVAL/판매용/평가용…) → 마스터 name 정확 일치(공백 무시) 순.
+ * 빈 입력은 null(미지정), 미매칭은 undefined(호출부가 오류 판정 — `USAGE_TYPE_INVALID_MESSAGE`).
+ */
+export function matchUsageType<T extends UsageTypeRef>(types: readonly T[], input: string | null | undefined): T | null | undefined {
+  const raw = (input ?? '').trim()
+  if (!raw) return null
+  const value = usageValueFromInput(raw)
+  if (value) {
+    const byValue = types.find((t) => t.value === value)
+    if (byValue) return byValue
+  }
+  const key = normUsageToken(raw)
+  return types.find((t) => normUsageToken(t.name) === key || (t.value != null && normUsageToken(t.value) === key))
+}
+
+/** 용도 라벨 — 마스터 name 우선, 없으면 value 폴백, 미지정은 '—'(dash=false면 '미지정') */
+export function usageTypeLabel(u: UsageTypeRef | null | undefined, opts?: { unset?: string }): string {
+  if (!u) return opts?.unset ?? USAGE_TYPE_UNSET_LABEL
+  return u.name || (u.value && u.value in USAGE_TYPE_LABELS ? USAGE_TYPE_LABELS[u.value as UsageTypeValue] : u.value) || '—'
+}
+
 /**
  * 계약완료 딜 상태명 — 기대 수량(Σ계약완료 딜 daewoong_device_count) 조인 조건(§9.1).
  * 2026-08-03 도입 병상 동기화 스크립트와 동일 규칙: `status_codes.category='SALES_DEAL_STATUS' AND name='계약완료'`.
@@ -386,6 +462,8 @@ export interface ParsedSerialLine {
   serialInput: string
   wardInput?: string
   memo?: string
+  /** 3열 이후 중 용도 별칭(판매용/평가용/SALE/EVAL)인 셀 — 메모에서 분리 */
+  usageInput?: string
 }
 
 /** 열 구분: 탭 또는 2칸 이상 공백 */
@@ -395,8 +473,9 @@ const TOKEN_SPLIT_RE = /[,;\s　]+/
 
 /**
  * 줄당 1건 — `A126861` / `A126862<TAB>6병동` / `A126863, A126864 A126865`(탭 없으면 토큰 전부 시리얼)
- * / `gw4c11-b008381<TAB>6병동<TAB>신관 GW`. `#` 뒤는 주석(줄 시작 또는 공백 뒤), 빈 줄 무시, 줄 번호 보존.
- * 열 모드의 첫 열에 시리얼이 여럿이면 같은 병동·메모로 각각 행이 된다.
+ * / `gw4c11-b008381<TAB>6병동<TAB>신관 GW` / `A126866<TAB>6병동<TAB>평가용`(3열 이후 용도 별칭 셀은 usageInput으로 분리).
+ * `#` 뒤는 주석(줄 시작 또는 공백 뒤), 빈 줄 무시, 줄 번호 보존.
+ * 열 모드의 첫 열에 시리얼이 여럿이면 같은 병동·메모·용도로 각각 행이 된다.
  *
  * 반환은 최대 `max + 1`건 — 호출부는 `rows.length > max`이면 'MAX 초과' 오류로 처리한다(대용량 붙여넣기 전량 파싱 방지).
  */
@@ -413,11 +492,13 @@ export function parseSerialLines(text: string | null | undefined, max: number = 
     if (columnMode) {
       const cols = line.trim().split(COLUMN_SPLIT_RE).map((c) => c.trim())
       const wardInput = cols[1] || undefined
-      const memo = cols.slice(2).filter(Boolean).join(' ') || undefined
+      const rest = cols.slice(2).filter(Boolean)
+      const usageInput = rest.find((c) => isUsageTypeToken(c))
+      const memo = rest.filter((c) => c !== usageInput).join(' ') || undefined
       const serials = cols[0].split(TOKEN_SPLIT_RE).filter(Boolean)
       for (const serialInput of serials) {
         if (rows.length >= limit) break
-        rows.push({ row, serialInput, ...(wardInput ? { wardInput } : {}), ...(memo ? { memo } : {}) })
+        rows.push({ row, serialInput, ...(wardInput ? { wardInput } : {}), ...(memo ? { memo } : {}), ...(usageInput ? { usageInput } : {}) })
       }
     } else {
       const serials = line.trim().split(TOKEN_SPLIT_RE).filter(Boolean)

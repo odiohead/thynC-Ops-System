@@ -110,5 +110,6 @@ export function projectionSnapshot(d: DeviceRow) {
     macAddress: d.macAddress,
     extDeviceCode: d.extDeviceCode,
     memo: d.memo,
+    usageTypeId: d.usageTypeId,
   }
 }

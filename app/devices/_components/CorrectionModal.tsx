@@ -14,9 +14,9 @@ import Button from '@/app/components/ui/Button'
 import { Input, Select } from '@/app/components/ui/Input'
 import { cn } from '@/lib/cn'
 import { isFutureYmd, isYmd, matchesSerialPattern, normalizeSerial, todayKst } from '@/lib/deviceRegistryShared'
-import { errorMessage, getUnitDetail, patchDevice } from './api'
+import { errorMessage, getUnitDetail, getUsageTypes, patchDevice } from './api'
 import { modelLabel } from './deviceDisplay'
-import type { DevicePatchBody, DeviceRef, ModelSummary, MutationDone } from './types'
+import type { DevicePatchBody, DeviceRef, ModelSummary, MutationDone, UsageType } from './types'
 
 export interface CorrectionModalProps {
   open: boolean
@@ -33,6 +33,8 @@ interface FormState {
   serialNo: string
   macAddress: string
   extDeviceCode: string
+  /** 용도 id 문자열, '' = 미지정 */
+  usageTypeId: string
   occurredOn: string
 }
 
@@ -41,6 +43,7 @@ interface Baseline {
   serialNo: string
   macAddress: string | null
   extDeviceCode: string | null
+  usageTypeId: number | null
   serialPattern: string | null
   deviceName: string
   deviceModel: string
@@ -48,7 +51,7 @@ interface Baseline {
   hospitalCode: string | null
 }
 
-const EMPTY_FORM: FormState = { deviceInfoId: '', serialNo: '', macAddress: '', extDeviceCode: '', occurredOn: '' }
+const EMPTY_FORM: FormState = { deviceInfoId: '', serialNo: '', macAddress: '', extDeviceCode: '', usageTypeId: '', occurredOn: '' }
 
 export function CorrectionModal({ open, onClose, hospitalCode, device, models, onDone }: CorrectionModalProps) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
@@ -56,6 +59,18 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [usageTypes, setUsageTypes] = useState<UsageType[] | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    getUsageTypes()
+      .then((r) => alive && setUsageTypes(r))
+      .catch(() => alive && setUsageTypes([]))
+    return () => {
+      alive = false
+    }
+  }, [open])
 
   // 열릴 때 현재 값 로드 — DeviceRef에는 MAC·닉네임이 없다
   useEffect(() => {
@@ -73,6 +88,7 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
       serialNo: device.serialNo,
       macAddress: '',
       extDeviceCode: '',
+      usageTypeId: device.usageTypeId != null ? String(device.usageTypeId) : '',
       occurredOn: todayKst(),
     })
     getUnitDetail(device.id)
@@ -85,6 +101,7 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
           serialNo: d.serialNo,
           macAddress: d.macAddress,
           extDeviceCode: d.extDeviceCode,
+          usageTypeId: d.usageTypeId ?? null,
           serialPattern: d.deviceInfo?.serialPattern ?? null,
           deviceName: d.deviceInfo?.deviceName ?? '',
           deviceModel: d.deviceInfo?.deviceModel ?? '',
@@ -96,6 +113,7 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
           serialNo: d.serialNo,
           macAddress: d.macAddress ?? '',
           extDeviceCode: d.extDeviceCode ?? '',
+          usageTypeId: d.usageTypeId != null ? String(d.usageTypeId) : '',
           occurredOn: todayKst(),
         })
       })
@@ -130,6 +148,8 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
     if ((mac || null) !== (base.macAddress ?? null)) out.macAddress = mac || null
     const ext = form.extDeviceCode.trim()
     if ((ext || null) !== (base.extDeviceCode ?? null)) out.extDeviceCode = ext || null
+    const usage = form.usageTypeId ? Number(form.usageTypeId) : null
+    if (usage !== (base.usageTypeId ?? null)) out.usageTypeId = usage
     return out
   }, [base, form, serialChanged, normalized.serialNo])
 
@@ -163,6 +183,7 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
       }
       if ('macAddress' in body) parts.push(body.macAddress ? `MAC ${body.macAddress}` : 'MAC 삭제')
       if ('extDeviceCode' in body) parts.push(body.extDeviceCode ? `닉네임 ${body.extDeviceCode}` : '닉네임 삭제')
+      if ('usageTypeId' in body) parts.push(body.usageTypeId == null ? '용도 미지정' : `용도 ${usageTypes?.find((u) => u.id === body.usageTypeId)?.name ?? body.usageTypeId}`)
       onDone({ message: `식별 정정: ${parts.length ? parts.join(' · ') : base.serialNo}`, openDeviceId: device.id })
     } catch (err) {
       setError(errorMessage(err, '정정에 실패했습니다.'))
@@ -180,7 +201,7 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
       ) : (
         <form onSubmit={submit} className="space-y-4 text-sm">
           <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            식별 속성(모델·시리얼·MAC·닉네임)의 <b>오타 보정</b>용입니다. CORRECT 이벤트로 기록되며 드로어에서 취소할 수 있습니다. 상태·병원·병동은 등록/이동/회수 이벤트로만 바뀝니다.
+            식별 속성(모델·시리얼·MAC·닉네임·용도)의 <b>오타 보정</b>용입니다. CORRECT 이벤트로 기록되며 드로어에서 취소할 수 있습니다. 상태·병원·병동은 등록/이동/회수 이벤트로만 바뀝니다.
             {hospitalCode && base?.hospitalCode && base.hospitalCode !== hospitalCode && (
               <span className="mt-1 block text-warning-subtle-foreground">이 기기는 현재 선택한 병원({hospitalCode})이 아닌 {base.hospitalCode} 소속입니다.</span>
             )}
@@ -246,6 +267,23 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
                 닉네임(온프렘 deviceCode)
               </label>
               <Input id="corr-ext" value={form.extDeviceCode} onChange={(e) => set('extDeviceCode', e.target.value)} placeholder="S12" disabled={loading || !base} autoComplete="off" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label htmlFor="corr-usage" className="mb-1 block text-xs font-medium text-muted-foreground">
+                용도
+              </label>
+              <Select id="corr-usage" value={form.usageTypeId} onChange={(e) => set('usageTypeId', e.target.value)} disabled={loading || !base || usageTypes == null}>
+                <option value="">미지정</option>
+                {(usageTypes ?? []).map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground">판매용/평가용 — 평가용은 계약 대조에서 제외. 용도만 바꾸는 것은 USER 등급도 드로어에서 가능합니다.</p>
             </div>
           </div>
 

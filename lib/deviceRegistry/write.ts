@@ -22,12 +22,15 @@ import {
   loadDeviceEvents,
   loadDevices,
   loadTrackedModels,
+  loadUsageTypes,
   mapDbError,
   prepareCtx,
   reasonByValue,
   rebuildUnitProjection,
   requireRecoveryReason,
+  requireUsageType,
   resolveModel,
+  resolveUsageTypeInput,
   resolveWardInput,
   resolveWardsByName,
   retroIllegal,
@@ -48,6 +51,7 @@ import {
   type SkippedItem,
   type TrackedModel,
   type UnitRow,
+  type UsageType,
   type WardRef,
 } from './core'
 import { matchInventoryUnits, type WmsMatch } from './wms'
@@ -129,6 +133,10 @@ export interface RegisterItem {
   memo?: string | null
   macAddress?: string | null
   extDeviceCode?: string | null
+  /** 용도(DEVICE_USAGE_TYPE id) — 라우트가 폼 공통값을 항목별로 채워 넘긴다. 신규 유닛에 부여, 기존 유닛은 비어 있을 때만 채움 */
+  usageTypeId?: number | null
+  /** 용도 입력(name/value 별칭 — '판매용'·'EVAL' 등). 미매칭은 400 '용도 값이 올바르지 않습니다 (판매용/평가용)' */
+  usageTypeInput?: string | null
 }
 
 export interface RegisterOpts extends RegistryOpts {
@@ -146,6 +154,8 @@ export interface RegisteredRef {
   wardId: number | null
   /** 이번 호출에서 유닛(시리얼 정체성)을 새로 만들었는지 — 재등록·고아 유닛 재사용이면 false */
   unitCreated: boolean
+  /** 등록 후 유닛의 용도 id(null=미지정) */
+  usageTypeId: number | null
 }
 
 export interface TransferredRef extends RegisteredRef {
@@ -175,6 +185,8 @@ interface PreparedItem {
   model: TrackedModel
   /** 모델을 명시(deviceInfoId·modelInput·onpremDeviceType)했는지 — 기존 유닛과 다르면 경고 */
   modelExplicit: boolean
+  /** 행 용도(해석 완료) — 기존 유닛에 다른 용도가 있으면 유지 + 경고 */
+  usage: UsageType | null
   /** 배치 행이 있는 기존 개체 */
   existing: DeviceRow | null
   /** 기존 유닛(배치 유무 무관) */
@@ -196,8 +208,9 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
   const importMode = opts?.importBatchId != null
   if (!Array.isArray(items) || items.length === 0) throw new RegistryError(400, '등록할 시리얼이 없습니다')
 
-  // 1) 시리얼 정규화·중복 병합·모델 판별
+  // 1) 시리얼 정규화·중복 병합·모델 판별·용도 해석
   const models = await loadTrackedModels(tx)
+  const usageTypes = await loadUsageTypes(tx)
   const prepared: PreparedItem[] = []
   const seen = new Set<string>()
   items.forEach((item, index) => {
@@ -216,6 +229,13 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
     })
     if (!res.model) throw new RegistryError(400, `${ns.serialNo}: ${res.error}`, { serial: ns.serialNo })
     for (const w of res.warnings) warnings.push(`${ns.serialNo}: ${w}`)
+    let usage: UsageType | null
+    try {
+      usage = resolveUsageTypeInput(usageTypes, { usageTypeId: item.usageTypeId, usageTypeInput: item.usageTypeInput }, null)
+    } catch (e) {
+      if (e instanceof RegistryError) throw new RegistryError(e.status, `${ns.serialNo}: ${e.message}`, { serial: ns.serialNo })
+      throw e
+    }
     prepared.push({
       index,
       item,
@@ -223,6 +243,7 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
       serialRaw: ns.serialRaw,
       model: res.model,
       modelExplicit: item.deviceInfoId != null || !!item.modelInput || item.onpremDeviceType != null,
+      usage,
       existing: null,
       unit: null,
       unitCreated: false,
@@ -244,6 +265,12 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
       const unitModel = models.find((m) => m.id === hit.unit.deviceInfoId)
       if (x.modelExplicit) warnings.push(`${x.serialNo}: 이미 ${unitModel?.deviceModel ?? `#${hit.unit.deviceInfoId}`}(으)로 등록된 시리얼 — 지정 모델(${x.model.deviceModel})은 무시합니다`)
       if (unitModel) x.model = unitModel
+    }
+    // 용도도 유닛 속성 — 기존 값이 있으면 유지(변경은 CORRECT), 다른 값을 명시했으면 경고만
+    if (x.usage && hit.unit.usageTypeId != null && hit.unit.usageTypeId !== x.usage.id) {
+      const cur = hit.unit.usageType?.name ?? usageTypes.find((u) => u.id === hit.unit.usageTypeId)?.name ?? `#${hit.unit.usageTypeId}`
+      warnings.push(`${x.serialNo}: 이미 용도 ${cur}(으)로 지정된 시리얼 — 지정 용도(${x.usage.name})는 무시합니다 (변경은 식별 정정)`)
+      x.usage = null
     }
     const d = hit.device
     x.existing = d
@@ -307,6 +334,7 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
       deviceInfoId: x.unit?.deviceInfoId ?? x.model.id,
       macAddress: x.item.macAddress,
       source: p.source,
+      usageTypeId: x.usage?.id ?? null,
     })
     x.unit = r.unit
     x.unitCreated = r.created
@@ -381,7 +409,7 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
     wms: Object.fromEntries(Array.from(wmsMap.entries())),
   }
   for (const s of slots) {
-    const ref: RegisteredRef = { id: s.deviceId, serialNo: s.x.serialNo, eventId: events[s.registerIdx].id, wardId: s.x.ward?.id ?? null, unitCreated: s.x.unitCreated }
+    const ref: RegisteredRef = { id: s.deviceId, serialNo: s.x.serialNo, eventId: events[s.registerIdx].id, wardId: s.x.ward?.id ?? null, unitCreated: s.x.unitCreated, usageTypeId: s.x.unit?.usageTypeId ?? null }
     if (s.x.kind === 'create') result.created.push(ref)
     else if (s.x.kind === 'reregister') result.reregistered.push(ref)
     else if (s.x.kind === 'transfer') {
@@ -512,6 +540,10 @@ export interface ReplaceInput {
   reasonCodeId?: number | null
   /** (1) 신 시리얼이 타 병원 ACTIVE일 때만 유효 */
   newConflict?: 'TRANSFER' | null
+  /** 구 기기 소급 등록(원장에 없음) 시 용도 */
+  oldUsageTypeId?: number | null
+  /** 신 기기 용도 — 신규 유닛일 때 부여. 생략 시 구 기기 용도를 승계(교체기는 같은 용도가 일반적) */
+  newUsageTypeId?: number | null
 }
 
 export interface ReplaceResult {
@@ -543,6 +575,8 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
     const autoCreate = opts?.autoCreateWard ?? true
     const models = await loadTrackedModels(tx)
     const reason = input.reasonCodeId != null ? await requireRecoveryReason(tx, Number(input.reasonCodeId)) : await reasonByValue(tx, 'DEFECT')
+    const oldUsage = await requireUsageType(tx, input.oldUsageTypeId == null ? null : Number(input.oldUsageTypeId))
+    const newUsage = await requireUsageType(tx, input.newUsageTypeId == null ? null : Number(input.newUsageTypeId))
 
     // ── 구 기기 식별 (유닛 + 배치)
     let old: DeviceRow | null = null
@@ -552,7 +586,7 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
     if (input.oldDeviceId != null) {
       old = await getDeviceOr404(tx, Number(input.oldDeviceId))
       oldKey = old.serialNo
-      oldUnit = (await tx.deviceUnit.findUnique({ where: { id: old.id } }))!
+      oldUnit = (await tx.deviceUnit.findUnique({ where: { id: old.id }, include: { usageType: { select: { id: true, name: true, value: true } } } }))!
     } else {
       const ns = normalizeSerial(input.oldSerial)
       if (!ns.serialNo) throw new RegistryError(400, '구 기기 시리얼을 입력하세요')
@@ -638,10 +672,16 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
 
     // ── 유닛 확보 (이벤트 related_device_id에 유닛 id가 필요) — 배치 행은 fold가 만든다
     if (oldCase === 'backfill') {
-      oldUnit = (await getOrCreateUnit(tx, { serialNo: oldKey, serialRaw: oldRaw, deviceInfoId: oldUnit?.deviceInfoId ?? oldModel!.id, source: 'BACKFILL' })).unit
+      oldUnit = (await getOrCreateUnit(tx, { serialNo: oldKey, serialRaw: oldRaw, deviceInfoId: oldUnit?.deviceInfoId ?? oldModel!.id, source: 'BACKFILL', usageTypeId: oldUsage?.id ?? null })).unit
     }
     if (newCase === 'create') {
-      newUnit = (await getOrCreateUnit(tx, { serialNo: newNs.serialNo, serialRaw: newNs.serialRaw, deviceInfoId: newUnit?.deviceInfoId ?? newModel!.id, source: p.source })).unit
+      // 신 기기 용도: 지정값 > 구 기기 용도 승계(교체기는 같은 용도가 일반적) > 미지정. 기존 유닛(재등록·고아)은 getOrCreateUnit이 비어 있을 때만 채운다
+      const inheritUsage = newUsage?.id ?? oldUnit?.usageTypeId ?? null
+      newUnit = (await getOrCreateUnit(tx, { serialNo: newNs.serialNo, serialRaw: newNs.serialRaw, deviceInfoId: newUnit?.deviceInfoId ?? newModel!.id, source: p.source, usageTypeId: inheritUsage })).unit
+    } else if (newUsage && newUnit && newUnit.usageTypeId != null && newUnit.usageTypeId !== newUsage.id) {
+      warnings.push(`신 기기 ${newNs.serialNo}: 이미 용도가 지정된 시리얼 — 지정 용도(${newUsage.name})는 무시합니다 (변경은 식별 정정)`)
+    } else if (newUsage && newUnit && newUnit.usageTypeId == null) {
+      newUnit = await tx.deviceUnit.update({ where: { id: newUnit.id }, data: { usageTypeId: newUsage.id }, include: { usageType: { select: { id: true, name: true, value: true } } } })
     }
     const oldId = oldUnit!.id
     const newId = newUnit!.id
@@ -833,6 +873,8 @@ export interface CorrectChanges {
   serialNo?: string | null
   macAddress?: string | null
   extDeviceCode?: string | null
+  /** 용도(DEVICE_USAGE_TYPE id, null=미지정) — 유닛 속성. 라우트 권한은 write(USER+) — 나머지 식별 보정은 admin */
+  usageTypeId?: number | null
 }
 
 export type ChangeSet = Record<string, { before: unknown; after: unknown }>
@@ -896,6 +938,14 @@ export async function correctDevice(ctx: RegistryCtx, input: { deviceId: number;
       if (v !== (device.extDeviceCode ?? null)) {
         changes.extDeviceCode = { before: device.extDeviceCode, after: v }
         placementData.extDeviceCode = v
+      }
+    }
+    if (ch.usageTypeId !== undefined) {
+      const u = await requireUsageType(tx, ch.usageTypeId == null ? null : Number(ch.usageTypeId))
+      const v = u?.id ?? null
+      if (v !== (device.usageTypeId ?? null)) {
+        changes.usageTypeId = { before: device.usageTypeId, after: v }
+        unitData.usageTypeId = v
       }
     }
     if (Object.keys(changes).length === 0) throw new RegistryError(400, '변경 사항이 없습니다')

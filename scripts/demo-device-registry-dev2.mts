@@ -7,7 +7,7 @@
  * 3층 구조(B-20): 시리얼 정체성은 device_units(공개 device id), 병원 배치는 hospital_devices(device_id UNIQUE). cleanup은 유닛까지 지운다.
  *
  * 데모 시나리오(설계 §6 화면 상태를 모두 볼 수 있게):
- *   1) go-live 임포트(붙여넣기, 2026-06-10): ECG 8 · SpO2 8 · GW 2 → 6병동/7병동/ICU
+ *   1) go-live 임포트(붙여넣기, 2026-06-10): ECG 8 · SpO2 8 · GW 2 → 6병동/7병동/ICU — P990107·P990108은 평가용(EVAL), 나머지 판매용(폼 기본)
  *   2) 병동 이동 A990103 6병동→7병동 (2026-07-02)
  *   3) 분실 회수 P990105 (2026-07-20)
  *   4) AS 교체 A990104 → A990201 (불량, 2026-08-12, 유지보수 MNT-202608-0011 연결)
@@ -64,16 +64,18 @@ async function seed() {
   const ctx = (occurredOn: string, extra: Partial<Parameters<typeof reg.registerDevices>[0]> = {}) => ({ hospitalCode: H, actor: ACTOR, occurredOn, ...extra })
 
   // 1) go-live 임포트 (붙여넣기 형식)
-  const rows: { row: number; serialInput: string; wardInput?: string }[] = []
+  const sale = await prisma.statusCode.findFirstOrThrow({ where: { category: 'DEVICE_USAGE_TYPE', value: 'SALE' } })
+  const rows: { row: number; serialInput: string; wardInput?: string; usageTypeInput?: string }[] = []
   let r = 1
   for (let i = 1; i <= 8; i++) rows.push({ row: r++, serialInput: `A9901${String(i).padStart(2, '0')}`, wardInput: i <= 4 ? '6병동' : '7병동' })
-  for (let i = 1; i <= 8; i++) rows.push({ row: r++, serialInput: `P9901${String(i).padStart(2, '0')}`, wardInput: i <= 4 ? '6병동' : '7병동' })
+  // P990107·P990108은 평가용(EVAL) — 요약 스트립 '(평가용 2 별도)'·커버리지 '평가용' 열·목록 용도 배지 확인용
+  for (let i = 1; i <= 8; i++) rows.push({ row: r++, serialInput: `P9901${String(i).padStart(2, '0')}`, wardInput: i <= 4 ? '6병동' : '7병동', ...(i >= 7 ? { usageTypeInput: '평가용' } : {}) })
   rows.push({ row: r++, serialInput: 'GW6420-B990101', wardInput: '6병동' })
   rows.push({ row: r++, serialInput: 'B990102', wardInput: 'ICU' })
   const imp = await reg.importBatch(ctx('2026-06-10', { memo: 'go-live 1차(데모)' }), {
-    rows, sourceKind: 'PASTE', mode: 'REGISTER', fileName: null, defaults: { wardMode: 'column' },
+    rows, sourceKind: 'PASTE', mode: 'REGISTER', fileName: null, defaults: { wardMode: 'column', usageTypeId: sale.id },
   })
-  console.log(`1) 임포트 배치 #${imp.batch.id}: 등록 ${imp.batch.registeredCount} · 병동 ${imp.result.newWards.map((w) => w.name).join(',')}`)
+  console.log(`1) 임포트 배치 #${imp.batch.id}: 등록 ${imp.batch.registeredCount} · 병동 ${imp.result.newWards.map((w) => w.name).join(',')} · 용도 판매용 기본, P990107·P990108 평가용`)
 
   const dev = async (serialNo: string) => (await prisma.deviceUnit.findUniqueOrThrow({ where: { serialNo } })).id // 공개 device id = 유닛 id
   // 2) 병동 이동
@@ -100,7 +102,14 @@ async function seed() {
   const summary = (await reg.getHospitalDeviceSummary(H))!
   const units = await prisma.deviceUnit.count({ where: { OR: PREFIX.map((p) => ({ serialNo: { startsWith: p } })) } })
   const placements = await prisma.hospitalDevice.count({ where: { unit: { OR: PREFIX.map((p) => ({ serialNo: { startsWith: p } })) } } })
-  console.log(`데모 유닛 ${units}건 / 배치 행 ${placements}건 ·`, '요약:', summary.models.filter((m: { active: number }) => m.active > 0).map((m: { deviceModel: string; active: number; expected: number | null; diff: number | null }) => `${m.deviceModel} 배치 ${m.active}/계약 ${m.expected ?? '—'} (차이 ${m.diff ?? '—'})`).join(' · '))
+  console.log(
+    `데모 유닛 ${units}건 / 배치 행 ${placements}건 · 평가용 ${summary.evalTotal} ·`,
+    '요약:',
+    summary.models
+      .filter((m: { active: number }) => m.active > 0)
+      .map((m: { deviceModel: string; active: number; activeEval: number; activeForCompare: number; expected: number | null; diff: number | null }) => `${m.deviceModel} 배치 ${m.active}(대조 ${m.activeForCompare}·평가 ${m.activeEval})/계약 ${m.expected ?? '—'} (차이 ${m.diff ?? '—'})`)
+      .join(' · ')
+  )
 }
 
 try {

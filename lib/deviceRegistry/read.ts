@@ -13,6 +13,8 @@ import {
   normalizeSerial,
   todayKst,
   type DeviceEventType,
+  type UsageFilter,
+  type UsageTypeRef,
 } from '@/lib/deviceRegistryShared'
 import { RegistryError, loadTrackedModels, ymd, ymdMinusDays, ymdToDate, type DbClient } from './core'
 import { matchInventoryUnits, queryWmsUnits, wmsWarning, type WmsMatch, type WmsMatchInput, type WmsUnitRow } from './wms'
@@ -54,9 +56,15 @@ export interface ModelSummary {
   deviceName: string
   deviceClass: string
   onpremDeviceType: number | null
+  /** 배치 중 전체(용도 무관) */
   active: number
+  /** 배치 중 가운데 평가용(usageType value=EVAL) — 계약 대조에서 제외 */
+  activeEval: number
+  /** 계약 대조용 배치 수 = active − activeEval (판매용 + 미지정) */
+  activeForCompare: number
   recovered30d: number
   expected: number | null
+  /** hard만 activeForCompare − expected */
   diff: number | null
   compare: 'hard' | 'soft' | 'none'
   /** 배치 중 유닛의 WMS 일시 매칭 집계 — out=OUT 매치, inStock=IN_STOCK 매치, unmatched=매치 없음(그 외 상태 포함) */
@@ -77,6 +85,8 @@ export interface HospitalDeviceSummary {
   lastImportAt: string | null
   lastImport: { id: number; createdAt: string; occurredOn: string | null; rowCount: number; registeredCount: number } | null
   activeTotal: number
+  /** 배치 중 평가용 합계(전 모델) */
+  evalTotal: number
   recovered30dTotal: number
   today: string
 }
@@ -91,7 +101,7 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     loadTrackedModels(client),
     client.hospitalDevice.findMany({
       where: { hospitalCode, status: 'ACTIVE' },
-      select: { deviceId: true, unit: { select: { deviceInfoId: true, serialNo: true, serialRaw: true } } },
+      select: { deviceId: true, unit: { select: { deviceInfoId: true, serialNo: true, serialRaw: true, usageType: { select: { value: true } } } } },
     }),
     client.$queryRaw<{ device_info_id: number; cnt: bigint }[]>`
       SELECT u.device_info_id, count(*) AS cnt
@@ -120,6 +130,7 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
   // 배치 중 유닛의 모델별 수 + WMS 일시 매칭 집계(배치 1쿼리)
   const modelById = new Map(models.map((m) => [m.id, m]))
   const activeBy = new Map<number, number>()
+  const evalBy = new Map<number, number>()
   const wmsBy = new Map<number, { out: number; inStock: number; unmatched: number }>()
   const wmsInputs: WmsMatchInput[] = activeUnits.map((r) => ({
     id: r.deviceId,
@@ -132,6 +143,7 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
   for (const r of activeUnits) {
     const mid = r.unit.deviceInfoId
     activeBy.set(mid, (activeBy.get(mid) ?? 0) + 1)
+    if (r.unit.usageType?.value === 'EVAL') evalBy.set(mid, (evalBy.get(mid) ?? 0) + 1)
     const agg = wmsBy.get(mid) ?? { out: 0, inStock: 0, unmatched: 0 }
     const m = matches.get(r.deviceId) ?? null
     if (!m) agg.unmatched += 1
@@ -146,6 +158,8 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
   const out: ModelSummary[] = []
   for (const m of models) {
     const active = activeBy.get(m.id) ?? 0
+    const activeEval = evalBy.get(m.id) ?? 0
+    const activeForCompare = active - activeEval
     const recovered30d = recBy.get(m.id) ?? 0
     if (!m.isActive && active === 0 && recovered30d === 0) continue
     let compare: ModelSummary['compare'] = 'none'
@@ -154,7 +168,7 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     if (m.onpremDeviceType === 1) {
       compare = expected.expected == null ? 'none' : 'hard'
       exp = expected.expected
-      diff = exp == null ? null : active - exp
+      diff = exp == null ? null : activeForCompare - exp // 평가용(EVAL)은 계약 대조에서 제외(§9.1)
     } else if (m.onpremDeviceType === 3) {
       compare = expected.expected == null ? 'none' : 'soft'
       exp = expected.expected
@@ -167,6 +181,8 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
       deviceClass: m.deviceClass,
       onpremDeviceType: m.onpremDeviceType,
       active,
+      activeEval,
+      activeForCompare,
       recovered30d,
       expected: exp,
       diff,
@@ -190,6 +206,7 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
       ? { id: lastImport.id, createdAt: lastImport.createdAt.toISOString(), occurredOn: ymd(lastImport.occurredOn), rowCount: lastImport.rowCount, registeredCount: lastImport.registeredCount }
       : null,
     activeTotal: out.reduce((s, m) => s + m.active, 0),
+    evalTotal: out.reduce((s, m) => s + m.activeEval, 0),
     recovered30dTotal: out.reduce((s, m) => s + m.recovered30d, 0),
     today,
   }
@@ -217,11 +234,17 @@ export interface CoverageRow {
   deals: number
   expected: number | null
   registered: boolean
+  /** 배치 중 ECG 가운데 계약 대조 대상(평가용 제외) */
   activeEcg: number
+  /** 배치 중 ECG 평가용 */
+  activeEcgEval: number
   activeSpo2: number
   activeGw: number
   activeThird: number
   activeTotal: number
+  /** 배치 중 평가용 합계(전 모델) */
+  evalTotal: number
+  /** activeEcg(평가용 제외) − expected */
   diff: number | null
   recovered30d: number
   lastEvent: { type: string; on: string } | null
@@ -231,7 +254,7 @@ export interface CoverageRow {
 export interface CoverageTotals {
   customerHospitals: number
   registeredHospitals: number
-  active: { ecg: number; spo2: number; gw: number; third: number; total: number }
+  active: { ecg: number; spo2: number; gw: number; third: number; total: number; eval: number }
   events30d: number
   recovered30d: number
 }
@@ -269,12 +292,15 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
        GROUP BY 1
     ), act AS (
       SELECT d.hospital_code,
-             count(*) FILTER (WHERE di.onprem_device_type = 1)::int AS ecg,
+             count(*) FILTER (WHERE di.onprem_device_type = 1 AND coalesce(ut.value, '') <> 'EVAL')::int AS ecg,
+             count(*) FILTER (WHERE di.onprem_device_type = 1 AND ut.value = 'EVAL')::int AS ecg_eval,
              count(*) FILTER (WHERE di.onprem_device_type = 3)::int AS spo2,
              count(*) FILTER (WHERE di.device_class = 'GATEWAY')::int AS gw,
              count(*) FILTER (WHERE di.device_class = 'THIRD_PARTY')::int AS third,
-             count(*)::int AS total
+             count(*)::int AS total,
+             count(*) FILTER (WHERE ut.value = 'EVAL')::int AS eval_total
         FROM hospital_devices d JOIN device_units u ON u.id = d.device_id JOIN device_info di ON di.id = u.device_info_id
+        LEFT JOIN status_codes ut ON ut.id = u.usage_type_id
        WHERE d.status = 'ACTIVE'
        GROUP BY 1
     ), rec AS (
@@ -296,8 +322,9 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
       SELECT p.hospital_code, p.hospital_name, p.status,
              coalesce(dl.deals, 0) AS deals, dl.expected,
              (act.total IS NOT NULL OR lev.hospital_code IS NOT NULL) AS registered,
-             coalesce(act.ecg, 0) AS ecg, coalesce(act.spo2, 0) AS spo2, coalesce(act.gw, 0) AS gw, coalesce(act.third, 0) AS third, coalesce(act.total, 0) AS total,
-             CASE WHEN coalesce(dl.deals, 0) > 0 THEN coalesce(act.ecg, 0) - dl.expected END AS diff,
+             coalesce(act.ecg, 0) AS ecg, coalesce(act.ecg_eval, 0) AS ecg_eval, coalesce(act.spo2, 0) AS spo2, coalesce(act.gw, 0) AS gw, coalesce(act.third, 0) AS third,
+             coalesce(act.total, 0) AS total, coalesce(act.eval_total, 0) AS eval_total,
+             CASE WHEN coalesce(dl.deals, 0) > 0 THEN coalesce(act.ecg, 0) - dl.expected END AS diff,   -- ecg는 평가용 제외(§9.1)
              coalesce(rec.recovered30d, 0) AS recovered30d,
              lev.event_type AS last_event_type, lev.occurred_on AS last_event_on,
              limp.id AS imp_id, limp.created_at AS imp_at, limp.occurred_on AS imp_on, limp.row_count AS imp_rows, limp.registered_count AS imp_reg
@@ -329,10 +356,12 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
     expected: number | null
     registered: boolean
     ecg: number
+    ecg_eval: number
     spo2: number
     gw: number
     third: number
     total: number
+    eval_total: number
     diff: number | null
     recovered30d: number
     last_event_type: string | null
@@ -343,19 +372,20 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
     imp_rows: number | null
     imp_reg: number | null
   }
-  const activeJoin = Prisma.sql`FROM hospital_devices d JOIN device_units u ON u.id = d.device_id JOIN device_info di ON di.id = u.device_info_id WHERE d.status = 'ACTIVE'`
+  const activeJoin = Prisma.sql`FROM hospital_devices d JOIN device_units u ON u.id = d.device_id JOIN device_info di ON di.id = u.device_info_id LEFT JOIN status_codes ut ON ut.id = u.usage_type_id WHERE d.status = 'ACTIVE'`
   const [rows, countRows, totalsRows] = await Promise.all([
     client.$queryRaw<Raw[]>(Prisma.sql`${base} SELECT * FROM rows WHERE ${where} ORDER BY ${orderBy} LIMIT ${limit} OFFSET ${(page - 1) * limit}`),
     client.$queryRaw<{ cnt: bigint }[]>(Prisma.sql`${base} SELECT count(*) AS cnt FROM rows WHERE ${where}`),
-    client.$queryRaw<{ customers: bigint; registered: bigint; ecg: bigint; spo2: bigint; gw: bigint; third: bigint; total: bigint; events30d: bigint; recovered30d: bigint }[]>`
+    client.$queryRaw<{ customers: bigint; registered: bigint; ecg: bigint; spo2: bigint; gw: bigint; third: bigint; total: bigint; eval_total: bigint; events30d: bigint; recovered30d: bigint }[]>`
       SELECT (SELECT count(*) FROM hospitals WHERE status = ANY(${statuses}::text[])) AS customers,
              (SELECT count(*) FROM (SELECT hospital_code FROM hospital_devices WHERE hospital_code IS NOT NULL
                                      UNION SELECT hospital_code FROM hospital_device_events WHERE hospital_code IS NOT NULL) x) AS registered,
-             (SELECT count(*) ${activeJoin} AND di.onprem_device_type = 1) AS ecg,
+             (SELECT count(*) ${activeJoin} AND di.onprem_device_type = 1 AND coalesce(ut.value, '') <> 'EVAL') AS ecg,
              (SELECT count(*) ${activeJoin} AND di.onprem_device_type = 3) AS spo2,
              (SELECT count(*) ${activeJoin} AND di.device_class = 'GATEWAY') AS gw,
              (SELECT count(*) ${activeJoin} AND di.device_class = 'THIRD_PARTY') AS third,
              (SELECT count(*) FROM hospital_devices WHERE status = 'ACTIVE') AS total,
+             (SELECT count(*) ${activeJoin} AND ut.value = 'EVAL') AS eval_total,
              (SELECT count(*) FROM hospital_device_events WHERE occurred_on >= ${since}::date AND event_type <> 'CORRECT') AS events30d,
              (SELECT count(*) FROM hospital_device_events WHERE event_type = 'RECOVER' AND occurred_on >= ${since}::date) AS recovered30d`,
   ])
@@ -369,10 +399,12 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
       expected: r.expected == null ? null : n(r.expected),
       registered: !!r.registered,
       activeEcg: n(r.ecg),
+      activeEcgEval: n(r.ecg_eval),
       activeSpo2: n(r.spo2),
       activeGw: n(r.gw),
       activeThird: n(r.third),
       activeTotal: n(r.total),
+      evalTotal: n(r.eval_total),
       diff: r.diff == null ? null : n(r.diff),
       recovered30d: n(r.recovered30d),
       lastEvent: r.last_event_type ? { type: r.last_event_type, on: ymd(r.last_event_on)! } : null,
@@ -384,7 +416,7 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
     totals: {
       customerHospitals: n(t?.customers),
       registeredHospitals: n(t?.registered),
-      active: { ecg: n(t?.ecg), spo2: n(t?.spo2), gw: n(t?.gw), third: n(t?.third), total: n(t?.total) },
+      active: { ecg: n(t?.ecg), spo2: n(t?.spo2), gw: n(t?.gw), third: n(t?.third), total: n(t?.total), eval: n(t?.eval_total) },
       events30d: n(t?.events30d),
       recovered30d: n(t?.recovered30d),
     },
@@ -411,6 +443,8 @@ export interface UnitsQuery {
   q?: string | null
   /** WMS 일시 매칭 기준(§7.1) — 후보 집합을 먼저 매칭한 뒤 id로 좁힌다 */
   wms?: UnitsWmsFilter | null
+  /** 용도 — SALE/EVAL(usageType.value) 또는 none(미지정) */
+  usage?: UsageFilter | null
   /** 공개 device id(유닛 id) */
   ids?: number[] | null
 }
@@ -426,6 +460,8 @@ export function buildUnitsWhere(params: UnitsQuery): Prisma.HospitalDeviceWhereI
   } else if (status === 'active') and.push({ status: 'ACTIVE' })
   else if (status === 'recovered') and.push({ status: 'RECOVERED' })
   if (params.model != null) and.push({ unit: { deviceInfoId: Number(params.model) } })
+  if (params.usage === 'none') and.push({ unit: { usageTypeId: null } })
+  else if (params.usage) and.push({ unit: { usageType: { is: { value: params.usage } } } })
   if (params.ward === 'unassigned') and.push({ wardId: null })
   else if (params.ward != null) and.push({ wardId: Number(params.ward) })
   if (params.q && params.q.trim()) {
@@ -467,9 +503,11 @@ export const UNIT_SELECT = {
   macAddress: true,
   memo: true,
   source: true,
+  usageTypeId: true,
   createdAt: true,
   updatedAt: true,
   deviceInfo: { select: { id: true, deviceModel: true, deviceName: true, deviceClass: true, onpremDeviceType: true, serialPattern: true } },
+  usageType: { select: { id: true, name: true, value: true } },
 } satisfies Prisma.DeviceUnitSelect
 
 export const UNITS_INCLUDE = {
@@ -493,6 +531,8 @@ export interface UnitView {
   macAddress: string | null
   memo: string | null
   source: string
+  usageTypeId: number | null
+  usageType: UsageTypeRef | null
   extDeviceCode: string | null
   extLastSeenAt: Date | null
   extSyncedAt: Date | null
@@ -527,6 +567,8 @@ export function toUnitView(p: PlacementWithUnit): UnitView {
     macAddress: unit.macAddress,
     memo: unit.memo,
     source: unit.source,
+    usageTypeId: unit.usageTypeId,
+    usageType: unit.usageType,
     extDeviceCode: placement.extDeviceCode,
     extLastSeenAt: placement.extLastSeenAt,
     extSyncedAt: placement.extSyncedAt,
@@ -688,6 +730,7 @@ export const EVENTS_INCLUDE = {
       serialNo: true,
       serialRaw: true,
       deviceInfo: { select: { id: true, deviceModel: true, deviceName: true, deviceClass: true } },
+      usageType: { select: { id: true, name: true, value: true } },
       placement: { select: { status: true, hospitalCode: true } },
     },
   },
@@ -710,6 +753,7 @@ export type EventListRow = Omit<EventRawRow, 'device'> & {
     status: string | null
     hospitalCode: string | null
     deviceInfo: EventRawRow['device']['deviceInfo']
+    usageType: UsageTypeRef | null
   }
 }
 
@@ -724,6 +768,7 @@ export function toEventListRow(e: EventRawRow): EventListRow {
       status: device.placement?.status ?? null,
       hospitalCode: device.placement?.hospitalCode ?? null,
       deviceInfo: device.deviceInfo,
+      usageType: device.usageType,
     },
   }
 }

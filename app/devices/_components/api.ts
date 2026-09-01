@@ -37,6 +37,7 @@ import type {
   RecoverBody,
   RecoverResponse,
   RecoveryReason,
+  UsageType,
   RegisterBody,
   RegisterPreviewResponse,
   RegisterResponse,
@@ -178,6 +179,7 @@ function unitsQuery(params: UnitsQueryParams): Record<string, QueryValue> {
     status: params.status,
     q: params.q,
     wms: params.wms,
+    usage: params.usage,
     page: params.page,
     limit: params.limit,
     sort: params.sort,
@@ -281,7 +283,7 @@ export function bulkDeviceAction(body: BulkBody): Promise<BulkResponse> {
   return apiFetch<BulkResponse>('/api/devices/units/bulk', { method: 'POST', body })
 }
 
-/** memo(write) / 식별 보정(admin → CORRECT) — 상태·병원·병동 키는 400 */
+/** memo(write) / usageTypeId(write → CORRECT) / 식별 보정(admin → CORRECT) — 상태·병원·병동 키는 400 */
 export function patchDevice(id: number, body: DevicePatchBody): Promise<DevicePatchResponse> {
   return apiFetch<DevicePatchResponse>(`/api/devices/units/${id}`, { method: 'PATCH', body })
 }
@@ -375,6 +377,12 @@ export function deleteWard(code: string, id: number): Promise<{ success: true }>
 
 export async function getRecoveryReasons(): Promise<RecoveryReason[]> {
   const r = await apiFetch<{ statusCodes: RecoveryReason[] }>('/api/settings/device-recovery-reason')
+  return r.statusCodes
+}
+
+/** 용도 마스터(DEVICE_USAGE_TYPE — 판매용 SALE / 평가용 EVAL) */
+export async function getUsageTypes(): Promise<UsageType[]> {
+  const r = await apiFetch<{ statusCodes: UsageType[] }>('/api/settings/device-usage-type')
   return r.statusCodes
 }
 

@@ -6,7 +6,7 @@ import { DEVICE_EVENT_TYPE_LABELS, toYmd, type DeviceEventType } from '@/lib/dev
  * 병원 상세 '도입 현황' — 디바이스 원장 요약 (hospital_device_registry_design.md §6.2, D12)
  *
  * 서버 컴포넌트가 `getHospitalDeviceSummary(code)`를 **직접 호출**한다(API 경유 아님 — 상세 페이지 권한을 따름).
- * - 모델(serial_tracked) 행: 배치 중 / 계약(hard=수치·soft='참고 n'·none='—') / 차이(hard만) / 최근 이벤트
+ * - 모델(serial_tracked) 행: 배치 중(계약 축 행은 평가용 제외 수 + '(평가용 n 별도)') / 계약(hard=수치·soft='참고 n'·none='—') / 차이(hard만, 평가용 제외 §9.1) / 최근 이벤트
  * - 원장 없음(activeTotal=0): 헤더·계약 열 유지 + '[디바이스 원장에서 임포트]' 링크
  * - 계약완료 딜 없음: 계약 축 모델(ECG·SpO2) 계약 열 '— (계약완료 딜 없음)'
  * 도입 병상 수(`hospitals.intro_beds`) 입력은 병원 수정 폼·Excel 가져오기·병원 PUT에 있으므로 여기서는 표시만 한다.
@@ -50,6 +50,18 @@ function ContractCell({ m, noDeals }: { m: ModelSummary; noDeals: boolean }) {
     return <Dash note="계약완료 딜 없음" />
   }
   return <Dash />
+}
+
+/** 배치 중 — 계약 축 행은 대조 기준(평가용 제외), 평가용은 '(평가용 n 별도)'로 병기 */
+function ActiveCell({ m }: { m: ModelSummary }) {
+  const activeEval = m.activeEval ?? 0
+  const shown = m.compare === 'none' ? m.active : (m.activeForCompare ?? m.active - activeEval)
+  return (
+    <span title={activeEval > 0 ? `배치 중 전체 ${m.active.toLocaleString()}대 (평가용 ${activeEval.toLocaleString()}대는 계약 대조 제외)` : undefined}>
+      <span className="tabular-nums font-medium text-gray-900">{shown.toLocaleString()}</span>
+      {activeEval > 0 && <span className="ml-1 whitespace-nowrap text-xs text-amber-700">(평가용 {activeEval.toLocaleString()} 별도)</span>}
+    </span>
+  )
 }
 
 function DiffCell({ m }: { m: ModelSummary }) {
@@ -158,11 +170,7 @@ export default async function HospitalDeviceSummary({
                     <span className="ml-1.5 font-mono text-xs text-gray-400">{m.deviceModel}</span>
                   </td>
                   <td className="whitespace-nowrap px-4 py-2.5 text-right text-sm">
-                    {empty ? (
-                      <Dash />
-                    ) : (
-                      <span className="tabular-nums font-medium text-gray-900">{m.active.toLocaleString()}</span>
-                    )}
+                    {empty ? <Dash /> : <ActiveCell m={m} />}
                   </td>
                   <td className="whitespace-nowrap px-4 py-2.5 text-right text-sm">
                     <ContractCell m={m} noDeals={noDeals} />
@@ -191,6 +199,14 @@ export default async function HospitalDeviceSummary({
             마지막 임포트{' '}
             <span className="tabular-nums font-medium text-gray-700">{lastImportMd ?? '없음'}</span>
           </span>
+          {(summary?.evalTotal ?? 0) > 0 && (
+            <>
+              <span aria-hidden>·</span>
+              <span title="평가용(EVAL) 기기 — 배치 중이지만 계약 대조에서 제외">
+                평가용 <span className="tabular-nums font-medium text-amber-700">{summary!.evalTotal}</span>대 별도
+              </span>
+            </>
+          )}
           {empty && (
             <>
               <span aria-hidden>·</span>

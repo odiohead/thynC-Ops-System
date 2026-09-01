@@ -19,7 +19,11 @@ import type {
   OnpremHeaderMap,
   RegistryRefType,
   RegistrySource,
+  UsageFilter,
+  UsageTypeRef,
 } from '@/lib/deviceRegistryShared'
+
+export type { UsageFilter, UsageTypeRef }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 권한 · 병원 옵션
@@ -89,6 +93,9 @@ export interface RecoveryReason {
   category: string
 }
 
+/** 용도 마스터 행 — GET /api/settings/device-usage-type → { statusCodes } (value SALE 판매용 / EVAL 평가용) */
+export type UsageType = RecoveryReason
+
 /**
  * WMS 매칭(lib/deviceRegistry/wms.ts WmsMatch) — 표시 전용 일시 계산. 3층 구조(B-20) 이후 원장↔WMS 영속 링크는 없다
  * (`unitId`는 inventory_units.id — 원장 device id가 아님).
@@ -118,12 +125,17 @@ export interface CoverageRow {
   expected: number | null
   /** 원장 개체 1건 이상 — false면 '미등록' 행(배치 열은 0·'—') */
   registered: boolean
+  /** 배치 중 ECG 가운데 계약 대조 대상(평가용 제외) */
   activeEcg: number
+  /** 배치 중 ECG 평가용(대조 제외) */
+  activeEcgEval: number
   activeSpo2: number
   activeGw: number
   activeThird: number
   activeTotal: number
-  /** activeEcg − expected (expected null 또는 미등록이면 null) */
+  /** 배치 중 평가용 합계(전 모델) */
+  evalTotal: number
+  /** activeEcg(평가용 제외) − expected (expected null 또는 미등록이면 null) */
   diff: number | null
   recovered30d: number
   lastEvent: { type: string; on: string } | null
@@ -133,7 +145,7 @@ export interface CoverageRow {
 export interface CoverageTotals {
   customerHospitals: number
   registeredHospitals: number
-  active: { ecg: number; spo2: number; gw: number; third: number; total: number }
+  active: { ecg: number; spo2: number; gw: number; third: number; total: number; eval: number }
   events30d: number
   recovered30d: number
 }
@@ -163,11 +175,16 @@ export interface ModelSummary {
   deviceName: string
   deviceClass: string
   onpremDeviceType: number | null
+  /** 배치 중 전체(용도 무관) */
   active: number
+  /** 배치 중 평가용(EVAL) — 계약 대조 제외 */
+  activeEval: number
+  /** 계약 대조용 = active − activeEval */
+  activeForCompare: number
   recovered30d: number
   /** hard(ECG)·soft(SpO2)는 Σ계약완료 딜, none은 null */
   expected: number | null
-  /** hard만 active − expected, 그 외 null */
+  /** hard만 activeForCompare − expected, 그 외 null */
   diff: number | null
   compare: 'hard' | 'soft' | 'none'
   /** 배치 중 유닛의 WMS 일시 매칭 집계(out=OUT · inStock=IN_STOCK · unmatched=매치 없음) */
@@ -199,6 +216,8 @@ export interface HospitalDeviceSummary {
   lastImportAt: string | null
   lastImport: { id: number; createdAt: string; occurredOn: string | null; rowCount: number; registeredCount: number } | null
   activeTotal: number
+  /** 배치 중 평가용 합계 */
+  evalTotal: number
   recovered30dTotal: number
   /** 서버 KST 오늘(YYYY-MM-DD) — 업무일자 기본값·미래 판정 */
   today: string
@@ -224,6 +243,9 @@ export interface DeviceRaw {
   memo: string | null
   /** 유닛이 처음 생긴 경로(MANUAL/IMPORT/WMS/ONPREM/BACKFILL) */
   source?: string
+  /** 용도(판매용 SALE / 평가용 EVAL) — 유닛 속성, null=미지정 */
+  usageTypeId: number | null
+  usageType: UsageTypeRef | null
   extLastSeenAt: string | null
   extSyncedAt: string | null
   status: DeviceStatus
@@ -285,6 +307,8 @@ export interface UnitsQueryParams {
   status?: UnitsStatusFilter
   q?: string | null
   wms?: UnitsWmsFilter | null
+  /** 용도 — SALE | EVAL | none(미지정) */
+  usage?: UsageFilter | null
   page?: number
   limit?: number
   sort?: UnitsSort
@@ -386,6 +410,7 @@ export interface DeviceEvent extends DeviceDetailEvent {
     status: DeviceStatus
     hospitalCode: string | null
     deviceInfo: { id: number; deviceModel: string; deviceName: string; deviceClass: string }
+    usageType: UsageTypeRef | null
   }
 }
 
@@ -505,16 +530,22 @@ export interface RegisterItemInput {
   memo?: string
   macAddress?: string
   extDeviceCode?: string
+  /** 항목 용도(id) — 공통값보다 우선 */
+  usageTypeId?: number
+  /** 항목 용도 입력(문자열 '판매용'·'EVAL' 등 — 붙여넣기 열) */
+  usageType?: string
 }
 
 export interface RegisterBody extends RegistryFields {
-  /** 문자열(시리얼)만 넣어도 됨. 항목 병동/모델이 공통값보다 우선 */
+  /** 문자열(시리얼)만 넣어도 됨. 항목 병동/모델/용도가 공통값보다 우선 */
   items: (string | RegisterItemInput)[]
   /** 공통 모델(고정) */
   deviceInfoId?: number
   /** 공통 병동 */
   wardId?: number
   wardName?: string
+  /** 공통 용도(폼 기본, 생략=미지정) — 신규 유닛에 부여, 기존 유닛은 비어 있을 때만 */
+  usageTypeId?: number
   /** 타 병원 ACTIVE 시리얼의 이관 opt-in — { [serialNo]: 'TRANSFER' } */
   conflicts?: Record<string, 'TRANSFER'>
   /** 미리보기 행(1부터=items index+1) 액션 */
@@ -594,6 +625,10 @@ export interface ReplaceBody extends RegistryFields {
   reasonCodeId?: number
   /** 신 시리얼이 타 병원 ACTIVE일 때 이관 opt-in */
   newConflict?: 'TRANSFER'
+  /** 구 기기 소급 등록 시 용도 */
+  oldUsageTypeId?: number
+  /** 신 기기 용도 — 생략 시 구 기기 용도 승계 */
+  newUsageTypeId?: number
 }
 
 /** POST …/devices/replace 201 */
@@ -667,13 +702,15 @@ export interface BulkResponse {
   warnings: string[]
 }
 
-/** PATCH /api/devices/units/[id] — memo(write) / 식별 보정(admin, CORRECT 이벤트) */
+/** PATCH /api/devices/units/[id] — memo(write) / usageTypeId(write, CORRECT) / 식별 보정(admin, CORRECT 이벤트) */
 export interface DevicePatchBody {
   memo?: string | null
   deviceInfoId?: number
   serialNo?: string
   macAddress?: string | null
   extDeviceCode?: string | null
+  /** 용도 id(null=미지정) — USER+ 허용, CORRECT 이벤트 기록 */
+  usageTypeId?: number | null
   /** CORRECT 이벤트 문맥(식별 보정 시) */
   occurredOn?: string
   ref?: RegistryRef | null
@@ -743,6 +780,9 @@ export interface ImportPreviewRow {
   serialRaw: string | null
   deviceInfoId: number | null
   deviceModel: string | null
+  /** 해석된 용도(행 입력 > 폼 기본 > 기존 유닛 값), null=미지정 */
+  usageTypeId: number | null
+  usageTypeName: string | null
   wardInput: string | null
   wardId: number | null
   wardName: string | null
@@ -817,6 +857,8 @@ export type ImportEmptyWardCell = 'warn' | 'error'
 export interface ImportOptions {
   mode?: ImportBatchMode
   deviceInfoId?: number
+  /** 폼 공통 용도(행 용도 열이 없을 때 적용) */
+  usageTypeId?: number
   wardMode?: ImportWardMode
   wardId?: number
   emptyWardCell?: ImportEmptyWardCell
@@ -935,7 +977,7 @@ export const GLOBAL_TAB_LABELS: Record<GlobalTab, string> = {
   events: '최근 이벤트',
 }
 
-/** 기기 목록 탭 필터 — status/model/ward/q/page는 URL 동기화, sort/wms/limit는 로컬 */
+/** 기기 목록 탭 필터 — status/model/ward/q/page는 URL 동기화, sort/wms/usage/limit는 로컬 */
 export interface ListFilters {
   status: UnitsStatusFilter
   model: number | null
@@ -945,6 +987,7 @@ export interface ListFilters {
   limit: number
   sort: UnitsSort
   wms: UnitsWmsFilter | null
+  usage: UsageFilter | null
 }
 
 /** 이력 탭·전역 최근 이벤트 필터 — q/page는 URL 동기화, 나머지 로컬 */
@@ -980,6 +1023,9 @@ export interface DeviceRef {
   wardName: string | null
   status: DeviceStatus
   hospitalCode: string | null
+  /** 용도(모달 기본값용) — 조회 결과에 없으면 undefined */
+  usageTypeId?: number | null
+  usageTypeName?: string | null
 }
 
 /**
@@ -1045,5 +1091,7 @@ export function toDeviceRef(d: DeviceRowBase | DeviceListRow | DeviceDetail): De
     wardName: d.ward?.name ?? null,
     status: d.status,
     hospitalCode: d.hospitalCode,
+    usageTypeId: d.usageTypeId ?? null,
+    usageTypeName: d.usageType?.name ?? null,
   }
 }

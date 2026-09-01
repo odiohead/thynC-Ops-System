@@ -10,7 +10,7 @@ type Params = { params: { code: string } }
 
 /**
  * POST /api/hospitals/[code]/devices/replace — 교체(RECOVER + REGISTER 쌍, §7.0 교체 계약 (1)~(6)) (§7.1, write)
- * body `{ oldDeviceId?|oldSerial, oldDeviceInfoId?, oldWardId?|oldWardName?, newSerial, newDeviceInfoId?, toWardId?|toWardName?, reasonCodeId?, occurredOn, memo?, ref?, newConflict? }`
+ * body `{ oldDeviceId?|oldSerial, oldDeviceInfoId?, oldWardId?|oldWardName?, oldUsageTypeId?, newSerial, newDeviceInfoId?, newUsageTypeId?(생략 시 구 기기 용도 승계), toWardId?|toWardName?, reasonCodeId?, occurredOn, memo?, ref?, newConflict? }`
  * 201 `{ actionGroup, backfilled?, recovered?, transferRecovered?, registered, movedNew?, linkedRecoverEventId?, eventIds[1..4], oldDevice, newDevice, warnings, wms }`
  */
 export async function POST(request: NextRequest, { params }: Params) {
@@ -42,6 +42,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       toWardName: optString(body.toWardName),
       reasonCodeId: optPositiveInt(body.reasonCodeId, '회수 사유(reasonCodeId)'),
       newConflict: newConflictRaw === 'TRANSFER' ? 'TRANSFER' : null,
+      oldUsageTypeId: optPositiveInt(body.oldUsageTypeId, '구 기기 용도(oldUsageTypeId)'),
+      newUsageTypeId: optPositiveInt(body.newUsageTypeId, '신 기기 용도(newUsageTypeId)'),
     }
     const occurredOn = optString(body.occurredOn)
     const memo = optString(body.memo)
@@ -73,6 +75,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         linkedRecoverEventId: r.linkedRecoverEventId,
         reasonCodeId: r.recoverEvent?.reasonCodeId ?? input.reasonCodeId ?? null,
         toWardId: r.newDevice.wardId,
+        newUsageTypeId: r.newDevice.usageTypeId,
         occurredOn: occurredOn ?? todayKst(),
         ref,
         memo,

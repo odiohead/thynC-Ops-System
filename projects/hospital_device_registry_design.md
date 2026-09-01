@@ -140,9 +140,10 @@ fold 규칙: REGISTER → ACTIVE·hospital_code·ward_id=to·placed_on·(recover
 | `mac_address` | TEXT NULL | 온프렘 export 식별자(예약 — 붙여넣기 유입값만) |
 | `memo` | TEXT NULL | 개체 속성(이벤트 아님) — 현장 식별 보조 |
 | `source` | TEXT NOT NULL DEFAULT 'MANUAL' (MANUAL/IMPORT/WMS/ONPREM/BACKFILL — 코드 상수, CHECK 없음) | 유닛이 처음 생긴 경로(후속 WMS 편입 시 유닛을 만든 쪽 구분) |
+| `usage_type_id` | INTEGER NULL FK `status_codes` RESTRICT (category `DEVICE_USAGE_TYPE` — value `SALE` 판매용 / `EVAL` 평가용, NULL=미지정) | **용도는 위치가 아닌 물건의 속성**(B-21, 2026-09-01 결정) — 병원 배치·창고 어디에 있든 유닛에 붙어 다닌다. 계약 대조(§9.1)에서 `EVAL`은 제외. 변경은 CORRECT 이벤트(`changes.usageTypeId`) — 라우트 권한은 write(USER+) |
 | `created_at` / `updated_at` | | |
 
-인덱스: (device_info_id) / serial_no `text_pattern_ops` / 부분 (serial_raw). 유닛 삭제는 배치·이벤트 참조 0건일 때만(FK RESTRICT). `inventory_unit_id` 컬럼은 두지 않는다 — WMS 편입은 반대 방향(`inventory_units.device_id → device_units`, 후속 마이그).
+인덱스: (device_info_id) / serial_no `text_pattern_ops` / 부분 (serial_raw) / (usage_type_id). 유닛 삭제는 배치·이벤트 참조 0건일 때만(FK RESTRICT). `inventory_unit_id` 컬럼은 두지 않는다 — WMS 편입은 반대 방향(`inventory_units.device_id → device_units`, 후속 마이그).
 
 ### 5.3 `hospital_devices`(이름 승계 — 병원 배치 프로젝션, 2층)
 유닛당 0..1행. 식별 속성은 5.2b로 이동했고 이 표는 **상태만** 가진다.
@@ -263,6 +264,7 @@ model HospitalDeviceEvent {
 | `normalizeSerial`·`parseSerialLines`·`detectOnpremHeader`·`normalizeWardName`·`suggestOccurredOnFromMaintenance` | 같은 파일(서버·클라이언트·후속 유지보수 라우트가 같은 함수). 일자 제안 = `max(visits.endDate ≤ 오늘)`(없으면 startDate) ?? `resolvedAt` ?? `reportedAt` ?? null — `MaintenanceVisit`은 `startDate/endDate`(기간형), 미래 방문은 제안하지 않음 |
 | 모델별 시리얼 형식·플래그 | `device_info` 행 |
 | **회수 사유** | StatusCode `DEVICE_RECOVERY_REASON` + `/api/settings/device-recovery-reason`(+`[id]`) + `StatusCodeManager` 페이지 + nav + seed. `value` 5개: `DEFECT`(교체 기본)·`LOST`(WMS 대조 제외)·`RETURN`(반납 — WMS `STOCK_IN_TYPE` RETURN과 동일 의미, 후속 반품 입고 훅이 사용)·`DISPOSE`·`TRANSFER`(이관). value 행·사용 중 행 삭제 불가 |
+| **용도(usage type)** | StatusCode `DEVICE_USAGE_TYPE` + `/api/settings/device-usage-type`(+`[id]`) + `StatusCodeManager` 페이지(`/settings/device-usage-type`) + nav 42 + seed. `value` 2개: `SALE`(판매용)·`EVAL`(평가용 — 계약 대조 제외). 유닛 속성 `device_units.usage_type_id`(NULL=미지정). 상수·별칭·매칭(`DEVICE_USAGE_TYPE_CATEGORY`·`USAGE_TYPE_VALUES`·`USAGE_TYPE_INPUT_ALIASES`·`matchUsageType`·`usageValueFromInput`)은 `lib/deviceRegistryShared.ts`. value 행(시스템 용도)·사용 중(`device_units.usage_type_id`) 행 삭제 불가(409). '대웅제약재고'는 판매용 창고이지 제3의 값이 아님 |
 | 계약완료 딜 상태명 | 상수 `DEAL_STATUS_CONTRACTED`(08-03 스크립트와 동일 규칙 주석) |
 
 ### 5d. 기존 `hospital_devices` 폐기 경로(D1)
@@ -289,12 +291,12 @@ model HospitalDeviceEvent {
 요약: 고객 병원 214 · 원장 등록 병원 21 · 배치 중 ECG 3,812 / SpO2 3,640 / GW 402 / 제3자 15 · 최근 30일 이벤트 148 · 회수(30일) 12
 탭 [병원 커버리지] [최근 이벤트]
 필터 [전체 ▾ | 미등록만 | 차이 있음 | 등록 완료]   검색 [병원명/코드]   정렬 [차이 큰 순 ▾ | 병원명 | 마지막 이벤트]
-| 병원 | 상태 | 계약 ECG | 배치 중 ECG | 차이 | SpO2(참고) | GW | 회수(30일) | 마지막 이벤트 | 마지막 임포트 | → |
-| 세란병원 | 운영 | 127 | 127 | 0 ✔ | 127 | 18 | 0 | 08-20 등록 | 08-20 (127행) | 열기 |
+| 병원 | 상태 | 계약 ECG | 배치 중 ECG | 차이 | 평가용 | SpO2(참고) | GW | 회수(30일) | 마지막 이벤트 | 마지막 임포트 | → |
+| 세란병원 | 운영 | 127 | 127 | 0 ✔ | 4 | 127 | 18 | 0 | 08-20 등록 | 08-20 (127행) | 열기 |
 | 한양대병원 | 운영 | 370 | 358 | −12 ▲ | 185 | 41 | 3 | 08-28 회수 | 08-12 | 열기 |
 | 제주한라병원 | 운영 | 500 | — | 미등록 | — | — | — | — | — | 임포트 |
 | 데모병원 | 보류 | — (계약완료 딜 없음) | 12 | — | 12 | 2 | 0 | 08-30 등록 | — | 열기 |
-(page/limit 50 · 원장 0건이어도 계약 열은 채워지고 나머지 '—'/'미등록' — 이 표 자체가 D6 백필 진행판)
+(page/limit 50 · 원장 0건이어도 계약 열은 채워지고 나머지 '—'/'미등록' — 이 표 자체가 D6 백필 진행판. 배치 중 ECG·차이는 평가용(EVAL) 제외, '평가용' 열은 전 모델 EVAL 합계 — §9.1)
 ```
 `GET /api/devices/summary`(병원별 groupBy 1회 + 딜 Σ). '회수(30일)' = RECOVER `occurred_on ≥ 오늘−30일`(업무일자 기준). '차이 있음'은 계약완료 딜이 있는 병원만. '최근 이벤트' 탭 = 전역 이벤트 목록(기본 30일).
 
@@ -305,12 +307,12 @@ model HospitalDeviceEvent {
 | 산소포화도 MP100W | 185 | (참고 200) | — | 1 | 180 / 0 / 5 | ← soft: ECG 동수 가정, 회색
 | 게이트웨이 MGW1010 | 41 | — | — | 0 | 41 / 0 / 0 |       ← 계약 축 없음
 | 제3자 기기 ▸ | 12 | — | — | 0 | — |                        ← 링BP 12 · 참BP 0 · RTLS 0
-| 병동 7개 (미지정 3대) |
+| 병동 7개 (미지정 3대) · 평가용 4 |                ← 배치 중 열은 계약 축 행에서 평가용 제외 수 + '(평가용 n 별도)', 병동 줄에 '평가용 n' 칩(evalTotal>0)
 탭 [기기 목록 (424)] [이력 (612)] [병동 (7)] [임포트 (2)]      우측(USER+): [+ 등록] [교체] [임포트]   선택 시: [병동 이동] [회수]
 ```
-계약 열 팝오버: "계약 = 계약완료 딜의 대웅 디바이스 수 합(ECG 기준). `1차 2025-03 40대 · 2차 2026-01 20대` → 딜 링크. SpO2는 참고, GW는 계약 축 없음. 도입 병상 수와 무관". 계약완료 딜이 없으면 '— (계약완료 딜 없음)'. 대조는 참고 신호임을 문구로 명시(딜 데이터 정정 요구가 운영팀으로 유입되지 않게).
+계약 열 팝오버: "계약 = 계약완료 딜의 대웅 디바이스 수 합(ECG 기준). `1차 2025-03 40대 · 2차 2026-01 20대` → 딜 링크. SpO2는 참고, GW는 계약 축 없음. 도입 병상 수와 무관. 배치 중·차이는 평가용(EVAL) 제외". 계약완료 딜이 없으면 '— (계약완료 딜 없음)'. 대조는 참고 신호임을 문구로 명시(딜 데이터 정정 요구가 운영팀으로 유입되지 않게).
 
-- **기기 목록 탭**: 필터 상태(● 배치 중 / 회수됨(미재배치) / 전체)·모델 칩·병동(미지정·폐쇄 포함)·시리얼 검색(키·원문·닉네임)·WMS. 컬럼 `☐ | 시리얼(mono, ⚠형식, 원문 2행) | 모델 | 병동 | 상태 | 배치일 | 회수일·사유 | 최근 이벤트 | 연결(MNT 링크) | 창고 개체 | 메모 | ⋯`. 정렬 병동→시리얼(기본)/시리얼/배치일/최근 이벤트. page/limit 50(≤500). **다중 선택 + '검색 결과 전체 선택 N건'**(≤2,000) → 일괄 이동/회수(252병동 → 101병동 통째 이동이 ≤5 입력, 병동 탭 [기기 일괄 이동] 기준 4). 빈 상태: 헤더 + "등록된 기기가 없습니다. [+ 등록] 또는 [임포트] 탭에서 시작하세요."
+- **기기 목록 탭**: 필터 상태(● 배치 중 / 회수됨(미재배치) / 전체)·모델 칩·병동(미지정·폐쇄 포함)·시리얼 검색(키·원문·닉네임)·WMS·용도(`usage=SALE|EVAL|none`). 컬럼 `☐ | 시리얼(mono, ⚠형식, 원문 2행) | 모델 | 용도(판매용 default·평가용 warning 배지, 미지정 '—') | 병동 | 상태 | 배치일 | 회수일·사유 | 최근 이벤트 | 연결(MNT 링크) | 창고 개체 | 메모 | ⋯`. 정렬 병동→시리얼(기본)/시리얼/배치일/최근 이벤트. page/limit 50(≤500). **다중 선택 + '검색 결과 전체 선택 N건'**(≤2,000) → 일괄 이동/회수(252병동 → 101병동 통째 이동이 ≤5 입력, 병동 탭 [기기 일괄 이동] 기준 4). 빈 상태: 헤더 + "등록된 기기가 없습니다. [+ 등록] 또는 [임포트] 탭에서 시작하세요."
 - **이력 드로어**(기기 클릭 · 우측 슬라이드 / 모바일 바텀시트) — 병원 경계 무관 전체 이벤트, 최신순
 ```
 A126861 · 심전계 MC200M-T · 배치 중 @ 순천향대부천병원 101병동 (배치일 2026-05-12) · 창고 개체: 대웅제약재고 OUT
@@ -324,7 +326,7 @@ A126861 · 심전계 MC200M-T · 배치 중 @ 순천향대부천병원 101병동
 ```
 각 행: 업무일자 · 타입 배지 · 요약(병동 from→to / 사유 / 교체·이관 상대 링크) · 연결 · 기록자 · 기록 시각(업무일자와 다르면 회색 병기 — D7). 관리: 이벤트 정정(§8.2 허용 필드)·마지막 이벤트 취소·모델/시리얼 정정.
 - **폼**(`Modal`, 모바일 바텀시트) — 스캐너 친화(autoFocus·자동 대문자·Enter 줄 추가·중복 줄 병합·⌘/Ctrl+Enter 제출). 공통: 업무일자(기본 오늘·과거 허용) · 메모 · **유지보수 코드 자동완성**(`GET /api/devices/maintenance-lookup?hospital=&q=` — 선택 시 업무일자를 §5c 규칙으로 자동 채움(사용자가 이미 고친 값은 유지, 출처 툴팁); `MNT-YYYYMM-NNNN` 정확 입력이면 타 병원 건도 선택 가능 + '다른 병원으로 기록된 건' 경고) · 대상 지정 = 선택 칩 + **시리얼 입력줄**(↵/스캔마다 lookup → 이 병원 ACTIVE면 칩 추가, 아니면 인라인 오류). 병동 입력은 모든 폼에서 같은 '콤보 + 새 병동' 컴포넌트(비활성 병동 미노출).
-  - **등록**: 시리얼 textarea · 모델(자동/고정) · 병동 · 업무일자 · 메모 · 코드. 실시간 판별은 임포트와 같은 `?preview=true` 엔진(디바운스, 200줄 초과 시 수동 [판별]). 판별 패널: 모델별 카운트 · ⚠형식 · 재등록(이전 회수 사유·일자) · 이미 배치 중(skip) · ✖ 타 병원 배치 중 → 행별 [제외][이관 처리] · 폐쇄 병동 → [미지정으로 등록](임포트와 동일 `rowActions`).
+  - **등록**: 시리얼 textarea · 모델(자동/고정) · 병동 · 용도 [미지정|판매용|평가용](폼 공통 기본 미지정 — 줄의 3열 이후 '판매용/평가용' 셀이 우선 → `body.usageTypeId`/`items[].usageType`) · 업무일자 · 메모 · 코드. 실시간 판별은 임포트와 같은 `?preview=true` 엔진(디바운스, 200줄 초과 시 수동 [판별]). 판별 패널: 모델별 카운트 · ⚠형식 · 재등록(이전 회수 사유·일자) · 이미 배치 중(skip) · ✖ 타 병원 배치 중 → 행별 [제외][이관 처리] · 폐쇄 병동 → [미지정으로 등록](임포트와 동일 `rowActions`).
   - **병동 이동**: 대상(칩+입력줄, 현재 병동 요약) · 병동 · 업무일자 · 메모 · 코드.
   - **회수**: 대상 · 사유(마스터) · 업무일자 · 메모 · 코드. `LOST` 안내 "분실 — 창고 반입 대상 아님", **`DEFECT` 선택 시 [교체 폼으로 전환]** 원클릭.
   - **교체(1폼 → 2이벤트)**: 구 시리얼 ↵ 조회 → (a) 이 병원 ACTIVE: 모델·병동 표시 / (b) **원장에 없음**(점진 백필 병원의 첫 AS — 가장 흔한 경로): '원장에 없는 시리얼 — 이 병원에 업무일자로 소급 등록한 뒤 교체합니다(실제 설치일은 기록되지 않음)' 안내 + 모델(접두 자동)·병동 입력 → 같은 `action_group`으로 REGISTER(구, 소급) → RECOVER(구) → REGISTER(신) 3이벤트 / (c) 타 병원 ACTIVE: **409** "구 기기가 {병원}에 배치 중 — 그 병원에서 회수(또는 이관) 기록 후 신 기기를 등록으로 처리하세요" / (d) 이 병원에서 이미 RECOVERED(먼저 회수 처리, 교체기 뒤늦게 도착): 'RECOVER 없이 교체 기기만 등록' 안내 → REGISTER(신) 1이벤트 + 구 RECOVER에 `related_device_id` 연결 → 신 시리얼(모델 자동·⚠접두 불일치·회수 이력 있으면 "재등록으로 이력 연결" 힌트·타 병원 ACTIVE면 [이관 처리]·**이 병원 배치 중이면 '이미 등록된 기기 — 회수만 기록하고 병동을 맞춥니다' 안내**(§7.0 (5))) · 병동(구 기본) · 사유(DEFECT 기본) · 업무일자 · 코드. Tab 구→신→제출, 토스트 "교체 기록: P018363 회수(불량) · P020418 등록(3병동)".
@@ -333,7 +335,7 @@ A126861 · 심전계 MC200M-T · 배치 중 @ 순천향대부천병원 101병동
 ```
 모드 (● 신규 등록  ○ 온프렘 export 초안)   ← 헤더에 시리얼 별칭 + (wardCode|deviceType 별칭)이 있거나 deviceRegisterList JSON이면 초안 모드 제안
 [텍스트 붙여넣기] | [Excel 업로드 · 템플릿 ↓]   업무일자 [2026-08-20] ("이 목록이 병원에 배치된 날(go-live·설치일)" — 오늘이고 행 ≥50이면 확인 배지)
-병동 [열에서 읽기 ▾ | 고정]  (열 모드 빈 셀: ● 미지정으로 등록(warn) / ○ 오류)   모델 [자동 ▾]   메모 [go-live 1차]
+병동 [열에서 읽기 ▾ | 고정]  (열 모드 빈 셀: ● 미지정으로 등록(warn) / ○ 오류)   모델 [자동 ▾]   용도 [미지정 ▾](E열/붙여넣기 용도 셀 우선)   메모 [go-live 1차]
 [미리보기]
 요약: 총 131 · 신규 118 · 재등록 2 · 건너뜀(이미 배치) 7 · 경고 3 · 충돌 1(기본 제외) · 오류 1     [전체|정상|재등록|경고|충돌|오류|건너뜀]
 생성 예정 병동: | 입력명 | 처리 [새로 생성 ▾ | 기존 병동으로 매핑: 6병동 / 61병동 …] |     ← 오타 병동을 실행 전에 흡수(wardAliases)
@@ -354,7 +356,7 @@ A126861 · 심전계 MC200M-T · 배치 중 @ 순천향대부천병원 101병동
 ```
 미리보기에 셀 편집은 없다 — 오타 행은 [제외]로 빼고 실행한 뒤 등록 폼에서 같은 업무일자로 추가(별도 action_group, 배치 카운트 미포함)하거나, 원본을 고쳐 [입력으로 돌아가기] 후 다시 검증. 제외 체크 상태는 실행 body `excludeRows`로 명시 전송. 실행은 단일 트랜잭션(all-or-nothing). 결과 "118대 등록 · 2대 재등록 · 병동 2개 생성 (배치 #13)". **초안 모드는 사람이 검토하는 도구일 뿐 자동 이벤트를 만들지 않는다** — 온프렘 대비 누락 diff·선택 회수는 v1에 없음(§10). 실행 후 병동 오타를 발견하면 '배치 취소 → 매핑 지정 재임포트'(배치 밖 이벤트가 없을 때).
 - **병동 탭**: `순서 ↑↓ | 병동명 ✎ | 온프렘 코드 | 배치 중 | 회수(누계) | 활성 | [기기 일괄 이동] [비활성](admin, 배치 0) [삭제](admin, 참조 0)` + 추가. 동명(`name_norm`) 409. 이름 변경은 이력 표시에 즉시 반영(같은 실체의 개명). 빈 상태 안내: "병동이 없습니다 — 임포트 시 자동 생성되거나 여기서 추가".
-- **Excel**: 헤더 [Excel]은 활성 탭 기준 — 기기 목록(`GET /api/devices/export?<units 필터>`), 이력(`/events/export`), 전역 커버리지(`/summary/export`). 같은 where 빌더 재사용, 캡 10,000/10,000/1,000행(초과 400 "필터를 좁혀…"). 열: 기기 목록 = 병원코드·병원명·시리얼(키)·원문·모델·병동·상태·배치일·회수일·회수 사유·최근 이벤트(유형·일자)·연결(ref)·창고 개체(인벤토리·상태 — export 1회당 배치 매칭 1쿼리)·메모 / 이력 = 이력 탭 컬럼 + 기록자·기록 시각·배치 # / 커버리지 = 전역 뷰 표 컬럼 그대로. 파일명 `디바이스원장_<병원명>_<필터>_YYYYMMDD.xlsx`.
+- **Excel**: 헤더 [Excel]은 활성 탭 기준 — 기기 목록(`GET /api/devices/export?<units 필터>`), 이력(`/events/export`), 전역 커버리지(`/summary/export`). 같은 where 빌더 재사용, 캡 10,000/10,000/1,000행(초과 400 "필터를 좁혀…"). 열: 기기 목록 = 병원코드·병원명·시리얼(키)·원문·모델·용도·병동·상태·배치일·회수일·회수 사유·최근 이벤트(유형·일자)·연결(ref)·창고 개체(인벤토리·상태 — export 1회당 배치 매칭 1쿼리)·메모 / 이력 = 이력 탭 컬럼 + 기록자·기록 시각·배치 # / 커버리지 = 전역 뷰 표 컬럼 그대로. 파일명 `디바이스원장_<병원명>_<필터>_YYYYMMDD.xlsx`.
 - **모바일**: `md:hidden` 카드(시리얼 크게+상태, 모델·병동, 최근 이벤트), 카드 체크박스, 바텀시트 드로어, **하단 고정 액션바 [등록][교체][회수]**([회수]는 선택 0건이면 시리얼 입력줄 autoFocus 스캔 모드). 임포트·Excel은 데스크톱 권장 문구.
 
 ### 6.2 병원 상세 '도입 현황' 교체(D12)
@@ -402,7 +404,7 @@ getHospitalDeviceSummary(code) · getGlobalCoverage(params) · matchInventoryUni
 |---|---|---|---|
 | `GET /api/devices/can-manage` | `{canWrite, canAdmin}` | 로그인 | UI 게이트 프로브 |
 | `GET /api/devices/summary?page&limit&filter&q&sort` | 커버리지 표 + 전역 요약 | 로그인 | 딜 Σ 조인 |
-| `GET /api/devices/units?hospital&model&ward&status&q&wms&page&limit&sort&idsOnly` | 기기 목록 | 로그인 | limit 50(≤500), `idsOnly` ≤2,000. `wms=linked|unlinked|in_stock` 필터는 **영속 `inventory_unit_id`(+`inventory_units` 조인)만 기준**; 페이지 단위 임시 매칭은 `inventory_unit_id IS NULL`인 행의 '창고 개체' 열 표시 보조일 뿐 필터·집계에 쓰지 않음(DB 쓰기 없음) |
+| `GET /api/devices/units?hospital&model&ward&status&q&wms&usage&page&limit&sort&idsOnly` | 기기 목록 | 로그인 | limit 50(≤500), `idsOnly` ≤2,000. `wms=linked|unlinked|in_stock` 필터는 **영속 `inventory_unit_id`(+`inventory_units` 조인)만 기준**; 페이지 단위 임시 매칭은 `inventory_unit_id IS NULL`인 행의 '창고 개체' 열 표시 보조일 뿐 필터·집계에 쓰지 않음(DB 쓰기 없음) |
 | `GET /api/devices/units/[id]` | 개체 + 이벤트 전체 + WMS + 상대 | 로그인 | 드로어 |
 | `GET /api/devices/lookup?serial=` | 개체 1건 / 0건이면 원장 접두 일치 ≤10 + WMS 정확·접미 일치 ≤10 | 로그인 | 입력 `normalizeSerial` 적용 |
 | `GET /api/devices/maintenance-lookup?hospital=&q=` | 이 병원 유지보수 자동완성 `{ id, maintenanceCode, title, hospitalMismatch, suggestedOccurredOn, basis }` | 로그인 | 정확 코드 입력 시 병원 필터 무시 + `hospitalMismatch:true` |
@@ -414,13 +416,14 @@ getHospitalDeviceSummary(code) · getGlobalCoverage(params) · matchInventoryUni
 | `POST /api/hospitals/[code]/devices/replace` | 교체 | write | `{ oldDeviceId?|oldSerial, oldDeviceInfoId?, oldWardId?|oldWardName?, newSerial, newDeviceInfoId?, toWardId?|toWardName?, reasonCodeId?, occurredOn, memo?, ref?, newConflict? }` — §7.0 교체 계약 |
 | `POST /api/devices/units/[id]/move` · `/recover` | 이동 / 회수 | write | 병원은 개체에서 유도. 같은 병동 400, 사유 없음 400, 이미 회수 409 |
 | `POST /api/devices/units/bulk` | 일괄 이동/회수 | write | 같은 병원 ACTIVE만, 단일 tx. 이미 대상 병동인 개체는 `skipped[]`; 타 병원·RECOVERED가 섞이면 전체 409 |
-| `PATCH /api/devices/units/[id]` | memo / 식별 보정 → CORRECT | write(memo) / admin(식별) | 시리얼 충돌 409, WMS 재매칭(영속) |
+| `PATCH /api/devices/units/[id]` | memo / 용도(`usageTypeId`, null=미지정) → CORRECT / 식별 보정 → CORRECT | write(memo·usageTypeId) / admin(식별 — 모델·시리얼·MAC·닉네임, usageTypeId와 함께 보내도 admin) | 시리얼 충돌 409, 없는 용도 400 '용도 값이 올바르지 않습니다 (판매용/평가용)', WMS 재매칭(영속) |
 | `PATCH /api/devices/events/[id]` · `DELETE /api/devices/events/[id]` | 인플레이스 정정 / 마지막 이벤트 취소 | admin | §8.2 |
 | `POST /api/hospitals/[code]/devices/import?preview=true` | file 또는 `{text}` + 옵션 → 행별 판정 | write | MAX 2,000, DB 쓰기 없음 |
 | `POST /api/hospitals/[code]/devices/import` | 서버 재검증 후 실행 | write | 미제외 오류 400 · 미지정 conflict 409 · 소급 불성립(미리보기 이후 변동) 409 `{ error, rows:[{row, serial, message}] }` · 초안 모드에서 distinct org ≥2인데 `orgs[]` 없음 400 · 120s tx |
 | `GET …/devices/imports` · `PATCH …/imports/[id]` · `POST …/imports/[id]/cancel` | 배치 목록 / 업무일자 일괄 정정 / 취소 | 로그인 / admin / admin | §8.2 |
 | `GET/POST /api/hospitals/[code]/wards` · `PUT/DELETE …/wards/[id]` | 병동 CRUD(PUT은 hospital_code 불가) | 로그인 / write / write(비활성은 admin) / admin | 참조 있으면 409, 동명 409 |
 | `GET/POST /api/settings/device-recovery-reason` · `PUT/DELETE …/[id]` | 사유 마스터 | 로그인 / ADMIN+ | value·사용 중 삭제 불가 |
+| `GET/POST /api/settings/device-usage-type` · `PUT/DELETE …/[id]` | 용도 마스터(SALE/EVAL) | 로그인 / ADMIN+ | value 행 409 '시스템 용도는 삭제할 수 없습니다' · 사용 중 409 '사용 중인 용도입니다' · audit `setting:device_usage_type` |
 | `/api/settings/devices`(기존) | +5필드, usageCount 합산, DELETE 가드 | 기존 필드 USER+ / 5필드 ADMIN+ | 정규식 검증 400 |
 
 **응답 요지**: register 201 `{ actionGroup, created[{id, serialNo, eventId}], reregistered[], transferred[{id, serialNo, fromHospitalCode}], skipped[{serialNo, reason}], warnings[] }`; 409 `{ error, conflicts:[{serial, hospitalCode, hospitalName, wardName, placedOn}] }`. replace 201 `{ actionGroup, backfilled?, recovered?, transferRecovered?, registered, movedNew?, linkedRecoverEventId?, eventIds[1..4] }`. summary `{ hospitalCode, introBeds, expectedDeviceCount|null, contractedDeals[{dealCode,count}], models[{deviceInfoId, deviceModel, deviceClass, active, recovered30d, expected|null, diff|null, compare:'hard'|'soft'|'none', wms{out,inStock,unmatched}, lastEvent}], wards[], unassigned, lastEventOn, lastImportAt, activeTotal }` — `wms{…}`는 영속 `inventory_unit_id` 조인 1쿼리로 집계(임시 매칭 미사용).
@@ -465,7 +468,7 @@ read = 로그인 전체(조직 게이트 없음 — nav `{SEERS}`는 UX) / write
 
 ## 9. 기존 데이터·모듈 연동
 ### 9.1 딜 기대 수량
-`SELECT count(*), SUM(COALESCE(daewoong_device_count,0)) FROM sales_deals sd JOIN status_codes sc ON sc.id=sd.status_id WHERE sd.hospital_code=$1 AND sc.category='SALES_DEAL_STATUS' AND sc.name='계약완료'`(08-03 스크립트 조건). `daewoong_count_type` 4종 전부 합산(쟁점 A-5). **`deals=0`이면 `expected=null`, `compare='none'`**(신규 go-live 직후·보류·데모 병원이 '+240 초과'로 표시되지 않게). ECG hard / SpO2 soft(ECG 동수 참고) / GW·제3자 `none`. `intro_beds`는 표시만. 딜 저장 시 파생 없음(매번 조인).
+`SELECT count(*), SUM(COALESCE(daewoong_device_count,0)) FROM sales_deals sd JOIN status_codes sc ON sc.id=sd.status_id WHERE sd.hospital_code=$1 AND sc.category='SALES_DEAL_STATUS' AND sc.name='계약완료'`(08-03 스크립트 조건). `daewoong_count_type` 4종 전부 합산(쟁점 A-5). **`deals=0`이면 `expected=null`, `compare='none'`**(신규 go-live 직후·보류·데모 병원이 '+240 초과'로 표시되지 않게). ECG hard / SpO2 soft(ECG 동수 참고) / GW·제3자 `none`. `intro_beds`는 표시만. 딜 저장 시 파생 없음(매번 조인). **평가용 제외(2026-09-01, B-21)**: `models[].active`는 배치 중 전체, `activeEval`은 그중 `usage_type=EVAL`, `activeForCompare = active − activeEval`, **`diff = activeForCompare − expected`**(hard). 병원 `evalTotal`, 커버리지 행 `activeEcg`(EVAL 제외)·`activeEcgEval`·`evalTotal`·`diff = activeEcg − expected`, 전역 합계 `active.eval`. 미지정(NULL)은 판매용과 같이 대조에 포함.
 
 ### 9.2 WMS 매칭(읽기) + 후속 훅
 **원칙**: 집계·필터는 영속 `inventory_unit_id`만 기준, 페이지 단위 임시 매칭은 표시 보조일 뿐. `inventory_units.status`는 후보 선별·⚠ 배지에만 읽고 원장 상태에 영향을 주지 않는다(D9).
@@ -494,7 +497,7 @@ P1: `get_hospital_overview` devices 문자열 → `'심전계(MC200M-T) 배치 1
 - `transferAllWorkItems`(`lib/workItemReassign.ts:235`, `$transaction` 호출 L259에 옵션 인자 없음 = 기본 timeout 5s → `{ timeout: 60_000, maxWait: 10_000 }` 명시; ①②는 단일 tx, '재지정 → 원본 삭제' 순서): ① 병동 — 원본 병동의 `name_norm`이 대상 병원에 이미 있으면 devices.`(wardId, hospitalCode)`·events.`(fromWardId, hospitalCode)`·events.`(toWardId, hospitalCode)`를 각각 한 문장으로 재지정 후 원본 병동 delete; 없으면 병동 행의 `hospital_code`만 이동(**ON UPDATE CASCADE로 소속 기기·이벤트가 함께 옮겨지는 것은 의도**); `ext_ward_code` 충돌이 남으면 원본 값을 NULL로 비우고 이동 ② 병동 미지정·RECOVERED 행과 이벤트·배치의 `hospital_code`·`last_hospital_code` updateMany ③ `TransferAllResult.moved`에 `devices·deviceEvents·wards`, `TransferAllWorkButton.tsx` 안내 문구에 '디바이스 원장' + "딜은 이동하지 않으므로 대상 병원 계약 대조에 차이가 표시될 수 있음" 1줄. 단건 재지정·유지보수 PUT은 원장 무영향.
 
 ### 9.7 체크리스트
-nav `('devices','디바이스 원장','/devices','device','operations',55,'{SEERS}')`(**`icon_key='device'`는 `NavIcons.tsx` `ICON_MAP`에 키 1개 + SVG 추가** — `wifi`는 GW 배치 플래너가 사용 중) + `('settings/device-recovery-reason','기기 회수 사유 관리',…,'settings',41,'병원·구축','{SUPER_ADMIN,ADMIN}')`(38 devices·39 emr-vendor·40 site-visit-status 다음) — 마이그 `ON CONFLICT (menu_key)` + `scripts/seed-device-registry.sql`(DDL 없음·idempotent, PROD→DEV 동기화 후 재실행) / `permissions.ts` `device.admin` / status_codes 7행(`ON CONFLICT (name, category)`) / device_info 4행 + 소비처(수량 폼 3곳 필터·품목 폼 전 행) / 팬아웃 §5d 전부 / README(디렉토리·스키마·주요 기능·API 표·AI 도구 수·권한 카탈로그 v1.3 누락분 보충 + v1.4)·ERD·DEV_HISTORY·`projects/README.md`(본 문서 행 + 2.0 행 'A1 → 원장 설계' 표기) / **착수 전 "PROD 데이터 동기화"로 DEV 갱신**(현재 DEV 08-10 스냅샷은 hospital_devices 15행/8병원/1,547대 — PROD의 8월 센서스 132행/67병원·8월 WMS 출고·8월 유지보수가 없음) / **P0에 실제 온프렘 export 샘플 1건 확보**(B-3 헤더 별칭 확정).
+nav `('devices','디바이스 원장','/devices','device','operations',55,'{SEERS}')`(**`icon_key='device'`는 `NavIcons.tsx` `ICON_MAP`에 키 1개 + SVG 추가** — `wifi`는 GW 배치 플래너가 사용 중) + `('settings/device-recovery-reason','기기 회수 사유 관리',…,'settings',41,'병원·구축','{SUPER_ADMIN,ADMIN}')`(38 devices·39 emr-vendor·40 site-visit-status 다음) + `('settings/device-usage-type','기기 용도 관리','/settings/device-usage-type','settings',42,'병원·구축','{SUPER_ADMIN,ADMIN}')` — 마이그 `ON CONFLICT (menu_key)` + `scripts/seed-device-registry.sql`(DDL 없음·idempotent, PROD→DEV 동기화 후 재실행) / `permissions.ts` `device.admin` / status_codes 7행 + 용도 2행 `DEVICE_USAGE_TYPE`(판매용 SALE·평가용 EVAL, `ON CONFLICT (name, category)`) / device_info 4행 + 소비처(수량 폼 3곳 필터·품목 폼 전 행) / 팬아웃 §5d 전부 / README(디렉토리·스키마·주요 기능·API 표·AI 도구 수·권한 카탈로그 v1.3 누락분 보충 + v1.4)·ERD·DEV_HISTORY·`projects/README.md`(본 문서 행 + 2.0 행 'A1 → 원장 설계' 표기) / **착수 전 "PROD 데이터 동기화"로 DEV 갱신**(현재 DEV 08-10 스냅샷은 hospital_devices 15행/8병원/1,547대 — PROD의 8월 센서스 132행/67병원·8월 WMS 출고·8월 유지보수가 없음) / **P0에 실제 온프렘 export 샘플 1건 확보**(B-3 헤더 별칭 확정).
 
 ## 10. 비범위
 | 제외 | 이유 |
@@ -566,6 +569,7 @@ nav `('devices','디바이스 원장','/devices','device','operations',55,'{SEER
 | B-18 | GW·제3자 기대치 축 없음(`compare:'none'`) | D1은 ECG hard·SpO2 soft만 정의. 구축 계획 수량(projects.gateway_count)은 계약이 아님 |
 | B-19 | 자재 품목 폼 모델 셀렉터는 필터하지 않음 | GW 품목을 MGW1010에 연결할 수 있게(연결은 WMS 사용자 행위) |
 | B-20 | **3층 구조** `device_info` → `device_units` → `hospital_devices` / `inventory_units` — 2026-09-01 사용자 결정: 시리얼 정체성은 `device_units`, 병원 상태는 `hospital_devices`(device_id UNIQUE 프로젝션), WMS 편입(`inventory_units.device_id`)은 후속. **API 공개 device id = `device_units.id`**. ACTIVE-only 변형(회수 요약을 유닛으로)은 미결정 | 한 시리얼이 병원 배치와 창고 개체 양쪽에 같은 정체성으로 걸리도록 — 단일 테이블 초안은 WMS 편입 시 `inventory_unit_id` 양방향 링크가 필요했음. dev2에서 롤백 런북(A.0 ②) 리허설 후 마이그 폴더 그대로 재적용 |
+| B-21 | **용도(usage type) = 유닛 속성 2값** `device_units.usage_type_id` → StatusCode `DEVICE_USAGE_TYPE`(value `SALE` 판매용 / `EVAL` 평가용, NULL=미지정) — 2026-09-01 사용자 결정. WMS 인벤토리 '대웅제약재고'는 **판매용 창고**이지 제3의 용도 값이 아니다. 계약 대조(§9.1)에서 EVAL 제외(`activeForCompare`). 변경은 CORRECT(`changes.usageTypeId`)이며 PATCH 권한은 write(USER+) — 나머지 식별 보정(admin)과 분리. 등록·임포트·교체는 폼 공통 기본값 + 행/항목 우선, 기존 유닛에 다른 용도를 명시하면 유지 + 경고(모델 규약과 동일), 비어 있으면 채움. 교체 신 기기는 구 기기 용도 승계 | 용도는 위치(병원/병동/창고)가 아니라 물건의 속성 — 평가용 기기가 병원에 배치돼 있어도 계약 수량과 비교하면 안 되고, 회수돼 창고로 가도 평가용으로 남는다. 같은 마스터 패턴(회수 사유)을 재사용해 설정 페이지·seed·감사 자원명만 추가 |
 
 ---
 
@@ -634,12 +638,14 @@ CREATE TABLE device_units (
   device_info_id INTEGER NOT NULL REFERENCES device_info(id) ON DELETE RESTRICT ON UPDATE CASCADE,
   serial_no TEXT NOT NULL, serial_raw TEXT, mac_address TEXT, memo TEXT,
   source TEXT NOT NULL DEFAULT 'MANUAL',
+  usage_type_id INTEGER REFERENCES status_codes(id) ON DELETE RESTRICT,   -- 용도(판매용/평가용, DEVICE_USAGE_TYPE) — 유닛 속성, NULL=미지정
   created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT device_units_serial_no_key UNIQUE (serial_no),
   CONSTRAINT device_units_serial_no_normalized_check CHECK (serial_no <> '' AND serial_no = upper(btrim(serial_no))));
 CREATE INDEX device_units_device_info_id_idx   ON device_units(device_info_id);
 CREATE INDEX device_units_serial_no_pattern_idx ON device_units(serial_no text_pattern_ops);
 CREATE INDEX device_units_serial_raw_idx        ON device_units(serial_raw) WHERE serial_raw IS NOT NULL;
+CREATE INDEX device_units_usage_type_id_idx     ON device_units(usage_type_id);
 
 -- 4') D1/D3: 병원 배치 프로젝션(이름 승계) — 유닛당 0..1행, 상태 컬럼은 이벤트 fold의 파생값
 CREATE TABLE hospital_devices (
@@ -708,12 +714,15 @@ CREATE INDEX hospital_device_events_type_date_idx    ON hospital_device_events(e
 CREATE UNIQUE INDEX hospital_device_events_auto_ref_idem_key ON hospital_device_events(ref_type, ref_code, device_id, event_type)
   WHERE ref_type IS NOT NULL AND source IN ('WMS','ONPREM');          -- 불변식 8 (MANUAL 제외)
 
--- 7) D5: 회수 사유 마스터
+-- 7) D5: 회수 사유 마스터 + 용도 마스터(DEVICE_USAGE_TYPE — 2026-09-01 결정: 판매용/평가용 2값, value가 시스템 의미)
 INSERT INTO status_codes (name, category, "order", value) VALUES
   ('불량(AS 회수)','DEVICE_RECOVERY_REASON',1,'DEFECT'), ('분실','DEVICE_RECOVERY_REASON',2,'LOST'),
   ('반납(계약 종료·축소)','DEVICE_RECOVERY_REASON',3,'RETURN'), ('데모 종료','DEVICE_RECOVERY_REASON',4,NULL),
   ('현장 폐기','DEVICE_RECOVERY_REASON',5,'DISPOSE'), ('타 병원 이관','DEVICE_RECOVERY_REASON',6,'TRANSFER'),
   ('기타','DEVICE_RECOVERY_REASON',9,NULL)
+ON CONFLICT (name, category) DO NOTHING;
+INSERT INTO status_codes (name, category, "order", value) VALUES
+  ('판매용','DEVICE_USAGE_TYPE',1,'SALE'), ('평가용','DEVICE_USAGE_TYPE',2,'EVAL')
 ON CONFLICT (name, category) DO NOTHING;
 
 -- 8) nav (icon 'device'는 P3에서 ICON_MAP에 추가)
@@ -721,9 +730,11 @@ INSERT INTO nav_menu_items (menu_key, label, href, icon_key, parent_key, sort_or
   ('devices','디바이스 원장','/devices','device','operations',55,'{SEERS}') ON CONFLICT (menu_key) DO NOTHING;
 INSERT INTO nav_menu_items (menu_key, label, href, parent_key, sort_order, group_label, allowed_roles) VALUES
   ('settings/device-recovery-reason','기기 회수 사유 관리','/settings/device-recovery-reason','settings',41,'병원·구축','{SUPER_ADMIN,ADMIN}') ON CONFLICT (menu_key) DO NOTHING;
+INSERT INTO nav_menu_items (menu_key, label, href, parent_key, sort_order, group_label, allowed_roles) VALUES
+  ('settings/device-usage-type','기기 용도 관리','/settings/device-usage-type','settings',42,'병원·구축','{SUPER_ADMIN,ADMIN}') ON CONFLICT (menu_key) DO NOTHING;
 ```
 ### A.2 `scripts/seed-device-registry.sql`
-A.1의 **2') UPDATE·INSERT + 7) + 8)** 만(DDL 없음) + 확인 SELECT. 상단 주석 "마이그레이션 적용 후 재실행 안전 — DDL 없음"(`seed-cs-masters.sql` 선례 형식). WMS 테이블 문장 없음.
+A.1의 **2') UPDATE·INSERT + 7)(회수 사유 + 용도 DEVICE_USAGE_TYPE) + 8)(nav 55·41·42)** 만(DDL 없음) + 확인 SELECT. 상단 주석 "마이그레이션 적용 후 재실행 안전 — DDL 없음"(`seed-cs-masters.sql` 선례 형식). WMS 테이블 문장 없음.
 
 ## 부록 B. 임포트 템플릿·붙여넣기
 - **B-1 Excel**(첫 시트, 1행 헤더 skip, MAX 2,000): `A 시리얼(필수) | B 모델(MC200M-T/심전계, 비우면 자동) | C 병동(이름 또는 ext_ward_code) | D 메모(→ REGISTER 이벤트 `memo`; 개체 `memo`는 드로어에서만 입력)`. 관리자 콘솔 xlsx(A열만·헤더 없음)는 A1이 시리얼 형식이면 자동 인식.

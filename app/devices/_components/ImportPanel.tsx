@@ -3,7 +3,7 @@
 /**
  * 임포트 탭 (입력 → 미리보기 → 결과 + 이력, §6.1-B 임포트 탭 · §7.2) — GROUP D
  * 입력: 모드(● 신규 등록 ○ 온프렘 export 초안 — preview.input.onprem이면 초안 제안) · [텍스트 붙여넣기] | [Excel 업로드 · 템플릿 ↓] · 업무일자(오늘+행≥50이면 확인 배지)
- *  · 병동 [열에서 읽기 ▾ | 고정](WardCombo) · 열 모드 빈 셀(● 미지정 warn / ○ 오류) · 모델 [자동 ▾](summary.models) · 메모 → [미리보기] = previewImport(code, source, options)
+ *  · 병동 [열에서 읽기 ▾ | 고정](WardCombo) · 열 모드 빈 셀(● 미지정 warn / ○ 오류) · 모델 [자동 ▾](summary.models) · 용도 [미지정|판매용|평가용](폼 공통 — E열/붙여넣기 용도 셀이 우선) · 메모 → [미리보기] = previewImport(code, source, options)
  * 미리보기: 요약(총·신규·재등록·건너뜀·경고·충돌(기본 제외)·오류) + 판정 필터 칩 · 생성 예정 병동 표(새로 생성 | 기존 병동 매핑 → wardAliases)
  *  · (초안) org ≥2 → 체크 + [이 기관만 등록](재검증 전 [실행] 비활성) · 행 표(☑ | 행 | 시리얼 | 원문 | 모델 | 병동(해석) | 판정 | 메시지/행 액션 [제외▾|이관] [미지정으로 등록])
  *  · [입력으로 돌아가기] [오류 행 제외하고 다시 검증] [실행 (n 등록 · m 재등록)](미제외 오류 있으면 비활성) = executeImport(code, source, { …options, excludeRows, rowActions, wardAliases, orgs })
@@ -31,7 +31,7 @@ import {
   type ImportRowAction,
   type ImportVerdict,
 } from '@/lib/deviceRegistryShared'
-import { cancelImportBatch, errorMessage, executeImport, getImportBatches, isApiError, patchImportBatchDate, previewImport, type ImportSource } from './api'
+import { cancelImportBatch, errorMessage, executeImport, getImportBatches, getUsageTypes, isApiError, patchImportBatchDate, previewImport, type ImportSource } from './api'
 import { Pager, StatChip, TableMessageRow, fmtDateTimeKst, ymdOrDash } from './groupd-shared'
 import { useDevicesToast } from './toast'
 import { WardCombo } from './WardCombo'
@@ -49,6 +49,7 @@ import {
   type ImportWardMode,
   type MutationDone,
   type RegistryErrorRow,
+  type UsageType,
   type WardValue,
 } from './types'
 
@@ -93,12 +94,12 @@ function sameSet(a: readonly string[] | null, b: readonly string[]): boolean {
   return b.every((x) => s.has(x))
 }
 
-/** 템플릿 xlsx — 첫 시트 1행 헤더(A 시리얼 · B 모델 · C 병동 · D 메모), 둘째 시트 안내 */
+/** 템플릿 xlsx — 첫 시트 1행 헤더(A 시리얼 · B 모델 · C 병동 · D 메모 · E 용도), 둘째 시트 안내 */
 async function downloadTemplate() {
   const XLSX = await import('xlsx')
   const wb = XLSX.utils.book_new()
-  const sheet = XLSX.utils.aoa_to_sheet([['시리얼', '모델', '병동', '메모']])
-  sheet['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 30 }]
+  const sheet = XLSX.utils.aoa_to_sheet([['시리얼', '모델', '병동', '메모', '용도']])
+  sheet['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 30 }, { wch: 10 }]
   XLSX.utils.book_append_sheet(wb, sheet, '기기 목록')
   const guide = XLSX.utils.aoa_to_sheet([
     ['디바이스 원장 임포트 템플릿'],
@@ -108,6 +109,7 @@ async function downloadTemplate() {
     ['B 모델', '아니오', '모델명 또는 제품명. 비우면 접두(A/P/B)로 자동 판별', 'MC200M-T / 심전계'],
     ['C 병동', '아니오', '병동 이름 또는 온프렘 병동 코드. 없는 이름은 새로 생성(미리보기에서 기존 병동으로 매핑 가능)', '6병동'],
     ['D 메모', '아니오', '등록 이벤트 메모(개체 메모는 드로어에서 입력)', 'go-live 1차'],
+    ['E 용도', '아니오', '판매용 또는 평가용(SALE/EVAL). 비우면 임포트 옵션의 용도, 그것도 없으면 미지정. 평가용은 계약 대조에서 제외', '평가용'],
     [''],
     ['· 첫 시트만 읽습니다. 1행은 헤더, 2행부터 데이터. 한 번에 최대 ' + IMPORT_MAX_ROWS.toLocaleString() + '행.'],
     ['· 관리자 콘솔 xlsx(A열만·헤더 없음)는 A1이 시리얼이면 자동 인식됩니다.'],
@@ -147,8 +149,20 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
   const [fixedWard, setFixedWard] = useState<WardValue>({})
   const [emptyWardCell, setEmptyWardCell] = useState<ImportEmptyWardCell>('warn')
   const [deviceInfoId, setDeviceInfoId] = useState<number | null>(null)
+  const [usageTypeId, setUsageTypeId] = useState<number | null>(null)
+  const [usageTypes, setUsageTypes] = useState<UsageType[] | null>(null)
   const [memo, setMemo] = useState('')
   const [inputError, setInputError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    getUsageTypes()
+      .then((r) => alive && setUsageTypes(r))
+      .catch(() => alive && setUsageTypes([]))
+    return () => {
+      alive = false
+    }
+  }, [])
 
   // 병원이 바뀌면 today 기본값만 따라간다(사용자가 손대지 않았을 때)
   const dateTouched = useRef(false)
@@ -187,9 +201,10 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
     if (mode) o.mode = mode
     if (wardMode === 'fixed' && fixedWard.wardId) o.wardId = fixedWard.wardId
     if (deviceInfoId) o.deviceInfoId = deviceInfoId
+    if (usageTypeId) o.usageTypeId = usageTypeId
     if (memo.trim()) o.memo = memo.trim()
     return o
-  }, [wardMode, emptyWardCell, occurredOn, mode, fixedWard.wardId, deviceInfoId, memo])
+  }, [wardMode, emptyWardCell, occurredOn, mode, fixedWard.wardId, deviceInfoId, usageTypeId, memo])
 
   /** 미리보기 상태(제외·행 액션·별칭·org)를 옵션에 얹는다 — 재검증·실행 공용 */
   const reviewOptions = useCallback(
@@ -496,7 +511,7 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
       </div>
 
       {/* 옵션 행 */}
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-2">
             업무일자
@@ -601,6 +616,26 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
           <span className="text-[11px]">게이트웨이 export처럼 한 모델만 있는 목록은 고정이 안전합니다.</span>
         </label>
         <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          용도
+          <Select
+            className="h-9"
+            value={usageTypeId ?? ''}
+            disabled={optionsDisabled || usageTypes == null}
+            onChange={(e) => {
+              setUsageTypeId(e.target.value ? Number(e.target.value) : null)
+              markStale()
+            }}
+          >
+            <option value="">미지정</option>
+            {(usageTypes ?? []).map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </Select>
+          <span className="text-[11px]">E열/붙여넣기의 &apos;판매용·평가용&apos; 셀이 우선. 평가용은 계약 대조에서 제외.</span>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           메모(배치)
           <Input className="h-9" value={memo} placeholder="go-live 1차" maxLength={200} disabled={optionsDisabled} onChange={(e) => setMemo(e.target.value)} />
           <span className="text-[11px]">배치 이력에 남는 메모. 행별 메모는 D열/3번째 열.</span>
@@ -667,7 +702,7 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
                     autoFocus
                   />
                   <p className="text-[11px] text-muted-foreground">
-                    줄당 1건 — 탭 또는 2칸 공백이면 <span className="font-mono">시리얼 · 병동 · 메모</span> 열 모드, 없으면 토큰 전부 시리얼. 최대 {IMPORT_MAX_ROWS.toLocaleString()}행.
+                    줄당 1건 — 탭 또는 2칸 공백이면 <span className="font-mono">시리얼 · 병동 · 메모</span> 열 모드(3열 이후 &apos;판매용·평가용&apos; 셀은 용도), 없으면 토큰 전부 시리얼. 최대 {IMPORT_MAX_ROWS.toLocaleString()}행.
                   </p>
                 </div>
               ) : (
@@ -679,7 +714,7 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
                         <FileSpreadsheet size={16} /> {file.name} <span className="text-xs text-muted-foreground">({Math.round(file.size / 1024).toLocaleString()} KB)</span>
                       </span>
                     ) : (
-                      <span>Excel(.xlsx) 파일 선택 — 첫 시트 A 시리얼 · B 모델 · C 병동 · D 메모(1행 헤더)</span>
+                      <span>Excel(.xlsx) 파일 선택 — 첫 시트 A 시리얼 · B 모델 · C 병동 · D 메모 · E 용도(1행 헤더)</span>
                     )}
                     <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="sr-only" onChange={onFileChange} />
                   </label>
@@ -876,6 +911,7 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
                         <TH>시리얼(정규화)</TH>
                         <TH>원문</TH>
                         <TH>모델</TH>
+                        <TH>용도</TH>
                         <TH>병동(해석)</TH>
                         <TH>판정</TH>
                         <TH>메시지 / 행 액션</TH>
@@ -883,7 +919,7 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
                     </THead>
                     <TBody>
                       {visibleRows.length === 0 ? (
-                        <TableMessageRow colSpan={8}>{verdictFilter === 'all' ? '판정된 행이 없습니다.' : `${IMPORT_VERDICT_LABELS[verdictFilter]} 행이 없습니다.`}</TableMessageRow>
+                        <TableMessageRow colSpan={9}>{verdictFilter === 'all' ? '판정된 행이 없습니다.' : `${IMPORT_VERDICT_LABELS[verdictFilter]} 행이 없습니다.`}</TableMessageRow>
                       ) : (
                         visibleRows.map((r, idx) => {
                           const ex = excluded.has(r.row)
@@ -913,6 +949,7 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
                               <TD className="align-top font-mono text-sm">{r.serialNo || <span className="text-muted-foreground">—</span>}</TD>
                               <TD className="align-top font-mono text-xs text-muted-foreground">{raw}</TD>
                               <TD className="whitespace-nowrap align-top text-xs">{r.deviceModel ?? <span className="text-muted-foreground">—</span>}</TD>
+                              <TD className="whitespace-nowrap align-top text-xs">{r.usageTypeName ?? <span className="text-muted-foreground">미지정</span>}</TD>
                               <TD className="whitespace-nowrap align-top text-xs">
                                 <span className={cn(w.tone === 'new' && 'text-primary', w.tone === 'inactive' && 'text-destructive', w.tone === 'unresolved' && 'text-warning-subtle-foreground', w.tone === 'none' && 'text-muted-foreground')}>
                                   {action === 'UNASSIGN_WARD' ? '미지정(액션)' : w.text}

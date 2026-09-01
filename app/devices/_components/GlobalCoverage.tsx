@@ -3,9 +3,9 @@
 /**
  * 전역 뷰 A — 병원 커버리지 표(백필 진행판, §6.1-A) — GROUP A
  * 필터 [전체 ▾ | 미등록만 | 차이 있음 | 등록 완료] · 검색 [병원명/코드] · 정렬 [차이 큰 순 ▾ | 병원명 | 마지막 이벤트]
- * 컬럼: 병원 | 상태 | 계약 ECG | 배치 중 ECG | 차이 | SpO2(참고) | GW | 회수(30일) | 마지막 이벤트 | 마지막 임포트 | →
+ * 컬럼: 병원 | 상태 | 계약 ECG | 배치 중 ECG(평가용 제외) | 차이 | 평가용(별도, 전 모델) | SpO2(참고) | GW | 회수(30일) | 마지막 이벤트 | 마지막 임포트 | →
  *  - registered=false 행: 배치/차이 '미등록', 나머지 '—', 우측 [임포트](onOpenImport) / 그 외 [열기](onOpenHospital)
- *  - expected=null: 계약 열 '— (계약완료 딜 없음)' · diff 0 → '0 ✔' · 음수 → '−12 ▲'
+ *  - expected=null: 계약 열 '— (계약완료 딜 없음)' · diff 0 → '0 ✔' · 음수 → '−12 ▲' (배치 중 ECG·차이는 평가용 EVAL 제외 §9.1)
  * 서버 페이지네이션(page/limit 50). 빈 상태에도 전 헤더 노출. 모바일 md:hidden 카드.
  * 요약 줄('고객 병원 n · …')과 탭 바는 orchestrator(DevicesClient)가 렌더한다 — 여기는 표만.
  */
@@ -42,7 +42,12 @@ const SORT_OPTIONS: { value: CoverageSort; label: string }[] = [
   { value: 'lastEvent', label: '마지막 이벤트' },
 ]
 
-const COLUMNS = ['병원', '상태', '계약 ECG', '배치 중 ECG', '차이', 'SpO2(참고)', 'GW', '회수(30일)', '마지막 이벤트', '마지막 임포트', '→'] as const
+const COLUMNS = ['병원', '상태', '계약 ECG', '배치 중 ECG', '차이', '평가용', 'SpO2(참고)', 'GW', '회수(30일)', '마지막 이벤트', '마지막 임포트', '→'] as const
+const COLUMN_TITLES: Partial<Record<(typeof COLUMNS)[number], string>> = {
+  '배치 중 ECG': '배치 중 ECG(평가용 제외 — 계약 대조 기준)',
+  차이: '배치 중 ECG(평가용 제외) − 계약 ECG',
+  평가용: '배치 중 평가용(EVAL) 기기 수(전 모델) — 계약 대조 제외',
+}
 const SEARCH_DEBOUNCE_MS = 300
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -105,7 +110,7 @@ function DiffCell({ row }: { row: CoverageRow }) {
   if (row.diff === 0) return <span className="tabular-nums text-success-subtle-foreground">0 ✔</span>
   const negative = row.diff < 0
   return (
-    <span className={cn('tabular-nums font-medium', negative ? 'text-destructive-subtle-foreground' : 'text-warning-subtle-foreground')} title="배치 중 ECG − 계약 ECG (참고 신호)">
+    <span className={cn('tabular-nums font-medium', negative ? 'text-destructive-subtle-foreground' : 'text-warning-subtle-foreground')} title="배치 중 ECG(평가용 제외) − 계약 ECG (참고 신호)">
       {negative ? '−' : '+'}
       {fmtInt(Math.abs(row.diff))} ▲
     </span>
@@ -115,6 +120,18 @@ function DiffCell({ row }: { row: CoverageRow }) {
 function RegisteredNum({ row, value, muted }: { row: CoverageRow; value: number; muted?: boolean }) {
   if (!row.registered) return DASH
   return <span className={cn('tabular-nums', muted && 'text-muted-foreground')}>{fmtInt(value)}</span>
+}
+
+/** 평가용 — 0이면 회색 '0', 있으면 warning 톤(ECG 평가용 수를 툴팁에) */
+function EvalCell({ row }: { row: CoverageRow }) {
+  if (!row.registered) return DASH
+  const n = row.evalTotal ?? 0
+  if (n === 0) return <span className="tabular-nums text-muted-foreground">0</span>
+  return (
+    <span className="tabular-nums font-medium text-warning-subtle-foreground" title={`평가용 ${fmtInt(n)}대 (ECG ${fmtInt(row.activeEcgEval ?? 0)}) — 계약 대조 제외`}>
+      {fmtInt(n)}
+    </span>
+  )
 }
 
 function LastEventCell({ row, today }: { row: CoverageRow; today: string }) {
@@ -290,7 +307,7 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
           <THead>
             <tr>
               {COLUMNS.map((c, i) => (
-                <TH key={c} className={cn(i >= 2 && i <= 7 && 'text-right', i === 10 && 'text-right')}>
+                <TH key={c} className={cn(i >= 2 && i <= 8 && 'text-right', i === 11 && 'text-right')} title={COLUMN_TITLES[c]}>
                   {c}
                 </TH>
               ))}
@@ -322,6 +339,9 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
                   <TD className="text-right">{row.registered ? <span className="tabular-nums font-medium">{fmtInt(row.activeEcg)}</span> : <span className="text-xs text-muted-foreground">미등록</span>}</TD>
                   <TD className="text-right">
                     <DiffCell row={row} />
+                  </TD>
+                  <TD className="text-right">
+                    <EvalCell row={row} />
                   </TD>
                   <TD className="text-right">
                     <RegisteredNum row={row} value={row.activeSpo2} muted />
@@ -394,6 +414,14 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
                 <dd>
                   <RegisteredNum row={row} value={row.recovered30d} />
                 </dd>
+                {row.registered && (row.evalTotal ?? 0) > 0 && (
+                  <>
+                    <dt className="text-muted-foreground">평가용(별도)</dt>
+                    <dd className="col-span-2">
+                      <EvalCell row={row} />
+                    </dd>
+                  </>
+                )}
               </dl>
               <div className="mt-2 flex items-end justify-between gap-2 text-xs">
                 <div className="space-y-0.5">

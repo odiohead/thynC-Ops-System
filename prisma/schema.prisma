@@ -172,6 +172,7 @@ model StatusCode {
   vocStatuses            VocReceipt[]           @relation("VocStatus")
   deviceRecoverReasons   HospitalDevice[]       @relation("DeviceRecoverReason") // DEVICE_RECOVERY_REASON (원장 프로젝션)
   deviceEventReasons     HospitalDeviceEvent[]  @relation("DeviceEventReason")   // DEVICE_RECOVERY_REASON (RECOVER 이벤트)
+  deviceUsageUnits       DeviceUnit[]           @relation("DeviceUsageType")     // DEVICE_USAGE_TYPE (유닛 용도: SALE/EVAL)
 
   @@unique([name, category])
   @@map("status_codes")
@@ -509,15 +510,18 @@ model DeviceUnit {
   macAddress   String?               @map("mac_address")
   memo         String?
   source       String                @default("MANUAL")
+  usageTypeId  Int?                  @map("usage_type_id")                                     // 용도(DEVICE_USAGE_TYPE: SALE 판매용 / EVAL 평가용, NULL=미지정) — 유닛 속성
   createdAt    DateTime              @default(now()) @map("created_at")
   updatedAt    DateTime              @default(now()) @updatedAt @map("updated_at")
   deviceInfo   DeviceInfo            @relation(fields: [deviceInfoId], references: [id], onDelete: Restrict)
+  usageType    StatusCode?           @relation("DeviceUsageType", fields: [usageTypeId], references: [id], onDelete: Restrict)
   placement    HospitalDevice?       @relation("UnitPlacement")      // 병원 배치 프로젝션 (유닛당 0..1행)
   replacedPlacements HospitalDevice[] @relation("DeviceReplacement") // 이 유닛이 교체기로 들어간 구기기 프로젝션들(replaced_by_id)
   events       HospitalDeviceEvent[] @relation("DeviceEvents")
   relatedEvents HospitalDeviceEvent[] @relation("EventRelatedDevice")
 
   @@index([deviceInfoId])
+  @@index([usageTypeId])
   @@map("device_units")
   @@schema("public")
 }

@@ -28,9 +28,11 @@ import {
   listHospitalWards,
   loadRecoveryReasons,
   loadTrackedModels,
+  loadUsageTypes,
   prepareCtx,
   requireOccurredOn,
   resolveModel,
+  resolveUsageTypeInput,
   wardNames,
   withRegistryTx,
   ymd,
@@ -65,11 +67,17 @@ export interface ImportRowInput {
   wardCode?: string | null
   macAddress?: string | null
   extDeviceCode?: string | null
+  /** E열/붙여넣기 용도 열 — name/value 별칭('판매용'·'EVAL'…). 미매칭은 error 판정 */
+  usageTypeInput?: string | null
+  /** 항목별 용도 id(등록 폼 items[i].usageTypeId 경유) — usageTypeInput보다 우선 */
+  usageTypeId?: number | null
 }
 
 export interface PreviewDefaults {
   /** 모델 고정 (없으면 행별 자동) */
   deviceInfoId?: number | null
+  /** 용도 기본값(폼 공통) — 행에 용도 입력이 없을 때 적용. 없으면 미지정 */
+  usageTypeId?: number | null
   wardMode: 'column' | 'fixed'
   /** wardMode=fixed */
   wardId?: number | null
@@ -108,6 +116,9 @@ export interface PreviewRow {
   serialRaw: string | null
   deviceInfoId: number | null
   deviceModel: string | null
+  /** 해석된 용도(행 입력 > 기본값 > 기존 유닛 값). null=미지정 */
+  usageTypeId: number | null
+  usageTypeName: string | null
   wardInput: string | null
   wardId: number | null
   wardName: string | null
@@ -193,11 +204,14 @@ export async function previewRows(
   const wardsByCode = new Map(wards.filter((w) => w.extWardCode).map((w) => [w.extWardCode!.toUpperCase(), w]))
   const reasons = await loadRecoveryReasons(client)
   const reasonById = new Map(reasons.map((r) => [r.id, r]))
+  const usageTypes = await loadUsageTypes(client)
+  const usageById = new Map(usageTypes.map((u) => [u.id, u]))
 
-  // 고정 모델·고정 병동 검증(전 행 공통이므로 한 번)
+  // 고정 모델·고정 병동·기본 용도 검증(전 행 공통이므로 한 번)
   if (defaults.deviceInfoId != null && !models.some((m) => m.id === Number(defaults.deviceInfoId))) {
     throw new RegistryError(400, '고정 모델이 원장 대상 모델이 아닙니다')
   }
+  if (defaults.usageTypeId != null && !usageById.has(Number(defaults.usageTypeId))) throw new RegistryError(400, '기본 용도가 올바르지 않습니다 (판매용/평가용)')
   let fixedWard: WardRef | null = null
   if (defaults.wardMode === 'fixed' && defaults.wardId != null) {
     fixedWard = wardsById.get(Number(defaults.wardId)) ?? null
@@ -246,6 +260,8 @@ export async function previewRows(
       serialRaw: ns.serialRaw,
       deviceInfoId: null,
       deviceModel: null,
+      usageTypeId: null,
+      usageTypeName: null,
       wardInput: null,
       wardId: null,
       wardName: null,
@@ -298,6 +314,14 @@ export async function previewRows(
       out.deviceInfoId = res.model.id
       out.deviceModel = res.model.deviceModel
       w.modelWarns.push(...res.warnings)
+    }
+    // 용도 — 행 입력(id > 별칭) > 기본값. 미매칭은 error(항상 반영 — 기존 유닛이어도 입력 자체가 잘못됨)
+    try {
+      const u = resolveUsageTypeInput(usageTypes, { usageTypeId: r.usageTypeId ?? null, usageTypeInput: r.usageTypeInput ?? null }, defaults.usageTypeId ?? null)
+      out.usageTypeId = u?.id ?? null
+      out.usageTypeName = u?.name ?? null
+    } catch (e) {
+      w.errors.push(e instanceof RegistryError ? e.message : String(e))
     }
   }
 
@@ -410,6 +434,14 @@ export async function previewRows(
       w.modelName = models.find((m) => m.id === unit.deviceInfoId)?.deviceModel ?? null
       out.deviceInfoId = unit.deviceInfoId
       out.deviceModel = w.modelName
+      // 용도도 유닛 속성 — 기존 값이 있으면 유지(다른 값을 명시한 행은 경고), 비어 있으면 행/기본값으로 채워진다
+      if (unit.usageTypeId != null) {
+        const cur = usageById.get(unit.usageTypeId) ?? null
+        const explicit = (r_usage_input(w.input) && out.usageTypeId != null && out.usageTypeId !== unit.usageTypeId)
+        if (explicit) w.warns.push(`이미 용도 ${cur?.name ?? `#${unit.usageTypeId}`}(으)로 지정된 시리얼 — 지정 용도(${out.usageTypeName ?? ''})는 무시합니다 (변경은 식별 정정)`)
+        out.usageTypeId = unit.usageTypeId
+        out.usageTypeName = cur?.name ?? null
+      }
     }
     if (!d) {
       if (action === 'TRANSFER') throw new RegistryError(400, `행 ${out.row}: TRANSFER 액션은 타 병원 배치 중(conflict) 행에만 지정할 수 있습니다`)
@@ -540,6 +572,11 @@ export async function previewRows(
   return { rows: works.map((w) => w.out), summary }
 }
 
+/** 행이 용도를 명시했는가(id 또는 입력 문자열) — 기본값 적용은 명시가 아님 */
+function r_usage_input(r: ImportRowInput): boolean {
+  return r.usageTypeId != null || !!(r.usageTypeInput && String(r.usageTypeInput).trim())
+}
+
 function toExisting(
   d: DeviceRow,
   hNames: Map<string, string>,
@@ -657,6 +694,7 @@ export async function importBatch(ctx: RegistryCtx, input: ImportInput, opts?: R
       memo: r.memo,
       macAddress: r.macAddress,
       extDeviceCode: r.extDeviceCode,
+      usageTypeId: r.usageTypeId,
     }))
     const conflicts = Object.fromEntries(executing.filter((r) => r.action === 'TRANSFER').map((r) => [r.serialNo, 'TRANSFER' as const]))
     let result: RegisterResult

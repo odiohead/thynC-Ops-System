@@ -3,7 +3,7 @@
 /**
  * 기기 목록 탭 (§6.1-B) — GROUP B
  * 필터: 상태(● 배치 중 / 회수됨(미재배치) / 전체) · 모델 칩(summary.models) · 병동(summary.wards + 미지정 + 폐쇄 포함) · 시리얼 검색(키·원문·닉네임, 디바운스 → setFilters({q})) · WMS(linked/unlinked/in_stock)
- * 컬럼: ☐ | 시리얼(mono, ⚠형식 불일치 = matchesSerialPattern(serialNo, deviceInfo.serialPattern)===false, 원문 2행) | 모델 | 병동 | 상태 | 배치일 | 회수일·사유 | 최근 이벤트 | 연결(refLink) | 창고 개체(wms 일시 매칭 '(자동 매칭)', wmsWarning ⚠) | 메모(USER+ 인라인 저장 → patchDevice({memo}) → onMutated) | ⋯(onAction)
+ * 컬럼: ☐ | 시리얼(mono, ⚠형식 불일치 = matchesSerialPattern(serialNo, deviceInfo.serialPattern)===false, 원문 2행) | 모델 | 용도(판매용 default·평가용 warning 배지, 미지정 '—') | 병동 | 상태 | 배치일 | 회수일·사유 | 최근 이벤트 | 연결(refLink) | 창고 개체(wms 일시 매칭 '(자동 매칭)', wmsWarning ⚠) | 메모(USER+ 인라인 저장 → patchDevice({memo}) → onMutated) | ⋯(onAction)
  * 정렬: 병동→시리얼(기본)/시리얼/배치일/최근 이벤트 (filters.sort — 헤더 클릭·셀렉트). page/limit 50(≤500) 서버 페이지네이션.
  * 다중 선택(ACTIVE 행만) + '검색 결과 전체 선택 N건'(getUnitIds ≤2,000 → Map에 id→(행 있으면 ref, 없으면 null)) → selection/setSelection.
  * 빈 상태: 헤더 + "등록된 기기가 없습니다. [+ 등록] 또는 [임포트] 탭에서 시작하세요." (onRegister / onOpenTab('import'))
@@ -19,11 +19,11 @@ import EmptyState from '@/app/components/ui/EmptyState'
 import { Input, Select } from '@/app/components/ui/Input'
 import { TBody, TD, TH, THead, TR } from '@/app/components/ui/Table'
 import { cn } from '@/lib/cn'
-import { DEVICE_STATUS_LABELS, REGISTRY_REF_TYPE_LABELS, matchesSerialPattern, refLink, todayKst, type RegistryRefType } from '@/lib/deviceRegistryShared'
+import { DEVICE_STATUS_LABELS, REGISTRY_REF_TYPE_LABELS, USAGE_TYPE_LABELS, matchesSerialPattern, refLink, todayKst, type RegistryRefType, type UsageFilter, type UsageTypeRef } from '@/lib/deviceRegistryShared'
 import { errorMessage, getUnitIds, getUnits, patchDevice } from './api'
 import { useDevicesToast } from './toast'
 import { RegistryFloatingPanel, RegistryMenuItem } from './RegistryFloatingPanel'
-import { lastEventText, wmsCell, ymdOrDash } from './deviceDisplay'
+import { lastEventText, usageBadgeVariant, wmsCell, ymdOrDash } from './deviceDisplay'
 import {
   toDeviceRef,
   type Capabilities,
@@ -76,6 +76,13 @@ const WMS_OPTIONS: { value: '' | UnitsWmsFilter; label: string }[] = [
   { value: 'unlinked', label: '미연결' },
 ]
 
+const USAGE_OPTIONS: { value: '' | UsageFilter; label: string }[] = [
+  { value: '', label: '용도 전체' },
+  { value: 'SALE', label: USAGE_TYPE_LABELS.SALE },
+  { value: 'EVAL', label: USAGE_TYPE_LABELS.EVAL },
+  { value: 'none', label: '용도 미지정' },
+]
+
 const SORT_OPTIONS: { value: UnitsSort; label: string }[] = [
   { value: 'ward', label: '병동 → 시리얼' },
   { value: 'serial', label: '시리얼' },
@@ -88,6 +95,7 @@ const LIMIT_OPTIONS = [50, 100, 200, 500]
 const COLUMNS: { key: string; label: string; sort?: UnitsSort; className?: string }[] = [
   { key: 'serial', label: '시리얼', sort: 'serial' },
   { key: 'model', label: '모델' },
+  { key: 'usage', label: '용도' },
   { key: 'ward', label: '병동', sort: 'ward' },
   { key: 'status', label: '상태' },
   { key: 'placedOn', label: '배치일', sort: 'placedOn' },
@@ -131,7 +139,7 @@ export function DeviceTable({
   const onTotalChangeRef = useRef(onTotalChange)
   onTotalChangeRef.current = onTotalChange
 
-  const hasFilter = filters.status !== 'active' || filters.model != null || filters.ward != null || filters.q !== '' || filters.wms != null
+  const hasFilter = filters.status !== 'active' || filters.model != null || filters.ward != null || filters.q !== '' || filters.wms != null || filters.usage != null
 
   useEffect(() => {
     let alive = true
@@ -144,6 +152,7 @@ export function DeviceTable({
       ward: filters.ward,
       q: filters.q || null,
       wms: filters.wms,
+      usage: filters.usage,
       page: filters.page,
       limit: filters.limit,
       sort: filters.sort,
@@ -167,7 +176,7 @@ export function DeviceTable({
       alive = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hospitalCode, filters.status, filters.model, filters.ward, filters.q, filters.wms, filters.page, filters.limit, filters.sort, reloadKey])
+  }, [hospitalCode, filters.status, filters.model, filters.ward, filters.q, filters.wms, filters.usage, filters.page, filters.limit, filters.sort, reloadKey])
 
   // ── 시리얼 검색 디바운스
   const [qInput, setQInput] = useState(filters.q)
@@ -212,7 +221,7 @@ export function DeviceTable({
   const selectAllResults = useCallback(async () => {
     setSelectingAll(true)
     try {
-      const r = await getUnitIds({ hospital: hospitalCode, status: 'active', model: filters.model, ward: filters.ward, q: filters.q || null, wms: filters.wms })
+      const r = await getUnitIds({ hospital: hospitalCode, status: 'active', model: filters.model, ward: filters.ward, q: filters.q || null, wms: filters.wms, usage: filters.usage })
       const byId = new Map(rows.map((row) => [row.id, row] as const))
       const next: Selection = new Map()
       for (const id of r.ids) {
@@ -226,7 +235,7 @@ export function DeviceTable({
     } finally {
       setSelectingAll(false)
     }
-  }, [hospitalCode, filters.model, filters.ward, filters.q, filters.wms, rows, selection, setSelection, notify])
+  }, [hospitalCode, filters.model, filters.ward, filters.q, filters.wms, filters.usage, rows, selection, setSelection, notify])
 
   const canSelectAllResults = filters.status === 'active' && allPageSelected && total > selectableRows.length && selection.size < Math.min(total, 2000)
 
@@ -272,7 +281,7 @@ export function DeviceTable({
   const activeWards = wards.filter((w) => w.isActive)
   const closedWards = wards.filter((w) => !w.isActive)
 
-  const resetFilters = () => setFilters({ status: 'active', model: null, ward: null, q: '', wms: null, page: 1 })
+  const resetFilters = () => setFilters({ status: 'active', model: null, ward: null, q: '', wms: null, usage: null, page: 1 })
 
   const pages = Math.max(1, Math.ceil(total / filters.limit))
   const from = total === 0 ? 0 : (filters.page - 1) * filters.limit + 1
@@ -367,6 +376,13 @@ export function DeviceTable({
           </div>
           <Select aria-label="WMS" value={filters.wms ?? ''} onChange={(e) => setFilters({ wms: (e.target.value || null) as UnitsWmsFilter | null })} className="h-8 w-auto text-xs">
             {WMS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+          <Select aria-label="용도" value={filters.usage ?? ''} onChange={(e) => setFilters({ usage: (e.target.value || null) as UsageFilter | null })} className="h-8 w-auto text-xs">
+            {USAGE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
@@ -484,6 +500,9 @@ export function DeviceTable({
                     <TD>
                       <div>{row.deviceInfo?.deviceName ?? '—'}</div>
                       <div className="text-[11px] text-muted-foreground">{row.deviceInfo?.deviceModel}</div>
+                    </TD>
+                    <TD className="whitespace-nowrap">
+                      <UsageBadge usage={row.usageType} />
                     </TD>
                     <TD className="whitespace-nowrap">{wardText(row)}</TD>
                     <TD>
@@ -610,8 +629,11 @@ export function DeviceTable({
                         <StatusBadge status={row.status} />
                       </div>
                       {row.serialRaw && <div className="font-mono text-[11px] text-muted-foreground">{row.serialRaw}</div>}
-                      <div className="mt-0.5 text-xs text-muted-foreground">
-                        {row.deviceInfo?.deviceName} {row.deviceInfo?.deviceModel} · {wardText(row)}
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+                        <span>
+                          {row.deviceInfo?.deviceName} {row.deviceInfo?.deviceModel} · {wardText(row)}
+                        </span>
+                        {row.usageType && <UsageBadge usage={row.usageType} />}
                       </div>
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
                         <span className="tabular-nums">{lastEventText(row.lastEventType, row.lastEventOn, today)}</span>
@@ -722,6 +744,17 @@ function StatusBadge({ status }: { status: DeviceListRow['status'] }) {
   return <Badge variant={status === 'ACTIVE' ? 'success' : 'default'}>{DEVICE_STATUS_LABELS[status] ?? status}</Badge>
 }
 
+/** 용도 배지 — 판매용 default · 평가용 warning · 미지정 '—' */
+export function UsageBadge({ usage }: { usage: UsageTypeRef | null | undefined }) {
+  const variant = usageBadgeVariant(usage)
+  if (!usage || !variant) return <span className="text-muted-foreground">—</span>
+  return (
+    <Badge variant={variant} title={usage.value === 'EVAL' ? '평가용 — 계약 대조에서 제외' : undefined}>
+      {usage.name}
+    </Badge>
+  )
+}
+
 function Chip({ active, onClick, children, title }: { active: boolean; onClick: () => void; children: ReactNode; title?: string }) {
   return (
     <button
@@ -744,7 +777,7 @@ function TableEmpty({ hasFilter, canWrite, onRegister, onOpenTab, onReset }: { h
     return (
       <EmptyState
         title="조건에 맞는 기기가 없습니다."
-        description="상태·모델·병동·검색어·WMS 필터를 조정하세요."
+        description="상태·모델·병동·검색어·WMS·용도 필터를 조정하세요."
         action={
           <Button size="sm" variant="outline" onClick={onReset}>
             필터 초기화

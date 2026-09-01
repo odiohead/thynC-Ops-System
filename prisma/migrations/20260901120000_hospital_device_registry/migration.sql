@@ -40,12 +40,14 @@ CREATE TABLE device_units (
   device_info_id INTEGER NOT NULL REFERENCES device_info(id) ON DELETE RESTRICT ON UPDATE CASCADE,
   serial_no TEXT NOT NULL, serial_raw TEXT, mac_address TEXT, memo TEXT,
   source TEXT NOT NULL DEFAULT 'MANUAL',
+  usage_type_id INTEGER REFERENCES status_codes(id) ON DELETE RESTRICT,   -- 용도(판매용/평가용, DEVICE_USAGE_TYPE) — 유닛 속성, NULL=미지정
   created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT device_units_serial_no_key UNIQUE (serial_no),
   CONSTRAINT device_units_serial_no_normalized_check CHECK (serial_no <> '' AND serial_no = upper(btrim(serial_no))));
 CREATE INDEX device_units_device_info_id_idx   ON device_units(device_info_id);
 CREATE INDEX device_units_serial_no_pattern_idx ON device_units(serial_no text_pattern_ops);
 CREATE INDEX device_units_serial_raw_idx        ON device_units(serial_raw) WHERE serial_raw IS NOT NULL;
+CREATE INDEX device_units_usage_type_id_idx     ON device_units(usage_type_id);
 
 -- 4') D1/D3: 병원 배치 프로젝션(이름 승계) — 유닛당 0..1행, 상태 컬럼은 이벤트 fold의 파생값
 CREATE TABLE hospital_devices (
@@ -114,12 +116,15 @@ CREATE INDEX hospital_device_events_type_date_idx    ON hospital_device_events(e
 CREATE UNIQUE INDEX hospital_device_events_auto_ref_idem_key ON hospital_device_events(ref_type, ref_code, device_id, event_type)
   WHERE ref_type IS NOT NULL AND source IN ('WMS','ONPREM');          -- 불변식 8 (MANUAL 제외)
 
--- 7) D5: 회수 사유 마스터
+-- 7) D5: 회수 사유 마스터 + 용도 마스터(DEVICE_USAGE_TYPE — 2026-09-01 결정: 판매용/평가용 2값, value가 시스템 의미)
 INSERT INTO status_codes (name, category, "order", value) VALUES
   ('불량(AS 회수)','DEVICE_RECOVERY_REASON',1,'DEFECT'), ('분실','DEVICE_RECOVERY_REASON',2,'LOST'),
   ('반납(계약 종료·축소)','DEVICE_RECOVERY_REASON',3,'RETURN'), ('데모 종료','DEVICE_RECOVERY_REASON',4,NULL),
   ('현장 폐기','DEVICE_RECOVERY_REASON',5,'DISPOSE'), ('타 병원 이관','DEVICE_RECOVERY_REASON',6,'TRANSFER'),
   ('기타','DEVICE_RECOVERY_REASON',9,NULL)
+ON CONFLICT (name, category) DO NOTHING;
+INSERT INTO status_codes (name, category, "order", value) VALUES
+  ('판매용','DEVICE_USAGE_TYPE',1,'SALE'), ('평가용','DEVICE_USAGE_TYPE',2,'EVAL')
 ON CONFLICT (name, category) DO NOTHING;
 
 -- 8) nav (icon 'device'는 P3에서 ICON_MAP에 추가)
@@ -127,3 +132,5 @@ INSERT INTO nav_menu_items (menu_key, label, href, icon_key, parent_key, sort_or
   ('devices','디바이스 원장','/devices','device','operations',55,'{SEERS}') ON CONFLICT (menu_key) DO NOTHING;
 INSERT INTO nav_menu_items (menu_key, label, href, parent_key, sort_order, group_label, allowed_roles) VALUES
   ('settings/device-recovery-reason','기기 회수 사유 관리','/settings/device-recovery-reason','settings',41,'병원·구축','{SUPER_ADMIN,ADMIN}') ON CONFLICT (menu_key) DO NOTHING;
+INSERT INTO nav_menu_items (menu_key, label, href, parent_key, sort_order, group_label, allowed_roles) VALUES
+  ('settings/device-usage-type','기기 용도 관리','/settings/device-usage-type','settings',42,'병원·구축','{SUPER_ADMIN,ADMIN}') ON CONFLICT (menu_key) DO NOTHING;

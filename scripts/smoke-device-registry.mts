@@ -58,6 +58,7 @@ const {
   getOrCreateUnit,
   flattenDevice,
   loadTrackedModels,
+  loadUsageTypes,
 } = reg
 const access = await import('../lib/deviceRegistryAccess')
 const auth = await import('../lib/auth')
@@ -68,7 +69,7 @@ const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
 /** 테스트 시리얼 — A9900xx / P9900xx / B9900xx (7자, 모델 패턴 통과) */
 const S = (n: number, kind: 'A' | 'P' | 'B' = 'A') => `${kind}9900${String(n).padStart(2, '0')}`
 const TEST_PREFIXES = ['A9900', 'P9900', 'B9900']
-const AUDIT_RESOURCES = ['hospital_device', 'hospital_device_event', 'hospital_device_import', 'hospital_ward', 'setting:device_recovery_reason']
+const AUDIT_RESOURCES = ['hospital_device', 'hospital_device_event', 'hospital_device_import', 'hospital_ward', 'setting:device_recovery_reason', 'setting:device_usage_type']
 
 let pass = 0
 let fail = 0
@@ -195,6 +196,7 @@ async function cleanup() {
   await prisma.hospitalDeviceImportBatch.deleteMany({ where: { id: { gt: pre.max.b }, hospitalCode: { in: TEST_HOSPITALS } } })
   await prisma.hospitalWard.deleteMany({ where: { id: { gt: pre.max.w }, hospitalCode: { in: TEST_HOSPITALS } } })
   await prisma.statusCode.deleteMany({ where: { category: 'DEVICE_RECOVERY_REASON', name: { startsWith: '스모크 사유' } } })
+  await prisma.statusCode.deleteMany({ where: { category: 'DEVICE_USAGE_TYPE', name: { startsWith: '스모크 용도' } } })
   await prisma.auditLog.deleteMany({ where: { id: { gt: pre.max.a }, resource: { in: AUDIT_RESOURCES } } })
 }
 
@@ -220,7 +222,7 @@ async function allTestDeviceIds(): Promise<number[]> {
 
 /** 공개 형상(유닛 + 배치 평탄화) — 배치 행이 없는 유닛(고아)은 null. `id`는 유닛 id */
 async function dev(where: { id: number } | { serialNo: string }) {
-  const u = await prisma.deviceUnit.findUnique({ where, include: { placement: true } })
+  const u = await prisma.deviceUnit.findUnique({ where, include: { placement: true, usageType: { select: { id: true, name: true, value: true } } } })
   return u && u.placement ? flattenDevice(u, u.placement) : null
 }
 /** 유닛 원행(배치 무관) */
@@ -291,6 +293,77 @@ async function main() {
   await registerDevices(ctx(H2, '2026-07-10'), [{ serialInput: S(90) }])
   const d90 = (await dev({ id: r90.created[0].id }))!
   ok(d90.status === 'ACTIVE' && d90.hospitalCode === H2 && d90.replacedById == null && d90.lastHospitalCode == null, '타 병원 재등록 후 replaced_by_id·last_hospital_code NULL')
+
+  section('[1b] 용도(판매용 SALE / 평가용 EVAL) — 유닛 속성 · 등록/임포트/교체/정정 · 계약 대조 제외')
+  const usageTypes = await loadUsageTypes(prisma)
+  const sale = usageTypes.find((u) => u.value === 'SALE')!
+  const evalT = usageTypes.find((u) => u.value === 'EVAL')!
+  ok(!!sale && !!evalT && sale.name === '판매용' && evalT.name === '평가용', '용도 마스터 DEVICE_USAGE_TYPE 2행(SALE 판매용·EVAL 평가용)')
+  const rU = await registerDevices(ctx(H1, '2026-08-01'), [
+    { serialInput: S(5), usageTypeId: evalT.id, wardName: '6병동' },
+    { serialInput: S(6), usageTypeInput: '판매용' },
+    { serialInput: S(7) },
+  ])
+  const u5 = rU.created.find((c) => c.serialNo === S(5))!
+  const u6 = rU.created.find((c) => c.serialNo === S(6))!
+  const u7 = rU.created.find((c) => c.serialNo === S(7))!
+  ok(rU.created.length === 3 && u5.usageTypeId === evalT.id && u6.usageTypeId === sale.id && u7.usageTypeId === null, '등록 시 용도 — id 지정 · 입력 별칭(판매용) · 미지정(null)')
+  ok((await unitRow({ id: u5.id }))!.usageTypeId === evalT.id && (await dev({ id: u5.id }))!.usageType?.value === 'EVAL', '유닛 usage_type_id 저장 + DeviceRow.usageType {id,name,value} 평탄화')
+  await expectErr('알 수 없는 용도 입력', () => registerDevices(ctx(H1), [{ serialInput: S(8), usageTypeInput: '전시용' }]), 400, '용도 값이 올바르지 않습니다 (판매용/평가용)')
+  await expectErr('없는 용도 id', () => registerDevices(ctx(H1), [{ serialInput: S(8), usageTypeId: 999_999 }]), 400, '용도 값이 올바르지 않습니다')
+  // 기존 유닛에 다른 용도를 명시 → 기존 값 유지 + 경고(모델과 같은 규약)
+  await recoverDevice(ctx(null, '2026-08-05'), { deviceId: u5.id, reasonCodeId: defect.id })
+  const rU2 = await registerDevices(ctx(H2, '2026-08-10'), [{ serialInput: S(5), usageTypeId: sale.id }])
+  ok(rU2.reregistered.length === 1 && rU2.reregistered[0].usageTypeId === evalT.id && rU2.warnings.some((w) => w.includes('지정 용도')), '기존 유닛과 다른 용도 지정 → 기존 유지 + 경고', rU2.warnings)
+  await recoverDevice(ctx(null, '2026-08-05'), { deviceId: u7.id, reasonCodeId: defect.id })
+  const rU3 = await registerDevices(ctx(H1, '2026-08-10'), [{ serialInput: S(7), usageTypeInput: 'EVAL' }])
+  ok(rU3.reregistered[0].usageTypeId === evalT.id && (await unitRow({ id: u7.id }))!.usageTypeId === evalT.id, '미지정 유닛은 재등록 시 용도 채움(value 별칭 EVAL)')
+  // correctDevice — 용도 변경 CORRECT · 취소 복원 · null(미지정)
+  const cu = await correctDevice(ctx(null), { deviceId: u6.id, changes: { usageTypeId: evalT.id } })
+  ok(cu.event.eventType === 'CORRECT' && (cu.changes.usageTypeId as { before: number }).before === sale.id && (cu.changes.usageTypeId as { after: number }).after === evalT.id && cu.device.usageTypeId === evalT.id, 'correctDevice usageTypeId → CORRECT changes {before,after}')
+  await expectErr('correctDevice 없는 용도', () => correctDevice(ctx(null), { deviceId: u6.id, changes: { usageTypeId: 999_999 } }), 400, '용도 값이')
+  await expectErr('correctDevice 변경 없음(같은 용도)', () => correctDevice(ctx(null), { deviceId: u6.id, changes: { usageTypeId: evalT.id } }), 400, '변경 사항')
+  const cuc = await cancelLastEvent(ctx(null), { eventId: cu.event.id })
+  ok(cuc.restored != null && (await unitRow({ id: u6.id }))!.usageTypeId === sale.id, 'CORRECT(용도) 취소 → before 복원')
+  const cuNull = await correctDevice(ctx(null), { deviceId: u6.id, changes: { usageTypeId: null } })
+  ok(cuNull.device.usageTypeId === null && (cuNull.changes.usageTypeId as { after: unknown }).after === null, 'correctDevice usageTypeId null → 미지정')
+  await correctDevice(ctx(null), { deviceId: u6.id, changes: { usageTypeId: sale.id } })
+  // 미리보기 — 행 용도 열 > 기본 용도, 알 수 없는 값 error, 기존 유닛 용도 유지
+  const pvU = await previewRows(
+    H1,
+    [
+      { row: 1, serialInput: S(9), usageTypeInput: '평가용' },
+      { row: 2, serialInput: S(11) },
+      { row: 3, serialInput: S(12), usageTypeInput: '전시용' },
+      { row: 4, serialInput: S(6) },
+    ],
+    { wardMode: 'fixed', mode: 'REGISTER', occurredOn: '2026-08-20', usageTypeId: evalT.id }
+  )
+  ok(pvU.rows[0].usageTypeId === evalT.id && pvU.rows[0].usageTypeName === '평가용', '미리보기 행 용도 열 해석(평가용)')
+  ok(pvU.rows[1].usageTypeId === evalT.id && pvU.rows[1].status === 'warn', '미리보기 기본 용도 적용(행에 용도 없음)')
+  ok(pvU.rows[2].status === 'error' && pvU.rows[2].messages[0] === '용도 값이 올바르지 않습니다 (판매용/평가용)', '미리보기 알 수 없는 용도 → error 판정')
+  ok(pvU.rows[3].status === 'skip' && pvU.rows[3].usageTypeId === sale.id, '기존 유닛(판매용)은 기본 용도(평가용)를 무시하고 유지')
+  await expectErr('미리보기 기본 용도 id 오류', () => previewRows(H1, [{ row: 1, serialInput: S(9) }], { wardMode: 'fixed', mode: 'REGISTER', occurredOn: today, usageTypeId: 999_999 }), 400, '기본 용도')
+  const impU = await importBatch(ctx(H1, '2026-08-20'), {
+    rows: [{ row: 1, serialInput: S(9), usageTypeInput: '평가용' }, { row: 2, serialInput: S(11) }],
+    sourceKind: 'PASTE',
+    mode: 'REGISTER',
+    defaults: { wardMode: 'fixed', usageTypeId: sale.id },
+  })
+  ok(impU.batch.registeredCount === 2 && (await unitRow({ serialNo: S(9) }))!.usageTypeId === evalT.id && (await unitRow({ serialNo: S(11) }))!.usageTypeId === sale.id, '임포트 실행 — 행 용도(평가용) > 기본 용도(판매용)')
+  // 교체 — 신 기기(신규 유닛) 용도는 구 기기 용도 승계, newUsageTypeId 지정이 우선
+  const rpU = await replaceDevice(ctx(H1, '2026-08-21'), { oldDeviceId: (await dev({ serialNo: S(9) }))!.id, newSerial: S(13) })
+  ok(rpU.newDevice.usageTypeId === evalT.id, '교체 신 기기(신규 유닛) 용도 = 구 기기 용도 승계(평가용)')
+  const rpU2 = await replaceDevice(ctx(H1, '2026-08-22'), { oldDeviceId: rpU.newDevice.id, newSerial: S(14), newUsageTypeId: sale.id })
+  ok(rpU2.newDevice.usageTypeId === sale.id, '교체 newUsageTypeId 지정 → 우선')
+  await expectErr('교체 없는 용도 id', () => replaceDevice(ctx(H1, '2026-08-23'), { oldDeviceId: rpU2.newDevice.id, newSerial: S(15), newUsageTypeId: 999_999 }), 400, '용도 값이')
+  // 목록 필터
+  const luEval = await listUnits({ hospital: H1, status: 'all', usage: 'EVAL' }, { page: 1, limit: 50 })
+  ok(luEval.total >= 1 && luEval.data.every((r) => r.usageType?.value === 'EVAL' && r.usageTypeId === evalT.id), 'listUnits usage=EVAL 필터 + 행 usageType 평탄화')
+  const luNone = await listUnits({ hospital: H1, status: 'all', usage: 'none' }, { page: 1, limit: 50 })
+  ok(luNone.total >= 1 && luNone.data.every((r) => r.usageTypeId === null && r.usageType === null), 'listUnits usage=none 필터(미지정)')
+  const luSale = await listUnits({ hospital: H1, status: 'all', usage: 'SALE' }, { page: 1, limit: 50 })
+  ok(luSale.total >= 1 && luSale.data.every((r) => r.usageType?.value === 'SALE'), 'listUnits usage=SALE 필터')
 
   section('[2] 소급·미래·불법 전이')
   await expectErr('미래 일자', () => moveDeviceWard(ctx(H2, '2099-01-01'), { deviceId: d1.id, toWardName: 'X' }), 400, '미래')
@@ -614,7 +687,10 @@ async function main() {
   const sum = (await getHospitalDeviceSummary(H1))!
   const ecg = sum.models.find((m) => m.onpremDeviceType === 1)!
   const spo2 = sum.models.find((m) => m.onpremDeviceType === 3)
-  ok(ecg.compare === 'hard' && ecg.expected === h1!.expected && ecg.diff === ecg.active - h1!.expected && ecg.active === (await prisma.hospitalDevice.count({ where: { hospitalCode: H1, status: 'ACTIVE', unit: { deviceInfoId: ecg.deviceInfoId } } })), 'ECG hard 대조(diff = 배치 중 − 계약)', ecg)
+  ok(ecg.compare === 'hard' && ecg.expected === h1!.expected && ecg.diff === ecg.activeForCompare - h1!.expected && ecg.active === (await prisma.hospitalDevice.count({ where: { hospitalCode: H1, status: 'ACTIVE', unit: { deviceInfoId: ecg.deviceInfoId } } })), 'ECG hard 대조(diff = 배치 중(평가용 제외) − 계약)', ecg)
+  const evalActiveH1 = await prisma.hospitalDevice.count({ where: { hospitalCode: H1, status: 'ACTIVE', unit: { deviceInfoId: ecg.deviceInfoId, usageType: { is: { value: 'EVAL' } } } } })
+  ok(evalActiveH1 >= 1 && ecg.activeEval === evalActiveH1 && ecg.activeForCompare === ecg.active - ecg.activeEval && ecg.diff !== ecg.active - h1!.expected, '요약: activeEval = 배치 중 EVAL 수 · activeForCompare = active − activeEval · diff에서 평가용 제외', { active: ecg.active, activeEval: ecg.activeEval, diff: ecg.diff })
+  ok(sum.evalTotal >= evalActiveH1 && sum.evalTotal === sum.models.reduce((s, m) => s + m.activeEval, 0), '요약: evalTotal = Σ models.activeEval')
   ok(!spo2 || (spo2.compare === 'soft' && spo2.expected === h1!.expected && spo2.diff === null), 'SpO2 soft(참고, diff null)', spo2)
   ok(sum.wards.length >= 4 && sum.wards.some((w) => w.name === '폐쇄병동' && !w.isActive) && typeof sum.unassigned === 'number' && sum.lastImport?.id === imp2.batch.id && sum.expectedDeviceCount === h1!.expected, '요약: 병동(폐쇄 포함)·미지정·마지막 임포트(취소 배치 제외)', { wards: sum.wards.length, lastImport: sum.lastImport?.id })
   ok(sum.recovered30dTotal >= 1 && sum.models.every((m) => m.recovered30d >= 0) && sum.lastEventOn != null, '요약: 회수(30일)·마지막 이벤트')
@@ -629,6 +705,8 @@ async function main() {
   const cov = await getGlobalCoverage({ page: 1, limit: 5, q: h1!.hospital_name })
   const covRow = cov.data.find((r) => r.hospitalCode === H1)!
   ok(!!covRow && covRow.expected === h1!.expected && covRow.deals === h1!.deals && covRow.registered && covRow.diff === covRow.activeEcg - h1!.expected && covRow.lastImport?.id === imp2.batch.id, '커버리지 행(H1): 계약·배치·차이·마지막 임포트', covRow)
+  ok(covRow.activeEcgEval === ecg.activeEval && covRow.activeEcg === ecg.activeForCompare && covRow.evalTotal === sum.evalTotal && covRow.evalTotal >= 1, '커버리지: 배치 중 ECG·차이는 평가용 제외, activeEcgEval·evalTotal 별도(요약과 일치)', { cov: [covRow.activeEcg, covRow.activeEcgEval, covRow.evalTotal], sum: [ecg.activeForCompare, ecg.activeEval, sum.evalTotal] })
+  ok(cov.totals.active.eval >= 1 && typeof cov.totals.active.ecg === 'number', '전역 합계 active.eval')
   ok(cov.totals.customerHospitals > 0 && cov.totals.registeredHospitals >= 3 && cov.totals.active.total >= 1 && cov.totals.events30d >= 1, '전역 합계', cov.totals)
   const cov3 = await getGlobalCoverage({ q: H3 })
   ok(cov3.data[0]?.hospitalCode === H3 && cov3.data[0].expected === null && cov3.data[0].diff === null && cov3.data[0].registered, '딜 0건 병원 커버리지: expected/diff null, registered')
@@ -706,9 +784,14 @@ async function main() {
   const adminTok = await auth.signToken({ userId: adminUser!.id, email: adminUser!.email, name: adminUser!.name, role: adminUser!.role as 'ADMIN', isActive: true })
   const viewerTok = await auth.signToken(fake('VIEWER'))
   const userTok = await auth.signToken(fake('USER'))
+  // 실제 USER 계정 — 이벤트를 만드는 write 경로(용도 PATCH)는 actor_id FK(users) 때문에 실존 사용자여야 한다
+  const realUser = await prisma.user.findFirst({ where: { role: 'USER', isActive: true }, orderBy: { createdAt: 'asc' } })
+  const userWriteTok = realUser ? await auth.signToken({ userId: realUser.id, email: realUser.email, name: realUser.name, role: 'USER', isActive: true }) : userTok
   const A = { token: adminTok }
   const V = { token: viewerTok }
   const U = { token: userTok }
+  const UW = { token: userWriteTok }
+  ok(!!realUser, '실제 USER 계정 존재(용도 PATCH write 테스트용)')
   const R = {
     canManage: await import('../app/api/devices/can-manage/route'),
     units: await import('../app/api/devices/units/route'),
@@ -735,6 +818,8 @@ async function main() {
     ward: await import('../app/api/hospitals/[code]/wards/[id]/route'),
     reasons: await import('../app/api/settings/device-recovery-reason/route'),
     reason: await import('../app/api/settings/device-recovery-reason/[id]/route'),
+    usages: await import('../app/api/settings/device-usage-type/route'),
+    usage: await import('../app/api/settings/device-usage-type/[id]/route'),
   }
   ok(typeof R.unit.GET === 'function' && typeof R.unit.PATCH === 'function', 'units/[id]/route.ts는 GET·PATCH 둘 다 export')
   const P1 = { params: { code: H1 } }
@@ -750,15 +835,22 @@ async function main() {
   ok(r.status === 404, 'register 없는 병원 → 404')
   r = await call(h(R.register.POST), 'POST', `${B}/api/hospitals/${H1}/devices/register`, { ...A, ...P1, body: { items: [] } })
   ok(r.status === 400, 'register items 비어 있음 → 400')
-  r = await call(h(R.register.POST), 'POST', `${B}/api/hospitals/${H1}/devices/register?preview=true`, { ...A, ...P1, body: { items: [S(80), { serial: S(81), wardName: '6병동' }, S(1)], occurredOn: '2026-08-01' } })
+  r = await call(h(R.register.POST), 'POST', `${B}/api/hospitals/${H1}/devices/register?preview=true`, { ...A, ...P1, body: { items: [S(80), { serial: S(81), wardName: '6병동', usageType: '평가용' }, S(1)], occurredOn: '2026-08-01', usageTypeId: sale.id } })
   ok(r.status === 200 && r.json.rows.length === 3 && r.json.rows[0].status === 'warn' && r.json.rows[0].messages.some((m: string) => m.includes('미지정')) && r.json.rows[1].status === 'ok' && r.json.rows[1].wardId === ward6.id && r.json.rows[2].status === 'conflict', 'register ?preview=true → 판정 행(병동 없음 warn·기존 병동 ok·conflict)', r.json.rows?.map((x: { status: string }) => x.status))
+  ok(r.json.rows[0].usageTypeId === sale.id && r.json.rows[1].usageTypeName === '평가용', 'register preview — 공통 usageTypeId 기본 + 항목 usageType 문자열 우선')
+  r = await call(h(R.register.POST), 'POST', `${B}/api/hospitals/${H1}/devices/register?preview=true`, { ...A, ...P1, body: { items: [{ serial: S(80), usageType: '전시용' }] } })
+  ok(r.status === 200 && r.json.rows[0].status === 'error' && r.json.rows[0].messages[0].includes('용도 값이 올바르지 않습니다'), 'register preview — 알 수 없는 용도 → error 행')
   r = await call(h(R.register.POST), 'POST', `${B}/api/hospitals/${H1}/devices/register`, { ...A, ...P1, body: { items: [S(80)], wardName: '6병동', occurredOn: '2026-08-01', memo: '라우트 등록' } })
   ok(r.status === 201 && r.json.created.length === 1 && r.json.eventIds.length === 1, 'register 단건 201')
   const id80 = r.json.created[0].id as number
   ok(!!(await prisma.auditLog.findFirst({ where: { id: { gt: pre.max.a }, resource: 'hospital_device', action: 'CREATE', resourceId: S(80) } })), 'audit hospital_device CREATE(id=시리얼)')
-  r = await call(h(R.register.POST), 'POST', `${B}/api/hospitals/${H1}/devices/register`, { ...A, ...P1, body: { items: [S(81), S(82)], wardName: '7병동', occurredOn: '2026-08-01' } })
-  ok(r.status === 201 && r.json.created.length === 2, 'register 다건 201')
+  r = await call(h(R.register.POST), 'POST', `${B}/api/hospitals/${H1}/devices/register`, { ...A, ...P1, body: { items: [S(81), S(82)], wardName: '7병동', occurredOn: '2026-08-01', usageTypeId: sale.id } })
+  ok(r.status === 201 && r.json.created.length === 2 && r.json.created.every((c: { usageTypeId: number | null }) => c.usageTypeId === sale.id), 'register 다건 201 (공통 usageTypeId 적용)')
   const [id81, id82] = r.json.created.map((c: { id: number }) => c.id) as number[]
+  r = await call(h(R.units.GET), 'GET', `${B}/api/devices/units?hospital=${H1}&usage=SALE&q=${S(80).slice(0, 6)}`, A)
+  ok(r.status === 200 && r.json.total === 2 && r.json.data.every((d: { usageType: { value: string } | null }) => d.usageType?.value === 'SALE'), 'units ?usage=SALE 필터')
+  r = await call(h(R.units.GET), 'GET', `${B}/api/devices/units?hospital=${H1}&usage=bogus`, A)
+  ok(r.status === 400, 'units 잘못된 usage → 400')
   ok(!!(await prisma.auditLog.findFirst({ where: { id: { gt: pre.max.a }, resource: 'hospital_device_event', resourceId: r.json.actionGroup } })), 'audit hospital_device_event(action_group) 1행')
   r = await call(h(R.register.POST), 'POST', `${B}/api/hospitals/${H1}/devices/register`, { ...A, ...P1, body: { items: [S(80)] } })
   ok(r.status === 409 && Array.isArray(r.json.skipped), 'register 이미 배치 → 409 skipped[]')
@@ -780,6 +872,17 @@ async function main() {
   ok(r.status === 400 && /이벤트/.test(r.json.error), 'PATCH 상태 키 → 400')
   r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id80}`, { ...U, params: { id: String(id80) }, body: { serialNo: S(83) } })
   ok(r.status === 403, 'PATCH 식별 보정 USER(권한 없음) → 403')
+  r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id80}`, { ...U, params: { id: String(id80) }, body: { deviceInfoId: 1 } })
+  ok(r.status === 403, 'PATCH 모델 정정 USER → 403 (admin)')
+  r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id80}`, { ...UW, params: { id: String(id80) }, body: { usageTypeId: evalT.id } })
+  ok(r.status === 200 && r.json.event.eventType === 'CORRECT' && r.json.changes.usageTypeId.after === evalT.id && r.json.device.usageTypeId === evalT.id, 'PATCH 용도 USER(write) → 200 CORRECT', r.json)
+  ok(!!(await prisma.auditLog.findFirst({ where: { id: { gt: pre.max.a }, resource: 'hospital_device', action: 'UPDATE', resourceId: S(80), resourceLabel: { contains: '용도 미지정 → 평가용' } } })), 'PATCH 용도 audit 라벨(용도 미지정 → 평가용)')
+  r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id80}`, { ...U, params: { id: String(id80) }, body: { usageTypeId: evalT.id, macAddress: '00:11' } })
+  ok(r.status === 403, 'PATCH 용도 + MAC 함께 USER → 403 (다른 식별 키는 admin)')
+  r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id80}`, { ...UW, params: { id: String(id80) }, body: { usageTypeId: 999999 } })
+  ok(r.status === 400 && /용도 값이/.test(r.json.error), 'PATCH 없는 용도 id → 400')
+  r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id80}`, { ...UW, params: { id: String(id80) }, body: { usageTypeId: null } })
+  ok(r.status === 200 && r.json.device.usageTypeId === null && r.json.changes.usageTypeId.before === evalT.id, 'PATCH 용도 null → 미지정(CORRECT)')
   r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id80}`, { ...A, params: { id: String(id80) }, body: { macAddress: '11:22' } })
   ok(r.status === 200 && r.json.event.eventType === 'CORRECT' && r.json.changes.macAddress.after === '11:22', 'PATCH 식별 보정 ADMIN → CORRECT')
   r = await call(h(R.move.POST), 'POST', `${B}/api/devices/units/${id80}/move`, { ...A, params: { id: String(id80) }, body: { toWardName: 'RT-B', occurredOn: '2026-08-05' } })
@@ -793,7 +896,7 @@ async function main() {
   r = await call(h(R.recover.POST), 'POST', `${B}/api/devices/units/${id80}/recover`, { ...A, params: { id: String(id80) }, body: { reasonCodeId: defect.id } })
   ok(r.status === 409, 'recover 재회수 → 409')
   r = await call(h(R.events.GET), 'GET', `${B}/api/devices/events?device=${id80}`, A)
-  ok(r.status === 200 && r.json.total === 4 && r.json.data[0].eventType === 'CORRECT' && r.json.data[1].eventType === 'RECOVER', 'events?device= (REGISTER·CORRECT·MOVE·RECOVER, 최신순 — CORRECT는 오늘)')
+  ok(r.status === 200 && r.json.total === 6 && r.json.data[0].eventType === 'CORRECT' && r.json.data[3].eventType === 'RECOVER' && 'usageType' in r.json.data[0].device, 'events?device= (REGISTER·CORRECT×3·MOVE·RECOVER, 최신순 — CORRECT는 오늘, device.usageType 포함)')
   r = await call(h(R.events.GET), 'GET', `${B}/api/devices/events?type=BOGUS`, A)
   ok(r.status === 400, 'events 잘못된 type → 400')
   r = await call(h(R.event.DELETE), 'DELETE', `${B}/api/devices/events/${recEvId}`, { ...U, params: { id: String(recEvId) } })
@@ -893,9 +996,31 @@ async function main() {
   ok(r.status === 409 && /시스템/.test(r.json.error), '시스템 사유 DELETE → 409')
   r = await call(h(R.reason.DELETE), 'DELETE', `${B}/api/settings/device-recovery-reason/${reasonId}`, { ...A, params: { id: String(reasonId) } })
   ok(r.status === 200, '회수 사유 DELETE')
+  // 용도 마스터 라우트 (device-recovery-reason과 같은 패턴)
+  r = await call(h(R.usages.GET), 'GET', `${B}/api/settings/device-usage-type`, V)
+  ok(r.status === 200 && r.json.statusCodes.some((s: { value: string | null }) => s.value === 'SALE') && r.json.statusCodes.some((s: { value: string | null }) => s.value === 'EVAL'), '용도 GET(VIEWER, SALE·EVAL)')
+  r = await call(h(R.usages.POST), 'POST', `${B}/api/settings/device-usage-type`, { ...U, body: { name: '스모크 용도' } })
+  ok(r.status === 403, '용도 POST USER → 403')
+  r = await call(h(R.usages.POST), 'POST', `${B}/api/settings/device-usage-type`, { ...A, body: { name: '스모크 용도', value: 'EVAL' } })
+  ok(r.status === 409, '용도 POST 이미 있는 value → 409')
+  r = await call(h(R.usages.POST), 'POST', `${B}/api/settings/device-usage-type`, { ...A, body: { name: '스모크 용도', value: 'DEMO' } })
+  ok(r.status === 400, '용도 POST 허용 어휘 밖 value → 400')
+  r = await call(h(R.usages.POST), 'POST', `${B}/api/settings/device-usage-type`, { ...A, body: { name: '스모크 용도', order: 50 } })
+  ok(r.status === 201 && r.json.statusCode.value === null && r.json.statusCode.category === 'DEVICE_USAGE_TYPE', '용도 POST 201')
+  const usageId = r.json.statusCode.id as number
+  r = await call(h(R.usage.PUT), 'PUT', `${B}/api/settings/device-usage-type/${usageId}`, { ...A, params: { id: String(usageId) }, body: { name: '스모크 용도2' } })
+  ok(r.status === 200 && r.json.statusCode.name === '스모크 용도2', '용도 PUT')
+  r = await call(h(R.usage.DELETE), 'DELETE', `${B}/api/settings/device-usage-type/${evalT.id}`, { ...A, params: { id: String(evalT.id) } })
+  ok(r.status === 409 && r.json.error === '시스템 용도는 삭제할 수 없습니다', '시스템 용도(EVAL) DELETE → 409')
+  await correctDevice(ctx(null), { deviceId: id81, changes: { usageTypeId: usageId } })
+  r = await call(h(R.usage.DELETE), 'DELETE', `${B}/api/settings/device-usage-type/${usageId}`, { ...A, params: { id: String(usageId) } })
+  ok(r.status === 409 && r.json.error === '사용 중인 용도입니다', '사용 중(device_units.usage_type_id) 용도 DELETE → 409')
+  await correctDevice(ctx(null), { deviceId: id81, changes: { usageTypeId: sale.id } })
+  r = await call(h(R.usage.DELETE), 'DELETE', `${B}/api/settings/device-usage-type/${usageId}`, { ...A, params: { id: String(usageId) } })
+  ok(r.status === 200, '미사용 사용자 용도 DELETE → 200')
   const auditBy = await prisma.auditLog.groupBy({ by: ['resource'], where: { id: { gt: pre.max.a }, resource: { in: AUDIT_RESOURCES } }, _count: { _all: true } })
   const ac = Object.fromEntries(auditBy.map((a) => [a.resource, a._count._all]))
-  ok((ac.hospital_device ?? 0) >= 5 && (ac.hospital_device_event ?? 0) >= 5 && ac.hospital_device_import === 3 && (ac.hospital_ward ?? 0) >= 4 && ac['setting:device_recovery_reason'] === 3, '감사 로그 자원별 건수(§8.3 자원명)', ac)
+  ok((ac.hospital_device ?? 0) >= 5 && (ac.hospital_device_event ?? 0) >= 5 && ac.hospital_device_import === 3 && (ac.hospital_ward ?? 0) >= 4 && ac['setting:device_recovery_reason'] === 3 && ac['setting:device_usage_type'] === 3, '감사 로그 자원별 건수(§8.3 자원명)', ac)
 
   section('[14] 최종 정합 — 전 개체 프로젝션 = fold')
   const all = await allTestDeviceIds()

@@ -2,7 +2,7 @@
  * 디바이스 원장 표시 헬퍼 (GROUP B 소유 — SummaryStrip · DeviceTable · DeviceHistoryDrawer · CorrectionModal 공용)
  * 순수 함수만. 날짜는 lib/deviceRegistryShared 의 toYmd 기준(@db.Date = UTC 자정 ISO), 기록 시각은 KST 표시.
  */
-import { DEVICE_EVENT_TYPE_LABELS, toYmd, todayKst, type DeviceEventType } from '@/lib/deviceRegistryShared'
+import { DEVICE_EVENT_TYPE_LABELS, toYmd, todayKst, type DeviceEventType, type UsageTypeRef } from '@/lib/deviceRegistryShared'
 import type { ChangeSet, ContractedDeal, ModelSummary, WmsMatch } from './types'
 
 /** @db.Date ISO → 'YYYY-MM-DD', 없으면 '—' */
@@ -70,23 +70,34 @@ export const CORRECT_FIELD_LABELS: Record<string, string> = {
   serialRaw: '원문',
   macAddress: 'MAC',
   extDeviceCode: '닉네임',
+  usageTypeId: '용도',
 }
 
-function changeValue(field: string, v: unknown, models?: readonly ModelSummary[]): string {
-  if (v === null || v === undefined || v === '') return '(없음)'
+function changeValue(field: string, v: unknown, models?: readonly ModelSummary[], usageTypes?: readonly UsageTypeRef[]): string {
+  if (v === null || v === undefined || v === '') return field === 'usageTypeId' ? '미지정' : '(없음)'
   if (field === 'deviceInfoId' && models) {
     const m = models.find((x) => x.deviceInfoId === Number(v))
     if (m) return `${m.deviceName} ${m.deviceModel}`
   }
+  if (field === 'usageTypeId' && usageTypes) {
+    const u = usageTypes.find((x) => x.id === Number(v))
+    if (u) return u.name
+  }
   return String(v)
 }
 
-/** CORRECT changes → ['시리얼: A12016 → A120160', …] (serialRaw는 시리얼 행에 함께 표시되므로 숨김) */
-export function changeSummaryLines(changes: ChangeSet | null | undefined, models?: readonly ModelSummary[]): string[] {
+/** CORRECT changes → ['시리얼: A12016 → A120160', '용도: 미지정 → 평가용', …] (serialRaw는 시리얼 행에 함께 표시되므로 숨김) */
+export function changeSummaryLines(changes: ChangeSet | null | undefined, models?: readonly ModelSummary[], usageTypes?: readonly UsageTypeRef[]): string[] {
   if (!changes) return []
   return Object.entries(changes)
     .filter(([field]) => field !== 'serialRaw')
-    .map(([field, c]) => `${CORRECT_FIELD_LABELS[field] ?? field}: ${changeValue(field, c?.before, models)} → ${changeValue(field, c?.after, models)}`)
+    .map(([field, c]) => `${CORRECT_FIELD_LABELS[field] ?? field}: ${changeValue(field, c?.before, models, usageTypes)} → ${changeValue(field, c?.after, models, usageTypes)}`)
+}
+
+/** 용도 배지 톤 — 판매용 default · 평가용 warning · 미지정 없음 */
+export function usageBadgeVariant(u: UsageTypeRef | null | undefined): 'default' | 'warning' | null {
+  if (!u) return null
+  return u.value === 'EVAL' ? 'warning' : 'default'
 }
 
 /** '1차 2025-03 40대' */

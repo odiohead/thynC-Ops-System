@@ -24,13 +24,21 @@ INSERT INTO status_codes (name, category, "order", value) VALUES
   ('기타','DEVICE_RECOVERY_REASON',9,NULL)
 ON CONFLICT (name, category) DO NOTHING;
 
+-- 3') 용도 마스터 (DEVICE_USAGE_TYPE — 2026-09-01 결정: 판매용/평가용 2값, value가 시스템 의미. 대웅제약재고는 판매용 창고이지 제3의 값이 아님)
+INSERT INTO status_codes (name, category, "order", value) VALUES
+  ('판매용','DEVICE_USAGE_TYPE',1,'SALE'), ('평가용','DEVICE_USAGE_TYPE',2,'EVAL')
+ON CONFLICT (name, category) DO NOTHING;
+
 -- 4) nav (icon 'device'는 P3에서 ICON_MAP에 추가 / 원장 nav는 SEERS 게이트 — D10)
 INSERT INTO nav_menu_items (menu_key, label, href, icon_key, parent_key, sort_order, allowed_org_codes) VALUES
   ('devices','디바이스 원장','/devices','device','operations',55,'{SEERS}') ON CONFLICT (menu_key) DO NOTHING;
 INSERT INTO nav_menu_items (menu_key, label, href, parent_key, sort_order, group_label, allowed_roles) VALUES
   ('settings/device-recovery-reason','기기 회수 사유 관리','/settings/device-recovery-reason','settings',41,'병원·구축','{SUPER_ADMIN,ADMIN}') ON CONFLICT (menu_key) DO NOTHING;
+INSERT INTO nav_menu_items (menu_key, label, href, parent_key, sort_order, group_label, allowed_roles) VALUES
+  ('settings/device-usage-type','기기 용도 관리','/settings/device-usage-type','settings',42,'병원·구축','{SUPER_ADMIN,ADMIN}') ON CONFLICT (menu_key) DO NOTHING;
 
 -- 확인
 SELECT device_model, device_class, onprem_device_type, serial_tracked, quantity_tracked FROM device_info ORDER BY sort_order;
 SELECT name, "order", value FROM status_codes WHERE category = 'DEVICE_RECOVERY_REASON' ORDER BY "order";
-SELECT menu_key, parent_key, sort_order FROM nav_menu_items WHERE menu_key IN ('devices', 'settings/device-recovery-reason');
+SELECT name, "order", value FROM status_codes WHERE category = 'DEVICE_USAGE_TYPE' ORDER BY "order";
+SELECT menu_key, parent_key, sort_order FROM nav_menu_items WHERE menu_key IN ('devices', 'settings/device-recovery-reason', 'settings/device-usage-type');

@@ -8,7 +8,7 @@
  *  (c) 타 병원 ACTIVE: 서버 409 문구 그대로 "구 기기가 {병원}에 배치 중 — 그 병원에서 회수(또는 이관) 기록 후 신 기기를 등록으로 처리하세요"
  *  (d) 이 병원 RECOVERED: 'RECOVER 없이 교체 기기만 등록' 안내
  * 신 시리얼(모델 자동·⚠접두 불일치·회수 이력 있으면 "재등록으로 이력 연결" 힌트·타 병원 ACTIVE면 [이관 처리]=newConflict:'TRANSFER'·이 병원 배치 중이면 '이미 등록된 기기 — 회수만 기록하고 병동을 맞춥니다')
- * · 병동(구 기본) · 사유(DEFECT 기본) · 업무일자 · 코드. Tab 구→신→제출.
+ * · 병동(구 기본) · 신 기기 용도(구 기기 용도 기본 — 사용자가 손대지 않으면 구 기기 조회 결과를 따라감; 신규 유닛일 때만 부여) · 사유(DEFECT 기본) · 업무일자 · 코드. Tab 구→신→제출.
  * replaceDevice(code, body) → onDone({ message:'교체 기록: P018363 회수(불량) · P020418 등록(3병동)', openDeviceId: newDevice.id, warnings })
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
@@ -18,8 +18,8 @@ import Badge from '@/app/components/ui/Badge'
 import { Input, Select, Textarea } from '@/app/components/ui/Input'
 import { cn } from '@/lib/cn'
 import { guessDeviceClassByPrefix, normalizeSerial, todayKst, toYmd, type OccurredOnBasis } from '@/lib/deviceRegistryShared'
-import { errorMessage, isApiError, getRecoveryReasons, lookupSerial, replaceDevice } from './api'
-import type { DeviceRef, DeviceRowBase, ModelSummary, MutationDone, RecoveryReason, RegistryRef, ReplaceBody, WardOption, WardValue } from './types'
+import { errorMessage, isApiError, getRecoveryReasons, getUsageTypes, lookupSerial, replaceDevice } from './api'
+import type { DeviceRef, DeviceRowBase, ModelSummary, MutationDone, RecoveryReason, RegistryRef, ReplaceBody, UsageType, WardOption, WardValue } from './types'
 import { WardCombo } from './WardCombo'
 import { MaintenanceCodeCombo } from './MaintenanceCodeCombo'
 import { FormField, ModalActions, Notice, OccurredOnField, StatusBadge, describeWard, isSubmitShortcut, useOccurredOn, wardBody } from './registryFormKit'
@@ -103,6 +103,10 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
   const [toWardDirty, setToWardDirty] = useState(false)
   const [reasons, setReasons] = useState<RecoveryReason[] | null>(null)
   const [reasonId, setReasonId] = useState<number | ''>('')
+  const [usageTypes, setUsageTypes] = useState<UsageType[] | null>(null)
+  /** 신 기기 용도 — 사용자가 고르기 전까지는 구 기기 용도를 따라간다 */
+  const [newUsageId, setNewUsageId] = useState<number | ''>(oldDevice?.usageTypeId ?? '')
+  const [newUsageDirty, setNewUsageDirty] = useState(false)
   const occ = useOccurredOn(today)
   const [memo, setMemo] = useState('')
   const [refCode, setRefCode] = useState('')
@@ -123,6 +127,9 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
         setReasonId((cur) => (cur === '' && defect ? defect.id : cur))
       })
       .catch(() => alive && setReasons([]))
+    getUsageTypes()
+      .then((r) => alive && setUsageTypes(r))
+      .catch(() => alive && setUsageTypes([]))
     return () => {
       alive = false
     }
@@ -154,14 +161,17 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
           setOldModelId(g.model?.deviceInfoId ?? '')
           setOldWard({})
           if (!toWardDirty) setToWard({})
+          if (!newUsageDirty) setNewUsageId('')
         } else if (d.status === 'ACTIVE' && d.hospitalCode === hospitalCode) {
           setOldState({ kind: 'active_here', device: d })
           if (!toWardDirty) setToWard(d.wardId != null ? { wardId: d.wardId } : {})
+          if (!newUsageDirty) setNewUsageId(d.usageTypeId ?? '')
         } else if (d.status === 'ACTIVE') {
           setOldState({ kind: 'other_hospital', device: d })
         } else if (d.lastHospitalCode === hospitalCode) {
           setOldState({ kind: 'recovered_here', device: d })
           if (!toWardDirty) setToWard({})
+          if (!newUsageDirty) setNewUsageId(d.usageTypeId ?? '')
         } else {
           setOldState({ kind: 'recovered_elsewhere', device: d })
         }
@@ -171,7 +181,7 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
         oldLooked.current = null
       }
     },
-    [hospitalCode, models, toWardDirty]
+    [hospitalCode, models, toWardDirty, newUsageDirty]
   )
 
   // ── 신 기기 조회
@@ -282,6 +292,8 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
       ...(newState.kind === 'create' && newModelId !== '' ? { newDeviceInfoId: newModelId } : {}),
       ...(toWardB.wardId != null ? { toWardId: toWardB.wardId } : toWardB.wardName ? { toWardName: toWardB.wardName } : {}),
       ...(reasonId !== '' ? { reasonCodeId: reasonId } : {}),
+      ...(newUsageId !== '' ? { newUsageTypeId: newUsageId } : {}),
+      ...(oldState.kind === 'not_found' && newUsageId !== '' ? { oldUsageTypeId: newUsageId } : {}),
       occurredOn: occ.value,
       memo: memo.trim() || null,
       ref,
@@ -515,6 +527,34 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
             wards={wards}
             disabled={submitting}
           />
+        </FormField>
+        <FormField
+          label="신 기기 용도"
+          htmlFor="replace-usage"
+          hint={
+            newState.kind === 'reregister' || newState.kind === 'active_here'
+              ? '이미 원장에 있는 기기 — 용도가 비어 있을 때만 적용(변경은 식별 정정)'
+              : oldState.kind === 'not_found'
+                ? '구 기기 소급 등록에도 같은 용도를 적용'
+                : '기본 = 구 기기 용도. 평가용은 계약 대조에서 제외'
+          }
+        >
+          <Select
+            id="replace-usage"
+            value={newUsageId}
+            disabled={submitting || usageTypes == null}
+            onChange={(e) => {
+              setNewUsageId(e.target.value ? Number(e.target.value) : '')
+              setNewUsageDirty(true)
+            }}
+          >
+            <option value="">미지정</option>
+            {(usageTypes ?? []).map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </Select>
         </FormField>
         <FormField label="회수 사유" htmlFor="replace-reason" hint="기본 불량(DEFECT)">
           <Select id="replace-reason" value={reasonId} disabled={submitting || !reasons} onChange={(e) => setReasonId(e.target.value ? Number(e.target.value) : '')}>

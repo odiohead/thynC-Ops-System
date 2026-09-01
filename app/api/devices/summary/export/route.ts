@@ -11,7 +11,7 @@ const FILTER_LABEL: Record<CoverageFilter, string> = { all: '커버리지', unre
 
 const DASH = '—'
 
-/** 전역 뷰 표 컬럼 그대로(§6.1 Excel) — 원장 미등록 병원은 계약 열만 채우고 나머지 '—'/'미등록' */
+/** 전역 뷰 표 컬럼 그대로(§6.1 Excel) — 원장 미등록 병원은 계약 열만 채우고 나머지 '—'/'미등록'. 배치 중 ECG·차이는 평가용 제외(§9.1), 평가용은 별도 열 */
 function toRow(r: CoverageRow): Record<string, unknown> {
   const reg = r.registered
   return {
@@ -21,6 +21,7 @@ function toRow(r: CoverageRow): Record<string, unknown> {
     '계약 ECG': r.expected ?? `${DASH} (계약완료 딜 없음)`,
     '배치 중 ECG': reg ? r.activeEcg : DASH,
     차이: !reg ? '미등록' : r.diff == null ? DASH : r.diff,
+    '평가용(별도)': reg ? r.evalTotal : DASH,
     'SpO2(참고)': reg ? r.activeSpo2 : DASH,
     GW: reg ? r.activeGw : DASH,
     제3자: reg ? r.activeThird : DASH,
@@ -50,7 +51,7 @@ export async function GET(req: NextRequest) {
       return badRequest(`필터를 좁혀 ${COVERAGE_MAX_LIMIT.toLocaleString()}행 이하로 내보내세요 (현재 ${result.total.toLocaleString()}행)`)
     }
     const rows = result.data.map(toRow)
-    return xlsxResponse(rows, '병원 커버리지', registryFileName(null, FILTER_LABEL[filter]), [14, 24, 8, 10, 12, 8, 11, 6, 6, 12, 10, 16, 20])
+    return xlsxResponse(rows, '병원 커버리지', registryFileName(null, FILTER_LABEL[filter]), [14, 24, 8, 10, 12, 8, 10, 11, 6, 6, 12, 10, 16, 20])
   } catch (e) {
     return readErrorResponse(e, 'summary/export')
   }

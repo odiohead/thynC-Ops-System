@@ -39,7 +39,7 @@ function parseConflicts(v: unknown): Record<string, 'TRANSFER'> {
 interface ParsedBody {
   items: RegisterItem[]
   /** 항목별 지정이 없을 때만 쓰는 공통값(미리보기 fixed 모드 판정용) */
-  common: { deviceInfoId: number | null; wardId: number | null; wardName: string | null }
+  common: { deviceInfoId: number | null; wardId: number | null; wardName: string | null; usageTypeId: number | null }
   anyItemWard: boolean
   anyItemModel: boolean
   occurredOn: string | null
@@ -52,9 +52,9 @@ interface ParsedBody {
 }
 
 /**
- * body `{ items[], occurredOn, memo?, ref?, conflicts?, deviceInfoId?, wardId?|wardName?, rowActions?, excludeRows?, wardAliases? }`
- * items[i]: 문자열(시리얼) 또는 `{ serialInput|serial|serialNo, deviceInfoId?, modelInput?, wardId?|wardName?, memo?, macAddress?, extDeviceCode? }`
- * 병동 우선순위: item.wardId > item.wardName > body.wardId > body.wardName (모델도 동일)
+ * body `{ items[], occurredOn, memo?, ref?, conflicts?, deviceInfoId?, wardId?|wardName?, usageTypeId?, rowActions?, excludeRows?, wardAliases? }`
+ * items[i]: 문자열(시리얼) 또는 `{ serialInput|serial|serialNo, deviceInfoId?, modelInput?, wardId?|wardName?, memo?, macAddress?, extDeviceCode?, usageTypeId?|usageType? }`
+ * 병동 우선순위: item.wardId > item.wardName > body.wardId > body.wardName (모델·용도도 동일 — 용도는 item.usageTypeId > item.usageType(문자열) > body.usageTypeId)
  */
 function parseBody(body: Record<string, unknown>): ParsedBody {
   const rawItems = body.items
@@ -65,6 +65,7 @@ function parseBody(body: Record<string, unknown>): ParsedBody {
     deviceInfoId: optPositiveInt(body.deviceInfoId, '모델(deviceInfoId)'),
     wardId: optPositiveInt(body.wardId, '병동(wardId)'),
     wardName: optString(body.wardName),
+    usageTypeId: optPositiveInt(body.usageTypeId, '용도(usageTypeId)'),
   }
   let anyItemWard = false
   let anyItemModel = false
@@ -101,6 +102,11 @@ function parseBody(body: Record<string, unknown>): ParsedBody {
     if (mac) item.macAddress = mac
     const ext = optString(o.extDeviceCode)
     if (ext) item.extDeviceCode = ext
+    const usageTypeId = optPositiveInt(o.usageTypeId, `${i + 1}번째 항목의 용도(usageTypeId)`)
+    const usageTypeInput = optString(o.usageType ?? o.usageTypeInput)
+    if (usageTypeId != null) item.usageTypeId = usageTypeId
+    else if (usageTypeInput) item.usageTypeInput = usageTypeInput
+    else if (common.usageTypeId != null) item.usageTypeId = common.usageTypeId
     return item
   })
 
@@ -160,11 +166,14 @@ async function previewItems(hospitalCode: string, p: ParsedBody) {
       memo: it.memo ?? null,
       macAddress: it.macAddress ?? null,
       extDeviceCode: it.extDeviceCode ?? null,
+      usageTypeId: it.usageTypeId ?? null,
+      usageTypeInput: it.usageTypeInput ?? null,
     }
   })
 
   return previewRows(hospitalCode, rows, {
     deviceInfoId: useFixedModel ? p.common.deviceInfoId : null,
+    usageTypeId: p.common.usageTypeId,
     wardMode: useFixedWard ? 'fixed' : 'column',
     wardId: useFixedWard ? p.common.wardId : null,
     emptyWardCell: 'warn',

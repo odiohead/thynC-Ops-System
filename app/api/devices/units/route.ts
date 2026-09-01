@@ -5,7 +5,7 @@ import { authOr401, pageLimit, parseUnitsQuery, readErrorResponse } from '../_re
 export const dynamic = 'force-dynamic'
 
 /**
- * 기기 목록 (§7.1) — `?hospital&model&ward(id|unassigned)&status=active|recovered|all&q&wms=linked|unlinked|in_stock&page&limit(50, ≤500)&sort=ward|serial|placedOn|lastEvent&idsOnly`
+ * 기기 목록 (§7.1) — `?hospital&model&ward(id|unassigned)&status=active|recovered|all&q&wms=linked|unlinked|in_stock&usage=SALE|EVAL|none&page&limit(50, ≤500)&sort=ward|serial|placedOn|lastEvent&idsOnly`
  * - 행 `id` = 공개 device id(`device_units.id`). 행에 deviceInfo·ward·hospital·lastHospital·recoverReason·replacedBy
  *   + `lastRef`(마지막 연결 ref) + `wms`(=`wmsTransient`, 표시용 배치 매칭 — 일시 계산, DB 쓰기 없음 §9.2) + `wmsWarning`
  * - `wms=` 필터도 같은 일시 매칭 기준(후보 ≤10,000대 — 초과 400)

@@ -18,7 +18,7 @@ import {
   type UnitsStatusFilter,
   type UnitsWmsFilter,
 } from '@/lib/deviceRegistry'
-import { DEVICE_EVENT_TYPES, REGISTRY_REF_TYPES, REGISTRY_SOURCES, isYmd, todayKst } from '@/lib/deviceRegistryShared'
+import { DEVICE_EVENT_TYPES, REGISTRY_REF_TYPES, REGISTRY_SOURCES, USAGE_FILTERS, isYmd, todayKst, type UsageFilter } from '@/lib/deviceRegistryShared'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 인증 · 오류
@@ -60,7 +60,7 @@ const UNITS_STATUS: readonly UnitsStatusFilter[] = ['active', 'recovered', 'all'
 const UNITS_WMS: readonly UnitsWmsFilter[] = ['linked', 'unlinked', 'in_stock']
 const UNITS_SORT: readonly UnitsSort[] = ['ward', 'serial', 'placedOn', 'lastEvent']
 
-/** `GET /api/devices/units`·`/export` 공용 — hospital/model/ward/status/q/wms/sort (§7.1) */
+/** `GET /api/devices/units`·`/export` 공용 — hospital/model/ward/status/q/wms/usage(SALE|EVAL|none)/sort (§7.1) */
 export function parseUnitsQuery(sp: URLSearchParams): { params: UnitsQuery; sort: UnitsSort } | NextResponse {
   const model = positiveInt(sp.get('model'))
   if (model === undefined) return badRequest('model은 기기 모델 id(양의 정수)여야 합니다.')
@@ -84,13 +84,17 @@ export function parseUnitsQuery(sp: URLSearchParams): { params: UnitsQuery; sort
   const wms = wmsRaw ? (UNITS_WMS.find((s) => s === wmsRaw) ?? undefined) : null
   if (wms === undefined) return badRequest('wms는 linked | unlinked | in_stock 중 하나여야 합니다.')
 
+  const usageRaw = sp.get('usage')
+  const usage: UsageFilter | null | undefined = usageRaw ? (USAGE_FILTERS.find((s) => s === usageRaw) ?? undefined) : null
+  if (usage === undefined) return badRequest('usage는 SALE | EVAL | none 중 하나여야 합니다.')
+
   const sortRaw = sp.get('sort')
   const sort = sortRaw ? (UNITS_SORT.find((s) => s === sortRaw) ?? undefined) : 'ward'
   if (sort === undefined) return badRequest('sort는 ward | serial | placedOn | lastEvent 중 하나여야 합니다.')
 
   const hospital = sp.get('hospital')?.trim() || null
   const q = sp.get('q')?.trim() || null
-  return { params: { hospital, model, ward, status, q, wms }, sort }
+  return { params: { hospital, model, ward, status, q, wms, usage }, sort }
 }
 
 /** `GET /api/devices/events`·`/events/export` 공용 — hospital/device/type/from/to/refType/refCode/batch/actionGroup/source/q */

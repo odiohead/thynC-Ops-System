@@ -375,7 +375,7 @@ prisma/
 
 ### 디바이스 원장 — DeviceUnit / HospitalDevice / HospitalWard / HospitalDeviceEvent / HospitalDeviceImportBatch (2026-09-01, `projects/hospital_device_registry_design.md` §5 · 3층 구조 B-20)
 - **3층 구조**: `device_info`(모델 마스터) → `device_units`(시리얼 정체성, 1층) → 상태 하위표 `hospital_devices`(병원 배치 프로젝션, 2층). **API 공개 device id = `device_units.id`**(`/api/devices/units/[id]`·이벤트 `deviceId`·교체 상대 전부 유닛 id). 원장↔WMS 영속 링크는 없음(구 `inventory_unit_id` 제거 — WMS 편입은 후속 `inventory_units.device_id`), WMS 매칭은 표시·집계용 일시 계산
-- **DeviceUnit (`device_units`)**: 시리얼당 1행 — `serial_no`(정규화 키, 전역 UNIQUE + CHECK `upper(btrim)`·비공백)·`serial_raw`(합성/바코드 원문)·`device_info_id`(FK RESTRICT)·`mac_address`·`memo`(개체 메모)·`source`(MANUAL/IMPORT/WMS/ONPREM/BACKFILL — 유닛이 처음 생긴 경로). 이벤트·배치가 참조하는 동안 삭제 불가(FK RESTRICT). 서비스는 유닛을 자동 삭제하지 않는다 — 이벤트가 0건이 되면 배치 행만 지우고 유닛은 고아 정체성으로 남아 재등록 시 같은 id를 재사용
+- **DeviceUnit (`device_units`)**: 시리얼당 1행 — `serial_no`(정규화 키, 전역 UNIQUE + CHECK `upper(btrim)`·비공백)·`serial_raw`(합성/바코드 원문)·`device_info_id`(FK RESTRICT)·`mac_address`·`memo`(개체 메모)·`source`(MANUAL/IMPORT/WMS/ONPREM/BACKFILL — 유닛이 처음 생긴 경로)·`usage_type_id`(FK status_codes `DEVICE_USAGE_TYPE` — 용도 판매용 SALE / 평가용 EVAL, NULL=미지정; 위치가 아닌 물건의 속성, 계약 대조에서 EVAL 제외, 변경은 CORRECT). 이벤트·배치가 참조하는 동안 삭제 불가(FK RESTRICT). 서비스는 유닛을 자동 삭제하지 않는다 — 이벤트가 0건이 되면 배치 행만 지우고 유닛은 고아 정체성으로 남아 재등록 시 같은 id를 재사용
 - **HospitalDevice (`hospital_devices`, 이름 승계 — 배치 프로젝션)**: 유닛당 0..1행(`device_id` UNIQUE FK → device_units) — `status`(ACTIVE/RECOVERED, 이벤트 fold 파생값)·`hospital_code`/`ward_id`(ACTIVE 위치, 복합 FK DEFERRABLE)·`last_hospital_code`·`placed_on`·`recovered_on`·`recover_reason_id`·`last_event_type/on`·`replaced_by_id`(→ 교체기 유닛)·`ext_device_code`(온프렘 닉네임 — 병원 문맥 값이라 배치에 둠)·`ext_last_seen_at`/`ext_synced_at`. 식별 컬럼(serial·model·mac·memo)은 갖지 않는다. 구 병원×모델 수량표는 마이그 내 `hospital_devices_qty_backup_202609`로 보존 후 DROP
 - **HospitalDeviceEvent (`hospital_device_events`)**: append-first 이력 — `device_id`(→ **device_units**)·`event_type`(REGISTER/MOVE_WARD/RECOVER/CORRECT)·`occurred_on`(업무일자)·`from_ward_id`/`to_ward_id`·`reason_code_id`·`related_device_id`(교체·이관 상대 → device_units)·`action_group`(교체·이관·일괄·임포트 묶음)·`ref_type/ref_code`(MAINTENANCE 등 연결)·`source`(MANUAL/IMPORT/WMS/ONPREM)·`import_batch_id`·`actor_*`·`edited_*`·`changes`(CORRECT)
 - **HospitalWard (`hospital_wards`)**: 병원별 병동 마스터 — `name`·`name_norm`(병원 내 UNIQUE)·`ext_ward_code`(온프렘 코드)·`sort_order`·`is_active`
@@ -971,7 +971,7 @@ prisma/
   - 임포트 탭(입력 → 미리보기 → 결과 + 이력): 모드(신규 등록 / 온프렘 export 초안 자동 감지), 텍스트 붙여넣기 | Excel 업로드(템플릿), 업무일자·병동(열에서 읽기|고정)·모델·메모, 판정 6종(ok/reregister/skip/warn/conflict/error) + 생성 예정 병동 매핑(wardAliases) + 초안 모드 org 선택 게이트, 미제외 오류·미해결 충돌이 있으면 [실행] 비활성, 단일 트랜잭션, 임포트 이력([업무일자 정정][취소] admin). VIEWER는 EmptyState + 이력만
   - 병동 탭: 순서 ↑↓ | 병동명 ✎ | 온프렘 코드 | 배치 중 | 회수(누계) | 활성 | [기기 일괄 이동] [비활성](admin, 배치 0) [삭제](admin, 참조 0) + 추가
   - 모바일: md:hidden 카드, 하단 고정 액션바 [등록][교체][회수](선택 0건이면 스캔 모드), 임포트·Excel은 데스크톱 권장
-- **연동**: 병원 상세 도입 현황 카드(§6.2) · 병원 업무 일괄 이전에 원장 포함(§9.6) · AI `get_hospital_overview` devices 문자열('배치 n대 / 계약 m') · 설정 `/settings/device-recovery-reason`(회수 사유, ADMIN+)·`/settings/devices` 5필드(ADMIN+ 편집)
+- **연동**: 병원 상세 도입 현황 카드(§6.2) · 병원 업무 일괄 이전에 원장 포함(§9.6) · AI `get_hospital_overview` devices 문자열('배치 n대 / 계약 m') · 설정 `/settings/device-recovery-reason`(회수 사유, ADMIN+)·`/settings/device-usage-type`(기기 용도 판매용/평가용, ADMIN+)·`/settings/devices` 5필드(ADMIN+ 편집)
 
 ### 병원 영업 정보 (영업/CRM v4, 2026-07-29 — ADMIN 이상 + SEERS 전용)
 - 병원 상세 '영업 정보' 단일 카드 — 권한 통과 시에만 렌더(서버 컴포넌트 게이트 + API 재검증)
@@ -1802,6 +1802,8 @@ npm run dev
 | DELETE | `/api/settings/devices/[id]` | 장비 정보 삭제 (원장 사용 중 가드) |
 | GET/POST | `/api/settings/device-recovery-reason` | 기기 회수 사유 마스터 목록 / 추가 (ADMIN 이상 — StatusCode `DEVICE_RECOVERY_REASON`) |
 | PUT/DELETE | `/api/settings/device-recovery-reason/[id]` | 회수 사유 수정 / 삭제 (ADMIN 이상 — value 행·사용 중 삭제 불가) |
+| GET/POST | `/api/settings/device-usage-type` | 기기 용도 마스터 목록 / 추가 (ADMIN 이상 — StatusCode `DEVICE_USAGE_TYPE`, value SALE 판매용 / EVAL 평가용) |
+| PUT/DELETE | `/api/settings/device-usage-type/[id]` | 용도 수정 / 삭제 (ADMIN 이상 — 시스템 용도(value)·사용 중(`device_units.usage_type_id`) 삭제 불가 409) |
 | GET  | `/api/settings/udi-ledger` | 입출고대장 문서 메타(문서번호·양식번호·개정이력) 조회 |
 | PUT  | `/api/settings/udi-ledger` | 입출고대장 문서 메타 수정 (ADMIN 이상) |
 | GET  | `/api/settings/build-status` | 공사 상태 목록 |

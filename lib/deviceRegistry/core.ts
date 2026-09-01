@@ -19,8 +19,12 @@ import { prisma } from '@/lib/prisma'
 import {
   DEVICE_EVENT_TYPE_LABELS,
   DEVICE_TRANSITIONS,
+  DEVICE_USAGE_TYPE_CATEGORY,
   IDEMPOTENT_SOURCES,
   RECOVERY_REASON_CATEGORY,
+  USAGE_TYPE_INVALID_MESSAGE,
+  matchUsageType,
+  type UsageTypeRef,
   REGISTRY_REF_TYPES,
   REGISTRY_SOURCES,
   guessDeviceClassByPrefix,
@@ -454,10 +458,13 @@ export function assertTransition(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type EventRow = HospitalDeviceEvent
-/** `device_units` 원행(1층) */
-export type UnitRow = DeviceUnit
+/** `device_units` 원행(1층) — 용도 마스터 조인(`usageType`)은 `UNIT_USAGE_INCLUDE`로 읽은 경우에만 채워진다 */
+export type UnitRow = DeviceUnit & { usageType?: UsageTypeRef | null }
 /** `hospital_devices` 원행(2층 배치 프로젝션) */
 export type PlacementRow = HospitalDevice
+
+/** 유닛 조회 공용 include — 용도(DEVICE_USAGE_TYPE) 마스터 행 {id, name, value} */
+export const UNIT_USAGE_INCLUDE = { usageType: { select: { id: true, name: true, value: true } } } satisfies Prisma.DeviceUnitInclude
 
 /**
  * 공개 기기 형상 — 유닛(식별) + 배치 프로젝션(상태)을 평탄화. `id` = `device_units.id`(공개 device id), `placementId` = `hospital_devices.id`(내부).
@@ -473,6 +480,9 @@ export interface DeviceRow {
   memo: string | null
   /** 유닛이 처음 생긴 경로 */
   source: string
+  /** 용도(판매용 SALE / 평가용 EVAL) — 유닛 속성, null=미지정 */
+  usageTypeId: number | null
+  usageType: UsageTypeRef | null
   extDeviceCode: string | null
   extLastSeenAt: Date | null
   extSyncedAt: Date | null
@@ -504,6 +514,8 @@ export function flattenDevice(unit: UnitRow, placement: PlacementRow): DeviceRow
     macAddress: unit.macAddress,
     memo: unit.memo,
     source: unit.source,
+    usageTypeId: unit.usageTypeId,
+    usageType: unit.usageType ?? null,
     extDeviceCode: placement.extDeviceCode,
     extLastSeenAt: placement.extLastSeenAt,
     extSyncedAt: placement.extSyncedAt,
@@ -700,13 +712,15 @@ export interface UnitUpsertInput {
   deviceInfoId: number
   macAddress?: string | null
   source: RegistrySource
+  /** 용도(검증 완료 id) — 생성 시 부여, 기존 유닛은 비어 있을 때만 채운다(다른 값이면 유지 — 호출부가 경고) */
+  usageTypeId?: number | null
 }
 
 /**
  * 시리얼 → 유닛 찾기/만들기. 정규화 키(`normalizeSerial`)로 조회하고 없으면 생성한다.
  * - 같은 시리얼이 **다른 모델**로 이미 등록돼 있으면 409(시리얼은 전역 정체성 — 모델 정정은 CORRECT로)
- * - 기존 유닛의 mac/serialRaw가 비어 있으면 입력값으로 채운다(덮어쓰지 않음)
- * 반환 `created`는 이번 호출에서 새로 만들었는지.
+ * - 기존 유닛의 mac/serialRaw/usageType이 비어 있으면 입력값으로 채운다(덮어쓰지 않음 — 용도 변경은 CORRECT로)
+ * 반환 `created`는 이번 호출에서 새로 만들었는지. 반환 유닛에는 `usageType` 조인이 포함된다.
  */
 export async function getOrCreateUnit(client: DbClient, input: UnitUpsertInput): Promise<{ unit: UnitRow; created: boolean }> {
   let serialNo: string
@@ -722,7 +736,8 @@ export async function getOrCreateUnit(client: DbClient, input: UnitUpsertInput):
   }
   if (!serialNo) throw new RegistryError(400, '시리얼이 비어 있습니다')
   const mac = input.macAddress?.trim() || null
-  const existing = await client.deviceUnit.findUnique({ where: { serialNo } })
+  const usageTypeId = input.usageTypeId ?? null
+  const existing = await client.deviceUnit.findUnique({ where: { serialNo }, include: UNIT_USAGE_INCLUDE })
   if (existing) {
     if (existing.deviceInfoId !== input.deviceInfoId) {
       const models = await client.deviceInfo.findMany({ where: { id: { in: [existing.deviceInfoId, input.deviceInfoId] } }, select: { id: true, deviceModel: true } })
@@ -732,11 +747,15 @@ export async function getOrCreateUnit(client: DbClient, input: UnitUpsertInput):
     const fill: Prisma.DeviceUnitUncheckedUpdateInput = {}
     if (mac && !existing.macAddress) fill.macAddress = mac
     if (serialRaw && !existing.serialRaw) fill.serialRaw = serialRaw
+    if (usageTypeId != null && existing.usageTypeId == null) fill.usageTypeId = usageTypeId
     if (Object.keys(fill).length === 0) return { unit: existing, created: false }
-    return { unit: await client.deviceUnit.update({ where: { id: existing.id }, data: fill }), created: false }
+    return { unit: await client.deviceUnit.update({ where: { id: existing.id }, data: fill, include: UNIT_USAGE_INCLUDE }), created: false }
   }
   try {
-    const unit = await client.deviceUnit.create({ data: { serialNo, serialRaw, deviceInfoId: input.deviceInfoId, macAddress: mac, source: input.source } })
+    const unit = await client.deviceUnit.create({
+      data: { serialNo, serialRaw, deviceInfoId: input.deviceInfoId, macAddress: mac, source: input.source, usageTypeId },
+      include: UNIT_USAGE_INCLUDE,
+    })
     return { unit, created: true }
   } catch (e) {
     throw mapDbError(e)
@@ -747,7 +766,7 @@ export async function getOrCreateUnit(client: DbClient, input: UnitUpsertInput):
 export async function loadUnits(client: DbClient, unitIds: readonly number[]): Promise<Map<number, UnitRow>> {
   const ids = Array.from(new Set(unitIds))
   if (ids.length === 0) return new Map()
-  const rows = await client.deviceUnit.findMany({ where: { id: { in: ids } } })
+  const rows = await client.deviceUnit.findMany({ where: { id: { in: ids } }, include: UNIT_USAGE_INCLUDE })
   return new Map(rows.map((u) => [u.id, u]))
 }
 
@@ -755,7 +774,7 @@ export async function loadUnits(client: DbClient, unitIds: readonly number[]): P
 export async function loadDevices(client: DbClient, unitIds: readonly number[]): Promise<Map<number, DeviceRow>> {
   const ids = Array.from(new Set(unitIds))
   if (ids.length === 0) return new Map()
-  const rows = await client.hospitalDevice.findMany({ where: { deviceId: { in: ids } }, include: { unit: true } })
+  const rows = await client.hospitalDevice.findMany({ where: { deviceId: { in: ids } }, include: { unit: { include: UNIT_USAGE_INCLUDE } } })
   return new Map(rows.map((p) => [p.deviceId, flattenDevice(p.unit, p)]))
 }
 
@@ -766,7 +785,7 @@ export async function findUnitsBySerial(
 ): Promise<Map<string, { unit: UnitRow; device: DeviceRow | null }>> {
   const keys = Array.from(new Set(serials.filter(Boolean)))
   if (keys.length === 0) return new Map()
-  const rows = await client.deviceUnit.findMany({ where: { serialNo: { in: keys } }, include: { placement: true } })
+  const rows = await client.deviceUnit.findMany({ where: { serialNo: { in: keys } }, include: { placement: true, ...UNIT_USAGE_INCLUDE } })
   return new Map(rows.map((u) => [u.serialNo, { unit: u, device: u.placement ? flattenDevice(u, u.placement) : null }]))
 }
 
@@ -777,7 +796,7 @@ export async function findUnitsBySerial(
 /** 공개 device id(유닛 id) → DeviceRow. 유닛이 없거나 배치 행(이벤트)이 없으면 404 '원장에 없는 기기' */
 export async function getDeviceOr404(client: DbClient, deviceId: number): Promise<DeviceRow> {
   if (!Number.isInteger(deviceId) || deviceId <= 0) throw new RegistryError(400, '기기 id가 올바르지 않습니다')
-  const p = await client.hospitalDevice.findUnique({ where: { deviceId }, include: { unit: true } })
+  const p = await client.hospitalDevice.findUnique({ where: { deviceId }, include: { unit: { include: UNIT_USAGE_INCLUDE } } })
   if (!p) throw new RegistryError(404, '원장에 없는 기기입니다')
   return flattenDevice(p.unit, p)
 }
@@ -922,6 +941,53 @@ export async function reasonByValue(client: DbClient, value: string): Promise<Re
   })
   if (!r) throw new RegistryError(400, `회수 사유 마스터에 ${value} 값이 없습니다 — 설정에서 등록하세요`)
   return r
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 용도 마스터 (StatusCode DEVICE_USAGE_TYPE — 2026-09-01 결정: SALE 판매용 / EVAL 평가용, NULL=미지정)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type UsageType = UsageTypeRef
+
+export async function loadUsageTypes(client: DbClient): Promise<UsageType[]> {
+  return client.statusCode.findMany({
+    where: { category: DEVICE_USAGE_TYPE_CATEGORY },
+    select: { id: true, name: true, value: true },
+    orderBy: [{ order: 'asc' }, { id: 'asc' }],
+  })
+}
+
+/** 용도 id 검증 — null/undefined는 미지정(null) 반환, 마스터에 없으면 400 */
+export async function requireUsageType(client: DbClient, usageTypeId: number | null | undefined): Promise<UsageType | null> {
+  if (usageTypeId == null) return null
+  if (!Number.isInteger(usageTypeId) || usageTypeId <= 0) throw new RegistryError(400, USAGE_TYPE_INVALID_MESSAGE)
+  const r = await client.statusCode.findFirst({
+    where: { id: usageTypeId, category: DEVICE_USAGE_TYPE_CATEGORY },
+    select: { id: true, name: true, value: true },
+  })
+  if (!r) throw new RegistryError(400, USAGE_TYPE_INVALID_MESSAGE)
+  return r
+}
+
+/**
+ * 행 단위 용도 해석 — `usageTypeId`(검증) > `usageTypeInput`(name/value 별칭 매칭) > 기본값(폼 공통). 미매칭 입력은 400.
+ * 호출부가 마스터를 한 번 로드해 넘긴다(임포트 2,000행).
+ */
+export function resolveUsageTypeInput(
+  types: readonly UsageType[],
+  input: { usageTypeId?: number | null; usageTypeInput?: string | null },
+  defaultId: number | null | undefined
+): UsageType | null {
+  if (input.usageTypeId != null) {
+    const t = types.find((x) => x.id === Number(input.usageTypeId))
+    if (!t) throw new RegistryError(400, USAGE_TYPE_INVALID_MESSAGE)
+    return t
+  }
+  const matched = matchUsageType(types, input.usageTypeInput)
+  if (matched === undefined) throw new RegistryError(400, USAGE_TYPE_INVALID_MESSAGE)
+  if (matched) return matched
+  if (defaultId != null) return types.find((x) => x.id === Number(defaultId)) ?? null
+  return null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

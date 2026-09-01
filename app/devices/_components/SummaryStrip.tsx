@@ -3,7 +3,8 @@
 /**
  * 병원 뷰 요약 스트립 (§6.1-B) — GROUP B
  * | 모델 | 배치 중 | 계약 | 차이 | 회수(30일) | WMS 매칭(출고/재고⚠/미매칭) |
- *  - compare 'hard'(ECG): 계약 = expected, 차이 = diff('−2 ▲' / '0 ✔'), 계약 셀 클릭 → 근거 딜 팝오버(contractedDeals '1차 2025-03 40대 · 2차 2026-01 20대' → 병원 상세(영업) 링크,
+ *  - 배치 중: 계약 축(hard·soft) 행은 activeForCompare(평가용 제외) + activeEval>0이면 '(평가용 n 별도)' 작은 표기 · none 행은 active(+같은 표기). 병동 줄에 '평가용 n' 칩(evalTotal>0)
+ *  - compare 'hard'(ECG): 계약 = expected, 차이 = diff('−2 ▲' / '0 ✔' — 평가용 제외 §9.1), 계약 셀 클릭 → 근거 딜 팝오버(contractedDeals '1차 2025-03 40대 · 2차 2026-01 20대' → 병원 상세(영업) 링크,
  *    문구 "계약 = 계약완료 딜의 대웅 디바이스 수 합(ECG 기준) … 도입 병상 수와 무관 — 참고 신호")
  *  - 'soft'(SpO2): 계약 '(참고 n)' 회색, 차이 '—' / 'none'(GW): '—' / 제3자(THIRD_PARTY)는 1행으로 접어 '제3자 기기 ▸' + 펼치면 모델별 세부 행
  *  - expected null: '— (계약완료 딜 없음)'
@@ -46,10 +47,11 @@ export function SummaryStrip({ summary, loading, error, onContractClick, onWards
 
   const thirdTotals = useMemo(() => {
     const active = third.reduce((s, m) => s + m.active, 0)
+    const activeEval = third.reduce((s, m) => s + (m.activeEval ?? 0), 0)
     const recovered30d = third.reduce((s, m) => s + m.recovered30d, 0)
     let last: { type: string; on: string } | null = null
     for (const m of third) if (m.lastEvent && (!last || m.lastEvent.on > last.on)) last = m.lastEvent
-    return { active, recovered30d, last }
+    return { active, activeEval, recovered30d, last }
   }, [third])
 
   const today = summary?.today
@@ -111,7 +113,10 @@ export function SummaryStrip({ summary, loading, error, onContractClick, onWards
                     </span>
                   </span>
                 </TD>
-                <TD className="text-right tabular-nums font-medium">{thirdTotals.active.toLocaleString()}</TD>
+                <TD className="text-right tabular-nums font-medium">
+                  {thirdTotals.active.toLocaleString()}
+                  <EvalNote n={thirdTotals.activeEval} />
+                </TD>
                 <TD className="text-right text-muted-foreground">—</TD>
                 <TD className="text-right text-muted-foreground">—</TD>
                 <TD className="text-right tabular-nums">{thirdTotals.recovered30d.toLocaleString()}</TD>
@@ -121,7 +126,10 @@ export function SummaryStrip({ summary, loading, error, onContractClick, onWards
                 third.map((m) => (
                   <TR key={m.deviceInfoId} className="bg-muted/30 text-xs">
                     <TD className="pl-10 text-muted-foreground">{modelLabel(m.deviceName, m.deviceModel)}</TD>
-                    <TD className="text-right tabular-nums">{m.active.toLocaleString()}</TD>
+                    <TD className="text-right tabular-nums">
+                      {m.active.toLocaleString()}
+                      <EvalNote n={m.activeEval} />
+                    </TD>
                     <TD className="text-right text-muted-foreground">—</TD>
                     <TD className="text-right text-muted-foreground">—</TD>
                     <TD className="text-right tabular-nums">{m.recovered30d.toLocaleString()}</TD>
@@ -157,6 +165,14 @@ export function SummaryStrip({ summary, loading, error, onContractClick, onWards
         ) : (
           <span className="text-muted-foreground">병동 —</span>
         )}
+        {summary && (summary.evalTotal ?? 0) > 0 && (
+          <span
+            className="inline-flex items-center rounded-full border border-warning/40 bg-warning-subtle px-2 py-0.5 text-xs font-medium tabular-nums text-warning-subtle-foreground"
+            title="평가용(EVAL) 기기 — 배치 중이지만 계약 수량 대조에서는 제외됩니다"
+          >
+            평가용 {summary.evalTotal.toLocaleString()}
+          </span>
+        )}
         <span className="text-xs text-muted-foreground tabular-nums">
           {summary ? (
             <>
@@ -191,7 +207,7 @@ export function SummaryStrip({ summary, loading, error, onContractClick, onWards
           <p className="mb-2 text-muted-foreground">— (계약완료 딜 없음)</p>
         )}
         <p className="text-muted-foreground">
-          계약 = 계약완료 딜의 대웅 디바이스 수 합(ECG 기준). SpO2는 참고(ECG 동수 가정), GW는 계약 축 없음. 도입 병상 수와 무관합니다.
+          계약 = 계약완료 딜의 대웅 디바이스 수 합(ECG 기준). SpO2는 참고(ECG 동수 가정), GW는 계약 축 없음. 도입 병상 수와 무관합니다. 배치 중·차이는 평가용(EVAL) 기기를 제외한 수입니다.
         </p>
         <p className="mt-1 text-muted-foreground">대조는 참고 신호입니다 — 차이가 있어도 딜 데이터 정정 요청 대상이 아니며, 원장 등록·회수 누락 여부를 먼저 확인하세요.</p>
       </RegistryFloatingPanel>
@@ -225,13 +241,20 @@ function ModelRow({ m, today, onContractClick, contractOpen }: { m: ModelSummary
     return <span className={cn('tabular-nums font-medium', m.diff === 0 ? 'text-success-subtle-foreground' : 'text-warning-subtle-foreground')}>{diffText(m.diff)}</span>
   })()
 
+  // 계약 축 행은 대조 기준(평가용 제외)을 본 수치로, 평가용은 별도 표기 — none 행은 전체 배치 수
+  const activeEval = m.activeEval ?? 0
+  const shown = m.compare === 'none' ? m.active : (m.activeForCompare ?? m.active - activeEval)
+
   return (
     <TR>
       <TD className="font-medium">
         {modelLabel(m.deviceName, m.deviceModel)}
         {m.lastEvent && <span className="ml-2 text-xs font-normal text-muted-foreground">{lastEventText(m.lastEvent.type, m.lastEvent.on, today)}</span>}
       </TD>
-      <TD className="text-right tabular-nums font-medium">{m.active.toLocaleString()}</TD>
+      <TD className="text-right tabular-nums font-medium" title={activeEval > 0 ? `배치 중 전체 ${m.active.toLocaleString()}대 (평가용 ${activeEval.toLocaleString()}대는 계약 대조 제외)` : undefined}>
+        {shown.toLocaleString()}
+        <EvalNote n={activeEval} />
+      </TD>
       <TD className="text-right">{contractCell}</TD>
       <TD className="text-right">{diffCell}</TD>
       <TD className="text-right tabular-nums">{m.recovered30d.toLocaleString()}</TD>
@@ -240,6 +263,12 @@ function ModelRow({ m, today, onContractClick, contractOpen }: { m: ModelSummary
       </TD>
     </TR>
   )
+}
+
+/** '(평가용 n 별도)' — 0이면 렌더하지 않음 */
+function EvalNote({ n }: { n: number | undefined }) {
+  if (!n || n <= 0) return null
+  return <span className="ml-1 whitespace-nowrap text-[11px] font-normal text-warning-subtle-foreground">(평가용 {n.toLocaleString()} 별도)</span>
 }
 
 function WmsCounts({ wms }: { wms: ModelSummary['wms'] }) {

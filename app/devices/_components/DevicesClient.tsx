@@ -82,11 +82,11 @@ type ModalState =
   | { kind: 'correct'; device: DeviceRef }
   | null
 
-type ListLocal = Pick<ListFilters, 'limit' | 'sort' | 'wms'>
+type ListLocal = Pick<ListFilters, 'limit' | 'sort' | 'wms' | 'usage'>
 type EventLocal = Omit<EventFilters, 'q' | 'page'>
 type CoverageLocal = Pick<CoverageFilters, 'filter' | 'sort' | 'limit'>
 
-const DEFAULT_LIST_LOCAL: ListLocal = { limit: 50, sort: 'ward', wms: null }
+const DEFAULT_LIST_LOCAL: ListLocal = { limit: 50, sort: 'ward', wms: null, usage: null }
 const DEFAULT_EVENT_LOCAL: EventLocal = { limit: 50, type: null, from: null, to: null, refType: null, source: null }
 /** 이벤트 로컬 필터 기본값 — 전역 '최근 이벤트'는 기본 30일(§6.1-A), 병원 이력은 전체 기간 */
 function defaultEventLocal(hospital: string | null): EventLocal {
