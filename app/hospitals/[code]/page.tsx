@@ -6,7 +6,7 @@ import { verifyToken, isAdminOrAbove } from '@/lib/auth'
 import DeleteButton from './_components/DeleteButton'
 import TransferAllWorkButton from '@/app/components/TransferAllWorkButton'
 import DaewoongStaffTab from './_components/DaewoongStaffTab'
-import HospitalDevicesSection from './_components/HospitalDevicesSection'
+import HospitalDeviceSummary from './_components/HospitalDeviceSummary'
 import StatusBadge from '@/app/components/StatusBadge'
 import SiteVisitsCard from './_components/SiteVisitsCard'
 import InstallPlansCard from './_components/InstallPlansCard'
@@ -14,7 +14,6 @@ import MaintenancesCard from './_components/MaintenancesCard'
 import RelatedWikiPagesCard from './_components/RelatedWikiPagesCard'
 // 병원 노트 임베드 — 메인→위키 import 승인 예외 (CLAUDE.md 규칙 7, 데이터 교환은 전부 HTTP)
 import HospitalNotePanel from '@/app/wiki/components/HospitalNotePanel'
-import InventoryUsageCard from './_components/InventoryUsageCard'
 import ConsultationsCard from './_components/ConsultationsCard'
 import SalesSection from './_components/SalesSection'
 import SystemStatusCard from './_components/SystemStatusCard'
@@ -44,7 +43,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
   const isAdmin = !!user && user.role !== 'VIEWER'
   const showSales = await canAccessSales(user) // 영업 섹션 — ADMIN 이상 + SEERS 소속만
 
-  const [hospital, projects, siteVisits, installPlans, maintenances, allDevices, hospitalDevices, statusCodes, dealProductTypes] = await Promise.all([
+  const [hospital, projects, siteVisits, installPlans, maintenances, statusCodes, dealProductTypes] = await Promise.all([
     prisma.hospital.findUnique({
       where: { hospitalCode: params.code },
       include: {
@@ -87,8 +86,6 @@ export default async function HospitalDetailPage({ params }: PageProps) {
         assignees: { include: { user: { select: { id: true, name: true } } } },
       },
     }),
-    prisma.deviceInfo.findMany({ orderBy: { sortOrder: 'asc' } }),
-    prisma.hospitalDevice.findMany({ where: { hospitalCode: params.code } }),
     prisma.statusCode.findMany({ where: { category: 'HOSPITAL' }, select: { name: true, color: true } }),
     prisma.salesDeal.findMany({ where: { hospitalCode: params.code }, select: { productType: true }, distinct: ['productType'] }),
   ])
@@ -128,14 +125,6 @@ export default async function HospitalDetailPage({ params }: PageProps) {
     type: m.type ?? null,
     status: m.status ?? null,
     assignees: m.assignees ?? [],
-  }))
-
-  const quantityMap = new Map(hospitalDevices.map((d) => [d.deviceInfoId, d.quantity]))
-  const deviceRows = allDevices.map((d) => ({
-    deviceInfoId: d.id,
-    deviceModel: d.deviceModel,
-    deviceName: d.deviceName,
-    quantity: quantityMap.get(d.id) ?? 0,
   }))
 
   return (
@@ -248,13 +237,9 @@ export default async function HospitalDetailPage({ params }: PageProps) {
               value={hospital.contractDate ? new Date(hospital.contractDate).toLocaleDateString('ko-KR') : null}
             />
           </dl>
+          {/* 도입 현황 — 디바이스 원장 요약(D12, P1 임시 플레이스홀더 → P4에서 실데이터) */}
           <div className="border-t border-gray-100 px-6 py-5">
-            <p className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-400">도입 현황</p>
-            <HospitalDevicesSection
-              hospitalCode={hospital.hospitalCode}
-              initialIntroBeds={hospital.introBeds}
-              initialDevices={deviceRows}
-            />
+            <HospitalDeviceSummary hospitalCode={hospital.hospitalCode} introBeds={hospital.introBeds} />
           </div>
         </div>
 
@@ -337,8 +322,6 @@ export default async function HospitalDetailPage({ params }: PageProps) {
             </div>
           )}
         </div>
-
-        <InventoryUsageCard hospitalCode={hospital.hospitalCode} />
 
         {/* 상담이력 — AI 어시스턴트 상담 정리 산출물 (SEERS 소속만 조회, 서버에서 강제) */}
         <ConsultationsCard

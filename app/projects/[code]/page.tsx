@@ -16,6 +16,7 @@ interface DeviceInfo {
   deviceName: string
   isActive: boolean
   sortOrder: number
+  quantityTracked?: boolean // 프로젝트·딜 수량 폼 노출 여부 (GET /api/settings/devices)
 }
 
 interface ProjectDevice {
@@ -208,7 +209,8 @@ export default function ProjectDetailPage() {
       fetch('/api/auth/me').then((r) => r.json()),
       fetch('/api/settings/intro-type').then((r) => r.json()),
     ]).then(([, devData, conData, bsData, meData, introData]) => {
-      setAllDevices((devData.devices ?? []).filter((d: DeviceInfo) => d.isActive))
+      // quantityTracked=false(GW·제3자)는 수량 폼에 숨김 — 설정 API가 필드를 아직 안 주면 기본 노출 (hospital_device_registry_design.md §5.1)
+      setAllDevices((devData.devices ?? []).filter((d: DeviceInfo) => d.isActive && (d.quantityTracked ?? true)))
       setConstructors(conData.constructors ?? [])
       setBuildStatuses(bsData.buildStatuses ?? [])
       setIsAdmin(meData?.role === 'ADMIN' || meData?.role === 'SUPER_ADMIN')

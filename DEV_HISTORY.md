@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-09-01 | 병원별 웨어러블 디바이스 원장 설계안 작성 (구현 미착수 — 검토 대기)
+
+- `projects/hospital_device_registry_design.md` 신규 — `/devices` 전용 페이지. 핵심 모델: 시리얼 = 전역 물리 개체 1행(`hospital_devices` 이름 승계 — 기존 병원×모델 수량표는 폐기, 마이그 내 백업 테이블 보존 후 DROP) + append-first 이벤트 이력(`hospital_device_events`: REGISTER/MOVE_WARD/RECOVER/CORRECT, 교체·이관은 RECOVER+REGISTER 쌍) + 병원별 병동 마스터(`hospital_wards`) + 임포트 배치(`hospital_device_import_batches`). 회수 사유는 StatusCode `DEVICE_RECOVERY_REASON`, `device_info`에 분류·온프렘 코드·시리얼 형식·원장/수량 대상 플래그 5컬럼 확장 + 게이트웨이·제3자 기기 4행 시드. 계약 대조는 Σ계약완료 딜 디바이스수(ECG hard·SpO2 soft). WMS는 조인 키·읽기 매칭만, AS(유지보수)·VOC·온프렘 동기화는 `ref_type`/`ext_*` 예약과 서비스 계약(`lib/deviceRegistry.ts`)만 고정
+- 경위: 조사 워크플로(6영역 병렬 + 보완 4건 — 코드·DEV/PROD 읽기 실측·온프렘 WAR/DDL 검증) → 사용자 결정 12개(D1~D12) 확정 → 3관점 초안·심사·통합 → 코드 대조 검증 2라운드(107건 반영) → 리드 재편(134KB→97KB: 실행형 백업 게이트 대신 마이그 내 백업 테이블, 브랜치 전용 DB 등 운영 절차는 쟁점 A-6으로 강등, 쟁점을 검토 요청 A 8건/설계 결정 B 19건으로 분리) → 최종본 검증 1라운드(3관점 41건 중 정합·정확성 37건 반영: D9 문구 명확화, 임포트 미리보기 소급 불성립 판정, 롤백 SQL 8문장, 교체 계약 (5)(6) 추가, 임포트 단건 취소·배치 취소 범위, rowActions 어휘, export 열 정의, file:line 정정 등 — 구조 축약 제안 4건은 보류)
+- 쟁점 A-1~A-8(백업 방식·nav 라벨·RTLS 모델 코드·타 병원 충돌 시리얼 이관 opt-in·기대 수량 딜 범위·구현 중 DB 격리·온프렘 초안 모드 범위·모델 마스터 5필드 권한)은 같은 날 사용자가 전부 추천안으로 확정. 본문 검토·착수 승인 대기. 조사 원문은 `projects/hospital_device_registry_brief.md`(참조 자료)로 보존
+- 영향 파일: projects/hospital_device_registry_design.md(신규), projects/hospital_device_registry_brief.md(신규), projects/README.md(목록 행 2건 추가)
+
+---
+
 ## 2026-08-31 | PROD 배포: 도입형태 자동 동기화 (커밋 5a6c036)
 
 - dev2 커밋(5a6c036, 5파일)·push → PROD `git pull`(caa3bc1→5a6c036) → 힙 4GB 빌드 → `pm2 restart thync-prod` (마이그레이션·신규 패키지 없음)

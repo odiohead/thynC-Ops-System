@@ -1487,8 +1487,6 @@ npm run dev
 | POST | `/api/hospitals/import` | Excel 일괄 가져오기 (`?preview=true` 미리보기) |
 | POST | `/api/hospitals/[code]/transfer-work` | 병원 업무 일괄 이전 (SUPER_ADMIN) |
 | POST | `/api/work-items/reassign` | 업무 병원 재지정 (ADMIN 이상, type/code/newHospitalCode) |
-| GET  | `/api/hospitals/[code]/devices` | 병원 장비 목록 |
-| POST | `/api/hospitals/[code]/devices` | 병원 장비 추가 |
 | GET  | `/api/hospitals/[code]/daewoong-staff` | 병원 담당자 목록 |
 | POST | `/api/hospitals/[code]/daewoong-staff` | 담당자 배정 |
 | DELETE | `/api/hospitals/[code]/daewoong-staff/[sid]` | 담당자 해제 |

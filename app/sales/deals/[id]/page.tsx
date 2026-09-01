@@ -63,9 +63,10 @@ export default async function SalesDealDetailPage({ params }: { params: { id: st
       orderBy: { orderNumber: 'asc' },
       select: { projectCode: true, projectName: true },
     }),
-    // 기기 마스터 — 활성 전체 + (비활성이어도 이 딜에 수량이 있으면 표시). 새 기기가 늘어나면 기존 딜은 0으로 노출
+    // 기기 마스터 — 활성·수량 집계 대상(quantityTracked) 전체 + (비활성/비대상이어도 이 딜에 수량이 있으면 표시 — 저장 시 deleteMany+createMany라 숨기면 유실).
+    // 새 기기가 늘어나면 기존 딜은 0으로 노출. GW·제3자(quantity_tracked=false)는 수량 폼에 숨김 (hospital_device_registry_design.md §5.1)
     prisma.deviceInfo.findMany({
-      where: { OR: [{ isActive: true }, { salesDealDevices: { some: { dealId: id } } }] },
+      where: { OR: [{ isActive: true, quantityTracked: true }, { salesDealDevices: { some: { dealId: id } } }] },
       orderBy: { sortOrder: 'asc' },
       select: { id: true, deviceName: true, deviceModel: true },
     }),

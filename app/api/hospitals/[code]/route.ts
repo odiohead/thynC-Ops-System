@@ -126,9 +126,14 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
   if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const [projectCount, siteVisitCount] = await Promise.all([
+  const [projectCount, siteVisitCount, deviceCount, deviceEventCount, wardCount, importBatchWithEventsCount] = await Promise.all([
     prisma.project.count({ where: { hospitalCode: params.code } }),
     prisma.siteVisit.count({ where: { hospitalCode: params.code } }),
+    // 디바이스 원장 선검사 (hospital_device_registry_design.md §9.6) — FK RESTRICT 위반 대신 409로 안내
+    prisma.hospitalDevice.count({ where: { OR: [{ hospitalCode: params.code }, { lastHospitalCode: params.code }] } }),
+    prisma.hospitalDeviceEvent.count({ where: { hospitalCode: params.code } }),
+    prisma.hospitalWard.count({ where: { hospitalCode: params.code } }),
+    prisma.hospitalDeviceImportBatch.count({ where: { hospitalCode: params.code, events: { some: {} } } }),
   ])
   if (projectCount > 0) {
     return NextResponse.json({ error: '연결된 프로젝트가 있어 삭제할 수 없습니다.' }, { status: 409 })
@@ -136,13 +141,24 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   if (siteVisitCount > 0) {
     return NextResponse.json({ error: '연결된 답사 기록이 있어 삭제할 수 없습니다.' }, { status: 409 })
   }
+  if (deviceCount > 0 || deviceEventCount > 0 || wardCount > 0 || importBatchWithEventsCount > 0) {
+    const detail = [`등록 ${deviceCount}대`, `이력 ${deviceEventCount}건`, `병동 ${wardCount}개`]
+    if (importBatchWithEventsCount > 0) detail.push(`임포트 배치 ${importBatchWithEventsCount}건`)
+    return NextResponse.json(
+      {
+        error: `연결된 디바이스 원장(${detail.join('·')})이 있어 삭제할 수 없습니다. 업무 일괄 이전으로 다른 병원에 옮기거나 디바이스 원장에서 정리한 뒤 다시 시도하세요.`,
+      },
+      { status: 409 },
+    )
+  }
 
   const existing = await prisma.hospital.findUnique({ where: { hospitalCode: params.code } })
   if (!existing) return NextResponse.json({ error: '병원을 찾을 수 없습니다.' }, { status: 404 })
 
   await prisma.$transaction([
     prisma.daewoongHospitalAssignment.deleteMany({ where: { hospitalCode: params.code } }),
-    prisma.hospitalDevice.deleteMany({ where: { hospitalCode: params.code } }),
+    // 이벤트 0건인 임포트 배치만 정리 (이벤트가 남은 배치는 위 선검사에서 409) — 원장 기기·이력·병동은 RESTRICT, 여기서 지우지 않음
+    prisma.hospitalDeviceImportBatch.deleteMany({ where: { hospitalCode: params.code, events: { none: {} } } }),
     prisma.hospitalMeta.deleteMany({ where: { hospitalCode: params.code } }),
     prisma.hospital.delete({ where: { hospitalCode: params.code } }),
   ])

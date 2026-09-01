@@ -72,6 +72,13 @@ export const PERMISSIONS = {
     description:
       '메인 대시보드 우측 상단에 주간업무 관리(/weekly) 진입 아이콘 표시 + 페이지 접근 허용 (SEERS 소속 요건과 가산 — 소속으로 이미 접근 가능한 계정에도 아이콘 노출용으로 부여 가능). 편집은 USER 등급 이상(VIEWER 조회 전용) 원칙 유지',
   },
+  // 카탈로그 v1.4 (2026-09-01)
+  'device.admin': {
+    label: '디바이스 원장 관리',
+    module: '디바이스 원장',
+    description:
+      '기기 이벤트 정정·취소, 임포트 배치 취소·업무일자 정정, 개체 식별정보 보정, 병동 비활성·삭제 (조회는 전원, 등록·회수·이동·교체·임포트는 USER 등급 전원)',
+  },
 } as const
 
 export type PermKey = keyof typeof PERMISSIONS

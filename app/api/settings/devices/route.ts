@@ -1,39 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getAuthUser, isUserOrAbove, isAdminOrAbove } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import {
+  ADMIN_ONLY_FIELDS_ERROR,
+  hasAdminOnlyField,
+  parseAdminOnlyFields,
+  toDeviceInfoDto,
+} from './shared'
 
 export async function GET() {
   const devices = await prisma.deviceInfo.findMany({
     orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
     include: {
-      _count: { select: { devices: true } },
+      // usageCount = 프로젝트 수량행 + 원장 개체(시리얼) + 딜 수량행 (hospital_device_registry_design.md §5.1)
+      _count: { select: { devices: true, hospitalDevices: true, salesDealDevices: true } },
     },
   })
 
   return NextResponse.json({
     devices: devices.map((d) => ({
-      id: d.id,
-      deviceModel: d.deviceModel,
-      deviceName: d.deviceName,
-      isActive: d.isActive,
-      sortOrder: d.sortOrder,
-      createdAt: d.createdAt,
-      usageCount: d._count.devices,
+      ...toDeviceInfoDto(d),
+      usageCount: d._count.devices + d._count.hospitalDevices + d._count.salesDealDevices,
+      usage: {
+        projects: d._count.devices,
+        registry: d._count.hospitalDevices,
+        deals: d._count.salesDealDevices,
+      },
     })),
   })
 }
 
 export async function POST(request: NextRequest) {
   const user = await getAuthUser(request)
-  if (!user || user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  const { deviceModel, deviceName, sortOrder, isActive } = await request.json()
+  if (!user || !isUserOrAbove(user.role)) {
+    return NextResponse.json({ error: '권한이 없습니다.' }, { status: 403 })
+  }
+  const body = await request.json()
+  const { deviceModel, deviceName, sortOrder, isActive } = body
+
+  // 5필드(분류·온프렘 코드·시리얼 형식·원장 대상·수량 집계 대상)는 ADMIN+ 전용 — 기존 필드는 USER+ (가산 원칙)
+  if (hasAdminOnlyField(body) && !isAdminOrAbove(user.role)) {
+    return NextResponse.json({ error: ADMIN_ONLY_FIELDS_ERROR }, { status: 403 })
+  }
 
   if (!deviceModel?.trim()) {
     return NextResponse.json({ error: '모델 코드를 입력해주세요.' }, { status: 400 })
   }
   if (!deviceName?.trim()) {
     return NextResponse.json({ error: '기기명을 입력해주세요.' }, { status: 400 })
+  }
+
+  const parsed = parseAdminOnlyFields(body)
+  if (!parsed.ok) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 })
   }
 
   const existing = await prisma.deviceInfo.findUnique({ where: { deviceModel: deviceModel.trim() } })
@@ -47,6 +67,8 @@ export async function POST(request: NextRequest) {
       deviceName: deviceName.trim(),
       sortOrder: sortOrder ?? 0,
       isActive: isActive ?? true,
+      // 미지정 필드는 DB 기본값(WEARABLE / NULL / NULL / false / true)
+      ...parsed.data,
     },
   })
 
@@ -60,5 +82,5 @@ export async function POST(request: NextRequest) {
     after: device,
   })
 
-  return NextResponse.json({ device }, { status: 201 })
+  return NextResponse.json({ device: toDeviceInfoDto(device) }, { status: 201 })
 }

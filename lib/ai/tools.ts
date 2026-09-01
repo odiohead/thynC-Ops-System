@@ -63,7 +63,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_hospital_overview',
     description:
-      '특정 병원의 현황을 조회한다. 병원의 상태·도입형태·병상·계약일·담당자·설치 장비 구성·업무 건수 요약이 필요할 때 호출하라.',
+      '특정 병원의 현황을 조회한다. 병원의 상태·도입형태·병상·계약일·담당자·디바이스 원장 배치 현황(모델별 배치 중 대수)·업무 건수 요약이 필요할 때 호출하라.',
     input_schema: {
       type: 'object',
       properties: {
@@ -599,13 +599,26 @@ async function getHospitalOverview(input: ToolInput) {
     include: {
       introTypes: { include: { statusCode: { select: { name: true } } } },
       daewoongAssignments: { include: { assignedUser: { select: { name: true } } } },
-      hospitalDevices: { include: { deviceInfo: { select: { deviceName: true, deviceModel: true } } } },
       _count: {
         select: { projects: true, maintenances: true, siteVisits: true, installPlans: true },
       },
     },
   })
   if (!h) return { error: `병원(${code})을 찾을 수 없습니다.` }
+  // 디바이스 원장 집계 — 이 병원에 배치 중(ACTIVE)인 시리얼 개체를 모델별로 센다 (hospital_device_registry_design.md §9.5 P1; 계약 대조·v2 도구는 후속)
+  const activeByModel = await prisma.hospitalDevice.groupBy({
+    by: ['deviceInfoId'],
+    where: { hospitalCode: code, status: 'ACTIVE' },
+    _count: { _all: true },
+  })
+  const deviceInfos = activeByModel.length
+    ? await prisma.deviceInfo.findMany({
+        where: { id: { in: activeByModel.map((g) => g.deviceInfoId) } },
+        orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+        select: { id: true, deviceName: true, deviceModel: true },
+      })
+    : []
+  const activeCountByInfoId = new Map(activeByModel.map((g) => [g.deviceInfoId, g._count._all]))
   return {
     hospitalCode: h.hospitalCode,
     name: h.hospitalName,
@@ -618,9 +631,7 @@ async function getHospitalOverview(input: ToolInput) {
     introBeds: h.introBeds,
     contractDate: ymd(h.contractDate),
     daewoongStaff: h.daewoongAssignments.map((a) => a.assignedUser.name),
-    devices: h.hospitalDevices
-      .map((d) => (d.deviceInfo ? `${d.deviceInfo.deviceName}(${d.deviceInfo.deviceModel}) x${d.quantity}` : null))
-      .filter(Boolean),
+    devices: deviceInfos.map((d) => `${d.deviceName}(${d.deviceModel}) 배치 ${activeCountByInfoId.get(d.id) ?? 0}대`),
     workCounts: {
       projects: h._count.projects,
       maintenances: h._count.maintenances,
