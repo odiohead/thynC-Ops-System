@@ -16,6 +16,14 @@
 
 ---
 
+## 2026-09-02 | PROD 배포: 디바이스 원장 AS 표시 접근성 (커밋 29c3e96)
+
+- dev2 커밋(29c3e96)·push → PROD `git pull`(768eeaa→29c3e96) → 힙 4GB 빌드 → `pm2 restart thync-prod` (마이그레이션 없음)
+- 드로어 액션 줄에 [AS 표시]/[AS 해제] 추가(기존 [병동 이동][회수][교체] 옆), 선택 일괄 AS 표시/해제(단일 트랜잭션·공유 action_group·유지보수 코드 공유, 이미 표시된 기기는 skipped)
+- 스모크: 로컬 `/`·`/devices` 307, 외부 HTTPS `/devices` 307, flush 후 에러 0. 서비스 스모크 496/496
+
+---
+
 ## 2026-09-02 | PROD 배포: 디바이스 원장 후속 3건 (커밋 768eeaa)
 
 - dev2 커밋 3건(7043e10 커버리지 성능·모집단 축소, 768eeaa 기기 목록 행 밀도·병동 탭)·push → PROD `git pull`(d6e54b1→768eeaa) → generate → 힙 4GB 빌드 → `pm2 restart thync-prod` (마이그레이션 없음 — deploy no-op 확인)
