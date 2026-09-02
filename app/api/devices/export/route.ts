@@ -31,7 +31,7 @@ function toRow(r: UnitListRow): Record<string, unknown> {
     계약건: r.dealCode ?? '',
     병동: r.ward ? `${r.ward.name}${r.ward.isActive ? '' : ' (폐쇄)'}` : r.status === 'ACTIVE' ? '미지정' : '',
     상태: placementStatusLabel(r),
-    'AS 시작일': toYmd(r.asStartedOn) ?? '',
+    'AS 접수일': toYmd(r.asStartedOn) ?? '',
     배치일: toYmd(r.placedOn) ?? '',
     회수일: toYmd(r.recoveredOn) ?? '',
     '회수 사유': r.recoverReason?.name ?? '',

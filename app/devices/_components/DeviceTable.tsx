@@ -14,12 +14,12 @@
  *  - `compact`: 기본 열을 `시리얼 | 모델 | 병동 | 상태 | 상품유형 | 배치일 | 최근 이벤트 | ⋯`로 줄이고(용도·회수일·연결·창고 개체·메모·원문 2행은 [열 더보기]),
  *    행 밀도 축소(2026-09-02 — 모델 셀 1줄·기기명만(모델코드 툴팁), 시리얼 원문은 툴팁, 셀 패딩 py-1.5 오버라이드) + 상태 줄 아래 **병동 탭 칩 바**
  *    `[전체 n][6병동 n]…[미지정 n]`(카운트 = summary.wards ACTIVE 수 — 추가 요청 없음; 기존 `ward=` 필터와 같은 상태라 [필터 더보기] 병동 셀렉트와 자동 동기화, 가로 스크롤),
- *    필터도 상태 + 시리얼 검색만 기본 노출(모델·병동·WMS·용도·상품유형·정렬·행수는 [필터 더보기] — 숨은 필터에 값이 있으면 자동 펼침)
+ *    필터는 상태 + 시리얼 검색 + 상품유형·계약건 인라인(항상 노출 — 2026-09-02 정리: 모델·병동·WMS·용도·AS 체크·정렬·행수는 전체 모드 전용, 병동 값은 URL ward=로만 동작)
  *  - `showSelection=false`: 체크박스·전체 선택 안내를 그리지 않음(오케스트레이터 [선택] 토글이 켤 때만 true)
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import Link from 'next/link'
-import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MoreHorizontal, Search, SlidersHorizontal, X } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MoreHorizontal, Search, X } from 'lucide-react'
 import Badge from '@/app/components/ui/Badge'
 import Button from '@/app/components/ui/Button'
 import EmptyState from '@/app/components/ui/EmptyState'
@@ -156,11 +156,10 @@ export function DeviceTable({
   const { canWrite, canAdmin } = capabilities
   const today = summary?.today ?? todayKst()
 
-  // ── v1 단순 모드: 열/필터 더보기 (compact가 아니면 항상 전체)
+  // ── v1 단순 모드: 열 더보기(compact가 아니면 항상 전체). 필터는 compact = 상태·검색 + 상품유형·계약건 인라인(항상 노출 — 2026-09-02 정리),
+  //    전체 모드 = 구 2행 필터 전부(모델·병동·WMS·용도·AS·정렬·행수). 병동 필터 값은 URL/외부에서 오면 그대로 적용된다(초기화가 함께 리셋)
   const [moreCols, setMoreCols] = useState(false)
-  const [moreFilters, setMoreFilters] = useState(false)
-  const advancedFilterActive = filters.model != null || filters.ward != null || filters.wms != null || filters.usage != null || filters.productType != null || filters.deal != null || filters.as
-  const showAdvancedFilters = !compact || moreFilters || advancedFilterActive
+  const showAdvancedFilters = !compact
   const showAllColumns = !compact || moreCols
   const visibleColumns = useMemo(() => (showAllColumns ? COLUMNS : COMPACT_COLUMN_KEYS.map((k) => COLUMNS.find((c) => c.key === k)!)), [showAllColumns])
 
@@ -373,18 +372,25 @@ export function DeviceTable({
             )}
           </div>
           {compact && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setMoreFilters((v) => !v)}
-              aria-expanded={showAdvancedFilters}
-              className={cn('h-8 gap-1 text-xs', advancedFilterActive && 'text-primary')}
-              title="모델·병동·WMS·용도·상품유형·정렬·행수"
-            >
-              <SlidersHorizontal size={13} aria-hidden="true" />
-              필터 더보기
-              {showAdvancedFilters ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
-            </Button>
+            <>
+              <Select aria-label="상품유형" value={filters.productType ?? ''} onChange={(e) => setFilters({ productType: (e.target.value || null) as ProductTypeFilter | null })} className="h-8 w-auto text-xs">
+                {PRODUCT_TYPE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+              <Select aria-label="계약건" value={filters.deal ?? ''} onChange={(e) => setFilters({ deal: e.target.value || null })} className="h-8 w-auto max-w-[13rem] text-xs" title="계약건(딜) 필터 — B-23">
+                <option value="">계약건 전체</option>
+                {(summary?.deals ?? []).map((d) => (
+                  <option key={d.dealCode} value={d.dealCode}>
+                    {d.dealCode}
+                    {d.roundNo != null ? ` (${d.roundNo}차${d.productType ? ` ${d.productType}` : ''})` : ' (계약 외)'}
+                  </option>
+                ))}
+                <option value="none">계약건 미지정</option>
+              </Select>
+            </>
           )}
           {hasFilter && (
             <Button size="sm" variant="ghost" onClick={resetFilters} className="h-8 text-xs">
@@ -893,8 +899,8 @@ export function DeviceTable({
                     AS 해제
                   </RegistryMenuItem>
                 ) : (
-                  <RegistryMenuItem onClick={() => { closeMenu(); onAction('asOpen', toDeviceRef(menu.row)) }} title="이 기기를 'AS진행중'으로 표시 (유지보수 코드 연결 가능)">
-                    AS 표시
+                  <RegistryMenuItem onClick={() => { closeMenu(); onAction('asOpen', toDeviceRef(menu.row)) }} title="이 기기의 AS를 접수 — 'AS진행중'으로 표시 (유지보수 코드 연결 가능)">
+                    AS 접수
                   </RegistryMenuItem>
                 )}
               </>
@@ -932,7 +938,7 @@ function StatusBadge({ row }: { row: Pick<DeviceListRow, 'status' | 'asStartedOn
   if (row.status !== 'ACTIVE') return <Badge variant="default">{DEVICE_STATUS_LABELS.RECOVERED}</Badge>
   if (row.asStartedOn) {
     return (
-      <Badge variant="warning" title={`AS 시작 ${toYmd(row.asStartedOn) ?? ''}${row.asRefCode ? ` · ${row.asRefCode}` : ''} — 교체·회수 시 자동 해제`}>
+      <Badge variant="warning" title={`AS 접수 ${toYmd(row.asStartedOn) ?? ''}${row.asRefCode ? ` · ${row.asRefCode}` : ''} — 교체·회수 시 자동 해제`}>
         {placementStatusLabel(row)}
       </Badge>
     )

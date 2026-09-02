@@ -293,7 +293,7 @@ export function DeviceListTab({ filters, setFilters, onOpenDevice, reloadKey }: 
                     <TD>
                       <Badge
                         variant={row.status !== 'ACTIVE' ? 'default' : row.asStartedOn ? 'warning' : 'success'}
-                        title={row.asStartedOn ? `AS 시작 ${toYmd(row.asStartedOn) ?? ''}${row.asRefCode ? ` · ${row.asRefCode}` : ''}` : undefined}
+                        title={row.asStartedOn ? `AS 접수 ${toYmd(row.asStartedOn) ?? ''}${row.asRefCode ? ` · ${row.asRefCode}` : ''}` : undefined}
                       >
                         {placementStatusLabel(row)}
                       </Badge>

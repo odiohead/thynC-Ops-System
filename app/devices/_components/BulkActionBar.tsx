@@ -17,7 +17,7 @@ export interface BulkActionBarProps {
   onSetProductType?: () => void
   /** 계약건(딜) 일괄 지정 — B-23 */
   onSetDeal?: () => void
-  /** AS 일괄 표시(B-24) — AsFlagModal(MNT 코드·업무일자 공유) */
+  /** AS 일괄 접수(B-24) — AsFlagModal 다건 모드(MNT 코드·업무일자 공유) */
   onAsOpen?: () => void
   /** AS 일괄 해제(B-24) — 선택에 AS진행중 기기가 있을 때만 전달(없으면 버튼 미노출) */
   onAsClear?: () => void
@@ -56,8 +56,8 @@ export function BulkActionBar({ count, canWrite, onMove, onRecover, onSetProduct
               </Button>
             )}
             {onAsOpen && (
-              <Button size="sm" variant="outline" onClick={onAsOpen} title="선택 기기를 한 번에 'AS진행중'으로 표시 — 유지보수 코드·업무일자 공유, 이미 표시된 기기는 건너뜀">
-                AS 표시
+              <Button size="sm" variant="outline" onClick={onAsOpen} title="선택 기기의 AS를 한 번에 접수('AS진행중' 표시) — 유지보수 코드·업무일자 공유, 이미 접수된 기기는 건너뜀">
+                AS 접수
               </Button>
             )}
             {onAsClear && (

@@ -49,7 +49,7 @@ export const DEVICE_EVENT_TYPE_LABELS: Record<DeviceEventType, string> = {
   MOVE_WARD: '병동 이동',
   RECOVER: '회수',
   CORRECT: '정정',
-  AS_OPEN: 'AS 시작',
+  AS_OPEN: 'AS 접수', // 액션 용어(2026-09-02 개정) — 상태 라벨 'AS진행중'·코드 AS_OPEN은 불변
   AS_CLEAR: 'AS 해제',
 }
 
@@ -116,7 +116,7 @@ export function transitionMessage(from: TransitionFrom, eventType: DeviceEventTy
         : '다른 병원에 배치 중인 기기입니다 — 그 병원에서 처리하세요'
     case 'invalid':
       if (eventType === 'MOVE_WARD') return '회수된 기기는 병동을 이동할 수 없습니다 — 먼저 재등록하세요'
-      if (eventType === 'AS_OPEN' || eventType === 'AS_CLEAR') return '회수된 기기에는 AS 표시를 할 수 없습니다'
+      if (eventType === 'AS_OPEN' || eventType === 'AS_CLEAR') return '회수된 기기에는 AS 접수·해제를 할 수 없습니다'
       return '이미 회수된 기기입니다'
   }
 }

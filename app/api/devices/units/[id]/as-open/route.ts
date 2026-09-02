@@ -41,7 +41,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       action: 'UPDATE',
       resource: 'hospital_device',
       resourceId: r.device.serialNo,
-      resourceLabel: `${await deviceAuditLabel(r.device.id)} AS 시작`,
+      resourceLabel: `${await deviceAuditLabel(r.device.id)} AS 접수`,
       before: { asStartedOn: null, asRefCode: null },
       after: {
         ...projectionSnapshot(r.device),

@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * 'AS 표시' 소형 모달 (B-24) — 행 ⋯·드로어 [AS 표시](1대) / 선택 바 [AS 표시](여러 대)
+ * 'AS 접수' 소형 모달 (B-24, 2026-09-02 용어 개정 — 액션 'AS 접수', 상태 'AS진행중') — 행 ⋯·드로어 [AS 접수](1대) / 선택 바 [AS 접수](여러 대)
  * ACTIVE 기기에 AS진행중 플래그를 켠다. 유지보수 코드는 선택 입력(MaintenanceCodeCombo — 업무일자 제안·`as_ref_code`).
  * 1대는 openDeviceAs(단건 audit), 여러 대는 bulkDeviceAction('AS_OPEN') — 같은 action_group·ref·업무일자를 공유하고
  * 이미 표시된 기기는 skipped[]. 교체·회수하면 자동 해제, 수동 해제는 [AS 해제].
@@ -32,7 +32,7 @@ export interface AsFlagModalProps {
 
 export function AsFlagModal(props: AsFlagModalProps) {
   const { open, onClose, deviceIds, devices } = props
-  const title = deviceIds.length === 1 && devices[0] ? `AS 표시 — ${devices[0].serialNo}` : `AS 표시 (${deviceIds.length.toLocaleString()}대)`
+  const title = deviceIds.length === 1 && devices[0] ? `AS 접수 — ${devices[0].serialNo}` : `AS 접수 (${deviceIds.length.toLocaleString()}대)`
   return (
     <Modal open={open} onClose={onClose} title={title} widthClass="max-w-md">
       {open && deviceIds.length > 0 && <AsFlagForm {...props} />}
@@ -67,7 +67,7 @@ function AsFlagForm({ onClose, devices, deviceIds, hospitalCode, today: todayPro
     try {
       if (single) {
         const r = await openDeviceAs(single.id, { occurredOn: occ.value, memo: memo.trim() || null, ref })
-        onDone({ message: `AS 표시: ${single.serialNo} (${occ.value}${refCode ? ` · ${refCode}` : ''})`, warnings: r.warnings })
+        onDone({ message: `AS 접수: ${single.serialNo} (${occ.value}${refCode ? ` · ${refCode}` : ''})`, warnings: r.warnings })
       } else {
         const r = await bulkDeviceAction({
           action: 'AS_OPEN',
@@ -79,10 +79,10 @@ function AsFlagForm({ onClose, devices, deviceIds, hospitalCode, today: todayPro
         })
         const warnings = [...r.warnings]
         if (r.skipped.length > 0) warnings.push(`이미 AS진행중 건너뜀: ${r.skipped.slice(0, 5).map((s) => s.serialNo).join(', ')}${r.skipped.length > 5 ? ' 외' : ''} (${r.skipped.length}대)`)
-        onDone({ message: `AS 표시: ${r.affectedDeviceIds.length.toLocaleString()}대 (${occ.value}${refCode ? ` · ${refCode}` : ''})`, warnings })
+        onDone({ message: `AS 접수: ${r.affectedDeviceIds.length.toLocaleString()}대 (${occ.value}${refCode ? ` · ${refCode}` : ''})`, warnings })
       }
     } catch (e) {
-      setError(errorMessage(e, 'AS 표시에 실패했습니다.'))
+      setError(errorMessage(e, 'AS 접수에 실패했습니다.'))
     } finally {
       setSubmitting(false)
     }
@@ -117,7 +117,7 @@ function AsFlagForm({ onClose, devices, deviceIds, hospitalCode, today: todayPro
       <FormField label="유지보수 코드" htmlFor="as-ref" hint="선택 — 연결하면 업무일자를 제안값으로 채우고 드로어에서 MNT 링크로 보입니다">
         <MaintenanceCodeCombo id="as-ref" hospitalCode={mntHospital} value={refCode} onChange={onRefChange} disabled={submitting} />
       </FormField>
-      <OccurredOnField id="as-date" state={occ} today={today} disabled={submitting} label="AS 시작일(업무일자)" />
+      <OccurredOnField id="as-date" state={occ} today={today} disabled={submitting} label="AS 접수일(업무일자)" />
       <FormField label="메모" htmlFor="as-memo">
         <Textarea id="as-memo" value={memo} onChange={(e) => setMemo(e.target.value)} disabled={submitting} rows={2} className="min-h-0" placeholder="예: 화면 불량 접수 — 교체 대기" />
       </FormField>
@@ -129,7 +129,7 @@ function AsFlagForm({ onClose, devices, deviceIds, hospitalCode, today: todayPro
           취소
         </Button>
         <Button onClick={() => void submit()} disabled={!canSubmit}>
-          {submitting ? '기록 중…' : single ? 'AS 표시' : `AS 표시 (${deviceIds.length.toLocaleString()}대)`}
+          {submitting ? '기록 중…' : single ? 'AS 접수' : `AS 접수 (${deviceIds.length.toLocaleString()}대)`}
         </Button>
       </ModalActions>
     </div>

@@ -219,8 +219,14 @@ export interface SummaryDealRow {
   active: number
   /** 모델별 등록 수량(배치 중) */
   activeByModel: { ecg: number; spo2: number; bp: number }
-  /** 교체 건수(RECOVER 이벤트 deal_code 스냅샷 기준) */
+  /** 이 계약건의 AS진행중 수(딜 합계 — 축 밖 모델 포함) */
+  asInProgress: number
+  /** 모델별 AS진행중 수(B-24) */
+  asByModel: { ecg: number; spo2: number; bp: number }
+  /** 교체 건수 = 누적 AS(행 합계 — 축 밖 모델 포함) */
   replacements: number
+  /** 모델별 교체(누적 AS) 수 — 회수 유닛 모델 축 */
+  replacementsByModel: { ecg: number; spo2: number; bp: number }
 }
 
 export interface ModelSummary {
@@ -288,8 +294,15 @@ export interface HospitalDeviceSummary {
   productTypeContext: ProductTypeContext
   /** 계약건(딜)별 현황(B-23) — 계약완료 딜 ∪ 배치·교체에 등장한 코드 */
   deals: SummaryDealRow[]
-  /** 계약건 미지정 버킷 — active: 딜 없는 배치 중 수(+모델별) / replacements: deal_code NULL 교체 짝 수 */
-  dealUnassigned: { active: number; activeByModel: { ecg: number; spo2: number; bp: number }; replacements: number }
+  /** 계약건 미지정 버킷 — active: 딜 없는 배치 중 수(+모델별) / asInProgress·asByModel / replacements(+모델별) */
+  dealUnassigned: {
+    active: number
+    activeByModel: { ecg: number; spo2: number; bp: number }
+    asInProgress: number
+    asByModel: { ecg: number; spo2: number; bp: number }
+    replacements: number
+    replacementsByModel: { ecg: number; spo2: number; bp: number }
+  }
   /** AS진행중(as_started_on NOT NULL) 배치 중 수(B-24) */
   asInProgress: number
   /** 계약 딜 2종이거나 배치에 상품유형이 있으면 true → 요약을 매트릭스로 */
@@ -1194,7 +1207,7 @@ export interface DeviceRef {
   productType?: ProductType | null
   /** 배치 계약건(교체 폼 '구 기기와 동일' 표시·AS 메뉴 판정용) */
   dealCode?: string | null
-  /** AS진행중 플래그 시작일(ISO) — 행 ⋯ 메뉴 'AS 표시/해제' 분기용 */
+  /** AS진행중 플래그 시작일(ISO) — 행 ⋯ 메뉴 'AS 접수/해제' 분기용 */
   asStartedOn?: string | null
 }
 
@@ -1204,7 +1217,7 @@ export interface DeviceRef {
  */
 export type Selection = Map<number, DeviceRef | null>
 
-/** 행 ⋯·드로어 버튼·모바일 액션바가 orchestrator에 요청하는 동작 — asOpen(AS 표시 모달)·asClear(즉시 해제)는 B-24 */
+/** 행 ⋯·드로어 버튼·모바일 액션바가 orchestrator에 요청하는 동작 — asOpen(AS 접수 모달)·asClear(즉시 해제)는 B-24 */
 export type DeviceAction = 'move' | 'recover' | 'replace' | 'correct' | 'asOpen' | 'asClear'
 
 /** 모달/패널이 쓰기 성공 후 orchestrator에 넘기는 결과 — 토스트 + onMutated + 선택 해제 */

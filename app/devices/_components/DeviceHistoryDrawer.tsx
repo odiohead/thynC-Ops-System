@@ -334,7 +334,7 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
                     {device.serialRaw && <span className="font-mono text-xs text-muted-foreground">원문 {device.serialRaw}</span>}
                     <Badge
                       variant={device.status !== 'ACTIVE' ? 'default' : device.asStartedOn ? 'warning' : 'success'}
-                      title={device.asStartedOn ? `AS 시작 ${toYmd(device.asStartedOn) ?? ''}${device.asRefCode ? ` · ${device.asRefCode}` : ''} — 교체·회수 시 자동 해제` : undefined}
+                      title={device.asStartedOn ? `AS 접수 ${toYmd(device.asStartedOn) ?? ''}${device.asRefCode ? ` · ${device.asRefCode}` : ''} — 교체·회수 시 자동 해제` : undefined}
                     >
                       {placementStatusLabel(device)}
                     </Badge>
@@ -603,8 +603,8 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
                         AS 해제
                       </Button>
                     ) : (
-                      <Button size="sm" variant="outline" onClick={() => onAction('asOpen', ref)} title="이 기기를 'AS진행중'으로 표시 (유지보수 코드 연결 가능 — B-24)">
-                        AS 표시
+                      <Button size="sm" variant="outline" onClick={() => onAction('asOpen', ref)} title="이 기기의 AS를 접수 — 'AS진행중'으로 표시 (유지보수 코드 연결 가능 — B-24)">
+                        AS 접수
                       </Button>
                     )}
                   </>
@@ -892,7 +892,7 @@ function EventSummary({ ev, onOpenDevice, usageTypes }: { ev: DeviceDetailEvent;
         </>
       )
     case 'AS_OPEN':
-      return <>AS진행중 표시</>
+      return <>AS 접수 — AS진행중으로 표시</>
     case 'AS_CLEAR':
       return <>AS진행중 해제</>
     case 'CORRECT': {

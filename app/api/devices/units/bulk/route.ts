@@ -8,7 +8,7 @@ import { optionalInt, parseRegistryFields, readJsonObject, registryActor, regist
 
 export const dynamic = 'force-dynamic'
 
-const ACTION_LABEL: Record<BulkActionKind, string> = { MOVE_WARD: '일괄 병동 이동', RECOVER: '일괄 회수', SET_PRODUCT_TYPE: '일괄 상품유형 지정', SET_DEAL: '일괄 계약건 지정', AS_OPEN: 'AS 일괄 표시', AS_CLEAR: 'AS 일괄 해제' }
+const ACTION_LABEL: Record<BulkActionKind, string> = { MOVE_WARD: '일괄 병동 이동', RECOVER: '일괄 회수', SET_PRODUCT_TYPE: '일괄 상품유형 지정', SET_DEAL: '일괄 계약건 지정', AS_OPEN: 'AS 일괄 접수', AS_CLEAR: 'AS 일괄 해제' }
 
 /**
  * 병원 문맥 유도 — body.hospitalCode가 없으면 선택 개체의 ACTIVE 병원에서 유도(§4.2 "개체에서 유도").

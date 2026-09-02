@@ -78,6 +78,16 @@ async function seed() {
     rows, sourceKind: 'PASTE', mode: 'REGISTER', fileName: null, defaults: { wardMode: 'column', usageTypeId: sale.id },
   })
   console.log(`1) 임포트 배치 #${imp.batch.id}: 등록 ${imp.batch.registeredCount} · 병동 ${imp.result.newWards.map((w) => w.name).join(',')} · 용도 판매용 기본, P990107·P990108 평가용 · 상품유형 기본 ${imp.preview.summary.productTypeContext.default ?? '미지정'}, A990107·A990108 라이트`)
+  // 1b) 계약건 선지정(B-23) — 일반 배치분 → 12대 딜. 교체(4단계) 전에 지정해 RECOVER 스냅샷에 딜이 남는다 → 계약별 표 '누적 AS'·'AS진행중'이 딜 행에 표시
+  const TODAY = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
+  const dealCtx = await reg.getHospitalDealContext(H)
+  const deal12 = dealCtx.deals.find((d) => d.count === 12) ?? dealCtx.deals[0] ?? null
+  const dealNext = dealCtx.deals.find((d) => d.dealCode !== deal12?.dealCode) ?? null
+  if (deal12) {
+    const normalIds = (await prisma.hospitalDevice.findMany({ where: { hospitalCode: H, status: 'ACTIVE', NOT: { productType: '라이트' } }, select: { deviceId: true } })).map((r) => r.deviceId)
+    const b1 = await reg.bulkDeviceAction(ctx(TODAY, { memo: '계약건 백필(데모)' }), { action: 'SET_DEAL', deviceIds: normalIds, dealCode: deal12.dealCode })
+    console.log(`1b) 계약건 지정: 일반 ${b1.affectedDeviceIds.length}대 → ${deal12.dealCode} (${deal12.count}대 딜)`)
+  } else console.log('1b) 계약완료 딜 없음 — 계약건 지정 생략')
 
   const dev = async (serialNo: string) => (await prisma.deviceUnit.findUniqueOrThrow({ where: { serialNo } })).id // 공개 device id = 유닛 id
   // 2) 병동 이동
@@ -101,28 +111,18 @@ async function seed() {
     { serialInput: 'A990901', wardName: '6병동' }, { serialInput: 'A990902', wardName: '6병동' },
   ])
   console.log('6) 타 병원 HOSP-000059 ECG 2대 등록')
-  // 7) 계약건(B-23) — 문산중앙 계약완료 딜 3건: 일반 배치분 → 12대 딜, 라이트 2대 → 다음 딜(명시), A990301은 미지정 유지
-  const TODAY = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
-  const dealCtx = await reg.getHospitalDealContext(H)
-  const deal12 = dealCtx.deals.find((d) => d.count === 12) ?? dealCtx.deals[0] ?? null
-  const dealNext = dealCtx.deals.find((d) => d.dealCode !== deal12?.dealCode) ?? null
-  if (deal12) {
-    const a301 = await prisma.deviceUnit.findUnique({ where: { serialNo: 'A990301' }, select: { id: true } })
+  // 7) 계약건(B-23) — 라이트 2대는 다음 딜에 명시 배정(일반은 1b에서 선지정), A990301(오늘 등록)은 미지정 유지
+  if (dealNext) {
     const liteIds = (await prisma.hospitalDevice.findMany({ where: { hospitalCode: H, status: 'ACTIVE', productType: '라이트' }, select: { deviceId: true } })).map((r) => r.deviceId)
-    const normalIds = (await prisma.hospitalDevice.findMany({ where: { hospitalCode: H, status: 'ACTIVE', NOT: { productType: '라이트' } }, select: { deviceId: true } }))
-      .map((r) => r.deviceId)
-      .filter((id) => id !== a301?.id)
-    const b1 = await reg.bulkDeviceAction(ctx(TODAY, { memo: '계약건 백필(데모)' }), { action: 'SET_DEAL', deviceIds: normalIds, dealCode: deal12.dealCode })
-    console.log(`7) 계약건 지정: 일반 ${b1.affectedDeviceIds.length}대 → ${deal12.dealCode} (${deal12.count}대 딜)`)
-    if (dealNext && liteIds.length) {
+    if (liteIds.length) {
       const b2 = await reg.bulkDeviceAction(ctx(TODAY, { memo: '계약건 백필(데모, 라이트 명시)' }), { action: 'SET_DEAL', deviceIds: liteIds, dealCode: dealNext.dealCode })
-      console.log(`   라이트 ${b2.affectedDeviceIds.length}대 → ${dealNext.dealCode} (명시) · A990301 미지정 유지`)
+      console.log(`7) 라이트 ${b2.affectedDeviceIds.length}대 → ${dealNext.dealCode} (명시) · A990301 미지정 유지`)
     }
-  } else console.log('7) 계약완료 딜 없음 — 계약건 지정 생략')
-  // 8) AS진행중(B-24) — B990102에 유지보수 코드로 표시
+  } else console.log('7) 라이트 계약건 배정 생략(계약완료 딜 부족)')
+  // 8) AS 접수(B-24) — B990102에 유지보수 코드로 접수
   const b102 = await prisma.deviceUnit.findUniqueOrThrow({ where: { serialNo: 'B990102' }, select: { id: true } })
   await reg.openDeviceAs(ctx(TODAY, mnt ? { ref: { type: 'MAINTENANCE', code: mnt.maintenanceCode } } : { memo: 'AS 접수(데모)' }), { deviceId: b102.id })
-  console.log(`8) AS 표시: B990102${mnt ? ` (ref ${mnt.maintenanceCode})` : ''}`)
+  console.log(`8) AS 접수: B990102${mnt ? ` (ref ${mnt.maintenanceCode})` : ''}`)
   // 9) B-25 확인 — 문산중앙 딜의 모델별 수량(sales_deal_devices) 행 여부(읽기 전용, sales_* 미기록)
   const mrowCnt = Number((await prisma.$queryRaw<{ c: bigint }[]>`SELECT count(*) c FROM sales_deal_devices sdd JOIN sales_deals sd ON sd.id = sdd.deal_id WHERE sd.hospital_code = ${H}`)[0].c)
   if (mrowCnt === 0) {

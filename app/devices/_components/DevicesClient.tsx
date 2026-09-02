@@ -386,10 +386,10 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
 
   const onAction = useCallback(
     (action: DeviceAction, ref: DeviceRef) => {
-      // AS 표시/해제(B-24)는 병원 요약 문맥이 필요 없다 — 어느 뷰에서든 즉시 처리
+      // AS 접수/해제(B-24)는 병원 요약 문맥이 필요 없다 — 어느 뷰에서든 즉시 처리
       if (action === 'asOpen' || action === 'asClear') {
         if (ref.status !== 'ACTIVE') {
-          notify('AS 표시는 배치 중(사용중) 기기에서만 가능합니다.', 'info')
+          notify('AS 접수는 배치 중(사용중) 기기에서만 가능합니다.', 'info')
           return
         }
         if (action === 'asOpen') {
@@ -690,7 +690,7 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
         <DeviceListTab filters={globalListFilters} setFilters={setGlobalListFilters} onOpenDevice={openDevice} reloadKey={reloadKey} />
       )}
 
-      {/* 드로어·정정·AS 표시 모달 — 병원 문맥 무관(양쪽 뷰 ?device= 딥링크) */}
+      {/* 드로어·정정·AS 접수 모달 — 병원 문맥 무관(양쪽 뷰 ?device= 딥링크) */}
       <DeviceHistoryDrawer deviceId={drawerDeviceId} onClose={closeDrawer} capabilities={capabilities} onMutated={onMutated} onAction={onAction} onOpenDevice={openDevice} reloadKey={reloadKey} />
       <CorrectionModal open={modal?.kind === 'correct'} onClose={closeModal} hospitalCode={hospital} device={modal?.kind === 'correct' ? modal.device : null} models={models} onDone={onDone} />
       <AsFlagModal
@@ -757,11 +757,17 @@ function ViewTabs({ active, onChange }: { active: DevicesView; onChange: (v: Dev
   )
 }
 
-/** B-25 모델 셀 — '도입 n / 등록 m'. 도입 null은 '—', 폴백 ECG 셀은 ⓘ(디바이스수 기준) */
-function ModelPairCell({ exp, act, fallback, warn }: { exp: number | null; act: number; fallback?: boolean; warn?: boolean }) {
+/**
+ * B-25 모델 셀 — 1행 '도입 n / 등록 m'(도입 null '—', 폴백 ECG ⓘ) + 2행 'AS a · 누적 b'
+ * (AS = AS진행중 플래그 수 · 누적 = 누적 AS건수 = 교체 짝 수, 둘 다 0이면 숨김). 툴팁에 4값 병기.
+ */
+function ModelPairCell({ exp, act, asCnt = 0, replCnt = 0, fallback, warn }: { exp: number | null; act: number; asCnt?: number; replCnt?: number; fallback?: boolean; warn?: boolean }) {
   return (
-    <td className="whitespace-nowrap py-1 pr-2 text-right tabular-nums">
-      <span className={cn(exp == null && 'text-muted-foreground', warn && 'text-warning-subtle-foreground')} title={fallback && exp != null ? '모델별 수량 미입력 — 디바이스수 기준' : undefined}>
+    <td
+      className="whitespace-nowrap py-1 pr-2 text-right align-top tabular-nums"
+      title={`도입 ${exp != null ? exp.toLocaleString() : '—'} · 등록 ${act.toLocaleString()} · AS진행중 ${asCnt.toLocaleString()} · 누적 AS(교체) ${replCnt.toLocaleString()}${fallback && exp != null ? ' · 도입은 모델별 수량 미입력 — 디바이스수 기준' : ''}`}
+    >
+      <span className={cn(exp == null && 'text-muted-foreground', warn && 'text-warning-subtle-foreground')}>
         {exp != null ? exp.toLocaleString() : '—'}
         {fallback && exp != null && (
           <span aria-hidden="true" className="ml-0.5 text-muted-foreground">
@@ -771,6 +777,11 @@ function ModelPairCell({ exp, act, fallback, warn }: { exp: number | null; act: 
       </span>
       <span className="text-muted-foreground"> / </span>
       <span>{act.toLocaleString()}</span>
+      {(asCnt > 0 || replCnt > 0) && (
+        <div className="text-[11px] font-normal text-muted-foreground">
+          AS {asCnt.toLocaleString()} · 누적 {replCnt.toLocaleString()}
+        </div>
+      )}
     </td>
   )
 }
@@ -811,6 +822,9 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
     return has ? s : null
   }
   const totalActiveOf = (t: number): number => models.find((m) => m.onpremDeviceType === t)?.active ?? 0
+  const unBucket = summary?.dealUnassigned ?? null
+  const sumAsOf = (k: 'ecg' | 'spo2' | 'bp'): number => dealRowsAll.reduce((s, d) => s + d.asByModel[k], 0) + (unBucket?.asByModel[k] ?? 0)
+  const sumReplOf = (k: 'ecg' | 'spo2' | 'bp'): number => dealRowsAll.reduce((s, d) => s + d.replacementsByModel[k], 0) + (unBucket?.replacementsByModel[k] ?? 0)
   const activeTitle = models.length > 0 ? models.map((m) => `${m.deviceName} ${m.active.toLocaleString()}${(m.activeEval ?? 0) > 0 ? ` (평가용 ${m.activeEval.toLocaleString()})` : ''}`).join(' · ') : undefined
   const ptKeys = summary ? Object.keys(summary.replacements?.byType ?? {}) : []
 
@@ -825,7 +839,7 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
           <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="text-xs font-semibold">계약 현황</span>
             {summary.asInProgress > 0 && (
-              <Badge variant="warning" className="tabular-nums" title="AS진행중 표시가 켜진 배치 중 기기 — 기기 목록 [필터 더보기]의 'AS진행중만'으로 조회">
+              <Badge variant="warning" className="tabular-nums" title="AS 접수돼 'AS진행중'인 배치 중 기기">
                 AS진행중 {summary.asInProgress.toLocaleString()}
               </Badge>
             )}
@@ -878,9 +892,9 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
                       )}
                     </td>
                     <td className="py-1 pr-2">{d.productType ? <Badge variant={productTypeBadgeVariant(d.productType) ?? 'default'}>{d.productType}</Badge> : <span className="text-muted-foreground">—</span>}</td>
-                    <ModelPairCell exp={d.expectedByModel?.ecg ?? null} act={d.activeByModel.ecg} fallback={d.expectedSource === 'fallback'} />
-                    <ModelPairCell exp={d.expectedByModel?.spo2 ?? null} act={d.activeByModel.spo2} />
-                    <ModelPairCell exp={d.expectedByModel?.bp ?? null} act={d.activeByModel.bp} />
+                    <ModelPairCell exp={d.expectedByModel?.ecg ?? null} act={d.activeByModel.ecg} asCnt={d.asByModel.ecg} replCnt={d.replacementsByModel.ecg} fallback={d.expectedSource === 'fallback'} />
+                    <ModelPairCell exp={d.expectedByModel?.spo2 ?? null} act={d.activeByModel.spo2} asCnt={d.asByModel.spo2} replCnt={d.replacementsByModel.spo2} />
+                    <ModelPairCell exp={d.expectedByModel?.bp ?? null} act={d.activeByModel.bp} asCnt={d.asByModel.bp} replCnt={d.replacementsByModel.bp} />
                     <td className="py-1 text-right tabular-nums">{d.replacements.toLocaleString()}</td>
                   </tr>
                 ))}
@@ -888,9 +902,9 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
                   <tr className="border-b border-border/60 text-muted-foreground">
                     <td className="py-1 pr-2" title="계약건이 지정되지 않은 배치·교체 — 선택 바 [계약건 지정]으로 정리">(미지정)</td>
                     <td className="py-1 pr-2">—</td>
-                    <ModelPairCell exp={null} act={summary.dealUnassigned.activeByModel.ecg} />
-                    <ModelPairCell exp={null} act={summary.dealUnassigned.activeByModel.spo2} />
-                    <ModelPairCell exp={null} act={summary.dealUnassigned.activeByModel.bp} />
+                    <ModelPairCell exp={null} act={summary.dealUnassigned.activeByModel.ecg} asCnt={summary.dealUnassigned.asByModel.ecg} replCnt={summary.dealUnassigned.replacementsByModel.ecg} />
+                    <ModelPairCell exp={null} act={summary.dealUnassigned.activeByModel.spo2} asCnt={summary.dealUnassigned.asByModel.spo2} replCnt={summary.dealUnassigned.replacementsByModel.spo2} />
+                    <ModelPairCell exp={null} act={summary.dealUnassigned.activeByModel.bp} asCnt={summary.dealUnassigned.asByModel.bp} replCnt={summary.dealUnassigned.replacementsByModel.bp} />
                     <td className="py-1 text-right tabular-nums">{summary.dealUnassigned.replacements.toLocaleString()}</td>
                   </tr>
                 )}
@@ -919,9 +933,9 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
                     </button>
                   </td>
                   <td className="py-1 pr-2" />
-                  <ModelPairCell exp={sumExpectedOf('ecg')} act={totalActiveOf(1)} warn={hasDiff} />
-                  <ModelPairCell exp={sumExpectedOf('spo2')} act={totalActiveOf(3)} />
-                  <ModelPairCell exp={sumExpectedOf('bp')} act={totalActiveOf(10)} />
+                  <ModelPairCell exp={sumExpectedOf('ecg')} act={totalActiveOf(1)} asCnt={sumAsOf('ecg')} replCnt={sumReplOf('ecg')} warn={hasDiff} />
+                  <ModelPairCell exp={sumExpectedOf('spo2')} act={totalActiveOf(3)} asCnt={sumAsOf('spo2')} replCnt={sumReplOf('spo2')} />
+                  <ModelPairCell exp={sumExpectedOf('bp')} act={totalActiveOf(10)} asCnt={sumAsOf('bp')} replCnt={sumReplOf('bp')} />
                   <td className="py-1 text-right tabular-nums">{summary.replacements.total.toLocaleString()}</td>
                 </tr>
               </tbody>
@@ -935,13 +949,15 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
                 {d.productType && <Badge variant={productTypeBadgeVariant(d.productType) ?? 'default'}>{d.productType}</Badge>}
                 <span className="tabular-nums text-muted-foreground">
                   E {pairText(d.expectedByModel?.ecg ?? null, d.activeByModel.ecg)}
-                  {d.expectedSource === 'fallback' && 'ⓘ'} · S {pairText(d.expectedByModel?.spo2 ?? null, d.activeByModel.spo2)} · BP {pairText(d.expectedByModel?.bp ?? null, d.activeByModel.bp)} · 교체 {d.replacements}
+                  {d.expectedSource === 'fallback' && 'ⓘ'} · S {pairText(d.expectedByModel?.spo2 ?? null, d.activeByModel.spo2)} · BP {pairText(d.expectedByModel?.bp ?? null, d.activeByModel.bp)}
+                  {d.asInProgress > 0 ? ` · AS ${d.asInProgress}` : ''} · 교체 {d.replacements}
                 </span>
               </li>
             ))}
             {(summary.dealUnassigned.active > 0 || summary.dealUnassigned.replacements > 0) && (
               <li className="tabular-nums text-muted-foreground">
-                (미지정) E —/{summary.dealUnassigned.activeByModel.ecg} · S —/{summary.dealUnassigned.activeByModel.spo2} · BP —/{summary.dealUnassigned.activeByModel.bp} · 교체 {summary.dealUnassigned.replacements}
+                (미지정) E —/{summary.dealUnassigned.activeByModel.ecg} · S —/{summary.dealUnassigned.activeByModel.spo2} · BP —/{summary.dealUnassigned.activeByModel.bp}
+                {summary.dealUnassigned.asInProgress > 0 ? ` · AS ${summary.dealUnassigned.asInProgress}` : ''} · 교체 {summary.dealUnassigned.replacements}
               </li>
             )}
             <li className="flex items-center gap-1 font-medium tabular-nums">

@@ -90,20 +90,31 @@ export async function countReplacements(hospitalCode: string, range?: { from?: s
   return { total: Object.values(byType).reduce((a, b) => a + b, 0), byType }
 }
 
+export interface DealReplacementAgg {
+  total: number
+  /** 회수된 유닛의 모델 축(ECG 1·SpO2 3·링BP 10)별 — 축 밖 모델(GW 등) 교체는 total에만 포함 */
+  ecg: number
+  spo2: number
+  bp: number
+}
+
 /**
- * 계약건(딜)별 교체 건수(B-23) — `countReplacements`와 같은 짝 판정을 RECOVER 이벤트의 `deal_code` 스냅샷으로 그룹.
- * 키 null = 미지정(딜 없이 회수·교체된 자리).
+ * 계약건(딜)별 교체 건수(B-23) — `countReplacements`와 같은 짝 판정을 RECOVER 이벤트의 `deal_code` 스냅샷으로 그룹
+ * (+회수 유닛의 모델별 분해 — 계약별 표 '누적 AS' 셀). 키 null = 미지정(딜 없이 회수·교체된 자리).
  */
-export async function countReplacementsByDeal(hospitalCode: string, client: DbClient = prisma): Promise<Map<string | null, number>> {
-  const rows = await client.$queryRaw<{ d: string | null; cnt: bigint }[]>(Prisma.sql`
-    SELECT e.deal_code AS d, count(*) AS cnt
-      FROM hospital_device_events e
+export async function countReplacementsByDeal(hospitalCode: string, client: DbClient = prisma): Promise<Map<string | null, DealReplacementAgg>> {
+  const rows = await client.$queryRaw<{ d: string | null; cnt: bigint; ecg: bigint; spo2: bigint; bp: bigint }[]>(Prisma.sql`
+    SELECT e.deal_code AS d, count(*) AS cnt,
+           count(*) FILTER (WHERE di.onprem_device_type = 1) AS ecg,
+           count(*) FILTER (WHERE di.onprem_device_type = 3) AS spo2,
+           count(*) FILTER (WHERE di.onprem_device_type = 10) AS bp
+      FROM hospital_device_events e JOIN device_units u ON u.id = e.device_id JOIN device_info di ON di.id = u.device_info_id
      WHERE e.event_type = 'RECOVER' AND e.hospital_code = ${hospitalCode}
        AND EXISTS (SELECT 1 FROM hospital_device_events r
                     WHERE r.event_type = 'REGISTER' AND r.hospital_code = e.hospital_code AND r.device_id <> e.device_id
                       AND (r.related_device_id = e.device_id OR (e.action_group IS NOT NULL AND r.action_group = e.action_group AND e.related_device_id = r.device_id)))
      GROUP BY 1`)
-  return new Map(rows.map((r) => [r.d, n(r.cnt)]))
+  return new Map(rows.map((r) => [r.d, { total: n(r.cnt), ecg: n(r.ecg), spo2: n(r.spo2), bp: n(r.bp) }]))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -274,8 +285,14 @@ export interface SummaryDealRow {
   active: number
   /** 모델별 등록 수량(배치 중 — ECG/SpO2/링BP) */
   activeByModel: { ecg: number; spo2: number; bp: number }
-  /** 교체 건수(RECOVER 이벤트 deal_code 스냅샷 기준 짝 수) */
+  /** 이 계약건의 AS진행중(as_started_on) 배치 수 — 딜 합계(축 밖 모델 포함) */
+  asInProgress: number
+  /** 모델별 AS진행중 수(B-24) */
+  asByModel: { ecg: number; spo2: number; bp: number }
+  /** 교체 건수 = 누적 AS(RECOVER 이벤트 deal_code 스냅샷 기준 짝 수 — 행 합계, 축 밖 모델 포함) */
   replacements: number
+  /** 모델별 교체(누적 AS) 수 — 회수 유닛의 모델 축 기준 */
+  replacementsByModel: { ecg: number; spo2: number; bp: number }
 }
 
 export interface HospitalDeviceSummary {
@@ -299,8 +316,15 @@ export interface HospitalDeviceSummary {
   productTypeContext: ProductTypeContext
   /** 계약건(딜)별 현황(B-23) — 계약완료 딜 ∪ 배치·교체에 등장한 딜 코드(재적재로 끊긴 코드도 노출) */
   deals: SummaryDealRow[]
-  /** 계약건 미지정 버킷 — active: 딜 없는 ACTIVE 배치 수(+모델별) / replacements: RECOVER 스냅샷 deal_code NULL인 교체 짝 수 */
-  dealUnassigned: { active: number; activeByModel: { ecg: number; spo2: number; bp: number }; replacements: number }
+  /** 계약건 미지정 버킷 — active: 딜 없는 ACTIVE 배치 수(+모델별) / asInProgress·asByModel / replacements: RECOVER 스냅샷 deal_code NULL인 교체 짝 수(+모델별) */
+  dealUnassigned: {
+    active: number
+    activeByModel: { ecg: number; spo2: number; bp: number }
+    asInProgress: number
+    asByModel: { ecg: number; spo2: number; bp: number }
+    replacements: number
+    replacementsByModel: { ecg: number; spo2: number; bp: number }
+  }
   /** AS진행중(as_started_on NOT NULL) ACTIVE 배치 수(B-24) */
   asInProgress: number
   /** 계약 딜이 2종이거나 배치에 상품유형이 하나라도 있으면 true — UI가 매트릭스로 그린다 */
@@ -348,11 +372,14 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     getHospitalProductTypeContext(hospitalCode, client),
     countReplacements(hospitalCode, undefined, client),
     countReplacements(hospitalCode, { from: since }, client),
-    client.$queryRaw<{ deal_code: string | null; cnt: bigint; as_cnt: bigint; ecg: bigint; spo2: bigint; bp: bigint }[]>`
+    client.$queryRaw<{ deal_code: string | null; cnt: bigint; as_cnt: bigint; ecg: bigint; spo2: bigint; bp: bigint; as_ecg: bigint; as_spo2: bigint; as_bp: bigint }[]>`
       SELECT d.deal_code, count(*) AS cnt, count(*) FILTER (WHERE d.as_started_on IS NOT NULL) AS as_cnt,
              count(*) FILTER (WHERE di.onprem_device_type = 1) AS ecg,
              count(*) FILTER (WHERE di.onprem_device_type = 3) AS spo2,
-             count(*) FILTER (WHERE di.onprem_device_type = 10) AS bp
+             count(*) FILTER (WHERE di.onprem_device_type = 10) AS bp,
+             count(*) FILTER (WHERE d.as_started_on IS NOT NULL AND di.onprem_device_type = 1) AS as_ecg,
+             count(*) FILTER (WHERE d.as_started_on IS NOT NULL AND di.onprem_device_type = 3) AS as_spo2,
+             count(*) FILTER (WHERE d.as_started_on IS NOT NULL AND di.onprem_device_type = 10) AS as_bp
         FROM hospital_devices d JOIN device_units u ON u.id = d.device_id JOIN device_info di ON di.id = u.device_info_id
        WHERE d.hospital_code = ${hospitalCode} AND d.status = 'ACTIVE'
        GROUP BY 1`,
@@ -483,12 +510,23 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     return { type: k, active: c.active, activeForCompare: c.activeForCompare, expected: expT, diff: expT == null ? null : c.activeForCompare - expT }
   })
   // 계약건(딜)별 현황(B-23) — 계약완료 딜 ∪ 배치·교체에 등장한 코드. 미지정(NULL)은 별도 버킷
-  const activeByDeal = new Map<string | null, { active: number; asCnt: number; ecg: number; spo2: number; bp: number }>(
-    dealActRows.map((r) => [r.deal_code, { active: n(r.cnt), asCnt: n(r.as_cnt), ecg: n(r.ecg), spo2: n(r.spo2), bp: n(r.bp) }])
+  const activeByDeal = new Map<string | null, { active: number; asCnt: number; ecg: number; spo2: number; bp: number; asEcg: number; asSpo2: number; asBp: number }>(
+    dealActRows.map((r) => [
+      r.deal_code,
+      { active: n(r.cnt), asCnt: n(r.as_cnt), ecg: n(r.ecg), spo2: n(r.spo2), bp: n(r.bp), asEcg: n(r.as_ecg), asSpo2: n(r.as_spo2), asBp: n(r.as_bp) },
+    ])
   )
   const activeModelOf = (code: string | null) => {
     const a = activeByDeal.get(code)
     return { ecg: a?.ecg ?? 0, spo2: a?.spo2 ?? 0, bp: a?.bp ?? 0 }
+  }
+  const asModelOf = (code: string | null) => {
+    const a = activeByDeal.get(code)
+    return { ecg: a?.asEcg ?? 0, spo2: a?.asSpo2 ?? 0, bp: a?.asBp ?? 0 }
+  }
+  const replModelOf = (code: string | null) => {
+    const r = replByDeal.get(code)
+    return { ecg: r?.ecg ?? 0, spo2: r?.spo2 ?? 0, bp: r?.bp ?? 0 }
   }
   const dealKeys: string[] = expected.contractedDeals.map((d) => d.dealCode)
   for (const k of Array.from(activeByDeal.keys())) if (k != null && !dealKeys.includes(k)) dealKeys.push(k)
@@ -507,10 +545,20 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
       contracted: !!c,
       active: activeByDeal.get(code)?.active ?? 0,
       activeByModel: activeModelOf(code),
-      replacements: replByDeal.get(code) ?? 0,
+      asInProgress: activeByDeal.get(code)?.asCnt ?? 0,
+      asByModel: asModelOf(code),
+      replacements: replByDeal.get(code)?.total ?? 0,
+      replacementsByModel: replModelOf(code),
     }
   })
-  const dealUnassigned = { active: activeByDeal.get(null)?.active ?? 0, activeByModel: activeModelOf(null), replacements: replByDeal.get(null) ?? 0 }
+  const dealUnassigned = {
+    active: activeByDeal.get(null)?.active ?? 0,
+    activeByModel: activeModelOf(null),
+    asInProgress: activeByDeal.get(null)?.asCnt ?? 0,
+    asByModel: asModelOf(null),
+    replacements: replByDeal.get(null)?.total ?? 0,
+    replacementsByModel: replModelOf(null),
+  }
   const asInProgress = Array.from(activeByDeal.values()).reduce((s, v) => s + v.asCnt, 0)
   return {
     hospitalCode: hospital.hospitalCode,

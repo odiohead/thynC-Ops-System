@@ -622,11 +622,13 @@ async function main() {
     const rowD1 = sumD.deals.find((d) => d.dealCode === D1.dealCode)
     const activeD1 = await prisma.hospitalDevice.count({ where: { hospitalCode: H3, status: 'ACTIVE', dealCode: D1.dealCode } })
     ok(!!rowD1 && rowD1.contracted === false && rowD1.expected === null && rowD1.active === activeD1 && rowD1.replacements === 2, '요약 deals[] — 계약 외 코드 행(active·교체 2건: S55→S56, S57→S58)', rowD1)
+    ok(!!rowD1 && rowD1.replacementsByModel.ecg === 2 && rowD1.replacementsByModel.spo2 === 0 && rowD1.replacements === rowD1.replacementsByModel.ecg + rowD1.replacementsByModel.spo2 + rowD1.replacementsByModel.bp && rowD1.asInProgress === 0 && rowD1.asByModel.ecg === 0, 'deals[] 모델별 누적 AS(교체) — ECG 2 · AS진행중 0', rowD1 && { repl: rowD1.replacementsByModel, as: rowD1.asByModel })
     const unassignedActive = await prisma.hospitalDevice.count({ where: { hospitalCode: H3, status: 'ACTIVE', dealCode: null } })
     ok(sumD.dealUnassigned.active === unassignedActive && typeof sumD.dealUnassigned.replacements === 'number', '요약 dealUnassigned 버킷(active = deal NULL ACTIVE 수)')
     const sumH1D = (await getHospitalDeviceSummary(H1))!
     const rowReal = sumH1D.deals.find((d) => d.dealCode === realDeal.dealCode)!
     ok(!!rowReal && rowReal.contracted && rowReal.expected === realDeal.count && rowReal.roundNo === realDeal.roundNo && rowReal.active >= 2, '요약 deals[] — 계약완료 딜 행(expected = Σ대웅 수·등록 수량)', rowReal)
+    ok(typeof rowReal.asInProgress === 'number' && typeof rowReal.asByModel.ecg === 'number' && typeof rowReal.replacementsByModel.ecg === 'number', 'deals[] asInProgress·asByModel·replacementsByModel 필드(additive)')
     // ── B-25: 계약 수량 = 딜 모델별 수량 1순위 · 디바이스수 폴백
     if (!h1!.has_rows) {
       ok(rowReal.expectedSource === 'fallback' && rowReal.expectedByModel?.ecg === realDeal.count && rowReal.expectedByModel?.spo2 === null && rowReal.expectedByModel?.bp === null, 'B-25: 폴백 딜 — expectedSource=fallback · expectedByModel={ecg: 디바이스수}', rowReal.expectedByModel)
@@ -679,7 +681,11 @@ async function main() {
     await expectErr('타 병원 문맥 AS → 409', () => reg.openDeviceAs(ctx(H1), { deviceId: d53id }), 409)
     const luAs = await listUnits({ hospital: H3, as: true }, { page: 1, limit: 50 })
     ok(luAs.data.some((r) => r.id === dAS.id) && luAs.data.every((r) => r.asStartedOn != null), 'listUnits as=1 필터')
-    ok((await getHospitalDeviceSummary(H3))!.asInProgress >= 1, '요약 asInProgress ≥ 1')
+    {
+      const sumAs = (await getHospitalDeviceSummary(H3))!
+      ok(sumAs.asInProgress >= 1, '요약 asInProgress ≥ 1')
+      ok(sumAs.dealUnassigned.asInProgress >= 1 && sumAs.dealUnassigned.asByModel.ecg >= 1, '미지정 버킷 asInProgress·asByModel.ecg(딜 없는 ECG AS 접수)', sumAs.dealUnassigned)
+    }
     const asC = await reg.clearDeviceAs(ctx(null, '2026-08-16'), { deviceId: dAS.id })
     ok(asC.event.eventType === 'AS_CLEAR' && asC.device.asStartedOn === null && asC.device.asRefCode === null, 'clearDeviceAs — 수동 해제')
     await expectErr('표시 없는 기기 해제 → 409', () => reg.clearDeviceAs(ctx(null), { deviceId: dAS.id }), 409, '표시가 없는')
@@ -689,7 +695,7 @@ async function main() {
     await cancelLastEvent(ctx(null), { eventId: asO.event.id })
     ok((await dev({ id: dAS.id }))!.asStartedOn === null && (await dev({ id: dAS.id }))!.asRefCode === null, 'AS_OPEN 취소 → 플래그 해제')
     ok(await projectionEqualsRebuild(dAS.id), 'AS 취소 후 프로젝션 = fold')
-    // 일괄 AS 표시/해제(bulk AS_OPEN/AS_CLEAR) — 같은 action_group·ref·업무일자 공유
+    // 일괄 AS 접수/해제(bulk AS_OPEN/AS_CLEAR) — 같은 action_group·ref·업무일자 공유
     const rBk = await registerDevices(ctx(H3, '2026-08-01'), [{ serialInput: S(16), wardName: 'D동' }, { serialInput: S(17), wardName: 'D동' }, { serialInput: S(18), wardName: 'D동' }], { dealContextOverride: NONE_D })
     const bkIds = rBk.created.map((c) => c.id)
     await reg.openDeviceAs(ctx(null, '2026-08-02'), { deviceId: bkIds[0] }) // 1대는 미리 표시 → skipped 확인
@@ -718,7 +724,7 @@ async function main() {
     await reg.openDeviceAs(ctx(null, '2026-08-20'), { deviceId: dAS.id })
     const repAS = await replaceDevice(ctx(H3, '2026-08-21'), { oldDeviceId: dAS.id, newSerial: S(62, 'P') })
     ok(repAS.oldDevice.status === 'RECOVERED' && repAS.oldDevice.asStartedOn === null && repAS.newDevice.asStartedOn === null, '교체 → 구 기기 AS 플래그 자동 해제')
-    await expectErr('회수된 기기 AS 표시 → 409', () => reg.openDeviceAs(ctx(null), { deviceId: dAS.id }), 409, '회수된 기기에는 AS 표시')
+    await expectErr('회수된 기기 AS 접수 → 409', () => reg.openDeviceAs(ctx(null), { deviceId: dAS.id }), 409, '회수된 기기에는 AS 접수')
     const detAS = (await getUnitDetail(repAS.newDevice.id))!
     ok('dealCode' in detAS && 'asStartedOn' in detAS && 'asRefCode' in detAS, '상세 응답에 dealCode·asStartedOn·asRefCode')
   }
@@ -1418,7 +1424,7 @@ async function main() {
   ok(r.status === 403, 'as-open VIEWER → 403')
   r = await call(h(RAS.open.POST), 'POST', `${B}/api/devices/units/${id81}/as-open`, { ...UW, params: { id: String(id81) }, body: { occurredOn: '2026-08-20', ...(mnt ? { ref: { type: 'MAINTENANCE', code: mnt.maintenanceCode } } : {}) } })
   ok(r.status === 201 && r.json.event.eventType === 'AS_OPEN' && r.json.device.asStartedOn != null && (!mnt || r.json.device.asRefCode === mnt.maintenanceCode), 'as-open USER → 201(플래그·MNT ref)', r.json)
-  ok(!!(await prisma.auditLog.findFirst({ where: { id: { gt: pre.max.a }, resource: 'hospital_device', action: 'UPDATE', resourceLabel: { contains: 'AS 시작' } } })), 'as-open audit 라벨 AS 시작')
+  ok(!!(await prisma.auditLog.findFirst({ where: { id: { gt: pre.max.a }, resource: 'hospital_device', action: 'UPDATE', resourceLabel: { contains: 'AS 접수' } } })), 'as-open audit 라벨 AS 접수')
   r = await call(h(RAS.open.POST), 'POST', `${B}/api/devices/units/${id81}/as-open`, { ...UW, params: { id: String(id81) }, body: {} })
   ok(r.status === 409, 'as-open 재표시 → 409')
   r = await call(h(R.units.GET), 'GET', `${B}/api/devices/units?hospital=${H1}&as=1`, A)
@@ -1433,7 +1439,7 @@ async function main() {
   // 업무일자 기본(오늘) — 앞선 단건 as-clear가 오늘 일자라 소급 일자로 켜면 fold가 다시 꺼진다(같은 일자 순서 = id)
   r = await call(h(R.bulk.POST), 'POST', `${B}/api/devices/units/bulk`, { ...UW, body: { action: 'AS_OPEN', deviceIds: [id81], ...(mnt ? { ref: { type: 'MAINTENANCE', code: mnt.maintenanceCode } } : {}) } })
   ok(r.status === 201 && r.json.events.length === 1 && r.json.events[0].eventType === 'AS_OPEN', 'bulk AS_OPEN 라우트 USER → 201')
-  ok(!!(await prisma.auditLog.findFirst({ where: { id: { gt: pre.max.a }, resource: 'hospital_device_event', resourceLabel: { contains: 'AS 일괄 표시' } } })), 'bulk AS_OPEN audit 라벨(AS 일괄 표시)')
+  ok(!!(await prisma.auditLog.findFirst({ where: { id: { gt: pre.max.a }, resource: 'hospital_device_event', resourceLabel: { contains: 'AS 일괄 접수' } } })), 'bulk AS_OPEN audit 라벨(AS 일괄 접수)')
   r = await call(h(R.bulk.POST), 'POST', `${B}/api/devices/units/bulk`, { ...UW, body: { action: 'AS_CLEAR', deviceIds: [id81] } })
   ok(r.status === 201 && r.json.events[0].eventType === 'AS_CLEAR', 'bulk AS_CLEAR 라우트 USER → 201')
   r = await call(h(R.hSummary.GET), 'GET', `${B}/api/hospitals/${H1}/devices/summary`, { ...V, ...P1 })
