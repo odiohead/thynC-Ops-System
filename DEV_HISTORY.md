@@ -16,6 +16,13 @@
 
 ---
 
+## 2026-09-02 | PROD 배포: 디바이스 원장 후속 3건 (커밋 768eeaa)
+
+- dev2 커밋 3건(7043e10 커버리지 성능·모집단 축소, 768eeaa 기기 목록 행 밀도·병동 탭)·push → PROD `git pull`(d6e54b1→768eeaa) → generate → 힙 4GB 빌드 → `pm2 restart thync-prod` (마이그레이션 없음 — deploy no-op 확인)
+- 스모크: 로컬 `/`·`/devices`·`/hospitals` 307, 외부 HTTPS `/devices` 307, flush 후 에러 0
+
+---
+
 ## 2026-09-02 | PROD 배포: 디바이스 원장 P5 (커밋 d6e54b1 — 14커밋 일괄)
 
 - **리허설 게이트**: PROD 09-02 01:00 덤프를 dev2 스크래치 DB(`thync_ops_rehearsal`)에 복원 → `migrate deploy` 정상(백업 테이블 132행 생성·신규 테이블 0·시드 정상) → seed 재실행 무변경 → 스키마 diff = dev2와 구조 완전 일치(컬럼 순서·owner 표기 차이뿐, `sales_deals` 코멘트 13건은 기존 PROD 전용) → DROP
