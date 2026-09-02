@@ -89,7 +89,9 @@ app/
 │   │   ├── field-engineers/          # 필드 엔지니어 관리 (ADMIN 이상)
 │   │   │   ├── [id]/                 # 필드 엔지니어 삭제
 │   │   │   └── candidates/           # 등록 후보 목록
-│   │   ├── devices/                  # 장비 정보 관리
+│   │   ├── devices/                  # 장비 정보 관리 (+원장 5필드 ADMIN+)
+│   │   ├── device-recovery-reason/   # 기기 회수 사유 마스터 CRUD (ADMIN — StatusCode DEVICE_RECOVERY_REASON)
+│   │   ├── device-usage-type/        # 기기 용도 마스터 CRUD (ADMIN — StatusCode DEVICE_USAGE_TYPE, SALE/EVAL)
 │   │   ├── build-status/             # 공사 상태 관리
 │   │   ├── status/                   # 병원 상태코드 관리
 │   │   ├── site-visit-status/        # 답사 상태코드 관리
@@ -200,7 +202,9 @@ app/
 │   ├── organizations/                # 소속 관리 (SUPER_ADMIN 전용)
 │   ├── field-engineers/              # 필드 엔지니어 리스트 (ADMIN 이상)
 │   ├── hira-sync/                    # 심평원 연동 관리 (SUPER_ADMIN 전용)
-│   ├── devices/                      # 장비 정보 관리
+│   ├── devices/                      # 장비 정보 관리 (+원장 5필드)
+│   ├── device-recovery-reason/       # 기기 회수 사유 관리 (ADMIN 이상 — 디바이스 원장)
+│   ├── device-usage-type/            # 기기 용도 관리 (ADMIN 이상 — 판매용/평가용)
 │   ├── build-status/                 # 공사 상태 관리
 │   ├── status/                       # 병원 상태코드 관리
 │   ├── site-visit-status/            # 답사 상태코드 관리
@@ -548,7 +552,7 @@ prisma/
 ### RBAC Lite — AppRole / AppRolePermission / AppUserRole (2026-08-04, `projects/rbac_design.md`)
 - 기존 등급(`User.role` 4단계) **위에 얹는 가산 전용(additive-only)** 기능 역할 체계 — 역할은 권한을 더해줄 뿐 기존 접근을 빼앗지 않는다
 - **AppRole** (`app_roles`): 직무 단위 역할 정의 — `code`(UNIQUE, 대문자 스네이크·생성 후 변경 불가), `name`, `description`, `isActive`, `sortOrder`
-- **AppRolePermission** (`app_role_permissions`): 역할 ↔ 권한 키. UNIQUE `(roleId, permKey)` — **권한 키 카탈로그는 `lib/permissions.ts`가 단일 소스**(DB에는 키 문자열만, 카탈로그 밖 키는 판정 시 무시). 카탈로그 v1.2(2026-08-06): `inventory.manage`(재고 입출고 처리)·`inventory.admin`(자재 관리자 — manage 상위집합 + 품목 마스터·자재 기초 설정)·`vehicle.manage`(차량 마스터 관리)·`sales.access`(영업 정보 접근 — SEERS 소속 축은 불변)·`maintenance.admin`/`install_plan.admin`/`project.admin`/`site_visit.admin`/`etc_task.admin`(각 모듈 건 삭제 — 조회·생성·수정은 원래 USER 전원 개방이라 무관). 각 키에 `description`(적용 범위 설명 — 역할 관리 화면 표시)
+- **AppRolePermission** (`app_role_permissions`): 역할 ↔ 권한 키. UNIQUE `(roleId, permKey)` — **권한 키 카탈로그는 `lib/permissions.ts`가 단일 소스**(DB에는 키 문자열만, 카탈로그 밖 키는 판정 시 무시). 카탈로그 v1.2(2026-08-06): `inventory.manage`(재고 입출고 처리)·`inventory.admin`(자재 관리자 — manage 상위집합 + 품목 마스터·자재 기초 설정)·`vehicle.manage`(차량 마스터 관리)·`sales.access`(영업 정보 접근 — SEERS 소속 축은 불변)·`maintenance.admin`/`install_plan.admin`/`project.admin`/`site_visit.admin`/`etc_task.admin`(각 모듈 건 삭제 — 조회·생성·수정은 원래 USER 전원 개방이라 무관). 각 키에 `description`(적용 범위 설명 — 역할 관리 화면 표시) · v1.3(2026-08-21): `weekly.access`(주간업무 관리 접근) · v1.4(2026-09-01): `device.admin`(디바이스 원장 관리 — 이벤트 정정·취소, 임포트 배치 취소·일자 정정, 개체 식별 보정, 병동 비활성·삭제; 조회는 전원, 일반 쓰기는 USER+)
 - **AppUserRole** (`app_user_roles`): 사용자 ↔ 역할 N:M. UNIQUE `(userId, roleId)`, 양쪽 Cascade
 - 판정은 `lib/appRoles.ts` `hasPermission(user, perm)` — SUPER_ADMIN 무조건 true, 활성 역할 권한 합집합, **60초 인메모리 캐시**(역할·멤버 변경 API에서 무효화), 실패 시 빈 집합(fail-closed). 권한은 JWT에 넣지 않고 DB 조회
 - 등급과의 합성은 호출부 책임 — 파일럿(자재관리): `canManageStock` = ADMIN 이상 OR 풀 OR `inventory.manage`(가산) / `canEditTxMeta` = ADMIN 이상 AND (풀 OR `inventory.manage`)(자격 요건)

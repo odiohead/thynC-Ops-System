@@ -164,6 +164,8 @@ UPDATE inventory_items i SET device_info_id = d.id
 현재 `device_info`에 2행뿐이므로 1차 백필은 6건(MC200M-T·MP100W 각 3)만 매칭된다. UDI 대상 모델 행을 추가한 뒤 재실행한다.
 
 > **⚠️ 부작용 주의** — `GET /api/hospitals/[code]/devices`는 `deviceInfo.findMany()`를 **`isActive` 필터 없이** 호출한다. `device_info`에 행을 추가하면 병원 장비 배정 드롭다운에 즉시 노출된다. 대응 방안은 §8 미결 3 참조.
+>
+> (정오 2026-09: 디바이스 원장 도입으로 `GET/PUT /api/hospitals/[code]/devices`(병원×모델 수량)는 삭제되고 hospital_devices는 시리얼 배치 테이블로 재정의됨 — 수량 폼 노출은 `device_info.quantity_tracked` 플래그가 담당. 상세: hospital_device_registry_design.md)
 
 ### 4.3 입고 발송처 — `destination` 겸용
 신규 컬럼을 만들지 않고 기존 `destination`(VARCHAR 100)을 **상대처(counterpart)** 로 의미 확장한다.
