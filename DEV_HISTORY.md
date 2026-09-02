@@ -12,6 +12,7 @@
 - **측정(DEV, API 엔드투엔드 — 라우트 핸들러 직접 호출)**: 초기 로드 3요청 332ms(개별 106~115ms) → **1요청 7~11ms**, 표 페이지 단건 108~112ms → 5~7ms
 - **검증**: tsc 0(4GB 힙) · eslint 0(터치 4파일) · 스모크 **483/483 pass**(어서션 수정 불필요 — H3 원장-only·딜 0건 병원 노출 유지 확인, 테이블 원상복구) · 문산중앙(HOSP-000046, 계약완료 딜 3건) 모집단 유지 확인
 - 영향: lib/deviceRegistry/read.ts, app/api/devices/summary/route.ts, app/devices/_components/{DevicesClient,GlobalCoverage}.tsx, projects/hospital_device_registry_design.md(§6.1 모집단·§9.1 성능 노트), README.md
+- **UI 개정(같은 날, 제품 책임자 피드백 — 병원 기기 목록 DeviceTable compact)**: ① 행 밀도 — 모델 셀 1줄(기기명만, 모델코드 툴팁)·시리얼 원문 2줄 제거(툴팁 '원문 …', ⚠ 인라인 유지)·표 셀 패딩 py-2.5→py-1.5(`[&_td]/[&_th]` 오버라이드, 헤더 포함 — [열 더보기] 시 2줄 복귀, 모바일 카드 무변경) ② 병동 탭 — 상태 필터 줄 아래 상시 칩 바 `[전체 n][6병동 n]…[미지정 n]`(카운트 = summary.wards ACTIVE 수, 추가 요청 없음; 클릭 = 기존 `ward=` URL 필터와 같은 상태라 [필터 더보기] 병동 셀렉트와 자동 동기화, 활성 강조·재클릭 해제, overflow-x 가로 스크롤, 폐쇄 병동은 배치>0일 때만·미지정 칩은 n>0일 때만). tsc 0 · eslint 0. 영향: app/devices/_components/DeviceTable.tsx, projects/hospital_device_registry_design.md(§6.1), DEV_HISTORY.md
 
 ---
 

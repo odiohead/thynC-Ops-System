@@ -12,6 +12,8 @@
  *
  * v1 단순화(2026-09-01 사용자 피드백) — props 추가(기본값은 구 동작 유지):
  *  - `compact`: 기본 열을 `시리얼 | 모델 | 병동 | 상태 | 상품유형 | 배치일 | 최근 이벤트 | ⋯`로 줄이고(용도·회수일·연결·창고 개체·메모·원문 2행은 [열 더보기]),
+ *    행 밀도 축소(2026-09-02 — 모델 셀 1줄·기기명만(모델코드 툴팁), 시리얼 원문은 툴팁, 셀 패딩 py-1.5 오버라이드) + 상태 줄 아래 **병동 탭 칩 바**
+ *    `[전체 n][6병동 n]…[미지정 n]`(카운트 = summary.wards ACTIVE 수 — 추가 요청 없음; 기존 `ward=` 필터와 같은 상태라 [필터 더보기] 병동 셀렉트와 자동 동기화, 가로 스크롤),
  *    필터도 상태 + 시리얼 검색만 기본 노출(모델·병동·WMS·용도·상품유형·정렬·행수는 [필터 더보기] — 숨은 필터에 값이 있으면 자동 펼침)
  *  - `showSelection=false`: 체크박스·전체 선택 안내를 그리지 않음(오케스트레이터 [선택] 토글이 켤 때만 true)
  */
@@ -399,6 +401,36 @@ export function DeviceTable({
             )}
           </span>
         </div>
+
+        {/* ── 병동 탭(2026-09-02) — 기존 ward 필터와 같은 상태([필터 더보기] 병동 셀렉트와 자동 동기화). 카운트는 ACTIVE 배치 수(summary), 상태 필터와 무관 표시 */}
+        {compact && summary && (
+          <div className="flex items-center gap-1 overflow-x-auto pb-0.5" role="tablist" aria-label="병동 탭">
+            <Chip className="shrink-0" active={filters.ward == null} onClick={() => setFilters({ ward: null })}>
+              전체
+              <span className={cn('ml-1 tabular-nums', filters.ward == null ? 'opacity-80' : 'text-muted-foreground')}>{summary.activeTotal.toLocaleString()}</span>
+            </Chip>
+            {activeWards.map((w) => (
+              <Chip key={w.id} className="shrink-0" active={filters.ward === w.id} onClick={() => setFilters({ ward: filters.ward === w.id ? null : w.id })}>
+                {w.name}
+                <span className={cn('ml-1 tabular-nums', filters.ward === w.id ? 'opacity-80' : 'text-muted-foreground')}>{w.active.toLocaleString()}</span>
+              </Chip>
+            ))}
+            {closedWards
+              .filter((w) => w.active > 0 || filters.ward === w.id)
+              .map((w) => (
+                <Chip key={w.id} className="shrink-0" active={filters.ward === w.id} onClick={() => setFilters({ ward: filters.ward === w.id ? null : w.id })} title="폐쇄 병동">
+                  {w.name} (폐쇄)
+                  <span className={cn('ml-1 tabular-nums', filters.ward === w.id ? 'opacity-80' : 'text-muted-foreground')}>{w.active.toLocaleString()}</span>
+                </Chip>
+              ))}
+            {(summary.unassigned > 0 || filters.ward === 'unassigned') && (
+              <Chip className="shrink-0" active={filters.ward === 'unassigned'} onClick={() => setFilters({ ward: filters.ward === 'unassigned' ? null : 'unassigned' })} title="병동 미지정 배치">
+                미지정
+                <span className={cn('ml-1 tabular-nums', filters.ward === 'unassigned' ? 'opacity-80' : 'text-muted-foreground')}>{summary.unassigned.toLocaleString()}</span>
+              </Chip>
+            )}
+          </div>
+        )}
         {showAdvancedFilters && (
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex flex-wrap items-center gap-1" aria-label="모델">
@@ -517,7 +549,7 @@ export function DeviceTable({
 
       {/* ── 데스크톱 표 */}
       <div className={cn('hidden overflow-x-auto rounded-lg border border-border bg-card md:block', loading && 'opacity-70 transition-opacity')}>
-        <table className="w-full text-sm">
+        <table className={cn('w-full text-sm', compact && '[&_td]:py-1.5 [&_th]:py-1.5')}>
           <THead>
             <TR className="hover:bg-transparent">
               {showSelection && (
@@ -563,7 +595,12 @@ export function DeviceTable({
                       return (
                         <TD>
                           <div className="flex items-center gap-1 font-mono font-medium">
-                            <button type="button" className="hover:underline" onClick={(e) => { e.stopPropagation(); onOpenDevice(row.id) }}>
+                            <button
+                              type="button"
+                              className="hover:underline"
+                              title={!showAllColumns && row.serialRaw ? `원문 ${row.serialRaw}` : undefined}
+                              onClick={(e) => { e.stopPropagation(); onOpenDevice(row.id) }}
+                            >
                               {row.serialNo}
                             </button>
                             {badFormat && <AlertTriangle size={13} className="text-warning" aria-label="형식 불일치" />}
@@ -572,10 +609,15 @@ export function DeviceTable({
                         </TD>
                       )
                     case 'model':
-                      return (
+                      // compact 축약: 1줄(기기명)·모델코드는 툴팁 — [열 더보기]·full 모드는 2줄 유지
+                      return showAllColumns ? (
                         <TD>
                           <div>{row.deviceInfo?.deviceName ?? '—'}</div>
                           <div className="text-[11px] text-muted-foreground">{row.deviceInfo?.deviceModel}</div>
+                        </TD>
+                      ) : (
+                        <TD className="whitespace-nowrap" title={row.deviceInfo?.deviceModel ?? undefined}>
+                          {row.deviceInfo?.deviceName ?? '—'}
                         </TD>
                       )
                     case 'usage':
@@ -920,7 +962,7 @@ export function ProductTypeBadge({ value, recovered }: { value: string | null | 
   )
 }
 
-function Chip({ active, onClick, children, title }: { active: boolean; onClick: () => void; children: ReactNode; title?: string }) {
+function Chip({ active, onClick, children, title, className }: { active: boolean; onClick: () => void; children: ReactNode; title?: string; className?: string }) {
   return (
     <button
       type="button"
@@ -928,8 +970,9 @@ function Chip({ active, onClick, children, title }: { active: boolean; onClick: 
       onClick={onClick}
       title={title}
       className={cn(
-        'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs transition-colors',
-        active ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-foreground hover:bg-accent'
+        'inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs transition-colors',
+        active ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-foreground hover:bg-accent',
+        className
       )}
     >
       {children}
