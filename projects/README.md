@@ -23,7 +23,7 @@
 | [sales_dashboard_map_design.md](sales_dashboard_map_design.md) | 영업 대시보드(지도) — `/sales/dashboard_map` 7개 권역 지도(muted-earth 베이스맵)+표+드릴다운·종별 필터·막대 3모드, koreaGeo.ts 재생성 절차 포함 | **완료 (PROD 배포 2026-08-15)** |
 | [hospitals_erd.html](hospitals_erd.html) | **참조 문서** (설계안 아님) — 병원(hospitals) 관련 테이블 ERD + 컬럼 상세 명세 (hira/meta/devices/intro_types/대웅배정/영업프로필 + 참조 업무 테이블 요약) | 참조용 (2026-08-16 작성, 스키마 변경 시 갱신) |
 | [weekly_ops_design.md](weekly_ops_design.md) | 주간업무 관리툴 — `/weekly` (nav 미등록·URL 직접 진입) 사업본부 주간 리뷰: 지속 항목 + 주차별 진행 upsert(지난주\|금주 병렬 보드), 병원별 이슈 뷰, 완료 아카이브, 티켓 미편입 | **v1 완료 (PROD 배포 2026-08-19, 커밋 1fc2964)** |
-| [hospital_device_registry_design.md](hospital_device_registry_design.md) | 병원별 웨어러블 디바이스 원장 — `/devices` 시리얼 개체(전역 1행) + append 이벤트 이력(등록·병동이동·회수·교체 쌍), 병원별 병동 마스터, 검토형 임포트, 딜 계약 수량 대조, 기존 `hospital_devices` 수량표 폐기(D1~D12, P0~P5). 2.0 기획 A1 구체화 | **P1~P4 구현 완료 — P5(PROD 배포) 진행 중 (2026-09-02)** |
+| [hospital_device_registry_design.md](hospital_device_registry_design.md) | 병원별 웨어러블 디바이스 원장 — `/devices` 시리얼 개체(전역 1행) + append 이벤트 이력(등록·병동이동·회수·교체 쌍), 병원별 병동 마스터, 검토형 임포트, 딜 계약 수량 대조, 기존 `hospital_devices` 수량표 폐기(D1~D12, P0~P5). 2.0 기획 A1 구체화 | **완료 (PROD 배포 2026-09-02, 커밋 d6e54b1) — 데이터는 사용자 직접 입력 예정, 후속: 교체 허용량 규칙·WMS 편입·유지보수 패널(P6)** |
 | [hospital_device_registry_brief.md](hospital_device_registry_brief.md) | **참조 문서** (설계안 아님) — 위 설계의 조사 원문: 기존 기기 수량 계층·WMS 시리얼 개체·AS 기록 실태·온프렘 `device_register`/API 검증·플랫폼 규약·데이터 규모 | 참조용 (2026-09-01 작성) |
 
 ## 루트에 남아 있는 1.0 문서

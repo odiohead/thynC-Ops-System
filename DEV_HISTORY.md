@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-09-02 | PROD 배포: 디바이스 원장 P5 (커밋 d6e54b1 — 14커밋 일괄)
+
+- **리허설 게이트**: PROD 09-02 01:00 덤프를 dev2 스크래치 DB(`thync_ops_rehearsal`)에 복원 → `migrate deploy` 정상(백업 테이블 132행 생성·신규 테이블 0·시드 정상) → seed 재실행 무변경 → 스키마 diff = dev2와 구조 완전 일치(컬럼 순서·owner 표기 차이뿐, `sales_deals` 코멘트 13건은 기존 PROD 전용) → DROP
+- **머지·push**: `feat/device-registry` 14커밋을 main에 ff 머지(`b94d2d8..d6e54b1`) 후 push. 마이그레이션은 `20260901120000_hospital_device_registry` 단일 파일(3층 최종형)
+- **EC2 dev 선행 적용**: 8/3 이후 정체 상태(git 0e02618·마이그 120) → pull(마이그 17개 적용, 137) → 1차 빌드 실패(`@tiptap/extension-text-style` 부재 — 8월 주간업무 패키지 미설치) → **`npm ci` 후 빌드 성공** → 재시작·seed·`/`·`/devices` 307
+- **PROD (A.0 2단계)**: ① 전체 덤프 `~/backups/db/thync_ops_pre_device_registry_20260902_*.dump`(16.3MB) + 수량표 CSV(132=132 게이트) → pull(5a6c036→d6e54b1) → `prisma generate` → 힙 4GB 빌드(DB 무접촉) ② `migrate deploy && pm2 restart thync-prod` 연달아(파괴적 창 초 단위) → seed(멱등) → 검증(마이그 137·백업 132·원장 테이블 전부 0·device_info 6·마스터 9·nav 4) → 스모크 로컬 `/`·`/devices`·`/hospitals`·`/sales/deals` 307 + 외부 HTTPS `/devices` 307, flush 후 에러 0
+- **PROD 데이터는 무생성**(사용자 결정: 직접 입력 예정). 데모 스크립트는 dev2 전용. 구 수량표 132행은 `hospital_devices_qty_backup_202609`로 DB 내 보존(원장 안정화 후 후속 마이그로 삭제 예정)
+- 이후 PROD→DEV 데이터 동기화 금지 해제(양쪽 DEV DB 모두 137 마이그 적용됨)
+
+---
+
 ## 2026-09-02 | 디바이스 원장 — 계약건(딜) 소프트 참조(B-23) + AS진행중 플래그(B-24), feat/device-registry
 
 - **제품 책임자 결정(2026-09-02)**: (A) 배치가 속한 **계약건(딜)을 소프트 참조**로 기록(`hospital_devices.deal_code`·이벤트 스냅샷 `hospital_device_events.deal_code`, FK 없음 — 딜 재적재·삭제 대비, 티켓 ref 선례; 재적재로 코드가 재발번되면 코드 매핑 백필 필요 — `daewoong_deal_migration_design.md` 상단 주의 추가). (B) 병원 뷰 상단을 **계약건별 현황 표**(계약건|유형|도입 수량|등록 수량|교체 건수 + '(미지정)' 행·합계 ⓘ 팝오버·AS진행중 칩)로 교체. (C) 개체 상태 표시를 **사용중/AS진행중/회수됨**으로 — 'AS진행중'은 ACTIVE 배치의 플래그(`as_started_on`·`as_ref_code`, 제3의 fold 상태 아님), 교체·회수 시 자동 해제
