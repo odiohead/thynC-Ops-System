@@ -13,7 +13,7 @@ export default function DeviceUsageTypeSettingsPage() {
       <StatusCodeManager
         endpoint="/api/settings/device-usage-type"
         title="기기 용도 관리"
-        description="디바이스 원장에서 기기(시리얼)에 붙는 용도입니다 — 판매용(SALE) / 평가용(EVAL), 지정하지 않으면 미지정. 평가용 기기는 계약 수량 대조(배치 중 − 계약)에서 제외됩니다. value가 있는 행은 시스템 의미가 연결된 용도라 이름·순서만 수정할 수 있고, 기기가 사용 중인 용도도 삭제할 수 없습니다. '대웅제약재고'는 판매용 창고이지 별도 용도가 아닙니다."
+        description="기기 현황에서 기기(시리얼)에 붙는 용도입니다 — 판매용(SALE) / 평가용(EVAL), 지정하지 않으면 미지정. 평가용 기기는 계약 수량 대조(배치 중 − 계약)에서 제외됩니다. value가 있는 행은 시스템 의미가 연결된 용도라 이름·순서만 수정할 수 있고, 기기가 사용 중인 용도도 삭제할 수 없습니다. '대웅제약재고'는 판매용 창고이지 별도 용도가 아닙니다."
         addPlaceholder="예: 전시용"
         useColor={false}
       />

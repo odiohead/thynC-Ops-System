@@ -139,7 +139,7 @@ ON CONFLICT (name, category) DO NOTHING;
 
 -- 8) nav (icon 'device'는 P3에서 ICON_MAP에 추가)
 INSERT INTO nav_menu_items (menu_key, label, href, icon_key, parent_key, sort_order, allowed_org_codes) VALUES
-  ('devices','디바이스 원장','/devices','device','operations',55,'{SEERS}') ON CONFLICT (menu_key) DO NOTHING;
+  ('devices','기기 현황','/devices','device','operations',55,'{SEERS}') ON CONFLICT (menu_key) DO NOTHING;
 INSERT INTO nav_menu_items (menu_key, label, href, parent_key, sort_order, group_label, allowed_roles) VALUES
   ('settings/device-recovery-reason','기기 회수 사유 관리','/settings/device-recovery-reason','settings',41,'병원·구축','{SUPER_ADMIN,ADMIN}') ON CONFLICT (menu_key) DO NOTHING;
 INSERT INTO nav_menu_items (menu_key, label, href, parent_key, sort_order, group_label, allowed_roles) VALUES

@@ -13,7 +13,7 @@ export default function DeviceRecoveryReasonSettingsPage() {
       <StatusCodeManager
         endpoint="/api/settings/device-recovery-reason"
         title="기기 회수 사유 관리"
-        description="디바이스 원장에서 기기를 회수할 때 선택하는 사유입니다. value가 있는 행은 삭제 불가 — 시스템 의미(불량·분실·반납·현장 폐기·타 병원 이관)가 연결된 사유라 이름·순서만 수정할 수 있고, 회수 이력에서 사용 중인 사유도 삭제할 수 없습니다."
+        description="기기 현황에서 기기를 회수할 때 선택하는 사유입니다. value가 있는 행은 삭제 불가 — 시스템 의미(불량·분실·반납·현장 폐기·타 병원 이관)가 연결된 사유라 이름·순서만 수정할 수 있고, 회수 이력에서 사용 중인 사유도 삭제할 수 없습니다."
         addPlaceholder="예: 업그레이드 교체"
         useColor={false}
       />

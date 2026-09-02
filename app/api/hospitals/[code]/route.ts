@@ -146,7 +146,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     if (importBatchWithEventsCount > 0) detail.push(`임포트 배치 ${importBatchWithEventsCount}건`)
     return NextResponse.json(
       {
-        error: `연결된 디바이스 원장(${detail.join('·')})이 있어 삭제할 수 없습니다. 업무 일괄 이전으로 다른 병원에 옮기거나 디바이스 원장에서 정리한 뒤 다시 시도하세요.`,
+        error: `연결된 기기 현황 데이터(${detail.join('·')})가 있어 삭제할 수 없습니다. 업무 일괄 이전으로 다른 병원에 옮기거나 기기 현황에서 정리한 뒤 다시 시도하세요.`,
       },
       { status: 409 },
     )

@@ -4,7 +4,7 @@
  * 교체 폼 (1폼 → 2이벤트, §6.1-B 폼 · 교체 / §7.0 교체 계약) — GROUP C
  * 구 시리얼 ↵ → lookupSerial:
  *  (a) 이 병원 ACTIVE: 모델·병동 표시
- *  (b) 원장에 없음: 안내 '원장에 없는 시리얼 — 이 병원에 업무일자로 소급 등록한 뒤 교체합니다(실제 설치일은 기록되지 않음)' + 모델(guessDeviceClassByPrefix 자동)·병동 입력 → oldDeviceInfoId/oldWardId|oldWardName
+ *  (b) 원장에 없음: 안내 '미등록 시리얼 — 이 병원에 업무일자로 소급 등록한 뒤 교체합니다(실제 설치일은 기록되지 않음)' + 모델(guessDeviceClassByPrefix 자동)·병동 입력 → oldDeviceInfoId/oldWardId|oldWardName
  *  (c) 타 병원 ACTIVE: 서버 409 문구 그대로 "구 기기가 {병원}에 배치 중 — 그 병원에서 회수(또는 이관) 기록 후 신 기기를 등록으로 처리하세요"
  *  (d) 이 병원 RECOVERED: 'RECOVER 없이 교체 기기만 등록' 안내
  * 신 시리얼(모델 자동·⚠접두 불일치·회수 이력 있으면 "재등록으로 이력 연결" 힌트·타 병원 ACTIVE면 [이관 처리]=newConflict:'TRANSFER'·이 병원 배치 중이면 '이미 등록된 기기 — 회수만 기록하고 병동을 맞춥니다')
@@ -415,7 +415,7 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, deals, t
         )}
         {oldState.kind === 'not_found' && (
           <>
-            <Notice tone="warning">원장에 없는 시리얼 — 이 병원에 업무일자로 소급 등록한 뒤 교체합니다(실제 설치일은 기록되지 않음)</Notice>
+            <Notice tone="warning">미등록 시리얼 — 이 병원에 업무일자로 소급 등록한 뒤 교체합니다(실제 설치일은 기록되지 않음)</Notice>
             <div className="grid gap-3 sm:grid-cols-2">
               <FormField label="구 기기 모델" htmlFor="replace-old-model" required hint={oldModelId === '' ? <span className="text-destructive">{oldGuessHint ? `${oldGuessHint} 모델이 등록되어 있지 않습니다 — 모델을 지정하세요` : '접두로 판별 불가 — 모델을 지정하세요'}</span> : '접두로 자동 판별 (수정 가능)'}>
                 <Select id="replace-old-model" value={oldModelId} disabled={submitting} onChange={(e) => setOldModelId(e.target.value ? Number(e.target.value) : '')}>
@@ -556,7 +556,7 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, deals, t
                 ))}
               </Select>
             </FormField>
-            <div className="self-end text-xs text-muted-foreground">원장에 없는 시리얼 — 신규 등록됩니다</div>
+            <div className="self-end text-xs text-muted-foreground">미등록 시리얼 — 신규 등록됩니다</div>
           </div>
         )}
         {newState.kind === 'reregister' && (
@@ -613,7 +613,7 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, deals, t
           htmlFor="replace-usage"
           hint={
             newState.kind === 'reregister' || newState.kind === 'active_here'
-              ? '이미 원장에 있는 기기 — 용도가 비어 있을 때만 적용(변경은 식별 정정)'
+              ? '이미 등록된 기기 — 용도가 비어 있을 때만 적용(변경은 식별 정정)'
               : oldState.kind === 'not_found'
                 ? '구 기기 소급 등록에도 같은 용도를 적용'
                 : '기본 = 구 기기 용도. 평가용은 계약 대조에서 제외'

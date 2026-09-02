@@ -10,7 +10,7 @@ import { parseDevicesParams } from './_components/urlState'
 export const dynamic = 'force-dynamic'
 
 export const metadata = {
-  title: '디바이스 원장',
+  title: '기기 현황',
 }
 
 interface PageProps {

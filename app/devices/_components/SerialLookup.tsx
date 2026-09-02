@@ -161,7 +161,7 @@ export function SerialLookup({ onNavigate, autoFocus, className }: SerialLookupP
         >
           <div className="border-b border-border px-3 py-2">
             <div className="flex items-center gap-2 text-sm">
-              <span className="font-medium text-foreground">원장에 없음</span>
+              <span className="font-medium text-foreground">미등록 시리얼</span>
               <span className="font-mono text-xs text-muted-foreground">{missInput?.serialNo}</span>
               {missInput?.serialRaw && missInput.serialRaw !== missInput.serialNo && (
                 <span className="truncate font-mono text-[11px] text-muted-foreground/80" title="원문(정규화 전)">

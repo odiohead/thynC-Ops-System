@@ -334,7 +334,7 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
   }, [loading, res, total, filters.page])
 
   const showEmpty = !loading && !error && rows.length === 0
-  const emptyText = filters.q || filters.filter !== 'all' ? '조건에 맞는 병원이 없습니다.' : '표시할 병원이 없습니다 — 고객 병원(운영·계약완료·보류) 또는 원장 보유 병원이 여기 나열됩니다.'
+  const emptyText = filters.q || filters.filter !== 'all' ? '조건에 맞는 병원이 없습니다.' : '표시할 병원이 없습니다 — 계약완료 딜 보유 또는 기기 등록 병원이 여기 나열됩니다.'
 
   let statusRow: ReactNode = null
   if (loading && rows.length === 0) statusRow = <span className="text-muted-foreground">불러오는 중…</span>

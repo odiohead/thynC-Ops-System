@@ -381,7 +381,7 @@ export default function DevicesSettingsPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">기기 관리</h1>
             <p className="mt-1 text-sm text-gray-500">
-              프로젝트·딜 수량 폼과 디바이스 원장에 사용되는 기기 모델 정보를 관리합니다.
+              프로젝트·딜 수량 폼과 기기 현황에 사용되는 기기 모델 정보를 관리합니다.
             </p>
             {userRole && !isAdmin && (
               <p className="mt-1 text-xs text-amber-600">{ADMIN_ONLY_HINT}. (읽기만 가능)</p>
@@ -423,7 +423,7 @@ export default function DevicesSettingsPage() {
                 <th className={thCls}>분류</th>
                 <th className={thCls} title="온프렘 thynC 디바이스 타입 코드 (1 ECG·2 TEMP·3 SpO2·6 BP·8 TAG·10 RING·11 CHARM)">온프렘 코드</th>
                 <th className={thCls} title="시리얼 경고용 정규식 — 불일치 시 등록은 허용하되 경고 표시">시리얼 형식</th>
-                <th className={`${thCls} text-center`} title="디바이스 원장(시리얼 관리) 대상 모델">원장 대상</th>
+                <th className={`${thCls} text-center`} title="기기 현황(시리얼 관리) 대상 모델">원장 대상</th>
                 <th className={`${thCls} text-center`} title="프로젝트·딜 수량 폼에 노출되는 모델">수량 집계</th>
                 <th className={thCls}>등록일</th>
                 <th className={`${thCls} text-center`}>활성</th>
@@ -656,7 +656,7 @@ export default function DevicesSettingsPage() {
         </div>
 
         <p className="mt-3 text-xs text-gray-400">
-          원장 대상 = 시리얼 단위로 관리하는 모델(디바이스 원장 선택지) · 수량 집계 = 프로젝트·딜 수량 폼에 노출되는 모델.
+          원장 대상 = 시리얼 단위로 관리하는 모델(기기 현황 선택지) · 수량 집계 = 프로젝트·딜 수량 폼에 노출되는 모델.
           사용 중(프로젝트·딜·원장)인 모델은 삭제 대신 비활성화됩니다.
         </p>
 

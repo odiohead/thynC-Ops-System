@@ -23,11 +23,11 @@ export async function checkDeviceRegistryAccess(
     if (isUserOrAbove(user.role) && (await hasPermission(user, 'device.admin'))) return null
     return {
       status: 403,
-      error: '이 작업은 ADMIN 이상 또는 디바이스 원장 관리 권한 보유자(USER 등급 이상)만 가능합니다.',
+      error: '이 작업은 ADMIN 이상 또는 기기 현황 관리 권한 보유자(USER 등급 이상)만 가능합니다.',
     }
   }
   if (opts?.write && !isUserOrAbove(user.role)) {
-    return { status: 403, error: '디바이스 원장 편집은 USER 등급 이상만 가능합니다 (VIEWER는 조회 전용).' }
+    return { status: 403, error: '기기 현황 편집은 USER 등급 이상만 가능합니다 (VIEWER는 조회 전용).' }
   }
   return null
 }

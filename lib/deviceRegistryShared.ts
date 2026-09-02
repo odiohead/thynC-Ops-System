@@ -109,7 +109,7 @@ export function transitionMessage(from: TransitionFrom, eventType: DeviceEventTy
     case 'skip':
       return '이미 이 병원에 배치 중인 시리얼입니다'
     case 'not_found':
-      return '원장에 없는 기기입니다'
+      return '기기 현황에 등록되지 않은 기기입니다'
     case 'conflict':
       return eventType === 'REGISTER'
         ? '다른 병원에 배치 중인 시리얼입니다 — 이관 처리를 지정하거나 그 병원에서 먼저 회수 기록하세요'

@@ -511,7 +511,7 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
 
   return (
     <div className="px-4 py-6 md:px-6">
-      <PageHeader title="디바이스 원장" actions={<ViewTabs active={view} onChange={changeView} />} />
+      <PageHeader title="기기 현황" actions={<ViewTabs active={view} onChange={changeView} />} />
 
       {view === 'hospital' ? (
         <>
@@ -1072,7 +1072,7 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
             <p className="text-muted-foreground">
               계약 = 계약완료 딜의 대웅 디바이스 수 합(ECG 기준). SpO2는 참고(ECG 동수 가정), GW는 계약 축 없음. 도입 병상 수와 무관합니다. 배치(대조)·차이는 평가용(EVAL) 기기를 제외한 수입니다.
             </p>
-            <p className="mt-1 text-muted-foreground">대조는 참고 신호입니다 — 차이가 있어도 딜 데이터 정정 요청 대상이 아니며, 원장 등록·회수 누락 여부를 먼저 확인하세요.</p>
+            <p className="mt-1 text-muted-foreground">대조는 참고 신호입니다 — 차이가 있어도 딜 데이터 정정 요청 대상이 아니며, 기기 현황의 등록·회수 누락 여부를 먼저 확인하세요.</p>
           </RegistryFloatingPanel>
         </>
       )}

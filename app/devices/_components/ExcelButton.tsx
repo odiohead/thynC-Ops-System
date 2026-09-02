@@ -32,7 +32,7 @@ function ExcelIcon({ className }: { className?: string }) {
   )
 }
 
-export function ExcelButton({ href, label = 'Excel', fallbackName = '디바이스원장.xlsx', size = 'sm', className }: ExcelButtonProps) {
+export function ExcelButton({ href, label = 'Excel', fallbackName = '기기현황.xlsx', size = 'sm', className }: ExcelButtonProps) {
   const notify = useDevicesToast()
   const [busy, setBusy] = useState(false)
 

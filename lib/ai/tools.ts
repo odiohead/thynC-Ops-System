@@ -64,7 +64,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_hospital_overview',
     description:
-      '특정 병원의 현황을 조회한다. 병원의 상태·도입형태·병상·계약일·담당자·디바이스 원장 배치 현황(모델별 배치 중 대수)·업무 건수 요약이 필요할 때 호출하라.',
+      '특정 병원의 현황을 조회한다. 병원의 상태·도입형태·병상·계약일·담당자·기기 현황 배치(모델별 배치 중 대수)·업무 건수 요약이 필요할 때 호출하라.',
     input_schema: {
       type: 'object',
       properties: {

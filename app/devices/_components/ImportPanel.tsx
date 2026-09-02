@@ -103,7 +103,7 @@ async function downloadTemplate() {
   sheet['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 30 }, { wch: 10 }]
   XLSX.utils.book_append_sheet(wb, sheet, '기기 목록')
   const guide = XLSX.utils.aoa_to_sheet([
-    ['디바이스 원장 임포트 템플릿'],
+    ['기기 현황 임포트 템플릿'],
     [''],
     ['열', '필수', '설명', '예시'],
     ['A 시리얼', '예', '기기 시리얼(대소문자·공백 무시). 합성 시리얼(GW4C11-B008381)·바코드형은 자동 분해', 'A126861'],
@@ -118,7 +118,7 @@ async function downloadTemplate() {
   ])
   guide['!cols'] = [{ wch: 12 }, { wch: 6 }, { wch: 70 }, { wch: 20 }]
   XLSX.utils.book_append_sheet(wb, guide, '안내')
-  XLSX.writeFile(wb, '디바이스원장_임포트_템플릿.xlsx')
+  XLSX.writeFile(wb, '기기현황_임포트_템플릿.xlsx')
 }
 
 function wardCell(r: ImportPreviewRow): { text: string; tone?: 'new' | 'inactive' | 'unresolved' | 'none' } {

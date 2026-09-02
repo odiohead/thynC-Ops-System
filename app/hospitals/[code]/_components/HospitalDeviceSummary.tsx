@@ -117,7 +117,7 @@ export default async function HospitalDeviceSummary({
           href={ledgerHref}
           className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100"
         >
-          디바이스 원장 열기 →
+          기기 현황 열기 →
         </Link>
       </div>
 
@@ -259,9 +259,9 @@ export default async function HospitalDeviceSummary({
           {empty && (
             <>
               <span aria-hidden>·</span>
-              <span className="text-gray-400">원장에 등록된 기기가 없습니다.</span>
+              <span className="text-gray-400">등록된 기기가 없습니다.</span>
               <Link href={importHref} className="font-medium text-blue-600 hover:text-blue-700 hover:underline">
-                디바이스 원장에서 임포트 →
+                기기 현황에서 임포트 →
               </Link>
             </>
           )}

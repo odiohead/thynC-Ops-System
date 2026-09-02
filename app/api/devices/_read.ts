@@ -36,7 +36,7 @@ export const badRequest = (error: string) => NextResponse.json({ error }, { stat
 export function readErrorResponse(e: unknown, context: string): NextResponse {
   if (isRegistryError(e)) return NextResponse.json(e.toJSON(), { status: e.status })
   console.error(`[devices:${context}]`, e)
-  return NextResponse.json({ error: '디바이스 원장 조회 중 오류가 발생했습니다.' }, { status: 500 })
+  return NextResponse.json({ error: '기기 현황 조회 중 오류가 발생했습니다.' }, { status: 500 })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -170,10 +170,10 @@ export async function hospitalDisplayName(code: string | null | undefined): Prom
   return h?.hospitalName ?? code
 }
 
-/** `디바이스원장_<병원명>_<필터>_YYYYMMDD.xlsx` (§6.1 Excel) */
+/** `기기현황_<병원명>_<필터>_YYYYMMDD.xlsx` (§6.1 Excel — 2026-09-02 '기기 현황' 개명) */
 export function registryFileName(hospitalName: string | null, filterLabel: string): string {
   const ymd = todayKst().replace(/-/g, '')
-  return `디바이스원장_${safeFilePart(hospitalName, '전체')}_${safeFilePart(filterLabel, '전체')}_${ymd}.xlsx`
+  return `기기현황_${safeFilePart(hospitalName, '전체')}_${safeFilePart(filterLabel, '전체')}_${ymd}.xlsx`
 }
 
 export function xlsxResponse(rows: Record<string, unknown>[], sheetName: string, filename: string, colWidths?: number[]): NextResponse {

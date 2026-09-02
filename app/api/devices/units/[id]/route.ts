@@ -43,7 +43,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     return NextResponse.json({ device, events })
   } catch (e) {
     console.error('[devices:units/[id]]', e)
-    return NextResponse.json({ error: '디바이스 원장 조회 중 오류가 발생했습니다.' }, { status: 500 })
+    return NextResponse.json({ error: '기기 현황 조회 중 오류가 발생했습니다.' }, { status: 500 })
   }
 }
 

@@ -33,7 +33,7 @@ function optionLabel(o: HospitalOption): string {
   // 커버리지 행에 배치 중 합계가 실려 오면 우선 표시(형상 확장 대비) — 없으면 registered 표식
   const activeTotal = (o as HospitalOption & { activeTotal?: number }).activeTotal
   if (typeof activeTotal === 'number' && activeTotal > 0) parts.push(`배치 중 ${activeTotal.toLocaleString()}대`)
-  else if (o.registered) parts.push('원장 등록')
+  else if (o.registered) parts.push('기기 등록')
   return parts.join(' · ')
 }
 
@@ -71,7 +71,7 @@ export function HospitalPicker({ value, options, loading, onChange, className }:
         disabled={loading}
         onSearch={searchAll ? onSearch : undefined}
       />
-      <label className="inline-flex cursor-pointer select-none items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground" title="고객 병원·원장 보유 병원 외 전체 병원 마스터에서 검색합니다 (20건)">
+      <label className="inline-flex cursor-pointer select-none items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground" title="고객 병원·기기 등록 병원 외 전체 병원 마스터에서 검색합니다 (20건)">
         <input
           type="checkbox"
           className="h-3.5 w-3.5 rounded border-input accent-primary"

@@ -232,7 +232,7 @@ export function DeviceListTab({ filters, setFilters, onOpenDevice, reloadKey }: 
         )}
         <span className="ml-auto inline-flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
           {loading ? '불러오는 중…' : `총 ${total.toLocaleString()}대`}
-          <ExcelButton href={excelHref} fallbackName="디바이스원장_전체.xlsx" />
+          <ExcelButton href={excelHref} fallbackName="기기현황_전체.xlsx" />
         </span>
       </div>
 
