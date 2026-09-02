@@ -17,6 +17,14 @@
 
 ---
 
+## 2026-09-02 | PROD 배포: 페이지 명칭 '기기 현황' 개명 (커밋 391c138)
+
+- dev2 커밋(391c138, 26파일)·push → PROD `git pull` → **nav `UPDATE nav_menu_items SET label='기기 현황' WHERE menu_key='devices'`(dev2·PROD 각 1행)** → 힙 4GB 빌드 → `pm2 restart thync-prod` (마이그레이션 없음)
+- '디바이스 원장' → '기기 현황': 페이지 타이틀·헤더·병원 상세 링크·문구('원장에 없음'→'미등록 시리얼' 등)·Excel 파일명(`기기현황_…`)·시드 nav 라벨·권한 카탈로그 라벨. 내부 식별자(lib/deviceRegistry·device.admin 키·라우트)와 설계 문서의 '원장' 개념 용어는 유지
+- 스모크: 로컬 `/`·`/devices`·`/hospitals` 307, 외부 HTTPS `/devices` 307. 빌드 창에 구 프로세스의 `.next` 교체 중 `_error.js` MODULE_NOT_FOUND 8건이 기록됐으나 재시작 후 재확인에서 에러 0(일시 현상)
+
+---
+
 ## 2026-09-02 | PROD 배포: 디바이스 원장 AS 접수 용어·필터 정리·계약표 AS 열 (커밋 b4bd115)
 
 - dev2 커밋(b4bd115)·push → PROD `git pull`(29c3e96→b4bd115) → 힙 4GB 빌드 → `pm2 restart thync-prod` (마이그레이션 없음)
