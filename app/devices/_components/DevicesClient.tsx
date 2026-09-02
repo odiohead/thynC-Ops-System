@@ -39,6 +39,8 @@ import {
   toWardOption,
   type Capabilities,
   type CoverageFilters,
+  type CoverageResponse,
+  type CoverageRow,
   type DeviceAction,
   type DeviceRef,
   type DevicesTab,
@@ -79,8 +81,8 @@ export interface DevicesClientProps {
   initialParams: DevicesUrlState
 }
 
-/** 커버리지 모집단 로드 — limit 200씩, total까지(최대 10페이지) */
-const OPTIONS_PAGE_LIMIT = 200
+/** 커버리지 모집단 로드 — 1,000씩(라우트 캡 COVERAGE_MAX_LIMIT), 보통 1요청으로 전체 모집단 확보(최대 10페이지 안전장치) */
+const OPTIONS_PAGE_LIMIT = 1000
 const OPTIONS_MAX_PAGES = 10
 
 type ModalState =
@@ -136,31 +138,33 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
     }
   }, [])
 
-  // ── 병원 옵션(고객 ∪ 원장 보유) — 커버리지 엔드포인트 페이징(라벨 '배치 중 n대')
-  const [options, setOptions] = useState<HospitalOption[]>([])
+  // ── 커버리지 캐시(계약완료 딜 보유 ∪ 원장 보유 — 2026-09-02 모집단 축소) — 1요청으로 콤보 옵션 + 미선택 첫 표 페이지 겸용
+  const [coverageCache, setCoverageCache] = useState<CoverageResponse | null>(null)
   const [optionsLoading, setOptionsLoading] = useState(true)
   const [reloadKey, setReloadKey] = useState(0)
-  /** mutation 후 콤보 라벨('배치 중 n대') 갱신용 재조회 키 */
+  /** mutation 후 콤보 라벨('배치 중 n대')·커버리지 표 갱신용 재조회 키 */
   const [optionsKey, setOptionsKey] = useState(0)
+  const loadedOptionsKey = useRef(-1)
 
   useEffect(() => {
+    if (view !== 'hospital') return // [디바이스] 뷰에서는 커버리지·콤보 모집단이 필요 없다 — [병원별] 진입 시 로드
+    if (loadedOptionsKey.current === optionsKey) return
+    loadedOptionsKey.current = optionsKey
     let alive = true
     ;(async () => {
       setOptionsLoading(true)
       try {
-        const acc: HospitalOption[] = []
+        const acc: CoverageRow[] = []
+        let first: CoverageResponse | null = null
         let page = 1
-        let total = 0
         do {
-          const r = await getCoverage({ page, limit: OPTIONS_PAGE_LIMIT, filter: 'all', sort: 'name' })
-          total = r.total
-          acc.push(
-            ...r.data.map((row) => ({ hospitalCode: row.hospitalCode, hospitalName: row.hospitalName, status: row.status, registered: row.registered, activeTotal: row.activeTotal }))
-          )
+          const r = await getCoverage({ page, limit: OPTIONS_PAGE_LIMIT, filter: 'all', sort: 'diff' })
+          if (!first) first = r
+          acc.push(...r.data)
           page += 1
-        } while (acc.length < total && page <= OPTIONS_MAX_PAGES)
-        if (!alive) return
-        setOptions(acc)
+        } while (first != null && acc.length < first.total && page <= OPTIONS_MAX_PAGES)
+        if (!alive || !first) return
+        setCoverageCache({ ...first, data: acc })
       } catch (e) {
         if (alive) notify(errorMessage(e, '병원 목록을 불러오지 못했습니다.'), 'error')
       } finally {
@@ -170,7 +174,16 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
     return () => {
       alive = false
     }
-  }, [notify, optionsKey])
+  }, [notify, optionsKey, view])
+
+  /** 병원 콤보 옵션 — 커버리지 캐시에서 파생(병원명 정렬) */
+  const options = useMemo<HospitalOption[]>(
+    () =>
+      (coverageCache?.data ?? [])
+        .map((row) => ({ hospitalCode: row.hospitalCode, hospitalName: row.hospitalName, status: row.status, registered: row.registered, activeTotal: row.activeTotal }))
+        .sort((a, b) => a.hospitalName.localeCompare(b.hospitalName, 'ko')),
+    [coverageCache]
+  )
 
   // URL 병원이 모집단 밖이면 단건 조회해 옵션에 합친다(§6.1 — 모집단과 무관하게 렌더)
   const [extraOption, setExtraOption] = useState<HospitalOption | null>(null)
@@ -643,7 +656,7 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
           ) : (
             <div className="mt-4">
               <p className="mb-2 text-xs text-muted-foreground">병원별 기기 현황 — 행을 클릭하면 그 병원의 기기 목록으로 이동합니다. 시리얼로 찾으려면 [디바이스] 탭에서 검색하세요.</p>
-              <GlobalCoverage compact filters={coverageFilters} setFilters={setCoverageFilters} onOpenHospital={openHospital} onOpenImport={openImport} reloadKey={reloadKey} />
+              <GlobalCoverage compact filters={coverageFilters} setFilters={setCoverageFilters} onOpenHospital={openHospital} onOpenImport={openImport} reloadKey={reloadKey} preloaded={coverageCache} preloadedLoading={optionsLoading} />
             </div>
           )}
         </>

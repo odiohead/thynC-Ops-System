@@ -305,7 +305,7 @@ model HospitalDeviceEvent {
 │ 병원: [🔎 병원 검색 (고객 병원 사전 로드 · ☐ 전체 병원 검색) ▾ ]                                     │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
-- **병원 콤보**: 고객(운영·계약완료·보류) ∪ 원장 보유 ≈215 사전 로드 + '전체 병원 검색' 토글(`/api/hospitals?search=`). `SearchSelect`(`app/weekly/_components/SearchSelect.tsx`) 재사용(표시 50건 캡) + `onSearch?(q)` 비동기 옵션 1개 추가(토글 on이면 `/api/hospitals?search=` 호출, 20건 표시). URL `hospital=`은 모집단과 무관하게 `/api/hospitals/[code]`로 조회해 렌더.
+- **병원 콤보**: **모집단 = 계약완료 딜 보유 ∪ 원장 보유(배치 현재/마지막·이벤트·병동·임포트 배치) 병원**(2026-09-02 제품 책임자 결정 — "미계약 병원은 처리할 필요가 없다": 구 상태(운영·계약완료·보류) 기반 모집 제거, DEV 214→211. 커버리지 표·콤보 옵션 동일 모집단, 1요청 사전 로드 limit≤1000) + '전체 병원 검색' 토글(`/api/hospitals?search=`). `SearchSelect`(`app/weekly/_components/SearchSelect.tsx`) 재사용(표시 50건 캡) + `onSearch?(q)` 비동기 옵션 1개 추가(토글 on이면 `/api/hospitals?search=` 호출, 20건 표시). URL `hospital=`은 모집단과 무관하게 `/api/hospitals/[code]`로 조회해 렌더.
 - **시리얼 조회**(`GET /api/devices/lookup?serial=`): 입력은 `normalizeSerial` 통과 후 `serial_no`=키 OR `serial_raw`=원문으로 조회. ACTIVE 1건 → 그 병원으로 전환 + 드로어 / RECOVERED 1건 → `last_hospital_code` 병원 + 상태 필터 '회수됨' + 드로어 / 0건 → "원장에 없음" + 원장 접두 일치 ≤10건(`serial_no LIKE '키 앞 5자%'`, `text_pattern_ops` — 오타 임포트 발견 경로, 병원·상태 표시) + WMS 개체 ≤10건(§9.2 배치 매칭 쿼리 재사용, WMS 라우트 무변경).
 - **가시성**: 읽기 전원 / [등록][교체][이동][회수][임포트]·병동 추가·메모 USER+(`GET /api/devices/can-manage` 프로브) / 정정·취소·배치 취소·식별 보정·병동 비활성/삭제 admin(드로어 '관리'·행 ⋯에만). VIEWER에게 임포트 탭은 노출하되 입력 영역 대신 EmptyState "임포트는 USER 등급부터 가능합니다" + 임포트 이력(읽기). `canWrite=false`면 USER+ 컨트롤(병동 탭 ✎·↑↓·추가, 메모 입력 포함)을 렌더하지 않고 읽기 값만 표시.
 
@@ -503,6 +503,7 @@ read = 로그인 전체(조직 게이트 없음 — nav `{SEERS}`는 UX) / write
 
 ## 9. 기존 데이터·모듈 연동
 ### 9.1 딜 기대 수량 — **모델별 수량 1순위(B-25, 2026-09-02 개정)**
+> **성능 노트(2026-09-02)**: 커버리지 `pop` CTE는 소형 코드 유니온(계약완료 딜 ∪ 원장 4테이블)을 만들어 `hospitals`(80k+)를 PK 조인으로 좁힌다 — 구 형태(hospitals 전행 스캔 + 행별 EXISTS)는 DEV 기준 쿼리 ~120ms였고 개편 후 ~3ms. 신규 인덱스 불필요(기존 `sales_deals_hospital_code_idx`·원장 인덱스로 충분), `totals.customerHospitals`는 계약완료 딜 보유 병원 수로 재정의.
 **계약 수량은 모델별이다**(한 딜에 심전도 100 + 산소포화도 50). 기대 수량 산식(models-first, `computeContractExpected` 순수 함수 — sales_* 읽기 전용):
 1. **1순위 — 딜 모델별 수량** `sales_deal_devices`(딜×모델, 딜 폼 '기기별 도입 수량'): 계약완료 딜별로 `device_info.onprem_device_type` 1(ECG)·3(SpO2)·10(링BP) 행을 합산. 축 밖 모델(GW·기타) 행은 **무시**(대조 축 없음). 행이 하나라도 있는 딜은 `expectedSource='models'`.
 2. **폴백 — 디바이스수**: 모델 행이 없는 딜은 구 규칙 `daewoong_device_count`(4종 합산, A-5) — **ECG에만 기여**, `expectedSource='fallback'`.

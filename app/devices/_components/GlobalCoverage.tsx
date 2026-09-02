@@ -39,6 +39,10 @@ export interface GlobalCoverageProps {
   reloadKey: number
   /** v1 단순 표(7열 + 미등록 [임포트]) — 기본 false(구 12열 전체 표) */
   compact?: boolean
+  /** 오케스트레이터의 커버리지 캐시(filter=all·q없음·sort=diff 전체 모집단) — 기본 필터 상태에서는 이 데이터로 첫 페이지를 그려 중복 fetch를 없앤다(2026-09-02 로딩 개선) */
+  preloaded?: CoverageResponse | null
+  /** 캐시 로드 중이면 자체 fetch를 미룬다(캐시 실패 시 false + null → 자체 fetch 폴백) */
+  preloadedLoading?: boolean
 }
 
 const FILTER_OPTIONS: { value: CoverageFilter; label: string }[] = [
@@ -263,7 +267,7 @@ function RowAction({ row, onOpenHospital, onOpenImport }: { row: CoverageRow; on
 // 본체
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImport, reloadKey, compact = false }: GlobalCoverageProps) {
+export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImport, reloadKey, compact = false, preloaded = null, preloadedLoading = false }: GlobalCoverageProps) {
   const columns: readonly string[] = compact ? COMPACT_COLUMNS : COLUMNS
   const [res, setRes] = useState<CoverageResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -289,8 +293,17 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
     return () => window.clearTimeout(t)
   }, [qInput, setFilters])
 
-  // 조회
+  // 조회 — 기본 필터 상태(전체·검색 없음·1페이지·차이순)면 오케스트레이터 캐시를 잘라 쓰고 fetch 생략(중복 요청 제거)
+  const preloadedUsable =
+    preloaded != null && filters.filter === 'all' && !filters.q && filters.page === 1 && filters.sort === 'diff' && (preloaded.data.length >= preloaded.total || preloaded.data.length >= filters.limit)
   useEffect(() => {
+    if (preloadedUsable && preloaded) {
+      setRes({ ...preloaded, data: preloaded.data.slice(0, filters.limit), limit: filters.limit })
+      setError(null)
+      setLoading(false)
+      return
+    }
+    if (preloaded == null && preloadedLoading) return // 캐시가 오는 중 — 자체 fetch로 이중 조회하지 않는다
     let alive = true
     setLoading(true)
     getCoverage({ page: filters.page, limit: filters.limit, filter: filters.filter, q: filters.q || null, sort: filters.sort })
@@ -307,7 +320,8 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
     return () => {
       alive = false
     }
-  }, [filters.page, filters.limit, filters.filter, filters.q, filters.sort, reloadKey, retryKey])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.page, filters.limit, filters.filter, filters.q, filters.sort, reloadKey, retryKey, preloaded, preloadedLoading, preloadedUsable])
 
   const rows = res?.data ?? []
   const total = res?.total ?? 0

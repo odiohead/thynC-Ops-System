@@ -25,9 +25,6 @@ import {
 import { RegistryError, getHospitalProductTypeContext, loadTrackedModels, ymd, ymdMinusDays, ymdToDate, type DbClient } from './core'
 import { matchInventoryUnits, queryWmsUnits, wmsWarning, type WmsMatch, type WmsMatchInput, type WmsUnitRow } from './wms'
 
-/** 커버리지 모집단 — 고객 병원 상태(§6.1-A: 운영·계약완료·보류) ∪ 원장 보유 병원 */
-export const CUSTOMER_HOSPITAL_STATUSES = ['운영', '계약완료', '보류'] as const
-
 const n = (v: unknown): number => (typeof v === 'bigint' ? Number(v) : typeof v === 'number' ? v : Number(v ?? 0))
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -544,7 +541,7 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 전역 커버리지 (§6.1-A 백필 진행판) — 고객 병원 ∪ 원장 보유 병원
+// 전역 커버리지 (§6.1-A 백필 진행판) — 계약완료 딜 보유 ∪ 원장 보유 병원 (2026-09-02 모집단 축소 — 상태 기반 모집 제거)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type CoverageFilter = 'all' | 'unregistered' | 'diff' | 'complete'
@@ -598,6 +595,7 @@ export interface CoverageModelCounts {
 }
 
 export interface CoverageTotals {
+  /** 계약완료 딜 보유 병원 수(2026-09-02 — 구 상태(운영·계약완료·보류) 기반 고객 병원 수를 대체) */
   customerHospitals: number
   registeredHospitals: number
   active: { ecg: number; spo2: number; gw: number; third: number; total: number; eval: number }
@@ -624,15 +622,20 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
   const sort: CoverageSort = params.sort && ['diff', 'name', 'lastEvent'].includes(params.sort) ? params.sort : 'diff'
   const q = (params.q ?? '').trim()
   const since = ymdToDate(ymdMinusDays(todayKst(), 30))
-  const statuses = [...CUSTOMER_HOSPITAL_STATUSES]
 
   const base = Prisma.sql`
     WITH pop AS (
+      -- 모집단(2026-09-02): 계약완료 딜 보유 ∪ 원장 보유(배치 현재/마지막 병원·이벤트·병동·임포트 배치) — 상태(운영·계약완료·보류) 기반 모집 제거.
+      -- 소형 코드 유니온을 만들어 hospitals(80k+)를 PK 조인으로 좁힌다(구 형태는 전행 스캔 + 행별 EXISTS ≈ 120ms).
       SELECT h.hospital_code, h.hospital_name, h.status
         FROM hospitals h
-       WHERE h.status = ANY(${statuses}::text[])
-          OR EXISTS (SELECT 1 FROM hospital_devices d WHERE d.hospital_code = h.hospital_code OR d.last_hospital_code = h.hospital_code)
-          OR EXISTS (SELECT 1 FROM hospital_device_events e WHERE e.hospital_code = h.hospital_code)
+        JOIN (SELECT sd.hospital_code FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
+               WHERE sc.category = ${DEAL_STATUS_CATEGORY} AND sc.name = ${DEAL_STATUS_CONTRACTED}
+              UNION SELECT d.hospital_code FROM hospital_devices d WHERE d.hospital_code IS NOT NULL
+              UNION SELECT d.last_hospital_code FROM hospital_devices d WHERE d.last_hospital_code IS NOT NULL
+              UNION SELECT e.hospital_code FROM hospital_device_events e WHERE e.hospital_code IS NOT NULL
+              UNION SELECT w.hospital_code FROM hospital_wards w
+              UNION SELECT b.hospital_code FROM hospital_device_import_batches b) c ON c.hospital_code = h.hospital_code
     ), dl AS (
       -- B-25: ECG 계약 수량 = 딜 모델별 수량(sales_deal_devices ECG 행) 1순위, 행 없는 딜은 daewoong_device_count 폴백
       SELECT sd.hospital_code, count(*)::int AS deals,
@@ -762,7 +765,8 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
     client.$queryRaw<Raw[]>(Prisma.sql`${base} SELECT * FROM rows WHERE ${where} ORDER BY ${orderBy} LIMIT ${limit} OFFSET ${(page - 1) * limit}`),
     client.$queryRaw<{ cnt: bigint }[]>(Prisma.sql`${base} SELECT count(*) AS cnt FROM rows WHERE ${where}`),
     client.$queryRaw<{ customers: bigint; registered: bigint; ecg: bigint; spo2: bigint; gw: bigint; third: bigint; total: bigint; eval_total: bigint; events30d: bigint; recovered30d: bigint; mixed_pt: bigint }[]>`
-      SELECT (SELECT count(*) FROM hospitals WHERE status = ANY(${statuses}::text[])) AS customers,
+      SELECT (SELECT count(DISTINCT sd.hospital_code) FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
+                     WHERE sc.category = ${DEAL_STATUS_CATEGORY} AND sc.name = ${DEAL_STATUS_CONTRACTED}) AS customers,
              (SELECT count(*) FROM (SELECT sd.hospital_code FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
                                      WHERE sc.category = ${DEAL_STATUS_CATEGORY} AND sc.name = ${DEAL_STATUS_CONTRACTED} AND sd.product_type IN ('일반','라이트')
                                      GROUP BY 1 HAVING count(DISTINCT sd.product_type) >= 2) m) AS mixed_pt,

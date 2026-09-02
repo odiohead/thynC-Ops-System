@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-09-02 | 디바이스 원장 — 커버리지 모집단 계약·원장 보유 기준 축소 + 로딩 성능 개선 (main, PROD 미반영)
+
+- **제품 책임자 결정**: /devices 초기 로딩 개선 — "미계약 병원은 처리할 필요가 없다". 커버리지·병원 콤보 모집단을 **계약완료 딜 보유 ∪ 원장 보유(배치 현재/마지막 병원·이벤트·병동·임포트 배치)**로 축소, 구 병원 상태(운영·계약완료·보류) 기반 모집 제거. DEV 모집단 214 → 211(상태만으로 들어오던 계약완료 딜 0건 병원 3곳 제외 — 승일희망요양·박애·경상국립대). 계약완료 딜 병원은 원장 0건이어도 유지(백필 진행판 유지), 원장만 있는 병원(딜 0건)도 유지
+- **SQL 개편(filter first)**: `getGlobalCoverage` `pop` CTE를 소형 코드 유니온(딜 ∪ 원장 4테이블) → `hospitals` PK 조인으로 재구성 — 구 형태는 hospitals 80,598행 전행 스캔 + 행별 EXISTS(버퍼 16만·쿼리 ~104~125ms)가 병목. **쿼리 ~120ms → ~3.4ms** (EXPLAIN ANALYZE, DEV). 신규 인덱스 불필요(기존 `sales_deals_hospital_code_idx`·원장 인덱스로 충분 — 마이그레이션 없음). `totals.customerHospitals`는 계약완료 딜 보유 병원 수로 재정의(구 상태 기반 수 대체), `CUSTOMER_HOSPITAL_STATUSES` 상수 제거
+- **중복 fetch 제거(클라이언트)**: 초기 로드가 커버리지 3요청(콤보 옵션 limit=200 페이징 2회 + 표 1회, 합 ~332ms)이던 것을 **1요청(limit=1000, sort=diff)** 으로 — `DevicesClient`가 커버리지 응답을 캐시해 콤보 옵션(병원명 클라 정렬)과 미선택 첫 표 페이지를 함께 파생, `GlobalCoverage`에 `preloaded`/`preloadedLoading` prop 추가(기본 필터 상태면 캐시 슬라이스, 필터·검색·페이지 변경 시엔 기존 서버 조회). [디바이스] 뷰로 진입하면 커버리지 로드를 [병원별] 전환 시로 지연. `/api/devices/summary` limit 캡 200 → `COVERAGE_MAX_LIMIT`(1000)
+- **측정(DEV, API 엔드투엔드 — 라우트 핸들러 직접 호출)**: 초기 로드 3요청 332ms(개별 106~115ms) → **1요청 7~11ms**, 표 페이지 단건 108~112ms → 5~7ms
+- **검증**: tsc 0(4GB 힙) · eslint 0(터치 4파일) · 스모크 **483/483 pass**(어서션 수정 불필요 — H3 원장-only·딜 0건 병원 노출 유지 확인, 테이블 원상복구) · 문산중앙(HOSP-000046, 계약완료 딜 3건) 모집단 유지 확인
+- 영향: lib/deviceRegistry/read.ts, app/api/devices/summary/route.ts, app/devices/_components/{DevicesClient,GlobalCoverage}.tsx, projects/hospital_device_registry_design.md(§6.1 모집단·§9.1 성능 노트), README.md
+
+---
+
 ## 2026-09-02 | PROD 배포: 디바이스 원장 P5 (커밋 d6e54b1 — 14커밋 일괄)
 
 - **리허설 게이트**: PROD 09-02 01:00 덤프를 dev2 스크래치 DB(`thync_ops_rehearsal`)에 복원 → `migrate deploy` 정상(백업 테이블 132행 생성·신규 테이블 0·시드 정상) → seed 재실행 무변경 → 스키마 diff = dev2와 구조 완전 일치(컬럼 순서·owner 표기 차이뿐, `sales_deals` 코멘트 13건은 기존 PROD 전용) → DROP
