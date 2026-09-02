@@ -16,6 +16,14 @@
 
 ---
 
+## 2026-09-02 | PROD 배포: 디바이스 원장 AS 접수 용어·필터 정리·계약표 AS 열 (커밋 b4bd115)
+
+- dev2 커밋(b4bd115)·push → PROD `git pull`(29c3e96→b4bd115) → 힙 4GB 빌드 → `pm2 restart thync-prod` (마이그레이션 없음)
+- ① 액션 용어 'AS 표시' → 'AS 접수'(버튼·메뉴·모달·감사 라벨·타임라인·Excel 'AS 접수일'; 상태 'AS진행중'·[AS 해제]·이벤트 코드 불변) ② 컴팩트 기기 목록 필터를 상태·시리얼 검색 + 상품유형·계약건 2개만 상시 노출('필터 더보기' 제거, 병동 탭 [전체] 포함 전 탭 동일) ③ 계약건별 표 기기 셀 2줄화: '도입 n / 등록 m' + 'AS a · 누적 b'(교체 횟수, 0이면 숨김) — deals[] asByModel·replacementsByModel 가산, '교체 건수' 열은 행 합계로 유지(모델 축 밖 GW 교체 포함)
+- 스모크: 로컬 `/`·`/devices` 307, 외부 HTTPS `/devices` 307, flush 후 에러 0. 서비스 스모크 499/499
+
+---
+
 ## 2026-09-02 | PROD 배포: 디바이스 원장 AS 표시 접근성 (커밋 29c3e96)
 
 - dev2 커밋(29c3e96)·push → PROD `git pull`(768eeaa→29c3e96) → 힙 4GB 빌드 → `pm2 restart thync-prod` (마이그레이션 없음)
