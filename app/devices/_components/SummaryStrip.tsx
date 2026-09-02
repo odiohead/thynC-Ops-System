@@ -3,10 +3,10 @@
 /**
  * 병원 뷰 요약 스트립 (§6.1-B) — GROUP B
  * | 모델 | 배치 중 | 계약 | 차이 | 회수(30일) | WMS 매칭(출고/재고⚠/미매칭) |
- *  - 배치 중: 계약 축(hard·soft) 행은 activeForCompare(평가용 제외) + activeEval>0이면 '(평가용 n 별도)' 작은 표기 · none 행은 active(+같은 표기). 병동 줄에 '평가용 n' 칩(evalTotal>0)
+ *  - 배치 중: 계약 축(hard) 행은 activeForCompare(평가용 제외) + activeEval>0이면 '(평가용 n 별도)' 작은 표기 · none 행은 active(+같은 표기). 병동 줄에 '평가용 n' 칩(evalTotal>0)
  *  - compare 'hard'(ECG): 계약 = expected, 차이 = diff('−2 ▲' / '0 ✔' — 평가용 제외 §9.1), 계약 셀 클릭 → 근거 딜 팝오버(contractedDeals '1차 2025-03 40대 · 2차 2026-01 20대' → 병원 상세(영업) 링크,
- *    문구 "계약 = 계약완료 딜의 대웅 디바이스 수 합(ECG 기준) … 도입 병상 수와 무관 — 참고 신호")
- *  - 'soft'(SpO2): 계약 '(참고 n)' 회색, 차이 '—' / 'none'(GW): '—' / 제3자(THIRD_PARTY)는 1행으로 접어 '제3자 기기 ▸' + 펼치면 모델별 세부 행
+ *    문구 "계약 = 딜 모델별 도입 기기 수량 합 … 디바이스수는 참고 표기 전용")
+ *  - 'none'(모델 행 없음·GW): '—' — 2026-09-02 개정으로 'soft'는 더 이상 생산되지 않음(타입만 호환) / 제3자(THIRD_PARTY)는 1행으로 접어 '제3자 기기 ▸' + 펼치면 모델별 세부 행
  *  - expected null: '— (계약완료 딜 없음)'
  *  - 마지막 행 '병동 n개 (미지정 m대)' 클릭 → onWardsClick
  *  - 상품유형 매트릭스(B-22): summary.productTypeMixed(계약 딜 2종 또는 배치에 상품유형 있음)면 모델 행 아래 '└ 일반 | 라이트 | 미지정' 소행(배치(대조)/계약/차이 = byProductType),
@@ -245,7 +245,7 @@ export function SummaryStrip({ summary, loading, error, onContractClick, onWards
           <p className="mb-2 text-muted-foreground">— (계약완료 딜 없음)</p>
         )}
         <p className="text-muted-foreground">
-          계약 = 계약완료 딜의 대웅 디바이스 수 합(ECG 기준). SpO2는 참고(ECG 동수 가정), GW는 계약 축 없음. 도입 병상 수와 무관합니다. 배치 중·차이는 평가용(EVAL) 기기를 제외한 수입니다.
+          계약 = 딜 모델별 도입 기기 수량(딜 상세 규모·계약 카드) 합. 수량 미입력 딜은 대조에서 제외(— 표기), GW는 계약 축 없음. 대웅 디바이스수·도입 병상 수는 참고 표기일 뿐 대조에 쓰지 않습니다. 배치 중·차이는 평가용(EVAL) 기기를 제외한 수입니다.
         </p>
         <p className="mt-1 text-muted-foreground">대조는 참고 신호입니다 — 차이가 있어도 딜 데이터 정정 요청 대상이 아니며, 원장 등록·회수 누락 여부를 먼저 확인하세요.</p>
       </RegistryFloatingPanel>
@@ -255,7 +255,6 @@ export function SummaryStrip({ summary, loading, error, onContractClick, onWards
 
 function ModelRow({ m, today, onContractClick, contractOpen, matrix }: { m: ModelSummary; today?: string; onContractClick: (e: MouseEvent<HTMLElement>) => void; contractOpen: boolean; matrix: boolean }) {
   const hard = m.compare === 'hard'
-  const soft = m.compare === 'soft'
   const ptRows = matrix ? PT_KEYS.filter((k) => m.byProductType?.[k]) : []
   const contractCell = (() => {
     if (hard) {
@@ -271,7 +270,6 @@ function ModelRow({ m, today, onContractClick, contractOpen, matrix }: { m: Mode
         </button>
       )
     }
-    if (soft) return <span className="text-muted-foreground tabular-nums">{m.expected == null ? '—' : `(참고 ${m.expected.toLocaleString()})`}</span>
     return <span className="text-muted-foreground">—</span>
   })()
 
@@ -323,7 +321,7 @@ function ModelRow({ m, today, onContractClick, contractOpen, matrix }: { m: Mode
               <EvalNote n={evalN} />
             </TD>
             <TD className="text-right tabular-nums">
-              {unset || c.expected == null ? <span className="text-muted-foreground">—</span> : hard ? c.expected.toLocaleString() : <span className="text-muted-foreground">(참고 {c.expected.toLocaleString()})</span>}
+              {unset || c.expected == null || !hard ? <span className="text-muted-foreground">—</span> : c.expected.toLocaleString()}
             </TD>
             <TD className="text-right">
               {hard && c.diff != null ? <span className={cn('tabular-nums font-medium', c.diff === 0 ? 'text-success-subtle-foreground' : 'text-warning-subtle-foreground')}>{diffText(c.diff)}</span> : <span className="text-muted-foreground">—</span>}

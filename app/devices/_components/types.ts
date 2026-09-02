@@ -127,7 +127,7 @@ export interface CoverageRow {
   hospitalName: string
   status: string
   deals: number
-  /** 계약완료 딜 0건이면 null → 계약 열 '— (계약완료 딜 없음)' */
+  /** 계약완료 딜 0건 또는 전 딜 모델별 수량 미입력이면 null → 계약 열 '—' */
   expected: number | null
   /** 원장 개체 1건 이상 — false면 '미등록' 행(배치 열은 0·'—') */
   registered: boolean
@@ -152,8 +152,10 @@ export interface CoverageRow {
   unassignedProductType: number
   /** 상품유형별 ACTIVE 배치 수(평가용 포함, 2026-09-02 v1 축약 표) — bp = 링 혈압계(CART BP, onprem_device_type 10). 구 응답 호환 optional */
   byProductType?: Record<CoverageProductTypeKey, CoverageModelCounts>
-  /** 상품유형별 계약완료 딜 대웅 디바이스 수 합(심전계 셀 툴팁) */
+  /** 상품유형별 딜 모델별 ECG 도입 수량 합(심전계 셀 툴팁 — 미입력이면 null) */
   expectedByType?: Record<'일반' | '라이트', number | null>
+  /** 계약완료 딜의 상품유형 존재 여부(수량 무관 — 판매유형 배지용, 2026-09-02) */
+  dealProductTypes?: Record<'일반' | '라이트', boolean>
 }
 
 export type CoverageProductTypeKey = '일반' | '라이트' | '미지정'
@@ -200,8 +202,8 @@ export interface DealModelExpected {
   bp: number | null
 }
 
-/** models = 딜 모델별 수량(sales_deal_devices) / fallback = 디바이스수(daewoong_device_count) 기준 */
-export type ExpectedSource = 'models' | 'fallback'
+/** models = 딜 모델별 수량(sales_deal_devices) / none = 모델별 수량 미입력(대조 제외 — 2026-09-02 개정, 디바이스수 폴백 제거) */
+export type ExpectedSource = 'models' | 'none'
 
 /** 계약건(딜)별 요약 행(B-23·B-25) — 병원 뷰 상단 계약별 표 */
 export interface SummaryDealRow {
@@ -242,7 +244,7 @@ export interface ModelSummary {
   /** 계약 대조용 = active − activeEval */
   activeForCompare: number
   recovered30d: number
-  /** hard(ECG)·soft(SpO2)는 Σ계약완료 딜, none은 null */
+  /** hard = Σ딜 모델별 수량(그 모델 행 보유 딜), none = 행 없음(대조 제외 — 2026-09-02 개정 후 soft 미생산·타입만 호환 유지) */
   expected: number | null
   /** hard만 activeForCompare − expected, 그 외 null */
   diff: number | null
@@ -250,7 +252,7 @@ export interface ModelSummary {
   /** 배치 중 유닛의 WMS 일시 매칭 집계(out=OUT · inStock=IN_STOCK · unmatched=매치 없음) */
   wms: { out: number; inStock: number; unmatched: number }
   lastEvent: { type: string; on: string } | null
-  /** 상품유형별 소계(B-22) — 키는 계약 딜 유형 ∪ 배치 유형(+'미지정'은 배치가 있을 때). expected는 그 유형 딜 Σ(ECG hard·SpO2 soft) */
+  /** 상품유형별 소계(B-22) — 키는 계약 딜 유형 ∪ 배치 유형(+'미지정'은 배치가 있을 때). expected는 그 유형 딜 모델별 수량 합(hard 축만) */
   byProductType: Partial<Record<ProductTypeKey, ProductTypeCell>>
 }
 

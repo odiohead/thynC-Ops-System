@@ -758,18 +758,18 @@ function ViewTabs({ active, onChange }: { active: DevicesView; onChange: (v: Dev
 }
 
 /**
- * B-25 모델 셀 — 1행 '도입 n / 등록 m'(도입 null '—', 폴백 ECG ⓘ) + 2행 'AS a · 누적 b'
+ * B-25 모델 셀 — 1행 '도입 n / 등록 m'(도입 null '—', 수량 미입력 딜 ECG ⓘ — 디바이스수 폴백 제거 2026-09-02) + 2행 'AS a · 누적 b'
  * (AS = AS진행중 플래그 수 · 누적 = 누적 AS건수 = 교체 짝 수, 둘 다 0이면 숨김). 툴팁에 4값 병기.
  */
-function ModelPairCell({ exp, act, asCnt = 0, replCnt = 0, fallback, warn }: { exp: number | null; act: number; asCnt?: number; replCnt?: number; fallback?: boolean; warn?: boolean }) {
+function ModelPairCell({ exp, act, asCnt = 0, replCnt = 0, missing, warn }: { exp: number | null; act: number; asCnt?: number; replCnt?: number; missing?: boolean; warn?: boolean }) {
   return (
     <td
       className="whitespace-nowrap py-1 pr-2 text-right align-top tabular-nums"
-      title={`도입 ${exp != null ? exp.toLocaleString() : '—'} · 등록 ${act.toLocaleString()} · AS진행중 ${asCnt.toLocaleString()} · 누적 AS(교체) ${replCnt.toLocaleString()}${fallback && exp != null ? ' · 도입은 모델별 수량 미입력 — 디바이스수 기준' : ''}`}
+      title={`도입 ${exp != null ? exp.toLocaleString() : '—'} · 등록 ${act.toLocaleString()} · AS진행중 ${asCnt.toLocaleString()} · 누적 AS(교체) ${replCnt.toLocaleString()}${missing ? ' · 모델별 도입 기기 수량 미입력 — 딜 상세(규모·계약 카드)에서 입력하세요' : ''}`}
     >
       <span className={cn(exp == null && 'text-muted-foreground', warn && 'text-warning-subtle-foreground')}>
         {exp != null ? exp.toLocaleString() : '—'}
-        {fallback && exp != null && (
+        {missing && (
           <span aria-hidden="true" className="ml-0.5 text-muted-foreground">
             ⓘ
           </span>
@@ -794,7 +794,7 @@ function pairText(exp: number | null, act: number): string {
 /**
  * 병원 뷰 상단 — 계약건(딜)별 현황 표(B-23·B-25, 2026-09-02 — 구 '요약 한 줄' 대체)
  * 열: 계약건 | 유형 | 심전계(도입/등록) | 산소포화도(도입/등록) | 혈압계(도입/등록) | 교체 건수.
- * 도입 = 딜 모델별 수량(sales_deal_devices) 1순위 — 행 없는 폴백 딜은 심전계 도입=디바이스수 ⓘ. 등록 = 그 딜 × 모델 배치 중.
+ * 도입 = 딜 모델별 수량(sales_deal_devices) 단일 소스 — 수량 미입력 딜은 '—' ⓘ(디바이스수 폴백 제거, 2026-09-02). 등록 = 그 딜 × 모델 배치 중.
  * 딜 없는 배치·교체가 있으면 '(미지정)' 행, 마지막 합계 행의 ⓘ가 구 요약 팝오버(모델별 대조·근거 딜·상품유형별·교체 집계)를 연다.
  * AS진행중 n 칩(B-24)·상품유형 혼합 배지는 헤더 줄. 모바일(sm 미만)은 딜당 'E 100/98 · S 50/50' 압축 줄.
  */
@@ -866,7 +866,7 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
                 <tr className="border-b border-border text-muted-foreground">
                   <th className="py-1 pr-2 text-left font-medium">계약건</th>
                   <th className="py-1 pr-2 text-left font-medium">유형</th>
-                  <th className="py-1 pr-2 text-right font-medium" title="심전계 — 도입(딜 모델별 수량, 미입력 딜은 디바이스수 ⓘ) / 등록(이 계약건 배치 중)">
+                  <th className="py-1 pr-2 text-right font-medium" title="심전계 — 도입(딜 모델별 수량, 미입력 딜은 — ⓘ) / 등록(이 계약건 배치 중)">
                     심전계 <span className="font-normal">도입/등록</span>
                   </th>
                   <th className="py-1 pr-2 text-right font-medium" title="산소포화도 — 도입(딜 모델별 수량) / 등록(이 계약건 배치 중)">
@@ -892,7 +892,7 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
                       )}
                     </td>
                     <td className="py-1 pr-2">{d.productType ? <Badge variant={productTypeBadgeVariant(d.productType) ?? 'default'}>{d.productType}</Badge> : <span className="text-muted-foreground">—</span>}</td>
-                    <ModelPairCell exp={d.expectedByModel?.ecg ?? null} act={d.activeByModel.ecg} asCnt={d.asByModel.ecg} replCnt={d.replacementsByModel.ecg} fallback={d.expectedSource === 'fallback'} />
+                    <ModelPairCell exp={d.expectedByModel?.ecg ?? null} act={d.activeByModel.ecg} asCnt={d.asByModel.ecg} replCnt={d.replacementsByModel.ecg} missing={d.contracted && d.expectedSource === 'none'} />
                     <ModelPairCell exp={d.expectedByModel?.spo2 ?? null} act={d.activeByModel.spo2} asCnt={d.asByModel.spo2} replCnt={d.replacementsByModel.spo2} />
                     <ModelPairCell exp={d.expectedByModel?.bp ?? null} act={d.activeByModel.bp} asCnt={d.asByModel.bp} replCnt={d.replacementsByModel.bp} />
                     <td className="py-1 text-right tabular-nums">{d.replacements.toLocaleString()}</td>
@@ -949,7 +949,7 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
                 {d.productType && <Badge variant={productTypeBadgeVariant(d.productType) ?? 'default'}>{d.productType}</Badge>}
                 <span className="tabular-nums text-muted-foreground">
                   E {pairText(d.expectedByModel?.ecg ?? null, d.activeByModel.ecg)}
-                  {d.expectedSource === 'fallback' && 'ⓘ'} · S {pairText(d.expectedByModel?.spo2 ?? null, d.activeByModel.spo2)} · BP {pairText(d.expectedByModel?.bp ?? null, d.activeByModel.bp)}
+                  {d.contracted && d.expectedSource === 'none' && 'ⓘ'} · S {pairText(d.expectedByModel?.spo2 ?? null, d.activeByModel.spo2)} · BP {pairText(d.expectedByModel?.bp ?? null, d.activeByModel.bp)}
                   {d.asInProgress > 0 ? ` · AS ${d.asInProgress}` : ''} · 교체 {d.replacements}
                 </span>
               </li>
@@ -1001,7 +1001,7 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
                       {(m.activeEval ?? 0) > 0 && <span className="ml-1 text-warning-subtle-foreground">(+평가용 {m.activeEval.toLocaleString()})</span>}
                     </td>
                     <td className="py-0.5 text-right tabular-nums">
-                      {m.compare === 'hard' ? (m.expected == null ? '—' : m.expected.toLocaleString()) : m.compare === 'soft' ? <span className="text-muted-foreground">{m.expected == null ? '—' : `(참고 ${m.expected.toLocaleString()})`}</span> : <span className="text-muted-foreground">—</span>}
+                      {m.compare === 'hard' && m.expected != null ? m.expected.toLocaleString() : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className={cn('py-0.5 text-right tabular-nums', m.compare === 'hard' && m.diff != null && (m.diff === 0 ? 'text-success-subtle-foreground' : 'font-medium text-warning-subtle-foreground'))}>
                       {m.compare === 'hard' && m.diff != null ? diffText(m.diff) : <span className="text-muted-foreground">—</span>}
@@ -1029,7 +1029,7 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
                     <span className="font-mono text-[11px] text-muted-foreground">{d.dealCode}</span>
                   </li>
                 ))}
-                <li className="border-t border-border pt-1 text-right font-medium tabular-nums">합계 {expected == null ? '—' : `${expected.toLocaleString()}대`}</li>
+                <li className="border-t border-border pt-1 text-right tabular-nums text-muted-foreground">대웅 디바이스수 합 {expected == null ? '—' : `${expected.toLocaleString()}대`} (참고 — 대조 미사용)</li>
               </ul>
             ) : (
               <p className="mb-2 text-muted-foreground">— (계약완료 딜 없음)</p>
@@ -1070,7 +1070,7 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
               </div>
             )}
             <p className="text-muted-foreground">
-              계약 = 계약완료 딜의 대웅 디바이스 수 합(ECG 기준). SpO2는 참고(ECG 동수 가정), GW는 계약 축 없음. 도입 병상 수와 무관합니다. 배치(대조)·차이는 평가용(EVAL) 기기를 제외한 수입니다.
+              계약 = 딜 모델별 도입 기기 수량(딜 상세 규모·계약 카드) 합. 수량 미입력 딜은 대조에서 제외(— 표기, 딜 상세에서 입력), GW는 계약 축 없음. 대웅 디바이스수·도입 병상 수는 참고 표기일 뿐 대조에 쓰지 않습니다. 배치(대조)·차이는 평가용(EVAL) 기기를 제외한 수입니다.
             </p>
             <p className="mt-1 text-muted-foreground">대조는 참고 신호입니다 — 차이가 있어도 딜 데이터 정정 요청 대상이 아니며, 기기 현황의 등록·회수 누락 여부를 먼저 확인하세요.</p>
           </RegistryFloatingPanel>

@@ -131,7 +131,7 @@ async function seed() {
         JOIN hospitals h ON h.hospital_code = sd.hospital_code
         JOIN sales_deal_devices sdd ON sdd.deal_id = sd.id
        WHERE sc.category = 'SALES_DEAL_STATUS' AND sc.name = '계약완료' GROUP BY 1, 2 ORDER BY 1 LIMIT 3`
-    console.log(`9) B-25: 문산중앙 딜에 모델별 수량 행 없음 — 계약별 표는 폴백(심전계 도입=디바이스수 ⓘ). 모델별 표 예시 병원: ${ex.map((e) => `${e.hospital_code} ${e.hospital_name}`).join(' · ') || '없음'}`)
+    console.log(`9) B-25 개정: 문산중앙 딜에 모델별 수량 행 없음 — 계약별 표 도입은 전부 '—' ⓘ(딜 상세 규모·계약 카드에서 입력, 디바이스수 폴백 제거). 모델별 표 예시 병원: ${ex.map((e) => `${e.hospital_code} ${e.hospital_name}`).join(' · ') || '없음'}`)
   } else console.log(`9) B-25: 문산중앙 딜 모델별 수량 행 ${mrowCnt}건 — 모델별 도입 수량으로 표시`)
   const summary = (await reg.getHospitalDeviceSummary(H))!
   const units = await prisma.deviceUnit.count({ where: { OR: PREFIX.map((p) => ({ serialNo: { startsWith: p } })) } })
@@ -153,7 +153,7 @@ async function seed() {
   )
   console.log(
     '계약건(B-23):',
-    summary.deals.map((d) => `${d.dealCode}${d.roundNo != null ? `(${d.roundNo}차 ${d.productType ?? '—'} ${d.expected ?? '—'}대)` : '(계약 외)'} 등록 ${d.active} · 교체 ${d.replacements}`).join(' / ') || '없음',
+    summary.deals.map((d) => `${d.dealCode}${d.roundNo != null ? `(${d.roundNo}차 ${d.productType ?? '—'} · 도입 ${d.expectedByModel?.ecg ?? '—'}${d.expectedSource === 'none' ? '(수량 미입력 — 디바이스수 ' + (d.expected ?? '—') + ' 참고)' : ''})` : '(계약 외)'} 등록 ${d.active} · 교체 ${d.replacements}`).join(' / ') || '없음',
     `· 미지정: 등록 ${summary.dealUnassigned.active} · 교체 ${summary.dealUnassigned.replacements} · AS진행중 ${summary.asInProgress}(B990102)`
   )
 }

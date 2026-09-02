@@ -121,14 +121,18 @@ async function maxIds() {
 
 const pre = { counts: await counts(), max: await maxIds() }
 
-type HospRow = { hospital_code: string; hospital_name: string; deals: number; expected: number; pt_kinds: number; has_rows: boolean }
+type HospRow = { hospital_code: string; hospital_name: string; deals: number; expected: number; pt_kinds: number; has_rows: boolean; em_ecg: number | null; em_spo2: number | null }
 const candidates = await prisma.$queryRaw<HospRow[]>`
   WITH dl AS (SELECT sd.hospital_code, count(*)::int c, sum(coalesce(sd.daewoong_device_count,0))::int s,
                      count(DISTINCT sd.product_type) FILTER (WHERE sd.product_type IN ('일반','라이트'))::int k,
-                     bool_or(EXISTS (SELECT 1 FROM sales_deal_devices sdd WHERE sdd.deal_id = sd.id)) hr
+                     bool_or(EXISTS (SELECT 1 FROM sales_deal_devices sdd WHERE sdd.deal_id = sd.id)) hr,
+                     sum(m.ecg)::int em_ecg, sum(m.spo2)::int em_spo2
                 FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
+                LEFT JOIN (SELECT sdd.deal_id, sum(sdd.quantity) FILTER (WHERE di.onprem_device_type = 1)::int ecg,
+                                  sum(sdd.quantity) FILTER (WHERE di.onprem_device_type = 3)::int spo2
+                             FROM sales_deal_devices sdd JOIN device_info di ON di.id = sdd.device_info_id GROUP BY 1) m ON m.deal_id = sd.id
                WHERE sc.category = 'SALES_DEAL_STATUS' AND sc.name = '계약완료' GROUP BY 1)
-  SELECT h.hospital_code, h.hospital_name, coalesce(dl.c,0) deals, coalesce(dl.s,0) expected, coalesce(dl.k,0) pt_kinds, coalesce(dl.hr,false) has_rows
+  SELECT h.hospital_code, h.hospital_name, coalesce(dl.c,0) deals, coalesce(dl.s,0) expected, coalesce(dl.k,0) pt_kinds, coalesce(dl.hr,false) has_rows, dl.em_ecg, dl.em_spo2
     FROM hospitals h LEFT JOIN dl ON dl.hospital_code = h.hospital_code
    WHERE h.status = '운영'
      AND NOT EXISTS (SELECT 1 FROM hospital_wards w WHERE w.hospital_code = h.hospital_code)
@@ -136,8 +140,8 @@ const candidates = await prisma.$queryRaw<HospRow[]>`
      AND NOT EXISTS (SELECT 1 FROM hospital_device_events e WHERE e.hospital_code = h.hospital_code)
    ORDER BY coalesce(dl.c,0) DESC, coalesce(dl.s,0) DESC, h.hospital_code`
 // H1은 상품유형 단일(혼합이면 미지정 등록이 400이라 기존 시나리오가 깨진다 — 혼합 규칙은 [1c]에서 문맥 주입으로 검증)
-// + 딜 모델별 수량 행이 없는 병원 우선(B-25 — 폴백 규칙이 구 기대값(Σ디바이스수)과 같아 기존 대조 시나리오 유지; 모델 행 케이스는 [1d] 실데이터 읽기 검증)
-const h1 = candidates.find((c) => c.deals > 0 && c.pt_kinds < 2 && !c.has_rows) ?? candidates.find((c) => c.deals > 0 && c.pt_kinds < 2)
+// + 딜 모델별 수량 행이 **있는** 병원 우선(B-25 개정 2026-09-02 — 디바이스수 폴백 제거로 hard 대조는 모델 행 보유 병원에서만 성립)
+const h1 = candidates.find((c) => c.deals > 0 && c.pt_kinds < 2 && c.has_rows && c.em_ecg != null) ?? candidates.find((c) => c.deals > 0 && c.pt_kinds < 2)
 const h3 = candidates.find((c) => c.deals === 0)
 const h2 = candidates.find((c) => c !== h1 && c !== h3)
 if (!h1 || !h2 || !h3) {
@@ -241,7 +245,7 @@ const unitRow = (where: { id: number } | { serialNo: string }) => prisma.deviceU
 
 async function main() {
   section('[0] 환경')
-  console.log(`  H1=${H1} ${h1!.hospital_name} (계약완료 딜 ${h1!.deals}건 Σ${h1!.expected}) · H2=${H2} ${h2!.hospital_name} · H3=${H3} ${h3!.hospital_name} (딜 0건)`)
+  console.log(`  H1=${H1} ${h1!.hospital_name} (계약완료 딜 ${h1!.deals}건 · 디바이스수 Σ${h1!.expected}(참고) · 모델 ECG ${h1!.em_ecg ?? '—'}/SpO2 ${h1!.em_spo2 ?? '—'}) · H2=${H2} ${h2!.hospital_name} · H3=${H3} ${h3!.hospital_name} (딜 0건)`)
   console.log(`  actor=${ACTOR.name} · GW WMS=${gwUnit ?? '없음'} · ECG IN_STOCK=${ecgInStock ?? '없음'} · MNT=${mnt?.maintenanceCode ?? '없음'}`)
   console.log(`  사전 row: units=${pre.counts.u} devices=${pre.counts.d} events=${pre.counts.e} wards=${pre.counts.w} batches=${pre.counts.b}`)
   const defect = await reasonByValue(prisma, 'DEFECT')
@@ -503,7 +507,18 @@ async function main() {
   const cells = Object.values(ecgP.byProductType)
   ok(cells.length >= 2 && cells.reduce((s, c) => s + c!.active, 0) === ecgP.active && cells.reduce((s, c) => s + c!.activeForCompare, 0) === ecgP.activeForCompare, '요약 byProductType — 유형별 active/activeForCompare 합 = 모델 합계', ecgP.byProductType)
   ok(ecgP.byProductType['라이트']!.active >= 2 && ecgP.byProductType['일반']!.active >= 1 && (ecgP.byProductType['미지정']?.active ?? 0) >= 0, '요약 byProductType 일반·라이트 키 존재')
-  for (const t of ptH1.types) ok(ecgP.byProductType[t]!.expected === ptH1.byType.find((b) => b.type === t)!.devices && (ecgP.compare !== 'hard' || ecgP.byProductType[t]!.diff === ecgP.byProductType[t]!.activeForCompare - ecgP.byProductType[t]!.expected!), `요약 byProductType.${t}.expected = 그 유형 딜 Σ(§9.1) · diff`)
+  // B-25 개정: 유형별 기대 = 그 유형 딜의 모델 행(ECG) 합 — 디바이스수 미사용(compare none이면 null)
+  const ptEcgRows = await prisma.$queryRaw<{ t: string | null; ecg: number | null }[]>`
+    SELECT sd.product_type AS t, sum(sdd.quantity) FILTER (WHERE di.onprem_device_type = 1)::int AS ecg
+      FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
+      LEFT JOIN sales_deal_devices sdd ON sdd.deal_id = sd.id LEFT JOIN device_info di ON di.id = sdd.device_info_id
+     WHERE sd.hospital_code = ${H1} AND sc.category = 'SALES_DEAL_STATUS' AND sc.name = '계약완료' GROUP BY 1`
+  for (const t of ptH1.types)
+    ok(
+      ecgP.byProductType[t]!.expected === (ecgP.compare === 'none' ? null : (ptEcgRows.find((r) => r.t === t)?.ecg ?? 0)) &&
+        (ecgP.compare !== 'hard' || ecgP.byProductType[t]!.diff === ecgP.byProductType[t]!.activeForCompare - ecgP.byProductType[t]!.expected!),
+      `요약 byProductType.${t}.expected = 그 유형 딜 모델 행 Σ(§9.1 개정) · diff`
+    )
   ok(sumP.productTypeMixed === true && sumP.productTypeContext.deals === ptH1.deals && sumP.productTypes.length >= 2 && sumP.productTypes.every((p) => typeof p.activeForCompare === 'number'), '요약 productTypeMixed(배치에 상품유형 있음) · productTypeContext · productTypes 축')
   const replP = await countReplacements(H1)
   const repl30P = await countReplacements(H1, { from: '2026-08-15', to: '2026-08-15' })
@@ -629,16 +644,26 @@ async function main() {
     const rowReal = sumH1D.deals.find((d) => d.dealCode === realDeal.dealCode)!
     ok(!!rowReal && rowReal.contracted && rowReal.expected === realDeal.count && rowReal.roundNo === realDeal.roundNo && rowReal.active >= 2, '요약 deals[] — 계약완료 딜 행(expected = Σ대웅 수·등록 수량)', rowReal)
     ok(typeof rowReal.asInProgress === 'number' && typeof rowReal.asByModel.ecg === 'number' && typeof rowReal.replacementsByModel.ecg === 'number', 'deals[] asInProgress·asByModel·replacementsByModel 필드(additive)')
-    // ── B-25: 계약 수량 = 딜 모델별 수량 1순위 · 디바이스수 폴백
-    if (!h1!.has_rows) {
-      ok(rowReal.expectedSource === 'fallback' && rowReal.expectedByModel?.ecg === realDeal.count && rowReal.expectedByModel?.spo2 === null && rowReal.expectedByModel?.bp === null, 'B-25: 폴백 딜 — expectedSource=fallback · expectedByModel={ecg: 디바이스수}', rowReal.expectedByModel)
-      const ecgActiveReal = await prisma.hospitalDevice.count({ where: { hospitalCode: H1, status: 'ACTIVE', dealCode: realDeal.dealCode, unit: { deviceInfo: { onpremDeviceType: 1 } } } })
-      ok(rowReal.activeByModel.ecg === ecgActiveReal && rowReal.activeByModel.ecg + rowReal.activeByModel.spo2 + rowReal.activeByModel.bp <= rowReal.active, 'B-25: 딜×모델 등록 수(activeByModel.ecg = DB count)', rowReal.activeByModel)
-      ok(sumH1D.dealUnassigned.activeByModel.ecg <= sumH1D.dealUnassigned.active && typeof sumH1D.dealUnassigned.activeByModel.spo2 === 'number', 'B-25: 미지정 버킷 activeByModel')
-      const ecgMF = sumH1D.models.find((m) => m.onpremDeviceType === 1)!
-      const spo2MF = sumH1D.models.find((m) => m.onpremDeviceType === 3)
-      ok(ecgMF.expected === h1!.expected && (!spo2MF || spo2MF.compare !== 'hard'), 'B-25: 폴백 전용 병원(H1) — ECG 기대 = Σ디바이스수(구 동작) · SpO2 soft 유지', { ecg: ecgMF.expected, spo2: spo2MF?.compare })
-    } else console.log('  (H1이 모델 행 보유 병원 — 폴백 전용 케이스 스킵)')
+    // ── B-25 개정(2026-09-02): 도입 수량 = sales_deal_devices 단일 소스 — 디바이스수 폴백 제거
+    const realDealAgg = (
+      await prisma.$queryRaw<{ ecg: number | null; spo2: number | null; bp: number | null; has: boolean }[]>`
+      SELECT sum(sdd.quantity) FILTER (WHERE di.onprem_device_type = 1)::int AS ecg,
+             sum(sdd.quantity) FILTER (WHERE di.onprem_device_type = 3)::int AS spo2,
+             sum(sdd.quantity) FILTER (WHERE di.onprem_device_type = 10)::int AS bp,
+             count(sdd.id) > 0 AS has
+        FROM sales_deals sd LEFT JOIN sales_deal_devices sdd ON sdd.deal_id = sd.id LEFT JOIN device_info di ON di.id = sdd.device_info_id
+       WHERE sd.deal_code = ${realDeal.dealCode}`
+    )[0]
+    if (realDealAgg.has)
+      ok(rowReal.expectedSource === 'models' && rowReal.expectedByModel?.ecg === realDealAgg.ecg && rowReal.expectedByModel?.spo2 === realDealAgg.spo2 && rowReal.expectedByModel?.bp === realDealAgg.bp, 'B-25 개정: 모델 행 딜 — expectedSource=models · expectedByModel=행 합', rowReal.expectedByModel)
+    else ok(rowReal.expectedSource === 'none' && rowReal.expectedByModel === null, 'B-25 개정: 수량 미입력 딜 — expectedSource=none · expectedByModel null(디바이스수 미사용)', { src: rowReal.expectedSource, byModel: rowReal.expectedByModel })
+    const ecgActiveReal = await prisma.hospitalDevice.count({ where: { hospitalCode: H1, status: 'ACTIVE', dealCode: realDeal.dealCode, unit: { deviceInfo: { onpremDeviceType: 1 } } } })
+    ok(rowReal.activeByModel.ecg === ecgActiveReal && rowReal.activeByModel.ecg + rowReal.activeByModel.spo2 + rowReal.activeByModel.bp <= rowReal.active, 'B-25: 딜×모델 등록 수(activeByModel.ecg = DB count)', rowReal.activeByModel)
+    ok(sumH1D.dealUnassigned.activeByModel.ecg <= sumH1D.dealUnassigned.active && typeof sumH1D.dealUnassigned.activeByModel.spo2 === 'number', 'B-25: 미지정 버킷 activeByModel')
+    const ecgMF = sumH1D.models.find((m) => m.onpremDeviceType === 1)!
+    const spo2MF = sumH1D.models.find((m) => m.onpremDeviceType === 3)
+    ok(h1!.em_ecg == null ? ecgMF.compare === 'none' && ecgMF.expected === null && ecgMF.diff === null : ecgMF.compare === 'hard' && ecgMF.expected === h1!.em_ecg, 'B-25 개정: ECG 기대 = Σ모델 행(미입력 병원은 none — 디바이스수 미사용)', { ecg: ecgMF.expected, em: h1!.em_ecg })
+    ok(!spo2MF || (h1!.em_spo2 == null ? spo2MF.compare === 'none' && spo2MF.expected === null : spo2MF.compare === 'hard' && spo2MF.expected === h1!.em_spo2), 'B-25 개정: SpO2 — 행 있으면 hard, 없으면 none(soft 제거)', { spo2: spo2MF?.compare, em: h1!.em_spo2 })
     // 실데이터 — 모델 행(SpO2) 있는 계약완료 딜 병원(읽기 전용, sales_* 미기록)
     const mrowHosp = await prisma.$queryRaw<{ hospital_code: string }[]>`
       SELECT sd.hospital_code FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
@@ -649,8 +674,8 @@ async function main() {
       const MH = mrowHosp[0].hospital_code
       const sqlExp = (
         await prisma.$queryRaw<{ ecg: number | null; spo2: number | null }[]>`
-        SELECT sum(CASE WHEN m.deal_id IS NULL THEN coalesce(sd.daewoong_device_count, 0) ELSE coalesce(m.ecg, 0) END)::int AS ecg,
-               sum(coalesce(m.spo2, 0))::int AS spo2
+        SELECT sum(m.ecg)::int AS ecg,
+               sum(m.spo2)::int AS spo2
           FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
           LEFT JOIN (SELECT sdd.deal_id,
                             sum(sdd.quantity) FILTER (WHERE di.onprem_device_type = 1)::int AS ecg,
@@ -661,12 +686,12 @@ async function main() {
       const sM = (await getHospitalDeviceSummary(MH))!
       const sEcg = sM.models.find((m) => m.onpremDeviceType === 1)!
       const sSpo2 = sM.models.find((m) => m.onpremDeviceType === 3)!
-      ok(sEcg.compare === 'hard' && sEcg.expected === (sqlExp.ecg ?? 0), `B-25 실데이터(${MH}): ECG 기대 = Σ(모델 행 + 폴백 디바이스수)`, { exp: sEcg.expected, sql: sqlExp })
+      ok(sEcg.compare === (sqlExp.ecg == null ? 'none' : 'hard') && sEcg.expected === sqlExp.ecg, `B-25 실데이터(${MH}): ECG 기대 = Σ모델 행(미입력이면 none)`, { exp: sEcg.expected, sql: sqlExp })
       ok(sSpo2.compare === 'hard' && sSpo2.expected === (sqlExp.spo2 ?? 0) && sSpo2.diff === sSpo2.activeForCompare - (sqlExp.spo2 ?? 0), 'B-25 실데이터: SpO2 실측 hard 대조(ECG 동수 soft 아님)', { compare: sSpo2.compare, exp: sSpo2.expected })
       const mDeal = sM.deals.find((d) => d.contracted && d.expectedSource === 'models')
       ok(!!mDeal && mDeal.expectedByModel != null && (mDeal.expectedByModel.ecg != null || mDeal.expectedByModel.spo2 != null), 'B-25 실데이터: deals[] models 출처 행 — expectedByModel 모델별 수량', mDeal && { code: mDeal.dealCode, byModel: mDeal.expectedByModel })
       const covM = (await getGlobalCoverage({ q: MH, limit: 5 })).data.find((r) => r.hospitalCode === MH)
-      ok(!!covM && covM.expected === (sqlExp.ecg ?? 0), 'B-25 실데이터: 커버리지 expected = 모델 행 우선 ECG', covM && { expected: covM.expected })
+      ok(!!covM && covM.expected === sqlExp.ecg, 'B-25 실데이터: 커버리지 expected = 모델 행 ECG(미입력 null)', covM && { expected: covM.expected })
       console.log(`  (B-25 모델별 수량 예시 병원: ${MH})`)
     } else ok(true, 'B-25: sales_deal_devices 행 있는 계약완료 딜 없음 — 실데이터 케이스 스킵')
 
@@ -1051,11 +1076,16 @@ async function main() {
   const sum = (await getHospitalDeviceSummary(H1))!
   const ecg = sum.models.find((m) => m.onpremDeviceType === 1)!
   const spo2 = sum.models.find((m) => m.onpremDeviceType === 3)
-  ok(ecg.compare === 'hard' && ecg.expected === h1!.expected && ecg.diff === ecg.activeForCompare - h1!.expected && ecg.active === (await prisma.hospitalDevice.count({ where: { hospitalCode: H1, status: 'ACTIVE', unit: { deviceInfoId: ecg.deviceInfoId } } })), 'ECG hard 대조(diff = 배치 중(평가용 제외) − 계약)', ecg)
+  ok(
+    (h1!.em_ecg == null ? ecg.compare === 'none' && ecg.expected === null && ecg.diff === null : ecg.compare === 'hard' && ecg.expected === h1!.em_ecg && ecg.diff === ecg.activeForCompare - h1!.em_ecg) &&
+      ecg.active === (await prisma.hospitalDevice.count({ where: { hospitalCode: H1, status: 'ACTIVE', unit: { deviceInfoId: ecg.deviceInfoId } } })),
+    'ECG 대조(기대 = Σ딜 모델 행 · diff = 배치 중(평가용 제외) − 계약 · 미입력 병원은 none)',
+    ecg
+  )
   const evalActiveH1 = await prisma.hospitalDevice.count({ where: { hospitalCode: H1, status: 'ACTIVE', unit: { deviceInfoId: ecg.deviceInfoId, usageType: { is: { value: 'EVAL' } } } } })
-  ok(evalActiveH1 >= 1 && ecg.activeEval === evalActiveH1 && ecg.activeForCompare === ecg.active - ecg.activeEval && ecg.diff !== ecg.active - h1!.expected, '요약: activeEval = 배치 중 EVAL 수 · activeForCompare = active − activeEval · diff에서 평가용 제외', { active: ecg.active, activeEval: ecg.activeEval, diff: ecg.diff })
+  ok(evalActiveH1 >= 1 && ecg.activeEval === evalActiveH1 && ecg.activeForCompare === ecg.active - ecg.activeEval && (h1!.em_ecg == null || ecg.diff === ecg.activeForCompare - h1!.em_ecg), '요약: activeEval = 배치 중 EVAL 수 · activeForCompare = active − activeEval · diff에서 평가용 제외', { active: ecg.active, activeEval: ecg.activeEval, diff: ecg.diff })
   ok(sum.evalTotal >= evalActiveH1 && sum.evalTotal === sum.models.reduce((s, m) => s + m.activeEval, 0), '요약: evalTotal = Σ models.activeEval')
-  ok(!spo2 || (spo2.compare === 'soft' && spo2.expected === h1!.expected && spo2.diff === null), 'SpO2 soft(참고, diff null)', spo2)
+  ok(!spo2 || (h1!.em_spo2 == null ? spo2.compare === 'none' && spo2.expected === null && spo2.diff === null : spo2.compare === 'hard' && spo2.expected === h1!.em_spo2 && spo2.diff === spo2.activeForCompare - h1!.em_spo2), 'SpO2 — 실측 행 있으면 hard, 없으면 none(soft 제거 — 2026-09-02 개정)', spo2)
   ok(sum.wards.length >= 4 && sum.wards.some((w) => w.name === '폐쇄병동' && !w.isActive) && typeof sum.unassigned === 'number' && sum.lastImport?.id === imp2.batch.id && sum.expectedDeviceCount === h1!.expected, '요약: 병동(폐쇄 포함)·미지정·마지막 임포트(취소 배치 제외)', { wards: sum.wards.length, lastImport: sum.lastImport?.id })
   ok(sum.recovered30dTotal >= 1 && sum.models.every((m) => m.recovered30d >= 0) && sum.lastEventOn != null, '요약: 회수(30일)·마지막 이벤트')
   const sum3 = (await getHospitalDeviceSummary(H3))!
@@ -1068,18 +1098,18 @@ async function main() {
   ok((await getHospitalDeviceSummary('HOSP-NOPE')) === null, '없는 병원 요약 → null')
   const cov = await getGlobalCoverage({ page: 1, limit: 5, q: h1!.hospital_name })
   const covRow = cov.data.find((r) => r.hospitalCode === H1)!
-  ok(!!covRow && covRow.expected === h1!.expected && covRow.deals === h1!.deals && covRow.registered && covRow.diff === covRow.activeEcg - h1!.expected && covRow.lastImport?.id === imp2.batch.id, '커버리지 행(H1): 계약·배치·차이·마지막 임포트', covRow)
+  ok(!!covRow && covRow.expected === h1!.em_ecg && covRow.deals === h1!.deals && covRow.registered && (h1!.em_ecg == null ? covRow.diff === null : covRow.diff === covRow.activeEcg - h1!.em_ecg) && covRow.lastImport?.id === imp2.batch.id, '커버리지 행(H1): 계약(모델 행 ECG)·배치·차이·마지막 임포트', covRow)
   ok(covRow.activeEcgEval === ecg.activeEval && covRow.activeEcg === ecg.activeForCompare && covRow.evalTotal === sum.evalTotal && covRow.evalTotal >= 1, '커버리지: 배치 중 ECG·차이는 평가용 제외, activeEcgEval·evalTotal 별도(요약과 일치)', { cov: [covRow.activeEcg, covRow.activeEcgEval, covRow.evalTotal], sum: [ecg.activeForCompare, ecg.activeEval, sum.evalTotal] })
   ok(cov.totals.active.eval >= 1 && typeof cov.totals.active.ecg === 'number', '전역 합계 active.eval')
   ok(cov.totals.customerHospitals > 0 && cov.totals.registeredHospitals >= 3 && cov.totals.active.total >= 1 && cov.totals.events30d >= 1, '전역 합계', cov.totals)
   const cov3 = await getGlobalCoverage({ q: H3 })
   ok(cov3.data[0]?.hospitalCode === H3 && cov3.data[0].expected === null && cov3.data[0].diff === null && cov3.data[0].registered, '딜 0건 병원 커버리지: expected/diff null, registered')
   const covDiff = await getGlobalCoverage({ filter: 'diff', limit: 50 })
-  ok(covDiff.total > 0 && covDiff.data.every((r) => r.deals > 0 && r.diff !== 0), '차이 있음 필터')
+  ok(covDiff.total > 0 && covDiff.data.every((r) => r.expected != null && r.diff !== 0), '차이 있음 필터(expected 보유 병원만 — 수량 미입력·딜 0건 제외)')
   const covUn = await getGlobalCoverage({ filter: 'unregistered', limit: 5 })
   ok(covUn.data.every((r) => !r.registered), '미등록 필터')
   const covDone = await getGlobalCoverage({ filter: 'complete', limit: 5 })
-  ok(covDone.data.every((r) => r.registered && (r.deals === 0 || r.diff === 0)), '등록 완료 필터')
+  ok(covDone.data.every((r) => r.registered && (r.expected == null || r.diff === 0)), '등록 완료 필터(expected 없는 병원 — 딜 0건·수량 미입력 — 은 대조 없음으로 완료 취급)')
   const covName = await getGlobalCoverage({ sort: 'name', limit: 5 })
   ok(covName.data.length === 5 && covName.data.every((r, i, a) => i === 0 || a[i - 1].hospitalName <= r.hospitalName), '병원명 정렬')
   const lu = await listUnits({ hospital: H1, status: 'all', q: 'a9900' }, { page: 1, limit: 10, sort: 'serial' })

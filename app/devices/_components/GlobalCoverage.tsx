@@ -5,7 +5,7 @@
  * 필터 [전체 ▾ | 미등록만 | 차이 있음 | 등록 완료] · 검색 [병원명/코드] · 정렬 [차이 큰 순 ▾ | 병원명 | 마지막 이벤트]
  * 컬럼: 병원 | 상태 | 계약 ECG | 배치 중 ECG(평가용 제외) | 차이 | 평가용(별도, 전 모델) | SpO2(참고) | GW | 회수(30일) | 마지막 이벤트 | 마지막 임포트 | →
  *  - registered=false 행: 배치/차이 '미등록', 나머지 '—', 우측 [임포트](onOpenImport) / 그 외 [열기](onOpenHospital)
- *  - expected=null: 계약 열 '— (계약완료 딜 없음)' · diff 0 → '0 ✔' · 음수 → '−12 ▲' (배치 중 ECG·차이는 평가용 EVAL 제외 §9.1)
+ *  - expected=null(딜 0건 또는 전 딜 모델별 수량 미입력 — 디바이스수 폴백 제거 2026-09-02): 계약 열 '—' · diff 0 → '0 ✔' · 음수 → '−12 ▲' (배치 중 ECG·차이는 평가용 EVAL 제외 §9.1)
  * 서버 페이지네이션(page/limit 50). 빈 상태에도 전 헤더 노출. 모바일 md:hidden 카드.
  * 요약 줄('고객 병원 n · …')과 탭 바는 orchestrator(DevicesClient)가 렌더한다 — 여기는 표만.
  *
@@ -118,11 +118,18 @@ function statusVariant(status: string | null): 'success' | 'primary' | 'warning'
   }
 }
 
-/** 계약 ECG — 계약완료 딜이 없으면 '— (계약완료 딜 없음)' */
+/** 계약 ECG — 딜 0건 '— (계약완료 딜 없음)' · 딜 있으나 모델별 수량 미입력 '— ⓘ'(2026-09-02 개정 — 디바이스수 폴백 제거) */
 function ExpectedCell({ row }: { row: CoverageRow }) {
-  if (row.expected == null) return <span className="text-xs text-muted-foreground">— (계약완료 딜 없음)</span>
+  if (row.expected == null)
+    return row.deals > 0 ? (
+      <span className="text-xs text-muted-foreground" title="모델별 도입 기기 수량 미입력 — 딜 상세(규모·계약 카드)에서 입력하세요">
+        — <span aria-hidden="true">ⓘ</span>
+      </span>
+    ) : (
+      <span className="text-xs text-muted-foreground">— (계약완료 딜 없음)</span>
+    )
   return (
-    <span className="tabular-nums" title={`계약완료 딜 ${row.deals}건 · 대웅 디바이스 수 합`}>
+    <span className="tabular-nums" title={`계약완료 딜 ${row.deals}건 · 딜 모델별 도입 기기 수량(ECG) 합`}>
       {fmtInt(row.expected)}
     </span>
   )
@@ -165,11 +172,11 @@ function ptCounts(row: CoverageRow, key: CoverageProductTypeKey): CoverageModelC
   return row.byProductType?.[key] ?? EMPTY_PT_COUNTS
 }
 
-/** 판매유형 — (계약완료 딜 유형 expectedByType non-null) ∪ (ACTIVE 배치 유형), 일반 먼저 */
+/** 판매유형 — (계약완료 딜 유형 dealProductTypes — 수량 무관) ∪ (ACTIVE 배치 유형), 일반 먼저 */
 function saleTypes(row: CoverageRow): ('일반' | '라이트')[] {
   return (['일반', '라이트'] as const).filter((k) => {
     const c = ptCounts(row, k)
-    return row.expectedByType?.[k] != null || c.ecg + c.spo2 + c.bp > 0
+    return row.dealProductTypes?.[k] || row.expectedByType?.[k] != null || c.ecg + c.spo2 + c.bp > 0
   })
 }
 
@@ -496,7 +503,7 @@ export function GlobalCoverage({ filters, setFilters, onOpenHospital, onOpenImpo
                       return (
                         <div key={k}>
                           <span className="mr-1 inline-block w-10 text-muted-foreground">{k}</span>
-                          <span title={expected != null ? `${k} 계약 ${fmtInt(expected)}대` : undefined}>E {fmtInt(c.ecg)}</span> · S {fmtInt(c.spo2)} · BP {fmtInt(c.bp)}
+                          <span title={expected != null ? `${k} 계약 ${fmtInt(expected)}대 (딜 모델별 수량 기준)` : undefined}>E {fmtInt(c.ecg)}</span> · S {fmtInt(c.spo2)} · BP {fmtInt(c.bp)}
                         </div>
                       )
                     })}
@@ -611,8 +618,8 @@ function CompactHospitalRow({ row, today, onOpenHospital }: { row: CoverageRow; 
   const normal = ptCounts(row, '일반')
   const lite = ptCounts(row, '라이트')
   const cells: { key: string; n: number; title?: string }[] = [
-    { key: 'ecg', n: normal.ecg, title: row.expectedByType?.일반 != null ? `일반 계약 ${fmtInt(row.expectedByType.일반)}대 (계약완료 딜 기준)` : undefined },
-    { key: 'ecg-lite', n: lite.ecg, title: row.expectedByType?.라이트 != null ? `라이트 계약 ${fmtInt(row.expectedByType.라이트)}대 (계약완료 딜 기준)` : undefined },
+    { key: 'ecg', n: normal.ecg, title: row.expectedByType?.일반 != null ? `일반 계약 ${fmtInt(row.expectedByType.일반)}대 (딜 모델별 수량 기준)` : undefined },
+    { key: 'ecg-lite', n: lite.ecg, title: row.expectedByType?.라이트 != null ? `라이트 계약 ${fmtInt(row.expectedByType.라이트)}대 (딜 모델별 수량 기준)` : undefined },
     { key: 'spo2', n: normal.spo2 },
     { key: 'spo2-lite', n: lite.spo2 },
     { key: 'bp', n: normal.bp, title: '링 혈압계(CART BP) SL-MPF1K07' },
