@@ -709,10 +709,35 @@ function ViewTabs({ active, onChange }: { active: DevicesView; onChange: (v: Dev
   )
 }
 
+/** B-25 모델 셀 — '도입 n / 등록 m'. 도입 null은 '—', 폴백 ECG 셀은 ⓘ(디바이스수 기준) */
+function ModelPairCell({ exp, act, fallback, warn }: { exp: number | null; act: number; fallback?: boolean; warn?: boolean }) {
+  return (
+    <td className="whitespace-nowrap py-1 pr-2 text-right tabular-nums">
+      <span className={cn(exp == null && 'text-muted-foreground', warn && 'text-warning-subtle-foreground')} title={fallback && exp != null ? '모델별 수량 미입력 — 디바이스수 기준' : undefined}>
+        {exp != null ? exp.toLocaleString() : '—'}
+        {fallback && exp != null && (
+          <span aria-hidden="true" className="ml-0.5 text-muted-foreground">
+            ⓘ
+          </span>
+        )}
+      </span>
+      <span className="text-muted-foreground"> / </span>
+      <span>{act.toLocaleString()}</span>
+    </td>
+  )
+}
+
+/** 모바일 압축 표기 — 'E 100/98' */
+function pairText(exp: number | null, act: number): string {
+  return `${exp != null ? exp.toLocaleString() : '—'}/${act.toLocaleString()}`
+}
+
 /**
- * 병원 뷰 상단 — 계약건(딜)별 현황 표(B-23, 2026-09-02 — 구 '요약 한 줄' 대체)
- * 열: 계약건 | 유형 | 도입 수량 | 등록 수량 | 교체 건수. 딜 없는 배치·교체가 있으면 '(미지정)' 행, 마지막은 합계 행.
- * 합계 행의 ⓘ가 구 요약 팝오버(모델별 대조·근거 딜·상품유형별·교체 집계)를 연다. AS진행중 n 칩(B-24)·상품유형 혼합 배지는 헤더 줄.
+ * 병원 뷰 상단 — 계약건(딜)별 현황 표(B-23·B-25, 2026-09-02 — 구 '요약 한 줄' 대체)
+ * 열: 계약건 | 유형 | 심전계(도입/등록) | 산소포화도(도입/등록) | 혈압계(도입/등록) | 교체 건수.
+ * 도입 = 딜 모델별 수량(sales_deal_devices) 1순위 — 행 없는 폴백 딜은 심전계 도입=디바이스수 ⓘ. 등록 = 그 딜 × 모델 배치 중.
+ * 딜 없는 배치·교체가 있으면 '(미지정)' 행, 마지막 합계 행의 ⓘ가 구 요약 팝오버(모델별 대조·근거 딜·상품유형별·교체 집계)를 연다.
+ * AS진행중 n 칩(B-24)·상품유형 혼합 배지는 헤더 줄. 모바일(sm 미만)은 딜당 'E 100/98 · S 50/50' 압축 줄.
  */
 function HospitalContractTable({ summary, loading, error, onWardsClick }: { summary: HospitalDeviceSummary | null; loading: boolean; error: string | null; onWardsClick: () => void }) {
   const [popAnchor, setPopAnchor] = useState<HTMLElement | null>(null)
@@ -723,6 +748,21 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
   const expected = summary?.expectedDeviceCount ?? null
   const hardModels = models.filter((m) => m.compare === 'hard')
   const hasDiff = hardModels.some((m) => m.diff != null && m.diff !== 0)
+  /** B-25 합계 재료 — 도입 = Σ deals[].expectedByModel(전부 null이면 '—'), 등록 = 모델 요약 active(미지정 포함) */
+  const dealRowsAll = summary?.deals ?? []
+  const sumExpectedOf = (k: 'ecg' | 'spo2' | 'bp'): number | null => {
+    let has = false
+    let s = 0
+    for (const d of dealRowsAll) {
+      const v = d.expectedByModel?.[k]
+      if (v != null) {
+        has = true
+        s += v
+      }
+    }
+    return has ? s : null
+  }
+  const totalActiveOf = (t: number): number => models.find((m) => m.onpremDeviceType === t)?.active ?? 0
   const activeTitle = models.length > 0 ? models.map((m) => `${m.deviceName} ${m.active.toLocaleString()}${(m.activeEval ?? 0) > 0 ? ` (평가용 ${m.activeEval.toLocaleString()})` : ''}`).join(' · ') : undefined
   const ptKeys = summary ? Object.keys(summary.replacements?.byType ?? {}) : []
 
@@ -758,14 +798,21 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
               </button>
             </span>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[30rem] text-xs">
+          <div className="hidden overflow-x-auto sm:block">
+            <table className="w-full min-w-[34rem] text-xs">
               <thead>
                 <tr className="border-b border-border text-muted-foreground">
                   <th className="py-1 pr-2 text-left font-medium">계약건</th>
                   <th className="py-1 pr-2 text-left font-medium">유형</th>
-                  <th className="py-1 pr-2 text-right font-medium" title="계약 도입 수량(Σ 대웅 디바이스 수)">도입 수량</th>
-                  <th className="py-1 pr-2 text-right font-medium" title="이 계약건으로 등록된 배치 중 기기">등록 수량</th>
+                  <th className="py-1 pr-2 text-right font-medium" title="심전계 — 도입(딜 모델별 수량, 미입력 딜은 디바이스수 ⓘ) / 등록(이 계약건 배치 중)">
+                    심전계 <span className="font-normal">도입/등록</span>
+                  </th>
+                  <th className="py-1 pr-2 text-right font-medium" title="산소포화도 — 도입(딜 모델별 수량) / 등록(이 계약건 배치 중)">
+                    산소포화도 <span className="font-normal">도입/등록</span>
+                  </th>
+                  <th className="py-1 pr-2 text-right font-medium" title="링 혈압계(CART BP) — 도입(딜 모델별 수량) / 등록(이 계약건 배치 중)">
+                    혈압계 <span className="font-normal">도입/등록</span>
+                  </th>
                   <th className="py-1 text-right font-medium" title="회수 시점 계약건 기준 교체 짝 수">교체 건수</th>
                 </tr>
               </thead>
@@ -783,8 +830,9 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
                       )}
                     </td>
                     <td className="py-1 pr-2">{d.productType ? <Badge variant={productTypeBadgeVariant(d.productType) ?? 'default'}>{d.productType}</Badge> : <span className="text-muted-foreground">—</span>}</td>
-                    <td className="py-1 pr-2 text-right tabular-nums">{d.expected != null ? d.expected.toLocaleString() : '—'}</td>
-                    <td className="py-1 pr-2 text-right tabular-nums">{d.active.toLocaleString()}</td>
+                    <ModelPairCell exp={d.expectedByModel?.ecg ?? null} act={d.activeByModel.ecg} fallback={d.expectedSource === 'fallback'} />
+                    <ModelPairCell exp={d.expectedByModel?.spo2 ?? null} act={d.activeByModel.spo2} />
+                    <ModelPairCell exp={d.expectedByModel?.bp ?? null} act={d.activeByModel.bp} />
                     <td className="py-1 text-right tabular-nums">{d.replacements.toLocaleString()}</td>
                   </tr>
                 ))}
@@ -792,14 +840,15 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
                   <tr className="border-b border-border/60 text-muted-foreground">
                     <td className="py-1 pr-2" title="계약건이 지정되지 않은 배치·교체 — 선택 바 [계약건 지정]으로 정리">(미지정)</td>
                     <td className="py-1 pr-2">—</td>
-                    <td className="py-1 pr-2 text-right">—</td>
-                    <td className="py-1 pr-2 text-right tabular-nums">{summary.dealUnassigned.active.toLocaleString()}</td>
+                    <ModelPairCell exp={null} act={summary.dealUnassigned.activeByModel.ecg} />
+                    <ModelPairCell exp={null} act={summary.dealUnassigned.activeByModel.spo2} />
+                    <ModelPairCell exp={null} act={summary.dealUnassigned.activeByModel.bp} />
                     <td className="py-1 text-right tabular-nums">{summary.dealUnassigned.replacements.toLocaleString()}</td>
                   </tr>
                 )}
                 {summary.deals.length === 0 && summary.dealUnassigned.active === 0 && summary.dealUnassigned.replacements === 0 && (
                   <tr className="border-b border-border/60">
-                    <td colSpan={5} className="py-1.5 text-muted-foreground">
+                    <td colSpan={6} className="py-1.5 text-muted-foreground">
                       계약완료 딜·등록 기기가 없습니다 — 등록·임포트에서 계약건을 지정할 수 있습니다.
                     </td>
                   </tr>
@@ -822,16 +871,47 @@ function HospitalContractTable({ summary, loading, error, onWardsClick }: { summ
                     </button>
                   </td>
                   <td className="py-1 pr-2" />
-                  <td className={cn('py-1 pr-2 text-right tabular-nums', hasDiff && 'text-warning-subtle-foreground')} title={hasDiff ? '배치 수와 계약 수가 다릅니다 — ⓘ 모델별 대조 참고' : undefined}>
-                    {expected != null ? expected.toLocaleString() : '—'}
-                    {hasDiff && <span aria-hidden="true"> ▲</span>}
-                  </td>
-                  <td className="py-1 pr-2 text-right tabular-nums">{summary.activeTotal.toLocaleString()}</td>
+                  <ModelPairCell exp={sumExpectedOf('ecg')} act={totalActiveOf(1)} warn={hasDiff} />
+                  <ModelPairCell exp={sumExpectedOf('spo2')} act={totalActiveOf(3)} />
+                  <ModelPairCell exp={sumExpectedOf('bp')} act={totalActiveOf(10)} />
                   <td className="py-1 text-right tabular-nums">{summary.replacements.total.toLocaleString()}</td>
                 </tr>
               </tbody>
             </table>
           </div>
+          {/* 모바일 — 딜당 압축 줄 'E 도입/등록 · S … · BP … · 교체 n' */}
+          <ul className="space-y-1.5 text-xs sm:hidden">
+            {summary.deals.map((d) => (
+              <li key={d.dealCode} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="font-mono">{d.dealCode}</span>
+                {d.productType && <Badge variant={productTypeBadgeVariant(d.productType) ?? 'default'}>{d.productType}</Badge>}
+                <span className="tabular-nums text-muted-foreground">
+                  E {pairText(d.expectedByModel?.ecg ?? null, d.activeByModel.ecg)}
+                  {d.expectedSource === 'fallback' && 'ⓘ'} · S {pairText(d.expectedByModel?.spo2 ?? null, d.activeByModel.spo2)} · BP {pairText(d.expectedByModel?.bp ?? null, d.activeByModel.bp)} · 교체 {d.replacements}
+                </span>
+              </li>
+            ))}
+            {(summary.dealUnassigned.active > 0 || summary.dealUnassigned.replacements > 0) && (
+              <li className="tabular-nums text-muted-foreground">
+                (미지정) E —/{summary.dealUnassigned.activeByModel.ecg} · S —/{summary.dealUnassigned.activeByModel.spo2} · BP —/{summary.dealUnassigned.activeByModel.bp} · 교체 {summary.dealUnassigned.replacements}
+              </li>
+            )}
+            <li className="flex items-center gap-1 font-medium tabular-nums">
+              합계 E {pairText(sumExpectedOf('ecg'), totalActiveOf(1))} · S {pairText(sumExpectedOf('spo2'), totalActiveOf(3))} · BP {pairText(sumExpectedOf('bp'), totalActiveOf(10))} · 교체 {summary.replacements.total}
+              <button
+                type="button"
+                onClick={(e) => {
+                  const el = e.currentTarget
+                  setPopAnchor((prev) => (prev ? null : el))
+                }}
+                aria-expanded={popAnchor != null}
+                aria-label="모델별 대조 상세"
+                className="inline-flex items-center rounded text-muted-foreground hover:text-primary"
+              >
+                <Info size={12} aria-hidden="true" />
+              </button>
+            </li>
+          </ul>
 
           <RegistryFloatingPanel open={popAnchor != null} anchor={popAnchor} onClose={closePop} align="left" className="w-96 max-w-[calc(100vw-1rem)] p-3 text-xs" keepOnScroll>
             <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">

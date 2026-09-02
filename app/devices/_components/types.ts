@@ -193,17 +193,32 @@ export interface ContractedDeal {
   productType: string | null
 }
 
-/** 계약건(딜)별 요약 행(B-23) — 병원 뷰 상단 계약별 표 */
+/** 모델별 도입 수량(B-25) — ECG/SpO2/링BP 축, null = 그 모델 수량 없음 */
+export interface DealModelExpected {
+  ecg: number | null
+  spo2: number | null
+  bp: number | null
+}
+
+/** models = 딜 모델별 수량(sales_deal_devices) / fallback = 디바이스수(daewoong_device_count) 기준 */
+export type ExpectedSource = 'models' | 'fallback'
+
+/** 계약건(딜)별 요약 행(B-23·B-25) — 병원 뷰 상단 계약별 표 */
 export interface SummaryDealRow {
   dealCode: string
   roundNo: number | null
   productType: string | null
   contractDate: string | null
-  /** 도입 수량 — 계약완료 딜이 아니면(재적재로 끊긴 코드) null */
+  /** 도입 수량(Σ daewoong_device_count — 구 축, 호환) — 계약완료 딜이 아니면(재적재로 끊긴 코드) null */
   expected: number | null
+  /** 모델별 도입 수량(B-25) — 폴백 딜은 {ecg: 디바이스수} */
+  expectedByModel: DealModelExpected | null
+  expectedSource: ExpectedSource | null
   contracted: boolean
   /** 등록 수량(배치 중) */
   active: number
+  /** 모델별 등록 수량(배치 중) */
+  activeByModel: { ecg: number; spo2: number; bp: number }
   /** 교체 건수(RECOVER 이벤트 deal_code 스냅샷 기준) */
   replacements: number
 }
@@ -273,8 +288,8 @@ export interface HospitalDeviceSummary {
   productTypeContext: ProductTypeContext
   /** 계약건(딜)별 현황(B-23) — 계약완료 딜 ∪ 배치·교체에 등장한 코드 */
   deals: SummaryDealRow[]
-  /** 계약건 미지정 버킷 — active: 딜 없는 배치 중 수 / replacements: deal_code NULL 교체 짝 수 */
-  dealUnassigned: { active: number; replacements: number }
+  /** 계약건 미지정 버킷 — active: 딜 없는 배치 중 수(+모델별) / replacements: deal_code NULL 교체 짝 수 */
+  dealUnassigned: { active: number; activeByModel: { ecg: number; spo2: number; bp: number }; replacements: number }
   /** AS진행중(as_started_on NOT NULL) 배치 중 수(B-24) */
   asInProgress: number
   /** 계약 딜 2종이거나 배치에 상품유형이 있으면 true → 요약을 매트릭스로 */

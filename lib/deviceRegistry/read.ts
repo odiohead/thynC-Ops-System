@@ -12,6 +12,7 @@ import {
   DEAL_STATUS_CONTRACTED,
   PRODUCT_TYPES,
   PRODUCT_TYPE_UNSET_LABEL,
+  isProductType,
   normalizeSerial,
   todayKst,
   type DeviceEventType,
@@ -109,6 +110,118 @@ export async function countReplacementsByDeal(hospitalCode: string, client: DbCl
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 계약 수량 — 딜 모델별 수량(sales_deal_devices) 1순위 · 대웅 디바이스수 폴백 (B-25, 2026-09-02)
+// sales_* 테이블은 읽기 전용. 대조 축(ECG 1 · SpO2 3 · 링BP 10) 밖 모델 행(GW·기타)은 **무시**한다(§9.1).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ExpectedSource = 'models' | 'fallback'
+
+export interface DealModelExpected {
+  ecg: number | null
+  spo2: number | null
+  bp: number | null
+}
+
+export interface HospitalContractExpected {
+  /** 계약완료 딜 코드 → 모델별 도입 수량 + 출처(models=딜 모델 행 / fallback=daewoong_device_count) */
+  byDeal: Map<string, { byModel: DealModelExpected; source: ExpectedSource }>
+  /** ECG 기대 = Σ(모델 행 딜의 ECG 행) + Σ(행 없는 딜의 디바이스수). 딜 0건이면 null — 항상 hard */
+  ecgExpected: number | null
+  /** SpO2 — SpO2 행이 하나라도 있으면 hard(Σ SpO2 행 — 폴백 딜은 기여 없음), 아니면 구 규칙 soft(Σ 디바이스수, ECG 동수 가정) */
+  spo2: { expected: number | null; hard: boolean }
+  /** 링BP — BP 행이 있을 때만 hard(Σ BP 행), 없으면 null(compare none) */
+  bpExpected: number | null
+  /** product_type별 같은 규칙(spo2는 병원 hard 여부를 따라 행 합/디바이스수 합) */
+  byType: Map<ProductType, { ecg: number; spo2: number; bp: number | null }>
+}
+
+type DealModelAgg = DealModelExpected & { hasAnyRow: boolean }
+
+/** 계약완료 딜의 sales_deal_devices 행(모델별 수량) 집계 — 읽기 전용 */
+async function fetchDealModelAgg(hospitalCode: string, client: DbClient): Promise<Map<string, DealModelAgg>> {
+  const rows = await client.$queryRaw<{ deal_code: string; t: number | null; qty: number | null }[]>`
+    SELECT sd.deal_code, di.onprem_device_type AS t, sum(sdd.quantity)::int AS qty
+      FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
+      JOIN sales_deal_devices sdd ON sdd.deal_id = sd.id
+      JOIN device_info di ON di.id = sdd.device_info_id
+     WHERE sd.hospital_code = ${hospitalCode} AND sc.category = ${DEAL_STATUS_CATEGORY} AND sc.name = ${DEAL_STATUS_CONTRACTED}
+     GROUP BY 1, 2`
+  const map = new Map<string, DealModelAgg>()
+  for (const r of rows) {
+    const agg = map.get(r.deal_code) ?? { ecg: null, spo2: null, bp: null, hasAnyRow: false }
+    agg.hasAnyRow = true // 축 밖 모델 행만 있어도 '모델 행 있는 딜'로 본다(폴백 미적용 — 소유자가 명시 입력)
+    if (r.t === 1) agg.ecg = (agg.ecg ?? 0) + n(r.qty)
+    else if (r.t === 3) agg.spo2 = (agg.spo2 ?? 0) + n(r.qty)
+    else if (r.t === 10) agg.bp = (agg.bp ?? 0) + n(r.qty)
+    map.set(r.deal_code, agg)
+  }
+  return map
+}
+
+/** B-25 순수 계산 — 요약·스모크 공용. contractedDeals = `getExpectedDeviceCount().contractedDeals` */
+export function computeContractExpected(
+  contractedDeals: ExpectedCount['contractedDeals'],
+  modelAgg: Map<string, DealModelAgg>
+): HospitalContractExpected {
+  const byDeal = new Map<string, { byModel: DealModelExpected; source: ExpectedSource }>()
+  let ecgSum = 0
+  let spo2Rows = 0
+  let bpRows = 0
+  let spo2Hard = false
+  let bpAny = false
+  const typeAcc = new Map<ProductType, { ecg: number; spo2Rows: number; bp: number; bpAny: boolean; daewoong: number }>()
+  const accOf = (pt: string | null) => {
+    if (!isProductType(pt)) return null
+    const cur = typeAcc.get(pt) ?? { ecg: 0, spo2Rows: 0, bp: 0, bpAny: false, daewoong: 0 }
+    typeAcc.set(pt, cur)
+    return cur
+  }
+  for (const d of contractedDeals) {
+    const agg = modelAgg.get(d.dealCode)
+    const acc = accOf(d.productType)
+    if (acc) acc.daewoong += d.count
+    if (agg?.hasAnyRow) {
+      byDeal.set(d.dealCode, { byModel: { ecg: agg.ecg, spo2: agg.spo2, bp: agg.bp }, source: 'models' })
+      ecgSum += agg.ecg ?? 0
+      if (agg.spo2 != null) {
+        spo2Hard = true
+        spo2Rows += agg.spo2
+      }
+      if (agg.bp != null) {
+        bpAny = true
+        bpRows += agg.bp
+      }
+      if (acc) {
+        acc.ecg += agg.ecg ?? 0
+        acc.spo2Rows += agg.spo2 ?? 0
+        if (agg.bp != null) {
+          acc.bpAny = true
+          acc.bp += agg.bp
+        }
+      }
+    } else {
+      // 폴백(구 규칙): 디바이스수는 ECG에만 기여(SpO2 soft 의미는 병원 단위에서만 유지)
+      byDeal.set(d.dealCode, { byModel: { ecg: d.count, spo2: null, bp: null }, source: 'fallback' })
+      ecgSum += d.count
+      if (acc) acc.ecg += d.count
+    }
+  }
+  const deals = contractedDeals.length
+  const daewoongTotal = contractedDeals.reduce((s, d) => s + d.count, 0)
+  const byType = new Map<ProductType, { ecg: number; spo2: number; bp: number | null }>()
+  for (const [k, a] of Array.from(typeAcc.entries())) {
+    byType.set(k, { ecg: a.ecg, spo2: spo2Hard ? a.spo2Rows : a.daewoong, bp: bpAny ? (a.bpAny ? a.bp : 0) : null })
+  }
+  return {
+    byDeal,
+    ecgExpected: deals === 0 ? null : ecgSum,
+    spo2: spo2Hard ? { expected: spo2Rows, hard: true } : { expected: deals === 0 ? null : daewoongTotal, hard: false },
+    bpExpected: bpAny ? bpRows : null,
+    byType,
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 병원 요약 (§7.1 summary 응답 요지 · §6.1-B 스트립 · §6.2 상세 카드)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -146,18 +259,24 @@ export interface ModelSummary {
   byProductType: Partial<Record<ProductTypeKey, ProductTypeCell>>
 }
 
-/** 계약건(딜)별 요약 행(B-23) — 병원 뷰 상단 계약별 표의 데이터 */
+/** 계약건(딜)별 요약 행(B-23·B-25) — 병원 뷰 상단 계약별 표의 데이터 */
 export interface SummaryDealRow {
   dealCode: string
   /** 계약완료 딜이 아니면(재적재로 끊긴 코드 등) null */
   roundNo: number | null
   productType: string | null
   contractDate: string | null
-  /** 도입 수량(Σ daewoong_device_count) — 계약완료 딜이 아니면 null */
+  /** 도입 수량(Σ daewoong_device_count — 구 축, 호환 유지) — 계약완료 딜이 아니면 null */
   expected: number | null
+  /** 모델별 도입 수량(B-25) — sales_deal_devices 1순위, 행 없으면 폴백 {ecg: 디바이스수}. 계약완료 딜이 아니면 null */
+  expectedByModel: DealModelExpected | null
+  /** models=딜 모델 행 / fallback=디바이스수 기준(모델별 수량 미입력) */
+  expectedSource: ExpectedSource | null
   contracted: boolean
   /** 등록 수량(배치 중 ACTIVE) */
   active: number
+  /** 모델별 등록 수량(배치 중 — ECG/SpO2/링BP) */
+  activeByModel: { ecg: number; spo2: number; bp: number }
   /** 교체 건수(RECOVER 이벤트 deal_code 스냅샷 기준 짝 수) */
   replacements: number
 }
@@ -183,8 +302,8 @@ export interface HospitalDeviceSummary {
   productTypeContext: ProductTypeContext
   /** 계약건(딜)별 현황(B-23) — 계약완료 딜 ∪ 배치·교체에 등장한 딜 코드(재적재로 끊긴 코드도 노출) */
   deals: SummaryDealRow[]
-  /** 계약건 미지정 버킷 — active: 딜 없는 ACTIVE 배치 수 / replacements: RECOVER 스냅샷 deal_code NULL인 교체 짝 수 */
-  dealUnassigned: { active: number; replacements: number }
+  /** 계약건 미지정 버킷 — active: 딜 없는 ACTIVE 배치 수(+모델별) / replacements: RECOVER 스냅샷 deal_code NULL인 교체 짝 수 */
+  dealUnassigned: { active: number; activeByModel: { ecg: number; spo2: number; bp: number }; replacements: number }
   /** AS진행중(as_started_on NOT NULL) ACTIVE 배치 수(B-24) */
   asInProgress: number
   /** 계약 딜이 2종이거나 배치에 상품유형이 하나라도 있으면 true — UI가 매트릭스로 그린다 */
@@ -200,7 +319,7 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
   if (!hospital) return null
   const today = todayKst()
   const since = ymdMinusDays(today, 30)
-  const [expected, models, activeUnits, recRows, lastRows, wards, unassigned, lastEvent, lastImport, ptCtx, replAll, repl30, dealActRows, replByDeal] = await Promise.all([
+  const [expected, models, activeUnits, recRows, lastRows, wards, unassigned, lastEvent, lastImport, ptCtx, replAll, repl30, dealActRows, replByDeal, dealModelAgg] = await Promise.all([
     getExpectedDeviceCount(hospitalCode, client),
     loadTrackedModels(client),
     client.hospitalDevice.findMany({
@@ -232,13 +351,19 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     getHospitalProductTypeContext(hospitalCode, client),
     countReplacements(hospitalCode, undefined, client),
     countReplacements(hospitalCode, { from: since }, client),
-    client.$queryRaw<{ deal_code: string | null; cnt: bigint; as_cnt: bigint }[]>`
-      SELECT d.deal_code, count(*) AS cnt, count(*) FILTER (WHERE d.as_started_on IS NOT NULL) AS as_cnt
-        FROM hospital_devices d
+    client.$queryRaw<{ deal_code: string | null; cnt: bigint; as_cnt: bigint; ecg: bigint; spo2: bigint; bp: bigint }[]>`
+      SELECT d.deal_code, count(*) AS cnt, count(*) FILTER (WHERE d.as_started_on IS NOT NULL) AS as_cnt,
+             count(*) FILTER (WHERE di.onprem_device_type = 1) AS ecg,
+             count(*) FILTER (WHERE di.onprem_device_type = 3) AS spo2,
+             count(*) FILTER (WHERE di.onprem_device_type = 10) AS bp
+        FROM hospital_devices d JOIN device_units u ON u.id = d.device_id JOIN device_info di ON di.id = u.device_info_id
        WHERE d.hospital_code = ${hospitalCode} AND d.status = 'ACTIVE'
        GROUP BY 1`,
     countReplacementsByDeal(hospitalCode, client),
+    fetchDealModelAgg(hospitalCode, client),
   ])
+  // 계약 수량(B-25) — 딜 모델별 수량 1순위, 디바이스수 폴백
+  const contract = computeContractExpected(expected.contractedDeals, dealModelAgg)
 
   // 배치 중 유닛의 모델별 수 + WMS 일시 매칭 집계(배치 1쿼리) + 상품유형별 소계(B-22)
   const modelById = new Map(models.map((m) => [m.id, m]))
@@ -290,13 +415,24 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     let exp: number | null = null
     let diff: number | null = null
     if (m.onpremDeviceType === 1) {
-      compare = expected.expected == null ? 'none' : 'hard'
-      exp = expected.expected
+      compare = contract.ecgExpected == null ? 'none' : 'hard'
+      exp = contract.ecgExpected
       diff = exp == null ? null : activeForCompare - exp // 평가용(EVAL)은 계약 대조에서 제외(§9.1)
     } else if (m.onpremDeviceType === 3) {
-      compare = expected.expected == null ? 'none' : 'soft'
-      exp = expected.expected
-      diff = null
+      // B-25: 딜 모델 행(SpO2)이 있으면 실측 hard, 폴백 전용 병원만 구 soft(ECG 동수 가정)
+      if (contract.spo2.hard) {
+        compare = 'hard'
+        exp = contract.spo2.expected
+        diff = exp == null ? null : activeForCompare - exp
+      } else {
+        compare = contract.spo2.expected == null ? 'none' : 'soft'
+        exp = contract.spo2.expected
+        diff = null
+      }
+    } else if (m.onpremDeviceType === 10 && contract.bpExpected != null) {
+      compare = 'hard'
+      exp = contract.bpExpected
+      diff = activeForCompare - exp
     }
     // 상품유형 소계 — 키: 계약 딜 유형 ∪ 이 모델 배치 유형(+미지정은 배치가 있을 때만)
     const ptm = ptBy.get(m.id) ?? new Map<ProductTypeKey, { active: number; evalN: number }>()
@@ -305,7 +441,18 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     for (const k of keys) {
       const c = ptm.get(k) ?? { active: 0, evalN: 0 }
       const forCompare = c.active - c.evalN
-      const expT = k !== PRODUCT_TYPE_UNSET_LABEL && compare !== 'none' ? (expectedByType.get(k) ?? 0) : null
+      // B-25: 유형별 기대 수량도 모델별 — ECG/SpO2/BP 각각 그 유형 딜의 모델 행 합(폴백은 ECG에만·SpO2는 soft면 디바이스수)
+      const bt = k !== PRODUCT_TYPE_UNSET_LABEL ? contract.byType.get(k as ProductType) : undefined
+      const expT =
+        k === PRODUCT_TYPE_UNSET_LABEL || compare === 'none'
+          ? null
+          : m.onpremDeviceType === 1
+            ? (bt?.ecg ?? 0)
+            : m.onpremDeviceType === 3
+              ? (bt?.spo2 ?? 0)
+              : m.onpremDeviceType === 10
+                ? (bt?.bp ?? 0)
+                : null
       byProductType[k] = { active: c.active, activeForCompare: forCompare, expected: expT, diff: compare === 'hard' && expT != null ? forCompare - expT : null }
     }
     out.push({
@@ -335,30 +482,38 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
   ]
   const productTypes = hospitalKeys.map((k) => {
     const c = ecgPt[k] ?? { active: 0, activeForCompare: 0, expected: null, diff: null }
-    const expT = k !== PRODUCT_TYPE_UNSET_LABEL && expected.expected != null ? (expectedByType.get(k) ?? 0) : null
+    const expT = k !== PRODUCT_TYPE_UNSET_LABEL && contract.ecgExpected != null ? (contract.byType.get(k as ProductType)?.ecg ?? 0) : null
     return { type: k, active: c.active, activeForCompare: c.activeForCompare, expected: expT, diff: expT == null ? null : c.activeForCompare - expT }
   })
   // 계약건(딜)별 현황(B-23) — 계약완료 딜 ∪ 배치·교체에 등장한 코드. 미지정(NULL)은 별도 버킷
-  const activeByDeal = new Map<string | null, { active: number; asCnt: number }>(
-    dealActRows.map((r) => [r.deal_code, { active: n(r.cnt), asCnt: n(r.as_cnt) }])
+  const activeByDeal = new Map<string | null, { active: number; asCnt: number; ecg: number; spo2: number; bp: number }>(
+    dealActRows.map((r) => [r.deal_code, { active: n(r.cnt), asCnt: n(r.as_cnt), ecg: n(r.ecg), spo2: n(r.spo2), bp: n(r.bp) }])
   )
+  const activeModelOf = (code: string | null) => {
+    const a = activeByDeal.get(code)
+    return { ecg: a?.ecg ?? 0, spo2: a?.spo2 ?? 0, bp: a?.bp ?? 0 }
+  }
   const dealKeys: string[] = expected.contractedDeals.map((d) => d.dealCode)
   for (const k of Array.from(activeByDeal.keys())) if (k != null && !dealKeys.includes(k)) dealKeys.push(k)
   for (const k of Array.from(replByDeal.keys())) if (k != null && !dealKeys.includes(k)) dealKeys.push(k)
   const dealRows: SummaryDealRow[] = dealKeys.map((code) => {
     const c = expected.contractedDeals.find((d) => d.dealCode === code) ?? null
+    const be = contract.byDeal.get(code) ?? null
     return {
       dealCode: code,
       roundNo: c?.roundNo ?? null,
       productType: c?.productType ?? null,
       contractDate: c?.contractDate ?? null,
       expected: c ? c.count : null,
+      expectedByModel: be?.byModel ?? null,
+      expectedSource: be?.source ?? null,
       contracted: !!c,
       active: activeByDeal.get(code)?.active ?? 0,
+      activeByModel: activeModelOf(code),
       replacements: replByDeal.get(code) ?? 0,
     }
   })
-  const dealUnassigned = { active: activeByDeal.get(null)?.active ?? 0, replacements: replByDeal.get(null) ?? 0 }
+  const dealUnassigned = { active: activeByDeal.get(null)?.active ?? 0, activeByModel: activeModelOf(null), replacements: replByDeal.get(null) ?? 0 }
   const asInProgress = Array.from(activeByDeal.values()).reduce((s, v) => s + v.asCnt, 0)
   return {
     hospitalCode: hospital.hospitalCode,
@@ -479,11 +634,16 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
           OR EXISTS (SELECT 1 FROM hospital_devices d WHERE d.hospital_code = h.hospital_code OR d.last_hospital_code = h.hospital_code)
           OR EXISTS (SELECT 1 FROM hospital_device_events e WHERE e.hospital_code = h.hospital_code)
     ), dl AS (
-      SELECT sd.hospital_code, count(*)::int AS deals, sum(coalesce(sd.daewoong_device_count, 0))::int AS expected,
-             sum(coalesce(sd.daewoong_device_count, 0)) FILTER (WHERE sd.product_type = '일반')::int AS expected_normal,
-             sum(coalesce(sd.daewoong_device_count, 0)) FILTER (WHERE sd.product_type = '라이트')::int AS expected_lite,
+      -- B-25: ECG 계약 수량 = 딜 모델별 수량(sales_deal_devices ECG 행) 1순위, 행 없는 딜은 daewoong_device_count 폴백
+      SELECT sd.hospital_code, count(*)::int AS deals,
+             sum(CASE WHEN m.deal_id IS NULL THEN coalesce(sd.daewoong_device_count, 0) ELSE coalesce(m.ecg, 0) END)::int AS expected,
+             sum(CASE WHEN m.deal_id IS NULL THEN coalesce(sd.daewoong_device_count, 0) ELSE coalesce(m.ecg, 0) END) FILTER (WHERE sd.product_type = '일반')::int AS expected_normal,
+             sum(CASE WHEN m.deal_id IS NULL THEN coalesce(sd.daewoong_device_count, 0) ELSE coalesce(m.ecg, 0) END) FILTER (WHERE sd.product_type = '라이트')::int AS expected_lite,
              count(DISTINCT sd.product_type) FILTER (WHERE sd.product_type IN ('일반','라이트'))::int AS pt_kinds
         FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
+        LEFT JOIN (SELECT sdd.deal_id, sum(sdd.quantity) FILTER (WHERE di.onprem_device_type = 1)::int AS ecg
+                     FROM sales_deal_devices sdd JOIN device_info di ON di.id = sdd.device_info_id
+                    GROUP BY 1) m ON m.deal_id = sd.id
        WHERE sc.category = ${DEAL_STATUS_CATEGORY} AND sc.name = ${DEAL_STATUS_CONTRACTED}
        GROUP BY 1
     ), act AS (

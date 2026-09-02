@@ -123,6 +123,16 @@ async function seed() {
   const b102 = await prisma.deviceUnit.findUniqueOrThrow({ where: { serialNo: 'B990102' }, select: { id: true } })
   await reg.openDeviceAs(ctx(TODAY, mnt ? { ref: { type: 'MAINTENANCE', code: mnt.maintenanceCode } } : { memo: 'AS 접수(데모)' }), { deviceId: b102.id })
   console.log(`8) AS 표시: B990102${mnt ? ` (ref ${mnt.maintenanceCode})` : ''}`)
+  // 9) B-25 확인 — 문산중앙 딜의 모델별 수량(sales_deal_devices) 행 여부(읽기 전용, sales_* 미기록)
+  const mrowCnt = Number((await prisma.$queryRaw<{ c: bigint }[]>`SELECT count(*) c FROM sales_deal_devices sdd JOIN sales_deals sd ON sd.id = sdd.deal_id WHERE sd.hospital_code = ${H}`)[0].c)
+  if (mrowCnt === 0) {
+    const ex = await prisma.$queryRaw<{ hospital_code: string; hospital_name: string }[]>`
+      SELECT sd.hospital_code, h.hospital_name FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
+        JOIN hospitals h ON h.hospital_code = sd.hospital_code
+        JOIN sales_deal_devices sdd ON sdd.deal_id = sd.id
+       WHERE sc.category = 'SALES_DEAL_STATUS' AND sc.name = '계약완료' GROUP BY 1, 2 ORDER BY 1 LIMIT 3`
+    console.log(`9) B-25: 문산중앙 딜에 모델별 수량 행 없음 — 계약별 표는 폴백(심전계 도입=디바이스수 ⓘ). 모델별 표 예시 병원: ${ex.map((e) => `${e.hospital_code} ${e.hospital_name}`).join(' · ') || '없음'}`)
+  } else console.log(`9) B-25: 문산중앙 딜 모델별 수량 행 ${mrowCnt}건 — 모델별 도입 수량으로 표시`)
   const summary = (await reg.getHospitalDeviceSummary(H))!
   const units = await prisma.deviceUnit.count({ where: { OR: PREFIX.map((p) => ({ serialNo: { startsWith: p } })) } })
   const placements = await prisma.hospitalDevice.count({ where: { unit: { OR: PREFIX.map((p) => ({ serialNo: { startsWith: p } })) } } })
