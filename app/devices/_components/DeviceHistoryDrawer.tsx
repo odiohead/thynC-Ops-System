@@ -598,6 +598,15 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
                     <Button size="sm" variant="outline" onClick={() => onAction('replace', ref)}>
                       교체
                     </Button>
+                    {device.asStartedOn ? (
+                      <Button size="sm" variant="outline" onClick={() => onAction('asClear', ref)} title="AS진행중 표시 해제 (교체·회수 시에는 자동 해제)">
+                        AS 해제
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => onAction('asOpen', ref)} title="이 기기를 'AS진행중'으로 표시 (유지보수 코드 연결 가능 — B-24)">
+                        AS 표시
+                      </Button>
+                    )}
                   </>
                 )}
                 {canWrite && device.status === 'RECOVERED' && <span className="text-xs text-muted-foreground">회수된 기기 — 재배치는 [+ 등록] 폼에 시리얼을 입력하면 이력이 이어집니다.</span>}

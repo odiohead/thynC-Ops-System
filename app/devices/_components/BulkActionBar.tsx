@@ -17,11 +17,15 @@ export interface BulkActionBarProps {
   onSetProductType?: () => void
   /** 계약건(딜) 일괄 지정 — B-23 */
   onSetDeal?: () => void
+  /** AS 일괄 표시(B-24) — AsFlagModal(MNT 코드·업무일자 공유) */
+  onAsOpen?: () => void
+  /** AS 일괄 해제(B-24) — 선택에 AS진행중 기기가 있을 때만 전달(없으면 버튼 미노출) */
+  onAsClear?: () => void
   onClear: () => void
   note?: string | null
 }
 
-export function BulkActionBar({ count, canWrite, onMove, onRecover, onSetProductType, onSetDeal, onClear, note }: BulkActionBarProps) {
+export function BulkActionBar({ count, canWrite, onMove, onRecover, onSetProductType, onSetDeal, onAsOpen, onAsClear, onClear, note }: BulkActionBarProps) {
   if (count === 0) return null
   return (
     <div
@@ -49,6 +53,16 @@ export function BulkActionBar({ count, canWrite, onMove, onRecover, onSetProduct
             {onSetDeal && (
               <Button size="sm" variant="outline" onClick={onSetDeal} title="선택 기기가 속한 계약건(딜)을 한 번에 지정 — 기기마다 정정 이벤트(소프트 참조)">
                 계약건 지정
+              </Button>
+            )}
+            {onAsOpen && (
+              <Button size="sm" variant="outline" onClick={onAsOpen} title="선택 기기를 한 번에 'AS진행중'으로 표시 — 유지보수 코드·업무일자 공유, 이미 표시된 기기는 건너뜀">
+                AS 표시
+              </Button>
+            )}
+            {onAsClear && (
+              <Button size="sm" variant="outline" onClick={onAsClear} title="선택 기기의 AS진행중 표시를 한 번에 해제 — 표시 없는 기기는 건너뜀">
+                AS 해제
               </Button>
             )}
           </>

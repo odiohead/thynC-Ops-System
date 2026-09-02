@@ -8,7 +8,7 @@ import { optionalInt, parseRegistryFields, readJsonObject, registryActor, regist
 
 export const dynamic = 'force-dynamic'
 
-const ACTION_LABEL: Record<BulkActionKind, string> = { MOVE_WARD: '일괄 병동 이동', RECOVER: '일괄 회수', SET_PRODUCT_TYPE: '일괄 상품유형 지정', SET_DEAL: '일괄 계약건 지정' }
+const ACTION_LABEL: Record<BulkActionKind, string> = { MOVE_WARD: '일괄 병동 이동', RECOVER: '일괄 회수', SET_PRODUCT_TYPE: '일괄 상품유형 지정', SET_DEAL: '일괄 계약건 지정', AS_OPEN: 'AS 일괄 표시', AS_CLEAR: 'AS 일괄 해제' }
 
 /**
  * 병원 문맥 유도 — body.hospitalCode가 없으면 선택 개체의 ACTIVE 병원에서 유도(§4.2 "개체에서 유도").
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await readJsonObject(request)
     const action = body.action as BulkActionKind
-    if (!(BULK_ACTIONS as readonly unknown[]).includes(action)) return NextResponse.json({ error: '일괄 액션은 MOVE_WARD·RECOVER·SET_PRODUCT_TYPE·SET_DEAL만 가능합니다' }, { status: 400 })
+    if (!(BULK_ACTIONS as readonly unknown[]).includes(action)) return NextResponse.json({ error: '일괄 액션은 MOVE_WARD·RECOVER·SET_PRODUCT_TYPE·SET_DEAL·AS_OPEN·AS_CLEAR만 가능합니다' }, { status: 400 })
     if (!Array.isArray(body.deviceIds)) return NextResponse.json({ error: 'deviceIds 배열이 필요합니다' }, { status: 400 })
     const deviceIds = uniqInts(body.deviceIds)
     if (deviceIds.length === 0) return NextResponse.json({ error: '대상 기기를 선택하세요' }, { status: 400 })

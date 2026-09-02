@@ -799,7 +799,7 @@ export interface RecoverResponse {
   warnings: string[]
 }
 
-export type BulkAction = 'MOVE_WARD' | 'RECOVER' | 'SET_PRODUCT_TYPE' | 'SET_DEAL'
+export type BulkAction = 'MOVE_WARD' | 'RECOVER' | 'SET_PRODUCT_TYPE' | 'SET_DEAL' | 'AS_OPEN' | 'AS_CLEAR'
 
 export interface BulkBody extends RegistryFields {
   action: BulkAction

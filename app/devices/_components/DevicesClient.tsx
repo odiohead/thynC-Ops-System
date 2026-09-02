@@ -27,7 +27,7 @@ import Button from '@/app/components/ui/Button'
 import Badge from '@/app/components/ui/Badge'
 import { cn } from '@/lib/cn'
 import { PRODUCT_TYPE_UNSET_LABEL, todayKst } from '@/lib/deviceRegistryShared'
-import { clearDeviceAs, errorMessage, exportEventsUrl, exportUnitsUrl, getCapabilities, getCoverage, getEvents, getHospitalOption, getHospitalSummary, getImportBatches, getUnitIds } from './api'
+import { bulkDeviceAction, clearDeviceAs, errorMessage, exportEventsUrl, exportUnitsUrl, getCapabilities, getCoverage, getEvents, getHospitalOption, getHospitalSummary, getImportBatches, getUnitIds } from './api'
 import { DevicesToastProvider, useDevicesToast } from './toast'
 import { useDevicesUrlState, type DevicesUrlState } from './useDevicesUrlState'
 import {
@@ -93,7 +93,7 @@ type ModalState =
   | { kind: 'correct'; device: DeviceRef }
   | { kind: 'productType'; devices: DeviceRef[]; ids: number[]; note?: string | null }
   | { kind: 'deal'; devices: DeviceRef[]; ids: number[]; note?: string | null }
-  | { kind: 'asOpen'; device: DeviceRef }
+  | { kind: 'asOpen'; devices: DeviceRef[]; ids: number[]; note?: string | null }
   | null
 
 type ListLocal = Pick<ListFilters, 'limit' | 'sort' | 'wms' | 'usage' | 'productType' | 'deal' | 'as'>
@@ -393,7 +393,7 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
           return
         }
         if (action === 'asOpen') {
-          setModal({ kind: 'asOpen', device: ref })
+          setModal({ kind: 'asOpen', devices: [ref], ids: [ref.id] })
           return
         }
         if (!window.confirm(`${ref.serialNo}의 AS진행중 표시를 해제할까요?`)) return
@@ -435,6 +435,19 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
   )
   const openBulkProductType = useCallback(() => setModal({ kind: 'productType', devices: selectedRefs, ids: selectedIds, note: selectionNote }), [selectedRefs, selectedIds, selectionNote])
   const openBulkDeal = useCallback(() => setModal({ kind: 'deal', devices: selectedRefs, ids: selectedIds, note: selectionNote }), [selectedRefs, selectedIds, selectionNote])
+  const openBulkAsOpen = useCallback(() => setModal({ kind: 'asOpen', devices: selectedRefs, ids: selectedIds, note: selectionNote }), [selectedRefs, selectedIds, selectionNote])
+  /** 선택에 AS진행중 행이 있을 때만 선택 바 [AS 해제] 노출 */
+  const anyFlaggedSelected = useMemo(() => selectedRefs.some((r) => !!r.asStartedOn), [selectedRefs])
+  const bulkAsClear = useCallback(() => {
+    if (selectedIds.length === 0) return
+    if (!window.confirm(`선택 ${selectedIds.length.toLocaleString()}대의 AS진행중 표시를 해제할까요? (표시 없는 기기는 건너뜁니다)`)) return
+    bulkDeviceAction({ action: 'AS_CLEAR', deviceIds: selectedIds, ...(hospital ? { hospitalCode: hospital } : {}) })
+      .then((r) => {
+        const warnings = r.skipped.length > 0 ? [`표시 없음 건너뜀: ${r.skipped.slice(0, 5).map((s) => s.serialNo).join(', ')}${r.skipped.length > 5 ? ' 외' : ''} (${r.skipped.length}대)`] : []
+        onDone({ message: `AS 해제: ${r.affectedDeviceIds.length.toLocaleString()}대`, warnings })
+      })
+      .catch((e) => notify(errorMessage(e, 'AS 해제에 실패했습니다.'), 'error'))
+  }, [selectedIds, hospital, onDone, notify])
 
   /** 병동 탭 [기기 일괄 이동] — 그 병동 배치 중 전체를 선택해 이동 모달 */
   const onBulkMoveWard = useCallback(
@@ -538,7 +551,20 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
               </div>
 
               <div className="mt-3">
-                {selectMode && <BulkActionBar count={selection.size} canWrite={canWrite} onMove={openBulkMove} onRecover={() => openBulkRecover(false)} onSetProductType={openBulkProductType} onSetDeal={openBulkDeal} onClear={clearSelection} note={selectionNote} />}
+                {selectMode && (
+                  <BulkActionBar
+                    count={selection.size}
+                    canWrite={canWrite}
+                    onMove={openBulkMove}
+                    onRecover={() => openBulkRecover(false)}
+                    onSetProductType={openBulkProductType}
+                    onSetDeal={openBulkDeal}
+                    onAsOpen={openBulkAsOpen}
+                    onAsClear={anyFlaggedSelected ? bulkAsClear : undefined}
+                    onClear={clearSelection}
+                    note={selectionNote}
+                  />
+                )}
 
                 {tab === 'list' && (
                   <DeviceTable
@@ -667,7 +693,16 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
       {/* 드로어·정정·AS 표시 모달 — 병원 문맥 무관(양쪽 뷰 ?device= 딥링크) */}
       <DeviceHistoryDrawer deviceId={drawerDeviceId} onClose={closeDrawer} capabilities={capabilities} onMutated={onMutated} onAction={onAction} onOpenDevice={openDevice} reloadKey={reloadKey} />
       <CorrectionModal open={modal?.kind === 'correct'} onClose={closeModal} hospitalCode={hospital} device={modal?.kind === 'correct' ? modal.device : null} models={models} onDone={onDone} />
-      <AsFlagModal open={modal?.kind === 'asOpen'} onClose={closeModal} device={modal?.kind === 'asOpen' ? modal.device : null} today={today} onDone={onDone} />
+      <AsFlagModal
+        open={modal?.kind === 'asOpen'}
+        onClose={closeModal}
+        devices={modal?.kind === 'asOpen' ? modal.devices : []}
+        deviceIds={modal?.kind === 'asOpen' ? modal.ids : []}
+        hospitalCode={hospital}
+        today={today}
+        note={modal?.kind === 'asOpen' ? modal.note : null}
+        onDone={onDone}
+      />
     </div>
   )
 }

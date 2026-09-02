@@ -915,11 +915,14 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
 // bulkDeviceAction — 일괄 이동/회수/상품유형 지정 (§7.1 bulk 행: 같은 병원 ACTIVE만, 단일 tx)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const BULK_ACTIONS = ['MOVE_WARD', 'RECOVER', 'SET_PRODUCT_TYPE', 'SET_DEAL'] as const
+export const BULK_ACTIONS = ['MOVE_WARD', 'RECOVER', 'SET_PRODUCT_TYPE', 'SET_DEAL', 'AS_OPEN', 'AS_CLEAR'] as const
 export type BulkActionKind = (typeof BULK_ACTIONS)[number]
 
 export interface BulkInput {
-  /** SET_PRODUCT_TYPE(B-22)·SET_DEAL(B-23): 기기마다 CORRECT 이벤트({before,after}) — write(USER+), 같은 action_group */
+  /**
+   * SET_PRODUCT_TYPE(B-22)·SET_DEAL(B-23): 기기마다 CORRECT 이벤트({before,after}) — write(USER+), 같은 action_group.
+   * AS_OPEN·AS_CLEAR(B-24): 기기마다 비상태 AS 이벤트 — 같은 action_group·ref(ctx.ref, MNT)·업무일자 공유, 이미 표시/미표시는 skipped[]
+   */
   action: BulkActionKind
   deviceIds: number[]
   toWardId?: number | null
@@ -944,7 +947,7 @@ export const BULK_MAX = 2000
 
 export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?: RegistryOpts): Promise<BulkResult> {
   return withRegistryTx(opts, async (tx) => {
-    if (!BULK_ACTIONS.includes(input.action)) throw new RegistryError(400, '일괄 액션은 MOVE_WARD·RECOVER·SET_PRODUCT_TYPE·SET_DEAL만 가능합니다')
+    if (!BULK_ACTIONS.includes(input.action)) throw new RegistryError(400, '일괄 액션은 MOVE_WARD·RECOVER·SET_PRODUCT_TYPE·SET_DEAL·AS_OPEN·AS_CLEAR만 가능합니다')
     const p = await prepareCtx(tx, ctx, { requireHospital: true })
     const here = p.hospitalCode!
     const ids = uniqInts(input.deviceIds ?? [])
@@ -1018,6 +1021,42 @@ export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?
         }))
       )
       await tx.hospitalDevice.updateMany({ where: { deviceId: { in: targets.map((d) => d.id) }, status: 'ACTIVE', hospitalCode: here }, data: { dealCode: after } })
+      return { actionGroup: p.actionGroup, events, eventIds: events.map((e) => e.id), skipped, affectedDeviceIds: targets.map((d) => d.id), warnings: p.warnings }
+    }
+    if (input.action === 'AS_OPEN' || input.action === 'AS_CLEAR') {
+      // AS 일괄 표시/해제(B-24) — 비상태 이벤트. 같은 action_group·ref·업무일자를 공유하고 개체별로 소급 전이 검증
+      const opening = input.action === 'AS_OPEN'
+      for (const d of devices) {
+        if (opening ? d.asStartedOn != null : d.asStartedOn == null) {
+          skipped.push({ deviceId: d.id, serialNo: d.serialNo, reason: opening ? '이미 AS진행중' : 'AS진행중 표시 없음' })
+        }
+      }
+      targets = devices.filter((d) => (opening ? d.asStartedOn == null : d.asStartedOn != null))
+      if (targets.length === 0) {
+        throw new RegistryError(409, opening ? '선택한 기기가 모두 AS진행중입니다' : '선택한 기기에 AS진행중 표시가 없습니다', { skipped })
+      }
+      const evMap = await loadDeviceEvents(tx, targets.map((d) => d.id))
+      const asInputs: EventInput[] = targets.map((d) => {
+        const st = stateAt(evMap.get(d.id) ?? [], p.occurredOn)
+        assertTransition(st, input.action as DeviceEventType, here, { serial: d.serialNo })
+        return {
+          deviceId: d.id,
+          eventType: input.action as DeviceEventType,
+          hospitalCode: here,
+          occurredOn: p.occurredOn,
+          memo: p.memo,
+          ref: p.ref,
+          actionGroup: p.actionGroup,
+          source: p.source,
+          productType: d.productType, // 표시 시점 배치 스냅샷
+          dealCode: d.dealCode,
+          actor: p.actor,
+        }
+      })
+      const events = await insertEvents(tx, asInputs)
+      for (const d of targets) {
+        await rebuildUnitProjection(tx, d.id, { guard: guardOf(d), illegal: retroIllegal })
+      }
       return { actionGroup: p.actionGroup, events, eventIds: events.map((e) => e.id), skipped, affectedDeviceIds: targets.map((d) => d.id), warnings: p.warnings }
     }
     if (input.action === 'MOVE_WARD') {

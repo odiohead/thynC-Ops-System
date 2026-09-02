@@ -689,6 +689,26 @@ async function main() {
     await cancelLastEvent(ctx(null), { eventId: asO.event.id })
     ok((await dev({ id: dAS.id }))!.asStartedOn === null && (await dev({ id: dAS.id }))!.asRefCode === null, 'AS_OPEN 취소 → 플래그 해제')
     ok(await projectionEqualsRebuild(dAS.id), 'AS 취소 후 프로젝션 = fold')
+    // 일괄 AS 표시/해제(bulk AS_OPEN/AS_CLEAR) — 같은 action_group·ref·업무일자 공유
+    const rBk = await registerDevices(ctx(H3, '2026-08-01'), [{ serialInput: S(16), wardName: 'D동' }, { serialInput: S(17), wardName: 'D동' }, { serialInput: S(18), wardName: 'D동' }], { dealContextOverride: NONE_D })
+    const bkIds = rBk.created.map((c) => c.id)
+    await reg.openDeviceAs(ctx(null, '2026-08-02'), { deviceId: bkIds[0] }) // 1대는 미리 표시 → skipped 확인
+    const bkAs = await bulkDeviceAction(ctx(H3, '2026-08-03', mnt ? { ref: { type: 'MAINTENANCE', code: mnt.maintenanceCode } } : {}), { action: 'AS_OPEN', deviceIds: bkIds })
+    ok(
+      bkAs.events.length === 2 && bkAs.skipped.length === 1 && bkAs.skipped[0].deviceId === bkIds[0] && bkAs.events.every((e) => e.eventType === 'AS_OPEN' && e.actionGroup === bkAs.actionGroup && (!mnt || e.refCode === mnt.maintenanceCode)),
+      'bulk AS_OPEN — 같은 action_group·ref 공유, 이미 표시 1대 skipped',
+      bkAs.skipped
+    )
+    const bk1 = (await dev({ id: bkIds[1] }))!
+    ok(bk1.asStartedOn?.toISOString().startsWith('2026-08-03') === true && (!mnt || bk1.asRefCode === mnt.maintenanceCode), 'bulk AS_OPEN → 플래그·as_ref_code(전 대상 공유)')
+    await expectErr('bulk AS_OPEN 전부 표시됨 → 409', () => bulkDeviceAction(ctx(H3), { action: 'AS_OPEN', deviceIds: bkIds }), 409, '모두 AS진행중')
+    const cBk = await cancelLastEvent(ctx(null), { eventId: bkAs.events[0].id })
+    ok(cBk.cancelledEventIds.length === 1 && (await dev({ id: bkAs.events[0].deviceId }))!.asStartedOn === null && (await dev({ id: bkAs.events[1].deviceId }))!.asStartedOn != null, 'bulk AS_OPEN 이벤트 1건 LIFO 취소 → 그 기기만 해제(그룹 짝 확장 없음)')
+    const bkClr = await bulkDeviceAction(ctx(H3, '2026-08-04'), { action: 'AS_CLEAR', deviceIds: bkIds })
+    ok(bkClr.events.length === 2 && bkClr.skipped.length === 1 && bkClr.skipped[0].deviceId === bkAs.events[0].deviceId && bkClr.events.every((e) => e.eventType === 'AS_CLEAR' && e.actionGroup === bkClr.actionGroup), 'bulk AS_CLEAR — 표시 없는 1대 skipped·같은 그룹', bkClr.skipped)
+    ok((await dev({ id: bkIds[0] }))!.asStartedOn === null && (await dev({ id: bkIds[2] }))!.asStartedOn === null, 'bulk AS_CLEAR → 전 대상 플래그 해제')
+    await expectErr('bulk AS_CLEAR 전부 미표시 → 409', () => bulkDeviceAction(ctx(H3), { action: 'AS_CLEAR', deviceIds: bkIds }), 409, 'AS진행중 표시가 없습니다')
+    for (const id of bkIds) ok(await projectionEqualsRebuild(id), `bulk AS 후 프로젝션 = fold (#${id})`)
     // 자동 해제 — 회수·교체
     await reg.openDeviceAs(ctx(null, '2026-08-17'), { deviceId: dAS.id })
     const rcAS = await recoverDevice(ctx(null, '2026-08-18'), { deviceId: dAS.id, reasonCodeId: defect.id })
@@ -1410,6 +1430,12 @@ async function main() {
   ok(!!(await prisma.auditLog.findFirst({ where: { id: { gt: pre.max.a }, resource: 'hospital_device', action: 'UPDATE', resourceLabel: { contains: 'AS 해제' } } })), 'as-clear audit 라벨 AS 해제')
   r = await call(h(RAS.clear.POST), 'POST', `${B}/api/devices/units/${id81}/as-clear`, { ...UW, params: { id: String(id81) }, body: {} })
   ok(r.status === 409, 'as-clear 표시 없음 → 409')
+  // 업무일자 기본(오늘) — 앞선 단건 as-clear가 오늘 일자라 소급 일자로 켜면 fold가 다시 꺼진다(같은 일자 순서 = id)
+  r = await call(h(R.bulk.POST), 'POST', `${B}/api/devices/units/bulk`, { ...UW, body: { action: 'AS_OPEN', deviceIds: [id81], ...(mnt ? { ref: { type: 'MAINTENANCE', code: mnt.maintenanceCode } } : {}) } })
+  ok(r.status === 201 && r.json.events.length === 1 && r.json.events[0].eventType === 'AS_OPEN', 'bulk AS_OPEN 라우트 USER → 201')
+  ok(!!(await prisma.auditLog.findFirst({ where: { id: { gt: pre.max.a }, resource: 'hospital_device_event', resourceLabel: { contains: 'AS 일괄 표시' } } })), 'bulk AS_OPEN audit 라벨(AS 일괄 표시)')
+  r = await call(h(R.bulk.POST), 'POST', `${B}/api/devices/units/bulk`, { ...UW, body: { action: 'AS_CLEAR', deviceIds: [id81] } })
+  ok(r.status === 201 && r.json.events[0].eventType === 'AS_CLEAR', 'bulk AS_CLEAR 라우트 USER → 201')
   r = await call(h(R.hSummary.GET), 'GET', `${B}/api/hospitals/${H1}/devices/summary`, { ...V, ...P1 })
   ok(r.status === 200 && Array.isArray(r.json.deals) && r.json.dealUnassigned && typeof r.json.asInProgress === 'number' && r.json.contractedDeals.every((d: { productType?: unknown }) => 'productType' in d), 'hospital summary — deals[]·dealUnassigned·asInProgress·contractedDeals.productType')
   const auditBy = await prisma.auditLog.groupBy({ by: ['resource'], where: { id: { gt: pre.max.a }, resource: { in: AUDIT_RESOURCES } }, _count: { _all: true } })
