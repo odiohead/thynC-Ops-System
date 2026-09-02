@@ -27,7 +27,7 @@ import Button from '@/app/components/ui/Button'
 import Badge from '@/app/components/ui/Badge'
 import { cn } from '@/lib/cn'
 import { PRODUCT_TYPE_UNSET_LABEL, todayKst } from '@/lib/deviceRegistryShared'
-import { errorMessage, exportEventsUrl, exportUnitsUrl, getCapabilities, getCoverage, getEvents, getHospitalOption, getHospitalSummary, getImportBatches, getUnitIds } from './api'
+import { clearDeviceAs, errorMessage, exportEventsUrl, exportUnitsUrl, getCapabilities, getCoverage, getEvents, getHospitalOption, getHospitalSummary, getImportBatches, getUnitIds } from './api'
 import { DevicesToastProvider, useDevicesToast } from './toast'
 import { useDevicesUrlState, type DevicesUrlState } from './useDevicesUrlState'
 import {
@@ -64,6 +64,8 @@ import { BulkActionBar } from './BulkActionBar'
 import { DeviceHistoryDrawer } from './DeviceHistoryDrawer'
 import { CorrectionModal } from './CorrectionModal'
 import { ProductTypeModal } from './ProductTypeModal'
+import { DealModal } from './DealModal'
+import { AsFlagModal } from './AsFlagModal'
 import { RegisterModal } from './RegisterModal'
 import { MoveWardModal } from './MoveWardModal'
 import { RecoverModal } from './RecoverModal'
@@ -88,13 +90,15 @@ type ModalState =
   | { kind: 'replace'; oldDevice: DeviceRef | null }
   | { kind: 'correct'; device: DeviceRef }
   | { kind: 'productType'; devices: DeviceRef[]; ids: number[]; note?: string | null }
+  | { kind: 'deal'; devices: DeviceRef[]; ids: number[]; note?: string | null }
+  | { kind: 'asOpen'; device: DeviceRef }
   | null
 
-type ListLocal = Pick<ListFilters, 'limit' | 'sort' | 'wms' | 'usage' | 'productType'>
+type ListLocal = Pick<ListFilters, 'limit' | 'sort' | 'wms' | 'usage' | 'productType' | 'deal' | 'as'>
 type EventLocal = Omit<EventFilters, 'q' | 'page'>
 type CoverageLocal = Pick<CoverageFilters, 'filter' | 'sort' | 'limit'>
 
-const DEFAULT_LIST_LOCAL: ListLocal = { limit: 50, sort: 'ward', wms: null, usage: null, productType: null }
+const DEFAULT_LIST_LOCAL: ListLocal = { limit: 50, sort: 'ward', wms: null, usage: null, productType: null, deal: null, as: false }
 /** 병원 이력 탭 로컬 필터 기본값 — 전체 기간 */
 const DEFAULT_EVENT_LOCAL: EventLocal = { limit: 50, type: null, from: null, to: null, refType: null, source: null }
 /** 병원 미선택 축약 커버리지 표 — 정렬은 '차이 큰 순' 고정(compact에서 셀렉트 미노출), 50행 */
@@ -369,6 +373,22 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
 
   const onAction = useCallback(
     (action: DeviceAction, ref: DeviceRef) => {
+      // AS 표시/해제(B-24)는 병원 요약 문맥이 필요 없다 — 어느 뷰에서든 즉시 처리
+      if (action === 'asOpen' || action === 'asClear') {
+        if (ref.status !== 'ACTIVE') {
+          notify('AS 표시는 배치 중(사용중) 기기에서만 가능합니다.', 'info')
+          return
+        }
+        if (action === 'asOpen') {
+          setModal({ kind: 'asOpen', device: ref })
+          return
+        }
+        if (!window.confirm(`${ref.serialNo}의 AS진행중 표시를 해제할까요?`)) return
+        clearDeviceAs(ref.id)
+          .then(() => onDone({ message: `AS 해제: ${ref.serialNo}` }))
+          .catch((e) => notify(errorMessage(e, 'AS 해제에 실패했습니다.'), 'error'))
+        return
+      }
       // 모달은 병원 문맥(요약·병동 옵션)이 필요 — [디바이스] 뷰(또는 병원 미선택)에서는 그 기기의 병원으로 전환 + 드로어 유지 후 다시 실행하도록 안내
       if (view !== 'hospital' || !hospital) {
         if (ref.hospitalCode) {
@@ -392,7 +412,7 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
           break
       }
     },
-    [view, hospital, url, notify, openReplace]
+    [view, hospital, url, notify, openReplace, onDone]
   )
 
   const openBulkMove = useCallback(() => setModal({ kind: 'move', devices: selectedRefs, ids: selectedIds, note: selectionNote }), [selectedRefs, selectedIds, selectionNote])
@@ -401,6 +421,7 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
     [selectedRefs, selectedIds]
   )
   const openBulkProductType = useCallback(() => setModal({ kind: 'productType', devices: selectedRefs, ids: selectedIds, note: selectionNote }), [selectedRefs, selectedIds, selectionNote])
+  const openBulkDeal = useCallback(() => setModal({ kind: 'deal', devices: selectedRefs, ids: selectedIds, note: selectionNote }), [selectedRefs, selectedIds, selectionNote])
 
   /** 병동 탭 [기기 일괄 이동] — 그 병동 배치 중 전체를 선택해 이동 모달 */
   const onBulkMoveWard = useCallback(
@@ -486,8 +507,8 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
 
           {hospital ? (
             <>
-              {/* 2행: 요약 한 줄 */}
-              <HospitalSummaryLine summary={summary} loading={summaryLoading} error={summaryError} onWardsClick={() => url.setTab('wards')} />
+              {/* 2행: 계약건(딜)별 현황 표 (B-23 — 구 요약 한 줄 대체) */}
+              <HospitalContractTable summary={summary} loading={summaryLoading} error={summaryError} onWardsClick={() => url.setTab('wards')} />
 
               {/* 3행: 소형 탭 + Excel·선택 토글 */}
               <div className="mt-4 flex flex-wrap items-end justify-between gap-2 border-b border-border">
@@ -504,7 +525,7 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
               </div>
 
               <div className="mt-3">
-                {selectMode && <BulkActionBar count={selection.size} canWrite={canWrite} onMove={openBulkMove} onRecover={() => openBulkRecover(false)} onSetProductType={openBulkProductType} onClear={clearSelection} note={selectionNote} />}
+                {selectMode && <BulkActionBar count={selection.size} canWrite={canWrite} onMove={openBulkMove} onRecover={() => openBulkRecover(false)} onSetProductType={openBulkProductType} onSetDeal={openBulkDeal} onClear={clearSelection} note={selectionNote} />}
 
                 {tab === 'list' && (
                   <DeviceTable
@@ -557,6 +578,7 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
                 hospitalCode={hospital}
                 models={models}
                 wards={wardOptions}
+                deals={summary?.contractedDeals ?? []}
                 today={today}
                 initialSerials={modal?.kind === 'register' ? modal.initialSerials : undefined}
                 onDone={onDone}
@@ -590,6 +612,7 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
                 oldDevice={modal?.kind === 'replace' ? modal.oldDevice : null}
                 models={models}
                 wards={wardOptions}
+                deals={summary?.contractedDeals ?? []}
                 today={today}
                 productTypeContext={summary?.productTypeContext ?? null}
                 onDone={onDone}
@@ -605,6 +628,17 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
                 note={modal?.kind === 'productType' ? modal.note : null}
                 onDone={onDone}
               />
+              <DealModal
+                open={modal?.kind === 'deal'}
+                onClose={closeModal}
+                hospitalCode={hospital}
+                devices={modal?.kind === 'deal' ? modal.devices : []}
+                deviceIds={modal?.kind === 'deal' ? modal.ids : []}
+                deals={summary?.deals ?? []}
+                today={today}
+                note={modal?.kind === 'deal' ? modal.note : null}
+                onDone={onDone}
+              />
             </>
           ) : (
             <div className="mt-4">
@@ -617,9 +651,10 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
         <DeviceListTab filters={globalListFilters} setFilters={setGlobalListFilters} onOpenDevice={openDevice} reloadKey={reloadKey} />
       )}
 
-      {/* 드로어·정정 모달 — 병원 문맥 무관(양쪽 뷰 ?device= 딥링크) */}
+      {/* 드로어·정정·AS 표시 모달 — 병원 문맥 무관(양쪽 뷰 ?device= 딥링크) */}
       <DeviceHistoryDrawer deviceId={drawerDeviceId} onClose={closeDrawer} capabilities={capabilities} onMutated={onMutated} onAction={onAction} onOpenDevice={openDevice} reloadKey={reloadKey} />
       <CorrectionModal open={modal?.kind === 'correct'} onClose={closeModal} hospitalCode={hospital} device={modal?.kind === 'correct' ? modal.device : null} models={models} onDone={onDone} />
+      <AsFlagModal open={modal?.kind === 'asOpen'} onClose={closeModal} device={modal?.kind === 'asOpen' ? modal.device : null} today={today} onDone={onDone} />
     </div>
   )
 }
@@ -675,11 +710,11 @@ function ViewTabs({ active, onChange }: { active: DevicesView; onChange: (v: Dev
 }
 
 /**
- * 병원 요약 한 줄(v1) — `배치 중 18 · 계약 60 · 회수 2 · 병동 3`
- * - 배치 중: title에 모델별 배치 수(평가용 별도) · 계약: 클릭 → 팝오버(근거 딜 목록·모델별 hard/soft 대조·평가용 제외·상품유형별·교체 집계 — 구 SummaryStrip 내용)
- * - 회수: 최근 30일 RECOVER · 병동: 클릭 → 병동 탭. 매트릭스 표·WMS 열·평가용 칩은 v1에서 노출하지 않는다
+ * 병원 뷰 상단 — 계약건(딜)별 현황 표(B-23, 2026-09-02 — 구 '요약 한 줄' 대체)
+ * 열: 계약건 | 유형 | 도입 수량 | 등록 수량 | 교체 건수. 딜 없는 배치·교체가 있으면 '(미지정)' 행, 마지막은 합계 행.
+ * 합계 행의 ⓘ가 구 요약 팝오버(모델별 대조·근거 딜·상품유형별·교체 집계)를 연다. AS진행중 n 칩(B-24)·상품유형 혼합 배지는 헤더 줄.
  */
-function HospitalSummaryLine({ summary, loading, error, onWardsClick }: { summary: HospitalDeviceSummary | null; loading: boolean; error: string | null; onWardsClick: () => void }) {
+function HospitalContractTable({ summary, loading, error, onWardsClick }: { summary: HospitalDeviceSummary | null; loading: boolean; error: string | null; onWardsClick: () => void }) {
   const [popAnchor, setPopAnchor] = useState<HTMLElement | null>(null)
   const closePop = useCallback(() => setPopAnchor(null), [])
 
@@ -692,46 +727,111 @@ function HospitalSummaryLine({ summary, loading, error, onWardsClick }: { summar
   const ptKeys = summary ? Object.keys(summary.replacements?.byType ?? {}) : []
 
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-border bg-card px-4 py-2.5 text-sm text-foreground" aria-label="기기 요약">
+    <div className="mt-3 rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground" aria-label="계약 현황">
       {loading && !summary ? (
         <span className="text-xs text-muted-foreground">요약 불러오는 중…</span>
       ) : !summary ? (
         <span className="text-xs text-destructive">{error ?? '요약을 불러올 수 없습니다.'}</span>
       ) : (
         <>
-          <span className="tabular-nums" title={activeTitle}>
-            배치 중 <strong className="font-semibold">{summary.activeTotal.toLocaleString()}</strong>
-            {(summary.evalTotal ?? 0) > 0 && <span className="ml-1 text-xs text-muted-foreground">(평가용 {summary.evalTotal.toLocaleString()})</span>}
-          </span>
-          <span className="text-muted-foreground">·</span>
-          <button
-            type="button"
-            onClick={(e) => {
-              const el = e.currentTarget
-              setPopAnchor((prev) => (prev ? null : el))
-            }}
-            aria-expanded={popAnchor != null}
-            className="inline-flex items-center gap-1 rounded tabular-nums underline decoration-dotted underline-offset-2 hover:text-primary"
-            title="계약 근거·모델별 대조 보기"
-          >
-            계약 <strong className={cn('font-semibold', expected == null && 'text-muted-foreground', hasDiff && 'text-warning-subtle-foreground')}>{expected == null ? '—' : expected.toLocaleString()}</strong>
-            {hasDiff && <span aria-hidden="true" className="text-xs text-warning-subtle-foreground">▲</span>}
-            <Info size={12} className="text-muted-foreground" aria-hidden="true" />
-          </button>
-          <span className="text-muted-foreground">·</span>
-          <span className="tabular-nums" title="최근 30일 회수(업무일자 기준)">
-            회수 <strong className="font-semibold">{summary.recovered30dTotal.toLocaleString()}</strong>
-          </span>
-          <span className="text-muted-foreground">·</span>
-          <button type="button" onClick={onWardsClick} className="rounded tabular-nums underline-offset-2 hover:underline" title={summary.unassigned > 0 ? `병동 미지정 ${summary.unassigned.toLocaleString()}대 — 병동 탭` : '병동 탭'}>
-            병동 <strong className="font-semibold">{summary.wards.length.toLocaleString()}</strong>
-            {summary.unassigned > 0 && <span className="ml-1 text-xs text-warning-subtle-foreground">(미지정 {summary.unassigned.toLocaleString()})</span>}
-          </button>
-          {summary.productTypeContext?.mixed && (
-            <Badge variant="primary" className="ml-1" title="계약완료 딜에 일반·라이트가 함께 있는 병원 — 등록 시 상품유형 선택 필수">
-              상품유형 혼합
-            </Badge>
-          )}
+          <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-xs font-semibold">계약 현황</span>
+            {summary.asInProgress > 0 && (
+              <Badge variant="warning" className="tabular-nums" title="AS진행중 표시가 켜진 배치 중 기기 — 기기 목록 [필터 더보기]의 'AS진행중만'으로 조회">
+                AS진행중 {summary.asInProgress.toLocaleString()}
+              </Badge>
+            )}
+            {summary.productTypeContext?.mixed && (
+              <Badge variant="primary" title="계약완료 딜에 일반·라이트가 함께 있는 병원 — 등록 시 상품유형 선택 필수">
+                상품유형 혼합
+              </Badge>
+            )}
+            <span className="ml-auto flex flex-wrap items-center gap-x-2 text-xs tabular-nums text-muted-foreground">
+              <span title={activeTitle}>
+                배치 중 {summary.activeTotal.toLocaleString()}
+                {(summary.evalTotal ?? 0) > 0 ? ` (평가용 ${summary.evalTotal.toLocaleString()})` : ''}
+              </span>
+              <span title="최근 30일 회수(업무일자 기준)">회수 {summary.recovered30dTotal.toLocaleString()}</span>
+              <button type="button" onClick={onWardsClick} className="rounded underline-offset-2 hover:underline" title={summary.unassigned > 0 ? `병동 미지정 ${summary.unassigned.toLocaleString()}대 — 병동 탭` : '병동 탭'}>
+                병동 {summary.wards.length.toLocaleString()}
+                {summary.unassigned > 0 ? ` (미지정 ${summary.unassigned.toLocaleString()})` : ''}
+              </button>
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[30rem] text-xs">
+              <thead>
+                <tr className="border-b border-border text-muted-foreground">
+                  <th className="py-1 pr-2 text-left font-medium">계약건</th>
+                  <th className="py-1 pr-2 text-left font-medium">유형</th>
+                  <th className="py-1 pr-2 text-right font-medium" title="계약 도입 수량(Σ 대웅 디바이스 수)">도입 수량</th>
+                  <th className="py-1 pr-2 text-right font-medium" title="이 계약건으로 등록된 배치 중 기기">등록 수량</th>
+                  <th className="py-1 text-right font-medium" title="회수 시점 계약건 기준 교체 짝 수">교체 건수</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.deals.map((d) => (
+                  <tr key={d.dealCode} className="border-b border-border/60">
+                    <td className="py-1 pr-2 font-mono">
+                      {d.dealCode}
+                      {d.roundNo != null ? (
+                        <span className="ml-1 font-sans text-muted-foreground">({d.roundNo}차)</span>
+                      ) : (
+                        <span className="ml-1 font-sans text-warning-subtle-foreground" title="계약완료 딜 목록에 없는 코드 — 딜 재적재로 끊겼거나 지정 오류(계약건 지정으로 정리)">
+                          (계약 외)
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-1 pr-2">{d.productType ? <Badge variant={productTypeBadgeVariant(d.productType) ?? 'default'}>{d.productType}</Badge> : <span className="text-muted-foreground">—</span>}</td>
+                    <td className="py-1 pr-2 text-right tabular-nums">{d.expected != null ? d.expected.toLocaleString() : '—'}</td>
+                    <td className="py-1 pr-2 text-right tabular-nums">{d.active.toLocaleString()}</td>
+                    <td className="py-1 text-right tabular-nums">{d.replacements.toLocaleString()}</td>
+                  </tr>
+                ))}
+                {(summary.dealUnassigned.active > 0 || summary.dealUnassigned.replacements > 0) && (
+                  <tr className="border-b border-border/60 text-muted-foreground">
+                    <td className="py-1 pr-2" title="계약건이 지정되지 않은 배치·교체 — 선택 바 [계약건 지정]으로 정리">(미지정)</td>
+                    <td className="py-1 pr-2">—</td>
+                    <td className="py-1 pr-2 text-right">—</td>
+                    <td className="py-1 pr-2 text-right tabular-nums">{summary.dealUnassigned.active.toLocaleString()}</td>
+                    <td className="py-1 text-right tabular-nums">{summary.dealUnassigned.replacements.toLocaleString()}</td>
+                  </tr>
+                )}
+                {summary.deals.length === 0 && summary.dealUnassigned.active === 0 && summary.dealUnassigned.replacements === 0 && (
+                  <tr className="border-b border-border/60">
+                    <td colSpan={5} className="py-1.5 text-muted-foreground">
+                      계약완료 딜·등록 기기가 없습니다 — 등록·임포트에서 계약건을 지정할 수 있습니다.
+                    </td>
+                  </tr>
+                )}
+                <tr className="font-medium">
+                  <td className="py-1 pr-2">
+                    합계
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        const el = e.currentTarget
+                        setPopAnchor((prev) => (prev ? null : el))
+                      }}
+                      aria-expanded={popAnchor != null}
+                      aria-label="모델별 대조 상세"
+                      className="ml-1 inline-flex items-center rounded align-middle text-muted-foreground hover:text-primary"
+                      title="모델별 대조·근거 딜·상품유형별·교체 집계 보기"
+                    >
+                      <Info size={12} aria-hidden="true" />
+                    </button>
+                  </td>
+                  <td className="py-1 pr-2" />
+                  <td className={cn('py-1 pr-2 text-right tabular-nums', hasDiff && 'text-warning-subtle-foreground')} title={hasDiff ? '배치 수와 계약 수가 다릅니다 — ⓘ 모델별 대조 참고' : undefined}>
+                    {expected != null ? expected.toLocaleString() : '—'}
+                    {hasDiff && <span aria-hidden="true"> ▲</span>}
+                  </td>
+                  <td className="py-1 pr-2 text-right tabular-nums">{summary.activeTotal.toLocaleString()}</td>
+                  <td className="py-1 text-right tabular-nums">{summary.replacements.total.toLocaleString()}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
           <RegistryFloatingPanel open={popAnchor != null} anchor={popAnchor} onClose={closePop} align="left" className="w-96 max-w-[calc(100vw-1rem)] p-3 text-xs" keepOnScroll>
             <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">

@@ -62,6 +62,9 @@ CREATE TABLE hospital_devices (
   last_event_type TEXT, last_event_on DATE,
   replaced_by_id INTEGER REFERENCES device_units(id) ON DELETE SET NULL,
   product_type TEXT,                                                       -- 상품유형(일반/라이트, B-22) — 자리의 판매 조건: 배치 속성. REGISTER 이벤트에서 fold, 교체 상속, 회수 시 마지막 값 보존(재등록 시 재지정)
+  deal_code TEXT,                                                          -- 계약건(딜) 소프트 참조(B-23, 2026-09-02) — sales_deals.deal_code, FK 없음(딜 재적재·삭제 대비). REGISTER fold, 교체 상속, 회수 시 마지막 값 보존
+  as_started_on DATE,                                                      -- AS진행중 플래그 시작일(B-24) — ACTIVE 배치의 표시 플래그(제3의 상태 아님). AS_OPEN이 set, AS_CLEAR·RECOVER·재REGISTER가 clear
+  as_ref_code TEXT,                                                        -- AS 연결 유지보수 코드(MNT-…, 소프트 참조) — AS_OPEN 이벤트 ref에서 fold
   created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT hospital_devices_device_id_key UNIQUE (device_id),
   CONSTRAINT hospital_devices_status_check CHECK (status IN ('ACTIVE','RECOVERED')),
@@ -74,6 +77,7 @@ CREATE INDEX hospital_devices_hospital_code_status_idx      ON hospital_devices(
 CREATE INDEX hospital_devices_ward_id_idx                   ON hospital_devices(ward_id);
 CREATE INDEX hospital_devices_last_hospital_code_status_idx ON hospital_devices(last_hospital_code, status);
 CREATE INDEX hospital_devices_hospital_product_type_status_idx ON hospital_devices(hospital_code, product_type, status);
+CREATE INDEX hospital_devices_hospital_deal_code_idx ON hospital_devices(hospital_code, deal_code) WHERE deal_code IS NOT NULL;
 
 -- 5) D6: 임포트 배치
 CREATE TABLE hospital_device_import_batches (
@@ -102,8 +106,9 @@ CREATE TABLE hospital_device_events (
   changes JSONB, actor_id TEXT REFERENCES users(id) ON DELETE SET NULL, actor_name TEXT,
   edited_at TIMESTAMP(3), edited_by TEXT REFERENCES users(id) ON DELETE SET NULL,
   product_type TEXT,                                                       -- 이벤트 시점 상품유형 스냅샷(REGISTER=지정값, MOVE_WARD/RECOVER=당시 배치 값, CORRECT=변경 후 값)
+  deal_code TEXT,                                                          -- 이벤트 시점 계약건(딜 코드) 스냅샷(B-23) — REGISTER=새 배치 값, 그 외=당시 배치 값(CORRECT=변경 후 값)
   created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT hospital_device_events_type_check CHECK (event_type IN ('REGISTER','MOVE_WARD','RECOVER','CORRECT')),
+  CONSTRAINT hospital_device_events_type_check CHECK (event_type IN ('REGISTER','MOVE_WARD','RECOVER','CORRECT','AS_OPEN','AS_CLEAR')),
   CONSTRAINT hospital_device_events_product_type_check CHECK (product_type IS NULL OR product_type IN ('일반','라이트')),
   CONSTRAINT hospital_device_events_hospital_check CHECK (event_type='CORRECT' OR hospital_code IS NOT NULL),
   CONSTRAINT hospital_device_events_ward_requires_hospital_check CHECK (hospital_code IS NOT NULL OR (from_ward_id IS NULL AND to_ward_id IS NULL)),

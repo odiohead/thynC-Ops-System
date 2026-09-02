@@ -96,9 +96,16 @@ export function parseUnitsQuery(sp: URLSearchParams): { params: UnitsQuery; sort
   const sort = sortRaw ? (UNITS_SORT.find((s) => s === sortRaw) ?? undefined) : 'ward'
   if (sort === undefined) return badRequest('sort는 ward | serial | placedOn | lastEvent 중 하나여야 합니다.')
 
+  // 계약건(B-23) — 딜 코드 또는 'none'(미지정). 존재하지 않는 코드는 0건 매치(검증 없음 — 소프트 참조)
+  const deal = sp.get('deal')?.trim() || null
+  // AS진행중만(B-24) — '1' | 'true'
+  const asRaw = sp.get('as')
+  const as = asRaw == null || asRaw === '' ? null : asRaw === '1' || asRaw === 'true' ? true : undefined
+  if (as === undefined) return badRequest('as는 1 | true 만 허용합니다.')
+
   const hospital = sp.get('hospital')?.trim() || null
   const q = sp.get('q')?.trim() || null
-  return { params: { hospital, model, ward, status, q, wms, usage, productType }, sort }
+  return { params: { hospital, model, ward, status, q, wms, usage, productType, deal, as }, sort }
 }
 
 /** `GET /api/devices/events`·`/events/export` 공용 — hospital/device/type/from/to/refType/refCode/batch/actionGroup/source/q */

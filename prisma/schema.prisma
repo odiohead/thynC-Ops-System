@@ -547,6 +547,9 @@ model HospitalDevice {
   lastEventOn     DateTime?             @map("last_event_on") @db.Date
   replacedById    Int?                  @map("replaced_by_id") // 교체기 유닛(device_units.id)
   productType     String?               @map("product_type") // 상품유형(일반/라이트, B-22) — 자리의 판매 조건(배치 속성). SQL CHECK. REGISTER 이벤트 fold, 교체 상속, 회수 시 마지막 값 보존
+  dealCode        String?               @map("deal_code") // 계약건(딜) 소프트 참조(B-23) — sales_deals.deal_code, FK 없음(재적재 대비). REGISTER fold·교체 상속·회수 시 마지막 값 보존. 부분 인덱스는 SQL만
+  asStartedOn     DateTime?             @map("as_started_on") @db.Date // AS진행중 플래그 시작일(B-24) — ACTIVE 배치 표시 플래그. AS_OPEN set / AS_CLEAR·RECOVER·재REGISTER clear
+  asRefCode       String?               @map("as_ref_code") // AS 연결 유지보수 코드(MNT-…, 소프트 참조)
   createdAt       DateTime              @default(now()) @map("created_at")
   updatedAt       DateTime              @default(now()) @updatedAt @map("updated_at")
   unit            DeviceUnit            @relation("UnitPlacement", fields: [deviceId], references: [id], onDelete: Restrict)
@@ -620,6 +623,7 @@ model HospitalDeviceEvent {
   editedAt        DateTime?                  @map("edited_at")
   editedById      String?                    @map("edited_by")
   productType     String?                    @map("product_type") // 이벤트 시점 상품유형 스냅샷(일반/라이트, SQL CHECK) — REGISTER=지정값·MOVE/RECOVER=당시 배치 값·CORRECT=변경 후 값
+  dealCode        String?                    @map("deal_code") // 이벤트 시점 계약건(딜 코드) 스냅샷(B-23) — REGISTER=새 배치 값·그 외=당시 배치 값·CORRECT=변경 후 값
   createdAt       DateTime                   @default(now()) @map("created_at")
   device          DeviceUnit                 @relation("DeviceEvents", fields: [deviceId], references: [id], onDelete: Restrict)
   hospital        Hospital?                  @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: Restrict)

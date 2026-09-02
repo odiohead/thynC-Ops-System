@@ -6,15 +6,20 @@
  * 불성립이면 409로 트랜잭션 롤백. WMS 매칭은 표시용 일시 계산(DB 쓰기 없음 — §9.2).
  */
 import { Prisma } from '@prisma/client'
-import { normalizeSerial, normalizeWardName, resolveProductTypeDefault, type DeviceEventType, type ProductType, type ProductTypeContext } from '@/lib/deviceRegistryShared'
+import { DEVICE_STATE_EVENT_TYPES, normalizeSerial, normalizeWardName, resolveProductTypeDefault, type DeviceEventType, type ProductType, type ProductTypeContext } from '@/lib/deviceRegistryShared'
 import {
+  DEAL_NOT_OF_HOSPITAL_MESSAGE,
   RegistryError,
   assertTransition,
   eventLabel,
   findUnitsBySerial,
   getDeviceOr404,
+  getHospitalDealContext,
   getHospitalProductTypeContext,
   getOrCreateUnit,
+  resolveDealInput,
+  type DealResolution,
+  type HospitalDealContext,
   getWardById,
   guardOf,
   hospitalNames,
@@ -145,6 +150,12 @@ export interface RegisterItem {
    * `opts.productTypeResolved`가 true면(임포트 실행 경로) 규칙을 건너뛰고 값(null 포함)을 그대로 쓴다
    */
   productType?: string | null
+  /**
+   * 계약건(딜 코드, B-23 — 선택 입력). 명시 코드는 이 병원 계약완료 딜이어야 한다(아니면 409).
+   * 생략이면 계약완료 딜 1건일 때 자동 기본값(명시 상품유형이 그 딜과 다르면 자동값 폐기 — 미지정).
+   * 딜이 정해지면 상품유형은 딜에서 파생(명시 유형이 명시 딜과 다르면 400).
+   */
+  dealCode?: string | null
 }
 
 export interface RegisterOpts extends RegistryOpts {
@@ -156,6 +167,8 @@ export interface RegisterOpts extends RegistryOpts {
   productTypeResolved?: boolean
   /** 테스트 전용 — 병원 딜 대신 이 문맥으로 기본값 규칙을 적용(스모크에서 혼합 병원 시나리오 주입) */
   productTypeContextOverride?: ProductTypeContext | null
+  /** 테스트 전용 — 병원 계약완료 딜 목록 대신 이 문맥으로 계약건 규칙(B-23)을 적용 */
+  dealContextOverride?: HospitalDealContext | null
 }
 
 export interface RegisteredRef {
@@ -170,6 +183,8 @@ export interface RegisteredRef {
   usageTypeId: number | null
   /** 이 REGISTER가 정한 배치 상품유형(null=미지정) */
   productType: string | null
+  /** 이 REGISTER가 정한 배치 계약건(딜 코드, null=미지정 — B-23) */
+  dealCode: string | null
 }
 
 export interface TransferredRef extends RegisteredRef {
@@ -205,6 +220,10 @@ interface PreparedItem {
   productTypeExplicit: ProductType | null | undefined
   /** 최종 배치 상품유형(규칙 적용 후) */
   productType: ProductType | null
+  /** 명시 계약건(딜 코드, trim) — null/undefined면 자동 기본값 대상 */
+  dealExplicit: string | null | undefined
+  /** 최종 배치 계약건(규칙 적용 후) */
+  dealCode: string | null
   /** 배치 행이 있는 기존 개체 */
   existing: DeviceRow | null
   /** 기존 유닛(배치 유무 무관) */
@@ -266,6 +285,8 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
       usage,
       productTypeExplicit,
       productType: null,
+      dealExplicit: item.dealCode === undefined ? undefined : item.dealCode == null || !String(item.dealCode).trim() ? null : String(item.dealCode).trim(),
+      dealCode: null,
       existing: null,
       unit: null,
       unitCreated: false,
@@ -314,14 +335,32 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
     throw new RegistryError(409, '이미 이 병원에 배치 중인 시리얼입니다', { skipped })
   }
 
-  // 2b) 상품유형(배치 속성, B-22) — 명시값 > 병원 계약완료 딜 기본값 규칙(혼합 병원 + 미지정 → 400 필수). skip 항목은 배치가 바뀌지 않으므로 제외
+  // 2b) 상품유형(배치 속성, B-22) + 계약건(B-23) — 계약건 명시/자동 기본값 → 딜이 정해지면 상품유형은 딜에서 파생,
+  //     아니면 기존 상품유형 기본값 규칙(혼합 병원 + 미지정 → 400 필수). skip 항목은 배치가 바뀌지 않으므로 제외
   const work = prepared.filter((x) => x.kind !== 'skip')
   if (opts?.productTypeResolved) {
-    for (const x of work) x.productType = x.productTypeExplicit ?? null
+    // 임포트 실행 경로 — 미리보기가 이미 규칙(상품유형·계약건)을 적용한 값을 그대로 쓴다
+    for (const x of work) {
+      x.productType = x.productTypeExplicit ?? null
+      x.dealCode = x.dealExplicit ?? null
+    }
   } else if (work.length > 0) {
     const ptCtx = opts?.productTypeContextOverride !== undefined ? opts.productTypeContextOverride : await getHospitalProductTypeContext(here, tx)
+    const dealCtx = opts?.dealContextOverride !== undefined ? opts.dealContextOverride : await getHospitalDealContext(here, tx)
     const ptWarnings = new Set<string>()
     for (const x of work) {
+      let dealRes: DealResolution
+      try {
+        dealRes = resolveDealInput(dealCtx, x.dealExplicit ?? null, x.productTypeExplicit ?? null)
+      } catch (e) {
+        if (e instanceof RegistryError) throw new RegistryError(e.status, `${x.serialNo}: ${e.message}`, { serial: x.serialNo })
+        throw e
+      }
+      x.dealCode = dealRes.deal?.dealCode ?? null
+      if (dealRes.productTypeFromDeal != null) {
+        x.productType = dealRes.productTypeFromDeal // 딜이 자리의 유형을 정한다 — 유형 기본값 규칙(혼합 400 포함) 생략
+        continue
+      }
       const res = resolveProductTypeDefault(ptCtx, x.productTypeExplicit ?? null)
       if (res.error) throw new RegistryError(400, res.error, { serial: x.serialNo })
       if (res.warning) ptWarnings.add(res.warning)
@@ -398,6 +437,7 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
         source: p.source,
         importBatchId: opts?.importBatchId ?? null,
         productType: x.existing!.productType, // 상대 병원 배치의 상품유형 스냅샷
+        dealCode: x.existing!.dealCode, // 상대 병원 배치의 계약건 스냅샷(B-23)
         actor: p.actor,
       })
     }
@@ -414,6 +454,7 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
       source: p.source,
       importBatchId: opts?.importBatchId ?? null,
       productType: x.productType, // 이 병원 자리의 판매 조건(새 REGISTER가 정한다)
+      dealCode: x.dealCode, // 이 배치가 속한 계약건(새 REGISTER가 정한다 — B-23)
       actor: p.actor,
     })
     slots.push({ x, deviceId, recoverIdx, registerIdx })
@@ -448,7 +489,7 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
     wms: Object.fromEntries(Array.from(wmsMap.entries())),
   }
   for (const s of slots) {
-    const ref: RegisteredRef = { id: s.deviceId, serialNo: s.x.serialNo, eventId: events[s.registerIdx].id, wardId: s.x.ward?.id ?? null, unitCreated: s.x.unitCreated, usageTypeId: s.x.unit?.usageTypeId ?? null, productType: s.x.productType }
+    const ref: RegisteredRef = { id: s.deviceId, serialNo: s.x.serialNo, eventId: events[s.registerIdx].id, wardId: s.x.ward?.id ?? null, unitCreated: s.x.unitCreated, usageTypeId: s.x.unit?.usageTypeId ?? null, productType: s.x.productType, dealCode: s.x.dealCode }
     if (s.x.kind === 'create') result.created.push(ref)
     else if (s.x.kind === 'reregister') result.reregistered.push(ref)
     else if (s.x.kind === 'transfer') {
@@ -502,6 +543,7 @@ export async function moveDeviceWard(
       actionGroup: p.actionGroup,
       source: p.source,
       productType: device.productType, // 기록 시점 배치 상품유형 스냅샷
+      dealCode: device.dealCode, // 기록 시점 배치 계약건 스냅샷(B-23)
       actor: p.actor,
     })
     if (!event) throw new RegistryError(409, '같은 연결 키의 이벤트가 이미 기록되어 있습니다')
@@ -552,6 +594,7 @@ export async function recoverDevice(
       actionGroup: p.actionGroup,
       source: p.source,
       productType: device.productType, // 회수되는 자리의 상품유형 스냅샷(교체 집계 축)
+      dealCode: device.dealCode, // 회수되는 자리의 계약건 스냅샷(딜별 교체 집계 축 — B-23)
       actor: p.actor,
     })
     if (!event) throw new RegistryError(409, '같은 연결 키의 이벤트가 이미 기록되어 있습니다')
@@ -590,8 +633,15 @@ export interface ReplaceInput {
    * (생략 시 병원 딜 기본값 규칙 — 혼합 병원이면 400 필수), 구 배치가 있는 경우 지정값은 무시(경고)
    */
   productType?: string | null
+  /**
+   * 계약건(딜 코드, B-23) — 신 배치는 **구 배치의 계약건을 상속**한다. 구 기기가 원장에 없어 소급 등록하는 경우에만 이 값을 쓰고
+   * (생략 시 계약건 규칙 — 단일 딜 자동 기본값), 구 배치가 있는 경우 지정값은 무시(경고)
+   */
+  dealCode?: string | null
   /** 테스트 전용 — 소급 경로 기본값 규칙에 쓸 문맥 주입 */
   productTypeContextOverride?: ProductTypeContext | null
+  /** 테스트 전용 — 소급 경로 계약건 규칙(B-23)에 쓸 문맥 주입 */
+  dealContextOverride?: HospitalDealContext | null
 }
 
 export interface ReplaceResult {
@@ -612,6 +662,8 @@ export interface ReplaceResult {
   newDevice: DeviceRow
   /** 신 배치에 적용된 상품유형(구 배치 상속 / 소급 경로는 입력·기본값) */
   productType: string | null
+  /** 신 배치에 적용된 계약건(구 배치 상속 / 소급 경로는 입력·기본값 — B-23) */
+  dealCode: string | null
   eventIds: number[]
   warnings: string[]
   wms: Record<number, WmsMatch | null>
@@ -664,6 +716,8 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
     const oldEvents = old ? (await loadDeviceEvents(tx, [old.id])).get(old.id) ?? [] : []
     /** 신 배치 상품유형 — 구 배치 상속(B-22). 소급 경로만 입력·병원 기본값 규칙 */
     let inheritedProductType: string | null = null
+    /** 신 배치 계약건 — 구 배치 상속(B-23). 소급 경로만 입력·자동 기본값 규칙 */
+    let inheritedDealCode: string | null = null
     if (!old) {
       oldCase = 'backfill'
       const res = resolveModel(models, { serialNo: oldKey, deviceInfoId: input.oldDeviceInfoId ?? oldUnit?.deviceInfoId ?? null })
@@ -673,17 +727,26 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
       oldWard = await resolveWardInput(tx, here, { wardId: input.oldWardId, wardName: input.oldWardName }, { autoCreate })
       oldWardAtTime = oldWard?.id ?? null
       warnings.push(`구 기기 ${oldKey}는 원장에 없어 업무일자로 소급 등록했습니다 (실제 설치일은 기록되지 않음)`)
-      const ptCtx = input.productTypeContextOverride !== undefined ? input.productTypeContextOverride : await getHospitalProductTypeContext(here, tx)
-      const ptRes = resolveProductTypeDefault(ptCtx, productTypeInput ?? null)
-      if (ptRes.error) throw new RegistryError(400, ptRes.error)
-      if (ptRes.warning) warnings.push(ptRes.warning)
-      inheritedProductType = ptRes.productType
+      // 계약건(B-23) 먼저 — 딜이 정해지고 명시 상품유형이 없으면 상품유형은 딜에서 파생
+      const dealCtx = input.dealContextOverride !== undefined ? input.dealContextOverride : await getHospitalDealContext(here, tx)
+      const dealRes: DealResolution = resolveDealInput(dealCtx, input.dealCode ?? null, productTypeInput ?? null)
+      inheritedDealCode = dealRes.deal?.dealCode ?? null
+      if (dealRes.productTypeFromDeal != null) {
+        inheritedProductType = dealRes.productTypeFromDeal
+      } else {
+        const ptCtx = input.productTypeContextOverride !== undefined ? input.productTypeContextOverride : await getHospitalProductTypeContext(here, tx)
+        const ptRes = resolveProductTypeDefault(ptCtx, productTypeInput ?? null)
+        if (ptRes.error) throw new RegistryError(400, ptRes.error)
+        if (ptRes.warning) warnings.push(ptRes.warning)
+        inheritedProductType = ptRes.productType
+      }
     } else if (old.status === 'ACTIVE' && old.hospitalCode === here) {
       oldCase = 'active_here'
       const st = stateAt(oldEvents, p.occurredOn)
       assertTransition(st, 'RECOVER', here, { serial: old.serialNo })
       oldWardAtTime = st.wardId
       inheritedProductType = old.productType
+      inheritedDealCode = old.dealCode
     } else if (old.status === 'ACTIVE') {
       const name = (await hospitalNames(tx, [old.hospitalCode])).get(old.hospitalCode!) ?? old.hospitalCode
       throw new RegistryError(409, `구 기기가 ${name}에 배치 중 — 그 병원에서 회수(또는 이관) 기록 후 신 기기를 등록으로 처리하세요`) // (2)
@@ -695,9 +758,13 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
       linkedRecover = [...sortEvents(oldEvents)].reverse().find((e) => e.eventType === 'RECOVER') ?? null
       oldWardAtTime = linkedRecover?.fromWardId ?? null
       inheritedProductType = old.productType // 회수 전 마지막 값(배치 행 보존분)
+      inheritedDealCode = old.dealCode
     }
     if (oldCase !== 'backfill' && productTypeInput !== undefined && productTypeInput !== inheritedProductType) {
       warnings.push(`상품유형은 구 기기 배치 값(${inheritedProductType ?? '미지정'})을 상속합니다 — 지정값(${productTypeInput ?? '미지정'})은 무시`)
+    }
+    if (oldCase !== 'backfill' && input.dealCode !== undefined && (input.dealCode ?? null) !== inheritedDealCode) {
+      warnings.push(`계약건은 구 기기 배치 값(${inheritedDealCode ?? '미지정'})을 상속합니다 — 지정값(${input.dealCode ?? '미지정'})은 무시`)
     }
 
     // ── 신 기기 병동(기본 구 병동)
@@ -762,7 +829,7 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
     let linkedRecoverEventId: number | null = null
 
     if (oldCase === 'backfill') {
-      backfillEvent = await insertEvent(tx, { ...base, deviceId: oldId, eventType: 'REGISTER', hospitalCode: here, toWardId: oldWardAtTime, memo: '교체 시 소급 등록', productType: inheritedProductType })
+      backfillEvent = await insertEvent(tx, { ...base, deviceId: oldId, eventType: 'REGISTER', hospitalCode: here, toWardId: oldWardAtTime, memo: '교체 시 소급 등록', productType: inheritedProductType, dealCode: inheritedDealCode })
       eventIds.push(backfillEvent!.id)
     }
     if (oldCase !== 'recovered_here') {
@@ -776,6 +843,7 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
         relatedDeviceId: newId,
         memo: p.memo,
         productType: inheritedProductType, // 회수되는 자리의 상품유형(교체 집계 축)
+        dealCode: inheritedDealCode, // 회수되는 자리의 계약건(딜별 교체 집계 축 — B-23)
       })
       eventIds.push(recoverEvent!.id)
     } else if (linkedRecover) {
@@ -793,6 +861,7 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
         reasonCodeId: transferReason.id,
         memo: p.memo,
         productType: newDev!.productType, // 상대 병원 배치의 상품유형 스냅샷
+        dealCode: newDev!.dealCode, // 상대 병원 배치의 계약건 스냅샷
       })
       eventIds.push(transferRecoverEvent!.id)
     }
@@ -800,14 +869,17 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
       if ((newDev!.productType ?? null) !== (inheritedProductType ?? null)) {
         warnings.push(`신 기기 ${newDev!.serialNo}는 이미 이 병원에 상품유형 ${newDev!.productType ?? '미지정'}(으)로 배치 중 — 구 기기 값(${inheritedProductType ?? '미지정'})을 상속하지 않습니다 (변경은 상품유형 지정)`)
       }
+      if ((newDev!.dealCode ?? null) !== (inheritedDealCode ?? null)) {
+        warnings.push(`신 기기 ${newDev!.serialNo}는 이미 이 병원에 계약건 ${newDev!.dealCode ?? '미지정'}(으)로 배치 중 — 구 기기 값(${inheritedDealCode ?? '미지정'})을 상속하지 않습니다 (변경은 계약건 지정)`)
+      }
       if (targetWardId != null && newDev!.wardId !== targetWardId) {
         const st = stateAt(newEvents, p.occurredOn)
         assertTransition(st, 'MOVE_WARD', here, { serial: newDev!.serialNo })
-        movedNewEvent = await insertEvent(tx, { ...base, deviceId: newId, eventType: 'MOVE_WARD', hospitalCode: here, fromWardId: st.wardId, toWardId: targetWardId, memo: p.memo, productType: newDev!.productType })
+        movedNewEvent = await insertEvent(tx, { ...base, deviceId: newId, eventType: 'MOVE_WARD', hospitalCode: here, fromWardId: st.wardId, toWardId: targetWardId, memo: p.memo, productType: newDev!.productType, dealCode: newDev!.dealCode })
         eventIds.push(movedNewEvent!.id)
       }
     } else {
-      registerEvent = await insertEvent(tx, { ...base, deviceId: newId, eventType: 'REGISTER', hospitalCode: here, toWardId: targetWardId, relatedDeviceId: oldId, memo: p.memo, productType: inheritedProductType })
+      registerEvent = await insertEvent(tx, { ...base, deviceId: newId, eventType: 'REGISTER', hospitalCode: here, toWardId: targetWardId, relatedDeviceId: oldId, memo: p.memo, productType: inheritedProductType, dealCode: inheritedDealCode })
       eventIds.push(registerEvent!.id)
     }
 
@@ -831,6 +903,7 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
       oldDevice,
       newDevice,
       productType: newDevice.productType,
+      dealCode: newDevice.dealCode,
       eventIds,
       warnings,
       wms: Object.fromEntries(Array.from(wmsMap.entries())),
@@ -842,11 +915,11 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
 // bulkDeviceAction — 일괄 이동/회수/상품유형 지정 (§7.1 bulk 행: 같은 병원 ACTIVE만, 단일 tx)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const BULK_ACTIONS = ['MOVE_WARD', 'RECOVER', 'SET_PRODUCT_TYPE'] as const
+export const BULK_ACTIONS = ['MOVE_WARD', 'RECOVER', 'SET_PRODUCT_TYPE', 'SET_DEAL'] as const
 export type BulkActionKind = (typeof BULK_ACTIONS)[number]
 
 export interface BulkInput {
-  /** SET_PRODUCT_TYPE(B-22): 기기마다 CORRECT 이벤트(changes.productType {before,after}) — write(USER+), 같은 action_group */
+  /** SET_PRODUCT_TYPE(B-22)·SET_DEAL(B-23): 기기마다 CORRECT 이벤트({before,after}) — write(USER+), 같은 action_group */
   action: BulkActionKind
   deviceIds: number[]
   toWardId?: number | null
@@ -854,6 +927,8 @@ export interface BulkInput {
   reasonCodeId?: number | null
   /** SET_PRODUCT_TYPE — 일반/라이트(별칭 허용) 또는 null(미지정으로) */
   productType?: string | null
+  /** SET_DEAL — 이 병원 계약완료 딜 코드 또는 null(미지정으로). 상품유형과의 결합 검증 없음(백필·정정 도구) */
+  dealCode?: string | null
 }
 
 export interface BulkResult {
@@ -869,7 +944,7 @@ export const BULK_MAX = 2000
 
 export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?: RegistryOpts): Promise<BulkResult> {
   return withRegistryTx(opts, async (tx) => {
-    if (!BULK_ACTIONS.includes(input.action)) throw new RegistryError(400, '일괄 액션은 MOVE_WARD·RECOVER·SET_PRODUCT_TYPE만 가능합니다')
+    if (!BULK_ACTIONS.includes(input.action)) throw new RegistryError(400, '일괄 액션은 MOVE_WARD·RECOVER·SET_PRODUCT_TYPE·SET_DEAL만 가능합니다')
     const p = await prepareCtx(tx, ctx, { requireHospital: true })
     const here = p.hospitalCode!
     const ids = uniqInts(input.deviceIds ?? [])
@@ -914,6 +989,37 @@ export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?
       await tx.hospitalDevice.updateMany({ where: { deviceId: { in: targets.map((d) => d.id) }, status: 'ACTIVE', hospitalCode: here }, data: { productType: after } })
       return { actionGroup: p.actionGroup, events, eventIds: events.map((e) => e.id), skipped, affectedDeviceIds: targets.map((d) => d.id), warnings: p.warnings }
     }
+    if (input.action === 'SET_DEAL') {
+      // 계약건 일괄 지정(B-23) — 상태 전이 없음. 기기마다 CORRECT(changes.dealCode) + 배치 행 갱신(fold도 같은 값을 낸다).
+      // 상품유형과의 결합 검증은 하지 않는다 — 백필·정정 도구(불일치는 요약 대조 표에서 드러난다).
+      const after = input.dealCode == null || !String(input.dealCode).trim() ? null : String(input.dealCode).trim()
+      if (after != null) {
+        const dealCtx = await getHospitalDealContext(here, tx)
+        if (!dealCtx.deals.some((d) => d.dealCode === after)) throw new RegistryError(409, DEAL_NOT_OF_HOSPITAL_MESSAGE)
+      }
+      for (const d of devices) if ((d.dealCode ?? null) === after) skipped.push({ deviceId: d.id, serialNo: d.serialNo, reason: `이미 계약건 ${after ?? '미지정'}` })
+      targets = devices.filter((d) => (d.dealCode ?? null) !== after)
+      if (targets.length === 0) throw new RegistryError(409, `선택한 기기가 모두 이미 계약건 ${after ?? '미지정'}입니다`, { skipped })
+      const events = await insertEvents(
+        tx,
+        targets.map((d) => ({
+          deviceId: d.id,
+          eventType: 'CORRECT' as const,
+          hospitalCode: here,
+          occurredOn: p.occurredOn,
+          memo: p.memo,
+          ref: p.ref,
+          actionGroup: p.actionGroup,
+          source: p.source,
+          changes: { dealCode: { before: d.dealCode ?? null, after } } as unknown as Prisma.InputJsonValue,
+          productType: d.productType,
+          dealCode: after,
+          actor: p.actor,
+        }))
+      )
+      await tx.hospitalDevice.updateMany({ where: { deviceId: { in: targets.map((d) => d.id) }, status: 'ACTIVE', hospitalCode: here }, data: { dealCode: after } })
+      return { actionGroup: p.actionGroup, events, eventIds: events.map((e) => e.id), skipped, affectedDeviceIds: targets.map((d) => d.id), warnings: p.warnings }
+    }
     if (input.action === 'MOVE_WARD') {
       toWard = await resolveWardInput(tx, here, { wardId: input.toWardId, wardName: input.toWardName }, { autoCreate: opts?.autoCreateWard ?? true })
       if (!toWard) throw new RegistryError(400, '이동할 병동을 지정하세요')
@@ -949,6 +1055,7 @@ export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?
         actionGroup: p.actionGroup,
         source: p.source,
         productType: d.productType, // 기록 시점 배치 상품유형 스냅샷
+        dealCode: d.dealCode, // 기록 시점 배치 계약건 스냅샷
         actor: p.actor,
       })
     }
@@ -978,6 +1085,8 @@ export interface CorrectChanges {
   usageTypeId?: number | null
   /** 상품유형(일반/라이트, null=미지정) — 배치 속성(B-22). 라우트 권한은 write(USER+) */
   productType?: string | null
+  /** 계약건(딜 코드, null=미지정) — 배치 속성(B-23). 이 병원 계약완료 딜이어야 한다(아니면 409). 라우트 권한은 write(USER+) */
+  dealCode?: string | null
 }
 
 export type ChangeSet = Record<string, { before: unknown; after: unknown }>
@@ -1005,8 +1114,9 @@ export async function correctDevice(ctx: RegistryCtx, input: { deviceId: number;
       if (!ns.serialNo) throw new RegistryError(400, '시리얼이 비어 있습니다')
       if (ns.serialNo !== device.serialNo || (ns.serialRaw ?? null) !== (device.serialRaw ?? null)) {
         // 시리얼 정정은 상태 이벤트가 이 병원 REGISTER 1건뿐인 개체만 — 이력이 있으면 정체성 변경이므로 409
+        // (AS_OPEN/AS_CLEAR는 CORRECT처럼 표시 마커라 판정에서 제외 — B-24)
         const events = (await loadDeviceEvents(tx, [device.id])).get(device.id) ?? []
-        const stateEvents = events.filter((e) => e.eventType !== 'CORRECT')
+        const stateEvents = events.filter((e) => (DEVICE_STATE_EVENT_TYPES as readonly string[]).includes(e.eventType))
         const sole = stateEvents.length === 1 && stateEvents[0].eventType === 'REGISTER' && device.status === 'ACTIVE' && stateEvents[0].hospitalCode === device.hospitalCode
         if (!sole) throw new RegistryError(409, '이력이 있는 개체 — 오입력이면 이벤트 취소를 사용하세요')
         if (ns.serialNo !== device.serialNo) {
@@ -1060,6 +1170,20 @@ export async function correctDevice(ctx: RegistryCtx, input: { deviceId: number;
         productTypeSnapshot = v
       }
     }
+    let dealCodeSnapshot: string | null = device.dealCode ?? null
+    if (ch.dealCode !== undefined) {
+      const v = ch.dealCode == null || !String(ch.dealCode).trim() ? null : String(ch.dealCode).trim()
+      if (v !== (device.dealCode ?? null)) {
+        if (v != null) {
+          const hosp = device.hospitalCode ?? device.lastHospitalCode
+          const dealCtx = hosp ? await getHospitalDealContext(hosp, tx) : { deals: [], single: null }
+          if (!dealCtx.deals.some((d) => d.dealCode === v)) throw new RegistryError(409, DEAL_NOT_OF_HOSPITAL_MESSAGE)
+        }
+        changes.dealCode = { before: device.dealCode ?? null, after: v }
+        placementData.dealCode = v
+        dealCodeSnapshot = v
+      }
+    }
     if (Object.keys(changes).length === 0) throw new RegistryError(400, '변경 사항이 없습니다')
 
     try {
@@ -1079,11 +1203,86 @@ export async function correctDevice(ctx: RegistryCtx, input: { deviceId: number;
       source: p.source,
       changes: changes as unknown as Prisma.InputJsonValue,
       productType: productTypeSnapshot,
+      dealCode: dealCodeSnapshot,
       actor: p.actor,
     })
     const updated = await getDeviceOr404(tx, device.id)
     const wms = (await matchInventoryUnits(tx, [toWmsInput(updated, models)])).get(updated.id) ?? null
     return { event: event!, device: updated, changes, wms }
+  })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// openDeviceAs · clearDeviceAs — 'AS진행중' 플래그(B-24, 2026-09-02)
+// ACTIVE 배치의 표시 플래그(제3의 fold 상태 아님). AS_OPEN/AS_CLEAR는 비상태 이벤트로 이력에 남고,
+// 교체·회수(RECOVER)·재등록(REGISTER) fold가 자동으로 플래그를 해제한다. 수동 해제는 clearDeviceAs.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface AsFlagResult {
+  event: EventRow
+  device: DeviceRow
+  warnings: string[]
+}
+
+/** AS 시작 표시 — 같은 병원 ACTIVE에서만(else 409), 이미 표시돼 있으면 409. ref(MAINTENANCE)가 있으면 `as_ref_code`로 남는다 */
+export async function openDeviceAs(ctx: RegistryCtx, input: { deviceId: number }, opts?: RegistryOpts): Promise<AsFlagResult> {
+  return withRegistryTx(opts, async (tx) => {
+    const device = await getDeviceOr404(tx, input.deviceId)
+    const here = ctx.hospitalCode ?? device.hospitalCode
+    assertTransition(device as { status: 'ACTIVE' | 'RECOVERED'; hospitalCode: string | null }, 'AS_OPEN', here ?? null)
+    if (device.asStartedOn) throw new RegistryError(409, '이미 AS진행중으로 표시된 기기입니다')
+    const p = await prepareCtx(tx, { ...ctx, hospitalCode: here }, { requireHospital: true })
+    const events = (await loadDeviceEvents(tx, [device.id])).get(device.id) ?? []
+    const st = stateAt(events, p.occurredOn)
+    assertTransition(st, 'AS_OPEN', here!, { serial: device.serialNo })
+    const event = await insertEvent(tx, {
+      deviceId: device.id,
+      eventType: 'AS_OPEN',
+      hospitalCode: here!,
+      occurredOn: p.occurredOn,
+      memo: p.memo,
+      ref: p.ref,
+      actionGroup: p.actionGroup,
+      source: p.source,
+      productType: device.productType, // 표시 시점 배치 스냅샷
+      dealCode: device.dealCode,
+      actor: p.actor,
+    })
+    if (!event) throw new RegistryError(409, '같은 연결 키의 이벤트가 이미 기록되어 있습니다')
+    await rebuildUnitProjection(tx, device.id, { guard: guardOf(device), illegal: retroIllegal })
+    const updated = await getDeviceOr404(tx, device.id)
+    return { event, device: updated, warnings: p.warnings }
+  })
+}
+
+/** AS 해제 — 표시가 없으면 409. (교체·회수 시에는 fold가 자동 해제하므로 이 호출이 필요 없다) */
+export async function clearDeviceAs(ctx: RegistryCtx, input: { deviceId: number }, opts?: RegistryOpts): Promise<AsFlagResult> {
+  return withRegistryTx(opts, async (tx) => {
+    const device = await getDeviceOr404(tx, input.deviceId)
+    const here = ctx.hospitalCode ?? device.hospitalCode
+    assertTransition(device as { status: 'ACTIVE' | 'RECOVERED'; hospitalCode: string | null }, 'AS_CLEAR', here ?? null)
+    if (!device.asStartedOn) throw new RegistryError(409, 'AS진행중 표시가 없는 기기입니다')
+    const p = await prepareCtx(tx, { ...ctx, hospitalCode: here }, { requireHospital: true })
+    const events = (await loadDeviceEvents(tx, [device.id])).get(device.id) ?? []
+    const st = stateAt(events, p.occurredOn)
+    assertTransition(st, 'AS_CLEAR', here!, { serial: device.serialNo })
+    const event = await insertEvent(tx, {
+      deviceId: device.id,
+      eventType: 'AS_CLEAR',
+      hospitalCode: here!,
+      occurredOn: p.occurredOn,
+      memo: p.memo,
+      ref: p.ref,
+      actionGroup: p.actionGroup,
+      source: p.source,
+      productType: device.productType,
+      dealCode: device.dealCode,
+      actor: p.actor,
+    })
+    if (!event) throw new RegistryError(409, '같은 연결 키의 이벤트가 이미 기록되어 있습니다')
+    await rebuildUnitProjection(tx, device.id, { guard: guardOf(device), illegal: retroIllegal })
+    const updated = await getDeviceOr404(tx, device.id)
+    return { event, device: updated, warnings: p.warnings }
   })
 }
 

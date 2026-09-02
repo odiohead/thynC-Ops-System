@@ -17,6 +17,8 @@ import type {
   CoverageSort,
   DevicePatchBody,
   DevicePatchResponse,
+  DeviceEventRaw,
+  DeviceRaw,
   EventCancelResponse,
   EventPatchBody,
   EventPatchResponse,
@@ -37,6 +39,7 @@ import type {
   RecoverBody,
   RecoverResponse,
   RecoveryReason,
+  RegistryFields,
   UsageType,
   RegisterBody,
   RegisterPreviewResponse,
@@ -181,6 +184,8 @@ function unitsQuery(params: UnitsQueryParams): Record<string, QueryValue> {
     wms: params.wms,
     usage: params.usage,
     productType: params.productType,
+    deal: params.deal,
+    as: params.as ?? undefined,
     page: params.page,
     limit: params.limit,
     sort: params.sort,
@@ -300,9 +305,25 @@ export function bulkDeviceAction(body: BulkBody): Promise<BulkResponse> {
   return apiFetch<BulkResponse>('/api/devices/units/bulk', { method: 'POST', body })
 }
 
-/** memo(write) / usageTypeId·productType(write → CORRECT) / 식별 보정(admin → CORRECT) — 상태·병원·병동 키는 400 */
+/** memo(write) / usageTypeId·productType·dealCode(write → CORRECT) / 식별 보정(admin → CORRECT) — 상태·병원·병동 키는 400 */
 export function patchDevice(id: number, body: DevicePatchBody): Promise<DevicePatchResponse> {
   return apiFetch<DevicePatchResponse>(`/api/devices/units/${id}`, { method: 'PATCH', body })
+}
+
+export interface AsFlagResponse {
+  event: DeviceEventRaw
+  device: DeviceRaw
+  warnings: string[]
+}
+
+/** 'AS진행중' 표시(B-24, write) — ref는 유지보수(MAINTENANCE) 코드 권장. 이미 표시됨·회수됨 409 */
+export function openDeviceAs(id: number, body: RegistryFields = {}): Promise<AsFlagResponse> {
+  return apiFetch<AsFlagResponse>(`/api/devices/units/${id}/as-open`, { method: 'POST', body })
+}
+
+/** 'AS진행중' 표시 수동 해제(B-24, write) — 표시 없음 409. 교체·회수 시에는 자동 해제 */
+export function clearDeviceAs(id: number, body: RegistryFields = {}): Promise<AsFlagResponse> {
+  return apiFetch<AsFlagResponse>(`/api/devices/units/${id}/as-clear`, { method: 'POST', body })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

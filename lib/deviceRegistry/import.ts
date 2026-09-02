@@ -27,8 +27,11 @@ import { prisma } from '@/lib/prisma'
 import {
   RegistryError,
   findUnitsBySerial,
+  getHospitalDealContext,
   getHospitalProductTypeContext,
   hospitalNames,
+  resolveDealInput,
+  type HospitalDealContext,
   listHospitalWards,
   loadRecoveryReasons,
   loadTrackedModels,
@@ -78,6 +81,8 @@ export interface ImportRowInput {
   usageTypeId?: number | null
   /** F열/붙여넣기 상품유형 열('일반'·'라이트'·'lite'…) — 미매칭은 error 판정 */
   productTypeInput?: string | null
+  /** 항목별 계약건(딜 코드, B-23 — 등록 폼 items[i].dealCode 경유). 이 병원 계약완료 딜이 아니면 error 판정 */
+  dealCode?: string | null
 }
 
 export interface PreviewDefaults {
@@ -89,6 +94,10 @@ export interface PreviewDefaults {
   productType?: string | null
   /** 테스트 전용 — 병원 딜 대신 이 문맥으로 규칙 적용(혼합 병원 판정 검증용). undefined면 DB 조회 */
   productTypeContextOverride?: ProductTypeContext | null
+  /** 계약건 기본값(폼 공통, B-23) — 행 입력이 없을 때. 없으면 계약완료 딜 1건일 때만 자동 기본값 */
+  dealCode?: string | null
+  /** 테스트 전용 — 계약건 규칙(B-23)에 쓸 문맥 주입. undefined면 DB 조회 */
+  dealContextOverride?: HospitalDealContext | null
   wardMode: 'column' | 'fixed'
   /** wardMode=fixed */
   wardId?: number | null
@@ -130,8 +139,10 @@ export interface PreviewRow {
   /** 해석된 용도(행 입력 > 기본값 > 기존 유닛 값). null=미지정 */
   usageTypeId: number | null
   usageTypeName: string | null
-  /** 해석된 상품유형(행 입력 > 폼 기본 > 병원 딜 규칙). null=미지정. 혼합 병원에서 미지정이면 error 판정 */
+  /** 해석된 상품유형(행 입력 > 폼 기본 > 계약건 파생 > 병원 딜 규칙). null=미지정. 혼합 병원에서 미지정이면 error 판정 */
   productType: ProductType | null
+  /** 해석된 계약건(행 입력 > 폼 기본 > 단일 딜 자동 기본값 — B-23). null=미지정 */
+  dealCode: string | null
   wardInput: string | null
   wardId: number | null
   wardName: string | null
@@ -234,6 +245,11 @@ export async function previewRows(
     throw new RegistryError(400, '기본 상품유형이 올바르지 않습니다 (일반/라이트)')
   }
   const ptCtx = defaults.productTypeContextOverride !== undefined ? defaults.productTypeContextOverride : await getHospitalProductTypeContext(hospitalCode, client)
+  const dealCtx: HospitalDealContext | null = defaults.dealContextOverride !== undefined ? defaults.dealContextOverride : await getHospitalDealContext(hospitalCode, client)
+  const defaultDealCode = defaults.dealCode != null && String(defaults.dealCode).trim() ? String(defaults.dealCode).trim() : null
+  if (defaultDealCode && dealCtx && !dealCtx.deals.some((d) => d.dealCode === defaultDealCode)) {
+    throw new RegistryError(400, '기본 계약건이 올바르지 않습니다 — 이 병원의 계약완료 딜이 아닙니다')
+  }
   let fixedWard: WardRef | null = null
   if (defaults.wardMode === 'fixed' && defaults.wardId != null) {
     fixedWard = wardsById.get(Number(defaults.wardId)) ?? null
@@ -288,6 +304,7 @@ export async function previewRows(
       usageTypeId: null,
       usageTypeName: null,
       productType: null,
+      dealCode: null,
       wardInput: null,
       wardId: null,
       wardName: null,
@@ -349,15 +366,34 @@ export async function previewRows(
     } catch (e) {
       w.errors.push(e instanceof RegistryError ? e.message : String(e))
     }
-    // 상품유형 — 행 입력(별칭) > 폼 기본 > 병원 딜 규칙. 미매칭은 error(항상), 혼합+미지정 error·딜 0건 warn은 skip 행에서 무시(3차에서 판정)
+    // 상품유형 — 행 입력(별칭) > 폼 기본 > 계약건 파생 > 병원 딜 규칙. 미매칭은 error(항상), 혼합+미지정 error·딜 0건 warn·계약건 오류는 skip 행에서 무시(3차에서 판정)
+    let explicitPt: ProductType | null = null
+    let ptParseOk = true
     try {
-      const explicit = parseProductTypeInput(r.productTypeInput) ?? defaultProductType
-      const res = resolveProductTypeDefault(ptCtx ?? null, explicit)
-      out.productType = res.productType
-      if (res.error) w.ptErrors.push(res.error)
-      else if (res.warning) w.ptWarns.push(res.warning)
+      explicitPt = parseProductTypeInput(r.productTypeInput) ?? defaultProductType
     } catch (e) {
+      ptParseOk = false
       w.errors.push(e instanceof RegistryError ? e.message : String(e))
+    }
+    // 계약건(B-23) — 행 입력 > 폼 기본 > 단일 딜 자동 기본값. 잘못된 코드·유형 충돌은 행 판정 오류(ptErrors — skip 행 무시 규약 공유)
+    try {
+      const dealRes = resolveDealInput(dealCtx, r.dealCode ?? defaultDealCode, explicitPt)
+      out.dealCode = dealRes.deal?.dealCode ?? null
+      if (ptParseOk) {
+        if (dealRes.productTypeFromDeal != null) {
+          out.productType = dealRes.productTypeFromDeal // 딜이 자리의 유형을 정한다 — 유형 기본값 규칙 생략
+        } else {
+          const res = resolveProductTypeDefault(ptCtx ?? null, explicitPt)
+          out.productType = res.productType
+          if (res.error) w.ptErrors.push(res.error)
+          else if (res.warning) w.ptWarns.push(res.warning)
+        }
+      }
+    } catch (e) {
+      if (e instanceof RegistryError) {
+        w.ptErrors.push(e.message)
+        if (ptParseOk) out.productType = explicitPt
+      } else throw e
     }
   }
 
@@ -733,6 +769,7 @@ export async function importBatch(ctx: RegistryCtx, input: ImportInput, opts?: R
       extDeviceCode: r.extDeviceCode,
       usageTypeId: r.usageTypeId,
       productType: r.productType,
+      dealCode: r.dealCode,
     }))
     const conflicts = Object.fromEntries(executing.filter((r) => r.action === 'TRANSFER').map((r) => [r.serialNo, 'TRANSFER' as const]))
     let result: RegisterResult

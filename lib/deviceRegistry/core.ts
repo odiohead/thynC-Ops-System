@@ -306,7 +306,12 @@ export interface FoldEvent {
   relatedDeviceId: number | null
   /** 이벤트 시점 상품유형 스냅샷 — REGISTER가 배치 값을 정한다(B-22) */
   productType?: string | null
-  /** CORRECT changes — `productType.after`가 있으면 fold가 배치 값을 갱신한다 */
+  /** 이벤트 시점 계약건(딜 코드) 스냅샷 — REGISTER가 배치 값을 정한다(B-23) */
+  dealCode?: string | null
+  /** 소프트 참조 — AS_OPEN의 MAINTENANCE ref가 `as_ref_code`로 fold 된다(B-24) */
+  refType?: string | null
+  refCode?: string | null
+  /** CORRECT changes — `productType.after`/`dealCode.after`가 있으면 fold가 배치 값을 갱신한다 */
   changes?: unknown
 }
 
@@ -321,9 +326,15 @@ export interface FoldState {
   replacedById: number | null
   /** 상품유형(일반/라이트) — REGISTER 이벤트 값, CORRECT(changes.productType)로 갱신, RECOVER는 마지막 값 유지(표시용) */
   productType: string | null
+  /** 계약건(딜 코드, B-23) — REGISTER 이벤트 값, CORRECT(changes.dealCode)로 갱신, RECOVER는 마지막 값 유지(표시용) */
+  dealCode: string | null
+  /** AS진행중 플래그(B-24) — AS_OPEN이 set, AS_CLEAR가 clear, RECOVER·재REGISTER가 자동 clear */
+  asStartedOn: string | null
+  /** AS_OPEN 이벤트의 MAINTENANCE ref 코드 */
+  asRefCode: string | null
   lastEventType: string | null
   lastEventOn: string | null
-  /** CORRECT 제외 상태 이벤트 수 */
+  /** CORRECT·AS_OPEN·AS_CLEAR 제외 상태 이벤트 수 */
   stateEventCount: number
 }
 
@@ -337,6 +348,9 @@ export const EMPTY_STATE: FoldState = {
   recoverReasonId: null,
   replacedById: null,
   productType: null,
+  dealCode: null,
+  asStartedOn: null,
+  asRefCode: null,
   lastEventType: null,
   lastEventOn: null,
   stateEventCount: 0,
@@ -349,6 +363,15 @@ function productTypeAfterOf(changes: unknown): string | null | undefined {
   if (!c || typeof c !== 'object') return undefined
   const after = (c as { after?: unknown }).after
   return after == null ? null : isProductType(after) ? after : undefined
+}
+
+/** CORRECT changes JSON에서 계약건(딜 코드) 변경 후 값을 꺼낸다(없으면 undefined) */
+function dealCodeAfterOf(changes: unknown): string | null | undefined {
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes)) return undefined
+  const c = (changes as Record<string, unknown>).dealCode
+  if (!c || typeof c !== 'object') return undefined
+  const after = (c as { after?: unknown }).after
+  return after == null ? null : typeof after === 'string' ? after : undefined
 }
 
 /** (occurred_on ASC, id ASC) — 같은 일자 순서는 id (불변식 3) */
@@ -377,7 +400,7 @@ export function retroIllegal(ev: FoldEvent): RegistryError {
 
 /**
  * fold 한 단계 — 전이가 성립하는지 판정만 (기록 시점의 병원 = ev.hospitalCode).
- * REGISTER: NONE·RECOVERED에서만 / MOVE_WARD·RECOVER: 같은 병원 ACTIVE에서만 / CORRECT: 항상.
+ * REGISTER: NONE·RECOVERED에서만 / MOVE_WARD·RECOVER·AS_OPEN·AS_CLEAR: 같은 병원 ACTIVE에서만 / CORRECT: 항상.
  */
 function foldStepOk(state: FoldState, ev: FoldEvent): boolean {
   switch (ev.eventType) {
@@ -385,6 +408,8 @@ function foldStepOk(state: FoldState, ev: FoldEvent): boolean {
       return state.status !== 'ACTIVE'
     case 'MOVE_WARD':
     case 'RECOVER':
+    case 'AS_OPEN':
+    case 'AS_CLEAR':
       return state.status === 'ACTIVE' && state.hospitalCode === ev.hospitalCode
     case 'CORRECT':
       return true
@@ -412,6 +437,9 @@ export function foldEvents(events: readonly FoldEvent[], illegal: (ev: FoldEvent
           lastHospitalCode: null,
           replacedById: null,
           productType: ev.productType ?? null, // 자리의 판매 조건은 새 REGISTER가 다시 정한다(회수 전 값 승계 없음)
+          dealCode: ev.dealCode ?? null, // 계약건도 새 REGISTER가 다시 정한다(B-23)
+          asStartedOn: null, // 재등록 시 AS 플래그 초기화(B-24)
+          asRefCode: null,
         }
         break
       case 'MOVE_WARD':
@@ -427,12 +455,23 @@ export function foldEvents(events: readonly FoldEvent[], illegal: (ev: FoldEvent
           recoveredOn: on,
           recoverReasonId: ev.reasonCodeId,
           replacedById: ev.relatedDeviceId,
+          asStartedOn: null, // 회수(교체 포함) 시 AS 플래그 자동 해제(B-24). dealCode는 마지막 값 보존(표시용)
+          asRefCode: null,
         }
         break
+      case 'AS_OPEN':
+        // 비상태 표시 이벤트(B-24) — 플래그만 접고 last_event·stateEventCount 미반영(CORRECT 규약과 동일)
+        s = { ...s, asStartedOn: on, asRefCode: ev.refType === 'MAINTENANCE' ? (ev.refCode ?? null) : null }
+        continue
+      case 'AS_CLEAR':
+        s = { ...s, asStartedOn: null, asRefCode: null }
+        continue
       case 'CORRECT': {
         const pt = productTypeAfterOf(ev.changes)
         if (pt !== undefined) s = { ...s, productType: pt }
-        continue // 식별 컬럼만 — 프로젝션·last_event 미반영(상품유형 정정만 배치 값 갱신)
+        const dc = dealCodeAfterOf(ev.changes)
+        if (dc !== undefined) s = { ...s, dealCode: dc }
+        continue // 식별 컬럼만 — 프로젝션·last_event 미반영(상품유형·계약건 정정만 배치 값 갱신)
       }
     }
     s.lastEventType = ev.eventType
@@ -529,6 +568,12 @@ export interface DeviceRow {
   replacedById: number | null
   /** 상품유형(일반/라이트) — 배치 속성(B-22), null=미지정. RECOVERED 행은 회수 전 마지막 값 */
   productType: string | null
+  /** 계약건(딜 코드) 소프트 참조 — 배치 속성(B-23), null=미지정. RECOVERED 행은 회수 전 마지막 값 */
+  dealCode: string | null
+  /** AS진행중 플래그 시작일(B-24) — ACTIVE에서만 값이 있다 */
+  asStartedOn: Date | null
+  /** AS 연결 유지보수 코드(MNT-…) */
+  asRefCode: string | null
   createdAt: Date
   updatedAt: Date
   unitCreatedAt: Date
@@ -562,6 +607,9 @@ export function flattenDevice(unit: UnitRow, placement: PlacementRow): DeviceRow
     lastEventOn: placement.lastEventOn,
     replacedById: placement.replacedById,
     productType: placement.productType,
+    dealCode: placement.dealCode,
+    asStartedOn: placement.asStartedOn,
+    asRefCode: placement.asRefCode,
     createdAt: placement.createdAt,
     updatedAt: placement.updatedAt,
     unitCreatedAt: unit.createdAt,
@@ -586,6 +634,8 @@ export interface EventInput {
   changes?: Prisma.InputJsonValue | null
   /** 이벤트 시점 상품유형 스냅샷(REGISTER=지정값·MOVE/RECOVER=당시 배치 값·CORRECT=변경 후 값) */
   productType?: string | null
+  /** 이벤트 시점 계약건(딜 코드) 스냅샷(REGISTER=새 배치 값·그 외=당시 배치 값·CORRECT=변경 후 값 — B-23) */
+  dealCode?: string | null
   actor: RegistryActor
 }
 
@@ -607,6 +657,7 @@ function toEventData(input: EventInput): Prisma.HospitalDeviceEventUncheckedCrea
     importBatchId: input.importBatchId ?? null,
     changes: input.changes ?? undefined,
     productType: input.productType ?? null,
+    dealCode: input.dealCode ?? null,
     actorId: input.actor.userId,
     actorName: input.actor.name,
   }
@@ -673,6 +724,9 @@ export interface ProjectionColumns {
   lastEventOn: Date | null
   replacedById: number | null
   productType: string | null
+  dealCode: string | null
+  asStartedOn: Date | null
+  asRefCode: string | null
 }
 
 export function projectionData(s: FoldState): ProjectionColumns {
@@ -688,6 +742,9 @@ export function projectionData(s: FoldState): ProjectionColumns {
     lastEventOn: s.lastEventOn ? ymdToDate(s.lastEventOn) : null,
     replacedById: s.replacedById,
     productType: s.productType,
+    dealCode: s.dealCode,
+    asStartedOn: s.asStartedOn ? ymdToDate(s.asStartedOn) : null,
+    asRefCode: s.asRefCode,
   }
 }
 
@@ -1074,6 +1131,76 @@ export function resolveProductTypeInput(
 ): ProductTypeResolution {
   const explicit = input.productType ?? parseProductTypeInput(input.productTypeInput) ?? formDefault ?? null
   return resolveProductTypeDefault(ctx, explicit)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 계약건(딜) 소프트 참조 (B-23, 2026-09-02) — 배치가 속한 딜을 deal_code 문자열로만 가리킨다(FK 없음 — 딜 재적재·삭제 대비, 티켓 ref 선례)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const DEAL_NOT_OF_HOSPITAL_MESSAGE = '이 병원의 계약완료 딜이 아닙니다'
+export const DEAL_PRODUCT_TYPE_CONFLICT_MESSAGE = '선택한 계약건의 상품유형과 다릅니다'
+
+export interface HospitalDealRow {
+  dealCode: string
+  roundNo: number
+  /** sales_deals.product_type — 일반/라이트(딜이 정하는 자리의 판매 조건) */
+  productType: string | null
+  /** Σ daewoong_device_count (도입 수량) */
+  count: number
+  contractDate: string | null
+}
+
+export interface HospitalDealContext {
+  /** 계약완료 딜(차수 오름차순) */
+  deals: HospitalDealRow[]
+  /** 계약완료 딜이 정확히 1건이면 그 딜(미지정 입력의 자동 기본값) */
+  single: HospitalDealRow | null
+}
+
+/** 병원의 계약완료 딜 목록 — §9.1과 같은 조인(SALES_DEAL_STATUS='계약완료'), 딜 코드·상품유형·도입 수량 */
+export async function getHospitalDealContext(hospitalCode: string, client: DbClient = prisma): Promise<HospitalDealContext> {
+  const rows = await client.$queryRaw<{ deal_code: string; round_no: number; product_type: string | null; contract_date: Date | null; cnt: number | null }[]>`
+    SELECT sd.deal_code, sd.round_no, sd.product_type, sd.contract_date, sd.daewoong_device_count AS cnt
+      FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
+     WHERE sd.hospital_code = ${hospitalCode} AND sc.category = ${DEAL_STATUS_CATEGORY} AND sc.name = ${DEAL_STATUS_CONTRACTED}
+     ORDER BY sd.round_no`
+  const deals = rows.map((r) => ({ dealCode: r.deal_code, roundNo: r.round_no, productType: r.product_type, count: Number(r.cnt ?? 0), contractDate: toYmd(r.contract_date) }))
+  return { deals, single: deals.length === 1 ? deals[0] : null }
+}
+
+export interface DealResolution {
+  deal: HospitalDealRow | null
+  /** 딜에서 파생된 상품유형(명시 상품유형이 없고 딜이 정해졌을 때만 non-null) */
+  productTypeFromDeal: ProductType | null
+}
+
+/**
+ * 계약건 해석(B-23) — 선택 입력.
+ * - 명시 코드: 이 병원 계약완료 딜에 있어야 한다(없으면 409). 명시 상품유형이 딜의 유형과 다르면 400.
+ * - 미지정: 계약완료 딜이 정확히 1건이면 자동 기본값. 단, 명시 상품유형이 그 딜의 유형과 다르면 **자동 기본값을 버린다**
+ *   (명시 유형이 "이 딜 소속이 아님"을 말하므로 — 400이 아니라 미지정. 400은 명시 선택에만).
+ * - 딜이 정해지고 명시 상품유형이 없으면 상품유형은 딜의 유형에서 파생(유형 기본값 규칙보다 우선).
+ */
+export function resolveDealInput(
+  ctx: HospitalDealContext | null | undefined,
+  explicitDealCode: string | null | undefined,
+  explicitProductType: ProductType | null
+): DealResolution {
+  const code = explicitDealCode != null && String(explicitDealCode).trim() ? String(explicitDealCode).trim() : null
+  if (code) {
+    const deal = ctx?.deals.find((d) => d.dealCode === code) ?? null
+    if (!deal) throw new RegistryError(409, DEAL_NOT_OF_HOSPITAL_MESSAGE)
+    if (explicitProductType && isProductType(deal.productType) && deal.productType !== explicitProductType) {
+      throw new RegistryError(400, DEAL_PRODUCT_TYPE_CONFLICT_MESSAGE)
+    }
+    return { deal, productTypeFromDeal: explicitProductType == null && isProductType(deal.productType) ? deal.productType : null }
+  }
+  const auto = ctx?.single ?? null
+  if (!auto) return { deal: null, productTypeFromDeal: null }
+  if (explicitProductType && isProductType(auto.productType) && auto.productType !== explicitProductType) {
+    return { deal: null, productTypeFromDeal: null } // 자동 기본값 폐기 — 명시 유형이 단일 딜과 다름
+  }
+  return { deal: auto, productTypeFromDeal: explicitProductType == null && isProductType(auto.productType) ? auto.productType : null }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

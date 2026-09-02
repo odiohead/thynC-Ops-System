@@ -15,11 +15,13 @@ export interface BulkActionBarProps {
   onRecover: () => void
   /** 상품유형(일반/라이트) 일괄 지정 — B-22 */
   onSetProductType?: () => void
+  /** 계약건(딜) 일괄 지정 — B-23 */
+  onSetDeal?: () => void
   onClear: () => void
   note?: string | null
 }
 
-export function BulkActionBar({ count, canWrite, onMove, onRecover, onSetProductType, onClear, note }: BulkActionBarProps) {
+export function BulkActionBar({ count, canWrite, onMove, onRecover, onSetProductType, onSetDeal, onClear, note }: BulkActionBarProps) {
   if (count === 0) return null
   return (
     <div
@@ -42,6 +44,11 @@ export function BulkActionBar({ count, canWrite, onMove, onRecover, onSetProduct
             {onSetProductType && (
               <Button size="sm" variant="outline" onClick={onSetProductType} title="선택 기기의 상품유형(일반/라이트)을 한 번에 지정 — 기기마다 정정 이벤트">
                 상품유형 지정
+              </Button>
+            )}
+            {onSetDeal && (
+              <Button size="sm" variant="outline" onClick={onSetDeal} title="선택 기기가 속한 계약건(딜)을 한 번에 지정 — 기기마다 정정 이벤트(소프트 참조)">
+                계약건 지정
               </Button>
             )}
           </>

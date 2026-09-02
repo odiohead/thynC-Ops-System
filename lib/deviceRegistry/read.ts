@@ -37,16 +37,16 @@ export interface ExpectedCount {
   deals: number
   /** 계약완료 딜 0건이면 null (compare none) */
   expected: number | null
-  contractedDeals: { dealCode: string; count: number; roundNo: number; contractDate: string | null }[]
+  contractedDeals: { dealCode: string; count: number; roundNo: number; contractDate: string | null; productType: string | null }[]
 }
 
 export async function getExpectedDeviceCount(hospitalCode: string, client: DbClient = prisma): Promise<ExpectedCount> {
-  const rows = await client.$queryRaw<{ deal_code: string; round_no: number; contract_date: Date | null; cnt: number | null }[]>`
-    SELECT sd.deal_code, sd.round_no, sd.contract_date, sd.daewoong_device_count AS cnt
+  const rows = await client.$queryRaw<{ deal_code: string; round_no: number; contract_date: Date | null; product_type: string | null; cnt: number | null }[]>`
+    SELECT sd.deal_code, sd.round_no, sd.contract_date, sd.product_type, sd.daewoong_device_count AS cnt
       FROM sales_deals sd JOIN status_codes sc ON sc.id = sd.status_id
      WHERE sd.hospital_code = ${hospitalCode} AND sc.category = ${DEAL_STATUS_CATEGORY} AND sc.name = ${DEAL_STATUS_CONTRACTED}
      ORDER BY sd.round_no`
-  const contractedDeals = rows.map((r) => ({ dealCode: r.deal_code, count: n(r.cnt), roundNo: r.round_no, contractDate: ymd(r.contract_date) }))
+  const contractedDeals = rows.map((r) => ({ dealCode: r.deal_code, count: n(r.cnt), roundNo: r.round_no, contractDate: ymd(r.contract_date), productType: r.product_type }))
   const deals = rows.length
   return { deals, expected: deals === 0 ? null : contractedDeals.reduce((s, d) => s + d.count, 0), contractedDeals }
 }
@@ -92,6 +92,22 @@ export async function countReplacements(hospitalCode: string, range?: { from?: s
   return { total: Object.values(byType).reduce((a, b) => a + b, 0), byType }
 }
 
+/**
+ * 계약건(딜)별 교체 건수(B-23) — `countReplacements`와 같은 짝 판정을 RECOVER 이벤트의 `deal_code` 스냅샷으로 그룹.
+ * 키 null = 미지정(딜 없이 회수·교체된 자리).
+ */
+export async function countReplacementsByDeal(hospitalCode: string, client: DbClient = prisma): Promise<Map<string | null, number>> {
+  const rows = await client.$queryRaw<{ d: string | null; cnt: bigint }[]>(Prisma.sql`
+    SELECT e.deal_code AS d, count(*) AS cnt
+      FROM hospital_device_events e
+     WHERE e.event_type = 'RECOVER' AND e.hospital_code = ${hospitalCode}
+       AND EXISTS (SELECT 1 FROM hospital_device_events r
+                    WHERE r.event_type = 'REGISTER' AND r.hospital_code = e.hospital_code AND r.device_id <> e.device_id
+                      AND (r.related_device_id = e.device_id OR (e.action_group IS NOT NULL AND r.action_group = e.action_group AND e.related_device_id = r.device_id)))
+     GROUP BY 1`)
+  return new Map(rows.map((r) => [r.d, n(r.cnt)]))
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 병원 요약 (§7.1 summary 응답 요지 · §6.1-B 스트립 · §6.2 상세 카드)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,6 +146,22 @@ export interface ModelSummary {
   byProductType: Partial<Record<ProductTypeKey, ProductTypeCell>>
 }
 
+/** 계약건(딜)별 요약 행(B-23) — 병원 뷰 상단 계약별 표의 데이터 */
+export interface SummaryDealRow {
+  dealCode: string
+  /** 계약완료 딜이 아니면(재적재로 끊긴 코드 등) null */
+  roundNo: number | null
+  productType: string | null
+  contractDate: string | null
+  /** 도입 수량(Σ daewoong_device_count) — 계약완료 딜이 아니면 null */
+  expected: number | null
+  contracted: boolean
+  /** 등록 수량(배치 중 ACTIVE) */
+  active: number
+  /** 교체 건수(RECOVER 이벤트 deal_code 스냅샷 기준 짝 수) */
+  replacements: number
+}
+
 export interface HospitalDeviceSummary {
   hospitalCode: string
   hospitalName: string
@@ -149,6 +181,12 @@ export interface HospitalDeviceSummary {
   today: string
   /** 병원 계약완료 딜 기준 상품유형 문맥(등록 기본값·필수 판정 — B-22) */
   productTypeContext: ProductTypeContext
+  /** 계약건(딜)별 현황(B-23) — 계약완료 딜 ∪ 배치·교체에 등장한 딜 코드(재적재로 끊긴 코드도 노출) */
+  deals: SummaryDealRow[]
+  /** 계약건 미지정 버킷 — active: 딜 없는 ACTIVE 배치 수 / replacements: RECOVER 스냅샷 deal_code NULL인 교체 짝 수 */
+  dealUnassigned: { active: number; replacements: number }
+  /** AS진행중(as_started_on NOT NULL) ACTIVE 배치 수(B-24) */
+  asInProgress: number
   /** 계약 딜이 2종이거나 배치에 상품유형이 하나라도 있으면 true — UI가 매트릭스로 그린다 */
   productTypeMixed: boolean
   /** 병원 단위 상품유형 축(ECG hard 기준) — 계약 딜 유형 ∪ 배치 유형(+미지정은 배치 있을 때) */
@@ -162,7 +200,7 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
   if (!hospital) return null
   const today = todayKst()
   const since = ymdMinusDays(today, 30)
-  const [expected, models, activeUnits, recRows, lastRows, wards, unassigned, lastEvent, lastImport, ptCtx, replAll, repl30] = await Promise.all([
+  const [expected, models, activeUnits, recRows, lastRows, wards, unassigned, lastEvent, lastImport, ptCtx, replAll, repl30, dealActRows, replByDeal] = await Promise.all([
     getExpectedDeviceCount(hospitalCode, client),
     loadTrackedModels(client),
     client.hospitalDevice.findMany({
@@ -177,7 +215,7 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     client.$queryRaw<{ device_info_id: number; event_type: string; occurred_on: Date }[]>`
       SELECT DISTINCT ON (u.device_info_id) u.device_info_id, e.event_type, e.occurred_on
         FROM hospital_device_events e JOIN device_units u ON u.id = e.device_id
-       WHERE e.hospital_code = ${hospitalCode} AND e.event_type <> 'CORRECT'
+       WHERE e.hospital_code = ${hospitalCode} AND e.event_type NOT IN ('CORRECT','AS_OPEN','AS_CLEAR')
        ORDER BY u.device_info_id, e.occurred_on DESC, e.id DESC`,
     client.hospitalWard.findMany({
       where: { hospitalCode },
@@ -194,6 +232,12 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     getHospitalProductTypeContext(hospitalCode, client),
     countReplacements(hospitalCode, undefined, client),
     countReplacements(hospitalCode, { from: since }, client),
+    client.$queryRaw<{ deal_code: string | null; cnt: bigint; as_cnt: bigint }[]>`
+      SELECT d.deal_code, count(*) AS cnt, count(*) FILTER (WHERE d.as_started_on IS NOT NULL) AS as_cnt
+        FROM hospital_devices d
+       WHERE d.hospital_code = ${hospitalCode} AND d.status = 'ACTIVE'
+       GROUP BY 1`,
+    countReplacementsByDeal(hospitalCode, client),
   ])
 
   // 배치 중 유닛의 모델별 수 + WMS 일시 매칭 집계(배치 1쿼리) + 상품유형별 소계(B-22)
@@ -294,6 +338,28 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     const expT = k !== PRODUCT_TYPE_UNSET_LABEL && expected.expected != null ? (expectedByType.get(k) ?? 0) : null
     return { type: k, active: c.active, activeForCompare: c.activeForCompare, expected: expT, diff: expT == null ? null : c.activeForCompare - expT }
   })
+  // 계약건(딜)별 현황(B-23) — 계약완료 딜 ∪ 배치·교체에 등장한 코드. 미지정(NULL)은 별도 버킷
+  const activeByDeal = new Map<string | null, { active: number; asCnt: number }>(
+    dealActRows.map((r) => [r.deal_code, { active: n(r.cnt), asCnt: n(r.as_cnt) }])
+  )
+  const dealKeys: string[] = expected.contractedDeals.map((d) => d.dealCode)
+  for (const k of Array.from(activeByDeal.keys())) if (k != null && !dealKeys.includes(k)) dealKeys.push(k)
+  for (const k of Array.from(replByDeal.keys())) if (k != null && !dealKeys.includes(k)) dealKeys.push(k)
+  const dealRows: SummaryDealRow[] = dealKeys.map((code) => {
+    const c = expected.contractedDeals.find((d) => d.dealCode === code) ?? null
+    return {
+      dealCode: code,
+      roundNo: c?.roundNo ?? null,
+      productType: c?.productType ?? null,
+      contractDate: c?.contractDate ?? null,
+      expected: c ? c.count : null,
+      contracted: !!c,
+      active: activeByDeal.get(code)?.active ?? 0,
+      replacements: replByDeal.get(code) ?? 0,
+    }
+  })
+  const dealUnassigned = { active: activeByDeal.get(null)?.active ?? 0, replacements: replByDeal.get(null) ?? 0 }
+  const asInProgress = Array.from(activeByDeal.values()).reduce((s, v) => s + v.asCnt, 0)
   return {
     hospitalCode: hospital.hospitalCode,
     hospitalName: hospital.hospitalName,
@@ -313,6 +379,9 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     recovered30dTotal: out.reduce((s, m) => s + m.recovered30d, 0),
     today,
     productTypeContext: ptCtx,
+    deals: dealRows,
+    dealUnassigned,
+    asInProgress,
     productTypeMixed: ptCtx.mixed || anyPlacementTyped,
     productTypes,
     replacements: { total: replAll.total, byType: replAll.byType, last30d: { total: repl30.total, byType: repl30.byType } },
@@ -448,7 +517,7 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
     ), lev AS (
       SELECT DISTINCT ON (hospital_code) hospital_code, event_type, occurred_on
         FROM hospital_device_events
-       WHERE hospital_code IS NOT NULL AND event_type <> 'CORRECT'
+       WHERE hospital_code IS NOT NULL AND event_type NOT IN ('CORRECT','AS_OPEN','AS_CLEAR')
        ORDER BY hospital_code, occurred_on DESC, id DESC
     ), limp AS (
       SELECT DISTINCT ON (hospital_code) hospital_code, id, created_at, occurred_on, row_count, registered_count
@@ -618,6 +687,10 @@ export interface UnitsQuery {
   usage?: UsageFilter | null
   /** 상품유형 — 일반/라이트(배치 product_type) 또는 none(미지정) */
   productType?: ProductTypeFilter | null
+  /** 계약건(B-23) — 딜 코드 또는 'none'(미지정) */
+  deal?: string | null
+  /** AS진행중만(as_started_on NOT NULL — B-24) */
+  as?: boolean | null
   /** 공개 device id(유닛 id) */
   ids?: number[] | null
 }
@@ -637,6 +710,9 @@ export function buildUnitsWhere(params: UnitsQuery): Prisma.HospitalDeviceWhereI
   else if (params.usage) and.push({ unit: { usageType: { is: { value: params.usage } } } })
   if (params.productType === 'none') and.push({ productType: null })
   else if (params.productType) and.push({ productType: params.productType })
+  if (params.deal === 'none') and.push({ dealCode: null })
+  else if (params.deal && params.deal.trim()) and.push({ dealCode: params.deal.trim() })
+  if (params.as) and.push({ asStartedOn: { not: null } })
   if (params.ward === 'unassigned') and.push({ wardId: null })
   else if (params.ward != null) and.push({ wardId: Number(params.ward) })
   if (params.q && params.q.trim()) {
@@ -730,6 +806,12 @@ export interface UnitView {
   replacedById: number | null
   /** 상품유형(일반/라이트) — 배치 속성(B-22), null=미지정 */
   productType: string | null
+  /** 계약건(딜 코드) 소프트 참조(B-23), null=미지정. RECOVERED 행은 회수 전 마지막 값 */
+  dealCode: string | null
+  /** AS진행중 플래그 시작일(B-24) — ACTIVE에서만 값이 있다 */
+  asStartedOn: Date | null
+  /** AS 연결 유지보수 코드 */
+  asRefCode: string | null
   createdAt: Date
   updatedAt: Date
   deviceInfo: PlacementWithUnit['unit']['deviceInfo']
@@ -769,6 +851,9 @@ export function toUnitView(p: PlacementWithUnit): UnitView {
     lastEventOn: placement.lastEventOn,
     replacedById: placement.replacedById,
     productType: placement.productType,
+    dealCode: placement.dealCode,
+    asStartedOn: placement.asStartedOn,
+    asRefCode: placement.asRefCode,
     createdAt: placement.createdAt,
     updatedAt: placement.updatedAt,
     deviceInfo: unit.deviceInfo,

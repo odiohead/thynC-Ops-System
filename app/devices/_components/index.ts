@@ -39,6 +39,10 @@ export { CorrectionModal } from './CorrectionModal'
 export type { CorrectionModalProps } from './CorrectionModal'
 export { ProductTypeModal } from './ProductTypeModal'
 export type { ProductTypeModalProps } from './ProductTypeModal'
+export { DealModal } from './DealModal'
+export type { DealModalProps } from './DealModal'
+export { AsFlagModal } from './AsFlagModal'
+export type { AsFlagModalProps } from './AsFlagModal'
 
 // GROUP C
 export { RegisterModal } from './RegisterModal'

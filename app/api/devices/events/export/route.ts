@@ -14,7 +14,7 @@ import { authOr401, badRequest, fmtKst, hospitalDisplayName, parseEventsQuery, r
 
 export const dynamic = 'force-dynamic'
 
-const CORRECT_FIELD_LABELS: Record<string, string> = { deviceInfoId: '모델', serialNo: '시리얼', serialRaw: '원문', macAddress: 'MAC', extDeviceCode: '닉네임', usageTypeId: '용도', productType: '상품유형' }
+const CORRECT_FIELD_LABELS: Record<string, string> = { deviceInfoId: '모델', serialNo: '시리얼', serialRaw: '원문', macAddress: 'MAC', extDeviceCode: '닉네임', usageTypeId: '용도', productType: '상품유형', dealCode: '계약건' }
 
 /** 이력 탭 '내용' 열 — 병동 from→to · 교체/이관 상대 · CORRECT 변경 요약 */
 function contentOf(e: EventListRow): string {
@@ -28,6 +28,10 @@ function contentOf(e: EventListRow): string {
       return `${from} → ${to}`
     case 'RECOVER':
       return `${from} 회수${rel ? ` → 교체 ${rel}` : ''}`
+    case 'AS_OPEN':
+      return `AS 시작${e.refCode ? ` (${e.refCode})` : ''}`
+    case 'AS_CLEAR':
+      return 'AS 해제'
     case 'CORRECT': {
       const ch = e.changes
       if (!ch || typeof ch !== 'object' || Array.isArray(ch)) return ''
@@ -55,6 +59,7 @@ function toRow(e: EventListRow): Record<string, unknown> {
     모델: e.device.deviceInfo.deviceModel,
     내용: contentOf(e),
     상품유형: e.productType ?? '',
+    계약건: e.dealCode ?? '',
     사유: e.reasonCode?.name ?? '',
     연결: e.refType && e.refCode ? `${REGISTRY_REF_TYPE_LABELS[e.refType as RegistryRefType] ?? e.refType} ${e.refCode}` : '',
     메모: e.memo ?? '',

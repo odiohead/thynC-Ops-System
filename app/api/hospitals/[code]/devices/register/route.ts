@@ -39,7 +39,7 @@ function parseConflicts(v: unknown): Record<string, 'TRANSFER'> {
 interface ParsedBody {
   items: RegisterItem[]
   /** 항목별 지정이 없을 때만 쓰는 공통값(미리보기 fixed 모드 판정용) */
-  common: { deviceInfoId: number | null; wardId: number | null; wardName: string | null; usageTypeId: number | null; productType: string | null }
+  common: { deviceInfoId: number | null; wardId: number | null; wardName: string | null; usageTypeId: number | null; productType: string | null; dealCode: string | null }
   anyItemWard: boolean
   anyItemModel: boolean
   occurredOn: string | null
@@ -68,6 +68,7 @@ function parseBody(body: Record<string, unknown>): ParsedBody {
     wardName: optString(body.wardName),
     usageTypeId: optPositiveInt(body.usageTypeId, '용도(usageTypeId)'),
     productType: optString(body.productType),
+    dealCode: optString(body.dealCode),
   }
   let anyItemWard = false
   let anyItemModel = false
@@ -112,6 +113,10 @@ function parseBody(body: Record<string, unknown>): ParsedBody {
     const productType = optString(o.productType ?? o.productTypeInput)
     if (productType) item.productType = productType
     else if (common.productType) item.productType = common.productType
+    // 계약건(B-23): item.dealCode > body.dealCode > 서비스 자동 기본값(단일 계약완료 딜)
+    const dealCode = optString(o.dealCode)
+    if (dealCode) item.dealCode = dealCode
+    else if (common.dealCode) item.dealCode = common.dealCode
     return item
   })
 
@@ -174,6 +179,7 @@ async function previewItems(hospitalCode: string, p: ParsedBody) {
       usageTypeId: it.usageTypeId ?? null,
       usageTypeInput: it.usageTypeInput ?? null,
       productTypeInput: it.productType ?? null,
+      dealCode: it.dealCode ?? null,
     }
   })
 

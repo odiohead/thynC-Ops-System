@@ -45,6 +45,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       oldUsageTypeId: optPositiveInt(body.oldUsageTypeId, '구 기기 용도(oldUsageTypeId)'),
       newUsageTypeId: optPositiveInt(body.newUsageTypeId, '신 기기 용도(newUsageTypeId)'),
       ...(body.productType !== undefined && body.productType !== null && body.productType !== '' ? { productType: optString(body.productType) } : {}),
+      ...(body.dealCode !== undefined && body.dealCode !== null && body.dealCode !== '' ? { dealCode: optString(body.dealCode) } : {}),
     }
     const occurredOn = optString(body.occurredOn)
     const memo = optString(body.memo)
@@ -78,6 +79,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         toWardId: r.newDevice.wardId,
         newUsageTypeId: r.newDevice.usageTypeId,
         productType: r.productType,
+        dealCode: r.dealCode,
         occurredOn: occurredOn ?? todayKst(),
         ref,
         memo,
@@ -97,6 +99,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         oldDevice: r.oldDevice,
         newDevice: r.newDevice,
         productType: r.productType,
+        dealCode: r.dealCode,
         warnings: r.warnings,
         wms: r.wms,
       },

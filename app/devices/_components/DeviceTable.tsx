@@ -24,7 +24,7 @@ import EmptyState from '@/app/components/ui/EmptyState'
 import { Input, Select } from '@/app/components/ui/Input'
 import { TBody, TD, TH, THead, TR } from '@/app/components/ui/Table'
 import { cn } from '@/lib/cn'
-import { DEVICE_STATUS_LABELS, PRODUCT_TYPES, REGISTRY_REF_TYPE_LABELS, USAGE_TYPE_LABELS, matchesSerialPattern, refLink, todayKst, type ProductTypeFilter, type RegistryRefType, type UsageFilter, type UsageTypeRef } from '@/lib/deviceRegistryShared'
+import { DEVICE_STATUS_LABELS, PRODUCT_TYPES, REGISTRY_REF_TYPE_LABELS, USAGE_TYPE_LABELS, matchesSerialPattern, placementStatusLabel, refLink, toYmd, todayKst, type ProductTypeFilter, type RegistryRefType, type UsageFilter, type UsageTypeRef } from '@/lib/deviceRegistryShared'
 import { errorMessage, getUnitIds, getUnits, patchDevice } from './api'
 import { useDevicesToast } from './toast'
 import { RegistryFloatingPanel, RegistryMenuItem } from './RegistryFloatingPanel'
@@ -107,9 +107,9 @@ const SORT_OPTIONS: { value: UnitsSort; label: string }[] = [
 
 const LIMIT_OPTIONS = [50, 100, 200, 500]
 
-type ColumnKey = 'serial' | 'model' | 'usage' | 'productType' | 'ward' | 'status' | 'placedOn' | 'recovered' | 'lastEvent' | 'ref' | 'wms' | 'memo'
+type ColumnKey = 'serial' | 'model' | 'usage' | 'productType' | 'deal' | 'ward' | 'status' | 'placedOn' | 'recovered' | 'lastEvent' | 'ref' | 'wms' | 'memo'
 
-/** compact 기본 열 순서(v1) — 나머지는 [열 더보기] */
+/** compact 기본 열 순서(v1) — 나머지(계약건 포함)는 [열 더보기] */
 const COMPACT_COLUMN_KEYS: readonly ColumnKey[] = ['serial', 'model', 'ward', 'status', 'productType', 'placedOn', 'lastEvent']
 
 const COLUMNS: { key: ColumnKey; label: string; sort?: UnitsSort; className?: string }[] = [
@@ -117,6 +117,7 @@ const COLUMNS: { key: ColumnKey; label: string; sort?: UnitsSort; className?: st
   { key: 'model', label: '모델' },
   { key: 'usage', label: '용도' },
   { key: 'productType', label: '상품유형' },
+  { key: 'deal', label: '계약건' },
   { key: 'ward', label: '병동', sort: 'ward' },
   { key: 'status', label: '상태' },
   { key: 'placedOn', label: '배치일', sort: 'placedOn' },
@@ -156,7 +157,7 @@ export function DeviceTable({
   // ── v1 단순 모드: 열/필터 더보기 (compact가 아니면 항상 전체)
   const [moreCols, setMoreCols] = useState(false)
   const [moreFilters, setMoreFilters] = useState(false)
-  const advancedFilterActive = filters.model != null || filters.ward != null || filters.wms != null || filters.usage != null || filters.productType != null
+  const advancedFilterActive = filters.model != null || filters.ward != null || filters.wms != null || filters.usage != null || filters.productType != null || filters.deal != null || filters.as
   const showAdvancedFilters = !compact || moreFilters || advancedFilterActive
   const showAllColumns = !compact || moreCols
   const visibleColumns = useMemo(() => (showAllColumns ? COLUMNS : COMPACT_COLUMN_KEYS.map((k) => COLUMNS.find((c) => c.key === k)!)), [showAllColumns])
@@ -170,7 +171,7 @@ export function DeviceTable({
   const onTotalChangeRef = useRef(onTotalChange)
   onTotalChangeRef.current = onTotalChange
 
-  const hasFilter = filters.status !== 'active' || filters.model != null || filters.ward != null || filters.q !== '' || filters.wms != null || filters.usage != null || filters.productType != null
+  const hasFilter = filters.status !== 'active' || filters.model != null || filters.ward != null || filters.q !== '' || filters.wms != null || filters.usage != null || filters.productType != null || filters.deal != null || filters.as
 
   useEffect(() => {
     let alive = true
@@ -185,6 +186,8 @@ export function DeviceTable({
       wms: filters.wms,
       usage: filters.usage,
       productType: filters.productType,
+      deal: filters.deal,
+      as: filters.as || null,
       page: filters.page,
       limit: filters.limit,
       sort: filters.sort,
@@ -208,7 +211,7 @@ export function DeviceTable({
       alive = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hospitalCode, filters.status, filters.model, filters.ward, filters.q, filters.wms, filters.usage, filters.productType, filters.page, filters.limit, filters.sort, reloadKey])
+  }, [hospitalCode, filters.status, filters.model, filters.ward, filters.q, filters.wms, filters.usage, filters.productType, filters.deal, filters.as, filters.page, filters.limit, filters.sort, reloadKey])
 
   // ── 시리얼 검색 디바운스
   const [qInput, setQInput] = useState(filters.q)
@@ -253,7 +256,7 @@ export function DeviceTable({
   const selectAllResults = useCallback(async () => {
     setSelectingAll(true)
     try {
-      const r = await getUnitIds({ hospital: hospitalCode, status: 'active', model: filters.model, ward: filters.ward, q: filters.q || null, wms: filters.wms, usage: filters.usage, productType: filters.productType })
+      const r = await getUnitIds({ hospital: hospitalCode, status: 'active', model: filters.model, ward: filters.ward, q: filters.q || null, wms: filters.wms, usage: filters.usage, productType: filters.productType, deal: filters.deal, as: filters.as || null })
       const byId = new Map(rows.map((row) => [row.id, row] as const))
       const next: Selection = new Map()
       for (const id of r.ids) {
@@ -267,7 +270,7 @@ export function DeviceTable({
     } finally {
       setSelectingAll(false)
     }
-  }, [hospitalCode, filters.model, filters.ward, filters.q, filters.wms, filters.usage, filters.productType, rows, selection, setSelection, notify])
+  }, [hospitalCode, filters.model, filters.ward, filters.q, filters.wms, filters.usage, filters.productType, filters.deal, filters.as, rows, selection, setSelection, notify])
 
   const canSelectAllResults = filters.status === 'active' && allPageSelected && total > selectableRows.length && selection.size < Math.min(total, 2000)
 
@@ -313,7 +316,7 @@ export function DeviceTable({
   const activeWards = wards.filter((w) => w.isActive)
   const closedWards = wards.filter((w) => !w.isActive)
 
-  const resetFilters = () => setFilters({ status: 'active', model: null, ward: null, q: '', wms: null, usage: null, productType: null, page: 1 })
+  const resetFilters = () => setFilters({ status: 'active', model: null, ward: null, q: '', wms: null, usage: null, productType: null, deal: null, as: false, page: 1 })
 
   const pages = Math.max(1, Math.ceil(total / filters.limit))
   const from = total === 0 ? 0 : (filters.page - 1) * filters.limit + 1
@@ -456,6 +459,20 @@ export function DeviceTable({
                 </option>
               ))}
             </Select>
+            <Select aria-label="계약건" value={filters.deal ?? ''} onChange={(e) => setFilters({ deal: e.target.value || null })} className="h-8 w-auto max-w-[13rem] text-xs" title="계약건(딜) 필터 — B-23">
+              <option value="">계약건 전체</option>
+              {(summary?.deals ?? []).map((d) => (
+                <option key={d.dealCode} value={d.dealCode}>
+                  {d.dealCode}
+                  {d.roundNo != null ? ` (${d.roundNo}차${d.productType ? ` ${d.productType}` : ''})` : ' (계약 외)'}
+                </option>
+              ))}
+              <option value="none">계약건 미지정</option>
+            </Select>
+            <label className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-xs text-foreground" title="AS진행중 표시가 켜진 기기만 (B-24)">
+              <input type="checkbox" checked={filters.as} onChange={(e) => setFilters({ as: e.target.checked })} className="h-3.5 w-3.5 rounded border-input accent-primary" />
+              AS진행중만
+            </label>
             <Select aria-label="정렬" value={filters.sort} onChange={(e) => setSort(e.target.value as UnitsSort)} className="h-8 w-auto text-xs">
               {SORT_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -573,12 +590,18 @@ export function DeviceTable({
                           <ProductTypeBadge value={row.productType} recovered={row.status === 'RECOVERED'} />
                         </TD>
                       )
+                    case 'deal':
+                      return (
+                        <TD className="whitespace-nowrap font-mono text-xs" title={row.dealCode ? `계약건 ${row.dealCode}${row.status === 'RECOVERED' ? ' (회수 전 값)' : ''}` : undefined}>
+                          {row.dealCode ?? <span className="font-sans text-muted-foreground">—</span>}
+                        </TD>
+                      )
                     case 'ward':
                       return <TD className="whitespace-nowrap">{wardText(row)}</TD>
                     case 'status':
                       return (
                         <TD>
-                          <StatusBadge status={row.status} />
+                          <StatusBadge row={row} />
                         </TD>
                       )
                     case 'placedOn':
@@ -735,7 +758,7 @@ export function DeviceTable({
                           {row.serialNo}
                           {badFormat && <AlertTriangle size={13} className="text-warning" aria-label="형식 불일치" />}
                         </span>
-                        <StatusBadge status={row.status} />
+                        <StatusBadge row={row} />
                       </div>
                       {row.serialRaw && <div className="font-mono text-[11px] text-muted-foreground">{row.serialRaw}</div>}
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
@@ -823,6 +846,15 @@ export function DeviceTable({
                 <RegistryMenuItem onClick={() => { closeMenu(); onAction('move', toDeviceRef(menu.row)) }}>병동 이동</RegistryMenuItem>
                 <RegistryMenuItem onClick={() => { closeMenu(); onAction('recover', toDeviceRef(menu.row)) }}>회수</RegistryMenuItem>
                 <RegistryMenuItem onClick={() => { closeMenu(); onAction('replace', toDeviceRef(menu.row)) }}>교체</RegistryMenuItem>
+                {menu.row.asStartedOn ? (
+                  <RegistryMenuItem onClick={() => { closeMenu(); onAction('asClear', toDeviceRef(menu.row)) }} title="AS진행중 표시 해제 (교체·회수 시에는 자동 해제)">
+                    AS 해제
+                  </RegistryMenuItem>
+                ) : (
+                  <RegistryMenuItem onClick={() => { closeMenu(); onAction('asOpen', toDeviceRef(menu.row)) }} title="이 기기를 'AS진행중'으로 표시 (유지보수 코드 연결 가능)">
+                    AS 표시
+                  </RegistryMenuItem>
+                )}
               </>
             )}
             {canWrite && menu.row.status === 'RECOVERED' && (
@@ -850,8 +882,20 @@ function wardText(row: DeviceListRow): string {
   return row.status === 'ACTIVE' ? '미지정' : '—'
 }
 
-function StatusBadge({ status }: { status: DeviceListRow['status'] }) {
-  return <Badge variant={status === 'ACTIVE' ? 'success' : 'default'}>{DEVICE_STATUS_LABELS[status] ?? status}</Badge>
+/**
+ * 배치 상태 배지(B-24) — 사용중(success) / AS진행중(warning, ACTIVE의 플래그) / 회수됨(default).
+ * '배치 중' 문구는 집계 수치에만 남는다(placementStatusLabel).
+ */
+function StatusBadge({ row }: { row: Pick<DeviceListRow, 'status' | 'asStartedOn' | 'asRefCode'> }) {
+  if (row.status !== 'ACTIVE') return <Badge variant="default">{DEVICE_STATUS_LABELS.RECOVERED}</Badge>
+  if (row.asStartedOn) {
+    return (
+      <Badge variant="warning" title={`AS 시작 ${toYmd(row.asStartedOn) ?? ''}${row.asRefCode ? ` · ${row.asRefCode}` : ''} — 교체·회수 시 자동 해제`}>
+        {placementStatusLabel(row)}
+      </Badge>
+    )
+  }
+  return <Badge variant="success">{placementStatusLabel(row)}</Badge>
 }
 
 /** 용도 배지 — 판매용 default · 평가용 warning · 미지정 '—' */

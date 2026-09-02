@@ -112,5 +112,8 @@ export function projectionSnapshot(d: DeviceRow) {
     memo: d.memo,
     usageTypeId: d.usageTypeId,
     productType: d.productType,
+    dealCode: d.dealCode,
+    asStartedOn: d.asStartedOn,
+    asRefCode: d.asRefCode,
   }
 }

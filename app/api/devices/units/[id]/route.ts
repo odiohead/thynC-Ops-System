@@ -47,9 +47,9 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 }
 
-const IDENTITY_KEYS = ['deviceInfoId', 'serialNo', 'macAddress', 'extDeviceCode', 'usageTypeId', 'productType'] as const
-/** 식별 보정 중 write(USER+)로 허용되는 키 — 용도·상품유형은 운영 속성이라 admin 게이트 밖(2026-09-01 결정 B-21·B-22) */
-const WRITE_LEVEL_IDENTITY_KEYS: readonly (typeof IDENTITY_KEYS)[number][] = ['usageTypeId', 'productType']
+const IDENTITY_KEYS = ['deviceInfoId', 'serialNo', 'macAddress', 'extDeviceCode', 'usageTypeId', 'productType', 'dealCode'] as const
+/** 식별 보정 중 write(USER+)로 허용되는 키 — 용도·상품유형·계약건은 운영 속성이라 admin 게이트 밖(B-21·B-22·B-23) */
+const WRITE_LEVEL_IDENTITY_KEYS: readonly (typeof IDENTITY_KEYS)[number][] = ['usageTypeId', 'productType', 'dealCode']
 const EVENT_ONLY_KEYS = ['status', 'hospitalCode', 'wardId', 'placedOn', 'recoveredOn', 'lastHospitalCode', 'recoverReasonId', 'replacedById'] as const
 
 /**
@@ -79,7 +79,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const identityKeys = IDENTITY_KEYS.filter((k) => k in body)
     const hasMemo = 'memo' in body
     if (identityKeys.length === 0 && !hasMemo) {
-      return NextResponse.json({ error: '변경할 항목이 없습니다 (memo·usageTypeId·productType 또는 식별 필드 deviceInfoId·serialNo·macAddress·extDeviceCode)' }, { status: 400 })
+      return NextResponse.json({ error: '변경할 항목이 없습니다 (memo·usageTypeId·productType·dealCode 또는 식별 필드 deviceInfoId·serialNo·macAddress·extDeviceCode)' }, { status: 400 })
     }
     if (hasMemo && body.memo !== null && typeof body.memo !== 'string') {
       return NextResponse.json({ error: '메모는 문자열이어야 합니다' }, { status: 400 })
@@ -109,6 +109,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         if (body.productType === null || body.productType === '') changes.productType = null
         else if (typeof body.productType !== 'string') return NextResponse.json({ error: '상품유형 값이 올바르지 않습니다 (일반/라이트)' }, { status: 400 })
         else changes.productType = body.productType
+      }
+      if ('dealCode' in body) {
+        // null/'' = 미지정, 문자열은 서비스가 계약완료 딜 소속 검증(아니면 409 — B-23)
+        if (body.dealCode === null || body.dealCode === '') changes.dealCode = null
+        else if (typeof body.dealCode !== 'string') return NextResponse.json({ error: '계약건 값이 올바르지 않습니다 (딜 코드)' }, { status: 400 })
+        else changes.dealCode = body.dealCode
       }
       if ('deviceInfoId' in body) {
         const v = optionalInt(body.deviceInfoId, '모델')
@@ -162,11 +168,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       : new Map<number, string>()
     const usagePart = r.correct?.changes.usageTypeId ? `용도 ${usageLabel(r.correct.changes.usageTypeId.before)} → ${usageLabel(r.correct.changes.usageTypeId.after)}` : null
     const ptPart = r.correct?.changes.productType ? `상품유형 ${String(r.correct.changes.productType.before ?? '미지정')} → ${String(r.correct.changes.productType.after ?? '미지정')}` : null
-    const OPS_KEYS = ['usageTypeId', 'productType']
+    const dealPart = r.correct?.changes.dealCode ? `계약건 ${String(r.correct.changes.dealCode.before ?? '미지정')} → ${String(r.correct.changes.dealCode.after ?? '미지정')}` : null
+    const OPS_KEYS = ['usageTypeId', 'productType', 'dealCode']
     const parts = [
       r.correct && changeKeys.some((k) => !OPS_KEYS.includes(k)) ? `식별 보정(${changeKeys.filter((k) => !OPS_KEYS.includes(k)).join(', ')})` : null,
       usagePart,
       ptPart,
+      dealPart,
       r.memo ? '메모' : null,
     ].filter(Boolean)
     await logAudit({

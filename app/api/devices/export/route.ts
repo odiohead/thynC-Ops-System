@@ -3,11 +3,10 @@ import { prisma } from '@/lib/prisma'
 import { UNITS_EXPORT_MAX, listUnits, resolveUnitsWhere, type UnitListRow } from '@/lib/deviceRegistry'
 import {
   DEVICE_EVENT_TYPE_LABELS,
-  DEVICE_STATUS_LABELS,
   REGISTRY_REF_TYPE_LABELS,
+  placementStatusLabel,
   toYmd,
   type DeviceEventType,
-  type DeviceStatus,
   type RegistryRefType,
 } from '@/lib/deviceRegistryShared'
 import { authOr401, badRequest, hospitalDisplayName, parseUnitsQuery, readErrorResponse, registryFileName, xlsxResponse } from '../_read'
@@ -29,8 +28,10 @@ function toRow(r: UnitListRow): Record<string, unknown> {
     모델명: r.deviceInfo.deviceName,
     용도: r.usageType?.name ?? '',
     상품유형: r.productType ?? '',
+    계약건: r.dealCode ?? '',
     병동: r.ward ? `${r.ward.name}${r.ward.isActive ? '' : ' (폐쇄)'}` : r.status === 'ACTIVE' ? '미지정' : '',
-    상태: DEVICE_STATUS_LABELS[r.status as DeviceStatus] ?? r.status,
+    상태: placementStatusLabel(r),
+    'AS 시작일': toYmd(r.asStartedOn) ?? '',
     배치일: toYmd(r.placedOn) ?? '',
     회수일: toYmd(r.recoveredOn) ?? '',
     '회수 사유': r.recoverReason?.name ?? '',
@@ -68,7 +69,7 @@ export async function GET(req: NextRequest) {
     ])
     const rows = data.map(toRow)
     const filterLabel = STATUS_FILTER_LABEL[params.status ?? 'active']
-    return xlsxResponse(rows, '기기 목록', registryFileName(hospitalName, filterLabel), [13, 20, 12, 16, 12, 16, 8, 8, 12, 8, 11, 11, 16, 12, 10, 12, 22, 26, 30, 24])
+    return xlsxResponse(rows, '기기 목록', registryFileName(hospitalName, filterLabel), [13, 20, 12, 16, 12, 16, 8, 8, 17, 12, 9, 11, 11, 11, 16, 12, 10, 12, 22, 26, 30, 24])
   } catch (e) {
     return readErrorResponse(e, 'export')
   }

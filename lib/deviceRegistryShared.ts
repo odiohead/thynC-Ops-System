@@ -28,7 +28,20 @@ export const DEVICE_STATUS_COLORS: Record<DeviceStatus, string> = {
   RECOVERED: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 }
 
-export const DEVICE_EVENT_TYPES = ['REGISTER', 'MOVE_WARD', 'RECOVER', 'CORRECT'] as const
+/**
+ * 배치(placement) 단위 상태 표시 라벨 (2026-09-02 결정 B-24)
+ * - ACTIVE는 개체 단위 표시에서 '사용중'으로 읽고, `as_started_on`이 있으면 'AS진행중'으로 읽는다(제3의 fold 상태가 아니라 ACTIVE의 플래그).
+ * - '배치 중'(DEVICE_STATUS_LABELS.ACTIVE)은 집계 수치 문구에만 계속 쓴다.
+ */
+export const PLACEMENT_STATUS_ACTIVE_LABEL = '사용중'
+export const PLACEMENT_STATUS_AS_LABEL = 'AS진행중'
+
+export function placementStatusLabel(row: { status: string; asStartedOn?: string | Date | null }): string {
+  if (row.status === 'RECOVERED') return DEVICE_STATUS_LABELS.RECOVERED
+  return row.asStartedOn ? PLACEMENT_STATUS_AS_LABEL : PLACEMENT_STATUS_ACTIVE_LABEL
+}
+
+export const DEVICE_EVENT_TYPES = ['REGISTER', 'MOVE_WARD', 'RECOVER', 'CORRECT', 'AS_OPEN', 'AS_CLEAR'] as const
 export type DeviceEventType = (typeof DEVICE_EVENT_TYPES)[number]
 
 export const DEVICE_EVENT_TYPE_LABELS: Record<DeviceEventType, string> = {
@@ -36,6 +49,8 @@ export const DEVICE_EVENT_TYPE_LABELS: Record<DeviceEventType, string> = {
   MOVE_WARD: '병동 이동',
   RECOVER: '회수',
   CORRECT: '정정',
+  AS_OPEN: 'AS 시작',
+  AS_CLEAR: 'AS 해제',
 }
 
 export const DEVICE_EVENT_TYPE_COLORS: Record<DeviceEventType, string> = {
@@ -43,9 +58,15 @@ export const DEVICE_EVENT_TYPE_COLORS: Record<DeviceEventType, string> = {
   MOVE_WARD: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300',
   RECOVER: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
   CORRECT: 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+  AS_OPEN: 'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300',
+  AS_CLEAR: 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300',
 }
 
-/** 상태 이벤트(fold·`last_event_type` 대상) — CORRECT는 식별 속성만 바꾸고 전이가 없다 */
+/**
+ * 상태 이벤트(fold 전이·`last_event_type` 대상) — CORRECT는 식별 속성만 바꾸고 전이가 없다.
+ * AS_OPEN/AS_CLEAR(B-24)는 **비상태 표시 이벤트**: ACTIVE 배치의 `as_started_on` 플래그만 접고(fold),
+ * CORRECT처럼 `last_event_type/on`·stateEventCount·요약 '최근 이벤트'에서 제외한다(마커일 뿐 자리의 이력이 아님).
+ */
 export const DEVICE_STATE_EVENT_TYPES: readonly DeviceEventType[] = ['REGISTER', 'MOVE_WARD', 'RECOVER']
 
 /**
@@ -65,10 +86,10 @@ export type TransitionFrom = 'NONE' | 'ACTIVE_SAME' | 'ACTIVE_OTHER' | 'RECOVERE
 export type TransitionOutcome = 'ok' | 'skip' | 'conflict' | 'invalid' | 'not_found'
 
 export const DEVICE_TRANSITIONS: Record<TransitionFrom, Record<DeviceEventType, TransitionOutcome>> = {
-  NONE: { REGISTER: 'ok', MOVE_WARD: 'not_found', RECOVER: 'not_found', CORRECT: 'not_found' },
-  ACTIVE_SAME: { REGISTER: 'skip', MOVE_WARD: 'ok', RECOVER: 'ok', CORRECT: 'ok' },
-  ACTIVE_OTHER: { REGISTER: 'conflict', MOVE_WARD: 'conflict', RECOVER: 'conflict', CORRECT: 'ok' },
-  RECOVERED: { REGISTER: 'ok', MOVE_WARD: 'invalid', RECOVER: 'invalid', CORRECT: 'ok' },
+  NONE: { REGISTER: 'ok', MOVE_WARD: 'not_found', RECOVER: 'not_found', CORRECT: 'not_found', AS_OPEN: 'not_found', AS_CLEAR: 'not_found' },
+  ACTIVE_SAME: { REGISTER: 'skip', MOVE_WARD: 'ok', RECOVER: 'ok', CORRECT: 'ok', AS_OPEN: 'ok', AS_CLEAR: 'ok' },
+  ACTIVE_OTHER: { REGISTER: 'conflict', MOVE_WARD: 'conflict', RECOVER: 'conflict', CORRECT: 'ok', AS_OPEN: 'conflict', AS_CLEAR: 'conflict' },
+  RECOVERED: { REGISTER: 'ok', MOVE_WARD: 'invalid', RECOVER: 'invalid', CORRECT: 'ok', AS_OPEN: 'invalid', AS_CLEAR: 'invalid' },
 }
 
 /** 판정 → HTTP 상태 (ok·skip은 호출부 규약에 따름 — skip은 단건/전부일 때만 409) */
@@ -94,7 +115,9 @@ export function transitionMessage(from: TransitionFrom, eventType: DeviceEventTy
         ? '다른 병원에 배치 중인 시리얼입니다 — 이관 처리를 지정하거나 그 병원에서 먼저 회수 기록하세요'
         : '다른 병원에 배치 중인 기기입니다 — 그 병원에서 처리하세요'
     case 'invalid':
-      return eventType === 'MOVE_WARD' ? '회수된 기기는 병동을 이동할 수 없습니다 — 먼저 재등록하세요' : '이미 회수된 기기입니다'
+      if (eventType === 'MOVE_WARD') return '회수된 기기는 병동을 이동할 수 없습니다 — 먼저 재등록하세요'
+      if (eventType === 'AS_OPEN' || eventType === 'AS_CLEAR') return '회수된 기기에는 AS 표시를 할 수 없습니다'
+      return '이미 회수된 기기입니다'
   }
 }
 

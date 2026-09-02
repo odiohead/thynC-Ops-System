@@ -8,7 +8,7 @@ import { optionalInt, parseRegistryFields, readJsonObject, registryActor, regist
 
 export const dynamic = 'force-dynamic'
 
-const ACTION_LABEL: Record<BulkActionKind, string> = { MOVE_WARD: '일괄 병동 이동', RECOVER: '일괄 회수', SET_PRODUCT_TYPE: '일괄 상품유형 지정' }
+const ACTION_LABEL: Record<BulkActionKind, string> = { MOVE_WARD: '일괄 병동 이동', RECOVER: '일괄 회수', SET_PRODUCT_TYPE: '일괄 상품유형 지정', SET_DEAL: '일괄 계약건 지정' }
 
 /**
  * 병원 문맥 유도 — body.hospitalCode가 없으면 선택 개체의 ACTIVE 병원에서 유도(§4.2 "개체에서 유도").
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await readJsonObject(request)
     const action = body.action as BulkActionKind
-    if (!(BULK_ACTIONS as readonly unknown[]).includes(action)) return NextResponse.json({ error: '일괄 액션은 MOVE_WARD·RECOVER·SET_PRODUCT_TYPE만 가능합니다' }, { status: 400 })
+    if (!(BULK_ACTIONS as readonly unknown[]).includes(action)) return NextResponse.json({ error: '일괄 액션은 MOVE_WARD·RECOVER·SET_PRODUCT_TYPE·SET_DEAL만 가능합니다' }, { status: 400 })
     if (!Array.isArray(body.deviceIds)) return NextResponse.json({ error: 'deviceIds 배열이 필요합니다' }, { status: 400 })
     const deviceIds = uniqInts(body.deviceIds)
     if (deviceIds.length === 0) return NextResponse.json({ error: '대상 기기를 선택하세요' }, { status: 400 })
@@ -61,13 +61,20 @@ export async function POST(request: NextRequest) {
       else if (typeof body.productType !== 'string') return NextResponse.json({ error: '상품유형 값이 올바르지 않습니다 (일반/라이트)' }, { status: 400 })
       else productType = body.productType
     }
+    let dealCode: string | null | undefined
+    if (action === 'SET_DEAL') {
+      if (!('dealCode' in body)) return NextResponse.json({ error: '계약건을 지정하세요 (딜 코드 또는 null=미지정)' }, { status: 400 })
+      if (body.dealCode === null || body.dealCode === '') dealCode = null
+      else if (typeof body.dealCode !== 'string') return NextResponse.json({ error: '계약건 값이 올바르지 않습니다 (딜 코드)' }, { status: 400 })
+      else dealCode = body.dealCode
+    }
 
     const hospitalCode =
       typeof body.hospitalCode === 'string' && body.hospitalCode.trim() ? body.hospitalCode.trim() : await deriveBulkHospital(deviceIds)
 
     const r = await bulkDeviceAction(
       { hospitalCode, actor: registryActor(user), ...fields },
-      { action, deviceIds, toWardId, toWardName, reasonCodeId, productType }
+      { action, deviceIds, toWardId, toWardName, reasonCodeId, productType, dealCode }
     )
 
     const serials = await prisma.deviceUnit.findMany({ where: { id: { in: r.affectedDeviceIds.slice(0, 50) } }, select: { serialNo: true } })
@@ -86,6 +93,7 @@ export async function POST(request: NextRequest) {
         toWardId: action === 'MOVE_WARD' ? (r.events[0]?.toWardId ?? null) : undefined,
         reasonCodeId: action === 'RECOVER' ? (r.events[0]?.reasonCodeId ?? null) : undefined,
         productType: action === 'SET_PRODUCT_TYPE' ? (r.events[0]?.productType ?? null) : undefined,
+        dealCode: action === 'SET_DEAL' ? (r.events[0]?.dealCode ?? null) : undefined,
         memo: fields.memo ?? null,
         ref: fields.ref ?? null,
         eventIds: r.eventIds,

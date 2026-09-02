@@ -16,7 +16,7 @@ import EmptyState from '@/app/components/ui/EmptyState'
 import { Input, Select } from '@/app/components/ui/Input'
 import { TBody, TD, TH, THead, TR } from '@/app/components/ui/Table'
 import { cn } from '@/lib/cn'
-import { DEVICE_STATUS_LABELS, PRODUCT_TYPES, USAGE_TYPE_LABELS, matchesSerialPattern, normalizeSerial, todayKst, type ProductTypeFilter, type UsageFilter } from '@/lib/deviceRegistryShared'
+import { PRODUCT_TYPES, USAGE_TYPE_LABELS, matchesSerialPattern, normalizeSerial, placementStatusLabel, todayKst, toYmd, type ProductTypeFilter, type UsageFilter } from '@/lib/deviceRegistryShared'
 import { errorMessage, exportUnitsUrl, getDeviceModels, getUnits, type DeviceModelOption } from './api'
 import { ExcelButton } from './ExcelButton'
 import { ProductTypeBadge, UsageBadge } from './DeviceTable'
@@ -291,7 +291,12 @@ export function DeviceListTab({ filters, setFilters, onOpenDevice, reloadKey }: 
                     <TD className={cn('whitespace-nowrap', h.muted && 'text-muted-foreground')}>{h.text}</TD>
                     <TD className="whitespace-nowrap">{wardText(row)}</TD>
                     <TD>
-                      <Badge variant={row.status === 'ACTIVE' ? 'success' : 'default'}>{DEVICE_STATUS_LABELS[row.status] ?? row.status}</Badge>
+                      <Badge
+                        variant={row.status !== 'ACTIVE' ? 'default' : row.asStartedOn ? 'warning' : 'success'}
+                        title={row.asStartedOn ? `AS 시작 ${toYmd(row.asStartedOn) ?? ''}${row.asRefCode ? ` · ${row.asRefCode}` : ''}` : undefined}
+                      >
+                        {placementStatusLabel(row)}
+                      </Badge>
                     </TD>
                     <TD className="whitespace-nowrap tabular-nums">{ymdOrDash(row.placedOn)}</TD>
                     <TD className="whitespace-nowrap tabular-nums">{lastEventText(row.lastEventType, row.lastEventOn, today)}</TD>
@@ -315,7 +320,7 @@ export function DeviceListTab({ filters, setFilters, onOpenDevice, reloadKey }: 
                 <li key={row.id} className="rounded-lg border border-border bg-card p-3" onClick={() => onOpenDevice(row.id)}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-base font-semibold">{row.serialNo}</span>
-                    <Badge variant={row.status === 'ACTIVE' ? 'success' : 'default'}>{DEVICE_STATUS_LABELS[row.status] ?? row.status}</Badge>
+                    <Badge variant={row.status !== 'ACTIVE' ? 'default' : row.asStartedOn ? 'warning' : 'success'}>{placementStatusLabel(row)}</Badge>
                   </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">
                     {row.deviceInfo?.deviceName} {row.deviceInfo?.deviceModel} · <span className={cn(!h.muted && 'text-foreground')}>{h.text}</span> · {wardText(row)}

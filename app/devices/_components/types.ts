@@ -189,6 +189,23 @@ export interface ContractedDeal {
   count: number
   roundNo: number
   contractDate: string | null
+  /** 딜의 상품유형(일반/라이트) — 계약건 선택 시 상품유형 파생(B-23) */
+  productType: string | null
+}
+
+/** 계약건(딜)별 요약 행(B-23) — 병원 뷰 상단 계약별 표 */
+export interface SummaryDealRow {
+  dealCode: string
+  roundNo: number | null
+  productType: string | null
+  contractDate: string | null
+  /** 도입 수량 — 계약완료 딜이 아니면(재적재로 끊긴 코드) null */
+  expected: number | null
+  contracted: boolean
+  /** 등록 수량(배치 중) */
+  active: number
+  /** 교체 건수(RECOVER 이벤트 deal_code 스냅샷 기준) */
+  replacements: number
 }
 
 export interface ModelSummary {
@@ -254,6 +271,12 @@ export interface HospitalDeviceSummary {
   today: string
   /** 병원 계약완료 딜 기준 상품유형 문맥(등록 기본값·혼합 필수 — B-22) */
   productTypeContext: ProductTypeContext
+  /** 계약건(딜)별 현황(B-23) — 계약완료 딜 ∪ 배치·교체에 등장한 코드 */
+  deals: SummaryDealRow[]
+  /** 계약건 미지정 버킷 — active: 딜 없는 배치 중 수 / replacements: deal_code NULL 교체 짝 수 */
+  dealUnassigned: { active: number; replacements: number }
+  /** AS진행중(as_started_on NOT NULL) 배치 중 수(B-24) */
+  asInProgress: number
   /** 계약 딜 2종이거나 배치에 상품유형이 있으면 true → 요약을 매트릭스로 */
   productTypeMixed: boolean
   /** 병원 단위 상품유형 축(ECG 기준) */
@@ -304,6 +327,12 @@ export interface DeviceRaw {
   replacedById: number | null
   /** 상품유형(일반/라이트) — 배치 속성(B-22), null=미지정. RECOVERED 행은 회수 전 마지막 값 */
   productType: ProductType | null
+  /** 계약건(딜 코드) 소프트 참조(B-23), null=미지정. RECOVERED 행은 회수 전 마지막 값 */
+  dealCode: string | null
+  /** AS진행중 플래그 시작일(B-24) — ACTIVE에서만 값이 있다. ISO 자정 문자열 */
+  asStartedOn: string | null
+  /** AS 연결 유지보수 코드(MNT-…) */
+  asRefCode: string | null
   createdAt: string
   updatedAt: string
 }
@@ -356,6 +385,10 @@ export interface UnitsQueryParams {
   usage?: UsageFilter | null
   /** 상품유형 — 일반 | 라이트 | none(미지정) */
   productType?: ProductTypeFilter | null
+  /** 계약건 — 딜 코드 | 'none'(미지정) (B-23) */
+  deal?: string | null
+  /** AS진행중만(B-24) */
+  as?: boolean | null
   page?: number
   limit?: number
   sort?: UnitsSort
@@ -436,6 +469,8 @@ export interface DeviceEventRaw {
   editedById: string | null
   /** 이벤트 시점 상품유형 스냅샷(REGISTER=지정값·MOVE/RECOVER=당시 배치 값·CORRECT=변경 후 값) */
   productType: ProductType | null
+  /** 이벤트 시점 계약건(딜 코드) 스냅샷(B-23) */
+  dealCode: string | null
   /** 기록 시각 — 업무일자와 다르면 회색 병기(D7) */
   createdAt: string
 }
@@ -587,6 +622,8 @@ export interface RegisterItemInput {
   usageType?: string
   /** 항목 상품유형('일반'·'라이트'·'lite' 등 — 붙여넣기 열) — 공통값보다 우선 */
   productType?: string
+  /** 항목 계약건(딜 코드, B-23) — 공통값보다 우선 */
+  dealCode?: string
 }
 
 export interface RegisterBody extends RegistryFields {
@@ -601,6 +638,8 @@ export interface RegisterBody extends RegistryFields {
   usageTypeId?: number
   /** 공통 상품유형(일반/라이트) — 생략 시 서버 기본값 규칙(병원 딜 1종 → 그 값 · 0종 → 미지정 · 혼합 → 400 필수) */
   productType?: ProductType
+  /** 공통 계약건(딜 코드, B-23) — 이 병원 계약완료 딜이어야 함(아니면 409). 생략 시 단일 딜 자동 기본값. 선택 시 상품유형은 딜에서 파생 */
+  dealCode?: string
   /** 타 병원 ACTIVE 시리얼의 이관 opt-in — { [serialNo]: 'TRANSFER' } */
   conflicts?: Record<string, 'TRANSFER'>
   /** 미리보기 행(1부터=items index+1) 액션 */
@@ -615,6 +654,8 @@ export interface RegisteredRef {
   eventId: number
   wardId: number | null
   productType?: ProductType | null
+  /** 이 REGISTER가 정한 계약건(B-23) */
+  dealCode?: string | null
 }
 
 export interface TransferredRef extends RegisteredRef {
@@ -689,6 +730,8 @@ export interface ReplaceBody extends RegistryFields {
   newUsageTypeId?: number
   /** 상품유형 — 구 기기가 원장에 없어 소급 등록할 때만 적용(그 외 구 배치 값 상속, B-22) */
   productType?: ProductType
+  /** 계약건 — 구 기기가 원장에 없어 소급 등록할 때만 적용(그 외 구 배치 값 상속, B-23) */
+  dealCode?: string
 }
 
 /** POST …/devices/replace 201 */
@@ -708,6 +751,8 @@ export interface ReplaceResponse {
   newDevice: DeviceRaw
   /** 신 배치에 적용된 상품유형 */
   productType: ProductType | null
+  /** 신 배치에 적용된 계약건(B-23 — 구 배치 상속) */
+  dealCode: string | null
   warnings: string[]
   wms: Record<string, WmsMatch | null>
 }
@@ -739,7 +784,7 @@ export interface RecoverResponse {
   warnings: string[]
 }
 
-export type BulkAction = 'MOVE_WARD' | 'RECOVER' | 'SET_PRODUCT_TYPE'
+export type BulkAction = 'MOVE_WARD' | 'RECOVER' | 'SET_PRODUCT_TYPE' | 'SET_DEAL'
 
 export interface BulkBody extends RegistryFields {
   action: BulkAction
@@ -750,6 +795,8 @@ export interface BulkBody extends RegistryFields {
   reasonCodeId?: number
   /** SET_PRODUCT_TYPE — 일반/라이트(null=미지정으로) */
   productType?: ProductType | null
+  /** SET_DEAL — 이 병원 계약완료 딜 코드(null=미지정으로) (B-23) */
+  dealCode?: string | null
   /** 생략 시 선택 기기의 ACTIVE 병원에서 유도 */
   hospitalCode?: string
 }
@@ -777,6 +824,8 @@ export interface DevicePatchBody {
   usageTypeId?: number | null
   /** 상품유형(일반/라이트, null=미지정) — USER+ 허용, CORRECT 이벤트 기록(배치 속성 B-22) */
   productType?: ProductType | null
+  /** 계약건(딜 코드, null=미지정) — USER+ 허용, CORRECT 이벤트 기록(배치 속성 B-23, 계약완료 딜 아니면 409) */
+  dealCode?: string | null
   /** CORRECT 이벤트 문맥(식별 보정 시) */
   occurredOn?: string
   ref?: RegistryRef | null
@@ -849,8 +898,10 @@ export interface ImportPreviewRow {
   /** 해석된 용도(행 입력 > 폼 기본 > 기존 유닛 값), null=미지정 */
   usageTypeId: number | null
   usageTypeName: string | null
-  /** 해석된 상품유형(행 입력 > 폼 기본 > 병원 딜 규칙), null=미지정(혼합 병원이면 error 판정) */
+  /** 해석된 상품유형(행 입력 > 폼 기본 > 계약건 파생 > 병원 딜 규칙), null=미지정(혼합 병원이면 error 판정) */
   productType: ProductType | null
+  /** 해석된 계약건(행 입력 > 폼 기본 > 단일 딜 자동 기본값 — B-23), null=미지정 */
+  dealCode: string | null
   wardInput: string | null
   wardId: number | null
   wardName: string | null
@@ -930,6 +981,8 @@ export interface ImportOptions {
   usageTypeId?: number
   /** 폼 공통 상품유형(F열/붙여넣기 셀이 없을 때) — 생략 시 병원 딜 기본값 규칙 */
   productType?: ProductType
+  /** 폼 공통 계약건(딜 코드, B-23) — 생략 시 단일 계약완료 딜 자동 기본값 */
+  dealCode?: string
   wardMode?: ImportWardMode
   wardId?: number
   emptyWardCell?: ImportEmptyWardCell
@@ -1057,7 +1110,7 @@ export const GLOBAL_TAB_LABELS: Record<GlobalTab, string> = {
   events: '최근 이벤트',
 }
 
-/** 기기 목록 탭 필터 — status/model/ward/q/page는 URL 동기화, sort/wms/usage/limit는 로컬 */
+/** 기기 목록 탭 필터 — status/model/ward/q/page는 URL 동기화, sort/wms/usage/deal/as/limit는 로컬 */
 export interface ListFilters {
   status: UnitsStatusFilter
   model: number | null
@@ -1069,6 +1122,10 @@ export interface ListFilters {
   wms: UnitsWmsFilter | null
   usage: UsageFilter | null
   productType: ProductTypeFilter | null
+  /** 계약건 — 딜 코드 | 'none'(미지정) | null(전체) (B-23) */
+  deal: string | null
+  /** AS진행중만(B-24) */
+  as: boolean
 }
 
 /** 전역 [디바이스] 뷰(v1 단순화) 필터 — 전부 URL 동기화(`?view=devices&status=&model=&usage=&productType=&q=&page=`) */
@@ -1120,6 +1177,10 @@ export interface DeviceRef {
   usageTypeName?: string | null
   /** 배치 상품유형(교체 폼 '구 기기와 동일' 표시용) */
   productType?: ProductType | null
+  /** 배치 계약건(교체 폼 '구 기기와 동일' 표시·AS 메뉴 판정용) */
+  dealCode?: string | null
+  /** AS진행중 플래그 시작일(ISO) — 행 ⋯ 메뉴 'AS 표시/해제' 분기용 */
+  asStartedOn?: string | null
 }
 
 /**
@@ -1128,8 +1189,8 @@ export interface DeviceRef {
  */
 export type Selection = Map<number, DeviceRef | null>
 
-/** 행 ⋯·드로어 버튼·모바일 액션바가 orchestrator에 요청하는 동작 */
-export type DeviceAction = 'move' | 'recover' | 'replace' | 'correct'
+/** 행 ⋯·드로어 버튼·모바일 액션바가 orchestrator에 요청하는 동작 — asOpen(AS 표시 모달)·asClear(즉시 해제)는 B-24 */
+export type DeviceAction = 'move' | 'recover' | 'replace' | 'correct' | 'asOpen' | 'asClear'
 
 /** 모달/패널이 쓰기 성공 후 orchestrator에 넘기는 결과 — 토스트 + onMutated + 선택 해제 */
 export interface MutationDone {
@@ -1188,5 +1249,7 @@ export function toDeviceRef(d: DeviceRowBase | DeviceListRow | DeviceDetail): De
     usageTypeId: d.usageTypeId ?? null,
     usageTypeName: d.usageType?.name ?? null,
     productType: d.productType ?? null,
+    dealCode: d.dealCode ?? null,
+    asStartedOn: d.asStartedOn ?? null,
   }
 }

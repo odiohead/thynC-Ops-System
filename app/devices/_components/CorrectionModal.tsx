@@ -13,7 +13,7 @@ import Modal from '@/app/components/ui/Modal'
 import Button from '@/app/components/ui/Button'
 import { Input, Select } from '@/app/components/ui/Input'
 import { cn } from '@/lib/cn'
-import { PRODUCT_TYPES, isFutureYmd, isYmd, matchesSerialPattern, normalizeSerial, todayKst, type ProductType } from '@/lib/deviceRegistryShared'
+import { DEVICE_STATE_EVENT_TYPES, PRODUCT_TYPES, isFutureYmd, isYmd, matchesSerialPattern, normalizeSerial, todayKst, type ProductType } from '@/lib/deviceRegistryShared'
 import { errorMessage, getUnitDetail, getUsageTypes, patchDevice } from './api'
 import { modelLabel } from './deviceDisplay'
 import type { DevicePatchBody, DeviceRef, ModelSummary, MutationDone, UsageType } from './types'
@@ -99,7 +99,7 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
       .then((r) => {
         if (!alive) return
         const d = r.device
-        const stateEventCount = r.events.filter((e) => e.eventType !== 'CORRECT').length
+        const stateEventCount = r.events.filter((e) => (DEVICE_STATE_EVENT_TYPES as readonly string[]).includes(e.eventType)).length
         setBase({
           deviceInfoId: d.deviceInfoId,
           serialNo: d.serialNo,

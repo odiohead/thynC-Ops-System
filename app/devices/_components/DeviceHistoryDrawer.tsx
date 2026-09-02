@@ -23,6 +23,7 @@ import { useOverlayDismiss } from '@/app/components/useOverlayDismiss'
 import { cn } from '@/lib/cn'
 import {
   DEVICE_EVENT_TYPE_LABELS,
+  DEVICE_STATE_EVENT_TYPES,
   DEVICE_STATUS_LABELS,
   REGISTRY_REF_TYPES,
   REGISTRY_REF_TYPE_LABELS,
@@ -31,6 +32,7 @@ import {
   REGISTRY_SOURCE_LABELS,
   isFutureYmd,
   isYmd,
+  placementStatusLabel,
   refLink,
   toYmd,
   todayKst,
@@ -38,11 +40,11 @@ import {
   type ProductType,
   type RegistryRefType,
 } from '@/lib/deviceRegistryShared'
-import { cancelEvent, errorMessage, getRecoveryReasons, getUnitDetail, getUsageTypes, getWards, patchDevice, patchEvent } from './api'
+import { cancelEvent, errorMessage, getHospitalSummary, getRecoveryReasons, getUnitDetail, getUsageTypes, getWards, patchDevice, patchEvent } from './api'
 import { useDevicesToast } from './toast'
 import { RegistryFloatingPanel, RegistryMenuItem } from './RegistryFloatingPanel'
 import { changeSummaryLines, fmtKstDateTime, kstYmd, modelLabel, productTypeBadgeVariant, usageBadgeVariant, wmsCell, ymdOrDash } from './deviceDisplay'
-import { toDeviceRef, type Capabilities, type DeviceAction, type DeviceDetail, type DeviceDetailEvent, type DeviceRef, type EventPatchBody, type RecoveryReason, type UsageType, type Ward } from './types'
+import { toDeviceRef, type Capabilities, type DeviceAction, type DeviceDetail, type DeviceDetailEvent, type DeviceRef, type EventPatchBody, type RecoveryReason, type SummaryDealRow, type UsageType, type Ward } from './types'
 
 export interface DeviceHistoryDrawerProps {
   /** URL ?device= — null이면 닫힘 */
@@ -59,11 +61,13 @@ export interface DeviceHistoryDrawerProps {
   onOpenDevice?: (id: number) => void
 }
 
-const EVENT_BADGE_VARIANT: Record<DeviceEventType, 'primary' | 'default' | 'warning' | 'outline'> = {
+const EVENT_BADGE_VARIANT: Record<DeviceEventType, 'primary' | 'default' | 'warning' | 'outline' | 'destructive'> = {
   REGISTER: 'primary',
   MOVE_WARD: 'outline',
   RECOVER: 'warning',
   CORRECT: 'default',
+  AS_OPEN: 'destructive',
+  AS_CLEAR: 'outline',
 }
 
 export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated, onAction, reloadKey, onOpenDevice }: DeviceHistoryDrawerProps) {
@@ -125,6 +129,8 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
     setSnapshotOpen(false)
     setUsageEditing(false)
     setPtEditing(false)
+    setDealEditing(false)
+    setDealOptions(null)
   }, [deviceId])
 
   // ── 상품유형(일반/라이트) — 배치 속성(B-22), USER+ 인라인 변경(CORRECT)
@@ -148,6 +154,40 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
       notify(errorMessage(e, '상품유형 변경에 실패했습니다.'), 'error')
     } finally {
       setPtSaving(false)
+    }
+  }
+
+  // ── 계약건(딜 코드, B-23) — USER+ 인라인 변경(CORRECT). 선택지는 편집 시작 시 병원 요약에서 지연 로드
+  const [dealEditing, setDealEditing] = useState(false)
+  const [dealSaving, setDealSaving] = useState(false)
+  const [dealOptions, setDealOptions] = useState<SummaryDealRow[] | null>(null)
+  const startDealEdit = () => {
+    setDealEditing(true)
+    if (dealOptions != null) return
+    const hosp = device?.hospitalCode ?? device?.lastHospitalCode
+    if (!hosp) return setDealOptions([])
+    getHospitalSummary(hosp)
+      .then((s) => setDealOptions(s.deals.filter((d) => d.contracted)))
+      .catch(() => setDealOptions([]))
+  }
+  const saveDeal = async (raw: string) => {
+    if (!device || dealSaving) return
+    const next = raw || null
+    if (next === (device.dealCode ?? null)) {
+      setDealEditing(false)
+      return
+    }
+    setDealSaving(true)
+    try {
+      const r = await patchDevice(device.id, { dealCode: next })
+      setDevice({ ...device, dealCode: r.device.dealCode ?? next })
+      setDealEditing(false)
+      notify(`${device.serialNo} 계약건 → ${next ?? '미지정'}`, 'success')
+      onMutated()
+    } catch (e) {
+      notify(errorMessage(e, '계약건 변경에 실패했습니다.'), 'error')
+    } finally {
+      setDealSaving(false)
     }
   }
 
@@ -242,7 +282,7 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
       `${device.serialNo} · ${ymdOrDash(latest.occurredOn)} ${DEVICE_EVENT_TYPE_LABELS[latest.eventType]} 이벤트를 취소할까요?`,
       latest.actionGroup ? '교체·이관·일괄로 함께 기록된 짝 이벤트가 있으면 같이 취소됩니다.' : null,
       latest.importBatchId != null ? `임포트 배치 #${latest.importBatchId}의 행이므로 배치 카운트도 조정됩니다.` : null,
-      events.filter((e) => e.eventType !== 'CORRECT').length <= 1 && latest.eventType === 'REGISTER' ? '유일한 등록 이벤트 — 개체 자체가 삭제됩니다.' : null,
+      events.filter((e) => (DEVICE_STATE_EVENT_TYPES as readonly string[]).includes(e.eventType)).length <= 1 && latest.eventType === 'REGISTER' ? '유일한 등록 이벤트 — 개체 자체가 삭제됩니다.' : null,
       '취소는 되돌릴 수 없습니다(감사 로그에 원문이 남습니다).',
     ].filter(Boolean)
     if (!window.confirm(lines.join('\n'))) return
@@ -292,7 +332,12 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-lg font-semibold leading-tight">{device.serialNo}</span>
                     {device.serialRaw && <span className="font-mono text-xs text-muted-foreground">원문 {device.serialRaw}</span>}
-                    <Badge variant={device.status === 'ACTIVE' ? 'success' : 'default'}>{DEVICE_STATUS_LABELS[device.status]}</Badge>
+                    <Badge
+                      variant={device.status !== 'ACTIVE' ? 'default' : device.asStartedOn ? 'warning' : 'success'}
+                      title={device.asStartedOn ? `AS 시작 ${toYmd(device.asStartedOn) ?? ''}${device.asRefCode ? ` · ${device.asRefCode}` : ''} — 교체·회수 시 자동 해제` : undefined}
+                    >
+                      {placementStatusLabel(device)}
+                    </Badge>
                     {canWrite && usageEditing ? (
                       <Select
                         aria-label="용도"
@@ -355,6 +400,45 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
                     ) : device.productType ? (
                       <Badge variant={device.status === 'RECOVERED' ? 'outline' : (productTypeBadgeVariant(device.productType) ?? 'default')} title={device.status === 'RECOVERED' ? '회수 전 상품유형 — 재등록 시 다시 지정' : '상품유형 (자리의 판매 조건)'}>
                         {device.status === 'RECOVERED' ? `회수 전 ${device.productType}` : device.productType}
+                      </Badge>
+                    ) : null}
+                    {canWrite && device.status === 'ACTIVE' && dealEditing ? (
+                      <Select
+                        aria-label="계약건"
+                        autoFocus
+                        value={device.dealCode ?? ''}
+                        disabled={dealSaving || dealOptions == null}
+                        onChange={(e) => void saveDeal(e.target.value)}
+                        onBlur={() => !dealSaving && setDealEditing(false)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') setDealEditing(false)
+                        }}
+                        className="h-7 w-auto max-w-[15rem] text-xs"
+                      >
+                        <option value="">{dealOptions == null ? '계약건 불러오는 중…' : '계약건 미지정'}</option>
+                        {(dealOptions ?? []).map((d) => (
+                          <option key={d.dealCode} value={d.dealCode}>
+                            {d.dealCode}
+                            {d.roundNo != null ? ` (${d.roundNo}차${d.productType ? ` ${d.productType}` : ''})` : ''}
+                          </option>
+                        ))}
+                        {device.dealCode && !(dealOptions ?? []).some((d) => d.dealCode === device.dealCode) && (
+                          <option value={device.dealCode}>{device.dealCode} (계약 외)</option>
+                        )}
+                      </Select>
+                    ) : canWrite && device.status === 'ACTIVE' ? (
+                      <button type="button" onClick={startDealEdit} className="rounded hover:bg-accent" title="계약건 변경 (이 병원 계약완료 딜 — CORRECT 이벤트로 기록, B-23)" aria-label="계약건 변경">
+                        {device.dealCode ? (
+                          <Badge variant="outline" className="font-mono">
+                            {device.dealCode}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline">계약건 미지정</Badge>
+                        )}
+                      </button>
+                    ) : device.dealCode ? (
+                      <Badge variant="outline" className="font-mono" title={device.status === 'RECOVERED' ? '회수 전 계약건 — 재등록 시 다시 지정' : '계약건(딜) 소프트 참조'}>
+                        {device.status === 'RECOVERED' ? `회수 전 ${device.dealCode}` : device.dealCode}
                       </Badge>
                     ) : null}
                   </div>
@@ -798,6 +882,10 @@ function EventSummary({ ev, onOpenDevice, usageTypes }: { ev: DeviceDetailEvent;
           )}
         </>
       )
+    case 'AS_OPEN':
+      return <>AS진행중 표시</>
+    case 'AS_CLEAR':
+      return <>AS진행중 해제</>
     case 'CORRECT': {
       const lines = changeSummaryLines(ev.changes, undefined, usageTypes)
       return <>{lines.length ? lines.join(' · ') : '식별 정정'}</>

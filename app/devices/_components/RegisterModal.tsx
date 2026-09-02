@@ -23,7 +23,7 @@ import { cn } from '@/lib/cn'
 import { IMPORT_MAX_ROWS, IMPORT_VERDICT_COLORS, IMPORT_VERDICT_LABELS, PRODUCT_TYPES, normalizeSerial, parseSerialLines, todayKst, toYmd, type ImportRowAction, type ImportVerdict, type OccurredOnBasis, type ProductType } from '@/lib/deviceRegistryShared'
 import { errorMessage, getUsageTypes, isApiError, previewRegister, registerDevices } from './api'
 import { productTypeDefaultLabel } from './deviceDisplay'
-import type { ImportPreviewRow, ModelSummary, MutationDone, RegisterBody, RegisterPreviewResponse, RegistryRef, UsageType, WardOption, WardValue } from './types'
+import type { ContractedDeal, ImportPreviewRow, ModelSummary, MutationDone, RegisterBody, RegisterPreviewResponse, RegistryRef, UsageType, WardOption, WardValue } from './types'
 import { WardCombo } from './WardCombo'
 import { MaintenanceCodeCombo } from './MaintenanceCodeCombo'
 import { FormField, ModalActions, Notice, OccurredOnField, describeWard, isSubmitShortcut, useOccurredOn, wardBody } from './registryFormKit'
@@ -36,6 +36,8 @@ export interface RegisterModalProps {
   models: ModelSummary[]
   /** 병동 콤보 사전 로드(summary.wards → toWardOption) */
   wards: WardOption[]
+  /** 계약건 선택지(summary.contractedDeals — B-23). 선택 시 상품유형은 딜에서 파생 */
+  deals: ContractedDeal[]
   /** 서버 KST 오늘(summary.today) — 없으면 todayKst() */
   today: string | null
   /** 미리 채울 시리얼(모바일 스캔·조회 결과 등) */
@@ -66,7 +68,7 @@ export function RegisterModal(props: RegisterModalProps) {
   )
 }
 
-function RegisterForm({ onClose, hospitalCode, models, wards, today: todayProp, initialSerials, onDone }: RegisterModalProps) {
+function RegisterForm({ onClose, hospitalCode, models, wards, deals, today: todayProp, initialSerials, onDone }: RegisterModalProps) {
   const today = todayProp ?? todayKst()
   const [text, setText] = useState(() => (initialSerials && initialSerials.length > 0 ? initialSerials.join('\n') + '\n' : ''))
   const [modelId, setModelId] = useState<number | ''>('')
@@ -75,6 +77,9 @@ function RegisterForm({ onClose, hospitalCode, models, wards, today: todayProp, 
   const [usageTypes, setUsageTypes] = useState<UsageType[] | null>(null)
   /** 상품유형 공통값 — '' = 서버 기본값 규칙(병원 딜 기준) */
   const [productType, setProductType] = useState<ProductType | ''>('')
+  /** 계약건 공통값(B-23) — '' = 자동(단일 계약완료 딜 기본값)/미지정 */
+  const [dealCode, setDealCode] = useState('')
+  const selectedDeal = useMemo(() => deals.find((d) => d.dealCode === dealCode) ?? null, [deals, dealCode])
   const occ = useOccurredOn(today)
   const [memo, setMemo] = useState('')
   const [refCode, setRefCode] = useState('')
@@ -150,6 +155,7 @@ function RegisterForm({ onClose, hospitalCode, models, wards, today: todayProp, 
       ...(modelId !== '' ? { deviceInfoId: modelId } : {}),
       ...(usageId !== '' ? { usageTypeId: usageId } : {}),
       ...(productType !== '' ? { productType } : {}),
+      ...(dealCode !== '' ? { dealCode } : {}),
       ...wardBody(ward),
       occurredOn: occ.value,
       memo: memo.trim() || null,
@@ -158,12 +164,12 @@ function RegisterForm({ onClose, hospitalCode, models, wards, today: todayProp, 
       ...(Object.keys(rowActions).length > 0 ? { rowActions } : {}),
       ...(excludeRows.length > 0 ? { excludeRows } : {}),
     }
-  }, [items, unassign, transfers, effectiveExcluded, refCode, modelId, usageId, productType, ward, occ.value, memo])
+  }, [items, unassign, transfers, effectiveExcluded, refCode, modelId, usageId, productType, dealCode, ward, occ.value, memo])
 
   // 판별 입력 키 — 제외 목록은 클라이언트가 계산하므로 키에 넣지 않는다(재판별 불필요)
   const currentKey = useMemo(
-    () => JSON.stringify({ items: items.map((it) => [it.serialInput, it.wardInput ?? '', it.memo ?? '', it.usageInput ?? '', it.productTypeInput ?? '']), modelId, usageId, productType, ward, occurredOn: occ.value, transfers: Array.from(transfers).sort(), unassign: Array.from(unassign).sort(), nonce }),
-    [items, modelId, usageId, productType, ward, occ.value, transfers, unassign, nonce]
+    () => JSON.stringify({ items: items.map((it) => [it.serialInput, it.wardInput ?? '', it.memo ?? '', it.usageInput ?? '', it.productTypeInput ?? '']), modelId, usageId, productType, dealCode, ward, occurredOn: occ.value, transfers: Array.from(transfers).sort(), unassign: Array.from(unassign).sort(), nonce }),
+    [items, modelId, usageId, productType, dealCode, ward, occ.value, transfers, unassign, nonce]
   )
   const ptCtx = preview?.productTypeContext ?? null
   const stale = preview != null && previewKey !== currentKey
@@ -375,12 +381,44 @@ function RegisterForm({ onClose, hospitalCode, models, wards, today: todayProp, 
           <WardCombo id="register-ward" hospitalCode={hospitalCode} value={ward} onChange={setWard} allowNew wards={wards} disabled={submitting} />
         </FormField>
         <FormField
+          label="계약건"
+          htmlFor="register-deal"
+          hint={
+            deals.length === 0
+              ? '이 병원에 계약완료 딜이 없습니다 — 계약건 미지정으로 등록됩니다'
+              : selectedDeal
+                ? `이 계약건의 상품유형(${selectedDeal.productType ?? '미지정'})이 적용됩니다`
+                : deals.length === 1
+                  ? `비우면 단일 계약건(${deals[0].dealCode})이 자동 지정됩니다`
+                  : '배치가 속한 딜(소프트 참조) — 비우면 미지정'
+          }
+        >
+          <Select
+            id="register-deal"
+            value={dealCode}
+            disabled={submitting}
+            onChange={(e) => {
+              setDealCode(e.target.value)
+              if (e.target.value) setProductType('') // 딜이 상품유형을 정한다(B-23)
+            }}
+          >
+            <option value="">{deals.length === 1 ? `자동 (단일 계약건: ${deals[0].dealCode})` : '미지정'}</option>
+            {deals.map((d) => (
+              <option key={d.dealCode} value={d.dealCode}>
+                {d.dealCode} · {d.roundNo}차{d.productType ? ` ${d.productType}` : ''} {d.count.toLocaleString()}대
+              </option>
+            ))}
+          </Select>
+        </FormField>
+        <FormField
           label="상품유형"
           htmlFor="register-product-type"
-          required={!!ptCtx?.mixed}
+          required={!!ptCtx?.mixed && !selectedDeal}
           hint={
-            ptCtx?.mixed && productType === '' ? (
-              <span className="text-destructive">이 병원은 일반·라이트 딜이 함께 있습니다 — 상품유형을 선택해야 등록할 수 있습니다 (줄에 &apos;일반&apos;/&apos;라이트&apos; 셀이 있으면 그 값 우선)</span>
+            selectedDeal ? (
+              '선택한 계약건의 상품유형이 적용됩니다 (줄에 다른 유형을 명시하면 400)'
+            ) : ptCtx?.mixed && productType === '' ? (
+              <span className="text-destructive">이 병원은 일반·라이트 딜이 함께 있습니다 — 상품유형(또는 계약건)을 선택해야 등록할 수 있습니다 (줄에 &apos;일반&apos;/&apos;라이트&apos; 셀이 있으면 그 값 우선)</span>
             ) : ptCtx ? (
               `계약완료 딜: ${ptCtx.byType.length ? ptCtx.byType.map((b) => `${b.type} ${b.devices.toLocaleString()}대`).join(' · ') : '없음'} — 자리의 판매 조건(배치 속성). 줄의 3번째 열 이후 '일반'/'라이트' 셀이 우선`
             ) : (
@@ -388,14 +426,21 @@ function RegisterForm({ onClose, hospitalCode, models, wards, today: todayProp, 
             )
           }
         >
-          <Select id="register-product-type" value={productType} disabled={submitting} onChange={(e) => setProductType(e.target.value as ProductType | '')}>
-            <option value="">{productTypeDefaultLabel(ptCtx)}</option>
-            {PRODUCT_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </Select>
+          {selectedDeal ? (
+            <div className="flex h-9 items-center rounded-md border border-border bg-muted/40 px-3 text-sm text-foreground" aria-readonly="true">
+              {selectedDeal.productType ?? '미지정'}
+              <span className="ml-2 text-xs text-muted-foreground">계약건에서 파생</span>
+            </div>
+          ) : (
+            <Select id="register-product-type" value={productType} disabled={submitting} onChange={(e) => setProductType(e.target.value as ProductType | '')}>
+              <option value="">{productTypeDefaultLabel(ptCtx)}</option>
+              {PRODUCT_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </Select>
+          )}
         </FormField>
         <FormField label="용도" htmlFor="register-usage" hint="공통 용도 — 줄의 3번째 열 이후에 '판매용'/'평가용'이 있으면 그 값이 우선. 평가용은 계약 대조에서 제외">
           <Select id="register-usage" value={usageId} disabled={submitting || usageTypes == null} onChange={(e) => setUsageId(e.target.value ? Number(e.target.value) : '')}>

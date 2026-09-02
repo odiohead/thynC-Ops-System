@@ -155,6 +155,9 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
   const [usageTypes, setUsageTypes] = useState<UsageType[] | null>(null)
   /** 상품유형 공통값 — null = 서버 기본값 규칙(병원 딜 기준) */
   const [productType, setProductType] = useState<ProductType | null>(null)
+  /** 계약건 공통값(B-23) — null = 자동(단일 계약완료 딜 기본값)/미지정 */
+  const [dealCode, setDealCode] = useState<string | null>(null)
+  const contractedDeals = useMemo(() => summary?.contractedDeals ?? [], [summary])
   const [memo, setMemo] = useState('')
   const [inputError, setInputError] = useState<string | null>(null)
 
@@ -209,9 +212,10 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
     if (deviceInfoId) o.deviceInfoId = deviceInfoId
     if (usageTypeId) o.usageTypeId = usageTypeId
     if (productType) o.productType = productType
+    if (dealCode) o.dealCode = dealCode
     if (memo.trim()) o.memo = memo.trim()
     return o
-  }, [wardMode, emptyWardCell, occurredOn, mode, fixedWard.wardId, deviceInfoId, usageTypeId, productType, memo])
+  }, [wardMode, emptyWardCell, occurredOn, mode, fixedWard.wardId, deviceInfoId, usageTypeId, productType, dealCode, memo])
 
   /** 미리보기 상태(제외·행 액션·별칭·org)를 옵션에 얹는다 — 재검증·실행 공용 */
   const reviewOptions = useCallback(
@@ -643,27 +647,50 @@ export function ImportPanel({ hospitalCode, capabilities, summary, onDone, onTot
           <span className="text-[11px]">E열/붙여넣기의 &apos;판매용·평가용&apos; 셀이 우선. 평가용은 계약 대조에서 제외.</span>
         </label>
         <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          상품유형{ptCtx?.mixed && <span className="ml-0.5 text-destructive">*</span>}
+          계약건
+          <Select
+            className="h-9"
+            value={dealCode ?? ''}
+            disabled={optionsDisabled}
+            onChange={(e) => {
+              setDealCode(e.target.value || null)
+              if (e.target.value) setProductType(null) // 딜이 상품유형을 정한다(B-23)
+              markStale()
+            }}
+          >
+            <option value="">{contractedDeals.length === 1 ? `자동 (단일 계약건: ${contractedDeals[0].dealCode})` : '미지정'}</option>
+            {contractedDeals.map((d) => (
+              <option key={d.dealCode} value={d.dealCode}>
+                {d.dealCode} · {d.roundNo}차{d.productType ? ` ${d.productType}` : ''} {d.count.toLocaleString()}대
+              </option>
+            ))}
+          </Select>
+          <span className="text-[11px]">{dealCode ? '이 계약건의 상품유형이 전 행에 적용됩니다(행에 다른 유형 명시 시 오류)' : '배치가 속한 딜(소프트 참조) — 비우면 단일 계약완료 딜일 때만 자동 지정'}</span>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          상품유형{ptCtx?.mixed && !dealCode && <span className="ml-0.5 text-destructive">*</span>}
           <Select
             className="h-9"
             value={productType ?? ''}
-            disabled={optionsDisabled}
+            disabled={optionsDisabled || !!dealCode}
             onChange={(e) => {
               setProductType((e.target.value || null) as ProductType | null)
               markStale()
             }}
           >
-            <option value="">{productTypeDefaultLabel(ptCtx)}</option>
+            <option value="">{dealCode ? '계약건에서 파생' : productTypeDefaultLabel(ptCtx)}</option>
             {PRODUCT_TYPES.map((t) => (
               <option key={t} value={t}>
                 {t}
               </option>
             ))}
           </Select>
-          <span className={cn('text-[11px]', ptCtx?.mixed && !productType && 'text-destructive')}>
-            {ptCtx?.mixed && !productType
-              ? '일반·라이트 딜이 함께 있는 병원 — F열/붙여넣기 셀이 없는 행은 오류로 판정됩니다. 공통값을 고르거나 행마다 지정하세요.'
-              : `자리의 판매 조건(배치 속성). F열/붙여넣기의 '일반·라이트' 셀이 우선${ptCtx?.byType.length ? ` · 계약완료 딜: ${ptCtx.byType.map((b) => `${b.type} ${b.devices.toLocaleString()}대`).join(' · ')}` : ''}`}
+          <span className={cn('text-[11px]', ptCtx?.mixed && !productType && !dealCode && 'text-destructive')}>
+            {dealCode
+              ? '선택한 계약건의 상품유형이 적용됩니다'
+              : ptCtx?.mixed && !productType
+                ? '일반·라이트 딜이 함께 있는 병원 — F열/붙여넣기 셀이 없는 행은 오류로 판정됩니다. 공통값(또는 계약건)을 고르거나 행마다 지정하세요.'
+                : `자리의 판매 조건(배치 속성). F열/붙여넣기의 '일반·라이트' 셀이 우선${ptCtx?.byType.length ? ` · 계약완료 딜: ${ptCtx.byType.map((b) => `${b.type} ${b.devices.toLocaleString()}대`).join(' · ')}` : ''}`}
           </span>
         </label>
         <label className="flex flex-col gap-1 text-xs text-muted-foreground">

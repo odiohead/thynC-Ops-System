@@ -109,6 +109,8 @@ CORRECT: 어느 상태에서나(admin), 식별 속성만, 전이 없음
 
 fold 규칙: REGISTER → ACTIVE·hospital_code·ward_id=to·placed_on·(recovered_on·recover_reason·last_hospital_code·replaced_by_id NULL) / MOVE_WARD → ward_id / RECOVER → RECOVERED·last_hospital_code·(hospital_code·ward NULL)·recovered_on·recover_reason_id·replaced_by_id=RECOVER의 `related_device_id` / CORRECT → 식별 컬럼만. `last_event_type/on`은 CORRECT를 제외한 마지막 이벤트. 전이 검증은 `assertTransition` 단일 소스(`canTransition` 선례). 개체 라우트(`/units/[id]/*`)의 병원 문맥은 body가 아니라 `device.hospital_code`에서 서버가 유도한다.
 
+**AS_OPEN / AS_CLEAR — 비상태 표시 이벤트(B-24, 2026-09-02)**: 'AS진행중'은 제3의 fold 상태가 아니라 **ACTIVE 배치의 플래그**다. 전이표에서 같은 병원 ACTIVE에서만 `ok`(타 병원 conflict·RECOVERED invalid·없음 not_found)이고, fold는 `as_started_on`(=occurred_on)·`as_ref_code`(AS_OPEN의 MAINTENANCE ref)만 갱신하며 CORRECT처럼 `last_event_type/on`·stateEventCount·요약 '최근 이벤트'에서 **제외**한다(마커일 뿐 자리의 이력이 아님 — 이력 드로어에는 'AS 시작/해제' 행으로 남는다). RECOVER(교체 포함)·재REGISTER fold가 플래그를 **자동 해제**하고(AS_CLEAR 이벤트 없이), 수동 해제는 AS_CLEAR. 개체 표시 라벨은 `placementStatusLabel` — ACTIVE='사용중', ACTIVE+플래그='AS진행중', RECOVERED='회수됨'('배치 중'은 집계 수치 문구에만).
+
 ## 5. 데이터 모델
 공통: `public` 스키마, FK는 `hospitals.hospital_code` + ON UPDATE CASCADE. **CHECK는 무결성 어휘(상태·타입·상태↔병원·병동↔병원·RECOVER 사유·CORRECT changes·ref 쌍·임포트 source_kind)만**; `ref_type`·`source`·`device_class`·`mode`는 코드 상수만(편입 어휘 확장 시 마이그 불필요). DDL 전문은 부록 A.1.
 
@@ -162,10 +164,13 @@ fold 규칙: REGISTER → ACTIVE·hospital_code·ward_id=to·placed_on·(recover
 | `last_event_type` / `last_event_on` | TEXT / DATE | 목록 '최근 이벤트' |
 | `replaced_by_id` | FK **`device_units`** SET NULL | "→ A130001로 교체됨" — 교체 상대는 유닛 |
 | `product_type` | TEXT NULL, CHECK `product_type IS NULL OR product_type IN ('일반','라이트')` (`sales_deals.product_type`과 같은 어휘) | **상품유형은 자리의 판매 조건 — 배치 속성**(B-22, 2026-09-01 결정). 물건(유닛)이 아니라 팔린 자리에 붙는다: 한 병원에 일반 50 + 라이트 50이 공존할 수 있고 같은 기기가 다른 병원으로 가면 다시 정해진다. REGISTER 이벤트 값의 fold 파생(CORRECT `changes.productType`으로 갱신) · **교체 상속**(신 배치 = 구 배치 값) · **회수 시 배치 행은 마지막 값을 보존**(표시 '회수 전 라이트')하되 재등록의 REGISTER가 다시 정한다(승계 없음) |
+| `deal_code` | TEXT NULL — **소프트 참조**(FK 없음, `sales_deals.deal_code` `DEAL-YYYYMM-NNNN`) | **계약건 — 배치가 속한 딜**(B-23, 2026-09-02). 딜은 재적재·삭제되므로 티켓 `ref_type/ref_code` 선례대로 코드 문자열만. REGISTER fold 파생(CORRECT `changes.dealCode`로 갱신) · 교체 상속 · 회수 시 마지막 값 보존(재등록 시 재지정). 선택 입력 — 명시 코드는 이 병원 계약완료 딜이어야 하고(409), 단일 계약완료 딜이면 자동 기본값(§7.0) |
+| `as_started_on` | DATE NULL | **AS진행중 플래그 시작일**(B-24) — ACTIVE 배치의 표시 플래그(제3의 상태 아님). AS_OPEN fold가 set, AS_CLEAR·RECOVER·재REGISTER가 clear |
+| `as_ref_code` | TEXT NULL | AS_OPEN 이벤트의 MAINTENANCE ref 코드(MNT-…, 소프트 참조) — 드로어·목록 툴팁에 표시 |
 | `created_at` / `updated_at` | | |
 
 **제거된 컬럼(구 단일 테이블 초안 대비)**: `device_info_id`·`serial_no`·`serial_raw`·`mac_address`·`memo`(→ `device_units`), `inventory_unit_id`(→ 후속 `inventory_units.device_id`로 방향 반전). 함께 제거된 제약·인덱스: `hospital_devices_serial_no_key`, `hospital_devices_inventory_unit_id_key`, `hospital_devices_serial_no_pattern_idx`, `hospital_devices_device_info_id_status_idx`, `hospital_devices_hospital_model_status_idx`(모델 축 조회는 `device_units` 조인).
-인덱스: (hospital_code, status) / (ward_id) / (last_hospital_code, status) / (hospital_code, product_type, status)(B-22 매트릭스·필터).
+인덱스: (hospital_code, status) / (ward_id) / (last_hospital_code, status) / (hospital_code, product_type, status)(B-22 매트릭스·필터) / 부분 (hospital_code, deal_code) WHERE deal_code IS NOT NULL(B-23 계약별 집계·필터).
 **미결정(B-20)**: ACTIVE-only 변형(회수 요약 `last_hospital_code`·`recovered_on`·`recover_reason_id`를 유닛으로 옮기고 배치 행은 ACTIVE만 보유)은 채택하지 않았고 추후 검토.
 
 ### 5.4 `hospital_device_import_batches`(신설 — 임포트 취소 단위)
@@ -176,7 +181,7 @@ fold 규칙: REGISTER → ACTIVE·hospital_code·ward_id=to·placed_on·(recover
 |---|---|---|
 | `id` | SERIAL PK(같은 일자 순서 키) | |
 | `device_id` | NOT NULL FK **`device_units`** RESTRICT | 유닛 삭제는 이벤트 0일 때만 |
-| `event_type` | TEXT NOT NULL CHECK (REGISTER, MOVE_WARD, RECOVER, CORRECT) | |
+| `event_type` | TEXT NOT NULL CHECK (REGISTER, MOVE_WARD, RECOVER, CORRECT, AS_OPEN, AS_CLEAR) | AS_OPEN/AS_CLEAR는 비상태 표시 이벤트(B-24, §4.2 주) |
 | `hospital_code` | NULL FK RESTRICT, CHECK `event_type='CORRECT' OR hospital_code IS NOT NULL`, CHECK `hospital_code IS NOT NULL OR (from_ward_id IS NULL AND to_ward_id IS NULL)` | **사건 병원 비정규화(D8)** — 유지보수 병원 변경·하드 삭제에 불변(유일한 예외: §9.6 일괄 이전 — 같은 실체의 병원 코드 통합이므로 이벤트도 대상 병원으로 이동, 드로어의 '이전 병원' 구분은 사라짐). 두 번째 CHECK는 복합 FK MATCH SIMPLE 우회 차단 |
 | `from_ward_id` / `to_ward_id` | 각각 복합 FK (x, hospital_code) RESTRICT DEFERRABLE | MOVE(from→to)·REGISTER(to)·RECOVER(from). RESTRICT라 병동 개명이 이력에 자연 반영 |
 | `reason_code_id` | FK status_codes RESTRICT, CHECK `event_type<>'RECOVER' OR reason_code_id IS NOT NULL` | 회수 사유 필수 |
@@ -191,6 +196,7 @@ fold 규칙: REGISTER → ACTIVE·hospital_code·ward_id=to·placed_on·(recover
 | `actor_id` / `actor_name` | FK SET NULL / TEXT | 계정 삭제 뒤에도 읽히도록 이름 스냅샷 |
 | `edited_at` / `edited_by` | | 인플레이스 정정 흔적 |
 | `product_type` | TEXT NULL, CHECK `IS NULL OR IN ('일반','라이트')` | **이벤트 시점 상품유형 스냅샷**(B-22) — REGISTER=이 배치에 지정된 값(fold 소스) · MOVE_WARD/RECOVER=기록 시점 배치 값 · CORRECT=변경 후 값. RECOVER 스냅샷이 교체 집계(`countReplacements`)의 상품유형 축 |
+| `deal_code` | TEXT NULL(소프트 참조) | **이벤트 시점 계약건(딜 코드) 스냅샷**(B-23) — REGISTER=새 배치 값(fold 소스) · 그 외=기록 시점 배치 값 · CORRECT=변경 후 값. RECOVER 스냅샷이 딜별 교체 집계(`countReplacementsByDeal`)의 축 |
 | `created_at` | | 기록 시각(업무일자와 분리 — D7) |
 
 인덱스: (device_id, occurred_on, id) fold / (hospital_code, occurred_on DESC, id DESC) / 부분 (ref_type, ref_code) / 부분 (import_batch_id) / 부분 (action_group) / (event_type, occurred_on DESC) / **멱등 부분 UNIQUE (ref_type, ref_code, device_id, event_type) WHERE ref_type IS NOT NULL AND source IN ('WMS','ONPREM')**.
@@ -286,7 +292,7 @@ model HospitalDeviceEvent {
 - **헤더**: 제목 '디바이스 원장' + 메인 탭 **[병원별] [디바이스]**만. 전역 요약 줄·헤더 시리얼 조회(`SerialLookup`)·헤더 [Excel]은 제거(Excel은 각 뷰 안으로 이동).
 - **[병원별]**(`?view=hospital&hospital=&tab=list|history|wards|import&status=&model=&ward=&q=&page=&device=`)
   - 1행 병원 콤보(기존 `HospitalPicker`, '전체 병원 검색' 토글 유지) … 우측(USER+) **[+ 등록] [임포트]**(임포트는 하위 탭 전환). 헤더 [교체]는 제거 — 행 ⋯·드로어 [교체]로만.
-  - 2행 **요약 한 줄** `배치 중 18 · 계약 60 · 회수 2 · 병동 3` — '계약' 클릭 → 팝오버(모델별 hard/soft 대조·근거 딜 목록·평가용 제외 문구·상품유형별·교체 집계 = 구 `SummaryStrip` 내용). 매트릭스 표·WMS 열·평가용 칩은 노출하지 않음(`SummaryStrip.tsx`는 보존, 미사용).
+  - 2행 **계약건(딜)별 현황 표**(B-23, 2026-09-02 — 구 '요약 한 줄' 대체, `HospitalContractTable`): 열 `계약건 | 유형 | 도입 수량(계약) | 등록 수량(배치 중) | 교체 건수`. 행 = 계약완료 딜 ∪ 배치·교체에 등장한 코드(계약 외 코드는 '(계약 외)' 표시 — 재적재로 끊긴 코드 발견 경로), 딜 없는 배치·교체가 있으면 '(미지정)' 행, 마지막 합계 행의 ⓘ가 구 팝오버(모델별 hard/soft 대조·근거 딜·평가용 제외·상품유형별·교체 집계)를 연다. 헤더 줄에 'AS진행중 n' warning 칩(B-24)·'상품유형 혼합' 배지·배치 중/회수(30일)/병동 요약. **개체 상태 표시 라벨(B-24)**: 목록·드로어·export의 상태는 `사용중`(ACTIVE)/`AS진행중`(ACTIVE+플래그, warning)/`회수됨` — '배치 중'은 집계 수치 문구에만. 기기 목록 [필터 더보기]에 계약건 select·'AS진행중만' 체크박스, [열 더보기]에 계약건 열, 행 ⋯에 'AS 표시'(유지보수 코드 선택 소형 모달)/'AS 해제', 선택 바에 [계약건 지정](SET_DEAL). 매트릭스 표·WMS 열·평가용 칩은 노출하지 않음(`SummaryStrip.tsx`는 보존, 미사용).
   - 3행 소형 탭 **기기 목록 | 이력 | 병동 | 임포트**(기본 기기 목록) — `EventsTab`/`WardPanel`/`ImportPanel`은 그대로. 우측에 [선택] 토글(USER+, 기기 목록 탭) + [Excel](기기 목록/이력 탭 기준).
   - 기기 목록 = `DeviceTable compact showSelection={선택 토글}`: 기본 열 `시리얼 | 모델 | 병동 | 상태 | 상품유형 | 배치일 | 최근 이벤트 | ⋯`, 용도·회수일·사유·연결·창고 개체·메모·원문 2행은 **[열 더보기]**; 필터는 상태(배치 중/회수됨/전체) + 시리얼 검색만 기본, 모델 칩·병동·WMS·용도·상품유형·정렬·행수는 **[필터 더보기]**(숨은 필터에 값이 있으면 자동 펼침). 체크박스·선택 바(`BulkActionBar`)는 [선택] 토글을 켤 때만(기본 off). 행 ⋯ 메뉴(이동/회수/교체/정정)·빈 상태 문구는 동일.
   - 병원 미선택(첫 화면): **축약 병원 커버리지 표**(`GlobalCoverage compact` — 2026-09-01 피드백 "첫 페이지에 아무것도 안 보이는 건 별로" → 09-02 "일반·라이트 수량을 따로" → 09-02 3차 개정 "병원당 1행"). 열 `병원명 | 상태 | 판매유형 | 심전계 | 심전계(라이트) | 산소포화도 | 산소포화도(라이트) | 혈압계 | 혈압계(라이트) | 마지막 이벤트` — 병원당 **1행**. **혈압계 = 링 혈압계(CART BP) SL-MPF1K07**(`onprem_device_type` 10 — MBP100U 아님, id 하드코딩 없음). 판매유형 = 일반/라이트 배지((계약완료 딜 유형 ∪ ACTIVE 배치 유형) 합집합, 일반 먼저, 없으면 '—'). 기기 6셀 = **ACTIVE 배치 수(평가용 포함 — 배치 현황이지 계약 대조가 아님)**, 기본 열 = '일반'·(라이트) 열 = '라이트', 고정 폭(w-20) 우측 정렬 tabular-nums로 그리드 정렬, **0은 회색 '0'**(원장 없는 병원도 '미등록' 문구 없이 전부 0), 심전계 셀 툴팁에 그 유형 계약 수(`expectedByType`). 미지정 ACTIVE 배치는 어느 열에도 합산하지 않고 병원명 옆 warning 배지 `미지정 n`(툴팁 '기기 목록에서 지정하세요'). **[임포트] 퀵 액션 없음**(등록은 병원 진입 후). GW·제3자(링 제외) 수는 이 표에 없음. 툴바 = 필터 [전체|등록 0|차이 있음|등록 완료]('unregistered' 값·동작 유지, 라벨만 '등록 0') + 검색 [병원명/코드](정렬 '차이 큰 순' 고정, 셀렉트 숨김), 50행, 행 클릭 → 병원 선택(setHospital). 모바일 카드: 병원+상태+판매유형 배지 + '일반 E n · S n · BP n'/'라이트 …' 두 줄. 데이터: `getGlobalCoverage` 행의 `byProductType{일반|라이트|미지정}{ecg,spo2,bp}`·`expectedByType{일반,라이트}`(09-02 additive 확장 — 기존 grouped 쿼리에 FILTER 카운트, N+1 없음, 기존 필드 전부 유지 = 전체 12열 모드 계속 동작). 전체 12열 모드·전역 최근 이벤트 탭은 v1 UI에 없음(파일·API 보존). `MobileActionBar`도 렌더하지 않음. URL: 병원 미선택 시 `q`/`page`는 이 표의 병원명 검색·페이지(병원 선택 시 초기화).
@@ -425,6 +431,8 @@ getHospitalDeviceSummary(code) · getGlobalCoverage(params) · matchInventoryUni
 **교체 계약(§4.1-6·§6.1 교체와 동일)**: (1) `newConflict:'TRANSFER'`는 **신 시리얼**이 타 병원 ACTIVE일 때만 — RECOVER(TRANSFER)@그 병원 + REGISTER@이 병원; 미지정이면 409 `conflicts[]`. (2) **구기기가 타 병원 ACTIVE면 항상 409**(구기기 이관 옵션 없음). (3) 구기기가 RECOVERED이고 `last_hospital_code`=이 병원이면 RECOVER 없이 REGISTER(신, `related_device_id`=구) 1이벤트 + 구 RECOVER 이벤트의 `related_device_id`=신 연결; `occurredOn < 구.recovered_on`이면 400; `last_hospital_code`≠이 병원이면 409. (4) 구=신 400. (5) **신 시리얼이 이미 이 병원 ACTIVE**(go-live 임포트에 예비기가 포함됐거나 등록을 먼저 한 경우)면 REGISTER를 만들지 않고 RECOVER(구, `related_device_id`=신) 1이벤트 + 병동이 다르면 MOVE_WARD(신 → 구 병동) 1이벤트를 같은 `action_group`으로 기록(응답 `registered:null, movedNew?`). (6) 구기기 소급 등록(원장에 없음) 경로의 소급 REGISTER(구)는 `occurred_on`=ctx.occurredOn(같은 일자, 순서는 id)·`memo`='교체 시 소급 등록'·`source`='MANUAL' — **구기기의 실제 배치일은 기록하지 않는다**(D6 점진 백필; 정확한 배치일이 필요하면 임포트로 먼저 등록).
 **상품유형 규칙(B-22, 2026-09-01)**: `getHospitalProductTypeContext(code)` → `{ types, default, mixed, deals, byType[{type,deals,devices}] }`(§9.1 SQL을 `sales_deals.product_type`으로 그룹). 순수 규칙 `resolveProductTypeDefault(ctx, explicit)`(`lib/deviceRegistryShared`): 명시값 > (1종 → 기본값 · 0종 → 미지정 + 경고 `병원 계약완료 딜 없음 — 상품유형 미지정` · 혼합 → 오류 `상품유형 필수 — 이 병원은 일반·라이트 딜이 함께 있습니다`). `registerDevices` items[].productType(별칭 일반/standard·라이트/lite, 미매칭 400 `상품유형 값이 올바르지 않습니다 (일반/라이트)`) — skip 항목은 규칙 제외, 혼합 병원에서 하나라도 미지정이면 400(단건·다건 동일 메시지). 임포트는 `previewRows`가 같은 규칙으로 행 판정(혼합 미지정 = error, 딜 0건 = warn)하고 실행은 `productTypeResolved`로 재적용하지 않는다. `replaceDevice`: 신 배치는 **구 배치 값 상속**(입력값은 경고 후 무시), 구 기기 소급 경로만 입력 `productType` + 기본값 규칙, TRANSFER opt-in은 상대 병원 RECOVER에 그 병원 배치 값 스냅샷. `bulkDeviceAction({ action:'SET_PRODUCT_TYPE', deviceIds, productType|null })`: 같은 병원 ACTIVE만, 기기마다 CORRECT(`changes.productType {before,after}`, 스냅샷=after) + 배치 행 갱신, 이미 같은 값은 `skipped[]`(전부면 409) — write(USER+). `correctDevice.changes.productType`도 동일(취소 시 before 복원). 테스트 전용 `productTypeContextOverride`(register/replace/previewRows)로 혼합 문맥을 주입한다(실데이터 딜 수정 금지). **교체 허용량(quota) 규칙은 보류** — 데이터·집계(`countReplacements`)만 둔다.
 **등록 중복 규약**: 타 병원 ACTIVE에 `conflicts[serial]`이 없으면 register·import 모두 409 `{ error, conflicts[] }`. 이 병원 ACTIVE는 `skipped[]` — items가 1건이거나 전부 skip이면 409 `이미 이 병원에 배치 중인 시리얼입니다`, 일부면 201+`skipped[]`; 임포트는 `skip` 판정으로 집계.
+**계약건 규칙(B-23, 2026-09-02)**: `getHospitalDealContext(code)` → `{ deals[{dealCode, roundNo, productType, count, contractDate}], single }`(§9.1 조인 + `sales_deals.product_type`). 순수 규칙 `resolveDealInput(ctx, explicitDealCode, explicitProductType)`: **선택 입력** — ① 명시 코드는 이 병원 계약완료 딜이어야 한다(없는 코드·타 병원 코드 모두 409 `이 병원의 계약완료 딜이 아닙니다`) ② 명시 딜 + 명시 상품유형 충돌 → 400 `선택한 계약건의 상품유형과 다릅니다` ③ 생략이면 계약완료 딜이 정확히 1건일 때만 자동 기본값(경고 없음) — 단 명시 상품유형이 그 단일 딜과 다르면 자동값을 **폐기**(400이 아니라 미지정; 400은 명시 선택에만) ④ 딜이 정해지고 명시 상품유형이 없으면 **상품유형은 딜에서 파생**(유형 기본값 규칙·혼합 400보다 우선). `replaceDevice`: 신 배치는 **구 배치 계약건 상속**(지정값은 경고 후 무시), 소급 경로만 입력/자동 기본값. `bulkDeviceAction({ action:'SET_DEAL', deviceIds, dealCode|null })`: 같은 병원 ACTIVE만, 기기마다 CORRECT(`changes.dealCode {before,after}`) — write(USER+), **상품유형과의 결합 검증 없음**(백필·정정 도구, 불일치는 계약별 표에서 드러남). `correctDevice.changes.dealCode`·`PATCH /units/[id]{dealCode}`도 동일(write). 임포트는 `previewRows`가 행 판정(잘못된 코드·유형 충돌 = error)하고 실행은 재적용하지 않는다. 테스트 전용 `dealContextOverride`(register/replace/previewRows).
+**AS진행중 플래그(B-24, 2026-09-02)**: `openDeviceAs(ctx,{deviceId})` → AS_OPEN(이미 표시 409 `이미 AS진행중으로 표시된 기기입니다`·회수됨/타 병원 409, ctx.ref(MAINTENANCE)가 `as_ref_code`) / `clearDeviceAs(ctx,{deviceId})` → AS_CLEAR(표시 없음 409 `AS진행중 표시가 없는 기기입니다`). 교체·회수는 fold가 자동 해제(이벤트 없음). `cancelLastEvent` LIFO 취소 지원(AS_CLEAR 취소 → 플래그 복원, AS_OPEN 취소 → 해제). 라우트 `POST /api/devices/units/[id]/as-open`·`/as-clear`(write, audit `hospital_device` UPDATE 'AS 시작/해제'). 목록 필터 `?as=1`·`?deal=<code|none>`.
 
 ### 7.1 엔드포인트
 | 메서드·경로 | 동작 | 권한 | 비고 |
@@ -497,6 +505,7 @@ read = 로그인 전체(조직 게이트 없음 — nav `{SEERS}`는 UX) / write
 ### 9.1 딜 기대 수량
 `SELECT count(*), SUM(COALESCE(daewoong_device_count,0)) FROM sales_deals sd JOIN status_codes sc ON sc.id=sd.status_id WHERE sd.hospital_code=$1 AND sc.category='SALES_DEAL_STATUS' AND sc.name='계약완료'`(08-03 스크립트 조건). `daewoong_count_type` 4종 전부 합산(쟁점 A-5). **`deals=0`이면 `expected=null`, `compare='none'`**(신규 go-live 직후·보류·데모 병원이 '+240 초과'로 표시되지 않게). ECG hard / SpO2 soft(ECG 동수 참고) / GW·제3자 `none`. `intro_beds`는 표시만. 딜 저장 시 파생 없음(매번 조인). **평가용 제외(2026-09-01, B-21)**: `models[].active`는 배치 중 전체, `activeEval`은 그중 `usage_type=EVAL`, `activeForCompare = active − activeEval`, **`diff = activeForCompare − expected`**(hard). 병원 `evalTotal`, 커버리지 행 `activeEcg`(EVAL 제외)·`activeEcgEval`·`evalTotal`·`diff = activeEcg − expected`, 전역 합계 `active.eval`. 미지정(NULL)은 판매용과 같이 대조에 포함.
 **상품유형별 기대 수량(2026-09-01, B-22)**: 같은 조인을 `GROUP BY sd.product_type`으로 — `SELECT sd.product_type, count(*), SUM(COALESCE(sd.daewoong_device_count,0)) FROM sales_deals sd JOIN status_codes sc ON sc.id=sd.status_id WHERE sd.hospital_code=$1 AND sc.category='SALES_DEAL_STATUS' AND sc.name='계약완료' GROUP BY 1`(`getHospitalProductTypeContext.byType`). 요약 `models[].byProductType[type|'미지정'] = { active, activeForCompare, expected(그 유형 딜 Σ — ECG hard·SpO2 soft·그 외 null), diff(hard만) }`(키 = 계약 딜 유형 ∪ 배치 유형, '미지정'은 배치가 있을 때만; 모델 합계는 기존 필드 그대로), 병원 `productTypes[]`(ECG 기준 축)·`productTypeMixed`(딜 2종 또는 배치에 상품유형 존재 → UI 매트릭스)·`productTypeContext`·`replacements{ total, byType, last30d }`(`countReplacements(code,{from,to})` = 같은 병원 RECOVER 가운데 REGISTER와 교체 짝(`related_device_id` 또는 같은 action_group)이 있는 것, RECOVER 스냅샷 상품유형 기준 — 이관 쌍 제외). 커버리지 행 `productTypeMixed`(딜 2종)·`unassignedProductType`(혼합 병원의 NULL ACTIVE 수), 전역 `mixedProductTypeHospitals`.
+**계약건(딜)별 집계(2026-09-02, B-23)**: 요약 `deals[] = { dealCode, roundNo|null, productType|null, contractDate|null, expected|null(Σ daewoong_device_count — 계약 외 코드는 null), contracted, active(배치 중), replacements }` — 키는 계약완료 딜 ∪ ACTIVE 배치·교체 이벤트에 등장한 deal_code(재적재로 끊긴 코드도 '(계약 외)'로 노출). `dealUnassigned = { active(deal_code NULL ACTIVE 수), replacements }` · `asInProgress`(as_started_on NOT NULL ACTIVE 수 — B-24). 교체는 `countReplacementsByDeal` — `countReplacements`와 같은 RECOVER↔REGISTER 짝 판정을 RECOVER 이벤트 `deal_code` 스냅샷으로 그룹. `getExpectedDeviceCount.contractedDeals[]`에 `productType` 추가(additive).
 
 ### 9.2 WMS 매칭(읽기) + 후속 훅
 **원칙**: 집계·필터는 영속 `inventory_unit_id`만 기준, 페이지 단위 임시 매칭은 표시 보조일 뿐. `inventory_units.status`는 후보 선별·⚠ 배지에만 읽고 원장 상태에 영향을 주지 않는다(D9).
@@ -598,6 +607,8 @@ nav `('devices','디바이스 원장','/devices','device','operations',55,'{SEER
 | B-19 | 자재 품목 폼 모델 셀렉터는 필터하지 않음 | GW 품목을 MGW1010에 연결할 수 있게(연결은 WMS 사용자 행위) |
 | B-20 | **3층 구조** `device_info` → `device_units` → `hospital_devices` / `inventory_units` — 2026-09-01 사용자 결정: 시리얼 정체성은 `device_units`, 병원 상태는 `hospital_devices`(device_id UNIQUE 프로젝션), WMS 편입(`inventory_units.device_id`)은 후속. **API 공개 device id = `device_units.id`**. ACTIVE-only 변형(회수 요약을 유닛으로)은 미결정 | 한 시리얼이 병원 배치와 창고 개체 양쪽에 같은 정체성으로 걸리도록 — 단일 테이블 초안은 WMS 편입 시 `inventory_unit_id` 양방향 링크가 필요했음. dev2에서 롤백 런북(A.0 ②) 리허설 후 마이그 폴더 그대로 재적용 |
 | B-22 | **상품유형(product type) = 배치 속성 2값** `hospital_devices.product_type` TEXT CHECK('일반','라이트', NULL=미지정 — `sales_deals.product_type`과 같은 어휘) + 이벤트 스냅샷 `hospital_device_events.product_type` — 2026-09-01 사용자 결정. 자리의 판매 조건이지 물건의 속성이 아니다(한 병원에 일반 50 + 라이트 50 공존 — 별개 딜). REGISTER가 정하고(fold), 교체는 상속, 회수는 배치 행에 마지막 값만 남기며 재등록 시 새 REGISTER가 다시 정한다. 기본값 = 병원 계약완료 딜의 상품유형 분포(1종 기본 · 0종 미지정+경고 · 혼합 명시 필수 400/판정 error). 변경은 CORRECT(`changes.productType`) — 단건 PATCH·일괄 `SET_PRODUCT_TYPE` 모두 write(USER+). 요약은 유형별 매트릭스(`byProductType`, 유형별 기대 수량 §9.1)·교체 집계(`replacements`, RECOVER 스냅샷 기준). **교체 허용량 규칙은 보류 — 데이터·집계만 구축** | 라이트 계약은 자리(좌석) 조건이라 기기를 바꿔 끼워도 자리의 유형은 유지되고, 다른 병원으로 옮기면 그 병원의 조건이 적용된다. 마스터(StatusCode) 대신 딜과 같은 TEXT 어휘를 써서 딜↔배치 대조가 조인 없이 성립 |
+| B-23 | **계약건(딜) = 배치의 소프트 참조 — 선택 입력** `hospital_devices.deal_code` TEXT + 이벤트 스냅샷 `hospital_device_events.deal_code` — 2026-09-02 제품 책임자 결정. FK 없음(딜은 재적재·삭제됨 — 티켓 `ref_type/ref_code` 선례). 시리얼을 보면 어느 계약 소속인지 답하고, 교체기는 구 배치의 딜을 상속한다. 명시 코드는 계약완료 딜 검증(409)·단일 딜 자동 기본값·딜 선택 시 상품유형 파생(명시 충돌 400, 자동 기본값은 충돌 시 폐기), 변경은 CORRECT(`SET_DEAL` 일괄·PATCH — write). **딜 재적재로 코드가 재발번되면 원장 두 컬럼(deal_code)의 코드 매핑 백필 단계가 필요**(`daewoong_deal_migration_design.md` 주의 참조) — 끊긴 코드는 계약별 표에 '(계약 외)'로 드러난다 |
+| B-24 | **'AS진행중' = ACTIVE 배치의 플래그**(제3의 fold 상태 아님) `as_started_on`·`as_ref_code` + 비상태 이벤트 AS_OPEN/AS_CLEAR — 2026-09-02 결정. 수동 표시(유지보수 코드 연결 가능)·수동 해제, **교체·회수 시 fold가 자동 해제**(이벤트 없음), 재등록 시 초기화. last_event·요약 '최근 이벤트'·stateEventCount·시리얼 정정 sole 판정에서 제외(CORRECT 규약), LIFO 취소 지원. 표시 라벨: 사용중/AS진행중/회수됨(`placementStatusLabel`) — '배치 중'은 집계 문구 전용 |
 | B-21 | **용도(usage type) = 유닛 속성 2값** `device_units.usage_type_id` → StatusCode `DEVICE_USAGE_TYPE`(value `SALE` 판매용 / `EVAL` 평가용, NULL=미지정) — 2026-09-01 사용자 결정. WMS 인벤토리 '대웅제약재고'는 **판매용 창고**이지 제3의 용도 값이 아니다. 계약 대조(§9.1)에서 EVAL 제외(`activeForCompare`). 변경은 CORRECT(`changes.usageTypeId`)이며 PATCH 권한은 write(USER+) — 나머지 식별 보정(admin)과 분리. 등록·임포트·교체는 폼 공통 기본값 + 행/항목 우선, 기존 유닛에 다른 용도를 명시하면 유지 + 경고(모델 규약과 동일), 비어 있으면 채움. 교체 신 기기는 구 기기 용도 승계 | 용도는 위치(병원/병동/창고)가 아니라 물건의 속성 — 평가용 기기가 병원에 배치돼 있어도 계약 수량과 비교하면 안 되고, 회수돼 창고로 가도 평가용으로 남는다. 같은 마스터 패턴(회수 사유)을 재사용해 설정 페이지·seed·감사 자원명만 추가 |
 
 ---
@@ -689,6 +700,9 @@ CREATE TABLE hospital_devices (
   last_event_type TEXT, last_event_on DATE,
   replaced_by_id INTEGER REFERENCES device_units(id) ON DELETE SET NULL,
   product_type TEXT,                                                       -- 상품유형(일반/라이트, B-22) — 자리의 판매 조건: 배치 속성. REGISTER 이벤트에서 fold, 교체 상속, 회수 시 마지막 값 보존(재등록 시 재지정)
+  deal_code TEXT,                                                          -- 계약건(딜) 소프트 참조(B-23, 2026-09-02) — sales_deals.deal_code, FK 없음(딜 재적재·삭제 대비). REGISTER fold, 교체 상속, 회수 시 마지막 값 보존
+  as_started_on DATE,                                                      -- AS진행중 플래그 시작일(B-24) — ACTIVE 배치의 표시 플래그(제3의 상태 아님). AS_OPEN이 set, AS_CLEAR·RECOVER·재REGISTER가 clear
+  as_ref_code TEXT,                                                        -- AS 연결 유지보수 코드(MNT-…, 소프트 참조) — AS_OPEN 이벤트 ref에서 fold
   created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT hospital_devices_device_id_key UNIQUE (device_id),
   CONSTRAINT hospital_devices_status_check CHECK (status IN ('ACTIVE','RECOVERED')),
@@ -701,6 +715,7 @@ CREATE INDEX hospital_devices_hospital_code_status_idx      ON hospital_devices(
 CREATE INDEX hospital_devices_ward_id_idx                   ON hospital_devices(ward_id);
 CREATE INDEX hospital_devices_last_hospital_code_status_idx ON hospital_devices(last_hospital_code, status);
 CREATE INDEX hospital_devices_hospital_product_type_status_idx ON hospital_devices(hospital_code, product_type, status);
+CREATE INDEX hospital_devices_hospital_deal_code_idx ON hospital_devices(hospital_code, deal_code) WHERE deal_code IS NOT NULL;
 
 -- 5) D6: 임포트 배치
 CREATE TABLE hospital_device_import_batches (
@@ -729,8 +744,9 @@ CREATE TABLE hospital_device_events (
   changes JSONB, actor_id TEXT REFERENCES users(id) ON DELETE SET NULL, actor_name TEXT,
   edited_at TIMESTAMP(3), edited_by TEXT REFERENCES users(id) ON DELETE SET NULL,
   product_type TEXT,                                                       -- 이벤트 시점 상품유형 스냅샷(REGISTER=지정값, MOVE_WARD/RECOVER=당시 배치 값, CORRECT=변경 후 값)
+  deal_code TEXT,                                                          -- 이벤트 시점 계약건(딜 코드) 스냅샷(B-23) — REGISTER=새 배치 값, 그 외=당시 배치 값(CORRECT=변경 후 값)
   created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT hospital_device_events_type_check CHECK (event_type IN ('REGISTER','MOVE_WARD','RECOVER','CORRECT')),
+  CONSTRAINT hospital_device_events_type_check CHECK (event_type IN ('REGISTER','MOVE_WARD','RECOVER','CORRECT','AS_OPEN','AS_CLEAR')),
   CONSTRAINT hospital_device_events_product_type_check CHECK (product_type IS NULL OR product_type IN ('일반','라이트')),
   CONSTRAINT hospital_device_events_hospital_check CHECK (event_type='CORRECT' OR hospital_code IS NOT NULL),
   CONSTRAINT hospital_device_events_ward_requires_hospital_check CHECK (hospital_code IS NOT NULL OR (from_ward_id IS NULL AND to_ward_id IS NULL)),

@@ -29,6 +29,8 @@ interface ImportOptions {
   usageTypeId: number | null
   /** 폼 공통 상품유형(일반/라이트 — 행 F열/붙여넣기 셀이 없을 때, 없으면 병원 딜 기본값 규칙) */
   productType: string | null
+  /** 폼 공통 계약건(딜 코드, B-23) — 없으면 단일 계약완료 딜 자동 기본값 */
+  dealCode: string | null
   wardMode: 'column' | 'fixed'
   wardId: number | null
   emptyWardCell: 'warn' | 'error'
@@ -59,6 +61,7 @@ function parseOptions(raw: Record<string, unknown>): ImportOptions {
     deviceInfoId: optPositiveInt(raw.deviceInfoId, '모델(deviceInfoId)'),
     usageTypeId: optPositiveInt(raw.usageTypeId, '용도(usageTypeId)'),
     productType: optString(raw.productType),
+    dealCode: optString(raw.dealCode),
     wardMode: wardModeRaw,
     wardId: optPositiveInt(raw.wardId, '고정 병동(wardId)'),
     emptyWardCell: emptyRaw,
@@ -139,6 +142,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       deviceInfoId: options.deviceInfoId,
       usageTypeId: options.usageTypeId,
       productType: options.productType,
+      dealCode: options.dealCode,
       wardMode: options.wardMode,
       wardId: options.wardId,
       emptyWardCell: options.emptyWardCell,
@@ -197,6 +201,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         fileName,
         usageTypeId: options.usageTypeId,
         productType: options.productType,
+        dealCode: options.dealCode,
         occurredOn: verified.summary.occurredOn,
         counts: {
           rows: batch.rowCount,

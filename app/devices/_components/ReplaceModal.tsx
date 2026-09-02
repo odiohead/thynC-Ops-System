@@ -21,7 +21,7 @@ import { cn } from '@/lib/cn'
 import { PRODUCT_TYPES, PRODUCT_TYPE_UNSET_LABEL, guessDeviceClassByPrefix, normalizeSerial, todayKst, toYmd, type OccurredOnBasis, type ProductType, type ProductTypeContext } from '@/lib/deviceRegistryShared'
 import { errorMessage, isApiError, getRecoveryReasons, getUsageTypes, lookupSerial, replaceDevice } from './api'
 import { productTypeDefaultLabel } from './deviceDisplay'
-import type { DeviceRef, DeviceRowBase, ModelSummary, MutationDone, RecoveryReason, RegistryRef, ReplaceBody, UsageType, WardOption, WardValue } from './types'
+import type { ContractedDeal, DeviceRef, DeviceRowBase, ModelSummary, MutationDone, RecoveryReason, RegistryRef, ReplaceBody, UsageType, WardOption, WardValue } from './types'
 import { WardCombo } from './WardCombo'
 import { MaintenanceCodeCombo } from './MaintenanceCodeCombo'
 import { FormField, ModalActions, Notice, OccurredOnField, StatusBadge, describeWard, isSubmitShortcut, useOccurredOn, wardBody } from './registryFormKit'
@@ -34,6 +34,8 @@ export interface ReplaceModalProps {
   oldDevice?: DeviceRef | null
   models: ModelSummary[]
   wards: WardOption[]
+  /** 계약건 선택지(summary.contractedDeals — B-23). 소급 등록 경로에서만 선택, 그 외 구 배치 상속 */
+  deals?: ContractedDeal[]
   today: string | null
   /** 병원 딜 기준 상품유형 문맥(summary.productTypeContext) — 구 기기 소급 등록 경로의 기본값 라벨·필수 판정 */
   productTypeContext?: ProductTypeContext | null
@@ -83,7 +85,7 @@ export function ReplaceModal(props: ReplaceModalProps) {
   )
 }
 
-function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: todayProp, productTypeContext, onDone }: ReplaceModalProps) {
+function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, deals, today: todayProp, productTypeContext, onDone }: ReplaceModalProps) {
   const today = todayProp ?? todayKst()
 
   // ── 구 기기
@@ -113,6 +115,8 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
   const [newUsageDirty, setNewUsageDirty] = useState(false)
   /** 상품유형 — 소급 경로(구 기기 원장에 없음)에서만 입력. '' = 병원 딜 기본값 규칙 */
   const [backfillProductType, setBackfillProductType] = useState<ProductType | ''>('')
+  /** 계약건(B-23) — 소급 경로에서만 입력. '' = 자동(단일 계약완료 딜 기본값)/미지정 */
+  const [backfillDealCode, setBackfillDealCode] = useState('')
   const occ = useOccurredOn(today)
   const [memo, setMemo] = useState('')
   const [refCode, setRefCode] = useState('')
@@ -274,7 +278,18 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
   const backfillNeedsProductType = oldState.kind === 'not_found' && !!productTypeContext?.mixed && backfillProductType === ''
   const oldOk = oldState.kind === 'active_here' || oldState.kind === 'recovered_here' || (oldState.kind === 'not_found' && oldModelId !== '' && !backfillNeedsProductType)
   /** 신 배치에 적용될 상품유형(표시) — 구 배치 상속 / 소급은 입력·기본값 */
-  const inheritedProductType: string | null = oldDeviceRow ? (oldDeviceRow.productType ?? null) : oldState.kind === 'not_found' ? (backfillProductType || productTypeContext?.default || null) : null
+  const backfillDeal = backfillDealCode ? (deals ?? []).find((d) => d.dealCode === backfillDealCode) ?? null : null
+  const inheritedProductType: string | null = oldDeviceRow
+    ? (oldDeviceRow.productType ?? null)
+    : oldState.kind === 'not_found'
+      ? (backfillDeal?.productType || backfillProductType || productTypeContext?.default || null)
+      : null
+  /** 신 배치에 적용될 계약건(표시) — 구 배치 상속 / 소급은 입력·단일 딜 자동 기본값(B-23) */
+  const inheritedDealCode: string | null = oldDeviceRow
+    ? (oldDeviceRow.dealCode ?? null)
+    : oldState.kind === 'not_found'
+      ? (backfillDealCode || ((deals ?? []).length === 1 ? (deals ?? [])[0].dealCode : null))
+      : null
   const newOk = newState.kind === 'reregister' || newState.kind === 'active_here' || (newState.kind === 'create' && newModelId !== '') || (newState.kind === 'other_hospital' && newConflict)
   const reason = useMemo(() => (reasons ?? []).find((r) => r.id === reasonId) ?? null, [reasons, reasonId])
   const disabled = submitting || !oldOk || !newOk || !!occ.error
@@ -303,7 +318,8 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
       ...(reasonId !== '' ? { reasonCodeId: reasonId } : {}),
       ...(newUsageId !== '' ? { newUsageTypeId: newUsageId } : {}),
       ...(oldState.kind === 'not_found' && newUsageId !== '' ? { oldUsageTypeId: newUsageId } : {}),
-      ...(oldState.kind === 'not_found' && backfillProductType !== '' ? { productType: backfillProductType } : {}),
+      ...(oldState.kind === 'not_found' && backfillProductType !== '' && !backfillDealCode ? { productType: backfillProductType } : {}),
+      ...(oldState.kind === 'not_found' && backfillDealCode !== '' ? { dealCode: backfillDealCode } : {}),
       occurredOn: occ.value,
       memo: memo.trim() || null,
       ref,
@@ -412,19 +428,49 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
                 </Select>
               </FormField>
               <FormField
+                label="계약건(소급 배치)"
+                htmlFor="replace-old-deal"
+                hint={
+                  (deals ?? []).length === 0
+                    ? '이 병원에 계약완료 딜이 없습니다 — 미지정'
+                    : backfillDeal
+                      ? `이 계약건의 상품유형(${backfillDeal.productType ?? '미지정'})이 구·신 배치에 적용됩니다`
+                      : '구 기기 소급 배치와 신 기기 배치에 같은 값 적용 — 비우면 단일 계약완료 딜일 때만 자동 지정'
+                }
+              >
+                <Select
+                  id="replace-old-deal"
+                  value={backfillDealCode}
+                  disabled={submitting}
+                  onChange={(e) => {
+                    setBackfillDealCode(e.target.value)
+                    if (e.target.value) setBackfillProductType('') // 딜이 상품유형을 정한다(B-23)
+                  }}
+                >
+                  <option value="">{(deals ?? []).length === 1 ? `자동 (단일 계약건: ${(deals ?? [])[0].dealCode})` : '미지정'}</option>
+                  {(deals ?? []).map((d) => (
+                    <option key={d.dealCode} value={d.dealCode}>
+                      {d.dealCode} · {d.roundNo}차{d.productType ? ` ${d.productType}` : ''} {d.count.toLocaleString()}대
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField
                 label="상품유형(소급 배치)"
                 htmlFor="replace-old-pt"
-                required={!!productTypeContext?.mixed}
+                required={!!productTypeContext?.mixed && !backfillDealCode}
                 hint={
-                  backfillNeedsProductType ? (
-                    <span className="text-destructive">일반·라이트 딜이 함께 있는 병원 — 상품유형을 선택하세요 (구·신 배치 모두 이 값)</span>
+                  backfillDealCode ? (
+                    '선택한 계약건의 상품유형이 적용됩니다'
+                  ) : backfillNeedsProductType ? (
+                    <span className="text-destructive">일반·라이트 딜이 함께 있는 병원 — 상품유형(또는 계약건)을 선택하세요 (구·신 배치 모두 이 값)</span>
                   ) : (
                     '구 기기 소급 배치와 신 기기 배치에 같은 값 적용 — 비우면 병원 계약 딜 기준 기본값'
                   )
                 }
               >
-                <Select id="replace-old-pt" value={backfillProductType} disabled={submitting} onChange={(e) => setBackfillProductType(e.target.value as ProductType | '')}>
-                  <option value="">{productTypeDefaultLabel(productTypeContext)}</option>
+                <Select id="replace-old-pt" value={backfillDealCode ? '' : backfillProductType} disabled={submitting || !!backfillDealCode} onChange={(e) => setBackfillProductType(e.target.value as ProductType | '')}>
+                  <option value="">{backfillDealCode ? `계약건에서 파생 (${backfillDeal?.productType ?? '미지정'})` : productTypeDefaultLabel(productTypeContext)}</option>
                   {PRODUCT_TYPES.map((t) => (
                     <option key={t} value={t}>
                       {t}
@@ -598,6 +644,21 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, today: t
                 <span className="ml-1 font-medium">({inheritedProductType ?? PRODUCT_TYPE_UNSET_LABEL})</span>
                 {newState.kind === 'active_here' && (newState.device.productType ?? null) !== (inheritedProductType ?? null) && (
                   <span className="ml-2 text-xs text-warning-subtle-foreground">신 기기는 이미 {newState.device.productType ?? PRODUCT_TYPE_UNSET_LABEL}(으)로 배치 중 — 상속하지 않음</span>
+                )}
+              </>
+            ) : (
+              <span className="text-muted-foreground">구 시리얼 조회 후 표시</span>
+            )}
+          </div>
+        </FormField>
+        <FormField label="계약건" hint={oldState.kind === 'not_found' ? '소급 배치 값(위에서 지정)과 동일' : '신 배치는 구 기기 배치의 계약건을 상속합니다 (변경은 등록 후 계약건 지정 — B-23)'}>
+          <div className="flex h-9 items-center rounded-md border border-border bg-muted/40 px-3 text-sm text-foreground" aria-readonly="true">
+            {oldDeviceRow || oldState.kind === 'not_found' ? (
+              <>
+                {oldState.kind === 'not_found' ? '소급 배치와 동일' : '구 기기와 동일'}
+                <span className="ml-1 font-mono font-medium">({inheritedDealCode ?? '미지정'})</span>
+                {newState.kind === 'active_here' && (newState.device.dealCode ?? null) !== (inheritedDealCode ?? null) && (
+                  <span className="ml-2 text-xs text-warning-subtle-foreground">신 기기는 이미 {newState.device.dealCode ?? '미지정'}(으)로 배치 중 — 상속하지 않음</span>
                 )}
               </>
             ) : (

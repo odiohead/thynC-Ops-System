@@ -205,7 +205,7 @@ async function cleanup() {
   await prisma.auditLog.deleteMany({ where: { id: { gt: pre.max.a }, resource: { in: AUDIT_RESOURCES } } })
 }
 
-const PROJ_FIELDS = ['status', 'hospitalCode', 'wardId', 'placedOn', 'lastHospitalCode', 'recoveredOn', 'recoverReasonId', 'lastEventType', 'lastEventOn', 'replacedById'] as const
+const PROJ_FIELDS = ['status', 'hospitalCode', 'wardId', 'placedOn', 'lastHospitalCode', 'recoveredOn', 'recoverReasonId', 'lastEventType', 'lastEventOn', 'replacedById', 'productType', 'dealCode', 'asStartedOn', 'asRefCode'] as const
 function projOf(d: Record<string, unknown> | null) {
   return d ? Object.fromEntries(PROJ_FIELDS.map((f) => [f, d[f] instanceof Date ? (d[f] as Date).toISOString() : d[f] ?? null])) : null
 }
@@ -525,6 +525,141 @@ async function main() {
   } else console.log('  (실데이터 혼합 병원 없음 — 주입 문맥으로만 검증)')
   const covH1 = (await getGlobalCoverage({ q: H1, limit: 5 })).data.find((r) => r.hospitalCode === H1)!
   ok(covH1.productTypeMixed === ptH1.mixed && (ptH1.mixed ? covH1.unassignedProductType >= 1 : covH1.unassignedProductType === 0), '커버리지 H1 productTypeMixed = 문맥 · unassignedProductType(혼합일 때만 계수)', covH1)
+
+  section('[1d] 계약건(딜) 소프트 참조(B-23) · AS진행중 플래그(B-24)')
+  {
+    const dctxH1 = await reg.getHospitalDealContext(H1)
+    ok(
+      dctxH1.deals.length === h1!.deals && dctxH1.deals.every((d) => typeof d.dealCode === 'string' && d.count >= 0) && (dctxH1.deals.length === 1 ? dctxH1.single?.dealCode === dctxH1.deals[0].dealCode : dctxH1.single === null),
+      `getHospitalDealContext(H1) — 계약완료 딜 ${dctxH1.deals.length}건 · single 규약`,
+      dctxH1
+    )
+    const D1 = { dealCode: 'DEAL-999901-0001', roundNo: 1, productType: '일반', count: 10, contractDate: null }
+    const D2 = { dealCode: 'DEAL-999901-0002', roundNo: 2, productType: '라이트', count: 5, contractDate: null }
+    const SINGLE: reg.HospitalDealContext = { deals: [D1], single: D1 }
+    const MULTI: reg.HospitalDealContext = { deals: [D1, D2], single: null }
+    const NONE_D: reg.HospitalDealContext = { deals: [], single: null }
+    // 순수 규칙
+    ok(reg.resolveDealInput(SINGLE, null, null).deal?.dealCode === D1.dealCode && reg.resolveDealInput(SINGLE, null, null).productTypeFromDeal === '일반', 'resolveDealInput: 단일 딜 자동 기본값 + 상품유형 파생')
+    ok(reg.resolveDealInput(SINGLE, null, '라이트').deal === null, 'resolveDealInput: 자동 기본값은 명시 유형 충돌 시 폐기(미지정, 400 아님)')
+    ok(reg.resolveDealInput(MULTI, null, null).deal === null, 'resolveDealInput: 딜 2건 — 자동 기본값 없음')
+    ok(reg.resolveDealInput(MULTI, D1.dealCode, '일반').deal?.dealCode === D1.dealCode && reg.resolveDealInput(MULTI, D1.dealCode, '일반').productTypeFromDeal === null, 'resolveDealInput: 명시 딜 + 같은 유형 → OK(파생 없음)')
+    await expectErr('resolveDealInput: 없는 코드', async () => reg.resolveDealInput(SINGLE, 'DEAL-000000-0000', null), 409, '이 병원의 계약완료 딜이 아닙니다')
+    await expectErr('resolveDealInput: 명시 딜 + 유형 충돌', async () => reg.resolveDealInput(MULTI, D1.dealCode, '라이트'), 400, '선택한 계약건의 상품유형과 다릅니다')
+    // 등록 — 자동 기본값·파생·스냅샷
+    const rd1 = await registerDevices(ctx(H3, '2026-08-01'), [{ serialInput: S(51), wardName: 'D동' }], { dealContextOverride: SINGLE })
+    ok(rd1.created[0].dealCode === D1.dealCode && rd1.created[0].productType === '일반' && !rd1.warnings.includes(shared.PRODUCT_TYPE_NO_DEAL_WARNING), '등록: 단일 딜 자동 기본값 + 상품유형 파생(딜 0건 경고 없음)', rd1.warnings)
+    const d51 = (await dev({ serialNo: S(51) }))!
+    const ev51 = (await prisma.hospitalDeviceEvent.findUnique({ where: { id: rd1.created[0].eventId } }))!
+    ok(d51.dealCode === D1.dealCode && ev51.dealCode === D1.dealCode, '배치 행 deal_code + REGISTER 이벤트 스냅샷')
+    const rd2 = await registerDevices(ctx(H3, '2026-08-01'), [{ serialInput: S(52), wardName: 'D동' }], { dealContextOverride: NONE_D })
+    ok(rd2.created[0].dealCode === null, '등록: 딜 0건 → 미지정(NULL)')
+    await expectErr('등록: 이 병원 딜 아닌 코드 → 409', () => registerDevices(ctx(H3, '2026-08-01'), [{ serialInput: S(53), dealCode: 'DEAL-000000-0000' }], { dealContextOverride: SINGLE }), 409, '이 병원의 계약완료 딜이 아닙니다')
+    ok((await prisma.deviceUnit.count({ where: { serialNo: S(53) } })) === 0, '409 시 유닛 미생성(롤백)')
+    const rd3 = await registerDevices(ctx(H3, '2026-08-01'), [{ serialInput: S(53), dealCode: D2.dealCode }], { dealContextOverride: MULTI })
+    ok(rd3.created[0].dealCode === D2.dealCode && rd3.created[0].productType === '라이트', '등록: 명시 딜(라이트 딜) → 상품유형 파생(혼합 400 우회)')
+    await expectErr('등록: 명시 딜 + 유형 충돌 → 400', () => registerDevices(ctx(H3, '2026-08-01'), [{ serialInput: S(54), dealCode: D1.dealCode, productType: '라이트' }], { dealContextOverride: MULTI }), 400, '선택한 계약건의 상품유형과 다릅니다')
+    const rd4 = await registerDevices(ctx(H3, '2026-08-01'), [{ serialInput: S(54), productType: '라이트' }], { dealContextOverride: SINGLE })
+    ok(rd4.created[0].dealCode === null && rd4.created[0].productType === '라이트', '등록: 자동 기본값 + 명시 유형 충돌 → 딜만 폐기(400 아님)')
+    // 이동·회수 스냅샷 + 회수 후 보존
+    const mv51 = await moveDeviceWard(ctx(null, '2026-08-05'), { deviceId: d51.id, toWardName: 'E동' })
+    ok(mv51.event.dealCode === D1.dealCode, 'MOVE_WARD 이벤트 deal_code 스냅샷')
+    const rc51 = await recoverDevice(ctx(null, '2026-08-10'), { deviceId: d51.id, reasonCodeId: defect.id })
+    ok(rc51.event.dealCode === D1.dealCode && rc51.device.dealCode === D1.dealCode && rc51.device.status === 'RECOVERED', 'RECOVER 스냅샷 + 회수 후 배치 행 deal_code 보존(표시용)')
+    // 교체 상속 · 소급 경로
+    const rp55 = await registerDevices(ctx(H3, '2026-08-01'), [{ serialInput: S(55), wardName: 'D동', dealCode: D1.dealCode }], { dealContextOverride: SINGLE })
+    const rep55 = await replaceDevice(ctx(H3, '2026-08-05'), { oldDeviceId: rp55.created[0].id, newSerial: S(56), dealCode: D2.dealCode })
+    ok(rep55.dealCode === D1.dealCode && rep55.newDevice.dealCode === D1.dealCode && rep55.recoverEvent!.dealCode === D1.dealCode && rep55.registerEvent!.dealCode === D1.dealCode && rep55.warnings.some((w) => w.includes('계약건은 구 기기 배치 값')), '교체: 신 배치 계약건 상속(지정값 무시+경고) + RECOVER/REGISTER 스냅샷', rep55.warnings)
+    const rep57 = await replaceDevice(ctx(H3, '2026-08-05'), { oldSerial: S(57), oldWardName: 'D동', newSerial: S(58), dealContextOverride: SINGLE })
+    ok(rep57.backfillEvent!.dealCode === D1.dealCode && rep57.newDevice.dealCode === D1.dealCode && rep57.newDevice.productType === '일반', '교체 소급 경로: 단일 딜 자동 기본값 → 구 소급·신 배치 적용 + 유형 파생')
+    // SET_DEAL·correctDevice — 실데이터 H1 계약완료 딜 코드
+    const realDeal = dctxH1.deals[0]
+    const rH1 = await registerDevices(ctx(H1, '2026-08-01'), [
+      { serialInput: S(59), wardName: '6병동', dealCode: realDeal.dealCode },
+      { serialInput: S(60), wardName: '6병동', dealCode: realDeal.dealCode },
+    ])
+    ok(rH1.created.length === 2 && rH1.created.every((c) => c.dealCode === realDeal.dealCode) && rH1.created.every((c) => !shared.isProductType(realDeal.productType) || c.productType === realDeal.productType), '실데이터 딜 명시 등록 → dealCode + 딜 유형 파생', rH1.created.map((c) => [c.serialNo, c.dealCode, c.productType]))
+    const bkD = await bulkDeviceAction(ctx(H1, '2026-08-02'), { action: 'SET_DEAL', deviceIds: rH1.created.map((c) => c.id), dealCode: null })
+    ok(bkD.events.length === 2 && bkD.events.every((e) => e.eventType === 'CORRECT') && (await dev({ id: rH1.created[0].id }))!.dealCode === null, 'bulk SET_DEAL null → 미지정 + CORRECT 이벤트')
+    const bkD2 = await bulkDeviceAction(ctx(H1, '2026-08-02'), { action: 'SET_DEAL', deviceIds: rH1.created.map((c) => c.id), dealCode: realDeal.dealCode })
+    const bkCh2 = bkD2.events[0].changes as { dealCode: { before: string | null; after: string | null } }
+    ok(bkD2.events.length === 2 && bkCh2.dealCode.before === null && bkCh2.dealCode.after === realDeal.dealCode && bkD2.events[0].dealCode === realDeal.dealCode, 'bulk SET_DEAL 지정 — changes {before,after} + 스냅샷=after')
+    await expectErr('bulk SET_DEAL 전부 같은 값 → 409', () => bulkDeviceAction(ctx(H1), { action: 'SET_DEAL', deviceIds: rH1.created.map((c) => c.id), dealCode: realDeal.dealCode }), 409, '이미 계약건')
+    await expectErr('bulk SET_DEAL 없는 딜 → 409', () => bulkDeviceAction(ctx(H1), { action: 'SET_DEAL', deviceIds: [rH1.created[0].id], dealCode: 'DEAL-000000-0000' }), 409, '이 병원의 계약완료 딜이 아닙니다')
+    await rebuildUnitProjection(prisma, rH1.created[0].id)
+    ok((await dev({ id: rH1.created[0].id }))!.dealCode === realDeal.dealCode, 'fold가 CORRECT changes.dealCode.after 반영(rebuild 멱등)')
+    const cD = await correctDevice(ctx(null, '2026-08-03'), { deviceId: rH1.created[0].id, changes: { dealCode: null } })
+    ok((cD.changes.dealCode as { before: string }).before === realDeal.dealCode && cD.device.dealCode === null && cD.event.dealCode === null, 'correctDevice dealCode → CORRECT changes + 스냅샷=after')
+    const cDc = await cancelLastEvent(ctx(null), { eventId: cD.event.id })
+    ok(cDc.restored != null && (await dev({ id: rH1.created[0].id }))!.dealCode === realDeal.dealCode, 'CORRECT(계약건) 취소 → before 복원')
+    await expectErr('correctDevice 없는 딜 → 409', () => correctDevice(ctx(null), { deviceId: rH1.created[0].id, changes: { dealCode: 'DEAL-000000-0000' } }), 409, '이 병원의 계약완료 딜이 아닙니다')
+    // 목록 필터
+    const luDeal = await listUnits({ hospital: H1, status: 'all', deal: realDeal.dealCode }, { page: 1, limit: 50 })
+    ok(luDeal.total >= 2 && luDeal.data.every((r) => r.dealCode === realDeal.dealCode), 'listUnits deal= 필터')
+    const luDealNone = await listUnits({ hospital: H3, status: 'active', deal: 'none' }, { page: 1, limit: 50 })
+    ok(luDealNone.data.every((r) => r.dealCode === null), 'listUnits deal=none 필터(미지정)')
+    // 미리보기·임포트 — 딜 규칙
+    const pvD = await previewRows(
+      H3,
+      [
+        { row: 1, serialInput: S(61), dealCode: D2.dealCode },
+        { row: 2, serialInput: S(60, 'P'), dealCode: 'DEAL-000000-0000' },
+        { row: 3, serialInput: S(61, 'P'), dealCode: D1.dealCode, productTypeInput: 'lite' },
+        { row: 4, serialInput: S(62, 'P') },
+      ],
+      { wardMode: 'fixed', mode: 'REGISTER', occurredOn: '2026-08-20', dealContextOverride: MULTI, productTypeContextOverride: MIXED_CTX }
+    )
+    ok(pvD.rows[0].dealCode === D2.dealCode && pvD.rows[0].productType === '라이트' && pvD.rows[0].status !== 'error', '미리보기: 행 딜 → 유형 파생(혼합 필수 오류 없음)', pvD.rows[0].messages)
+    ok(pvD.rows[1].status === 'error' && pvD.rows[1].messages.some((m) => m.includes('계약완료 딜이 아닙니다')), '미리보기: 없는 딜 → error 행')
+    ok(pvD.rows[2].status === 'error' && pvD.rows[2].messages.some((m) => m.includes('상품유형과 다릅니다')), '미리보기: 딜·유형 충돌 → error 행')
+    ok(pvD.rows[3].dealCode === null && pvD.rows[3].status === 'error' && pvD.rows[3].messages.includes(shared.PRODUCT_TYPE_REQUIRED_MESSAGE), '미리보기: 딜 없음 + 혼합 문맥 → 기존 유형 필수 오류 유지')
+    const impD = await importBatch(ctx(H3, '2026-08-20'), { rows: [{ row: 1, serialInput: S(61), dealCode: D1.dealCode }], sourceKind: 'PASTE', mode: 'REGISTER', defaults: { wardMode: 'fixed', dealContextOverride: SINGLE } })
+    ok(impD.batch.registeredCount === 1 && (await dev({ serialNo: S(61) }))!.dealCode === D1.dealCode && (await dev({ serialNo: S(61) }))!.productType === '일반', '임포트 실행 — 행 딜 pass-through + 유형 파생')
+    // 요약 deals[] · dealUnassigned
+    const sumD = (await getHospitalDeviceSummary(H3))!
+    const rowD1 = sumD.deals.find((d) => d.dealCode === D1.dealCode)
+    const activeD1 = await prisma.hospitalDevice.count({ where: { hospitalCode: H3, status: 'ACTIVE', dealCode: D1.dealCode } })
+    ok(!!rowD1 && rowD1.contracted === false && rowD1.expected === null && rowD1.active === activeD1 && rowD1.replacements === 2, '요약 deals[] — 계약 외 코드 행(active·교체 2건: S55→S56, S57→S58)', rowD1)
+    const unassignedActive = await prisma.hospitalDevice.count({ where: { hospitalCode: H3, status: 'ACTIVE', dealCode: null } })
+    ok(sumD.dealUnassigned.active === unassignedActive && typeof sumD.dealUnassigned.replacements === 'number', '요약 dealUnassigned 버킷(active = deal NULL ACTIVE 수)')
+    const sumH1D = (await getHospitalDeviceSummary(H1))!
+    const rowReal = sumH1D.deals.find((d) => d.dealCode === realDeal.dealCode)!
+    ok(!!rowReal && rowReal.contracted && rowReal.expected === realDeal.count && rowReal.roundNo === realDeal.roundNo && rowReal.active >= 2, '요약 deals[] — 계약완료 딜 행(expected = Σ대웅 수·등록 수량)', rowReal)
+
+    // ── AS진행중(B-24)
+    const dAS = (await dev({ serialNo: S(52) }))!
+    ok(shared.placementStatusLabel(dAS) === '사용중' && shared.placementStatusLabel({ status: 'RECOVERED' }) === '회수됨' && shared.placementStatusLabel({ status: 'ACTIVE', asStartedOn: '2026-08-01' }) === 'AS진행중', 'placementStatusLabel — 사용중/AS진행중/회수됨')
+    const asO = await reg.openDeviceAs(ctx(null, '2026-08-15', mnt ? { ref: { type: 'MAINTENANCE', code: mnt.maintenanceCode } } : {}), { deviceId: dAS.id })
+    ok(asO.event.eventType === 'AS_OPEN' && asO.device.asStartedOn?.toISOString().startsWith('2026-08-15') === true && (mnt ? asO.device.asRefCode === mnt.maintenanceCode : asO.device.asRefCode === null), 'openDeviceAs — as_started_on=업무일자 · as_ref_code=MNT', { as: asO.device.asStartedOn, ref: asO.device.asRefCode })
+    ok(asO.device.lastEventType === 'REGISTER' && asO.event.dealCode === (dAS.dealCode ?? null), 'AS_OPEN은 last_event 미반영(비상태 이벤트) + deal 스냅샷')
+    await expectErr('이미 표시된 기기 재표시 → 409', () => reg.openDeviceAs(ctx(null), { deviceId: dAS.id }), 409, '이미 AS진행중')
+    const d53id = (await dev({ serialNo: S(53) }))!.id
+    await expectErr('타 병원 문맥 AS → 409', () => reg.openDeviceAs(ctx(H1), { deviceId: d53id }), 409)
+    const luAs = await listUnits({ hospital: H3, as: true }, { page: 1, limit: 50 })
+    ok(luAs.data.some((r) => r.id === dAS.id) && luAs.data.every((r) => r.asStartedOn != null), 'listUnits as=1 필터')
+    ok((await getHospitalDeviceSummary(H3))!.asInProgress >= 1, '요약 asInProgress ≥ 1')
+    const asC = await reg.clearDeviceAs(ctx(null, '2026-08-16'), { deviceId: dAS.id })
+    ok(asC.event.eventType === 'AS_CLEAR' && asC.device.asStartedOn === null && asC.device.asRefCode === null, 'clearDeviceAs — 수동 해제')
+    await expectErr('표시 없는 기기 해제 → 409', () => reg.clearDeviceAs(ctx(null), { deviceId: dAS.id }), 409, '표시가 없는')
+    // LIFO 취소 — AS_CLEAR 취소 → 플래그 복원, AS_OPEN 취소 → 해제
+    const cClear = await cancelLastEvent(ctx(null), { eventId: asC.event.id })
+    ok(cClear.cancelledEventIds.length === 1 && (await dev({ id: dAS.id }))!.asStartedOn?.toISOString().startsWith('2026-08-15') === true, 'AS_CLEAR 취소(LIFO) → 플래그 복원(fold)')
+    await cancelLastEvent(ctx(null), { eventId: asO.event.id })
+    ok((await dev({ id: dAS.id }))!.asStartedOn === null && (await dev({ id: dAS.id }))!.asRefCode === null, 'AS_OPEN 취소 → 플래그 해제')
+    ok(await projectionEqualsRebuild(dAS.id), 'AS 취소 후 프로젝션 = fold')
+    // 자동 해제 — 회수·교체
+    await reg.openDeviceAs(ctx(null, '2026-08-17'), { deviceId: dAS.id })
+    const rcAS = await recoverDevice(ctx(null, '2026-08-18'), { deviceId: dAS.id, reasonCodeId: defect.id })
+    ok(rcAS.device.asStartedOn === null && rcAS.device.asRefCode === null, '회수 → AS 플래그 자동 해제')
+    ok((await prisma.hospitalDeviceEvent.count({ where: { deviceId: dAS.id, eventType: 'AS_CLEAR' } })) === 0, '자동 해제는 AS_CLEAR 이벤트를 만들지 않는다')
+    await registerDevices(ctx(H3, '2026-08-19'), [{ serialInput: S(52), wardName: 'D동' }], { dealContextOverride: NONE_D })
+    await reg.openDeviceAs(ctx(null, '2026-08-20'), { deviceId: dAS.id })
+    const repAS = await replaceDevice(ctx(H3, '2026-08-21'), { oldDeviceId: dAS.id, newSerial: S(62, 'P') })
+    ok(repAS.oldDevice.status === 'RECOVERED' && repAS.oldDevice.asStartedOn === null && repAS.newDevice.asStartedOn === null, '교체 → 구 기기 AS 플래그 자동 해제')
+    await expectErr('회수된 기기 AS 표시 → 409', () => reg.openDeviceAs(ctx(null), { deviceId: dAS.id }), 409, '회수된 기기에는 AS 표시')
+    const detAS = (await getUnitDetail(repAS.newDevice.id))!
+    ok('dealCode' in detAS && 'asStartedOn' in detAS && 'asRefCode' in detAS, '상세 응답에 dealCode·asStartedOn·asRefCode')
+  }
 
   section('[2] 소급·미래·불법 전이')
   await expectErr('미래 일자', () => moveDeviceWard(ctx(H2, '2099-01-01'), { deviceId: d1.id, toWardName: 'X' }), 400, '미래')
@@ -1202,6 +1337,39 @@ async function main() {
   await correctDevice(ctx(null), { deviceId: id81, changes: { usageTypeId: sale.id } })
   r = await call(h(R.usage.DELETE), 'DELETE', `${B}/api/settings/device-usage-type/${usageId}`, { ...A, params: { id: String(usageId) } })
   ok(r.status === 200, '미사용 사용자 용도 DELETE → 200')
+  // 계약건(B-23)·AS(B-24) 라우트
+  const RAS = { open: await import('../app/api/devices/units/[id]/as-open/route'), clear: await import('../app/api/devices/units/[id]/as-clear/route') }
+  const realDealH1 = (await reg.getHospitalDealContext(H1)).deals[0]
+  r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id81}`, { ...UW, params: { id: String(id81) }, body: { dealCode: realDealH1.dealCode } })
+  ok(r.status === 200 && r.json.event.eventType === 'CORRECT' && r.json.changes.dealCode.after === realDealH1.dealCode && r.json.device.dealCode === realDealH1.dealCode, 'PATCH 계약건 USER(write) → 200 CORRECT', r.json)
+  r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id81}`, { ...UW, params: { id: String(id81) }, body: { dealCode: 'DEAL-000000-0000' } })
+  ok(r.status === 409 && r.json.error === '이 병원의 계약완료 딜이 아닙니다', 'PATCH 없는 계약건 → 409')
+  r = await call(h(R.units.GET), 'GET', `${B}/api/devices/units?hospital=${H1}&deal=${encodeURIComponent(realDealH1.dealCode)}`, A)
+  ok(r.status === 200 && r.json.total >= 1 && r.json.data.every((d: { dealCode: string | null }) => d.dealCode === realDealH1.dealCode), 'units ?deal= 필터')
+  r = await call(h(R.units.GET), 'GET', `${B}/api/devices/units?hospital=${H1}&as=bogus`, A)
+  ok(r.status === 400, 'units 잘못된 as → 400')
+  r = await call(h(R.bulk.POST), 'POST', `${B}/api/devices/units/bulk`, { ...UW, body: { action: 'SET_DEAL', deviceIds: [id81] } })
+  ok(r.status === 400 && /계약건/.test(r.json.error), 'bulk SET_DEAL dealCode 누락 → 400')
+  r = await call(h(R.bulk.POST), 'POST', `${B}/api/devices/units/bulk`, { ...UW, body: { action: 'SET_DEAL', deviceIds: [id81], dealCode: null } })
+  ok(r.status === 201 && r.json.events.every((e: { eventType: string }) => e.eventType === 'CORRECT'), 'bulk SET_DEAL null(미지정) USER → 201')
+  r = await call(h(RAS.open.POST), 'POST', `${B}/api/devices/units/${id81}/as-open`, { ...V, params: { id: String(id81) }, body: {} })
+  ok(r.status === 403, 'as-open VIEWER → 403')
+  r = await call(h(RAS.open.POST), 'POST', `${B}/api/devices/units/${id81}/as-open`, { ...UW, params: { id: String(id81) }, body: { occurredOn: '2026-08-20', ...(mnt ? { ref: { type: 'MAINTENANCE', code: mnt.maintenanceCode } } : {}) } })
+  ok(r.status === 201 && r.json.event.eventType === 'AS_OPEN' && r.json.device.asStartedOn != null && (!mnt || r.json.device.asRefCode === mnt.maintenanceCode), 'as-open USER → 201(플래그·MNT ref)', r.json)
+  ok(!!(await prisma.auditLog.findFirst({ where: { id: { gt: pre.max.a }, resource: 'hospital_device', action: 'UPDATE', resourceLabel: { contains: 'AS 시작' } } })), 'as-open audit 라벨 AS 시작')
+  r = await call(h(RAS.open.POST), 'POST', `${B}/api/devices/units/${id81}/as-open`, { ...UW, params: { id: String(id81) }, body: {} })
+  ok(r.status === 409, 'as-open 재표시 → 409')
+  r = await call(h(R.units.GET), 'GET', `${B}/api/devices/units?hospital=${H1}&as=1`, A)
+  ok(r.status === 200 && r.json.data.some((d: { id: number }) => d.id === id81) && r.json.data.every((d: { asStartedOn: string | null }) => d.asStartedOn != null), 'units ?as=1 필터')
+  r = await call(h(R.exportUnits.GET), 'GET', `${B}/api/devices/export?hospital=${H1}&as=1`, V)
+  ok(r.status === 200 && r.ct.includes('spreadsheetml'), 'units export(as 필터, 상태/계약건 열) xlsx')
+  r = await call(h(RAS.clear.POST), 'POST', `${B}/api/devices/units/${id81}/as-clear`, { ...UW, params: { id: String(id81) }, body: {} })
+  ok(r.status === 201 && r.json.device.asStartedOn === null, 'as-clear USER → 201')
+  ok(!!(await prisma.auditLog.findFirst({ where: { id: { gt: pre.max.a }, resource: 'hospital_device', action: 'UPDATE', resourceLabel: { contains: 'AS 해제' } } })), 'as-clear audit 라벨 AS 해제')
+  r = await call(h(RAS.clear.POST), 'POST', `${B}/api/devices/units/${id81}/as-clear`, { ...UW, params: { id: String(id81) }, body: {} })
+  ok(r.status === 409, 'as-clear 표시 없음 → 409')
+  r = await call(h(R.hSummary.GET), 'GET', `${B}/api/hospitals/${H1}/devices/summary`, { ...V, ...P1 })
+  ok(r.status === 200 && Array.isArray(r.json.deals) && r.json.dealUnassigned && typeof r.json.asInProgress === 'number' && r.json.contractedDeals.every((d: { productType?: unknown }) => 'productType' in d), 'hospital summary — deals[]·dealUnassigned·asInProgress·contractedDeals.productType')
   const auditBy = await prisma.auditLog.groupBy({ by: ['resource'], where: { id: { gt: pre.max.a }, resource: { in: AUDIT_RESOURCES } }, _count: { _all: true } })
   const ac = Object.fromEntries(auditBy.map((a) => [a.resource, a._count._all]))
   ok((ac.hospital_device ?? 0) >= 5 && (ac.hospital_device_event ?? 0) >= 5 && ac.hospital_device_import === 3 && (ac.hospital_ward ?? 0) >= 4 && ac['setting:device_recovery_reason'] === 3 && ac['setting:device_usage_type'] === 3, '감사 로그 자원별 건수(§8.3 자원명)', ac)

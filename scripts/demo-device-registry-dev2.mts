@@ -101,6 +101,28 @@ async function seed() {
     { serialInput: 'A990901', wardName: '6병동' }, { serialInput: 'A990902', wardName: '6병동' },
   ])
   console.log('6) 타 병원 HOSP-000059 ECG 2대 등록')
+  // 7) 계약건(B-23) — 문산중앙 계약완료 딜 3건: 일반 배치분 → 12대 딜, 라이트 2대 → 다음 딜(명시), A990301은 미지정 유지
+  const TODAY = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
+  const dealCtx = await reg.getHospitalDealContext(H)
+  const deal12 = dealCtx.deals.find((d) => d.count === 12) ?? dealCtx.deals[0] ?? null
+  const dealNext = dealCtx.deals.find((d) => d.dealCode !== deal12?.dealCode) ?? null
+  if (deal12) {
+    const a301 = await prisma.deviceUnit.findUnique({ where: { serialNo: 'A990301' }, select: { id: true } })
+    const liteIds = (await prisma.hospitalDevice.findMany({ where: { hospitalCode: H, status: 'ACTIVE', productType: '라이트' }, select: { deviceId: true } })).map((r) => r.deviceId)
+    const normalIds = (await prisma.hospitalDevice.findMany({ where: { hospitalCode: H, status: 'ACTIVE', NOT: { productType: '라이트' } }, select: { deviceId: true } }))
+      .map((r) => r.deviceId)
+      .filter((id) => id !== a301?.id)
+    const b1 = await reg.bulkDeviceAction(ctx(TODAY, { memo: '계약건 백필(데모)' }), { action: 'SET_DEAL', deviceIds: normalIds, dealCode: deal12.dealCode })
+    console.log(`7) 계약건 지정: 일반 ${b1.affectedDeviceIds.length}대 → ${deal12.dealCode} (${deal12.count}대 딜)`)
+    if (dealNext && liteIds.length) {
+      const b2 = await reg.bulkDeviceAction(ctx(TODAY, { memo: '계약건 백필(데모, 라이트 명시)' }), { action: 'SET_DEAL', deviceIds: liteIds, dealCode: dealNext.dealCode })
+      console.log(`   라이트 ${b2.affectedDeviceIds.length}대 → ${dealNext.dealCode} (명시) · A990301 미지정 유지`)
+    }
+  } else console.log('7) 계약완료 딜 없음 — 계약건 지정 생략')
+  // 8) AS진행중(B-24) — B990102에 유지보수 코드로 표시
+  const b102 = await prisma.deviceUnit.findUniqueOrThrow({ where: { serialNo: 'B990102' }, select: { id: true } })
+  await reg.openDeviceAs(ctx(TODAY, mnt ? { ref: { type: 'MAINTENANCE', code: mnt.maintenanceCode } } : { memo: 'AS 접수(데모)' }), { deviceId: b102.id })
+  console.log(`8) AS 표시: B990102${mnt ? ` (ref ${mnt.maintenanceCode})` : ''}`)
   const summary = (await reg.getHospitalDeviceSummary(H))!
   const units = await prisma.deviceUnit.count({ where: { OR: PREFIX.map((p) => ({ serialNo: { startsWith: p } })) } })
   const placements = await prisma.hospitalDevice.count({ where: { unit: { OR: PREFIX.map((p) => ({ serialNo: { startsWith: p } })) } } })
@@ -118,6 +140,11 @@ async function seed() {
     'ECG:',
     Object.entries(ecg?.byProductType ?? {}).map(([k, c]) => `${k} 배치 ${c!.activeForCompare}/계약 ${c!.expected ?? '—'} (차이 ${c!.diff ?? '—'})`).join(' · '),
     `· 교체 전체 ${summary.replacements.total} (일반 ${summary.replacements.byType['일반']} · 라이트 ${summary.replacements.byType['라이트']} · 미지정 ${summary.replacements.byType['미지정']}) · 최근 30일 ${summary.replacements.last30d.total}`
+  )
+  console.log(
+    '계약건(B-23):',
+    summary.deals.map((d) => `${d.dealCode}${d.roundNo != null ? `(${d.roundNo}차 ${d.productType ?? '—'} ${d.expected ?? '—'}대)` : '(계약 외)'} 등록 ${d.active} · 교체 ${d.replacements}`).join(' / ') || '없음',
+    `· 미지정: 등록 ${summary.dealUnassigned.active} · 교체 ${summary.dealUnassigned.replacements} · AS진행중 ${summary.asInProgress}(B990102)`
   )
 }
 

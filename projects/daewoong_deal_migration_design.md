@@ -1,5 +1,6 @@
 # 대웅 원장 딜 전면 재적재 + 대웅 축 분리 설계
 
+> **주의(2026-09-02)**: 디바이스 원장이 `hospital_devices.deal_code`·`hospital_device_events.deal_code`로 딜 코드를 **소프트 참조**한다(FK 없음 — `hospital_device_registry_design.md` B-23). 재적재로 딜 코드가 재발번되면 **구 코드 → 신 코드 매핑으로 원장 두 컬럼을 백필하는 단계가 필요**하다. 끊긴 코드는 원장 병원 뷰 계약별 표에 '(계약 외)'로 드러난다.
 > 작성일: 2026-07-31 · 상태: **dev2 구현 완료 (2026-07-31) — PROD 반영 대기**
 > **개정**: 원천 파일은 `thynC_status.xlsx`(구파일)가 아니라 **`thynC_status_DW.xlsx` '1. 거래처별 종합현황' 232행** (사용자 확정). 구파일은 2차 보강 소스. 실행 산출물: `scripts/migrate-daewoong-deals-20260731.sql`(DW 232건 적재+프로젝트 재연결) · `scripts/enrich-deals-from-status-excel-20260731.sql`(구파일 227건 보강). 아래 §1~§7은 구파일 기준 초안으로 레코드 수·컬럼이 다름 — 최종 구현은 DEV_HISTORY 2026-07-31 항목 참조.
 > 배경: 2026-07-29 백필(`backfill-sales-deals-from-projects.sql`)이 "프로젝트 1건 = 계약 1건"으로 243딜을 생성했으나, 프로젝트에는 무계약·선등록 건이 섞여 있어 전제가 틀림 (경희대 사례). 사용자 결정: **엑셀(대웅제약 원장) = 딜 레코드 원천** — PROD 데이터를 날려서라도 재적재.

@@ -72,6 +72,7 @@ export const CORRECT_FIELD_LABELS: Record<string, string> = {
   extDeviceCode: '닉네임',
   usageTypeId: '용도',
   productType: '상품유형',
+  dealCode: '계약건',
 }
 
 function changeValue(field: string, v: unknown, models?: readonly ModelSummary[], usageTypes?: readonly UsageTypeRef[]): string {
