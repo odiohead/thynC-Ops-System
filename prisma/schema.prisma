@@ -173,6 +173,7 @@ model StatusCode {
   deviceRecoverReasons   HospitalDevice[]       @relation("DeviceRecoverReason") // DEVICE_RECOVERY_REASON (원장 프로젝션)
   deviceEventReasons     HospitalDeviceEvent[]  @relation("DeviceEventReason")   // DEVICE_RECOVERY_REASON (RECOVER 이벤트)
   deviceUsageUnits       DeviceUnit[]           @relation("DeviceUsageType")     // DEVICE_USAGE_TYPE (유닛 용도: SALE/EVAL)
+  stockOutStatuses       StockOutRequest[]      @relation("StockOutStatus")      // STOCK_OUT_STATUS (출고요청 상태)
 
   @@unique([name, category])
   @@map("status_codes")
@@ -317,6 +318,8 @@ model User {
   ticketQueueMemberships    TicketQueueMember[]          @relation("TicketQueueMemberUser")
   ticketCtiRuleUpdates      TicketDomainCtiRule[]        @relation("CtiRuleUpdater")
   vocReceiptsCreated        VocReceipt[]                 @relation("VocCreator")
+  stockOutRequestsCreated   StockOutRequest[]            @relation("StockOutCreator")
+  stockOutRequestsFulfilled StockOutRequest[]            @relation("StockOutFulfiller")
   salesActivities           SalesActivity[]              @relation("SalesActivityAuthor")
   salesOwnedProfiles        HospitalSalesProfile[]       @relation("SalesProfileOwner")
   weeklyItemsOwned          WeeklyItem[]                 @relation("WeeklyItemOwner")
@@ -451,6 +454,7 @@ model Project {
   files             ProjectFile[]
   assignees         ProjectAssignee[]
   salesDeal         SalesDeal?
+  stockOutRequests  StockOutRequest[] // 출고요청 (도메인 레코드, 프로젝트 필수 연결)
 
   @@map("projects")
   @@schema("public")
@@ -1172,6 +1176,7 @@ model InventoryTransaction {
   parentTxId    Int?                       @map("parent_tx_id") // 세트출고 자식 전표 → 주자재 전표
   note          String?
   actorId       String                     @map("actor_id")
+  stockOutRequestId Int?                   @map("stock_out_request_id") // 출고요청 링크 (P2 — 처리 내역 역조회, SET NULL)
   canceledAt    DateTime?                  @map("canceled_at")
   canceledById  String?                    @map("canceled_by_id")
   createdAt     DateTime                   @default(now()) @map("created_at")
@@ -1184,6 +1189,7 @@ model InventoryTransaction {
   hospital      Hospital?                  @relation(fields: [hospitalCode], references: [hospitalCode])
   actor         User                       @relation("InventoryTxActor", fields: [actorId], references: [id])
   canceledBy    User?                      @relation("InventoryTxCanceler", fields: [canceledById], references: [id])
+  stockOutRequest StockOutRequest?         @relation(fields: [stockOutRequestId], references: [id], onDelete: SetNull)
   parentTx      InventoryTransaction?      @relation("TxSetComponents", fields: [parentTxId], references: [id])
   childTxs      InventoryTransaction[]     @relation("TxSetComponents")
   units         InventoryTransactionUnit[]
@@ -1195,6 +1201,7 @@ model InventoryTransaction {
   @@index([createdAt(sort: Desc)])
   @@index([inventoryId, createdAt(sort: Desc)])
   @@index([parentTxId])
+  @@index([stockOutRequestId])
   @@map("inventory_transactions")
   @@schema("public")
 }
@@ -2060,6 +2067,73 @@ model VocReceipt {
   @@schema("public")
 }
 
+/// 출고 품목 마스터 (출고업무 전용 — projects/stock_out_request_design.md §4.1, WMS 품목·device_info와 독립)
+model StockOutItem {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  itemGroup String   @map("item_group") // 'SYSTEM' 시스템 / 'WEARABLE' 웨어러블 디바이스 (SQL CHECK)
+  wmsModelName String? @map("wms_model_name") // WMS 품목 해석 키 = inventory_items.model_name (P2, NULL=매핑 없음)
+  sortOrder Int      @default(0) @map("sort_order")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  requestItems StockOutRequestItem[]
+
+  @@map("stock_out_items")
+  @@schema("public")
+}
+
+/// 출고요청 — 7번째 티켓 도메인 (refType 'STOCK_OUT', projects/stock_out_request_design.md)
+model StockOutRequest {
+  id              Int       @id @default(autoincrement())
+  sorCode         String    @unique @map("sor_code") @db.VarChar(20) // SOR-YYYYMM-NNNN
+  projectCode     String    @map("project_code") // 필수 연결 — 프로젝트 삭제는 RESTRICT(라우트 선검사 409)
+  statusId        Int?      @map("status_id") // STOCK_OUT_STATUS (+ticket_status 매핑: 완료·취소→CLOSED)
+  statusChangedAt DateTime? @default(now()) @map("status_changed_at")
+  requestDate     DateTime  @map("request_date") @db.Date // 희망 출고일
+  note            String?   @db.Text // 비고 — 티켓 설명 자동입력 소스
+  resolvedAt      DateTime? @map("resolved_at") @db.Date // 종결 버킷(완료·취소) 진입 시 자동 기록
+  createdById     String?   @map("created_by_id") // 요청자 — 수정 권한 판정 기준
+  fulfilledAt     DateTime? @map("fulfilled_at") // 출고 처리 시각 (P2 — 이중 처리 가드, NULL=미처리)
+  fulfilledById   String?   @map("fulfilled_by_id") // 처리자 (자재담당자)
+  ticketId        Int?      @unique @map("ticket_id") // 도메인 1:1 연결 티켓
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  project   Project               @relation(fields: [projectCode], references: [projectCode])
+  status    StatusCode?           @relation("StockOutStatus", fields: [statusId], references: [id], onDelete: SetNull)
+  createdBy User?                 @relation("StockOutCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  fulfilledBy User?               @relation("StockOutFulfiller", fields: [fulfilledById], references: [id], onDelete: SetNull)
+  transactions InventoryTransaction[] // 처리 전표 (P2 — stock_out_request_id 역조회)
+  ticket    Ticket?               @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  items     StockOutRequestItem[]
+
+  @@index([projectCode])
+  @@index([statusId])
+  @@index([requestDate])
+  @@index([createdAt])
+  @@map("stock_out_requests")
+  @@schema("public")
+}
+
+/// 출고요청 품목 라인 (수량 입력된 품목만 저장)
+model StockOutRequestItem {
+  id        Int @id @default(autoincrement())
+  requestId Int @map("request_id")
+  itemId    Int @map("item_id")
+  quantity  Int // SQL CHECK > 0
+  fulfilledSerials String? @map("fulfilled_serials") @db.Text // 과도기 시리얼 기록 (P2 — 비시리얼 품목 전용, 줄 단위 원문)
+
+  request StockOutRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  item    StockOutItem    @relation(fields: [itemId], references: [id])
+
+  @@unique([requestId, itemId])
+  @@index([itemId])
+  @@map("stock_out_request_items")
+  @@schema("public")
+}
+
 model TicketPendingReason {
   id          Int          @id @default(autoincrement())
   name        String       @unique
@@ -2115,6 +2189,7 @@ model Ticket {
   installPlan     InstallPlan?
   project         Project?
   voc             VocReceipt?
+  stockOutRequest StockOutRequest?
 
   @@index([queueId, status])
   @@index([parentId])

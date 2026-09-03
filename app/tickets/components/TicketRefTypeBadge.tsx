@@ -56,6 +56,12 @@ const REF_TYPE_TONES: Record<DomainRefType, RefTypeTone> = {
     metaClass: 'text-indigo-800 dark:text-indigo-300',
     linkClass: 'border-indigo-300 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:text-indigo-300 dark:hover:bg-indigo-900/40',
   },
+  STOCK_OUT: {
+    badgeClass: 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300',
+    bannerClass: 'border-teal-200 bg-teal-50 text-teal-900 dark:border-teal-800 dark:bg-teal-900/20 dark:text-teal-200',
+    metaClass: 'text-teal-800 dark:text-teal-300',
+    linkClass: 'border-teal-300 text-teal-700 hover:bg-teal-100 dark:border-teal-700 dark:text-teal-300 dark:hover:bg-teal-900/40',
+  },
 }
 
 interface RefTypeMeta extends RefTypeTone {

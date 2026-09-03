@@ -102,6 +102,8 @@ app/
 │   │   ├── maintenance-status/       # 유지보수 상태 관리 (+티켓 상태 매핑)
 │   │   ├── etc-task-status/          # 기타업무 상태 관리 (+티켓 상태 매핑)
 │   │   ├── install-plan-status/      # 설치계획 상태 관리 (2026-07-27 단일 축 — +티켓 상태 매핑)
+│   │   ├── stock-out-status/         # 출고업무 상태 관리 (+티켓 상태 매핑, 2026-09-03)
+│   │   ├── stock-out-items/          # 출고 품목 마스터 CRUD (ADMIN — 출고업무 전용, 사용 중 삭제 409)
 │   │   ├── sales-codes/              # 영업 StatusCode 3카테고리 CRUD (화이트리스트·색상, ADMIN)
 │   │   ├── ticket-queues/            # Assignment Group 마스터 CRUD (티켓 있으면 삭제 400)
 │   │   ├── ticket-cti/               # 티켓 분류(CTI) 3단 트리 CRUD + 기본 그룹 지정
@@ -144,6 +146,7 @@ app/
 │   ├── parking/                      # 주차 웹할인 — search/coupons/register (pweb.kr 대행, USER 이상)
 │   ├── install-plans/                # 설치계획(가안) CRUD
 │   ├── voc-receipts/                 # VOC접수 CRUD (등록 시 CS 마스터 티켓 자동 생성 — 단일 트랜잭션, 생성자 기록)
+│   ├── stock-out-requests/           # 출고요청 CRUD + [id] (등록 시 STOCK_OUT 티켓 자동 생성 — 단일 트랜잭션, 프로젝트 필수 연결)
 │   ├── voc-masters/                  # VOC 접수 채널 조회 (channels)
 │   ├── etc-tasks/                    # 기타업무 CRUD + 파일 관리 (다병원·비유지보수 업무)
 │   ├── inventory/                    # 자재관리(WMS)
@@ -170,6 +173,7 @@ app/
 │   └── calendar/                     # 구축 일정 간트 캘린더 (새 탭)
 ├── site-visits/                      # 답사 목록·상세·등록
 ├── voc/                              # VOC 접수 — 목록·등록(new)·상세([id] — 하위 티켓 패널·처리 결과 Tiptap) (CS 워크플로)
+├── stock-out-requests/               # 출고업무 — 목록·상세([id] — 출고 처리 카드·처리 내역) + _components/{StockOutRequestFormModal(등록·수정),FulfillCard(출고 처리 — P2)}
 ├── maintenances/                     # 유지보수 목록·상세·등록
 ├── etc-tasks/                        # 기타업무 목록·상세·등록 (다병원·비유지보수 업무)
 ├── tickets/                          # 티켓 목록(Assignment Group 탭·저장된 뷰)·생성(CTI 3단)·상세(전이 액션·타임라인)·dashboard/(P12 지표)
@@ -219,6 +223,8 @@ app/
 │   ├── voc-type/                     # VOC 분류 관리 (StatusCodeManager)
 │   ├── emr-vendor/                   # EMR 업체 관리 (StatusCodeManager — 병원 EMR 연동 정보에서 선택, 2026-08-16)
 │   ├── install-plan-status/          # 설치계획 상태 관리 (WorkflowStatusManager, 2026-07-27)
+│   ├── stock-out-status/             # 출고업무 상태 관리 (WorkflowStatusManager, 2026-09-03)
+│   ├── stock-out-items/              # 출고 품목 관리 (ADMIN 이상 — 출고업무 전용 품목 마스터)
 │   ├── sales-codes/                  # 영업 코드 관리 — 7카테고리 (단계·딜 상태·판매모델·세금계산서·정산·활동 유형·직군)
 │   ├── ticket-queues/                # Assignment Group 관리 (이름·설명·순서·활성·티켓 수, 멤버 모달 팀(부서) 단위 일괄 선택)
 │   ├── ticket-cti/                   # 티켓 분류(CTI) 관리 (Category/Type/Item 3컬럼 + Item 기본 Assignment Group 지정)
@@ -274,8 +280,11 @@ lib/
 │   ├── meta.ts                       # [클라 안전] 도메인 메타 단일 소스 (refType·라벨·경로·taskType·childCreate)
 │   ├── types.ts / shared.ts          # 어댑터 계약 + 공용 헬퍼(상태 매핑 해석·규칙 폴백)
 │   ├── registry.ts                   # 어댑터 조립 — syncTicketToDomain 디스패치·detailInclude 병합·linkedWork 조립
-│   └── maintenance·etcTask·siteVisit·installPlan·project·voc.ts  # 도메인별 생성·양방향 동기화·배너
+│   └── maintenance·etcTask·siteVisit·installPlan·project·voc·stockOut.ts  # 도메인별 생성·양방향 동기화·배너
 ├── csCodes.ts                        # CS 코드 발번 (VOC-YYYYMM-NNNN, KST)
+├── stockOut.ts                       # 출고요청 — SOR-YYYYMM-NNNN 발번·품목 요약·수정 권한 판정 (2026-09-03)
+├── stockOutShared.ts                 # 출고 처리 클라 안전 상수 — 출고유형 3종→인벤토리·전표유형·기기 용도 매핑 (P2)
+├── stockOutFulfill.ts                # 출고 처리 코어 — preview(검증·라인 판정)/execute(WMS 차감+기기현황 등록+완료, 단일 트랜잭션) (P2)
 ├── audit.ts                          # 감사 로그 헬퍼 (logAudit, auditActorFromJWT, redact)
 ├── hospitalStatus.ts                 # 병원 thynC 현황상태 단방향 자동 진행 헬퍼 (advanceHospitalStatus)
 ├── vehicleLog.ts                     # 운행일지 거리 재계산(recalcVehicleLogs) + 주행거리 무결성 검사(checkOdometerConsistency)
@@ -779,6 +788,12 @@ prisma/
 - **하위 티켓 생성 (P3)**: 마스터 티켓·VOC 상세의 '서브/하위 티켓 생성' 드롭다운 — 순수 티켓(`/tickets/new?parentId=`) + `childCreate` 선언 도메인(유지보수 `/maintenances/new?parentTicketId=` — POST가 같은 트랜잭션에서 parentId 연결+link 이벤트)
 - 마스터 시드: `scripts/seed-cs-masters.sql` (idempotent — 상태코드 3카테고리·CS 그룹·CTI·VOC 규칙·nav 3행). 스모크: `scripts/cs-workflow-smoke.mts`
 
+### 출고업무 — StockOutRequest / StockOutRequestItem / StockOutItem (2026-09-03 — `projects/stock_out_request_design.md`)
+- **StockOutRequest** (`stock_out_requests`): 구축 프로젝트 자재 출고요청 — **7번째 티켓 도메인** (refType `STOCK_OUT`, 어댑터 `lib/ticket-domains/stockOut.ts`) · `sorCode`(SOR-YYYYMM-NNNN) · `projectCode`(**필수 FK, ON DELETE RESTRICT** — 프로젝트 DELETE 라우트 409 선검사) · 상태(`STOCK_OUT_STATUS`: 요청→OPEN/처리중→IN_PROGRESS/보류→PENDING/**완료→CLOSED**(RESOLVED 미경유 — 2026-09-03 사용자 결정)/취소→CLOSED) · `requestDate`(희망 출고일 DATE) · `note`(비고 — 티켓 설명 자동입력 소스) · `resolvedAt`(종결 버킷 진입 시 자동 기록) · 생성자(`createdById`) · `ticketId`(1:1). 담당 배정은 티켓 단독 소유(VOC 선례), 병원은 프로젝트에서 파생
+- **StockOutRequestItem** (`stock_out_request_items`): 품목×수량 라인 — UNIQUE(request,item) · CHECK qty>0 · 요청 삭제 CASCADE
+- **StockOutItem** (`stock_out_items`): 출고 품목 마스터(출고업무 전용 — WMS 품목·device_info와 독립) — name UNIQUE · 그룹(SYSTEM 시스템/WEARABLE 웨어러블 디바이스) · **`wmsModelName`**(P2 — 출고 처리 시 `inventory_items.model_name` 매칭 키) · 시드 12종(`scripts/seed-stock-out-masters.sql`), 사용 중 삭제 409 → 비활성
+- **출고 처리 (P2, 2026-09-03 — §13)**: `stock_out_requests.fulfilled_at/fulfilled_by_id`(처리 스탬프 — 이중 처리 가드), `stock_out_request_items.fulfilled_serials`(실출고/과도기 시리얼 기록), `inventory_transactions.stock_out_request_id`(전표↔요청 링크, SET NULL). 처리는 `lib/stockOutFulfill.ts` — 출고유형 3종(판매(대웅)/판매(자체)/DEMO·PoC → 인벤토리 매핑, `lib/stockOutShared.ts` OUT_TYPE_META) · **전량 일치 단일 트랜잭션**(WMS 전표·재고 차감·시리얼 개체 OUT + 웨어러블 기기현황 등록(source WMS·ref INVENTORY_TX·용도 자동) + 상태 '완료'→티켓 CLOSED) · 타 병원 배치 시리얼 차단·부분 출고 없음
+
 ### SLA 시계 엔진 (1.1 P1 — `projects/notification_v1.1_design.md` §4)
 
 - 1.0의 단일 시계(`dueAt = 생성일 + Sev별 목표일`)를 **정책 × 타깃 × 시계** 3계층으로 재설계. 티켓 1건이 metric별 여러 시계를 동시에 갖는다
@@ -1045,6 +1060,14 @@ prisma/
   - 바 클릭 시 해당 상세 페이지 새 탭 오픈
   - 주말 컬럼 연회색 오버레이, 오늘 세로선 빨강
   - 배정 업무 없는 엔지니어도 빈 행으로 표시
+
+### 출고업무 (`/stock-out-requests`, 2026-09-03 — `projects/stock_out_request_design.md`)
+- 구축 프로젝트의 자재 출고요청 — Slack 수기 요청을 시스템 업무로 편입. **프로젝트 연결 필수**(프로젝트 없이 요청 불가)
+- 등록은 **프로젝트 상세의 [출고요청] 버튼**(저장 좌측, VIEWER 제외)에서 팝업으로 — 희망 출고일 + 품목 그룹(시스템/웨어러블 디바이스)별 수량 그리드 + 비고. 프로젝트 상세에 해당 프로젝트 출고요청 이력 카드 노출
+- 등록 시 **연결 티켓 자동 생성**(refType `STOCK_OUT`, 단일 트랜잭션) — CTI·Assignment Group은 자동생성 규칙(`ticket_domain_cti_rules`) 단일 소스, 알림은 티켓 파이프라인
+- 상태 5종(요청·처리중·보류·완료·취소) 양방향 동기화 — **완료·취소 → 티켓 CLOSED 직행**(RESOLVED 미경유). 수정·삭제는 완료·취소 전 요청자 본인+ADMIN, 이후 ADMIN만. 삭제 시 연결 티켓 동반 삭제
+- 목록(nav '출고업무', 프로젝트 관리 하단)은 조회·처리 중심([+ 등록] 없음). 품목 마스터 `/settings/stock-out-items`(+WMS 모델명 매핑) · 상태 `/settings/stock-out-status`(ADMIN)
+- **출고 처리 (P2, 2026-09-03)**: 상세의 '출고 처리' 카드(재고 담당자/ADMIN) — 출고유형 3택(판매(대웅)/판매(자체)/DEMO·PoC → 인벤토리 자동)→창고→라인 입력(시리얼 스캔/LOT+수량+과도기 시리얼 기록/수량)→검증→실행. **전량 일치 단일 트랜잭션**으로 WMS 재고 차감 + 웨어러블(심전계·산소포화도본체) **기기현황 자동 등록**(용도 판매용/평가용 자동, 타 병원 배치 중이면 차단) + 요청 '완료'(티켓 CLOSED). 처리 내역 카드에 전표 목록(취소 표시)
 
 ### 설치계획(가안) 관리
 - 설치계획(가안) 등록·수정·삭제 (삭제는 ADMIN 이상)
@@ -1661,6 +1684,19 @@ npm run dev
 | GET/POST, PUT/DELETE | `/api/settings/ticket-cti(/[id])` | CTI 3단계 트리 (하위·티켓·**자동생성 규칙** 있으면 삭제 불가, 기본 큐 지정, 목록에 `ruleUsage` 사용처 포함) |
 | GET, PUT | `/api/settings/ticket-cti-rules` | 업무별 티켓 자동생성 규칙 (CTI·Assignment Group·설명 자동입력 — 조회 로그인, 변경 ADMIN) |
 | GET/POST, PUT/DELETE | `/api/settings/ticket-pending-reasons(/[id])` | PENDING 사유 마스터 |
+
+### 출고업무 (2026-09-03 — 조회 로그인 전원 / 쓰기 USER 이상, 수정·삭제는 완료·취소 전 본인+ADMIN·이후 ADMIN)
+
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET | `/api/stock-out-requests` | 목록 (projectCode·statusId·q·희망 출고일 기간·페이징) |
+| POST | `/api/stock-out-requests` | 등록 — 프로젝트 필수·품목 라인 ≥1·중복 품목 400 (레코드+라인+티켓 단일 트랜잭션) |
+| GET | `/api/stock-out-requests/[id]` | 상세 (품목 라인·연결 티켓 포함) |
+| PUT | `/api/stock-out-requests/[id]` | 수정 — 희망일·비고·상태(어댑터 동기화)·라인 전체 교체 |
+| DELETE | `/api/stock-out-requests/[id]` | 삭제 — 연결 티켓 동반 삭제 |
+| POST | `/api/stock-out-requests/[id]/fulfill` (+`?preview=true`) | 출고 처리 (P2 — `canManageStock`) — 검증/실행: WMS 차감+기기현황 등록+완료, 전량 일치 |
+| GET/POST | `/api/settings/stock-out-status` (+`[id]` PUT/DELETE) | 출고업무 상태 관리 (+티켓 상태 매핑 필수) |
+| GET/POST | `/api/settings/stock-out-items` (+`[id]` PUT/DELETE) | 출고 품목 마스터 (쓰기 ADMIN — 사용 중 삭제 409) |
 
 ### CS 워크플로 — VOC접수 (2026-08-15 — `projects/cs_ticket_workflow_design.md`, 콜기록지는 같은 날 사용자 결정으로 제거)
 | Method | Endpoint | 설명 |

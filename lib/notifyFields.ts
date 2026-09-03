@@ -21,6 +21,7 @@ export const TASK_TYPE_LABELS: Record<TaskType, string> = {
   MAINTENANCE: '유지보수',
   ETC: '기타업무',
   VOC: 'VOC접수',
+  STOCK_OUT: '출고요청',
   TICKET: '티켓',
 }
 
@@ -79,6 +80,13 @@ export const FIELD_CATALOG: Record<TaskType, FieldDef[]> = {
     { key: 'receivedAt', label: '접수일' },
     { key: 'resolvedAt', label: '완료일' },
   ],
+  STOCK_OUT: [
+    { key: 'status', label: '상태' },
+    { key: 'requestDate', label: '희망 출고일' },
+    { key: 'items', label: '품목' },
+    { key: 'createdBy', label: '요청자' },
+    { key: 'resolvedAt', label: '완료일' },
+  ],
   TICKET: [
     { key: 'owner', label: '담당자' },
     { key: 'severity', label: 'Severity' },
@@ -97,10 +105,11 @@ export const DEFAULT_FIELDS: Record<TaskType, string[]> = {
   MAINTENANCE: ['assignees', 'priority', 'type', 'reportedAt'],
   ETC: ['assignees', 'priority', 'reportedAt'],
   VOC: ['vocType', 'channel', 'receivedAt'],
+  STOCK_OUT: ['status', 'requestDate', 'items'],
   TICKET: ['owner', 'severity', 'queue'],
 }
 
-export const TASK_TYPES: TaskType[] = ['PROJECT', 'SITE_VISIT', 'INSTALL_PLAN', 'MAINTENANCE', 'ETC', 'VOC', 'TICKET']
+export const TASK_TYPES: TaskType[] = ['PROJECT', 'SITE_VISIT', 'INSTALL_PLAN', 'MAINTENANCE', 'ETC', 'VOC', 'STOCK_OUT', 'TICKET']
 
 /** refType → 알림 taskType (순수 티켓 = TICKET) — 도메인 메타 단일 소스 (P0 레지스트리 전환) */
 export function refTypeToTaskType(refType: string | null): TaskType {

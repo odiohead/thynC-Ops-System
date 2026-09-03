@@ -9,6 +9,7 @@ import FieldEngineerSelectModal from '@/app/components/FieldEngineerSelectModal'
 import ReassignHospitalButton from '@/app/components/ReassignHospitalButton'
 import LinkedTicketBanner from '@/app/tickets/components/LinkedTicketBanner'
 import TicketLogPanel from '@/app/tickets/components/TicketLogPanel'
+import StockOutRequestFormModal from '@/app/stock-out-requests/_components/StockOutRequestFormModal'
 
 interface DeviceInfo {
   id: number
@@ -109,6 +110,23 @@ const CONTRACT_FILE_CATEGORIES: { key: string; label: string }[] = [
   { key: 'CONTRACT', label: '계약서' },
 ]
 
+// 출고요청 이력 행 (stock_out_request_design.md §8 — §2-9 프로젝트 상세 노출)
+interface SorRow {
+  id: number
+  sorCode: string
+  requestDate: string
+  status: { id: number; name: string; color: string | null } | null
+  items: { id: number; quantity: number; item: { name: string } }[]
+}
+
+function sorItemsSummary(items: SorRow['items']): string {
+  if (!items.length) return '-'
+  const total = items.reduce((s, l) => s + l.quantity, 0)
+  return items.length > 1
+    ? `${items[0].item.name} ${items[0].quantity} 외 ${items.length - 1}종 · 총 ${total}개`
+    : `${items[0].item.name} ${items[0].quantity}`
+}
+
 function toDateInput(val: string | null): string {
   if (!val) return ''
   return val.slice(0, 10)
@@ -125,6 +143,9 @@ export default function ProjectDetailPage() {
   const [introTypeOptions, setIntroTypeOptions] = useState<IntroTypeOption[]>([])
   const [isAdmin, setIsAdmin] = useState(false)
   const [canDelete, setCanDelete] = useState(false)
+  const [canWrite, setCanWrite] = useState(false) // 출고요청 버튼 게이트 (VIEWER 제외)
+  const [sorModalOpen, setSorModalOpen] = useState(false)
+  const [sorList, setSorList] = useState<SorRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
@@ -200,6 +221,16 @@ export default function ProjectDetailPage() {
     setDeviceQty(qtyMap)
   }, [code, router])
 
+  // 이 프로젝트의 출고요청 이력 (stock_out_request_design.md §8)
+  const loadSors = useCallback(async () => {
+    const res = await fetch(`/api/stock-out-requests?projectCode=${encodeURIComponent(code)}&pageSize=50`)
+    if (res.ok) {
+      const d = await res.json()
+      setSorList(d.requests ?? [])
+    }
+  }, [code])
+  useEffect(() => { void loadSors() }, [loadSors])
+
   useEffect(() => {
     Promise.all([
       loadProject(),
@@ -214,6 +245,7 @@ export default function ProjectDetailPage() {
       setConstructors(conData.constructors ?? [])
       setBuildStatuses(bsData.buildStatuses ?? [])
       setIsAdmin(meData?.role === 'ADMIN' || meData?.role === 'SUPER_ADMIN')
+      setCanWrite(!!meData?.role && meData.role !== 'VIEWER')
       // 삭제 버튼: ADMIN 이상 또는 project.admin 권한 보유자(VIEWER 제외) — 서버 DELETE 게이트와 동일 판정
       setCanDelete(
         meData?.role === 'ADMIN' || meData?.role === 'SUPER_ADMIN' ||
@@ -388,6 +420,14 @@ export default function ProjectDetailPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {canWrite && (
+              <button
+                onClick={() => setSorModalOpen(true)}
+                className="rounded-lg border border-teal-300 bg-teal-50 px-4 py-2 text-sm font-medium text-teal-700 transition-colors hover:bg-teal-100"
+              >
+                출고요청
+              </button>
+            )}
             {saveMsg && <span className="text-sm text-green-600">{saveMsg}</span>}
             <button
               onClick={handleSave}
@@ -749,6 +789,40 @@ export default function ProjectDetailPage() {
             </div>
           </div>
 
+          {/* 출고요청 이력 (stock_out_request_design.md §8) */}
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <h2 className="text-sm font-semibold text-gray-700">
+                출고요청
+                <span className="ml-1 font-normal text-gray-400">{sorList.length}건</span>
+              </h2>
+              <Link href="/stock-out-requests" className="text-xs text-blue-600 hover:underline">출고업무 목록 →</Link>
+            </div>
+            {sorList.length === 0 ? (
+              <p className="px-6 py-4 text-sm text-gray-400">출고요청이 없습니다. 상단 [출고요청] 버튼으로 등록하세요.</p>
+            ) : (
+              <ul className="divide-y divide-gray-100">
+                {sorList.map((s) => (
+                  <li key={s.id}>
+                    <Link href={`/stock-out-requests/${s.id}`} className="flex flex-wrap items-center gap-2 px-6 py-2.5 hover:bg-gray-50">
+                      <span className="font-mono text-xs text-blue-600">{s.sorCode}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm text-gray-800">{sorItemsSummary(s.items)}</span>
+                      <span className="text-xs text-gray-500">희망 {s.requestDate.slice(0, 10)}</span>
+                      {s.status && (
+                        <span
+                          className="inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium"
+                          style={{ backgroundColor: `${s.status.color ?? '#9CA3AF'}22`, color: s.status.color ?? '#6B7280' }}
+                        >
+                          {s.status.name}
+                        </span>
+                      )}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
           {/* 이슈 노트 — 사내위키 '프로젝트 이슈노트' 페이지 임베드 */}
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
             <div className="border-b border-gray-200 px-6 py-4">
@@ -779,6 +853,14 @@ export default function ProjectDetailPage() {
 
         </div>
       </div>
+
+      {/* 출고요청 등록 모달 (stock_out_request_design.md §8) */}
+      <StockOutRequestFormModal
+        open={sorModalOpen}
+        onClose={() => setSorModalOpen(false)}
+        onSaved={() => { router.refresh(); void loadSors() }}
+        project={{ projectCode: project.projectCode, projectName: project.projectName, hospitalName: project.hospital.hospitalName }}
+      />
 
       {/* 담당자 선택 모달 */}
       <FieldEngineerSelectModal

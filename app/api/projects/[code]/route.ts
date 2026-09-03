@@ -251,6 +251,15 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   const existing = await prisma.project.findUnique({ where: { projectCode: params.code } })
   if (!existing) return NextResponse.json({ error: '프로젝트를 찾을 수 없습니다.' }, { status: 404 })
 
+  // 출고요청 연결 시 삭제 차단 (FK RESTRICT — stock_out_request_design.md §7)
+  const sorCount = await prisma.stockOutRequest.count({ where: { projectCode: params.code } })
+  if (sorCount > 0) {
+    return NextResponse.json(
+      { error: `이 프로젝트에 출고요청 ${sorCount}건이 연결되어 있어 삭제할 수 없습니다. 출고요청을 먼저 삭제하세요.` },
+      { status: 409 }
+    )
+  }
+
   // Google Calendar 이벤트 삭제 (비차단)
   if (existing.calendarEventId) {
     await deleteCalendarEvent('project', existing.calendarEventId)

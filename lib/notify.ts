@@ -16,6 +16,7 @@ import { Prisma, TicketSeverity, TicketStatus } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getSlackMode, resolveTargetChannel, slackPostMessage, slackLookupUserByEmail } from '@/lib/slack'
 import { FIELD_CATALOG, DEFAULT_FIELDS, TASK_TYPE_LABELS, TASK_TYPES, refTypeToTaskType } from '@/lib/notifyFields'
+import { summarizeStockOutItems } from '@/lib/stockOut'
 import { TICKET_STATUS_LABELS, TICKET_SEVERITY_LABELS, PERSONAL_QUEUE_NAME } from '@/lib/ticket-shared'
 import { resolveChannels, type NotifyRouteEvent, type ResolvedChannel } from '@/lib/notify-routes'
 import { emitNotification, ticketRecipients, queueMemberIds } from '@/lib/notify-center'
@@ -244,7 +245,7 @@ async function buildMentionLine(ch: ResolvedChannel, queueId?: number, queueName
 // 설정 게이트
 // ─────────────────────────────────────────────────────────────
 
-export type TaskType = 'PROJECT' | 'SITE_VISIT' | 'INSTALL_PLAN' | 'MAINTENANCE' | 'ETC' | 'VOC' | 'TICKET'
+export type TaskType = 'PROJECT' | 'SITE_VISIT' | 'INSTALL_PLAN' | 'MAINTENANCE' | 'ETC' | 'VOC' | 'STOCK_OUT' | 'TICKET'
 
 /** 업무 타입별 Slack 사용 여부 (notify_types_enabled, 기본 전부 on). 이벤트·지연·DM 모두 이 게이트 적용 */
 export async function getTypesEnabled(): Promise<Record<TaskType, boolean>> {
@@ -530,6 +531,25 @@ async function enrichTask(taskType: TaskType, refCode: string): Promise<Enriched
       if (v.receivedAt) fv.receivedAt = ymd(v.receivedAt)!
       if (v.resolvedAt) fv.resolvedAt = ymd(v.resolvedAt)!
       return { hospitalName: v.hospital?.hospitalName ?? v.hospitalNameRaw ?? null, title: v.title ?? null, url: `${base}/voc/${v.id}`, fieldValues: fv }
+    }
+    case 'STOCK_OUT': {
+      const r = await prisma.stockOutRequest.findUnique({
+        where: { sorCode: refCode },
+        select: {
+          id: true, requestDate: true, resolvedAt: true,
+          project: { select: { projectName: true, hospital: { select: { hospitalName: true } } } },
+          createdBy: { select: { name: true } },
+          status: { select: { name: true } },
+          items: { select: { quantity: true, item: { select: { name: true } } } },
+        },
+      })
+      if (!r) return null
+      if (r.status?.name) fv.status = r.status.name
+      if (r.requestDate) fv.requestDate = ymd(r.requestDate)!
+      if (r.items.length) fv.items = summarizeStockOutItems(r.items)
+      if (r.createdBy?.name) fv.createdBy = r.createdBy.name
+      if (r.resolvedAt) fv.resolvedAt = ymd(r.resolvedAt)!
+      return { hospitalName: r.project?.hospital?.hospitalName ?? null, title: r.project?.projectName ?? null, url: `${base}/stock-out-requests/${r.id}`, fieldValues: fv }
     }
     case 'TICKET': {
       const t = await prisma.ticket.findUnique({
