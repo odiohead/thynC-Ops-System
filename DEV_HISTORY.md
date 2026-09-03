@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-09-03 | PROD 배포: 출고업무 신규 — 출고요청·출고 처리 (커밋 ec7338a)
+
+- dev2 커밋(ec7338a, 35파일)·push → PROD **사전 전체 덤프**(`~/backups/db/thync_ops_pre_stock_out_20260903_043516.dump`, 17MB) → `git pull`(e208cb1→ec7338a) → `prisma generate` → 힙 4GB 빌드(DB 무접촉) → **`migrate deploy`(2건: stock_out_requests·stock_out_fulfillment) && `pm2 restart thync-prod`** → `seed-stock-out-masters.sql`(멱등 — 상태 5행 매핑 OPEN/IN_PROGRESS/PENDING/CLOSED×2·품목 12종 wms 매핑·규칙 1행·nav 3행) → 검증
+- 스모크: 로컬 `/`·`/stock-out-requests`·`/projects` 307, 외부 HTTPS `/`·`/stock-out-requests` 307, flush 후 에러 로그 0, `migrate status` 최신
+- **후속(사용자)**: 자동생성 규칙의 CTI가 dev 임시(ETC 기본 규칙과 동일 '일반')로 시드됨 — 설정 > 티켓 자동생성 규칙에서 신설한 CTI로 변경(비소급). 자재담당자 처리 권한은 기존 재고 담당자 풀 그대로
+
+---
+
 ## 2026-09-03 | 출고업무 P2 — 출고 처리(자재담당자)·WMS 재고 연동·기기현황 자동 등록 (main, PROD 미반영)
 
 - **요구·결정**(`stock_out_request_design.md` §13): 출고요청을 자재담당자가 처리하면 **재고 자동 차감 + 웨어러블은 기기현황 자동 등록**. 확정: 출고유형 3종 처리 시 선택(판매(대웅)→대웅제약재고·판매(자체)→판매용재고·DEMO/PoC→평가용재고, 전표 유형 판매/영업 매핑) · **부분 출고 없음**(전량 일치 all-or-nothing, 재고 부족 시 출고 불가) · 타 병원 배치 중 시리얼은 **경고·진행 불가**(이관 없음) · 품목 미존재는 '재고 없음' 표시 · 센서 3종은 과도기(WMS 비시리얼·LOT) — **LOT+수량 차감 + 시리얼 선택 기록**(개체 미생성), 라인 모드가 `isSerialManaged` 파생이라 추후 WMS 시리얼 전환 시 코드 수정 없이 시리얼 필수 경로 자동 적용 · MGW1010은 시리얼 스캔(기기현황 등록은 웨어러블 2종만) · 처리 성공 = 상태 자동 '완료'(티켓 CLOSED)
