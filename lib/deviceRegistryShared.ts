@@ -164,7 +164,7 @@ export const REGISTRY_SOURCE_LABELS: Record<RegistrySource, string> = {
 /** 멱등 부분 UNIQUE(ref_type, ref_code, device_id, event_type)가 적용되는 자동 출처 (§4.1-8 — MANUAL은 제외) */
 export const IDEMPOTENT_SOURCES: readonly RegistrySource[] = ['WMS', 'ONPREM']
 
-export const REGISTRY_REF_TYPES = ['MAINTENANCE', 'VOC', 'INVENTORY_TX', 'ONPREM_SYNC'] as const
+export const REGISTRY_REF_TYPES = ['MAINTENANCE', 'VOC', 'INVENTORY_TX', 'ONPREM_SYNC', 'AS'] as const // AS: AS접수(as_receipts) — 2026-09-04 AS업무 도메인
 export type RegistryRefType = (typeof REGISTRY_REF_TYPES)[number]
 
 export const REGISTRY_REF_TYPE_LABELS: Record<RegistryRefType, string> = {
@@ -172,6 +172,7 @@ export const REGISTRY_REF_TYPE_LABELS: Record<RegistryRefType, string> = {
   VOC: 'VOC',
   INVENTORY_TX: '입출고 전표',
   ONPREM_SYNC: '온프렘 동기화',
+  AS: 'AS접수',
 }
 
 /**
@@ -188,6 +189,8 @@ export function refLink(type: RegistryRefType | string | null | undefined, code:
       return `/voc?q=${q}`
     case 'INVENTORY_TX':
       return `/inventory/transactions?code=${q}`
+    case 'AS':
+      return `/as-receipts?q=${q}`
     default:
       return null
   }

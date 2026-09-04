@@ -4,6 +4,46 @@
 
 ---
 
+## 2026-09-04 09:32 | AS업무(AS접수) P1 구현 — 8번째 티켓 도메인 AS·기기현황 연동 (main, 미커밋·PROD 미반영)
+
+- **설계 승인·착수**: `projects/as_work_design.md` §13 검토 요망 5건 전건 제안대로 확정(등록자=접수담당자 갈음·기본 그룹 CS·발송지 라벨 '병원/기타(대웅 등)'·전 라인 종결 시 완료 자동·미등록 라인 기기종류 필드) — 엑셀 이력 마이그는 기능 검증 후 별도(사용자 지시)
+- **DB**: 마이그레이션 `20260904090000_as_receipts` — `as_receipts`(헤더: 병원 필수 FK·category CHECK FAULT/LOST·엑셀 A~Y 매핑 축(접수일·고객명·수거방법/송장/수거일·입고일·선교체·발송지·예상출하일·비고)·AS_STATUS·ticket 1:1) / `as_receipt_items`(기기 라인: UNIQUE(receipt,serial)·device_units 소프트 연결(NULL=미등록)·outcome CHECK 4종·교체기·라인 발송 3필드). psql 직접 적용 후 `migrate resolve --applied`(규칙 1)
+- **티켓 편입(SOP 8번째)**: `lib/ticket-domains/asReceipt.ts` 어댑터(생성·양방향 동기화·배너 — 완료·취소 CLOSED 직행, 제목 `[AS접수·구분] 병원명`) + meta(DOMAIN_REF_TYPES 8종·라벨 'AS접수'·fallbackQueue CS)·registry 등록. TaskType 'AS' — notify union·enrichTask 케이스·notifyFields 카탈로그·TicketRefTypeBadge cyan 톤
+- **기기현황 연동**(`lib/asReceiptService.ts` — 1차 기기현황만, WMS 2차): `REGISTRY_REF_TYPES`에 'AS' 추가(fold `as_ref_code`가 AS 코드도 수용·validateRef AS 검증·refLink `/as-receipts?q=`) · 등록 시 매칭(ACTIVE_HERE만 `openDeviceAs`, 미등록/타 병원/회수/이미 AS중은 경고 스킵) · 라인 결과 확정 `resolveAsLines`(수리반환 `clearDeviceAs`·교체 `replaceDevice`(분실 접수 건 사유 LOST, 실패는 전체 중단)·분실 `recoverDevice(LOST)`·취소, 부분 발송 지원, **전 라인 종결 → 헤더 완료 자동+티켓 CLOSED**) · 라인 편집 `applyItemChanges`(종결 라인 제거 400·제거 라인은 이 접수가 켠 플래그만 해제·추가 라인 표시)
+- **API**: `/api/as-receipts`(GET 필터·POST 단일 트랜잭션+경고 반환) + `match`(매칭 미리보기) + `[id]`(GET/PUT — 진행 기록·라인 편집 / DELETE — 티켓 동반·플래그 해제) + `[id]/resolve-items`(USER+ 전원 — 별도 처리 풀 없음) + 설정 `/api/settings/as-status`(+[id])
+- **화면**: `/as-receipts` 목록(상태·구분·기간·검색, [+ 접수])·`[id]` 상세(기본 정보→진행 기록 인라인 저장→기기 라인 표+라인 처리 패널(교체는 라인별 교체기 시리얼))·`AsReceiptFormModal`(병원 검색→시리얼 [매칭 확인] 미리보기→라인별 증상). 설정 'AS업무 상태 관리'. NavIcons 'repair'. `/devices` AS 접수 모달에 'AS업무 등록 권장' 안내(수동 버튼은 보정용 유지 — 결정 8)
+- **시드** `scripts/seed-as-masters.sql`(멱등 — AS_STATUS 단계형 8종+티켓 매핑, 규칙 기본 행(dev 임시 ETC CTI — PROD는 사용자 신설 CTI로 변경), nav 2행: AS업무 52(유지보수 아래)·설정 59) — dev2 적용
+- **검증**: tsc 0(4GB) · eslint 0 · 스모크 `scripts/as-receipt-smoke.mts` **43/43 pass**(마스터·어댑터 8종·ref 'AS'·생성(코드·티켓·AS 표시·중복 경고)·상태 양방향·라인 처리 4결과(교체 fold·분실 LOST·미등록 경고·완료 자동·종결 후 409)·라인 편집·배너·권한·CASCADE — 테스트 기기·병동·접수 전량 삭제) · **회귀**: stock-out 31/31·cs-workflow 23/23·stock-out-fulfill 23/23·기기현황 서비스 **500/500**·shared **121/121**
+- **부수 정리**: 구식 스모크 기대값 현행화 — stock-out·cs-workflow 어댑터 수 어서션 `>=`로, shared 전이표에 AS_OPEN/AS_CLEAR 열 추가(B-24 이전 작성분)·404 문구 개명 반영(9건 fail은 본 작업 이전부터 존재하던 것)
+- 영향: prisma/{migrations/20260904090000_as_receipts/migration.sql,schema.prisma}, lib/{asReceipt.ts,asReceiptShared.ts,asReceiptService.ts(신규 3),notify.ts,notifyFields.ts,deviceRegistryShared.ts,deviceRegistry/core.ts}, lib/ticket-domains/{asReceipt.ts(신규),meta.ts,registry.ts}, app/api/as-receipts/**(신규 4라우트), app/api/settings/as-status/**(신규), app/as-receipts/**(신규 3), app/settings/as-status/page.tsx(신규), app/components/NavIcons.tsx, app/devices/_components/AsFlagModal.tsx, app/tickets/components/TicketRefTypeBadge.tsx, scripts/{seed-as-masters.sql,as-receipt-smoke.mts(신규),stock-out-smoke.mts,cs-workflow-smoke.mts,smoke-device-registry-shared.mts}, projects/{as_work_design.md,README.md}, README.md, DEV_HISTORY.md
+- **다음**: 사용자 기능 검증(dev2 빌드·재시작은 요청 시) → PROD 반영 → 과거 이력 소급 마이그 트랙
+
+---
+
+## 2026-09-04 08:47 | AS업무(AS접수) 도메인화 — 설계 논의·설계안 작성 (구현 미착수)
+
+- **배경**: thynC AS이력 마이그(3,537행) 착수 전, AS 처리 업무 자체를 시스템 도메인으로 편입하기로 방향 전환(사용자 제안). 엑셀 A~Y 25열 실측 분석(헤더·채움율·고유값 — Y'식별번호'는 실제 비고란, L/R은 송장+방문 텍스트 혼재, 선교체 20%, D열에 '추가 제공' 19·'분실 철회' 18 예외) + 유지보수 도메인 실태(263건/7개월, 라우터·서버·PC 등 인프라 방문 중심) 대조로 경계 확정 — **"기기 실물이 움직이면 AS, 사람이 움직이면 유지보수"**
+- **확정 결정(사용자)**: ① 별도 도메인(8번째 티켓 도메인, 유지보수 불변·자동 파생 없음) ② 수거/발송 방법 플래그(택배/방문 — 단계 일괄 스킵 없음) ③ 과거 이력 전체를 **기능 완료 후** 도메인 레코드로 소급(별도 트랙) ④ WMS 1차 제외(기기현황 연동만) ⑤ 단계형 상태(접수→수거중→입고→처리중→발송→완료 +보류·취소, 선교체 순서 강제 없음) ⑥ 라인 단위 부분 처리(전 라인 종결 시 헤더 완료) ⑦ 미등록 시리얼 경고 후 허용 ⑧ /devices 수동 AS 버튼 유지(보정용) ⑨ 구분 고장/분실 2종('추가 제공' 제외, '분실 철회'는 취소/정정) ⑩ 명칭 nav 'AS업무'/도메인 'AS접수' 이원화
+- **설계안** `projects/as_work_design.md` 신규 — `as_receipts`(헤더)+`as_receipt_items`(기기 라인) 모델, AS_STATUS 8종+티켓 매핑, 기기현황 자동 연동 표(접수 AS_OPEN·수리반환 AS_CLEAR·교체 replaceDevice·분실 recoverDevice, ref 'AS'), 어댑터 SOP 편입 계획, API·화면·시드, 과거 소급 트랙(§11 — 티켓 3,500건 부작용은 소급 시점 결정), 검토 요망 5건(§13)
+- `thync_as_migration_design.md`에 목적지 개정 메모(기기현황 이벤트만 → 도메인 레코드+이벤트) 추가 — 규칙 §3은 그 문서 단일 소스 유지
+- 영향: projects/{as_work_design.md(신규),README.md,thync_as_migration_design.md}, DEV_HISTORY.md — 코드 무변경
+- **다음**: 설계안 사용자 검토·승인(설계 게이트) → P1 구현
+
+---
+
+## 2026-09-03 | 메디인병원 AS이력 마이그레이션 — dev2 리허설 성공 (133/133, PROD 미실행)
+
+- **배경**: `메디인병원_AS이력.xlsx`(79행, 2025-11-20~2026-09-02) 분석(오전 세션 — 판정 '가능')에 따라 기기현황 순차 기록 리허설. 사전에 PROD→dev2 데이터 동기화(신규 덤프 — 04:35 정기백업은 출고업무 마이그 이전 스키마라 부적합, `dev_before_sync_20260903_170124.sql.gz` 백업 생성, 115테이블 TRUNCATE 후 복원)
+- **스크립트** `scripts/migrate-mediin-as-history.mts` (report/apply 2모드, `--file`·`--init-date`): F/N열 줄 단위 시리얼 토큰 추출(비표준 표기·병동 힌트 파싱), **F=N 시리얼 비교로 분류**(L열 불신) — 수리반환 80(AS 접수(A열)→해제(M열)) · 교체 52(AS 접수→`replaceDevice`, 사유 DEFECT/분실 LOST) · AS접수만 1(미완료) · 소급 3(원장에 없음 → 소급 REGISTER/교체 소급 경로). 이벤트 memo '메디인 AS이력 r{행}' 태그 = 재실행 가드 + 추적. 규칙 불일치 행은 자동 처리 없이 수동 확인 목록으로
+- **1차 apply 실패 → 원인 2건 해결**: ① 초기 60대 REGISTER가 입력일(2026-09-02, IMPORT)로 기록돼 있어 그보다 이른 소급 이벤트 전부 불성립 → **fix-init 단계 추가**(태그 없는 초기 REGISTER 60건을 `editEvent`로 일반 딜 계약일 **2025-05-29**로 소급 정정 — 실제 설치일 확인 시 `--init-date`로 교체) ② 혼합 병원(일반+라이트 딜)이라 소급 등록 경로 상품유형 필수 → '일반' 명시. 부분 성공 9건은 `cancelLastEvent` LIFO 루프(취소가 action_group 쌍 단위라 매회 재조회)로 정리 후 재실행
+- **리허설 중 발견·수정 ③**: C열 폴백이 복수 병동 병기(개행 구분)를 통째로 병동명으로 써서 오염 병동 2개 자동 생성(77·79행 소급 경로) → 폴백을 **단일 병동일 때만**으로 수정, 전량 LIFO 취소 후 수정본 재실행(오염 병동 삭제, 해당 소급 2대는 '미지정'으로 — 실물 확인 대상)
+- **결과(dev2, 재실행 최종)**: **133/133 성공** — ACTIVE 60→**63대**(순증 3 = 소급 등록분), AS진행중 1(P020283 — 76행 미완료 접수), 병동 분포 31/32/41/42·응급실·중환자실 + 미지정 2, 이벤트 REGISTER 53·RECOVER 52(불량 50·분실 2)·AS_OPEN 131·AS_CLEAR 80. 샘플 타임라인(P003324→P004165 교체→수리 2회→재교체→09-01 재제공) 정합 확인
+- **규칙 개정(같은 날, 사용자 정의 확인)**: 완료 판정 기준을 N열 존재 → **M열(발송일) 존재**로 교체 — L열 '선교체'는 신기기를 '배정'만 한 상태일 수 있고, M열이 비어 있으면 미발송(O열 미완료와 일치). 미발송 행(76·78·79·80, 기기 8대)은 N과 무관하게 **AS 접수만**(구기기 AS진행중 유지·신기기 미등록, 실발송 시 운영 [교체]로 자연 종결; open-only에도 소급 등록 지원). 전량 취소 후 재실행: **133/133 성공, ACTIVE 63, AS진행중 8**(P020283·P020987·P002346·P003597·P003054·P013428·P017521·P003331), RECOVER 45·REGISTER 46·AS_OPEN 131·AS_CLEAR 80, 미발송 신기기 7종 미등록 확인. 부가: 76행 N열 '46268'은 시리얼이 아니라 날짜(2026-09-14 추정 — 파서가 정상 무시)
+- **PROD 미실행** — 사용자 확인 대기: ① 초기 등록일 2025-05-29(일반 딜 계약일) 소급이 맞는지(실제 설치일 있으면 교체) ② F 미등록 3건(P017521·P017077·P013979) 실물 확인 ③ 확인 후 같은 스크립트를 PROD에서 1회 실행(엑셀 파일 전송 필요)
+- 영향: scripts/migrate-mediin-as-history.mts(신규, 미커밋), DEV_HISTORY.md. dev2 DB는 리허설 적용 상태 유지(화면 확인용)
+
+---
+
 ## 2026-09-03 | PROD 배포: 출고업무 신규 — 출고요청·출고 처리 (커밋 ec7338a)
 
 - dev2 커밋(ec7338a, 35파일)·push → PROD **사전 전체 덤프**(`~/backups/db/thync_ops_pre_stock_out_20260903_043516.dump`, 17MB) → `git pull`(e208cb1→ec7338a) → `prisma generate` → 힙 4GB 빌드(DB 무접촉) → **`migrate deploy`(2건: stock_out_requests·stock_out_fulfillment) && `pm2 restart thync-prod`** → `seed-stock-out-masters.sql`(멱등 — 상태 5행 매핑 OPEN/IN_PROGRESS/PENDING/CLOSED×2·품목 12종 wms 매핑·규칙 1행·nav 3행) → 검증

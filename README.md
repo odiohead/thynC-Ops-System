@@ -104,6 +104,7 @@ app/
 │   │   ├── install-plan-status/      # 설치계획 상태 관리 (2026-07-27 단일 축 — +티켓 상태 매핑)
 │   │   ├── stock-out-status/         # 출고업무 상태 관리 (+티켓 상태 매핑, 2026-09-03)
 │   │   ├── stock-out-items/          # 출고 품목 마스터 CRUD (ADMIN — 출고업무 전용, 사용 중 삭제 409)
+│   │   ├── as-status/                # AS업무 상태 관리 (+티켓 상태 매핑, 2026-09-04)
 │   │   ├── sales-codes/              # 영업 StatusCode 3카테고리 CRUD (화이트리스트·색상, ADMIN)
 │   │   ├── ticket-queues/            # Assignment Group 마스터 CRUD (티켓 있으면 삭제 400)
 │   │   ├── ticket-cti/               # 티켓 분류(CTI) 3단 트리 CRUD + 기본 그룹 지정
@@ -147,6 +148,7 @@ app/
 │   ├── install-plans/                # 설치계획(가안) CRUD
 │   ├── voc-receipts/                 # VOC접수 CRUD (등록 시 CS 마스터 티켓 자동 생성 — 단일 트랜잭션, 생성자 기록)
 │   ├── stock-out-requests/           # 출고요청 CRUD + [id] (등록 시 STOCK_OUT 티켓 자동 생성 — 단일 트랜잭션, 프로젝트 필수 연결)
+│   ├── as-receipts/                  # AS접수 CRUD + match(시리얼 원장 매칭 미리보기) + [id]/resolve-items(라인 결과 확정 — 기기현황 연동) (등록 시 AS 티켓 자동 생성·AS 표시, 2026-09-04)
 │   ├── voc-masters/                  # VOC 접수 채널 조회 (channels)
 │   ├── etc-tasks/                    # 기타업무 CRUD + 파일 관리 (다병원·비유지보수 업무)
 │   ├── inventory/                    # 자재관리(WMS)
@@ -174,6 +176,7 @@ app/
 ├── site-visits/                      # 답사 목록·상세·등록
 ├── voc/                              # VOC 접수 — 목록·등록(new)·상세([id] — 하위 티켓 패널·처리 결과 Tiptap) (CS 워크플로)
 ├── stock-out-requests/               # 출고업무 — 목록·상세([id] — 출고 처리 카드·처리 내역) + _components/{StockOutRequestFormModal(등록·수정),FulfillCard(출고 처리 — P2)}
+├── as-receipts/                      # AS업무 — 목록([+ 접수])·상세([id] — 진행 기록·기기 라인·라인 처리) + _components/AsReceiptFormModal(등록·수정 — 시리얼 매칭 미리보기) (2026-09-04)
 ├── maintenances/                     # 유지보수 목록·상세·등록
 ├── etc-tasks/                        # 기타업무 목록·상세·등록 (다병원·비유지보수 업무)
 ├── tickets/                          # 티켓 목록(Assignment Group 탭·저장된 뷰)·생성(CTI 3단)·상세(전이 액션·타임라인)·dashboard/(P12 지표)
@@ -225,6 +228,7 @@ app/
 │   ├── install-plan-status/          # 설치계획 상태 관리 (WorkflowStatusManager, 2026-07-27)
 │   ├── stock-out-status/             # 출고업무 상태 관리 (WorkflowStatusManager, 2026-09-03)
 │   ├── stock-out-items/              # 출고 품목 관리 (ADMIN 이상 — 출고업무 전용 품목 마스터)
+│   ├── as-status/                # AS업무 상태 관리 (WorkflowStatusManager, 2026-09-04)
 │   ├── sales-codes/                  # 영업 코드 관리 — 7카테고리 (단계·딜 상태·판매모델·세금계산서·정산·활동 유형·직군)
 │   ├── ticket-queues/                # Assignment Group 관리 (이름·설명·순서·활성·티켓 수, 멤버 모달 팀(부서) 단위 일괄 선택)
 │   ├── ticket-cti/                   # 티켓 분류(CTI) 관리 (Category/Type/Item 3컬럼 + Item 기본 Assignment Group 지정)
@@ -285,6 +289,9 @@ lib/
 ├── stockOut.ts                       # 출고요청 — SOR-YYYYMM-NNNN 발번·품목 요약·수정 권한 판정 (2026-09-03)
 ├── stockOutShared.ts                 # 출고 처리 클라 안전 상수 — 출고유형 3종→인벤토리·전표유형·기기 용도 매핑 (P2)
 ├── stockOutFulfill.ts                # 출고 처리 코어 — preview(검증·라인 판정)/execute(WMS 차감+기기현황 등록+완료, 단일 트랜잭션) (P2)
+├── asReceipt.ts                      # AS접수 — AS-YYYYMM-NNNN 발번·수정 권한 판정 (2026-09-04)
+├── asReceiptShared.ts                # AS업무 클라 안전 상수 — 구분·수거/발송 방법·결과·기기종류 라벨·시리얼 파서
+├── asReceiptService.ts               # AS접수↔기기현황 연동 — 시리얼 매칭·AS 표시·라인 편집 반영·라인 결과 확정(수리반환/교체/분실, 완료 자동)
 ├── audit.ts                          # 감사 로그 헬퍼 (logAudit, auditActorFromJWT, redact)
 ├── hospitalStatus.ts                 # 병원 thynC 현황상태 단방향 자동 진행 헬퍼 (advanceHospitalStatus)
 ├── vehicleLog.ts                     # 운행일지 거리 재계산(recalcVehicleLogs) + 주행거리 무결성 검사(checkOdometerConsistency)
@@ -794,6 +801,12 @@ prisma/
 - **StockOutItem** (`stock_out_items`): 출고 품목 마스터(출고업무 전용 — WMS 품목·device_info와 독립) — name UNIQUE · 그룹(SYSTEM 시스템/WEARABLE 웨어러블 디바이스) · **`wmsModelName`**(P2 — 출고 처리 시 `inventory_items.model_name` 매칭 키) · 시드 12종(`scripts/seed-stock-out-masters.sql`), 사용 중 삭제 409 → 비활성
 - **출고 처리 (P2, 2026-09-03 — §13)**: `stock_out_requests.fulfilled_at/fulfilled_by_id`(처리 스탬프 — 이중 처리 가드), `stock_out_request_items.fulfilled_serials`(실출고/과도기 시리얼 기록), `inventory_transactions.stock_out_request_id`(전표↔요청 링크, SET NULL). 처리는 `lib/stockOutFulfill.ts` — 출고유형 3종(판매(대웅)/판매(자체)/DEMO·PoC → 인벤토리 매핑, `lib/stockOutShared.ts` OUT_TYPE_META) · **전량 일치 단일 트랜잭션**(WMS 전표·재고 차감·시리얼 개체 OUT + 웨어러블 기기현황 등록(source WMS·ref INVENTORY_TX·용도 자동) + 상태 '완료'→티켓 CLOSED) · 타 병원 배치 시리얼 차단·부분 출고 없음
 
+### AS업무 — AsReceipt / AsReceiptItem (2026-09-04 — `projects/as_work_design.md`)
+- **AsReceipt** (`as_receipts`): 기기 수리·교체(AS) 접수 — **8번째 티켓 도메인** (refType `AS`, 어댑터 `lib/ticket-domains/asReceipt.ts`) · `asCode`(AS-YYYYMM-NNNN) · `hospitalCode`(필수 FK) · `category`(FAULT 고장/LOST 분실 — CHECK, 2026-09-04 확정 2종) · 엑셀 A~Y 매핑 축: `receiptDate`·`reporterName`(고객명/카카오채널)·수거(`pickupMethod` PARCEL/VISIT·`pickupTrackingNo`·`pickedUpAt`)·`receivedAt`(입고)·`preReplace`(선교체)·발송지(`destType` HOSPITAL/OTHER·`destInfo`)·`expectedShipDate`·`note` · 상태(`AS_STATUS` **단계형 8종**: 접수→OPEN/수거중·입고·처리중·발송→IN_PROGRESS/보류→PENDING/**완료·취소→CLOSED** — 선교체·방문교체가 있어 단계 순서 강제 없음) · `resolvedAt` · `createdById`(등록자 — 담당 배정은 티켓 단독 소유) · `ticketId`(1:1)
+- **AsReceiptItem** (`as_receipt_items`): 기기 라인(1접수:N기기 — UNIQUE(receipt,serial)·CASCADE) — `serialNo`(정규화)·`deviceId`(device_units 소프트 연결, **NULL=미등록 라인** — 경고 후 허용·추후 백필)·`deviceKind`(미등록 라인 기기종류)·`wardName`·`symptom`(기기별 접수사유)·`processNote` · **라인 단위 결과** `outcome`(REPAIR_RETURN 수리반환/REPLACE 교체/LOST 분실종결/CANCELED — CHECK) · 교체기(`newSerialNo`·`newDeviceId`) · 발송(`shipMethod`·`shipTrackingNo`·`shippedAt` — **부분 발송 지원**)
+- **기기현황 연동** (`lib/asReceiptService.ts` — 1차 범위, WMS 전표 제외): 등록 시 라인별 원장 매칭(같은 병원 ACTIVE) → `openDeviceAs`(ref `AS` — `REGISTRY_REF_TYPES` 확장·`as_ref_code` fold) / 라인 결과 확정 시 수리반환 `clearDeviceAs`·교체 `replaceDevice`(분실 접수 건은 사유 LOST)·분실 `recoverDevice(LOST)` / 미등록·이미 AS중은 경고 수집 후 스킵 / **전 라인 종결 → 헤더 '완료' 자동 + 티켓 CLOSED**. 라인 편집 시 제거 라인은 이 접수가 켠 플래그만 해제
+- 마스터 시드: `scripts/seed-as-masters.sql` (idempotent — AS_STATUS 8종+매핑·자동생성 규칙·nav 2행). 스모크: `scripts/as-receipt-smoke.mts` (43항목)
+
 ### SLA 시계 엔진 (1.1 P1 — `projects/notification_v1.1_design.md` §4)
 
 - 1.0의 단일 시계(`dueAt = 생성일 + Sev별 목표일`)를 **정책 × 타깃 × 시계** 3계층으로 재설계. 티켓 1건이 metric별 여러 시계를 동시에 갖는다
@@ -1068,6 +1081,13 @@ prisma/
 - 상태 5종(요청·처리중·보류·완료·취소) 양방향 동기화 — **완료·취소 → 티켓 CLOSED 직행**(RESOLVED 미경유). 수정·삭제는 완료·취소 전 요청자 본인+ADMIN, 이후 ADMIN만. 삭제 시 연결 티켓 동반 삭제
 - 목록(nav '출고업무', 프로젝트 관리 하단)은 조회·처리 중심([+ 등록] 없음). 품목 마스터 `/settings/stock-out-items`(+WMS 모델명 매핑) · 상태 `/settings/stock-out-status`(ADMIN)
 - **출고 처리 (P2, 2026-09-03)**: 상세의 '출고 처리' 카드(재고 담당자/ADMIN) — 출고유형 3택(판매(대웅)/판매(자체)/DEMO·PoC → 인벤토리 자동)→창고→라인 입력(시리얼 스캔/LOT+수량+과도기 시리얼 기록/수량)→검증→실행. **전량 일치 단일 트랜잭션**으로 WMS 재고 차감 + 웨어러블(심전계·산소포화도본체) **기기현황 자동 등록**(용도 판매용/평가용 자동, 타 병원 배치 중이면 차단) + 요청 '완료'(티켓 CLOSED). 처리 내역 카드에 전표 목록(취소 표시)
+
+### AS업무 (`/as-receipts`, 2026-09-04 — `projects/as_work_design.md`)
+- 기기 수리·교체(AS) 업무의 도메인화 — 수기 엑셀 원장(A~Y열, 월 ~220건)을 시스템 업무로 편입 (**8번째 티켓 도메인**, nav 'AS업무'/도메인 'AS접수' 이원화). 경계: **"기기 실물이 움직이면 AS, 사람이 움직이면 유지보수"** — 유지보수 도메인 불변
+- 등록: 목록 [+ 접수] 모달 — 병원 검색 → 구분(고장/분실) → 시리얼 여러 줄 + **[매칭 확인]**(원장 매칭 미리보기 — 원장 연결/미등록/타 병원/회수 배지·경고) → 라인별 증상·기기종류(미등록만). 등록 시 연결 티켓 자동 생성 + 같은 병원 ACTIVE 라인 **AS진행중 표시 자동**(ref AS) — 미등록 시리얼도 경고 후 접수 허용(연동 스킵)
+- 상세: 기본 정보 → **진행 기록**(수거일·입고일·예상 출하일·발송지 — 인라인 저장) → **기기 라인 표 + 라인 처리**(선택 → 수리반환/교체/분실종결/라인취소 + 처리일·발송방법(택배/방문교체)·송장 — **부분 발송 지원**, 교체는 라인별 교체기 시리얼). 처리 시 기기현황 즉시 기록(교체 = 구기기 회수+교체기 등록), **전 라인 종결 시 '완료' 자동**(티켓 CLOSED)
+- 상태 단계형 8종(접수·수거중·입고·처리중·발송·완료·보류·취소 — 선교체 20% 실측 대응, 순서 강제 없음) 티켓 양방향 동기화. 수정·삭제는 완료·취소 전 등록자 본인+ADMIN·이후 ADMIN, 라인 처리는 USER 이상 전원(별도 풀 없음). 삭제 시 티켓 동반 + 이 접수가 켠 AS 표시 해제(기록 이벤트는 보존)
+- 상태 마스터 `/settings/as-status`(ADMIN). 기기현황(/devices) 수동 [AS 접수] 버튼은 보정·이력 소급용으로 유지(모달에 AS업무 등록 권장 안내). 과거 AS이력 3,537행 소급은 기능 검증 후 별도 트랙(`thync_as_migration_design.md`)
 
 ### 설치계획(가안) 관리
 - 설치계획(가안) 등록·수정·삭제 (삭제는 ADMIN 이상)
@@ -1697,6 +1717,19 @@ npm run dev
 | POST | `/api/stock-out-requests/[id]/fulfill` (+`?preview=true`) | 출고 처리 (P2 — `canManageStock`) — 검증/실행: WMS 차감+기기현황 등록+완료, 전량 일치 |
 | GET/POST | `/api/settings/stock-out-status` (+`[id]` PUT/DELETE) | 출고업무 상태 관리 (+티켓 상태 매핑 필수) |
 | GET/POST | `/api/settings/stock-out-items` (+`[id]` PUT/DELETE) | 출고 품목 마스터 (쓰기 ADMIN — 사용 중 삭제 409) |
+
+### AS업무 (2026-09-04 — 조회 로그인 전원 / 쓰기 USER 이상, 수정·삭제는 완료·취소 전 본인+ADMIN·이후 ADMIN, 라인 처리는 USER 이상 전원)
+
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET | `/api/as-receipts` | 목록 (statusId·category·hospitalCode·접수일 기간·q(코드·병원·시리얼)·페이징) |
+| POST | `/api/as-receipts` | 등록 — 병원·접수일·시리얼 라인 ≥1 (레코드+라인+티켓+AS 표시 단일 트랜잭션, 경고 배열 반환) |
+| POST | `/api/as-receipts/match` | 시리얼 원장 매칭 미리보기 (등록 폼 — ACTIVE_HERE/ACTIVE_OTHER/RECOVERED/NONE) |
+| GET | `/api/as-receipts/[id]` | 상세 (기기 라인·원장 배치 상태·연결 티켓 포함) |
+| PUT | `/api/as-receipts/[id]` | 수정 — 헤더·진행 기록·상태(어댑터 동기화)·라인 편집(종결 라인 제거 400, 제거 라인 플래그 해제·추가 라인 AS 표시) |
+| DELETE | `/api/as-receipts/[id]` | 삭제 — 티켓 동반, 이 접수가 켠 AS 표시 해제(이벤트 보존) |
+| POST | `/api/as-receipts/[id]/resolve-items` | 라인 결과 확정 — 수리반환/교체/분실종결/라인취소 + 부분 발송, 전 라인 종결 시 완료 자동 |
+| GET/POST | `/api/settings/as-status` (+`[id]` PUT/DELETE) | AS업무 상태 관리 (+티켓 상태 매핑 필수) |
 
 ### CS 워크플로 — VOC접수 (2026-08-15 — `projects/cs_ticket_workflow_design.md`, 콜기록지는 같은 날 사용자 결정으로 제거)
 | Method | Endpoint | 설명 |

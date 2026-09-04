@@ -112,6 +112,9 @@ function AsFlagForm({ onClose, devices, deviceIds, hospitalCode, today: todayPro
           </>
         )}
         <div className="mt-1 text-muted-foreground">AS진행중은 배치 중(ACTIVE) 기기의 표시 플래그입니다 — 교체·회수를 기록하면 자동으로 해제됩니다.{!single && ' 유지보수 코드·업무일자는 전 대상에 함께 기록됩니다.'}</div>
+        <div className="mt-1 text-muted-foreground">
+          일상 AS 처리는 <a href="/as-receipts" className="underline hover:no-underline">AS업무 등록</a>을 권장합니다 — 이 버튼은 보정·이력 소급용입니다.
+        </div>
       </Notice>
 
       <FormField label="유지보수 코드" htmlFor="as-ref" hint="선택 — 연결하면 업무일자를 제안값으로 채우고 드로어에서 MNT 링크로 보입니다">

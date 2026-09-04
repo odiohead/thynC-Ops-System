@@ -253,6 +253,11 @@ export async function validateRef(
     if (!m) throw new RegistryError(400, `유지보수 코드를 찾을 수 없습니다: ${code}`)
     if (hospitalCode && m.hospitalCode !== hospitalCode) warnings.push(`다른 병원으로 기록된 유지보수 건입니다 (${code})`)
   }
+  if (ref.type === 'AS') {
+    const r = await client.asReceipt.findUnique({ where: { asCode: code }, select: { hospitalCode: true } })
+    if (!r) throw new RegistryError(400, `AS접수 코드를 찾을 수 없습니다: ${code}`)
+    if (hospitalCode && r.hospitalCode !== hospitalCode) warnings.push(`다른 병원으로 기록된 AS접수 건입니다 (${code})`)
+  }
   return { ref: { type: ref.type, code }, warnings }
 }
 
@@ -461,7 +466,7 @@ export function foldEvents(events: readonly FoldEvent[], illegal: (ev: FoldEvent
         break
       case 'AS_OPEN':
         // 비상태 표시 이벤트(B-24) — 플래그만 접고 last_event·stateEventCount 미반영(CORRECT 규약과 동일)
-        s = { ...s, asStartedOn: on, asRefCode: ev.refType === 'MAINTENANCE' ? (ev.refCode ?? null) : null }
+        s = { ...s, asStartedOn: on, asRefCode: ev.refType === 'MAINTENANCE' || ev.refType === 'AS' ? (ev.refCode ?? null) : null } // AS = AS접수 코드(2026-09-04)
         continue
       case 'AS_CLEAR':
         s = { ...s, asStartedOn: null, asRefCode: null }

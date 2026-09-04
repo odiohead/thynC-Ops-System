@@ -245,7 +245,7 @@ async function buildMentionLine(ch: ResolvedChannel, queueId?: number, queueName
 // 설정 게이트
 // ─────────────────────────────────────────────────────────────
 
-export type TaskType = 'PROJECT' | 'SITE_VISIT' | 'INSTALL_PLAN' | 'MAINTENANCE' | 'ETC' | 'VOC' | 'STOCK_OUT' | 'TICKET'
+export type TaskType = 'PROJECT' | 'SITE_VISIT' | 'INSTALL_PLAN' | 'MAINTENANCE' | 'ETC' | 'VOC' | 'STOCK_OUT' | 'AS' | 'TICKET'
 
 /** 업무 타입별 Slack 사용 여부 (notify_types_enabled, 기본 전부 on). 이벤트·지연·DM 모두 이 게이트 적용 */
 export async function getTypesEnabled(): Promise<Record<TaskType, boolean>> {
@@ -550,6 +550,26 @@ async function enrichTask(taskType: TaskType, refCode: string): Promise<Enriched
       if (r.createdBy?.name) fv.createdBy = r.createdBy.name
       if (r.resolvedAt) fv.resolvedAt = ymd(r.resolvedAt)!
       return { hospitalName: r.project?.hospital?.hospitalName ?? null, title: r.project?.projectName ?? null, url: `${base}/stock-out-requests/${r.id}`, fieldValues: fv }
+    }
+    case 'AS': {
+      const r = await prisma.asReceipt.findUnique({
+        where: { asCode: refCode },
+        select: {
+          id: true, category: true, receiptDate: true, resolvedAt: true,
+          hospital: { select: { hospitalName: true } },
+          createdBy: { select: { name: true } },
+          status: { select: { name: true } },
+          items: { select: { outcome: true } },
+        },
+      })
+      if (!r) return null
+      if (r.status?.name) fv.status = r.status.name
+      fv.category = r.category === 'LOST' ? '분실' : '고장'
+      if (r.receiptDate) fv.receiptDate = ymd(r.receiptDate)!
+      if (r.items.length) fv.items = `기기 ${r.items.length}대`
+      if (r.createdBy?.name) fv.createdBy = r.createdBy.name
+      if (r.resolvedAt) fv.resolvedAt = ymd(r.resolvedAt)!
+      return { hospitalName: r.hospital?.hospitalName ?? null, title: `AS접수 기기 ${r.items.length}대`, url: `${base}/as-receipts/${r.id}`, fieldValues: fv }
     }
     case 'TICKET': {
       const t = await prisma.ticket.findUnique({

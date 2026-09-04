@@ -20,6 +20,7 @@ import { installPlanAdapter } from './installPlan'
 import { projectAdapter } from './project'
 import { vocAdapter } from './voc'
 import { stockOutAdapter } from './stockOut'
+import { asReceiptAdapter } from './asReceipt'
 
 export const TICKET_DOMAIN_ADAPTERS: Record<DomainRefType, TicketDomainAdapter> = {
   MAINTENANCE: maintenanceAdapter,
@@ -29,6 +30,7 @@ export const TICKET_DOMAIN_ADAPTERS: Record<DomainRefType, TicketDomainAdapter> 
   PROJECT: projectAdapter,
   VOC: vocAdapter,
   STOCK_OUT: stockOutAdapter,
+  AS: asReceiptAdapter,
 }
 
 export function getDomainAdapter(refType: string | null | undefined): TicketDomainAdapter | null {

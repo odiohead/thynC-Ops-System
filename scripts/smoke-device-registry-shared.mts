@@ -113,12 +113,12 @@ eq('전각 공백 제거', normalizeWardName('6　병동'), '6병동')
 eq('앞뒤 공백·탭', normalizeWardName('\t 101 병동 \n'), '101병동')
 eq('빈 값', normalizeWardName(null), '')
 
-console.log('\n[6] 전이표 (§4.2) — 16셀')
+console.log('\n[6] 전이표 (§4.2) — 24셀 (2026-09-04 갱신: B-24 AS_OPEN/AS_CLEAR 열 추가 — ACTIVE_SAME만 ok)')
 const expected: Record<TransitionFrom, Record<(typeof DEVICE_EVENT_TYPES)[number], TransitionOutcome>> = {
-  NONE: { REGISTER: 'ok', MOVE_WARD: 'not_found', RECOVER: 'not_found', CORRECT: 'not_found' },
-  ACTIVE_SAME: { REGISTER: 'skip', MOVE_WARD: 'ok', RECOVER: 'ok', CORRECT: 'ok' },
-  ACTIVE_OTHER: { REGISTER: 'conflict', MOVE_WARD: 'conflict', RECOVER: 'conflict', CORRECT: 'ok' },
-  RECOVERED: { REGISTER: 'ok', MOVE_WARD: 'invalid', RECOVER: 'invalid', CORRECT: 'ok' },
+  NONE: { REGISTER: 'ok', MOVE_WARD: 'not_found', RECOVER: 'not_found', CORRECT: 'not_found', AS_OPEN: 'not_found', AS_CLEAR: 'not_found' },
+  ACTIVE_SAME: { REGISTER: 'skip', MOVE_WARD: 'ok', RECOVER: 'ok', CORRECT: 'ok', AS_OPEN: 'ok', AS_CLEAR: 'ok' },
+  ACTIVE_OTHER: { REGISTER: 'conflict', MOVE_WARD: 'conflict', RECOVER: 'conflict', CORRECT: 'ok', AS_OPEN: 'conflict', AS_CLEAR: 'conflict' },
+  RECOVERED: { REGISTER: 'ok', MOVE_WARD: 'invalid', RECOVER: 'invalid', CORRECT: 'ok', AS_OPEN: 'invalid', AS_CLEAR: 'invalid' },
 }
 for (const from of Object.keys(expected) as TransitionFrom[]) {
   for (const ev of DEVICE_EVENT_TYPES) {
@@ -143,7 +143,7 @@ eq('transitionOutcome(RECOVERED, MOVE_WARD) = invalid', transitionOutcome('RECOV
 check('transitionMessage ok → null', transitionMessage('NONE', 'REGISTER') === null)
 check('transitionMessage skip 문구', transitionMessage('ACTIVE_SAME', 'REGISTER') === '이미 이 병원에 배치 중인 시리얼입니다')
 check('transitionMessage 이미 회수', transitionMessage('RECOVERED', 'RECOVER') === '이미 회수된 기기입니다')
-check('transitionMessage 404 문구', (transitionMessage('NONE', 'RECOVER') ?? '').includes('원장에 없는'))
+check('transitionMessage 404 문구', (transitionMessage('NONE', 'RECOVER') ?? '').includes('등록되지 않은')) // 2026-09-02 '기기 현황' 개명 문구
 
 console.log('\n[7] refLink')
 eq('MAINTENANCE', refLink('MAINTENANCE', 'MNT-202605-0047'), '/maintenances?search=MNT-202605-0047')

@@ -77,6 +77,7 @@ model Hospital {
   servers               HospitalServer[]
   emrInfo               HospitalEmrInfo?
   vocReceipts           VocReceipt[]
+  asReceipts            AsReceipt[]
   projects              Project[]
   meta                  HospitalMeta?
   hospitalDevices       HospitalDevice[]             @relation("DeviceCurrentHospital") // 현재 배치 중 개체 (원장, 2026-09-01)
@@ -174,6 +175,7 @@ model StatusCode {
   deviceEventReasons     HospitalDeviceEvent[]  @relation("DeviceEventReason")   // DEVICE_RECOVERY_REASON (RECOVER 이벤트)
   deviceUsageUnits       DeviceUnit[]           @relation("DeviceUsageType")     // DEVICE_USAGE_TYPE (유닛 용도: SALE/EVAL)
   stockOutStatuses       StockOutRequest[]      @relation("StockOutStatus")      // STOCK_OUT_STATUS (출고요청 상태)
+  asReceiptStatuses      AsReceipt[]            @relation("AsReceiptStatus")     // AS_STATUS (AS접수 상태)
 
   @@unique([name, category])
   @@map("status_codes")
@@ -318,6 +320,7 @@ model User {
   ticketQueueMemberships    TicketQueueMember[]          @relation("TicketQueueMemberUser")
   ticketCtiRuleUpdates      TicketDomainCtiRule[]        @relation("CtiRuleUpdater")
   vocReceiptsCreated        VocReceipt[]                 @relation("VocCreator")
+  asReceiptsCreated         AsReceipt[]                  @relation("AsReceiptCreator")
   stockOutRequestsCreated   StockOutRequest[]            @relation("StockOutCreator")
   stockOutRequestsFulfilled StockOutRequest[]            @relation("StockOutFulfiller")
   salesActivities           SalesActivity[]              @relation("SalesActivityAuthor")
@@ -523,6 +526,8 @@ model DeviceUnit {
   replacedPlacements HospitalDevice[] @relation("DeviceReplacement") // 이 유닛이 교체기로 들어간 구기기 프로젝션들(replaced_by_id)
   events       HospitalDeviceEvent[] @relation("DeviceEvents")
   relatedEvents HospitalDeviceEvent[] @relation("EventRelatedDevice")
+  asReceiptItems AsReceiptItem[]      @relation("AsItemDevice")       // AS접수 라인(구기기) — 소프트 연결
+  asReceiptNewItems AsReceiptItem[]   @relation("AsItemNewDevice")    // AS접수 라인(교체기)
 
   @@index([deviceInfoId])
   @@index([usageTypeId])
@@ -2134,6 +2139,72 @@ model StockOutRequestItem {
   @@schema("public")
 }
 
+model AsReceipt {
+  id               Int       @id @default(autoincrement())
+  asCode           String    @unique @map("as_code") @db.VarChar(20) // AS-YYYYMM-NNNN
+  hospitalCode     String    @map("hospital_code")
+  category         String    @default("FAULT") // FAULT 고장 / LOST 분실 (SQL CHECK — 2026-09-04 확정 2종)
+  receiptDate      DateTime  @map("receipt_date") @db.Date // 접수일 (엑셀 A열)
+  reporterName     String?   @map("reporter_name") // 고객명/카카오채널명 (J열, 자유 텍스트)
+  pickupMethod     String?   @map("pickup_method") // PARCEL 택배수거 / VISIT 방문수거 (SQL CHECK)
+  pickupTrackingNo String?   @map("pickup_tracking_no") // 수거 송장
+  pickedUpAt       DateTime? @map("picked_up_at") @db.Date // 수거일 (M열)
+  receivedAt       DateTime? @map("received_at") @db.Date // 입고일 (N열)
+  preReplace       Boolean   @default(false) @map("pre_replace") // 선교체요청 (P열)
+  destType         String?   @map("dest_type") // HOSPITAL 병원 / OTHER 기타(대웅 등) (S열, SQL CHECK)
+  destInfo         String?   @map("dest_info") @db.Text // 발송지 정보 (T열)
+  expectedShipDate DateTime? @map("expected_ship_date") @db.Date // 예상 출하일 (U열)
+  statusId         Int?      @map("status_id") // AS_STATUS (+ticket_status 매핑 필수 — 단계형 8종)
+  statusChangedAt  DateTime? @default(now()) @map("status_changed_at")
+  note             String?   @db.Text // 비고 (Y열 — 실측상 자유 메모란)
+  resolvedAt       DateTime? @map("resolved_at") @db.Date // 종결 버킷(완료·취소) 진입 시 자동
+  createdById      String?   @map("created_by_id") // 등록자(접수담당자 K열 대응 — 담당 배정은 티켓 단독 소유)
+  ticketId         Int?      @unique @map("ticket_id") // 도메인 1:1 연결 티켓
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  hospital  Hospital        @relation(fields: [hospitalCode], references: [hospitalCode])
+  status    StatusCode?     @relation("AsReceiptStatus", fields: [statusId], references: [id], onDelete: SetNull)
+  createdBy User?           @relation("AsReceiptCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  ticket    Ticket?         @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  items     AsReceiptItem[]
+
+  @@index([hospitalCode])
+  @@index([statusId])
+  @@index([receiptDate])
+  @@index([createdAt])
+  @@map("as_receipts")
+  @@schema("public")
+}
+
+model AsReceiptItem {
+  id             Int       @id @default(autoincrement())
+  receiptId      Int       @map("receipt_id")
+  serialNo       String    @map("serial_no") // 정규화(대문자) 시리얼 — UNIQUE(receipt, serial)
+  deviceId       Int?      @map("device_id") // device_units.id — NULL = 미등록 라인 (경고 후 허용)
+  newDeviceId    Int?      @map("new_device_id") // 교체기 원장 개체 (REPLACE 처리 결과)
+  deviceKind     String?   @map("device_kind") // 미등록 라인 기기종류(통계용 — 원장 연결 라인은 모델 파생)
+  wardName       String?   @map("ward_name") // 병동 힌트(표시용 — 원장 연결 시 원장 병동 우선)
+  symptom        String?   @db.Text // 접수사유 (I열, 기기별)
+  processNote    String?   @map("process_note") @db.Text // 처리내용 (Q열, 기기별)
+  outcome        String? // NULL 진행 / REPAIR_RETURN 수리반환 / REPLACE 교체 / LOST 분실종결 / CANCELED 라인취소 (SQL CHECK)
+  newSerialNo    String?   @map("new_serial_no") // 교체 발송기기 (W열, REPLACE 필수)
+  shipMethod     String?   @map("ship_method") // PARCEL 택배 / VISIT 방문 (SQL CHECK)
+  shipTrackingNo String?   @map("ship_tracking_no")
+  shippedAt      DateTime? @map("shipped_at") @db.Date // 발송·교체일 (V열 — 라인 단위 부분 발송)
+
+  receipt   AsReceipt   @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  device    DeviceUnit? @relation("AsItemDevice", fields: [deviceId], references: [id], onDelete: SetNull)
+  newDevice DeviceUnit? @relation("AsItemNewDevice", fields: [newDeviceId], references: [id], onDelete: SetNull)
+
+  @@unique([receiptId, serialNo])
+  @@index([deviceId])
+  @@index([newDeviceId])
+  @@index([serialNo])
+  @@map("as_receipt_items")
+  @@schema("public")
+}
+
 model TicketPendingReason {
   id          Int          @id @default(autoincrement())
   name        String       @unique
@@ -2190,6 +2261,7 @@ model Ticket {
   project         Project?
   voc             VocReceipt?
   stockOutRequest StockOutRequest?
+  asReceipt       AsReceipt?
 
   @@index([queueId, status])
   @@index([parentId])

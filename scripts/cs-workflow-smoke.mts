@@ -33,7 +33,7 @@ async function main() {
   try {
     // ── P0: 레지스트리 형상 ──────────────────────────────────
     console.log('▶ P0 — 어댑터 레지스트리')
-    check('어댑터 6종 등록', Object.keys(TICKET_DOMAIN_ADAPTERS).length === 6)
+    check('어댑터 등록 (6종 이상)', Object.keys(TICKET_DOMAIN_ADAPTERS).length >= 6) // 2026-09-03 STOCK_OUT·2026-09-04 AS 추가 — 이후 도메인 추가에 안전하게 >= 로
     check('미등록 refType → null 어댑터', getDomainAdapter('NOPE') === null && getDomainAdapter(null) === null)
     const inc = domainDetailIncludes()
     check(

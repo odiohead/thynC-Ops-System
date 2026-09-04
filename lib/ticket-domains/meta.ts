@@ -11,7 +11,7 @@
  */
 
 /** 도메인 연결 유형 — tickets.ref_type과 동일 값 (구 lib/ticketCtiRules.ts에서 이동) */
-export const DOMAIN_REF_TYPES = ['SITE_VISIT', 'INSTALL_PLAN', 'PROJECT', 'ETC', 'MAINTENANCE', 'VOC', 'STOCK_OUT'] as const
+export const DOMAIN_REF_TYPES = ['SITE_VISIT', 'INSTALL_PLAN', 'PROJECT', 'ETC', 'MAINTENANCE', 'VOC', 'STOCK_OUT', 'AS'] as const
 export type DomainRefType = (typeof DOMAIN_REF_TYPES)[number]
 
 export function isDomainRefType(v: unknown): v is DomainRefType {
@@ -22,7 +22,7 @@ export function isDomainRefType(v: unknown): v is DomainRefType {
 export const PURE_TICKET_LABEL = '순수 티켓'
 
 /** 알림 업무 타입 (lib/notify.ts TaskType과 동일 값 집합 — 순환 import 방지를 위해 여기서 문자열로 보관) */
-export type DomainTaskType = 'PROJECT' | 'SITE_VISIT' | 'INSTALL_PLAN' | 'MAINTENANCE' | 'ETC' | 'VOC' | 'STOCK_OUT'
+export type DomainTaskType = 'PROJECT' | 'SITE_VISIT' | 'INSTALL_PLAN' | 'MAINTENANCE' | 'ETC' | 'VOC' | 'STOCK_OUT' | 'AS'
 
 export interface TicketDomainMeta {
   /** 사람용 라벨 (배지·필터·설정 화면 공용) */
@@ -146,6 +146,21 @@ export const TICKET_DOMAIN_META: Record<DomainRefType, TicketDomainMeta> = {
     fallbackQueueName: '내부운영',
     taskType: 'STOCK_OUT',
     statusCategory: 'STOCK_OUT_STATUS',
+  },
+  // 8번째 도메인 (as_work_design.md) — 기기 수리·교체(AS) 업무.
+  // nav 표기는 'AS업무', 도메인 라벨은 'AS접수' (2026-09-04 승인 — 라벨 이원화).
+  AS: {
+    label: 'AS접수',
+    listPath: '/as-receipts',
+    detailHref: (r) => `/as-receipts/${r.id}`,
+    codePrefix: 'AS',
+    descriptionSource: '접수사유',
+    descriptionIsHtml: false,
+    matchCategory: null,
+    matchLabel: null,
+    fallbackQueueName: 'CS',
+    taskType: 'AS',
+    statusCategory: 'AS_STATUS',
   },
 }
 

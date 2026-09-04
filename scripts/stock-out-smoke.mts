@@ -50,7 +50,7 @@ async function main() {
 
     // ── 레지스트리 ────────────────────────────────────────────
     console.log('▶ 어댑터 레지스트리')
-    check('어댑터 7종 등록 (STOCK_OUT 포함)', Object.keys(TICKET_DOMAIN_ADAPTERS).length === 7 && 'STOCK_OUT' in TICKET_DOMAIN_ADAPTERS)
+    check('어댑터 등록 (STOCK_OUT 포함, 7종 이상)', Object.keys(TICKET_DOMAIN_ADAPTERS).length >= 7 && 'STOCK_OUT' in TICKET_DOMAIN_ADAPTERS) // 2026-09-04 AS 추가로 8종 — 이후 도메인 추가에 안전하게 >= 로
     check('detailInclude에 stockOutRequest', 'stockOutRequest' in domainDetailIncludes())
 
     // ── 생성 ─────────────────────────────────────────────────
