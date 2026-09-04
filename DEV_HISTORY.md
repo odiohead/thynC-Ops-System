@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-09-04 09:52 | PROD 배포: AS업무 신규 — 8번째 티켓 도메인 AS (커밋 990c0d2)
+
+- dev2 커밋 2건(c7656a4 메디인 마이그 문서·스크립트, 990c0d2 AS업무 33파일)·push → PROD **사전 전체 덤프**(`~/backups/db/thync_ops_pre_as_work_20260904_004601.dump`, 16MB) → `git pull`(ec7338a→990c0d2) → `prisma generate` → 힙 4GB 빌드(DB 무접촉) → **`migrate deploy`(1건: as_receipts) && `pm2 restart thync-prod`** → `seed-as-masters.sql`(멱등 — AS_STATUS 단계형 8행 매핑·규칙 1행(dev 임시 ETC CTI '일반')·nav 2행) → 검증
+- 스모크: `migrate status` 최신, 로컬 `/`·`/as-receipts`·`/settings/as-status` 307, 외부 HTTPS `/as-receipts` 307, flush 후 에러 로그 0
+- **샘플 데이터(사용자 승인 — PROD 즉시 사용 아님)**: 곡성사랑병원(HOSP-000013, 원장·딜 무존재 확인 후) 기기 6대(SMP0001~6, 심전계, 3/5병동) + AS접수 3건 — ① AS-202609-0001 고장 접수 3라인(미등록 1, TK-202609-00028 OPEN) ② AS-202609-0002 고장 처리중(선교체·수거/입고 기록·1/2 수리반환 발송, TK-…-00029 IN_PROGRESS) ③ AS-202609-0003 분실 완료(자동 완료, TK-…-00030 CLOSED). 일회용 스크립트는 실행 후 삭제
+- 빌드 이슈 1건(dev2에서 선수정): `/as-receipts` 목록의 `useSearchParams()` Suspense 경계 누락 → tickets/new 관례로 래핑(990c0d2에 포함)
+- **후속(사용자)**: ① 자동생성 규칙 CTI가 dev 임시(ETC '일반')로 시드됨 — 설정 > 티켓 자동생성 규칙에서 AS용 CTI 신설·변경(비소급, SOR 선례) ② 검증 완료 후 곡성사랑 샘플 정리 요청 ③ 과거 AS이력 3,537행 소급 마이그는 기능 검증 후 착수
+
+---
+
 ## 2026-09-04 09:32 | AS업무(AS접수) P1 구현 — 8번째 티켓 도메인 AS·기기현황 연동 (main, 미커밋·PROD 미반영)
 
 - **설계 승인·착수**: `projects/as_work_design.md` §13 검토 요망 5건 전건 제안대로 확정(등록자=접수담당자 갈음·기본 그룹 CS·발송지 라벨 '병원/기타(대웅 등)'·전 라인 종결 시 완료 자동·미등록 라인 기기종류 필드) — 엑셀 이력 마이그는 기능 검증 후 별도(사용자 지시)

@@ -27,7 +27,7 @@
 | [hospital_device_registry_brief.md](hospital_device_registry_brief.md) | **참조 문서** (설계안 아님) — 위 설계의 조사 원문: 기존 기기 수량 계층·WMS 시리얼 개체·AS 기록 실태·온프렘 `device_register`/API 검증·플랫폼 규약·데이터 규모 | 참조용 (2026-09-01 작성) |
 | [stock_out_request_design.md](stock_out_request_design.md) | 출고업무(출고요청) — 프로젝트 필수 연결 도메인 레코드(`SOR-`)+메인 티켓 자동 생성(7번째 도메인, refType `STOCK_OUT`), 품목 마스터 12종×수량 라인, 프로젝트 상세 팝업 등록, 상태 5종(요청·처리중·보류·완료·취소 — 완료·취소는 티켓 CLOSED 직행) | **P1·P2 구현 완료 (dev2, 2026-09-03) — PROD 미반영** (P2: 출고 처리·WMS 차감·기기현황 자동 등록 §13) |
 | [thync_as_migration_design.md](thync_as_migration_design.md) | thynC AS이력(수기 엑셀 원장 3,537행·174병원) → 기기현황 마이그 — X열 완료 판정·오입력 자동 보정 3종·88건 충돌 절충·병원별 단계 적용(초기必 검증 게이트). 메디인 리허설 완료(dev2) | **설계 확정 — 일반화 스크립트 구현 대기** |
-| [as_work_design.md](as_work_design.md) | AS업무(AS접수) — 기기 수리·교체 업무 도메인화(8번째 티켓 도메인, refType `AS`): 헤더+기기 라인 구조, 단계형 상태 8종(완료·취소 티켓 CLOSED 직행), 기기현황 자동 연동(AS_OPEN·교체·회수), WMS 1차 제외, 과거 이력 3,537행은 기능 완료 후 도메인 소급 | **P1 구현 완료 (dev2, 2026-09-04) — 기능 검증·PROD 반영 대기** |
+| [as_work_design.md](as_work_design.md) | AS업무(AS접수) — 기기 수리·교체 업무 도메인화(8번째 티켓 도메인, refType `AS`): 헤더+기기 라인 구조, 단계형 상태 8종(완료·취소 티켓 CLOSED 직행), 기기현황 자동 연동(AS_OPEN·교체·회수), WMS 1차 제외, 과거 이력 3,537행은 기능 완료 후 도메인 소급 | **완료 (PROD 배포 2026-09-04, 커밋 990c0d2)** — 후속: PROD CTI 규칙 사용자 신설·과거 이력 소급 마이그 |
 
 ## 루트에 남아 있는 1.0 문서
 
