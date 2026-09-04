@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-09-04 10:28 | 메디인 AS이력 → AS접수 도메인 마이그 리허설 성공 (dev2, 79/79 — PROD 미실행)
+
+- **배경**: AS업무 도메인 신설(990c0d2)로 마이그 목적지가 'AS접수 도메인 레코드 + 기기현황 이벤트'로 변경됨(설계 §11) — 기존 dev2 리허설(기기현황 이벤트만, 태그 302건)을 되돌리고 도메인 경유로 재실행
+- **신규 스크립트** `scripts/migrate-mediin-as-domain.mts`(report/rollback-events/apply, 미커밋): 파싱·분류 규칙은 구 스크립트와 동일(F/N 쌍·M열 완료 판정·C열 단일 병동 폴백·소급 판정), 실행만 도메인 서비스로 — 행=AS접수 1건(코드 **접수월 기반** AS-YYYYMM-NNNN, createdAt·티켓 createdAt 접수일 소급 via backfill), 라인=기기(수리반환/교체/AS접수만/분실), 소급 라인은 접수일 REGISTER(memo 태그) 후 정상 경로, 처리 는 `resolveAsLines` 재사용(전 라인 종결 시 완료 자동+티켓 CLOSED 소급)
+- **rollback-events**: 구 태그 이벤트 302건 → `cancelLastEvent` LIFO 257회(action_group 쌍 단위)로 전량 취소 — 초기 60대 REGISTER·fix-init(2025-05-29)은 무접촉, ACTIVE 60·AS진행중 0 복원 확인
+- **apply 결과(79/79·라인 133·실패 0)**: AS접수 79(완료 75·접수 4 — 미발송 행 76·78·79·80) · 티켓 79(CLOSED 75·OPEN 4) · ACTIVE 63(소급 3 순증) · **AS진행중 8 — 구 리허설과 동일 시리얼**(P020283·P020987·P002346·P003597·P003054·P013428·P017521·P003331) · ref AS 이벤트 AS_OPEN 133·AS_CLEAR 80·RECOVER 45·REGISTER 45(+소급 REGISTER 3 memo 태그). 경고 23건은 전부 '신 기기 재등록 이력 연결'(정상 — 수리 후 재투입 순환)
+- 구 대비 개선: AS_OPEN 131→133(소급 교체 라인도 접수 표시 기록), 소급 REGISTER 일자 발송일→접수일(실물 존재 시점 정합)
+- 영향: scripts/migrate-mediin-as-domain.mts(신규, 미커밋), projects/thync_as_migration_design.md(§5 갱신), DEV_HISTORY.md. dev2 DB는 도메인 리허설 적용 상태 유지(화면 확인용)
+- **PROD 미실행 — 기존 확인 2건 유지**: ① 초기 등록일 2025-05-29(일반 딜 계약일) 소급 확정 ② 소급 3건(P017521·P017077·P013979) 실물 확인. 다음: 화면 검증 → 마스터(3,537행) 일반화 스크립트(이 스크립트가 원형)
+
+---
+
 ## 2026-09-04 09:52 | PROD 배포: AS업무 신규 — 8번째 티켓 도메인 AS (커밋 990c0d2)
 
 - dev2 커밋 2건(c7656a4 메디인 마이그 문서·스크립트, 990c0d2 AS업무 33파일)·push → PROD **사전 전체 덤프**(`~/backups/db/thync_ops_pre_as_work_20260904_004601.dump`, 16MB) → `git pull`(ec7338a→990c0d2) → `prisma generate` → 힙 4GB 빌드(DB 무접촉) → **`migrate deploy`(1건: as_receipts) && `pm2 restart thync-prod`** → `seed-as-masters.sql`(멱등 — AS_STATUS 단계형 8행 매핑·규칙 1행(dev 임시 ETC CTI '일반')·nav 2행) → 검증

@@ -54,7 +54,13 @@
 - 비표준 시리얼 24종/40회 (PO↔P0 4, 자릿수 누락 13, SD5528 12, C7xxxxx 3)
 - 세란병원: 마스터에 AS 행 0건 (8/14 go-live 신규 — 검증만 하면 됨)
 
-## 5. 메디인 현재 상태 (개별 파일 기준 리허설 — dev2 적용됨)
+## 5. 메디인 현재 상태
+
+> **2026-09-04 — 도메인 경유 리허설 완료 (dev2)**: 구 리허설(기기현황 이벤트만, 태그 302건)을 `rollback-events`(LIFO 취소 257회)로 전량 되돌린 뒤, 신규 `scripts/migrate-mediin-as-domain.mts`로 **AS접수 도메인 레코드 경유 재적재 — 79/79행 성공**.
+> 결과: AS접수 79건(완료 75 · 접수 4 — 미발송 행 76·78·79·80) · 티켓 backfill 79건(CLOSED 75·OPEN 4, createdAt=접수일 소급) · 코드 접수월 기반 `AS-YYYYMM-NNNN` · ACTIVE 63 · AS진행중 8(구 리허설과 동일 시리얼) · ref AS 이벤트 AS_OPEN 133·AS_CLEAR 80·RECOVER 45·REGISTER 45 + 소급 REGISTER 3(memo 태그).
+> 구 대비 차이: AS_OPEN 131→133(소급 교체 2건도 접수 표시 기록 — 도메인 경로가 더 정합), 소급 REGISTER 일자는 발송일→접수일. fix-init은 멱등 확인(0건). **일반화 스크립트(마스터 3,537행)는 이 스크립트가 원형** — PROD 반영은 확인 2건(아래) 해소 후.
+
+### (구) 기기현황 이벤트만 리허설 기록 — 2026-09-04 롤백됨
 
 - `scripts/migrate-mediin-as-history.mts` report/apply — **133/133 성공**: ACTIVE 63(소급 3 포함), AS진행중 8, RECOVER 45·REGISTER 46·AS_OPEN 131·AS_CLEAR 80
 - fix-init: 초기 60대 REGISTER를 2026-09-02(입력일) → **2025-05-29(일반 딜 계약일)로 소급 정정** 완료(dev2)
