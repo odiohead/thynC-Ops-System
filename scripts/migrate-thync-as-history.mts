@@ -24,6 +24,7 @@ import { createTicketForAsReceipt } from '../lib/ticket-domains/asReceipt'
 const prisma = new PrismaClient()
 const args = process.argv.slice(2)
 const MODE = args.includes('apply') ? 'apply' : 'report'
+const APPEND = args.includes('--append') // 증분 — 기존 태그 행은 스킵하고 신규만 반영
 const fileIdx = args.indexOf('--file')
 const FILE = fileIdx >= 0 ? args[fileIdx + 1] : '/mnt/c/Users/USER/Documents/thynC_AS이력.xlsx'
 const rdIdx = args.indexOf('--report-dir')
@@ -80,10 +81,12 @@ async function main() {
   const norm = (x: string) =>
     x.replace(/^\d{8}[_ ]?/, '').replace(/[_ ]?\d+차$/, '').replace(/\(.*?\)/g, '')
       .replace(/^(의료법인|재단법인|사회복지법인|학교법인)\S*재단/, '').replace(/^\(의\)|^\(재\)|^\(의료\)/, '').replace(/\s+/g, '')
-  const aliases = (rawName: string): Set<string> => {
+  const aliases = (rawName0: string): Set<string> => {
+    const rawName = rawName0.normalize('NFC')
     const out = new Set<string>()
     const b = norm(rawName)
     if (b) out.add(b)
+    else out.add(rawName.replace(/\s+/g, '')) // 법인명 전체가 병원명(예: 의료법인한양의료재단) — 정규화가 전부 소거되면 원명 사용
     const sh = b.replace(/학교|의과대학|대학\s*교/g, '')
     if (sh) out.add(sh)
     for (const m of rawName.matchAll(/\(([^)]+)\)/g)) {
@@ -99,7 +102,8 @@ async function main() {
     byAlias.set(k, arr)
   }
   const cache = new Map<string, string | null>()
-  const matchHosp = (rawName: string): string | null => {
+  const matchHosp = (rawName0: string): string | null => {
+    const rawName = rawName0.normalize('NFC')
     if (cache.has(rawName)) return cache.get(rawName)!
     let code: string | null = null
     const keys = aliases(rawName)
@@ -221,7 +225,11 @@ async function main() {
 
   // ── apply ──
   const guard = await prisma.asReceipt.count({ where: { note: { startsWith: NOTE_TAG } } })
-  if (guard > 0) { console.error(`이미 '${NOTE_TAG}' 접수 ${guard}건 존재 — 중단 (백업 복원 후 재실행)`); process.exit(2) }
+  if (guard > 0 && !APPEND) { console.error(`이미 '${NOTE_TAG}' 접수 ${guard}건 존재 — 중단 (증분은 --append)`); process.exit(2) }
+  const doneNotes = new Set(
+    (await prisma.asReceipt.findMany({ where: { note: { startsWith: NOTE_TAG } }, select: { note: true } })).map((x) => x.note!)
+  )
+  if (APPEND) console.log(`append 모드 — 기존 ${doneNotes.size}행 스킵 예정`)
   const actor = await prisma.user.findFirst({ where: { role: 'SUPER_ADMIN', isActive: true }, select: { id: true, name: true } })
   if (!actor) throw new Error('SUPER_ADMIN 없음')
   const actorRef = { userId: actor.id, name: actor.name }
@@ -287,6 +295,7 @@ async function main() {
     const code = matchHosp(p.hospRaw)
     const e = eligible(code)
     if (!e.ok) { notEligRows.set(`${p.hospRaw} — ${e.why}`, (notEligRows.get(`${p.hospRaw} — ${e.why}`) ?? 0) + 1); continue }
+    if (doneNotes.has(`${NOTE_TAG} r${p.row}`)) continue // append — 기반영 행
     const st = statOf(code!)
     try {
       // 얽힘 라인 사전 제외
