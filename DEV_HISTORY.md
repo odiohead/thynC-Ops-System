@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-09-06 08:18 | AS이력 마이그 증분 v1.1 — 매처 결함 2건 수정·한양의료재단 52행 편입 (dev2·PROD, 커밋 ddb395e)
+
+- 사용자 질문("3,000행 중 왜 2,260건?")으로 퍼널 점검 — 대상 외 1,159행 분해 중 **미매칭 139행에서 매처 결함 발견**: ① 법인명 전체가 병원명이면(의료법인한양의료재단) norm이 전부 소거돼 별칭 공집합 ② AS엑셀 B열 NFD 표기(동아병원 73행) 미정규화
+- 수정: aliases 빈 결과 시 원명 폴백 + 입력 NFC 정규화 + **--append 증분 모드**(기존 태그 행 스킵·fix-init 멱등) — `migrate-thync-as-history.mts`
+- 증분 결과(dev2=PROD): 접수 +53(한양 52 + 1차 실패 재시도 1) · 라인 +87 · fix-init 240건(한양 초기 REGISTER) → **누계 접수 2,313 · 라인 8,427 · 티켓 2,313(CLOSED 2,231·OPEN 82)**
+- 동아병원 73행은 매칭 보정됐으나 원장 미보유(현황 파일 없음) — 편입 대기 목록 유지. 보고서 v1.1 갱신(`PROD_반영_결과보고서_20260905.md` §8)
+- 영향: scripts/migrate-thync-as-history.mts, 보고서 md, DEV_HISTORY.md
+
+---
+
 ## 2026-09-05 18:38 | PROD 실행: 초기 기기 임포트(138곳 23,478대) + AS이력 마이그(2,260접수 8,340라인) — 커밋 6c121d6
 
 - **절차**: dev2 리허설(1차 fix-init 누락 실패 → 백업 원복 → fix-init 추가 재실행 성공) → 스크립트 커밋·push(6c121d6 — `import-initial-devices.mts`·`migrate-thync-as-history.mts`) → 추출 데이터 tarball 전송 → PROD **사전 전체 덤프**(`thync_ops_pre_initial_devices_as_20260905_092420.dump`) → pull → ① 임포트 ② AS 마이그 ③ 검증 (한 체인, 데이터 전용 — 빌드·재시작 없음)
