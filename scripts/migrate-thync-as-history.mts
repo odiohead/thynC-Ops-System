@@ -5,7 +5,7 @@
  *   npx tsx scripts/migrate-thync-as-history.mts apply  [--file <xlsx>] [--report-dir <디렉토리>]
  *
  * apply (2026-09-05 사용자 승인):
- *  - 대상: 원장(ACTIVE) 보유 병원 − 메디인(기적용) − 소급률 30%+ 보류 4곳 — 전역 접수일순 replay(이동 시리얼 직렬화)
+ *  - 대상: 매칭되는 전 병원 − 메디인(기적용) — AS이력 전량 반영(2026-09-06 방침), 원장 없으면 소급 REGISTER. 전역 접수일순 replay
  *  - 행=AS접수 1건(접수월 코드·티켓 backfill 생성일 소급), 라인=기기(수리반환/교체/AS접수만/분실), 규칙은 §3(X열 판정·보정 3종)
  *  - 행 내 중복 시리얼 dedupe(첫 값), 병원 간 기간 겹침(얽힘) 시리얼 라인은 사전 제외+목록
  *  - 실패는 행·라인 단위 격리(전체 중단 없음). 재실행 가드: note '마스터 AS이력' 존재 시 중단
@@ -31,8 +31,8 @@ const rdIdx = args.indexOf('--report-dir')
 const REPORT_DIR = rdIdx >= 0 ? args[rdIdx + 1] : '/mnt/c/Users/USER/Documents/기기현황_초기임포트'
 const MEDIIN = 'HOSP-000042'
 const NOTE_TAG = '마스터 AS이력'
-/** 소급률 30%+ — 원장 대비 이력 불일치 커서 보류 (2026-09-05 report 실측) */
-const HOLD_NAMES = ['의료법인성지의료재단성지병원', '명지성모병원', '세웅종합병원', '아주대학교의료원']
+// (2026-09-06 사용자 방침) AS이력 전량 반영이 목적 — 원장 보유·소급률 게이트 제거.
+// 원장 없는 병원은 첫 등장 기기를 소급 REGISTER로 등록, 초기 도입분은 추후 임포트로 보완(재등록 스킵).
 
 function excelDate(n: unknown): string | null {
   if (typeof n !== 'number' || !isFinite(n) || n < 40000 || n > 50000) return null
@@ -202,14 +202,10 @@ async function main() {
     set.add(a.unit.serialNo)
     regSerials.set(a.hospitalCode!, set)
   }
-  const holdCodes = new Set<string>()
-  for (const n of HOLD_NAMES) { const c = matchHosp(n); if (c) holdCodes.add(c) }
   const eligible = (c: string | null): { ok: boolean; why: string } => {
     if (!c) return { ok: false, why: '병원 미매칭' }
     if (c === MEDIIN) return { ok: false, why: '메디인 — 기적용' }
-    if (holdCodes.has(c)) return { ok: false, why: '소급률 30%+ 보류' }
-    if (!(regSerials.get(c)?.size ?? 0)) return { ok: false, why: '원장 미보유(중복 제외·파일 없음 등)' }
-    return { ok: true, why: '' }
+    return { ok: true, why: '' } // 전량 반영 (2026-09-06) — 원장 없으면 소급 등록 경로
   }
 
   // ── report 요약 ──
