@@ -31,6 +31,8 @@ const rdIdx = args.indexOf('--report-dir')
 const REPORT_DIR = rdIdx >= 0 ? args[rdIdx + 1] : '/mnt/c/Users/USER/Documents/기기현황_초기임포트'
 const MEDIIN = 'HOSP-000042'
 const NOTE_TAG = '마스터 AS이력'
+/** 혼합 딜 병원 상품유형 수동 지정 — 2026-09-06 사용자 확정: 울산병원 '일반' */
+const PRODUCT_TYPE_BY_HOSP: Record<string, string> = { 'HOSP-000131': '일반' }
 // (2026-09-06 사용자 방침) AS이력 전량 반영이 목적 — 원장 보유·소급률 게이트 제거.
 // 원장 없는 병원은 첫 등장 기기를 소급 REGISTER로 등록, 초기 도입분은 추후 임포트로 보완(재등록 스킵).
 
@@ -320,7 +322,7 @@ async function main() {
           try {
             await registerDevices(
               { hospitalCode: code!, actor: actorRef, occurredOn: p.date, source: 'MANUAL', memo: `${NOTE_TAG} r${p.row} 소급` },
-              [{ serialInput: l.serial, wardName: l.ward, productType: undefined }]
+              [{ serialInput: l.serial, wardName: l.ward, productType: PRODUCT_TYPE_BY_HOSP[code!] }]
             )
             st.backfillReg++
           } catch (err) {
@@ -392,7 +394,7 @@ async function main() {
         try {
           await registerDevices(
             { hospitalCode: code!, actor: actorRef, occurredOn: p.outDate, source: 'MANUAL', memo: `${NOTE_TAG} r${p.row} 추가발송` },
-            [{ serialInput: s, productType: undefined }]
+            [{ serialInput: s, productType: PRODUCT_TYPE_BY_HOSP[code!] }]
           )
           st.extraReg++
         } catch (err) {

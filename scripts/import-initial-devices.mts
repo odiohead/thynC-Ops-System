@@ -14,6 +14,8 @@ import { todayKst } from '../lib/deviceRegistryShared'
 
 const BASE = process.env.IMPORT_BASE ?? '/tmp/claude-1000/-home-ubuntu-workspace-thynC-Ops-System/ef015821-a260-4247-a232-08bd5f516db2/scratchpad/hyunhwang'
 const OUT = process.env.IMPORT_OUT ?? '/mnt/c/Users/USER/Documents/기기현황_초기임포트'
+const ONLY = process.env.IMPORT_ONLY ? process.env.IMPORT_ONLY.normalize('NFC') : null // 특정 병원(폴더명 포함 일치)만
+const PT = process.env.IMPORT_PRODUCT_TYPE ?? null // 혼합 딜 병원 수동 지정 (예: 울산병원 '일반' — 2026-09-06)
 const prisma = new PrismaClient()
 const nfc = (s: unknown) => String(s ?? '').normalize('NFC')
 
@@ -48,6 +50,7 @@ async function main() {
       folder, code, name: String(r[2] ?? ''), asHist: String(r[3] ?? ''), fileDevices: Number(r[6] ?? 0),
       status: '', created: 0, rereg: 0, skipped: 0, excludedErr: 0, excludedConf: 0, newWards: 0, note: '',
     }
+    if (ONLY && !folder.includes(ONLY)) continue
     recs.push(rec)
     if (rec.fileDevices === 0) { rec.status = '기기 목록 미기입 — 제외'; continue }
     if (dupSet.has(folder)) { rec.status = '교차 중복 — 제외(사용자 결정)'; continue }
@@ -66,7 +69,7 @@ async function main() {
           memo: [d.note, d.wardSource === 'block' ? '병동=블록주석 추정' : null].filter(Boolean).join(' · ') || null,
         }))
       const today = todayKst()
-      const preview = await previewRows(code, rows, { wardMode: 'column', mode: 'REGISTER', occurredOn: today, excludeRows: [] })
+      const preview = await previewRows(code, rows, { wardMode: 'column', mode: 'REGISTER', occurredOn: today, excludeRows: [], productType: PT ?? undefined })
       const errRows = preview.rows.filter((p) => p.status === 'error')
       const confRows = preview.rows.filter((p) => p.status === 'conflict')
       rec.excludedErr = errRows.length
@@ -83,7 +86,7 @@ async function main() {
         {
           rows, excludeRows: exclude, sourceKind: 'EXCEL', mode: 'REGISTER',
           fileName: nfc(ex.chosenFile ?? '현황'),
-          defaults: { wardMode: 'column' },
+          defaults: { wardMode: 'column', productType: PT ?? undefined },
         }
       )
       rec.created = result.result.created.length
@@ -112,7 +115,7 @@ async function main() {
   const sh = XLSX.utils.aoa_to_sheet(rows)
   sh['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 22 }, { wch: 6 }, { wch: 9 }, { wch: 26 }, { wch: 7 }, { wch: 7 }, { wch: 7 }, { wch: 9 }, { wch: 9 }, { wch: 8 }, { wch: 60 }]
   XLSX.utils.book_append_sheet(wb, sh, '작업 결과')
-  XLSX.writeFile(wb, `${OUT}/_작업완료병원.xlsx`)
+  XLSX.writeFile(wb, `${OUT}/_작업완료병원${ONLY ? '_증분' : ''}.xlsx`)
 
   const okRecs = recs.filter((x) => x.status === '임포트 완료')
   console.log(`\n임포트 완료 ${okRecs.length}곳 · 등록 ${okRecs.reduce((s, x) => s + x.created, 0)}대 · 재등록 ${okRecs.reduce((s, x) => s + x.rereg, 0)} · 신규 병동 ${okRecs.reduce((s, x) => s + x.newWards, 0)}`)
