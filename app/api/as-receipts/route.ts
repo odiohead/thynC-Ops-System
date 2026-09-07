@@ -43,8 +43,10 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const statusId = parseInt(sp.get('statusId') ?? '')
-  if (Number.isInteger(statusId)) where.statusId = statusId
+  // 상태 복수 선택 (2026-09-07) — ?statusId=1&statusId=2
+  const statusIds = sp.getAll('statusId').map((v) => parseInt(v)).filter((v) => Number.isInteger(v))
+  if (statusIds.length === 1) where.statusId = statusIds[0]
+  else if (statusIds.length > 1) where.statusId = { in: statusIds }
 
   const category = sp.get('category')
   if (category && (AS_CATEGORIES as readonly string[]).includes(category)) where.category = category

@@ -4,7 +4,7 @@
  * AS업무 목록 (as_work_design.md §8)
  * 기기 수리·교체(AS) 접수 — 연결 티켓 refType 'AS'. [+ 접수]로 등록 (VIEWER 제외).
  */
-import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
@@ -47,40 +47,54 @@ function AsReceiptListInner() {
   const pageSize = 30
   const [loading, setLoading] = useState(true)
 
-  const [statuses, setStatuses] = useState<CodeRef[]>([])
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
-  const [statusId, setStatusId] = useState('')
+  const [statusIds, setStatusIds] = useState<number[]>([]) // 복수 선택 (2026-09-07) — 빈 배열 = 전체
   const [category, setCategory] = useState('')
+  const [summary, setSummary] = useState<{
+    byStatus: (CodeRef & { count: number })[]
+    total: number
+    openTotal: number
+    thisWeek: number
+    avgResolutionDays: number | null
+    overdue2w: number
+  } | null>(null)
   const [qInput, setQInput] = useState(searchParams.get('q') ?? '')
   const [q, setQ] = useState(searchParams.get('q') ?? '')
   const [createOpen, setCreateOpen] = useState(false)
   const [canWrite, setCanWrite] = useState(false)
   const [notice, setNotice] = useState<string[] | null>(null)
+  const loadSeq = useRef(0) // 필터 연속 변경 시 이전 응답이 최신 화면을 덮지 않도록 (리뷰 결함5)
 
-  useEffect(() => {
-    fetch('/api/settings/as-status').then((r) => (r.ok ? r.json() : null)).then((d) => setStatuses(d?.statusCodes ?? []))
-    fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setCanWrite(d.role !== 'VIEWER'))
+  const loadSummary = useCallback(() => {
+    fetch('/api/as-receipts/summary').then((r) => (r.ok ? r.json() : null)).then((d) => d && setSummary(d))
   }, [])
 
+  useEffect(() => {
+    loadSummary()
+    fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setCanWrite(d.role !== 'VIEWER'))
+  }, [loadSummary])
+
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current
     setLoading(true)
     const params = new URLSearchParams()
     if (from) params.set('from', from)
     if (to) params.set('to', to)
-    if (statusId) params.set('statusId', statusId)
+    for (const id of statusIds) params.append('statusId', String(id))
     if (category) params.set('category', category)
     if (q) params.set('q', q)
     params.set('page', String(page))
     params.set('pageSize', String(pageSize))
     const res = await fetch(`/api/as-receipts?${params.toString()}`)
+    if (seq !== loadSeq.current) return // 더 새로운 요청이 나감 — 이 응답 폐기
     if (res.ok) {
       const d = await res.json()
       setRows(d.receipts ?? [])
       setTotal(d.total ?? 0)
     }
     setLoading(false)
-  }, [from, to, statusId, category, q, page])
+  }, [from, to, statusIds, category, q, page])
 
   useEffect(() => { void load() }, [load])
 
@@ -115,15 +129,74 @@ function AsReceiptListInner() {
         </div>
       )}
 
+      {/* 요약 (2026-09-07) — 상태별 건수·이번 주·평균 처리·2주 경과 */}
+      {summary && (
+        <>
+          <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+            <div className="rounded-lg border border-gray-200 bg-white px-3.5 py-2.5 shadow-sm">
+              <p className="text-xs text-gray-400">진행 중 / 전체</p>
+              <p className="mt-0.5 text-lg font-bold text-gray-900">
+                {summary.openTotal.toLocaleString()}
+                <span className="ml-1 text-sm font-normal text-gray-400">/ {summary.total.toLocaleString()}건</span>
+              </p>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white px-3.5 py-2.5 shadow-sm">
+              <p className="text-xs text-gray-400">이번 주 접수</p>
+              <p className="mt-0.5 text-lg font-bold text-gray-900">{summary.thisWeek.toLocaleString()}<span className="ml-1 text-sm font-normal text-gray-400">건</span></p>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white px-3.5 py-2.5 shadow-sm">
+              <p className="text-xs text-gray-400">평균 처리시간 <span className="text-gray-300">(최근 3개월)</span></p>
+              <p className="mt-0.5 text-lg font-bold text-gray-900">
+                {summary.avgResolutionDays != null ? summary.avgResolutionDays : '-'}
+                <span className="ml-1 text-sm font-normal text-gray-400">일</span>
+              </p>
+            </div>
+            <div className={`rounded-lg border px-3.5 py-2.5 shadow-sm ${summary.overdue2w > 0 ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white'}`}>
+              <p className={`text-xs ${summary.overdue2w > 0 ? 'text-red-500' : 'text-gray-400'}`}>접수 2주 경과 미처리</p>
+              <p className={`mt-0.5 text-lg font-bold ${summary.overdue2w > 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                {summary.overdue2w.toLocaleString()}<span className="ml-1 text-sm font-normal opacity-60">건</span>
+              </p>
+            </div>
+          </div>
+
+          {/* 상태 필터 — 체크박스 칩 (복수 선택) */}
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => { setStatusIds([]); setPage(1) }}
+              className={`rounded-full border px-2.5 py-1 text-xs font-medium ${statusIds.length === 0 ? 'border-gray-800 bg-gray-800 text-white' : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'}`}
+            >
+              전체 {summary.total.toLocaleString()}
+            </button>
+            {summary.byStatus.map((st) => {
+              const on = statusIds.includes(st.id)
+              return (
+                <button
+                  key={st.id}
+                  type="button"
+                  onClick={() => {
+                    setStatusIds((prev) => (prev.includes(st.id) ? prev.filter((x) => x !== st.id) : [...prev, st.id]))
+                    setPage(1)
+                  }}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${on ? 'text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                  style={on
+                    ? { backgroundColor: st.color ?? '#374151', borderColor: st.color ?? '#374151' }
+                    : { borderColor: `${st.color ?? '#D1D5DB'}88` }}
+                >
+                  {on && <span aria-hidden>✓</span>}
+                  {st.name} {st.count.toLocaleString()}
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
+
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="text-xs text-gray-400">접수일</span>
         <input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1) }} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
         <span className="text-gray-400">~</span>
         <input type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1) }} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
-        <select value={statusId} onChange={(e) => { setStatusId(e.target.value); setPage(1) }} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm">
-          <option value="">상태 전체</option>
-          {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
         <select value={category} onChange={(e) => { setCategory(e.target.value); setPage(1) }} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm">
           <option value="">구분 전체</option>
           {AS_CATEGORIES.map((c) => <option key={c} value={c}>{AS_CATEGORY_LABELS[c]}</option>)}
@@ -194,7 +267,7 @@ function AsReceiptListInner() {
       <AsReceiptFormModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onSaved={(warnings) => { setNotice(warnings.length ? warnings : null); router.refresh(); void load() }}
+        onSaved={(warnings) => { setNotice(warnings.length ? warnings : null); router.refresh(); void load(); loadSummary() }}
       />
     </div>
   )

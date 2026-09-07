@@ -176,8 +176,9 @@ export async function syncTicketToAsReceipt(tx: Prisma.TransactionClient, ticket
     data.statusId = nextStatusId
     data.statusChangedAt = new Date()
   }
-  // 완료일 백필은 상태 변경과 독립 (VOC 선례 — keep-if-consistent 경로에서도 완료일 기록)
-  if ((ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') && !r.resolvedAt) data.resolvedAt = new Date()
+  // 완료일 백필은 상태 변경과 독립 (VOC 선례) — DATE 컬럼이라 KST 날짜로 기록 (리뷰 부수)
+  const kstYmd = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
+  if ((ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') && !r.resolvedAt) data.resolvedAt = new Date(`${kstYmd}T00:00:00Z`)
   if (ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED' && r.resolvedAt) data.resolvedAt = null
   if (Object.keys(data).length) await tx.asReceipt.update({ where: { id: r.id }, data })
 }

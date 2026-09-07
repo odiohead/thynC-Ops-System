@@ -128,7 +128,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
         data.statusChangedAt = new Date()
         // 완료일 자동 관리 — 종결 버킷(완료·취소 → CLOSED 매핑) 진입 시 기록, 이탈 시 해제
         const terminal = row.ticketStatus === 'RESOLVED' || row.ticketStatus === 'CLOSED'
-        if (terminal && !existing.resolvedAt) data.resolvedAt = new Date()
+        if (terminal && !existing.resolvedAt) data.resolvedAt = new Date(`${todayKst()}T00:00:00Z`) // DATE 컬럼 — KST 날짜로 (리뷰 부수)
         if (!terminal && existing.resolvedAt) data.resolvedAt = null
       }
     }
