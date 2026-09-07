@@ -226,6 +226,7 @@ export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
           preReplace: cell(r, C.PRE_REPLACE).includes('선교체'),
           destType,
           destInfo,
+          pickupDestInfo: destInfo, // 회수지 = 발송지 자동 기재 (상이 시 화면에서 '회수지 상이' 체크 후 수정 — CX #13)
           note: noteParts.join('\n'),
           lines,
         },

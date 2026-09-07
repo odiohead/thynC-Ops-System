@@ -21,7 +21,13 @@ const listInclude = {
   status: { select: { id: true, name: true, color: true } },
   createdBy: { select: { id: true, name: true } },
   ticket: { select: { id: true, ticketCode: true, status: true, owner: { select: { id: true, name: true } } } },
-  items: { select: { id: true, serialNo: true, outcome: true }, orderBy: { id: 'asc' as const } },
+  items: {
+    select: {
+      id: true, serialNo: true, outcome: true, deviceKind: true,
+      device: { select: { deviceInfo: { select: { deviceName: true } } } }, // 목록 기기별 대수 표기 (CX #1)
+    },
+    orderBy: { id: 'asc' as const },
+  },
 } as const
 
 export async function GET(request: NextRequest) {
@@ -51,6 +57,20 @@ export async function GET(request: NextRequest) {
 
   const hospitalCode = sp.get('hospitalCode')
   if (hospitalCode) where.hospitalCode = hospitalCode
+
+  // 발송(출고)일 기간 필터 (CX #9) — 라인 shippedAt 기준
+  const shippedFrom = sp.get('shippedFrom')
+  const shippedTo = sp.get('shippedTo')
+  if (shippedFrom || shippedTo) {
+    where.items = {
+      some: {
+        shippedAt: {
+          ...(shippedFrom ? { gte: new Date(shippedFrom) } : {}),
+          ...(shippedTo ? { lte: new Date(shippedTo) } : {}),
+        },
+      },
+    }
+  }
 
   const q = sp.get('q')?.trim()
   if (q) {

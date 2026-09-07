@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-09-07 16:50 | AS업무 CX 확인사항 반영 — 회수지 필드·처리내용·권한 개정·목록 개선 (dev2, PROD 배포 대기)
+
+- **원천**: CX팀 `AS_OPS_확인사항.xlsx`(시트 항목 29종 반영 대조 + 기능 요청 12건) 분석 → 사용자 승인 범위 구현
+- **① 회수지 신설 (CX #13, 사용자 사양)**: `as_receipts.pickup_dest_differs`(bool)·`pickup_dest_info`(text) — 마이그 `20260907170000_as_receipt_pickup_dest`. 채널톡 인입 시 발송지(T열)와 동일 자동 기재, 상세 진행 기록에 '회수지 상이' 체크박스(체크 시에만 별도 입력, 미체크는 "발송지와 동일" 표시)
+- **② 처리내용 입력 (CX #18 — 유일한 실제 미구현 갭)**: 라인 처리 패널에 처리내용 입력(선택 라인 공통 기록, 미입력 시 기존 값 보존) + 라인 표 '처리내용' 컬럼 표시. `resolveAsLines` input `processNote`
+- **③ 수정 권한 개정 (CX #4·#10)**: `canEditAsReceipt` — 종결 전 **USER 전원** 수정 가능(구: 등록자 본인만). 삭제는 구 규칙 유지(`canDeleteAsReceipt` 분리). CX 신고 "진행기록 저장 미작동"(#10)의 유력 원인(타인 등록 건 403) 해소 — PROD 배포 후 3321 건 확인 예정
+- **④ 목록 개선 (CX #1·#2·#9)**: [기기] 컬럼 기기별 대수(`summarizeAsItemsByKind` — 산소포화도 n·심전도 n, 목록 API items에 모델명 포함) / 필터·페이지 **URL 동기화**(history.replaceState — 상세 뒤로가기 시 검색 결과 복원) / **발송일 기간 필터**(라인 shippedAt) + **라인 단위 Excel 내보내기** `GET /api/as-receipts/export`(현재 필터 기준·발송일 필터 시 해당 기간 발송 라인만, 최대 1만 라인 — 안내 메시지 발송용)
+- **⑤ 선교체 상시 표시 (CX #3)**: 상세 헤더 — 미해당 시 '일반 (선교체 아님)' 배지
+- 검증 오해 정리: #5 발송 송장·#19는 라인 처리에 기구현(결과 확정 시 입력) / #10 PUT 필드 소실 의혹은 undefined 가드로 무해 확인. 미착수(별도 결정): #8 티켓 리오픈(전이표 공통 정책)·#12 복수 발송지(구조 변경)·#7 의도 확인 필요
+- 검증: tsc 0·eslint 0·서비스 스모크(회수지 자동 기재→처리내용 기록→자동 완료→정리)·4GB 빌드·pm2 재시작·/as-receipts 307·에러 0
+- 영향: prisma(스키마+마이그), lib/{asReceipt,asReceiptService,asReceiptShared,channeltalkAsSync}.ts, app/api/as-receipts/{route,export/route(신규),[id]/route,[id]/resolve-items/route}.ts, app/as-receipts/{page,[id]/page}.tsx, README.md
+
+---
+
 ## 2026-09-07 15:40 | 채널톡 AS접수 자동 등록 — 시트 1분 폴링 + 완료 역기입 (dev2 검증 완료, PROD 배포 진행)
 
 - **설계**(`projects/channeltalk_as_intake_design.md` v3, 당일 확정): 채널톡 ALF 태스크→'thynC VOC 현황' A/S 탭(채널톡 전용 중계 파일, 실측 3,612행+매일 증가)을 1분 폴링. 접수만 시트→시스템, 처리·완료는 시스템에서 수행하고 종결 시 X열(완료여부) 역기입. 컷오버 3612(3613행부터), 이전 행은 마이그 트랙 영역

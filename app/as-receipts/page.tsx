@@ -9,7 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
 import AsReceiptFormModal from './_components/AsReceiptFormModal'
-import { AS_CATEGORIES, AS_CATEGORY_LABELS, summarizeAsItems, type AsCategory } from '@/lib/asReceiptShared'
+import { AS_CATEGORIES, AS_CATEGORY_LABELS, summarizeAsItemsByKind, type AsCategory } from '@/lib/asReceiptShared'
 
 interface CodeRef { id: number; name: string; color: string | null }
 interface AsRow {
@@ -23,7 +23,7 @@ interface AsRow {
   status: CodeRef | null
   createdBy: { id: string; name: string } | null
   ticket: { id: number; ticketCode: string; status: string; owner: { id: string; name: string } | null } | null
-  items: { id: number; serialNo: string; outcome: string | null }[]
+  items: { id: number; serialNo: string; outcome: string | null; deviceKind: string | null; device: { deviceInfo: { deviceName: string } } | null }[]
 }
 
 function codeBadge(c: CodeRef | null) {
@@ -43,14 +43,19 @@ function AsReceiptListInner() {
   const searchParams = useSearchParams()
   const [rows, setRows] = useState<AsRow[]>([])
   const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
+  // 필터·페이지는 URL과 동기화 (CX #2 — 상세 진입 후 뒤로가기 시 검색 결과 복원)
+  const [page, setPage] = useState(() => Math.max(1, parseInt(searchParams.get('page') ?? '1') || 1))
   const pageSize = 30
   const [loading, setLoading] = useState(true)
 
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
-  const [statusIds, setStatusIds] = useState<number[]>([]) // 복수 선택 (2026-09-07) — 빈 배열 = 전체
-  const [category, setCategory] = useState('')
+  const [from, setFrom] = useState(searchParams.get('from') ?? '')
+  const [to, setTo] = useState(searchParams.get('to') ?? '')
+  const [statusIds, setStatusIds] = useState<number[]>(() =>
+    searchParams.getAll('statusId').map((v) => parseInt(v)).filter((v) => Number.isInteger(v))
+  ) // 복수 선택 (2026-09-07) — 빈 배열 = 전체
+  const [category, setCategory] = useState(searchParams.get('category') ?? '')
+  const [shippedFrom, setShippedFrom] = useState(searchParams.get('shippedFrom') ?? '') // 발송일 필터 (CX #9)
+  const [shippedTo, setShippedTo] = useState(searchParams.get('shippedTo') ?? '')
   const [summary, setSummary] = useState<{
     byStatus: (CodeRef & { count: number })[]
     total: number
@@ -75,15 +80,30 @@ function AsReceiptListInner() {
     fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setCanWrite(d.role !== 'VIEWER'))
   }, [loadSummary])
 
-  const load = useCallback(async () => {
-    const seq = ++loadSeq.current
-    setLoading(true)
+  const buildFilterParams = useCallback(() => {
     const params = new URLSearchParams()
     if (from) params.set('from', from)
     if (to) params.set('to', to)
     for (const id of statusIds) params.append('statusId', String(id))
     if (category) params.set('category', category)
+    if (shippedFrom) params.set('shippedFrom', shippedFrom)
+    if (shippedTo) params.set('shippedTo', shippedTo)
     if (q) params.set('q', q)
+    return params
+  }, [from, to, statusIds, category, shippedFrom, shippedTo, q])
+
+  // 필터·페이지를 URL에 반영 — 뒤로가기 복원용 (CX #2, history만 교체해 리렌더 억제)
+  useEffect(() => {
+    const params = buildFilterParams()
+    if (page > 1) params.set('page', String(page))
+    const qs = params.toString()
+    window.history.replaceState(null, '', qs ? `/as-receipts?${qs}` : '/as-receipts')
+  }, [buildFilterParams, page])
+
+  const load = useCallback(async () => {
+    const seq = ++loadSeq.current
+    setLoading(true)
+    const params = buildFilterParams()
     params.set('page', String(page))
     params.set('pageSize', String(pageSize))
     const res = await fetch(`/api/as-receipts?${params.toString()}`)
@@ -94,7 +114,7 @@ function AsReceiptListInner() {
       setTotal(d.total ?? 0)
     }
     setLoading(false)
-  }, [from, to, statusIds, category, q, page])
+  }, [buildFilterParams, page])
 
   useEffect(() => { void load() }, [load])
 
@@ -201,6 +221,10 @@ function AsReceiptListInner() {
           <option value="">구분 전체</option>
           {AS_CATEGORIES.map((c) => <option key={c} value={c}>{AS_CATEGORY_LABELS[c]}</option>)}
         </select>
+        <span className="ml-1 text-xs text-gray-400">발송일</span>
+        <input type="date" value={shippedFrom} onChange={(e) => { setShippedFrom(e.target.value); setPage(1) }} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
+        <span className="text-gray-400">~</span>
+        <input type="date" value={shippedTo} onChange={(e) => { setShippedTo(e.target.value); setPage(1) }} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
         <div className="flex items-center gap-1.5">
           <input
             type="text"
@@ -212,6 +236,14 @@ function AsReceiptListInner() {
           />
           <button type="button" onClick={() => { setQ(qInput); setPage(1) }} className="rounded-md bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700">검색</button>
         </div>
+        <button
+          type="button"
+          onClick={() => { window.location.href = `/api/as-receipts/export?${buildFilterParams().toString()}` }}
+          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
+          title="현재 필터 기준 라인 단위 Excel 다운로드"
+        >
+          Excel
+        </button>
         <span className="ml-auto text-sm text-gray-500">{total.toLocaleString()}건</span>
       </div>
 
@@ -236,7 +268,7 @@ function AsReceiptListInner() {
                     <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-blue-600">{r.asCode}</td>
                     <td className="max-w-[12rem] truncate px-3 py-2 text-gray-900">{r.hospital?.hospitalName ?? '-'}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-gray-700">{AS_CATEGORY_LABELS[r.category as AsCategory] ?? r.category}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-gray-700">{summarizeAsItems(r.items)}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-gray-700">{summarizeAsItemsByKind(r.items)}</td>
                     <td className="whitespace-nowrap px-3 py-2">{codeBadge(r.status)}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-gray-600">{r.receiptDate.slice(0, 10)}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-gray-600">{r.ticket?.owner?.name ?? '-'}</td>

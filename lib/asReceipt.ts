@@ -35,6 +35,17 @@ export function canEditAsReceipt(
   user: { userId: string; role: string },
   receipt: { createdById: string | null; status: { ticketStatus: TicketStatus | null } | null }
 ): boolean {
+  // 2026-09-07 개정 (CX 확인사항 #4): 종결 전에는 USER 전원 수정 가능 (구 규칙: 등록자 본인만)
+  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true
+  if (user.role === 'VIEWER') return false
+  return !isTerminalAsStatus(receipt.status?.ticketStatus)
+}
+
+/** 삭제는 구 규칙 유지 — ADMIN 항상 / USER는 본인 등록 + 종결 전 (§13-1) */
+export function canDeleteAsReceipt(
+  user: { userId: string; role: string },
+  receipt: { createdById: string | null; status: { ticketStatus: TicketStatus | null } | null }
+): boolean {
   if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true
   if (user.role === 'VIEWER') return false
   if (receipt.createdById !== user.userId) return false

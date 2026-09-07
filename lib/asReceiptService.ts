@@ -256,6 +256,8 @@ export interface ResolveInput {
   effectiveDate?: string | null
   shipMethod?: 'PARCEL' | 'VISIT' | null
   shipTrackingNo?: string | null
+  /** 처리내용 (시트 Q열 대응, CX #18 — 선택 라인 전체에 기록) */
+  processNote?: string | null
 }
 
 export interface ResolveResult {
@@ -328,6 +330,7 @@ export async function resolveAsLines(
           shippedAt: shipped ? new Date(effectiveDate) : undefined,
           shipMethod: shipped ? shipMethod : undefined,
           shipTrackingNo: shipped ? input.shipTrackingNo?.trim() || null : undefined,
+          processNote: input.processNote?.trim() ? input.processNote.trim() : undefined, // CX #18 — 미입력 시 기존 값 보존
         }
 
         if (!item.deviceId) {
@@ -409,6 +412,7 @@ export interface CreateAsReceiptInput {
   preReplace?: boolean
   destType?: string | null // HOSPITAL / OTHER
   destInfo?: string | null
+  pickupDestInfo?: string | null // 회수지 정보 (CX #13 — 채널톡 인입 시 발송지와 동일 자동 기재)
   statusId?: number | null // 미지정 시 '접수'
   note?: string | null
   lines: LineInput[]
@@ -498,6 +502,7 @@ export async function createAsReceipt(
               preReplace,
               destType,
               destInfo,
+              pickupDestInfo: input.pickupDestInfo?.trim() || null,
               statusId,
               note,
               createdById: actor.userId,

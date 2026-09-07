@@ -34,6 +34,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       effectiveDate: typeof body.effectiveDate === 'string' ? body.effectiveDate : null,
       shipMethod: body.shipMethod ?? null,
       shipTrackingNo: typeof body.shipTrackingNo === 'string' ? body.shipTrackingNo : null,
+      processNote: typeof body.processNote === 'string' ? body.processNote : null,
     })
   } catch (e) {
     if (e instanceof AsServiceError) return NextResponse.json({ error: e.message }, { status: e.status })

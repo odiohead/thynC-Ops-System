@@ -2149,6 +2149,8 @@ model AsReceipt {
   pickupMethod     String?   @map("pickup_method") // PARCEL 택배수거 / VISIT 방문수거 (SQL CHECK)
   pickupTrackingNo String?   @map("pickup_tracking_no") // 수거 송장
   pickedUpAt       DateTime? @map("picked_up_at") @db.Date // 수거일 (M열)
+  pickupDestDiffers Boolean  @default(false) @map("pickup_dest_differs") // 회수지 상이 체크 (CX #13 — 2026-09-07)
+  pickupDestInfo   String?   @map("pickup_dest_info") @db.Text // 회수지 정보 — 채널톡 인입 시 발송지와 동일 자동 기재
   receivedAt       DateTime? @map("received_at") @db.Date // 입고일 (N열)
   preReplace       Boolean   @default(false) @map("pre_replace") // 선교체요청 (P열)
   destType         String?   @map("dest_type") // HOSPITAL 병원 / OTHER 기타(대웅 등) (S열, SQL CHECK)

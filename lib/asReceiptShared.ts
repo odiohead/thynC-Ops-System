@@ -30,6 +30,22 @@ export const AS_OUTCOME_LABELS: Record<AsOutcome, string> = {
 export const AS_DEVICE_KINDS = ['심전도', '산소포화도', '게이트웨이', '기타'] as const
 
 /** 라인 요약 한 줄 — '기기 3대 (종결 1)' (목록·배너·알림 공용) */
+/** 목록 [기기] 기기별 대수 표기 (CX #1) — "산소포화도 2 · 심전도 1 (종결 n)" */
+export function summarizeAsItemsByKind(
+  items: { outcome: string | null; deviceKind?: string | null; device?: { deviceInfo: { deviceName: string } } | null }[]
+): string {
+  if (!items.length) return '기기 없음'
+  const byKind = new Map<string, number>()
+  for (const i of items) {
+    const kind = i.device?.deviceInfo.deviceName ?? i.deviceKind ?? '기타'
+    byKind.set(kind, (byKind.get(kind) ?? 0) + 1)
+  }
+  const parts: string[] = []
+  byKind.forEach((n, kind) => parts.push(`${kind} ${n}`))
+  const done = items.filter((i) => i.outcome != null && i.outcome !== '').length
+  return parts.join(' · ') + (done > 0 ? ` (종결 ${done})` : '')
+}
+
 export function summarizeAsItems(items: { outcome: string | null }[]): string {
   if (!items.length) return '기기 없음'
   const done = items.filter((i) => i.outcome != null && i.outcome !== '').length

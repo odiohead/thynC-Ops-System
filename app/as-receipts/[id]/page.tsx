@@ -54,6 +54,8 @@ interface AsDetail {
   preReplace: boolean
   destType: string | null
   destInfo: string | null
+  pickupDestDiffers: boolean
+  pickupDestInfo: string | null
   expectedShipDate: string | null
   note: string | null
   resolvedAt: string | null
@@ -127,7 +129,7 @@ export default function AsReceiptDetailPage() {
   const [me, setMe] = useState<{ id: string; role: string } | null>(null)
 
   // 진행 기록 (물류)
-  const [logistics, setLogistics] = useState({ pickedUpAt: '', receivedAt: '', expectedShipDate: '', destType: '', destInfo: '' })
+  const [logistics, setLogistics] = useState({ pickedUpAt: '', receivedAt: '', expectedShipDate: '', destType: '', destInfo: '', pickupDestDiffers: false, pickupDestInfo: '' })
 
   // 라인 처리 패널
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -136,6 +138,7 @@ export default function AsReceiptDetailPage() {
   const [effectiveDate, setEffectiveDate] = useState(todayKst())
   const [shipMethod, setShipMethod] = useState('')
   const [shipTrackingNo, setShipTrackingNo] = useState('')
+  const [processNote, setProcessNote] = useState('') // 처리내용 (CX #18 — 선택 라인 공통 기록)
 
   useEffect(() => {
     fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setMe({ id: d.id ?? d.userId ?? '', role: d.role }))
@@ -154,6 +157,8 @@ export default function AsReceiptDetailPage() {
       expectedShipDate: r.expectedShipDate?.slice(0, 10) ?? '',
       destType: r.destType ?? '',
       destInfo: r.destInfo ?? '',
+      pickupDestDiffers: r.pickupDestDiffers,
+      pickupDestInfo: r.pickupDestInfo ?? '',
     })
     setSelected(new Set())
     setLoading(false)
@@ -168,8 +173,10 @@ export default function AsReceiptDetailPage() {
 
   const isAdmin = !!me && (me.role === 'ADMIN' || me.role === 'SUPER_ADMIN')
   const isTerminal = req?.status?.ticketStatus === 'RESOLVED' || req?.status?.ticketStatus === 'CLOSED'
-  // 서버 canEditAsReceipt와 동일 판정 (§13-1)
-  const canEdit = !!me && !!req && (isAdmin || (me.role !== 'VIEWER' && req.createdBy?.id === me.id && !isTerminal))
+  // 서버 canEditAsReceipt와 동일 판정 (2026-09-07 개정 CX #4 — 종결 전 USER 전원)
+  const canEdit = !!me && !!req && (isAdmin || (me.role !== 'VIEWER' && !isTerminal))
+  // 삭제는 구 규칙 유지 — ADMIN 항상 / USER 본인 등록 + 종결 전
+  const canDelete = !!me && !!req && (isAdmin || (me.role !== 'VIEWER' && req.createdBy?.id === me.id && !isTerminal))
   // 라인 처리 — USER 이상 전원 (별도 처리 풀 없음, 설계 §7)
   const canResolve = !!me && me.role !== 'VIEWER' && !isTerminal
   const openItems = req?.items.filter((i) => !i.outcome) ?? []
@@ -208,7 +215,7 @@ export default function AsReceiptDetailPage() {
     const res = await fetch(`/api/as-receipts/${req.id}/resolve-items`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lines, effectiveDate, shipMethod: shipMethod || null, shipTrackingNo: shipTrackingNo || null }),
+      body: JSON.stringify({ lines, effectiveDate, shipMethod: shipMethod || null, shipTrackingNo: shipTrackingNo || null, processNote: processNote || null }),
     })
     const d = await res.json().catch(() => ({}))
     setBusy(false)
@@ -216,6 +223,7 @@ export default function AsReceiptDetailPage() {
     setWarnings(d.warnings ?? [])
     setNewSerials({})
     setShipTrackingNo('')
+    setProcessNote('')
     router.refresh()
     await load()
   }
@@ -261,7 +269,10 @@ export default function AsReceiptDetailPage() {
             <span className="text-gray-300">/</span>
             <span className="font-mono text-sm text-gray-500">{req.asCode}</span>
             {codeBadge(req.status)}
-            {req.preReplace && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-600">선교체</span>}
+            {/* 선교체 여부 상시 표시 (CX #3) */}
+            {req.preReplace
+              ? <span className="rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-600">선교체</span>
+              : <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">일반 (선교체 아님)</span>}
           </div>
           <h1 className="mt-1 text-xl font-bold text-gray-900">
             {req.hospital?.hospitalName ?? '-'} <span className="font-normal text-gray-400">· {catLabel} · 기기 {req.items.length}대</span>
@@ -289,7 +300,7 @@ export default function AsReceiptDetailPage() {
           {canEdit && (
             <button type="button" onClick={() => setEditOpen(true)} disabled={busy} className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">수정</button>
           )}
-          {canEdit && (
+          {canDelete && (
             <button type="button" onClick={remove} disabled={busy} className="rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-500 hover:bg-red-50">삭제</button>
           )}
         </div>
@@ -386,6 +397,39 @@ export default function AsReceiptDetailPage() {
             ) : <p className="mt-1 truncate text-sm text-gray-900">{req.destInfo ?? '-'}</p>}
           </div>
         </div>
+        {/* 회수지 (CX #13) — 기본 발송지와 동일, '회수지 상이' 체크 시 별도 입력 */}
+        <div className="flex flex-wrap items-center gap-3 border-t border-gray-100 px-4 py-3 sm:px-6">
+          <p className={label}>고장품 회수지</p>
+          <label className={`flex items-center gap-1.5 text-sm ${canEdit ? 'cursor-pointer text-gray-600' : 'text-gray-400'}`}>
+            <input
+              type="checkbox"
+              checked={logistics.pickupDestDiffers}
+              disabled={!canEdit}
+              onChange={(e) => setLogistics((p) => ({
+                ...p,
+                pickupDestDiffers: e.target.checked,
+                pickupDestInfo: e.target.checked ? p.pickupDestInfo : p.destInfo,
+              }))}
+              className="rounded border-gray-300"
+            />
+            회수지 상이
+          </label>
+          {logistics.pickupDestDiffers ? (
+            canEdit ? (
+              <input
+                type="text"
+                value={logistics.pickupDestInfo}
+                onChange={(e) => setLogistics((p) => ({ ...p, pickupDestInfo: e.target.value }))}
+                placeholder="회수지 주소 / 회수자 / 연락처"
+                className="min-w-[16rem] flex-1 rounded-md border border-gray-300 px-2 py-1 text-sm"
+              />
+            ) : <p className="flex-1 truncate text-sm text-gray-900">{req.pickupDestInfo ?? '-'}</p>
+          ) : (
+            <p className="flex-1 truncate text-sm text-gray-500">
+              발송지와 동일{(logistics.destInfo || req.destInfo) ? ` — ${logistics.destInfo || req.destInfo}` : ''}
+            </p>
+          )}
+        </div>
         {canEdit && (
           <div className="flex justify-end border-t border-gray-100 px-4 py-2.5 sm:px-6">
             <button
@@ -397,6 +441,8 @@ export default function AsReceiptDetailPage() {
                 expectedShipDate: logistics.expectedShipDate || null,
                 destType: logistics.destType || null,
                 destInfo: logistics.destInfo || null,
+                pickupDestDiffers: logistics.pickupDestDiffers,
+                pickupDestInfo: (logistics.pickupDestDiffers ? logistics.pickupDestInfo : logistics.destInfo) || null,
               }, '진행 기록 저장에 실패했습니다.')}
               className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
             >
@@ -417,7 +463,7 @@ export default function AsReceiptDetailPage() {
             <thead className="bg-gray-50">
               <tr>
                 {canResolve && <th className="w-8 px-3 py-2" />}
-                {['시리얼', '모델·병동', '증상', '결과', '발송', '교체기'].map((h) => (
+                {['시리얼', '모델·병동', '증상', '처리내용', '결과', '발송', '교체기'].map((h) => (
                   <th key={h} className="whitespace-nowrap px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">{h}</th>
                 ))}
               </tr>
@@ -453,6 +499,7 @@ export default function AsReceiptDetailPage() {
                     )}
                   </td>
                   <td className="max-w-[16rem] truncate px-3 py-2 text-gray-700" title={item.symptom ?? undefined}>{item.symptom ?? '-'}</td>
+                  <td className="max-w-[14rem] truncate px-3 py-2 text-xs text-gray-500" title={item.processNote ?? undefined}>{item.processNote ?? '-'}</td>
                   <td className="whitespace-nowrap px-3 py-2">
                     {item.outcome ? (
                       <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${OUTCOME_BADGE_CLS[item.outcome] ?? 'bg-gray-100 text-gray-500'}`}>
@@ -501,6 +548,7 @@ export default function AsReceiptDetailPage() {
                       <input type="text" value={shipTrackingNo} onChange={(e) => setShipTrackingNo(e.target.value)} placeholder="발송 송장" className="w-40 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
                     </>
                   )}
+                  <input type="text" value={processNote} onChange={(e) => setProcessNote(e.target.value)} placeholder="처리내용 (선택 라인 공통 기록)" className="min-w-[14rem] flex-1 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
                   <button
                     type="button"
                     onClick={runResolve}

@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { canEditAsReceipt } from '@/lib/asReceipt'
+import { canEditAsReceipt, canDeleteAsReceipt } from '@/lib/asReceipt'
 import { AS_CATEGORIES, AS_METHODS, AS_DEST_TYPES } from '@/lib/asReceiptShared'
 import { applyItemChanges, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { syncAsReceiptToTicket } from '@/lib/ticket-domains/asReceipt'
@@ -111,6 +111,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
     data.reporterName = strOrNull(body.reporterName)
     data.pickupTrackingNo = strOrNull(body.pickupTrackingNo)
     data.destInfo = strOrNull(body.destInfo)
+    if (body.pickupDestDiffers !== undefined) data.pickupDestDiffers = body.pickupDestDiffers === true
+    data.pickupDestInfo = strOrNull(body.pickupDestInfo)
     data.note = strOrNull(body.note)
     data.pickedUpAt = dateOrNull(body.pickedUpAt)
     data.receivedAt = dateOrNull(body.receivedAt)
@@ -202,7 +204,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   })
   if (!existing) return NextResponse.json({ error: 'AS접수를 찾을 수 없습니다.' }, { status: 404 })
 
-  if (!canEditAsReceipt(user, existing)) {
+  if (!canDeleteAsReceipt(user, existing)) {
     return NextResponse.json({ error: '삭제 권한이 없습니다. 본인 등록 건은 완료·취소 전까지만 삭제할 수 있습니다.' }, { status: 403 })
   }
 
