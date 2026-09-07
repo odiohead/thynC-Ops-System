@@ -211,7 +211,11 @@ export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
 
       const noteParts = [tag]
       if (cell(r, C.AGENT)) noteParts.push(`접수담당: ${cell(r, C.AGENT)}`)
-      if (cell(r, C.DEST_INFO)) noteParts.push(`발송지(${cell(r, C.DEST_TYPE) || '-'}): ${cell(r, C.DEST_INFO)}`)
+
+      // 발송지(S/T열) — 도메인 필드 매핑: '병원'→HOSPITAL, 그 외 기재값→OTHER (T열 정보와 함께)
+      const destRaw = cell(r, C.DEST_TYPE)
+      const destInfo = cell(r, C.DEST_INFO) || null
+      const destType = destRaw.includes('병원') ? 'HOSPITAL' : destRaw || destInfo ? 'OTHER' : null
 
       const created = await createAsReceipt(
         {
@@ -220,6 +224,8 @@ export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
           receiptDate,
           reporterName: cell(r, C.REPORTER) || null,
           preReplace: cell(r, C.PRE_REPLACE).includes('선교체'),
+          destType,
+          destInfo,
           note: noteParts.join('\n'),
           lines,
         },

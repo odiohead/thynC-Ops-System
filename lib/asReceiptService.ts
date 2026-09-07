@@ -11,7 +11,7 @@ import { prisma } from '@/lib/prisma'
 import { normalizeSerial, todayKst } from '@/lib/deviceRegistryShared'
 import { openDeviceAs, clearDeviceAs, replaceDevice, recoverDevice, RegistryError, type RegistryCtx } from '@/lib/deviceRegistry'
 import { syncAsReceiptToTicket, createTicketForAsReceipt } from '@/lib/ticket-domains/asReceipt'
-import { AS_OUTCOMES, AS_CATEGORIES, AS_METHODS, type AsOutcome } from '@/lib/asReceiptShared'
+import { AS_OUTCOMES, AS_CATEGORIES, AS_METHODS, AS_DEST_TYPES, type AsOutcome } from '@/lib/asReceiptShared'
 import { nextAsCode } from '@/lib/asReceipt'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
@@ -407,6 +407,8 @@ export interface CreateAsReceiptInput {
   pickupMethod?: string | null
   pickupTrackingNo?: string | null
   preReplace?: boolean
+  destType?: string | null // HOSPITAL / OTHER
+  destInfo?: string | null
   statusId?: number | null // 미지정 시 '접수'
   note?: string | null
   lines: LineInput[]
@@ -471,6 +473,9 @@ export async function createAsReceipt(
   const reporterName = input.reporterName?.trim() || null
   const pickupTrackingNo = input.pickupTrackingNo?.trim() || null
   const preReplace = input.preReplace === true
+  const destType = input.destType ?? null
+  if (destType && !(AS_DEST_TYPES as readonly string[]).includes(destType)) throw new AsServiceError(400, '발송지 구분이 올바르지 않습니다.')
+  const destInfo = input.destInfo?.trim() || null
 
   // 티켓 설명 소스 — 비고 또는 라인 접수사유 상위 3건
   const symptoms = lines.map((l) => l.symptom?.trim()).filter((s): s is string => !!s)
@@ -491,6 +496,8 @@ export async function createAsReceipt(
               pickupMethod,
               pickupTrackingNo,
               preReplace,
+              destType,
+              destInfo,
               statusId,
               note,
               createdById: actor.userId,
