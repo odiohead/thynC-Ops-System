@@ -4,6 +4,24 @@
 
 ---
 
+## 2026-09-07 15:40 | 채널톡 AS접수 자동 등록 — 시트 1분 폴링 + 완료 역기입 (dev2 검증 완료, PROD 배포 진행)
+
+- **설계**(`projects/channeltalk_as_intake_design.md` v3, 당일 확정): 채널톡 ALF 태스크→'thynC VOC 현황' A/S 탭(채널톡 전용 중계 파일, 실측 3,612행+매일 증가)을 1분 폴링. 접수만 시트→시스템, 처리·완료는 시스템에서 수행하고 종결 시 X열(완료여부) 역기입. 컷오버 3612(3613행부터), 이전 행은 마이그 트랙 영역
+- **구현**: ① `createAsReceipt` 등록 코어를 POST 라우트에서 `lib/asReceiptService.ts`로 추출(화면·폴링 공유 — 발번 재시도·라인 매칭·티켓·AS표시 트랜잭션 동일) ② `lib/hospitalNameMatcher.ts` — AS 마이그 검증 별칭 매처 lib 승격 ③ `lib/channeltalkAsSync.ts` — 인입(필수값·병원·시리얼 검증, I열 시리얼별 증상/병동 분배, G+H 수량 대조 경고)+완료 역기입+AI~AL 시스템 기입란 자동 확장(시트가 34열이라 4열 append) ④ `lib/channeltalk-as-scheduler.ts` + instrumentation 등록(AppSetting `channeltalk_as_interval`, 기본 off) ⑤ 봇 계정 '채널톡 접수봇'(USER·SEERS·isActive=false 로그인 차단) + AppSetting 셋업 스크립트 `scripts/setup-channeltalk-as.mts`(dev/prod 모드)
+- **멱등성 2중**: 시트 AI열(공란만 처리) + DB note `[채널톡 r행번호]` 태그(되쓰기 실패 자가 복구 — dev2 E2E에서 실제 발생·복구 실증)
+- **dev2 E2E**(테스트 시트 사본): 정상 등록(병동 폴백·증상 파싱·기기 매칭·티켓 OPEN·CTI 규칙 '내부운영/일반')·병원 미매칭 실패 기입·필수값 누락 실패·보정 후 AI 리셋 재시도 성공·미등록 시리얼 경고 접수·완료 역기입(X=완료) 전부 통과. 실패 행 재시도는 AI 리셋 시에만(무한 루프 없음). 테스트 데이터·시트 정리 완료
+- 검증: tsc 0·eslint 0·힙 4GB 빌드·pm2 재시작·/as-receipts 307·에러 0 (dev2 스케줄러 OFF 유지 — 실시트 폴링은 PROD 단독)
+- 영향: lib/{channeltalkAsSync,channeltalk-as-scheduler,hospitalNameMatcher}.ts(신규), lib/asReceiptService.ts, app/api/as-receipts/route.ts, instrumentation.ts, scripts/setup-channeltalk-as.mts(신규), projects/channeltalk_as_intake_design.md(신규), projects/README.md, README.md
+
+---
+
+## 2026-09-07 15:30 | PROD 재고 LOT 오기입 정정 — ITEM-0003(MP1000F) 903호 MC26010601·MP26010601 → MF26010601 (데이터 전용)
+
+- **사용자 지시**: 903호 산소포화도센서(평가용) LOT 4개 중 MC26010601·MP26010601은 MF26010601 오기입(입고 전표 STK-202607-0040 메모 "MF26010601 잘못작성함"으로 확인) → MF로 이관
+- **조치(PROD, 사전 덤프 `~/backups/db/thync_ops_pre_lot_fix_item3_20260907_062602.dump`)**: 단일 트랜잭션 — 해당 LOT 전표 17건(취소 1건 포함) `lot_no`를 MF26010601로 재표기 → `inventory_stocks` MF 행 수량을 전표 순합으로 재계산(130) → MC·MP 재고 행 삭제. UDI 대장 체크·단품(units) 영향 없음(0건)
+- 결과: 903호 ITEM-0003 재고 — MF26010601 130 · MC26072801 6 · (LOT 없음) 0. 전표 순합 = 재고 일치 검증
+- 영향: PROD DB만(소스 무변경), DEV_HISTORY.md
+
 ## 2026-09-07 13:56 | 울산병원 데이터 정비 — 병동 명칭 통일·1차 계약건 지정 (dev2·PROD)
 
 - **확인(사용자 질의)**: 1차 계약 112세트(심전계 112+산소포화도 112=224대) 전량 식별·등록 확인. 딜 구조 — 1차 DEAL-202509-0013(일반, 25-09-04, 도입 수량 미입력)·2차 DEAL-202608-0006(라이트, 26-08-13, 60+60 수량만·기기 미확보)

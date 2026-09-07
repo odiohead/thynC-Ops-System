@@ -46,6 +46,15 @@ export async function register() {
       console.error('[instrumentation] 심평원 연동 고아 잡 정리 실패:', err)
     }
 
+    // 채널톡 AS접수 시트 폴링 (channeltalk_as_intake_design.md — 주기 channeltalk_as_interval, 기본 off)
+    try {
+      const { startChanneltalkAsScheduler } = await import('@/lib/channeltalk-as-scheduler')
+      const cts = await prisma.appSetting.findUnique({ where: { key: 'channeltalk_as_interval' } })
+      startChanneltalkAsScheduler(cts?.value || 'off')
+    } catch (err) {
+      console.error('[instrumentation] 채널톡 AS 스케줄러 초기화 실패:', err)
+    }
+
     // 위키 청크 인덱스 주기 갱신 (본문 저장은 협업 서버가 하므로 REST 훅만으로는 누락됨)
     // 다른 스케줄러와 달리 기본값이 '10m' — 설정 UI가 없어 'off' 기본이면 아무도 켜지 않는다
     try {

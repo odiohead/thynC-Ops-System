@@ -10,8 +10,9 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { normalizeSerial, todayKst } from '@/lib/deviceRegistryShared'
 import { openDeviceAs, clearDeviceAs, replaceDevice, recoverDevice, RegistryError, type RegistryCtx } from '@/lib/deviceRegistry'
-import { syncAsReceiptToTicket } from '@/lib/ticket-domains/asReceipt'
-import { AS_OUTCOMES, type AsOutcome } from '@/lib/asReceiptShared'
+import { syncAsReceiptToTicket, createTicketForAsReceipt } from '@/lib/ticket-domains/asReceipt'
+import { AS_OUTCOMES, AS_CATEGORIES, AS_METHODS, type AsOutcome } from '@/lib/asReceiptShared'
+import { nextAsCode } from '@/lib/asReceipt'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
@@ -392,4 +393,166 @@ export async function resolveAsLines(
     },
     { timeout: 120000, maxWait: 10000 }
   )
+}
+
+// ── 접수 등록 코어 (2026-09-07 — 채널톡 자동 등록 편입으로 라우트에서 추출) ─────────
+// 화면 등록(POST /api/as-receipts)과 채널톡 시트 폴링(lib/channeltalkAsSync)이 공유하는 단일 경로.
+// 검증 실패는 AsServiceError(400). 발번 충돌(P2002)은 1회 재시도.
+
+export interface CreateAsReceiptInput {
+  hospitalCode: string
+  category?: string
+  receiptDate: Date
+  reporterName?: string | null
+  pickupMethod?: string | null
+  pickupTrackingNo?: string | null
+  preReplace?: boolean
+  statusId?: number | null // 미지정 시 '접수'
+  note?: string | null
+  lines: LineInput[]
+}
+
+export interface CreateAsReceiptResult {
+  id: number
+  asCode: string
+  ticketId: number
+  warnings: string[]
+  hospitalName: string
+}
+
+export async function createAsReceipt(
+  input: CreateAsReceiptInput,
+  actor: { userId: string; name: string }
+): Promise<CreateAsReceiptResult> {
+  const hospitalCode = input.hospitalCode?.trim()
+  if (!hospitalCode) throw new AsServiceError(400, '병원을 선택하세요.')
+  const hospital = await prisma.hospital.findUnique({
+    where: { hospitalCode },
+    select: { hospitalCode: true, hospitalName: true },
+  })
+  if (!hospital) throw new AsServiceError(400, '병원을 찾을 수 없습니다.')
+
+  const category = input.category ?? 'FAULT'
+  if (!(AS_CATEGORIES as readonly string[]).includes(category)) throw new AsServiceError(400, '구분이 올바르지 않습니다.')
+
+  const receiptDate = input.receiptDate
+  if (!(receiptDate instanceof Date) || isNaN(receiptDate.getTime())) throw new AsServiceError(400, '접수일을 입력하세요.')
+
+  const pickupMethod = input.pickupMethod ?? null
+  if (pickupMethod && !(AS_METHODS as readonly string[]).includes(pickupMethod)) {
+    throw new AsServiceError(400, '수거방법이 올바르지 않습니다.')
+  }
+
+  const lines = input.lines
+  if (!lines.length) throw new AsServiceError(400, '기기 시리얼을 1개 이상 입력하세요.')
+  const seen = new Set<string>()
+  for (const l of lines) {
+    const key = l.serial.replace(/\s+/g, '').toUpperCase()
+    if (!key) throw new AsServiceError(400, '시리얼이 비어 있습니다.')
+    if (seen.has(key)) throw new AsServiceError(400, `같은 시리얼이 중복 입력되었습니다: ${key}`)
+    seen.add(key)
+  }
+
+  // 상태 — 지정 시 카테고리 검증, 미지정이면 '접수'
+  let statusId: number | null = null
+  if (input.statusId !== undefined && input.statusId !== null) {
+    const row = Number.isInteger(input.statusId)
+      ? await prisma.statusCode.findFirst({ where: { id: input.statusId, category: 'AS_STATUS' }, select: { id: true } })
+      : null
+    if (!row) throw new AsServiceError(400, '상태가 올바르지 않습니다.')
+    statusId = row.id
+  } else {
+    const open = await prisma.statusCode.findFirst({ where: { category: 'AS_STATUS', name: '접수' }, select: { id: true } })
+    statusId = open?.id ?? null
+  }
+  const statusRow = statusId ? await prisma.statusCode.findUnique({ where: { id: statusId }, select: { name: true } }) : null
+
+  const note = input.note?.trim() || null
+  const reporterName = input.reporterName?.trim() || null
+  const pickupTrackingNo = input.pickupTrackingNo?.trim() || null
+  const preReplace = input.preReplace === true
+
+  // 티켓 설명 소스 — 비고 또는 라인 접수사유 상위 3건
+  const symptoms = lines.map((l) => l.symptom?.trim()).filter((s): s is string => !!s)
+  const description = note ?? (symptoms.length ? symptoms.slice(0, 3).join(' / ') : null)
+
+  // 레코드+라인+연결 티켓+AS 표시 단일 트랜잭션 — 발번 P2002 1회 재시도
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = await prisma.$transaction(
+        async (tx) => {
+          const receipt = await tx.asReceipt.create({
+            data: {
+              asCode: await nextAsCode(tx),
+              hospitalCode: hospital.hospitalCode,
+              category,
+              receiptDate,
+              reporterName,
+              pickupMethod,
+              pickupTrackingNo,
+              preReplace,
+              statusId,
+              note,
+              createdById: actor.userId,
+            },
+          })
+          // 라인 매칭 + 생성
+          const txWarnings: string[] = []
+          const matches = await matchSerials(tx, hospital.hospitalCode, lines.map((l) => l.serial))
+          const flagTargets: { serialNo: string; deviceId: number }[] = []
+          for (let i = 0; i < matches.length; i++) {
+            const m = matches[i]
+            const line = lines[i]
+            const w = matchWarning(m)
+            if (w) txWarnings.push(w)
+            await tx.asReceiptItem.create({
+              data: {
+                receiptId: receipt.id,
+                serialNo: m.serialNo,
+                deviceId: m.deviceId,
+                deviceKind: m.deviceId ? null : line.deviceKind?.trim() || null,
+                wardName: line.wardName?.trim() || m.wardName,
+                symptom: line.symptom?.trim() || null,
+              },
+            })
+            if (m.state === 'ACTIVE_HERE' && !m.asOpen) flagTargets.push({ serialNo: m.serialNo, deviceId: m.deviceId! })
+          }
+          const tid = await createTicketForAsReceipt(tx, {
+            id: receipt.id,
+            asCode: receipt.asCode,
+            hospitalCode: hospital.hospitalCode,
+            hospitalName: hospital.hospitalName,
+            category,
+            statusName: statusRow?.name ?? null,
+            statusId: receipt.statusId,
+            description,
+            resolvedAt: null,
+            createdAt: receipt.createdAt,
+          }, actor.userId, 'domain')
+          // AS 표시 — 접수일 기준, 실패는 경고 (ref 검증이 접수 레코드를 참조하므로 티켓 생성 후 호출 무관)
+          txWarnings.push(
+            ...(await openAsFlags(
+              tx,
+              { asCode: receipt.asCode, hospitalCode: hospital.hospitalCode },
+              flagTargets,
+              { userId: actor.userId, name: actor.name },
+              receipt.receiptDate.toISOString().slice(0, 10)
+            ))
+          )
+          return { receipt, tid, txWarnings }
+        },
+        { timeout: 60000, maxWait: 10000 }
+      )
+      return {
+        id: result.receipt.id,
+        asCode: result.receipt.asCode,
+        ticketId: result.tid,
+        warnings: result.txWarnings,
+        hospitalName: hospital.hospitalName,
+      }
+    } catch (err) {
+      if (attempt === 0 && err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') continue
+      throw err
+    }
+  }
 }
