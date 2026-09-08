@@ -83,8 +83,8 @@ function cell(row: unknown[], idx: number): string {
   return String(row[idx] ?? '').trim()
 }
 
-/** 접수사유(I열) — 시리얼별 줄에서 증상·병동 분해. "SERIAL / 병동 / 증상" | "SERIAL / 증상" | "SERIAL 증상" */
-function parseSymptoms(text: string, serials: string[]): Map<string, { symptom: string | null; ward: string | null }> {
+/** 접수사유(I열) — 시리얼별 줄에서 증상·병동 분해. "SERIAL / 병동 / 증상" | "SERIAL / 증상" | "SERIAL 증상" (백필 스크립트 재사용을 위해 export) */
+export function parseSymptoms(text: string, serials: string[]): Map<string, { symptom: string | null; ward: string | null }> {
   const out = new Map<string, { symptom: string | null; ward: string | null }>()
   const remain: string[] = []
   for (const line0 of text.split(/[\r\n]+/)) {
