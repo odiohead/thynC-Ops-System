@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-09-08 14:25 | PROD 배포: RBAC 카탈로그 v1.5 (e763086) + 영업 BigInt 500 수정 (d2c92bc)
+
+- **절차**: dev2 분리 커밋(d2c92bc fix(sales)·e763086 feat(rbac)) → push → PROD pull → 힙 4GB 빌드 → `pm2 restart thync-prod` (코드 전용 — 스키마·마이그·시드 없음, 사전 덤프 생략·일일 백업 의존)
+- **확인**: /as-receipts·/settings/roles·/tickets·/hospitals 전부 307, 에러 로그 0. 채널톡 AS 폴링 스케줄러 1m 재기동·mail/wiki-chunk 스케줄러 정상
+- dev2는 역할 관리 화면에서 신규 9키 노출 사용자 확인 완료 후 배포
+- 후속: 역할 신설·권한 매핑은 사용자 직접 수행 예정. gateway_planner.access 사용 시 nav 메뉴 허용 권한·역할 조정 필요(메뉴 관리)
+
+---
+
 ## 2026-09-08 14:10 | RBAC 카탈로그 v1.5 — 미편입 모듈 일괄 편입 (신규 9키 + vehicle.manage 확장, dev2·PROD 배포 대기)
 
 - **배경(사용자 지시)**: 역할 관리에 AS업무·출고업무 등 최근 기능이 미반영 — "현재 기능의 권한을 모두 추가, 역할 신설·매핑은 사용자가 수행"
