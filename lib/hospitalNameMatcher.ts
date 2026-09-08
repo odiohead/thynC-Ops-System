@@ -19,19 +19,20 @@ export interface HospitalMatcher {
 
 const norm = (x: string) =>
   x.replace(/^\d{8}[_ ]?/, '').replace(/[_ ]?\d+차$/, '').replace(/\(.*?\)/g, '')
-    .replace(/^(의료법인|재단법인|사회복지법인|학교법인)\S*재단/, '').replace(/^\(의\)|^\(재\)|^\(의료\)/, '').replace(/\s+/g, '')
+    .replace(/^(의료법인|재단법인|사회복지법인|학교법인)\S*재단/, '').replace(/^\(의\)|^\(재\)|^\(의료\)/, '')
+    .replace(/\s+/g, '').toUpperCase() // 영문 대소문자 표기 흔들림 대응 (하남S/하남s — 2026-09-08)
 
 const aliases = (rawName0: string): string[] => {
   const rawName = rawName0.normalize('NFC')
   const out = new Set<string>()
   const b = norm(rawName)
   if (b) out.add(b)
-  else out.add(rawName.replace(/\s+/g, '')) // 법인명 전체가 병원명(예: 의료법인한양의료재단) — 정규화가 전부 소거되면 원명 사용
+  else out.add(rawName.replace(/\s+/g, '').toUpperCase()) // 법인명 전체가 병원명(예: 의료법인한양의료재단) — 정규화가 전부 소거되면 원명 사용
   const sh = b.replace(/학교|의과대학|대학\s*교/g, '')
   if (sh) out.add(sh)
   const parens = rawName.match(/\(([^)]+)\)/g) ?? []
   for (let i = 0; i < parens.length; i++) {
-    const inner = parens[i].slice(1, -1).replace(/\s+/g, '')
+    const inner = parens[i].slice(1, -1).replace(/\s+/g, '').toUpperCase()
     if (inner.length >= 3 && /병원|의료원|센터/.test(inner)) { out.add(inner); out.add(inner.replace(/학교|의과대학/g, '')) }
   }
   return Array.from(out)
