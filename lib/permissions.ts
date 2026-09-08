@@ -20,7 +20,7 @@ export const PERMISSIONS = {
     label: '차량 관리',
     module: '차량',
     description:
-      '차량 마스터 등록·수정·삭제·활성 토글 (설정 > 차량 관리). 예약·운행일지는 원래 전 직원 가능이라 무관',
+      '차량 마스터 등록·수정·삭제·활성 토글 (설정 > 차량 관리) + 타인 예약 수정·삭제·반납 처리, 반납 취소, 타인 운행일지 수정·삭제, 반납·운행일지의 운전자 타인 지정 (카탈로그 v1.5 배선 확장). 본인 예약·반납·운행일지는 원래 USER 등급 전원 가능이라 무관',
   },
   'sales.access': {
     label: '영업 정보 접근',
@@ -78,6 +78,61 @@ export const PERMISSIONS = {
     module: '기기 현황',
     description:
       '기기 이벤트 정정·취소, 임포트 배치 취소·업무일자 정정, 개체 식별정보 보정, 병동 비활성·삭제 (조회는 전원, 등록·회수·이동·교체·임포트는 USER 등급 전원)',
+  },
+  // 카탈로그 v1.5 (2026-09-08) — 미편입 모듈 일괄 편입
+  'as_receipt.admin': {
+    label: 'AS업무 관리',
+    module: 'AS업무',
+    description:
+      '종결(완료·취소) 후 AS접수 수정, 타인 등록 건 삭제·종결 후 삭제. 조회는 전원, 등록·종결 전 수정·라인 처리(결과 확정)는 원래 USER 등급 전원 가능이라 무관',
+  },
+  'stock_out.admin': {
+    label: '출고업무 관리',
+    module: '출고업무',
+    description:
+      '타인 등록 출고요청 수정·삭제, 종결(완료·취소) 후 수정·삭제. 조회는 전원, 등록·본인 건 종결 전 수정은 원래 USER 등급 전원 가능. 출고 처리(재고 차감·기기 등록)는 재고 권한(inventory.manage 등) 축이라 별개',
+  },
+  'voc.admin': {
+    label: 'VOC접수 관리',
+    module: 'VOC접수',
+    description:
+      'VOC접수 삭제(연결 티켓 동반 삭제). 조회는 전원, 등록·수정·처리결과 작성은 원래 USER 등급 전원 가능이라 무관',
+  },
+  'ticket.admin': {
+    label: '티켓 관리',
+    module: '티켓',
+    description:
+      '티켓 삭제, 타인 코멘트 수정·삭제, 티켓 지표의 담당자별 처리량 열람. 조회는 전원, 생성·전이·배정·코멘트 작성은 원래 USER 등급 전원 가능이라 무관',
+  },
+  'gateway_planner.access': {
+    label: 'GW 배치 플래너 접근',
+    module: 'GW 배치 플래너',
+    description:
+      'GW 배치 플래너 전체(잡 목록·상세·삭제·도면 업로드·스케일 확정·재배치·재분석·PPTX 생성) — 원래 ADMIN 등급 전용 모듈의 접근 개방(USER 등급 이상). 플래너 운영 파라미터 설정(설정 > GW 배치 규칙)은 ADMIN 등급 필요(불포함)',
+  },
+  'hospital.admin': {
+    label: '병원 관리',
+    module: '병원',
+    description:
+      '병원 삭제, 병원 목록 Google Drive 내보내기, 병원 Excel 가져오기 버튼 노출(가져오기 API 자체는 원래 USER 등급 전원). 등록·수정은 원래 USER 등급 전원 가능이라 무관. 병원 업무 일괄 이전·HIRA 동기화는 SUPER_ADMIN 전용 유지(불포함)',
+  },
+  'wiki.admin': {
+    label: '위키 관리',
+    module: '위키',
+    description:
+      '보호 페이지(프로젝트 이슈노트·병원노트 연동) 삭제, 페이지 AI 검색 제외 토글, 타인 댓글 수정·삭제. 일반 페이지 작성·수정·삭제·댓글은 원래 USER 등급 전원 가능이라 무관',
+  },
+  'consultation.admin': {
+    label: '상담이력 관리',
+    module: '상담이력',
+    description:
+      '타인 상담이력 수정·삭제(본인 건은 원래 가능). 단 SEERS 소속 요건은 별개 축이라 이 권한으로 풀리지 않음(소속 외 계정은 조회 자체 불가)',
+  },
+  'ai_assistant.admin': {
+    label: 'AI 어시스턴트 관리',
+    module: 'AI 어시스턴트',
+    description:
+      '답변 피드백 통계 열람, 타인 대화 세션 삭제. 어시스턴트 사용 자체는 SEERS 소속 축이라 별개(이 권한으로 풀리지 않음). 세션 상세 열람은 원래 본인만 가능(ADMIN 포함)이라 무관, 런타임 설정은 ADMIN 등급 필요(불포함)',
   },
 } as const
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 
 type Ctx = { params: { id: string } }
 
@@ -11,8 +12,12 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   const existing = await prisma.wikiComment.findUnique({ where: { id: params.id } })
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  // 본인 댓글이거나 ADMIN 이상만 수정 가능
-  if (existing.authorId !== authUser.userId && !isAdminOrAbove(authUser.role)) {
+  // 본인 댓글이거나 ADMIN 이상 또는 (USER 이상 + wiki.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (
+    existing.authorId !== authUser.userId &&
+    !isAdminOrAbove(authUser.role) &&
+    !(isUserOrAbove(authUser.role) && (await hasPermission(authUser, 'wiki.admin')))
+  ) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -40,7 +45,12 @@ export async function DELETE(request: NextRequest, { params }: Ctx) {
   const existing = await prisma.wikiComment.findUnique({ where: { id: params.id } })
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  if (existing.authorId !== authUser.userId && !isAdminOrAbove(authUser.role)) {
+  // 본인 댓글이거나 ADMIN 이상 또는 (USER 이상 + wiki.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (
+    existing.authorId !== authUser.userId &&
+    !isAdminOrAbove(authUser.role) &&
+    !(isUserOrAbove(authUser.role) && (await hasPermission(authUser, 'wiki.admin')))
+  ) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

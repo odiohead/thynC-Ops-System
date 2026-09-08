@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { recalcVehicleLogs, checkOdometerConsistency } from '@/lib/vehicleLog'
 
@@ -32,7 +33,12 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (resv.returnedAt) {
     return NextResponse.json({ error: '이미 반납 완료된 예약입니다.' }, { status: 400 })
   }
-  if (resv.userId !== user.userId && !isAdminOrAbove(user.role)) {
+  // 타인 예약 반납: ADMIN 이상 또는 (USER 이상 + vehicle.manage 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (
+    resv.userId !== user.userId &&
+    !isAdminOrAbove(user.role) &&
+    !(isUserOrAbove(user.role) && (await hasPermission(user, 'vehicle.manage')))
+  ) {
     return NextResponse.json({ error: '본인 예약만 반납할 수 있습니다.' }, { status: 403 })
   }
 
@@ -51,9 +57,9 @@ export async function POST(request: NextRequest, { params }: Params) {
   const purpose = body.purpose !== undefined ? (body.purpose?.trim() || null) : resv.purpose
   const destination = body.destination !== undefined ? (body.destination?.trim() || null) : resv.destination
   const note = typeof body.note === 'string' ? (body.note.trim() || null) : null
-  // 운전자: 기본 예약자, ADMIN만 변경 가능
+  // 운전자: 기본 예약자, ADMIN 이상 또는 (USER 이상 + vehicle.manage 권한)만 변경 가능 — RBAC v1.5 가산, VIEWER 제외
   let driverId = resv.userId
-  if (body.driverId && isAdminOrAbove(user.role)) driverId = body.driverId
+  if (body.driverId && (isAdminOrAbove(user.role) || (isUserOrAbove(user.role) && (await hasPermission(user, 'vehicle.manage'))))) driverId = body.driverId
 
   const conflictMsg = await checkOdometerConsistency(resv.vehicleId, endAt, endOdometer)
   if (conflictMsg) return NextResponse.json({ error: conflictMsg }, { status: 400 })
@@ -99,7 +105,8 @@ export async function POST(request: NextRequest, { params }: Params) {
 export async function DELETE(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!isAdminOrAbove(user.role)) {
+  // ADMIN 이상 또는 (USER 이상 + vehicle.manage 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (!isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'vehicle.manage')))) {
     return NextResponse.json({ error: '반납 취소는 관리자만 가능합니다.' }, { status: 403 })
   }
 

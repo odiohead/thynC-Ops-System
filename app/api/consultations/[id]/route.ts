@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove, JWTPayload } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove, JWTPayload } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { checkConsultationRead, extractConsultationTitle } from '@/lib/consultation'
 
@@ -31,8 +32,12 @@ const detailSelect = {
   hospital: { select: { hospitalCode: true, hospitalName: true } },
 } as const
 
-function canModify(user: JWTPayload, consultedById: string): boolean {
-  return isAdminOrAbove(user.role) || consultedById === user.userId
+async function canModify(user: JWTPayload, consultedById: string): Promise<boolean> {
+  // ADMIN 이상 또는 (USER 이상 + consultation.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (isAdminOrAbove(user.role) || (isUserOrAbove(user.role) && (await hasPermission(user, 'consultation.admin')))) {
+    return true
+  }
+  return consultedById === user.userId
 }
 
 async function loadOrDeny(request: NextRequest, params: Params['params']) {
@@ -63,7 +68,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const { user, consultation } = loaded
 
   if (user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  if (!canModify(user, consultation.consultedById)) {
+  if (!(await canModify(user, consultation.consultedById))) {
     return NextResponse.json({ error: '본인이 저장한 상담이력만 수정할 수 있습니다.' }, { status: 403 })
   }
 
@@ -120,7 +125,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   const { user, consultation } = loaded
 
   if (user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  if (!canModify(user, consultation.consultedById)) {
+  if (!(await canModify(user, consultation.consultedById))) {
     return NextResponse.json({ error: '본인이 저장한 상담이력만 삭제할 수 있습니다.' }, { status: 403 })
   }
 

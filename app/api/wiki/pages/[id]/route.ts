@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { deleteFromS3 } from '@/lib/s3'
 import { getIssuePageProtection } from '@/lib/wiki/projectIssueNote'
@@ -319,7 +320,12 @@ export async function DELETE(request: NextRequest, { params }: Ctx) {
       { status: 400 },
     )
   }
-  if (protection === 'issue' && !isAdminOrAbove(authUser.role)) {
+  // ADMIN 이상 또는 (USER 이상 + wiki.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (
+    protection === 'issue' &&
+    !isAdminOrAbove(authUser.role) &&
+    !(isUserOrAbove(authUser.role) && (await hasPermission(authUser, 'wiki.admin')))
+  ) {
     return NextResponse.json(
       { error: '프로젝트 이슈노트 페이지는 관리자만 삭제할 수 있습니다.' },
       { status: 403 },
@@ -332,7 +338,12 @@ export async function DELETE(request: NextRequest, { params }: Ctx) {
       { status: 400 },
     )
   }
-  if (noteProtection === 'note' && !isAdminOrAbove(authUser.role)) {
+  // ADMIN 이상 또는 (USER 이상 + wiki.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (
+    noteProtection === 'note' &&
+    !isAdminOrAbove(authUser.role) &&
+    !(isUserOrAbove(authUser.role) && (await hasPermission(authUser, 'wiki.admin')))
+  ) {
     return NextResponse.json(
       { error: '병원 노트 페이지는 관리자만 삭제할 수 있습니다.' },
       { status: 403 },

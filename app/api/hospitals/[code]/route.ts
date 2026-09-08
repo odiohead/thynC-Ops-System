@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Params = { params: { code: string } }
@@ -124,7 +125,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
 export async function DELETE(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
-  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  // ADMIN 이상 또는 (USER 이상 + hospital.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (!user || (!isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'hospital.admin'))))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const [projectCount, siteVisitCount, deviceCount, deviceEventCount, wardCount, importBatchWithEventsCount] = await Promise.all([
     prisma.project.count({ where: { hospitalCode: params.code } }),

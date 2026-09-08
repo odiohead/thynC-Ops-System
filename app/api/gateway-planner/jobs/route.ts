@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { prisma } from '@/lib/prisma'
 import { uploadToS3 } from '@/lib/s3'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
@@ -13,7 +14,8 @@ const ALLOWED_EXT = ['pdf', 'jpg', 'jpeg', 'png']
 // 잡 목록
 export async function GET(request: NextRequest) {
   const user = await getAuthUser(request)
-  if (!user || !isAdminOrAbove(user.role)) {
+  // ADMIN 이상 또는 (USER 이상 + gateway_planner.access 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (!user || (!isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'gateway_planner.access'))))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   const jobs = await prisma.gatewayPlanJob.findMany({
@@ -31,7 +33,8 @@ export async function GET(request: NextRequest) {
 // 도면 업로드 + 잡 생성 (백그라운드 파이프라인 시작)
 export async function POST(request: NextRequest) {
   const user = await getAuthUser(request)
-  if (!user || !isAdminOrAbove(user.role)) {
+  // ADMIN 이상 또는 (USER 이상 + gateway_planner.access 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (!user || (!isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'gateway_planner.access'))))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

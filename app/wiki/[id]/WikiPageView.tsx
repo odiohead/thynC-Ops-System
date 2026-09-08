@@ -56,6 +56,8 @@ type Props = {
   issueProtection: 'root' | 'issue' | null
   /** AI 어시스턴트 검색 제외 여부 (하위 페이지까지 cascade) */
   aiExcluded: boolean
+  /** USER 이상 + wiki.admin 권한 보유 여부 — RBAC v1.5 가산 (서버에서 판정) */
+  wikiAdminPerm?: boolean
 }
 
 /** 사용자 id로 안정적인 커서 색 생성 (협업 awareness용) */
@@ -86,11 +88,16 @@ export default function WikiPageView({
   currentUserName,
   issueProtection,
   aiExcluded,
+  wikiAdminPerm,
 }: Props) {
   const router = useRouter()
   const toast = useToast()
   const editable = currentUserRole !== 'VIEWER'
-  const isAdmin = currentUserRole === 'ADMIN' || currentUserRole === 'SUPER_ADMIN'
+  // ADMIN 이상 또는 (USER 이상 + wiki.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  const isAdmin =
+    currentUserRole === 'ADMIN' ||
+    currentUserRole === 'SUPER_ADMIN' ||
+    (currentUserRole !== 'VIEWER' && !!wikiAdminPerm)
   const [excluded, setExcluded] = useState(aiExcluded)
 
   const toggleAiExclude = useCallback(async () => {
@@ -438,7 +445,7 @@ export default function WikiPageView({
             <OverflowMenu
               items={[
                 { label: '버전 기록', icon: '🕘', onClick: () => setShowVersions(true) },
-                // AI 어시스턴트 검색 제외 토글 — ADMIN 이상만. 카테고리에 걸면 하위 전체 제외
+                // AI 어시스턴트 검색 제외 토글 — ADMIN 이상 또는 wiki.admin 권한. 카테고리에 걸면 하위 전체 제외
                 ...(isAdmin
                   ? [
                       {
@@ -449,7 +456,7 @@ export default function WikiPageView({
                     ]
                   : []),
                 // 프로젝트 이슈노트 보호 — 루트: 이동·복제·템플릿·삭제 전부 숨김,
-                // 이슈노트 페이지: 이동·템플릿 숨김, 삭제는 ADMIN 이상만 (서버도 동일 검증)
+                // 이슈노트 페이지: 이동·템플릿 숨김, 삭제는 ADMIN 이상 또는 wiki.admin 권한 (서버도 동일 검증)
                 ...(editable && issueProtection !== 'root'
                   ? [
                       ...(issueProtection !== 'issue'
@@ -572,6 +579,7 @@ export default function WikiPageView({
             pageId={id}
             currentUserId={currentUserId}
             currentUserRole={currentUserRole}
+            wikiAdminPerm={wikiAdminPerm}
           />
         </div>
       )}

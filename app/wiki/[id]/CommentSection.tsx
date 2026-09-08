@@ -14,9 +14,11 @@ type Props = {
   pageId: string
   currentUserId: string
   currentUserRole: string
+  /** USER 이상 + wiki.admin 권한 보유 여부 — RBAC v1.5 가산 (서버에서 판정) */
+  wikiAdminPerm?: boolean
 }
 
-export default function CommentSection({ pageId, currentUserId, currentUserRole }: Props) {
+export default function CommentSection({ pageId, currentUserId, currentUserRole, wikiAdminPerm }: Props) {
   const [comments, setComments] = useState<Comment[]>([])
   const [loading, setLoading] = useState(true)
   const [draft, setDraft] = useState('')
@@ -26,7 +28,11 @@ export default function CommentSection({ pageId, currentUserId, currentUserRole 
   const [editDraft, setEditDraft] = useState('')
 
   const canWrite = currentUserRole !== 'VIEWER'
-  const isAdminish = currentUserRole === 'ADMIN' || currentUserRole === 'SUPER_ADMIN'
+  // ADMIN 이상 또는 (USER 이상 + wiki.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  const isAdminish =
+    currentUserRole === 'ADMIN' ||
+    currentUserRole === 'SUPER_ADMIN' ||
+    (currentUserRole !== 'VIEWER' && !!wikiAdminPerm)
 
   const load = async () => {
     setLoading(true)

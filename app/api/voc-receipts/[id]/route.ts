@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { sanitizeRichTextHtml } from '@/lib/richtext'
 import { syncVocToTicket } from '@/lib/ticket-domains/voc'
@@ -148,7 +149,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
 export async function DELETE(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
-  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  // ADMIN 이상 또는 (USER 이상 + voc.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (!user || (!isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'voc.admin'))))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const id = parseInt(params.id)
   if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })

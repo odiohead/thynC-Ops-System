@@ -33,21 +33,25 @@ export function isTerminalAsStatus(ticketStatus: TicketStatus | null | undefined
 /** 수정·삭제 권한: ADMIN 이상 항상 / USER는 본인 등록 + 종결(완료·취소) 전 / VIEWER 불가 (SOR canEdit 패턴 — §13-1 등록자 기준) */
 export function canEditAsReceipt(
   user: { userId: string; role: string },
-  receipt: { createdById: string | null; status: { ticketStatus: TicketStatus | null } | null }
+  receipt: { createdById: string | null; status: { ticketStatus: TicketStatus | null } | null },
+  adminPerm?: boolean // ADMIN 이상 또는 (USER 이상 + as_receipt.admin 권한) — RBAC v1.5 가산, VIEWER 제외
 ): boolean {
   // 2026-09-07 개정 (CX 확인사항 #4): 종결 전에는 USER 전원 수정 가능 (구 규칙: 등록자 본인만)
   if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true
   if (user.role === 'VIEWER') return false
+  if (adminPerm) return true
   return !isTerminalAsStatus(receipt.status?.ticketStatus)
 }
 
 /** 삭제는 구 규칙 유지 — ADMIN 항상 / USER는 본인 등록 + 종결 전 (§13-1) */
 export function canDeleteAsReceipt(
   user: { userId: string; role: string },
-  receipt: { createdById: string | null; status: { ticketStatus: TicketStatus | null } | null }
+  receipt: { createdById: string | null; status: { ticketStatus: TicketStatus | null } | null },
+  adminPerm?: boolean // ADMIN 이상 또는 (USER 이상 + as_receipt.admin 권한) — RBAC v1.5 가산, VIEWER 제외
 ): boolean {
   if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true
   if (user.role === 'VIEWER') return false
+  if (adminPerm) return true
   if (receipt.createdById !== user.userId) return false
   return !isTerminalAsStatus(receipt.status?.ticketStatus)
 }

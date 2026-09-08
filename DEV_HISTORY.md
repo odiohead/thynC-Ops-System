@@ -4,7 +4,26 @@
 
 ---
 
-## 2026-09-08 09:20 | 시트 갭 백필 — 마이그 이후 미반영 76건 선별 등록 (PROD 데이터 작업, 실패 0)
+## 2026-09-08 14:10 | RBAC 카탈로그 v1.5 — 미편입 모듈 일괄 편입 (신규 9키 + vehicle.manage 확장, dev2·PROD 배포 대기)
+
+- **배경(사용자 지시)**: 역할 관리에 AS업무·출고업무 등 최근 기능이 미반영 — "현재 기능의 권한을 모두 추가, 역할 신설·매핑은 사용자가 수행"
+- **조사**: 전 모듈 접근 게이트 전수 조사(7영역 병렬) → ADMIN-only 동작 식별, SEERS 소속·SUPER_ADMIN·설정 마스터·소유권 축은 편입 비대상으로 분리
+- **신규 9키** (`lib/permissions.ts` v1.5): `as_receipt.admin`·`stock_out.admin`·`voc.admin`·`ticket.admin`·`gateway_planner.access`·`hospital.admin`·`wiki.admin`·`consultation.admin`·`ai_assistant.admin` + `vehicle.manage` 배선 확장(반납 취소·타인 예약 수정/삭제/반납·타인 운행일지 수정/삭제·운전자 타인 지정). 상세 범위는 README §RBAC Lite v1.5
+- **배선**: 표준형 `ADMIN 이상 OR (USER 이상 + hasPermission)` 가산 — API 26개 라우트 + UI 미러(클라이언트는 `/api/auth/me`의 `permissions[]`, 서버 컴포넌트는 `hasPermission` 직접). 동기 헬퍼(`canEdit/DeleteAsReceipt`·`canEditStockOutRequest`)는 adminPerm 옵셔널 파라미터 방식(클라이언트 번들 보호). 본인·종결·SEERS·vehicleReservationBlocked 축 전부 보존
+- **검증(적대적 교차 리뷰 10개 관점)**: 회귀 0·VIEWER 침범 0·키 오타 0. 발견 blocker 1건 수정 — 차량 반납 POST 소유권 게이트 미확장(UI만 열려 403 불일치) → 서버 확장. minor 2건 수정 — GW플래너 설정 링크 ADMIN만 노출, vehicle.manage 설명 과대 기술(예약 운전자 지정은 필드 자체 없음) 정정. 구식 주석 4곳·403 문구 1곳 정리
+- 검증: tsc 0·eslint 0(경고 1건은 기존). 빌드·재시작은 미실행(사용자 요청 대기)
+- **후속(사용자 판단)**: ① nav 노출 — `gateway_planner.access` 보유자에게 메뉴를 보이려면 메뉴 관리(SUPER_ADMIN)에서 해당 메뉴 허용 권한에 키 추가 필요(단 Navigation은 역할 AND 권한 판정이라 USER 등급 허용도 함께 필요) ② 별건 발견 — GET /api/vehicles가 무인증 응답(기존 이슈) ③ 시공사 마스터 CUD는 설정 축으로 편입 제외(필요 시 별도 결정)
+- 영향: lib/{permissions,asReceipt,stockOut}.ts, app/api — as-receipts/[id]·stock-out-requests/[id]·voc-receipts/[id]·tickets/[id](+logs/[logId]·metrics)·gateway-planner/jobs 전체·vehicle-reservations/[id](+return)·vehicle-logs·hospitals/[code]·drive/export/hospitals·wiki/pages/[id](+ai-exclude)·wiki/comments/[id]·consultations/[id]·ai-assistant/{feedback,sessions/[id]}, UI — as-receipts/[id]·stock-out-requests/[id]·voc/[id]·tickets/[code]·TicketLogPanel·tickets/dashboard·gateway-planner·vehicle-reservations·hospitals(+[code])·wiki/[id] 뷰 3종, README.md
+
+---
+
+## 2026-09-08 13:40 | 병원 영업 정보 조회 BigInt 직렬화 500 수정 (dev2, PROD 배포 대기)
+
+- **배경**: 9/7 채널톡 배포 중 PROD 로그에서 발견된 별건 — `GET /api/hospitals/[code]/sales`가 `TypeError: Do not know how to serialize a BigInt`로 500
+- **원인**: 통합 GET 응답의 딜 직렬화에서 BigInt 8필드 중 3필드(`amount*`)만 `toAmount` 변환 — 대웅 금액 계열 5필드(`daewoongAmountTotal/Product/Construction/Actual/Service`)가 `...d` 스프레드로 BigInt 그대로 응답에 포함돼 JSON.stringify 실패. 대웅 금액이 있는 딜 보유 병원에서만 발생 (dev 기준 딜 251건 중 233건·병원 206곳 해당 — 사실상 딜 보유 병원 전체의 영업 섹션 조회 불가였음)
+- **수정**: 누락 5필드에 `toAmount` 적용. 다른 소비처 점검 — 딜 mutation 라우트(스칼라만 응답)·`app/sales/*` 서버 컴포넌트·`lib/ai/tools.ts`는 기변환 확인, 이 라우트만 누락이었음
+- 검증: tsc 0·eslint 0
+- 영향: app/api/hospitals/[code]/sales/route.ts
 
 - **배경(사용자 질의→지시)**: 마이그(~9/2 접수 추출) 이후·폴링 컷오버(3613) 이전에 시트에 추가된 행이 미반영 — "없는 것만 추가 등록, 중복 금지"
 - **대조(일회용 tmp-backfill-gap.mts, 접수일+시리얼 완전 일치 기준, r3400~3612)**: 기반영 130 / **미반영 76**(9/3~9/7 신규 73 + 8월 마이그 잔여 3) / 부분 매칭 7

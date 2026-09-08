@@ -73,11 +73,11 @@ export default function StockOutDetailPage() {
   const [busy, setBusy] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
 
-  const [me, setMe] = useState<{ id: string; role: string } | null>(null)
+  const [me, setMe] = useState<{ id: string; role: string; permissions?: string[] } | null>(null)
   const [canManage, setCanManage] = useState(false) // 재고 처리 권한 (출고 처리 카드 게이트)
 
   useEffect(() => {
-    fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setMe({ id: d.id ?? d.userId ?? '', role: d.role }))
+    fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setMe({ id: d.id ?? d.userId ?? '', role: d.role, permissions: d.permissions }))
     fetch('/api/settings/stock-out-status').then((r) => (r.ok ? r.json() : null)).then((d) => setStatuses(d?.statusCodes ?? []))
     fetch('/api/inventory/can-manage').then((r) => (r.ok ? r.json() : null)).then((d) => setCanManage(!!d?.canManage))
   }, [])
@@ -99,8 +99,10 @@ export default function StockOutDetailPage() {
 
   const isAdmin = !!me && (me.role === 'ADMIN' || me.role === 'SUPER_ADMIN')
   const isTerminal = req?.status?.ticketStatus === 'RESOLVED' || req?.status?.ticketStatus === 'CLOSED'
+  // ADMIN 이상 또는 (USER 이상 + stock_out.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  const stockOutAdmin = !!me && me.role !== 'VIEWER' && (me.permissions ?? []).includes('stock_out.admin')
   // 서버 canEditStockOutRequest와 동일 판정 (설계 §2-6)
-  const canEdit = !!me && !!req && (isAdmin || (me.role !== 'VIEWER' && req.createdBy?.id === me.id && !isTerminal))
+  const canEdit = !!me && !!req && (isAdmin || stockOutAdmin || (me.role !== 'VIEWER' && req.createdBy?.id === me.id && !isTerminal))
 
   async function changeStatus(statusId: number) {
     if (!req) return

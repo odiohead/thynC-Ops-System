@@ -11,6 +11,7 @@ interface Me {
   name: string
   role: 'SUPER_ADMIN' | 'ADMIN' | 'USER' | 'VIEWER'
   vehicleReservationBlocked?: boolean
+  permissions?: string[]
 }
 
 const DAY_LABELS = ['월', '화', '수', '목', '금', '토', '일']
@@ -62,7 +63,10 @@ export default function VehicleReservationsPage() {
     initialDate?: string
   } | null>(null)
 
-  const isAdmin = me != null && (me.role === 'SUPER_ADMIN' || me.role === 'ADMIN')
+  // ADMIN 이상 또는 (VIEWER 제외 + vehicle.manage 권한) — RBAC v1.5 가산
+  const isAdmin =
+    me != null &&
+    (me.role === 'SUPER_ADMIN' || me.role === 'ADMIN' || (me.role !== 'VIEWER' && (me.permissions ?? []).includes('vehicle.manage')))
   const isBlocked = me != null && me.vehicleReservationBlocked === true
   const canReserve = me != null && me.role !== 'VIEWER' && !isBlocked
 
@@ -84,7 +88,7 @@ export default function VehicleReservationsPage() {
   useEffect(() => {
     fetch('/api/auth/me')
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => setMe(data?.id ? { id: data.id, name: data.name, role: data.role, vehicleReservationBlocked: data.vehicleReservationBlocked } : null))
+      .then((data) => setMe(data?.id ? { id: data.id, name: data.name, role: data.role, vehicleReservationBlocked: data.vehicleReservationBlocked, permissions: data.permissions } : null))
       .catch(() => setMe(null))
     fetch('/api/vehicles?activeOnly=true')
       .then((res) => res.json())

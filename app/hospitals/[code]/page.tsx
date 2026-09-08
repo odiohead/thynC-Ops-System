@@ -2,7 +2,8 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
-import { verifyToken, isAdminOrAbove } from '@/lib/auth'
+import { verifyToken, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import DeleteButton from './_components/DeleteButton'
 import TransferAllWorkButton from '@/app/components/TransferAllWorkButton'
 import DaewoongStaffTab from './_components/DaewoongStaffTab'
@@ -42,6 +43,9 @@ export default async function HospitalDetailPage({ params }: PageProps) {
   const user = token ? await verifyToken(token) : null
   const isAdmin = !!user && user.role !== 'VIEWER'
   const showSales = await canAccessSales(user) // 영업 섹션 — ADMIN 이상 + SEERS 소속만
+  // ADMIN 이상 또는 (USER 이상 + consultation.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  const canManageConsultations =
+    !!user && (isAdminOrAbove(user.role) || (isUserOrAbove(user.role) && (await hasPermission(user, 'consultation.admin'))))
 
   const [hospital, projects, siteVisits, installPlans, maintenances, statusCodes, dealProductTypes] = await Promise.all([
     prisma.hospital.findUnique({
@@ -327,7 +331,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
         <ConsultationsCard
           hospitalCode={hospital.hospitalCode}
           currentUserId={user?.userId ?? null}
-          isAdmin={isAdminOrAbove(user?.role ?? '')}
+          isAdmin={canManageConsultations}
         />
 
         {/* 병원 노트 — 위키 '병원 노트' 페이지 임베드 (사람이 쓰는 병원 특이사항 메모) */}

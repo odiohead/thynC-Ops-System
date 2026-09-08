@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
-import { verifyToken, isAdminOrAbove } from '@/lib/auth'
+import { verifyToken, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import StatusBadge from '@/app/components/StatusBadge'
 
 export const dynamic = 'force-dynamic'
@@ -39,7 +40,10 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
   const cookieStore = cookies()
   const token = cookieStore.get('auth-token')?.value
   const user = token ? await verifyToken(token) : null
-  const isAdmin = user ? isAdminOrAbove(user.role) : false
+  // ADMIN 이상 또는 (USER 이상 + hospital.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  const isAdmin = user
+    ? isAdminOrAbove(user.role) || (isUserOrAbove(user.role) && (await hasPermission(user, 'hospital.admin')))
+    : false
 
   const page = Math.max(1, parseInt((searchParams.page as string) ?? '1'))
   const search = (searchParams.search as string) ?? ''

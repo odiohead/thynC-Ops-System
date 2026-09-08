@@ -41,10 +41,12 @@ export function isTerminalStockOutStatus(ticketStatus: TicketStatus | null | und
 /** 수정·삭제 권한: ADMIN 이상 항상 / USER는 본인 요청 + 종결(완료·취소) 전 / VIEWER 불가 */
 export function canEditStockOutRequest(
   user: { userId: string; role: string },
-  req: { createdById: string | null; status: { ticketStatus: TicketStatus | null } | null }
+  req: { createdById: string | null; status: { ticketStatus: TicketStatus | null } | null },
+  adminPerm?: boolean // stock_out.admin 권한 — RBAC v1.5 가산, ADMIN 동일 취급 (VIEWER 선차단 유지)
 ): boolean {
   if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true
   if (user.role === 'VIEWER') return false
+  if (adminPerm) return true
   if (req.createdById !== user.userId) return false
   return !isTerminalStockOutStatus(req.status?.ticketStatus)
 }

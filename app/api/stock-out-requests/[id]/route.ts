@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { canEditStockOutRequest } from '@/lib/stockOut'
 import { syncStockOutToTicket } from '@/lib/ticket-domains/stockOut'
@@ -83,7 +84,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
   })
   if (!existing) return NextResponse.json({ error: '출고요청을 찾을 수 없습니다.' }, { status: 404 })
 
-  if (!canEditStockOutRequest(user, existing)) {
+  // ADMIN 이상 또는 (USER 이상 + stock_out.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (!canEditStockOutRequest(user, existing, await hasPermission(user, 'stock_out.admin'))) {
     return NextResponse.json({ error: '수정 권한이 없습니다. 본인 요청은 완료·취소 전까지만 수정할 수 있습니다.' }, { status: 403 })
   }
 
@@ -162,7 +164,8 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   })
   if (!existing) return NextResponse.json({ error: '출고요청을 찾을 수 없습니다.' }, { status: 404 })
 
-  if (!canEditStockOutRequest(user, existing)) {
+  // ADMIN 이상 또는 (USER 이상 + stock_out.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (!canEditStockOutRequest(user, existing, await hasPermission(user, 'stock_out.admin'))) {
     return NextResponse.json({ error: '삭제 권한이 없습니다. 본인 요청은 완료·취소 전까지만 삭제할 수 있습니다.' }, { status: 403 })
   }
 

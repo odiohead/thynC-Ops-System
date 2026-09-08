@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { recalcVehicleLogs, checkOdometerConsistency } from '@/lib/vehicleLog'
 
@@ -69,9 +70,9 @@ export async function POST(request: NextRequest) {
   const vehicle = await prisma.vehicle.findUnique({ where: { id: vehicleId } })
   if (!vehicle) return NextResponse.json({ error: '차량을 찾을 수 없습니다.' }, { status: 404 })
 
-  // 운전자: 기본 작성자 본인, ADMIN만 타인 지정 가능
+  // 운전자: 기본 작성자 본인, ADMIN 이상 또는 (USER 이상 + vehicle.manage 권한)만 타인 지정 가능 — RBAC v1.5 가산, VIEWER 제외
   let driverId = user.userId
-  if (body.driverId && isAdminOrAbove(user.role)) driverId = body.driverId
+  if (body.driverId && (isAdminOrAbove(user.role) || (isUserOrAbove(user.role) && (await hasPermission(user, 'vehicle.manage'))))) driverId = body.driverId
 
   const conflictMsg = await checkOdometerConsistency(vehicleId, endAt, endOdometer)
   if (conflictMsg) return NextResponse.json({ error: conflictMsg }, { status: 400 })

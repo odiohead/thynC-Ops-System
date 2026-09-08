@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { PERSONAL_QUEUE_NAME } from '@/lib/ticket-shared'
 import { isDomainRefType } from '@/lib/ticket-domains/meta'
 
@@ -123,7 +124,8 @@ export async function GET(request: NextRequest) {
 
   // ── 담당별 처리량 (ADMIN 이상만 — 사용자 확정) ──────────────
   let perOwner: { ownerId: string; name: string; closed: number; avgDays: number | null; openLoad: number }[] | undefined
-  if (isAdminOrAbove(user.role)) {
+  // ADMIN 이상 또는 (USER 이상 + ticket.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (isAdminOrAbove(user.role) || (isUserOrAbove(user.role) && (await hasPermission(user, 'ticket.admin')))) {
     const rows = await prisma.$queryRaw<
       { owner_id: string; name: string; closed: bigint; avg_days: number | null; open_load: bigint }[]
     >(Prisma.sql`

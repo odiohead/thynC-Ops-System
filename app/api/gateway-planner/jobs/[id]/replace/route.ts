@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { prisma } from '@/lib/prisma'
 import { runPlacement } from '@/lib/gateway-planner/runner'
 import { GwScaleCandidate } from '@/lib/gateway-planner/types'
@@ -9,7 +10,8 @@ export const dynamic = 'force-dynamic'
 // 현재 규칙으로 재배치 (AI 재호출 없음)
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   const user = await getAuthUser(request)
-  if (!user || !isAdminOrAbove(user.role)) {
+  // ADMIN 이상 또는 (USER 이상 + gateway_planner.access 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (!user || (!isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'gateway_planner.access'))))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   const id = parseInt(params.id, 10)

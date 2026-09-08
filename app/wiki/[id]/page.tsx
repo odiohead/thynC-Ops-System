@@ -1,7 +1,8 @@
 import { notFound } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
-import { verifyToken } from '@/lib/auth'
+import { verifyToken, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import type { PartialBlock } from '@blocknote/core'
 import { getIssuePageProtection } from '@/lib/wiki/projectIssueNote'
 import WikiPageView from './WikiPageView'
@@ -50,6 +51,10 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
   if (page.pageType === 'html') {
     const token = cookies().get('auth-token')?.value
     const jwt = token ? await verifyToken(token) : null
+    // USER 이상 + wiki.admin 권한 — RBAC v1.5 가산, VIEWER 제외 (UI 게이트용)
+    const wikiAdminPerm = jwt
+      ? isUserOrAbove(jwt.role) && (await hasPermission(jwt, 'wiki.admin'))
+      : false
     let favorited = false
     if (jwt?.userId) {
       const fav = await prisma.wikiFavorite.findUnique({
@@ -73,6 +78,7 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
         favorited={favorited}
         currentUserRole={jwt?.role ?? 'VIEWER'}
         aiExcluded={page.aiExcluded}
+        wikiAdminPerm={wikiAdminPerm}
       />
     )
   }
@@ -135,6 +141,10 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
   // 즐겨찾기 + 열람 로그 (현재 사용자)
   const token = cookies().get('auth-token')?.value
   const jwt = token ? await verifyToken(token) : null
+  // USER 이상 + wiki.admin 권한 — RBAC v1.5 가산, VIEWER 제외 (UI 게이트용)
+  const wikiAdminPerm = jwt
+    ? isUserOrAbove(jwt.role) && (await hasPermission(jwt, 'wiki.admin'))
+    : false
   let favorited = false
   if (jwt?.userId) {
     const fav = await prisma.wikiFavorite.findUnique({
@@ -170,6 +180,7 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
       currentUserRole={jwt?.role ?? 'VIEWER'}
       currentUserName={jwt?.name ?? ''}
       aiExcluded={page.aiExcluded}
+      wikiAdminPerm={wikiAdminPerm}
     />
   )
 }

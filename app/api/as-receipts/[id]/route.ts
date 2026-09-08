@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getAuthUser, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { canEditAsReceipt, canDeleteAsReceipt } from '@/lib/asReceipt'
 import { AS_CATEGORIES, AS_METHODS, AS_DEST_TYPES } from '@/lib/asReceiptShared'
@@ -82,7 +83,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
   })
   if (!existing) return NextResponse.json({ error: 'AS접수를 찾을 수 없습니다.' }, { status: 404 })
 
-  if (!canEditAsReceipt(user, existing)) {
+  // ADMIN 이상 또는 (USER 이상 + as_receipt.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  const adminPerm = isUserOrAbove(user.role) && (await hasPermission(user, 'as_receipt.admin'))
+  if (!canEditAsReceipt(user, existing, adminPerm)) {
     return NextResponse.json({ error: '수정 권한이 없습니다. 본인 등록 건은 완료·취소 전까지만 수정할 수 있습니다.' }, { status: 403 })
   }
 
@@ -204,7 +207,9 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   })
   if (!existing) return NextResponse.json({ error: 'AS접수를 찾을 수 없습니다.' }, { status: 404 })
 
-  if (!canDeleteAsReceipt(user, existing)) {
+  // ADMIN 이상 또는 (USER 이상 + as_receipt.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  const adminPerm = isUserOrAbove(user.role) && (await hasPermission(user, 'as_receipt.admin'))
+  if (!canDeleteAsReceipt(user, existing, adminPerm)) {
     return NextResponse.json({ error: '삭제 권한이 없습니다. 본인 등록 건은 완료·취소 전까지만 삭제할 수 있습니다.' }, { status: 403 })
   }
 

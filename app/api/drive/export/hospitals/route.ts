@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { verifyToken, isAdminOrAbove } from '@/lib/auth'
+import { verifyToken, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { createFormattedSheet, listFilesByNamePrefix } from '@/lib/googleDrive'
 
 const STATUS_LABEL: Record<string, string> = {
@@ -13,7 +14,8 @@ async function requireAdmin(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value
   if (!token) return null
   const payload = await verifyToken(token)
-  if (!payload || !isAdminOrAbove(payload.role)) return null
+  // ADMIN 이상 또는 (USER 이상 + hospital.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (!payload || (!isAdminOrAbove(payload.role) && !(isUserOrAbove(payload.role) && (await hasPermission(payload, 'hospital.admin'))))) return null
   return payload
 }
 
@@ -27,7 +29,7 @@ function formatDate(date: Date): string {
 export async function POST(req: NextRequest) {
   try {
     const admin = await requireAdmin(req)
-    if (!admin) return NextResponse.json({ error: '관리자만 사용할 수 있습니다.' }, { status: 403 })
+    if (!admin) return NextResponse.json({ error: '관리자 또는 병원 관리 권한 보유자만 사용할 수 있습니다.' }, { status: 403 })
 
     // 전체 병원 목록 조회
     const hospitals = await prisma.hospital.findMany({

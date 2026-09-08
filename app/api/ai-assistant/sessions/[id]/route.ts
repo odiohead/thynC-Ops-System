@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { checkAiAccess } from '@/lib/ai/access'
 import { TOOL_LABELS } from '@/lib/ai/tools'
 
@@ -67,7 +68,10 @@ export async function DELETE(request: NextRequest, { params }: Ctx) {
 
   const session = await prisma.aiChatSession.findUnique({ where: { id: params.id } })
   if (!session) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  if (session.userId !== authUser.userId && !isAdminOrAbove(authUser.role)) {
+  // ADMIN 이상 또는 (USER 이상 + ai_assistant.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  const isManager =
+    isAdminOrAbove(authUser.role) || (isUserOrAbove(authUser.role) && (await hasPermission(authUser, 'ai_assistant.admin')))
+  if (session.userId !== authUser.userId && !isManager) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

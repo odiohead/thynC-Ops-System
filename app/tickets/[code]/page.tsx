@@ -70,7 +70,7 @@ interface QueueMember { userId: string; user: UserRef }
 interface Queue { id: number; name: string; isActive: boolean; members?: QueueMember[] }
 interface AppUser { id: string; name: string; isActive: boolean }
 interface PendingReason { id: number; name: string; isActive: boolean }
-interface Me { userId: string; role: string }
+interface Me { userId: string; role: string; permissions?: string[] }
 
 const ALL_SEVERITIES = Object.keys(TICKET_SEVERITY_LABELS) as TicketSeverity[]
 
@@ -131,6 +131,8 @@ export default function TicketDetailPage() {
 
   const canWrite = !!me && me.role !== 'VIEWER'
   const isAdmin = !!me && (me.role === 'ADMIN' || me.role === 'SUPER_ADMIN')
+  // ADMIN 이상 또는 (USER 이상 + ticket.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  const isTicketAdmin = isAdmin || (!!me && me.role !== 'VIEWER' && (me.permissions ?? []).includes('ticket.admin'))
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/tickets/${encodeURIComponent(code)}`)
@@ -145,7 +147,7 @@ export default function TicketDetailPage() {
 
   useEffect(() => {
     fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => {
-      if (d?.id) setMe({ userId: d.id, role: d.role ?? 'VIEWER' })
+      if (d?.id) setMe({ userId: d.id, role: d.role ?? 'VIEWER', permissions: d.permissions ?? [] })
     })
     fetch('/api/settings/ticket-queues')
       .then((r) => (r.ok ? r.json() : { queues: [] }))
@@ -499,7 +501,7 @@ export default function TicketDetailPage() {
         <div className="mb-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3.5 sm:px-6 sm:py-4">
             <h2 className="text-sm font-semibold text-gray-700">Details</h2>
-            {isAdmin && (
+            {isTicketAdmin && (
               <button
                 type="button"
                 onClick={handleDeleteTicket}

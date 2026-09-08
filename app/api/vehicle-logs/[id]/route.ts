@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { recalcVehicleLogs, checkOdometerConsistency } from '@/lib/vehicleLog'
 
@@ -44,7 +45,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if (!before) return NextResponse.json({ error: '운행일지를 찾을 수 없습니다.' }, { status: 404 })
 
   const isOwner = before.driverId === user.userId || before.createdById === user.userId
-  if (!isOwner && !isAdminOrAbove(user.role)) {
+  // 본인 또는 ADMIN 이상 또는 (USER 이상 + vehicle.manage 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (!isOwner && !isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'vehicle.manage')))) {
     return NextResponse.json({ error: '본인 운행일지만 수정할 수 있습니다.' }, { status: 403 })
   }
 
@@ -63,9 +65,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: '최종 주행거리를 올바르게 입력해주세요.' }, { status: 400 })
   }
 
-  // 운전자 변경: ADMIN만
+  // 운전자 변경: ADMIN 이상 또는 (USER 이상 + vehicle.manage 권한) — RBAC v1.5 가산, VIEWER 제외
   let driverId = before.driverId
-  if (body.driverId !== undefined && body.driverId && isAdminOrAbove(user.role)) driverId = body.driverId
+  if (body.driverId !== undefined && body.driverId && (isAdminOrAbove(user.role) || (isUserOrAbove(user.role) && (await hasPermission(user, 'vehicle.manage'))))) driverId = body.driverId
 
   const conflictMsg = await checkOdometerConsistency(before.vehicleId, endAt, endOdometer, id)
   if (conflictMsg) return NextResponse.json({ error: conflictMsg }, { status: 400 })
@@ -120,7 +122,8 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   if (!before) return NextResponse.json({ error: '운행일지를 찾을 수 없습니다.' }, { status: 404 })
 
   const isOwner = before.driverId === user.userId || before.createdById === user.userId
-  if (!isOwner && !isAdminOrAbove(user.role)) {
+  // 본인 또는 ADMIN 이상 또는 (USER 이상 + vehicle.manage 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (!isOwner && !isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'vehicle.manage')))) {
     return NextResponse.json({ error: '본인 운행일지만 삭제할 수 있습니다.' }, { status: 403 })
   }
 

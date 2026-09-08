@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { prisma } from '@/lib/prisma'
 import { getSignedUrl, deleteFromS3 } from '@/lib/s3'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
@@ -9,7 +10,8 @@ export const dynamic = 'force-dynamic'
 // 잡 상세 (상태 폴링 겸용)
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const user = await getAuthUser(request)
-  if (!user || !isAdminOrAbove(user.role)) {
+  // ADMIN 이상 또는 (USER 이상 + gateway_planner.access 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (!user || (!isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'gateway_planner.access'))))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   const id = parseInt(params.id, 10)
@@ -27,7 +29,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 // 잡 삭제 (S3 파일 포함)
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   const user = await getAuthUser(request)
-  if (!user || !isAdminOrAbove(user.role)) {
+  // ADMIN 이상 또는 (USER 이상 + gateway_planner.access 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (!user || (!isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'gateway_planner.access'))))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   const id = parseInt(params.id, 10)

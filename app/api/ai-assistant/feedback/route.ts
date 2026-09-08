@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { checkAiAccess } from '@/lib/ai/access'
 
 export const dynamic = 'force-dynamic'
@@ -62,7 +63,8 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const user = await getAuthUser(request)
-  if (!user || !isAdminOrAbove(user.role)) {
+  // ADMIN 이상 또는 (USER 이상 + ai_assistant.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (!user || (!isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'ai_assistant.admin'))))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   const since = new Date(Date.now() - 90 * 24 * 3600 * 1000)

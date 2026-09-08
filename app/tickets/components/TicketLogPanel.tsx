@@ -16,7 +16,7 @@ interface LogEntry {
   author: { id: string; name: string } | null
 }
 
-interface Me { userId: string; role: string }
+interface Me { userId: string; role: string; permissions?: string[] }
 
 interface Props {
   ticketId: number
@@ -81,7 +81,7 @@ export default function TicketLogPanel({
   useEffect(() => {
     if (meProp === undefined) {
       fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => {
-        if (d?.id) setSelfMe({ userId: d.id, role: d.role ?? 'VIEWER' })
+        if (d?.id) setSelfMe({ userId: d.id, role: d.role ?? 'VIEWER', permissions: d.permissions ?? [] })
       })
     }
     if (!userNamesProp) {
@@ -117,6 +117,8 @@ export default function TicketLogPanel({
 
   const canWrite = !!me && me.role !== 'VIEWER'
   const isAdmin = !!me && (me.role === 'ADMIN' || me.role === 'SUPER_ADMIN')
+  // ADMIN 이상 또는 (USER 이상 + ticket.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  const isTicketAdmin = isAdmin || (!!me && me.role !== 'VIEWER' && (me.permissions ?? []).includes('ticket.admin'))
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/tickets/${ticketId}/logs`)
@@ -128,7 +130,7 @@ export default function TicketLogPanel({
 
   function canModify(log: LogEntry): boolean {
     if (!me || log.logType !== 'comment') return false
-    return isAdmin || (log.authorId !== null && log.authorId === me.userId)
+    return isTicketAdmin || (log.authorId !== null && log.authorId === me.userId)
   }
 
   /** 시스템 이벤트 payload → 한 줄 요약 */

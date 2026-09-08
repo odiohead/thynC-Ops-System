@@ -3,7 +3,7 @@
 /**
  * 티켓 프로세스 지표 대시보드 (P12 — ticket_dev_schedule.md)
  * 데이터: GET /api/tickets/metrics (필드 기반 전 기간 + 체류는 statusChangedAt 보완)
- * 담당별 처리량 표는 ADMIN 이상에게만 응답에 포함(perOwner) — 있으면 렌더.
+ * 담당별 처리량 표는 ADMIN 이상 또는 ticket.admin 권한 보유자에게만 응답에 포함(perOwner) — 있으면 렌더.
  * 차트 팔레트는 useChartTheme(라이트/다크 분기) — dataviz 검증 통과 조합만 사용:
  *   2시리즈(생성/종결) light #2C5CE5/#10B981 · dark #4B7BFF/#059669
  */

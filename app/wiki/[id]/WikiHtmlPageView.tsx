@@ -17,6 +17,8 @@ type Props = {
   favorited: boolean
   currentUserRole: string
   aiExcluded: boolean
+  /** USER 이상 + wiki.admin 권한 보유 여부 — RBAC v1.5 가산 (서버에서 판정) */
+  wikiAdminPerm?: boolean
 }
 
 /**
@@ -34,11 +36,16 @@ export default function WikiHtmlPageView({
   favorited,
   currentUserRole,
   aiExcluded,
+  wikiAdminPerm,
 }: Props) {
   const router = useRouter()
   const toast = useToast()
   const editable = currentUserRole !== 'VIEWER'
-  const isAdmin = currentUserRole === 'ADMIN' || currentUserRole === 'SUPER_ADMIN'
+  // ADMIN 이상 또는 (USER 이상 + wiki.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  const isAdmin =
+    currentUserRole === 'ADMIN' ||
+    currentUserRole === 'SUPER_ADMIN' ||
+    (currentUserRole !== 'VIEWER' && !!wikiAdminPerm)
   const [excluded, setExcluded] = useState(aiExcluded)
 
   const toggleAiExclude = async () => {

@@ -38,6 +38,7 @@ export default function GatewayPlannerPage() {
   const [page, setPage] = useState('1')
   const [uploading, setUploading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false) // 설정 링크 노출용 — 배치 규칙 설정은 ADMIN 등급 전용(gateway_planner.access 불포함)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const fetchJobs = useCallback(async () => {
@@ -55,6 +56,10 @@ export default function GatewayPlannerPage() {
 
   useEffect(() => {
     fetchJobs()
+    fetch('/api/auth/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setIsAdmin(d?.role === 'ADMIN' || d?.role === 'SUPER_ADMIN'))
+      .catch(() => {})
   }, [fetchJobs])
 
   // 진행 중 잡이 있으면 5초 폴링
@@ -247,9 +252,11 @@ export default function GatewayPlannerPage() {
         </div>
       )}
 
-      <div className="mt-4 text-xs text-gray-400">
-        배치 규칙(커버리지·병실 개수 등)은 <Link href="/settings/gateway-planner" className="text-blue-500 hover:underline">설정 &gt; GW 배치 규칙</Link>에서 변경할 수 있습니다.
-      </div>
+      {isAdmin && (
+        <div className="mt-4 text-xs text-gray-400">
+          배치 규칙(커버리지·병실 개수 등)은 <Link href="/settings/gateway-planner" className="text-blue-500 hover:underline">설정 &gt; GW 배치 규칙</Link>에서 변경할 수 있습니다.
+        </div>
+      )}
     </div>
   )
 }

@@ -87,9 +87,11 @@ export default function VocDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const [me, setMe] = useState<{ role: string } | null>(null)
+  const [me, setMe] = useState<{ role: string; permissions?: string[] } | null>(null)
   const canWrite = !!me && me.role !== 'VIEWER'
   const isAdmin = !!me && (me.role === 'ADMIN' || me.role === 'SUPER_ADMIN')
+  // ADMIN 이상 또는 (USER 이상 + voc.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  const canDelete = isAdmin || (!!me && me.role !== 'VIEWER' && (me.permissions ?? []).includes('voc.admin'))
 
   const [editOpen, setEditOpen] = useState(false)
   const [form, setForm] = useState<VocFormValue>(emptyVocForm)
@@ -100,7 +102,7 @@ export default function VocDetailPage() {
   const [childMenuOpen, setChildMenuOpen] = useState(false)
 
   useEffect(() => {
-    fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setMe({ role: d.role }))
+    fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setMe({ role: d.role, permissions: d.permissions }))
   }, [])
 
   const load = useCallback(async () => {
@@ -225,7 +227,7 @@ export default function VocDetailPage() {
           {canWrite && !editOpen && (
             <button type="button" onClick={openEdit} disabled={busy} className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">수정</button>
           )}
-          {isAdmin && (
+          {canDelete && (
             <button type="button" onClick={removeVoc} disabled={busy} className="rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-500 hover:bg-red-50">삭제</button>
           )}
         </div>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Params = { params: { id: string } }
@@ -48,7 +49,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if (before.status !== 'RESERVED') {
     return NextResponse.json({ error: '취소된 예약은 수정할 수 없습니다.' }, { status: 400 })
   }
-  if (before.userId !== user.userId && !isAdminOrAbove(user.role)) {
+  // 본인 또는 ADMIN 이상 또는 (USER 이상 + vehicle.manage 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (before.userId !== user.userId && !isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'vehicle.manage')))) {
     return NextResponse.json({ error: '본인 예약만 수정할 수 있습니다.' }, { status: 403 })
   }
 
@@ -149,7 +151,8 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   if (before.status !== 'RESERVED') {
     return NextResponse.json({ error: '이미 취소된 예약입니다.' }, { status: 400 })
   }
-  if (before.userId !== user.userId && !isAdminOrAbove(user.role)) {
+  // 본인 또는 ADMIN 이상 또는 (USER 이상 + vehicle.manage 권한) — RBAC v1.5 가산, VIEWER 제외
+  if (before.userId !== user.userId && !isAdminOrAbove(user.role) && !(isUserOrAbove(user.role) && (await hasPermission(user, 'vehicle.manage')))) {
     return NextResponse.json({ error: '본인 예약만 취소할 수 있습니다.' }, { status: 403 })
   }
 

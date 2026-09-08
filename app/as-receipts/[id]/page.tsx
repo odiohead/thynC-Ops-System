@@ -126,7 +126,7 @@ export default function AsReceiptDetailPage() {
   const [warnings, setWarnings] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
-  const [me, setMe] = useState<{ id: string; role: string } | null>(null)
+  const [me, setMe] = useState<{ id: string; role: string; permissions?: string[] } | null>(null)
 
   // 진행 기록 (물류)
   const [logistics, setLogistics] = useState({ pickedUpAt: '', receivedAt: '', expectedShipDate: '', destType: '', destInfo: '', pickupDestDiffers: false, pickupDestInfo: '' })
@@ -141,7 +141,7 @@ export default function AsReceiptDetailPage() {
   const [processNote, setProcessNote] = useState('') // 처리내용 (CX #18 — 선택 라인 공통 기록)
 
   useEffect(() => {
-    fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setMe({ id: d.id ?? d.userId ?? '', role: d.role }))
+    fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setMe({ id: d.id ?? d.userId ?? '', role: d.role, permissions: d.permissions }))
     fetch('/api/settings/as-status').then((r) => (r.ok ? r.json() : null)).then((d) => setStatuses(d?.statusCodes ?? []))
   }, [])
 
@@ -173,10 +173,12 @@ export default function AsReceiptDetailPage() {
 
   const isAdmin = !!me && (me.role === 'ADMIN' || me.role === 'SUPER_ADMIN')
   const isTerminal = req?.status?.ticketStatus === 'RESOLVED' || req?.status?.ticketStatus === 'CLOSED'
+  // ADMIN 이상 또는 (USER 이상 + as_receipt.admin 권한) — RBAC v1.5 가산, VIEWER 제외
+  const adminPerm = !!me && me.role !== 'VIEWER' && (me.permissions ?? []).includes('as_receipt.admin')
   // 서버 canEditAsReceipt와 동일 판정 (2026-09-07 개정 CX #4 — 종결 전 USER 전원)
-  const canEdit = !!me && !!req && (isAdmin || (me.role !== 'VIEWER' && !isTerminal))
+  const canEdit = !!me && !!req && (isAdmin || adminPerm || (me.role !== 'VIEWER' && !isTerminal))
   // 삭제는 구 규칙 유지 — ADMIN 항상 / USER 본인 등록 + 종결 전
-  const canDelete = !!me && !!req && (isAdmin || (me.role !== 'VIEWER' && req.createdBy?.id === me.id && !isTerminal))
+  const canDelete = !!me && !!req && (isAdmin || adminPerm || (me.role !== 'VIEWER' && req.createdBy?.id === me.id && !isTerminal))
   // 라인 처리 — USER 이상 전원 (별도 처리 풀 없음, 설계 §7)
   const canResolve = !!me && me.role !== 'VIEWER' && !isTerminal
   const openItems = req?.items.filter((i) => !i.outcome) ?? []
