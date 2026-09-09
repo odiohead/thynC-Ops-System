@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-09-09 10:05 | PROD 배포: 사이니지 /dashboard 개선 (2997337) — 영업현황 보드·자동 복구·2분 리로드·장기 로그인
+
+- **절차**: dev2 커밋(2997337)·push → PROD pull → 힙 4GB 빌드 → `pm2 restart thync-prod` (코드 전용 — 스키마·마이그·패키지·시드 없음, 사전 덤프 생략·일일 백업 의존)
+- **확인**: localhost — /api/health 200·/sw.js 200·/dashboard-offline.html 200·/dashboard 307·/api/sales/dashboard 307·/login 200. 공개 HTTPS(ops.seersthync.com) — /api/health·/sw.js(application/javascript)·/dashboard-offline.html 전부 200 (서비스 워커 등록 조건 충족). 배포발 에러 로그 0 (기존 Slack lookup 경고·stale 클라이언트 Server Action 경고만)
+- **사이니지 적용 안내**: 사이니지 브라우저에서 '로그인 상태 유지 (1년)' 체크 후 로그인 → `/dashboard` 접속(첫 접속 시 서비스 워커 설치) → 우측 상단 보드 선택. 계정 비활성화는 장기 토큰 페이지 접근에 즉시 반영되지 않으므로 사이니지 전용 계정 권장
+- 영향: PROD 소스(2997337), DEV_HISTORY.md
+
+---
+
 ## 2026-09-09 09:30 | 사이니지 /dashboard 개선 — 영업현황 보드 선택 + 서버 재시작 자동 복구 + 2분 리로드 (dev2 빌드·재시작 완료)
 
 - **① 보드 선택(사용자 요청)**: 헤더 우측 상단 세그먼트 `운영현황 | 영업현황`. 영업현황은 `/sales/dashboard`의 `SalesDashboardA`를 그대로 재사용(스크롤 컨테이너) — 이를 위해 페이지 서버 컴포넌트에 있던 딜 집계 로직을 `lib/salesDashboardData.ts`(`buildSalesDashboardData`)로 추출하고 `GET /api/sales/dashboard` 신설(게이트 `checkSalesAccess` 동일). 선택은 `?view=sales`로 URL 동기화(리로드·폴백 복귀 후 유지). 영업 데이터는 영업 뷰일 때만 폴링
