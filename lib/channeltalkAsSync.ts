@@ -6,6 +6,9 @@
  *  ① 접수 인입: 컷오버 이후 AI(처리상태) 공란 행 → 파싱·병원 매칭 → createAsReceipt(기존 경로: 티켓·AS표시·알림·SLA)
  *     → AI~AL 되쓰기 (등록완료/실패·AS코드·메모·시각)
  *  ② 완료 역기입: AI='등록완료' & X(완료여부) 미종결 행 → 접수가 종결(resolvedAt)이면 X에 완료/취소 기입
+ *  ③ 발송정보 역기입(2026-09-09 — 출하정보 안내메시지 발송용): AI='등록완료' 행 전부 대상, 발송된 라인(수리반환·교체)이 있으면
+ *     R(수리품 택배발송)=송장 목록, W(발송기기)=출고 시리얼 목록(수리반환→원 시리얼, 교체→교체기 시리얼)을 개행 구분으로 기입.
+ *     완료 시점이 아니라 발송정보 입력 시점부터 반영되며, 시트 값과 다를 때만 씀(부분 발송 누적 갱신·매 틱 무의미 쓰기 방지)
  *
  * 멱등성: 1차 = AI열 공란 여부. 2차 = note의 [채널톡 r{행}] 태그로 DB 기존재 검사(되쓰기 실패 자가 복구).
  * 행 삭제로 인한 행번호 변동은 전제상 없음(시트에 사람 개입 없음 — 설계 §9 D4).
@@ -29,7 +32,10 @@ const KEY_TAB = 'channeltalk_as_sheet_tab' // 기본 'A/S'
 // 0-index 열 위치 (시트 실측 계약 — 설계 §2.1)
 const C = {
   DATE: 0, HOSP: 1, WARD: 2, CATEGORY: 3, KIND: 4, SERIALS: 5, CNT_ECG: 6, CNT_SPO2: 7,
-  SYMPTOM: 8, REPORTER: 9, AGENT: 10, PICKUP_DATE: 12, PRE_REPLACE: 15, DEST_TYPE: 18, DEST_INFO: 19,
+  SYMPTOM: 8, REPORTER: 9, AGENT: 10, PICKUP_DATE: 12, PRE_REPLACE: 15,
+  SHIP_TRACKING: 17, // R 수리품 택배발송 — 역기입 대상 (③)
+  DEST_TYPE: 18, DEST_INFO: 19,
+  SHIP_SERIALS: 22, // W 발송기기 — 역기입 대상 (③)
   DONE: 23, // X 완료여부 — 역기입 대상
   SYS_STATE: 34, SYS_CODE: 35, SYS_MEMO: 36, SYS_AT: 37, // AI~AL 시스템 기입란
 } as const
@@ -41,6 +47,7 @@ export interface ChanneltalkSyncResult {
   registered: number
   failed: number
   completedBack: number
+  shipBack: number
 }
 
 function sheetsClient() {
@@ -121,7 +128,7 @@ async function loadSettings() {
 }
 
 export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
-  const result: ChanneltalkSyncResult = { scanned: 0, registered: 0, failed: 0, completedBack: 0 }
+  const result: ChanneltalkSyncResult = { scanned: 0, registered: 0, failed: 0, completedBack: 0, shipBack: 0 }
   const { sheetId, cutover, tab } = await loadSettings()
   if (!sheetId) {
     console.warn('[channeltalk-as] channeltalk_as_sheet_id 미설정 — 스킵')
@@ -274,6 +281,42 @@ export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
       rangeOf(rowNo, 'AL', [nowKst()])
       result.completedBack++
       console.log(`[channeltalk-as] r${rowNo} 완료 역기입: ${cell(r, C.SYS_CODE)} → ${label}`)
+    }
+  }
+
+  // ── ③ 발송정보 역기입 (R 송장 · W 발송기기 — 발송 입력 시점부터, 시트 값과 다를 때만) ──
+  const okRows = rows
+    .map((r, i) => ({ r, rowNo: cutover + 1 + i }))
+    .filter(({ r }) => cell(r, C.SYS_STATE) === SYS_STATE.OK && cell(r, C.SYS_CODE))
+  if (okRows.length) {
+    const shipped = await prisma.asReceipt.findMany({
+      where: { asCode: { in: okRows.map(({ r }) => cell(r, C.SYS_CODE)) }, items: { some: { shippedAt: { not: null } } } },
+      select: {
+        asCode: true,
+        items: {
+          where: { shippedAt: { not: null }, outcome: { in: ['REPAIR_RETURN', 'REPLACE'] } },
+          select: { serialNo: true, newSerialNo: true, outcome: true, shipTrackingNo: true },
+          orderBy: { id: 'asc' },
+        },
+      },
+    })
+    const byCode = new Map(shipped.map((x) => [x.asCode, x]))
+    for (const { r, rowNo } of okRows) {
+      const rec = byCode.get(cell(r, C.SYS_CODE))
+      if (!rec || !rec.items.length) continue
+      const serials = rec.items.map((i) => (i.outcome === 'REPLACE' ? i.newSerialNo : i.serialNo)).filter((v): v is string => !!v)
+      const trackings = Array.from(new Set(rec.items.map((i) => i.shipTrackingNo?.trim()).filter((v): v is string => !!v)))
+      const wantW = Array.from(new Set(serials)).join('\n')
+      const wantR = trackings.join('\n')
+      const norm = (v: string) => v.replace(/\r/g, '').trim()
+      let changed = false
+      if (wantW && norm(cell(r, C.SHIP_SERIALS)) !== wantW) { rangeOf(rowNo, 'W', [wantW]); changed = true }
+      if (wantR && norm(cell(r, C.SHIP_TRACKING)) !== wantR) { rangeOf(rowNo, 'R', [wantR]); changed = true }
+      if (changed) {
+        rangeOf(rowNo, 'AL', [nowKst()])
+        result.shipBack++
+        console.log(`[channeltalk-as] r${rowNo} 발송정보 역기입: ${rec.asCode} → W ${serials.length}대${wantR ? `, R ${trackings.length}건` : ''}`)
+      }
     }
   }
 

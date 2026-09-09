@@ -3,14 +3,15 @@ import { Prisma } from '@prisma/client'
 import * as XLSX from 'xlsx'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_OUTCOME_LABELS, AS_SHIP_METHOD_LABELS, type AsCategory, type AsMethod, type AsOutcome } from '@/lib/asReceiptShared'
+import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_DEST_TYPE_LABELS, AS_OUTCOME_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, type AsCategory, type AsDestType, type AsMethod, type AsOutcome } from '@/lib/asReceiptShared'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * AS업무 Excel 내보내기 (CX #9 — 발송 일자별 안내 메시지 발송 등에 활용)
  * 목록과 동일 필터(접수일·상태·구분·검색) + 발송일 기간(shippedFrom/To — 라인 shippedAt).
- * 행 = 기기 라인 1건 (접수 헤더 정보 반복). 최대 10,000라인.
+ * 행 = 기기 라인 1건 (접수 헤더 정보 반복 — 화면 입력 항목 전부 포함).
+ * 상한: 접수 조회 무제한, 라인 100,000행(안전장치 — 2026-09-09 구 3,000접수/10,000라인 상한 제거).
  */
 export async function GET(request: NextRequest) {
   const user = await getAuthUser(request)
@@ -52,6 +53,7 @@ export async function GET(request: NextRequest) {
     include: {
       hospital: { select: { hospitalName: true } },
       status: { select: { name: true } },
+      createdBy: { select: { name: true } },
       ticket: { select: { ticketCode: true, owner: { select: { name: true } } } },
       items: {
         select: {
@@ -63,8 +65,9 @@ export async function GET(request: NextRequest) {
       },
     },
     orderBy: { receiptDate: 'desc' },
-    take: 3000,
   })
+
+  const MAX_ROWS = 100_000
 
   const d10 = (v: Date | null) => (v ? v.toISOString().slice(0, 10) : '')
   const rows: Record<string, string>[] = []
@@ -83,6 +86,16 @@ export async function GET(request: NextRequest) {
         구분: AS_CATEGORY_LABELS[r.category as AsCategory] ?? r.category,
         상태: r.status?.name ?? '',
         고객명: r.reporterName ?? '',
+        선교체: r.preReplace ? '선교체' : '일반',
+        수거방법: r.pickupMethod ? (AS_PICKUP_METHOD_LABELS[r.pickupMethod as AsMethod] ?? r.pickupMethod) : '',
+        수거송장: r.pickupTrackingNo ?? '',
+        수거일: d10(r.pickedUpAt),
+        입고일: d10(r.receivedAt),
+        발송지구분: r.destType ? (AS_DEST_TYPE_LABELS[r.destType as AsDestType] ?? r.destType) : '',
+        발송지정보: r.destInfo ?? '',
+        회수지상이: r.pickupDestDiffers ? 'Y' : '',
+        회수지정보: r.pickupDestInfo ?? '',
+        예상출하일: d10(r.expectedShipDate),
         시리얼: i.serialNo,
         기기종류: i.device?.deviceInfo.deviceName ?? i.deviceKind ?? '',
         병동: i.device?.placement?.ward?.name ?? i.wardName ?? '',
@@ -94,19 +107,27 @@ export async function GET(request: NextRequest) {
         송장: i.shipTrackingNo ?? '',
         교체기: i.newSerialNo ?? '',
         완료일: d10(r.resolvedAt),
+        상태변경일: d10(r.statusChangedAt),
         담당: r.ticket?.owner?.name ?? '',
         티켓: r.ticket?.ticketCode ?? '',
+        등록자: r.createdBy?.name ?? '',
+        비고: r.note ?? '',
       })
-      if (rows.length >= 10000) break
+      if (rows.length >= MAX_ROWS) break
     }
-    if (rows.length >= 10000) break
+    if (rows.length >= MAX_ROWS) break
   }
 
   const ws = XLSX.utils.json_to_sheet(rows)
   ws['!cols'] = [
-    { wch: 15 }, { wch: 11 }, { wch: 22 }, { wch: 6 }, { wch: 8 }, { wch: 18 }, { wch: 11 }, { wch: 10 },
-    { wch: 10 }, { wch: 28 }, { wch: 28 }, { wch: 9 }, { wch: 11 }, { wch: 9 }, { wch: 15 }, { wch: 11 },
-    { wch: 11 }, { wch: 8 }, { wch: 15 },
+    // 접수번호 접수일 병원 구분 상태 고객명 선교체 수거방법 수거송장 수거일 입고일
+    { wch: 15 }, { wch: 11 }, { wch: 22 }, { wch: 6 }, { wch: 8 }, { wch: 18 }, { wch: 7 }, { wch: 9 }, { wch: 15 }, { wch: 11 }, { wch: 11 },
+    // 발송지구분 발송지정보 회수지상이 회수지정보 예상출하일
+    { wch: 11 }, { wch: 24 }, { wch: 9 }, { wch: 24 }, { wch: 11 },
+    // 시리얼 기기종류 병동 증상 처리내용 결과 발송일 발송방법 송장 교체기
+    { wch: 11 }, { wch: 10 }, { wch: 10 }, { wch: 28 }, { wch: 28 }, { wch: 9 }, { wch: 11 }, { wch: 9 }, { wch: 15 }, { wch: 11 },
+    // 완료일 상태변경일 담당 티켓 등록자 비고
+    { wch: 11 }, { wch: 11 }, { wch: 8 }, { wch: 15 }, { wch: 10 }, { wch: 30 },
   ]
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'AS업무')

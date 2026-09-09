@@ -22,8 +22,8 @@ async function tick() {
   running = true
   try {
     const r = await runChanneltalkAsSync()
-    if (r.registered || r.failed || r.completedBack) {
-      console.log(`[channeltalk-as] 틱 완료 (scanned=${r.scanned}, registered=${r.registered}, failed=${r.failed}, completedBack=${r.completedBack})`)
+    if (r.registered || r.failed || r.completedBack || r.shipBack) {
+      console.log(`[channeltalk-as] 틱 완료 (scanned=${r.scanned}, registered=${r.registered}, failed=${r.failed}, completedBack=${r.completedBack}, shipBack=${r.shipBack})`)
     }
   } catch (err) {
     console.error('[channeltalk-as] 틱 실패:', err)
