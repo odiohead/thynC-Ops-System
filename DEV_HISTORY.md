@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-09-09 12:40 | PROD 배포: AS 시트 발송정보 역기입 V열 추가 (d04d103)
+
+- **절차**: dev2 힙 4GB 빌드·`pm2 restart thync-dev`(health 200) → 커밋(d04d103)·push → PROD pull → 힙 4GB 빌드 → `pm2 restart thync-prod` (코드 전용)
+- **확인**: PROD /api/health 200·/login 200·/as-receipts 307. 재기동 후 첫 틱 — r3613 AS-202609-0041 → W 1대·V 1일 기입(shipBack=1), 이후 에러 로그 없음(빌드 중 구 프로세스의 `entryCSSFiles` 오류만 — 재시작 전 발생, 정상 범위)
+- 영향: PROD 소스(d04d103), DEV_HISTORY.md
+
+---
+
 ## 2026-09-09 12:20 | AS 시트 발송정보 역기입 — V열(발송·교체일자) 추가 (dev2 검증 완료, 빌드·PROD 배포 대기)
 
 - 사용자 요청 "발송일(V열)도 같은 방식으로": ③ 발송정보 역기입 블록에 V열 추가 — 발송 라인 `shippedAt`(YYYY-MM-DD) 목록, 중복 제거·라인 순·개행 구분(같은 날 일괄 발송이면 1줄). R·W와 같은 조건(시트 값과 다를 때만 기입, AL 갱신)
