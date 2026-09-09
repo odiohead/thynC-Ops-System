@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-09-09 12:20 | AS 시트 발송정보 역기입 — V열(발송·교체일자) 추가 (dev2 검증 완료, 빌드·PROD 배포 대기)
+
+- 사용자 요청 "발송일(V열)도 같은 방식으로": ③ 발송정보 역기입 블록에 V열 추가 — 발송 라인 `shippedAt`(YYYY-MM-DD) 목록, 중복 제거·라인 순·개행 구분(같은 날 일괄 발송이면 1줄). R·W와 같은 조건(시트 값과 다를 때만 기입, AL 갱신)
+- 검증: tsc 0·eslint 0. dev2 [TEST] 사본 시트 E2E — 2라인 접수 → 9/8 라인1 발송(V=2026-09-08) → 변경 없는 틱 shipBack 0 → 9/9 라인2 발송(V=2026-09-08\n2026-09-09, R·W 개행 2건, X=완료) 통과. 테스트 접수·티켓 삭제, 시트 r2·r3 원복
+- 영향: lib/channeltalkAsSync.ts, projects/channeltalk_as_intake_design.md, README.md
+
+---
+
 ## 2026-09-09 11:50 | PROD 배포: AS업무 시트 발송정보 역기입 + Excel 전체 항목 (cff9743)
 
 - **절차**: dev2 힙 4GB 빌드·`pm2 restart thync-dev`(health 200) → 커밋(cff9743)·push → PROD pull → 힙 4GB 빌드 → `pm2 restart thync-prod` (코드 전용 — 스키마·마이그·패키지·시드 없음)
