@@ -12,10 +12,13 @@ export interface JWTPayload {
   organization?: { id: number; name: string; code: string }
 }
 
-export async function signToken(payload: JWTPayload): Promise<string> {
+/** 세션 수명 — 기본 7일, '로그인 상태 유지'(사이니지 등 장기 표시) 시 365일 */
+export const SESSION_TTL_SEC = { default: 60 * 60 * 24 * 7, remember: 60 * 60 * 24 * 365 } as const
+
+export async function signToken(payload: JWTPayload, ttlSec: number = SESSION_TTL_SEC.default): Promise<string> {
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: 'HS256' })
-    .setExpirationTime('7d')
+    .setExpirationTime(Math.floor(Date.now() / 1000) + ttlSec)
     .sign(secret)
 }
 

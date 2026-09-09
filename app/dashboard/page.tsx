@@ -3,8 +3,10 @@
 /**
  * 운영 관제 월보드 — 50인치 사이니지 전용
  * - 네비게이션 없음(MainWrapper/Navigation에서 제외), 스크롤 없음(h-screen 고정 그리드)
- * - 라이트/다크 토글(헤더), 60초 자동 갱신, 실시간 시계, 전체화면 버튼
+ * - 라이트/다크 토글(헤더), 60초 데이터 갱신 + 2분 전체 리로드, 실시간 시계, 전체화면 버튼
  * - 사이니지 원칙: 모든 수치는 호버 없이 상시 표시
+ * - 뷰 전환(우측 상단): 운영현황(기본) / 영업현황(/sales/dashboard 와 동일 데이터·컴포넌트, 스크롤 영역) — URL ?view=sales 로 유지
+ * - 자동 복구: useSignageKeepAlive (서비스 워커 폴백 + 워치독 + 주기 리로드) — 서버 재시작 후 화면 스스로 복귀
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
@@ -12,6 +14,8 @@ import { Maximize, Minimize } from 'lucide-react'
 import StatusBadge from '@/app/components/StatusBadge'
 import ThemeToggle from '@/app/components/theme/ThemeToggle'
 import { useChartTheme } from '@/app/components/theme/useChartTheme'
+import SalesDashboardA, { type DashboardAData } from '@/app/sales/dashboard/_components/SalesDashboardA'
+import { useSignageKeepAlive } from './useSignageKeepAlive'
 import {
   ComposedChart,
   Bar,
@@ -75,7 +79,11 @@ type MaintenanceData = {
   items: MaintenanceItem[]
 }
 
-const REFRESH_MS = 60_000
+const REFRESH_MS = 60_000        // 데이터 폴링
+const RELOAD_MS = 120_000        // 전체 리로드 (사이니지 요구: 2분)
+
+type BoardView = 'ops' | 'sales'
+const VIEW_LABEL: Record<BoardView, string> = { ops: '운영현황', sales: '영업현황' }
 const PROJECT_MAX = 6
 const MNT_MAX = 7
 
@@ -100,6 +108,23 @@ export default function DashboardPage() {
   const [now, setNow] = useState<Date | null>(null)
   const [lastSync, setLastSync] = useState<Date | null>(null)
   const [isFull, setIsFull] = useState(false)
+  const [view, setView] = useState<BoardView>('ops')
+  const [sales, setSales] = useState<DashboardAData | null>(null)
+  const [salesError, setSalesError] = useState<string | null>(null)
+  const { disconnected, reportFailure } = useSignageKeepAlive(RELOAD_MS)
+
+  /* 뷰 선택 — URL ?view= 와 동기화 (리로드·SW 폴백 복귀 후에도 유지) */
+  useEffect(() => {
+    const v = new URLSearchParams(window.location.search).get('view')
+    if (v === 'sales') setView('sales')
+  }, [])
+  const changeView = useCallback((v: BoardView) => {
+    setView(v)
+    const url = new URL(window.location.href)
+    if (v === 'ops') url.searchParams.delete('view')
+    else url.searchParams.set('view', v)
+    window.history.replaceState(null, '', url.toString())
+  }, [])
 
   /* 실시간 시계 (hydration mismatch 방지 위해 mount 후 시작) */
   useEffect(() => {
@@ -118,6 +143,17 @@ export default function DashboardPage() {
         return null
       }
     }
+    // 영업현황: 403(권한 없음)은 서버 정상이므로 메시지로 구분
+    const safeGetSales = async (): Promise<{ data: DashboardAData | null; error: string | null }> => {
+      try {
+        const res = await fetch('/api/sales/dashboard', { cache: 'no-store' })
+        if (res.ok) return { data: await res.json(), error: null }
+        const body = await res.json().catch(() => ({}))
+        return { data: null, error: body.error ?? `영업현황을 불러올 수 없습니다 (${res.status})` }
+      } catch {
+        return { data: null, error: null }
+      }
+    }
     const [prj, sum, mon, mnt, hst] = await Promise.all([
       safeGet<{ thisWeek: DashboardProject[]; nextWeek: DashboardProject[] }>('/api/dashboard'),
       safeGet<SummaryData>('/api/dashboard/summary'),
@@ -130,8 +166,14 @@ export default function DashboardPage() {
     if (mon) setMonthly(mon.months)
     if (mnt) setMaintenance(mnt)
     if (hst) setHospStats(hst)
-    if (prj || sum || mon || mnt || hst) setLastSync(new Date())
-  }, [])
+    // 영업현황은 선택된 뷰일 때만 조회 (딜 전체 집계 — 불필요한 부하 방지)
+    const sal = view === 'sales' ? await safeGetSales() : { data: null, error: null }
+    if (sal.data) { setSales(sal.data); setSalesError(null) }
+    else if (sal.error) setSalesError(sal.error)
+    const anyOk = Boolean(prj || sum || mon || mnt || hst || sal.data)
+    if (anyOk) setLastSync(new Date())
+    else reportFailure() // 전부 실패 → 서버 다운으로 간주, 복구 폴링 진입
+  }, [view, reportFailure])
 
   useEffect(() => {
     loadAll()
@@ -197,10 +239,10 @@ export default function DashboardPage() {
             </span>
             <span className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Live</span>
           </div>
-          <h1 className="text-xl font-bold tracking-tight">thynC 운영 현황</h1>
+          <h1 className="text-xl font-bold tracking-tight">thynC {VIEW_LABEL[view]}</h1>
           {lastSync && (
             <span className="text-xs text-muted-foreground">
-              60초 자동 갱신 · 마지막 {String(lastSync.getHours()).padStart(2, '0')}:{String(lastSync.getMinutes()).padStart(2, '0')}:{String(lastSync.getSeconds()).padStart(2, '0')}
+              60초 갱신 · 2분 리로드 · 마지막 {String(lastSync.getHours()).padStart(2, '0')}:{String(lastSync.getMinutes()).padStart(2, '0')}:{String(lastSync.getSeconds()).padStart(2, '0')}
             </span>
           )}
         </div>
@@ -208,6 +250,22 @@ export default function DashboardPage() {
           <span className="text-base text-muted-foreground">{dateStr}</span>
           <span className="font-mono text-3xl font-bold tabular-nums tracking-tight">{timeStr}</span>
           <div className="flex items-center gap-1">
+            <div role="tablist" aria-label="보드 선택" className="mr-2 inline-flex rounded-md border border-border bg-muted/40 p-0.5">
+              {(Object.keys(VIEW_LABEL) as BoardView[]).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === v}
+                  onClick={() => changeView(v)}
+                  className={`rounded px-3 py-1 text-sm font-medium transition-colors ${
+                    view === v ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {VIEW_LABEL[v]}
+                </button>
+              ))}
+            </div>
             <ThemeToggle />
             <button
               type="button"
@@ -221,6 +279,20 @@ export default function DashboardPage() {
         </div>
       </header>
 
+      {/* ═══ 영업현황 뷰: /sales/dashboard 컴포넌트 재사용 (스크롤 영역) ═══ */}
+      {view === 'sales' && (
+        <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-card">
+          {sales ? (
+            <SalesDashboardA data={sales} signage />
+          ) : salesError ? (
+            <Empty text={salesError} />
+          ) : (
+            <Empty text="영업현황을 불러오는 중…" />
+          )}
+        </div>
+      )}
+
+      {view === 'ops' && (<>
       {/* ═══ KPI 타일: 5종 + 종별 현황(2칸) ═══ */}
       <div className="grid shrink-0 grid-cols-7 gap-3">
         <KpiTile
@@ -342,6 +414,17 @@ export default function DashboardPage() {
         <ProjectList title="이번주 구축 현황" projects={thisWeek} emptyText="이번주 구축 일정이 없습니다" />
         <ProjectList title="차주 구축 예정" projects={nextWeek} emptyText="차주 구축 일정이 없습니다" />
       </div>
+      </>)}
+
+      {/* ═══ 서버 끊김 오버레이 — 복구되면 훅이 자동 리로드 ═══ */}
+      {disconnected && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="rounded-lg border border-border bg-card px-10 py-8 text-center shadow-lg">
+            <p className="text-2xl font-bold">서버 연결 대기 중</p>
+            <p className="mt-2 text-sm text-muted-foreground">서버가 복구되면 화면을 자동으로 다시 불러옵니다 (5초 간격 확인)</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

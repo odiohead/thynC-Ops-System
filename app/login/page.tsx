@@ -14,6 +14,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(false)
+  const [remember, setRemember] = useState(false) // 로그인 상태 유지 — 365일 세션 (사이니지 등)
   const [btnHover, setBtnHover] = useState(false)
 
   async function handleSubmit(e: React.FormEvent) {
@@ -24,7 +25,7 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, remember }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -282,9 +283,11 @@ export default function LoginPage() {
                   }}>
                     <input
                       type="checkbox"
+                      checked={remember}
+                      onChange={(e) => setRemember(e.target.checked)}
                       style={{ width: 14, height: 14, accentColor: '#2C5CE5' }}
                     />
-                    로그인 상태 유지
+                    로그인 상태 유지 (1년)
                   </label>
                   <a href="#" style={{ fontSize: 12, color: '#2C5CE5', textDecoration: 'none' }}>
                     비밀번호 찾기

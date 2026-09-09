@@ -173,10 +173,11 @@ function StatusBar({ items, colors }: { items: Array<{ name: string; count: numb
 }
 
 /** 누적+월별 트렌드 카드 — 상단 누적 히어로 숫자, 누적 그라데이션 에어리어(끝점 강조), 하단 월별 막대(값 라벨 상시) */
-function TrendCard({ title, unit, cum, rows, color, gradId, chart }: {
+function TrendCard({ title, unit, cum, rows, color, gradId, chart, compact = false }: {
   title: string; unit: string; cum: number; color: string; gradId: string
   rows: Array<{ ym: string; v: number; cum: number }>
   chart: ReturnType<typeof useChartTheme>
+  compact?: boolean // 사이니지 — 차트 높이 축소
 }) {
   const thisMonth = rows.length > 0 ? rows[rows.length - 1].v : 0
   return (
@@ -189,7 +190,7 @@ function TrendCard({ title, unit, cum, rows, color, gradId, chart }: {
         <span className="text-2xl font-bold tabular-nums text-gray-900">{cum.toLocaleString()}<span className="ml-0.5 text-sm font-medium text-gray-500">{unit}</span></span>
         <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">누적 · 이번달 +{thisMonth.toLocaleString()}</span>
       </div>
-      <ResponsiveContainer width="100%" height={104}>
+      <ResponsiveContainer width="100%" height={compact ? 72 : 104}>
         <AreaChart data={rows} margin={{ top: 14, right: 34, left: 8, bottom: 0 }}>
           <defs>
             <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
@@ -203,7 +204,7 @@ function TrendCard({ title, unit, cum, rows, color, gradId, chart }: {
           <Area type="monotone" dataKey="cum" stroke={color} strokeWidth={2.5} fill={`url(#${gradId})`} dot={false} activeDot={{ r: 4 }} />
         </AreaChart>
       </ResponsiveContainer>
-      <ResponsiveContainer width="100%" height={96}>
+      <ResponsiveContainer width="100%" height={compact ? 68 : 96}>
         <BarChart data={rows} margin={{ top: 14, right: 8, left: 8, bottom: 0 }}>
           <XAxis dataKey="ym" tick={{ fontSize: 9, fill: chart.tick }} tickLine={false} axisLine={false} interval={0} />
           <YAxis hide />
@@ -251,11 +252,12 @@ function TargetPanel({ t, emptyMsg, colorOf }: {
 }
 
 /** 하반기 영업현황 / 연도 목표현황 / 종별 도입 병원 탭 카드 — 우상단 ⚙로 활성 탭의 종별 목표 병상수 설정 (2026-08-21 하반기 탭 추가·디폴트) */
-function TypeDistCard({ typeDist, target, halfTarget, chart }: {
+function TypeDistCard({ typeDist, target, halfTarget, chart, fill = false }: {
   typeDist: DashboardAData['typeDist']
   target: DashboardAData['target']
   halfTarget: DashboardAData['halfTarget']
   chart: ReturnType<typeof useChartTheme>
+  fill?: boolean // 사이니지 — 그리드 셀 높이를 채우고 내용 초과 시에만 내부 스크롤
 }) {
   const [tab, setTab] = useState<'half' | 'target' | 'dist'>('half')
   const [settingsFor, setSettingsFor] = useState<'year' | 'h2' | null>(null)
@@ -272,8 +274,8 @@ function TypeDistCard({ typeDist, target, halfTarget, chart }: {
   const h2FromLabel = halfTarget.from.slice(5).replace('-', '/') // 'MM/DD'
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-2">
+    <div className={`rounded-lg border border-gray-200 bg-white p-4 shadow-sm ${fill ? 'flex h-full min-h-0 flex-col' : ''}`}>
+      <div className="flex shrink-0 items-center justify-between gap-2">
         <div className="flex items-center gap-1">
           <button className={tabBtn(tab === 'half')} onClick={() => setTab('half')}>
             <TrendingUp className="h-3.5 w-3.5" /> 하반기 영업현황
@@ -306,7 +308,7 @@ function TypeDistCard({ typeDist, target, halfTarget, chart }: {
         </div>
       </div>
 
-      <div className="mt-3">
+      <div className={fill ? 'mt-3 min-h-0 flex-1 overflow-auto' : 'mt-3'}>
         {tab === 'half' ? (
           <TargetPanel
             t={halfTarget}
@@ -594,7 +596,11 @@ function TargetSettingsModal({ year, period, titleSuffix, initial, initialColor,
   )
 }
 
-export default function SalesDashboardA({ data }: { data: DashboardAData }) {
+/**
+ * @param signage 사이니지(/dashboard 영업현황 뷰) 모드 — 부모 높이(h-full) 안에서 KPI·월별 추이·계약내역/하반기 현황 카드 2단까지
+ *   스크롤 없이 한 화면에 고정(flex 열). 정산·세금계산서 행은 미표시. 차트 높이 축소·패딩 축소.
+ */
+export default function SalesDashboardA({ data, signage = false }: { data: DashboardAData; signage?: boolean }) {
   const chart = useChartTheme()
   const { kpi } = data
 
@@ -607,14 +613,14 @@ export default function SalesDashboardA({ data }: { data: DashboardAData }) {
   }
 
   return (
-    <div className="p-6">
-      <div className="flex items-baseline justify-between">
+    <div className={signage ? 'flex h-full min-h-0 flex-col gap-3 p-4' : 'p-6'}>
+      <div className="flex shrink-0 items-baseline justify-between">
         <h2 className="text-lg font-bold text-gray-900">도입 실적 대시보드</h2>
         <span className="text-xs text-gray-400">계약완료 딜 기준 · 진행중(영업중) 딜 {kpi.activeDeals}건 별도</span>
       </div>
 
       {/* KPI */}
-      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
+      <div className={signage ? 'grid shrink-0 grid-cols-7 gap-3' : 'mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7'}>
         <Kpi label="도입 병원" value={`${kpi.hospitals.toLocaleString()}곳`} sub={`확장(2차+) ${kpi.expanded}곳`} />
         <Kpi label="누적 도입 병동" value={`${kpi.wards.toLocaleString()}병동`} />
         <Kpi label="누적 도입 병상" value={`${kpi.devices.toLocaleString()}병상`} sub={`대웅 디바이스 수량 기준 · 게이트웨이 환경 병상 ${kpi.beds.toLocaleString()}`} />
@@ -625,9 +631,9 @@ export default function SalesDashboardA({ data }: { data: DashboardAData }) {
       </div>
 
       {/* 월별 추이 — 3등분: 계약 건수 / 도입 병원(누적+월별) / 도입 병상(누적+월별) */}
-      <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-3">
+      <div className={signage ? 'grid shrink-0 grid-cols-3 gap-3' : 'mt-4 grid grid-cols-1 gap-3 xl:grid-cols-3'}>
         <Card title="월별 계약 건수" note="계약일 기준 · 최근 24개월">
-          <ResponsiveContainer width="100%" height={244}>
+          <ResponsiveContainer width="100%" height={signage ? 176 : 244}>
             <BarChart data={data.monthly} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid stroke={chart.grid} vertical={false} />
               <XAxis dataKey="ym" tick={{ fontSize: 11, fill: chart.tick }} tickLine={false} axisLine={false} />
@@ -637,26 +643,29 @@ export default function SalesDashboardA({ data }: { data: DashboardAData }) {
             </BarChart>
           </ResponsiveContainer>
         </Card>
-        <TrendCard title="도입 병원 수" unit="곳" color={chart.blue} gradId="gradHosp" chart={chart}
+        <TrendCard title="도입 병원 수" unit="곳" color={chart.blue} gradId="gradHosp" chart={chart} compact={signage}
           cum={kpi.hospitals} rows={data.monthly.slice(-12).map((m) => ({ ym: m.ym, v: m.hosp, cum: m.cumHosp }))} />
-        <TrendCard title="도입 병상 수 (대웅 디바이스)" unit="병상" color={chart.amber} gradId="gradBeds" chart={chart}
+        <TrendCard title="도입 병상 수 (대웅 디바이스)" unit="병상" color={chart.amber} gradId="gradBeds" chart={chart} compact={signage}
           cum={kpi.devices} rows={data.monthly.slice(-12).map((m) => ({ ym: m.ym, v: m.beds, cum: m.cumBeds }))} />
       </div>
 
-      <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3">
+      <div className={signage ? 'grid min-h-0 flex-1 grid-cols-3 grid-rows-[minmax(0,1fr)] gap-3' : 'mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3'}>
         <DealListCard title="월 계약내역" mode="month" deals={data.allDeals} />
         <DealListCard title="주 계약내역" mode="week" deals={data.allDeals} />
-        <TypeDistCard typeDist={data.typeDist} target={data.target} halfTarget={data.halfTarget} chart={chart} />
+        <TypeDistCard typeDist={data.typeDist} target={data.target} halfTarget={data.halfTarget} chart={chart} fill={signage} />
       </div>
 
-      <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
-        <Card title="정산 현황" note="계약완료 딜 기준">
-          <StatusBar items={data.settleDist} colors={statusColors} />
-        </Card>
-        <Card title="세금계산서 발행 현황" note="계약완료 딜 기준">
-          <StatusBar items={data.taxDist} colors={statusColors} />
-        </Card>
-      </div>
+      {/* 사이니지 모드에서는 미표시 — 위 2단이 한 화면(h-full)을 정확히 채움 (2026-09-09 사용자 결정) */}
+      {!signage && (
+        <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
+          <Card title="정산 현황" note="계약완료 딜 기준">
+            <StatusBar items={data.settleDist} colors={statusColors} />
+          </Card>
+          <Card title="세금계산서 발행 현황" note="계약완료 딜 기준">
+            <StatusBar items={data.taxDist} colors={statusColors} />
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

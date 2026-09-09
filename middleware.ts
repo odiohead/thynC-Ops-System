@@ -9,6 +9,9 @@ export async function middleware(req: NextRequest) {
     pathname === '/login' ||
     pathname.startsWith('/api/auth') ||
     pathname.startsWith('/api/mail-queue') ||
+    pathname === '/api/health' ||           // 사이니지 생존 확인 (무인증)
+    pathname === '/sw.js' ||                // 사이니지 서비스 워커
+    pathname === '/dashboard-offline.html' || // 사이니지 오프라인 폴백 페이지
     pathname.startsWith('/_next') ||
     pathname.startsWith('/fonts') ||
     pathname === '/favicon.ico'

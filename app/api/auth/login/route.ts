@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import bcrypt from 'bcryptjs'
-import { signToken } from '@/lib/auth'
+import { signToken, SESSION_TTL_SEC } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 
 export async function POST(req: NextRequest) {
-  const { email, password } = await req.json()
+  const { email, password, remember } = await req.json()
+  // 로그인 상태 유지(사이니지 장기 표시용) — 토큰·쿠키 수명 365일 (2026-09-09)
+  const ttl = remember === true ? SESSION_TTL_SEC.remember : SESSION_TTL_SEC.default
 
   // 이메일 정규화 — 모바일 자동 대문자·복사 공백으로 인한 로그인 실패 방지 (DB 이메일은 소문자 저장이 불변식)
   const normalizedEmail = String(email ?? '').trim().toLowerCase()
@@ -39,13 +41,13 @@ export async function POST(req: NextRequest) {
     role: user.role,
     isActive: user.isActive,
     organization: user.organization ?? undefined,
-  })
+  }, ttl)
 
   const res = NextResponse.json({ ok: true })
   res.cookies.set('auth-token', token, {
     httpOnly: true,
     path: '/',
-    maxAge: 60 * 60 * 24 * 7,
+    maxAge: ttl,
     sameSite: 'lax',
   })
 
@@ -55,7 +57,7 @@ export async function POST(req: NextRequest) {
     action: 'LOGIN',
     resource: 'auth',
     resourceId: user.id,
-    resourceLabel: `${user.name} (${user.email})`,
+    resourceLabel: `${user.name} (${user.email})${remember === true ? ' [로그인 상태 유지 365일]' : ''}`,
   })
 
   return res

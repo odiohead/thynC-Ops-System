@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-09-09 09:30 | 사이니지 /dashboard 개선 — 영업현황 보드 선택 + 서버 재시작 자동 복구 + 2분 리로드 (dev2 빌드·재시작 완료)
+
+- **① 보드 선택(사용자 요청)**: 헤더 우측 상단 세그먼트 `운영현황 | 영업현황`. 영업현황은 `/sales/dashboard`의 `SalesDashboardA`를 그대로 재사용(스크롤 컨테이너) — 이를 위해 페이지 서버 컴포넌트에 있던 딜 집계 로직을 `lib/salesDashboardData.ts`(`buildSalesDashboardData`)로 추출하고 `GET /api/sales/dashboard` 신설(게이트 `checkSalesAccess` 동일). 선택은 `?view=sales`로 URL 동기화(리로드·폴백 복귀 후 유지). 영업 데이터는 영업 뷰일 때만 폴링
+- **② 서버 재시작 자동 복구(사용자 요청 — "브라우저가 지속 시도해 복구 시 자동 복귀")**: `useSignageKeepAlive` 훅 3중 구조 — (1) 서비스 워커 `public/sw.js`(scope `/dashboard`)가 문서 로드 실패·5xx 시 캐시된 `public/dashboard-offline.html` 응답 → 브라우저 오류 화면(JS 소실) 원천 차단, 폴백 페이지가 5초마다 `/api/health` 폴링 후 `location.reload()` (2) 페이지 워치독 — 데이터 폴링 전부 실패 시 오버레이 + 5초 health 폴링 → 복구 시 리로드 (3) 2분 주기 리로드 — 직전 health 확인, 다운이면 (2)로 전환
+- **③ 2분 리프레시**: 전체 리로드 120초(`RELOAD_MS`), 기존 60초 데이터 폴링 유지. 헤더 문구 "60초 갱신 · 2분 리로드"
+- 신규 `GET /api/health`(무인증·DB 미접근). middleware 공개 경로 3건 추가(`/api/health`·`/sw.js`·`/dashboard-offline.html`)
+- 검증: tsc 0·eslint 0·힙 4GB 빌드·pm2 resurrect(thync-dev·collab 미기동 상태였음)·/api/health 200·/sw.js 200·/dashboard-offline.html 200·SEERS ADMIN 토큰으로 `/api/sales/dashboard` 200(병원 213·딜 234·월 22)·비SEERS admin 403 메시지·`/sales/dashboard` 200 회귀 없음. SW 폴백 실동작은 사이니지 브라우저(HTTPS)에서 확인 필요
+- **④ 장기 로그인(2차 지시 — "1주일마다 로그인 불가")**: 로그인 화면의 배선 안 돼 있던 '로그인 상태 유지' 체크박스를 실제 동작으로 연결 — 체크 시 JWT·쿠키 365일(`SESSION_TTL_SEC.remember`), 미체크 7일. `signToken(payload, ttlSec)` 파라미터화(호출부는 로그인 1곳), 감사로그 라벨에 `[로그인 상태 유지 365일]` 표기. 검증: 쿠키 Max-Age 604800/31536000·JWT exp 365.0일
+- **⑤ 영업현황 사이니지 레이아웃(2차 지시 — "하반기 영업현황 카드까지 스크롤 없이")**: `SalesDashboardA`에 `signage` prop — 루트 `h-full flex-col`, KPI·월별 추이 행 shrink-0(차트 높이 244→176·트렌드 104/96→72/68), 계약내역·하반기 현황 행 `flex-1 min-h-0`(TypeDistCard는 셀 채움·초과 시에만 내부 스크롤), 정산·세금계산서 행은 사이니지 미표시(사용자 결정 — 2단이 화면을 정확히 채우도록). 기존 `/sales/dashboard` 렌더는 prop 미지정으로 불변. 실기 해상도에서의 최종 확인은 사이니지 브라우저 필요(헤드리스 브라우저 없음)
+- **주의**: 장기 토큰은 미들웨어가 토큰 클레임만 검사하므로 계정 비활성화가 페이지 접근에 즉시 반영되지 않음(DB 실시간 게이트가 있는 API는 즉시 차단). 영업현황 컴포넌트는 라이트 톤 고정 색(gray/white)이라 다크 테마 사이니지에서는 밝은 카드로 표시
+- 영향: app/dashboard/{page.tsx,useSignageKeepAlive.ts(신규)}, app/sales/dashboard/{page.tsx,_components/SalesDashboardA.tsx}, app/login/page.tsx, app/api/auth/login/route.ts, lib/{auth,salesDashboardData(신규)}.ts, app/api/sales/dashboard/route.ts(신규), app/api/health/route.ts(신규), public/{sw.js,dashboard-offline.html}(신규), middleware.ts, README.md
+
+---
+
 ## 2026-09-08 14:25 | PROD 배포: RBAC 카탈로그 v1.5 (e763086) + 영업 BigInt 500 수정 (d2c92bc)
 
 - **절차**: dev2 분리 커밋(d2c92bc fix(sales)·e763086 feat(rbac)) → push → PROD pull → 힙 4GB 빌드 → `pm2 restart thync-prod` (코드 전용 — 스키마·마이그·시드 없음, 사전 덤프 생략·일일 백업 의존)

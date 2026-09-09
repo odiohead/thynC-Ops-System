@@ -166,7 +166,7 @@ app/
 │   ├── weekly/                       # 주간업무 관리 (2026-08-19) — board(주차 통합)·items(+[id]/update)·notes(특이사항)·masters·can-access(진입 아이콘 게이트) (SEERS 소속 OR weekly.access 권한)
 │   └── drive/                        # Google Drive 연동 (파일 업로드/목록/삭제/병원목록 내보내기)
 ├── (대시보드)/                        # 메인 대시보드 (이번 주/다음 주 공사 현황)
-├── dashboard/                        # 사이니지 월보드 (50인치 상시 표시, 네비 없음)
+├── dashboard/                        # 사이니지 월보드 (50인치 상시 표시, 네비 없음) — 운영/영업 보드 선택, useSignageKeepAlive(자동 복구·2분 리로드)
 ├── hospitals/                        # 병원 목록·상세·등록·수정 ([code]/_components/SalesSection — 영업 정보 v3: 요약 스트립+탭 4개, ADMIN+SEERS · HospitalDeviceSummary — 도입 현황 카드, lib 직접 호출)
 ├── devices/                          # 기기 현황(구 디바이스 원장, 2026-09-02 개명) (2026-09-01, `projects/hospital_device_registry_design.md` §6) — page.tsx(searchParams 파싱) + _components/(DevicesClient 오케스트레이터·useDevicesUrlState·urlState·api·types·toast / HospitalPicker·SerialLookup·GlobalCoverage·ExcelButton / SummaryStrip·DeviceTable·BulkActionBar·DeviceHistoryDrawer·CorrectionModal·ProductTypeModal·DealModal·AsFlagModal / RegisterModal·MoveWardModal·RecoverModal·ReplaceModal·WardCombo·MaintenanceCodeCombo·MobileActionBar / ImportPanel·WardPanel·EventsTab / DeviceListTab(v1 [디바이스] 뷰) + 헬퍼 deviceDisplay·RegistryFloatingPanel·registryFormKit·groupd-shared) — v1 단순화 UI에서 SerialLookup·GlobalCoverage·SummaryStrip·MobileActionBar는 미렌더(보존)
 ├── hira-hospitals/                   # HIRA 병원 조회
@@ -919,6 +919,8 @@ prisma/
 
 ## 인증 및 역할 체계
 
+- 세션: JWT httpOnly 쿠키. 기본 7일, 로그인 시 '로그인 상태 유지 (1년)' 체크하면 365일 (`lib/auth.ts` `SESSION_TTL_SEC`, 2026-09-09 — 사이니지 상시 표시용)
+
 ### 역할 (Role)
 
 | 역할 | 설명 |
@@ -961,7 +963,14 @@ prisma/
 - 우측 상단 **'사이니지 월보드' 진입 버튼** — `/dashboard`를 새 탭으로 오픈 (2026-07-21, 사이니지 월보드의 유일한 UI 진입 경로)
 
 ### 사이니지 월보드 (`/dashboard`, 50인치 상시 표시용)
-- 네비게이션 없는 h-screen 무스크롤 단일 화면, 다크/라이트 토글, 전체화면 버튼, 실시간 시계, 60초 자동 폴링(실패 시 기존 데이터 유지)
+- 네비게이션 없는 h-screen 무스크롤 단일 화면, 다크/라이트 토글, 전체화면 버튼, 실시간 시계, 60초 자동 폴링(실패 시 기존 데이터 유지) + **2분 주기 전체 리로드**(배포 코드 반영)
+- **보드 선택(2026-09-09)**: 우측 상단 세그먼트 `운영현황`(기본) | `영업현황`. 영업현황은 `/sales/dashboard`의 `SalesDashboardA` 컴포넌트를 `signage` 모드로 재사용 — KPI·월별 추이·계약내역/하반기 영업현황 카드 2단이 한 화면(h-full flex)을 스크롤 없이 채움, 정산·세금계산서 행은 사이니지에서 미표시. 데이터는 데이터는 `GET /api/sales/dashboard`(집계는 `lib/salesDashboardData.ts` 단일 소스, 권한 게이트는 영업 섹션과 동일 `checkSalesAccess` — 미충족 시 403 메시지 표시). 선택은 URL `?view=sales`로 유지되어 리로드·복구 후에도 같은 보드가 뜬다. 영업 데이터는 영업현황 뷰일 때만 조회
+- **서버 재시작 자동 복구(2026-09-09, `app/dashboard/useSignageKeepAlive.ts`)** — 3중 구조
+  1. **서비스 워커** `public/sw.js`(scope `/dashboard`): 문서 로드가 네트워크 실패·5xx(Nginx 502 포함)면 캐시된 `public/dashboard-offline.html`을 대신 응답 → 브라우저 "페이지를 열 수 없음" 화면(JS 소실)을 원천 차단. 폴백 페이지는 5초마다 `/api/health`를 확인해 200이면 원래 URL을 `location.reload()`
+  2. **페이지 워치독**: 데이터 폴링이 전부 실패하면 "서버 연결 대기 중" 오버레이 + 5초 health 폴링, 복구 시 리로드
+  3. **주기 리로드**: 2분마다 health 확인 후 리로드(서버가 죽어 있으면 리로드하지 않고 2번으로 전환)
+  - `GET /api/health`·`/sw.js`·`/dashboard-offline.html`은 middleware 무인증 공개 경로. 서비스 워커는 HTTPS(또는 localhost)에서만 등록됨
+- **장기 로그인**: 로그인 화면 '로그인 상태 유지 (1년)' 체크 시 JWT·쿠키 수명 365일(`SESSION_TTL_SEC.remember`) — 사이니지 계정은 이 옵션으로 로그인. 미체크는 기존 7일
 - KPI 7컬럼: 도입병원 / 도입병상 / **종별 도입 현황(전국 HIRA 모수 대비 도입수·도입률: 상급종합·종합병원·병원·기타)** / 유지보수 진행중 / 이번주 구축 / 차주 구축 예정
 - 월별 누적 도입 현황 차트(라벨 상시 표시 — 사이니지 원칙상 호버 툴팁 미사용, 라인·바 밴드 분리, 애니메이션 비활성)
 - 유지보수 진행중 내역(우선순위 마커, 최신 7건) + 이번주/차주 구축 리스트
@@ -1560,6 +1569,8 @@ npm run dev
 | GET | `/api/dashboard/summary` | 도입병원/병상 합계 + 상태별 집계 |
 | GET | `/api/dashboard/maintenance` | 유지보수 진행중 건수·상태별·주간 추이 + 진행중 내역(items) |
 | GET | `/api/dashboard/hospital-stats` | 종별(HIRA) 병원 현황 — 전국 모수·검토중·도입(contracted) |
+| GET | `/api/sales/dashboard` | 영업 대시보드 A(도입 실적) 데이터 — 사이니지 `/dashboard` 영업현황 뷰용. `lib/salesDashboardData.ts` 집계, `checkSalesAccess` 게이트 |
+| GET | `/api/health` | 무인증 생존 확인 `{ok:true}` — 사이니지 자동 복구 폴링용 (DB 미접근) |
 
 ### 병원
 | Method | Endpoint | 설명 |

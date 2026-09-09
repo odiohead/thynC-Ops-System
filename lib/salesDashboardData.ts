@@ -1,0 +1,172 @@
+import { isAdminOrAbove, type JWTPayload } from '@/lib/auth'
+import { getSalesTargetSettings, salesH2From } from '@/lib/salesTargets'
+import { prisma } from '@/lib/prisma'
+import type { DashboardAData } from '@/app/sales/dashboard/_components/SalesDashboardA'
+
+/**
+ * 영업 대시보드 A(도입 실적) 데이터 집계 — 단일 소스
+ * - `/sales/dashboard` 서버 컴포넌트와 `GET /api/sales/dashboard`(사이니지 /dashboard 영업현황 뷰)가 공유
+ * - 호출부에서 canAccessSales/checkSalesAccess 게이트를 먼저 통과시켜야 한다
+ */
+export async function buildSalesDashboardData(user: JWTPayload): Promise<DashboardAData> {
+  const deals = await prisma.salesDeal.findMany({
+    include: {
+      status: { select: { name: true } },
+      hospitalModel: { select: { name: true } },
+      taxInvoice: { select: { name: true } },
+      settlement: { select: { name: true } },
+      hospital: { select: { hospitalCode: true, hospitalName: true, type: true, sidoName: true } },
+    },
+  })
+
+  const n = (v: bigint | null) => (v === null ? 0 : Number(v))
+  const completed = deals.filter((d) => d.status?.name === '계약완료')
+  const active = deals.filter((d) => d.status?.name === '영업중')
+
+  // KPI
+  const hospSet = new Set(completed.map((d) => d.hospitalCode))
+  const roundsPerHosp = new Map<string, number>()
+  completed.forEach((d) => roundsPerHosp.set(d.hospitalCode, (roundsPerHosp.get(d.hospitalCode) ?? 0) + 1))
+  const expandedHosp = Array.from(roundsPerHosp.values()).filter((c) => c >= 2).length
+  const deviceSum = completed.reduce((a, d) => a + (d.daewoongDeviceCount ?? 0), 0) // 누적 도입 병상 = 대웅 디바이스 수량 (2026-07-31 사용자 결정)
+  const bedSum = completed.reduce((a, d) => a + (d.bedCount ?? 0), 0)
+  const wardSum = completed.reduce((a, d) => a + (d.wardCount ?? 0), 0)
+  const actualSum = completed.reduce((a, d) => a + n(d.daewoongAmountActual), 0)
+  const saleSum = completed.reduce((a, d) => a + n(d.daewoongAmountProduct) + n(d.daewoongAmountConstruction), 0)
+  const dwTotalSum = completed.reduce((a, d) => a + n(d.daewoongAmountTotal), 0) // 대웅제약 매출액 = 계약금액(총견적가) 합
+
+  // 월별 추이 (계약일 기준) — 건수 + 신규 병원·병상(디바이스) + 누적
+  const monthMap = new Map<string, { count: number; hosp: number; beds: number }>()
+  const firstMonthByHosp = new Map<string, string>() // 병원별 최초 계약월 (신규 병원 판정)
+  for (const d of completed) {
+    if (!d.contractDate) continue
+    const ym = d.contractDate.toISOString().slice(0, 7)
+    const prev = firstMonthByHosp.get(d.hospitalCode)
+    if (!prev || ym < prev) firstMonthByHosp.set(d.hospitalCode, ym)
+  }
+  for (const d of completed) {
+    if (!d.contractDate) continue
+    const ym = d.contractDate.toISOString().slice(0, 7)
+    const cur = monthMap.get(ym) ?? { count: 0, hosp: 0, beds: 0 }
+    cur.count += 1
+    cur.beds += d.daewoongDeviceCount ?? 0
+    monthMap.set(ym, cur)
+  }
+  firstMonthByHosp.forEach((ym) => { const cur = monthMap.get(ym); if (cur) cur.hosp += 1 })
+  const allMonths = Array.from(monthMap.keys()).sort()
+  let cumHosp = 0, cumBeds = 0
+  const monthlyAll = allMonths.map((ym) => {
+    const m = monthMap.get(ym)!
+    cumHosp += m.hosp; cumBeds += m.beds
+    return { ym: ym.slice(2).replace('-', '.'), count: m.count, hosp: m.hosp, beds: m.beds, cumHosp, cumBeds }
+  })
+  const monthly = monthlyAll.slice(-24)
+
+  const countBy = <T,>(list: T[], key: (t: T) => string | null | undefined) => {
+    const m = new Map<string, number>()
+    list.forEach((t) => { const k = key(t) ?? '미지정'; m.set(k, (m.get(k) ?? 0) + 1) })
+    return m
+  }
+
+  // 계약내역 전체 목록 (계약일 보유분) — 이번달/이번주 카드에서 기간 이동(◀▶) 클라이언트 필터
+  const dated = completed.filter((d) => d.contractDate !== null)
+  const allDeals = dated
+    .sort((a, b) => b.contractDate!.getTime() - a.contractDate!.getTime())
+    .map((d) => ({
+      name: d.hospital.hospitalName,
+      type: d.hospital.type,
+      model: d.daewoongModel ?? d.hospitalModel?.name ?? null,
+      devices: d.daewoongDeviceCount,
+      date: d.contractDate!.toISOString().slice(0, 10),
+      sido: d.hospital.sidoName,
+    }))
+  // 종별: 병원 단위 (딜 다건 중복 제거) — 종별 전체 병원 수 대비 도입 수, 종별 위계 순 고정 (2026-07-31)
+  const typeMap = new Map<string, string>()
+  completed.forEach((d) => typeMap.set(d.hospitalCode, d.hospital.type))
+  const introByType = countBy(Array.from(typeMap.values()), (t) => t)
+  const typeTotals = await prisma.hospital.groupBy({ by: ['type'], _count: { _all: true } })
+  const totalByType = new Map(typeTotals.map((t) => [t.type, t._count._all]))
+  // 종별 도입 병상 합 (deals 원천 — 대웅 디바이스 수량, KPI '도입 병상'과 동일 기준)
+  const introBedsByType = new Map<string, number>()
+  completed.forEach((d) => {
+    const t = d.hospital.type ?? '미지정'
+    introBedsByType.set(t, (introBedsByType.get(t) ?? 0) + (d.daewoongDeviceCount ?? 0))
+  })
+  // 종별 전체 병상 합 (심평원 허가병상 — 병원상세정보연동 결과, 미연동 병원은 NULL 제외)
+  const bedTotalRows = await prisma.$queryRaw<Array<{ type: string | null; total: bigint }>>`
+    SELECT h.type AS type, COALESCE(SUM(hh.perm_sbd_cnt), 0) AS total
+    FROM hospitals h
+    JOIN hira_hospitals hh ON hh.hira_id = h.hira_id
+    GROUP BY h.type`
+  const bedTotalByType = new Map(bedTotalRows.filter((r) => r.type).map((r) => [r.type!, Number(r.total)]))
+  const TYPE_ORDER = ['상급종합', '종합병원', '병원', '요양병원', '정신병원', '치과병원', '한방병원', '의원', '치과의원', '한의원']
+  const typeDist = Array.from(introByType.entries())
+    .map(([name, count]) => ({
+      name,
+      count,
+      total: totalByType.get(name) ?? 0,
+      beds: introBedsByType.get(name) ?? 0,
+      totalBeds: bedTotalByType.get(name) ?? 0,
+    }))
+    .sort((a, b) => {
+      const ia = TYPE_ORDER.indexOf(a.name), ib = TYPE_ORDER.indexOf(b.name)
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+    })
+
+  // 2026년 목표현황 — 계약일 2026년 계약완료 딜 기준 (병상 = 대웅 디바이스, 병원 = 중복 제거) (2026-08-18)
+  const TARGET_YEAR = 2026
+  const distByType = (list: typeof completed, bedTargets: Record<string, number>) => {
+    const bedsByType = new Map<string, number>()
+    const hospByType = new Map<string, Set<string>>()
+    for (const d of list) {
+      const t = d.hospital.type ?? '미지정'
+      bedsByType.set(t, (bedsByType.get(t) ?? 0) + (d.daewoongDeviceCount ?? 0))
+      if (!hospByType.has(t)) hospByType.set(t, new Set())
+      hospByType.get(t)!.add(d.hospitalCode)
+    }
+    return TYPE_ORDER.filter((t) => bedTargets[t] !== undefined).map((name) => ({
+      name,
+      targetBeds: bedTargets[name],
+      beds: bedsByType.get(name) ?? 0,
+      hospitals: hospByType.get(name)?.size ?? 0,
+    }))
+  }
+  const yearDeals = completed.filter((d) => d.contractDate?.toISOString().slice(0, 4) === String(TARGET_YEAR))
+  const { targets: bedTargets, totalColor, typeColors } = await getSalesTargetSettings(TARGET_YEAR)
+  const targetDist = distByType(yearDeals, bedTargets)
+
+  // 2026년 하반기 영업현황 — 실적 집계는 8/1부터 (2026-08-21 사용자 결정), 목표는 하반기 전용 키
+  const H2_FROM = salesH2From(TARGET_YEAR)
+  const halfDeals = completed.filter((d) => {
+    const ds = d.contractDate?.toISOString().slice(0, 10)
+    return ds !== undefined && ds >= H2_FROM && ds <= `${TARGET_YEAR}-12-31`
+  })
+  const half = await getSalesTargetSettings(TARGET_YEAR, 'h2')
+  const halfDist = distByType(halfDeals, half.targets)
+
+  // 정산·세금계산서 (계약완료 딜 기준)
+  const settleDist = Array.from(countBy(completed, (d) => d.daewoongSettlement).entries()).map(([name, count]) => ({ name, count }))
+  const taxDist = Array.from(countBy(completed, (d) => d.daewoongTaxInvoice).entries()).map(([name, count]) => ({ name, count }))
+
+  const data: DashboardAData = {
+    kpi: {
+      hospitals: hospSet.size,
+      expanded: expandedHosp,
+      wards: wardSum,
+      beds: bedSum,
+      devices: deviceSum,
+      dwTotalSum,
+      actualSum,
+      saleSum,
+      activeDeals: active.length,
+    },
+    monthly,
+    allDeals,
+    typeDist,
+    target: { year: TARGET_YEAR, dist: targetDist, totalColor, typeColors, canEdit: isAdminOrAbove(user.role) },
+    halfTarget: { year: TARGET_YEAR, from: H2_FROM, dist: halfDist, totalColor: half.totalColor, typeColors: half.typeColors, canEdit: isAdminOrAbove(user.role) },
+    settleDist,
+    taxDist,
+  }
+  return data
+}
