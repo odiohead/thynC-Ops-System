@@ -2,7 +2,7 @@
  * AS업무(AS접수) 스모크 (as_work_design.md §10)
  *
  * 검증:
- *  마스터 — AS_STATUS 8종 매핑(접수 OPEN·수거중/입고/처리중/발송 IN_PROGRESS·보류 PENDING·완료/취소 CLOSED)·규칙·LOST 사유
+ *  마스터 — AS_STATUS 7종 매핑(접수 OPEN·수거중/입고/발송 IN_PROGRESS·보류 PENDING·완료/취소 CLOSED)·규칙·LOST 사유
  *  레지스트리 — 어댑터 8종·detailInclude에 asReceipt·REGISTRY_REF_TYPES 'AS'·refLink
  *  생성 — AS 코드 형식·매칭(ACTIVE_HERE/NONE)·레코드+라인+티켓(refType AS·제목·병원)·AS 표시(asRefCode)·중복 표시 경고
  *  도메인→티켓 — 수거중 IN_PROGRESS / 보류 PENDING / 접수 OPEN
@@ -72,10 +72,10 @@ async function main() {
     // ── 마스터 ────────────────────────────────────────────────
     console.log('▶ 마스터 시드')
     const statuses = await prisma.statusCode.findMany({ where: { category: 'AS_STATUS' }, orderBy: { order: 'asc' } })
-    check('AS_STATUS 8종', statuses.length === 8, `실제 ${statuses.length}`)
+    check('AS_STATUS 7종', statuses.length === 7, `실제 ${statuses.length}`)
     const mapOf = (n: string) => statuses.find((s) => s.name === n)?.ticketStatus
-    check('매핑 접수→OPEN·수거중/입고/처리중/발송→IN_PROGRESS',
-      mapOf('접수') === 'OPEN' && mapOf('수거중') === 'IN_PROGRESS' && mapOf('입고') === 'IN_PROGRESS' && mapOf('처리중') === 'IN_PROGRESS' && mapOf('발송') === 'IN_PROGRESS')
+    check('매핑 접수→OPEN·수거중/입고/발송→IN_PROGRESS',
+      mapOf('접수') === 'OPEN' && mapOf('수거중') === 'IN_PROGRESS' && mapOf('입고') === 'IN_PROGRESS' && mapOf('발송') === 'IN_PROGRESS')
     check('매핑 보류→PENDING·완료→CLOSED·취소→CLOSED (RESOLVED 미경유)',
       mapOf('보류') === 'PENDING' && mapOf('완료') === 'CLOSED' && mapOf('취소') === 'CLOSED')
     const rule = await prisma.ticketDomainCtiRule.findFirst({ where: { refType: 'AS', matchStatusCodeId: null } })

@@ -24,7 +24,14 @@ export interface LineRow {
   symptom: string
   /** 수정 모드 — 종결된 라인(제거·시리얼 변경 불가) */
   outcome: string | null
+  /** 행 식별 키 (시리얼 인라인 편집으로 serial이 바뀌므로 serial을 key로 쓰지 않음) */
+  key: number
+  /** 마지막으로 매칭 확인한 시리얼 — 다르면 blur 시 재매칭 */
+  matchedSerial: string
 }
+
+let rowKeySeq = 1
+const nextKey = () => rowKeySeq++
 
 export interface AsEditTarget {
   id: number
@@ -108,6 +115,8 @@ export default function AsReceiptFormModal({
         deviceKind: i.deviceKind ?? '',
         symptom: i.symptom ?? '',
         outcome: i.outcome,
+        key: nextKey(),
+        matchedSerial: i.serialNo,
       })))
     } else {
       setHospital(null)
@@ -160,9 +169,72 @@ export default function AsReceiptFormModal({
         deviceKind: '',
         symptom: '',
         outcome: null,
+        key: nextKey(),
+        matchedSerial: m.serialNo,
       })),
     ])
     setSerialText('')
+  }
+
+  /** 시리얼 매칭 API 호출 (공용) */
+  async function matchApi(hospitalCode: string, serials: string[]) {
+    const res = await fetch('/api/as-receipts/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hospitalCode, serials }),
+    })
+    const d = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(d.error ?? '매칭 확인에 실패했습니다.')
+    return (d.results ?? []) as { serialNo: string; state: string; modelName: string | null; wardName: string | null; warning: string | null }[]
+  }
+
+  /** 인라인 시리얼 편집 후 blur — 바뀐 시리얼만 재매칭 (수정 모드, 미종결 라인) */
+  async function rematchRow(idx: number) {
+    const row = rows[idx]
+    if (!row || !hospital) return
+    const key = parseSerialTextarea(row.serial)[0] ?? ''
+    if (!key) { updateRow(idx, { serial: row.matchedSerial }); return }
+    if (key === row.matchedSerial) { if (row.serial !== key) updateRow(idx, { serial: key }); return }
+    if (rows.some((r, i) => i !== idx && r.serial === key)) { setError(`같은 시리얼이 이미 있습니다: ${key}`); updateRow(idx, { serial: row.matchedSerial }); return }
+    setChecking(true)
+    setError(null)
+    try {
+      const [m] = await matchApi(hospital.code, [key])
+      updateRow(idx, {
+        serial: key,
+        matchedSerial: key,
+        state: m?.state ?? 'NONE',
+        modelName: m?.modelName ?? null,
+        warning: m?.warning ?? null,
+        wardName: row.wardName || (m?.wardName ?? ''),
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '매칭 확인에 실패했습니다.')
+      updateRow(idx, { serial: row.matchedSerial })
+    }
+    setChecking(false)
+  }
+
+  /** 병원 변경(수정 모드) — 미종결 라인 전부 새 병원 기준 재매칭 */
+  async function changeHospital(h: { code: string; name: string }) {
+    setHospital(h)
+    setHospitalOpts([])
+    const openRows = rows.filter((r) => !r.outcome)
+    if (!openRows.length) return
+    setChecking(true)
+    setError(null)
+    try {
+      const results = await matchApi(h.code, openRows.map((r) => r.serial))
+      const bySerial = new Map(results.map((m) => [m.serialNo, m]))
+      setRows((prev) => prev.map((r) => {
+        if (r.outcome) return r
+        const m = bySerial.get(r.serial)
+        return m ? { ...r, state: m.state, modelName: m.modelName, warning: m.warning } : r
+      }))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '매칭 확인에 실패했습니다.')
+    }
+    setChecking(false)
   }
 
   function updateRow(idx: number, patch: Partial<LineRow>) {
@@ -194,7 +266,7 @@ export default function AsReceiptFormModal({
       ? await fetch(`/api/as-receipts/${editTarget.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ ...payload, hospitalCode: hospital.code }), // 병원 변경 포함 (2026-09-10)
         })
       : await fetch('/api/as-receipts', {
           method: 'POST',
@@ -233,8 +305,16 @@ export default function AsReceiptFormModal({
             {hospital ? (
               <div className="mt-1 flex items-center gap-2">
                 <span className="rounded-md bg-blue-50 px-2.5 py-1.5 text-sm text-blue-800">{hospital.name}</span>
-                {!editTarget && (
-                  <button type="button" className="text-xs text-gray-400 hover:text-gray-600" onClick={() => { setHospital(null); setRows([]) }}>변경</button>
+                <button
+                  type="button"
+                  className="text-xs text-gray-400 hover:text-gray-600"
+                  title={editTarget ? '병원 변경 — 미종결 라인은 새 병원 기준으로 재매칭됩니다' : undefined}
+                  onClick={() => { setHospital(null); if (!editTarget) setRows([]) }}
+                >
+                  변경
+                </button>
+                {editTarget && hospital.code !== editTarget.hospitalCode && (
+                  <span className="text-xs text-amber-600">변경됨 (원래: {editTarget.hospitalName})</span>
                 )}
               </div>
             ) : (
@@ -257,7 +337,11 @@ export default function AsReceiptFormModal({
                         key={h.hospitalCode}
                         type="button"
                         className="block w-full px-2.5 py-1.5 text-left text-sm hover:bg-blue-50"
-                        onClick={() => { setHospital({ code: h.hospitalCode, name: h.hospitalName || h.hiraHospitalName || h.hospitalCode }); setHospitalOpts([]) }}
+                        onClick={() => {
+                          const picked = { code: h.hospitalCode, name: h.hospitalName || h.hiraHospitalName || h.hospitalCode }
+                          if (editTarget) void changeHospital(picked)
+                          else { setHospital(picked); setHospitalOpts([]) }
+                        }}
                       >
                         {h.hospitalName || h.hiraHospitalName}
                         <span className="ml-1.5 font-mono text-xs text-gray-400">{h.hospitalCode}</span>
@@ -336,12 +420,23 @@ export default function AsReceiptFormModal({
                 {rows.map((r, idx) => {
                   const badge = STATE_BADGES[r.state ?? 'NONE'] ?? STATE_BADGES.NONE
                   return (
-                    <div key={r.serial} className="rounded-lg border border-gray-200 px-2.5 py-2">
+                    <div key={r.key} className="rounded-lg border border-gray-200 px-2.5 py-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-sm text-gray-900">{r.serial}</span>
+                        {r.outcome ? (
+                          <span className="font-mono text-sm text-gray-900">{r.serial}</span>
+                        ) : (
+                          <input
+                            type="text"
+                            value={r.serial}
+                            onChange={(e) => updateRow(idx, { serial: e.target.value.toUpperCase() })}
+                            onBlur={() => void rematchRow(idx)}
+                            onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), (e.target as HTMLInputElement).blur())}
+                            title="시리얼 수정 — 포커스가 벗어나면 재매칭"
+                            className={`w-36 rounded-md border px-2 py-0.5 font-mono text-sm text-gray-900 ${r.serial !== r.matchedSerial ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`}
+                          />
+                        )}
                         <span className={`rounded-full px-1.5 py-0.5 text-[11px] font-medium ${badge.cls}`}>{badge.label}</span>
                         {r.modelName && <span className="text-xs text-gray-400">{r.modelName}</span>}
-                        {r.wardName && <span className="text-xs text-gray-400">{r.wardName}</span>}
                         {r.outcome ? (
                           <span className="text-[11px] text-gray-400">종결 라인 — 제거 불가</span>
                         ) : (
@@ -350,6 +445,13 @@ export default function AsReceiptFormModal({
                       </div>
                       {r.warning && <p className="mt-1 text-xs text-amber-600">⚠ {r.warning}</p>}
                       <div className="mt-1.5 flex gap-1.5">
+                        <input
+                          type="text"
+                          value={r.wardName}
+                          onChange={(e) => updateRow(idx, { wardName: e.target.value })}
+                          placeholder="병동"
+                          className="w-24 rounded-md border border-gray-300 px-2 py-1 text-xs"
+                        />
                         {r.state === 'NONE' && (
                           <select
                             value={r.deviceKind}
@@ -385,7 +487,7 @@ export default function AsReceiptFormModal({
             <button
               type="button"
               onClick={submit}
-              disabled={busy}
+              disabled={busy || checking}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
               {busy ? '저장 중...' : editTarget ? '수정 저장' : 'AS접수 등록'}

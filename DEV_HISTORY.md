@@ -4,6 +4,30 @@
 
 ---
 
+## 2026-09-10 14:40 | AS 상태 '처리중' 제거 — 단계형 7종 (dev2 마스터 삭제·빌드·재시작, PROD 동시 반영)
+
+- **사용자 결정**: 수거중·입고·발송이 모두 티켓 IN_PROGRESS 버킷이라 '처리중'은 중복 단계 → 제거. PROD의 '처리중' 접수 1건은 사용자가 사전 이동(0건 확인 후 삭제)
+- **시드** `scripts/seed-as-masters.sql`: '처리중' INSERT·매핑 UPDATE 목록에서 제거 + 사용 접수가 없을 때만 삭제하는 DELETE 추가(멱등·FK SET NULL 방지 — 동기화 후 재실행 시 되살아나지 않음)
+- **폴백** `lib/ticket-domains/asReceipt.ts`: 티켓→AS 이름 폴백 IN_PROGRESS→'수거중'(버킷 첫 단계), AS→티켓 폴백의 '처리중' case는 잔존 데이터 호환으로 유지. 정식 경로(`status_codes.ticket_status`·`pickDomainStatus`)는 변경 없음 — 티켓 처리중 전이 시 IN_PROGRESS 버킷 첫 상태(수거중) 선택, 이미 입고·발송이면 유지
+- **DB**: dev2·PROD `status_codes` AS_STATUS '처리중' 행 삭제(각 사용 0건 확인). 코드가 '처리중'을 자동 세팅하는 곳 없음(사전 grep)
+- 문서: as_work_design.md §4.3·원칙 5, README AS업무·스키마·시드 표기 7종
+- 영향: scripts/seed-as-masters.sql, lib/ticket-domains/asReceipt.ts, projects/as_work_design.md, README.md, dev2·PROD DB(status_codes 1행)
+
+---
+
+## 2026-09-10 14:00 | AS업무 수정 모달 — 시리얼·병동 인라인 편집 + 병원 변경, 시트 시리얼 괄호 제거 (dev2 빌드·재시작 완료, PROD 배포 대기)
+
+- **배경(사용자 신고)**: PROD AS-202609-0159(id 3441, 채널톡 r3657) — 시트 F열이 `P013798(72W)` 형식이라 시리얼 6개 전부 괄호 포함으로 등록(미등록 라인). 수정 모드에서 시리얼 등 수집값을 고칠 수 있어야 함
+- **수정 모달** (`AsReceiptFormModal`): ① 미종결 라인 시리얼을 텍스트 입력으로 — 포커스 이탈(또는 Enter) 시 `/api/as-receipts/match`로 그 시리얼만 재매칭(상태·모델·경고 갱신, 변경 중엔 앰버 테두리, 중복 시 원복) ② 병동 입력 전 라인 노출 ③ 수정 모드에서도 병원 [변경] 허용 — 선택 즉시 미종결 라인 전부 새 병원 기준 재매칭, '변경됨(원래: …)' 표기 ④ 행 key를 시리얼 대신 고유 번호로(편집 중 리마운트 방지), 매칭 진행 중 저장 버튼 비활성. PUT 페이로드에 `hospitalCode` 포함
+- **PUT** (`/api/as-receipts/[id]`): `hospitalCode` 수용(존재 검증) — 변경 시 `applyItemChanges`에 `previousHospitalCode` 전달, 라인이 안 와도 기존 라인으로 재매칭. 티켓 병원·제목은 기존 어댑터 동기화가 처리
+- **서비스** (`applyItemChanges`): `opts.previousHospitalCode` — 병원이 바뀌면 미종결 기존 라인을 전부 제거(플래그 해제 이벤트는 구 병원 ctx)→재추가(새 병원 매칭·AS 표시)로 처리. 시리얼 변경은 기존 시리얼 키 제거→추가 의미론 그대로(증상·병동은 입력값 유지)
+- **시트 파서** (`channeltalkAsSync`): F열 괄호 구간 제거 후 `parseSerialTextarea` — 재발 방지
+- 검증: tsc 0·eslint 0. dev2 서비스 E2E(임시 접수 → 삭제) — ① `A125142(72W)`+`A125153` 등록(미등록 1) ② 시리얼 보정 `A125142` → 원장 연결·AS 표시 켜짐·증상 유지·병동 갱신 ③ 병원 HOSP-000003→000095 변경 → 구 병원 라인 플래그 해제, 새 병원 라인 `A121825` AS 표시, 타병원 경고 1, 티켓 병원·제목 동기화 ④ 정리 후 플래그·고아 티켓 0. 힙 4GB 빌드·`pm2 restart thync-dev`·/api/health 200
+- **PROD 3441 보정 안내**: 배포 후 수정 모달에서 시리얼 6개의 `(72W)` 제거 → 자동 재매칭·저장(병동은 이미 52W). 스크립트 일괄 보정은 하지 않음(사용자 화면 확인 경로)
+- 영향: app/as-receipts/_components/AsReceiptFormModal.tsx, app/api/as-receipts/[id]/route.ts, lib/{asReceiptService,channeltalkAsSync}.ts, projects/channeltalk_as_intake_design.md, README.md
+
+---
+
 ## 2026-09-10 11:30 | PROD 배포: AS업무 4건 — 수거 송장·시트 L열 역기입 + 목록 컬럼 확장 + 접수 기기상태 (ce7e39d)
 
 - **절차**: dev2 커밋(ce7e39d)·push → PROD pull → 힙 4GB 빌드 → `pm2 restart thync-prod` (코드 전용 — 스키마·마이그·패키지·시드 없음)

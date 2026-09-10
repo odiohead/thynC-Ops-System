@@ -199,7 +199,7 @@ export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
         continue
       }
 
-      const serials = parseSerialTextarea(serialsRaw)
+      const serials = parseSerialTextarea(serialsRaw.replace(/[(（][^)）]*[)）]/g, '')) // 'P013798(72W)' 같은 괄호 병동 표기 제거 (2026-09-10, r3657 사례)
       if (!serials.length) {
         result.failed++
         rangeOf(rowNo, 'AI', [SYS_STATE.FAIL, '', '시리얼 파싱 결과 없음', nowKst()])

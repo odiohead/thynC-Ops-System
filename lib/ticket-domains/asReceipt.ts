@@ -2,7 +2,7 @@
  * AS접수 어댑터 (as_work_design.md — 어댑터 SOP(§3.4) 8번째 적용)
  * 기기 수리·교체(AS) 업무 — 연결 티켓 refType 'AS'. 병원 필수 연결.
  *
- * 워크플로 상태(AS_STATUS, 단계형 8종): 접수 → 수거중 → 입고 → 처리중 → 발송 → 완료(**CLOSED 직행**)
+ * 워크플로 상태(AS_STATUS, 단계형 7종 — '처리중' 2026-09-10 제거): 접수 → 수거중 → 입고 → 발송 → 완료(**CLOSED 직행**)
  * + 보류(PENDING)·취소(CLOSED). 선교체·방문교체가 있어 단계 순서는 강제하지 않는다(2026-09-04 결정 5).
  * 담당 배정은 티켓 단독 소유(VOC 선례) — 도메인에는 등록자(createdBy)만 기록.
  */
@@ -29,7 +29,7 @@ export function asStatusToTicket(statusName: string | null, hasOwner: boolean): 
   switch (statusName) {
     case '수거중':
     case '입고':
-    case '처리중':
+    case '처리중': // 구 상태(2026-09-10 제거) — 잔존 데이터 호환
     case '발송': return 'IN_PROGRESS'
     case '보류': return 'PENDING'
     case '완료': return 'CLOSED' // RESOLVED 미경유 — SOR 선례
@@ -43,7 +43,7 @@ export function asStatusToTicket(statusName: string | null, hasOwner: boolean): 
 /** 티켓 상태 → AS접수 상태명 (역방향 이름 폴백 — 매핑 행 전무 환경) */
 export function ticketStatusToAs(status: TicketStatus): string {
   switch (status) {
-    case 'IN_PROGRESS': return '처리중'
+    case 'IN_PROGRESS': return '수거중' // '처리중' 제거(2026-09-10) — IN_PROGRESS 버킷 첫 단계
     case 'PENDING': return '보류'
     case 'RESOLVED':
     case 'CLOSED': return '완료'

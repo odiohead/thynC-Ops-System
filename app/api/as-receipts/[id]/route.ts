@@ -137,6 +137,13 @@ export async function PUT(request: NextRequest, { params }: Params) {
     data.receivedAt = dateOrNull(body.receivedAt)
     data.expectedShipDate = dateOrNull(body.expectedShipDate)
     if (body.preReplace !== undefined) data.preReplace = body.preReplace === true
+    // 병원 변경 (2026-09-10 — 시트 인입 오매칭 보정용). 미종결 라인은 새 병원 기준 재매칭·AS 표시 이전, 티켓 병원은 어댑터 동기화
+    if (typeof body.hospitalCode === 'string' && body.hospitalCode.trim() && body.hospitalCode.trim() !== existing.hospitalCode) {
+      const code = body.hospitalCode.trim()
+      const h = await prisma.hospital.findUnique({ where: { hospitalCode: code }, select: { hospitalCode: true } })
+      if (!h) throw new AsServiceError(400, '병원을 찾을 수 없습니다.')
+      data.hospitalCode = code
+    }
 
     if (body.statusId !== undefined) {
       const sid = Number(body.statusId)
@@ -174,7 +181,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
     warnings = await prisma.$transaction(
       async (tx) => {
         const updated = await tx.asReceipt.update({ where: { id }, data, select: { id: true, asCode: true, hospitalCode: true, receiptDate: true } })
-        const w = items ? await applyItemChanges(tx, updated, items, { userId: user.userId, name: user.name }) : []
+        // 병원이 바뀌었는데 라인이 안 왔으면 기존 라인 그대로 재매칭
+        const lines = items ?? (data.hospitalCode
+          ? (await tx.asReceiptItem.findMany({ where: { receiptId: id }, orderBy: { id: 'asc' } })).map((i) => ({ serial: i.serialNo }))
+          : null)
+        const w = lines ? await applyItemChanges(tx, updated, lines, { userId: user.userId, name: user.name }, { previousHospitalCode: existing.hospitalCode }) : []
         await syncAsReceiptToTicket(tx, id, user.userId)
         return w
       },

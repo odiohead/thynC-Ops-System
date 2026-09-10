@@ -144,12 +144,17 @@ export async function applyItemChanges(
   tx: Prisma.TransactionClient,
   receipt: { id: number; asCode: string; hospitalCode: string; receiptDate: Date },
   lines: readonly LineInput[],
-  actor: { userId: string | null; name: string | null }
+  actor: { userId: string | null; name: string | null },
+  /** 병원 변경 수정(2026-09-10) — 직전 병원 코드. 지정되고 현재와 다르면 미종결 라인 전부를 제거→재추가로 새 병원 기준 재매칭 */
+  opts?: { previousHospitalCode?: string }
 ): Promise<string[]> {
   if (!lines.length) throw new AsServiceError(400, '기기 라인을 1개 이상 입력하세요.')
   const warnings: string[] = []
-  const existing = await tx.asReceiptItem.findMany({ where: { receiptId: receipt.id } })
-  const byKey = new Map(existing.map((i) => [i.serialNo, i]))
+  const hospitalChanged = !!opts?.previousHospitalCode && opts.previousHospitalCode !== receipt.hospitalCode
+  const allExisting = await tx.asReceiptItem.findMany({ where: { receiptId: receipt.id } })
+  // 병원 변경 시 미종결 기존 라인은 '없던 것'으로 취급(아래 제거 루프에서 플래그 해제·삭제 → 추가 루프에서 재매칭 생성)
+  const existing = allExisting
+  const byKey = new Map(allExisting.filter((i) => !(hospitalChanged && !i.outcome)).map((i) => [i.serialNo, i]))
 
   const nextKeys: string[] = []
   const seen = new Set<string>()
@@ -172,16 +177,16 @@ export async function applyItemChanges(
 
   const today = todayKst()
   const clearCtx: RegistryCtx = {
-    hospitalCode: receipt.hospitalCode,
+    hospitalCode: opts?.previousHospitalCode ?? receipt.hospitalCode, // 해제 이벤트는 플래그를 켠 당시 병원 기준
     actor,
     occurredOn: today,
     source: 'MANUAL',
     ref: { type: 'AS', code: receipt.asCode },
   }
 
-  // 제거 (미종결) — 이 접수가 켠 플래그만 해제
+  // 제거 (미종결) — 이 접수가 켠 플래그만 해제. 병원 변경 시 미종결 라인 전부 대상(재추가 전제)
   for (const item of existing) {
-    if (seen.has(item.serialNo)) continue
+    if (seen.has(item.serialNo) && !(hospitalChanged && !item.outcome)) continue
     if (item.deviceId) {
       const placement = await tx.hospitalDevice.findUnique({
         where: { deviceId: item.deviceId },
