@@ -46,6 +46,77 @@ export function summarizeAsItemsByKind(
   return parts.join(' · ') + (done > 0 ? ` (종결 ${done})` : '')
 }
 
+/** 접수 라인들의 상품유형(일반/라이트) 집합 — 원장 배치 기준(구기기 배치 → 없으면 교체기 배치). 혼재 시 둘 다, 미등록만이면 빈 배열 (목록 표기용, 2026-09-10) */
+export function summarizeAsItemProductTypes(
+  items: { device?: { placement?: { productType: string | null } | null } | null; newDevice?: { placement?: { productType: string | null } | null } | null }[]
+): string[] {
+  const set = new Set<string>()
+  for (const i of items) {
+    const t = i.device?.placement?.productType ?? i.newDevice?.placement?.productType
+    if (t) set.add(t)
+  }
+  return ['일반', '라이트'].filter((t) => set.has(t))
+}
+
+// ─── 목록 원장 정합 태그 (2026-09-10) ──────────────────────────
+// 접수 병원과 라인 기기의 현재 원장 배치를 대조 — 미종결 라인만 평가(종결 라인은 교체·분실로 회수되는 게 정상이라 제외)
+export const AS_REGISTRY_TAGS = ['OTHER_HOSPITAL', 'RECOVERED', 'UNPLACED', 'UNREGISTERED'] as const
+export type AsRegistryTag = (typeof AS_REGISTRY_TAGS)[number]
+export const AS_REGISTRY_TAG_LABELS: Record<AsRegistryTag, string> = {
+  OTHER_HOSPITAL: '타병원', // 원장상 다른 병원에 ACTIVE 배치
+  RECOVERED: '회수', // 원장상 회수(RECOVERED) 상태 — 어느 병원에도 배치 아님
+  UNPLACED: '미배치', // 원장 개체는 있으나 배치 이력 없음
+  UNREGISTERED: '미등록', // 원장에 시리얼 자체가 없음
+}
+export const AS_REGISTRY_TAG_DESC: Record<AsRegistryTag, string> = {
+  OTHER_HOSPITAL: '기기현황에 다른 병원 배치로 등록된 기기 — 배치 확인 필요',
+  RECOVERED: '기기현황에 회수 상태로 등록된 기기 — 재배치 여부 확인 필요',
+  UNPLACED: '기기현황에 개체는 있으나 병원 배치가 없는 기기',
+  UNREGISTERED: '기기현황에 등록되지 않은 시리얼',
+}
+export interface AsRegistryTagSummary { tag: AsRegistryTag; count: number; detail: string | null } // detail: 타병원명 등
+
+export type AsRegistryUnit = { placement: { status: string; hospitalCode: string | null; hospitalName: string | null } | null } | undefined
+export interface AsRegistryLineTag { tag: AsRegistryTag; detail: string | null } // detail: 타병원명
+
+/** 라인 1개의 현재 배치 → 태그 (정상이면 null). unit: 원장 조회 결과(undefined = 미등록) */
+export function classifyAsRegistryLine(hospitalCode: string, unit: AsRegistryUnit): AsRegistryLineTag | null {
+  if (!unit) return { tag: 'UNREGISTERED', detail: null }
+  const p = unit.placement
+  if (!p) return { tag: 'UNPLACED', detail: null }
+  if (p.status !== 'ACTIVE') return { tag: 'RECOVERED', detail: null }
+  if (p.hospitalCode !== hospitalCode) return { tag: 'OTHER_HOSPITAL', detail: p.hospitalName ?? p.hospitalCode }
+  return null
+}
+
+/** 라인별 현재 배치 → 접수 단위 태그 집계(태그 순서 고정). 미종결 라인만 */
+export function summarizeAsRegistryTags(
+  hospitalCode: string,
+  items: { serialNo: string; outcome: string | null }[],
+  unitBySerial: Map<string, NonNullable<AsRegistryUnit>>
+): AsRegistryTagSummary[] {
+  const acc = new Map<AsRegistryTag, { count: number; details: Set<string> }>()
+  for (const i of items) {
+    if (i.outcome) continue
+    const r = classifyAsRegistryLine(hospitalCode, unitBySerial.get(i.serialNo))
+    if (!r) continue
+    const cur = acc.get(r.tag) ?? { count: 0, details: new Set<string>() }
+    cur.count++
+    if (r.detail) cur.details.add(r.detail)
+    acc.set(r.tag, cur)
+  }
+  return AS_REGISTRY_TAGS.filter((t) => acc.has(t)).map((t) => {
+    const v = acc.get(t)!
+    return { tag: t, count: v.count, detail: v.details.size ? Array.from(v.details).join(', ') : null }
+  })
+}
+
+/** 목록 '접수 기기상태' 표기 — 미종결 라인 없음 → null(표시 안 함), 태그 없음 → 정상, 있음 → 확인필요 */
+export function asReceiptDeviceStateLabel(hasOpenLines: boolean, tags: AsRegistryTagSummary[]): '정상' | '확인필요' | null {
+  if (!hasOpenLines) return null
+  return tags.length ? '확인필요' : '정상'
+}
+
 export function summarizeAsItems(items: { outcome: string | null }[]): string {
   if (!items.length) return '기기 없음'
   const done = items.filter((i) => i.outcome != null && i.outcome !== '').length

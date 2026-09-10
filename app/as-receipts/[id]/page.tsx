@@ -13,8 +13,7 @@ import AsReceiptFormModal, { type AsEditTarget } from '../_components/AsReceiptF
 import {
   AS_CATEGORY_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, AS_DEST_TYPES,
   AS_DEST_TYPE_LABELS, AS_OUTCOMES, AS_OUTCOME_LABELS,
-  type AsCategory, type AsMethod, type AsDestType, type AsOutcome,
-} from '@/lib/asReceiptShared'
+  type AsCategory, type AsMethod, type AsDestType, type AsOutcome, AS_REGISTRY_TAG_LABELS, AS_REGISTRY_TAG_DESC, type AsRegistryTag, type AsRegistryLineTag } from '@/lib/asReceiptShared'
 import type { TicketStatus } from '@prisma/client'
 
 interface CodeRef { id: number; name: string; color: string | null }
@@ -39,6 +38,7 @@ interface ItemRow {
     placement: { status: string; hospitalCode: string | null; asStartedOn: string | null; asRefCode: string | null; ward: { name: string } | null } | null
   } | null
   newDevice: { id: number; serialNo: string } | null
+  registryTag: AsRegistryLineTag | null // 미종결 라인의 현재 원장 정합(정상=null) — API 실시간 계산
 }
 
 interface AsDetail {
@@ -98,7 +98,23 @@ function todayKst(): string {
 }
 
 /** 라인의 기기현황 상태 배지 */
+const REGISTRY_TAG_BADGE: Record<AsRegistryTag, string> = {
+  OTHER_HOSPITAL: 'bg-red-50 text-red-600',
+  RECOVERED: 'bg-amber-50 text-amber-700',
+  UNPLACED: 'bg-gray-100 text-gray-500',
+  UNREGISTERED: 'bg-gray-100 text-gray-500',
+}
+
 function deviceBadge(item: ItemRow, asCode: string, hospitalCode: string | null) {
+  // 미종결 라인 — API가 시리얼로 실시간 대조한 태그 우선 (목록 '접수 기기상태'와 같은 기준)
+  if (item.registryTag) {
+    const t = item.registryTag
+    return (
+      <span className={`rounded-full px-1.5 py-0.5 text-[11px] font-medium ${REGISTRY_TAG_BADGE[t.tag]}`} title={AS_REGISTRY_TAG_DESC[t.tag]}>
+        {AS_REGISTRY_TAG_LABELS[t.tag]}{t.detail ? ` · ${t.detail}` : ''}
+      </span>
+    )
+  }
   if (!item.deviceId) return <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-500">미등록</span>
   const p = item.device?.placement
   if (!p) return null
@@ -129,7 +145,7 @@ export default function AsReceiptDetailPage() {
   const [me, setMe] = useState<{ id: string; role: string; permissions?: string[] } | null>(null)
 
   // 진행 기록 (물류)
-  const [logistics, setLogistics] = useState({ pickedUpAt: '', receivedAt: '', expectedShipDate: '', destType: '', destInfo: '', pickupDestDiffers: false, pickupDestInfo: '' })
+  const [logistics, setLogistics] = useState({ pickupTrackingNo: '', pickedUpAt: '', receivedAt: '', expectedShipDate: '', destType: '', destInfo: '', pickupDestDiffers: false, pickupDestInfo: '' })
 
   // 라인 처리 패널
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -152,6 +168,7 @@ export default function AsReceiptDetailPage() {
     const r: AsDetail = d.asReceipt
     setReq(r)
     setLogistics({
+      pickupTrackingNo: r.pickupTrackingNo ?? '',
       pickedUpAt: r.pickedUpAt?.slice(0, 10) ?? '',
       receivedAt: r.receivedAt?.slice(0, 10) ?? '',
       expectedShipDate: r.expectedShipDate?.slice(0, 10) ?? '',
@@ -364,7 +381,13 @@ export default function AsReceiptDetailPage() {
         <div className="border-b border-gray-200 px-4 py-3 sm:px-6">
           <h2 className="text-sm font-semibold text-gray-700">진행 기록</h2>
         </div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-4 sm:px-6 md:grid-cols-5">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-4 sm:px-6 md:grid-cols-6">
+          <div>
+            <p className={label}>수거 송장번호</p>
+            {canEdit ? (
+              <input type="text" value={logistics.pickupTrackingNo} onChange={(e) => setLogistics((p) => ({ ...p, pickupTrackingNo: e.target.value }))} placeholder="고장품 택배 송장" className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 font-mono text-sm" />
+            ) : <p className="mt-1 font-mono text-sm text-gray-900">{req.pickupTrackingNo ?? '-'}</p>}
+          </div>
           <div>
             <p className={label}>수거일</p>
             {canEdit ? (
@@ -438,6 +461,7 @@ export default function AsReceiptDetailPage() {
               type="button"
               disabled={busy}
               onClick={() => putReceipt({
+                pickupTrackingNo: logistics.pickupTrackingNo || null,
                 pickedUpAt: logistics.pickedUpAt || null,
                 receivedAt: logistics.receivedAt || null,
                 expectedShipDate: logistics.expectedShipDate || null,

@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { AS_CATEGORIES, parseSerialTextarea } from '@/lib/asReceiptShared'
+import { AS_CATEGORIES, parseSerialTextarea, summarizeAsRegistryTags } from '@/lib/asReceiptShared'
 import { createAsReceipt, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { notifyTicketCreated } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
@@ -24,7 +24,8 @@ const listInclude = {
   items: {
     select: {
       id: true, serialNo: true, outcome: true, deviceKind: true,
-      device: { select: { deviceInfo: { select: { deviceName: true } } } }, // 목록 기기별 대수 표기 (CX #1)
+      device: { select: { deviceInfo: { select: { deviceName: true } }, placement: { select: { productType: true } } } }, // 목록 기기별 대수 표기 (CX #1) + 상품유형(일반/라이트, 2026-09-10)
+      newDevice: { select: { placement: { select: { productType: true } } } }, // 교체 라인 — 구기기 배치가 회수된 뒤에는 교체기 배치의 상품유형으로 판별
     },
     orderBy: { id: 'asc' as const },
   },
@@ -96,7 +97,20 @@ export async function GET(request: NextRequest) {
     }),
   ])
 
-  return NextResponse.json({ receipts, total, page, pageSize })
+  // 원장 정합 태그 (2026-09-10) — 페이지 내 미종결 라인 시리얼의 현재 배치를 1회 조회해 접수 단위로 집계
+  const openSerials = Array.from(new Set(receipts.flatMap((r) => r.items.filter((i) => !i.outcome).map((i) => i.serialNo))))
+  const units = openSerials.length
+    ? await prisma.deviceUnit.findMany({
+        where: { serialNo: { in: openSerials } },
+        select: { serialNo: true, placement: { select: { status: true, hospitalCode: true, hospital: { select: { hospitalName: true } } } } },
+      })
+    : []
+  const unitBySerial = new Map(units.map((u) => [u.serialNo, {
+    placement: u.placement ? { status: u.placement.status, hospitalCode: u.placement.hospitalCode, hospitalName: u.placement.hospital?.hospitalName ?? null } : null,
+  }]))
+  const withTags = receipts.map((r) => ({ ...r, registryTags: summarizeAsRegistryTags(r.hospitalCode, r.items, unitBySerial) }))
+
+  return NextResponse.json({ receipts: withTags, total, page, pageSize })
 }
 
 /** items 입력 정리 — [{serial, symptom?, wardName?, deviceKind?}] 또는 serialsText(줄 단위) */

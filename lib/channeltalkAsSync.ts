@@ -32,7 +32,9 @@ const KEY_TAB = 'channeltalk_as_sheet_tab' // 기본 'A/S'
 // 0-index 열 위치 (시트 실측 계약 — 설계 §2.1)
 const C = {
   DATE: 0, HOSP: 1, WARD: 2, CATEGORY: 3, KIND: 4, SERIALS: 5, CNT_ECG: 6, CNT_SPO2: 7,
-  SYMPTOM: 8, REPORTER: 9, AGENT: 10, PICKUP_DATE: 12, PRE_REPLACE: 15,
+  SYMPTOM: 8, REPORTER: 9, AGENT: 10,
+  PICKUP_TRACKING: 11, // L 고장품 수거 송장 — 역기입 대상 (④)
+  PICKUP_DATE: 12, PRE_REPLACE: 15,
   SHIP_TRACKING: 17, // R 수리품 택배발송 — 역기입 대상 (③)
   DEST_TYPE: 18, DEST_INFO: 19,
   SHIP_DATES: 21, // V 발송, 교체일자 — 역기입 대상 (③)
@@ -49,6 +51,7 @@ export interface ChanneltalkSyncResult {
   failed: number
   completedBack: number
   shipBack: number
+  pickupBack: number
 }
 
 function sheetsClient() {
@@ -129,7 +132,7 @@ async function loadSettings() {
 }
 
 export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
-  const result: ChanneltalkSyncResult = { scanned: 0, registered: 0, failed: 0, completedBack: 0, shipBack: 0 }
+  const result: ChanneltalkSyncResult = { scanned: 0, registered: 0, failed: 0, completedBack: 0, shipBack: 0, pickupBack: 0 }
   const { sheetId, cutover, tab } = await loadSettings()
   if (!sheetId) {
     console.warn('[channeltalk-as] channeltalk_as_sheet_id 미설정 — 스킵')
@@ -321,6 +324,23 @@ export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
         result.shipBack++
         console.log(`[channeltalk-as] r${rowNo} 발송정보 역기입: ${rec.asCode} → W ${serials.length}대, V ${dates.length}일${wantR ? `, R ${trackings.length}건` : ''}`)
       }
+    }
+  }
+
+  // ── ④ 수거 송장 역기입 (L 고장품 택배수거 송장 — 상세 화면 입력값, 시트 값과 다를 때만) ──
+  if (okRows.length) {
+    const receipts = await prisma.asReceipt.findMany({
+      where: { asCode: { in: okRows.map(({ r }) => cell(r, C.SYS_CODE)) }, pickupTrackingNo: { not: null } },
+      select: { asCode: true, pickupTrackingNo: true },
+    })
+    const byCode = new Map(receipts.map((x) => [x.asCode, x.pickupTrackingNo?.trim() ?? '']))
+    for (const { r, rowNo } of okRows) {
+      const want = byCode.get(cell(r, C.SYS_CODE))
+      if (!want || cell(r, C.PICKUP_TRACKING).replace(/\r/g, '').trim() === want) continue
+      rangeOf(rowNo, 'L', [want])
+      rangeOf(rowNo, 'AL', [nowKst()])
+      result.pickupBack++
+      console.log(`[channeltalk-as] r${rowNo} 수거 송장 역기입: ${cell(r, C.SYS_CODE)} → L ${want}`)
     }
   }
 

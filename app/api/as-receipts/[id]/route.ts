@@ -5,7 +5,7 @@ import { getAuthUser, isUserOrAbove } from '@/lib/auth'
 import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { canEditAsReceipt, canDeleteAsReceipt } from '@/lib/asReceipt'
-import { AS_CATEGORIES, AS_METHODS, AS_DEST_TYPES } from '@/lib/asReceiptShared'
+import { AS_CATEGORIES, AS_METHODS, AS_DEST_TYPES, classifyAsRegistryLine } from '@/lib/asReceiptShared'
 import { applyItemChanges, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { syncAsReceiptToTicket } from '@/lib/ticket-domains/asReceipt'
 import { clearDeviceAs, RegistryError } from '@/lib/deviceRegistry'
@@ -55,7 +55,23 @@ export async function GET(request: NextRequest, { params }: Params) {
   const asReceipt = await prisma.asReceipt.findUnique({ where: { id }, include: detailInclude })
   if (!asReceipt) return NextResponse.json({ error: 'AS접수를 찾을 수 없습니다.' }, { status: 404 })
 
-  return NextResponse.json({ asReceipt })
+  // 라인별 원장 정합 태그 (2026-09-10) — 미종결 라인의 시리얼로 현재 배치를 실시간 대조(등록 시 deviceId 스냅샷과 무관)
+  const openSerials = asReceipt.items.filter((i) => !i.outcome).map((i) => i.serialNo)
+  const units = openSerials.length
+    ? await prisma.deviceUnit.findMany({
+        where: { serialNo: { in: openSerials } },
+        select: { serialNo: true, placement: { select: { status: true, hospitalCode: true, hospital: { select: { hospitalName: true } } } } },
+      })
+    : []
+  const unitBySerial = new Map(units.map((u) => [u.serialNo, {
+    placement: u.placement ? { status: u.placement.status, hospitalCode: u.placement.hospitalCode, hospitalName: u.placement.hospital?.hospitalName ?? null } : null,
+  }]))
+  const items = asReceipt.items.map((i) => ({
+    ...i,
+    registryTag: i.outcome ? null : classifyAsRegistryLine(asReceipt.hospitalCode, unitBySerial.get(i.serialNo)),
+  }))
+
+  return NextResponse.json({ asReceipt: { ...asReceipt, items } })
 }
 
 /** YYYY-MM-DD | '' | null → Date | null (undefined = 미변경) */

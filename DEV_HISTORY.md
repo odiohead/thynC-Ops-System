@@ -4,6 +4,38 @@
 
 ---
 
+## 2026-09-10 11:00 | AS업무 — 목록 '접수 기기상태'(정상/확인필요) + 상세 라인별 원장 정합 태그, 담당(티켓) 제거 (dev2 빌드·재시작 완료, PROD 배포 대기)
+
+- **사용자 요청(2단계)**: ① 접수 기기가 해당 병원에 등록돼 있지 않은 경우를 태그로 — 타 병원 등록 / 미등록 + 그 외 상태 분석, 병원명 다음 컬럼, 담당(티켓) 제거 ② 컬럼명 '접수 기기상태'로, 목록은 **정상/확인필요** 2개로만 표기하고 라인별 상태는 **상세 시리얼 옆**에
+- **상태 분석(등록 시 `matchSerials`의 4상태를 재분류)**: `타병원`(다른 병원 ACTIVE 배치 — 병원명 병기)·`회수`(RECOVERED)·`미배치`(원장 개체는 있으나 배치 이력 없음 — 등록 시 NONE에 섞여 있던 경우를 분리)·`미등록`(시리얼 자체 없음). **미종결 라인만 평가** — 종결 라인은 교체·분실로 구기기가 회수되는 게 정상이라 태그하면 노이즈(마이그 3천 건 전부 '회수'). 등록 시점 스냅샷(deviceId)이 아니라 **조회 시 시리얼로 현재 배치**를 대조 — 등록 후 원장 보정이 즉시 반영
+- **구현**: `lib/asReceiptShared.ts` `classifyAsRegistryLine`(라인 1개)·`summarizeAsRegistryTags`(접수 집계)·`asReceiptDeviceStateLabel`(정상/확인필요/null) / 목록 API — 페이지 내 미종결 라인 시리얼 1회 `deviceUnit` 조회 → 접수별 `registryTags` / 상세 API — 같은 조회로 라인별 `registryTag` 부가 / 목록 '접수 기기상태' 컬럼(병원 다음) — 정상 초록·확인필요 빨강(툴팁: 태그별 대수·타병원명), 미종결 라인 없으면 '-' / 상세 `deviceBadge` — 미종결 라인은 API 태그 우선(타병원 빨강·회수 앰버·미배치/미등록 회색, 툴팁 설명), 종결 라인은 기존 deviceId 기준 배지 유지. 담당(티켓) 컬럼 제거(13컬럼 유지)
+- 검증: tsc 0·eslint 0. dev2 미종결 라인 459개 SQL 대조 — 정상 457·회수 1·미등록 1(타병원·미배치 0). 힙 4GB 빌드·`pm2 restart thync-dev`·/api/health 200
+- 영향: app/as-receipts/{page,[id]/page}.tsx, app/api/as-receipts/{route,[id]/route}.ts, lib/asReceiptShared.ts, README.md
+
+---
+
+## 2026-09-10 10:10 | AS업무 목록 컬럼 확장 — 티켓 제거·선교체·상품유형(일반/라이트)·수거·발송지·완료일 (dev2 빌드·재시작 완료, PROD 배포 대기)
+
+- **사용자 요청**: 목록에서 가능한 많은 정보 노출 — 마지막 '티켓' 컬럼 제거, 선교체 여부 추가, 등록 기기의 라이트/일반형 식별(혼재 시 둘 다 표기)
+- **목록 API** (`app/api/as-receipts/route.ts`): 라인 select에 `device.placement.productType`·`newDevice.placement.productType` 추가(헤더 스칼라 `preReplace`·`pickupMethod`·`pickupTrackingNo`·`destType`·`resolvedAt`는 include 응답에 이미 포함)
+- **판별 헬퍼** `summarizeAsItemProductTypes` (`lib/asReceiptShared.ts`): 라인별 원장 배치 상품유형(구기기 배치 → 없으면 교체기 배치) 집합 → `['일반','라이트']` 순서 고정. 미등록 라인만이면 '-'
+- **화면** (`app/as-receipts/page.tsx`): 9→13컬럼 — 접수번호·병원·구분·선교체(앰버 배지)·기기·유형(일반 회색/라이트 파랑 배지, 혼재 시 2개)·상태·접수일·수거(방법+송장 모노)·발송지·완료일·담당(티켓)·등록자. 티켓 컬럼·Link import 제거
+- 검증: tsc 0·eslint 0. dev2 데이터 — 접수 3,317건 라인 배치 '일반', 원장 라이트 배치 439건 존재(배지 경로 유효). 힙 4GB 빌드·`pm2 restart thync-dev`·/api/health 200
+- 영향: app/as-receipts/page.tsx, app/api/as-receipts/route.ts, lib/asReceiptShared.ts, README.md
+
+---
+
+## 2026-09-10 09:40 | AS업무 상세 — 수거 송장번호 입력·저장 + 구글시트 L열 역기입 (dev2 빌드·재시작 완료, PROD 배포 대기)
+
+- **사용자 요청**: 상세 화면에서 고장품 택배수거 송장번호를 입력·저장할 수 있고, 그 값이 구글시트 L열(수거 송장)로 갱신돼야 함
+- **화면** (`app/as-receipts/[id]/page.tsx`): 진행 기록 블록 맨 앞에 '수거 송장번호' 텍스트 입력 추가(5→6열 그리드), '진행 기록 저장'에 `pickupTrackingNo` 포함. 기존 수정 모달의 동일 필드와 같은 컬럼 사용 — API 변경 없음(PUT은 이미 `pickupTrackingNo` 수용, undefined는 미변경)
+- **시트 역기입 ④ 신설** (`lib/channeltalkAsSync.ts`): AI='등록완료' 행 전부 대상, AJ AS코드로 접수 `pickupTrackingNo` 조회 → 값이 있고 시트 L열과 다를 때만 L 기입 + AL 처리시각 갱신. 결과 카운터 `pickupBack` 추가(스케줄러 틱 로그 포함). 발송정보 역기입(③)과 독립, DB 값이 비어 있으면 시트를 지우지 않음(단방향 채움)
+- 검증: tsc 0·eslint 0. dev2 [TEST] 사본 시트 E2E — r2 AJ를 미종결·미발송 접수(AS-202609-0037)로 임시 지정, DB 송장 'TEST-1234-5678' 설정 → 틱 1회 pickupBack 1·L2 기입·AL 갱신 → 2회차 pickupBack 0(무변경) 통과. DB·L2·AJ2 원복, 일회용 스크립트 삭제. 힙 4GB 빌드·`pm2 restart thync-dev`·/api/health 200·/as-receipts 307·에러 로그 0
+- **주의**: PROD 반영 후 첫 틱에 기존 '등록완료' 행 중 접수에 수거 송장이 있는 행 전부에 L열이 일괄 기입됨(마이그 접수는 컷오버 이전 행이라 대상 아님)
+- 영향: app/as-receipts/[id]/page.tsx, lib/{channeltalkAsSync,channeltalk-as-scheduler}.ts, projects/channeltalk_as_intake_design.md, README.md
+
+---
+
 ## 2026-09-09 12:40 | PROD 배포: AS 시트 발송정보 역기입 V열 추가 (d04d103)
 
 - **절차**: dev2 힙 4GB 빌드·`pm2 restart thync-dev`(health 200) → 커밋(d04d103)·push → PROD pull → 힙 4GB 빌드 → `pm2 restart thync-prod` (코드 전용)
