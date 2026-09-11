@@ -24,11 +24,12 @@ interface AsRow {
   destType: string | null
   hospital: { hospitalCode: string; hospitalName: string } | null
   registryTags: AsRegistryTagSummary[]
+  intakeIssues: number // 입고 대조 미입고·미식별입고 라인 수 (2026-09-11)
   status: CodeRef | null
   createdBy: { id: string; name: string } | null
   ticket: { id: number; ticketCode: string; status: string; owner: { id: string; name: string } | null } | null
   items: {
-    id: number; serialNo: string; outcome: string | null; deviceKind: string | null
+    id: number; serialNo: string; outcome: string | null; deviceKind: string | null; intakeState: string
     device: { deviceInfo: { deviceName: string }; placement: { productType: string | null } | null } | null
     newDevice: { placement: { productType: string | null } | null } | null
   }[]
@@ -53,10 +54,12 @@ function productTypeBadges(items: AsRow['items']) {
 
 /** 접수 기기상태 — 미종결 라인의 원장 정합: 정상 / 확인필요(툴팁에 태그별 라인 수) / 미종결 라인 없으면 '-' */
 function deviceStateBadge(r: AsRow) {
-  const label = asReceiptDeviceStateLabel(r.items.some((i) => !i.outcome), r.registryTags ?? [])
+  const label = asReceiptDeviceStateLabel(r.items.some((i) => !i.outcome), r.registryTags ?? [], r.intakeIssues ?? 0)
   if (!label) return <span className="text-xs text-gray-300">-</span>
   if (label === '정상') return <span className="whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700">정상</span>
-  const tip = r.registryTags.map((t) => `${AS_REGISTRY_TAG_LABELS[t.tag]} ${t.count}대${t.detail ? ` (${t.detail})` : ''}`).join(' · ')
+  const parts = r.registryTags.map((t) => `원장 ${AS_REGISTRY_TAG_LABELS[t.tag]} ${t.count}대${t.detail ? ` (${t.detail})` : ''}`)
+  if (r.intakeIssues > 0) parts.push(`입고 대조 미입고·미식별입고 ${r.intakeIssues}대`)
+  const tip = parts.join(' · ')
   return <span className="whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700" title={tip}>확인필요</span>
 }
 

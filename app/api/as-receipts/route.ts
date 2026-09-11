@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { AS_CATEGORIES, parseSerialTextarea, summarizeAsRegistryTags } from '@/lib/asReceiptShared'
+import { AS_CATEGORIES, parseSerialTextarea, summarizeAsRegistryTags, isAsIntakeIssue } from '@/lib/asReceiptShared'
 import { createAsReceipt, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { notifyTicketCreated } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
@@ -23,7 +23,7 @@ const listInclude = {
   ticket: { select: { id: true, ticketCode: true, status: true, owner: { select: { id: true, name: true } } } },
   items: {
     select: {
-      id: true, serialNo: true, outcome: true, deviceKind: true,
+      id: true, serialNo: true, outcome: true, deviceKind: true, intakeState: true, // 입고 대조 (2026-09-11)
       device: { select: { deviceInfo: { select: { deviceName: true } }, placement: { select: { productType: true } } } }, // 목록 기기별 대수 표기 (CX #1) + 상품유형(일반/라이트, 2026-09-10)
       newDevice: { select: { placement: { select: { productType: true } } } }, // 교체 라인 — 구기기 배치가 회수된 뒤에는 교체기 배치의 상품유형으로 판별
     },
@@ -108,7 +108,11 @@ export async function GET(request: NextRequest) {
   const unitBySerial = new Map(units.map((u) => [u.serialNo, {
     placement: u.placement ? { status: u.placement.status, hospitalCode: u.placement.hospitalCode, hospitalName: u.placement.hospital?.hospitalName ?? null } : null,
   }]))
-  const withTags = receipts.map((r) => ({ ...r, registryTags: summarizeAsRegistryTags(r.hospitalCode, r.items, unitBySerial) }))
+  const withTags = receipts.map((r) => ({
+    ...r,
+    registryTags: summarizeAsRegistryTags(r.hospitalCode, r.items, unitBySerial),
+    intakeIssues: r.items.filter((i) => !i.outcome && isAsIntakeIssue(i.intakeState)).length, // 입고 대조 미입고·미식별입고 라인 수 (2026-09-11)
+  }))
 
   return NextResponse.json({ receipts: withTags, total, page, pageSize })
 }

@@ -34,7 +34,10 @@ const C = {
   DATE: 0, HOSP: 1, WARD: 2, CATEGORY: 3, KIND: 4, SERIALS: 5, CNT_ECG: 6, CNT_SPO2: 7,
   SYMPTOM: 8, REPORTER: 9, AGENT: 10,
   PICKUP_TRACKING: 11, // L 고장품 수거 송장 — 역기입 대상 (④)
-  PICKUP_DATE: 12, PRE_REPLACE: 15,
+  PICKUP_DATE: 12,
+  RECEIVED_DATE: 13, // N 입고일 — 역기입 대상 (⑤)
+  CHECKED_DATE: 14, // O 확인일 — 역기입 대상 (⑤)
+  PRE_REPLACE: 15,
   SHIP_TRACKING: 17, // R 수리품 택배발송 — 역기입 대상 (③)
   DEST_TYPE: 18, DEST_INFO: 19,
   SHIP_DATES: 21, // V 발송, 교체일자 — 역기입 대상 (③)
@@ -52,6 +55,7 @@ export interface ChanneltalkSyncResult {
   completedBack: number
   shipBack: number
   pickupBack: number
+  intakeBack: number
 }
 
 function sheetsClient() {
@@ -132,7 +136,7 @@ async function loadSettings() {
 }
 
 export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
-  const result: ChanneltalkSyncResult = { scanned: 0, registered: 0, failed: 0, completedBack: 0, shipBack: 0, pickupBack: 0 }
+  const result: ChanneltalkSyncResult = { scanned: 0, registered: 0, failed: 0, completedBack: 0, shipBack: 0, pickupBack: 0, intakeBack: 0 }
   const { sheetId, cutover, tab } = await loadSettings()
   if (!sheetId) {
     console.warn('[channeltalk-as] channeltalk_as_sheet_id 미설정 — 스킵')
@@ -341,6 +345,30 @@ export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
       rangeOf(rowNo, 'AL', [nowKst()])
       result.pickupBack++
       console.log(`[channeltalk-as] r${rowNo} 수거 송장 역기입: ${cell(r, C.SYS_CODE)} → L ${want}`)
+    }
+  }
+
+  // ── ⑤ 입고일·확인일 역기입 (N·O — 입고처리 화면 입력값, 시트 값과 다를 때만, 단방향 채움) ──
+  if (okRows.length) {
+    const receipts = await prisma.asReceipt.findMany({
+      where: { asCode: { in: okRows.map(({ r }) => cell(r, C.SYS_CODE)) }, OR: [{ receivedAt: { not: null } }, { checkedAt: { not: null } }] },
+      select: { asCode: true, receivedAt: true, checkedAt: true },
+    })
+    const byCode = new Map(receipts.map((x) => [x.asCode, x]))
+    const norm = (v: string) => v.replace(/\r/g, '').trim()
+    for (const { r, rowNo } of okRows) {
+      const rec = byCode.get(cell(r, C.SYS_CODE))
+      if (!rec) continue
+      const wantN = rec.receivedAt?.toISOString().slice(0, 10) ?? ''
+      const wantO = rec.checkedAt?.toISOString().slice(0, 10) ?? ''
+      let changed = false
+      if (wantN && norm(cell(r, C.RECEIVED_DATE)) !== wantN) { rangeOf(rowNo, 'N', [wantN]); changed = true }
+      if (wantO && norm(cell(r, C.CHECKED_DATE)) !== wantO) { rangeOf(rowNo, 'O', [wantO]); changed = true }
+      if (changed) {
+        rangeOf(rowNo, 'AL', [nowKst()])
+        result.intakeBack++
+        console.log(`[channeltalk-as] r${rowNo} 입고정보 역기입: ${rec.asCode} → N ${wantN || '-'} / O ${wantO || '-'}`)
+      }
     }
   }
 

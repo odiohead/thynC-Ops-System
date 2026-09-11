@@ -17,17 +17,56 @@ export const AS_DEST_TYPES = ['HOSPITAL', 'OTHER'] as const
 export type AsDestType = (typeof AS_DEST_TYPES)[number]
 export const AS_DEST_TYPE_LABELS: Record<AsDestType, string> = { HOSPITAL: '병원', OTHER: '기타(대웅 등)' }
 
-export const AS_OUTCOMES = ['REPAIR_RETURN', 'REPLACE', 'LOST', 'CANCELED'] as const
+export const AS_OUTCOMES = ['REPAIR_RETURN', 'REPLACE', 'LOST', 'CANCELED', 'NOT_RECEIVED'] as const
 export type AsOutcome = (typeof AS_OUTCOMES)[number]
 export const AS_OUTCOME_LABELS: Record<AsOutcome, string> = {
   REPAIR_RETURN: '수리반환',
   REPLACE: '교체',
   LOST: '분실종결',
   CANCELED: '라인취소',
+  NOT_RECEIVED: '미회수', // 입고 대조 예외 — 접수자 확인에서만 확정 (2026-09-11)
 }
+/** 라인 처리 패널에서 고를 수 있는 결과 — 미회수는 접수자 확인 절차 전용 */
+export const AS_RESOLVE_OUTCOMES = ['REPAIR_RETURN', 'REPLACE', 'LOST', 'CANCELED'] as const
+
+// ─── 입고 대조 (2026-09-11 — as_work_design.md §14) ───────────────
+export const AS_INTAKE_STATES = ['PENDING', 'RECEIVED', 'MISMATCH', 'EXTRA'] as const
+export type AsIntakeState = (typeof AS_INTAKE_STATES)[number]
+export const AS_INTAKE_STATE_LABELS: Record<AsIntakeState, string> = {
+  PENDING: '대기', // 입고처리 전 (방문교체·선교체는 입고 없이 처리될 수 있음)
+  RECEIVED: '정상입고', // 접수 시리얼이 입고로 식별됨
+  MISMATCH: '미입고', // 접수 시리얼이 입고로 식별되지 않음 — 접수자 확인(치환·정상입고 확정·미회수)
+  EXTRA: '미식별입고', // 입고 시리얼이 접수 내역에 없음 — 접수자 확인(치환 대상·신규 편입·삭제)
+}
+/** 접수자 확인이 필요한 라인인가 (미종결 기준은 호출부) */
+export const isAsIntakeIssue = (state: string | null | undefined) => state === 'MISMATCH' || state === 'EXTRA'
 
 /** 미등록 라인 기기종류 선택지 (§13-5 — 통계용 최소 입력. 원장 연결 라인은 모델에서 파생) */
 export const AS_DEVICE_KINDS = ['심전도', '산소포화도', '게이트웨이', '기타'] as const
+
+// ─── 기기군 (상세 AS상세내역 카드 분리, 2026-09-11) ────────────────
+// 원장 모델명(device_info.device_name: 심전계/산소포화도) 또는 미등록 라인 기기종류(AS_DEVICE_KINDS)를 3군으로 접는다
+export const AS_DEVICE_GROUPS = ['심전계', '산소포화도', '기타'] as const
+export type AsDeviceGroup = (typeof AS_DEVICE_GROUPS)[number]
+export function asDeviceGroupOf(modelName: string | null | undefined, deviceKind: string | null | undefined, serialNo?: string | null): AsDeviceGroup {
+  const n = (modelName ?? deviceKind ?? '').replace(/\s+/g, '')
+  if (/심전/.test(n) || /ecg/i.test(n)) return '심전계'
+  if (/산소포화|spo2|산소/i.test(n)) return '산소포화도'
+  if (!n) {
+    const k = asDeviceKindFromSerial(serialNo)
+    if (k === '심전도') return '심전계'
+    if (k === '산소포화도') return '산소포화도'
+  }
+  return '기타'
+}
+/** 미등록 시리얼의 기기종류 추정 — 원장 device_info.serial_pattern 접두 규칙(A→심전계, P→산소포화도, B→게이트웨이). 모르면 null */
+export function asDeviceKindFromSerial(serialNo: string | null | undefined): (typeof AS_DEVICE_KINDS)[number] | null {
+  const s = (serialNo ?? '').trim().toUpperCase()
+  if (/^A\d/.test(s)) return '심전도'
+  if (/^P\d/.test(s)) return '산소포화도'
+  if (/^B\d/.test(s)) return '게이트웨이'
+  return null
+}
 
 /** 라인 요약 한 줄 — '기기 3대 (종결 1)' (목록·배너·알림 공용) */
 /** 목록 [기기] 기기별 대수 표기 (CX #1) — "산소포화도 2 · 심전도 1 (종결 n)" */
@@ -112,9 +151,9 @@ export function summarizeAsRegistryTags(
 }
 
 /** 목록 '접수 기기상태' 표기 — 미종결 라인 없음 → null(표시 안 함), 태그 없음 → 정상, 있음 → 확인필요 */
-export function asReceiptDeviceStateLabel(hasOpenLines: boolean, tags: AsRegistryTagSummary[]): '정상' | '확인필요' | null {
+export function asReceiptDeviceStateLabel(hasOpenLines: boolean, tags: AsRegistryTagSummary[], intakeIssues = 0): '정상' | '확인필요' | null {
   if (!hasOpenLines) return null
-  return tags.length ? '확인필요' : '정상'
+  return tags.length || intakeIssues > 0 ? '확인필요' : '정상' // 입고 대조(미입고·미식별입고)는 원장 정합 태그와 별개 축 — 목록 표기만 합류
 }
 
 export function summarizeAsItems(items: { outcome: string | null }[]): string {

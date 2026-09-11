@@ -9,9 +9,9 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { normalizeSerial, todayKst } from '@/lib/deviceRegistryShared'
-import { openDeviceAs, clearDeviceAs, replaceDevice, recoverDevice, RegistryError, type RegistryCtx } from '@/lib/deviceRegistry'
+import { openDeviceAs, clearDeviceAs, replaceDevice, recoverDevice, registerDevicesIn, RegistryError, type RegistryCtx } from '@/lib/deviceRegistry'
 import { syncAsReceiptToTicket, createTicketForAsReceipt } from '@/lib/ticket-domains/asReceipt'
-import { AS_OUTCOMES, AS_CATEGORIES, AS_METHODS, AS_DEST_TYPES, type AsOutcome } from '@/lib/asReceiptShared'
+import { AS_OUTCOMES, AS_CATEGORIES, AS_METHODS, AS_DEST_TYPES, asDeviceKindFromSerial, type AsOutcome } from '@/lib/asReceiptShared'
 import { nextAsCode } from '@/lib/asReceipt'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
@@ -253,6 +253,8 @@ export interface ResolveLineInput {
   outcome: AsOutcome
   /** REPLACE 필수 — 교체 발송기기 시리얼 */
   newSerial?: string | null
+  /** 라인별 처리내용 (2026-09-11 — 기기군 카드에서 라인마다 입력). 미지정 시 공통 processNote */
+  processNote?: string | null
 }
 
 export interface ResolveInput {
@@ -280,6 +282,7 @@ export async function resolveAsLines(
   for (const l of input.lines) {
     if (!Number.isInteger(l.itemId)) throw new AsServiceError(400, '라인이 올바르지 않습니다.')
     if (!AS_OUTCOMES.includes(l.outcome)) throw new AsServiceError(400, '처리 결과가 올바르지 않습니다.')
+    if (l.outcome === 'NOT_RECEIVED') throw new AsServiceError(400, "'미회수'는 입고 대조의 접수자 확인에서만 확정할 수 있습니다.")
     if (l.outcome === 'REPLACE' && !normalizeSerial(l.newSerial ?? '').serialNo) {
       throw new AsServiceError(400, '교체 처리에는 발송기기 시리얼이 필요합니다.')
     }
@@ -296,7 +299,7 @@ export async function resolveAsLines(
         select: {
           id: true, asCode: true, hospitalCode: true, category: true,
           status: { select: { ticketStatus: true } },
-          items: { select: { id: true, serialNo: true, deviceId: true, outcome: true } },
+          items: { select: { id: true, serialNo: true, deviceId: true, outcome: true, intakeState: true } },
         },
       })
       if (!receipt) throw new AsServiceError(404, 'AS접수를 찾을 수 없습니다.')
@@ -328,6 +331,10 @@ export async function resolveAsLines(
         const item = byId.get(l.itemId)
         if (!item) throw new AsServiceError(400, '이 접수의 라인이 아닙니다.')
         if (item.outcome) throw new AsServiceError(409, `이미 종결된 라인입니다: ${item.serialNo}`)
+        // 입고 대조 게이트 (2026-09-11): 미입고·미식별입고 라인은 접수자 확인 전까지 처리 불가. 대기(PENDING)는 허용 — 방문교체·선교체는 입고 없이 처리됨
+        if (item.intakeState === 'MISMATCH' || item.intakeState === 'EXTRA') {
+          throw new AsServiceError(409, `${item.serialNo}: 입고 대조 확인이 필요한 라인입니다 — 접수자 확인(치환·정상입고 확정·미회수) 후 처리하세요`)
+        }
 
         const shipped = l.outcome === 'REPAIR_RETURN' || l.outcome === 'REPLACE'
         const data: Prisma.AsReceiptItemUncheckedUpdateInput = {
@@ -335,7 +342,7 @@ export async function resolveAsLines(
           shippedAt: shipped ? new Date(effectiveDate) : undefined,
           shipMethod: shipped ? shipMethod : undefined,
           shipTrackingNo: shipped ? input.shipTrackingNo?.trim() || null : undefined,
-          processNote: input.processNote?.trim() ? input.processNote.trim() : undefined, // CX #18 — 미입력 시 기존 값 보존
+          processNote: (l.processNote ?? input.processNote)?.trim() ? (l.processNote ?? input.processNote)!.trim() : undefined, // CX #18 — 미입력 시 기존 값 보존 (라인별 우선)
         }
 
         if (!item.deviceId) {
@@ -344,7 +351,9 @@ export async function resolveAsLines(
           if (l.outcome === 'REPLACE') data.newSerialNo = normalizeSerial(l.newSerial!).serialNo
         } else if (l.outcome === 'REPAIR_RETURN' || l.outcome === 'CANCELED') {
           try {
-            await clearDeviceAs(ctx, { deviceId: item.deviceId }, { client: tx })
+            const r = await clearDeviceAs(ctx, { deviceId: item.deviceId }, { client: tx })
+            // 처리일이 AS 표시 시작일(접수일)보다 앞서면 원장 fold가 해제를 접지 않아 표시가 남는다 (2026-09-11 E2E에서 확인)
+            if (r.device.asStartedOn) warnings.push(`${item.serialNo}: 처리일(${effectiveDate})이 AS 표시 시작일(${ymd(r.device.asStartedOn) ?? '-'})보다 앞서 AS진행중 표시가 남았습니다 — 처리일을 표시 시작일 이후로 다시 처리하거나 기기현황에서 해제하세요`)
           } catch (e) {
             if (e instanceof RegistryError) warnings.push(`${item.serialNo}: AS 해제 실패 — ${e.message}`)
             else throw e
@@ -401,6 +410,304 @@ export async function resolveAsLines(
     },
     { timeout: 120000, maxWait: 10000 }
   )
+}
+
+// ── 입고 대조 (2026-09-11 — as_work_design.md §14) ─────────────────────────
+// 입고처리: AS담당자가 실물 시리얼을 입력 → 접수 라인과 대조. 일치 → RECEIVED, 접수됐으나 없음 → MISMATCH,
+// 입고됐으나 접수에 없음 → EXTRA 라인 생성(원장 매칭만, AS 표시는 편입 확정 시). 누적 실행 가능(부분 입고).
+// 접수자 확인: MISMATCH → 치환(EXTRA와 매핑)·정상입고 확정·미회수 / EXTRA → 신규 편입·삭제.
+
+/** 비고 끝에 이력 한 줄 추가 (5,000자 초과 시 앞부분 절단) */
+function appendNote(note: string | null | undefined, line: string): string {
+  const next = note?.trim() ? `${note.trimEnd()}\n${line}` : line
+  return next.length > 5000 ? next.slice(next.length - 5000) : next
+}
+
+export interface IntakeInput {
+  serials: string[]
+  receivedAt?: string | null // 입고일 (N열) — 기본 오늘
+  checkedAt?: string | null // 확인일 (O열) — 기본 입고일
+}
+export interface IntakeResult {
+  received: string[]
+  mismatch: string[]
+  extra: string[]
+  warnings: string[]
+  statusChanged: boolean
+}
+
+export async function intakeAsLines(receiptId: number, actor: { userId: string; name: string | null }, input: IntakeInput): Promise<IntakeResult> {
+  const keys: string[] = []
+  const seen = new Set<string>()
+  for (const raw of input.serials ?? []) {
+    const k = normalizeSerial(String(raw ?? '')).serialNo
+    if (!k || seen.has(k)) continue
+    seen.add(k); keys.push(k)
+  }
+  if (!keys.length) throw new AsServiceError(400, '입고 시리얼을 1개 이상 입력하세요.')
+  const receivedAt = input.receivedAt?.trim() || todayKst()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedAt)) throw new AsServiceError(400, '입고일이 올바르지 않습니다 (YYYY-MM-DD).')
+  const checkedAt = input.checkedAt?.trim() || receivedAt
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(checkedAt)) throw new AsServiceError(400, '확인일이 올바르지 않습니다 (YYYY-MM-DD).')
+
+  return prisma.$transaction(async (tx) => {
+    const receipt = await tx.asReceipt.findUnique({
+      where: { id: receiptId },
+      select: { id: true, asCode: true, hospitalCode: true, receivedAt: true, note: true, statusId: true, status: { select: { ticketStatus: true, order: true } }, items: true },
+    })
+    if (!receipt) throw new AsServiceError(404, 'AS접수를 찾을 수 없습니다.')
+    if (receipt.status?.ticketStatus === 'RESOLVED' || receipt.status?.ticketStatus === 'CLOSED') throw new AsServiceError(409, '완료·취소된 접수는 입고 처리할 수 없습니다.')
+    const warnings: string[] = []
+    const result: IntakeResult = { received: [], mismatch: [], extra: [], warnings, statusChanged: false }
+    const bySerial = new Map(receipt.items.map((i) => [i.serialNo, i]))
+    const matched = new Set<string>()
+
+    for (const k of keys) {
+      const item = bySerial.get(k)
+      if (item) {
+        matched.add(k)
+        if (item.outcome) { warnings.push(`${k}: 이미 종결된 라인 — 입고 상태를 바꾸지 않았습니다`); continue }
+        if (item.intakeState !== 'RECEIVED') {
+          await tx.asReceiptItem.update({ where: { id: item.id }, data: { intakeState: 'RECEIVED', receivedAt: new Date(receivedAt) } })
+        }
+        result.received.push(k)
+      } else {
+        // 접수 외 입고 — EXTRA 라인 생성 (원장 매칭만, AS 표시·기기종류는 편입 확정 시)
+        const [m] = await matchSerials(tx, receipt.hospitalCode, [k])
+        const w = matchWarning(m)
+        if (w) warnings.push(w)
+        await tx.asReceiptItem.create({
+          data: {
+            receiptId: receipt.id, serialNo: k, deviceId: m.deviceId, wardName: m.wardName,
+            deviceKind: m.deviceId ? null : asDeviceKindFromSerial(k), // 미등록이면 시리얼 접두로 기기종류 추정 (A 심전계 / P 산소포화도)
+            intakeState: 'EXTRA', intakeSource: 'INTAKE', receivedAt: new Date(receivedAt),
+          },
+        })
+        result.extra.push(k)
+      }
+    }
+    // 접수 라인 중 이번 입력에 없고 아직 대기인 라인 → 미입고 (이미 정상입고·종결은 유지)
+    for (const item of receipt.items) {
+      if (matched.has(item.serialNo) || item.outcome) continue
+      if (item.intakeState === 'PENDING') {
+        await tx.asReceiptItem.update({ where: { id: item.id }, data: { intakeState: 'MISMATCH' } })
+      }
+      if (item.intakeState === 'PENDING' || item.intakeState === 'MISMATCH') result.mismatch.push(item.serialNo)
+    }
+
+    // 헤더: 입고일(최초만)·확인일 갱신, 상태가 '입고' 이전 단계면 '입고'로
+    const data: Prisma.AsReceiptUncheckedUpdateInput = { checkedAt: new Date(checkedAt) }
+    if (!receipt.receivedAt) data.receivedAt = new Date(receivedAt)
+    // 비고 이력 (사용자 요청 2026-09-11 — 입고 대조·확인 흔적을 비고에 남긴다)
+    data.note = appendNote(receipt.note, `[입고처리 ${receivedAt} ${actor.name ?? ''}] 입력 ${keys.length} → 정상입고 ${result.received.length}${result.mismatch.length ? ` · 미입고 ${result.mismatch.length}(${result.mismatch.join(', ')})` : ''}${result.extra.length ? ` · 미식별입고 ${result.extra.length}(${result.extra.join(', ')})` : ''}`)
+    const inbound = await tx.statusCode.findFirst({ where: { category: 'AS_STATUS', name: '입고' }, select: { id: true, order: true } })
+    if (inbound && receipt.statusId !== inbound.id && (receipt.status?.order ?? 0) < inbound.order) {
+      data.statusId = inbound.id
+      data.statusChangedAt = new Date()
+      result.statusChanged = true
+    }
+    await tx.asReceipt.update({ where: { id: receipt.id }, data })
+    if (result.statusChanged) await syncAsReceiptToTicket(tx, receipt.id, actor.userId)
+    return result
+  }, { timeout: 60000, maxWait: 10000 })
+}
+
+export type IntakeConfirmAction =
+  | { type: 'REMAP'; itemId: number; extraItemId: number } // 미입고 라인의 시리얼을 미식별입고 라인 시리얼로 치환 (오타 보정)
+  | { type: 'MARK_RECEIVED'; itemId: number } // 미입고 → 정상입고 (입고 입력 누락 등 수동 확정)
+  | { type: 'NOT_RECEIVED'; itemId: number; comment: string } // 미입고 → 미회수 종결 (코멘트 필수)
+  | { type: 'ACCEPT_EXTRA'; itemId: number; deviceKind?: string | null } // 미식별입고 → 신규 라인 편입 (정상입고, AS 표시)
+  | { type: 'DISCARD_EXTRA'; itemId: number } // 미식별입고 라인 삭제 (입고 입력 오타)
+
+export async function confirmAsIntake(receiptId: number, actor: { userId: string; name: string | null }, action: IntakeConfirmAction): Promise<{ warnings: string[]; autoCompleted: boolean }> {
+  return prisma.$transaction(async (tx) => {
+    const receipt = await tx.asReceipt.findUnique({
+      where: { id: receiptId },
+      select: { id: true, asCode: true, hospitalCode: true, receiptDate: true, note: true, status: { select: { ticketStatus: true } } },
+    })
+    if (!receipt) throw new AsServiceError(404, 'AS접수를 찾을 수 없습니다.')
+    if (receipt.status?.ticketStatus === 'RESOLVED' || receipt.status?.ticketStatus === 'CLOSED') throw new AsServiceError(409, '완료·취소된 접수입니다.')
+    const warnings: string[] = []
+    const today = todayKst()
+    let history = '' // 비고 이력 한 줄
+    const ctx: RegistryCtx = { hospitalCode: receipt.hospitalCode, actor, occurredOn: today, source: 'MANUAL', ref: { type: 'AS', code: receipt.asCode } }
+    const getItem = async (id: number) => {
+      const it = await tx.asReceiptItem.findFirst({ where: { id, receiptId } })
+      if (!it) throw new AsServiceError(400, '이 접수의 라인이 아닙니다.')
+      if (it.outcome) throw new AsServiceError(409, `이미 종결된 라인입니다: ${it.serialNo}`)
+      return it
+    }
+    /** 이 접수가 켠 AS 표시만 해제 */
+    const clearOwnFlag = async (deviceId: number | null, serial: string) => {
+      if (!deviceId) return
+      const p = await tx.hospitalDevice.findUnique({ where: { deviceId }, select: { asStartedOn: true, asRefCode: true } })
+      if (p?.asStartedOn && p.asRefCode === receipt.asCode) {
+        try { await clearDeviceAs(ctx, { deviceId }, { client: tx }) } catch (e) { if (e instanceof RegistryError) warnings.push(`${serial}: AS 해제 실패 — ${e.message}`); else throw e }
+      }
+    }
+
+    switch (action.type) {
+      case 'REMAP': {
+        const item = await getItem(action.itemId)
+        const extra = await getItem(action.extraItemId)
+        if (item.intakeState !== 'MISMATCH') throw new AsServiceError(400, `미입고 라인이 아닙니다: ${item.serialNo}`)
+        if (extra.intakeState !== 'EXTRA') throw new AsServiceError(400, `미식별입고 라인이 아닙니다: ${extra.serialNo}`)
+        await clearOwnFlag(item.deviceId, item.serialNo)
+        await tx.asReceiptItem.delete({ where: { id: extra.id } })
+        await tx.asReceiptItem.update({
+          where: { id: item.id },
+          data: {
+            serialNo: extra.serialNo, receiptSerialNo: item.receiptSerialNo ?? item.serialNo,
+            deviceId: extra.deviceId, deviceKind: extra.deviceId ? null : item.deviceKind,
+            wardName: item.wardName ?? extra.wardName,
+            intakeState: 'RECEIVED', receivedAt: extra.receivedAt,
+          },
+        })
+        if (extra.deviceId) {
+          const [m] = await matchSerials(tx, receipt.hospitalCode, [extra.serialNo])
+          if (m.state === 'ACTIVE_HERE' && !m.asOpen) warnings.push(...(await openAsFlags(tx, receipt, [{ serialNo: m.serialNo, deviceId: m.deviceId! }], actor, ymd(receipt.receiptDate) ?? today)))
+          else { const w = matchWarning(m); if (w) warnings.push(w) }
+        } else warnings.push(`${extra.serialNo}: 기기 현황에 등록되지 않은 기기입니다 — 미등록 라인으로 유지`)
+        history = `시리얼 치환 ${item.serialNo} → ${extra.serialNo}`
+        break
+      }
+      case 'MARK_RECEIVED': {
+        const item = await getItem(action.itemId)
+        if (item.intakeState !== 'MISMATCH') throw new AsServiceError(400, `미입고 라인이 아닙니다: ${item.serialNo}`)
+        await tx.asReceiptItem.update({ where: { id: item.id }, data: { intakeState: 'RECEIVED', receivedAt: item.receivedAt ?? new Date(today) } })
+        history = `${item.serialNo} 정상입고 수동 확정`
+        break
+      }
+      case 'NOT_RECEIVED': {
+        const item = await getItem(action.itemId)
+        if (item.intakeState !== 'MISMATCH') throw new AsServiceError(400, `미입고 라인이 아닙니다: ${item.serialNo}`)
+        const comment = action.comment?.trim()
+        if (!comment) throw new AsServiceError(400, '미회수 처리에는 코멘트가 필요합니다.')
+        await clearOwnFlag(item.deviceId, item.serialNo)
+        await tx.asReceiptItem.update({ where: { id: item.id }, data: { outcome: 'NOT_RECEIVED', processNote: comment } })
+        history = `${item.serialNo} 미회수 종결 — ${comment}`
+        break
+      }
+      case 'ACCEPT_EXTRA': {
+        const item = await getItem(action.itemId)
+        if (item.intakeState !== 'EXTRA') throw new AsServiceError(400, `미식별입고 라인이 아닙니다: ${item.serialNo}`)
+        const [m] = await matchSerials(tx, receipt.hospitalCode, [item.serialNo])
+        await tx.asReceiptItem.update({
+          where: { id: item.id },
+          data: { intakeState: 'RECEIVED', deviceId: m.deviceId, deviceKind: m.deviceId ? null : action.deviceKind?.trim() || item.deviceKind, wardName: item.wardName ?? m.wardName },
+        })
+        if (m.state === 'ACTIVE_HERE' && !m.asOpen) warnings.push(...(await openAsFlags(tx, receipt, [{ serialNo: m.serialNo, deviceId: m.deviceId! }], actor, today)))
+        else { const w = matchWarning(m); if (w) warnings.push(w) }
+        history = `${item.serialNo} 미식별입고 → 신규 라인 편입`
+        break
+      }
+      case 'DISCARD_EXTRA': {
+        const item = await getItem(action.itemId)
+        if (item.intakeState !== 'EXTRA') throw new AsServiceError(400, `미식별입고 라인이 아닙니다: ${item.serialNo}`)
+        await tx.asReceiptItem.delete({ where: { id: item.id } })
+        history = `${item.serialNo} 미식별입고 라인 삭제`
+        break
+      }
+      default:
+        throw new AsServiceError(400, '확인 동작이 올바르지 않습니다.')
+    }
+    if (history) await tx.asReceipt.update({ where: { id: receipt.id }, data: { note: appendNote(receipt.note, `[입고확인 ${today} ${actor.name ?? ''}] ${history}`) } })
+
+    // 미회수 종결로 전 라인이 끝나면 접수 자동 완료 (라인 처리와 동일 규칙)
+    let autoCompleted = false
+    const remaining = await tx.asReceiptItem.count({ where: { receiptId: receipt.id, outcome: null } })
+    if (remaining === 0) {
+      const done = await tx.statusCode.findFirst({ where: { category: 'AS_STATUS', name: '완료' }, select: { id: true } })
+      if (done) {
+        await tx.asReceipt.update({ where: { id: receipt.id }, data: { statusId: done.id, statusChangedAt: new Date(), resolvedAt: new Date(today) } })
+        await syncAsReceiptToTicket(tx, receipt.id, actor.userId)
+        autoCompleted = true
+      }
+    }
+    return { warnings, autoCompleted }
+  }, { timeout: 60000, maxWait: 10000 })
+}
+
+// ── 원장 정합 확정 (2026-09-11 — 접수 시리얼이 미등록·미배치·회수·타병원일 때 접수 병원 배치로 보정) ─────────
+// registerDevicesIn 한 번으로 신규 등록 / 재등록(회수·미배치) / 타병원 이관(TRANSFER opt-in)을 처리하고
+// 라인 deviceId를 연결 + AS 표시. 이력은 비고에 남긴다. 권한: USER 이상(접수자 확인과 동일).
+
+export interface RegistryConfirmInput {
+  itemId: number
+  /** 미등록 시리얼의 모델(device_name/device_model) — 접두로 판별 불가할 때 필수 */
+  modelInput?: string | null
+  /** 상품유형(일반/라이트) — 병원이 혼합 딜이면 필수(원장 규칙) */
+  productType?: string | null
+  wardName?: string | null
+}
+
+export async function confirmAsRegistry(receiptId: number, actor: { userId: string; name: string | null }, input: RegistryConfirmInput): Promise<{ warnings: string[]; kind: 'created' | 'reregistered' | 'transferred' }> {
+  return prisma.$transaction(async (tx) => {
+    const receipt = await tx.asReceipt.findUnique({
+      where: { id: receiptId },
+      select: { id: true, asCode: true, hospitalCode: true, receiptDate: true, note: true, status: { select: { ticketStatus: true } }, hospital: { select: { hospitalName: true } } },
+    })
+    if (!receipt) throw new AsServiceError(404, 'AS접수를 찾을 수 없습니다.')
+    if (receipt.status?.ticketStatus === 'RESOLVED' || receipt.status?.ticketStatus === 'CLOSED') throw new AsServiceError(409, '완료·취소된 접수입니다.')
+    const item = await tx.asReceiptItem.findFirst({ where: { id: input.itemId, receiptId } })
+    if (!item) throw new AsServiceError(400, '이 접수의 라인이 아닙니다.')
+    if (item.outcome) throw new AsServiceError(409, `이미 종결된 라인입니다: ${item.serialNo}`)
+    const [m] = await matchSerials(tx, receipt.hospitalCode, [item.serialNo])
+    if (m.state === 'ACTIVE_HERE') throw new AsServiceError(409, `${item.serialNo}: 이미 이 병원에 배치된 기기입니다 (정상)`)
+
+    const today = todayKst()
+    const ctx: RegistryCtx = { hospitalCode: receipt.hospitalCode, actor, occurredOn: today, source: 'MANUAL', ref: { type: 'AS', code: receipt.asCode }, memo: `AS접수 원장 확정 (${receipt.asCode})` }
+    const ward = input.wardName?.trim() || item.wardName || null
+    const r = await registerDevicesIn(tx, ctx, [{
+      serialInput: item.serialNo,
+      modelInput: input.modelInput?.trim() || null,
+      wardName: ward,
+      productType: input.productType?.trim() || undefined,
+    }], { client: tx, conflicts: m.state === 'ACTIVE_OTHER' ? { [item.serialNo]: 'TRANSFER' } : null })
+    const ref = r.created[0] ?? r.reregistered[0] ?? r.transferred[0]
+    if (!ref) throw new AsServiceError(409, `${item.serialNo}: 원장 배치가 만들어지지 않았습니다${r.skipped[0]?.reason ? ` — ${r.skipped[0].reason}` : ''}`)
+    const kind: 'created' | 'reregistered' | 'transferred' = r.created[0] ? 'created' : r.reregistered[0] ? 'reregistered' : 'transferred'
+    const warnings = [...r.warnings]
+
+    await tx.asReceiptItem.update({ where: { id: item.id }, data: { deviceId: ref.id, deviceKind: null, wardName: ward ?? undefined } })
+    warnings.push(...(await openAsFlags(tx, receipt, [{ serialNo: item.serialNo, deviceId: ref.id }], actor, today)))
+
+    const kindLabel = kind === 'created' ? '원장 신규 등록' : kind === 'reregistered' ? '재등록' : `타병원(${m.hospitalName ?? '-'})에서 이관`
+    await tx.asReceipt.update({ where: { id: receipt.id }, data: { note: appendNote(receipt.note, `[원장확정 ${today} ${actor.name ?? ''}] ${item.serialNo} → ${receipt.hospital?.hospitalName ?? receipt.hospitalCode} 배치 (${kindLabel}${ward ? `, ${ward}` : ''})`) } })
+    return { warnings, kind }
+  }, { timeout: 60000, maxWait: 10000 })
+}
+
+// ── 발송정보 갱신 (2026-09-11 — 기기군 단위 발송방법·송장·발송일 일괄 기입/정정) ─────────
+// 발송된 라인(수리반환·교체)만 대상. 기기현황 이벤트는 건드리지 않음(발송 메타만). 시트 R·V·W 역기입은 다음 틱에 반영.
+
+export interface ShipInfoInput {
+  itemIds: number[]
+  shipMethod?: 'PARCEL' | 'VISIT' | null
+  shipTrackingNo?: string | null
+  shippedAt?: string | null // YYYY-MM-DD
+}
+
+export async function updateAsShipInfo(receiptId: number, input: ShipInfoInput): Promise<{ updated: number }> {
+  const ids = Array.from(new Set((input.itemIds ?? []).filter((n) => Number.isInteger(n))))
+  if (!ids.length) throw new AsServiceError(400, '발송정보를 적용할 라인을 선택하세요.')
+  const shipMethod = input.shipMethod ?? null
+  if (shipMethod && shipMethod !== 'PARCEL' && shipMethod !== 'VISIT') throw new AsServiceError(400, '발송방법이 올바르지 않습니다.')
+  const shippedAt = input.shippedAt?.trim() || null
+  if (shippedAt && !/^\d{4}-\d{2}-\d{2}$/.test(shippedAt)) throw new AsServiceError(400, '발송일이 올바르지 않습니다 (YYYY-MM-DD).')
+  const items = await prisma.asReceiptItem.findMany({ where: { id: { in: ids }, receiptId }, select: { id: true, serialNo: true, outcome: true } })
+  if (items.length !== ids.length) throw new AsServiceError(400, '이 접수의 라인이 아닙니다.')
+  const notShipped = items.filter((i) => i.outcome !== 'REPAIR_RETURN' && i.outcome !== 'REPLACE')
+  if (notShipped.length) throw new AsServiceError(400, `발송 라인(수리반환·교체)만 발송정보를 수정할 수 있습니다: ${notShipped.map((i) => i.serialNo).join(', ')}`)
+  const r = await prisma.asReceiptItem.updateMany({
+    where: { id: { in: ids } },
+    data: {
+      shipMethod: input.shipMethod === undefined ? undefined : shipMethod,
+      shipTrackingNo: input.shipTrackingNo === undefined ? undefined : input.shipTrackingNo?.trim() || null,
+      shippedAt: shippedAt ? new Date(shippedAt) : undefined,
+    },
+  })
+  return { updated: r.count }
 }
 
 // ── 접수 등록 코어 (2026-09-07 — 채널톡 자동 등록 편입으로 라우트에서 추출) ─────────

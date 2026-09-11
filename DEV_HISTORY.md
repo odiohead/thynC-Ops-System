@@ -4,6 +4,85 @@
 
 ---
 
+## 2026-09-10 16:20 | PROD 데이터 보정 — 세웅종합병원 숫자 시리얼 접두 부착(산소포화도 P00·심전계 A0) + 중복 유닛 12건 병합
+
+- **사용자 요청**: 세웅종합병원(HOSP-000080) 기기 시리얼이 숫자만으로 잘못 등록(9/5 임포트) → 산소포화도 4자리에 'P00', 심전계 5자리에 'A0' 부착. 겹치는 건은 시점 기준 병합(세웅 등록이 더 오래됐으니 세웅 등록 → 이후 최신 위치로 이동한 이력이 되게)
+- **1차(산소포화도 49대)**: SQL 단일 트랜잭션 `serial_no='P00'||serial_no`, 원문은 `serial_raw` 보존
+- **2차(심전계 50대 + 산소포화도 잔여 1대 = 51)**: 일회용 tsx 스크립트(PROD에서 실행 후 삭제, 레포 미포함) — 단순 개명 39건 / **병합 12건**(11 심전계 + 4256). 병합 원인: AS이력 마이그레이션이 원장에서 숫자 시리얼을 못 찾아 정식 시리얼(A0…/P00…)로 '소급' REGISTER를 생성해 같은 기기가 두 유닛으로 존재. 처리: 임포트 유닛의 REGISTER(2025-06-02)를 실제 유닛으로 이관 → 실제 유닛의 '소급' REGISTER(세웅·더 늦은 날짜) 삭제 → 임포트 유닛(배치·유닛 행) 삭제 → `rebuildUnitProjection`(fold)로 프로젝션 재계산. dry-run(롤백)으로 fold 정합성 통과 확인 후 `--apply`
+- **결과**: 세웅 ACTIVE 산소포화도 50·심전계 56(임포트 중복 11대 제거로 67→56), 숫자만인 시리얼 0. 병합된 12대 중 9대는 세웅에 그대로(배치일 2025-06-02로 정정), A090180은 회수 상태, A090221은 HOSP-000150·P004256은 대구수성메트로(HOSP-000033) 현재 위치 유지. 고아 배치·이벤트 0, AS 라인·재고·related/replaced 참조 0 사전 확인
+- 영향: PROD DB(device_units 88행 개명·12행 삭제, hospital_devices 12행 삭제, hospital_device_events 12행 이관·12행 삭제, 프로젝션 12행 재계산), DEV_HISTORY.md
+
+---
+
+## 2026-09-11 14:00 | 원장 정합 확정 — 타병원·회수·미배치·미등록 라인을 [확정]으로 접수 병원 배치 (dev2 빌드·재시작, PROD 배포 대기)
+
+- **사용자 요청**: 접수 시리얼의 원장 문제(미등록·타병원 등)로 목록이 '확인필요'일 때, 입고 대조 패널처럼 하단에 나열하고 [확정]하면 기기정보를 해당 병원에 있는 것으로 갱신 — 설계 §15
+- **서비스** `confirmAsRegistry`(`lib/asReceiptService.ts`): `matchSerials` 재판정(ACTIVE_HERE면 409) → `registerDevicesIn` 1회(미등록 신규 등록 / 회수·미배치 재등록 / 타병원 `TRANSFER` opt-in 이관, ref AS·memo '원장 확정') → 라인 `deviceId` 연결·기기종류 null·병동 갱신 → `openAsFlags` → 비고 `[원장확정 …]` 이력. 상품유형·모델은 원장 규칙 그대로(혼합 병원 400은 화면에서 선택해 재시도)
+- **API** `POST /api/as-receipts/[id]/registry-confirm`(USER 이상, RegistryError는 toJSON 그대로 반환) / **화면** 기기군 카드 하단 '원장 정합 확인' 패널 — 라인별 원장 배지·예정 동작 문구(신규 등록/재등록/X병원에서 이관)·모델 select(미등록 시, 시리얼 접두로 기본값)·병동·상품유형(자동/일반/라이트)·[확정], 카드 헤더 '원장 확인 n' 카운트. 입고 대조 패널과 별개 축
+- 검증: tsc 0·eslint 0. 서비스 E2E(테스트 전용 시리얼 A999001~3, 원장 이벤트·배치·유닛까지 정리) — 미등록 → created / 타병원(HOSP-000095) → transferred / 회수 → reregistered, 3건 모두 접수 병원 ACTIVE + AS 표시 + 라인 deviceId 연결, 재확정 409, 비고 이력 3줄. 힙 4GB 빌드·`pm2 restart thync-dev`
+- 영향: lib/asReceiptService.ts, app/api/as-receipts/[id]/registry-confirm/route.ts(신규), app/as-receipts/[id]/page.tsx, projects/as_work_design.md, README.md
+
+---
+
+## 2026-09-11 13:00 | 버그 수정 — 상세 API 라인 select에 입고 필드 누락 (입고 배지 공란·확인 패널 미표시)
+
+- **사용자 신고(스크린샷)**: 입고처리 후에도 '입고' 컬럼이 빈 배지, 미식별입고 라인에 처리 체크박스 노출. DB는 정상(P019094 RECEIVED·P123499/P099199 EXTRA)이었고 `GET /api/as-receipts/[id]`의 `detailInclude.items.select`가 명시 목록이라 `intakeState`·`receivedAt`·`receiptSerialNo`·`intakeSource`가 응답에 없었음 → 화면이 undefined로 판정
+- 수정: select 4필드 추가. 빌드·재시작
+- 영향: app/api/as-receipts/[id]/route.ts
+
+---
+
+## 2026-09-11 12:40 | 입고 대조 라벨 확정 — 정상입고 / 미입고 / 미식별입고 (원장 정합 태그와 별개 축, dev2 빌드·재시작)
+
+- **사용자 지시**: 입고처리 후 기기 표 '입고' 컬럼에 접수 시리얼이 입고로 식별되면 **정상입고**, 식별 안 되면 **미입고**, 입고 시리얼이 접수에 없으면 **미식별입고**로 라벨. 타병원 등 원장 정합 태그와는 다른 축으로 관리
+- 코드 값(RECEIVED/MISMATCH/EXTRA)은 유지, 라벨·화면 문구·확인 패널 버튼('정상입고 확정')·입고 결과 배너·비고 이력 문구·API 오류 메시지·목록 툴팁('입고 대조 미입고·미식별입고 n대')·설계 §14·README 일괄 개정. 카드 헤더 카운트 표기는 '입고 확인 n'
+- 검증: tsc 0·eslint 0. 힙 4GB 빌드·`pm2 restart thync-dev`
+- 영향: lib/{asReceiptShared,asReceiptService}.ts, app/as-receipts/{page,[id]/page}.tsx, app/api/as-receipts/{route,[id]/intake/route}.ts, projects/as_work_design.md, README.md
+
+---
+
+## 2026-09-11 12:10 | 입고 대조 보완 — 바깥 입고일 입력 제거·미등록 시리얼 기기군 접두 판별·비고 이력 (dev2 빌드·재시작)
+
+- **사용자 피드백** ① 3번 카드 헤더의 입고일 입력이 입고처리 영역과 중복 → 헤더는 표시만(입고처리 시 기록), 버튼은 '예상 출하일 저장'으로 축소 ② 입고처리에 임의 시리얼 `P123499`가 '기타' 기기군으로 분류 — 원인은 미등록 라인(원장 없음·기기종류 없음)이라 판별 재료가 없었던 것(`P0` 인식 문제 아님). **원장 `device_info.serial_pattern` 접두 규칙(A→심전계, P→산소포화도, B→게이트웨이)** 을 `asDeviceKindFromSerial`로 두고 `asDeviceGroupOf`가 시리얼 접두로 폴백, 접수외입고 라인 생성 시 미등록이면 기기종류도 같은 규칙으로 채움(dev2 기존 1건 백필) ③ 치환 등 확인 이력 → **비고에 자동 추가**: `[입고처리 날짜 이름] 입력 n → 수거완료 a · 확인필요 b(시리얼) · 접수외입고 c(시리얼)` / `[입고확인 날짜 이름] 시리얼 치환 X → Y | 수거완료 수동 확정 | 미회수 종결 — 코멘트 | 신규 라인 편입 | 라인 삭제` (5,000자 초과 시 앞부분 절단)
+- 3457 확인: 치환은 실행되지 않은 상태였음(P019094 MISMATCH · P123499 EXTRA 그대로) — 이번 수정으로 두 라인이 같은 산소포화도 카드에 나타나므로 확인필요 라인의 [치환] 셀렉트에서 P123499 선택 후 실행하면 됨
+- 검증: tsc 0·eslint 0. 힙 4GB 빌드·`pm2 restart thync-dev`
+- 영향: lib/{asReceiptShared,asReceiptService}.ts, app/as-receipts/[id]/page.tsx
+
+---
+
+## 2026-09-11 11:30 | AS 입고 대조 — 입고처리·자동 판정·접수자 확인(치환/수거완료/미회수/편입)·처리 게이트·목록 확인필요·시트 N·O 역기입 (dev2 빌드·재시작, 사용자 확인 대기)
+
+- **배경·결정(사용자)**: 고객 입력 시리얼과 실물이 다른 경우가 있어 AS담당자의 입고 대조 단계 신설. 확인 권한 USER 이상 전원 / O열 확인일 입력 + N·O 역기입 / 접수 외 입고은 치환·신규 편입 둘 다 / 미회수는 종결 간주·코멘트 필수 — 설계 `as_work_design.md` §14
+- **DB** (`20260911100000_as_intake_check`, dev2 적용·resolve): `as_receipts.checked_at` / `as_receipt_items.intake_state`(CHECK PENDING·RECEIVED·MISMATCH·EXTRA, 부분 인덱스)·`received_at`·`receipt_serial_no`·`intake_source`(CHECK RECEIPT·INTAKE) / `outcome` CHECK에 `NOT_RECEIVED` 추가. **PROD 반영 시 동일 SQL 필요**
+- **서비스** (`lib/asReceiptService.ts`): `intakeAsLines`(정규화·중복 제거 → 일치 RECEIVED / 대기 라인 미포함 MISMATCH / 접수 외 EXTRA 라인 생성(원장 매칭만) → 헤더 입고일 최초·확인일 갱신·상태 '입고' 자동+티켓 동기화, 누적 실행) / `confirmAsIntake`(REMAP·MARK_RECEIVED·NOT_RECEIVED·ACCEPT_EXTRA·DISCARD_EXTRA — 이 접수가 켠 AS 표시만 해제·편입/치환 시 표시, 미회수로 전 라인 종결 시 자동 완료) / `resolveAsLines` 게이트: MISMATCH·EXTRA 409, `NOT_RECEIVED` 직접 선택 400, PENDING 허용(방문교체·선교체·기존 접수 호환)
+- **API**: `POST /api/as-receipts/[id]/intake`·`/intake-confirm`(USER 이상, 감사로그·티켓 알림) / 목록 API `intakeIssues` / Excel 라인 컬럼 입고상태·라인입고일·접수시리얼 / 시트 역기입 ⑤ N·O(`intakeBack`)
+- **화면**: 상세 3번 카드 — 확인일 표시·[입고처리] 토글(시리얼 textarea+입고일·확인일 → 대조 실행, 결과 요약 배너) / 기기군 카드 '입고' 컬럼 배지(대기·수거완료·확인필요·접수외입고), 확인필요·접수외입고 라인은 처리 체크박스 제외 + 카드 하단 **접수자 확인 패널**(확인필요: 치환 대상 select+[치환]·[수거완료]·미회수 코멘트+[미회수] / 접수외입고: 기기종류(미등록 시)+[신규 라인 편입]·[삭제]), 치환 라인은 '접수 {원 시리얼}' 표기 / 결과 select는 `AS_RESOLVE_OUTCOMES`(미회수 제외) / 목록 '접수 기기상태' 툴팁에 '입고 대조 확인필요 n대'
+- 검증: tsc 0·eslint 0. 서비스 E2E(임시 접수 → 삭제): 접수 4라인 → 입고 2(일치 1·접수외 1) → 수거완료 1/확인필요 3/접수외입고 1·헤더 입고일·확인일·상태 '입고' → 확인필요 처리 409 → 2차 입고 누적 → 오타 치환(원 시리얼 보존·AS 표시 이전) → 미회수(코멘트 없으면 400) → 남은 3라인 수리반환 → 자동 완료·플래그 0. 힙 4GB 빌드·`pm2 restart thync-dev`. **화면 동작은 dev2에서 사용자 확인 필요**
+- 영향: prisma/{schema.prisma,migrations/20260911100000_as_intake_check}, lib/{asReceiptService,asReceiptShared,channeltalkAsSync,channeltalk-as-scheduler}.ts, app/api/as-receipts/{route,export/route,[id]/intake/route(신규),[id]/intake-confirm/route(신규),[id]/resolve-items/route}.ts, app/as-receipts/{page,[id]/page}.tsx, projects/{as_work_design,channeltalk_as_intake_design}.md, README.md
+
+---
+
+## 2026-09-11 09:15 | PROD → dev2 데이터 동기화 (상세 카드 재구성 테스트용, 신규 덤프)
+
+- **사용자 요청** "현재 PROD의 데이터를 dev2로 마이그". 최신 정기 백업(9/10 01:00)이 어제 오후 변경분('처리중' 삭제·3441 편집) 이전이라 PROD에서 `pg_dump -Fc --data-only` 신규 생성(`thync_ops_sync_20260911_090627.dump`, 19MB — PROD는 읽기만)
+- **절차(dev2)**: 스키마 대조(public+wiki 컬럼 1,199개 동일 — string_agg 해시는 정렬 차이로 불일치했으나 정렬 목록 diff 0) → `pm2 stop thync-dev` → dev2 백업 `dev_before_sync_20260911_090627.dump` → 채널톡 설정 3키 보존 → 117테이블 `TRUNCATE ... RESTART IDENTITY CASCADE`(`_prisma_migrations` 제외) → TOC에서 `_prisma_migrations` TABLE DATA 라인만 제거(SEQUENCE SET 94개 유지 — 9/9 시퀀스 리셋 사고 재발 방지) → `pg_restore --data-only --disable-triggers --single-transaction` → 채널톡 설정 원복(interval **off**·[TEST] 시트·컷오버 1 — 실시트 폴링은 PROD 단독) → `pm2 start`
+- **결과**: health 200·/as-receipts/3441 307·스케줄러 OFF. 접수 3,453·라인 13,355·티켓 4,389·유닛/배치 28,239·병원 80,599·사용자 71·위키 143·마이그 141 보존. AS_STATUS 7종·`as_receipts_id_seq` 3459 정상. PROD 3441(AS-202609-0159)이 dev2에서 동일 id로 조회됨 — 괄호 시리얼 보정·카드 재구성 테스트 가능
+- 영향: dev2 DB(데이터 전량), DEV_HISTORY.md
+
+---
+
+## 2026-09-11 09:40 | AS 상세 카드 재구성 — 공통/접수/AS상세(기기군별)/비고 + 라인별 처리내용·기기군 발송정보 (dev2 빌드·재시작 완료, 사용자 확인 대기)
+
+- **사용자 요청**: 시트 입력 주체 기준으로 접수자(A~M·S·T) / AS담당자(N~X) 카드 분리, AS담당자 영역은 기기군별 카드, 처리내용은 기기별·발송방법/송장은 기기군별 한 번, 비고란 신설. 순서: 1 공통정보 → 2 접수정보 → 3 AS상세내역(3-1 심전계·3-2 산소포화도) → 4 비고
+- **화면** (`app/as-receipts/[id]/page.tsx` 전면 재구성): ① 공통정보(병원·구분·상태·담당/티켓·등록자·등록일시·완료일·기기 수) ② 접수정보 — 접수일·고객명(읽기, 수정 모달)·수거방법·수거 송장·수거일·발송지 구분/정보·회수지 인라인 [접수정보 저장] ③ AS상세내역 — 입고일·예상 출하일 [저장] + `GroupCard`(심전계/산소포화도/기타 — 라인이 있는 군만): 라인 표(시리얼+정합 배지·병동·증상·**처리내용 인라인(blur 저장, PUT items)**·결과·교체기·발송) / **기기군 공통 발송정보**(발송방법·송장·발송일 — 기발송 라인 첫 값으로 초기화, 처리 실행 시 수리반환·교체 라인에 적용, [발송 라인 n대에 적용]으로 기발송 라인 일괄 정정) / 라인 처리(미종결 전체 선택·결과·처리일(비발송 결과)·교체기 시리얼) ④ 비고 — `note` textarea [비고 저장](변경 없으면 비활성). 헤더의 수정 모달·상태 변경·삭제 유지
+- **기기군 판별** `asDeviceGroupOf` (`lib/asReceiptShared.ts`): 원장 모델명(심전계/산소포화도) → 없으면 미등록 라인 기기종류(심전도/산소포화도/게이트웨이/기타) → 심전계·산소포화도·기타 3군
+- **API/서비스**: `resolve-items` 라인별 `processNote`(공통값 폴백) / 신설 `POST /api/as-receipts/[id]/ship-info` + `updateAsShipInfo` — 발송 라인(수리반환·교체)만 발송방법·송장·발송일 갱신, 종결 접수도 허용(시트 R·V·W 역기입이 다음 틱에 따라감) / `resolveAsLines` 경고 추가 — 처리일이 AS 표시 시작일보다 앞서면 원장 fold가 해제를 접지 않아 표시가 남음(E2E에서 발견, 기존 원장 규칙)
+- 검증: tsc 0·eslint 0. 서비스 E2E(임시 접수 → 삭제) — 기기군 판별 4케이스, 라인별 처리내용 저장, 부분 발송, 기기군 발송정보 정정 2라인, 미종결 라인 거부. E2E 중 처리일 소급으로 남은 테스트 기기 2대 플래그는 SQL로 정리. 힙 4GB 빌드·`pm2 restart thync-dev`·/api/health 200. **화면 동작은 dev2에서 사용자 확인 필요**
+- **의견 반영 메모**: 선교체는 시트 P열(담당자 영역)이지만 고객 요청 속성이라 공통정보·헤더 배지로 유지. 병동·증상은 접수자 데이터지만 기기별이라 3의 라인 표에 읽기로 두고 수정 모달에서 편집
+- 영향: app/as-receipts/[id]/page.tsx, app/api/as-receipts/[id]/{resolve-items,ship-info(신규)}/route.ts, lib/{asReceiptService,asReceiptShared}.ts, README.md
+
+---
+
 ## 2026-09-10 14:55 | PROD 배포: AS 수정 모달 편집 확장 + 시트 괄호 시리얼 + '처리중' 제거 (fa0fc73)
 
 - **절차**: dev2 커밋(fa0fc73)·push → PROD pull → PROD DB '처리중' 사용 접수 0건 확인 후 `status_codes` 행 삭제(사용자 허락 — "PROD까지 바로 반영") → 힙 4GB 빌드 → `pm2 restart thync-prod`

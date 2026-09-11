@@ -13,7 +13,7 @@ type Params = { params: { id: string } }
 
 /**
  * AS접수 라인 결과 확정 (as_work_design.md §5·§7) — 부분 발송 지원 (결정 6)
- * POST { lines: [{itemId, outcome, newSerial?}], effectiveDate?, shipMethod?, shipTrackingNo? }
+ * POST { lines: [{itemId, outcome, newSerial?, processNote?}], effectiveDate?, shipMethod?, shipTrackingNo?, processNote? }
  * 수리반환 → clearDeviceAs / 교체 → replaceDevice(fold 자동 해제) / 분실종결 → recoverDevice(LOST) / 라인취소 → clearDeviceAs
  * 전 라인 종결 시 헤더 '완료' 자동 + 티켓 CLOSED (§13-4).
  * 권한: USER 이상 전원 — 별도 처리 풀 없음(1차, 설계 §7)
@@ -30,7 +30,14 @@ export async function POST(request: NextRequest, { params }: Params) {
   let result
   try {
     result = await resolveAsLines(id, { userId: user.userId, name: user.name }, {
-      lines: Array.isArray(body.lines) ? body.lines : [],
+      lines: Array.isArray(body.lines)
+        ? (body.lines as Record<string, unknown>[]).map((l) => ({
+            itemId: Number(l.itemId),
+            outcome: l.outcome as never,
+            newSerial: typeof l.newSerial === 'string' ? l.newSerial : null,
+            processNote: typeof l.processNote === 'string' ? l.processNote : undefined, // 라인별 처리내용 (2026-09-11)
+          }))
+        : [],
       effectiveDate: typeof body.effectiveDate === 'string' ? body.effectiveDate : null,
       shipMethod: body.shipMethod ?? null,
       shipTrackingNo: typeof body.shipTrackingNo === 'string' ? body.shipTrackingNo : null,
