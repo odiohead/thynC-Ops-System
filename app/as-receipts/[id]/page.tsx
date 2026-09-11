@@ -640,6 +640,25 @@ export default function AsReceiptDetailPage() {
     return true
   }
 
+  async function reopen() {
+    if (!req) return
+    const reason = prompt(`${req.asCode}를 리오픈합니다. 사유를 입력하세요 (비고에 기록):`)
+    if (reason == null) return
+    if (!reason.trim()) { flash('리오픈 사유를 입력하세요.'); return }
+    setBusy(true)
+    const res = await fetch(`/api/as-receipts/${req.id}/reopen`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    })
+    const d = await res.json().catch(() => ({}))
+    setBusy(false)
+    if (!res.ok) { flash(d.error ?? '리오픈에 실패했습니다.'); return }
+    setWarnings([`리오픈 — 상태 '${d.statusName}' (라인 결과·기기현황 기록은 그대로입니다)`])
+    router.refresh()
+    await load()
+  }
+
   async function remove() {
     if (!req) return
     if (!confirm(`${req.asCode}를 삭제하시겠습니까? 연결된 티켓도 함께 삭제됩니다.\n(이 접수가 켠 AS 표시는 해제되고, 기록된 기기현황 이벤트는 보존됩니다)`)) return
@@ -715,6 +734,9 @@ export default function AsReceiptDetailPage() {
           )}
           {canEdit && (
             <button type="button" onClick={() => setEditOpen(true)} disabled={busy} className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50" title="접수 기본값·기기 시리얼 수정">수정</button>
+          )}
+          {isTerminal && !!me && me.role !== 'VIEWER' && (
+            <button type="button" onClick={reopen} disabled={busy} className="rounded-lg border border-amber-300 px-3 py-1.5 text-sm text-amber-700 hover:bg-amber-50" title="완료·취소 접수를 다시 진행 상태로 (사유 기록)">리오픈</button>
           )}
           {canDelete && (
             <button type="button" onClick={remove} disabled={busy} className="rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-500 hover:bg-red-50">삭제</button>

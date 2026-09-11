@@ -2153,6 +2153,7 @@ model AsReceipt {
   pickupDestInfo   String?   @map("pickup_dest_info") @db.Text // 회수지 정보 — 채널톡 인입 시 발송지와 동일 자동 기재
   receivedAt       DateTime? @map("received_at") @db.Date // 입고일 (N열)
   checkedAt        DateTime? @map("checked_at") @db.Date // 확인일 (O열 — 입고 대조 확인일, 2026-09-11)
+  sheetDoneSynced  String?   @map("sheet_done_synced") // 채널톡 시트 X열에 마지막으로 기입한 완료 상태(완료/취소/미완료) — 이벤트 기반 역기입(2026-09-11 §7.1 개정). NULL=미기록(첫 틱에 DB 상태를 기준선으로 채택, 기입 없음)
   preReplace       Boolean   @default(false) @map("pre_replace") // 선교체요청 (P열)
   destType         String?   @map("dest_type") // HOSPITAL 병원 / OTHER 기타(대웅 등) (S열, SQL CHECK)
   destInfo         String?   @map("dest_info") @db.Text // 발송지 정보 (T열)

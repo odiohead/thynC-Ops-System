@@ -678,6 +678,45 @@ export async function confirmAsRegistry(receiptId: number, actor: { userId: stri
   }, { timeout: 60000, maxWait: 10000 })
 }
 
+// ── 리오픈 (2026-09-11 — 완료·취소된 접수를 다시 진행 상태로) ─────────
+// 헤더만 되돌린다(라인 결과·기기현황 이벤트는 그대로 — 라인 되돌리기는 별도 결정). 사유는 비고 이력 + 티켓은 어댑터 동기화로 재오픈.
+
+export async function reopenAsReceipt(receiptId: number, actor: { userId: string; name: string | null }, input: { reason: string; statusId?: number | null }): Promise<{ statusName: string }> {
+  const reason = input.reason?.trim()
+  if (!reason) throw new AsServiceError(400, '리오픈 사유를 입력하세요.')
+  return prisma.$transaction(async (tx) => {
+    const receipt = await tx.asReceipt.findUnique({
+      where: { id: receiptId },
+      select: { id: true, asCode: true, note: true, status: { select: { ticketStatus: true, name: true } }, items: { select: { intakeState: true } } },
+    })
+    if (!receipt) throw new AsServiceError(404, 'AS접수를 찾을 수 없습니다.')
+    const terminal = receipt.status?.ticketStatus === 'RESOLVED' || receipt.status?.ticketStatus === 'CLOSED'
+    if (!terminal) throw new AsServiceError(409, '완료·취소된 접수만 리오픈할 수 있습니다.')
+    // 대상 상태: 지정 시 비종결 AS_STATUS만 / 미지정 시 입고된 라인이 있으면 '입고', 없으면 '접수'
+    let target: { id: number; name: string } | null = null
+    if (input.statusId != null) {
+      const row = await tx.statusCode.findFirst({ where: { id: input.statusId, category: 'AS_STATUS' }, select: { id: true, name: true, ticketStatus: true } })
+      if (!row || row.ticketStatus === 'RESOLVED' || row.ticketStatus === 'CLOSED') throw new AsServiceError(400, '리오픈 대상 상태가 올바르지 않습니다 (종결 상태 불가).')
+      target = { id: row.id, name: row.name }
+    } else {
+      const name = receipt.items.some((i) => i.intakeState === 'RECEIVED') ? '입고' : '접수'
+      target = await tx.statusCode.findFirst({ where: { category: 'AS_STATUS', name }, select: { id: true, name: true } })
+        ?? await tx.statusCode.findFirst({ where: { category: 'AS_STATUS', name: '접수' }, select: { id: true, name: true } })
+      if (!target) throw new AsServiceError(400, "AS_STATUS '접수' 상태가 없습니다 — seed-as-masters.sql 확인")
+    }
+    const today = todayKst()
+    await tx.asReceipt.update({
+      where: { id: receipt.id },
+      data: {
+        statusId: target.id, statusChangedAt: new Date(), resolvedAt: null,
+        note: appendNote(receipt.note, `[리오픈 ${today} ${actor.name ?? ''}] ${receipt.status?.name ?? '종결'} → ${target.name} — ${reason}`),
+      },
+    })
+    await syncAsReceiptToTicket(tx, receipt.id, actor.userId)
+    return { statusName: target.name }
+  }, { timeout: 30000, maxWait: 10000 })
+}
+
 // ── 발송정보 갱신 (2026-09-11 — 기기군 단위 발송방법·송장·발송일 일괄 기입/정정) ─────────
 // 발송된 라인(수리반환·교체)만 대상. 기기현황 이벤트는 건드리지 않음(발송 메타만). 시트 R·V·W 역기입은 다음 틱에 반영.
 

@@ -5,7 +5,7 @@
  * 틱마다 2가지 수행:
  *  ① 접수 인입: 컷오버 이후 AI(처리상태) 공란 행 → 파싱·병원 매칭 → createAsReceipt(기존 경로: 티켓·AS표시·알림·SLA)
  *     → AI~AL 되쓰기 (등록완료/실패·AS코드·메모·시각)
- *  ② 완료 역기입: AI='등록완료' & X(완료여부) 미종결 행 → 접수가 종결(resolvedAt)이면 X에 완료/취소 기입
+ *  ② 완료 역기입(2026-09-11 개정 — 이벤트 기반): AI='등록완료' 행의 DB 종결 상태(완료/취소/미완료)가 마지막 기입 값(sheetDoneSynced)과 다를 때만 X에 1회 기입. 시트 수동 변경 불간섭, 리오픈 → '미완료'
  *  ③ 발송정보 역기입(2026-09-09 — 출하정보 안내메시지 발송용): AI='등록완료' 행 전부 대상, 발송된 라인(수리반환·교체)이 있으면
  *     R(수리품 택배발송)=송장 목록, V(발송·교체일자)=발송일 목록, W(발송기기)=출고 시리얼 목록(수리반환→원 시리얼, 교체→교체기 시리얼)을 개행 구분으로 기입.
  *     완료 시점이 아니라 발송정보 입력 시점부터 반영되며, 시트 값과 다를 때만 씀(부분 발송 누적 갱신·매 틱 무의미 쓰기 방지)
@@ -270,25 +270,32 @@ export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
     }
   }
 
-  // ── ② 완료 역기입 ────────────────────────────────────────────
-  const doneRows = rows
-    .map((r, i) => ({ r, rowNo: cutover + 1 + i }))
-    .filter(({ r }) => cell(r, C.SYS_STATE) === SYS_STATE.OK && !['완료', '취소'].includes(cell(r, C.DONE)) && cell(r, C.SYS_CODE))
-  if (doneRows.length) {
-    const codes = doneRows.map(({ r }) => cell(r, C.SYS_CODE))
-    const receipts = await prisma.asReceipt.findMany({
-      where: { asCode: { in: codes }, resolvedAt: { not: null } },
-      select: { asCode: true, status: { select: { name: true } } },
-    })
-    const byCode = new Map(receipts.map((x) => [x.asCode, x]))
-    for (const { r, rowNo } of doneRows) {
-      const rec = byCode.get(cell(r, C.SYS_CODE))
-      if (!rec) continue
-      const label = rec.status?.name === '취소' ? '취소' : '완료'
-      rangeOf(rowNo, 'X', [label])
-      rangeOf(rowNo, 'AL', [nowKst()])
-      result.completedBack++
-      console.log(`[channeltalk-as] r${rowNo} 완료 역기입: ${cell(r, C.SYS_CODE)} → ${label}`)
+  // ── ② 완료 역기입 (2026-09-11 개정 — 이벤트 기반) ────────────────
+  // DB 종결 상태(완료/취소/미완료)가 `sheetDoneSynced`(마지막 기입 값)와 다를 때만 X에 1회 기입. 시트 수동 변경은 덮어쓰지 않는다.
+  // NULL(개정 전 접수)은 첫 틱에 DB 상태를 기준선으로 채택만 하고 기입하지 않음(기존 방식으로 이미 기입된 상태). 리오픈 → '미완료' 1회.
+  const doneSyncUpdates: { id: number; value: string }[] = [] // batchUpdate 성공 후 반영 (실패 시 다음 틱 재시도)
+  {
+    const codeRows = rows
+      .map((r, i) => ({ r, rowNo: cutover + 1 + i }))
+      .filter(({ r }) => cell(r, C.SYS_STATE) === SYS_STATE.OK && cell(r, C.SYS_CODE))
+    if (codeRows.length) {
+      const receipts = await prisma.asReceipt.findMany({
+        where: { asCode: { in: codeRows.map(({ r }) => cell(r, C.SYS_CODE)) } },
+        select: { id: true, asCode: true, resolvedAt: true, sheetDoneSynced: true, status: { select: { name: true } } },
+      })
+      const byCode = new Map(receipts.map((x) => [x.asCode, x]))
+      for (const { r, rowNo } of codeRows) {
+        const rec = byCode.get(cell(r, C.SYS_CODE))
+        if (!rec) continue
+        const want = rec.resolvedAt ? (rec.status?.name === '취소' ? '취소' : '완료') : '미완료'
+        if (rec.sheetDoneSynced === want) continue
+        if (rec.sheetDoneSynced == null) { doneSyncUpdates.push({ id: rec.id, value: want }); continue } // 기준선 채택
+        rangeOf(rowNo, 'X', [want])
+        rangeOf(rowNo, 'AL', [nowKst()])
+        doneSyncUpdates.push({ id: rec.id, value: want })
+        result.completedBack++
+        console.log(`[channeltalk-as] r${rowNo} 완료 역기입: ${rec.asCode} → ${want} (이전 ${rec.sheetDoneSynced})`)
+      }
     }
   }
 
@@ -378,5 +385,7 @@ export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
       requestBody: { valueInputOption: 'RAW', data: writes },
     })
   }
+  // X열 기입이 성공한 뒤에만 마지막 기입 값 기록 (기준선 채택 포함)
+  for (const u of doneSyncUpdates) await prisma.asReceipt.update({ where: { id: u.id }, data: { sheetDoneSynced: u.value } })
   return result
 }

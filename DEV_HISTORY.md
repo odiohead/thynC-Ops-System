@@ -14,6 +14,28 @@
 
 ---
 
+## 2026-09-11 15:40 | 시트 X열 완료 역기입 이벤트 기반 개정 (dev2 마이그·빌드·재시작, PROD 배포 대기)
+
+- **사용자 신고·결정**: 시스템 완료 후 시트에서 '진행중'으로 바꿔도 매 분 '완료'로 되돌아감 → "이벤트 발생 시 해당 필드만 갱신" 방식으로 X열부터 개정
+- **DB** `20260911150000_as_sheet_done_synced`: `as_receipts.sheet_done_synced TEXT`(마지막 기입 값 완료/취소/미완료). dev2 적용·resolve·generate. **PROD 반영 시 동일 SQL 필요**
+- **동기화 ②** (`lib/channeltalkAsSync.ts`): 등록완료 행 전부 대상, DB 상태(resolvedAt → 완료/취소, 아니면 미완료)가 `sheetDoneSynced`와 다를 때만 X 기입 + AL 갱신. NULL은 첫 틱에 기준선 채택(기입 없음 — 기존 방식으로 이미 기입된 상태). 기록은 batchUpdate 성공 후에만 → 실패 시 다음 틱 재시도. 리오픈 → '미완료' 1회. 시트 수동 변경은 이후 불간섭
+- 검증: tsc 0·eslint 0. dev2 [TEST] 사본 시트 E2E(임시 접수·r2 AJ/X 임시 사용 후 원복): ① 기준선 채택 completedBack 0·X 미기입 ② 라인취소로 완료 → X='완료' 1회 ③ 시트 X를 '진행중'으로 수동 변경 → 다음 틱 유지(0건) ④ 리오픈 → X='미완료' 1회 ⑤ 무변경 0건. 힙 4GB 빌드·`pm2 restart thync-dev`
+- 후속 검토: R·V·W(발송)·L(수거 송장)·N·O(입고)는 시스템이 원천이라 현행(시트와 다르면 기입) 유지 — 같은 원칙으로 바꿀지는 별도 결정
+- 영향: prisma/{schema.prisma,migrations/20260911150000_as_sheet_done_synced}, lib/channeltalkAsSync.ts, projects/channeltalk_as_intake_design.md, README.md
+
+---
+
+## 2026-09-11 15:10 | AS 리오픈 기능 (dev2 빌드·재시작, PROD 배포 대기)
+
+- **사용자 요청**: 완료 조치 후에도 내용을 수정해야 하는 경우가 있어 리오픈 필요
+- **서비스** `reopenAsReceipt`: 종결(RESOLVED/CLOSED) 접수만 대상, 사유 필수 → 비종결 상태로 복귀(지정 `statusId`는 비종결만 허용, 미지정 시 정상입고 라인이 있으면 '입고' 없으면 '접수')·`resolvedAt` null·`statusChangedAt` 갱신·비고 `[리오픈 날짜 이름] 완료 → 접수 — 사유`·`syncAsReceiptToTicket`(티켓 CLOSED → OPEN/IN_PROGRESS, closedAt 해제). **헤더만** 되돌림 — 라인 결과·기기현황 이벤트는 불변(교체·회수 되돌리기는 원장 소급 문제라 별도 결정)
+- **API** `POST /api/as-receipts/[id]/reopen`(USER 이상 — 종결 후 수정을 열어주는 진입점이므로 라인 처리와 같은 범위) / **화면** 헤더에 종결 시 [리오픈] 버튼(사유 prompt) → 리오픈되면 기존 규칙대로 USER도 수정 가능
+- 검증: tsc 0·eslint 0. 서비스 E2E — 비종결 거부·사유 필수·완료 → 접수·티켓 CLOSED → OPEN·closedAt null·비고 이력. 힙 4GB 빌드·`pm2 restart thync-dev`
+- **미결(사용자 질문)**: 시트 X열 완료 역기입이 매 틱 조정 방식이라 시트 수동 변경을 계속 덮어씀 + 리오픈 후 X가 '완료'로 남음 — 이벤트 기반(마지막 동기화 값 기록 후 변경 시에만 기입, 리오픈 시 '미완료' 1회 기입)으로 개정 제안
+- 영향: lib/asReceiptService.ts, app/api/as-receipts/[id]/reopen/route.ts(신규), app/as-receipts/[id]/page.tsx, README.md
+
+---
+
 ## 2026-09-11 14:40 | PROD 배포: AS 상세 카드 재구성 + 입고 대조 + 원장 정합 확정 + 기기군 발송정보 (75a39a3, 마이그 포함)
 
 - **절차**: dev2 커밋(75a39a3)·push → PROD 사전 전체 덤프 `thync_ops_pre_as_intake_20260911_013621.dump`(스키마 변경 동반) → pull → 마이그 SQL `20260911100000_as_intake_check` 적용 + `migrate resolve --applied` + `prisma generate` → 힙 4GB 빌드 → `pm2 restart thync-prod`
