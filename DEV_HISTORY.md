@@ -14,6 +14,18 @@
 
 ---
 
+## 2026-09-11 16:40 | AS '발송완료' 상태 신설 + 4. 기기등록 카드 [완료] (dev2 시드·빌드·재시작, PROD 배포 대기)
+
+- **사용자 요청**: 발송 완료가 곧 '완료'면 안 됨 — 고객 시스템 기기등록 후속업무가 있음. '4. 기기등록' 카드에 [완료] 버튼만 두고(기능은 1차 미구현) 최종 완료는 거기서, 전 라인 처리 종료는 '발송완료' — 설계 §16
+- **마스터**: `AS_STATUS` '발송완료'(order 55, `#14B8A6`, IN_PROGRESS) 시드 추가 → 8종. dev2 `seed-as-masters.sql` 재실행 적용. **PROD 반영 시 시드 재실행 필요**(DDL 아님, 마스터 1행 INSERT + 매핑)
+- **서비스**: 자동 전이 공용 `advanceToShippedDone`(라인 처리·미회수 확정 공통) — 미종결 0이면 '발송완료'(현재가 더 뒤 단계·종결·보류면 유지, 티켓 IN_PROGRESS) / 신설 `completeAsReceipt` — 미종결 라인 0 필수(409) → '완료'·`resolvedAt`·티켓 CLOSED·비고 `[기기등록 완료 …]` / 리오픈 기본 대상: 전 라인 종결이면 '발송완료'. 어댑터 이름 폴백에 '발송완료' 추가
+- **API** `POST /api/as-receipts/[id]/complete`(USER 이상) / **화면** 4. 기기등록 카드(안내 문구 + [완료], 미종결 라인 있으면 비활성), 비고는 5번으로
+- **파급**: 시트 X열 '완료' 기입 시점이 기기등록 [완료]로 이동(발송완료 단계는 '미완료'). 스모크 `as-receipt-smoke.mts` 8종·발송완료→완료 2단계로 갱신 + 9/7 권한 개정을 반영 못 한 기존 단언 1건('USER 타인 등록 차단') 정정 → **44/44 pass**
+- 검증: tsc 0·eslint 0·스모크 44 pass. 힙 4GB 빌드·`pm2 restart thync-dev`
+- 영향: scripts/{seed-as-masters.sql,as-receipt-smoke.mts}, lib/{asReceiptService.ts,ticket-domains/asReceipt.ts}, app/api/as-receipts/[id]/complete/route.ts(신규), app/as-receipts/[id]/page.tsx, projects/as_work_design.md, README.md, dev2 DB(status_codes 1행)
+
+---
+
 ## 2026-09-11 16:00 | PROD 배포: AS 리오픈 + 시트 X열 완료 역기입 이벤트 기반 개정 (6b78da3, 마이그 포함)
 
 - **절차**: dev2 커밋(6b78da3)·push → PROD 사전 전체 덤프 `thync_ops_pre_sheet_sync_20260911_024019.dump` → pull → 마이그 SQL `20260911150000_as_sheet_done_synced` 적용 + resolve + generate → 힙 4GB 빌드 → `pm2 restart thync-prod`

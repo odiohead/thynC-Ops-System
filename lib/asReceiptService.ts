@@ -390,22 +390,8 @@ export async function resolveAsLines(
         await tx.asReceiptItem.update({ where: { id: item.id }, data })
       }
 
-      // 전 라인 종결 → 헤더 '완료' 자동 전이 (§13-4 확정) + 티켓 CLOSED (어댑터 동기화)
-      let autoCompleted = false
-      const remaining = await tx.asReceiptItem.count({ where: { receiptId: receipt.id, outcome: null } })
-      if (remaining === 0) {
-        const done = await tx.statusCode.findFirst({ where: { category: 'AS_STATUS', name: '완료' }, select: { id: true } })
-        if (done) {
-          await tx.asReceipt.update({
-            where: { id: receipt.id },
-            data: { statusId: done.id, statusChangedAt: new Date(), resolvedAt: new Date(effectiveDate) },
-          })
-          await syncAsReceiptToTicket(tx, receipt.id, actor.userId)
-          autoCompleted = true
-        } else {
-          warnings.push("AS_STATUS '완료' 상태가 없어 자동 완료를 건너뛰었습니다 — seed-as-masters.sql 확인")
-        }
-      }
+      // 전 라인 종결 → 헤더 '발송완료' 자동 전이 (2026-09-11 개정 — 최종 '완료'는 4. 기기등록 카드의 [완료]로만) + 티켓 IN_PROGRESS 유지
+      const autoCompleted = await advanceToShippedDone(tx, receipt.id, actor, warnings)
       return { warnings, autoCompleted }
     },
     { timeout: 120000, maxWait: 10000 }
@@ -613,17 +599,8 @@ export async function confirmAsIntake(receiptId: number, actor: { userId: string
     }
     if (history) await tx.asReceipt.update({ where: { id: receipt.id }, data: { note: appendNote(receipt.note, `[입고확인 ${today} ${actor.name ?? ''}] ${history}`) } })
 
-    // 미회수 종결로 전 라인이 끝나면 접수 자동 완료 (라인 처리와 동일 규칙)
-    let autoCompleted = false
-    const remaining = await tx.asReceiptItem.count({ where: { receiptId: receipt.id, outcome: null } })
-    if (remaining === 0) {
-      const done = await tx.statusCode.findFirst({ where: { category: 'AS_STATUS', name: '완료' }, select: { id: true } })
-      if (done) {
-        await tx.asReceipt.update({ where: { id: receipt.id }, data: { statusId: done.id, statusChangedAt: new Date(), resolvedAt: new Date(today) } })
-        await syncAsReceiptToTicket(tx, receipt.id, actor.userId)
-        autoCompleted = true
-      }
-    }
+    // 미회수 종결로 전 라인이 끝나면 '발송완료' 자동 전이 (라인 처리와 동일 규칙)
+    const autoCompleted = await advanceToShippedDone(tx, receipt.id, actor, warnings)
     return { warnings, autoCompleted }
   }, { timeout: 60000, maxWait: 10000 })
 }
@@ -678,6 +655,47 @@ export async function confirmAsRegistry(receiptId: number, actor: { userId: stri
   }, { timeout: 60000, maxWait: 10000 })
 }
 
+// ── 발송완료 자동 전이 / 최종 완료 (2026-09-11 — 기기등록 후속업무 반영) ─────────
+// 전 라인 종결 → '발송완료'(비종결, IN_PROGRESS). 최종 '완료'(CLOSED)는 4. 기기등록 카드의 [완료]로만(completeAsReceipt).
+
+/** 미종결 라인이 0이고 현재 상태가 '발송완료' 이전이면 '발송완료'로. 반환: 전이 여부 */
+async function advanceToShippedDone(tx: Prisma.TransactionClient, receiptId: number, actor: { userId: string | null; name: string | null }, warnings: string[]): Promise<boolean> {
+  const remaining = await tx.asReceiptItem.count({ where: { receiptId, outcome: null } })
+  if (remaining !== 0) return false
+  const cur = await tx.asReceipt.findUnique({ where: { id: receiptId }, select: { statusId: true, status: { select: { order: true, ticketStatus: true } } } })
+  const shipped = await tx.statusCode.findFirst({ where: { category: 'AS_STATUS', name: '발송완료' }, select: { id: true, order: true } })
+  if (!shipped) { warnings.push("AS_STATUS '발송완료' 상태가 없어 자동 전이를 건너뛰었습니다 — seed-as-masters.sql 확인"); return false }
+  if (!cur || cur.statusId === shipped.id) return false
+  const terminal = cur.status?.ticketStatus === 'RESOLVED' || cur.status?.ticketStatus === 'CLOSED'
+  if (terminal || (cur.status?.order ?? 0) > shipped.order) return false // 이미 완료·취소·보류 등 뒤 단계면 유지
+  await tx.asReceipt.update({ where: { id: receiptId }, data: { statusId: shipped.id, statusChangedAt: new Date() } })
+  await syncAsReceiptToTicket(tx, receiptId, actor.userId)
+  return true
+}
+
+/** 4. 기기등록 [완료] — 전 라인 종결 상태에서만 최종 '완료'(CLOSED)·완료일 기록·티켓 CLOSED */
+export async function completeAsReceipt(receiptId: number, actor: { userId: string; name: string | null }): Promise<{ statusName: string }> {
+  return prisma.$transaction(async (tx) => {
+    const receipt = await tx.asReceipt.findUnique({
+      where: { id: receiptId },
+      select: { id: true, asCode: true, note: true, status: { select: { name: true, ticketStatus: true } } },
+    })
+    if (!receipt) throw new AsServiceError(404, 'AS접수를 찾을 수 없습니다.')
+    if (receipt.status?.ticketStatus === 'RESOLVED' || receipt.status?.ticketStatus === 'CLOSED') throw new AsServiceError(409, '이미 완료·취소된 접수입니다.')
+    const remaining = await tx.asReceiptItem.count({ where: { receiptId, outcome: null } })
+    if (remaining > 0) throw new AsServiceError(409, `미종결 라인이 ${remaining}개 있습니다 — 전 라인 처리 후 완료할 수 있습니다.`)
+    const done = await tx.statusCode.findFirst({ where: { category: 'AS_STATUS', name: '완료' }, select: { id: true, name: true } })
+    if (!done) throw new AsServiceError(400, "AS_STATUS '완료' 상태가 없습니다 — seed-as-masters.sql 확인")
+    const today = todayKst()
+    await tx.asReceipt.update({
+      where: { id: receiptId },
+      data: { statusId: done.id, statusChangedAt: new Date(), resolvedAt: new Date(today), note: appendNote(receipt.note, `[기기등록 완료 ${today} ${actor.name ?? ''}] ${receipt.status?.name ?? '-'} → 완료`) },
+    })
+    await syncAsReceiptToTicket(tx, receiptId, actor.userId)
+    return { statusName: done.name }
+  }, { timeout: 30000, maxWait: 10000 })
+}
+
 // ── 리오픈 (2026-09-11 — 완료·취소된 접수를 다시 진행 상태로) ─────────
 // 헤더만 되돌린다(라인 결과·기기현황 이벤트는 그대로 — 라인 되돌리기는 별도 결정). 사유는 비고 이력 + 티켓은 어댑터 동기화로 재오픈.
 
@@ -687,7 +705,7 @@ export async function reopenAsReceipt(receiptId: number, actor: { userId: string
   return prisma.$transaction(async (tx) => {
     const receipt = await tx.asReceipt.findUnique({
       where: { id: receiptId },
-      select: { id: true, asCode: true, note: true, status: { select: { ticketStatus: true, name: true } }, items: { select: { intakeState: true } } },
+      select: { id: true, asCode: true, note: true, status: { select: { ticketStatus: true, name: true } }, items: { select: { intakeState: true, outcome: true } } },
     })
     if (!receipt) throw new AsServiceError(404, 'AS접수를 찾을 수 없습니다.')
     const terminal = receipt.status?.ticketStatus === 'RESOLVED' || receipt.status?.ticketStatus === 'CLOSED'
@@ -699,7 +717,8 @@ export async function reopenAsReceipt(receiptId: number, actor: { userId: string
       if (!row || row.ticketStatus === 'RESOLVED' || row.ticketStatus === 'CLOSED') throw new AsServiceError(400, '리오픈 대상 상태가 올바르지 않습니다 (종결 상태 불가).')
       target = { id: row.id, name: row.name }
     } else {
-      const name = receipt.items.some((i) => i.intakeState === 'RECEIVED') ? '입고' : '접수'
+      const allClosed = receipt.items.length > 0 && receipt.items.every((i) => i.outcome)
+      const name = allClosed ? '발송완료' : receipt.items.some((i) => i.intakeState === 'RECEIVED') ? '입고' : '접수'
       target = await tx.statusCode.findFirst({ where: { category: 'AS_STATUS', name }, select: { id: true, name: true } })
         ?? await tx.statusCode.findFirst({ where: { category: 'AS_STATUS', name: '접수' }, select: { id: true, name: true } })
       if (!target) throw new AsServiceError(400, "AS_STATUS '접수' 상태가 없습니다 — seed-as-masters.sql 확인")

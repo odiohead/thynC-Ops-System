@@ -2,7 +2,7 @@
  * AS업무(AS접수) 스모크 (as_work_design.md §10)
  *
  * 검증:
- *  마스터 — AS_STATUS 7종 매핑(접수 OPEN·수거중/입고/발송 IN_PROGRESS·보류 PENDING·완료/취소 CLOSED)·규칙·LOST 사유
+ *  마스터 — AS_STATUS 8종 매핑(접수 OPEN·수거중/입고/발송/발송완료 IN_PROGRESS·보류 PENDING·완료/취소 CLOSED)·규칙·LOST 사유
  *  레지스트리 — 어댑터 8종·detailInclude에 asReceipt·REGISTRY_REF_TYPES 'AS'·refLink
  *  생성 — AS 코드 형식·매칭(ACTIVE_HERE/NONE)·레코드+라인+티켓(refType AS·제목·병원)·AS 표시(asRefCode)·중복 표시 경고
  *  도메인→티켓 — 수거중 IN_PROGRESS / 보류 PENDING / 접수 OPEN
@@ -20,7 +20,7 @@ import { TICKET_DOMAIN_ADAPTERS, domainDetailIncludes, buildTicketLinkedWork } f
 import { createTicketForAsReceipt, syncAsReceiptToTicket, syncTicketToAsReceipt } from '../lib/ticket-domains/asReceipt'
 import { nextAsCode, canEditAsReceipt } from '../lib/asReceipt'
 import { summarizeAsItems } from '../lib/asReceiptShared'
-import { matchSerials, matchWarning, openAsFlags, resolveAsLines, applyItemChanges, AsServiceError } from '../lib/asReceiptService'
+import { matchSerials, matchWarning, openAsFlags, resolveAsLines, applyItemChanges, AsServiceError, completeAsReceipt } from '../lib/asReceiptService'
 import { registerDevices } from '../lib/deviceRegistry/write'
 import { REGISTRY_REF_TYPES, refLink, todayKst } from '../lib/deviceRegistryShared'
 
@@ -72,7 +72,7 @@ async function main() {
     // ── 마스터 ────────────────────────────────────────────────
     console.log('▶ 마스터 시드')
     const statuses = await prisma.statusCode.findMany({ where: { category: 'AS_STATUS' }, orderBy: { order: 'asc' } })
-    check('AS_STATUS 7종', statuses.length === 7, `실제 ${statuses.length}`)
+    check('AS_STATUS 8종', statuses.length === 8, `실제 ${statuses.length}`)
     const mapOf = (n: string) => statuses.find((s) => s.name === n)?.ticketStatus
     check('매핑 접수→OPEN·수거중/입고/발송→IN_PROGRESS',
       mapOf('접수') === 'OPEN' && mapOf('수거중') === 'IN_PROGRESS' && mapOf('입고') === 'IN_PROGRESS' && mapOf('발송') === 'IN_PROGRESS')
@@ -211,10 +211,14 @@ async function main() {
     const s3After = await placementOf(S3)
     check('분실종결 — RECOVERED + 사유 LOST', s3After?.status === 'RECOVERED' && s3After?.recoverReasonId === lostReason?.id)
     check('미등록 라인 — 이벤트 스킵 경고', res.warnings.some((w) => w.includes('미등록 라인')))
-    check('전 라인 종결 → 헤더 완료 자동', res.autoCompleted)
+    check('전 라인 종결 → 헤더 발송완료 자동 (2026-09-11)', res.autoCompleted)
+    const shippedReceipt = await prisma.asReceipt.findUnique({ where: { id: receipt.id }, include: { status: true } })
+    ticket = await prisma.ticket.findUnique({ where: { id: ticketId } })
+    check("헤더 '발송완료'·완료일 없음 + 티켓 IN_PROGRESS", shippedReceipt?.status?.name === '발송완료' && shippedReceipt?.resolvedAt == null && ticket?.status === 'IN_PROGRESS')
+    await completeAsReceipt(receipt.id, actor)
     const doneReceipt = await prisma.asReceipt.findUnique({ where: { id: receipt.id }, include: { status: true } })
     ticket = await prisma.ticket.findUnique({ where: { id: ticketId } })
-    check("헤더 '완료'·완료일 + 티켓 CLOSED", doneReceipt?.status?.name === '완료' && doneReceipt?.resolvedAt != null && ticket?.status === 'CLOSED')
+    check("기기등록 [완료] → 헤더 '완료'·완료일 + 티켓 CLOSED", doneReceipt?.status?.name === '완료' && doneReceipt?.resolvedAt != null && ticket?.status === 'CLOSED')
 
     // 종결 후 처리 시도 → 409
     let blocked = false
@@ -277,7 +281,7 @@ async function main() {
     check('수정 권한 — ADMIN 항상', canEditAsReceipt({ userId: 'x', role: 'ADMIN' }, ownDone))
     check('수정 권한 — USER 본인·종결 전 허용', canEditAsReceipt({ userId: anyUser.id, role: 'USER' }, own))
     check('수정 권한 — USER 본인·종결 후 차단', !canEditAsReceipt({ userId: anyUser.id, role: 'USER' }, ownDone))
-    check('수정 권한 — USER 타인 등록 차단', !canEditAsReceipt({ userId: anyUser.id, role: 'USER' }, other))
+    check('수정 권한 — USER 타인 등록·종결 전 허용 (2026-09-07 CX #4 개정)', canEditAsReceipt({ userId: anyUser.id, role: 'USER' }, other))
     check('수정 권한 — VIEWER 차단', !canEditAsReceipt({ userId: anyUser.id, role: 'VIEWER' }, own))
 
     await prisma.asReceipt.delete({ where: { id: receipt2.id } })

@@ -640,6 +640,18 @@ export default function AsReceiptDetailPage() {
     return true
   }
 
+  async function completeReceipt() {
+    if (!req) return
+    if (!confirm(`${req.asCode}를 최종 완료합니다 (기기등록 완료).\n접수 상태 '완료'·완료일 기록·티켓 종결. 계속할까요?`)) return
+    setBusy(true)
+    const res = await fetch(`/api/as-receipts/${req.id}/complete`, { method: 'POST' })
+    const d = await res.json().catch(() => ({}))
+    setBusy(false)
+    if (!res.ok) { flash(d.error ?? '완료 처리에 실패했습니다.'); return }
+    router.refresh()
+    await load()
+  }
+
   async function reopen() {
     if (!req) return
     const reason = prompt(`${req.asCode}를 리오픈합니다. 사유를 입력하세요 (비고에 기록):`)
@@ -958,9 +970,33 @@ export default function AsReceiptDetailPage() {
         </div>
       </Card>
 
-      {/* 4. 비고 */}
+      {/* 4. 기기등록 (2026-09-11) — 고객 시스템 기기등록 후속업무. 1차: 최종 완료 버튼만 */}
+      <Card title="4. 기기등록" sub="고객 시스템 등록 후 최종 완료">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
+          <p className="text-sm text-gray-600">
+            {isTerminal
+              ? <>이 접수는 <span className="font-medium text-gray-900">{req.status?.name}</span> 상태입니다{req.resolvedAt ? ` (완료일 ${d10(req.resolvedAt)})` : ''}.</>
+              : openItems.length > 0
+                ? <>미종결 라인 <span className="font-medium text-gray-900">{openItems.length}대</span> — 전 라인 처리 후 완료할 수 있습니다.</>
+                : <>전 라인 처리가 끝났습니다. 고객 시스템에 기기등록을 마쳤으면 [완료]를 눌러 접수를 종결하세요.</>}
+          </p>
+          {canResolve && (
+            <button
+              type="button"
+              disabled={busy || openItems.length > 0}
+              onClick={completeReceipt}
+              className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40"
+              title={openItems.length > 0 ? '미종결 라인이 있어 완료할 수 없습니다' : '접수 최종 완료'}
+            >
+              완료
+            </button>
+          )}
+        </div>
+      </Card>
+
+      {/* 5. 비고 */}
       <Card
-        title="4. 비고"
+        title="5. 비고"
         sub="이 접수건의 특이사항"
         right={canEdit && (
           <button type="button" disabled={busy || note === (req.note ?? '')} onClick={() => putReceipt({ note: note || null }, '비고 저장에 실패했습니다.')} className="rounded-md border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50">비고 저장</button>

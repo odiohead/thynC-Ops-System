@@ -2,14 +2,15 @@
 -- idempotent: PROD 최초 반영·데이터 동기화 후 재실행 가능 (CLAUDE.md 티켓 규칙 4)
 --   psql -U thync -d thync_ops_dev -f scripts/seed-as-masters.sql
 
--- 1) AS접수 워크플로 상태 (AS_STATUS, 단계형 7종 — '처리중'은 2026-09-10 제거: 수거중·입고·발송이 모두 IN_PROGRESS라 중복) + 티켓 상태 매핑 (규칙 6 — 매핑 필수)
---    접수→OPEN(담당 있으면 엔진이 ASSIGNED) / 수거중·입고·발송→IN_PROGRESS / 보류→PENDING(사유 '기타')
+-- 1) AS접수 워크플로 상태 (AS_STATUS, 단계형 8종 — '처리중'은 2026-09-10 제거, '발송완료'는 2026-09-11 추가: 전 라인 처리 후 기기등록(고객 시스템 등록) 전까지) + 티켓 상태 매핑 (규칙 6 — 매핑 필수)
+--    접수→OPEN(담당 있으면 엔진이 ASSIGNED) / 수거중·입고·발송·발송완료→IN_PROGRESS / 보류→PENDING(사유 '기타')
 --    완료→CLOSED(2026-09-04 결정 — SOR 선례, RESOLVED 미경유) / 취소→CLOSED
 INSERT INTO status_codes (name, category, "order", color) VALUES
   ('접수',   'AS_STATUS', 10, '#3B82F6'),
   ('수거중', 'AS_STATUS', 20, '#8B5CF6'),
   ('입고',   'AS_STATUS', 30, '#06B6D4'),
   ('발송',   'AS_STATUS', 50, '#F97316'),
+  ('발송완료', 'AS_STATUS', 55, '#14B8A6'), -- 2026-09-11: 전 라인 처리 종료(자동) — 기기등록 후속업무 대기, 비종결
   ('완료',   'AS_STATUS', 60, '#10B981'),
   ('보류',   'AS_STATUS', 70, '#9CA3AF'),
   ('취소',   'AS_STATUS', 80, '#6B7280')
@@ -21,7 +22,7 @@ DELETE FROM status_codes sc WHERE sc.category='AS_STATUS' AND sc.name='처리중
 
 -- 매핑은 관리자가 설정 화면에서 바꿀 수 있으므로 NULL(미매핑)인 행만 채운다
 UPDATE status_codes SET ticket_status = 'OPEN'        WHERE category='AS_STATUS' AND name='접수'   AND ticket_status IS NULL;
-UPDATE status_codes SET ticket_status = 'IN_PROGRESS' WHERE category='AS_STATUS' AND name IN ('수거중','입고','발송') AND ticket_status IS NULL;
+UPDATE status_codes SET ticket_status = 'IN_PROGRESS' WHERE category='AS_STATUS' AND name IN ('수거중','입고','발송','발송완료') AND ticket_status IS NULL;
 UPDATE status_codes SET ticket_status = 'PENDING',
   ticket_pending_reason_id = (SELECT id FROM ticket_pending_reasons WHERE name='기타')
   WHERE category='AS_STATUS' AND name='보류' AND ticket_status IS NULL;
