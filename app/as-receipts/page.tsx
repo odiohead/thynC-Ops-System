@@ -109,6 +109,7 @@ function AsReceiptListInner() {
     openTotal: number
     thisWeek: number
     avgResolutionDays: number | null
+    avgResolution: { normal: { days: number | null; count: number }; preReplace: { days: number | null; count: number } }
     overdue2w: number
   } | null>(null)
   const [qInput, setQInput] = useState(searchParams.get('q') ?? '')
@@ -212,12 +213,24 @@ function AsReceiptListInner() {
               <p className="text-xs text-gray-400">이번 주 접수</p>
               <p className="mt-0.5 text-lg font-bold text-gray-900">{summary.thisWeek.toLocaleString()}<span className="ml-1 text-sm font-normal text-gray-400">건</span></p>
             </div>
-            <div className="rounded-lg border border-gray-200 bg-white px-3.5 py-2.5 shadow-sm">
+            {/* 평균 처리시간 — 일반 AS / 선교체 분리 (2026-09-12 사용자 요청). 툴팁에 각 완료 건수 */}
+            <div
+              className="rounded-lg border border-gray-200 bg-white px-3.5 py-2.5 shadow-sm"
+              title={`최근 3개월 접수 후 완료된 건의 접수→완료 평균 일수\n일반 AS ${summary.avgResolution.normal.count.toLocaleString()}건 · 선교체 ${summary.avgResolution.preReplace.count.toLocaleString()}건`}
+            >
               <p className="text-xs text-gray-400">평균 처리시간 <span className="text-gray-300">(최근 3개월)</span></p>
-              <p className="mt-0.5 text-lg font-bold text-gray-900">
-                {summary.avgResolutionDays != null ? summary.avgResolutionDays : '-'}
-                <span className="ml-1 text-sm font-normal text-gray-400">일</span>
-              </p>
+              <div className="mt-0.5 flex items-baseline gap-3">
+                <p className="text-lg font-bold text-gray-900">
+                  <span className="mr-1 text-xs font-normal text-gray-500">일반</span>
+                  {summary.avgResolution.normal.days != null ? summary.avgResolution.normal.days : '-'}
+                  <span className="ml-0.5 text-sm font-normal text-gray-400">일</span>
+                </p>
+                <p className="text-lg font-bold text-amber-800">
+                  <span className="mr-1 text-xs font-normal text-amber-700">선교체</span>
+                  {summary.avgResolution.preReplace.days != null ? summary.avgResolution.preReplace.days : '-'}
+                  <span className="ml-0.5 text-sm font-normal text-amber-700/70">일</span>
+                </p>
+              </div>
             </div>
             <div className={`rounded-lg border px-3.5 py-2.5 shadow-sm ${summary.overdue2w > 0 ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white'}`}>
               <p className={`text-xs ${summary.overdue2w > 0 ? 'text-red-500' : 'text-gray-400'}`}>접수 2주 경과 미처리</p>

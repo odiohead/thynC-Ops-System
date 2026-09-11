@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-09-12 | AS 목록 평균 처리시간 — 일반 AS / 선교체 분리 (dev2 tsc·eslint 통과, 빌드·PROD 배포 대기)
+
+- **사용자 요청**: 요약 스트립의 평균 처리시간을 '선교체' 건과 일반 AS 건으로 나눠 표시
+- **API** (`/api/as-receipts/summary`): 평균 쿼리를 `GROUP BY pre_replace`로 분리 — 응답에 `avgResolution: { normal, preReplace }` (각 `days`·완료 `count`) 추가. 기존 `avgResolutionDays`는 두 그룹의 건수 가중 평균으로 유지(호환)
+- **화면** (`/as-receipts`): 평균 처리시간 카드에 '일반 N일 · 선교체 N일' 나란히 표시(선교체는 목록 배지와 같은 앰버 톤), 카드 툴팁에 각 완료 건수. dev2 기준 일반 1,295건 7.8일 / 선교체 3건 1.0일
+- 검증: tsc 0·eslint 0 (힙 4GB). 빌드·재시작 미실행
+- 영향: app/api/as-receipts/summary/route.ts, app/as-receipts/page.tsx, README.md
+
+---
+
 ## 2026-09-11 19:30 | PROD 배포: 계정 검색 + 역할 멤버 모달 수정 + 자재 현황 접기/펴기 (81d0169)
 
 - **절차**: dev2 커밋(81d0169)·push → PROD pull → 힙 4GB 빌드 → `pm2 restart thync-prod` (코드 전용, DDL·시드 없음)
