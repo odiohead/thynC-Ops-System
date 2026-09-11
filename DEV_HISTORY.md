@@ -4,7 +4,15 @@
 
 ---
 
-## 2026-09-12 | AS 목록 평균 처리시간 — 일반 AS / 선교체 분리 (dev2 tsc·eslint 통과, 빌드·PROD 배포 대기)
+## 2026-09-12 | PROD 배포: AS 목록 평균 처리시간 일반/선교체 분리 (42f1f8c)
+
+- **절차**: dev2 힙 4GB 빌드·`pm2 restart thync-dev`(health 200·/as-receipts 307) → 커밋(42f1f8c)·push → PROD pull → 힙 4GB 빌드 → `pm2 restart thync-prod` (코드 전용, DDL·시드 없음)
+- **확인**: PROD /api/health 200·/as-receipts 307. 로그 오류는 재시작 직후 구 번들 Server Action 미스매치(배포 경계 무해)뿐
+- 영향: PROD 소스(42f1f8c), DEV_HISTORY.md
+
+---
+
+## 2026-09-12 | AS 목록 평균 처리시간 — 일반 AS / 선교체 분리 (dev2 빌드·재시작, PROD 배포 완료 42f1f8c)
 
 - **사용자 요청**: 요약 스트립의 평균 처리시간을 '선교체' 건과 일반 AS 건으로 나눠 표시
 - **API** (`/api/as-receipts/summary`): 평균 쿼리를 `GROUP BY pre_replace`로 분리 — 응답에 `avgResolution: { normal, preReplace }` (각 `days`·완료 `count`) 추가. 기존 `avgResolutionDays`는 두 그룹의 건수 가중 평균으로 유지(호환)
