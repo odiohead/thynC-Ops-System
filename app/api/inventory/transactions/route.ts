@@ -57,6 +57,7 @@ export async function POST(req: NextRequest) {
         note: body.note ?? null,
         txDate: body.txDate ?? null,
         serials: body.serials ?? [],
+        allowUnknownReturn: body.allowUnknownReturn === true,
         lotBySerial: body.lotBySerial ?? undefined,
         lotNo: body.lotNo ?? null,
         unitIds: body.unitIds ?? [],
@@ -78,7 +79,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ transaction: tx }, { status: 201 })
   } catch (e) {
     if (e instanceof InventoryError) {
-      return NextResponse.json({ error: e.message }, { status: e.status })
+      return NextResponse.json({ error: e.message, ...(e.code ? { code: e.code } : {}), ...(e.details ?? {}) }, { status: e.status })
     }
     console.error('Inventory transaction error:', e)
     return NextResponse.json({ error: '전표 처리 중 오류가 발생했습니다.' }, { status: 500 })

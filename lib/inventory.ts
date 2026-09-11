@@ -79,11 +79,18 @@ export const REASON_VALUE_DISPOSE = 'DISPOSE'
 /** 업무-오류(4xx) 표현용 — API에서 status로 매핑 */
 export class InventoryError extends Error {
   status: number
-  constructor(message: string, status = 400) {
+  code?: string // 클라이언트 분기용 오류 코드 (예: UNKNOWN_RETURN_SERIALS)
+  details?: Record<string, unknown> // 오류 부가 정보 (예: unknownSerials)
+  constructor(message: string, status = 400, extra?: { code?: string; details?: Record<string, unknown> }) {
     super(message)
     this.status = status
+    this.code = extra?.code
+    this.details = extra?.details
   }
 }
+
+/** 회수(반품) 입고에 시스템 미등록 시리얼이 섞였을 때의 오류 코드 — 클라이언트가 확인 후 allowUnknownReturn=true로 재요청 */
+export const ERR_UNKNOWN_RETURN_SERIALS = 'UNKNOWN_RETURN_SERIALS'
 
 type Tx = Prisma.TransactionClient
 
@@ -156,6 +163,7 @@ export interface CreateTxInput {
   note?: string | null
   txDate?: string | null // 입출고일 (YYYY-MM-DD) — 미입력 시 KST 오늘. 시스템 처리시각과 별개 (소급 등록)
   serials?: string[] // 시리얼 품목 IN (신규 또는 회수 대상)
+  allowUnknownReturn?: boolean // 회수(반품) 입고에서 미등록 시리얼(시스템 도입 전 출고분)을 신규 개체로 등록 허용 — 클라이언트 확인 후에만 true
   lotBySerial?: Record<string, string | null> // 시리얼 품목 신규 입고 시 시리얼별 LOT (LOT 관리 품목 필수)
   lotNo?: string | null // 전표 단위 LOT — 비시리얼 LOT 관리 품목(선택) / 시리얼 단건 입고 표기용
   unitIds?: number[] // 시리얼 품목 OUT/MOVE (선택 개체)
@@ -434,21 +442,40 @@ async function applySerialUnits(
 
     if (reasonValue === REASON_VALUE_RETURN) {
       // 회수(반품): 이 품목(=이 인벤토리)의 기존 OUT 개체를 IN_STOCK으로 복귀
+      // 미등록 시리얼(시스템 도입 전 출고분)은 클라이언트가 확인(allowUnknownReturn)한 경우에만 신규 개체로 등록 — 오타 방어
       const existing = await client.inventoryUnit.findMany({ where: { itemId, serialNo: { in: serials } } })
       const map = new Map(existing.map((u) => [u.serialNo, u]))
       const unitIds: number[] = []
+      const unknown: string[] = []
       for (const s of serials) {
         const u = map.get(s)
-        if (!u) throw new InventoryError(`회수 대상 시리얼을 찾을 수 없습니다: ${s}`)
+        if (!u) { unknown.push(s); continue }
         if (u.status === 'IN_STOCK') throw new InventoryError(`이미 재고에 있는 시리얼입니다: ${s}`)
         unitIds.push(u.id)
       }
+      if (unknown.length > 0 && !input.allowUnknownReturn) {
+        throw new InventoryError(
+          `시스템에 출고 이력이 없는 시리얼입니다: ${unknown.slice(0, 10).join(', ')}${unknown.length > 10 ? ` 외 ${unknown.length - 10}건` : ''}`,
+          409,
+          { code: ERR_UNKNOWN_RETURN_SERIALS, details: { unknownSerials: unknown } },
+        )
+      }
       // 동시성 가드: 상태 조건부 갱신 + 건수 검증 (경합 시 롤백)
-      const res = await client.inventoryUnit.updateMany({
-        where: { id: { in: unitIds }, status: { not: 'IN_STOCK' } },
-        data: { status: 'IN_STOCK', warehouseId: input.warehouseId, hospitalCode: null },
-      })
-      if (res.count !== unitIds.length) throw new InventoryError('처리 중 개체 상태가 변경되었습니다. 다시 시도하세요.', 409)
+      if (unitIds.length > 0) {
+        const res = await client.inventoryUnit.updateMany({
+          where: { id: { in: unitIds }, status: { not: 'IN_STOCK' } },
+          data: { status: 'IN_STOCK', warehouseId: input.warehouseId, hospitalCode: null },
+        })
+        if (res.count !== unitIds.length) throw new InventoryError('처리 중 개체 상태가 변경되었습니다. 다시 시도하세요.', 409)
+      }
+      // 확인된 미등록 시리얼 → 신규 개체 생성(IN_STOCK). 취소 시 이 전표에만 연결된 개체는 삭제된다(cancel 경로)
+      const lotOfUnknown = (s: string) => input.lotBySerial?.[s]?.trim() || null
+      for (const s of unknown) {
+        const u = await client.inventoryUnit.create({
+          data: { itemId, serialNo: s, lotNo: lotOfUnknown(s), status: 'IN_STOCK', warehouseId: input.warehouseId, inventoryId },
+        })
+        unitIds.push(u.id)
+      }
       await links(unitIds)
     } else {
       // 신규 입고: 개체 생성 (같은 품목 내 시리얼 중복 금지, 품목의 인벤토리 기록)
@@ -628,11 +655,26 @@ async function reverseTransaction(client: Tx, tx: CancelableTx) {
 
     if (tx.txType === 'IN' && reasonValue === REASON_VALUE_RETURN) {
       // 회수 취소 → 다시 OUT (현재 IN_STOCK@입고위치·같은 인벤토리여야)
-      const res = await client.inventoryUnit.updateMany({
+      // 단, 이 회수 전표가 신규 등록한 개체(시스템 도입 전 출고분 — 다른 전표 연결이 없음)는 OUT 유령 개체가 되지 않도록 삭제
+      const eligible = await client.inventoryUnit.count({
         where: { id: { in: unitIds }, status: 'IN_STOCK', warehouseId: tx.warehouseId, inventoryId: tx.inventoryId },
-        data: { status: 'OUT', warehouseId: null },
       })
-      if (res.count !== unitIds.length) throw new InventoryError('개체가 이미 변경되어 취소할 수 없습니다.', 409)
+      if (eligible !== unitIds.length) throw new InventoryError('개체가 이미 변경되어 취소할 수 없습니다.', 409)
+      const linkCounts = await client.inventoryTransactionUnit.groupBy({ by: ['unitId'], where: { unitId: { in: unitIds } }, _count: { _all: true } })
+      const createdHere = new Set(linkCounts.filter((l) => l._count._all === 1).map((l) => l.unitId))
+      const restoredIds = unitIds.filter((id) => !createdHere.has(id))
+      const createdIds = unitIds.filter((id) => createdHere.has(id))
+      if (restoredIds.length > 0) {
+        const res = await client.inventoryUnit.updateMany({
+          where: { id: { in: restoredIds }, status: 'IN_STOCK', warehouseId: tx.warehouseId, inventoryId: tx.inventoryId },
+          data: { status: 'OUT', warehouseId: null },
+        })
+        if (res.count !== restoredIds.length) throw new InventoryError('개체가 이미 변경되어 취소할 수 없습니다.', 409)
+      }
+      if (createdIds.length > 0) {
+        await client.inventoryTransactionUnit.deleteMany({ where: { transactionId: tx.id, unitId: { in: createdIds } } })
+        await client.inventoryUnit.deleteMany({ where: { id: { in: createdIds } } })
+      }
     } else if (tx.txType === 'IN') {
       // 신규 입고 취소 → 개체 삭제 (현재 IN_STOCK@입고위치여야)
       const eligible = await client.inventoryUnit.count({

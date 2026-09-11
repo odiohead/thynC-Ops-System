@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-09-11 11:30 | 자재관리 회수(반품) 입고 — 미등록 시리얼 확인 후 신규 등록 (dev2 검증 완료, 빌드·PROD 배포 대기)
+
+- **배경(사용자 신고)**: PROD 판매용재고 게이트웨이 회수 입고에서 `GW5A13-B019056`이 "회수 대상 시리얼을 찾을 수 없습니다"로 거부. 자재관리 도입 전 출고된 기기라 4개 인벤토리(대웅제약재고 포함)·전표·AS라인·출고요청 어디에도 개체 이력 없음. 사용자 결정 **B안**: 안전장치 유지 + 확인 한 번으로 신규 등록
+- **서비스** (`lib/inventory.ts`): `InventoryError`에 `code`·`details` 추가, `CreateTxInput.allowUnknownReturn`. 회수 분기 — 미등록 시리얼을 모아 플래그 없으면 409 `UNKNOWN_RETURN_SERIALS`(+`unknownSerials`), 있으면 기존 개체 복귀 + 미등록은 신규 개체(IN_STOCK, `lotBySerial` 있으면 LOT) 생성. **취소 경로**: 회수 전표 취소 시 전표 연결이 1건뿐인(이 전표가 생성한) 개체는 삭제, 나머지는 OUT 복귀 — 유령 OUT 개체 방지
+- **API** (`/api/inventory/transactions` POST): `allowUnknownReturn` 수용, InventoryError 응답에 `code`·details 전개
+- **모달** (`TransactionModal`): 409+code 수신 시 앰버 확인 패널(시리얼 목록·오타 안내·돌아가기/신규 등록하고 회수 확정) → `submit(true)` 재요청. 패널 열린 동안 확정 버튼 비활성. 회수 안내 문구 보강. Excel 일괄 입출고(bulk-serial)는 미변경(기존 오류 유지)
+- 검증: tsc 0·eslint 0(힙 4GB). dev2 서비스 E2E — 기존 OUT 개체 + 미등록 시리얼 혼합 회수: ① 플래그 없이 409·code·목록, 기존 개체 무변경·미등록 미생성 ② 플래그로 성공, 둘 다 IN_STOCK@위치 ③ 취소 → 신규 개체 삭제·기존 개체 OUT(위치 NULL) 복귀. 테스트 전표(STK-202609-0186)는 취소 상태로 잔존
+- 영향: lib/inventory.ts, app/api/inventory/transactions/route.ts, app/inventory/components/TransactionModal.tsx, README.md
+
+---
+
 ## 2026-09-10 16:20 | PROD 데이터 보정 — 세웅종합병원 숫자 시리얼 접두 부착(산소포화도 P00·심전계 A0) + 중복 유닛 12건 병합
 
 - **사용자 요청**: 세웅종합병원(HOSP-000080) 기기 시리얼이 숫자만으로 잘못 등록(9/5 임포트) → 산소포화도 4자리에 'P00', 심전계 5자리에 'A0' 부착. 겹치는 건은 시점 기준 병합(세웅 등록이 더 오래됐으니 세웅 등록 → 이후 최신 위치로 이동한 이력이 되게)

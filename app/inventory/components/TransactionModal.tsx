@@ -55,6 +55,7 @@ export default function TransactionModal({
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [unknownReturn, setUnknownReturn] = useState<string[] | null>(null) // 회수 입고 — 시스템 미등록 시리얼 확인 대기 목록
 
   // 품목 — 고정(상세에서 진입) 또는 모달 내 선택(카드 섹션 버튼)
   const [item, setItem] = useState<ModalItem | null>(fixedItem ?? null)
@@ -248,8 +249,9 @@ export default function TransactionModal({
       })
     : pickList
 
-  async function submit() {
+  async function submit(allowUnknownReturn = false) {
     setError(null)
+    setUnknownReturn(null)
     if (!item) { setError('품목을 선택하세요.'); return }
     if (!warehouseId) { setError('위치를 선택하세요.'); return }
     if (txType === 'MOVE' && !toWarehouseId) { setError('도착 위치를 선택하세요.'); return }
@@ -283,6 +285,7 @@ export default function TransactionModal({
       note,
       txDate: txType === 'MOVE' ? null : txDate,
       serials: serial ? serialLines : [], // IN=신규/회수, OUT·MOVE=대상 개체 지정 (서버에서 위치 검증)
+      allowUnknownReturn: isReturnIn && allowUnknownReturn, // 회수 입고 — 미등록 시리얼 신규 등록 확인 후 재요청
       lotBySerial: needLotInput ? Object.fromEntries(serialLines.map((sn) => [sn, lotNo.trim()])) : undefined,
       lotNo: lotPick ? (lotSel ?? '') : (needLotInput || lotInRequired ? lotNo.trim() || null : null),
       unitIds: [],
@@ -295,6 +298,10 @@ export default function TransactionModal({
       })
       const data = await res.json().catch(() => ({}))
       if (res.ok) { onDone(); return }
+      if (res.status === 409 && data.code === 'UNKNOWN_RETURN_SERIALS' && Array.isArray(data.unknownSerials)) {
+        setUnknownReturn(data.unknownSerials as string[])
+        return
+      }
       setError(data.error ?? '처리에 실패했습니다.')
     } catch {
       setError('네트워크 오류로 처리하지 못했습니다. 다시 시도하세요.')
@@ -461,7 +468,7 @@ export default function TransactionModal({
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">시리얼 입력 · 바코드 스캔 (줄바꿈으로 여러 개) · <b>{effectiveQty}개</b></label>
               <textarea value={serialsText} onChange={(e) => setSerialsText(e.target.value)} rows={5} placeholder={'SN001\nSN002\nSN003\n(바코드 리더기로 연속 스캔 가능)'} className={inputCls + ' font-mono'} />
-              {currentReason?.value === 'RETURN' && <p className="mt-1 text-xs text-amber-600">회수: 이 인벤토리에서 출고된 개체의 시리얼을 입력하세요.</p>}
+              {currentReason?.value === 'RETURN' && <p className="mt-1 text-xs text-amber-600">회수: 이 인벤토리에서 출고된 개체의 시리얼을 입력하세요. 시스템 도입 전 출고분(미등록 시리얼)은 확정 시 확인 후 신규 등록됩니다.</p>}
               {needLotInput && (
                 <div className="mt-2">
                   <label className="block text-xs font-medium text-gray-700 mb-1">LOT 번호 <span className="text-red-500">*</span> <span className="font-normal text-gray-400">— 이 전표의 모든 시리얼에 동일 적용</span></label>
@@ -583,11 +590,26 @@ export default function TransactionModal({
           </div>
 
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
+          {unknownReturn && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+              <p className="font-medium">다음 {unknownReturn.length}개 시리얼은 시스템에 출고 이력이 없습니다.</p>
+              <p className="mt-1 text-xs">시스템 도입 전에 출고된 기기라면 신규 개체로 등록하고 회수 처리합니다. 시리얼 오타라면 취소 후 수정하세요.</p>
+              <ul className="mt-2 max-h-28 overflow-y-auto font-mono text-xs">
+                {unknownReturn.map((sn) => <li key={sn}>{sn}</li>)}
+              </ul>
+              <div className="mt-3 flex justify-end gap-2">
+                <button type="button" onClick={() => setUnknownReturn(null)} className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100">돌아가기</button>
+                <button type="button" onClick={() => submit(true)} disabled={busy} className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50">
+                  {busy ? '처리 중...' : '신규 등록하고 회수 확정'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end gap-2 border-t border-gray-200 px-6 py-4 sticky bottom-0 bg-white">
           <button onClick={onClose} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">취소</button>
-          <button onClick={submit} disabled={busy || !item || effectiveQty <= 0} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+          <button onClick={() => submit()} disabled={busy || !item || effectiveQty <= 0 || unknownReturn !== null} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
             {busy ? '처리 중...' : `${TYPE_LABEL[txType]} 확정`}
           </button>
         </div>
