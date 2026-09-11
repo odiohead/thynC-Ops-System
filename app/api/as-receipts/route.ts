@@ -59,12 +59,30 @@ export async function GET(request: NextRequest) {
   const hospitalCode = sp.get('hospitalCode')
   if (hospitalCode) where.hospitalCode = hospitalCode
 
+  // 기기군 필터 (2026-09-11) — ?group=ECG|SPO2 (둘 다면 미지정). 원장 모델명 → 미등록 기기종류 → 시리얼 접두(A 심전계 / P 산소포화도)
+  const group = sp.get('group')
+  if (group === 'ECG' || group === 'SPO2') {
+    const [nameKey, kindKey, prefix] = group === 'ECG' ? ['심전', '심전', 'A'] : ['산소', '산소', 'P']
+    where.items = {
+      ...(where.items as object | undefined),
+      some: {
+        ...((where.items as { some?: object } | undefined)?.some ?? {}),
+        OR: [
+          { device: { deviceInfo: { deviceName: { contains: nameKey } } } },
+          { deviceId: null, deviceKind: { contains: kindKey } },
+          { deviceId: null, deviceKind: null, serialNo: { startsWith: prefix } },
+        ],
+      },
+    }
+  }
+
   // 발송(출고)일 기간 필터 (CX #9) — 라인 shippedAt 기준
   const shippedFrom = sp.get('shippedFrom')
   const shippedTo = sp.get('shippedTo')
   if (shippedFrom || shippedTo) {
     where.items = {
       some: {
+        ...((where.items as { some?: object } | undefined)?.some ?? {}),
         shippedAt: {
           ...(shippedFrom ? { gte: new Date(shippedFrom) } : {}),
           ...(shippedTo ? { lte: new Date(shippedTo) } : {}),

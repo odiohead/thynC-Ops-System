@@ -35,6 +35,12 @@ interface AsRow {
   }[]
 }
 
+/** 구분 배지 — 고장 앰버 · 분실 빨강 (2026-09-11) */
+const CATEGORY_BADGE: Record<string, string> = {
+  FAULT: 'bg-amber-100 text-amber-800',
+  LOST: 'bg-red-100 text-red-700',
+}
+
 const PRODUCT_TYPE_BADGE: Record<string, string> = {
   일반: 'bg-gray-100 text-gray-700',
   라이트: 'bg-blue-100 text-blue-800',
@@ -91,6 +97,10 @@ function AsReceiptListInner() {
     searchParams.getAll('statusId').map((v) => parseInt(v)).filter((v) => Number.isInteger(v))
   ) // 복수 선택 (2026-09-07) — 빈 배열 = 전체
   const [category, setCategory] = useState(searchParams.get('category') ?? '')
+  // 기기군 체크박스 (2026-09-11) — 기본 둘 다 체크(전체). 하나만 체크 시 해당 기기군 라인 보유 접수만. 둘 다 해제 = 전체
+  const [ecg, setEcg] = useState(searchParams.get('group') !== 'SPO2')
+  const [spo2, setSpo2] = useState(searchParams.get('group') !== 'ECG')
+  const group = ecg && !spo2 ? 'ECG' : spo2 && !ecg ? 'SPO2' : ''
   const [shippedFrom, setShippedFrom] = useState(searchParams.get('shippedFrom') ?? '') // 발송일 필터 (CX #9)
   const [shippedTo, setShippedTo] = useState(searchParams.get('shippedTo') ?? '')
   const [summary, setSummary] = useState<{
@@ -123,11 +133,12 @@ function AsReceiptListInner() {
     if (to) params.set('to', to)
     for (const id of statusIds) params.append('statusId', String(id))
     if (category) params.set('category', category)
+    if (group) params.set('group', group)
     if (shippedFrom) params.set('shippedFrom', shippedFrom)
     if (shippedTo) params.set('shippedTo', shippedTo)
     if (q) params.set('q', q)
     return params
-  }, [from, to, statusIds, category, shippedFrom, shippedTo, q])
+  }, [from, to, statusIds, category, group, shippedFrom, shippedTo, q])
 
   // 필터·페이지를 URL에 반영 — 뒤로가기 복원용 (CX #2, history만 교체해 리렌더 억제)
   useEffect(() => {
@@ -258,6 +269,11 @@ function AsReceiptListInner() {
           <option value="">구분 전체</option>
           {AS_CATEGORIES.map((c) => <option key={c} value={c}>{AS_CATEGORY_LABELS[c]}</option>)}
         </select>
+        <span className="ml-1 inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-2 py-1 text-sm text-gray-700">
+          <span className="text-xs text-gray-400">기기군</span>
+          <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={ecg} onChange={(e) => { setEcg(e.target.checked); setPage(1) }} className="rounded border-gray-300" />심전계</label>
+          <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={spo2} onChange={(e) => { setSpo2(e.target.checked); setPage(1) }} className="rounded border-gray-300" />산소포화도</label>
+        </span>
         <span className="ml-1 text-xs text-gray-400">발송일</span>
         <input type="date" value={shippedFrom} onChange={(e) => { setShippedFrom(e.target.value); setPage(1) }} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
         <span className="text-gray-400">~</span>
@@ -305,7 +321,9 @@ function AsReceiptListInner() {
                     <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-blue-600">{r.asCode}</td>
                     <td className="max-w-[12rem] truncate px-3 py-2 text-gray-900">{r.hospital?.hospitalName ?? '-'}</td>
                     <td className="whitespace-nowrap px-3 py-2">{deviceStateBadge(r)}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-gray-700">{AS_CATEGORY_LABELS[r.category as AsCategory] ?? r.category}</td>
+                    <td className="whitespace-nowrap px-3 py-2">
+                      <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${CATEGORY_BADGE[r.category] ?? 'bg-gray-100 text-gray-700'}`}>{AS_CATEGORY_LABELS[r.category as AsCategory] ?? r.category}</span>
+                    </td>
                     <td className="whitespace-nowrap px-3 py-2">
                       {r.preReplace
                         ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">선교체</span>
