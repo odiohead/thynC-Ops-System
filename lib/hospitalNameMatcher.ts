@@ -39,6 +39,15 @@ const aliases = (rawName0: string): string[] => {
 }
 
 export function buildHospitalMatcher(hospitals: { hospitalCode: string; hospitalName: string }[]): HospitalMatcher {
+  // 정식명 정규화 키 → 코드 (2026-09-11: 별칭 축약 충돌 대응 — '동아대학교병원'의 축약 '동아병원'이 실제 '동아병원'과 겹치던 사례.
+  // 입력 정규화 키가 어떤 병원의 정식명과 유일하게 일치하면 별칭보다 우선 확정)
+  const byExact = new Map<string, string[]>()
+  for (const h of hospitals) {
+    const k = norm(h.hospitalName.normalize('NFC')) || h.hospitalName.normalize('NFC').replace(/\s+/g, '').toUpperCase()
+    const arr = byExact.get(k) ?? []
+    if (!arr.includes(h.hospitalCode)) arr.push(h.hospitalCode)
+    byExact.set(k, arr)
+  }
   const byAlias = new Map<string, string[]>()
   for (const h of hospitals) for (const k of aliases(h.hospitalName)) {
     const arr = byAlias.get(k) ?? []
@@ -65,7 +74,9 @@ export function buildHospitalMatcher(hospitals: { hospitalCode: string; hospital
       if (cache.has(rawName)) return cache.get(rawName)!
       let code: string | null = null
       const keys = aliases(rawName)
-      for (const k of keys) { const arr = byAlias.get(k) ?? []; if (arr.length === 1) { code = arr[0]; break } }
+      const exact = byExact.get(keys[0]) ?? [] // 정식명 유일 일치 우선
+      if (exact.length === 1) code = exact[0]
+      if (!code) for (const k of keys) { const arr = byAlias.get(k) ?? []; if (arr.length === 1) { code = arr[0]; break } }
       if (!code) {
         const cands = partialCands(keys)
         if (cands.size === 1) code = Array.from(cands)[0]
