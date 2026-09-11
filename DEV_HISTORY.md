@@ -14,6 +14,14 @@
 
 ---
 
+## 2026-09-11 16:00 | PROD 배포: AS 리오픈 + 시트 X열 완료 역기입 이벤트 기반 개정 (6b78da3, 마이그 포함)
+
+- **절차**: dev2 커밋(6b78da3)·push → PROD 사전 전체 덤프 `thync_ops_pre_sheet_sync_20260911_024019.dump` → pull → 마이그 SQL `20260911150000_as_sheet_done_synced` 적용 + resolve + generate → 힙 4GB 빌드 → `pm2 restart thync-prod`
+- **확인**: /api/health 200·/as-receipts 307. 첫 틱 기준선 채택 — 시트 등록완료 행 54건(`sheet_done_synced` 미완료 53·완료 1)이 **기입 없이** 기록됨(completedBack 0, 시트 수동 변경 보존). 컷오버 이전·시트 외 접수 87건은 NULL 유지(시트 행 없음). 배포발 에러 0
+- 영향: PROD 소스(6b78da3)·PROD DB(컬럼 1 추가), DEV_HISTORY.md
+
+---
+
 ## 2026-09-11 15:40 | 시트 X열 완료 역기입 이벤트 기반 개정 (dev2 마이그·빌드·재시작, PROD 배포 대기)
 
 - **사용자 신고·결정**: 시스템 완료 후 시트에서 '진행중'으로 바꿔도 매 분 '완료'로 되돌아감 → "이벤트 발생 시 해당 필드만 갱신" 방식으로 X열부터 개정
