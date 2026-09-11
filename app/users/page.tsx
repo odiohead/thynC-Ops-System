@@ -87,6 +87,7 @@ export default function UsersPage() {
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'SEERS' | 'DAEWOONG' | 'ETC'>('SEERS')
+  const [search, setSearch] = useState('')
 
   // 다른 계정 수정 모달 (SUPER_ADMIN 전용)
   const [showEditOtherModal, setShowEditOtherModal] = useState(false)
@@ -335,9 +336,21 @@ export default function UsersPage() {
   const seersCount = users.filter((u) => u.organization?.code === 'SEERS').length
   const daewoongCount = users.filter((u) => u.organization?.code === 'DAEWOONG').length
   const etcCount = users.filter((u) => !u.organization).length
-  const filteredUsers = activeTab === 'ETC'
+  const tabUsers = activeTab === 'ETC'
     ? users.filter((u) => !u.organization)
     : users.filter((u) => u.organization?.code === activeTab)
+  // 계정 검색 — 이름·이메일·연락처·부서·역할명 부분 일치 (현재 탭 내)
+  const q = search.trim().toLowerCase()
+  const filteredUsers = q
+    ? tabUsers.filter((u) => {
+        const hay = [
+          u.name, u.email, u.phone, u.department?.name,
+          ROLE_LABEL[u.role], u.role,
+          ...(u.appRoles?.map((r) => r.role.name) ?? []),
+        ].filter(Boolean).join(' ').toLowerCase()
+        return hay.includes(q)
+      })
+    : tabUsers
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto">
@@ -379,10 +392,27 @@ export default function UsersPage() {
         ))}
       </div>
 
+      {/* 계정 검색 */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="이름·이메일·연락처·부서·역할 검색"
+          className="w-full sm:w-80 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+        {q && (
+          <span className="text-xs text-gray-500">
+            {filteredUsers.length}명 / {tabUsers.length}명
+            <button onClick={() => setSearch('')} className="ml-2 text-blue-600 hover:underline">지우기</button>
+          </span>
+        )}
+      </div>
+
       {/* 모바일 카드 리스트 */}
       <div className="md:hidden space-y-2.5">
         {filteredUsers.length === 0 ? (
-          <div className="rounded-xl border border-border bg-card py-12 text-center text-sm text-muted-foreground">계정이 없습니다.</div>
+          <div className="rounded-xl border border-border bg-card py-12 text-center text-sm text-muted-foreground">{q ? '검색 결과가 없습니다.' : '계정이 없습니다.'}</div>
         ) : (
           filteredUsers.map((user) => (
             <div
@@ -565,7 +595,7 @@ export default function UsersPage() {
           </tbody>
         </table>
         {filteredUsers.length === 0 && (
-          <div className="py-12 text-center text-sm text-gray-500">계정이 없습니다.</div>
+          <div className="py-12 text-center text-sm text-gray-500">{q ? '검색 결과가 없습니다.' : '계정이 없습니다.'}</div>
         )}
       </div>
 

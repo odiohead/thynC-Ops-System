@@ -63,6 +63,12 @@ export default function RolesSettingsPage() {
   const [candidateLoading, setCandidateLoading] = useState(false)
   const [modalError, setModalError] = useState<string | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 후보 검색 응답 순서 보정 — 늦게 도착한 이전 검색 결과가 최신 결과를 덮어쓰지 않게
+  const candidateSeqRef = useRef(0)
+  // 백드롭 mousedown 여부 — 입력창에서 드래그 선택 후 바깥에서 놓았을 때 click 타깃이 백드롭이 되어 모달이 닫히는 문제 방지
+  const backdropDownRef = useRef(false)
+  // 모달 안에서 멤버가 바뀌었으면 닫을 때 한 번만 router.refresh()
+  const memberDirtyRef = useRef(false)
 
   const permModules = permissionsByModule()
   const selected = roles.find((r) => r.id === selectedId) ?? null
@@ -178,14 +184,23 @@ export default function RolesSettingsPage() {
   }
 
   const fetchCandidates = useCallback(async (roleId: number, s: string) => {
+    const seq = ++candidateSeqRef.current
     setCandidateLoading(true)
     setModalError(null)
-    const res = await fetch(`/api/settings/app-roles/candidates?roleId=${roleId}&search=${encodeURIComponent(s)}&limit=10`)
-    if (res.ok) {
-      const data = await res.json()
-      setCandidates(data.data)
+    try {
+      const res = await fetch(`/api/settings/app-roles/candidates?roleId=${roleId}&search=${encodeURIComponent(s)}&limit=10`)
+      if (seq !== candidateSeqRef.current) return // 더 최신 검색이 진행 중
+      if (res.ok) {
+        const data = await res.json()
+        setCandidates(data.data)
+      } else {
+        setModalError('후보 검색에 실패했습니다.')
+      }
+    } catch {
+      if (seq === candidateSeqRef.current) setModalError('후보 검색에 실패했습니다.')
+    } finally {
+      if (seq === candidateSeqRef.current) setCandidateLoading(false)
     }
-    setCandidateLoading(false)
   }, [])
 
   function openMemberModal() {
@@ -194,7 +209,18 @@ export default function RolesSettingsPage() {
     setSearch('')
     setCandidates([])
     setModalError(null)
+    memberDirtyRef.current = false
     fetchCandidates(selected.id, '')
+  }
+
+  function closeMemberModal() {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    candidateSeqRef.current++ // 진행 중인 검색 응답 무시
+    setShowMemberModal(false)
+    if (memberDirtyRef.current) {
+      memberDirtyRef.current = false
+      router.refresh()
+    }
   }
 
   function handleSearchChange(value: string) {
@@ -213,9 +239,11 @@ export default function RolesSettingsPage() {
       body: JSON.stringify({ userId: candidate.id }),
     })
     if (res.ok) {
+      memberDirtyRef.current = true
+      // 추가된 사람만 목록에서 즉시 제거 — 검색어·입력 포커스는 그대로 유지
+      setCandidates((prev) => prev.filter((c) => c.id !== candidate.id))
       await fetchRoles()
       fetchCandidates(selected.id, search)
-      router.refresh()
     } else {
       const data = await res.json()
       setModalError(data.error ?? '추가에 실패했습니다.')
@@ -511,13 +539,18 @@ export default function RolesSettingsPage() {
       {showMemberModal && selected && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          onClick={(e) => { if (e.target === e.currentTarget) setShowMemberModal(false) }}
+          onMouseDown={(e) => { backdropDownRef.current = e.target === e.currentTarget }}
+          onClick={(e) => {
+            const down = backdropDownRef.current
+            backdropDownRef.current = false
+            if (down && e.target === e.currentTarget) closeMemberModal()
+          }}
         >
           <div className="w-full max-w-lg rounded-xl bg-white shadow-xl mx-4">
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
               <h2 className="text-base font-semibold text-gray-900">{selected.name} — 멤버 추가</h2>
               <button
-                onClick={() => setShowMemberModal(false)}
+                onClick={closeMemberModal}
                 className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
               >
                 ✕

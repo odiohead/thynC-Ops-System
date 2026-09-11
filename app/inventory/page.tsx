@@ -44,6 +44,8 @@ function categoryOptions(categories: Category[]): { id: number; label: string }[
   return out
 }
 
+const COLLAPSED_KEY = 'inventory.collapsedInventories'
+
 /**
  * 자재 현황 첫페이지 — 인벤토리별 카드 섹션 (탭 없음).
  * 각 섹션 헤더에 입고/출고/이동 버튼 1세트 (품목은 모달에서 선택), 행별 입출고 버튼 없음.
@@ -61,6 +63,26 @@ export default function InventoryPage() {
   const [filterCategory, setFilterCategory] = useState('')
 
   const [modal, setModal] = useState<{ inventory: ModalInventory; txType: TxType } | null>(null)
+
+  // 인벤토리 섹션 접기/펴기 — 접힌 인벤토리 id 집합, localStorage 영속 (기본: 전부 펼침)
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
+  const [collapsedLoaded, setCollapsedLoaded] = useState(false)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(COLLAPSED_KEY)
+      if (raw) setCollapsed(new Set((JSON.parse(raw) as number[]).filter((n) => Number.isInteger(n))))
+    } catch { /* 저장값 없음·파싱 실패 시 기본(전부 펼침) */ }
+    setCollapsedLoaded(true)
+  }, [])
+  function saveCollapsed(next: Set<number>) {
+    setCollapsed(next)
+    try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(Array.from(next))) } catch { /* ignore */ }
+  }
+  function toggleCollapsed(id: number) {
+    const next = new Set(collapsed)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    saveCollapsed(next)
+  }
 
   const fetchStocks = useCallback(async () => {
     const params = new URLSearchParams()
@@ -89,6 +111,9 @@ export default function InventoryPage() {
   }
 
   const activeInventories = inventories.filter((i) => i.isActive)
+  // 검색·분류 필터가 걸려 있으면 결과가 보이도록 접힘을 무시하고 전부 펼침
+  const filterActive = Boolean(search.trim() || filterCategory)
+  const allCollapsed = activeInventories.length > 0 && activeInventories.every((i) => collapsed.has(i.id))
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -109,6 +134,17 @@ export default function InventoryPage() {
           <option value="">전체 분류</option>
           {categoryOptions(categories).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
         </select>
+        {activeInventories.length > 1 && (
+          <button
+            type="button"
+            onClick={() => saveCollapsed(allCollapsed ? new Set() : new Set(activeInventories.map((i) => i.id)))}
+            disabled={filterActive}
+            title={filterActive ? '검색·분류 필터 중에는 모든 인벤토리가 펼쳐집니다' : undefined}
+            className="ml-auto rounded-lg border border-gray-300 px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+          >
+            {allCollapsed ? '모두 펼치기' : '모두 접기'}
+          </button>
+        )}
       </div>
 
       {/* 인벤토리별 카드 섹션 */}
@@ -120,17 +156,27 @@ export default function InventoryPage() {
             const invRows = rows.filter((r) => r.inventoryId === inv.id)
             const invWarehouseCount = warehouses.filter((w) => w.inventoryId === inv.id && w.isActive).length
             const invTotal = invRows.reduce((sum, r) => sum + r.total, 0)
+            const isOpen = filterActive || !collapsedLoaded || !collapsed.has(inv.id)
             return (
               <section key={inv.id} className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-                {/* 섹션 헤더 */}
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-gray-50 px-4 py-3">
-                  <div className="flex flex-wrap items-baseline gap-2">
+                {/* 섹션 헤더 — 클릭으로 접기/펴기 (버튼 영역 제외) */}
+                <div
+                  className={`flex flex-wrap items-center justify-between gap-3 bg-gray-50 px-4 py-3 ${isOpen ? 'border-b border-gray-200' : ''}`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleCollapsed(inv.id)}
+                    disabled={filterActive}
+                    aria-expanded={isOpen}
+                    className="flex min-w-0 flex-1 flex-wrap items-baseline gap-2 text-left disabled:cursor-default"
+                  >
+                    <span className={`shrink-0 self-center text-xs text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} aria-hidden>▶</span>
                     <h2 className="text-base font-semibold text-gray-900">{inv.name}</h2>
                     <span className="text-xs text-gray-500">
                       품목 {invRows.length}종 · 총 <b className="tabular-nums text-gray-700">{invTotal.toLocaleString()}</b> · 위치 {invWarehouseCount}곳
                     </span>
                     {inv.linkHospital && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">병원 연결</span>}
-                  </div>
+                  </button>
                   {canManage && (
                     <div className="flex gap-1.5">
                       <button onClick={() => setModal({ inventory: inv, txType: 'IN' })}
@@ -143,8 +189,8 @@ export default function InventoryPage() {
                   )}
                 </div>
 
-                {/* 품목별 재고 테이블 */}
-                <div className="overflow-x-auto">
+                {/* 품목별 재고 테이블 (접힘 시 숨김) */}
+                <div className="overflow-x-auto" hidden={!isOpen}>
                   <table className="w-full text-sm whitespace-nowrap">
                     <thead>
                       <tr className="border-b border-gray-200 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
