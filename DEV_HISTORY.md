@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-09-14 15:20 | PROD 배포: AS접수 라인 처리방법 초안 + [최종확정] (f73cc4a)
+
+- **PROD**: `git pull`(902f2b3→f73cc4a, package.json 변경 없어 npm install 생략) → 마이그 `20260914140000_as_line_draft` SQL 실행+resolve(`migrate status` up to date) → `prisma generate` → 힙 4GB 빌드(협업 번들 해시 2108cacb 불변 → 협업 서버 재시작 불필요) → `pm2 restart thync-prod` → login 200·as-receipts 307(미인증 리다이렉트) 정상
+- 영향: DEV_HISTORY.md
+
+---
+
 ## 2026-09-14 14:30 | AS접수 상세 — 라인 처리방법 초안(변경 가능) + 3. AS상세내역 [최종확정] + 발송정보란 하단 이동 (dev2 DB 마이그·E2E 완료, 빌드·PROD 배포 대기)
 
 - **배경(사용자)**: [처리 실행] 즉시 기기현황 이벤트가 기록되어 오등록('수리반환' 등)을 수정할 수 없음. 요구 — 발송정보 입력란을 '라인 선택 후 처리' 아래로, 최종확정 전에는 기기별 처리현황 변경 가능, 3단계에 [최종확정] 버튼
