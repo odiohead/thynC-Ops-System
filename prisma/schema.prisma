@@ -2248,6 +2248,8 @@ model AsReceiptItem {
   shipMethod     String?   @map("ship_method") // PARCEL 택배 / VISIT 방문 (SQL CHECK)
   shipTrackingNo String?   @map("ship_tracking_no")
   shippedAt      DateTime? @map("shipped_at") @db.Date // 발송·교체일 (V열 — 라인 단위 부분 발송)
+  draftOutcome   String?   @map("draft_outcome") // 처리방법 초안 (2026-09-14) — 최종확정 전까지 변경 가능, 확정 시 outcome으로 이관 (SQL CHECK)
+  draftNewSerialNo String? @map("draft_new_serial_no") // 교체 초안 발송기기 시리얼
 
   receipt   AsReceipt   @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   device    DeviceUnit? @relation("AsItemDevice", fields: [deviceId], references: [id], onDelete: SetNull)

@@ -32,6 +32,8 @@ interface ItemRow {
   processNote: string | null
   outcome: string | null
   newSerialNo: string | null
+  draftOutcome: string | null // 처리방법 초안 (2026-09-14) — 최종확정 전까지 변경 가능
+  draftNewSerialNo: string | null
   shipMethod: string | null
   shipTrackingNo: string | null
   shippedAt: string | null
@@ -183,7 +185,7 @@ interface GroupCardProps {
   canResolve: boolean
   canEdit: boolean
   busy: boolean
-  onResolve: (lines: { itemId: number; outcome: AsOutcome; newSerial?: string; processNote?: string }[], effectiveDate: string, shipMethod: string, shipTrackingNo: string) => Promise<boolean>
+  onDraft: (lines: { itemId: number; outcome: AsOutcome | null; newSerial?: string }[]) => Promise<boolean> // 처리방법 초안 저장/해제 (2026-09-14)
   onSaveProcessNote: (item: ItemRow, note: string) => Promise<boolean>
   onApplyShipInfo: (itemIds: number[], shipMethod: string, shipTrackingNo: string, shippedAt: string) => Promise<boolean>
   onConfirm: (body: Record<string, unknown>) => Promise<boolean> // 입고 대조 접수자 확인 (2026-09-11)
@@ -192,10 +194,12 @@ interface GroupCardProps {
 }
 const MODEL_BY_KIND: Record<string, string> = { 심전도: '심전계', 산소포화도: '산소포화도', 게이트웨이: '게이트웨이' }
 
-function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canEdit, busy, onResolve, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm }: GroupCardProps) {
+function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm }: GroupCardProps) {
   const openItems = items.filter((i) => !i.outcome && !isAsIntakeIssue(i.intakeState)) // 미입고·미식별입고는 처리 대상 아님
   const issueItems = items.filter((i) => !i.outcome && isAsIntakeIssue(i.intakeState))
-  const shippedItems = items.filter((i) => i.outcome === 'REPAIR_RETURN' || i.outcome === 'REPLACE')
+  const isShip = (o: string | null) => o === 'REPAIR_RETURN' || o === 'REPLACE'
+  const shippedItems = items.filter((i) => (i.outcome ? isShip(i.outcome) : isShip(i.draftOutcome))) // 확정 + 초안 발송 라인 (2026-09-14)
+  const draftItems = items.filter((i) => !i.outcome && i.draftOutcome)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const registryItems = items.filter((i) => !i.outcome && i.registryTag) // 원장 정합 확인 대상 (타병원·회수·미배치·미등록)
   const [regForm, setRegForm] = useState<Record<number, { modelInput: string; productType: string; wardName: string }>>({})
@@ -203,7 +207,6 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
   const [remapPick, setRemapPick] = useState<Record<number, string>>({}) // MISMATCH 라인별 치환 대상 EXTRA id
   const [nrComment, setNrComment] = useState<Record<number, string>>({}) // 미회수 코멘트
   const [outcome, setOutcome] = useState<AsOutcome>('REPAIR_RETURN')
-  const [effectiveDate, setEffectiveDate] = useState(todayKst())
   const [newSerials, setNewSerials] = useState<Record<number, string>>({})
   const [notes, setNotes] = useState<Record<number, string>>({})
   // 기기군 공통 발송정보 — 기발송 라인이 있으면 첫 라인 값으로 초기화 (한 번만 입력 — 2026-09-11)
@@ -214,25 +217,29 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
   useEffect(() => {
     setSelected(new Set())
     setNotes({})
-    const f = items.find((i) => i.outcome === 'REPAIR_RETURN' || i.outcome === 'REPLACE')
+    const f = items.find((i) => (i.outcome ? isShip(i.outcome) : isShip(i.draftOutcome)))
     if (f) { setShipMethod(f.shipMethod ?? ''); setShipTrackingNo(f.shipTrackingNo ?? ''); setShippedAt(f.shippedAt?.slice(0, 10) ?? '') }
   }, [items])
 
-  const isShipOutcome = outcome === 'REPAIR_RETURN' || outcome === 'REPLACE'
   const allOpenSelected = openItems.length > 0 && openItems.every((i) => selected.has(i.id))
   const noteOf = (i: ItemRow) => (notes[i.id] ?? i.processNote ?? '')
 
-  async function run() {
+  /** 선택 라인에 처리방법 초안 저장 — 기기현황에는 기록되지 않음, 최종확정 전까지 변경 가능 */
+  async function saveDraft() {
     const lines = Array.from(selected).map((itemId) => ({
       itemId, outcome,
-      newSerial: outcome === 'REPLACE' ? newSerials[itemId] ?? '' : undefined,
-      processNote: notes[itemId] !== undefined ? notes[itemId] : undefined,
+      newSerial: outcome === 'REPLACE' ? (newSerials[itemId] ?? items.find((i) => i.id === itemId)?.draftNewSerialNo ?? '') : undefined,
     }))
     if (!lines.length) return
     if (outcome === 'REPLACE' && lines.some((l) => !l.newSerial?.trim())) { alert('교체 처리는 선택한 모든 라인에 발송기기 시리얼이 필요합니다.'); return }
-    if (!confirm(`[${group}] ${lines.length}개 라인을 [${AS_OUTCOME_LABELS[outcome]}] 처리합니다.\n기기현황에 즉시 기록됩니다. 계속할까요?`)) return
-    const ok = await onResolve(lines, isShipOutcome ? (shippedAt || effectiveDate) : effectiveDate, isShipOutcome ? shipMethod : '', isShipOutcome ? shipTrackingNo : '')
+    const ok = await onDraft(lines)
     if (ok) { setSelected(new Set()); setNewSerials({}) }
+  }
+  async function clearDraft() {
+    const ids = Array.from(selected).filter((id) => items.find((i) => i.id === id)?.draftOutcome)
+    if (!ids.length) return
+    const ok = await onDraft(ids.map((itemId) => ({ itemId, outcome: null })))
+    if (ok) setSelected(new Set())
   }
 
   return (
@@ -240,7 +247,7 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
       <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-4 py-2">
         <h3 className="text-sm font-semibold text-gray-700">{index}. {group}</h3>
         <span className="text-xs text-gray-400">
-          {items.length}대 · 종결 {items.filter((i) => i.outcome).length}대
+          {items.length}대 · 확정 {items.filter((i) => i.outcome).length}대{draftItems.length > 0 && <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 font-medium text-blue-700">초안 {draftItems.length}</span>}
           {issueItems.length > 0 && <span className="ml-1.5 rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700">입고 확인 {issueItems.length}</span>}
           {registryItems.length > 0 && <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">원장 확인 {registryItems.length}</span>}
         </span>
@@ -297,9 +304,11 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
                 <td className="whitespace-nowrap px-3 py-2">
                   {item.outcome ? (
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${OUTCOME_BADGE_CLS[item.outcome] ?? 'bg-gray-100 text-gray-500'}`}>{AS_OUTCOME_LABELS[item.outcome as AsOutcome] ?? item.outcome}</span>
-                  ) : <span className="text-xs text-gray-300">진행 중</span>}
+                  ) : item.draftOutcome ? (
+                    <span className="rounded-full border border-dashed border-blue-400 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700" title="초안 — 최종확정 전까지 변경 가능">{AS_OUTCOME_LABELS[item.draftOutcome as AsOutcome] ?? item.draftOutcome} (초안)</span>
+                  ) : <span className="text-xs text-gray-300">미지정</span>}
                 </td>
-                <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-gray-600">{item.newSerialNo ?? '-'}</td>
+                <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-gray-600">{item.newSerialNo ?? (item.draftNewSerialNo ? <span className="text-blue-600" title="초안">{item.draftNewSerialNo}</span> : '-')}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-500">
                   {item.shippedAt ? (
                     <>
@@ -396,44 +405,22 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
         </div>
       )}
 
-      {/* 기기군 공통 발송정보 + 라인 처리 */}
+      {/* 라인 처리방법 초안 → 기기군 공통 발송정보 (2026-09-14 — 확정은 3. 카드 하단 [최종확정]) */}
       {(canResolve && openItems.length > 0) || (canEdit && shippedItems.length > 0) ? (
         <div className="space-y-2.5 border-t border-gray-200 bg-gray-50 px-4 py-3">
-          {(canResolve && openItems.length > 0 && isShipOutcome) || (canEdit && shippedItems.length > 0) ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-medium text-gray-500">발송정보 (기기군 공통)</span>
-              <select value={shipMethod} onChange={(e) => setShipMethod(e.target.value)} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm">
-                <option value="">발송방법</option>
-                {AS_METHODS.map((m) => <option key={m} value={m}>{AS_SHIP_METHOD_LABELS[m]}</option>)}
-              </select>
-              <input type="text" value={shipTrackingNo} onChange={(e) => setShipTrackingNo(e.target.value)} placeholder="발송 송장" className="w-44 rounded-md border border-gray-300 px-2.5 py-1.5 font-mono text-sm" />
-              <input type="date" value={shippedAt} onChange={(e) => setShippedAt(e.target.value)} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" title="발송일" />
-              {canEdit && shippedItems.length > 0 && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => { if (confirm(`[${group}] 발송 라인 ${shippedItems.length}대에 이 발송정보를 적용합니다.`)) void onApplyShipInfo(shippedItems.map((i) => i.id), shipMethod, shipTrackingNo, shippedAt) }}
-                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50"
-                  title="이미 발송 처리된 라인의 발송방법·송장·발송일을 기기군 단위로 갱신"
-                >
-                  발송 라인 {shippedItems.length}대에 적용
-                </button>
-              )}
-            </div>
-          ) : null}
           {canResolve && openItems.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-gray-700">{selected.size > 0 ? `선택 ${selected.size}개 라인` : '라인 선택 후 처리'}</span>
+              <span className="text-sm font-medium text-gray-700">{selected.size > 0 ? `선택 ${selected.size}개 라인` : '라인 선택 후 처리방법 지정'}</span>
               <select value={outcome} onChange={(e) => setOutcome(e.target.value as AsOutcome)} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm">
                 {AS_RESOLVE_OUTCOMES.map((o) => <option key={o} value={o}>{AS_OUTCOME_LABELS[o]}</option>)}
               </select>
-              {!isShipOutcome && (
-                <input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" title="처리일" />
-              )}
-              {isShipOutcome && <span className="text-xs text-gray-400">발송일·방법·송장은 위 발송정보 사용{!shippedAt && ' (발송일 미입력 시 오늘)'}</span>}
-              <button type="button" onClick={run} disabled={busy || selected.size === 0} className="ml-auto rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-                {busy ? '처리 중...' : '처리 실행'}
+              <button type="button" onClick={saveDraft} disabled={busy || selected.size === 0} className="rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50" title="선택 라인에 처리방법을 지정합니다 (최종확정 전까지 변경 가능)">
+                {busy ? '저장 중...' : '처리방법 저장'}
               </button>
+              {Array.from(selected).some((id) => items.find((i) => i.id === id)?.draftOutcome) && (
+                <button type="button" onClick={clearDraft} disabled={busy} className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50">지정 해제</button>
+              )}
+              <span className="ml-auto text-xs text-gray-400">기기현황 기록은 하단 [최종확정] 시점에 이루어집니다</span>
             </div>
           )}
           {canResolve && outcome === 'REPLACE' && selected.size > 0 && (
@@ -446,10 +433,30 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
                   <div key={itemId} className="flex items-center gap-2">
                     <span className="w-28 font-mono text-xs text-gray-600">{item.serialNo}</span>
                     <span className="text-gray-300">→</span>
-                    <input type="text" value={newSerials[itemId] ?? ''} onChange={(e) => setNewSerials((p) => ({ ...p, [itemId]: e.target.value }))} placeholder="교체기 시리얼" className="w-40 rounded-md border border-gray-300 px-2 py-1 font-mono text-xs" />
+                    <input type="text" value={newSerials[itemId] ?? item.draftNewSerialNo ?? ''} onChange={(e) => setNewSerials((p) => ({ ...p, [itemId]: e.target.value }))} placeholder="교체기 시리얼" className="w-40 rounded-md border border-gray-300 px-2 py-1 font-mono text-xs" />
                   </div>
                 )
               })}
+            </div>
+          )}
+          {canEdit && shippedItems.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-t border-gray-200 pt-2.5">
+              <span className="text-xs font-medium text-gray-500">발송정보 (기기군 공통)</span>
+              <select value={shipMethod} onChange={(e) => setShipMethod(e.target.value)} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm">
+                <option value="">발송방법</option>
+                {AS_METHODS.map((m) => <option key={m} value={m}>{AS_SHIP_METHOD_LABELS[m]}</option>)}
+              </select>
+              <input type="text" value={shipTrackingNo} onChange={(e) => setShipTrackingNo(e.target.value)} placeholder="발송 송장" className="w-44 rounded-md border border-gray-300 px-2.5 py-1.5 font-mono text-sm" />
+              <input type="date" value={shippedAt} onChange={(e) => setShippedAt(e.target.value)} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" title="발송일 (미입력 시 최종확정일)" />
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => { if (confirm(`[${group}] 발송 라인 ${shippedItems.length}대(확정·초안 포함)에 이 발송정보를 적용합니다.`)) void onApplyShipInfo(shippedItems.map((i) => i.id), shipMethod, shipTrackingNo, shippedAt) }}
+                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+                title="수리반환·교체(확정 또는 초안) 라인의 발송방법·송장·발송일을 기기군 단위로 기입"
+              >
+                발송 라인 {shippedItems.length}대에 적용
+              </button>
             </div>
           )}
         </div>
@@ -476,6 +483,7 @@ export default function AsReceiptDetailPage() {
   const [intake, setIntake] = useState({ pickupMethod: '', pickupTrackingNo: '', pickedUpAt: '', destType: '', destInfo: '', pickupDestDiffers: false, pickupDestInfo: '' })
   // 3. AS상세내역 헤더 (AS담당자 입력 — 시트 N·U)
   const [asHead, setAsHead] = useState({ expectedShipDate: '' })
+  const [confirmDate, setConfirmDate] = useState(todayKst()) // 최종확정 기준일 (2026-09-14)
   // 3. 입고처리 (2026-09-11) — 실물 시리얼 대조
   const [intakeOpen, setIntakeOpen] = useState(false)
   const [intakeText, setIntakeText] = useState('')
@@ -527,6 +535,7 @@ export default function AsReceiptDetailPage() {
   // 라인 처리 — USER 이상 전원 (별도 처리 풀 없음, 설계 §7)
   const canResolve = !!me && me.role !== 'VIEWER' && !isTerminal
   const openItems = req?.items.filter((i) => !i.outcome) ?? []
+  const draftCount = req?.items.filter((i) => !i.outcome && i.draftOutcome).length ?? 0
 
   async function putReceipt(body: Record<string, unknown>, failMsg: string) {
     if (!req) return false
@@ -551,21 +560,52 @@ export default function AsReceiptDetailPage() {
     return putReceipt({ items: req.items.map((i) => (i.id === item.id ? { serial: i.serialNo, processNote: noteText } : { serial: i.serialNo })) }, '처리내용 저장에 실패했습니다.')
   }
 
-  async function resolveLines(lines: { itemId: number; outcome: AsOutcome; newSerial?: string; processNote?: string }[], effectiveDate: string, shipMethod: string, shipTrackingNo: string) {
+  async function draftLines(lines: { itemId: number; outcome: AsOutcome | null; newSerial?: string }[]) {
     if (!req) return false
     setBusy(true)
-    const res = await fetch(`/api/as-receipts/${req.id}/resolve-items`, {
+    const res = await fetch(`/api/as-receipts/${req.id}/draft-lines`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lines, effectiveDate, shipMethod: shipMethod || null, shipTrackingNo: shipTrackingNo || null }),
+      body: JSON.stringify({ lines }),
     })
     const d = await res.json().catch(() => ({}))
     setBusy(false)
-    if (!res.ok) { flash(d.error ?? '라인 처리에 실패했습니다.'); return false }
-    setWarnings(d.warnings ?? [])
+    if (!res.ok) { flash(d.error ?? '처리방법 저장에 실패했습니다.'); return false }
     router.refresh()
     await load()
     return true
+  }
+
+  /** 3. AS상세내역 [최종확정] — 초안 전 라인을 한 번에 확정 (기기현황 기록, 이후 변경 불가) */
+  async function confirmLines() {
+    if (!req) return
+    const drafts = req.items.filter((i) => !i.outcome && i.draftOutcome)
+    if (!drafts.length) { flash('확정할 초안 라인이 없습니다.'); return }
+    const shipNoDate = drafts.filter((i) => (i.draftOutcome === 'REPAIR_RETURN' || i.draftOutcome === 'REPLACE') && !i.shippedAt).length
+    const nonShip = drafts.filter((i) => i.draftOutcome === 'LOST' || i.draftOutcome === 'CANCELED').length
+    const summary = AS_RESOLVE_OUTCOMES.map((o) => { const n = drafts.filter((i) => i.draftOutcome === o).length; return n ? `${AS_OUTCOME_LABELS[o]} ${n}` : null }).filter(Boolean).join(' · ')
+    const remain = req.items.filter((i) => !i.outcome && !i.draftOutcome).length
+    const lines = [
+      `${req.asCode} 초안 ${drafts.length}개 라인을 최종확정합니다.`,
+      `(${summary})`,
+      (shipNoDate || nonShip) ? `발송일 미기입 ${shipNoDate}대 · 분실/취소 ${nonShip}대의 기준일: ${confirmDate}` : null,
+      remain ? `처리방법 미지정 ${remain}대는 진행 중으로 남습니다.` : null,
+      '',
+      '기기현황에 즉시 기록되며 확정 후에는 변경할 수 없습니다. 계속할까요?',
+    ].filter((l) => l !== null)
+    if (!confirm(lines.join('\n'))) return
+    setBusy(true)
+    const res = await fetch(`/api/as-receipts/${req.id}/confirm-lines`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ effectiveDate: confirmDate || null }),
+    })
+    const d = await res.json().catch(() => ({}))
+    setBusy(false)
+    if (!res.ok) { flash(d.error ?? d.message ?? '최종확정에 실패했습니다.'); return }
+    setWarnings(d.warnings ?? [])
+    router.refresh()
+    await load()
   }
 
   async function runIntake() {
@@ -956,7 +996,7 @@ export default function AsReceiptDetailPage() {
               canResolve={canResolve}
               canEdit={canEdit}
               busy={busy}
-              onResolve={resolveLines}
+              onDraft={draftLines}
               onSaveProcessNote={saveProcessNote}
               onApplyShipInfo={applyShipInfo}
               onConfirm={confirmIntake}
@@ -965,7 +1005,27 @@ export default function AsReceiptDetailPage() {
             />
           ))}
           {canResolve && openItems.length > 0 && (
-            <p className="text-xs text-gray-400">결과 확정 시 기기현황(AS 해제·교체·회수)에 즉시 기록됩니다. 전 라인 종결 시 접수가 자동 완료됩니다.</p>
+            <div className="mt-1 flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50/60 px-4 py-3">
+              <div className="min-w-0 flex-1 text-sm text-gray-700">
+                {draftCount > 0
+                  ? <>초안 <span className="font-medium text-blue-700">{draftCount}대</span>{openItems.length - draftCount > 0 && <> · 미지정 {openItems.length - draftCount}대</>} — 처리방법·처리내용·발송정보를 확인한 뒤 최종확정하세요.</>
+                  : <>라인별 처리방법을 지정하면 여기서 한 번에 최종확정합니다. 확정 전까지는 처리방법을 자유롭게 변경할 수 있습니다.</>}
+                <p className="mt-0.5 text-xs text-gray-500">최종확정 시 기기현황(AS 해제·교체·회수)에 기록되며 이후 변경할 수 없습니다. 전 라인 확정 시 접수가 &lsquo;발송완료&rsquo;로 넘어갑니다.</p>
+              </div>
+              <label className="flex items-center gap-1.5 text-xs text-gray-500" title="분실·취소 라인 처리일 / 발송일 미기입 발송 라인의 발송일">
+                기준일
+                <input type="date" value={confirmDate} onChange={(e) => setConfirmDate(e.target.value)} className="rounded-md border border-gray-300 px-2 py-1 text-xs" />
+              </label>
+              <button
+                type="button"
+                disabled={busy || draftCount === 0}
+                onClick={confirmLines}
+                className="rounded-md bg-blue-700 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-40"
+                title={draftCount === 0 ? '초안 라인이 없습니다' : `초안 ${draftCount}대 최종확정`}
+              >
+                최종확정{draftCount > 0 && ` (${draftCount})`}
+              </button>
+            </div>
           )}
         </div>
       </Card>

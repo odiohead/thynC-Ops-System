@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-09-14 14:30 | AS접수 상세 — 라인 처리방법 초안(변경 가능) + 3. AS상세내역 [최종확정] + 발송정보란 하단 이동 (dev2 DB 마이그·E2E 완료, 빌드·PROD 배포 대기)
+
+- **배경(사용자)**: [처리 실행] 즉시 기기현황 이벤트가 기록되어 오등록('수리반환' 등)을 수정할 수 없음. 요구 — 발송정보 입력란을 '라인 선택 후 처리' 아래로, 최종확정 전에는 기기별 처리현황 변경 가능, 3단계에 [최종확정] 버튼
+- **DB** (마이그 `20260914140000_as_line_draft`, dev2 적용·resolve): `as_receipt_items` +`draft_outcome`(CHECK 4종)·`draft_new_serial_no`
+- **서비스** (`lib/asReceiptService.ts`): `draftAsLines`(초안 저장/해제 — 확정 라인 409, 입고 확인 필요 라인 409, 교체 초안 시리얼 필수) / `confirmAsDrafts`(초안 전 라인 → `resolveAsLines` 한 트랜잭션, 발송 라인은 라인 `shippedAt` 우선) / `resolveAsLines` 개정 — 라인별 `effectiveDate`(RegistryCtx 라인별 생성), 발송방법·송장은 **지정된 경우에만 덮어씀**(초안 단계 기입값 보존), 확정 시 초안 컬럼 비움 / `updateAsShipInfo` — 초안이 발송인 라인에도 적용 허용
+- **API**: 신규 `POST draft-lines`·`POST confirm-lines`(감사로그·티켓 clock·알림은 resolve-items와 동일). `resolve-items`는 API 호환으로 유지(화면에서는 미사용). GET 상세에 `draftOutcome`·`draftNewSerialNo`
+- **UI** (`app/as-receipts/[id]/page.tsx`): 기기군 카드 하단 순서 ① 라인 선택 후 처리방법 지정 [처리방법 저장]/[지정 해제] + 교체 시리얼 ② 발송정보(기기군 공통) [발송 라인 N대에 적용](확정+초안). 결과 열 `(초안)` 점선 배지·교체기 초안 표시·헤더 초안 수. 3. 카드 하단 [최종확정 (N)] + 기준일(분실/취소 처리일·발송일 미기입 발송 라인) + 확인 대화상자에 처리방법별 집계·미지정 잔여 안내. 처리일 입력(기존 라인 처리용)은 기준일로 흡수
+- **불변**: 시트 역기입(③ R·V·W, X 완료여부)은 `outcome` 기준이라 초안 영향 없음. 4. 기기등록 [완료]·리오픈·입고 대조·원장 정합 흐름 변경 없음
+- **검증**: tsc 0·eslint 0. dev2 서비스 E2E(tsx, 테스트 접수 3라인·미등록 시리얼): 초안 저장 → 교체 시리얼 없이 400 → 수리반환→교체 변경 → 초안 발송 라인 발송정보 적용(분실 라인 400) → 초안 해제·재지정 → 최종확정 2라인(미지정 1 잔여, 상태 '접수' 유지, 발송정보 보존) → 확정 라인 재초안 409·초안 없음 400 → 잔여 확정 → '발송완료' 자동 전이. 테스트 접수·티켓 삭제
+- 영향: lib/asReceiptService.ts, app/api/as-receipts/[id]/{draft-lines,confirm-lines}/route.ts(신규), app/api/as-receipts/[id]/route.ts, app/as-receipts/[id]/page.tsx, prisma/schema.prisma, prisma/migrations/20260914140000_as_line_draft, README.md
+
+---
+
 ## 2026-09-14 12:10 | PROD 배포: 심평원 상세연동 v2 + 위키 검토 후속 A11·B4 (303326b)
 
 - **dev2**: 빌드·`pm2 restart thync-dev thync-collab`, HTTP 200, `[hira-detail] 분할 실행 스케줄러 시작` 확인

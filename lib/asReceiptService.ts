@@ -11,7 +11,7 @@ import { prisma } from '@/lib/prisma'
 import { normalizeSerial, todayKst } from '@/lib/deviceRegistryShared'
 import { openDeviceAs, clearDeviceAs, replaceDevice, recoverDevice, registerDevicesIn, RegistryError, type RegistryCtx } from '@/lib/deviceRegistry'
 import { syncAsReceiptToTicket, createTicketForAsReceipt } from '@/lib/ticket-domains/asReceipt'
-import { AS_OUTCOMES, AS_CATEGORIES, AS_METHODS, AS_DEST_TYPES, asDeviceKindFromSerial, type AsOutcome } from '@/lib/asReceiptShared'
+import { AS_OUTCOMES, AS_RESOLVE_OUTCOMES, AS_CATEGORIES, AS_METHODS, AS_DEST_TYPES, asDeviceKindFromSerial, type AsOutcome } from '@/lib/asReceiptShared'
 import { nextAsCode } from '@/lib/asReceipt'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
@@ -255,6 +255,8 @@ export interface ResolveLineInput {
   newSerial?: string | null
   /** 라인별 처리내용 (2026-09-11 — 기기군 카드에서 라인마다 입력). 미지정 시 공통 processNote */
   processNote?: string | null
+  /** 라인별 기준일 (2026-09-14 최종확정 — 발송 라인은 초안 단계에 입력한 발송일). 미지정 시 공통 effectiveDate */
+  effectiveDate?: string | null
 }
 
 export interface ResolveInput {
@@ -289,6 +291,9 @@ export async function resolveAsLines(
   }
   const effectiveDate = input.effectiveDate?.trim() || todayKst()
   if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) throw new AsServiceError(400, '처리일이 올바르지 않습니다 (YYYY-MM-DD).')
+  for (const l of input.lines) {
+    if (l.effectiveDate && !/^\d{4}-\d{2}-\d{2}$/.test(l.effectiveDate)) throw new AsServiceError(400, '라인 처리일이 올바르지 않습니다 (YYYY-MM-DD).')
+  }
   const shipMethod = input.shipMethod ?? null
   if (shipMethod && shipMethod !== 'PARCEL' && shipMethod !== 'VISIT') throw new AsServiceError(400, '발송방법이 올바르지 않습니다.')
 
@@ -309,13 +314,13 @@ export async function resolveAsLines(
       const byId = new Map(receipt.items.map((i) => [i.id, i]))
       const warnings: string[] = []
 
-      const ctx: RegistryCtx = {
+      const ctxFor = (occurredOn: string): RegistryCtx => ({
         hospitalCode: receipt.hospitalCode,
         actor: { userId: actor.userId, name: actor.name },
-        occurredOn: effectiveDate,
+        occurredOn,
         source: 'MANUAL',
         ref: { type: 'AS', code: receipt.asCode },
-      }
+      })
       /** 분실 회수 사유 (DEVICE_RECOVERY_REASON value=LOST) — 필요 시에만 조회 */
       let lostReasonId: number | null | undefined
       const requireLostReason = async () => {
@@ -337,11 +342,16 @@ export async function resolveAsLines(
         }
 
         const shipped = l.outcome === 'REPAIR_RETURN' || l.outcome === 'REPLACE'
+        const lineDate = l.effectiveDate?.trim() || effectiveDate
+        const ctx = ctxFor(lineDate)
         const data: Prisma.AsReceiptItemUncheckedUpdateInput = {
           outcome: l.outcome,
-          shippedAt: shipped ? new Date(effectiveDate) : undefined,
-          shipMethod: shipped ? shipMethod : undefined,
-          shipTrackingNo: shipped ? input.shipTrackingNo?.trim() || null : undefined,
+          draftOutcome: null, // 초안 → 확정 이관 (2026-09-14)
+          draftNewSerialNo: null,
+          shippedAt: shipped ? new Date(lineDate) : undefined,
+          // 발송방법·송장은 지정된 경우에만 덮어씀 — 초안 단계에서 라인에 먼저 기입한 값 보존 (2026-09-14)
+          shipMethod: shipped && shipMethod ? shipMethod : undefined,
+          shipTrackingNo: shipped && input.shipTrackingNo?.trim() ? input.shipTrackingNo.trim() : undefined,
           processNote: (l.processNote ?? input.processNote)?.trim() ? (l.processNote ?? input.processNote)!.trim() : undefined, // CX #18 — 미입력 시 기존 값 보존 (라인별 우선)
         }
 
@@ -353,7 +363,7 @@ export async function resolveAsLines(
           try {
             const r = await clearDeviceAs(ctx, { deviceId: item.deviceId }, { client: tx })
             // 처리일이 AS 표시 시작일(접수일)보다 앞서면 원장 fold가 해제를 접지 않아 표시가 남는다 (2026-09-11 E2E에서 확인)
-            if (r.device.asStartedOn) warnings.push(`${item.serialNo}: 처리일(${effectiveDate})이 AS 표시 시작일(${ymd(r.device.asStartedOn) ?? '-'})보다 앞서 AS진행중 표시가 남았습니다 — 처리일을 표시 시작일 이후로 다시 처리하거나 기기현황에서 해제하세요`)
+            if (r.device.asStartedOn) warnings.push(`${item.serialNo}: 처리일(${lineDate})이 AS 표시 시작일(${ymd(r.device.asStartedOn) ?? '-'})보다 앞서 AS진행중 표시가 남았습니다 — 처리일을 표시 시작일 이후로 다시 처리하거나 기기현황에서 해제하세요`)
           } catch (e) {
             if (e instanceof RegistryError) warnings.push(`${item.serialNo}: AS 해제 실패 — ${e.message}`)
             else throw e
@@ -396,6 +406,77 @@ export async function resolveAsLines(
     },
     { timeout: 120000, maxWait: 10000 }
   )
+}
+
+// ── 라인 처리방법 초안 / 최종확정 (2026-09-14) ─────────────────────────
+// 담당자가 라인별 처리방법(+교체 시리얼)을 초안으로 저장해 두고 최종확정 전까지 자유롭게 변경한다.
+// 초안은 기기현황·티켓·시트 역기입에 영향을 주지 않는다(outcome이 아님). 최종확정이 초안 전체를 resolveAsLines로 한 번에 확정.
+
+export interface DraftLineInput {
+  itemId: number
+  outcome: AsOutcome | null // null = 초안 해제
+  newSerial?: string | null
+}
+
+export async function draftAsLines(receiptId: number, input: { lines: DraftLineInput[] }): Promise<{ updated: number }> {
+  if (!Array.isArray(input.lines) || input.lines.length === 0) throw new AsServiceError(400, '처리방법을 지정할 라인을 선택하세요.')
+  for (const l of input.lines) {
+    if (!Number.isInteger(l.itemId)) throw new AsServiceError(400, '라인이 올바르지 않습니다.')
+    if (l.outcome != null && !(AS_RESOLVE_OUTCOMES as readonly string[]).includes(l.outcome)) throw new AsServiceError(400, '처리방법이 올바르지 않습니다.')
+    if (l.outcome === 'REPLACE' && !normalizeSerial(l.newSerial ?? '').serialNo) throw new AsServiceError(400, '교체 초안에는 발송기기 시리얼이 필요합니다.')
+  }
+  return prisma.$transaction(async (tx) => {
+    const receipt = await tx.asReceipt.findUnique({
+      where: { id: receiptId },
+      select: { status: { select: { ticketStatus: true } }, items: { select: { id: true, serialNo: true, outcome: true, intakeState: true } } },
+    })
+    if (!receipt) throw new AsServiceError(404, 'AS접수를 찾을 수 없습니다.')
+    if (receipt.status?.ticketStatus === 'RESOLVED' || receipt.status?.ticketStatus === 'CLOSED') throw new AsServiceError(409, '완료·취소된 접수는 처리할 수 없습니다.')
+    const byId = new Map(receipt.items.map((i) => [i.id, i]))
+    let updated = 0
+    for (const l of input.lines) {
+      const item = byId.get(l.itemId)
+      if (!item) throw new AsServiceError(400, '이 접수의 라인이 아닙니다.')
+      if (item.outcome) throw new AsServiceError(409, `이미 확정된 라인은 변경할 수 없습니다: ${item.serialNo}`)
+      if (l.outcome && (item.intakeState === 'MISMATCH' || item.intakeState === 'EXTRA')) {
+        throw new AsServiceError(409, `${item.serialNo}: 입고 대조 확인이 필요한 라인입니다 — 접수자 확인 후 처리방법을 지정하세요`)
+      }
+      await tx.asReceiptItem.update({
+        where: { id: item.id },
+        data: {
+          draftOutcome: l.outcome,
+          draftNewSerialNo: l.outcome === 'REPLACE' ? normalizeSerial(l.newSerial!).serialNo : null,
+        },
+      })
+      updated++
+    }
+    return { updated }
+  })
+}
+
+/** 3. AS상세내역 [최종확정] — 초안이 있는 전 라인을 한 번에 확정 (발송 라인은 라인에 기입된 발송일, 없으면 effectiveDate) */
+export async function confirmAsDrafts(
+  receiptId: number,
+  actor: { userId: string; name: string | null },
+  input: { effectiveDate?: string | null }
+): Promise<ResolveResult & { confirmed: number }> {
+  const drafts = await prisma.asReceiptItem.findMany({
+    where: { receiptId, outcome: null, draftOutcome: { not: null } },
+    select: { id: true, draftOutcome: true, draftNewSerialNo: true, shippedAt: true },
+    orderBy: { id: 'asc' },
+  })
+  if (!drafts.length) throw new AsServiceError(400, '확정할 초안 라인이 없습니다. 라인별 처리방법을 먼저 지정하세요.')
+  const lines: ResolveLineInput[] = drafts.map((d) => {
+    const shipped = d.draftOutcome === 'REPAIR_RETURN' || d.draftOutcome === 'REPLACE'
+    return {
+      itemId: d.id,
+      outcome: d.draftOutcome as AsOutcome,
+      newSerial: d.draftNewSerialNo,
+      effectiveDate: shipped && d.shippedAt ? ymd(d.shippedAt) : null,
+    }
+  })
+  const r = await resolveAsLines(receiptId, actor, { lines, effectiveDate: input.effectiveDate ?? null })
+  return { ...r, confirmed: lines.length }
 }
 
 // ── 입고 대조 (2026-09-11 — as_work_design.md §14) ─────────────────────────
@@ -753,10 +834,12 @@ export async function updateAsShipInfo(receiptId: number, input: ShipInfoInput):
   if (shipMethod && shipMethod !== 'PARCEL' && shipMethod !== 'VISIT') throw new AsServiceError(400, '발송방법이 올바르지 않습니다.')
   const shippedAt = input.shippedAt?.trim() || null
   if (shippedAt && !/^\d{4}-\d{2}-\d{2}$/.test(shippedAt)) throw new AsServiceError(400, '발송일이 올바르지 않습니다 (YYYY-MM-DD).')
-  const items = await prisma.asReceiptItem.findMany({ where: { id: { in: ids }, receiptId }, select: { id: true, serialNo: true, outcome: true } })
+  const items = await prisma.asReceiptItem.findMany({ where: { id: { in: ids }, receiptId }, select: { id: true, serialNo: true, outcome: true, draftOutcome: true } })
   if (items.length !== ids.length) throw new AsServiceError(400, '이 접수의 라인이 아닙니다.')
-  const notShipped = items.filter((i) => i.outcome !== 'REPAIR_RETURN' && i.outcome !== 'REPLACE')
-  if (notShipped.length) throw new AsServiceError(400, `발송 라인(수리반환·교체)만 발송정보를 수정할 수 있습니다: ${notShipped.map((i) => i.serialNo).join(', ')}`)
+  // 확정된 발송 라인 + 초안이 발송(수리반환·교체)인 라인 (2026-09-14 — 최종확정 전에 발송정보를 먼저 기입)
+  const isShip = (o: string | null) => o === 'REPAIR_RETURN' || o === 'REPLACE'
+  const notShipped = items.filter((i) => !(i.outcome ? isShip(i.outcome) : isShip(i.draftOutcome)))
+  if (notShipped.length) throw new AsServiceError(400, `발송 라인(수리반환·교체 확정 또는 초안)만 발송정보를 수정할 수 있습니다: ${notShipped.map((i) => i.serialNo).join(', ')}`)
   const r = await prisma.asReceiptItem.updateMany({
     where: { id: { in: ids } },
     data: {

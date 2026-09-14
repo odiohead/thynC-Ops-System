@@ -30,7 +30,7 @@ const detailInclude = {
   items: {
     select: {
       id: true, serialNo: true, deviceId: true, newDeviceId: true, deviceKind: true, wardName: true,
-      symptom: true, processNote: true, outcome: true, newSerialNo: true,
+      symptom: true, processNote: true, outcome: true, newSerialNo: true, draftOutcome: true, draftNewSerialNo: true, // 초안 (2026-09-14)
       shipMethod: true, shipTrackingNo: true, shippedAt: true,
       intakeState: true, receivedAt: true, receiptSerialNo: true, intakeSource: true, // 입고 대조 (2026-09-11)
       device: {
