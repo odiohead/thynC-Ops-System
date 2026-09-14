@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-09-14 12:10 | PROD 배포: 심평원 상세연동 v2 + 위키 검토 후속 A11·B4 (303326b)
+
+- **dev2**: 빌드·`pm2 restart thync-dev thync-collab`, HTTP 200, `[hira-detail] 분할 실행 스케줄러 시작` 확인
+- **PROD**: `git pull`(42f1f8c→303326b) → `npm install`(xl-multi-column 제거, 1 package removed) → `prisma generate` → 마이그 `20260914100000_hira_detail_sync_v2` SQL 실행+resolve(`migrate status` up to date) → `users` 2행(admin@thync.com·thync@seers.co.kr) organization_id=1(SEERS) 부여 → 힙 4GB 빌드(협업 번들 8cc9df07→2108cacb) → `pm2 restart thync-prod thync-collab-prod` → login 200·협업 서버 1234 Ready·hira-detail 스케줄러 기동 → `resync.mjs --dry` 5건(dev2와 동일: 시스템 아키텍쳐·07.07·07.27·08.10·08.31) → 실행 5건 갱신/실패 0 → 재dry-run 0건
+- **미처리**: 대웅 휴면 계정 비활성화 여부는 사용자 판단 대기(코드·DB 변경 없음). `scripts/tmp-*.mts` 임시 스크립트 11개는 커밋 제외(dev2 미추적 유지)
+- **후속**: PROD에서 설정 > 심평원 연동 관리 → 의원 + 3항목 상세연동 첫 실행(약 13일 자동 분할)은 사용자 실행
+
+---
+
 ## 2026-09-14 11:00 | 심평원 병원상세정보연동 v2 — 의원급 확장 + 진료과목·전문의수 + 일일 한도 분할 자동 실행 (dev2 DB 마이그·E2E 완료, 빌드·PROD 배포 대기)
 
 - **배경**: 기존 상세연동은 허가병상수 1항목·병원급 7종만(의원은 일일 한도로 제외). 같은 키의 `MadmDtlInfoService2.8`에 진료과목(`getDgsbjtInfo`)·전문과목별 전문의수(`getSpcSbjtSdrInfo`) 오퍼레이션이 있음을 호출로 검증. 사용자 요구: 의원 포함·병상수 저장·항목 3종·10,000콜 한도 안에서 수일 분할 처리·요청 상세에서 진행 확인. 설계안 `projects/hira_detail_sync_v2_design.md` 작성 후 착수
