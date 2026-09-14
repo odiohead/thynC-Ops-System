@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getWikiAuthUser } from '@/lib/wiki/access'
 
 type Ctx = { params: { id: string } }
 
 export async function GET(request: NextRequest, { params }: Ctx) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const comments = await prisma.wikiComment.findMany({
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest, { params }: Ctx) {
 }
 
 export async function POST(request: NextRequest, { params }: Ctx) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 

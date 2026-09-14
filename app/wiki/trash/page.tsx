@@ -1,10 +1,19 @@
+import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
+import { verifyToken, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { hasPermission } from '@/lib/appRoles'
 import EmptyState from '../components/ui/EmptyState'
 import TrashActions from './TrashActions'
 
 export const dynamic = 'force-dynamic'
 
 export default async function TrashPage() {
+  // 영구 삭제 버튼: ADMIN 이상 또는 (USER 이상 + wiki.admin) — 서버 API와 동일 게이트 (2026-09-12 A-7)
+  const token = cookies().get('auth-token')?.value
+  const jwt = token ? await verifyToken(token) : null
+  const canRestore = !!jwt && isUserOrAbove(jwt.role)
+  const canPurge =
+    !!jwt && (isAdminOrAbove(jwt.role) || (isUserOrAbove(jwt.role) && (await hasPermission(jwt, 'wiki.admin'))))
   const pages = await prisma.wikiPage.findMany({
     where: { deletedAt: { not: null } },
     orderBy: { deletedAt: 'desc' },
@@ -23,7 +32,7 @@ export default async function TrashPage() {
     <div className="wiki-content py-10">
       <h1 className="wiki-page-title mb-2">🗑 휴지통</h1>
       <p className="mb-6 text-sm text-[var(--wiki-text-soft)]">
-        삭제된 페이지는 여기에서 복구하거나 영구 삭제할 수 있습니다. 하위 페이지는 부모와 함께 복구됩니다.
+        삭제된 페이지는 여기에서 복구할 수 있습니다. 하위 페이지는 부모와 함께 복구됩니다. 영구 삭제는 관리자만 할 수 있습니다.
       </p>
 
       {pages.length === 0 ? (
@@ -45,7 +54,7 @@ export default async function TrashPage() {
                   {p.deletedAt ? new Date(p.deletedAt).toLocaleString('ko-KR') : ''}
                 </span>
               </span>
-              <TrashActions pageId={p.id} title={p.title} />
+              <TrashActions pageId={p.id} title={p.title} canRestore={canRestore} canPurge={canPurge} />
             </li>
           ))}
         </ul>

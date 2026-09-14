@@ -18,7 +18,6 @@ import {
   defaultBlockSpecs,
   defaultInlineContentSpecs,
 } from '@blocknote/core'
-import { withMultiColumn } from '@blocknote/xl-multi-column'
 
 // ──────────────────────────────────────────────────────────
 // 커스텀 블록: 위키 하위 페이지 링크
@@ -214,24 +213,6 @@ export const calloutSpec = createReactBlockSpec(
 )()
 
 // ──────────────────────────────────────────────────────────
-// 커스텀 블록: 구분선
-// ──────────────────────────────────────────────────────────
-export const dividerSpec = createReactBlockSpec(
-  {
-    type: 'divider',
-    propSchema: {},
-    content: 'none',
-  },
-  {
-    render: () => (
-      <div contentEditable={false} className="my-2 select-none py-1">
-        <hr className="border-t border-[var(--wiki-border-strong)]" />
-      </div>
-    ),
-  },
-)()
-
-// ──────────────────────────────────────────────────────────
 // 커스텀 인라인: @ mention (병원/프로젝트)
 // ──────────────────────────────────────────────────────────
 export const mentionSpec = createReactInlineContentSpec(
@@ -264,17 +245,17 @@ export const mentionSpec = createReactInlineContentSpec(
 )
 
 // ──────────────────────────────────────────────────────────
-// 스키마: 기본 + 커스텀 (멀티컬럼 포함)
+// 스키마: 기본 + 커스텀
+// 2026-09-12: 멀티컬럼(xl-multi-column, GPL, 사용 0)과 커스텀 divider(기본 스펙을 덮어써 `---` 입력규칙·
+// <hr> 붙여넣기 파싱을 잃고 슬래시 메뉴에 'Divider'/'구분선'이 중복 노출되던 문제) 제거.
+// 구분선은 core 기본 divider 스펙(type 'divider', props {}) — 기존 저장 데이터와 형식 동일.
 // ──────────────────────────────────────────────────────────
-export const wikiSchema = withMultiColumn(
-  BlockNoteSchema.create({
-    blockSpecs: {
-      ...defaultBlockSpecs,
-      file: wikiFileSpec,
-      wikiPageLink: wikiPageLinkSpec,
-      callout: calloutSpec,
-      divider: dividerSpec,
-    },
-    inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionSpec },
-  }),
-)
+export const wikiSchema = BlockNoteSchema.create({
+  blockSpecs: {
+    ...defaultBlockSpecs,
+    file: wikiFileSpec,
+    wikiPageLink: wikiPageLinkSpec,
+    callout: calloutSpec,
+  },
+  inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionSpec },
+})

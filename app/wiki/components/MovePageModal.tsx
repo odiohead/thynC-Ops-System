@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { compareSiblings } from '@/lib/wiki/sortSiblings'
 
 type FlatPage = {
   id: string
@@ -30,7 +31,7 @@ function buildTree(pages: FlatPage[]): TreeNode[] {
     }
   })
   const sortRec = (nodes: TreeNode[]) => {
-    nodes.sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title))
+    nodes.sort(compareSiblings)
     nodes.forEach((n) => sortRec(n.children))
   }
   sortRec(roots)

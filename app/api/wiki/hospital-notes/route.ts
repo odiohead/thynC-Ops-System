@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getWikiAuthUser } from '@/lib/wiki/access'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import {
   HOSPITAL_NOTE_REF_TYPE,
@@ -25,7 +25,7 @@ import {
  */
 
 export async function GET(request: NextRequest) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const hospitalCode = new URL(request.url).searchParams.get('hospitalCode')
@@ -68,7 +68,7 @@ async function getOrCreateNotePage(hospitalCode: string, userId: string, hospita
 }
 
 export async function POST(request: NextRequest) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 

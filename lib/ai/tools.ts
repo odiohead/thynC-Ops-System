@@ -1285,8 +1285,8 @@ async function readHospitalNote(input: ToolInput) {
   const code = str(input.hospitalCode)
   if (!code) return { error: 'hospitalCode가 필요합니다.' }
   const page = await findHospitalNotePage(code)
-  if (!page) return { note: '이 병원의 병원 노트(상담이력)가 아직 없습니다.' }
-  if (await isPageAiExcluded(page.id)) return { note: '이 병원의 병원 노트(상담이력)가 아직 없습니다.' }
+  if (!page) return { note: '이 병원의 병원 노트가 아직 없습니다.' }
+  if (await isPageAiExcluded(page.id)) return { note: '이 병원의 병원 노트가 아직 없습니다.' }
   const text = page.plainText
   return {
     pageId: page.id,

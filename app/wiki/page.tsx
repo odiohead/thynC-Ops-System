@@ -123,9 +123,24 @@ export default async function WikiHomePage() {
   return (
     <div className="wiki-content py-6 sm:py-10">
       <h1 className="wiki-page-title mb-1.5">사내 위키</h1>
-      <p className="mb-8 text-sm text-[var(--wiki-text-soft)]">
+      <p className="mb-4 text-sm text-[var(--wiki-text-soft)]">
         좌측 사이드바에서 페이지를 선택하거나 새 페이지를 작성하세요.
       </p>
+      {/* 검색 입력 — /wiki/search GET 폼 그대로 (2026-09-12 B-2) */}
+      <form method="GET" action="/wiki/search" className="mb-8 flex gap-2">
+        <input
+          type="search"
+          name="q"
+          placeholder="제목·본문·첨부 파일명 검색"
+          className="flex-1 rounded-[6px] border border-[var(--wiki-border)] bg-[var(--wiki-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--wiki-accent)]"
+        />
+        <button
+          type="submit"
+          className="rounded-[6px] bg-[var(--wiki-accent)] px-4 py-2 text-sm font-medium text-white transition hover:brightness-95"
+        >
+          검색
+        </button>
+      </form>
 
       {recentCards.length === 0 ? (
         <EmptyState

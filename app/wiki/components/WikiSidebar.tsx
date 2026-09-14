@@ -19,6 +19,7 @@ import MovePageModal from './MovePageModal'
 import NotificationBell from './NotificationBell'
 import { useToast } from './ui/Toast'
 import { useOverlayDismiss } from '@/app/components/useOverlayDismiss'
+import { compareSiblings } from '@/lib/wiki/sortSiblings'
 
 export type SidebarPage = {
   id: string
@@ -49,7 +50,7 @@ function buildTree(pages: SidebarPage[]): TreeNode[] {
     }
   })
   const sortRec = (nodes: TreeNode[]) => {
-    nodes.sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title))
+    nodes.sort(compareSiblings)
     nodes.forEach((n) => sortRec(n.children))
   }
   sortRec(roots)

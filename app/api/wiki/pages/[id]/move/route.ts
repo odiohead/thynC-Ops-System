@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getWikiAuthUser } from '@/lib/wiki/access'
 import {
   getIssuePageProtection,
   getIssueNoteRootSetting,
@@ -9,6 +9,10 @@ import {
   getHospitalNotePageProtection,
   getHospitalNoteRootSetting,
 } from '@/lib/wiki/hospitalNote'
+import { sortSiblings } from '@/lib/wiki/sortSiblings'
+
+/** 정렬·이동은 본문 편집이 아니므로 updated_at을 올리지 않는다 (2026-09-12 A-11② — 홈 '최근 수정'이 이동 흔적으로 오염되던 문제) */
+const keepUpdatedAt = (updatedAt: Date) => ({ updatedAt })
 
 type Ctx = { params: { id: string } }
 
@@ -22,7 +26,7 @@ type Ctx = { params: { id: string } }
  * 순환 참조 방지: 새 부모가 본인이거나 본인의 후손이면 400
  */
 export async function PATCH(request: NextRequest, { params }: Ctx) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
@@ -36,33 +40,38 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
 
   const target = await prisma.wikiPage.findUnique({
     where: { id: params.id },
-    select: { id: true, parentId: true, sortOrder: true },
+    select: { id: true, parentId: true, sortOrder: true, title: true, updatedAt: true },
   })
   if (!target) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  // ── 모드 1: 인접 형제와 sortOrder 교환 ─────────────
+  // ── 모드 1: 인접 형제와 순서 교환 ─────────────
+  // 살아있는 형제만(휴지통 제외) 화면과 같은 규칙(sortOrder → 제목)으로 정렬한 뒤 0..n을 재부여하고 이웃과 교환한다.
+  // (이전: 값 교환만 해서 동률(0↔0)이면 무반응, 휴지통 형제와 교환, 서버·클라 동률 규칙 불일치 — 2026-09-12 A-8)
   if (direction === 'up' || direction === 'down') {
-    const siblings = await prisma.wikiPage.findMany({
-      where: { parentId: target.parentId },
-      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-      select: { id: true, sortOrder: true },
-    })
+    const siblings = sortSiblings(
+      await prisma.wikiPage.findMany({
+        where: { parentId: target.parentId, deletedAt: null, isTemplate: false },
+        select: { id: true, sortOrder: true, title: true, updatedAt: true },
+      }),
+    )
     const idx = siblings.findIndex((s) => s.id === target.id)
     const swapIdx = direction === 'up' ? idx - 1 : idx + 1
     if (idx === -1 || swapIdx < 0 || swapIdx >= siblings.length) {
       return NextResponse.json({ error: 'Cannot move further' }, { status: 400 })
     }
-    const neighbor = siblings[swapIdx]
-    await prisma.$transaction([
-      prisma.wikiPage.update({
-        where: { id: target.id },
-        data: { sortOrder: neighbor.sortOrder },
-      }),
-      prisma.wikiPage.update({
-        where: { id: neighbor.id },
-        data: { sortOrder: target.sortOrder },
-      }),
-    ])
+    const ordered = [...siblings]
+    ;[ordered[idx], ordered[swapIdx]] = [ordered[swapIdx], ordered[idx]]
+    await prisma.$transaction(
+      ordered
+        .map((s, i) => ({ s, i }))
+        .filter(({ s, i }) => s.sortOrder !== i)
+        .map(({ s, i }) =>
+          prisma.wikiPage.update({
+            where: { id: s.id },
+            data: { sortOrder: i, ...keepUpdatedAt(s.updatedAt) },
+          }),
+        ),
+    )
     return NextResponse.json({ ok: true })
   }
 
@@ -112,7 +121,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
         const noteRootId = await getHospitalNoteRootSetting()
         if (noteRootId && parentId === noteRootId) {
           return NextResponse.json(
-            { error: '병원 노트 카테고리에는 병원 상세·상담 정리에서만 페이지를 추가할 수 있습니다.' },
+            { error: '병원 노트 카테고리에는 병원 상세에서만 페이지를 추가할 수 있습니다.' },
             { status: 400 },
           )
         }
@@ -162,22 +171,28 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
 
     // position 모드: 새 부모의 자식 목록(본인 제외) position 인덱스에 삽입, 전체 sortOrder 0..n 재부여
     if (position !== undefined) {
-      const siblings = await prisma.wikiPage.findMany({
-        where: { parentId, id: { not: target.id } },
-        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-        select: { id: true },
-      })
+      const siblings = sortSiblings(
+        await prisma.wikiPage.findMany({
+          where: { parentId, id: { not: target.id }, deletedAt: null, isTemplate: false },
+          select: { id: true, sortOrder: true, title: true, updatedAt: true },
+        }),
+      )
       const clamped = Math.max(0, Math.min(position, siblings.length))
-      const orderedIds = [
-        ...siblings.slice(0, clamped).map((s) => s.id),
-        target.id,
-        ...siblings.slice(clamped).map((s) => s.id),
-      ]
+      const ordered = [...siblings.slice(0, clamped), target, ...siblings.slice(clamped)]
       await prisma.$transaction([
-        prisma.wikiPage.update({ where: { id: target.id }, data: { parentId } }),
-        ...orderedIds.map((pid, i) =>
-          prisma.wikiPage.update({ where: { id: pid }, data: { sortOrder: i } }),
-        ),
+        prisma.wikiPage.update({
+          where: { id: target.id },
+          data: { parentId, ...keepUpdatedAt(target.updatedAt) },
+        }),
+        ...ordered
+          .map((s, i) => ({ s, i }))
+          .filter(({ s, i }) => s.id === target.id || s.sortOrder !== i)
+          .map(({ s, i }) =>
+            prisma.wikiPage.update({
+              where: { id: s.id },
+              data: { sortOrder: i, ...keepUpdatedAt(s.updatedAt) },
+            }),
+          ),
       ])
       return NextResponse.json({ ok: true })
     }
@@ -186,7 +201,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     if (nextSortOrder === undefined) {
       // 새 부모의 자식 중 최대 sortOrder + 1
       const last = await prisma.wikiPage.findFirst({
-        where: { parentId },
+        where: { parentId, deletedAt: null, isTemplate: false },
         orderBy: { sortOrder: 'desc' },
         select: { sortOrder: true },
       })
@@ -195,7 +210,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
 
     await prisma.wikiPage.update({
       where: { id: target.id },
-      data: { parentId, sortOrder: nextSortOrder },
+      data: { parentId, sortOrder: nextSortOrder, ...keepUpdatedAt(target.updatedAt) },
     })
     return NextResponse.json({ ok: true })
   }
@@ -203,7 +218,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
   if (sortOrder !== undefined) {
     await prisma.wikiPage.update({
       where: { id: target.id },
-      data: { sortOrder },
+      data: { sortOrder, ...keepUpdatedAt(target.updatedAt) },
     })
     return NextResponse.json({ ok: true })
   }

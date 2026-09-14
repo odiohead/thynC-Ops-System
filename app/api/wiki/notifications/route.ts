@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getWikiAuthUser } from '@/lib/wiki/access'
 
 export async function GET(request: NextRequest) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const [items, unreadCount] = await Promise.all([
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
 
 // 읽음 처리: { ids?: string[] } 없으면 전체 읽음
 export async function PATCH(request: NextRequest) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json().catch(() => ({}))

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { getWikiAuthUser } from '@/lib/wiki/access'
 import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
@@ -13,7 +14,7 @@ type Ctx = { params: { id: string } }
  * body: { excluded: boolean }
  */
 export async function PATCH(request: NextRequest, { params }: Ctx) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   // ADMIN 이상 또는 (USER 이상 + wiki.admin 권한) — RBAC v1.5 가산, VIEWER 제외
   if (

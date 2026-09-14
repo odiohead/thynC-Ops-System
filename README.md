@@ -31,7 +31,7 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 | 차트 | Recharts |
 | 아이콘 | lucide-react |
 | 리치 텍스트 에디터 | Tiptap (`@tiptap/react` + 확장) — 기존 모듈 + 주간업무(/weekly, `@tiptap/extension-text-style` 색상·형광펜) |
-| 블록 에디터 (위키) | BlockNote (`@blocknote/core`, `@blocknote/react`, `@blocknote/ariakit`, `@blocknote/xl-multi-column`) — 위키 전용 |
+| 블록 에디터 (위키) | BlockNote (`@blocknote/core`, `@blocknote/react`, `@blocknote/ariakit`, `@blocknote/server-util`) — 위키 전용. `xl-multi-column`(GPL)은 2026-09-12 제거(사용 0) |
 | 드래그앤드롭 (위키) | `@dnd-kit/core` — 위키 사이드바 트리 이동 전용 |
 | 프로세스 관리 | PM2 |
 | 웹서버 | Nginx |
@@ -329,7 +329,10 @@ lib/
     ├── chunk.ts                      # 축1 위키 청크 인덱스 생성 (HTML h1~h4 / BlockNote heading 기준, 표 구조 보존)
     ├── chunk-scheduler.ts            # 청크 주기 갱신 스케줄러 (chunks_synced_at < updated_at 판정, 기본 10분)
     ├── htmlText.ts                   # HTML 문서 페이지 — sanitize(script 등 제거) + plain text·title 추출
-    ├── wikiSchema.tsx                # BlockNote 커스텀 스키마 (콜아웃·구분선·페이지링크·mention·멀티컬럼)
+    ├── wikiSchema.tsx                # BlockNote 커스텀 스키마 (콜아웃·페이지링크·파일카드·mention — 구분선은 core 기본, 멀티컬럼 제거 2026-09-12)
+    ├── access.ts                     # 위키 접근 게이트 (SEERS 소속 OR wiki.access, DB 실시간) — 페이지·API·협업 서버 공통 정책
+    ├── search.ts                     # 사람용 검색 단일 소스 (토큰 AND·제목 우선 정렬·첨부 파일명·절단 건수)
+    ├── sortSiblings.ts               # 형제 정렬 규칙 단일 소스 (sortOrder → 제목)
     ├── projectIssueNote.ts           # 프로젝트 이슈노트 — 루트 카테고리 보장·보호 판정 (refType 'project_issue')
     └── hospitalNote.ts               # 병원 노트 — 루트 카테고리 보장·보호 판정·페이지 조회 (refType 'hospital_note')
 
@@ -372,6 +375,10 @@ prisma/
 ### HiraHospital (건강보험심사평가원 병원 원본 데이터)
 - HIRA에서 가져온 공공 병원 데이터 원본
 - hiraId, 병원명, 종별코드, 시도/시군구, 주소, 전화번호, 의사 수 등
+- 상세연동 항목(2026-09-14 v2): `perm_sbd_cnt`/`detail_synced_at`(허가병상수), `dept_synced_at`·`sdr_synced_at`(진료과목·전문의수 연동 시각)
+- **HiraHospitalDept** (`hira_hospital_depts`): 병원별 진료과목 — `dgsbjt_cd/nm`, `pr_sdr_cnt`(진료과목별 전문의), `cdiag_dr_cnt`(선택진료의사), `dtl_sdr_cnt`(전문과목별 전문의) — 심평원 getDgsbjtInfo·getSpcSbjtSdrInfo 결과를 과목 코드로 병합, unique(hospital, code)
+- **HiraSyncJob** 분할 실행 컬럼: `params`(typeCodes·items), `total_targets/done_count/failed_count`, `daily_quota`, `calls_today/quota_date`, `day_count`, `next_run_at`; status `running|waiting|done|error|cancelled`
+- **HiraSyncJobTarget** (`hira_sync_job_targets`): 잡별 대상 병원 진행 상태(`pending/done/failed`, error) — 재개·재시작 시 pending만 이어서 처리
 - 허가 병상수 (`permSbdCnt`) + 상세정보 연동 시각 (`detailSyncedAt`) — 병원상세정보연동(`getEqpInfo2.8`)으로 갱신, 미연동 시 NULL
 
 ### Hospital (운영 병원)
@@ -993,6 +1000,7 @@ prisma/
 - 병원별 대웅 담당자(DAEWOONG 소속 User) 복수 선택 배정·해제 (DaewoongSelectModal 체크박스 방식)
 - 병원 상세 **도입 현황 카드**(`HospitalDeviceSummary`, 2026-09-01): 디바이스 원장 요약(모델 | 배치 중 | 계약 | 차이 | 최근 이벤트 + 최근 30일 회수·마지막 임포트)을 서버 컴포넌트가 `getHospitalDeviceSummary` 직접 호출로 표시, [디바이스 원장 열기 →]. 도입 병상 수는 표시만(수정은 병원 수정 폼). 원장 없음이면 헤더·계약 열 유지 + [디바이스 원장에서 임포트 →]
 - 시도/시군구/상태 필터, 페이지네이션 — 병원종·상태 필터는 표 상단 **체크박스 상시 노출** (2026-07-21, 구 멀티선택 드롭다운 대체. 선택 시 즉시 적용 + 초기화 버튼)
+- **병원상세정보연동 v2** (2026-09-14, `projects/hira_detail_sync_v2_design.md`): 대상 종별에 **의원(31)** 추가, 항목을 **허가병상수·진료과목·전문의수** 3종 체크박스로 확장. 병원당 항목 수만큼 호출하므로 일일 9,000콜 예산 안에서 `floor(9000/항목수)`개 병원씩 처리하고 남으면 `waiting` → 익일 00:10 KST 스케줄러(5분 tick, `lib/hira-detail-sync.ts`)가 자동 재개(수일~수주 1요청). 서버 재시작 시 상세 잡은 error가 아닌 waiting으로 돌려 즉시 재개. 요청 상세(로그 패널)에 진행률 바·대상/완료/실패·일차·오늘 호출·다음 실행·예상 잔여일·실패 병원 표본·**요청 취소** 버튼. HIRA 병원 상세에 '진료과목·전문의' 표(진료과목 전문의/전문과목 전문의/선택진료의사)·허가병상수, 병원 상세 기본 정보에 '진료과목 (심평원)' 한 줄 요약
 - **전체 병상수 표기** (2026-08-10): 목록 '전체병상' 컬럼(모바일 카드 포함)·상세 기본 정보 '전체 병상수 (심평원)' — `hira_hospitals.perm_sbd_cnt` 조인 표시, 병원상세정보연동 미실행 병원은 '-'
 - **Excel 일괄 가져오기** (ADMIN 이상): `병원명`, `도입형태`, `도입병상 수` 컬럼 기준 일괄 교체
   - 미리보기(preview) 모드 지원
@@ -1302,7 +1310,20 @@ prisma/
 - **디자인 시스템(Phase 9)**: 위키 전용 디자인 토큰(`app/wiki/wiki-theme.css`, `.wiki-root` 스코프), full-bleed 레이아웃, 공통 컴포넌트(Toast/WikiModal/Skeleton/EmptyState/OverflowMenu), `alert()` 미사용(토스트로 통일)
 - **자동 저장 + 충돌 감지(Phase 10)**: 편집 모드 토글 없이 진입 즉시 편집, 변경 시 debounce 1.5초 자동 저장, 헤더 저장 인디케이터. `baseUpdatedAt` 비교로 다른 곳 수정 시 409 충돌 안내(실시간 협업 대신 lost-update 방지). 버전 스냅샷은 2분 throttle
 - **페이지 아이콘·커버(Phase 10)**: 이모지 아이콘(경량 EmojiPicker) + 커버 이미지. 사이드바·홈·검색·휴지통에 아이콘 노출
-- **블록 확장(Phase 11)**: 콜아웃(💡 배경색 박스)·구분선 커스텀 블록(슬래시 메뉴), **멀티컬럼**(`@blocknote/xl-multi-column` — 블록을 좌우 칼럼으로 나란히 배치, 드래그로 칼럼 생성)
+- **블록 확장(Phase 11)**: 콜아웃(💡 배경색 박스) 커스텀 블록(슬래시 메뉴, 기본 항목과 같은 삽입 규칙). 구분선은 core 기본 divider(`---` 입력규칙·`<hr>` 붙여넣기 지원). 멀티컬럼(`xl-multi-column`, GPL)은 2026-09-12 제거(88일간 사용 0). **표 옵션**(헤더 행/열·셀 병합·셀 배경/글자색)은 2026-09-12부터 에디터 UI에 노출
+- **2026-09-12 검토 후속 (projects/wiki_next_gen_review.md)**:
+  - **협업 스냅샷 정합(A-1)**: 협업 서버 `store()`가 표 블록의 `columnWidths: [undefined…]`로 Prisma에 거부돼 표 포함 페이지의 검색·AI 스냅샷이 6/30 이후 갱신되지 않던 결함 수정(JSON 왕복). 1회성 재동기화 `node collab-server/dist/resync.mjs [--dry] [--page id]`
+  - **협업 편집 버전·최근 수정자(A-2·A-3)**: 협업 저장 경로(`collab-server/materialize.ts`)에서도 2분 throttle 버전 스냅샷(직전 버전과 내용 상이 시, 저장자=마지막 입력자)·`last_editor_id` 갱신·버전 생성 시점 감사로그 1건. 내용이 바뀌지 않은 저장은 아무것도 갱신하지 않음
+  - **버전 복원(A-4)**: 협업 페이지는 서버가 스냅샷·제목만 처리하고 `mode:'client'`로 블록을 돌려주면 클라이언트가 라이브 협업 세션에서 `editor.replaceBlocks`로 적용(Yjs 전파). 협업 미연결 시 복원 버튼 비활성. REST `PUT contentJson`은 Y.Doc 보유 페이지에서 409
+  - **끊김 폴백(A-5)**: 읽기전용 스냅샷 폴백은 최초 연결 실패·인증 종단(4401/4403)에만. 세션 중 끊김은 provider를 유지해 재접속 시 Yjs가 입력을 병합, 미동기 변경이 있으면 탭 닫기 경고
+  - **소속 게이트(A-6)**: `lib/wiki/access.ts` — 페이지(layout)·`/api/wiki/*`(`getWikiAuthUser`)·협업 `onConnect` 모두 SEERS 소속 OR `wiki.access` 권한(DB 실시간). 비대상 계정은 안내 화면, 메인 화면의 노트 임베드 패널은 숨김
+  - **영구 삭제 게이트(A-7)**: `?permanent=1`은 ADMIN 이상 OR (USER+`wiki.admin`), 휴지통 항목만. 첨부 DELETE API 제거(호출처 없음)
+  - **정렬(A-8)**: 새 페이지는 형제 맨 끝(`max+1`), ↑↓는 살아있는 형제를 화면 규칙(`lib/wiki/sortSiblings.ts`)으로 0..n 재부여 후 교환, 이동·정렬은 `updated_at`을 올리지 않음. 일반 PUT의 `parentId`에도 순환 검사
+  - **에디터(A-9)**: 콜아웃 슬래시 항목이 기본 항목과 같은 삽입 규칙(빈 "/" 블록 교체·커서 이동), 커스텀 divider 제거로 'Divider/구분선' 중복 해소
+  - **목차(A-10)**: 스크롤 컨테이너 실폭(ResizeObserver) ≥ 1,400px일 때만 표시(노트북 해상도 본문 겹침 방지)
+  - **첨부 파일명(A-11①)**: presigned URL에 `Content-Disposition; filename*=UTF-8''` — 한글 파일명 그대로 저장
+  - **검색(B-2)**: `lib/wiki/search.ts` 단일 소스 — 공백 토큰 AND, 제목 완전 일치 → 제목 토큰 수 → 최신 순, 첨부 파일명 포함, 50건 초과 시 "n건 중 상위 50건" 안내, 홈 검색 입력
+  - **카테고리 하위 목록(B-3)**: 상세 하단 '하위 페이지 (N)' 읽기 전용 목록(사이드바와 같은 정렬)
 - **목차 TOC(Phase 11)**: heading 추출 → 넓은 화면 우측 floating 목차(클릭 스크롤)
 - **홈 대시보드(Phase 11)**: 즐겨찾기 / 최근 본 / 최근 수정 3섹션
 - **백링크(Phase 12)**: 본문 저장 시 페이지 링크를 `WikiPageLink`로 인덱싱, 상세 하단 "이 페이지를 링크한 페이지" 패널
@@ -1331,7 +1352,7 @@ prisma/
   - **페이지 블록** — 슬래시 `/`에 "하위 페이지 추가" → 자식 페이지 즉시 생성 + 본문에 📄 링크 블록 삽입
   - **기존 페이지 링크** — 슬래시 `/`에 "기존 페이지 링크" → 검색 모달(`/api/wiki/search`)에서 이미 있는 페이지를 골라 신규 생성 없이 📄 링크 블록 삽입
   - **인라인 mention** — `@` 입력 시 병원·프로젝트 통합 검색 자동완성, 선택 시 `target="_blank"` 링크 삽입
-- 권한: 로그인 필수 / VIEWER 읽기 / USER 이상 쓰기·삭제
+- 권한: 로그인 + **SEERS 소속 OR `wiki.access`**(서버 강제, 2026-09-12) / VIEWER 읽기 / USER 이상 쓰기·휴지통 이동 / 영구 삭제·보호 페이지 삭제는 ADMIN 이상 OR `wiki.admin`
 - 인라인 mention 검색은 검색 plain_text 인덱스에도 포함됨 (label 추출)
 
 ### AI 어시스턴트 v2 (에이전트형 — `function_ai_assistant.html`, Phase 1~4·6 완료 2026-07-18)
@@ -1669,8 +1690,9 @@ npm run dev
 | GET | `/api/hira-hospitals/[id]` | HIRA 병원 상세 |
 | GET | `/api/hira-hospitals/sync` | 연동 잡 히스토리 목록 (최근 50건) |
 | POST | `/api/hira-hospitals/sync` | 연동 잡 시작 (백그라운드 비동기, SUPER_ADMIN) |
-| GET | `/api/hira-hospitals/sync/[id]` | 연동 잡 상세 + 로그 목록 (SUPER_ADMIN) |
-| POST | `/api/hira-hospitals/detail-sync` | 병원상세정보연동 시작 — 종별 선택(병원급 7종), 허가병상수 갱신 (백그라운드 비동기, SUPER_ADMIN) |
+| GET | `/api/hira-hospitals/sync/[id]` | 연동 잡 상세 + 로그 목록 + 상세연동 진행 요약(`progress`: 대상/완료/실패/오늘 호출/다음 실행/실패 표본) (SUPER_ADMIN) |
+| POST | `/api/hira-hospitals/detail-sync` | 병원상세정보연동 시작 (v2 2026-09-14) — body `{ typeCodes, items }`, 종별 8종(의원 포함)·항목 허가병상수/진료과목/전문의수, 일일 9,000콜 예산 안에서 수일 분할 자동 실행 (SUPER_ADMIN) |
+| POST | `/api/hira-hospitals/detail-sync/[id]/cancel` | 진행/대기 중인 상세연동 요청 취소 (SUPER_ADMIN) |
 
 ### 프로젝트
 | Method | Endpoint | 설명 |
@@ -1989,14 +2011,13 @@ npm run dev
 | POST | `/api/wiki/pages` | 페이지 생성 — USER+, 감사로그 CREATE, `plainText` 자동. **HTML 문서 페이지**: `{pageType:'html', contentHtml}` (sanitize 후 저장, 최대 2MB) |
 | GET  | `/api/wiki/pages/[id]` | 페이지 상세 |
 | PUT  | `/api/wiki/pages/[id]` | 페이지 수정 — USER+, 감사로그 UPDATE. 본문 변경 시 **버전 스냅샷(2분 throttle) + `plainText`/백링크 동기화**. `icon`/`coverUrl`/`coverOffsetY`/`isTemplate` 수정, `baseUpdatedAt`로 **충돌 감지(409)**. HTML 페이지는 `contentHtml`로 문서 교체(블록 본문과 상호 배타 400) |
-| DELETE | `/api/wiki/pages/[id]` | 휴지통 이동(soft delete, 자식 동반). `?permanent=1` → 영구 삭제(+첨부 S3 정리) — USER+, 감사로그 DELETE |
+| DELETE | `/api/wiki/pages/[id]` | 휴지통 이동(soft delete, 자식 동반) — USER+. `?permanent=1` → 영구 삭제(+첨부 S3 정리) — ADMIN 이상 OR (USER+`wiki.admin`), 휴지통 항목만(2026-09-12). 감사로그 DELETE |
 | POST | `/api/wiki/pages/[id]/restore` | 휴지통에서 복구 (자식 동반, 부모 삭제 시 루트 승격) — USER+ |
 | PATCH | `/api/wiki/pages/[id]/move` | 페이지 이동/정렬 — USER+, 순환 참조 차단. `{direction}` 형제 교환 / `{parentId}` 부모 변경(최하단) / `{parentId, position}` 특정 위치 삽입(형제 sortOrder 재부여) / `{sortOrder}` 직접 지정 |
 | POST | `/api/wiki/pages/[id]/duplicate` | 페이지 복제 (`{includeChildren?}`) — USER+, 본문·태그·참조 복사, 감사로그 CREATE |
 | GET  | `/api/wiki/tree` | 전체 위키 페이지 평면 리스트 |
 | POST | `/api/wiki/upload?pageId=` | 첨부 업로드 (multipart, 최대 50MB) — USER+ |
 | GET  | `/api/wiki/files/[id]` | 첨부 다운로드 (24h presigned URL로 307) |
-| DELETE | `/api/wiki/files/[id]` | 첨부 삭제 — USER+ |
 | GET  | `/api/wiki/pages/[id]/references` | 페이지의 병원/프로젝트 참조 목록 (라벨 enrich) |
 | POST | `/api/wiki/pages/[id]/references` | 참조 추가 — USER+, 도메인 객체 존재 검증, 중복 시 409 |
 | DELETE | `/api/wiki/pages/[id]/references/[refId]` | 참조 해제 — USER+ |
@@ -2011,12 +2032,12 @@ npm run dev
 | GET  | `/api/wiki/pages/[id]/favorite` | 현재 페이지 즐겨찾기 여부 |
 | POST | `/api/wiki/pages/[id]/favorite` | 즐겨찾기 추가 |
 | DELETE | `/api/wiki/pages/[id]/favorite` | 즐겨찾기 해제 |
-| GET  | `/api/wiki/search` | 검색 (`?q=&tagId=`) — 제목 + plain_text ILIKE(trgm 가속), snippet 반환, 삭제/템플릿 제외. (페이지 `/wiki/search`는 작성자·기간 필터 추가) |
+| GET  | `/api/wiki/search` | 검색 (`?q=&tagId=`) — `lib/wiki/search.ts` 공용: 공백 토큰 AND(제목·plain_text·첨부 파일명), 제목 우선 정렬, `total`·`truncated` 반환, 삭제/템플릿 제외. (페이지 `/wiki/search`는 작성자·기간 필터 추가) |
 | GET  | `/api/wiki/notifications` | 내 알림 목록 + 미읽음 수 |
 | PATCH | `/api/wiki/notifications` | 알림 읽음 처리 (`{ids?}` 없으면 전체) |
 | GET  | `/api/wiki/pages/[id]/versions` | 페이지 버전 목록 |
 | GET  | `/api/wiki/pages/[id]/versions/[versionId]` | 버전 상세 |
-| POST | `/api/wiki/pages/[id]/versions/[versionId]` | 해당 버전으로 복원 — USER+, 감사로그 UPDATE |
+| POST | `/api/wiki/pages/[id]/versions/[versionId]` | 해당 버전으로 복원 — USER+, 감사로그 UPDATE. Y.Doc 보유 페이지는 `{mode:'client', blocks}` 반환(클라이언트가 라이브 세션에 적용), 없으면 서버 적용 |
 | GET  | `/api/wiki/pages/[id]/comments` | 댓글 목록 |
 | POST | `/api/wiki/pages/[id]/comments` | 댓글 등록 (`{body}`) — USER+ |
 | PUT  | `/api/wiki/comments/[id]` | 댓글 수정 (본인 + ADMIN+) |

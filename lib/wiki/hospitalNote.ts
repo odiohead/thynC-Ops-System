@@ -7,7 +7,7 @@ import { prisma } from '../prisma'
  * - 루트 카테고리 페이지 id는 AppSetting(`wiki_hospital_note_root_id`)에 보관
  * - 병원 ↔ 페이지 1:1 연결은 WikiPageReference(refType='hospital_note', refCode=hospitalCode)
  * - 루트: 이동·이름변경·삭제 차단 / 노트 페이지: 카테고리 밖 이동 차단, 삭제는 ADMIN 이상
- * - AI 상담 정리("병원 노트에 추가")가 이 페이지에 상담이력을 append — 어시스턴트가 read_hospital_note로 재활용
+ * - 담당자가 직접 쓰는 특이사항 메모 — 어시스턴트가 read_hospital_note로 참고 (상담이력 자동 append는 2026-07-26 폐지, consultations 테이블로 분리)
  */
 export const HOSPITAL_NOTE_REF_TYPE = 'hospital_note'
 export const HOSPITAL_NOTE_ROOT_SETTING_KEY = 'wiki_hospital_note_root_id'

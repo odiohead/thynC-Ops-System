@@ -4,6 +4,52 @@
 
 ---
 
+## 2026-09-14 11:00 | 심평원 병원상세정보연동 v2 — 의원급 확장 + 진료과목·전문의수 + 일일 한도 분할 자동 실행 (dev2 DB 마이그·E2E 완료, 빌드·PROD 배포 대기)
+
+- **배경**: 기존 상세연동은 허가병상수 1항목·병원급 7종만(의원은 일일 한도로 제외). 같은 키의 `MadmDtlInfoService2.8`에 진료과목(`getDgsbjtInfo`)·전문과목별 전문의수(`getSpcSbjtSdrInfo`) 오퍼레이션이 있음을 호출로 검증. 사용자 요구: 의원 포함·병상수 저장·항목 3종·10,000콜 한도 안에서 수일 분할 처리·요청 상세에서 진행 확인. 설계안 `projects/hira_detail_sync_v2_design.md` 작성 후 착수
+- **DB** (마이그 `20260914100000_hira_detail_sync_v2`, dev2 적용·resolve): `hira_hospitals` +`dept_synced_at`·`sdr_synced_at` / 신규 `hira_hospital_depts`(과목 코드 기준 두 오퍼레이션 병합, `pr_sdr_cnt`·`cdiag_dr_cnt`·`dtl_sdr_cnt`) / `hira_sync_jobs` +`params`·`total_targets`·`done_count`·`failed_count`·`daily_quota`·`calls_today`·`quota_date`·`day_count`·`next_run_at` / 신규 `hira_sync_job_targets`(잡별 대상 병원 pending/done/failed)
+- **실행기** `lib/hira-detail-sync.ts` 신규(단일 소스 — route의 runDetailSync 제거): 일일 예산 9,000콜, 병원당 항목 수만큼 호출, `runDay`가 pending 대상을 처리하다 예산 도달·API 치명 코드(22 등)면 `waiting`+익일 00:10 KST, 스케줄러(5분 tick, instrumentation 기동)가 재개. 취소는 20건마다 상태 재조회로 감지. 응답 과목에 없는 행은 해당 항목 컬럼만 NULL, 둘 다 NULL이면 삭제. `DETAIL_CL_CODES`(의원 추가)·`DETAIL_ITEMS`를 page/route가 공유
+- **instrumentation**: 재시작 고아 잡 중 v2 상세 잡은 error 대신 `waiting`(next_run_at=now)으로 전환해 즉시 재개, 목록 연동은 종전대로 error
+- **API**: `POST detail-sync` body `{typeCodes, items}`(대기 중 상세 잡 있으면 409), 신규 `POST detail-sync/[id]/cancel`, `GET sync/[id]`에 `progress`(대상/완료/실패/오늘 호출/일차/다음 실행/잔여일/실패 표본 20)
+- **UI**: 설정 카드에 항목 체크박스(기본 전체)·총 호출 수·하루 처리량·예상 일수, 상태 배지 `대기(다음날)`·`취소`, 히스토리 연동건수 `완료/대상`, 로그 패널 상단 진행 요약 블록 + 요청 취소 버튼, `day_start/day_done` 로그 스타일. HIRA 병원 상세 '진료과목·전문의' 표 + 허가병상수, 병원 상세 '진료과목 (심평원)' 요약
+- **검증**: tsc 0·eslint 0. dev2 실행기 E2E(tsx, 의원 내과 5곳 × 3항목): 예산 8,995에서 시작 → 1곳 처리 후 `waiting`·next_run_at 익일 00:10 KST·과목 행 4(내과 pr 1/dtl 1) → 날짜 변경 재개 → 2일차 4곳 처리·done → 같은 병원 재연동 시 행 수 불변(7→7) → 대기 잡 취소 ok/재취소 not_active. 테스트 잡 삭제(cascade 확인), 연동된 실데이터는 유지
+- **PROD 반영 시**: 마이그 SQL 1건(규칙 5 허락) + 첫 실행은 의원 38,293곳 × 3항목 ≈ 13일
+- 영향: lib/hira-detail-sync.ts(신규), app/api/hira-hospitals/detail-sync/route.ts, app/api/hira-hospitals/detail-sync/[id]/cancel/route.ts(신규), app/api/hira-hospitals/sync/[id]/route.ts, instrumentation.ts, app/settings/hira-sync/{page.tsx,_components/HiraSyncPageClient.tsx}, app/hira-hospitals/[id]/page.tsx, app/hospitals/[code]/page.tsx, prisma/schema.prisma, prisma/migrations/20260914100000_hira_detail_sync_v2, projects/{hira_detail_sync_v2_design.md(신규),README.md}, README.md
+
+---
+
+## 2026-09-12 16:00 | 위키 검토 후속 개선 A 11건 + B 4건 구현 (dev2 빌드·재시작·재동기화·E2E 완료, PROD 배포 대기)
+
+- **근거**: `projects/wiki_next_gen_review.md`. 사용자 결정 — A-6 무소속 계정 2개 SEERS 소속 부여 후 게이트 적용 / A-7 영구삭제 게이트 승인(RBAC 가산 원칙 예외) / B-1·B-2·B-3·B-5 포함 / 평문 자격증명은 별도 논의 / dev2 빌드·재시작·재동기화까지 진행
+- **협업 서버** (`collab-server/index.mts`, 신규 `materialize.ts`·`resync.mts`, `build.mjs` 2엔트리): ① A-1 `store()` 표 페이지 스냅샷 실패 수정 — Y.Doc→블록 변환 결과 JSON 왕복(`columnWidths: [undefined…]` 정규화) ② A-2 협업 편집 버전 스냅샷 — REST와 같은 2분 throttle + 직전 버전과 내용 상이 시, 저장자=디바운스 창 마지막 입력자(`context.user`) ③ A-3 `last_editor_id` 갱신 + 버전 생성 시점 감사로그 1건(`after.via='collab'`). **내용이 바뀌지 않은 저장은 아무것도 갱신 안 함** — 비교는 키 순서 무관 정규 직렬화(`canonicalJson`; jsonb가 키를 재정렬해 단순 문자열 비교로는 83페이지 전부 '변경'으로 오판되던 것을 dry-run에서 발견) ④ A-6 `onConnect` DB 실시간 소속(SEERS OR `wiki.access`)·활성·DB 등급 판정, DB 조회 실패는 평문 Error로(Prisma 오류 객체를 그대로 던지면 Hocuspocus가 `code:'P1001'`로 소켓을 닫으려다 TypeError) ⑤ 실패 로그 1줄 축약(이전엔 블록 덤프로 29MB) ⑥ 재동기화 `node collab-server/dist/resync.mjs [--dry] [--page id]`(mode resync — 버전·최근 수정자 불변)
+- **에디터** (`WikiEditor.tsx`, `lib/wiki/wikiSchema.tsx`): A-5 폴백은 최초 연결 실패·인증 종단(4401/4403·authenticationFailed)에만, 세션 중 끊김은 provider 유지 + `hasUnsyncedChanges` beforeunload 경고 / A-9 콜아웃 `insertOrUpdateBlockForSlashMenu`, 커스텀 divider 스펙·항목 제거(core 기본 divider) / B-1 `tables: {headers, splitCells, cellBackgroundColor, cellTextColor}` / B-5 `@blocknote/xl-multi-column` 제거(`npm uninstall`, withMultiColumn·dropCursor·사전·슬래시 병합 제거) / `onEditorReady`·`onCollabStatusChange` prop 추가
+- **버전 복원 A-4** (`versions/[versionId]/route.ts`, `VersionHistoryModal.tsx`, `WikiPageView.tsx`): Y.Doc 보유 페이지는 서버가 현재본 스냅샷+제목만 처리하고 `{mode:'client', blocks}` 반환 → 클라이언트가 라이브 세션 `editor.replaceBlocks`로 적용. 협업 미연결 시 복원 버튼 비활성·안내. 같은 클래스 잔존 경로 차단: `PUT contentJson`은 Y.Doc 보유 페이지에서 409, 제목 변경 시 링크 라벨 동기화는 Y.Doc 보유 소스 제외
+- **게이트 A-6** (`lib/wiki/access.ts` 신규, `lib/permissions.ts` `wiki.access` 키): `app/wiki/layout.tsx` 안내 화면, `/api/wiki/*` 25개 라우트 `getAuthUser`→`getWikiAuthUser`(차단 시 401 — 기존 2줄 패턴 유지), 노트 임베드 패널(병원·프로젝트)은 401/403이면 숨김. dev2 DB: `admin@thync.com`·`thync@seers.co.kr` organization_id=1(SEERS) 부여
+- **영구삭제 A-7** (`pages/[id]/route.ts` DELETE, `trash/*`, `files/[id]/route.ts`): `?permanent=1`은 ADMIN 이상 OR (USER+`wiki.admin`) + 휴지통 항목만(400), 휴지통 화면 버튼은 권한별 노출, 첨부 DELETE 핸들러 제거(405). `wiki.admin` 카탈로그 설명 갱신
+- **정렬 A-8·A-11②** (`pages/route.ts`, `move/route.ts`, `lib/wiki/sortSiblings.ts` 신규, `WikiSidebar`·`MovePageModal`·`page.tsx` 공용): 생성 시 `max+1`(살아있는 형제 기준), ↑↓는 살아있는 형제를 공통 규칙(sortOrder→제목)으로 0..n 재부여 후 교환, position 모드도 동일, 모든 이동·정렬 update에 `updatedAt` 기존값 명시(홈 '최근 수정' 오염 차단). 일반 PUT `parentId`에 후손 순환 검사 추가
+- **기타 A**: A-10 목차는 `main.wiki-scroll` 실폭(ResizeObserver) ≥ 1,400px일 때만 렌더 / A-11① `lib/s3.ts getSignedUrl(key, ttl, {downloadName, inline})` — `Content-Disposition; filename*=UTF-8''`, files 라우트가 원 파일명 전달 / A-11③ 낡은 문구 5곳(병원노트 패널·hospitalNote 주석·tools.ts 2·route 오류문 2)
+- **B-2 검색** (`lib/wiki/search.ts` 신규, `search/page.tsx`·`api/search/route.ts` 공용, 홈 검색 입력): `$queryRaw` — 공백 토큰 AND(제목·plain_text·첨부 파일명), `ORDER BY 제목 완전일치 DESC, 제목 토큰 적중수 DESC, updated_at DESC`, `count(*) OVER()`로 절단 안내("n건 중 상위 50건"), 다중 토큰 하이라이트·스니펫. API 응답 형식 유지 + `total`·`truncated`
+- **B-3** 상세 하단 '하위 페이지 (N)' 목록(`page.tsx` 1쿼리, 사이드바와 같은 정렬)
+- **운영 C-1**: `package.json build` = `next build && node collab-server/build.mjs`, CLAUDE.md PROD 반영 절차에 협업 서버 재시작 조건·복구 런북·규칙 7 승인 예외 3(lib/ai→lib/wiki 읽기)·게이트 규칙 기록, README 갱신
+- **검증**: tsc 0(4GB) · collab 파일 별도 tsc 0 · eslint 0(기존 경고 1) · Next 빌드 성공 · `pm2 restart thync-collab·thync-dev` · dev2 E2E(임시 JWT·Hocuspocus provider 하네스, 종료 후 삭제): 게이트(DAEWOONG /wiki 안내·API 401·협업 4403 Forbidden / SEERS VIEWER 통과) · 검색('산소포화도' 제목 일치 1위, '설치 계획' 토큰 AND 12건, 'thync' 64건 절단 안내, 첨부 파일명 적중) · 파일명(`filename*=UTF-8''01_SEERS_2026_회의록_세로양식.docx`) · 생성 sortOrder max+1 · 순환 400 · ↑↓ 재부여 시 형제 updated_at 불변 · `PUT contentJson` 409 · 협업 저장: 1차 스냅샷·최근 수정자=편집자, 2차 버전 1(saved_by 편집자)+collab 감사 1, 3차(2분 내) 버전 유지, VIEWER 업데이트 거부(hasUnsyncedChanges true·DB 불변) · 복원 `mode client` + 서버 본문 불변 + 스냅샷 2 · 영구삭제(USER 403 / 살아있음 400 / 휴지통 후 ADMIN 204) · 첨부 DELETE 405
+- **재동기화(dev2)**: dry-run 5건(07.07·07.27·08.10·08.31·시스템 아키텍쳐 — 검증과 일치) → 실행 5건 갱신(07.27 plain_text 129→2,926자) → 재dry-run 0건. 청크는 10분 스케줄러가 재색인
+- **PROD 반영 시 추가 작업**(별도 허락): ① `npm install`(xl-multi-column 제거) ② `users` 2행 organization_id 부여(SEERS) — 안 하면 부트스트랩 관리자가 위키에서 차단 ③ 빌드 후 **`pm2 restart thync-collab-prod`**(6/30 이후 첫 재시작 — 업무 외 시간) ④ `node collab-server/dist/resync.mjs --dry` → 실행(PROD DB 쓰기) ⑤ 대웅 휴면 계정 비활성화 여부
+- 영향: collab-server/{index.mts,materialize.ts(신규),resync.mts(신규),build.mjs}, lib/wiki/{access,search,sortSiblings}.ts(신규)·wikiSchema.tsx·hospitalNote.ts, lib/{s3,permissions}.ts, lib/ai/tools.ts, app/wiki/{layout,page}.tsx, app/wiki/[id]/{page,WikiPageView,VersionHistoryModal,TableOfContents}.tsx, app/wiki/components/{WikiEditor,WikiSidebar,MovePageModal,HospitalNotePanel,ProjectIssueNotePanel}.tsx, app/wiki/search/page.tsx, app/wiki/trash/*, app/api/wiki/** 25파일, package.json(+lock), CLAUDE.md, README.md, projects/{README.md,wiki_next_gen_review.md}, dev2 DB(users 2행)
+
+---
+
+## 2026-09-12 15:10 | 차세대 사내위키 검토 의견서 작성 (projects/wiki_next_gen_review.md) — 코드 변경 없음
+
+- **사용자 요청**: 노션·컨플루언스 등 인기 위키 툴과 정밀 비교해 보완·튜닝·신규 기능 요소가 있는지 의견 제시. "현재가 좋다면 그렇게 말해도 좋다, 무리한 기능·아키텍처 제안 금지"
+- **방법**: 위키 코드 4렌즈 정밀 감사(에디터 / 정보구조·검색 / 협업·이력·권한 / 메인·AI 연동·운영) + dev2 DB(PROD 09-10 동기화본) 실측 + PROD 로그 읽기 전용 확인 + 시장·여론 조사 8주제(Notion·Confluence·OSS 6종·KM 도구 6종·여론·BlockNote 생태계·한글 검색·AI-in-wiki, 웹 1차 자료) → 후보 27건 → 후보별 코드 반박자·가치 반박자 적대 검증 + 강점·누락 점검 53건. 검증에서 후보 8건이 "하지 말 것"으로 뒤집혔고(구 위키 트리 정리·신선도 루틴·AI 인용 규칙 등) 강점 주장 35건 중 7건 과장·1건 오류(표 옵션 미개방)로 정정
+- **결론**: 기능 세트·아키텍처는 상용 대비 충분(노트 임베드 협업·AI 절 단위 검색은 고유 강점). 신규 기능·아키텍처 개선 불권장. 단 **2026-06-30 협업(Yjs) 전환 때 끊긴 배선이 회귀로 남아 있음** — ① 협업 서버 store()가 표 포함 페이지 스냅샷 동기화에 항상 실패(PROD 로그 527회, 주간 업무보고 4장이 검색·AI에서 낡은 본문) ② 버전 스냅샷 0건(57건 전부 6월) ③ 최근 수정자·감사로그 미갱신 ④ 버전 복원이 Y.Doc 페이지에서 겉으로만 성공 ⑤ 세션 중 끊김 8초 후 입력 폐기. 그 외 소속(org) 서버 게이트 부재(nav만 SEERS), 영구삭제 USER 전원 허용, 신규 페이지 sortOrder 0 정렬 뒤섞임, 슬래시 커스텀 항목 커서 미이동·Divider 중복, TOC 겹침, 첨부 한글 파일명 손실·이동 시 수정일 오염·낡은 문구 — A등급 11건 전부 소규모
+- **분류**: A 결함·회귀 11 / B 선택(표 옵션 개방·검색 제목 우선 정렬·하위 목록·ko 사전·xl-multi-column 제거·업그레이드 트리거형) 6 / C 운영(협업 배포 절차 문서화·백업 오프호스트) 2 + 메모(위키 내 평문 자격증명·'Old_' 접두사 개명) / D 보류 재확인 25+(DB 뷰·페이지 권한·인라인 댓글·검증 워크플로·구 위키 아카이브·퀵스위처·내보내기·코드 하이라이트 등)
+- **권고 순서**: 1차 협업 서버 결함 묶음(한 배포, 배포 절차 문서화 선행) → 2차 Next 앱 결함 → 운영 병행 → 선택은 사용자 결정. 착수 전 결정 4건(무소속 계정 처리·영구삭제 게이트 RBAC 예외·멀티컬럼 제거 번복·평문 자격증명 처리)
+- **부수 발견**: `npm audit` `@tiptap/core ≤3.30.4` high 2건(3.x 내 수정판), Next 14.2.35 critical 권고(수정은 Next 16) — 별건
+- 영향: projects/wiki_next_gen_review.md(신규), projects/README.md(문서 목록 행), DEV_HISTORY.md. 코드·DB·PROD 변경 없음
+
+---
+
 ## 2026-09-12 | PROD 배포: AS 목록 평균 처리시간 일반/선교체 분리 (42f1f8c)
 
 - **절차**: dev2 힙 4GB 빌드·`pm2 restart thync-dev`(health 200·/as-receipts 307) → 커밋(42f1f8c)·push → PROD pull → 힙 4GB 빌드 → `pm2 restart thync-prod` (코드 전용, DDL·시드 없음)

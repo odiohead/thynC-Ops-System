@@ -49,6 +49,7 @@ export default function HospitalNotePanel({ hospitalCode }: { hospitalCode: stri
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [collabFailed, setCollabFailed] = useState(false)
+  const [hidden, setHidden] = useState(false)
 
   const canWrite = !!me && me.role !== 'VIEWER'
 
@@ -68,6 +69,9 @@ export default function HospitalNotePanel({ hospitalCode }: { hospitalCode: stri
       if (pageRes.ok) {
         const data = await pageRes.json()
         setPage((data?.page as NotePage | null) ?? null)
+      } else if (pageRes.status === 401 || pageRes.status === 403) {
+        // 위키 소속 게이트(SEERS OR wiki.access) 차단 — 패널 자체를 숨긴다 (2026-09-12 A-6)
+        setHidden(true)
       } else {
         const err = await pageRes.json().catch(() => ({}))
         setError(err.error || `병원 노트 조회 실패 (${pageRes.status})`)
@@ -106,6 +110,7 @@ export default function HospitalNotePanel({ hospitalCode }: { hospitalCode: stri
     }
   }
 
+  if (hidden) return null
   if (loading) {
     return <div className="py-6 text-center text-sm text-gray-400">병원 노트 불러오는 중…</div>
   }
@@ -128,7 +133,7 @@ export default function HospitalNotePanel({ hospitalCode }: { hospitalCode: stri
         )}
         <p className="mt-2 text-xs text-gray-400">
           생성하면 사내위키 &lsquo;병원 노트&rsquo;에 이 병원 전용 페이지가 만들어집니다.
-          AI 어시스턴트 상담 정리도 이 페이지에 축적됩니다.
+          담당자가 직접 쓰는 특이사항 메모이며, AI 어시스턴트가 응대 시 참고합니다(상담이력은 별도 저장).
         </p>
       </div>
     )

@@ -48,6 +48,7 @@ export default function ProjectIssueNotePanel({ projectCode }: { projectCode: st
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [collabFailed, setCollabFailed] = useState(false)
+  const [hidden, setHidden] = useState(false)
 
   const canWrite = !!me && me.role !== 'VIEWER'
 
@@ -68,6 +69,9 @@ export default function ProjectIssueNotePanel({ projectCode }: { projectCode: st
       if (pageRes.ok) {
         const data = await pageRes.json()
         setPage((data?.page as IssueNotePage | null) ?? null)
+      } else if (pageRes.status === 401 || pageRes.status === 403) {
+        // 위키 소속 게이트(SEERS OR wiki.access) 차단 — 패널 자체를 숨긴다 (2026-09-12 A-6)
+        setHidden(true)
       } else {
         const err = await pageRes.json().catch(() => ({}))
         setError(err.error || `이슈노트 조회 실패 (${pageRes.status})`)
@@ -106,6 +110,7 @@ export default function ProjectIssueNotePanel({ projectCode }: { projectCode: st
     }
   }
 
+  if (hidden) return null
   if (loading) {
     return <div className="py-6 text-center text-sm text-gray-400">이슈노트 불러오는 중…</div>
   }

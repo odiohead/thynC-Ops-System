@@ -12,13 +12,10 @@ import { BlockNoteView } from '@blocknote/ariakit'
 import { useTheme } from '@/app/components/theme/ThemeProvider'
 import {
   filterSuggestionItems,
+  insertOrUpdateBlockForSlashMenu,
+  type BlockNoteEditor,
   type PartialBlock,
 } from '@blocknote/core'
-import {
-  getMultiColumnSlashMenuItems,
-  multiColumnDropCursor,
-  locales as multiColumnLocales,
-} from '@blocknote/xl-multi-column'
 import { en as coreLocaleEn } from '@blocknote/core/locales'
 import { HocuspocusProvider } from '@hocuspocus/provider'
 import * as Y from 'yjs'
@@ -140,6 +137,11 @@ type CollabConfig = {
   userColor: string
 }
 
+export type CollabStatus = 'connecting' | 'connected' | 'disconnected'
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type WikiEditorInstance = BlockNoteEditor<any, any, any>
+
 type Props = {
   initialContent?: PartialBlock[]
   editable?: boolean
@@ -149,8 +151,16 @@ type Props = {
   onSaveNow?: () => Promise<void>
   /** 설정 시 실시간 동시편집(Yjs) 모드 — 본문은 Y.Doc이 진실의 원천이므로 initialContent 미사용 */
   collab?: CollabConfig
-  /** 협업 서버에 일정 시간 내 연결하지 못하면 호출 — 부모가 읽기전용 폴백으로 전환 */
+  /**
+   * 협업 서버에 **최초 연결조차** 일정 시간 내 실패하면 호출 — 부모가 읽기전용 스냅샷으로 폴백.
+   * 한 번 연결된 뒤 끊긴 경우는 호출하지 않는다(provider를 살려 두면 Yjs가 재접속 시 끊긴 동안의 입력을 병합한다).
+   * 예외: 서버가 인증 실패(4401/4403)로 닫으면 provider가 재시도하지 않으므로 이때는 폴백한다.
+   */
   onCollabUnavailable?: () => void
+  /** 협업 연결 상태 변화 통지 (부모가 복원 등 라이브 세션이 필요한 동작을 게이트할 때 사용) */
+  onCollabStatusChange?: (status: CollabStatus) => void
+  /** 에디터 인스턴스 전달 — 부모가 라이브 세션에서 본문을 교체(버전 복원)할 때 사용 */
+  onEditorReady?: (editor: WikiEditorInstance) => void
 }
 
 export default function WikiEditor({
@@ -161,6 +171,8 @@ export default function WikiEditor({
   onSaveNow,
   collab,
   onCollabUnavailable,
+  onCollabStatusChange,
+  onEditorReady,
 }: Props) {
   const { theme } = useTheme()
   const router = useRouter()
@@ -179,41 +191,76 @@ export default function WikiEditor({
         })
       : null,
   )
-  const [collabStatus, setCollabStatus] = useState<'connecting' | 'connected' | 'disconnected'>(
-    'connecting',
-  )
+  const [collabStatus, setCollabStatus] = useState<CollabStatus>('connecting')
+  /** 한 번이라도 동기화된 적이 있는가 — 이후 끊김은 폴백 대상이 아님 */
+  const everConnectedRef = useRef(false)
+  /** 서버가 인증 실패로 닫음 — provider가 재시도하지 않으므로 폴백해야 하는 종단 상태 */
+  const terminalCloseRef = useRef(false)
+
   useEffect(() => {
     if (!provider) return
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const onStatus = (e: any) => setCollabStatus(e.status)
-    const onSynced = () => setCollabStatus('connected')
+    const onSynced = () => {
+      everConnectedRef.current = true
+      setCollabStatus('connected')
+    }
+    const onAuthFailed = () => {
+      terminalCloseRef.current = true
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const onClose = (e: any) => {
+      const code = e?.event?.code
+      if (code === 4401 || code === 4403) terminalCloseRef.current = true
+    }
     provider.on('status', onStatus)
     provider.on('synced', onSynced)
+    provider.on('authenticationFailed', onAuthFailed)
+    provider.on('close', onClose)
     // race 방지: 리스너 부착 전에 이미 연결/동기화됐을 수 있으므로 현재 상태로 보정.
-    // (provider는 생성 즉시 연결을 시작하는데 이 effect는 렌더 후 실행되어 'connected'를 놓칠 수 있음)
-    if (provider.isConnected || provider.isSynced) setCollabStatus('connected')
+    if (provider.isSynced) {
+      everConnectedRef.current = true
+      setCollabStatus('connected')
+    } else if (provider.isConnected) setCollabStatus('connected')
     else if (provider.status) setCollabStatus(provider.status)
     return () => {
       provider.off('status', onStatus)
       provider.off('synced', onSynced)
+      provider.off('authenticationFailed', onAuthFailed)
+      provider.off('close', onClose)
       provider.destroy()
     }
   }, [provider])
 
-  // 협업 서버에 일정 시간 내 한 번도 연결되지 못하면 폴백(읽기전용 스냅샷)으로 전환 요청
+  useEffect(() => {
+    onCollabStatusChange?.(collabStatus)
+  }, [collabStatus, onCollabStatusChange])
+
+  // 최초 연결 실패(또는 인증 실패로 종단) 시에만 폴백 요청. 세션 중 끊김은 provider를 유지해 재동기화에 맡긴다.
   const collabFailedRef = useRef(false)
   useEffect(() => {
     if (!collab || collabStatus === 'connected') return
     const t = setTimeout(() => {
-      // 이 타이머는 collabStatus가 'connected'가 아닐 때만 등록되며,
-      // 연결되면 effect cleanup으로 해제된다. 발화 = 제한시간 내 미연결.
-      if (!collabFailedRef.current) {
-        collabFailedRef.current = true
-        onCollabUnavailable?.()
-      }
+      if (collabFailedRef.current) return
+      if (everConnectedRef.current && !terminalCloseRef.current) return
+      collabFailedRef.current = true
+      onCollabUnavailable?.()
     }, 8000)
     return () => clearTimeout(t)
   }, [collab, collabStatus, onCollabUnavailable])
+
+  // 끊긴 동안의 입력이 서버에 아직 안 갔으면 탭 닫기 전에 경고
+  useEffect(() => {
+    if (!provider) return
+    const handler = (e: BeforeUnloadEvent) => {
+      if (provider.hasUnsyncedChanges) {
+        e.preventDefault()
+        e.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [provider])
 
   const uploadFile = pageId
     ? async (file: File): Promise<string> => {
@@ -234,9 +281,10 @@ export default function WikiEditor({
 
   const editor = useCreateBlockNote({
     schema: wikiSchema,
-    dropCursor: multiColumnDropCursor,
-    dictionary: { ...coreLocaleEn, multi_column: multiColumnLocales.ko },
+    dictionary: coreLocaleEn,
     uploadFile,
+    // 표 헤더 행/열·셀 병합·셀 색 — core 기본값이 전부 false라 켜 주지 않으면 UI에 나오지 않는다 (2026-09-12 B-1)
+    tables: { headers: true, splitCells: true, cellBackgroundColor: true, cellTextColor: true },
     // 협업 모드: Y.Doc 동기화. 비협업: 기존 initialContent
     ...(collab && provider
       ? {
@@ -255,6 +303,10 @@ export default function WikiEditor({
               : undefined,
         }),
   })
+
+  useEffect(() => {
+    onEditorReady?.(editor as unknown as WikiEditorInstance)
+  }, [editor, onEditorReady])
 
   // 검색 모달에서 기존 페이지 선택 → wikiPageLink 블록 삽입 (신규 생성 없음)
   const handleLinkSelect = async (page: { id: string; title: string }) => {
@@ -280,6 +332,8 @@ export default function WikiEditor({
     }
   }
 
+  const disconnectedAfterSync = collabStatus !== 'connected' && everConnectedRef.current
+
   return (
     <>
     {collab && (
@@ -295,9 +349,11 @@ export default function WikiEditor({
         />
         {collabStatus === 'connected'
           ? '실시간 협업 연결됨'
-          : collabStatus === 'connecting'
-            ? '협업 서버 연결 중…'
-            : '협업 연결 끊김 — 재연결 시도 중'}
+          : disconnectedAfterSync
+            ? '협업 연결 끊김 — 재연결 시도 중 (지금 입력한 내용은 재연결되면 자동 반영)'
+            : collabStatus === 'connecting'
+              ? '협업 서버 연결 중…'
+              : '협업 연결 끊김 — 재연결 시도 중'}
       </div>
     )}
     <BlockNoteView
@@ -309,14 +365,11 @@ export default function WikiEditor({
         if (onChange) onChange(editor.document as unknown[])
       }}
     >
-      {/* 슬래시 메뉴: 기본 + "하위 페이지 추가" */}
+      {/* 슬래시 메뉴: 기본 + 위키 항목(하위 페이지·기존 페이지 링크) + 콜아웃 */}
       <SuggestionMenuController
         triggerCharacter="/"
         getItems={async (query) => {
-          const items: DefaultReactSuggestionItem[] = [
-            ...getDefaultReactSlashMenuItems(editor),
-            ...getMultiColumnSlashMenuItems(editor),
-          ]
+          const items: DefaultReactSuggestionItem[] = [...getDefaultReactSlashMenuItems(editor)]
           if (pageId) {
             items.push({
               title: '하위 페이지 추가',
@@ -377,35 +430,20 @@ export default function WikiEditor({
               setLinkPickerOpen(true)
             },
           })
+          // 기본 항목과 같은 삽입 규칙(insertOrUpdateBlockForSlashMenu): "/" 로 시작한 빈 블록은 교체하고 커서를 안으로 옮긴다.
+          // (2026-09-12 A-9 — 이전 insertBlocks(after)는 빈 단락을 남기고 커서를 옮기지 않아 고장처럼 보였다)
           items.push({
             title: '콜아웃',
             subtext: '아이콘 + 배경색 강조 박스',
             aliases: ['callout', 'note', 'info', '콜아웃', '강조', '안내'],
-            group: '기본 블록',
+            group: 'Basic blocks',
             icon: <span>💡</span>,
             onItemClick: () => {
-              const cur = editor.getTextCursorPosition().block
-              editor.insertBlocks(
+              insertOrUpdateBlockForSlashMenu(
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                [{ type: 'callout', props: { emoji: '💡', color: 'blue' } }] as any,
-                cur,
-                'after',
-              )
-            },
-          })
-          items.push({
-            title: '구분선',
-            subtext: '가로 구분선',
-            aliases: ['divider', 'hr', 'rule', '구분', '구분선', '선'],
-            group: '기본 블록',
-            icon: <span>―</span>,
-            onItemClick: () => {
-              const cur = editor.getTextCursorPosition().block
-              editor.insertBlocks(
+                editor as any,
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                [{ type: 'divider' }] as any,
-                cur,
-                'after',
+                { type: 'callout', props: { emoji: '💡', color: 'blue' } } as any,
               )
             },
           })

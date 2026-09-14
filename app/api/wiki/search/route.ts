@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getWikiAuthUser } from '@/lib/wiki/access'
+import { searchWikiPages, makeSnippet } from '@/lib/wiki/search'
 
+/**
+ * 위키 검색 API — 에디터 '기존 페이지 링크' 피커가 사용. 응답 형식(results[].id/title/snippet/updatedAt/author/lastEditor/tags)은 유지.
+ * 검색 로직은 검색 페이지와 공용 `lib/wiki/search.ts` (2026-09-12 B-2: 토큰 AND·제목 우선 정렬·첨부 파일명·절단 안내).
+ */
 export async function GET(request: NextRequest) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(request.url)
@@ -12,57 +16,23 @@ export async function GET(request: NextRequest) {
 
   if (!q && !tagId) return NextResponse.json({ results: [] })
 
-  const where: Record<string, unknown> = { deletedAt: null, isTemplate: false }
-  if (q) {
-    where.OR = [
-      { title: { contains: q, mode: 'insensitive' } },
-      { plainText: { contains: q, mode: 'insensitive' } },
-    ]
-  }
-  if (tagId) {
-    where.tags = { some: { tagId } }
-  }
+  const { rows, total, tokens } = await searchWikiPages({ q, tagId })
 
-  const pages = await prisma.wikiPage.findMany({
-    where,
-    take: 50,
-    orderBy: { updatedAt: 'desc' },
-    select: {
-      id: true,
-      title: true,
-      plainText: true,
-      updatedAt: true,
-      author: { select: { name: true } },
-      lastEditor: { select: { name: true } },
-      tags: { include: { tag: { select: { id: true, name: true, color: true } } } },
-    },
-  })
-
-  const SNIPPET_RADIUS = 60
-  const results = pages.map((p) => {
-    let snippet: string | null = null
-    if (q) {
-      const lower = p.plainText.toLowerCase()
-      const idx = lower.indexOf(q.toLowerCase())
-      if (idx >= 0) {
-        const from = Math.max(0, idx - SNIPPET_RADIUS)
-        const to = Math.min(p.plainText.length, idx + q.length + SNIPPET_RADIUS)
-        snippet =
-          (from > 0 ? '… ' : '') +
-          p.plainText.slice(from, to) +
-          (to < p.plainText.length ? ' …' : '')
-      }
-    }
+  const results = rows.map((p) => {
+    const snip = makeSnippet(p.plainText, tokens)
+    const snippet = snip
+      ? `${snip.leading ? '… ' : ''}${snip.before}${snip.match}${snip.after}${snip.trailing ? ' …' : ''}`
+      : null
     return {
       id: p.id,
       title: p.title,
       snippet,
       updatedAt: p.updatedAt,
-      author: p.author?.name ?? null,
-      lastEditor: p.lastEditor?.name ?? null,
-      tags: p.tags.map((t) => t.tag),
+      author: p.authorName,
+      lastEditor: p.lastEditorName,
+      tags: p.tags,
     }
   })
 
-  return NextResponse.json({ results, query: q, total: results.length })
+  return NextResponse.json({ results, query: q, total, truncated: total > results.length })
 }

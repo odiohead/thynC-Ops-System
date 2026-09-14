@@ -53,7 +53,12 @@ export default async function HospitalDetailPage({ params }: PageProps) {
       include: {
         meta: true,
         introTypes: { include: { statusCode: true }, orderBy: { statusCode: { order: 'asc' } } },
-        hiraHospital: { select: { permSbdCnt: true, detailSyncedAt: true } },
+        hiraHospital: {
+          select: {
+            permSbdCnt: true, detailSyncedAt: true,
+            depts: { select: { dgsbjtNm: true, prSdrCnt: true, dtlSdrCnt: true }, orderBy: { dgsbjtCd: 'asc' } },
+          },
+        },
       },
     }),
     prisma.project.findMany({
@@ -187,6 +192,27 @@ export default async function HospitalDetailPage({ params }: PageProps) {
             />
             <Field label="주소" value={hospital.address} />
           </dl>
+          {hospital.hiraHospital?.depts && hospital.hiraHospital.depts.length > 0 && (
+            <dl className="grid grid-cols-1 gap-6 border-t border-gray-100 px-6 py-5">
+              <Field
+                label="진료과목 (심평원)"
+                value={
+                  <span className="leading-6">
+                    {hospital.hiraHospital.depts.map((d, i) => {
+                      const sdr = d.dtlSdrCnt ?? d.prSdrCnt
+                      return (
+                        <span key={d.dgsbjtNm}>
+                          {i > 0 && <span className="text-gray-300"> · </span>}
+                          {d.dgsbjtNm}
+                          {sdr != null && sdr > 0 && <span className="text-xs text-gray-500">(전문의 {sdr})</span>}
+                        </span>
+                      )
+                    })}
+                  </span>
+                }
+              />
+            </dl>
+          )}
         </div>
 
         {/* 대웅제약 담당자 */}

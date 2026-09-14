@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getWikiAuthUser } from '@/lib/wiki/access'
 import {
   getIssueNoteRootSetting,
   PROJECT_ISSUE_REF_TYPE,
 } from '@/lib/wiki/projectIssueNote'
 
 export async function GET(request: NextRequest) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const pages = await prisma.wikiPage.findMany({

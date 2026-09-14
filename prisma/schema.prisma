@@ -43,8 +43,12 @@ model HiraHospital {
   midwifeCnt     Int?      @map("midwife_cnt")
   permSbdCnt     Int?      @map("perm_sbd_cnt")
   detailSyncedAt DateTime? @map("detail_synced_at")
+  deptSyncedAt   DateTime? @map("dept_synced_at")
+  sdrSyncedAt    DateTime? @map("sdr_synced_at")
   createdAt      DateTime  @default(now()) @map("created_at")
   hospital       Hospital?
+  depts          HiraHospitalDept[]
+  syncTargets    HiraSyncJobTarget[]
 
   @@map("hira_hospitals")
   @@schema("public")
@@ -812,9 +816,53 @@ model HiraSyncJob {
   status     String        @default("running") @map("status")
   totalCount Int           @default(0) @map("total_count")
   jobType    String        @default("basis") @map("job_type")
+  params       Json?     @map("params")
+  totalTargets Int       @default(0) @map("total_targets")
+  doneCount    Int       @default(0) @map("done_count")
+  failedCount  Int       @default(0) @map("failed_count")
+  dailyQuota   Int       @default(0) @map("daily_quota")
+  callsToday   Int       @default(0) @map("calls_today")
+  quotaDate    String?   @map("quota_date")
+  dayCount     Int       @default(0) @map("day_count")
+  nextRunAt    DateTime? @map("next_run_at")
   logs       HiraSyncLog[]
+  targets    HiraSyncJobTarget[]
 
   @@map("hira_sync_jobs")
+  @@schema("public")
+}
+
+// 상세연동 잡별 대상 병원 진행 상태 (hira_detail_sync_v2_design.md §3.4)
+model HiraSyncJobTarget {
+  id             Int          @id @default(autoincrement())
+  jobId          Int          @map("job_id")
+  hiraHospitalId Int          @map("hira_hospital_id")
+  status         String       @default("pending") @map("status")
+  error          String?      @map("error")
+  processedAt    DateTime?    @map("processed_at")
+  job            HiraSyncJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  hiraHospital   HiraHospital @relation(fields: [hiraHospitalId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, hiraHospitalId])
+  @@index([jobId, status])
+  @@map("hira_sync_job_targets")
+  @@schema("public")
+}
+
+// 병원별 진료과목·전문의 (심평원 getDgsbjtInfo + getSpcSbjtSdrInfo 병합, hira_detail_sync_v2_design.md §3.2)
+model HiraHospitalDept {
+  id             Int          @id @default(autoincrement())
+  hiraHospitalId Int          @map("hira_hospital_id")
+  dgsbjtCd       String       @map("dgsbjt_cd")
+  dgsbjtNm       String       @map("dgsbjt_nm")
+  prSdrCnt       Int?         @map("pr_sdr_cnt")
+  cdiagDrCnt     Int?         @map("cdiag_dr_cnt")
+  dtlSdrCnt      Int?         @map("dtl_sdr_cnt")
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at")
+  hiraHospital   HiraHospital @relation(fields: [hiraHospitalId], references: [id], onDelete: Cascade)
+
+  @@unique([hiraHospitalId, dgsbjtCd])
+  @@map("hira_hospital_depts")
   @@schema("public")
 }
 

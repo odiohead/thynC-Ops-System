@@ -1,13 +1,11 @@
 import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
-import type { Prisma } from '@prisma/client'
 import EmptyState from '../components/ui/EmptyState'
+import { searchWikiPages, makeSnippet, findFirstMatch } from '@/lib/wiki/search'
 
 export const dynamic = 'force-dynamic'
 
 type SearchParams = { q?: string; tagId?: string; author?: string; period?: string }
-
-const PERIODS: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90 }
 
 export default async function WikiSearchPage({
   searchParams,
@@ -23,37 +21,10 @@ export default async function WikiSearchPage({
 
   const hasQuery = !!(q || tagId || author || period)
 
-  const where: Prisma.WikiPageWhereInput = { deletedAt: null, isTemplate: false }
-  if (q) {
-    where.OR = [
-      { title: { contains: q, mode: 'insensitive' } },
-      { plainText: { contains: q, mode: 'insensitive' } },
-    ]
-  }
-  if (tagId) where.tags = { some: { tagId } }
-  if (author) where.author = { name: { contains: author, mode: 'insensitive' } }
-  if (period && PERIODS[period]) {
-    const since = new Date(Date.now() - PERIODS[period] * 24 * 60 * 60 * 1000)
-    where.updatedAt = { gte: since }
-  }
-
-  const pages = hasQuery
-    ? await prisma.wikiPage.findMany({
-        where,
-        take: 50,
-        orderBy: { updatedAt: 'desc' },
-        select: {
-          id: true,
-          title: true,
-          icon: true,
-          plainText: true,
-          updatedAt: true,
-          author: { select: { name: true } },
-          lastEditor: { select: { name: true } },
-          tags: { include: { tag: { select: { id: true, name: true, color: true } } } },
-        },
-      })
-    : []
+  // 검색 로직은 /api/wiki/search와 공용 (lib/wiki/search.ts) — 토큰 AND·제목 우선 정렬·첨부 파일명 포함·절단 건수
+  const { rows: pages, total, tokens } = hasQuery
+    ? await searchWikiPages({ q, tagId, author, period })
+    : { rows: [], total: 0, tokens: [] as string[] }
 
   return (
     <div className="wiki-content py-10">
@@ -71,7 +42,11 @@ export default async function WikiSearchPage({
         </div>
       ) : (
         <>
-          <div className="mt-6 text-xs text-[var(--wiki-text-muted)]">{pages.length}건 결과</div>
+          <div className="mt-6 text-xs text-[var(--wiki-text-muted)]">
+            {total > pages.length
+              ? `${total.toLocaleString('ko-KR')}건 중 상위 ${pages.length}건 표시 — 검색어를 더 구체적으로 입력하면 좁힐 수 있습니다`
+              : `${pages.length}건 결과`}
+          </div>
           <ul className="mt-3 overflow-hidden rounded-[10px] border border-[var(--wiki-border)] bg-[var(--wiki-bg)]">
             {pages.map((p) => (
               <li key={p.id} className="border-b border-[var(--wiki-border)] last:border-0">
@@ -79,25 +54,25 @@ export default async function WikiSearchPage({
                   <span className="shrink-0 pt-0.5 text-base leading-none">{p.icon || '📄'}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium text-[var(--wiki-text)]">
-                      <Highlight text={p.title || '제목 없음'} query={q} />
+                      <Highlight text={p.title || '제목 없음'} tokens={tokens} />
                     </span>
-                    {q && p.plainText && <Snippet text={p.plainText} query={q} />}
+                    {tokens.length > 0 && p.plainText && <Snippet text={p.plainText} tokens={tokens} />}
                     <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--wiki-text-muted)]">
                       <span>
-                        {p.lastEditor?.name ?? p.author?.name ?? '-'} ·{' '}
+                        {p.lastEditorName ?? p.authorName ?? '-'} ·{' '}
                         {new Date(p.updatedAt).toLocaleDateString('ko-KR')}
                       </span>
                       {p.tags.map((t) => (
                         <span
-                          key={t.tag.id}
+                          key={t.id}
                           className="rounded border px-1.5 py-0.5 text-[10px]"
                           style={
-                            t.tag.color
-                              ? { borderColor: t.tag.color, color: t.tag.color, background: `${t.tag.color}10` }
+                            t.color
+                              ? { borderColor: t.color, color: t.color, background: `${t.color}10` }
                               : { borderColor: 'var(--wiki-border-strong)', color: 'var(--wiki-text-muted)' }
                           }
                         >
-                          #{t.tag.name}
+                          #{t.name}
                         </span>
                       ))}
                     </span>
@@ -131,7 +106,7 @@ function SearchForm({
           type="search"
           name="q"
           defaultValue={q}
-          placeholder="제목·본문 검색"
+          placeholder="제목·본문·첨부 파일명 검색 (띄어쓰기로 여러 단어)"
           className="flex-1 rounded-[6px] border border-[var(--wiki-border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--wiki-accent)]"
         />
         <button
@@ -218,33 +193,28 @@ function TagFilter({
   )
 }
 
-function Highlight({ text, query }: { text: string; query: string }) {
-  if (!query) return <>{text}</>
-  const idx = text.toLowerCase().indexOf(query.toLowerCase())
-  if (idx < 0) return <>{text}</>
+function Highlight({ text, tokens }: { text: string; tokens: string[] }) {
+  const hit = findFirstMatch(text, tokens)
+  if (!hit) return <>{text}</>
   return (
     <>
-      {text.slice(0, idx)}
-      <mark className="bg-yellow-200 px-0.5">{text.slice(idx, idx + query.length)}</mark>
-      {text.slice(idx + query.length)}
+      {text.slice(0, hit.index)}
+      <mark className="bg-yellow-200 px-0.5">{text.slice(hit.index, hit.index + hit.length)}</mark>
+      {text.slice(hit.index + hit.length)}
     </>
   )
 }
 
-function Snippet({ text, query }: { text: string; query: string }) {
-  const lower = text.toLowerCase()
-  const idx = lower.indexOf(query.toLowerCase())
-  if (idx < 0) return null
-  const RADIUS = 60
-  const from = Math.max(0, idx - RADIUS)
-  const to = Math.min(text.length, idx + query.length + RADIUS)
+function Snippet({ text, tokens }: { text: string; tokens: string[] }) {
+  const snip = makeSnippet(text, tokens)
+  if (!snip) return null
   return (
     <span className="mt-1 block text-xs text-[var(--wiki-text-soft)]">
-      {from > 0 && '… '}
-      {text.slice(from, idx)}
-      <mark className="bg-yellow-200 px-0.5">{text.slice(idx, idx + query.length)}</mark>
-      {text.slice(idx + query.length, to)}
-      {to < text.length && ' …'}
+      {snip.leading && '… '}
+      {snip.before}
+      <mark className="bg-yellow-200 px-0.5">{snip.match}</mark>
+      {snip.after}
+      {snip.trailing && ' …'}
     </span>
   )
 }

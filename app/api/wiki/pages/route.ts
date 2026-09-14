@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getWikiAuthUser } from '@/lib/wiki/access'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { extractPlainTextFromBlocks } from '@/lib/wiki/blockText'
 import { sanitizeHtmlDocument, extractPlainTextFromHtml, HTML_DOC_MAX_BYTES } from '@/lib/wiki/htmlText'
@@ -10,7 +10,7 @@ import { getIssueNoteRootSetting } from '@/lib/wiki/projectIssueNote'
 import { getHospitalNoteRootSetting } from '@/lib/wiki/hospitalNote'
 
 export async function GET(request: NextRequest) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(request.url)
@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
     const hospitalNoteRootId = await getHospitalNoteRootSetting()
     if (hospitalNoteRootId && parentId === hospitalNoteRootId) {
       return NextResponse.json(
-        { error: '병원 노트 카테고리에는 병원 상세·상담 정리에서만 페이지를 추가할 수 있습니다.' },
+        { error: '병원 노트 카테고리에는 병원 상세에서만 페이지를 추가할 수 있습니다.' },
         { status: 400 },
       )
     }
@@ -133,10 +133,18 @@ export async function POST(request: NextRequest) {
 
   const contentArr = (contentJson ?? []) as unknown
   const sanitizedHtml = isHtmlPage ? sanitizeHtmlDocument(contentHtml as string) : null
+  // 새 페이지는 형제 맨 끝에 (2026-09-12 A-8 — 기본값 0이면 기존 형제와 동률이 되어 순서가 뒤섞이고 ↑↓가 무반응)
+  const lastSibling = await prisma.wikiPage.findFirst({
+    where: { parentId: parentId ?? null, deletedAt: null, isTemplate: false },
+    orderBy: { sortOrder: 'desc' },
+    select: { sortOrder: true },
+  })
+  const nextSortOrder = (lastSibling?.sortOrder ?? -1) + 1
   const created = await prisma.wikiPage.create({
     data: {
       title,
       parentId: parentId ?? null,
+      sortOrder: nextSortOrder,
       slug: slug ?? null,
       contentJson: contentArr as Prisma.InputJsonValue,
       pageType: isHtmlPage ? 'html' : 'block',

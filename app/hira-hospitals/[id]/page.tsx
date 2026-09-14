@@ -33,8 +33,14 @@ export default async function HiraHospitalDetailPage({ params }: { params: { id:
   const id = parseInt(params.id)
   if (isNaN(id)) notFound()
 
-  const h = await prisma.hiraHospital.findUnique({ where: { id } })
+  const h = await prisma.hiraHospital.findUnique({
+    where: { id },
+    include: { depts: { orderBy: { dgsbjtCd: 'asc' } } },
+  })
   if (!h) notFound()
+
+  const fmtSynced = (d: Date | null) =>
+    d ? d.toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -83,12 +89,54 @@ export default async function HiraHospitalDetailPage({ params }: { params: { id:
           </Section>
 
           {/* 의료진 */}
-          <Section title="의료진">
+          <Section title="의료진 · 시설">
             <Field
               label="총 의사 수"
               value={h.totalDoctors != null ? `${h.totalDoctors.toLocaleString()}명` : null}
             />
+            <Field
+              label="허가 병상수"
+              value={
+                h.permSbdCnt != null
+                  ? <>{h.permSbdCnt.toLocaleString()}병상 <span className="text-xs text-gray-400">({fmtSynced(h.detailSyncedAt)} 연동)</span></>
+                  : null
+              }
+            />
           </Section>
+
+          {/* 진료과목·전문의 (심평원 상세연동 v2) */}
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-6 py-4">
+              <h2 className="text-sm font-semibold text-gray-700">진료과목 · 전문의</h2>
+              <p className="text-xs text-gray-400">
+                진료과목 {h.deptSyncedAt ? `${fmtSynced(h.deptSyncedAt)} 연동` : '미연동'} · 전문의수 {h.sdrSyncedAt ? `${fmtSynced(h.sdrSyncedAt)} 연동` : '미연동'}
+              </p>
+            </div>
+            {h.depts.length === 0 ? (
+              <p className="px-6 py-6 text-sm text-gray-400">연동된 진료과목 정보가 없습니다. 설정 &gt; 심평원 연동 관리에서 병원상세정보연동을 실행하세요.</p>
+            ) : (
+              <table className="min-w-full divide-y divide-gray-100">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-2.5 text-left text-xs font-medium text-gray-500">진료과목</th>
+                    <th className="px-6 py-2.5 text-right text-xs font-medium text-gray-500">진료과목 전문의</th>
+                    <th className="px-6 py-2.5 text-right text-xs font-medium text-gray-500">전문과목 전문의</th>
+                    <th className="px-6 py-2.5 text-right text-xs font-medium text-gray-500">선택진료의사</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {h.depts.map((d) => (
+                    <tr key={d.id}>
+                      <td className="px-6 py-2 text-sm text-gray-900">{d.dgsbjtNm} <span className="font-mono text-xs text-gray-400">{d.dgsbjtCd}</span></td>
+                      <td className="px-6 py-2 text-right text-sm tabular-nums text-gray-700">{d.prSdrCnt != null ? d.prSdrCnt.toLocaleString() : <span className="text-gray-300">-</span>}</td>
+                      <td className="px-6 py-2 text-right text-sm tabular-nums text-gray-700">{d.dtlSdrCnt != null ? d.dtlSdrCnt.toLocaleString() : <span className="text-gray-300">-</span>}</td>
+                      <td className="px-6 py-2 text-right text-sm tabular-nums text-gray-700">{d.cdiagDrCnt != null ? d.cdiagDrCnt.toLocaleString() : <span className="text-gray-300">-</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
 
           {/* 기타 */}
           <Section title="기타 정보">

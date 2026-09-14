@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { verifyToken, isSuperAdmin } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import HiraSyncPageClient from './_components/HiraSyncPageClient'
+import { DETAIL_CL_CODES, DETAIL_ITEMS, DAILY_CALL_BUDGET } from '@/lib/hira-detail-sync'
 
 export const dynamic = 'force-dynamic'
 export const metadata = { title: '심평원 연동 관리' }
@@ -26,18 +27,14 @@ export default async function HiraSyncPage() {
     status: j.status,
     totalCount: j.totalCount,
     jobType: j.jobType,
+    params: j.params as { typeCodes: string[]; items: string[] } | null,
+    totalTargets: j.totalTargets,
+    doneCount: j.doneCount,
+    failedCount: j.failedCount,
+    nextRunAt: j.nextRunAt ? j.nextRunAt.toISOString() : null,
   }))
 
-  // 병원상세정보연동 대상 종별(병원급 7종) 건수 — detail-sync route의 DETAIL_CL_CODES와 동기화
-  const DETAIL_CL_CODES: { code: string; name: string }[] = [
-    { code: '01', name: '상급종합병원' },
-    { code: '11', name: '종합병원' },
-    { code: '21', name: '병원' },
-    { code: '28', name: '요양병원' },
-    { code: '29', name: '정신병원' },
-    { code: '41', name: '치과병원' },
-    { code: '92', name: '한방병원' },
-  ]
+  // 병원상세정보연동 대상 종별 — lib/hira-detail-sync.ts DETAIL_CL_CODES 단일 소스 (v2: 의원 포함)
   const typeCounts = await prisma.hiraHospital.groupBy({
     by: ['typeCode'],
     where: { typeCode: { in: DETAIL_CL_CODES.map((c) => c.code) } },
@@ -55,7 +52,7 @@ export default async function HiraSyncPage() {
           <h1 className="text-2xl font-bold text-gray-900">심평원 연동 관리</h1>
           <p className="mt-1 text-sm text-gray-500">심평원 병원 데이터를 최신 상태로 갱신합니다.</p>
         </div>
-        <HiraSyncPageClient initialJobs={serialized} detailTypes={detailTypes} />
+        <HiraSyncPageClient initialJobs={serialized} detailTypes={detailTypes} detailItems={DETAIL_ITEMS.map((d) => ({ key: d.key, name: d.name }))} dailyCallBudget={DAILY_CALL_BUDGET} />
       </div>
     </div>
   )

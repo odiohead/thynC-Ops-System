@@ -9,6 +9,25 @@ type Job = {
   status: string
   totalCount: number
   jobType: string
+  params: { typeCodes: string[]; items: string[] } | null
+  totalTargets: number
+  doneCount: number
+  failedCount: number
+  nextRunAt: string | null
+}
+
+type Progress = {
+  totalTargets: number
+  doneCount: number
+  failedCount: number
+  pending: number
+  dailyQuota: number
+  callsToday: number
+  quotaDate: string | null
+  dayCount: number
+  nextRunAt: string | null
+  remainingDays: number | null
+  failedSample: { id: number; name: string; typeName: string; error: string | null }[]
 }
 
 type DetailType = {
@@ -34,6 +53,12 @@ function fmt(iso: string | null) {
 }
 
 function StatusBadge({ status }: { status: string }) {
+  if (status === 'waiting') {
+    return <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700">대기(다음날)</span>
+  }
+  if (status === 'cancelled') {
+    return <span className="rounded-full bg-gray-200 px-2.5 py-0.5 text-xs font-medium text-gray-600">취소</span>
+  }
   if (status === 'running') {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700">
@@ -58,6 +83,10 @@ function LogLine({ log }: { log: Log }) {
       return <p className="text-gray-700">{log.message}</p>
     case 'group_db_done':
       return <p className="text-blue-600">✓ {log.message}</p>
+    case 'day_start':
+      return <p className="font-semibold text-gray-600">▶ {log.message}</p>
+    case 'day_done':
+      return <p className="font-semibold text-amber-600">⏸ {log.message}</p>
     case 'done':
       return <p className="font-semibold text-green-600">✓ {log.message}</p>
     case 'error':
@@ -69,7 +98,12 @@ function LogLine({ log }: { log: Log }) {
   }
 }
 
-export default function HiraSyncPageClient({ initialJobs, detailTypes }: { initialJobs: Job[]; detailTypes: DetailType[] }) {
+export default function HiraSyncPageClient({ initialJobs, detailTypes, detailItems, dailyCallBudget }: {
+  initialJobs: Job[]
+  detailTypes: DetailType[]
+  detailItems: { key: string; name: string }[]
+  dailyCallBudget: number
+}) {
   const [jobs, setJobs] = useState<Job[]>(initialJobs)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -80,10 +114,14 @@ export default function HiraSyncPageClient({ initialJobs, detailTypes }: { initi
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<string | null>(null)
   const [selectedTypes, setSelectedTypes] = useState<string[]>([])
+  const [selectedItems, setSelectedItems] = useState<string[]>(detailItems.map((d) => d.key))
+  const [progress, setProgress] = useState<Progress | null>(null)
+  const [cancelling, setCancelling] = useState(false)
   const [detailStarting, setDetailStarting] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
 
   const hasRunning = jobs.some((j) => j.status === 'running')
+  const hasWaitingDetail = jobs.some((j) => j.status === 'waiting' && j.jobType === 'detail')
 
   // 목록 폴링 (진행 중인 잡이 있을 때)
   const fetchJobs = useCallback(async () => {
@@ -95,17 +133,19 @@ export default function HiraSyncPageClient({ initialJobs, detailTypes }: { initi
   }, [])
 
   useEffect(() => {
-    if (!hasRunning) return
-    const interval = setInterval(fetchJobs, 2000)
+    if (!hasRunning && !hasWaitingDetail) return
+    // 대기 중(다음날)은 자정 재개 감지용으로 느리게 폴링
+    const interval = setInterval(fetchJobs, hasRunning ? 2000 : 60000)
     return () => clearInterval(interval)
-  }, [hasRunning, fetchJobs])
+  }, [hasRunning, hasWaitingDetail, fetchJobs])
 
   // 선택된 잡 로그 조회
   const fetchLogs = useCallback(async (jobId: number) => {
     const res = await fetch(`/api/hira-hospitals/sync/${jobId}`)
     if (res.ok) {
-      const { job } = await res.json()
+      const { job, progress: p } = await res.json()
       setSelectedLogs(job.logs)
+      setProgress(p ?? null)
     }
   }, [])
 
@@ -115,7 +155,7 @@ export default function HiraSyncPageClient({ initialJobs, detailTypes }: { initi
     fetchLogs(selectedJobId).finally(() => setLogsLoading(false))
 
     const job = jobs.find((j) => j.id === selectedJobId)
-    if (!job || job.status !== 'running') return
+    if (!job || (job.status !== 'running' && job.status !== 'waiting')) return
 
     const interval = setInterval(() => fetchLogs(selectedJobId), 2000)
     return () => clearInterval(interval)
@@ -176,7 +216,7 @@ export default function HiraSyncPageClient({ initialJobs, detailTypes }: { initi
       const res = await fetch('/api/hira-hospitals/detail-sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ typeCodes: selectedTypes }),
+        body: JSON.stringify({ typeCodes: selectedTypes, items: selectedItems }),
       })
       const json = await res.json()
       if (!res.ok) {
@@ -192,6 +232,7 @@ export default function HiraSyncPageClient({ initialJobs, detailTypes }: { initi
   }
 
   function selectJob(jobId: number) {
+    setProgress(null)
     if (selectedJobId === jobId) {
       setSelectedJobId(null)
       setSelectedLogs([])
@@ -201,7 +242,33 @@ export default function HiraSyncPageClient({ initialJobs, detailTypes }: { initi
     }
   }
 
+  function toggleItem(key: string) {
+    setSelectedItems((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key])
+  }
+
+  async function cancelJob(jobId: number) {
+    if (!confirm('진행 중인 상세연동 요청을 취소할까요? 이미 처리된 병원 데이터는 유지됩니다.')) return
+    setCancelling(true)
+    try {
+      const res = await fetch(`/api/hira-hospitals/detail-sync/${jobId}/cancel`, { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok) {
+        setDetailError(json.error ?? '취소 실패')
+        return
+      }
+      await fetchJobs()
+      await fetchLogs(jobId)
+    } finally {
+      setCancelling(false)
+    }
+  }
+
   const selectedJob = jobs.find((j) => j.id === selectedJobId)
+  const selectedHospitalCount = detailTypes.filter((t) => selectedTypes.includes(t.code)).reduce((s, t) => s + t.count, 0)
+  const perDayQuota = Math.max(1, Math.floor(dailyCallBudget / Math.max(1, selectedItems.length)))
+  const estimatedDays = Math.max(1, Math.ceil(selectedHospitalCount / perDayQuota))
+  const typeNameOf = (code: string) => detailTypes.find((t) => t.code === code)?.name ?? code
+  const itemNameOf = (key: string) => detailItems.find((d) => d.key === key)?.name ?? key
 
   return (
     <div className="space-y-6">
@@ -253,15 +320,16 @@ export default function HiraSyncPageClient({ initialJobs, detailTypes }: { initi
           <div>
             <h2 className="text-sm font-semibold text-gray-700">병원상세정보연동</h2>
             <p className="mt-0.5 text-xs text-gray-400">
-              선택한 종별의 병원별 허가 병상수를 가져옵니다. 병원 1곳당 API 1회 호출로 시간이 소요됩니다.
+              선택한 종별 병원의 허가병상수·진료과목·전문의수를 가져옵니다. 병원 1곳당 항목 수만큼 API를 호출하며,
+              일일 한도({dailyCallBudget.toLocaleString()}회) 안에서 매일 자정 이후 자동으로 이어서 처리됩니다.
             </p>
           </div>
           <button
             onClick={startDetailSync}
-            disabled={detailStarting || hasRunning || selectedTypes.length === 0}
+            disabled={detailStarting || hasRunning || hasWaitingDetail || selectedTypes.length === 0 || selectedItems.length === 0}
             className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {detailStarting ? '시작 중...' : hasRunning ? '연동 진행 중' : '병원상세정보연동'}
+            {detailStarting ? '시작 중...' : hasRunning ? '연동 진행 중' : hasWaitingDetail ? '분할 실행 대기 중' : '병원상세정보연동'}
           </button>
         </div>
         <div className="px-6 py-4">
@@ -291,16 +359,27 @@ export default function HiraSyncPageClient({ initialJobs, detailTypes }: { initi
               </label>
             ))}
           </div>
-          {selectedTypes.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-gray-100 pt-3">
+            <span className="text-sm font-medium text-gray-600">항목</span>
+            <span className="h-4 w-px bg-gray-200" />
+            {detailItems.map((d) => (
+              <label key={d.key} className="flex cursor-pointer items-center gap-1.5 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={selectedItems.includes(d.key)}
+                  onChange={() => toggleItem(d.key)}
+                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                {d.name}
+              </label>
+            ))}
+          </div>
+          {selectedTypes.length > 0 && selectedItems.length > 0 && (
             <p className="mt-3 text-xs text-gray-500">
-              선택 종별 합계{' '}
-              <span className="font-medium text-gray-700">
-                {detailTypes.filter((t) => selectedTypes.includes(t.code)).reduce((s, t) => s + t.count, 0).toLocaleString()}개
-              </span>{' '}
-              병원 — 약{' '}
-              {Math.max(1, Math.round(
-                detailTypes.filter((t) => selectedTypes.includes(t.code)).reduce((s, t) => s + t.count, 0) * 0.3 / 60,
-              ))}분 소요 예상
+              선택 종별 합계 <span className="font-medium text-gray-700">{selectedHospitalCount.toLocaleString()}개</span> 병원 ×{' '}
+              {selectedItems.length}항목 = 총 <span className="font-medium text-gray-700">{(selectedHospitalCount * selectedItems.length).toLocaleString()}회</span> 호출 —
+              하루 {perDayQuota.toLocaleString()}개 병원씩 약 <span className="font-medium text-gray-700">{estimatedDays}일</span> 소요 예상
+              {estimatedDays > 1 && ' (자정 이후 자동 재개)'}
             </p>
           )}
         </div>
@@ -351,7 +430,9 @@ export default function HiraSyncPageClient({ initialJobs, detailTypes }: { initi
                         <StatusBadge status={job.status} />
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-700">
-                        {job.status === 'running' ? '-' : job.totalCount.toLocaleString() + '건'}
+                        {job.jobType === 'detail' && job.params
+                          ? <span className="tabular-nums">{job.doneCount.toLocaleString()}<span className="text-gray-400">/{job.totalTargets.toLocaleString()}</span></span>
+                          : job.status === 'running' ? '-' : job.totalCount.toLocaleString() + '건'}
                       </td>
                     </tr>
                   ))}
@@ -371,13 +452,67 @@ export default function HiraSyncPageClient({ initialJobs, detailTypes }: { initi
                   <p className="mt-0.5 text-xs text-gray-400">{fmt(selectedJob.startedAt)}</p>
                 )}
               </div>
-              <button
-                onClick={() => { setSelectedJobId(null); setSelectedLogs([]) }}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-3">
+                {selectedJob && selectedJob.jobType === 'detail' && selectedJob.params && (selectedJob.status === 'running' || selectedJob.status === 'waiting') && (
+                  <button
+                    onClick={() => cancelJob(selectedJob.id)}
+                    disabled={cancelling}
+                    className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    {cancelling ? '취소 중...' : '요청 취소'}
+                  </button>
+                )}
+                <button
+                  onClick={() => { setSelectedJobId(null); setSelectedLogs([]); setProgress(null) }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
+            {selectedJob && selectedJob.jobType === 'detail' && selectedJob.params && progress && (
+              <div className="border-b border-gray-100 bg-gray-50 px-5 py-3 text-xs text-gray-600">
+                <div className="flex items-center justify-between">
+                  <span>
+                    진행률{' '}
+                    <span className="font-semibold text-gray-800">
+                      {progress.totalTargets > 0 ? Math.floor(((progress.doneCount + progress.failedCount) / progress.totalTargets) * 100) : 0}%
+                    </span>
+                    {' '}· 완료 {progress.doneCount.toLocaleString()} / 대상 {progress.totalTargets.toLocaleString()}
+                    {progress.failedCount > 0 && <span className="text-red-500"> · 실패 {progress.failedCount.toLocaleString()}</span>}
+                  </span>
+                  <span className="text-gray-400">{progress.dayCount}일차</span>
+                </div>
+                <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+                  <div
+                    className={`h-full ${selectedJob.status === 'done' ? 'bg-green-500' : 'bg-indigo-500'}`}
+                    style={{ width: `${progress.totalTargets > 0 ? Math.min(100, ((progress.doneCount + progress.failedCount) / progress.totalTargets) * 100) : 0}%` }}
+                  />
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1">
+                  <span>종별: {selectedJob.params.typeCodes.map(typeNameOf).join('·')}</span>
+                  <span>항목: {selectedJob.params.items.map(itemNameOf).join('·')}</span>
+                  <span>오늘 호출: {progress.callsToday.toLocaleString()} / {dailyCallBudget.toLocaleString()}{progress.quotaDate ? ` (${progress.quotaDate})` : ''}</span>
+                  <span>하루 처리량: {progress.dailyQuota.toLocaleString()}개 병원</span>
+                  {progress.pending > 0 && (selectedJob.status === 'running' || selectedJob.status === 'waiting') && (
+                    <>
+                      <span>남은 대상: {progress.pending.toLocaleString()}개{progress.remainingDays != null && ` (약 ${progress.remainingDays}일)`}</span>
+                      <span>{selectedJob.status === 'waiting' ? `다음 실행: ${fmt(progress.nextRunAt)}` : '실행 중'}</span>
+                    </>
+                  )}
+                </div>
+                {progress.failedSample.length > 0 && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-red-500">실패 병원 (최근 {progress.failedSample.length}건)</summary>
+                    <ul className="mt-1 space-y-0.5 text-gray-500">
+                      {progress.failedSample.map((f) => (
+                        <li key={f.id}>{f.name} <span className="text-gray-400">({f.typeName})</span> — {f.error}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            )}
             <div
               ref={logRef}
               className="flex-1 overflow-y-auto px-5 py-4 font-mono text-xs space-y-1"
@@ -392,6 +527,9 @@ export default function HiraSyncPageClient({ initialJobs, detailTypes }: { initi
               )}
               {selectedJob?.status === 'running' && (
                 <p className="animate-pulse text-gray-400">연동 진행 중...</p>
+              )}
+              {selectedJob?.status === 'waiting' && (
+                <p className="text-amber-500">다음 실행 대기 중 ({fmt(selectedJob.nextRunAt)})</p>
               )}
             </div>
           </div>

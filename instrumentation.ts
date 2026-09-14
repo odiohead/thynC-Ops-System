@@ -26,8 +26,17 @@ export async function register() {
     // 심평원 연동 잡 고아 정리 — 연동은 서버 프로세스 내 백그라운드라 재시작 시 강제 종료됨.
     // running으로 남은 잡을 중단 처리해야 새 연동 시작(409 배타)이 풀린다. 재실행하면 미연동 병원부터 이어서 진행
     try {
-      const stale = await prisma.hiraSyncJob.findMany({ where: { status: 'running' }, select: { id: true } })
+      const stale = await prisma.hiraSyncJob.findMany({ where: { status: 'running' }, select: { id: true, jobType: true, params: true } })
       for (const job of stale) {
+        // v2 상세연동(분할 실행)은 진행 상태가 DB에 있어 재개 가능 — waiting으로 돌려 스케줄러가 즉시 이어감
+        if (job.jobType === 'detail' && job.params) {
+          await prisma.hiraSyncJob.update({ where: { id: job.id }, data: { status: 'waiting', nextRunAt: new Date() } })
+          await prisma.hiraSyncLog.create({
+            data: { jobId: job.id, type: 'day_done', message: '서버 재시작으로 실행이 끊겼습니다. 미처리 병원부터 곧 자동으로 이어서 진행합니다.', stats: { interruptedByRestart: true } },
+          })
+          console.warn(`[instrumentation] 심평원 상세연동 잡 #${job.id} 재개 대기 전환 (서버 재시작)`)
+          continue
+        }
         await prisma.hiraSyncJob.update({
           where: { id: job.id },
           data: { status: 'error', endedAt: new Date() },
@@ -44,6 +53,14 @@ export async function register() {
       }
     } catch (err) {
       console.error('[instrumentation] 심평원 연동 고아 잡 정리 실패:', err)
+    }
+
+    // 심평원 상세연동 분할 실행 스케줄러 (hira_detail_sync_v2_design.md §4) — waiting 잡을 next_run_at 도달 시 재개
+    try {
+      const { startHiraDetailScheduler } = await import('@/lib/hira-detail-sync')
+      startHiraDetailScheduler()
+    } catch (err) {
+      console.error('[instrumentation] 심평원 상세연동 스케줄러 초기화 실패:', err)
     }
 
     // 채널톡 AS접수 시트 폴링 (channeltalk_as_intake_design.md — 주기 channeltalk_as_interval, 기본 off)

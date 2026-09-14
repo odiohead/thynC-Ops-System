@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getWikiAuthUser } from '@/lib/wiki/access'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Ctx = { params: { id: string } }
@@ -10,7 +10,7 @@ type Ctx = { params: { id: string } }
  * 부모가 삭제 상태/없음이면 최상위로 승격.
  */
 export async function POST(request: NextRequest, { params }: Ctx) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 

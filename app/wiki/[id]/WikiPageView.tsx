@@ -16,7 +16,8 @@ const WikiEditor = dynamic(() => import('../components/WikiEditor'), {
 import ReferencePickerModal from './ReferencePickerModal'
 import TagPicker, { type Tag } from './TagPicker'
 import FavoriteButton from './FavoriteButton'
-import VersionHistoryModal from './VersionHistoryModal'
+import VersionHistoryModal, { type RestorePayload } from './VersionHistoryModal'
+import type { CollabStatus, WikiEditorInstance } from '../components/WikiEditor'
 import CommentSection from './CommentSection'
 import OverflowMenu from '../components/ui/OverflowMenu'
 import WikiModal from '../components/ui/WikiModal'
@@ -43,6 +44,8 @@ type Props = {
   coverUrl: string | null
   coverOffsetY: number
   backlinks: { id: string; title: string; icon: string | null }[]
+  /** 하위 페이지 목록 (2026-09-12 B-3 — 카테고리 페이지가 본문 없이 백지로 보이던 문제) */
+  childPages: { id: string; title: string; icon: string | null; updatedAt: string }[]
   author: string
   lastEditor: string
   updatedAt: string
@@ -77,6 +80,7 @@ export default function WikiPageView({
   coverUrl: initialCoverUrl,
   coverOffsetY: initialCoverOffsetY,
   backlinks,
+  childPages,
   author,
   lastEditor,
   updatedAt,
@@ -122,6 +126,12 @@ export default function WikiPageView({
   // 모든 페이지 실시간 협업 기본. 협업 서버 연결 실패 시 스냅샷 읽기전용으로 폴백.
   const [collabFailed, setCollabFailed] = useState(false)
   const collabActive = !collabFailed
+  const [collabStatus, setCollabStatus] = useState<CollabStatus>('connecting')
+  const editorRef = useRef<WikiEditorInstance | null>(null)
+  const handleEditorReady = useCallback((ed: WikiEditorInstance) => {
+    editorRef.current = ed
+  }, [])
+  const handleCollabStatus = useCallback((s: CollabStatus) => setCollabStatus(s), [])
 
   const [showRefPicker, setShowRefPicker] = useState(false)
   const [showVersions, setShowVersions] = useState(false)
@@ -188,6 +198,28 @@ export default function WikiPageView({
       }
     },
     [editable, id, toast],
+  )
+
+  /**
+   * 버전 복원 — 협업 페이지는 본문의 진실의 원천이 Y.Doc이라 서버가 content_json을 고쳐도 되돌아간다(A-4).
+   * 라이브 협업 세션의 에디터에서 replaceBlocks 로 적용하면 일반 편집과 같은 경로로 Yjs에 전파된다.
+   */
+  const applyRestore = useCallback(
+    async ({ blocks, title: restoredTitle }: RestorePayload): Promise<boolean> => {
+      const ed = editorRef.current
+      if (!ed || collabStatus !== 'connected') return false
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ed.replaceBlocks(ed.document as any, (blocks.length ? blocks : [{ type: 'paragraph' }]) as any)
+        setTitle(restoredTitle)
+        titleRef.current = restoredTitle
+        return true
+      } catch (e) {
+        console.error('[wiki] 버전 복원 적용 실패', e)
+        return false
+      }
+    },
+    [collabStatus],
   )
 
   const scheduleSave = useCallback(() => {
@@ -546,11 +578,37 @@ export default function WikiPageView({
             pageId={id}
             collab={{ pageId: id, userName: currentUserName, userColor: colorFromId(currentUserId) }}
             onCollabUnavailable={() => setCollabFailed(true)}
+            onCollabStatusChange={handleCollabStatus}
+            onEditorReady={handleEditorReady}
           />
         ) : (
           <WikiEditor key="legacy" initialContent={initialContent} editable={false} pageId={id} />
         )}
       </div>
+
+      {childPages.length > 0 && (
+        <div className="wiki-content mt-8 border-t border-[var(--wiki-border)] pt-6">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--wiki-text-muted)]">
+            📁 하위 페이지 ({childPages.length})
+          </h3>
+          <ul className="overflow-hidden rounded-[8px] border border-[var(--wiki-border)] bg-[var(--wiki-bg)]">
+            {childPages.map((c) => (
+              <li key={c.id} className="border-b border-[var(--wiki-border)] last:border-0">
+                <Link
+                  href={`/wiki/${c.id}`}
+                  className="flex items-center gap-2.5 px-3 py-2 text-sm transition hover:bg-[var(--wiki-hover)]"
+                >
+                  <span className="shrink-0 text-base leading-none">{c.icon || '📄'}</span>
+                  <span className="min-w-0 flex-1 truncate text-[var(--wiki-text)]">{c.title || '제목 없음'}</span>
+                  <span className="shrink-0 text-xs text-[var(--wiki-text-muted)]">
+                    {new Date(c.updatedAt).toLocaleDateString('ko-KR')}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {backlinks.length > 0 && (
         <div className="wiki-content mt-8 border-t border-[var(--wiki-border)] pt-6">
@@ -593,7 +651,12 @@ export default function WikiPageView({
       )}
 
       {showVersions && (
-        <VersionHistoryModal pageId={id} onClose={() => setShowVersions(false)} />
+        <VersionHistoryModal
+          pageId={id}
+          onClose={() => setShowVersions(false)}
+          canRestoreLive={editable && collabActive && collabStatus === 'connected'}
+          onRestoreLive={applyRestore}
+        />
       )}
 
       {showMove && (

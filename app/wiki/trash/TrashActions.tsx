@@ -4,7 +4,17 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useToast } from '../components/ui/Toast'
 
-export default function TrashActions({ pageId, title }: { pageId: string; title: string }) {
+export default function TrashActions({
+  pageId,
+  title,
+  canRestore,
+  canPurge,
+}: {
+  pageId: string
+  title: string
+  canRestore: boolean
+  canPurge: boolean
+}) {
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -42,6 +52,7 @@ export default function TrashActions({ pageId, title }: { pageId: string; title:
     }
   }
 
+  if (!canRestore) return null
   return (
     <div className="flex shrink-0 gap-1.5">
       <button
@@ -51,13 +62,15 @@ export default function TrashActions({ pageId, title }: { pageId: string; title:
       >
         복구
       </button>
-      <button
-        onClick={purge}
-        disabled={busy}
-        className="rounded-[6px] border border-red-200 px-2.5 py-1 text-xs text-red-600 transition hover:bg-red-50 disabled:opacity-50"
-      >
-        영구 삭제
-      </button>
+      {canPurge && (
+        <button
+          onClick={purge}
+          disabled={busy}
+          className="rounded-[6px] border border-red-200 px-2.5 py-1 text-xs text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+        >
+          영구 삭제
+        </button>
+      )}
     </div>
   )
 }

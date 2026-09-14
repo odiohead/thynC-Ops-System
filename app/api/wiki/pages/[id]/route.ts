@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
+import { getWikiAuthUser } from '@/lib/wiki/access'
 import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { deleteFromS3 } from '@/lib/s3'
@@ -23,7 +24,7 @@ function metaSnapshot(p: {
 }
 
 export async function GET(request: NextRequest, { params }: Ctx) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const page = await prisma.wikiPage.findUnique({
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest, { params }: Ctx) {
 }
 
 export async function PUT(request: NextRequest, { params }: Ctx) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
@@ -95,6 +96,24 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
 
   if (parentId === params.id) {
     return NextResponse.json({ error: 'Cannot set self as parent' }, { status: 400 })
+  }
+  // 순환 참조 방지 — 이동 API(/move)와 같은 검사. (2026-09-12 A-8: 이 경로는 자기 자신만 검사하고 있었다)
+  if (parentId && parentId !== existing.parentId) {
+    const descendants = await collectDescendantIds(params.id)
+    if (descendants.includes(parentId)) {
+      return NextResponse.json({ error: 'Cannot move under own descendant' }, { status: 400 })
+    }
+  }
+  // 협업 페이지(Y.Doc 보유)의 본문은 Y.Doc이 진실의 원천 — REST로 content_json을 쓰면 편집기에 반영되지 않고
+  // 다음 협업 저장이 되돌린다(2026-09-12 A-4). 현 클라이언트는 본문을 PUT하지 않으므로 스크립트·구 클라이언트 방어용.
+  if (contentJson !== undefined) {
+    const ydoc = await prisma.wikiPageYdoc.findUnique({ where: { pageId: params.id }, select: { pageId: true } })
+    if (ydoc) {
+      return NextResponse.json(
+        { error: '실시간 협업 페이지의 본문은 편집기에서만 수정할 수 있습니다 (REST 본문 저장 불가).' },
+        { status: 409 },
+      )
+    }
   }
 
   // 프로젝트 이슈노트 보호 — 루트: 이름·위치·템플릿화 차단 / 이슈노트: 위치·템플릿화 차단
@@ -264,8 +283,16 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
         WHERE deleted_at IS NULL
           AND content_json::text LIKE ${'%' + params.id + '%'}
       `
+      // Y.Doc이 있는 페이지는 REST로 content_json을 고쳐도 다음 협업 저장이 되돌리므로 제외 (A-4 같은 결함 클래스).
+      // 그런 페이지의 링크 라벨은 다음 편집 때 사용자가 고치거나, 렌더 시 실제 제목 조회로 대체될 때까지 옛 제목으로 남는다(클릭은 id 기반이라 정상).
+      const ydocIds = new Set(
+        (await tx.wikiPageYdoc.findMany({
+          where: { pageId: { in: candidates.map((c) => c.id) } },
+          select: { pageId: true },
+        })).map((y) => y.pageId),
+      )
       for (const src of candidates) {
-        if (src.id === params.id) continue
+        if (src.id === params.id || ydocIds.has(src.id)) continue
         const { blocks, changed } = updatePageLinkTitles(src.contentJson, params.id, title)
         if (changed) {
           await tx.wikiPage.update({
@@ -303,7 +330,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
 }
 
 export async function DELETE(request: NextRequest, { params }: Ctx) {
-  const authUser = await getAuthUser(request)
+  const authUser = await getWikiAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (authUser.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
@@ -348,6 +375,20 @@ export async function DELETE(request: NextRequest, { params }: Ctx) {
       { error: '병원 노트 페이지는 관리자만 삭제할 수 있습니다.' },
       { status: 403 },
     )
+  }
+
+  // 영구 삭제(되돌릴 수 없음)는 ADMIN 이상 또는 (USER 이상 + wiki.admin), 그리고 휴지통에 있는 페이지만
+  // (2026-09-12 A-7 — 이전엔 USER 전원이 살아있는 페이지까지 하위 포함 hard delete + S3 첨부 삭제 가능했다. RBAC 가산 원칙 예외로 사용자 승인)
+  if (permanent) {
+    if (
+      !isAdminOrAbove(authUser.role) &&
+      !(isUserOrAbove(authUser.role) && (await hasPermission(authUser, 'wiki.admin')))
+    ) {
+      return NextResponse.json({ error: '영구 삭제는 관리자(또는 위키 관리 권한)만 할 수 있습니다.' }, { status: 403 })
+    }
+    if (!existing.deletedAt) {
+      return NextResponse.json({ error: '휴지통에 있는 페이지만 영구 삭제할 수 있습니다. 먼저 삭제(휴지통 이동)하세요.' }, { status: 400 })
+    }
   }
 
   const descendantIds = await collectDescendantIds(params.id)

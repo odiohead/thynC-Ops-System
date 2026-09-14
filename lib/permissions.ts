@@ -116,11 +116,17 @@ export const PERMISSIONS = {
     description:
       '병원 삭제, 병원 목록 Google Drive 내보내기, 병원 Excel 가져오기 버튼 노출(가져오기 API 자체는 원래 USER 등급 전원). 등록·수정은 원래 USER 등급 전원 가능이라 무관. 병원 업무 일괄 이전·HIRA 동기화는 SUPER_ADMIN 전용 유지(불포함)',
   },
+  'wiki.access': {
+    label: '위키 접근',
+    module: '위키',
+    description:
+      '사내 위키 전체(페이지·API·실시간 협업)에 대한 접근 개방 — 원래 SEERS 소속 전용. 소속 외 계정(협력사 등)에 위키를 열어줄 때 부여. 등급은 그대로 적용(VIEWER 읽기 전용, USER 이상 쓰기). nav 메뉴 노출(allowed_org_codes)과 별개로 서버가 강제 (2026-09-12)',
+  },
   'wiki.admin': {
     label: '위키 관리',
     module: '위키',
     description:
-      '보호 페이지(프로젝트 이슈노트·병원노트 연동) 삭제, 페이지 AI 검색 제외 토글, 타인 댓글 수정·삭제. 일반 페이지 작성·수정·삭제·댓글은 원래 USER 등급 전원 가능이라 무관',
+      '보호 페이지(프로젝트 이슈노트·병원노트 연동) 삭제, 휴지통 영구 삭제(2026-09-12부터 ADMIN 이상 또는 이 권한), 페이지 AI 검색 제외 토글, 타인 댓글 수정·삭제. 일반 페이지 작성·수정·휴지통 이동·댓글·버전 복원은 원래 USER 등급 전원 가능이라 무관',
   },
   'consultation.admin': {
     label: '상담이력 관리',

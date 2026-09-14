@@ -5,6 +5,7 @@ import { verifyToken, isUserOrAbove } from '@/lib/auth'
 import { hasPermission } from '@/lib/appRoles'
 import type { PartialBlock } from '@blocknote/core'
 import { getIssuePageProtection } from '@/lib/wiki/projectIssueNote'
+import { sortSiblings } from '@/lib/wiki/sortSiblings'
 import WikiPageView from './WikiPageView'
 import WikiHtmlPageView from './WikiHtmlPageView'
 
@@ -127,6 +128,18 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
   })
   const tags = tagRels.map((r) => ({ id: r.tag.id, name: r.tag.name, color: r.tag.color }))
 
+  // 하위 페이지 — 사이드바와 같은 정렬 규칙 (2026-09-12 B-3)
+  const childRows = await prisma.wikiPage.findMany({
+    where: { parentId: page.id, deletedAt: null, isTemplate: false },
+    select: { id: true, title: true, icon: true, sortOrder: true, updatedAt: true },
+  })
+  const childPages = sortSiblings(childRows).map((c) => ({
+    id: c.id,
+    title: c.title,
+    icon: c.icon,
+    updatedAt: c.updatedAt.toISOString(),
+  }))
+
   // 백링크 — 이 페이지를 링크한 페이지들
   const backlinkRels = await prisma.wikiPageLink.findMany({
     where: { targetPageId: page.id, source: { deletedAt: null } },
@@ -169,6 +182,7 @@ export default async function WikiDetailPage({ params }: { params: { id: string 
       coverUrl={page.coverUrl}
       coverOffsetY={page.coverOffsetY}
       backlinks={backlinks}
+      childPages={childPages}
       author={page.author.name}
       lastEditor={page.lastEditor?.name ?? page.author.name}
       updatedAt={page.updatedAt.toISOString()}

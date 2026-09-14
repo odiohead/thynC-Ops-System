@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useToast } from '../components/ui/Toast'
 
 type Version = {
   id: string
@@ -10,14 +11,26 @@ type Version = {
   savedBy: { id: string; name: string }
 }
 
+export type RestorePayload = { blocks: unknown[]; title: string }
+
 export default function VersionHistoryModal({
   pageId,
   onClose,
+  canRestoreLive,
+  onRestoreLive,
 }: {
   pageId: string
   onClose: () => void
+  /**
+   * 협업 세션이 연결돼 있어 클라이언트에서 본문을 적용할 수 있는가.
+   * 협업 페이지는 서버가 content_json을 고쳐도 Y.Doc이 되돌리므로(2026-09-12 A-4) 연결 전에는 복원을 막는다.
+   */
+  canRestoreLive: boolean
+  /** 서버가 `mode: 'client'`로 응답했을 때 라이브 에디터에 블록을 적용. 성공 여부 반환 */
+  onRestoreLive: (payload: RestorePayload) => Promise<boolean>
 }) {
   const router = useRouter()
+  const toast = useToast()
   const [versions, setVersions] = useState<Version[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -41,11 +54,22 @@ export default function VersionHistoryModal({
       const res = await fetch(`/api/wiki/pages/${pageId}/versions/${versionId}`, {
         method: 'POST',
       })
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        alert(err.error || `복원 실패 (${res.status})`)
+        toast.error(data.error || `복원 실패 (${res.status})`)
         return
       }
+      if (data.mode === 'client') {
+        const applied = await onRestoreLive({
+          blocks: Array.isArray(data.blocks) ? (data.blocks as unknown[]) : [],
+          title: data.title ?? '',
+        })
+        if (!applied) {
+          toast.error('본문 적용에 실패했습니다. 협업 연결 상태를 확인한 뒤 다시 시도하세요.')
+          return
+        }
+      }
+      toast.success('복원되었습니다')
       router.refresh()
       onClose()
     } finally {
@@ -65,8 +89,14 @@ export default function VersionHistoryModal({
         <div className="p-4 border-b">
           <h2 className="text-lg font-bold">버전 히스토리</h2>
           <p className="text-xs text-gray-500 mt-1">
-            본문이 수정될 때마다 직전 상태가 자동 저장됩니다.
+            본문을 편집하는 동안 2분 간격으로 직전 상태가 자동 저장됩니다(동시 편집 시 마지막 입력자 기준).
+            복원하면 현재 본문은 새 버전으로 보존됩니다.
           </p>
+          {!canRestoreLive && (
+            <p className="mt-1 text-xs text-amber-700">
+              실시간 협업에 연결된 상태에서만 복원할 수 있습니다. 연결을 확인한 뒤 다시 열어주세요.
+            </p>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -90,7 +120,8 @@ export default function VersionHistoryModal({
                   </div>
                   <button
                     onClick={() => restore(v.id)}
-                    disabled={restoring === v.id}
+                    disabled={restoring === v.id || !canRestoreLive}
+                    title={canRestoreLive ? undefined : '협업 연결 후 복원 가능'}
                     className="text-xs px-2 py-1 border border-blue-300 text-blue-700 rounded hover:bg-blue-50 disabled:opacity-50"
                   >
                     {restoring === v.id ? '복원 중...' : '복원'}

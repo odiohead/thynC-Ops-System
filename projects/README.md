@@ -12,6 +12,7 @@
 
 | 문서 | 대상 | 상태 |
 |---|---|---|
+| [hira_detail_sync_v2_design.md](hira_detail_sync_v2_design.md) | 심평원 병원상세정보연동 v2 — 의원급 확장·진료과목/전문의수 항목·일일 한도(9,000콜) 분할 자동 실행·요청 상세 진행 현황 | **구현 완료 (dev2, 2026-09-14) — 빌드·PROD 배포 대기** |
 | [notification_v1.1_design.md](notification_v1.1_design.md) · [HTML](notification_v1.1_design.html) | 1.1 알림체계 개선 (SLA 세분화·채널 라우팅·내부 알림·첫 화면 개인화) | **P1~P6 구현 완료 / P7 지표·PROD 배포 대기** |
 | [sales_crm_design.md](sales_crm_design.md) · [HTML](sales_crm_design.html) | 영업/CRM 모듈 v4 — 병원 축·차수 축 2데이터셋 (인적정보/전원 이력·딜 확장·`/sales` 도입 현황 목록, P1~P5) | **v4 P1~P3 구현 완료 (dev2, 2026-07-29) — P4 실데이터 검증 대기** |
 | [daewoong_deal_migration_design.md](daewoong_deal_migration_design.md) | 대웅 원장(thynC_status.xlsx) 딜 전면 재적재 + 대웅 축 필드 분리·'대웅제약' 카드 | **검토 대기 (착수 승인 전)** |
@@ -29,6 +30,7 @@
 | [thync_as_migration_design.md](thync_as_migration_design.md) | thynC AS이력(수기 엑셀 원장 3,537행·174병원) → 기기현황 마이그 — X열 완료 판정·오입력 자동 보정 3종·88건 충돌 절충·병원별 단계 적용(초기必 검증 게이트). 메디인 리허설 완료(dev2) | **설계 확정 — 일반화 스크립트 구현 대기** |
 | [channeltalk_as_intake_design.md](channeltalk_as_intake_design.md) | 채널톡 AS접수 자동 등록 — ALF 태스크→'thynC VOC 현황' A/S 탭(중계 전용)을 1분 폴링해 접수 자동 생성(마이그 파서 재사용·티켓 기존 경로) + 종결 시 완료여부 역기입, P0~P3 | **완료 (PROD 배포 2026-09-07)** |
 | [as_work_design.md](as_work_design.md) | AS업무(AS접수) — 기기 수리·교체 업무 도메인화(8번째 티켓 도메인, refType `AS`): 헤더+기기 라인 구조, 단계형 상태 8종(완료·취소 티켓 CLOSED 직행), 기기현황 자동 연동(AS_OPEN·교체·회수), WMS 1차 제외, 과거 이력 3,537행은 기능 완료 후 도메인 소급 | **완료 (PROD 배포 2026-09-04, 커밋 990c0d2)** — 후속: PROD CTI 규칙 사용자 신설·과거 이력 소급 마이그 |
+| [wiki_next_gen_review.md](wiki_next_gen_review.md) | **검토 의견** (설계안 아님) — 차세대 사내위키 검토: Notion·Confluence·오픈소스 6종·KM 도구 6종·여론 vs 현 위키 정밀 비교(코드 감사 4렌즈 + 조사 8주제 + 적대 검증 53). 결론: 기능·아키텍처 충분, 6/30 협업 전환 회귀 등 소규모 결함 11건(A)만 수정, 선택 6(B)·운영 2(C)·보류 25+(D) | **A 11건 + B 4건 구현 완료 (dev2 2026-09-12) — PROD 배포 대기** |
 
 ## 루트에 남아 있는 1.0 문서
 

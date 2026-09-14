@@ -108,9 +108,20 @@ PGPASSWORD=... psql -U thync -d thync_ops -c "ALTER TABLE ..."
 # PROD 반영 절차
 cd /home/ubuntu/thynC-Ops-System/thynC-Ops-PROD
 git pull origin main
-npm run build
+npm install                      # package.json 변경 시
+NODE_OPTIONS="--max-old-space-size=4096" npm run build   # next build + 협업 서버 번들(collab-server/dist) 함께 생성
 pm2 restart thync-prod
+# 협업 서버 — 아래 파일 중 하나라도 바뀐 배포면 반드시 재시작 (번들은 build에 포함되지만 프로세스는 별도)
+#   collab-server/*.mts · lib/wiki/wikiSchema.tsx · lib/wiki/blockText.ts · 패키지(blocknote/yjs/hocuspocus)
+#   → sha256sum collab-server/dist/index.mjs 가 이전 배포와 다르면 재시작
+pm2 restart thync-collab-prod
+# 재시작 순간 위키를 열어 둔 사용자는 WS 재접속(입력은 재접속 시 자동 병합) — 업무 외 시간 권장.
+# 빌드만 하고 재시작을 빼먹으면 서버가 구 스키마로 Y.Doc↔블록 변환을 계속해 조용한 스냅샷 손상이 난다.
 ```
+
+**협업 서버 스냅샷 복구 런북** (Y.Doc = 진실의 원천, `wiki_pages.content_json/plain_text` = 검색·렌더 스냅샷)
+- 스냅샷이 낡았다고 의심되면(검색·AI가 옛 본문을 보임): `node collab-server/dist/resync.mjs --dry` 로 대상 확인 → `--dry` 없이 실행하면 Y.Doc에서 스냅샷·백링크 재생성(버전·최근 수정자는 건드리지 않음). 협업 서버가 떠 있어도 안전. PROD는 DB 쓰기이므로 규칙 5(명시 허락) 적용
+- 반대로 Y.Doc이 손상됐고 스냅샷이 맞다면: 해당 `wiki.wiki_page_ydoc` 행을 삭제 → 협업 서버 재시작 → 다음 열람 시 `content_json`으로 재시딩(collab-server/index.mts fetch). 열려 있는 세션이 있으면 메모리 Y.Doc이 다시 저장되므로 반드시 재시작 후
 
 ### 7. 위키 모듈 경계 — 단방향 의존성
 
@@ -121,6 +132,8 @@ pm2 restart thync-prod
 - 메인에서 위키 데이터가 필요하면 `fetch('/api/wiki/...')`로 호출 (쿠키 인증 자동 전달)
 - **승인 예외 (2026-07-17, 프로젝트 이슈노트 위키 전환)**: `app/projects/[code]/page.tsx` → `app/wiki/components/ProjectIssueNotePanel` import 1건만 허용. 패널 내부의 데이터 교환은 전부 HTTP(`/api/wiki/*`)이며, 이 결정으로 위키는 "떼어낼 수 있는 부가 모듈"이 아니라 콘텐츠 백본으로 격상됨(분리 시 이슈노트 임베드 동반 이전 필요)
 - **승인 예외 2 (2026-07-18, 병원 노트 — AI 어시스턴트 v2 Phase 4)**: `app/hospitals/[code]/page.tsx` → `app/wiki/components/HospitalNotePanel` import 1건 추가 허용. 이슈노트와 동일 패턴(데이터 교환은 전부 HTTP `/api/wiki/hospital-notes`)
+- **승인 예외 3 (사후 기록 2026-09-12 — AI 어시스턴트 v3, 2026-07-18~)**: `lib/ai/tools.ts` → `lib/wiki/{hospitalNote,aiExclusion}` import 및 `wiki.wiki_chunks`/`wiki_pages` **읽기 전용 직접 조회**(청크 랭킹 SQL), `instrumentation.ts` → `lib/wiki/chunk-scheduler` 기동. 위키는 AI 지식 백본이라 HTTP 우회의 이득이 없음. 쓰기는 여전히 위키 API/협업 서버만
+- **위키 접근 게이트 (2026-09-12)**: 위키 페이지·`/api/wiki/*`·협업 서버는 `lib/wiki/access.ts`(SEERS 소속 OR `wiki.access` 권한, DB 실시간)로 서버가 강제. nav `allowed_org_codes`는 노출 제어일 뿐. 새 위키 API는 `getAuthUser` 대신 `getWikiAuthUser` 사용
 
 ```typescript
 // app/hospitals/[code]/page.tsx (메인 모듈)
