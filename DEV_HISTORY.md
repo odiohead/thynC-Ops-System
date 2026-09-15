@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-09-15 19:00 | PROD 배포: AS 태그·타임라인·목록 개편 + 선교체 사후 입고 (471b412)
+
+- **dev2**: 커밋 471b412·push(`scripts/tmp-*.mts` 11개는 미추적 유지)
+- **PROD**: `git pull`(2369885→471b412, package.json 변경 없어 npm install 생략) → 마이그 `20260915170000_as_receipt_tags` SQL 실행+resolve(`migrate status` up to date, 컬럼 3개 확인) → `prisma generate` → 힙 4GB 빌드(협업 번들 해시 2108cacb 불변 → 협업 서버 재시작 불필요) → `pm2 restart thync-prod` → Ready 1188ms · health 200 · /as-receipts·3470·timeline 307(미인증 리다이렉트) 정상, 에러 로그 없음
+- **후속**: AS-202609-0188(3470)은 입고처리를 다시 실행하면 사후 입고가 기록됨(사용자 실행)
+- 영향: PROD 소스(471b412)·PROD DB(as_receipts 컬럼 3개), DEV_HISTORY.md
+
+---
+
 ## 2026-09-15 18:40 | AS 목록 기기 열 축약(ECG·SpO2·ETC) + 태그 열 잔여 폭 한 줄 (dev2 빌드·재시작)
 
 - **사용자 요청**: 기기 열이 너무 길다 — 심전계 ECG / 산소포화도 SpO2 / 기타 ETC 코드로 수량만 표기해 폭을 최소화하고, 남는 폭은 전부 태그 열에 주어 태그가 많아도 한 줄로
