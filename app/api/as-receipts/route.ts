@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { AS_CATEGORIES, parseSerialTextarea, summarizeAsRegistryTags, isAsIntakeIssue } from '@/lib/asReceiptShared'
+import { AS_CATEGORIES, AS_TAGS, AS_TAG_FIELDS, parseSerialTextarea, summarizeAsRegistryTags, isAsIntakeIssue, type AsTag } from '@/lib/asReceiptShared'
 import { createAsReceipt, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { notifyTicketCreated } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
@@ -23,7 +23,7 @@ const listInclude = {
   ticket: { select: { id: true, ticketCode: true, status: true, owner: { select: { id: true, name: true } } } },
   items: {
     select: {
-      id: true, serialNo: true, outcome: true, deviceKind: true, intakeState: true, // 입고 대조 (2026-09-11)
+      id: true, serialNo: true, outcome: true, deviceKind: true, intakeState: true, shippedAt: true, // 입고 대조 (2026-09-11) · 발송일 열 (2026-09-15)
       device: { select: { deviceInfo: { select: { deviceName: true } }, placement: { select: { productType: true } } } }, // 목록 기기별 대수 표기 (CX #1) + 상품유형(일반/라이트, 2026-09-10)
       newDevice: { select: { placement: { select: { productType: true } } } }, // 교체 라인 — 구기기 배치가 회수된 뒤에는 교체기 배치의 상품유형으로 판별
     },
@@ -55,6 +55,11 @@ export async function GET(request: NextRequest) {
 
   const category = sp.get('category')
   if (category && (AS_CATEGORIES as readonly string[]).includes(category)) where.category = category
+
+  // 태그 필터 (2026-09-15) — ?tag=PRE_REPLACE&tag=PRIORITY_REPAIR (복수 = 모두 켜진 접수, AND)
+  for (const t of sp.getAll('tag')) {
+    if ((AS_TAGS as readonly string[]).includes(t)) where[AS_TAG_FIELDS[t as AsTag]] = true
+  }
 
   const hospitalCode = sp.get('hospitalCode')
   if (hospitalCode) where.hospitalCode = hospitalCode
@@ -177,6 +182,9 @@ export async function POST(request: NextRequest) {
         pickupMethod: body.pickupMethod ?? null,
         pickupTrackingNo: typeof body.pickupTrackingNo === 'string' ? body.pickupTrackingNo : null,
         preReplace: body.preReplace === true,
+        priorityRepair: body.priorityRepair === true, // 태그 (2026-09-15)
+        firmwareUpdate: body.firmwareUpdate === true,
+        accessoryIncluded: body.accessoryIncluded === true,
         statusId,
         note: typeof body.note === 'string' ? body.note : null,
         lines: parseLines(body),

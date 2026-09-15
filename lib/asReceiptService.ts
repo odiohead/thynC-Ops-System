@@ -11,7 +11,7 @@ import { prisma } from '@/lib/prisma'
 import { normalizeSerial, todayKst } from '@/lib/deviceRegistryShared'
 import { openDeviceAs, clearDeviceAs, replaceDevice, recoverDevice, registerDevicesIn, RegistryError, type RegistryCtx } from '@/lib/deviceRegistry'
 import { syncAsReceiptToTicket, createTicketForAsReceipt } from '@/lib/ticket-domains/asReceipt'
-import { AS_OUTCOMES, AS_RESOLVE_OUTCOMES, AS_CATEGORIES, AS_METHODS, AS_DEST_TYPES, asDeviceKindFromSerial, type AsOutcome } from '@/lib/asReceiptShared'
+import { AS_OUTCOMES, AS_RESOLVE_OUTCOMES, AS_CATEGORIES, AS_METHODS, AS_DEST_TYPES, AS_OUTCOME_LABELS, asDeviceKindFromSerial, type AsOutcome } from '@/lib/asReceiptShared'
 import { nextAsCode } from '@/lib/asReceipt'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
@@ -533,10 +533,12 @@ export async function intakeAsLines(receiptId: number, actor: { userId: string; 
       const item = bySerial.get(k)
       if (item) {
         matched.add(k)
-        if (item.outcome) { warnings.push(`${k}: 이미 종결된 라인 — 입고 상태를 바꾸지 않았습니다`); continue }
-        if (item.intakeState !== 'RECEIVED') {
-          await tx.asReceiptItem.update({ where: { id: item.id }, data: { intakeState: 'RECEIVED', receivedAt: new Date(receivedAt) } })
-        }
+        if (item.intakeState === 'RECEIVED') { result.received.push(k); continue } // 이미 정상입고 — 입고일 유지
+        // 종결 라인의 사후 입고 (2026-09-15): 선교체·방문교체는 처리(발송)가 입고보다 앞서므로, 종결됐어도 대기(PENDING)면 정상입고로 기록한다.
+        // 미회수(NOT_RECEIVED)로 종결된 미입고(MISMATCH) 라인은 접수자 확인을 거친 판단이라 자동으로 뒤집지 않는다.
+        if (item.outcome && item.intakeState !== 'PENDING') { warnings.push(`${k}: 이미 종결된 라인 — 입고 상태를 바꾸지 않았습니다`); continue }
+        await tx.asReceiptItem.update({ where: { id: item.id }, data: { intakeState: 'RECEIVED', receivedAt: new Date(receivedAt) } })
+        if (item.outcome) warnings.push(`${k}: 처리 완료된 라인의 사후 입고로 기록했습니다 (${AS_OUTCOME_LABELS[item.outcome as AsOutcome] ?? item.outcome})`)
         result.received.push(k)
       } else {
         // 접수 외 입고 — EXTRA 라인 생성 (원장 매칭만, AS 표시·기기종류는 편입 확정 시)
@@ -862,6 +864,9 @@ export interface CreateAsReceiptInput {
   reporterName?: string | null
   pickupMethod?: string | null
   pickupTrackingNo?: string | null
+  priorityRepair?: boolean // 태그 (2026-09-15)
+  firmwareUpdate?: boolean
+  accessoryIncluded?: boolean
   preReplace?: boolean
   destType?: string | null // HOSPITAL / OTHER
   destInfo?: string | null
@@ -930,6 +935,7 @@ export async function createAsReceipt(
   const reporterName = input.reporterName?.trim() || null
   const pickupTrackingNo = input.pickupTrackingNo?.trim() || null
   const preReplace = input.preReplace === true
+  const tagFlags = { priorityRepair: input.priorityRepair === true, firmwareUpdate: input.firmwareUpdate === true, accessoryIncluded: input.accessoryIncluded === true }
   const destType = input.destType ?? null
   if (destType && !(AS_DEST_TYPES as readonly string[]).includes(destType)) throw new AsServiceError(400, '발송지 구분이 올바르지 않습니다.')
   const destInfo = input.destInfo?.trim() || null
@@ -953,6 +959,7 @@ export async function createAsReceipt(
               pickupMethod,
               pickupTrackingNo,
               preReplace,
+              ...tagFlags,
               destType,
               destInfo,
               pickupDestInfo: input.pickupDestInfo?.trim() || null,

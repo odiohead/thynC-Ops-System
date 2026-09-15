@@ -4,6 +4,47 @@
 
 ---
 
+## 2026-09-15 18:40 | AS 목록 기기 열 축약(ECG·SpO2·ETC) + 태그 열 잔여 폭 한 줄 (dev2 빌드·재시작)
+
+- **사용자 요청**: 기기 열이 너무 길다 — 심전계 ECG / 산소포화도 SpO2 / 기타 ETC 코드로 수량만 표기해 폭을 최소화하고, 남는 폭은 전부 태그 열에 주어 태그가 많아도 한 줄로
+- **공용** (`lib/asReceiptShared.ts`): `AS_DEVICE_GROUP_CODES`·`summarizeAsItemsByGroup()` — 기존 `asDeviceGroupOf`(원장 모델명→기기종류→시리얼 접두)로 3군 집계(대수·종결 수)
+- **목록** (`app/as-receipts/page.tsx`): 기기 셀 = 군별 배지(`ECG 2` 하늘 · `SpO2 1` 장미 · `ETC` 회색, 종결분 `/n` 흐리게), 툴팁은 기존 "산소포화도 2 · 심전도 1 (종결 n)" 유지. 헤더 폭: 태그 열만 `w-full`, 나머지 `w-px`(내용 폭) + 전 셀 `whitespace-nowrap`, 태그 배지 `flex-nowrap`. 병원 열은 최소 7rem·최대 12rem 말줄임(툴팁 전체명)
+- 검증: tsc 0·eslint 0 → 힙 4GB 빌드 → `pm2 restart thync-dev` → health 200·목록 307
+- 영향: lib/asReceiptShared.ts, app/as-receipts/page.tsx, README.md
+
+---
+
+## 2026-09-15 18:20 | dev2 빌드·재시작 — AS 태그·타임라인 + 선교체 사후 입고
+
+- 힙 4GB `npm run build`(협업 번들 해시 2108cacb 불변 → thync-collab 재시작 불필요) → `pm2 restart thync-dev` → /api/health 200 · /as-receipts·상세·`?tag=` 307(미인증 리다이렉트) 정상
+- 영향: dev2 런타임(빌드 산출물)
+
+---
+
+## 2026-09-15 18:00 | AS접수 상세·목록 개편 — 태그 3종 + 비고 접수정보 이동 + 타임라인 + 목록 컬럼·태그 필터 (dev2 DB 마이그·E2E 완료, 빌드·PROD 배포 대기)
+
+- **사용자 요청**: ① 5. 비고 텍스트박스를 2. 접수정보 최하단으로(접수 시 입력 비중이 큼) ② 최하단에 Timeline history ③ 2. 접수정보에 '우선수리'·'펌웨어 업데이트'·'부속품 동봉' 체크박스 ④ 목록에서 선교체·발송지·완료일·등록자 제거, 수거 우측에 발송일·태그(선교체+3종, 컬러) 추가 + 태그 필터
+- **DB** (마이그 `20260915170000_as_receipt_tags`, dev2 적용·resolve): `as_receipts` +`priority_repair`·`firmware_update`·`accessory_included` BOOLEAN NOT NULL DEFAULT false. `pre_replace`는 유지(요약 평균·시트 P열·채널톡 인입이 사용) — 태그 4종의 하나로 편입
+- **공용** (`lib/asReceiptShared.ts`): `AS_TAGS`·`AS_TAG_LABELS`·`AS_TAG_FIELDS`(태그↔컬럼)·`AS_TAG_BADGE_CLS`(선교체 앰버·우선수리 빨강·펌웨어 보라·부속품 청록)·`asReceiptTags()` 단일 소스
+- **API**: 목록 `?tag=` 복수(AND) 필터 + items `shippedAt` 포함 / POST·PUT 태그 3종 수용(`createAsReceipt` 입력 확장) / Excel 열 우선수리·펌웨어업데이트·부속품동봉 추가 / 신규 `GET [id]/timeline` — `audit_logs`(resource=as_receipt) + 연결 티켓 `ticket_logs` 합성. 일반 수정은 before/after 헤더 필드 diff("수거방법 - → 택배수거 / 태그 우선수리 켬 → 끔 / 비고 입력"), 입고처리·입고 확인·라인 최종확정·발송정보·원장 확정·완료·리오픈은 라벨 접미사로 분기해 요약. 비고 뒤에 시스템 이력 줄만 덧붙은 경우는 diff에서 생략(별도 이벤트 존재). 초안 저장은 감사로그가 없어 미표시
+- **상세** (`app/as-receipts/[id]/page.tsx`): 헤더 배지 = 켜진 태그 전부('일반 (선교체 아님)' 문구 제거), 1. 공통정보 구분 옆 선교체 표기 제거. 2. 접수정보 하단에 태그 체크박스 행 + 비고 textarea(4줄) — [접수정보 저장]이 태그·비고 포함. 5. 비고 카드 → **5. 타임라인**(세로 점선, 접수 이벤트 파란 점·티켓 이벤트 회색 점+'티켓' 칩, 시각·행위자·상세 줄). 수정 모달(`AsReceiptFormModal`) 선교체 체크박스를 태그 4종 체크박스 행으로 확장(등록·수정 공통)
+- **목록** (`app/as-receipts/page.tsx`): 컬럼 접수번호·병원·접수 기기상태·구분·기기·유형·상태·접수일·수거·**발송일**·**태그**. 발송일 = 라인 발송일 최신, 부분 발송·복수 날짜면 `(발송 n/전체 m)`+툴팁 전체 날짜. 태그 필터 칩(기기군 우측, URL 동기화)
+- **검증**: tsc 0·eslint 0. dev2 라우트 핸들러 E2E(tsx, NextRequest+JWT 쿠키): 등록(선교체+우선수리) 201 → 목록 `tag=PRE_REPLACE` 포함·`tag=PRE_REPLACE&tag=PRIORITY_REPAIR` 포함·`tag=FIRMWARE_UPDATE` 미포함 → PUT(수거방법·태그 변경·비고) 200 → 입고처리 200 → 타임라인 5건(입고처리 / 티켓 상태 Open→In Progress 자동 / 접수 수정 diff 5항목 / 접수 등록 / 티켓 생성). 테스트 접수·티켓·감사로그 삭제
+- **PROD 반영 시**: 마이그 SQL 1건(규칙 5 허락) — 컬럼 DEFAULT false라 기존 데이터 영향 없음
+- 영향: prisma/schema.prisma, prisma/migrations/20260915170000_as_receipt_tags, lib/asReceiptShared.ts, lib/asReceiptService.ts, app/api/as-receipts/{route.ts,[id]/route.ts,[id]/timeline/route.ts(신규),export/route.ts}, app/as-receipts/{page.tsx,[id]/page.tsx,_components/AsReceiptFormModal.tsx}, README.md
+
+---
+
+## 2026-09-15 17:10 | AS접수 입고처리 — 선교체 등 처리 완료 라인의 사후 입고 기록 (dev2 E2E 완료, 빌드·PROD 배포 대기)
+
+- **배경(사용자 보고, PROD AS-202609-0188 / id 3470)**: 선교체는 신기기를 먼저 발송하고 고장품이 나중에 입고되는데, 라인을 '교체'로 확정한 뒤 입고처리를 하면 "입력 1 → 정상입고 0"으로 기록되지 않음(3회 시도 흔적). 원인: `intakeAsLines`가 `outcome`이 있는 라인을 "이미 종결된 라인" 경고로 건너뜀 — 입고 대조 설계 당시 "선교체는 입고 없이 처리됨"으로 간주했으나 실제 업무는 입고가 뒤따름
+- **수정** (`lib/asReceiptService.ts` intakeAsLines): 종결 라인이라도 `intakeState`가 PENDING이면 정상입고·라인 입고일 기록(경고 "처리 완료된 라인의 사후 입고로 기록했습니다 (교체)"). 이미 RECEIVED면 입고일 유지·경고 없음. 미회수(NOT_RECEIVED)로 종결된 MISMATCH 라인은 접수자 확인을 거친 판단이라 종전대로 건너뜀. 헤더 상태('발송완료' 등 뒤 단계)·결과·기기현황 이벤트·시트 역기입(outcome 기준)은 불변, 입고 안 된 다른 선교체 라인은 PENDING 유지(미입고로 뒤집지 않음 — 기존 `item.outcome` skip 유지)
+- **검증**: tsc 0·eslint 0. dev2 서비스 E2E(tsx, 미등록 시리얼 2라인 선교체 접수): 교체 확정 → '발송완료' → 1대 입고 → RECEIVED·입고일 2026-09-15·경고 1 → 같은 시리얼 재입고 → 입고일 유지·경고 0, 다른 라인 PENDING 유지, 상태 불변. 테스트 접수·티켓 삭제
+- **PROD 반영 시**: 코드 전용(DDL 없음). 3470은 배포 후 입고처리를 다시 실행하면 기록됨(비고의 "정상입고 0" 이력 3줄은 그대로 남음)
+- 영향: lib/asReceiptService.ts, README.md
+
+---
+
 ## 2026-09-14 15:20 | PROD 배포: AS접수 라인 처리방법 초안 + [최종확정] (f73cc4a)
 
 - **PROD**: `git pull`(902f2b3→f73cc4a, package.json 변경 없어 npm install 생략) → 마이그 `20260914140000_as_line_draft` SQL 실행+resolve(`migrate status` up to date) → `prisma generate` → 힙 4GB 빌드(협업 번들 해시 2108cacb 불변 → 협업 서버 재시작 불필요) → `pm2 restart thync-prod` → login 200·as-receipts 307(미인증 리다이렉트) 정상

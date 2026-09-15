@@ -17,6 +17,35 @@ export const AS_DEST_TYPES = ['HOSPITAL', 'OTHER'] as const
 export type AsDestType = (typeof AS_DEST_TYPES)[number]
 export const AS_DEST_TYPE_LABELS: Record<AsDestType, string> = { HOSPITAL: '병원', OTHER: '기타(대웅 등)' }
 
+// ─── 접수 태그 (2026-09-15) — 선교체와 같은 성격의 접수 플래그. 목록 '태그' 열·필터, 상세 2. 접수정보 체크박스 ───
+export const AS_TAGS = ['PRE_REPLACE', 'PRIORITY_REPAIR', 'FIRMWARE_UPDATE', 'ACCESSORY'] as const
+export type AsTag = (typeof AS_TAGS)[number]
+export const AS_TAG_LABELS: Record<AsTag, string> = {
+  PRE_REPLACE: '선교체',
+  PRIORITY_REPAIR: '우선수리',
+  FIRMWARE_UPDATE: '펌웨어 업데이트',
+  ACCESSORY: '부속품 동봉',
+}
+/** 태그 ↔ as_receipts 불리언 컬럼 */
+export const AS_TAG_FIELDS: Record<AsTag, 'preReplace' | 'priorityRepair' | 'firmwareUpdate' | 'accessoryIncluded'> = {
+  PRE_REPLACE: 'preReplace',
+  PRIORITY_REPAIR: 'priorityRepair',
+  FIRMWARE_UPDATE: 'firmwareUpdate',
+  ACCESSORY: 'accessoryIncluded',
+}
+/** 태그 배지 색 (목록·상세 공용) */
+export const AS_TAG_BADGE_CLS: Record<AsTag, string> = {
+  PRE_REPLACE: 'bg-amber-100 text-amber-800',
+  PRIORITY_REPAIR: 'bg-red-100 text-red-700',
+  FIRMWARE_UPDATE: 'bg-violet-100 text-violet-700',
+  ACCESSORY: 'bg-teal-100 text-teal-700',
+}
+export type AsTagFlags = { preReplace: boolean; priorityRepair: boolean; firmwareUpdate: boolean; accessoryIncluded: boolean }
+/** 접수의 켜진 태그 목록 (AS_TAGS 순서 고정) */
+export function asReceiptTags(r: Partial<AsTagFlags>): AsTag[] {
+  return AS_TAGS.filter((t) => r[AS_TAG_FIELDS[t]] === true)
+}
+
 export const AS_OUTCOMES = ['REPAIR_RETURN', 'REPLACE', 'LOST', 'CANCELED', 'NOT_RECEIVED'] as const
 export type AsOutcome = (typeof AS_OUTCOMES)[number]
 export const AS_OUTCOME_LABELS: Record<AsOutcome, string> = {
@@ -66,6 +95,22 @@ export function asDeviceKindFromSerial(serialNo: string | null | undefined): (ty
   if (/^P\d/.test(s)) return '산소포화도'
   if (/^B\d/.test(s)) return '게이트웨이'
   return null
+}
+
+/** 목록 [기기] 아이콘 표기 (2026-09-15) — 기기군 3종을 짧은 코드로: ECG(심전계) · SpO2(산소포화도) · ETC(기타), 각 대수(+종결 수) */
+export const AS_DEVICE_GROUP_CODES: Record<AsDeviceGroup, string> = { 심전계: 'ECG', 산소포화도: 'SpO2', 기타: 'ETC' }
+export function summarizeAsItemsByGroup(
+  items: { serialNo?: string | null; outcome: string | null; deviceKind?: string | null; device?: { deviceInfo: { deviceName: string } } | null }[]
+): { group: AsDeviceGroup; code: string; count: number; done: number }[] {
+  const acc = new Map<AsDeviceGroup, { count: number; done: number }>()
+  for (const i of items) {
+    const g = asDeviceGroupOf(i.device?.deviceInfo.deviceName, i.deviceKind, i.serialNo)
+    const cur = acc.get(g) ?? { count: 0, done: 0 }
+    cur.count++
+    if (i.outcome) cur.done++
+    acc.set(g, cur)
+  }
+  return AS_DEVICE_GROUPS.filter((g) => acc.has(g)).map((g) => ({ group: g, code: AS_DEVICE_GROUP_CODES[g], ...acc.get(g)! }))
 }
 
 /** 라인 요약 한 줄 — '기기 3대 (종결 1)' (목록·배너·알림 공용) */

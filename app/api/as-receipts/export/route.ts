@@ -87,6 +87,9 @@ export async function GET(request: NextRequest) {
         상태: r.status?.name ?? '',
         고객명: r.reporterName ?? '',
         선교체: r.preReplace ? '선교체' : '일반',
+        우선수리: r.priorityRepair ? 'Y' : '',
+        펌웨어업데이트: r.firmwareUpdate ? 'Y' : '',
+        부속품동봉: r.accessoryIncluded ? 'Y' : '',
         수거방법: r.pickupMethod ? (AS_PICKUP_METHOD_LABELS[r.pickupMethod as AsMethod] ?? r.pickupMethod) : '',
         수거송장: r.pickupTrackingNo ?? '',
         수거일: d10(r.pickedUpAt),
@@ -123,8 +126,8 @@ export async function GET(request: NextRequest) {
 
   const ws = XLSX.utils.json_to_sheet(rows)
   ws['!cols'] = [
-    // 접수번호 접수일 병원 구분 상태 고객명 선교체 수거방법 수거송장 수거일 입고일
-    { wch: 15 }, { wch: 11 }, { wch: 22 }, { wch: 6 }, { wch: 8 }, { wch: 18 }, { wch: 7 }, { wch: 9 }, { wch: 15 }, { wch: 11 }, { wch: 11 },
+    // 접수번호 접수일 병원 구분 상태 고객명 선교체 우선수리 펌웨어업데이트 부속품동봉 수거방법 수거송장 수거일 입고일
+    { wch: 15 }, { wch: 11 }, { wch: 22 }, { wch: 6 }, { wch: 8 }, { wch: 18 }, { wch: 7 }, { wch: 8 }, { wch: 12 }, { wch: 9 }, { wch: 9 }, { wch: 15 }, { wch: 11 }, { wch: 11 },
     // 발송지구분 발송지정보 회수지상이 회수지정보 예상출하일
     { wch: 11 }, { wch: 24 }, { wch: 9 }, { wch: 24 }, { wch: 11 },
     // 시리얼 기기종류 병동 증상 처리내용 | 입고상태 라인입고일 접수시리얼 (2026-09-11) | 결과 발송일 발송방법 송장 교체기

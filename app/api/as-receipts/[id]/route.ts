@@ -138,6 +138,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
     data.receivedAt = dateOrNull(body.receivedAt)
     data.expectedShipDate = dateOrNull(body.expectedShipDate)
     if (body.preReplace !== undefined) data.preReplace = body.preReplace === true
+    // 태그 (2026-09-15)
+    if (body.priorityRepair !== undefined) data.priorityRepair = body.priorityRepair === true
+    if (body.firmwareUpdate !== undefined) data.firmwareUpdate = body.firmwareUpdate === true
+    if (body.accessoryIncluded !== undefined) data.accessoryIncluded = body.accessoryIncluded === true
     // 병원 변경 (2026-09-10 — 시트 인입 오매칭 보정용). 미종결 라인은 새 병원 기준 재매칭·AS 표시 이전, 티켓 병원은 어댑터 동기화
     if (typeof body.hospitalCode === 'string' && body.hospitalCode.trim() && body.hospitalCode.trim() !== existing.hospitalCode) {
       const code = body.hospitalCode.trim()

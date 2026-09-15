@@ -2,7 +2,7 @@
 
 /**
  * AS접수 상세 (as_work_design.md §8 — 2026-09-11 카드 재구성)
- * 1 공통정보 → 2 접수정보(접수자 입력, 시트 A~M·S·T) → 3 AS상세내역(AS담당자 입력, 시트 N~X — 기기군별 카드: 라인별 처리내용, 기기군 단위 발송정보) → 4 비고.
+ * 1 공통정보 → 2 접수정보(접수자 입력, 시트 A~M·S·T + 태그·비고) → 3 AS상세내역(AS담당자 입력, 시트 N~X — 기기군별 카드: 라인별 처리내용, 기기군 단위 발송정보) → 4 기기등록 → 5 타임라인(2026-09-15 — 감사로그·티켓 로그 합성 이력).
  * 상태 변경(도메인→티켓 동기화)·수정 모달·삭제(티켓 동반) — 권한 §13-1.
  */
 import { useState, useEffect, useCallback } from 'react'
@@ -15,7 +15,8 @@ import {
   AS_DEST_TYPE_LABELS, AS_OUTCOME_LABELS,
   type AsCategory, type AsMethod, type AsDestType, type AsOutcome, AS_REGISTRY_TAG_LABELS, AS_REGISTRY_TAG_DESC, type AsRegistryTag, type AsRegistryLineTag,
   AS_METHODS, AS_DEVICE_GROUPS, asDeviceGroupOf, type AsDeviceGroup,
-  AS_RESOLVE_OUTCOMES, AS_INTAKE_STATE_LABELS, AS_DEVICE_KINDS, isAsIntakeIssue, asDeviceKindFromSerial, type AsIntakeState } from '@/lib/asReceiptShared'
+  AS_RESOLVE_OUTCOMES, AS_INTAKE_STATE_LABELS, AS_DEVICE_KINDS, isAsIntakeIssue, asDeviceKindFromSerial, type AsIntakeState,
+  AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, AS_TAG_BADGE_CLS, asReceiptTags, type AsTagFlags } from '@/lib/asReceiptShared'
 import type { TicketStatus } from '@prisma/client'
 import { PRODUCT_TYPES } from '@/lib/deviceRegistryShared'
 
@@ -50,6 +51,8 @@ interface ItemRow {
   intakeSource: string
 }
 
+interface TimelineEvent { id: string; at: string; actor: string | null; source: 'audit' | 'ticket'; title: string; details: string[] } // /api/as-receipts/[id]/timeline (2026-09-15)
+
 interface AsDetail {
   id: number
   asCode: string
@@ -62,6 +65,9 @@ interface AsDetail {
   receivedAt: string | null
   checkedAt: string | null // 확인일 (O열)
   preReplace: boolean
+  priorityRepair: boolean // 태그 (2026-09-15)
+  firmwareUpdate: boolean
+  accessoryIncluded: boolean
   destType: string | null
   destInfo: string | null
   pickupDestDiffers: boolean
@@ -481,6 +487,7 @@ export default function AsReceiptDetailPage() {
 
   // 2. 접수정보 (접수자 입력 — 시트 A~M·S·T)
   const [intake, setIntake] = useState({ pickupMethod: '', pickupTrackingNo: '', pickedUpAt: '', destType: '', destInfo: '', pickupDestDiffers: false, pickupDestInfo: '' })
+  const [tags, setTags] = useState<AsTagFlags>({ preReplace: false, priorityRepair: false, firmwareUpdate: false, accessoryIncluded: false }) // 태그 (2026-09-15) — 접수정보 저장에 포함
   // 3. AS상세내역 헤더 (AS담당자 입력 — 시트 N·U)
   const [asHead, setAsHead] = useState({ expectedShipDate: '' })
   const [confirmDate, setConfirmDate] = useState(todayKst()) // 최종확정 기준일 (2026-09-14)
@@ -488,8 +495,10 @@ export default function AsReceiptDetailPage() {
   const [intakeOpen, setIntakeOpen] = useState(false)
   const [intakeText, setIntakeText] = useState('')
   const [intakeDates, setIntakeDates] = useState({ receivedAt: todayKst(), checkedAt: todayKst() })
-  // 4. 비고
+  // 2. 비고 (2026-09-15 — 접수정보 카드 하단으로 이동, 접수정보 저장에 포함)
   const [note, setNote] = useState('')
+  // 5. 타임라인 (2026-09-15)
+  const [timeline, setTimeline] = useState<TimelineEvent[] | null>(null)
 
   useEffect(() => {
     fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setMe({ id: d.id ?? d.userId ?? '', role: d.role, permissions: d.permissions }))
@@ -511,10 +520,12 @@ export default function AsReceiptDetailPage() {
       pickupDestDiffers: r.pickupDestDiffers,
       pickupDestInfo: r.pickupDestInfo ?? '',
     })
+    setTags({ preReplace: r.preReplace, priorityRepair: r.priorityRepair, firmwareUpdate: r.firmwareUpdate, accessoryIncluded: r.accessoryIncluded })
     setAsHead({ expectedShipDate: r.expectedShipDate?.slice(0, 10) ?? '' })
     setIntakeDates({ receivedAt: r.receivedAt?.slice(0, 10) ?? todayKst(), checkedAt: todayKst() })
     setNote(r.note ?? '')
     setLoading(false)
+    fetch(`/api/as-receipts/${id}/timeline`).then((t) => (t.ok ? t.json() : null)).then((d) => setTimeline(d?.events ?? [])).catch(() => setTimeline([]))
   }, [id])
 
   useEffect(() => { void load() }, [load])
@@ -739,6 +750,8 @@ export default function AsReceiptDetailPage() {
     destInfo: intake.destInfo || null,
     pickupDestDiffers: intake.pickupDestDiffers,
     pickupDestInfo: (intake.pickupDestDiffers ? intake.pickupDestInfo : intake.destInfo) || null,
+    ...tags, // 태그 (2026-09-15)
+    note: note || null, // 비고 — 접수정보 카드로 이동 (2026-09-15)
   }, '접수정보 저장에 실패했습니다.')
 
   return (
@@ -764,9 +777,9 @@ export default function AsReceiptDetailPage() {
             <span className="text-gray-300">/</span>
             <span className="font-mono text-sm text-gray-500">{req.asCode}</span>
             {codeBadge(req.status)}
-            {req.preReplace
-              ? <span className="rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-600">선교체</span>
-              : <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">일반 (선교체 아님)</span>}
+            {asReceiptTags(req).map((t) => (
+              <span key={t} className={`rounded-full px-2 py-0.5 text-xs font-medium ${AS_TAG_BADGE_CLS[t]}`}>{AS_TAG_LABELS[t]}</span>
+            ))}
           </div>
           <h1 className="mt-1 text-xl font-bold text-gray-900">
             {req.hospital?.hospitalName ?? '-'} <span className="font-normal text-gray-400">· {catLabel} · 기기 {req.items.length}대</span>
@@ -807,7 +820,7 @@ export default function AsReceiptDetailPage() {
           </div>
           <div>
             <p className={label}>구분</p>
-            <p className="mt-1 text-sm text-gray-900">{catLabel}{req.preReplace && <span className="ml-1.5 text-xs text-orange-600">선교체</span>}</p>
+            <p className="mt-1 text-sm text-gray-900">{catLabel}</p>
           </div>
           <div>
             <p className={label}>상태</p>
@@ -919,6 +932,29 @@ export default function AsReceiptDetailPage() {
           ) : (
             <p className="flex-1 truncate text-sm text-gray-500">발송지와 동일{(intake.destInfo || req.destInfo) ? ` — ${intake.destInfo || req.destInfo}` : ''}</p>
           )}
+        </div>
+        {/* 태그 (2026-09-15) — 선교체·우선수리·펌웨어 업데이트·부속품 동봉. 목록 '태그' 열·필터와 동일 */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-gray-100 px-4 py-3 sm:px-6">
+          <p className={label}>태그</p>
+          {AS_TAGS.map((t) => (
+            <label key={t} className={`flex items-center gap-1.5 text-sm ${canEdit ? 'cursor-pointer text-gray-700' : tags[AS_TAG_FIELDS[t]] ? 'text-gray-700' : 'text-gray-400'}`}>
+              <input
+                type="checkbox"
+                checked={tags[AS_TAG_FIELDS[t]]}
+                disabled={!canEdit}
+                onChange={(e) => setTags((p) => ({ ...p, [AS_TAG_FIELDS[t]]: e.target.checked }))}
+                className="rounded border-gray-300"
+              />
+              <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${tags[AS_TAG_FIELDS[t]] ? AS_TAG_BADGE_CLS[t] : 'bg-gray-100 text-gray-500'}`}>{AS_TAG_LABELS[t]}</span>
+            </label>
+          ))}
+        </div>
+        {/* 비고 (2026-09-15 — 5번 카드에서 이동, 접수정보 저장에 포함) */}
+        <div className="border-t border-gray-100 px-4 py-3 sm:px-6">
+          <p className={label}>비고 <span className="normal-case tracking-normal text-gray-300">(특이사항 · 입고처리 등 시스템 이력이 뒤에 자동 추가됨)</span></p>
+          {canEdit ? (
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={4} placeholder="후속 조치·특이사항 등" className="mt-1 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
+          ) : <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">{req.note || <span className="text-gray-400">-</span>}</p>}
         </div>
       </Card>
 
@@ -1054,18 +1090,32 @@ export default function AsReceiptDetailPage() {
         </div>
       </Card>
 
-      {/* 5. 비고 */}
-      <Card
-        title="5. 비고"
-        sub="이 접수건의 특이사항"
-        right={canEdit && (
-          <button type="button" disabled={busy || note === (req.note ?? '')} onClick={() => putReceipt({ note: note || null }, '비고 저장에 실패했습니다.')} className="rounded-md border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50">비고 저장</button>
-        )}
-      >
+      {/* 5. 타임라인 (2026-09-15) — 감사로그(접수)·티켓 로그 합성, 최신순 */}
+      <Card title="5. 타임라인" sub="접수·처리·티켓 이력" right={timeline && <span className="text-xs text-gray-400">{timeline.length}건</span>}>
         <div className="px-4 py-3 sm:px-6">
-          {canEdit ? (
-            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="후속 조치·특이사항 등" className="w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
-          ) : <p className="whitespace-pre-wrap text-sm text-gray-800">{req.note || <span className="text-gray-400">-</span>}</p>}
+          {timeline === null ? (
+            <p className="py-4 text-center text-sm text-gray-400">불러오는 중...</p>
+          ) : timeline.length === 0 ? (
+            <p className="py-4 text-center text-sm text-gray-400">이력이 없습니다.</p>
+          ) : (
+            <ol className="relative ml-2 border-l border-gray-200">
+              {timeline.map((ev) => (
+                <li key={ev.id} className="mb-4 ml-4 last:mb-0">
+                  <span className={`absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full border-2 border-white ${ev.source === 'ticket' ? 'bg-gray-300' : 'bg-blue-500'}`} />
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className={`text-sm ${ev.source === 'ticket' ? 'text-gray-600' : 'font-medium text-gray-900'}`}>{ev.title}</span>
+                    <span className="text-xs text-gray-400">{fmtDt(ev.at)}{ev.actor ? ` · ${ev.actor}` : ''}</span>
+                    {ev.source === 'ticket' && <span className="rounded bg-gray-100 px-1 py-0.5 text-[10px] text-gray-500">티켓</span>}
+                  </div>
+                  {ev.details.length > 0 && (
+                    <ul className="mt-0.5 space-y-0.5 text-xs text-gray-600">
+                      {ev.details.map((d, i) => <li key={i} className="break-words">{d}</li>)}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
         </div>
       </Card>
 
@@ -1086,6 +1136,9 @@ export default function AsReceiptDetailPage() {
             pickupMethod: req.pickupMethod,
             pickupTrackingNo: req.pickupTrackingNo,
             preReplace: req.preReplace,
+            priorityRepair: req.priorityRepair,
+            firmwareUpdate: req.firmwareUpdate,
+            accessoryIncluded: req.accessoryIncluded,
             note: req.note,
             items: req.items.map((i) => ({
               serialNo: i.serialNo,

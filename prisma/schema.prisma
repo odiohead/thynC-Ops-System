@@ -2203,6 +2203,9 @@ model AsReceipt {
   checkedAt        DateTime? @map("checked_at") @db.Date // 확인일 (O열 — 입고 대조 확인일, 2026-09-11)
   sheetDoneSynced  String?   @map("sheet_done_synced") // 채널톡 시트 X열에 마지막으로 기입한 완료 상태(완료/취소/미완료) — 이벤트 기반 역기입(2026-09-11 §7.1 개정). NULL=미기록(첫 틱에 DB 상태를 기준선으로 채택, 기입 없음)
   preReplace       Boolean   @default(false) @map("pre_replace") // 선교체요청 (P열)
+  priorityRepair   Boolean   @default(false) @map("priority_repair") // 태그: 우선수리 (2026-09-15)
+  firmwareUpdate   Boolean   @default(false) @map("firmware_update") // 태그: 펌웨어 업데이트
+  accessoryIncluded Boolean  @default(false) @map("accessory_included") // 태그: 부속품 동봉
   destType         String?   @map("dest_type") // HOSPITAL 병원 / OTHER 기타(대웅 등) (S열, SQL CHECK)
   destInfo         String?   @map("dest_info") @db.Text // 발송지 정보 (T열)
   expectedShipDate DateTime? @map("expected_ship_date") @db.Date // 예상 출하일 (U열)

@@ -8,7 +8,7 @@
 import { useState, useEffect } from 'react'
 import {
   AS_CATEGORIES, AS_CATEGORY_LABELS, AS_METHODS, AS_PICKUP_METHOD_LABELS,
-  AS_DEVICE_KINDS, parseSerialTextarea, type AsCategory,
+  AS_DEVICE_KINDS, AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, parseSerialTextarea, type AsCategory, type AsTag, type AsTagFlags,
 } from '@/lib/asReceiptShared'
 
 interface HospitalOpt { hospitalCode: string; hospitalName: string; hiraHospitalName: string | null }
@@ -44,6 +44,9 @@ export interface AsEditTarget {
   pickupMethod: string | null
   pickupTrackingNo: string | null
   preReplace: boolean
+  priorityRepair: boolean // 태그 (2026-09-15)
+  firmwareUpdate: boolean
+  accessoryIncluded: boolean
   note: string | null
   items: { serialNo: string; wardName: string | null; deviceKind: string | null; symptom: string | null; outcome: string | null; deviceId: number | null; modelName: string | null }[]
 }
@@ -82,7 +85,7 @@ export default function AsReceiptFormModal({
   const [reporterName, setReporterName] = useState('')
   const [pickupMethod, setPickupMethod] = useState('')
   const [pickupTrackingNo, setPickupTrackingNo] = useState('')
-  const [preReplace, setPreReplace] = useState(false)
+  const [tags, setTags] = useState<AsTagFlags>({ preReplace: false, priorityRepair: false, firmwareUpdate: false, accessoryIncluded: false }) // 태그 (2026-09-15)
   const [note, setNote] = useState('')
 
   const [serialText, setSerialText] = useState('')
@@ -104,7 +107,7 @@ export default function AsReceiptFormModal({
       setReporterName(editTarget.reporterName ?? '')
       setPickupMethod(editTarget.pickupMethod ?? '')
       setPickupTrackingNo(editTarget.pickupTrackingNo ?? '')
-      setPreReplace(editTarget.preReplace)
+      setTags({ preReplace: editTarget.preReplace, priorityRepair: editTarget.priorityRepair, firmwareUpdate: editTarget.firmwareUpdate, accessoryIncluded: editTarget.accessoryIncluded })
       setNote(editTarget.note ?? '')
       setRows(editTarget.items.map((i) => ({
         serial: i.serialNo,
@@ -125,7 +128,7 @@ export default function AsReceiptFormModal({
       setReporterName('')
       setPickupMethod('')
       setPickupTrackingNo('')
-      setPreReplace(false)
+      setTags({ preReplace: false, priorityRepair: false, firmwareUpdate: false, accessoryIncluded: false })
       setNote('')
       setRows([])
     }
@@ -253,7 +256,7 @@ export default function AsReceiptFormModal({
       reporterName: reporterName || null,
       pickupMethod: pickupMethod || null,
       pickupTrackingNo: pickupTrackingNo || null,
-      preReplace,
+      ...tags,
       note: note || null,
       items: rows.map((r) => ({
         serial: r.serial,
@@ -377,16 +380,21 @@ export default function AsReceiptFormModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={label}>고객명 (카카오채널명)</label>
-              <input type="text" value={reporterName} onChange={(e) => setReporterName(e.target.value)} className={input} />
-            </div>
-            <div className="flex items-end pb-1.5">
-              <label className="flex items-center gap-2 text-sm text-gray-700">
-                <input type="checkbox" checked={preReplace} onChange={(e) => setPreReplace(e.target.checked)} className="rounded border-gray-300" />
-                선교체요청
-              </label>
+          <div>
+            <label className={label}>고객명 (카카오채널명)</label>
+            <input type="text" value={reporterName} onChange={(e) => setReporterName(e.target.value)} className={input} />
+          </div>
+
+          {/* 태그 (2026-09-15) — 선교체·우선수리·펌웨어 업데이트·부속품 동봉 */}
+          <div>
+            <label className={label}>태그</label>
+            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1.5">
+              {AS_TAGS.map((t: AsTag) => (
+                <label key={t} className="flex cursor-pointer items-center gap-1.5 text-sm text-gray-700">
+                  <input type="checkbox" checked={tags[AS_TAG_FIELDS[t]]} onChange={(e) => setTags((p) => ({ ...p, [AS_TAG_FIELDS[t]]: e.target.checked }))} className="rounded border-gray-300" />
+                  {AS_TAG_LABELS[t]}
+                </label>
+              ))}
             </div>
           </div>
 

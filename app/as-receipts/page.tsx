@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
 import AsReceiptFormModal from './_components/AsReceiptFormModal'
-import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_PICKUP_METHOD_LABELS, AS_DEST_TYPE_LABELS, AS_REGISTRY_TAG_LABELS, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsMethod, type AsDestType } from '@/lib/asReceiptShared'
+import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_PICKUP_METHOD_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsMethod, type AsTag } from '@/lib/asReceiptShared'
 
 interface CodeRef { id: number; name: string; color: string | null }
 interface AsRow {
@@ -19,6 +19,9 @@ interface AsRow {
   resolvedAt: string | null
   createdAt: string
   preReplace: boolean
+  priorityRepair: boolean // 태그 (2026-09-15)
+  firmwareUpdate: boolean
+  accessoryIncluded: boolean
   pickupMethod: string | null
   pickupTrackingNo: string | null
   destType: string | null
@@ -29,7 +32,7 @@ interface AsRow {
   createdBy: { id: string; name: string } | null
   ticket: { id: number; ticketCode: string; status: string; owner: { id: string; name: string } | null } | null
   items: {
-    id: number; serialNo: string; outcome: string | null; deviceKind: string | null; intakeState: string
+    id: number; serialNo: string; outcome: string | null; deviceKind: string | null; intakeState: string; shippedAt: string | null
     device: { deviceInfo: { deviceName: string }; placement: { productType: string | null } | null } | null
     newDevice: { placement: { productType: string | null } | null } | null
   }[]
@@ -54,6 +57,52 @@ function productTypeBadges(items: AsRow['items']) {
       {types.map((t) => (
         <span key={t} className={`rounded px-1.5 py-0.5 text-xs font-medium ${PRODUCT_TYPE_BADGE[t] ?? 'bg-gray-100 text-gray-700'}`}>{t}</span>
       ))}
+    </span>
+  )
+}
+
+/** 기기 열 (2026-09-15 축약) — ECG · SpO2 · ETC 코드 + 대수, 종결분은 흐리게 '/n'. 툴팁에 기존 상세 표기 */
+const DEVICE_GROUP_BADGE: Record<string, string> = {
+  ECG: 'bg-sky-50 text-sky-700 ring-sky-200',
+  SpO2: 'bg-rose-50 text-rose-700 ring-rose-200',
+  ETC: 'bg-gray-100 text-gray-600 ring-gray-200',
+}
+function deviceCell(r: AsRow) {
+  const groups = summarizeAsItemsByGroup(r.items)
+  if (!groups.length) return <span className="text-xs text-gray-300">-</span>
+  return (
+    <span className="inline-flex items-center gap-1" title={summarizeAsItemsByKind(r.items)}>
+      {groups.map((g) => (
+        <span key={g.code} className={`inline-flex items-center gap-0.5 whitespace-nowrap rounded px-1 py-0.5 font-mono text-[11px] font-semibold ring-1 ring-inset ${DEVICE_GROUP_BADGE[g.code]}`}>
+          {g.code}<span className="font-sans font-medium">{g.count}</span>
+          {g.done > 0 && <span className="font-sans font-normal opacity-50">/{g.done}</span>}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/** 태그 열 (2026-09-15) — 선교체·우선수리·펌웨어 업데이트·부속품 동봉 */
+function tagBadges(r: AsRow) {
+  const tags = asReceiptTags(r)
+  if (!tags.length) return <span className="text-xs text-gray-300">-</span>
+  return (
+    <span className="inline-flex flex-nowrap gap-1">
+      {tags.map((t) => <span key={t} className={`whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium ${AS_TAG_BADGE_CLS[t]}`}>{AS_TAG_LABELS[t]}</span>)}
+    </span>
+  )
+}
+
+/** 발송일 열 (2026-09-15) — 라인 발송일 중 최신. 여러 날짜면 툴팁에 전체, 미발송 라인이 남으면 '(n/m)' */
+function shippedCell(r: AsRow) {
+  const dates = Array.from(new Set(r.items.map((i) => i.shippedAt?.slice(0, 10)).filter((d): d is string => !!d))).sort()
+  if (!dates.length) return <span className="text-xs text-gray-300">-</span>
+  const shipped = r.items.filter((i) => i.shippedAt).length
+  const partial = shipped < r.items.length
+  return (
+    <span title={dates.length > 1 ? `발송일 ${dates.join(', ')}` : undefined}>
+      {dates[dates.length - 1]}
+      {(partial || dates.length > 1) && <span className="ml-1 text-xs text-gray-400">({shipped}/{r.items.length})</span>}
     </span>
   )
 }
@@ -101,6 +150,7 @@ function AsReceiptListInner() {
   const [ecg, setEcg] = useState(searchParams.get('group') !== 'SPO2')
   const [spo2, setSpo2] = useState(searchParams.get('group') !== 'ECG')
   const group = ecg && !spo2 ? 'ECG' : spo2 && !ecg ? 'SPO2' : ''
+  const [tagFilter, setTagFilter] = useState<AsTag[]>(() => searchParams.getAll('tag').filter((t): t is AsTag => (AS_TAGS as readonly string[]).includes(t))) // 태그 필터 (2026-09-15) — 복수 = AND
   const [shippedFrom, setShippedFrom] = useState(searchParams.get('shippedFrom') ?? '') // 발송일 필터 (CX #9)
   const [shippedTo, setShippedTo] = useState(searchParams.get('shippedTo') ?? '')
   const [summary, setSummary] = useState<{
@@ -135,11 +185,12 @@ function AsReceiptListInner() {
     for (const id of statusIds) params.append('statusId', String(id))
     if (category) params.set('category', category)
     if (group) params.set('group', group)
+    for (const t of tagFilter) params.append('tag', t)
     if (shippedFrom) params.set('shippedFrom', shippedFrom)
     if (shippedTo) params.set('shippedTo', shippedTo)
     if (q) params.set('q', q)
     return params
-  }, [from, to, statusIds, category, group, shippedFrom, shippedTo, q])
+  }, [from, to, statusIds, category, group, tagFilter, shippedFrom, shippedTo, q])
 
   // 필터·페이지를 URL에 반영 — 뒤로가기 복원용 (CX #2, history만 교체해 리렌더 억제)
   useEffect(() => {
@@ -287,6 +338,23 @@ function AsReceiptListInner() {
           <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={ecg} onChange={(e) => { setEcg(e.target.checked); setPage(1) }} className="rounded border-gray-300" />심전계</label>
           <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={spo2} onChange={(e) => { setSpo2(e.target.checked); setPage(1) }} className="rounded border-gray-300" />산소포화도</label>
         </span>
+        <span className="ml-1 inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 text-sm">
+          <span className="text-xs text-gray-400">태그</span>
+          {AS_TAGS.map((t) => {
+            const on = tagFilter.includes(t)
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => { setTagFilter((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t])); setPage(1) }}
+                className={`rounded px-1.5 py-0.5 text-xs font-medium transition-colors ${on ? AS_TAG_BADGE_CLS[t] + ' ring-1 ring-current' : 'bg-gray-100 text-gray-400 hover:text-gray-600'}`}
+                title={on ? `${AS_TAG_LABELS[t]} 필터 해제` : `${AS_TAG_LABELS[t]} 접수만 보기 (여러 개 선택 시 모두 해당)`}
+              >
+                {on && <span aria-hidden>✓ </span>}{AS_TAG_LABELS[t]}
+              </button>
+            )
+          })}
+        </span>
         <span className="ml-1 text-xs text-gray-400">발송일</span>
         <input type="date" value={shippedFrom} onChange={(e) => { setShippedFrom(e.target.value); setPage(1) }} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
         <span className="text-gray-400">~</span>
@@ -323,8 +391,8 @@ function AsReceiptListInner() {
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  {['접수번호', '병원', '접수 기기상태', '구분', '선교체', '기기', '유형', '상태', '접수일', '수거', '발송지', '완료일', '등록자'].map((h) => (
-                    <th key={h} className={thClass}>{h}</th>
+                  {['접수번호', '병원', '접수 기기상태', '구분', '기기', '유형', '상태', '접수일', '수거', '발송일', '태그'].map((h) => (
+                    <th key={h} className={`${thClass} ${h === '태그' ? 'w-full' : 'w-px'}`}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -332,17 +400,12 @@ function AsReceiptListInner() {
                 {rows.map((r) => (
                   <tr key={r.id} className="cursor-pointer hover:bg-gray-50" onClick={() => router.push(`/as-receipts/${r.id}`)}>
                     <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-blue-600">{r.asCode}</td>
-                    <td className="max-w-[12rem] truncate px-3 py-2 text-gray-900">{r.hospital?.hospitalName ?? '-'}</td>
+                    <td className="max-w-[12rem] truncate px-3 py-2 text-gray-900" title={r.hospital?.hospitalName ?? undefined}><span className="block min-w-[7rem] max-w-[12rem] truncate">{r.hospital?.hospitalName ?? '-'}</span></td>
                     <td className="whitespace-nowrap px-3 py-2">{deviceStateBadge(r)}</td>
                     <td className="whitespace-nowrap px-3 py-2">
                       <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${CATEGORY_BADGE[r.category] ?? 'bg-gray-100 text-gray-700'}`}>{AS_CATEGORY_LABELS[r.category as AsCategory] ?? r.category}</span>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2">
-                      {r.preReplace
-                        ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">선교체</span>
-                        : <span className="text-xs text-gray-300">-</span>}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-gray-700">{summarizeAsItemsByKind(r.items)}</td>
+                    <td className="whitespace-nowrap px-3 py-2">{deviceCell(r)}</td>
                     <td className="whitespace-nowrap px-3 py-2">{productTypeBadges(r.items)}</td>
                     <td className="whitespace-nowrap px-3 py-2">{codeBadge(r.status)}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-gray-600">{r.receiptDate.slice(0, 10)}</td>
@@ -350,9 +413,8 @@ function AsReceiptListInner() {
                       {r.pickupMethod ? AS_PICKUP_METHOD_LABELS[r.pickupMethod as AsMethod] : '-'}
                       {r.pickupTrackingNo && <span className="ml-1 font-mono text-xs text-gray-400">{r.pickupTrackingNo}</span>}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-gray-600">{r.destType ? AS_DEST_TYPE_LABELS[r.destType as AsDestType] : '-'}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-gray-600">{r.resolvedAt ? r.resolvedAt.slice(0, 10) : '-'}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-gray-600">{r.createdBy?.name ?? '-'}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-gray-600">{shippedCell(r)}</td>
+                    <td className="whitespace-nowrap px-3 py-2">{tagBadges(r)}</td>
                   </tr>
                 ))}
               </tbody>
