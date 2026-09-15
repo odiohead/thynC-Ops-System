@@ -150,6 +150,7 @@ function AsReceiptListInner() {
   const [ecg, setEcg] = useState(searchParams.get('group') !== 'SPO2')
   const [spo2, setSpo2] = useState(searchParams.get('group') !== 'ECG')
   const group = ecg && !spo2 ? 'ECG' : spo2 && !ecg ? 'SPO2' : ''
+  const [overdue, setOverdue] = useState(searchParams.get('overdue') === '1') // 접수 2주 경과 미처리 필터 (2026-09-15 — 요약 카드 클릭)
   const [tagFilter, setTagFilter] = useState<AsTag[]>(() => searchParams.getAll('tag').filter((t): t is AsTag => (AS_TAGS as readonly string[]).includes(t))) // 태그 필터 (2026-09-15) — 복수 = AND
   const [shippedFrom, setShippedFrom] = useState(searchParams.get('shippedFrom') ?? '') // 발송일 필터 (CX #9)
   const [shippedTo, setShippedTo] = useState(searchParams.get('shippedTo') ?? '')
@@ -159,7 +160,7 @@ function AsReceiptListInner() {
     openTotal: number
     thisWeek: number
     avgResolutionDays: number | null
-    avgResolution: { normal: { days: number | null; count: number }; preReplace: { days: number | null; count: number } }
+    avgResolution: { normal: { days: number | null; count: number; doneCount: number; openCount: number }; preReplace: { days: number | null; count: number; doneCount: number; openCount: number } }
     overdue2w: number
   } | null>(null)
   const [qInput, setQInput] = useState(searchParams.get('q') ?? '')
@@ -186,11 +187,12 @@ function AsReceiptListInner() {
     if (category) params.set('category', category)
     if (group) params.set('group', group)
     for (const t of tagFilter) params.append('tag', t)
+    if (overdue) params.set('overdue', '1')
     if (shippedFrom) params.set('shippedFrom', shippedFrom)
     if (shippedTo) params.set('shippedTo', shippedTo)
     if (q) params.set('q', q)
     return params
-  }, [from, to, statusIds, category, group, tagFilter, shippedFrom, shippedTo, q])
+  }, [from, to, statusIds, category, group, tagFilter, overdue, shippedFrom, shippedTo, q])
 
   // 필터·페이지를 URL에 반영 — 뒤로가기 복원용 (CX #2, history만 교체해 리렌더 억제)
   useEffect(() => {
@@ -267,9 +269,9 @@ function AsReceiptListInner() {
             {/* 평균 처리시간 — 일반 AS / 선교체 분리 (2026-09-12 사용자 요청). 툴팁에 각 완료 건수 */}
             <div
               className="rounded-lg border border-gray-200 bg-white px-3.5 py-2.5 shadow-sm"
-              title={`최근 3개월 접수 후 완료된 건의 접수→완료 평균 일수\n일반 AS ${summary.avgResolution.normal.count.toLocaleString()}건 · 선교체 ${summary.avgResolution.preReplace.count.toLocaleString()}건`}
+              title={`최근 3개월 접수 건의 평균 경과 일수 — 완료 건은 접수→완료일, 미완료 건은 접수→오늘까지 포함 (취소 제외)\n일반 AS ${summary.avgResolution.normal.count.toLocaleString()}건 (완료 ${summary.avgResolution.normal.doneCount.toLocaleString()} · 미완료 ${summary.avgResolution.normal.openCount.toLocaleString()}) · 선교체 ${summary.avgResolution.preReplace.count.toLocaleString()}건 (완료 ${summary.avgResolution.preReplace.doneCount.toLocaleString()} · 미완료 ${summary.avgResolution.preReplace.openCount.toLocaleString()})`}
             >
-              <p className="text-xs text-gray-400">평균 처리시간 <span className="text-gray-300">(최근 3개월)</span></p>
+              <p className="text-xs text-gray-400">평균 처리시간 <span className="text-gray-300">(최근 3개월 · 미완료 경과 포함)</span></p>
               <div className="mt-0.5 flex items-baseline gap-3">
                 <p className="text-lg font-bold text-gray-900">
                   <span className="mr-1 text-xs font-normal text-gray-500">일반</span>
@@ -283,12 +285,17 @@ function AsReceiptListInner() {
                 </p>
               </div>
             </div>
-            <div className={`rounded-lg border px-3.5 py-2.5 shadow-sm ${summary.overdue2w > 0 ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white'}`}>
-              <p className={`text-xs ${summary.overdue2w > 0 ? 'text-red-500' : 'text-gray-400'}`}>접수 2주 경과 미처리</p>
+            <button
+              type="button"
+              onClick={() => { setOverdue((v) => !v); setPage(1) }}
+              title={overdue ? '2주 경과 미처리 필터 해제' : '클릭 — 접수 2주 경과 미처리 건만 보기'}
+              className={`rounded-lg border px-3.5 py-2.5 text-left shadow-sm transition-colors ${overdue ? 'border-red-500 bg-red-100 ring-2 ring-red-300' : summary.overdue2w > 0 ? 'border-red-200 bg-red-50 hover:bg-red-100' : 'border-gray-200 bg-white hover:bg-gray-50'}`}
+            >
+              <p className={`text-xs ${summary.overdue2w > 0 ? 'text-red-500' : 'text-gray-400'}`}>접수 2주 경과 미처리{overdue && <span className="ml-1 rounded bg-red-600 px-1 py-0.5 text-[10px] text-white">필터 중</span>}</p>
               <p className={`mt-0.5 text-lg font-bold ${summary.overdue2w > 0 ? 'text-red-600' : 'text-gray-900'}`}>
                 {summary.overdue2w.toLocaleString()}<span className="ml-1 text-sm font-normal opacity-60">건</span>
               </p>
-            </div>
+            </button>
           </div>
 
           {/* 상태 필터 — 체크박스 칩 (복수 선택) */}

@@ -61,6 +61,14 @@ export async function GET(request: NextRequest) {
     if ((AS_TAGS as readonly string[]).includes(t)) where[AS_TAG_FIELDS[t as AsTag]] = true
   }
 
+  // 접수 2주 경과 미처리 (2026-09-15 — 요약 카드 클릭 필터): summary.overdue2w와 동일 정의(KST 오늘 기준 14일 전 미만 접수 & 비종결·상태 없음)
+  if (sp.get('overdue') === '1') {
+    const kstTodayYmd = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
+    const cut = new Date(new Date(`${kstTodayYmd}T00:00:00Z`).getTime() - 14 * 86400000)
+    where.receiptDate = { ...(where.receiptDate as object | undefined), lt: cut } // 접수일 기간 필터(gte/lte)와 병행 가능
+    where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: [{ statusId: null }, { status: { ticketStatus: { notIn: ['RESOLVED', 'CLOSED'] } } }, { status: { ticketStatus: null } }] }]
+  }
+
   const hospitalCode = sp.get('hospitalCode')
   if (hospitalCode) where.hospitalCode = hospitalCode
 
