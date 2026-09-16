@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-09-16 13:10 | PROD 데이터 보정: AS-202609-0248(3536) 분실종결 라인에 신품 A139341 교체기 등록 (사용자 요청)
+
+- **배경**: 동아병원 A119887 라인이 '분실종결'로 확정됐으나 분실 처리 중 신품을 제공함 → 교체기 등록 요청. 분실 접수(category LOST)는 원래 처리방법 '교체'가 구기기 LOST 회수 + 신기기 등록을 한 번에 기록하는 경로 — 이번 건은 이미 LOST 회수가 끝난 뒤라 사후 보정
+- **실행(PROD, 1회성 tsx 스크립트 — 실행 후 삭제, 커밋 안 함)**: `replaceDevice(oldDeviceId 28333 → newSerial A139341, reason LOST, ref AS-202609-0248, 2026-09-16)` — 회수된 구기기 케이스라 신기기 REGISTER(related_device=구기기, 9병동·상품유형 '일반' 상속) + 구 배치 `replaced_by_id` 연결 → 라인 `newSerialNo/newDeviceId` 갱신 → 비고 `[교체기 등록 2026-09-16 관리자] A119887(분실종결) → 신품 A139341 동아병원 배치` → 감사로그 '교체기 등록(분실 신품)'. dry-run 후 실행, 경고 0
+- **결과**: A139341 ACTIVE 동아병원 9병동 / A119887 RECOVERED(LOST) replaced_by=A139341 / 라인 outcome LOST 유지 + 교체기 표시
+- **운영 안내**: 앞으로 분실+신품 제공은 처리방법 '교체'(분실 접수는 자동으로 LOST 사유 회수)로 확정하면 이 보정이 필요 없음
+- 영향: PROD DB(as_receipt_items 1행·as_receipts 1행 note·device_units/hospital_devices/hospital_device_events A139341 신규·A119887 replaced_by), DEV_HISTORY.md
+
+---
+
 ## 2026-09-16 12:30 | PROD 배포: 채널톡 AS 동기화 개선 (85dbfe9) — 첫 틱에 AJ 코드 7행 승격
 
 - **dev2**: 힙 4GB 빌드·`pm2 restart thync-dev`(health 200) → 커밋 85dbfe9·push
