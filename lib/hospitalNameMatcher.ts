@@ -81,6 +81,16 @@ export function buildHospitalMatcher(hospitals: { hospitalCode: string; hospital
         const cands = partialCands(keys)
         if (cands.size === 1) code = Array.from(cands)[0]
       }
+      // 지역 접두 (2026-09-16: '광주 동아병원'·'군산 차병원' 사례) — 입력 키가 어떤 병원의 정식명 키로 끝나고 남는 접두가 짧으면(≤4자, 시·군·구명) 그 정식명으로 확정.
+      // 부분 포함은 '동아병원'(정식)과 '동아대학교병원'(축약 별칭 '동아병원')이 함께 걸려 실패하지만, 정식명 접미 일치는 '동아병원'만 남는다
+      if (!code) {
+        const k = keys[0]
+        const hits = new Set<string>()
+        byExact.forEach((arr, ek) => {
+          if (ek.length >= 4 && k.length > ek.length && k.length - ek.length <= 4 && k.endsWith(ek)) arr.forEach((c) => hits.add(c)) // 정식명 키 4자 이상 — '차병원'(3자) 같은 범용 접미는 제외('일산차병원'→'군산 차병원' 오매칭 방지)
+        })
+        if (hits.size === 1) code = Array.from(hits)[0]
+      }
       cache.set(rawName, code)
       return code
     },

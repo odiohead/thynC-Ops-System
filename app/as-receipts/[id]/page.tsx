@@ -197,10 +197,12 @@ interface GroupCardProps {
   onConfirm: (body: Record<string, unknown>) => Promise<boolean> // 입고 대조 접수자 확인 (2026-09-11)
   extras: ItemRow[] // 접수 전체의 미식별입고 라인 (치환 후보 — 기기군 무관)
   onRegistryConfirm: (body: Record<string, unknown>) => Promise<boolean> // 원장 정합 확정 (2026-09-11)
+  onCorrectSerial: (itemId: number, serial: string) => Promise<boolean> // 라인 시리얼 보정 (2026-09-15)
 }
 const MODEL_BY_KIND: Record<string, string> = { 심전도: '심전계', 산소포화도: '산소포화도', 게이트웨이: '게이트웨이' }
 
-function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm }: GroupCardProps) {
+function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm, onCorrectSerial }: GroupCardProps) {
+  const [fixSerial, setFixSerial] = useState<Record<number, string>>({}) // 시리얼 보정 입력 (2026-09-15) — 라인별, 빈 값 = 닫힘
   const openItems = items.filter((i) => !i.outcome && !isAsIntakeIssue(i.intakeState)) // 미입고·미식별입고는 처리 대상 아님
   const issueItems = items.filter((i) => !i.outcome && isAsIntakeIssue(i.intakeState))
   const isShip = (o: string | null) => o === 'REPAIR_RETURN' || o === 'REPLACE'
@@ -333,15 +335,39 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
       {/* 원장 정합 — 접수자 확정 (타병원·회수·미배치·미등록 라인 → 이 병원 배치로 보정) */}
       {canEdit && registryItems.length > 0 && (
         <div className="space-y-2 border-t border-amber-100 bg-amber-50/40 px-4 py-3">
-          <p className="text-xs font-medium text-amber-800">원장 정합 확인 {registryItems.length}대 — [확정]하면 기기현황을 이 병원 배치로 갱신합니다 (신규 등록 · 재등록 · 타병원 이관)</p>
+          <p className="text-xs font-medium text-amber-800">원장 정합 확인 {registryItems.length}대 — 시리얼 오타면 [시리얼 보정]으로 고치고, 실제 미등록·타병원·회수 기기면 [확정]으로 기기현황을 이 병원 배치로 갱신합니다 (신규 등록 · 재등록 · 타병원 이관)</p>
           {registryItems.map((item) => {
             const t = item.registryTag!
             const f = regOf(item)
             const actionLabel = t.tag === 'OTHER_HOSPITAL' ? `${t.detail ?? '타병원'}에서 회수(이관) 후 이 병원 배치` : t.tag === 'UNREGISTERED' ? '원장 신규 등록 후 이 병원 배치' : '이 병원에 재등록'
             return (
               <div key={item.id} className="flex flex-wrap items-center gap-2 rounded-md border border-amber-100 bg-white px-3 py-2 text-xs">
-                <span className="font-mono text-sm text-gray-900">{item.serialNo}</span>
+                <span className="font-mono text-sm text-gray-900" title={item.receiptSerialNo && item.receiptSerialNo !== item.serialNo ? `접수 시리얼 ${item.receiptSerialNo}` : undefined}>{item.serialNo}</span>
                 {deviceBadge(item, asCode, hospitalCode)}
+                {fixSerial[item.id] !== undefined ? (
+                  <span className="inline-flex items-center gap-1">
+                    <input
+                      type="text"
+                      autoFocus
+                      value={fixSerial[item.id]}
+                      onChange={(e) => setFixSerial((p) => ({ ...p, [item.id]: e.target.value.toUpperCase() }))}
+                      onKeyDown={(e) => { if (e.key === 'Escape') setFixSerial((p) => { const n = { ...p }; delete n[item.id]; return n }) }}
+                      placeholder="올바른 시리얼"
+                      className="w-32 rounded-md border border-blue-300 px-2 py-1 font-mono text-xs"
+                    />
+                    <button
+                      type="button"
+                      disabled={busy || !fixSerial[item.id]?.trim() || fixSerial[item.id]?.trim() === item.serialNo}
+                      onClick={async () => { if (await onCorrectSerial(item.id, fixSerial[item.id])) setFixSerial((p) => { const n = { ...p }; delete n[item.id]; return n }) }}
+                      className="rounded-md bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+                    >
+                      보정 적용
+                    </button>
+                    <button type="button" onClick={() => setFixSerial((p) => { const n = { ...p }; delete n[item.id]; return n })} className="text-gray-400 hover:text-gray-600">취소</button>
+                  </span>
+                ) : (
+                  <button type="button" disabled={busy} onClick={() => setFixSerial((p) => ({ ...p, [item.id]: item.serialNo }))} className="rounded-md border border-blue-200 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50" title="인입 시리얼 오타 보정 — 원 시리얼은 접수 시리얼로 보존, 새 시리얼로 기기현황 재매칭">시리얼 보정</button>
+                )}
                 <span className="text-gray-400">→ {actionLabel}</span>
                 {t.tag === 'UNREGISTERED' && (
                   <select value={f.modelInput} onChange={(e) => setRegForm((p) => ({ ...p, [item.id]: { ...f, modelInput: e.target.value } }))} className="rounded-md border border-gray-300 px-2 py-1 text-xs" title="모델 (시리얼 접두로 추정, 확인 후 확정)">
@@ -653,6 +679,21 @@ export default function AsReceiptDetailPage() {
     setBusy(false)
     if (!res.ok) { flash(d.error ?? '입고 확인에 실패했습니다.'); return false }
     if (d.warnings?.length) setWarnings(d.warnings)
+    router.refresh()
+    await load()
+    return true
+  }
+
+  /** 라인 시리얼 보정 (2026-09-15) — POST correct-serial */
+  async function correctSerial(itemId: number, serial: string) {
+    if (!req) return false
+    setBusy(true)
+    const res = await fetch(`/api/as-receipts/${req.id}/correct-serial`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ itemId, serial }) })
+    const d = await res.json().catch(() => ({}))
+    setBusy(false)
+    if (!res.ok) { flash(d.error ?? d.message ?? '시리얼 보정에 실패했습니다.'); return false }
+    const st: Record<string, string> = { ACTIVE_HERE: '원장 연결', ACTIVE_OTHER: '타병원 배치', RECOVERED: '회수 상태', NONE: '미등록' }
+    setWarnings([`시리얼 보정 ${d.previousSerialNo} → ${d.serialNo} (${st[d.state] ?? d.state}${d.modelName ? ` · ${d.modelName}` : ''})`, ...(d.warnings ?? [])])
     router.refresh()
     await load()
     return true
@@ -1038,6 +1079,7 @@ export default function AsReceiptDetailPage() {
               onConfirm={confirmIntake}
               extras={req.items.filter((i) => !i.outcome && i.intakeState === 'EXTRA')}
               onRegistryConfirm={registryConfirm}
+              onCorrectSerial={correctSerial}
             />
           ))}
           {canResolve && openItems.length > 0 && (

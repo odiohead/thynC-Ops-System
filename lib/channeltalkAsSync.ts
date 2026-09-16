@@ -238,6 +238,9 @@ export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
           category: cell(r, C.CATEGORY).includes('분실') ? 'LOST' : 'FAULT',
           receiptDate,
           reporterName: cell(r, C.REPORTER) || null,
+          // 자동 인입 기본값 (2026-09-15 사용자 요청): 수거방법 택배수거 · 수거일 접수일 익일 (화면에서 수정 가능)
+          pickupMethod: 'PARCEL',
+          pickedUpAt: new Date(receiptDate.getTime() + 86400000),
           preReplace: cell(r, C.PRE_REPLACE).includes('선교체'),
           destType,
           destInfo,

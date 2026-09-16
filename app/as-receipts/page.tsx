@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
 import AsReceiptFormModal from './_components/AsReceiptFormModal'
-import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_PICKUP_METHOD_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsMethod, type AsTag } from '@/lib/asReceiptShared'
+import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsTag } from '@/lib/asReceiptShared'
 
 interface CodeRef { id: number; name: string; color: string | null }
 interface AsRow {
@@ -32,7 +32,7 @@ interface AsRow {
   createdBy: { id: string; name: string } | null
   ticket: { id: number; ticketCode: string; status: string; owner: { id: string; name: string } | null } | null
   items: {
-    id: number; serialNo: string; outcome: string | null; deviceKind: string | null; intakeState: string; shippedAt: string | null
+    id: number; serialNo: string; outcome: string | null; deviceKind: string | null; intakeState: string; shippedAt: string | null; shipTrackingNo: string | null
     device: { deviceInfo: { deviceName: string }; placement: { productType: string | null } | null } | null
     newDevice: { placement: { productType: string | null } | null } | null
   }[]
@@ -107,6 +107,17 @@ function shippedCell(r: AsRow) {
   )
 }
 
+/** 발송 송장번호 열 (2026-09-15) — 라인 송장 중복 제거, 여러 개면 첫 값 + '+n'(툴팁 전체) */
+function shipTrackingCell(r: AsRow) {
+  const nos = Array.from(new Set(r.items.map((i) => i.shipTrackingNo?.trim()).filter((v): v is string => !!v)))
+  if (!nos.length) return <span className="text-xs text-gray-300">-</span>
+  return (
+    <span className="font-mono text-xs text-gray-700" title={nos.length > 1 ? nos.join(', ') : undefined}>
+      {nos[0]}{nos.length > 1 && <span className="ml-1 font-sans text-gray-400">+{nos.length - 1}</span>}
+    </span>
+  )
+}
+
 /** 접수 기기상태 — 미종결 라인의 원장 정합: 정상 / 확인필요(툴팁에 태그별 라인 수) / 미종결 라인 없으면 '-' */
 function deviceStateBadge(r: AsRow) {
   const label = asReceiptDeviceStateLabel(r.items.some((i) => !i.outcome), r.registryTags ?? [], r.intakeIssues ?? 0)
@@ -150,6 +161,7 @@ function AsReceiptListInner() {
   const [ecg, setEcg] = useState(searchParams.get('group') !== 'SPO2')
   const [spo2, setSpo2] = useState(searchParams.get('group') !== 'ECG')
   const group = ecg && !spo2 ? 'ECG' : spo2 && !ecg ? 'SPO2' : ''
+  const [needsCheck, setNeedsCheck] = useState(searchParams.get('needsCheck') === '1') // 접수 기기상태 '확인필요' 필터 (2026-09-15)
   const [overdue, setOverdue] = useState(searchParams.get('overdue') === '1') // 접수 2주 경과 미처리 필터 (2026-09-15 — 요약 카드 클릭)
   const [tagFilter, setTagFilter] = useState<AsTag[]>(() => searchParams.getAll('tag').filter((t): t is AsTag => (AS_TAGS as readonly string[]).includes(t))) // 태그 필터 (2026-09-15) — 복수 = AND
   const [shippedFrom, setShippedFrom] = useState(searchParams.get('shippedFrom') ?? '') // 발송일 필터 (CX #9)
@@ -188,11 +200,12 @@ function AsReceiptListInner() {
     if (group) params.set('group', group)
     for (const t of tagFilter) params.append('tag', t)
     if (overdue) params.set('overdue', '1')
+    if (needsCheck) params.set('needsCheck', '1')
     if (shippedFrom) params.set('shippedFrom', shippedFrom)
     if (shippedTo) params.set('shippedTo', shippedTo)
     if (q) params.set('q', q)
     return params
-  }, [from, to, statusIds, category, group, tagFilter, overdue, shippedFrom, shippedTo, q])
+  }, [from, to, statusIds, category, group, tagFilter, overdue, needsCheck, shippedFrom, shippedTo, q])
 
   // 필터·페이지를 URL에 반영 — 뒤로가기 복원용 (CX #2, history만 교체해 리렌더 억제)
   useEffect(() => {
@@ -345,6 +358,10 @@ function AsReceiptListInner() {
           <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={ecg} onChange={(e) => { setEcg(e.target.checked); setPage(1) }} className="rounded border-gray-300" />심전계</label>
           <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={spo2} onChange={(e) => { setSpo2(e.target.checked); setPage(1) }} className="rounded border-gray-300" />산소포화도</label>
         </span>
+        <label className={`ml-1 inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-sm ${needsCheck ? 'border-red-300 bg-red-50 text-red-700' : 'border-gray-200 bg-white text-gray-700'}`} title="접수 기기상태가 '확인필요'(원장 정합 태그 또는 입고 대조 미입고·미식별입고)인 접수만">
+          <input type="checkbox" checked={needsCheck} onChange={(e) => { setNeedsCheck(e.target.checked); setPage(1) }} className="rounded border-gray-300" />
+          확인필요만
+        </label>
         <span className="ml-1 inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 text-sm">
           <span className="text-xs text-gray-400">태그</span>
           {AS_TAGS.map((t) => {
@@ -398,8 +415,8 @@ function AsReceiptListInner() {
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  {['접수번호', '병원', '접수 기기상태', '구분', '기기', '유형', '상태', '접수일', '수거', '발송일', '태그'].map((h) => (
-                    <th key={h} className={`${thClass} ${h === '태그' ? 'w-full' : 'w-px'}`}>{h}</th>
+                  {['접수번호', '병원', '접수 기기상태', '구분', '기기', '유형', '상태', '접수일', '발송일', '발송 송장번호', '태그'].map((h) => (
+                    <th key={h} className={`${thClass} ${h === '태그' ? 'w-[27rem] min-w-[27rem]' : ''}`}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -407,7 +424,7 @@ function AsReceiptListInner() {
                 {rows.map((r) => (
                   <tr key={r.id} className="cursor-pointer hover:bg-gray-50" onClick={() => router.push(`/as-receipts/${r.id}`)}>
                     <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-blue-600">{r.asCode}</td>
-                    <td className="max-w-[12rem] truncate px-3 py-2 text-gray-900" title={r.hospital?.hospitalName ?? undefined}><span className="block min-w-[7rem] max-w-[12rem] truncate">{r.hospital?.hospitalName ?? '-'}</span></td>
+                    <td className="max-w-[14rem] truncate px-3 py-2 text-gray-900" title={r.hospital?.hospitalName ?? undefined}><span className="block min-w-[8rem] max-w-[14rem] truncate">{r.hospital?.hospitalName ?? '-'}</span></td>
                     <td className="whitespace-nowrap px-3 py-2">{deviceStateBadge(r)}</td>
                     <td className="whitespace-nowrap px-3 py-2">
                       <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${CATEGORY_BADGE[r.category] ?? 'bg-gray-100 text-gray-700'}`}>{AS_CATEGORY_LABELS[r.category as AsCategory] ?? r.category}</span>
@@ -416,11 +433,8 @@ function AsReceiptListInner() {
                     <td className="whitespace-nowrap px-3 py-2">{productTypeBadges(r.items)}</td>
                     <td className="whitespace-nowrap px-3 py-2">{codeBadge(r.status)}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-gray-600">{r.receiptDate.slice(0, 10)}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-gray-600" title={r.pickupTrackingNo ?? undefined}>
-                      {r.pickupMethod ? AS_PICKUP_METHOD_LABELS[r.pickupMethod as AsMethod] : '-'}
-                      {r.pickupTrackingNo && <span className="ml-1 font-mono text-xs text-gray-400">{r.pickupTrackingNo}</span>}
-                    </td>
                     <td className="whitespace-nowrap px-3 py-2 text-gray-600">{shippedCell(r)}</td>
+                    <td className="whitespace-nowrap px-3 py-2">{shipTrackingCell(r)}</td>
                     <td className="whitespace-nowrap px-3 py-2">{tagBadges(r)}</td>
                   </tr>
                 ))}

@@ -23,7 +23,7 @@ const listInclude = {
   ticket: { select: { id: true, ticketCode: true, status: true, owner: { select: { id: true, name: true } } } },
   items: {
     select: {
-      id: true, serialNo: true, outcome: true, deviceKind: true, intakeState: true, shippedAt: true, // 입고 대조 (2026-09-11) · 발송일 열 (2026-09-15)
+      id: true, serialNo: true, outcome: true, deviceKind: true, intakeState: true, shippedAt: true, shipTrackingNo: true, // 입고 대조 (2026-09-11) · 발송일·발송 송장 열 (2026-09-15)
       device: { select: { deviceInfo: { select: { deviceName: true } }, placement: { select: { productType: true } } } }, // 목록 기기별 대수 표기 (CX #1) + 상품유형(일반/라이트, 2026-09-10)
       newDevice: { select: { placement: { select: { productType: true } } } }, // 교체 라인 — 구기기 배치가 회수된 뒤에는 교체기 배치의 상품유형으로 판별
     },
@@ -67,6 +67,18 @@ export async function GET(request: NextRequest) {
     const cut = new Date(new Date(`${kstTodayYmd}T00:00:00Z`).getTime() - 14 * 86400000)
     where.receiptDate = { ...(where.receiptDate as object | undefined), lt: cut } // 접수일 기간 필터(gte/lte)와 병행 가능
     where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: [{ statusId: null }, { status: { ticketStatus: { notIn: ['RESOLVED', 'CLOSED'] } } }, { status: { ticketStatus: null } }] }]
+  }
+
+  // 접수 기기상태 '확인필요' 필터 (2026-09-15) — 목록 배지와 같은 정의: 미종결 라인 중 원장 정합 태그(미등록·미배치·회수·타병원) 또는 입고 대조(미입고·미식별입고)가 있는 접수
+  if (sp.get('needsCheck') === '1') {
+    const rows = await prisma.$queryRaw<{ id: number }[]>(Prisma.sql`
+      SELECT DISTINCT r.id FROM as_receipts r
+      JOIN as_receipt_items i ON i.receipt_id = r.id AND i.outcome IS NULL
+      LEFT JOIN device_units du ON du.serial_no = i.serial_no
+      LEFT JOIN hospital_devices hd ON hd.device_id = du.id
+      WHERE i.intake_state IN ('MISMATCH', 'EXTRA')
+         OR du.id IS NULL OR hd.id IS NULL OR hd.status <> 'ACTIVE' OR hd.hospital_code IS DISTINCT FROM r.hospital_code`)
+    where.id = { in: rows.map((x) => x.id) }
   }
 
   const hospitalCode = sp.get('hospitalCode')

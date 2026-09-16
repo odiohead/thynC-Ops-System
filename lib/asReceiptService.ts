@@ -738,6 +738,64 @@ export async function confirmAsRegistry(receiptId: number, actor: { userId: stri
   }, { timeout: 60000, maxWait: 10000 })
 }
 
+// ── 라인 시리얼 보정 (2026-09-15) ─────────────────────────────────────
+// 채널톡·시트 인입 시리얼 오타("P018330사용중/삭제X" 등)를 담당자가 라인 단위로 고친다. 미종결 라인만.
+// 원 시리얼은 receipt_serial_no에 보존(입고 대조 치환과 같은 칸 — 최초 1회만 기록), 새 시리얼로 원장 재매칭·AS 표시,
+// 이전 라인이 켠 AS 표시는 해제. 기기현황 이벤트는 재매칭 결과에 따라서만 발생.
+
+export interface CorrectSerialResult { serialNo: string; previousSerialNo: string; state: MatchState; modelName: string | null; warnings: string[] }
+
+export async function correctAsLineSerial(receiptId: number, actor: { userId: string; name: string | null }, input: { itemId: number; serial: string }): Promise<CorrectSerialResult> {
+  const key = normalizeSerial(input.serial ?? '').serialNo
+  if (!key) throw new AsServiceError(400, '보정할 시리얼을 입력하세요.')
+  return prisma.$transaction(async (tx) => {
+    const receipt = await tx.asReceipt.findUnique({
+      where: { id: receiptId },
+      select: { id: true, asCode: true, hospitalCode: true, receiptDate: true, note: true, status: { select: { ticketStatus: true } }, items: { select: { id: true, serialNo: true } } },
+    })
+    if (!receipt) throw new AsServiceError(404, 'AS접수를 찾을 수 없습니다.')
+    if (receipt.status?.ticketStatus === 'RESOLVED' || receipt.status?.ticketStatus === 'CLOSED') throw new AsServiceError(409, '완료·취소된 접수입니다.')
+    const item = await tx.asReceiptItem.findFirst({ where: { id: input.itemId, receiptId } })
+    if (!item) throw new AsServiceError(400, '이 접수의 라인이 아닙니다.')
+    if (item.outcome) throw new AsServiceError(409, `이미 종결된 라인입니다: ${item.serialNo}`)
+    if (key === item.serialNo) throw new AsServiceError(400, '같은 시리얼입니다.')
+    if (receipt.items.some((i) => i.id !== item.id && i.serialNo === key)) throw new AsServiceError(400, `같은 시리얼이 이 접수에 이미 있습니다: ${key}`)
+
+    const warnings: string[] = []
+    const today = todayKst()
+    // 이전 시리얼이 켠 AS 표시 해제 (이 접수 참조일 때만)
+    if (item.deviceId) {
+      const placement = await tx.hospitalDevice.findUnique({ where: { deviceId: item.deviceId }, select: { asStartedOn: true, asRefCode: true } })
+      if (placement?.asStartedOn && placement.asRefCode === receipt.asCode) {
+        try {
+          await clearDeviceAs({ hospitalCode: receipt.hospitalCode, actor, occurredOn: today, source: 'MANUAL', ref: { type: 'AS', code: receipt.asCode }, memo: `시리얼 보정 (${item.serialNo} → ${key})` }, { deviceId: item.deviceId }, { client: tx })
+        } catch (e) {
+          if (e instanceof RegistryError) warnings.push(`${item.serialNo}: 이전 시리얼 AS 해제 실패 — ${e.message}`)
+          else throw e
+        }
+      }
+    }
+    const [m] = await matchSerials(tx, receipt.hospitalCode, [key])
+    const w = matchWarning(m)
+    if (w) warnings.push(w)
+    await tx.asReceiptItem.update({
+      where: { id: item.id },
+      data: {
+        serialNo: m.serialNo,
+        receiptSerialNo: item.receiptSerialNo ?? item.serialNo, // 최초 접수 시리얼 보존
+        deviceId: m.deviceId,
+        deviceKind: m.deviceId ? null : item.deviceKind ?? asDeviceKindFromSerial(m.serialNo),
+        wardName: item.wardName ?? m.wardName,
+      },
+    })
+    if (m.state === 'ACTIVE_HERE' && !m.asOpen) {
+      warnings.push(...(await openAsFlags(tx, receipt, [{ serialNo: m.serialNo, deviceId: m.deviceId! }], actor, ymd(receipt.receiptDate) ?? today)))
+    }
+    await tx.asReceipt.update({ where: { id: receipt.id }, data: { note: appendNote(receipt.note, `[시리얼 보정 ${today} ${actor.name ?? ''}] ${item.serialNo} → ${m.serialNo}${m.modelName ? ` (${m.modelName})` : m.state === 'NONE' ? ' (미등록)' : ''}`) } })
+    return { serialNo: m.serialNo, previousSerialNo: item.serialNo, state: m.state, modelName: m.modelName, warnings }
+  }, { timeout: 60000, maxWait: 10000 })
+}
+
 // ── 발송완료 자동 전이 / 최종 완료 (2026-09-11 — 기기등록 후속업무 반영) ─────────
 // 전 라인 종결 → '발송완료'(비종결, IN_PROGRESS). 최종 '완료'(CLOSED)는 4. 기기등록 카드의 [완료]로만(completeAsReceipt).
 
@@ -864,6 +922,7 @@ export interface CreateAsReceiptInput {
   reporterName?: string | null
   pickupMethod?: string | null
   pickupTrackingNo?: string | null
+  pickedUpAt?: Date | null // 수거일 (2026-09-15 — 채널톡 자동 인입 기본 익일)
   priorityRepair?: boolean // 태그 (2026-09-15)
   firmwareUpdate?: boolean
   accessoryIncluded?: boolean
@@ -958,6 +1017,7 @@ export async function createAsReceipt(
               reporterName,
               pickupMethod,
               pickupTrackingNo,
+              pickedUpAt: input.pickedUpAt instanceof Date && !isNaN(input.pickedUpAt.getTime()) ? input.pickedUpAt : null,
               preReplace,
               ...tagFlags,
               destType,

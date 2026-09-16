@@ -110,6 +110,10 @@ function summarizeAudit(row: { id: number; action: string; resourceLabel: string
     const kind: Record<string, string> = { created: '원장 신규 등록', reregistered: '재등록', transferred: '타병원에서 이관' }
     return { ...base, title: '원장 확정', details: [kind[String(after.kind)] ?? '', ...warn].filter(Boolean) }
   }
+  if (suffix === '시리얼 보정') {
+    const st: Record<string, string> = { ACTIVE_HERE: '원장 연결', ACTIVE_OTHER: '타병원 배치', RECOVERED: '회수 상태', NONE: '미등록' }
+    return { ...base, title: `시리얼 보정 ${str(after.previousSerialNo)} → ${str(after.serialNo)}`, details: [`${st[String(after.state)] ?? ''}${after.modelName ? ` · ${after.modelName}` : ''}`, ...warn].filter(Boolean) }
+  }
   if (suffix === '기기등록 완료') return { ...base, title: '기기등록 완료 → 접수 완료', details: after.statusName ? [`상태 ${after.statusName}`] : [] }
   if (suffix === '리오픈') return { ...base, title: `리오픈${after.statusName ? ` → ${after.statusName}` : ''}`, details: after.reason ? [String(after.reason)] : [] }
   // 일반 수정 — 헤더 필드 diff

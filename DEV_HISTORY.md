@@ -4,6 +4,39 @@
 
 ---
 
+## 2026-09-16 10:30 | 채널톡 시트 미등록 대조 + 병원 매처 지역 접두 규칙 ('광주 동아병원' → 동아병원) (dev2 검증, 빌드·PROD 배포 대기)
+
+- **조사(사용자 질문, 시트 r3717 KS병원)**: 실패 사유 "시리얼 ✕"는 오류가 아니라 **동기화 틱(9/14 15:56:42)이 채널톡 태스크가 행을 쓰는 도중에 읽어** F열이 비어 있던 것(r3718도 같은 초·같은 사유). 담당자는 15:49·15:53에 AS-202609-0218/0219를 수동 등록하고 AJ열에 코드를 손으로 기입. 설계 결함 2건 — ① 필수값 누락 실패가 영구(AI 채워지면 재시도 없음) ② AI≠'등록완료'면 AJ에 코드가 있어도 역기입(X·R/V/W·L) 제외
+- **전수 대조(컷오버 이후 126행 vs PROD 9월 접수 237건, 읽기 전용)**: 등록완료·DB 존재 104 / 실패이나 수동 등록됨 18(AJ 코드 7 + 시리얼 매칭 11) / 등록완료인데 AJ 공란 1(r3616 → AS-0048 수동) / 건너뜀 1 / **DB 없음 2** — r3619(9/8 "광주 동아병원" A119887, X 미완료)·r3640(9/8 "군산 차병원" P016782, X 완료). 실패 사유는 필수값 누락 13·병원 매칭 실패 6
+- **매처** (`lib/hospitalNameMatcher.ts`, 사용자 확정 "동아병원은 동아병원, 동아대학교병원 아님"): 정식명·별칭·부분 포함이 모두 실패하면 **입력 키가 어떤 병원의 정식명 키(4자 이상)로 끝나고 남는 접두가 ≤4자(시·군·구명)일 때 유일하면 확정**. '광주동아병원'은 부분 포함에서 동아병원·동아대학교병원(축약 별칭 '동아병원') 둘이 걸려 실패했으나 정식명 접미 일치는 동아병원만. 정식명 키 3자('차병원' — 의료법인의인의료재단 차병원)는 제외해 '일산차병원'→군산 차병원 오매칭 방지(첫 시도에서 발견·수정). 검증: 광주 동아병원→동아병원 / 부산 동아대학교병원→동아대학교병원 / 서울 더필병원→더필병원 / 군산·일산·분당 차병원 실패 유지. 회귀: 시트 등록완료 104행 병원명 재매칭 100건 DB 동일, 4건은 등록 후 사용자가 시스템에서 병원 변경한 건(매처 결과=시트 표기)
+- **미처리**: r3619 등록은 PROD 배포 후 시트 AI열을 비우면 동기화가 정상 경로로 자동 등록(태그·티켓·알림 포함) / r3640은 사용자 결정 대기 / 동기화 개선(필수값 누락 재시도·AJ 코드 승격·수동 등록 중복 방지)은 승인 대기
+- 영향: lib/hospitalNameMatcher.ts
+
+---
+
+## 2026-09-15 21:10 | AS 개선 5건 — 자동 인입 수거 기본값 · 확인필요 필터 · 수거 송장→수거중 자동 · 목록 발송 송장 열 · 폭 보정 (dev2 E2E 완료, 빌드·PROD 배포 대기)
+
+- **① 자동 인입 기본값** (`lib/channeltalkAsSync.ts`): createAsReceipt에 `pickupMethod: 'PARCEL'`·`pickedUpAt: 접수일+1일` 전달(`CreateAsReceiptInput`에 `pickedUpAt` 추가). 화면 수정 가능. 수동 등록 모달 기본값은 변경 없음
+- **② 목록 '확인필요만' 필터** (`GET /api/as-receipts?needsCheck=1`): 배지 정의(미종결 라인의 원장 정합 태그 or 입고 대조 이슈)를 raw SQL로 재현 — `as_receipt_items(outcome null)` × `device_units`(serial) × `hospital_devices`: 미등록(du 없음)·미배치(hd 없음)·비ACTIVE·타병원 or intake_state MISMATCH/EXTRA → 접수 id 집합을 `where.id in`. 화면 체크박스(기기군 우측, URL 동기화). 표본 100건에서 배지 판정과 불일치 0
+- **③ 수거 송장 → '수거중' 자동** (`PUT [id]`): body에 statusId가 없고 `pickupTrackingNo`가 빈 값→기입으로 바뀌며 현재 상태 order가 '수거중'보다 앞이면 statusId 전이(+statusChangedAt, 어댑터 티켓 동기화는 기존 경로). 응답 `autoPickup`·경고 문구로 화면 배너 표시. 송장 변경·'입고' 이후 단계는 불변(E2E 확인)
+- **④ 목록 컬럼**: 접수번호·병원·접수 기기상태·구분·기기·유형·상태·접수일·**발송일**·**발송 송장번호**(라인 송장 중복 제거, `+n` 툴팁)·태그 — '수거' 열 제거. list include에 `shipTrackingNo`
+- **⑤ 폭**: 태그 열 고정 27rem(4개 한 줄), 나머지 열은 자동 폭(종전 `w-px` 최소폭 해제), 병원 최소 8rem·최대 14rem
+- **검증**: tsc 0·eslint 0. dev2 라우트 E2E — needsCheck 54건·표본 불일치 0 / PUT 송장 없음→'접수' 유지 → 송장 기입→'수거중' autoPickup / 송장 변경→불변 / '입고' 상태에서 송장 기입→불변. 테스트 데이터 삭제
+- 영향: lib/{channeltalkAsSync,asReceiptService}.ts, app/api/as-receipts/{route.ts,[id]/route.ts}, app/as-receipts/page.tsx, README.md
+
+---
+
+## 2026-09-15 20:30 | AS접수 라인 시리얼 보정 기능 (dev2 E2E 완료, 빌드·PROD 배포 대기)
+
+- **배경(사용자, PROD AS-202609-0056 / 3338)**: 채널톡 인입 시리얼 `P018330사용중/삭제X`처럼 명백한 오타가 미등록 라인으로 들어오는데, 원장 정합 패널엔 [확정](원장 신규 등록)만 있고 시리얼을 고칠 수단이 없음(수정 모달의 인라인 시리얼 편집은 발견되지 않음)
+- **서비스** (`lib/asReceiptService.ts` `correctAsLineSerial`): 미종결 라인만·같은 시리얼/접수 내 중복 400. 이전 시리얼이 이 접수로 켠 AS 표시 해제 → 새 시리얼 원장 매칭(`matchSerials`) → 라인 `serialNo`·`deviceId`·`deviceKind`(미등록이면 접두 추정)·`wardName` 갱신, 원 시리얼은 `receiptSerialNo`에 최초 1회 보존(입고 대조 치환과 같은 칸) → ACTIVE_HERE면 AS 표시(접수일 기준) → 비고 이력 `[시리얼 보정 날짜 사용자] 구 → 신 (모델|미등록)`
+- **API**: 신규 `POST [id]/correct-serial` `{ itemId, serial }` — 권한은 접수 수정(canEditAsReceipt)과 동일, 감사로그 라벨 '시리얼 보정', 티켓 clock·알림. 타임라인에 '시리얼 보정 구 → 신' 이벤트(매칭 상태·모델)
+- **UI** (`app/as-receipts/[id]/page.tsx` GroupCard 원장 정합 패널): 라인마다 [시리얼 보정] → 인라인 입력(대문자 자동, Esc 취소) + [보정 적용]. 성공 시 경고 배너에 결과·재로드. 시리얼 셀 툴팁에 접수 시리얼. 패널 안내문에 "오타면 보정 / 실제 미등록·타병원·회수면 확정" 분기 명시
+- **검증**: tsc 0·eslint 0. dev2 라우트 E2E: ACTIVE 배치 기기 시리얼+오타 접미로 접수(미등록 라인) → 보정 200 `ACTIVE_HERE 산소포화도`, 라인 deviceId 연결·receiptSerialNo 보존·배치 AS 표시 켜짐 → 접수 내 중복 400·동일 400 → 미등록 시리얼로 재보정 → 이전 기기 AS 표시 해제 확인, 타임라인 2건, 비고 이력. 테스트 접수·티켓·원장 이벤트 삭제(플래그 원복)
+- 영향: lib/asReceiptService.ts, app/api/as-receipts/[id]/correct-serial/route.ts(신규), app/api/as-receipts/[id]/timeline/route.ts, app/as-receipts/[id]/page.tsx, README.md
+
+---
+
 ## 2026-09-15 19:50 | PROD 배포: AS 요약 평균(미완료 포함) + 2주 경과 클릭 필터 (f8004b1)
 
 - **dev2**: 힙 4GB 빌드·`pm2 restart thync-dev`(health 200) → 커밋 f8004b1·push

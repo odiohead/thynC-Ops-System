@@ -109,6 +109,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const body = await request.json()
   const data: Prisma.AsReceiptUncheckedUpdateInput = {}
   let items: LineInput[] | null = null
+  let autoPickup = false // 수거 송장 기입 → '수거중' 자동 전이 여부 (응답·경고용)
 
   try {
     if (body.category !== undefined) {
@@ -150,6 +151,18 @@ export async function PUT(request: NextRequest, { params }: Params) {
       data.hospitalCode = code
     }
 
+    // 수거 송장번호 최초 기입 → 상태 '수거중' 자동 (2026-09-15 사용자 요청). 명시 statusId가 오면 그쪽 우선. '접수'보다 뒤 단계면 유지
+    if (body.statusId === undefined && data.pickupTrackingNo && !existing.pickupTrackingNo) {
+      const [pickup, cur] = await Promise.all([
+        prisma.statusCode.findFirst({ where: { category: 'AS_STATUS', name: '수거중' }, select: { id: true, order: true } }),
+        existing.statusId ? prisma.statusCode.findUnique({ where: { id: existing.statusId }, select: { order: true } }) : Promise.resolve(null),
+      ])
+      if (pickup && existing.statusId !== pickup.id && (cur?.order ?? 0) < pickup.order) {
+        data.statusId = pickup.id
+        data.statusChangedAt = new Date()
+        autoPickup = true
+      }
+    }
     if (body.statusId !== undefined) {
       const sid = Number(body.statusId)
       const row = Number.isInteger(sid)
@@ -220,7 +233,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     notifyTicketChanged({ ticketId: existing.ticketId, actorName: user.name, actorId: user.userId }).catch(() => {})
   }
 
-  return NextResponse.json({ asReceipt, warnings })
+  return NextResponse.json({ asReceipt, warnings: autoPickup ? ["수거 송장번호 기입 → 상태 '수거중'으로 자동 변경", ...warnings] : warnings, autoPickup })
 }
 
 export async function DELETE(request: NextRequest, { params }: Params) {
