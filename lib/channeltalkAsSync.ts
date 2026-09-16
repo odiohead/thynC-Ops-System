@@ -46,12 +46,16 @@ const C = {
   SYS_STATE: 34, SYS_CODE: 35, SYS_MEMO: 36, SYS_AT: 37, // AI~AL 시스템 기입란
 } as const
 
-const SYS_STATE = { OK: '등록완료', FAIL: '실패', SKIP: '건너뜀' } as const
+const SYS_STATE = { OK: '등록완료', FAIL: '실패', SKIP: '건너뜀', WAIT: '대기' } as const
+/** '대기'(필수값 누락 — 행 작성 중) 유지 한도: 최초 대기 기록(AL) 후 이 시간이 지나도 채워지지 않으면 '실패' (2026-09-16) */
+const WAIT_MAX_MS = 24 * 3600 * 1000
 
 export interface ChanneltalkSyncResult {
   scanned: number
   registered: number
   failed: number
+  waiting: number // 필수값 누락 대기(재시도 예정) (2026-09-16)
+  linked: number // AJ 코드·기존 접수 연결로 승격 (2026-09-16)
   completedBack: number
   shipBack: number
   pickupBack: number
@@ -67,6 +71,8 @@ function sheetsClient() {
 }
 
 const nowKst = () => new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' })
+/** 접수 비고 끝에 행 태그 줄 추가 (5,000자 초과 시 앞부분 절단) */
+const appendTag = (note: string | null, line: string) => { const n = note?.trim() ? `${note.trimEnd()}\n${line}` : line; return n.length > 5000 ? n.slice(n.length - 5000) : n }
 
 /** 시스템 기입란(AI~AL) 그리드 보장 — 시트가 34열(AH)까지라 최초 1회 4열 확장 + 헤더 기입 */
 const gridEnsured = new Set<string>()
@@ -135,9 +141,15 @@ async function loadSettings() {
   return { sheetId, cutover, tab }
 }
 
-export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
-  const result: ChanneltalkSyncResult = { scanned: 0, registered: 0, failed: 0, completedBack: 0, shipBack: 0, pickupBack: 0, intakeBack: 0 }
-  const { sheetId, cutover, tab } = await loadSettings()
+/** 테스트 주입(2026-09-16) — 시트 대신 메모리 행을 쓰고, batchUpdate 대신 콜백으로 되쓰기 내용을 받는다. 운영 경로는 미지정 */
+export interface ChanneltalkSyncTestIo { rows: unknown[][]; cutover: number; onWrite: (writes: { range: string; values: string[][] }[]) => void }
+
+export async function runChanneltalkAsSync(testIo?: ChanneltalkSyncTestIo): Promise<ChanneltalkSyncResult> {
+  const result: ChanneltalkSyncResult = { scanned: 0, registered: 0, failed: 0, waiting: 0, linked: 0, completedBack: 0, shipBack: 0, pickupBack: 0, intakeBack: 0 }
+  const settings = await loadSettings()
+  const sheetId = testIo ? 'test' : settings.sheetId
+  const cutover = testIo ? testIo.cutover : settings.cutover
+  const tab = settings.tab
   if (!sheetId) {
     console.warn('[channeltalk-as] channeltalk_as_sheet_id 미설정 — 스킵')
     return result
@@ -148,14 +160,11 @@ export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
     return result
   }
 
-  const sheets = sheetsClient()
-  await ensureSystemColumns(sheets, sheetId, tab)
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `'${tab}'!A${cutover + 1}:AL`,
-    valueRenderOption: 'FORMATTED_VALUE',
-  })
-  const rows = res.data.values ?? []
+  const sheets = testIo ? null : sheetsClient()
+  if (sheets) await ensureSystemColumns(sheets, sheetId, tab)
+  const rows: unknown[][] = testIo
+    ? testIo.rows
+    : (await sheets!.spreadsheets.values.get({ spreadsheetId: sheetId, range: `'${tab}'!A${cutover + 1}:AL`, valueRenderOption: 'FORMATTED_VALUE' })).data.values ?? []
   result.scanned = rows.length
   if (!rows.length) return result
 
@@ -166,12 +175,29 @@ export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
   // ── ① 접수 인입 ──────────────────────────────────────────────
   const pendingRows = rows
     .map((r, i) => ({ r, rowNo: cutover + 1 + i }))
-    .filter(({ r }) => cell(r, C.SYS_STATE) === '' && r.some((v) => String(v ?? '').trim() !== ''))
+    .filter(({ r }) => {
+      const st = cell(r, C.SYS_STATE)
+      // AI 공란(신규) · '대기'(필수값 누락 재시도) · '실패'인데 AJ에 코드가 손으로 기입된 행(수동 등록 연결 승격) — 2026-09-16
+      return (st === '' || st === SYS_STATE.WAIT || (st === SYS_STATE.FAIL && cell(r, C.SYS_CODE) !== '')) && r.some((v) => String(v ?? '').trim() !== '')
+    })
 
   let matcher: Awaited<ReturnType<typeof loadHospitalMatcher>> | null = null
   for (const { r, rowNo } of pendingRows) {
     const tag = `[채널톡 r${rowNo}]`
+    const state = cell(r, C.SYS_STATE)
     try {
+      // AJ 코드 승격 (2026-09-16): '실패' 행에 담당자가 수동 등록한 AS 코드를 AJ에 적어 두면 '등록완료'로 올려 역기입 대상에 포함. 접수 비고에 행 태그 추가
+      if (state === SYS_STATE.FAIL) {
+        const code = cell(r, C.SYS_CODE)
+        const rec = await prisma.asReceipt.findUnique({ where: { asCode: code }, select: { id: true, asCode: true, note: true } })
+        if (!rec) continue // 코드가 DB에 없으면 그대로 둠(실패 유지 — 담당자가 확인)
+        if (!(rec.note ?? '').includes(tag)) await prisma.asReceipt.update({ where: { id: rec.id }, data: { note: appendTag(rec.note, `${tag} 수동 등록 연결`) } })
+        rangeOf(rowNo, 'AI', [SYS_STATE.OK, rec.asCode, '(수동 등록 연결 — AJ 코드 승격)', nowKst()])
+        result.linked++
+        console.log(`[channeltalk-as] r${rowNo} AJ 코드 승격 → ${rec.asCode}`)
+        continue
+      }
+
       // DB측 2차 가드 — 이전 틱에서 등록됐지만 되쓰기 실패한 행
       const dup = await prisma.asReceipt.findFirst({ where: { note: { contains: tag } }, select: { asCode: true } })
       if (dup) {
@@ -183,8 +209,18 @@ export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
       const hospRaw = cell(r, C.HOSP)
       const serialsRaw = cell(r, C.SERIALS)
       if (!dateRaw || !hospRaw || !serialsRaw) {
-        result.failed++
-        rangeOf(rowNo, 'AI', [SYS_STATE.FAIL, '', `필수값 누락 (접수일:${dateRaw ? '○' : '✕'} 병원:${hospRaw ? '○' : '✕'} 시리얼:${serialsRaw ? '○' : '✕'})`, nowKst()])
+        // 필수값 누락 = 채널톡 태스크가 행을 쓰는 도중일 가능성 (2026-09-16, r3717·3718 사례) → '대기'로 두고 다음 틱 재시도. 최초 대기 후 24h 지나면 '실패'
+        const missing = `필수값 누락 (접수일:${dateRaw ? '○' : '✕'} 병원:${hospRaw ? '○' : '✕'} 시리얼:${serialsRaw ? '○' : '✕'})`
+        if (state === SYS_STATE.WAIT) {
+          const since = Date.parse(cell(r, C.SYS_AT).replace(' ', 'T') + '+09:00')
+          if (!isNaN(since) && Date.now() - since > WAIT_MAX_MS) {
+            result.failed++
+            rangeOf(rowNo, 'AI', [SYS_STATE.FAIL, '', `${missing} — 24시간 경과`, nowKst()])
+          } else result.waiting++ // 대기 유지 (AL은 최초 대기 시각 보존)
+        } else {
+          result.waiting++
+          rangeOf(rowNo, 'AI', [SYS_STATE.WAIT, '', `${missing} — 행 작성 대기, 채워지면 자동 등록`, nowKst()])
+        }
         continue
       }
       const receiptDate = new Date(dateRaw)
@@ -231,6 +267,20 @@ export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
       const destRaw = cell(r, C.DEST_TYPE)
       const destInfo = cell(r, C.DEST_INFO) || null
       const destType = destRaw.includes('병원') ? 'HOSPITAL' : destRaw || destInfo ? 'OTHER' : null
+
+      // 수동 등록 중복 방지 (2026-09-16): 같은 병원·접수일에 이 행의 시리얼을 전부 가진 접수가 이미 있으면 새로 만들지 않고 연결
+      const already = await prisma.asReceipt.findFirst({
+        where: { hospitalCode, receiptDate, items: { some: { serialNo: { in: serials } } } },
+        select: { id: true, asCode: true, note: true, items: { select: { serialNo: true } } },
+        orderBy: { id: 'desc' },
+      })
+      if (already && serials.every((sn) => already.items.some((i) => i.serialNo === sn))) {
+        if (!(already.note ?? '').includes(tag)) await prisma.asReceipt.update({ where: { id: already.id }, data: { note: appendTag(already.note, `${tag} 기존 접수 연결`) } })
+        rangeOf(rowNo, 'AI', [SYS_STATE.OK, already.asCode, '(기존 접수 연결 — 동일 병원·접수일·시리얼)', nowKst()])
+        result.linked++
+        console.log(`[channeltalk-as] r${rowNo} 기존 접수 연결 → ${already.asCode}`)
+        continue
+      }
 
       const created = await createAsReceipt(
         {
@@ -382,7 +432,8 @@ export async function runChanneltalkAsSync(): Promise<ChanneltalkSyncResult> {
     }
   }
 
-  if (writes.length) {
+  if (writes.length && testIo) testIo.onWrite(writes)
+  else if (writes.length && sheets) {
     await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: sheetId,
       requestBody: { valueInputOption: 'RAW', data: writes },
