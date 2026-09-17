@@ -127,12 +127,18 @@ export async function GET(request: NextRequest) {
   }
 
   const q = sp.get('q')?.trim()
+  const qTracking = q?.replace(/[\s-]+/g, '') ?? ''
   if (q) {
     where.OR = [
       { asCode: { contains: q, mode: 'insensitive' } },
       { reporterName: { contains: q, mode: 'insensitive' } },
       { hospital: { hospitalName: { contains: q, mode: 'insensitive' } } },
       { items: { some: { serialNo: { contains: q.replace(/\s+/g, ''), mode: 'insensitive' } } } },
+      // 운송장 검색 (2026-09-18): 수거 송장은 접수 헤더, 발송 송장은 라인 — 공백·하이픈 제거 후 부분 일치
+      ...(qTracking ? [
+        { pickupTrackingNo: { contains: qTracking } },
+        { items: { some: { shipTrackingNo: { contains: qTracking } } } },
+      ] : []),
     ]
   }
 

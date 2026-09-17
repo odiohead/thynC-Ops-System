@@ -1777,7 +1777,7 @@ npm run dev
 
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| GET | `/api/as-receipts` | 목록 (statusId **복수 가능**·category·hospitalCode·접수일 기간·**tag 복수(AND, 2026-09-15)**·**overdue=1**(접수 2주 경과 미종결 — summary.overdue2w와 동일 정의)·**needsCheck=1**(접수 기기상태 '확인필요' — 미종결 라인의 원장 정합 태그 또는 입고 대조 미입고·미식별입고, raw SQL)·q(코드·병원·시리얼)·**receivedFrom/To**(입고일 — 라인 receivedAt 또는 헤더 receivedAt, 2026-09-16)·shippedFrom/To(발송일 — 라인)·**sort/dir**(2026-09-16: asCode·hospital·category·status(order)·receiptDate는 Prisma orderBy, receivedAt·shippedAt은 라인 최신 날짜 집계라 id 전량 조회 후 JS 정렬·슬라이스, 빈 값 항상 뒤)·페이징) |
+| GET | `/api/as-receipts` | 목록 (statusId **복수 가능**·category·hospitalCode·접수일 기간·**tag 복수(AND, 2026-09-15)**·**overdue=1**(접수 2주 경과 미종결 — summary.overdue2w와 동일 정의)·**needsCheck=1**(접수 기기상태 '확인필요' — 미종결 라인의 원장 정합 태그 또는 입고 대조 미입고·미식별입고, raw SQL)·q(접수번호·병원·접수자·시리얼·**수거/발송 운송장번호**(2026-09-18, 공백·하이픈 무시) — export 동일)·**receivedFrom/To**(입고일 — 라인 receivedAt 또는 헤더 receivedAt, 2026-09-16)·shippedFrom/To(발송일 — 라인)·**sort/dir**(2026-09-16: asCode·hospital·category·status(order)·receiptDate는 Prisma orderBy, receivedAt·shippedAt은 라인 최신 날짜 집계라 id 전량 조회 후 JS 정렬·슬라이스, 빈 값 항상 뒤)·페이징) |
 | GET | `/api/as-receipts/summary` | 목록 상단 요약 — 상태별 건수·이번 주(KST 월~) 접수·평균 처리일(최근 3개월 접수 건 — 완료는 접수→완료일, 미완료는 접수→오늘(KST), 취소 제외 (2026-09-15 개정) — `avgResolution.normal/preReplace` {days,count,doneCount,openCount} 분리 + 가중 합산 `avgResolutionDays`)·접수 2주 경과 미종결 (2026-09-07) |
 | POST | `/api/as-receipts` | 등록 — 병원·접수일·시리얼 라인 ≥1 (레코드+라인+티켓+AS 표시 단일 트랜잭션, 경고 배열 반환) |
 | POST | `/api/as-receipts/match` | 시리얼 원장 매칭 미리보기 (등록 폼 — ACTIVE_HERE/ACTIVE_OTHER/RECOVERED/NONE) |

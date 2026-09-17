@@ -451,8 +451,9 @@ function AsReceiptListInner() {
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && (setQ(qInput), setPage(1))}
-            placeholder="코드·병원·시리얼 검색"
-            className="w-48 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm"
+            placeholder="접수번호·병원·시리얼·운송장 검색"
+            title="AS접수번호 · 병원명 · 접수자 · 기기 시리얼 · 수거/발송 운송장번호"
+            className="w-56 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm"
           />
           <button type="button" onClick={() => { setQ(qInput); setPage(1) }} className="rounded-md bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700">검색</button>
         </div>

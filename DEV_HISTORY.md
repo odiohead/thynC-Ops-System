@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-09-18 08:30 | AS접수 목록 — 검색어에 수거·발송 운송장번호 추가 (dev2 검증, 빌드·PROD 배포 대기)
+
+- **배경(사용자 요청)**: AS업무 메인 검색을 접수번호·운송장번호로도 할 수 있게 — 접수번호(`asCode`)는 이미 검색 대상이었으나 placeholder가 '코드'라 드러나지 않았고, 운송장은 미지원
+- **변경**: 목록 `GET /api/as-receipts`·Excel `export` 공용 `q` OR 조건에 **수거 송장**(접수 헤더 `pickupTrackingNo`)·**발송 송장**(라인 `shipTrackingNo`, some) 부분 일치 추가 — 검색어의 공백·하이픈 제거 후 비교(DB 값은 전부 구분자 없는 문자열이라 하이픈 섞어 입력해도 매치). 기존 접수번호·접수자·병원명·시리얼 조건 유지. 검색창 placeholder '접수번호·병원·시리얼·운송장 검색' + 툴팁(전체 대상 명시), 폭 w-48→w-56
+- **검증**: tsc 0(힙 4GB)·eslint 0. dev2 Prisma 실측 — 수거 송장 전체·`1234-5678910`(하이픈) → AS-202609-0039 1건, 발송 송장 `A12345678`·끝 6자리 → AS-202609-0151 포함, `AS-202609-0039`·`0039` 접수번호 매치 정상. 빌드·재시작 미실행
+- 영향: app/api/as-receipts/{route.ts,export/route.ts}, app/as-receipts/page.tsx, README.md
+
+---
+
 ## 2026-09-17 16:00 | PROD 배포: AS접수 목록 개선 — 입고일 열·필터 + 컬럼 정렬 + 페이저 + 날짜 필터 캘린더 (d4bae73)
 
 - **dev2 병합**: dev에서 push된 기기 상태·위치 축(26a0ba1·eb12ab8) 위에 dev2 작업분을 stash→pull→pop으로 재적용 — 충돌 3파일(목록 API items select·목록 AsRow 타입·DEV_HISTORY) 양쪽 유지로 해결, 마이그 `20260917120000_device_condition_location` dev2 DB 적용+resolve+generate, tsc 0·힙 4GB 빌드·재시작(WSL 재부팅으로 PM2가 비어 있어 `pm2 resurrect`·`pm2 save`) → 커밋 d4bae73·push
