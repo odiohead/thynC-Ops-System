@@ -31,7 +31,7 @@
 | [channeltalk_as_intake_design.md](channeltalk_as_intake_design.md) | 채널톡 AS접수 자동 등록 — ALF 태스크→'thynC VOC 현황' A/S 탭(중계 전용)을 1분 폴링해 접수 자동 생성(마이그 파서 재사용·티켓 기존 경로) + 종결 시 완료여부 역기입, P0~P3 | **완료 (PROD 배포 2026-09-07)** |
 | [as_work_design.md](as_work_design.md) | AS업무(AS접수) — 기기 수리·교체 업무 도메인화(8번째 티켓 도메인, refType `AS`): 헤더+기기 라인 구조, 단계형 상태 8종(완료·취소 티켓 CLOSED 직행), 기기현황 자동 연동(AS_OPEN·교체·회수), WMS 1차 제외, 과거 이력 3,537행은 기능 완료 후 도메인 소급 | **완료 (PROD 배포 2026-09-04, 커밋 990c0d2)** — 후속: PROD CTI 규칙 사용자 신설·과거 이력 소급 마이그 |
 | [wiki_next_gen_review.md](wiki_next_gen_review.md) | **검토 의견** (설계안 아님) — 차세대 사내위키 검토: Notion·Confluence·오픈소스 6종·KM 도구 6종·여론 vs 현 위키 정밀 비교(코드 감사 4렌즈 + 조사 8주제 + 적대 검증 53). 결론: 기능·아키텍처 충분, 6/30 협업 전환 회귀 등 소규모 결함 11건(A)만 수정, 선택 6(B)·운영 2(C)·보류 25+(D) | **A 11건 + B 4건 구현 완료 (dev2 2026-09-12) — PROD 배포 대기** |
-| [device_condition_location_design.md](device_condition_location_design.md) | 기기 상태·위치 축 — AS 회수 기기의 실물 상태 6종(사용중·AS접수·수리완료·출고 전·분실·폐기)·위치(병원/리프레시센터/thynC Connected Hub)를 배치와 분리해 유닛 축으로 추적, AS 상세 라인 '수리완료' 체크·이벤트 4종·백필(HDR D11 개정) | **구현 완료 (dev, 2026-09-17) — dev 반영 완료(빌드·재시작·백필 적용 2026-09-17) — PROD 배포 대기** (A-1~A-6 사용자 확정, A-5는 사용자 수정 · §13 구현 노트) |
+| [device_condition_location_design.md](device_condition_location_design.md) | 기기 상태·위치 축 — AS 회수 기기의 실물 상태 6종(사용중·AS접수·수리완료·출고 전·분실·폐기)·위치(병원/리프레시센터/thynC Connected Hub)를 배치와 분리해 유닛 축으로 추적, AS 상세 라인 '수리완료' 체크·이벤트 4종·백필(HDR D11 개정) | **구현 완료 (dev, 2026-09-17) — 완료(PROD 배포 2026-09-17, 커밋 26a0ba1 — 백필 적용) — 화면 확인·Phase 2(센터/Hub 재고 목록·PRE_SHIP 생성·일괄 정리) 대기** (A-1~A-6 사용자 확정, A-5는 사용자 수정 · §13 구현 노트) |
 
 ## 루트에 남아 있는 1.0 문서
 

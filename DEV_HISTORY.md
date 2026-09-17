@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-09-17 15:45 | PROD 배포: 기기 상태·위치 축 (26a0ba1) — 마이그·빌드·백필 적용
+
+- **dev**: 커밋 26a0ba1(57파일 +3,487/−450)·push. dev는 15:20에 빌드·재시작·백필 적용 완료(직전 항목)
+- **PROD 런북(설계안 A.0)**: 사전 전체 덤프 `backups/db/thync_ops_pre_devcond_20260917_062845.dump`(21MB) → 채널톡 스케줄러 `off` → `git pull`(85dbfe9→26a0ba1, package.json 변경 없음) → 마이그 `20260917120000_device_condition_location` psql 단일 tx 적용(lock_timeout 5s, 오류 0) → `migrate resolve --applied` → `prisma generate` → 힙 3GB 빌드(협업 번들 2108cacb 불변 — collab 재시작 불필요) → `pm2 restart thync-prod` → health 200(`eventTypes` 10종·`buildCommit` 26a0ba1)
+- **PROD 백필**: `--dry`(health 가드 통과) → `--apply` COMMIT — 유닛 28,384: 규칙 3 AS_WAITING·센터 113 / 규칙 2 AS_WAITING·병원 784 / 규칙 1 IN_USE 26,017 / 규칙 5 LOST 128 / 규칙 6 0 / 규칙 7 미확인·센터 1,342 / 규칙 8 0 · INTAKE(BACKFILL) 1,455 → 재실행 `--dry` 규칙별 0건·I-3/I-6/I-4 예외 0. 목록 출력: 플래그∧종결 접수 2대(IN_USE 유지)·플래그 없는 PENDING 라인 7대 — 수동 정리 참고
+- 스케줄러 `1m` 복구 + 재시작(health 200). PROD→DEV 데이터 동기화는 스키마 동일해져 다시 가능
+- 영향: PROD 소스(26a0ba1)·PROD DB(device_units 28,384행 condition/location, hospital_device_events +1,455, status_codes DEVICE_SITE 2행, as_receipt_items 컬럼 2개 — 사용자 명시 요청 "prod에도 반영해줘"), DEV_HISTORY.md, projects/README.md, projects/device_condition_location_design.md
+
+---
+
 ## 2026-09-17 14:55 | 기기 상태·위치 축 — condition 6종·위치(병원/리프레시센터/Hub) 유닛 축 도입 + AS 라인 수리완료 체크·폐기 + 기기현황 열·필터·드로어 액션 + 백필 스크립트 (구현 완료 dev — 빌드·백필 --apply·PROD 미실행)
 
 - **배경·설계**: AS 회수 기기의 수리 진행·소재를 기기 단위로 보고 싶다는 요구 → `projects/device_condition_location_design.md`(D1~D5·A-1~A-6 사용자 확정, B-26~B-37, HDR D11 개정 B-36). 원장은 배치(병원 몫)만 기록했으므로 **배치·상태·위치 3축**으로 분리 — 배치 프로젝션·fold·CHECK는 불변, 상태·위치는 `device_units` 유닛 속성(낙관 가드 UPDATE + 스냅샷 이벤트, HDR 불변식 1·3 명시 예외)
