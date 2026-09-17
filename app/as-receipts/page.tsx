@@ -7,15 +7,36 @@
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
+import Pager from '@/app/components/ui/Pager'
+import DateRangeFilter from '@/app/components/ui/DateRangeFilter'
 import AsReceiptFormModal from './_components/AsReceiptFormModal'
 import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsTag } from '@/lib/asReceiptShared'
 
 interface CodeRef { id: number; name: string; color: string | null }
+/** 정렬 가능 컬럼 (2026-09-16) — 서버 정렬(`?sort=&dir=`). 계산 컬럼(기기상태·기기·유형·송장·태그)은 정렬 없음 */
+type SortKey = 'asCode' | 'hospital' | 'category' | 'status' | 'receiptDate' | 'receivedAt' | 'shippedAt'
+const SORT_KEYS: readonly SortKey[] = ['asCode', 'hospital', 'category', 'status', 'receiptDate', 'receivedAt', 'shippedAt']
+const COLUMNS: { label: string; sort?: SortKey; cls?: string }[] = [
+  { label: '접수번호', sort: 'asCode' },
+  { label: '병원', sort: 'hospital' },
+  { label: '접수 기기상태' },
+  { label: '구분', sort: 'category' },
+  { label: '기기' },
+  { label: '유형' },
+  { label: '상태', sort: 'status' },
+  { label: '접수일', sort: 'receiptDate' },
+  { label: '입고일', sort: 'receivedAt' },
+  { label: '발송일', sort: 'shippedAt' },
+  { label: '발송 송장번호' },
+  { label: '태그', cls: 'w-[27rem] min-w-[27rem]' },
+]
+
 interface AsRow {
   id: number
   asCode: string
   category: string
   receiptDate: string
+  receivedAt: string | null // 입고일 (최초 입고처리일, 2026-09-16 열)
   resolvedAt: string | null
   createdAt: string
   preReplace: boolean
@@ -32,7 +53,7 @@ interface AsRow {
   createdBy: { id: string; name: string } | null
   ticket: { id: number; ticketCode: string; status: string; owner: { id: string; name: string } | null } | null
   items: {
-    id: number; serialNo: string; outcome: string | null; deviceKind: string | null; intakeState: string; shippedAt: string | null; shipTrackingNo: string | null
+    id: number; serialNo: string; outcome: string | null; deviceKind: string | null; intakeState: string; receivedAt: string | null; shippedAt: string | null; shipTrackingNo: string | null
     repairedAt: string | null // 수리완료 체크 (2026-09-17) — 기기 셀 `수리 n/m`
     device: { deviceInfo: { deviceName: string }; placement: { productType: string | null } | null } | null
     newDevice: { placement: { productType: string | null } | null } | null
@@ -93,6 +114,24 @@ function tagBadges(r: AsRow) {
   return (
     <span className="inline-flex flex-nowrap gap-1">
       {tags.map((t) => <span key={t} className={`whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium ${AS_TAG_BADGE_CLS[t]}`}>{AS_TAG_LABELS[t]}</span>)}
+    </span>
+  )
+}
+
+/** 입고일 열 (2026-09-16) — 라인 입고일 중 최신(없으면 접수 헤더 입고일). 여러 날짜면 툴팁에 전체, 미입고 라인이 남으면 '(n/m)' */
+function receivedCell(r: AsRow) {
+  const dates = Array.from(new Set(r.items.map((i) => i.receivedAt?.slice(0, 10)).filter((d): d is string => !!d))).sort()
+  const headerDate = r.receivedAt?.slice(0, 10) ?? null
+  if (!dates.length) {
+    if (!headerDate) return <span className="text-xs text-gray-300">-</span>
+    return <span>{headerDate}</span>
+  }
+  const received = r.items.filter((i) => i.receivedAt).length
+  const partial = received < r.items.length
+  return (
+    <span title={dates.length > 1 ? `입고일 ${dates.join(', ')}` : undefined}>
+      {dates[dates.length - 1]}
+      {(partial || dates.length > 1) && <span className="ml-1 text-xs text-gray-400">({received}/{r.items.length})</span>}
     </span>
   )
 }
@@ -170,6 +209,12 @@ function AsReceiptListInner() {
   const [tagFilter, setTagFilter] = useState<AsTag[]>(() => searchParams.getAll('tag').filter((t): t is AsTag => (AS_TAGS as readonly string[]).includes(t))) // 태그 필터 (2026-09-15) — 복수 = AND
   const [shippedFrom, setShippedFrom] = useState(searchParams.get('shippedFrom') ?? '') // 발송일 필터 (CX #9)
   const [shippedTo, setShippedTo] = useState(searchParams.get('shippedTo') ?? '')
+  const [receivedFrom, setReceivedFrom] = useState(searchParams.get('receivedFrom') ?? '') // 입고일 필터 (2026-09-16)
+  const [receivedTo, setReceivedTo] = useState(searchParams.get('receivedTo') ?? '')
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' } | null>(() => {
+    const k = searchParams.get('sort'); const d = searchParams.get('dir')
+    return k && (SORT_KEYS as readonly string[]).includes(k) ? { key: k as SortKey, dir: d === 'desc' ? 'desc' : 'asc' } : null
+  }) // 정렬 (2026-09-16) — null = 기본(등록 최신순)
   const [summary, setSummary] = useState<{
     byStatus: (CodeRef & { count: number })[]
     total: number
@@ -207,22 +252,37 @@ function AsReceiptListInner() {
     if (needsCheck) params.set('needsCheck', '1')
     if (shippedFrom) params.set('shippedFrom', shippedFrom)
     if (shippedTo) params.set('shippedTo', shippedTo)
+    if (receivedFrom) params.set('receivedFrom', receivedFrom)
+    if (receivedTo) params.set('receivedTo', receivedTo)
     if (q) params.set('q', q)
     return params
-  }, [from, to, statusIds, category, group, tagFilter, overdue, needsCheck, shippedFrom, shippedTo, q])
+  }, [from, to, statusIds, category, group, tagFilter, overdue, needsCheck, shippedFrom, shippedTo, receivedFrom, receivedTo, q])
+
+  const hasFilter = !!(from || to || statusIds.length || category || group || tagFilter.length || overdue || needsCheck || shippedFrom || shippedTo || receivedFrom || receivedTo || q)
+  const resetFilters = () => {
+    setFrom(''); setTo(''); setStatusIds([]); setCategory(''); setEcg(true); setSpo2(true); setTagFilter([]); setOverdue(false); setNeedsCheck(false)
+    setShippedFrom(''); setShippedTo(''); setReceivedFrom(''); setReceivedTo(''); setQ(''); setQInput(''); setPage(1)
+  }
+  // 헤더 클릭: asc → desc → 기본 정렬 해제 (유지보수 목록과 동일 UX)
+  const toggleSort = (key: SortKey) => {
+    setSort((cur) => (!cur || cur.key !== key ? { key, dir: 'asc' } : cur.dir === 'asc' ? { key, dir: 'desc' } : null))
+    setPage(1)
+  }
 
   // 필터·페이지를 URL에 반영 — 뒤로가기 복원용 (CX #2, history만 교체해 리렌더 억제)
   useEffect(() => {
     const params = buildFilterParams()
+    if (sort) { params.set('sort', sort.key); params.set('dir', sort.dir) }
     if (page > 1) params.set('page', String(page))
     const qs = params.toString()
     window.history.replaceState(null, '', qs ? `/as-receipts?${qs}` : '/as-receipts')
-  }, [buildFilterParams, page])
+  }, [buildFilterParams, page, sort])
 
   const load = useCallback(async () => {
     const seq = ++loadSeq.current
     setLoading(true)
     const params = buildFilterParams()
+    if (sort) { params.set('sort', sort.key); params.set('dir', sort.dir) }
     params.set('page', String(page))
     params.set('pageSize', String(pageSize))
     const res = await fetch(`/api/as-receipts?${params.toString()}`)
@@ -233,7 +293,7 @@ function AsReceiptListInner() {
       setTotal(d.total ?? 0)
     }
     setLoading(false)
-  }, [buildFilterParams, page])
+  }, [buildFilterParams, page, sort])
 
   useEffect(() => { void load() }, [load])
 
@@ -349,10 +409,9 @@ function AsReceiptListInner() {
       )}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="text-xs text-gray-400">접수일</span>
-        <input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1) }} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
-        <span className="text-gray-400">~</span>
-        <input type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1) }} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
+        <DateRangeFilter label="접수일" from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); setPage(1) }} />
+        <DateRangeFilter label="입고일" from={receivedFrom} to={receivedTo} onChange={(f, t) => { setReceivedFrom(f); setReceivedTo(t); setPage(1) }} />
+        <DateRangeFilter label="발송일" from={shippedFrom} to={shippedTo} onChange={(f, t) => { setShippedFrom(f); setShippedTo(t); setPage(1) }} />
         <select value={category} onChange={(e) => { setCategory(e.target.value); setPage(1) }} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm">
           <option value="">구분 전체</option>
           {AS_CATEGORIES.map((c) => <option key={c} value={c}>{AS_CATEGORY_LABELS[c]}</option>)}
@@ -383,10 +442,9 @@ function AsReceiptListInner() {
             )
           })}
         </span>
-        <span className="ml-1 text-xs text-gray-400">발송일</span>
-        <input type="date" value={shippedFrom} onChange={(e) => { setShippedFrom(e.target.value); setPage(1) }} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
-        <span className="text-gray-400">~</span>
-        <input type="date" value={shippedTo} onChange={(e) => { setShippedTo(e.target.value); setPage(1) }} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
+        {hasFilter && (
+          <button type="button" onClick={resetFilters} className="rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-800" title="모든 필터 초기화">필터 초기화</button>
+        )}
         <div className="flex items-center gap-1.5">
           <input
             type="text"
@@ -419,8 +477,20 @@ function AsReceiptListInner() {
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  {['접수번호', '병원', '접수 기기상태', '구분', '기기', '유형', '상태', '접수일', '발송일', '발송 송장번호', '태그'].map((h) => (
-                    <th key={h} className={`${thClass} ${h === '태그' ? 'w-[27rem] min-w-[27rem]' : ''}`}>{h}</th>
+                  {COLUMNS.map((col) => (
+                    <th key={col.label} className={`${thClass} ${col.cls ?? ''}`}>
+                      {col.sort ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleSort(col.sort!)}
+                          className={`inline-flex items-center gap-1 whitespace-nowrap uppercase tracking-wider transition-colors ${sort?.key === col.sort ? 'text-blue-600' : 'hover:text-gray-800'}`}
+                          title="클릭하여 정렬 (오름차순 → 내림차순 → 기본)"
+                        >
+                          {col.label}
+                          <span className="text-[10px]">{sort?.key === col.sort ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+                        </button>
+                      ) : col.label}
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -437,6 +507,7 @@ function AsReceiptListInner() {
                     <td className="whitespace-nowrap px-3 py-2">{productTypeBadges(r.items)}</td>
                     <td className="whitespace-nowrap px-3 py-2">{codeBadge(r.status)}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-gray-600">{r.receiptDate.slice(0, 10)}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-gray-600">{receivedCell(r)}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-gray-600">{shippedCell(r)}</td>
                     <td className="whitespace-nowrap px-3 py-2">{shipTrackingCell(r)}</td>
                     <td className="whitespace-nowrap px-3 py-2">{tagBadges(r)}</td>
@@ -448,13 +519,7 @@ function AsReceiptListInner() {
         )}
       </div>
 
-      {totalPages > 1 && (
-        <div className="mt-3 flex items-center justify-center gap-2 text-sm">
-          <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded-md border border-gray-300 px-3 py-1.5 disabled:opacity-40">이전</button>
-          <span className="text-gray-500">{page} / {totalPages}</span>
-          <button type="button" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} className="rounded-md border border-gray-300 px-3 py-1.5 disabled:opacity-40">다음</button>
-        </div>
-      )}
+      <Pager page={page} totalPages={totalPages} total={total} onChange={setPage} className="mt-3" />
 
       <AsReceiptFormModal
         open={createOpen}

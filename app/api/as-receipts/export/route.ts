@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 
 /**
  * AS업무 Excel 내보내기 (CX #9 — 발송 일자별 안내 메시지 발송 등에 활용)
- * 목록과 동일 필터(접수일·상태·구분·검색) + 발송일 기간(shippedFrom/To — 라인 shippedAt).
+ * 목록과 동일 필터(접수일·상태·구분·검색) + 발송일 기간(shippedFrom/To — 라인 shippedAt) + 입고일 기간(receivedFrom/To, 2026-09-16).
  * 행 = 기기 라인 1건 (접수 헤더 정보 반복 — 화면 입력 항목 전부 포함).
  * 상한: 접수 조회 무제한, 라인 100,000행(안전장치 — 2026-09-09 구 3,000접수/10,000라인 상한 제거).
  */
@@ -47,6 +47,13 @@ export async function GET(request: NextRequest) {
     ? { shippedAt: { ...(shippedFrom ? { gte: new Date(shippedFrom) } : {}), ...(shippedTo ? { lte: new Date(shippedTo) } : {}) } }
     : null
   if (shippedFilter) where.items = { some: shippedFilter }
+  // 입고일 기간 (2026-09-16) — 목록과 동일: 라인 receivedAt 또는 헤더 receivedAt
+  const receivedFrom = sp.get('receivedFrom')
+  const receivedTo = sp.get('receivedTo')
+  if (receivedFrom || receivedTo) {
+    const range = { ...(receivedFrom ? { gte: new Date(receivedFrom) } : {}), ...(receivedTo ? { lte: new Date(receivedTo) } : {}) }
+    where.AND = [{ OR: [{ receivedAt: range }, { items: { some: { receivedAt: range } } }] }]
+  }
 
   const receipts = await prisma.asReceipt.findMany({
     where,

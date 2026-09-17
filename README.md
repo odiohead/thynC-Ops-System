@@ -253,7 +253,7 @@ app/
 └── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper, StatusBadge, NotificationBell, MyWorkPanel 등)
     ├── useOverlayDismiss.ts          # 오버레이(드로어·모달) 공통 훅 — 배경 스크롤 잠금 + ESC 닫기
     ├── theme/                        # ThemeProvider, ThemeToggle, useChartTheme (다크모드)
-    └── ui/                           # 디자인 프리미티브 (Button, Card, Badge, Input, Table, Modal(모바일 바텀시트), PageHeader, EmptyState)
+    └── ui/                           # 디자인 프리미티브 (Button, Card, Badge, Input, Table, Modal(모바일 바텀시트), PageHeader, EmptyState, Pager(상태 기반 페이저 — 첫/마지막·±5·번호 입력, 2026-09-16), DateRangeFilter(팝오버 달력 날짜 범위 필터 — 프리셋·직접 입력, 2026-09-16))
 
 lib/
 ├── ai/                               # AI 어시스턴트 v2 (function_ai_assistant.html)
@@ -1109,7 +1109,7 @@ prisma/
 - 기기 수리·교체(AS) 업무의 도메인화 — 수기 엑셀 원장(A~Y열, 월 ~220건)을 시스템 업무로 편입 (**8번째 티켓 도메인**, nav 'AS업무'/도메인 'AS접수' 이원화). 경계: **"기기 실물이 움직이면 AS, 사람이 움직이면 유지보수"** — 유지보수 도메인 불변
 - 목록 상단 **요약 스트립**(진행 중/전체·이번 주 접수·평균 처리일(최근 3개월, **일반 AS / 선교체 분리** 2026-09-12, **미완료 건은 접수→오늘 경과 포함·취소 제외** 2026-09-15 개정 — 툴팁에 완료/미완료 건수)·**2주 경과 미처리 카드 클릭 → 해당 건 필터**(`overdue=1`, 토글·URL 동기화, 2026-09-15)) + **상태 체크박스 칩**(건수 표시·복수 선택 필터, 2026-09-07)
 - 목록 필터(2026-09-11): **기기군 체크박스**(심전계·산소포화도, 기본 둘 다 체크=전체, 하나만 체크 시 해당 기기군 라인 보유 접수 — `?group=ECG|SPO2`, 원장 모델명 → 미등록 기기종류 → 시리얼 접두 A/P 순 판별). 구분 컬럼 배지 색(고장 앰버·분실 빨강)
-- 목록 컬럼(2026-09-15 개편): 접수번호·병원·**접수 기기상태**·구분·**기기**(축약 배지 `ECG n`·`SpO2 n`·`ETC n`, 종결분 `/n` 흐리게, 툴팁에 기기별 상세 — `summarizeAsItemsByGroup`)·**유형**(라인 기기의 원장 배치 상품유형 일반/라이트 — 혼재 시 둘 다 배지, 구기기 배치 회수 후엔 교체기 배치 기준)·상태·접수일·**발송일**(라인 발송일 중 최신, 부분 발송·복수 날짜면 `(n/m)`+툴팁)·**발송 송장번호**(라인 송장 중복 제거, 여러 개면 `+n`+툴팁)·**태그**(선교체·우선수리·펌웨어 업데이트·부속품 동봉 색 배지 — 4개가 한 줄에 들어가는 고정 폭 27rem) — 수거·선교체·발송지·완료일·등록자·티켓 코드·담당 컬럼은 제거(상세에서 확인). **태그 필터** 칩(복수 선택 = 모두 켜진 접수, URL `tag` 복수 파라미터) · **'확인필요만'** 체크(접수 기기상태 배지와 같은 정의 — `needsCheck=1`, 2026-09-15)
+- 목록 컬럼(2026-09-15 개편): 접수번호·병원·**접수 기기상태**·구분·**기기**(축약 배지 `ECG n`·`SpO2 n`·`ETC n`, 종결분 `/n` 흐리게, 툴팁에 기기별 상세 — `summarizeAsItemsByGroup`)·**유형**(라인 기기의 원장 배치 상품유형 일반/라이트 — 혼재 시 둘 다 배지, 구기기 배치 회수 후엔 교체기 배치 기준)·상태·접수일·**입고일**(2026-09-16 — 라인 입고일 중 최신, 부분 입고·복수 날짜면 `(n/m)`+툴팁, 라인 입고일이 없으면 접수 헤더 입고일)·**발송일**(라인 발송일 중 최신, 부분 발송·복수 날짜면 `(n/m)`+툴팁)·**발송 송장번호**(라인 송장 중복 제거, 여러 개면 `+n`+툴팁)·**태그**(선교체·우선수리·펌웨어 업데이트·부속품 동봉 색 배지 — 4개가 한 줄에 들어가는 고정 폭 27rem) — 수거·선교체·발송지·완료일·등록자·티켓 코드·담당 컬럼은 제거(상세에서 확인). **태그 필터** 칩(복수 선택 = 모두 켜진 접수, URL `tag` 복수 파라미터) · **'확인필요만'** 체크(접수 기기상태 배지와 같은 정의 — `needsCheck=1`, 2026-09-15) · **페이징**(2026-09-16, `app/components/ui/Pager`): 첫/마지막·±5페이지·한 페이지 이동·번호 직접 입력(Enter/blur)·전체 건수, 페이지는 URL `page`와 동기화 · **컬럼 정렬**(2026-09-16 — 접수번호·병원·구분·상태·접수일·입고일·발송일 헤더 클릭 asc→desc→기본, 서버 정렬, URL `sort/dir` 동기화; 계산 컬럼은 정렬 없음) · **날짜 필터 개선**(2026-09-16 — 접수일·**입고일**(신설)·발송일 3개를 `app/components/ui/DateRangeFilter` 팝오버 달력으로 교체: 시작·종료일 클릭(호버 미리보기)·프리셋(오늘·최근 7일·최근 30일·이번 달·지난 달)·직접 입력·× 해제, 버튼에 현재 범위 요약) · **필터 초기화** 버튼(필터가 하나라도 켜지면 표시)
 - **접수 태그 (2026-09-15)**: `as_receipts` 불리언 4종(`pre_replace`·`priority_repair`·`firmware_update`·`accessory_included`) — 카탈로그·라벨·색·컬럼 매핑은 `lib/asReceiptShared.ts` `AS_TAGS`/`AS_TAG_FIELDS`/`AS_TAG_BADGE_CLS` 단일 소스. 등록·수정 모달과 상세 2. 접수정보 체크박스, 목록 태그 열·필터, Excel 열, 타임라인 diff에 공용
 - **접수 기기상태**(`registryTags`, `summarizeAsRegistryTags`·`asReceiptDeviceStateLabel`): 접수 병원과 라인 기기의 **현재** 원장 배치를 조회 시 실시간 대조(미종결 라인만 — 종결 라인은 교체·분실 회수가 정상이라 제외). 목록은 **정상 / 확인필요** 2단계(확인필요 툴팁에 태그별 대수, 미종결 라인 없으면 '-'), 라인별 태그는 **상세 시리얼 옆 배지**(`classifyAsRegistryLine`, 상세 API가 라인에 `registryTag` 부가) — `타병원`(다른 병원 ACTIVE, 병원명 병기)·`회수`(RECOVERED)·`미배치`(개체만 있고 배치 없음)·`미등록`(시리얼 없음) 4종. 종결 라인은 기존 등록 시 deviceId 기준 배지(미등록·회수·타 병원·AS진행중) 유지
 - **수정 모달(2026-09-10 개정 — 시트 인입 오류 보정용)**: 미종결 라인 **시리얼 인라인 편집**(포커스 이탈 시 원장 재매칭, 서비스는 시리얼 키 기준 제거→추가로 처리해 AS 표시 이전)·**병동 편집**(전 라인)·**병원 변경**(미종결 라인 전부 새 병원 기준 재매칭·AS 표시 이전, 티켓 병원·제목 어댑터 동기화 — PUT `hospitalCode` 수용, `applyItemChanges` `previousHospitalCode` 옵션). 종결 라인은 시리얼 고정·제거 불가 유지
@@ -1777,7 +1777,7 @@ npm run dev
 
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| GET | `/api/as-receipts` | 목록 (statusId **복수 가능**·category·hospitalCode·접수일 기간·**tag 복수(AND, 2026-09-15)**·**overdue=1**(접수 2주 경과 미종결 — summary.overdue2w와 동일 정의)·**needsCheck=1**(접수 기기상태 '확인필요' — 미종결 라인의 원장 정합 태그 또는 입고 대조 미입고·미식별입고, raw SQL)·q(코드·병원·시리얼)·페이징) |
+| GET | `/api/as-receipts` | 목록 (statusId **복수 가능**·category·hospitalCode·접수일 기간·**tag 복수(AND, 2026-09-15)**·**overdue=1**(접수 2주 경과 미종결 — summary.overdue2w와 동일 정의)·**needsCheck=1**(접수 기기상태 '확인필요' — 미종결 라인의 원장 정합 태그 또는 입고 대조 미입고·미식별입고, raw SQL)·q(코드·병원·시리얼)·**receivedFrom/To**(입고일 — 라인 receivedAt 또는 헤더 receivedAt, 2026-09-16)·shippedFrom/To(발송일 — 라인)·**sort/dir**(2026-09-16: asCode·hospital·category·status(order)·receiptDate는 Prisma orderBy, receivedAt·shippedAt은 라인 최신 날짜 집계라 id 전량 조회 후 JS 정렬·슬라이스, 빈 값 항상 뒤)·페이징) |
 | GET | `/api/as-receipts/summary` | 목록 상단 요약 — 상태별 건수·이번 주(KST 월~) 접수·평균 처리일(최근 3개월 접수 건 — 완료는 접수→완료일, 미완료는 접수→오늘(KST), 취소 제외 (2026-09-15 개정) — `avgResolution.normal/preReplace` {days,count,doneCount,openCount} 분리 + 가중 합산 `avgResolutionDays`)·접수 2주 경과 미종결 (2026-09-07) |
 | POST | `/api/as-receipts` | 등록 — 병원·접수일·시리얼 라인 ≥1 (레코드+라인+티켓+AS 표시 단일 트랜잭션, 경고 배열 반환) |
 | POST | `/api/as-receipts/match` | 시리얼 원장 매칭 미리보기 (등록 폼 — ACTIVE_HERE/ACTIVE_OTHER/RECOVERED/NONE) |

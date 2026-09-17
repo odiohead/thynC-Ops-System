@@ -24,7 +24,7 @@ const listInclude = {
   ticket: { select: { id: true, ticketCode: true, status: true, owner: { select: { id: true, name: true } } } },
   items: {
     select: {
-      id: true, serialNo: true, outcome: true, deviceKind: true, intakeState: true, shippedAt: true, shipTrackingNo: true, // 입고 대조 (2026-09-11) · 발송일·발송 송장 열 (2026-09-15)
+      id: true, serialNo: true, outcome: true, deviceKind: true, intakeState: true, receivedAt: true, shippedAt: true, shipTrackingNo: true, // 입고 대조 (2026-09-11) · 발송일·발송 송장 열 (2026-09-15) · 입고일 열 (2026-09-16)
       repairedAt: true, // 수리완료 체크 (2026-09-17) — 목록 기기군 배지 `수리 n/m`
       device: { select: { deviceInfo: { select: { deviceName: true } }, placement: { select: { productType: true } } } }, // 목록 기기별 대수 표기 (CX #1) + 상품유형(일반/라이트, 2026-09-10)
       newDevice: { select: { placement: { select: { productType: true } } } }, // 교체 라인 — 구기기 배치가 회수된 뒤에는 교체기 배치의 상품유형으로 판별
@@ -118,6 +118,14 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // 입고일 기간 필터 (2026-09-16) — 라인 receivedAt 또는 접수 헤더 receivedAt(최초 입고처리일) 중 하나가 범위 안이면 포함 (목록 입고일 열과 같은 소스)
+  const receivedFrom = sp.get('receivedFrom')
+  const receivedTo = sp.get('receivedTo')
+  if (receivedFrom || receivedTo) {
+    const range = { ...(receivedFrom ? { gte: new Date(receivedFrom) } : {}), ...(receivedTo ? { lte: new Date(receivedTo) } : {}) }
+    where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: [{ receivedAt: range }, { items: { some: { receivedAt: range } } }] }]
+  }
+
   const q = sp.get('q')?.trim()
   if (q) {
     where.OR = [
@@ -131,16 +139,51 @@ export async function GET(request: NextRequest) {
   const page = Math.max(1, parseInt(sp.get('page') ?? '1') || 1)
   const pageSize = Math.min(100, Math.max(10, parseInt(sp.get('pageSize') ?? '30') || 30))
 
-  const [total, receipts] = await Promise.all([
-    prisma.asReceipt.count({ where }),
-    prisma.asReceipt.findMany({
+  // 정렬 (2026-09-16) — ?sort=<key>&dir=asc|desc. 기본 등록 최신순. 입고일·발송일은 라인 집계(최신 라인 날짜, 입고일은 헤더 폴백)라 Prisma orderBy 불가 → id 전량 조회 후 JS 정렬·페이지 슬라이스
+  const sortKey = sp.get('sort') ?? ''
+  const dir: 'asc' | 'desc' = sp.get('dir') === 'desc' ? 'desc' : 'asc'
+  const SCALAR_SORT: Record<string, Prisma.AsReceiptOrderByWithRelationInput[]> = {
+    asCode: [{ asCode: dir }],
+    hospital: [{ hospital: { hospitalName: dir } }, { id: 'desc' }],
+    category: [{ category: dir }, { id: 'desc' }],
+    status: [{ status: { order: dir } }, { id: 'desc' }],
+    receiptDate: [{ receiptDate: dir }, { id: dir }],
+  }
+  const AGG_SORT = ['receivedAt', 'shippedAt']
+
+  const total = await prisma.asReceipt.count({ where })
+  let receipts: Prisma.AsReceiptGetPayload<{ include: typeof listInclude }>[]
+  if (AGG_SORT.includes(sortKey)) {
+    const all = await prisma.asReceipt.findMany({
+      where,
+      select: { id: true, receivedAt: true, items: { select: { receivedAt: true, shippedAt: true } } },
+    })
+    const keyOf = (r: (typeof all)[number]) => {
+      const lineDates = r.items.map((i) => (sortKey === 'receivedAt' ? i.receivedAt : i.shippedAt)).filter((d): d is Date => !!d).map((d) => d.getTime())
+      if (lineDates.length) return Math.max(...lineDates)
+      return sortKey === 'receivedAt' && r.receivedAt ? r.receivedAt.getTime() : null
+    }
+    const keyed = all.map((r) => ({ id: r.id, k: keyOf(r) }))
+    keyed.sort((a, b) => {
+      if (a.k === null && b.k === null) return b.id - a.id
+      if (a.k === null) return 1 // 빈 값은 방향과 무관하게 뒤로
+      if (b.k === null) return -1
+      const c = a.k - b.k
+      return (dir === 'asc' ? c : -c) || b.id - a.id
+    })
+    const pageIds = keyed.slice((page - 1) * pageSize, page * pageSize).map((x) => x.id)
+    const fetched = await prisma.asReceipt.findMany({ where: { id: { in: pageIds } }, include: listInclude })
+    const byId = new Map(fetched.map((r) => [r.id, r]))
+    receipts = pageIds.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => !!r)
+  } else {
+    receipts = await prisma.asReceipt.findMany({
       where,
       include: listInclude,
-      orderBy: { createdAt: 'desc' },
+      orderBy: SCALAR_SORT[sortKey] ?? [{ createdAt: 'desc' }],
       skip: (page - 1) * pageSize,
       take: pageSize,
-    }),
-  ])
+    })
+  }
 
   // 원장 정합 태그 (2026-09-10) — 페이지 내 미종결 라인 시리얼의 현재 배치를 1회 조회해 접수 단위로 집계
   const openSerials = Array.from(new Set(receipts.flatMap((r) => r.items.filter((i) => !i.outcome).map((i) => i.serialNo))))

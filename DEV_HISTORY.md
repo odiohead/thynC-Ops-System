@@ -42,6 +42,35 @@
 
 ---
 
+## 2026-09-16 16:00 | AS접수 목록 — 컬럼 정렬 + 입고일 필터 + 날짜 필터 캘린더 범위 지정으로 개선 (dev2 검증, 빌드·PROD 배포 대기)
+
+- **컬럼 정렬**(사용자 요청 — 입고일 정렬 필요, 이참에 필드별): 접수번호·병원(병원명)·구분·상태(상태코드 order)·접수일·입고일·발송일 헤더 클릭 asc→desc→기본(등록 최신순), 유지보수 목록과 같은 표기(▲▼⇅). 목록이 서버 페이징이라 **서버 정렬**(`?sort=&dir=`) — 스칼라·관계 컬럼은 Prisma orderBy(+id 보조키), 입고일·발송일은 열 표시와 같은 정의(라인 최신 날짜, 입고일은 헤더 폴백)라 Prisma orderBy 불가 → 필터 조건의 id·날짜만 전량 조회(3.4천 행)해 JS 정렬 후 페이지 id 슬라이스 → include 조회·순서 복원. 빈 값은 방향과 무관하게 뒤. 정렬 변경 시 1페이지로, URL `sort/dir` 동기화(뒤로가기 복원). 계산 컬럼(기기상태·기기·유형·송장·태그)은 정렬 없음
+- **입고일 필터**(신설): `receivedFrom/To` — 라인 `receivedAt` 또는 접수 헤더 `receivedAt` 중 하나가 범위 안이면 포함(입고일 열과 같은 소스). Excel 내보내기(`export`)에도 동일 조건 추가
+- **날짜 필터 캘린더 범위 지정**(사용자 요청 — 유지보수 방문일 캘린더 선택기의 개선판): 공용 `app/components/ui/DateRangeFilter.tsx` 신설 — 버튼(현재 범위 요약, 프리셋 일치 시 프리셋명, × 해제) → 팝오버 월 달력에서 시작·종료일 클릭(호버 미리보기, 역순 클릭은 자동 정렬, 같은 날 두 번 = 하루) + 프리셋(오늘·최근 7일·최근 30일·이번 달·지난 달, KST) + 직접 입력(date 인풋, Enter/blur) + 초기화. 바깥 클릭·ESC 닫기. `MaintenanceVisitPicker`(다중 방문일 입력용)는 손대지 않고 달력 렌더 방식만 차용. AS 목록의 접수일·입고일·발송일 3개에 적용, 종전 date 인풋 6개 제거
+- **필터 초기화** 버튼: 필터가 하나라도 켜지면 표시 — 전부 해제 + 1페이지
+- **검증**: tsc 0(힙 4GB)·eslint 0. dev2 Prisma 검증 — 입고일 9/10~9/12 필터 4건, 입고일 desc 상위 5건 라인 최신일 순(0175·0174·0173·0169 9/11 → 0040 9/7), 빈 값 3,448건 후순위, 상태 order asc·병원명 desc 정상. 빌드·재시작 미실행
+- 영향: app/components/ui/DateRangeFilter.tsx(신규), app/as-receipts/page.tsx, app/api/as-receipts/{route.ts,export/route.ts}, README.md
+
+---
+
+## 2026-09-16 15:00 | AS접수 목록 — 입고일 열 추가 + 페이징 고도화 (dev2 검증, 빌드·PROD 배포 대기)
+
+- **입고일 열**(사용자 요청): 접수일·발송일 사이에 **입고일** 추가 — 발송일 열과 같은 규칙으로 라인 `receivedAt` 중 최신, 부분 입고·복수 날짜면 `(n/m)`+툴팁(전체 날짜), 라인 입고일이 하나도 없으면 접수 헤더 `receivedAt`(최초 입고처리일) 폴백. 목록 API items select에 `receivedAt` 추가
+- **페이징 고도화**(사용자 요청 — 종전 '이전/다음'만): 공용 `app/components/ui/Pager.tsx` 신설(상태 기반, 부모가 `page`/`setPage` 소유) — « 첫 페이지 · ‹5 (5페이지 앞) · ‹ 이전 · **번호 입력**(Enter/blur 적용, 범위 밖은 1~마지막으로 보정) / 마지막 · › 다음 · 5› · » 마지막 페이지 · 전체 n건. 1페이지뿐이면 미표시. AS접수 목록에 적용(URL `page` 동기화는 기존 그대로). 기존 `hospitals/_components/Pagination`(Link 기반 서버 목록)은 그대로 둠
+- **검증**: tsc 0(힙 4GB)·eslint 0. dev2 데이터로 Prisma select 확인 — 부분 입고 건(AS-202609-0173: 라인 2 중 1 입고 → `2026-09-11 (1/2)`), 총 3,453건 → 116페이지. 빌드·재시작 미실행
+- 영향: app/components/ui/Pager.tsx(신규), app/as-receipts/page.tsx, app/api/as-receipts/route.ts, README.md
+
+---
+
+## 2026-09-16 14:00 | PROD 데이터 보정: AS접수 '접수' + 수거 송장번호 있음 22건 → '수거중' (사용자 요청)
+
+- **배경**: 9/15 배포한 "수거 송장 최초 기입 → '수거중' 자동 전이"는 배포 이후 PUT에만 적용 — 그 전에 송장이 기입된 '접수' 상태 건은 남아 있어 일괄 보정 요청
+- **실행(PROD, 1회성 tsx 스크립트 `scripts/tmp-as-pickup-fix.mts` — dry-run 후 `--apply`, 실행 후 PROD·dev2 모두 삭제, 커밋 안 함)**: 대상 = `status='접수'` AND `pickup_tracking_no` 비공백(9/7~9/15 접수 22건, 전부 티켓 OPEN·미배정). 건별 트랜잭션으로 `statusId→수거중`·`statusChangedAt=now` 갱신 + `syncAsReceiptToTicket`(어댑터 경유, 규칙 3) → 티켓 OPEN→IN_PROGRESS + `status_change`(via domain_sync) 이벤트 22건, 이후 `syncTicketClocksSafe`. 감사로그·Slack 알림은 없음(일괄 보정)
+- **결과**: 22/22 성공, 사후 검증 수거중·IN_PROGRESS 일치 22/22, 잔여 대상 0. 대상: AS-202609-0042·0158·0169·0173·0198·0199·0202·0206·0207·0214·0220·0221·0226·0227·0229·0231·0232·0234·0235·0236·0238·0239
+- 영향: PROD DB(as_receipts 22행 status·statusChangedAt, tickets 22행 status·statusChangedAt, ticket_logs 22행), DEV_HISTORY.md
+
+---
+
 ## 2026-09-16 13:10 | PROD 데이터 보정: AS-202609-0248(3536) 분실종결 라인에 신품 A139341 교체기 등록 (사용자 요청)
 
 - **배경**: 동아병원 A119887 라인이 '분실종결'로 확정됐으나 분실 처리 중 신품을 제공함 → 교체기 등록 요청. 분실 접수(category LOST)는 원래 처리방법 '교체'가 구기기 LOST 회수 + 신기기 등록을 한 번에 기록하는 경로 — 이번 건은 이미 LOST 회수가 끝난 뒤라 사후 보정
