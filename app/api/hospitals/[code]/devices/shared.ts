@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, type JWTPayload } from '@/lib/auth'
 import { checkDeviceRegistryAccess } from '@/lib/deviceRegistryAccess'
-import { isRegistryError, type RegistryActor, type RegistryRef } from '@/lib/deviceRegistry'
+import { toRegistryErrorResponse, type RegistryActor, type RegistryRef } from '@/lib/deviceRegistry'
 import { IMPORT_ROW_ACTIONS, REGISTRY_REF_TYPES, type ImportRowAction, type RegistryRefType } from '@/lib/deviceRegistryShared'
 
 export type HospitalRef = { hospitalCode: string; hospitalName: string }
@@ -51,7 +51,8 @@ export class BadRequest extends Error {
 
 /** RegistryError → 그 status + `toJSON()`(`{ error, conflicts?, rows?, skipped? }`), BadRequest → 400, 그 외 500 */
 export function errorResponse(e: unknown, fallback: string): NextResponse {
-  if (isRegistryError(e)) return NextResponse.json(e.toJSON(), { status: e.status })
+  const r = toRegistryErrorResponse(e) // RegistryError·RegistryTxAbort(2026-09-17) 공통
+  if (r) return NextResponse.json(r.body, { status: r.status })
   if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 })
   console.error(`[device-registry] ${fallback}`, e)
   return NextResponse.json({ error: fallback }, { status: 500 })

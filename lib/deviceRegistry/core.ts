@@ -10,8 +10,11 @@
  * - 불변식 1: 이벤트가 단일 소스, 프로젝션은 `rebuildUnitProjection`의 (occurred_on ASC, id ASC) fold 파생값
  * - 불변식 3: 소급 입력 허용 — 삽입 시점 상태로 전이 검증(`assertTransition`) + 삽입 후 전체 재-fold(불성립 409)
  * - 동시성: 프로젝션 UPDATE는 이전 (status, hospital_code, ward_id) 가드 updateMany, count≠1 → 409
- * - 유닛은 자동 삭제하지 않는다 — 이벤트 0건이면 배치 행만 지우고 유닛(시리얼 정체성)은 남는다(고아 유닛 = 원장 밖 식별자)
+ * - 유닛은 자동 삭제하지 않는다 — 배치 상태 이벤트 0건이면 배치 행만 지우고 유닛(시리얼 정체성)은 남는다(고아 유닛 = 원장 밖 식별자)
  * - 서비스는 logAudit·Slack을 호출하지 않는다(라우트 책임). inventory_* 테이블에 쓰지 않는다(D9)
+ * - 상태·위치 축(2026-09-17, device_condition_location_design.md — B-26): `device_units.condition/location_*`은 fold 파생값이 아니라 유닛 속성.
+ *   신규 4종 이벤트(INTAKE·REPAIR_DONE·SCRAP·SITE_MOVE)는 배치 fold 비상태 이벤트(continue). 쓰기 규약은 `./condition.ts`
+ *   EMPTY 판정 = 배치 상태 이벤트(DEVICE_STATE_EVENT_TYPES) 0건 — 신규 4종·CORRECT만 남은 유닛은 배치 행 없음(status ?? 'ACTIVE' CHECK 위반 차단)
  */
 import { Prisma, type DeviceUnit, type HospitalDevice, type HospitalDeviceEvent, type PrismaClient } from '@prisma/client'
 import { randomUUID } from 'crypto'
@@ -19,8 +22,11 @@ import { prisma } from '@/lib/prisma'
 import {
   DEAL_STATUS_CATEGORY,
   DEAL_STATUS_CONTRACTED,
+  DEVICE_CONCURRENT_CHANGE_MESSAGE,
   DEVICE_EVENT_TYPE_LABELS,
+  DEVICE_STATE_EVENT_TYPES,
   DEVICE_TRANSITIONS,
+  DEVICE_UNIT_STATE_EVENT_TYPES,
   DEVICE_USAGE_TYPE_CATEGORY,
   IDEMPOTENT_SOURCES,
   PRODUCT_TYPE_INVALID_MESSAGE,
@@ -143,6 +149,35 @@ export function isRegistryError(e: unknown): e is RegistryError {
 }
 
 /**
+ * 암묵 전이(§4.1 쓰기 순서 2)의 유닛 가드 실패 — 이벤트·배치가 이미 써진 뒤라 **tx 전체를 실패**시켜야 한다.
+ * RegistryError의 하위가 **아니다**: AS 서비스의 `instanceof RegistryError` 흡수 경로(경고로 삼킴)에 잡히지 않는다. 라우트는 409 '동시에 변경되어 다시 시도하세요'.
+ */
+export class RegistryTxAbort extends Error {
+  readonly status = 409 as const
+  constructor(message: string = DEVICE_CONCURRENT_CHANGE_MESSAGE) {
+    super(message)
+    this.name = 'RegistryTxAbort'
+  }
+  toJSON() {
+    return { error: this.message }
+  }
+}
+
+export function isRegistryTxAbort(e: unknown): e is RegistryTxAbort {
+  return e instanceof RegistryTxAbort
+}
+
+/**
+ * RegistryError·RegistryTxAbort → `{ status, body }` (라우트 공통 — `registryErrorResponse`·`readErrorResponse` 등이 이 헬퍼를 쓴다).
+ * 둘 다 아니면 null(호출부가 500 처리).
+ */
+export function toRegistryErrorResponse(e: unknown): { status: number; body: Record<string, unknown> } | null {
+  if (isRegistryError(e)) return { status: e.status, body: e.toJSON() }
+  if (isRegistryTxAbort(e)) return { status: e.status, body: e.toJSON() }
+  return null
+}
+
+/**
  * DB 예외 → RegistryError 매핑 (§7.0·§5.6·§7.3)
  * - P2002 serial_no → 409 '이미 등록된 시리얼' / device_id(유닛당 배치 1행) → 409 / CHECK 23514(시리얼 미정규화 등) → 409
  * - P2003 또는 커밋 시 복합 FK(23503) → 409 '병동이 이 병원에 속하지 않습니다'
@@ -237,38 +272,43 @@ export function requireOccurredOn(v: string | null | undefined): string {
   return value
 }
 
-/** 소프트 참조 검증 — 어휘·코드 존재(MAINTENANCE는 400), 병원 불일치는 경고만 (§7.3) */
+/**
+ * 소프트 참조 검증 — 어휘·코드 존재(MAINTENANCE는 400), 병원 불일치는 경고만 (§7.3).
+ * `opts.suppressHospitalWarning`: 배치 RECOVERED/없음 유닛의 상태·위치 이벤트(§7.0 공통 규약 — 문맥 병원이 last_hospital_code라 불일치가 정상)에서 경고를 억제한다.
+ */
 export async function validateRef(
   client: DbClient,
   ref: RegistryRef | null | undefined,
-  hospitalCode: string | null
+  hospitalCode: string | null,
+  opts?: { suppressHospitalWarning?: boolean }
 ): Promise<{ ref: RegistryRef | null; warnings: string[] }> {
   if (!ref) return { ref: null, warnings: [] }
   if (!REGISTRY_REF_TYPES.includes(ref.type)) throw new RegistryError(400, '연결 유형이 올바르지 않습니다')
   const code = String(ref.code ?? '').trim()
   if (!code) throw new RegistryError(400, '연결 코드가 비어 있습니다')
   const warnings: string[] = []
+  const warn = !opts?.suppressHospitalWarning
   if (ref.type === 'MAINTENANCE') {
     const m = await client.maintenance.findUnique({ where: { maintenanceCode: code }, select: { hospitalCode: true } })
     if (!m) throw new RegistryError(400, `유지보수 코드를 찾을 수 없습니다: ${code}`)
-    if (hospitalCode && m.hospitalCode !== hospitalCode) warnings.push(`다른 병원으로 기록된 유지보수 건입니다 (${code})`)
+    if (warn && hospitalCode && m.hospitalCode !== hospitalCode) warnings.push(`다른 병원으로 기록된 유지보수 건입니다 (${code})`)
   }
   if (ref.type === 'AS') {
     const r = await client.asReceipt.findUnique({ where: { asCode: code }, select: { hospitalCode: true } })
     if (!r) throw new RegistryError(400, `AS접수 코드를 찾을 수 없습니다: ${code}`)
-    if (hospitalCode && r.hospitalCode !== hospitalCode) warnings.push(`다른 병원으로 기록된 AS접수 건입니다 (${code})`)
+    if (warn && hospitalCode && r.hospitalCode !== hospitalCode) warnings.push(`다른 병원으로 기록된 AS접수 건입니다 (${code})`)
   }
   return { ref: { type: ref.type, code }, warnings }
 }
 
 /**
- * ctx → PreparedCtx. `requireHospital`이면 병원 존재까지 확인(404).
- * 개체 라우트는 `deriveCtxHospital`로 hospitalCode를 채운 뒤 호출한다.
+ * ctx → PreparedCtx. `requireHospital`이면 병원 존재까지 확인(404). false면 hospitalCode를 검증 없이 통과(회수 기기·배치 없는 유닛 문맥 — null 허용).
+ * 개체 라우트는 `deriveCtxHospital`로 hospitalCode를 채운 뒤 호출한다. `suppressRefHospitalWarning`은 `validateRef` 옵션 그대로.
  */
 export async function prepareCtx(
   client: DbClient,
   ctx: RegistryCtx,
-  opts: { requireHospital: boolean }
+  opts: { requireHospital: boolean; suppressRefHospitalWarning?: boolean }
 ): Promise<PreparedCtx> {
   const hospitalCode = ctx.hospitalCode ? String(ctx.hospitalCode) : null
   if (opts.requireHospital) {
@@ -279,7 +319,7 @@ export async function prepareCtx(
   const occurredOn = requireOccurredOn(ctx.occurredOn)
   const source = ctx.source ?? 'MANUAL'
   if (!REGISTRY_SOURCES.includes(source)) throw new RegistryError(400, '출처(source)가 올바르지 않습니다')
-  const { ref, warnings } = await validateRef(client, ctx.ref, hospitalCode)
+  const { ref, warnings } = await validateRef(client, ctx.ref, hospitalCode, { suppressHospitalWarning: opts.suppressRefHospitalWarning })
   let actionGroup = ctx.actionGroup ?? null
   if (actionGroup && !UUID_RE.test(actionGroup)) throw new RegistryError(400, 'actionGroup은 UUID여야 합니다')
   if (!actionGroup) actionGroup = randomUUID()
@@ -316,7 +356,7 @@ export interface FoldEvent {
   /** 소프트 참조 — AS_OPEN의 MAINTENANCE ref가 `as_ref_code`로 fold 된다(B-24) */
   refType?: string | null
   refCode?: string | null
-  /** CORRECT changes — `productType.after`/`dealCode.after`가 있으면 fold가 배치 값을 갱신한다 */
+  /** CORRECT changes — `productType.after`/`dealCode.after`가 있으면 fold가 배치 값을 갱신한다. condition/location 스냅샷 키(2026-09-17)는 fold가 읽지 않는다 */
   changes?: unknown
 }
 
@@ -405,7 +445,7 @@ export function retroIllegal(ev: FoldEvent): RegistryError {
 
 /**
  * fold 한 단계 — 전이가 성립하는지 판정만 (기록 시점의 병원 = ev.hospitalCode).
- * REGISTER: NONE·RECOVERED에서만 / MOVE_WARD·RECOVER·AS_OPEN·AS_CLEAR: 같은 병원 ACTIVE에서만 / CORRECT: 항상.
+ * REGISTER: NONE·RECOVERED에서만 / MOVE_WARD·RECOVER·AS_OPEN·AS_CLEAR: 같은 병원 ACTIVE에서만 / CORRECT·INTAKE·REPAIR_DONE·SCRAP·SITE_MOVE: 항상(배치 축 판정은 서비스가 삽입 시점에).
  */
 function foldStepOk(state: FoldState, ev: FoldEvent): boolean {
   switch (ev.eventType) {
@@ -417,6 +457,10 @@ function foldStepOk(state: FoldState, ev: FoldEvent): boolean {
     case 'AS_CLEAR':
       return state.status === 'ACTIVE' && state.hospitalCode === ev.hospitalCode
     case 'CORRECT':
+    case 'INTAKE':
+    case 'REPAIR_DONE':
+    case 'SCRAP':
+    case 'SITE_MOVE':
       return true
     default:
       return false
@@ -478,6 +522,11 @@ export function foldEvents(events: readonly FoldEvent[], illegal: (ev: FoldEvent
         if (dc !== undefined) s = { ...s, dealCode: dc }
         continue // 식별 컬럼만 — 프로젝션·last_event 미반영(상품유형·계약건 정정만 배치 값 갱신)
       }
+      case 'INTAKE':
+      case 'REPAIR_DONE':
+      case 'SCRAP':
+      case 'SITE_MOVE':
+        continue // 유닛 상태·위치 축 이벤트(2026-09-17, B-35) — 배치 프로젝션·last_event 미반영. 유닛 값은 condition.ts가 직접 갱신
     }
     s.lastEventType = ev.eventType
     s.lastEventOn = on
@@ -491,9 +540,17 @@ export function stateAt(events: readonly FoldEvent[], atYmd: string): FoldState 
   return foldEvents(events.filter((e) => (toYmd(e.occurredOn) ?? '') <= atYmd))
 }
 
-/** 업무일자 이후의 상태 이벤트(CORRECT 제외) — 소급 정합 검사용 */
+/** 배치 fold 정합에 영향 없는 이벤트 — 소급 정합 검사(`stateEventsAfter`)·임포트 lastStateOn·assertSuffix가 같은 집합을 제외한다(AS_*는 현행대로 포함) */
+export const NON_PLACEMENT_EVENT_TYPES: readonly string[] = ['CORRECT', ...DEVICE_UNIT_STATE_EVENT_TYPES]
+
+/** 업무일자 이후의 배치 축 이벤트(CORRECT·신규 4종 제외, AS_* 포함) — 소급 정합 검사용 */
 export function stateEventsAfter<T extends FoldEvent>(events: readonly T[], atYmd: string): T[] {
-  return sortEvents(events.filter((e) => e.eventType !== 'CORRECT' && (toYmd(e.occurredOn) ?? '') > atYmd))
+  return sortEvents(events.filter((e) => !NON_PLACEMENT_EVENT_TYPES.includes(e.eventType) && (toYmd(e.occurredOn) ?? '') > atYmd))
+}
+
+/** 배치 상태 이벤트(REGISTER·MOVE_WARD·RECOVER)가 1건 이상인가 — 배치 행 존재 판정(EMPTY = false) */
+export function hasPlacementStateEvents(events: readonly { eventType: string }[]): boolean {
+  return events.some((e) => (DEVICE_STATE_EVENT_TYPES as readonly string[]).includes(e.eventType))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -532,13 +589,18 @@ export function assertTransition(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type EventRow = HospitalDeviceEvent
-/** `device_units` 원행(1층) — 용도 마스터 조인(`usageType`)은 `UNIT_USAGE_INCLUDE`로 읽은 경우에만 채워진다 */
-export type UnitRow = DeviceUnit & { usageType?: UsageTypeRef | null }
+/** 거점(DEVICE_SITE) 마스터 행 — 유닛 `locationSite` 조인 형상 */
+export type DeviceSiteRef = { id: number; name: string; value: string | null }
+/** `device_units` 원행(1층) — 용도(`usageType`)·거점(`locationSite`) 조인은 `UNIT_USAGE_INCLUDE`로 읽은 경우에만 채워진다 */
+export type UnitRow = DeviceUnit & { usageType?: UsageTypeRef | null; locationSite?: DeviceSiteRef | null }
 /** `hospital_devices` 원행(2층 배치 프로젝션) */
 export type PlacementRow = HospitalDevice
 
-/** 유닛 조회 공용 include — 용도(DEVICE_USAGE_TYPE) 마스터 행 {id, name, value} */
-export const UNIT_USAGE_INCLUDE = { usageType: { select: { id: true, name: true, value: true } } } satisfies Prisma.DeviceUnitInclude
+/** 유닛 조회 공용 include — 용도(DEVICE_USAGE_TYPE)·위치 거점(DEVICE_SITE) 마스터 행 {id, name, value} */
+export const UNIT_USAGE_INCLUDE = {
+  usageType: { select: { id: true, name: true, value: true } },
+  locationSite: { select: { id: true, name: true, value: true } },
+} satisfies Prisma.DeviceUnitInclude
 
 /**
  * 공개 기기 형상 — 유닛(식별) + 배치 프로젝션(상태)을 평탄화. `id` = `device_units.id`(공개 device id), `placementId` = `hospital_devices.id`(내부).
@@ -557,6 +619,16 @@ export interface DeviceRow {
   /** 용도(판매용 SALE / 평가용 EVAL) — 유닛 속성, null=미지정 */
   usageTypeId: number | null
   usageType: UsageTypeRef | null
+  /** 기기 상태(condition 6종, B-26) — 유닛 속성, null=미확인(백필·재도출 전용) */
+  condition: string | null
+  conditionChangedOn: Date | null
+  /** 위치: 병원 코드(거점과 배타 — I-2) */
+  locationHospitalCode: string | null
+  /** 위치: 거점 status_codes.id(DEVICE_SITE) */
+  locationSiteId: number | null
+  /** 위치 거점 마스터 행(value REFRESH_CENTER/HUB) — 조인한 경우에만 */
+  locationSite: DeviceSiteRef | null
+  locationChangedOn: Date | null
   extDeviceCode: string | null
   extLastSeenAt: Date | null
   extSyncedAt: Date | null
@@ -598,6 +670,12 @@ export function flattenDevice(unit: UnitRow, placement: PlacementRow): DeviceRow
     source: unit.source,
     usageTypeId: unit.usageTypeId,
     usageType: unit.usageType ?? null,
+    condition: unit.condition,
+    conditionChangedOn: unit.conditionChangedOn,
+    locationHospitalCode: unit.locationHospitalCode,
+    locationSiteId: unit.locationSiteId,
+    locationSite: unit.locationSite ?? null,
+    locationChangedOn: unit.locationChangedOn,
     extDeviceCode: placement.extDeviceCode,
     extLastSeenAt: placement.extLastSeenAt,
     extSyncedAt: placement.extSyncedAt,
@@ -755,7 +833,8 @@ export function projectionData(s: FoldState): ProjectionColumns {
 
 /**
  * 프로젝션 재계산 — 유닛의 이벤트를 다시 접어 배치 행(`hospital_devices.device_id = unitId`)을 UPDATE 한다(불변식 1).
- * - 이벤트 0건이면 쓰지 않고 EMPTY 상태 반환(호출부가 배치 행을 삭제 — `rebuildOrDelete`)
+ * - **배치 상태 이벤트(REGISTER·MOVE_WARD·RECOVER) 0건**이면 쓰지 않고 EMPTY 상태 반환(`state.status === null`, 호출부가 배치 행을 삭제 — `rebuildOrDelete`).
+ *   신규 4종·CORRECT만 남은 유닛도 EMPTY — `projectionData`의 `status ?? 'ACTIVE'`가 CHECK를 깨지 않도록(2026-09-17 §5.3 fold)
  * - 배치 행이 없는데 이벤트가 있으면 생성(첫 REGISTER 직후 경로) — `device_id` UNIQUE 충돌은 mapDbError → 409
  * - `guard`가 있으면 이전 (status, hospital_code, ward_id) 조건 updateMany, count≠1 → 409 (§7.0 동시성)
  * - fold 불성립은 `illegal`이 만든 409 (기본 문구 / 소급 삽입은 retroIllegal)
@@ -769,7 +848,7 @@ export async function rebuildUnitProjection(
     where: { deviceId: unitId },
     orderBy: [{ occurredOn: 'asc' }, { id: 'asc' }],
   })
-  if (events.length === 0) return { state: { ...EMPTY_STATE }, events }
+  if (!hasPlacementStateEvents(events)) return { state: { ...EMPTY_STATE }, events }
   const state = foldEvents(events, opts?.illegal)
   const data = projectionData(state)
   if (opts?.guard) {
@@ -786,18 +865,18 @@ export async function rebuildUnitProjection(
   return { state, events }
 }
 
-/** 이벤트 0건이면 배치 행 삭제(유닛은 남김), 아니면 재계산. 삭제 여부 반환. */
+/** 배치 상태 이벤트 0건(fold `state.status == null`)이면 배치 행 삭제(유닛은 남김), 아니면 재계산. 삭제 여부 반환. */
 export async function rebuildOrDelete(
   client: DbClient,
   unitId: number,
   opts?: { illegal?: (ev: FoldEvent, state: FoldState) => RegistryError }
-): Promise<{ deleted: boolean; state: FoldState }> {
+): Promise<{ deleted: boolean; state: FoldState; events: EventRow[] }> {
   const { state, events } = await rebuildUnitProjection(client, unitId, opts)
-  if (events.length === 0) {
+  if (state.status == null) {
     await client.hospitalDevice.deleteMany({ where: { deviceId: unitId } })
-    return { deleted: true, state }
+    return { deleted: true, state, events }
   }
-  return { deleted: false, state }
+  return { deleted: false, state, events }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -899,6 +978,18 @@ export async function getDeviceOr404(client: DbClient, deviceId: number): Promis
   const p = await client.hospitalDevice.findUnique({ where: { deviceId }, include: { unit: { include: UNIT_USAGE_INCLUDE } } })
   if (!p) throw new RegistryError(404, '원장에 없는 기기입니다')
   return flattenDevice(p.unit, p)
+}
+
+/**
+ * 공개 device id → 유닛 + 배치(nullable) — **배치 무관 조회**(§7.0 공통 규약: 상태·위닛 축 서비스·CORRECT 취소는 `getDeviceOr404`를 쓰지 않는다).
+ * 유닛이 없으면 404. `device`는 배치 행이 있을 때만 DeviceRow.
+ */
+export async function getUnitOr404(client: DbClient, deviceId: number): Promise<{ unit: UnitRow; placement: PlacementRow | null; device: DeviceRow | null }> {
+  if (!Number.isInteger(deviceId) || deviceId <= 0) throw new RegistryError(400, '기기 id가 올바르지 않습니다')
+  const u = await client.deviceUnit.findUnique({ where: { id: deviceId }, include: { placement: true, ...UNIT_USAGE_INCLUDE } })
+  if (!u) throw new RegistryError(404, '원장에 없는 기기입니다')
+  const { placement, ...unit } = u
+  return { unit, placement, device: placement ? flattenDevice(unit, placement) : null }
 }
 
 /**

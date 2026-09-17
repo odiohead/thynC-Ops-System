@@ -4,7 +4,7 @@
  * /devices URL 동기화 훅 (projects/hospital_device_registry_design.md §6 — v1 단순화 2026-09-01)
  *
  * `?view=hospital&hospital=&tab=list|history|wards|import&status=&model=&ward=&q=&page=&device=`
- * `?view=devices&status=&model=&usage=&productType=&q=&page=&device=`
+ * `?view=devices&status=&model=&usage=&productType=&condition=&location=&q=&page=&device=`
  *
  * - 단일 소스는 URL(useSearchParams) — 뒤로가기/앞으로가기도 그대로 반영. 첫 렌더는 서버가 파싱한 `initial`과 일치
  * - 모든 변경은 `router.replace(…, { scroll:false })` (히스토리 오염 없음). 타이핑 검색은 호출부에서 디바운스 후 setFilters
@@ -36,8 +36,8 @@ export interface DevicesUrlApi {
   setHospital: (code: string | null, opts?: SetHospitalOptions) => void
   /** 병원 뷰 하위 탭 전환 — page 1로, q(시리얼) 유지 */
   setTab: (tab: DevicesTab) => void
-  /** 목록 필터(status/model/ward/usage/productType/q) — page는 patch에 없으면 1로 리셋 */
-  setFilters: (patch: Partial<Pick<DevicesUrlState, 'status' | 'model' | 'ward' | 'usage' | 'productType' | 'q' | 'page'>>) => void
+  /** 목록 필터(status/model/ward/usage/productType/condition/location/q) — page는 patch에 없으면 1로 리셋 */
+  setFilters: (patch: Partial<Pick<DevicesUrlState, 'status' | 'model' | 'ward' | 'usage' | 'productType' | 'condition' | 'location' | 'q' | 'page'>>) => void
   /** 드로어 열기/닫기 */
   setDevice: (id: number | null) => void
 }
@@ -86,7 +86,7 @@ export function useDevicesUrlState(initial: DevicesUrlState = DEFAULT_URL_STATE)
   const setTab = useCallback((tab: DevicesTab) => replace({ ...state, tab: resolveTab(state.hospital, tab), page: 1 }), [replace, state])
 
   const setFilters = useCallback(
-    (patch: Partial<Pick<DevicesUrlState, 'status' | 'model' | 'ward' | 'usage' | 'productType' | 'q' | 'page'>>) =>
+    (patch: Partial<Pick<DevicesUrlState, 'status' | 'model' | 'ward' | 'usage' | 'productType' | 'condition' | 'location' | 'q' | 'page'>>) =>
       replace({ ...state, page: 1, ...patch }),
     [replace, state]
   )

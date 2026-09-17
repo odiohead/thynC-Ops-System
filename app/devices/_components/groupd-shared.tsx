@@ -7,7 +7,8 @@
 import { useEffect, useRef } from 'react'
 import Button from '@/app/components/ui/Button'
 import { cn } from '@/lib/cn'
-import { DEVICE_EVENT_TYPE_LABELS, toYmd, todayKst } from '@/lib/deviceRegistryShared'
+import { DEVICE_EVENT_TYPE_LABELS, toYmd, todayKst, unitStateChangesOf } from '@/lib/deviceRegistryShared'
+import { locationMoveText, locationSnapshotText, unitStateAfterText, unitStateChangeLines } from './deviceDisplay'
 import type { DeviceDetailEvent, DeviceEvent } from './types'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -76,7 +77,16 @@ function fmtChangeValue(v: unknown): string {
   return String(v)
 }
 
-/** 이벤트 1건 → 내용 문구 */
+/** 스냅샷 키(condition/location)는 `unitStateChangeLines`가 문장화 — 일반 필드 루프에서 제외 */
+const UNIT_STATE_KEYS: readonly string[] = ['condition', 'location']
+
+/** 배치 축 이벤트 행의 상태·위치 스냅샷 병기 ' → 사용중 · 병원 …'(2026-09-17 B-28, 배포 전 이벤트는 스냅샷 없음 → '') */
+function afterSuffix(ev: DeviceDetailEvent | DeviceEvent): string {
+  const t = unitStateAfterText(ev.changes)
+  return t ? ` → ${t}` : ''
+}
+
+/** 이벤트 1건 → 내용 문구 — 상태·위치 축 4종(입고/수리 완료/폐기/위치 이동)·CORRECT 상태 스냅샷은 deviceDisplay 문장화 헬퍼(단일 소스) */
 export function eventContent(ev: DeviceDetailEvent | DeviceEvent): string {
   const from = ev.fromWard?.name ?? '미지정'
   const to = ev.toWard?.name ?? '미지정'
@@ -85,18 +95,35 @@ export function eventContent(ev: DeviceDetailEvent | DeviceEvent): string {
       const parts = [`→ ${to}`]
       if (ev.relatedDevice) parts.push(`교체 ${ev.relatedDevice.serialNo} 대체`)
       if (ev.importBatch) parts.push(`임포트 #${ev.importBatch.id}`)
-      return parts.join(' · ')
+      return parts.join(' · ') + afterSuffix(ev)
     }
     case 'MOVE_WARD':
       return `${from} → ${to}`
     case 'RECOVER': {
       const parts = [`${from} 회수`]
       if (ev.relatedDevice) parts.push(`→ 교체 ${ev.relatedDevice.serialNo}`)
-      return parts.join(' ')
+      return parts.join(' ') + afterSuffix(ev)
     }
+    case 'AS_OPEN':
+      return `AS 접수${ev.refCode ? ` (${ev.refCode})` : ''}${afterSuffix(ev)}`
+    case 'AS_CLEAR':
+      return `AS 해제${afterSuffix(ev)}`
+    case 'INTAKE': {
+      const site = unitStateChangesOf(ev.changes)?.location.after
+      return [`${site?.kind === 'SITE' ? locationSnapshotText(site) : '센터'} 입고${ev.refCode ? ` (${ev.refCode})` : ''}`, ...unitStateChangeLines(ev.changes)].join(' · ')
+    }
+    case 'REPAIR_DONE':
+      return ['수리 완료', ...unitStateChangeLines(ev.changes)].join(' · ')
+    case 'SCRAP':
+      return ['폐기', ...unitStateChangeLines(ev.changes)].join(' · ')
+    case 'SITE_MOVE':
+      return `위치 이동 ${locationMoveText(ev.changes) ?? ''}`.trim()
     case 'CORRECT': {
       const ch = ev.changes ?? {}
-      const items = Object.entries(ch).map(([k, v]) => `${CHANGE_FIELD_LABELS[k] ?? k} ${fmtChangeValue(v?.before)} → ${fmtChangeValue(v?.after)}`)
+      const items = Object.entries(ch)
+        .filter(([k]) => !UNIT_STATE_KEYS.includes(k))
+        .map(([k, v]) => `${CHANGE_FIELD_LABELS[k] ?? k} ${fmtChangeValue(v?.before)} → ${fmtChangeValue(v?.after)}`)
+      items.push(...unitStateChangeLines(ch))
       return items.length ? items.join(' · ') : '식별 정보 정정'
     }
     default:

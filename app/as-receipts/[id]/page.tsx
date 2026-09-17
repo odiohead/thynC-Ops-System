@@ -4,6 +4,7 @@
  * AS접수 상세 (as_work_design.md §8 — 2026-09-11 카드 재구성)
  * 1 공통정보 → 2 접수정보(접수자 입력, 시트 A~M·S·T + 태그·비고) → 3 AS상세내역(AS담당자 입력, 시트 N~X — 기기군별 카드: 라인별 처리내용, 기기군 단위 발송정보) → 4 기기등록 → 5 타임라인(2026-09-15 — 감사로그·티켓 로그 합성 이력).
  * 상태 변경(도메인→티켓 동기화)·수정 모달·삭제(티켓 동반) — 권한 §13-1.
+ * 2026-09-17 기기 상태·위치 축(device_condition_location_design.md §6.1): 3번 카드 라인 '수리완료' 체크박스(입고된 라인만) · 카드 헤더 `수리완료 n/m` · 시리얼 셀 기기 상태 배지 · [폐기](회수 기기만).
  */
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -16,9 +17,10 @@ import {
   type AsCategory, type AsMethod, type AsDestType, type AsOutcome, AS_REGISTRY_TAG_LABELS, AS_REGISTRY_TAG_DESC, type AsRegistryTag, type AsRegistryLineTag,
   AS_METHODS, AS_DEVICE_GROUPS, asDeviceGroupOf, type AsDeviceGroup,
   AS_RESOLVE_OUTCOMES, AS_INTAKE_STATE_LABELS, AS_DEVICE_KINDS, isAsIntakeIssue, asDeviceKindFromSerial, type AsIntakeState,
-  AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, AS_TAG_BADGE_CLS, asReceiptTags, type AsTagFlags } from '@/lib/asReceiptShared'
+  AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, AS_TAG_BADGE_CLS, asReceiptTags, type AsTagFlags,
+  canMarkAsLineRepaired, asRepairDisabledReason, summarizeAsRepairProgress, AS_LINE_CONDITION_BADGE_CLS, isAsLineConditionBadge } from '@/lib/asReceiptShared' // 수리완료 체크·기기 상태 배지 (2026-09-17)
 import type { TicketStatus } from '@prisma/client'
-import { PRODUCT_TYPES } from '@/lib/deviceRegistryShared'
+import { PRODUCT_TYPES, deviceConditionLabel, deviceSiteLabel } from '@/lib/deviceRegistryShared'
 
 interface CodeRef { id: number; name: string; color: string | null }
 
@@ -42,6 +44,7 @@ interface ItemRow {
     id: number
     deviceInfo: { deviceName: string }
     placement: { status: string; hospitalCode: string | null; asStartedOn: string | null; asRefCode: string | null; ward: { name: string } | null } | null
+    unit?: { condition: string | null; locationSiteValue: string | null; locationHospitalCode: string | null; locationHospitalName?: string | null } | null // 기기 상태·위치 축 (2026-09-17 — device_condition_location_design.md §5.1)
   } | null
   newDevice: { id: number; serialNo: string } | null
   registryTag: AsRegistryLineTag | null // 미종결 라인의 현재 원장 정합(정상=null) — API 실시간 계산
@@ -49,6 +52,8 @@ interface ItemRow {
   receivedAt: string | null
   receiptSerialNo: string | null // 치환 전 접수 시리얼
   intakeSource: string
+  repairedAt: string | null // 수리완료 체크 (2026-09-17) — outcome과 독립인 제3축(YYYY-MM-DD)
+  repairedBy: { id: string; name: string | null } | null
 }
 
 interface TimelineEvent { id: string; at: string; actor: string | null; source: 'audit' | 'ticket'; title: string; details: string[] } // /api/as-receipts/[id]/timeline (2026-09-15)
@@ -163,6 +168,18 @@ function deviceBadge(item: ItemRow, asCode: string, hospitalCode: string | null)
   return null
 }
 
+/** 라인 기기 상태(condition) 소형 배지 (2026-09-17 §6.1) — 수리완료·폐기·분실만, 툴팁에 위치 */
+function conditionBadge(item: ItemRow, hospitalCode: string | null) {
+  const u = item.device?.unit
+  if (!u || !isAsLineConditionBadge(u.condition)) return null
+  const loc = u.locationSiteValue ? deviceSiteLabel(u.locationSiteValue) : u.locationHospitalCode ? (u.locationHospitalCode === hospitalCode ? '접수 병원' : `병원 ${u.locationHospitalName ?? u.locationHospitalCode}`) : '없음'
+  return (
+    <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[11px] font-medium ${AS_LINE_CONDITION_BADGE_CLS[u.condition]}`} title={`기기 상태 ${deviceConditionLabel(u.condition)} · 위치: ${loc}`}>
+      {deviceConditionLabel(u.condition)}
+    </span>
+  )
+}
+
 const label = 'text-xs font-medium uppercase tracking-wider text-gray-400'
 const inputCls = 'mt-1 w-full rounded-md border border-gray-300 px-2 py-1 text-sm'
 
@@ -198,11 +215,15 @@ interface GroupCardProps {
   extras: ItemRow[] // 접수 전체의 미식별입고 라인 (치환 후보 — 기기군 무관)
   onRegistryConfirm: (body: Record<string, unknown>) => Promise<boolean> // 원장 정합 확정 (2026-09-11)
   onCorrectSerial: (itemId: number, serial: string) => Promise<boolean> // 라인 시리얼 보정 (2026-09-15)
+  canRepair: boolean // 수리완료 체크·폐기 권한 — VIEWER 제외(접수 종결 여부 무관, A-2·A-5) (2026-09-17)
+  onToggleRepaired: (item: ItemRow, repaired: boolean) => Promise<boolean> // POST repair-done (2026-09-17)
+  onScrapLine: (item: ItemRow) => Promise<boolean> // POST scrap-line — confirm·memo 프롬프트는 호출부 (2026-09-17)
 }
 const MODEL_BY_KIND: Record<string, string> = { 심전도: '심전계', 산소포화도: '산소포화도', 게이트웨이: '게이트웨이' }
 
-function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm, onCorrectSerial }: GroupCardProps) {
+function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm, onCorrectSerial, canRepair, onToggleRepaired, onScrapLine }: GroupCardProps) {
   const [fixSerial, setFixSerial] = useState<Record<number, string>>({}) // 시리얼 보정 입력 (2026-09-15) — 라인별, 빈 값 = 닫힘
+  const repair = summarizeAsRepairProgress(items) // 수리완료 n/m (2026-09-17) — m = 체크 가능 라인(canMarkAsLineRepaired)
   const openItems = items.filter((i) => !i.outcome && !isAsIntakeIssue(i.intakeState)) // 미입고·미식별입고는 처리 대상 아님
   const issueItems = items.filter((i) => !i.outcome && isAsIntakeIssue(i.intakeState))
   const isShip = (o: string | null) => o === 'REPAIR_RETURN' || o === 'REPLACE'
@@ -258,6 +279,11 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
           {items.length}대 · 확정 {items.filter((i) => i.outcome).length}대{draftItems.length > 0 && <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 font-medium text-blue-700">초안 {draftItems.length}</span>}
           {issueItems.length > 0 && <span className="ml-1.5 rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700">입고 확인 {issueItems.length}</span>}
           {registryItems.length > 0 && <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">원장 확인 {registryItems.length}</span>}
+          {repair.repairable > 0 && (
+            <span className={`ml-1.5 rounded px-1.5 py-0.5 font-medium ${repair.repaired < repair.repairable ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`} title="수리완료 체크 / 체크 가능(입고된) 라인">
+              수리완료 {repair.repaired}/{repair.repairable}
+            </span>
+          )}
         </span>
       </div>
       <div className="overflow-x-auto">
@@ -271,7 +297,7 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
                   )}
                 </th>
               )}
-              {['시리얼', '입고', '병동', '증상', '처리내용', '결과', '교체기', '발송'].map((h) => (
+              {['시리얼', '입고', '병동', '증상', '처리내용', '수리완료', '결과', '교체기', '발송'].map((h) => ( // 셀 나열(아래 <td>)과 1:1 — 열 추가 시 동시 수정
                 <th key={h} className="whitespace-nowrap px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">{h}</th>
               ))}
             </tr>
@@ -289,6 +315,7 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
                 <td className="whitespace-nowrap px-3 py-2">
                   <span className="font-mono text-sm text-gray-900">{item.serialNo}</span>
                   <span className="ml-1.5">{deviceBadge(item, asCode, hospitalCode)}</span>
+                  {conditionBadge(item, hospitalCode)}
                   {item.device?.deviceInfo.deviceName == null && item.deviceKind && <span className="ml-1 text-[11px] text-gray-400">{item.deviceKind}</span>}
                   {item.receiptSerialNo && <span className="ml-1 text-[11px] text-gray-400" title="접수 시 입력된 시리얼(치환 전)">접수 {item.receiptSerialNo}</span>}
                   {item.intakeSource === 'INTAKE' && item.intakeState === 'RECEIVED' && <span className="ml-1 text-[11px] text-gray-400">입고 편입</span>}
@@ -308,6 +335,36 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
                       className={`w-44 rounded-md border px-2 py-1 text-xs ${notes[item.id] !== undefined && notes[item.id] !== (item.processNote ?? '') ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`}
                     />
                   ) : <span className="text-xs text-gray-500" title={item.processNote ?? undefined}>{item.processNote ?? '-'}</span>}
+                </td>
+                {/* 수리완료 체크 (2026-09-17 §6.1) — 입고된 라인만(D5), 분실·취소·미회수 제외. 결과 확정 라인·종결 접수도 가능(선교체, A-2). outcome·헤더 상태에는 개입하지 않음 */}
+                <td className="whitespace-nowrap px-3 py-2">
+                  {(() => {
+                    const ok = canMarkAsLineRepaired(item)
+                    const checked = !!item.repairedAt
+                    const cond = item.device?.unit?.condition ?? null
+                    const scrappable = canRepair && ok && item.device?.placement?.status === 'RECOVERED' && cond !== 'SCRAPPED' && cond !== 'LOST'
+                    const title = checked
+                      ? `수리완료 ${d10(item.repairedAt).slice(5)} ${item.repairedBy?.name ?? ''}`.trim()
+                      : !canRepair ? '수리완료 체크 권한이 없습니다' : (asRepairDisabledReason(item) ?? '체크하면 기기 상태가 수리완료로 기록됩니다')
+                    return (
+                      <span className="inline-flex items-center gap-1.5" title={title}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={!canRepair || busy || !ok}
+                          onChange={(e) => void onToggleRepaired(item, e.target.checked)}
+                          className="rounded border-gray-300 disabled:opacity-40"
+                          aria-label={`${item.serialNo} 수리완료`}
+                        />
+                        {checked && <span className="text-xs text-emerald-700">{d10(item.repairedAt)}</span>}
+                        {scrappable && (
+                          <button type="button" disabled={busy} onClick={() => void onScrapLine(item)} className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-100 hover:text-red-600 disabled:opacity-40" title="회수된 기기를 폐기 처리합니다 (기기 상태 폐기·위치 없음, 사유 필수)">
+                            폐기
+                          </button>
+                        )}
+                      </span>
+                    )
+                  })()}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2">
                   {item.outcome ? (
@@ -571,6 +628,8 @@ export default function AsReceiptDetailPage() {
   const canDelete = !!me && !!req && (isAdmin || adminPerm || (me.role !== 'VIEWER' && req.createdBy?.id === me.id && !isTerminal))
   // 라인 처리 — USER 이상 전원 (별도 처리 풀 없음, 설계 §7)
   const canResolve = !!me && me.role !== 'VIEWER' && !isTerminal
+  // 수리완료 체크·폐기 — VIEWER 제외, 접수 종결 여부 무관(선교체 구기기는 완료 후 수리 — A-2·A-5, 서버 repair-done/scrap-line과 동일)
+  const canRepair = !!me && me.role !== 'VIEWER'
   const openItems = req?.items.filter((i) => !i.outcome) ?? []
   const draftCount = req?.items.filter((i) => !i.outcome && i.draftOutcome).length ?? 0
 
@@ -727,6 +786,47 @@ export default function AsReceiptDetailPage() {
     const d = await res.json().catch(() => ({}))
     setBusy(false)
     if (!res.ok) { flash(d.error ?? '발송정보 갱신에 실패했습니다.'); return false }
+    router.refresh()
+    await load()
+    return true
+  }
+
+  /** 수리완료 체크/해제 (2026-09-17) — POST repair-done. 라인 repaired_at + 기기 condition(REPAIRED / 해제는 CORRECT). 종결 접수도 허용(A-2) */
+  async function toggleRepaired(item: ItemRow, repaired: boolean) {
+    if (!req) return false
+    if (!repaired && !confirm(`${item.serialNo} 수리완료를 해제합니다 (기기 상태가 AS접수로 돌아갑니다).`)) return false
+    setBusy(true)
+    const res = await fetch(`/api/as-receipts/${req.id}/repair-done`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId: item.id, repaired }),
+    })
+    const d = await res.json().catch(() => ({}))
+    setBusy(false)
+    if (!res.ok) { flash(d.error ?? d.message ?? (repaired ? '수리완료 처리에 실패했습니다.' : '수리완료 해제에 실패했습니다.')); return false }
+    if (d.warnings?.length) setWarnings(d.warnings)
+    router.refresh()
+    await load()
+    return true
+  }
+
+  /** 라인 기기 폐기 (2026-09-17, A-5) — confirm + 사유(memo) 필수 프롬프트 → POST scrap-line. 회수(RECOVERED) 기기만 — 배치 중이면 서버 409 */
+  async function scrapLine(item: ItemRow) {
+    if (!req) return false
+    if (!confirm(`${item.serialNo} 기기를 폐기 처리합니다.\n기기 상태가 '폐기'로 기록되고 위치가 지워지며, 라인의 수리완료 체크는 해제됩니다.\n되돌리려면 관리자 보정이 필요합니다. 계속할까요?`)) return false
+    const memo = prompt(`${item.serialNo} 폐기 사유를 입력하세요 (필수 — 접수 비고에 기록):`)
+    if (memo == null) return false
+    if (!memo.trim()) { flash('폐기 사유를 입력하세요.'); return false }
+    setBusy(true)
+    const res = await fetch(`/api/as-receipts/${req.id}/scrap-line`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId: item.id, memo: memo.trim() }),
+    })
+    const d = await res.json().catch(() => ({}))
+    setBusy(false)
+    if (!res.ok) { flash(d.error ?? d.message ?? '폐기 처리에 실패했습니다.'); return false }
+    setWarnings([`${item.serialNo} 폐기 처리됨`, ...(d.warnings ?? [])])
     router.refresh()
     await load()
     return true
@@ -1080,6 +1180,9 @@ export default function AsReceiptDetailPage() {
               extras={req.items.filter((i) => !i.outcome && i.intakeState === 'EXTRA')}
               onRegistryConfirm={registryConfirm}
               onCorrectSerial={correctSerial}
+              canRepair={canRepair}
+              onToggleRepaired={toggleRepaired}
+              onScrapLine={scrapLine}
             />
           ))}
           {canResolve && openItems.length > 0 && (

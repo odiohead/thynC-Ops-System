@@ -180,6 +180,7 @@
 | 입고처리 `POST /intake` | 실물 시리얼 입력(줄 단위) + 입고일(N)·확인일(O). **누적 실행 가능**(부분 입고) | 일치 → 라인 `intake_state=RECEIVED` **정상입고**(+`received_at`) / 접수됐으나 없음(대기 라인) → `MISMATCH` **미입고** / 입력했으나 접수에 없음 → `EXTRA` **미식별입고** 라인 생성(`intake_source=INTAKE`, 원장 매칭만·AS 표시는 편입 시). 헤더 `received_at`(최초만)·`checked_at` 갱신, 상태가 '입고' 이전이면 '입고' 자동(티켓 동기화) |
 | 접수자 확인 `POST /intake-confirm` | MISMATCH(미입고): **치환**(EXTRA 시리얼로 교체 — `receipt_serial_no`에 원 시리얼 보존, AS 표시 이전) · **정상입고 확정**(수동) · **미회수**(결과 `NOT_RECEIVED`, 코멘트 필수 → `process_note`, AS 표시 해제) / EXTRA(미식별입고): **신규 라인 편입**(RECEIVED, 원장 매칭·AS 표시, 미등록이면 시리얼 접두로 기기종류 추정) · **삭제** | 미회수는 종결로 간주 — 나머지 라인이 끝나면 접수 자동 완료 |
 | 라인 처리 게이트 | `MISMATCH`·`EXTRA` 라인은 409로 처리 거부. **`PENDING`은 허용** — 방문교체·선교체는 입고 없이 처리되며, 기존 미종결 접수(입고처리 미실행)도 그대로 처리 가능 | `NOT_RECEIVED`는 라인 처리 패널에서 선택 불가(확인 절차 전용) |
+| 수리완료(`repaired_at`) `POST /repair-done` | **제3축**(2026-09-17 — `device_condition_location_design.md` §7.2, §17): `intake_state='RECEIVED'` ∧ `outcome ∉ {LOST, CANCELED, NOT_RECEIVED}` 라인만 체크 가능(D5 입고된 라인만), 결과 확정 라인·**종결 접수도 허용**(A-2). outcome·헤더 전이·완료 판정에 불개입 | 라인 `repaired_at/by` + 기기 `condition=REPAIRED`(같은 tx, 해제는 CORRECT). 체크된 라인이 분실·취소·미회수로 확정되면 NULL |
 
 **결정**
 - 확인 권한: USER 이상 전원(라인 처리와 동일, 별도 권한키 없음) — 채널톡 인입 건은 등록자가 봇이라 본인 제한이 성립하지 않음
@@ -212,4 +213,32 @@
 - **최종 완료**: 상세 **4. 기기등록** 카드(비고는 5로) — 1차는 기능 없이 [완료] 버튼만. `POST /api/as-receipts/[id]/complete`(USER 이상): 미종결 라인 0 필수(409) → '완료'(CLOSED)·완료일·티켓 CLOSED·비고 `[기기등록 완료 …]`
 - 리오픈 기본 대상: 전 라인 종결이면 '발송완료', 아니면 입고/접수
 - 영향: 시트 X열 '완료'는 기기등록 [완료] 시점에 기입됨(발송완료 단계에서는 '미완료' 유지). 시드·스모크 8종
+
+---
+
+## 17. 수리완료 체크·기기 상태 연동 (2026-09-17 확정 — `device_condition_location_design.md`)
+
+- **배경**: 10대 접수 중 몇 대가 수리됐는지, 회수·입고된 기기가 지금 어떤 상태로 어디 있는지를 라인 결과(outcome)만으로는 답할 수 없었다. 기기현황에 **기기 상태(condition 6종: 사용중·AS접수·수리완료·출고 전·분실·폐기)·위치(병원/리프레시센터/thynC Connected Hub)** 유닛 축이 생겼고, AS 흐름의 각 단계가 그 축을 자동으로 옮긴다.
+- **수리완료 = 제3축** `as_receipt_items.repaired_at/repaired_by_id` — `intake_state × outcome` 2축 게이트(§14)와 독립. **outcome·헤더 상태 전이·`advanceToShippedDone`·`completeAsReceipt`·리오픈에 절대 개입하지 않는다.**
+  - 체크 가능 = `canMarkAsLineRepaired`: `intake_state='RECEIVED'` ∧ `outcome ∉ {LOST, CANCELED, NOT_RECEIVED}`(D5 입고된 라인만). 결과 확정 라인(수리반환·교체 — 선교체)도 가능, **종결(완료·취소) 접수도 허용**(A-2 — 완료 전 사후 입고된 선교체 REPLACE·RECEIVED 라인 19건 실존). 권한 VIEWER 제외(`canEditAsReceipt` 미사용 — 다른 라인 API의 409 규약과 다름을 라우트 주석에 명시)
+  - `POST /api/as-receipts/[id]/repair-done { itemId, repaired }` → 라인 `repaired_at`(서버 오늘 KST)·`repaired_by` + 기기 `condition=REPAIRED`(REPAIR_DONE 이벤트, ref AS) / 해제는 CORRECT(AS접수 복귀) + 비고 `[수리완료 09-17 홍길동] P018330`. 미등록·사용중·폐기 기기는 라인만 기록 + 경고. 재체크 멱등(경고 '변경 사항 없음'). 낙관 가드 409 '동시에 변경되어 다시 시도하세요'는 전파(tx 롤백 — 라인만 커밋되는 반쪽 상태 방지)
+  - 화면: 3. AS상세내역 라인 표 '처리내용'과 '결과' 사이 '수리완료' 체크박스(해제는 confirm), 카드 헤더 `수리완료 n/m`(m = 체크 가능 라인), 시리얼 셀 기기 상태 배지(수리완료·폐기·분실 + 위치 툴팁), 목록 '기기' 배지 `수리 n/m`, Excel '수리완료일', 타임라인 접미어 수리완료/수리완료 해제/폐기
+  - 체크된 라인이 이후 분실·취소·미회수로 확정되면 그 분기에서 `repaired_at/by` NULL + 비고(n이 m 밖에 남지 않게)
+- **[폐기]** `POST /api/as-receipts/[id]/scrap-line { itemId, memo(필수) }` — 회수(RECOVERED)된 라인 기기만(배치 ACTIVE 409 '배치 중 기기는 먼저 회수하세요'), 권한은 AS 업무 권한과 동일(VIEWER 제외 — 사용자 결정 A-5). 기기 SCRAPPED·위치 없음 + 라인 repaired_at NULL + 비고 `[폐기 …] memo`. 되돌림은 기기현황 admin 보정·LIFO 취소
+- **AS 흐름 → 기기 상태·위치**(`lib/asReceiptService.ts` 훅, 그쪽 §7.3):
+
+| 단계 | 기기 상태 · 위치 |
+|---|---|
+| 접수 등록(AS_OPEN) | AS접수 · 병원 유지 |
+| 입고처리 일치 라인·입고 확인(정상입고 확정·미식별 편입·치환 후 기기) | INTAKE → AS접수 · **리프레시센터**(배치 ACTIVE 유지 — D2). 결과 NULL·교체 라인만, ref별 1회 기록 |
+| 수리완료 체크 | 수리완료 · 센터 (→ 교체품 가용 — 회수 목록 `condition=REPAIRED&location=REFRESH_CENTER`) |
+| 수리반환 확정 | 사용중 · 병원 — **되돌림 게이트 `ownsDeviceState`**(그 기기의 마지막 스냅샷 이벤트가 이 접수 ref 또는 비AS ref일 때만; 타 접수면 경고 '다른 접수(AS-…)가 최근 상태를 기록 — 유지'). 이 접수가 켠 플래그면 AS_CLEAR(처리일 < 표시 시작일이면 업무일자 클램프 + 경고), 아니면 CORRECT 폴백 |
+| 교체 확정 구기기 | 배치 RECOVERED(DEFECT) · AS접수 · 리프레시센터(A-4 스냅샷 note '입고 미확인'). 신기기 REGISTER → 사용중 · 병원(폐기 기기 409, 수리완료 아니면 경고) |
+| 분실종결 · 분실 접수의 교체 | 분실 · 위치 없음 |
+| 라인 취소 | 사용중 · **위치 유지**(센터면 센터 → 기기현황 [병원 반환]) |
+| 미회수 확정 · 라인 제거 · 접수 삭제 · 시리얼 보정 구기기 · 치환 전 기기 | 사용중 · 병원(실물 이동 근거 없음) — 게이트 통과 시, memo '미회수 확정/라인 제거/접수 삭제/시리얼 보정/시리얼 치환 AS-…' |
+| 원장 확정 · 시리얼 보정 신기기 · 병원 변경 재생성 라인 | 라인이 RECEIVED면 INTAKE(occurredOn=입고일), repaired_at 있으면 REPAIR_DONE(occurredOn=repaired_at) **재적용**. 병원 변경 재생성 시 입고 상태·입고일·접수 시리얼·입고 출처·수리완료 필드 보존(기존 유실 결함 동반 수정) |
+
+- **초안/최종확정·선교체 사후 입고·종결 게이트 조건부 완화(문서 미반영분 동반 기재)**: 초안(`draft-lines`)은 기기현황에 쓰지 않고 [최종확정](`confirm-lines`)이 `resolveAsLines`를 경유해 위 표를 따른다(기준일 `effectiveDate`, 발송 라인은 라인 발송일 우선). **종결 접수 사후 입고**: `intakeAsLines`의 종결 게이트를 조건부 완화 — 입력 시리얼 전부가 `outcome='REPLACE'` ∧ `intake_state ∈ {PENDING, RECEIVED}` 라인과 일치할 때만(RECEIVED 재입력은 무변경 통과, 불일치 1건이라도 있으면 400·EXTRA 생성 금지), 헤더 status/received_at/checked_at 불변·`advanceToShippedDone` 미호출·비고만(전환 0건이면 비고도 없이 경고 '변경 사항 없음'). 종결 우회(PUT statusId·티켓 전이)로 '취소'에 들어간 접수의 AS접수 기기 정리는 v1 비범위(백필 `--dry` 목록)
+- 스모크 `scripts/as-receipt-smoke.mts` '▶ 수리완료' [C-1]~[C-16]·[C-I6](39항목)
 

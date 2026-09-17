@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { TICKET_STATUS_LABELS } from '@/lib/ticket-shared'
+import { deviceConditionLabel } from '@/lib/deviceRegistryShared'
 import type { TicketStatus } from '@prisma/client'
 import {
   AS_CATEGORY_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, AS_DEST_TYPE_LABELS, AS_OUTCOME_LABELS, AS_TAGS, AS_TAG_FIELDS, AS_TAG_LABELS,
@@ -13,7 +14,7 @@ type Params = { params: { id: string } }
 
 /**
  * AS접수 타임라인 (2026-09-15) — 상세 하단 이력. 읽기 전용 합성(별도 테이블 없음):
- *  · audit_logs(resource=as_receipt, resource_id=asCode) — 등록·접수정보 수정(필드 diff)·입고처리·입고 확인·라인 최종확정·발송정보·원장 확정·완료·리오픈
+ *  · audit_logs(resource=as_receipt, resource_id=asCode) — 등록·접수정보 수정(필드 diff)·입고처리·입고 확인·라인 최종확정·발송정보·원장 확정·완료·리오픈·수리완료/해제·폐기(2026-09-17)
  *  · ticket_logs(연결 티켓) — 생성·상태 전이·담당 배정·댓글
  * 최신순. 초안 저장(draft-lines)은 감사로그가 없어 나타나지 않는다(확정 시점만 이력).
  */
@@ -113,6 +114,18 @@ function summarizeAudit(row: { id: number; action: string; resourceLabel: string
   if (suffix === '시리얼 보정') {
     const st: Record<string, string> = { ACTIVE_HERE: '원장 연결', ACTIVE_OTHER: '타병원 배치', RECOVERED: '회수 상태', NONE: '미등록' }
     return { ...base, title: `시리얼 보정 ${str(after.previousSerialNo)} → ${str(after.serialNo)}`, details: [`${st[String(after.state)] ?? ''}${after.modelName ? ` · ${after.modelName}` : ''}`, ...warn].filter(Boolean) }
+  }
+  // 수리완료 체크·해제·폐기 (2026-09-17 — 기기 상태·위치 축 §6.1) — after { itemId, serialNo, repaired, repairedAt, condition, warnings } / { itemId, serialNo, memo, condition, warnings }
+  if (suffix === '수리완료' || suffix === '수리완료 해제') {
+    const details: string[] = []
+    if (suffix === '수리완료' && after.repairedAt) details.push(`수리완료일 ${d10(after.repairedAt)}`)
+    if (after.condition) details.push(`기기 상태 ${deviceConditionLabel(String(after.condition))}`)
+    return { ...base, title: `${suffix} — ${str(after.serialNo)}`, details: [...details, ...warn] }
+  }
+  if (suffix === '폐기') {
+    const details: string[] = []
+    if (after.memo) details.push(String(after.memo))
+    return { ...base, title: `폐기 — ${str(after.serialNo)}`, details: [...details, ...warn] }
   }
   if (suffix === '기기등록 완료') return { ...base, title: '기기등록 완료 → 접수 완료', details: after.statusName ? [`상태 ${after.statusName}`] : [] }
   if (suffix === '리오픈') return { ...base, title: `리오픈${after.statusName ? ` → ${after.statusName}` : ''}`, details: after.reason ? [String(after.reason)] : [] }

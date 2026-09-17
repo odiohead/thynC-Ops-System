@@ -376,7 +376,7 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, deals, t
       <section className="space-y-2 rounded-lg border border-border p-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-semibold text-foreground">구 기기 (회수)</h3>
-          {oldDeviceRow && <StatusBadge status={oldDeviceRow.status} />}
+          {oldDeviceRow && <StatusBadge status={oldDeviceRow.status} condition={oldDeviceRow.condition} />}
         </div>
         <FormField label="구 시리얼" htmlFor="replace-old" required hint={oldState.kind === 'loading' ? '조회 중…' : '↵ 또는 포커스 이동 시 원장 조회'}>
           <Input
@@ -518,7 +518,7 @@ function ReplaceForm({ onClose, hospitalCode, oldDevice, models, wards, deals, t
       <section className="space-y-2 rounded-lg border border-border p-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-semibold text-foreground">신 기기 (등록)</h3>
-          {newDeviceRow && <StatusBadge status={newDeviceRow.status} />}
+          {newDeviceRow && <StatusBadge status={newDeviceRow.status} condition={newDeviceRow.condition} />}
         </div>
         <FormField label="신 시리얼" htmlFor="replace-new" required hint={newState.kind === 'loading' ? '조회 중…' : '↵ 시 조회 후 제출 버튼으로 이동'}>
           <Input

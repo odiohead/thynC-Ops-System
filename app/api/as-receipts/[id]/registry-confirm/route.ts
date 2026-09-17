@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { confirmAsRegistry, AsServiceError } from '@/lib/asReceiptService'
-import { RegistryError } from '@/lib/deviceRegistry'
+import { toRegistryErrorResponse } from '@/lib/deviceRegistry'
 import { notifyTicketChanged } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
 
@@ -32,7 +32,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     })
   } catch (e) {
     if (e instanceof AsServiceError) return NextResponse.json({ error: e.message }, { status: e.status })
-    if (e instanceof RegistryError) return NextResponse.json(e.toJSON(), { status: e.status })
+    const r = toRegistryErrorResponse(e) // RegistryError·RegistryTxAbort(2026-09-17) 공통
+    if (r) return NextResponse.json(r.body, { status: r.status })
     throw e
   }
 

@@ -59,6 +59,7 @@ export async function GET(request: NextRequest) {
         select: {
           serialNo: true, deviceKind: true, wardName: true, symptom: true, processNote: true,
           outcome: true, newSerialNo: true, shipMethod: true, shipTrackingNo: true, shippedAt: true, intakeState: true, receivedAt: true, receiptSerialNo: true,
+          repairedAt: true, // 수리완료일 (2026-09-17)
           device: { select: { deviceInfo: { select: { deviceName: true } }, placement: { select: { ward: { select: { name: true } } } } } },
         },
         orderBy: { id: 'asc' },
@@ -104,6 +105,7 @@ export async function GET(request: NextRequest) {
         병동: i.device?.placement?.ward?.name ?? i.wardName ?? '',
         증상: i.symptom ?? '',
         처리내용: i.processNote ?? '',
+        수리완료일: d10(i.repairedAt), // 2026-09-17 — '처리내용' 뒤 (아래 !cols 폭 배열과 동기화)
         입고상태: AS_INTAKE_STATE_LABELS[i.intakeState as AsIntakeState] ?? i.intakeState,
         라인입고일: i.receivedAt ? i.receivedAt.toISOString().slice(0, 10) : '',
         접수시리얼: i.receiptSerialNo ?? '',
@@ -130,8 +132,8 @@ export async function GET(request: NextRequest) {
     { wch: 15 }, { wch: 11 }, { wch: 22 }, { wch: 6 }, { wch: 8 }, { wch: 18 }, { wch: 7 }, { wch: 8 }, { wch: 12 }, { wch: 9 }, { wch: 9 }, { wch: 15 }, { wch: 11 }, { wch: 11 },
     // 발송지구분 발송지정보 회수지상이 회수지정보 예상출하일
     { wch: 11 }, { wch: 24 }, { wch: 9 }, { wch: 24 }, { wch: 11 },
-    // 시리얼 기기종류 병동 증상 처리내용 | 입고상태 라인입고일 접수시리얼 (2026-09-11) | 결과 발송일 발송방법 송장 교체기
-    { wch: 11 }, { wch: 10 }, { wch: 10 }, { wch: 28 }, { wch: 28 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 11 }, { wch: 9 }, { wch: 15 }, { wch: 11 },
+    // 시리얼 기기종류 병동 증상 처리내용 수리완료일(2026-09-17) | 입고상태 라인입고일 접수시리얼 (2026-09-11) | 결과 발송일 발송방법 송장 교체기
+    { wch: 11 }, { wch: 10 }, { wch: 10 }, { wch: 28 }, { wch: 28 }, { wch: 11 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 11 }, { wch: 9 }, { wch: 15 }, { wch: 11 },
     // 완료일 상태변경일 담당 티켓 등록자 비고
     { wch: 11 }, { wch: 11 }, { wch: 8 }, { wch: 15 }, { wch: 10 }, { wch: 30 },
   ]

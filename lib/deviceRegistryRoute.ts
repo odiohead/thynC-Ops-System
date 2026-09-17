@@ -3,15 +3,15 @@
  *
  * - registryActor        : JWT → RegistryActor
  * - parseRegistryFields  : body의 공통 문맥 필드(occurredOn·memo·ref) 형태 검증 — 어휘·존재 검증은 서비스(prepareCtx)가 담당
- * - registryErrorResponse: RegistryError → 그 status + `toJSON()` 본문, 그 외 500
+ * - registryErrorResponse: RegistryError·RegistryTxAbort → 그 status + 본문(`toRegistryErrorResponse` 공통 헬퍼), 그 외 500
  * - parseIdParam         : 경로 파라미터 정수 검증
  * - deviceAuditLabel     : audit resourceLabel `{병원} {모델} {시리얼}` (§8.3)
- * - projectionSnapshot   : audit before/after용 스냅샷(유닛 식별 + 배치 상태 컬럼만) — `id`는 공개 device id(유닛 id)
+ * - projectionSnapshot   : audit before/after용 스냅샷(유닛 식별 + 배치 상태 컬럼 + 기기 상태·위치) — `id`는 공개 device id(유닛 id)
  */
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import type { JWTPayload } from '@/lib/auth'
-import { RegistryError, isRegistryError, type DeviceRow, type RegistryActor, type RegistryRef } from '@/lib/deviceRegistry'
+import { RegistryError, toRegistryErrorResponse, type DeviceRow, type RegistryActor, type RegistryRef } from '@/lib/deviceRegistry'
 
 export function registryActor(user: JWTPayload): RegistryActor {
   return { userId: user.userId, name: user.name }
@@ -70,7 +70,8 @@ export async function readJsonObject(request: Request): Promise<Record<string, u
 }
 
 export function registryErrorResponse(e: unknown, context: string): NextResponse {
-  if (isRegistryError(e)) return NextResponse.json(e.toJSON(), { status: e.status })
+  const r = toRegistryErrorResponse(e)
+  if (r) return NextResponse.json(r.body, { status: r.status })
   console.error(`[device-registry] ${context} 실패:`, e)
   return NextResponse.json({ error: '처리 중 오류가 발생했습니다.' }, { status: 500 })
 }
@@ -90,7 +91,7 @@ export async function deviceAuditLabel(deviceId: number): Promise<string> {
   return `${hosp} ${d.deviceInfo?.deviceModel ?? '-'} ${d.serialNo}`
 }
 
-/** audit before/after용 — 유닛 식별 + 배치 프로젝션 컬럼만 (타임스탬프 제외) */
+/** audit before/after용 — 유닛 식별 + 배치 프로젝션 컬럼 + 기기 상태·위치(2026-09-17 §8.3) (타임스탬프 제외) */
 export function projectionSnapshot(d: DeviceRow) {
   return {
     id: d.id,
@@ -115,5 +116,9 @@ export function projectionSnapshot(d: DeviceRow) {
     dealCode: d.dealCode,
     asStartedOn: d.asStartedOn,
     asRefCode: d.asRefCode,
+    condition: d.condition,
+    locationKind: d.locationHospitalCode ? 'HOSPITAL' : d.locationSiteId != null ? 'SITE' : null,
+    locationCode: d.locationHospitalCode ?? d.locationSite?.value ?? null,
+    locationSiteValue: d.locationSite?.value ?? null,
   }
 }

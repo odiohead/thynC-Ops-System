@@ -86,6 +86,7 @@ model Hospital {
   meta                  HospitalMeta?
   hospitalDevices       HospitalDevice[]             @relation("DeviceCurrentHospital") // 현재 배치 중 개체 (원장, 2026-09-01)
   lastHospitalDevices   HospitalDevice[]             @relation("DeviceLastHospital")    // 이 병원에서 회수된(미재배치) 개체
+  deviceLocationUnits   DeviceUnit[]                 @relation("DeviceLocationHospital") // 위치가 이 병원인 유닛 (상태·위치 축, 2026-09-17)
   hospitalWards         HospitalWard[]
   deviceEvents          HospitalDeviceEvent[]
   deviceImportBatches   HospitalDeviceImportBatch[]
@@ -178,6 +179,7 @@ model StatusCode {
   deviceRecoverReasons   HospitalDevice[]       @relation("DeviceRecoverReason") // DEVICE_RECOVERY_REASON (원장 프로젝션)
   deviceEventReasons     HospitalDeviceEvent[]  @relation("DeviceEventReason")   // DEVICE_RECOVERY_REASON (RECOVER 이벤트)
   deviceUsageUnits       DeviceUnit[]           @relation("DeviceUsageType")     // DEVICE_USAGE_TYPE (유닛 용도: SALE/EVAL)
+  deviceSiteUnits        DeviceUnit[]           @relation("DeviceLocationSite")  // DEVICE_SITE (유닛 위치 거점: REFRESH_CENTER/HUB, 2026-09-17)
   stockOutStatuses       StockOutRequest[]      @relation("StockOutStatus")      // STOCK_OUT_STATUS (출고요청 상태)
   asReceiptStatuses      AsReceipt[]            @relation("AsReceiptStatus")     // AS_STATUS (AS접수 상태)
 
@@ -338,6 +340,7 @@ model User {
   deviceImportsCancelled    HospitalDeviceImportBatch[]  @relation("DeviceImportCancelledBy")
   deviceEventsActed         HospitalDeviceEvent[]        @relation("DeviceEventActor")
   deviceEventsEdited        HospitalDeviceEvent[]        @relation("DeviceEventEditor")
+  asItemsRepaired           AsReceiptItem[]              @relation("AsItemRepairedBy") // AS 라인 수리완료 체크(2026-09-17)
 
   @@map("users")
   @@schema("public")
@@ -511,8 +514,13 @@ model HospitalWard {
 
 // 시리얼 정체성(유닛) — 시리얼당 1행, 전역 UNIQUE (3층 구조 B-20: device_info → device_units → hospital_devices / inventory_units)
 // API 공개 device id = device_units.id. source 어휘 MANUAL/IMPORT/WMS/ONPREM/BACKFILL는 코드 상수(CHECK 없음)
+// 상태·위치 축(2026-09-17, device_condition_location_design.md §5.1 — B-26 유닛 속성, fold 파생값 아님): condition 6종 + 위치(병원 코드 | 거점 DEVICE_SITE) — 스냅샷 이벤트 changes에 before/after
 // SQL-only CHECK: serial_no <> '' AND serial_no = upper(btrim(serial_no)) (정규화 키 강제)
+//   / condition IS NULL OR condition IN ('IN_USE','AS_WAITING','REPAIRED','PRE_SHIP','LOST','SCRAPPED') (device_units_condition_check)
+//   / location_hospital_code IS NULL OR location_site_id IS NULL (I-2 device_units_location_single_check)
+//   / condition NOT IN ('LOST','SCRAPPED') OR 위치 둘 다 NULL (I-1 device_units_terminal_no_location_check)
 // SQL-only 인덱스: serial_no text_pattern_ops / 부분 (serial_raw) WHERE serial_raw IS NOT NULL
+//   / 부분 (location_site_id, condition) WHERE location_site_id IS NOT NULL / 부분 (location_hospital_code) WHERE location_hospital_code IS NOT NULL
 model DeviceUnit {
   id           Int                   @id @default(autoincrement())
   deviceInfoId Int                   @map("device_info_id")
@@ -522,10 +530,17 @@ model DeviceUnit {
   memo         String?
   source       String                @default("MANUAL")
   usageTypeId  Int?                  @map("usage_type_id")                                     // 용도(DEVICE_USAGE_TYPE: SALE 판매용 / EVAL 평가용, NULL=미지정) — 유닛 속성
+  condition            String?       // DEVICE_CONDITION 6종 (SQL CHECK) · NULL=미확인(백필·재도출 전용) — 유닛 속성(B-26, HDR 불변식 1·3 예외)
+  conditionChangedOn   DateTime?     @map("condition_changed_on") @db.Date // 상태 진입 업무일자
+  locationHospitalCode String?       @map("location_hospital_code")        // 위치: 병원(코드 FK, B-30) — 거점과 배타(I-2)
+  locationSiteId       Int?          @map("location_site_id")              // 위치: 거점 DEVICE_SITE (REFRESH_CENTER/HUB)
+  locationChangedOn    DateTime?     @map("location_changed_on") @db.Date  // 위치 진입 업무일자
   createdAt    DateTime              @default(now()) @map("created_at")
   updatedAt    DateTime              @default(now()) @updatedAt @map("updated_at")
   deviceInfo   DeviceInfo            @relation(fields: [deviceInfoId], references: [id], onDelete: Restrict)
   usageType    StatusCode?           @relation("DeviceUsageType", fields: [usageTypeId], references: [id], onDelete: Restrict)
+  locationHospital Hospital?         @relation("DeviceLocationHospital", fields: [locationHospitalCode], references: [hospitalCode], onDelete: Restrict, onUpdate: Cascade)
+  locationSite     StatusCode?       @relation("DeviceLocationSite", fields: [locationSiteId], references: [id], onDelete: Restrict)
   placement    HospitalDevice?       @relation("UnitPlacement")      // 병원 배치 프로젝션 (유닛당 0..1행)
   replacedPlacements HospitalDevice[] @relation("DeviceReplacement") // 이 유닛이 교체기로 들어간 구기기 프로젝션들(replaced_by_id)
   events       HospitalDeviceEvent[] @relation("DeviceEvents")
@@ -535,6 +550,7 @@ model DeviceUnit {
 
   @@index([deviceInfoId])
   @@index([usageTypeId])
+  @@index([condition])
   @@map("device_units")
   @@schema("public")
 }
@@ -610,8 +626,11 @@ model HospitalDeviceImportBatch {
   @@schema("public")
 }
 
-// 이벤트 이력 — append-first, 단일 소스 (§4.1). device_id·related_device_id는 유닛(DeviceUnit) 참조. event_type REGISTER/MOVE_WARD/RECOVER/CORRECT
-// SQL-only CHECK: event_type 어휘 / CORRECT 외 hospital_code 필수 / 병동 있으면 hospital_code 필수 / RECOVER 사유 필수 / CORRECT changes 필수 / (ref_type IS NULL)=(ref_code IS NULL)
+// 이벤트 이력 — append-first, 단일 소스 (§4.1). device_id·related_device_id는 유닛(DeviceUnit) 참조.
+// event_type 10종(2026-09-17): REGISTER/MOVE_WARD/RECOVER/CORRECT/AS_OPEN/AS_CLEAR + INTAKE(센터 입고)/REPAIR_DONE(수리 완료)/SCRAP(폐기)/SITE_MOVE(위치 이동) — 신규 4종은 배치 fold 비상태 이벤트
+// 스냅샷 이벤트(REGISTER·RECOVER·AS_*·INTAKE·REPAIR_DONE·SCRAP·SITE_MOVE·상태 CORRECT)의 changes에 { condition:{before,after}, location:{before,after,note?} } — device_condition_location_design.md §5.3
+// SQL-only CHECK: event_type 어휘 / CORRECT·INTAKE·REPAIR_DONE·SCRAP·SITE_MOVE 외 hospital_code 필수 / 병동 있으면 hospital_code 필수 / RECOVER 사유 필수
+//   / CORRECT·INTAKE·REPAIR_DONE·SCRAP·SITE_MOVE changes 필수 / (ref_type IS NULL)=(ref_code IS NULL)
 // SQL-only: 복합 FK (from_ward_id|to_ward_id, hospital_code) DEFERRABLE INITIALLY DEFERRED
 // SQL-only 부분 인덱스: (ref_type, ref_code) / (import_batch_id) / (action_group) / 멱등 UNIQUE (ref_type, ref_code, device_id, event_type) WHERE source IN ('WMS','ONPREM')
 model HospitalDeviceEvent {
@@ -2253,10 +2272,13 @@ model AsReceiptItem {
   shippedAt      DateTime? @map("shipped_at") @db.Date // 발송·교체일 (V열 — 라인 단위 부분 발송)
   draftOutcome   String?   @map("draft_outcome") // 처리방법 초안 (2026-09-14) — 최종확정 전까지 변경 가능, 확정 시 outcome으로 이관 (SQL CHECK)
   draftNewSerialNo String? @map("draft_new_serial_no") // 교체 초안 발송기기 시리얼
+  repairedAt     DateTime? @map("repaired_at") @db.Date // 수리완료 체크 업무일자(2026-09-17) — outcome과 독립인 제3축, 서버가 오늘 KST(B-34)
+  repairedById   String?   @map("repaired_by_id") // 체크한 사용자
 
   receipt   AsReceipt   @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   device    DeviceUnit? @relation("AsItemDevice", fields: [deviceId], references: [id], onDelete: SetNull)
   newDevice DeviceUnit? @relation("AsItemNewDevice", fields: [newDeviceId], references: [id], onDelete: SetNull)
+  repairedBy User?      @relation("AsItemRepairedBy", fields: [repairedById], references: [id], onDelete: SetNull)
 
   @@unique([receiptId, serialNo])
   @@index([deviceId])

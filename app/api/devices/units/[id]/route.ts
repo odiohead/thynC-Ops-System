@@ -4,7 +4,8 @@ import { prisma } from '@/lib/prisma'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { checkDeviceRegistryAccess } from '@/lib/deviceRegistryAccess'
 import { correctDevice, getUnitDetail, updateDeviceMemo, type CorrectChanges } from '@/lib/deviceRegistry'
-import { DEVICE_USAGE_TYPE_CATEGORY } from '@/lib/deviceRegistryShared'
+import { DEVICE_CONDITIONS, DEVICE_SITE_VALUES, DEVICE_USAGE_TYPE_CATEGORY, deviceConditionLabel, isDeviceCondition, isDeviceSiteValue, unitStateChangesOf, type DeviceLocationSnapshot } from '@/lib/deviceRegistryShared'
+import { locationSnapshotText } from '@/app/devices/_components/deviceDisplay'
 import {
   deviceAuditLabel,
   optionalInt,
@@ -47,9 +48,24 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 }
 
-const IDENTITY_KEYS = ['deviceInfoId', 'serialNo', 'macAddress', 'extDeviceCode', 'usageTypeId', 'productType', 'dealCode'] as const
-/** 식별 보정 중 write(USER+)로 허용되는 키 — 용도·상품유형·계약건은 운영 속성이라 admin 게이트 밖(B-21·B-22·B-23) */
+const IDENTITY_KEYS = ['deviceInfoId', 'serialNo', 'macAddress', 'extDeviceCode', 'usageTypeId', 'productType', 'dealCode', 'condition', 'location'] as const
+/** 식별 보정 중 write(USER+)로 허용되는 키 — 용도·상품유형·계약건은 운영 속성이라 admin 게이트 밖(B-21·B-22·B-23). condition·location 보정은 admin OR device.admin(2026-09-17 §8.1) */
 const WRITE_LEVEL_IDENTITY_KEYS: readonly (typeof IDENTITY_KEYS)[number][] = ['usageTypeId', 'productType', 'dealCode']
+/** 운영 속성 키 — 감사 라벨에서 '식별 보정(…)'으로 묶지 않고 각자 문장화 */
+const OPS_KEYS: readonly string[] = ['usageTypeId', 'productType', 'dealCode', 'condition', 'location']
+
+/** `location` body → 스냅샷 형상. null/''/`{kind:null}` = 위치 없음. 형태 오류는 400 */
+function parseLocationBody(raw: unknown): DeviceLocationSnapshot | null | NextResponse {
+  if (raw == null || raw === '') return null
+  if (typeof raw !== 'object' || Array.isArray(raw)) return NextResponse.json({ error: '위치는 { kind: HOSPITAL|SITE|null, code } 형식이어야 합니다' }, { status: 400 })
+  const o = raw as Record<string, unknown>
+  if (o.kind == null || o.kind === '') return null
+  if (o.kind !== 'HOSPITAL' && o.kind !== 'SITE') return NextResponse.json({ error: '위치 kind는 HOSPITAL | SITE | null 이어야 합니다' }, { status: 400 })
+  const code = typeof o.code === 'string' ? o.code.trim() : ''
+  if (!code) return NextResponse.json({ error: o.kind === 'HOSPITAL' ? '위치 병원 코드를 입력하세요' : `거점 값을 선택하세요 (${DEVICE_SITE_VALUES.join(' | ')})` }, { status: 400 })
+  if (o.kind === 'SITE' && !isDeviceSiteValue(code)) return NextResponse.json({ error: `거점 값이 올바르지 않습니다 (${DEVICE_SITE_VALUES.join(' | ')})` }, { status: 400 })
+  return { kind: o.kind, code }
+}
 const EVENT_ONLY_KEYS = ['status', 'hospitalCode', 'wardId', 'placedOn', 'recoveredOn', 'lastHospitalCode', 'recoverReasonId', 'replacedById'] as const
 
 /**
@@ -58,6 +74,8 @@ const EVENT_ONLY_KEYS = ['status', 'hospitalCode', 'wardId', 'placedOn', 'recove
  * - `{ deviceInfoId?|serialNo?|macAddress?|extDeviceCode? }` : 식별 보정 → CORRECT 이벤트 (admin) — 시리얼·모델·MAC은 유닛, 닉네임은 배치. 시리얼 충돌 409, 이력 있는 개체의 시리얼 정정 409
  * - `{ usageTypeId }`                            : 용도(판매용/평가용/null=미지정) → CORRECT 이벤트 (**write** — USER+, 다른 식별 키와 함께 보내면 admin)
  * - `{ productType }`                            : 상품유형(일반/라이트/null=미지정, 배치 속성 B-22) → CORRECT 이벤트 (**write** — USER+, 잘못된 값 400)
+ * - `{ condition?, location? }`                  : 기기 상태·위치 보정(2026-09-17 §7.0·§8.1 — PRE_SHIP v1 진입로 A-6) → CORRECT 이벤트 (**admin OR device.admin**).
+ *   condition 6종|null(미확인), location `{ kind:'HOSPITAL'|'SITE'|null, code }`. 검증(I-1·I-3·배치 병원)은 서비스. 배치 없는 유닛도 허용(device null)
  *   선택: `occurredOn`·`ref`는 CORRECT 이벤트 문맥(기본 오늘)
  * 두 종류를 함께 보내면 단일 tx로 처리(식별 보정 → 메모). 상태·병원·병동 키는 400(이벤트로만 변경).
  * 병원 문맥은 개체에서 유도(body hospitalCode 무시). audit `hospital_device` UPDATE(resourceId=시리얼, before/after 스냅샷)
@@ -79,7 +97,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const identityKeys = IDENTITY_KEYS.filter((k) => k in body)
     const hasMemo = 'memo' in body
     if (identityKeys.length === 0 && !hasMemo) {
-      return NextResponse.json({ error: '변경할 항목이 없습니다 (memo·usageTypeId·productType·dealCode 또는 식별 필드 deviceInfoId·serialNo·macAddress·extDeviceCode)' }, { status: 400 })
+      return NextResponse.json({ error: '변경할 항목이 없습니다 (memo·usageTypeId·productType·dealCode·condition·location 또는 식별 필드 deviceInfoId·serialNo·macAddress·extDeviceCode)' }, { status: 400 })
     }
     if (hasMemo && body.memo !== null && typeof body.memo !== 'string') {
       return NextResponse.json({ error: '메모는 문자열이어야 합니다' }, { status: 400 })
@@ -116,6 +134,17 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         else if (typeof body.dealCode !== 'string') return NextResponse.json({ error: '계약건 값이 올바르지 않습니다 (딜 코드)' }, { status: 400 })
         else changes.dealCode = body.dealCode
       }
+      if ('condition' in body) {
+        // null/'' = 미확인(NULL — 백필·재도출 전용 값이지만 admin 보정으로 되돌릴 수 있게 허용), 문자열은 6종만
+        if (body.condition === null || body.condition === '') changes.condition = null
+        else if (!isDeviceCondition(body.condition)) return NextResponse.json({ error: `기기 상태 값이 올바르지 않습니다 (${DEVICE_CONDITIONS.join(' | ')})` }, { status: 400 })
+        else changes.condition = body.condition
+      }
+      if ('location' in body) {
+        const loc = parseLocationBody(body.location)
+        if (loc instanceof NextResponse) return loc
+        changes.location = loc
+      }
       if ('deviceInfoId' in body) {
         const v = optionalInt(body.deviceInfoId, '모델')
         if (v === undefined) return NextResponse.json({ error: '모델을 선택하세요' }, { status: 400 })
@@ -148,9 +177,11 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       { timeout: 30_000, maxWait: 10_000 }
     )
 
-    const device = r.memo?.device ?? r.correct!.device
-    const beforeSnap = projectionSnapshot(device) as Record<string, unknown>
-    const afterSnap = projectionSnapshot(device) as Record<string, unknown>
+    // 배치 없는 유닛(고아·PRE_SHIP)의 상태·위치 보정은 device가 null — 스냅샷은 changes만 (2026-09-17 correctDevice 배치 무관 조회)
+    const device = r.memo?.device ?? r.correct?.device ?? null
+    const unitIdent = r.correct?.unit
+    const beforeSnap = (device ? projectionSnapshot(device) : { id: unitIdent?.id, serialNo: unitIdent?.serialNo }) as Record<string, unknown>
+    const afterSnap = (device ? projectionSnapshot(device) : { id: unitIdent?.id, serialNo: unitIdent?.serialNo }) as Record<string, unknown>
     if (r.correct) {
       for (const [field, v] of Object.entries(r.correct.changes)) {
         beforeSnap[field] = v.before
@@ -169,12 +200,30 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const usagePart = r.correct?.changes.usageTypeId ? `용도 ${usageLabel(r.correct.changes.usageTypeId.before)} → ${usageLabel(r.correct.changes.usageTypeId.after)}` : null
     const ptPart = r.correct?.changes.productType ? `상품유형 ${String(r.correct.changes.productType.before ?? '미지정')} → ${String(r.correct.changes.productType.after ?? '미지정')}` : null
     const dealPart = r.correct?.changes.dealCode ? `계약건 ${String(r.correct.changes.dealCode.before ?? '미지정')} → ${String(r.correct.changes.dealCode.after ?? '미지정')}` : null
-    const OPS_KEYS = ['usageTypeId', 'productType', 'dealCode']
+    // 기기 상태·위치 보정(2026-09-17 §8.3) — 라벨 '기기 상태 보정'/'위치 보정', 스냅샷은 문장화 값(위치 병원은 이름으로)
+    const unitState = r.correct ? unitStateChangesOf(r.correct.changes) : null
+    const hospitalNames = new Map<string, string>()
+    if (unitState) {
+      const codes = [unitState.location.before, unitState.location.after].filter((l) => l.kind === 'HOSPITAL' && l.code).map((l) => l.code!)
+      if (codes.length > 0) for (const h of await prisma.hospital.findMany({ where: { hospitalCode: { in: codes } }, select: { hospitalCode: true, hospitalName: true } })) hospitalNames.set(h.hospitalCode, h.hospitalName)
+    }
+    const condChanged = !!unitState && (unitState.condition.before ?? null) !== (unitState.condition.after ?? null)
+    const locChanged = !!unitState && ((unitState.location.before.kind ?? null) !== (unitState.location.after.kind ?? null) || (unitState.location.before.code ?? null) !== (unitState.location.after.code ?? null))
+    const condPart = unitState && condChanged ? `기기 상태 보정 ${deviceConditionLabel(unitState.condition.before)} → ${deviceConditionLabel(unitState.condition.after)}` : null
+    const locPart = unitState && locChanged ? `위치 보정 ${locationSnapshotText(unitState.location.before, hospitalNames)} → ${locationSnapshotText(unitState.location.after, hospitalNames)}` : null
+    if (unitState) {
+      beforeSnap.condition = deviceConditionLabel(unitState.condition.before)
+      afterSnap.condition = deviceConditionLabel(unitState.condition.after)
+      beforeSnap.location = locationSnapshotText(unitState.location.before, hospitalNames)
+      afterSnap.location = locationSnapshotText(unitState.location.after, hospitalNames)
+    }
     const parts = [
       r.correct && changeKeys.some((k) => !OPS_KEYS.includes(k)) ? `식별 보정(${changeKeys.filter((k) => !OPS_KEYS.includes(k)).join(', ')})` : null,
       usagePart,
       ptPart,
       dealPart,
+      condPart,
+      locPart,
       r.memo ? '메모' : null,
     ].filter(Boolean)
     await logAudit({
@@ -182,8 +231,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       actor: auditActorFromJWT(user),
       action: 'UPDATE',
       resource: 'hospital_device',
-      resourceId: device.serialNo,
-      resourceLabel: `${await deviceAuditLabel(device.id)} ${parts.join('·')}`,
+      resourceId: device?.serialNo ?? unitIdent?.serialNo ?? String(deviceId),
+      resourceLabel: `${await deviceAuditLabel(device?.id ?? deviceId)} ${parts.join('·')}`,
       before: beforeSnap,
       after: { ...afterSnap, ...(r.correct ? { correctEventId: r.correct.event.id, changes: r.correct.changes } : {}) },
     })

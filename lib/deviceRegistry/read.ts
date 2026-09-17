@@ -21,8 +21,13 @@ import {
   type ProductTypeFilter,
   type UsageFilter,
   type UsageTypeRef,
+  DEVICE_SITE_CATEGORY,
+  type ConditionFilter,
+  type LocationFilter,
 } from '@/lib/deviceRegistryShared'
-import { RegistryError, getHospitalProductTypeContext, loadTrackedModels, ymd, ymdMinusDays, ymdToDate, type DbClient } from './core'
+import { RegistryError, getHospitalProductTypeContext, loadTrackedModels, ymd, ymdMinusDays, ymdToDate, type DbClient,
+  type DeviceSiteRef,
+} from './core'
 import { matchInventoryUnits, queryWmsUnits, wmsWarning, type WmsMatch, type WmsMatchInput, type WmsUnitRow } from './wms'
 
 const n = (v: unknown): number => (typeof v === 'bigint' ? Number(v) : typeof v === 'number' ? v : Number(v ?? 0))
@@ -334,8 +339,8 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     client.$queryRaw<{ device_info_id: number; event_type: string; occurred_on: Date }[]>`
       SELECT DISTINCT ON (u.device_info_id) u.device_info_id, e.event_type, e.occurred_on
         FROM hospital_device_events e JOIN device_units u ON u.id = e.device_id
-       WHERE e.hospital_code = ${hospitalCode} AND e.event_type NOT IN ('CORRECT','AS_OPEN','AS_CLEAR')
-       ORDER BY u.device_info_id, e.occurred_on DESC, e.id DESC`,
+       WHERE e.hospital_code = ${hospitalCode} AND e.event_type NOT IN ('CORRECT','AS_OPEN','AS_CLEAR','INTAKE','REPAIR_DONE','SCRAP','SITE_MOVE')
+       ORDER BY u.device_info_id, e.occurred_on DESC, e.id DESC`, // 요약 '최근 이벤트'는 배치 상태 이벤트만(신규 4종 제외 — 2026-09-17). events30d·lastRef는 포함 유지
     client.hospitalWard.findMany({
       where: { hospitalCode },
       select: { id: true, name: true, extWardCode: true, isActive: true, sortOrder: true, _count: { select: { devices: { where: { status: 'ACTIVE' } } } } },
@@ -704,7 +709,7 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
     ), lev AS (
       SELECT DISTINCT ON (hospital_code) hospital_code, event_type, occurred_on
         FROM hospital_device_events
-       WHERE hospital_code IS NOT NULL AND event_type NOT IN ('CORRECT','AS_OPEN','AS_CLEAR')
+       WHERE hospital_code IS NOT NULL AND event_type NOT IN ('CORRECT','AS_OPEN','AS_CLEAR','INTAKE','REPAIR_DONE','SCRAP','SITE_MOVE')
        ORDER BY hospital_code, occurred_on DESC, id DESC
     ), limp AS (
       SELECT DISTINCT ON (hospital_code) hospital_code, id, created_at, occurred_on, row_count, registered_count
@@ -882,6 +887,10 @@ export interface UnitsQuery {
   deal?: string | null
   /** AS진행중만(as_started_on NOT NULL — B-24) */
   as?: boolean | null
+  /** 기기 상태(condition 6종) 또는 none(미확인 NULL) — 유닛 속성(2026-09-17). 회수 목록 `condition=REPAIRED&location=REFRESH_CENTER` = 교체품 가용(I-5 v1 근사) */
+  condition?: ConditionFilter | null
+  /** 위치 — HOSPITAL(병원 위치 있음) / REFRESH_CENTER / HUB(거점 value) / none(위치 없음) */
+  location?: LocationFilter | null
   /** 공개 device id(유닛 id) */
   ids?: number[] | null
 }
@@ -904,6 +913,12 @@ export function buildUnitsWhere(params: UnitsQuery): Prisma.HospitalDeviceWhereI
   if (params.deal === 'none') and.push({ dealCode: null })
   else if (params.deal && params.deal.trim()) and.push({ dealCode: params.deal.trim() })
   if (params.as) and.push({ asStartedOn: { not: null } })
+  // 상태·위치 축(2026-09-17) — `unit:` 관계 조건(부분 인덱스 device_units_location_site_idx / _location_hospital_idx)
+  if (params.condition === 'none') and.push({ unit: { condition: null } })
+  else if (params.condition) and.push({ unit: { condition: params.condition } })
+  if (params.location === 'none') and.push({ unit: { locationHospitalCode: null, locationSiteId: null } })
+  else if (params.location === 'HOSPITAL') and.push({ unit: { locationHospitalCode: { not: null } } })
+  else if (params.location) and.push({ unit: { locationSite: { is: { category: DEVICE_SITE_CATEGORY, value: params.location } } } })
   if (params.ward === 'unassigned') and.push({ wardId: null })
   else if (params.ward != null) and.push({ wardId: Number(params.ward) })
   if (params.q && params.q.trim()) {
@@ -949,10 +964,17 @@ export const UNIT_SELECT = {
   memo: true,
   source: true,
   usageTypeId: true,
+  condition: true,
+  conditionChangedOn: true,
+  locationHospitalCode: true,
+  locationSiteId: true,
+  locationChangedOn: true,
   createdAt: true,
   updatedAt: true,
   deviceInfo: { select: { id: true, deviceModel: true, deviceName: true, deviceClass: true, onpremDeviceType: true, serialPattern: true } },
   usageType: { select: { id: true, name: true, value: true } },
+  locationSite: { select: { id: true, name: true, value: true } },
+  locationHospital: { select: { hospitalCode: true, hospitalName: true } },
 } satisfies Prisma.DeviceUnitSelect
 
 export const UNITS_INCLUDE = {
@@ -978,6 +1000,20 @@ export interface UnitView {
   source: string
   usageTypeId: number | null
   usageType: UsageTypeRef | null
+  /** 기기 상태(condition 6종, B-26) — 유닛 속성, null=미확인(UI '미확인' gray) */
+  condition: string | null
+  conditionChangedOn: Date | null
+  /** 위치: 병원 코드(거점과 배타) */
+  locationHospitalCode: string | null
+  /** 위치 병원명 — `locationHospital.hospitalName` 평탄화 */
+  locationHospitalName: string | null
+  /** 위치: 거점 id(DEVICE_SITE) */
+  locationSiteId: number | null
+  /** 위치 거점 value(REFRESH_CENTER/HUB) — 표시·필터 키 */
+  locationSiteValue: string | null
+  /** 위치 거점 마스터 행 {id,name,value} */
+  locationSite: DeviceSiteRef | null
+  locationChangedOn: Date | null
   extDeviceCode: string | null
   extLastSeenAt: Date | null
   extSyncedAt: Date | null
@@ -1026,6 +1062,14 @@ export function toUnitView(p: PlacementWithUnit): UnitView {
     source: unit.source,
     usageTypeId: unit.usageTypeId,
     usageType: unit.usageType,
+    condition: unit.condition,
+    conditionChangedOn: unit.conditionChangedOn,
+    locationHospitalCode: unit.locationHospitalCode,
+    locationHospitalName: unit.locationHospital?.hospitalName ?? null,
+    locationSiteId: unit.locationSiteId,
+    locationSiteValue: unit.locationSite?.value ?? null,
+    locationSite: unit.locationSite ?? null,
+    locationChangedOn: unit.locationChangedOn,
     extDeviceCode: placement.extDeviceCode,
     extLastSeenAt: placement.extLastSeenAt,
     extSyncedAt: placement.extSyncedAt,

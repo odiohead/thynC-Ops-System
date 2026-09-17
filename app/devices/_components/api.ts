@@ -32,6 +32,7 @@ import type {
   ImportExecuteResponse,
   ImportOptions,
   ImportPreviewResponse,
+  LocationBody,
   LookupResponse,
   MaintenanceLookupResponse,
   MoveBody,
@@ -46,10 +47,13 @@ import type {
   RegisterResponse,
   ReplaceBody,
   ReplaceResponse,
+  ScrapBody,
   UnitDetailResponse,
   UnitIdsResponse,
   UnitsQueryParams,
   UnitsResponse,
+  UnitStateBody,
+  UnitStateResponse,
   WardCreateBody,
   WardRow,
   WardUpdateBody,
@@ -186,6 +190,8 @@ function unitsQuery(params: UnitsQueryParams): Record<string, QueryValue> {
     productType: params.productType,
     deal: params.deal,
     as: params.as ?? undefined,
+    condition: params.condition,
+    location: params.location,
     page: params.page,
     limit: params.limit,
     sort: params.sort,
@@ -324,6 +330,30 @@ export function openDeviceAs(id: number, body: RegistryFields = {}): Promise<AsF
 /** 'AS진행중' 표시 수동 해제(B-24, write) — 표시 없음 409. 교체·회수 시에는 자동 해제 */
 export function clearDeviceAs(id: number, body: RegistryFields = {}): Promise<AsFlagResponse> {
   return apiFetch<AsFlagResponse>(`/api/devices/units/${id}/as-clear`, { method: 'POST', body })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 기기 상태·위치 축(2026-09-17 device_condition_location_design.md §7.1) — 드로어 액션, 병원 문맥 무관(write USER+)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** [수리완료] — AS_WAITING/미확인 → REPAIRED(REPAIR_DONE) + 그 기기의 입고 라인 repaired_at 기록(라인 동기화). 사용중 409 */
+export function markDeviceRepaired(id: number, body: UnitStateBody = {}): Promise<UnitStateResponse> {
+  return apiFetch<UnitStateResponse>(`/api/devices/units/${id}/repair-done`, { method: 'POST', body })
+}
+
+/** [수리완료 해제] — REPAIRED → AS_WAITING(CORRECT, B-27) + 라인 repaired_at NULL. 수리완료 아님 409 */
+export function undoDeviceRepaired(id: number, body: UnitStateBody = {}): Promise<UnitStateResponse> {
+  return apiFetch<UnitStateResponse>(`/api/devices/units/${id}/repair-undo`, { method: 'POST', body })
+}
+
+/** [폐기] — 회수 기기만(배치 ACTIVE 409 '먼저 회수'), memo 필수(400), LOST 409 → SCRAPPED·위치 없음 + 라인 repaired_at NULL */
+export function scrapDevice(id: number, body: ScrapBody): Promise<UnitStateResponse> {
+  return apiFetch<UnitStateResponse>(`/api/devices/units/${id}/scrap`, { method: 'POST', body })
+}
+
+/** [위치 이동]/[병원 반환] — RECOVERED/없음: 거점(REFRESH_CENTER/HUB)만 · ACTIVE: 'HOSPITAL'(배치 병원)만·IN_USE만(그 외 409) */
+export function moveDeviceLocation(id: number, body: LocationBody): Promise<UnitStateResponse> {
+  return apiFetch<UnitStateResponse>(`/api/devices/units/${id}/location`, { method: 'POST', body })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

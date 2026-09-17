@@ -29,6 +29,11 @@ INSERT INTO status_codes (name, category, "order", value) VALUES
   ('판매용','DEVICE_USAGE_TYPE',1,'SALE'), ('평가용','DEVICE_USAGE_TYPE',2,'EVAL')
 ON CONFLICT (name, category) DO NOTHING;
 
+-- 3'') 거점 마스터 (DEVICE_SITE — 2026-09-17 기기 상태·위치 축)
+INSERT INTO status_codes (name, category, "order", value) VALUES
+  ('리프레시센터','DEVICE_SITE',1,'REFRESH_CENTER'), ('thynC Connected Hub','DEVICE_SITE',2,'HUB')
+ON CONFLICT (name, category) DO NOTHING;
+
 -- 4) nav (icon 'device'는 P3에서 ICON_MAP에 추가 / 원장 nav는 SEERS 게이트 — D10)
 INSERT INTO nav_menu_items (menu_key, label, href, icon_key, parent_key, sort_order, allowed_org_codes) VALUES
   ('devices','기기 현황','/devices','device','operations',55,'{SEERS}') ON CONFLICT (menu_key) DO NOTHING;
@@ -41,4 +46,5 @@ INSERT INTO nav_menu_items (menu_key, label, href, parent_key, sort_order, group
 SELECT device_model, device_class, onprem_device_type, serial_tracked, quantity_tracked FROM device_info ORDER BY sort_order;
 SELECT name, "order", value FROM status_codes WHERE category = 'DEVICE_RECOVERY_REASON' ORDER BY "order";
 SELECT name, "order", value FROM status_codes WHERE category = 'DEVICE_USAGE_TYPE' ORDER BY "order";
+SELECT name, "order", value FROM status_codes WHERE category = 'DEVICE_SITE' ORDER BY "order";
 SELECT menu_key, parent_key, sort_order FROM nav_menu_items WHERE menu_key IN ('devices', 'settings/device-recovery-reason', 'settings/device-usage-type');

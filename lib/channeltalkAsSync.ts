@@ -20,6 +20,7 @@ import { notifyTicketCreated } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
 import { parseSerialTextarea } from '@/lib/asReceiptShared'
 import { createAsReceipt, AsServiceError, type LineInput } from '@/lib/asReceiptService'
+import { isRegistryTxAbort } from '@/lib/deviceRegistry'
 import { loadHospitalMatcher } from '@/lib/hospitalNameMatcher'
 
 export const CHANNELTALK_BOT_EMAIL = 'channeltalk-bot@seersthync.com'
@@ -316,6 +317,20 @@ export async function runChanneltalkAsSync(testIo?: ChanneltalkSyncTestIo): Prom
       rangeOf(rowNo, 'AI', [SYS_STATE.OK, created.asCode, warnParts.join(' | ').slice(0, 500), nowKst()])
       console.log(`[channeltalk-as] r${rowNo} → ${created.asCode} (${created.hospitalName}, 라인 ${lines.length})`)
     } catch (e) {
+      if (isRegistryTxAbort(e)) {
+        // 기기 유닛 동시 변경(AS_OPEN 암묵 전이의 유닛 가드 실패 — tx 전체 롤백, device_condition_location_design.md §4.1·§9.5)은 일시적 경합 →
+        // '실패'로 굳히지 않고 '대기'로 두어 다음 틱에 재시도(필수값 누락 '대기'와 같은 규약 — AL 최초 대기 시각 보존, 24h 초과면 '실패'). 2026-09-17 P2 리뷰
+        const since = state === SYS_STATE.WAIT ? Date.parse(cell(r, C.SYS_AT).replace(' ', 'T') + '+09:00') : NaN
+        if (!isNaN(since) && Date.now() - since > WAIT_MAX_MS) {
+          result.failed++
+          rangeOf(rowNo, 'AI', [SYS_STATE.FAIL, '', `기기 동시 변경 재시도 24시간 경과 — ${e.message}`.slice(0, 300), nowKst()])
+        } else {
+          result.waiting++
+          if (state !== SYS_STATE.WAIT) rangeOf(rowNo, 'AI', [SYS_STATE.WAIT, '', `기기 동시 변경 — 다음 틱 재시도 (${e.message})`.slice(0, 300), nowKst()])
+        }
+        console.warn(`[channeltalk-as] r${rowNo} 기기 동시 변경 — 대기:`, e.message)
+        continue
+      }
       result.failed++
       const msg = e instanceof AsServiceError ? e.message : e instanceof Error ? e.message : String(e)
       rangeOf(rowNo, 'AI', [SYS_STATE.FAIL, '', msg.slice(0, 300), nowKst()])

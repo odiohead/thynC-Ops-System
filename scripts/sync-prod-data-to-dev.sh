@@ -94,14 +94,18 @@ TABLES="$("${PSQL[@]}" -d "$DEV_DB" -At -c \
    FROM pg_tables WHERE schemaname='public'$EXCLUDE_SQL")"
 [[ -n "$TABLES" ]] || err "TRUNCATE 대상 테이블 없음"
 
-log "DEV TRUNCATE + PROD 데이터 적재 (단일 트랜잭션)"
+# PROD 설정값을 그대로 가져오면 DEV에서 외부 시트를 쓰는 스케줄러가 켜지므로 적재 직후 OFF로 덮어쓴다
+DEV_OFF_SETTINGS_SQL="UPDATE app_settings SET value = 'off' WHERE key IN ('channeltalk_as_interval');"
+
+log "DEV TRUNCATE + PROD 데이터 적재 + DEV 전용 스케줄러 OFF (단일 트랜잭션)"
 "${PSQL[@]}" -d "$DEV_DB" --single-transaction -v ON_ERROR_STOP=1 \
   -c "TRUNCATE $TABLES RESTART IDENTITY CASCADE;" \
-  -f "$PROD_DUMP"
+  -f "$PROD_DUMP" \
+  -c "$DEV_OFF_SETTINGS_SQL"
 
 # ── 4단계: 오래된 백업 정리 ───────────────────────────────────────
 log "${RETENTION_DAYS}일 이전 백업 정리"
 find "$BACKUP_DIR" -type f -mtime +"$RETENTION_DAYS" \( -name "*.sql" -o -name "*.sql.gz" \) -print -delete || true
 
-log "✓ 완료. PROD → DEV 데이터 동기화 성공"
+log "✓ 완료. PROD → DEV 데이터 동기화 성공 (channeltalk_as_interval=off — 실행 중인 서버는 재시작 시 반영)"
 log "  롤백: gunzip -c $DEV_BACKUP | ${PSQL[*]} -d $DEV_DB"

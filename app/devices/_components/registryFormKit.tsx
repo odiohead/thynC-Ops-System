@@ -16,8 +16,9 @@ import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import Badge from '@/app/components/ui/Badge'
 import { Input } from '@/app/components/ui/Input'
-import { DEVICE_STATUS_LABELS, OCCURRED_ON_BASIS_LABELS, isFutureYmd, normalizeSerial, toYmd, type OccurredOnBasis } from '@/lib/deviceRegistryShared'
+import { DEVICE_STATUS_LABELS, OCCURRED_ON_BASIS_LABELS, deviceConditionLabel, isFutureYmd, normalizeSerial, toYmd, type OccurredOnBasis } from '@/lib/deviceRegistryShared'
 import { errorMessage, lookupSerial } from './api'
+import { conditionBadgeVariant } from './deviceDisplay'
 import { toDeviceRef, type DeviceRef, type WardOption, type WardValue } from './types'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -349,6 +350,26 @@ export function wardBody(v: WardValue): { wardId?: number; wardName?: string } {
   return {}
 }
 
-export function StatusBadge({ status }: { status: DeviceRef['status'] }) {
-  return <Badge variant={status === 'ACTIVE' ? 'success' : 'default'}>{DEVICE_STATUS_LABELS[status]}</Badge>
+/**
+ * 기기 상태(condition, 2026-09-17 B-26) 배지 — 사용중/AS접수/수리완료/출고 전/분실/폐기, NULL='미확인'(gray). 톤은 `conditionBadgeVariant` 단일 소스.
+ * 목록·드로어·시리얼 조회·교체 폼이 공용(배치 배지 옆에 병기)
+ */
+export function ConditionBadge({ condition, since, className }: { condition: string | null | undefined; since?: string | null; className?: string }) {
+  const label = deviceConditionLabel(condition)
+  const d = since ? toYmd(since) : null
+  return (
+    <Badge variant={conditionBadgeVariant(condition)} className={className} title={`기기 상태 ${label}${d ? ` (${d}~)` : ''}${condition ? '' : ' — 판정 근거 없이 백필·재도출된 기기(관리 보정으로 지정)'}`}>
+      {label}
+    </Badge>
+  )
+}
+
+/** 배치 배지(사용중/회수됨) + `condition`을 넘기면 기기 상태 배지 병기(2026-09-17 §6.2) */
+export function StatusBadge({ status, condition }: { status: DeviceRef['status']; condition?: string | null }) {
+  return (
+    <>
+      <Badge variant={status === 'ACTIVE' ? 'success' : 'default'}>{DEVICE_STATUS_LABELS[status]}</Badge>
+      {condition !== undefined && <ConditionBadge condition={condition} />}
+    </>
+  )
 }

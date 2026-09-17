@@ -2,8 +2,9 @@
 
 /**
  * 전역 [디바이스] 뷰 — 병원과 무관한 전 기기 평면 목록 (v1 단순화, 2026-09-01 사용자 피드백)
- * 툴바: 검색 [시리얼/병원명] · 모델 [전체▾] · 상태 [배치 중 | 회수됨 | 전체] · 용도 [전체▾] · 상품유형 [전체▾] · [Excel](같은 필터로 `/api/devices/export`)
- * 표: 시리얼 | 모델 | 용도 | 상품유형 | 현재 병원 | 병동 | 상태 | 배치일 | 최근 이벤트 — 행 클릭 → onOpenDevice(드로어). 페이지 50 고정.
+ * 툴바: 검색 [시리얼/병원명] · 모델 [전체▾] · 상태 [배치 중 | 회수됨 | 전체] · 용도 [전체▾] · 상품유형 [전체▾] · 기기 상태 [전체▾] · 위치 [전체▾] · [Excel](같은 필터로 `/api/devices/export`)
+ * 표: 시리얼 | 모델 | 용도 | 상품유형 | 현재 병원 | 병동 | 배치 | 기기 상태 | 위치 | 배치일 | 최근 이벤트 — 행 클릭 → onOpenDevice(드로어). 페이지 50 고정.
+ * 기기 상태·위치(2026-09-17 device_condition_location_design.md §6.2): URL `condition=`·`location=` — 회수 목록 `?status=recovered&condition=REPAIRED&location=REFRESH_CENTER` = 교체품 가용(I-5 v1 근사)
  * 검색: `GET /api/devices/units?q=` — 시리얼 키·원문·닉네임·메모 + (병원 미지정이라) 현재/마지막 병원명. 정렬 기본 시리얼 오름차순이라 정확 일치가 접두 일치보다 앞서고,
  *       추가로 페이지 안에서 정확 일치(키 또는 원문) 행을 맨 위로 올린다(구 헤더 '시리얼 조회' 대체).
  * 쓰기 버튼 없음(등록·이동·회수는 병원 문맥 — 드로어 액션은 오케스트레이터가 병원별 뷰로 안내).
@@ -16,11 +17,12 @@ import EmptyState from '@/app/components/ui/EmptyState'
 import { Input, Select } from '@/app/components/ui/Input'
 import { TBody, TD, TH, THead, TR } from '@/app/components/ui/Table'
 import { cn } from '@/lib/cn'
-import { PRODUCT_TYPES, USAGE_TYPE_LABELS, matchesSerialPattern, normalizeSerial, placementStatusLabel, todayKst, toYmd, type ProductTypeFilter, type UsageFilter } from '@/lib/deviceRegistryShared'
+import { LOCATION_NONE_LABEL, PRODUCT_TYPES, USAGE_TYPE_LABELS, matchesSerialPattern, normalizeSerial, placementStatusLabel, todayKst, toYmd, type ConditionFilter, type LocationFilter, type ProductTypeFilter, type UsageFilter } from '@/lib/deviceRegistryShared'
 import { errorMessage, exportUnitsUrl, getDeviceModels, getUnits, type DeviceModelOption } from './api'
 import { ExcelButton } from './ExcelButton'
-import { ProductTypeBadge, UsageBadge } from './DeviceTable'
-import { lastEventText, ymdOrDash } from './deviceDisplay'
+import { CONDITION_OPTIONS, LOCATION_OPTIONS, ProductTypeBadge, UsageBadge } from './DeviceTable'
+import { ConditionBadge } from './registryFormKit'
+import { lastEventText, locationText, ymdOrDash } from './deviceDisplay'
 import type { DeviceListRow, GlobalListFilters, UnitsSort, UnitsStatusFilter } from './types'
 
 export interface DeviceListTabProps {
@@ -60,7 +62,9 @@ const COLUMNS: { key: string; label: string; sort?: UnitsSort }[] = [
   { key: 'productType', label: '상품유형' },
   { key: 'hospital', label: '현재 병원' },
   { key: 'ward', label: '병동' },
-  { key: 'status', label: '상태' },
+  { key: 'status', label: '배치' }, // 헤더만 '상태' → '배치'(B-29·A-3) — 값 불변
+  { key: 'condition', label: '기기 상태' },
+  { key: 'location', label: '위치' },
   { key: 'placedOn', label: '배치일', sort: 'placedOn' },
   { key: 'lastEvent', label: '최근 이벤트', sort: 'lastEvent' },
 ]
@@ -116,7 +120,7 @@ export function DeviceListTab({ filters, setFilters, onOpenDevice, reloadKey }: 
     let alive = true
     const seq = ++reqSeq.current
     setLoading(true)
-    getUnits({ hospital: null, status: filters.status, model: filters.model, usage: filters.usage, productType: filters.productType, q: filters.q || null, page: filters.page, limit: PAGE_LIMIT, sort })
+    getUnits({ hospital: null, status: filters.status, model: filters.model, usage: filters.usage, productType: filters.productType, condition: filters.condition, location: filters.location, q: filters.q || null, page: filters.page, limit: PAGE_LIMIT, sort })
       .then((r) => {
         if (!alive || seq !== reqSeq.current) return
         setRows(hoistExact(r.data, filters.q))
@@ -133,7 +137,7 @@ export function DeviceListTab({ filters, setFilters, onOpenDevice, reloadKey }: 
     return () => {
       alive = false
     }
-  }, [filters.status, filters.model, filters.usage, filters.productType, filters.q, filters.page, sort, reloadKey])
+  }, [filters.status, filters.model, filters.usage, filters.productType, filters.condition, filters.location, filters.q, filters.page, sort, reloadKey])
 
   // ── 검색 디바운스
   const [qInput, setQInput] = useState(filters.q)
@@ -148,12 +152,12 @@ export function DeviceListTab({ filters, setFilters, onOpenDevice, reloadKey }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qInput])
 
-  const hasFilter = filters.status !== 'active' || filters.model != null || filters.usage != null || filters.productType != null || filters.q !== ''
-  const resetFilters = () => setFilters({ status: 'active', model: null, usage: null, productType: null, q: '', page: 1 })
+  const hasFilter = filters.status !== 'active' || filters.model != null || filters.usage != null || filters.productType != null || filters.condition != null || filters.location != null || filters.q !== ''
+  const resetFilters = () => setFilters({ status: 'active', model: null, usage: null, productType: null, condition: null, location: null, q: '', page: 1 })
 
   const excelHref = useMemo(
-    () => exportUnitsUrl({ hospital: null, status: filters.status, model: filters.model, usage: filters.usage, productType: filters.productType, q: filters.q || null, sort }),
-    [filters.status, filters.model, filters.usage, filters.productType, filters.q, sort]
+    () => exportUnitsUrl({ hospital: null, status: filters.status, model: filters.model, usage: filters.usage, productType: filters.productType, condition: filters.condition, location: filters.location, q: filters.q || null, sort }),
+    [filters.status, filters.model, filters.usage, filters.productType, filters.condition, filters.location, filters.q, sort]
   )
 
   const pages = Math.max(1, Math.ceil(total / PAGE_LIMIT))
@@ -220,6 +224,20 @@ export function DeviceListTab({ filters, setFilters, onOpenDevice, reloadKey }: 
         </Select>
         <Select aria-label="상품유형" value={filters.productType ?? ''} onChange={(e) => setFilters({ productType: (e.target.value || null) as ProductTypeFilter | null })} className="h-8 w-auto text-xs">
           {PRODUCT_TYPE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+        <Select aria-label="기기 상태" value={filters.condition ?? ''} onChange={(e) => setFilters({ condition: (e.target.value || null) as ConditionFilter | null })} className="h-8 w-auto text-xs" title="기기 상태(실물 상태) — 배치와 별개 축. 회수됨 + 수리완료 + 리프레시센터 = 교체품 가용">
+          {CONDITION_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+        <Select aria-label="위치" value={filters.location ?? ''} onChange={(e) => setFilters({ location: (e.target.value || null) as LocationFilter | null })} className="h-8 w-auto text-xs" title="위치(실제 소재) — 병원/리프레시센터/thynC Connected Hub">
+          {LOCATION_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
@@ -298,6 +316,12 @@ export function DeviceListTab({ filters, setFilters, onOpenDevice, reloadKey }: 
                         {placementStatusLabel(row)}
                       </Badge>
                     </TD>
+                    <TD className="whitespace-nowrap">
+                      <ConditionBadge condition={row.condition} since={row.conditionChangedOn} />
+                    </TD>
+                    <TD className={cn('whitespace-nowrap', locationText(row) === LOCATION_NONE_LABEL && 'text-muted-foreground')} title={row.locationChangedOn ? `위치 진입 ${ymdOrDash(row.locationChangedOn)}` : undefined}>
+                      {locationText(row)}
+                    </TD>
                     <TD className="whitespace-nowrap tabular-nums">{ymdOrDash(row.placedOn)}</TD>
                     <TD className="whitespace-nowrap tabular-nums">{lastEventText(row.lastEventType, row.lastEventOn, today)}</TD>
                   </TR>
@@ -320,10 +344,13 @@ export function DeviceListTab({ filters, setFilters, onOpenDevice, reloadKey }: 
                 <li key={row.id} className="rounded-lg border border-border bg-card p-3" onClick={() => onOpenDevice(row.id)}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-base font-semibold">{row.serialNo}</span>
-                    <Badge variant={row.status !== 'ACTIVE' ? 'default' : row.asStartedOn ? 'warning' : 'success'}>{placementStatusLabel(row)}</Badge>
+                    <span className="inline-flex items-center gap-1">
+                      <Badge variant={row.status !== 'ACTIVE' ? 'default' : row.asStartedOn ? 'warning' : 'success'}>{placementStatusLabel(row)}</Badge>
+                      <ConditionBadge condition={row.condition} since={row.conditionChangedOn} />
+                    </span>
                   </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">
-                    {row.deviceInfo?.deviceName} {row.deviceInfo?.deviceModel} · <span className={cn(!h.muted && 'text-foreground')}>{h.text}</span> · {wardText(row)}
+                    {row.deviceInfo?.deviceName} {row.deviceInfo?.deviceModel} · <span className={cn(!h.muted && 'text-foreground')}>{h.text}</span> · {wardText(row)} · 위치 {locationText(row)}
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
                     {row.usageType && <UsageBadge usage={row.usageType} />}
@@ -371,7 +398,7 @@ function ListEmpty({ hasFilter, onReset }: { hasFilter: boolean; onReset: () => 
     return (
       <EmptyState
         title="조건에 맞는 기기가 없습니다."
-        description="검색어·모델·상태·용도·상품유형 필터를 조정하세요."
+        description="검색어·모델·배치·기기 상태·위치·용도·상품유형 필터를 조정하세요."
         action={
           <Button size="sm" variant="outline" onClick={onReset}>
             필터 초기화

@@ -33,6 +33,7 @@ interface AsRow {
   ticket: { id: number; ticketCode: string; status: string; owner: { id: string; name: string } | null } | null
   items: {
     id: number; serialNo: string; outcome: string | null; deviceKind: string | null; intakeState: string; shippedAt: string | null; shipTrackingNo: string | null
+    repairedAt: string | null // 수리완료 체크 (2026-09-17) — 기기 셀 `수리 n/m`
     device: { deviceInfo: { deviceName: string }; placement: { productType: string | null } | null } | null
     newDevice: { placement: { productType: string | null } | null } | null
   }[]
@@ -61,7 +62,7 @@ function productTypeBadges(items: AsRow['items']) {
   )
 }
 
-/** 기기 열 (2026-09-15 축약) — ECG · SpO2 · ETC 코드 + 대수, 종결분은 흐리게 '/n'. 툴팁에 기존 상세 표기 */
+/** 기기 열 (2026-09-15 축약) — ECG · SpO2 · ETC 코드 + 대수, 종결분은 흐리게 '/n'. 툴팁에 기존 상세 표기. 2026-09-17: 체크 가능(입고) 라인이 있으면 '수리 n/m' 병기(n<m amber · n=m green) */
 const DEVICE_GROUP_BADGE: Record<string, string> = {
   ECG: 'bg-sky-50 text-sky-700 ring-sky-200',
   SpO2: 'bg-rose-50 text-rose-700 ring-rose-200',
@@ -76,6 +77,9 @@ function deviceCell(r: AsRow) {
         <span key={g.code} className={`inline-flex items-center gap-0.5 whitespace-nowrap rounded px-1 py-0.5 font-mono text-[11px] font-semibold ring-1 ring-inset ${DEVICE_GROUP_BADGE[g.code]}`}>
           {g.code}<span className="font-sans font-medium">{g.count}</span>
           {g.done > 0 && <span className="font-sans font-normal opacity-50">/{g.done}</span>}
+          {g.repairable > 0 && (
+            <span className={`ml-0.5 font-sans font-medium ${g.repaired < g.repairable ? 'text-amber-700' : 'text-emerald-700'}`} title={`수리완료 ${g.repaired} / 입고 라인 ${g.repairable}`}>수리{g.repaired}/{g.repairable}</span>
+          )}
         </span>
       ))}
     </span>

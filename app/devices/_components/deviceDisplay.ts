@@ -2,7 +2,23 @@
  * 디바이스 원장 표시 헬퍼 (GROUP B 소유 — SummaryStrip · DeviceTable · DeviceHistoryDrawer · CorrectionModal 공용)
  * 순수 함수만. 날짜는 lib/deviceRegistryShared 의 toYmd 기준(@db.Date = UTC 자정 ISO), 기록 시각은 KST 표시.
  */
-import { DEVICE_EVENT_TYPE_LABELS, PRODUCT_TYPE_UNSET_LABEL, toYmd, todayKst, type DeviceEventType, type ProductType, type ProductTypeContext, type UsageTypeRef } from '@/lib/deviceRegistryShared'
+import {
+  DEVICE_EVENT_TYPE_LABELS,
+  DEVICE_SITE_FALLBACK_LABELS,
+  LOCATION_NONE_LABEL,
+  PRODUCT_TYPE_UNSET_LABEL,
+  deviceConditionLabel,
+  deviceSiteLabel,
+  isDeviceSiteValue,
+  toYmd,
+  todayKst,
+  unitStateChangesOf,
+  type DeviceEventType,
+  type DeviceLocationSnapshot,
+  type ProductType,
+  type ProductTypeContext,
+  type UsageTypeRef,
+} from '@/lib/deviceRegistryShared'
 import type { ChangeSet, ContractedDeal, ModelSummary, WmsMatch } from './types'
 
 /** @db.Date ISO → 'YYYY-MM-DD', 없으면 '—' */
@@ -63,7 +79,7 @@ export function wmsCell(wms: WmsMatch | null | undefined): WmsCell | null {
   return null
 }
 
-/** CORRECT 이벤트 changes 필드 라벨 */
+/** CORRECT 이벤트 changes 필드 라벨 — condition/location(2026-09-17 상태·위치 축)은 `unitStateChangeLines`가 문장화한다 */
 export const CORRECT_FIELD_LABELS: Record<string, string> = {
   deviceInfoId: '모델',
   serialNo: '시리얼',
@@ -73,7 +89,12 @@ export const CORRECT_FIELD_LABELS: Record<string, string> = {
   usageTypeId: '용도',
   productType: '상품유형',
   dealCode: '계약건',
+  condition: '기기 상태',
+  location: '위치',
 }
+
+/** 스냅샷 키 — 일반 필드 루프에서 제외하고 문장화 헬퍼로 넘긴다 */
+const UNIT_STATE_CHANGE_KEYS: readonly string[] = ['condition', 'location']
 
 function changeValue(field: string, v: unknown, models?: readonly ModelSummary[], usageTypes?: readonly UsageTypeRef[]): string {
   if (v === null || v === undefined || v === '') return field === 'usageTypeId' || field === 'productType' ? PRODUCT_TYPE_UNSET_LABEL : '(없음)'
@@ -88,12 +109,122 @@ function changeValue(field: string, v: unknown, models?: readonly ModelSummary[]
   return String(v)
 }
 
-/** CORRECT changes → ['시리얼: A12016 → A120160', '용도: 미지정 → 평가용', …] (serialRaw는 시리얼 행에 함께 표시되므로 숨김) */
-export function changeSummaryLines(changes: ChangeSet | null | undefined, models?: readonly ModelSummary[], usageTypes?: readonly UsageTypeRef[]): string[] {
+/**
+ * CORRECT changes → ['시리얼: A12016 → A120160', '용도: 미지정 → 평가용', '기기 상태: 수리완료 → AS접수', …]
+ * (serialRaw는 시리얼 행에 함께 표시되므로 숨김. condition/location 키는 `unitStateChangeLines` 문장화 — 값이 같으면 생략)
+ */
+export function changeSummaryLines(changes: ChangeSet | null | undefined, models?: readonly ModelSummary[], usageTypes?: readonly UsageTypeRef[], hospitalNames?: HospitalNameMap): string[] {
   if (!changes) return []
-  return Object.entries(changes)
-    .filter(([field]) => field !== 'serialRaw')
+  const plain = Object.entries(changes)
+    .filter(([field]) => field !== 'serialRaw' && !UNIT_STATE_CHANGE_KEYS.includes(field))
     .map(([field, c]) => `${CORRECT_FIELD_LABELS[field] ?? field}: ${changeValue(field, c?.before, models, usageTypes)} → ${changeValue(field, c?.after, models, usageTypes)}`)
+  return [...plain, ...unitStateChangeLines(changes, { hospitalNames })]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 기기 상태(condition) · 위치(location) — 2026-09-17 device_condition_location_design.md §5.3·§6.2
+// 문장화 헬퍼 단일 소스: changeSummaryLines · DeviceHistoryDrawer EventSummary · groupd-shared eventContent · 이벤트 export · PATCH 감사 라벨이 공유
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type BadgeVariant = 'default' | 'primary' | 'success' | 'warning' | 'destructive' | 'outline'
+
+/** 기기 상태 배지 톤 — 사용중 success · AS접수 warning · 수리완료 primary · 출고 전 outline · 분실 destructive · 폐기·미확인(NULL) default(gray) */
+export function conditionBadgeVariant(condition: string | null | undefined): BadgeVariant {
+  switch (condition) {
+    case 'IN_USE':
+      return 'success'
+    case 'AS_WAITING':
+      return 'warning'
+    case 'REPAIRED':
+      return 'primary'
+    case 'PRE_SHIP':
+      return 'outline'
+    case 'LOST':
+      return 'destructive'
+    default:
+      return 'default'
+  }
+}
+
+/** 병원 코드 → 병원명 해석용(이벤트 스냅샷은 코드만 싣는다). 없으면 '병원 {코드}'로 표시 */
+export type HospitalNameMap = ReadonlyMap<string, string> | Readonly<Record<string, string>> | null | undefined
+
+function hospitalNameOf(code: string, names?: HospitalNameMap): string | null {
+  if (!names) return null
+  if (names instanceof Map) return names.get(code) ?? null
+  return (names as Record<string, string>)[code] ?? null
+}
+
+/** 유닛 행의 위치 필드(UnitView 평탄화 형상) — 목록·드로어·export 공용 입력 */
+export interface LocationSource {
+  locationHospitalCode?: string | null
+  locationHospitalName?: string | null
+  locationSiteValue?: string | null
+  locationSite?: { name?: string | null; value?: string | null } | null
+}
+
+export function locationKindOf(u: LocationSource): 'HOSPITAL' | 'SITE' | null {
+  if (u.locationHospitalCode) return 'HOSPITAL'
+  if (u.locationSite || u.locationSiteValue) return 'SITE'
+  return null
+}
+
+/** 위치 표시 — 병원명(없으면 코드) / 거점 마스터 name(없으면 value 폴백 리프레시센터·thynC Connected Hub) / '—' */
+export function locationText(u: LocationSource): string {
+  if (u.locationHospitalCode) return u.locationHospitalName || u.locationHospitalCode
+  const site = deviceSiteLabel(u.locationSite ?? u.locationSiteValue ?? null)
+  return site ?? LOCATION_NONE_LABEL
+}
+
+/** 스냅샷 위치 값 → 문구: '병원 세란병원'(names 없으면 '병원 A123') / '리프레시센터' / '없음' */
+export function locationSnapshotText(loc: DeviceLocationSnapshot | null | undefined, hospitalNames?: HospitalNameMap): string {
+  if (!loc || !loc.kind || !loc.code) return '없음'
+  if (loc.kind === 'HOSPITAL') return `병원 ${hospitalNameOf(loc.code, hospitalNames) ?? loc.code}`
+  return isDeviceSiteValue(loc.code) ? DEVICE_SITE_FALLBACK_LABELS[loc.code] : loc.code
+}
+
+/**
+ * 스냅샷 changes → 상태·위치 변경 문장. 기본은 값이 바뀐 축만('기기 상태: 사용중 → AS접수', '위치: 병원 A → 리프레시센터 (입고 미확인)'),
+ * `includeUnchanged`면 둘 다. 스냅샷이 없으면 [].
+ */
+export function unitStateChangeLines(changes: unknown, opts?: { hospitalNames?: HospitalNameMap; includeUnchanged?: boolean }): string[] {
+  const ch = unitStateChangesOf(changes)
+  if (!ch) return []
+  const out: string[] = []
+  const cb = ch.condition.before ?? null
+  const ca = ch.condition.after ?? null
+  if (opts?.includeUnchanged || cb !== ca) out.push(`${CORRECT_FIELD_LABELS.condition}: ${deviceConditionLabel(cb)} → ${deviceConditionLabel(ca)}`)
+  const lb = ch.location.before
+  const la = ch.location.after
+  const locChanged = (lb.kind ?? null) !== (la.kind ?? null) || (lb.code ?? null) !== (la.code ?? null)
+  if (opts?.includeUnchanged || locChanged) {
+    const note = ch.location.note ? ` (${ch.location.note})` : '' // A-4(a) '입고 미확인'
+    out.push(`${CORRECT_FIELD_LABELS.location}: ${locationSnapshotText(lb, opts?.hospitalNames)} → ${locationSnapshotText(la, opts?.hospitalNames)}${note}`)
+  }
+  return out
+}
+
+/** 스냅샷 after 요약 '사용중 · 병원 세란병원' — REGISTER/RECOVER/AS_* 행에 '→ …'로 병기. 스냅샷 없으면 null */
+export function unitStateAfterText(changes: unknown, hospitalNames?: HospitalNameMap): string | null {
+  const ch = unitStateChangesOf(changes)
+  if (!ch) return null
+  const loc = ch.location.after
+  const locText = loc.kind ? locationSnapshotText(loc, hospitalNames) : null
+  const note = ch.location.note ? ` (${ch.location.note})` : ''
+  return `${deviceConditionLabel(ch.condition.after)}${locText ? ` · ${locText}` : ''}${note}`
+}
+
+/** 위치 이동 문구 'A → B' (SITE_MOVE) — 스냅샷 없으면 null */
+export function locationMoveText(changes: unknown, hospitalNames?: HospitalNameMap): string | null {
+  const ch = unitStateChangesOf(changes)
+  if (!ch) return null
+  return `${locationSnapshotText(ch.location.before, hospitalNames)} → ${locationSnapshotText(ch.location.after, hospitalNames)}`
+}
+
+/** '(09-14~)' — 상태·위치 진입 업무일자 병기 */
+export function sinceText(v: string | null | undefined, today?: string): string | null {
+  const d = fmtShortDate(v, today)
+  return d ? `(${d}~)` : null
 }
 
 /** 상품유형 배지 톤 — 일반 default · 라이트 info(primary) · 미지정 없음 (B-22) */

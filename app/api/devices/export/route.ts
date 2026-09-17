@@ -4,18 +4,20 @@ import { UNITS_EXPORT_MAX, listUnits, resolveUnitsWhere, type UnitListRow } from
 import {
   DEVICE_EVENT_TYPE_LABELS,
   REGISTRY_REF_TYPE_LABELS,
+  deviceConditionLabel,
   placementStatusLabel,
   toYmd,
   type DeviceEventType,
   type RegistryRefType,
 } from '@/lib/deviceRegistryShared'
+import { locationText } from '@/app/devices/_components/deviceDisplay'
 import { authOr401, badRequest, hospitalDisplayName, parseUnitsQuery, readErrorResponse, registryFileName, xlsxResponse } from '../_read'
 
 export const dynamic = 'force-dynamic'
 
 const STATUS_FILTER_LABEL = { active: '배치중', recovered: '회수됨', all: '전체' } as const
 
-/** 기기 목록 열(§6.1 Excel) — 회수된 개체는 병원 열에 마지막 병원(last_hospital_code)을 적는다 */
+/** 기기 목록 열(§6.1 Excel) — 회수된 개체는 병원 열에 마지막 병원(last_hospital_code)을 적는다. '상태'(배치) 뒤 '기기 상태'·'위치'(2026-09-17 상태·위치 축) — colWidths 동기화 */
 function toRow(r: UnitListRow): Record<string, unknown> {
   const hospital = r.hospital ?? r.lastHospital
   const wms = r.wms
@@ -31,6 +33,8 @@ function toRow(r: UnitListRow): Record<string, unknown> {
     계약건: r.dealCode ?? '',
     병동: r.ward ? `${r.ward.name}${r.ward.isActive ? '' : ' (폐쇄)'}` : r.status === 'ACTIVE' ? '미지정' : '',
     상태: placementStatusLabel(r),
+    '기기 상태': deviceConditionLabel(r.condition),
+    위치: locationText(r),
     'AS 접수일': toYmd(r.asStartedOn) ?? '',
     배치일: toYmd(r.placedOn) ?? '',
     회수일: toYmd(r.recoveredOn) ?? '',
@@ -69,7 +73,7 @@ export async function GET(req: NextRequest) {
     ])
     const rows = data.map(toRow)
     const filterLabel = STATUS_FILTER_LABEL[params.status ?? 'active']
-    return xlsxResponse(rows, '기기 목록', registryFileName(hospitalName, filterLabel), [13, 20, 12, 16, 12, 16, 8, 8, 17, 12, 9, 11, 11, 11, 16, 12, 10, 12, 22, 26, 30, 24])
+    return xlsxResponse(rows, '기기 목록', registryFileName(hospitalName, filterLabel), [13, 20, 12, 16, 12, 16, 8, 8, 17, 12, 9, 10, 18, 11, 11, 11, 16, 12, 10, 12, 22, 26, 30, 24])
   } catch (e) {
     return readErrorResponse(e, 'export')
   }

@@ -6,9 +6,9 @@ import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { canEditAsReceipt, canDeleteAsReceipt } from '@/lib/asReceipt'
 import { AS_CATEGORIES, AS_METHODS, AS_DEST_TYPES, classifyAsRegistryLine } from '@/lib/asReceiptShared'
-import { applyItemChanges, AsServiceError, type LineInput } from '@/lib/asReceiptService'
+import { applyItemChanges, setUnitInUse, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { syncAsReceiptToTicket } from '@/lib/ticket-domains/asReceipt'
-import { clearDeviceAs, RegistryError } from '@/lib/deviceRegistry'
+import { toRegistryErrorResponse } from '@/lib/deviceRegistry'
 import { todayKst } from '@/lib/deviceRegistryShared'
 import { notifyTicketChanged } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
@@ -33,9 +33,11 @@ const detailInclude = {
       symptom: true, processNote: true, outcome: true, newSerialNo: true, draftOutcome: true, draftNewSerialNo: true, // 초안 (2026-09-14)
       shipMethod: true, shipTrackingNo: true, shippedAt: true,
       intakeState: true, receivedAt: true, receiptSerialNo: true, intakeSource: true, // 입고 대조 (2026-09-11)
+      repairedAt: true, repairedBy: { select: { id: true, name: true } }, // 수리완료 체크 (2026-09-17 — 제3축)
       device: {
         select: {
           id: true,
+          condition: true, locationHospitalCode: true, locationSite: { select: { value: true } }, locationHospital: { select: { hospitalName: true } }, // 기기 상태·위치 축 (2026-09-17) → 응답 `device.unit`으로 정형화
           deviceInfo: { select: { deviceName: true } },
           placement: { select: { status: true, hospitalCode: true, asStartedOn: true, asRefCode: true, ward: { select: { name: true } } } },
         },
@@ -45,6 +47,21 @@ const detailInclude = {
     orderBy: { id: 'asc' as const },
   },
 } as const
+
+type DetailReceipt = NonNullable<Prisma.Result<typeof prisma.asReceipt, { include: typeof detailInclude }, 'findUnique'>>
+
+/**
+ * 상세 응답 라인 정형화 (2026-09-17) — `device.unit { condition, locationSiteValue, locationHospitalCode, locationHospitalName }`(설계 §7.1 계약 + 병원명 표시용).
+ * 유닛 형상 체인(§5.1)에 맞춰 select에서 빠지면 UI가 조용히 '미확인'으로 보이므로 이 한 곳에서 조립한다.
+ */
+function shapeDetailItems(items: DetailReceipt['items']) {
+  return items.map((i) => ({
+    ...i,
+    device: i.device
+      ? { ...i.device, unit: { condition: i.device.condition, locationSiteValue: i.device.locationSite?.value ?? null, locationHospitalCode: i.device.locationHospitalCode, locationHospitalName: i.device.locationHospital?.hospitalName ?? null } }
+      : i.device,
+  }))
+}
 
 export async function GET(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
@@ -67,7 +84,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   const unitBySerial = new Map(units.map((u) => [u.serialNo, {
     placement: u.placement ? { status: u.placement.status, hospitalCode: u.placement.hospitalCode, hospitalName: u.placement.hospital?.hospitalName ?? null } : null,
   }]))
-  const items = asReceipt.items.map((i) => ({
+  const items = shapeDetailItems(asReceipt.items).map((i) => ({
     ...i,
     registryTag: i.outcome ? null : classifyAsRegistryLine(asReceipt.hospitalCode, unitBySerial.get(i.serialNo)),
   }))
@@ -211,11 +228,13 @@ export async function PUT(request: NextRequest, { params }: Params) {
     )
   } catch (e) {
     if (e instanceof AsServiceError) return NextResponse.json({ error: e.message }, { status: e.status })
-    if (e instanceof RegistryError) return NextResponse.json({ error: e.message }, { status: e.status })
+    const r = toRegistryErrorResponse(e) // RegistryError·RegistryTxAbort(2026-09-17) 공통 — 본문 { error, … }
+    if (r) return NextResponse.json(r.body, { status: r.status })
     throw e
   }
 
-  const asReceipt = await prisma.asReceipt.findUnique({ where: { id }, include: detailInclude })
+  const updatedRow = await prisma.asReceipt.findUnique({ where: { id }, include: detailInclude })
+  const asReceipt = updatedRow ? { ...updatedRow, items: shapeDetailItems(updatedRow.items) } : null
 
   await logAudit({
     req: request,
@@ -258,38 +277,33 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: '삭제 권한이 없습니다. 본인 등록 건은 완료·취소 전까지만 삭제할 수 있습니다.' }, { status: 403 })
   }
 
-  // 이 접수가 켠 AS 표시 해제(best-effort) 후 삭제 — 기록된 이벤트는 보존 (§5)
-  await prisma.$transaction(
-    async (tx) => {
-      const today = todayKst()
-      for (const item of existing.items) {
-        if (!item.deviceId || item.outcome) continue
-        const placement = await tx.hospitalDevice.findUnique({
-          where: { deviceId: item.deviceId },
-          select: { asStartedOn: true, asRefCode: true },
-        })
-        if (placement?.asStartedOn && placement.asRefCode === existing.asCode) {
-          try {
-            await clearDeviceAs(
-              {
-                hospitalCode: existing.hospitalCode,
-                actor: { userId: user.userId, name: user.name },
-                occurredOn: today,
-                source: 'MANUAL',
-                memo: `${existing.asCode} 접수 삭제`,
-              },
-              { deviceId: item.deviceId },
-              { client: tx }
-            )
-          } catch (e) {
-            if (!(e instanceof RegistryError)) throw e
-          }
+  // 미종결 라인 기기 IN_USE·병원 복귀(best-effort — 게이트·플래그 소유 판정은 setUnitInUse, 이 접수가 켠 플래그는 AS_CLEAR·아니면 CORRECT 폴백) 후 삭제 — 기록된 이벤트는 보존 (§5)
+  // CORRECT 폴백의 ref { AS, asCode }는 삭제 전 삽입이라 validateRef 통과 — 삭제 후 소프트 참조로 잔존 (2026-09-17 §7.3)
+  let warnings: string[] = []
+  try {
+    warnings = await prisma.$transaction(
+      async (tx) => {
+        const today = todayKst()
+        const out: string[] = []
+        for (const item of existing.items) {
+          if (!item.deviceId || item.outcome) continue
+          out.push(...(await setUnitInUse(
+            tx,
+            { hospitalCode: existing.hospitalCode, actor: { userId: user.userId, name: user.name }, occurredOn: today, source: 'MANUAL', ref: { type: 'AS', code: existing.asCode } },
+            item.deviceId,
+            { locationToHospital: true, memo: `접수 삭제 ${existing.asCode}` }
+          )))
         }
-      }
-      await tx.asReceipt.delete({ where: { id } }) // 라인은 FK CASCADE
-    },
-    { timeout: 60000, maxWait: 10000 }
-  )
+        await tx.asReceipt.delete({ where: { id } }) // 라인은 FK CASCADE
+        return out
+      },
+      { timeout: 60000, maxWait: 10000 }
+    )
+  } catch (e) {
+    const r = toRegistryErrorResponse(e) // RegistryTxAbort(유닛 가드 실패 — tx 전체 롤백) → 409. RegistryError는 setUnitInUse가 경고로 흡수
+    if (r) return NextResponse.json(r.body, { status: r.status })
+    throw e
+  }
 
   // 연결 티켓도 삭제 (도메인과 생명주기 공유 — 유지보수 P5·VOC 선례)
   if (existing.ticketId) {
@@ -304,7 +318,8 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     resourceId: existing.asCode,
     resourceLabel: `${existing.asCode}`,
     before: existing,
+    after: warnings.length ? { warnings } : undefined,
   })
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true, warnings })
 }

@@ -4,9 +4,13 @@
  * 3층 구조(B-20): 모든 쓰기 경로는 **유닛(`device_units`) 찾기/만들기 → 이벤트 INSERT → `rebuildUnitProjection`(fold → 배치 행 upsert)** 순서다.
  * 공개 device id = 유닛 id. 배치 행(`hospital_devices`)은 첫 REGISTER의 fold에서 생성되고 RECOVERED 행은 그대로 남는다(ACTIVE-only 변형 미채택).
  * 불성립이면 409로 트랜잭션 롤백. WMS 매칭은 표시용 일시 계산(DB 쓰기 없음 — §9.2).
+ *
+ * 상태·위치 축(2026-09-17, device_condition_location_design.md §4.1 쓰기 순서 2): REGISTER·RECOVER·AS_OPEN·AS_CLEAR는 공용 헬퍼 `applyImplicitTransition`로
+ * 유닛 condition/location을 부수 갱신한다 — phase 1(검증·changes, 이벤트 INSERT 전) → insert·rebuild(guard) → phase 2 `apply()`(가드 실패 = RegistryTxAbort, tx 전체 실패).
  */
 import { Prisma } from '@prisma/client'
-import { DEVICE_STATE_EVENT_TYPES, normalizeSerial, normalizeWardName, resolveProductTypeDefault, type DeviceEventType, type ProductType, type ProductTypeContext } from '@/lib/deviceRegistryShared'
+import { DEVICE_CONCURRENT_CHANGE_MESSAGE, DEVICE_STATE_EVENT_TYPES, isDeviceCondition, isDeviceSiteValue, isSnapshotEvent, normalizeSerial, normalizeWardName, resolveProductTypeDefault, deviceConditionLabel, type DeviceCondition, type DeviceEventType, type DeviceLocationSnapshot, type ProductType, type ProductTypeContext } from '@/lib/deviceRegistryShared'
+import { NO_LOCATION, applyImplicitTransition, buildUnitStateChanges, eventHospitalOf, locationColumns, reuseWarning, siteByValue, unitStateEquals, unitStateOf, type ImplicitTransition, type UnitStateSnapshot } from './condition'
 import {
   DEAL_NOT_OF_HOSPITAL_MESSAGE,
   RegistryError,
@@ -14,6 +18,7 @@ import {
   eventLabel,
   findUnitsBySerial,
   getDeviceOr404,
+  getUnitOr404,
   getHospitalDealContext,
   getHospitalProductTypeContext,
   getOrCreateUnit,
@@ -48,6 +53,7 @@ import {
   wardNames,
   withRegistryTx,
   ymd,
+  ymdToDate,
   type Conflict,
   type DbClient,
   type DeviceRow,
@@ -111,6 +117,22 @@ function assertTransferConsistent(device: DeviceRow, events: readonly EventRow[]
   return st
 }
 
+/**
+ * AS_OPEN/AS_CLEAR 소급 정합(§8.2 1 보강, 2026-09-17 P1 리뷰) — 업무일자 이후에 **스냅샷 배치 축 이벤트**(REGISTER·RECOVER·AS_OPEN·AS_CLEAR, changes 보유)가 있으면 409.
+ * 허용하면 occurred_on 순(`assertSuffix`)과 id 순(`assertNoLaterSnapshot`)이 역전된 쌍이 생겨 두 이벤트 모두 취소 불가(교착)가 된다.
+ * MOVE_WARD(비스냅샷)·배포 전 이벤트(스냅샷 없음)는 취소 순서로 풀리므로 대상 아님. REGISTER·RECOVER 소급은 `assertTransferConsistent`·`assertReregisterConsistent`·retroIllegal이 이미 차단.
+ */
+function assertNoLaterSnapshotAxisEvent(serialNo: string, events: readonly EventRow[], occurredOn: string) {
+  const hit = stateEventsAfter(events, occurredOn).find((e) => isSnapshotEvent(e))
+  if (hit) {
+    throw new RegistryError(
+      409,
+      `${serialNo}: 업무일자(${occurredOn}) 이후 배치 이벤트(${eventLabel(hit)})가 있어 소급 기록할 수 없습니다 — 최근 이벤트를 먼저 취소하세요`,
+      { serial: serialNo }
+    )
+  }
+}
+
 /** 재등록 소급 정합 — 업무일자 < 회수일이면 409 (§7.2 메시지) */
 function assertReregisterConsistent(device: DeviceRow, occurredOn: string) {
   const rec = ymd(device.recoveredOn)
@@ -121,6 +143,22 @@ function assertReregisterConsistent(device: DeviceRow, occurredOn: string) {
       { serial: device.serialNo }
     )
   }
+}
+
+/**
+ * 수동 AS 해제(/devices 단건·일괄) 경고(§4.2 각주 ⁴) — 이 기기에 `intake_state='RECEIVED' ∧ outcome IS NULL` 라인이 있으면 실물이 센터에 있을 수 있어
+ * 위치는 유지하고 '미종결 입고 라인(AS-…) 있음'을 알린다. AS 서비스 훅(`setUnitInUse(locationToHospital:true)`)은 이 경로를 쓰지 않는다.
+ */
+async function openIntakeLineWarnings(tx: DbClient, deviceId: number, serialNo: string): Promise<string[]> {
+  const lines = await tx.asReceiptItem.findMany({
+    where: { deviceId, intakeState: 'RECEIVED', outcome: null },
+    select: { receipt: { select: { asCode: true } } },
+    orderBy: { id: 'desc' },
+    take: 5,
+  })
+  if (lines.length === 0) return []
+  const codes = Array.from(new Set(lines.map((l) => l.receipt.asCode)))
+  return [`${serialNo}: 미종결 입고 라인(${codes.join(', ')}) 있음 — 기기 위치는 유지됩니다(실물 반환은 AS 상세에서 확정하거나 [병원 반환])`]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -416,11 +454,32 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
     x.unitCreated = r.created
   }
 
-  // 6) 이벤트 적재 — 이관은 RECOVER(TRANSFER)@상대 → REGISTER@이 병원 순(같은 일자 순서 = id)
+  // 5b) 상태·위치 축 암묵 전이 phase 1(§4.1 쓰기 순서 2) — 이벤트 INSERT 전 검증·changes 계산. SCRAPPED 유닛은 409 '폐기된 기기'(쓰기 없음).
+  //     이관은 RECOVER(TRANSFER, keep) → REGISTER(IN_USE·이 병원) 체인. 재등록 유닛·배치 없는 기존 유닛(고아 — 센터 입고 후 등록 등) condition ∉ {REPAIRED, IN_USE, PRE_SHIP}면 재사용 경고 1건(replaceDevice 고아 규칙과 동일)
+  const phases = new Map<number, ImplicitTransition[]>()
+  for (const x of work) {
+    const unit = x.unit!
+    const list: ImplicitTransition[] = []
+    if (x.kind === 'transfer') {
+      const t = await applyImplicitTransition(tx, { unit, eventType: 'RECOVER', hospitalCode: x.existing!.hospitalCode, reasonValue: 'TRANSFER', occurredOn: p.occurredOn, serial: x.serialNo })
+      list.push(t, await applyImplicitTransition(tx, { unit, before: t.after, eventType: 'REGISTER', hospitalCode: here, occurredOn: p.occurredOn, serial: x.serialNo }))
+    } else {
+      list.push(await applyImplicitTransition(tx, { unit, eventType: 'REGISTER', hospitalCode: here, occurredOn: p.occurredOn, serial: x.serialNo }))
+    }
+    if (x.kind === 'reregister' || (!x.unitCreated && unit.condition)) {
+      const w = reuseWarning(x.serialNo, unit.condition)
+      if (w) warnings.push(w)
+    }
+    for (const t of list) warnings.push(...t.warnings)
+    phases.set(unit.id, list)
+  }
+
+  // 6) 이벤트 적재 — 이관은 RECOVER(TRANSFER)@상대 → REGISTER@이 병원 순(같은 일자 순서 = id). 스냅샷(changes)은 phase 1 결과
   const inputs: EventInput[] = []
   const slots: { x: PreparedItem; deviceId: number; recoverIdx: number | null; registerIdx: number }[] = []
   for (const x of work) {
     const deviceId = x.unit!.id
+    const ph = phases.get(deviceId)!
     let recoverIdx: number | null = null
     if (x.kind === 'transfer') {
       recoverIdx = inputs.length
@@ -438,6 +497,7 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
         importBatchId: opts?.importBatchId ?? null,
         productType: x.existing!.productType, // 상대 병원 배치의 상품유형 스냅샷
         dealCode: x.existing!.dealCode, // 상대 병원 배치의 계약건 스냅샷(B-23)
+        changes: ph[0].changes as unknown as Prisma.InputJsonValue,
         actor: p.actor,
       })
     }
@@ -455,6 +515,7 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
       importBatchId: opts?.importBatchId ?? null,
       productType: x.productType, // 이 병원 자리의 판매 조건(새 REGISTER가 정한다)
       dealCode: x.dealCode, // 이 배치가 속한 계약건(새 REGISTER가 정한다 — B-23)
+      changes: ph[ph.length - 1].changes as unknown as Prisma.InputJsonValue,
       actor: p.actor,
     })
     slots.push({ x, deviceId, recoverIdx, registerIdx })
@@ -469,6 +530,8 @@ export async function registerDevicesIn(tx: DbClient, ctx: RegistryCtx, items: r
       await tx.hospitalDevice.updateMany({ where: { deviceId: s.deviceId, extDeviceCode: null }, data: { extDeviceCode: ext } })
     }
   }
+  // 7b) 상태·위치 축 phase 2 — insert·rebuild 루프 **뒤** apply()(가드 실패 = RegistryTxAbort → tx 전체 실패)
+  for (const s of slots) for (const t of phases.get(s.deviceId)!) await t.apply()
 
   // 8) WMS 표시용 매칭(일시 계산 — §9.2)
   const wmsMap = await matchInventoryUnits(
@@ -581,6 +644,8 @@ export async function recoverDevice(
     const events = (await loadDeviceEvents(tx, [device.id])).get(device.id) ?? []
     const st = stateAt(events, p.occurredOn)
     assertTransition(st, 'RECOVER', here!, { serial: device.serialNo })
+    // 상태·위치 축 암묵 전이 phase 1 — 사유 value 매핑(§5.6: DEFECT→AS_WAITING·위치 리프레시센터(A-4), LOST→LOST, DISPOSE→SCRAPPED, 그 외 keep)
+    const transition = await applyImplicitTransition(tx, { unit: device, eventType: 'RECOVER', hospitalCode: here!, reasonValue: reason.value, occurredOn: p.occurredOn })
     const event = await insertEvent(tx, {
       deviceId: device.id,
       eventType: 'RECOVER',
@@ -595,12 +660,14 @@ export async function recoverDevice(
       source: p.source,
       productType: device.productType, // 회수되는 자리의 상품유형 스냅샷(교체 집계 축)
       dealCode: device.dealCode, // 회수되는 자리의 계약건 스냅샷(딜별 교체 집계 축 — B-23)
+      changes: transition.changes as unknown as Prisma.InputJsonValue,
       actor: p.actor,
     })
     if (!event) throw new RegistryError(409, '같은 연결 키의 이벤트가 이미 기록되어 있습니다')
     await rebuildUnitProjection(tx, device.id, { guard: guardOf(device), illegal: retroIllegal })
+    await transition.apply()
     const updated = await getDeviceOr404(tx, device.id)
-    return { event, device: updated, fromWardId: st.wardId, reason, warnings: p.warnings }
+    return { event, device: updated, fromWardId: st.wardId, reason, warnings: [...p.warnings, ...transition.warnings] }
   })
 }
 
@@ -818,6 +885,34 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
     const oldSnapshot = old ? guardOf(old) : null
     const newSnapshot = newDev ? guardOf(newDev) : null
 
+    // ── 상태·위치 축 암묵 전이 phase 1(§7.0 replaceDevice 표) — 이벤트 INSERT 전 검증(SCRAPPED 409 → resolveAsLines 관례상 전체 중단)
+    //    backfill 구기기: REGISTER(IN_USE·병원) → RECOVER(사유 매핑) / active_here 구기기: RECOVER(DEFECT→AS_WAITING·위치 A-4(a) 리프레시센터) / recovered_here: 무변경
+    //    신기기 create·reregister: REGISTER(IN_USE·병원, REPAIRED 아니면 경고) / transfer: RECOVER(TRANSFER)→REGISTER / active_here: 무변경(MOVE_WARD는 스냅샷 이벤트 아님)
+    const oldPhases: ImplicitTransition[] = []
+    const newPhases: ImplicitTransition[] = []
+    const oldLabel = `구 기기 ${oldKey}`
+    const newLabel = `신 기기 ${newNs.serialNo}`
+    if (oldCase === 'backfill') {
+      const reg = await applyImplicitTransition(tx, { unit: oldUnit!, eventType: 'REGISTER', hospitalCode: here, occurredOn: p.occurredOn, serial: oldLabel })
+      oldPhases.push(reg, await applyImplicitTransition(tx, { unit: oldUnit!, before: reg.after, eventType: 'RECOVER', hospitalCode: here, reasonValue: reason.value, occurredOn: p.occurredOn, serial: oldLabel }))
+    } else if (oldCase === 'active_here') {
+      oldPhases.push(await applyImplicitTransition(tx, { unit: oldUnit!, eventType: 'RECOVER', hospitalCode: here, reasonValue: reason.value, occurredOn: p.occurredOn, serial: oldLabel }))
+    }
+    if (newCase === 'transfer') {
+      const t = await applyImplicitTransition(tx, { unit: newUnit!, eventType: 'RECOVER', hospitalCode: newDev!.hospitalCode, reasonValue: 'TRANSFER', occurredOn: p.occurredOn, serial: newLabel })
+      newPhases.push(t, await applyImplicitTransition(tx, { unit: newUnit!, before: t.after, eventType: 'REGISTER', hospitalCode: here, occurredOn: p.occurredOn, serial: newLabel }))
+    } else if (newCase === 'create' || newCase === 'reregister') {
+      newPhases.push(await applyImplicitTransition(tx, { unit: newUnit!, eventType: 'REGISTER', hospitalCode: here, occurredOn: p.occurredOn, serial: newLabel }))
+      // 교체품 재사용(§4.5) — 회수 이력 유닛(또는 기존 고아 유닛에 상태가 있으면) REPAIRED가 아니면 경고 1건
+      if (newCase === 'reregister' || (newHit && newUnit!.condition && newUnit!.condition !== 'PRE_SHIP')) {
+        const w = reuseWarning(newLabel, newUnit!.condition, { strict: true })
+        if (w) warnings.push(w)
+      }
+    }
+    for (const t of [...oldPhases, ...newPhases]) warnings.push(...t.warnings)
+    const oldRecoverChanges = (oldCase === 'backfill' ? oldPhases[1] : oldPhases[0])?.changes
+    const newRegisterChanges = newPhases.length > 0 ? newPhases[newPhases.length - 1].changes : undefined
+
     // ── 이벤트 순서: REGISTER(구 소급) → RECOVER(구) → RECOVER TRANSFER(신) → REGISTER(신) | MOVE_WARD(신)
     const base = { occurredOn: p.occurredOn, ref: p.ref, actionGroup: p.actionGroup, source: p.source, actor: p.actor } as const
     const eventIds: number[] = []
@@ -829,7 +924,7 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
     let linkedRecoverEventId: number | null = null
 
     if (oldCase === 'backfill') {
-      backfillEvent = await insertEvent(tx, { ...base, deviceId: oldId, eventType: 'REGISTER', hospitalCode: here, toWardId: oldWardAtTime, memo: '교체 시 소급 등록', productType: inheritedProductType, dealCode: inheritedDealCode })
+      backfillEvent = await insertEvent(tx, { ...base, deviceId: oldId, eventType: 'REGISTER', hospitalCode: here, toWardId: oldWardAtTime, memo: '교체 시 소급 등록', productType: inheritedProductType, dealCode: inheritedDealCode, changes: oldPhases[0].changes as unknown as Prisma.InputJsonValue })
       eventIds.push(backfillEvent!.id)
     }
     if (oldCase !== 'recovered_here') {
@@ -844,6 +939,7 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
         memo: p.memo,
         productType: inheritedProductType, // 회수되는 자리의 상품유형(교체 집계 축)
         dealCode: inheritedDealCode, // 회수되는 자리의 계약건(딜별 교체 집계 축 — B-23)
+        changes: oldRecoverChanges as unknown as Prisma.InputJsonValue,
       })
       eventIds.push(recoverEvent!.id)
     } else if (linkedRecover) {
@@ -862,6 +958,7 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
         memo: p.memo,
         productType: newDev!.productType, // 상대 병원 배치의 상품유형 스냅샷
         dealCode: newDev!.dealCode, // 상대 병원 배치의 계약건 스냅샷
+        changes: newPhases[0].changes as unknown as Prisma.InputJsonValue,
       })
       eventIds.push(transferRecoverEvent!.id)
     }
@@ -879,13 +976,15 @@ export async function replaceDevice(ctx: RegistryCtx, input: ReplaceInput, opts?
         eventIds.push(movedNewEvent!.id)
       }
     } else {
-      registerEvent = await insertEvent(tx, { ...base, deviceId: newId, eventType: 'REGISTER', hospitalCode: here, toWardId: targetWardId, relatedDeviceId: oldId, memo: p.memo, productType: inheritedProductType, dealCode: inheritedDealCode })
+      registerEvent = await insertEvent(tx, { ...base, deviceId: newId, eventType: 'REGISTER', hospitalCode: here, toWardId: targetWardId, relatedDeviceId: oldId, memo: p.memo, productType: inheritedProductType, dealCode: inheritedDealCode, changes: newRegisterChanges as unknown as Prisma.InputJsonValue })
       eventIds.push(registerEvent!.id)
     }
 
-    // ── 프로젝션 재계산 (기존 배치 행은 가드, 새 행은 fold로 생성)
+    // ── 프로젝션 재계산 (기존 배치 행은 가드, 새 행은 fold로 생성) → 상태·위치 축 phase 2(적재 순서대로 apply)
     await rebuildUnitProjection(tx, oldId, { guard: oldSnapshot ?? undefined, illegal: retroIllegal })
     await rebuildUnitProjection(tx, newId, { guard: newSnapshot ?? undefined, illegal: retroIllegal })
+    for (const t of oldPhases) await t.apply()
+    for (const t of newPhases) await t.apply()
 
     const oldDevice = await getDeviceOr404(tx, oldId)
     const newDevice = await getDeviceOr404(tx, newId)
@@ -965,6 +1064,7 @@ export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?
 
     let toWard: WardRef | null = null
     let reasonId: number | null = null
+    let reason: { id: number; name: string; value: string | null } | null = null
     let targets = devices
     const skipped: SkippedItem[] = []
     if (input.action === 'SET_PRODUCT_TYPE') {
@@ -1036,10 +1136,19 @@ export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?
         throw new RegistryError(409, opening ? '선택한 기기가 모두 AS진행중입니다' : '선택한 기기에 AS진행중 표시가 없습니다', { skipped })
       }
       const evMap = await loadDeviceEvents(tx, targets.map((d) => d.id))
-      const asInputs: EventInput[] = targets.map((d) => {
+      const warnings = [...p.warnings]
+      const asInputs: EventInput[] = []
+      const transitions: ImplicitTransition[] = []
+      for (const d of targets) {
         const st = stateAt(evMap.get(d.id) ?? [], p.occurredOn)
         assertTransition(st, input.action as DeviceEventType, here, { serial: d.serialNo })
-        return {
+        assertNoLaterSnapshotAxisEvent(d.serialNo, evMap.get(d.id) ?? [], p.occurredOn) // 소급 역전 쌍 차단(단건과 동일)
+        // 상태·위치 축 암묵 전이 phase 1 — 단건과 동일(AS_OPEN → AS_WAITING·위치 유지 / 수동 AS_CLEAR → IN_USE·위치 유지 + 미종결 입고 라인 경고)
+        const t = await applyImplicitTransition(tx, { unit: d, eventType: input.action as 'AS_OPEN' | 'AS_CLEAR', hospitalCode: here, occurredOn: p.occurredOn, locationToHospital: false })
+        transitions.push(t)
+        warnings.push(...t.warnings)
+        if (!opening) warnings.push(...(await openIntakeLineWarnings(tx, d.id, d.serialNo)))
+        asInputs.push({
           deviceId: d.id,
           eventType: input.action as DeviceEventType,
           hospitalCode: here,
@@ -1050,14 +1159,16 @@ export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?
           source: p.source,
           productType: d.productType, // 표시 시점 배치 스냅샷
           dealCode: d.dealCode,
+          changes: t.changes as unknown as Prisma.InputJsonValue,
           actor: p.actor,
-        }
-      })
+        })
+      }
       const events = await insertEvents(tx, asInputs)
       for (const d of targets) {
         await rebuildUnitProjection(tx, d.id, { guard: guardOf(d), illegal: retroIllegal })
       }
-      return { actionGroup: p.actionGroup, events, eventIds: events.map((e) => e.id), skipped, affectedDeviceIds: targets.map((d) => d.id), warnings: p.warnings }
+      for (const t of transitions) await t.apply() // phase 2 — insert·rebuild 루프 뒤
+      return { actionGroup: p.actionGroup, events, eventIds: events.map((e) => e.id), skipped, affectedDeviceIds: targets.map((d) => d.id), warnings }
     }
     if (input.action === 'MOVE_WARD') {
       toWard = await resolveWardInput(tx, here, { wardId: input.toWardId, wardName: input.toWardName }, { autoCreate: opts?.autoCreateWard ?? true })
@@ -1066,12 +1177,15 @@ export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?
       targets = devices.filter((d) => d.wardId !== toWard!.id)
       if (targets.length === 0) throw new RegistryError(409, '선택한 기기가 모두 이미 해당 병동에 있습니다', { skipped })
     } else {
-      reasonId = (await requireRecoveryReason(tx, input.reasonCodeId == null ? null : Number(input.reasonCodeId))).id
+      reason = await requireRecoveryReason(tx, input.reasonCodeId == null ? null : Number(input.reasonCodeId))
+      reasonId = reason.id
     }
 
     const eventsMap = await loadDeviceEvents(tx, targets.map((d) => d.id))
     const inputs: EventInput[] = []
     const applied: DeviceRow[] = []
+    const transitions: ImplicitTransition[] = []
+    const warnings = [...p.warnings]
     for (const d of targets) {
       const st = stateAt(eventsMap.get(d.id) ?? [], p.occurredOn)
       assertTransition(st, input.action as DeviceEventType, here, { serial: d.serialNo })
@@ -1081,6 +1195,14 @@ export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?
         continue
       }
       applied.push(d)
+      // 일괄 회수도 단건과 동일한 사유 매핑(§5.6 — DEFECT 위치는 A-4). MOVE_WARD는 스냅샷 이벤트가 아니다
+      let changes: Prisma.InputJsonValue | undefined
+      if (input.action === 'RECOVER') {
+        const t = await applyImplicitTransition(tx, { unit: d, eventType: 'RECOVER', hospitalCode: here, reasonValue: reason!.value, occurredOn: p.occurredOn })
+        transitions.push(t)
+        warnings.push(...t.warnings)
+        changes = t.changes as unknown as Prisma.InputJsonValue
+      }
       inputs.push({
         deviceId: d.id,
         eventType: input.action,
@@ -1095,6 +1217,7 @@ export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?
         source: p.source,
         productType: d.productType, // 기록 시점 배치 상품유형 스냅샷
         dealCode: d.dealCode, // 기록 시점 배치 계약건 스냅샷
+        changes,
         actor: p.actor,
       })
     }
@@ -1106,13 +1229,15 @@ export async function bulkDeviceAction(ctx: RegistryCtx, input: BulkInput, opts?
         illegal: (ev) => new RegistryError(409, `${d.serialNo}: 이 일자에 기록하면 이후 이벤트(${eventLabel(ev)})가 성립하지 않습니다`),
       })
     }
-    return { actionGroup: p.actionGroup, events, eventIds: events.map((e) => e.id), skipped, affectedDeviceIds: applied.map((d) => d.id), warnings: p.warnings }
+    for (const t of transitions) await t.apply() // phase 2 — insert·rebuild 루프 뒤
+    return { actionGroup: p.actionGroup, events, eventIds: events.map((e) => e.id), skipped, affectedDeviceIds: applied.map((d) => d.id), warnings }
   })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // correctDevice — 식별 속성 정정 → CORRECT 이벤트 (§8.2)
-// 시리얼·모델·MAC은 유닛(`device_units`) 속성, 닉네임(ext_device_code)은 배치(`hospital_devices`) 속성
+// 시리얼·모델·MAC·용도·기기 상태·위치는 유닛(`device_units`) 속성, 닉네임(ext_device_code)·상품유형·계약건은 배치(`hospital_devices`) 속성
+// 조회는 **배치 무관**(`getUnitOr404` — 2026-09-17 §7.0): 배치 행이 없는 유닛은 유닛 속성만 정정할 수 있고 반환 `device`는 null
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface CorrectChanges {
@@ -1126,13 +1251,23 @@ export interface CorrectChanges {
   productType?: string | null
   /** 계약건(딜 코드, null=미지정) — 배치 속성(B-23). 이 병원 계약완료 딜이어야 한다(아니면 409). 라우트 권한은 write(USER+) */
   dealCode?: string | null
+  /**
+   * 기기 상태(condition 6종, null=미확인) — 유닛 속성(2026-09-17 §7.0, admin OR device.admin). 검증: I-1(분실·폐기는 위치 없음)·I-3(배치 ACTIVE면 LOST/SCRAPPED/PRE_SHIP 불가).
+   * PRE_SHIP의 v1 공식 진입로(A-6): condition PRE_SHIP + 위치 HUB, 배치 RECOVERED/없음만
+   */
+  condition?: DeviceCondition | null
+  /** 위치 — `{ kind:'HOSPITAL', code:병원코드 } | { kind:'SITE', code:REFRESH_CENTER|HUB } | null(없음)`. 배치 ACTIVE의 병원 위치는 배치 병원만 */
+  location?: DeviceLocationSnapshot | null
 }
 
 export type ChangeSet = Record<string, { before: unknown; after: unknown }>
 
 export interface CorrectResult {
   event: EventRow
-  device: DeviceRow
+  /** 배치 행이 있는 유닛만 DeviceRow — 배치 없는 유닛(고아·PRE_SHIP)은 null */
+  device: DeviceRow | null
+  /** 정정 후 유닛 원행(배치 무관) */
+  unit: UnitRow
   changes: ChangeSet
   /** 정정 후 WMS 표시용 매칭(일시 계산) */
   wms: WmsMatch | null
@@ -1140,32 +1275,36 @@ export interface CorrectResult {
 
 export async function correctDevice(ctx: RegistryCtx, input: { deviceId: number; changes: CorrectChanges }, opts?: RegistryOpts): Promise<CorrectResult> {
   return withRegistryTx(opts, async (tx) => {
-    const device = await getDeviceOr404(tx, input.deviceId)
-    const p = await prepareCtx(tx, { ...ctx, hospitalCode: ctx.hospitalCode ?? device.hospitalCode }, { requireHospital: false })
+    const { unit, placement } = await getUnitOr404(tx, input.deviceId)
+    const p = await prepareCtx(tx, { ...ctx, hospitalCode: ctx.hospitalCode ?? eventHospitalOf(placement) }, { requireHospital: false, suppressRefHospitalWarning: placement?.status !== 'ACTIVE' })
     const models = await loadTrackedModels(tx)
     const ch = input.changes ?? {}
     const changes: ChangeSet = {}
     const unitData: Prisma.DeviceUnitUncheckedUpdateInput = {}
     const placementData: Prisma.HospitalDeviceUncheckedUpdateInput = {}
+    const requirePlacement = (what: string) => {
+      if (!placement) throw new RegistryError(409, `${unit.serialNo}: 배치 행이 없는 기기 — ${what}은(는) 배치 속성이라 정정할 수 없습니다`)
+      return placement
+    }
 
     if (ch.serialNo !== undefined) {
       const ns = normalizeSerial(ch.serialNo)
       if (!ns.serialNo) throw new RegistryError(400, '시리얼이 비어 있습니다')
-      if (ns.serialNo !== device.serialNo || (ns.serialRaw ?? null) !== (device.serialRaw ?? null)) {
+      if (ns.serialNo !== unit.serialNo || (ns.serialRaw ?? null) !== (unit.serialRaw ?? null)) {
         // 시리얼 정정은 상태 이벤트가 이 병원 REGISTER 1건뿐인 개체만 — 이력이 있으면 정체성 변경이므로 409
-        // (AS_OPEN/AS_CLEAR는 CORRECT처럼 표시 마커라 판정에서 제외 — B-24)
-        const events = (await loadDeviceEvents(tx, [device.id])).get(device.id) ?? []
+        // (AS_OPEN/AS_CLEAR·신규 4종은 CORRECT처럼 비상태 이벤트라 판정에서 제외 — B-24·B-35)
+        const events = (await loadDeviceEvents(tx, [unit.id])).get(unit.id) ?? []
         const stateEvents = events.filter((e) => (DEVICE_STATE_EVENT_TYPES as readonly string[]).includes(e.eventType))
-        const sole = stateEvents.length === 1 && stateEvents[0].eventType === 'REGISTER' && device.status === 'ACTIVE' && stateEvents[0].hospitalCode === device.hospitalCode
+        const sole = !!placement && stateEvents.length === 1 && stateEvents[0].eventType === 'REGISTER' && placement.status === 'ACTIVE' && stateEvents[0].hospitalCode === placement.hospitalCode
         if (!sole) throw new RegistryError(409, '이력이 있는 개체 — 오입력이면 이벤트 취소를 사용하세요')
-        if (ns.serialNo !== device.serialNo) {
+        if (ns.serialNo !== unit.serialNo) {
           const dup = await tx.deviceUnit.findUnique({ where: { serialNo: ns.serialNo }, select: { id: true } })
           if (dup) throw new RegistryError(409, '이미 등록된 시리얼입니다')
-          changes.serialNo = { before: device.serialNo, after: ns.serialNo }
+          changes.serialNo = { before: unit.serialNo, after: ns.serialNo }
           unitData.serialNo = ns.serialNo
         }
-        if ((ns.serialRaw ?? null) !== (device.serialRaw ?? null)) {
-          changes.serialRaw = { before: device.serialRaw, after: ns.serialRaw }
+        if ((ns.serialRaw ?? null) !== (unit.serialRaw ?? null)) {
+          changes.serialRaw = { before: unit.serialRaw, after: ns.serialRaw }
           unitData.serialRaw = ns.serialRaw
         }
       }
@@ -1173,68 +1312,131 @@ export async function correctDevice(ctx: RegistryCtx, input: { deviceId: number;
     if (ch.deviceInfoId !== undefined && ch.deviceInfoId !== null) {
       const id = Number(ch.deviceInfoId)
       if (!models.some((m) => m.id === id)) throw new RegistryError(400, '원장 대상 모델이 아닙니다 (serial_tracked)')
-      if (id !== device.deviceInfoId) {
-        changes.deviceInfoId = { before: device.deviceInfoId, after: id }
+      if (id !== unit.deviceInfoId) {
+        changes.deviceInfoId = { before: unit.deviceInfoId, after: id }
         unitData.deviceInfoId = id
       }
     }
     if (ch.macAddress !== undefined) {
       const v = ch.macAddress?.trim() || null
-      if (v !== (device.macAddress ?? null)) {
-        changes.macAddress = { before: device.macAddress, after: v }
+      if (v !== (unit.macAddress ?? null)) {
+        changes.macAddress = { before: unit.macAddress, after: v }
         unitData.macAddress = v
       }
     }
     if (ch.extDeviceCode !== undefined) {
       const v = ch.extDeviceCode?.trim() || null
-      if (v !== (device.extDeviceCode ?? null)) {
-        changes.extDeviceCode = { before: device.extDeviceCode, after: v }
+      const pl = requirePlacement('닉네임')
+      if (v !== (pl.extDeviceCode ?? null)) {
+        changes.extDeviceCode = { before: pl.extDeviceCode, after: v }
         placementData.extDeviceCode = v
       }
     }
     if (ch.usageTypeId !== undefined) {
       const u = await requireUsageType(tx, ch.usageTypeId == null ? null : Number(ch.usageTypeId))
       const v = u?.id ?? null
-      if (v !== (device.usageTypeId ?? null)) {
-        changes.usageTypeId = { before: device.usageTypeId, after: v }
+      if (v !== (unit.usageTypeId ?? null)) {
+        changes.usageTypeId = { before: unit.usageTypeId, after: v }
         unitData.usageTypeId = v
       }
     }
-    let productTypeSnapshot: string | null = device.productType ?? null
+    let productTypeSnapshot: string | null = placement?.productType ?? null
     if (ch.productType !== undefined) {
       const v = parseProductTypeInput(ch.productType)
-      if (v !== (device.productType ?? null)) {
-        changes.productType = { before: device.productType ?? null, after: v }
+      const pl = requirePlacement('상품유형')
+      if (v !== (pl.productType ?? null)) {
+        changes.productType = { before: pl.productType ?? null, after: v }
         placementData.productType = v
         productTypeSnapshot = v
       }
     }
-    let dealCodeSnapshot: string | null = device.dealCode ?? null
+    let dealCodeSnapshot: string | null = placement?.dealCode ?? null
     if (ch.dealCode !== undefined) {
       const v = ch.dealCode == null || !String(ch.dealCode).trim() ? null : String(ch.dealCode).trim()
-      if (v !== (device.dealCode ?? null)) {
+      const pl = requirePlacement('계약건')
+      if (v !== (pl.dealCode ?? null)) {
         if (v != null) {
-          const hosp = device.hospitalCode ?? device.lastHospitalCode
+          const hosp = pl.hospitalCode ?? pl.lastHospitalCode
           const dealCtx = hosp ? await getHospitalDealContext(hosp, tx) : { deals: [], single: null }
           if (!dealCtx.deals.some((d) => d.dealCode === v)) throw new RegistryError(409, DEAL_NOT_OF_HOSPITAL_MESSAGE)
         }
-        changes.dealCode = { before: device.dealCode ?? null, after: v }
+        changes.dealCode = { before: pl.dealCode ?? null, after: v }
         placementData.dealCode = v
         dealCodeSnapshot = v
+      }
+    }
+
+    // 기기 상태·위치 보정(2026-09-17 §7.0·§8.1) — CORRECT_UNIT_FIELDS 일반 루프가 아닌 전용 매핑(location {kind,code} → 2컬럼, SITE는 value→id)
+    let unitState: UnitStateSnapshot | null = null
+    if (ch.condition !== undefined || ch.location !== undefined) {
+      const before = await unitStateOf(tx, unit)
+      let condition: DeviceCondition | null = before.condition
+      if (ch.condition !== undefined) {
+        if (ch.condition !== null && !isDeviceCondition(ch.condition)) throw new RegistryError(400, '기기 상태 값이 올바르지 않습니다')
+        condition = ch.condition
+      }
+      let location: DeviceLocationSnapshot = { ...before.location }
+      let siteId: number | null = null // SITE 검증 결과 id 재사용(locationColumns 재조회 방지)
+      if (ch.location !== undefined) {
+        const loc = ch.location
+        if (loc == null || loc.kind == null) location = { ...NO_LOCATION }
+        else if (loc.kind === 'SITE') {
+          if (!isDeviceSiteValue(loc.code)) throw new RegistryError(400, '위치 거점 값이 올바르지 않습니다 (REFRESH_CENTER/HUB)')
+          siteId = (await siteByValue(tx, loc.code)).id
+          location = { kind: 'SITE', code: loc.code }
+        } else if (loc.kind === 'HOSPITAL') {
+          const code = String(loc.code ?? '').trim()
+          if (!code) throw new RegistryError(400, '위치 병원 코드가 비어 있습니다')
+          const h = await tx.hospital.findUnique({ where: { hospitalCode: code }, select: { hospitalCode: true } })
+          if (!h) throw new RegistryError(404, '위치 병원을 찾을 수 없습니다')
+          location = { kind: 'HOSPITAL', code }
+        } else throw new RegistryError(400, '위치 종류가 올바르지 않습니다 (HOSPITAL/SITE)')
+      }
+      // I-1: 분실·폐기는 위치 없음
+      if ((condition === 'LOST' || condition === 'SCRAPPED') && location.kind != null) {
+        throw new RegistryError(400, `${deviceConditionLabel(condition)} 기기는 위치를 가질 수 없습니다 — 위치를 비우세요 (I-1)`)
+      }
+      // I-3: 배치 ACTIVE면 LOST/SCRAPPED/PRE_SHIP 불가. I-4: ACTIVE의 병원 위치는 배치 병원만
+      if (placement?.status === 'ACTIVE') {
+        if (condition === 'LOST' || condition === 'SCRAPPED' || condition === 'PRE_SHIP') {
+          throw new RegistryError(409, `배치 중 기기는 ${deviceConditionLabel(condition)}(으)로 보정할 수 없습니다 — 먼저 회수하세요 (I-3)`)
+        }
+        if (location.kind === 'HOSPITAL' && location.code !== placement.hospitalCode) {
+          throw new RegistryError(409, '배치 중 기기의 병원 위치는 배치 병원만 가능합니다 (I-4)')
+        }
+      }
+      const after: UnitStateSnapshot = { condition, location }
+      if (!unitStateEquals(before, after)) {
+        const snap = buildUnitStateChanges(before, after)
+        changes.condition = snap.condition
+        changes.location = snap.location
+        unitState = after
+        const cols = siteId != null ? { locationHospitalCode: null, locationSiteId: siteId } : await locationColumns(tx, location)
+        unitData.condition = condition
+        unitData.locationHospitalCode = cols.locationHospitalCode
+        unitData.locationSiteId = cols.locationSiteId
+        if ((before.condition ?? null) !== condition) unitData.conditionChangedOn = ymdToDate(p.occurredOn)
+        if (before.location.kind !== location.kind || before.location.code !== location.code) unitData.locationChangedOn = ymdToDate(p.occurredOn)
       }
     }
     if (Object.keys(changes).length === 0) throw new RegistryError(400, '변경 사항이 없습니다')
 
     try {
-      if (Object.keys(unitData).length > 0) await tx.deviceUnit.update({ where: { id: device.id }, data: unitData })
-      if (Object.keys(placementData).length > 0) await tx.hospitalDevice.update({ where: { deviceId: device.id }, data: placementData })
+      if (Object.keys(unitData).length > 0) {
+        if (unitState) {
+          // 상태·위치는 낙관 가드(§4.1 쓰기 순서 1) — 동시 변경이면 409, 쓰기 없음
+          const res = await tx.deviceUnit.updateMany({ where: { id: unit.id, condition: unit.condition ?? null, locationHospitalCode: unit.locationHospitalCode ?? null, locationSiteId: unit.locationSiteId ?? null }, data: unitData })
+          if (res.count !== 1) throw new RegistryError(409, DEVICE_CONCURRENT_CHANGE_MESSAGE)
+        } else await tx.deviceUnit.update({ where: { id: unit.id }, data: unitData })
+      }
+      if (Object.keys(placementData).length > 0) await tx.hospitalDevice.update({ where: { deviceId: unit.id }, data: placementData })
     } catch (e) {
       throw mapDbError(e)
     }
     const event = await insertEvent(tx, {
-      deviceId: device.id,
+      deviceId: unit.id,
       eventType: 'CORRECT',
-      hospitalCode: device.hospitalCode,
+      hospitalCode: eventHospitalOf(placement),
       occurredOn: p.occurredOn,
       memo: p.memo,
       ref: p.ref,
@@ -1245,9 +1447,10 @@ export async function correctDevice(ctx: RegistryCtx, input: { deviceId: number;
       dealCode: dealCodeSnapshot,
       actor: p.actor,
     })
-    const updated = await getDeviceOr404(tx, device.id)
-    const wms = (await matchInventoryUnits(tx, [toWmsInput(updated, models)])).get(updated.id) ?? null
-    return { event: event!, device: updated, changes, wms }
+    const after = await getUnitOr404(tx, unit.id)
+    const wmsTarget = after.device ?? { id: after.unit.id, serialNo: after.unit.serialNo, serialRaw: after.unit.serialRaw, deviceInfoId: after.unit.deviceInfoId }
+    const wms = (await matchInventoryUnits(tx, [toWmsInput(wmsTarget, models)])).get(unit.id) ?? null
+    return { event: event!, device: after.device, unit: after.unit, changes, wms }
   })
 }
 
@@ -1274,6 +1477,9 @@ export async function openDeviceAs(ctx: RegistryCtx, input: { deviceId: number }
     const events = (await loadDeviceEvents(tx, [device.id])).get(device.id) ?? []
     const st = stateAt(events, p.occurredOn)
     assertTransition(st, 'AS_OPEN', here!, { serial: device.serialNo })
+    assertNoLaterSnapshotAxisEvent(device.serialNo, events, p.occurredOn) // 소급 역전 쌍(occurred_on 순 ≠ id 순) 차단 — §8.2 1
+    // 상태·위치 축 암묵 전이 phase 1 — IN_USE/REPAIRED/NULL → AS_WAITING(위치 유지)
+    const transition = await applyImplicitTransition(tx, { unit: device, eventType: 'AS_OPEN', hospitalCode: here!, occurredOn: p.occurredOn })
     const event = await insertEvent(tx, {
       deviceId: device.id,
       eventType: 'AS_OPEN',
@@ -1285,17 +1491,23 @@ export async function openDeviceAs(ctx: RegistryCtx, input: { deviceId: number }
       source: p.source,
       productType: device.productType, // 표시 시점 배치 스냅샷
       dealCode: device.dealCode,
+      changes: transition.changes as unknown as Prisma.InputJsonValue,
       actor: p.actor,
     })
     if (!event) throw new RegistryError(409, '같은 연결 키의 이벤트가 이미 기록되어 있습니다')
     await rebuildUnitProjection(tx, device.id, { guard: guardOf(device), illegal: retroIllegal })
+    await transition.apply()
     const updated = await getDeviceOr404(tx, device.id)
-    return { event, device: updated, warnings: p.warnings }
+    return { event, device: updated, warnings: [...p.warnings, ...transition.warnings] }
   })
 }
 
-/** AS 해제 — 표시가 없으면 409. (교체·회수 시에는 fold가 자동 해제하므로 이 호출이 필요 없다) */
-export async function clearDeviceAs(ctx: RegistryCtx, input: { deviceId: number }, opts?: RegistryOpts): Promise<AsFlagResult> {
+/**
+ * AS 해제 — 표시가 없으면 409. (교체·회수 시에는 fold가 자동 해제하므로 이 호출이 필요 없다)
+ * 상태·위치 축(§7.0): AS_WAITING/REPAIRED/NULL → IN_USE. `locationToHospital=true`는 **AS 서비스 훅(`setUnitInUse`)이 호출할 때만**(위치 → 배치 병원);
+ * /devices 단건·일괄 수동 해제(기본 false)는 위치 유지 + warnings '미종결 입고 라인(AS-…) 있음'.
+ */
+export async function clearDeviceAs(ctx: RegistryCtx, input: { deviceId: number; locationToHospital?: boolean }, opts?: RegistryOpts): Promise<AsFlagResult> {
   return withRegistryTx(opts, async (tx) => {
     const device = await getDeviceOr404(tx, input.deviceId)
     const here = ctx.hospitalCode ?? device.hospitalCode
@@ -1305,6 +1517,11 @@ export async function clearDeviceAs(ctx: RegistryCtx, input: { deviceId: number 
     const events = (await loadDeviceEvents(tx, [device.id])).get(device.id) ?? []
     const st = stateAt(events, p.occurredOn)
     assertTransition(st, 'AS_CLEAR', here!, { serial: device.serialNo })
+    assertNoLaterSnapshotAxisEvent(device.serialNo, events, p.occurredOn) // 소급 역전 쌍 차단 — §8.2 1
+    const locationToHospital = input.locationToHospital === true
+    const transition = await applyImplicitTransition(tx, { unit: device, eventType: 'AS_CLEAR', hospitalCode: here!, occurredOn: p.occurredOn, locationToHospital })
+    const warnings = [...p.warnings, ...transition.warnings]
+    if (!locationToHospital) warnings.push(...(await openIntakeLineWarnings(tx, device.id, device.serialNo)))
     const event = await insertEvent(tx, {
       deviceId: device.id,
       eventType: 'AS_CLEAR',
@@ -1316,12 +1533,14 @@ export async function clearDeviceAs(ctx: RegistryCtx, input: { deviceId: number 
       source: p.source,
       productType: device.productType,
       dealCode: device.dealCode,
+      changes: transition.changes as unknown as Prisma.InputJsonValue,
       actor: p.actor,
     })
     if (!event) throw new RegistryError(409, '같은 연결 키의 이벤트가 이미 기록되어 있습니다')
     await rebuildUnitProjection(tx, device.id, { guard: guardOf(device), illegal: retroIllegal })
+    await transition.apply()
     const updated = await getDeviceOr404(tx, device.id)
-    return { event, device: updated, warnings: p.warnings }
+    return { event, device: updated, warnings }
   })
 }
 

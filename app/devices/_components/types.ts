@@ -9,9 +9,14 @@
  * 이 파일은 P3-0 스켈레톤 소유(orchestrator). 그룹 A~D는 여기 타입을 import만 하고 수정하지 않는다(필요 시 Verify 에이전트 경유).
  */
 import type {
+  ConditionFilter,
+  DeviceCondition,
   DeviceEventType,
+  DeviceLocationSnapshot,
+  DeviceSiteValue,
   DeviceStatus,
   ImportBatchMode,
+  LocationFilter,
   ImportRowAction,
   ImportSourceKind,
   ImportVerdict,
@@ -26,7 +31,17 @@ import type {
   UsageTypeRef,
 } from '@/lib/deviceRegistryShared'
 
-export type { ProductType, ProductTypeContext, ProductTypeFilter, UsageFilter, UsageTypeRef }
+export type { ConditionFilter, DeviceCondition, DeviceLocationSnapshot, DeviceSiteValue, LocationFilter, ProductType, ProductTypeContext, ProductTypeFilter, UsageFilter, UsageTypeRef }
+
+/** 거점(DEVICE_SITE) 마스터 행 — 유닛 `locationSite` 조인 형상 */
+export interface DeviceSiteRef {
+  id: number
+  name: string
+  value: string | null
+}
+
+/** 위치 이동 목적지 — 거점 value 또는 'HOSPITAL'(배치 병원 반환, ACTIVE·IN_USE만) */
+export type LocationTarget = DeviceSiteValue | 'HOSPITAL'
 
 /** 상품유형 축 키(요약 매트릭스) — '일반' | '라이트' | '미지정' */
 export type ProductTypeKey = ProductType | '미지정'
@@ -363,6 +378,20 @@ export interface DeviceRaw {
   asStartedOn: string | null
   /** AS 연결 유지보수 코드(MNT-…) */
   asRefCode: string | null
+  /** 기기 상태(condition 6종, 2026-09-17 B-26) — 유닛 속성, null=미확인(UI '미확인' gray) */
+  condition: string | null
+  conditionChangedOn: string | null
+  /** 위치: 병원 코드(거점과 배타 — I-2) */
+  locationHospitalCode: string | null
+  /** 위치 병원명 평탄화 */
+  locationHospitalName: string | null
+  /** 위치: 거점 id(DEVICE_SITE) */
+  locationSiteId: number | null
+  /** 위치 거점 value(REFRESH_CENTER/HUB) — 표시·필터 키 */
+  locationSiteValue: string | null
+  /** 위치 거점 마스터 행 {id,name,value} */
+  locationSite: DeviceSiteRef | null
+  locationChangedOn: string | null
   createdAt: string
   updatedAt: string
 }
@@ -419,6 +448,10 @@ export interface UnitsQueryParams {
   deal?: string | null
   /** AS진행중만(B-24) */
   as?: boolean | null
+  /** 기기 상태 — 6종 | none(미확인) (2026-09-17). 회수 목록 `condition=REPAIRED&location=REFRESH_CENTER` = 교체품 가용(I-5 v1 근사) */
+  condition?: ConditionFilter | null
+  /** 위치 — HOSPITAL | REFRESH_CENTER | HUB | none(위치 없음) */
+  location?: LocationFilter | null
   page?: number
   limit?: number
   sort?: UnitsSort
@@ -814,6 +847,46 @@ export interface RecoverResponse {
   warnings: string[]
 }
 
+// ── 기기 상태·위치 축 액션(2026-09-17 device_condition_location_design.md §7.1) — 드로어 [수리완료][수리완료 해제][폐기][위치 이동][병원 반환]
+
+/** POST …/repair-done · …/repair-undo body — 문맥 필드만(ref 없음 = 드로어 경로) */
+export type UnitStateBody = RegistryFields
+
+/** POST …/scrap body — memo 필수(A-5 오폐기 완화책, 400) */
+export interface ScrapBody extends RegistryFields {
+  memo: string
+}
+
+/** POST …/location body — 목적지 거점(REFRESH_CENTER/HUB) 또는 HOSPITAL(배치 병원 반환) */
+export interface LocationBody extends RegistryFields {
+  to: LocationTarget
+}
+
+/** 상태·위치 한 시점 값(이벤트 changes의 before/after 단위) */
+export interface UnitStateSnapshot {
+  condition: string | null
+  location: DeviceLocationSnapshot
+}
+
+/** 라인 동기화 결과(§6.2) — 그 기기의 `canMarkAsLineRepaired` 라인 갱신 건수·접수 코드 */
+export interface AsLineSyncResult {
+  updated: number
+  asCodes: string[]
+}
+
+/** POST …/repair-done · repair-undo · scrap · location 201 — `changed:false`면 event null(멱등) */
+export interface UnitStateResponse {
+  changed: boolean
+  event: DeviceEventRaw | null
+  /** 배치 행이 있는 유닛만(배치 없는 유닛은 null) */
+  device: DeviceRaw | null
+  before: UnitStateSnapshot
+  after: UnitStateSnapshot
+  /** 라인 동기화(repair-done·repair-undo·scrap) */
+  lines?: AsLineSyncResult
+  warnings: string[]
+}
+
 export type BulkAction = 'MOVE_WARD' | 'RECOVER' | 'SET_PRODUCT_TYPE' | 'SET_DEAL' | 'AS_OPEN' | 'AS_CLEAR'
 
 export interface BulkBody extends RegistryFields {
@@ -856,13 +929,18 @@ export interface DevicePatchBody {
   productType?: ProductType | null
   /** 계약건(딜 코드, null=미지정) — USER+ 허용, CORRECT 이벤트 기록(배치 속성 B-23, 계약완료 딜 아니면 409) */
   dealCode?: string | null
+  /** 기기 상태 보정(6종, null=미확인) — admin OR device.admin, CORRECT 이벤트(2026-09-17 §8.1 — PRE_SHIP v1 진입로 A-6) */
+  condition?: DeviceCondition | null
+  /** 위치 보정 — `{ kind:'HOSPITAL', code }` | `{ kind:'SITE', code:'REFRESH_CENTER'|'HUB' }` | null(없음). admin OR device.admin */
+  location?: DeviceLocationSnapshot | null
   /** CORRECT 이벤트 문맥(식별 보정 시) */
   occurredOn?: string
   ref?: RegistryRef | null
 }
 
 export interface DevicePatchResponse {
-  device: DeviceRaw
+  /** 배치 없는 유닛의 상태·위치 보정은 null */
+  device: DeviceRaw | null
   event?: DeviceEventRaw
   changes?: ChangeSet
   wms?: WmsMatch | null
@@ -1156,14 +1234,22 @@ export interface ListFilters {
   deal: string | null
   /** AS진행중만(B-24) */
   as: boolean
+  /** 기기 상태(6종 | none=미확인) — 로컬 (2026-09-17) */
+  condition: ConditionFilter | null
+  /** 위치(HOSPITAL | REFRESH_CENTER | HUB | none) — 로컬 */
+  location: LocationFilter | null
 }
 
-/** 전역 [디바이스] 뷰(v1 단순화) 필터 — 전부 URL 동기화(`?view=devices&status=&model=&usage=&productType=&q=&page=`) */
+/** 전역 [디바이스] 뷰(v1 단순화) 필터 — 전부 URL 동기화(`?view=devices&status=&model=&usage=&productType=&condition=&location=&q=&page=`) */
 export interface GlobalListFilters {
   status: UnitsStatusFilter
   model: number | null
   usage: UsageFilter | null
   productType: ProductTypeFilter | null
+  /** 기기 상태(6종 | none=미확인) — URL (2026-09-17). 회수 목록 `condition=REPAIRED&location=REFRESH_CENTER` = 교체품 가용 */
+  condition: ConditionFilter | null
+  /** 위치(HOSPITAL | REFRESH_CENTER | HUB | none) — URL */
+  location: LocationFilter | null
   /** 시리얼(키·원문·닉네임) 또는 병원명 */
   q: string
   page: number
@@ -1211,6 +1297,12 @@ export interface DeviceRef {
   dealCode?: string | null
   /** AS진행중 플래그 시작일(ISO) — 행 ⋯ 메뉴 'AS 접수/해제' 분기용 */
   asStartedOn?: string | null
+  /** 기기 상태(condition, 2026-09-17) — 드로어 액션 판정·확인 문구용 */
+  condition?: string | null
+  /** 위치 거점 value(REFRESH_CENTER/HUB) — 위치 거점이면 값, 병원·없음이면 null */
+  locationSiteValue?: string | null
+  /** 위치 병원 코드 */
+  locationHospitalCode?: string | null
 }
 
 /**
@@ -1219,8 +1311,17 @@ export interface DeviceRef {
  */
 export type Selection = Map<number, DeviceRef | null>
 
-/** 행 ⋯·드로어 버튼·모바일 액션바가 orchestrator에 요청하는 동작 — asOpen(AS 접수 모달)·asClear(즉시 해제)는 B-24 */
-export type DeviceAction = 'move' | 'recover' | 'replace' | 'correct' | 'asOpen' | 'asClear'
+/**
+ * 행 ⋯·드로어 버튼·모바일 액션바가 orchestrator에 요청하는 동작 — asOpen(AS 접수 모달)·asClear(즉시 해제)는 B-24.
+ * 상태·위치 축(2026-09-17 §6.2, 병원 문맥 무관 경로): repairDone [수리완료] · repairUndo [수리완료 해제] · scrap [폐기](memo 필수) ·
+ * moveLocation [위치 이동](`opts.to` 거점) · returnHospital [병원 반환](ACTIVE·위치 거점·IN_USE → SITE_MOVE to HOSPITAL)
+ */
+export type DeviceAction = 'move' | 'recover' | 'replace' | 'correct' | 'asOpen' | 'asClear' | 'repairDone' | 'repairUndo' | 'scrap' | 'moveLocation' | 'returnHospital'
+
+/** onAction 부가 인자 — moveLocation의 목적지 거점 */
+export interface DeviceActionOptions {
+  to?: LocationTarget
+}
 
 /** 모달/패널이 쓰기 성공 후 orchestrator에 넘기는 결과 — 토스트 + onMutated + 선택 해제 */
 export interface MutationDone {
@@ -1281,5 +1382,8 @@ export function toDeviceRef(d: DeviceRowBase | DeviceListRow | DeviceDetail): De
     productType: d.productType ?? null,
     dealCode: d.dealCode ?? null,
     asStartedOn: d.asStartedOn ?? null,
+    condition: d.condition ?? null,
+    locationSiteValue: d.locationSiteValue ?? d.locationSite?.value ?? null,
+    locationHospitalCode: d.locationHospitalCode ?? null,
   }
 }

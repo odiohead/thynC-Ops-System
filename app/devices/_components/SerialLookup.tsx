@@ -14,6 +14,7 @@ import { Input } from '@/app/components/ui/Input'
 import { cn } from '@/lib/cn'
 import { DEVICE_STATUS_LABELS, normalizeSerial } from '@/lib/deviceRegistryShared'
 import { errorMessage, lookupSerial } from './api'
+import { ConditionBadge } from './registryFormKit'
 import { useDevicesToast } from './toast'
 import type { DeviceRowBase, LookupNavigateTarget, LookupResponse } from './types'
 
@@ -196,6 +197,7 @@ export function SerialLookup({ onNavigate, autoFocus, className }: SerialLookupP
                       <Badge variant={c.status === 'ACTIVE' ? 'success' : 'default'} className="shrink-0">
                         {DEVICE_STATUS_LABELS[c.status]}
                       </Badge>
+                      <ConditionBadge condition={c.condition} className="shrink-0" />
                     </button>
                   </li>
                 ))}

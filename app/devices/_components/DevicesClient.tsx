@@ -26,8 +26,8 @@ import PageHeader from '@/app/components/ui/PageHeader'
 import Button from '@/app/components/ui/Button'
 import Badge from '@/app/components/ui/Badge'
 import { cn } from '@/lib/cn'
-import { PRODUCT_TYPE_UNSET_LABEL, todayKst } from '@/lib/deviceRegistryShared'
-import { bulkDeviceAction, clearDeviceAs, errorMessage, exportEventsUrl, exportUnitsUrl, getCapabilities, getCoverage, getEvents, getHospitalOption, getHospitalSummary, getImportBatches, getUnitIds } from './api'
+import { DEVICE_SITE_FALLBACK_LABELS, PRODUCT_TYPE_UNSET_LABEL, isDeviceSiteValue, todayKst } from '@/lib/deviceRegistryShared'
+import { bulkDeviceAction, clearDeviceAs, errorMessage, exportEventsUrl, exportUnitsUrl, getCapabilities, getCoverage, getEvents, getHospitalOption, getHospitalSummary, getImportBatches, getUnitIds, markDeviceRepaired, moveDeviceLocation, scrapDevice, undoDeviceRepaired } from './api'
 import { DevicesToastProvider, useDevicesToast } from './toast'
 import { useDevicesUrlState, type DevicesUrlState } from './useDevicesUrlState'
 import {
@@ -42,6 +42,7 @@ import {
   type CoverageResponse,
   type CoverageRow,
   type DeviceAction,
+  type DeviceActionOptions,
   type DeviceRef,
   type DevicesTab,
   type DevicesView,
@@ -53,6 +54,7 @@ import {
   type ListFilters,
   type MutationDone,
   type Selection,
+  type UnitStateResponse,
   type WardOption,
 } from './types'
 import { diffText, fmtDeal, modelLabel, productTypeBadgeVariant } from './deviceDisplay'
@@ -96,11 +98,11 @@ type ModalState =
   | { kind: 'asOpen'; devices: DeviceRef[]; ids: number[]; note?: string | null }
   | null
 
-type ListLocal = Pick<ListFilters, 'limit' | 'sort' | 'wms' | 'usage' | 'productType' | 'deal' | 'as'>
+type ListLocal = Pick<ListFilters, 'limit' | 'sort' | 'wms' | 'usage' | 'productType' | 'deal' | 'as' | 'condition' | 'location'>
 type EventLocal = Omit<EventFilters, 'q' | 'page'>
 type CoverageLocal = Pick<CoverageFilters, 'filter' | 'sort' | 'limit'>
 
-const DEFAULT_LIST_LOCAL: ListLocal = { limit: 50, sort: 'ward', wms: null, usage: null, productType: null, deal: null, as: false }
+const DEFAULT_LIST_LOCAL: ListLocal = { limit: 50, sort: 'ward', wms: null, usage: null, productType: null, deal: null, as: false, condition: null, location: null }
 /** 병원 이력 탭 로컬 필터 기본값 — 전체 기간 */
 const DEFAULT_EVENT_LOCAL: EventLocal = { limit: 50, type: null, from: null, to: null, refType: null, source: null }
 /** 병원 미선택 축약 커버리지 표 — 정렬은 '차이 큰 순' 고정(compact에서 셀렉트 미노출), 50행 */
@@ -329,8 +331,8 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
 
   /** [디바이스] 뷰 필터 — 전부 URL */
   const globalListFilters = useMemo<GlobalListFilters>(
-    () => ({ status: url.state.status, model: url.state.model, usage: url.state.usage, productType: url.state.productType, q: url.state.q, page: url.state.page }),
-    [url.state.status, url.state.model, url.state.usage, url.state.productType, url.state.q, url.state.page]
+    () => ({ status: url.state.status, model: url.state.model, usage: url.state.usage, productType: url.state.productType, condition: url.state.condition, location: url.state.location, q: url.state.q, page: url.state.page }),
+    [url.state.status, url.state.model, url.state.usage, url.state.productType, url.state.condition, url.state.location, url.state.q, url.state.page]
   )
   const setGlobalListFilters = useCallback((patch: Partial<GlobalListFilters>) => url.setFilters(patch), [url])
 
@@ -384,8 +386,62 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
     [summaryReady, summaryError, notify]
   )
 
+  /**
+   * 기기 상태·위치 축 액션(2026-09-17 device_condition_location_design.md §6.2·§7.1) — 병원 문맥 무관(asOpen/asClear 패턴).
+   * [수리완료][수리완료 해제][폐기](memo 필수 프롬프트, A-5)·[위치 이동](opts.to 거점)·[병원 반환](SITE_MOVE to HOSPITAL) — confirm 후 즉시 호출 → onDone.
+   * repair-done/undo/scrap은 서버가 그 기기의 AS 입고 라인 repaired_at도 함께 동기화한다(응답 lines) — 토스트 보조 문구로 알린다.
+   */
+  const runUnitStateAction = useCallback(
+    async (action: DeviceAction, ref: DeviceRef, opts?: DeviceActionOptions) => {
+      const lineNote = (r: UnitStateResponse): string[] => (r.lines && r.lines.updated > 0 ? [`AS 입고 라인 ${r.lines.updated}건 동기화 (${r.lines.asCodes.join(', ')})`] : [])
+      try {
+        if (action === 'repairDone') {
+          if (!window.confirm(`${ref.serialNo}을(를) 수리완료로 기록할까요?\n이 기기의 AS 입고 라인에도 수리완료가 함께 기록됩니다.`)) return
+          const r = await markDeviceRepaired(ref.id)
+          onDone({ message: r.changed ? `수리완료: ${ref.serialNo}` : `${ref.serialNo}은(는) 이미 수리완료 상태입니다`, warnings: [...r.warnings, ...lineNote(r)] })
+        } else if (action === 'repairUndo') {
+          if (!window.confirm(`${ref.serialNo}의 수리완료를 해제할까요? (AS접수 상태로 되돌리고 AS 입고 라인의 수리완료 체크도 해제됩니다)`)) return
+          const r = await undoDeviceRepaired(ref.id)
+          onDone({ message: `수리완료 해제: ${ref.serialNo}`, warnings: [...r.warnings, ...lineNote(r)] })
+        } else if (action === 'scrap') {
+          if (!window.confirm(`${ref.serialNo}을(를) 폐기 처리할까요?\n폐기는 되돌리기 어렵습니다(관리자 보정 경로만). AS 입고 라인의 수리완료 체크는 해제됩니다.`)) return
+          const memo = window.prompt('폐기 사유(필수) — 감사 로그·AS 접수 비고에 남습니다', '')
+          if (memo == null) return
+          if (!memo.trim()) {
+            notify('폐기 사유를 입력하세요.', 'error')
+            return
+          }
+          const r = await scrapDevice(ref.id, { memo: memo.trim() })
+          onDone({ message: r.changed ? `폐기: ${ref.serialNo}` : `${ref.serialNo}은(는) 이미 폐기된 기기입니다`, warnings: [...r.warnings, ...lineNote(r)] })
+        } else if (action === 'moveLocation') {
+          const to = opts?.to
+          if (!to || !isDeviceSiteValue(to)) {
+            notify('이동할 거점(리프레시센터 / thynC Connected Hub)을 선택하세요.', 'info')
+            return
+          }
+          const label = DEVICE_SITE_FALLBACK_LABELS[to]
+          if (!window.confirm(`${ref.serialNo}의 위치를 ${label}(으)로 이동할까요?`)) return
+          const r = await moveDeviceLocation(ref.id, { to })
+          onDone({ message: r.changed ? `위치 이동: ${ref.serialNo} → ${label}` : `${ref.serialNo}은(는) 이미 ${label}에 있습니다`, warnings: r.warnings })
+        } else if (action === 'returnHospital') {
+          if (!window.confirm(`${ref.serialNo}을(를) 배치 병원으로 반환(위치 → 병원)할까요?`)) return
+          const r = await moveDeviceLocation(ref.id, { to: 'HOSPITAL' })
+          onDone({ message: r.changed ? `병원 반환: ${ref.serialNo}` : `${ref.serialNo}은(는) 이미 병원 위치입니다`, warnings: r.warnings })
+        }
+      } catch (e) {
+        notify(errorMessage(e, '처리에 실패했습니다.'), 'error')
+      }
+    },
+    [onDone, notify]
+  )
+
   const onAction = useCallback(
-    (action: DeviceAction, ref: DeviceRef) => {
+    (action: DeviceAction, ref: DeviceRef, opts?: DeviceActionOptions) => {
+      // 기기 상태·위치 축 5종(2026-09-17)은 병원 문맥 무관 — 어느 뷰에서든 즉시 처리(회수 기기 포함)
+      if (action === 'repairDone' || action === 'repairUndo' || action === 'scrap' || action === 'moveLocation' || action === 'returnHospital') {
+        void runUnitStateAction(action, ref, opts)
+        return
+      }
       // AS 접수/해제(B-24)는 병원 요약 문맥이 필요 없다 — 어느 뷰에서든 즉시 처리
       if (action === 'asOpen' || action === 'asClear') {
         if (ref.status !== 'ACTIVE') {
@@ -425,7 +481,7 @@ function DevicesInner({ initialParams }: DevicesClientProps) {
           break
       }
     },
-    [view, hospital, url, notify, openReplace, onDone]
+    [view, hospital, url, notify, openReplace, onDone, runUnitStateAction]
   )
 
   const openBulkMove = useCallback(() => setModal({ kind: 'move', devices: selectedRefs, ids: selectedIds, note: selectionNote }), [selectedRefs, selectedIds, selectionNote])

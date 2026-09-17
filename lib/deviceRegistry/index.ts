@@ -3,6 +3,7 @@
  *
  * core   : 타입·RegistryError·withRegistryTx·fold/rebuild·assertTransition·병동/모델/사유 해석
  * write  : registerDevices·moveDeviceWard·recoverDevice·replaceDevice·bulkDeviceAction·correctDevice·updateDeviceMemo
+ * condition: 유닛 상태·위치 축(2026-09-17) — intakeDevice·markDeviceRepaired·undoDeviceRepaired·scrapDevice·moveDeviceLocation·applyImplicitTransition·취소 규약 헬퍼
  * import : previewRows·importBatch
  * admin  : editEvent·cancelLastEvent·cancelImportBatch·editImportBatchDate
  * read   : getHospitalDeviceSummary·getGlobalCoverage·lookupDevice·listUnits/listEvents(+where 빌더)·getUnitDetail·listImportBatches
@@ -11,6 +12,7 @@
  */
 export * from './core'
 export * from './wms'
+export * from './condition'
 export * from './write'
 export * from './import'
 export * from './admin'

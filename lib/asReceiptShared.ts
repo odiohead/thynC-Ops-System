@@ -70,6 +70,51 @@ export const AS_INTAKE_STATE_LABELS: Record<AsIntakeState, string> = {
 /** 접수자 확인이 필요한 라인인가 (미종결 기준은 호출부) */
 export const isAsIntakeIssue = (state: string | null | undefined) => state === 'MISMATCH' || state === 'EXTRA'
 
+// ─── 수리완료 체크 (2026-09-17 — device_condition_location_design.md §5.6·§7.2) ───
+/** 결과가 이 집합이면 수리완료 대상이 아니다(분실·취소·미회수) */
+export const AS_REPAIR_EXCLUDED_OUTCOMES: readonly string[] = ['LOST', 'CANCELED', 'NOT_RECEIVED']
+/**
+ * 라인 수리완료 체크 가능 여부 — 입고된 라인(D5)만, 분실·취소·미회수 라인 제외. 접수 상태(종결 포함, A-2)·outcome NULL/REPAIR_RETURN/REPLACE는 허용.
+ * 카드 헤더 `수리완료 n/m`의 m(분모)도 이 판정으로 센다.
+ */
+export function canMarkAsLineRepaired(item: { intakeState: string | null | undefined; outcome: string | null | undefined }): boolean {
+  return item.intakeState === 'RECEIVED' && !AS_REPAIR_EXCLUDED_OUTCOMES.includes(item.outcome ?? '')
+}
+/** 체크박스 비활성 사유 툴팁(§6.1) — 체크 가능하면 null */
+export function asRepairDisabledReason(item: { intakeState: string | null | undefined; outcome: string | null | undefined }): string | null {
+  if (canMarkAsLineRepaired(item)) return null
+  if (AS_REPAIR_EXCLUDED_OUTCOMES.includes(item.outcome ?? '')) return '분실·취소·미회수 라인'
+  return '입고 후 체크할 수 있습니다'
+}
+/** 수리 진행도 `수리완료 n/m` — m = 체크 가능 라인 수(canMarkAsLineRepaired), n = 그중 repaired_at 있음. m=0이면 표시하지 않는다(호출부) */
+export function summarizeAsRepairProgress(items: { intakeState: string | null | undefined; outcome: string | null | undefined; repairedAt?: string | Date | null }[]): { repaired: number; repairable: number } {
+  let repaired = 0
+  let repairable = 0
+  for (const i of items) {
+    if (!canMarkAsLineRepaired(i)) continue
+    repairable++
+    if (i.repairedAt) repaired++
+  }
+  return { repaired, repairable }
+}
+/** 접수 비고 이력 최대 길이 — 초과 시 앞부분 절단 */
+export const AS_NOTE_MAX_LENGTH = 5000
+/**
+ * 접수 비고 끝에 이력 한 줄 추가(5,000자 초과 시 앞부분 절단) — lib/asReceiptService.ts(라인 처리·입고·수리완료·폐기 등)와
+ * 기기현황 라우트의 라인 동기화(app/api/devices/units/[id]/_unitState.ts)가 같은 규칙을 쓴다(2026-09-17 통합 — 복제본 제거).
+ */
+export function appendAsNote(note: string | null | undefined, line: string): string {
+  const next = note?.trim() ? `${note.trimEnd()}\n${line}` : line
+  return next.length > AS_NOTE_MAX_LENGTH ? next.slice(next.length - AS_NOTE_MAX_LENGTH) : next
+}
+/** 라인 기기 상태(condition) 소형 배지 — AS 상세 시리얼 셀에 노출하는 3종만(수리완료·폐기·분실). 나머지(사용중·AS접수)는 배치 배지·입고 배지로 충분 */
+export const AS_LINE_CONDITION_BADGE_CLS: Record<'REPAIRED' | 'SCRAPPED' | 'LOST', string> = {
+  REPAIRED: 'bg-emerald-50 text-emerald-700',
+  SCRAPPED: 'bg-gray-200 text-gray-600',
+  LOST: 'bg-red-50 text-red-600',
+}
+export const isAsLineConditionBadge = (v: string | null | undefined): v is 'REPAIRED' | 'SCRAPPED' | 'LOST' => v === 'REPAIRED' || v === 'SCRAPPED' || v === 'LOST'
+
 /** 미등록 라인 기기종류 선택지 (§13-5 — 통계용 최소 입력. 원장 연결 라인은 모델에서 파생) */
 export const AS_DEVICE_KINDS = ['심전도', '산소포화도', '게이트웨이', '기타'] as const
 
@@ -97,17 +142,18 @@ export function asDeviceKindFromSerial(serialNo: string | null | undefined): (ty
   return null
 }
 
-/** 목록 [기기] 아이콘 표기 (2026-09-15) — 기기군 3종을 짧은 코드로: ECG(심전계) · SpO2(산소포화도) · ETC(기타), 각 대수(+종결 수) */
+/** 목록 [기기] 아이콘 표기 (2026-09-15) — 기기군 3종을 짧은 코드로: ECG(심전계) · SpO2(산소포화도) · ETC(기타), 각 대수(+종결 수). 2026-09-17: 수리 진행도 `repaired/repairable`(체크 가능 라인 기준, intakeState·repairedAt 있을 때만 집계) 병기 */
 export const AS_DEVICE_GROUP_CODES: Record<AsDeviceGroup, string> = { 심전계: 'ECG', 산소포화도: 'SpO2', 기타: 'ETC' }
 export function summarizeAsItemsByGroup(
-  items: { serialNo?: string | null; outcome: string | null; deviceKind?: string | null; device?: { deviceInfo: { deviceName: string } } | null }[]
-): { group: AsDeviceGroup; code: string; count: number; done: number }[] {
-  const acc = new Map<AsDeviceGroup, { count: number; done: number }>()
+  items: { serialNo?: string | null; outcome: string | null; deviceKind?: string | null; intakeState?: string | null; repairedAt?: string | Date | null; device?: { deviceInfo: { deviceName: string } } | null }[]
+): { group: AsDeviceGroup; code: string; count: number; done: number; repaired: number; repairable: number }[] {
+  const acc = new Map<AsDeviceGroup, { count: number; done: number; repaired: number; repairable: number }>()
   for (const i of items) {
     const g = asDeviceGroupOf(i.device?.deviceInfo.deviceName, i.deviceKind, i.serialNo)
-    const cur = acc.get(g) ?? { count: 0, done: 0 }
+    const cur = acc.get(g) ?? { count: 0, done: 0, repaired: 0, repairable: 0 }
     cur.count++
     if (i.outcome) cur.done++
+    if (i.intakeState !== undefined && canMarkAsLineRepaired({ intakeState: i.intakeState, outcome: i.outcome })) { cur.repairable++; if (i.repairedAt) cur.repaired++ } // intakeState 없는 호출부(알림 등)는 진행도 미집계
     acc.set(g, cur)
   }
   return AS_DEVICE_GROUPS.filter((g) => acc.has(g)).map((g) => ({ group: g, code: AS_DEVICE_GROUP_CODES[g], ...acc.get(g)! }))

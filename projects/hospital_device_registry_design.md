@@ -20,7 +20,7 @@
 | D8 | AS 연동은 **유지보수 하위 흐름 우선** — 이벤트에 `ref_type/ref_code` 예약, 이번 범위엔 자리·계약만. 원장은 티켓 도메인 아님 |
 | D9 | WMS는 **조인 키만**(`inventory_unit_id` nullable + 시리얼 자동 매칭 읽기 표시). 쓰기 훅·`link_hospital` 확대는 후속. WMS 테이블에 쓰기 없음 — `inventory_units.status`는 **원장 상태(ACTIVE/RECOVERED)·이벤트 생성·fold의 입력으로 절대 미사용**(매칭 후보 우선순위·⚠ 표시용 읽기만 허용, §9.2) |
 | D10 | 읽기 로그인 전체 / 등록·회수·이동·임포트 `isUserOrAbove` / 정정·삭제·배치 취소 `isAdminOrAbove OR device.admin` / nav SEERS 게이트 |
-| D11 | 원장은 **'이 병원에서 나감(사유)'까지만**. 회수 후 수리·폐기·재출고는 WMS 영역 |
+| D11 | 원장은 **'이 병원에서 나감(사유)'까지만**. 회수 후 수리·폐기·재출고는 WMS 영역 · **개정 참조(2026-09-17, B-36 — `device_condition_location_design.md`)**: 회수 후 실물 상태(AS접수·수리완료·분실·폐기·출고 전)·위치(병원/리프레시센터/Hub)는 원장 **유닛 축**(`device_units.condition/location_*`)이 추적한다. 배치 프로젝션·WMS 재고·전표는 불변 |
 | D12 | 전용 페이지 `/devices`. 병원 상세 '도입 현황' 수량 입력 → **모델별 요약행 + 링크**로 교체, `InventoryUsageCard` 제거 |
 
 ---
@@ -92,7 +92,7 @@ HospitalDeviceImportBatch — 취소 단위 · mode · 카운트 · summary · c
 4. **이벤트는 append-first** — 지우는 경로는 §8.2의 취소 4종(① 마지막 이벤트 취소 ② 교체·이관 그룹 짝 취소 ③ CORRECT 취소 ④ 임포트 배치 취소)뿐이고 인플레이스 UPDATE는 admin 허용 필드에 한정(D10이 명시한 예외). 사실의 번복은 새 이벤트.
 5. **병동은 병원에 속한다** — `(ward_id, hospital_code)` 복합 FK. 이벤트는 병동이 있으면 `hospital_code` 필수 CHECK.
 6. **교체 = RECOVER + REGISTER 쌍**(같은 `action_group`, 상호 `related_device_id`). **타 병원 이관도 같은 구조**(RECOVER 사유 `TRANSFER` + REGISTER). REPLACE/TRANSFER 이벤트 타입은 없다. 구기기가 원장에 없으면 같은 그룹에 소급 REGISTER를 앞세워 3이벤트; 구기기가 이미 이 병원에서 회수돼 있으면 RECOVER를 다시 만들지 않고 신 REGISTER 1이벤트 + 구 RECOVER 이벤트에 `related_device_id` 연결(§7.0 교체 계약).
-7. **회수 후 원장 책임 종료**(D11): RECOVERED는 `hospital_code NULL`, `last_hospital_code`에 마지막 병원. 재등록 시 이력은 잇되 프로젝션은 현재 배치만 말한다(`last_hospital_code`·`replaced_by_id` NULL).
+7. **회수 후 원장 책임 종료**(D11): RECOVERED는 `hospital_code NULL`, `last_hospital_code`에 마지막 병원. 재등록 시 이력은 잇되 프로젝션은 현재 배치만 말한다(`last_hospital_code`·`replaced_by_id` NULL). **개정 참조(2026-09-17 B-36)**: 배치 책임은 그대로 끝나되 실물 상태·위치는 유닛 속성 축이 이어 받는다(`device_condition_location_design.md` §4 — 불변식 1·3의 명시 예외 B-26, 유닛 값은 fold 파생이 아니라 스냅샷 이벤트 id 순 I-6).
 8. **자동 출처 멱등 키**: `source IN ('WMS','ONPREM')`이고 ref가 있으면 `(ref_type, ref_code, device_id, event_type)` 부분 UNIQUE(훅 재실행 no-op). MANUAL에는 적용하지 않는다(같은 MNT에서 같은 기기를 정당하게 2회 이동하는 입력을 버리면 안 됨).
 
 ### 4.2 상태 머신
@@ -553,7 +553,7 @@ nav `('devices','디바이스 원장','/devices','device','operations',55,'{SEER
 | 온프렘 스냅샷 diff(원장 ACTIVE인데 목록에 없는 기기·선택 회수) | '동기화는 예약만'(쟁점 A-7). v1 초안 모드는 D6 그대로 |
 | 온프렘 API 자동 동기화·org 매핑 테이블·인증 | 예약만 |
 | AI 도구 3종 | v2 |
-| 회수 후 수리·폐기·재출고 상태 | D11 WMS 영역 |
+| 회수 후 수리·폐기·재출고 상태 | D11 WMS 영역 → **2026-09-17 해제(B-36)**: 수리·폐기·분실·위치는 `device_condition_location_design.md`가 유닛 축으로 구현. 재출고 생성 경로(Hub 입고·WMS 편입)는 그쪽 Phase 2 |
 | 비시리얼 소모품·MT100D/MBP100U 시드 | D2, 코드만 |
 | `intro_beds` 재계산·센서스 이관 | D1 |
 | 병실·병상 계층·사용량·온프렘 닉네임 부여 기능 | 참고 구조 이식 금지 |
@@ -619,6 +619,7 @@ nav `('devices','디바이스 원장','/devices','device','operations',55,'{SEER
 | B-23 | **계약건(딜) = 배치의 소프트 참조 — 선택 입력** `hospital_devices.deal_code` TEXT + 이벤트 스냅샷 `hospital_device_events.deal_code` — 2026-09-02 제품 책임자 결정. FK 없음(딜은 재적재·삭제됨 — 티켓 `ref_type/ref_code` 선례). 시리얼을 보면 어느 계약 소속인지 답하고, 교체기는 구 배치의 딜을 상속한다. 명시 코드는 계약완료 딜 검증(409)·단일 딜 자동 기본값·딜 선택 시 상품유형 파생(명시 충돌 400, 자동 기본값은 충돌 시 폐기), 변경은 CORRECT(`SET_DEAL` 일괄·PATCH — write). **딜 재적재로 코드가 재발번되면 원장 두 컬럼(deal_code)의 코드 매핑 백필 단계가 필요**(`daewoong_deal_migration_design.md` 주의 참조) — 끊긴 코드는 계약별 표에 '(계약 외)'로 드러난다 |
 | B-24 | **'AS진행중' = ACTIVE 배치의 플래그**(제3의 fold 상태 아님) `as_started_on`·`as_ref_code` + 비상태 이벤트 AS_OPEN/AS_CLEAR — 2026-09-02 결정. 수동 표시(유지보수 코드 연결 가능)·수동 해제, **교체·회수 시 fold가 자동 해제**(이벤트 없음), 재등록 시 초기화. last_event·요약 '최근 이벤트'·stateEventCount·시리얼 정정 sole 판정에서 제외(CORRECT 규약), LIFO 취소 지원. 표시 라벨: 사용중/AS진행중/회수됨(`placementStatusLabel`) — '배치 중'은 집계 문구 전용 |
 | B-21 | **용도(usage type) = 유닛 속성 2값** `device_units.usage_type_id` → StatusCode `DEVICE_USAGE_TYPE`(value `SALE` 판매용 / `EVAL` 평가용, NULL=미지정) — 2026-09-01 사용자 결정. WMS 인벤토리 '대웅제약재고'는 **판매용 창고**이지 제3의 용도 값이 아니다. 계약 대조(§9.1)에서 EVAL 제외(`activeForCompare`). 변경은 CORRECT(`changes.usageTypeId`)이며 PATCH 권한은 write(USER+) — 나머지 식별 보정(admin)과 분리. 등록·임포트·교체는 폼 공통 기본값 + 행/항목 우선, 기존 유닛에 다른 용도를 명시하면 유지 + 경고(모델 규약과 동일), 비어 있으면 채움. 교체 신 기기는 구 기기 용도 승계 | 용도는 위치(병원/병동/창고)가 아니라 물건의 속성 — 평가용 기기가 병원에 배치돼 있어도 계약 수량과 비교하면 안 되고, 회수돼 창고로 가도 평가용으로 남는다. 같은 마스터 패턴(회수 사유)을 재사용해 설정 페이지·seed·감사 자원명만 추가 |
+| B-36 | **D11 개정 참조(2026-09-17)** — 회수 후 상태·위치는 `device_condition_location_design.md`(B-26~B-37, 본 표의 다음 번호를 그 문서가 이어 씀)가 `device_units.condition/location_*` 유닛 축으로 정의. 배치 프로젝션·fold·CHECK·WMS 경계는 불변, 스냅샷 이벤트(REGISTER·RECOVER·AS_*·신규 4종·상태 CORRECT)의 `changes.condition/location`이 이력. **B-20의 ACTIVE-only 변형(회수 요약을 유닛으로) 미결정은 여전히 미결** — 회수 기기 목록은 계속 `hospital_devices RECOVERED` 기준(배치 없는 유닛은 목록 비노출, 그쪽 §10) | 2.0 기획 A1 '창고 밖 상태 추가'의 구현 위치를 원장 유닛으로 확정 |
 
 ---
 

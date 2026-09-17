@@ -41,7 +41,8 @@ export function placementStatusLabel(row: { status: string; asStartedOn?: string
   return row.asStartedOn ? PLACEMENT_STATUS_AS_LABEL : PLACEMENT_STATUS_ACTIVE_LABEL
 }
 
-export const DEVICE_EVENT_TYPES = ['REGISTER', 'MOVE_WARD', 'RECOVER', 'CORRECT', 'AS_OPEN', 'AS_CLEAR'] as const
+// 2026-09-17 상태·위치 축(device_condition_location_design.md §5.6): INTAKE(센터 입고)·REPAIR_DONE(수리 완료)·SCRAP(폐기)·SITE_MOVE(위치 이동) 4종 추가 — 10종
+export const DEVICE_EVENT_TYPES = ['REGISTER', 'MOVE_WARD', 'RECOVER', 'CORRECT', 'AS_OPEN', 'AS_CLEAR', 'INTAKE', 'REPAIR_DONE', 'SCRAP', 'SITE_MOVE'] as const
 export type DeviceEventType = (typeof DEVICE_EVENT_TYPES)[number]
 
 export const DEVICE_EVENT_TYPE_LABELS: Record<DeviceEventType, string> = {
@@ -51,6 +52,10 @@ export const DEVICE_EVENT_TYPE_LABELS: Record<DeviceEventType, string> = {
   CORRECT: '정정',
   AS_OPEN: 'AS 접수', // 액션 용어(2026-09-02 개정) — 상태 라벨 'AS진행중'·코드 AS_OPEN은 불변
   AS_CLEAR: 'AS 해제',
+  INTAKE: '입고',
+  REPAIR_DONE: '수리 완료',
+  SCRAP: '폐기',
+  SITE_MOVE: '위치 이동',
 }
 
 export const DEVICE_EVENT_TYPE_COLORS: Record<DeviceEventType, string> = {
@@ -60,14 +65,45 @@ export const DEVICE_EVENT_TYPE_COLORS: Record<DeviceEventType, string> = {
   CORRECT: 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
   AS_OPEN: 'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300',
   AS_CLEAR: 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300',
+  INTAKE: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300',
+  REPAIR_DONE: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
+  SCRAP: 'bg-gray-300 text-gray-800 dark:bg-gray-600 dark:text-gray-200',
+  SITE_MOVE: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300',
 }
 
 /**
- * 상태 이벤트(fold 전이·`last_event_type` 대상) — CORRECT는 식별 속성만 바꾸고 전이가 없다.
+ * 배치 상태 이벤트(fold 전이·`last_event_type` 대상·배치 fold EMPTY 판정) — CORRECT는 식별 속성만 바꾸고 전이가 없다.
  * AS_OPEN/AS_CLEAR(B-24)는 **비상태 표시 이벤트**: ACTIVE 배치의 `as_started_on` 플래그만 접고(fold),
  * CORRECT처럼 `last_event_type/on`·stateEventCount·요약 '최근 이벤트'에서 제외한다(마커일 뿐 자리의 이력이 아님).
+ * 신규 4종(INTAKE·REPAIR_DONE·SCRAP·SITE_MOVE, 2026-09-17)도 배치 fold 비상태 이벤트(B-35) — 이 상수는 **불변(3종)**.
  */
 export const DEVICE_STATE_EVENT_TYPES: readonly DeviceEventType[] = ['REGISTER', 'MOVE_WARD', 'RECOVER']
+
+/** 배치 축 이벤트(§0 용어) — 배치 프로젝션을 접는 이벤트. admin `assertSuffix`(occurred_on 순 LIFO)의 대상 (B-35) */
+export const DEVICE_PLACEMENT_AXIS_EVENT_TYPES: readonly DeviceEventType[] = ['REGISTER', 'MOVE_WARD', 'RECOVER', 'AS_OPEN', 'AS_CLEAR']
+
+/** 유닛 상태·위치 축 전용 이벤트 4종(2026-09-17) — 배치 fold `continue`, `stateEventsAfter`·임포트 lastStateOn·요약 lastEvent에서 제외 */
+export const DEVICE_UNIT_STATE_EVENT_TYPES: readonly DeviceEventType[] = ['INTAKE', 'REPAIR_DONE', 'SCRAP', 'SITE_MOVE']
+
+/**
+ * 스냅샷 이벤트 후보(§0 용어) — `changes.condition/location`을 싣는 이벤트. MOVE_WARD는 제외(상태·위치를 바꾸지 않음).
+ * CORRECT는 condition/location 키를 가진 행만 스냅샷 이벤트다 → 판정은 `isSnapshotEvent(ev)`.
+ */
+export const DEVICE_SNAPSHOT_EVENT_TYPES: readonly DeviceEventType[] = ['REGISTER', 'RECOVER', 'AS_OPEN', 'AS_CLEAR', 'INTAKE', 'REPAIR_DONE', 'SCRAP', 'SITE_MOVE', 'CORRECT']
+
+/** `changes`에 상태 스냅샷(condition 키)이 있는가 — 배포 전 이벤트(스냅샷 없음)와 구분 */
+export function hasUnitStateSnapshot(changes: unknown): boolean {
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes)) return false
+  const c = (changes as Record<string, unknown>).condition
+  return !!c && typeof c === 'object' && !Array.isArray(c)
+}
+
+/** 스냅샷 이벤트인가(I-6·§8.2 취소 규약·`ownsDeviceState` 공용 판정) — 배치 축·신규 4종은 스냅샷 보유 시, CORRECT는 condition 키 보유 시 */
+export function isSnapshotEvent(ev: { eventType: string; changes?: unknown }): boolean {
+  if (ev.eventType === 'MOVE_WARD') return false
+  if (!(DEVICE_SNAPSHOT_EVENT_TYPES as readonly string[]).includes(ev.eventType)) return false
+  return hasUnitStateSnapshot(ev.changes)
+}
 
 /**
  * 전이표 행 키 — §4.2 표의 4행.
@@ -85,11 +121,13 @@ export type TransitionFrom = 'NONE' | 'ACTIVE_SAME' | 'ACTIVE_OTHER' | 'RECOVERE
  */
 export type TransitionOutcome = 'ok' | 'skip' | 'conflict' | 'invalid' | 'not_found'
 
+// 2026-09-17 신규 4종(배치 축 판정 — SAME/OTHER는 호출부 ctx.hospitalCode(접수 병원) 기준, §5.6): INTAKE·REPAIR_DONE은 배치 없음/RECOVERED/같은 병원 ACTIVE에서 ok,
+// 타 병원 ACTIVE는 conflict(스킵+경고) · SCRAP은 배치 ACTIVE면 invalid(I-3 '먼저 회수') · SITE_MOVE는 ACTIVE_SAME에서 '병원 반환'만(condition IN_USE — 서비스 검증)
 export const DEVICE_TRANSITIONS: Record<TransitionFrom, Record<DeviceEventType, TransitionOutcome>> = {
-  NONE: { REGISTER: 'ok', MOVE_WARD: 'not_found', RECOVER: 'not_found', CORRECT: 'not_found', AS_OPEN: 'not_found', AS_CLEAR: 'not_found' },
-  ACTIVE_SAME: { REGISTER: 'skip', MOVE_WARD: 'ok', RECOVER: 'ok', CORRECT: 'ok', AS_OPEN: 'ok', AS_CLEAR: 'ok' },
-  ACTIVE_OTHER: { REGISTER: 'conflict', MOVE_WARD: 'conflict', RECOVER: 'conflict', CORRECT: 'ok', AS_OPEN: 'conflict', AS_CLEAR: 'conflict' },
-  RECOVERED: { REGISTER: 'ok', MOVE_WARD: 'invalid', RECOVER: 'invalid', CORRECT: 'ok', AS_OPEN: 'invalid', AS_CLEAR: 'invalid' },
+  NONE: { REGISTER: 'ok', MOVE_WARD: 'not_found', RECOVER: 'not_found', CORRECT: 'not_found', AS_OPEN: 'not_found', AS_CLEAR: 'not_found', INTAKE: 'ok', REPAIR_DONE: 'ok', SCRAP: 'ok', SITE_MOVE: 'ok' },
+  ACTIVE_SAME: { REGISTER: 'skip', MOVE_WARD: 'ok', RECOVER: 'ok', CORRECT: 'ok', AS_OPEN: 'ok', AS_CLEAR: 'ok', INTAKE: 'ok', REPAIR_DONE: 'ok', SCRAP: 'invalid', SITE_MOVE: 'ok' },
+  ACTIVE_OTHER: { REGISTER: 'conflict', MOVE_WARD: 'conflict', RECOVER: 'conflict', CORRECT: 'ok', AS_OPEN: 'conflict', AS_CLEAR: 'conflict', INTAKE: 'conflict', REPAIR_DONE: 'conflict', SCRAP: 'invalid', SITE_MOVE: 'conflict' },
+  RECOVERED: { REGISTER: 'ok', MOVE_WARD: 'invalid', RECOVER: 'invalid', CORRECT: 'ok', AS_OPEN: 'invalid', AS_CLEAR: 'invalid', INTAKE: 'ok', REPAIR_DONE: 'ok', SCRAP: 'ok', SITE_MOVE: 'ok' },
 }
 
 /** 판정 → HTTP 상태 (ok·skip은 호출부 규약에 따름 — skip은 단건/전부일 때만 409) */
@@ -111,12 +149,14 @@ export function transitionMessage(from: TransitionFrom, eventType: DeviceEventTy
     case 'not_found':
       return '기기 현황에 등록되지 않은 기기입니다'
     case 'conflict':
-      return eventType === 'REGISTER'
-        ? '다른 병원에 배치 중인 시리얼입니다 — 이관 처리를 지정하거나 그 병원에서 먼저 회수 기록하세요'
-        : '다른 병원에 배치 중인 기기입니다 — 그 병원에서 처리하세요'
+      if (eventType === 'REGISTER') return '다른 병원에 배치 중인 시리얼입니다 — 이관 처리를 지정하거나 그 병원에서 먼저 회수 기록하세요'
+      if (eventType === 'INTAKE' || eventType === 'REPAIR_DONE') return '다른 병원에 배치 중인 기기입니다 — 원장 확정에서 이관 후 입고하세요'
+      return '다른 병원에 배치 중인 기기입니다 — 그 병원에서 처리하세요'
     case 'invalid':
       if (eventType === 'MOVE_WARD') return '회수된 기기는 병동을 이동할 수 없습니다 — 먼저 재등록하세요'
       if (eventType === 'AS_OPEN' || eventType === 'AS_CLEAR') return '회수된 기기에는 AS 접수·해제를 할 수 없습니다'
+      if (eventType === 'SCRAP') return DEVICE_SCRAP_ACTIVE_MESSAGE // 배치 ACTIVE(I-3)
+      if (eventType === 'INTAKE' || eventType === 'REPAIR_DONE' || eventType === 'SITE_MOVE') return '이 배치 상태에서는 처리할 수 없습니다'
       return '이미 회수된 기기입니다'
   }
 }
@@ -149,7 +189,7 @@ export function canTransition(
 // 출처 · 소프트 참조 · 분류 · 배치 · 온프렘 코드 · 임포트 판정 (CHECK 없음 — 상수만)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 이벤트·유닛 `source` 어휘 — BACKFILL은 유닛 생성 경로(교체 시 구기기 소급 등록)에만 쓴다 */
+/** 이벤트·유닛 `source` 어휘 — BACKFILL = 유닛 생성(교체 시 구기기 소급 등록)·상태축 소급 백필(scripts/backfill-device-condition.mts의 INTAKE, 2026-09-17) */
 export const REGISTRY_SOURCES = ['MANUAL', 'IMPORT', 'WMS', 'ONPREM', 'BACKFILL'] as const
 export type RegistrySource = (typeof REGISTRY_SOURCES)[number]
 
@@ -285,6 +325,135 @@ export const RECOVERY_REASON_FALLBACK_LABELS: Record<RecoveryReasonValue, string
   DISPOSE: '폐기',
   TRANSFER: '이관',
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 기기 상태(condition) · 위치(location) 축 — 2026-09-17 device_condition_location_design.md §4.2·§5.6
+// 유닛(device_units) 속성(B-26): 배치 fold 파생값이 아니라 직접 갱신(낙관 가드) + 스냅샷 이벤트. NULL = '미확인'(백필·재도출 전용)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const DEVICE_CONDITIONS = ['IN_USE', 'AS_WAITING', 'REPAIRED', 'PRE_SHIP', 'LOST', 'SCRAPPED'] as const
+export type DeviceCondition = (typeof DEVICE_CONDITIONS)[number]
+
+export const DEVICE_CONDITION_LABELS: Record<DeviceCondition, string> = {
+  IN_USE: '사용중',
+  AS_WAITING: 'AS접수',
+  REPAIRED: '수리완료',
+  PRE_SHIP: '출고 전',
+  LOST: '분실',
+  SCRAPPED: '폐기',
+}
+
+/** condition NULL(백필·재도출 전용) 표기 */
+export const DEVICE_CONDITION_UNKNOWN_LABEL = '미확인'
+
+export const DEVICE_CONDITION_COLORS: Record<DeviceCondition, string> = {
+  IN_USE: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
+  AS_WAITING: 'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300',
+  REPAIRED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
+  PRE_SHIP: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300',
+  LOST: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+  SCRAPPED: 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+}
+
+/** NULL(미확인) 배지 톤 */
+export const DEVICE_CONDITION_UNKNOWN_COLOR = 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+
+export function isDeviceCondition(v: unknown): v is DeviceCondition {
+  return typeof v === 'string' && (DEVICE_CONDITIONS as readonly string[]).includes(v)
+}
+
+/** condition 라벨 — NULL/미지 값은 '미확인' */
+export function deviceConditionLabel(v: string | null | undefined): string {
+  return v && isDeviceCondition(v) ? DEVICE_CONDITION_LABELS[v] : DEVICE_CONDITION_UNKNOWN_LABEL
+}
+
+/** 목록 필터 `condition=` 어휘 — 6종 또는 none(미확인 NULL) */
+export const CONDITION_FILTERS = [...DEVICE_CONDITIONS, 'none'] as const
+export type ConditionFilter = (typeof CONDITION_FILTERS)[number]
+
+/** 거점 마스터 StatusCode 카테고리(B-30) — value가 시스템 의미. 설정 UI 없음(2행 고정, seed·마이그 양쪽 INSERT) */
+export const DEVICE_SITE_CATEGORY = 'DEVICE_SITE'
+
+export const DEVICE_SITE_VALUES = ['REFRESH_CENTER', 'HUB'] as const
+export type DeviceSiteValue = (typeof DEVICE_SITE_VALUES)[number]
+
+/** value별 기본 표시명 — 실제 표시는 status_codes.name, 마스터 조인 불가 시 폴백용 */
+export const DEVICE_SITE_FALLBACK_LABELS: Record<DeviceSiteValue, string> = {
+  REFRESH_CENTER: '리프레시센터',
+  HUB: 'thynC Connected Hub',
+}
+
+export function isDeviceSiteValue(v: unknown): v is DeviceSiteValue {
+  return typeof v === 'string' && (DEVICE_SITE_VALUES as readonly string[]).includes(v)
+}
+
+/** 거점 라벨 — 마스터 name 우선, 없으면 value 폴백 */
+export function deviceSiteLabel(site: { name?: string | null; value?: string | null } | string | null | undefined): string | null {
+  if (!site) return null
+  if (typeof site === 'string') return isDeviceSiteValue(site) ? DEVICE_SITE_FALLBACK_LABELS[site] : site
+  return site.name || (isDeviceSiteValue(site.value) ? DEVICE_SITE_FALLBACK_LABELS[site.value] : site.value) || null
+}
+
+/** 목록 필터 `location=` 어휘 — 병원 / 거점 2종 / none(위치 없음) */
+export const LOCATION_FILTERS = ['HOSPITAL', 'REFRESH_CENTER', 'HUB', 'none'] as const
+export type LocationFilter = (typeof LOCATION_FILTERS)[number]
+
+/** 위치 표시 라벨 — 병원(HOSPITAL)·거점·없음('—') */
+export const LOCATION_KIND_LABELS = { HOSPITAL: '병원', SITE: '거점' } as const
+export const LOCATION_NONE_LABEL = '—'
+
+/** 스냅샷 이벤트 `changes.location` 값 형상(§5.3) — kind HOSPITAL이면 code=병원 코드, SITE면 code=거점 value, 없음이면 둘 다 null */
+export interface DeviceLocationSnapshot {
+  kind: 'HOSPITAL' | 'SITE' | null
+  code: string | null
+}
+
+/**
+ * 스냅샷 이벤트 `changes` 형상(§5.3) — 값이 같아도 before/after를 모두 기록한다(B-28).
+ * `location.note`는 A-4(a) '입고 미확인'(DEFECT 회수 시 before 위치가 병원일 때만 — memo 컬럼이 아님, 사용자 회수 메모와 분리)
+ */
+export interface DeviceUnitStateChanges {
+  condition: { before: DeviceCondition | null; after: DeviceCondition | null }
+  location: { before: DeviceLocationSnapshot; after: DeviceLocationSnapshot; note?: string }
+}
+
+/** A-4(a) 표시 문구 — `changes.location.note` */
+export const DEVICE_LOCATION_NOTE_INTAKE_UNCONFIRMED = '입고 미확인'
+
+/** `changes` JSON → 상태 스냅샷(없으면 null) — 표시·재도출·취소 복원 공용 파서 */
+export function unitStateChangesOf(changes: unknown): DeviceUnitStateChanges | null {
+  if (!hasUnitStateSnapshot(changes)) return null
+  const c = changes as Record<string, unknown>
+  const cond = c.condition as { before?: unknown; after?: unknown }
+  const loc = (c.location && typeof c.location === 'object' ? c.location : {}) as { before?: unknown; after?: unknown; note?: unknown }
+  const toLoc = (v: unknown): DeviceLocationSnapshot => {
+    if (!v || typeof v !== 'object') return { kind: null, code: null }
+    const o = v as { kind?: unknown; code?: unknown }
+    const kind = o.kind === 'HOSPITAL' || o.kind === 'SITE' ? o.kind : null
+    return { kind, code: kind && typeof o.code === 'string' ? o.code : null }
+  }
+  return {
+    condition: { before: isDeviceCondition(cond.before) ? cond.before : null, after: isDeviceCondition(cond.after) ? cond.after : null },
+    location: { before: toLoc(loc.before), after: toLoc(loc.after), ...(typeof loc.note === 'string' ? { note: loc.note } : {}) },
+  }
+}
+
+/**
+ * 회수 사유 value → condition(§5.6). RETURN·TRANSFER·value NULL(데모 종료·기타)은 keep(매핑 없음 — §4.2).
+ * DEFECT의 위치는 A-4(a): RECOVER 행 스냅샷에 위치 after=리프레시센터(before가 병원이면 note '입고 미확인'), INTAKE는 만들지 않는다.
+ */
+export const RECOVERY_REASON_CONDITION: Partial<Record<RecoveryReasonValue, DeviceCondition>> = {
+  DEFECT: 'AS_WAITING',
+  LOST: 'LOST',
+  DISPOSE: 'SCRAPPED',
+}
+
+/** 공통 오류 문구(§6.3) — 서비스·라우트·폼이 같은 문자열을 쓴다 */
+export const DEVICE_SCRAP_ACTIVE_MESSAGE = '배치 중 기기는 먼저 회수하세요'
+export const DEVICE_SCRAPPED_REGISTER_MESSAGE = '폐기된 기기입니다 — 정정 후 등록하세요'
+export const DEVICE_CONCURRENT_CHANGE_MESSAGE = '동시에 변경되어 다시 시도하세요'
+export const DEVICE_OPEN_INTAKE_LINE_MESSAGE = '미종결 입고 라인 — AS 상세에서 확정하세요'
+export const DEVICE_REPAIR_IN_USE_MESSAGE = '사용중 기기는 수리완료 처리할 수 없습니다'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 용도(usage type) — StatusCode DEVICE_USAGE_TYPE (2026-09-01 결정: 판매용/평가용 2값, NULL=미지정)

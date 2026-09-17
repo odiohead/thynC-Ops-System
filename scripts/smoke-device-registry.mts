@@ -10,9 +10,13 @@
  *   시작/종료 시 5개 원장 테이블(device_units 포함) row 수가 같아야 통과.
  * - 3층 구조(B-20): 공개 device id = device_units.id. 서비스는 유닛을 자동 삭제하지 않는다(이벤트 0 → 배치 행만 삭제, 유닛은 고아로 남음)
  *   → 스모크가 만든 유닛은 cleanup이 직접 지운다.
+ * - [1e] 기기 상태·위치 축(2026-09-17 device_condition_location_design.md 부록 C [1e-1]~[1e-11]): 2축 전이표 전수·멱등/INTAKE ref 규칙·가드 409/RegistryTxAbort 롤백·
+ *   취소/재도출·SCRAPPED 등록 409·ACTIVE SCRAP/SITE_MOVE 409·배치 상태 이벤트 0 재-fold·I-6·일괄=단건·DEVICE_SITE 마스터·ACTIVE_OTHER conflict.
+ *   거점 마스터는 seed의 DEVICE_SITE 2행을 그대로 쓴다(스모크 거점 생성 없음). 스모크용 AS접수(SMOKE_AS_CODES, 티켓 없음)는 cleanup에서 삭제.
+ * - [13] 라우트에 units/[id]/{repair-done,repair-undo,scrap,location}·PATCH condition/location·목록 필터·as-receipts/[id]/{repair-done,scrap-line} 포함.
  */
 import { readFileSync } from 'fs'
-import { PrismaClient } from '@prisma/client'
+import { Prisma, PrismaClient } from '@prisma/client'
 import { NextRequest } from 'next/server'
 import type { RegistryCtx } from '../lib/deviceRegistry'
 
@@ -61,6 +65,18 @@ const {
   loadUsageTypes,
   getHospitalProductTypeContext,
   countReplacements,
+  // 상태·위치 축(2026-09-17 condition.ts)
+  RegistryTxAbort,
+  intakeDevice,
+  markDeviceRepaired,
+  undoDeviceRepaired,
+  scrapDevice,
+  moveDeviceLocation,
+  applyUnitState,
+  applyImplicitTransition,
+  judgeCondition,
+  loadDeviceSites,
+  ymd,
 } = reg
 const shared = await import('../lib/deviceRegistryShared')
 const access = await import('../lib/deviceRegistryAccess')
@@ -72,7 +88,9 @@ const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
 /** 테스트 시리얼 — A9900xx / P9900xx / B9900xx (7자, 모델 패턴 통과) */
 const S = (n: number, kind: 'A' | 'P' | 'B' = 'A') => `${kind}9900${String(n).padStart(2, '0')}`
 const TEST_PREFIXES = ['A9900', 'P9900', 'B9900']
-const AUDIT_RESOURCES = ['hospital_device', 'hospital_device_event', 'hospital_device_import', 'hospital_ward', 'setting:device_recovery_reason', 'setting:device_usage_type']
+const AUDIT_RESOURCES = ['hospital_device', 'hospital_device_event', 'hospital_device_import', 'hospital_ward', 'setting:device_recovery_reason', 'setting:device_usage_type', 'as_receipt']
+/** 스모크용 AS접수 코드 — [1e] ref 규칙용 3건(라인 없음) + [13] 라우트용 1건(라인 3). 티켓 없음, cleanup에서 삭제(라인은 CASCADE) */
+const SMOKE_AS_CODES = ['AS-999901-9001', 'AS-999901-9002', 'AS-999901-9003', 'AS-999912-9901'] as const
 
 let pass = 0
 let fail = 0
@@ -198,6 +216,7 @@ async function cleanup() {
     select: { id: true },
   })
   const ids = units.map((d) => d.id)
+  await prisma.asReceipt.deleteMany({ where: { asCode: { in: [...SMOKE_AS_CODES] } } }) // 라인 CASCADE
   await prisma.hospitalDeviceEvent.deleteMany({
     where: { OR: [{ deviceId: { in: ids } }, { relatedDeviceId: { in: ids } }, { id: { gt: pre.max.e }, hospitalCode: { in: TEST_HOSPITALS } }] },
   })
@@ -310,6 +329,13 @@ async function main() {
   const sale = usageTypes.find((u) => u.value === 'SALE')!
   const evalT = usageTypes.find((u) => u.value === 'EVAL')!
   ok(!!sale && !!evalT && sale.name === '판매용' && evalT.name === '평가용', '용도 마스터 DEVICE_USAGE_TYPE 2행(SALE 판매용·EVAL 평가용)')
+  {
+    // 거점 마스터(DEVICE_SITE, 2026-09-17 상태·위치 축 §5.2) — [1e] 2축 전이 스모크는 Integrate 단계에서 별도 작성
+    const sites = await prisma.statusCode.findMany({ where: { category: shared.DEVICE_SITE_CATEGORY }, select: { name: true, value: true } })
+    const rc = sites.find((x) => x.value === 'REFRESH_CENTER')
+    const hub = sites.find((x) => x.value === 'HUB')
+    ok(!!rc && !!hub && rc.name === '리프레시센터' && hub.name === 'thynC Connected Hub', '거점 마스터 DEVICE_SITE 2행(REFRESH_CENTER 리프레시센터·HUB thynC Connected Hub)', sites)
+  }
   const rU = await registerDevices(ctx(H1, '2026-08-01'), [
     { serialInput: S(5), usageTypeId: evalT.id, wardName: '6병동' },
     { serialInput: S(6), usageTypeInput: '판매용' },
@@ -425,13 +451,15 @@ async function main() {
     ok(rD.created[0].productType === (ptH1.default ?? null) && (await dev({ serialNo: S(65) }))!.productType === (ptH1.default ?? null), `등록 미지정 → 병원 딜 기본값(${ptH1.default ?? '미지정'})`, rD.warnings)
     ok(ptH1.deals === 0 ? rD.warnings.includes(shared.PRODUCT_TYPE_NO_DEAL_WARNING) : !rD.warnings.includes(shared.PRODUCT_TYPE_NO_DEAL_WARNING), '기본값 적용 시 경고 유무(딜 0건일 때만)')
   }
-  // 주입 문맥 — 혼합 병원 시나리오(실데이터 수정 없음)
-  await expectErr('혼합 문맥 주입 + 미지정 → 400 필수', () => registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(66) }], { productTypeContextOverride: MIXED_CTX }), 400, shared.PRODUCT_TYPE_REQUIRED_MESSAGE)
-  await expectErr('혼합 문맥 다건 — 하나라도 미지정이면 400', () => registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(66), productType: '일반' }, { serialInput: S(67) }], { productTypeContextOverride: MIXED_CTX }), 400, shared.PRODUCT_TYPE_REQUIRED_MESSAGE)
+  // 주입 문맥 — 혼합 병원 시나리오(실데이터 수정 없음). 계약건 문맥도 비워야 한다(H1에 계약완료 딜이 1건이면 자동 기본값 딜이 상품유형을 파생해 혼합 규칙이 생략됨 — B-23,
+  // 2026-09-17 PROD 재동기화 후 H1 후보가 단일 딜 병원으로 바뀌어 드러난 데이터 의존 — dealContextOverride 주입으로 고정)
+  const NO_DEALS: reg.HospitalDealContext = { deals: [], single: null }
+  await expectErr('혼합 문맥 주입 + 미지정 → 400 필수', () => registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(66) }], { productTypeContextOverride: MIXED_CTX, dealContextOverride: NO_DEALS }), 400, shared.PRODUCT_TYPE_REQUIRED_MESSAGE)
+  await expectErr('혼합 문맥 다건 — 하나라도 미지정이면 400', () => registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(66), productType: '일반' }, { serialInput: S(67) }], { productTypeContextOverride: MIXED_CTX, dealContextOverride: NO_DEALS }), 400, shared.PRODUCT_TYPE_REQUIRED_MESSAGE)
   ok((await prisma.deviceUnit.count({ where: { serialNo: { in: [S(66), S(67)] } } })) === 0, '400 시 유닛·배치 미생성(롤백)')
-  const rM = await registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(66), productType: '일반' }, { serialInput: S(67), productType: '라이트' }], { productTypeContextOverride: MIXED_CTX })
+  const rM = await registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(66), productType: '일반' }, { serialInput: S(67), productType: '라이트' }], { productTypeContextOverride: MIXED_CTX, dealContextOverride: NO_DEALS })
   ok(rM.created.length === 2 && rM.created.map((c) => c.productType).sort().join() === '라이트,일반', '혼합 문맥 + 전부 명시 → 201 (한 병원에 일반·라이트 공존)')
-  const rL = await registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(68) }], { productTypeContextOverride: LITE_CTX })
+  const rL = await registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(68) }], { productTypeContextOverride: LITE_CTX, dealContextOverride: NO_DEALS })
   ok(rL.created[0].productType === '라이트' && rL.warnings.every((w) => !w.includes('상품유형')), '라이트 단일 문맥 주입 → 기본값 라이트(경고 없음)')
   const rZ = await registerDevices(ctx(H3, '2026-08-01'), [{ serialInput: S(69) }])
   ok(rZ.created[0].productType === null && rZ.warnings.includes(shared.PRODUCT_TYPE_NO_DEAL_WARNING), 'H3(딜 0건) 미지정 등록 → null + 경고')
@@ -455,8 +483,8 @@ async function main() {
   // 교체 상속
   const rpP = await replaceDevice(ctx(H1, '2026-08-15'), { oldDeviceId: (await dev({ serialNo: S(67) }))!.id, newSerial: S(72), productType: '일반' })
   ok(rpP.productType === '라이트' && rpP.newDevice.productType === '라이트' && rpP.recoverEvent!.productType === '라이트' && rpP.registerEvent!.productType === '라이트' && rpP.warnings.some((w) => w.includes('상속')), '교체: 신 배치는 구 배치 상품유형(라이트) 상속 · 지정값(일반)은 무시+경고 · RECOVER/REGISTER 스냅샷', rpP.warnings)
-  await expectErr('교체 소급 경로 + 혼합 문맥 + 미지정 → 400', () => replaceDevice(ctx(H1, '2026-08-15'), { oldSerial: S(73), oldWardName: '6병동', newSerial: S(74), productTypeContextOverride: MIXED_CTX }), 400, shared.PRODUCT_TYPE_REQUIRED_MESSAGE)
-  const rpB = await replaceDevice(ctx(H1, '2026-08-15'), { oldSerial: S(73), oldWardName: '6병동', newSerial: S(74), productType: 'lite', productTypeContextOverride: MIXED_CTX })
+  await expectErr('교체 소급 경로 + 혼합 문맥 + 미지정 → 400', () => replaceDevice(ctx(H1, '2026-08-15'), { oldSerial: S(73), oldWardName: '6병동', newSerial: S(74), productTypeContextOverride: MIXED_CTX, dealContextOverride: NO_DEALS }), 400, shared.PRODUCT_TYPE_REQUIRED_MESSAGE)
+  const rpB = await replaceDevice(ctx(H1, '2026-08-15'), { oldSerial: S(73), oldWardName: '6병동', newSerial: S(74), productType: 'lite', productTypeContextOverride: MIXED_CTX, dealContextOverride: NO_DEALS })
   ok(rpB.backfillEvent!.productType === '라이트' && rpB.recoverEvent!.productType === '라이트' && rpB.registerEvent!.productType === '라이트' && rpB.newDevice.productType === '라이트' && rpB.oldDevice.productType === '라이트', '교체 소급 경로: 입력 상품유형(lite)이 구 소급 REGISTER·RECOVER·신 REGISTER 전부에 적용')
   // 일괄 지정
   const t66 = (await dev({ serialNo: S(66) }))! // 일반
@@ -487,7 +515,7 @@ async function main() {
       { row: 3, serialInput: S(77), productTypeInput: '프로' },
       { row: 4, serialInput: S(66) },
     ],
-    { wardMode: 'fixed', mode: 'REGISTER', occurredOn: '2026-08-20', productTypeContextOverride: MIXED_CTX }
+    { wardMode: 'fixed', mode: 'REGISTER', occurredOn: '2026-08-20', productTypeContextOverride: MIXED_CTX, dealContextOverride: NO_DEALS }
   )
   ok(pvP.rows[0].productType === '라이트' && pvP.rows[0].status === 'warn' && !pvP.rows[0].messages.includes(shared.PRODUCT_TYPE_REQUIRED_MESSAGE), '미리보기 행 상품유형 열(lite → 라이트) — 혼합 문맥에서도 필수 오류 없음(병동 미지정 warn만)')
   ok(pvP.rows[1].productType === null && pvP.rows[1].status === 'error' && pvP.rows[1].messages.includes(shared.PRODUCT_TYPE_REQUIRED_MESSAGE), '미리보기 혼합 문맥 + 미지정 행 → error 필수 메시지')
@@ -740,6 +768,15 @@ async function main() {
     ok((await dev({ id: bkIds[0] }))!.asStartedOn === null && (await dev({ id: bkIds[2] }))!.asStartedOn === null, 'bulk AS_CLEAR → 전 대상 플래그 해제')
     await expectErr('bulk AS_CLEAR 전부 미표시 → 409', () => bulkDeviceAction(ctx(H3), { action: 'AS_CLEAR', deviceIds: bkIds }), 409, 'AS진행중 표시가 없습니다')
     for (const id of bkIds) ok(await projectionEqualsRebuild(id), `bulk AS 후 프로젝션 = fold (#${id})`)
+    // 소급 AS 표시/해제 차단(§8.2 1 보강, P1 리뷰) — bkIds[0]: REGISTER 08-01 · AS_OPEN 08-02 · AS_CLEAR 08-04. 업무일자 이후 스냅샷 배치 축 이벤트가 있으면 409(역전 쌍 교착 방지), 없으면 기록
+    await expectErr('소급 AS_OPEN(08-01) — 이후 AS_OPEN/AS_CLEAR 스냅샷 있음 → 409', () => reg.openDeviceAs(ctx(null, '2026-08-01'), { deviceId: bkIds[0] }), 409, '소급 기록할 수 없습니다')
+    await expectErr('일괄 소급 AS_OPEN(08-01) → 409(단건과 동일)', () => bulkDeviceAction(ctx(H3, '2026-08-01'), { action: 'AS_OPEN', deviceIds: [bkIds[0]] }), 409, '소급 기록할 수 없습니다')
+    ok((await prisma.hospitalDeviceEvent.count({ where: { deviceId: bkIds[0], eventType: 'AS_OPEN' } })) === 1, '소급 409 후 AS_OPEN 이벤트 미생성(롤백)')
+    const asRetro = await reg.openDeviceAs(ctx(null, '2026-08-05'), { deviceId: bkIds[0] })
+    ok(asRetro.event.eventType === 'AS_OPEN' && asRetro.device.asStartedOn?.toISOString().startsWith('2026-08-05') === true, '이후 스냅샷 없는 소급 AS_OPEN(08-05) → 기록')
+    await expectErr('소급 AS_CLEAR(08-04, 이후 AS_OPEN 08-05 있음) → 409', () => reg.clearDeviceAs(ctx(null, '2026-08-04'), { deviceId: bkIds[0] }), 409)
+    const cRetro = await cancelLastEvent(ctx(null), { eventId: asRetro.event.id })
+    ok(cRetro.cancelledEventIds.length === 1 && (await dev({ id: bkIds[0] }))!.asStartedOn === null && (await projectionEqualsRebuild(bkIds[0])), '소급 AS_OPEN LIFO 취소 → 해제·프로젝션 = fold')
     // 자동 해제 — 회수·교체
     await reg.openDeviceAs(ctx(null, '2026-08-17'), { deviceId: dAS.id })
     const rcAS = await recoverDevice(ctx(null, '2026-08-18'), { deviceId: dAS.id, reasonCodeId: defect.id })
@@ -752,6 +789,447 @@ async function main() {
     await expectErr('회수된 기기 AS 접수 → 409', () => reg.openDeviceAs(ctx(null), { deviceId: dAS.id }), 409, '회수된 기기에는 AS 접수')
     const detAS = (await getUnitDetail(repAS.newDevice.id))!
     ok('dealCode' in detAS && 'asStartedOn' in detAS && 'asRefCode' in detAS, '상세 응답에 dealCode·asStartedOn·asRefCode')
+  }
+
+  section('[1e] 기기 상태·위치 축 (2026-09-17 device_condition_location_design.md §4·§7.0·§8.2·부록 C) — 2축 전이·멱등·가드·취소·재도출·I-1~I-6')
+  {
+    const lostR = await reasonByValue(prisma, 'LOST')
+    const disposeR = await reasonByValue(prisma, 'DISPOSE')
+    const returnR = await reasonByValue(prisma, 'RETURN')
+    const ecgModelId = (await unitRow({ id: d1.id }))!.deviceInfoId
+    /** 유닛 상태·위치 요약 — `{ condition, loc: 'HOSPITAL/코드' | 'SITE/값' | 'none', condOn, locOn }` */
+    const st = async (id: number) => {
+      const u = (await prisma.deviceUnit.findUnique({ where: { id }, include: { locationSite: true } }))!
+      return { condition: u.condition, loc: u.locationHospitalCode ? `HOSPITAL/${u.locationHospitalCode}` : u.locationSite?.value ? `SITE/${u.locationSite.value}` : 'none', condOn: ymd(u.conditionChangedOn), locOn: ymd(u.locationChangedOn) }
+    }
+    const evCount = (id: number) => prisma.hospitalDeviceEvent.count({ where: { deviceId: id } })
+    const lastEv = (id: number) => prisma.hospitalDeviceEvent.findFirst({ where: { deviceId: id }, orderBy: { id: 'desc' } })
+    const chOf = (e: { changes: unknown } | null | undefined) => shared.unitStateChangesOf(e?.changes)
+    const locStr = (l: { kind: string | null; code: string | null } | null | undefined) => (l && l.kind ? `${l.kind}/${l.code}` : 'none')
+    const hosp = (code: string) => `HOSPITAL/${code}`
+    const RC = 'SITE/REFRESH_CENTER'
+    const HUB = 'SITE/HUB'
+    const nullChanges = (eventId: number) => prisma.hospitalDeviceEvent.update({ where: { id: eventId }, data: { changes: Prisma.DbNull } }) // 배포 전 이벤트(스냅샷 없음) 시뮬레이션
+    const reg1 = async (serial: string, hospital: string = H1, on: string = '2026-08-01') => (await registerDevices(ctx(hospital, on), [{ serialInput: serial, wardName: '6병동' }])).created[0]
+    // 스모크용 AS접수 3건(ref 규칙·validateRef 통과용) — 라인 없음, cleanup에서 삭제
+    for (const code of SMOKE_AS_CODES.slice(0, 3)) {
+      await prisma.asReceipt.upsert({ where: { asCode: code }, create: { asCode: code, hospitalCode: H1, category: 'FAULT', receiptDate: new Date(today), createdById: adminUser!.id, note: '[스모크] 상태·위치 축' }, update: {} })
+    }
+    const [AS1, AS2, AS3] = SMOKE_AS_CODES
+    const asRef = (code: string) => ({ ref: { type: 'AS' as const, code } })
+
+    // ── [1e-10] 거점 마스터 ────────────────────────────────────────────────
+    const sites = await loadDeviceSites(prisma)
+    ok(sites.length === 2 && sites.map((s) => s.value).join(',') === 'REFRESH_CENTER,HUB' && sites[0].name === '리프레시센터' && sites[1].name === 'thynC Connected Hub', '[1e-10] DEVICE_SITE 마스터 2행(REFRESH_CENTER·HUB, order 순) — loadDeviceSites', sites)
+    await expectErr('[1e-10] siteByValue 허용 어휘 밖 → 400', () => reg.siteByValue(prisma, 'NOWHERE'), 400, '거점 값')
+
+    // ── [1e-1] condition × 이벤트 전이표 전수(§4.2 — 순수 판정 84셀 + sameRef) ──
+    {
+      type Kind = reg.UnitEventKind
+      const KINDS: Kind[] = ['REGISTER', 'AS_OPEN', 'INTAKE', 'REPAIR_DONE', 'AS_CLEAR', 'RECOVER_DEFECT', 'RECOVER_LOST', 'RECOVER_DISPOSE', 'RECOVER_KEEP', 'RECOVER_TRANSFER', 'SCRAP', 'SITE_MOVE']
+      // 'ok:X' = 전이 · 'keep' = 유지 · '409' = 거부. §4.2 표 그대로(PRE_SHIP×INTAKE·LOST×INTAKE는 진입 열 규칙대로 ok — condition.ts 주석)
+      const row = (s: string) => Object.fromEntries(s.split(' ').map((cell, i) => [KINDS[i], cell])) as Record<Kind, string>
+      const expectedT: Record<shared.DeviceCondition | 'NULL', Record<Kind, string>> = {
+        IN_USE: row('ok:IN_USE ok:AS_WAITING ok:AS_WAITING 409 keep ok:AS_WAITING ok:LOST ok:SCRAPPED keep keep ok:SCRAPPED keep'),
+        AS_WAITING: row('ok:IN_USE keep keep ok:REPAIRED ok:IN_USE keep ok:LOST ok:SCRAPPED keep keep ok:SCRAPPED keep'),
+        REPAIRED: row('ok:IN_USE ok:AS_WAITING ok:AS_WAITING keep ok:IN_USE keep ok:LOST ok:SCRAPPED keep keep ok:SCRAPPED keep'),
+        PRE_SHIP: row('ok:IN_USE 409 ok:AS_WAITING 409 409 409 409 409 409 409 ok:SCRAPPED keep'),
+        LOST: row('ok:IN_USE 409 ok:AS_WAITING 409 409 409 409 409 409 409 409 409'),
+        SCRAPPED: row('409 409 409 409 409 409 409 409 409 409 keep 409'),
+        NULL: row('ok:IN_USE ok:AS_WAITING ok:AS_WAITING ok:REPAIRED ok:IN_USE ok:AS_WAITING ok:LOST ok:SCRAPPED keep keep ok:SCRAPPED keep'),
+      }
+      const enc = (r: reg.ConditionRule) => (r.kind === 'ok' ? `ok:${r.to}` : r.kind === 'keep' ? 'keep' : '409')
+      const bad: string[] = []
+      for (const cur of Object.keys(expectedT) as (shared.DeviceCondition | 'NULL')[]) {
+        for (const k of KINDS) {
+          const got = enc(judgeCondition(cur === 'NULL' ? null : cur, k))
+          if (got !== expectedT[cur][k]) bad.push(`${cur}×${k}: ${got} ≠ ${expectedT[cur][k]}`)
+        }
+      }
+      ok(bad.length === 0, '[1e-1] condition × 이벤트 전이표 84셀 = §4.2 기대표(judgeCondition)', bad)
+      ok(judgeCondition('REPAIRED', 'INTAKE', { sameRef: true }).kind === 'keep' && judgeCondition('REPAIRED', 'INTAKE', { sameRef: false }).kind === 'ok', '[1e-1] REPAIRED × INTAKE — 같은 ref는 keep, 새 ref는 AS_WAITING(재입고, B-37)')
+      ok(reg.recoverKindOf('DEFECT') === 'RECOVER_DEFECT' && reg.recoverKindOf('LOST') === 'RECOVER_LOST' && reg.recoverKindOf('DISPOSE') === 'RECOVER_DISPOSE' && reg.recoverKindOf('TRANSFER') === 'RECOVER_TRANSFER' && reg.recoverKindOf('RETURN') === 'RECOVER_KEEP' && reg.recoverKindOf(null) === 'RECOVER_KEEP', '[1e-1] 회수 사유 value → 판정 축(§5.6 RECOVERY_REASON_CONDITION, RETURN·NULL은 keep)')
+    }
+    // 실제 서비스 조합 — 배치 status × condition × 이벤트(기대 결과·409 문구)
+    const u24 = await reg1(S(24))
+    let s24 = await st(u24.id)
+    const ev24 = (await lastEv(u24.id))!
+    ok(s24.condition === 'IN_USE' && s24.loc === hosp(H1) && s24.condOn === '2026-08-01' && s24.locOn === '2026-08-01' && chOf(ev24)?.condition.before === null && chOf(ev24)?.condition.after === 'IN_USE' && locStr(chOf(ev24)?.location.after) === hosp(H1), '[1e-1] REGISTER(신규) → IN_USE·위치 병원·changed_on=업무일자 + 이벤트 스냅샷(before NULL → after IN_USE)', { s24, ch: ev24.changes })
+    await expectErr("[1e-1] ACTIVE·IN_USE REPAIR_DONE → 409 '사용중 기기는 수리완료 처리할 수 없습니다'", () => markDeviceRepaired(ctx(null), { deviceId: u24.id }), 409, shared.DEVICE_REPAIR_IN_USE_MESSAGE)
+    await expectErr("[1e-6] ACTIVE SCRAP → 409 '배치 중 기기는 먼저 회수하세요'(I-3)", () => scrapDevice(ctx(null), { deviceId: u24.id, memo: 'x' }), 409, shared.DEVICE_SCRAP_ACTIVE_MESSAGE)
+    await expectErr('[1e-6] ACTIVE SITE_MOVE(거점) → 409 먼저 회수', () => moveDeviceLocation(ctx(null), { deviceId: u24.id, to: 'REFRESH_CENTER' }), 409, shared.DEVICE_SCRAP_ACTIVE_MESSAGE)
+    {
+      const same = await moveDeviceLocation(ctx(null), { deviceId: u24.id, to: 'HOSPITAL' })
+      ok(same.changed === false && same.event === null, '[1e-6] ACTIVE·IN_USE·이미 병원 [병원 반환] → changed:false·이벤트 없음')
+    }
+    const asO24 = await reg.openDeviceAs(ctx(null, '2026-08-10'), { deviceId: u24.id })
+    s24 = await st(u24.id)
+    ok(s24.condition === 'AS_WAITING' && s24.loc === hosp(H1) && s24.condOn === '2026-08-10' && s24.locOn === '2026-08-01' && chOf(asO24.event)?.condition.after === 'AS_WAITING' && locStr(chOf(asO24.event)?.location.after) === hosp(H1), '[1e-1] AS_OPEN → AS_WAITING·위치 병원 유지(condition_changed_on만 갱신) + 스냅샷', s24)
+    const in24 = await intakeDevice(ctx(H1, '2026-08-11'), { deviceId: u24.id })
+    s24 = await st(u24.id)
+    ok(in24.changed && in24.event?.eventType === 'INTAKE' && in24.event.hospitalCode === H1 && s24.condition === 'AS_WAITING' && s24.loc === RC && s24.locOn === '2026-08-11' && (await dev({ id: u24.id }))!.status === 'ACTIVE' && locStr(chOf(in24.event)?.location.before) === hosp(H1) && locStr(chOf(in24.event)?.location.after) === RC, '[1e-1] ACTIVE INTAKE → AS_WAITING·리프레시센터, 배치 ACTIVE 유지(D2), hospital_code=배치 병원, 스냅샷 병원→센터', { s24, in24: in24.event })
+    await expectErr("[1e-6] ACTIVE·AS_WAITING [병원 반환] → 409 '미종결 입고 라인 — AS 상세에서 확정하세요'", () => moveDeviceLocation(ctx(null), { deviceId: u24.id, to: 'HOSPITAL' }), 409, shared.DEVICE_OPEN_INTAKE_LINE_MESSAGE)
+    const rp24 = await markDeviceRepaired(ctx(null, '2026-08-12'), { deviceId: u24.id })
+    s24 = await st(u24.id)
+    ok(rp24.changed && rp24.event?.eventType === 'REPAIR_DONE' && s24.condition === 'REPAIRED' && s24.loc === RC && s24.condOn === '2026-08-12' && s24.locOn === '2026-08-11' && (await dev({ id: u24.id }))!.lastEventType === 'REGISTER', '[1e-1] REPAIR_DONE → REPAIRED·센터 유지 + last_event 미반영(비상태 이벤트)', s24)
+    {
+      const rp24b = await markDeviceRepaired(ctx(null), { deviceId: u24.id })
+      ok(rp24b.changed === false && rp24b.event === null, '[1e-2] REPAIRED 재수리완료 → changed:false·이벤트 없음(멱등)')
+    }
+    await expectErr('[1e-6] ACTIVE·REPAIRED [병원 반환] → 409(AS 상세에서 확정)', () => moveDeviceLocation(ctx(null), { deviceId: u24.id, to: 'HOSPITAL' }), 409, shared.DEVICE_OPEN_INTAKE_LINE_MESSAGE)
+    const clr24 = await reg.clearDeviceAs(ctx(null, '2026-08-13'), { deviceId: u24.id, locationToHospital: true })
+    s24 = await st(u24.id)
+    ok(clr24.event.eventType === 'AS_CLEAR' && s24.condition === 'IN_USE' && s24.loc === hosp(H1) && s24.condOn === '2026-08-13' && s24.locOn === '2026-08-13' && chOf(clr24.event)?.condition.before === 'REPAIRED' && chOf(clr24.event)?.condition.after === 'IN_USE' && locStr(chOf(clr24.event)?.location.after) === hosp(H1), '[1e-1] AS_CLEAR(locationToHospital — AS 서비스 훅) → IN_USE·위치 병원 + 스냅샷 REPAIRED→IN_USE', { s24, ch: clr24.event.changes })
+    ok(await projectionEqualsRebuild(u24.id), '[1e-1] u24 프로젝션 = fold(상태·위치 축은 배치 fold 비영향)')
+    // RECOVER 사유 매핑(단건) — DEFECT/LOST/DISPOSE/RETURN
+    const u25 = await reg1(S(25))
+    const rc25 = await recoverDevice(ctx(null, '2026-08-05'), { deviceId: u25.id, reasonCodeId: defect.id })
+    let s25 = await st(u25.id)
+    ok(s25.condition === 'AS_WAITING' && s25.loc === RC && s25.condOn === '2026-08-05' && s25.locOn === '2026-08-05' && chOf(rc25.event)?.location.note === shared.DEVICE_LOCATION_NOTE_INTAKE_UNCONFIRMED && locStr(chOf(rc25.event)?.location.before) === hosp(H1) && locStr(chOf(rc25.event)?.location.after) === RC, "[1e-1] RECOVER(DEFECT) → AS_WAITING·리프레시센터(A-4(a)) + note '입고 미확인'(before 병원일 때만)", { s25, ch: rc25.event.changes })
+    const u26 = await reg1(S(26))
+    const rc26 = await recoverDevice(ctx(null, '2026-08-05'), { deviceId: u26.id, reasonCodeId: lostR.id })
+    let s26 = await st(u26.id)
+    ok(s26.condition === 'LOST' && s26.loc === 'none' && chOf(rc26.event)?.condition.after === 'LOST' && locStr(chOf(rc26.event)?.location.after) === 'none', '[1e-1] RECOVER(LOST) → LOST·위치 없음(I-1)', s26)
+    const u27 = await reg1(S(27))
+    const rc27 = await recoverDevice(ctx(null, '2026-08-05'), { deviceId: u27.id, reasonCodeId: disposeR.id })
+    const s27 = await st(u27.id)
+    ok(s27.condition === 'SCRAPPED' && s27.loc === 'none' && chOf(rc27.event)?.condition.after === 'SCRAPPED', '[1e-1] RECOVER(DISPOSE) → SCRAPPED·위치 없음', s27)
+    const u28 = await reg1(S(28))
+    const rc28 = await recoverDevice(ctx(null, '2026-08-05'), { deviceId: u28.id, reasonCodeId: returnR.id })
+    let s28 = await st(u28.id)
+    ok(s28.condition === 'IN_USE' && s28.loc === hosp(H1) && rc28.warnings.some((w) => w.includes('[위치 이동]')) && chOf(rc28.event)?.condition.before === 'IN_USE' && chOf(rc28.event)?.condition.after === 'IN_USE', "[1e-1] RECOVER(RETURN) → keep(IN_USE·병원, before=after 스냅샷 기록) + 경고 '[위치 이동]'", { s28, w: rc28.warnings })
+    // RECOVERED 유닛의 SITE_MOVE·SCRAP·REPAIR·INTAKE
+    {
+      const mv = await moveDeviceLocation(ctx(null, '2026-08-06'), { deviceId: u28.id, to: 'REFRESH_CENTER' })
+      s28 = await st(u28.id)
+      ok(mv.changed && mv.event?.eventType === 'SITE_MOVE' && mv.event.hospitalCode === H1 && s28.condition === 'IN_USE' && s28.loc === RC && s28.locOn === '2026-08-06' && s28.condOn === '2026-08-01', '[1e-1] RECOVERED SITE_MOVE 병원→리프레시센터 (condition 유지, hospital_code=last_hospital_code — B-31)', s28)
+      const mv2 = await moveDeviceLocation(ctx(null, '2026-08-07'), { deviceId: u28.id, to: 'HUB' })
+      s28 = await st(u28.id)
+      ok(mv2.changed && s28.loc === HUB && locStr(chOf(mv2.event)?.location.before) === RC && locStr(chOf(mv2.event)?.location.after) === HUB, '[1e-1] SITE_MOVE 거점↔거점(리프레시센터 → Hub) 스냅샷', s28)
+      const mv3 = await moveDeviceLocation(ctx(null), { deviceId: u28.id, to: 'HUB' })
+      ok(mv3.changed === false && mv3.event === null, '[1e-2] 같은 위치 SITE_MOVE → changed:false·이벤트 없음')
+      await expectErr('[1e-1] RECOVERED [병원 반환] → 409(회수 기기는 등록·교체로 배치)', () => moveDeviceLocation(ctx(null), { deviceId: u28.id, to: 'HOSPITAL' }), 409, '병원 반환 대상이 아닙니다')
+      await expectErr('[1e-1] SITE_MOVE 허용 어휘 밖 → 400', () => moveDeviceLocation(ctx(null), { deviceId: u28.id, to: 'NOWHERE' as never }), 400)
+    }
+    {
+      // A-6: admin CORRECT(PRE_SHIP + HUB, 배치 RECOVERED/없음만) — I-1·I-3 검증
+      const cPre = await correctDevice(ctx(null, '2026-08-08'), { deviceId: u28.id, changes: { condition: 'PRE_SHIP' } })
+      s28 = await st(u28.id)
+      ok(cPre.event.eventType === 'CORRECT' && s28.condition === 'PRE_SHIP' && s28.loc === HUB && s28.condOn === '2026-08-08' && chOf(cPre.event)?.condition.before === 'IN_USE' && chOf(cPre.event)?.condition.after === 'PRE_SHIP', '[1e-1] admin CORRECT → PRE_SHIP·Hub(A-6 진입로) — 상태 스냅샷 CORRECT', s28)
+      await expectErr("[1e-1] PRE_SHIP REPAIR_DONE → 409 '출고 전 기기는 수리완료 처리할 수 없습니다'", () => markDeviceRepaired(ctx(null), { deviceId: u28.id }), 409, '출고 전')
+      await expectErr('[1e-1] CORRECT LOST + 위치 → 400 (I-1)', () => correctDevice(ctx(null), { deviceId: u28.id, changes: { condition: 'LOST', location: { kind: 'SITE', code: 'HUB' } } }), 400, 'I-1')
+      await expectErr('[1e-1] ACTIVE 기기 CORRECT LOST → 409 (I-3)', () => correctDevice(ctx(null), { deviceId: u24.id, changes: { condition: 'LOST', location: null } }), 409, 'I-3')
+      await expectErr('[1e-1] ACTIVE 기기 CORRECT 위치 타 병원 → 409', () => correctDevice(ctx(null), { deviceId: u24.id, changes: { location: { kind: 'HOSPITAL', code: H2 } } }), 409)
+      await expectErr('[1e-1] CORRECT 변경 없음(같은 값) → 400', () => correctDevice(ctx(null), { deviceId: u28.id, changes: { condition: 'PRE_SHIP', location: { kind: 'SITE', code: 'HUB' } } }), 400, '변경 사항')
+      const pr = await registerDevices(ctx(H1, '2026-08-09'), [{ serialInput: S(28), wardName: '6병동' }])
+      s28 = await st(u28.id)
+      ok(pr.reregistered.length === 1 && s28.condition === 'IN_USE' && s28.loc === hosp(H1) && !pr.warnings.some((w) => w.includes('수리완료 체크 없이')), '[1e-1] PRE_SHIP 재등록 → IN_USE·병원, 재사용 경고 없음(PRE_SHIP은 경고 대상 아님)', { s28, w: pr.warnings })
+    }
+    {
+      // LOST × INTAKE(발견) / LOST × SCRAP·SITE_MOVE 409 · SCRAPPED × INTAKE·REPAIR 409·SCRAP keep
+      await expectErr("[1e-1] LOST SCRAP → 409 '분실 기기는 폐기할 수 없습니다'", () => scrapDevice(ctx(null), { deviceId: u26.id, memo: 'x' }), 409, '분실 기기')
+      await expectErr('[1e-1] LOST SITE_MOVE → 409', () => moveDeviceLocation(ctx(null), { deviceId: u26.id, to: 'HUB' }), 409, '분실 기기')
+      await expectErr('[1e-1] LOST REPAIR_DONE → 409', () => markDeviceRepaired(ctx(null), { deviceId: u26.id }), 409)
+      const found = await intakeDevice(ctx(null, '2026-08-20'), { deviceId: u26.id })
+      s26 = await st(u26.id)
+      ok(found.changed && found.event?.hospitalCode === H1 && s26.condition === 'AS_WAITING' && s26.loc === RC && chOf(found.event)?.condition.before === 'LOST', '[1e-1] LOST INTAKE(발견) → AS_WAITING·센터, hospital_code=last_hospital_code', s26)
+      await expectErr("[1e-1] SCRAPPED INTAKE → 409 '폐기된 기기'", () => intakeDevice(ctx(null), { deviceId: u27.id }), 409, '폐기된 기기')
+      await expectErr('[1e-1] SCRAPPED REPAIR_DONE → 409', () => markDeviceRepaired(ctx(null), { deviceId: u27.id }), 409, '폐기')
+      await expectErr('[1e-1] SCRAPPED SITE_MOVE → 409', () => moveDeviceLocation(ctx(null), { deviceId: u27.id, to: 'HUB' }), 409, '폐기된 기기')
+      const sc27 = await scrapDevice(ctx(null), { deviceId: u27.id, memo: '재폐기' })
+      ok(sc27.changed === false && sc27.event === null, '[1e-2] SCRAPPED SCRAP → keep(changed:false·이벤트 없음)')
+    }
+    {
+      // 재등록 경고(§7.0) — REPAIRED/IN_USE는 없음, AS_WAITING/NULL은 '수리완료 체크 없이 재사용' 1건 · 교체기는 strict(REPAIRED 아니면)
+      const rr25 = await registerDevices(ctx(H1, '2026-08-06'), [{ serialInput: S(25), wardName: '6병동' }])
+      s25 = await st(u25.id)
+      ok(rr25.reregistered.length === 1 && rr25.warnings.filter((w) => w.includes('수리완료 체크 없이')).length === 1 && s25.condition === 'IN_USE' && s25.loc === hosp(H1), "[1e-1] AS_WAITING 유닛 재등록 → IN_USE·병원 + 경고 1건 '수리완료 체크 없이 재사용'", { s25, w: rr25.warnings })
+      await recoverDevice(ctx(null, '2026-08-07'), { deviceId: u25.id, reasonCodeId: defect.id })
+      await markDeviceRepaired(ctx(null, '2026-08-08'), { deviceId: u25.id })
+      const rr25b = await registerDevices(ctx(H1, '2026-08-09'), [{ serialInput: S(25), wardName: '6병동' }])
+      s25 = await st(u25.id)
+      ok(rr25b.reregistered.length === 1 && !rr25b.warnings.some((w) => w.includes('수리완료 체크 없이')) && s25.condition === 'IN_USE' && s25.loc === hosp(H1), '[1e-1] REPAIRED 유닛 재등록 → IN_USE·병원, 재사용 경고 없음', { s25, w: rr25b.warnings })
+      await recoverDevice(ctx(null, '2026-08-10'), { deviceId: u25.id, reasonCodeId: defect.id })
+      const u29 = await reg1(S(29))
+      const rep29 = await replaceDevice(ctx(H1, '2026-08-11'), { oldDeviceId: u29.id, newSerial: S(25) })
+      s25 = await st(u25.id)
+      const s29 = await st(u29.id)
+      ok(rep29.newDevice.id === u25.id && rep29.warnings.filter((w) => w.includes('수리완료 체크 없이')).length === 1 && s25.condition === 'IN_USE' && s25.loc === hosp(H1) && s29.condition === 'AS_WAITING' && s29.loc === RC && chOf(rep29.recoverEvent)?.location.note === shared.DEVICE_LOCATION_NOTE_INTAKE_UNCONFIRMED && chOf(rep29.registerEvent)?.condition.after === 'IN_USE', '[1e-1] 교체 — 교체기(AS_WAITING·strict) 경고 1건 → IN_USE·병원 / 구기기 RECOVER(DEFECT) AS_WAITING·센터(A-4 note)', { s25, s29, w: rep29.warnings })
+      const rep29b = await replaceDevice(ctx(H1, '2026-08-12'), { oldDeviceId: u25.id, newSerial: S(29) })
+      ok(rep29b.newDevice.id === u29.id && rep29b.warnings.filter((w) => w.includes('수리완료 체크 없이')).length === 1 && (await st(u29.id)).condition === 'IN_USE', '[1e-1] 교체기 AS_WAITING(RECOVERED) 재사용 → 경고 1건 + IN_USE', rep29b.warnings)
+    }
+
+    // ── [1e-2] INTAKE ref 규칙(B-37) — 첫 ref 기록 · 같은 ref 무변화 스킵 · 변화 시 기록 · BACKFILL 제외 ──
+    {
+      const u31 = await reg1(S(31))
+      await recoverDevice(ctx(null, '2026-08-05'), { deviceId: u31.id, reasonCodeId: defect.id }) // AS_WAITING·센터(RECOVERED)
+      const n0 = await evCount(u31.id)
+      const i1 = await intakeDevice(ctx(H1, '2026-08-06', asRef(AS1)), { deviceId: u31.id })
+      ok(i1.changed === false && i1.event?.eventType === 'INTAKE' && i1.event.refCode === AS1 && (await evCount(u31.id)) === n0 + 1 && chOf(i1.event)?.condition.before === 'AS_WAITING' && chOf(i1.event)?.condition.after === 'AS_WAITING', '[1e-2] INTAKE 변화 없음 + 첫 ref(AS1) → 기록(changed:false·before=after 스냅샷)', i1.event)
+      const i2 = await intakeDevice(ctx(H1, '2026-08-07', asRef(AS1)), { deviceId: u31.id })
+      ok(i2.changed === false && i2.event === null && (await evCount(u31.id)) === n0 + 1, '[1e-2] 같은 ref(AS1) ∧ 무변화 → 스킵(이벤트 없음)')
+      const i3 = await intakeDevice(ctx(H1, '2026-08-07', asRef(AS2)), { deviceId: u31.id })
+      ok(i3.event?.refCode === AS2 && (await evCount(u31.id)) === n0 + 2, '[1e-2] 다른 ref(AS2) 첫 기록 → 기록')
+      const i4 = await intakeDevice(ctx(H1, '2026-08-07'), { deviceId: u31.id })
+      const i5 = await intakeDevice(ctx(H1, '2026-08-07'), { deviceId: u31.id })
+      ok(i4.event != null && i4.event.refCode === null && i5.event === null && (await evCount(u31.id)) === n0 + 3, '[1e-2] ref 없음(드로어 경로)도 첫 1회 기록·재호출 스킵')
+      await markDeviceRepaired(ctx(null, '2026-08-08', asRef(AS2)), { deviceId: u31.id })
+      const i6 = await intakeDevice(ctx(H1, '2026-08-09', asRef(AS2)), { deviceId: u31.id })
+      ok(i6.changed === false && i6.event === null && (await st(u31.id)).condition === 'REPAIRED', '[1e-2] REPAIRED × 같은 ref(AS2) INTAKE → keep·스킵(교체품 가용 유지)')
+      const i7 = await intakeDevice(ctx(H1, '2026-08-09', asRef(AS3)), { deviceId: u31.id })
+      ok(i7.changed && i7.event?.refCode === AS3 && chOf(i7.event)?.condition.before === 'REPAIRED' && (await st(u31.id)).condition === 'AS_WAITING', '[1e-2] REPAIRED × 새 ref(AS3) INTAKE → AS_WAITING(재입고·가용 제외) 기록')
+      // BACKFILL INTAKE는 sameRef 판정에서 제외 — BACKFILL 행만 있는 ref는 '첫 ref'로 본다
+      const u32 = await reg1(S(32))
+      await recoverDevice(ctx(null, '2026-08-05'), { deviceId: u32.id, reasonCodeId: defect.id })
+      const bf = await insertEvent(prisma, { deviceId: u32.id, eventType: 'INTAKE', hospitalCode: H1, occurredOn: '2026-08-05', source: 'BACKFILL', actionGroup: null, ref: { type: 'AS', code: AS1 }, actor: ACTOR, changes: { condition: { before: null, after: 'AS_WAITING' }, location: { before: { kind: 'HOSPITAL', code: H1 }, after: { kind: 'SITE', code: 'REFRESH_CENTER' } } } })
+      const i8 = await intakeDevice(ctx(H1, '2026-08-06', asRef(AS1)), { deviceId: u32.id })
+      ok(!!bf && i8.event?.eventType === 'INTAKE' && i8.event.source === 'MANUAL', '[1e-2] BACKFILL INTAKE(ref AS1)만 있는 기기 — 같은 ref MANUAL INTAKE는 첫 ref로 기록(스킵 판정에서 BACKFILL 제외)', i8.event)
+    }
+
+    // ── [1e-3] 가드 409(쓰기 없음) · 흡수 409 후 무변경 · RegistryTxAbort 전체 롤백 ──
+    {
+      const u33 = await reg1(S(33))
+      const n0 = await evCount(u33.id)
+      const fresh = (await unitRow({ id: u33.id }))!
+      const stale = { ...fresh, condition: 'REPAIRED' } // DB는 IN_USE — 낙관 가드가 어긋난 스냅샷
+      await expectErr("[1e-3] 신규 서비스 유닛 가드(updateMany count≠1) → 409 '동시에 변경되어 다시 시도하세요'", () => applyUnitState(prisma, { unit: stale, before: { condition: 'REPAIRED', location: { kind: 'HOSPITAL', code: H1 } }, after: { condition: 'AS_WAITING', location: { kind: 'SITE', code: 'REFRESH_CENTER' } }, occurredOn: today, event: { eventType: 'INTAKE', hospitalCode: H1, source: 'MANUAL', actionGroup: null, actor: ACTOR } }), 409, shared.DEVICE_CONCURRENT_CHANGE_MESSAGE)
+      ok((await evCount(u33.id)) === n0 && (await st(u33.id)).condition === 'IN_USE', '[1e-3] 가드 409 후 해당 유닛 신규 이벤트 0건·유닛 무변경')
+      // 암묵 전이 경로 — 소급 검증 409(AS 서비스가 흡수하는 RegistryError) 후 유닛 무변경·이벤트 0
+      const before24 = await st(u24.id)
+      const n24 = await evCount(u24.id)
+      await expectErr('[1e-3] 소급 AS_OPEN(08-05, 이후 AS_OPEN 08-10 스냅샷 있음) → 409(흡수 가능 RegistryError)', () => reg.openDeviceAs(ctx(null, '2026-08-05'), { deviceId: u24.id }), 409, '소급 기록할 수 없습니다')
+      ok(JSON.stringify(await st(u24.id)) === JSON.stringify(before24) && (await evCount(u24.id)) === n24, '[1e-3] 소급 409 후 유닛 무변경·이벤트 0')
+      await expectErr('[1e-3] 배치 가드 409(이미 회수된 기기 RECOVER)', () => recoverDevice(ctx(null), { deviceId: u27.id, reasonCodeId: defect.id }), 409, '이미 회수')
+      ok((await st(u27.id)).condition === 'SCRAPPED' && (await evCount(u27.id)) === 2, '[1e-3] 배치 409 후 유닛 무변경')
+      // 유닛 가드 실패(phase 2) → RegistryTxAbort — 같은 tx에서 이미 INSERT된 이벤트까지 전체 롤백
+      let abortName = ''
+      let abortStatus = 0
+      try {
+        await prisma.$transaction(async (tx) => {
+          const unit = await tx.deviceUnit.findUniqueOrThrow({ where: { id: u33.id } })
+          const t = await applyImplicitTransition(tx, { unit, eventType: 'AS_OPEN', hospitalCode: H1, occurredOn: today })
+          await insertEvent(tx, { deviceId: u33.id, eventType: 'AS_OPEN', hospitalCode: H1, occurredOn: today, source: 'MANUAL', actionGroup: null, actor: ACTOR, changes: t.changes as unknown as Prisma.InputJsonValue })
+          await tx.deviceUnit.update({ where: { id: u33.id }, data: { condition: 'REPAIRED' } }) // 동시 변경 시뮬레이션(phase 1 이후 유닛이 바뀜)
+          await t.apply()
+        })
+      } catch (e) {
+        abortName = (e as Error).name
+        abortStatus = (e as { status?: number }).status ?? 0
+      }
+      ok(abortName === 'RegistryTxAbort' && abortStatus === 409 && (await evCount(u33.id)) === n0 && (await st(u33.id)).condition === 'IN_USE', '[1e-3] 암묵 전이 유닛 가드 실패 → RegistryTxAbort(409, RegistryError 아님) · tx 전체 롤백(이벤트 0·유닛 IN_USE)', { abortName, abortStatus })
+      ok(!(new RegistryTxAbort() instanceof RegistryError) && reg.toRegistryErrorResponse(new RegistryTxAbort())?.status === 409 && reg.toRegistryErrorResponse(new RegistryTxAbort())?.body.error === shared.DEVICE_CONCURRENT_CHANGE_MESSAGE, "[1e-3] RegistryTxAbort는 RegistryError 하위가 아님 + toRegistryErrorResponse 409 '동시에 변경되어 다시 시도하세요'")
+    }
+
+    // ── [1e-4] 취소·정정 규약(§8.2, 단일 정렬 기준 = id) ──
+    {
+      // (a) 신규 4종·상태 CORRECT LIFO 취소 → changes.before 복원
+      const u34 = await reg1(S(34))
+      await recoverDevice(ctx(null, '2026-08-05'), { deviceId: u34.id, reasonCodeId: defect.id })
+      const rp = await markDeviceRepaired(ctx(null, '2026-08-06'), { deviceId: u34.id })
+      const c1 = await cancelLastEvent(ctx(null), { eventId: rp.event!.id })
+      let s34 = await st(u34.id)
+      ok(c1.cancelledEventIds.length === 1 && c1.unitStates?.[u34.id]?.condition === 'AS_WAITING' && s34.condition === 'AS_WAITING' && s34.loc === RC && s34.condOn === '2026-08-05', '[1e-4] REPAIR_DONE 취소 → before(AS_WAITING·센터) 복원, changed_on=남은 스냅샷(RECOVER) 일자', { s34, c1: c1.unitStates })
+      const mv = await moveDeviceLocation(ctx(null, '2026-08-07'), { deviceId: u34.id, to: 'HUB' })
+      await cancelLastEvent(ctx(null), { eventId: mv.event!.id })
+      s34 = await st(u34.id)
+      ok(s34.loc === RC && s34.condition === 'AS_WAITING', '[1e-4] SITE_MOVE 취소 → 위치 before(리프레시센터) 복원')
+      const sc = await scrapDevice(ctx(null, '2026-08-07'), { deviceId: u34.id, memo: '폐기 후 취소' })
+      ok((await st(u34.id)).condition === 'SCRAPPED' && (await st(u34.id)).loc === 'none', '[1e-4] SCRAP → SCRAPPED·위치 없음')
+      await cancelLastEvent(ctx(null), { eventId: sc.event!.id })
+      s34 = await st(u34.id)
+      ok(s34.condition === 'AS_WAITING' && s34.loc === RC, '[1e-4] SCRAP 취소 → before(AS_WAITING·센터) 복원(위치 전용 매핑)')
+      const rp2 = await markDeviceRepaired(ctx(null, '2026-08-08'), { deviceId: u34.id })
+      const un = await undoDeviceRepaired(ctx(null, '2026-08-09'), { deviceId: u34.id })
+      ok(un.event?.eventType === 'CORRECT' && un.event.memo === '수리완료 해제' && (await st(u34.id)).condition === 'AS_WAITING' && chOf(un.event)?.condition.before === 'REPAIRED', "[1e-4] 수리완료 해제 = CORRECT(REPAIRED→AS_WAITING, memo '수리완료 해제') — B-27")
+      await expectErr('[1e-4] 수리완료 아닌 기기 해제 → 409', () => undoDeviceRepaired(ctx(null), { deviceId: u34.id }), 409, '수리완료 상태가 아닙니다')
+      const mv2 = await moveDeviceLocation(ctx(null, '2026-08-10'), { deviceId: u34.id, to: 'HUB' })
+      await expectErr('[1e-4] 상태 CORRECT 취소 — id 더 큰 스냅샷(SITE_MOVE) 있음 → 409', () => cancelLastEvent(ctx(null), { eventId: un.event!.id }), 409, '이후 상태 스냅샷')
+      await expectErr('[1e-4] REPAIR_DONE 취소 — 이후 CORRECT·SITE_MOVE 있음 → 409', () => cancelLastEvent(ctx(null), { eventId: rp2.event!.id }), 409, '이후 상태 스냅샷')
+      await cancelLastEvent(ctx(null), { eventId: mv2.event!.id })
+      const cUn = await cancelLastEvent(ctx(null), { eventId: un.event!.id })
+      s34 = await st(u34.id)
+      ok(cUn.restored?.condition != null && s34.condition === 'REPAIRED' && s34.loc === RC, '[1e-4] LIFO 순서대로 취소(SITE_MOVE → CORRECT) → REPAIRED 복원')
+      await cancelLastEvent(ctx(null), { eventId: rp2.event!.id })
+      ok((await st(u34.id)).condition === 'AS_WAITING', '[1e-4] REPAIR_DONE 취소 → AS_WAITING')
+      // (b) 소급 AS_CLEAR(id n+1) 뒤 REPAIR_DONE(id n) 취소 → 409 · AS_CLEAR 취소 → 재도출 ①(REPAIR_DONE after)
+      const u35 = await reg1(S(35))
+      await reg.openDeviceAs(ctx(null, '2026-08-10'), { deviceId: u35.id })
+      await intakeDevice(ctx(H1, '2026-08-11'), { deviceId: u35.id })
+      const rp35 = await markDeviceRepaired(ctx(null, '2026-08-12'), { deviceId: u35.id })
+      const clr35 = await reg.clearDeviceAs(ctx(null, '2026-08-11'), { deviceId: u35.id }) // 소급 — 이후 스냅샷 배치 축 이벤트 없음(REPAIR_DONE·INTAKE는 비배치)
+      ok(clr35.event.id > rp35.event!.id && (await st(u35.id)).condition === 'IN_USE' && (await st(u35.id)).loc === RC && clr35.warnings.length === 0, '[1e-4] 소급 AS_CLEAR(08-11, 수동 해제) → IN_USE·위치 유지(센터) — id 순 최신', { s: await st(u35.id), w: clr35.warnings })
+      await expectErr('[1e-4] 소급 AS_CLEAR 뒤 REPAIR_DONE 취소 → 409(AS_CLEAR 먼저)', () => cancelLastEvent(ctx(null), { eventId: rp35.event!.id }), 409, '이후 상태 스냅샷')
+      const cClr = await cancelLastEvent(ctx(null), { eventId: clr35.event.id })
+      let s35 = await st(u35.id)
+      ok(cClr.unitStates?.[u35.id]?.condition === 'REPAIRED' && s35.condition === 'REPAIRED' && s35.loc === RC && (await dev({ id: u35.id }))!.asStartedOn != null, '[1e-4] AS_CLEAR 취소 → 재도출 ①(남은 id 최대 스냅샷 REPAIR_DONE after = REPAIRED·센터) + 플래그 복원(fold)', s35)
+      await cancelLastEvent(ctx(null), { eventId: rp35.event!.id })
+      s35 = await st(u35.id)
+      ok(s35.condition === 'AS_WAITING' && s35.loc === RC, '[1e-4] 이어서 REPAIR_DONE 취소 → AS_WAITING·센터')
+      ok(await projectionEqualsRebuild(u35.id), '[1e-4] u35 프로젝션 = fold')
+      // (c) REGISTER(오늘, id n) + INTAKE(과거일, id n+1) → REGISTER 취소 409 → INTAKE 먼저 취소 → REGISTER 취소(배치 삭제) → NULL
+      const u36 = await reg1(S(36), H1, today)
+      const in36 = await intakeDevice(ctx(H1, '2026-08-01'), { deviceId: u36.id })
+      ok(in36.event != null && in36.event.id > u36.eventId, '[1e-4] REGISTER(오늘) 뒤 INTAKE(과거일) 기록(id 순 최신)')
+      await expectErr('[1e-4] REGISTER(오늘) 취소 — id 더 큰 INTAKE(과거일) 있음 → 409', () => cancelLastEvent(ctx(null), { eventId: u36.eventId }), 409, '이후 상태 스냅샷')
+      await cancelLastEvent(ctx(null), { eventId: in36.event!.id })
+      ok((await st(u36.id)).condition === 'IN_USE' && (await st(u36.id)).loc === hosp(H1), '[1e-4] INTAKE 취소 → before(IN_USE·병원)')
+      const cReg = await cancelLastEvent(ctx(null), { eventId: u36.eventId })
+      const s36 = await st(u36.id)
+      ok(cReg.deletedDeviceIds.includes(u36.id) && (await dev({ id: u36.id })) == null && s36.condition === null && s36.loc === 'none' && s36.condOn === null, '[1e-4] REGISTER 취소(배치 삭제) → 재도출 ② 취소 이벤트 before = NULL·위치 없음', s36)
+      // (d) RECOVER(LOST) 취소 → 재도출 ①/②/③
+      const u37 = await reg1(S(37))
+      const rl37 = await recoverDevice(ctx(null, '2026-08-05'), { deviceId: u37.id, reasonCodeId: lostR.id })
+      const c37 = await cancelLastEvent(ctx(null), { eventId: rl37.event.id })
+      ok(c37.unitStates?.[u37.id]?.condition === 'IN_USE' && (await st(u37.id)).condition === 'IN_USE' && (await st(u37.id)).loc === hosp(H1) && (await st(u37.id)).condOn === '2026-08-01' && c37.warnings.length === 0, '[1e-4] RECOVER(LOST) 취소 → 재도출 ① 남은 스냅샷(REGISTER after) = IN_USE·병원', c37.unitStates)
+      const u38 = await reg1(S(38))
+      await nullChanges(u38.eventId) // 배포 전 REGISTER(스냅샷 없음)
+      const rl38 = await recoverDevice(ctx(null, '2026-08-05'), { deviceId: u38.id, reasonCodeId: lostR.id })
+      const c38 = await cancelLastEvent(ctx(null), { eventId: rl38.event.id })
+      ok(c38.unitStates?.[u38.id]?.condition === 'IN_USE' && (await st(u38.id)).loc === hosp(H1) && (await st(u38.id)).condOn === null, '[1e-4] 배포 전 REGISTER만 남은 유닛의 RECOVER(LOST) 취소 → 재도출 ② 취소 이벤트 before(IN_USE·병원), changed_on NULL', c38.unitStates)
+      const u39 = await reg1(S(39))
+      await nullChanges(u39.eventId)
+      const rd39 = await recoverDevice(ctx(null, '2026-08-05'), { deviceId: u39.id, reasonCodeId: defect.id })
+      await nullChanges(rd39.event.id) // 취소 대상도 스냅샷 없음(구 이벤트)
+      const c39 = await cancelLastEvent(ctx(null), { eventId: rd39.event.id })
+      ok(c39.unitStates?.[u39.id]?.condition === 'IN_USE' && (await st(u39.id)).loc === hosp(H1) && (await st(u39.id)).condOn === '2026-08-01', '[1e-4] 스냅샷 전무 유닛의 RECOVER 취소 → 재도출 ③ 배치 파생(ACTIVE → IN_USE·배치 병원, changed_on=placed_on)', c39.unitStates)
+      // (e) 배포 전 이벤트만 가진 유닛의 AS_CLEAR 취소 → before(AS_WAITING) — §4.4 정합
+      const u49 = await reg1(S(49))
+      await nullChanges(u49.eventId)
+      const ao49 = await reg.openDeviceAs(ctx(null, '2026-08-10'), { deviceId: u49.id })
+      await nullChanges(ao49.event.id)
+      const clr49 = await reg.clearDeviceAs(ctx(null, '2026-08-11'), { deviceId: u49.id })
+      ok(chOf(clr49.event)?.condition.before === 'AS_WAITING' && chOf(clr49.event)?.condition.after === 'IN_USE', '[1e-4] 배포 전 AS_OPEN 뒤 AS_CLEAR → 스냅샷 AS_WAITING→IN_USE')
+      const c49 = await cancelLastEvent(ctx(null), { eventId: clr49.event.id })
+      ok(c49.unitStates?.[u49.id]?.condition === 'AS_WAITING' && (await st(u49.id)).condition === 'AS_WAITING' && (await st(u49.id)).loc === hosp(H1) && (await dev({ id: u49.id }))!.asStartedOn != null, '[1e-4] AS_CLEAR 취소(배포 전 이벤트만 남음) → 재도출 ② before = AS_WAITING·병원(플래그와 정합 §4.4)', c49.unitStates)
+      // 재도출 결과가 I-4를 깨면 409가 아니라 warnings
+      const u79 = await reg1(S(79))
+      await reg.openDeviceAs(ctx(null, '2026-08-10'), { deviceId: u79.id })
+      await intakeDevice(ctx(H1, '2026-08-11'), { deviceId: u79.id })
+      await reg.clearDeviceAs(ctx(null, '2026-08-12'), { deviceId: u79.id }) // 수동 해제 — 위치 센터 유지(I-4 예외)
+      ok((await st(u79.id)).condition === 'IN_USE' && (await st(u79.id)).loc === RC, '[1e-4] 수동 AS_CLEAR → IN_USE·위치 센터 유지(I-4 예외)')
+      const back79 = await moveDeviceLocation(ctx(null, '2026-08-13'), { deviceId: u79.id, to: 'HOSPITAL' })
+      ok(back79.changed && (await st(u79.id)).loc === hosp(H1), '[1e-6] ACTIVE·IN_USE [병원 반환] → 위치 병원(SITE_MOVE)')
+      const cBack = await cancelLastEvent(ctx(null), { eventId: back79.event!.id })
+      ok(cBack.warnings.some((w) => w.includes('I-4')) && (await st(u79.id)).loc === RC, '[1e-4] [병원 반환] 취소 → 위치 센터 복원 + I-4 경고(409 아님)', cBack.warnings)
+
+      // (g) 정정 역전 차단(§8.2 3, P2 리뷰) — AS_OPEN(08-10, id n)·AS_CLEAR(08-11, id n+1)에서 AS_OPEN을 08-12로 옮기면 일자 순↔id 순 역전(양쪽 취소 불가 교착) → 409, 08-09는 성립
+      const u80 = await reg1(S(80, 'B')) // A9900 80~82는 라우트 섹션이 신규 등록에 쓴다 — B 접두 사용
+      const op80 = await reg.openDeviceAs(ctx(null, '2026-08-10'), { deviceId: u80.id })
+      const cl80 = await reg.clearDeviceAs(ctx(null, '2026-08-11'), { deviceId: u80.id })
+      await expectErr('[1e-4] 배치 축 스냅샷 occurredOn 정정으로 역전 쌍 생성(AS_OPEN → 08-12) → 409', () => editEvent(ctx(null), { eventId: op80.event.id, patch: { occurredOn: '2026-08-12' } }), 409, '어긋나')
+      await expectErr('[1e-4] AS_CLEAR를 AS_OPEN 앞(08-09)으로 정정 → 409', () => editEvent(ctx(null), { eventId: cl80.event.id, patch: { occurredOn: '2026-08-09' } }), 409, '어긋나')
+      const ee80 = await editEvent(ctx(null), { eventId: op80.event.id, patch: { occurredOn: '2026-08-09' } })
+      ok(ymd(ee80.after.occurredOn) === '2026-08-09' && (await projectionEqualsRebuild(u80.id)), '[1e-4] 역전 없는 정정(AS_OPEN 08-10 → 08-09)은 성립')
+
+      // (h) 취소 후 축별 진입일 — RECOVER(08-05: 상태·위치) → REPAIR_DONE(08-06: 상태만) → SITE_MOVE HUB(08-07: 위치만) 취소 → condition 08-06 유지·location 08-05
+      const u81 = await reg1(S(81, 'B'))
+      await recoverDevice(ctx(null, '2026-08-05'), { deviceId: u81.id, reasonCodeId: defect.id })
+      await markDeviceRepaired(ctx(null, '2026-08-06'), { deviceId: u81.id })
+      const mv81 = await moveDeviceLocation(ctx(null, '2026-08-07'), { deviceId: u81.id, to: 'HUB' })
+      await cancelLastEvent(ctx(null), { eventId: mv81.event!.id })
+      const s81 = await st(u81.id)
+      ok(s81.condition === 'REPAIRED' && s81.loc === RC && s81.condOn === '2026-08-06' && s81.locOn === '2026-08-05', '[1e-4] SITE_MOVE 취소 → 축별 진입일(condition 08-06 REPAIR_DONE · location 08-05 RECOVER)', s81)
+    }
+
+    // ── [1e-5] SCRAPPED 유닛 REGISTER 409 — 등록·교체기·backfill·임포트 미리보기 4경로 ──
+    {
+      const before = await evCount(u27.id)
+      await expectErr("[1e-5] 등록 → 409 '폐기된 기기입니다 — 정정 후 등록하세요'", () => registerDevices(ctx(H1), [{ serialInput: S(27), wardName: '6병동' }]), 409, shared.DEVICE_SCRAPPED_REGISTER_MESSAGE)
+      await expectErr('[1e-5] 교체기로 → 409', () => replaceDevice(ctx(H1), { oldDeviceId: u24.id, newSerial: S(27) }), 409, shared.DEVICE_SCRAPPED_REGISTER_MESSAGE)
+      // backfill 경로 = 배치 행 없는 유닛(고아) — 고아 유닛을 admin CORRECT로 SCRAPPED 만든 뒤 구기기 소급 등록 교체 시도
+      const { unit: o89 } = await getOrCreateUnit(prisma, { serialInput: S(89), deviceInfoId: ecgModelId, source: 'MANUAL' })
+      await correctDevice(ctx(null), { deviceId: o89.id, changes: { condition: 'SCRAPPED', location: null } })
+      await expectErr('[1e-5] backfill 구기기(배치 없는 폐기 유닛의 소급 등록 교체) → 409', () => replaceDevice(ctx(H1), { oldSerial: S(89), oldWardName: '6병동', newSerial: S(19) }), 409, shared.DEVICE_SCRAPPED_REGISTER_MESSAGE)
+      ok((await evCount(u27.id)) === before && (await st(u27.id)).condition === 'SCRAPPED' && (await dev({ id: u24.id }))!.status === 'ACTIVE' && (await dev({ id: o89.id })) == null && (await prisma.deviceUnit.count({ where: { serialNo: S(19) } })) === 0, '[1e-5] 409 후 무변경(이벤트 0·u24 ACTIVE 유지·고아 배치 없음·신 유닛 미생성)')
+      const pvS = await previewRows(H1, [{ row: 1, serialInput: S(27), wardInput: '6병동' }], { wardMode: 'column', mode: 'REGISTER', occurredOn: today })
+      ok(pvS.rows[0].status === 'error' && pvS.rows[0].messages.includes(shared.DEVICE_SCRAPPED_REGISTER_MESSAGE), '[1e-5] 임포트 미리보기 → error 행(미리보기/실행 일치)', pvS.rows[0].messages)
+      const cFix = await correctDevice(ctx(null), { deviceId: u27.id, changes: { condition: 'REPAIRED', location: { kind: 'SITE', code: 'REFRESH_CENTER' } } })
+      const rr27 = await registerDevices(ctx(H1, today), [{ serialInput: S(27), wardName: '6병동' }])
+      ok(cFix.event.eventType === 'CORRECT' && rr27.reregistered.length === 1 && (await st(u27.id)).condition === 'IN_USE', '[1e-5] admin CORRECT(SCRAPPED→REPAIRED·센터) 후 재등록 → IN_USE')
+    }
+
+    // ── [1e-7] 배치 상태 이벤트 0 + INTAKE만 남은 유닛 재-fold(cancelLastEvent·cancelImportBatch) ──
+    {
+      const { unit: o87 } = await getOrCreateUnit(prisma, { serialInput: S(87), deviceInfoId: ecgModelId, source: 'MANUAL' })
+      const in87 = await intakeDevice(ctx(null, '2026-08-01'), { deviceId: o87.id })
+      ok(in87.event?.eventType === 'INTAKE' && in87.event.hospitalCode === null && (await st(o87.id)).condition === 'AS_WAITING' && (await st(o87.id)).loc === RC && (await dev({ id: o87.id })) == null, '[1e-7] 배치 없는 유닛 INTAKE(NONE ok) → AS_WAITING·센터, hospital_code NULL(B-31), 배치 행 없음')
+      const r87 = await registerDevices(ctx(H1, '2026-08-02'), [{ serialInput: S(87), wardName: '6병동' }])
+      ok(r87.created.length === 1 && !r87.created[0].unitCreated && (await st(o87.id)).condition === 'IN_USE' && r87.warnings.some((w) => w.includes('수리완료 체크 없이')), '[1e-7] 고아 유닛 등록 → IN_USE·병원(+재사용 경고)')
+      const c87 = await cancelLastEvent(ctx(null), { eventId: r87.created[0].eventId })
+      const s87 = await st(o87.id)
+      ok(c87.deletedDeviceIds.includes(o87.id) && (await dev({ id: o87.id })) == null && (await evCount(o87.id)) === 1 && s87.condition === 'AS_WAITING' && s87.loc === RC, '[1e-7] REGISTER 취소 → 배치 상태 이벤트 0 → 배치 행 삭제(CHECK 위반 없음)·INTAKE 잔존·재도출 ①(INTAKE after)', s87)
+      const { unit: o88 } = await getOrCreateUnit(prisma, { serialInput: S(88), deviceInfoId: ecgModelId, source: 'MANUAL' })
+      await intakeDevice(ctx(null, '2026-08-01'), { deviceId: o88.id })
+      const imp88 = await importBatch(ctx(H1, '2026-08-02'), { rows: [{ row: 1, serialInput: S(88) }], sourceKind: 'PASTE', mode: 'REGISTER', defaults: { wardMode: 'fixed', wardId: ward6.id } })
+      ok(imp88.batch.registeredCount === 1 && (await st(o88.id)).condition === 'IN_USE', '[1e-7] 임포트 REGISTER → IN_USE')
+      await expectErr('[1e-7] 임포트 등록 직후 ACTIVE·IN_USE 수리완료 → 409', () => markDeviceRepaired(ctx(null), { deviceId: o88.id }), 409, shared.DEVICE_REPAIR_IN_USE_MESSAGE)
+      const in88b = await intakeDevice(ctx(H1, '2026-08-03'), { deviceId: o88.id }) // 배치 밖 스냅샷(id 더 큼)
+      await expectErr('[1e-7] 배치 밖 이후 스냅샷(INTAKE) 있으면 배치 취소 409(laterSnapshotOutside)', () => cancelImportBatch(ctx(H1), { batchId: imp88.batch.id }), 409, '이후 상태 스냅샷')
+      await cancelLastEvent(ctx(null), { eventId: in88b.event!.id })
+      const cb88 = await cancelImportBatch(ctx(H1), { batchId: imp88.batch.id })
+      const s88 = await st(o88.id)
+      ok(cb88.summary.deletedDeviceIds.includes(o88.id) && (await dev({ id: o88.id })) == null && (await evCount(o88.id)) === 1 && s88.condition === 'AS_WAITING' && s88.loc === RC, '[1e-7] 배치 취소 → 배치 행 삭제·INTAKE 잔존·재도출 ①(AS_WAITING·센터)', s88)
+    }
+
+    // ── [1e-9] 일괄(bulk) 회수(LOST)·AS 표시·AS 해제(위치 유지) = 단건과 동일 ──
+    {
+      const r9 = await registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(94), wardName: '6병동' }, { serialInput: S(95), wardName: '6병동' }])
+      const [u94, u95] = r9.created
+      const bk = await bulkDeviceAction(ctx(H1, '2026-08-05'), { action: 'RECOVER', deviceIds: [u94.id, u95.id], reasonCodeId: lostR.id })
+      const s94 = await st(u94.id)
+      const s95 = await st(u95.id)
+      ok(bk.events.length === 2 && s94.condition === 'LOST' && s94.loc === 'none' && s95.condition === 'LOST' && s95.loc === 'none' && bk.events.every((e) => chOf(e)?.condition.after === 'LOST' && locStr(chOf(e)?.location.after) === 'none'), '[1e-9] 일괄 회수(LOST) → 단건과 동일(LOST·위치 없음·스냅샷)', { s94, s95 })
+      const cbk = await cancelLastEvent(ctx(null), { eventId: bk.events[0].id })
+      ok(cbk.cancelledEventIds.length === 1 && (await st(u94.id)).condition === 'IN_USE' && (await st(u95.id)).condition === 'LOST', '[1e-9] 일괄 회수 이벤트 1건 취소 → 그 기기만 재도출(IN_USE), 짝 확장 없음')
+      const r9b = await registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: S(96), wardName: '6병동' }, { serialInput: S(97), wardName: '6병동' }])
+      const [u96, u97] = r9b.created
+      const bkO = await bulkDeviceAction(ctx(H1, '2026-08-05'), { action: 'AS_OPEN', deviceIds: [u96.id, u97.id] })
+      ok(bkO.events.length === 2 && (await st(u96.id)).condition === 'AS_WAITING' && (await st(u96.id)).loc === hosp(H1) && (await st(u97.id)).condition === 'AS_WAITING' && bkO.events.every((e) => chOf(e)?.condition.after === 'AS_WAITING'), '[1e-9] 일괄 AS 표시 → AS_WAITING·위치 병원 유지(단건과 동일)')
+      await intakeDevice(ctx(H1, '2026-08-06'), { deviceId: u96.id })
+      const bkC = await bulkDeviceAction(ctx(H1, '2026-08-07'), { action: 'AS_CLEAR', deviceIds: [u96.id, u97.id] })
+      const s96 = await st(u96.id)
+      const s97 = await st(u97.id)
+      ok(bkC.events.length === 2 && s96.condition === 'IN_USE' && s96.loc === RC && s97.condition === 'IN_USE' && s97.loc === hosp(H1) && (await dev({ id: u96.id }))!.asStartedOn === null, '[1e-9] 일괄 AS 해제(수동) → IN_USE·위치 유지(센터는 센터, 병원은 병원 — I-4 예외)', { s96, s97 })
+      const back96 = await moveDeviceLocation(ctx(null, '2026-08-08'), { deviceId: u96.id, to: 'HOSPITAL' })
+      ok(back96.changed && (await st(u96.id)).loc === hosp(H1), '[1e-9] [병원 반환]으로 I-4 예외 해소')
+      for (const id of [u94.id, u95.id, u96.id, u97.id]) ok(await projectionEqualsRebuild(id), `[1e-9] 일괄 후 프로젝션 = fold (#${id})`)
+    }
+
+    // ── [1e-11] ACTIVE_OTHER — 접수 병원 ≠ 배치 병원 INTAKE/REPAIR_DONE conflict ──
+    {
+      const u98 = await reg1(S(98))
+      const n0 = await evCount(u98.id)
+      await expectErr("[1e-11] INTAKE(ctx 병원 H2, 배치 H1) → 409 '다른 병원에 배치 중인 기기입니다 — 원장 확정에서 이관 후 입고하세요'", () => intakeDevice(ctx(H2), { deviceId: u98.id }), 409, '원장 확정에서 이관 후 입고')
+      await expectErr('[1e-11] REPAIR_DONE(ctx 병원 H2) → 409 conflict', () => markDeviceRepaired(ctx(H2), { deviceId: u98.id }), 409, '다른 병원')
+      await expectErr('[1e-11] SITE_MOVE(ctx 병원 H2) → 409 conflict', () => moveDeviceLocation(ctx(H2), { deviceId: u98.id, to: 'HOSPITAL' }), 409, '다른 병원')
+      ok((await evCount(u98.id)) === n0 && (await st(u98.id)).condition === 'IN_USE', '[1e-11] conflict 409 후 이벤트 0·유닛 무변경')
+      const inSame = await intakeDevice(ctx(H1), { deviceId: u98.id })
+      ok(inSame.changed && (await st(u98.id)).loc === RC, '[1e-11] 같은 병원 문맥(H1) INTAKE → ok')
+      const inNull = await intakeDevice(ctx(null), { deviceId: u98.id })
+      ok(inNull.changed === false && inNull.event === null, '[1e-11] ctx 병원 없음(드로어 경로) = 배치 병원(SAME) — 무변화·ref 없음 재호출 스킵')
+    }
+
+    // ── [1e-8] I-6 — 스냅샷 이벤트가 1건 이상인 테스트 유닛 전부: 유닛 값 = id 최대 스냅샷 이벤트의 after ──
+    {
+      const units = await prisma.deviceUnit.findMany({ where: { OR: TEST_PREFIXES.map((p) => ({ serialNo: { startsWith: p } })) }, include: { locationSite: true } })
+      const bad: string[] = []
+      let checked = 0
+      for (const u of units) {
+        const latest = await reg.latestSnapshotEvent(prisma, u.id)
+        if (!latest) continue
+        checked++
+        const ch = shared.unitStateChangesOf(latest.changes)!
+        const loc = u.locationHospitalCode ? `HOSPITAL/${u.locationHospitalCode}` : u.locationSite?.value ? `SITE/${u.locationSite.value}` : 'none'
+        if ((ch.condition.after ?? null) !== (u.condition ?? null) || locStr(ch.location.after) !== loc) bad.push(`${u.serialNo}: unit ${u.condition}·${loc} ≠ snapshot ${ch.condition.after}·${locStr(ch.location.after)} (#${latest.id} ${latest.eventType})`)
+      }
+      ok(bad.length === 0 && checked >= 20, `[1e-8] I-6 — 테스트 유닛 ${checked}대: 유닛 condition/location = id 최대 스냅샷 이벤트 after`, bad)
+      // I-1·I-2 — DB CHECK(LOST/SCRAPPED 위치 NULL · 위치 단일)를 앱이 깨지 않았는지
+      const viol = await prisma.deviceUnit.count({ where: { OR: [{ condition: { in: ['LOST', 'SCRAPPED'] }, OR: [{ locationHospitalCode: { not: null } }, { locationSiteId: { not: null } }] }, { locationHospitalCode: { not: null }, locationSiteId: { not: null } }] } })
+      ok(viol === 0, '[1e-8] I-1·I-2 위반 0(전 유닛)')
+      // I-3 — 배치 ACTIVE ∧ condition ∈ {LOST,SCRAPPED,PRE_SHIP} 0(테스트 병원)
+      const i3 = await prisma.hospitalDevice.count({ where: { status: 'ACTIVE', hospitalCode: { in: TEST_HOSPITALS }, unit: { condition: { in: ['LOST', 'SCRAPPED', 'PRE_SHIP'] } } } })
+      ok(i3 === 0, '[1e-8] I-3 위반 0(테스트 병원 ACTIVE)')
+    }
   }
 
   section('[2] 소급·미래·불법 전이')
@@ -966,7 +1444,7 @@ async function main() {
   const pv2 = await previewRows(H1, rows.filter((r) => ![4, 9, 13].includes(r.row)), { wardMode: 'column', mode: 'REGISTER', occurredOn: '2026-08-30' })
   ok(pv2.summary.skip === 9 && pv2.summary.executable === 0, '같은 목록 재임포트 → 전부 skip', pv2.summary)
   await expectErr('전부 skip 실행', () => importBatch(importCtx, { rows: rows.filter((r) => ![4, 9, 13].includes(r.row)), sourceKind: 'PASTE', mode: 'REGISTER', defaults: { wardMode: 'column' } }), 400, '실행할 행')
-  await expectErr('배치 업무일자 → 이관 원 병원 이후 이벤트 앞으로(불성립)', () => editImportBatchDate(ctx(H1), { batchId: imp.batch.id, occurredOn: '2026-08-29' }), 409, '성립하지')
+  await expectErr('배치 업무일자 → 이관 원 병원 이후 이벤트(08-30 회수) 앞으로 → 409(일자 순↔id 순 역전 차단 §8.2 3 — fold 불성립보다 먼저 판정)', () => editImportBatchDate(ctx(H1), { batchId: imp.batch.id, occurredOn: '2026-08-29' }), 409, '어긋나')
   await expectErr('배치 업무일자 변경 없음', () => editImportBatchDate(ctx(H1), { batchId: imp.batch.id, occurredOn: '2026-08-30' }), 400)
   const ed = await editImportBatchDate(ctx(H1), { batchId: imp.batch.id, occurredOn: '2026-08-31' })
   ok(ed.eventCount === 9 && ed.after === '2026-08-31' && ed.before === '2026-08-30' && (await dev({ serialNo: S(41) }))!.placedOn?.toISOString().startsWith('2026-08-31'), '배치 업무일자 일괄 정정 → 프로젝션 placed_on 갱신')
@@ -1010,6 +1488,19 @@ async function main() {
   const r105b = await registerDevices(ctx(H1, today), [{ serialInput: S(46) }])
   ok(r105b.created.length === 1 && r105b.created[0].id === r105.created[0].id && !r105b.created[0].unitCreated, '고아 유닛 재등록 → 같은 유닛 id 재사용(신규 배치, unitCreated=false)')
   await cancelLastEvent(ctx(null), { eventId: r105b.created[0].eventId })
+  // 배치 취소 시 상태 스냅샷 CORRECT 보존(§8.2 2, P1 리뷰) — 고아 유닛에 A-6 CORRECT(PRE_SHIP·HUB) → 임포트 REGISTER → 배치 취소: CORRECT 잔존·유닛 = CORRECT after·correctedSerials 제외
+  const orphanId = r105.created[0].id
+  const cPre = await correctDevice(ctx(null), { deviceId: orphanId, changes: { condition: 'PRE_SHIP', location: { kind: 'SITE', code: 'HUB' } } })
+  ok(cPre.event.eventType === 'CORRECT' && (await unitRow({ id: orphanId }))!.condition === 'PRE_SHIP', '고아 유닛 상태 CORRECT(PRE_SHIP·HUB) — A-6 진입')
+  const impO = await importBatch(ctx(H1, today), { rows: [{ row: 1, serialInput: S(46) }], sourceKind: 'PASTE', mode: 'REGISTER', defaults: { wardMode: 'fixed', wardId: ward6.id } })
+  ok(impO.batch.registeredCount === 1 && (await unitRow({ id: orphanId }))!.condition === 'IN_USE', '임포트 REGISTER → IN_USE(암묵 전이)')
+  const cbO = await cancelImportBatch(ctx(H1), { batchId: impO.batch.id })
+  const uO = (await unitRow({ id: orphanId }))!
+  ok(
+    cbO.summary.deletedDeviceIds.includes(orphanId) && !cbO.summary.correctedSerials.includes(S(46)) && (await prisma.hospitalDeviceEvent.findUnique({ where: { id: cPre.event.id } })) != null && uO.condition === 'PRE_SHIP' && uO.locationSiteId != null && uO.locationHospitalCode == null,
+    '배치 취소 → 상태 스냅샷 CORRECT 보존 · 유닛 = CORRECT after(PRE_SHIP·HUB, 재도출 ①) · correctedSerials 제외',
+    { cond: uO.condition, site: uO.locationSiteId, summary: cbO.summary }
+  )
   void closed
 
   section('[9] 식별 정정 · CORRECT 취소 · 이벤트 정정 · 그룹 취소 · 메모')
@@ -1438,6 +1929,8 @@ async function main() {
   // 계약건(B-23)·AS(B-24) 라우트
   const RAS = { open: await import('../app/api/devices/units/[id]/as-open/route'), clear: await import('../app/api/devices/units/[id]/as-clear/route') }
   const realDealH1 = (await reg.getHospitalDealContext(H1)).deals[0]
+  // H1 계약완료 딜이 1건이면 등록 시 자동 기본값(B-23)으로 이미 그 딜이 붙어 PATCH가 '변경 사항 없음'이 된다 — 먼저 비워 변경이 생기게 (데이터 의존 제거)
+  if ((await dev({ id: id81 }))!.dealCode === realDealH1.dealCode) await correctDevice(ctx(null), { deviceId: id81, changes: { dealCode: null } })
   r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id81}`, { ...UW, params: { id: String(id81) }, body: { dealCode: realDealH1.dealCode } })
   ok(r.status === 200 && r.json.event.eventType === 'CORRECT' && r.json.changes.dealCode.after === realDealH1.dealCode && r.json.device.dealCode === realDealH1.dealCode, 'PATCH 계약건 USER(write) → 200 CORRECT', r.json)
   r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${id81}`, { ...UW, params: { id: String(id81) }, body: { dealCode: 'DEAL-000000-0000' } })
@@ -1474,9 +1967,175 @@ async function main() {
   ok(r.status === 201 && r.json.events[0].eventType === 'AS_CLEAR', 'bulk AS_CLEAR 라우트 USER → 201')
   r = await call(h(R.hSummary.GET), 'GET', `${B}/api/hospitals/${H1}/devices/summary`, { ...V, ...P1 })
   ok(r.status === 200 && Array.isArray(r.json.deals) && r.json.dealUnassigned && typeof r.json.asInProgress === 'number' && r.json.contractedDeals.every((d: { productType?: unknown }) => 'productType' in d), 'hospital summary — deals[]·dealUnassigned·asInProgress·contractedDeals.productType')
+  // ── 기기 상태·위치 축 라우트(2026-09-17 §7.1) — units/[id]/{repair-done,repair-undo,scrap,location} · PATCH condition/location · 목록 필터 · export · as-receipts/[id]/{repair-done,scrap-line}
+  {
+    const RC2 = {
+      repairDone: await import('../app/api/devices/units/[id]/repair-done/route'),
+      repairUndo: await import('../app/api/devices/units/[id]/repair-undo/route'),
+      scrap: await import('../app/api/devices/units/[id]/scrap/route'),
+      location: await import('../app/api/devices/units/[id]/location/route'),
+      asRepairDone: await import('../app/api/as-receipts/[id]/repair-done/route'),
+      asScrapLine: await import('../app/api/as-receipts/[id]/scrap-line/route'),
+      asDetail: await import('../app/api/as-receipts/[id]/route'),
+    }
+    const P = (n: number) => S(n, 'P')
+    const rP = await registerDevices(ctx(H1, '2026-08-01'), [{ serialInput: P(2), wardName: '6병동' }, { serialInput: P(3) }, { serialInput: P(4) }])
+    const [p2, p3, p4] = rP.created.map((c) => c.id)
+    await recoverDevice(ctx(H1, '2026-09-01'), { deviceId: p2, reasonCodeId: defect.id })
+    await recoverDevice(ctx(H1, '2026-09-01'), { deviceId: p3, reasonCodeId: defect.id })
+    // AS접수(라인 3: 입고 라인 · LOST 라인 · 미입고 라인) — 티켓 없음(라우트의 syncTicketClocksSafe는 ticketId 없으면 스킵). cleanup(SMOKE_AS_CODES)에서 삭제
+    const AS_R = SMOKE_AS_CODES[3]
+    const receipt = await prisma.asReceipt.create({
+      data: {
+        asCode: AS_R, hospitalCode: H1, category: 'FAULT', receiptDate: new Date('2026-09-01T00:00:00Z'), createdById: adminUser!.id, note: '기존 비고',
+        items: {
+          create: [
+            { serialNo: P(2), deviceId: p2, intakeState: 'RECEIVED', receivedAt: new Date('2026-09-02T00:00:00Z'), outcome: null },
+            { serialNo: P(3), deviceId: p3, intakeState: 'RECEIVED', receivedAt: new Date('2026-09-02T00:00:00Z'), outcome: 'LOST' }, // 제외 outcome — 동기화 대상 아님
+            { serialNo: P(4), deviceId: p4, intakeState: 'PENDING', outcome: null }, // 미입고 — 대상 아님
+          ],
+        },
+      },
+      include: { items: true },
+    })
+    const item2 = receipt.items.find((i) => i.serialNo === P(2))!
+    const item3 = receipt.items.find((i) => i.serialNo === P(3))!
+    const item4 = receipt.items.find((i) => i.serialNo === P(4))!
+    const lineOf = (id: number) => prisma.asReceiptItem.findUniqueOrThrow({ where: { id } })
+    const noteOf = async () => (await prisma.asReceipt.findUniqueOrThrow({ where: { id: receipt.id } })).note ?? ''
+    const unitOf = (id: number) => prisma.deviceUnit.findUniqueOrThrow({ where: { id }, include: { locationSite: true } })
+    const idP = (id: number) => ({ params: { id: String(id) } })
+    const auditLabel = (resource: string, resourceId: string, where: { endsWith?: string; contains?: string; equals?: string }) =>
+      prisma.auditLog.findFirst({ where: { id: { gt: pre.max.a }, resource, resourceId, resourceLabel: where }, orderBy: { id: 'desc' } })
+
+    // units/[id]/repair-done — write(USER+) · 라인 동기화 · 멱등 · 감사
+    r = await call(h(RC2.repairDone.POST), 'POST', `${B}/api/devices/units/${p2}/repair-done`, { ...V, ...idP(p2), body: {} })
+    ok(r.status === 403, 'units repair-done VIEWER → 403')
+    r = await call(h(RC2.repairDone.POST), 'POST', `${B}/api/devices/units/${p2}/repair-done`, { ...UW, ...idP(p2), body: {} })
+    ok(r.status === 201 && r.json.changed === true && r.json.after.condition === 'REPAIRED' && r.json.event.eventType === 'REPAIR_DONE' && r.json.event.refCode === null && r.json.lines.updated === 1 && r.json.lines.asCodes[0] === AS_R && r.json.device?.condition === 'REPAIRED' && r.json.device?.status === 'RECOVERED', 'units repair-done USER → 201 REPAIRED·REPAIR_DONE(ref 없음)·lines 1·device.condition', r.json)
+    {
+      const l2 = await lineOf(item2.id)
+      const note = await noteOf()
+      const others = await prisma.asReceiptItem.findMany({ where: { id: { in: [item3.id, item4.id] } } })
+      ok(l2.repairedAt != null && l2.repairedById === (realUser?.id ?? null) && note.startsWith('기존 비고') && note.includes('[수리완료 ') && note.includes(P(2)) && note.includes('(기기현황)') && others.every((i) => i.repairedAt == null), '드로어 라인 동기화 — 대상 라인 repaired_at/by + 비고 이력(기존 비고 보존), LOST·PENDING 라인 미기록', { l2, note })
+    }
+    r = await call(h(RC2.repairDone.POST), 'POST', `${B}/api/devices/units/${p2}/repair-done`, { ...A, ...idP(p2), body: {} })
+    ok(r.status === 201 && r.json.changed === false && r.json.event === null && r.json.lines.updated === 0 && (await prisma.hospitalDeviceEvent.count({ where: { deviceId: p2, eventType: 'REPAIR_DONE' } })) === 1, 'units repair-done 재호출 → changed:false·이벤트 없음·라인 0(멱등)')
+    ok(!!(await auditLabel('hospital_device', P(2), { endsWith: '수리 완료' })), "units repair-done audit 라벨 '… 수리 완료'")
+    r = await call(h(RC2.repairDone.POST), 'POST', `${B}/api/devices/units/${p4}/repair-done`, { ...A, ...idP(p4), body: {} })
+    ok(r.status === 409 && String(r.json.error).includes(shared.DEVICE_REPAIR_IN_USE_MESSAGE), "units repair-done 사용중 → 409 '사용중 기기는 수리완료 처리할 수 없습니다'")
+    // repair-undo
+    r = await call(h(RC2.repairUndo.POST), 'POST', `${B}/api/devices/units/${p2}/repair-undo`, { ...UW, ...idP(p2), body: {} })
+    ok(r.status === 201 && r.json.after.condition === 'AS_WAITING' && r.json.event.eventType === 'CORRECT' && r.json.event.memo === '수리완료 해제' && r.json.lines.updated === 1 && (await lineOf(item2.id)).repairedAt == null && (await noteOf()).includes('[수리완료 해제 '), 'units repair-undo → CORRECT(AS_WAITING)·라인 NULL·비고', r.json)
+    ok(!!(await auditLabel('hospital_device', P(2), { endsWith: '수리완료 해제' })), "units repair-undo audit 라벨 '… 수리완료 해제'")
+    r = await call(h(RC2.repairUndo.POST), 'POST', `${B}/api/devices/units/${p2}/repair-undo`, { ...A, ...idP(p2), body: {} })
+    ok(r.status === 409, 'units repair-undo 수리완료 아님 → 409')
+    // scrap — memo 필수(A-5 완화책) · 라인 NULL · ACTIVE 409 · 멱등
+    await call(h(RC2.repairDone.POST), 'POST', `${B}/api/devices/units/${p2}/repair-done`, { ...A, ...idP(p2), body: {} })
+    r = await call(h(RC2.scrap.POST), 'POST', `${B}/api/devices/units/${p2}/scrap`, { ...UW, ...idP(p2), body: {} })
+    ok(r.status === 400 && /사유/.test(r.json.error), 'units scrap memo 없음 → 400')
+    r = await call(h(RC2.scrap.POST), 'POST', `${B}/api/devices/units/${p2}/scrap`, { ...UW, ...idP(p2), body: { memo: '보드 파손' } })
+    ok(r.status === 201 && r.json.after.condition === 'SCRAPPED' && r.json.after.location.kind === null && r.json.event.eventType === 'SCRAP' && r.json.event.memo === '보드 파손' && r.json.lines.updated === 1, 'units scrap USER(A-5) → 201 SCRAPPED·위치 없음·memo·라인 NULL', r.json)
+    {
+      const u = await unitOf(p2)
+      const note = await noteOf()
+      ok(u.condition === 'SCRAPPED' && u.locationSiteId == null && u.locationHospitalCode == null && (await lineOf(item2.id)).repairedAt == null && note.includes('[폐기 ') && note.includes('보드 파손'), 'units scrap → 유닛 I-1·라인 repaired_at NULL·비고 [폐기 …] memo')
+    }
+    r = await call(h(RC2.scrap.POST), 'POST', `${B}/api/devices/units/${p4}/scrap`, { ...A, ...idP(p4), body: { memo: 'x' } })
+    ok(r.status === 409 && String(r.json.error).includes('먼저 회수'), 'units scrap ACTIVE → 409 먼저 회수')
+    r = await call(h(RC2.scrap.POST), 'POST', `${B}/api/devices/units/${p2}/scrap`, { ...A, ...idP(p2), body: { memo: '재폐기' } })
+    ok(r.status === 201 && r.json.changed === false, 'units scrap 이미 폐기 → changed:false')
+    ok(!!(await auditLabel('hospital_device', P(2), { endsWith: '폐기' })), "units scrap audit 라벨 '… 폐기'")
+    // location — 거점 이동·멱등·HOSPITAL 409·ACTIVE 거점 409·SCRAPPED 409·to 오류 400
+    r = await call(h(RC2.location.POST), 'POST', `${B}/api/devices/units/${p3}/location`, { ...UW, ...idP(p3), body: { to: 'NOWHERE' } })
+    ok(r.status === 400, 'units location to 오류 → 400')
+    r = await call(h(RC2.location.POST), 'POST', `${B}/api/devices/units/${p3}/location`, { ...UW, ...idP(p3), body: { to: 'hub' } })
+    ok(r.status === 201 && r.json.changed === true && r.json.after.location.code === 'HUB' && r.json.after.condition === 'AS_WAITING' && r.json.event.eventType === 'SITE_MOVE', 'units location RECOVERED → HUB(소문자 to 허용, condition 유지)', r.json)
+    r = await call(h(RC2.location.POST), 'POST', `${B}/api/devices/units/${p3}/location`, { ...UW, ...idP(p3), body: { to: 'HUB' } })
+    ok(r.status === 201 && r.json.changed === false, 'units location 같은 위치 → changed:false')
+    r = await call(h(RC2.location.POST), 'POST', `${B}/api/devices/units/${p3}/location`, { ...UW, ...idP(p3), body: { to: 'HOSPITAL' } })
+    ok(r.status === 409, 'units location RECOVERED → HOSPITAL 409')
+    r = await call(h(RC2.location.POST), 'POST', `${B}/api/devices/units/${p4}/location`, { ...UW, ...idP(p4), body: { to: 'REFRESH_CENTER' } })
+    ok(r.status === 409 && String(r.json.error).includes('먼저 회수'), 'units location ACTIVE → 거점 409')
+    r = await call(h(RC2.location.POST), 'POST', `${B}/api/devices/units/${p4}/location`, { ...UW, ...idP(p4), body: { to: 'HOSPITAL' } })
+    ok(r.status === 201 && r.json.changed === false, 'units location ACTIVE·IN_USE·이미 병원 [병원 반환] → changed:false')
+    r = await call(h(RC2.location.POST), 'POST', `${B}/api/devices/units/${p2}/location`, { ...UW, ...idP(p2), body: { to: 'HUB' } })
+    ok(r.status === 409, 'units location SCRAPPED → 409')
+    ok(!!(await auditLabel('hospital_device', P(3), { contains: '위치 이동 리프레시센터 → thynC Connected Hub' })), "units location audit 라벨 '위치 이동 리프레시센터 → thynC Connected Hub'")
+    // PATCH condition/location — admin OR device.admin · I-1 400 · I-3 409 · 라벨 문장화
+    r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${p2}`, { ...UW, ...idP(p2), body: { condition: 'AS_WAITING' } })
+    ok(r.status === 403, 'PATCH condition USER(권한 없음) → 403')
+    r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${p2}`, { ...A, ...idP(p2), body: { condition: 'LOST', location: { kind: 'SITE', code: 'HUB' } } })
+    ok(r.status === 400 && String(r.json.error).includes('I-1'), 'PATCH LOST + 위치 → 400 I-1')
+    r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${p2}`, { ...A, ...idP(p2), body: { condition: 'BOGUS' } })
+    ok(r.status === 400, 'PATCH condition 어휘 오류 → 400')
+    r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${p2}`, { ...A, ...idP(p2), body: { location: { kind: 'SITE', code: 'X' } } })
+    ok(r.status === 400, 'PATCH 거점 값 오류 → 400')
+    r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${p2}`, { ...A, ...idP(p2), body: { condition: 'REPAIRED', location: { kind: 'SITE', code: 'REFRESH_CENTER' } } })
+    ok(r.status === 200 && r.json.event.eventType === 'CORRECT' && r.json.changes.condition.after === 'REPAIRED' && r.json.changes.location.after.code === 'REFRESH_CENTER' && r.json.device?.condition === 'REPAIRED', 'PATCH admin SCRAPPED→REPAIRED·리프레시센터 → 200 CORRECT', r.json)
+    {
+      const a = await auditLabel('hospital_device', P(2), { contains: '기기 상태 보정' })
+      const before = (a?.before ?? {}) as { condition?: string }
+      const after = (a?.after ?? {}) as { location?: string }
+      ok(!!a && a.resourceLabel!.includes('기기 상태 보정 폐기 → 수리완료') && a.resourceLabel!.includes('위치 보정 없음 → 리프레시센터') && before.condition === '폐기' && after.location === '리프레시센터', 'PATCH audit 라벨·스냅샷 문장화 값(기기 상태 보정 폐기 → 수리완료 · 위치 보정 없음 → 리프레시센터)', a?.resourceLabel)
+    }
+    r = await call(h(R.unit.PATCH), 'PATCH', `${B}/api/devices/units/${p4}`, { ...A, ...idP(p4), body: { condition: 'LOST', location: null } })
+    ok(r.status === 409 && String(r.json.error).includes('I-3'), 'PATCH ACTIVE 기기 LOST → 409 I-3')
+    // 목록 필터(condition·location)·export·상세
+    r = await call(h(R.units.GET), 'GET', `${B}/api/devices/units?status=recovered&condition=REPAIRED&location=REFRESH_CENTER&q=${P(2).slice(0, 5)}`, UW)
+    ok(r.status === 200 && r.json.total === 1 && r.json.data[0].id === p2 && r.json.data[0].condition === 'REPAIRED' && r.json.data[0].locationSiteValue === 'REFRESH_CENTER', 'units ?condition=REPAIRED&location=REFRESH_CENTER → 1건(교체품 가용 근사, I-5)', { total: r.json?.total })
+    r = await call(h(R.units.GET), 'GET', `${B}/api/devices/units?status=all&location=HUB&q=${P(3).slice(0, 5)}`, UW)
+    ok(r.status === 200 && r.json.total === 1 && r.json.data[0].id === p3, 'units ?location=HUB → 1건')
+    r = await call(h(R.units.GET), 'GET', `${B}/api/devices/units?status=all&location=HOSPITAL&q=${P(4).slice(0, 5)}`, UW)
+    ok(r.status === 200 && r.json.data.some((d: { id: number }) => d.id === p4) && r.json.data.every((d: { locationHospitalCode: string | null }) => d.locationHospitalCode != null), 'units ?location=HOSPITAL')
+    r = await call(h(R.units.GET), 'GET', `${B}/api/devices/units?condition=BOGUS`, UW)
+    ok(r.status === 400, 'units condition 어휘 오류 → 400')
+    r = await call(h(R.units.GET), 'GET', `${B}/api/devices/units?location=BOGUS`, UW)
+    ok(r.status === 400, 'units location 어휘 오류 → 400')
+    r = await call(h(R.exportUnits.GET), 'GET', `${B}/api/devices/export?status=all&condition=REPAIRED&q=${P(2).slice(0, 5)}`, V)
+    ok(r.status === 200 && r.ct.includes('spreadsheetml'), 'units export(condition 필터, 기기 상태·위치 열) xlsx')
+    r = await call(h(R.eventsExport.GET), 'GET', `${B}/api/devices/events/export?device=${p2}`, V)
+    ok(r.status === 200 && r.ct.includes('spreadsheetml'), 'events export(상태·위치 축 4종 요약·병원명 맵) xlsx')
+    r = await call(h(R.unit.GET), 'GET', `${B}/api/devices/units/${p2}`, { ...A, ...idP(p2) })
+    ok(r.status === 200 && r.json.device.condition === 'REPAIRED' && r.json.device.locationSiteValue === 'REFRESH_CENTER' && r.json.events.some((e: { eventType: string }) => e.eventType === 'SCRAP'), 'units/[id] GET — device.condition·locationSiteValue + 상태·위치 축 이벤트')
+    // as-receipts/[id]/repair-done · scrap-line (!VIEWER, 접수 상태 무관 — §7.1·§7.2) · GET 상세 계약
+    const asP = { params: { id: String(receipt.id) } }
+    r = await call(h(RC2.asRepairDone.POST), 'POST', `${B}/api/as-receipts/${receipt.id}/repair-done`, { ...V, ...asP, body: { itemId: item2.id, repaired: true } })
+    ok(r.status === 403, 'as repair-done VIEWER → 403')
+    r = await call(h(RC2.asRepairDone.POST), 'POST', `${B}/api/as-receipts/${receipt.id}/repair-done`, { ...UW, ...asP, body: { itemId: item4.id, repaired: true } })
+    ok(r.status === 400 && String(r.json.error).includes('입고된 라인만'), "as repair-done 미입고 라인 → 400 '입고된 라인만 수리완료 처리할 수 있습니다'")
+    r = await call(h(RC2.asRepairDone.POST), 'POST', `${B}/api/as-receipts/${receipt.id}/repair-done`, { ...UW, ...asP, body: { itemId: item3.id, repaired: true } })
+    ok(r.status === 400 && String(r.json.error).includes('분실·취소·미회수'), 'as repair-done LOST 라인 → 400')
+    r = await call(h(RC2.asRepairDone.POST), 'POST', `${B}/api/as-receipts/${receipt.id}/repair-done`, { ...UW, ...asP, body: { itemId: item2.id, repaired: true } })
+    ok(r.status === 200 && r.json.success === true && r.json.repaired === true && r.json.repairedAt === today && r.json.repairedBy?.id === (realUser?.id ?? null) && r.json.condition === 'REPAIRED' && r.json.warnings.length === 0, 'as repair-done USER → 200 {repaired, repairedAt(오늘 KST), repairedBy, condition REPAIRED}', r.json)
+    ok(!!(await auditLabel('as_receipt', AS_R, { equals: `${AS_R} 수리완료` })), "as repair-done audit 라벨 '{asCode} 수리완료'")
+    r = await call(h(RC2.asRepairDone.POST), 'POST', `${B}/api/as-receipts/${receipt.id}/repair-done`, { ...UW, ...asP, body: { itemId: item2.id, repaired: false } })
+    ok(r.status === 200 && r.json.repaired === false && r.json.repairedAt === null && r.json.condition === 'AS_WAITING' && (await lineOf(item2.id)).repairedAt == null, 'as repair-done 해제 → 라인 NULL·기기 CORRECT AS_WAITING', r.json)
+    ok(!!(await auditLabel('as_receipt', AS_R, { equals: `${AS_R} 수리완료 해제` })), "as repair-done 해제 audit 라벨 '{asCode} 수리완료 해제'")
+    r = await call(h(RC2.asDetail.GET), 'GET', `${B}/api/as-receipts/${receipt.id}`, { ...UW, ...asP })
+    {
+      const it = r.json?.asReceipt?.items?.find((i: { id: number }) => i.id === item2.id)
+      ok(r.status === 200 && !!it && it.repairedAt === null && 'repairedBy' in it && it.device?.unit?.condition === 'AS_WAITING' && it.device?.unit?.locationSiteValue === 'REFRESH_CENTER' && it.device?.unit?.locationHospitalCode === null && 'locationHospitalName' in it.device.unit, 'as-receipts/[id] GET — items[].repairedAt/repairedBy + device.unit{condition, locationSiteValue, locationHospitalCode, locationHospitalName}', it)
+    }
+    r = await call(h(RC2.asScrapLine.POST), 'POST', `${B}/api/as-receipts/${receipt.id}/scrap-line`, { ...V, ...asP, body: { itemId: item2.id, memo: 'x' } })
+    ok(r.status === 403, 'as scrap-line VIEWER → 403')
+    r = await call(h(RC2.asScrapLine.POST), 'POST', `${B}/api/as-receipts/${receipt.id}/scrap-line`, { ...UW, ...asP, body: { itemId: item2.id, memo: '  ' } })
+    ok(r.status === 400 && /사유/.test(r.json.error), 'as scrap-line memo 없음 → 400')
+    r = await call(h(RC2.asScrapLine.POST), 'POST', `${B}/api/as-receipts/${receipt.id}/scrap-line`, { ...UW, ...asP, body: { itemId: item3.id, memo: 'x' } })
+    ok(r.status === 400, 'as scrap-line LOST 라인 → 400')
+    r = await call(h(RC2.asScrapLine.POST), 'POST', `${B}/api/as-receipts/${receipt.id}/scrap-line`, { ...UW, ...asP, body: { itemId: item2.id, memo: '스모크 폐기' } })
+    {
+      const note = await noteOf()
+      ok(r.status === 200 && r.json.success === true && r.json.condition === 'SCRAPPED' && (await unitOf(p2)).condition === 'SCRAPPED' && note.includes('[폐기 ') && note.includes('스모크 폐기'), 'as scrap-line USER → 200 SCRAPPED + 비고 [폐기 …] memo', r.json)
+    }
+    ok(!!(await auditLabel('as_receipt', AS_R, { equals: `${AS_R} 폐기` })), "as scrap-line audit 라벨 '{asCode} 폐기'")
+    r = await call(h(RC2.asScrapLine.POST), 'POST', `${B}/api/as-receipts/${receipt.id}/scrap-line`, { ...UW, ...asP, body: { itemId: item2.id, memo: '재폐기' } })
+    ok(r.status === 400 && String(r.json.error).includes('폐기'), 'as scrap-line 이미 폐기 기기 → 400')
+  }
+
   const auditBy = await prisma.auditLog.groupBy({ by: ['resource'], where: { id: { gt: pre.max.a }, resource: { in: AUDIT_RESOURCES } }, _count: { _all: true } })
   const ac = Object.fromEntries(auditBy.map((a) => [a.resource, a._count._all]))
-  ok((ac.hospital_device ?? 0) >= 5 && (ac.hospital_device_event ?? 0) >= 5 && ac.hospital_device_import === 3 && (ac.hospital_ward ?? 0) >= 4 && ac['setting:device_recovery_reason'] === 3 && ac['setting:device_usage_type'] === 3, '감사 로그 자원별 건수(§8.3 자원명)', ac)
+  ok((ac.hospital_device ?? 0) >= 5 && (ac.hospital_device_event ?? 0) >= 5 && ac.hospital_device_import === 3 && (ac.hospital_ward ?? 0) >= 4 && ac['setting:device_recovery_reason'] === 3 && ac['setting:device_usage_type'] === 3 && ac.as_receipt === 3, '감사 로그 자원별 건수(§8.3 자원명 — as_receipt 수리완료·해제·폐기 3건)', ac)
 
   section('[14] 최종 정합 — 전 개체 프로젝션 = fold')
   const all = await allTestDeviceIds()
@@ -1500,6 +2159,7 @@ main()
     const post = await counts()
     ok(JSON.stringify(post) === JSON.stringify(pre.counts), `정리 후 row 수 = 사전 (units=${post.u} devices=${post.d} events=${post.e} wards=${post.w} batches=${post.b})`, { pre: pre.counts, post })
     ok((await prisma.auditLog.count({ where: { id: { gt: pre.max.a }, resource: { in: AUDIT_RESOURCES } } })) === 0, '이 실행의 audit_logs 정리')
+    ok((await prisma.asReceipt.count({ where: { asCode: { in: [...SMOKE_AS_CODES] } } })) === 0, '스모크 AS접수 정리(SMOKE_AS_CODES)')
     console.log(`\n결과: pass=${pass} fail=${fail}`)
     await prisma.$disconnect()
     process.exit(fail > 0 ? 1 : 0)

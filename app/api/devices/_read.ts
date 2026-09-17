@@ -11,14 +11,14 @@ import * as XLSX from 'xlsx'
 import { getAuthUser, type JWTPayload } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import {
-  isRegistryError,
+  toRegistryErrorResponse,
   type EventsQuery,
   type UnitsQuery,
   type UnitsSort,
   type UnitsStatusFilter,
   type UnitsWmsFilter,
 } from '@/lib/deviceRegistry'
-import { DEVICE_EVENT_TYPES, PRODUCT_TYPE_FILTERS, REGISTRY_REF_TYPES, REGISTRY_SOURCES, USAGE_FILTERS, isYmd, todayKst, type ProductTypeFilter, type UsageFilter } from '@/lib/deviceRegistryShared'
+import { CONDITION_FILTERS, DEVICE_EVENT_TYPES, LOCATION_FILTERS, PRODUCT_TYPE_FILTERS, REGISTRY_REF_TYPES, REGISTRY_SOURCES, USAGE_FILTERS, isYmd, todayKst, type ConditionFilter, type LocationFilter, type ProductTypeFilter, type UsageFilter } from '@/lib/deviceRegistryShared'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 인증 · 오류
@@ -32,9 +32,10 @@ export async function authOr401(req: NextRequest): Promise<JWTPayload | NextResp
 
 export const badRequest = (error: string) => NextResponse.json({ error }, { status: 400 })
 
-/** RegistryError → 그 status + toJSON(), 그 외 → 500 */
+/** RegistryError·RegistryTxAbort → 그 status + 본문(공통 헬퍼 `toRegistryErrorResponse`), 그 외 → 500 */
 export function readErrorResponse(e: unknown, context: string): NextResponse {
-  if (isRegistryError(e)) return NextResponse.json(e.toJSON(), { status: e.status })
+  const r = toRegistryErrorResponse(e)
+  if (r) return NextResponse.json(r.body, { status: r.status })
   console.error(`[devices:${context}]`, e)
   return NextResponse.json({ error: '기기 현황 조회 중 오류가 발생했습니다.' }, { status: 500 })
 }
@@ -60,7 +61,7 @@ const UNITS_STATUS: readonly UnitsStatusFilter[] = ['active', 'recovered', 'all'
 const UNITS_WMS: readonly UnitsWmsFilter[] = ['linked', 'unlinked', 'in_stock']
 const UNITS_SORT: readonly UnitsSort[] = ['ward', 'serial', 'placedOn', 'lastEvent']
 
-/** `GET /api/devices/units`·`/export` 공용 — hospital/model/ward/status/q/wms/usage(SALE|EVAL|none)/productType(일반|라이트|none)/sort (§7.1) */
+/** `GET /api/devices/units`·`/export` 공용 — hospital/model/ward/status/q/wms/usage(SALE|EVAL|none)/productType(일반|라이트|none)/condition(6종|none)/location(HOSPITAL|REFRESH_CENTER|HUB|none)/sort (§7.1) */
 export function parseUnitsQuery(sp: URLSearchParams): { params: UnitsQuery; sort: UnitsSort } | NextResponse {
   const model = positiveInt(sp.get('model'))
   if (model === undefined) return badRequest('model은 기기 모델 id(양의 정수)여야 합니다.')
@@ -92,6 +93,14 @@ export function parseUnitsQuery(sp: URLSearchParams): { params: UnitsQuery; sort
   const productType: ProductTypeFilter | null | undefined = ptRaw ? (PRODUCT_TYPE_FILTERS.find((s) => s === ptRaw) ?? undefined) : null
   if (productType === undefined) return badRequest('productType은 일반 | 라이트 | none 중 하나여야 합니다.')
 
+  // 기기 상태·위치(2026-09-17 device_condition_location_design.md §6.2) — 회수 목록 condition=REPAIRED&location=REFRESH_CENTER = 교체품 가용(I-5 v1 근사)
+  const condRaw = sp.get('condition')
+  const condition: ConditionFilter | null | undefined = condRaw ? (CONDITION_FILTERS.find((s) => s === condRaw) ?? undefined) : null
+  if (condition === undefined) return badRequest(`condition은 ${CONDITION_FILTERS.join(' | ')} 중 하나여야 합니다.`)
+  const locRaw = sp.get('location')
+  const location: LocationFilter | null | undefined = locRaw ? (LOCATION_FILTERS.find((s) => s === locRaw) ?? undefined) : null
+  if (location === undefined) return badRequest(`location은 ${LOCATION_FILTERS.join(' | ')} 중 하나여야 합니다.`)
+
   const sortRaw = sp.get('sort')
   const sort = sortRaw ? (UNITS_SORT.find((s) => s === sortRaw) ?? undefined) : 'ward'
   if (sort === undefined) return badRequest('sort는 ward | serial | placedOn | lastEvent 중 하나여야 합니다.')
@@ -105,7 +114,7 @@ export function parseUnitsQuery(sp: URLSearchParams): { params: UnitsQuery; sort
 
   const hospital = sp.get('hospital')?.trim() || null
   const q = sp.get('q')?.trim() || null
-  return { params: { hospital, model, ward, status, q, wms, usage, productType, deal, as }, sort }
+  return { params: { hospital, model, ward, status, q, wms, usage, productType, deal, as, condition, location }, sort }
 }
 
 /** `GET /api/devices/events`·`/events/export` 공용 — hospital/device/type/from/to/refType/refCode/batch/actionGroup/source/q */

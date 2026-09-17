@@ -22,6 +22,7 @@ import {
   type ImportRowAction,
   type ImportSourceKind,
   type ImportVerdict,
+  DEVICE_SCRAPPED_REGISTER_MESSAGE,
 } from '@/lib/deviceRegistryShared'
 import { prisma } from '@/lib/prisma'
 import {
@@ -51,6 +52,7 @@ import {
   type RegistryCtx,
   type RegistryOpts,
   type WardRef,
+  NON_PLACEMENT_EVENT_TYPES,
 } from './core'
 import { registerDevicesIn, type RegisterItem, type RegisterResult } from './write'
 import { matchInventoryUnits, type WmsMatch } from './wms'
@@ -486,7 +488,7 @@ export async function previewRows(
   if (transferCandidates.length > 0) {
     const grouped = await client.hospitalDeviceEvent.groupBy({
       by: ['deviceId'],
-      where: { deviceId: { in: transferCandidates.map((w) => existingBySerial.get(w.out.serialNo)!.id) }, eventType: { not: 'CORRECT' } },
+      where: { deviceId: { in: transferCandidates.map((w) => existingBySerial.get(w.out.serialNo)!.id) }, eventType: { notIn: [...NON_PLACEMENT_EVENT_TYPES] } }, // 배치 축 이벤트만(CORRECT·신규 4종 제외 — stateEventsAfter와 동일 필터)
       _max: { occurredOn: true },
     })
     for (const g of grouped) lastStateOn.set(g.deviceId, ymd(g._max.occurredOn) ?? '')
@@ -499,6 +501,8 @@ export async function previewRows(
     const d = existingBySerial.get(out.serialNo)
     const unit = unitsBySerial.get(out.serialNo)?.unit
     if (unit) {
+      // 폐기(SCRAPPED) 유닛은 등록 불가 — 미리보기/실행(registerDevicesIn 409) 일치 (2026-09-17 §7.0)
+      if (unit.condition === 'SCRAPPED') w.errors.push(DEVICE_SCRAPPED_REGISTER_MESSAGE)
       // 원장에 있는 유닛(배치 유무 무관)은 모델이 확정되어 있다 — 행의 모델 판별 오류·형식 경고는 무시
       w.modelError = null
       w.modelWarns = []

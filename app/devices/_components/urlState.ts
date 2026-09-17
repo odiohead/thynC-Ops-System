@@ -4,7 +4,7 @@
  *
  * v1 단순화(2026-09-01 사용자 피드백) — 메인 탭 2개:
  *  - `?view=hospital&hospital=&tab=list|history|wards|import&status=&model=&ward=&q=&page=&device=` (병원 미선택이면 q/page = 축약 커버리지 표의 병원명 검색·페이지)
- *  - `?view=devices&status=&model=&usage=&productType=&q=&page=&device=`
+ *  - `?view=devices&status=&model=&usage=&productType=&condition=&location=&q=&page=&device=` (condition/location은 2026-09-17 기기 상태·위치 축)
  * 구 링크(`tab=coverage|events`, view 없음)는 기본값(view=hospital, tab=list)으로 관대하게 매핑.
  */
 import {
@@ -16,7 +16,7 @@ import {
   type UnitsStatusFilter,
   type WardFilter,
 } from './types'
-import { PRODUCT_TYPE_FILTERS, USAGE_FILTERS, type ProductTypeFilter, type UsageFilter } from '@/lib/deviceRegistryShared'
+import { CONDITION_FILTERS, LOCATION_FILTERS, PRODUCT_TYPE_FILTERS, USAGE_FILTERS, type ConditionFilter, type LocationFilter, type ProductTypeFilter, type UsageFilter } from '@/lib/deviceRegistryShared'
 
 export interface DevicesUrlState {
   /** 메인 탭 — 기본 hospital */
@@ -30,6 +30,9 @@ export interface DevicesUrlState {
   /** devices 뷰 전용 URL 필터(병원 뷰에서는 로컬 필터로 남는다) */
   usage: UsageFilter | null
   productType: ProductTypeFilter | null
+  /** devices 뷰 전용 — 기기 상태(6종|none)·위치(HOSPITAL|REFRESH_CENTER|HUB|none) (2026-09-17). 회수 목록 condition=REPAIRED&location=REFRESH_CENTER = 교체품 가용 */
+  condition: ConditionFilter | null
+  location: LocationFilter | null
   q: string
   page: number
   /** 드로어 딥링크 기기 id(양쪽 뷰 공통) */
@@ -45,6 +48,8 @@ export const DEFAULT_URL_STATE: DevicesUrlState = {
   ward: null,
   usage: null,
   productType: null,
+  condition: null,
+  location: null,
   q: '',
   page: 1,
   device: null,
@@ -88,6 +93,8 @@ export function parseDevicesParams(sp: RawParams): DevicesUrlState {
   const ward: WardFilter = wardRaw === 'unassigned' ? 'unassigned' : posInt(wardRaw)
   const usageRaw = first(sp, 'usage')
   const ptRaw = first(sp, 'productType')
+  const condRaw = first(sp, 'condition')
+  const locRaw = first(sp, 'location')
   return {
     view,
     hospital: view === 'hospital' ? hospital : null,
@@ -97,6 +104,8 @@ export function parseDevicesParams(sp: RawParams): DevicesUrlState {
     ward: view === 'hospital' ? ward : null,
     usage: view === 'devices' && (USAGE_FILTERS as readonly string[]).includes(usageRaw ?? '') ? (usageRaw as UsageFilter) : null,
     productType: view === 'devices' && (PRODUCT_TYPE_FILTERS as readonly string[]).includes(ptRaw ?? '') ? (ptRaw as ProductTypeFilter) : null,
+    condition: view === 'devices' && (CONDITION_FILTERS as readonly string[]).includes(condRaw ?? '') ? (condRaw as ConditionFilter) : null,
+    location: view === 'devices' && (LOCATION_FILTERS as readonly string[]).includes(locRaw ?? '') ? (locRaw as LocationFilter) : null,
     q: (first(sp, 'q') ?? '').trim(),
     page: posInt(first(sp, 'page')) ?? 1,
     device: posInt(first(sp, 'device')),
@@ -125,6 +134,8 @@ export function serializeDevicesParams(s: DevicesUrlState): string {
     if (s.model != null) sp.set('model', String(s.model))
     if (s.usage) sp.set('usage', s.usage)
     if (s.productType) sp.set('productType', s.productType)
+    if (s.condition) sp.set('condition', s.condition)
+    if (s.location) sp.set('location', s.location)
     if (s.q) sp.set('q', s.q)
     if (s.page > 1) sp.set('page', String(s.page))
   }

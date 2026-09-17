@@ -7,6 +7,10 @@
  *  - 헤더 상품유형 배지(일반/라이트/미지정, 배치 속성 B-22) — USER+ 인라인 변경(patchDevice({productType}) → CORRECT). 이벤트 행은 스냅샷이 현재 값과 다를 때만 '(당시 라이트)' 병기
  *  - '온프렘 스냅샷 ▸'(macAddress·extDeviceCode·ext_* 값 있을 때만) · 메모 인라인 저장(USER+, patchDevice({memo}))
  *  - 버튼 [병동 이동] [회수] [교체](canWrite, ACTIVE) → onAction · 관리 ▾(canAdmin): 이벤트 정정(patchEvent, §8.2 허용 필드) · 마지막 이벤트 취소(cancelEvent) · 모델/시리얼 정정(onAction('correct'))
+ *  - 기기 상태·위치 축(2026-09-17 device_condition_location_design.md §6.2): 헤더 배치 배지 뒤 condition 배지 + 설명 줄 '· 위치: 리프레시센터 (09-14~)'.
+ *    액션(병원 문맥 무관 — onAction asOpen/asClear 패턴): 배치 RECOVERED/없음 → [수리완료](AS접수/미확인) [수리완료 해제](수리완료) [폐기](분실·폐기 아님, memo 필수) [위치 이동 ▾](목적지 거점)
+ *    / 배치 ACTIVE ∧ 위치 거점 ∧ 사용중 → [병원 반환](I-4 예외 해소). 이벤트 행: 4종(입고/수리 완료/폐기/위치 이동) 문장 + REGISTER/RECOVER/AS_* 행에 '→ 사용중 · 병원' 스냅샷 병기.
+ *    드로어는 occurred_on 정렬이라 소급 확정(초안 발송일) 시 REPAIR_DONE이 AS_CLEAR 뒤에 보일 수 있다(id 순 취소 규약과 다름 — §6.2).
  *  - 이벤트 목록 최신순(서버 순서 그대로): 업무일자 · 타입 배지 · 요약(병동 from→to / 사유 / 교체·이관 상대 링크 → 그 기기 드로어) · 연결(refLink) · 기록자 · 기록 시각(업무일자와 다르면 회색 병기)
  *  - 병원이 바뀌는 지점에 '─ 이전 병원 ─' 구분선. 임포트 REGISTER는 '(임포트 #12)' + '(배치 취소로만)'
  * 관리 액션 성공 후 onMutated(). deviceId null이면 렌더하지 않음. ESC/배경 클릭 → onClose.
@@ -23,8 +27,11 @@ import { useOverlayDismiss } from '@/app/components/useOverlayDismiss'
 import { cn } from '@/lib/cn'
 import {
   DEVICE_EVENT_TYPE_LABELS,
+  DEVICE_SITE_FALLBACK_LABELS,
+  DEVICE_SITE_VALUES,
   DEVICE_STATE_EVENT_TYPES,
   DEVICE_STATUS_LABELS,
+  DEVICE_UNIT_STATE_EVENT_TYPES,
   REGISTRY_REF_TYPES,
   REGISTRY_REF_TYPE_LABELS,
   PRODUCT_TYPES,
@@ -36,6 +43,7 @@ import {
   refLink,
   toYmd,
   todayKst,
+  unitStateChangesOf,
   type DeviceEventType,
   type ProductType,
   type RegistryRefType,
@@ -43,8 +51,9 @@ import {
 import { cancelEvent, errorMessage, getHospitalSummary, getRecoveryReasons, getUnitDetail, getUsageTypes, getWards, patchDevice, patchEvent } from './api'
 import { useDevicesToast } from './toast'
 import { RegistryFloatingPanel, RegistryMenuItem } from './RegistryFloatingPanel'
-import { changeSummaryLines, fmtKstDateTime, kstYmd, modelLabel, productTypeBadgeVariant, usageBadgeVariant, wmsCell, ymdOrDash } from './deviceDisplay'
-import { toDeviceRef, type Capabilities, type DeviceAction, type DeviceDetail, type DeviceDetailEvent, type DeviceRef, type EventPatchBody, type RecoveryReason, type SummaryDealRow, type UsageType, type Ward } from './types'
+import { ConditionBadge } from './registryFormKit'
+import { changeSummaryLines, fmtKstDateTime, kstYmd, locationMoveText, locationSnapshotText, locationText, modelLabel, productTypeBadgeVariant, sinceText, unitStateAfterText, unitStateChangeLines, usageBadgeVariant, wmsCell, ymdOrDash, type HospitalNameMap } from './deviceDisplay'
+import { toDeviceRef, type Capabilities, type DeviceAction, type DeviceActionOptions, type DeviceDetail, type DeviceDetailEvent, type DeviceRef, type EventPatchBody, type RecoveryReason, type SummaryDealRow, type UsageType, type Ward } from './types'
 
 export interface DeviceHistoryDrawerProps {
   /** URL ?device= — null이면 닫힘 */
@@ -53,21 +62,26 @@ export interface DeviceHistoryDrawerProps {
   capabilities: Capabilities
   /** 정정·취소·메모 저장 후 */
   onMutated: () => void
-  /** [병동 이동] [회수] [교체] · 관리 ▾ 식별 정정 */
-  onAction: (action: DeviceAction, device: DeviceRef) => void
+  /** [병동 이동] [회수] [교체] · 관리 ▾ 식별 정정 · 상태·위치 축 [수리완료][수리완료 해제][폐기][위치 이동(opts.to)][병원 반환] */
+  onAction: (action: DeviceAction, device: DeviceRef, opts?: DeviceActionOptions) => void
   /** 값이 바뀌면 상세 재조회 */
   reloadKey: number
   /** 교체·이관 상대 기기 링크 → 그 기기 드로어(없으면 URL ?device= 직접 교체) */
   onOpenDevice?: (id: number) => void
 }
 
-const EVENT_BADGE_VARIANT: Record<DeviceEventType, 'primary' | 'default' | 'warning' | 'outline' | 'destructive'> = {
+const EVENT_BADGE_VARIANT: Record<DeviceEventType, 'primary' | 'default' | 'success' | 'warning' | 'outline' | 'destructive'> = {
   REGISTER: 'primary',
   MOVE_WARD: 'outline',
   RECOVER: 'warning',
   CORRECT: 'default',
   AS_OPEN: 'destructive',
   AS_CLEAR: 'outline',
+  // 상태·위치 축 4종(2026-09-17 §6.2) — 입고 primary · 수리 완료 success · 폐기 default(gray) · 위치 이동 outline. Record라 타입 추가 시 컴파일 강제
+  INTAKE: 'primary',
+  REPAIR_DONE: 'success',
+  SCRAP: 'default',
+  SITE_MOVE: 'outline',
 }
 
 export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated, onAction, reloadKey, onOpenDevice }: DeviceHistoryDrawerProps) {
@@ -146,7 +160,7 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
     setPtSaving(true)
     try {
       const r = await patchDevice(device.id, { productType: next })
-      setDevice({ ...device, productType: r.device.productType ?? next })
+      setDevice({ ...device, productType: r.device?.productType ?? next })
       setPtEditing(false)
       notify(`${device.serialNo} 상품유형 → ${next ?? PRODUCT_TYPE_UNSET_LABEL}`, 'success')
       onMutated()
@@ -180,7 +194,7 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
     setDealSaving(true)
     try {
       const r = await patchDevice(device.id, { dealCode: next })
-      setDevice({ ...device, dealCode: r.device.dealCode ?? next })
+      setDevice({ ...device, dealCode: r.device?.dealCode ?? next })
       setDealEditing(false)
       notify(`${device.serialNo} 계약건 → ${next ?? '미지정'}`, 'success')
       onMutated()
@@ -216,7 +230,7 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
     try {
       const r = await patchDevice(device.id, { usageTypeId: next })
       const u = usageTypes?.find((x) => x.id === next) ?? null
-      setDevice({ ...device, usageTypeId: r.device.usageTypeId ?? next, usageType: u ? { id: u.id, name: u.name, value: u.value } : null })
+      setDevice({ ...device, usageTypeId: r.device?.usageTypeId ?? next, usageType: u ? { id: u.id, name: u.name, value: u.value } : null })
       setUsageEditing(false)
       notify(`${device.serialNo} 용도 → ${u?.name ?? '미지정'}`, 'success')
       onMutated()
@@ -268,6 +282,20 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
     if (synced) items.push({ label: '동기화', value: synced })
     return items
   }, [device])
+
+  // ── 위치 이동 ▾(목적지 거점 선택) — 2026-09-17 §6.2
+  const [locAnchor, setLocAnchor] = useState<HTMLElement | null>(null)
+  const closeLoc = useCallback(() => setLocAnchor(null), [])
+
+  /** 이벤트 스냅샷의 병원 코드 → 이름(이벤트 hospital·현재/마지막/위치 병원에서 수집) — 문장화 헬퍼에 전달 */
+  const hospitalNames = useMemo<HospitalNameMap>(() => {
+    const m = new Map<string, string>()
+    if (device?.hospital) m.set(device.hospital.hospitalCode, device.hospital.hospitalName)
+    if (device?.lastHospital) m.set(device.lastHospital.hospitalCode, device.lastHospital.hospitalName)
+    if (device?.locationHospitalCode && device.locationHospitalName) m.set(device.locationHospitalCode, device.locationHospitalName)
+    for (const ev of events) if (ev.hospital) m.set(ev.hospital.hospitalCode, ev.hospital.hospitalName)
+    return m
+  }, [device, events])
 
   // ── 관리 메뉴 · 이벤트 정정/취소
   const [adminAnchor, setAdminAnchor] = useState<HTMLElement | null>(null)
@@ -338,6 +366,7 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
                     >
                       {placementStatusLabel(device)}
                     </Badge>
+                    <ConditionBadge condition={device.condition} since={device.conditionChangedOn} />
                     {canWrite && usageEditing ? (
                       <Select
                         aria-label="용도"
@@ -460,6 +489,11 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
                         </span>
                       </>
                     )}
+                    {' · '}
+                    <span title="실제 소재(위치 축, 2026-09-17) — 배치(병원 몫)와 별개">
+                      위치: {locationText(device)}
+                      {sinceText(device.locationChangedOn) && <span className="text-muted-foreground"> {sinceText(device.locationChangedOn)}</span>}
+                    </span>
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                     <span className="inline-flex items-center gap-1">
@@ -609,6 +643,65 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
                     )}
                   </>
                 )}
+                {/* 상태·위치 축(2026-09-17 §6.2) — 병원 문맥 무관 경로. ACTIVE ∧ 위치 거점 ∧ 사용중 → [병원 반환]; AS접수/수리완료 ACTIVE는 AS 상세에서 확정 */}
+                {canWrite && ref && device.status === 'ACTIVE' && device.locationSiteValue && device.condition === 'IN_USE' && (
+                  <Button size="sm" variant="outline" onClick={() => onAction('returnHospital', ref)} title="위치 거점 → 배치 병원 (취소 라인·수동 AS 해제로 센터에 남은 실물의 반환 — I-4 예외 해소)">
+                    병원 반환
+                  </Button>
+                )}
+                {canWrite && device.status === 'ACTIVE' && device.locationSiteValue && device.condition !== 'IN_USE' && (
+                  <span className="text-xs text-muted-foreground">미종결 입고 라인 — 실물 반환은 AS 상세에서 확정하세요.</span>
+                )}
+                {canWrite && ref && device.status !== 'ACTIVE' && (
+                  <>
+                    {(device.condition === 'AS_WAITING' || device.condition == null) && (
+                      <Button size="sm" variant="outline" onClick={() => onAction('repairDone', ref)} title="수리 완료 기록(REPAIR_DONE) — 이 기기의 AS 입고 라인에도 수리완료가 함께 기록됩니다">
+                        수리완료
+                      </Button>
+                    )}
+                    {device.condition === 'REPAIRED' && (
+                      <Button size="sm" variant="outline" onClick={() => onAction('repairUndo', ref)} title="수리완료 해제(정정 이벤트) — AS 입고 라인의 수리완료 체크도 해제됩니다">
+                        수리완료 해제
+                      </Button>
+                    )}
+                    {device.condition !== 'SCRAPPED' && device.condition !== 'LOST' && (
+                      <>
+                        <Button size="sm" variant="outline" onClick={() => onAction('scrap', ref)} className="text-destructive" title="폐기(SCRAP) — 사유 메모 필수. 되돌림은 관리자 보정 경로만">
+                          폐기
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => {
+                            const el = e.currentTarget
+                            setLocAnchor((prev) => (prev ? null : el))
+                          }}
+                          aria-haspopup="menu"
+                          aria-expanded={locAnchor != null}
+                          className="gap-1"
+                          title="위치 이동(SITE_MOVE) — 목적지 거점 선택"
+                        >
+                          위치 이동 <ChevronDown size={14} />
+                        </Button>
+                        <RegistryFloatingPanel open={locAnchor != null} anchor={locAnchor} onClose={closeLoc} className="w-52 py-1">
+                          {DEVICE_SITE_VALUES.map((v) => (
+                            <RegistryMenuItem
+                              key={v}
+                              disabled={device.locationSiteValue === v}
+                              onClick={() => {
+                                closeLoc()
+                                onAction('moveLocation', ref, { to: v })
+                              }}
+                            >
+                              {DEVICE_SITE_FALLBACK_LABELS[v]}
+                              {device.locationSiteValue === v ? ' (현재)' : ''}
+                            </RegistryMenuItem>
+                          ))}
+                        </RegistryFloatingPanel>
+                      </>
+                    )}
+                  </>
+                )}
                 {canWrite && device.status === 'RECOVERED' && <span className="text-xs text-muted-foreground">회수된 기기 — 재배치는 [+ 등록] 폼에 시리얼을 입력하면 이력이 이어집니다.</span>}
                 {!canWrite && <span className="text-xs text-muted-foreground">이동·회수·교체는 USER 등급부터 가능합니다.</span>}
                 {canAdmin && (
@@ -676,6 +769,7 @@ export function DeviceHistoryDrawer({ deviceId, onClose, capabilities, onMutated
                       },
                       notify,
                       usageTypes: usageTypes ?? [],
+                      hospitalNames,
                     })}
                   </ol>
                 )}
@@ -706,6 +800,8 @@ interface TimelineArgs {
   notify: ReturnType<typeof useDevicesToast>
   /** CORRECT 용도 변경 라벨 해석용 */
   usageTypes: readonly UsageType[]
+  /** 스냅샷 위치 병원 코드 → 이름 */
+  hospitalNames: HospitalNameMap
 }
 
 function renderTimeline(a: TimelineArgs): ReactNode[] {
@@ -739,6 +835,7 @@ function renderTimeline(a: TimelineArgs): ReactNode[] {
         onCancelEdit={() => a.onEdit(null)}
         notify={a.notify}
         usageTypes={a.usageTypes}
+        hospitalNames={a.hospitalNames}
         currentProductType={a.device.productType ?? null}
       />
     )
@@ -760,6 +857,7 @@ function EventRow({
   onCancelEdit,
   notify,
   usageTypes,
+  hospitalNames,
   currentProductType,
 }: {
   ev: DeviceDetailEvent
@@ -775,6 +873,7 @@ function EventRow({
   onCancelEdit: () => void
   notify: ReturnType<typeof useDevicesToast>
   usageTypes: readonly UsageType[]
+  hospitalNames: HospitalNameMap
   /** 현재 배치 상품유형 — 이벤트 스냅샷과 다르면 '(당시 …)' 병기 */
   currentProductType: string | null
 }) {
@@ -797,7 +896,7 @@ function EventRow({
         <div className="min-w-0 flex-1">
           <div className="text-foreground">
             {showHospital && ev.hospital && <span className="mr-1 text-muted-foreground">{ev.hospital.hospitalName}</span>}
-            <EventSummary ev={ev} onOpenDevice={onOpenDevice} usageTypes={usageTypes} />
+            <EventSummary ev={ev} onOpenDevice={onOpenDevice} usageTypes={usageTypes} hospitalNames={hospitalNames} />
             {importLocked && ev.importBatch && (
               <span className="ml-1 text-muted-foreground">
                 (임포트 #{ev.importBatch.id}
@@ -859,7 +958,19 @@ function DeviceLink({ id, serial, onOpenDevice }: { id: number; serial: string; 
   )
 }
 
-function EventSummary({ ev, onOpenDevice, usageTypes }: { ev: DeviceDetailEvent; onOpenDevice: (id: number) => void; usageTypes: readonly UsageType[] }) {
+/** 배치 축 이벤트(REGISTER/RECOVER/AS_*)의 상태·위치 스냅샷 병기 '→ 사용중 · 병원 …'(B-28). 배포 전 이벤트는 스냅샷이 없어 표시 없음 */
+function StateAfter({ changes, hospitalNames }: { changes: unknown; hospitalNames: HospitalNameMap }) {
+  const t = unitStateAfterText(changes, hospitalNames)
+  if (!t) return null
+  return (
+    <span className="text-muted-foreground" title="이벤트 직후 기기 상태 · 위치(스냅샷)">
+      {' '}
+      → {t}
+    </span>
+  )
+}
+
+function EventSummary({ ev, onOpenDevice, usageTypes, hospitalNames }: { ev: DeviceDetailEvent; onOpenDevice: (id: number) => void; usageTypes: readonly UsageType[]; hospitalNames: HospitalNameMap }) {
   switch (ev.eventType) {
     case 'REGISTER':
       return (
@@ -871,6 +982,7 @@ function EventSummary({ ev, onOpenDevice, usageTypes }: { ev: DeviceDetailEvent;
               (교체: <DeviceLink id={ev.relatedDevice.id} serial={ev.relatedDevice.serialNo} onOpenDevice={onOpenDevice} /> 대체)
             </span>
           )}
+          <StateAfter changes={ev.changes} hospitalNames={hospitalNames} />
         </>
       )
     case 'MOVE_WARD':
@@ -889,14 +1001,54 @@ function EventSummary({ ev, onOpenDevice, usageTypes }: { ev: DeviceDetailEvent;
               → 교체 <DeviceLink id={ev.relatedDevice.id} serial={ev.relatedDevice.serialNo} onOpenDevice={onOpenDevice} />
             </>
           )}
+          <StateAfter changes={ev.changes} hospitalNames={hospitalNames} />
         </>
       )
     case 'AS_OPEN':
-      return <>AS 접수 — AS진행중으로 표시</>
+      return (
+        <>
+          AS 접수 — AS진행중으로 표시
+          <StateAfter changes={ev.changes} hospitalNames={hospitalNames} />
+        </>
+      )
     case 'AS_CLEAR':
-      return <>AS진행중 해제</>
+      return (
+        <>
+          AS진행중 해제
+          <StateAfter changes={ev.changes} hospitalNames={hospitalNames} />
+        </>
+      )
+    // 상태·위치 축 4종(2026-09-17 §6.2) — 문장화는 deviceDisplay 헬퍼(단일 소스)
+    case 'INTAKE': {
+      const site = unitStateChangesOf(ev.changes)?.location.after
+      const lines = unitStateChangeLines(ev.changes, { hospitalNames })
+      return (
+        <>
+          {site?.kind === 'SITE' ? locationSnapshotText(site) : '센터'} 입고{ev.refCode ? ` (${ev.refCode})` : ''}
+          {lines.length > 0 && <span className="text-muted-foreground"> · {lines.join(' · ')}</span>}
+        </>
+      )
+    }
+    case 'REPAIR_DONE': {
+      const lines = unitStateChangeLines(ev.changes, { hospitalNames })
+      return (
+        <>
+          수리 완료{lines.length > 0 && <span className="text-muted-foreground"> · {lines.join(' · ')}</span>}
+        </>
+      )
+    }
+    case 'SCRAP': {
+      const lines = unitStateChangeLines(ev.changes, { hospitalNames })
+      return (
+        <>
+          폐기{lines.length > 0 && <span className="text-muted-foreground"> · {lines.join(' · ')}</span>}
+        </>
+      )
+    }
+    case 'SITE_MOVE':
+      return <>위치 이동 {locationMoveText(ev.changes, hospitalNames) ?? ''}</>
     case 'CORRECT': {
-      const lines = changeSummaryLines(ev.changes, undefined, usageTypes)
+      const lines = changeSummaryLines(ev.changes, undefined, usageTypes, hospitalNames)
       return <>{lines.length ? lines.join(' · ') : '식별 정정'}</>
     }
     default:
@@ -1070,7 +1222,10 @@ function EventEditForm({ ev, onCancel, onSaved, notify }: { ev: DeviceDetailEven
           <Input value={memo} maxLength={500} onChange={(e) => setMemo(e.target.value)} className={fieldCls} />
         </label>
       </div>
-      <p className="text-[11px] text-muted-foreground">유형·기기·병원·상대 기기·배치는 정정할 수 없습니다 — 잘못 기록됐다면 취소 후 다시 입력하세요. 업무일자 변경은 전이 재검증(불성립 시 409)을 거칩니다.</p>
+      <p className="text-[11px] text-muted-foreground">
+        유형·기기·병원·상대 기기·배치는 정정할 수 없습니다 — 잘못 기록됐다면 취소 후 다시 입력하세요. 업무일자 변경은 전이 재검증(불성립 시 409)을 거칩니다.
+        {(DEVICE_UNIT_STATE_EVENT_TYPES as readonly string[]).includes(ev.eventType) && ' 상태·위치 이벤트는 업무일자·메모·연결만 정정할 수 있고 기기 상태·위치 값에는 영향이 없습니다(id 순). 연결(ref) 정정은 AS 되돌림 게이트·입고 스킵 판정을 바꿉니다.'}
+      </p>
       {error && (
         <p role="alert" className="rounded border border-destructive/40 bg-destructive-subtle px-2 py-1 text-destructive-subtle-foreground">
           {error}

@@ -5,6 +5,7 @@ import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { AS_CATEGORIES, AS_TAGS, AS_TAG_FIELDS, parseSerialTextarea, summarizeAsRegistryTags, isAsIntakeIssue, type AsTag } from '@/lib/asReceiptShared'
 import { createAsReceipt, AsServiceError, type LineInput } from '@/lib/asReceiptService'
+import { toRegistryErrorResponse } from '@/lib/deviceRegistry'
 import { notifyTicketCreated } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
 
@@ -24,6 +25,7 @@ const listInclude = {
   items: {
     select: {
       id: true, serialNo: true, outcome: true, deviceKind: true, intakeState: true, shippedAt: true, shipTrackingNo: true, // 입고 대조 (2026-09-11) · 발송일·발송 송장 열 (2026-09-15)
+      repairedAt: true, // 수리완료 체크 (2026-09-17) — 목록 기기군 배지 `수리 n/m`
       device: { select: { deviceInfo: { select: { deviceName: true } }, placement: { select: { productType: true } } } }, // 목록 기기별 대수 표기 (CX #1) + 상품유형(일반/라이트, 2026-09-10)
       newDevice: { select: { placement: { select: { productType: true } } } }, // 교체 라인 — 구기기 배치가 회수된 뒤에는 교체기 배치의 상품유형으로 판별
     },
@@ -213,6 +215,8 @@ export async function POST(request: NextRequest) {
     )
   } catch (e) {
     if (e instanceof AsServiceError) return NextResponse.json({ error: e.message }, { status: e.status })
+    const r = toRegistryErrorResponse(e) // RegistryTxAbort(AS 표시 암묵 전이의 유닛 가드 실패 — 2026-09-17) → 409. RegistryError는 openAsFlags가 경고로 흡수
+    if (r) return NextResponse.json(r.body, { status: r.status })
     throw e
   }
 
