@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-09-18 08:50 | PROD 배포: AS접수 목록 운송장번호 검색 (30713f1)
+
+- **dev2**: 힙 4GB 빌드·`pm2 restart thync-dev`(health 200) → 커밋 30713f1·push
+- **PROD**: `git pull`(d4bae73→30713f1, 코드 전용 — package.json·마이그·협업 서버 변경 없음) → 힙 4GB 빌드(협업 번들 2108cacb 불변, collab 재시작 불필요) → `pm2 restart thync-prod` → health 200 · `/api/as-receipts?q=1234-5678` 307 정상. 재시작 이후 에러 로그 없음(Slack `invalid_blocks`·`users_not_found`는 재시작 전 기존 누적분)
+- 영향: PROD 소스(30713f1), DEV_HISTORY.md
+
+---
+
 ## 2026-09-18 08:30 | AS접수 목록 — 검색어에 수거·발송 운송장번호 추가 (dev2 검증, 빌드·PROD 배포 대기)
 
 - **배경(사용자 요청)**: AS업무 메인 검색을 접수번호·운송장번호로도 할 수 있게 — 접수번호(`asCode`)는 이미 검색 대상이었으나 placeholder가 '코드'라 드러나지 않았고, 운송장은 미지원
