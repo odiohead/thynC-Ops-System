@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-09-17 16:00 | PROD 배포: AS접수 목록 개선 — 입고일 열·필터 + 컬럼 정렬 + 페이저 + 날짜 필터 캘린더 (d4bae73)
+
+- **dev2 병합**: dev에서 push된 기기 상태·위치 축(26a0ba1·eb12ab8) 위에 dev2 작업분을 stash→pull→pop으로 재적용 — 충돌 3파일(목록 API items select·목록 AsRow 타입·DEV_HISTORY) 양쪽 유지로 해결, 마이그 `20260917120000_device_condition_location` dev2 DB 적용+resolve+generate, tsc 0·힙 4GB 빌드·재시작(WSL 재부팅으로 PM2가 비어 있어 `pm2 resurrect`·`pm2 save`) → 커밋 d4bae73·push
+- **PROD**: `git pull`(eb12ab8→d4bae73, 코드 전용 — package.json·마이그·협업 서버 변경 없음) → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` → Ready 1273ms · health 200 · `/as-receipts?sort=receivedAt&dir=desc&receivedFrom=…`·`/api/as-receipts?sort=shippedAt` 307 정상. 재시작 이후 에러 로그 0 (`clientModules` TypeError 3건은 재시작 이전 빌드 구간 발생분)
+- 영향: PROD 소스(d4bae73), DEV_HISTORY.md
+
+---
+
 ## 2026-09-17 15:45 | PROD 배포: 기기 상태·위치 축 (26a0ba1) — 마이그·빌드·백필 적용
 
 - **dev**: 커밋 26a0ba1(57파일 +3,487/−450)·push. dev는 15:20에 빌드·재시작·백필 적용 완료(직전 항목)
