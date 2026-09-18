@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-09-18 09:30 | PROD 배포: AS접수 상세 접수일 인라인 수정 (f2fe23a)
+
+- **dev2**: 힙 4GB 빌드·`pm2 restart thync-dev`(health 200) → 커밋 f2fe23a·push
+- **PROD**: `git pull`(30713f1→f2fe23a, 코드 전용 — package.json·마이그·협업 서버 변경 없음) → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` → health 200 · `/as-receipts/1` 307 정상. 재시작 이후 에러 로그 없음(Slack `invalid_blocks`·`users_not_found`는 재시작 직전 기존 알림 경로 발생분 — 이번 변경과 무관)
+- 영향: PROD 소스(f2fe23a), DEV_HISTORY.md
+
+---
+
 ## 2026-09-18 09:20 | AS접수 상세 — 2. 접수정보 카드에서 접수일 인라인 수정 (dev2 검증, 빌드·PROD 배포 대기)
 
 - **배경(사용자 요청)**: 상세 2. 접수정보 카드의 접수일이 읽기 전용이라 헤더 [수정] 모달로만 바꿀 수 있었음 → 담당자가 카드에서 바로 수정. 구글시트 역기입은 하지 않음(사용자 명시)
