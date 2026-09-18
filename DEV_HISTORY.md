@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-09-18 13:30 | PROD 배포: 수거방법 '수거없음' + 분실 자동 설정 (9cac262) — 마이그 적용
+
+- **dev2**: 마이그 적용·resolve·generate → 힙 4GB 빌드·`pm2 restart thync-dev`(health 200) → 커밋 9cac262·push
+- **PROD(사용자 명시 "PROD까지 바로 반영")**: `git pull`(6b73e87→9cac262, package.json·협업 서버 변경 없음) → 마이그 `20260918120000_as_pickup_method_none` psql 단일 tx(lock_timeout 5s) 적용 → `migrate resolve --applied` → `prisma generate` → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` → health 200, 불안정 재시작 0, 재시작 이후 에러 로그 없음. CHECK 정의에 NONE 포함·`_prisma_migrations` 등록 확인
+- 영향: PROD 소스(9cac262)·PROD DB(as_receipts CHECK 제약 재생성 — 데이터 변경 없음), DEV_HISTORY.md
+
+---
+
 ## 2026-09-18 13:10 | AS접수 — 수거방법 '수거없음'(NONE) 추가 + 분실 접수는 등록 시 자동 '수거없음' (dev2 마이그 적용·빌드, PROD 반영 진행)
 
 - **배경(사용자 요청)**: 상세 2. 접수정보의 수거방법에 '수거없음' 옵션 추가, 구분이 '분실'인 레코드 생성 시 자동 셋팅
