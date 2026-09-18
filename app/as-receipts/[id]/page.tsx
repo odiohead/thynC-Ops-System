@@ -11,7 +11,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import TicketStatusBadge from '@/app/tickets/components/TicketStatusBadge'
 import AsReceiptFormModal, { type AsEditTarget } from '../_components/AsReceiptFormModal'
-import {
+import { AS_PICKUP_METHODS, type AsPickupMethod,
   AS_CATEGORY_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, AS_DEST_TYPES,
   AS_DEST_TYPE_LABELS, AS_OUTCOME_LABELS,
   type AsCategory, type AsMethod, type AsDestType, type AsOutcome, AS_REGISTRY_TAG_LABELS, AS_REGISTRY_TAG_DESC, type AsRegistryTag, type AsRegistryLineTag,
@@ -1050,9 +1050,9 @@ export default function AsReceiptDetailPage() {
             {canEdit ? (
               <select value={intake.pickupMethod} onChange={(e) => setIntake((p) => ({ ...p, pickupMethod: e.target.value }))} className={inputCls}>
                 <option value="">선택</option>
-                {AS_METHODS.map((m) => <option key={m} value={m}>{AS_PICKUP_METHOD_LABELS[m]}</option>)}
+                {AS_PICKUP_METHODS.map((m) => <option key={m} value={m}>{AS_PICKUP_METHOD_LABELS[m]}</option>)}
               </select>
-            ) : <p className="mt-1 text-sm text-gray-900">{req.pickupMethod ? AS_PICKUP_METHOD_LABELS[req.pickupMethod as AsMethod] : '-'}</p>}
+            ) : <p className="mt-1 text-sm text-gray-900">{req.pickupMethod ? AS_PICKUP_METHOD_LABELS[req.pickupMethod as AsPickupMethod] ?? req.pickupMethod : '-'}</p>}
           </div>
           <div>
             <p className={label}>수거 송장번호</p>

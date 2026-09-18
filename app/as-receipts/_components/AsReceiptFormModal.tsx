@@ -6,8 +6,8 @@
  * → 라인별 증상·기기종류 입력 → 등록. 수정 모드는 종결 라인 제거 불가(서버 400).
  */
 import { useState, useEffect } from 'react'
-import {
-  AS_CATEGORIES, AS_CATEGORY_LABELS, AS_METHODS, AS_PICKUP_METHOD_LABELS,
+import { AS_PICKUP_METHODS, defaultAsPickupMethod,
+  AS_CATEGORIES, AS_CATEGORY_LABELS, AS_PICKUP_METHOD_LABELS,
   AS_DEVICE_KINDS, AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, parseSerialTextarea, type AsCategory, type AsTag, type AsTagFlags,
 } from '@/lib/asReceiptShared'
 
@@ -359,7 +359,16 @@ export default function AsReceiptFormModal({
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div>
               <label className={label}>구분 *</label>
-              <select value={category} onChange={(e) => setCategory(e.target.value as AsCategory)} className={input}>
+              <select
+                value={category}
+                onChange={(e) => {
+                  const next = e.target.value as AsCategory
+                  setCategory(next)
+                  // 분실 선택 → 수거방법 '수거없음' 자동, 분실 해제 시 '수거없음'이었으면 비움 (2026-09-18)
+                  setPickupMethod((prev) => (next === 'LOST' ? (defaultAsPickupMethod(next) ?? '') : prev === 'NONE' ? '' : prev))
+                }}
+                className={input}
+              >
                 {AS_CATEGORIES.map((c) => <option key={c} value={c}>{AS_CATEGORY_LABELS[c]}</option>)}
               </select>
             </div>
@@ -371,7 +380,7 @@ export default function AsReceiptFormModal({
               <label className={label}>수거방법</label>
               <select value={pickupMethod} onChange={(e) => setPickupMethod(e.target.value)} className={input}>
                 <option value="">선택</option>
-                {AS_METHODS.map((m) => <option key={m} value={m}>{AS_PICKUP_METHOD_LABELS[m]}</option>)}
+                {AS_PICKUP_METHODS.map((m) => <option key={m} value={m}>{AS_PICKUP_METHOD_LABELS[m]}</option>)}
               </select>
             </div>
             <div>

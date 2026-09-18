@@ -2213,7 +2213,7 @@ model AsReceipt {
   category         String    @default("FAULT") // FAULT 고장 / LOST 분실 (SQL CHECK — 2026-09-04 확정 2종)
   receiptDate      DateTime  @map("receipt_date") @db.Date // 접수일 (엑셀 A열)
   reporterName     String?   @map("reporter_name") // 고객명/카카오채널명 (J열, 자유 텍스트)
-  pickupMethod     String?   @map("pickup_method") // PARCEL 택배수거 / VISIT 방문수거 (SQL CHECK)
+  pickupMethod     String?   @map("pickup_method") // PARCEL 택배수거 / VISIT 방문수거 / NONE 수거없음(2026-09-18 — 분실 기본) (SQL CHECK)
   pickupTrackingNo String?   @map("pickup_tracking_no") // 수거 송장
   pickedUpAt       DateTime? @map("picked_up_at") @db.Date // 수거일 (M열)
   pickupDestDiffers Boolean  @default(false) @map("pickup_dest_differs") // 회수지 상이 체크 (CX #13 — 2026-09-07)

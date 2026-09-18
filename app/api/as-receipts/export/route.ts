@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { buildAsReceiptSearchOr } from '@/lib/asReceiptSearch'
-import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_DEST_TYPE_LABELS, AS_OUTCOME_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, AS_INTAKE_STATE_LABELS, type AsIntakeState, type AsCategory, type AsDestType, type AsMethod, type AsOutcome, parseAsSearchField } from '@/lib/asReceiptShared'
+import { type AsPickupMethod, AS_CATEGORIES, AS_CATEGORY_LABELS, AS_DEST_TYPE_LABELS, AS_OUTCOME_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, AS_INTAKE_STATE_LABELS, type AsIntakeState, type AsCategory, type AsDestType, type AsMethod, type AsOutcome, parseAsSearchField } from '@/lib/asReceiptShared'
 
 export const dynamic = 'force-dynamic'
 
@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
         우선수리: r.priorityRepair ? 'Y' : '',
         펌웨어업데이트: r.firmwareUpdate ? 'Y' : '',
         부속품동봉: r.accessoryIncluded ? 'Y' : '',
-        수거방법: r.pickupMethod ? (AS_PICKUP_METHOD_LABELS[r.pickupMethod as AsMethod] ?? r.pickupMethod) : '',
+        수거방법: r.pickupMethod ? (AS_PICKUP_METHOD_LABELS[r.pickupMethod as AsPickupMethod] ?? r.pickupMethod) : '',
         수거송장: r.pickupTrackingNo ?? '',
         수거일: d10(r.pickedUpAt),
         입고일: d10(r.receivedAt),

@@ -7,10 +7,17 @@ export const AS_CATEGORIES = ['FAULT', 'LOST'] as const
 export type AsCategory = (typeof AS_CATEGORIES)[number]
 export const AS_CATEGORY_LABELS: Record<AsCategory, string> = { FAULT: '고장', LOST: '분실' }
 
-export const AS_METHODS = ['PARCEL', 'VISIT'] as const
+export const AS_METHODS = ['PARCEL', 'VISIT'] as const // 발송방법(라인 ship_method) — 수거방법은 아래 AS_PICKUP_METHODS
 export type AsMethod = (typeof AS_METHODS)[number]
+// 수거방법 (2026-09-18 NONE 추가): PARCEL 택배수거 / VISIT 방문수거 / NONE 수거없음 — 분실 접수 등록 시 기본값
+export const AS_PICKUP_METHODS = ['PARCEL', 'VISIT', 'NONE'] as const
+export type AsPickupMethod = (typeof AS_PICKUP_METHODS)[number]
+/** 등록 시 수거방법 기본값 — 분실(LOST)은 회수할 기기가 없으므로 '수거없음' */
+export function defaultAsPickupMethod(category: string): AsPickupMethod | null {
+  return category === 'LOST' ? 'NONE' : null
+}
 /** 수거방법 라벨 (2026-09-04 확정 — 수거/발송 각자 방법 플래그, 단계 일괄 스킵 없음) */
-export const AS_PICKUP_METHOD_LABELS: Record<AsMethod, string> = { PARCEL: '택배수거', VISIT: '방문수거' }
+export const AS_PICKUP_METHOD_LABELS: Record<AsPickupMethod, string> = { PARCEL: '택배수거', VISIT: '방문수거', NONE: '수거없음' }
 export const AS_SHIP_METHOD_LABELS: Record<AsMethod, string> = { PARCEL: '택배발송', VISIT: '방문교체' }
 
 export const AS_DEST_TYPES = ['HOSPITAL', 'OTHER'] as const

@@ -5,7 +5,7 @@ import { getAuthUser, isUserOrAbove } from '@/lib/auth'
 import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { canEditAsReceipt, canDeleteAsReceipt } from '@/lib/asReceipt'
-import { AS_CATEGORIES, AS_METHODS, AS_DEST_TYPES, classifyAsRegistryLine } from '@/lib/asReceiptShared'
+import { AS_PICKUP_METHODS, AS_CATEGORIES, AS_DEST_TYPES, classifyAsRegistryLine } from '@/lib/asReceiptShared'
 import { findOpenLinesBySerial, duplicatesForReceipt } from '@/lib/asReceiptSearch'
 import { applyItemChanges, setUnitInUse, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { syncAsReceiptToTicket } from '@/lib/ticket-domains/asReceipt'
@@ -142,7 +142,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       data.receiptDate = d
     }
     if (body.pickupMethod !== undefined) {
-      if (body.pickupMethod && !(AS_METHODS as readonly string[]).includes(body.pickupMethod)) throw new AsServiceError(400, '수거방법이 올바르지 않습니다.')
+      if (body.pickupMethod && !(AS_PICKUP_METHODS as readonly string[]).includes(body.pickupMethod)) throw new AsServiceError(400, '수거방법이 올바르지 않습니다.')
       data.pickupMethod = body.pickupMethod || null
     }
     if (body.destType !== undefined) {

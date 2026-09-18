@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-09-18 13:10 | AS접수 — 수거방법 '수거없음'(NONE) 추가 + 분실 접수는 등록 시 자동 '수거없음' (dev2 마이그 적용·빌드, PROD 반영 진행)
+
+- **배경(사용자 요청)**: 상세 2. 접수정보의 수거방법에 '수거없음' 옵션 추가, 구분이 '분실'인 레코드 생성 시 자동 셋팅
+- **DB(규칙 1 — psql 직접 적용 후 `migrate resolve --applied`, `prisma generate`)**: 마이그 `20260918120000_as_pickup_method_none` — `as_receipts_pickup_method_check`를 PARCEL/VISIT/**NONE**으로 재생성(발송방법 `as_receipt_items.ship_method` CHECK는 불변). 스키마 주석만 갱신
+- **코드**: `lib/asReceiptShared.ts` — 수거방법 카탈로그를 발송방법(`AS_METHODS`)에서 분리한 `AS_PICKUP_METHODS`(+`AsPickupMethod`, 라벨 `NONE: '수거없음'`)와 `defaultAsPickupMethod(category)`(LOST → NONE). `createAsReceipt`는 수거방법 미지정이면 기본값 적용·검증 목록 교체, PUT 검증 교체, 채널톡 인입은 '분실' 행이면 `NONE`·수거일 없음(고장은 종전 택배·익일 유지). 등록/수정 모달: 구분 '분실' 선택 시 수거방법 '수거없음' 자동(해제 시 '수거없음'이었으면 비움, 사용자가 바꿀 수 있음), 상세 셀렉트·타임라인·Excel 라벨 3종
+- **검증**: dev2 CHECK 정의 NONE 포함 확인, tsc 0(힙 4GB)·eslint 0. 서비스 경유 생성 테스트는 티켓·알림이 딸려 있어 생략(기본값 함수·CHECK·검증 목록으로 갈음)
+- 영향: prisma/schema.prisma, prisma/migrations/20260918120000_as_pickup_method_none/, lib/asReceiptShared.ts, lib/asReceiptService.ts, lib/channeltalkAsSync.ts, app/api/as-receipts/{[id]/route.ts,[id]/timeline/route.ts,export/route.ts}, app/as-receipts/{_components/AsReceiptFormModal.tsx,[id]/page.tsx}, README.md
+
+---
+
 ## 2026-09-18 11:35 | PROD 배포: AS 검색 항목·복수 키워드·운송장 정규화·중복접수 확인필요·상세 카드 리마운트 (6b73e87)
 
 - **dev2**: 힙 4GB 빌드·`pm2 restart thync-dev`(health 200) → 커밋 6b73e87(9파일 +226/−57)·push

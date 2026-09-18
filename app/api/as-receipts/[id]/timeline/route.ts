@@ -4,7 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { TICKET_STATUS_LABELS } from '@/lib/ticket-shared'
 import { deviceConditionLabel } from '@/lib/deviceRegistryShared'
 import type { TicketStatus } from '@prisma/client'
-import {
+import { type AsPickupMethod,
   AS_CATEGORY_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, AS_DEST_TYPE_LABELS, AS_OUTCOME_LABELS, AS_TAGS, AS_TAG_FIELDS, AS_TAG_LABELS,
   type AsCategory, type AsMethod, type AsDestType, type AsOutcome,
 } from '@/lib/asReceiptShared'
@@ -43,7 +43,7 @@ function diffHeader(before: Rec, after: Rec): string[] {
   cmp('category', '구분', (v) => AS_CATEGORY_LABELS[v as AsCategory] ?? str(v))
   cmp('receiptDate', '접수일', d10)
   cmp('reporterName', '고객명')
-  cmp('pickupMethod', '수거방법', (v) => (v ? AS_PICKUP_METHOD_LABELS[v as AsMethod] ?? String(v) : '-'))
+  cmp('pickupMethod', '수거방법', (v) => (v ? AS_PICKUP_METHOD_LABELS[v as AsPickupMethod] ?? String(v) : '-'))
   cmp('pickupTrackingNo', '수거 송장')
   cmp('pickedUpAt', '수거일', d10)
   cmp('receivedAt', '입고일', d10)

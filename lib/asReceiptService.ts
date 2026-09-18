@@ -22,7 +22,7 @@ import {
   type RegistryCtx, type UnitStateSnapshot,
 } from '@/lib/deviceRegistry'
 import { syncAsReceiptToTicket, createTicketForAsReceipt } from '@/lib/ticket-domains/asReceipt'
-import { AS_OUTCOMES, AS_RESOLVE_OUTCOMES, AS_CATEGORIES, AS_METHODS, AS_DEST_TYPES, AS_OUTCOME_LABELS, AS_REPAIR_EXCLUDED_OUTCOMES, appendAsNote as appendNote, asDeviceKindFromSerial, canMarkAsLineRepaired, type AsOutcome } from '@/lib/asReceiptShared'
+import { AS_PICKUP_METHODS, defaultAsPickupMethod, AS_OUTCOMES, AS_RESOLVE_OUTCOMES, AS_CATEGORIES, AS_DEST_TYPES, AS_OUTCOME_LABELS, AS_REPAIR_EXCLUDED_OUTCOMES, appendAsNote as appendNote, asDeviceKindFromSerial, canMarkAsLineRepaired, type AsOutcome } from '@/lib/asReceiptShared'
 import { nextAsCode } from '@/lib/asReceipt'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
@@ -1254,8 +1254,8 @@ export async function createAsReceipt(
   const receiptDate = input.receiptDate
   if (!(receiptDate instanceof Date) || isNaN(receiptDate.getTime())) throw new AsServiceError(400, '접수일을 입력하세요.')
 
-  const pickupMethod = input.pickupMethod ?? null
-  if (pickupMethod && !(AS_METHODS as readonly string[]).includes(pickupMethod)) {
+  const pickupMethod = input.pickupMethod ?? defaultAsPickupMethod(category) // 분실은 기본 '수거없음' (2026-09-18)
+  if (pickupMethod && !(AS_PICKUP_METHODS as readonly string[]).includes(pickupMethod)) {
     throw new AsServiceError(400, '수거방법이 올바르지 않습니다.')
   }
 
