@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { checkSalesAccess } from '@/lib/sales'
+import { checkSalesAccess, isSalesOwnerCandidate } from '@/lib/sales'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,6 +25,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const hospital = await prisma.hospital.findUnique({ where: { hospitalCode: params.code }, select: { hospitalCode: true, hospitalName: true } })
   if (!hospital) return NextResponse.json({ error: '병원을 찾을 수 없습니다.' }, { status: 404 })
 
+  const before = await prisma.hospitalSalesProfile.findUnique({ where: { hospitalCode: params.code } })
   const body = await request.json()
   const stageId = intOrNull(body.stageId)
   const ownerId = strOrNull(body.ownerId)
@@ -35,9 +36,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const stage = await prisma.statusCode.findUnique({ where: { id: stageId }, select: { category: true } })
     if (stage?.category !== 'SALES_STAGE') return NextResponse.json({ error: '영업 단계 값이 올바르지 않습니다.' }, { status: 400 })
   }
-  if (ownerId !== null) {
-    const owner = await prisma.user.findUnique({ where: { id: ownerId }, select: { isActive: true } })
-    if (!owner || !owner.isActive) return NextResponse.json({ error: '담당 영업 값이 올바르지 않습니다.' }, { status: 400 })
+  if (ownerId !== null && ownerId !== before?.ownerId) {
+    // 새로 지정하는 담당은 SALES_MANAGER 역할 보유 활성 계정만 (2026-09-18). 기존 담당 유지(변경 없음)는 역할이 빠져도 통과
+    if (!(await isSalesOwnerCandidate(ownerId))) return NextResponse.json({ error: '담당 영업은 영업담당(SALES_MANAGER) 역할이 부여된 활성 계정만 지정할 수 있습니다.' }, { status: 400 })
   }
 
   const data = {
@@ -48,7 +49,6 @@ export async function PUT(request: NextRequest, { params }: Params) {
     salesMemo: typeof body.salesMemo === 'string' && body.salesMemo.trim() ? body.salesMemo : null,
   }
 
-  const before = await prisma.hospitalSalesProfile.findUnique({ where: { hospitalCode: params.code } })
   const profile = await prisma.hospitalSalesProfile.upsert({
     where: { hospitalCode: params.code },
     create: { hospitalCode: params.code, ...data },

@@ -163,7 +163,7 @@ app/
 │   │   ├── sync/                     # 심평원 연동 (POST: 백그라운드 시작, GET: 히스토리 목록)
 │   │   │   └── [id]/                 # 연동 잡 상세 + 로그
 │   │   └── detail-sync/              # 병원상세정보연동 (POST: 종별 선택 → 허가병상수 갱신, 백그라운드)
-│   ├── weekly/                       # 주간업무 관리 (2026-08-19) — board(주차 통합)·items(+[id]/update)·notes(특이사항)·masters·can-access(진입 아이콘 게이트) (SEERS 소속 OR weekly.access 권한)
+│   ├── weekly/                       # 주간업무 관리 (2026-08-19) — board(주차 통합)·items(+[id]/update·[id]/files/[fileId] 첨부 2026-09-18)·notes(특이사항)·masters·can-access(진입 아이콘 게이트) (SEERS 소속 OR weekly.access 권한)
 │   └── drive/                        # Google Drive 연동 (파일 업로드/목록/삭제/병원목록 내보내기)
 ├── (대시보드)/                        # 메인 대시보드 (이번 주/다음 주 공사 현황)
 ├── dashboard/                        # 사이니지 월보드 (50인치 상시 표시, 네비 없음) — 운영/영업 보드 선택, useSignageKeepAlive(자동 복구·2분 리로드)
@@ -188,7 +188,7 @@ app/
 │   └── mobile/                       # 빠른 예약·반납 모바일 페이지 (가능 차량 실시간 검색 + 인라인 반납)
 ├── sales/                            # 영업현황 (ADMIN+SEERS) — dashboard/(대시보드 A·실적, 메인) + deals/(도입현황 — 엑셀 B~AK 표·등록 모달, [id] 딜 상세 편집) + dashboard_map/(지역별 도입현황 지도 — 7개 권역 SVG 지도+표+드릴다운) + page.tsx(→ dashboard 리다이렉트) + _components/SalesConceptTabs(탭 3개)
 ├── parking/                          # 주차 웹할인 등록 (차량 검색 → 계정별 할인권 → 등록, nav 미등록)
-├── weekly/                           # 주간업무 관리 (사업본부 주간 리뷰 — nav 미등록·URL 직접 진입, SEERS) + _components/(ItemDetailModal·SearchSelect·AddItemRow·CellEditor·NotesSection·WeeklyRichEditor·RichContent — 진행내용·특이사항은 Tiptap 리치텍스트(색상·형광펜) HTML 저장)
+├── weekly/                           # 주간업무 관리 (사업본부 주간 리뷰 — nav 미등록·URL 직접 진입, SEERS) + _components/(ItemDetailModal·SearchSelect·AddItemRow·CellEditor·NotesSection·WeeklyRichEditor·RichContent·WeeklyFilesPanel/FilesModal/AttachCell(첨부 2026-09-18) — 진행내용·특이사항은 Tiptap 리치텍스트(색상·형광펜) HTML 저장)
 ├── ai-assistant/                     # AI 어시스턴트 채팅
 ├── wiki/                             # 사내 위키 (Phase 2-3)
 │   ├── layout.tsx                    # 사이드바 + 콘텐츠 flex 레이아웃 (모든 /wiki/* 적용)
@@ -675,6 +675,7 @@ prisma/
 - **WeeklyItem** (`weekly_items`): 사업본부 주간 리뷰 관리 항목(지속 레코드) — kind(`PROJECT`=주요 안건/`ISSUE`=주요 이슈)·title·detail(설명)·status(`진행`/`보류`)·bizType(`thynC`/`mobiCARE`/`공통` — 코드 상수 `lib/weekly.ts`)·병원/담당 팀(departments)/담당 FK(선택, SET NULL)·targetDate·`completedWeek`(**완료 여부 단일 소스** — 완료 주차 월요일 DATE, NULL이면 미완료)·completedAt·sortOrder·createdBy. 구 project_code 연결은 2026-08-19 1차 검토에서 제거(`20260819171543_weekly_items_revise`)
 - **WeeklyItemUpdate** (`weekly_item_updates`): 항목×주차별 진행 기록 — `UNIQUE(item_id, week_start)` 주차당 1건 upsert, content TEXT, 항목 삭제 시 CASCADE
 - **WeeklyWeekNote** (`weekly_week_notes`): 주간 특이사항 — 주차별 N건 자유 기재 엔트리 (week_start INDEX, created_by/updated_by — 2026-08-19 1차 검토에서 주차당 1건 메모에서 개정)
+- **WeeklyItemFile** (`weekly_item_files`, 2026-09-18 `20260918150000_weekly_item_files`): 항목 첨부파일 — fileName·s3Key(`weekly/<itemId>/<ts>_<name>`)·sizeBytes·contentType·uploadedBy(users SET NULL)·uploadedAt, item_id INDEX·CASCADE. 분류(file_category) 없음. 보드 DTO `fileCount`(`_count.files`), 상세 DTO `files[]`
 - 티켓 파이프라인 미편입(경영 리뷰 레이어) — ticket_status 매핑·어댑터 비대상
 
 ### Vehicle (법인차량)
@@ -998,7 +999,8 @@ prisma/
 - 운영 병원 등록·수정·삭제
   - 등록: 병원명+상태만으로 즉시 등록, HIRA 연결은 선택
   - 수정: HIRA 병원 연결 변경·해제 지원
-- 병원별 대웅 담당자(DAEWOONG 소속 User) 복수 선택 배정·해제 (DaewoongSelectModal 체크박스 방식)
+- 병원별 대웅 담당자(DAEWOONG 소속 User) 복수 선택 배정·해제 (DaewoongSelectModal 체크박스 방식) — **2026-09-18: 별도 카드(`DaewoongStaffTab`) 제거, 병원 상세 '영업 정보' 카드 개요 탭으로 편입**(칩 + [배정]/×, API `/daewoong-staff` 그대로). 따라서 영업 정보 카드 게이트(ADMIN 이상 또는 `sales.access` + SEERS 소속) 안에서만 보인다
+- **씨어스 영업담당**(`HospitalSalesProfile.ownerId`, 2026-09-18): 영업 정보 카드 개요 탭에서 지정 — 후보는 **RBAC 역할 `SALES_MANAGER` 보유 활성 계정**(`lib/sales.ts` `SALES_OWNER_ROLE_CODE`·`isSalesOwnerCandidate`, 종전 SEERS 활성 계정 전체). 저장 시 새 담당은 서버가 후보 여부 검증(기존 담당 유지는 역할이 빠져도 통과, 셀렉트에 '(역할 없음)' 표기로 유지)
 - 병원 상세 **도입 현황 카드**(`HospitalDeviceSummary`, 2026-09-01): 디바이스 원장 요약(모델 | 배치 중 | 계약 | 차이 | 최근 이벤트 + 최근 30일 회수·마지막 임포트)을 서버 컴포넌트가 `getHospitalDeviceSummary` 직접 호출로 표시, [디바이스 원장 열기 →]. 도입 병상 수는 표시만(수정은 병원 수정 폼). 원장 없음이면 헤더·계약 열 유지 + [디바이스 원장에서 임포트 →]
 - 시도/시군구/상태 필터, 페이지네이션 — 병원종·상태 필터는 표 상단 **체크박스 상시 노출** (2026-07-21, 구 멀티선택 드롭다운 대체. 선택 시 즉시 적용 + 초기화 버튼)
 - **병원상세정보연동 v2** (2026-09-14, `projects/hira_detail_sync_v2_design.md`): 대상 종별에 **의원(31)** 추가, 항목을 **허가병상수·진료과목·전문의수** 3종 체크박스로 확장. 병원당 항목 수만큼 호출하므로 일일 9,000콜 예산 안에서 `floor(9000/항목수)`개 병원씩 처리하고 남으면 `waiting` → 익일 00:10 KST 스케줄러(5분 tick, `lib/hira-detail-sync.ts`)가 자동 재개(수일~수주 1요청). 서버 재시작 시 상세 잡은 error가 아닌 waiting으로 돌려 즉시 재개. 요청 상세(로그 패널)에 진행률 바·대상/완료/실패·일차·오늘 호출·다음 실행·예상 잔여일·실패 병원 표본·**요청 취소** 버튼. HIRA 병원 상세에 '진료과목·전문의' 표(진료과목 전문의/전문과목 전문의/선택진료의사)·허가병상수, 병원 상세 기본 정보에 '진료과목 (심평원)' 한 줄 요약
@@ -1036,7 +1038,7 @@ prisma/
 
 ### 병원 영업 정보 (영업/CRM v4, 2026-07-29 — ADMIN 이상 + SEERS 전용)
 - 병원 상세 '영업 정보' 단일 카드 — 권한 통과 시에만 렌더(서버 컴포넌트 게이트 + API 재검증)
-- **요약 스트립(항상 표시)**: 영업 단계 배지(색상)·담당 영업·전체 병상·도입 병상(자동)·침투율(자동)·누적 실판매액·최근 활동
+- **요약 스트립(항상 표시)**: 영업 단계 배지(색상)·씨어스 담당·**대웅 담당**(2026-09-18 편입)·전체 병상·도입 병상(자동)·침투율(자동)·누적 실판매액·최근 활동. 개요 탭 그리드에 '씨어스 영업담당'(SALES_MANAGER 역할 후보 셀렉트)·'대웅 담당자'(칩·배정 모달) 필드
 - **탭 4개**: 개요 / 인적정보 / 영업 활동 / 계약 이력 — **빈 상태에도 필드 그리드·컬럼 헤더가 상시 노출**
   - 개요: 단계·담당·전체 병상/병동·도입 병상(자동)·침투율(자동)·메모 (수정 토글 시 같은 그리드가 인라인 폼 전환)
   - 인적정보: 이름·직군·직책·부서·진료과·전화·이메일 테이블 + 인물 등록 인라인 폼. 행 액션 **수정 / 전원(병원 검색 모달 — 이력 보존) / 소속종료 / 삭제**, 타 병원 이력 보유 시 '이력' 뱃지(툴팁), 과거 인물 접힘 목록(재직기간·현재 병원)
@@ -1072,6 +1074,7 @@ prisma/
 - **완료 처리**: 보고 있는 주차로 귀속(completedWeek — 단일 소스, 미래 주 차단) → 해당 주 보드에 취소선·완료 배지 잔류, 다음 주부터 제외, 아카이브 탭에서 재개 가능
 - **병원별 탭**(완료 포함 토글)·**완료 아카이브 탭** + 항목 상세 모달(전 필드 편집·주차별 타임라인·삭제)
 - 접근: 로그인+SEERS 소속 조회, USER 이상 쓰기 (`checkWeeklyAccess` — nav 미등록이므로 API 게이트가 단일 소스)
+- **첨부파일 (2026-09-18, `projects/weekly_attachments_design.md`)**: 항목 단위 첨부 — 보드·병원별·경과·아카이브에 목표일 다음 **'첨부' 별도 컬럼**(2026-09-19 개정 — 0건: 쓰기 권한자에게 '+ 첨부', n건: 클립 아이콘+건수 — 행 클릭과 분리) → 첨부 레이어(Modal): 드롭존·[파일 선택] 다중 업로드(한 요청 최대 10개·파일당 20MB, 부분 실패 보고)·파일명 클릭 새 탭(PDF·이미지 inline, 한글명 보존)·삭제(쓰기 권한자 전원, confirm). 항목 상세 모달 좌측에도 같은 패널. 업로드·삭제 후 보드는 해당 항목 `fileCount`만 로컬 갱신. 항목 삭제 시 S3 객체 정리. 감사 로그 `weekly_item_file`
 
 ### 프로젝트 관리
 - 구축 공사 프로젝트 등록·수정·삭제 (삭제는 ADMIN 이상)
@@ -1124,7 +1127,7 @@ prisma/
 - 상태 단계형 8종(접수·수거중·입고·발송·**발송완료**·완료·보류·취소 — 선교체 20% 실측 대응, 순서 강제 없음. '처리중'은 2026-09-10 제거, '발송완료'는 2026-09-11 추가 — 전 라인 처리 후 기기등록 전 단계, 자동 전이 대상) 티켓 양방향 동기화. 수정·삭제는 완료·취소 전 등록자 본인+ADMIN·이후 ADMIN, 라인 처리는 USER 이상 전원(별도 풀 없음). 삭제 시 티켓 동반 + 이 접수가 켠 AS 표시 해제(기록 이벤트는 보존)
 - 상태 마스터 `/settings/as-status`(ADMIN). 기기현황(/devices) 수동 [AS 접수] 버튼은 보정·이력 소급용으로 유지(모달에 AS업무 등록 권장 안내). 과거 AS이력 3,537행 소급은 기능 검증 후 별도 트랙(`thync_as_migration_design.md`)
 - **CX 확인사항 반영 (2026-09-07 — `AS_OPS_확인사항.xlsx`)**: ① 회수지 필드 신설(`pickup_dest_differs`·`pickup_dest_info` — 채널톡 인입 시 발송지와 동일 자동 기재, '회수지 상이' 체크 시 별도 입력) ② 라인 처리내용(`processNote`) 입력·표시(처리 실행 시 선택 라인 공통 기록·라인 표 컬럼) ③ **수정 권한 개정 — 종결 전 USER 전원**(구 등록자 본인 한정 · 삭제는 구 규칙 유지 `canDeleteAsReceipt`) ④ 선교체 여부 상시 표시(미해당 시 '일반' 배지) ⑤ 목록 [기기] 기기별 대수(`summarizeAsItemsByKind` — 산소포화도 n·심전도 n) ⑥ 목록 필터·페이지 URL 동기화(뒤로가기 검색 결과 복원) ⑦ 발송일 기간 필터 + 라인 단위 Excel 내보내기(`/api/as-receipts/export` — 안내 메시지 발송용. **2026-09-09**: 접수 3,000건·라인 1만 행 상한 제거(라인 10만 안전장치만), 접수 헤더 입력 항목 전부 포함 — 선교체·수거방법/송장/수거일·입고일·발송지 구분/정보·회수지 상이/정보·예상출하일·상태변경일·등록자·비고 추가, 32컬럼)
-- **채널톡 자동 등록 (2026-09-07 — `projects/channeltalk_as_intake_design.md`)**: 채널톡 ALF 태스크가 기록하는 구글시트('thynC VOC 현황' A/S 탭, 채널톡 전용 중계 파일)를 **1분 폴링**(`lib/channeltalkAsSync` + 스케줄러) — 신규 행을 병원 매칭(`lib/hospitalNameMatcher`)·시리얼(괄호 병동 표기 `P013798(72W)` 제거, 2026-09-10)/증상 파싱 후 `createAsReceipt` 동일 경로로 자동 등록(등록자 '채널톡 접수봇', **기본값 2026-09-15: 수거방법 택배수거·수거일 접수일 익일 — 화면에서 수정 가능**), 결과는 시트 AI~AL열에 되쓰기(등록완료/실패 사유 — 실패 행은 보정 후 AI 비우면 재시도). **2026-09-16 개정**: ① 필수값 누락(접수일·병원·시리얼)은 행 작성 도중일 수 있어 '실패' 대신 **'대기'** 로 두고 매 틱 재시도, 최초 대기(AL) 후 24시간 지나면 '실패' ② **AJ 코드 승격** — '실패' 행에 담당자가 수동 등록 AS 코드를 AJ에 적으면 '등록완료'로 올려 역기입 대상에 포함(접수 비고에 `[채널톡 r행] 수동 등록 연결` 태그) ③ **기존 접수 연결** — 등록 직전 같은 병원·접수일에 행의 시리얼을 전부 가진 접수가 있으면 새로 만들지 않고 연결(수동 등록이 먼저 된 경우 중복 방지). 틱 로그에 `linked`·`waiting` 카운트. `runChanneltalkAsSync(testIo?)` 메모리 행 주입으로 테스트 가능. 접수 종결 시 시트 X열(완료여부)에 완료/취소 **역기입** — **2026-09-11 이벤트 기반 개정**: `sheetDoneSynced`(마지막 기입 값)와 DB 상태가 다를 때만 1회 기입(리오픈 → '미완료'), 시트 수동 변경 불간섭, 개정 전 접수는 첫 틱 기준선 채택. **발송정보 역기입(2026-09-09)**: 라인 발송(수리반환·교체) 입력 시점부터 R열(수리품 택배발송)=송장 목록·V열(발송·교체일자)=발송일 목록·W열(발송기기)=출고 시리얼(수리반환→원 시리얼, 교체→교체기) 개행 구분(중복 제거) 기입 — 시트 값과 다를 때만 갱신(부분 발송 누적). **수거 송장 역기입(2026-09-10)**: 상세 진행 기록에서 저장한 수거 송장번호(`pickupTrackingNo`)를 L열(수거 송장)에 기입 — 값이 있고 시트와 다를 때만(단방향 채움). AppSetting: `channeltalk_as_interval`(off/1m/5m/10m)·`channeltalk_as_sheet_id`·`channeltalk_as_cutover_row`(컷오버 행 — 이후 행만 처리). 셋업: `scripts/setup-channeltalk-as.mts`
+- **채널톡 자동 등록 (2026-09-07 — `projects/channeltalk_as_intake_design.md`)**: 채널톡 ALF 태스크가 기록하는 구글시트('thynC VOC 현황' A/S 탭, 채널톡 전용 중계 파일)를 **1분 폴링**(`lib/channeltalkAsSync` + 스케줄러) — 신규 행을 병원 매칭(`lib/hospitalNameMatcher`)·시리얼(괄호 병동 표기 `P013798(72W)` 제거, 2026-09-10)/증상 파싱 후 `createAsReceipt` 동일 경로로 자동 등록(등록자 '채널톡 접수봇', **기본값 2026-09-15: 수거방법 택배수거·수거일 접수일 익일 — 화면에서 수정 가능**), 결과는 시트 AI~AL열에 되쓰기(등록완료/실패 사유 — 실패 행은 보정 후 AI 비우면 재시도). **2026-09-16 개정**: ① 필수값 누락(접수일·병원·시리얼)은 행 작성 도중일 수 있어 '실패' 대신 **'대기'** 로 두고 매 틱 재시도, 최초 대기(AL) 후 24시간 지나면 '실패' ② **AJ 코드 승격** — '실패' 행에 담당자가 수동 등록 AS 코드를 AJ에 적으면 '등록완료'로 올려 역기입 대상에 포함(접수 비고에 `[채널톡 r행] 수동 등록 연결` 태그) ③ **기존 접수 연결** — 등록 직전 같은 병원·접수일에 행의 시리얼을 전부 가진 접수가 있으면 새로 만들지 않고 연결(수동 등록이 먼저 된 경우 중복 방지). 틱 로그에 `linked`·`waiting` 카운트. `runChanneltalkAsSync(testIo?)` 메모리 행 주입으로 테스트 가능. 접수 종결 시 시트 X열(완료여부)에 완료/취소 **역기입** — **2026-09-11 이벤트 기반 개정**: `sheetDoneSynced`(마지막 기입 값)와 DB 상태가 다를 때만 1회 기입(리오픈 → '미완료'), 시트 수동 변경 불간섭, 개정 전 접수는 첫 틱 기준선 채택. **발송정보 역기입(2026-09-09)**: 라인 발송(수리반환·교체) 입력 시점부터 R열(수리품 택배발송)=송장 목록·V열(발송·교체일자)=발송일 목록·W열(발송기기)=출고 시리얼(수리반환→원 시리얼, 교체→교체기) 개행 구분(중복 제거) 기입 — 시트 값과 다를 때만 갱신(부분 발송 누적). **수거 송장 역기입(2026-09-10)**: 상세 진행 기록에서 저장한 수거 송장번호(`pickupTrackingNo`)를 L열(수거 송장)에 기입 — 값이 있고 시트와 다를 때만(단방향 채움). AppSetting: `channeltalk_as_interval`(off/1m/5m/10m)·`channeltalk_as_sheet_id`·`channeltalk_as_cutover_row`(컷오버 행 — 이후 행만 처리). 셋업: `scripts/setup-channeltalk-as.mts` **2026-09-19 행 이동 가드**: DB측 2차 가드(비고 `[채널톡 rN]` 태그로 '이미 등록된 행' 판정)는 태그 접수의 병원·시리얼이 행 내용과 일치할 때만 재기입하고, 불일치면 행 삭제·삽입으로 번호가 밀린 것으로 보고 일반 등록 경로(기존 접수 연결·신규 등록)로 진행(r3800 예수병원 → AS-0304 오기입 사례)
 
 ### 설치계획(가안) 관리
 - 설치계획(가안) 등록·수정·삭제 (삭제는 ADMIN 이상)
@@ -1664,7 +1667,7 @@ npm run dev
 | Method | Endpoint | 설명 |
 |--------|----------|------|
 | GET  | `/api/hospitals/[code]/sales` | 영업 정보 통합 조회 (프로필·인적정보(현재/과거 소속)·활동·딜 + 마스터(SALES 코드 7종·SEERS 유저·프로젝트) + 파생(도입 병상·침투율·누적 실판매액)) |
-| PUT  | `/api/hospitals/[code]/sales/profile` | 영업 프로필 upsert (단계·담당 영업 검증) |
+| PUT  | `/api/hospitals/[code]/sales/profile` | 영업 프로필 upsert (단계 검증·담당 영업은 SALES_MANAGER 역할 보유 활성 계정만 — 2026-09-18) |
 | POST, PUT/DELETE | `/api/hospitals/[code]/sales/persons(/[affId])` | 인물+소속 등록/동시 수정/소속 삭제(오입력 정정) |
 | POST | `/api/hospitals/[code]/sales/persons/[affId]/transfer` | **전원 처리** — 소속 종료 + 대상 병원 신규 소속 (이력 보존) |
 | POST | `/api/hospitals/[code]/sales/persons/[affId]/end` | 소속 종료 (퇴직 등) |
@@ -1690,6 +1693,7 @@ npm run dev
 - `PUT /api/weekly/items/[id]/update` - 주차 진행 upsert (빈 content면 삭제)
 - `GET /api/weekly/notes?week=` - 주차별 특이사항 조회 (보드 ◀▶ 주차 네비용) / `POST /api/weekly/notes` / `PUT·DELETE /api/weekly/notes/[id]` - 주간 특이사항 엔트리 생성·수정·삭제
 - `GET /api/weekly/masters` - 셀렉트 마스터 (병원·SEERS 활성 사용자·SEERS 부서=담당 팀)
+- `GET·POST /api/weekly/items/[id]/files` - 첨부 목록 / multipart `files` 다중 업로드(≤10개·파일당 20MB·실행파일 확장자 거부, `{files, failed}` 201 — 전부 실패면 400) / `GET /api/weekly/items/[id]/files/[fileId]` - 항목 소속 검증 후 presigned URL 302(5분, inline) / `DELETE` - S3·DB 삭제. 조회는 주간 조회 권한, 업로드·삭제는 쓰기 권한 (2026-09-18)
 
 ### HIRA 병원
 | Method | Endpoint | 설명 |

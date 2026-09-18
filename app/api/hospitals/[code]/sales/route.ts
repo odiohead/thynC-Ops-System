@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { SALES_OWNER_ROLE_CODE } from '@/lib/sales'
 import { getAuthUser } from '@/lib/auth'
 import { checkSalesAccess, toAmount, SALES_CODE_CATEGORIES } from '@/lib/sales'
 
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   })
   if (!hospital) return NextResponse.json({ error: '병원을 찾을 수 없습니다.' }, { status: 404 })
 
-  const [profile, affiliations, deals, activities, codes, owners, projects] = await Promise.all([
+  const [profile, affiliations, deals, activities, codes, ownerCandidates, projects, daewoongStaff] = await Promise.all([
     prisma.hospitalSalesProfile.findUnique({
       where: { hospitalCode: params.code },
       include: {
@@ -70,9 +71,9 @@ export async function GET(request: NextRequest, { params }: Params) {
       orderBy: { order: 'asc' },
       select: { id: true, name: true, category: true, color: true },
     }),
-    // 담당 영업 후보 — SEERS 활성 계정
+    // 담당 영업 후보 — RBAC 역할 SALES_MANAGER 보유 활성 계정 (2026-09-18 — 종전 SEERS 활성 계정 전체)
     prisma.user.findMany({
-      where: { isActive: true, organization: { code: 'SEERS' } },
+      where: { isActive: true, appRoles: { some: { role: { code: SALES_OWNER_ROLE_CODE, isActive: true } } } },
       orderBy: { name: 'asc' },
       select: { id: true, name: true },
     }),
@@ -80,6 +81,12 @@ export async function GET(request: NextRequest, { params }: Params) {
       where: { hospitalCode: params.code },
       orderBy: { orderNumber: 'asc' },
       select: { projectCode: true, projectName: true },
+    }),
+    // 대웅 담당자 배정 (2026-09-18 — 별도 카드에서 영업 정보 카드로 편입, 추가·해제는 /daewoong-staff API 그대로)
+    prisma.daewoongHospitalAssignment.findMany({
+      where: { hospitalCode: params.code },
+      orderBy: { createdAt: 'asc' },
+      select: { assignedUser: { select: { id: true, name: true, email: true, phone: true } } },
     }),
   ])
 
@@ -96,6 +103,11 @@ export async function GET(request: NextRequest, { params }: Params) {
   const contractedTotal = deals
     .filter((d) => d.status?.name === '계약완료')
     .reduce((sum, d) => sum + (d.daewoongAmountActual !== null ? Number(d.daewoongAmountActual) : 0), 0) // 대웅 실판매액 기준 (2026-07-31 — 씨어스 금액 수기 입력 전)
+
+  // 현재 담당이 역할 해제 등으로 후보에서 빠졌어도 셀렉트에서 보이도록 유지
+  const owners = profile?.owner && !ownerCandidates.some((u) => u.id === profile.owner!.id)
+    ? [...ownerCandidates, { id: profile.owner.id, name: `${profile.owner.name} (역할 없음)` }]
+    : ownerCandidates
 
   return NextResponse.json({
     canEdit: true,
@@ -117,6 +129,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     })),
     activities,
     derived: { introBeds, penetration, contractedTotal },
+    daewoongStaff: daewoongStaff.map((a) => a.assignedUser),
     masters: { codes: codesByCategory, owners, projects },
   })
 }

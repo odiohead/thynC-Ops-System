@@ -4,6 +4,50 @@
 
 ---
 
+## 2026-09-19 09:10 | 주간업무 첨부 — 목표일 셀 병합 → '첨부' 별도 컬럼으로 분리 (dev2 빌드·재시작, PROD 배포 대기)
+
+- **배경(사용자 지적)**: 첨부 트리거를 목표일 셀 안에 넣은 1차 반영이 "목표일과 같은 컬럼 개념이면 안 되고 별도 필드여야 하며 정렬이 흐트러진다" → 컬럼 분리
+- **변경**: `BOARD_COLS`에 `files`('첨부', 폭 72, 리사이즈) 컬럼을 `target` 다음에 신설, 목표일 폭 112 원복, 컬럼 폭 저장키 v4→**v5**(리셋). 병원별·경과·아카이브 리스트도 목표일 다음 '첨부' `<th>`/`<td>` 추가. `TargetCell`(날짜+트리거 병합) 폐기 → `AttachCell`(트리거만, VIEWER 0건은 `—`)로 교체, 목표일 셀은 종전 렌더 복원. 레이어·API·DTO 변경 없음
+- **문서**: 설계 §3.1·§5·§7-B 개정 이력 기록, README 주요 기능·디렉토리
+- **검증**: tsc 0·eslint 0, 4GB 빌드·`pm2 restart thync-dev`
+- 영향: app/weekly/page.tsx, app/weekly/_components/AttachCell.tsx(신규, TargetCell.tsx 삭제), projects/weekly_attachments_design.md, README.md
+
+---
+
+## 2026-09-18 17:40 | 주간업무 — 항목 첨부파일 (목표일 셀 클립 트리거 + 첨부 레이어 다중 업로드) (dev2 빌드·재시작 완료, PROD 배포 대기)
+
+- **배경(사용자 요청)**: 보드 목표일 오른쪽에 클립 아이콘 — 없으면 '+첨부', 있으면 아이콘, 클릭하면 팝업 레이어에서 여러 파일 업로드. 설계 `projects/weekly_attachments_design.md` 작성 → 착수 승인("일단 착수해서 dev2에 반영") → §7 결정 A~H 추천안대로 구현
+- **DB(규칙 1)**: 마이그 `20260918150000_weekly_item_files` — `weekly_item_files`(item_id CASCADE·file_name·s3_key·size_bytes·content_type·uploaded_by SET NULL·uploaded_at, item_id INDEX). 분류(file_category) 없음. psql 적용 → `migrate resolve --applied` → `prisma generate`
+- **API**: `GET·POST /api/weekly/items/[id]/files`(목록 / multipart `files` 다중 — 한 요청 ≤10개·파일당 20MB·실행파일 확장자 거부, 파일별 실패는 `failed[]`로 보고, 전부 실패면 400) · `GET /api/weekly/items/[id]/files/[fileId]`(항목 소속 검증 → presigned 302, 5분, `downloadName` 한글 보존·inline) · `DELETE`(S3→DB). 게이트는 `checkWeeklyAccess`(조회/쓰기). 감사 `weekly_item_file` CREATE/DELETE. 항목 DELETE 시 첨부 S3 객체 정리 추가. 상한 상수는 `lib/weekly.ts`(`WEEKLY_FILE_MAX_BYTES`·`WEEKLY_FILES_PER_REQUEST`) 화면 공용
+- **DTO**: `WeeklyItemDto.fileCount`(`ITEM_INCLUDE._count.files` — 보드·리스트 쿼리 1회), `WeeklyItemDetailDto.files[]`(`WeeklyFileDto`)
+- **화면**: `TargetCell`(목표일 + 트리거 — 0건: 쓰기 권한자에게 '+ 첨부', n건: 클립+건수, `stopPropagation`으로 행 클릭 분리) 보드·병원별·경과·아카이브 4곳 공용 · `FilesModal`(max-w-xl) + `WeeklyFilesPanel`(드롭존·[파일 선택] multiple·업로드 중 표시·부분 실패 플래시·파일명 새 탭·삭제 confirm) · 상세 모달 좌측 '첨부파일 (n건)' 섹션에 같은 패널. 업로드·삭제 후 `router.refresh()` + 보드는 해당 항목 `fileCount`만 로컬 패치(스크롤·펼침 보존), 상세 경로는 기존 `onChanged` 재조회. 목표일 열 폭 112→148, 컬럼 폭 저장키 v3→v4
+- **검증(dev2, 4GB 빌드·`pm2 restart thync-dev`·health 200)**: tsc 0·eslint 0. curl 실측 — 한글명·바이너리·exe 3개 동시 업로드 → 2건 201 + exe `failed`, 21MB 400, 파일 없음 400, VIEWER 업로드·삭제 403/조회 허용, 다운로드 302(`filename*=UTF-8''견적서_테스트.txt`, S3 GET 200), 타 항목 fileId 404, 삭제 후 presigned 404(S3 제거 확인), 감사 3행, 보드 fileCount 0→2→1→0. 테스트 파일은 전부 삭제(잔여 0행)
+- **미확인**: Nginx `client_max_body_size`(PROD·dev 호스트) — 20MB 미만이면 PROD 배포 시 조정 필요(설계 §8)
+- 영향: prisma/schema.prisma, prisma/migrations/20260918150000_weekly_item_files/, lib/weekly.ts, app/api/weekly/{shared.ts,items/[id]/route.ts,items/[id]/files/route.ts(신규),items/[id]/files/[fileId]/route.ts(신규)}, app/weekly/{page.tsx,_components/ItemDetailModal.tsx,_components/WeeklyFilesPanel.tsx(신규),_components/FilesModal.tsx(신규),_components/TargetCell.tsx(신규)}, projects/{weekly_attachments_design.md(신규),README.md,weekly_ops_design.md}, README.md
+
+---
+
+## 2026-09-19 09:40 | 채널톡 AS 동기화 — 시트 행 이동 시 오기입 결함 수정(2차 가드 내용 대조) + r3800 보정 스크립트 (dev2 빌드·재시작, PROD 코드·보정 미반영)
+
+- **사고(사용자 보고)**: 9/18 r3799→AS-0303(동아대)·r3800→AS-0304(서울산보람) 등록 후 시트 위쪽 행 1개가 삭제되어 전부 한 줄 상승 → 새 예수병원 행이 3800번이 됨 → 17:57 KST 틱에서 DB측 2차 가드가 비고 태그 `[채널톡 r3800]`(=0304)만 보고 예수병원 행에 '등록완료·AS-0304·(재기입)' 오기입, 이어 ④ 수거 송장 역기입이 그 행 L열에 0304의 송장(CJ 26095749762409)까지 기입. 예수병원은 이나경 님이 17:53 수동 등록(AS-0305, 정상). 시트 3796~3802행 읽기로 확인
+- **코드**: `lib/channeltalkAsSync.ts` 2차 가드 — 태그 접수의 `hospitalCode`·라인 시리얼을 조회해 행의 병원 매칭 결과·시리얼(괄호 제거 파싱)과 **모두 일치할 때만 재기입**, 불일치면 경고 로그 후 일반 경로(같은 병원·접수일·시리얼 '기존 접수 연결' → 신규 등록). 필수값 파싱을 가드 앞으로 이동
+- **검증**: tsc 0·eslint 0. dev2 메모리 행 E2E — A) r3676 동일 내용(부산본병원 P003057) → 재기입 AS-0177 / B) r3676에 광주씨티병원 3대(행 이동 상황) → 불일치 경고 후 '기존 접수 연결' AS-0175(linked=1, 신규 생성 0). 테스트로 붙은 0175 비고 태그는 원복
+- **PROD 보정 준비(미실행 — 시트·PROD DB 쓰기, 사용자 직접 실행)**: `scripts/tmp-fix-ct-r3800.mts` — 3800행 병원=예수병원·AJ=0304 가드 후 AI~AL → 등록완료/AS-202609-0305/보정 메모, L3800 → 0305 수거 송장(없음 → 비움), DB 0305 비고에 `[채널톡 r3800] 수동 등록 연결` 태그. 기본 dry-run, `--apply`로 실행. 0304의 비고 태그(r3800)는 그대로 둠(역기입은 시트 AJ 코드 기준이라 영향 없음)
+- 영향: lib/channeltalkAsSync.ts, scripts/tmp-fix-ct-r3800.mts(1회성, 실행 후 삭제 예정), README.md
+
+---
+
+## 2026-09-18 15:00 | 병원 상세 — 씨어스 영업담당(SALES_MANAGER 역할 후보) 지정 + 대웅 담당자 카드를 '영업 정보' 카드로 편입 (dev2 빌드·재시작, PROD 미반영)
+
+- **배경(사용자 결정)**: 병원별 씨어스 영업담당은 병원 축에서 관리 — 기존 `HospitalSalesProfile.ownerId`(병원당 1행, PROD 0건)를 단일 소스로 재사용(새 테이블·hospitals 컬럼 없음). 후보는 RBAC 역할 **SALES_MANAGER** 보유 계정. 대웅 담당자는 별도 카드를 둘 정보가 아니라 같은 카드로 편입
+- **API**: `GET /api/hospitals/[code]/sales` — `masters.owners`를 SEERS 활성 계정 전체 → `appRoles.some(role.code='SALES_MANAGER', isActive)` 활성 계정으로 교체(현재 담당이 후보 밖이면 '(역할 없음)' 항목으로 유지), 응답에 `daewoongStaff[]`(배정 유저 id·name·email·phone) 추가. `PUT …/sales/profile` — 새 담당(변경 시)은 `isSalesOwnerCandidate` 검증(400), 기존 담당 유지는 통과. `lib/sales.ts`에 `SALES_OWNER_ROLE_CODE`·`isSalesOwnerCandidate`. 대웅 배정 추가·해제 API(`/daewoong-staff`)는 그대로
+- **UI**: `SalesSection` 개요 탭 — '담당 영업' → **'씨어스 영업담당'**(역할 후보 셀렉트), **'대웅 담당자'** 행 신설(칩 + × 해제 + [배정] → `DaewoongSelectModal`, 차이만 POST/DELETE — 구 `DaewoongStaffTab` 로직 이관), 요약 스트립에 '씨어스 담당 · 대웅 담당' 병기. `canWrite` prop(페이지 `isAdmin` = VIEWER 제외) — 없으면 [수정]·[배정]·× 비표시. 페이지에서 대웅 담당자 카드 블록 제거, `DaewoongStaffTab.tsx` 삭제
+- **영향 범위 주의**: 대웅 담당자 표시가 영업 정보 카드 게이트(ADMIN 이상 또는 `sales.access` + SEERS) 안으로 들어가 **DAEWOONG 소속 계정·일반 USER는 병원 상세에서 대웅 담당자를 더 이상 볼 수 없음**(사용자 결정에 따른 편입 — 필요 시 게이트 완화는 별도 판단)
+- **검증**: tsc 0(힙 4GB)·eslint 0. dev2 SALES_MANAGER 역할 보유 계정 32명(dev2 데이터). 화면 E2E는 사용자 확인 대기. PROD 미반영(코드 전용, 마이그 없음)
+- 영향: lib/sales.ts, app/api/hospitals/[code]/sales/{route.ts,profile/route.ts}, app/hospitals/[code]/{page.tsx,_components/SalesSection.tsx,_components/DaewoongStaffTab.tsx(삭제)}, README.md
+
+---
+
 ## 2026-09-18 14:00 | PROD 데이터 작업: 자재관리 '오산영업소' 인벤토리에 '평가용재고' 품목 7건 복사 (사용자 요청·직접 실행)
 
 - **배경**: 사용자가 PROD에 인벤토리 '오산영업소'(id 5) 신설 → 평가용재고(id 2)의 품목 정의를 그대로 복사 요청(재고 수량·개체·전표 제외). 평가용재고에 BOM 구성 연결은 없음

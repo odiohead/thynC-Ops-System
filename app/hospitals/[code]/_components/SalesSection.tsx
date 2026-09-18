@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import RichTextEditor from '@/app/components/RichTextEditor'
+import DaewoongSelectModal from '@/app/components/DaewoongSelectModal'
 
 // ─── 타입 ───
 
@@ -55,8 +56,10 @@ interface Activity {
   author: { id: string; name: string } | null
   deal: { id: number; dealCode: string; roundNo: number } | null
 }
+interface DaewoongStaffUser { id: string; name: string; email: string; phone: string | null }
 interface SalesData {
   profile: Profile | null
+  daewoongStaff: DaewoongStaffUser[] // 대웅 담당자 배정 (2026-09-18 — 영업 정보 카드로 편입)
   persons: { current: PersonRow[]; past: PersonRow[] }
   deals: Deal[]
   activities: Activity[]
@@ -96,8 +99,25 @@ function StageBadge({ stage }: { stage: CodeItem | null }) {
 
 // ─── 개요 탭 — 필드 그리드 상시 노출, [수정] 토글로 같은 그리드가 폼 전환 ───
 
-function OverviewTab({ code, data, onSaved }: { code: string; data: SalesData; onSaved: () => void }) {
+function OverviewTab({ code, data, onSaved, canWrite }: { code: string; data: SalesData; onSaved: () => void; canWrite: boolean }) {
   const p = data.profile
+  const [dwModal, setDwModal] = useState(false) // 대웅 담당자 선택 모달 (2026-09-18)
+
+  /** 대웅 담당자 배정 반영 — 선택 결과와 현재 배정의 차이만 POST/DELETE (구 DaewoongStaffTab 로직 이관) */
+  const applyDaewoong = async (selected: { id: string }[]) => {
+    const currentIds = new Set(data.daewoongStaff.map((u) => u.id))
+    const selectedIds = new Set(selected.map((u) => u.id))
+    await Promise.all([
+      ...selected.filter((u) => !currentIds.has(u.id)).map((u) => fetch(`/api/hospitals/${code}/daewoong-staff`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: u.id }) })),
+      ...data.daewoongStaff.filter((u) => !selectedIds.has(u.id)).map((u) => fetch(`/api/hospitals/${code}/daewoong-staff/${u.id}`, { method: 'DELETE' })),
+    ])
+    onSaved()
+  }
+  const removeDaewoong = async (userId: string) => {
+    if (!confirm('대웅 담당자 배정을 해제하시겠습니까?')) return
+    await fetch(`/api/hospitals/${code}/daewoong-staff/${userId}`, { method: 'DELETE' })
+    onSaved()
+  }
   const { introBeds, penetration } = data.derived
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -149,8 +169,8 @@ function OverviewTab({ code, data, onSaved }: { code: string; data: SalesData; o
             </select>
           </div>
           <div>
-            <label className={labelCls}>담당 영업</label>
-            <select className={inputCls} value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
+            <label className={labelCls}>씨어스 영업담당</label>
+            <select className={inputCls} value={form.ownerId} title="영업담당(SALES_MANAGER) 역할이 부여된 활성 계정만 선택 가능" onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
               <option value="">미지정</option>
               {data.masters.owners.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
@@ -185,8 +205,21 @@ function OverviewTab({ code, data, onSaved }: { code: string; data: SalesData; o
           <dd><StageBadge stage={p?.stage ?? null} /></dd>
         </div>
         <div>
-          <dt className={labelCls}>담당 영업</dt>
+          <dt className={labelCls}>씨어스 영업담당</dt>
           <dd className="text-sm text-gray-900">{p?.owner?.name ?? <Empty />}</dd>
+        </div>
+        <div className="col-span-2">
+          <dt className={labelCls}>대웅 담당자 <span className="normal-case">({data.daewoongStaff.length})</span></dt>
+          <dd className="flex flex-wrap items-center gap-1.5">
+            {data.daewoongStaff.length === 0 && <Empty />}
+            {data.daewoongStaff.map((u) => (
+              <span key={u.id} className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700" title={[u.email, u.phone].filter(Boolean).join(' · ')}>
+                {u.name}
+                {canWrite && <button type="button" onClick={() => removeDaewoong(u.id)} className="ml-0.5 text-blue-400 hover:text-blue-600" aria-label="배정 해제">×</button>}
+              </span>
+            ))}
+            {canWrite && <button type="button" onClick={() => setDwModal(true)} className="rounded-lg border border-gray-300 px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-100">배정</button>}
+          </dd>
         </div>
         <div>
           <dt className={labelCls}>전체 병상수 <span className="normal-case">(수기)</span></dt>
@@ -209,9 +242,12 @@ function OverviewTab({ code, data, onSaved }: { code: string; data: SalesData; o
           <dd className="whitespace-pre-wrap text-sm text-gray-900">{p?.salesMemo ?? <Empty />}</dd>
         </div>
       </dl>
-      <div className="mt-4">
-        <button onClick={startEdit} className={btnGhost}>수정</button>
-      </div>
+      {canWrite && (
+        <div className="mt-4">
+          <button onClick={startEdit} className={btnGhost}>수정</button>
+        </div>
+      )}
+      <DaewoongSelectModal isOpen={dwModal} onClose={() => setDwModal(false)} onSelect={applyDaewoong} currentAssigneeIds={data.daewoongStaff.map((u) => u.id)} />
     </div>
   )
 }
@@ -809,7 +845,7 @@ const TABS = [
 ] as const
 type TabKey = (typeof TABS)[number]['key']
 
-export default function SalesSection({ hospitalCode }: { hospitalCode: string; currentUserId?: string | null }) {
+export default function SalesSection({ hospitalCode, canWrite = true }: { hospitalCode: string; currentUserId?: string | null; canWrite?: boolean }) {
   const [data, setData] = useState<SalesData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<TabKey>('overview')
@@ -846,7 +882,8 @@ export default function SalesSection({ hospitalCode }: { hospitalCode: string; c
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <h2 className="text-base font-bold text-gray-800">영업 정보</h2>
           <StageBadge stage={p?.stage ?? null} />
-          <span className="text-xs text-gray-500">담당 {p?.owner?.name ?? '—'}</span>
+          <span className="text-xs text-gray-500">씨어스 담당 {p?.owner?.name ?? '—'}</span>
+          <span className="text-xs text-gray-500">대웅 담당 {data.daewoongStaff.length ? data.daewoongStaff.map((u) => u.name).join(', ') : '—'}</span>
         </div>
         <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs text-gray-500">
           <span>전체 병상 <b className="text-sm text-gray-900">{p?.totalBeds?.toLocaleString() ?? '—'}</b></span>
@@ -871,7 +908,7 @@ export default function SalesSection({ hospitalCode }: { hospitalCode: string; c
         ))}
       </div>
 
-      {tab === 'overview' && <OverviewTab code={hospitalCode} data={data} onSaved={load} />}
+      {tab === 'overview' && <OverviewTab code={hospitalCode} data={data} onSaved={load} canWrite={canWrite} />}
       {tab === 'persons' && <PersonsTab code={hospitalCode} data={data} onSaved={load} />}
       {tab === 'activities' && <ActivitiesTab code={hospitalCode} data={data} onSaved={load} />}
       {tab === 'deals' && <DealsTab code={hospitalCode} data={data} onSaved={load} />}

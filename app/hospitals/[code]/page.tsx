@@ -6,7 +6,6 @@ import { verifyToken, isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
 import { hasPermission } from '@/lib/appRoles'
 import DeleteButton from './_components/DeleteButton'
 import TransferAllWorkButton from '@/app/components/TransferAllWorkButton'
-import DaewoongStaffTab from './_components/DaewoongStaffTab'
 import HospitalDeviceSummary from './_components/HospitalDeviceSummary'
 import StatusBadge from '@/app/components/StatusBadge'
 import SiteVisitsCard from './_components/SiteVisitsCard'
@@ -215,11 +214,6 @@ export default async function HospitalDetailPage({ params }: PageProps) {
           )}
         </div>
 
-        {/* 대웅제약 담당자 */}
-        <div className="mt-4">
-          <DaewoongStaffTab hospitalCode={hospital.hospitalCode} isAdmin={isAdmin} />
-        </div>
-
         {/* thynC 도입현황 */}
         <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
           <div className="border-b border-gray-200 px-6 py-4">
@@ -273,8 +267,8 @@ export default async function HospitalDetailPage({ params }: PageProps) {
           </div>
         </div>
 
-        {/* 영업 정보 (영업/CRM v4 — ADMIN 이상+SEERS만 렌더, API에서 재검증) */}
-        {showSales && <SalesSection hospitalCode={hospital.hospitalCode} currentUserId={user?.userId ?? null} />}
+        {/* 영업 정보 (영업/CRM v4 — ADMIN 이상+SEERS만 렌더, API에서 재검증). 2026-09-18: 씨어스 영업담당(SALES_MANAGER 역할 후보) + 대웅 담당자 배정을 이 카드로 편입 (별도 카드 제거) */}
+        {showSales && <SalesSection hospitalCode={hospital.hospitalCode} currentUserId={user?.userId ?? null} canWrite={isAdmin} />}
 
         {/* thynC 시스템 현황 — 서버 현황 + EMR 연동 정보 (2026-08-16) */}
         <SystemStatusCard hospitalCode={hospital.hospitalCode} canWrite={isAdmin} />

@@ -18,6 +18,15 @@ export const SALES_ALLOWED_ORG_CODES: readonly string[] = ['SEERS']
 export type SalesAccessDenial = { status: number; error: string }
 
 /** 통과면 null, 차단이면 응답에 쓸 상태코드·메시지 */
+/** 병원 씨어스 영업담당(HospitalSalesProfile.ownerId) 후보 = 이 RBAC 역할 보유 활성 계정 (2026-09-18 사용자 결정) */
+export const SALES_OWNER_ROLE_CODE = 'SALES_MANAGER'
+
+/** ownerId가 영업담당 후보(역할 보유·활성)인지 */
+export async function isSalesOwnerCandidate(userId: string): Promise<boolean> {
+  const n = await prisma.user.count({ where: { id: userId, isActive: true, appRoles: { some: { role: { code: SALES_OWNER_ROLE_CODE, isActive: true } } } } })
+  return n > 0
+}
+
 export async function checkSalesAccess(user: JWTPayload, opts?: { write?: boolean }): Promise<SalesAccessDenial | null> {
   const gradeOk = opts?.write ? isUserOrAbove(user.role) : true // 편집은 VIEWER 제외
   if (!isAdminOrAbove(user.role) && !(gradeOk && (await hasPermission(user, 'sales.access')))) {

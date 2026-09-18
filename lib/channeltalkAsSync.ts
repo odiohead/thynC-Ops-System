@@ -199,16 +199,26 @@ export async function runChanneltalkAsSync(testIo?: ChanneltalkSyncTestIo): Prom
         continue
       }
 
-      // DB측 2차 가드 — 이전 틱에서 등록됐지만 되쓰기 실패한 행
-      const dup = await prisma.asReceipt.findFirst({ where: { note: { contains: tag } }, select: { asCode: true } })
-      if (dup) {
-        rangeOf(rowNo, 'AI', [SYS_STATE.OK, dup.asCode, '(재기입 — 이전 틱 등록분)', nowKst()])
-        continue
-      }
-
       const dateRaw = cell(r, C.DATE)
       const hospRaw = cell(r, C.HOSP)
       const serialsRaw = cell(r, C.SERIALS)
+
+      // DB측 2차 가드 — 이전 틱에서 등록됐지만 되쓰기 실패한 행.
+      // 2026-09-19: 행번호 태그만으로 판정하지 않는다 — 시트에서 행이 삭제·삽입되면 번호가 밀려 다른 접수(다른 병원)가 같은 rN을 물려받는다(r3800 예수병원 → AS-0304 오기입 사례).
+      // 태그 접수의 병원과 시리얼이 이 행과 일치할 때만 재기입, 아니면 행 이동으로 보고 일반 등록 경로(기존 접수 연결·신규 등록)로 진행
+      const dup = await prisma.asReceipt.findFirst({ where: { note: { contains: tag } }, select: { asCode: true, hospitalCode: true, items: { select: { serialNo: true } } } })
+      if (dup) {
+        matcher ??= await loadHospitalMatcher()
+        const rowHospital = hospRaw ? matcher.match(hospRaw) : null
+        const rowSerials = parseSerialTextarea(serialsRaw.replace(/[(（][^)）]*[)）]/g, ''))
+        const sameHospital = !!rowHospital && rowHospital === dup.hospitalCode
+        const sameSerials = rowSerials.length > 0 && rowSerials.every((sn) => dup.items.some((i) => i.serialNo === sn))
+        if (sameHospital && sameSerials) {
+          rangeOf(rowNo, 'AI', [SYS_STATE.OK, dup.asCode, '(재기입 — 이전 틱 등록분)', nowKst()])
+          continue
+        }
+        console.warn(`[channeltalk-as] r${rowNo} 태그 접수 ${dup.asCode}(${dup.hospitalCode})와 행 내용 불일치(병원 ${rowHospital ?? '?'} / 시리얼 ${rowSerials.join(',') || '-'}) — 행 이동으로 판단, 일반 등록 경로로 진행`)
+      }
       if (!dateRaw || !hospRaw || !serialsRaw) {
         // 필수값 누락 = 채널톡 태스크가 행을 쓰는 도중일 가능성 (2026-09-16, r3717·3718 사례) → '대기'로 두고 다음 틱 재시도. 최초 대기 후 24h 지나면 '실패'
         const missing = `필수값 누락 (접수일:${dateRaw ? '○' : '✕'} 병원:${hospRaw ? '○' : '✕'} 시리얼:${serialsRaw ? '○' : '✕'})`
