@@ -48,6 +48,7 @@ interface ItemRow {
   } | null
   newDevice: { id: number; serialNo: string } | null
   registryTag: AsRegistryLineTag | null // 미종결 라인의 현재 원장 정합(정상=null) — API 실시간 계산
+  duplicateOf?: string[] // 같은 시리얼 미종결 라인을 가진 다른 접수번호 (2026-09-18 중복접수) — 배치 태그와 별개 축
   intakeState: string // 입고 대조 (2026-09-11): PENDING/RECEIVED/MISMATCH/EXTRA
   receivedAt: string | null
   receiptSerialNo: string | null // 치환 전 접수 시리얼
@@ -141,9 +142,28 @@ const REGISTRY_TAG_BADGE: Record<AsRegistryTag, string> = {
   RECOVERED: 'bg-amber-50 text-amber-700',
   UNPLACED: 'bg-gray-100 text-gray-500',
   UNREGISTERED: 'bg-gray-100 text-gray-500',
+  DUPLICATE: 'bg-red-100 text-red-700',
+}
+
+/** 중복접수 배지 (2026-09-18) — 같은 시리얼의 미종결 라인이 다른 접수에도 있음. 배치 배지와 함께 표시, 클릭 시 해당 접수로 */
+function duplicateBadge(item: ItemRow) {
+  if (!item.duplicateOf?.length) return null
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-medium ${REGISTRY_TAG_BADGE.DUPLICATE}`} title={`${AS_REGISTRY_TAG_DESC.DUPLICATE}: ${item.duplicateOf.join(', ')}`}>
+      {AS_REGISTRY_TAG_LABELS.DUPLICATE}
+      {item.duplicateOf.map((c) => <Link key={c} href={`/as-receipts?q=${encodeURIComponent(c)}`} className="underline decoration-dotted hover:text-red-900">{c}</Link>)}
+    </span>
+  )
 }
 
 function deviceBadge(item: ItemRow, asCode: string, hospitalCode: string | null) {
+  const dup = duplicateBadge(item)
+  const main = placementBadge(item, asCode, hospitalCode)
+  if (!dup) return main
+  return <>{main}{dup}</>
+}
+
+function placementBadge(item: ItemRow, asCode: string, hospitalCode: string | null) {
   // 미종결 라인 — API가 시리얼로 실시간 대조한 태그 우선 (목록 '접수 기기상태'와 같은 기준)
   if (item.registryTag) {
     const t = item.registryTag
@@ -582,6 +602,7 @@ export default function AsReceiptDetailPage() {
   const [note, setNote] = useState('')
   // 5. 타임라인 (2026-09-15)
   const [timeline, setTimeline] = useState<TimelineEvent[] | null>(null)
+  const [reloadSeq, setReloadSeq] = useState(0) // 저장·처리 후 load()마다 증가 — 기기군 카드(GroupCard) key에 넣어 로컬 입력 상태(발송정보·선택·초안 입력)를 서버 값으로 리셋 (2026-09-18)
 
   useEffect(() => {
     fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setMe({ id: d.id ?? d.userId ?? '', role: d.role, permissions: d.permissions }))
@@ -589,11 +610,12 @@ export default function AsReceiptDetailPage() {
   }, [])
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/as-receipts/${id}`)
+    const res = await fetch(`/api/as-receipts/${id}`, { cache: 'no-store' })
     if (!res.ok) { setError('AS접수를 찾을 수 없습니다.'); setLoading(false); return }
     const d = await res.json()
     const r: AsDetail = d.asReceipt
     setReq(r)
+    setReloadSeq((n) => n + 1)
     setIntake({
       receiptDate: r.receiptDate.slice(0, 10),
       pickupMethod: r.pickupMethod ?? '',
@@ -1171,7 +1193,7 @@ export default function AsReceiptDetailPage() {
             <p className="py-6 text-center text-sm text-gray-400">기기 라인이 없습니다.</p>
           ) : groups.map((g, gi) => (
             <GroupCard
-              key={g.group}
+              key={`${g.group}-${reloadSeq}`}
               index={`3-${gi + 1}`}
               group={g.group}
               items={g.items}

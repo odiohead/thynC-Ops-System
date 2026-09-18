@@ -188,21 +188,52 @@ export function summarizeAsItemProductTypes(
   return ['일반', '라이트'].filter((t) => set.has(t))
 }
 
+// ─── 목록 검색 항목 (2026-09-18) ──────────────────────────
+// 검색어는 ','로 여러 키워드 지정 가능(OR). 항목별 대상: 통합 = 아래 전부 + 고객명(reporterName)
+export const AS_SEARCH_FIELDS = ['all', 'hospital', 'serial', 'code', 'tracking', 'owner'] as const
+export type AsSearchField = (typeof AS_SEARCH_FIELDS)[number]
+export const AS_SEARCH_FIELD_LABELS: Record<AsSearchField, string> = {
+  all: '통합검색',
+  hospital: '병원명',
+  serial: '시리얼번호',
+  code: '접수번호',
+  tracking: '송장번호', // 수거(접수 헤더)·발송(라인) 모두, 영숫자만 비교
+  owner: '담당자', // 연결 티켓 담당자 이름
+}
+export const AS_SEARCH_FIELD_PLACEHOLDER: Record<AsSearchField, string> = {
+  all: '접수번호·병원·시리얼·송장·담당자 (쉼표로 여러 개)',
+  hospital: '병원명 (쉼표로 여러 개)',
+  serial: '시리얼번호 (쉼표로 여러 개)',
+  code: '접수번호 (쉼표로 여러 개)',
+  tracking: '수거·발송 송장번호 (쉼표로 여러 개)',
+  owner: '담당자 이름 (쉼표로 여러 개)',
+}
+export function parseAsSearchField(v: string | null | undefined): AsSearchField {
+  return (AS_SEARCH_FIELDS as readonly string[]).includes(v ?? '') ? (v as AsSearchField) : 'all'
+}
+/** 검색어 → 키워드 배열 (쉼표 분리·trim·빈 값 제거·중복 제거) */
+export function splitAsSearchKeywords(q: string): string[] {
+  return Array.from(new Set(q.split(',').map((k) => k.trim()).filter(Boolean)))
+}
+
 // ─── 목록 원장 정합 태그 (2026-09-10) ──────────────────────────
 // 접수 병원과 라인 기기의 현재 원장 배치를 대조 — 미종결 라인만 평가(종결 라인은 교체·분실로 회수되는 게 정상이라 제외)
-export const AS_REGISTRY_TAGS = ['OTHER_HOSPITAL', 'RECOVERED', 'UNPLACED', 'UNREGISTERED'] as const
+// 2026-09-18: DUPLICATE(중복접수) 추가 — 원장 배치와 별개 축(같은 시리얼의 미종결 라인이 다른 접수에도 있음). 라인은 배치 태그와 중복접수를 동시에 가질 수 있음
+export const AS_REGISTRY_TAGS = ['OTHER_HOSPITAL', 'RECOVERED', 'UNPLACED', 'UNREGISTERED', 'DUPLICATE'] as const
 export type AsRegistryTag = (typeof AS_REGISTRY_TAGS)[number]
 export const AS_REGISTRY_TAG_LABELS: Record<AsRegistryTag, string> = {
   OTHER_HOSPITAL: '타병원', // 원장상 다른 병원에 ACTIVE 배치
   RECOVERED: '회수', // 원장상 회수(RECOVERED) 상태 — 어느 병원에도 배치 아님
   UNPLACED: '미배치', // 원장 개체는 있으나 배치 이력 없음
   UNREGISTERED: '미등록', // 원장에 시리얼 자체가 없음
+  DUPLICATE: '중복접수', // 같은 시리얼의 미종결 라인이 다른 AS접수에도 있음
 }
 export const AS_REGISTRY_TAG_DESC: Record<AsRegistryTag, string> = {
   OTHER_HOSPITAL: '기기현황에 다른 병원 배치로 등록된 기기 — 배치 확인 필요',
   RECOVERED: '기기현황에 회수 상태로 등록된 기기 — 재배치 여부 확인 필요',
   UNPLACED: '기기현황에 개체는 있으나 병원 배치가 없는 기기',
   UNREGISTERED: '기기현황에 등록되지 않은 시리얼',
+  DUPLICATE: '같은 시리얼의 미종결 라인이 다른 AS접수에도 있음 — 중복 접수 여부 확인 필요',
 }
 export interface AsRegistryTagSummary { tag: AsRegistryTag; count: number; detail: string | null } // detail: 타병원명 등
 
@@ -219,21 +250,26 @@ export function classifyAsRegistryLine(hospitalCode: string, unit: AsRegistryUni
   return null
 }
 
-/** 라인별 현재 배치 → 접수 단위 태그 집계(태그 순서 고정). 미종결 라인만 */
+/** 라인별 현재 배치 → 접수 단위 태그 집계(태그 순서 고정). 미종결 라인만. dupBySerial: 시리얼 → 다른 접수의 접수번호(2026-09-18 중복접수 축, 배치 태그와 별도 집계) */
 export function summarizeAsRegistryTags(
   hospitalCode: string,
   items: { serialNo: string; outcome: string | null }[],
-  unitBySerial: Map<string, NonNullable<AsRegistryUnit>>
+  unitBySerial: Map<string, NonNullable<AsRegistryUnit>>,
+  dupBySerial?: Map<string, string[]>
 ): AsRegistryTagSummary[] {
   const acc = new Map<AsRegistryTag, { count: number; details: Set<string> }>()
+  const add = (tag: AsRegistryTag, detail: string | null) => {
+    const cur = acc.get(tag) ?? { count: 0, details: new Set<string>() }
+    cur.count++
+    if (detail) cur.details.add(detail)
+    acc.set(tag, cur)
+  }
   for (const i of items) {
     if (i.outcome) continue
     const r = classifyAsRegistryLine(hospitalCode, unitBySerial.get(i.serialNo))
-    if (!r) continue
-    const cur = acc.get(r.tag) ?? { count: 0, details: new Set<string>() }
-    cur.count++
-    if (r.detail) cur.details.add(r.detail)
-    acc.set(r.tag, cur)
+    if (r) add(r.tag, r.detail)
+    const dups = dupBySerial?.get(i.serialNo)
+    if (dups?.length) add('DUPLICATE', dups.join(', '))
   }
   return AS_REGISTRY_TAGS.filter((t) => acc.has(t)).map((t) => {
     const v = acc.get(t)!

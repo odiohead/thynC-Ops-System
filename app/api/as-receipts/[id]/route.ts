@@ -6,6 +6,7 @@ import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { canEditAsReceipt, canDeleteAsReceipt } from '@/lib/asReceipt'
 import { AS_CATEGORIES, AS_METHODS, AS_DEST_TYPES, classifyAsRegistryLine } from '@/lib/asReceiptShared'
+import { findOpenLinesBySerial, duplicatesForReceipt } from '@/lib/asReceiptSearch'
 import { applyItemChanges, setUnitInUse, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { syncAsReceiptToTicket } from '@/lib/ticket-domains/asReceipt'
 import { toRegistryErrorResponse } from '@/lib/deviceRegistry'
@@ -84,9 +85,11 @@ export async function GET(request: NextRequest, { params }: Params) {
   const unitBySerial = new Map(units.map((u) => [u.serialNo, {
     placement: u.placement ? { status: u.placement.status, hospitalCode: u.placement.hospitalCode, hospitalName: u.placement.hospital?.hospitalName ?? null } : null,
   }]))
+  const dupBySerial = duplicatesForReceipt(asReceipt.id, openSerials, await findOpenLinesBySerial(openSerials)) // 중복접수 (2026-09-18)
   const items = shapeDetailItems(asReceipt.items).map((i) => ({
     ...i,
     registryTag: i.outcome ? null : classifyAsRegistryLine(asReceipt.hospitalCode, unitBySerial.get(i.serialNo)),
+    duplicateOf: i.outcome ? [] : (dupBySerial.get(i.serialNo) ?? []), // 같은 시리얼 미종결 라인을 가진 다른 접수번호
   }))
 
   return NextResponse.json({ asReceipt: { ...asReceipt, items } })

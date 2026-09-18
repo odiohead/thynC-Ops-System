@@ -3,7 +3,8 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { AS_CATEGORIES, AS_TAGS, AS_TAG_FIELDS, parseSerialTextarea, summarizeAsRegistryTags, isAsIntakeIssue, type AsTag } from '@/lib/asReceiptShared'
+import { AS_CATEGORIES, AS_TAGS, AS_TAG_FIELDS, parseSerialTextarea, summarizeAsRegistryTags, isAsIntakeIssue, type AsTag, parseAsSearchField } from '@/lib/asReceiptShared'
+import { buildAsReceiptSearchOr, findOpenLinesBySerial, duplicatesForReceipt } from '@/lib/asReceiptSearch'
 import { createAsReceipt, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { toRegistryErrorResponse } from '@/lib/deviceRegistry'
 import { notifyTicketCreated } from '@/lib/notify'
@@ -71,7 +72,7 @@ export async function GET(request: NextRequest) {
     where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: [{ statusId: null }, { status: { ticketStatus: { notIn: ['RESOLVED', 'CLOSED'] } } }, { status: { ticketStatus: null } }] }]
   }
 
-  // 접수 기기상태 '확인필요' 필터 (2026-09-15) — 목록 배지와 같은 정의: 미종결 라인 중 원장 정합 태그(미등록·미배치·회수·타병원) 또는 입고 대조(미입고·미식별입고)가 있는 접수
+  // 접수 기기상태 '확인필요' 필터 (2026-09-15) — 목록 배지와 같은 정의: 미종결 라인 중 원장 정합 태그(미등록·미배치·회수·타병원) 또는 입고 대조(미입고·미식별입고) 또는 중복접수(같은 시리얼 미종결 라인이 다른 접수에 — 2026-09-18)가 있는 접수
   if (sp.get('needsCheck') === '1') {
     const rows = await prisma.$queryRaw<{ id: number }[]>(Prisma.sql`
       SELECT DISTINCT r.id FROM as_receipts r
@@ -79,7 +80,8 @@ export async function GET(request: NextRequest) {
       LEFT JOIN device_units du ON du.serial_no = i.serial_no
       LEFT JOIN hospital_devices hd ON hd.device_id = du.id
       WHERE i.intake_state IN ('MISMATCH', 'EXTRA')
-         OR du.id IS NULL OR hd.id IS NULL OR hd.status <> 'ACTIVE' OR hd.hospital_code IS DISTINCT FROM r.hospital_code`)
+         OR du.id IS NULL OR hd.id IS NULL OR hd.status <> 'ACTIVE' OR hd.hospital_code IS DISTINCT FROM r.hospital_code
+         OR EXISTS (SELECT 1 FROM as_receipt_items o WHERE o.serial_no = i.serial_no AND o.outcome IS NULL AND o.receipt_id <> r.id)`) // 중복접수 (2026-09-18)
     where.id = { in: rows.map((x) => x.id) }
   }
 
@@ -127,20 +129,8 @@ export async function GET(request: NextRequest) {
   }
 
   const q = sp.get('q')?.trim()
-  const qTracking = q?.replace(/[\s-]+/g, '') ?? ''
-  if (q) {
-    where.OR = [
-      { asCode: { contains: q, mode: 'insensitive' } },
-      { reporterName: { contains: q, mode: 'insensitive' } },
-      { hospital: { hospitalName: { contains: q, mode: 'insensitive' } } },
-      { items: { some: { serialNo: { contains: q.replace(/\s+/g, ''), mode: 'insensitive' } } } },
-      // 운송장 검색 (2026-09-18): 수거 송장은 접수 헤더, 발송 송장은 라인 — 공백·하이픈 제거 후 부분 일치
-      ...(qTracking ? [
-        { pickupTrackingNo: { contains: qTracking } },
-        { items: { some: { shipTrackingNo: { contains: qTracking } } } },
-      ] : []),
-    ]
-  }
+  const searchOr = q ? await buildAsReceiptSearchOr(q, parseAsSearchField(sp.get('field'))) : null // 항목(field)·쉼표 복수 키워드 — lib/asReceiptSearch 단일 소스 (2026-09-18)
+  if (searchOr) where.OR = searchOr
 
   const page = Math.max(1, parseInt(sp.get('page') ?? '1') || 1)
   const pageSize = Math.min(100, Math.max(10, parseInt(sp.get('pageSize') ?? '30') || 30))
@@ -202,9 +192,10 @@ export async function GET(request: NextRequest) {
   const unitBySerial = new Map(units.map((u) => [u.serialNo, {
     placement: u.placement ? { status: u.placement.status, hospitalCode: u.placement.hospitalCode, hospitalName: u.placement.hospital?.hospitalName ?? null } : null,
   }]))
+  const openBySerial = await findOpenLinesBySerial(openSerials) // 중복접수 대조 (2026-09-18)
   const withTags = receipts.map((r) => ({
     ...r,
-    registryTags: summarizeAsRegistryTags(r.hospitalCode, r.items, unitBySerial),
+    registryTags: summarizeAsRegistryTags(r.hospitalCode, r.items, unitBySerial, duplicatesForReceipt(r.id, r.items.filter((i) => !i.outcome).map((i) => i.serialNo), openBySerial)),
     intakeIssues: r.items.filter((i) => !i.outcome && isAsIntakeIssue(i.intakeState)).length, // 입고 대조 미입고·미식별입고 라인 수 (2026-09-11)
   }))
 

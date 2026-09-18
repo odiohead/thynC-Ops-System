@@ -4,6 +4,26 @@
 
 ---
 
+## 2026-09-18 11:20 | AS접수 목록 — 검색 항목 드롭다운(통합·병원명·시리얼·접수번호·송장번호·담당자) + 쉼표 복수 키워드 (dev2 검증, 빌드·PROD 배포 대기)
+
+- **검색 항목(사용자 요청)**: 검색창 앞에 드롭다운 — 통합검색·병원명·시리얼번호·접수번호·송장번호·담당자. 카탈로그·라벨·placeholder는 `lib/asReceiptShared.ts` `AS_SEARCH_FIELDS`/`AS_SEARCH_FIELD_LABELS`/`AS_SEARCH_FIELD_PLACEHOLDER`(+`parseAsSearchField`) 단일 소스. 통합 = 접수번호·고객명·병원명·시리얼·송장·**담당자(연결 티켓 owner 이름 — 신규 대상)**. API `?field=`(통합이면 URL 생략), 목록·export 공용 `buildAsReceiptSearchOr(q, field)`. 송장 항목인데 매치 0이면 `id:-1`로 0건(통합은 다른 대상으로 폴백)
+- **쉼표 복수 키워드(사용자 요청)**: `splitAsSearchKeywords`(쉼표 분리·trim·중복 제거) → 키워드×대상 OR(하나라도 맞으면 포함). 송장 raw SQL은 `LIKE ANY(text[])`로 1회 조회. 키워드가 전부 공란이면 필터 없음
+- **검증**: tsc 0·eslint 0. dev2 실측 — 송장 2개 쉼표 → 3건(통합도 동일), 없는 송장 → 0건, 접수번호 2개 → 2건, 접수번호를 병원명 항목으로 → 0건, 병원명 '분당제생병원' 148건, 시리얼 P030172 4건, 담당자 '전채림' 2건('채림' 통합 동일, '전채림, 없는사람' 2건), `' , ,'` → 필터 없음. 빌드·재시작 미실행
+- 영향: lib/asReceiptShared.ts, lib/asReceiptSearch.ts, app/api/as-receipts/{route.ts,export/route.ts}, app/as-receipts/page.tsx, README.md
+
+---
+
+## 2026-09-18 10:40 | AS업무 — 중복접수 '확인필요' 합류 · 운송장 정규화 검색 · 공란 [검색] 새로고침 · 상세 저장 후 카드 리마운트 (dev2 검증, 빌드·PROD 배포 대기)
+
+- **중복접수 → 확인필요(사용자 요청)**: 같은 시리얼의 미종결 라인이 다른 AS접수에도 있으면(병원 무관) 접수 기기상태를 '확인필요'로. `AS_REGISTRY_TAGS`에 `DUPLICATE`('중복접수') 추가 — 원장 배치 태그와 **별개 축**이라 한 라인이 둘 다 가질 수 있음(`summarizeAsRegistryTags` 4번째 인자 `dupBySerial`). 목록 API는 페이지 내 미종결 시리얼로 `findOpenLinesBySerial` 1회 조회 → 접수별 `duplicatesForReceipt`, `needsCheck=1` raw SQL에 `EXISTS(다른 접수의 같은 시리얼 미종결 라인)` OR 추가. 상세 API는 라인에 `duplicateOf: string[]`(상대 접수번호) 부가 → 시리얼 옆 배지 '중복접수 AS-…'(목록 검색 링크), 원장 정합 확인 패널 대상은 아님(배치 보정 액션이 없음). 목록 툴팁은 '중복접수 n대 (AS-…)'(원장 접두 없음), '확인필요만' 툴팁 갱신. 중복 레코드 자체는 손대지 않음(사용자: 고치라는 게 아님)
+- **운송장 검색 결함 수정(사용자 보고 확인)**: PROD 수거 송장 105건 중 79건이 `CJ 26096748385982`처럼 접두+공백 형식 → 어제 넣은 contains(검색어만 공백 제거)로는 `CJ 2609`·`2609`가 빠짐. 신규 `lib/asReceiptSearch.ts` — DB 값·검색어 **양쪽**을 `regexp_replace(…,'[^0-9A-Za-z]','')`+upper로 정규화한 raw SQL(수거 헤더 ∪ 발송 라인)로 id 사전 조회 후 `id IN` OR 항목. 검색어 OR 조건 전체를 `buildAsReceiptSearchOr`로 단일화(목록·export 공용)
+- **공란 [검색]·Enter = 새로고침**: 검색어가 현재 값과 같고 1페이지면(공란 포함) 상태 변경 없이 `load()`+`loadSummary()` 즉시 재조회, 다르면 종전대로 상태 갱신
+- **상세 저장 후 자동 갱신 보강(사용자 요청)**: 모든 mutation 핸들러는 이미 `router.refresh()`+`load()`를 호출했으나 기기군 카드(GroupCard)의 발송정보·선택·초안 입력이 props 초기값 useState라 저장 뒤 구 값이 남음 → `load()`마다 `reloadSeq` 증가, `key={group-reloadSeq}`로 카드 리마운트(서버 값으로 리셋). 상세 fetch `cache: 'no-store'`
+- **검증**: tsc 0(힙 4GB)·eslint 0. dev2 실측 — 임시 송장 `CJ 26096748385982` 세팅 후 `CJ 2609`/`cj2609`/`2609674`/전체/`CJ-2609 6748` 모두 1건 매치(원복 완료) · 중복 시리얼 P030172(AS-202607-0457·AS-202609-0062) → 0062 라인 `duplicateOf=[AS-202607-0457]`, 태그 집계 `DUPLICATE 1 (AS-202607-0457)` · dev2 전체 중복접수 플래그 접수 2건. 빌드·재시작 미실행
+- 영향: lib/asReceiptSearch.ts(신규), lib/asReceiptShared.ts, app/api/as-receipts/{route.ts,export/route.ts,[id]/route.ts}, app/as-receipts/{page.tsx,[id]/page.tsx}, README.md
+
+---
+
 ## 2026-09-18 09:30 | PROD 배포: AS접수 상세 접수일 인라인 수정 (f2fe23a)
 
 - **dev2**: 힙 4GB 빌드·`pm2 restart thync-dev`(health 200) → 커밋 f2fe23a·push

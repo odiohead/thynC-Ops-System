@@ -10,7 +10,7 @@ import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
 import Pager from '@/app/components/ui/Pager'
 import DateRangeFilter from '@/app/components/ui/DateRangeFilter'
 import AsReceiptFormModal from './_components/AsReceiptFormModal'
-import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsTag } from '@/lib/asReceiptShared'
+import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsTag, AS_SEARCH_FIELDS, AS_SEARCH_FIELD_LABELS, AS_SEARCH_FIELD_PLACEHOLDER, parseAsSearchField, type AsSearchField } from '@/lib/asReceiptShared'
 
 interface CodeRef { id: number; name: string; color: string | null }
 /** 정렬 가능 컬럼 (2026-09-16) — 서버 정렬(`?sort=&dir=`). 계산 컬럼(기기상태·기기·유형·송장·태그)은 정렬 없음 */
@@ -166,7 +166,7 @@ function deviceStateBadge(r: AsRow) {
   const label = asReceiptDeviceStateLabel(r.items.some((i) => !i.outcome), r.registryTags ?? [], r.intakeIssues ?? 0)
   if (!label) return <span className="text-xs text-gray-300">-</span>
   if (label === '정상') return <span className="whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700">정상</span>
-  const parts = r.registryTags.map((t) => `원장 ${AS_REGISTRY_TAG_LABELS[t.tag]} ${t.count}대${t.detail ? ` (${t.detail})` : ''}`)
+  const parts = r.registryTags.map((t) => `${t.tag === 'DUPLICATE' ? '' : '원장 '}${AS_REGISTRY_TAG_LABELS[t.tag]} ${t.count}대${t.detail ? ` (${t.detail})` : ''}`) // DUPLICATE(2026-09-18)는 원장 축이 아님
   if (r.intakeIssues > 0) parts.push(`입고 대조 미입고·미식별입고 ${r.intakeIssues}대`)
   const tip = parts.join(' · ')
   return <span className="whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700" title={tip}>확인필요</span>
@@ -226,6 +226,7 @@ function AsReceiptListInner() {
   } | null>(null)
   const [qInput, setQInput] = useState(searchParams.get('q') ?? '')
   const [q, setQ] = useState(searchParams.get('q') ?? '')
+  const [field, setField] = useState<AsSearchField>(() => parseAsSearchField(searchParams.get('field'))) // 검색 항목 (2026-09-18)
   const [createOpen, setCreateOpen] = useState(false)
   const [canWrite, setCanWrite] = useState(false)
   const [notice, setNotice] = useState<string[] | null>(null)
@@ -254,14 +255,14 @@ function AsReceiptListInner() {
     if (shippedTo) params.set('shippedTo', shippedTo)
     if (receivedFrom) params.set('receivedFrom', receivedFrom)
     if (receivedTo) params.set('receivedTo', receivedTo)
-    if (q) params.set('q', q)
+    if (q) { params.set('q', q); if (field !== 'all') params.set('field', field) }
     return params
-  }, [from, to, statusIds, category, group, tagFilter, overdue, needsCheck, shippedFrom, shippedTo, receivedFrom, receivedTo, q])
+  }, [from, to, statusIds, category, group, tagFilter, overdue, needsCheck, shippedFrom, shippedTo, receivedFrom, receivedTo, q, field])
 
   const hasFilter = !!(from || to || statusIds.length || category || group || tagFilter.length || overdue || needsCheck || shippedFrom || shippedTo || receivedFrom || receivedTo || q)
   const resetFilters = () => {
     setFrom(''); setTo(''); setStatusIds([]); setCategory(''); setEcg(true); setSpo2(true); setTagFilter([]); setOverdue(false); setNeedsCheck(false)
-    setShippedFrom(''); setShippedTo(''); setReceivedFrom(''); setReceivedTo(''); setQ(''); setQInput(''); setPage(1)
+    setShippedFrom(''); setShippedTo(''); setReceivedFrom(''); setReceivedTo(''); setQ(''); setQInput(''); setField('all'); setPage(1)
   }
   // 헤더 클릭: asc → desc → 기본 정렬 해제 (유지보수 목록과 동일 UX)
   const toggleSort = (key: SortKey) => {
@@ -296,6 +297,15 @@ function AsReceiptListInner() {
   }, [buildFilterParams, page, sort])
 
   useEffect(() => { void load() }, [load])
+
+  /** [검색]·Enter — 검색어가 바뀌면 상태 갱신(effect가 재조회), 같으면(공란 포함) 목록·요약을 즉시 재조회 (2026-09-18 — 공란 [검색] = 새로고침) */
+  const runSearch = () => {
+    const next = qInput.trim()
+    if (next !== q || page !== 1) { setQ(next); setPage(1); return }
+    void load()
+    loadSummary()
+  }
+
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const thClass = 'whitespace-nowrap px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500'
@@ -421,7 +431,7 @@ function AsReceiptListInner() {
           <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={ecg} onChange={(e) => { setEcg(e.target.checked); setPage(1) }} className="rounded border-gray-300" />심전계</label>
           <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={spo2} onChange={(e) => { setSpo2(e.target.checked); setPage(1) }} className="rounded border-gray-300" />산소포화도</label>
         </span>
-        <label className={`ml-1 inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-sm ${needsCheck ? 'border-red-300 bg-red-50 text-red-700' : 'border-gray-200 bg-white text-gray-700'}`} title="접수 기기상태가 '확인필요'(원장 정합 태그 또는 입고 대조 미입고·미식별입고)인 접수만">
+        <label className={`ml-1 inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-sm ${needsCheck ? 'border-red-300 bg-red-50 text-red-700' : 'border-gray-200 bg-white text-gray-700'}`} title="접수 기기상태가 '확인필요'(원장 정합 태그 · 입고 대조 미입고·미식별입고 · 중복접수)인 접수만">
           <input type="checkbox" checked={needsCheck} onChange={(e) => { setNeedsCheck(e.target.checked); setPage(1) }} className="rounded border-gray-300" />
           확인필요만
         </label>
@@ -446,16 +456,24 @@ function AsReceiptListInner() {
           <button type="button" onClick={resetFilters} className="rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-800" title="모든 필터 초기화">필터 초기화</button>
         )}
         <div className="flex items-center gap-1.5">
+          <select
+            value={field}
+            onChange={(e) => { setField(parseAsSearchField(e.target.value)); if (q) setPage(1) }}
+            className="rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+            title="검색 항목 — 통합검색은 접수번호·고객명·병원명·시리얼·송장·담당자 전부"
+          >
+            {AS_SEARCH_FIELDS.map((f) => <option key={f} value={f}>{AS_SEARCH_FIELD_LABELS[f]}</option>)}
+          </select>
           <input
             type="text"
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && (setQ(qInput), setPage(1))}
-            placeholder="접수번호·병원·시리얼·운송장 검색"
-            title="AS접수번호 · 병원명 · 접수자 · 기기 시리얼 · 수거/발송 운송장번호"
-            className="w-56 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm"
+            onKeyDown={(e) => e.key === 'Enter' && runSearch()}
+            placeholder={AS_SEARCH_FIELD_PLACEHOLDER[field]}
+            title="쉼표(,)로 여러 키워드를 지정하면 하나라도 맞는 접수를 보여줍니다"
+            className="w-64 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm"
           />
-          <button type="button" onClick={() => { setQ(qInput); setPage(1) }} className="rounded-md bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700">검색</button>
+          <button type="button" onClick={runSearch} className="rounded-md bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700">검색</button>
         </div>
         <button
           type="button"

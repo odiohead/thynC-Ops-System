@@ -3,7 +3,8 @@ import { Prisma } from '@prisma/client'
 import * as XLSX from 'xlsx'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_DEST_TYPE_LABELS, AS_OUTCOME_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, AS_INTAKE_STATE_LABELS, type AsIntakeState, type AsCategory, type AsDestType, type AsMethod, type AsOutcome } from '@/lib/asReceiptShared'
+import { buildAsReceiptSearchOr } from '@/lib/asReceiptSearch'
+import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_DEST_TYPE_LABELS, AS_OUTCOME_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, AS_INTAKE_STATE_LABELS, type AsIntakeState, type AsCategory, type AsDestType, type AsMethod, type AsOutcome, parseAsSearchField } from '@/lib/asReceiptShared'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,20 +34,8 @@ export async function GET(request: NextRequest) {
   const hospitalCode = sp.get('hospitalCode')
   if (hospitalCode) where.hospitalCode = hospitalCode
   const q = sp.get('q')?.trim()
-  const qTracking = q?.replace(/[\s-]+/g, '') ?? ''
-  if (q) {
-    where.OR = [
-      { asCode: { contains: q, mode: 'insensitive' } },
-      { reporterName: { contains: q, mode: 'insensitive' } },
-      { hospital: { hospitalName: { contains: q, mode: 'insensitive' } } },
-      { items: { some: { serialNo: { contains: q.replace(/\s+/g, ''), mode: 'insensitive' } } } },
-      // 운송장 검색 (2026-09-18): 수거 송장은 접수 헤더, 발송 송장은 라인 — 공백·하이픈 제거 후 부분 일치
-      ...(qTracking ? [
-        { pickupTrackingNo: { contains: qTracking } },
-        { items: { some: { shipTrackingNo: { contains: qTracking } } } },
-      ] : []),
-    ]
-  }
+  const searchOr = q ? await buildAsReceiptSearchOr(q, parseAsSearchField(sp.get('field'))) : null // 목록과 동일 검색 조건
+  if (searchOr) where.OR = searchOr
   const shippedFrom = sp.get('shippedFrom')
   const shippedTo = sp.get('shippedTo')
   const shippedFilter = shippedFrom || shippedTo
