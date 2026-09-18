@@ -569,7 +569,7 @@ export default function AsReceiptDetailPage() {
   const [me, setMe] = useState<{ id: string; role: string; permissions?: string[] } | null>(null)
 
   // 2. 접수정보 (접수자 입력 — 시트 A~M·S·T)
-  const [intake, setIntake] = useState({ pickupMethod: '', pickupTrackingNo: '', pickedUpAt: '', destType: '', destInfo: '', pickupDestDiffers: false, pickupDestInfo: '' })
+  const [intake, setIntake] = useState({ receiptDate: '', pickupMethod: '', pickupTrackingNo: '', pickedUpAt: '', destType: '', destInfo: '', pickupDestDiffers: false, pickupDestInfo: '' })
   const [tags, setTags] = useState<AsTagFlags>({ preReplace: false, priorityRepair: false, firmwareUpdate: false, accessoryIncluded: false }) // 태그 (2026-09-15) — 접수정보 저장에 포함
   // 3. AS상세내역 헤더 (AS담당자 입력 — 시트 N·U)
   const [asHead, setAsHead] = useState({ expectedShipDate: '' })
@@ -595,6 +595,7 @@ export default function AsReceiptDetailPage() {
     const r: AsDetail = d.asReceipt
     setReq(r)
     setIntake({
+      receiptDate: r.receiptDate.slice(0, 10),
       pickupMethod: r.pickupMethod ?? '',
       pickupTrackingNo: r.pickupTrackingNo ?? '',
       pickedUpAt: r.pickedUpAt?.slice(0, 10) ?? '',
@@ -883,17 +884,21 @@ export default function AsReceiptDetailPage() {
   const groups = AS_DEVICE_GROUPS
     .map((g) => ({ group: g, items: req.items.filter((i) => asDeviceGroupOf(i.device?.deviceInfo.deviceName, i.deviceKind, i.serialNo) === g) }))
     .filter((g) => g.items.length > 0)
-  const saveIntake = () => putReceipt({
-    pickupMethod: intake.pickupMethod || null,
-    pickupTrackingNo: intake.pickupTrackingNo || null,
-    pickedUpAt: intake.pickedUpAt || null,
-    destType: intake.destType || null,
-    destInfo: intake.destInfo || null,
-    pickupDestDiffers: intake.pickupDestDiffers,
-    pickupDestInfo: (intake.pickupDestDiffers ? intake.pickupDestInfo : intake.destInfo) || null,
-    ...tags, // 태그 (2026-09-15)
-    note: note || null, // 비고 — 접수정보 카드로 이동 (2026-09-15)
-  }, '접수정보 저장에 실패했습니다.')
+  const saveIntake = () => {
+    if (!intake.receiptDate) { flash('접수일을 입력하세요.'); return }
+    void putReceipt({
+      receiptDate: intake.receiptDate, // 접수일 인라인 수정 (2026-09-18) — 시트 역기입 없음
+      pickupMethod: intake.pickupMethod || null,
+      pickupTrackingNo: intake.pickupTrackingNo || null,
+      pickedUpAt: intake.pickedUpAt || null,
+      destType: intake.destType || null,
+      destInfo: intake.destInfo || null,
+      pickupDestDiffers: intake.pickupDestDiffers,
+      pickupDestInfo: (intake.pickupDestDiffers ? intake.pickupDestInfo : intake.destInfo) || null,
+      ...tags, // 태그 (2026-09-15)
+      note: note || null, // 비고 — 접수정보 카드로 이동 (2026-09-15)
+    }, '접수정보 저장에 실패했습니다.')
+  }
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
@@ -1010,7 +1015,9 @@ export default function AsReceiptDetailPage() {
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-4 sm:px-6 md:grid-cols-4">
           <div>
             <p className={label}>접수일</p>
-            <p className="mt-1 text-sm text-gray-900">{d10(req.receiptDate)}</p>
+            {canEdit ? (
+              <input type="date" value={intake.receiptDate} onChange={(e) => setIntake((p) => ({ ...p, receiptDate: e.target.value }))} className={inputCls} />
+            ) : <p className="mt-1 text-sm text-gray-900">{d10(req.receiptDate)}</p>}
           </div>
           <div>
             <p className={label}>고객명 (카카오채널명)</p>

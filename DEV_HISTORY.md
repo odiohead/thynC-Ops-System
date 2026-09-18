@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-09-18 09:20 | AS접수 상세 — 2. 접수정보 카드에서 접수일 인라인 수정 (dev2 검증, 빌드·PROD 배포 대기)
+
+- **배경(사용자 요청)**: 상세 2. 접수정보 카드의 접수일이 읽기 전용이라 헤더 [수정] 모달로만 바꿀 수 있었음 → 담당자가 카드에서 바로 수정. 구글시트 역기입은 하지 않음(사용자 명시)
+- **변경**: `intake` 상태에 `receiptDate` 추가(로드 시 `receiptDate.slice(0,10)`), `canEdit`이면 접수일을 date 인풋으로 렌더, [접수정보 저장]이 `receiptDate`를 PUT 본문에 포함(빈 값이면 '접수일을 입력하세요.' 플래시 후 중단). 서버 `PUT /api/as-receipts/[id]`는 이미 `receiptDate`(필수 date, 티켓 동기화·감사 diff 포함)를 받으므로 API 변경 없음. 헤더 [수정] 모달의 접수일 입력은 그대로 유지
+- **검증**: tsc 0(힙 4GB)·eslint 0. 빌드·재시작 미실행
+- 영향: app/as-receipts/[id]/page.tsx, README.md
+
+---
+
 ## 2026-09-18 08:50 | PROD 배포: AS접수 목록 운송장번호 검색 (30713f1)
 
 - **dev2**: 힙 4GB 빌드·`pm2 restart thync-dev`(health 200) → 커밋 30713f1·push
