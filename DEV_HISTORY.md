@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-09-18 11:35 | PROD 배포: AS 검색 항목·복수 키워드·운송장 정규화·중복접수 확인필요·상세 카드 리마운트 (6b73e87)
+
+- **dev2**: 힙 4GB 빌드·`pm2 restart thync-dev`(health 200) → 커밋 6b73e87(9파일 +226/−57)·push
+- **PROD**: `git pull`(f2fe23a→6b73e87, 코드 전용 — package.json·마이그·협업 서버 변경 없음) → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` → health 200 · `/api/as-receipts?field=tracking&q=CJ 2609,999&needsCheck=1` 307 정상, 불안정 재시작 0. 재시작 이후 에러 로그 없음(Slack `invalid_blocks`·`users_not_found`는 재시작 전 기존 누적분)
+- **PROD 읽기 확인**: 중복접수 정의(같은 시리얼 미종결 라인이 다른 접수에)로 새로 '확인필요'가 되는 접수 25건 — 데이터는 손대지 않음(사용자: 고치라는 게 아님), 목록 '확인필요만' 필터로 확인 가능
+- 영향: PROD 소스(6b73e87), DEV_HISTORY.md
+
+---
+
 ## 2026-09-18 11:20 | AS접수 목록 — 검색 항목 드롭다운(통합·병원명·시리얼·접수번호·송장번호·담당자) + 쉼표 복수 키워드 (dev2 검증, 빌드·PROD 배포 대기)
 
 - **검색 항목(사용자 요청)**: 검색창 앞에 드롭다운 — 통합검색·병원명·시리얼번호·접수번호·송장번호·담당자. 카탈로그·라벨·placeholder는 `lib/asReceiptShared.ts` `AS_SEARCH_FIELDS`/`AS_SEARCH_FIELD_LABELS`/`AS_SEARCH_FIELD_PLACEHOLDER`(+`parseAsSearchField`) 단일 소스. 통합 = 접수번호·고객명·병원명·시리얼·송장·**담당자(연결 티켓 owner 이름 — 신규 대상)**. API `?field=`(통합이면 URL 생략), 목록·export 공용 `buildAsReceiptSearchOr(q, field)`. 송장 항목인데 매치 0이면 `id:-1`로 0건(통합은 다른 대상으로 폴백)
