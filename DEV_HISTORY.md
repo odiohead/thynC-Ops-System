@@ -27,6 +27,15 @@
 
 ---
 
+## 2026-09-19 13:30 | PROD 배포: 합포장 태그 (23440ee) — 마이그 적용 + 백필 20건
+
+- **dev2**: 커밋 23440ee·push — `prisma/schema.prisma`는 타 세션의 주간업무 첨부(WeeklyItemFile) 미커밋 변경이 섞여 있어 `combinedPack` 한 줄만 인덱스에 올려 커밋(작업 트리는 그대로)
+- **PROD(사용자 명시 "마이그레이션이랑 백필까지")**: `git pull`(81b3c5a→23440ee, package.json·협업 서버 변경 없음) → 마이그 `20260919120000_as_receipt_combined_pack` psql 단일 tx(lock_timeout 5s) 적용(컬럼 + 정규화 송장 인덱스 확인) → `migrate resolve --applied` → `prisma generate` → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` → health 200, 불안정 재시작 0
+- **백필**: `scripts/backfill-as-combined-pack.mts` dry-run → `--apply` 20건 `combined_pack=true`(8그룹: CJ600414580784 0243~0246 4건 / CJ26097749148266 0301~0303 / CJ600353167275 0215~0217 / 2건 그룹 5개) → 재실행 dry-run 켤 접수 0(멱등 확인)
+- 영향: PROD 소스(23440ee)·PROD DB(as_receipts 컬럼·인덱스 추가, 20행 combined_pack), DEV_HISTORY.md
+
+---
+
 ## 2026-09-19 13:00 | AS접수 — 태그 '합포장' 추가 + 같은 수거 송장번호 접수 자동 태그 (dev2 마이그·빌드·재시작, PROD 미반영)
 
 - **태그(사용자 요청)**: `AS_TAGS`에 `COMBINED_PACK`('합포장', sky 배지) 추가 — 카탈로그 단일 소스라 상세 2. 접수정보 체크박스·등록/수정 모달·목록 태그 열(폭 27→32rem)·태그 필터·Excel '합포장' 열·타임라인 diff에 자동 반영. `AsTagFlags`에 `combinedPack` + 공용 초기값 `AS_TAG_FLAGS_EMPTY`
