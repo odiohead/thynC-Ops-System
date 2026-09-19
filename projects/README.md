@@ -12,7 +12,7 @@
 
 | 문서 | 대상 | 상태 |
 |---|---|---|
-| [weekly_attachments_design.md](weekly_attachments_design.md) | 주간업무 첨부파일 — 목표일 셀 클립 트리거(+첨부/📎n) · Modal 레이어 다중 업로드 · `weekly_item_files` · 항목 소속 검증 302 다운로드 | **구현 완료 (dev2, 2026-09-18) — PROD 배포 대기** |
+| [weekly_attachments_design.md](weekly_attachments_design.md) | 주간업무 첨부파일 — 목표일 셀 클립 트리거(+첨부/📎n) · Modal 레이어 다중 업로드 · `weekly_item_files` · 항목 소속 검증 302 다운로드 | **PROD 배포 완료 (2026-09-19, 97342ce)** |
 | [hira_detail_sync_v2_design.md](hira_detail_sync_v2_design.md) | 심평원 병원상세정보연동 v2 — 의원급 확장·진료과목/전문의수 항목·일일 한도(9,000콜) 분할 자동 실행·요청 상세 진행 현황 | **구현 완료 (dev2, 2026-09-14) — 빌드·PROD 배포 대기** |
 | [notification_v1.1_design.md](notification_v1.1_design.md) · [HTML](notification_v1.1_design.html) | 1.1 알림체계 개선 (SLA 세분화·채널 라우팅·내부 알림·첫 화면 개인화) | **P1~P6 구현 완료 / P7 지표·PROD 배포 대기** |
 | [sales_crm_design.md](sales_crm_design.md) · [HTML](sales_crm_design.html) | 영업/CRM 모듈 v4 — 병원 축·차수 축 2데이터셋 (인적정보/전원 이력·딜 확장·`/sales` 도입 현황 목록, P1~P5) | **v4 P1~P3 구현 완료 (dev2, 2026-07-29) — P4 실데이터 검증 대기** |

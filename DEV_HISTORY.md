@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-09-19 09:40 | PROD 배포: 주간업무 항목 첨부파일 (97342ce) — 마이그 적용
+
+- **dev2**: 커밋 97342ce(주간 첨부 — '첨부' 별도 컬럼 최종안)·push. README·DEV_HISTORY 기록분은 병행 세션 커밋에 이미 포함
+- **PROD(사용자 "prod에 반영해줘")**: `git pull`(d91673e→97342ce, package.json·협업 서버 변경 없음) → 마이그 `20260918150000_weekly_item_files` psql 적용(lock_timeout 5s) → `migrate resolve --applied` → `prisma generate` → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` → health 200 · `/weekly`·`/api/weekly/items/1/files` 307(비로그인 정상) · 재시작 이후 에러 로그 없음. `_prisma_migrations` 등록·`weekly_item_files` 0행 확인
+- **선행 확인 해소**: PROD Nginx `client_max_body_size 50m` — 파일당 20MB 상한 그대로 유효
+- 영향: PROD 소스(97342ce)·PROD DB(weekly_item_files 테이블 신규 — 데이터 변경 없음), DEV_HISTORY.md
+
+---
+
 ## 2026-09-19 09:10 | 주간업무 첨부 — 목표일 셀 병합 → '첨부' 별도 컬럼으로 분리 (dev2 빌드·재시작, PROD 배포 대기)
 
 - **배경(사용자 지적)**: 첨부 트리거를 목표일 셀 안에 넣은 1차 반영이 "목표일과 같은 컬럼 개념이면 안 되고 별도 필드여야 하며 정렬이 흐트러진다" → 컬럼 분리
