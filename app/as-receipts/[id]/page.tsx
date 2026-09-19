@@ -590,7 +590,7 @@ export default function AsReceiptDetailPage() {
   const [me, setMe] = useState<{ id: string; role: string; permissions?: string[] } | null>(null)
 
   // 2. 접수정보 (접수자 입력 — 시트 A~M·S·T)
-  const [intake, setIntake] = useState({ receiptDate: '', pickupMethod: '', pickupTrackingNo: '', pickedUpAt: '', destType: '', destInfo: '', pickupDestDiffers: false, pickupDestInfo: '' })
+  const [intake, setIntake] = useState({ receiptDate: '', reporterName: '', pickupMethod: '', pickupTrackingNo: '', pickedUpAt: '', destType: '', destInfo: '', pickupDestDiffers: false, pickupDestInfo: '' })
   const [tags, setTags] = useState<AsTagFlags>(AS_TAG_FLAGS_EMPTY) // 태그 (2026-09-15) — 접수정보 저장에 포함
   // 3. AS상세내역 헤더 (AS담당자 입력 — 시트 N·U)
   const [asHead, setAsHead] = useState({ expectedShipDate: '' })
@@ -619,6 +619,7 @@ export default function AsReceiptDetailPage() {
     setReloadSeq((n) => n + 1)
     setIntake({
       receiptDate: r.receiptDate.slice(0, 10),
+      reporterName: r.reporterName ?? '',
       pickupMethod: r.pickupMethod ?? '',
       pickupTrackingNo: r.pickupTrackingNo ?? '',
       pickedUpAt: r.pickedUpAt?.slice(0, 10) ?? '',
@@ -911,6 +912,7 @@ export default function AsReceiptDetailPage() {
     if (!intake.receiptDate) { flash('접수일을 입력하세요.'); return }
     void putReceipt({
       receiptDate: intake.receiptDate, // 접수일 인라인 수정 (2026-09-18) — 시트 역기입 없음
+      reporterName: intake.reporterName.trim() || null, // 고객명 인라인 수정 (2026-09-19)
       pickupMethod: intake.pickupMethod || null,
       pickupTrackingNo: intake.pickupTrackingNo || null,
       pickedUpAt: intake.pickedUpAt || null,
@@ -1044,7 +1046,9 @@ export default function AsReceiptDetailPage() {
           </div>
           <div>
             <p className={label}>고객명 (카카오채널명)</p>
-            <p className="mt-1 truncate text-sm text-gray-900" title={req.reporterName ?? undefined}>{req.reporterName ?? '-'}</p>
+            {canEdit ? (
+              <input type="text" value={intake.reporterName} onChange={(e) => setIntake((p) => ({ ...p, reporterName: e.target.value }))} placeholder="고객명 / 카카오채널명" className={inputCls} />
+            ) : <p className="mt-1 truncate text-sm text-gray-900" title={req.reporterName ?? undefined}>{req.reporterName ?? '-'}</p>}
           </div>
           <div>
             <p className={label}>수거방법</p>

@@ -27,6 +27,14 @@
 
 ---
 
+## 2026-09-19 14:00 | AS접수 상세 — 2. 접수정보 카드에서 고객명(카카오채널명) 인라인 수정 (dev2 빌드·재시작 → PROD 반영)
+
+- **변경(사용자 요청)**: 읽기 전용이던 고객명을 `canEdit`이면 텍스트 입력으로, [접수정보 저장]에 `reporterName`(공백이면 null) 포함. 서버 PUT은 이미 `reporterName`을 받고(undefined면 무변경) 감사 diff·타임라인에 포함되므로 API 변경 없음
+- **검증**: tsc 0(힙 4GB)·eslint 0
+- 영향: app/as-receipts/[id]/page.tsx, README.md
+
+---
+
 ## 2026-09-19 13:30 | PROD 배포: 합포장 태그 (23440ee) — 마이그 적용 + 백필 20건
 
 - **dev2**: 커밋 23440ee·push — `prisma/schema.prisma`는 타 세션의 주간업무 첨부(WeeklyItemFile) 미커밋 변경이 섞여 있어 `combinedPack` 한 줄만 인덱스에 올려 커밋(작업 트리는 그대로)
