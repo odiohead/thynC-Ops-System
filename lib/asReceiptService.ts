@@ -1223,6 +1223,7 @@ export interface CreateAsReceiptInput {
   destType?: string | null // HOSPITAL / OTHER
   destInfo?: string | null
   pickupDestInfo?: string | null // 회수지 정보 (CX #13 — 채널톡 인입 시 발송지와 동일 자동 기재)
+  pickupDestDiffers?: boolean // 회수지 상이 체크 (2026-09-19 — 채널톡 T열 '회수지:'/'발송지:' 분해 시 자동)
   statusId?: number | null // 미지정 시 '접수'
   note?: string | null
   lines: LineInput[]
@@ -1316,6 +1317,7 @@ export async function createAsReceipt(
               destType,
               destInfo,
               pickupDestInfo: input.pickupDestInfo?.trim() || null,
+              pickupDestDiffers: !!input.pickupDestDiffers,
               statusId,
               note,
               createdById: actor.userId,

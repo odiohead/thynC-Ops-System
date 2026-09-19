@@ -81,7 +81,9 @@ export async function GET(request: NextRequest) {
       LEFT JOIN hospital_devices hd ON hd.device_id = du.id
       WHERE i.intake_state IN ('MISMATCH', 'EXTRA')
          OR du.id IS NULL OR hd.id IS NULL OR hd.status <> 'ACTIVE' OR hd.hospital_code IS DISTINCT FROM r.hospital_code
-         OR EXISTS (SELECT 1 FROM as_receipt_items o WHERE o.serial_no = i.serial_no AND o.outcome IS NULL AND o.receipt_id <> r.id)`) // 중복접수 (2026-09-18)
+         OR EXISTS (SELECT 1 FROM as_receipt_items o JOIN as_receipts orr ON orr.id = o.receipt_id LEFT JOIN status_codes os ON os.id = orr.status_id
+                    WHERE o.serial_no = i.serial_no AND o.outcome IS NULL AND o.receipt_id <> r.id
+                      AND (os.ticket_status IS NULL OR os.ticket_status NOT IN ('RESOLVED', 'CLOSED')))`) // 중복접수 (2026-09-18) — 상대 접수가 종결이면 제외 (2026-09-19, findOpenLinesBySerial과 동일 정의)
     where.id = { in: rows.map((x) => x.id) }
   }
 

@@ -52,12 +52,17 @@ export async function buildAsReceiptSearchOr(q: string, field: AsSearchField = '
 
 export interface AsOpenLineRef { receiptId: number; asCode: string }
 
-/** 시리얼별 미종결(outcome NULL) 라인을 가진 접수 목록 — 호출부가 자기 접수를 제외해 중복접수 판정 */
+/** 중복접수 상대가 되는 접수 조건 — 헤더가 종결(완료·취소, ticketStatus RESOLVED/CLOSED)이면 라인이 열려 있어도 제외 (2026-09-19: 한쪽을 취소해도 '확인필요'가 남던 문제) */
+export const AS_OPEN_RECEIPT_WHERE: Prisma.AsReceiptWhereInput = {
+  OR: [{ statusId: null }, { status: { ticketStatus: null } }, { status: { ticketStatus: { notIn: ['RESOLVED', 'CLOSED'] } } }],
+}
+
+/** 시리얼별 미종결(outcome NULL) 라인을 가진 미종결 접수 목록 — 호출부가 자기 접수를 제외해 중복접수 판정 */
 export async function findOpenLinesBySerial(serials: string[]): Promise<Map<string, AsOpenLineRef[]>> {
   const map = new Map<string, AsOpenLineRef[]>()
   if (!serials.length) return map
   const rows = await prisma.asReceiptItem.findMany({
-    where: { serialNo: { in: serials }, outcome: null },
+    where: { serialNo: { in: serials }, outcome: null, receipt: AS_OPEN_RECEIPT_WHERE },
     select: { serialNo: true, receiptId: true, receipt: { select: { asCode: true } } },
     orderBy: { receiptId: 'asc' },
   })

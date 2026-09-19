@@ -27,6 +27,15 @@
 
 ---
 
+## 2026-09-19 11:10 | AS — 중복접수 '확인필요' 종결 상대 제외 + 채널톡 T열 '회수지/발송지' 라벨 자동 분해 (dev2 빌드·재시작, PROD 미반영)
+
+- **중복접수 잔존(사용자 보고)**: 상대 접수를 취소(헤더 상태 '취소' = CLOSED)해도 라인 outcome은 NULL로 남아 계속 중복으로 잡힘(PROD 실측: 현재 중복 18 시리얼은 전부 미종결·미종결 쌍이라 정상 표시, 취소 후 잔존이 문제). `lib/asReceiptSearch.ts` `AS_OPEN_RECEIPT_WHERE`(statusId NULL / ticketStatus NULL / RESOLVED·CLOSED 제외)를 `findOpenLinesBySerial`에 적용, 목록 `needsCheck=1` raw SQL도 상대 접수의 `status_codes.ticket_status`로 동일 제외. 삭제는 FK CASCADE로 라인이 사라져 종전에도 즉시 해소(화면은 재조회 시 반영)
+- **채널톡 T열 분해(사용자 요청)**: PROD 시트 실측 — 동아대(3796~3798)·순천에스(3743)·팔팔(3710)·광주센트럴(3712~3717) 등이 T열 한 셀에 '회수지: …' / '발송지: …' / 메모 줄을 함께 기재. `parseDestCell` 신설 — 줄 단위로 라벨('회수지'·'발송지', 콜론·'정보' 변형 허용) 구획을 모아 발송지 → `destInfo`, 회수지 → `pickupDestInfo`, 회수지가 있고 공백 무시 비교로 발송지와 다르면 `pickupDestDiffers=true` 자동. 라벨 없는 본문은 발송지로(발송지 라벨이 따로 있으면 비고 '발송지 메모:'로 보존), 회수지만 있으면 발송지도 동일. `createAsReceipt` 입력에 `pickupDestDiffers` 추가(종전 항상 false). 기존 접수는 소급하지 않음
+- **검증**: tsc 0(힙 4GB)·eslint 0. 파서 6케이스(단순·회수+발송·회수만+부속줄·본문+회수동일·메모+발송지·빈값) 기대값 일치
+- 영향: lib/asReceiptSearch.ts, lib/channeltalkAsSync.ts, lib/asReceiptService.ts, app/api/as-receipts/route.ts, README.md
+
+---
+
 ## 2026-09-19 09:55 | PROD 배포: 영업담당·대웅담당 편입 + 채널톡 행 이동 가드 (af30962) + r3800 데이터 보정 실행
 
 - **dev2**: 커밋 af30962(위 두 작업 + 보정 스크립트)·push. 같은 작업 트리에 있던 주간업무 첨부(weekly_item_files) 미커밋 변경분은 타 세션 작업이라 제외

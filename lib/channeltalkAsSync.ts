@@ -105,6 +105,33 @@ function cell(row: unknown[], idx: number): string {
   return String(row[idx] ?? '').trim()
 }
 
+/**
+ * 발송지 정보(T열) 분해 (2026-09-19) — CS 담당자가 한 셀에 '회수지: …'와 '발송지: …'를 함께 적는 사례(동아대·팔팔·순천에스 등).
+ * 줄 단위로 훑으며 '회수지'/'발송지' 라벨(콜론 선택, '회수지정보'·'발송지 정보' 변형 허용) 뒤의 줄들을 그 구획으로 모은다. '회수자명'·'연락처' 같은 부속 줄은 직전 구획에 붙는다.
+ * - destInfo: '발송지' 구획 → 없으면 라벨 없는 본문 → 그것도 없으면 '회수지' 구획(회수지만 적힌 경우 발송지도 같은 곳으로 간주)
+ * - pickupDestInfo: '회수지' 구획 → 없으면 destInfo(= 발송지와 동일)
+ * - pickupDestDiffers: 회수지 구획이 있고 공백 무시 비교로 destInfo와 다를 때만 true
+ * 결과 문자열은 라벨을 떼고 줄을 ' / '로 이어 한 줄로 만든다(화면 입력값과 같은 형태). (백필·테스트 재사용을 위해 export)
+ */
+export function parseDestCell(text: string): { destInfo: string | null; pickupDestInfo: string | null; pickupDestDiffers: boolean; extra: string | null } {
+  const segs: Record<'plain' | 'pickup' | 'dest', string[]> = { plain: [], pickup: [], dest: [] }
+  let cur: keyof typeof segs = 'plain'
+  for (const line0 of text.split(/[\r\n]+/)) {
+    let line = line0.trim()
+    if (!line) continue
+    const m = /^(회수지|발송지)\s*(?:정보)?\s*[:：]?\s*(.*)$/.exec(line)
+    if (m) { cur = m[1] === '회수지' ? 'pickup' : 'dest'; line = m[2].trim(); if (!line) continue }
+    segs[cur].push(line)
+  }
+  const join = (a: string[]) => (a.length ? a.join(' / ') : null)
+  const dest = join(segs.dest) ?? join(segs.plain) ?? join(segs.pickup)
+  const pickup = join(segs.pickup) ?? dest
+  const norm = (v: string | null) => (v ?? '').replace(/\s+/g, '')
+  // 라벨 구획이 있어 본문(라벨 없는 줄 — '방문수거 / 평택 발송' 같은 메모)이 발송지에 쓰이지 않으면 extra로 돌려 비고에 보존
+  const extra = segs.dest.length > 0 && segs.plain.length ? segs.plain.join(' / ') : null
+  return { destInfo: dest, pickupDestInfo: pickup, pickupDestDiffers: segs.pickup.length > 0 && norm(pickup) !== norm(dest), extra }
+}
+
 /** 접수사유(I열) — 시리얼별 줄에서 증상·병동 분해. "SERIAL / 병동 / 증상" | "SERIAL / 증상" | "SERIAL 증상" (백필 스크립트 재사용을 위해 export) */
 export function parseSymptoms(text: string, serials: string[]): Map<string, { symptom: string | null; ward: string | null }> {
   const out = new Map<string, { symptom: string | null; ward: string | null }>()
@@ -275,8 +302,11 @@ export async function runChanneltalkAsSync(testIo?: ChanneltalkSyncTestIo): Prom
       if (cell(r, C.AGENT)) noteParts.push(`접수담당: ${cell(r, C.AGENT)}`)
 
       // 발송지(S/T열) — 도메인 필드 매핑: '병원'→HOSPITAL, 그 외 기재값→OTHER (T열 정보와 함께)
+      // 2026-09-19: T열에 '회수지: …' / '발송지: …' 라벨이 함께 적힌 경우 분해 — 발송지 → destInfo, 회수지 → pickupDestInfo(+상이 체크)
       const destRaw = cell(r, C.DEST_TYPE)
-      const destInfo = cell(r, C.DEST_INFO) || null
+      const dest = parseDestCell(cell(r, C.DEST_INFO))
+      if (dest.extra) noteParts.push(`발송지 메모: ${dest.extra}`)
+      const destInfo = dest.destInfo
       const destType = destRaw.includes('병원') ? 'HOSPITAL' : destRaw || destInfo ? 'OTHER' : null
 
       // 수동 등록 중복 방지 (2026-09-16): 같은 병원·접수일에 이 행의 시리얼을 전부 가진 접수가 이미 있으면 새로 만들지 않고 연결
@@ -305,7 +335,8 @@ export async function runChanneltalkAsSync(testIo?: ChanneltalkSyncTestIo): Prom
           preReplace: cell(r, C.PRE_REPLACE).includes('선교체'),
           destType,
           destInfo,
-          pickupDestInfo: destInfo, // 회수지 = 발송지 자동 기재 (상이 시 화면에서 '회수지 상이' 체크 후 수정 — CX #13)
+          pickupDestDiffers: dest.pickupDestDiffers, // T열에 회수지가 따로 적혀 있고 발송지와 다르면 자동 체크 (2026-09-19)
+          pickupDestInfo: dest.pickupDestInfo, // 회수지 = 라벨 분해값, 없으면 발송지와 동일 자동 기재 (상이 시 화면에서 '회수지 상이' 체크 후 수정 — CX #13)
           note: noteParts.join('\n'),
           lines,
         },
