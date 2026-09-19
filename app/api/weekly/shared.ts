@@ -1,4 +1,4 @@
-import type { WeeklyItemDto, WeeklyItemKind, WeeklyNoteDto, WeeklyUpdateDto } from '@/lib/weekly'
+import type { WeeklyFileDto, WeeklyItemDto, WeeklyItemKind, WeeklyNoteDto, WeeklyUpdateDto } from '@/lib/weekly'
 
 /**
  * 주간업무 API 공용 — prisma row → DTO 조립 (projects/weekly_ops_design.md)
@@ -10,6 +10,7 @@ export const ITEM_INCLUDE = {
   hospital: { select: { hospitalName: true } },
   ownerTeam: { select: { name: true } },
   owner: { select: { name: true } },
+  _count: { select: { files: true } }, // 첨부 건수 (weekly_attachments_design.md)
 } as const
 
 /** DATE 컬럼 직렬화 — YYYY-MM-DD */
@@ -42,6 +43,29 @@ export type ItemRow = {
   hospital?: { hospitalName: string } | null
   ownerTeam?: { name: string } | null
   owner?: { name: string } | null
+  _count?: { files: number } | null
+}
+
+export type FileRow = {
+  id: number
+  fileName: string
+  sizeBytes: number
+  contentType: string | null
+  uploadedAt: Date
+  uploadedBy?: { name: string } | null
+}
+
+export const FILE_INCLUDE = { uploadedBy: { select: { name: true } } } as const
+
+export function toFileDto(f: FileRow): WeeklyFileDto {
+  return {
+    id: f.id,
+    fileName: f.fileName,
+    sizeBytes: f.sizeBytes,
+    contentType: f.contentType,
+    uploadedByName: f.uploadedBy?.name ?? null,
+    uploadedAt: f.uploadedAt.toISOString(),
+  }
 }
 
 /** 주간 특이사항 조회 공통 include — 작성자 소속팀 포함 (2026-08-20) */
@@ -108,5 +132,6 @@ export function toItemDto(
     lastWeek: updates?.lastWeek ? toUpdateDto(updates.lastWeek) : null,
     latestUpdate: updates?.latestUpdate ? toUpdateDto(updates.latestUpdate) : null,
     updates: updates?.all ? updates.all.map(toUpdateDto) : null,
+    fileCount: item._count?.files ?? 0,
   }
 }

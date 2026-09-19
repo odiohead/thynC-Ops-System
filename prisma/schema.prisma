@@ -336,6 +336,7 @@ model User {
   weeklyUpdatesEdited       WeeklyItemUpdate[]           @relation("WeeklyUpdateEditor")
   weeklyNotesEdited         WeeklyWeekNote[]             @relation("WeeklyNoteEditor")
   weeklyNotesAuthored       WeeklyWeekNote[]             @relation("WeeklyNoteAuthor")
+  weeklyFilesUploaded       WeeklyItemFile[]             @relation("WeeklyFileUploader")
   deviceImportsCreated      HospitalDeviceImportBatch[]  @relation("DeviceImportCreatedBy")
   deviceImportsCancelled    HospitalDeviceImportBatch[]  @relation("DeviceImportCancelledBy")
   deviceEventsActed         HospitalDeviceEvent[]        @relation("DeviceEventActor")
@@ -2744,6 +2745,7 @@ model WeeklyItem {
   owner     User?       @relation("WeeklyItemOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   createdBy User?       @relation("WeeklyItemCreator", fields: [createdById], references: [id], onDelete: SetNull)
   updates   WeeklyItemUpdate[]
+  files     WeeklyItemFile[]
 
   @@index([kind])
   @@index([hospitalCode])
@@ -2786,5 +2788,24 @@ model WeeklyWeekNote {
 
   @@index([weekStart])
   @@map("weekly_week_notes")
+  @@schema("public")
+}
+
+/// 주간업무 항목 첨부파일 — 항목 단위(주차별 진행 아님), 분류 없음 (projects/weekly_attachments_design.md §4.1)
+model WeeklyItemFile {
+  id           Int      @id @default(autoincrement())
+  itemId       Int      @map("item_id")
+  fileName     String   @map("file_name")
+  s3Key        String   @map("s3_key")
+  sizeBytes    Int      @map("size_bytes")
+  contentType  String?  @map("content_type")
+  uploadedById String?  @map("uploaded_by")
+  uploadedAt   DateTime @default(now()) @map("uploaded_at")
+
+  item       WeeklyItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  uploadedBy User?      @relation("WeeklyFileUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([itemId])
+  @@map("weekly_item_files")
   @@schema("public")
 }

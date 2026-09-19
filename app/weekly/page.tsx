@@ -15,6 +15,8 @@ import CellEditor from './_components/CellEditor'
 import SearchSelect from './_components/SearchSelect'
 import NotesSection from './_components/NotesSection'
 import RichContent from './_components/RichContent'
+import AttachCell from './_components/AttachCell'
+import FilesModal from './_components/FilesModal'
 import { isEmptyRichText } from '@/lib/richtext'
 import {
   WEEKLY_ITEM_KINDS,
@@ -56,10 +58,11 @@ const BOARD_COLS: { key: string; label: string; w: number; resizable: boolean }[
   { key: 'status', label: '상태', w: 80, resizable: true },
   { key: 'owner', label: '담당', w: 96, resizable: true },
   { key: 'target', label: '목표일', w: 112, resizable: true },
+  { key: 'files', label: '첨부', w: 72, resizable: true }, // 2026-09-19: 첨부 별도 컬럼 (weekly_attachments_design.md §3.1)
   { key: 'done', label: '', w: 96, resizable: false },
 ]
-// v3 (2026-08-21): 진행 컬럼 병합에 맞춰 저장 폭 리셋
-const COL_WIDTH_STORAGE_KEY = 'weekly_board_col_widths_v3'
+// v3 (2026-08-21): 진행 컬럼 병합에 맞춰 저장 폭 리셋 / v5 (2026-09-19): 첨부 컬럼 추가
+const COL_WIDTH_STORAGE_KEY = 'weekly_board_col_widths_v5'
 const COL_MIN_WIDTH = 56
 
 function defaultColWidths(): Record<string, number> {
@@ -89,6 +92,8 @@ export default function WeeklyPage() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [adding, setAdding] = useState<WeeklyItemKind | null>(null)
   const [detailId, setDetailId] = useState<number | null>(null)
+  /** 첨부 레이어 대상 항목 (weekly_attachments_design.md §3.2) */
+  const [filesFor, setFilesFor] = useState<{ id: number; title: string } | null>(null)
   const [busy, setBusy] = useState(false)
   /** 펼쳐진 행 — 진행 내용을 2줄 clamp 대신 전체 표시 */
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
@@ -536,6 +541,9 @@ export default function WeeklyPage() {
         <td className={`${tdCls} whitespace-nowrap ${overdue ? 'font-medium text-destructive' : ''}`}>
           {it.targetDate ?? '—'}
         </td>
+        <td className={`${tdCls} whitespace-nowrap`}>
+          <AttachCell fileCount={it.fileCount} canWrite={canWrite} onOpenFiles={() => setFilesFor({ id: it.id, title: it.title })} />
+        </td>
         <td className={`${tdCls} w-28 whitespace-nowrap text-right`}>
           {canWrite && !it.completedWeek && weekYmd <= todayMondayYmd && (
             <Button size="sm" variant="outline" onClick={() => completeItem(it)} disabled={busy}>
@@ -657,6 +665,7 @@ export default function WeeklyPage() {
             <th className={thCls}>상태</th>
             <th className={thCls}>담당</th>
             <th className={thCls}>목표일</th>
+            <th className={thCls}>첨부</th>
           </tr>
         </thead>
         <tbody>
@@ -698,6 +707,9 @@ export default function WeeklyPage() {
                 <td className={`${tdCls} whitespace-nowrap`}>{it.ownerName ?? '—'}</td>
                 <td className={`${tdCls} whitespace-nowrap ${mode === 'overdue' ? 'font-medium text-destructive' : ''}`}>
                   {it.targetDate ?? '—'}
+                </td>
+                <td className={`${tdCls} whitespace-nowrap`}>
+                  <AttachCell fileCount={it.fileCount} canWrite={canWrite} onOpenFiles={() => setFilesFor({ id: it.id, title: it.title })} />
                 </td>
               </tr>
             )
@@ -857,6 +869,17 @@ export default function WeeklyPage() {
         canWrite={canWrite}
         onChanged={reloadAll}
         completeWeekYmd={tab === 'board' ? weekYmd : undefined}
+      />
+      <FilesModal
+        item={filesFor}
+        canWrite={canWrite}
+        onClose={() => setFilesFor(null)}
+        onChanged={(itemId, count) => {
+          // 보드 전체 재조회 없이 해당 항목의 fileCount만 로컬 갱신 (스크롤·펼침 상태 보존 — §3.4)
+          const patch = (it: WeeklyItemDto) => (it.id === itemId ? { ...it, fileCount: count } : it)
+          setBoard((b) => (b ? { ...b, items: b.items.map(patch) } : b))
+          setListItems((l) => (l ? l.map(patch) : l))
+        }}
       />
     </div>
   )

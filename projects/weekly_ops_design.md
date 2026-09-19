@@ -255,6 +255,8 @@ WeeklyWeekNote (주간 리뷰 메모 — 주차당 1건, 회의 노트용)
 - Slack 주간 요약 발송 (티켓 규칙 1 — `lib/notify.ts` 경유 필요)
 - 프로젝트 모듈에서 "주간 관리 중" 표시 역참조
 
+**후속 구현**: 항목 첨부파일 — `weekly_attachments_design.md` (2026-09-18)
+
 ---
 
 ## 10. 비범위 (Non-goals)

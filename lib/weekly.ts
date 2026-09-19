@@ -154,6 +154,22 @@ export interface WeeklyItemDto {
   updates?: WeeklyUpdateDto[] | null
   /** archive·hospital 스코프 전용 — 가장 최근 update */
   latestUpdate: WeeklyUpdateDto | null
+  /** 첨부파일 건수 — 목표일 셀 트리거용 (weekly_attachments_design.md §3.1) */
+  fileCount: number
+}
+
+/** 첨부 업로드 상한 — 파일당 바이트·요청당 개수 (API·화면 공용) */
+export const WEEKLY_FILE_MAX_BYTES = 20 * 1024 * 1024
+export const WEEKLY_FILES_PER_REQUEST = 10
+
+/** 항목 첨부파일 (weekly_attachments_design.md §4.3) */
+export interface WeeklyFileDto {
+  id: number
+  fileName: string
+  sizeBytes: number
+  contentType: string | null
+  uploadedByName: string | null
+  uploadedAt: string
 }
 
 /** 주간 특이사항 엔트리 — 주차별 N건 자유 기재 (엄격한 관리 항목이 아닌 '그 주에 말할 컨텐츠') */
@@ -178,6 +194,7 @@ export interface WeeklyBoardResponse {
 export interface WeeklyItemDetailDto extends Omit<WeeklyItemDto, 'thisWeek' | 'lastWeek' | 'latestUpdate'> {
   createdByName: string | null
   updates: WeeklyUpdateDto[] // weekStart 역순 전체
+  files: WeeklyFileDto[] // uploadedAt 오름차순
 }
 
 export interface WeeklyMastersResponse {

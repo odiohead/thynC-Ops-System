@@ -5,7 +5,8 @@ import { checkWeeklyAccess } from '@/lib/weeklyAccess'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { currentMondayKstYmd, isMondayYmd, isWeeklyBizType, isWeeklyItemKind, isWeeklyItemStatus, isYmd, type WeeklyItemDetailDto } from '@/lib/weekly'
 import { isEmptyRichText, sanitizeRichTextHtml } from '@/lib/richtext'
-import { ITEM_INCLUDE, toItemDto, toUpdateDto } from '../../shared'
+import { FILE_INCLUDE, ITEM_INCLUDE, toFileDto, toItemDto, toUpdateDto } from '../../shared'
+import { deleteFromS3 } from '@/lib/s3'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,6 +37,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         orderBy: { weekStart: 'desc' },
         include: { updatedBy: { select: { name: true } } },
       },
+      files: { orderBy: { uploadedAt: 'asc' }, include: FILE_INCLUDE },
     },
   })
   if (!item) return NextResponse.json({ error: '항목을 찾을 수 없습니다.' }, { status: 404 })
@@ -44,6 +46,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     ...toItemDto(item), // thisWeek/lastWeek/latestUpdate는 null로 포함되나 상세 계약에서 미사용
     createdByName: item.createdBy?.name ?? null,
     updates: item.updates.map(toUpdateDto),
+    files: item.files.map(toFileDto),
   }
   return NextResponse.json({ item: detail })
 }
@@ -259,9 +262,18 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: '잘못된 id입니다.' }, { status: 400 })
   }
 
-  const before = await prisma.weeklyItem.findUnique({ where: { id } })
+  const before = await prisma.weeklyItem.findUnique({ where: { id }, include: { files: { select: { s3Key: true } } } })
   if (!before) return NextResponse.json({ error: '항목을 찾을 수 없습니다.' }, { status: 404 })
 
+  // 첨부 S3 객체 정리 — DB 행은 CASCADE. 실패해도 삭제는 진행 (고아 객체는 경고 로그로 추적)
+  for (const f of before.files) {
+    try {
+      await deleteFromS3(f.s3Key)
+    } catch (e) {
+      console.warn(`[weekly] 첨부 S3 삭제 실패 (item ${id}, ${f.s3Key}):`, e instanceof Error ? e.message : e)
+    }
+  }
+  const beforeItem = { ...before, files: undefined }
   await prisma.weeklyItem.delete({ where: { id } })
 
   await logAudit({
@@ -271,7 +283,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     resource: 'weekly_item',
     resourceId: id,
     resourceLabel: before.title,
-    before,
+    before: beforeItem,
   })
   return NextResponse.json({ success: true })
 }

@@ -11,6 +11,7 @@ import SearchSelect from './SearchSelect'
 import RichContent from './RichContent'
 import WeeklyRichEditor from './WeeklyRichEditor'
 import CellEditor from './CellEditor'
+import WeeklyFilesPanel from './WeeklyFilesPanel'
 import { isEmptyRichText } from '@/lib/richtext'
 import {
   WEEKLY_ITEM_KINDS,
@@ -76,9 +77,13 @@ export default function ItemDetailModal({ itemId, onClose, masters, canWrite, on
   /** 진행 이력 인라인 수정 중인 주차 (weekStart YMD) */
   const [editingWeek, setEditingWeek] = useState<string | null>(null)
 
+  /** 첨부 건수 — 패널 변경 후 헤더 라벨 갱신용 (null이면 detail.files 기준) */
+  const [fileCount, setFileCount] = useState<number | null>(null)
+
   const load = useCallback(async () => {
     if (itemId == null) return
     setError('')
+    setFileCount(null)
     const res = await fetch(`/api/weekly/items/${itemId}`)
     if (res.redirected) {
       window.location.href = '/login'
@@ -425,6 +430,21 @@ export default function ItemDetailModal({ itemId, onClose, masters, canWrite, on
                 ) : (
                   <div className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">—</div>
                 )}
+              </div>
+
+              {/* 첨부파일 — 보드 목표일 셀 트리거와 같은 패널 (weekly_attachments_design.md §3.3) */}
+              <div>
+                <span className={fieldLabel}>첨부파일 ({fileCount ?? detail.files.length}건)</span>
+                <WeeklyFilesPanel
+                  key={detail.id}
+                  itemId={detail.id}
+                  canWrite={canWrite}
+                  initialFiles={detail.files}
+                  onChanged={(n) => {
+                    setFileCount(n)
+                    onChanged() // 보드 fileCount 반영 (기존 onChanged = 보드 재조회 경로)
+                  }}
+                />
               </div>
 
               {/* 메타 정보 */}
