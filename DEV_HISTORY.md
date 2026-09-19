@@ -27,6 +27,14 @@
 
 ---
 
+## 2026-09-19 14:10 | PROD 배포: AS 상세 고객명 인라인 수정 (d91673e)
+
+- **dev2**: 힙 4GB 빌드·`pm2 restart thync-dev`(health 200) → 커밋 d91673e·push
+- **PROD**: `git pull`(23440ee→d91673e, 코드 전용) → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` → health 200, 불안정 재시작 0
+- 영향: PROD 소스(d91673e), DEV_HISTORY.md
+
+---
+
 ## 2026-09-19 14:00 | AS접수 상세 — 2. 접수정보 카드에서 고객명(카카오채널명) 인라인 수정 (dev2 빌드·재시작 → PROD 반영)
 
 - **변경(사용자 요청)**: 읽기 전용이던 고객명을 `canEdit`이면 텍스트 입력으로, [접수정보 저장]에 `reporterName`(공백이면 null) 포함. 서버 PUT은 이미 `reporterName`을 받고(undefined면 무변경) 감사 diff·타임라인에 포함되므로 API 변경 없음
