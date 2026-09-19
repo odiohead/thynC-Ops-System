@@ -27,6 +27,16 @@
 
 ---
 
+## 2026-09-19 13:00 | AS접수 — 태그 '합포장' 추가 + 같은 수거 송장번호 접수 자동 태그 (dev2 마이그·빌드·재시작, PROD 미반영)
+
+- **태그(사용자 요청)**: `AS_TAGS`에 `COMBINED_PACK`('합포장', sky 배지) 추가 — 카탈로그 단일 소스라 상세 2. 접수정보 체크박스·등록/수정 모달·목록 태그 열(폭 27→32rem)·태그 필터·Excel '합포장' 열·타임라인 diff에 자동 반영. `AsTagFlags`에 `combinedPack` + 공용 초기값 `AS_TAG_FLAGS_EMPTY`
+- **DB(규칙 1)**: 마이그 `20260919120000_as_receipt_combined_pack` — `as_receipts.combined_pack BOOLEAN NOT NULL DEFAULT false` + 수거 송장 정규화 표현식 인덱스 `as_receipts_pickup_tracking_norm_idx`(`upper(regexp_replace(pickup_tracking_no,'[^0-9A-Za-z]','','g'))`, 부분 인덱스) — 자동 태그와 송장 검색 공용. dev2 적용·resolve·generate
+- **자동 태그(사용자 질문 "주기적으로 체크? 부하?")**: 주기 검사 대신 **이벤트 기반** — `PUT /api/as-receipts/[id]`에서 수거 송장번호가 기입·변경될 때, `POST` 등록 시 송장이 있을 때만 `syncCombinedPackByTracking` 호출 → 같은 정규화 번호의 다른 접수가 있으면 이 접수와 그 접수들을 `combined_pack=true`(이미 켜진 건 무변경, **자동 끔 없음** — 수동 해제 존중). 인덱스 등치 조회 1회 + updateMany 1회라 부하 무시 가능. 화면엔 경고 줄로 "…와 합포장으로 표시" 안내. 기존 데이터는 `scripts/backfill-as-combined-pack.mts`(dry-run 기본, `--apply`, 멱등) 1회 — dev2는 대상 0, PROD 읽기 실측 8그룹 20건(CJ600414580784 4건 등)
+- **검증**: tsc 0(힙 4GB)·eslint 0. dev2 실측 — 접수 A에 'CJ ZZ-9999 0001' 입력 시 상대 없음 → 무변경, 접수 B에 'cjzz99990001'(표기 다름) 입력 → A·B 모두 켜짐·안내 문구, 이후 원복
+- 영향: prisma/schema.prisma, prisma/migrations/20260919120000_as_receipt_combined_pack/, lib/asReceiptShared.ts, lib/asReceiptSearch.ts, lib/asReceiptService.ts, app/api/as-receipts/{route.ts,[id]/route.ts,export/route.ts}, app/as-receipts/{page.tsx,[id]/page.tsx,_components/AsReceiptFormModal.tsx}, scripts/backfill-as-combined-pack.mts(신규), README.md
+
+---
+
 ## 2026-09-19 11:30 | PROD 배포: 중복접수 종결 상대 제외 + 채널톡 T열 회수지/발송지 분해 (81b3c5a)
 
 - **dev2**: 커밋 81b3c5a·push (주간업무 첨부 미커밋분은 타 세션 작업이라 제외)

@@ -8,7 +8,7 @@
 import { useState, useEffect } from 'react'
 import { AS_PICKUP_METHODS, defaultAsPickupMethod,
   AS_CATEGORIES, AS_CATEGORY_LABELS, AS_PICKUP_METHOD_LABELS,
-  AS_DEVICE_KINDS, AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, parseSerialTextarea, type AsCategory, type AsTag, type AsTagFlags,
+  AS_DEVICE_KINDS, AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, AS_TAG_FLAGS_EMPTY, parseSerialTextarea, type AsCategory, type AsTag, type AsTagFlags,
 } from '@/lib/asReceiptShared'
 
 interface HospitalOpt { hospitalCode: string; hospitalName: string; hiraHospitalName: string | null }
@@ -47,6 +47,7 @@ export interface AsEditTarget {
   priorityRepair: boolean // 태그 (2026-09-15)
   firmwareUpdate: boolean
   accessoryIncluded: boolean
+  combinedPack: boolean
   note: string | null
   items: { serialNo: string; wardName: string | null; deviceKind: string | null; symptom: string | null; outcome: string | null; deviceId: number | null; modelName: string | null }[]
 }
@@ -85,7 +86,7 @@ export default function AsReceiptFormModal({
   const [reporterName, setReporterName] = useState('')
   const [pickupMethod, setPickupMethod] = useState('')
   const [pickupTrackingNo, setPickupTrackingNo] = useState('')
-  const [tags, setTags] = useState<AsTagFlags>({ preReplace: false, priorityRepair: false, firmwareUpdate: false, accessoryIncluded: false }) // 태그 (2026-09-15)
+  const [tags, setTags] = useState<AsTagFlags>(AS_TAG_FLAGS_EMPTY) // 태그 (2026-09-15)
   const [note, setNote] = useState('')
 
   const [serialText, setSerialText] = useState('')
@@ -107,7 +108,7 @@ export default function AsReceiptFormModal({
       setReporterName(editTarget.reporterName ?? '')
       setPickupMethod(editTarget.pickupMethod ?? '')
       setPickupTrackingNo(editTarget.pickupTrackingNo ?? '')
-      setTags({ preReplace: editTarget.preReplace, priorityRepair: editTarget.priorityRepair, firmwareUpdate: editTarget.firmwareUpdate, accessoryIncluded: editTarget.accessoryIncluded })
+      setTags({ preReplace: editTarget.preReplace, priorityRepair: editTarget.priorityRepair, firmwareUpdate: editTarget.firmwareUpdate, accessoryIncluded: editTarget.accessoryIncluded, combinedPack: editTarget.combinedPack })
       setNote(editTarget.note ?? '')
       setRows(editTarget.items.map((i) => ({
         serial: i.serialNo,
@@ -128,7 +129,7 @@ export default function AsReceiptFormModal({
       setReporterName('')
       setPickupMethod('')
       setPickupTrackingNo('')
-      setTags({ preReplace: false, priorityRepair: false, firmwareUpdate: false, accessoryIncluded: false })
+      setTags(AS_TAG_FLAGS_EMPTY)
       setNote('')
       setRows([])
     }

@@ -28,7 +28,7 @@ const COLUMNS: { label: string; sort?: SortKey; cls?: string }[] = [
   { label: '입고일', sort: 'receivedAt' },
   { label: '발송일', sort: 'shippedAt' },
   { label: '발송 송장번호' },
-  { label: '태그', cls: 'w-[27rem] min-w-[27rem]' },
+  { label: '태그', cls: 'w-[32rem] min-w-[32rem]' }, // 5개(합포장 추가 2026-09-19)가 한 줄에
 ]
 
 interface AsRow {
@@ -43,6 +43,7 @@ interface AsRow {
   priorityRepair: boolean // 태그 (2026-09-15)
   firmwareUpdate: boolean
   accessoryIncluded: boolean
+  combinedPack: boolean
   pickupMethod: string | null
   pickupTrackingNo: string | null
   destType: string | null

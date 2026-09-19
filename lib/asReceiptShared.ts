@@ -25,20 +25,22 @@ export type AsDestType = (typeof AS_DEST_TYPES)[number]
 export const AS_DEST_TYPE_LABELS: Record<AsDestType, string> = { HOSPITAL: '병원', OTHER: '기타(대웅 등)' }
 
 // ─── 접수 태그 (2026-09-15) — 선교체와 같은 성격의 접수 플래그. 목록 '태그' 열·필터, 상세 2. 접수정보 체크박스 ───
-export const AS_TAGS = ['PRE_REPLACE', 'PRIORITY_REPAIR', 'FIRMWARE_UPDATE', 'ACCESSORY'] as const
+export const AS_TAGS = ['PRE_REPLACE', 'PRIORITY_REPAIR', 'FIRMWARE_UPDATE', 'ACCESSORY', 'COMBINED_PACK'] as const // COMBINED_PACK 합포장 (2026-09-19 — 수동 체크 + 같은 수거 송장번호 접수 발견 시 자동 켬)
 export type AsTag = (typeof AS_TAGS)[number]
 export const AS_TAG_LABELS: Record<AsTag, string> = {
   PRE_REPLACE: '선교체',
   PRIORITY_REPAIR: '우선수리',
   FIRMWARE_UPDATE: '펌웨어 업데이트',
   ACCESSORY: '부속품 동봉',
+  COMBINED_PACK: '합포장',
 }
 /** 태그 ↔ as_receipts 불리언 컬럼 */
-export const AS_TAG_FIELDS: Record<AsTag, 'preReplace' | 'priorityRepair' | 'firmwareUpdate' | 'accessoryIncluded'> = {
+export const AS_TAG_FIELDS: Record<AsTag, 'preReplace' | 'priorityRepair' | 'firmwareUpdate' | 'accessoryIncluded' | 'combinedPack'> = {
   PRE_REPLACE: 'preReplace',
   PRIORITY_REPAIR: 'priorityRepair',
   FIRMWARE_UPDATE: 'firmwareUpdate',
   ACCESSORY: 'accessoryIncluded',
+  COMBINED_PACK: 'combinedPack',
 }
 /** 태그 배지 색 (목록·상세 공용) */
 export const AS_TAG_BADGE_CLS: Record<AsTag, string> = {
@@ -46,8 +48,10 @@ export const AS_TAG_BADGE_CLS: Record<AsTag, string> = {
   PRIORITY_REPAIR: 'bg-red-100 text-red-700',
   FIRMWARE_UPDATE: 'bg-violet-100 text-violet-700',
   ACCESSORY: 'bg-teal-100 text-teal-700',
+  COMBINED_PACK: 'bg-sky-100 text-sky-700',
 }
-export type AsTagFlags = { preReplace: boolean; priorityRepair: boolean; firmwareUpdate: boolean; accessoryIncluded: boolean }
+export type AsTagFlags = { preReplace: boolean; priorityRepair: boolean; firmwareUpdate: boolean; accessoryIncluded: boolean; combinedPack: boolean }
+export const AS_TAG_FLAGS_EMPTY: AsTagFlags = { preReplace: false, priorityRepair: false, firmwareUpdate: false, accessoryIncluded: false, combinedPack: false }
 /** 접수의 켜진 태그 목록 (AS_TAGS 순서 고정) */
 export function asReceiptTags(r: Partial<AsTagFlags>): AsTag[] {
   return AS_TAGS.filter((t) => r[AS_TAG_FIELDS[t]] === true)

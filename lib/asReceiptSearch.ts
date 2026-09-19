@@ -83,3 +83,20 @@ export function duplicatesForReceipt(receiptId: number, serials: string[], openB
   }
   return out
 }
+
+/**
+ * 합포장 자동 태그 (2026-09-19) — 수거 송장번호가 기입·변경될 때 호출(이벤트 기반, 주기 검사 없음).
+ * 같은 번호(영숫자 정규화·대소문자 무시)의 다른 접수가 있으면 이 접수와 그 접수들의 combined_pack을 켠다(이미 켜진 건 건드리지 않음, 자동 끔 없음).
+ * 조회는 as_receipts 정규화 표현식 인덱스(as_receipts_pickup_tracking_norm_idx)로 O(1). 돌려주는 문자열은 화면 경고용 안내
+ */
+export async function syncCombinedPackByTracking(receiptId: number, trackingNo: string): Promise<string[]> {
+  const key = normalizeTrackingNo(trackingNo)
+  if (!key) return []
+  const rows = await prisma.$queryRaw<{ id: number; as_code: string; combined_pack: boolean }[]>(Prisma.sql`
+    SELECT id, as_code, combined_pack FROM as_receipts
+    WHERE upper(regexp_replace(coalesce(pickup_tracking_no, ''), '[^0-9A-Za-z]', '', 'g')) = ${key} AND id <> ${receiptId}`)
+  if (!rows.length) return []
+  const ids = [receiptId, ...rows.filter((r) => !r.combined_pack).map((r) => r.id)]
+  await prisma.asReceipt.updateMany({ where: { id: { in: ids }, combinedPack: false }, data: { combinedPack: true } })
+  return [`같은 수거 송장번호의 접수 ${rows.map((r) => r.as_code).join(', ')}와 합포장으로 표시했습니다.`]
+}

@@ -2225,6 +2225,7 @@ model AsReceipt {
   priorityRepair   Boolean   @default(false) @map("priority_repair") // 태그: 우선수리 (2026-09-15)
   firmwareUpdate   Boolean   @default(false) @map("firmware_update") // 태그: 펌웨어 업데이트
   accessoryIncluded Boolean  @default(false) @map("accessory_included") // 태그: 부속품 동봉
+  combinedPack     Boolean   @default(false) @map("combined_pack") // 태그: 합포장 (2026-09-19) — 수동 체크 또는 같은 수거 송장번호 접수 발견 시 자동 켬(자동 끔 없음)
   destType         String?   @map("dest_type") // HOSPITAL 병원 / OTHER 기타(대웅 등) (S열, SQL CHECK)
   destInfo         String?   @map("dest_info") @db.Text // 발송지 정보 (T열)
   expectedShipDate DateTime? @map("expected_ship_date") @db.Date // 예상 출하일 (U열)

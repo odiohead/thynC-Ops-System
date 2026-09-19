@@ -93,6 +93,7 @@ export async function GET(request: NextRequest) {
         우선수리: r.priorityRepair ? 'Y' : '',
         펌웨어업데이트: r.firmwareUpdate ? 'Y' : '',
         부속품동봉: r.accessoryIncluded ? 'Y' : '',
+        합포장: r.combinedPack ? 'Y' : '',
         수거방법: r.pickupMethod ? (AS_PICKUP_METHOD_LABELS[r.pickupMethod as AsPickupMethod] ?? r.pickupMethod) : '',
         수거송장: r.pickupTrackingNo ?? '',
         수거일: d10(r.pickedUpAt),

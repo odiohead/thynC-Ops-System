@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { AS_CATEGORIES, AS_TAGS, AS_TAG_FIELDS, parseSerialTextarea, summarizeAsRegistryTags, isAsIntakeIssue, type AsTag, parseAsSearchField } from '@/lib/asReceiptShared'
-import { buildAsReceiptSearchOr, findOpenLinesBySerial, duplicatesForReceipt } from '@/lib/asReceiptSearch'
+import { buildAsReceiptSearchOr, findOpenLinesBySerial, duplicatesForReceipt, syncCombinedPackByTracking } from '@/lib/asReceiptSearch'
 import { createAsReceipt, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { toRegistryErrorResponse } from '@/lib/deviceRegistry'
 import { notifyTicketCreated } from '@/lib/notify'
@@ -249,6 +249,7 @@ export async function POST(request: NextRequest) {
         priorityRepair: body.priorityRepair === true, // 태그 (2026-09-15)
         firmwareUpdate: body.firmwareUpdate === true,
         accessoryIncluded: body.accessoryIncluded === true,
+        combinedPack: body.combinedPack === true,
         statusId,
         note: typeof body.note === 'string' ? body.note : null,
         lines: parseLines(body),
@@ -274,6 +275,8 @@ export async function POST(request: NextRequest) {
     after: asReceipt,
   })
 
+  // 합포장 자동 태그 — 등록 시 수거 송장이 입력된 경우 (2026-09-19)
+  if (typeof body.pickupTrackingNo === 'string' && body.pickupTrackingNo.trim()) await syncCombinedPackByTracking(result.id, body.pickupTrackingNo).catch((e) => console.warn('[as] 합포장 자동 태그 실패:', e))
   // Slack 알림 — 티켓 파이프라인 단일 소스 (규칙 1), best-effort
   syncTicketClocksSafe(result.ticketId)
   notifyTicketCreated({ ticketId: result.ticketId, actorName: user.name, actorId: user.userId }).catch(() => {})

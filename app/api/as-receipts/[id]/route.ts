@@ -6,7 +6,7 @@ import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { canEditAsReceipt, canDeleteAsReceipt } from '@/lib/asReceipt'
 import { AS_PICKUP_METHODS, AS_CATEGORIES, AS_DEST_TYPES, classifyAsRegistryLine } from '@/lib/asReceiptShared'
-import { findOpenLinesBySerial, duplicatesForReceipt } from '@/lib/asReceiptSearch'
+import { findOpenLinesBySerial, duplicatesForReceipt, syncCombinedPackByTracking } from '@/lib/asReceiptSearch'
 import { applyItemChanges, setUnitInUse, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { syncAsReceiptToTicket } from '@/lib/ticket-domains/asReceipt'
 import { toRegistryErrorResponse } from '@/lib/deviceRegistry'
@@ -163,6 +163,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (body.priorityRepair !== undefined) data.priorityRepair = body.priorityRepair === true
     if (body.firmwareUpdate !== undefined) data.firmwareUpdate = body.firmwareUpdate === true
     if (body.accessoryIncluded !== undefined) data.accessoryIncluded = body.accessoryIncluded === true
+    if (body.combinedPack !== undefined) data.combinedPack = body.combinedPack === true // 합포장 (2026-09-19)
     // 병원 변경 (2026-09-10 — 시트 인입 오매칭 보정용). 미종결 라인은 새 병원 기준 재매칭·AS 표시 이전, 티켓 병원은 어댑터 동기화
     if (typeof body.hospitalCode === 'string' && body.hospitalCode.trim() && body.hospitalCode.trim() !== existing.hospitalCode) {
       const code = body.hospitalCode.trim()
@@ -234,6 +235,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const r = toRegistryErrorResponse(e) // RegistryError·RegistryTxAbort(2026-09-17) 공통 — 본문 { error, … }
     if (r) return NextResponse.json(r.body, { status: r.status })
     throw e
+  }
+
+  // 합포장 자동 태그 (2026-09-19): 수거 송장번호가 기입·변경됐고 같은 번호(영숫자 정규화)의 다른 접수가 있으면 양쪽 모두 켬 (끄지는 않음 — 수동 해제 존중)
+  if (data.pickupTrackingNo && data.pickupTrackingNo !== existing.pickupTrackingNo) {
+    warnings.push(...(await syncCombinedPackByTracking(id, data.pickupTrackingNo).catch((e) => { console.warn('[as] 합포장 자동 태그 실패:', e); return [] as string[] })))
   }
 
   const updatedRow = await prisma.asReceipt.findUnique({ where: { id }, include: detailInclude })

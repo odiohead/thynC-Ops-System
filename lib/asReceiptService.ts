@@ -1219,6 +1219,7 @@ export interface CreateAsReceiptInput {
   priorityRepair?: boolean // 태그 (2026-09-15)
   firmwareUpdate?: boolean
   accessoryIncluded?: boolean
+  combinedPack?: boolean // 합포장 태그 (2026-09-19)
   preReplace?: boolean
   destType?: string | null // HOSPITAL / OTHER
   destInfo?: string | null
@@ -1288,7 +1289,7 @@ export async function createAsReceipt(
   const reporterName = input.reporterName?.trim() || null
   const pickupTrackingNo = input.pickupTrackingNo?.trim() || null
   const preReplace = input.preReplace === true
-  const tagFlags = { priorityRepair: input.priorityRepair === true, firmwareUpdate: input.firmwareUpdate === true, accessoryIncluded: input.accessoryIncluded === true }
+  const tagFlags = { priorityRepair: input.priorityRepair === true, firmwareUpdate: input.firmwareUpdate === true, accessoryIncluded: input.accessoryIncluded === true, combinedPack: input.combinedPack === true }
   const destType = input.destType ?? null
   if (destType && !(AS_DEST_TYPES as readonly string[]).includes(destType)) throw new AsServiceError(400, '발송지 구분이 올바르지 않습니다.')
   const destInfo = input.destInfo?.trim() || null

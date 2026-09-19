@@ -17,7 +17,7 @@ import { AS_PICKUP_METHODS, type AsPickupMethod,
   type AsCategory, type AsMethod, type AsDestType, type AsOutcome, AS_REGISTRY_TAG_LABELS, AS_REGISTRY_TAG_DESC, type AsRegistryTag, type AsRegistryLineTag,
   AS_METHODS, AS_DEVICE_GROUPS, asDeviceGroupOf, type AsDeviceGroup,
   AS_RESOLVE_OUTCOMES, AS_INTAKE_STATE_LABELS, AS_DEVICE_KINDS, isAsIntakeIssue, asDeviceKindFromSerial, type AsIntakeState,
-  AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, AS_TAG_BADGE_CLS, asReceiptTags, type AsTagFlags,
+  AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, AS_TAG_BADGE_CLS, AS_TAG_FLAGS_EMPTY, asReceiptTags, type AsTagFlags,
   canMarkAsLineRepaired, asRepairDisabledReason, summarizeAsRepairProgress, AS_LINE_CONDITION_BADGE_CLS, isAsLineConditionBadge } from '@/lib/asReceiptShared' // 수리완료 체크·기기 상태 배지 (2026-09-17)
 import type { TicketStatus } from '@prisma/client'
 import { PRODUCT_TYPES, deviceConditionLabel, deviceSiteLabel } from '@/lib/deviceRegistryShared'
@@ -74,6 +74,7 @@ interface AsDetail {
   priorityRepair: boolean // 태그 (2026-09-15)
   firmwareUpdate: boolean
   accessoryIncluded: boolean
+  combinedPack: boolean // 합포장 (2026-09-19)
   destType: string | null
   destInfo: string | null
   pickupDestDiffers: boolean
@@ -590,7 +591,7 @@ export default function AsReceiptDetailPage() {
 
   // 2. 접수정보 (접수자 입력 — 시트 A~M·S·T)
   const [intake, setIntake] = useState({ receiptDate: '', pickupMethod: '', pickupTrackingNo: '', pickedUpAt: '', destType: '', destInfo: '', pickupDestDiffers: false, pickupDestInfo: '' })
-  const [tags, setTags] = useState<AsTagFlags>({ preReplace: false, priorityRepair: false, firmwareUpdate: false, accessoryIncluded: false }) // 태그 (2026-09-15) — 접수정보 저장에 포함
+  const [tags, setTags] = useState<AsTagFlags>(AS_TAG_FLAGS_EMPTY) // 태그 (2026-09-15) — 접수정보 저장에 포함
   // 3. AS상세내역 헤더 (AS담당자 입력 — 시트 N·U)
   const [asHead, setAsHead] = useState({ expectedShipDate: '' })
   const [confirmDate, setConfirmDate] = useState(todayKst()) // 최종확정 기준일 (2026-09-14)
@@ -626,7 +627,7 @@ export default function AsReceiptDetailPage() {
       pickupDestDiffers: r.pickupDestDiffers,
       pickupDestInfo: r.pickupDestInfo ?? '',
     })
-    setTags({ preReplace: r.preReplace, priorityRepair: r.priorityRepair, firmwareUpdate: r.firmwareUpdate, accessoryIncluded: r.accessoryIncluded })
+    setTags({ preReplace: r.preReplace, priorityRepair: r.priorityRepair, firmwareUpdate: r.firmwareUpdate, accessoryIncluded: r.accessoryIncluded, combinedPack: r.combinedPack })
     setAsHead({ expectedShipDate: r.expectedShipDate?.slice(0, 10) ?? '' })
     setIntakeDates({ receivedAt: r.receivedAt?.slice(0, 10) ?? todayKst(), checkedAt: todayKst() })
     setNote(r.note ?? '')
@@ -1313,6 +1314,7 @@ export default function AsReceiptDetailPage() {
             priorityRepair: req.priorityRepair,
             firmwareUpdate: req.firmwareUpdate,
             accessoryIncluded: req.accessoryIncluded,
+            combinedPack: req.combinedPack,
             note: req.note,
             items: req.items.map((i) => ({
               serialNo: i.serialNo,
