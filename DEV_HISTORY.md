@@ -27,6 +27,14 @@
 
 ---
 
+## 2026-09-19 11:30 | PROD 배포: 중복접수 종결 상대 제외 + 채널톡 T열 회수지/발송지 분해 (81b3c5a)
+
+- **dev2**: 커밋 81b3c5a·push (주간업무 첨부 미커밋분은 타 세션 작업이라 제외)
+- **PROD**: `git pull`(f03f5ef→81b3c5a, package.json·마이그·협업 서버 변경 없음) → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` → health 200, 불안정 재시작 0. 재시작 후 채널톡 스케줄러 정상 기동
+- 영향: PROD 소스(81b3c5a), DEV_HISTORY.md
+
+---
+
 ## 2026-09-19 11:10 | AS — 중복접수 '확인필요' 종결 상대 제외 + 채널톡 T열 '회수지/발송지' 라벨 자동 분해 (dev2 빌드·재시작, PROD 미반영)
 
 - **중복접수 잔존(사용자 보고)**: 상대 접수를 취소(헤더 상태 '취소' = CLOSED)해도 라인 outcome은 NULL로 남아 계속 중복으로 잡힘(PROD 실측: 현재 중복 18 시리얼은 전부 미종결·미종결 쌍이라 정상 표시, 취소 후 잔존이 문제). `lib/asReceiptSearch.ts` `AS_OPEN_RECEIPT_WHERE`(statusId NULL / ticketStatus NULL / RESOLVED·CLOSED 제외)를 `findOpenLinesBySerial`에 적용, 목록 `needsCheck=1` raw SQL도 상대 접수의 `status_codes.ticket_status`로 동일 제외. 삭제는 FK CASCADE로 라인이 사라져 종전에도 즉시 해소(화면은 재조회 시 반영)
