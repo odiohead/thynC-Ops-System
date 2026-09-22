@@ -11,7 +11,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import TicketStatusBadge from '@/app/tickets/components/TicketStatusBadge'
 import AsReceiptFormModal, { type AsEditTarget } from '../_components/AsReceiptFormModal'
-import { AS_PICKUP_METHODS, type AsPickupMethod,
+import { asListHref, AS_PICKUP_METHODS, type AsPickupMethod,
   AS_CATEGORY_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, AS_DEST_TYPES,
   AS_DEST_TYPE_LABELS, AS_OUTCOME_LABELS,
   type AsCategory, type AsMethod, type AsDestType, type AsOutcome, AS_REGISTRY_TAG_LABELS, AS_REGISTRY_TAG_DESC, type AsRegistryTag, type AsRegistryLineTag,
@@ -897,7 +897,7 @@ export default function AsReceiptDetailPage() {
     setBusy(false)
     if (!res.ok) { flash(d.error ?? '삭제에 실패했습니다.'); return }
     router.refresh()
-    router.push('/as-receipts')
+    router.push(asListHref()) // 마지막 목록 필터·페이지로 복귀 (2026-09-21)
   }
 
   if (loading) return <div className="py-20 text-center text-sm text-gray-400">불러오는 중...</div>
@@ -944,6 +944,7 @@ export default function AsReceiptDetailPage() {
       <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => router.push(asListHref())} className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50" title="AS업무 목록으로 (마지막 필터·페이지 유지)">← 목록</button>
             <Link href="/as-receipts" className="text-sm text-gray-400 hover:text-gray-600">AS업무</Link>
             <span className="text-gray-300">/</span>
             <span className="font-mono text-sm text-gray-500">{req.asCode}</span>

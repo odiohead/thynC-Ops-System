@@ -30,6 +30,23 @@ export function isTerminalAsStatus(ticketStatus: TicketStatus | null | undefined
   return ticketStatus === 'RESOLVED' || ticketStatus === 'CLOSED'
 }
 
+/**
+ * 상태 변경 시 함께 갱신할 필드 — PUT 단건·일괄 상태변경 공용 (2026-09-21 추출)
+ * statusChangedAt 갱신 + 완료일 자동 관리(종결 버킷 진입 시 KST 오늘 기록, 이탈 시 해제). 같은 상태면 빈 객체
+ */
+export function asStatusChangeData(
+  existing: { statusId: number | null; resolvedAt: Date | null },
+  next: { id: number; ticketStatus: TicketStatus | null },
+  todayKstYmd: string,
+): Prisma.AsReceiptUncheckedUpdateInput {
+  if (next.id === existing.statusId) return {}
+  const data: Prisma.AsReceiptUncheckedUpdateInput = { statusId: next.id, statusChangedAt: new Date() }
+  const terminal = isTerminalAsStatus(next.ticketStatus)
+  if (terminal && !existing.resolvedAt) data.resolvedAt = new Date(`${todayKstYmd}T00:00:00Z`) // DATE 컬럼 — KST 날짜로
+  if (!terminal && existing.resolvedAt) data.resolvedAt = null
+  return data
+}
+
 /** 수정·삭제 권한: ADMIN 이상 항상 / USER는 본인 등록 + 종결(완료·취소) 전 / VIEWER 불가 (SOR canEdit 패턴 — §13-1 등록자 기준) */
 export function canEditAsReceipt(
   user: { userId: string; role: string },

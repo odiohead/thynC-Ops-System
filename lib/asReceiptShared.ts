@@ -288,11 +288,33 @@ export function summarizeAsRegistryTags(
   })
 }
 
-/** 목록 '접수 기기상태' 표기 — 미종결 라인 없음 → null(표시 안 함), 태그 없음 → 정상, 있음 → 확인필요 */
-export function asReceiptDeviceStateLabel(hasOpenLines: boolean, tags: AsRegistryTagSummary[], intakeIssues = 0): '정상' | '확인필요' | null {
+/** 접수 상태가 '취소'인지 — AS_STATUS 마스터의 '취소' 코드(완료와 같은 CLOSED 매핑이라 ticket_status로는 구분 불가 → 이름 기준, `'수거중'` 자동 전이 선례) (2026-09-21) */
+export function isAsCanceledStatus(status: { name: string } | null | undefined): boolean {
+  return status?.name === '취소'
+}
+
+/** 목록 '접수 기기상태' 표기 — 취소 접수 → '취소'(정합 검토 대상 아님, 2026-09-21) / 미종결 라인 없음 → null(표시 안 함) / 태그 없음 → 정상 / 있음 → 확인필요 */
+export function asReceiptDeviceStateLabel(hasOpenLines: boolean, tags: AsRegistryTagSummary[], intakeIssues = 0, canceled = false): '정상' | '확인필요' | '취소' | null {
+  if (canceled) return '취소'
   if (!hasOpenLines) return null
   return tags.length || intakeIssues > 0 ? '확인필요' : '정상' // 입고 대조(미입고·미식별입고)는 원장 정합 태그와 별개 축 — 목록 표기만 합류
 }
+
+/** 목록 마지막 조회 쿼리스트링 보관 키 — 상세 [목록] 복귀 시 필터·페이지 복원 (2026-09-21, 프로젝트 목록 sessionStorage 선례) */
+export const AS_LIST_QS_KEY = 'as_receipts_list_qs'
+/** 상세 → 목록 복귀 경로 (클라이언트 전용 — 저장된 필터가 있으면 그대로) */
+export function asListHref(): string {
+  if (typeof window === 'undefined') return '/as-receipts'
+  try {
+    const qs = window.sessionStorage.getItem(AS_LIST_QS_KEY)
+    return qs ? `/as-receipts?${qs}` : '/as-receipts'
+  } catch {
+    return '/as-receipts'
+  }
+}
+
+/** 일괄 상태변경 요청 상한 (2026-09-21) */
+export const AS_BULK_STATUS_MAX = 100
 
 export function summarizeAsItems(items: { outcome: string | null }[]): string {
   if (!items.length) return '기기 없음'

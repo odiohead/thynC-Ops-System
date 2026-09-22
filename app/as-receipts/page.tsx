@@ -10,7 +10,7 @@ import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
 import Pager from '@/app/components/ui/Pager'
 import DateRangeFilter from '@/app/components/ui/DateRangeFilter'
 import AsReceiptFormModal from './_components/AsReceiptFormModal'
-import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsTag, AS_SEARCH_FIELDS, AS_SEARCH_FIELD_LABELS, AS_SEARCH_FIELD_PLACEHOLDER, parseAsSearchField, type AsSearchField } from '@/lib/asReceiptShared'
+import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsTag, AS_SEARCH_FIELDS, AS_SEARCH_FIELD_LABELS, AS_SEARCH_FIELD_PLACEHOLDER, parseAsSearchField, type AsSearchField, isAsCanceledStatus, AS_LIST_QS_KEY, AS_BULK_STATUS_MAX } from '@/lib/asReceiptShared'
 
 interface CodeRef { id: number; name: string; color: string | null }
 /** 정렬 가능 컬럼 (2026-09-16) — 서버 정렬(`?sort=&dir=`). 계산 컬럼(기기상태·기기·유형·송장·태그)은 정렬 없음 */
@@ -164,8 +164,9 @@ function shipTrackingCell(r: AsRow) {
 
 /** 접수 기기상태 — 미종결 라인의 원장 정합: 정상 / 확인필요(툴팁에 태그별 라인 수) / 미종결 라인 없으면 '-' */
 function deviceStateBadge(r: AsRow) {
-  const label = asReceiptDeviceStateLabel(r.items.some((i) => !i.outcome), r.registryTags ?? [], r.intakeIssues ?? 0)
+  const label = asReceiptDeviceStateLabel(r.items.some((i) => !i.outcome), r.registryTags ?? [], r.intakeIssues ?? 0, isAsCanceledStatus(r.status))
   if (!label) return <span className="text-xs text-gray-300">-</span>
+  if (label === '취소') return <span className="whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-500" title="취소된 접수 — 원장 정합·입고 대조 검토 대상 아님">취소</span>
   if (label === '정상') return <span className="whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700">정상</span>
   const parts = r.registryTags.map((t) => `${t.tag === 'DUPLICATE' ? '' : '원장 '}${AS_REGISTRY_TAG_LABELS[t.tag]} ${t.count}대${t.detail ? ` (${t.detail})` : ''}`) // DUPLICATE(2026-09-18)는 원장 축이 아님
   if (r.intakeIssues > 0) parts.push(`입고 대조 미입고·미식별입고 ${r.intakeIssues}대`)
@@ -231,6 +232,10 @@ function AsReceiptListInner() {
   const [createOpen, setCreateOpen] = useState(false)
   const [canWrite, setCanWrite] = useState(false)
   const [notice, setNotice] = useState<string[] | null>(null)
+  const [selected, setSelected] = useState<Set<number>>(new Set()) // 체크된 접수 id (2026-09-21 — 상태 일괄변경)
+  const [bulkStatusId, setBulkStatusId] = useState('')
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [statuses, setStatuses] = useState<CodeRef[]>([]) // AS_STATUS 마스터 (일괄변경 셀렉트)
   const loadSeq = useRef(0) // 필터 연속 변경 시 이전 응답이 최신 화면을 덮지 않도록 (리뷰 결함5)
 
   const loadSummary = useCallback(() => {
@@ -240,6 +245,7 @@ function AsReceiptListInner() {
   useEffect(() => {
     loadSummary()
     fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setCanWrite(d.role !== 'VIEWER'))
+    fetch('/api/settings/as-status').then((r) => (r.ok ? r.json() : null)).then((d) => setStatuses(d?.statusCodes ?? []))
   }, [loadSummary])
 
   const buildFilterParams = useCallback(() => {
@@ -278,6 +284,7 @@ function AsReceiptListInner() {
     if (page > 1) params.set('page', String(page))
     const qs = params.toString()
     window.history.replaceState(null, '', qs ? `/as-receipts?${qs}` : '/as-receipts')
+    try { window.sessionStorage.setItem(AS_LIST_QS_KEY, qs) } catch { /* 저장 불가 환경 — 상세 [목록]은 필터 없이 복귀 */ }
   }, [buildFilterParams, page, sort])
 
   const load = useCallback(async () => {
@@ -291,11 +298,40 @@ function AsReceiptListInner() {
     if (seq !== loadSeq.current) return // 더 새로운 요청이 나감 — 이 응답 폐기
     if (res.ok) {
       const d = await res.json()
-      setRows(d.receipts ?? [])
+      const list: AsRow[] = d.receipts ?? []
+      setRows(list)
       setTotal(d.total ?? 0)
+      setSelected((prev) => { const ids = new Set(list.map((r) => r.id)); const next = new Set(Array.from(prev).filter((id) => ids.has(id))); return next.size === prev.size ? prev : next }) // 페이지·필터 이동 시 화면 밖 선택 해제
     }
     setLoading(false)
   }, [buildFilterParams, page, sort])
+
+  const allOnPageSelected = rows.length > 0 && rows.every((r) => selected.has(r.id))
+  const toggleAll = () => setSelected(allOnPageSelected ? new Set() : new Set(rows.map((r) => r.id)))
+  const toggleOne = (id: number) => setSelected((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next })
+
+  // 상태 일괄변경 (2026-09-21) — 접수별 PUT 단건과 같은 규칙, 결과 요약을 notice로
+  const applyBulkStatus = async () => {
+    const st = statuses.find((x) => String(x.id) === bulkStatusId)
+    if (!st || !selected.size || bulkBusy) return
+    if (!confirm(`선택한 ${selected.size}건의 상태를 '${st.name}'(으)로 변경할까요?`)) return
+    setBulkBusy(true)
+    try {
+      const res = await fetch('/api/as-receipts/bulk-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: Array.from(selected), statusId: st.id }) })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) { setNotice([d.error ?? '일괄변경에 실패했습니다.']); return }
+      const lines: string[] = [`상태 일괄변경 '${d.status}' — 변경 ${d.updated.length}건${d.unchanged.length ? ` · 이미 같은 상태 ${d.unchanged.length}건` : ''}${d.skipped.length ? ` · 제외 ${d.skipped.length}건` : ''}`]
+      for (const sk of d.skipped as { asCode: string; reason: string }[]) lines.push(`${sk.asCode}: ${sk.reason}`)
+      setNotice(lines)
+      setSelected(new Set())
+      setBulkStatusId('')
+      router.refresh()
+      void load()
+      loadSummary()
+    } finally {
+      setBulkBusy(false)
+    }
+  }
 
   useEffect(() => { void load() }, [load])
 
@@ -332,10 +368,17 @@ function AsReceiptListInner() {
 
       {notice && notice.length > 0 && (
         <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
-          <p className="font-medium">등록 완료 — 경고 {notice.length}건</p>
-          <ul className="mt-1 list-inside list-disc space-y-0.5 text-xs">
-            {notice.map((w, i) => <li key={i}>{w}</li>)}
-          </ul>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-medium">{notice[0]}</p>
+              {notice.length > 1 && (
+                <ul className="mt-1 list-inside list-disc space-y-0.5 text-xs">
+                  {notice.slice(1).map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              )}
+            </div>
+            <button type="button" onClick={() => setNotice(null)} className="text-xs text-amber-700 hover:underline">닫기</button>
+          </div>
         </div>
       )}
 
@@ -487,6 +530,22 @@ function AsReceiptListInner() {
         <span className="ml-auto text-sm text-gray-500">{total.toLocaleString()}건</span>
       </div>
 
+      {canWrite && selected.size > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+          <span className="font-medium">{selected.size}건 선택</span>
+          <span className="text-blue-300">|</span>
+          <span className="text-xs text-blue-700">상태 일괄변경</span>
+          <select value={bulkStatusId} onChange={(e) => setBulkStatusId(e.target.value)} disabled={bulkBusy} className="rounded-md border border-blue-200 bg-white px-2 py-1 text-sm">
+            <option value="">상태 선택</option>
+            {statuses.map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
+          </select>
+          <button type="button" onClick={applyBulkStatus} disabled={!bulkStatusId || bulkBusy || selected.size > AS_BULK_STATUS_MAX} className="rounded-md bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700 disabled:opacity-50" title={selected.size > AS_BULK_STATUS_MAX ? `한 번에 최대 ${AS_BULK_STATUS_MAX}건` : '선택 건에 상태 적용 (접수별 상태 변경과 같은 규칙 — 티켓 동기화·완료일 자동)'}>
+            {bulkBusy ? '변경 중…' : '적용'}
+          </button>
+          <button type="button" onClick={() => setSelected(new Set())} disabled={bulkBusy} className="ml-auto text-xs text-blue-700 hover:underline">선택 해제</button>
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
         {loading ? (
           <p className="py-16 text-center text-sm text-gray-400">불러오는 중...</p>
@@ -497,6 +556,11 @@ function AsReceiptListInner() {
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
+                  {canWrite && (
+                    <th className="w-8 px-3 py-2">
+                      <input type="checkbox" checked={allOnPageSelected} onChange={toggleAll} className="rounded border-gray-300" title="이 페이지 전체 선택" aria-label="이 페이지 전체 선택" />
+                    </th>
+                  )}
                   {COLUMNS.map((col) => (
                     <th key={col.label} className={`${thClass} ${col.cls ?? ''}`}>
                       {col.sort ? (
@@ -515,24 +579,33 @@ function AsReceiptListInner() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {rows.map((r) => (
-                  <tr key={r.id} className="cursor-pointer hover:bg-gray-50" onClick={() => router.push(`/as-receipts/${r.id}`)}>
+                {rows.map((r) => {
+                  // 취소 접수 — 접수번호 제외 전 열 취소선 (2026-09-21). 배지(inline-flex)는 text-decoration이 전파되지 않아 자손 전체에 지정
+                  const strike = isAsCanceledStatus(r.status) ? ' line-through [&_*]:line-through opacity-60' : ''
+                  return (
+                  <tr key={r.id} className={`cursor-pointer hover:bg-gray-50 ${selected.has(r.id) ? 'bg-blue-50/60' : ''}`} onClick={() => router.push(`/as-receipts/${r.id}`)}>
+                    {canWrite && (
+                      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} className="rounded border-gray-300" aria-label={`${r.asCode} 선택`} />
+                      </td>
+                    )}
                     <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-blue-600">{r.asCode}</td>
-                    <td className="max-w-[14rem] truncate px-3 py-2 text-gray-900" title={r.hospital?.hospitalName ?? undefined}><span className="block min-w-[8rem] max-w-[14rem] truncate">{r.hospital?.hospitalName ?? '-'}</span></td>
-                    <td className="whitespace-nowrap px-3 py-2">{deviceStateBadge(r)}</td>
-                    <td className="whitespace-nowrap px-3 py-2">
+                    <td className={`max-w-[14rem] truncate px-3 py-2 text-gray-900${strike}`} title={r.hospital?.hospitalName ?? undefined}><span className="block min-w-[8rem] max-w-[14rem] truncate">{r.hospital?.hospitalName ?? '-'}</span></td>
+                    <td className={`whitespace-nowrap px-3 py-2${strike}`}>{deviceStateBadge(r)}</td>
+                    <td className={`whitespace-nowrap px-3 py-2${strike}`}>
                       <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${CATEGORY_BADGE[r.category] ?? 'bg-gray-100 text-gray-700'}`}>{AS_CATEGORY_LABELS[r.category as AsCategory] ?? r.category}</span>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2">{deviceCell(r)}</td>
-                    <td className="whitespace-nowrap px-3 py-2">{productTypeBadges(r.items)}</td>
-                    <td className="whitespace-nowrap px-3 py-2">{codeBadge(r.status)}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-gray-600">{r.receiptDate.slice(0, 10)}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-gray-600">{receivedCell(r)}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-gray-600">{shippedCell(r)}</td>
-                    <td className="whitespace-nowrap px-3 py-2">{shipTrackingCell(r)}</td>
-                    <td className="whitespace-nowrap px-3 py-2">{tagBadges(r)}</td>
+                    <td className={`whitespace-nowrap px-3 py-2${strike}`}>{deviceCell(r)}</td>
+                    <td className={`whitespace-nowrap px-3 py-2${strike}`}>{productTypeBadges(r.items)}</td>
+                    <td className={`whitespace-nowrap px-3 py-2${strike}`}>{codeBadge(r.status)}</td>
+                    <td className={`whitespace-nowrap px-3 py-2 text-gray-600${strike}`}>{r.receiptDate.slice(0, 10)}</td>
+                    <td className={`whitespace-nowrap px-3 py-2 text-gray-600${strike}`}>{receivedCell(r)}</td>
+                    <td className={`whitespace-nowrap px-3 py-2 text-gray-600${strike}`}>{shippedCell(r)}</td>
+                    <td className={`whitespace-nowrap px-3 py-2${strike}`}>{shipTrackingCell(r)}</td>
+                    <td className={`whitespace-nowrap px-3 py-2${strike}`}>{tagBadges(r)}</td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -544,7 +617,7 @@ function AsReceiptListInner() {
       <AsReceiptFormModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onSaved={(warnings) => { setNotice(warnings.length ? warnings : null); router.refresh(); void load(); loadSummary() }}
+        onSaved={(warnings) => { setNotice(warnings.length ? [`등록 완료 — 경고 ${warnings.length}건`, ...warnings] : null); router.refresh(); void load(); loadSummary() }}
       />
     </div>
   )

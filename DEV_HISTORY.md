@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-09-21 10:30 | AS업무 — 취소 접수 기기상태 '취소'+취소선 · 목록 체크박스 상태 일괄변경 · 상세 [← 목록] 필터 복귀 (dev2 빌드·재시작, PROD 배포 대기)
+
+- **① 취소 접수(사용자 요청)**: 상태가 '취소'인 접수는 원장 정합·입고 대조 검토 대상이 아니므로 접수 기기상태를 '확인필요' 대신 **'취소'**(회색 배지)로. `lib/asReceiptShared.ts` `isAsCanceledStatus`(AS_STATUS '취소' — 완료와 같은 CLOSED 매핑이라 ticket_status로 구분 불가, '수거중' 자동 전이와 같은 이름 기준 선례) + `asReceiptDeviceStateLabel(…, canceled)` 4번째 인자. 목록 API `needsCheck=1` raw SQL에 `status_codes.name <> '취소'` 조건. 목록 행은 **접수번호 제외 전 열 취소선+opacity-60**(배지가 inline-flex라 text-decoration이 전파되지 않아 `[&_*]:line-through`로 자손 전체 지정)
+- **② 체크박스 + 상태 일괄변경(사용자 요청)**: 쓰기 권한자에게 행 왼쪽 체크박스(클릭 전파 차단)·헤더 전체선택(현재 페이지). 선택이 있으면 표 위 파란 바 — 상태 셀렉트(`/api/settings/as-status`)·[적용](confirm)·[선택 해제]. 신규 `POST /api/as-receipts/bulk-status` `{ids, statusId}` ≤100건 — 접수별 PUT 단건과 같은 규칙: `canEditAsReceipt`(종결 건은 ADMIN·AS 관리 권한만), `lib/asReceipt.ts`에 **`asStatusChangeData` 추출**(statusChangedAt·완료일 자동 — PUT과 공용), 어댑터 `syncAsReceiptToTicket`(규칙 3), 감사 `as_receipt` UPDATE(라벨 '상태 일괄변경 → …'), SLA 클럭·`notifyTicketChanged`(규칙 1). 접수별 개별 트랜잭션이라 일부 실패해도 나머지 반영, 응답 `{status, updated, unchanged, skipped[{asCode, reason}]}` → 상단 배너(등록 경고 배너를 공용화, [닫기] 추가). 페이지·필터 이동 시 화면 밖 선택 자동 해제
+- **③ 상세 [← 목록](사용자 요청)**: 목록의 URL 동기화 effect가 쿼리스트링을 sessionStorage `as_receipts_list_qs`에 보관, 상세 헤더 브레드크럼 앞 [← 목록] 버튼·삭제 후 이동이 `asListHref()`로 필터·정렬·페이지 그대로 복귀(새 탭 등 저장값 없으면 `/as-receipts`)
+- **검증(dev2, 4GB 빌드·`pm2 restart thync-dev`·health 200)**: tsc 0·eslint 0. curl 실측 — VIEWER 403, ids 없음·잘못된 상태·101건 400, `[3454, 3459, 없는 id]`→'취소': updated 2·skipped 1(사유), 완료일 기록·연결 티켓 CLOSED(어댑터), 취소 후 `needsCheck=1`에서 AS-202609-0177 제외(사전 1건→0건)·목록 status '취소'로 배지 판정, 같은 상태 재적용 unchanged, ADMIN 원복 '접수'→완료일 해제·티켓 OPEN, 감사 4행. 테스트 접수 2건은 원래 상태로 복구(statusChangedAt만 갱신). `/as-receipts`·`?needsCheck=1&page=2`·상세 200
+- 영향: lib/{asReceiptShared,asReceipt}.ts, app/api/as-receipts/{route.ts,[id]/route.ts,bulk-status/route.ts(신규)}, app/as-receipts/{page.tsx,[id]/page.tsx}, README.md
+
+---
+
 ## 2026-09-19 09:40 | PROD 배포: 주간업무 항목 첨부파일 (97342ce) — 마이그 적용
 
 - **dev2**: 커밋 97342ce(주간 첨부 — '첨부' 별도 컬럼 최종안)·push. README·DEV_HISTORY 기록분은 병행 세션 커밋에 이미 포함
