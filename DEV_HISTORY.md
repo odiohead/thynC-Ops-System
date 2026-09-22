@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-09-22 09:20 | PROD 배포: AS업무 — 취소 접수 '취소' 배지·상태 일괄변경·[← 목록] 복귀 (d62ecc9)
+
+- **dev2**: 미커밋 AS업무 건(2026-09-21 10:30 항목) 커밋 d62ecc9·push. `scripts/tmp-*.mts` 임시 스크립트 11개는 커밋 제외
+- **PROD(사용자 "prod에 반영해줘")**: `git pull`(97342ce→d62ecc9, package.json·마이그·협업 서버 변경 없음 — 코드 전용) → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` → health 200 · `/as-receipts`·`POST /api/as-receipts/bulk-status` 307(비로그인 정상) · 재시작 후 불안정 재시작 0. 에러 로그의 "Failed to find Server Action"은 배포 직후 구 번들 탭의 요청(정상 현상)
+- 영향: PROD 소스(d62ecc9), DEV_HISTORY.md
+
+---
+
 ## 2026-09-21 10:30 | AS업무 — 취소 접수 기기상태 '취소'+취소선 · 목록 체크박스 상태 일괄변경 · 상세 [← 목록] 필터 복귀 (dev2 빌드·재시작, PROD 배포 대기)
 
 - **① 취소 접수(사용자 요청)**: 상태가 '취소'인 접수는 원장 정합·입고 대조 검토 대상이 아니므로 접수 기기상태를 '확인필요' 대신 **'취소'**(회색 배지)로. `lib/asReceiptShared.ts` `isAsCanceledStatus`(AS_STATUS '취소' — 완료와 같은 CLOSED 매핑이라 ticket_status로 구분 불가, '수거중' 자동 전이와 같은 이름 기준 선례) + `asReceiptDeviceStateLabel(…, canceled)` 4번째 인자. 목록 API `needsCheck=1` raw SQL에 `status_codes.name <> '취소'` 조건. 목록 행은 **접수번호 제외 전 열 취소선+opacity-60**(배지가 inline-flex라 text-decoration이 전파되지 않아 `[&_*]:line-through`로 자손 전체 지정)
