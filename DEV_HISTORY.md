@@ -4,7 +4,16 @@
 
 ---
 
-## 2026-09-28 10:00 | AS업무 — 수리대기 큐(AS담당자용 기기 단위 화면) `/as-receipts/queue` (dev2 빌드·재시작, PROD 배포 대기)
+## 2026-09-28 12:55 | PROD 배포: AS 수리대기 큐 (f1d6d1d)
+
+- **dev2**: 커밋 f1d6d1d(수리대기 큐 — 12:00 항목)·push. `scripts/tmp-*.mts` 임시 스크립트는 커밋 제외
+- **PROD(사용자 "PROD에 기능 반영해줘")**: `git pull`(d62ecc9→f1d6d1d, package.json·마이그·협업 서버 변경 없음 — 코드 전용) → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` → health 200 · `/as-receipts/queue`·`/api/as-receipts/queue` 307(비로그인 정상). 에러 로그 마지막 기록(P2024 커넥션 풀 타임아웃, User 조회)은 03:50:17으로 재시작(03:51:22) **이전**(빌드 중 부하) — 재시작 후 신규 에러 없음
+- **PROD 실측(읽기 전용 SQL, 설계 §3 정의)**: 수리 대기 심전계 117 · 산소포화도 155 / 입고 예정 심전계 85 · 산소포화도 264 (기타 0)
+- 영향: PROD 소스(f1d6d1d), DEV_HISTORY.md
+
+---
+
+## 2026-09-28 12:00 | AS업무 — 수리대기 큐(AS담당자용 기기 단위 화면) `/as-receipts/queue` (dev2 빌드·재시작 → PROD 배포 f1d6d1d)
 
 - **배경(사용자 요청)**: 수리담당자가 "센터에 들어와 수리해야 할 기기"·"곧 들어올 기기"를 접수(병원) 단위 목록에서 보기 어려움 → 설계 `projects/as_repair_queue_design.md` 작성 → 추천안 전건 승인("추천안대로 진행") → 구현. **스키마 변경 없음**(기존 3축 intake_state × outcome × repaired_at 판정)
 - **공용**: `lib/asReceiptQueue.ts`(신규) — 상세 라우트의 `detailInclude`·`shapeDetailItems`를 이곳으로 이동(Next 14 route.ts는 메서드 외 export 불가)해 상세·큐가 같은 라인 select 사용, `asQueueBucketWhere`(수리 대기 = RECEIVED ∧ repaired_at NULL ∧ outcome NULL|REPLACE, 접수 종결 무관 / 입고 예정 = PENDING|MISMATCH ∧ outcome NULL ∧ 접수 미종결 ∧ 분실·수거없음 제외)·`asQueueOrderBy`·`asDeviceGroupWhere`(목록 `?group=` 필터 조각을 추출해 공용). `lib/asReceiptShared.ts` — 버킷 상수·라벨·설명, 기기군 코드(`AS_DEVICE_GROUP_TO_CODE` — 목록 표기 코드 'SpO2'와 별개로 대문자 키), `AS_QUEUE_QS_KEY`·`AS_BACK_KEY`(상세 [← 목록]이 마지막 화면 list/queue로 복귀 — `asListHref` 개정, `asQueueHref` 신설), `AS_QUEUE_BULK_MAX`
