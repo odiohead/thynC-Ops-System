@@ -52,10 +52,17 @@ export interface ChanneltalkVocSyncOptions {
 
 // ─── 변환 ───
 const ms2date = (v: unknown) => (typeof v === 'number' && v > 0 ? new Date(v) : null)
-const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null)
-const arr = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+/** PostgreSQL TEXT·JSONB는 NUL(0x00)을 거부 — 채널톡 메시지 본문에 실제로 섞여 옴(PROD 백필 2026-09-28). 문자열에서 제거 */
+const stripNul = (v: string) => (v.includes('\u0000') ? v.replace(/\u0000/g, '') : v)
+const deepStripNul = (o: unknown): unknown =>
+  typeof o === 'string' ? stripNul(o)
+  : Array.isArray(o) ? o.map(deepStripNul)
+  : o && typeof o === 'object' ? Object.fromEntries(Object.entries(o as Record<string, unknown>).map(([k, v]) => [stripNul(k), deepStripNul(v)]))
+  : o
+const str = (v: unknown) => (typeof v === 'string' && v.trim() ? stripNul(v.trim()) : null)
+const arr = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').map(stripNul) : [])
 const sha = (o: unknown) => createHash('sha256').update(JSON.stringify(o)).digest('hex')
-const json = (o: unknown) => o as Prisma.InputJsonValue
+const json = (o: unknown) => deepStripNul(o) as Prisma.InputJsonValue
 
 /** 상담 변경 감지용 유의미 필드 (updatedAt·통계 제외) */
 function chatSignature(c: ChanneltalkUserChatRaw) {
@@ -117,6 +124,7 @@ class SyncCtx {
       if (!u?.id) continue
       const ex = extractUser(u)
       this.userCache.set(u.id, { opsCode: ex.opsCode, hospitalNameRaw: ex.hospitalNameRaw })
+      this.knownUsers.add(u.id)
       const rawHash = userSignature(u)
       const cur = await prisma.channeltalkUser.findUnique({ where: { id: u.id }, select: { rawHash: true } })
       if (cur?.rawHash === rawHash) continue
@@ -126,6 +134,23 @@ class SyncCtx {
         update: { ...ex, raw: json(u), rawHash, lastSyncedAt: new Date() },
       })
     }
+  }
+
+  /** 상담의 userId가 DB에 없으면 단건 조회로 보충, 그래도 없으면(삭제·병합 고객) null — FK 위반 방지 (PROD 백필 2026-09-28) */
+  private knownUsers = new Set<string>()
+  async ensureUser(userId: string | null): Promise<string | null> {
+    if (!userId) return null
+    if (this.knownUsers.has(userId) || this.userCache.has(userId)) { this.knownUsers.add(userId); return userId }
+    const exists = await prisma.channeltalkUser.findUnique({ where: { id: userId }, select: { id: true } })
+    if (exists) { this.knownUsers.add(userId); return userId }
+    try {
+      const { user } = await this.client.getUser(userId)
+      if (user?.id) { await this.upsertUsers([user]); this.knownUsers.add(userId); return userId }
+    } catch (e) {
+      if (e instanceof CallBudgetExceeded) throw e
+      this.log(`고객 ${userId} 조회 실패 — 상담 user_id 비움 (${e instanceof Error ? e.message.slice(0, 80) : e})`)
+    }
+    return null
   }
 
   private async userHint(userId: string | null) {
@@ -160,9 +185,10 @@ class SyncCtx {
     const rawHash = chatSignature(c)
     const cur = await prisma.channeltalkUserChat.findUnique({ where: { id: c.id }, select: { rawHash: true, messageCount: true } })
     if (cur && cur.rawHash === rawHash && cur.messageCount > 0) return { isNew: false, changed: false }
+    const userId = await this.ensureUser(str(c.userId))
     const hint = await this.hospitalHint(c)
     const data = {
-      channelId: str(c.channelId), userId: str(c.userId), state: c.state, assigneeId: str(c.assigneeId),
+      channelId: str(c.channelId), userId, state: c.state, assigneeId: str(c.assigneeId),
       managerIds: arr(c.managerIds), tags: arr(c.tags), name: str(c.name), description: str(c.description),
       contactMediumType: str(c.contactMediumType), sourceType: str(c.source?.medium?.mediumType) ?? (c.source?.workflow ? 'workflow' : null),
       firstAskedAt: ms2date(c.firstAskedAt), openedAt: ms2date(c.openedAt), closedAt: ms2date(c.closedAt),
