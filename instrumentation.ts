@@ -72,6 +72,16 @@ export async function register() {
       console.error('[instrumentation] 채널톡 AS 스케줄러 초기화 실패:', err)
     }
 
+    // 채널톡 상담 원천 적재 폴링 (voc_channeltalk_intake_design.md — 주기 channeltalk_voc_interval, 기본 off)
+    try {
+      const { startChanneltalkVocScheduler } = await import('@/lib/channeltalk-voc-scheduler')
+      const { CHANNELTALK_VOC_INTERVAL_KEY } = await import('@/lib/channeltalk/shared')
+      const cv = await prisma.appSetting.findUnique({ where: { key: CHANNELTALK_VOC_INTERVAL_KEY } })
+      startChanneltalkVocScheduler(cv?.value || 'off')
+    } catch (err) {
+      console.error('[instrumentation] 채널톡 VOC 스케줄러 초기화 실패:', err)
+    }
+
     // 위키 청크 인덱스 주기 갱신 (본문 저장은 협업 서버가 하므로 REST 훅만으로는 누락됨)
     // 다른 스케줄러와 달리 기본값이 '10m' — 설정 UI가 없어 'off' 기본이면 아무도 켜지 않는다
     try {

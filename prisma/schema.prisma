@@ -82,6 +82,7 @@ model Hospital {
   emrInfo               HospitalEmrInfo?
   vocReceipts           VocReceipt[]
   asReceipts            AsReceipt[]
+  channeltalkChats      ChanneltalkUserChat[]
   projects              Project[]
   meta                  HospitalMeta?
   hospitalDevices       HospitalDevice[]             @relation("DeviceCurrentHospital") // 현재 배치 중 개체 (원장, 2026-09-01)
@@ -2807,5 +2808,131 @@ model WeeklyItemFile {
 
   @@index([itemId])
   @@map("weekly_item_files")
+  @@schema("public")
+}
+
+// ─── 채널톡 상담 원천 적재 (projects/voc_channeltalk_intake_design.md §3, 2026-09-28) ───
+// 채널톡 Open API 원문(raw JSONB) + 추출 컬럼. 채널톡 id가 PK. VOC 승격층(VocReceipt)은 별도 단계.
+
+/// 채널톡 고객 — 최신 스냅샷 1행. profile.OpsCode = hospital_code(HOSP-xxxxxx)
+model ChanneltalkUser {
+  id              String   @id @db.VarChar(40)
+  channelId       String?  @map("channel_id") @db.VarChar(40)
+  memberId        String?  @map("member_id") @db.VarChar(80)
+  unifiedId       String?  @map("unified_id") @db.VarChar(80)
+  name            String?
+  mobileNumber    String?  @map("mobile_number") @db.VarChar(40)
+  landlineNumber  String?  @map("landline_number") @db.VarChar(40)
+  email           String?  @db.VarChar(200)
+  opsCode         String?  @map("ops_code")
+  hospitalNameRaw String?  @map("hospital_name_raw")
+  ward            String?
+  address         String?
+  profile         Json?
+  tags            String[] @default([])
+  raw             Json
+  rawHash         String   @map("raw_hash") @db.VarChar(64)
+  firstSeenAt     DateTime @default(now()) @map("first_seen_at") @db.Timestamptz
+  lastSyncedAt    DateTime @default(now()) @map("last_synced_at") @db.Timestamptz
+
+  chats ChanneltalkUserChat[]
+
+  @@index([opsCode])
+  @@map("channeltalk_users")
+  @@schema("public")
+}
+
+/// 채널톡 매니저 — 담당·참여자 이름 표시용 마스터
+model ChanneltalkManager {
+  id           String   @id @db.VarChar(40)
+  channelId    String?  @map("channel_id") @db.VarChar(40)
+  name         String?
+  email        String?  @db.VarChar(200)
+  raw          Json
+  lastSyncedAt DateTime @default(now()) @map("last_synced_at") @db.Timestamptz
+
+  @@map("channeltalk_managers")
+  @@schema("public")
+}
+
+/// 채널톡 상담(userChat) 1건 = 1행
+model ChanneltalkUserChat {
+  id                  String    @id @db.VarChar(40)
+  channelId           String?   @map("channel_id") @db.VarChar(40)
+  userId              String?   @map("user_id") @db.VarChar(40)
+  state               String    @db.VarChar(16) // opened / snoozed / closed
+  assigneeId          String?   @map("assignee_id") @db.VarChar(40)
+  managerIds          String[]  @default([]) @map("manager_ids")
+  tags                String[]  @default([])
+  name                String?
+  description         String?
+  contactMediumType   String?   @map("contact_medium_type") @db.VarChar(32)
+  sourceType          String?   @map("source_type") @db.VarChar(32)
+  firstAskText        String?   @map("first_ask_text") // 고객 첫 메시지 본문 (messages 호출로 채움)
+  firstAskedAt        DateTime? @map("first_asked_at") @db.Timestamptz
+  openedAt            DateTime? @map("opened_at") @db.Timestamptz
+  closedAt            DateTime? @map("closed_at") @db.Timestamptz
+  createdAtCt         DateTime? @map("created_at_ct") @db.Timestamptz
+  updatedAtCt         DateTime? @map("updated_at_ct") @db.Timestamptz
+  raw                 Json
+  rawHash             String    @map("raw_hash") @db.VarChar(64)
+  messageCursor       String?   @map("message_cursor")
+  messageCount        Int       @default(0) @map("message_count")
+  messagesSyncedAt    DateTime? @map("messages_synced_at") @db.Timestamptz
+  hospitalCode        String?   @map("hospital_code") // 힌트 — opscode 정확 일치 / name 매처 / none
+  hospitalMatchSource String?   @map("hospital_match_source") @db.VarChar(16)
+  hospitalMatchNote   String?   @map("hospital_match_note")
+  firstSeenAt         DateTime  @default(now()) @map("first_seen_at") @db.Timestamptz
+  lastSyncedAt        DateTime  @default(now()) @map("last_synced_at") @db.Timestamptz
+
+  user     ChanneltalkUser?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  hospital Hospital?            @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: SetNull)
+  messages ChanneltalkMessage[]
+
+  @@index([state])
+  @@index([closedAt])
+  @@index([firstAskedAt])
+  @@index([userId])
+  @@index([hospitalCode])
+  @@map("channeltalk_user_chats")
+  @@schema("public")
+}
+
+/// 채널톡 메시지 — 파일은 메타만 (file_meta), 바이너리 미수집
+model ChanneltalkMessage {
+  id          String   @id @db.VarChar(40)
+  chatId      String   @map("chat_id") @db.VarChar(40)
+  personType  String?  @map("person_type") @db.VarChar(16) // user / manager / bot
+  personId    String?  @map("person_id") @db.VarChar(40)
+  plainText   String?  @map("plain_text")
+  hasFiles    Boolean  @default(false) @map("has_files")
+  fileMeta    Json?    @map("file_meta")
+  createdAtCt DateTime @map("created_at_ct") @db.Timestamptz
+  raw         Json
+  syncedAt    DateTime @default(now()) @map("synced_at") @db.Timestamptz
+
+  chat ChanneltalkUserChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, createdAtCt])
+  @@map("channeltalk_messages")
+  @@schema("public")
+}
+
+/// 채널톡 동기화 틱 실행 로그 (30일 보관)
+model ChanneltalkSyncRun {
+  id              Int       @id @default(autoincrement())
+  mode            String    @db.VarChar(16) // backfill / incremental / manual
+  startedAt       DateTime  @default(now()) @map("started_at") @db.Timestamptz
+  endedAt         DateTime? @map("ended_at") @db.Timestamptz
+  scannedChats    Int       @default(0) @map("scanned_chats")
+  upsertedChats   Int       @default(0) @map("upserted_chats")
+  fetchedMessages Int       @default(0) @map("fetched_messages")
+  apiCalls        Int       @default(0) @map("api_calls")
+  rateLimited     Int       @default(0) @map("rate_limited")
+  error           String?
+  stats           Json?
+
+  @@index([startedAt])
+  @@map("channeltalk_sync_runs")
   @@schema("public")
 }

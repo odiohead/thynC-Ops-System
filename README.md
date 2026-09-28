@@ -150,6 +150,7 @@ app/
 │   ├── stock-out-requests/           # 출고요청 CRUD + [id] (등록 시 STOCK_OUT 티켓 자동 생성 — 단일 트랜잭션, 프로젝트 필수 연결)
 │   ├── as-receipts/                  # AS접수 CRUD + queue(수리대기 큐 — 라인 단위 버킷 조회, 2026-09-28) + queue/repair-done(수리완료 일괄) + match(시리얼 원장 매칭 미리보기) + [id]/resolve-items(라인 결과 확정 — 기기현황 연동, 라인별 처리내용) + [id]/ship-info(기기군 발송정보 갱신, 2026-09-11) + export(라인 단위 Excel — 발송일 필터, 2026-09-07) + [id]/repair-done·scrap-line(라인 수리완료 체크/해제·라인 기기 폐기 — 기기 상태·위치 축, 2026-09-17) (등록 시 AS 티켓 자동 생성·AS 표시, 2026-09-04)
 │   ├── voc-masters/                  # VOC 접수 채널 조회 (channels)
+│   ├── channeltalk/chats/            # 채널톡 상담 원본 목록·상세([id]) — 읽기 전용 (voc_channeltalk_intake_design.md §5.2, 2026-09-28)
 │   ├── etc-tasks/                    # 기타업무 CRUD + 파일 관리 (다병원·비유지보수 업무)
 │   ├── inventory/                    # 자재관리(WMS)
 │   │   ├── items/                    # 품목 마스터 route/[id](재고·부자재 포함)/import + [id]/components(주자재-부자재 매핑) + [id]/lot-history(LOT별 입출고 요약)
@@ -175,6 +176,7 @@ app/
 │   └── calendar/                     # 구축 일정 간트 캘린더 (새 탭)
 ├── site-visits/                      # 답사 목록·상세·등록
 ├── voc/                              # VOC 접수 — 목록·등록(new)·상세([id] — 하위 티켓 패널·처리 결과 Tiptap) (CS 워크플로)
+│   └── inbox/                        # 채널톡 상담 원본 열람 — 목록·상세([id] 메시지 타임라인) 읽기 전용, **nav 미등록(URL 직접 진입)** (2026-09-28)
 ├── stock-out-requests/               # 출고업무 — 목록·상세([id] — 출고 처리 카드·처리 내역) + _components/{StockOutRequestFormModal(등록·수정),FulfillCard(출고 처리 — P2)}
 ├── as-receipts/                      # AS업무 — 목록([+ 접수])·상세([id] — 진행 기록·기기 라인·라인 처리)·queue(수리대기 큐 — AS담당자용 기기 단위 화면, 2026-09-28) + _components/AsReceiptFormModal(등록·수정 — 시리얼 매칭 미리보기)·AsTabs(접수 목록 ↔ 수리대기 탭 스트립) (2026-09-04)
 ├── maintenances/                     # 유지보수 목록·상세·등록
@@ -223,7 +225,9 @@ app/
 │   ├── maintenance-status/           # 유지보수 상태 관리 (WorkflowStatusManager)
 │   ├── etc-task-status/              # 기타업무 상태 관리 (WorkflowStatusManager)
 │   ├── voc-status/                   # VOC 상태 관리 (WorkflowStatusManager — 티켓 상태 매핑, CS 워크플로)
+│   ├── channeltalk-sync/             # 채널톡 상담 적재 설정 — 주기·호출 상한·[지금 실행]·[백필 시작/이어서]·[백필 초기화]·최근 실행 10건·DB 현황 (2026-09-28)
 │   ├── voc-type/                     # VOC 분류 관리 (StatusCodeManager)
+│   ├── channeltalk-sync/             # 채널톡 상담 적재 설정 (GET/PUT 주기·호출 상한·백필 상태·실행 로그 + run(지금 실행/백필) + backfill-reset) — ADMIN (2026-09-28)
 │   ├── emr-vendor/                   # EMR 업체 관리 (StatusCodeManager — 병원 EMR 연동 정보에서 선택, 2026-08-16)
 │   ├── install-plan-status/          # 설치계획 상태 관리 (WorkflowStatusManager, 2026-07-27)
 │   ├── stock-out-status/             # 출고업무 상태 관리 (WorkflowStatusManager, 2026-09-03)
@@ -295,6 +299,11 @@ lib/
 ├── asReceiptService.ts               # AS접수↔기기현황 연동 — 시리얼 매칭·AS 표시·라인 편집 반영·라인 결과 확정(수리반환/교체/분실, 완료 자동) + createAsReceipt 등록 코어(화면·채널톡 폴링 공유, 2026-09-07)
 ├── channeltalkAsSync.ts              # 채널톡 AS접수 시트 동기화 — 'thynC VOC 현황' A/S 탭 폴링: 접수 인입(신규 행→createAsReceipt)+완료 역기입(X열)+발송정보 역기입(R 송장·V 발송일·W 발송기기, 개행 구분 — 2026-09-09), AI~AL 시스템 기입란 자동 확장 (2026-09-07)
 ├── channeltalk-as-scheduler.ts       # 채널톡 AS 폴링 스케줄러 (mail-scheduler 패턴, channeltalk_as_interval 제어 — off/1m/5m/10m, 재진입 가드)
+├── channeltalk-voc-scheduler.ts      # 채널톡 상담 원천 적재 폴링 스케줄러 (channeltalk_voc_interval — off/1m/5m/10m, 백필 미완료면 틱마다 backfill 이어감, 2026-09-28)
+├── channeltalk/                      # 채널톡 Open API 원천 적재 (voc_channeltalk_intake_design.md)
+│   ├── client.ts                     #   Open API v5 클라이언트 — 인증 헤더·since 커서·429 백오프·잔여 호출 대기·틱당 호출 상한(CallBudgetExceeded)
+│   ├── vocSync.ts                    #   runChanneltalkVocSync(incremental|backfill|manual) — 매니저→활성 전량→종료 증분(DB 최대 closedAt−24h 중단)→신규·변경 상담 메시지, rawHash 변경 감지, 병원 힌트(OpsCode→이름 매처)
+│   └── shared.ts                     #   클라이언트 안전 상수·라벨·BackfillState·데스크 딥링크
 ├── hospitalNameMatcher.ts            # 병원명 자유 표기→hospitalCode 매처 — AS 마이그 검증 별칭 매칭 lib 승격 (NFC·법인 접두·학교 축약·괄호 별칭, 유일 매칭만 확정)
 ├── audit.ts                          # 감사 로그 헬퍼 (logAudit, auditActorFromJWT, redact)
 ├── hospitalStatus.ts                 # 병원 thynC 현황상태 단방향 자동 진행 헬퍼 (advanceHospitalStatus)
@@ -820,6 +829,15 @@ prisma/
 - **기기현황 연동** (`lib/asReceiptService.ts` — 1차 범위, WMS 전표 제외): 등록 시 라인별 원장 매칭(같은 병원 ACTIVE) → `openDeviceAs`(ref `AS` — `REGISTRY_REF_TYPES` 확장·`as_ref_code` fold) / 라인 결과 확정 시 수리반환 `clearDeviceAs`·교체 `replaceDevice`(분실 접수 건은 사유 LOST)·분실 `recoverDevice(LOST)` / 미등록·이미 AS중은 경고 수집 후 스킵 / **전 라인 종결 → 헤더 '완료' 자동 + 티켓 CLOSED**. 라인 편집 시 제거 라인은 이 접수가 켠 플래그만 해제
 - 마스터 시드: `scripts/seed-as-masters.sql` (idempotent — AS_STATUS 8종+매핑('처리중' 삭제 포함)·자동생성 규칙·nav 2행). 스모크: `scripts/as-receipt-smoke.mts` (86항목 — '▶ 수리완료' [C-1]~[C-16]·[C-I6] 39항목 포함, 2026-09-17)
 
+### 채널톡 상담 원천 적재 — ChanneltalkUserChat / ChanneltalkMessage / ChanneltalkUser / ChanneltalkManager / ChanneltalkSyncRun (2026-09-28 — `projects/voc_channeltalk_intake_design.md` §3)
+- 채널톡 Open API 원문(`raw` JSONB) + 추출 컬럼. **채널톡 id가 PK**(VARCHAR 40). VOC 승격층(`voc_receipts`)은 무변경 — 다음 단계
+- **ChanneltalkUserChat** (`channeltalk_user_chats`): 상담(userChat) 1행 — `state`(opened/snoozed/closed)·`assigneeId`·`managerIds[]`·`tags[]`(GIN)·`name`·`contactMediumType`·`sourceType`·**`firstAskText`**(고객 첫 발화 — 목록·승격 제목용)·`firstAskedAt`/`openedAt`/`closedAt`/`createdAtCt`/`updatedAtCt`·`rawHash`(유의미 필드만 — updatedAt·통계 제외)·`messageCursor`(마지막 메시지 id, 참고)·`messageCount`·`messagesSyncedAt`·**병원 힌트** `hospitalCode`(FK SET NULL)·`hospitalMatchSource`(opscode/name/none)·`hospitalMatchNote` — 확정은 승격 단계
+- **ChanneltalkMessage** (`channeltalk_messages`): 메시지 1행(chat CASCADE) — `personType`(user/manager/bot)·`plainText`·`hasFiles`·`fileMeta`(메타만, 바이너리 미수집)·`createdAtCt`
+- **ChanneltalkUser** (`channeltalk_users`): 고객 최신 스냅샷 — `name`·`mobileNumber`·`landlineNumber`·`email`·**`opsCode`**(= `hospital_code`, 실측 100% 일치)·`hospitalNameRaw`·`ward`·`address`·`profile` JSONB·`tags[]`
+- **ChanneltalkManager** (`channeltalk_managers`): 담당·참여자 이름 마스터 / **ChanneltalkSyncRun** (`channeltalk_sync_runs`): 틱 로그(mode·scanned/upserted/fetchedMessages/apiCalls/rateLimited·error·stats, 30일 보관)
+- AppSetting: `channeltalk_voc_interval`(off/1m/5m/10m)·`channeltalk_voc_backfill`(JSON 커서·done)·`channeltalk_voc_max_calls`(기본 200). `.env`: `CHANNELTALK_ACCESS_KEY`/`CHANNELTALK_ACCESS_SECRET`
+- **거버넌스**: 상담 본문에 병원 직원이 적은 환자 식별정보가 부수적으로 섞일 수 있음 — 열람은 로그인 게이트 뒤에만, AI 검색 인덱스·Slack 알림으로 **재전파 금지**
+
 ### SLA 시계 엔진 (1.1 P1 — `projects/notification_v1.1_design.md` §4)
 
 - 1.0의 단일 시계(`dueAt = 생성일 + Sev별 목표일`)를 **정책 × 타깃 × 시계** 3계층으로 재설계. 티켓 1건이 metric별 여러 시계를 동시에 갖는다
@@ -1129,6 +1147,7 @@ prisma/
 - 상태 마스터 `/settings/as-status`(ADMIN). 기기현황(/devices) 수동 [AS 접수] 버튼은 보정·이력 소급용으로 유지(모달에 AS업무 등록 권장 안내). 과거 AS이력 3,537행 소급은 기능 검증 후 별도 트랙(`thync_as_migration_design.md`)
 - **CX 확인사항 반영 (2026-09-07 — `AS_OPS_확인사항.xlsx`)**: ① 회수지 필드 신설(`pickup_dest_differs`·`pickup_dest_info` — 채널톡 인입 시 발송지와 동일 자동 기재, '회수지 상이' 체크 시 별도 입력) ② 라인 처리내용(`processNote`) 입력·표시(처리 실행 시 선택 라인 공통 기록·라인 표 컬럼) ③ **수정 권한 개정 — 종결 전 USER 전원**(구 등록자 본인 한정 · 삭제는 구 규칙 유지 `canDeleteAsReceipt`) ④ 선교체 여부 상시 표시(미해당 시 '일반' 배지) ⑤ 목록 [기기] 기기별 대수(`summarizeAsItemsByKind` — 산소포화도 n·심전도 n) ⑥ 목록 필터·페이지 URL 동기화(뒤로가기 검색 결과 복원) ⑦ 발송일 기간 필터 + 라인 단위 Excel 내보내기(`/api/as-receipts/export` — 안내 메시지 발송용. **2026-09-09**: 접수 3,000건·라인 1만 행 상한 제거(라인 10만 안전장치만), 접수 헤더 입력 항목 전부 포함 — 선교체·수거방법/송장/수거일·입고일·발송지 구분/정보·회수지 상이/정보·예상출하일·상태변경일·등록자·비고 추가, 32컬럼)
 - **채널톡 자동 등록 (2026-09-07 — `projects/channeltalk_as_intake_design.md`)**: 채널톡 ALF 태스크가 기록하는 구글시트('thynC VOC 현황' A/S 탭, 채널톡 전용 중계 파일)를 **1분 폴링**(`lib/channeltalkAsSync` + 스케줄러) — 신규 행을 병원 매칭(`lib/hospitalNameMatcher`)·시리얼(괄호 병동 표기 `P013798(72W)` 제거, 2026-09-10)/증상 파싱 후 `createAsReceipt` 동일 경로로 자동 등록(등록자 '채널톡 접수봇', **기본값 2026-09-15: 수거방법 택배수거·수거일 접수일 익일 — 화면에서 수정 가능**), 결과는 시트 AI~AL열에 되쓰기(등록완료/실패 사유 — 실패 행은 보정 후 AI 비우면 재시도). **2026-09-16 개정**: ① 필수값 누락(접수일·병원·시리얼)은 행 작성 도중일 수 있어 '실패' 대신 **'대기'** 로 두고 매 틱 재시도, 최초 대기(AL) 후 24시간 지나면 '실패' ② **AJ 코드 승격** — '실패' 행에 담당자가 수동 등록 AS 코드를 AJ에 적으면 '등록완료'로 올려 역기입 대상에 포함(접수 비고에 `[채널톡 r행] 수동 등록 연결` 태그) ③ **기존 접수 연결** — 등록 직전 같은 병원·접수일에 행의 시리얼을 전부 가진 접수가 있으면 새로 만들지 않고 연결(수동 등록이 먼저 된 경우 중복 방지). 틱 로그에 `linked`·`waiting` 카운트. `runChanneltalkAsSync(testIo?)` 메모리 행 주입으로 테스트 가능. 접수 종결 시 시트 X열(완료여부)에 완료/취소 **역기입** — **2026-09-11 이벤트 기반 개정**: `sheetDoneSynced`(마지막 기입 값)와 DB 상태가 다를 때만 1회 기입(리오픈 → '미완료'), 시트 수동 변경 불간섭, 개정 전 접수는 첫 틱 기준선 채택. **발송정보 역기입(2026-09-09)**: 라인 발송(수리반환·교체) 입력 시점부터 R열(수리품 택배발송)=송장 목록·V열(발송·교체일자)=발송일 목록·W열(발송기기)=출고 시리얼(수리반환→원 시리얼, 교체→교체기) 개행 구분(중복 제거) 기입 — 시트 값과 다를 때만 갱신(부분 발송 누적). **수거 송장 역기입(2026-09-10)**: 상세 진행 기록에서 저장한 수거 송장번호(`pickupTrackingNo`)를 L열(수거 송장)에 기입 — 값이 있고 시트와 다를 때만(단방향 채움). AppSetting: `channeltalk_as_interval`(off/1m/5m/10m)·`channeltalk_as_sheet_id`·`channeltalk_as_cutover_row`(컷오버 행 — 이후 행만 처리). 셋업: `scripts/setup-channeltalk-as.mts` **2026-09-19 행 이동 가드**: DB측 2차 가드(비고 `[채널톡 rN]` 태그로 '이미 등록된 행' 판정)는 태그 접수의 병원·시리얼이 행 내용과 일치할 때만 재기입하고, 불일치면 행 삭제·삽입으로 번호가 밀린 것으로 보고 일반 등록 경로(기존 접수 연결·신규 등록)로 진행(r3800 예수병원 → AS-0304 오기입 사례) **2026-09-19 T열 회수지/발송지 분해**(`parseDestCell`): 한 셀에 '회수지: …'·'발송지: …' 라벨이 함께 적히면 발송지 구획 → `destInfo`, 회수지 구획 → `pickupDestInfo`(공백 무시 비교로 다르면 `pickupDestDiffers` 자동 체크), 라벨 없는 본문은 발송지(발송지 라벨이 있으면 비고 '발송지 메모:'로 보존), 회수지만 적힌 셀은 발송지도 같은 곳으로 간주
+- **채널톡 상담 원천 적재 (2026-09-28 — `projects/voc_channeltalk_intake_design.md`, 1단계)**: 채널톡 **Open API**로 모든 고객 상담(userChat)·메시지·고객 프로필을 원문 그대로 5테이블에 멱등 적재 — CS 업무를 VOC 도메인에서 출발시키기 위한 원천층. **VOC 레코드 승격은 다음 단계**(현 단계는 VOC 테이블 무변경). 증분 알고리즘(목록 API에 갱신시각 필터 없음): 매니저 마스터 → 활성(opened·snoozed) 전량 → 종료를 최신부터 순회하다 DB 최대 종료시각−24h 이전에서 중단 → 신규(asc 전량)·변경(desc로 저장된 메시지 id까지) 상담만 메시지 수집. 변경 감지는 상태·담당·태그·마지막 메시지 id 등 유의미 필드 해시(`updatedAt`은 종료 후에도 계속 바뀜). 백필은 종료 상담 asc 전량을 AppSetting 커서로 이어가며 틱당 호출 상한(기본 200, 레이트리밋 1,000/윈도) 도달 시 이월. 병원은 **힌트만**: `profile.OpsCode`(= hospital_code) 정확 일치 → `profile.hospital`·상담명 매처(`hospitalNameMatcher`) → 미매칭. 설정 `/settings/channeltalk-sync`(ADMIN — nav '연동·알림' 그룹, `seed-cs-masters.sql` 7) — 주기·상한·지금 실행·백필 시작/이어서/초기화·실행 로그·DB 현황), 열람 `/voc/inbox`(읽기 전용, **nav 미등록** — 요약 한 줄·필터 6종·표, 상세는 고객/담당자/봇 말풍선 타임라인 + 데스크 딥링크, 승격 버튼이 붙을 자리). 스크립트 `scripts/channeltalk-voc-backfill.mts [--dry] [--since=] [--max-calls=] [--reset] [--loop]`(부분 백필은 커서를 남기지 않음). 기존 AS 시트 폴링은 무변경 병존
 
 ### 설치계획(가안) 관리
 - 설치계획(가안) 등록·수정·삭제 (삭제는 ADMIN 이상)
@@ -1817,6 +1836,11 @@ npm run dev
 | GET | `/api/voc-masters/channels` | VOC 접수 채널(VOC_CHANNEL) 조회 |
 | GET/POST, PUT/DELETE | `/api/settings/voc-status(/[id])` | VOC 워크플로 상태 (+티켓 상태 매핑 필수, 사용 중 삭제 409) |
 | GET/POST, PUT/DELETE | `/api/settings/voc-type(/[id])` | VOC 분류 마스터 (자동생성 규칙 조건 축, 사용 중 삭제 409) |
+| GET | `/api/channeltalk/chats` | 채널톡 상담 원본 목록(`?state=active|opened|snoozed|closed&from=&to=(firstAskedAt KST)&tag=&hospital=&match=opscode|name|none&q=(첫 질문·고객·병원)&page=&pageSize=`) + 태그 집계·요약(활성·오늘 인입·마지막 동기화) — 로그인 사용자 (2026-09-28) |
+| GET | `/api/channeltalk/chats/[id]` | 상담 상세(고객·병원 힌트·메시지 타임라인 asc·매니저 이름 맵, raw 제외) |
+| GET/PUT | `/api/settings/channeltalk-sync` | 채널톡 적재 설정 — 주기·활성 주기·호출 상한·키 설정 여부·백필 상태·최근 실행 10건·DB 현황 / 저장 시 스케줄러 재시작 (ADMIN) |
+| POST | `/api/settings/channeltalk-sync/run` | 즉시 실행 `{mode:'incremental'|'backfill'}` — 진행 중 409, 키 미설정 400, 결과 요약 반환 (ADMIN) |
+| POST | `/api/settings/channeltalk-sync/backfill-reset` | 백필 커서 초기화(데이터 유지) (ADMIN) |
 
 ※ `/api/maintenances` POST는 `parentTicketId` 옵션 수용 (P3 — 생성 티켓을 마스터의 하위로 연결, 2레벨·CLOSED 검증). `/api/tickets/[id]` GET/PUT 응답에 `linkedWork`(어댑터 조립 배너 데이터) 포함. `/api/tickets` GET은 `sort`(code/severity/type/title/status/queue/owner/hospital/created/changed)+`order` 컬럼 정렬 지원 (2026-08-15)
 

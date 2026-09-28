@@ -88,3 +88,8 @@ ON CONFLICT (menu_key) DO NOTHING;
 -- 확인
 SELECT category, count(*) FROM status_codes WHERE category IN ('VOC_CHANNEL','VOC_TYPE','VOC_STATUS') GROUP BY category ORDER BY category;
 SELECT r.ref_type, c.name AS cti_item, q.name AS queue FROM ticket_domain_cti_rules r JOIN ticket_cti c ON r.cti_id = c.id LEFT JOIN ticket_queues q ON r.queue_id = q.id WHERE r.ref_type = 'VOC';
+
+-- 7) 2026-09-28 채널톡 상담 원천 적재 — 설정 nav (연동·알림 그룹, 메일 동기화 옆). 열람 /voc/inbox는 사용자 지시로 nav 미등록
+INSERT INTO nav_menu_items (menu_key, label, href, parent_key, sort_order, group_label, allowed_roles) VALUES
+  ('settings/channeltalk-sync', '채널톡 상담 적재', '/settings/channeltalk-sync', 'settings', 103, '연동·알림', '{SUPER_ADMIN,ADMIN}')
+ON CONFLICT (menu_key) DO NOTHING;

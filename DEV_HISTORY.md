@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-09-28 15:10 | 채널톡 상담 원천 적재 1단계 — Open API 폴링·5테이블·설정/열람 화면 (dev2 빌드·재시작, PROD 미반영)
+
+- **배경(사용자 요청)**: CS 업무를 VOC 도메인에서 출발시키기 위해 채널톡 인입 상담을 시스템에 연동. "원천 적재 먼저, VOC 레코드 승격은 다음 단계" 합의 → 설계 `projects/voc_channeltalk_intake_design.md` 작성 → 추천안 §8 A~H 전건 승인 → 단계별 확인하며 진행(probe → 마이그 → 수집 모듈 → 백필·소량 적재 → 설정·열람 화면)
+- **probe 실측(§9)**: 활성 19·종료 3,038건(7월~ 월 800~1,300), 레이트리밋 1,000/윈도, **`user.profile.OpsCode` = hospital_code(276/276 일치)**, 상담 `tags`는 값 있을 때만 키 존재, 목록 응답 `messages`는 상담당 마지막 1건(첫 질문은 `/messages` 필요), 파일은 저장소 키만(URL 없음). 상담 본문에 환자 식별정보가 부수 포함되는 사례 확인 → 재전파 금지 원칙 문서화
+- **DB(규칙 1)**: 마이그 `20260928150000_channeltalk_raw_intake` — `channeltalk_users`·`channeltalk_managers`·`channeltalk_user_chats`(hospitals FK SET NULL, tags GIN)·`channeltalk_messages`(chat CASCADE)·`channeltalk_sync_runs`. 채널톡 id PK, raw JSONB + 추출 컬럼. `VocReceipt` 무변경. psql 적용 → `migrate resolve --applied` → `prisma generate`, 드리프트 검사 컬럼 차이 0
+- **수집**: `lib/channeltalk/client.ts`(인증·커서·429 백오프 3회·잔여<10 대기·틱당 상한 `CallBudgetExceeded`) · `lib/channeltalk/vocSync.ts`(`runChanneltalkVocSync` — 매니저→활성 전량→종료 증분(DB max closedAt−24h 중단)→신규 asc 전량/변경 desc 기지 id까지 메시지, rawHash는 유의미 필드만, 병원 힌트 OpsCode→이름 매처, 백필 커서 AppSetting `channeltalk_voc_backfill`, 실행 로그 30일 보관) · `lib/channeltalk-voc-scheduler.ts`(백필 미완료면 틱마다 backfill) · `instrumentation.ts` 등록(기본 off) · `lib/channeltalk/shared.ts`
+- **설계 대비 조정**: 메시지 증분은 커서 대신 "desc로 저장된 id까지"(채널톡이 마지막 페이지에 커서를 주지 않음) · 변경 감지 해시에서 `updatedAt`·통계 제외 · `channeltalk_managers` 신설 · 부분 백필(`--since`)은 완료 상태를 남기지 않음(finally에서 커서 초기화)
+- **화면·API**: `/settings/channeltalk-sync`(ADMIN — **nav '연동·알림' 그룹 103, 사용자 지적 후 추가**·`seed-cs-masters.sql` 7) + `GET/PUT /api/settings/channeltalk-sync`·`POST …/run`·`POST …/backfill-reset` / `/voc/inbox`·`/voc/inbox/[id]`(로그인, **nav 미등록 — 사용자 지시**) + `GET /api/channeltalk/chats(/[id])`. 승격 액션 없음
+- **dev2 적재**: `scripts/channeltalk-voc-backfill.mts --since=2026-09-21` → 활성 20·종료 171·메시지 4,5xx·고객 735·매니저 15. 병원 힌트 OpsCode 128·이름 6·미매칭 57(프로필 병원 필드가 사람 이름·닉네임 — 정상). 첫 질문 없는 37건은 고객 발화 자체가 없는 상담. 멱등: 재실행 시 변경분만(증분 틱 API 5회·1초). 전체 이력 백필은 미실행(커서 초기 상태)
+- **검증(dev2, 4GB 빌드·`pm2 restart thync-dev`·health 200)**: tsc 0·eslint 0. curl — 비로그인 307, VIEWER 설정 403/목록·상세 허용, PUT interval 잘못 400·maxCalls 5 400, [지금 실행] 결과 반환, 필터 5종(match·tag·q 한글 인코딩·기간·페이지), 상세 raw 제외·404, 페이지 3종 200. 중간 결함: 스크립트 상한 미지정 시 서버 기본 200 적용 → 무제한으로 수정
+- **후속(다음 단계 — 별도 설계)**: VOC 승격 규칙·`VocReceipt.channeltalkChatId`·VOC_CHANNEL '채널톡' 시드·열람 화면 [VOC 생성]·AS접수 연결. PROD 반영 시 `.env` 키 2줄 + 마이그 + 전체 백필(스크립트 `--loop` 권장)
+- 영향: prisma/{schema.prisma,migrations/20260928150000_channeltalk_raw_intake/}, lib/channeltalk/{client,vocSync,shared}.ts(신규), lib/channeltalk-voc-scheduler.ts(신규), instrumentation.ts, app/api/settings/channeltalk-sync/{route.ts,run/route.ts,backfill-reset/route.ts}(신규), app/api/channeltalk/chats/{route.ts,[id]/route.ts}(신규), app/settings/channeltalk-sync/page.tsx(신규), app/voc/inbox/{page.tsx,[id]/page.tsx}(신규), scripts/channeltalk-voc-backfill.mts(신규), projects/{voc_channeltalk_intake_design.md(신규),README.md}, README.md
+
+---
+
 ## 2026-09-28 12:55 | PROD 배포: AS 수리대기 큐 (f1d6d1d)
 
 - **dev2**: 커밋 f1d6d1d(수리대기 큐 — 12:00 항목)·push. `scripts/tmp-*.mts` 임시 스크립트는 커밋 제외
