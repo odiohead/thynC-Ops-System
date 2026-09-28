@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-09-28 10:00 | AS업무 — 수리대기 큐(AS담당자용 기기 단위 화면) `/as-receipts/queue` (dev2 빌드·재시작, PROD 배포 대기)
+
+- **배경(사용자 요청)**: 수리담당자가 "센터에 들어와 수리해야 할 기기"·"곧 들어올 기기"를 접수(병원) 단위 목록에서 보기 어려움 → 설계 `projects/as_repair_queue_design.md` 작성 → 추천안 전건 승인("추천안대로 진행") → 구현. **스키마 변경 없음**(기존 3축 intake_state × outcome × repaired_at 판정)
+- **공용**: `lib/asReceiptQueue.ts`(신규) — 상세 라우트의 `detailInclude`·`shapeDetailItems`를 이곳으로 이동(Next 14 route.ts는 메서드 외 export 불가)해 상세·큐가 같은 라인 select 사용, `asQueueBucketWhere`(수리 대기 = RECEIVED ∧ repaired_at NULL ∧ outcome NULL|REPLACE, 접수 종결 무관 / 입고 예정 = PENDING|MISMATCH ∧ outcome NULL ∧ 접수 미종결 ∧ 분실·수거없음 제외)·`asQueueOrderBy`·`asDeviceGroupWhere`(목록 `?group=` 필터 조각을 추출해 공용). `lib/asReceiptShared.ts` — 버킷 상수·라벨·설명, 기기군 코드(`AS_DEVICE_GROUP_TO_CODE` — 목록 표기 코드 'SpO2'와 별개로 대문자 키), `AS_QUEUE_QS_KEY`·`AS_BACK_KEY`(상세 [← 목록]이 마지막 화면 list/queue로 복귀 — `asListHref` 개정, `asQueueHref` 신설), `AS_QUEUE_BULK_MAX`
+- **API**: `GET /api/as-receipts/queue`(bucket·group·hospital·priority·page — counts는 버킷별 최소 select 전량을 JS `asDeviceGroupOf`로 접어 클라이언트 판정과 동일 보장) · `POST /api/as-receipts/queue/repair-done`(itemIds ≤100, 라인별 `setAsLineRepaired` 개별 tx, skipped 사유 보고, 감사 라벨 단건과 동일 '수리완료')
+- **화면**: `app/as-receipts/queue/page.tsx` — 버킷 카드 2개(기기군 3종 건수 상시)·기기군 세그먼트·병원 검색·우선수리만·표(수리 대기: 체크박스·시리얼+기기상태/미등록 배지·접수번호 링크·병원·입고일·경과·접수사유(+처리내용)·태그·처리방법(확정 배지 / 초안 셀렉트 수리반환·교체+발송기기 입력)·[수리완료] 체크·[폐기] / 입고 예정: 접수일·경과·상태·수거(방법·수거일·송장)·입고대조 배지 — 읽기 전용)·선택 바 [수리완료 n대 적용]·Pager. `_components/AsTabs.tsx`(신규) 탭 스트립을 접수 목록·큐 양쪽 헤더 아래 삽입, 목록 effect는 `AS_BACK_KEY='list'` 기록
+- **검증(dev2, 4GB 빌드·`pm2 restart thync-dev`·health 200)**: tsc 0·eslint 0. curl — counts(수리 대기 SpO2 4 / 입고 예정 ECG 230·SpO2 762·ETC 1)가 §3 SQL 직접 집계(993)와 일치, 병원 부분일치(하남 → 7건 단일 병원), ETC·우선수리 0건, itemIds 없음·101건 400, 없는 id skipped, 초안 REPLACE+발송기기 저장→응답 반영→해제, 일괄 수리완료 2건(미등록 라인 경고) → 재실행 2건 '이미 수리완료' skipped(멱등) → 단건 해제로 원복(수리완료·해제 감사 4행), `/as-receipts`·`/as-receipts/queue` 200. 테스트 라인 3건 원상복구(13328 기기 condition은 해제 경로의 기존 규칙대로 NULL→AS접수)
+- **중간 결함 수정**: 건수 집계가 목록 표기 코드 `SpO2`를 키로 써 SPO2가 0으로 나옴 → `AS_DEVICE_GROUP_TO_CODE` 도입 / 일괄 경고에 시리얼 접두 중복 → 서비스 경고 그대로 전달
+- **미실측**: PROD 건수(dev2 세션에 PROD ssh 키 없음) — 배포 시 확인
+- 영향: lib/{asReceiptQueue.ts(신규),asReceiptShared.ts}, app/api/as-receipts/{route.ts,[id]/route.ts,queue/route.ts(신규),queue/repair-done/route.ts(신규)}, app/as-receipts/{page.tsx,queue/page.tsx(신규),_components/AsTabs.tsx(신규)}, projects/{as_repair_queue_design.md(신규),README.md}, README.md
+
+---
+
 ## 2026-09-22 09:20 | PROD 배포: AS업무 — 취소 접수 '취소' 배지·상태 일괄변경·[← 목록] 복귀 (d62ecc9)
 
 - **dev2**: 미커밋 AS업무 건(2026-09-21 10:30 항목) 커밋 d62ecc9·push. `scripts/tmp-*.mts` 임시 스크립트 11개는 커밋 제외

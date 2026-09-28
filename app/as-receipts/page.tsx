@@ -10,7 +10,8 @@ import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
 import Pager from '@/app/components/ui/Pager'
 import DateRangeFilter from '@/app/components/ui/DateRangeFilter'
 import AsReceiptFormModal from './_components/AsReceiptFormModal'
-import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsTag, AS_SEARCH_FIELDS, AS_SEARCH_FIELD_LABELS, AS_SEARCH_FIELD_PLACEHOLDER, parseAsSearchField, type AsSearchField, isAsCanceledStatus, AS_LIST_QS_KEY, AS_BULK_STATUS_MAX } from '@/lib/asReceiptShared'
+import AsTabs from './_components/AsTabs' // 접수 목록 ↔ 수리대기 탭 (2026-09-28)
+import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsTag, AS_SEARCH_FIELDS, AS_SEARCH_FIELD_LABELS, AS_SEARCH_FIELD_PLACEHOLDER, parseAsSearchField, type AsSearchField, isAsCanceledStatus, AS_LIST_QS_KEY, AS_BACK_KEY, AS_BULK_STATUS_MAX } from '@/lib/asReceiptShared'
 
 interface CodeRef { id: number; name: string; color: string | null }
 /** 정렬 가능 컬럼 (2026-09-16) — 서버 정렬(`?sort=&dir=`). 계산 컬럼(기기상태·기기·유형·송장·태그)은 정렬 없음 */
@@ -284,7 +285,7 @@ function AsReceiptListInner() {
     if (page > 1) params.set('page', String(page))
     const qs = params.toString()
     window.history.replaceState(null, '', qs ? `/as-receipts?${qs}` : '/as-receipts')
-    try { window.sessionStorage.setItem(AS_LIST_QS_KEY, qs) } catch { /* 저장 불가 환경 — 상세 [목록]은 필터 없이 복귀 */ }
+    try { window.sessionStorage.setItem(AS_LIST_QS_KEY, qs); window.sessionStorage.setItem(AS_BACK_KEY, 'list') } catch { /* 저장 불가 환경 — 상세 [목록]은 필터 없이 복귀 */ }
   }, [buildFilterParams, page, sort])
 
   const load = useCallback(async () => {
@@ -349,7 +350,7 @@ function AsReceiptListInner() {
 
   return (
     <div className="mx-auto max-w-screen-2xl px-4 py-6 sm:px-6">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-xl font-bold text-gray-900">AS업무</h1>
           <p className="mt-0.5 text-sm text-gray-500">
@@ -365,6 +366,7 @@ function AsReceiptListInner() {
           )}
         </div>
       </div>
+      <AsTabs />
 
       {notice && notice.length > 0 && (
         <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">

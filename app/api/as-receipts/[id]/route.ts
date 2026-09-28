@@ -9,6 +9,7 @@ import { AS_PICKUP_METHODS, AS_CATEGORIES, AS_DEST_TYPES, classifyAsRegistryLine
 import { findOpenLinesBySerial, duplicatesForReceipt, syncCombinedPackByTracking } from '@/lib/asReceiptSearch'
 import { applyItemChanges, setUnitInUse, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { syncAsReceiptToTicket } from '@/lib/ticket-domains/asReceipt'
+import { asDetailInclude, shapeAsDetailItems } from '@/lib/asReceiptQueue' // 상세 include·라인 정형화 — 수리대기 큐와 공용 (2026-09-28)
 import { toRegistryErrorResponse } from '@/lib/deviceRegistry'
 import { todayKst } from '@/lib/deviceRegistryShared'
 import { notifyTicketChanged } from '@/lib/notify'
@@ -23,46 +24,8 @@ type Params = { params: { id: string } }
  * 수정·삭제 권한: ADMIN 이상 항상 / USER는 본인 등록 + 종결(완료·취소) 전 (§13-1)
  */
 
-const detailInclude = {
-  hospital: { select: { hospitalCode: true, hospitalName: true } },
-  status: { select: { id: true, name: true, color: true, ticketStatus: true } },
-  createdBy: { select: { id: true, name: true } },
-  ticket: { select: { id: true, ticketCode: true, status: true, owner: { select: { id: true, name: true } } } },
-  items: {
-    select: {
-      id: true, serialNo: true, deviceId: true, newDeviceId: true, deviceKind: true, wardName: true,
-      symptom: true, processNote: true, outcome: true, newSerialNo: true, draftOutcome: true, draftNewSerialNo: true, // 초안 (2026-09-14)
-      shipMethod: true, shipTrackingNo: true, shippedAt: true,
-      intakeState: true, receivedAt: true, receiptSerialNo: true, intakeSource: true, // 입고 대조 (2026-09-11)
-      repairedAt: true, repairedBy: { select: { id: true, name: true } }, // 수리완료 체크 (2026-09-17 — 제3축)
-      device: {
-        select: {
-          id: true,
-          condition: true, locationHospitalCode: true, locationSite: { select: { value: true } }, locationHospital: { select: { hospitalName: true } }, // 기기 상태·위치 축 (2026-09-17) → 응답 `device.unit`으로 정형화
-          deviceInfo: { select: { deviceName: true } },
-          placement: { select: { status: true, hospitalCode: true, asStartedOn: true, asRefCode: true, ward: { select: { name: true } } } },
-        },
-      },
-      newDevice: { select: { id: true, serialNo: true } },
-    },
-    orderBy: { id: 'asc' as const },
-  },
-} as const
-
-type DetailReceipt = NonNullable<Prisma.Result<typeof prisma.asReceipt, { include: typeof detailInclude }, 'findUnique'>>
-
-/**
- * 상세 응답 라인 정형화 (2026-09-17) — `device.unit { condition, locationSiteValue, locationHospitalCode, locationHospitalName }`(설계 §7.1 계약 + 병원명 표시용).
- * 유닛 형상 체인(§5.1)에 맞춰 select에서 빠지면 UI가 조용히 '미확인'으로 보이므로 이 한 곳에서 조립한다.
- */
-function shapeDetailItems(items: DetailReceipt['items']) {
-  return items.map((i) => ({
-    ...i,
-    device: i.device
-      ? { ...i.device, unit: { condition: i.device.condition, locationSiteValue: i.device.locationSite?.value ?? null, locationHospitalCode: i.device.locationHospitalCode, locationHospitalName: i.device.locationHospital?.hospitalName ?? null } }
-      : i.device,
-  }))
-}
+const detailInclude = asDetailInclude
+const shapeDetailItems = shapeAsDetailItems
 
 export async function GET(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)

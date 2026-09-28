@@ -12,6 +12,7 @@
 
 | 문서 | 대상 | 상태 |
 |---|---|---|
+| [as_repair_queue_design.md](as_repair_queue_design.md) | AS 수리대기 큐 — AS담당자용 기기 단위 화면(`/as-receipts/queue`): 수리 대기·입고 예정 2버킷 × 심전계/산소포화도, 수리완료·처리방법 초안·폐기(기존 API 재사용), 스키마 변경 없음 | **구현 완료 (dev2, 2026-09-28) — 화면 검토·PROD 배포 대기** |
 | [weekly_attachments_design.md](weekly_attachments_design.md) | 주간업무 첨부파일 — 목표일 셀 클립 트리거(+첨부/📎n) · Modal 레이어 다중 업로드 · `weekly_item_files` · 항목 소속 검증 302 다운로드 | **PROD 배포 완료 (2026-09-19, 97342ce)** |
 | [hira_detail_sync_v2_design.md](hira_detail_sync_v2_design.md) | 심평원 병원상세정보연동 v2 — 의원급 확장·진료과목/전문의수 항목·일일 한도(9,000콜) 분할 자동 실행·요청 상세 진행 현황 | **구현 완료 (dev2, 2026-09-14) — 빌드·PROD 배포 대기** |
 | [notification_v1.1_design.md](notification_v1.1_design.md) · [HTML](notification_v1.1_design.html) | 1.1 알림체계 개선 (SLA 세분화·채널 라우팅·내부 알림·첫 화면 개인화) | **P1~P6 구현 완료 / P7 지표·PROD 배포 대기** |

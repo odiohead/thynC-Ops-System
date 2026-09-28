@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { AS_CATEGORIES, AS_TAGS, AS_TAG_FIELDS, parseSerialTextarea, summarizeAsRegistryTags, isAsIntakeIssue, type AsTag, parseAsSearchField } from '@/lib/asReceiptShared'
+import { asDeviceGroupWhere } from '@/lib/asReceiptQueue'
 import { buildAsReceiptSearchOr, findOpenLinesBySerial, duplicatesForReceipt, syncCombinedPackByTracking } from '@/lib/asReceiptSearch'
 import { createAsReceipt, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { toRegistryErrorResponse } from '@/lib/deviceRegistry'
@@ -95,17 +96,9 @@ export async function GET(request: NextRequest) {
   // 기기군 필터 (2026-09-11) — ?group=ECG|SPO2 (둘 다면 미지정). 원장 모델명 → 미등록 기기종류 → 시리얼 접두(A 심전계 / P 산소포화도)
   const group = sp.get('group')
   if (group === 'ECG' || group === 'SPO2') {
-    const [nameKey, kindKey, prefix] = group === 'ECG' ? ['심전', '심전', 'A'] : ['산소', '산소', 'P']
     where.items = {
       ...(where.items as object | undefined),
-      some: {
-        ...((where.items as { some?: object } | undefined)?.some ?? {}),
-        OR: [
-          { device: { deviceInfo: { deviceName: { contains: nameKey } } } },
-          { deviceId: null, deviceKind: { contains: kindKey } },
-          { deviceId: null, deviceKind: null, serialNo: { startsWith: prefix } },
-        ],
-      },
+      some: { ...((where.items as { some?: object } | undefined)?.some ?? {}), ...asDeviceGroupWhere(group) }, // 수리대기 큐와 같은 판정 (2026-09-28 공용화)
     }
   }
 

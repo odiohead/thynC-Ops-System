@@ -302,16 +302,50 @@ export function asReceiptDeviceStateLabel(hasOpenLines: boolean, tags: AsRegistr
 
 /** 목록 마지막 조회 쿼리스트링 보관 키 — 상세 [목록] 복귀 시 필터·페이지 복원 (2026-09-21, 프로젝트 목록 sessionStorage 선례) */
 export const AS_LIST_QS_KEY = 'as_receipts_list_qs'
-/** 상세 → 목록 복귀 경로 (클라이언트 전용 — 저장된 필터가 있으면 그대로) */
-export function asListHref(): string {
-  if (typeof window === 'undefined') return '/as-receipts'
-  try {
-    const qs = window.sessionStorage.getItem(AS_LIST_QS_KEY)
-    return qs ? `/as-receipts?${qs}` : '/as-receipts'
-  } catch {
-    return '/as-receipts'
-  }
+/** 수리대기 큐 마지막 조회 쿼리스트링 보관 키 (2026-09-28 — as_repair_queue_design.md §4.1) */
+export const AS_QUEUE_QS_KEY = 'as_receipts_queue_qs'
+/** 상세 [← 목록]이 돌아갈 화면 — 마지막으로 머문 쪽('list' 접수 목록 / 'queue' 수리대기). 각 페이지의 URL 동기화 effect가 기록 */
+export const AS_BACK_KEY = 'as_receipts_back'
+export type AsBackTarget = 'list' | 'queue'
+function readAsQs(key: string): string | null {
+  if (typeof window === 'undefined') return null
+  try { return window.sessionStorage.getItem(key) } catch { return null }
 }
+/** 상세 → 목록 복귀 경로 (클라이언트 전용 — 저장된 필터가 있으면 그대로). 마지막 화면이 수리대기 큐면 큐로 (2026-09-28) */
+export function asListHref(): string {
+  if (readAsQs(AS_BACK_KEY) === 'queue') return asQueueHref()
+  const qs = readAsQs(AS_LIST_QS_KEY)
+  return qs ? `/as-receipts?${qs}` : '/as-receipts'
+}
+/** 수리대기 큐 복귀 경로 (클라이언트 전용) */
+export function asQueueHref(): string {
+  const qs = readAsQs(AS_QUEUE_QS_KEY)
+  return qs ? `/as-receipts/queue?${qs}` : '/as-receipts/queue'
+}
+
+// ─── 수리대기 큐 (2026-09-28 — as_repair_queue_design.md §3) ──────────────
+// 라인 1행 = 기기 1대. 기존 3축(intake_state × outcome × repaired_at)만으로 판정 — 새 컬럼 없음. 서버 where는 lib/asReceiptQueue.ts
+export const AS_QUEUE_BUCKETS = ['WAITING', 'INCOMING'] as const
+export type AsQueueBucket = (typeof AS_QUEUE_BUCKETS)[number]
+export const AS_QUEUE_BUCKET_LABELS: Record<AsQueueBucket, string> = { WAITING: '수리 대기', INCOMING: '입고 예정' }
+export const AS_QUEUE_BUCKET_DESC: Record<AsQueueBucket, string> = {
+  WAITING: '정상입고됐고 수리완료 체크 전인 기기 (결과 없음 또는 교체 확정된 선교체 구기기 — 접수 종결 여부 무관)',
+  INCOMING: '접수됐고 아직 입고되지 않은 기기 (입고 대기·미입고, 접수 미종결, 분실·수거없음 접수 제외)',
+}
+export function parseAsQueueBucket(v: string | null | undefined): AsQueueBucket {
+  return (AS_QUEUE_BUCKETS as readonly string[]).includes(v ?? '') ? (v as AsQueueBucket) : 'WAITING'
+}
+/** 기기군 코드 (목록 ?group= 과 동일 — ECG 심전계 / SPO2 산소포화도 / ETC 기타) */
+export const AS_DEVICE_GROUP_CODE_LIST = ['ECG', 'SPO2', 'ETC'] as const
+export type AsDeviceGroupCode = (typeof AS_DEVICE_GROUP_CODE_LIST)[number]
+export const AS_DEVICE_GROUP_CODE_LABELS: Record<AsDeviceGroupCode, AsDeviceGroup> = { ECG: '심전계', SPO2: '산소포화도', ETC: '기타' }
+/** 기기군 → 큐 코드 (목록 표기 코드 `AS_DEVICE_GROUP_CODES`는 'SpO2' 대소문자 표기라 별도 — 쿼리 파라미터·counts 키는 대문자) */
+export const AS_DEVICE_GROUP_TO_CODE: Record<AsDeviceGroup, AsDeviceGroupCode> = { 심전계: 'ECG', 산소포화도: 'SPO2', 기타: 'ETC' }
+export function parseAsDeviceGroupCode(v: string | null | undefined): AsDeviceGroupCode {
+  return (AS_DEVICE_GROUP_CODE_LIST as readonly string[]).includes(v ?? '') ? (v as AsDeviceGroupCode) : 'ECG'
+}
+/** 큐 일괄 수리완료 요청 상한 */
+export const AS_QUEUE_BULK_MAX = 100
 
 /** 일괄 상태변경 요청 상한 (2026-09-21) */
 export const AS_BULK_STATUS_MAX = 100
