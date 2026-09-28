@@ -1,6 +1,6 @@
 # 채널톡 상담 원천 적재 (voc-channeltalk-intake) — 설계안
 
-> **상태: 1단계(원천 적재) 구현 완료 (dev2 2026-09-28 — 빌드·재시작, PROD 미반영)** — 추천안 §8 A~H 전건 승인. 열람 화면은 사용자 지시로 **nav 미등록(URL `/voc/inbox` 직접 진입)**. 전체 이력 백필은 미실행(PROD 반영 시 수행). §13 구현 노트
+> **상태: 1단계(원천 적재) 완료 — PROD 배포·전체 백필·5분 폴링 ON (2026-09-28, caf6390)** — 추천안 §8 A~H 전건 승인. 열람 화면은 사용자 지시로 **nav 미등록(URL `/voc/inbox` 직접 진입)**. 전체 이력 백필은 미실행(PROD 반영 시 수행). §13 구현 노트
 > 상위 문서: `cs_ticket_workflow_design.md`(VOC접수 도메인 본체), 선례: `channeltalk_as_intake_design.md`(채널톡 AS 시트 폴링)
 >
 > 채널톡(Channel Talk)에 인입되는 **모든 고객 상담(userChat)을 Open API로 수집해 원본 그대로 적재**한다. 이 문서의 범위는 **원천 적재층까지**이며, 적재된 상담을 `voc_receipts`(VOC 레코드)로 승격하는 규칙·화면은 **다음 단계 문서**로 분리한다(사용자 결정 2026-09-28).
@@ -272,3 +272,4 @@ nav: `voc/inbox`('채널톡 상담', parent `voc` 또는 운영현황 하위 —
 - **설계 대비 변경**: ① 메시지 증분은 `message_cursor` 대신 desc 순회로 저장된 id를 만나면 중단(채널톡이 마지막 페이지에 `next`를 주지 않음 — 컬럼은 마지막 메시지 id 참고용) ② `raw_hash`는 유의미 필드만(state·assignee·managerIds·tags·name·description·userId·시각 3종·마지막 메시지 id 3종) — `updatedAt`은 종료 후에도 통계 갱신으로 계속 바뀜 ③ `channeltalk_managers` 신설(§9) ④ 병원 힌트 ④(첫 질문 본문 패턴)는 미구현 — OpsCode 커버리지가 높아 불필요 ⑤ 부분 백필(`--since`)은 커서를 남기지 않음(전체 백필 미완료 상태 유지) ⑥ 스크립트는 호출 상한 무제한, 서버 틱은 AppSetting 기본 200
 - **nav**: `/voc/inbox`는 사용자 지시로 미등록. `/settings/channeltalk-sync`는 설정 > 연동·알림 그룹(sort 103, ADMIN 이상)에 등록(`seed-cs-masters.sql` 7 — 사용자 지적 2026-09-28)
 - **PROD 반영 절차(예정)**: `.env` 키 2줄 → git pull → 마이그 psql 적용·resolve → generate → 빌드·재시작 → `scripts/channeltalk-voc-backfill.mts --dry` → `--loop` 전체 백필(≈3,100 호출, 수 분) → 설정 화면에서 주기 5m
+- **백필 결함(2026-09-28 PROD)**: 고아 `userId`(삭제·병합 고객 — 목록 응답 `users` 미포함) → `ensureUser` 단건 보충·NULL / 메시지 본문 NUL(0x00) → `deepStripNul`. PROD 실측: 종료 3,044·활성 19·메시지 68,108, 3분 46초·3,076 호출·429 0

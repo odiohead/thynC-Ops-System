@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-09-28 15:40 | PROD 백필 완료·5분 폴링 ON — 백필 결함 2건 수정 (caf6390)
+
+- **PROD 첫 백필 실패 → 결함 2건(dev2 전체 백필로 재현·수정)**: ① 오래된 상담의 `userId`가 목록 응답 `users`에 없어(삭제·병합 고객) FK 위반 → `ensureUser`: DB에 없으면 `GET /users/{id}` 단건 보충, 그래도 없으면(422 notFound) `user_id` NULL + 로그 ② 메시지 본문에 NUL(0x00) → PostgreSQL TEXT·JSONB 거부(22021) → `stripNul`/`deepStripNul`을 추출 문자열·raw JSON 전체에 적용. 커밋 caf6390·push
+- **dev2 전체 백필(검증)**: 종료 3,044·활성 17, 메시지 68,039, 3분 15초, 429 0회. 병원 힌트 OpsCode 1,790·이름 484·미매칭 787, user_id NULL 1
+- **PROD(사용자 "백필 돌리고 5분으로 켜줘")**: `git pull`(996913a→caf6390) → 빌드·재시작 → `channeltalk-voc-backfill.mts --reset --loop`(3분 46초, 호출 3,076, 429 0, 고객 1건 422 notFound → NULL) → 종료 3,044·활성 19·메시지 68,108·고객 737 → AppSetting `channeltalk_voc_interval=5m` → 재시작 → 기동 로그 "스케줄러 시작: 5m 간격", health 200. 병원 힌트 OpsCode 1,798·이름 477·미매칭 788
+- 영향: lib/channeltalk/vocSync.ts, PROD DB(channeltalk_* 적재·app_settings 1행), DEV_HISTORY.md
+
+---
+
 ## 2026-09-28 15:15 | PROD 배포: 채널톡 상담 원천 적재 1단계 (996913a) — 마이그·nav·.env 키 적용, 백필은 미실행
 
 - **dev2**: 사용자 지적("설정은 네비게이션 메뉴에 있어야지") → `settings/channeltalk-sync` nav 행(연동·알림 그룹 103, ADMIN 이상) dev2 DB 삽입 + `seed-cs-masters.sql` 7) 추가 → 커밋 996913a·push. `scripts/tmp-*.mts`는 커밋 제외
