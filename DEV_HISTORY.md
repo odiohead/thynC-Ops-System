@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-09-28 15:15 | PROD 배포: 채널톡 상담 원천 적재 1단계 (996913a) — 마이그·nav·.env 키 적용, 백필은 미실행
+
+- **dev2**: 사용자 지적("설정은 네비게이션 메뉴에 있어야지") → `settings/channeltalk-sync` nav 행(연동·알림 그룹 103, ADMIN 이상) dev2 DB 삽입 + `seed-cs-masters.sql` 7) 추가 → 커밋 996913a·push. `scripts/tmp-*.mts`는 커밋 제외
+- **PROD(사용자 "PROD에 반영하고 알려줘")**: `.env`에 `CHANNELTALK_ACCESS_KEY`/`SECRET` 2줄 추가(규칙 6 예외) → `git pull`(f1d6d1d→996913a, package.json·협업 서버 변경 없음) → 마이그 `20260928150000_channeltalk_raw_intake` psql 단일 tx(lock_timeout 5s, CREATE 14) → `migrate resolve --applied` → `prisma generate` → nav 시드 INSERT 1 → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` → health 200 · 신규 4라우트 307(비로그인 정상) · 스케줄러 OFF 기동 로그. 에러 로그의 `_error.js` 미존재는 빌드 중 구 번들 요청(재시작 전), Slack `invalid_blocks`는 배포 전부터 2,762건 누적된 기존 현상(본 배포 무관)
+- **PROD 백필 dry-run(채널톡 읽기만)**: closed 3,044 · opened 17 · 예상 호출 ≈ 3,072. **전체 백필·스케줄러 ON은 사용자 확인 후 실행**(PROD DML — 규칙 5)
+- 영향: PROD 소스(996913a)·PROD DB(channeltalk_* 5테이블 신규·nav 1행)·PROD .env, scripts/seed-cs-masters.sql, README.md, DEV_HISTORY.md
+
+---
+
 ## 2026-09-28 15:10 | 채널톡 상담 원천 적재 1단계 — Open API 폴링·5테이블·설정/열람 화면 (dev2 빌드·재시작, PROD 미반영)
 
 - **배경(사용자 요청)**: CS 업무를 VOC 도메인에서 출발시키기 위해 채널톡 인입 상담을 시스템에 연동. "원천 적재 먼저, VOC 레코드 승격은 다음 단계" 합의 → 설계 `projects/voc_channeltalk_intake_design.md` 작성 → 추천안 §8 A~H 전건 승인 → 단계별 확인하며 진행(probe → 마이그 → 수집 모듈 → 백필·소량 적재 → 설정·열람 화면)
