@@ -101,11 +101,22 @@ export interface PromoteResult { created: number; followups: number; resolved: n
  * 상담 1건 승격 (자동·수동 공용). 수동(actorId 지정)은 컷오버·태그 조건을 건너뛴다(사용자 판단).
  * 반환: 생성/연결된 vocId
  */
-export async function promoteChat(chatId: string, opts: { actorId?: string; manual?: boolean } = {}): Promise<{ vocId: number; vocCode: string; reason: 'AUTO_TAG' | 'AUTO_FOLLOWUP' | 'MANUAL' }> {
+export interface PromoteChatOptions {
+  actorId?: string
+  /** 수동 승격 — 컷오버·태그 조건 무시, linkReason MANUAL, 후속 연결 안 함 */
+  manual?: boolean
+  /** 판정(evaluateChat) 생략 — 보정 스크립트용(linkReason은 AUTO_TAG 유지) */
+  skipEval?: boolean
+  /** 같은 고객 미종결 VOC 후속 연결 생략 */
+  noFollowup?: boolean
+  /** Slack 알림·SLA 시계 생략 — 일괄 보정·리허설용 */
+  silent?: boolean
+}
+export async function promoteChat(chatId: string, opts: PromoteChatOptions = {}): Promise<{ vocId: number; vocCode: string; reason: 'AUTO_TAG' | 'AUTO_FOLLOWUP' | 'MANUAL' }> {
   const c = await prisma.channeltalkUserChat.findUnique({ where: { id: chatId }, select: CHAT_SELECT })
   if (!c) throw new Error('상담을 찾을 수 없습니다')
   if (c.vocLink) throw new Error('이미 VOC에 연결된 상담입니다')
-  if (!opts.manual) {
+  if (!opts.manual && !opts.skipEval) {
     const skip = evaluateChat(c, await readCutover())
     if (skip) throw new Error(`승격 대상 아님: ${VOC_SKIP_LABEL[skip]}`)
   }
@@ -113,7 +124,7 @@ export async function promoteChat(chatId: string, opts: { actorId?: string; manu
   const receivedAt = c.firstUserMessageAt ?? new Date()
 
   // ④ 같은 고객 미종결 VOC → 후속 연결
-  const openVoc = opts.manual ? null : await findOpenVocForCustomer(c.userId, new Date(receivedAt.getTime() - FOLLOWUP_DAYS * 86400_000))
+  const openVoc = opts.manual || opts.noFollowup ? null : await findOpenVocForCustomer(c.userId, new Date(receivedAt.getTime() - FOLLOWUP_DAYS * 86400_000))
   if (openVoc) {
     await prisma.vocChanneltalkChat.create({ data: { vocId: openVoc, chatId: c.id, linkReason: 'AUTO_FOLLOWUP', linkedById: null } })
     const v = await prisma.vocReceipt.findUnique({ where: { id: openVoc }, select: { vocCode: true } })
@@ -144,8 +155,10 @@ export async function promoteChat(chatId: string, opts: { actorId?: string; manu
   await prisma.vocChanneltalkChat.create({ data: { vocId: created.id, chatId: c.id, linkReason: opts.manual ? 'MANUAL' : 'AUTO_TAG', linkedById: opts.manual ? actorId : null } })
   // 상담이 이미 종료돼 있으면(늦은 태그) 즉시 회신완료 판정
   if (c.state === 'closed') await syncVocStatusFromChat(created.id, actorId)
-  syncTicketClocksSafe(created.ticketId)
-  notifyTicketCreated({ ticketId: created.ticketId, actorName: '채널톡 접수봇', actorId }).catch(() => {})
+  if (!opts.silent) {
+    syncTicketClocksSafe(created.ticketId)
+    notifyTicketCreated({ ticketId: created.ticketId, actorName: '채널톡 접수봇', actorId }).catch(() => {})
+  }
   return { vocId: created.id, vocCode: created.vocCode, reason: opts.manual ? 'MANUAL' : 'AUTO_TAG' }
 }
 
