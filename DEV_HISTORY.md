@@ -22,6 +22,17 @@
 
 ---
 
+## 2026-09-29 17:40 | PROD 보정: 채널톡 소급 승격 VOC 1,732건 시각·상태 정정 + 역순 후속 46건 재생성 + 컷오버 2026-09-29 (47b2cd2, 사용자 직접 실행)
+
+- **배경**: 16:40 발견 — PROD 자동 승격 ON·컷오버 공란으로 과거 상담 소급 VOC 1,774건 생성(티켓 생성일·해결일 전부 오늘 → 지표 왜곡, Slack 1,980건 기발송, 후속 연결 46건은 처리 순서 문제로 **역순**(과거 상담이 진행 중 상담의 VOC에 붙음)). 사용자 결정 "**유지하는 쪽으로 보정**"
+- **스크립트 `scripts/fix-voc-retro-promotion.mts [--apply] [--set-cutover=]`**(멱등): 대상 = 자동 CHANNELTALK VOC 중 티켓 생성−접수 > 24h. A. 역순 후속(전체 자동 VOC 대상) 해제 → 독립 VOC 재생성(`promoteChat` 신규 옵션 `skipEval·noFollowup·silent`) B. 티켓 `created_at`=고객 첫 발화 / 연결 상담 전부 종료면 VOC '종결'·`resolved_at`=상담 종료일, 티켓 CLOSED·resolved/closed/status_changed_at=상담 종료시각 + `status_change` 이벤트(via retro_fix) — 자동 종결 배치 미경유 / 상담 진행 중이면 created_at만 C. 컷오버 기록. Slack 없음
+- **dev2 리허설**: silent 승격으로 소급 30건 + 역순 후속 6건 재현 → dry → apply → 역순 잔여 0·시각 일치 36/36·재실행 변경 0. 첫 판에서 역순 탐색이 소급분에 한정돼 6건을 놓침 → 전체 자동 VOC로 확대 수정
+- **PROD**: dry-run(소급 1,732·역순 46·종결 1,727·진행 중 5) → 자동 모드 정책이 PROD 쓰기 차단 → **사용자 `!` 셸로 `--apply --set-cutover=2026-09-29` 실행** → A 46건 재생성 · B 생성시각 1,778·종결 1,773·진행 중 5 · C 컷오버 기록. 검증(읽기): 역순 잔여 0, created_at=received_at 1,778/1,784(차이 6은 실시간분), 종결·CLOSED·closed_at=상담 종료 1,773/1,778(5는 상담 진행 중), 완료월 7월 442·8월 717·9월 648, 티켓 생성월 7·8·9월로 분산(오늘 생성 소급분 0), RESOLVED 잔여 34(실시간분 — 배치 정상 대상), retro_fix 이벤트 1,773, 재실행 변경 0. 이후 빌드·`pm2 restart thync-prod`(lib 변경 반영, health 200)
+- **결과 상태**: PROD VOC 1,822건(종결 1,773·회신완료 34·접수 15), `channeltalk_voc_promote=on`·`channeltalk_voc_cutover=2026-09-29` — 이후 실시간 승격만
+- 영향: lib/channeltalk/vocPromote.ts, scripts/fix-voc-retro-promotion.mts(신규), PROD DB(voc_receipts·tickets·voc_channeltalk_chats·ticket_logs·app_settings), DEV_HISTORY.md
+
+---
+
 ## 2026-09-29 16:40 | PROD 배포: 병원 AS메모 (60e16e0) — 마이그 적용 · PROD VOC 소급 생성 상태 발견
 
 - **dev2**: 커밋 60e16e0(16:20 항목)·push. 병원 태그·VOC 승격 분은 병행 세션이 df44a7a로 이미 배포(15:45 기록)
