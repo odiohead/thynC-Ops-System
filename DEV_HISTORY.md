@@ -22,6 +22,15 @@
 
 ---
 
+## 2026-09-29 16:40 | PROD 배포: 병원 AS메모 (60e16e0) — 마이그 적용 · PROD VOC 소급 생성 상태 발견
+
+- **dev2**: 커밋 60e16e0(16:20 항목)·push. 병원 태그·VOC 승격 분은 병행 세션이 df44a7a로 이미 배포(15:45 기록)
+- **PROD(사용자 "prod에 반영해줘")**: `git pull`(19d6e96→60e16e0, package.json·협업 서버 변경 없음) → 마이그 `20260929090000_hospital_as_memo` psql 단일 tx(lock_timeout 5s, ALTER 3) → `migrate resolve --applied` → `prisma generate` → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` → health 200 · `/api/hospitals/[code]/as-memo`·병원 상세 307(비로그인 정상) · 불안정 재시작 0. `hospital_meta.as_memo*` 3컬럼 확인
+- **발견(배포 전 점검, 본 배포와 무관)**: PROD `channeltalk_voc_promote=on`·`channeltalk_voc_cutover` **공란** → 컷오버 없이 자동 승격이 돌아 **과거 상담 소급 VOC 1,774건**(전부 CHANNELTALK·auto, 접수월 7월 464·8월 714·9월 596, 회신완료 1,761·접수 13, 후속 연결 46, 티켓 1,774) 생성. 최근 6시간 Slack 알림 1,980건 발송. 15:45 배포 기록은 "자동 승격 OFF·사용자가 컷오버 지정 후 ON" — ON은 그 이후 켜진 것. **정리 여부는 사용자 결정 대기**(삭제는 PROD DML — 규칙 5). 설계 §PROD 절차의 컷오버 지정 권고 재확인
+- 영향: PROD 소스(60e16e0)·PROD DB(hospital_meta 컬럼 3), DEV_HISTORY.md
+
+---
+
 ## 2026-09-29 16:20 | 병원 AS메모 — 부가정보 카드 서브영역 + AS접수 상세 1.공통정보(병원 태그 칩·AS메모) (dev2 빌드·재시작, PROD 미반영)
 
 - **요청(사용자)**: 병원 상세 '부가정보' 카드에 '태그' 옆 **'AS메모'** 서브영역(마크다운 기본·색상 가능한 에디터) 추가, 같은 메모를 **AS접수 상세 '1.공통정보' 하위 섹션**에 노출, 병원 태그 중 **선교체 기본**이 공통정보에서 바로 보이게
