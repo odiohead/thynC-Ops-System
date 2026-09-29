@@ -151,6 +151,8 @@ app/
 │   ├── as-receipts/                  # AS접수 CRUD + queue(수리대기 큐 — 라인 단위 버킷 조회, 2026-09-28) + queue/repair-done(수리완료 일괄) + match(시리얼 원장 매칭 미리보기) + [id]/resolve-items(라인 결과 확정 — 기기현황 연동, 라인별 처리내용) + [id]/ship-info(기기군 발송정보 갱신, 2026-09-11) + export(라인 단위 Excel — 발송일 필터, 2026-09-07) + [id]/repair-done·scrap-line(라인 수리완료 체크/해제·라인 기기 폐기 — 기기 상태·위치 축, 2026-09-17) (등록 시 AS 티켓 자동 생성·AS 표시, 2026-09-04)
 │   ├── voc-masters/                  # VOC 접수 채널 조회 (channels)
 │   ├── channeltalk/chats/            # 채널톡 상담 원본 목록·상세([id]) — 읽기 전용 (voc_channeltalk_intake_design.md §5.2, 2026-09-28)
+│   │   └── [id]/promote · exclude     # 상담 → VOC 수동 승격 / 자동 승격 제외·해제 (USER 이상, voc_channeltalk_promotion_design.md)
+│   ├── hospital-tags/                # 병원 태그 마스터(활성) 조회 — 로그인 (2026-09-28)
 │   ├── etc-tasks/                    # 기타업무 CRUD + 파일 관리 (다병원·비유지보수 업무)
 │   ├── inventory/                    # 자재관리(WMS)
 │   │   ├── items/                    # 품목 마스터 route/[id](재고·부자재 포함)/import + [id]/components(주자재-부자재 매핑) + [id]/lot-history(LOT별 입출고 요약)
@@ -177,6 +179,7 @@ app/
 ├── site-visits/                      # 답사 목록·상세·등록
 ├── voc/                              # VOC 접수 — 목록·등록(new)·상세([id] — 하위 티켓 패널·처리 결과 Tiptap) (CS 워크플로)
 │   └── inbox/                        # 채널톡 상담 원본 열람 — 목록·상세([id] 메시지 타임라인) 읽기 전용, **nav 미등록(URL 직접 진입)** (2026-09-28)
+│   └── _components/                  # VocForm · ChatTimeline(채널톡 말풍선 타임라인 — inbox·VOC 상세 공용) · VocChanneltalkSection(VOC 상세 연결 상담 섹션) (2026-09-28)
 ├── stock-out-requests/               # 출고업무 — 목록·상세([id] — 출고 처리 카드·처리 내역) + _components/{StockOutRequestFormModal(등록·수정),FulfillCard(출고 처리 — P2)}
 ├── as-receipts/                      # AS업무 — 목록([+ 접수])·상세([id] — 진행 기록·기기 라인·라인 처리)·queue(수리대기 큐 — AS담당자용 기기 단위 화면, 2026-09-28) + _components/AsReceiptFormModal(등록·수정 — 시리얼 매칭 미리보기)·AsTabs(접수 목록 ↔ 수리대기 탭 스트립) (2026-09-04)
 ├── maintenances/                     # 유지보수 목록·상세·등록
@@ -300,9 +303,12 @@ lib/
 ├── channeltalkAsSync.ts              # 채널톡 AS접수 시트 동기화 — 'thynC VOC 현황' A/S 탭 폴링: 접수 인입(신규 행→createAsReceipt)+완료 역기입(X열)+발송정보 역기입(R 송장·V 발송일·W 발송기기, 개행 구분 — 2026-09-09), AI~AL 시스템 기입란 자동 확장 (2026-09-07)
 ├── channeltalk-as-scheduler.ts       # 채널톡 AS 폴링 스케줄러 (mail-scheduler 패턴, channeltalk_as_interval 제어 — off/1m/5m/10m, 재진입 가드)
 ├── channeltalk-voc-scheduler.ts      # 채널톡 상담 원천 적재 폴링 스케줄러 (channeltalk_voc_interval — off/1m/5m/10m, 백필 미완료면 틱마다 backfill 이어감, 2026-09-28)
+├── hospitalTags.ts                   # 병원 태그 시스템 키 단일 소스(HOSPITAL_TAG_KEYS: PRE_REPLACE_DEFAULT·NO_REMOTE_ACCESS·KEY_ACCOUNT)·DTO·hasHospitalTag (2026-09-28)
+├── vocService.ts                     # VOC 접수 생성 서비스(createVocReceipt — VOC+CS 마스터 티켓 단일 tx, ownerId 배정) — POST /api/voc-receipts·채널톡 승격 공용 (2026-09-28)
 ├── channeltalk/                      # 채널톡 Open API 원천 적재 (voc_channeltalk_intake_design.md)
 │   ├── client.ts                     #   Open API v5 클라이언트 — 인증 헤더·since 커서·429 백오프·잔여 호출 대기·틱당 호출 상한(CallBudgetExceeded)
 │   ├── vocSync.ts                    #   runChanneltalkVocSync(incremental|backfill|manual) — 매니저→활성 전량→종료 증분(DB 최대 closedAt−24h 중단)→신규·변경 상담 메시지, rawHash 변경 감지, 병원 힌트(OpsCode→이름 매처)
+│   ├── vocPromote.ts                 #   상담 → VOC 승격 — evaluateChat(제외 사유 6종)·promoteChat(자동/수동)·syncVocStatusFromChat(종료↔회신완료)·promoteChanneltalkVocs(틱 후처리, 후보=변경∪DB 미승격 대상) (voc_channeltalk_promotion_design.md)
 │   └── shared.ts                     #   클라이언트 안전 상수·라벨·BackfillState·데스크 딥링크
 ├── hospitalNameMatcher.ts            # 병원명 자유 표기→hospitalCode 매처 — AS 마이그 검증 별칭 매칭 lib 승격 (NFC·법인 접두·학교 축약·괄호 별칭, 유일 매칭만 확정)
 ├── audit.ts                          # 감사 로그 헬퍼 (logAudit, auditActorFromJWT, redact)
@@ -412,6 +418,11 @@ prisma/
 - Hospital과 1:1 관계
 - Google Drive 폴더 ID (`driveProjectFolderId`), Drive 상태 파일 ID (`driveStatusFileId`), Drive 설치계획 파일 ID (`driveInstallPlanFileId`)
 - 원격 접속 URL (`remoteAccessUrl`), 원격 제어 URL (`remoteControlUrl`)
+
+### HospitalTag / HospitalTagAssignment (병원 태그 — 2026-09-28)
+- **HospitalTag** (`hospital_tags`): 엄격 정의 마스터(사용자 결정 — 생성·수정은 ADMIN/시드, 사용자는 체크만) — `key`(시스템 키 UNIQUE, 코드 참조용 불변 — `lib/hospitalTags.ts`)·`name`(UNIQUE)·`description`(언제 부여)·`effectNote`(시스템 동작 효과 — 없으면 정보성 라벨)·`color`·`isSystem`(삭제·키 변경 금지)·`isActive`·`sortOrder`. 초기 3종 시드 `scripts/seed-hospital-tags.sql`(idempotent): `PRE_REPLACE_DEFAULT` 선교체 기본 / `NO_REMOTE_ACCESS` 원격접속불가 / `KEY_ACCOUNT` 주요병원. 값이 붙는 규칙(허용량·SLA)은 태그가 아니라 정식 필드로
+- **HospitalTagAssignment** (`hospital_tag_assignments`): 병원 ↔ 태그 N:M — UNIQUE(hospital_code, tag_id), 병원 CASCADE·태그 RESTRICT, `note`(부여 근거 — v1 UI 미노출 예약)·`assignedById`(SET NULL)·`assignedAt`. 감사 `hospital_tags` UPDATE(before/after 태그명 배열)
+- 마이그 `20260928170000_hospital_tags`. 후속(연동 예정): AS접수 등록 시 `PRE_REPLACE_DEFAULT` → 선교체 기본 체크, 유지보수·VOC·상담 화면 `NO_REMOTE_ACCESS` 경고 칩, 병원 목록 태그 필터, 마스터 관리 설정 화면
 
 ### 디바이스 원장 — DeviceUnit / HospitalDevice / HospitalWard / HospitalDeviceEvent / HospitalDeviceImportBatch (2026-09-01, `projects/hospital_device_registry_design.md` §5 · 3층 구조 B-20)
 - **3층 구조**: `device_info`(모델 마스터) → `device_units`(시리얼 정체성, 1층) → 상태 하위표 `hospital_devices`(병원 배치 프로젝션, 2층). **API 공개 device id = `device_units.id`**(`/api/devices/units/[id]`·이벤트 `deviceId`·교체 상대 전부 유닛 id). 원장↔WMS 영속 링크는 없음(구 `inventory_unit_id` 제거 — WMS 편입은 후속 `inventory_units.device_id`), WMS 매칭은 표시·집계용 일시 계산
@@ -837,6 +848,7 @@ prisma/
 - **ChanneltalkManager** (`channeltalk_managers`): 담당·참여자 이름 마스터 / **ChanneltalkSyncRun** (`channeltalk_sync_runs`): 틱 로그(mode·scanned/upserted/fetchedMessages/apiCalls/rateLimited·error·stats, 30일 보관)
 - AppSetting: `channeltalk_voc_interval`(off/1m/5m/10m)·`channeltalk_voc_backfill`(JSON 커서·done)·`channeltalk_voc_max_calls`(기본 200). `.env`: `CHANNELTALK_ACCESS_KEY`/`CHANNELTALK_ACCESS_SECRET`
 - **거버넌스**: 상담 본문에 병원 직원이 적은 환자 식별정보가 부수적으로 섞일 수 있음 — 열람은 로그인 게이트 뒤에만, AI 검색 인덱스·Slack 알림으로 **재전파 금지**
+- **VOC 승격 (2026-09-28 — `projects/voc_channeltalk_promotion_design.md`, 마이그 `20260928190000_voc_channeltalk_promotion`)**: `VocReceipt.source`(MANUAL/CHANNELTALK)·`autoCreated` · **`VocChanneltalkChat`** (`voc_channeltalk_chats` — VOC 1 : 상담 N, `chat_id` UNIQUE, `link_reason` AUTO_TAG/AUTO_FOLLOWUP/MANUAL) · `ChanneltalkUserChat.firstUserMessageAt`(고객 첫 텍스트 발화 = VOC receivedAt)·`managerInitiated`·`vocExcludedAt/ById`. **VOC_TYPE 마스터 재편**: 구 6종 → 채널톡 분류 태그 28종(`name`='대분류/소분류', `value`=태그명 매핑 키), VOC_CHANNEL '채널톡'. AppSetting `channeltalk_voc_promote`(on/off)·`channeltalk_voc_cutover`(KST 일자)·`channeltalk_voc_rescan_hours`(기본 24)·`channeltalk_voc_last_rescan`
 
 ### SLA 시계 엔진 (1.1 P1 — `projects/notification_v1.1_design.md` §4)
 
@@ -1035,6 +1047,8 @@ prisma/
 - **업무 병원 재지정(매핑 정정)** (ADMIN 이상): 프로젝트/답사/설치계획/유지보수 상세의 "병원 재지정" 버튼으로 잘못 지정된 병원을 올바른 병원으로 이전. 한 트랜잭션으로 업무 hospitalCode + **연결 티켓(병원·제목) 동기화**(P13 — Task 미러 갱신은 폐기), 두 병원 현황 상태 자동 재계산(옛 병원 하향 포함), 프로젝트는 이름의 병원명도 선택 변경. 감사로그 기록
 - **병원 업무 일괄 이전** (SUPER_ADMIN): 병원 상세의 "업무 일괄 이전" 버튼으로 한 병원의 모든 업무(프로젝트·답사·설치계획·유지보수·상담·**디바이스 원장**)를 다른 병원으로 한 번에 이전(병원을 통째로 잘못 만든 경우 정리용). **연결 티켓·순수 티켓도 함께 이전**(P13 — [답사]/[설치계획] 제목의 병원명 갱신 포함). 디바이스 원장(2026-09-01)은 같은 트랜잭션에서 병동 이동(동명 병동은 대상 병원 병동으로 병합, 온프렘 코드 충돌 시 원본 코드 해제)·개체·이벤트·임포트 배치의 병원 코드를 이전 — 딜은 이동하지 않으므로 대상 병원 계약 대조에 차이가 표시될 수 있음(확인 단계에 안내)
 
+- **병원 태그 (2026-09-28)**: 상세 '기본 정보' 카드 아래 **'부가정보' 카드 > '태그'** 서브영역 — 마스터 3종(선교체 기본·원격접속불가·주요병원)을 체크박스로 부여/해제(USER 이상, 즉시 저장·`router.refresh()`, VIEWER는 칩만). 설명·시스템 효과·부여자·일시 표시. 마스터는 엄격 정의(시드 전용, 사용자 생성 불가). `HospitalTagsCard`
+
 ### 기기 현황 (`/devices`, 2026-09-01, 2026-09-02 '디바이스 원장'에서 개명 — `projects/hospital_device_registry_design.md`)
 - **목적**: 병원별 웨어러블·게이트웨이 시리얼 단위 배치·회수·교체 이력(§2 Q1~Q8). 조회는 로그인 전원, 등록·이동·회수·교체·임포트·병동 추가·메모는 USER 이상, 정정·취소·배치 취소·식별 보정·병동 비활성/삭제는 ADMIN 이상 또는 `device.admin`(UI는 `GET /api/devices/can-manage` `{canWrite, canAdmin}` 프로브로 게이트 — 읽기 전용 사용자는 쓰기 컨트롤을 렌더하지 않음)
 - **v1 단순화 UI(2026-09-01 사용자 피드백 — 구현 기능은 보존, 노출만 축소)**: 헤더 = 제목 + 메인 탭 **[병원별] [디바이스]**(`?view=hospital|devices`, 기본 hospital). [병원별] = 병원 콤보(+ USER+ [+ 등록][임포트]) → 요약 한 줄 `배치 중 n · 계약 m(클릭 → 근거 딜·모델별 대조 팝오버) · 회수 k · 병동 w` → 소형 탭 [기기 목록|이력|병동|임포트](기본 기기 목록; 기기 목록은 7열 compact + [열 더보기], 필터는 상태·시리얼 검색 + 상품유형·계약건 인라인만(2026-09-02 정리 — 모델·병동·WMS·용도·'AS진행중만'은 전체 모드 전용), 체크박스·일괄 바는 [선택] 토글 시만, 우측 [Excel]) / 병원 미선택(첫 화면)은 축약 병원 커버리지 표(`GlobalCoverage compact` — 병원당 1행: 병원명(+미지정 n 배지)·상태·판매유형(일반/라이트 배지) | 심전계·산소포화도·혈압계(=링 혈압계 CART BP SL-MPF1K07, onprem type 10) 각 일반/(라이트) 6셀 고정 폭(ACTIVE 배치 수·평가용 포함·0은 회색 0, 미등록 문구·[임포트] 퀵 액션 없음) | 마지막 이벤트, 필터(전체|등록 0|차이 있음|등록 완료)+병원명 검색, 행 클릭 → 병원 선택). [디바이스] = 신규 `DeviceListTab`(병원 무관 전 기기 평면 목록 — 검색 [시리얼/병원명]·모델·상태·용도·상품유형·[Excel], 9열, 행 클릭 드로어, 50행 페이지, 쓰기 버튼 없음; `units?q=`가 병원 미지정이면 병원명도 매치 + 정확 일치 상단). **v1에서 렌더하지 않는 것(파일·API 보존)**: 전역 요약 줄·커버리지 전체 12열 모드·전역 최근 이벤트 탭·헤더 시리얼 조회(`SerialLookup`)·요약 매트릭스 표(`SummaryStrip`)·`MobileActionBar`·헤더 [교체]. 아래 항목은 전체 기능 형상(후속 노출) 설명
@@ -1084,6 +1098,7 @@ prisma/
 - 차량번호+입차일 검색 → 입차 차량 선택 → 계정별(env `PARKING_ACCOUNTS`) 사용 가능 할인권·잔여 조회 → 할인권 1건 등록
 - **자동 계산·등록**: 주차시간 기반 무료+유료 최적 조합 미리보기(plan) → 순차 등록(auto-apply). 커버 목표 = 주차시간 + **출차 여유 10분**, 차감(부과) 대상 = 목표 − **기본 무료 30분** − 기적용분 (2026-08-03). 무료권 우선, 잔여는 903 계정 유료권 DP 최소비용 커버
 - **재입차 무료권 차단 (2026-08-04)**: 사이트 규칙상 한 차량이 그날 무료권을 쓰면 출차 후 재입차해도 무료권을 다시 못 쓴다. 입차 차량 검색은 '현재 주차 중'만 반환해 이전 입차건이 안 보이므로, **할인등록현황(`/state/doListMst`, `account_no=''` → 전 호실·출차분 포함)** 을 조회해 판정 — 이번 입차건과 `entry_date`가 다른 무료 등록이 우리 계정(`PARKING_ACCOUNTS`)에 있으면 `freeBlocked`. 자동계산은 무료를 빼고 전부 유료로 커버하고, 수동 무료 버튼은 비활성화되며 유료 게이트(`paidUnlocked`)는 즉시 해제된다. 타 입주사 계정의 무료권은 재사용 사례가 확인되어 판정에서 제외. 이력 조회 실패 시 차단하지 않음(fail-open). **판정은 입차 달력일 기준(2026-08-07)** — 사이트 영업일이 실제 날짜를 지연 추적해(13시에도 전날 표시 실측) 전날 입차건 무료권이 새 날짜 입차를 차단하던 오판(47서1581) 수정: 현재 입차건과 같은 입차일(YYYYMMDD) 이력만 차단 사유로 인정
+- **등록 이력 = 감사 로그 (2026-09-29)**: DB 미사용 모듈이라 이력 출처는 `audit_logs` `resource='parking_discount'` CREATE 하나뿐 — 수동 등록(`after.mode='manual'`: 계정·차량·입차ID·할인권)·자동 등록(`mode='auto'`: 계획 요약·단계별 적용 여부, 1건이라도 실제 등록된 경우만) 성공 시 기록. 사이트 거부·예외는 기록하지 않음. `/settings/audit-logs` 대상 필터 `parking_discount`
 - nav 메뉴 미등록 (URL 직접 접근)
 
 ### 주간업무 관리 (`/weekly` — 2026-08-19 드래프트, SEERS 소속 전용·nav 미등록)
@@ -1148,6 +1163,7 @@ prisma/
 - **CX 확인사항 반영 (2026-09-07 — `AS_OPS_확인사항.xlsx`)**: ① 회수지 필드 신설(`pickup_dest_differs`·`pickup_dest_info` — 채널톡 인입 시 발송지와 동일 자동 기재, '회수지 상이' 체크 시 별도 입력) ② 라인 처리내용(`processNote`) 입력·표시(처리 실행 시 선택 라인 공통 기록·라인 표 컬럼) ③ **수정 권한 개정 — 종결 전 USER 전원**(구 등록자 본인 한정 · 삭제는 구 규칙 유지 `canDeleteAsReceipt`) ④ 선교체 여부 상시 표시(미해당 시 '일반' 배지) ⑤ 목록 [기기] 기기별 대수(`summarizeAsItemsByKind` — 산소포화도 n·심전도 n) ⑥ 목록 필터·페이지 URL 동기화(뒤로가기 검색 결과 복원) ⑦ 발송일 기간 필터 + 라인 단위 Excel 내보내기(`/api/as-receipts/export` — 안내 메시지 발송용. **2026-09-09**: 접수 3,000건·라인 1만 행 상한 제거(라인 10만 안전장치만), 접수 헤더 입력 항목 전부 포함 — 선교체·수거방법/송장/수거일·입고일·발송지 구분/정보·회수지 상이/정보·예상출하일·상태변경일·등록자·비고 추가, 32컬럼)
 - **채널톡 자동 등록 (2026-09-07 — `projects/channeltalk_as_intake_design.md`)**: 채널톡 ALF 태스크가 기록하는 구글시트('thynC VOC 현황' A/S 탭, 채널톡 전용 중계 파일)를 **1분 폴링**(`lib/channeltalkAsSync` + 스케줄러) — 신규 행을 병원 매칭(`lib/hospitalNameMatcher`)·시리얼(괄호 병동 표기 `P013798(72W)` 제거, 2026-09-10)/증상 파싱 후 `createAsReceipt` 동일 경로로 자동 등록(등록자 '채널톡 접수봇', **기본값 2026-09-15: 수거방법 택배수거·수거일 접수일 익일 — 화면에서 수정 가능**), 결과는 시트 AI~AL열에 되쓰기(등록완료/실패 사유 — 실패 행은 보정 후 AI 비우면 재시도). **2026-09-16 개정**: ① 필수값 누락(접수일·병원·시리얼)은 행 작성 도중일 수 있어 '실패' 대신 **'대기'** 로 두고 매 틱 재시도, 최초 대기(AL) 후 24시간 지나면 '실패' ② **AJ 코드 승격** — '실패' 행에 담당자가 수동 등록 AS 코드를 AJ에 적으면 '등록완료'로 올려 역기입 대상에 포함(접수 비고에 `[채널톡 r행] 수동 등록 연결` 태그) ③ **기존 접수 연결** — 등록 직전 같은 병원·접수일에 행의 시리얼을 전부 가진 접수가 있으면 새로 만들지 않고 연결(수동 등록이 먼저 된 경우 중복 방지). 틱 로그에 `linked`·`waiting` 카운트. `runChanneltalkAsSync(testIo?)` 메모리 행 주입으로 테스트 가능. 접수 종결 시 시트 X열(완료여부)에 완료/취소 **역기입** — **2026-09-11 이벤트 기반 개정**: `sheetDoneSynced`(마지막 기입 값)와 DB 상태가 다를 때만 1회 기입(리오픈 → '미완료'), 시트 수동 변경 불간섭, 개정 전 접수는 첫 틱 기준선 채택. **발송정보 역기입(2026-09-09)**: 라인 발송(수리반환·교체) 입력 시점부터 R열(수리품 택배발송)=송장 목록·V열(발송·교체일자)=발송일 목록·W열(발송기기)=출고 시리얼(수리반환→원 시리얼, 교체→교체기) 개행 구분(중복 제거) 기입 — 시트 값과 다를 때만 갱신(부분 발송 누적). **수거 송장 역기입(2026-09-10)**: 상세 진행 기록에서 저장한 수거 송장번호(`pickupTrackingNo`)를 L열(수거 송장)에 기입 — 값이 있고 시트와 다를 때만(단방향 채움). AppSetting: `channeltalk_as_interval`(off/1m/5m/10m)·`channeltalk_as_sheet_id`·`channeltalk_as_cutover_row`(컷오버 행 — 이후 행만 처리). 셋업: `scripts/setup-channeltalk-as.mts` **2026-09-19 행 이동 가드**: DB측 2차 가드(비고 `[채널톡 rN]` 태그로 '이미 등록된 행' 판정)는 태그 접수의 병원·시리얼이 행 내용과 일치할 때만 재기입하고, 불일치면 행 삭제·삽입으로 번호가 밀린 것으로 보고 일반 등록 경로(기존 접수 연결·신규 등록)로 진행(r3800 예수병원 → AS-0304 오기입 사례) **2026-09-19 T열 회수지/발송지 분해**(`parseDestCell`): 한 셀에 '회수지: …'·'발송지: …' 라벨이 함께 적히면 발송지 구획 → `destInfo`, 회수지 구획 → `pickupDestInfo`(공백 무시 비교로 다르면 `pickupDestDiffers` 자동 체크), 라벨 없는 본문은 발송지(발송지 라벨이 있으면 비고 '발송지 메모:'로 보존), 회수지만 적힌 셀은 발송지도 같은 곳으로 간주
 - **채널톡 상담 원천 적재 (2026-09-28 — `projects/voc_channeltalk_intake_design.md`, 1단계)**: 채널톡 **Open API**로 모든 고객 상담(userChat)·메시지·고객 프로필을 원문 그대로 5테이블에 멱등 적재 — CS 업무를 VOC 도메인에서 출발시키기 위한 원천층. **VOC 레코드 승격은 다음 단계**(현 단계는 VOC 테이블 무변경). 증분 알고리즘(목록 API에 갱신시각 필터 없음): 매니저 마스터 → 활성(opened·snoozed) 전량 → 종료를 최신부터 순회하다 DB 최대 종료시각−24h 이전에서 중단 → 신규(asc 전량)·변경(desc로 저장된 메시지 id까지) 상담만 메시지 수집. 변경 감지는 상태·담당·태그·마지막 메시지 id 등 유의미 필드 해시(`updatedAt`은 종료 후에도 계속 바뀜). 백필은 종료 상담 asc 전량을 AppSetting 커서로 이어가며 틱당 호출 상한(기본 200, 레이트리밋 1,000/윈도) 도달 시 이월. 병원은 **힌트만**: `profile.OpsCode`(= hospital_code) 정확 일치 → `profile.hospital`·상담명 매처(`hospitalNameMatcher`) → 미매칭. 설정 `/settings/channeltalk-sync`(ADMIN — nav '연동·알림' 그룹, `seed-cs-masters.sql` 7) — 주기·상한·지금 실행·백필 시작/이어서/초기화·실행 로그·DB 현황), 열람 `/voc/inbox`(읽기 전용, **nav 미등록** — 요약 한 줄·필터 6종·표, 상세는 고객/담당자/봇 말풍선 타임라인 + 데스크 딥링크, 승격 버튼이 붙을 자리). 스크립트 `scripts/channeltalk-voc-backfill.mts [--dry] [--since=] [--max-calls=] [--reset] [--loop]`(부분 백필은 커서를 남기지 않음). 기존 AS 시트 폴링은 무변경 병존
+- **채널톡 상담 → VOC 승격 (2026-09-28 — `projects/voc_channeltalk_promotion_design.md`, 2단계)**: **분류 태그(a~h)가 걸린 시점**에 VOC 자동 생성(팀 태그는 조건 아님 — 보류). 대상 = 고객 발화 있음 ∧ 담당자 발신 아님 ∧ 수동 제외 아님 ∧ 컷오버(`channeltalk_voc_cutover`) 이후 첫 발화. 같은 고객의 미종결 VOC가 14일 내 있으면 후속 상담으로 연결(N:1). receivedAt=고객 첫 발화, 제목=첫 의미 있는 고객 메시지, 분류=첫 분류 태그(VOC_TYPE 28종 `value` 매핑), 채널 '채널톡', 티켓 담당=채널톡 assignee 이메일 매칭(ASSIGNED). 연결 상담 전부 종료 → '회신완료'(하위 티켓 미종결이면 유지), 재오픈 → '처리중'. 늦게 걸린 태그는 **종료 상담 전량 재검사**(기본 24h)로 수집. 승격 후보는 변경 상담 ∪ DB상 미승격 대상 전부(설정 변경 직후 누락 없음). 화면: 원본 목록 VOC 열·필터, 원본 상세 [VOC 생성]·[자동 승격 제외], VOC 상세 '채널톡 상담' 섹션(연결 상담·타임라인·데스크 링크), VOC 목록 '자동' 표시, 설정 'VOC 자동 승격' 블록(ON·컷오버·재검사 주기·전량 재검사). 생성 경로는 `lib/vocService.createVocReceipt`(수동 등록과 공용)
 
 ### 설치계획(가안) 관리
 - 설치계획(가안) 등록·수정·삭제 (삭제는 ADMIN 이상)
@@ -1440,7 +1456,7 @@ prisma/
 
 ### 감사 로그 (SUPER_ADMIN 전용)
 - 시스템 내 모든 데이터 변경(CREATE/UPDATE/DELETE) 및 인증(LOGIN/LOGOUT) 이벤트 기록
-- 적용 범위: 인증, User CRUD, 4대 업무(Project/SiteVisit/Maintenance/InstallPlan), Hospital(+ 대웅 담당자 배정/해제), Contractor, Settings 전체
+- 적용 범위: 인증, User CRUD, 4대 업무(Project/SiteVisit/Maintenance/InstallPlan), Hospital(+ 대웅 담당자 배정/해제), Contractor, Settings 전체, 주차 웹할인 등록(`parking_discount` — 2026-09-29)
 - `/settings/audit-logs` 페이지: 검색(사용자/대상명) + 액션·대상·기간 필터 + 페이지네이션
 - 행 클릭 시 상세 모달: before/after 필드별 비교 테이블(변경 필드 노란색 하이라이트)
 - 비밀번호 등 민감 필드는 저장 시점에 자동 `[REDACTED]` 처리
@@ -1681,6 +1697,8 @@ npm run dev
 | PATCH | `/api/hospitals/[code]/devices/imports/[batchId]` | 배치 업무일자 일괄 정정 (admin) |
 | POST | `/api/hospitals/[code]/devices/imports/[batchId]/cancel` | 배치 취소 (admin — 배치 밖 상태 이벤트 있으면 409) |
 | GET/POST | `/api/hospitals/[code]/wards` | 병동 목록 / 추가 (write, 동명 409) |
+| GET | `/api/hospital-tags` | 병원 태그 마스터(활성) 목록 (로그인, 2026-09-28) |
+| GET/PUT | `/api/hospitals/[code]/tags` | 병원 태그 부여 목록 / 부여 집합 교체 `{tagIds}` (USER 이상 — VIEWER 403, 추가분만 부여자·시각 기록, 비활성·없는 태그 400, 감사 `hospital_tags`) |
 | PUT/DELETE | `/api/hospitals/[code]/wards/[id]` | 병동 수정(write, 비활성은 admin) / 삭제(admin, 참조 있으면 409) |
 
 ### 영업/CRM (전 엔드포인트 ADMIN 이상 + SEERS 소속 — `checkSalesAccess`)
@@ -1702,9 +1720,9 @@ npm run dev
 |--------|----------|------|
 | POST | `/api/parking/search` | 차량번호+입차일로 입차 차량 검색 |
 | POST | `/api/parking/coupons` | 선택 차량에 대한 전 계정 할인권·잔여 병렬 조회 |
-| POST | `/api/parking/register` | 계정 1개로 할인권 1건 등록 |
+| POST | `/api/parking/register` | 계정 1개로 할인권 1건 등록 (성공 시 audit `parking_discount` CREATE — 2026-09-29) |
 | POST | `/api/parking/plan` | 주차시간 기반 자동 할인권 조합 미리보기 (무료 30분·출차 여유 10분 반영, 읽기 전용) |
-| POST | `/api/parking/auto-apply` | 자동 계산 조합 순차 등록 (무료 먼저 → 903 유료, 실패 시 중단) |
+| POST | `/api/parking/auto-apply` | 자동 계산 조합 순차 등록 (무료 먼저 → 903 유료, 실패 시 중단, 1건 이상 등록 시 audit `parking_discount` CREATE) |
 
 ### 주간업무 관리 (2026-08-19 — 조회 SEERS 소속, 쓰기 USER 이상 `checkWeeklyAccess`)
 - `GET /api/weekly/board?week=YYYY-MM-DD` - 주차 통합 조회 (항목+금주/직전 update+주간 메모, week는 월요일만)
@@ -1836,11 +1854,13 @@ npm run dev
 | GET | `/api/voc-masters/channels` | VOC 접수 채널(VOC_CHANNEL) 조회 |
 | GET/POST, PUT/DELETE | `/api/settings/voc-status(/[id])` | VOC 워크플로 상태 (+티켓 상태 매핑 필수, 사용 중 삭제 409) |
 | GET/POST, PUT/DELETE | `/api/settings/voc-type(/[id])` | VOC 분류 마스터 (자동생성 규칙 조건 축, 사용 중 삭제 409) |
-| GET | `/api/channeltalk/chats` | 채널톡 상담 원본 목록(`?state=active|opened|snoozed|closed&from=&to=(firstAskedAt KST)&tag=&hospital=&match=opscode|name|none&q=(첫 질문·고객·병원)&page=&pageSize=`) + 태그 집계·요약(활성·오늘 인입·마지막 동기화) — 로그인 사용자 (2026-09-28) |
+| GET | `/api/channeltalk/chats` | 채널톡 상담 원본 목록(`?state=active|opened|snoozed|closed&from=&to=(firstAskedAt KST)&tag=&hospital=&match=opscode|name|none&voc=linked|none|eligible|excluded&q=(첫 질문·고객·병원)&page=&pageSize=`) + 태그 집계·요약(활성·오늘 인입·마지막 동기화)·행별 `vocLink`·`vocSkipReason` — 로그인 사용자 (2026-09-28) |
 | GET | `/api/channeltalk/chats/[id]` | 상담 상세(고객·병원 힌트·메시지 타임라인 asc·매니저 이름 맵, raw 제외) |
 | GET/PUT | `/api/settings/channeltalk-sync` | 채널톡 적재 설정 — 주기·활성 주기·호출 상한·키 설정 여부·백필 상태·최근 실행 10건·DB 현황 / 저장 시 스케줄러 재시작 (ADMIN) |
-| POST | `/api/settings/channeltalk-sync/run` | 즉시 실행 `{mode:'incremental'|'backfill'}` — 진행 중 409, 키 미설정 400, 결과 요약 반환 (ADMIN) |
+| POST | `/api/settings/channeltalk-sync/run` | 즉시 실행 `{mode:'incremental'|'backfill'|'rescan'}`(rescan=종료 상담 전량 재검사 강제) — 진행 중 409, 키 미설정 400, 결과 요약(+`promote`) 반환 (ADMIN) |
 | POST | `/api/settings/channeltalk-sync/backfill-reset` | 백필 커서 초기화(데이터 유지) (ADMIN) |
+| POST | `/api/channeltalk/chats/[id]/promote` | 상담 → VOC 수동 승격 (USER 이상, 컷오버·태그 조건 무시, 이미 연결 409, 감사 `voc_receipt` CREATE) |
+| POST | `/api/channeltalk/chats/[id]/exclude` | `{excluded}` 자동 승격 수동 제외/해제 (USER 이상, 연결 상담 409, 감사 `channeltalk_chat`) |
 
 ※ `/api/maintenances` POST는 `parentTicketId` 옵션 수용 (P3 — 생성 티켓을 마스터의 하위로 연결, 2레벨·CLOSED 검증). `/api/tickets/[id]` GET/PUT 응답에 `linkedWork`(어댑터 조립 배너 데이터) 포함. `/api/tickets` GET은 `sort`(code/severity/type/title/status/queue/owner/hospital/created/changed)+`order` 컬럼 정렬 지원 (2026-08-15)
 

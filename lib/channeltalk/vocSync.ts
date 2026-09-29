@@ -20,9 +20,10 @@ import {
   type ChanneltalkUserChatRaw, type ChanneltalkUserRaw, type ChanneltalkManagerRaw, type ChanneltalkMessageRaw,
 } from './client'
 import {
-  CHANNELTALK_VOC_BACKFILL_KEY, CHANNELTALK_VOC_MAX_CALLS_KEY, EMPTY_BACKFILL,
+  CHANNELTALK_VOC_BACKFILL_KEY, CHANNELTALK_VOC_MAX_CALLS_KEY, CHANNELTALK_VOC_RESCAN_HOURS_KEY, CHANNELTALK_VOC_LAST_RESCAN_KEY, EMPTY_BACKFILL,
   type BackfillState, type ChanneltalkSyncMode,
 } from './shared'
+import { promoteChanneltalkVocs, type PromoteResult } from './vocPromote'
 
 const CLOSED_SAFETY_MS = 24 * 3600 * 1000
 const DEFAULT_MAX_CALLS = 200
@@ -40,6 +41,8 @@ export interface ChanneltalkVocSyncResult {
   backfillDone: boolean | null // backfill 모드에서만 의미
   budgetExceeded: boolean
   error: string | null
+  fullRescan: boolean // 이번 틱에 종료 상담 전량 재검사 수행
+  promote: PromoteResult | null // VOC 승격 결과 (자동 승격 off면 0)
 }
 
 export interface ChanneltalkVocSyncOptions {
@@ -47,6 +50,8 @@ export interface ChanneltalkVocSyncOptions {
   maxCalls?: number
   /** backfill 모드에서 이 일자 이전 상담은 건너뜀(개발 소량 적재용) — closedAt 기준 */
   backfillSince?: Date
+  /** 종료 상담 전량 재검사 강제 (설정 화면 버튼) */
+  forceFullRescan?: boolean
   log?: (line: string) => void
 }
 
@@ -93,6 +98,7 @@ function extractUser(u: ChanneltalkUserRaw) {
 // ─── 동기화 컨텍스트 ───
 class SyncCtx {
   scanned = 0; upserted = 0; newChats = 0; fetchedMessages = 0
+  changedChatIds = new Set<string>() // 신규·변경 상담 — 틱 후 VOC 승격·상태 동기화 대상
   private hospitalCodes: Set<string> | null = null
   private matcher: HospitalMatcher | null = null
   private userCache = new Map<string, { opsCode: string | null; hospitalNameRaw: string | null }>()
@@ -202,6 +208,7 @@ class SyncCtx {
     })
     this.upserted++
     if (!cur) this.newChats++
+    this.changedChatIds.add(c.id)
     return { isNew: !cur, changed: true }
   }
 
@@ -241,14 +248,19 @@ class SyncCtx {
       })
       this.fetchedMessages += rows.length
     }
-    const [count, firstAsk, last] = await Promise.all([
+    const [count, firstAsk, last, firstAny] = await Promise.all([
       prisma.channeltalkMessage.count({ where: { chatId } }),
-      prisma.channeltalkMessage.findFirst({ where: { chatId, personType: 'user', plainText: { not: null } }, orderBy: { createdAtCt: 'asc' }, select: { plainText: true } }),
+      prisma.channeltalkMessage.findFirst({ where: { chatId, personType: 'user', plainText: { not: null } }, orderBy: { createdAtCt: 'asc' }, select: { plainText: true, createdAtCt: true } }),
       prisma.channeltalkMessage.findFirst({ where: { chatId }, orderBy: { createdAtCt: 'desc' }, select: { id: true } }),
+      prisma.channeltalkMessage.findFirst({ where: { chatId }, orderBy: { createdAtCt: 'asc' }, select: { personType: true } }),
     ])
     await prisma.channeltalkUserChat.update({
       where: { id: chatId },
-      data: { messageCount: count, firstAskText: firstAsk?.plainText ?? undefined, messageCursor: last?.id ?? null, messagesSyncedAt: new Date() },
+      data: {
+        messageCount: count, firstAskText: firstAsk?.plainText ?? undefined, messageCursor: last?.id ?? null, messagesSyncedAt: new Date(),
+        firstUserMessageAt: firstAsk?.createdAtCt ?? undefined, // 고객 첫 발화 (VOC receivedAt 원천)
+        managerInitiated: firstAny?.personType === 'manager', // 담당자 발신 상담(발송안내 등)
+      },
     })
   }
 
@@ -271,6 +283,17 @@ class SyncCtx {
         if (!page.next || !page.userChats?.length) break
         since = page.next
       }
+    }
+  }
+
+  /** 종료 상담 전량 재검사 — 늦게 걸린 태그·담당 변경 수집 (500건/페이지, ≈7~8회). 변경 감지는 rawHash */
+  async syncClosedFull() {
+    let since: string | null = null
+    for (;;) {
+      const page = await this.client.listUserChats('closed', 'asc', since)
+      await this.processPage(page)
+      if (!page.next || !page.userChats?.length) break
+      since = page.next
     }
   }
 
@@ -312,6 +335,22 @@ async function readMaxCalls() {
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_CALLS
 }
 
+async function readRescanDue(): Promise<boolean> {
+  const [h, last] = await Promise.all([
+    prisma.appSetting.findUnique({ where: { key: CHANNELTALK_VOC_RESCAN_HOURS_KEY } }),
+    prisma.appSetting.findUnique({ where: { key: CHANNELTALK_VOC_LAST_RESCAN_KEY } }),
+  ])
+  const hours = Number(h?.value)
+  if (h?.value === 'off') return false
+  const period = Number.isFinite(hours) && hours > 0 ? hours : 24
+  const lastAt = last?.value ? new Date(last.value).getTime() : 0
+  return Date.now() - lastAt >= period * 3600_000
+}
+async function markRescanDone() {
+  const value = new Date().toISOString()
+  await prisma.appSetting.upsert({ where: { key: CHANNELTALK_VOC_LAST_RESCAN_KEY }, update: { value }, create: { key: CHANNELTALK_VOC_LAST_RESCAN_KEY, value } })
+}
+
 let running = false
 export function isChanneltalkVocSyncRunning() { return running }
 
@@ -325,6 +364,8 @@ export async function runChanneltalkVocSync(mode: ChanneltalkSyncMode = 'increme
   let error: string | null = null
   let budgetExceeded = false
   let backfillDone: boolean | null = null
+  let fullRescan = false
+  let promote: PromoteResult | null = null
   try {
     if (mode === 'backfill') {
       const st = await readBackfill()
@@ -357,8 +398,11 @@ export async function runChanneltalkVocSync(mode: ChanneltalkSyncMode = 'increme
     } else {
       await ctx.syncManagers()
       await ctx.syncActive()
-      await ctx.syncClosedIncremental()
+      if (opts.forceFullRescan || (await readRescanDue())) { fullRescan = true; await ctx.syncClosedFull(); await markRescanDone(); log('종료 상담 전량 재검사 완료') }
+      else await ctx.syncClosedIncremental()
     }
+    // VOC 승격·상태 동기화 (자동 승격 on일 때만 — vocPromote)
+    promote = await promoteChanneltalkVocs(Array.from(ctx.changedChatIds), log)
   } catch (e) {
     if (e instanceof CallBudgetExceeded) { budgetExceeded = true; log('호출 상한 도달 — 다음 틱에 이어서') }
     else { error = e instanceof Error ? e.message : String(e); log(`실패: ${error}`) }
@@ -369,10 +413,10 @@ export async function runChanneltalkVocSync(mode: ChanneltalkSyncMode = 'increme
       data: {
         endedAt: new Date(), scannedChats: ctx.scanned, upsertedChats: ctx.upserted, fetchedMessages: ctx.fetchedMessages,
         apiCalls: client.calls, rateLimited: client.rateLimited, error,
-        stats: { newChats: ctx.newChats, budgetExceeded, backfillDone },
+        stats: { newChats: ctx.newChats, budgetExceeded, backfillDone, fullRescan, promote: promote ? { created: promote.created, followups: promote.followups, resolved: promote.resolved, reopened: promote.reopened, errors: promote.errors.length } : null },
       },
     }).catch(() => {})
     prisma.channeltalkSyncRun.deleteMany({ where: { startedAt: { lt: new Date(Date.now() - RUN_RETENTION_DAYS * 86400_000) } } }).catch(() => {})
   }
-  return { mode, runId: run.id, scannedChats: ctx.scanned, upsertedChats: ctx.upserted, newChats: ctx.newChats, fetchedMessages: ctx.fetchedMessages, apiCalls: client.calls, rateLimited: client.rateLimited, backfillDone, budgetExceeded, error }
+  return { mode, runId: run.id, scannedChats: ctx.scanned, upsertedChats: ctx.upserted, newChats: ctx.newChats, fetchedMessages: ctx.fetchedMessages, apiCalls: client.calls, rateLimited: client.rateLimited, backfillDone, budgetExceeded, error, fullRescan, promote }
 }

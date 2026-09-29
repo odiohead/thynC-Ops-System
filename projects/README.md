@@ -35,6 +35,7 @@
 | [wiki_next_gen_review.md](wiki_next_gen_review.md) | **검토 의견** (설계안 아님) — 차세대 사내위키 검토: Notion·Confluence·오픈소스 6종·KM 도구 6종·여론 vs 현 위키 정밀 비교(코드 감사 4렌즈 + 조사 8주제 + 적대 검증 53). 결론: 기능·아키텍처 충분, 6/30 협업 전환 회귀 등 소규모 결함 11건(A)만 수정, 선택 6(B)·운영 2(C)·보류 25+(D) | **A 11건 + B 4건 구현 완료 (dev2 2026-09-12) — PROD 배포 대기** |
 | [device_condition_location_design.md](device_condition_location_design.md) | 기기 상태·위치 축 — AS 회수 기기의 실물 상태 6종(사용중·AS접수·수리완료·출고 전·분실·폐기)·위치(병원/리프레시센터/thynC Connected Hub)를 배치와 분리해 유닛 축으로 추적, AS 상세 라인 '수리완료' 체크·이벤트 4종·백필(HDR D11 개정) | **구현 완료 (dev, 2026-09-17) — 완료(PROD 배포 2026-09-17, 커밋 26a0ba1 — 백필 적용) — 화면 확인·Phase 2(센터/Hub 재고 목록·PRE_SHIP 생성·일괄 정리) 대기** (A-1~A-6 사용자 확정, A-5는 사용자 수정 · §13 구현 노트) |
 | [voc_channeltalk_intake_design.md](voc_channeltalk_intake_design.md) | 채널톡 상담 원천 적재 — Open API(userChat·메시지·고객) 폴링으로 원문 JSON+추출 컬럼 4테이블에 멱등 적재(활성 전량+종료 증분+메시지 커서), 백필·설정 페이지·읽기 전용 열람 `/voc/inbox`. VOC 레코드 승격은 다음 단계 문서로 분리 | **1단계 완료 (PROD 배포·전체 백필·5분 폴링 2026-09-28, caf6390) — 승격(2단계) 설계 대기** |
+| [voc_channeltalk_promotion_design.md](voc_channeltalk_promotion_design.md) | 채널톡 상담 → VOC 승격 — 분류 태그 트리거 자동 생성(컷오버·고객 발화·담당자 발신 제외), 같은 고객 미종결 VOC 후속 연결, receivedAt=첫 발화, 상담 종료↔회신완료 동기화, 종료 상담 전량 재검사, VOC 분류 마스터를 채널톡 태그 28종으로 재편, 수동 승격·제외 | **구현 완료 (dev2 2026-09-28) — PROD 미반영** |
 
 ## 루트에 남아 있는 1.0 문서
 

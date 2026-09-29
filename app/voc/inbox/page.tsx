@@ -9,12 +9,14 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Pager from '@/app/components/ui/Pager'
-import { CHANNELTALK_STATE_LABEL, CHANNELTALK_HOSPITAL_MATCH_LABEL, type ChanneltalkChatState } from '@/lib/channeltalk/shared'
+import { CHANNELTALK_STATE_LABEL, CHANNELTALK_HOSPITAL_MATCH_LABEL, VOC_SKIP_LABEL, type ChanneltalkChatState, type VocSkipReason } from '@/lib/channeltalk/shared'
 
 interface Row {
   id: string; state: ChanneltalkChatState; assigneeName: string | null; tags: string[]; name: string | null; contactMediumType: string | null
   firstAskText: string | null; firstAskedAt: string | null; closedAt: string | null; messageCount: number
   hospitalCode: string | null; hospitalMatchSource: string | null; hospitalMatchNote: string | null
+  vocSkipReason: VocSkipReason | null; vocExcludedAt: string | null
+  vocLink: { vocId: number; linkReason: string; voc: { vocCode: string } } | null
   user: { id: string; name: string | null; hospitalNameRaw: string | null; opsCode: string | null } | null
   hospital: { hospitalCode: string; hospitalName: string } | null
 }
@@ -35,6 +37,7 @@ export default function ChanneltalkInboxPage() {
   const [to, setTo] = useState('')
   const [tag, setTag] = useState('')
   const [match, setMatch] = useState('')
+  const [vocFilter, setVocFilter] = useState('')
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
 
@@ -42,12 +45,12 @@ export default function ChanneltalkInboxPage() {
     setLoading(true)
     const p = new URLSearchParams()
     if (state) p.set('state', state); if (from) p.set('from', from); if (to) p.set('to', to)
-    if (tag) p.set('tag', tag); if (match) p.set('match', match); if (q) p.set('q', q)
+    if (tag) p.set('tag', tag); if (match) p.set('match', match); if (q) p.set('q', q); if (vocFilter) p.set('voc', vocFilter)
     p.set('page', String(page)); p.set('pageSize', String(pageSize))
     const res = await fetch(`/api/channeltalk/chats?${p}`)
     if (res.ok) { const d = await res.json(); setRows(d.chats ?? []); setTotal(d.total ?? 0); setTags(d.tags ?? []); setSummary(d.summary ?? null) }
     setLoading(false)
-  }, [state, from, to, tag, match, q, page])
+  }, [state, from, to, tag, match, q, vocFilter, page])
   useEffect(() => { void load() }, [load])
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
@@ -82,6 +85,9 @@ export default function ChanneltalkInboxPage() {
           <option value="">병원 매칭 전체</option>
           {Object.entries(CHANNELTALK_HOSPITAL_MATCH_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
+        <select value={vocFilter} onChange={(e) => { setVocFilter(e.target.value); setPage(1) }} className={sel}>
+          <option value="">VOC 전체</option><option value="linked">VOC 연결됨</option><option value="none">미연결</option><option value="eligible">미연결·고객 발화 있음</option><option value="excluded">수동 제외</option>
+        </select>
         <div className="flex items-center gap-1.5">
           <input type="text" value={qInput} onChange={(e) => setQInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (setQ(qInput), setPage(1))} placeholder="첫 질문·고객·병원 검색" className="w-48 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
           <button type="button" onClick={() => { setQ(qInput); setPage(1) }} className="rounded-md bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700">검색</button>
@@ -94,7 +100,7 @@ export default function ChanneltalkInboxPage() {
           : rows.length === 0 ? <p className="py-16 text-center text-sm text-gray-400">상담이 없습니다.</p> : (
           <div className="overflow-x-auto">
             <table className={`min-w-full divide-y divide-gray-200 text-sm ${loading ? 'opacity-60' : ''}`}>
-              <thead className="bg-gray-50"><tr>{['인입', '상태', '고객', '병원', '첫 질문', '태그', '담당', '메시지', '종료'].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+              <thead className="bg-gray-50"><tr>{['인입', '상태', '고객', '병원', '첫 질문', '태그', '담당', '메시지', '종료', 'VOC'].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
               <tbody className="divide-y divide-gray-100">
                 {rows.map((r) => (
                   <tr key={r.id} className="cursor-pointer hover:bg-gray-50" onClick={() => router.push(`/voc/inbox/${r.id}`)}>
@@ -110,6 +116,11 @@ export default function ChanneltalkInboxPage() {
                     <td className="whitespace-nowrap px-3 py-2 text-gray-600">{r.assigneeName ?? '-'}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-right text-gray-600">{r.messageCount}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-gray-500">{kst(r.closedAt)}</td>
+                    <td className="whitespace-nowrap px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                      {r.vocLink ? <Link href={`/voc/${r.vocLink.vocId}`} className="font-mono text-xs text-blue-600 hover:underline">{r.vocLink.voc.vocCode}</Link>
+                        : r.vocSkipReason ? <span className="text-[11px] text-gray-400">{VOC_SKIP_LABEL[r.vocSkipReason]}</span>
+                        : <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">승격 대기</span>}
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import { registerDiscount } from '@/lib/parking'
+import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,6 +25,18 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await registerDiscount({ userId, carNo, carId, discountType, entryDate })
+    // 감사 로그 — 사이트에 실제 등록된 건만 기록 (2026-09-29, DB 미사용 모듈이라 이력의 유일한 출처)
+    if (result.ok) {
+      await logAudit({
+        req: request,
+        actor: auditActorFromJWT(user),
+        action: 'CREATE',
+        resource: 'parking_discount',
+        resourceId: carId ?? null,
+        resourceLabel: `${carNo} · ${userId} · ${discountType}`,
+        after: { mode: 'manual', account: userId, carNo, carId: carId ?? null, entryDate: entryDate ?? null, discountType, message: result.message },
+      })
+    }
     return NextResponse.json(result, { status: result.ok ? 200 : 409 })
   } catch (e) {
     return NextResponse.json({ ok: false, message: (e instanceof Error ? e.message : '') || '등록 실패' }, { status: 502 })

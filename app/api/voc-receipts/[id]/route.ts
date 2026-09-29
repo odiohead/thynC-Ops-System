@@ -18,6 +18,7 @@ const detailInclude = {
   vocType: { select: { id: true, name: true, color: true } },
   status: { select: { id: true, name: true, color: true } },
   createdBy: { select: { id: true, name: true } },
+  channeltalkChats: { orderBy: { linkedAt: 'asc' }, select: { linkReason: true, linkedAt: true, chat: { select: { id: true, channelId: true, state: true, tags: true, firstAskText: true, firstAskedAt: true, closedAt: true, messageCount: true } } } },
   ticket: {
     select: {
       id: true, ticketCode: true, status: true, parentId: true,

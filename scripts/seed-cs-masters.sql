@@ -93,3 +93,45 @@ SELECT r.ref_type, c.name AS cti_item, q.name AS queue FROM ticket_domain_cti_ru
 INSERT INTO nav_menu_items (menu_key, label, href, parent_key, sort_order, group_label, allowed_roles) VALUES
   ('settings/channeltalk-sync', '채널톡 상담 적재', '/settings/channeltalk-sync', 'settings', 103, '연동·알림', '{SUPER_ADMIN,ADMIN}')
 ON CONFLICT (menu_key) DO NOTHING;
+
+-- 8) 2026-09-28 채널톡 상담 → VOC 승격 (voc_channeltalk_promotion_design.md)
+--    접수 채널 '채널톡' + VOC 분류를 채널톡 분류 태그 체계(a~h 대분류 / 소분류)로 재편 — name='대분류/소분류', value=채널톡 태그명(매핑 키)
+INSERT INTO status_codes (name, category, "order", color) VALUES ('채널톡', 'VOC_CHANNEL', 5, '#F97316') ON CONFLICT (name, category) DO NOTHING;
+
+INSERT INTO status_codes (name, value, category, "order", color) VALUES
+  ('오류SW/데이터',            'a_오류SW_데이터',               'VOC_TYPE', 110, '#EF4444'),
+  ('오류SW/레포트',            'a_오류SW_레포트',               'VOC_TYPE', 111, '#EF4444'),
+  ('오류SW/알람',              'a_오류SW_알람',                 'VOC_TYPE', 112, '#EF4444'),
+  ('오류SW/접속',              'a_오류SW_접속',                 'VOC_TYPE', 113, '#EF4444'),
+  ('오류SW/화면',              'a_오류SW_화면',                 'VOC_TYPE', 114, '#EF4444'),
+  ('오류HW/디바이스',          'b_오류HW_디바이스',             'VOC_TYPE', 120, '#DC2626'),
+  ('오류HW/운영장비',          'b_오류HW_운영장비',             'VOC_TYPE', 121, '#DC2626'),
+  ('EMR/연동오류',             'c_EMR_연동오류',                'VOC_TYPE', 130, '#F59E0B'),
+  ('EMR/이용-현황문의',        'c_EMR_이용-현황문의',           'VOC_TYPE', 131, '#F59E0B'),
+  ('사용/계정',                'd_사용_계정',                   'VOC_TYPE', 140, '#0EA5E9'),
+  ('사용/기본사용',            'd_사용_기본사용',               'VOC_TYPE', 141, '#0EA5E9'),
+  ('사용/레포트',              'd_사용_레포트',                 'VOC_TYPE', 142, '#0EA5E9'),
+  ('사용/알람',                'd_사용_알람',                   'VOC_TYPE', 143, '#0EA5E9'),
+  ('사용/화면',                'd_사용_화면',                   'VOC_TYPE', 144, '#0EA5E9'),
+  ('운영/교육',                'e_운영_교육',                   'VOC_TYPE', 150, '#8B5CF6'),
+  ('운영/기기관리-조작요청',   'e_운영_기기관리-조작요청',      'VOC_TYPE', 151, '#8B5CF6'),
+  ('운영/병동-환자관리-조작요청','e_운영_병동-환자관리-조작요청','VOC_TYPE', 152, '#8B5CF6'),
+  ('운영/설치-점검',           'e_운영_설치-점검',              'VOC_TYPE', 153, '#8B5CF6'),
+  ('운영/요금-계약',           'e_운영_요금-계약',              'VOC_TYPE', 154, '#8B5CF6'),
+  ('AS/고장접수',              'f_AS_고장접수',                 'VOC_TYPE', 160, '#10B981'),
+  ('AS/분실접수',              'f_AS_분실접수',                 'VOC_TYPE', 161, '#10B981'),
+  ('AS/소모품-부속품',         'f_AS_소모품-부속품',            'VOC_TYPE', 162, '#10B981'),
+  ('AS/진행상황문의',          'f_AS_진행상황문의',             'VOC_TYPE', 163, '#10B981'),
+  ('개선/UIUX',                'g_개선_UIUX',                   'VOC_TYPE', 170, '#6366F1'),
+  ('개선/디바이스',            'g_개선_디바이스',               'VOC_TYPE', 171, '#6366F1'),
+  ('개선/서비스',              'g_개선_서비스',                 'VOC_TYPE', 172, '#6366F1'),
+  ('타사/HW',                  'h_타사_HW',                     'VOC_TYPE', 180, '#6B7280'),
+  ('타사/SW',                  'h_타사_SW',                     'VOC_TYPE', 181, '#6B7280')
+ON CONFLICT (name, category) DO UPDATE SET value = EXCLUDED.value, "order" = EXCLUDED."order", color = EXCLUDED.color;
+
+-- 구 6종(불만·장애·요청·문의·칭찬·기타)은 참조가 없을 때만 제거 (dev2·PROD 모두 voc_receipts 0건 확인 2026-09-28)
+DELETE FROM status_codes s WHERE s.category = 'VOC_TYPE' AND s.value IS NULL
+  AND NOT EXISTS (SELECT 1 FROM voc_receipts v WHERE v.voc_type_id = s.id)
+  AND NOT EXISTS (SELECT 1 FROM ticket_domain_cti_rules r WHERE r.match_status_code_id = s.id);
+
+SELECT count(*) AS voc_types FROM status_codes WHERE category = 'VOC_TYPE';

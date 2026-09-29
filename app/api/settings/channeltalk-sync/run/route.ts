@@ -1,5 +1,5 @@
 /**
- * 채널톡 동기화 즉시 실행 — ADMIN 이상. body { mode: 'incremental' | 'backfill' }
+ * 채널톡 동기화 즉시 실행 — ADMIN 이상. body { mode: 'incremental' | 'backfill' | 'rescan' } (rescan = 종료 상담 전량 재검사 강제)
  * incremental은 동기 실행(수 초), backfill은 틱당 호출 상한만큼 진행하고 반환(커서 저장 — 스케줄러가 켜져 있으면 자동으로 이어감, 아니면 다시 클릭)
  */
 import { NextRequest, NextResponse } from 'next/server'
@@ -14,6 +14,6 @@ export async function POST(request: NextRequest) {
   if (isChanneltalkVocSyncRunning()) return NextResponse.json({ error: '동기화가 이미 진행 중입니다' }, { status: 409 })
   const body = await request.json().catch(() => ({}))
   const mode = body.mode === 'backfill' ? 'backfill' : 'manual'
-  const result = await runChanneltalkVocSync(mode)
+  const result = await runChanneltalkVocSync(mode, { forceFullRescan: body.mode === 'rescan' })
   return NextResponse.json(result, { status: result.error ? 500 : 200 })
 }

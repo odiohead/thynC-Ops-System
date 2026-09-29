@@ -3,9 +3,11 @@
 /** 채널톡 상담 원본 상세 — 상담 정보 · 고객 · 메시지 타임라인(고객/담당자/봇) · 데스크 딥링크. 읽기 전용 */
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { CHANNELTALK_STATE_LABEL, CHANNELTALK_PERSON_LABEL, CHANNELTALK_HOSPITAL_MATCH_LABEL, channeltalkDeskChatUrl, type ChanneltalkChatState } from '@/lib/channeltalk/shared'
+import Link from 'next/link'
+import ChatTimeline, { type TimelineMsg } from '@/app/voc/_components/ChatTimeline'
+import { CHANNELTALK_STATE_LABEL, CHANNELTALK_HOSPITAL_MATCH_LABEL, VOC_SKIP_LABEL, VOC_LINK_REASON_LABEL, channeltalkDeskChatUrl, type ChanneltalkChatState, type VocSkipReason } from '@/lib/channeltalk/shared'
 
-interface Msg { id: string; personType: string | null; personId: string | null; plainText: string | null; hasFiles: boolean; fileMeta: { name?: string; type?: string; size?: number }[] | null; createdAtCt: string }
+type Msg = TimelineMsg
 interface Chat {
   id: string; channelId: string | null; state: ChanneltalkChatState; assigneeId: string | null; managerIds: string[]; tags: string[]; name: string | null; description: string | null
   contactMediumType: string | null; sourceType: string | null; firstAskText: string | null; firstAskedAt: string | null; openedAt: string | null; closedAt: string | null
@@ -13,9 +15,10 @@ interface Chat {
   user: { id: string; name: string | null; mobileNumber: string | null; landlineNumber: string | null; email: string | null; opsCode: string | null; hospitalNameRaw: string | null; ward: string | null; address: string | null; tags: string[] } | null
   hospital: { hospitalCode: string; hospitalName: string } | null
   messages: Msg[]
+  vocSkipReason: VocSkipReason | null; vocExcludedAt: string | null; vocExcludedBy: { id: string; name: string } | null
+  vocLink: { vocId: number; linkReason: string; linkedAt: string; voc: { vocCode: string; title: string } } | null
 }
 const kst = (iso: string | null) => (iso ? new Date(iso).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16) : '-')
-const BUBBLE: Record<string, string> = { user: 'bg-blue-50 border-blue-100', manager: 'bg-white border-gray-200', bot: 'bg-gray-50 border-gray-100 text-gray-500' }
 
 export default function ChanneltalkChatDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -23,6 +26,35 @@ export default function ChanneltalkChatDetailPage() {
   const [chat, setChat] = useState<Chat | null>(null)
   const [managerNames, setManagerNames] = useState<Record<string, string>>({})
   const [err, setErr] = useState('')
+  const [me, setMe] = useState<{ role: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [flash, setFlash] = useState('')
+  const canWrite = !!me && me.role !== 'VIEWER'
+
+  const load = () => fetch(`/api/channeltalk/chats/${id}`).then(async (r) => {
+    if (!r.ok) { setErr((await r.json()).error ?? '오류'); return }
+    const d = await r.json(); setChat(d.chat); setManagerNames(d.managerNames ?? {})
+  })
+  useEffect(() => { fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setMe({ role: d.role })) }, [])
+  async function promote() {
+    if (!confirm('이 상담으로 VOC를 생성합니다. 진행할까요?')) return
+    setBusy(true); setFlash('')
+    try {
+      const res = await fetch(`/api/channeltalk/chats/${id}/promote`, { method: 'POST' })
+      const d = await res.json()
+      if (!res.ok) { setFlash(d.error ?? '실패'); return }
+      setFlash(`${d.vocCode} 생성`); router.refresh(); await load()
+    } finally { setBusy(false) }
+  }
+  async function exclude(excluded: boolean) {
+    setBusy(true); setFlash('')
+    try {
+      const res = await fetch(`/api/channeltalk/chats/${id}/exclude`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ excluded }) })
+      const d = await res.json()
+      if (!res.ok) { setFlash(d.error ?? '실패'); return }
+      router.refresh(); await load()
+    } finally { setBusy(false) }
+  }
 
   useEffect(() => {
     fetch(`/api/channeltalk/chats/${id}`).then(async (r) => {
@@ -33,7 +65,6 @@ export default function ChanneltalkChatDetailPage() {
 
   if (err) return <div className="p-8 text-sm text-red-600">{err}</div>
   if (!chat) return <div className="p-8 text-sm text-gray-400">불러오는 중...</div>
-  const who = (m: Msg) => m.personType === 'manager' ? managerNames[m.personId ?? ''] ?? '담당자' : m.personType === 'user' ? chat.user?.name ?? '고객' : CHANNELTALK_PERSON_LABEL[m.personType ?? ''] ?? m.personType
   const row = (l: string, v: React.ReactNode) => <div className="flex gap-2 text-sm"><span className="w-20 shrink-0 text-gray-500">{l}</span><span className="min-w-0 break-words text-gray-900">{v ?? '-'}</span></div>
 
   return (
@@ -69,22 +100,36 @@ export default function ChanneltalkChatDetailPage() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:col-span-2">
-          <h2 className="mb-3 text-sm font-semibold text-gray-700">대화 ({chat.messages.length})</h2>
-          {chat.messages.length === 0 ? <p className="py-8 text-center text-sm text-gray-400">메시지가 없습니다.</p> : (
-            <div className="space-y-2">
-              {chat.messages.map((m) => (
-                <div key={m.id} className={`rounded-lg border px-3 py-2 ${BUBBLE[m.personType ?? ''] ?? BUBBLE.bot} ${m.personType === 'user' ? 'mr-8' : 'ml-8'}`}>
-                  <div className="mb-0.5 flex items-center gap-2 text-[11px] text-gray-500">
-                    <span className="font-medium">{who(m)}</span><span>{CHANNELTALK_PERSON_LABEL[m.personType ?? ''] ?? ''}</span><span className="ml-auto">{kst(m.createdAtCt)}</span>
-                  </div>
-                  {m.plainText && <p className="whitespace-pre-wrap break-words text-sm">{m.plainText}</p>}
-                  {m.hasFiles && m.fileMeta && <p className="mt-1 text-xs text-gray-500">📎 {m.fileMeta.map((f) => f.name ?? f.type ?? '파일').join(', ')}</p>}
-                  {!m.plainText && !m.hasFiles && <p className="text-xs text-gray-400">(본문 없음)</p>}
-                </div>
-              ))}
+        <div className="space-y-4 lg:col-span-2">
+        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <h2 className="mb-2 text-sm font-semibold text-gray-700">VOC</h2>
+          {chat.vocLink ? (
+            <p className="text-sm text-gray-700">
+              <Link href={`/voc/${chat.vocLink.vocId}`} className="font-mono text-blue-600 hover:underline">{chat.vocLink.voc.vocCode}</Link>
+              <span className="ml-2 text-gray-900">{chat.vocLink.voc.title}</span>
+              <span className="ml-2 text-xs text-gray-400">{VOC_LINK_REASON_LABEL[chat.vocLink.linkReason] ?? chat.vocLink.linkReason} · {kst(chat.vocLink.linkedAt)}</span>
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className={chat.vocSkipReason ? 'text-gray-500' : 'rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700'}>
+                {chat.vocSkipReason ? `자동 승격 제외 — ${VOC_SKIP_LABEL[chat.vocSkipReason]}${chat.vocExcludedBy ? ` (${chat.vocExcludedBy.name})` : ''}` : '자동 승격 대기'}
+              </span>
+              {canWrite && (
+                <>
+                  <button type="button" onClick={promote} disabled={busy} className="rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">VOC 생성</button>
+                  {chat.vocExcludedAt
+                    ? <button type="button" onClick={() => exclude(false)} disabled={busy} className="rounded-md border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">제외 해제</button>
+                    : <button type="button" onClick={() => exclude(true)} disabled={busy} className="rounded-md border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">자동 승격 제외</button>}
+                </>
+              )}
+              {flash && <span className="text-xs text-gray-500">{flash}</span>}
             </div>
           )}
+        </div>
+        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <h2 className="mb-3 text-sm font-semibold text-gray-700">대화 ({chat.messages.length})</h2>
+          <ChatTimeline messages={chat.messages} managerNames={managerNames} customerName={chat.user?.name ?? null} />
+        </div>
         </div>
       </div>
     </div>

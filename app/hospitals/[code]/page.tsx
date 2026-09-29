@@ -17,6 +17,7 @@ import HospitalNotePanel from '@/app/wiki/components/HospitalNotePanel'
 import ConsultationsCard from './_components/ConsultationsCard'
 import SalesSection from './_components/SalesSection'
 import SystemStatusCard from './_components/SystemStatusCard'
+import HospitalTagsCard from './_components/HospitalTagsCard'
 import { canAccessSales } from '@/lib/sales'
 
 
@@ -213,6 +214,9 @@ export default async function HospitalDetailPage({ params }: PageProps) {
             </dl>
           )}
         </div>
+
+        {/* 부가정보 — 태그 (2026-09-28, 마스터 엄격 정의·체크만) */}
+        <HospitalTagsCard hospitalCode={hospital.hospitalCode} canWrite={isAdmin} />
 
         {/* thynC 도입현황 */}
         <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">

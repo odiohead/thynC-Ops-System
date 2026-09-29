@@ -19,7 +19,8 @@ interface Run {
 interface Data {
   interval: string; activeInterval: string; maxCalls: number; configured: boolean; running: boolean
   backfill: BackfillState; runs: Run[]
-  stats: { chats: Record<string, number>; messages: number; users: number; lastSyncedAt: string | null }
+  promote: boolean; cutover: string; rescanHours: string; lastRescanAt: string | null
+  stats: { chats: Record<string, number>; messages: number; users: number; lastSyncedAt: string | null; vocLinked: number }
 }
 
 const kst = (iso: string | null) => (iso ? new Date(iso).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16) : '-')
@@ -29,6 +30,9 @@ export default function ChanneltalkSyncSettingsPage() {
   const [data, setData] = useState<Data | null>(null)
   const [interval, setIntervalValue] = useState('off')
   const [maxCalls, setMaxCalls] = useState(200)
+  const [promote, setPromote] = useState(false)
+  const [cutover, setCutover] = useState('')
+  const [rescanHours, setRescanHours] = useState('24')
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
   const [authChecked, setAuthChecked] = useState(false)
@@ -37,7 +41,7 @@ export default function ChanneltalkSyncSettingsPage() {
     const res = await fetch('/api/settings/channeltalk-sync')
     if (!res.ok) return
     const d: Data = await res.json()
-    setData(d); setIntervalValue(d.interval); setMaxCalls(d.maxCalls)
+    setData(d); setIntervalValue(d.interval); setMaxCalls(d.maxCalls); setPromote(d.promote); setCutover(d.cutover ?? ''); setRescanHours(d.rescanHours ?? '24')
   }, [])
 
   useEffect(() => {
@@ -53,19 +57,19 @@ export default function ChanneltalkSyncSettingsPage() {
   async function save() {
     setBusy('save')
     try {
-      const res = await fetch('/api/settings/channeltalk-sync', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ interval, maxCalls }) })
+      const res = await fetch('/api/settings/channeltalk-sync', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ interval, maxCalls, promote, cutover, rescanHours }) })
       const d = await res.json()
       flash(res.ok, res.ok ? d.message : d.error)
       router.refresh(); await load()
     } finally { setBusy(null) }
   }
-  async function run(mode: 'incremental' | 'backfill') {
+  async function run(mode: 'incremental' | 'backfill' | 'rescan') {
     setBusy(mode)
     try {
       const res = await fetch('/api/settings/channeltalk-sync/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) })
       const d = await res.json()
       if (!res.ok) flash(false, d.error ?? '실패')
-      else flash(true, `${mode === 'backfill' ? '백필' : '동기화'} 완료 — 스캔 ${d.scannedChats} · 갱신 ${d.upsertedChats}(신규 ${d.newChats}) · 메시지 ${d.fetchedMessages} · 호출 ${d.apiCalls}${d.budgetExceeded ? ' · 호출 상한 도달(이어서 실행 필요)' : ''}${d.backfillDone ? ' · 백필 완료' : ''}`)
+      else flash(true, `${mode === 'backfill' ? '백필' : mode === 'rescan' ? '전량 재검사' : '동기화'} 완료 — 스캔 ${d.scannedChats} · 갱신 ${d.upsertedChats}(신규 ${d.newChats}) · 메시지 ${d.fetchedMessages} · 호출 ${d.apiCalls}${d.promote ? ` · VOC 생성 ${d.promote.created}·후속 ${d.promote.followups}·회신완료 ${d.promote.resolved}${d.promote.errors?.length ? `·실패 ${d.promote.errors.length}` : ''}` : ''}${d.budgetExceeded ? ' · 호출 상한 도달(이어서 실행 필요)' : ''}${d.backfillDone ? ' · 백필 완료' : ''}`)
       router.refresh(); await load()
     } finally { setBusy(null) }
   }
@@ -132,6 +136,34 @@ export default function ChanneltalkSyncSettingsPage() {
             {message && <span className={`text-sm ${message.ok ? 'text-green-600' : 'text-red-600'}`}>{message.text}</span>}
           </div>
           <p className="mt-3 text-xs text-gray-500">백필: {bfLabel}. 백필은 종료 상담을 오래된 순으로 전량 훑으며, 호출 상한에 닿으면 커서를 저장하고 멈춥니다(주기가 켜져 있으면 자동으로 이어감).</p>
+        </div>
+
+        <div className="mb-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+          <h2 className="mb-3 text-sm font-semibold text-gray-700">VOC 자동 승격</h2>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" checked={promote} onChange={(e) => setPromote(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-gray-300" />
+              <span><span className="font-medium text-gray-900">자동 승격 ON</span><span className="block text-xs text-gray-500">분류 태그(a~h)가 걸린 상담을 VOC로 자동 생성. 팀 태그는 조건 아님</span></span>
+            </label>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">컷오버 일자 (KST)</label>
+              <input type="date" value={cutover} onChange={(e) => setCutover(e.target.value)} className="mt-1 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
+              <p className="mt-1 text-xs text-gray-500">이 일자 이후 고객 첫 발화 상담만 자동 승격. 비우면 전체(과거 소급) — 권장하지 않음</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">종료 상담 전량 재검사 주기</label>
+              <div className="mt-1 flex items-center gap-2">
+                <input type="text" value={rescanHours} onChange={(e) => setRescanHours(e.target.value)} className="w-20 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
+                <span className="text-xs text-gray-500">시간 (1~168) 또는 off</span>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">늦게 걸린 태그·담당 변경 수집(API 7~8회). 마지막 {kst(data.lastRescanAt)}</p>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button type="button" onClick={save} disabled={!!busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{busy === 'save' ? '저장 중...' : '저장'}</button>
+            <button type="button" onClick={() => run('rescan')} disabled={!!busy || !data.configured} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">{busy === 'rescan' ? '재검사 중...' : '전량 재검사 지금'}</button>
+            <span className="text-xs text-gray-500">VOC 연결 상담 {data.stats.vocLinked.toLocaleString()}건</span>
+          </div>
         </div>
 
         <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">

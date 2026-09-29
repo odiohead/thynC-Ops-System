@@ -13,6 +13,7 @@ import TicketSeverityBadge from '@/app/tickets/components/TicketSeverityBadge'
 import TicketRefTypeBadge from '@/app/tickets/components/TicketRefTypeBadge'
 import RichTextEditor from '@/app/components/RichTextEditor'
 import VocForm, { emptyVocForm, type VocFormValue } from '../_components/VocForm'
+import VocChanneltalkSection, { type LinkedChat } from '../_components/VocChanneltalkSection'
 import type { TicketStatus, TicketSeverity } from '@prisma/client'
 import { TICKET_DOMAIN_META, DOMAIN_REF_TYPES } from '@/lib/ticket-domains/meta'
 
@@ -46,6 +47,9 @@ interface VocDetail {
   vocType: CodeRef | null
   status: CodeRef | null
   createdBy: { id: string; name: string } | null
+  source?: string
+  autoCreated?: boolean
+  channeltalkChats?: LinkedChat[]
   ticket: {
     id: number
     ticketCode: string
@@ -286,6 +290,9 @@ export default function VocDetailPage() {
           )}
         </div>
       )}
+
+      {/* 채널톡 상담 (2026-09-28 — 연결 상담 + 타임라인) */}
+      <VocChanneltalkSection links={voc.channeltalkChats ?? []} customerName={voc.customerName} />
 
       {/* 처리 결과 (Tiptap — 유지보수 resolution 선례) */}
       <div className="mb-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">

@@ -3,8 +3,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { nextVocCode } from '@/lib/csCodes'
-import { createTicketForVoc } from '@/lib/ticket-domains/voc'
+import { createVocReceipt } from '@/lib/vocService'
 import { notifyTicketCreated } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
 
@@ -23,6 +22,7 @@ const listInclude = {
   status: { select: { id: true, name: true, color: true } },
   createdBy: { select: { id: true, name: true } },
   ticket: { select: { id: true, ticketCode: true, status: true, owner: { select: { id: true, name: true } } } },
+  channeltalkChats: { select: { chatId: true } },
 } as const
 
 export async function GET(request: NextRequest) {
@@ -117,12 +117,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 })
   }
 
-  // 기본 상태 '접수'
-  if (!statusId) {
-    const accept = await prisma.statusCode.findFirst({ where: { category: 'VOC_STATUS', name: '접수' }, select: { id: true } })
-    statusId = accept?.id ?? null
-  }
-
   let receivedAt: Date | undefined
   if (body.receivedAt) {
     const d = new Date(body.receivedAt)
@@ -130,55 +124,19 @@ export async function POST(request: NextRequest) {
     receivedAt = d
   }
 
-  const statusRow = statusId ? await prisma.statusCode.findUnique({ where: { id: statusId }, select: { name: true } }) : null
-
-  // VOC 레코드 + 연결 티켓을 **한 트랜잭션**으로 — 티켓 없는 VOC를 만들지 않는다 (실패 시 전부 롤백).
-  // 코드 발번 UNIQUE 충돌(P2002)은 1회 재시도.
-  let created!: { id: number; vocCode: string }
-  let ticketId!: number
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const result = await prisma.$transaction(async (tx) => {
-        const voc = await tx.vocReceipt.create({
-          data: {
-            vocCode: await nextVocCode(tx),
-            title,
-            hospitalCode,
-            hospitalNameRaw: hospitalCode ? null : (typeof body.hospitalNameRaw === 'string' && body.hospitalNameRaw.trim() ? body.hospitalNameRaw.trim() : null),
-            customerName: typeof body.customerName === 'string' && body.customerName.trim() ? body.customerName.trim() : null,
-            customerPhone: typeof body.customerPhone === 'string' && body.customerPhone.trim() ? body.customerPhone.trim() : null,
-            channelId,
-            vocTypeId,
-            statusId,
-            content: typeof body.content === 'string' && body.content.trim() ? body.content.trim() : null,
-            receivedAt,
-            createdById: user.userId,
-          },
-        })
-        const tid = await createTicketForVoc(tx, {
-          id: voc.id,
-          vocCode: voc.vocCode,
-          title: voc.title,
-          hospitalCode: voc.hospitalCode,
-          hospitalName: null,
-          statusName: statusRow?.name ?? null,
-          statusId: voc.statusId,
-          vocTypeId: voc.vocTypeId,
-          content: voc.content,
-          receivedAt: voc.receivedAt,
-          resolvedAt: null,
-          createdAt: voc.createdAt,
-        }, user.userId, 'domain')
-        return { voc, tid }
-      })
-      created = result.voc
-      ticketId = result.tid
-      break
-    } catch (err) {
-      if (attempt === 0 && err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') continue
-      throw err
-    }
-  }
+  // VOC 레코드 + 연결 티켓을 **한 트랜잭션**으로 (lib/vocService — 채널톡 자동 승격과 공용, 2026-09-28)
+  const created = await createVocReceipt({
+    title,
+    hospitalCode,
+    hospitalNameRaw: typeof body.hospitalNameRaw === 'string' && body.hospitalNameRaw.trim() ? body.hospitalNameRaw.trim() : null,
+    customerName: typeof body.customerName === 'string' && body.customerName.trim() ? body.customerName.trim() : null,
+    customerPhone: typeof body.customerPhone === 'string' && body.customerPhone.trim() ? body.customerPhone.trim() : null,
+    channelId, vocTypeId, statusId,
+    content: typeof body.content === 'string' && body.content.trim() ? body.content.trim() : null,
+    receivedAt: receivedAt ?? null,
+    source: 'MANUAL',
+  }, user.userId)
+  const ticketId = created.ticketId
 
   const vocReceipt = await prisma.vocReceipt.findUnique({ where: { id: created.id }, include: listInclude })
 

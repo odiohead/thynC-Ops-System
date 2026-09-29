@@ -24,6 +24,9 @@ interface VocReceipt {
   status: CodeRef | null
   createdBy: { id: string; name: string } | null
   ticket: { id: number; ticketCode: string; status: string; owner: { id: string; name: string } | null } | null
+  source?: string
+  autoCreated?: boolean
+  channeltalkChats?: { chatId: string }[]
 }
 
 /** ISO(UTC) → KST 날짜 (UTC slice는 KST 00~09시 접수 건이 하루 전으로 표시됨) */
@@ -166,7 +169,7 @@ export default function VocListPage() {
                     <td className="max-w-[10rem] truncate px-3 py-2 text-gray-900">{v.hospital?.hospitalName ?? v.hospitalNameRaw ?? '-'}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-gray-700">{v.customerName ?? '-'}</td>
                     <td className="whitespace-nowrap px-3 py-2">{codeBadge(v.vocType)}</td>
-                    <td className="whitespace-nowrap px-3 py-2">{codeBadge(v.channel)}</td>
+                    <td className="whitespace-nowrap px-3 py-2">{codeBadge(v.channel)}{v.autoCreated && <span className="ml-1 text-[10px] text-gray-400" title="채널톡 태그 트리거 자동 생성">자동</span>}{(v.channeltalkChats?.length ?? 0) > 1 && <span className="ml-1 text-[10px] text-gray-400">×{v.channeltalkChats!.length}</span>}</td>
                     <td className="max-w-sm truncate px-3 py-2 text-gray-900">{v.title}</td>
                     <td className="whitespace-nowrap px-3 py-2">{codeBadge(v.status)}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-gray-600">{v.ticket?.owner?.name ?? '-'}</td>

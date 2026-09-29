@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { evaluateChat, readCutover } from '@/lib/channeltalk/vocPromote'
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const user = await getAuthUser(request)
@@ -12,11 +13,13 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       user: { select: { id: true, name: true, mobileNumber: true, landlineNumber: true, email: true, opsCode: true, hospitalNameRaw: true, ward: true, address: true, tags: true } },
       hospital: { select: { hospitalCode: true, hospitalName: true } },
       messages: { orderBy: { createdAtCt: 'asc' }, select: { id: true, personType: true, personId: true, plainText: true, hasFiles: true, fileMeta: true, createdAtCt: true } },
+      vocLink: { select: { vocId: true, linkReason: true, linkedAt: true, voc: { select: { vocCode: true, title: true } } } },
+      vocExcludedBy: { select: { id: true, name: true } },
     },
   })
   if (!chat) return NextResponse.json({ error: '상담을 찾을 수 없습니다' }, { status: 404 })
   const managers = await prisma.channeltalkManager.findMany({ select: { id: true, name: true } })
   const { raw: _raw, ...rest } = chat
   void _raw
-  return NextResponse.json({ chat: rest, managerNames: Object.fromEntries(managers.map((m) => [m.id, m.name ?? m.id])) })
+  return NextResponse.json({ chat: { ...rest, vocSkipReason: evaluateChat(chat, await readCutover()) }, managerNames: Object.fromEntries(managers.map((m) => [m.id, m.name ?? m.id])) })
 }

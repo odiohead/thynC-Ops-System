@@ -83,6 +83,7 @@ model Hospital {
   vocReceipts           VocReceipt[]
   asReceipts            AsReceipt[]
   channeltalkChats      ChanneltalkUserChat[]
+  tagAssignments        HospitalTagAssignment[] // 병원 태그 (2026-09-28)
   projects              Project[]
   meta                  HospitalMeta?
   hospitalDevices       HospitalDevice[]             @relation("DeviceCurrentHospital") // 현재 배치 중 개체 (원장, 2026-09-01)
@@ -346,6 +347,9 @@ model User {
 
   @@map("users")
   @@schema("public")
+  hospitalTagAssignments HospitalTagAssignment[] @relation("HospitalTagAssigner") // 병원 태그 부여자 (2026-09-28)
+  channeltalkVocExclusions ChanneltalkUserChat[] @relation("ChanneltalkVocExcluder")
+  vocChanneltalkLinks      VocChanneltalkChat[]  @relation("VocChatLinker")
 }
 
 model Department {
@@ -2124,6 +2128,8 @@ model VocReceipt {
   resolvedAt      DateTime? @map("resolved_at") @db.Date
   createdById     String?   @map("created_by_id") // 생성자 — 배정이 아니라 기록 (계정 삭제 시 NULL)
   ticketId        Int?      @unique @map("ticket_id") // 도메인 1:1 연결 — CS 마스터 티켓
+  source          String    @default("MANUAL") @db.VarChar(16) // MANUAL / CHANNELTALK (2026-09-28)
+  autoCreated     Boolean   @default(false) @map("auto_created") // 채널톡 태그 트리거 자동 생성
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -2133,6 +2139,7 @@ model VocReceipt {
   status    StatusCode? @relation("VocStatus", fields: [statusId], references: [id], onDelete: SetNull)
   createdBy User?       @relation("VocCreator", fields: [createdById], references: [id], onDelete: SetNull)
   ticket    Ticket?     @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  channeltalkChats VocChanneltalkChat[] // 연결 상담 (2026-09-28)
 
   @@index([receivedAt])
   @@index([hospitalCode])
@@ -2884,8 +2891,14 @@ model ChanneltalkUserChat {
   hospitalMatchNote   String?   @map("hospital_match_note")
   firstSeenAt         DateTime  @default(now()) @map("first_seen_at") @db.Timestamptz
   lastSyncedAt        DateTime  @default(now()) @map("last_synced_at") @db.Timestamptz
+  firstUserMessageAt  DateTime? @map("first_user_message_at") @db.Timestamptz // 고객 첫 텍스트 발화 (VOC receivedAt 원천, 2026-09-28)
+  managerInitiated    Boolean   @default(false) @map("manager_initiated") // 첫 메시지가 담당자(발송안내 등)
+  vocExcludedAt       DateTime? @map("voc_excluded_at") @db.Timestamptz // 수동 제외
+  vocExcludedById     String?   @map("voc_excluded_by_id")
 
   user     ChanneltalkUser?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  vocExcludedBy User?           @relation("ChanneltalkVocExcluder", fields: [vocExcludedById], references: [id], onDelete: SetNull)
+  vocLink  VocChanneltalkChat?
   hospital Hospital?            @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: SetNull)
   messages ChanneltalkMessage[]
 
@@ -2934,5 +2947,64 @@ model ChanneltalkSyncRun {
 
   @@index([startedAt])
   @@map("channeltalk_sync_runs")
+  @@schema("public")
+}
+
+// ─── 병원 태그 (2026-09-28) — 마스터는 엄격 정의(ADMIN/시드), 사용자는 부여(체크)만 ───
+
+/// 병원 태그 마스터 — key는 코드 참조용 불변 시스템 키(lib/hospitalTags.ts), is_system이면 삭제·키 변경 금지
+model HospitalTag {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique @db.VarChar(50)
+  name        String   @unique @db.VarChar(50)
+  description String?
+  effectNote  String?  @map("effect_note") // 시스템 동작 효과 — 없으면 정보성 라벨
+  color       String   @default("#6B7280") @db.VarChar(20)
+  isSystem    Boolean  @default(false) @map("is_system")
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  assignments HospitalTagAssignment[]
+
+  @@map("hospital_tags")
+  @@schema("public")
+}
+
+/// 병원 ↔ 태그 부여 (N:M) — UNIQUE(hospital, tag), 병원 삭제 시 CASCADE, 태그는 RESTRICT
+model HospitalTagAssignment {
+  id           Int      @id @default(autoincrement())
+  hospitalCode String   @map("hospital_code")
+  tagId        Int      @map("tag_id")
+  note         String? // 부여 근거 (v1 UI 미노출)
+  assignedById String?  @map("assigned_by_id")
+  assignedAt   DateTime @default(now()) @map("assigned_at") @db.Timestamptz
+
+  hospital   Hospital    @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: Cascade)
+  tag        HospitalTag @relation(fields: [tagId], references: [id], onDelete: Restrict)
+  assignedBy User?       @relation("HospitalTagAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@unique([hospitalCode, tagId])
+  @@index([tagId])
+  @@map("hospital_tag_assignments")
+  @@schema("public")
+}
+
+/// VOC ↔ 채널톡 상담 연결 (2026-09-28) — VOC 1 : 상담 N, 상담은 최대 1 VOC(chat_id UNIQUE)
+model VocChanneltalkChat {
+  id         Int      @id @default(autoincrement())
+  vocId      Int      @map("voc_id")
+  chatId     String   @unique @map("chat_id") @db.VarChar(40)
+  linkReason String   @map("link_reason") @db.VarChar(16) // AUTO_TAG / AUTO_FOLLOWUP / MANUAL
+  linkedById String?  @map("linked_by_id")
+  linkedAt   DateTime @default(now()) @map("linked_at") @db.Timestamptz
+
+  voc      VocReceipt          @relation(fields: [vocId], references: [id], onDelete: Cascade)
+  chat     ChanneltalkUserChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  linkedBy User?               @relation("VocChatLinker", fields: [linkedById], references: [id], onDelete: SetNull)
+
+  @@index([vocId])
+  @@map("voc_channeltalk_chats")
   @@schema("public")
 }

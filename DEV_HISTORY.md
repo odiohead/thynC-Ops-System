@@ -4,6 +4,39 @@
 
 ---
 
+## 2026-09-29 15:30 | 주차 웹할인 등록 감사 로그 (dev2, 빌드·PROD 미반영)
+
+- **배경(사용자 요청)**: 주차 웹할인(`/parking`)이 pweb.kr 대행 호출 stateless 모듈(DB 미사용)이라 누가 언제 어떤 차량에 할인권을 등록했는지 시스템 어디에도 남지 않음(감사 로그·서버 로그 모두 없음, `lib/parking.ts`에 console 출력 0). "감사 로그 추가로 진행" 지시
+- **구현**: `POST /api/parking/register` — 사이트 등록 성공(`result.ok`) 시 `logAudit` CREATE `resource='parking_discount'`, resourceId=입차ID, 라벨 `차량번호 · 계정 · 할인권코드`, after `{mode:'manual', account, carNo, carId, entryDate, discountType, message}` / `POST /api/parking/auto-apply` — 단계 중 1건이라도 `applied`면 기록(부분 실패 포함), 라벨 `차량번호 · 자동 n건 (무료 a·유료 b)`, after `{mode:'auto', ok, message, plan 요약(elapsed/target/chargeable/already/add/totalCost/freeBlocked), steps[계정·라벨·할인권·분·가격·applied·message]}`. 사이트 거부(409)·예외(502)는 미기록 — 실제 등록된 건만 이력으로 남기는 원칙
+- **검증**: tsc 0·eslint 0. **실 등록 테스트는 미실시**(pweb.kr에 실제 할인권이 소모되므로) — 다음 실제 사용 시 `/settings/audit-logs` 대상 `parking_discount`로 확인
+- 영향: app/api/parking/{register,auto-apply}/route.ts, README.md
+
+---
+
+## 2026-09-28 18:30 | 채널톡 상담 → VOC 승격 (2단계) — 분류 태그 트리거 자동 생성·후속 연결·종료↔회신완료·전량 재검사 (dev2 빌드·재시작, PROD 미반영)
+
+- **기준(사용자 확정, `projects/voc_channeltalk_promotion_design.md` §1)**: 분류 태그(a~h)가 걸린 시점에 VOC 생성(팀 태그 조건 아님 — 보류) · 고객 발화 ∧ 담당자 발신 아님 ∧ 컷오버 이후 · 같은 고객 미종결 VOC 14일 내 후속 연결 · receivedAt=첫 발화 · 상담 종료→회신완료(하위 미종결 유지)/재오픈→처리중 · 늦은 태그는 종료 상담 전량 재검사(24h). "일단 개발해봐" 지시로 설계 문서 없이 착수, 문서는 기록용 작성
+- **DB(규칙 1)**: 마이그 `20260928190000_voc_channeltalk_promotion` — `voc_receipts.source`·`auto_created`, `voc_channeltalk_chats`(VOC 1:N 상담, chat UNIQUE, link_reason), `channeltalk_user_chats.first_user_message_at`·`manager_initiated`·`voc_excluded_at/by_id`(기존 3,061건 메시지에서 백필: 발화 2,261·담당자 발신 916). **VOC_TYPE 재편**(`seed-cs-masters.sql` 8): 구 6종 삭제(dev2·PROD 참조 0 확인) → 채널톡 분류 태그 28종(name 대분류/소분류, value=태그명), VOC_CHANNEL '채널톡'
+- **코드**: `lib/vocService.ts`(POST 생성 로직 추출·ownerId 배정) · `lib/channeltalk/vocPromote.ts`(evaluateChat·promoteChat·syncVocStatusFromChat·promoteChanneltalkVocs) · `vocSync.ts`(첫 발화·담당자 발신 갱신, 변경 id 수집, `syncClosedFull` 재검사, 승격 훅, stats에 promote/fullRescan) · API promote/exclude 신규, 목록 `voc` 필터·`vocSkipReason`·`vocLink`, VOC 상세 `channeltalkChats`, 설정 promote/cutover/rescanHours + run `rescan` · 화면 inbox VOC 열·필터·상세 액션, `VocChanneltalkSection`·`ChatTimeline` 공용 추출, VOC 목록 '자동', 설정 블록
+- **중간 결함 수정**: ① 승격 후보가 '변경 상담'뿐이라 설정 변경 직후 미변경 대상 28건 누락 → 후보 = 변경 ∪ DB 미승격 대상 ② 제목이 인사말("안녕하세요")만 → 첫 의미 있는 고객 메시지(8자 이상) 선택, 본문 = 고객 초기 발화 ≤5건
+- **검증(dev2, 4GB 빌드·`pm2 restart thync-dev`·health 200)**: tsc 0·eslint 0. 자동 ON·컷오버 9/28 → 41/41 생성(분류·채널·담당 ASSIGNED·receivedAt 13/13 일치·종료 상담 즉시 회신완료), 재틱 0(멱등) · 재오픈 시뮬레이션 처리중↔회신완료(티켓 IN_PROGRESS↔RESOLVED) · 수동 승격 201/VIEWER 403/재승격 409/MANUAL · 제외→EXCLUDED→해제, 연결 상담 409 · voc 필터 4종 · VOC 상세 링크·목록 source · 수동 등록 회귀(MANUAL) · 페이지 5종 200 · 감사. 테스트 수동 VOC 삭제. **후속 연결(AUTO_FOLLOWUP)은 실데이터 미발생 — PROD에서 확인**
+- **dev2 데이터 상태**: 자동 승격 ON·컷오버 2026-09-28·VOC 42건(자동 41 + 수동 승격 1) 남김. 폴링 주기는 off
+- **후속**: 제목 휴리스틱(워크플로 버튼 텍스트) · 팀 태그 라우팅 · 태그 변경 시 분류 재동기화 · 병원 미매칭 큐 · AS접수 하위 연결 · PROD 반영 시 마이그+시드 재실행+백필 SQL+컷오버 지정
+- 영향: prisma/{schema.prisma,migrations/20260928190000_voc_channeltalk_promotion/}, scripts/seed-cs-masters.sql, lib/{vocService.ts(신규),channeltalkAsSync.ts}, lib/channeltalk/{shared,vocSync,vocPromote(신규)}.ts, app/api/channeltalk/chats/{route.ts,[id]/route.ts,[id]/promote/route.ts(신규),[id]/exclude/route.ts(신규)}, app/api/voc-receipts/{route.ts,[id]/route.ts}, app/api/settings/channeltalk-sync/{route.ts,run/route.ts}, app/voc/{page.tsx,[id]/page.tsx,inbox/page.tsx,inbox/[id]/page.tsx,_components/ChatTimeline.tsx(신규),_components/VocChanneltalkSection.tsx(신규)}, app/settings/channeltalk-sync/page.tsx, projects/{voc_channeltalk_promotion_design.md(신규),README.md}, README.md
+
+---
+
+## 2026-09-28 17:30 | 병원 태그 — 엄격 정의 마스터(3종) + 병원 상세 '부가정보 > 태그' 체크 (dev2 빌드·재시작, PROD 미반영)
+
+- **배경(사용자 요청)**: 병원 단위 운영 특성(선교체 기본·원격접속불가·주요병원)이 코드 어디에도 없어 AS·CS 처리 시 참고 불가 → 태그 컨셉 합의. **마스터는 엄격 정의(아무나 생성 불가), 사용자는 체크만**. 정보성 라벨과 동작 파라미터(시스템 키로 코드 참조)를 한 마스터에서 구분. 설계 문서 없이 스키마 설계 후 바로 구현(사용자 지시)
+- **DB(규칙 1)**: 마이그 `20260928170000_hospital_tags` — `hospital_tags`(key UNIQUE·name UNIQUE·description·effect_note·color·is_system·is_active·sort_order) + `hospital_tag_assignments`(hospital CASCADE·tag RESTRICT·UNIQUE(hospital, tag)·note 예약·assigned_by SET NULL·assigned_at). 시드 `scripts/seed-hospital-tags.sql`(idempotent, ON CONFLICT(key) 갱신) 3종: `PRE_REPLACE_DEFAULT`·`NO_REMOTE_ACCESS`·`KEY_ACCOUNT`(전부 is_system). psql 적용 → `migrate resolve --applied` → `prisma generate`
+- **코드**: `lib/hospitalTags.ts`(시스템 키 단일 소스·DTO·`hasHospitalTag`) · `GET /api/hospital-tags`(로그인) · `GET/PUT /api/hospitals/[code]/tags`(PUT은 USER 이상, 집합 교체 — 추가분만 부여자 기록, 감사 `hospital_tags` UPDATE before/after 태그명) · `app/hospitals/[code]/_components/HospitalTagsCard.tsx`(부가정보 카드 — 태그 서브영역, 체크 즉시 PUT·`router.refresh()`, 설명·효과·부여자 표시) · 상세 페이지 기본 정보 카드 아래 삽입
+- **검증(dev2, 4GB 빌드·`pm2 restart thync-dev`·health 200)**: tsc 0·eslint 0. curl — 마스터 3종, VIEWER PUT 403/GET 허용, body 오류·없는 태그 400, [1,3] 부여(added 2·부여자 기록) → [3](removed 1) → 동일 집합 무변경(0/0) → 빈 집합 원복, 없는 병원 404, 상세 200, 감사 2행(before/after)
+- **후속(연동 예정, 미구현)**: AS접수 등록 시 선교체 기본값 자동 체크·유지보수/VOC/상담 화면 원격접속불가 경고·병원 목록 태그 필터·마스터 관리 설정 화면(현재는 시드로만)
+- 영향: prisma/{schema.prisma,migrations/20260928170000_hospital_tags/}, scripts/seed-hospital-tags.sql(신규), lib/hospitalTags.ts(신규), app/api/hospital-tags/route.ts(신규), app/api/hospitals/[code]/tags/route.ts(신규), app/hospitals/[code]/{page.tsx,_components/HospitalTagsCard.tsx(신규)}, README.md
+
+---
+
 ## 2026-09-28 15:40 | PROD 백필 완료·5분 폴링 ON — 백필 결함 2건 수정 (caf6390)
 
 - **PROD 첫 백필 실패 → 결함 2건(dev2 전체 백필로 재현·수정)**: ① 오래된 상담의 `userId`가 목록 응답 `users`에 없어(삭제·병합 고객) FK 위반 → `ensureUser`: DB에 없으면 `GET /users/{id}` 단건 보충, 그래도 없으면(422 notFound) `user_id` NULL + 로그 ② 메시지 본문에 NUL(0x00) → PostgreSQL TEXT·JSONB 거부(22021) → `stripNul`/`deepStripNul`을 추출 문자열·raw JSON 전체에 적용. 커밋 caf6390·push

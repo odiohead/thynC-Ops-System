@@ -23,7 +23,8 @@ import { createAsReceipt, AsServiceError, type LineInput } from '@/lib/asReceipt
 import { isRegistryTxAbort } from '@/lib/deviceRegistry'
 import { loadHospitalMatcher } from '@/lib/hospitalNameMatcher'
 
-export const CHANNELTALK_BOT_EMAIL = 'channeltalk-bot@seersthync.com'
+import { CHANNELTALK_BOT_EMAIL } from '@/lib/channeltalk/shared'
+export { CHANNELTALK_BOT_EMAIL }
 
 // AppSetting 키 (README 데이터베이스 스키마 — AppSetting)
 const KEY_SHEET_ID = 'channeltalk_as_sheet_id'
