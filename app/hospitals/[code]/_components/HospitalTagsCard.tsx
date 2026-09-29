@@ -1,13 +1,14 @@
 'use client'
 
 /**
- * 병원 부가정보 카드 — '태그' 서브영역 (2026-09-28)
+ * 병원 부가정보 카드 — '태그'(2026-09-28) + 'AS메모'(2026-09-29, AsMemoPanel — AS접수 상세와 공용) 서브영역
  * 마스터(3종 시드)는 엄격 정의, 여기서는 체크만. USER 이상 토글 → PUT 즉시 반영, VIEWER는 칩만.
  * 시스템 효과가 있는 태그(effectNote)는 설명에 함께 표시.
  */
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import type { HospitalTagDto, HospitalTagAssignmentDto } from '@/lib/hospitalTags'
+import AsMemoPanel from './AsMemoPanel'
 
 interface Props { hospitalCode: string; canWrite: boolean }
 
@@ -93,6 +94,9 @@ export default function HospitalTagsCard({ hospitalCode, canWrite }: Props) {
         )}
         {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
         {!canWrite && !loading && <p className="mt-2 text-xs text-gray-400">태그 변경은 USER 이상만 가능합니다.</p>}
+      </div>
+      <div className="border-t border-gray-100 px-6 py-5">
+        <AsMemoPanel hospitalCode={hospitalCode} canWrite={canWrite} />
       </div>
     </div>
   )

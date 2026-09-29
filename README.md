@@ -171,6 +171,7 @@ app/
 ├── (대시보드)/                        # 메인 대시보드 (이번 주/다음 주 공사 현황)
 ├── dashboard/                        # 사이니지 월보드 (50인치 상시 표시, 네비 없음) — 운영/영업 보드 선택, useSignageKeepAlive(자동 복구·2분 리로드)
 ├── hospitals/                        # 병원 목록·상세·등록·수정 ([code]/_components/SalesSection — 영업 정보 v3: 요약 스트립+탭 4개, ADMIN+SEERS · HospitalDeviceSummary — 도입 현황 카드, lib 직접 호출)
+│   └── [code]/_components/           # HospitalTagsCard(부가정보 — 태그 체크 + AS메모, 2026-09-28~29) · AsMemoPanel(AS메모 보기/편집 — AS접수 상세 공용) · HospitalTagChips(읽기 전용 태그 칩, 선교체 기본 강조)
 ├── devices/                          # 기기 현황(구 디바이스 원장, 2026-09-02 개명) (2026-09-01, `projects/hospital_device_registry_design.md` §6) — page.tsx(searchParams 파싱) + _components/(DevicesClient 오케스트레이터·useDevicesUrlState·urlState·api·types·toast / HospitalPicker·SerialLookup·GlobalCoverage·ExcelButton / SummaryStrip·DeviceTable·BulkActionBar·DeviceHistoryDrawer·CorrectionModal·ProductTypeModal·DealModal·AsFlagModal / RegisterModal·MoveWardModal·RecoverModal·ReplaceModal·WardCombo·MaintenanceCodeCombo·MobileActionBar / ImportPanel·WardPanel·EventsTab / DeviceListTab(v1 [디바이스] 뷰) + 헬퍼 deviceDisplay·RegistryFloatingPanel·registryFormKit·groupd-shared) — v1 단순화 UI에서 SerialLookup·GlobalCoverage·SummaryStrip·MobileActionBar는 미렌더(보존)
 ├── hira-hospitals/                   # HIRA 병원 조회
 ├── install-plans/                    # 설치계획(가안) 목록·상세·등록
@@ -419,6 +420,7 @@ prisma/
 - Google Drive 폴더 ID (`driveProjectFolderId`), Drive 상태 파일 ID (`driveStatusFileId`), Drive 설치계획 파일 ID (`driveInstallPlanFileId`)
 - 원격 접속 URL (`remoteAccessUrl`), 원격 제어 URL (`remoteControlUrl`)
 
+- **AS메모 (2026-09-29, 마이그 `20260929090000_hospital_as_memo`)**: `asMemo`(리치텍스트 HTML — Tiptap 굵게·목록·색·형광펜, `sanitizeRichTextHtml` 후 저장, 빈 값 NULL)·`asMemoUpdatedAt`·`asMemoUpdatedById`(FK users SET NULL). 병원 상세 '부가정보 > AS메모'와 AS접수 상세 '1.공통정보'에서 같은 값을 편집(USER 이상, 접수 종결 여부 무관). 감사 `hospital_as_memo` UPDATE
 ### HospitalTag / HospitalTagAssignment (병원 태그 — 2026-09-28)
 - **HospitalTag** (`hospital_tags`): 엄격 정의 마스터(사용자 결정 — 생성·수정은 ADMIN/시드, 사용자는 체크만) — `key`(시스템 키 UNIQUE, 코드 참조용 불변 — `lib/hospitalTags.ts`)·`name`(UNIQUE)·`description`(언제 부여)·`effectNote`(시스템 동작 효과 — 없으면 정보성 라벨)·`color`·`isSystem`(삭제·키 변경 금지)·`isActive`·`sortOrder`. 초기 3종 시드 `scripts/seed-hospital-tags.sql`(idempotent): `PRE_REPLACE_DEFAULT` 선교체 기본 / `NO_REMOTE_ACCESS` 원격접속불가 / `KEY_ACCOUNT` 주요병원. 값이 붙는 규칙(허용량·SLA)은 태그가 아니라 정식 필드로
 - **HospitalTagAssignment** (`hospital_tag_assignments`): 병원 ↔ 태그 N:M — UNIQUE(hospital_code, tag_id), 병원 CASCADE·태그 RESTRICT, `note`(부여 근거 — v1 UI 미노출 예약)·`assignedById`(SET NULL)·`assignedAt`. 감사 `hospital_tags` UPDATE(before/after 태그명 배열)
@@ -1048,6 +1050,7 @@ prisma/
 - **병원 업무 일괄 이전** (SUPER_ADMIN): 병원 상세의 "업무 일괄 이전" 버튼으로 한 병원의 모든 업무(프로젝트·답사·설치계획·유지보수·상담·**디바이스 원장**)를 다른 병원으로 한 번에 이전(병원을 통째로 잘못 만든 경우 정리용). **연결 티켓·순수 티켓도 함께 이전**(P13 — [답사]/[설치계획] 제목의 병원명 갱신 포함). 디바이스 원장(2026-09-01)은 같은 트랜잭션에서 병동 이동(동명 병동은 대상 병원 병동으로 병합, 온프렘 코드 충돌 시 원본 코드 해제)·개체·이벤트·임포트 배치의 병원 코드를 이전 — 딜은 이동하지 않으므로 대상 병원 계약 대조에 차이가 표시될 수 있음(확인 단계에 안내)
 
 - **병원 태그 (2026-09-28)**: 상세 '기본 정보' 카드 아래 **'부가정보' 카드 > '태그'** 서브영역 — 마스터 3종(선교체 기본·원격접속불가·주요병원)을 체크박스로 부여/해제(USER 이상, 즉시 저장·`router.refresh()`, VIEWER는 칩만). 설명·시스템 효과·부여자·일시 표시. 마스터는 엄격 정의(시드 전용, 사용자 생성 불가). `HospitalTagsCard`
+- **병원 AS메모 (2026-09-29)**: '부가정보' 카드 두 번째 서브영역 — 리치텍스트(WeeklyRichEditor 재사용: 굵게·목록·글자색·형광펜) 작성/편집, 수정자·일시 표시(`AsMemoPanel`). **AS접수 상세 '1.공통정보' 하단**에 같은 패널(compact) + **병원 태그 칩**(`HospitalTagChips` — 선교체 기본 ★ 강조)이 함께 표시되어 AS 처리 중 병원 관행을 바로 참고. 두 화면이 같은 API를 쓰므로 한쪽 편집이 다른 쪽에 즉시 반영
 
 ### 기기 현황 (`/devices`, 2026-09-01, 2026-09-02 '디바이스 원장'에서 개명 — `projects/hospital_device_registry_design.md`)
 - **목적**: 병원별 웨어러블·게이트웨이 시리얼 단위 배치·회수·교체 이력(§2 Q1~Q8). 조회는 로그인 전원, 등록·이동·회수·교체·임포트·병동 추가·메모는 USER 이상, 정정·취소·배치 취소·식별 보정·병동 비활성/삭제는 ADMIN 이상 또는 `device.admin`(UI는 `GET /api/devices/can-manage` `{canWrite, canAdmin}` 프로브로 게이트 — 읽기 전용 사용자는 쓰기 컨트롤을 렌더하지 않음)
@@ -1699,6 +1702,7 @@ npm run dev
 | GET/POST | `/api/hospitals/[code]/wards` | 병동 목록 / 추가 (write, 동명 409) |
 | GET | `/api/hospital-tags` | 병원 태그 마스터(활성) 목록 (로그인, 2026-09-28) |
 | GET/PUT | `/api/hospitals/[code]/tags` | 병원 태그 부여 목록 / 부여 집합 교체 `{tagIds}` (USER 이상 — VIEWER 403, 추가분만 부여자·시각 기록, 비활성·없는 태그 400, 감사 `hospital_tags`) |
+| GET/PUT | `/api/hospitals/[code]/as-memo` | 병원 AS메모 조회 / 저장 `{asMemo}` (USER 이상 — VIEWER 403, HTML sanitize·50,000자 상한·빈 값 NULL·동일 값 무갱신, 감사 `hospital_as_memo`) (2026-09-29) |
 | PUT/DELETE | `/api/hospitals/[code]/wards/[id]` | 병동 수정(write, 비활성은 admin) / 삭제(admin, 참조 있으면 409) |
 
 ### 영업/CRM (전 엔드포인트 ADMIN 이상 + SEERS 소속 — `checkSalesAccess`)

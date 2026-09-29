@@ -350,6 +350,7 @@ model User {
   hospitalTagAssignments HospitalTagAssignment[] @relation("HospitalTagAssigner") // 병원 태그 부여자 (2026-09-28)
   channeltalkVocExclusions ChanneltalkUserChat[] @relation("ChanneltalkVocExcluder")
   vocChanneltalkLinks      VocChanneltalkChat[]  @relation("VocChatLinker")
+  hospitalAsMemos HospitalMeta[] @relation("HospitalAsMemoEditor")
 }
 
 model Department {
@@ -689,7 +690,12 @@ model HospitalMeta {
   driveInstallPlanFileId String?  @map("drive_install_plan_file_id")
   remoteAccessUrl        String?  @map("remote_access_url")
   remoteControlUrl       String?  @map("remote_control_url")
+  asMemo                 String?  @map("as_memo") // AS메모 — 리치텍스트 HTML (2026-09-29, 병원 상세·AS접수 상세 공용)
+  asMemoUpdatedAt        DateTime? @map("as_memo_updated_at") @db.Timestamptz
+  asMemoUpdatedById      String?  @map("as_memo_updated_by_id")
   updatedAt              DateTime @updatedAt @map("updated_at")
+
+  asMemoUpdatedBy User? @relation("HospitalAsMemoEditor", fields: [asMemoUpdatedById], references: [id], onDelete: SetNull)
 
   @@map("hospital_meta")
   @@schema("public")

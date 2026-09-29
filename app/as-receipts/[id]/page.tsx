@@ -10,6 +10,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import TicketStatusBadge from '@/app/tickets/components/TicketStatusBadge'
+import HospitalTagChips from '@/app/hospitals/[code]/_components/HospitalTagChips'
+import AsMemoPanel from '@/app/hospitals/[code]/_components/AsMemoPanel'
 import AsReceiptFormModal, { type AsEditTarget } from '../_components/AsReceiptFormModal'
 import { asListHref, AS_PICKUP_METHODS, type AsPickupMethod,
   AS_CATEGORY_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, AS_DEST_TYPES,
@@ -1028,6 +1030,18 @@ export default function AsReceiptDetailPage() {
             <p className="mt-1 text-sm text-gray-900">{req.items.length}대 <span className="text-xs text-gray-400">· 종결 {req.items.length - openItems.length}대</span></p>
           </div>
         </div>
+        {/* 병원 태그 · AS메모 (2026-09-29 — 병원 단위 정보, 병원 상세 '부가정보'와 공용. 메모 편집은 접수 종결 여부와 무관하게 USER 이상) */}
+        {req.hospital && (
+          <div className="grid grid-cols-1 gap-x-6 gap-y-4 border-t border-gray-100 px-4 py-4 sm:px-6 md:grid-cols-4">
+            <div>
+              <p className={label}>병원 태그</p>
+              <div className="mt-1.5"><HospitalTagChips hospitalCode={req.hospital.hospitalCode} /></div>
+            </div>
+            <div className="md:col-span-3">
+              <AsMemoPanel hospitalCode={req.hospital.hospitalCode} canWrite={!!me && me.role !== 'VIEWER'} compact />
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* 2. 접수정보 (접수자 입력 — 시트 A~M · S·T) */}

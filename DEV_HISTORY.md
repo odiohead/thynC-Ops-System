@@ -22,6 +22,17 @@
 
 ---
 
+## 2026-09-29 16:20 | 병원 AS메모 — 부가정보 카드 서브영역 + AS접수 상세 1.공통정보(병원 태그 칩·AS메모) (dev2 빌드·재시작, PROD 미반영)
+
+- **요청(사용자)**: 병원 상세 '부가정보' 카드에 '태그' 옆 **'AS메모'** 서브영역(마크다운 기본·색상 가능한 에디터) 추가, 같은 메모를 **AS접수 상세 '1.공통정보' 하위 섹션**에 노출, 병원 태그 중 **선교체 기본**이 공통정보에서 바로 보이게
+- **DB(규칙 1)**: 마이그 `20260929090000_hospital_as_memo` — `hospital_meta.as_memo`(TEXT HTML)·`as_memo_updated_at`·`as_memo_updated_by_id`(FK users SET NULL). Prisma `HospitalMeta.asMemo*` + User 역참조
+- **API**: `GET/PUT /api/hospitals/[code]/as-memo` — PUT은 USER 이상, `sanitizeRichTextHtml`(주간업무와 동일 정화 — script 제거 확인)·50,000자 상한·`isEmptyRichText`면 NULL·동일 값이면 무갱신, meta 없으면 upsert 생성, 감사 `hospital_as_memo` UPDATE(before/after)
+- **화면**: `AsMemoPanel`(공용 — 보기 `weekly-rich` 스타일 / 편집 `WeeklyRichEditor` 재사용(Tiptap 색·형광펜, 에디터 컨벤션 표의 Tiptap 축), 수정자·일시, 저장 후 `router.refresh()`) · 병원 상세 `HospitalTagsCard`(부가정보)에 태그 아래 구분선+AS메모 · `HospitalTagChips`(읽기 전용 칩, 선교체 기본 ★ 강조, 태그 없으면 병원 설정 링크) · AS접수 상세 1.공통정보 그리드 아래 구분선 행: 병원 태그(1칸) + AS메모 compact(3칸). 메모 편집 권한은 접수 종결 여부와 무관하게 USER 이상(병원 단위 정보)
+- **검증(dev2, 4GB 빌드·`pm2 restart thync-dev`·health 200)**: tsc 0·eslint 0. curl — 초기 null, VIEWER PUT 403·타입 오류 400·없는 병원 404, 색·형광펜·목록 HTML 보존 + `<script>` 제거, 동일 값 재저장 updatedAt 불변, 빈 값 → null, 감사 2행, 병원 상세·AS접수 상세 200. 테스트 데이터: 부산본병원(HOSP-000051) AS메모·선교체 기본 태그 — 화면 확인용으로 남김
+- 영향: prisma/{schema.prisma,migrations/20260929090000_hospital_as_memo/}, app/api/hospitals/[code]/as-memo/route.ts(신규), app/hospitals/[code]/_components/{AsMemoPanel.tsx(신규),HospitalTagChips.tsx(신규),HospitalTagsCard.tsx}, app/as-receipts/[id]/page.tsx, README.md
+
+---
+
 ## 2026-09-28 18:30 | 채널톡 상담 → VOC 승격 (2단계) — 분류 태그 트리거 자동 생성·후속 연결·종료↔회신완료·전량 재검사 (dev2 빌드·재시작, PROD 미반영)
 
 - **기준(사용자 확정, `projects/voc_channeltalk_promotion_design.md` §1)**: 분류 태그(a~h)가 걸린 시점에 VOC 생성(팀 태그 조건 아님 — 보류) · 고객 발화 ∧ 담당자 발신 아님 ∧ 컷오버 이후 · 같은 고객 미종결 VOC 14일 내 후속 연결 · receivedAt=첫 발화 · 상담 종료→회신완료(하위 미종결 유지)/재오픈→처리중 · 늦은 태그는 종료 상담 전량 재검사(24h). "일단 개발해봐" 지시로 설계 문서 없이 착수, 문서는 기록용 작성
