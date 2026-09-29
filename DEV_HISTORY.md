@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-09-29 15:45 | PROD 배포: 채널톡→VOC 승격 2단계 · 병원 태그 · 주차 감사 로그 (df44a7a) — 마이그 2건·시드·백필 적용, 자동 승격은 OFF 상태
+
+- **dev2**: 힙 4GB 빌드·`pm2 restart thync-dev`·health 200 → 커밋 df44a7a(9/28 17:30·18:30 항목 + 9/29 주차 감사 로그, `scripts/tmp-*.mts` 제외)·push. 백필 SQL이 설계 문서에 없어 `scripts/backfill-channeltalk-first-ask.sql` 신규 작성 — `vocSync.ts` 규칙(고객 첫 텍스트 발화 min / 첫 메시지 person_type=manager)과 동일, dev2 dry-run 변경 0건으로 코드 계산값과 일치 확인
+- **PROD(사용자 "prod반영 진행해줘")**: `git pull`(caf6390→df44a7a, package.json·협업 서버 변경 없음) → 사전 점검(구 VOC_TYPE 참조 0·voc_receipts 0·상담 3,133) → 마이그 `20260928170000_hospital_tags`·`20260928190000_voc_channeltalk_promotion` psql 단일 tx(lock_timeout 5s) → `migrate resolve --applied` ×2 → `prisma generate` → `seed-cs-masters.sql`(VOC_TYPE 28종·채널 '채널톡') → `seed-hospital-tags.sql`(3종) → 백필(first_user_message_at 2,323·manager_initiated 934 / 3,133) → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` → health 200·신규 라우트 6종 307(비로그인 정상)·스케줄러 6종 기동. 에러 로그 마지막 기록(P2024·Slack invalid_blocks)은 06:41:04로 재시작(06:42:16) 이전(빌드 중 부하) — 재시작 후 신규 에러 없음
+- **PROD 설정 상태**: `channeltalk_voc_promote` 미설정(기본 off)·`channeltalk_voc_cutover` 미설정 — **자동 승격은 사용자가 `/settings/channeltalk-sync`에서 컷오버 일자 지정 후 ON**(설계 §PROD 반영 절차, 업무 판단이라 배포에서 켜지 않음). 폴링 5m은 기존대로 유지
+- 영향: PROD 소스(df44a7a)·PROD DB(테이블 3·컬럼 6 신규, status_codes VOC_TYPE 재편·VOC_CHANNEL 1행, hospital_tags 3행, channeltalk_user_chats 백필), scripts/backfill-channeltalk-first-ask.sql(신규), DEV_HISTORY.md
+
+---
+
 ## 2026-09-29 15:30 | 주차 웹할인 등록 감사 로그 (dev2, 빌드·PROD 미반영)
 
 - **배경(사용자 요청)**: 주차 웹할인(`/parking`)이 pweb.kr 대행 호출 stateless 모듈(DB 미사용)이라 누가 언제 어떤 차량에 할인권을 등록했는지 시스템 어디에도 남지 않음(감사 로그·서버 로그 모두 없음, `lib/parking.ts`에 console 출력 0). "감사 로그 추가로 진행" 지시
