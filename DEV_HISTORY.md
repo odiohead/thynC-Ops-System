@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-09-30 15:05 | PROD 데이터 보정: AS-202609-0159(3441) 접수 시리얼 병동 접미어 → 입고 시리얼 확정 (사용자 직접 실행)
+
+- **사건**: 채널톡 접수봇(9/9)이 시트 값 `P017426(52W)` 형식(병동 접미어 포함)을 시리얼로 6라인 등록 → 9/16 원장 확정에서 "시리얼 형식 불일치" 경고에도 신규 등록 확정 → **가짜 기기 6대**(device_units 28346~28351, AS_WAITING)·**가짜 병동 '52W'**(hospital_wards 718) 생성 → 9/29 수리반환 확정(발송일 9/30이 미래라 기기 복귀 6건 실패) → 9/30 입고처리에서 실제 시리얼 입력 → 원 라인이 이미 종결이라 매칭 안 되고 **미식별입고 6라인 추가**. PROD 전체에서 동일 패턴은 이 1건뿐(괄호 시리얼 라인·기기 모두)
+- **UI 불가 사유**: 시리얼 보정·미입고↔미식별 치환 모두 결과 미확정 라인만 허용(409)
+- **보정(단일 tx, 사용자 확인 후 사용자가 `! ssh … /tmp/fix-as-3441.sh`로 직접 실행 — 자동 모드 분류기가 PROD DML 차단)**: 접수 시리얼 접미어 제거값 = 미식별 라인 시리얼 매핑 6/6 검증 → 미식별 라인 6 삭제 → 원 라인 6을 입고 시리얼·실제 기기(16135/16148/16293/16295/16300/16301)·정상입고 9/11로 갱신(원 시리얼은 `receipt_serial_no` 보존, 수리반환·발송 유지) → 가짜 기기 이벤트 12·배치 6·기기 6·병동 718 삭제 → 접수 비고 추가·audit `as_receipt` UPDATE 1행. 사후 검증: 괄호 시리얼 0·가짜 기기 0·병동 0. 실제 기기 6대에는 이번 AS 이벤트 미기록(상태 사용중 그대로)
+- **잔여**: 헤더 '발송완료' — 전 라인 종결이라 담당자가 화면에서 '완료' 전환 필요(티켓 4385 동반). **재발 방지 미착수**: 시트 임포트 시 괄호 접미어 분리, 입고 대조 접미어 무시 매칭, 원장 확정 형식 불일치 차단 — 사용자 결정 대기
+- 영향: PROD DB(as_receipt_items 6 UPDATE·6 DELETE, device_units 6·hospital_devices 6·hospital_device_events 12·hospital_wards 1 DELETE, as_receipts 1·audit_logs 1), DEV_HISTORY.md
+
+---
+
 ## 2026-09-29 15:45 | PROD 배포: 채널톡→VOC 승격 2단계 · 병원 태그 · 주차 감사 로그 (df44a7a) — 마이그 2건·시드·백필 적용, 자동 승격은 OFF 상태
 
 - **dev2**: 힙 4GB 빌드·`pm2 restart thync-dev`·health 200 → 커밋 df44a7a(9/28 17:30·18:30 항목 + 9/29 주차 감사 로그, `scripts/tmp-*.mts` 제외)·push. 백필 SQL이 설계 문서에 없어 `scripts/backfill-channeltalk-first-ask.sql` 신규 작성 — `vocSync.ts` 규칙(고객 첫 텍스트 발화 min / 첫 메시지 person_type=manager)과 동일, dev2 dry-run 변경 0건으로 코드 계산값과 일치 확인
@@ -19,6 +29,15 @@
 - **구현**: `POST /api/parking/register` — 사이트 등록 성공(`result.ok`) 시 `logAudit` CREATE `resource='parking_discount'`, resourceId=입차ID, 라벨 `차량번호 · 계정 · 할인권코드`, after `{mode:'manual', account, carNo, carId, entryDate, discountType, message}` / `POST /api/parking/auto-apply` — 단계 중 1건이라도 `applied`면 기록(부분 실패 포함), 라벨 `차량번호 · 자동 n건 (무료 a·유료 b)`, after `{mode:'auto', ok, message, plan 요약(elapsed/target/chargeable/already/add/totalCost/freeBlocked), steps[계정·라벨·할인권·분·가격·applied·message]}`. 사이트 거부(409)·예외(502)는 미기록 — 실제 등록된 건만 이력으로 남기는 원칙
 - **검증**: tsc 0·eslint 0. **실 등록 테스트는 미실시**(pweb.kr에 실제 할인권이 소모되므로) — 다음 실제 사용 시 `/settings/audit-logs` 대상 `parking_discount`로 확인
 - 영향: app/api/parking/{register,auto-apply}/route.ts, README.md
+
+---
+
+## 2026-09-29 18:20 | AS접수 — 목록 '병동' 열 + 상세 공통정보 '접수 병동' (dev2 빌드·재시작, PROD 미반영)
+
+- **배경(사용자 확인·요청)**: 시트 C열 병동은 라인 `as_receipt_items.ward_name`에 저장돼 있으나(PROD 채널톡 인입 1,395/1,427 기입) 헤더 화면에 노출이 없었음. AS 인입은 여전히 구글시트 경로(채널톡 원본 미사용) 확인
+- **변경**: `lib/asReceiptShared.ts` `summarizeAsReceiptWards`(라인 wardName 중복 제거·순서 유지) · 목록 API items select에 `wardName` · 목록 `COLUMNS` '병원' 다음 '병동'(요약 콤마 구분, 말줄임+title) · 상세 1.공통정보 그리드 끝 '접수 병동'(전폭, 원장 배치 병동과 다를 수 있음 안내). 라인 표 '병동' 열(원장 우선)은 무변경
+- **검증(dev2, 4GB 빌드·`pm2 restart thync-dev`·health 200)**: tsc 0·eslint 0. 목록 API 라인 wardName 포함·요약 정상, 병동 3종 접수(3451) 상세 요약 '6병동, 별관2병동, 45병동(본관)', 목록·상세 200
+- 영향: lib/asReceiptShared.ts, app/api/as-receipts/route.ts, app/as-receipts/{page.tsx,[id]/page.tsx}, README.md
 
 ---
 
