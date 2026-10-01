@@ -351,6 +351,7 @@ model User {
   channeltalkVocExclusions ChanneltalkUserChat[] @relation("ChanneltalkVocExcluder")
   vocChanneltalkLinks      VocChanneltalkChat[]  @relation("VocChatLinker")
   hospitalAsMemos HospitalMeta[] @relation("HospitalAsMemoEditor")
+  viewPrefs UserViewPref[] // 사용자별 화면 설정 (2026-10-01)
 }
 
 model Department {
@@ -3012,5 +3013,19 @@ model VocChanneltalkChat {
 
   @@index([vocId])
   @@map("voc_channeltalk_chats")
+  @@schema("public")
+}
+
+/// 사용자별 화면 설정 (2026-10-01) — 뷰 키 단위 JSON (AS접수 목록 열 선택·순서·폭 등). 계정 삭제 시 CASCADE
+model UserViewPref {
+  userId    String   @map("user_id")
+  viewKey   String   @map("view_key") @db.VarChar(60)
+  prefs     Json
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, viewKey])
+  @@map("user_view_prefs")
   @@schema("public")
 }

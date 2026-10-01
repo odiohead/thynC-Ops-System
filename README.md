@@ -153,6 +153,7 @@ app/
 │   ├── channeltalk/chats/            # 채널톡 상담 원본 목록·상세([id]) — 읽기 전용 (voc_channeltalk_intake_design.md §5.2, 2026-09-28)
 │   │   └── [id]/promote · exclude     # 상담 → VOC 수동 승격 / 자동 승격 제외·해제 (USER 이상, voc_channeltalk_promotion_design.md)
 │   ├── hospital-tags/                # 병원 태그 마스터(활성) 조회 — 로그인 (2026-09-28)
+│   ├── me/view-prefs/[key]/          # 사용자별 화면 설정 GET/PUT/DELETE (user_view_prefs — 본인 전용, 16KB 상한) (2026-10-01)
 │   ├── etc-tasks/                    # 기타업무 CRUD + 파일 관리 (다병원·비유지보수 업무)
 │   ├── inventory/                    # 자재관리(WMS)
 │   │   ├── items/                    # 품목 마스터 route/[id](재고·부자재 포함)/import + [id]/components(주자재-부자재 매핑) + [id]/lot-history(LOT별 입출고 요약)
@@ -306,6 +307,7 @@ lib/
 ├── channeltalk-voc-scheduler.ts      # 채널톡 상담 원천 적재 폴링 스케줄러 (channeltalk_voc_interval — off/1m/5m/10m, 백필 미완료면 틱마다 backfill 이어감, 2026-09-28)
 ├── hospitalTags.ts                   # 병원 태그 시스템 키 단일 소스(HOSPITAL_TAG_KEYS: PRE_REPLACE_DEFAULT·NO_REMOTE_ACCESS·KEY_ACCOUNT)·DTO·hasHospitalTag (2026-09-28)
 ├── vocService.ts                     # VOC 접수 생성 서비스(createVocReceipt — VOC+CS 마스터 티켓 단일 tx, ownerId 배정) — POST /api/voc-receipts·채널톡 승격 공용 (2026-09-28)
+├── asReceiptColumns.ts               # AS접수 목록 열 카탈로그·사용자 열 설정 타입/기본값/정규화 (2026-10-01)
 ├── channeltalk/                      # 채널톡 Open API 원천 적재 (voc_channeltalk_intake_design.md)
 │   ├── client.ts                     #   Open API v5 클라이언트 — 인증 헤더·since 커서·429 백오프·잔여 호출 대기·틱당 호출 상한(CallBudgetExceeded)
 │   ├── vocSync.ts                    #   runChanneltalkVocSync(incremental|backfill|manual) — 매니저→활성 전량→종료 증분(DB 최대 closedAt−24h 중단)→신규·변경 상담 메시지, rawHash 변경 감지, 병원 힌트(OpsCode→이름 매처)
@@ -426,6 +428,9 @@ prisma/
 - **HospitalTagAssignment** (`hospital_tag_assignments`): 병원 ↔ 태그 N:M — UNIQUE(hospital_code, tag_id), 병원 CASCADE·태그 RESTRICT, `note`(부여 근거 — v1 UI 미노출 예약)·`assignedById`(SET NULL)·`assignedAt`. 감사 `hospital_tags` UPDATE(before/after 태그명 배열)
 - 마이그 `20260928170000_hospital_tags`. 후속(연동 예정): AS접수 등록 시 `PRE_REPLACE_DEFAULT` → 선교체 기본 체크, 유지보수·VOC·상담 화면 `NO_REMOTE_ACCESS` 경고 칩, 병원 목록 태그 필터, 마스터 관리 설정 화면
 
+
+### UserViewPref (사용자별 화면 설정 — 2026-10-01)
+- **UserViewPref** (`user_view_prefs`): PK(user_id, view_key) · `prefs` JSONB · `updatedAt`. 계정 삭제 CASCADE. 뷰 키 단위 자유 JSON — 첫 사용처 `as_receipts_list`(AS접수 목록 열 선택·순서·폭 `{version:1, columns:[{key,width}]}`). 마이그 `20261001120000_user_view_prefs`
 ### 디바이스 원장 — DeviceUnit / HospitalDevice / HospitalWard / HospitalDeviceEvent / HospitalDeviceImportBatch (2026-09-01, `projects/hospital_device_registry_design.md` §5 · 3층 구조 B-20)
 - **3층 구조**: `device_info`(모델 마스터) → `device_units`(시리얼 정체성, 1층) → 상태 하위표 `hospital_devices`(병원 배치 프로젝션, 2층). **API 공개 device id = `device_units.id`**(`/api/devices/units/[id]`·이벤트 `deviceId`·교체 상대 전부 유닛 id). 원장↔WMS 영속 링크는 없음(구 `inventory_unit_id` 제거 — WMS 편입은 후속 `inventory_units.device_id`), WMS 매칭은 표시·집계용 일시 계산
 - **DeviceUnit (`device_units`)**: 시리얼당 1행 — `serial_no`(정규화 키, 전역 UNIQUE + CHECK `upper(btrim)`·비공백)·`serial_raw`(합성/바코드 원문)·`device_info_id`(FK RESTRICT)·`mac_address`·`memo`(개체 메모)·`source`(MANUAL/IMPORT/WMS/ONPREM/BACKFILL — 유닛이 처음 생긴 경로)·`usage_type_id`(FK status_codes `DEVICE_USAGE_TYPE` — 용도 판매용 SALE / 평가용 EVAL, NULL=미지정; 위치가 아닌 물건의 속성, 계약 대조에서 EVAL 제외, 변경은 CORRECT) · **기기 상태·위치 축 5필드(2026-09-17 — `projects/device_condition_location_design.md` §5.1, B-26 유닛 속성 = HDR 불변식 1·3 명시 예외, fold 파생값 아님)**: `condition`(TEXT CHECK 6종 — IN_USE 사용중/AS_WAITING AS접수/REPAIRED 수리완료/PRE_SHIP 출고 전/LOST 분실/SCRAPPED 폐기, NULL=미확인 — 백필·재도출 전용)·`condition_changed_on`(DATE)·`location_hospital_code`(FK hospitals RESTRICT/CASCADE — 병원 위치)·`location_site_id`(FK status_codes `DEVICE_SITE` — 거점 리프레시센터 REFRESH_CENTER / thynC Connected Hub HUB)·`location_changed_on`(DATE). CHECK: 위치는 병원·거점 중 하나만(`device_units_location_single_check`, I-2)·LOST/SCRAPPED는 위치 둘 다 NULL(`device_units_terminal_no_location_check`, I-1); 인덱스 `(condition)`·부분 `(location_site_id, condition)`·부분 `(location_hospital_code)`. 갱신은 낙관 가드 `updateMany WHERE {condition, location = before}` + 스냅샷 이벤트(신규 4 서비스는 가드→이벤트, 기존 REGISTER/RECOVER/AS_* 암묵 전이는 검증·이벤트·rebuild→가드 — 실패 시 `RegistryTxAbort`로 tx 전체 실패). 마이그 `20260917120000_device_condition_location`은 DDL·seed만, 기존 28,355대는 `scripts/backfill-device-condition.mts --dry|--rehearse|--apply`(§9.1 규칙 3→2→1·5→6→7→8 + 회수·입고 기기 INTAKE source BACKFILL)로 채움. 이벤트·배치가 참조하는 동안 삭제 불가(FK RESTRICT). 서비스는 유닛을 자동 삭제하지 않는다 — 이벤트가 0건이 되면 배치 행만 지우고 유닛은 고아 정체성으로 남아 재등록 시 같은 id를 재사용
@@ -1053,6 +1058,8 @@ prisma/
 - **병원 태그 (2026-09-28)**: 상세 '기본 정보' 카드 아래 **'부가정보' 카드 > '태그'** 서브영역 — 마스터 3종(선교체 기본·원격접속불가·주요병원)을 체크박스로 부여/해제(USER 이상, 즉시 저장·`router.refresh()`, VIEWER는 칩만). 설명·시스템 효과·부여자·일시 표시. 마스터는 엄격 정의(시드 전용, 사용자 생성 불가). `HospitalTagsCard`
 - **병원 AS메모 (2026-09-29)**: '부가정보' 카드 두 번째 서브영역 — 리치텍스트(WeeklyRichEditor 재사용: 굵게·목록·글자색·형광펜) 작성/편집, 수정자·일시 표시(`AsMemoPanel`). **AS접수 상세 '1.공통정보' 하단**에 같은 패널(compact) + **병원 태그 칩**(`HospitalTagChips` — 선교체 기본 ★ 강조)이 함께 표시되어 AS 처리 중 병원 관행을 바로 참고. 두 화면이 같은 API를 쓰므로 한쪽 편집이 다른 쪽에 즉시 반영
 - **AS접수 병동 표기 (2026-09-29)**: 목록 '병원' 우측 **'병동' 열** 신설 + 상세 '1.공통정보'에 **'접수 병동'** 필드 — 라인 `wardName`(접수 시 입력·시트 C/I열) 중복 제거 요약(`summarizeAsReceiptWards`, 입력 순서 유지). 원장 배치 병동이 아니라 고객이 접수 시 적은 병동이며, 라인 표의 '병동' 열은 종전대로 원장 병동 우선
+- **AS접수 목록 사용자 열 설정 (2026-10-01 — 2줄 행 시안은 사용자 피드백으로 롤백)**: 열 카탈로그 `lib/asReceiptColumns.ts`(**46열**, 4그룹 — 기본 13 / 접수정보: 고객명·수거방법·수거일·수거송장번호·회수지 상이·회수지 정보·발송지 구분·발송지 정보·발송예정일·비고·개별 태그 5 / 진행·처리: 확인일·기기 수·종결 수·수리완료 n/m·입고 대조 이슈·시리얼·교체기 시리얼·접수사유·처리방법·발송방법·시트 완료여부 / 관리: 담당·티켓번호·티켓 상태·등록자·등록 일시·상태 변경일·완료일). '기본' 프리셋 = 종전 13열 원 순서, 툴바 **[기본으로]** 로 언제든 복원(저장 시 유지). **고정 3열**(접수번호·병원명·접수일 — 항상 맨 앞, 숨김·이동 불가, 폭만 조절) + 나머지는 [열 설정] 체크로 표시 선택, **헤더 드래그**로 순서, **헤더 경계 드래그**로 폭(`table-layout: fixed` + colgroup, 셀은 말줄임+title 툴팁). 변경 시 '열 설정 변경됨' 배너의 **[저장]** → `PUT /api/me/view-prefs/as_receipts_list`(사용자별 서버 저장, 기기 무관) / [취소]. 저장값은 `normalizeAsListPrefs`로 정규화(알 수 없는 키 제거·고정열 강제·폭 56~2000). 32rem 고정 태그 열 폐지
+- **nav 현재 메뉴 재클릭 = 새로고침 (2026-10-01, 사용자 요청)**: `Navigation` 1·2단 메뉴 Link에 `onNavClick` — `pathname === href`면 `window.location.assign(href)`로 전체 새로고침(AS업무 목록에서 'AS업무' 재클릭 시 필터·캐시 초기화). 하위 경로(상세)에서는 종전처럼 클라이언트 이동
 
 ### 기기 현황 (`/devices`, 2026-09-01, 2026-09-02 '디바이스 원장'에서 개명 — `projects/hospital_device_registry_design.md`)
 - **목적**: 병원별 웨어러블·게이트웨이 시리얼 단위 배치·회수·교체 이력(§2 Q1~Q8). 조회는 로그인 전원, 등록·이동·회수·교체·임포트·병동 추가·메모는 USER 이상, 정정·취소·배치 취소·식별 보정·병동 비활성/삭제는 ADMIN 이상 또는 `device.admin`(UI는 `GET /api/devices/can-manage` `{canWrite, canAdmin}` 프로브로 게이트 — 읽기 전용 사용자는 쓰기 컨트롤을 렌더하지 않음)
@@ -1705,6 +1712,7 @@ npm run dev
 | GET | `/api/hospital-tags` | 병원 태그 마스터(활성) 목록 (로그인, 2026-09-28) |
 | GET/PUT | `/api/hospitals/[code]/tags` | 병원 태그 부여 목록 / 부여 집합 교체 `{tagIds}` (USER 이상 — VIEWER 403, 추가분만 부여자·시각 기록, 비활성·없는 태그 400, 감사 `hospital_tags`) |
 | GET/PUT | `/api/hospitals/[code]/as-memo` | 병원 AS메모 조회 / 저장 `{asMemo}` (USER 이상 — VIEWER 403, HTML sanitize·50,000자 상한·빈 값 NULL·동일 값 무갱신, 감사 `hospital_as_memo`) (2026-09-29) |
+| GET/PUT/DELETE | `/api/me/view-prefs/[key]` | 사용자별 화면 설정 (본인 전용, 키 `[a-zA-Z0-9_-]{1,60}`, `{prefs}` 객체 16KB 상한) (2026-10-01) |
 | PUT/DELETE | `/api/hospitals/[code]/wards/[id]` | 병동 수정(write, 비활성은 admin) / 삭제(admin, 참조 있으면 409) |
 
 ### 영업/CRM (전 엔드포인트 ADMIN 이상 + SEERS 소속 — `checkSalesAccess`)

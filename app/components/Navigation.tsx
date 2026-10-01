@@ -182,6 +182,10 @@ export default function Navigation() {
   function isActive(href: string) {
     return pathname === href || pathname.startsWith(href + '/')
   }
+  /** 이미 그 화면에 있을 때 메뉴를 다시 누르면 전체 새로고침 (사용자 요청 2026-10-01 — AS업무 등 목록 필터·캐시 초기화) */
+  const onNavClick = (href: string) => (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (pathname === href) { e.preventDefault(); window.location.assign(href) }
+  }
 
   const navItemClass = (active: boolean) =>
     `flex items-center gap-3 rounded-md px-3 py-2.5 lg:py-2 text-sm transition-colors ${
@@ -248,7 +252,7 @@ export default function Navigation() {
               // 하위 메뉴 보유 → 아코디언 (설정·운영현황 공통), 없으면 일반 링크
               if (!hasAnyChildren(item.menuKey)) {
                 return (
-                  <Link key={item.menuKey} href={item.href} className={navItemClass(isActive(item.href))}>
+                  <Link key={item.menuKey} href={item.href} onClick={onNavClick(item.href)} className={navItemClass(isActive(item.href))}>
                     {getMenuIcon(item.iconKey)}
                     {item.label}
                   </Link>
@@ -287,7 +291,7 @@ export default function Navigation() {
                           )}
                           <div className="space-y-0.5">
                             {group.items.map(child => (
-                              <Link key={child.menuKey} href={child.href} className={navItemClass(isActive(child.href))}>
+                              <Link key={child.menuKey} href={child.href} onClick={onNavClick(child.href)} className={navItemClass(isActive(child.href))}>
                                 {getMenuIcon(child.iconKey)}
                                 {child.label}
                               </Link>

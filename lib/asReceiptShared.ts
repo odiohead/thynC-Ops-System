@@ -34,6 +34,14 @@ export const AS_TAG_LABELS: Record<AsTag, string> = {
   ACCESSORY: '부속품 동봉',
   COMBINED_PACK: '합포장',
 }
+/** 태그 2글자 약어 — 목록 2줄 행 보조 줄 칩 (2026-10-01, 전체 라벨은 툴팁) */
+export const AS_TAG_SHORT_LABELS: Record<AsTag, string> = {
+  PRE_REPLACE: '선교',
+  PRIORITY_REPAIR: '우선',
+  FIRMWARE_UPDATE: '펌업',
+  ACCESSORY: '부속',
+  COMBINED_PACK: '합포',
+}
 /** 태그 ↔ as_receipts 불리언 컬럼 */
 export const AS_TAG_FIELDS: Record<AsTag, 'preReplace' | 'priorityRepair' | 'firmwareUpdate' | 'accessoryIncluded' | 'combinedPack'> = {
   PRE_REPLACE: 'preReplace',

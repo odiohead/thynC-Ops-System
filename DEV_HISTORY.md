@@ -4,6 +4,91 @@
 
 ---
 
+## 2026-10-01 10:40 | PROD → dev2 데이터 동기화 (정기 백업 thync_ops_20261001_010001.dump)
+
+- **사용자 요청** "PROD데이터를 DEV2로 마이그" — CLAUDE.md 약속어 dev2 절차. 사전 점검: 덤프 TABLE DATA 129(=dev2 128테이블 + _prisma_migrations), dev2·PROD 마이그 이력 154개 동일
+- **절차**: SCP(40MB) → `pm2 stop thync-dev thync-collab`(협업 서버도 정지 — 메모리 Y.Doc 재저장 방지) → DEV 백업 `dev_before_sync_20261001_103617.sql.gz`(29MB) → public+wiki **128테이블** `TRUNCATE … RESTART IDENTITY CASCADE`(CLAUDE.md의 '36개'는 구 수치) → TOC에서 `_prisma_migrations` 데이터만 제외 → `sudo -u postgres pg_restore --data-only --disable-triggers --single-transaction` 성공 → DEV 전용 스케줄러 OFF: `channeltalk_as_interval`·**`channeltalk_voc_interval`·`channeltalk_voc_promote`**(기존 규칙에 VOC 2키 추가 — PROD 5m/on이 따라오면 dev2가 채널톡 재적재·VOC 자동 생성·테스트 Slack 발송) → PM2 기동, health 200
+- **결과(dev2 row)**: hospitals 80,598 · as_receipts 3,711 · as_receipt_items 14,347 · voc_receipts 1,868 · tickets 6,630 · channeltalk_user_chats 3,219 · channeltalk_messages 71,372 · wiki_pages 162 · users 73 · _prisma_migrations 154 보존. 시퀀스는 덤프 setval로 max id와 일치
+- **주의**: dev2 테스트 데이터(리허설 소급 VOC·부산본병원 AS메모·태그 등)는 전부 PROD 데이터로 대체됨. 롤백: `gunzip -c /home/ubuntu/backups/db-sync/dev_before_sync_20261001_103617.sql.gz | psql -h localhost -U thync -d thync_ops_dev`
+- 영향: dev2 DB 전체(데이터만), DEV_HISTORY.md
+
+---
+
+## 2026-10-01 15:40 | AS접수 목록 — 날짜 열 최소 폭 재산정(셀 패딩 포함) (dev2 빌드·재시작)
+
+- **사용자 신고**: 기본 프리셋에서 접수일 `2026-10-01`이 `2026-10-…`로 잘림 — 폭 104에서 셀 좌우 패딩 24px를 빼면 글자 영역 80px < 날짜 폭(≈84px)
+- **변경**: minWidth를 패딩 포함 값으로 — 날짜 104→**116**(접수일·수거일·발송예정일·확인일·완료일), `(n/m)` 병기 132→**148**(입고일·발송일), 일시 140→**160**(등록 일시·상태 변경일). 저장된 구 폭은 정규화로 자동 상향
+- 영향: lib/asReceiptColumns.ts
+
+---
+
+## 2026-10-01 15:20 | AS접수 목록 — 날짜 열 최소 폭 방식으로 변경 (접수일 표기 yyyy-mm-dd 복원) (dev2 빌드·재시작)
+
+- **사용자 피드백**: 월-일/연도 분리 표기 별로 → 종전 `yyyy-mm-dd`로. 폭 고정 대신 **날짜 열은 최소 폭**(늘리기 가능·줄이기 제한)
+- **변경**: `resizable` 속성 폐기. 날짜 열 `minWidth` — 접수일·수거일·발송예정일·확인일·완료일 104 / 입고일·발송일 132('(n/m)' 병기) / 등록 일시·상태 변경일 140. 리사이즈 드래그·저장값 정규화 모두 minWidth 아래로 못 줄임, 핸들 툴팁에 최소 폭 표시. 접수일 셀 종전 표기 복원
+- **검증(dev2, 4GB 빌드·`pm2 restart thync-dev`·health 200)**: tsc 0·eslint 0, 정규화 — 접수일 60→104·입고일 80→132·발송일 400 유지·수거일 10→104
+- 영향: lib/asReceiptColumns.ts, app/as-receipts/page.tsx
+
+---
+
+## 2026-10-01 15:00 | AS접수 목록 — 접수일 열 폭 고정(말줄임 금지)·표기 정리 (dev2 빌드·재시작)
+
+- **사용자 요청**: 접수일은 `…`로 잘리면 안 됨 → 날짜가 항상 온전히 보이는 고정 폭 / 폭은 약간 줄이되 보기 좋게
+- **변경**: 카탈로그 `resizable?: boolean` 신설 — 접수일 `width 92·resizable:false`(핸들 미표시·드래그 차단·저장값 정규화 시 기본 폭 강제). 셀 표기 `MM-DD` 본문 + `YYYY` 10px 회색(툴팁 전체 날짜, tabular-nums)
+- **검증(dev2, 4GB 빌드·`pm2 restart thync-dev`·health 200)**: tsc 0·eslint 0, 정규화 — 접수일 폭 300 저장 → 92 강제
+- 영향: lib/asReceiptColumns.ts, app/as-receipts/page.tsx
+
+---
+
+## 2026-10-01 14:30 | AS접수 목록 열 카탈로그 46열(4그룹) + [기본으로] 상시 버튼 + nav 현재 메뉴 재클릭 새로고침 (dev2 빌드·재시작)
+
+- **사용자 요청**: 선택 가능한 열이 적다 → 상세에서 취급하는 정보를 전부 열로 / '기본' 프리셋 상시 복원 / AS업무 목록에서 nav 'AS업무' 클릭 시 새로고침
+- **열 카탈로그(`lib/asReceiptColumns.ts`)**: 20 → **46열**, `group` 4종(기본·접수정보·진행·처리·관리)으로 패널 묶음. 헤더 전 필드(고객명·수거방법/일/송장·회수지 상이/정보·발송지 구분/정보·발송예정일·비고·개별 태그 5·확인일·시트 완료여부·상태 변경일·등록 일시·완료일·티켓번호/상태·담당·등록자) + 라인 집계(기기 수·종결 수·수리완료 n/m·입고 대조 이슈·시리얼·교체기 시리얼·접수사유·처리방법·발송방법). 목록 API items select에 `newSerialNo·shipMethod·symptom` 추가(헤더 스칼라는 include라 기존 포함). `renderCell` 분기 확장
+- **기본 프리셋**: `defaultAsListPrefs()` = 종전 13열 원 순서·기본 폭. 툴바 **[기본으로]**(이미 기본이면 비활성) — 적용 후 [저장]해야 유지. 패널의 [기본값으로]는 제거(중복)
+- **nav(`app/components/Navigation.tsx`)**: `onNavClick(href)` — 현재 pathname과 같은 메뉴를 누르면 `window.location.assign`으로 전체 새로고침(1·2단 메뉴 공통). 상세 등 하위 경로에서는 종전 클라이언트 이동
+- **검증(dev2, 4GB 빌드·`pm2 restart thync-dev`·health 200)**: tsc 0·eslint 0, 목록 200, API 신규 헤더·라인 키 포함 확인, 전열(46) 저장 → 정규화 46·기본 13 확인. 화면 드래그·새로고침은 육안 확인
+- 영향: lib/asReceiptColumns.ts, app/api/as-receipts/route.ts, app/as-receipts/page.tsx, app/components/Navigation.tsx, README.md
+
+---
+
+## 2026-10-01 13:30 | AS접수 목록 — 2줄 행 롤백 → 사용자 열 커스터마이징(표시·순서·폭·저장) (dev2 빌드·재시작, PROD 미반영)
+
+- **사용자 결정**: "두줄은 아닌 것 같아, 롤백" → 열 선택·헤더 좌우 순서·폭 조절·[저장] 시 사용자별 유지. 접수번호·병원명·접수일 3열은 맨 앞 고정(조정 불가)
+- **DB(규칙 1)**: 마이그 `20261001120000_user_view_prefs` — `user_view_prefs`(PK user_id+view_key, prefs JSONB, CASCADE). 범용 뷰 설정 저장소(향후 다른 목록도 사용)
+- **코드**: `lib/asReceiptColumns.ts`(카탈로그 20열 — 기존 13 + 수거일·수거송장번호·수거방법·완료일·담당·등록자·고객명, 기본 표시 13, `normalizeAsListPrefs` 정규화) · `GET/PUT/DELETE /api/me/view-prefs/[key]`(본인 전용) · `app/as-receipts/page.tsx`: 2줄 구조·정렬 셀렉트·`COLUMNS`/`DATE_SORTS` 제거 → `table-layout: fixed` + colgroup, 셀 말줄임+title, `renderCell(key)` 디스패치, 헤더 `draggable`(고정 열 제외·고정 열 앞 드롭 불가)·경계 리사이즈(주간 보드 선례, 56~2000px), `ColumnSettingsButton`(체크 목록·고정 잠김·기본값), dirty 배너 [저장]/[취소]. 저장 전 변경은 화면만, 새로고침 시 서버 저장값으로. 고정 3열은 폭 조절만 허용(판단: 병원명 폭 조절은 유용)
+- **검증(dev2, 4GB 빌드·`pm2 restart thync-dev`·health 200)**: tsc 0·eslint 0. API — 비로그인 307·잘못된 키 400·body 오류 400·PUT→GET 순서 보존·타 사용자 null·DELETE→null / 정규화 — 고정열 누락·순서 뒤섬·중복·알 수 없는 키·폭 범위 보정, 파손 시 기본 13열 / 목록 200. **드래그·리사이즈 동작은 육안 확인 필요**(네이티브 DnD)
+- 영향: prisma/{schema.prisma,migrations/20261001120000_user_view_prefs/}, lib/asReceiptColumns.ts(신규), app/api/me/view-prefs/[key]/route.ts(신규), app/as-receipts/page.tsx, README.md
+
+---
+
+## 2026-10-01 12:00 | AS접수 목록 2줄 행 — 3차: 보조 줄 고정 폭 슬롯 + 수거일·수거송장번호 추가 (dev2 빌드·재시작)
+
+- **사용자 피드백**: 입고일 등이 비어도 간격이 줄지 않게 필드 영역 고정 / 접수일 다음에 수거일·수거송장번호 추가
+- **변경(`app/as-receipts/page.tsx`)**: 보조 줄을 `flex-nowrap` + 필드별 고정 폭(접수일·수거일 9.5rem, 수거송장번호 14rem, 입고일·발송일 11rem, 발송 송장번호 15rem, 태그 flex-1) — 빈 값은 `-` 자리 유지, 넘치면 말줄임+툴팁. `AsRow.pickedUpAt` 추가(목록 API는 include라 스칼라 이미 포함 — API 무변경), 수거송장번호는 헤더 `pickupTrackingNo`
+- **검증(dev2, 4GB 빌드·`pm2 restart thync-dev`·health 200)**: tsc 0·eslint 0, 목록 200, API 응답에 pickedUpAt·pickupTrackingNo 확인
+- 영향: app/as-receipts/page.tsx, README.md
+
+---
+
+## 2026-10-01 11:30 | AS접수 목록 2줄 행 — 2차 수정: 1줄 기존 배치 유지 · 뒤 5열만 "필드명: 값"으로 내림 (dev2 빌드·재시작)
+
+- **사용자 피드백**: 2줄은 좋으나 필드 재배치가 어색함 → "기존 배치·폰트 유지, 뒤에 있던 필드만 아래 줄로, 2줄은 `필드명: 정보` 표기"
+- **변경(`app/as-receipts/page.tsx`)**: 1줄 = 종전 8열 원 순서·원 스타일(접수번호·병원·병동·접수 기기상태·구분·기기·유형·상태 — 기기/유형 분리 복원) · 2줄 = `접수일: · 입고일: · 발송일: · 발송 송장번호: · 태그:` (라벨 text-xs gray-400, 값은 종전 셀 표기 그대로 — 전체 날짜·부분 n/m·툴팁·전체 라벨 태그 배지). 11:00판의 MM-DD 축약·태그 2글자 약어(`AS_TAG_SHORT_LABELS`는 shared에 남김, 미사용)·기기 셀 상품유형 병기는 되돌림. '정렬' 셀렉트·tbody 2행 구조는 유지
+- **검증(dev2, 4GB 빌드·`pm2 restart thync-dev`·health 200)**: tsc 0·eslint 0, 목록·입고일 정렬 200. PROD 동기화 데이터(3,711건)로 확인 가능
+- 영향: app/as-receipts/page.tsx, README.md
+
+---
+
+## 2026-10-01 11:00 | AS접수 목록 — 2줄 행 재구성 (1차안: 핵심 6열 + 보조 줄 · 진행 열 합치기 · 태그 약어) (dev2 빌드·재시작, PROD 미반영)
+
+- **배경(사용자 의견청취 → 1차안 승인)**: 목록 열이 13개(태그 열 32rem 고정)까지 늘어 가로스크롤 압박. 제안 5안 중 1차안 "2줄 행 + 날짜 3열 → 진행 한 줄 + 태그 약어 칩" 채택
+- **변경(`app/as-receipts/page.tsx`)**: `COLUMNS` 6열(접수번호·병원·구분·기기·상태·접수 기기상태 — 기기 셀에 상품유형 배지 병기) · 보조 줄 `병동 · 접수→입고→발송(MM-DD, 부분 n/m·여러 날짜 툴팁 유지) · 송장 · 태그 약어` · 접수 1건 = `<tbody>` 2행(hover·클릭·선택 묶음, 체크박스 rowSpan) · `DATE_SORTS` '정렬' 셀렉트(접수일·입고일·발송일 ↑↓, 기존 sort/dir 상태·URL 동기화 재사용) · `lib/asReceiptShared.ts` `AS_TAG_SHORT_LABELS`. 데이터·API 변경 없음
+- **검증(dev2, 4GB 빌드·`pm2 restart thync-dev`·health 200)**: tsc 0·eslint 0. 목록 기본·`?sort=receivedAt&dir=desc`·`?sort=shippedAt&dir=asc&page=2` 200, API 입고일 desc 순서 확인. **육안 확인은 사용자 몫**(행 높이·보조 줄 밀도)
+- **후속 후보(2차안)**: 역할별 뷰 프리셋·열 토글(localStorage) / 우측 드로어 미리보기 / compact 밀도 토글
+- 영향: app/as-receipts/page.tsx, lib/asReceiptShared.ts, README.md
+
+---
+
 ## 2026-10-01 09:30 | PROD 배포: AS 시리얼 형식 게이트 + 목록 '병동' 열·상세 '접수 병동' (1909343)
 
 - **dev2**: 여러 세션 미커밋분(9/30 16:10 시리얼 게이트 · 9/29 18:20 병동 표기) 통합 커밋 1909343·push. `scripts/tmp-*.mts` 제외. dev2는 9/30 사용자 요청으로 빌드·재시작 완료 상태

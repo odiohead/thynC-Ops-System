@@ -11,27 +11,14 @@ import Pager from '@/app/components/ui/Pager'
 import DateRangeFilter from '@/app/components/ui/DateRangeFilter'
 import AsReceiptFormModal from './_components/AsReceiptFormModal'
 import AsTabs from './_components/AsTabs' // 접수 목록 ↔ 수리대기 탭 (2026-09-28)
-import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsTag, AS_SEARCH_FIELDS, AS_SEARCH_FIELD_LABELS, AS_SEARCH_FIELD_PLACEHOLDER, parseAsSearchField, type AsSearchField, isAsCanceledStatus, AS_LIST_QS_KEY, AS_BACK_KEY, AS_BULK_STATUS_MAX, summarizeAsReceiptWards } from '@/lib/asReceiptShared'
+import { AS_LIST_COLUMNS, AS_LIST_COLUMN_MAP, AS_LIST_COLUMN_GROUPS, AS_LIST_VIEW_KEY, AS_LIST_COL_MIN, defaultAsListPrefs, normalizeAsListPrefs, samePrefs, type AsListPrefs } from '@/lib/asReceiptColumns' // 사용자 열 설정 (2026-10-01)
+import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsTag, AS_SEARCH_FIELDS, AS_SEARCH_FIELD_LABELS, AS_SEARCH_FIELD_PLACEHOLDER, parseAsSearchField, type AsSearchField, isAsCanceledStatus, AS_LIST_QS_KEY, AS_BACK_KEY, AS_BULK_STATUS_MAX, summarizeAsReceiptWards, AS_PICKUP_METHOD_LABELS, type AsPickupMethod, AS_DEST_TYPE_LABELS, type AsDestType, AS_OUTCOME_LABELS, type AsOutcome, AS_SHIP_METHOD_LABELS, type AsMethod, summarizeAsRepairProgress } from '@/lib/asReceiptShared'
 
 interface CodeRef { id: number; name: string; color: string | null }
 /** 정렬 가능 컬럼 (2026-09-16) — 서버 정렬(`?sort=&dir=`). 계산 컬럼(기기상태·기기·유형·송장·태그)은 정렬 없음 */
 type SortKey = 'asCode' | 'hospital' | 'category' | 'status' | 'receiptDate' | 'receivedAt' | 'shippedAt'
 const SORT_KEYS: readonly SortKey[] = ['asCode', 'hospital', 'category', 'status', 'receiptDate', 'receivedAt', 'shippedAt']
-const COLUMNS: { label: string; sort?: SortKey; cls?: string }[] = [
-  { label: '접수번호', sort: 'asCode' },
-  { label: '병원', sort: 'hospital' },
-  { label: '병동' }, // 접수 병동 요약 (2026-09-29 — 라인 wardName 중복 제거, 원장 병동 아님)
-  { label: '접수 기기상태' },
-  { label: '구분', sort: 'category' },
-  { label: '기기' },
-  { label: '유형' },
-  { label: '상태', sort: 'status' },
-  { label: '접수일', sort: 'receiptDate' },
-  { label: '입고일', sort: 'receivedAt' },
-  { label: '발송일', sort: 'shippedAt' },
-  { label: '발송 송장번호' },
-  { label: '태그', cls: 'w-[32rem] min-w-[32rem]' }, // 5개(합포장 추가 2026-09-19)가 한 줄에
-]
+// 열 정의는 lib/asReceiptColumns.ts (사용자 열 설정 — 표시·순서·폭, 2026-10-01)
 
 interface AsRow {
   id: number
@@ -48,6 +35,16 @@ interface AsRow {
   combinedPack: boolean
   pickupMethod: string | null
   pickupTrackingNo: string | null
+  pickedUpAt: string | null // 수거일 (2026-10-01)
+  reporterName: string | null // 고객명(카카오채널명)
+  pickupDestDiffers: boolean
+  pickupDestInfo: string | null
+  checkedAt: string | null
+  destInfo: string | null
+  expectedShipDate: string | null
+  statusChangedAt: string | null
+  note: string | null
+  sheetDoneSynced: string | null
   destType: string | null
   hospital: { hospitalCode: string; hospitalName: string } | null
   registryTags: AsRegistryTagSummary[]
@@ -58,6 +55,7 @@ interface AsRow {
   items: {
     id: number; serialNo: string; outcome: string | null; deviceKind: string | null; intakeState: string; receivedAt: string | null; shippedAt: string | null; shipTrackingNo: string | null
     wardName: string | null // 접수 병동 (2026-09-29)
+    newSerialNo: string | null; shipMethod: string | null; symptom: string | null // 사용자 열 (2026-10-01)
     repairedAt: string | null // 수리완료 체크 (2026-09-17) — 기기 셀 `수리 n/m`
     device: { deviceInfo: { deviceName: string }; placement: { productType: string | null } | null } | null
     newDevice: { placement: { productType: string | null } | null } | null
@@ -111,12 +109,12 @@ function deviceCell(r: AsRow) {
   )
 }
 
-/** 태그 열 (2026-09-15) — 선교체·우선수리·펌웨어 업데이트·부속품 동봉 */
+/** 태그 배지 (2026-09-15) — 선교체·우선수리·펌웨어 업데이트·부속품 동봉·합포장 (보조 줄로 이동, 표기는 그대로 — 2026-10-01) */
 function tagBadges(r: AsRow) {
   const tags = asReceiptTags(r)
   if (!tags.length) return <span className="text-xs text-gray-300">-</span>
   return (
-    <span className="inline-flex flex-nowrap gap-1">
+    <span className="inline-flex flex-wrap gap-1">
       {tags.map((t) => <span key={t} className={`whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium ${AS_TAG_BADGE_CLS[t]}`}>{AS_TAG_LABELS[t]}</span>)}
     </span>
   )
@@ -189,6 +187,114 @@ function codeBadge(c: CodeRef | null) {
   )
 }
 
+/** 열 키 → 셀 내용 (사용자 열 설정, 2026-10-01). 긴 내용은 셀의 truncate(말줄임)로 잘리고 title 툴팁에 전체 */
+function renderCell(key: string, r: AsRow): { node: React.ReactNode; title?: string } {
+  const dash = <span className="text-xs text-gray-300">-</span>
+  switch (key) {
+    case 'asCode': return { node: <span className="font-mono text-xs text-blue-600">{r.asCode}</span> }
+    case 'hospital': return { node: <span className="text-gray-900">{r.hospital?.hospitalName ?? '-'}</span>, title: r.hospital?.hospitalName ?? undefined }
+    case 'receiptDate': return { node: <span className="text-gray-600">{r.receiptDate.slice(0, 10)}</span> }
+    case 'ward': { const w = summarizeAsReceiptWards(r.items).join(', '); return { node: w ? <span className="text-xs text-gray-600">{w}</span> : dash, title: w || undefined } }
+    case 'deviceState': return { node: deviceStateBadge(r) }
+    case 'category': return { node: <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${CATEGORY_BADGE[r.category] ?? 'bg-gray-100 text-gray-700'}`}>{AS_CATEGORY_LABELS[r.category as AsCategory] ?? r.category}</span> }
+    case 'devices': return { node: deviceCell(r), title: summarizeAsItemsByKind(r.items) }
+    case 'productType': return { node: productTypeBadges(r.items) }
+    case 'status': return { node: codeBadge(r.status) }
+    case 'pickedUpAt': return { node: r.pickedUpAt ? <span className="text-gray-600">{r.pickedUpAt.slice(0, 10)}</span> : dash }
+    case 'pickupTrackingNo': { const v = r.pickupTrackingNo?.trim(); return { node: v ? <span className="font-mono text-xs text-gray-700">{v}</span> : dash, title: v || undefined } }
+    case 'pickupMethod': return { node: r.pickupMethod ? <span className="text-xs text-gray-600">{AS_PICKUP_METHOD_LABELS[r.pickupMethod as AsPickupMethod] ?? r.pickupMethod}</span> : dash }
+    case 'receivedAt': return { node: <span className="text-gray-600">{receivedCell(r)}</span> }
+    case 'shippedAt': return { node: <span className="text-gray-600">{shippedCell(r)}</span> }
+    case 'shipTrackingNo': return { node: shipTrackingCell(r) }
+    case 'tags': return { node: tagBadges(r), title: asReceiptTags(r).map((t) => AS_TAG_LABELS[t]).join(', ') || undefined }
+    case 'resolvedAt': return { node: r.resolvedAt ? <span className="text-gray-600">{r.resolvedAt.slice(0, 10)}</span> : dash }
+    case 'owner': return { node: r.ticket?.owner?.name ? <span className="text-gray-700">{r.ticket.owner.name}</span> : <span className="text-xs text-gray-400">미배정</span> }
+    case 'createdBy': return { node: r.createdBy?.name ? <span className="text-gray-700">{r.createdBy.name}</span> : dash }
+    case 'reporterName': return { node: r.reporterName ? <span className="text-gray-700">{r.reporterName}</span> : dash, title: r.reporterName ?? undefined }
+    // ── 접수정보 ──
+    case 'pickupDestDiffers': return { node: r.pickupDestDiffers ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">상이</span> : dash }
+    case 'pickupDestInfo': return { node: r.pickupDestInfo ? <span className="text-xs text-gray-700">{r.pickupDestInfo}</span> : dash, title: r.pickupDestInfo ?? undefined }
+    case 'destType': return { node: r.destType ? <span className="text-xs text-gray-600">{AS_DEST_TYPE_LABELS[r.destType as AsDestType] ?? r.destType}</span> : dash }
+    case 'destInfo': return { node: r.destInfo ? <span className="text-xs text-gray-700">{r.destInfo}</span> : dash, title: r.destInfo ?? undefined }
+    case 'expectedShipDate': return { node: r.expectedShipDate ? <span className="text-gray-600">{r.expectedShipDate.slice(0, 10)}</span> : dash }
+    case 'note': { const v = r.note?.replace(/\s+/g, ' ').trim(); return { node: v ? <span className="text-xs text-gray-600">{v}</span> : dash, title: r.note ?? undefined } }
+    case 'tagPreReplace': return { node: r.preReplace ? <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${AS_TAG_BADGE_CLS.PRE_REPLACE}`}>선교체</span> : dash }
+    case 'tagPriorityRepair': return { node: r.priorityRepair ? <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${AS_TAG_BADGE_CLS.PRIORITY_REPAIR}`}>우선수리</span> : dash }
+    case 'tagFirmwareUpdate': return { node: r.firmwareUpdate ? <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${AS_TAG_BADGE_CLS.FIRMWARE_UPDATE}`}>펌웨어</span> : dash }
+    case 'tagAccessory': return { node: r.accessoryIncluded ? <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${AS_TAG_BADGE_CLS.ACCESSORY}`}>부속품</span> : dash }
+    case 'tagCombinedPack': return { node: r.combinedPack ? <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${AS_TAG_BADGE_CLS.COMBINED_PACK}`}>합포장</span> : dash }
+    // ── 진행·처리 (라인 집계) ──
+    case 'checkedAt': return { node: r.checkedAt ? <span className="text-gray-600">{r.checkedAt.slice(0, 10)}</span> : dash }
+    case 'itemCount': return { node: <span className="text-gray-700">{r.items.length}</span> }
+    case 'closedCount': { const n = r.items.filter((i) => i.outcome).length; return { node: <span className={n === r.items.length && n > 0 ? 'text-emerald-700' : 'text-gray-700'}>{n}<span className="text-xs text-gray-400">/{r.items.length}</span></span> } }
+    case 'repairProgress': { const p = summarizeAsRepairProgress(r.items); return { node: p.repairable ? <span className={p.repaired < p.repairable ? 'text-amber-700' : 'text-emerald-700'}>{p.repaired}<span className="text-xs text-gray-400">/{p.repairable}</span></span> : dash } }
+    case 'intakeIssues': return { node: r.intakeIssues > 0 ? <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700">{r.intakeIssues}대</span> : dash }
+    case 'serials': { const v = r.items.map((i) => i.serialNo).join(', '); return { node: v ? <span className="font-mono text-xs text-gray-700">{v}</span> : dash, title: v || undefined } }
+    case 'newSerials': { const v = r.items.map((i) => i.newSerialNo?.trim()).filter(Boolean).join(', '); return { node: v ? <span className="font-mono text-xs text-gray-700">{v}</span> : dash, title: v || undefined } }
+    case 'symptoms': { const v = Array.from(new Set(r.items.map((i) => i.symptom?.replace(/\s+/g, ' ').trim()).filter(Boolean))).join(' / '); return { node: v ? <span className="text-xs text-gray-700">{v}</span> : dash, title: v || undefined } }
+    case 'outcomes': { const counts = new Map<string, number>(); for (const i of r.items) if (i.outcome) counts.set(i.outcome, (counts.get(i.outcome) ?? 0) + 1); const v = Array.from(counts).map(([k, n]) => `${AS_OUTCOME_LABELS[k as AsOutcome] ?? k} ${n}`).join(' · '); return { node: v ? <span className="text-xs text-gray-700">{v}</span> : dash, title: v || undefined } }
+    case 'shipMethod': { const v = Array.from(new Set(r.items.map((i) => i.shipMethod).filter((m): m is string => !!m))).map((m) => AS_SHIP_METHOD_LABELS[m as AsMethod] ?? m).join(', '); return { node: v ? <span className="text-xs text-gray-600">{v}</span> : dash } }
+    case 'sheetDoneSynced': return { node: r.sheetDoneSynced ? <span className="text-xs text-gray-600">{r.sheetDoneSynced}</span> : dash }
+    // ── 관리 ──
+    case 'ticketCode': return { node: r.ticket ? <span className="font-mono text-xs text-blue-600">{r.ticket.ticketCode}</span> : dash }
+    case 'ticketStatus': return { node: r.ticket ? <span className="text-xs text-gray-600">{r.ticket.status}</span> : dash }
+    case 'createdAt': return { node: <span className="text-gray-600">{new Date(r.createdAt).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16)}</span> }
+    case 'statusChangedAt': return { node: r.statusChangedAt ? <span className="text-gray-600">{new Date(r.statusChangedAt).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16)}</span> : dash }
+    default: return { node: dash }
+  }
+}
+
+/** [열 설정] — 표시할 열 체크(고정 3열은 잠김) + 기본값 복원. 순서·폭은 헤더에서 드래그 */
+function ColumnSettingsButton({ prefs, onChange }: { prefs: AsListPrefs; onChange: (p: AsListPrefs) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc); return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+  const shown = new Set(prefs.columns.map((c) => c.key))
+  const toggle = (key: string) => {
+    const def = AS_LIST_COLUMN_MAP[key]
+    if (def.fixed) return
+    if (shown.has(key)) onChange({ ...prefs, columns: prefs.columns.filter((c) => c.key !== key) })
+    else onChange({ ...prefs, columns: [...prefs.columns, { key, width: def.width }] }) // 새 열은 맨 뒤 — 위치는 헤더 드래그로
+  }
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50" title="표시할 열 선택 · 순서는 헤더 드래그 · 폭은 헤더 경계 드래그 · [저장]으로 내 설정 저장">
+        열 설정 <span className="text-xs text-gray-400">{prefs.columns.length}/{AS_LIST_COLUMNS.length}</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 z-30 mt-1 w-72 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+          <p className="mb-2 text-xs text-gray-500">표시할 열을 선택하세요. 접수번호·병원명·접수일은 항상 맨 앞에 고정됩니다. 순서는 헤더를 드래그, 폭은 헤더 경계를 드래그해 바꾸고 [저장]을 누르세요.</p>
+          <div className="max-h-96 space-y-3 overflow-y-auto pr-1">
+            {AS_LIST_COLUMN_GROUPS.map((g) => (
+              <div key={g}>
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400">{g}</p>
+                <ul className="space-y-0.5">
+                  {AS_LIST_COLUMNS.filter((c) => c.group === g).map((c) => (
+                    <li key={c.key}>
+                      <label className={`flex items-center gap-2 rounded px-1.5 py-0.5 text-sm ${c.fixed ? 'text-gray-400' : 'cursor-pointer text-gray-800 hover:bg-gray-50'}`}>
+                        <input type="checkbox" checked={shown.has(c.key)} disabled={!!c.fixed} onChange={() => toggle(c.key)} className="h-4 w-4 rounded border-gray-300" />
+                        {c.label}{c.fixed && <span className="ml-auto text-[10px]">고정</span>}
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex justify-between border-t border-gray-100 pt-2">
+            <button type="button" onClick={() => onChange(defaultAsListPrefs())} className="text-xs text-gray-500 hover:text-gray-800">기본값으로</button>
+            <button type="button" onClick={() => setOpen(false)} className="text-xs text-blue-600 hover:underline">닫기</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AsReceiptListInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -220,6 +326,51 @@ function AsReceiptListInner() {
     const k = searchParams.get('sort'); const d = searchParams.get('dir')
     return k && (SORT_KEYS as readonly string[]).includes(k) ? { key: k as SortKey, dir: d === 'desc' ? 'desc' : 'asc' } : null
   }) // 정렬 (2026-09-16) — null = 기본(등록 최신순)
+
+  // ── 사용자 열 설정 (2026-10-01, lib/asReceiptColumns) — 서버 user_view_prefs 저장, [저장] 전까지는 화면만 ──
+  const [prefs, setPrefs] = useState<AsListPrefs>(defaultAsListPrefs)
+  const [savedPrefs, setSavedPrefs] = useState<AsListPrefs>(defaultAsListPrefs)
+  const [prefsSaving, setPrefsSaving] = useState(false)
+  const dirty = !samePrefs(prefs, savedPrefs)
+  useEffect(() => {
+    fetch(`/api/me/view-prefs/${AS_LIST_VIEW_KEY}`).then((r) => (r.ok ? r.json() : null)).then((d) => {
+      const p = d?.prefs ? normalizeAsListPrefs(d.prefs) : defaultAsListPrefs()
+      setPrefs(p); setSavedPrefs(p)
+    }).catch(() => {})
+  }, [])
+  async function savePrefs() {
+    setPrefsSaving(true)
+    try {
+      const res = await fetch(`/api/me/view-prefs/${AS_LIST_VIEW_KEY}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prefs }) })
+      if (res.ok) setSavedPrefs(prefs)
+      else setNotice([`열 설정 저장 실패: ${(await res.json().catch(() => ({}))).error ?? res.status}`])
+    } finally { setPrefsSaving(false) }
+  }
+  const visibleCols = prefs.columns.map((c) => ({ ...AS_LIST_COLUMN_MAP[c.key], width: c.width }))
+  const setColWidth = (key: string, width: number) => setPrefs((p) => ({ ...p, columns: p.columns.map((c) => (c.key === key ? { ...c, width } : c)) }))
+  /** 헤더 경계 드래그 — 폭 조절 (주간업무 보드 선례) */
+  const startResize = (key: string) => (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    const startX = e.clientX
+    const startW = prefs.columns.find((c) => c.key === key)?.width ?? AS_LIST_COLUMN_MAP[key].width
+    const min = AS_LIST_COLUMN_MAP[key].minWidth ?? AS_LIST_COL_MIN
+    const onMove = (ev: MouseEvent) => setColWidth(key, Math.min(2000, Math.max(min, startW + ev.clientX - startX)))
+    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.body.style.cursor = '' }
+    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp); document.body.style.cursor = 'col-resize'
+  }
+  /** 헤더 드래그 — 순서 변경 (고정 3열 제외, 고정 열 앞으로는 못 놓음) */
+  const [dragKey, setDragKey] = useState<string | null>(null)
+  const [dropKey, setDropKey] = useState<string | null>(null)
+  const moveColumn = (from: string, to: string) => {
+    if (from === to || AS_LIST_COLUMN_MAP[from]?.fixed || AS_LIST_COLUMN_MAP[to]?.fixed) return
+    setPrefs((p) => {
+      const cols = [...p.columns]
+      const fi = cols.findIndex((c) => c.key === from); const ti = cols.findIndex((c) => c.key === to)
+      if (fi < 0 || ti < 0) return p
+      const [moved] = cols.splice(fi, 1); cols.splice(ti, 0, moved)
+      return { ...p, columns: cols }
+    })
+  }
   const [summary, setSummary] = useState<{
     byStatus: (CodeRef & { count: number })[]
     total: number
@@ -531,6 +682,15 @@ function AsReceiptListInner() {
         >
           Excel
         </button>
+        <ColumnSettingsButton prefs={prefs} onChange={setPrefs} />
+        <button type="button" onClick={() => setPrefs(defaultAsListPrefs())} disabled={samePrefs(prefs, defaultAsListPrefs())} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40" title="'기본' 프리셋(종전 목록 13열)으로 되돌림 — [저장]을 눌러야 내 설정으로 유지">기본으로</button>
+        {dirty && (
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+            열 설정 변경됨
+            <button type="button" onClick={savePrefs} disabled={prefsSaving} className="rounded bg-blue-600 px-2 py-0.5 font-medium text-white hover:bg-blue-700 disabled:opacity-50">{prefsSaving ? '저장 중…' : '저장'}</button>
+            <button type="button" onClick={() => setPrefs(savedPrefs)} disabled={prefsSaving} className="rounded border border-gray-300 bg-white px-2 py-0.5 text-gray-600 hover:bg-gray-50">취소</button>
+          </span>
+        )}
         <span className="ml-auto text-sm text-gray-500">{total.toLocaleString()}건</span>
       </div>
 
@@ -554,30 +714,48 @@ function AsReceiptListInner() {
         {loading ? (
           <p className="py-16 text-center text-sm text-gray-400">불러오는 중...</p>
         ) : rows.length === 0 ? (
-          <p className="py-16 text-center text-sm text-gray-400">AS접수가 없습니다.{canWrite && ' [+ 접수]로 등록하세요.'}</p>
+          <p className="py-16 text-center text-sm text-gray-400">AS접수가 없습니다.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-sm">
+            {/* 사용자 열 설정 (2026-10-01): table-layout fixed + colgroup 폭 — 셀은 말줄임, 헤더 드래그로 순서·경계 드래그로 폭 */}
+            <table className="divide-y divide-gray-200 text-sm" style={{ tableLayout: 'fixed', width: visibleCols.reduce((w, c) => w + c.width, canWrite ? 40 : 0) }}>
+              <colgroup>
+                {canWrite && <col style={{ width: 40 }} />}
+                {visibleCols.map((c) => <col key={c.key} style={{ width: c.width }} />)}
+              </colgroup>
               <thead className="bg-gray-50">
                 <tr>
                   {canWrite && (
-                    <th className="w-8 px-3 py-2">
+                    <th className="px-3 py-2">
                       <input type="checkbox" checked={allOnPageSelected} onChange={toggleAll} className="rounded border-gray-300" title="이 페이지 전체 선택" aria-label="이 페이지 전체 선택" />
                     </th>
                   )}
-                  {COLUMNS.map((col) => (
-                    <th key={col.label} className={`${thClass} ${col.cls ?? ''}`}>
-                      {col.sort ? (
-                        <button
-                          type="button"
-                          onClick={() => toggleSort(col.sort!)}
-                          className={`inline-flex items-center gap-1 whitespace-nowrap uppercase tracking-wider transition-colors ${sort?.key === col.sort ? 'text-blue-600' : 'hover:text-gray-800'}`}
-                          title="클릭하여 정렬 (오름차순 → 내림차순 → 기본)"
-                        >
-                          {col.label}
-                          <span className="text-[10px]">{sort?.key === col.sort ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'}</span>
-                        </button>
-                      ) : col.label}
+                  {visibleCols.map((col) => (
+                    <th
+                      key={col.key}
+                      className={`relative select-none ${thClass} ${dropKey === col.key && dragKey && dragKey !== col.key ? 'bg-blue-100' : ''} ${col.fixed ? '' : 'cursor-grab'}`}
+                      draggable={!col.fixed}
+                      onDragStart={(e) => { if (col.fixed) { e.preventDefault(); return } setDragKey(col.key); e.dataTransfer.effectAllowed = 'move' }}
+                      onDragOver={(e) => { if (dragKey && !col.fixed) { e.preventDefault(); if (dropKey !== col.key) setDropKey(col.key) } }}
+                      onDragLeave={() => { if (dropKey === col.key) setDropKey(null) }}
+                      onDrop={(e) => { e.preventDefault(); if (dragKey) moveColumn(dragKey, col.key); setDragKey(null); setDropKey(null) }}
+                      onDragEnd={() => { setDragKey(null); setDropKey(null) }}
+                      title={col.fixed ? '고정 열 (폭만 조절 가능)' : '드래그하여 순서 변경 · 오른쪽 경계 드래그로 폭 조절'}
+                    >
+                      <span className="block truncate">
+                        {col.sort ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleSort(col.sort!)}
+                            className={`inline-flex items-center gap-1 whitespace-nowrap uppercase tracking-wider transition-colors ${sort?.key === col.sort ? 'text-blue-600' : 'hover:text-gray-800'}`}
+                            title="클릭하여 정렬 (오름차순 → 내림차순 → 기본)"
+                          >
+                            {col.label}
+                            <span className="text-[10px]">{sort?.key === col.sort ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+                          </button>
+                        ) : col.label}
+                      </span>
+                      <span className="absolute -right-1 top-0 z-10 h-full w-2 cursor-col-resize select-none hover:bg-blue-300/50" onMouseDown={startResize(col.key)} onClick={(e) => e.stopPropagation()} draggable={false} title={col.minWidth ? `드래그로 폭 조절 (최소 ${col.minWidth}px)` : '드래그로 폭 조절'} />
                     </th>
                   ))}
                 </tr>
@@ -587,28 +765,21 @@ function AsReceiptListInner() {
                   // 취소 접수 — 접수번호 제외 전 열 취소선 (2026-09-21). 배지(inline-flex)는 text-decoration이 전파되지 않아 자손 전체에 지정
                   const strike = isAsCanceledStatus(r.status) ? ' line-through [&_*]:line-through opacity-60' : ''
                   return (
-                  <tr key={r.id} className={`cursor-pointer hover:bg-gray-50 ${selected.has(r.id) ? 'bg-blue-50/60' : ''}`} onClick={() => router.push(`/as-receipts/${r.id}`)}>
-                    {canWrite && (
-                      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                        <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} className="rounded border-gray-300" aria-label={`${r.asCode} 선택`} />
-                      </td>
-                    )}
-                    <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-blue-600">{r.asCode}</td>
-                    <td className={`max-w-[14rem] truncate px-3 py-2 text-gray-900${strike}`} title={r.hospital?.hospitalName ?? undefined}><span className="block min-w-[8rem] max-w-[14rem] truncate">{r.hospital?.hospitalName ?? '-'}</span></td>
-                    <td className={`max-w-[10rem] truncate px-3 py-2 text-xs text-gray-600${strike}`} title={summarizeAsReceiptWards(r.items).join(', ') || undefined}>{summarizeAsReceiptWards(r.items).join(', ') || <span className="text-gray-300">-</span>}</td>
-                    <td className={`whitespace-nowrap px-3 py-2${strike}`}>{deviceStateBadge(r)}</td>
-                    <td className={`whitespace-nowrap px-3 py-2${strike}`}>
-                      <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${CATEGORY_BADGE[r.category] ?? 'bg-gray-100 text-gray-700'}`}>{AS_CATEGORY_LABELS[r.category as AsCategory] ?? r.category}</span>
-                    </td>
-                    <td className={`whitespace-nowrap px-3 py-2${strike}`}>{deviceCell(r)}</td>
-                    <td className={`whitespace-nowrap px-3 py-2${strike}`}>{productTypeBadges(r.items)}</td>
-                    <td className={`whitespace-nowrap px-3 py-2${strike}`}>{codeBadge(r.status)}</td>
-                    <td className={`whitespace-nowrap px-3 py-2 text-gray-600${strike}`}>{r.receiptDate.slice(0, 10)}</td>
-                    <td className={`whitespace-nowrap px-3 py-2 text-gray-600${strike}`}>{receivedCell(r)}</td>
-                    <td className={`whitespace-nowrap px-3 py-2 text-gray-600${strike}`}>{shippedCell(r)}</td>
-                    <td className={`whitespace-nowrap px-3 py-2${strike}`}>{shipTrackingCell(r)}</td>
-                    <td className={`whitespace-nowrap px-3 py-2${strike}`}>{tagBadges(r)}</td>
-                  </tr>
+                    <tr key={r.id} className={`cursor-pointer hover:bg-gray-50 ${selected.has(r.id) ? 'bg-blue-50/60' : ''}`} onClick={() => router.push(`/as-receipts/${r.id}`)}>
+                      {canWrite && (
+                        <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                          <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} className="rounded border-gray-300" aria-label={`${r.asCode} 선택`} />
+                        </td>
+                      )}
+                      {visibleCols.map((col) => {
+                        const cell = renderCell(col.key, r)
+                        return (
+                          <td key={col.key} className={`overflow-hidden text-ellipsis whitespace-nowrap px-3 py-2${col.key === 'asCode' ? '' : strike}`} title={cell.title}>
+                            {cell.node}
+                          </td>
+                        )
+                      })}
+                    </tr>
                   )
                 })}
               </tbody>
