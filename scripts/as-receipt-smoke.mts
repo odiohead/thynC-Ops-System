@@ -44,35 +44,36 @@ function check(name: string, ok: boolean, note?: string) {
   else { fail++; console.log(`  ❌ ${name}${note ? ` — ${note}` : ''}`) }
 }
 
-const S1 = 'ASMK0001' // 수리반환
-const S2 = 'ASMK0002' // 교체(구)
-const S3 = 'ASMK0003' // 분실
-const S4 = 'ASMK0004' // 교체기(신)
-const S5 = 'ASMK0005' // 라인 편집용
-const SX = 'ASMKXX01' // 미등록 라인
-const SX2 = 'ASMKXX02' // 편집 추가 미등록 라인
+// 테스트 시리얼은 형식 규칙(A+숫자 6자리, 2026-09-30 시리얼 게이트) 준수 — A99xxxx 대역(실기기 미사용)
+const S1 = 'A990001' // 수리반환
+const S2 = 'A990002' // 교체(구)
+const S3 = 'A990003' // 분실
+const S4 = 'A990004' // 교체기(신)
+const S5 = 'A990005' // 라인 편집용
+const SX = 'A990901' // 미등록 라인
+const SX2 = 'A990902' // 편집 추가 미등록 라인
 // 수리완료·기기 상태 축 (2026-09-17)
-const D1 = 'ASMK1001' // 기본 흐름(입고→체크→수리반환)
-const D2 = 'ASMK1002' // 플래그 없는 기기 — CORRECT 폴백
-const D3 = 'ASMK1003' // 옛 플래그 접수 B vs 최근 접수 A
-const D5 = 'ASMK1005' // 선교체 구기기
-const N5 = 'ASMK1015' // 선교체 신기기(미등록 → 생성)
-const D6 = 'ASMK1006' // 수리품 재사용 접수의 구기기
-const D7 = 'ASMK1007' // 재접수·해제·폐기
-const N7 = 'ASMK1017' // D7 교체기
-const D8 = 'ASMK1008' // 취소 라인·병원 반환
-const SX9 = 'ASMK1009' // 미등록 라인 → 원장 확정 재적용
-const D10 = 'ASMK1010' // 분실 확정
-const D11 = 'ASMK1011' // 타병원 배치 → 병원 변경 재생성
-const D12A = 'ASMK1012' // 시리얼 보정 구
-const D12B = 'ASMK1022' // 시리얼 보정 신
-const D13 = 'ASMK1013' // 접수 삭제 훅
-const D14A = 'ASMK1014' // 입고 확인 — 정상입고
-const D14B = 'ASMK1024' // 입고 확인 — 미회수
-const D14C = 'ASMK1034' // 입고 확인 — 정상입고 수동 확정
-const D15A = 'ASMK1016' // 입고 확인 — 시리얼 치환(REMAP) 치환 전(미입고)
-const D15B = 'ASMK1026' // 입고 확인 — 시리얼 치환(REMAP) 치환 후(미식별입고)
-const D16 = 'ASMK1036' // 소급 수리반환(처리일 < AS 표시 시작일) — 업무일자 클램프
+const D1 = 'A991001' // 기본 흐름(입고→체크→수리반환)
+const D2 = 'A991002' // 플래그 없는 기기 — CORRECT 폴백
+const D3 = 'A991003' // 옛 플래그 접수 B vs 최근 접수 A
+const D5 = 'A991005' // 선교체 구기기
+const N5 = 'A991015' // 선교체 신기기(미등록 → 생성)
+const D6 = 'A991006' // 수리품 재사용 접수의 구기기
+const D7 = 'A991007' // 재접수·해제·폐기
+const N7 = 'A991017' // D7 교체기
+const D8 = 'A991008' // 취소 라인·병원 반환
+const SX9 = 'A991009' // 미등록 라인 → 원장 확정 재적용
+const D10 = 'A991010' // 분실 확정
+const D11 = 'A991011' // 타병원 배치 → 병원 변경 재생성
+const D12A = 'A991012' // 시리얼 보정 구
+const D12B = 'A991022' // 시리얼 보정 신
+const D13 = 'A991013' // 접수 삭제 훅
+const D14A = 'A991014' // 입고 확인 — 정상입고
+const D14B = 'A991024' // 입고 확인 — 미회수
+const D14C = 'A991034' // 입고 확인 — 정상입고 수동 확정
+const D15A = 'A991016' // 입고 확인 — 시리얼 치환(REMAP) 치환 전(미입고)
+const D15B = 'A991026' // 입고 확인 — 시리얼 치환(REMAP) 치환 후(미식별입고)
+const D16 = 'A991036' // 소급 수리반환(처리일 < AS 표시 시작일) — 업무일자 클램프
 const ALL_SERIALS = [S1, S2, S3, S4, S5, SX, SX2, D1, D2, D3, D5, N5, D6, D7, N7, D8, SX9, D10, D11, D12A, D12B, D13, D14A, D14B, D14C, D15A, D15B, D16]
 const WARD = 'AS스모크병동'
 
@@ -458,7 +459,7 @@ async function main() {
       u5?.placement?.status === 'RECOVERED' && u5?.condition === 'AS_WAITING' && atCenter(u5) && locAfter(rec5) === 'SITE/REFRESH_CENTER' && unitStateChangesOf(rec5?.changes)?.location.note === '입고 미확인' && uN5?.condition === 'IN_USE' && atHospital(uN5, hospitalCode) && res5.autoCompleted,
       JSON.stringify({ u5, rec5: rec5?.changes, uN5 }))
     await completeAsReceipt(R5.id, actor)
-    check('[C-5] 종결 접수 사후 입고 — 불일치 시리얼 400(EXTRA 생성 금지)', (await errStatus(() => intakeAsLines(R5.id, actor, { serials: [D5, 'ASMKZZ99'] }))) === 400 && (await prisma.asReceiptItem.count({ where: { receiptId: R5.id } })) === 1)
+    check('[C-5] 종결 접수 사후 입고 — 불일치 시리얼 400(EXTRA 생성 금지)', (await errStatus(() => intakeAsLines(R5.id, actor, { serials: [D5, 'A990999'] }))) === 400 && (await prisma.asReceiptItem.count({ where: { receiptId: R5.id } })) === 1)
     const in5 = await intakeAsLines(R5.id, actor, { serials: [D5] })
     const line5 = await prisma.asReceiptItem.findUnique({ where: { id: i5 } })
     const r5 = await prisma.asReceipt.findUnique({ where: { id: R5.id }, include: { status: true } })

@@ -11,7 +11,7 @@ import Pager from '@/app/components/ui/Pager'
 import DateRangeFilter from '@/app/components/ui/DateRangeFilter'
 import AsReceiptFormModal from './_components/AsReceiptFormModal'
 import AsTabs from './_components/AsTabs' // 접수 목록 ↔ 수리대기 탭 (2026-09-28)
-import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsTag, AS_SEARCH_FIELDS, AS_SEARCH_FIELD_LABELS, AS_SEARCH_FIELD_PLACEHOLDER, parseAsSearchField, type AsSearchField, isAsCanceledStatus, AS_LIST_QS_KEY, AS_BACK_KEY, AS_BULK_STATUS_MAX } from '@/lib/asReceiptShared'
+import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsTag, AS_SEARCH_FIELDS, AS_SEARCH_FIELD_LABELS, AS_SEARCH_FIELD_PLACEHOLDER, parseAsSearchField, type AsSearchField, isAsCanceledStatus, AS_LIST_QS_KEY, AS_BACK_KEY, AS_BULK_STATUS_MAX, summarizeAsReceiptWards } from '@/lib/asReceiptShared'
 
 interface CodeRef { id: number; name: string; color: string | null }
 /** 정렬 가능 컬럼 (2026-09-16) — 서버 정렬(`?sort=&dir=`). 계산 컬럼(기기상태·기기·유형·송장·태그)은 정렬 없음 */
@@ -20,6 +20,7 @@ const SORT_KEYS: readonly SortKey[] = ['asCode', 'hospital', 'category', 'status
 const COLUMNS: { label: string; sort?: SortKey; cls?: string }[] = [
   { label: '접수번호', sort: 'asCode' },
   { label: '병원', sort: 'hospital' },
+  { label: '병동' }, // 접수 병동 요약 (2026-09-29 — 라인 wardName 중복 제거, 원장 병동 아님)
   { label: '접수 기기상태' },
   { label: '구분', sort: 'category' },
   { label: '기기' },
@@ -56,6 +57,7 @@ interface AsRow {
   ticket: { id: number; ticketCode: string; status: string; owner: { id: string; name: string } | null } | null
   items: {
     id: number; serialNo: string; outcome: string | null; deviceKind: string | null; intakeState: string; receivedAt: string | null; shippedAt: string | null; shipTrackingNo: string | null
+    wardName: string | null // 접수 병동 (2026-09-29)
     repairedAt: string | null // 수리완료 체크 (2026-09-17) — 기기 셀 `수리 n/m`
     device: { deviceInfo: { deviceName: string }; placement: { productType: string | null } | null } | null
     newDevice: { placement: { productType: string | null } | null } | null
@@ -169,7 +171,7 @@ function deviceStateBadge(r: AsRow) {
   if (!label) return <span className="text-xs text-gray-300">-</span>
   if (label === '취소') return <span className="whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-500" title="취소된 접수 — 원장 정합·입고 대조 검토 대상 아님">취소</span>
   if (label === '정상') return <span className="whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700">정상</span>
-  const parts = r.registryTags.map((t) => `${t.tag === 'DUPLICATE' ? '' : '원장 '}${AS_REGISTRY_TAG_LABELS[t.tag]} ${t.count}대${t.detail ? ` (${t.detail})` : ''}`) // DUPLICATE(2026-09-18)는 원장 축이 아님
+  const parts = r.registryTags.map((t) => `${t.tag === 'DUPLICATE' || t.tag === 'BAD_SERIAL' ? '' : '원장 '}${AS_REGISTRY_TAG_LABELS[t.tag]} ${t.count}대${t.detail ? ` (${t.detail})` : ''}`) // DUPLICATE(2026-09-18)는 원장 축이 아님
   if (r.intakeIssues > 0) parts.push(`입고 대조 미입고·미식별입고 ${r.intakeIssues}대`)
   const tip = parts.join(' · ')
   return <span className="whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700" title={tip}>확인필요</span>
@@ -593,6 +595,7 @@ function AsReceiptListInner() {
                     )}
                     <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-blue-600">{r.asCode}</td>
                     <td className={`max-w-[14rem] truncate px-3 py-2 text-gray-900${strike}`} title={r.hospital?.hospitalName ?? undefined}><span className="block min-w-[8rem] max-w-[14rem] truncate">{r.hospital?.hospitalName ?? '-'}</span></td>
+                    <td className={`max-w-[10rem] truncate px-3 py-2 text-xs text-gray-600${strike}`} title={summarizeAsReceiptWards(r.items).join(', ') || undefined}>{summarizeAsReceiptWards(r.items).join(', ') || <span className="text-gray-300">-</span>}</td>
                     <td className={`whitespace-nowrap px-3 py-2${strike}`}>{deviceStateBadge(r)}</td>
                     <td className={`whitespace-nowrap px-3 py-2${strike}`}>
                       <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${CATEGORY_BADGE[r.category] ?? 'bg-gray-100 text-gray-700'}`}>{AS_CATEGORY_LABELS[r.category as AsCategory] ?? r.category}</span>

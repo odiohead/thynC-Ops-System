@@ -340,6 +340,7 @@ export async function runChanneltalkAsSync(testIo?: ChanneltalkSyncTestIo): Prom
           pickupDestInfo: dest.pickupDestInfo, // 회수지 = 라벨 분해값, 없으면 발송지와 동일 자동 기재 (상이 시 화면에서 '회수지 상이' 체크 후 수정 — CX #13)
           note: noteParts.join('\n'),
           lines,
+          allowInvalidSerial: true, // 시트 값이 비정상이어도 접수는 만들고 '시리얼 오류' 태그로 보정 전 처리 차단 (2026-09-30)
         },
         { userId: bot.id, name: bot.name }
       )

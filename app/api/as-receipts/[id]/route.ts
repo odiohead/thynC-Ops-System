@@ -51,7 +51,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   const dupBySerial = duplicatesForReceipt(asReceipt.id, openSerials, await findOpenLinesBySerial(openSerials)) // 중복접수 (2026-09-18)
   const items = shapeDetailItems(asReceipt.items).map((i) => ({
     ...i,
-    registryTag: i.outcome ? null : classifyAsRegistryLine(asReceipt.hospitalCode, unitBySerial.get(i.serialNo)),
+    registryTag: i.outcome ? null : classifyAsRegistryLine(asReceipt.hospitalCode, unitBySerial.get(i.serialNo), i.serialNo), // 시리얼 형식 오류 우선 (2026-09-30)
     duplicateOf: i.outcome ? [] : (dupBySerial.get(i.serialNo) ?? []), // 같은 시리얼 미종결 라인을 가진 다른 접수번호
   }))
 

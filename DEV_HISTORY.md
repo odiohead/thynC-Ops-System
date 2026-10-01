@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-09-30 16:10 | AS업무 — 시리얼 형식 게이트: 비정상 시리얼은 [시리얼 보정] 전 이후 처리 차단 (dev2 미빌드·PROD 미반영)
+
+- **배경(사용자 요청, AS-202609-0159 보정 후속)**: 시트 인입 시리얼 `P017426(52W)`가 그대로 원장 확정·수리반환까지 흘러 가짜 기기 6대가 생긴 재발 방지. 사용자 확정 규칙 **심전계 A+숫자 6자리 · 산소포화도 P+숫자 6자리**(PROD 실측: 전 라인 14,318건 중 규칙 외 20건·미종결 1건(테스트 접수), 게이트웨이 B 시리얼 AS 라인 0건 → 두 규칙만으로 충분)
+- **공용(`lib/asReceiptShared.ts`)**: `AS_SERIAL_RE`·`AS_SERIAL_RULE_TEXT`·`isValidAsSerial`·`asSerialFormatError` + 원장 정합 태그 `BAD_SERIAL`('시리얼 오류', 목록 라벨은 '원장 ' 접두 없음) — `classifyAsRegistryLine(hospital, unit, serialNo?)` 3번째 인자로 최우선 판정(`summarizeAsRegistryTags`·상세 API 전달)
+- **서비스 게이트(`lib/asReceiptService.ts`)**: `assertAsSerialOk`(409) — resolveAsLines·draftAsLines(초안 지정만, 해제 허용)·confirmAsIntake(MARK_RECEIVED·NOT_RECEIVED·ACCEPT_EXTRA, REMAP은 치환 결과 시리얼 검사)·confirmAsRegistry·requireRepairableLine(수리완료·폐기·큐 일괄)·updateAsShipInfo / `assertInputSerialOk`(400) — 교체기(resolve·draft)·입고 입력·보정 결과·화면 등록(`createAsReceipt`, `allowInvalidSerial` 아니면)·라인 편집 신규 키(`applyItemChanges`, 기존 비정상 라인 유지는 허용). 시트 인입(`channeltalkAsSync`)은 `allowInvalidSerial: true` + 경고 "시리얼 형식 오류 — 보정 전 이후 처리 불가"
+- **화면(`app/as-receipts/[id]/page.tsx`)**: 그룹 헤더 '시리얼 오류 n' 배지(흰 글자 적색), 라인 배지 `BAD_SERIAL`, 처리 체크박스·수리완료 체크 제외(툴팁 '시리얼 보정 후'), 원장 정합 섹션에 규칙 안내 문구 + 해당 라인은 [시리얼 보정]만 노출([확정]·모델·병동·상품유형 숨김)
+- **검증(dev2)**: tsc 0·eslint 0. 기존 스모크 `scripts/as-receipt-smoke.mts` 테스트 시리얼 `ASMK####` → 규칙 준수 `A99####`(실기기 미사용 대역, dev2 기존 A9999xx 4대와 겹치지 않음)로 교체 후 **86/86**. 전용 게이트 테스트(`scripts/tmp-serial-gate-test.mts`, 커밋 제외) **24/24** — 판정 8·화면 등록 400·시트 인입 허용+경고·초안/최종확정/원장확정/발송 409·입고 입력 400·교체기 400·라인 편집 신규 400/기존 유지 허용·보정 결과 400·보정 후 receiptSerialNo 보존·보정 후 처리 허용. 테스트 데이터 삭제
+- **미실시**: 빌드·PM2 재시작(화면 변경은 빌드 후 육안 확인 필요) · PROD 반영 · PROD 잔여 비정상 시리얼 20건은 전부 종결(백필 없음, 비소급)
+- 영향: lib/{asReceiptShared,asReceiptService,channeltalkAsSync}.ts, app/api/as-receipts/[id]/route.ts, app/as-receipts/{page.tsx,[id]/page.tsx}, scripts/as-receipt-smoke.mts, README.md
+
+---
+
 ## 2026-09-30 15:05 | PROD 데이터 보정: AS-202609-0159(3441) 접수 시리얼 병동 접미어 → 입고 시리얼 확정 (사용자 직접 실행)
 
 - **사건**: 채널톡 접수봇(9/9)이 시트 값 `P017426(52W)` 형식(병동 접미어 포함)을 시리얼로 6라인 등록 → 9/16 원장 확정에서 "시리얼 형식 불일치" 경고에도 신규 등록 확정 → **가짜 기기 6대**(device_units 28346~28351, AS_WAITING)·**가짜 병동 '52W'**(hospital_wards 718) 생성 → 9/29 수리반환 확정(발송일 9/30이 미래라 기기 복귀 6건 실패) → 9/30 입고처리에서 실제 시리얼 입력 → 원 라인이 이미 종결이라 매칭 안 되고 **미식별입고 6라인 추가**. PROD 전체에서 동일 패턴은 이 1건뿐(괄호 시리얼 라인·기기 모두)

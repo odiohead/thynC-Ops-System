@@ -22,7 +22,7 @@ import {
   type RegistryCtx, type UnitStateSnapshot,
 } from '@/lib/deviceRegistry'
 import { syncAsReceiptToTicket, createTicketForAsReceipt } from '@/lib/ticket-domains/asReceipt'
-import { AS_PICKUP_METHODS, defaultAsPickupMethod, AS_OUTCOMES, AS_RESOLVE_OUTCOMES, AS_CATEGORIES, AS_DEST_TYPES, AS_OUTCOME_LABELS, AS_REPAIR_EXCLUDED_OUTCOMES, appendAsNote as appendNote, asDeviceKindFromSerial, canMarkAsLineRepaired, type AsOutcome } from '@/lib/asReceiptShared'
+import { AS_PICKUP_METHODS, defaultAsPickupMethod, AS_OUTCOMES, AS_RESOLVE_OUTCOMES, AS_CATEGORIES, AS_DEST_TYPES, AS_OUTCOME_LABELS, AS_REPAIR_EXCLUDED_OUTCOMES, appendAsNote as appendNote, asDeviceKindFromSerial, canMarkAsLineRepaired, isValidAsSerial, asSerialFormatError, AS_SERIAL_RULE_TEXT, type AsOutcome } from '@/lib/asReceiptShared'
 import { nextAsCode } from '@/lib/asReceipt'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
@@ -34,6 +34,16 @@ export class AsServiceError extends Error {
     this.name = 'AsServiceError'
     this.status = status
   }
+}
+
+/** 시리얼 형식 게이트 (2026-09-30) — 비정상 시리얼 라인은 [시리얼 보정] 전까지 이후 처리 불가(409). 판정 단일 소스 lib/asReceiptShared.isValidAsSerial */
+function assertAsSerialOk(serialNo: string): void {
+  const err = asSerialFormatError(serialNo)
+  if (err) throw new AsServiceError(409, err)
+}
+/** 입력 시리얼(교체기·입고·보정) 형식 검증 — 400 */
+function assertInputSerialOk(serialNo: string, what: string): void {
+  if (!isValidAsSerial(serialNo)) throw new AsServiceError(400, `${what} 시리얼 형식 오류: ${serialNo} (${AS_SERIAL_RULE_TEXT})`)
 }
 
 const ymd = (d: Date | string | null | undefined): string | null =>
@@ -293,7 +303,7 @@ export async function applyItemChanges(
   lines: readonly LineInput[],
   actor: { userId: string | null; name: string | null },
   /** 병원 변경 수정(2026-09-10) — 직전 병원 코드. 지정되고 현재와 다르면 미종결 라인 전부를 제거→재추가로 새 병원 기준 재매칭 */
-  opts?: { previousHospitalCode?: string }
+  opts?: { previousHospitalCode?: string; allowInvalidSerial?: boolean }
 ): Promise<string[]> {
   if (!lines.length) throw new AsServiceError(400, '기기 라인을 1개 이상 입력하세요.')
   const warnings: string[] = []
@@ -313,6 +323,7 @@ export async function applyItemChanges(
     seen.add(key)
     nextKeys.push(key)
     inputByKey.set(key, line)
+    if (!byKey.has(key) && !opts?.allowInvalidSerial) assertInputSerialOk(key, '기기') // 신규 추가 라인만 — 기존 비정상 라인은 유지(보정은 correct-serial) (2026-09-30)
   }
 
   // 종결 라인 제거 금지
@@ -432,6 +443,7 @@ export async function resolveAsLines(
     if (l.outcome === 'REPLACE' && !normalizeSerial(l.newSerial ?? '').serialNo) {
       throw new AsServiceError(400, '교체 처리에는 발송기기 시리얼이 필요합니다.')
     }
+    if (l.outcome === 'REPLACE') assertInputSerialOk(normalizeSerial(l.newSerial ?? '').serialNo, '교체 발송기기')
   }
   const effectiveDate = input.effectiveDate?.trim() || todayKst()
   if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) throw new AsServiceError(400, '처리일이 올바르지 않습니다 (YYYY-MM-DD).')
@@ -482,6 +494,7 @@ export async function resolveAsLines(
         const item = byId.get(l.itemId)
         if (!item) throw new AsServiceError(400, '이 접수의 라인이 아닙니다.')
         if (item.outcome) throw new AsServiceError(409, `이미 종결된 라인입니다: ${item.serialNo}`)
+        assertAsSerialOk(item.serialNo) // 시리얼 형식 게이트 (2026-09-30)
         // 입고 대조 게이트 (2026-09-11): 미입고·미식별입고 라인은 접수자 확인 전까지 처리 불가. 대기(PENDING)는 허용 — 방문교체·선교체는 입고 없이 처리됨
         if (item.intakeState === 'MISMATCH' || item.intakeState === 'EXTRA') {
           throw new AsServiceError(409, `${item.serialNo}: 입고 대조 확인이 필요한 라인입니다 — 접수자 확인(치환·정상입고 확정·미회수) 후 처리하세요`)
@@ -579,6 +592,7 @@ export async function draftAsLines(receiptId: number, input: { lines: DraftLineI
     if (!Number.isInteger(l.itemId)) throw new AsServiceError(400, '라인이 올바르지 않습니다.')
     if (l.outcome != null && !(AS_RESOLVE_OUTCOMES as readonly string[]).includes(l.outcome)) throw new AsServiceError(400, '처리방법이 올바르지 않습니다.')
     if (l.outcome === 'REPLACE' && !normalizeSerial(l.newSerial ?? '').serialNo) throw new AsServiceError(400, '교체 초안에는 발송기기 시리얼이 필요합니다.')
+    if (l.outcome === 'REPLACE') assertInputSerialOk(normalizeSerial(l.newSerial ?? '').serialNo, '교체 발송기기')
   }
   return prisma.$transaction(async (tx) => {
     const receipt = await tx.asReceipt.findUnique({
@@ -593,6 +607,7 @@ export async function draftAsLines(receiptId: number, input: { lines: DraftLineI
       const item = byId.get(l.itemId)
       if (!item) throw new AsServiceError(400, '이 접수의 라인이 아닙니다.')
       if (item.outcome) throw new AsServiceError(409, `이미 확정된 라인은 변경할 수 없습니다: ${item.serialNo}`)
+      if (l.outcome) assertAsSerialOk(item.serialNo) // 시리얼 형식 게이트 (2026-09-30) — 초안 해제는 허용
       if (l.outcome && (item.intakeState === 'MISMATCH' || item.intakeState === 'EXTRA')) {
         throw new AsServiceError(409, `${item.serialNo}: 입고 대조 확인이 필요한 라인입니다 — 접수자 확인 후 처리방법을 지정하세요`)
       }
@@ -661,6 +676,8 @@ export async function intakeAsLines(receiptId: number, actor: { userId: string; 
     seen.add(k); keys.push(k)
   }
   if (!keys.length) throw new AsServiceError(400, '입고 시리얼을 1개 이상 입력하세요.')
+  const badKeys = keys.filter((k) => !isValidAsSerial(k))
+  if (badKeys.length) throw new AsServiceError(400, `입고 시리얼 형식 오류: ${badKeys.join(', ')} (${AS_SERIAL_RULE_TEXT})`) // 비정상 시리얼로 미식별입고 라인이 생기지 않게 (2026-09-30)
   const receivedAt = input.receivedAt?.trim() || todayKst()
   if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedAt)) throw new AsServiceError(400, '입고일이 올바르지 않습니다 (YYYY-MM-DD).')
   const checkedAt = input.checkedAt?.trim() || receivedAt
@@ -784,6 +801,7 @@ export async function confirmAsIntake(receiptId: number, actor: { userId: string
         const extra = await getItem(action.extraItemId)
         if (item.intakeState !== 'MISMATCH') throw new AsServiceError(400, `미입고 라인이 아닙니다: ${item.serialNo}`)
         if (extra.intakeState !== 'EXTRA') throw new AsServiceError(400, `미식별입고 라인이 아닙니다: ${extra.serialNo}`)
+        assertAsSerialOk(extra.serialNo) // 치환 결과 시리얼은 정상이어야 함 (2026-09-30)
         // 치환 전 기기(실제로는 안 들어온 기기) — 시리얼 보정과 동일하게 IN_USE·병원 복귀(게이트·플래그 소유 판정은 setUnitInUse)
         if (item.deviceId) warnings.push(...(await setUnitInUse(tx, ctx, item.deviceId, { locationToHospital: true, memo: `시리얼 치환 ${receipt.asCode} (${item.serialNo} → ${extra.serialNo})` })))
         await tx.asReceiptItem.delete({ where: { id: extra.id } })
@@ -808,6 +826,7 @@ export async function confirmAsIntake(receiptId: number, actor: { userId: string
       case 'MARK_RECEIVED': {
         const item = await getItem(action.itemId)
         if (item.intakeState !== 'MISMATCH') throw new AsServiceError(400, `미입고 라인이 아닙니다: ${item.serialNo}`)
+        assertAsSerialOk(item.serialNo) // 시리얼 형식 게이트 (2026-09-30) — 비정상 시리얼은 REMAP(치환)이나 [시리얼 보정]으로만
         const receivedAt = item.receivedAt ?? new Date(today)
         await tx.asReceiptItem.update({ where: { id: item.id }, data: { intakeState: 'RECEIVED', receivedAt } })
         await intakeUnit(item.deviceId, item.serialNo, receivedAt)
@@ -817,6 +836,7 @@ export async function confirmAsIntake(receiptId: number, actor: { userId: string
       case 'NOT_RECEIVED': {
         const item = await getItem(action.itemId)
         if (item.intakeState !== 'MISMATCH') throw new AsServiceError(400, `미입고 라인이 아닙니다: ${item.serialNo}`)
+        assertAsSerialOk(item.serialNo) // 시리얼 형식 게이트 (2026-09-30)
         const comment = action.comment?.trim()
         if (!comment) throw new AsServiceError(400, '미회수 처리에는 코멘트가 필요합니다.')
         // 실물 이동 근거 없음 → IN_USE·병원(게이트 통과 시 — 플래그 소유면 AS_CLEAR, 아니면 CORRECT 폴백)
@@ -829,6 +849,7 @@ export async function confirmAsIntake(receiptId: number, actor: { userId: string
       case 'ACCEPT_EXTRA': {
         const item = await getItem(action.itemId)
         if (item.intakeState !== 'EXTRA') throw new AsServiceError(400, `미식별입고 라인이 아닙니다: ${item.serialNo}`)
+        assertAsSerialOk(item.serialNo) // 시리얼 형식 게이트 (2026-09-30)
         const [m] = await matchSerials(tx, receipt.hospitalCode, [item.serialNo])
         await tx.asReceiptItem.update({
           where: { id: item.id },
@@ -882,6 +903,7 @@ export async function confirmAsRegistry(receiptId: number, actor: { userId: stri
     const item = await tx.asReceiptItem.findFirst({ where: { id: input.itemId, receiptId } })
     if (!item) throw new AsServiceError(400, '이 접수의 라인이 아닙니다.')
     if (item.outcome) throw new AsServiceError(409, `이미 종결된 라인입니다: ${item.serialNo}`)
+    assertAsSerialOk(item.serialNo) // 시리얼 형식 게이트 (2026-09-30) — 비정상 시리얼로 원장 신규 등록 금지 (AS-202609-0159 가짜 기기 6대 사례)
     const [m] = await matchSerials(tx, receipt.hospitalCode, [item.serialNo])
     if (m.state === 'ACTIVE_HERE') throw new AsServiceError(409, `${item.serialNo}: 이미 이 병원에 배치된 기기입니다 (정상)`)
 
@@ -920,6 +942,7 @@ export interface CorrectSerialResult { serialNo: string; previousSerialNo: strin
 export async function correctAsLineSerial(receiptId: number, actor: { userId: string; name: string | null }, input: { itemId: number; serial: string }): Promise<CorrectSerialResult> {
   const key = normalizeSerial(input.serial ?? '').serialNo
   if (!key) throw new AsServiceError(400, '보정할 시리얼을 입력하세요.')
+  assertInputSerialOk(key, '보정') // 보정 결과는 반드시 정상 시리얼 (2026-09-30)
   return prisma.$transaction(async (tx) => {
     const receipt = await tx.asReceipt.findUnique({
       where: { id: receiptId },
@@ -981,6 +1004,7 @@ export interface RepairDoneResult {
 async function requireRepairableLine(tx: Prisma.TransactionClient, receiptId: number, itemId: number, what: string) {
   const item = await tx.asReceiptItem.findFirst({ where: { id: itemId, receiptId } })
   if (!item) throw new AsServiceError(400, '이 접수의 라인이 아닙니다.')
+  assertAsSerialOk(item.serialNo) // 시리얼 형식 게이트 (2026-09-30)
   if (item.intakeState !== 'RECEIVED') throw new AsServiceError(400, `입고된 라인만 ${what} 처리할 수 있습니다`)
   if (AS_REPAIR_EXCLUDED_OUTCOMES.includes(item.outcome ?? '')) throw new AsServiceError(400, `분실·취소·미회수 라인은 ${what} 대상이 아닙니다`)
   if (!canMarkAsLineRepaired(item)) throw new AsServiceError(400, `${what} 대상이 아닌 라인입니다`) // 판정 단일 소스(lib/asReceiptShared) 방어
@@ -1189,6 +1213,7 @@ export async function updateAsShipInfo(receiptId: number, input: ShipInfoInput):
   if (shippedAt && !/^\d{4}-\d{2}-\d{2}$/.test(shippedAt)) throw new AsServiceError(400, '발송일이 올바르지 않습니다 (YYYY-MM-DD).')
   const items = await prisma.asReceiptItem.findMany({ where: { id: { in: ids }, receiptId }, select: { id: true, serialNo: true, outcome: true, draftOutcome: true } })
   if (items.length !== ids.length) throw new AsServiceError(400, '이 접수의 라인이 아닙니다.')
+  for (const i of items) assertAsSerialOk(i.serialNo) // 시리얼 형식 게이트 (2026-09-30)
   // 확정된 발송 라인 + 초안이 발송(수리반환·교체)인 라인 (2026-09-14 — 최종확정 전에 발송정보를 먼저 기입)
   const isShip = (o: string | null) => o === 'REPAIR_RETURN' || o === 'REPLACE'
   const notShipped = items.filter((i) => !(i.outcome ? isShip(i.outcome) : isShip(i.draftOutcome)))
@@ -1209,6 +1234,8 @@ export async function updateAsShipInfo(receiptId: number, input: ShipInfoInput):
 // 검증 실패는 AsServiceError(400). 발번 충돌(P2002)은 1회 재시도.
 
 export interface CreateAsReceiptInput {
+  /** 시트 자동 인입 전용 — 비정상 시리얼도 등록 허용(경고·'시리얼 오류' 태그로 이후 처리 차단). 화면 등록은 false(400) (2026-09-30) */
+  allowInvalidSerial?: boolean
   hospitalCode: string
   category?: string
   receiptDate: Date
@@ -1269,6 +1296,8 @@ export async function createAsReceipt(
     if (!key) throw new AsServiceError(400, '시리얼이 비어 있습니다.')
     if (seen.has(key)) throw new AsServiceError(400, `같은 시리얼이 중복 입력되었습니다: ${key}`)
     seen.add(key)
+    // 시리얼 형식(2026-09-30): 화면 등록은 400으로 즉시 차단. 시트 자동 인입(allowInvalidSerial)은 등록은 허용하되 '시리얼 오류' 태그로 보정 전 이후 처리 차단
+    if (!input.allowInvalidSerial) assertInputSerialOk(normalizeSerial(key).serialNo, '기기')
   }
 
   // 상태 — 지정 시 카테고리 검증, 미지정이면 '접수'
@@ -1333,6 +1362,7 @@ export async function createAsReceipt(
             const line = lines[i]
             const w = matchWarning(m)
             if (w) txWarnings.push(w)
+            if (!isValidAsSerial(m.serialNo)) txWarnings.push(`${m.serialNo}: 시리얼 형식 오류 (${AS_SERIAL_RULE_TEXT}) — [시리얼 보정] 전에는 이후 처리 불가`) // 시트 자동 인입만 도달 (2026-09-30)
             await tx.asReceiptItem.create({
               data: {
                 receiptId: receipt.id,

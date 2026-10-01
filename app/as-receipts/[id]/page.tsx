@@ -20,7 +20,8 @@ import { asListHref, AS_PICKUP_METHODS, type AsPickupMethod,
   AS_METHODS, AS_DEVICE_GROUPS, asDeviceGroupOf, type AsDeviceGroup,
   AS_RESOLVE_OUTCOMES, AS_INTAKE_STATE_LABELS, AS_DEVICE_KINDS, isAsIntakeIssue, asDeviceKindFromSerial, type AsIntakeState,
   AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, AS_TAG_BADGE_CLS, AS_TAG_FLAGS_EMPTY, asReceiptTags, type AsTagFlags,
-  canMarkAsLineRepaired, asRepairDisabledReason, summarizeAsRepairProgress, AS_LINE_CONDITION_BADGE_CLS, isAsLineConditionBadge } from '@/lib/asReceiptShared' // 수리완료 체크·기기 상태 배지 (2026-09-17)
+  canMarkAsLineRepaired, asRepairDisabledReason, summarizeAsRepairProgress, AS_LINE_CONDITION_BADGE_CLS, isAsLineConditionBadge, summarizeAsReceiptWards,
+  isValidAsSerial, AS_SERIAL_RULE_TEXT } from '@/lib/asReceiptShared' // 수리완료 체크·기기 상태 배지 (2026-09-17) · 시리얼 형식 게이트 (2026-09-30)
 import type { TicketStatus } from '@prisma/client'
 import { PRODUCT_TYPES, deviceConditionLabel, deviceSiteLabel } from '@/lib/deviceRegistryShared'
 
@@ -141,6 +142,7 @@ function todayKst(): string {
 
 /** 라인의 기기현황 상태 배지 */
 const REGISTRY_TAG_BADGE: Record<AsRegistryTag, string> = {
+  BAD_SERIAL: 'bg-red-600 text-white', // 시리얼 형식 오류 — 보정 전 처리 불가 (2026-09-30)
   OTHER_HOSPITAL: 'bg-red-50 text-red-600',
   RECOVERED: 'bg-amber-50 text-amber-700',
   UNPLACED: 'bg-gray-100 text-gray-500',
@@ -247,7 +249,8 @@ const MODEL_BY_KIND: Record<string, string> = { 심전도: '심전계', 산소�
 function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm, onCorrectSerial, canRepair, onToggleRepaired, onScrapLine }: GroupCardProps) {
   const [fixSerial, setFixSerial] = useState<Record<number, string>>({}) // 시리얼 보정 입력 (2026-09-15) — 라인별, 빈 값 = 닫힘
   const repair = summarizeAsRepairProgress(items) // 수리완료 n/m (2026-09-17) — m = 체크 가능 라인(canMarkAsLineRepaired)
-  const openItems = items.filter((i) => !i.outcome && !isAsIntakeIssue(i.intakeState)) // 미입고·미식별입고는 처리 대상 아님
+  const badSerialItems = items.filter((i) => !i.outcome && !isValidAsSerial(i.serialNo)) // 시리얼 형식 오류 — 보정 전 처리 불가 (2026-09-30)
+  const openItems = items.filter((i) => !i.outcome && !isAsIntakeIssue(i.intakeState) && isValidAsSerial(i.serialNo)) // 미입고·미식별입고·시리얼 오류는 처리 대상 아님
   const issueItems = items.filter((i) => !i.outcome && isAsIntakeIssue(i.intakeState))
   const isShip = (o: string | null) => o === 'REPAIR_RETURN' || o === 'REPLACE'
   const shippedItems = items.filter((i) => (i.outcome ? isShip(i.outcome) : isShip(i.draftOutcome))) // 확정 + 초안 발송 라인 (2026-09-14)
@@ -301,6 +304,7 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
         <span className="text-xs text-gray-400">
           {items.length}대 · 확정 {items.filter((i) => i.outcome).length}대{draftItems.length > 0 && <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 font-medium text-blue-700">초안 {draftItems.length}</span>}
           {issueItems.length > 0 && <span className="ml-1.5 rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700">입고 확인 {issueItems.length}</span>}
+          {badSerialItems.length > 0 && <span className="ml-1.5 rounded bg-red-600 px-1.5 py-0.5 font-medium text-white" title={AS_SERIAL_RULE_TEXT}>시리얼 오류 {badSerialItems.length}</span>}
           {registryItems.length > 0 && <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">원장 확인 {registryItems.length}</span>}
           {repair.repairable > 0 && (
             <span className={`ml-1.5 rounded px-1.5 py-0.5 font-medium ${repair.repaired < repair.repairable ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`} title="수리완료 체크 / 체크 가능(입고된) 라인">
@@ -330,7 +334,7 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
               <tr key={item.id} className={item.outcome === 'CANCELED' ? 'text-gray-400' : ''}>
                 {canResolve && (
                   <td className="px-3 py-2">
-                    {!item.outcome && !isAsIntakeIssue(item.intakeState) && (
+                    {!item.outcome && !isAsIntakeIssue(item.intakeState) && isValidAsSerial(item.serialNo) && (
                       <input type="checkbox" checked={selected.has(item.id)} onChange={(e) => setSelected((prev) => { const n = new Set(prev); if (e.target.checked) n.add(item.id); else n.delete(item.id); return n })} className="rounded border-gray-300" />
                     )}
                   </td>
@@ -362,13 +366,13 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
                 {/* 수리완료 체크 (2026-09-17 §6.1) — 입고된 라인만(D5), 분실·취소·미회수 제외. 결과 확정 라인·종결 접수도 가능(선교체, A-2). outcome·헤더 상태에는 개입하지 않음 */}
                 <td className="whitespace-nowrap px-3 py-2">
                   {(() => {
-                    const ok = canMarkAsLineRepaired(item)
+                    const ok = canMarkAsLineRepaired(item) && isValidAsSerial(item.serialNo) // 시리얼 오류 라인은 보정 전 체크 불가 (2026-09-30)
                     const checked = !!item.repairedAt
                     const cond = item.device?.unit?.condition ?? null
                     const scrappable = canRepair && ok && item.device?.placement?.status === 'RECOVERED' && cond !== 'SCRAPPED' && cond !== 'LOST'
                     const title = checked
                       ? `수리완료 ${d10(item.repairedAt).slice(5)} ${item.repairedBy?.name ?? ''}`.trim()
-                      : !canRepair ? '수리완료 체크 권한이 없습니다' : (asRepairDisabledReason(item) ?? '체크하면 기기 상태가 수리완료로 기록됩니다')
+                      : !canRepair ? '수리완료 체크 권한이 없습니다' : !isValidAsSerial(item.serialNo) ? '시리얼 보정 후 체크할 수 있습니다' : (asRepairDisabledReason(item) ?? '체크하면 기기 상태가 수리완료로 기록됩니다')
                     return (
                       <span className="inline-flex items-center gap-1.5" title={title}>
                         <input
@@ -416,10 +420,12 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
       {canEdit && registryItems.length > 0 && (
         <div className="space-y-2 border-t border-amber-100 bg-amber-50/40 px-4 py-3">
           <p className="text-xs font-medium text-amber-800">원장 정합 확인 {registryItems.length}대 — 시리얼 오타면 [시리얼 보정]으로 고치고, 실제 미등록·타병원·회수 기기면 [확정]으로 기기현황을 이 병원 배치로 갱신합니다 (신규 등록 · 재등록 · 타병원 이관)</p>
+          {badSerialItems.length > 0 && <p className="text-xs font-medium text-red-700">시리얼 오류 {badSerialItems.length}대 — 형식 규칙({AS_SERIAL_RULE_TEXT})에 맞지 않는 시리얼은 [시리얼 보정]으로 고치기 전에는 원장 확정·입고·처리방법·발송·수리완료를 진행할 수 없습니다</p>}
           {registryItems.map((item) => {
             const t = item.registryTag!
             const f = regOf(item)
-            const actionLabel = t.tag === 'OTHER_HOSPITAL' ? `${t.detail ?? '타병원'}에서 회수(이관) 후 이 병원 배치` : t.tag === 'UNREGISTERED' ? '원장 신규 등록 후 이 병원 배치' : '이 병원에 재등록'
+            const bad = t.tag === 'BAD_SERIAL' // 시리얼 형식 오류 — [시리얼 보정]만 가능, [확정] 불가 (2026-09-30)
+            const actionLabel = bad ? '시리얼 보정 필요 (형식 오류)' : t.tag === 'OTHER_HOSPITAL' ? `${t.detail ?? '타병원'}에서 회수(이관) 후 이 병원 배치` : t.tag === 'UNREGISTERED' ? '원장 신규 등록 후 이 병원 배치' : '이 병원에 재등록'
             return (
               <div key={item.id} className="flex flex-wrap items-center gap-2 rounded-md border border-amber-100 bg-white px-3 py-2 text-xs">
                 <span className="font-mono text-sm text-gray-900" title={item.receiptSerialNo && item.receiptSerialNo !== item.serialNo ? `접수 시리얼 ${item.receiptSerialNo}` : undefined}>{item.serialNo}</span>
@@ -448,26 +454,26 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
                 ) : (
                   <button type="button" disabled={busy} onClick={() => setFixSerial((p) => ({ ...p, [item.id]: item.serialNo }))} className="rounded-md border border-blue-200 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50" title="인입 시리얼 오타 보정 — 원 시리얼은 접수 시리얼로 보존, 새 시리얼로 기기현황 재매칭">시리얼 보정</button>
                 )}
-                <span className="text-gray-400">→ {actionLabel}</span>
-                {t.tag === 'UNREGISTERED' && (
+                <span className={bad ? 'font-medium text-red-600' : 'text-gray-400'}>→ {actionLabel}</span>
+                {!bad && t.tag === 'UNREGISTERED' && (
                   <select value={f.modelInput} onChange={(e) => setRegForm((p) => ({ ...p, [item.id]: { ...f, modelInput: e.target.value } }))} className="rounded-md border border-gray-300 px-2 py-1 text-xs" title="모델 (시리얼 접두로 추정, 확인 후 확정)">
                     <option value="">모델 선택</option>
                     {['심전계', '산소포화도', '게이트웨이'].map((m) => <option key={m} value={m}>{m}</option>)}
                   </select>
                 )}
-                <input type="text" value={f.wardName} onChange={(e) => setRegForm((p) => ({ ...p, [item.id]: { ...f, wardName: e.target.value } }))} placeholder="병동" className="w-24 rounded-md border border-gray-300 px-2 py-1 text-xs" />
-                <select value={f.productType} onChange={(e) => setRegForm((p) => ({ ...p, [item.id]: { ...f, productType: e.target.value } }))} className="rounded-md border border-gray-300 px-2 py-1 text-xs" title="상품유형 — 병원 딜이 일반·라이트 혼합이면 필수">
+                {!bad && <input type="text" value={f.wardName} onChange={(e) => setRegForm((p) => ({ ...p, [item.id]: { ...f, wardName: e.target.value } }))} placeholder="병동" className="w-24 rounded-md border border-gray-300 px-2 py-1 text-xs" />}
+                {!bad && <select value={f.productType} onChange={(e) => setRegForm((p) => ({ ...p, [item.id]: { ...f, productType: e.target.value } }))} className="rounded-md border border-gray-300 px-2 py-1 text-xs" title="상품유형 — 병원 딜이 일반·라이트 혼합이면 필수">
                   <option value="">상품유형 (자동)</option>
                   {PRODUCT_TYPES.map((pt) => <option key={pt} value={pt}>{pt}</option>)}
-                </select>
-                <button
+                </select>}
+                {!bad && <button
                   type="button"
                   disabled={busy || (t.tag === 'UNREGISTERED' && !f.modelInput)}
                   onClick={() => { if (confirm(`${item.serialNo}: ${actionLabel}\n기기현황에 즉시 기록됩니다. 계속할까요?`)) void onRegistryConfirm({ itemId: item.id, modelInput: f.modelInput || null, productType: f.productType || null, wardName: f.wardName || null }) }}
                   className="rounded-md bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-40"
                 >
                   확정
-                </button>
+                </button>}
               </div>
             )
           })}
@@ -1028,6 +1034,10 @@ export default function AsReceiptDetailPage() {
           <div>
             <p className={label}>기기</p>
             <p className="mt-1 text-sm text-gray-900">{req.items.length}대 <span className="text-xs text-gray-400">· 종결 {req.items.length - openItems.length}대</span></p>
+          </div>
+          <div className="col-span-2 md:col-span-4">
+            <p className={label}>접수 병동 <span className="normal-case tracking-normal text-gray-300">(접수 시 입력 — 원장 배치 병동과 다를 수 있음)</span></p>
+            <p className="mt-1 text-sm text-gray-900">{summarizeAsReceiptWards(req.items).join(', ') || <span className="text-gray-400">-</span>}</p>
           </div>
         </div>
         {/* 병원 태그 · AS메모 (2026-09-29 — 병원 단위 정보, 병원 상세 '부가정보'와 공용. 메모 편집은 접수 종결 여부와 무관하게 USER 이상) */}
