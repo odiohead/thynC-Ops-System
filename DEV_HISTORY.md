@@ -14,6 +14,14 @@
 
 ---
 
+## 2026-10-01 16:00 | PROD 배포: AS접수 목록 사용자 열 커스터마이징 + nav 재클릭 새로고침 (2d0e1e9) — 마이그 적용
+
+- **dev2**: 13:30~15:40 항목(2줄 행 롤백·46열 카탈로그·고정 3열·기본 프리셋·날짜 최소 폭·user_view_prefs·nav 새로고침) 통합 커밋 2d0e1e9·push
+- **PROD(사용자 "PROD에 반영해줘")**: `git pull`(1909343→2d0e1e9, package.json·협업 서버 변경 없음) → 마이그 `20261001120000_user_view_prefs` psql 단일 tx(lock_timeout 5s, CREATE TABLE) → `migrate resolve --applied` → `prisma generate` → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` → health 200 · `/as-receipts`·`/api/me/view-prefs/as_receipts_list` 307(비로그인 정상) · 신규 에러 없음. `user_view_prefs` 0행(사용자가 [저장]하면 생성)
+- 영향: PROD 소스(2d0e1e9)·PROD DB(user_view_prefs 테이블 신규), DEV_HISTORY.md
+
+---
+
 ## 2026-10-01 15:40 | AS접수 목록 — 날짜 열 최소 폭 재산정(셀 패딩 포함) (dev2 빌드·재시작)
 
 - **사용자 신고**: 기본 프리셋에서 접수일 `2026-10-01`이 `2026-10-…`로 잘림 — 폭 104에서 셀 좌우 패딩 24px를 빼면 글자 영역 80px < 날짜 폭(≈84px)
