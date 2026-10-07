@@ -241,7 +241,7 @@ export default function ParkingPage() {
       const res = await fetch('/api/parking/auto-apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ carId: selected.id, carNo: selected.carNo }),
+        body: JSON.stringify({ carId: selected.id, carNo: selected.carNo, entryDate: entryDate || searchDate }),
       })
       const data = await res.json()
       setToast({ ok: !!data.ok, msg: data.message || (data.ok ? '자동 등록 완료' : '자동 등록 실패') })

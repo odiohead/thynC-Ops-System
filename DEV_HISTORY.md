@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-10-07 18:10 | 주차 웹할인 — 자동 등록에 검색 입차일(entryDate) 전달 + 실패 사유 서버 로그 (dev2 빌드·재시작, PROD 미반영)
+
+- **사건(PROD 조회)**: 10/07 16:53~16:56 KST 자동 등록 5회 연속 409(차량 21러7974, 사이트 입차 기록 2026-09-29·carId 536791). 16:57 유서영 님 수동 무료 4건은 성공. 감사 로그는 성공 건만 남아 실패 본문 없음 — nginx 409 응답 크기(4376B)·코드 추적으로 원인 확정
+- **원인**: `autoApplyDiscount` → `registerDiscount` 호출 시 `entryDate` 미전달 → 사이트 기본 영업일(당시 10/06, 실제 날짜 지연 추적)로 차량 재검색 → 9/29 입차건이 목록에 없어 1단계 "입차 차량을 찾지 못했습니다"로 중단. 수동 등록은 화면이 검색 입차일을 보내므로 정상. 계획(plan)은 carId 직접 조회라 정상(무료 4건 계획)
+- **변경**: `app/parking/page.tsx` 자동 등록 body에 `entryDate: entryDate || searchDate`(수동 등록과 동일) · `app/api/parking/auto-apply/route.ts` `entryDate` 수신·`autoApplyDiscount(carId, carNo, entryDate)` 전달·감사 로그 after에 `entryDate` 기록·**실패(409)·예외(502) 시 `console.warn/error`로 차량·입차일·사용자·단계별 사유 기록**(DB 미사용 모듈이라 서버 로그가 유일한 실패 출처) · `lib/parking.ts` `autoApplyDiscount` 3번째 인자 `entryDate?` → 각 단계 `registerDiscount`에 전달
+- **검증(dev2)**: tsc 0·eslint 0, 4GB 빌드·`pm2 restart thync-dev`. 실제 사이트 등록은 입차 차량이 있어야 하므로 육안 확인은 다음 실사용 시
+- 영향: app/parking/page.tsx, app/api/parking/auto-apply/route.ts, lib/parking.ts, README.md
+
+---
+
 ## 2026-10-01 10:40 | PROD → dev2 데이터 동기화 (정기 백업 thync_ops_20261001_010001.dump)
 
 - **사용자 요청** "PROD데이터를 DEV2로 마이그" — CLAUDE.md 약속어 dev2 절차. 사전 점검: 덤프 TABLE DATA 129(=dev2 128테이블 + _prisma_migrations), dev2·PROD 마이그 이력 154개 동일

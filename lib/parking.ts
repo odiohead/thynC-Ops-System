@@ -785,8 +785,10 @@ export interface AutoApplyResult {
   message: string
 }
 
-/** 계획을 순차 실행(무료 먼저 → 903 유료). 실패 시 중단하고 결과 보고. */
-export async function autoApplyDiscount(carId: string, carNo: string): Promise<AutoApplyResult> {
+/** 계획을 순차 실행(무료 먼저 → 903 유료). 실패 시 중단하고 결과 보고.
+ *  entryDate = 검색에 쓴 입차일. 생략하면 registerDiscount가 사이트 기본 영업일로 차량을 찾는데,
+ *  영업일이 실제 날짜를 지연 추적하거나 며칠 전 입차건이면 '입차 차량을 찾지 못했습니다'로 실패한다 (2026-10-07, 21러7974). */
+export async function autoApplyDiscount(carId: string, carNo: string, entryDate?: string): Promise<AutoApplyResult> {
   const plan = await planAutoDiscount(carId)
   if (!plan.ok || plan.steps.length === 0) {
     return { ok: false, plan, results: [], finalState: await carDiscountState(carId), message: plan.reason || '적용할 항목이 없습니다.' }
@@ -803,6 +805,7 @@ export async function autoApplyDiscount(carId: string, carNo: string): Promise<A
       carNo,
       carId,
       discountType: s.discountType,
+      entryDate,
       assumeUnlocked: true, // 무료를 먼저 순차 등록하므로 유료 게이트 재조회 생략
     })
     results.push({ ...s, applied: r.ok, message: r.message })
