@@ -5,9 +5,19 @@
  * - NFC 정규화 (macOS/시트 NFD 표기 함정 — drive-korean-filename-nfd)
  * - 법인 접두 제거·학교 축약·괄호 별칭 전개, 정규화가 전부 소거되면 원명 폴백
  * - 별칭 유일 매칭 → 확정, 실패 시 부분 포함(4자 이상)으로 유일 후보만 확정
- * 사용처: 채널톡 AS접수 폴링(lib/channeltalkAsSync). 후보 풀은 고객사(프로젝트·기기·딜 보유 병원).
+ * 사용처: 채널톡 AS접수 폴링(lib/channeltalkAsSync)·채널톡 상담 적재(lib/channeltalk/vocSync).
+ *
+ * 후보 풀 2계층 (2026-10-08 — 비공식 설치 병원 HOSP-002710 AS 접수 매칭 실패 사례):
+ * - core: 고객사(프로젝트·기기 배치·딜 보유 병원). 모든 매칭 단계 참여
+ * - extended: 채널톡 고객 프로필 OpsCode로 연결된 병원 중 core 밖(담당자가 직접 입력한 명시적 연결).
+ *   **정식명·별칭 유일 일치일 때만 확정** — 부분 포함·지역 접두 추정 단계에는 참여하지 않는다(느슨한 표기가 확장 병원으로 흘러가는 길 차단).
+ *   전체 병원(8만)으로 넓히면 '화순성심병원'→'성심병원' 오매칭, '우리병원'·'영동병원' 등 동명 충돌 10건 상실 — 측정 후 기각.
+ *   검증: scripts/verify-hospital-matcher.mts
  */
 import { prisma } from '@/lib/prisma'
+
+export type HospitalMatcherTier = 'core' | 'extended'
+export interface HospitalMatcherEntry { hospitalCode: string; hospitalName: string; tier?: HospitalMatcherTier }
 
 export interface HospitalMatcher {
   /** 유일 매칭 시 hospitalCode, 아니면 null */
@@ -15,6 +25,7 @@ export interface HospitalMatcher {
   /** 실패 진단용 — 부분 포함 후보 코드 목록 */
   candidates(rawName: string): string[]
   nameOf(code: string): string | undefined
+  tierOf(code: string): HospitalMatcherTier | undefined
 }
 
 const norm = (x: string) =>
@@ -38,7 +49,9 @@ const aliases = (rawName0: string): string[] => {
   return Array.from(out)
 }
 
-export function buildHospitalMatcher(hospitals: { hospitalCode: string; hospitalName: string }[]): HospitalMatcher {
+export function buildHospitalMatcher(hospitals: HospitalMatcherEntry[]): HospitalMatcher {
+  const tierMap = new Map(hospitals.map((h) => [h.hospitalCode, h.tier ?? 'core'] as [string, HospitalMatcherTier]))
+  const isCore = (code: string) => tierMap.get(code) !== 'extended'
   // 정식명 정규화 키 → 코드 (2026-09-11: 별칭 축약 충돌 대응 — '동아대학교병원'의 축약 '동아병원'이 실제 '동아병원'과 겹치던 사례.
   // 입력 정규화 키가 어떤 병원의 정식명과 유일하게 일치하면 별칭보다 우선 확정)
   const byExact = new Map<string, string[]>()
@@ -57,12 +70,13 @@ export function buildHospitalMatcher(hospitals: { hospitalCode: string; hospital
   const nameMap = new Map(hospitals.map((h) => [h.hospitalCode, h.hospitalName] as [string, string]))
   const cache = new Map<string, string | null>()
 
+  // 부분 포함·지역 접두 추정은 core 병원만 후보 (extended는 정식명·별칭 유일 일치 전용)
   const partialCands = (keys: string[]): Set<string> => {
     const cands = new Set<string>()
     byAlias.forEach((arr, ak) => {
       for (const k of keys) {
         if (k.length < 4 || ak.length < 4) continue
-        if (ak.includes(k) || k.includes(ak)) arr.forEach((c) => cands.add(c))
+        if (ak.includes(k) || k.includes(ak)) arr.filter(isCore).forEach((c) => cands.add(c))
       }
     })
     return cands
@@ -74,7 +88,7 @@ export function buildHospitalMatcher(hospitals: { hospitalCode: string; hospital
       if (cache.has(rawName)) return cache.get(rawName)!
       let code: string | null = null
       const keys = aliases(rawName)
-      const exact = byExact.get(keys[0]) ?? [] // 정식명 유일 일치 우선
+      const exact = byExact.get(keys[0]) ?? [] // 정식명 유일 일치 우선 (core·extended 공통 — 둘이 겹치면 모호 → 실패)
       if (exact.length === 1) code = exact[0]
       if (!code) for (const k of keys) { const arr = byAlias.get(k) ?? []; if (arr.length === 1) { code = arr[0]; break } }
       if (!code) {
@@ -87,7 +101,7 @@ export function buildHospitalMatcher(hospitals: { hospitalCode: string; hospital
         const k = keys[0]
         const hits = new Set<string>()
         byExact.forEach((arr, ek) => {
-          if (ek.length >= 4 && k.length > ek.length && k.length - ek.length <= 4 && k.endsWith(ek)) arr.forEach((c) => hits.add(c)) // 정식명 키 4자 이상 — '차병원'(3자) 같은 범용 접미는 제외('일산차병원'→'군산 차병원' 오매칭 방지)
+          if (ek.length >= 4 && k.length > ek.length && k.length - ek.length <= 4 && k.endsWith(ek)) arr.filter(isCore).forEach((c) => hits.add(c)) // 정식명 키 4자 이상 — '차병원'(3자) 같은 범용 접미는 제외('일산차병원'→'군산 차병원' 오매칭 방지)
         })
         if (hits.size === 1) code = Array.from(hits)[0]
       }
@@ -101,14 +115,25 @@ export function buildHospitalMatcher(hospitals: { hospitalCode: string; hospital
       return Array.from(cands)
     },
     nameOf: (code) => nameMap.get(code),
+    tierOf: (code) => tierMap.get(code),
   }
 }
 
-/** 고객사 풀(프로젝트·기기 배치·딜 중 하나라도 보유)로 매처 생성 */
+/** core: 고객사 풀(프로젝트·기기 배치·딜 중 하나라도 보유) + extended: 채널톡 OpsCode 연결 병원(core 밖) */
 export async function loadHospitalMatcher(): Promise<HospitalMatcher> {
-  const hospitals = await prisma.hospital.findMany({
+  const core = await prisma.hospital.findMany({
     where: { OR: [{ projects: { some: {} } }, { hospitalDevices: { some: {} } }, { salesDeals: { some: {} } }] },
     select: { hospitalCode: true, hospitalName: true },
   })
-  return buildHospitalMatcher(hospitals)
+  const coreCodes = new Set(core.map((h) => h.hospitalCode))
+  const opsCodes = (await prisma.channeltalkUser.findMany({ where: { opsCode: { not: null } }, distinct: ['opsCode'], select: { opsCode: true } }))
+    .map((u) => u.opsCode!)
+    .filter((c) => !coreCodes.has(c))
+  const extended = opsCodes.length
+    ? await prisma.hospital.findMany({ where: { hospitalCode: { in: opsCodes } }, select: { hospitalCode: true, hospitalName: true } })
+    : []
+  return buildHospitalMatcher([
+    ...core.map((h) => ({ ...h, tier: 'core' as const })),
+    ...extended.map((h) => ({ ...h, tier: 'extended' as const })),
+  ])
 }

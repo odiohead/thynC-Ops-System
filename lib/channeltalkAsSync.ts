@@ -278,6 +278,9 @@ export async function runChanneltalkAsSync(testIo?: ChanneltalkSyncTestIo): Prom
         continue
       }
 
+      // 확장 풀(채널톡 OpsCode 연결·고객사 풀 밖) 매칭은 시트 메모에 남겨 추적 가능하게 (2026-10-08, HOSP-002710 비공식 설치 사례)
+      const extendedMatch = matcher.tierOf(hospitalCode) === 'extended' ? `확장 풀 매칭(채널톡 OpsCode 연결 병원, 고객사 풀 밖): ${matcher.nameOf(hospitalCode) ?? hospitalCode}` : null
+
       const serials = parseSerialTextarea(serialsRaw.replace(/[(（][^)）]*[)）]/g, '')) // 'P013798(72W)' 같은 괄호 병동 표기 제거 (2026-09-10, r3657 사례)
       if (!serials.length) {
         result.failed++
@@ -292,7 +295,7 @@ export async function runChanneltalkAsSync(testIo?: ChanneltalkSyncTestIo): Prom
       })
 
       // 수량 대조(G+H vs 시리얼 수) — 경고만
-      const warnParts: string[] = []
+      const warnParts: string[] = extendedMatch ? [extendedMatch] : []
       const cntEcg = parseInt(cell(r, C.CNT_ECG)) || 0
       const cntSpo2 = parseInt(cell(r, C.CNT_SPO2)) || 0
       if (cntEcg + cntSpo2 > 0 && cntEcg + cntSpo2 !== serials.length) {
