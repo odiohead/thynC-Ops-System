@@ -4,6 +4,51 @@
 
 ---
 
+## 2026-10-14 10:30 | AS접수 상세 타임라인 — 비고 수정 내용(줄 diff) 표시 (dev2 소스, 빌드·PROD 미반영)
+
+- **요청(사용자)**: 상세 '비고' 수정을 타임라인에 이력으로 — 가능하면 수정 내용까지
+- **판단**: 타임라인은 별도 테이블 없이 `audit_logs`(접수 수정 PUT의 before/after 전체 레코드) + 티켓 로그 합성이라, 비고 전문이 이미 수정 전후로 저장돼 있음 → **DB·저장 경로 변경 없이 표시만 확장**, 기존 수정 이력에도 소급 적용(dev2 기준 과거 비고 변경 감사로그 156건). 시스템 이력 줄([입고처리]·[원장확정]·[리오픈] 등)은 각 처리 경로가 별도 감사로그를 남기므로 일반 수정 감사로그의 비고 차이 = 사용자 편집분
+- **변경**: `app/api/as-receipts/[id]/timeline/route.ts` — `noteDiffOf`(줄 단위 LCS diff, 공백 줄 제외, 각 30줄 상한 '… 외 n줄') → 이벤트에 `noteDiff { removed, added }` 추가. 요약 문구는 '비고 입력/수정/삭제'로 정리하고, 기존의 '끝에 덧붙인 수정은 생략'(시스템 추가로 오인) 규칙 제거 — 사용자가 비고 끝에 줄을 덧붙여도 이제 표시됨. `app/as-receipts/[id]/page.tsx` — 이벤트 아래 회색 박스에 삭제 줄(빨강 취소선 −)·추가 줄(초록 +)
+- **검증**: tsc 0(4GB) · eslint 0(터치 2파일) · diff 단위 케이스 5종(첫 입력·끝 추가·중간 수정·전체 삭제·무변경) · dev2 실 감사로그 대조(줄 수정은 −/+ 쌍, 추가는 + 만)
+- 영향: app/api/as-receipts/[id]/timeline/route.ts, app/as-receipts/[id]/page.tsx, README.md, DEV_HISTORY.md
+
+---
+
+## 2026-10-13 18:30 | PROD 운영 보정: AS-202609-0358(대전한국병원, 접수 3647) 라인 P003472 수리반환 → 교체(P004234)
+
+- **요청(팀장님 경유)**: 11병동 P003472를 '수리반환'으로 처리했으나 실제로는 P004234로 교체 발송
+- **사전 확인(PROD 읽기)**: 라인 14139 REPAIR_RETURN·발송 10/8, 접수 완료(티켓 CLOSED). P003472는 ACTIVE·REPAIRED·리프레시센터·**AS 표시(as_ref_code 0358) 잔존**(수리반환 확정 때 AS_CLEAR 미기록). P004234는 같은 병원에서 5/13 AS-202604-0159로 회수된 기기(RECOVERED·센터·상태 미확인)
+- **처리(1회성 tsx 스크립트, 단일 tx — PROD dry-run 후 `--apply`, 실행 후 PROD·dev2 삭제, 커밋 안 함)**: 화면 교체 경로와 동일한 `replaceDevice`(처리일 2026-10-08, ref AS-202609-0358, 실행자 이준호) → P003472 RECOVER(63537, related P004234 — AS 표시 fold 해제) · P004234 재등록 REGISTER(63538, 11병동, 구 배치 상품유형·계약건 상속) → 라인 outcome REPLACE·new_serial_no P004234·new_device_id 24111(송장·발송일 유지) → 접수 비고 정정 한 줄 + 감사 로그. 경고 2건(재등록 이력 연결·P004234 수리완료 체크 없이 재사용)은 정상 경로 안내
+- **검증**: P003472 RECOVERED·replaced_by 24111·AS 표시 해제, P004234 ACTIVE 11병동 IN_USE. 채널톡 AS 시트 r3852 발송기기(W) 재역기입 로그 확인
+- 영향: PROD DB(hospital_devices·hospital_device_events·device_units·as_receipt_items·as_receipts.note·audit_logs), 채널톡 AS 시트 r3852(W), DEV_HISTORY.md
+
+---
+
+## 2026-10-13 17:40 | PROD 운영 보정: AS-202610-0075(접수 3802) 교체기 시리얼 오타 정정 — P006168 교체기 P021328 → P021320
+
+- **요청(사용자)**: 원주세브란스기독병원(HOSP-000160) 8병동(동관4층) 접수 3802 라인 P006168의 교체기를 담당자가 P021328로 입력 — 실제는 P021320(오타)
+- **사전 확인(PROD 읽기)**: 라인 14793(P006168)·14798(P006398) 둘 다 교체기 P021328(device 28639). 14793 교체 처리 시 오타로 P021328 유닛이 REGISTER(related P006168)로 신규 생성, 14798은 기존 유닛이라 RECOVER만 기록 → 8병동 신규 배치 1대뿐. P021320은 기기현황 미존재, WMS 무관. 사용자 확인: P021328은 P006398 교체기가 맞음
+- **처리(1회성 tsx 스크립트, 단일 tx — dry-run 후 `--apply`, 실행 후 PROD·dev2 삭제, 커밋 안 함)**: ① P021320 유닛(28701)·배치 신규 — 28639 복제(MP100W·8병동·IN_USE·배치일 10/8·일반·DEAL-202507-0007) ② P021320 REGISTER 이벤트(63532, 62395 복제 — related P006168, action_group = P006168 RECOVER 그룹, 처리자 임상욱 유지) ③ P006168 배치 replaced_by·RECOVER(62394) related → P021320 ④ P021328 REGISTER(62395) related → P006398·action_group → P006398 RECOVER(62404) 그룹 ⑤ 라인 14793 new_serial_no/new_device_id → P021320/28701 ⑥ 감사 로그(as_receipt UPDATE, 실행자 이준호)
+- **검증**: 8병동 ACTIVE P021328·P021320 2대, 회수 기기 replaced_by 각 1:1, REGISTER/RECOVER 쌍 그룹 일치. 채널톡 AS 시트 r4004는 정정 직후 틱에서 발송기기(W) 재역기입 확인(shipBack 1)
+- 영향: PROD DB(device_units·hospital_devices·hospital_device_events·as_receipt_items·audit_logs), 채널톡 AS 시트 r4004(W), DEV_HISTORY.md
+
+---
+
+## 2026-10-13 15:40 | PROD 운영 보정: 승일희망요양병원 9/4 출고 게이트웨이 65대 — 대웅제약재고 → 판매용재고 이관 후 판매 출고 (전산 정정)
+
+- **요청(사용자)**: `260904 gwinfo.xlsx`(MGW1010 65대, BARCODE = 시스템 시리얼, 1병동 8·2~4병동 각 19) — 9/4 승일희망요양병원(HOSP-003380)에 출고됐으나 PROD에 대웅제약재고 909호 IN_STOCK으로 남아 있음. 판매용재고에서 출고된 것으로 정정
+- **사전 확인**: 65대 전부 대웅 909호 IN_STOCK(8/11~8/25 입고 — 이 중 28대는 8/13 '전산차이 상계처리'로 판매용재고에서 넘어온 개체, 판매용 쪽 개체는 OUT으로 잔존). 9/4·9/11 기존 승일희망 출고 전표(김태완 처리)와 시리얼 중복 0
+- **처리(1회성 tsx 스크립트 — 실행 후 PROD·dev2 모두 삭제, 커밋 안 함)**: 전표일 2026-09-04, 단일 트랜잭션, 처리자 이준호, 표준 경로(`planInventoryTransaction`/`applyInventoryTransaction`)
+  - STK-202610-0119 대웅제약재고 OUT '기타' 65 (909호 → 판매용재고)
+  - STK-202610-0120 판매용재고 IN '회수(반품)' 28 — 기존 OUT 개체 복귀(개체 이력 연속, 일반 입고는 동일 시리얼 중복으로 거부되는 구조)
+  - STK-202610-0121 판매용재고 IN '기타' 37 — 신규 개체(LOT은 대웅 개체 LOT GW6309/GW6420 승계)
+  - STK-202610-0122 판매용재고 OUT '판매' 65 → 승일희망요양병원 (workType PROJECT · PRJ-202606-0006)
+  - 비고 공통 마커 '승일희망요양병원 9/4 출고분 전산 정정'
+- **검증**: dev2 dry-run(롤백)·PROD dry-run 통과 후 `--apply`. 사후 PROD: 대상 대웅 IN_STOCK 0·판매용 OUT 65, 전표별 개체 링크 수 일치, MGW1010 재고 스냅샷 = 개체 수(대웅 72 · 판매용 12). 게이트웨이는 기기현황 비대상. 파일의 MAC·병동 정보는 WMS에 저장 필드가 없어 미반영
+- 영향: PROD DB(inventory_transactions 4·inventory_units·inventory_stocks), DEV_HISTORY.md
+
+---
+
 ## 2026-10-08 18:00 | PROD 배포: 병원명 매처 후보 풀 2계층 (57d0fb3) + 시트 r4042 재시도 → AS-202610-0117 등록
 
 - **dev**: 17:40 항목 커밋 57d0fb3·push

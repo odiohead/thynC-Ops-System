@@ -60,7 +60,7 @@ interface ItemRow {
   repairedBy: { id: string; name: string | null } | null
 }
 
-interface TimelineEvent { id: string; at: string; actor: string | null; source: 'audit' | 'ticket'; title: string; details: string[] } // /api/as-receipts/[id]/timeline (2026-09-15)
+interface TimelineEvent { id: string; at: string; actor: string | null; source: 'audit' | 'ticket'; title: string; details: string[]; noteDiff?: { removed: string[]; added: string[] } } // /api/as-receipts/[id]/timeline (2026-09-15 · 비고 수정 내용 2026-10-14)
 
 interface AsDetail {
   id: number
@@ -1315,6 +1315,16 @@ export default function AsReceiptDetailPage() {
                     <ul className="mt-0.5 space-y-0.5 text-xs text-gray-600">
                       {ev.details.map((d, i) => <li key={i} className="break-words">{d}</li>)}
                     </ul>
+                  )}
+                  {ev.noteDiff && (
+                    <div className="mt-1 space-y-0.5 rounded border border-gray-100 bg-gray-50 px-2 py-1.5 text-xs">
+                      {ev.noteDiff.removed.map((l, i) => (
+                        <p key={`r${i}`} className="whitespace-pre-wrap break-words text-red-600"><span className="mr-1 select-none">−</span><span className="line-through">{l}</span></p>
+                      ))}
+                      {ev.noteDiff.added.map((l, i) => (
+                        <p key={`a${i}`} className="whitespace-pre-wrap break-words text-green-700"><span className="mr-1 select-none">+</span>{l}</p>
+                      ))}
+                    </div>
                   )}
                 </li>
               ))}

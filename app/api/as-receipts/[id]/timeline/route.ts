@@ -14,7 +14,7 @@ type Params = { params: { id: string } }
 
 /**
  * AS접수 타임라인 (2026-09-15) — 상세 하단 이력. 읽기 전용 합성(별도 테이블 없음):
- *  · audit_logs(resource=as_receipt, resource_id=asCode) — 등록·접수정보 수정(필드 diff)·입고처리·입고 확인·라인 최종확정·발송정보·원장 확정·완료·리오픈·수리완료/해제·폐기(2026-09-17)
+ *  · audit_logs(resource=as_receipt, resource_id=asCode) — 등록·접수정보 수정(필드 diff + 비고 수정 내용 줄 diff 2026-10-14)·입고처리·입고 확인·라인 최종확정·발송정보·원장 확정·완료·리오픈·수리완료/해제·폐기(2026-09-17)
  *  · ticket_logs(연결 티켓) — 생성·상태 전이·담당 배정·댓글
  * 최신순. 초안 저장(draft-lines)은 감사로그가 없어 나타나지 않는다(확정 시점만 이력).
  */
@@ -25,6 +25,8 @@ export interface AsTimelineEvent {
   source: 'audit' | 'ticket'
   title: string
   details: string[]
+  /** 비고 수정 내용 (2026-10-14) — 줄 단위 diff. 접수 수정 감사로그의 before/after 비고 전문에서 산출 */
+  noteDiff?: { removed: string[]; added: string[] }
 }
 
 type Rec = Record<string, unknown>
@@ -53,13 +55,36 @@ function diffHeader(before: Rec, after: Rec): string[] {
   cmp('pickupDestInfo', '회수지 정보')
   cmp('expectedShipDate', '예상 출하일', d10)
   for (const t of AS_TAGS) cmp(AS_TAG_FIELDS[t], `태그 ${AS_TAG_LABELS[t]}`, (v) => (v ? '켬' : '끔'))
-  if ((before.note ?? null) !== (after.note ?? null)) {
-    const b = String(before.note ?? ''), a = String(after.note ?? '')
-    // 비고 뒤에 이력 줄만 덧붙은 경우(입고처리 등 시스템 추가)는 별도 이벤트가 있으므로 생략
-    if (!a.startsWith(b) || a.length <= b.length) out.push('비고 수정')
-    else if (!b) out.push('비고 입력')
-  }
+  // 비고는 noteDiffOf가 수정 내용(줄 diff)으로 따로 싣는다 — 여기서는 요약 한 줄만
+  // (시스템 이력 줄 추가는 각 처리 경로가 별도 감사로그를 남기므로, 일반 수정 감사로그의 비고 차이는 사용자 편집분이다)
+  const nd = noteDiffOf(before, after)
+  if (nd) out.push(!String(before.note ?? '').trim() ? '비고 입력' : !String(after.note ?? '').trim() ? '비고 삭제' : '비고 수정')
   return out
+}
+
+const NOTE_DIFF_MAX_LINES = 30
+
+/** 비고 줄 단위 diff (LCS) — 삭제·추가 줄. 변경 없으면 null. 표시 상한 NOTE_DIFF_MAX_LINES줄(초과분은 '… 외 n줄') */
+function noteDiffOf(before: Rec, after: Rec): { removed: string[]; added: string[] } | null {
+  const b = String(before.note ?? '').replace(/\r/g, ''), a = String(after.note ?? '').replace(/\r/g, '')
+  if (b === a) return null
+  const x = b ? b.split('\n') : [], y = a ? a.split('\n') : []
+  const n = x.length, m = y.length
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = x[i] === y[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
+  const removed: string[] = [], added: string[] = []
+  let i = 0, j = 0
+  while (i < n && j < m) {
+    if (x[i] === y[j]) { i++; j++ } else if (dp[i + 1][j] >= dp[i][j + 1]) { removed.push(x[i++]) } else { added.push(y[j++]) }
+  }
+  while (i < n) removed.push(x[i++])
+  while (j < m) added.push(y[j++])
+  const cap = (arr: string[]) => {
+    const kept = arr.filter((l) => l.trim())
+    return kept.length > NOTE_DIFF_MAX_LINES ? [...kept.slice(0, NOTE_DIFF_MAX_LINES), `… 외 ${kept.length - NOTE_DIFF_MAX_LINES}줄`] : kept
+  }
+  const r = { removed: cap(removed), added: cap(added) }
+  return r.removed.length || r.added.length ? r : null
 }
 
 function summarizeAudit(row: { id: number; action: string; resourceLabel: string | null; before: unknown; after: unknown; createdAt: Date; actorName: string | null }, asCode: string): AsTimelineEvent {
@@ -130,8 +155,10 @@ function summarizeAudit(row: { id: number; action: string; resourceLabel: string
   if (suffix === '기기등록 완료') return { ...base, title: '기기등록 완료 → 접수 완료', details: after.statusName ? [`상태 ${after.statusName}`] : [] }
   if (suffix === '리오픈') return { ...base, title: `리오픈${after.statusName ? ` → ${after.statusName}` : ''}`, details: after.reason ? [String(after.reason)] : [] }
   // 일반 수정 — 헤더 필드 diff
-  const details = Object.keys(before).length && Object.keys(after).length ? diffHeader(before, after) : []
-  return { ...base, title: details.length ? '접수 수정' : '접수 수정 (기기 라인)', details }
+  const both = Object.keys(before).length > 0 && Object.keys(after).length > 0
+  const details = both ? diffHeader(before, after) : []
+  const noteDiff = both ? noteDiffOf(before, after) : null
+  return { ...base, title: details.length ? '접수 수정' : '접수 수정 (기기 라인)', details, ...(noteDiff ? { noteDiff } : {}) }
 }
 
 export async function GET(request: NextRequest, { params }: Params) {
