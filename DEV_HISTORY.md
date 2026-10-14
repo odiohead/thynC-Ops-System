@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-10-14 10:05 | PROD 반영: 병원 태그 'SpO2센서 교체완료' (9f2f3b8)
+
+- **dev2**: 09:40 항목 커밋 9f2f3b8·push
+- **PROD(사용자 "PROD에 반영해줘")**: `git pull`(fe8f536→9f2f3b8 — 시드·문서만, 빌드·재시작 불필요) → `psql -f scripts/seed-hospital-tags.sql`(idempotent) → 태그 4종 확인(SPO2_SENSOR_REPLACED 신규) · health 200. 사용자는 병원 상세 '부가정보'에서 체크, AS접수 상세 병원 태그 칩에 표시(목록 '태그' 열은 접수 태그 전용 — 병원 태그 미표시는 기존 설계)
+- 영향: PROD DB(hospital_tags 1행), DEV_HISTORY.md
+
+---
+
 ## 2026-10-14 09:40 | 병원 태그 추가 — 'SpO2센서 교체완료' (dev2 DB 적용, PROD 미반영)
 
 - **요청(사용자)**: 기납품처의 SpO2 센서를 구형 → 신형으로 교체 중 — 교체 완료 병원을 체크할 태그
