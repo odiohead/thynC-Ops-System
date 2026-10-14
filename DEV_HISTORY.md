@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-10-14 09:15 | PROD 배포: AS접수 타임라인 비고 수정 내용 표시 (f3b5620)
+
+- **dev2**: 10:30 항목 힙 4GB 빌드·`pm2 restart thync-dev`(health 200) → 커밋 f3b5620(10/13 운영 보정 기록 3건 포함, 임시 스크립트 `scripts/tmp-*.mts` 제외)·push
+- **PROD(사용자 "PROD까지 쭉 진행해줘")**: `git pull`(1ec58af→f3b5620, package.json·DB·협업 서버 변경 없음) → 힙 4GB 빌드(협업 번들 2108cacb 불변 → `thync-collab-prod` 재시작 불필요) → `pm2 restart thync-prod` → health 200 · `/as-receipts/3802`·`/api/as-receipts/3802/timeline` 307(비로그인 정상) · 재시작 후 신규 에러 로그 없음(기존 반복 패턴 Slack invalid_blocks 등은 재시작 전 기록)
+- 참고: PROD 작업 트리에 미추적 `scripts/tmp-sheet-tabs.mts`(이번 배포와 무관한 기존 파일) 존재 — 손대지 않음
+- 영향: PROD 소스(f3b5620), DEV_HISTORY.md
+
+---
+
 ## 2026-10-14 10:30 | AS접수 상세 타임라인 — 비고 수정 내용(줄 diff) 표시 (dev2 소스, 빌드·PROD 미반영)
 
 - **요청(사용자)**: 상세 '비고' 수정을 타임라인에 이력으로 — 가능하면 수정 내용까지
