@@ -250,10 +250,8 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
   const [fixSerial, setFixSerial] = useState<Record<number, string>>({}) // 시리얼 보정 입력 (2026-09-15) — 라인별, 빈 값 = 닫힘
   const repair = summarizeAsRepairProgress(items) // 수리완료 n/m (2026-09-17) — m = 체크 가능 라인(canMarkAsLineRepaired)
   const badSerialItems = items.filter((i) => !i.outcome && !isValidAsSerial(i.serialNo)) // 시리얼 형식 오류 — 보정 전 처리 불가 (2026-09-30)
-  const openItems = items.filter((i) => !i.outcome && !isAsIntakeIssue(i.intakeState) && isValidAsSerial(i.serialNo)) // 미입고·미식별입고·시리얼 오류는 처리 대상 아님
   const issueItems = items.filter((i) => !i.outcome && isAsIntakeIssue(i.intakeState))
   const isShip = (o: string | null) => o === 'REPAIR_RETURN' || o === 'REPLACE'
-  const shippedItems = items.filter((i) => (i.outcome ? isShip(i.outcome) : isShip(i.draftOutcome))) // 확정 + 초안 발송 라인 (2026-09-14)
   const draftItems = items.filter((i) => !i.outcome && i.draftOutcome)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const registryItems = items.filter((i) => !i.outcome && i.registryTag) // 원장 정합 확인 대상 (타병원·회수·미배치·미등록)
@@ -264,34 +262,55 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
   const [outcome, setOutcome] = useState<AsOutcome>('REPAIR_RETURN')
   const [newSerials, setNewSerials] = useState<Record<number, string>>({})
   const [notes, setNotes] = useState<Record<number, string>>({})
-  // 기기군 공통 발송정보 — 기발송 라인이 있으면 첫 라인 값으로 초기화 (한 번만 입력 — 2026-09-11)
-  const first = shippedItems[0]
-  const [shipMethod, setShipMethod] = useState(first?.shipMethod ?? '')
-  const [shipTrackingNo, setShipTrackingNo] = useState(first?.shipTrackingNo ?? '')
-  const [shippedAt, setShippedAt] = useState(first?.shippedAt?.slice(0, 10) ?? '')
+  // 발송정보 입력 (2026-10-14 부분 발송 — 라인마다 발송일·송장이 다를 수 있음). 처리방법과 한 번에 저장(선택 라인 대상).
+  // 이전 발송분 값이 새 라인에 섞이지 않도록 빈 값으로 시작 (기존 값은 표의 '발송' 열에서 확인)
+  const [shipMethod, setShipMethod] = useState('')
+  const [shipTrackingNo, setShipTrackingNo] = useState('')
+  const [shippedAt, setShippedAt] = useState('')
   useEffect(() => {
     setSelected(new Set())
     setNotes({})
-    const f = items.find((i) => (i.outcome ? isShip(i.outcome) : isShip(i.draftOutcome)))
-    if (f) { setShipMethod(f.shipMethod ?? ''); setShipTrackingNo(f.shipTrackingNo ?? ''); setShippedAt(f.shippedAt?.slice(0, 10) ?? '') }
+    setShipMethod(''); setShipTrackingNo(''); setShippedAt('')
   }, [items])
 
-  const allOpenSelected = openItems.length > 0 && openItems.every((i) => selected.has(i.id))
+  // 선택 대상 (2026-10-14 개정 — 휴먼에러 방지): 발송정보까지 입력된 발송 라인(발송일 + 송장, 방문은 발송일만)은 체크 불가.
+  //  · 미확정 처리 가능 라인 → 처리방법(+발송정보) 지정
+  //  · 확정 발송 라인 중 발송정보 미완료 → 발송정보만 기입
+  const isOpenItem = (i: ItemRow) => !i.outcome && !isAsIntakeIssue(i.intakeState) && isValidAsSerial(i.serialNo) // 미입고·미식별입고·시리얼 오류는 처리 대상 아님
+  const shipDone = (i: ItemRow) => (i.outcome ? isShip(i.outcome) : isShip(i.draftOutcome)) && !!i.shippedAt && (!!i.shipTrackingNo || i.shipMethod === 'VISIT')
+  const isOpenSelectable = (i: ItemRow) => canResolve && isOpenItem(i) && !shipDone(i)
+  const isShipFixSelectable = (i: ItemRow) => canEdit && !!i.outcome && isShip(i.outcome) && !shipDone(i)
+  const canSelect = (i: ItemRow) => isOpenSelectable(i) || isShipFixSelectable(i)
+  const selectableOpen = items.filter(isOpenSelectable)
+  const selectableAll = items.filter(canSelect)
+  const showSelect = selectableAll.length > 0
+  const draftSel = selectableOpen.filter((i) => selected.has(i.id)).map((i) => i.id)
+  const shipFixSel = items.filter((i) => isShipFixSelectable(i) && selected.has(i.id))
+  const selCount = draftSel.length + shipFixSel.length
+  /** 발송정보를 받을 라인 — 처리방법이 수리반환·교체면 처리방법 지정 라인 + 확정 발송 라인 */
+  const shipTargetIds = [...(isShip(outcome) ? draftSel : []), ...shipFixSel.map((i) => i.id)]
+  const shipInputEmpty = !shipMethod && !shipTrackingNo.trim() && !shippedAt
+  const showShipInputs = canEdit && shipTargetIds.length > 0
+
+  const allOpenSelected = selectableAll.length > 0 && selectableAll.every((i) => selected.has(i.id))
   const noteOf = (i: ItemRow) => (notes[i.id] ?? i.processNote ?? '')
 
-  /** 선택 라인에 처리방법 초안 저장 — 기기현황에는 기록되지 않음, 최종확정 전까지 변경 가능 */
+  /** 선택 라인 저장 — 처리방법 초안(미확정 라인) + 발송정보(입력 시, 발송 라인만). 기기현황 기록은 [최종확정] 시점 */
   async function saveDraft() {
-    const lines = Array.from(selected).map((itemId) => ({
+    const lines = draftSel.map((itemId) => ({
       itemId, outcome,
       newSerial: outcome === 'REPLACE' ? (newSerials[itemId] ?? items.find((i) => i.id === itemId)?.draftNewSerialNo ?? '') : undefined,
     }))
-    if (!lines.length) return
+    if (!lines.length && !shipFixSel.length) return
     if (outcome === 'REPLACE' && lines.some((l) => !l.newSerial?.trim())) { alert('교체 처리는 선택한 모든 라인에 발송기기 시리얼이 필요합니다.'); return }
-    const ok = await onDraft(lines)
-    if (ok) { setSelected(new Set()); setNewSerials({}) }
+    if (!lines.length && shipInputEmpty) { alert('발송정보를 입력하세요.'); return }
+    const ship = { ids: shipTargetIds, method: shipMethod, tracking: shipTrackingNo, date: shippedAt } // 저장 후 리로드로 입력값이 초기화되기 전에 고정
+    if (lines.length && !(await onDraft(lines))) return
+    if (!shipInputEmpty && ship.ids.length && !(await onApplyShipInfo(ship.ids, ship.method, ship.tracking, ship.date))) return
+    setSelected(new Set()); setNewSerials({})
   }
   async function clearDraft() {
-    const ids = Array.from(selected).filter((id) => items.find((i) => i.id === id)?.draftOutcome)
+    const ids = draftSel.filter((id) => items.find((i) => i.id === id)?.draftOutcome)
     if (!ids.length) return
     const ok = await onDraft(ids.map((itemId) => ({ itemId, outcome: null })))
     if (ok) setSelected(new Set())
@@ -317,10 +336,10 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
         <table className="min-w-full divide-y divide-gray-100 text-sm">
           <thead>
             <tr>
-              {canResolve && (
+              {showSelect && (
                 <th className="w-8 px-3 py-2">
-                  {openItems.length > 0 && (
-                    <input type="checkbox" checked={allOpenSelected} onChange={(e) => setSelected(e.target.checked ? new Set(openItems.map((i) => i.id)) : new Set())} className="rounded border-gray-300" title="처리 가능 라인 전체 선택" />
+                  {selectableAll.length > 0 && (
+                    <input type="checkbox" checked={allOpenSelected} onChange={(e) => setSelected(e.target.checked ? new Set(selectableAll.map((i) => i.id)) : new Set())} className="rounded border-gray-300" title="선택 가능 라인 전체 선택 (발송정보까지 입력된 라인 제외)" />
                   )}
                 </th>
               )}
@@ -332,9 +351,9 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
           <tbody className="divide-y divide-gray-100">
             {items.map((item) => (
               <tr key={item.id} className={item.outcome === 'CANCELED' ? 'text-gray-400' : ''}>
-                {canResolve && (
+                {showSelect && (
                   <td className="px-3 py-2">
-                    {!item.outcome && !isAsIntakeIssue(item.intakeState) && isValidAsSerial(item.serialNo) && (
+                    {canSelect(item) && (
                       <input type="checkbox" checked={selected.has(item.id)} onChange={(e) => setSelected((prev) => { const n = new Set(prev); if (e.target.checked) n.add(item.id); else n.delete(item.id); return n })} className="rounded border-gray-300" />
                     )}
                   </td>
@@ -523,28 +542,23 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
         </div>
       )}
 
-      {/* 라인 처리방법 초안 → 기기군 공통 발송정보 (2026-09-14 — 확정은 3. 카드 하단 [최종확정]) */}
-      {(canResolve && openItems.length > 0) || (canEdit && shippedItems.length > 0) ? (
+      {/* 라인 처리 (2026-10-14 개정): 선택 → 처리방법 → (교체기 시리얼) → 발송정보 → [저장]. 확정은 3. 카드 하단 [최종확정] */}
+      {showSelect ? (
         <div className="space-y-2.5 border-t border-gray-200 bg-gray-50 px-4 py-3">
-          {canResolve && openItems.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-gray-700">{selected.size > 0 ? `선택 ${selected.size}개 라인` : '라인 선택 후 처리방법 지정'}</span>
-              <select value={outcome} onChange={(e) => setOutcome(e.target.value as AsOutcome)} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-gray-700">{selCount > 0 ? `선택 ${selCount}대` : '라인을 선택하세요'}</span>
+            {canResolve && selectableOpen.length > 0 && (
+              <select value={outcome} onChange={(e) => setOutcome(e.target.value as AsOutcome)} disabled={draftSel.length === 0} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm disabled:opacity-50" title={draftSel.length === 0 ? '미확정 라인을 선택하면 처리방법을 지정할 수 있습니다' : '선택한 미확정 라인의 처리방법'}>
                 {AS_RESOLVE_OUTCOMES.map((o) => <option key={o} value={o}>{AS_OUTCOME_LABELS[o]}</option>)}
               </select>
-              <button type="button" onClick={saveDraft} disabled={busy || selected.size === 0} className="rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50" title="선택 라인에 처리방법을 지정합니다 (최종확정 전까지 변경 가능)">
-                {busy ? '저장 중...' : '처리방법 저장'}
-              </button>
-              {Array.from(selected).some((id) => items.find((i) => i.id === id)?.draftOutcome) && (
-                <button type="button" onClick={clearDraft} disabled={busy} className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50">지정 해제</button>
-              )}
-              <span className="ml-auto text-xs text-gray-400">기기현황 기록은 하단 [최종확정] 시점에 이루어집니다</span>
-            </div>
-          )}
-          {canResolve && outcome === 'REPLACE' && selected.size > 0 && (
+            )}
+            {shipFixSel.length > 0 && <span className="text-xs text-gray-500">확정 라인 {shipFixSel.length}대는 발송정보만 저장</span>}
+            <span className="ml-auto text-xs text-gray-400">기기현황 기록은 하단 [최종확정] 시점에 이루어집니다</span>
+          </div>
+          {canResolve && outcome === 'REPLACE' && draftSel.length > 0 && (
             <div className="space-y-1.5 rounded-md border border-gray-200 bg-white px-3 py-2">
               <p className="text-xs font-medium text-gray-500">교체 발송기기 시리얼 (라인별)</p>
-              {Array.from(selected).map((itemId) => {
+              {draftSel.map((itemId) => {
                 const item = items.find((i) => i.id === itemId)
                 if (!item) return null
                 return (
@@ -557,26 +571,25 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
               })}
             </div>
           )}
-          {canEdit && shippedItems.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2 border-t border-gray-200 pt-2.5">
-              <span className="text-xs font-medium text-gray-500">발송정보 (기기군 공통)</span>
-              <select value={shipMethod} onChange={(e) => setShipMethod(e.target.value)} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm">
-                <option value="">발송방법</option>
-                {AS_METHODS.map((m) => <option key={m} value={m}>{AS_SHIP_METHOD_LABELS[m]}</option>)}
-              </select>
-              <input type="text" value={shipTrackingNo} onChange={(e) => setShipTrackingNo(e.target.value)} placeholder="발송 송장" className="w-44 rounded-md border border-gray-300 px-2.5 py-1.5 font-mono text-sm" />
-              <input type="date" value={shippedAt} onChange={(e) => setShippedAt(e.target.value)} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" title="발송일 (미입력 시 최종확정일)" />
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => { if (confirm(`[${group}] 발송 라인 ${shippedItems.length}대(확정·초안 포함)에 이 발송정보를 적용합니다.`)) void onApplyShipInfo(shippedItems.map((i) => i.id), shipMethod, shipTrackingNo, shippedAt) }}
-                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50"
-                title="수리반환·교체(확정 또는 초안) 라인의 발송방법·송장·발송일을 기기군 단위로 기입"
-              >
-                발송 라인 {shippedItems.length}대에 적용
-              </button>
-            </div>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {showShipInputs && (
+              <>
+                <span className="text-xs font-medium text-gray-500" title="라인마다 발송일·송장이 다를 수 있습니다 (부분 발송). 선택 라인에만 저장, 빈 칸은 기존 값 유지 — 아직 발송 전이면 비워 두고 나중에 다시 선택해 입력">발송정보 (선택)</span>
+                <select value={shipMethod} onChange={(e) => setShipMethod(e.target.value)} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm">
+                  <option value="">발송방법</option>
+                  {AS_METHODS.map((m) => <option key={m} value={m}>{AS_SHIP_METHOD_LABELS[m]}</option>)}
+                </select>
+                <input type="text" value={shipTrackingNo} onChange={(e) => setShipTrackingNo(e.target.value)} placeholder="발송 송장" title="빈 칸은 기존 값 유지" className="w-44 rounded-md border border-gray-300 px-2.5 py-1.5 font-mono text-sm" />
+                <input type="date" value={shippedAt} onChange={(e) => setShippedAt(e.target.value)} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" title="발송일 (미입력 시 기존 값 유지 · 초안 라인은 최종확정일)" />
+              </>
+            )}
+            <button type="button" onClick={saveDraft} disabled={busy || selCount === 0 || (draftSel.length === 0 && shipInputEmpty)} className="rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50" title="선택 라인에 처리방법(미확정 라인)과 발송정보(입력 시)를 저장합니다 — 최종확정 전까지 변경 가능">
+              {busy ? '저장 중...' : draftSel.length > 0 ? `처리방법 저장 (${selCount}대)` : `발송정보 저장 (${selCount}대)`}
+            </button>
+            {draftSel.some((id) => items.find((i) => i.id === id)?.draftOutcome) && (
+              <button type="button" onClick={clearDraft} disabled={busy} className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50">지정 해제</button>
+            )}
+          </div>
         </div>
       ) : null}
     </div>
@@ -814,7 +827,8 @@ export default function AsReceiptDetailPage() {
     const res = await fetch(`/api/as-receipts/${req.id}/ship-info`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itemIds, shipMethod: shipMethod || null, shipTrackingNo, shippedAt: shippedAt || null }),
+      // 입력한 항목만 갱신 — 빈 칸은 기존 값 유지 (2026-10-14 부분 발송: 송장만 정정해도 발송방법·발송일이 지워지지 않게)
+      body: JSON.stringify({ itemIds, shipMethod: shipMethod || undefined, shipTrackingNo: shipTrackingNo.trim() || undefined, shippedAt: shippedAt || null }),
     })
     const d = await res.json().catch(() => ({}))
     setBusy(false)
@@ -934,7 +948,7 @@ export default function AsReceiptDetailPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
+    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
       {error && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">{error}</div>}
       {warnings.length > 0 && (
         <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
