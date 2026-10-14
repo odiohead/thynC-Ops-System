@@ -8,7 +8,7 @@
 
 - **사건**: r4122(10/14, 고장, 산소포화도 P020830·P021307·P021080, '빨간 느낌표 표시', 접수 메모 '수원버팀병원/4병동', 발송지 수원 영통 골든스퀘어) → '병원 매칭 실패: 후보 버팀병원, 버팀병원'. PROD에 정식명 '버팀병원' 2곳 — 수원 영통 HOSP-002983(운영·기기 60·채널톡 OpsCode 연결) / 오산 HOSP-000869(운영·기기 30). 시리얼 3대 모두 HOSP-002983 ACTIVE. 매처는 '수원버팀병원'·'버팀병원(수원)' 등 표기로도 미확정(PROD 읽기 확인) — 시트 표기 수정으로는 해결 불가
 - **처리(사용자 승인, 1회성 tsx — 입력값 출력 후 `--apply`, 실행 후 PROD 삭제)**: `runChanneltalkAsSync` 신규 등록 경로와 동일 매핑(`parseSerialTextarea`·`parseSymptoms`·`parseDestCell`·`createAsReceipt`·봇 계정·SLA·감사)으로 병원만 HOSP-002983 지정 → **AS-202610-0194**(티켓 7254, TK-202610-00593) → 시트 AJ(코드)·AK(메모) 기입 → 다음 틱 'AJ 코드 승격'으로 AI '등록완료' 확인
-- **알림 이슈**: 스크립트를 `NODE_ENV=production` 없이 실행해 Slack 안전장치가 live→test 강등 — 등록 알림이 테스트 경로('[DEV→#AS업무]'·'[DEV→#운영 공지]' 접두)로 발송되고 'sent' 로그가 남아, `NODE_ENV=production` 재발송은 등록 알림 1시간 멱등성에 걸려 스킵. 운영 채널 실알림은 미발송 상태
+- **알림 이슈**: 스크립트를 `NODE_ENV=production` 없이 실행해 Slack 안전장치가 live→test 강등 — 등록 알림이 테스트 경로('[DEV→#AS업무]'·'[DEV→#운영 공지]' 접두)로 발송되고 'sent' 로그가 남아, `NODE_ENV=production` 재발송은 등록 알림 1시간 멱등성에 걸려 스킵. 운영 채널 실알림은 미발송 — **재발송 안 함(사용자 결정: 담당자에게 직접 안내)**
 - **교훈**: PROD에서 알림을 유발하는 1회성 스크립트는 `NODE_ENV=production`으로 실행
 - 영향: PROD DB(as_receipts·as_receipt_items·tickets·기기현황 AS 표시·audit_logs·notification_logs), 채널톡 AS 시트 r4122(AJ·AK → AI 승격), DEV_HISTORY.md
 
