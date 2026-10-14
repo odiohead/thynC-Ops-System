@@ -15,6 +15,7 @@ type Params = { params: { id: string } }
  * POST { serials: string[] | serialsText: string, receivedAt?, checkedAt? }
  * 실물 시리얼을 접수 라인과 대조: 일치 → 정상입고, 접수됐으나 없음 → 미입고, 접수에 없음 → 미식별입고 라인. 누적 실행 가능.
  * 헤더 입고일(최초)·확인일 갱신, 상태 '입고' 자동(이전 단계일 때). 권한: USER 이상 전원
+ * 2026-10-14: 화면은 '입고확인일' 하나만 보냄(receivedAt) — checkedAt 미지정 시 서비스가 입고일과 같은 날짜로 기록(시트 O열 역기입 유지)
  * 2026-09-17: 정상입고 라인의 기기는 센터 입고(INTAKE — AS_WAITING·리프레시센터). 종결 접수는 선교체(REPLACE·미입고) 라인만 사후 입고 허용(§7.3 조건부 완화)
  */
 export async function POST(request: NextRequest, { params }: Params) {

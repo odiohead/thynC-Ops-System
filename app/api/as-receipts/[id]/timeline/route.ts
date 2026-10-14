@@ -48,7 +48,7 @@ function diffHeader(before: Rec, after: Rec): string[] {
   cmp('pickupMethod', '수거방법', (v) => (v ? AS_PICKUP_METHOD_LABELS[v as AsPickupMethod] ?? String(v) : '-'))
   cmp('pickupTrackingNo', '수거 송장')
   cmp('pickedUpAt', '수거일', d10)
-  cmp('receivedAt', '입고일', d10)
+  cmp('receivedAt', '입고확인일', d10)
   cmp('destType', '발송지 구분', (v) => (v ? AS_DEST_TYPE_LABELS[v as AsDestType] ?? String(v) : '-'))
   cmp('destInfo', '발송지 정보')
   cmp('pickupDestDiffers', '회수지 상이', (v) => (v ? '예' : '아니오'))
@@ -100,7 +100,7 @@ function summarizeAudit(row: { id: number; action: string; resourceLabel: string
     const details = [`입력 ${r('serials').length}대 · 정상입고 ${r('received').length}`]
     if (r('mismatch').length) details.push(`미입고 ${r('mismatch').length} (${r('mismatch').join(', ')})`)
     if (r('extra').length) details.push(`미식별입고 ${r('extra').length} (${r('extra').join(', ')})`)
-    if (after.receivedAt) details.push(`입고일 ${d10(after.receivedAt)}`)
+    if (after.receivedAt) details.push(`입고확인일 ${d10(after.receivedAt)}`)
     return { ...base, title: '입고처리', details: [...details, ...warn] }
   }
   if (suffix.startsWith('입고 확인')) {

@@ -392,7 +392,7 @@ function QueuePageInner() {
                   <th className={thCls}>병원</th>
                   {isWaiting ? (
                     <>
-                      <th className={thCls}>입고일</th>
+                      <th className={thCls}>입고확인일</th>
                       <th className={thCls}>경과</th>
                     </>
                   ) : (

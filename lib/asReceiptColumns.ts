@@ -36,7 +36,7 @@ export const AS_LIST_COLUMNS: AsListColumnDef[] = [
   { key: 'devices', label: '기기', width: 170, defaultVisible: true, group: '기본' },
   { key: 'productType', label: '유형', width: 80, defaultVisible: true, group: '기본' },
   { key: 'status', label: '상태', width: 96, sort: 'status', defaultVisible: true, group: '기본' },
-  { key: 'receivedAt', label: '입고일', width: 148, minWidth: 148, sort: 'receivedAt', defaultVisible: true, group: '기본' }, // '(n/m)' 병기 폭 포함
+  { key: 'receivedAt', label: '입고확인일', width: 148, minWidth: 148, sort: 'receivedAt', defaultVisible: true, group: '기본' }, // '(n/m)' 병기 폭 포함
   { key: 'shippedAt', label: '발송일', width: 148, minWidth: 148, sort: 'shippedAt', defaultVisible: true, group: '기본' },
   { key: 'shipTrackingNo', label: '발송 송장번호', width: 160, defaultVisible: true, group: '기본' },
   { key: 'tags', label: '태그', width: 300, defaultVisible: true, group: '기본' },
@@ -57,7 +57,6 @@ export const AS_LIST_COLUMNS: AsListColumnDef[] = [
   { key: 'tagAccessory', label: '부속품 동봉', width: 90, group: '접수정보' },
   { key: 'tagCombinedPack', label: '합포장', width: 64, group: '접수정보' },
   // ── 진행·처리 (상세 3번 카드 집계) ──
-  { key: 'checkedAt', label: '확인일', width: 116, minWidth: 116, group: '진행·처리' },
   { key: 'itemCount', label: '기기 수', width: 72, group: '진행·처리' },
   { key: 'closedCount', label: '종결 수', width: 72, group: '진행·처리' },
   { key: 'repairProgress', label: '수리완료', width: 90, group: '진행·처리' },

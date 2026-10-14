@@ -72,7 +72,7 @@ interface AsDetail {
   pickupTrackingNo: string | null
   pickedUpAt: string | null
   receivedAt: string | null
-  checkedAt: string | null // 확인일 (O열)
+  checkedAt: string | null // 확인일 (O열) — 2026-10-14 입고확인일로 통합, 화면 미표시(기존 값 보존)
   preReplace: boolean
   priorityRepair: boolean // 태그 (2026-09-15)
   firmwareUpdate: boolean
@@ -619,7 +619,7 @@ export default function AsReceiptDetailPage() {
   // 3. 입고처리 (2026-09-11) — 실물 시리얼 대조
   const [intakeOpen, setIntakeOpen] = useState(false)
   const [intakeText, setIntakeText] = useState('')
-  const [intakeDates, setIntakeDates] = useState({ receivedAt: todayKst(), checkedAt: todayKst() })
+  const [intakeDate, setIntakeDate] = useState(todayKst()) // 입고확인일 (2026-10-14 입고일·확인일 통합 — 담당자 확인 시점 = 입고일, 서버가 확인일(O)도 같은 날짜로 기록)
   // 2. 비고 (2026-09-15 — 접수정보 카드 하단으로 이동, 접수정보 저장에 포함)
   const [note, setNote] = useState('')
   // 5. 타임라인 (2026-09-15)
@@ -651,7 +651,7 @@ export default function AsReceiptDetailPage() {
     })
     setTags({ preReplace: r.preReplace, priorityRepair: r.priorityRepair, firmwareUpdate: r.firmwareUpdate, accessoryIncluded: r.accessoryIncluded, combinedPack: r.combinedPack })
     setAsHead({ expectedShipDate: r.expectedShipDate?.slice(0, 10) ?? '' })
-    setIntakeDates({ receivedAt: r.receivedAt?.slice(0, 10) ?? todayKst(), checkedAt: todayKst() })
+    setIntakeDate(todayKst())
     setNote(r.note ?? '')
     setLoading(false)
     fetch(`/api/as-receipts/${id}/timeline`).then((t) => (t.ok ? t.json() : null)).then((d) => setTimeline(d?.events ?? [])).catch(() => setTimeline([]))
@@ -759,7 +759,7 @@ export default function AsReceiptDetailPage() {
     const res = await fetch(`/api/as-receipts/${req.id}/intake`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ serials, receivedAt: intakeDates.receivedAt || null, checkedAt: intakeDates.checkedAt || null }),
+      body: JSON.stringify({ serials, receivedAt: intakeDate || null }),
     })
     const d = await res.json().catch(() => ({}))
     setBusy(false)
@@ -1189,12 +1189,8 @@ export default function AsReceiptDetailPage() {
       >
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-3 sm:px-6 md:grid-cols-4">
           <div>
-            <p className={label}>입고일 <span className="normal-case tracking-normal text-gray-300">(입고처리 시 기록)</span></p>
+            <p className={label}>입고확인일 <span className="normal-case tracking-normal text-gray-300">(최초 입고처리 시 기록)</span></p>
             <p className="mt-1 text-sm text-gray-900">{d10(req.receivedAt)}</p>
-          </div>
-          <div>
-            <p className={label}>확인일 <span className="normal-case tracking-normal text-gray-300">(입고 대조)</span></p>
-            <p className="mt-1 text-sm text-gray-900">{d10(req.checkedAt)}</p>
           </div>
           <div>
             <p className={label}>예상 출하일</p>
@@ -1217,12 +1213,8 @@ export default function AsReceiptDetailPage() {
               <textarea value={intakeText} onChange={(e) => setIntakeText(e.target.value)} rows={4} placeholder={'입고 시리얼 (줄당 1개)\nP013798\nP015127'} className="min-w-[16rem] flex-1 rounded-md border border-gray-300 px-2.5 py-1.5 font-mono text-sm" />
               <div className="space-y-2">
                 <div>
-                  <p className={label}>입고일 (N)</p>
-                  <input type="date" value={intakeDates.receivedAt} onChange={(e) => setIntakeDates((p) => ({ ...p, receivedAt: e.target.value }))} className={inputCls} />
-                </div>
-                <div>
-                  <p className={label}>확인일 (O)</p>
-                  <input type="date" value={intakeDates.checkedAt} onChange={(e) => setIntakeDates((p) => ({ ...p, checkedAt: e.target.value }))} className={inputCls} />
+                  <p className={label} title="담당자가 입고를 확인한 날짜 — 시트 N(입고일)·O(확인일)에 같은 날짜로 기입">입고확인일</p>
+                  <input type="date" value={intakeDate} onChange={(e) => setIntakeDate(e.target.value)} className={inputCls} />
                 </div>
                 <button type="button" disabled={busy || !intakeText.trim()} onClick={runIntake} className="w-full rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
                   {busy ? '처리 중...' : '대조 실행'}

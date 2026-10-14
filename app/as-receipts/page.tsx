@@ -131,7 +131,7 @@ function receivedCell(r: AsRow) {
   const received = r.items.filter((i) => i.receivedAt).length
   const partial = received < r.items.length
   return (
-    <span title={dates.length > 1 ? `입고일 ${dates.join(', ')}` : undefined}>
+    <span title={dates.length > 1 ? `입고확인일 ${dates.join(', ')}` : undefined}>
       {dates[dates.length - 1]}
       {(partial || dates.length > 1) && <span className="ml-1 text-xs text-gray-400">({received}/{r.items.length})</span>}
     </span>
@@ -224,7 +224,6 @@ function renderCell(key: string, r: AsRow): { node: React.ReactNode; title?: str
     case 'tagAccessory': return { node: r.accessoryIncluded ? <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${AS_TAG_BADGE_CLS.ACCESSORY}`}>부속품</span> : dash }
     case 'tagCombinedPack': return { node: r.combinedPack ? <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${AS_TAG_BADGE_CLS.COMBINED_PACK}`}>합포장</span> : dash }
     // ── 진행·처리 (라인 집계) ──
-    case 'checkedAt': return { node: r.checkedAt ? <span className="text-gray-600">{r.checkedAt.slice(0, 10)}</span> : dash }
     case 'itemCount': return { node: <span className="text-gray-700">{r.items.length}</span> }
     case 'closedCount': { const n = r.items.filter((i) => i.outcome).length; return { node: <span className={n === r.items.length && n > 0 ? 'text-emerald-700' : 'text-gray-700'}>{n}<span className="text-xs text-gray-400">/{r.items.length}</span></span> } }
     case 'repairProgress': { const p = summarizeAsRepairProgress(r.items); return { node: p.repairable ? <span className={p.repaired < p.repairable ? 'text-amber-700' : 'text-emerald-700'}>{p.repaired}<span className="text-xs text-gray-400">/{p.repairable}</span></span> : dash } }
@@ -619,7 +618,7 @@ function AsReceiptListInner() {
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <DateRangeFilter label="접수일" from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); setPage(1) }} />
-        <DateRangeFilter label="입고일" from={receivedFrom} to={receivedTo} onChange={(f, t) => { setReceivedFrom(f); setReceivedTo(t); setPage(1) }} />
+        <DateRangeFilter label="입고확인일" from={receivedFrom} to={receivedTo} onChange={(f, t) => { setReceivedFrom(f); setReceivedTo(t); setPage(1) }} />
         <DateRangeFilter label="발송일" from={shippedFrom} to={shippedTo} onChange={(f, t) => { setShippedFrom(f); setShippedTo(t); setPage(1) }} />
         <select value={category} onChange={(e) => { setCategory(e.target.value); setPage(1) }} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm">
           <option value="">구분 전체</option>

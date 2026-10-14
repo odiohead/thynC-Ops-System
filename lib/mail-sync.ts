@@ -27,6 +27,22 @@ async function listMessages(
   return messages
 }
 
+/**
+ * 내용 기준 중복 판정 (2026-10-14) — 폼 알림이 수신자 2곳(thync_request@seers·thync_team@daewoong)으로 발송돼
+ * 같은 응답이 Gmail 메시지 2통(ID 상이)으로 들어오는 문제. 거래처명·담당자 이메일·등록시각이 같은 큐 항목이 있으면 같은 요청으로 본다.
+ * 등록시각을 못 읽은 메일은 수신시각 ±5분으로 대체 판정. 상태(대기·등록·무시) 무관.
+ */
+const DUP_WINDOW_MS = 5 * 60 * 1000
+function contentDupWhere(p: { hospitalNameRaw: string; managerEmail: string; requestDate: Date | null; receivedAt: Date }) {
+  return {
+    hospitalNameRaw: p.hospitalNameRaw,
+    managerEmail: p.managerEmail,
+    ...(p.requestDate
+      ? { requestDate: p.requestDate }
+      : { receivedAt: { gte: new Date(p.receivedAt.getTime() - DUP_WINDOW_MS), lte: new Date(p.receivedAt.getTime() + DUP_WINDOW_MS) } }),
+  }
+}
+
 function buildQuery(senderEmails: string[], subjectKeyword: string): string {
   const oneWeekAgo = Math.floor((Date.now() - 7 * 24 * 60 * 60 * 1000) / 1000)
   const fromQuery = senderEmails.length > 1
@@ -73,6 +89,15 @@ export async function syncInstallPlanMails(): Promise<SyncResult> {
       const requestDate = parsed.requestDateRaw
         ? parseKstDate(parsed.requestDateRaw)
         : null
+
+      const dup = await prisma.installPlanQueue.findFirst({
+        where: contentDupWhere({ hospitalNameRaw: parsed.hospitalName, managerEmail: parsed.managerEmail, requestDate, receivedAt }),
+        select: { id: true },
+      })
+      if (dup) {
+        console.log(`[mail-sync/install-plan] 같은 요청의 중복 메일 건너뜀 (id: ${msg.id} → 큐 #${dup.id}, ${parsed.hospitalName})`)
+        continue
+      }
 
       await prisma.installPlanQueue.create({
         data: {
@@ -156,6 +181,15 @@ export async function syncSiteVisitMails(): Promise<SyncResult> {
       const requestDate = parsed.requestDateRaw
         ? parseKstDate(parsed.requestDateRaw)
         : null
+
+      const dup = await prisma.siteVisitQueue.findFirst({
+        where: contentDupWhere({ hospitalNameRaw: parsed.hospitalName, managerEmail: parsed.managerEmail, requestDate, receivedAt }),
+        select: { id: true },
+      })
+      if (dup) {
+        console.log(`[mail-sync/site-visit] 같은 요청의 중복 메일 건너뜀 (id: ${msg.id} → 큐 #${dup.id}, ${parsed.hospitalName})`)
+        continue
+      }
 
       await prisma.siteVisitQueue.create({
         data: {
