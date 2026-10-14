@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-10-14 09:40 | 병원 태그 추가 — 'SpO2센서 교체완료' (dev2 DB 적용, PROD 미반영)
+
+- **요청(사용자)**: 기납품처의 SpO2 센서를 구형 → 신형으로 교체 중 — 교체 완료 병원을 체크할 태그
+- **변경**: `scripts/seed-hospital-tags.sql`에 행 추가 — key `SPO2_SENSOR_REPLACED` · 이름 'SpO2센서 교체완료' · 설명 '기납품 병원의 SpO2 센서를 구형에서 신형으로 교체 완료한 병원' · 색 #10B981 · `is_system=false`(코드 참조 없는 정보성 태그) · 순서 40. 마스터 조회 API가 활성 태그 전체를 정렬 반환하므로 코드 변경 없이 병원 상세 '부가정보' 체크박스·태그 칩에 노출
+- **적용**: dev2 `psql -f scripts/seed-hospital-tags.sql`(idempotent) → 4행 확인
+- 영향: scripts/seed-hospital-tags.sql, dev2 DB(hospital_tags 1행), README.md, DEV_HISTORY.md
+
+---
+
 ## 2026-10-14 09:15 | PROD 배포: AS접수 타임라인 비고 수정 내용 표시 (f3b5620)
 
 - **dev2**: 10:30 항목 힙 4GB 빌드·`pm2 restart thync-dev`(health 200) → 커밋 f3b5620(10/13 운영 보정 기록 3건 포함, 임시 스크립트 `scripts/tmp-*.mts` 제외)·push

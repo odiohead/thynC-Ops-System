@@ -424,7 +424,7 @@ prisma/
 
 - **AS메모 (2026-09-29, 마이그 `20260929090000_hospital_as_memo`)**: `asMemo`(리치텍스트 HTML — Tiptap 굵게·목록·색·형광펜, `sanitizeRichTextHtml` 후 저장, 빈 값 NULL)·`asMemoUpdatedAt`·`asMemoUpdatedById`(FK users SET NULL). 병원 상세 '부가정보 > AS메모'와 AS접수 상세 '1.공통정보'에서 같은 값을 편집(USER 이상, 접수 종결 여부 무관). 감사 `hospital_as_memo` UPDATE
 ### HospitalTag / HospitalTagAssignment (병원 태그 — 2026-09-28)
-- **HospitalTag** (`hospital_tags`): 엄격 정의 마스터(사용자 결정 — 생성·수정은 ADMIN/시드, 사용자는 체크만) — `key`(시스템 키 UNIQUE, 코드 참조용 불변 — `lib/hospitalTags.ts`)·`name`(UNIQUE)·`description`(언제 부여)·`effectNote`(시스템 동작 효과 — 없으면 정보성 라벨)·`color`·`isSystem`(삭제·키 변경 금지)·`isActive`·`sortOrder`. 초기 3종 시드 `scripts/seed-hospital-tags.sql`(idempotent): `PRE_REPLACE_DEFAULT` 선교체 기본 / `NO_REMOTE_ACCESS` 원격접속불가 / `KEY_ACCOUNT` 주요병원. 값이 붙는 규칙(허용량·SLA)은 태그가 아니라 정식 필드로
+- **HospitalTag** (`hospital_tags`): 엄격 정의 마스터(사용자 결정 — 생성·수정은 ADMIN/시드, 사용자는 체크만) — `key`(시스템 키 UNIQUE, 코드 참조용 불변 — `lib/hospitalTags.ts`)·`name`(UNIQUE)·`description`(언제 부여)·`effectNote`(시스템 동작 효과 — 없으면 정보성 라벨)·`color`·`isSystem`(삭제·키 변경 금지)·`isActive`·`sortOrder`. 초기 3종 시드 `scripts/seed-hospital-tags.sql`(idempotent): `PRE_REPLACE_DEFAULT` 선교체 기본 / `NO_REMOTE_ACCESS` 원격접속불가 / `KEY_ACCOUNT` 주요병원 + **`SPO2_SENSOR_REPLACED` SpO2센서 교체완료**(2026-10-14 — 기납품처 구형→신형 센서 교체 추적, 정보성·비시스템). 값이 붙는 규칙(허용량·SLA)은 태그가 아니라 정식 필드로
 - **HospitalTagAssignment** (`hospital_tag_assignments`): 병원 ↔ 태그 N:M — UNIQUE(hospital_code, tag_id), 병원 CASCADE·태그 RESTRICT, `note`(부여 근거 — v1 UI 미노출 예약)·`assignedById`(SET NULL)·`assignedAt`. 감사 `hospital_tags` UPDATE(before/after 태그명 배열)
 - 마이그 `20260928170000_hospital_tags`. 후속(연동 예정): AS접수 등록 시 `PRE_REPLACE_DEFAULT` → 선교체 기본 체크, 유지보수·VOC·상담 화면 `NO_REMOTE_ACCESS` 경고 칩, 병원 목록 태그 필터, 마스터 관리 설정 화면
 
