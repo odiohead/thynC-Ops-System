@@ -233,9 +233,9 @@ interface GroupCardProps {
   canResolve: boolean
   canEdit: boolean
   busy: boolean
-  onDraft: (lines: { itemId: number; outcome: AsOutcome | null; newSerial?: string }[]) => Promise<boolean> // 처리방법 초안 저장/해제 (2026-09-14)
+  onDraft: (lines: { itemId: number; outcome: AsOutcome | null; newSerial?: string }[]) => Promise<string | null> // 처리방법 초안 저장/해제 (2026-09-14) — 실패 메시지 반환, null = 성공 (2026-10-15 카드 안 표시)
   onSaveProcessNote: (item: ItemRow, note: string) => Promise<boolean>
-  onApplyShipInfo: (itemIds: number[], shipMethod: string, shipTrackingNo: string, shippedAt: string) => Promise<boolean>
+  onApplyShipInfo: (itemIds: number[], shipMethod: string, shipTrackingNo: string, shippedAt: string) => Promise<string | null> // 실패 메시지 반환, null = 성공
   onConfirm: (body: Record<string, unknown>) => Promise<boolean> // 입고 대조 접수자 확인 (2026-09-11)
   extras: ItemRow[] // 접수 전체의 미식별입고 라인 (치환 후보 — 기기군 무관)
   onRegistryConfirm: (body: Record<string, unknown>) => Promise<boolean> // 원장 정합 확정 (2026-09-11)
@@ -259,7 +259,9 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
   const regOf = (i: ItemRow) => regForm[i.id] ?? { modelInput: MODEL_BY_KIND[asDeviceKindFromSerial(i.serialNo) ?? ''] ?? '', productType: '', wardName: i.wardName ?? '' }
   const [remapPick, setRemapPick] = useState<Record<number, string>>({}) // MISMATCH 라인별 치환 대상 EXTRA id
   const [nrComment, setNrComment] = useState<Record<number, string>>({}) // 미회수 코멘트
-  const [outcome, setOutcome] = useState<AsOutcome>('REPAIR_RETURN')
+  // 처리방법 — '' = 미선택(기본, 2026-10-15). 미선택이면 처리방법을 건드리지 않고 발송정보만 저장한다
+  // (종전 기본 '수리반환'이 며칠 뒤 송장 입력 시 교체 초안을 덮어쓰던 버그 — ad48e89)
+  const [outcome, setOutcome] = useState<AsOutcome | ''>('')
   const [newSerials, setNewSerials] = useState<Record<number, string>>({})
   const [notes, setNotes] = useState<Record<number, string>>({})
   // 발송정보 입력 (2026-10-14 부분 발송 — 라인마다 발송일·송장이 다를 수 있음). 처리방법과 한 번에 저장(선택 라인 대상).
@@ -267,53 +269,73 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
   const [shipMethod, setShipMethod] = useState('')
   const [shipTrackingNo, setShipTrackingNo] = useState('')
   const [shippedAt, setShippedAt] = useState('')
-  useEffect(() => {
-    setSelected(new Set())
-    setNotes({})
-    setShipMethod(''); setShipTrackingNo(''); setShippedAt('')
-  }, [items])
+  const [actionError, setActionError] = useState<string | null>(null) // 저장 실패·예외 — 카드 안 버튼 아래, 다음 조작까지 유지 (2026-10-15)
+  // 리로드 후 초기화는 부모 key(`${group}-${reloadSeq}`) 재마운트가 담당한다. [items] effect는 두지 않는다 —
+  // 부모 groups가 렌더마다 새 배열이라 busy 토글·다른 카드 입력만으로도 선택·입력·오류 메시지가 지워졌다 (2026-10-15)
+  useEffect(() => { setActionError(null) }, [selected, outcome, newSerials, shipMethod, shipTrackingNo, shippedAt])
 
-  // 선택 대상 (2026-10-14 개정 — 휴먼에러 방지): 발송정보까지 입력된 발송 라인(발송일 + 송장, 방문은 발송일만)은 체크 불가.
-  //  · 미확정 처리 가능 라인 → 처리방법(+발송정보) 지정
-  //  · 확정 발송 라인 중 발송정보 미완료 → 발송정보만 기입
+  // 선택 대상 (2026-10-15 개정 — 최종확정 전에는 언제든 처리방법·교체기 변경 가능):
+  //  · 미확정 처리 가능 라인 → 항상 선택 가능(발송정보까지 입력된 초안도). 처리방법(+발송정보) 지정·변경
+  //  · 확정 발송 라인 중 발송정보 미완료 → 발송정보만 기입 (발송정보까지 입력된 확정 라인은 잠금 — 2026-10-14 휴먼에러 방지 유지)
+  //  · 헤더 전체 선택은 발송정보까지 입력된 라인을 제외 — 송장 일괄 입력 시 기발송분 혼입 방지
   const isOpenItem = (i: ItemRow) => !i.outcome && !isAsIntakeIssue(i.intakeState) && isValidAsSerial(i.serialNo) // 미입고·미식별입고·시리얼 오류는 처리 대상 아님
   const shipDone = (i: ItemRow) => (i.outcome ? isShip(i.outcome) : isShip(i.draftOutcome)) && !!i.shippedAt && (!!i.shipTrackingNo || i.shipMethod === 'VISIT')
-  const isOpenSelectable = (i: ItemRow) => canResolve && isOpenItem(i) && !shipDone(i)
+  const isOpenSelectable = (i: ItemRow) => canResolve && isOpenItem(i)
   const isShipFixSelectable = (i: ItemRow) => canEdit && !!i.outcome && isShip(i.outcome) && !shipDone(i)
   const canSelect = (i: ItemRow) => isOpenSelectable(i) || isShipFixSelectable(i)
   const selectableOpen = items.filter(isOpenSelectable)
   const selectableAll = items.filter(canSelect)
+  const bulkSelectable = selectableAll.filter((i) => !shipDone(i))
   const showSelect = selectableAll.length > 0
   const draftSel = selectableOpen.filter((i) => selected.has(i.id)).map((i) => i.id)
+  const selOpenItems = selectableOpen.filter((i) => selected.has(i.id))
   const shipFixSel = items.filter((i) => isShipFixSelectable(i) && selected.has(i.id))
   const selCount = draftSel.length + shipFixSel.length
-  /** 발송정보를 받을 라인 — 처리방법이 수리반환·교체면 처리방법 지정 라인 + 확정 발송 라인 */
-  const shipTargetIds = [...(isShip(outcome) ? draftSel : []), ...shipFixSel.map((i) => i.id)]
+  const pickOutcome = outcome !== '' // 처리방법을 직접 고름 → 선택 미확정 라인 처리방법 저장
   const shipInputEmpty = !shipMethod && !shipTrackingNo.trim() && !shippedAt
-  const showShipInputs = canEdit && shipTargetIds.length > 0
+  /** 발송정보를 받을 라인 — 저장 후 처리방법이 수리반환·교체인 미확정 라인 + 확정 발송 라인 */
+  const shipTargets = [...selOpenItems.filter((i) => isShip(pickOutcome ? outcome : i.draftOutcome)), ...shipFixSel]
+  /** 발송정보를 받을 수 없는 미확정 라인 — 처리방법 미선택인데 처리방법 미지정 / 분실·취소 */
+  const shipBlocked = !pickOutcome ? selOpenItems.filter((i) => !isShip(i.draftOutcome)) : []
+  const showShipInputs = canEdit && selCount > 0
+  /** 교체기 시리얼 입력 — 교체를 고른 경우 선택 미확정 라인별(기존 교체 초안 값으로 채움) */
+  const replaceItems = pickOutcome && outcome === 'REPLACE' ? selOpenItems : []
+  const serialOf = (i: ItemRow) => (newSerials[i.id] ?? i.draftNewSerialNo ?? '').trim().toUpperCase()
+  const badNewSerial = replaceItems.filter((i) => !serialOf(i) || !isValidAsSerial(serialOf(i)))
+  /** 저장 불가 사유 (버튼 아래 안내) — 없으면 null */
+  const blockReason: string | null =
+    selCount === 0 ? null
+    : !pickOutcome && shipInputEmpty ? (selOpenItems.length ? '처리방법을 선택하거나 발송정보를 입력하세요' : '발송정보를 입력하세요')
+    : shipBlocked.length && !shipInputEmpty ? `처리방법이 ${shipBlocked.some((i) => !i.draftOutcome) ? '지정되지 않은' : '발송 대상이 아닌(분실·취소)'} 라인이 있어 발송정보를 저장할 수 없습니다: ${shipBlocked.map((i) => i.serialNo).join(', ')} — 처리방법을 먼저 지정하세요`
+    : pickOutcome && !shipInputEmpty && !isShip(outcome) && shipFixSel.length === 0 ? `${AS_OUTCOME_LABELS[outcome as AsOutcome]}은(는) 발송정보를 받지 않습니다 — 발송정보 입력을 비우세요`
+    : badNewSerial.length ? `교체기 시리얼을 확인하세요 (${AS_SERIAL_RULE_TEXT}): ${badNewSerial.map((i) => i.serialNo).join(', ')}`
+    : null
+  const canSave = selCount > 0 && !blockReason
+  const saveLabel = pickOutcome ? `처리방법 저장 (${selCount}대)` : `발송정보 저장 (${selCount}대)`
 
-  const allOpenSelected = selectableAll.length > 0 && selectableAll.every((i) => selected.has(i.id))
+  const allOpenSelected = bulkSelectable.length > 0 && bulkSelectable.every((i) => selected.has(i.id))
   const noteOf = (i: ItemRow) => (notes[i.id] ?? i.processNote ?? '')
 
   /** 선택 라인 저장 — 처리방법 초안(미확정 라인) + 발송정보(입력 시, 발송 라인만). 기기현황 기록은 [최종확정] 시점 */
   async function saveDraft() {
-    const lines = draftSel.map((itemId) => ({
-      itemId, outcome,
-      newSerial: outcome === 'REPLACE' ? (newSerials[itemId] ?? items.find((i) => i.id === itemId)?.draftNewSerialNo ?? '') : undefined,
-    }))
-    if (!lines.length && !shipFixSel.length) return
-    if (outcome === 'REPLACE' && lines.some((l) => !l.newSerial?.trim())) { alert('교체 처리는 선택한 모든 라인에 발송기기 시리얼이 필요합니다.'); return }
-    if (!lines.length && shipInputEmpty) { alert('발송정보를 입력하세요.'); return }
-    const ship = { ids: shipTargetIds, method: shipMethod, tracking: shipTrackingNo, date: shippedAt } // 저장 후 리로드로 입력값이 초기화되기 전에 고정
-    if (lines.length && !(await onDraft(lines))) return
-    if (!shipInputEmpty && ship.ids.length && !(await onApplyShipInfo(ship.ids, ship.method, ship.tracking, ship.date))) return
-    setSelected(new Set()); setNewSerials({})
+    if (!canSave) return
+    const lines = pickOutcome
+      ? selOpenItems.map((i) => ({ itemId: i.id, outcome: outcome as AsOutcome, newSerial: outcome === 'REPLACE' ? serialOf(i) : undefined }))
+      : []
+    const ship = { ids: shipInputEmpty ? [] : shipTargets.map((i) => i.id), method: shipMethod, tracking: shipTrackingNo, date: shippedAt } // 저장 후 리로드로 입력값이 초기화되기 전에 고정
+    // 기존 발송정보 덮어쓰기 확인 — 입력한 칸만 바뀐다(빈 칸은 기존 값 유지)
+    const overwrite = ship.ids.length ? shipTargets.filter((i) => (shipTrackingNo.trim() && i.shipTrackingNo) || (shippedAt && i.shippedAt) || (shipMethod && i.shipMethod)) : []
+    if (overwrite.length && !confirm(`이미 발송정보가 있는 라인 ${overwrite.length}대의 값을 바꿉니다.\n${overwrite.map((i) => `${i.serialNo}: ${i.shippedAt ? d10(i.shippedAt) : '-'} ${i.shipTrackingNo ?? ''}`).join('\n')}\n\n계속할까요?`)) return
+    if (lines.length) { const err = await onDraft(lines); if (err) { setActionError(err); return } }
+    if (ship.ids.length) { const err = await onApplyShipInfo(ship.ids, ship.method, ship.tracking, ship.date); if (err) { setActionError(lines.length ? `처리방법은 저장됐지만 발송정보 저장에 실패했습니다 — ${err}` : err); return } }
+    setSelected(new Set()); setNewSerials({}); setOutcome('')
   }
   async function clearDraft() {
-    const ids = draftSel.filter((id) => items.find((i) => i.id === id)?.draftOutcome)
-    if (!ids.length) return
-    const ok = await onDraft(ids.map((itemId) => ({ itemId, outcome: null })))
-    if (ok) setSelected(new Set())
+    const drafted = selOpenItems.filter((i) => i.draftOutcome)
+    if (!drafted.length) return
+    const err = await onDraft(drafted.map((i) => ({ itemId: i.id, outcome: null })))
+    if (err) setActionError(err)
+    else setSelected(new Set())
   }
 
   return (
@@ -339,7 +361,7 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
               {showSelect && (
                 <th className="w-8 px-3 py-2">
                   {selectableAll.length > 0 && (
-                    <input type="checkbox" checked={allOpenSelected} onChange={(e) => setSelected(e.target.checked ? new Set(selectableAll.map((i) => i.id)) : new Set())} className="rounded border-gray-300" title="선택 가능 라인 전체 선택 (발송정보까지 입력된 라인 제외)" />
+                    <input type="checkbox" checked={allOpenSelected} onChange={(e) => setSelected(e.target.checked ? new Set(bulkSelectable.map((i) => i.id)) : new Set())} className="rounded border-gray-300" title="선택 가능 라인 전체 선택 (발송정보까지 입력된 라인 제외 — 필요하면 개별 선택)" />
                   )}
                 </th>
               )}
@@ -548,24 +570,30 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-gray-700">{selCount > 0 ? `선택 ${selCount}대` : '라인을 선택하세요'}</span>
             {canResolve && selectableOpen.length > 0 && (
-              <select value={outcome} onChange={(e) => setOutcome(e.target.value as AsOutcome)} disabled={draftSel.length === 0} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm disabled:opacity-50" title={draftSel.length === 0 ? '미확정 라인을 선택하면 처리방법을 지정할 수 있습니다' : '선택한 미확정 라인의 처리방법'}>
-                {AS_RESOLVE_OUTCOMES.map((o) => <option key={o} value={o}>{AS_OUTCOME_LABELS[o]}</option>)}
-              </select>
+              <>
+                <span className="text-gray-300">|</span>
+                <span className="text-xs font-medium text-gray-500">처리방법</span>
+                <select value={outcome} onChange={(e) => setOutcome(e.target.value as AsOutcome | '')} disabled={draftSel.length === 0} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm disabled:opacity-50" title={draftSel.length === 0 ? '미확정 라인을 선택하면 처리방법을 지정할 수 있습니다' : "선택한 미확정 라인의 처리방법 — '-'(미선택)이면 기존 처리방법을 바꾸지 않고 발송정보만 저장합니다"}>
+                  <option value="">-</option>
+                  {AS_RESOLVE_OUTCOMES.map((o) => <option key={o} value={o}>{AS_OUTCOME_LABELS[o]}</option>)}
+                </select>
+              </>
             )}
             {shipFixSel.length > 0 && <span className="text-xs text-gray-500">확정 라인 {shipFixSel.length}대는 발송정보만 저장</span>}
             <span className="ml-auto text-xs text-gray-400">기기현황 기록은 하단 [최종확정] 시점에 이루어집니다</span>
           </div>
-          {canResolve && outcome === 'REPLACE' && draftSel.length > 0 && (
+          {canResolve && replaceItems.length > 0 && (
             <div className="space-y-1.5 rounded-md border border-gray-200 bg-white px-3 py-2">
-              <p className="text-xs font-medium text-gray-500">교체 발송기기 시리얼 (라인별)</p>
-              {draftSel.map((itemId) => {
-                const item = items.find((i) => i.id === itemId)
-                if (!item) return null
+              <p className="text-xs font-medium text-gray-500">교체 발송기기 시리얼 (라인별 — {AS_SERIAL_RULE_TEXT})</p>
+              {replaceItems.map((item) => {
+                const v = serialOf(item)
+                const bad = !!v && !isValidAsSerial(v)
                 return (
-                  <div key={itemId} className="flex items-center gap-2">
+                  <div key={item.id} className="flex items-center gap-2">
                     <span className="w-28 font-mono text-xs text-gray-600">{item.serialNo}</span>
                     <span className="text-gray-300">→</span>
-                    <input type="text" value={newSerials[itemId] ?? item.draftNewSerialNo ?? ''} onChange={(e) => setNewSerials((p) => ({ ...p, [itemId]: e.target.value }))} placeholder="교체기 시리얼" className="w-40 rounded-md border border-gray-300 px-2 py-1 font-mono text-xs" />
+                    <input type="text" value={newSerials[item.id] ?? item.draftNewSerialNo ?? ''} onChange={(e) => setNewSerials((p) => ({ ...p, [item.id]: e.target.value }))} placeholder="교체기 시리얼" className={`w-40 rounded-md border px-2 py-1 font-mono text-xs ${bad ? 'border-red-400 bg-red-50' : 'border-gray-300'}`} />
+                    {bad && <span className="text-xs text-red-600">형식 오류</span>}
                   </div>
                 )
               })}
@@ -583,13 +611,18 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
                 <input type="date" value={shippedAt} onChange={(e) => setShippedAt(e.target.value)} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" title="발송일 (미입력 시 기존 값 유지 · 초안 라인은 최종확정일)" />
               </>
             )}
-            <button type="button" onClick={saveDraft} disabled={busy || selCount === 0 || (draftSel.length === 0 && shipInputEmpty)} className="rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50" title="선택 라인에 처리방법(미확정 라인)과 발송정보(입력 시)를 저장합니다 — 최종확정 전까지 변경 가능">
-              {busy ? '저장 중...' : draftSel.length > 0 ? `처리방법 저장 (${selCount}대)` : `발송정보 저장 (${selCount}대)`}
+            <button type="button" onClick={saveDraft} disabled={busy || !canSave} className="rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50" title="처리방법을 고르면 처리방법(+입력한 발송정보)을, '-'이면 발송정보만 저장합니다 — 최종확정 전까지 변경 가능">
+              {busy ? '저장 중...' : saveLabel}
             </button>
-            {draftSel.some((id) => items.find((i) => i.id === id)?.draftOutcome) && (
+            {selOpenItems.some((i) => i.draftOutcome) && (
               <button type="button" onClick={clearDraft} disabled={busy} className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50">지정 해제</button>
             )}
           </div>
+          {(actionError || blockReason) && (
+            <p className={`text-xs ${actionError ? 'rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-700' : 'text-amber-700'}`} role={actionError ? 'alert' : undefined}>
+              {actionError ?? blockReason}
+            </p>
+          )}
         </div>
       ) : null}
     </div>
@@ -702,8 +735,8 @@ export default function AsReceiptDetailPage() {
     return putReceipt({ items: req.items.map((i) => (i.id === item.id ? { serial: i.serialNo, processNote: noteText } : { serial: i.serialNo })) }, '처리내용 저장에 실패했습니다.')
   }
 
-  async function draftLines(lines: { itemId: number; outcome: AsOutcome | null; newSerial?: string }[]) {
-    if (!req) return false
+  async function draftLines(lines: { itemId: number; outcome: AsOutcome | null; newSerial?: string }[]): Promise<string | null> {
+    if (!req) return '접수 정보를 불러오지 못했습니다.'
     setBusy(true)
     const res = await fetch(`/api/as-receipts/${req.id}/draft-lines`, {
       method: 'POST',
@@ -712,10 +745,10 @@ export default function AsReceiptDetailPage() {
     })
     const d = await res.json().catch(() => ({}))
     setBusy(false)
-    if (!res.ok) { flash(d.error ?? '처리방법 저장에 실패했습니다.'); return false }
+    if (!res.ok) return d.error ?? '처리방법 저장에 실패했습니다.' // 카드 안 표시 (2026-10-15 — 상단 배너는 화면 밖이라 안 보였음)
     router.refresh()
     await load()
-    return true
+    return null
   }
 
   /** 3. AS상세내역 [최종확정] — 초안 전 라인을 한 번에 확정 (기기현황 기록, 이후 변경 불가) */
@@ -821,8 +854,8 @@ export default function AsReceiptDetailPage() {
     return true
   }
 
-  async function applyShipInfo(itemIds: number[], shipMethod: string, shipTrackingNo: string, shippedAt: string) {
-    if (!req) return false
+  async function applyShipInfo(itemIds: number[], shipMethod: string, shipTrackingNo: string, shippedAt: string): Promise<string | null> {
+    if (!req) return '접수 정보를 불러오지 못했습니다.'
     setBusy(true)
     const res = await fetch(`/api/as-receipts/${req.id}/ship-info`, {
       method: 'POST',
@@ -832,10 +865,10 @@ export default function AsReceiptDetailPage() {
     })
     const d = await res.json().catch(() => ({}))
     setBusy(false)
-    if (!res.ok) { flash(d.error ?? '발송정보 갱신에 실패했습니다.'); return false }
+    if (!res.ok) return d.error ?? '발송정보 갱신에 실패했습니다.' // 카드 안 표시 (2026-10-15)
     router.refresh()
     await load()
-    return true
+    return null
   }
 
   /** 수리완료 체크/해제 (2026-09-17) — POST repair-done. 라인 repaired_at + 기기 condition(REPAIRED / 해제는 CORRECT). 종결 접수도 허용(A-2) */
