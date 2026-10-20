@@ -4,6 +4,26 @@
 
 ---
 
+## 2026-10-20 17:50 | PROD → dev2 데이터 동기화 (정기 백업 20261020_010002)
+
+- **요청(사용자)**: 개발 활용용 PROD 데이터 동기화
+- **처리(dev2 절차)**: PROD `~/backups/db/thync_ops_20261020_010002.dump`(풀덤프) SCP → 사전 점검(`_prisma_migrations` 155건 일치, 스키마 차이는 일부 테이블 컬럼 순서뿐 — COPY 컬럼 명시라 무해) → `pm2 stop thync-dev thync-collab` → dev2 백업 `dev_before_sync_20261020_174448.sql.gz` → `public`·`wiki` 전 테이블(`_prisma_migrations` 제외) TRUNCATE + `_prisma_migrations` 제외 TOC로 `pg_restore --data-only --disable-triggers` SQL 적재 + `channeltalk_as_interval=off` (postgres, 단일 트랜잭션) → PM2 재기동 health 200
+- **참고**: 1차 적재는 덤프 SQL이 search_path를 비워 마지막 `UPDATE app_settings`가 실패 → 전체 롤백, `public.app_settings`로 재실행해 성공. 협업 서버도 함께 정지해 wiki Y.Doc 재기록 방지
+- 결과: users 75 · hospitals 80,598 · projects 279 · tickets 7,509 · as_receipts 4,002 · hospital_devices 28,800 · wiki_pages 168
+- 영향: dev2 DB 전체 데이터, DEV_HISTORY.md
+
+---
+
+## 2026-10-20 17:40 | 자재관리 — '품목 관리' 버튼이 RBAC 자재 관리자 권한 보유자에게 안 보이는 버그 수정 (dev2, 미빌드)
+
+- **신고**: 역할 '재고책임자'(`inventory.admin`) 멤버인데 `/inventory`에서 '품목 관리' 버튼이 보이지 않음
+- **원인**: `app/inventory/page.tsx`가 버튼 노출을 `/api/auth/me` 등급(ADMIN 이상)으로만 판정 — 2026-08-06 `inventory.admin` 도입 시 서버(`canAdminInventory`)·품목 목록/상세 화면은 `can-manage.canAdmin`으로 바뀌었으나 메인 화면 버튼만 누락. USER 등급 권한 보유자(예: 신수연)는 버튼만 숨고 URL 직접 접근은 가능했음
+- **변경**: 메인 화면도 `/api/inventory/can-manage`의 `canAdmin`으로 판정(`/api/auth/me` 호출 제거) — 화면 전용, 서버·DB 무변경
+- **검증(dev2, PROD 동기화 데이터)**: tsc 0 · eslint 0. 실행 중 서버에 판정 API 호출 — 신수연(USER·재고책임자) `canAdmin:true`(종전 판정 USER→숨김), 강은구(USER·재고담당만) `canAdmin:false`(숨김 유지). 빌드·화면 확인은 사용자 요청 시
+- 영향: app/inventory/page.tsx, DEV_HISTORY.md
+
+---
+
 ## 2026-10-15 16:00 | PROD 운영 정리: 접수일 9/14 이전 미종결 AS접수 12건 일괄 '완료'
 
 - **요청(사용자)**: 9/14 이전 접수 건 일괄 완료 — 대상 12건(접수 11·입고 1, 07-10~09-07): AS-202607-0163·0579, AS-202608-0283, AS-202609-0014·0026·0035·0060·0062·0070·0071·0097·0123. 0062(입고 6대 센터 보관)·0097(10/14 수정 이력)도 사용자 결정으로 포함
