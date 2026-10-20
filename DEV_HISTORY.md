@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-10-20 18:00 | PROD 배포: 자재관리 '품목 관리' 버튼 RBAC 권한 반영 (cf2a078)
+
+- **dev2(사용자 "dev2 및 prod까지 빌드 및 재시작")**: 힙 4GB 빌드(협업 번들 2108cacb 불변)·`pm2 restart thync-dev` health 200. Playwright 헤드리스 실제 화면 — 신수연(USER·재고책임자) '품목 관리' 버튼 노출·클릭 시 `/inventory/items` 진입, 강은구(USER·재고담당만) 버튼 미노출
+- **PROD**: `git pull`(d7cea1c→cf2a078, package.json·DB·협업 서버 변경 없음) → 힙 4GB 빌드(협업 번들 2108cacb 불변 → `thync-collab-prod` 재시작 불필요) → `pm2 restart thync-prod` → health 200 · `/inventory` 307(비로그인 정상) · 재시작 후 신규 에러 없음(마지막 에러 기록 08:59:04Z < 재시작 09:00:11Z)
+- 영향: PROD 소스(cf2a078), DEV_HISTORY.md
+
+---
+
 ## 2026-10-20 17:50 | PROD → dev2 데이터 동기화 (정기 백업 20261020_010002)
 
 - **요청(사용자)**: 개발 활용용 PROD 데이터 동기화
