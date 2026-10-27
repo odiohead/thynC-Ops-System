@@ -33,7 +33,7 @@ export const AS_INTAKE_FAIL_LABEL: Record<string, string> = {
   HOSPITAL_CONFLICT: 'OpsCode↔병원명 불일치',
   NO_SERIAL: '시리얼 없음',
   BAD_SERIAL: '시리얼 형식 오류',
-  UNKNOWN_DEVICE: '기기 원장에 없는 시리얼',
+  UNKNOWN_DEVICE: '기기 원장에 없는 시리얼 (구 분류 — 2026-10-27부터 생성 후 미등록 라인 처리)',
   MIXED_CATEGORY: '고장+분실 혼합',
   MULTI_DEST: '수령지 2곳 이상 (분할 여부 결정)',
   ALREADY_EXISTS: '동일 접수 존재 (연결 확인)',

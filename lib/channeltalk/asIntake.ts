@@ -151,7 +151,7 @@ export function validateExtract(e: AsExtract): { failClass: string; note: string
   else if (!e.hospitalCode) out.push({ failClass: 'HOSPITAL_UNMATCHED', note: `병원 매칭 실패: '${e.hospitalNameRaw ?? '-'}'` })
   if (!e.lines.length) out.push({ failClass: 'NO_SERIAL', note: '시리얼을 읽지 못함' })
   if (e.invalidSerials.length) out.push({ failClass: 'BAD_SERIAL', note: `형식 오류: ${e.invalidSerials.join(', ')}` })
-  if (e.unknownSerials.length) out.push({ failClass: 'UNKNOWN_DEVICE', note: `기기 원장에 없음: ${e.unknownSerials.join(', ')}` })
+  // 기기 원장에 없는 시리얼(unknownSerials)은 큐행이 아니라 시트 경로와 같이 생성 — 라인 '미등록' 배지·[원장확정]/[시리얼 보정]으로 처리 (D3 번복, 2026-10-27 사용자 결정)
   if (e.mixedCategory) out.push({ failClass: 'MIXED_CATEGORY', note: '고장·분실 태그가 함께 걸림 — 구분을 사람이 결정' })
   if (e.destCount >= 2) out.push({ failClass: 'MULTI_DEST', note: `수령지가 ${e.destCount}곳 — 병동별 분할 여부를 사람이 결정` })
   if (!e.labels.includes('symptom') && !e.lines.some((l) => l.symptom)) out.push({ failClass: 'PARSE_INCOMPLETE', note: '접수사유를 읽지 못함' })
@@ -201,6 +201,7 @@ async function botUser() {
 async function autoCreate(chat: ChatRow, e: AsExtract, lastMessageId: string | null, bot: NonNullable<Awaited<ReturnType<typeof botUser>>>, log: (l: string) => void) {
   const warn: string[] = []
   if (e.hospitalMatchSource === 'name') warn.push(`병원명 매칭: '${e.hospitalNameRaw}'`)
+  if (e.unknownSerials.length) warn.push(`기기 원장에 없는 시리얼(미등록 라인): ${e.unknownSerials.join(', ')}`)
   const created = await createAsReceipt({ ...extractToCreateInput(e, chat.id, warn.join(' | ') || null), source: 'CHANNELTALK', vocId: chat.vocLink?.vocId ?? null }, { userId: bot.id, name: bot.name })
   await prisma.asIntakeLink.upsert({
     where: { chatId: chat.id },
