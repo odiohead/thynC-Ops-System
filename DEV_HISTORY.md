@@ -4,6 +4,10 @@
 
 ---
 
+## 2026-10-27 21:00 | PROD 배포: 채널톡 상담 첨부파일 열람 (1fad331)
+
+- `1fad331` push → PROD pull → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` health 200, 새 라우트 응답 확인(미로그인 307). 마이그·패키지·설정 변경 없음. VOC 원본·VOC 상세·AS 등록대기 타임라인에서 첨부 사진 썸네일·문서 다운로드 가능
+
 ## 2026-10-27 20:30 | 채널톡 상담 첨부파일 열람 — 서명 URL 프록시 (VOC·원본·AS 등록대기 타임라인) (dev2 빌드·PROD 배포)
 
 - **배경**: 상담 첨부(9/29~ 고객 메시지의 5.9%, 사진 jpeg/png 대부분 + mp4·pdf·xlsx)는 메타만 적재돼 화면에서 이름만 보였음. 비공개 파일(`bin.channel.io` `pri-file/…`, `privateFileScope: chat`)은 CDN 직접 접근 403. Open API `GET /open/v5/user-chats/{chatId}/messages/file?key=` 가 15분 서명 URL을 반환함을 실측(200, HEAD 200 image/jpeg)
