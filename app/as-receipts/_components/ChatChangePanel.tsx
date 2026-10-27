@@ -5,13 +5,16 @@
  * "현재값 / 상담값"으로 보여주고 사람이 고른 항목만 [반영]. 자동 반영 없음.
  */
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { channeltalkDeskChatUrl } from '@/lib/channeltalk/shared'
 import type { AsIntakeDiffItem } from '@/lib/channeltalk/asIntakeShared'
 
 export interface ChatIntakeInfo { linkId: number; chatId: string; channelId: string | null; changeDetectedAt: string | null; changeDiff: AsIntakeDiffItem[] | null }
 
 export default function ChatChangePanel({ receiptId, intake, canEdit, onDone }: { receiptId: number; intake: ChatIntakeInfo; canEdit: boolean; onDone: (msg: string | null) => void }) {
+  const router = useRouter()
   const diff = intake.changeDiff ?? []
+  const hasSerialDiff = diff.some((d) => d.field === 'serials')
   const [sel, setSel] = useState<Set<string>>(new Set(diff.map((d) => d.field)))
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -24,6 +27,7 @@ export default function ChatChangePanel({ receiptId, intake, canEdit, onDone }: 
     const j = await res.json().catch(() => ({}))
     setBusy(false)
     if (!res.ok) { setErr(j.error ?? '처리에 실패했습니다.'); return }
+    if (j.id) { router.refresh(); router.push(`/as-receipts/${j.id}`); return } // 새 접수로 분리 → 새 접수 상세로
     onDone(j.warnings?.length ? j.warnings.join('\n') : null)
   }
 
@@ -34,6 +38,7 @@ export default function ChatChangePanel({ receiptId, intake, canEdit, onDone }: 
         {canEdit && (
           <span className="flex items-center gap-2">
             <button type="button" onClick={() => post({ action: 'apply', fields: Array.from(sel) })} disabled={busy || !sel.size} className="rounded-md bg-orange-600 px-3 py-1 text-xs font-medium text-white hover:bg-orange-700 disabled:opacity-50">선택 반영 ({sel.size})</button>
+            {hasSerialDiff && <button type="button" onClick={() => { if (window.confirm('상담에만 있는 시리얼로 새 AS 접수를 만듭니다(접수일 오늘). 진행할까요?')) post({ action: 'new_receipt' }) }} disabled={busy} className="rounded-md border border-orange-300 bg-white px-3 py-1 text-xs font-medium text-orange-800 hover:bg-orange-100 disabled:opacity-50" title="같은 상담에서 나중에 추가된 접수를 기존 접수에 합치지 않고 별도 접수로">새 접수로 만들기</button>}
             <button type="button" onClick={() => post({ action: 'dismiss' })} disabled={busy} className="rounded-md border border-orange-300 bg-white px-3 py-1 text-xs text-orange-800 hover:bg-orange-100 disabled:opacity-50">무시</button>
           </span>
         )}

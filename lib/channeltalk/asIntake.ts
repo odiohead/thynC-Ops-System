@@ -41,7 +41,7 @@ export async function readAsIntakeCutover(): Promise<Date | null> {
 
 const CHAT_SELECT = {
   id: true, channelId: true, userId: true, state: true, tags: true, name: true, firstUserMessageAt: true, hospitalCode: true,
-  user: { select: { name: true, opsCode: true, hospitalNameRaw: true } },
+  user: { select: { name: true, opsCode: true, hospitalNameRaw: true, ward: true } },
   vocLink: { select: { vocId: true } },
   asIntake: { select: { id: true, state: true, receiptId: true, seenMessageId: true, extracted: true } },
 } as const
@@ -66,7 +66,7 @@ export async function extractAsFromChat(chat: ChatRow, matcher: HospitalMatcher)
   let chatMentionsPreReplace = false
   for (const m of msgs) {
     const t = m.plainText!
-    if (/선교체/.test(t) && m.personType !== 'bot') chatMentionsPreReplace = true
+    if (/선교체/.test(t) && m.personType === 'user') chatMentionsPreReplace = true // 고객 발언만 — 담당자의 안내("선교체 발송 예정")는 제외 (2026-10-27 보완 2)
     if (m.personType !== 'user' && isAlfCompletion(t)) { if (lastConfirm) { confirmation = lastConfirm; completion = { id: m.id, at: m.createdAtCt }; firstCompletionAt ??= m.createdAtCt } ; continue }
     if (m.personType === 'bot' && isAlfConfirmation(t)) { lastConfirm = { id: m.id, text: t, at: m.createdAtCt }; if (/선교체/.test(t)) chatMentionsPreReplace = true }
   }
@@ -80,7 +80,13 @@ export async function extractAsFromChat(chat: ChatRow, matcher: HospitalMatcher)
   const nameHospital = nameRaw ? matcher.match(nameRaw) : null
   let hospitalCode: string | null = opsHospital ?? nameHospital ?? chat.hospitalCode
   let hospitalMatchSource: AsExtract['hospitalMatchSource'] = opsHospital ? 'opscode' : nameHospital ? 'name' : chat.hospitalCode ? 'name' : 'none'
-  if (opsHospital && nameHospital && opsHospital !== nameHospital) { hospitalMatchSource = 'conflict'; hospitalCode = null }
+  if (opsHospital && nameHospital && opsHospital !== nameHospital) {
+    // 보완 1 (2026-10-27): 고객이 줄여 쓴 병원명('현대병원')이 OpsCode 병원명('광주현대병원')에 포함되면 동명 충돌이 아니라 축약 — OpsCode 채택
+    const opsName = (matcher.nameOf(opsHospital) ?? (await prisma.hospital.findUnique({ where: { hospitalCode: opsHospital }, select: { hospitalName: true } }))?.hospitalName ?? '')
+    const n = (s: string) => s.replace(/\s+/g, '').replace(/(의료법인|재단법인|사회복지법인|학교법인|의료재단|\(.*?\))/g, '')
+    if (nameRaw && n(opsName).includes(n(nameRaw))) hospitalMatchSource = 'opscode'
+    else { hospitalMatchSource = 'conflict'; hospitalCode = null }
+  }
 
   const hasFault = chat.tags.includes(AS_TAG_FAULT), hasLost = chat.tags.includes(AS_TAG_LOST)
   const category: AsExtract['category'] = hasLost && !hasFault ? 'LOST' : 'FAULT'
@@ -99,15 +105,27 @@ export async function extractAsFromChat(chat: ChatRow, matcher: HospitalMatcher)
     if (tag) preReplaceSource = 'hospital_tag'
   }
   const receiptAt = firstCompletionAt ?? completion?.at ?? chat.firstUserMessageAt ?? new Date()
+  // 보완 3 (2026-10-27): 상담명이 닉네임이면('테니스 560') CS가 손으로 고치던 '병원/병동/이름' 형식을 프로필에서 조합
+  const chatName = chat.name?.trim() || null
+  const looksStructured = !!chatName && (/병원|의원|센터|재단|\//.test(chatName) || /^대웅/.test(chatName))
+  const hospName = chat.user?.hospitalNameRaw ?? (hospitalCode ? matcher.nameOf(hospitalCode) ?? null : null) ?? nameRaw
+  const userName = chat.user?.name?.trim() || null
+  const userStructured = !!userName && /병원|의원|센터|재단|\//.test(userName) // 프로필 이름이 이미 '병원/병동' 형식
+  const parts: string[] = []
+  for (const v of userStructured ? [userName] : [hospName, parsed?.wards[0] ?? chat.user?.ward, userName]) if (v && v.trim() && !parts.includes(v.trim())) parts.push(v.trim())
+  const composed = parts.join('/')
+  const reporterName = looksStructured ? chatName : composed || chatName || userName
+  // 보완 4: 확인문의 수령지/발송지 구획 수 (2곳 이상이면 다병동 — 분할 판단을 사람에게)
+  const destCount = parsed ? parsed.destLines.filter((l) => /^(수령지|발송지|배송지)/.test(l.replace(/^[\s\-•·*▪]+/, ''))).length : 0
   const extract: AsExtract = {
     hospitalNameRaw: nameRaw, hospitalCode, hospitalMatchSource, hospitalNameMatchCode: nameHospital,
     category, mixedCategory,
     receiptDate: kstDate(receiptAt),
-    reporterName: chat.name ?? chat.user?.name ?? null,
+    reporterName,
     wards: parsed?.wards ?? [], deviceKindText: parsed?.deviceKindText ?? null,
     lines: lines.map((l) => ({ serial: l.serial, ward: l.ward ?? parsed?.wards[0] ?? null, symptom: l.symptom })),
     invalidSerials: Array.from(new Set(invalidSerials)), unknownSerials,
-    destInfo: dest.destInfo, pickupDestInfo: dest.pickupDestInfo, pickupDestDiffers: dest.pickupDestDiffers,
+    destInfo: dest.destInfo, pickupDestInfo: dest.pickupDestInfo, pickupDestDiffers: dest.pickupDestDiffers, destCount,
     preReplace: !!preReplaceSource, preReplaceSource,
     hasConfirmation: !!parsed, hasCompletion: !!completion,
     labels: parsed?.labels ?? [],
@@ -135,6 +153,7 @@ export function validateExtract(e: AsExtract): { failClass: string; note: string
   if (e.invalidSerials.length) out.push({ failClass: 'BAD_SERIAL', note: `형식 오류: ${e.invalidSerials.join(', ')}` })
   if (e.unknownSerials.length) out.push({ failClass: 'UNKNOWN_DEVICE', note: `기기 원장에 없음: ${e.unknownSerials.join(', ')}` })
   if (e.mixedCategory) out.push({ failClass: 'MIXED_CATEGORY', note: '고장·분실 태그가 함께 걸림 — 구분을 사람이 결정' })
+  if (e.destCount >= 2) out.push({ failClass: 'MULTI_DEST', note: `수령지가 ${e.destCount}곳 — 병동별 분할 여부를 사람이 결정` })
   if (!e.labels.includes('symptom') && !e.lines.some((l) => l.symptom)) out.push({ failClass: 'PARSE_INCOMPLETE', note: '접수사유를 읽지 못함' })
   return out
 }
@@ -262,7 +281,8 @@ export async function intakeAsFromChats(changedChatIds: string[], log: (l: strin
         const { extract, lastMessageId } = await extractAsFromChat(chat, matcher)
         if (lastMessageId && lastMessageId === link.seenMessageId) continue
         const diff = await diffExtractAgainstReceipt(link.receiptId, extract)
-        await prisma.asIntakeLink.update({ where: { id: link.id }, data: { seenMessageId: lastMessageId, changeDetectedAt: diff.length ? new Date() : null, changeDiff: diff.length ? (diff as unknown as Prisma.InputJsonValue) : Prisma.DbNull } })
+        // diff가 있으면 최신 추출값도 저장 — [반영]/[새 접수로 만들기]가 생성 시점 값이 아니라 현재 상담 값을 쓰도록 (2026-10-27 보완 6 검증에서 발견)
+        await prisma.asIntakeLink.update({ where: { id: link.id }, data: { seenMessageId: lastMessageId, changeDetectedAt: diff.length ? new Date() : null, changeDiff: diff.length ? (diff as unknown as Prisma.InputJsonValue) : Prisma.DbNull, ...(diff.length ? { extracted: extract as unknown as Prisma.InputJsonValue } : {}) } })
         if (diff.length) { r.changes++; log(`채널톡 변경 감지 — 접수 #${link.receiptId} ← 상담 ${chat.id} (${diff.map((d) => d.label).join(', ')})`) }
         continue
       }

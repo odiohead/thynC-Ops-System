@@ -51,6 +51,26 @@ export default function AsIntakeDetailPage() {
   const [lines, setLines] = useState<LineForm[]>([])
   const [ignoreReason, setIgnoreReason] = useState<AsIntakeIgnoreReason>('OTHER')
   const [showIgnore, setShowIgnore] = useState(false)
+  const [bulk, setBulk] = useState('') // 시리얼 일괄 붙여넣기 (보완 5 — 대웅 대리접수 등 수십 대 목록)
+  const [showBulk, setShowBulk] = useState(false)
+
+  /** 줄 단위 "SERIAL [/ 병동 [/ 증상]]" 또는 쉼표·공백 구분 시리얼 → 라인 추가(중복 제외) */
+  function addBulk() {
+    const added: LineForm[] = []
+    for (const raw of bulk.split(/\r?\n/)) {
+      const line = raw.trim()
+      if (!line) continue
+      const parts = line.split(/\s*\/\s*/)
+      const head = parts[0]
+      const tokens = head.split(/[\s,，]+/).map((t) => t.replace(/[(（][^)）]*[)）]/g, '').toUpperCase()).filter(Boolean)
+      const ward = parts.length >= 3 ? parts[1] : ''
+      const symptom = parts.length >= 3 ? parts.slice(2).join(' / ') : parts.length === 2 ? parts[1] : ''
+      for (const t of tokens) if (/^[A-Z]{1,2}\d{5,7}$/.test(t) && !added.some((a) => a.serial === t)) added.push({ serial: t, ward, symptom })
+    }
+    if (!added.length) { setError('붙여넣은 내용에서 시리얼(영문+숫자 6자리)을 찾지 못했습니다.'); return }
+    setLines((ls) => { const have = new Set(ls.map((l) => l.serial.toUpperCase())); return [...ls, ...added.filter((a) => !have.has(a.serial))] })
+    setBulk(''); setShowBulk(false); setError(null)
+  }
 
   const fill = useCallback((e: AsExtract | null, hosp: HospitalOpt | null) => {
     setHospital(hosp)
@@ -210,7 +230,13 @@ export default function AsIntakeDetailPage() {
               {pickupDestDiffers && <textarea value={pickupDestInfo} onChange={(e) => setPickupDestInfo(e.target.value)} rows={2} placeholder="회수지 정보" className={input(!pickupDestInfo)} />}
             </div>
             <div>
-              <div className="flex items-center justify-between"><span className={label}>기기 라인 * <span className="font-normal text-gray-400">(시리얼 / 병동 / 증상)</span></span>{pending && canWrite && <button type="button" onClick={() => setLines((ls) => [...ls, { serial: '', ward: d.extracted?.wards[0] ?? '', symptom: '' }])} className="text-xs text-blue-600 hover:underline">+ 라인</button>}</div>
+              <div className="flex items-center justify-between"><span className={label}>기기 라인 * <span className="font-normal text-gray-400">(시리얼 / 병동 / 증상)</span></span>{pending && canWrite && <span className="flex gap-3"><button type="button" onClick={() => setShowBulk((v) => !v)} className="text-xs text-blue-600 hover:underline">일괄 붙여넣기</button><button type="button" onClick={() => setLines((ls) => [...ls, { serial: '', ward: d.extracted?.wards[0] ?? '', symptom: '' }])} className="text-xs text-blue-600 hover:underline">+ 라인</button></span>}</div>
+              {showBulk && (
+                <div className="mt-1 rounded-md border border-blue-200 bg-blue-50/40 p-2">
+                  <textarea value={bulk} onChange={(e) => setBulk(e.target.value)} rows={5} placeholder={'한 줄에 한 대 — 시리얼만 또는  시리얼 / 병동 / 증상\nP012345 / 5병동 / 느낌표\nA123456\n(쉼표·공백 구분도 가능)'} className="w-full rounded-md border border-gray-300 px-2 py-1 font-mono text-xs" />
+                  <div className="mt-1 flex gap-2"><button type="button" onClick={addBulk} className="rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700">라인에 추가</button><button type="button" onClick={() => { setShowBulk(false); setBulk('') }} className="text-xs text-gray-500">닫기</button></div>
+                </div>
+              )}
               <div className="mt-1 space-y-1">
                 {lines.map((l, i) => {
                   const bad = l.serial.trim() !== '' && !AS_SERIAL_RE.test(l.serial.trim().toUpperCase())

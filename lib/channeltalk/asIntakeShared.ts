@@ -35,6 +35,7 @@ export const AS_INTAKE_FAIL_LABEL: Record<string, string> = {
   BAD_SERIAL: '시리얼 형식 오류',
   UNKNOWN_DEVICE: '기기 원장에 없는 시리얼',
   MIXED_CATEGORY: '고장+분실 혼합',
+  MULTI_DEST: '수령지 2곳 이상 (분할 여부 결정)',
   ALREADY_EXISTS: '동일 접수 존재 (연결 확인)',
   TX_ABORT: '기기 동시 변경 — 재시도 소진',
   ERROR: '생성 오류',
@@ -63,6 +64,7 @@ export interface AsExtract {
   destInfo: string | null
   pickupDestInfo: string | null
   pickupDestDiffers: boolean
+  destCount: number // 확인문에 적힌 수령지/발송지 구획 수 — 2 이상이면 다병동 분할 판단 필요(MULTI_DEST, 2026-10-27 보완 4)
   preReplace: boolean
   preReplaceSource: 'confirmation' | 'chat' | 'hospital_tag' | null
   hasConfirmation: boolean

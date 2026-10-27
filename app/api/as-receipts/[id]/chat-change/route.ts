@@ -8,9 +8,11 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { applyItemChanges, AsServiceError, type LineInput } from '@/lib/asReceiptService'
+import { applyItemChanges, createAsReceipt, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { syncAsReceiptToTicket } from '@/lib/ticket-domains/asReceipt'
 import { toRegistryErrorResponse } from '@/lib/deviceRegistry'
+import { notifyTicketCreated } from '@/lib/notify'
+import { syncTicketClocksSafe } from '@/lib/sla'
 import type { AsExtract, AsIntakeDiffItem } from '@/lib/channeltalk/asIntakeShared'
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
@@ -27,6 +29,37 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   if (body.action === 'dismiss') {
     await prisma.asIntakeLink.update({ where: { id: link.id }, data: { changeDetectedAt: null, changeDiff: Prisma.DbNull } })
     return NextResponse.json({ ok: true })
+  }
+  // 보완 6 (2026-10-27): 같은 상담에 뒤에 추가된 접수 — 기존 접수에 반영하는 대신 새 접수로 (상담에만 있는 시리얼, 없으면 전부). 접수일 = 오늘(KST), source INTAKE_QUEUE(사람 결정)
+  if (body.action === 'new_receipt') {
+    const cur = await prisma.asReceipt.findUnique({ where: { id }, select: { asCode: true, hospitalCode: true, vocId: true, items: { select: { serialNo: true } } } })
+    if (!cur) return NextResponse.json({ error: 'AS접수를 찾을 수 없습니다.' }, { status: 404 })
+    const have = new Set(cur.items.map((i) => i.serialNo))
+    const fresh = e.lines.filter((l) => !have.has(l.serial))
+    if (!fresh.length) return NextResponse.json({ error: '상담에만 있는 시리얼이 없습니다 — 기존 접수와 같은 기기라 새 접수를 만들지 않습니다.' }, { status: 400 })
+    const lines: LineInput[] = fresh.map((l) => ({ serial: l.serial, symptom: l.symptom, wardName: l.ward }))
+    const today = new Date(`${new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })}T00:00:00Z`)
+    const lost = e.category === 'LOST'
+    let created: Awaited<ReturnType<typeof createAsReceipt>>
+    try {
+      created = await createAsReceipt({
+        hospitalCode: e.hospitalCode ?? cur.hospitalCode, category: e.category, receiptDate: today, reporterName: e.reporterName,
+        pickupMethod: lost ? 'NONE' : 'PARCEL', pickedUpAt: lost ? null : new Date(today.getTime() + 86400000),
+        preReplace: e.preReplace, destType: e.destInfo ? 'HOSPITAL' : null, destInfo: e.destInfo, pickupDestDiffers: e.pickupDestDiffers, pickupDestInfo: e.pickupDestInfo,
+        note: `[채널톡 상담 ${link.chatId}] 추가 접수 — ${cur.asCode}의 변경 감지에서 새 접수로 분리`, lines, source: 'INTAKE_QUEUE', vocId: cur.vocId,
+      }, { userId: user.userId, name: user.name })
+    } catch (err) {
+      if (err instanceof AsServiceError) return NextResponse.json({ error: err.message }, { status: err.status })
+      const r = toRegistryErrorResponse(err)
+      if (r) return NextResponse.json(r.body, { status: r.status })
+      throw err
+    }
+    const remaining = diff.filter((d) => d.field !== 'serials')
+    await prisma.asIntakeLink.update({ where: { id: link.id }, data: { changeDetectedAt: remaining.length ? undefined : null, changeDiff: remaining.length ? (remaining as unknown as Prisma.InputJsonValue) : Prisma.DbNull } })
+    await logAudit({ req: request, actor: auditActorFromJWT(user), action: 'CREATE', resource: 'as_receipt', resourceId: created.asCode, resourceLabel: `${created.asCode} ${created.hospitalName} (채널톡 변경 감지 → 새 접수, 원 접수 ${cur.asCode})` })
+    syncTicketClocksSafe(created.ticketId)
+    notifyTicketCreated({ ticketId: created.ticketId, actorName: user.name, actorId: user.userId }).catch(() => {})
+    return NextResponse.json({ ok: true, id: created.id, asCode: created.asCode, warnings: created.warnings }, { status: 201 })
   }
   if (body.action !== 'apply' || !Array.isArray(body.fields) || !body.fields.length) return NextResponse.json({ error: '반영할 항목을 선택하세요.' }, { status: 400 })
   const fields = new Set((body.fields as unknown[]).map(String).filter((f) => diff.some((d) => d.field === f)))

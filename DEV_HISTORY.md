@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-10-27 17:30 | AS 인입 보완 6건 — 최근 100건 PROD 시뮬레이션 결과 반영 (dev2 빌드·재시작, PROD 미반영)
+
+- **분석(PROD 읽기 전용, 실제 모듈 `extractAsFromChat`+`validateExtract`로 최근 AS접수 100건 시뮬레이션)**: 자동·동일 50 / 자동·보정흔적 25(문구 9·접수자명 8·선교체 10·병동 2·발송지 5·시리얼 분할/오타 5) / 등록대기 20(확인문 없음 11 — 그중 대웅 대리접수 8, 원장 미등록 3 — 그중 오타 적발 2, 혼합 2, 충돌 2, 완료 없음 2) / 변경 감지 2 / 상담 없음 3. 시트 3자 대조: 생성 시점엔 K(접수담당) 20/93행만 기입, 현재 91/93 → 차이의 대부분은 **CS 사후 보정**(원장 경고 보고 오타 교정·접수자명 정규화·다병동 분할), ALF 출력≠확인문은 1건. 채널톡 프로필 `OpsCode` 보유: 최근 60일 AS 상담 고객 387명 중 293(전부 유효), 미보유 94 = 대웅 직원 59 + 병원 직원 35(병원명 매처로 해결)
+- **보완**: ① OpsCode↔확인문 병원명 충돌 시 OpsCode 병원명이 확인문 병원명을 포함하면(광주현대병원⊇현대병원) OpsCode 채택 ② 선교체 판정에서 담당자 발언 제외(고객 발언·확인문·병원 태그만) ③ 접수자명 — 상담명이 닉네임이면 프로필(이름이 이미 '병원/병동'이면 그대로, 아니면 병원/병동/이름 조합) ④ 확인문 수령지 2곳 이상 → 큐행 `MULTI_DEST`(`AsExtract.destCount`) ⑤ 등록대기 폼 [일괄 붙여넣기](줄 단위 `시리얼 / 병동 / 증상`, 쉼표·공백 구분, 중복 제외) ⑥ 변경 감지 패널 [새 접수로 만들기](`chat-change` action `new_receipt` — 상담에만 있는 시리얼로 접수일 오늘·source INTAKE_QUEUE 신규 생성, 원 접수 비고 참조, serials diff 해소)
+- 검증: tsc 0·eslint 0, dev2 추출 스팟체크(광주현대 충돌→opscode·'테니스 560'→'문산중앙병원/3병동'·분당제생 destCount 3~4→MULTI_DEST) · 힙 4GB 빌드·`pm2 restart thync-dev` health 200 · Playwright 실화면: T1 일괄 붙여넣기(4줄 입력 → 중복·오류 줄 제외 3라인) / T2 변경 감지(시리얼 추가 주입) → [새 접수로 만들기] → AS-202610-0314 생성(P012574만, source INTAKE_QUEUE, diff 해소). **검증 중 발견·수정**: 변경 감지 시 `extracted`를 갱신하지 않아 [반영]/[새 접수]가 생성 시점 값을 쓰던 문제 → diff 기록 시 최신 추출값 저장, 상담에만 있는 시리얼이 없으면 새 접수 거부(400)
+- 영향: `lib/channeltalk/{asIntake,asIntakeShared}.ts` · `app/as-receipts/intake/[id]/page.tsx` · `app/api/as-receipts/[id]/chat-change/route.ts` · `app/as-receipts/_components/ChatChangePanel.tsx`
+
+## 2026-10-27 15:30 | PROD 배포: AS 인입 소스 전환 P1~P3 + P4 그림자(dry) 시작 (2d19e3d)
+
+- 커밋 `2d19e3d` push → PROD `git pull` → 마이그 `20261027110000_as_channeltalk_intake` `prisma db execute` + `migrate resolve --applied`(status up to date) → 검증: `as_receipts.source` 백필 SHEET 776·IMPORT 3,315·MANUAL 39, `voc_receipt_types` 2,508 시드, `as_intake_links` 0 → `prisma generate` → 힙 4GB 빌드(협업 번들 2108cacb 불변, collab 재시작 불필요) → `pm2 restart thync-prod` health 200. 패키지 변경 없음
+- 그림자 설정(사용자 "P4 진행" — 설정 키 upsert): `channeltalk_as_intake=dry`, `channeltalk_as_intake_cutover=2026-10-27`. 시트 폴러는 `create`(현행) 유지·1m, VOC 폴링 5m 유지. dry는 판정·추출 결과를 틱 로그(`[channeltalk-voc] [dry] …`)와 `channeltalk_sync_runs.stats.asIntake`에만 남기고 생성·큐 적재 없음
+- 리플레이 보고서는 개인 연락처가 든 §4 상세를 제외하고 커밋(요약·집계만). 임시 스크립트는 미커밋
+- 다음: 그림자 N일 관찰(자동/큐 비율·UNKNOWN_DEVICE 실비율·시트 경로 생성분과 대조) → 사용자 판단 후 P5 전환(`on`+컷오버+시트 `link`+폴링 `1m`+상담사 시트 수기 중단 공지)
+
 ## 2026-10-27 14:30 | AS 인입 소스 전환 P1~P3 구현 — 모델·채널톡 인입 모듈·등록대기 큐·변경 감지·시트 연결 전용 모드·VOC 복수 분류 (dev2 빌드·재시작, PROD 미반영)
 
 - **결정(P0 보고 후 사용자 "다음단계 진행" — 권장안 채택)**: D1 상담 1건 = 접수 1건(병동별 분할 안 함) · D2 고장+분실 혼합 태그 → 큐행 · D3 기기 원장에 없는 시리얼 → 큐행(시트 선례의 '경고만 내고 생성' 대신) · D4 OpsCode↔확인문 병원명 충돌 → 큐행 · 폴링 1분(전환 시)
