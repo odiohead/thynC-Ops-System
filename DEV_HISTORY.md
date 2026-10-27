@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-10-27 20:30 | 채널톡 상담 첨부파일 열람 — 서명 URL 프록시 (VOC·원본·AS 등록대기 타임라인) (dev2 빌드·PROD 배포)
+
+- **배경**: 상담 첨부(9/29~ 고객 메시지의 5.9%, 사진 jpeg/png 대부분 + mp4·pdf·xlsx)는 메타만 적재돼 화면에서 이름만 보였음. 비공개 파일(`bin.channel.io` `pri-file/…`, `privateFileScope: chat`)은 CDN 직접 접근 403. Open API `GET /open/v5/user-chats/{chatId}/messages/file?key=` 가 15분 서명 URL을 반환함을 실측(200, HEAD 200 image/jpeg)
+- **구현(A안 — 복제 없이 열람)**: `ChanneltalkClient.fileUrl(chatId, key)` · `GET /api/channeltalk/chats/[id]/files/[fileId]`(로그인 사용자 — 적재된 `file_meta`에서 key/previewKey 조회 → 서명 URL 302, `?thumb=1`은 썸네일 webp, private 10분 캐시) · `ChatTimeline`에 `chatId` prop + 첨부 렌더(이미지 썸네일 → 새 탭 원본, 영상·문서는 이름·크기 링크). 호출부 3곳(`/voc/inbox/[id]`·`VocChanneltalkSection`·`/as-receipts/intake/[id]`) chatId 전달. 파일은 우리 저장소에 복제하지 않음(채널톡 권한·삭제를 따름). B안(S3 복제·AI 입력)은 보류
+- 검증(dev2): tsc 0·eslint 0·빌드·재시작 health 200 · API: `?thumb=1` → 302 서명 webp, 원본 follow 200 image/jpeg 2.1MB, 미로그인 307(로그인 리다이렉트), 없는 파일 404 · Playwright `/voc/inbox/6ae04fb4…`: 첨부 5건 썸네일 전부 로드(naturalWidth>0), 콘솔·5xx 없음
+- 영향: `lib/channeltalk/client.ts` · `app/api/channeltalk/chats/[id]/files/[fileId]/route.ts`(신규) · `app/voc/_components/{ChatTimeline,VocChanneltalkSection}.tsx` · `app/voc/inbox/[id]/page.tsx` · `app/as-receipts/intake/[id]/page.tsx`
+
 ## 2026-10-27 19:40 | PROD 배포: D3 번복 — 원장 미등록 시리얼 생성 + 미등록 라인 (000c8fa)
 
 - `000c8fa` push → PROD pull → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` health 200. 마이그·패키지 변경 없음, 설정 그대로(그림자 dry)

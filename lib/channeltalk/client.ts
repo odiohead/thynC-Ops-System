@@ -143,6 +143,12 @@ export class ChanneltalkClient {
   listMessages(chatId: string, sortOrder: 'asc' | 'desc', since?: string | null, limit = 500) {
     return this.get<MessageListPage>(`user-chats/${chatId}/messages`, { sortOrder, since: since ?? undefined, limit })
   }
+  /** 상담 첨부파일 서명 URL (15분 유효) — 비공개 파일(pri-file)은 CDN 직접 접근 403, 이 엔드포인트로만 (2026-10-27, docs "Get a file url in a UserChat") */
+  async fileUrl(chatId: string, key: string): Promise<string> {
+    const r = await this.get<{ result?: string }>(`user-chats/${chatId}/messages/file`, { key })
+    if (!r?.result) throw new Error('파일 URL 응답이 비어 있습니다')
+    return r.result
+  }
   listManagers(limit = 500) {
     return this.get<{ managers: ChanneltalkManagerRaw[] }>('managers', { limit })
   }

@@ -271,7 +271,7 @@ export default function AsIntakeDetailPage() {
         <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:col-span-2">
           <div className="mb-2 flex items-center justify-between"><h2 className="text-sm font-semibold text-gray-700">상담 원문 <span className="text-xs font-normal text-gray-400">{d.messages.length}건</span></h2>{d.chat.user && <span className="text-xs text-gray-500">{d.chat.user.name}{customerPhone ? ` · ${customerPhone}` : ''}{d.chat.user.ward ? ` · ${d.chat.user.ward}` : ''}</span>}</div>
           <div className="max-h-[75vh] overflow-y-auto pr-1">
-            <ChatTimeline messages={d.messages} managerNames={d.managerNames} customerName={d.chat.user?.name ?? d.chat.name} />
+            <ChatTimeline messages={d.messages} managerNames={d.managerNames} customerName={d.chat.user?.name ?? d.chat.name} chatId={d.chat.id} />
           </div>
         </div>
       </div>

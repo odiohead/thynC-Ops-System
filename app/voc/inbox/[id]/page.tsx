@@ -128,7 +128,7 @@ export default function ChanneltalkChatDetailPage() {
         </div>
         <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
           <h2 className="mb-3 text-sm font-semibold text-gray-700">대화 ({chat.messages.length})</h2>
-          <ChatTimeline messages={chat.messages} managerNames={managerNames} customerName={chat.user?.name ?? null} />
+          <ChatTimeline messages={chat.messages} managerNames={managerNames} customerName={chat.user?.name ?? null} chatId={chat.id} />
         </div>
         </div>
       </div>

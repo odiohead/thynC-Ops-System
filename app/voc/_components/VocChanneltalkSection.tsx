@@ -38,7 +38,7 @@ export default function VocChanneltalkSection({ links, customerName }: { links: 
             {l.chat.tags.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{l.chat.tags.map((t) => <span key={t} className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600">{t}</span>)}</div>}
             {openId === l.chat.id && (
               <div className="mt-3">
-                {cur ? <ChatTimeline messages={cur.messages} managerNames={cur.managerNames} customerName={customerName} /> : <p className="text-sm text-gray-400">불러오는 중...</p>}
+                {cur ? <ChatTimeline messages={cur.messages} managerNames={cur.managerNames} customerName={customerName} chatId={openId ?? undefined} /> : <p className="text-sm text-gray-400">불러오는 중...</p>}
               </div>
             )}
           </li>
