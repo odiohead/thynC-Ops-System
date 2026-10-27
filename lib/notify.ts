@@ -20,8 +20,9 @@ import { summarizeStockOutItems } from '@/lib/stockOut'
 import { TICKET_STATUS_LABELS, TICKET_SEVERITY_LABELS, PERSONAL_QUEUE_NAME } from '@/lib/ticket-shared'
 import { resolveChannels, type NotifyRouteEvent, type ResolvedChannel } from '@/lib/notify-routes'
 import { emitNotification, ticketRecipients, queueMemberIds } from '@/lib/notify-center'
+import { NOTIFY_EVENTS, NOTIFY_EVENT_ENABLED_KEY, NOTIFY_EVENT_MAP } from '@/lib/notify-events'
 
-export type NotifyEventType = 'task_created' | 'task_status_changed' | 'delayed' | 'ticket_assigned'
+export type NotifyEventType = 'task_created' | 'task_status_changed' | 'delayed' | 'ticket_assigned' | 'domain_event'
 type NotifyStatus = 'sent' | 'failed' | 'skipped'
 type TargetType = 'channel' | 'dm'
 
@@ -263,8 +264,30 @@ export async function getTypesEnabled(): Promise<Record<TaskType, boolean>> {
   return result
 }
 
-async function typeEnabled(taskType: TaskType): Promise<boolean> {
-  return (await getTypesEnabled())[taskType]
+/**
+ * 이벤트별 사용 여부 (notify_event_enabled, 기본 전부 on — lib/notify-events.ts 카탈로그 키). 2026-10-27 재편:
+ * 구 `notify_event_toggles`(티켓 이벤트 5종)·`notify_types_enabled`(업무 타입별)를 대체 — 타입별 제한은 라우트의 업무 유형 조건으로 옮김(scripts/migrate-notify-toggles.mts).
+ * 새 키가 없으면 구 토글에서 파생(전환 전 안전망).
+ */
+export async function getEventEnabledMap(): Promise<Record<string, boolean>> {
+  const result: Record<string, boolean> = {}
+  for (const e of NOTIFY_EVENTS) result[e.key] = true
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: NOTIFY_EVENT_ENABLED_KEY } })
+    if (row?.value) {
+      const parsed = JSON.parse(row.value) as Record<string, unknown>
+      for (const e of NOTIFY_EVENTS) if (parsed[e.key] === false) result[e.key] = false
+      return result
+    }
+    const legacy = await getEventToggles()
+    for (const e of NOTIFY_EVENTS) if (e.legacyToggle && legacy[e.legacyToggle] === false) result[e.key] = false
+  } catch (err) {
+    console.error('[notify] notify_event_enabled 파싱 실패:', err)
+  }
+  return result
+}
+export async function isNotifyEventOn(key: string): Promise<boolean> {
+  return (await getEventEnabledMap())[key] !== false
 }
 
 /** AppSetting 이벤트 알림 게이트: notify_enabled(기본 off) && notify_events_enabled(기본 on) */
@@ -840,7 +863,6 @@ export async function notifyTicketCreated(input: {
     const core = await loadTicketCore(input.ticketId)
     if (!core) return
     const taskType = refTypeToTaskType(core.refType)
-    if (!(await typeEnabled(taskType))) return
 
     // 내부 알림 (P5) — Slack 게이트·멱등성 체크보다 **앞에서** 적재한다.
     // (아래 채널 멱등성은 ticketCode 기준이라 삭제 후 코드가 재사용되면 과거 로그에 걸린다.
@@ -858,11 +880,10 @@ export async function notifyTicketCreated(input: {
     })
     if (already) return
 
-    // 이벤트별 토글: created off → 채널 미발송, sig 기준선만 확보.
+    // 이벤트 사용 여부(notify_event_enabled): off → 채널 미발송, sig 기준선만 확보.
     // '개인 업무' 그룹은 채널 알림 제외 (v2 P2 — 확정 6, 내부 알림은 위에서 이미 적재됨)
-    const toggles = await getEventToggles()
     const isPersonal = core.queue.name === PERSONAL_QUEUE_NAME
-    if (!toggles.created || isPersonal) {
+    if (!(await isNotifyEventOn('TICKET_CREATED')) || isPersonal) {
       await recordLog({
         eventType: 'task_created',
         taskType,
@@ -929,7 +950,6 @@ export async function notifyTicketChanged(input: {
     const core = await loadTicketCore(input.ticketId)
     if (!core) return
     const taskType = refTypeToTaskType(core.refType)
-    if (!(await typeEnabled(taskType))) return
 
     const currentSig = ticketSig(core)
 
@@ -983,14 +1003,14 @@ export async function notifyTicketChanged(input: {
       })
     }
 
-    // 이벤트별 토글(설정 세분 제어) — 꺼진 이벤트는 채널 발송에서 제외.
-    // v2 P2: 신규 배정(assigned)도 채널 알림 대상 (구 배정 DM 대체 — 그룹 채널에 @멘션)
-    const toggles = await getEventToggles()
-    const assignedWorthy = ownerChanged && !!core.ownerId && toggles.assigned
+    // 이벤트별 사용 여부(notify_event_enabled, 2026-10-27 재편) — 꺼진 이벤트는 채널 발송에서 제외.
+    // v2 P2: 신규 배정(assigned)도 채널 알림 대상 (구 배정 DM 대체 — 그룹 채널에 @멘션). 재편 후 TICKET_ASSIGNED 라우팅 이벤트로도 매칭
+    const on = await getEventEnabledMap()
+    const assignedWorthy = ownerChanged && !!core.ownerId && on.TICKET_ASSIGNED !== false
     const channelWorthy =
-      (statusChanged && toggles.statusChanged) ||
-      (queueChanged && toggles.queueTransferred) ||
-      (escalated && toggles.sevEscalated) ||
+      (statusChanged && on.TICKET_STATUS_CHANGED !== false) ||
+      (queueChanged && on.TICKET_QUEUE_TRANSFERRED !== false) ||
+      (escalated && on.SEV_ESCALATED !== false) ||
       assignedWorthy
     const isPersonal = core.queue.name === PERSONAL_QUEUE_NAME // 개인 업무 그룹은 채널 알림 제외 (확정 6)
     if (!channelWorthy || isPersonal) {
@@ -1017,9 +1037,10 @@ export async function notifyTicketChanged(input: {
 
     // 변경 축 → 라우팅 이벤트. 복합 변경(상태+큐 동시)이면 두 이벤트의 매칭 채널을 합쳐 1메시지로 보낸다
     const routeEvents: NotifyRouteEvent[] = []
-    if (statusChanged && toggles.statusChanged) routeEvents.push('TICKET_STATUS_CHANGED')
-    if (queueChanged && toggles.queueTransferred) routeEvents.push('TICKET_QUEUE_TRANSFERRED')
-    if (escalated && toggles.sevEscalated) routeEvents.push('SEV_ESCALATED')
+    if (statusChanged && on.TICKET_STATUS_CHANGED !== false) routeEvents.push('TICKET_STATUS_CHANGED')
+    if (queueChanged && on.TICKET_QUEUE_TRANSFERRED !== false) routeEvents.push('TICKET_QUEUE_TRANSFERRED')
+    if (escalated && on.SEV_ESCALATED !== false) routeEvents.push('SEV_ESCALATED')
+    if (assignedWorthy) routeEvents.push('TICKET_ASSIGNED')
 
     await dispatchToRoutes({
       eventTypes: routeEvents,
@@ -1046,6 +1067,58 @@ export async function notifyTicketChanged(input: {
     await saveTicketSig(core.id, currentSig)
   } catch (err) {
     console.error('[notify] notifyTicketChanged 예외:', err)
+  }
+}
+
+/**
+ * 도메인 이벤트 알림 (2026-10-27, projects/domain_event_notify_design.md §2.2) — 티켓 상태와 무관한 업무 사건(AS 입고확인 등).
+ * 카탈로그 키로 라우팅 규칙을 찾아(업무 유형은 티켓 refType, 그룹·CTI·Sev 조건) 채널 N개에 발송. 멱등성 없음(실행 1회 = 알림 1건).
+ * best-effort — 절대 throw하지 않음.
+ */
+export async function notifyDomainEvent(input: {
+  event: string
+  ticketId: number
+  actorName?: string | null
+  /** 머리줄 뒤에 붙는 요약 (예: '광주한국병원 · AS-202610-0296') */
+  title: string
+  fields: { label: string; value: string }[]
+  /** 경고 줄(선택) — 불일치·미식별 등 */
+  warning?: string | null
+  link?: string | null
+}): Promise<void> {
+  try {
+    const def = NOTIFY_EVENT_MAP[input.event]
+    if (!def || def.kind !== 'domain') { console.warn(`[notify] 미등록 도메인 이벤트: ${input.event}`); return }
+    if (!(await eventsEnabled())) return
+    if (!(await isNotifyEventOn(input.event))) return
+    const core = await loadTicketCore(input.ticketId)
+    if (!core) return
+    const taskType = refTypeToTaskType(core.refType)
+    const isPersonal = core.queue.name === PERSONAL_QUEUE_NAME
+    if (isPersonal) return
+    const base = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || ''
+    const link = input.link ? (input.link.startsWith('http') ? input.link : `${base}${input.link}`) : `${base}/tickets/${core.ticketCode}`
+    await dispatchToRoutes({
+      eventTypes: [input.event],
+      match: { refType: core.refType, queueId: core.queueId, ctiId: core.ctiId, severity: core.severity },
+      eventType: 'domain_event',
+      taskType,
+      refCode: domainRefCode(core) ?? core.ticketCode,
+      queueId: core.queueId,
+      queueName: core.queue.name,
+      render: (mentionLine) => {
+        const head = `*[${def.label}]* ${input.title}`
+        const lines = input.fields.filter((f) => f.value).map((f) => `• ${f.label}: ${f.value}`)
+        if (input.warning) lines.push(`:warning: ${input.warning}`)
+        if (input.actorName) lines.push(`• 처리자: ${input.actorName}`)
+        lines.push(`<${link}|상세 보기>`)
+        if (mentionLine) lines.push(mentionLine)
+        const text = [head, ...lines].join('\n')
+        return { text, blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }] }
+      },
+    })
+  } catch (err) {
+    console.error('[notify] notifyDomainEvent 예외:', err)
   }
 }
 

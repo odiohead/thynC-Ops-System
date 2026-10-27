@@ -10,17 +10,11 @@
 import { prisma } from '@/lib/prisma'
 import type { TicketSeverity, TicketStatus } from '@prisma/client'
 import { ctiAncestors } from '@/lib/sla'
+import { NOTIFY_EVENT_KEYS } from '@/lib/notify-events'
 
-export const NOTIFY_ROUTE_EVENTS = [
-  'TICKET_CREATED',
-  'TICKET_STATUS_CHANGED',
-  'TICKET_QUEUE_TRANSFERRED',
-  'SEV_ESCALATED',
-  'SLA_BREACH',
-  'SLA_WARNING',
-  'DAILY_DIGEST',
-] as const
-export type NotifyRouteEvent = (typeof NOTIFY_ROUTE_EVENTS)[number]
+/** 라우팅 가능한 이벤트 = 카탈로그 전체 (lib/notify-events.ts 단일 소스, 2026-10-27 — 티켓 이벤트 + TICKET_ASSIGNED + 도메인 이벤트) */
+export const NOTIFY_ROUTE_EVENTS: readonly string[] = NOTIFY_EVENT_KEYS
+export type NotifyRouteEvent = string
 
 export const MENTION_MODES = ['none', 'queue_members', 'channel', 'here'] as const
 export type MentionMode = (typeof MENTION_MODES)[number]

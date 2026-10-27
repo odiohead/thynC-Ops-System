@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-10-27 22:30 | Slack 알림 설정 이벤트 중심 재편 + AS 입고확인 도메인 이벤트 (dev2 빌드·적용, PROD 미반영)
+
+- **배경(사용자)**: AS 입고확인 시 특정 채널 알림 요구 + "주요 기능마다 알림을 세세하게 제어" — 기존 화면은 SLA가 첫 탭, 토글 3겹(전체/업무 타입별/티켓 이벤트별)+라우팅 규칙이 흩어져 "무슨 일이 생기면 어디로 가는가"가 안 보임. 재편 + 입고확인 동시 진행, 3겹 토글 → 라우트 일원화 동의, 채널은 기존 'AS업무'(설계 `projects/domain_event_notify_design.md` §5·§6)
+- **카탈로그** `lib/notify-events.ts`(단일 소스, 16종: 티켓 공통 5 — `TICKET_ASSIGNED` 라우팅 이벤트 승격 / SLA 3 / AS 4 / VOC 2 / 운영 2 — 구현 9·예약 7). `lib/notify-routes.ts` 이벤트 목록 = 카탈로그. **이벤트별 사용 여부** AppSetting `notify_event_enabled`(JSON) — `getEventEnabledMap`/`isNotifyEventOn`(새 키 없으면 구 토글 파생). `notifyTicketCreated/Changed`·`sla-alerts`의 구 토글·업무 타입 게이트 제거. **`notifyDomainEvent()`** 신설(티켓 컨텍스트로 라우트 매칭, 로그 `domain_event`, 멱등성 없음). 발생 지점: `POST /api/as-receipts/[id]/intake`(입고 기기·입고확인일·불일치/미식별·처리자·링크)
+- **설정 화면 재편** `/settings/notifications`: ① 이벤트(`EventsTab` — 모듈별 카탈로그, 사용 스위치 + 규칙 인라인 추가/활성/삭제, 조건 축은 이벤트 정의대로, 미구현은 예약 표시·추가 불가) ② 채널(`ChannelsTab`, 같은 Slack ID 중복 경고) ③ SLA 기준 ④ 공통(모드·전체 on/off·멘션 킬스위치·SLA 엔진·자동 종결·필드·이력 — 구 토글 2블록 제거). `RoutesTab.tsx` 삭제. API: `/api/settings/notify-routes` GET `eventEnabled`+`eventDefs/eventGroups`, POST `{kind:'event-enabled'}`; `/api/settings/notifications` GET/PUT에서 `eventToggles`·`typesEnabled`·`eventsEnabled` 제거(`notify_events_enabled`는 항상 on 기록)
+- **마이그·시드**: `scripts/migrate-notify-toggles.mts`(dry-run 기본/`--apply`): 구 토글→`notify_event_enabled`, 꺼진 업무 타입(유지보수·기타업무)→전체 대상 라우트 5건의 `ref_types`로 이관(현재 동작 보존), 전역 통합. `scripts/seed-notify-events.sql`: 'AS 입고확인 → AS업무' 라우트(idempotent). dev2 적용 완료(route #7)
+- **검증(dev2)**: tsc 0·eslint 0·4GB 빌드·재시작 health 200 · 입고확인 API 호출 → `notification_logs` `domain_event` **sent**(test 모드 `[DEV→#AS업무] *[AS 입고확인]* 광주한국병원 · AS-202610-0314 / 입고 기기 1대 / 입고확인일 / 처리자 / 상세 링크`) · Playwright: 이벤트 탭 5그룹 16행·AS 입고확인 '발송 중' 배지 → 스위치 off '사용 중지' → on 복귀 / 상태 변경 규칙 폼에 상태 조건 노출 / 예약 이벤트 스위치 비활성·추가 버튼 없음 / 채널 탭 3채널 / 공통 탭에 구 토글 없음·전체 사용 있음 — 콘솔·5xx 없음. **첫 검증 때 스위치를 끈 채 둔 탓에 입고 알림이 안 간 것을 로그로 확인(= 스위치가 실제로 발송을 막음)**
+- **부수 발견(미수정, 기존)**: dev2 `delayed`(SLA 즉시/요약) 발송이 10/25부터 매 틱 `invalid_blocks`로 실패 중(일 171건) — 이번 변경과 무관(변경 전 날짜부터), PROD 영향 여부는 별도 확인 필요
+- 영향: `lib/{notify-events,notify,notify-routes,sla-alerts}.ts` · `app/api/settings/{notifications,notify-routes}/route.ts` · `app/api/as-receipts/[id]/intake/route.ts` · `app/settings/notifications/{page,EventsTab,ChannelsTab}.tsx`(RoutesTab 삭제) · `scripts/{migrate-notify-toggles.mts,seed-notify-events.sql}` · README·설계 문서·projects/README
+
 ## 2026-10-27 21:00 | PROD 배포: 채널톡 상담 첨부파일 열람 (1fad331)
 
 - `1fad331` push → PROD pull → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `pm2 restart thync-prod` health 200, 새 라우트 응답 확인(미로그인 307). 마이그·패키지·설정 변경 없음. VOC 원본·VOC 상세·AS 등록대기 타임라인에서 첨부 사진 썸네일·문서 다운로드 가능

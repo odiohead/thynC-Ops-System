@@ -4,7 +4,8 @@ import { prisma } from '@/lib/prisma'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { FIELD_CATALOG, DEFAULT_FIELDS, TASK_TYPES, TASK_TYPE_LABELS } from '@/lib/notifyFields'
 import { startNotifyScheduler, TICK_OPTIONS, DEFAULT_TICK } from '@/lib/notify-scheduler'
-import { getTypesEnabled, getEventToggles, type TaskType, type TicketEventToggles } from '@/lib/notify'
+import { getEventEnabledMap, type TaskType } from '@/lib/notify'
+import { NOTIFY_EVENTS, NOTIFY_EVENT_GROUPS, NOTIFY_EVENT_ENABLED_KEY } from '@/lib/notify-events'
 
 /**
  * 알림 전역 설정 (v2 P1 재편 — notification_v2_design.md)
@@ -74,9 +75,11 @@ export async function GET(request: NextRequest) {
     digestHour: Number.isFinite(parseInt(map['notify_digest_hour'] ?? '')) ? parseInt(map['notify_digest_hour']!) : -1,
     digestChannelId: Number.isFinite(digestChannelId) ? digestChannelId : null,
     channels,
-    eventToggles: await getEventToggles(),
+    // 2026-10-27 재편: 이벤트별 사용 여부(카탈로그 키) — 구 eventToggles·typesEnabled 대체
+    eventEnabled: await getEventEnabledMap(),
+    events: NOTIFY_EVENTS,
+    eventGroups: NOTIFY_EVENT_GROUPS,
     autoCloseDays: await readIntSetting('ticket_auto_close_days', 0),
-    typesEnabled: await getTypesEnabled(),
     fields: await readFields(),
     catalog: FIELD_CATALOG,
     labels: TASK_TYPE_LABELS,
@@ -93,10 +96,12 @@ export async function PUT(request: NextRequest) {
 
   const body = await request.json()
   const {
-    enabled, eventsEnabled, fields, tickInterval, breachTickCap,
-    queueMentions, sev1Channel, eventToggles, autoCloseDays, typesEnabled,
+    enabled, fields, tickInterval, breachTickCap,
+    queueMentions, sev1Channel, eventEnabled, autoCloseDays,
     digestHour, digestChannelId,
   } = body
+  // 전역 on/off 하나로 통합 (구 notify_events_enabled는 항상 on으로 기록 — 재편 2026-10-27)
+  const eventsEnabled = true
 
   // F3 수정: tick·cap은 페이로드에 있을 때만 갱신 (누락 시 기존값 유지 — 조용한 5m 리셋 방지)
   const tickProvided = (TICK_OPTIONS as readonly string[]).includes(tickInterval)
@@ -105,18 +110,12 @@ export async function PUT(request: NextRequest) {
 
   const queueMentionsVal = queueMentions === false ? 'off' : 'on'
   const sev1ChannelVal = sev1Channel === false ? 'off' : 'on'
-  const et = (eventToggles ?? {}) as Partial<TicketEventToggles>
-  const cleanEventToggles: TicketEventToggles = {
-    created: et.created !== false,
-    statusChanged: et.statusChanged !== false,
-    queueTransferred: et.queueTransferred !== false,
-    sevEscalated: et.sevEscalated !== false,
-    assigned: et.assigned !== false,
-  }
+  // 이벤트별 사용 여부 — 카탈로그에 있는 키만, 미지정은 on (페이로드에 없으면 기존값 유지)
+  const eventEnabledProvided = eventEnabled && typeof eventEnabled === 'object'
+  const cleanEventEnabled: Record<string, boolean> = {}
+  if (eventEnabledProvided) for (const e of NOTIFY_EVENTS) cleanEventEnabled[e.key] = (eventEnabled as Record<string, unknown>)[e.key] !== false
   const autoCloseNum = Math.floor(Number(autoCloseDays))
   const autoCloseVal = String(Number.isFinite(autoCloseNum) && autoCloseNum >= 0 ? autoCloseNum : 0)
-  const cleanTypes = {} as Record<TaskType, boolean>
-  for (const t of TASK_TYPES) cleanTypes[t] = !(typesEnabled && typesEnabled[t] === false)
 
   // 전역 요약: 시각 0~23만 유효, 그 외 -1(off). 채널은 존재 검증
   const digestHourNum = Math.floor(Number(digestHour))
@@ -152,9 +151,8 @@ export async function PUT(request: NextRequest) {
     upsert('notify_sev1_channel', sev1ChannelVal),
     upsert('notify_digest_hour', digestHourVal),
     upsert('notify_digest_channel_id', digestChannelVal),
-    upsert('notify_event_toggles', JSON.stringify(cleanEventToggles)),
+    ...(eventEnabledProvided ? [upsert(NOTIFY_EVENT_ENABLED_KEY, JSON.stringify(cleanEventEnabled))] : []),
     upsert('ticket_auto_close_days', autoCloseVal),
-    upsert('notify_types_enabled', JSON.stringify(cleanTypes)),
   ])
 
   // tick 주기가 실제로 바뀐 요청일 때만 스케줄러 재기동
@@ -173,7 +171,7 @@ export async function PUT(request: NextRequest) {
       ...(capProvided ? { breachTickCap: capNum } : {}),
       queueMentions: queueMentionsVal, sev1Channel: sev1ChannelVal,
       digestHour: digestHourVal, digestChannelId: digestChannelVal || null,
-      eventToggles: cleanEventToggles, autoCloseDays: autoCloseVal, typesEnabled: cleanTypes, fields: clean,
+      ...(eventEnabledProvided ? { eventEnabled: cleanEventEnabled } : {}), autoCloseDays: autoCloseVal, fields: clean,
     },
   })
 

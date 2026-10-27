@@ -4,7 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { intakeAsLines, AsServiceError } from '@/lib/asReceiptService'
 import { toRegistryErrorResponse } from '@/lib/deviceRegistry'
-import { notifyTicketChanged } from '@/lib/notify'
+import { notifyTicketChanged, notifyDomainEvent } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
 
 export const dynamic = 'force-dynamic'
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     throw e
   }
 
-  const asReceipt = await prisma.asReceipt.findUnique({ where: { id }, select: { asCode: true, ticketId: true } })
+  const asReceipt = await prisma.asReceipt.findUnique({ where: { id }, select: { asCode: true, ticketId: true, hospital: { select: { hospitalName: true } } } })
   await logAudit({
     req: request, actor: auditActorFromJWT(user), action: 'UPDATE', resource: 'as_receipt',
     resourceId: asReceipt?.asCode ?? id, resourceLabel: `${asReceipt?.asCode ?? id} 입고처리`,
@@ -52,6 +52,20 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (asReceipt?.ticketId) {
     syncTicketClocksSafe(asReceipt.ticketId)
     notifyTicketChanged({ ticketId: asReceipt.ticketId, actorName: user.name, actorId: user.userId }).catch(() => {})
+    // 도메인 이벤트 'AS 입고확인' (2026-10-27 domain_event_notify_design.md §2.3) — 실행 1회 = 알림 1건, 채널·조건은 알림 설정 > 이벤트
+    const shown = result.received.slice(0, 10).join(', ') + (result.received.length > 10 ? ` 외 ${result.received.length - 10}대` : '')
+    const warn = [result.mismatch.length ? `미입고(접수됐으나 없음) ${result.mismatch.length}대: ${result.mismatch.slice(0, 5).join(', ')}` : '', result.extra.length ? `미식별 입고(접수에 없음) ${result.extra.length}대: ${result.extra.slice(0, 5).join(', ')}` : ''].filter(Boolean).join(' / ')
+    notifyDomainEvent({
+      event: 'AS_INTAKE_CONFIRMED', ticketId: asReceipt.ticketId, actorName: user.name,
+      title: `${asReceipt.hospital?.hospitalName ?? ''} · ${asReceipt.asCode}`,
+      fields: [
+        { label: '입고 기기', value: result.received.length ? `${result.received.length}대 (${shown})` : '0대' },
+        { label: '입고확인일', value: typeof body.receivedAt === 'string' && body.receivedAt ? body.receivedAt : new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }) },
+        { label: '상태', value: result.statusChanged ? "'입고'로 변경" : '' },
+      ],
+      warning: warn || null,
+      link: `/as-receipts/${id}`,
+    }).catch(() => {})
   }
   return NextResponse.json({ success: true, ...result })
 }

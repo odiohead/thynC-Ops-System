@@ -331,6 +331,7 @@ lib/
 ├── sla.ts                            # SLA 시계 엔진 (1.1 P1 — 정책 매칭·시계 생성/갱신·정지/재개·달성/초과, 알림과 독립)
 ├── sla-alerts.ts                     # SLA 알림 발송 (1.1 P4 — 초과 즉시 알림 1회성 + 지정 시각 일일 요약)
 ├── notify-routes.ts                  # 채널 라우팅 매칭 (1.1 P3 — 이벤트×조건 → 채널 N개, 같은 채널 1건 합침)
+├── notify-events.ts                  # Slack 알림 이벤트 카탈로그 — 단일 소스(그룹·라벨·설명·조건 축·구현 여부·구 토글 매핑). 새 알림 = 항목 1개 + notifyDomainEvent() 1줄 (2026-10-27)
 ├── notify-center.ts                  # 내부 알림 생성 단일 진입점 (1.1 P5 — emit·수신자 산출·dedup·개인 설정)
 ├── slaSettings.ts                    # SLA 설정 입력 검증·정규화·CTI 서브트리 확장 (1.1 P2)
 ├── inventory.ts                      # 자재관리 — 품목 채번(nextItemCode) + 재고 처리 권한(canManageStock: ADMIN or 재고 담당자 풀)
@@ -876,6 +877,7 @@ prisma/
 - 시드 `scripts/seed-ticket-masters.sql`과 별개로 `scripts/seed-sla-policies.sql`(폴백 정책 = 1.0 값 이관 + PROJECT 정책), 백필 `scripts/backfill-sla-clocks.mts`(**quiet 기본** — 과거 초과분 알림 억제), 스모크 `scripts/sla-smoke.mts`(31케이스)
 
 ### Slack 채널 라우팅 (1.1 P3 — `projects/notification_v1.1_design.md` §5.1)
+- **이벤트 중심 재편 (2026-10-27 — `projects/domain_event_notify_design.md`)**: 라우팅 이벤트 = `lib/notify-events.ts` 카탈로그 전체(티켓 공통 5종 — `TICKET_ASSIGNED` 추가 / SLA 3종 / AS·VOC·운영 도메인 이벤트 — 첫 구현 `AS_INTAKE_CONFIRMED`, 나머지는 키 예약). **이벤트별 사용 여부**는 AppSetting `notify_event_enabled`(JSON {key: bool}) 하나 — 구 `notify_event_toggles`(티켓 이벤트 5종)·`notify_types_enabled`(업무 타입별)·`notify_events_enabled` 3겹 게이트 폐지(`scripts/migrate-notify-toggles.mts`: 구 토글 → 새 키, 꺼진 업무 타입 → 전체 대상 라우트의 `ref_types` 조건으로 이관, 전역은 `notify_enabled` 하나). `notifyDomainEvent({event, ticketId, title, fields, warning, link})`(lib/notify.ts) — 티켓 컨텍스트(refType·그룹·CTI·Sev)로 규칙 매칭 → 채널 N개, 로그 eventType `domain_event`, 멱등성 없음(실행 1회 = 1건). 발생 지점: AS 입고확인(`POST /api/as-receipts/[id]/intake` — 입고 기기·입고확인일·불일치/미식별·처리자). 시드 `scripts/seed-notify-events.sql`(AS 입고확인 → 'AS업무' 채널). **설정 화면 `/settings/notifications` 재편**: ① 이벤트(모듈별 카탈로그, 행마다 사용 스위치 + 규칙 인라인 추가·활성·삭제, 미구현 이벤트는 예약 표시) ② 채널(마스터, 같은 Slack ID 중복 경고) ③ SLA 기준(매트릭스) ④ 공통(모드·전체 on/off·멘션 킬스위치·SLA 엔진·자동 종결·메시지 필드·이력). `POST /api/settings/notify-routes {kind:'event-enabled', eventKey, enabled}` 로 스위치 저장
 
 - 1.0은 채널이 env 상수(`SLACK_CHANNEL_MAIN`/`DELAY`)에 고정돼 유형별 분리가 불가능했다. 1.1은 **채널·규칙을 DB로** 옮겨 런타임 관리
 - **NotifyChannel** (`notify_channels`): `name`(UNIQUE)·`slackChannelId`·활성·순서. 설정 화면에서 **연결 테스트 발송** 가능
@@ -1906,8 +1908,8 @@ npm run dev
 ### 발송 채널·라우팅 (1.1 P3 — 전체 ADMIN 이상)
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| GET  | `/api/settings/notify-routes` | 채널·규칙 목록 + 편집 마스터(이벤트·멘션 모드·Assignment Group·CTI·상태·Sev·metric) |
-| POST | `/api/settings/notify-routes` | `{kind:'channel'}` 채널 추가 / `{kind:'route'}` 규칙 추가(일일 요약은 발송 시각 필수) / `{kind:'test'}` **연결 테스트 발송** |
+| GET  | `/api/settings/notify-routes` | 채널·규칙 목록 + `eventEnabled`(이벤트별 사용 여부) + 편집 마스터(이벤트 키·**카탈로그 `eventDefs`/`eventGroups`**·멘션 모드·Assignment Group·CTI·상태·Sev·metric) (2026-10-27) |
+| POST | `/api/settings/notify-routes` | `{kind:'channel'}` 채널 추가 / `{kind:'route'}` 규칙 추가(일일 요약은 발송 시각 필수, 미구현 이벤트 400) / `{kind:'test'}` **연결 테스트 발송** / `{kind:'event-enabled', eventKey, enabled}` 이벤트 사용 스위치 (2026-10-27) |
 | PUT  | `/api/settings/notify-routes/[id]?kind=channel\|route` | 채널·규칙 수정 (규칙은 조건·채널·멘션·발송 시각·활성) |
 | DELETE | `/api/settings/notify-routes/[id]?kind=channel\|route` | 삭제 (채널 삭제 시 연결 규칙 cascade — 발송 대상 없는 규칙을 남기지 않음) |
 

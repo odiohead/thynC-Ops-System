@@ -13,7 +13,7 @@
 
 import { prisma } from '@/lib/prisma'
 import { getSlackMode } from '@/lib/slack'
-import { dispatchToChannel, getTypesEnabled, type TaskType } from '@/lib/notify'
+import { dispatchToChannel, isNotifyEventOn, type TaskType } from '@/lib/notify'
 import { resolveChannels, type DigestOpts } from '@/lib/notify-routes'
 import { findSlaRisk, formatDuration, SLA_METRIC_LABELS, type SlaMetric, type SlaRiskItem } from '@/lib/sla'
 import { refTypeToTaskType } from '@/lib/notifyFields'
@@ -160,14 +160,13 @@ export async function runSlaBreachAlerts(): Promise<{ marked: number; sent: numb
   })
   if (pending.length === 0) return { marked: overdue.length, sent: 0, pending: pendingAll }
 
-  const types = await getTypesEnabled()
+  const allowed = await isNotifyEventOn('SLA_BREACH') // 이벤트 사용 여부(2026-10-27 재편 — 업무 타입 제한은 라우트의 업무 유형 조건)
   let sent = 0
 
   for (const c of pending) {
     const t = c.ticket
     const taskType = refTypeToTaskType(t.refType)
-    // 업무 타입 킬스위치가 꺼져 있으면 발송하지 않지만, 재시도 루프를 막기 위해 마킹은 한다
-    const allowed = types[taskType]
+    // 이벤트가 꺼져 있으면 발송하지 않지만, 재시도 루프를 막기 위해 마킹은 한다
     if (allowed) {
       const overdueMin = Math.max(0, (now.getTime() - c.dueAt.getTime()) / 60_000)
       const channels = await clockChannels(c, t, 'SLA_BREACH')
@@ -243,7 +242,7 @@ export async function runSlaWarnAlerts(): Promise<{ sent: number }> {
     take: cap * 5,
   })
 
-  const types = await getTypesEnabled()
+  const warningOn = await isNotifyEventOn('SLA_WARNING')
   let sent = 0
 
   for (const c of candidates) {
@@ -255,7 +254,7 @@ export async function runSlaWarnAlerts(): Promise<{ sent: number }> {
 
     const t = c.ticket
     const taskType = refTypeToTaskType(t.refType)
-    if (types[taskType]) {
+    if (warningOn) {
       const remainMin = Math.max(0, (c.dueAt.getTime() - now.getTime()) / 60_000)
       const channels = await clockChannels(c, t, 'SLA_WARNING')
       if (channels.length > 0) {
@@ -369,7 +368,7 @@ const GLOBAL_DIGEST_MARK = 0 // notification_logs payload.digestRouteId — 전�
  * 서버 재시작·배포와 무관하게 하루 1회가 보장된다.
  */
 export async function runDailyDigests(opts: { force?: boolean; dryRun?: boolean } = {}): Promise<
-  { routeName: string; hour: number; status: 'sent' | 'skipped_not_due' | 'skipped_already' | 'dry'; count: number }[]
+  { routeName: string; hour: number; status: 'sent' | 'skipped_not_due' | 'skipped_already' | 'skipped_off' | 'dry'; count: number }[]
 > {
   const rows = await prisma.appSetting.findMany({
     where: { key: { in: ['notify_digest_hour', 'notify_digest_channel_id'] } },
@@ -404,8 +403,8 @@ export async function runDailyDigests(opts: { force?: boolean; dryRun?: boolean 
     if (already) return [{ routeName, hour: digestHour, status: 'skipped_already', count: 0 }]
   }
 
-  const types = await getTypesEnabled()
-  const items = (await findSlaRisk({ includeWarning: true })).filter((i) => types[refTypeToTaskType(i.refType)])
+  if (!(await isNotifyEventOn('DAILY_DIGEST'))) return [{ routeName, hour: digestHour, status: 'skipped_off', count: 0 }]
+  const items = await findSlaRisk({ includeWarning: true })
   const { text, blocks } = buildDigestMessage(items, GLOBAL_DIGEST_OPTS, routeName)
 
   if (opts.dryRun) {

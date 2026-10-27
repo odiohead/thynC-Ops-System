@@ -11,8 +11,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { dispatchToChannel } from '@/lib/notify'
+import { dispatchToChannel, getEventEnabledMap } from '@/lib/notify'
 import { NOTIFY_ROUTE_EVENTS, MENTION_MODES, DEFAULT_DIGEST_OPTS } from '@/lib/notify-routes'
+import { NOTIFY_EVENTS, NOTIFY_EVENT_GROUPS, NOTIFY_EVENT_MAP, NOTIFY_EVENT_ENABLED_KEY } from '@/lib/notify-events'
 import { SLA_METRICS } from '@/lib/sla'
 import { TICKET_STATUSES, TICKET_SEVERITIES } from '@/lib/slaSettings'
 
@@ -61,8 +62,11 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     channels,
     routes,
+    eventEnabled: await getEventEnabledMap(),
     masters: {
       events: NOTIFY_ROUTE_EVENTS,
+      eventDefs: NOTIFY_EVENTS, // 카탈로그(그룹·설명·조건 축·구현 여부) — 이벤트 탭용 (2026-10-27)
+      eventGroups: NOTIFY_EVENT_GROUPS,
       mentionModes: MENTION_MODES,
       metrics: SLA_METRICS,
       statuses: TICKET_STATUSES,
@@ -93,6 +97,19 @@ export async function POST(request: NextRequest) {
       text: `:white_check_mark: 연결 테스트 — *${ch.name}* 채널로 알림이 도착했습니다. (${user.name})`,
     })
     return NextResponse.json({ ok: true, note: 'test/off 모드에서는 실제 채널 대신 테스트 채널로 라우팅되거나 미발송됩니다.' })
+  }
+
+  // ── 이벤트 사용 여부 토글 (2026-10-27 재편 — 이벤트 탭의 스위치. notify_event_enabled JSON 한 키만 갱신)
+  if (body.kind === 'event-enabled') {
+    const key = String(body.eventKey ?? '')
+    if (!NOTIFY_EVENT_MAP[key]) return NextResponse.json({ error: `알 수 없는 이벤트: ${key}` }, { status: 400 })
+    const row = await prisma.appSetting.findUnique({ where: { key: NOTIFY_EVENT_ENABLED_KEY } })
+    let map: Record<string, boolean> = {}
+    try { map = row?.value ? (JSON.parse(row.value) as Record<string, boolean>) : {} } catch { map = {} }
+    map[key] = body.enabled !== false
+    await prisma.appSetting.upsert({ where: { key: NOTIFY_EVENT_ENABLED_KEY }, update: { value: JSON.stringify(map) }, create: { key: NOTIFY_EVENT_ENABLED_KEY, value: JSON.stringify(map) } })
+    await logAudit({ req: request, actor: auditActorFromJWT(user), action: 'UPDATE', resource: 'setting:notifications', resourceId: key, resourceLabel: `알림 이벤트 ${NOTIFY_EVENT_MAP[key].label} ${map[key] ? '사용' : '중지'}` })
+    return NextResponse.json({ ok: true, eventKey: key, enabled: map[key] })
   }
 
   // ── 채널 추가
@@ -128,6 +145,9 @@ export async function POST(request: NextRequest) {
     if (!name) return NextResponse.json({ error: '규칙 이름을 입력하세요.' }, { status: 400 })
     if (!(NOTIFY_ROUTE_EVENTS as readonly string[]).includes(eventType)) {
       return NextResponse.json({ error: `알 수 없는 이벤트: ${eventType}` }, { status: 400 })
+    }
+    if (NOTIFY_EVENT_MAP[eventType] && !NOTIFY_EVENT_MAP[eventType].implemented) {
+      return NextResponse.json({ error: `'${NOTIFY_EVENT_MAP[eventType].label}'은 발송 지점이 아직 구현되지 않은 이벤트입니다.` }, { status: 400 })
     }
     const ch = await prisma.notifyChannel.findUnique({ where: { id: channelId } })
     if (!ch) return NextResponse.json({ error: '채널을 선택하세요.' }, { status: 400 })
