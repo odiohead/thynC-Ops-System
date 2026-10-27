@@ -24,6 +24,7 @@ import {
 import { syncAsReceiptToTicket, createTicketForAsReceipt } from '@/lib/ticket-domains/asReceipt'
 import { AS_PICKUP_METHODS, defaultAsPickupMethod, AS_OUTCOMES, AS_RESOLVE_OUTCOMES, AS_CATEGORIES, AS_DEST_TYPES, AS_OUTCOME_LABELS, AS_REPAIR_EXCLUDED_OUTCOMES, appendAsNote as appendNote, asDeviceKindFromSerial, canMarkAsLineRepaired, isValidAsSerial, asSerialFormatError, AS_SERIAL_RULE_TEXT, type AsOutcome } from '@/lib/asReceiptShared'
 import { nextAsCode } from '@/lib/asReceipt'
+import { addTicketEvent } from '@/lib/ticket'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
@@ -1255,6 +1256,10 @@ export interface CreateAsReceiptInput {
   statusId?: number | null // 미지정 시 '접수'
   note?: string | null
   lines: LineInput[]
+  /** 출처 (2026-10-27 as_channeltalk_intake_design §3.1) — 미지정 MANUAL. 시트 폴링 SHEET / 상담 자동 CHANNELTALK / 등록대기 확정 INTAKE_QUEUE */
+  source?: 'MANUAL' | 'SHEET' | 'CHANNELTALK' | 'INTAKE_QUEUE' | 'IMPORT'
+  /** 마스터 VOC — 지정 시 AS 티켓을 VOC 티켓의 하위(parentId)로 연결 */
+  vocId?: number | null
 }
 
 export interface CreateAsReceiptResult {
@@ -1351,6 +1356,8 @@ export async function createAsReceipt(
               statusId,
               note,
               createdById: actor.userId,
+              source: input.source ?? 'MANUAL',
+              vocId: input.vocId ?? null,
             },
           })
           // 라인 매칭 + 생성
@@ -1387,6 +1394,14 @@ export async function createAsReceipt(
             resolvedAt: null,
             createdAt: receipt.createdAt,
           }, actor.userId, 'domain')
+          // 마스터 VOC가 있으면 AS 티켓을 VOC 티켓 하위로 (2026-10-27 — 채널톡 인입 경로, 2레벨 고정: VOC 티켓이 이미 하위면 연결 생략)
+          if (input.vocId) {
+            const vocTicket = await tx.vocReceipt.findUnique({ where: { id: input.vocId }, select: { ticketId: true, ticket: { select: { id: true, ticketCode: true, parentId: true } } } })
+            if (vocTicket?.ticket && !vocTicket.ticket.parentId) {
+              await tx.ticket.update({ where: { id: tid }, data: { parentId: vocTicket.ticket.id } })
+              await addTicketEvent(tx, tid, 'link', actor.userId, { event: 'parent_set', parentId: vocTicket.ticket.id, parentCode: vocTicket.ticket.ticketCode, via: 'as_intake' })
+            }
+          }
           // AS 표시 — 접수일 기준, 실패는 경고 (ref 검증이 접수 레코드를 참조하므로 티켓 생성 후 호출 무관)
           txWarnings.push(
             ...(await openAsFlags(

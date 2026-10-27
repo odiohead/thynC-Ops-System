@@ -30,6 +30,8 @@ export { CHANNELTALK_BOT_EMAIL }
 const KEY_SHEET_ID = 'channeltalk_as_sheet_id'
 const KEY_CUTOVER = 'channeltalk_as_cutover_row' // 이 행번호 초과부터 처리 (기본 3612 — 3613행이 첫 대상)
 const KEY_TAB = 'channeltalk_as_sheet_tab' // 기본 'A/S'
+// 2026-10-27 (as_channeltalk_intake_design.md §7): 'link' = 연결 전용 모드 — 시트 행으로 접수를 만들지 않고 채널톡 경로가 만든 기존 접수를 찾아 AJ에 코드만 기입. 못 찾으면 '대기' → 24h 후 '미연결'(오류 아님). 역기입 ②~⑤는 무변경
+import { CHANNELTALK_AS_SHEET_MODE_KEY, type AsSheetMode } from '@/lib/channeltalk/asIntakeShared'
 
 // 0-index 열 위치 (시트 실측 계약 — 설계 §2.1)
 const C = {
@@ -48,7 +50,7 @@ const C = {
   SYS_STATE: 34, SYS_CODE: 35, SYS_MEMO: 36, SYS_AT: 37, // AI~AL 시스템 기입란
 } as const
 
-const SYS_STATE = { OK: '등록완료', FAIL: '실패', SKIP: '건너뜀', WAIT: '대기' } as const
+const SYS_STATE = { OK: '등록완료', FAIL: '실패', SKIP: '건너뜀', WAIT: '대기', UNLINKED: '미연결' } as const // 미연결 = 연결 전용 모드에서 24h 내 채널톡 경로 접수를 못 찾음 (2026-10-27)
 /** '대기'(필수값 누락 — 행 작성 중) 유지 한도: 최초 대기 기록(AL) 후 이 시간이 지나도 채워지지 않으면 '실패' (2026-09-16) */
 const WAIT_MAX_MS = 24 * 3600 * 1000
 
@@ -58,6 +60,7 @@ export interface ChanneltalkSyncResult {
   failed: number
   waiting: number // 필수값 누락 대기(재시도 예정) (2026-09-16)
   linked: number // AJ 코드·기존 접수 연결로 승격 (2026-09-16)
+  unlinked: number // 연결 전용 모드 — 24h 내 채널톡 경로 접수 없음 (2026-10-27)
   completedBack: number
   shipBack: number
   pickupBack: number
@@ -162,23 +165,25 @@ export function parseSymptoms(text: string, serials: string[]): Map<string, { sy
 }
 
 async function loadSettings() {
-  const rows = await prisma.appSetting.findMany({ where: { key: { in: [KEY_SHEET_ID, KEY_CUTOVER, KEY_TAB] } } })
+  const rows = await prisma.appSetting.findMany({ where: { key: { in: [KEY_SHEET_ID, KEY_CUTOVER, KEY_TAB, CHANNELTALK_AS_SHEET_MODE_KEY] } } })
   const map = new Map(rows.map((r) => [r.key, r.value]))
   const sheetId = map.get(KEY_SHEET_ID)?.trim()
   const cutover = parseInt(map.get(KEY_CUTOVER) ?? '') || 3612
   const tab = map.get(KEY_TAB)?.trim() || 'A/S'
-  return { sheetId, cutover, tab }
+  const sheetMode: AsSheetMode = map.get(CHANNELTALK_AS_SHEET_MODE_KEY) === 'link' ? 'link' : 'create'
+  return { sheetId, cutover, tab, sheetMode }
 }
 
 /** 테스트 주입(2026-09-16) — 시트 대신 메모리 행을 쓰고, batchUpdate 대신 콜백으로 되쓰기 내용을 받는다. 운영 경로는 미지정 */
-export interface ChanneltalkSyncTestIo { rows: unknown[][]; cutover: number; onWrite: (writes: { range: string; values: string[][] }[]) => void }
+export interface ChanneltalkSyncTestIo { rows: unknown[][]; cutover: number; onWrite: (writes: { range: string; values: string[][] }[]) => void; sheetMode?: AsSheetMode }
 
 export async function runChanneltalkAsSync(testIo?: ChanneltalkSyncTestIo): Promise<ChanneltalkSyncResult> {
-  const result: ChanneltalkSyncResult = { scanned: 0, registered: 0, failed: 0, waiting: 0, linked: 0, completedBack: 0, shipBack: 0, pickupBack: 0, intakeBack: 0 }
+  const result: ChanneltalkSyncResult = { scanned: 0, registered: 0, failed: 0, waiting: 0, linked: 0, unlinked: 0, completedBack: 0, shipBack: 0, pickupBack: 0, intakeBack: 0 }
   const settings = await loadSettings()
   const sheetId = testIo ? 'test' : settings.sheetId
   const cutover = testIo ? testIo.cutover : settings.cutover
   const tab = settings.tab
+  const sheetMode: AsSheetMode = testIo?.sheetMode ?? settings.sheetMode
   if (!sheetId) {
     console.warn('[channeltalk-as] channeltalk_as_sheet_id 미설정 — 스킵')
     return result
@@ -206,17 +211,29 @@ export async function runChanneltalkAsSync(testIo?: ChanneltalkSyncTestIo): Prom
     .map((r, i) => ({ r, rowNo: cutover + 1 + i }))
     .filter(({ r }) => {
       const st = cell(r, C.SYS_STATE)
-      // AI 공란(신규) · '대기'(필수값 누락 재시도) · '실패'인데 AJ에 코드가 손으로 기입된 행(수동 등록 연결 승격) — 2026-09-16
-      return (st === '' || st === SYS_STATE.WAIT || (st === SYS_STATE.FAIL && cell(r, C.SYS_CODE) !== '')) && r.some((v) => String(v ?? '').trim() !== '')
+      // AI 공란(신규) · '대기'(필수값 누락 재시도) · '실패'/'미연결'인데 AJ에 코드가 손으로 기입된 행(수동 등록 연결 승격) — 2026-09-16
+      return (st === '' || st === SYS_STATE.WAIT || ((st === SYS_STATE.FAIL || st === SYS_STATE.UNLINKED) && cell(r, C.SYS_CODE) !== '')) && r.some((v) => String(v ?? '').trim() !== '')
     })
 
   let matcher: Awaited<ReturnType<typeof loadHospitalMatcher>> | null = null
+  /** 연결 전용 모드 — 생성 대신 '대기', 최초 대기 후 24h 지나면 '미연결'(로그만, 실패 아님). 반환 후 호출부는 continue */
+  const linkModeHold = (rowNo: number, state: string, r: unknown[], reason: string) => {
+    const since = state === SYS_STATE.WAIT ? Date.parse(cell(r, C.SYS_AT).replace(' ', 'T') + '+09:00') : NaN
+    if (!isNaN(since) && Date.now() - since > WAIT_MAX_MS) {
+      result.unlinked++
+      rangeOf(rowNo, 'AI', [SYS_STATE.UNLINKED, '', `채널톡 경로 접수 없음 — 24시간 경과${reason ? ` (${reason})` : ''}. 역기입 대상 아님`, nowKst()])
+      console.log(`[channeltalk-as] r${rowNo} 미연결 (연결 전용 모드): ${reason}`)
+    } else {
+      result.waiting++
+      if (state !== SYS_STATE.WAIT) rangeOf(rowNo, 'AI', [SYS_STATE.WAIT, '', `채널톡 경로 생성 대기 (연결 전용 모드${reason ? ` — ${reason}` : ''})`, nowKst()])
+    }
+  }
   for (const { r, rowNo } of pendingRows) {
     const tag = `[채널톡 r${rowNo}]`
     const state = cell(r, C.SYS_STATE)
     try {
-      // AJ 코드 승격 (2026-09-16): '실패' 행에 담당자가 수동 등록한 AS 코드를 AJ에 적어 두면 '등록완료'로 올려 역기입 대상에 포함. 접수 비고에 행 태그 추가
-      if (state === SYS_STATE.FAIL) {
+      // AJ 코드 승격 (2026-09-16): '실패'·'미연결' 행에 담당자가 수동 등록한 AS 코드를 AJ에 적어 두면 '등록완료'로 올려 역기입 대상에 포함. 접수 비고에 행 태그 추가
+      if (state === SYS_STATE.FAIL || state === SYS_STATE.UNLINKED) {
         const code = cell(r, C.SYS_CODE)
         const rec = await prisma.asReceipt.findUnique({ where: { asCode: code }, select: { id: true, asCode: true, note: true } })
         if (!rec) continue // 코드가 DB에 없으면 그대로 둠(실패 유지 — 담당자가 확인)
@@ -272,6 +289,7 @@ export async function runChanneltalkAsSync(testIo?: ChanneltalkSyncTestIo): Prom
       matcher ??= await loadHospitalMatcher()
       const hospitalCode = matcher.match(hospRaw)
       if (!hospitalCode) {
+        if (sheetMode === 'link') { linkModeHold(rowNo, state, r, `병원 매칭 실패 "${hospRaw}"`); continue }
         const cands = matcher.candidates(hospRaw).slice(0, 4).map((c) => matcher!.nameOf(c) ?? c)
         result.failed++
         rangeOf(rowNo, 'AI', [SYS_STATE.FAIL, '', `병원 매칭 실패: "${hospRaw}"${cands.length ? ` 후보: ${cands.join(', ')}` : ''}`, nowKst()])
@@ -283,6 +301,7 @@ export async function runChanneltalkAsSync(testIo?: ChanneltalkSyncTestIo): Prom
 
       const serials = parseSerialTextarea(serialsRaw.replace(/[(（][^)）]*[)）]/g, '')) // 'P013798(72W)' 같은 괄호 병동 표기 제거 (2026-09-10, r3657 사례)
       if (!serials.length) {
+        if (sheetMode === 'link') { linkModeHold(rowNo, state, r, '시리얼 파싱 결과 없음'); continue }
         result.failed++
         rangeOf(rowNo, 'AI', [SYS_STATE.FAIL, '', '시리얼 파싱 결과 없음', nowKst()])
         continue
@@ -321,11 +340,13 @@ export async function runChanneltalkAsSync(testIo?: ChanneltalkSyncTestIo): Prom
       })
       if (already && serials.every((sn) => already.items.some((i) => i.serialNo === sn))) {
         if (!(already.note ?? '').includes(tag)) await prisma.asReceipt.update({ where: { id: already.id }, data: { note: appendTag(already.note, `${tag} 기존 접수 연결`) } })
-        rangeOf(rowNo, 'AI', [SYS_STATE.OK, already.asCode, '(기존 접수 연결 — 동일 병원·접수일·시리얼)', nowKst()])
+        rangeOf(rowNo, 'AI', [SYS_STATE.OK, already.asCode, sheetMode === 'link' ? '(채널톡 경로 접수 연결 — 연결 전용 모드)' : '(기존 접수 연결 — 동일 병원·접수일·시리얼)', nowKst()])
         result.linked++
         console.log(`[channeltalk-as] r${rowNo} 기존 접수 연결 → ${already.asCode}`)
         continue
       }
+      // 연결 전용 모드: 여기까지 왔으면 채널톡 경로 접수가 아직 없음 — 생성하지 않고 대기/미연결 (2026-10-27)
+      if (sheetMode === 'link') { linkModeHold(rowNo, state, r, ''); continue }
 
       const created = await createAsReceipt(
         {
@@ -344,6 +365,7 @@ export async function runChanneltalkAsSync(testIo?: ChanneltalkSyncTestIo): Prom
           note: noteParts.join('\n'),
           lines,
           allowInvalidSerial: true, // 시트 값이 비정상이어도 접수는 만들고 '시리얼 오류' 태그로 보정 전 처리 차단 (2026-09-30)
+          source: 'SHEET',
         },
         { userId: bot.id, name: bot.name }
       )

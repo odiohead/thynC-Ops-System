@@ -20,7 +20,8 @@ interface Data {
   interval: string; activeInterval: string; maxCalls: number; configured: boolean; running: boolean
   backfill: BackfillState; runs: Run[]
   promote: boolean; cutover: string; rescanHours: string; lastRescanAt: string | null
-  stats: { chats: Record<string, number>; messages: number; users: number; lastSyncedAt: string | null; vocLinked: number }
+  asIntake: string; asIntakeCutover: string; sheetMode: string
+  stats: { chats: Record<string, number>; messages: number; users: number; lastSyncedAt: string | null; vocLinked: number; asPending: number; asLinked: number }
 }
 
 const kst = (iso: string | null) => (iso ? new Date(iso).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16) : '-')
@@ -33,6 +34,9 @@ export default function ChanneltalkSyncSettingsPage() {
   const [promote, setPromote] = useState(false)
   const [cutover, setCutover] = useState('')
   const [rescanHours, setRescanHours] = useState('24')
+  const [asIntake, setAsIntake] = useState('off')
+  const [asIntakeCutover, setAsIntakeCutover] = useState('')
+  const [sheetMode, setSheetMode] = useState('create')
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
   const [authChecked, setAuthChecked] = useState(false)
@@ -42,6 +46,7 @@ export default function ChanneltalkSyncSettingsPage() {
     if (!res.ok) return
     const d: Data = await res.json()
     setData(d); setIntervalValue(d.interval); setMaxCalls(d.maxCalls); setPromote(d.promote); setCutover(d.cutover ?? ''); setRescanHours(d.rescanHours ?? '24')
+    setAsIntake(d.asIntake ?? 'off'); setAsIntakeCutover(d.asIntakeCutover ?? ''); setSheetMode(d.sheetMode ?? 'create')
   }, [])
 
   useEffect(() => {
@@ -57,7 +62,7 @@ export default function ChanneltalkSyncSettingsPage() {
   async function save() {
     setBusy('save')
     try {
-      const res = await fetch('/api/settings/channeltalk-sync', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ interval, maxCalls, promote, cutover, rescanHours }) })
+      const res = await fetch('/api/settings/channeltalk-sync', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ interval, maxCalls, promote, cutover, rescanHours, asIntake, asIntakeCutover, sheetMode }) })
       const d = await res.json()
       flash(res.ok, res.ok ? d.message : d.error)
       router.refresh(); await load()
@@ -163,6 +168,35 @@ export default function ChanneltalkSyncSettingsPage() {
             <button type="button" onClick={save} disabled={!!busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{busy === 'save' ? '저장 중...' : '저장'}</button>
             <button type="button" onClick={() => run('rescan')} disabled={!!busy || !data.configured} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">{busy === 'rescan' ? '재검사 중...' : '전량 재검사 지금'}</button>
             <span className="text-xs text-gray-500">VOC 연결 상담 {data.stats.vocLinked.toLocaleString()}건</span>
+          </div>
+        </div>
+
+        <div className="mb-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+          <h2 className="mb-1 text-sm font-semibold text-gray-700">AS 인입 (채널톡 상담 → AS접수)</h2>
+          <p className="mb-3 text-xs text-gray-500">AS 태그(고장접수·분실접수)가 걸린 상담의 ALF 확인문을 읽어 AS접수를 자동 생성하고, 실패는 AS업무 [등록대기]로 보냅니다. 그림자 = 판정 결과를 로그에만 남김(생성·큐 적재 없음).</p>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">모드</label>
+              <select value={asIntake} onChange={(e) => setAsIntake(e.target.value)} className="mt-1 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm">
+                <option value="off">OFF</option><option value="dry">그림자 (로그만)</option><option value="on">ON</option>
+              </select>
+              <p className="mt-1 text-xs text-gray-500">등록대기 {data.stats.asPending}건 · 연결 {data.stats.asLinked}건</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">컷오버 일자 (KST)</label>
+              <input type="date" value={asIntakeCutover} onChange={(e) => setAsIntakeCutover(e.target.value)} className="mt-1 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
+              <p className="mt-1 text-xs text-gray-500">이 일자 이후 고객 첫 발화 상담만. ON에는 필수</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">시트 폴러 모드</label>
+              <select value={sheetMode} onChange={(e) => setSheetMode(e.target.value)} className="mt-1 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm">
+                <option value="create">생성 (현행)</option><option value="link">연결 전용</option>
+              </select>
+              <p className="mt-1 text-xs text-gray-500">연결 전용 = 시트 행으로 접수를 만들지 않고 채널톡 경로 접수에 AJ 코드만 기입(역기입 유지). 전환 시 ON과 함께</p>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button type="button" onClick={save} disabled={!!busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{busy === 'save' ? '저장 중...' : '저장'}</button>
           </div>
         </div>
 

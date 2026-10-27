@@ -4,6 +4,34 @@
 
 ---
 
+## 2026-10-27 14:30 | AS 인입 소스 전환 P1~P3 구현 — 모델·채널톡 인입 모듈·등록대기 큐·변경 감지·시트 연결 전용 모드·VOC 복수 분류 (dev2 빌드·재시작, PROD 미반영)
+
+- **결정(P0 보고 후 사용자 "다음단계 진행" — 권장안 채택)**: D1 상담 1건 = 접수 1건(병동별 분할 안 함) · D2 고장+분실 혼합 태그 → 큐행 · D3 기기 원장에 없는 시리얼 → 큐행(시트 선례의 '경고만 내고 생성' 대신) · D4 OpsCode↔확인문 병원명 충돌 → 큐행 · 폴링 1분(전환 시)
+- **P1 모델**(마이그 `20261027110000_as_channeltalk_intake`, dev2 적용): `as_receipts.source`(MANUAL/SHEET/CHANNELTALK/INTAKE_QUEUE/IMPORT, 기존 행 note 태그로 백필 — SHEET 659·IMPORT 3,315·MANUAL 28)·`voc_id` · `as_intake_links`(chat_id UNIQUE, 상태·실패 분류·추출 JSON·변경 diff) · `voc_receipt_types`(기존 VOC 대표 분류 2,506행 시드). `createAsReceipt`에 `source`·`vocId` 입력 추가 — vocId 지정 시 AS 티켓 parentId=VOC 티켓(2레벨 고정)
+- **P2 인입**: `lib/channeltalk/asIntake.ts` — vocSync 틱 후처리(`promoteChanneltalkVocs` 직후) `intakeAsFromChats`: 태그 2종 판정 → `extractAsFromChat`(마지막 완료 안내 직전 확인문 L1 파싱 + OpsCode/병원명 매처·구분(태그)·선교체(확인문/상담 언급/병원 태그)·원장 대조·접수일=완료 안내 KST) → `validateExtract` → 통과 시 자동 생성(기존 경로·Slack·SLA·감사), 실패 시 PENDING 큐 적재(재태깅·상담 변경 시 재추출·재시도) · 연결 상담 변경 시 `diffExtractAgainstReceipt`로 diff 기록만. 모드 `channeltalk_as_intake` off/dry/on(+컷오버 필수 가드 — VOC 승격에도 적용). 설정 API·화면 'AS 인입' 블록(모드·컷오버·시트 폴러 모드). `vocPromote.syncVocTypesFromChats` — 승격·후속 연결·태그 변경 틱마다 복수 분류 재동기화(대표 분류 불간섭). `channeltalkAsSync` **연결 전용 모드**(`channeltalk_as_sheet_mode=link`): 생성 대신 기존 접수 연결→AJ 기입, 없으면 '대기'→24h '미연결'(실패·Slack 아님), AI 상태 '미연결'+AJ 코드 수동 승격 허용, 시트 경로 생성분은 source SHEET
+- **P3 화면·API**: `/as-receipts` 우측상단 [등록대기 N] → `/as-receipts/intake`(상태 탭·실패 분류 칩) → `/as-receipts/intake/[id]`(좌 프리필 폼·빈칸 강조·형식 오류/원장 미등록 시리얼 표시, 우 `ChatTimeline` 원문·데스크 링크) — [AS 접수 등록]·[기존 접수에 연결]·[AS 아님](사유·되돌리기)·[Claude 도움요청](`lib/ai/asExtract` tool use, 빈 필드만 채움). AS 상세 상단 `ChatChangePanel`(현재값/상담값, 항목 선택 [반영]/[무시]) + 헤더 '채널톡 상담 ↗'. API 7종(README 표)
+- **검증(dev2)**: tsc 0·eslint 0·힙 4GB 빌드(협업 번들 2108cacb 불변)·`pm2 restart thync-dev` health 200. 직접 실행: dry 10/20~ 113건 → 자동 54/큐 59 · on(컷오버 10/26) 36건 → 생성 14(source CHANNELTALK·voc_id·parentId=VOC 티켓 확인)/큐 22(UNKNOWN_DEVICE 11·NO_CONFIRM 7·충돌 2·혼합 1·완료 없음 1 — dev2 원장 스냅샷이 10/20이라 UNKNOWN_DEVICE 과다) · 변경 감지(테스트 봇 메시지 삽입 → diff 기록, 삭제) · VOC 복수 분류(VOC-202610-0660 고장+분실 2행) · 시트 link 모드 testIo 4행(연결·대기·미연결·병원 미매칭→대기). **Playwright 헤드리스 실제 화면(이준호)**: S1 목록 버튼 '등록대기 22' → 큐 진입 / S2 22행·칩 5종 / S3 UNKNOWN_DEVICE 상세 프리필(P016974 노란 강조·HOSP-000171·실패 배지·원문 24건) / S4 NO_CONFIRM 빈 폼 안내 / S5 [AS 접수 등록] → AS-202610-0309(#4041, source INTAKE_QUEUE, LINKED) / S6 변경 감지 패널 1행 → [선택 반영] → 증상 반영·패널 소멸 / S7 설정 블록 / S8 AS 아님(진행 문의) → 되돌리기 — 전부 PASS, 콘솔·5xx 없음. 테스트 메시지 삭제, 생성 접수는 dev2에 유지
+- **미완**: P4 PROD 그림자(`dry`) → P5 전환(`on`+컷오버+시트 `link`+폴링 1m). 임시 스크립트 `scripts/tmp-as-intake-run.mts`·`tmp-as-sheet-link-test.mts`·`tmp-dump-as-sheet.mts`·`tmp-as-intake-replay.mts`는 전환 후 삭제 예정
+- 영향 파일: `prisma/schema.prisma`·마이그 / `lib/asReceiptService.ts` / `lib/channeltalk/{asIntake,asIntakeShared,alfParser,vocSync,vocPromote}.ts` / `lib/channeltalkAsSync.ts`·`lib/channeltalk-as-scheduler.ts` / `lib/ai/asExtract.ts` / `app/api/settings/channeltalk-sync/route.ts`·`app/settings/channeltalk-sync/page.tsx` / `app/api/as-receipts/intake/**`·`app/api/as-receipts/[id]/{route,chat-change/route}.ts` / `app/as-receipts/{page,intake/page,intake/[id]/page,[id]/page}.tsx`·`_components/ChatChangePanel.tsx` / `README.md`·`projects/as_channeltalk_intake_design.md`·`projects/README.md`
+
+## 2026-10-27 10:45 | AS 인입 소스 전환(구글시트 → 채널톡 원문) — 설계 확정 + P0 리플레이 (dev2, DB 쓰기 없음)
+
+- 배경: AS접수 자동 인입을 시트 폴링(`channeltalkAsSync`)에서 채널톡 상담 원문(`channeltalk_messages`의 ALF 확정 확인문)으로 바꾸는 대작업. 목적은 구글시트 제거. 설계 `projects/as_channeltalk_intake_design.md`(사용자 결정 §9: 태그 2종 트리거·L1 규칙 파서 자동 생성·실패는 '등록대기' 큐(+[Claude 도움요청])·생성 후 채널톡 변경은 감지만·시트 폴러는 연결 전용 모드로 역기입 유지·VOC 복수 분류·백필 없음·폴링 1분)
+- 실측 근거: 시트 접수 331건(9/29~) 중 89%는 시리얼 전부가 상담 메시지에 존재, ALF 완료 상담 302건 중 라벨 보유 94% — `voc_receipts`에는 구조화 데이터가 없어 소스는 상담 원문이어야 함
+- P0: `lib/channeltalk/alfParser.ts`(순차 상태기계 — 라벨 변형·병동 섹션·시리얼 란 인라인 증상·그룹 공유 증상·범위·'동일'·발송/회수 구획) + `scripts/tmp-as-intake-replay.mts`(시트 접수 659건 ↔ 상담 매칭 → 필드별 비교, 역방향 분류) + `scripts/tmp-dump-as-sheet.mts`(시트 읽기 전용 덤프). 결과 `projects/as_intake_replay_report_20261027.md`: 자동 생성 가능 76.5%, 큐행 10.6%, 상담 없음 12.9% · 자동 생성분 핵심 3필드 일치 88.9%(접수)/91.7%(상담 단위) · 병원 98.5·구분 98.7·발송지 98.5·증상 94.0·시리얼 집합 88.7(잔여는 병동 분할 단위 차이·CS 오타 교정·사후 추가). 결정 요청 D1~D4 + 합격선 판단 대기
+- 영향 파일: `lib/channeltalk/alfParser.ts`(신규) · `scripts/tmp-as-intake-replay.mts`·`scripts/tmp-dump-as-sheet.mts`(임시) · `projects/as_channeltalk_intake_design.md`·`projects/as_intake_replay_report_20261027.md`·`projects/README.md`
+
+## 2026-10-26 18:00 | PROD 운영 보정: AS-202610-0089 P018277 — 교체(→P018386) 기록을 수리반환으로 정정
+
+- **신고(사용자)**: 0089가 P018277 입고 → P018386 출고로 나오지만 실제로는 P018277을 수리해 내보냄
+- **경위(비고·감사로그·원장 대조)**: 10/8 선교체로 P018386 발송·라인 교체 최종확정 → '2000F 센서로 선교체 취소' → 10/13 두 기기 모두 센터 입고(P018386은 미식별입고 라인 삭제) → 10/14 P018277 수리 후 반환 발송(A3858026101500012, 비고에만 기록) → 10/16 수리완료 체크. 원장상 P018277은 센터·수리완료로 남음. P018386은 10/26 AS-202610-0364 교체기로 실제 발송(이미 전남대 등록 상태라 806병동 이동만 기록 — 현 상태 정확)
+- **처리(사용자 결정 — 기존 원장 이벤트·타임라인 무수정, 현시점 로그만 추가 / 1회성 tsx dry-run 후 `--apply`, 실행 후 PROD·dev2 삭제, 실행자 이준호)**: P018277 REGISTER #67368(2026-10-26, ref 0089, 811병동, 정정 메모) → 전남대 811병동 사용중. 라인 14866 outcome REPLACE→REPAIR_RETURN·교체기 비움·발송 10/14·송장 A3858026101500012(수리완료 체크 유지). 접수 비고 정정 이력 + 감사로그 #23709
+- **미처리(의도)**: 10/8 교체 이벤트 보존 → 전남대 교체 건수 1건 집계 유지. 채널톡 시트 W열(P018386)은 실무자 확인. 접수·티켓 상태 무변경
+- **보류**: AS-202610-0358 P002364 동일 시리얼 중복 각인(수성메트로 회수기 vs 해피뷰병원 사용기) — 라인 원장 연결 해제안 제시, 사용자 결정으로 추후 처리
+- 영향: PROD DB(hospital_device_events 1·hospital_devices·device_units 18087·as_receipt_items 1·as_receipts note 1·audit_logs 1), DEV_HISTORY.md
+
+---
+
 ## 2026-10-20 18:00 | PROD 배포: 자재관리 '품목 관리' 버튼 RBAC 권한 반영 (cf2a078)
 
 - **dev2(사용자 "dev2 및 prod까지 빌드 및 재시작")**: 힙 4GB 빌드(협업 번들 2108cacb 불변)·`pm2 restart thync-dev` health 200. Playwright 헤드리스 실제 화면 — 신수연(USER·재고책임자) '품목 관리' 버튼 노출·클릭 시 `/inventory/items` 진입, 강은구(USER·재고담당만) 버튼 미노출

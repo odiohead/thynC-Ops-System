@@ -11,6 +11,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import TicketStatusBadge from '@/app/tickets/components/TicketStatusBadge'
 import HospitalTagChips from '@/app/hospitals/[code]/_components/HospitalTagChips'
+import ChatChangePanel, { type ChatIntakeInfo } from '../_components/ChatChangePanel' // 채널톡 변경 감지 (2026-10-27)
 import AsMemoPanel from '@/app/hospitals/[code]/_components/AsMemoPanel'
 import AsReceiptFormModal, { type AsEditTarget } from '../_components/AsReceiptFormModal'
 import { asListHref, AS_PICKUP_METHODS, type AsPickupMethod,
@@ -635,6 +636,7 @@ export default function AsReceiptDetailPage() {
   const id = params.id as string
 
   const [req, setReq] = useState<AsDetail | null>(null)
+  const [chatIntake, setChatIntake] = useState<ChatIntakeInfo | null>(null) // 원천 채널톡 상담 연결·변경 감지 (2026-10-27)
   const [statuses, setStatuses] = useState<CodeRef[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -670,6 +672,7 @@ export default function AsReceiptDetailPage() {
     const d = await res.json()
     const r: AsDetail = d.asReceipt
     setReq(r)
+    setChatIntake(d.intake ?? null)
     setReloadSeq((n) => n + 1)
     setIntake({
       receiptDate: r.receiptDate.slice(0, 10),
@@ -983,6 +986,9 @@ export default function AsReceiptDetailPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
       {error && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">{error}</div>}
+      {chatIntake?.changeDiff && chatIntake.changeDiff.length > 0 && (
+        <ChatChangePanel receiptId={req.id} intake={chatIntake} canEdit={canEdit} onDone={(msg) => { if (msg) setWarnings(msg.split('\n')); router.refresh(); void load() }} />
+      )}
       {warnings.length > 0 && (
         <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
           <div className="flex items-center justify-between">
@@ -1010,6 +1016,7 @@ export default function AsReceiptDetailPage() {
           </div>
           <h1 className="mt-1 text-xl font-bold text-gray-900">
             {req.hospital?.hospitalName ?? '-'} <span className="font-normal text-gray-400">· {catLabel} · 기기 {req.items.length}대</span>
+            {chatIntake && <a href={`https://desk.channel.io/#/channels/${chatIntake.channelId ?? ''}/user_chats/${chatIntake.chatId}`} target="_blank" rel="noreferrer" className="ml-2 align-middle text-xs font-normal text-blue-600 hover:underline" title="원천 채널톡 상담">채널톡 상담 ↗</a>}
           </h1>
         </div>
         <div className="flex items-center gap-2">

@@ -24,6 +24,7 @@ import {
   type BackfillState, type ChanneltalkSyncMode,
 } from './shared'
 import { promoteChanneltalkVocs, type PromoteResult } from './vocPromote'
+import { intakeAsFromChats, type AsIntakeResult } from './asIntake'
 
 const CLOSED_SAFETY_MS = 24 * 3600 * 1000
 const DEFAULT_MAX_CALLS = 200
@@ -43,6 +44,7 @@ export interface ChanneltalkVocSyncResult {
   error: string | null
   fullRescan: boolean // 이번 틱에 종료 상담 전량 재검사 수행
   promote: PromoteResult | null // VOC 승격 결과 (자동 승격 off면 0)
+  asIntake: AsIntakeResult | null // AS 인입 결과 (2026-10-27 — off면 null)
 }
 
 export interface ChanneltalkVocSyncOptions {
@@ -366,6 +368,7 @@ export async function runChanneltalkVocSync(mode: ChanneltalkSyncMode = 'increme
   let backfillDone: boolean | null = null
   let fullRescan = false
   let promote: PromoteResult | null = null
+  let asIntake: AsIntakeResult | null = null
   try {
     if (mode === 'backfill') {
       const st = await readBackfill()
@@ -403,6 +406,9 @@ export async function runChanneltalkVocSync(mode: ChanneltalkSyncMode = 'increme
     }
     // VOC 승격·상태 동기화 (자동 승격 on일 때만 — vocPromote)
     promote = await promoteChanneltalkVocs(Array.from(ctx.changedChatIds), log)
+    // AS 인입 (채널톡 상담 → AS접수, as_channeltalk_intake_design.md §4.1) — 승격 뒤에 실행해 VOC 마스터 연결이 가능하게
+    try { asIntake = await intakeAsFromChats(Array.from(ctx.changedChatIds), log); if (asIntake.mode === 'off') asIntake = null }
+    catch (e) { log(`AS 인입 실패: ${e instanceof Error ? e.message : String(e)}`) }
   } catch (e) {
     if (e instanceof CallBudgetExceeded) { budgetExceeded = true; log('호출 상한 도달 — 다음 틱에 이어서') }
     else { error = e instanceof Error ? e.message : String(e); log(`실패: ${error}`) }
@@ -413,10 +419,14 @@ export async function runChanneltalkVocSync(mode: ChanneltalkSyncMode = 'increme
       data: {
         endedAt: new Date(), scannedChats: ctx.scanned, upsertedChats: ctx.upserted, fetchedMessages: ctx.fetchedMessages,
         apiCalls: client.calls, rateLimited: client.rateLimited, error,
-        stats: { newChats: ctx.newChats, budgetExceeded, backfillDone, fullRescan, promote: promote ? { created: promote.created, followups: promote.followups, resolved: promote.resolved, reopened: promote.reopened, errors: promote.errors.length } : null },
+        stats: {
+          newChats: ctx.newChats, budgetExceeded, backfillDone, fullRescan,
+          promote: promote ? { created: promote.created, followups: promote.followups, resolved: promote.resolved, reopened: promote.reopened, errors: promote.errors.length } : null,
+          asIntake: asIntake ? { mode: asIntake.mode, candidates: asIntake.candidates, created: asIntake.created, queued: asIntake.queued, retried: asIntake.retried, changes: asIntake.changes, dryAuto: asIntake.dryAuto, dryQueue: asIntake.dryQueue, errors: asIntake.errors.length } : null,
+        },
       },
     }).catch(() => {})
     prisma.channeltalkSyncRun.deleteMany({ where: { startedAt: { lt: new Date(Date.now() - RUN_RETENTION_DAYS * 86400_000) } } }).catch(() => {})
   }
-  return { mode, runId: run.id, scannedChats: ctx.scanned, upsertedChats: ctx.upserted, newChats: ctx.newChats, fetchedMessages: ctx.fetchedMessages, apiCalls: client.calls, rateLimited: client.rateLimited, backfillDone, budgetExceeded, error, fullRescan, promote }
+  return { mode, runId: run.id, scannedChats: ctx.scanned, upsertedChats: ctx.upserted, newChats: ctx.newChats, fetchedMessages: ctx.fetchedMessages, apiCalls: client.calls, rateLimited: client.rateLimited, backfillDone, budgetExceeded, error, fullRescan, promote, asIntake }
 }

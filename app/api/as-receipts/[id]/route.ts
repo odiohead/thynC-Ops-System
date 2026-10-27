@@ -55,7 +55,9 @@ export async function GET(request: NextRequest, { params }: Params) {
     duplicateOf: i.outcome ? [] : (dupBySerial.get(i.serialNo) ?? []), // 같은 시리얼 미종결 라인을 가진 다른 접수번호
   }))
 
-  return NextResponse.json({ asReceipt: { ...asReceipt, items } })
+  // 원천 상담 연결·변경 감지 (2026-10-27 as_channeltalk_intake_design.md §6)
+  const intake = await prisma.asIntakeLink.findFirst({ where: { receiptId: asReceipt.id, state: 'LINKED' }, select: { id: true, chatId: true, changeDetectedAt: true, changeDiff: true, chat: { select: { channelId: true } } } })
+  return NextResponse.json({ asReceipt: { ...asReceipt, items }, intake: intake ? { linkId: intake.id, chatId: intake.chatId, channelId: intake.chat.channelId, changeDetectedAt: intake.changeDetectedAt, changeDiff: intake.changeDiff } : null })
 }
 
 /** YYYY-MM-DD | '' | null → Date | null (undefined = 미변경) */

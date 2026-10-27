@@ -127,6 +127,7 @@ export async function promoteChat(chatId: string, opts: PromoteChatOptions = {})
   const openVoc = opts.manual || opts.noFollowup ? null : await findOpenVocForCustomer(c.userId, new Date(receivedAt.getTime() - FOLLOWUP_DAYS * 86400_000))
   if (openVoc) {
     await prisma.vocChanneltalkChat.create({ data: { vocId: openVoc, chatId: c.id, linkReason: 'AUTO_FOLLOWUP', linkedById: null } })
+    await syncVocTypesFromChats(openVoc)
     const v = await prisma.vocReceipt.findUnique({ where: { id: openVoc }, select: { vocCode: true } })
     return { vocId: openVoc, vocCode: v!.vocCode, reason: 'AUTO_FOLLOWUP' }
   }
@@ -153,6 +154,7 @@ export async function promoteChat(chatId: string, opts: PromoteChatOptions = {})
     ownerId,
   }, actorId)
   await prisma.vocChanneltalkChat.create({ data: { vocId: created.id, chatId: c.id, linkReason: opts.manual ? 'MANUAL' : 'AUTO_TAG', linkedById: opts.manual ? actorId : null } })
+  await syncVocTypesFromChats(created.id) // 복수 분류 (2026-10-27)
   // 상담이 이미 종료돼 있으면(늦은 태그) 즉시 회신완료 판정
   if (c.state === 'closed') await syncVocStatusFromChat(created.id, actorId)
   if (!opts.silent) {
@@ -160,6 +162,30 @@ export async function promoteChat(chatId: string, opts: PromoteChatOptions = {})
     notifyTicketCreated({ ticketId: created.ticketId, actorName: '채널톡 접수봇', actorId }).catch(() => {})
   }
   return { vocId: created.id, vocCode: created.vocCode, reason: opts.manual ? 'MANUAL' : 'AUTO_TAG' }
+}
+
+/**
+ * VOC 복수 분류 재동기화 (2026-10-27, as_channeltalk_intake_design.md §8) — 연결 상담 전부의 분류 태그 합집합 ↔ voc_receipt_types.
+ * 대표 분류(voc_type_id)는 사람이 바꿨을 수 있으므로 건드리지 않고, 비어 있을 때만 첫 태그로 채운다. 반환: 추가+제거 건수
+ */
+export async function syncVocTypesFromChats(vocId: number): Promise<number> {
+  const v = await prisma.vocReceipt.findUnique({
+    where: { id: vocId },
+    select: { vocTypeId: true, types: { select: { vocTypeId: true } }, channeltalkChats: { select: { chat: { select: { tags: true } } }, orderBy: { linkedAt: 'asc' } } },
+  })
+  if (!v || !v.channeltalkChats.length) return 0
+  const tags = Array.from(new Set(v.channeltalkChats.flatMap((l) => l.chat.tags).filter(isCategoryTag)))
+  const codes = tags.length ? await prisma.statusCode.findMany({ where: { category: 'VOC_TYPE', value: { in: tags } }, select: { id: true, value: true } }) : []
+  const byTag = new Map(codes.map((c) => [c.value!, c.id]))
+  const wantIds = new Set(tags.map((t) => byTag.get(t)).filter((id): id is number => !!id))
+  if (v.vocTypeId) wantIds.add(v.vocTypeId) // 대표 분류는 태그가 빠져도 유지
+  const haveIds = new Set(v.types.map((t) => t.vocTypeId))
+  let changed = 0
+  for (const id of Array.from(wantIds)) if (!haveIds.has(id)) { await prisma.vocReceiptType.create({ data: { vocId, vocTypeId: id, tag: codes.find((c) => c.id === id)?.value ?? null } }); changed++ }
+  const removeIds = Array.from(haveIds).filter((id) => !wantIds.has(id))
+  if (removeIds.length) { await prisma.vocReceiptType.deleteMany({ where: { vocId, vocTypeId: { in: removeIds } } }); changed += removeIds.length }
+  if (!v.vocTypeId && tags.length) { const first = byTag.get(tags[0]); if (first) await prisma.vocReceipt.update({ where: { id: vocId }, data: { vocTypeId: first } }) }
+  return changed
 }
 
 /**
@@ -221,6 +247,7 @@ export async function promoteChanneltalkVocs(changedChatIds: string[], log: (l: 
       if (c.vocLink) {
         const s = await syncVocStatusFromChat(c.vocLink.vocId, actorId)
         if (s === 'resolved') r.resolved++; else if (s === 'reopened') r.reopened++
+        if (changedChatIds.includes(c.id)) await syncVocTypesFromChats(c.vocLink.vocId) // 태그 변경 재동기화 (2026-10-27)
         continue
       }
       if (evaluateChat(c, cutover)) continue

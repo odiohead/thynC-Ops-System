@@ -384,6 +384,7 @@ function AsReceiptListInner() {
   const [field, setField] = useState<AsSearchField>(() => parseAsSearchField(searchParams.get('field'))) // 검색 항목 (2026-09-18)
   const [createOpen, setCreateOpen] = useState(false)
   const [canWrite, setCanWrite] = useState(false)
+  const [intakePending, setIntakePending] = useState(0) // 등록대기 건수 (2026-10-27)
   const [notice, setNotice] = useState<string[] | null>(null)
   const [selected, setSelected] = useState<Set<number>>(new Set()) // 체크된 접수 id (2026-09-21 — 상태 일괄변경)
   const [bulkStatusId, setBulkStatusId] = useState('')
@@ -398,6 +399,7 @@ function AsReceiptListInner() {
   useEffect(() => {
     loadSummary()
     fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setCanWrite(d.role !== 'VIEWER'))
+    fetch('/api/as-receipts/intake?countOnly=1').then((r) => (r.ok ? r.json() : null)).then((d) => d && setIntakePending(d.pending ?? 0)).catch(() => {})
     fetch('/api/settings/as-status').then((r) => (r.ok ? r.json() : null)).then((d) => setStatuses(d?.statusCodes ?? []))
   }, [loadSummary])
 
@@ -511,6 +513,10 @@ function AsReceiptListInner() {
         </div>
         <div className="flex items-center gap-2">
           <TicketRuleSettingButton refType="AS" />
+          {/* 채널톡 인입 등록대기 큐 (2026-10-27 as_channeltalk_intake_design.md §5) — 건수는 PENDING */}
+          <button type="button" onClick={() => router.push('/as-receipts/intake')} className={`rounded-lg border px-3.5 py-2 text-sm font-medium ${intakePending > 0 ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100' : 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50'}`} title="채널톡 상담에서 자동 접수에 실패한 건">
+            등록대기{intakePending > 0 ? ` ${intakePending}` : ''}
+          </button>
           {canWrite && (
             <button type="button" onClick={() => setCreateOpen(true)} className="rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-blue-700">
               + 접수

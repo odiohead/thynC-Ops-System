@@ -177,6 +177,7 @@ model StatusCode {
   emrVendorInfos         HospitalEmrInfo[]      @relation("EmrVendor")
   vocChannels            VocReceipt[]           @relation("VocChannel")
   vocTypes               VocReceipt[]           @relation("VocType")
+  vocReceiptTypes        VocReceiptType[]       @relation("VocReceiptTypeCode") // VOC 복수 분류 (2026-10-27)
   vocStatuses            VocReceipt[]           @relation("VocStatus")
   deviceRecoverReasons   HospitalDevice[]       @relation("DeviceRecoverReason") // DEVICE_RECOVERY_REASON (원장 프로젝션)
   deviceEventReasons     HospitalDeviceEvent[]  @relation("DeviceEventReason")   // DEVICE_RECOVERY_REASON (RECOVER 이벤트)
@@ -350,6 +351,8 @@ model User {
   hospitalTagAssignments HospitalTagAssignment[] @relation("HospitalTagAssigner") // 병원 태그 부여자 (2026-09-28)
   channeltalkVocExclusions ChanneltalkUserChat[] @relation("ChanneltalkVocExcluder")
   vocChanneltalkLinks      VocChanneltalkChat[]  @relation("VocChatLinker")
+  asIntakeDecided          AsIntakeLink[]        @relation("AsIntakeDecider") // 등록대기 큐 등록·제외 (2026-10-27)
+  asIntakeAiRequested      AsIntakeLink[]        @relation("AsIntakeAiRequester")
   hospitalAsMemos HospitalMeta[] @relation("HospitalAsMemoEditor")
   viewPrefs UserViewPref[] // 사용자별 화면 설정 (2026-10-01)
 }
@@ -2147,6 +2150,8 @@ model VocReceipt {
   createdBy User?       @relation("VocCreator", fields: [createdById], references: [id], onDelete: SetNull)
   ticket    Ticket?     @relation(fields: [ticketId], references: [id], onDelete: SetNull)
   channeltalkChats VocChanneltalkChat[] // 연결 상담 (2026-09-28)
+  asReceipts AsReceipt[]        @relation("AsReceiptVoc") // 이 VOC를 마스터로 하는 AS접수 (2026-10-27)
+  types      VocReceiptType[]   // 복수 분류 (2026-10-27) — voc_type_id는 대표 분류
 
   @@index([receivedAt])
   @@index([hospitalCode])
@@ -2251,6 +2256,8 @@ model AsReceipt {
   resolvedAt       DateTime? @map("resolved_at") @db.Date // 종결 버킷(완료·취소) 진입 시 자동
   createdById      String?   @map("created_by_id") // 등록자(접수담당자 K열 대응 — 담당 배정은 티켓 단독 소유)
   ticketId         Int?      @unique @map("ticket_id") // 도메인 1:1 연결 티켓
+  source           String    @default("MANUAL") @db.VarChar(16) // MANUAL 화면 / SHEET 시트 폴링 / CHANNELTALK 상담 자동 / INTAKE_QUEUE 등록대기 수동 확정 / IMPORT 마이그 (2026-10-27, SQL CHECK)
+  vocId            Int?      @map("voc_id") // 마스터 VOC (상담이 VOC에 연결돼 있으면 자동)
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
@@ -2258,12 +2265,15 @@ model AsReceipt {
   status    StatusCode?     @relation("AsReceiptStatus", fields: [statusId], references: [id], onDelete: SetNull)
   createdBy User?           @relation("AsReceiptCreator", fields: [createdById], references: [id], onDelete: SetNull)
   ticket    Ticket?         @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  voc       VocReceipt?     @relation("AsReceiptVoc", fields: [vocId], references: [id], onDelete: SetNull)
   items     AsReceiptItem[]
+  intakeLinks AsIntakeLink[] // 원천 상담 연결 (2026-10-27)
 
   @@index([hospitalCode])
   @@index([statusId])
   @@index([receiptDate])
   @@index([createdAt])
+  @@index([vocId])
   @@map("as_receipts")
   @@schema("public")
 }
@@ -2906,6 +2916,7 @@ model ChanneltalkUserChat {
   user     ChanneltalkUser?     @relation(fields: [userId], references: [id], onDelete: SetNull)
   vocExcludedBy User?           @relation("ChanneltalkVocExcluder", fields: [vocExcludedById], references: [id], onDelete: SetNull)
   vocLink  VocChanneltalkChat?
+  asIntake AsIntakeLink? // AS 인입 연결·등록대기 (2026-10-27)
   hospital Hospital?            @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: SetNull)
   messages ChanneltalkMessage[]
 
@@ -3013,6 +3024,56 @@ model VocChanneltalkChat {
 
   @@index([vocId])
   @@map("voc_channeltalk_chats")
+  @@schema("public")
+}
+
+/// 채널톡 상담 ↔ AS접수 연결 + 등록대기 큐 (2026-10-27, projects/as_channeltalk_intake_design.md §3.2) — 상담 1건 = 최대 1행(chat_id UNIQUE = 멱등 키)
+model AsIntakeLink {
+  id               Int       @id @default(autoincrement())
+  chatId           String    @unique @map("chat_id") @db.VarChar(40)
+  receiptId        Int?      @map("receipt_id")
+  state            String    @default("PENDING") @db.VarChar(16) // PENDING 등록대기 / LINKED 연결됨 / IGNORED AS 아님 (SQL CHECK)
+  failClass        String?   @map("fail_class") @db.VarChar(24) // lib/channeltalk/asIntakeShared.ts AS_INTAKE_FAIL_LABEL
+  failNote         String?   @map("fail_note")
+  extracted        Json?     // 추출 결과(AsExtract) — 큐 상세 프리필 원천
+  extractLayer     String    @default("NONE") @map("extract_layer") @db.VarChar(8) // L1 / L2 / NONE
+  sourceMessageIds String[]  @default([]) @map("source_message_ids")
+  seenMessageId    String?   @map("seen_message_id") @db.VarChar(40) // 마지막으로 추출에 사용한 메시지 id — 변경 감지 기준
+  changeDetectedAt DateTime? @map("change_detected_at") @db.Timestamptz
+  changeDiff       Json?     @map("change_diff")
+  aiRequestedAt    DateTime? @map("ai_requested_at") @db.Timestamptz
+  aiRequestedById  String?   @map("ai_requested_by_id")
+  decidedById      String?   @map("decided_by_id")
+  decidedAt        DateTime? @map("decided_at") @db.Timestamptz
+  ignoreReason     String?   @map("ignore_reason") @db.VarChar(24) // PROGRESS / ACCESSORY / DUPLICATE / OTHER
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  chat          ChanneltalkUserChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  receipt       AsReceipt?          @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  aiRequestedBy User?               @relation("AsIntakeAiRequester", fields: [aiRequestedById], references: [id], onDelete: SetNull)
+  decidedBy     User?               @relation("AsIntakeDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([state])
+  @@index([receiptId])
+  @@map("as_intake_links")
+  @@schema("public")
+}
+
+/// VOC 복수 분류 (2026-10-27) — 상담 태그 전부 보관, voc_receipts.voc_type_id는 대표(첫 태그) 유지
+model VocReceiptType {
+  id        Int      @id @default(autoincrement())
+  vocId     Int      @map("voc_id")
+  vocTypeId Int      @map("voc_type_id")
+  tag       String?  @db.VarChar(80) // 원 채널톡 태그명
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  voc     VocReceipt @relation(fields: [vocId], references: [id], onDelete: Cascade)
+  vocType StatusCode @relation("VocReceiptTypeCode", fields: [vocTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([vocId, vocTypeId])
+  @@index([vocTypeId])
+  @@map("voc_receipt_types")
   @@schema("public")
 }
 
