@@ -8,7 +8,7 @@ import { CHANNELTALK_STATE_LABEL, VOC_LINK_REASON_LABEL, channeltalkDeskChatUrl,
 
 export interface LinkedChat { linkReason: string; linkedAt: string; chat: { id: string; channelId: string | null; state: ChanneltalkChatState; tags: string[]; firstAskText: string | null; firstAskedAt: string | null; closedAt: string | null; messageCount: number } }
 const kst = (iso: string | null) => (iso ? new Date(iso).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16) : '-')
-const STATE_CLS: Record<string, string> = { opened: 'bg-green-100 text-green-700', snoozed: 'bg-amber-100 text-amber-700', closed: 'bg-gray-100 text-gray-600' }
+const STATE_CLS: Record<string, string> = { opened: 'bg-green-100 text-green-700', snoozed: 'bg-amber-100 text-amber-700', closed: 'bg-gray-100 text-gray-600', initial: 'bg-violet-100 text-violet-700', queued: 'bg-sky-100 text-sky-700', missed: 'bg-red-100 text-red-700' }
 
 export default function VocChanneltalkSection({ links, customerName }: { links: LinkedChat[]; customerName: string | null }) {
   const [openId, setOpenId] = useState<string | null>(links[0]?.chat.id ?? null)

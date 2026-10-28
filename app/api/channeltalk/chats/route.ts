@@ -1,6 +1,6 @@
 /**
  * 채널톡 상담 원본 목록 (voc_channeltalk_intake_design.md §5.2) — 로그인 사용자(VOC 접수 목록과 같은 게이트)
- * ?voc=linked|eligible|excluded|none(미연결 전체) · state=opened|snoozed|closed|active · from/to(firstAskedAt, KST) · tag · hospital(코드) · match=opscode|name|none · q(첫 질문·고객명·병원명) · page/pageSize
+ * ?voc=linked|eligible|excluded|none(미연결 전체) · state=opened|snoozed|closed|initial|queued|missed|active(종료 외) · from/to(firstAskedAt, KST) · tag · hospital(코드) · match=opscode|name|none · q(첫 질문·고객명·병원명) · page/pageSize
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams
   const where: Prisma.ChanneltalkUserChatWhereInput = {}
   const state = sp.get('state')
-  if (state === 'active') where.state = { in: ['opened', 'snoozed'] }
+  if (state === 'active') where.state = { not: 'closed' }
   else if (state) where.state = state
   const from = sp.get('from'); const to = sp.get('to')
   if (from || to) where.firstAskedAt = { ...(from ? { gte: new Date(`${from}T00:00:00+09:00`) } : {}), ...(to ? { lte: new Date(`${to}T23:59:59.999+09:00`) } : {}) }
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
     prisma.$queryRaw<{ tag: string; n: number }[]>`SELECT t AS tag, count(*)::int AS n FROM channeltalk_user_chats, unnest(tags) t GROUP BY t ORDER BY n DESC, t`,
     prisma.channeltalkManager.findMany({ select: { id: true, name: true } }),
     prisma.$queryRaw<{ active: number; today: number; last_synced: Date | null }[]>`
-      SELECT count(*) FILTER (WHERE state IN ('opened','snoozed'))::int AS active,
+      SELECT count(*) FILTER (WHERE state <> 'closed')::int AS active,
              count(*) FILTER (WHERE first_asked_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')::int AS today,
              max(last_synced_at) AS last_synced
       FROM channeltalk_user_chats`,

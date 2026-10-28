@@ -202,7 +202,7 @@ export default function ChanneltalkSyncSettingsPage() {
 
         <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
-            ['활성 상담', ((data.stats.chats.opened ?? 0) + (data.stats.chats.snoozed ?? 0)).toLocaleString()],
+            ['활성 상담', Object.entries(data.stats.chats).filter(([k]) => k !== 'closed').reduce((a, [, v]) => a + (v ?? 0), 0).toLocaleString()],
             ['종료 상담', (data.stats.chats.closed ?? 0).toLocaleString()],
             ['메시지', data.stats.messages.toLocaleString()],
             ['고객', data.stats.users.toLocaleString()],

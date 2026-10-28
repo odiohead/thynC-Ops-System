@@ -21,13 +21,17 @@ export const isTeamTag = (t: string) => t.startsWith('팀/') || t === '팀'
 export const CHANNELTALK_VOC_INTERVALS = ['off', '1m', '5m', '10m'] as const
 export type ChanneltalkVocInterval = (typeof CHANNELTALK_VOC_INTERVALS)[number]
 
-export const CHANNELTALK_CHAT_STATES = ['opened', 'snoozed', 'closed'] as const
+/** 채널톡 user-chat state 전체(API 422 메시지 기준). initial = 담당자가 아직 열지 않은 상담 — ALF(봇)만 응대한 상담은 사람이 열기 전까지 여기 머문다(2026-10-28 사건) */
+export const CHANNELTALK_CHAT_STATES = ['opened', 'snoozed', 'closed', 'initial', 'queued', 'missed'] as const
 export type ChanneltalkChatState = (typeof CHANNELTALK_CHAT_STATES)[number]
 
 export const CHANNELTALK_STATE_LABEL: Record<ChanneltalkChatState, string> = {
   opened: '진행중',
   snoozed: '보류',
   closed: '종료',
+  initial: '미오픈(봇응대)',
+  queued: '대기열',
+  missed: '미응답',
 }
 
 export const CHANNELTALK_PERSON_LABEL: Record<string, string> = {

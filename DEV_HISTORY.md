@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-10-28 11:20 | 채널톡 동기화 — `initial`(미오픈·봇응대) 상담 스캔 누락 수정 (AS 인입 35분 지연 원인)
+
+- PROD 전환 후 첫 실제 케이스(제주 한국병원 9대, 상담 `6ae13fc4`)가 ALF 완료·태그(09:23)보다 36분 늦게(09:59) 인입된 원인 조사. 처음엔 "태그가 상담 종료 시 붙는다"고 잘못 추정 → 사용자 지적으로 재조사. 실제 원인: ALF(봇)만 응대한 상담은 담당자가 열기 전까지 채널톡 state **`initial`**(openedAt null, 목록 응답에 `state` 필드 없음)에 머무는데, 동기화가 `opened·snoozed·closed`만 스캔해 **사람이 열기 전엔 보이지 않았음**. API 422 메시지로 상태 전체 `[closed, opened, snoozed, queued, initial, missed]` 확인. PROD에 `initial` 9건(AS 태그 4건, 6/30·7/7·9/23×2 — 이제껏 VOC·AS 어디에도 안 잡힘) 잔존
+- 수정: 활성 스캔을 `opened·snoozed·initial·queued·missed`로 확장(`ACTIVE_STATES`), `initial` 응답의 state 누락은 조회 목록 state로 보완(해시에도 반영 → initial→opened 전이 감지). 상태 상수·라벨(미오픈(봇응대)/대기열/미응답)·VOC 인박스 필터·배지 색·'활성' 집계(종료 외) 동반 수정. 스키마 변경 없음(컬럼 주석만)
+- dev2 검증: 수동 틱 1회 → 신규 9건 적재·메시지 152건·VOC 승격 2건(컷오버 이후 10-13·10-28 건), 컷오버 이전 AS 태그 건은 인입 스킵 확인(기존 가드)
+- 영향: `lib/channeltalk/{vocSync,client,shared}.ts`, `app/api/channeltalk/chats/route.ts`, `app/settings/channeltalk-sync/page.tsx`, `app/voc/inbox/page.tsx`, `app/voc/_components/VocChanneltalkSection.tsx`, `prisma/schema.prisma`(주석)
+
 ## 2026-10-28 09:55 | PROD 전환: AS 접수 인입 소스 구글시트 → 채널톡 상담 (P5)
 
 - 사용자 "PROD 니가 직접 전환해줘" — 설정 API(`PUT /api/settings/channeltalk-sync`, 화면 저장과 동일 경로)로 한 번에: AS 인입 `dry`→**`on`**, 컷오버 2026-10-27→**2026-10-28**, 시트 폴러 `create`→**`link`(연결 전용)**, 채널톡 폴링 5m→**1m**(스케줄러 재기동 확인 activeInterval 1m). VOC 승격 설정은 그대로(on·컷오버 9/29)

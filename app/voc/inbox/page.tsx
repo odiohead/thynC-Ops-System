@@ -21,7 +21,7 @@ interface Row {
   hospital: { hospitalCode: string; hospitalName: string } | null
 }
 const kst = (iso: string | null) => (iso ? new Date(iso).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16) : '-')
-const STATE_CLS: Record<string, string> = { opened: 'bg-green-100 text-green-700', snoozed: 'bg-amber-100 text-amber-700', closed: 'bg-gray-100 text-gray-600' }
+const STATE_CLS: Record<string, string> = { opened: 'bg-green-100 text-green-700', snoozed: 'bg-amber-100 text-amber-700', closed: 'bg-gray-100 text-gray-600', initial: 'bg-violet-100 text-violet-700', queued: 'bg-sky-100 text-sky-700', missed: 'bg-red-100 text-red-700' }
 
 export default function ChanneltalkInboxPage() {
   const router = useRouter()
@@ -72,7 +72,7 @@ export default function ChanneltalkInboxPage() {
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <select value={state} onChange={(e) => { setState(e.target.value); setPage(1) }} className={sel}>
-          <option value="">상태 전체</option><option value="active">활성(진행중·보류)</option><option value="opened">진행중</option><option value="snoozed">보류</option><option value="closed">종료</option>
+          <option value="">상태 전체</option><option value="active">활성(종료 외)</option><option value="opened">진행중</option><option value="snoozed">보류</option><option value="initial">미오픈(봇응대)</option><option value="closed">종료</option>
         </select>
         <input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1) }} className={sel} />
         <span className="text-gray-400">~</span>

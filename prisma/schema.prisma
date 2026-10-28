@@ -2884,7 +2884,7 @@ model ChanneltalkUserChat {
   id                  String    @id @db.VarChar(40)
   channelId           String?   @map("channel_id") @db.VarChar(40)
   userId              String?   @map("user_id") @db.VarChar(40)
-  state               String    @db.VarChar(16) // opened / snoozed / closed
+  state               String    @db.VarChar(16) // opened / snoozed / closed / initial(미오픈·봇응대) / queued / missed
   assigneeId          String?   @map("assignee_id") @db.VarChar(40)
   managerIds          String[]  @default([]) @map("manager_ids")
   tags                String[]  @default([])

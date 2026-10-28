@@ -2,7 +2,8 @@
  * 채널톡 상담 원천 적재 — 동기화 본체 (projects/voc_channeltalk_intake_design.md §4)
  *
  * runChanneltalkVocSync(mode)
- *  - incremental: ① 매니저 마스터 ② 활성(opened·snoozed) 전량 ③ 종료(closed) 최신부터 순회 → DB 종료시각 최대값−24h 이전 행에서 중단
+ *  - incremental: ① 매니저 마스터 ② 활성(opened·snoozed + initial·queued·missed) 전량 ③ 종료(closed) 최신부터 순회 → DB 종료시각 최대값−24h 이전 행에서 중단
+ *                 (initial = 담당자가 아직 열지 않은 상담. ALF가 끝까지 응대한 AS 접수는 사람이 열기 전까지 여기 머물러 opened·closed만 보면 보이지 않는다 — 2026-10-28)
  *                 ④ 신규·변경 상담의 메시지 수집 (신규=asc 전량, 변경=desc로 이미 저장된 메시지 id를 만날 때까지)
  *  - backfill:    closed asc 전량을 AppSetting 커서로 이어가며 적재(틱당 호출 상한 도달 시 커서 저장 후 이월) → 완료 후 활성 전량. 완료되면 done=true
  *  - manual:      incremental과 같음 (설정 화면 [지금 실행] 표기용)
@@ -21,12 +22,14 @@ import {
 } from './client'
 import {
   CHANNELTALK_VOC_BACKFILL_KEY, CHANNELTALK_VOC_MAX_CALLS_KEY, CHANNELTALK_VOC_RESCAN_HOURS_KEY, CHANNELTALK_VOC_LAST_RESCAN_KEY, EMPTY_BACKFILL,
-  type BackfillState, type ChanneltalkSyncMode,
+  type BackfillState, type ChanneltalkSyncMode, type ChanneltalkChatState,
 } from './shared'
 import { promoteChanneltalkVocs, type PromoteResult } from './vocPromote'
 import { intakeAsFromChats, type AsIntakeResult } from './asIntake'
 
 const CLOSED_SAFETY_MS = 24 * 3600 * 1000
+/** 종료 외 전 상태 — 매 틱 전량 스캔 */
+const ACTIVE_STATES = ['opened', 'snoozed', 'initial', 'queued', 'missed'] as const satisfies readonly ChanneltalkChatState[]
 const DEFAULT_MAX_CALLS = 200
 const RUN_RETENTION_DAYS = 30
 
@@ -188,15 +191,17 @@ class SyncCtx {
   }
 
   /** 상담 upsert → 메시지 수집 필요 여부 반환 */
-  async upsertChat(c: ChanneltalkUserChatRaw): Promise<{ isNew: boolean; changed: boolean }> {
+  async upsertChat(c: ChanneltalkUserChatRaw, listState?: ChanneltalkChatState): Promise<{ isNew: boolean; changed: boolean }> {
     this.scanned++
+    // initial(미오픈) 목록 응답엔 state 필드가 없다 → 조회한 목록의 state로 보완 (해시도 보완값 기준이라 initial→opened 전이가 변경으로 잡힌다)
+    if (!c.state && listState) c.state = listState
     const rawHash = chatSignature(c)
     const cur = await prisma.channeltalkUserChat.findUnique({ where: { id: c.id }, select: { rawHash: true, messageCount: true } })
     if (cur && cur.rawHash === rawHash && cur.messageCount > 0) return { isNew: false, changed: false }
     const userId = await this.ensureUser(str(c.userId))
     const hint = await this.hospitalHint(c)
     const data = {
-      channelId: str(c.channelId), userId, state: c.state, assigneeId: str(c.assigneeId),
+      channelId: str(c.channelId), userId, state: c.state ?? 'initial', assigneeId: str(c.assigneeId),
       managerIds: arr(c.managerIds), tags: arr(c.tags), name: str(c.name), description: str(c.description),
       contactMediumType: str(c.contactMediumType), sourceType: str(c.source?.medium?.mediumType) ?? (c.source?.workflow ? 'workflow' : null),
       firstAskedAt: ms2date(c.firstAskedAt), openedAt: ms2date(c.openedAt), closedAt: ms2date(c.closedAt),
@@ -267,21 +272,21 @@ class SyncCtx {
   }
 
   /** 목록 페이지 1장 처리 (users → chats → messages) */
-  async processPage(page: { userChats: ChanneltalkUserChatRaw[]; users?: ChanneltalkUserRaw[]; managers?: ChanneltalkManagerRaw[] }) {
+  async processPage(page: { userChats: ChanneltalkUserChatRaw[]; users?: ChanneltalkUserRaw[]; managers?: ChanneltalkManagerRaw[] }, listState?: ChanneltalkChatState) {
     await this.upsertUsers(page.users)
     if (page.managers?.length) await this.syncManagers(page.managers)
     for (const c of page.userChats ?? []) {
-      const r = await this.upsertChat(c)
+      const r = await this.upsertChat(c, listState)
       if (r.changed) await this.syncMessages(c.id, r.isNew)
     }
   }
 
   async syncActive() {
-    for (const state of ['opened', 'snoozed'] as const) {
+    for (const state of ACTIVE_STATES) {
       let since: string | null = null
       for (;;) {
         const page = await this.client.listUserChats(state, 'asc', since)
-        await this.processPage(page)
+        await this.processPage(page, state)
         if (!page.next || !page.userChats?.length) break
         since = page.next
       }

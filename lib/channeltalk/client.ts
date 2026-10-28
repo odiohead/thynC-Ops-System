@@ -6,6 +6,8 @@
  * - 호출 카운트·상한: 틱당 maxCalls 초과 시 CallBudgetExceeded — 호출부가 커서를 저장하고 다음 틱으로 이월
  */
 
+import type { ChanneltalkChatState } from './shared'
+
 const BASE = 'https://api.channel.io/open/v5/'
 
 export class ChanneltalkApiError extends Error {
@@ -21,7 +23,7 @@ export interface ChanneltalkUserChatRaw {
   id: string
   channelId?: string
   userId?: string
-  state: 'opened' | 'snoozed' | 'closed'
+  state?: ChanneltalkChatState // initial(미오픈) 상담은 목록 응답에 state 필드가 없다 → 조회한 목록의 state로 보완
   assigneeId?: string
   managerIds?: string[]
   tags?: string[]
@@ -134,7 +136,7 @@ export class ChanneltalkClient {
     }
   }
 
-  listUserChats(state: 'opened' | 'snoozed' | 'closed', sortOrder: 'asc' | 'desc', since?: string | null, limit = 500) {
+  listUserChats(state: ChanneltalkChatState, sortOrder: 'asc' | 'desc', since?: string | null, limit = 500) {
     return this.get<UserChatListPage>('user-chats', { state, sortOrder, since: since ?? undefined, limit })
   }
   getUserChat(id: string) {
