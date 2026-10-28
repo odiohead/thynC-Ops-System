@@ -1,6 +1,6 @@
 # AS접수 인입 소스 전환 — 구글시트 → 채널톡 상담 원문 (as-channeltalk-intake) — 설계안
 
-> **상태: P1~P3 구현 완료 (dev2 2026-10-27, 빌드·재시작·Playwright 실화면 검증) — P4 PROD 그림자(dry)·P5 전환 대기** — 방법론·결정 사항은 사용자와 대화로 확정(§9), D1~D4는 권장안 채택(§13). 리플레이 보고 `as_intake_replay_report_20261027.md`. 폴링 주기 1분(전환 시).
+> **상태: P5 전환 완료 (PROD 2026-10-28 09:55 — AS 인입 ON·컷오버 2026-10-28·시트 연결 전용·폴링 1m). 그림자 분석 DEV_HISTORY 2026-10-28 09:40** — 방법론·결정 사항은 사용자와 대화로 확정(§9), D1~D4는 권장안 채택(§13). 리플레이 보고 `as_intake_replay_report_20261027.md`. 폴링 주기 1분(전환 시).
 > 상위: `as_work_design.md`(AS업무 도메인), `voc_channeltalk_intake_design.md`(채널톡 원천 적재), `voc_channeltalk_promotion_design.md`(VOC 승격) · 대체 대상: `channeltalk_as_intake_design.md`(시트 폴링)
 >
 > **목적: 구글시트('thynC VOC 현황 > A/S')를 AS 업무에서 제거한다.** AS접수 레코드의 생성 소스를 시트 행이 아니라 **이미 적재 중인 채널톡 상담 원문(`channeltalk_user_chats`·`channeltalk_messages`)** 으로 바꾸고, ALF가 하던 "대화 → 구조화" 정제를 시스템이 직접 수행한다.
