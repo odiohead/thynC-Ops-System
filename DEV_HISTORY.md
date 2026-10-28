@@ -4,6 +4,11 @@
 
 ---
 
+## 2026-10-28 09:10 | PROD 배포: Slack 알림 설정 이벤트 중심 재편 + AS 입고확인 이벤트 (d1ab744)
+
+- `d1ab744` push → PROD pull → 힙 4GB 빌드(협업 번들 2108cacb 불변) → `migrate-notify-toggles.mts` dry-run 확인 후 `--apply`(구 토글 → `notify_event_enabled`, 꺼져 있던 유지보수·기타업무 → 전체 대상 라우트 5건 `ref_types` 7종으로 이관, 전역 on 유지) → `seed-notify-events.sql`(route #7 'AS 입고확인 → AS업무') → `pm2 restart thync-prod` health 200 → 라우트 7건·설정 키 검증. 스키마 변경 없음
+- 이후 AS 입고확인 실행 시 'AS업무' 채널로 발송(live 모드). 운영자는 `/settings/notifications` 이벤트 탭에서 이벤트별 사용·채널·조건 제어
+
 ## 2026-10-27 22:30 | Slack 알림 설정 이벤트 중심 재편 + AS 입고확인 도메인 이벤트 (dev2 빌드·적용, PROD 미반영)
 
 - **배경(사용자)**: AS 입고확인 시 특정 채널 알림 요구 + "주요 기능마다 알림을 세세하게 제어" — 기존 화면은 SLA가 첫 탭, 토글 3겹(전체/업무 타입별/티켓 이벤트별)+라우팅 규칙이 흩어져 "무슨 일이 생기면 어디로 가는가"가 안 보임. 재편 + 입고확인 동시 진행, 3겹 토글 → 라우트 일원화 동의, 채널은 기존 'AS업무'(설계 `projects/domain_event_notify_design.md` §5·§6)
