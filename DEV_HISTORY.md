@@ -6,7 +6,7 @@
 
 ## 2026-10-28 13:40 | VOC 주간 대시보드 (`/voc/dashboard`)
 
-- **PROD 배포 2026-10-28 14:05 (d2e945e)** — 빌드·재시작, 협업 서버 번들 동일(재시작 불필요). PROD W43 실측: VOC 141건(전주 227), 1차 대응 중앙값 9분·p90 3.5h, AS 108건(고장 99/분실 9)·수리출하 중앙값 8일, 집계 3.1s
+- **PROD 배포 2026-10-28 14:05 (d2e945e) + TZ 보정 14:30 (fad1fa7)** — 첫 배포 직후 PROD W43 VOC가 141건으로 연결 상담 176건과 어긋나 조사: `voc_receipts.received_at`이 naive timestamp(UTC 저장)라 `AT TIME ZONE 'Asia/Seoul'`이 역방향 변환돼 월요일 주간 건이 전주로 밀림(세션 TZ dev2=KST·PROD=UTC라 dev2에선 우연히 맞아 보임). `AT TIME ZONE 'UTC'`로 timestamptz화 후 KST 변환, 범위 파라미터도 naive UTC로 비교(인덱스 유지). 보정 후 PROD W43: VOC 176건(전주 235) = 연결 상담 176, 1차 대응 중앙값 9분·p90 3.5h, 24h 내 종료 155/176, AS 108건(고장 99/분실 9)·수리출하 중앙값 8일, 집계 5s
 
 - 서비스 운영 관점 주간 리포트를 시스템이 직접 산출(기존 Looker PDF 대체). 설계 `projects/voc_dashboard_design.md` — 사용자 결정 7건: ISO 주(월~일)·1차 대응은 사람 답변 기준·팀 축은 채널톡 팀 태그·AS 섹션 포함·중앙값+p90·복수 분류 각 1 계상·반복 병원 5건
 - `lib/vocDashboard.ts` 집계(raw SQL 12종 병렬, KST date_trunc('week'), 1차 답변은 DISTINCT ON 1회 스캔 — dev2 290ms) · `GET /api/voc-receipts/dashboard?week=&repeat=` · `app/voc/dashboard/page.tsx`(recharts, Suspense) · VOC 접수 헤더 [대시보드] 링크
