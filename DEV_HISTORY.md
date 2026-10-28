@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-10-28 13:40 | VOC 주간 대시보드 (`/voc/dashboard`)
+
+- 서비스 운영 관점 주간 리포트를 시스템이 직접 산출(기존 Looker PDF 대체). 설계 `projects/voc_dashboard_design.md` — 사용자 결정 7건: ISO 주(월~일)·1차 대응은 사람 답변 기준·팀 축은 채널톡 팀 태그·AS 섹션 포함·중앙값+p90·복수 분류 각 1 계상·반복 병원 5건
+- `lib/vocDashboard.ts` 집계(raw SQL 12종 병렬, KST date_trunc('week'), 1차 답변은 DISTINCT ON 1회 스캔 — dev2 290ms) · `GET /api/voc-receipts/dashboard?week=&repeat=` · `app/voc/dashboard/page.tsx`(recharts, Suspense) · VOC 접수 헤더 [대시보드] 링크
+- Playwright 검증: 버튼→이동, KPI 12개 = API 값 일치, 차트·TOP10·2차 토글·임계값 변경·주 이동·진행 중 배지·잘못된 week 400 처리, 스크린샷 확인 후 표 패딩·헤더 문구 보정
+- 영향: `lib/vocDashboard.ts`(신규), `app/api/voc-receipts/dashboard/route.ts`(신규), `app/voc/dashboard/page.tsx`(신규), `app/voc/page.tsx`, README, projects/README
+
 ## 2026-10-28 11:20 | 채널톡 동기화 — `initial`(미오픈·봇응대) 상담 스캔 누락 수정 (AS 인입 35분 지연 원인)
 
 - PROD 전환 후 첫 실제 케이스(제주 한국병원 9대, 상담 `6ae13fc4`)가 ALF 완료·태그(09:23)보다 36분 늦게(09:59) 인입된 원인 조사. 처음엔 "태그가 상담 종료 시 붙는다"고 잘못 추정 → 사용자 지적으로 재조사. 실제 원인: ALF(봇)만 응대한 상담은 담당자가 열기 전까지 채널톡 state **`initial`**(openedAt null, 목록 응답에 `state` 필드 없음)에 머무는데, 동기화가 `opened·snoozed·closed`만 스캔해 **사람이 열기 전엔 보이지 않았음**. API 422 메시지로 상태 전체 `[closed, opened, snoozed, queued, initial, missed]` 확인. PROD에 `initial` 9건(AS 태그 4건, 6/30·7/7·9/23×2 — 이제껏 VOC·AS 어디에도 안 잡힘) 잔존

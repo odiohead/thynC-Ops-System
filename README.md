@@ -146,7 +146,7 @@ app/
 │   ├── vehicle-logs/                 # 운행일지 목록·작성 + [id] 조회/수정/삭제
 │   ├── parking/                      # 주차 웹할인 — search/coupons/register (pweb.kr 대행, USER 이상)
 │   ├── install-plans/                # 설치계획(가안) CRUD
-│   ├── voc-receipts/                 # VOC접수 CRUD (등록 시 CS 마스터 티켓 자동 생성 — 단일 트랜잭션, 생성자 기록)
+│   ├── voc-receipts/                 # VOC접수 CRUD (등록 시 CS 마스터 티켓 자동 생성 — 단일 트랜잭션, 생성자 기록) · dashboard/ 주간 지표 (2026-10-28)
 │   ├── stock-out-requests/           # 출고요청 CRUD + [id] (등록 시 STOCK_OUT 티켓 자동 생성 — 단일 트랜잭션, 프로젝트 필수 연결)
 │   ├── as-receipts/                  # AS접수 CRUD + queue(수리대기 큐 — 라인 단위 버킷 조회, 2026-09-28) + queue/repair-done(수리완료 일괄) + match(시리얼 원장 매칭 미리보기) + [id]/resolve-items(라인 결과 확정 — 기기현황 연동, 라인별 처리내용) + [id]/ship-info(기기군 발송정보 갱신, 2026-09-11) + export(라인 단위 Excel — 발송일 필터, 2026-09-07) + [id]/repair-done·scrap-line(라인 수리완료 체크/해제·라인 기기 폐기 — 기기 상태·위치 축, 2026-09-17) (등록 시 AS 티켓 자동 생성·AS 표시, 2026-09-04)
 │   ├── voc-masters/                  # VOC 접수 채널 조회 (channels)
@@ -179,7 +179,7 @@ app/
 ├── projects/                         # 프로젝트 목록·상세·등록
 │   └── calendar/                     # 구축 일정 간트 캘린더 (새 탭)
 ├── site-visits/                      # 답사 목록·상세·등록
-├── voc/                              # VOC 접수 — 목록·등록(new)·상세([id] — 하위 티켓 패널·처리 결과 Tiptap) (CS 워크플로)
+├── voc/                              # VOC 접수 — 목록·등록(new)·상세([id] — 하위 티켓 패널·처리 결과 Tiptap) · dashboard/ 주간 대시보드 (2026-10-28) (CS 워크플로)
 │   └── inbox/                        # 채널톡 상담 원본 열람 — 목록·상세([id] 메시지 타임라인) 읽기 전용, **nav 미등록(URL 직접 진입)** (2026-09-28)
 │   └── _components/                  # VocForm · ChatTimeline(채널톡 말풍선 타임라인 — inbox·VOC 상세 공용) · VocChanneltalkSection(VOC 상세 연결 상담 섹션) (2026-09-28)
 ├── stock-out-requests/               # 출고업무 — 목록·상세([id] — 출고 처리 카드·처리 내역) + _components/{StockOutRequestFormModal(등록·수정),FulfillCard(출고 처리 — P2)}
@@ -306,6 +306,7 @@ lib/
 ├── channeltalk-as-scheduler.ts       # 채널톡 AS 폴링 스케줄러 (mail-scheduler 패턴, channeltalk_as_interval 제어 — off/1m/5m/10m, 재진입 가드)
 ├── channeltalk-voc-scheduler.ts      # 채널톡 상담 원천 적재 폴링 스케줄러 (channeltalk_voc_interval — off/1m/5m/10m, 백필 미완료면 틱마다 backfill 이어감, 2026-09-28)
 ├── hospitalTags.ts                   # 병원 태그 시스템 키 단일 소스(HOSPITAL_TAG_KEYS: PRE_REPLACE_DEFAULT·NO_REMOTE_ACCESS·KEY_ACCOUNT)·DTO·hasHospitalTag (2026-09-28)
+├── vocDashboard.ts                   # VOC 주간 대시보드 집계 — ISO 주·8주 추이·1차 대응(사람) 중앙값/p90·백로그·팀/담당자·반복 병원·AS (2026-10-28, projects/voc_dashboard_design.md)
 ├── vocService.ts                     # VOC 접수 생성 서비스(createVocReceipt — VOC+CS 마스터 티켓 단일 tx, ownerId 배정) — POST /api/voc-receipts·채널톡 승격 공용 (2026-09-28)
 ├── asReceiptColumns.ts               # AS접수 목록 열 카탈로그·사용자 열 설정 타입/기본값/정규화 (2026-10-01)
 ├── channeltalk/                      # 채널톡 Open API 원천 적재 (voc_channeltalk_intake_design.md)
@@ -863,6 +864,7 @@ prisma/
 - AppSetting: `channeltalk_voc_interval`(off/1m/5m/10m)·`channeltalk_voc_backfill`(JSON 커서·done)·`channeltalk_voc_max_calls`(기본 200). `.env`: `CHANNELTALK_ACCESS_KEY`/`CHANNELTALK_ACCESS_SECRET`
 - **거버넌스**: 상담 본문에 병원 직원이 적은 환자 식별정보가 부수적으로 섞일 수 있음 — 열람은 로그인 게이트 뒤에만, AI 검색 인덱스·Slack 알림으로 **재전파 금지**
 - **VOC 승격 (2026-09-28 — `projects/voc_channeltalk_promotion_design.md`, 마이그 `20260928190000_voc_channeltalk_promotion`)**: `VocReceipt.source`(MANUAL/CHANNELTALK)·`autoCreated` · **`VocChanneltalkChat`** (`voc_channeltalk_chats` — VOC 1 : 상담 N, `chat_id` UNIQUE, `link_reason` AUTO_TAG/AUTO_FOLLOWUP/MANUAL) · `ChanneltalkUserChat.firstUserMessageAt`(고객 첫 텍스트 발화 = VOC receivedAt)·`managerInitiated`·`vocExcludedAt/ById`. **VOC_TYPE 마스터 재편**: 구 6종 → 채널톡 분류 태그 28종(`name`='대분류/소분류', `value`=태그명 매핑 키), VOC_CHANNEL '채널톡'. AppSetting `channeltalk_voc_promote`(on/off)·`channeltalk_voc_cutover`(KST 일자)·`channeltalk_voc_rescan_hours`(기본 24)·`channeltalk_voc_last_rescan`
+- **VOC 주간 대시보드 (2026-10-28 — `projects/voc_dashboard_design.md`)**: VOC 접수 우측 상단 [대시보드] → `/voc/dashboard`. **ISO 주(월~일 KST)** 선택(기본 지난주, 진행 중 주 배지), 메인 축 2개 + AS 섹션: ① **Volume** — 주간 건수·전주 대비·일평균(영업일 5)·8주 대분류 적층(복수 분류 각 1 계상, 중복 포함 명시)·중분류 TOP10(Δ) ② **Responsiveness** — VOC 연결 상담 기준 **1차 대응 = 사람 담당자 첫 텍스트 답변**(봇·log 제외, 담당자 발신 제외)·종료까지 시간의 **중앙값·p90**(평균은 툴팁)·24h 내 종료율·사람 개입률·미해결 백로그(7일 경과) ③ **AS** — 접수(고장/분실)·기기군 대수·수리출하 소요일(달력일)·미완료·VOC 연계율. 2차(토글): 채널톡 팀 태그·담당자별, 반복 발생 병원(4주 3/5/10건). 스키마 변경 없음, 인쇄는 브라우저
 - **VOC 복수 분류 (2026-10-27)**: **`VocReceiptType`** (`voc_receipt_types` — UNIQUE(voc, type), FK CASCADE, `tag` 원 태그명): 연결 상담 전부의 분류 태그 합집합을 보관(`syncVocTypesFromChats` — 승격·후속 연결·태그 변경 틱마다 재동기화). `voc_receipts.voc_type_id`는 **대표 분류**(첫 태그, 사람이 바꿀 수 있어 재동기화가 건드리지 않음 — 비어 있을 때만 채움). 기존 VOC는 마이그에서 대표 분류 1행 시드
 
 ### SLA 시계 엔진 (1.1 P1 — `projects/notification_v1.1_design.md` §4)
@@ -1882,6 +1884,7 @@ npm run dev
 | Method | Endpoint | 설명 |
 |--------|----------|------|
 | GET/POST | `/api/voc-receipts` | VOC 목록(`?from=&to=&statusId=&vocTypeId=&hospitalCode=&createdById=&q=`) · 등록(`VOC-YYYYMM-NNNN` 채번 + **연결 티켓 자동 생성**=CS 마스터, 단일 트랜잭션 — 생성자 자동 기록) |
+| GET | `/api/voc-receipts/dashboard` | VOC 주간 대시보드 지표(`?week=2026-W43&repeat=5`, 생략 시 지난주) — Volume·Responsiveness·팀/담당자·반복 병원·AS 한 번에 (2026-10-28) |
 | GET/PUT/DELETE | `/api/voc-receipts/[id]` | 상세(+하위 티켓 현황) · 수정(어댑터 동기화 — 담당은 티켓 단독 소유라 미포함) · 삭제(ADMIN — 연결 티켓 동반 삭제) |
 | GET | `/api/voc-masters/channels` | VOC 접수 채널(VOC_CHANNEL) 조회 |
 | GET/POST, PUT/DELETE | `/api/settings/voc-status(/[id])` | VOC 워크플로 상태 (+티켓 상태 매핑 필수, 사용 중 삭제 409) |

@@ -107,6 +107,7 @@ export default function VocListPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Link href="/voc/dashboard" className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">대시보드</Link>
           <TicketRuleSettingButton refType="VOC" />
           {canWrite && (
             <button
