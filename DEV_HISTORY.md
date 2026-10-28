@@ -6,6 +6,8 @@
 
 ## 2026-10-28 13:40 | VOC 주간 대시보드 (`/voc/dashboard`)
 
+- **PROD 배포 2026-10-28 14:05 (d2e945e)** — 빌드·재시작, 협업 서버 번들 동일(재시작 불필요). PROD W43 실측: VOC 141건(전주 227), 1차 대응 중앙값 9분·p90 3.5h, AS 108건(고장 99/분실 9)·수리출하 중앙값 8일, 집계 3.1s
+
 - 서비스 운영 관점 주간 리포트를 시스템이 직접 산출(기존 Looker PDF 대체). 설계 `projects/voc_dashboard_design.md` — 사용자 결정 7건: ISO 주(월~일)·1차 대응은 사람 답변 기준·팀 축은 채널톡 팀 태그·AS 섹션 포함·중앙값+p90·복수 분류 각 1 계상·반복 병원 5건
 - `lib/vocDashboard.ts` 집계(raw SQL 12종 병렬, KST date_trunc('week'), 1차 답변은 DISTINCT ON 1회 스캔 — dev2 290ms) · `GET /api/voc-receipts/dashboard?week=&repeat=` · `app/voc/dashboard/page.tsx`(recharts, Suspense) · VOC 접수 헤더 [대시보드] 링크
 - Playwright 검증: 버튼→이동, KPI 12개 = API 값 일치, 차트·TOP10·2차 토글·임계값 변경·주 이동·진행 중 배지·잘못된 week 400 처리, 스크린샷 확인 후 표 패딩·헤더 문구 보정

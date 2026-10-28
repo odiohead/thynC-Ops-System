@@ -1,6 +1,6 @@
 # VOC 주간 대시보드 (voc-dashboard) — 설계안
 
-> **상태: 구현 완료 (dev2 2026-10-28 빌드·적용, Playwright 검증) — PROD 미반영** — 사용자 결정 7건(§2·§8) 반영.
+> **상태: PROD 배포 완료 (2026-10-28, d2e945e)** — dev2 Playwright 검증 후 반영. — 사용자 결정 7건(§2·§8) 반영.
 > 참고 자료: `주간_thynC_VOC&AS_현황_26W43.pdf`(Looker 주간보고, 형태는 참고만 — 구조 이식 금지). 관련: `voc_channeltalk_promotion_design.md`(VOC = 채널톡 승격), `as_channeltalk_intake_design.md`, 규칙: `feature-design-principles`·`ui-start-simple`
 
 ---
