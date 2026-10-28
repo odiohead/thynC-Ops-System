@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-10-28 16:40 | VOC·AS 주간 대시보드 v2 — 금~목 주·SLA 제외·AS 고장/분실 보강·병원 TOP10
+
+- 사용자 요청: 통계 기준 금~목, 처리시간 SLA 제외, AS 보강(고장·분실 분리, 최근 1개월 병원 TOP10 건수·도입 기기 대비), 전반적으로 더 많은 정보. 설계안 §2b(R1~R5)
+- 주 = 금 00:00~다음 금 00:00 KST, 표기는 목요일의 ISO 주(PDF 10/16~10/22 = 2026-W43과 일치). 버킷은 `(KST 날짜 − 창 시작 금요일)/7` 정수 나눗셈으로 통일(date_trunc 미사용). `?week=` 금요일 날짜·`YYYY-Www` 둘 다 수용, 비금요일 400
+- AS: 고장/분실 카테고리 카드(접수·대수·기기군·전주 대비·미완료·VOC 연계·선교체·수리출하 / 미완료 단계 / 4주 처리 결과 / 누적 접수 대수÷배치 기기), 8주 추이 각각(기기군 적층+접수 선), 병원 TOP10 ×2(28일 접수 대수 / 배치 기기 대비 접수율, 배치 50대 하한). 분모 = `hospital_devices` ACTIVE(최근 4주 AS 병원 전부 원장 등록 확인). VOC 병원 TOP10(28일) 추가, 팀·담당자 상시 표시, Responsiveness 축·반복 병원 토글 삭제
+- dev2 검증: 집계 150ms, Playwright — KPI·카드 셀 = API 값, 표 5개·차트 26, '1차 대응' 문구 없음, 주 이동(◀ → 10/9, `?week=2026-W43`, 진행 중 주 배지·▶ 비활성, 비금요일 400) 확인
+- 영향: `lib/vocDashboard.ts`, `app/api/voc-receipts/dashboard/route.ts`, `app/voc/dashboard/page.tsx`, README, projects/README, 설계안
+
 ## 2026-10-28 13:40 | VOC 주간 대시보드 (`/voc/dashboard`)
 
 - **PROD 배포 2026-10-28 14:05 (d2e945e) + TZ 보정 14:30 (fad1fa7)** — 첫 배포 직후 PROD W43 VOC가 141건으로 연결 상담 176건과 어긋나 조사: `voc_receipts.received_at`이 naive timestamp(UTC 저장)라 `AT TIME ZONE 'Asia/Seoul'`이 역방향 변환돼 월요일 주간 건이 전주로 밀림(세션 TZ dev2=KST·PROD=UTC라 dev2에선 우연히 맞아 보임). `AT TIME ZONE 'UTC'`로 timestamptz화 후 KST 변환, 범위 파라미터도 naive UTC로 비교(인덱스 유지). 보정 후 PROD W43: VOC 176건(전주 235) = 연결 상담 176, 1차 대응 중앙값 9분·p90 3.5h, 24h 내 종료 155/176, AS 108건(고장 99/분실 9)·수리출하 중앙값 8일, 집계 5s
