@@ -2,7 +2,7 @@
  * VOC 주간 대시보드 집계 (projects/voc_dashboard_design.md §3 — 지표 정의의 단일 소스)
  *
  * - 주 = ISO 주(월 00:00 KST ~ 다음 월 00:00 KST). 추이는 선택 주 포함 8주
- * - VOC 귀속 = voc_receipts.received_at(고객 첫 발화), AS 귀속 = as_receipts.receipt_date
+ * - VOC 귀속 = voc_receipts.received_at(고객 첫 발화 — naive timestamp(UTC 저장)이라 반드시 `AT TIME ZONE 'UTC'`로 timestamptz화 후 KST 변환. 세션 TZ가 dev2=KST·PROD=UTC로 달라 생략 시 주 경계가 9~18h 밀린다), AS 귀속 = as_receipts.receipt_date(DATE)
  * - 1차 대응 = 고객 첫 발화 이후 사람 담당자의 첫 텍스트 메시지(봇·log 액션 제외). 담당자 발신 상담은 분모 제외
  * - 분류 집계는 voc_receipt_types(복수 분류 각 1 계상 — 합계가 VOC 건수보다 클 수 있음)
  * - 응답 시간 대표값은 중앙값·p90(평균은 참고)
@@ -139,16 +139,16 @@ export async function buildVocDashboard(opts: { year: number; week: number; repe
 
   const [vocWeekly, majorWeekly, minorRows, respWeekly, backlogRows, teamWeekly, assigneeRows, repeatRows, asWeekly, asItems, shipRows, asBacklog] = await Promise.all([
     prisma.$queryRaw<{ wk: Date; n: number }[]>`
-      SELECT date_trunc('week', received_at AT TIME ZONE 'Asia/Seoul')::date AS wk, count(*)::int AS n
-      FROM voc_receipts WHERE received_at >= ${seriesStart} AND received_at < ${weekEnd} GROUP BY 1`,
+      SELECT date_trunc('week', (received_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Seoul')::date AS wk, count(*)::int AS n
+      FROM voc_receipts WHERE received_at >= ${seriesStart}::timestamptz AT TIME ZONE 'UTC' AND received_at < ${weekEnd}::timestamptz AT TIME ZONE 'UTC' GROUP BY 1`,
     prisma.$queryRaw<{ wk: Date; major: string; n: number }[]>`
-      SELECT date_trunc('week', v.received_at AT TIME ZONE 'Asia/Seoul')::date AS wk, split_part(sc.name, '/', 1) AS major, count(*)::int AS n
+      SELECT date_trunc('week', (v.received_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Seoul')::date AS wk, split_part(sc.name, '/', 1) AS major, count(*)::int AS n
       FROM voc_receipt_types t JOIN voc_receipts v ON v.id = t.voc_id JOIN status_codes sc ON sc.id = t.voc_type_id
-      WHERE v.received_at >= ${seriesStart} AND v.received_at < ${weekEnd} GROUP BY 1, 2`,
+      WHERE v.received_at >= ${seriesStart}::timestamptz AT TIME ZONE 'UTC' AND v.received_at < ${weekEnd}::timestamptz AT TIME ZONE 'UTC' GROUP BY 1, 2`,
     prisma.$queryRaw<{ wk: Date; name: string; n: number }[]>`
-      SELECT date_trunc('week', v.received_at AT TIME ZONE 'Asia/Seoul')::date AS wk, sc.name, count(*)::int AS n
+      SELECT date_trunc('week', (v.received_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Seoul')::date AS wk, sc.name, count(*)::int AS n
       FROM voc_receipt_types t JOIN voc_receipts v ON v.id = t.voc_id JOIN status_codes sc ON sc.id = t.voc_type_id
-      WHERE v.received_at >= ${kst(prevMonday)} AND v.received_at < ${weekEnd} GROUP BY 1, 2`,
+      WHERE v.received_at >= ${kst(prevMonday)}::timestamptz AT TIME ZONE 'UTC' AND v.received_at < ${weekEnd}::timestamptz AT TIME ZONE 'UTC' GROUP BY 1, 2`,
     prisma.$queryRaw<{ wk: Date; total: number; human: number; closed: number; within24: number; med: number | null; p90: number | null; avg: number | null; cmed: number | null; cp90: number | null; cavg: number | null }[]>`
       WITH ${chatCte}
       SELECT wk, count(*)::int AS total, count(first_reply)::int AS human, count(closed_at)::int AS closed,
@@ -157,7 +157,7 @@ export async function buildVocDashboard(opts: { year: number; week: number; repe
              percentile_cont(0.5) WITHIN GROUP (ORDER BY cl_sec) AS cmed, percentile_cont(0.9) WITHIN GROUP (ORDER BY cl_sec) AS cp90, avg(cl_sec) AS cavg
       FROM joined GROUP BY wk`,
     prisma.$queryRaw<{ name: string | null; n: number; over7: number }[]>`
-      SELECT s.name, count(*)::int AS n, count(*) FILTER (WHERE v.received_at < now() - interval '7 days')::int AS over7
+      SELECT s.name, count(*)::int AS n, count(*) FILTER (WHERE v.received_at < (now() AT TIME ZONE 'UTC') - interval '7 days')::int AS over7
       FROM voc_receipts v LEFT JOIN status_codes s ON s.id = v.status_id
       WHERE s.id IS NULL OR s.ticket_status NOT IN ('RESOLVED', 'CLOSED') GROUP BY s.name`,
     prisma.$queryRaw<{ wk: Date; team: string; n: number }[]>`
@@ -173,10 +173,10 @@ export async function buildVocDashboard(opts: { year: number; week: number; repe
     prisma.$queryRaw<{ hospital_code: string; name: string; n: number; top_type: string | null; last_at: Date }[]>`
       SELECT v.hospital_code, h.hospital_name AS name, count(*)::int AS n, max(v.received_at) AS last_at,
              (SELECT sc.name FROM voc_receipt_types t JOIN status_codes sc ON sc.id = t.voc_type_id JOIN voc_receipts v2 ON v2.id = t.voc_id
-              WHERE v2.hospital_code = v.hospital_code AND v2.received_at >= ${repeatStart} AND v2.received_at < ${weekEnd}
+              WHERE v2.hospital_code = v.hospital_code AND v2.received_at >= ${repeatStart}::timestamptz AT TIME ZONE 'UTC' AND v2.received_at < ${weekEnd}::timestamptz AT TIME ZONE 'UTC'
               GROUP BY sc.name ORDER BY count(*) DESC, sc.name LIMIT 1) AS top_type
       FROM voc_receipts v JOIN hospitals h ON h.hospital_code = v.hospital_code
-      WHERE v.received_at >= ${repeatStart} AND v.received_at < ${weekEnd}
+      WHERE v.received_at >= ${repeatStart}::timestamptz AT TIME ZONE 'UTC' AND v.received_at < ${weekEnd}::timestamptz AT TIME ZONE 'UTC'
       GROUP BY v.hospital_code, h.hospital_name HAVING count(*) >= ${threshold} ORDER BY n DESC, name LIMIT 30`,
     prisma.$queryRaw<{ wk: Date; n: number; lost: number; linked: number }[]>`
       SELECT date_trunc('week', r.receipt_date)::date AS wk, count(*)::int AS n, count(*) FILTER (WHERE r.category = 'LOST')::int AS lost,
@@ -199,7 +199,7 @@ export async function buildVocDashboard(opts: { year: number; week: number; repe
       FROM as_receipt_items i JOIN as_receipts r ON r.id = i.receipt_id
       WHERE i.shipped_at >= ${weekKey}::date AND i.shipped_at < ${ymd(addDays(monday, 7))}::date AND i.outcome IN ('REPAIR_RETURN', 'REPLACE')`,
     prisma.$queryRaw<{ open: number; over7: number }[]>`
-      SELECT count(*)::int AS open, count(*) FILTER (WHERE r.receipt_date < current_date - 7)::int AS over7
+      SELECT count(*)::int AS open, count(*) FILTER (WHERE r.receipt_date < (now() AT TIME ZONE 'Asia/Seoul')::date - 7)::int AS over7
       FROM as_receipts r LEFT JOIN status_codes s ON s.id = r.status_id
       WHERE s.id IS NULL OR s.ticket_status <> 'CLOSED'`,
   ])
