@@ -253,10 +253,13 @@ export function splitAsSearchKeywords(q: string): string[] {
 // 접수 병원과 라인 기기의 현재 원장 배치를 대조 — 미종결 라인만 평가(종결 라인은 교체·분실로 회수되는 게 정상이라 제외)
 // 2026-09-18: DUPLICATE(중복접수) 추가 — 원장 배치와 별개 축(같은 시리얼의 미종결 라인이 다른 접수에도 있음). 라인은 배치 태그와 중복접수를 동시에 가질 수 있음
 // 2026-09-30: BAD_SERIAL(시리얼 오류) 추가 — 형식 규칙(AS_SERIAL_RE) 위반. 원장 대조보다 우선(비정상 시리얼은 원장에 있을 수 없음), 보정 전 이후 처리 차단
-export const AS_REGISTRY_TAGS = ['BAD_SERIAL', 'OTHER_HOSPITAL', 'RECOVERED', 'UNPLACED', 'UNREGISTERED', 'DUPLICATE'] as const
+// 2026-10-29: DETACHED(분리 예외) 추가 — 원장에 시리얼 개체가 있는데 라인 device_id가 NULL인 상태. 정상 흐름(등록·시리얼 보정·원장 확정)은 개체가 있으면 항상 연결하므로
+//   이 상태는 운영자가 의도적으로 분리한 예외(동일 시리얼 2대 생산 — AS-202610-0358 P002364, 해피뷰 개체가 실사용)에서만 생긴다. 원장 확정 대상 아님·확인필요 아님·최종확정은 미등록 라인 규칙(기기현황 미기록)
+export const AS_REGISTRY_TAGS = ['BAD_SERIAL', 'DETACHED', 'OTHER_HOSPITAL', 'RECOVERED', 'UNPLACED', 'UNREGISTERED', 'DUPLICATE'] as const
 export type AsRegistryTag = (typeof AS_REGISTRY_TAGS)[number]
 export const AS_REGISTRY_TAG_LABELS: Record<AsRegistryTag, string> = {
   BAD_SERIAL: '시리얼 오류', // 형식 규칙 위반 — 보정 전 처리 불가
+  DETACHED: '분리(예외)', // 원장 개체와 의도적으로 분리된 라인 — 기기현황 미기록
   OTHER_HOSPITAL: '타병원', // 원장상 다른 병원에 ACTIVE 배치
   RECOVERED: '회수', // 원장상 회수(RECOVERED) 상태 — 어느 병원에도 배치 아님
   UNPLACED: '미배치', // 원장 개체는 있으나 배치 이력 없음
@@ -265,6 +268,7 @@ export const AS_REGISTRY_TAG_LABELS: Record<AsRegistryTag, string> = {
 }
 export const AS_REGISTRY_TAG_DESC: Record<AsRegistryTag, string> = {
   BAD_SERIAL: `시리얼 형식 오류 (${AS_SERIAL_RULE_TEXT}) — [시리얼 보정]으로 고치기 전에는 이후 처리를 할 수 없습니다`,
+  DETACHED: '원장 개체와 의도적으로 분리된 라인(동일 시리얼 중복 생산 등) — 원장 개체는 그대로 두고 이 라인만 기기현황 기록 없이 처리합니다. 원장 확정 대상 아님',
   OTHER_HOSPITAL: '기기현황에 다른 병원 배치로 등록된 기기 — 배치 확인 필요',
   RECOVERED: '기기현황에 회수 상태로 등록된 기기 — 재배치 여부 확인 필요',
   UNPLACED: '기기현황에 개체는 있으나 병원 배치가 없는 기기',
@@ -277,9 +281,10 @@ export type AsRegistryUnit = { placement: { status: string; hospitalCode: string
 export interface AsRegistryLineTag { tag: AsRegistryTag; detail: string | null } // detail: 타병원명
 
 /** 라인 1개의 현재 배치 → 태그 (정상이면 null). unit: 원장 조회 결과(undefined = 미등록). serialNo 지정 시 형식 규칙 위반이 최우선(BAD_SERIAL, 2026-09-30) */
-export function classifyAsRegistryLine(hospitalCode: string, unit: AsRegistryUnit, serialNo?: string | null): AsRegistryLineTag | null {
+export function classifyAsRegistryLine(hospitalCode: string, unit: AsRegistryUnit, serialNo?: string | null, lineDeviceId?: number | null): AsRegistryLineTag | null {
   if (serialNo != null && !isValidAsSerial(serialNo)) return { tag: 'BAD_SERIAL', detail: null }
   if (!unit) return { tag: 'UNREGISTERED', detail: null }
+  if (unit && lineDeviceId === null) return { tag: 'DETACHED', detail: null } // 개체는 있는데 라인이 분리됨 — 운영 예외 (2026-10-29). undefined(미전달)는 구 동작
   const p = unit.placement
   if (!p) return { tag: 'UNPLACED', detail: null }
   if (p.status !== 'ACTIVE') return { tag: 'RECOVERED', detail: null }
@@ -290,7 +295,7 @@ export function classifyAsRegistryLine(hospitalCode: string, unit: AsRegistryUni
 /** 라인별 현재 배치 → 접수 단위 태그 집계(태그 순서 고정). 미종결 라인만. dupBySerial: 시리얼 → 다른 접수의 접수번호(2026-09-18 중복접수 축, 배치 태그와 별도 집계) */
 export function summarizeAsRegistryTags(
   hospitalCode: string,
-  items: { serialNo: string; outcome: string | null }[],
+  items: { serialNo: string; outcome: string | null; deviceId?: number | null }[],
   unitBySerial: Map<string, NonNullable<AsRegistryUnit>>,
   dupBySerial?: Map<string, string[]>
 ): AsRegistryTagSummary[] {
@@ -303,7 +308,7 @@ export function summarizeAsRegistryTags(
   }
   for (const i of items) {
     if (i.outcome) continue
-    const r = classifyAsRegistryLine(hospitalCode, unitBySerial.get(i.serialNo), i.serialNo)
+    const r = classifyAsRegistryLine(hospitalCode, unitBySerial.get(i.serialNo), i.serialNo, i.deviceId)
     if (r) add(r.tag, r.detail)
     const dups = dupBySerial?.get(i.serialNo)
     if (dups?.length) add('DUPLICATE', dups.join(', '))
@@ -323,7 +328,7 @@ export function isAsCanceledStatus(status: { name: string } | null | undefined):
 export function asReceiptDeviceStateLabel(hasOpenLines: boolean, tags: AsRegistryTagSummary[], intakeIssues = 0, canceled = false): '정상' | '확인필요' | '취소' | null {
   if (canceled) return '취소'
   if (!hasOpenLines) return null
-  return tags.length || intakeIssues > 0 ? '확인필요' : '정상' // 입고 대조(미입고·미식별입고)는 원장 정합 태그와 별개 축 — 목록 표기만 합류
+  return tags.some((t) => t.tag !== 'DETACHED') || intakeIssues > 0 ? '확인필요' : '정상' // 입고 대조(미입고·미식별입고)는 원장 정합 태그와 별개 축 — 목록 표기만 합류. DETACHED는 의도된 예외라 확인필요 아님 (2026-10-29)
 }
 
 /** 목록 마지막 조회 쿼리스트링 보관 키 — 상세 [목록] 복귀 시 필터·페이지 복원 (2026-09-21, 프로젝트 목록 sessionStorage 선례) */

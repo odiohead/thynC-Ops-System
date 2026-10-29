@@ -26,7 +26,7 @@ const listInclude = {
   ticket: { select: { id: true, ticketCode: true, status: true, owner: { select: { id: true, name: true } } } },
   items: {
     select: {
-      id: true, serialNo: true, outcome: true, deviceKind: true, intakeState: true, receivedAt: true, shippedAt: true, shipTrackingNo: true, // 입고 대조 (2026-09-11) · 발송일·발송 송장 열 (2026-09-15) · 입고일 열 (2026-09-16)
+      id: true, serialNo: true, outcome: true, deviceId: true, deviceKind: true, intakeState: true, // deviceId: 분리 예외 태그 판정 (2026-10-29) receivedAt: true, shippedAt: true, shipTrackingNo: true, // 입고 대조 (2026-09-11) · 발송일·발송 송장 열 (2026-09-15) · 입고일 열 (2026-09-16)
       wardName: true, // 목록 '병동' 열 (2026-09-29 — 접수 병동 요약)
       newSerialNo: true, shipMethod: true, symptom: true, // 사용자 열(교체기 시리얼·발송방법·접수사유, 2026-10-01)
       repairedAt: true, // 수리완료 체크 (2026-09-17) — 목록 기기군 배지 `수리 n/m`
