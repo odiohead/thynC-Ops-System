@@ -167,8 +167,13 @@ export default function AsIntakeDetailPage() {
     <div className="mx-auto max-w-screen-2xl px-4 py-6 sm:px-6">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div className="flex items-center gap-2 text-sm text-gray-400"><Link href="/as-receipts" className="hover:text-gray-600">AS업무</Link><span className="text-gray-300">/</span><Link href="/as-receipts/intake" className="hover:text-gray-600">등록대기</Link><span className="text-gray-300">/</span><span className="font-mono text-gray-500">#{d.link.id}</span></div>
-          <h1 className="mt-1 text-xl font-bold text-gray-900">{d.chat.name ?? d.chat.user?.name ?? '(상담)'} <span className="font-normal text-gray-400">· {kst(d.chat.firstUserMessageAt ?? d.chat.createdAtCt)} · {d.chat.state === 'closed' ? '종료' : '진행중'}{d.chat.assigneeName ? ` · 담당 ${d.chat.assigneeName}` : ''}</span></h1>
+          {/* 좌측 상단 복귀 버튼 — 회색 브레드크럼 대체 (2026-10-30 요청) */}
+          <div className="mb-2 flex items-center gap-2">
+            <Link href="/as-receipts/intake" className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">← 등록대기 목록</Link>
+            <Link href="/as-receipts" className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">AS업무</Link>
+            <span className="font-mono text-xs text-gray-400">#{d.link.id}</span>
+          </div>
+          <h1 className="text-xl font-bold text-gray-900">{d.chat.name ?? d.chat.user?.name ?? '(상담)'} <span className="font-normal text-gray-400">· {kst(d.chat.firstUserMessageAt ?? d.chat.createdAtCt)} · {d.chat.state === 'closed' ? '종료' : '진행중'}{d.chat.assigneeName ? ` · 담당 ${d.chat.assigneeName}` : ''}</span></h1>
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
             {d.chat.tags.filter((t) => t.startsWith('f_')).map((t) => <span key={t} className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-600">{t}</span>)}
             {d.chat.vocLink && <Link href={`/voc/${d.chat.vocLink.voc.id}`} className="rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-indigo-700 hover:underline">{d.chat.vocLink.voc.vocCode}</Link>}
@@ -177,11 +182,6 @@ export default function AsIntakeDetailPage() {
           </div>
         </div>
         <div className="text-right text-xs text-gray-500">
-          {/* 등록대기 목록·AS접수 원 페이지 복귀 (2026-10-30 요청) */}
-          <div className="mb-2 flex justify-end gap-2">
-            <Link href="/as-receipts/intake" className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">← 등록대기 목록</Link>
-            <Link href="/as-receipts" className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">AS업무</Link>
-          </div>
           {pending ? (
             <p><span className="rounded bg-red-50 px-1.5 py-0.5 font-medium text-red-700">{d.link.failLabel ?? '등록대기'}</span>{d.link.failNote && <span className="ml-1.5 text-gray-500">{d.link.failNote}</span>}</p>
           ) : d.link.state === 'LINKED' ? (
