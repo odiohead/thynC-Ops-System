@@ -22,7 +22,7 @@ import { asListHref, AS_PICKUP_METHODS, type AsPickupMethod,
   AS_RESOLVE_OUTCOMES, AS_INTAKE_STATE_LABELS, AS_DEVICE_KINDS, isAsIntakeIssue, asDeviceKindFromSerial, type AsIntakeState,
   AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, AS_TAG_BADGE_CLS, AS_TAG_FLAGS_EMPTY, asReceiptTags, type AsTagFlags,
   canMarkAsLineRepaired, asRepairDisabledReason, summarizeAsRepairProgress, AS_LINE_CONDITION_BADGE_CLS, isAsLineConditionBadge, summarizeAsReceiptWards,
-  isValidAsSerial, AS_SERIAL_RULE_TEXT } from '@/lib/asReceiptShared' // 수리완료 체크·기기 상태 배지 (2026-09-17) · 시리얼 형식 게이트 (2026-09-30)
+  isValidAsSerial, AS_SERIAL_RULE_TEXT, type AsLostQuota } from '@/lib/asReceiptShared' // 수리완료 체크·기기 상태 배지 (2026-09-17) · 시리얼 형식 게이트 (2026-09-30)
 import type { TicketStatus } from '@prisma/client'
 import { PRODUCT_TYPES, deviceConditionLabel, deviceSiteLabel } from '@/lib/deviceRegistryShared'
 
@@ -67,6 +67,7 @@ interface AsDetail {
   id: number
   asCode: string
   category: string
+  lostQuota?: AsLostQuota | null // 분실 접수만 — 구매수량 대비 누적 교체 제공 (2026-10-30)
   receiptDate: string
   reporterName: string | null
   pickupMethod: string | null
@@ -1052,10 +1053,39 @@ export default function AsReceiptDetailPage() {
               {req.hospital ? <Link href={`/hospitals/${req.hospital.hospitalCode}`} className="text-blue-600 hover:underline">{req.hospital.hospitalName}</Link> : '-'}
             </p>
           </div>
-          <div>
-            <p className={label}>구분</p>
-            <p className="mt-1 text-sm text-gray-900">{catLabel}</p>
-          </div>
+          {/* 구분 — 분실이면 기기군별 누적 교체 제공 / 구매수량(%) 표기, 한도(10%) 초과·처리 시 초과는 빨간 테두리 깜박임 (2026-10-30) */}
+          {(() => {
+            const q = req.category === 'LOST' ? req.lostQuota : null
+            const over = !!q && q.groups.some((g) => g.overBefore)
+            const overAfter = !over && !!q && q.groups.some((g) => g.overAfter)
+            const alert = over || overAfter
+            const closedReceipt = req.status?.ticketStatus === 'RESOLVED' || req.status?.ticketStatus === 'CLOSED' // 종결 접수면 '처리 시'가 아니라 '이 접수 포함'
+            return (
+              <div className={`relative ${alert ? 'rounded-lg bg-red-50 px-3 py-2 -mx-3 -my-2' : ''}`}>
+                {alert && <span aria-hidden className="pointer-events-none absolute inset-0 animate-pulse rounded-lg border-2 border-red-500" />}
+                <p className={label}>구분{alert && <span className="ml-1.5 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold normal-case tracking-normal text-white">{over ? `분실 제공 한도 ${q!.thresholdPct}% 초과` : closedReceipt ? `이 접수 포함 ${q!.thresholdPct}% 초과` : `이 건 처리 시 ${q!.thresholdPct}% 초과`}</span>}</p>
+                <p className="mt-1 text-sm text-gray-900">{catLabel}</p>
+                {q && (
+                  <div className="mt-1 space-y-0.5 text-xs" title={`분실 기기 신규 제공 한도 = 구매수량(계약완료 딜 기기 수량)의 ${q.thresholdPct}%. '이전 제공'은 다른 분실 접수의 교체 확정 대수, 화살표 뒤는 이 접수의 라인을 교체 처리했을 때`}>
+                    {q.groups.map((g) => {
+                      const bad = g.overBefore || g.overAfter
+                      return (
+                        <p key={g.group} className={bad ? 'font-semibold text-red-700' : 'text-gray-700'}>
+                          <span className="inline-block w-16 text-gray-500">{g.group}</span>
+                          {g.purchased === null
+                            ? <span className="text-gray-400">구매수량 미등록{g.before + g.thisReceipt > 0 ? ` (제공 ${g.before}대, 이 접수 ${g.thisReceipt}대)` : ''}</span>
+                            : <>
+                                <span className="font-mono">{g.before} / {g.purchased}</span> ({g.pctBefore}%)
+                                {g.thisReceipt > 0 && <span className={`block pl-16 ${g.overAfter ? 'text-red-700' : 'text-gray-500'}`}>→ {closedReceipt ? '이 접수 포함' : '처리 시'} <span className="font-mono">{g.after} / {g.purchased}</span> ({g.pctAfter}%)</span>}
+                              </>}
+                        </p>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
           <div>
             <p className={label}>상태</p>
             <p className="mt-1">{codeBadge(req.status)}</p>

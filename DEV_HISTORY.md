@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-10-30 14:30 | 분실 AS — 구매수량 대비 누적 교체 제공 표기 + 10% 한도 초과 식별
+
+- 정책: 분실 기기 신규 제공은 구매수량의 10%까지. AS 상세 '1. 공통정보' 구분 필드에 분실이면 기기군(심전계/산소포화도) 2줄로 `이전 제공 / 구매수량 (%)` + 이 접수 라인이 있으면 `→ 처리 시(종결이면 '이 접수 포함') n / m (%)`
+- 사용자 결정: 분모 = **계약완료 딜의 `sales_deal_devices` 기기 수량 합**만(없으면 '구매수량 미등록 (제공 n대, 이 접수 n대)' — 원장 배치 수로 대체하지 않음, 분실 병원 82곳 중 21곳만 딜 기기 행 보유) / 이 접수 계산은 미종결 라인 전부 + 교체 확정 라인 / 초과 표시 = 빨간 테두리 깜박임(ring `animate-pulse`) + 배지('분실 제공 한도 10% 초과' / '이 건 처리 시 10% 초과')
+- `lib/asLostQuota.ts` `computeAsLostQuota`(raw SQL 3종, 기기군은 `asDeviceGroupOf` 단일 소스) · 타입·`AS_LOST_QUOTA_PCT`는 `lib/asReceiptShared.ts` · `GET /api/as-receipts/[id]` 응답 `asReceipt.lostQuota`(분실만, 그 외 null)
+- dev2 검증(Playwright·API): 대청병원 정상(심전계 7/120 5.8% → 8/120 6.7%), 문산중앙 '구매수량 미등록', 딜 수량을 임시로 50으로 낮춰 초과 상태(14%→16%) 배지·깜박임 확인 후 원복
+- 영향: `lib/asLostQuota.ts`(신규), `lib/asReceiptShared.ts`, `app/api/as-receipts/[id]/route.ts`, `app/as-receipts/[id]/page.tsx`, README
+
 ## 2026-10-30 10:20 | AS 등록대기 — 복귀 버튼 2종 (등록대기 목록 · AS업무)
 
 - 사용자 요청: 등록대기 상세 상단에 [← 등록대기 목록], 등록대기 목록·상세에 [AS업무](AS접수 원 페이지 복귀). 기존엔 작은 브레드크럼만 있었음

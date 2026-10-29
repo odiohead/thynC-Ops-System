@@ -1,0 +1,57 @@
+/**
+ * 분실 AS — 구매수량 대비 누적 교체 제공 현황 (2026-10-30 사용자 요청)
+ *
+ * 정책: 분실 기기는 구매수량의 10%까지만 신규 기기로 제공. AS 상세 '1. 공통정보' 구분 필드에 기기군(심전계/산소포화도)별로
+ * "이 접수 이전 제공 / 구매수량 (%)"를 표기하고, 이미 초과했거나 이 접수를 교체 처리하면 초과하는 경우 식별 표시.
+ *
+ * - 분모(구매수량) = 계약완료 딜의 `sales_deal_devices.quantity` 합(기기군별). 행이 없는 병원은 null('구매수량 미등록') — 사용자 결정: 원장 배치 수로 대체하지 않음
+ * - 분자(이전 제공) = 같은 병원의 다른 분실 접수(취소 제외) 라인 중 결과 '교체'(REPLACE) 대수
+ * - 이 접수 = 미종결 라인 전부 + 이미 교체 확정된 라인 (분실 접수는 교체 발송이 기본이므로 미종결 라인은 전부 교체 예정으로 본다)
+ * - 기기군 접기는 asDeviceGroupOf(원장 모델명 → 미등록 라인 기기종류 → 시리얼 접두) 단일 소스
+ */
+import { prisma } from '@/lib/prisma'
+import { asDeviceGroupOf, AS_LOST_QUOTA_PCT, type AsDeviceGroup, type AsLostQuota, type AsLostQuotaGroup } from '@/lib/asReceiptShared'
+
+const QUOTA_GROUPS: AsLostQuotaGroup['group'][] = ['심전계', '산소포화도']
+
+export async function computeAsLostQuota(receipt: { id: number; hospitalCode: string }): Promise<AsLostQuota> {
+  const [purchasedRows, beforeRows, thisRows] = await Promise.all([
+    prisma.$queryRaw<{ device_name: string; qty: number }[]>`
+      SELECT di.device_name, sum(dd.quantity)::int AS qty
+      FROM sales_deal_devices dd JOIN sales_deals d ON d.id = dd.deal_id JOIN status_codes s ON s.id = d.status_id JOIN device_info di ON di.id = dd.device_info_id
+      WHERE d.hospital_code = ${receipt.hospitalCode} AND s.name = '계약완료' AND dd.quantity > 0 GROUP BY di.device_name`,
+    prisma.$queryRaw<{ device_name: string | null; device_kind: string | null; serial_no: string }[]>`
+      SELECT di.device_name, i.device_kind, i.serial_no
+      FROM as_receipt_items i JOIN as_receipts r ON r.id = i.receipt_id LEFT JOIN status_codes s ON s.id = r.status_id
+      LEFT JOIN device_units du ON du.id = i.device_id LEFT JOIN device_info di ON di.id = du.device_info_id
+      WHERE r.hospital_code = ${receipt.hospitalCode} AND r.category = 'LOST' AND r.id <> ${receipt.id} AND i.outcome = 'REPLACE' AND coalesce(s.name, '') <> '취소'`,
+    prisma.$queryRaw<{ device_name: string | null; device_kind: string | null; serial_no: string }[]>`
+      SELECT di.device_name, i.device_kind, i.serial_no
+      FROM as_receipt_items i LEFT JOIN device_units du ON du.id = i.device_id LEFT JOIN device_info di ON di.id = du.device_info_id
+      WHERE i.receipt_id = ${receipt.id} AND (i.outcome IS NULL OR i.outcome = 'REPLACE')`,
+  ])
+  const purchased = new Map<AsDeviceGroup, number>()
+  for (const r of purchasedRows) { const g = asDeviceGroupOf(r.device_name, null); purchased.set(g, (purchased.get(g) ?? 0) + Number(r.qty)) }
+  const count = (rows: { device_name: string | null; device_kind: string | null; serial_no: string }[]) => {
+    const m = new Map<AsDeviceGroup, number>()
+    for (const r of rows) { const g = asDeviceGroupOf(r.device_name, r.device_kind, r.serial_no); m.set(g, (m.get(g) ?? 0) + 1) }
+    return m
+  }
+  const before = count(beforeRows)
+  const cur = count(thisRows)
+  const pct = (n: number, d: number | null) => (d ? Math.round((n / d) * 1000) / 10 : null)
+  const groups: AsLostQuotaGroup[] = QUOTA_GROUPS.map((group) => {
+    const p = purchased.get(group) ?? null
+    const b = before.get(group) ?? 0
+    const t = cur.get(group) ?? 0
+    const a = b + t
+    const limit = p === null ? null : (p * AS_LOST_QUOTA_PCT) / 100
+    return {
+      group, purchased: p, before: b, thisReceipt: t, after: a,
+      pctBefore: pct(b, p), pctAfter: pct(a, p),
+      overBefore: limit !== null && b > limit,
+      overAfter: limit !== null && a > limit,
+    }
+  })
+  return { thresholdPct: AS_LOST_QUOTA_PCT, hasPurchase: groups.some((g) => g.purchased !== null), groups }
+}

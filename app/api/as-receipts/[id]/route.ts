@@ -9,6 +9,7 @@ import { AS_PICKUP_METHODS, AS_CATEGORIES, AS_DEST_TYPES, classifyAsRegistryLine
 import { findOpenLinesBySerial, duplicatesForReceipt, syncCombinedPackByTracking } from '@/lib/asReceiptSearch'
 import { applyItemChanges, setUnitInUse, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { syncAsReceiptToTicket } from '@/lib/ticket-domains/asReceipt'
+import { computeAsLostQuota } from '@/lib/asLostQuota' // 분실 — 구매수량 대비 누적 교체 제공 (2026-10-30)
 import { asDetailInclude, shapeAsDetailItems } from '@/lib/asReceiptQueue' // 상세 include·라인 정형화 — 수리대기 큐와 공용 (2026-09-28)
 import { toRegistryErrorResponse } from '@/lib/deviceRegistry'
 import { todayKst } from '@/lib/deviceRegistryShared'
@@ -57,7 +58,8 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   // 원천 상담 연결·변경 감지 (2026-10-27 as_channeltalk_intake_design.md §6)
   const intake = await prisma.asIntakeLink.findFirst({ where: { receiptId: asReceipt.id, state: 'LINKED' }, select: { id: true, chatId: true, changeDetectedAt: true, changeDiff: true, chat: { select: { channelId: true } } } })
-  return NextResponse.json({ asReceipt: { ...asReceipt, items }, intake: intake ? { linkId: intake.id, chatId: intake.chatId, channelId: intake.chat.channelId, changeDetectedAt: intake.changeDetectedAt, changeDiff: intake.changeDiff } : null })
+  const lostQuota = asReceipt.category === 'LOST' ? await computeAsLostQuota({ id: asReceipt.id, hospitalCode: asReceipt.hospitalCode }) : null
+  return NextResponse.json({ asReceipt: { ...asReceipt, items, lostQuota }, intake: intake ? { linkId: intake.id, chatId: intake.chatId, channelId: intake.chat.channelId, changeDetectedAt: intake.changeDetectedAt, changeDiff: intake.changeDiff } : null })
 }
 
 /** YYYY-MM-DD | '' | null → Date | null (undefined = 미변경) */

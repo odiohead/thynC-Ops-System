@@ -153,6 +153,22 @@ export const AS_DEVICE_KINDS = ['심전도', '산소포화도', '게이트웨이
 
 // ─── 기기군 (상세 AS상세내역 카드 분리, 2026-09-11) ────────────────
 // 원장 모델명(device_info.device_name: 심전계/산소포화도) 또는 미등록 라인 기기종류(AS_DEVICE_KINDS)를 3군으로 접는다
+// ─── 분실 교체 제공 한도 (2026-10-30 — lib/asLostQuota.ts 집계, AS 상세 '구분' 필드 표기) ────
+/** 분실 기기 신규 제공 한도 — 구매수량 대비 % */
+export const AS_LOST_QUOTA_PCT = 10
+export interface AsLostQuotaGroup {
+  group: '심전계' | '산소포화도'
+  purchased: number | null // 계약완료 딜 기기 수량 합 — null = 구매수량 미등록
+  before: number // 이 접수 이전(다른 분실 접수) 교체 제공 대수
+  thisReceipt: number // 이 접수의 미종결 + 교체 확정 라인 수
+  after: number // before + thisReceipt
+  pctBefore: number | null
+  pctAfter: number | null
+  overBefore: boolean // 이미 한도 초과
+  overAfter: boolean // 이 접수를 교체 처리하면 초과
+}
+export interface AsLostQuota { thresholdPct: number; hasPurchase: boolean; groups: AsLostQuotaGroup[] }
+
 export const AS_DEVICE_GROUPS = ['심전계', '산소포화도', '기타'] as const
 export type AsDeviceGroup = (typeof AS_DEVICE_GROUPS)[number]
 export function asDeviceGroupOf(modelName: string | null | undefined, deviceKind: string | null | undefined, serialNo?: string | null): AsDeviceGroup {
