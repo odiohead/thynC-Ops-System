@@ -144,7 +144,6 @@ function todayKst(): string {
 /** 라인의 기기현황 상태 배지 */
 const REGISTRY_TAG_BADGE: Record<AsRegistryTag, string> = {
   BAD_SERIAL: 'bg-red-600 text-white', // 시리얼 형식 오류 — 보정 전 처리 불가 (2026-09-30)
-  DETACHED: 'bg-violet-50 text-violet-700', // 원장 분리 예외 (2026-10-29) — 확정 대상 아님
   OTHER_HOSPITAL: 'bg-red-50 text-red-600',
   RECOVERED: 'bg-amber-50 text-amber-700',
   UNPLACED: 'bg-gray-100 text-gray-500',
@@ -256,7 +255,7 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
   const isShip = (o: string | null) => o === 'REPAIR_RETURN' || o === 'REPLACE'
   const draftItems = items.filter((i) => !i.outcome && i.draftOutcome)
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const registryItems = items.filter((i) => !i.outcome && i.registryTag && i.registryTag.tag !== 'DETACHED') // 원장 정합 확인 대상 (타병원·회수·미배치·미등록) — 분리 예외는 제외 (2026-10-29)
+  const registryItems = items.filter((i) => !i.outcome && i.registryTag) // 원장 정합 확인 대상 (타병원·회수·미배치·미등록)
   const [regForm, setRegForm] = useState<Record<number, { modelInput: string; productType: string; wardName: string }>>({})
   const regOf = (i: ItemRow) => regForm[i.id] ?? { modelInput: MODEL_BY_KIND[asDeviceKindFromSerial(i.serialNo) ?? ''] ?? '', productType: '', wardName: i.wardName ?? '' }
   const [remapPick, setRemapPick] = useState<Record<number, string>>({}) // MISMATCH 라인별 치환 대상 EXTRA id
