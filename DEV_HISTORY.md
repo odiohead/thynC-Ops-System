@@ -11,6 +11,7 @@
 - 서버 컴포넌트 `HospitalAsSummary`가 `lib/asHospitalSummary.getHospitalAsSummary`를 직접 호출(HospitalDeviceSummary 선례, API 없음)
 - dev2 검증(Playwright): 대청병원(고장 77건·307대, 분실 12건·18대, 5% 테스트 한도 초과 표시), 서울백강병원(이력 없음·0/30), [목록 →] → `/as-receipts?q=병원명&field=hospital&category=LOST` 12행
 - 영향: `lib/asHospitalSummary.ts`(신규), `app/hospitals/[code]/_components/HospitalAsSummary.tsx`(신규), `app/hospitals/[code]/page.tsx`, README
+- **PROD 배포 2026-10-30 (0d9f788)** — 등록대기 복귀 버튼(701ec7b·a8045d7)·분실 한도 표기(c0c5e7a, 한도 10%)·병원 AS 현황(48dab95·0d9f788) 함께 반영. 협업 서버 번들 동일(재시작 불필요). dev2는 UI 확인용 5% 임시값을 10%로 되돌려 재빌드
 
 ## 2026-10-30 14:30 | 분실 AS — 구매수량 대비 누적 교체 제공 표기 + 10% 한도 초과 식별
 
