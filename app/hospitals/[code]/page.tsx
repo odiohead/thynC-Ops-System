@@ -7,6 +7,7 @@ import { hasPermission } from '@/lib/appRoles'
 import DeleteButton from './_components/DeleteButton'
 import TransferAllWorkButton from '@/app/components/TransferAllWorkButton'
 import HospitalDeviceSummary from './_components/HospitalDeviceSummary'
+import HospitalAsSummary from './_components/HospitalAsSummary'
 import StatusBadge from '@/app/components/StatusBadge'
 import SiteVisitsCard from './_components/SiteVisitsCard'
 import InstallPlansCard from './_components/InstallPlansCard'
@@ -268,6 +269,10 @@ export default async function HospitalDetailPage({ params }: PageProps) {
           {/* 도입 현황 — 디바이스 원장 요약(D12, P1 임시 플레이스홀더 → P4에서 실데이터) */}
           <div className="border-t border-gray-100 px-6 py-5">
             <HospitalDeviceSummary hospitalCode={hospital.hospitalCode} introBeds={hospital.introBeds} />
+          </div>
+          {/* AS 현황 — 고장/분실 분리, 분실은 구매수량 대비 교체 제공(한도) (2026-10-30) */}
+          <div className="border-t border-gray-100 px-6 py-5">
+            <HospitalAsSummary hospitalCode={hospital.hospitalCode} hospitalName={hospital.hospitalName} />
           </div>
         </div>
 
