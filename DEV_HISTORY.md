@@ -11,6 +11,8 @@
 - `lib/asLostQuota.ts` `computeAsLostQuota`(raw SQL 3종, 기기군은 `asDeviceGroupOf` 단일 소스) · 타입·`AS_LOST_QUOTA_PCT`는 `lib/asReceiptShared.ts` · `GET /api/as-receipts/[id]` 응답 `asReceipt.lostQuota`(분실만, 그 외 null)
 - dev2 검증(Playwright·API): 대청병원 정상(심전계 7/120 5.8% → 8/120 6.7%), 문산중앙 '구매수량 미등록', 딜 수량을 임시로 50으로 낮춰 초과 상태(14%→16%) 배지·깜박임 확인 후 원복
 - 영향: `lib/asLostQuota.ts`(신규), `lib/asReceiptShared.ts`, `app/api/as-receipts/[id]/route.ts`, `app/as-receipts/[id]/page.tsx`, README
+- **[PROD 데이터 조치 2026-10-30, 사용자 지시]** 딜 '도입 기기 수량'(`sales_deal_devices`)이 비어 있는 계약완료 딜 **187건(병원 165곳)** 에 '대웅제약' 카드 디바이스수(`sales_deals.daewoong_device_count`)를 심전계·산소포화도 **동일 수량**으로 일괄 적재(374행, 합 27,964대). 백업 PROD `~/backups/sales_deal_devices_before_fill_20261030.dump`. 기존 행이 있는 딜(74건, 한 기기만 있는 2건 포함)은 무변경. 적재 후 계약완료 딜 전부 기기 행 보유, 분실 병원 82/82 커버
+- PROD → dev2 데이터 동기화(새 dump `thync_ops_sync_20261029_224205.dump`, dev2 백업 `dev_before_sync_20261030_074229.sql.gz`, public+wiki 131테이블 TRUNCATE → data-only 복원, `channeltalk_as_interval`·`channeltalk_as_intake` off·`channeltalk_voc_interval` 5m 유지)
 
 ## 2026-10-30 10:20 | AS 등록대기 — 복귀 버튼 2종 (등록대기 목록 · AS업무)
 
