@@ -7,7 +7,7 @@
 ## 2026-10-30 16:10 | 병원 상세 'thynC 현황 > AS 현황' — 고장/분실 분리 요약 + 분실 제공 한도
 
 - 사용자 요청: 병원 상세(`/hospitals/[code]`)에서도 분실·일반 AS 현황을 보게. 'thynC 현황' 카드의 도입 현황 아래에 **AS 현황** 섹션 추가(설계·배치는 내 판단)
-- 고장 AS | 분실 AS 2열 블록: 누적 접수(건·대, 심전계/산소포화도) · 미완료(7일 경과) · 최근 90일(마지막 접수일) · 최근 접수 3건(링크·상태) · [목록 →](AS업무 병원+구분 필터 딥링크) · 분실 블록엔 **교체 제공 / 구매수량(%)** 기기군별(AS 상세 '구분'과 같은 산식, `computeAsLostQuota` receipt id 0) — 한도 초과면 빨간 테두리 깜박임·배지. 취소 접수·취소 라인 제외. 접수 없으면 '접수 이력 없음'
+- 고장 AS | 분실 AS 블록 2개 — **블록 전체가 AS업무 링크**(병원+구분 필터 `?q=병원명&field=hospital&category=`). 본문은 기기군 2줄만: 고장 `누적 접수 대수 / 구매수량`, 분실 `교체 제공 / 구매수량 (%)`(AS 상세 '구분'과 같은 산식, `computeAsLostQuota` receipt id 0), 우측 상단 접수 건수, 미완료는 있을 때만 한 줄. 분실 한도 초과면 빨간 테두리 깜박임·배지. 취소 접수·취소 라인 제외. 1차안의 최근 접수 3건 목록은 사용자 피드백으로 제거(같은 날)
 - 서버 컴포넌트 `HospitalAsSummary`가 `lib/asHospitalSummary.getHospitalAsSummary`를 직접 호출(HospitalDeviceSummary 선례, API 없음)
 - dev2 검증(Playwright): 대청병원(고장 77건·307대, 분실 12건·18대, 5% 테스트 한도 초과 표시), 서울백강병원(이력 없음·0/30), [목록 →] → `/as-receipts?q=병원명&field=hospital&category=LOST` 12행
 - 영향: `lib/asHospitalSummary.ts`(신규), `app/hospitals/[code]/_components/HospitalAsSummary.tsx`(신규), `app/hospitals/[code]/page.tsx`, README
