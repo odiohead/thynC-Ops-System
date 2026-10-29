@@ -177,6 +177,11 @@ export default function AsIntakeDetailPage() {
           </div>
         </div>
         <div className="text-right text-xs text-gray-500">
+          {/* 등록대기 목록·AS접수 원 페이지 복귀 (2026-10-30 요청) */}
+          <div className="mb-2 flex justify-end gap-2">
+            <Link href="/as-receipts/intake" className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">← 등록대기 목록</Link>
+            <Link href="/as-receipts" className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">AS업무</Link>
+          </div>
           {pending ? (
             <p><span className="rounded bg-red-50 px-1.5 py-0.5 font-medium text-red-700">{d.link.failLabel ?? '등록대기'}</span>{d.link.failNote && <span className="ml-1.5 text-gray-500">{d.link.failNote}</span>}</p>
           ) : d.link.state === 'LINKED' ? (

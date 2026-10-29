@@ -49,10 +49,14 @@ export default function AsIntakeQueuePage() {
           <h1 className="mt-1 text-xl font-bold text-gray-900">AS 등록대기</h1>
           <p className="mt-0.5 text-sm text-gray-500">채널톡 AS 상담 중 자동 접수에 실패한 건입니다. 원문을 보고 빈칸을 채워 [등록]하거나, AS가 아니면 제외하세요.</p>
         </div>
-        <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 text-sm">
-          {STATES.map(([k, l]) => (
-            <button key={k} type="button" onClick={() => { setState(k); setFailClass('') }} className={`rounded-md px-3 py-1 ${state === k ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>{l}{k === 'PENDING' && pendingTotal > 0 ? ` ${pendingTotal}` : ''}</button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 text-sm">
+            {STATES.map(([k, l]) => (
+              <button key={k} type="button" onClick={() => { setState(k); setFailClass('') }} className={`rounded-md px-3 py-1 ${state === k ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>{l}{k === 'PENDING' && pendingTotal > 0 ? ` ${pendingTotal}` : ''}</button>
+            ))}
+          </div>
+          {/* AS접수 원 페이지 복귀 (2026-10-30 요청) */}
+          <Link href="/as-receipts" className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">← AS업무</Link>
         </div>
       </div>
 
