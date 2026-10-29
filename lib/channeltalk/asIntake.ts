@@ -255,6 +255,7 @@ export async function intakeAsFromChats(changedChatIds: string[], log: (l: strin
   if (mode === 'off') return r
   const cutover = await readAsIntakeCutover()
   if (mode === 'on' && !cutover) { log('AS 인입 ON인데 컷오버 미설정 — 스킵(설정 화면에서 컷오버 지정)'); return r }
+  const cutoverYmd = cutover ? new Date(cutover.getTime() + 9 * 3600_000).toISOString().slice(0, 10) : '' // KST 날짜 — extract.receiptDate(YYYY-MM-DD)와 비교
   const bot = mode === 'on' ? await botUser() : null
   if (mode === 'on' && !bot) { r.errors.push(`봇 계정(${CHANNELTALK_BOT_EMAIL}) 없음`); return r }
   const tags = Array.from(AS_INTAKE_TAGS)
@@ -275,7 +276,8 @@ export async function intakeAsFromChats(changedChatIds: string[], log: (l: strin
     try {
       const link = chat.asIntake
       if (link?.state === 'IGNORED') continue
-      if (cutover && (!chat.firstUserMessageAt || chat.firstUserMessageAt < cutover) && !link) continue
+      // 컷오버 이전에 시작된 미처리 상담 — 바로 버리지 않고 추출 후 ALF 완료(접수일) 기준으로 판정 (2026-10-29)
+      const preCutover = !!cutover && !link && (!chat.firstUserMessageAt || chat.firstUserMessageAt < cutover)
       // 연결된 접수 — 상담 변경 시 재추출·diff 기록 (반영은 사람)
       if (link?.state === 'LINKED') {
         if (mode !== 'on' || !link.receiptId) continue
@@ -288,6 +290,12 @@ export async function intakeAsFromChats(changedChatIds: string[], log: (l: strin
         continue
       }
       const { extract, lastMessageId } = await extractAsFromChat(chat, matcher)
+      // 컷오버 이전 상담이라도 ALF 완료(접수일)가 컷오버 이후면 처리 — 카테고리만 고른 뒤 며칠 뒤 같은 상담에서 접수한 사례
+      // (2026-10-29 부산백병원 P030666: 10/26 상담 → 10/29 접수. 종전엔 첫 발화 기준으로 스킵돼 시트/수기 등록만 됨)
+      if (preCutover) {
+        if (!extract.hasCompletion || extract.receiptDate < cutoverYmd) continue
+        log(`컷오버 이전 상담의 사후 접수 — ${chat.id} 접수일 ${extract.receiptDate} (첫 발화 ${chat.firstUserMessageAt?.toISOString().slice(0, 10) ?? '-'})`)
+      }
       const fails = validateExtract(extract)
       if (!fails.length && extract.hospitalCode) {
         const dup = await findExistingReceipt(extract.hospitalCode, extract.receiptDate, extract.lines.map((l) => l.serial))
