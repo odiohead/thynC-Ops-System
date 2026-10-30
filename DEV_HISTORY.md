@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-10-30 21:30 | VOC현황 시트 과거 이력 적재(dev2 7,894건) + VOC 등록대기 큐
+
+- 배경: 구글시트 'thynC VOC 현황' > 'VOC현황_NEW'(10,672행, 2024-10-24~2026-10-28)와 시스템 VOC 대조 분석 — 시스템 VOC는 2026-07-14부터만 존재. 겹치는 기간 3,112행은 '접수시간'=상담 고객 메시지 시각(±2분)+병원코드+본문 유사도로 93.8% 상담 매칭(대조표 `scripts/data/voc_sheet_match.tsv`, 상담 id 기준이라 PROD 공용). 차이 4종: ① 7/14 이전 7,560행 ② 수기(유선·대웅 경유) ~45행 ③ 구 태그명(`f_AS_입출고`·`d_사용_기기관리`·`c_EMR_연동` 등 현 VOC_TYPE 마스터에 없는 이름)만 달린 상담 186건이 NO_TAG로 미승격 ④ 시트는 문의 단위 분할(상담 1건→2~5행 456건)·A/S 탭 복제 행. 2026-08부터 시트의 완료여부·1차대응·문의유형 열은 미기재(태그만)
+- 사용자 결정 3건: 기존 VOC와 매칭된 2,616행은 **건너뛰기** / 등록대기 큐 유입 = **시트 잔여(병원 미식별) + 채널톡 미승격 상담(태그 없음·구 태그명)** — 병원 없는 상담은 지금처럼 VOC 바로 생성 / 시트 전용 열은 **본문 메모 블록**으로 보존. 설계 기록 `projects/voc_sheet_import_design.md`
+- 적재 `scripts/import-voc-sheet.mts --dry|--apply` (멱등 `voc_receipts.source_ref`='sheet:VOC현황_NEW:r{n}'): 생성 경로 `lib/vocImport.createVocFromImport` = `createVocReceipt`(VOC+CS 마스터 티켓) + 보정(VOC·티켓 created_at=접수시각, 종결이면 티켓 CLOSED·closed_at=완료시각 — `fix-voc-retro-promotion` 방식, 알림·SLA 없음). 코드는 **접수 월 기준**(`createVocCodeAllocator`), 상태는 시트 완료여부 → 공란이면 7/14 이전 종결 / 상담 상태 / 14일 경과 종결, 채널은 유선→전화·접수시간 또는 상담→채널톡·그 외 없음, 생성자=등록자 이름(ALF·미매칭은 채널톡 접수봇), 조치 내용→처리결과, 상담 있으면 `voc_channeltalk_chats` link_reason **SHEET**(상담당 1회)
+- **dev2 적재 결과**: VOC 7,894(종결 7,769·처리중 122·접수 3 / 채널톡 4,717·전화 209·없음 2,968 / 상담 연결 248) · 등록대기 177(확인불가 84·미매칭 93) · 건너뜀 2,616 · 오류 0 · 105초. 티켓 created_at=접수시각 7,894/7,894, CLOSED인데 closed_at 없음 0
+- 등록대기 큐: 마이그 `20261030170000_voc_intake_queue`(`voc_intake_items` + `voc_receipts.source_ref`, `source` 'SHEET'), `lib/vocIntakeShared.ts`(상수·VocIntakeDraft), 채널톡 유입 훅 `vocPromote.queueUnpromotedChats`(승격 틱 끝 — OLD_TAG 즉시·NO_TAG는 종료 24h 후, 연결되면 REGISTERED 자동 정리; dev2 1회 실행 → NO_TAG 46건 적재, 컷오버 9/29 이후 분), API 4종(`/api/voc-receipts/intake`·`[id]`·`register`·`ignore`), 화면 `/voc` [등록대기 N] → `/voc/intake` → `/voc/intake/[id]`(AS 등록대기와 같은 구조 — 좌 폼 프리필·우 원문: 채널톡 타임라인 / 시트 원본 열), VOC 목록 '시트' 표시. 큐에서 시트 항목 등록 시에도 접수 월 코드
+- dev2 검증(Playwright 12항목): [등록대기 223]=API pending, 6/1~6/3 목록 30행 전부 '시트' 표시, 큐 목록 223=API(칩 필터 채널톡 46), 시트 r30 상세 프리필(분류·종결) → 분당서울대학교병원 검색·선택 → [VOC 등록] → VOC 종결·병원·큐 REGISTERED, 채널톡 항목 타임라인 9건 → [VOC 아님]→IGNORED→되돌리기→PENDING, VIEWER 403·미로그인 307, 콘솔 오류·5xx 0
+- 영향: `prisma/schema.prisma`, 마이그 1건, `lib/vocService.ts`(vocCode·sourceRef·resolvedAt 입력), `lib/vocImport.ts`·`lib/vocIntakeShared.ts`(신규), `lib/channeltalk/vocPromote.ts`(제목·본문 헬퍼 추출·큐 훅)·`vocSync.ts`(stats), `app/api/voc-receipts/intake/**`(신규 4), `app/voc/intake/**`(신규 2), `app/voc/page.tsx`, `scripts/import-voc-sheet.mts`·`scripts/data/voc_sheet_match.tsv`(신규), README, projects/README, 설계 문서
+- **PROD 미반영** — 반영 시 마이그 → 빌드·재시작 → `import-voc-sheet.mts --dry` 확인 → `--apply`(규칙 5, 약 2분). 시트 10688행 이후 신규 행은 적재하지 않음(CS 기록 경로 전환은 별도 결정). 후속 검토: 큐의 NO_TAG 46건은 '감사합니다'류 잡음일 수 있어 운영하며 제외 사유 통계로 유예 시간·조건 조정
+
 ## 2026-10-30 16:10 | 병원 상세 'thynC 현황 > AS 현황' — 고장/분실 분리 요약 + 분실 제공 한도
 
 - 사용자 요청: 병원 상세(`/hospitals/[code]`)에서도 분실·일반 AS 현황을 보게. 'thynC 현황' 카드의 도입 현황 아래에 **AS 현황** 섹션 추가(설계·배치는 내 판단)

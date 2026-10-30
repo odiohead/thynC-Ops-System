@@ -353,6 +353,7 @@ model User {
   vocChanneltalkLinks      VocChanneltalkChat[]  @relation("VocChatLinker")
   asIntakeDecided          AsIntakeLink[]        @relation("AsIntakeDecider") // 등록대기 큐 등록·제외 (2026-10-27)
   asIntakeAiRequested      AsIntakeLink[]        @relation("AsIntakeAiRequester")
+  vocIntakeDecided         VocIntakeItem[]       @relation("VocIntakeDecider") // VOC 등록대기 등록·제외 (2026-10-30)
   hospitalAsMemos HospitalMeta[] @relation("HospitalAsMemoEditor")
   viewPrefs UserViewPref[] // 사용자별 화면 설정 (2026-10-01)
 }
@@ -2138,7 +2139,8 @@ model VocReceipt {
   resolvedAt      DateTime? @map("resolved_at") @db.Date
   createdById     String?   @map("created_by_id") // 생성자 — 배정이 아니라 기록 (계정 삭제 시 NULL)
   ticketId        Int?      @unique @map("ticket_id") // 도메인 1:1 연결 — CS 마스터 티켓
-  source          String    @default("MANUAL") @db.VarChar(16) // MANUAL / CHANNELTALK (2026-09-28)
+  source          String    @default("MANUAL") @db.VarChar(16) // MANUAL / CHANNELTALK (2026-09-28) / SHEET (구글시트 VOC현황_NEW 적재, 2026-10-30)
+  sourceRef       String?   @unique @map("source_ref") @db.VarChar(40) // 적재 멱등 키 — 'sheet:VOC현황_NEW:r1234' (2026-10-30)
   autoCreated     Boolean   @default(false) @map("auto_created") // 채널톡 태그 트리거 자동 생성
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
@@ -2151,6 +2153,7 @@ model VocReceipt {
   ticket    Ticket?     @relation(fields: [ticketId], references: [id], onDelete: SetNull)
   channeltalkChats VocChanneltalkChat[] // 연결 상담 (2026-09-28)
   asReceipts AsReceipt[]        @relation("AsReceiptVoc") // 이 VOC를 마스터로 하는 AS접수 (2026-10-27)
+  intakeItems VocIntakeItem[]   // 등록대기에서 등록된 경우 그 항목 (2026-10-30)
   types      VocReceiptType[]   // 복수 분류 (2026-10-27) — voc_type_id는 대표 분류
 
   @@index([receivedAt])
@@ -2917,6 +2920,7 @@ model ChanneltalkUserChat {
   vocExcludedBy User?           @relation("ChanneltalkVocExcluder", fields: [vocExcludedById], references: [id], onDelete: SetNull)
   vocLink  VocChanneltalkChat?
   asIntake AsIntakeLink? // AS 인입 연결·등록대기 (2026-10-27)
+  vocIntake VocIntakeItem? // VOC 등록대기 (2026-10-30)
   hospital Hospital?            @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: SetNull)
   messages ChanneltalkMessage[]
 
@@ -3057,6 +3061,33 @@ model AsIntakeLink {
   @@index([state])
   @@index([receiptId])
   @@map("as_intake_links")
+  @@schema("public")
+}
+
+/// VOC 등록대기 큐 (2026-10-30, projects/voc_sheet_import_design.md) — 자동 생성 못 한 VOC 후보(시트 적재 잔여·채널톡 미승격 상담). 사람이 빈칸을 채워 [등록] 또는 [VOC 아님]
+model VocIntakeItem {
+  id           Int       @id @default(autoincrement())
+  source       String    @db.VarChar(16) // SHEET / CHANNELTALK (SQL CHECK)
+  chatId       String?   @unique @map("chat_id") @db.VarChar(40)
+  sourceRef    String?   @unique @map("source_ref") @db.VarChar(40) // 'sheet:VOC현황_NEW:r1234'
+  state        String    @default("PENDING") @db.VarChar(16) // PENDING / REGISTERED / IGNORED (SQL CHECK)
+  failClass    String?   @map("fail_class") @db.VarChar(24) // lib/vocIntakeShared.ts VOC_INTAKE_FAIL_LABEL
+  failNote     String?   @map("fail_note")
+  draft        Json?     // 프리필 초안 (VocIntakeDraft)
+  vocId        Int?      @map("voc_id")
+  decidedById  String?   @map("decided_by_id")
+  decidedAt    DateTime? @map("decided_at") @db.Timestamptz
+  ignoreReason String?   @map("ignore_reason") @db.VarChar(24)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  chat      ChanneltalkUserChat? @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  voc       VocReceipt?          @relation(fields: [vocId], references: [id], onDelete: SetNull)
+  decidedBy User?                @relation("VocIntakeDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([state])
+  @@index([vocId])
+  @@map("voc_intake_items")
   @@schema("public")
 }
 

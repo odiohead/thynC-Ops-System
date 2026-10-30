@@ -426,7 +426,7 @@ export async function runChanneltalkVocSync(mode: ChanneltalkSyncMode = 'increme
         apiCalls: client.calls, rateLimited: client.rateLimited, error,
         stats: {
           newChats: ctx.newChats, budgetExceeded, backfillDone, fullRescan,
-          promote: promote ? { created: promote.created, followups: promote.followups, resolved: promote.resolved, reopened: promote.reopened, errors: promote.errors.length } : null,
+          promote: promote ? { created: promote.created, followups: promote.followups, resolved: promote.resolved, reopened: promote.reopened, queued: promote.queued, settled: promote.settled, errors: promote.errors.length } : null,
           asIntake: asIntake ? { mode: asIntake.mode, candidates: asIntake.candidates, created: asIntake.created, queued: asIntake.queued, retried: asIntake.retried, changes: asIntake.changes, dryAuto: asIntake.dryAuto, dryQueue: asIntake.dryQueue, errors: asIntake.errors.length } : null,
         },
       },

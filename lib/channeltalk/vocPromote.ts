@@ -95,7 +95,52 @@ async function findOpenVocForCustomer(userId: string | null, since: Date): Promi
   return row?.vocId ?? null
 }
 
-export interface PromoteResult { created: number; followups: number; resolved: number; reopened: number; errors: string[] }
+export interface PromoteResult { created: number; followups: number; resolved: number; reopened: number; queued: number; settled: number; errors: string[] }
+
+/** 제목·본문 — 고객 초기 발화 ≤5건. 제목: 인사말만인 발화("안녕하세요", "As")는 건너뛰고 첫 의미 있는 고객 메시지(8자 이상), 없으면 첫 발화 */
+async function chatTitleAndContent(c: { id: string; channelId: string | null; firstAskText: string | null }): Promise<{ title: string; content: string }> {
+  const userTexts = await prisma.channeltalkMessage.findMany({ where: { chatId: c.id, personType: 'user', plainText: { not: null } }, orderBy: { createdAtCt: 'asc' }, take: 5, select: { plainText: true } })
+  const texts = userTexts.map((m) => m.plainText!.trim()).filter(Boolean)
+  const titleSource = texts.find((t) => t.replace(/[\s!?.~,]/g, '').length >= 8 && !/^(안녕하세요|안녕하십니까|수고하세요)[^가-힣a-z0-9]*$/i.test(t)) ?? texts[0] ?? c.firstAskText ?? '(채널톡 상담)'
+  const deskUrl = channeltalkDeskChatUrl(c.channelId, c.id)
+  return { title: oneLine(titleSource), content: `${texts.join('\n') || c.firstAskText || ''}\n\n[채널톡 상담] ${deskUrl}`.trim() }
+}
+
+/**
+ * VOC 등록대기 적재 (2026-10-30, projects/voc_sheet_import_design.md §4) — 승격 조건 중 **태그**만 못 갖춘 상담을 큐로:
+ *  OLD_TAG = a~h_ 태그는 있으나 현 VOC_TYPE 마스터에 없는 이름뿐 / NO_TAG = 분류 태그 없이 종료 후 24h 경과(늦은 태그 유예).
+ * 큐에 있던 상담이 이후 태그·수동 승격으로 VOC에 연결되면 REGISTERED로 정리(settled).
+ */
+export async function queueUnpromotedChats(cutover: Date | null, categoryTags: string[], log: (l: string) => void): Promise<{ queued: number; settled: number }> {
+  let queued = 0, settled = 0
+  const pend = await prisma.vocIntakeItem.findMany({ where: { state: 'PENDING', source: 'CHANNELTALK', chat: { vocLink: { isNot: null } } }, select: { id: true, chat: { select: { vocLink: { select: { vocId: true } } } } } })
+  for (const p of pend) {
+    await prisma.vocIntakeItem.update({ where: { id: p.id }, data: { state: 'REGISTERED', vocId: p.chat!.vocLink!.vocId, decidedAt: new Date(), failClass: null } })
+    settled++
+  }
+  if (!cutover || !categoryTags.length) return { queued, settled }
+  const grace = new Date(Date.now() - 24 * 3600_000)
+  const cands = await prisma.channeltalkUserChat.findMany({
+    where: { vocLink: { is: null }, vocIntake: { is: null }, vocExcludedAt: null, managerInitiated: false, firstUserMessageAt: { gte: cutover }, NOT: { tags: { hasSome: categoryTags } } },
+    select: { id: true, channelId: true, state: true, closedAt: true, tags: true, firstAskText: true, firstUserMessageAt: true, hospitalCode: true, user: { select: { hospitalNameRaw: true } } },
+  })
+  for (const c of cands) {
+    const legacy = c.tags.filter(isCategoryTag)
+    const failClass = legacy.length ? 'OLD_TAG' : c.state === 'closed' && c.closedAt && c.closedAt <= grace ? 'NO_TAG' : null
+    if (!failClass) continue
+    const tc = await chatTitleAndContent(c)
+    const draft = {
+      hospitalCode: c.hospitalCode, hospitalNameRaw: c.hospitalCode ? null : c.user?.hospitalNameRaw ?? null,
+      title: tc.title, content: tc.content, resolution: null,
+      receivedAt: (c.firstUserMessageAt ?? new Date()).toISOString(), resolvedAt: null,
+      statusName: c.state === 'closed' ? '회신완료' : null, channelName: '채널톡', tag: null, tagRaw: legacy[0] ?? null, registrantName: null,
+    }
+    await prisma.vocIntakeItem.create({ data: { source: 'CHANNELTALK', chatId: c.id, failClass, failNote: legacy.length ? `상담 태그: ${legacy.join(', ')}` : '종료 후 24시간 동안 분류 태그 없음', draft } })
+    queued++
+    log(`VOC 등록대기 적재 ← 상담 ${c.id} (${failClass})`)
+  }
+  return { queued, settled }
+}
 
 /**
  * 상담 1건 승격 (자동·수동 공용). 수동(actorId 지정)은 컷오버·태그 조건을 건너뛴다(사용자 판단).
@@ -132,22 +177,17 @@ export async function promoteChat(chatId: string, opts: PromoteChatOptions = {})
     return { vocId: openVoc, vocCode: v!.vocCode, reason: 'AUTO_FOLLOWUP' }
   }
 
-  const [vocTypeId, channelId, ownerId, userTexts] = await Promise.all([
-    vocTypeIdFromTags(c.tags), channeltalkChannelId(), ownerFromAssignee(c.assigneeId),
-    prisma.channeltalkMessage.findMany({ where: { chatId: c.id, personType: 'user', plainText: { not: null } }, orderBy: { createdAtCt: 'asc' }, take: 5, select: { plainText: true } }),
+  const [vocTypeId, channelId, ownerId, tc] = await Promise.all([
+    vocTypeIdFromTags(c.tags), channeltalkChannelId(), ownerFromAssignee(c.assigneeId), chatTitleAndContent(c),
   ])
-  const texts = userTexts.map((m) => m.plainText!.trim()).filter(Boolean)
-  // 제목: 인사말만인 발화("안녕하세요", "As")는 건너뛰고 첫 의미 있는 고객 메시지(8자 이상), 없으면 첫 발화
-  const titleSource = texts.find((t) => t.replace(/[\s!?.~,]/g, '').length >= 8 && !/^(안녕하세요|안녕하십니까|수고하세요)[^가-힣a-z0-9]*$/i.test(t)) ?? texts[0] ?? c.firstAskText ?? '(채널톡 상담)'
-  const deskUrl = channeltalkDeskChatUrl(c.channelId, c.id)
   const created = await createVocReceipt({
-    title: oneLine(titleSource),
+    title: tc.title,
     hospitalCode: c.hospitalCode,
     hospitalNameRaw: c.hospitalCode ? null : c.user?.hospitalNameRaw ?? null,
     customerName: c.user?.name ?? null,
     customerPhone: c.user?.mobileNumber ?? c.user?.landlineNumber ?? null,
     channelId, vocTypeId,
-    content: `${texts.join('\n') || c.firstAskText || ''}\n\n[채널톡 상담] ${deskUrl}`.trim(),
+    content: tc.content,
     receivedAt,
     source: 'CHANNELTALK',
     autoCreated: !opts.manual,
@@ -227,7 +267,7 @@ export async function syncVocStatusFromChat(vocId: number, actorId: string | nul
 
 /** 틱 후처리 — 변경된 상담 id 집합에 대해 승격·상태 동기화 */
 export async function promoteChanneltalkVocs(changedChatIds: string[], log: (l: string) => void): Promise<PromoteResult> {
-  const r: PromoteResult = { created: 0, followups: 0, resolved: 0, reopened: 0, errors: [] }
+  const r: PromoteResult = { created: 0, followups: 0, resolved: 0, reopened: 0, queued: 0, settled: 0, errors: [] }
   if (!(await readPromoteOn())) return r
   const cutover = await readCutover()
   const categoryTags = (await prisma.statusCode.findMany({ where: { category: 'VOC_TYPE', value: { not: null } }, select: { value: true } })).map((r) => r.value!)
@@ -258,6 +298,13 @@ export async function promoteChanneltalkVocs(changedChatIds: string[], log: (l: 
       const msg = `상담 ${c.id}: ${e instanceof Error ? e.message : String(e)}`
       r.errors.push(msg); log(`승격 실패 — ${msg}`)
     }
+  }
+  try {
+    const q = await queueUnpromotedChats(cutover, categoryTags, log)
+    r.queued = q.queued; r.settled = q.settled
+  } catch (e) {
+    const msg = `등록대기 적재: ${e instanceof Error ? e.message : String(e)}`
+    r.errors.push(msg); log(msg)
   }
   return r
 }

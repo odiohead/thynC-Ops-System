@@ -66,9 +66,11 @@ export default function VocListPage() {
 
   const [me, setMe] = useState<{ role: string } | null>(null)
   const canWrite = !!me && me.role !== 'VIEWER'
+  const [intakePending, setIntakePending] = useState<number | null>(null) // 등록대기 건수 (2026-10-30)
 
   useEffect(() => {
     fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setMe({ role: d.role }))
+    fetch('/api/voc-receipts/intake?countOnly=1', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((d) => d && setIntakePending(d.pending ?? 0))
     fetch('/api/settings/voc-status').then((r) => (r.ok ? r.json() : null)).then((d) => setStatuses(d?.statusCodes ?? []))
     fetch('/api/settings/voc-type').then((r) => (r.ok ? r.json() : null)).then((d) => setTypes(d?.statusCodes ?? []))
   }, [])
@@ -107,6 +109,7 @@ export default function VocListPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Link href="/voc/intake" className={`rounded-lg border px-3 py-2 text-sm font-medium hover:bg-gray-50 ${intakePending ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-gray-300 bg-white text-gray-700'}`} title="자동 생성 못 한 VOC 후보 — 빈칸을 채워 등록">등록대기{intakePending ? ` ${intakePending}` : ''}</Link>
           <Link href="/voc/dashboard" className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">대시보드</Link>
           <TicketRuleSettingButton refType="VOC" />
           {canWrite && (
@@ -170,7 +173,7 @@ export default function VocListPage() {
                     <td className="max-w-[10rem] truncate px-3 py-2 text-gray-900">{v.hospital?.hospitalName ?? v.hospitalNameRaw ?? '-'}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-gray-700">{v.customerName ?? '-'}</td>
                     <td className="whitespace-nowrap px-3 py-2">{codeBadge(v.vocType)}</td>
-                    <td className="whitespace-nowrap px-3 py-2">{codeBadge(v.channel)}{v.autoCreated && <span className="ml-1 text-[10px] text-gray-400" title="채널톡 태그 트리거 자동 생성">자동</span>}{(v.channeltalkChats?.length ?? 0) > 1 && <span className="ml-1 text-[10px] text-gray-400">×{v.channeltalkChats!.length}</span>}</td>
+                    <td className="whitespace-nowrap px-3 py-2">{codeBadge(v.channel)}{v.autoCreated && <span className="ml-1 text-[10px] text-gray-400" title="채널톡 태그 트리거 자동 생성">자동</span>}{v.source === 'SHEET' && <span className="ml-1 text-[10px] text-gray-400" title="구글시트 VOC현황_NEW 과거 이력 적재">시트</span>}{(v.channeltalkChats?.length ?? 0) > 1 && <span className="ml-1 text-[10px] text-gray-400">×{v.channeltalkChats!.length}</span>}</td>
                     <td className="max-w-sm truncate px-3 py-2 text-gray-900">{v.title}</td>
                     <td className="whitespace-nowrap px-3 py-2">{codeBadge(v.status)}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-gray-600">{v.ticket?.owner?.name ?? '-'}</td>

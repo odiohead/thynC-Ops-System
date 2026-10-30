@@ -21,10 +21,16 @@ export interface CreateVocInput {
   statusId?: number | null // 없으면 '접수'
   content?: string | null
   receivedAt?: Date | null
-  source?: 'MANUAL' | 'CHANNELTALK'
+  source?: 'MANUAL' | 'CHANNELTALK' | 'SHEET'
   autoCreated?: boolean
   /** 티켓 담당자 (활성 사용자 id) — 채널톡 assignee 매핑 */
   ownerId?: string | null
+  /** 적재 멱등 키 (시트 행 등, 2026-10-30) */
+  sourceRef?: string | null
+  /** 코드 지정 — 과거 이력 적재 시 접수 월 기준 채번(lib/vocImport). 없으면 nextVocCode(현재 월) */
+  vocCode?: string | null
+  /** 처리 완료일 — 과거 이력 적재 */
+  resolvedAt?: Date | null
 }
 
 export async function createVocReceipt(input: CreateVocInput, actorId: string): Promise<{ id: number; vocCode: string; ticketId: number }> {
@@ -43,7 +49,7 @@ export async function createVocReceipt(input: CreateVocInput, actorId: string): 
       return await prisma.$transaction(async (tx) => {
         const voc = await tx.vocReceipt.create({
           data: {
-            vocCode: await nextVocCode(tx),
+            vocCode: input.vocCode ?? (await nextVocCode(tx)),
             title: input.title,
             hospitalCode: input.hospitalCode ?? null,
             hospitalNameRaw: input.hospitalCode ? null : input.hospitalNameRaw ?? null,
@@ -57,6 +63,8 @@ export async function createVocReceipt(input: CreateVocInput, actorId: string): 
             createdById: actorId,
             source: input.source ?? 'MANUAL',
             autoCreated: input.autoCreated ?? false,
+            sourceRef: input.sourceRef ?? null,
+            resolvedAt: input.resolvedAt ?? null,
           },
         })
         const ticketId = await createTicketForVoc(tx, {
@@ -74,7 +82,7 @@ export async function createVocReceipt(input: CreateVocInput, actorId: string): 
         return { id: voc.id, vocCode: voc.vocCode, ticketId }
       })
     } catch (err) {
-      if (attempt === 0 && err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') continue
+      if (attempt === 0 && !input.vocCode && err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') continue
       throw err
     }
   }
