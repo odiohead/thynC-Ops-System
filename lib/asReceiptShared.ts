@@ -76,6 +76,12 @@ export const AS_OUTCOME_LABELS: Record<AsOutcome, string> = {
 }
 /** 라인 처리 패널에서 고를 수 있는 결과 — 미회수는 접수자 확인 절차 전용 */
 export const AS_RESOLVE_OUTCOMES = ['REPAIR_RETURN', 'REPLACE', 'LOST', 'CANCELED'] as const
+/** 접수 구분별 선택 가능한 처리방법 (2026-10-30): 분실 접수는 기기를 수리해 돌려줄 수 없으므로 '수리반환' 제외 — UI 선택지·서버 검증(초안·확정) 단일 소스 */
+export function asResolveOutcomesFor(category: string | null | undefined): readonly AsOutcome[] {
+  return category === 'LOST' ? AS_RESOLVE_OUTCOMES.filter((o) => o !== 'REPAIR_RETURN') : AS_RESOLVE_OUTCOMES
+}
+/** 분실 접수에서 '새 기기 제공'으로 세는 라인 결과 — 분실 한도 집계(`lib/asLostQuota.ts`) 단일 소스. REPAIR_RETURN은 AS이력 마이그(IMPORT) 분류 잔재(라벨 승계 발송)라 제공으로 본다 */
+export const AS_LOST_PROVIDED_OUTCOMES = ['REPLACE', 'REPAIR_RETURN'] as const
 
 // ─── 입고 대조 (2026-09-11 — as_work_design.md §14) ───────────────
 export const AS_INTAKE_STATES = ['PENDING', 'RECEIVED', 'MISMATCH', 'EXTRA'] as const

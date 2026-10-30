@@ -19,7 +19,7 @@ import { asListHref, AS_PICKUP_METHODS, type AsPickupMethod,
   AS_DEST_TYPE_LABELS, AS_OUTCOME_LABELS,
   type AsCategory, type AsMethod, type AsDestType, type AsOutcome, AS_REGISTRY_TAG_LABELS, AS_REGISTRY_TAG_DESC, type AsRegistryTag, type AsRegistryLineTag,
   AS_METHODS, AS_DEVICE_GROUPS, asDeviceGroupOf, type AsDeviceGroup,
-  AS_RESOLVE_OUTCOMES, AS_INTAKE_STATE_LABELS, AS_DEVICE_KINDS, isAsIntakeIssue, asDeviceKindFromSerial, type AsIntakeState,
+  AS_RESOLVE_OUTCOMES, asResolveOutcomesFor, AS_INTAKE_STATE_LABELS, AS_DEVICE_KINDS, isAsIntakeIssue, asDeviceKindFromSerial, type AsIntakeState,
   AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, AS_TAG_BADGE_CLS, AS_TAG_FLAGS_EMPTY, asReceiptTags, type AsTagFlags,
   canMarkAsLineRepaired, asRepairDisabledReason, summarizeAsRepairProgress, AS_LINE_CONDITION_BADGE_CLS, isAsLineConditionBadge, summarizeAsReceiptWards,
   isValidAsSerial, AS_SERIAL_RULE_TEXT, type AsLostQuota } from '@/lib/asReceiptShared' // 수리완료 체크·기기 상태 배지 (2026-09-17) · 시리얼 형식 게이트 (2026-09-30)
@@ -231,6 +231,7 @@ interface GroupCardProps {
   group: AsDeviceGroup
   items: ItemRow[]
   asCode: string
+  category: string // 접수 구분 — 분실이면 처리방법에서 '수리반환' 제외 (2026-10-30, `asResolveOutcomesFor`)
   hospitalCode: string | null
   canResolve: boolean
   canEdit: boolean
@@ -248,7 +249,7 @@ interface GroupCardProps {
 }
 const MODEL_BY_KIND: Record<string, string> = { 심전도: '심전계', 산소포화도: '산소포화도', 게이트웨이: '게이트웨이' }
 
-function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm, onCorrectSerial, canRepair, onToggleRepaired, onScrapLine }: GroupCardProps) {
+function GroupCard({ index, group, items, asCode, category, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm, onCorrectSerial, canRepair, onToggleRepaired, onScrapLine }: GroupCardProps) {
   const [fixSerial, setFixSerial] = useState<Record<number, string>>({}) // 시리얼 보정 입력 (2026-09-15) — 라인별, 빈 값 = 닫힘
   const repair = summarizeAsRepairProgress(items) // 수리완료 n/m (2026-09-17) — m = 체크 가능 라인(canMarkAsLineRepaired)
   const badSerialItems = items.filter((i) => !i.outcome && !isValidAsSerial(i.serialNo)) // 시리얼 형식 오류 — 보정 전 처리 불가 (2026-09-30)
@@ -577,7 +578,7 @@ function GroupCard({ index, group, items, asCode, hospitalCode, canResolve, canE
                 <span className="text-xs font-medium text-gray-500">처리방법</span>
                 <select value={outcome} onChange={(e) => setOutcome(e.target.value as AsOutcome | '')} disabled={draftSel.length === 0} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm disabled:opacity-50" title={draftSel.length === 0 ? '미확정 라인을 선택하면 처리방법을 지정할 수 있습니다' : "선택한 미확정 라인의 처리방법 — '-'(미선택)이면 기존 처리방법을 바꾸지 않고 발송정보만 저장합니다"}>
                   <option value="">-</option>
-                  {AS_RESOLVE_OUTCOMES.map((o) => <option key={o} value={o}>{AS_OUTCOME_LABELS[o]}</option>)}
+                  {asResolveOutcomesFor(category).map((o) => <option key={o} value={o}>{AS_OUTCOME_LABELS[o]}</option>)}
                 </select>
               </>
             )}
@@ -1304,6 +1305,7 @@ export default function AsReceiptDetailPage() {
               group={g.group}
               items={g.items}
               asCode={req.asCode}
+              category={req.category}
               hospitalCode={req.hospital?.hospitalCode ?? null}
               canResolve={canResolve}
               canEdit={canEdit}

@@ -22,7 +22,7 @@ import {
   type RegistryCtx, type UnitStateSnapshot,
 } from '@/lib/deviceRegistry'
 import { syncAsReceiptToTicket, createTicketForAsReceipt } from '@/lib/ticket-domains/asReceipt'
-import { AS_PICKUP_METHODS, defaultAsPickupMethod, AS_OUTCOMES, AS_RESOLVE_OUTCOMES, AS_CATEGORIES, AS_DEST_TYPES, AS_OUTCOME_LABELS, AS_REPAIR_EXCLUDED_OUTCOMES, appendAsNote as appendNote, asDeviceKindFromSerial, canMarkAsLineRepaired, isValidAsSerial, asSerialFormatError, AS_SERIAL_RULE_TEXT, type AsOutcome } from '@/lib/asReceiptShared'
+import { AS_PICKUP_METHODS, defaultAsPickupMethod, AS_OUTCOMES, AS_RESOLVE_OUTCOMES, asResolveOutcomesFor, AS_CATEGORIES, AS_DEST_TYPES, AS_OUTCOME_LABELS, AS_REPAIR_EXCLUDED_OUTCOMES, appendAsNote as appendNote, asDeviceKindFromSerial, canMarkAsLineRepaired, isValidAsSerial, asSerialFormatError, AS_SERIAL_RULE_TEXT, type AsOutcome } from '@/lib/asReceiptShared'
 import { nextAsCode } from '@/lib/asReceipt'
 import { addTicketEvent } from '@/lib/ticket'
 
@@ -468,6 +468,11 @@ export async function resolveAsLines(
       if (receipt.status?.ticketStatus === 'RESOLVED' || receipt.status?.ticketStatus === 'CLOSED') {
         throw new AsServiceError(409, '완료·취소된 접수는 처리할 수 없습니다.')
       }
+      for (const l of input.lines) {
+        if (l.outcome !== 'NOT_RECEIVED' && !asResolveOutcomesFor(receipt.category).includes(l.outcome)) {
+          throw new AsServiceError(400, `${AS_OUTCOME_LABELS[l.outcome]}은(는) ${receipt.category === 'LOST' ? '분실' : '이'} 접수에서 선택할 수 없는 처리방법입니다.`) // 2026-10-30 분실 접수 수리반환 금지
+        }
+      }
       const byId = new Map(receipt.items.map((i) => [i.id, i]))
       const warnings: string[] = []
       const today = todayKst()
@@ -598,10 +603,15 @@ export async function draftAsLines(receiptId: number, input: { lines: DraftLineI
   return prisma.$transaction(async (tx) => {
     const receipt = await tx.asReceipt.findUnique({
       where: { id: receiptId },
-      select: { status: { select: { ticketStatus: true } }, items: { select: { id: true, serialNo: true, outcome: true, intakeState: true } } },
+      select: { category: true, status: { select: { ticketStatus: true } }, items: { select: { id: true, serialNo: true, outcome: true, intakeState: true } } },
     })
     if (!receipt) throw new AsServiceError(404, 'AS접수를 찾을 수 없습니다.')
     if (receipt.status?.ticketStatus === 'RESOLVED' || receipt.status?.ticketStatus === 'CLOSED') throw new AsServiceError(409, '완료·취소된 접수는 처리할 수 없습니다.')
+    for (const l of input.lines) {
+      if (l.outcome && !asResolveOutcomesFor(receipt.category).includes(l.outcome)) {
+        throw new AsServiceError(400, `${AS_OUTCOME_LABELS[l.outcome]}은(는) ${receipt.category === 'LOST' ? '분실' : '이'} 접수에서 선택할 수 없는 처리방법입니다.`) // 2026-10-30 분실 접수 수리반환 금지
+      }
+    }
     const byId = new Map(receipt.items.map((i) => [i.id, i]))
     let updated = 0
     for (const l of input.lines) {

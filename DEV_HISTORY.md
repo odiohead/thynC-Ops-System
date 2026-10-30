@@ -15,6 +15,15 @@
 - 영향: `prisma/schema.prisma`, 마이그 1건, `lib/vocService.ts`(vocCode·sourceRef·resolvedAt 입력), `lib/vocImport.ts`·`lib/vocIntakeShared.ts`(신규), `lib/channeltalk/vocPromote.ts`(제목·본문 헬퍼 추출·큐 훅)·`vocSync.ts`(stats), `app/api/voc-receipts/intake/**`(신규 4), `app/voc/intake/**`(신규 2), `app/voc/page.tsx`, `scripts/import-voc-sheet.mts`·`scripts/data/voc_sheet_match.tsv`(신규), README, projects/README, 설계 문서
 - **PROD 배포 + 적재 2026-10-30 14:30 KST (27bfd75, 사용자 지시 "소스 PROD 반영 + VOC 데이터도 동일하게")**: 백업 `~/backups/voc_tickets_before_sheet_import_20261030_0513.dump`(voc_*·ticket* 테이블) → git pull → 마이그 psql 적용·resolve(157) → generate → 힙 4GB 빌드 → `pm2 restart thync-prod` health 200(협업 번들 2108cacb 불변, 재시작 불필요) → `import-voc-sheet.mts --dry` → `--apply`: **VOC 7,896 생성**(종결 7,771·처리중 122·접수 3, 상담 연결 248) · 등록대기 175(확인불가 84·미매칭 91) · 오류 0 · 176초. 검증: 티켓 created_at=접수시각 7,896/7,896, CLOSED closed_at 누락 0, 코드 VOC-202410-0001~, 미로그인 307, 에러 로그 없음. 승격 틱의 큐 훅은 배포 직후 자동 실행돼 채널톡 NO_TAG 46건 적재, 그중 2건은 시트 적재가 상담을 연결해 REGISTERED로 정리됨(settled). PROD VOC 총 10,545건(CHANNELTALK 2,647·SHEET 7,896·MANUAL 2). 시트 10688행 이후 신규 행은 적재하지 않음(CS 기록 경로 전환은 별도 결정). 후속 검토: 큐의 NO_TAG 46건은 '감사합니다'류 잡음일 수 있어 운영하며 제외 사유 통계로 유예 시간·조건 조정
 
+## 2026-10-30 18:30 | 분실 한도 집계 — AS이력 마이그 분실 라인(수리반환 분류) 누락 보정 + 분실 접수 수리반환 선택 금지
+
+- 사용자 보고: 센트럴병원(HOSP-000076)은 분실 AS가 7건(AS-202512-0088~)인데 '이전 제공'이 심전계 1 / 산소포화도 1로 표시. 원인은 산식이 아니라 데이터 분류 — thynC AS이력 마이그(IMPORT, 2026-09-05)가 "발송기기(W) = 접수 시리얼(F)"인 행을 수리반환으로 분류했는데, 분실 행은 CS가 새 기기에 분실 기기의 시리얼 라벨을 승계해 W에 같은 시리얼을 적는 관행(처리내용 `A114919: 기기 분실(SD5A29-A123766->SD5528-A114919)`)이라 실제는 전부 새 기기 제공. dev2(=PROD 10/30 동기화) 기준 분실 접수의 REPAIR_RETURN 라인 196개·병원 55곳 전부 IMPORT
+- 보정: `computeAsLostQuota` 분자(이전 제공·이 접수 확정분)를 `AS_LOST_PROVIDED_OUTCOMES`(REPLACE·REPAIR_RETURN)로 집계 — 분실 기기를 수리해 돌려주는 경우는 없으므로 분실 접수의 수리반환 = 제공. 데이터(outcome) 백필은 하지 않음(PROD 반영 시 별도 결정)
+- 재발 방지: 분실 접수에서는 처리방법 '수리반환' 선택 불가 — `asResolveOutcomesFor(category)` 단일 소스로 AS 상세 처리방법 select(GroupCard `category` prop)와 서버 초안(`draftAsLines`)·확정(`resolveAsLines`) 검증 모두 400
+- dev2 검증(서비스 직접 호출): AS-202610-0449 이전 제공 심전계 18 / 259 (6.9%) → 처리 시 22 (8.5%), 산소포화도 1 → 5; 병원 요약(id 0)도 동일; 분실 접수 초안·확정에 REPAIR_RETURN 400 거부·라인 무변경. 화면은 Playwright로 확인
+- 부수 확인(미조치): AS-202512-0088은 시트상 심전계 5대+산소포화도 1대 제공인데 마이그 라인 1개(나머지 5대는 기기현황 추가발송만) · '분실 철회' 2행(A114888·A114280)은 마이그가 건너뜀
+- 영향: `lib/asLostQuota.ts`, `lib/asReceiptShared.ts`, `lib/asReceiptService.ts`, `app/as-receipts/[id]/page.tsx`, README
+
 ## 2026-10-30 16:10 | 병원 상세 'thynC 현황 > AS 현황' — 고장/분실 분리 요약 + 분실 제공 한도
 
 - 사용자 요청: 병원 상세(`/hospitals/[code]`)에서도 분실·일반 AS 현황을 보게. 'thynC 현황' 카드의 도입 현황 아래에 **AS 현황** 섹션 추가(설계·배치는 내 판단)
