@@ -23,6 +23,8 @@
 - dev2 검증(서비스 직접 호출): AS-202610-0449 이전 제공 심전계 18 / 259 (6.9%) → 처리 시 22 (8.5%), 산소포화도 1 → 5; 병원 요약(id 0)도 동일; 분실 접수 초안·확정에 REPAIR_RETURN 400 거부·라인 무변경. 화면은 Playwright로 확인
 - 부수 확인(미조치): AS-202512-0088은 시트상 심전계 5대+산소포화도 1대 제공인데 마이그 라인 1개(나머지 5대는 기기현황 추가발송만) · '분실 철회' 2행(A114888·A114280)은 마이그가 건너뜀
 - 영향: `lib/asLostQuota.ts`, `lib/asReceiptShared.ts`, `lib/asReceiptService.ts`, `app/as-receipts/[id]/page.tsx`, README
+- **PROD 배포 2026-10-30 (6345790)** — 협업 서버 번들 동일(재시작 불필요), http 200
+- **[PROD 데이터 조치 2026-10-30, 사용자 지시 "prod 데이터에도 반영"]** dev2·PROD 동일: IMPORT 분실 접수의 `REPAIR_RETURN` 라인 **195개(접수 111·병원 55, 취소 접수 1라인 제외)** → `outcome='REPLACE'`, `new_serial_no`=접수 시리얼(라벨 승계), 접수 비고에 `[데이터 보정 2026-10-30] 분실 라인 수리반환→교체 n대 …` 1줄. 기기현황 이벤트·`new_device_id` 무변경. 롤백 SQL PROD `~/backups/as_lost_outcome_before_fix_20261030.sql`(308행). 적용 후 PROD 센트럴병원 이전 제공 심전계 18 / 산소포화도 1 = dev2. 임시 스크립트(`scripts/tmp-as-lost-outcome-fix.mts`)는 양쪽 삭제·미커밋
 
 ## 2026-10-30 16:10 | 병원 상세 'thynC 현황 > AS 현황' — 고장/분실 분리 요약 + 분실 제공 한도
 
