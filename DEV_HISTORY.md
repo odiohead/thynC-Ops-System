@@ -10,6 +10,8 @@
 - 설계 판단: PDF는 주간 보고서이므로 **선택 주(금요일)에 귀속**, 주당 1건·재업로드 = 교체. 서버에서 `pdfinfo`로 1페이지 검증(아니면 400) → `pdftoppm` 200DPI PNG → S3에 원본 PDF+PNG 저장(`voc-dashboard/reports/<금요일>/`) → `voc_dashboard_reports` upsert → 이전 객체 삭제. 표시는 presigned URL(1시간) 이미지, 클릭하면 원본 PDF 새 창. 업로드·교체·삭제 USER 이상(VIEWER 열람만), 감사 로그 기록
 - 화면: 하단 카드 — 빈 상태는 드롭존(파일 선택·드래그), 있으면 이미지·파일명·크기·업로더·시각 + [교체][삭제]. 주 이동 시 해당 주 자료로 갱신
 - dev2 검증: 마이그 적용(158)·tsc·eslint 통과, 빌드·`pm2 restart thync-dev` http 307(미로그인). 서비스 레벨 E2E — W44 PDF 변환 2667×1500(PNG 265KB, 0.5s) → 저장 → 이미지·PDF URL 200(Content-Disposition inline 한글 안전) → 교체 시 같은 행·이전 이미지 404 → 삭제 후 행 0·이미지 404, 비PDF 거부. 화면 조작(로그인 세션 필요)은 사용자 확인 대기
+- 같은 날 후속: 이미지 최대 폭(1024px) 제한 제거·카드 여백 축소 — 이미지가 카드 폭 전체를 채우도록(사용자 피드백 "일부만 보인다")
+- **PROD 배포 2026-10-31 22:00 (155dc3c, 사용자 지시 "PROD까지 반영")**: git pull → 마이그 psql 적용·resolve(158, up to date) → generate → 힙 4GB 빌드 → `pm2 restart thync-prod` health 307(미로그인). 패키지 변경 없음, 협업 번들 2108cacb 불변(재시작 불필요), poppler(pdftoppm·pdfinfo) PROD 설치 확인. 에러 로그 없음
 - 영향: `prisma/schema.prisma`(VocDashboardReport + User relation), 마이그 `20261031120000_voc_dashboard_reports`, `lib/vocDashboardReport.ts`(신규), `app/api/voc-receipts/dashboard/report/route.ts`(신규), `app/voc/dashboard/_components/WeeklyReportPanel.tsx`(신규), `app/voc/dashboard/page.tsx`, README, `projects/voc_dashboard_design.md` §9
 
 ---
