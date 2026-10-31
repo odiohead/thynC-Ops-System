@@ -354,6 +354,7 @@ model User {
   asIntakeDecided          AsIntakeLink[]        @relation("AsIntakeDecider") // 등록대기 큐 등록·제외 (2026-10-27)
   asIntakeAiRequested      AsIntakeLink[]        @relation("AsIntakeAiRequester")
   vocIntakeDecided         VocIntakeItem[]       @relation("VocIntakeDecider") // VOC 등록대기 등록·제외 (2026-10-30)
+  vocDashboardReports      VocDashboardReport[]  @relation("VocDashboardReportUploader") // 주간 대시보드 보고 PDF 업로드 (2026-10-31)
   hospitalAsMemos HospitalMeta[] @relation("HospitalAsMemoEditor")
   viewPrefs UserViewPref[] // 사용자별 화면 설정 (2026-10-01)
 }
@@ -3119,5 +3120,25 @@ model UserViewPref {
 
   @@id([userId, viewKey])
   @@map("user_view_prefs")
+  @@schema("public")
+}
+
+/// VOC·AS 주간 대시보드 — 주간 보고 PDF 첨부 (2026-10-31). 주(금요일)당 1건, 1페이지 PDF를 PNG로 변환해 대시보드 하단에 표시
+model VocDashboardReport {
+  id           Int      @id @default(autoincrement())
+  weekStart    DateTime @unique @map("week_start") @db.Date // 금~목 주의 금요일 — lib/vocDashboard parseWeekStart
+  fileName     String   @map("file_name") @db.VarChar(255)
+  pdfKey       String   @map("pdf_key")   // S3 원본 PDF
+  imageKey     String   @map("image_key") // S3 변환 PNG(1페이지, 200DPI)
+  imageWidth   Int      @map("image_width")
+  imageHeight  Int      @map("image_height")
+  pdfSize      Int      @map("pdf_size")
+  uploadedById String?  @map("uploaded_by_id")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  uploadedBy User? @relation("VocDashboardReportUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@map("voc_dashboard_reports")
   @@schema("public")
 }

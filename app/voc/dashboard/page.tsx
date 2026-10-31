@@ -11,6 +11,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import { ComposedChart, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useChartTheme } from '@/app/components/theme/useChartTheme'
 import type { VocDashboard, AsCategoryStat, HospitalAsRow } from '@/lib/vocDashboard'
+import WeeklyReportPanel from './_components/WeeklyReportPanel'
 
 const MAJOR_COLORS: Record<string, string> = {
   AS: '#2C5CE5', 오류SW: '#F97316', 오류HW: '#84CC16', EMR: '#EAB308', 사용: '#EC4899', 운영: '#06B6D4', 개선: '#38BDF8', 타사: '#8B5CF6',
@@ -34,6 +35,10 @@ function VocDashboardInner() {
   const [data, setData] = useState<VocDashboard | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [canEdit, setCanEdit] = useState(false) // 주간 보고 PDF 업로드·삭제 — USER 이상
+  useEffect(() => {
+    fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setCanEdit(d.role !== 'VIEWER')).catch(() => {})
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -189,6 +194,9 @@ function VocDashboardInner() {
           <HospitalTable title={`병원 TOP 10 — 배치 기기 대비 AS 접수율 (최근 ${as.windowDays}일, 배치 ${as.ratioMinDeployed}대 이상)`} rows={as.topHospitalsByRatio} mode="ratio" />
         </div>
       </section>
+
+      {/* 주간 보고 자료 (PDF → 이미지) — 선택 주 귀속 */}
+      <WeeklyReportPanel weekStart={week.start} weekIso={week.iso} weekLabel={week.label} canEdit={canEdit} />
 
       <p className="text-[11px] text-gray-400">집계 시각 {new Date(data.generatedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })} · 미해결·미완료·배치 기기 수는 조회 시점 기준, 나머지는 선택 주(또는 최근 {as.windowDays}일) 기준 · 취소 접수·취소 라인 제외</p>
     </div>

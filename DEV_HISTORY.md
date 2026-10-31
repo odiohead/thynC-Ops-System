@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-10-31 21:40 | VOC·AS 주간 대시보드 — 주간 보고 자료(PDF) 패널
+
+- 사용자 요청: 기존 주간보고 PDF(PPT 1페이지, 예 `thynC VOC 주요이슈_261023-261029`)의 내용을 `/voc/dashboard`에서도 보고 싶음. PPT 편집 기능은 원치 않음 → **PDF 업로드 → 이미지 표시**로 결정. 대시보드 최하단에 영역을 두고 그 안에서 업로드
+- 설계 판단: PDF는 주간 보고서이므로 **선택 주(금요일)에 귀속**, 주당 1건·재업로드 = 교체. 서버에서 `pdfinfo`로 1페이지 검증(아니면 400) → `pdftoppm` 200DPI PNG → S3에 원본 PDF+PNG 저장(`voc-dashboard/reports/<금요일>/`) → `voc_dashboard_reports` upsert → 이전 객체 삭제. 표시는 presigned URL(1시간) 이미지, 클릭하면 원본 PDF 새 창. 업로드·교체·삭제 USER 이상(VIEWER 열람만), 감사 로그 기록
+- 화면: 하단 카드 — 빈 상태는 드롭존(파일 선택·드래그), 있으면 이미지·파일명·크기·업로더·시각 + [교체][삭제]. 주 이동 시 해당 주 자료로 갱신
+- dev2 검증: 마이그 적용(158)·tsc·eslint 통과, 빌드·`pm2 restart thync-dev` http 307(미로그인). 서비스 레벨 E2E — W44 PDF 변환 2667×1500(PNG 265KB, 0.5s) → 저장 → 이미지·PDF URL 200(Content-Disposition inline 한글 안전) → 교체 시 같은 행·이전 이미지 404 → 삭제 후 행 0·이미지 404, 비PDF 거부. 화면 조작(로그인 세션 필요)은 사용자 확인 대기
+- 영향: `prisma/schema.prisma`(VocDashboardReport + User relation), 마이그 `20261031120000_voc_dashboard_reports`, `lib/vocDashboardReport.ts`(신규), `app/api/voc-receipts/dashboard/report/route.ts`(신규), `app/voc/dashboard/_components/WeeklyReportPanel.tsx`(신규), `app/voc/dashboard/page.tsx`, README, `projects/voc_dashboard_design.md` §9
+
+---
+
 ## 2026-10-30 21:30 | VOC현황 시트 과거 이력 적재(dev2 7,894건·PROD 7,896건) + VOC 등록대기 큐
 
 - 배경: 구글시트 'thynC VOC 현황' > 'VOC현황_NEW'(10,672행, 2024-10-24~2026-10-28)와 시스템 VOC 대조 분석 — 시스템 VOC는 2026-07-14부터만 존재. 겹치는 기간 3,112행은 '접수시간'=상담 고객 메시지 시각(±2분)+병원코드+본문 유사도로 93.8% 상담 매칭(대조표 `scripts/data/voc_sheet_match.tsv`, 상담 id 기준이라 PROD 공용). 차이 4종: ① 7/14 이전 7,560행 ② 수기(유선·대웅 경유) ~45행 ③ 구 태그명(`f_AS_입출고`·`d_사용_기기관리`·`c_EMR_연동` 등 현 VOC_TYPE 마스터에 없는 이름)만 달린 상담 186건이 NO_TAG로 미승격 ④ 시트는 문의 단위 분할(상담 1건→2~5행 456건)·A/S 탭 복제 행. 2026-08부터 시트의 완료여부·1차대응·문의유형 열은 미기재(태그만)

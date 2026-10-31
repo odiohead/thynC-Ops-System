@@ -106,3 +106,11 @@
 - Q1 반복 병원 임계값 기본 **5건**(4주), 화면 3/5/10 조절 — 확정
 - Q2 1차 대응·종료 시간 **중앙값 + p90**, 평균은 툴팁 — 확정 (기존 PDF 평균 기준과 달라짐을 보고 시 명시)
 - Q3 분류 집계 **복수 분류 각 1 계상**(화면에 '분류 기준, 중복 포함' 명시) — 확정
+
+## 9. 주간 보고 자료 패널 (2026-10-31 추가)
+- 요구: 기존 주간보고 PDF(`thynC VOC 주요이슈_YYMMDD-YYMMDD`, PPT 1페이지)의 수기 이슈·CX 코멘트도 대시보드에서 보고 싶음. PPT 편집 기능은 만들지 않음(사용자 결정) → **PDF 업로드 → 이미지 표시**
+- 귀속: 선택 주(금요일 `week_start`)당 1건. 주 이동 시 해당 주 자료 표시, 재업로드 = 교체
+- 서버: `lib/vocDashboardReport.ts` — `%PDF-` 매직 바이트·`pdfinfo` 페이지 수(1페이지만, 아니면 400)·`pdftoppm -r 200 -png -singlefile`·sharp PNG 재압축 → S3 `voc-dashboard/reports/<금요일>/<ts>.{pdf,png}` → `voc_dashboard_reports` upsert → 이전 객체 삭제. presigned URL 1시간
+- API: `GET/POST/DELETE /api/voc-receipts/dashboard/report?week=` (POST multipart `week`,`file`, 20MB). 권한: 조회 로그인 / 쓰기 USER 이상. 감사 로그 `voc_dashboard_report` CREATE·DELETE
+- 화면: `app/voc/dashboard/_components/WeeklyReportPanel.tsx` — 하단 카드. 빈 상태(USER 이상)는 드롭존, 있으면 이미지(클릭 → PDF)·파일명·크기·업로더·시각, 우측 상단 [교체][삭제]. VIEWER는 안내 문구만. §6의 '주간 코멘트 입력란' 2차 후보는 이 패널로 대체
+- dev2 검증: W44 PDF(2667×1500, PNG 265KB, 0.5s) 업로드→URL 200→교체(같은 id, 이전 이미지 404)→삭제(행 0, 이미지 404). 비PDF 거부
