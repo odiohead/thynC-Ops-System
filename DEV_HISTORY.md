@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-11-02 00:30 | 출고 품목 관리 — '구성 안내' 탭 (주 품목↔구성품 수량 편집 UI)
+
+- 배경: 구성 안내(thynC 시스템 XX → 운영팀재고 부자재 수량)가 테이블(`stock_out_item_components`)에만 있고 수단이 시드 SQL뿐이라, 사용자 질문("별도 설정화면으로 빼는 건?")에 찬성 → 설정 > 출고 품목 관리에 탭 추가(별도 메뉴 대신 팝업 관련 설정 한 화면)
+- API `GET/PUT/DELETE /api/settings/stock-out-components`(ADMIN 쓰기, 1단계 깊이 강제, 감사 로그) · 탭 UI `app/settings/stock-out-items/_components/ComponentsTab.tsx`(좌 주 품목 목록+추가 / 우 구성품 표 — 수량 blur 저장·삭제·추가·전체 삭제). 설정 페이지 탭 타입을 업무 3종 + COMPONENTS로 확장, 검색창은 업무 탭에서만
+- dev2: tsc·eslint 통과, 빌드·재시작. 스키마 변경 없음
+- 영향: `app/api/settings/stock-out-components/route.ts`(신규), `app/settings/stock-out-items/{page.tsx,_components/ComponentsTab.tsx}`, README, 설계 문서 §14
+
+---
+
 ## 2026-11-01 21:00 | 출고요청 팝업 — 'thynC 시스템 XX' 구성 부자재 '포함 n' 안내 (현재고 표시 제거)
 
 - 사용자 요구: 대웅제약재고 'thynC 시스템 10~100'은 운영팀재고 품목(서버·매니저PC 2·27인치 모니터·50인치 사이니지 1~2)으로 구성됨. 관리는 따로 하되, 팝업에서 시스템 수량을 적으면 운영팀재고 품목 행에 이미 포함된 수량을 알려 줄 것. 현재고 표시는 제거

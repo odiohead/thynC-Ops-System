@@ -104,6 +104,7 @@ app/
 │   │   ├── install-plan-status/      # 설치계획 상태 관리 (2026-07-27 단일 축 — +티켓 상태 매핑)
 │   │   ├── stock-out-status/         # 출고업무 상태 관리 (+티켓 상태 매핑, 2026-09-03)
 │   │   ├── stock-out-items/          # 출고 품목 노출 설정 — GET 자재관리 품목 전체(+?purpose=) · [id] PUT 업무별 노출 토글 (ADMIN, v2 2026-11-01)
+│   │   ├── stock-out-components/     # 출고요청 구성 안내 설정 — GET 주 품목별 구성품 · PUT 업서트 · DELETE (ADMIN, 2026-11-01)
 │   │   ├── as-status/                # AS업무 상태 관리 (+티켓 상태 매핑, 2026-09-04)
 │   │   ├── sales-codes/              # 영업 StatusCode 3카테고리 CRUD (화이트리스트·색상, ADMIN)
 │   │   ├── ticket-queues/            # Assignment Group 마스터 CRUD (티켓 있으면 삭제 400)
@@ -236,7 +237,7 @@ app/
 │   ├── emr-vendor/                   # EMR 업체 관리 (StatusCodeManager — 병원 EMR 연동 정보에서 선택, 2026-08-16)
 │   ├── install-plan-status/          # 설치계획 상태 관리 (WorkflowStatusManager, 2026-07-27)
 │   ├── stock-out-status/             # 출고업무 상태 관리 (WorkflowStatusManager, 2026-09-03)
-│   ├── stock-out-items/              # 출고 품목 관리 — 업무 탭(구축/유지보수/사업업무)별 자재관리 품목 노출 체크 (ADMIN 이상 쓰기, v2 2026-11-01)
+│   ├── stock-out-items/              # 출고 품목 관리 — 업무 탭(구축/유지보수/사업업무)별 자재관리 품목 노출 체크 (ADMIN 이상 쓰기, v2 2026-11-01) + '구성 안내' 탭(_components/ComponentsTab — 주 품목↔구성품 수량 편집)
 │   ├── as-status/                # AS업무 상태 관리 (WorkflowStatusManager, 2026-09-04)
 │   ├── sales-codes/                  # 영업 코드 관리 — 7카테고리 (단계·딜 상태·판매모델·세금계산서·정산·활동 유형·직군)
 │   ├── ticket-queues/                # Assignment Group 관리 (이름·설명·순서·활성·티켓 수, 멤버 모달 팀(부서) 단위 일괄 선택)
@@ -848,7 +849,7 @@ prisma/
 ### 출고업무 — StockOutRequest / StockOutRequestItem / StockOutItemPurpose (2026-09-03 — `projects/stock_out_request_design.md` · v2 2026-11-01 `projects/stock_out_v2_design.md`)
 - **StockOutRequest** (`stock_out_requests`): 구축 프로젝트 자재 출고요청 — **7번째 티켓 도메인** (refType `STOCK_OUT`, 어댑터 `lib/ticket-domains/stockOut.ts`) · `sorCode`(SOR-YYYYMM-NNNN) · `projectCode`(**필수 FK, ON DELETE RESTRICT** — 프로젝트 DELETE 라우트 409 선검사) · 상태(`STOCK_OUT_STATUS`: 요청→OPEN/처리중→IN_PROGRESS/보류→PENDING/**완료→CLOSED**(RESOLVED 미경유 — 2026-09-03 사용자 결정)/취소→CLOSED) · `requestDate`(희망 출고일 DATE) · `note`(비고 — 티켓 설명 자동입력 소스) · `resolvedAt`(종결 버킷 진입 시 자동 기록) · 생성자(`createdById`) · `ticketId`(1:1). 담당 배정은 티켓 단독 소유(VOC 선례), 병원은 프로젝트에서 파생
 - **StockOutRequestItem** (`stock_out_request_items`): 품목×수량 라인 — **`inventoryItemId` FK `inventory_items`(자재관리 품목, 인벤토리×품목 행 — v2 2026-11-01, 구 `item_id`→`stock_out_items`는 대웅제약재고 같은 모델로 백필 후 제거)** · UNIQUE(request, inventory_item) · CHECK qty>0 · 요청 삭제 CASCADE. `stock_out_requests.purpose`(BUILD/MAINTENANCE/BUSINESS, 기본 BUILD — 이번 범위는 프로젝트 팝업 = 구축)
-- **StockOutItemComponent** (`stock_out_item_components`, 2026-11-01): 출고요청 **구성 안내** — 대웅제약재고 'thynC 시스템 XX' 1개당 thynC운영팀재고 부자재 수량(PK parent+child, quantity>0). 인벤토리가 달라 WMS 주자재-부자재 매핑(같은 인벤토리 한정)과 별개이며 재고 처리와 무관. 시드 `scripts/seed-stock-out-components.sql`(10/20/30: 서버(워크스테이션)1·매니저PC 2·27인치 모니터 1·50인치 사이니지 1 / 40: 사이니지 2 / 50: 서버(50병상)·사이니지 2 / 100: 서버(100병상)·사이니지 2). 관리 UI 없음(시드·SQL)
+- **StockOutItemComponent** (`stock_out_item_components`, 2026-11-01): 출고요청 **구성 안내** — 대웅제약재고 'thynC 시스템 XX' 1개당 thynC운영팀재고 부자재 수량(PK parent+child, quantity>0). 인벤토리가 달라 WMS 주자재-부자재 매핑(같은 인벤토리 한정)과 별개이며 재고 처리와 무관. 시드 `scripts/seed-stock-out-components.sql`(10/20/30: 서버(워크스테이션)1·매니저PC 2·27인치 모니터 1·50인치 사이니지 1 / 40: 사이니지 2 / 50: 서버(50병상)·사이니지 2 / 100: 서버(100병상)·사이니지 2). 관리 UI = 설정 > 출고 품목 관리 '구성 안내' 탭(좌 주 품목 목록 / 우 구성품 표 — 추가·수량 수정(blur 저장)·삭제, 인벤토리 제한 없음, 1단계 깊이)
 - **StockOutItemPurpose** (`stock_out_item_purposes`, v2): 업무별 노출 설정 — PK(inventory_item_id, purpose), 행 존재 = 체크. 설정 > 출고 품목 관리 탭에서 토글. 시드 `scripts/seed-stock-out-masters.sql` = 구축 탭 대웅제약재고 14종(시스템 6·MGW1010·MC200M-T·MP100W·MP1000F·L-* 4). **`stock_out_items`(전용 품목 마스터)는 v2에서 DROP**
 - **출고 처리 (P2, 2026-09-03 — §13)**: `stock_out_requests.fulfilled_at/fulfilled_by_id`(처리 스탬프 — 이중 처리 가드), `stock_out_request_items.fulfilled_serials`(실출고/과도기 시리얼 기록), `inventory_transactions.stock_out_request_id`(전표↔요청 링크, SET NULL). 처리는 `lib/stockOutFulfill.ts` — 출고유형 3종(판매(대웅)/판매(자체)/DEMO·PoC → 인벤토리 매핑, `lib/stockOutShared.ts` OUT_TYPE_META) · **전량 일치 단일 트랜잭션**(WMS 전표·재고 차감·시리얼 개체 OUT + 웨어러블 기기현황 등록(source WMS·ref INVENTORY_TX·용도 자동) + 상태 '완료'→티켓 CLOSED) · 타 병원 배치 시리얼 차단·부분 출고 없음
 
@@ -1853,6 +1854,7 @@ npm run dev
 | GET/POST | `/api/settings/stock-out-status` (+`[id]` PUT/DELETE) | 출고업무 상태 관리 (+티켓 상태 매핑 필수) |
 | GET | `/api/settings/stock-out-items` (`?purpose=BUILD`) | 출고 품목 노출 설정 — 자재관리 활성 품목 전체(인벤토리별 그룹·분류·관리방식·현재고·purposes), `?purpose=`면 그 업무에 체크된 품목만(요청 폼) (v2 2026-11-01) |
 | PUT | `/api/settings/stock-out-items/[inventoryItemId]` | `{purpose, enabled}` 업무별 노출 토글 (ADMIN, 멱등, 감사 로그) |
+| GET/PUT/DELETE | `/api/settings/stock-out-components` | 출고요청 구성 안내(`stock_out_item_components`) — 주 품목별 구성품 목록 / `{parentItemId, childItemId, quantity}` 업서트 / `?parentItemId=&childItemId=` 삭제(child 생략 시 전체). 1단계 깊이 강제, ADMIN, 감사 로그 (2026-11-01) |
 
 ### AS업무 (2026-09-04 — 조회 로그인 전원 / 쓰기 USER 이상, 수정·삭제는 완료·취소 전 본인+ADMIN·이후 ADMIN, 라인 처리는 USER 이상 전원)
 
