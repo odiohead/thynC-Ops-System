@@ -11,6 +11,7 @@
 - 설정 GET에 품목별 `components` 추가, 팝업은 입력 수량×구성 수량을 child별 합산해 입력란 왼쪽 '포함 n' 배지(툴팁 출처). 요청 라인은 사용자가 적은 수량만 — 부자재 행이 구축 탭에 노출돼 있어야 보임
 - 같은 날 후속: 팝업 품목명 우측 모델명 표시 제거(사용자 요청). 시스템100 서버 구성 서버(100병상)으로 정정 후 dev2 빌드·재시작
 - dev2: 마이그·시드 적용(구성 24행), tsc·eslint 통과. 빌드는 요청 시
+- **PROD 배포 2026-11-01 23:00 (b27f8be, 사용자 지시 "PROD도 빌드 및 재시작")**: 출고 테이블 백업 `~/backups/stock_out_before_v2_20261101.dump`(요청 1·라인 5·품목 12) → git pull → 마이그 3건 순차 적용·resolve(161, up to date; 백필 5라인 대웅제약재고 정상, `stock_out_items` DROP) → generate → 힙 4GB 빌드 → `pm2 restart thync-prod`(협업 번들 2108cacb 불변) → 시드: 구축 탭 14종 · 구성 **18행**(dev2 24행 — PROD 운영팀재고에 '서버' 분류(id 15)·서버 품목 3종(ITEM-0069~0071, dev2에서 11/1 사용자 생성)이 없어 서버 구성 6행 누락 → PROD에 품목 생성 후 `seed-stock-out-components.sql` 재실행 필요). health 307, 에러 로그 없음. 마이그 단계는 자동 안전장치(테이블 삭제)에 2회 거부돼 사용자 "그냥 진행해" 지시 후 1건씩 분리 실행
 - 영향: `prisma/schema.prisma`, 마이그 1건, `scripts/seed-stock-out-components.sql`(신규), `app/api/settings/stock-out-items/route.ts`, `app/stock-out-requests/_components/StockOutRequestFormModal.tsx`, README, 설계 문서 §13
 
 ---
