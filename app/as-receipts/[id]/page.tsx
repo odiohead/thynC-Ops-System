@@ -25,7 +25,7 @@ import { asListHref, AS_PICKUP_METHODS, type AsPickupMethod,
   isValidAsSerial, AS_SERIAL_RULE_TEXT, type AsLostQuota, type AsDealQuota } from '@/lib/asReceiptShared' // 수리완료 체크·기기 상태 배지 (2026-09-17) · 시리얼 형식 게이트 (2026-09-30)
 import type { TicketStatus } from '@prisma/client'
 import { PRODUCT_TYPES, deviceConditionLabel, deviceSiteLabel } from '@/lib/deviceRegistryShared'
-import AsNoticeArea from '../_components/AsNoticeArea'
+import AsNoticeArea, { type AsPolicyAlert } from '../_components/AsNoticeArea'
 
 interface CodeRef { id: number; name: string; color: string | null }
 
@@ -993,20 +993,39 @@ export default function AsReceiptDetailPage() {
       {/* 상단 알림 영역 — 상시 정책 알림(red + 최초 1회 모달) / 작업 결과 경고(amber, 닫기) 한 컴포넌트에서 분기 (2026-11-02) */}
       <AsNoticeArea
         alerts={(() => {
-          const dq = req.dealQuota
-          if (!dq || !(dq.liteOverBefore || dq.liteOverAfter)) return []
           const closedReceipt = req.status?.ticketStatus === 'RESOLVED' || req.status?.ticketStatus === 'CLOSED'
-          const lite = dq.rows.find((r) => r.productType === '라이트')
-          const cells = lite ? (['심전계', '산소포화도'] as const).filter((g) => lite.cells[g].overBefore || lite.cells[g].overAfter).map((g) => ({ g, c: lite.cells[g] })) : []
-          return [{
-            key: `lite-over:${dq.liteOverBefore ? 'before' : 'after'}:${cells.map(({ g, c }) => `${g}=${c.after}/${c.introduced}`).join(',')}`,
-            title: dq.liteOverBefore
-              ? `라이트형 교체 수량 초과 — 도입 수량의 ${dq.liteThresholdPct}%를 이미 넘었습니다`
-              : `${closedReceipt ? '이 접수 포함' : '이 건 처리 시'} 라이트형 교체 수량이 도입 수량의 ${dq.liteThresholdPct}%를 초과합니다`,
-            lines: cells.map(({ g, c }) => (
-              <span key={g}>라이트 {g}: 교체 누계 <span className="font-mono">{c.before} / {c.introduced}</span>{c.thisReceipt > 0 && <> → {closedReceipt ? '이 접수 포함' : '처리 시'} <span className="font-mono">{c.after} / {c.introduced}</span> ({c.pctAfter}%)</>}</span>
-            )),
-          }]
+          const list: AsPolicyAlert[] = []
+          // ① 분실 제공 한도 10% (분실 접수 — '구분' 필드와 같은 판정, lib/asLostQuota)
+          const lq = req.category === 'LOST' ? req.lostQuota : null
+          if (lq && lq.groups.some((g) => g.overBefore || g.overAfter)) {
+            const over = lq.groups.some((g) => g.overBefore)
+            const cells = lq.groups.filter((g) => g.overBefore || g.overAfter)
+            list.push({
+              key: `lost-over:${over ? 'before' : 'after'}:${cells.map((g) => `${g.group}=${g.after}/${g.purchased}`).join(',')}`,
+              title: over
+                ? `분실 제공 한도 초과 — 구매수량의 ${lq.thresholdPct}%를 이미 넘었습니다`
+                : `${closedReceipt ? '이 접수 포함' : '이 건 처리 시'} 분실 기기 제공이 구매수량의 ${lq.thresholdPct}%를 초과합니다`,
+              lines: cells.map((g) => (
+                <span key={g.group}>{g.group}: 이전 제공 <span className="font-mono">{g.before} / {g.purchased}</span> ({g.pctBefore}%){g.thisReceipt > 0 && <> → {closedReceipt ? '이 접수 포함' : '처리 시'} <span className="font-mono">{g.after} / {g.purchased}</span> ({g.pctAfter}%)</>}</span>
+              )),
+            })
+          }
+          // ② 라이트 교체 한도 100% (전 구분 — lib/asDealQuota)
+          const dq = req.dealQuota
+          if (dq && (dq.liteOverBefore || dq.liteOverAfter)) {
+            const lite = dq.rows.find((r) => r.productType === '라이트')
+            const cells = lite ? (['심전계', '산소포화도'] as const).filter((g) => lite.cells[g].overBefore || lite.cells[g].overAfter).map((g) => ({ g, c: lite.cells[g] })) : []
+            list.push({
+              key: `lite-over:${dq.liteOverBefore ? 'before' : 'after'}:${cells.map(({ g, c }) => `${g}=${c.after}/${c.introduced}`).join(',')}`,
+              title: dq.liteOverBefore
+                ? `라이트형 교체 수량 초과 — 도입 수량의 ${dq.liteThresholdPct}%를 이미 넘었습니다`
+                : `${closedReceipt ? '이 접수 포함' : '이 건 처리 시'} 라이트형 교체 수량이 도입 수량의 ${dq.liteThresholdPct}%를 초과합니다`,
+              lines: cells.map(({ g, c }) => (
+                <span key={g}>라이트 {g}: 교체 누계 <span className="font-mono">{c.before} / {c.introduced}</span>{c.thisReceipt > 0 && <> → {closedReceipt ? '이 접수 포함' : '처리 시'} <span className="font-mono">{c.after} / {c.introduced}</span> ({c.pctAfter}%)</>}</span>
+              )),
+            })
+          }
+          return list
         })()}
         panels={chatIntake?.changeDiff && chatIntake.changeDiff.length > 0 ? [{
           key: `chat-change:${chatIntake.linkId}:${chatIntake.changeDetectedAt ?? ''}`,
