@@ -9,6 +9,7 @@
 - 배경: 구성 안내(thynC 시스템 XX → 운영팀재고 부자재 수량)가 테이블(`stock_out_item_components`)에만 있고 수단이 시드 SQL뿐이라, 사용자 질문("별도 설정화면으로 빼는 건?")에 찬성 → 설정 > 출고 품목 관리에 탭 추가(별도 메뉴 대신 팝업 관련 설정 한 화면)
 - API `GET/PUT/DELETE /api/settings/stock-out-components`(ADMIN 쓰기, 1단계 깊이 강제, 감사 로그) · 탭 UI `app/settings/stock-out-items/_components/ComponentsTab.tsx`(좌 주 품목 목록+추가 / 우 구성품 표 — 수량 blur 저장·삭제·추가·전체 삭제). 설정 페이지 탭 타입을 업무 3종 + COMPONENTS로 확장, 검색창은 업무 탭에서만
 - dev2: tsc·eslint 통과, 빌드·재시작. 스키마 변경 없음
+- **PROD 배포 2026-11-02 00:50 (dc2cb64, 사용자 지시 "PROD까지 바로 반영")**: git pull → 마이그 없음(up to date) → 힙 4GB 빌드 → `pm2 restart thync-prod`(협업 번들 2108cacb 불변) → 구성 안내 탭·API 307(미로그인), 에러 로그 없음
 - 영향: `app/api/settings/stock-out-components/route.ts`(신규), `app/settings/stock-out-items/{page.tsx,_components/ComponentsTab.tsx}`, README, 설계 문서 §14
 
 ---
