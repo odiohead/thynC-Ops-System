@@ -1,21 +1,22 @@
 'use client'
 
 /**
- * 출고 처리 카드 (stock_out_request_design.md §13.4 — 자재담당자 전용, 2026-09-03 개정)
- * 출고유형 3택(→ 인벤토리 자동, 창고 선택 없음) → 품목별 입력 후 **[확인]**(라인 단위 검증·잠금)
- * → 전 품목 확인 완료 시 [출고 실행] (전량 일치·all-or-nothing).
+ * 출고 처리 카드 (stock_out_request_design.md §13.4 · v2 stock_out_v2_design.md §5·§7 — 자재담당자 전용)
+ * v2: 출고유형 선택 없음 — 인벤토리는 요청 라인의 자재관리 품목이 결정(인벤토리별 전표 분리, 전표 유형 자동).
+ * 열리면 바로 미리보기 → 품목별 입력 후 **[확인]**(라인 단위 검증·잠금) → 전 품목 확인 완료 시 [출고 실행] (전량 일치·all-or-nothing).
  */
-import { useState, useCallback } from 'react'
-import { STOCK_OUT_OUT_TYPES, OUT_TYPE_META, type StockOutOutType } from '@/lib/stockOutShared'
+import { useState, useCallback, useEffect } from 'react'
 
 interface Bucket { warehouseId: number; warehouseName: string; lotNo: string; quantity: number }
 interface PreviewLine {
-  itemId: number
+  inventoryItemId: number
   name: string
-  itemGroup: string
+  modelName: string | null
+  inventoryId: number
+  inventoryName: string
+  categoryName: string | null
   quantity: number
   mode: 'serial' | 'lot' | 'qty' | 'missing'
-  wmsItemName: string | null
   registry: boolean
   buckets: Bucket[]
   stockTotal: number
@@ -23,8 +24,7 @@ interface PreviewLine {
   messages: string[]
 }
 interface Preview {
-  inventory: { id: number; name: string } | null
-  reasonName: string
+  inventories: { id: number; name: string; reasonName: string; usageInput: string }[]
   lines: PreviewLine[]
   errors: string[]
   ok: boolean
@@ -59,7 +59,6 @@ const STATUS_TONE: Record<PreviewLine['status'], string> = {
 }
 
 export default function FulfillCard({ requestId, onDone }: { requestId: number; onDone: () => void }) {
-  const [outType, setOutType] = useState<StockOutOutType | null>(null)
   const [txDate, setTxDate] = useState(todayKst())
   const [serialText, setSerialText] = useState<Record<number, string>>({})
   const [lotRows, setLotRows] = useState<Record<number, LotRow[]>>({})
@@ -73,25 +72,25 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
   const buildLines = useCallback((p: Preview | null) => {
     if (!p) return []
     return p.lines.map((l) => ({
-      itemId: l.itemId,
-      serials: l.mode === 'serial' ? (serialText[l.itemId] ?? '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean) : undefined,
+      inventoryItemId: l.inventoryItemId,
+      serials: l.mode === 'serial' ? (serialText[l.inventoryItemId] ?? '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean) : undefined,
       lots: l.mode === 'lot'
-        ? (lotRows[l.itemId] ?? []).filter((r) => r.bucketKey && r.quantity !== '').map((r) => {
+        ? (lotRows[l.inventoryItemId] ?? []).filter((r) => r.bucketKey && r.quantity !== '').map((r) => {
             const [wh, ...lot] = r.bucketKey.split('|')
             return { warehouseId: Number(wh), lotNo: lot.join('|'), quantity: parseInt(r.quantity) || 0 }
           })
         : undefined,
-      serialsNote: l.mode !== 'serial' ? (noteText[l.itemId] ?? '').trim() || null : undefined,
+      serialsNote: l.mode !== 'serial' ? (noteText[l.inventoryItemId] ?? '').trim() || null : undefined,
     }))
   }, [serialText, lotRows, noteText])
 
-  const callPreview = useCallback(async (ot: StockOutOutType, withLines: boolean, base: Preview | null) => {
+  const callPreview = useCallback(async (withLines: boolean, base: Preview | null) => {
     setBusy(true)
     setError(null)
     const res = await fetch(`/api/stock-out-requests/${requestId}/fulfill?preview=true`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ outType: ot, txDate, lines: withLines ? buildLines(base) : [] }),
+      body: JSON.stringify({ txDate, lines: withLines ? buildLines(base) : [] }),
     })
     const d = await res.json().catch(() => ({}))
     setBusy(false)
@@ -100,43 +99,37 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
     return d.preview as Preview
   }, [requestId, txDate, buildLines])
 
-  async function selectOutType(t: StockOutOutType) {
-    setOutType(t)
-    setConfirmed(new Set())
-    setLocalErr({})
-    await callPreview(t, false, null)
-  }
+  // 카드가 열리면 바로 미리보기 (v2 — 출고유형 선택 단계 없음)
+  useEffect(() => { void callPreview(false, null) }, [requestId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** 품목별 [확인] — 라인 단위 검증 후 잠금 */
   async function confirmLine(l: PreviewLine) {
-    if (!outType) return
-    // 클라 선제 검증 (시리얼 개수·중복)
     if (l.mode === 'serial') {
-      const { errors } = localSerialCheck(serialText[l.itemId] ?? '', l.quantity)
-      if (errors.length > 0) { setLocalErr((p) => ({ ...p, [l.itemId]: errors })); return }
+      const { errors } = localSerialCheck(serialText[l.inventoryItemId] ?? '', l.quantity)
+      if (errors.length > 0) { setLocalErr((p) => ({ ...p, [l.inventoryItemId]: errors })); return }
     }
-    setLocalErr((p) => ({ ...p, [l.itemId]: [] }))
-    const p = await callPreview(outType, true, preview)
+    setLocalErr((p) => ({ ...p, [l.inventoryItemId]: [] }))
+    const p = await callPreview(true, preview)
     if (!p) return
-    const after = p.lines.find((x) => x.itemId === l.itemId)
+    const after = p.lines.find((x) => x.inventoryItemId === l.inventoryItemId)
     if (after && (after.status === 'ok' || after.status === 'warning')) {
-      setConfirmed((prev) => new Set(prev).add(l.itemId))
+      setConfirmed((prev) => new Set(prev).add(l.inventoryItemId))
     }
   }
 
-  function unlockLine(itemId: number) {
-    setConfirmed((prev) => { const n = new Set(prev); n.delete(itemId); return n })
+  function unlockLine(id: number) {
+    setConfirmed((prev) => { const n = new Set(prev); n.delete(id); return n })
   }
 
   async function execute() {
-    if (!outType || !preview) return
+    if (!preview) return
     if (!confirm('출고를 실행합니다. 재고 차감·기기현황 등록·요청 완료 처리가 한 번에 진행됩니다.')) return
     setBusy(true)
     setError(null)
     const res = await fetch(`/api/stock-out-requests/${requestId}/fulfill`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ outType, txDate, lines: buildLines(preview) }),
+      body: JSON.stringify({ txDate, lines: buildLines(preview) }),
     })
     const d = await res.json().catch(() => ({}))
     setBusy(false)
@@ -148,7 +141,7 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
     onDone()
   }
 
-  const allConfirmed = !!preview && preview.lines.length > 0 && preview.lines.every((l) => confirmed.has(l.itemId))
+  const allConfirmed = !!preview && preview.lines.length > 0 && preview.lines.every((l) => confirmed.has(l.inventoryItemId))
   const ready = allConfirmed && !!preview?.ok
   const label = 'text-xs font-medium text-gray-500'
   const input = 'rounded-md border border-gray-300 px-2.5 py-1.5 text-sm'
@@ -162,33 +155,27 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
       <div className="space-y-4 p-4 sm:p-6">
         {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 whitespace-pre-wrap">{error}</div>}
 
-        {/* 출고유형 → 인벤토리 자동 (창고 선택 없음 — 위치는 서버가 자동 결정) */}
+        {/* 인벤토리·전표 유형은 라인 품목이 결정 — 창고는 서버가 자동 */}
         <div className="flex flex-wrap items-end gap-4">
           <div>
-            <p className={label}>출고유형 *</p>
-            <div className="mt-1.5 flex flex-wrap gap-2">
-              {STOCK_OUT_OUT_TYPES.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => void selectOutType(t)}
-                  disabled={busy}
-                  className={`rounded-lg border px-3.5 py-1.5 text-sm font-medium transition-colors ${
-                    outType === t ? 'border-teal-500 bg-teal-600 text-white' : 'border-gray-300 text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {OUT_TYPE_META[t].label}
-                  <span className={`ml-1.5 text-xs ${outType === t ? 'text-teal-100' : 'text-gray-400'}`}>{OUT_TYPE_META[t].inventoryName}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
             <p className={label}>출고일</p>
-            <input type="date" value={txDate} onChange={(e) => setTxDate(e.target.value)} className={`${input} mt-1`} />
+            <input type="date" value={txDate} onChange={(e) => { setTxDate(e.target.value); setConfirmed(new Set()) }} className={`${input} mt-1`} />
           </div>
-          {preview && <p className="pb-1.5 text-xs text-gray-400">전표 유형: {preview.reasonName}</p>}
+          {preview && preview.inventories.length > 0 && (
+            <div className="pb-1">
+              <p className={label}>출고 인벤토리 · 전표 유형</p>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {preview.inventories.map((inv) => (
+                  <span key={inv.id} className="rounded-md border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs text-teal-800">
+                    {inv.name} <span className="text-teal-500">· {inv.reasonName}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
+
+        {!preview && !error && <p className="text-sm text-gray-400">검증 중…</p>}
 
         {preview && (
           <>
@@ -201,34 +188,29 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
             {/* 품목별 입력 + [확인] (라인 단위 검증·잠금) */}
             <div className="space-y-3">
               {preview.lines.map((l) => {
-                const isConfirmed = confirmed.has(l.itemId)
-                const lErrs = localErr[l.itemId] ?? []
-                const serialCnt = (serialText[l.itemId] ?? '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean).length
+                const id = l.inventoryItemId
+                const isConfirmed = confirmed.has(id)
+                const lErrs = localErr[id] ?? []
+                const serialCnt = (serialText[id] ?? '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean).length
                 return (
-                  <div key={l.itemId} className={`rounded-lg border p-3 ${
+                  <div key={id} className={`rounded-lg border p-3 ${
                     isConfirmed ? 'border-green-300 bg-green-50/40' : l.status === 'error' ? 'border-red-300 bg-red-50/40' : 'border-gray-200'
                   }`}>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-sm font-medium text-gray-800">
                         {l.name}
-                        <span className="ml-1.5 text-xs text-gray-400">요청 {l.quantity}개{l.wmsItemName ? ` · WMS ${l.wmsItemName}` : ''}</span>
+                        {l.modelName && l.modelName !== l.name && <span className="ml-1 font-mono text-xs text-gray-400">{l.modelName}</span>}
+                        <span className="ml-1.5 text-xs text-gray-400">요청 {l.quantity}개 · {l.inventoryName}</span>
                         {l.registry && <span className="ml-1.5 rounded bg-teal-100 px-1.5 py-0.5 text-[11px] font-medium text-teal-700">기기현황 등록</span>}
                       </p>
                       <div className="flex items-center gap-2">
                         {isConfirmed ? (
                           <>
                             <span className="text-xs font-medium text-green-600">✓ 확인됨</span>
-                            <button type="button" onClick={() => unlockLine(l.itemId)} className="rounded-md border border-gray-300 px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-50">수정</button>
+                            <button type="button" onClick={() => unlockLine(id)} className="rounded-md border border-gray-300 px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-50">수정</button>
                           </>
                         ) : l.mode !== 'missing' ? (
-                          <button
-                            type="button"
-                            onClick={() => void confirmLine(l)}
-                            disabled={busy}
-                            className="rounded-md bg-gray-800 px-3 py-1 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-50"
-                          >
-                            확인
-                          </button>
+                          <button type="button" onClick={() => void confirmLine(l)} disabled={busy} className="rounded-md bg-gray-800 px-3 py-1 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-50">확인</button>
                         ) : null}
                       </div>
                     </div>
@@ -240,8 +222,8 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
                           <span className={`text-xs ${serialCnt === l.quantity ? 'text-green-600' : 'text-gray-400'}`}>{serialCnt} / {l.quantity}</span>
                         </div>
                         <textarea
-                          value={serialText[l.itemId] ?? ''}
-                          onChange={(e) => { setSerialText((p) => ({ ...p, [l.itemId]: e.target.value })); unlockLine(l.itemId) }}
+                          value={serialText[id] ?? ''}
+                          onChange={(e) => { setSerialText((p) => ({ ...p, [id]: e.target.value })); unlockLine(id) }}
                           disabled={isConfirmed}
                           rows={Math.min(6, Math.max(2, l.quantity))}
                           placeholder={'시리얼을 한 줄에 하나씩'}
@@ -253,7 +235,7 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
                     {l.mode === 'lot' && (
                       <div className="mt-2 space-y-1.5">
                         <p className={label}>LOT별 수량 (합 = {l.quantity})</p>
-                        {(lotRows[l.itemId] ?? [{ bucketKey: '', quantity: '' }]).map((row, ri) => {
+                        {(lotRows[id] ?? [{ bucketKey: '', quantity: '' }]).map((row, ri) => {
                           const cur = l.buckets.find((b) => `${b.warehouseId}|${b.lotNo}` === row.bucketKey)
                           const multiWh = new Set(l.buckets.map((b) => b.warehouseId)).size > 1
                           return (
@@ -261,7 +243,7 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
                               <select
                                 value={row.bucketKey}
                                 disabled={isConfirmed}
-                                onChange={(e) => { const v = e.target.value; setLotRows((p) => { const rows = [...(p[l.itemId] ?? [{ bucketKey: '', quantity: '' }])]; rows[ri] = { ...rows[ri], bucketKey: v }; return { ...p, [l.itemId]: rows } }); unlockLine(l.itemId) }}
+                                onChange={(e) => { const v = e.target.value; setLotRows((p) => { const rows = [...(p[id] ?? [{ bucketKey: '', quantity: '' }])]; rows[ri] = { ...rows[ri], bucketKey: v }; return { ...p, [id]: rows } }); unlockLine(id) }}
                                 className={`${input} disabled:bg-gray-50 disabled:text-gray-500`}
                               >
                                 <option value="">LOT 선택</option>
@@ -275,31 +257,25 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
                                 type="number" min="1"
                                 value={row.quantity}
                                 disabled={isConfirmed}
-                                onChange={(e) => { const v = e.target.value; setLotRows((p) => { const rows = [...(p[l.itemId] ?? [{ bucketKey: '', quantity: '' }])]; rows[ri] = { ...rows[ri], quantity: v }; return { ...p, [l.itemId]: rows } }); unlockLine(l.itemId) }}
+                                onChange={(e) => { const v = e.target.value; setLotRows((p) => { const rows = [...(p[id] ?? [{ bucketKey: '', quantity: '' }])]; rows[ri] = { ...rows[ri], quantity: v }; return { ...p, [id]: rows } }); unlockLine(id) }}
                                 placeholder="수량"
                                 className={`${input} w-24 text-right disabled:bg-gray-50 disabled:text-gray-500`}
                               />
                               {cur && <span className="text-xs text-gray-400">잔량 {cur.quantity}</span>}
                               {ri > 0 && !isConfirmed && (
-                                <button type="button" onClick={() => { setLotRows((p) => ({ ...p, [l.itemId]: (p[l.itemId] ?? []).filter((_, i) => i !== ri) })); unlockLine(l.itemId) }} className="text-xs text-red-400 hover:text-red-600">삭제</button>
+                                <button type="button" onClick={() => { setLotRows((p) => ({ ...p, [id]: (p[id] ?? []).filter((_, i) => i !== ri) })); unlockLine(id) }} className="text-xs text-red-400 hover:text-red-600">삭제</button>
                               )}
                             </div>
                           )
                         })}
                         {!isConfirmed && (
-                          <button
-                            type="button"
-                            onClick={() => setLotRows((p) => ({ ...p, [l.itemId]: [...(p[l.itemId] ?? [{ bucketKey: '', quantity: '' }]), { bucketKey: '', quantity: '' }] }))}
-                            className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-500 hover:bg-gray-50"
-                          >
-                            + LOT 추가
-                          </button>
+                          <button type="button" onClick={() => setLotRows((p) => ({ ...p, [id]: [...(p[id] ?? [{ bucketKey: '', quantity: '' }]), { bucketKey: '', quantity: '' }] }))} className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-500 hover:bg-gray-50">+ LOT 추가</button>
                         )}
                         <div className="pt-1">
                           <p className={label}>시리얼 기록 (선택 — 과도기, 재고 차감과 무관)</p>
                           <textarea
-                            value={noteText[l.itemId] ?? ''}
-                            onChange={(e) => setNoteText((p) => ({ ...p, [l.itemId]: e.target.value }))}
+                            value={noteText[id] ?? ''}
+                            onChange={(e) => setNoteText((p) => ({ ...p, [id]: e.target.value }))}
                             disabled={isConfirmed}
                             rows={2}
                             placeholder="스캔한 시리얼을 기록으로 남기려면 줄 단위 입력"

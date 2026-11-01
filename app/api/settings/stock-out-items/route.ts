@@ -1,51 +1,69 @@
+/**
+ * 출고 품목 노출 설정 — 조회 (projects/stock_out_v2_design.md §6)
+ * 품목 소스 = 자재관리 품목(inventory_items, 인벤토리×품목 행). 체크 상태는 stock_out_item_purposes.
+ * GET            : 활성 품목 전체 + 각 품목의 purposes (설정 화면 — 로그인 전원 조회 가능, 쓰기는 ADMIN)
+ * GET ?purpose=  : 해당 업무에 체크된 활성 품목만 (출고요청 폼용)
+ */
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
-import { logAudit, auditActorFromJWT } from '@/lib/audit'
+import { getAuthUser } from '@/lib/auth'
+import { isStockOutPurpose } from '@/lib/stockOutShared'
 
 export const dynamic = 'force-dynamic'
 
-const ITEM_GROUPS = ['SYSTEM', 'WEARABLE'] as const
+export interface StockOutItemOption {
+  id: number
+  itemCode: string
+  name: string
+  modelName: string | null
+  categoryName: string | null
+  isSerialManaged: boolean
+  isLotManaged: boolean
+  stockTotal: number
+  purposes: string[]
+  /** 이 품목 1개에 포함되는 부자재(출고요청 구성 안내 — stock_out_item_components) */
+  components: { childItemId: number; childName: string; quantity: number }[]
+}
+export interface StockOutInventoryGroup {
+  id: number
+  name: string
+  items: StockOutItemOption[]
+}
 
-/**
- * 출고 품목 마스터 (stock_out_request_design.md §4.1 — 출고업무 전용, WMS 품목과 독립)
- * GET은 로그인 전원(요청 폼 옵션), 쓰기는 ADMIN 이상.
- */
 export async function GET(request: NextRequest) {
   const user = await getAuthUser(request)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const purposeParam = request.nextUrl.searchParams.get('purpose')
+  if (purposeParam && !isStockOutPurpose(purposeParam)) return NextResponse.json({ error: '업무 구분이 올바르지 않습니다.' }, { status: 400 })
 
-  const items = await prisma.stockOutItem.findMany({
-    orderBy: [{ itemGroup: 'asc' }, { sortOrder: 'asc' }, { id: 'asc' }],
-    include: { _count: { select: { requestItems: true } } },
-  })
-  return NextResponse.json({ items })
-}
-
-export async function POST(request: NextRequest) {
-  const user = await getAuthUser(request)
-  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-
-  const { name, itemGroup, sortOrder, isActive, wmsModelName } = await request.json()
-  if (!name?.trim()) return NextResponse.json({ error: '품목명을 입력해주세요.' }, { status: 400 })
-  if (!ITEM_GROUPS.includes(itemGroup)) return NextResponse.json({ error: '품목 그룹이 올바르지 않습니다.' }, { status: 400 })
-
-  const dup = await prisma.stockOutItem.findUnique({ where: { name: name.trim() } })
-  if (dup) return NextResponse.json({ error: '이미 존재하는 품목명입니다.' }, { status: 409 })
-
-  const item = await prisma.stockOutItem.create({
-    data: { name: name.trim(), itemGroup, sortOrder: Number.isInteger(sortOrder) ? sortOrder : 0, isActive: isActive ?? true, wmsModelName: typeof wmsModelName === 'string' && wmsModelName.trim() ? wmsModelName.trim() : null },
+  const items = await prisma.inventoryItem.findMany({
+    where: {
+      isActive: true,
+      inventory: { isActive: true },
+      ...(purposeParam ? { stockOutPurposes: { some: { purpose: purposeParam } } } : {}),
+    },
+    select: {
+      id: true, itemCode: true, name: true, modelName: true, isSerialManaged: true, isLotManaged: true,
+      inventory: { select: { id: true, name: true, sortOrder: true } },
+      category: { select: { name: true, sortOrder: true } },
+      stockOutPurposes: { select: { purpose: true } },
+      stockOutComponents: { select: { childItemId: true, quantity: true, child: { select: { name: true } } }, orderBy: { sortOrder: 'asc' } },
+      stocks: { select: { quantity: true } },
+    },
+    orderBy: [{ inventory: { sortOrder: 'asc' } }, { inventory: { id: 'asc' } }, { category: { sortOrder: 'asc' } }, { sortOrder: 'asc' }, { id: 'asc' }],
   })
 
-  await logAudit({
-    req: request,
-    actor: auditActorFromJWT(user),
-    action: 'CREATE',
-    resource: 'setting:stock_out_item',
-    resourceId: item.id,
-    resourceLabel: item.name,
-    after: item,
-  })
-
-  return NextResponse.json({ item }, { status: 201 })
+  const groups: StockOutInventoryGroup[] = []
+  for (const it of items) {
+    let g = groups.find((x) => x.id === it.inventory.id)
+    if (!g) { g = { id: it.inventory.id, name: it.inventory.name, items: [] }; groups.push(g) }
+    g.items.push({
+      id: it.id, itemCode: it.itemCode, name: it.name, modelName: it.modelName,
+      categoryName: it.category?.name ?? null, isSerialManaged: it.isSerialManaged, isLotManaged: it.isLotManaged,
+      stockTotal: it.stocks.reduce((s, b) => s + b.quantity, 0),
+      purposes: it.stockOutPurposes.map((p) => p.purpose),
+      components: it.stockOutComponents.map((c) => ({ childItemId: c.childItemId, childName: c.child.name, quantity: c.quantity })),
+    })
+  }
+  return NextResponse.json({ inventories: groups })
 }

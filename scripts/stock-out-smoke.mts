@@ -43,8 +43,8 @@ async function main() {
     const mapOf = (n: string) => statuses.find((s) => s.name === n)?.ticketStatus
     check('매핑 요청→OPEN·처리중→IN_PROGRESS·보류→PENDING', mapOf('요청') === 'OPEN' && mapOf('처리중') === 'IN_PROGRESS' && mapOf('보류') === 'PENDING')
     check("매핑 완료→CLOSED·취소→CLOSED (2026-09-03 결정 — RESOLVED 미경유)", mapOf('완료') === 'CLOSED' && mapOf('취소') === 'CLOSED')
-    const itemCount = await prisma.stockOutItem.count({ where: { isActive: true } })
-    check('출고 품목 12종 시드', itemCount >= 12, `실제 ${itemCount}`)
+    const buildCount = await prisma.stockOutItemPurpose.count({ where: { purpose: 'BUILD' } })
+    check('구축(BUILD) 노출 품목 시드 (v2 — 대웅제약재고 14종)', buildCount >= 10, `실제 ${buildCount}`)
     const rule = await prisma.ticketDomainCtiRule.findFirst({ where: { refType: 'STOCK_OUT', matchStatusCodeId: null } })
     check('자동생성 규칙 기본 행 존재', !!rule)
 
@@ -62,7 +62,7 @@ async function main() {
     if (!project) throw new Error('프로젝트가 없어 스모크를 진행할 수 없습니다.')
     const anyUser = await prisma.user.findFirst({ where: { isActive: true }, select: { id: true } })
     if (!anyUser) throw new Error('사용자가 없습니다.')
-    const items = await prisma.stockOutItem.findMany({ where: { isActive: true }, orderBy: { id: 'asc' }, take: 3 })
+    const items = await prisma.inventoryItem.findMany({ where: { isActive: true, stockOutPurposes: { some: { purpose: 'BUILD' } } }, orderBy: { id: 'asc' }, take: 3 })
 
     const sorCode = await nextSorCode()
     check('SOR 코드 형식 SOR-YYYYMM-NNNN', /^SOR-\d{6}-\d{4}$/.test(sorCode))
@@ -80,7 +80,7 @@ async function main() {
     })
     cleanup.push(() => prisma.stockOutRequest.deleteMany({ where: { id: sor.id } }))
     await prisma.stockOutRequestItem.createMany({
-      data: items.map((it, i) => ({ requestId: sor.id, itemId: it.id, quantity: i + 1 })),
+      data: items.map((it, i) => ({ requestId: sor.id, inventoryItemId: it.id, quantity: i + 1 })),
     })
 
     const ticketId = await prisma.$transaction((tx) =>

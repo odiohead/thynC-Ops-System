@@ -48,7 +48,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       resource: 'stock_out_request',
       resourceId: after?.sorCode ?? id,
       resourceLabel: `${after?.sorCode ?? id} 출고 처리 (전표 ${result.txCodes.length}건, 기기 등록 ${result.registered}대)`,
-      after: { txCodes: result.txCodes, registered: result.registered, skipped: result.registrySkipped, outType: body.outType },
+      after: { txCodes: result.txCodes, registered: result.registered, skipped: result.registrySkipped },
     })
 
     if (after?.ticketId) {

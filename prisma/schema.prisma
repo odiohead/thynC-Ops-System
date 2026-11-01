@@ -1173,6 +1173,10 @@ model InventoryItem {
   units           InventoryUnit[]
   components      InventoryItemComponent[] @relation("ComponentParent") // 이 품목이 주자재일 때의 부자재 구성
   usedIn          InventoryItemComponent[] @relation("ComponentChild") // 이 품목이 부자재로 소속된 주자재
+  stockOutLines    StockOutRequestItem[]   @relation("StockOutLineItem")    // 출고요청 라인 (v2 2026-11-01)
+  stockOutPurposes StockOutItemPurpose[]   @relation("StockOutItemPurposes") // 출고요청 업무별 노출 설정
+  stockOutComponents StockOutItemComponent[] @relation("StockOutComponentParent") // 출고요청 구성 안내 — 이 품목 1개에 포함되는 부자재
+  stockOutUsedIn     StockOutItemComponent[] @relation("StockOutComponentChild")  // 출고요청 구성 안내 — 이 품목이 부자재로 포함되는 주 품목
 
   @@index([categoryId])
   @@index([inventoryId])
@@ -2165,27 +2169,13 @@ model VocReceipt {
 }
 
 /// 출고 품목 마스터 (출고업무 전용 — projects/stock_out_request_design.md §4.1, WMS 품목·device_info와 독립)
-model StockOutItem {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique
-  itemGroup String   @map("item_group") // 'SYSTEM' 시스템 / 'WEARABLE' 웨어러블 디바이스 (SQL CHECK)
-  wmsModelName String? @map("wms_model_name") // WMS 품목 해석 키 = inventory_items.model_name (P2, NULL=매핑 없음)
-  sortOrder Int      @default(0) @map("sort_order")
-  isActive  Boolean  @default(true) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  requestItems StockOutRequestItem[]
-
-  @@map("stock_out_items")
-  @@schema("public")
-}
 
 /// 출고요청 — 7번째 티켓 도메인 (refType 'STOCK_OUT', projects/stock_out_request_design.md)
 model StockOutRequest {
   id              Int       @id @default(autoincrement())
   sorCode         String    @unique @map("sor_code") @db.VarChar(20) // SOR-YYYYMM-NNNN
   projectCode     String    @map("project_code") // 필수 연결 — 프로젝트 삭제는 RESTRICT(라우트 선검사 409)
+  purpose         String    @default("BUILD") @db.VarChar(16) // 업무 구분 BUILD 구축 / MAINTENANCE 유지보수 / BUSINESS 사업업무 (SQL CHECK, lib/stockOutShared.ts — v2 2026-11-01)
   statusId        Int?      @map("status_id") // STOCK_OUT_STATUS (+ticket_status 매핑: 완료·취소→CLOSED)
   statusChangedAt DateTime? @default(now()) @map("status_changed_at")
   requestDate     DateTime  @map("request_date") @db.Date // 희망 출고일
@@ -2216,18 +2206,49 @@ model StockOutRequest {
 
 /// 출고요청 품목 라인 (수량 입력된 품목만 저장)
 model StockOutRequestItem {
-  id        Int @id @default(autoincrement())
-  requestId Int @map("request_id")
-  itemId    Int @map("item_id")
-  quantity  Int // SQL CHECK > 0
+  id              Int @id @default(autoincrement())
+  requestId       Int @map("request_id")
+  inventoryItemId Int @map("inventory_item_id") // 자재관리 품목(인벤토리×품목 행) — v2 2026-11-01, 구 stock_out_items 폐기
+  quantity        Int // SQL CHECK > 0
   fulfilledSerials String? @map("fulfilled_serials") @db.Text // 과도기 시리얼 기록 (P2 — 비시리얼 품목 전용, 줄 단위 원문)
 
   request StockOutRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  item    StockOutItem    @relation(fields: [itemId], references: [id])
+  item    InventoryItem   @relation("StockOutLineItem", fields: [inventoryItemId], references: [id])
 
-  @@unique([requestId, itemId])
-  @@index([itemId])
+  @@unique([requestId, inventoryItemId])
+  @@index([inventoryItemId])
   @@map("stock_out_request_items")
+  @@schema("public")
+}
+
+/// 출고요청 품목 구성 안내 (2026-11-01) — 대웅제약재고 'thynC 시스템 XX' 1개당 thynC운영팀재고 부자재 수량. 인벤토리가 달라 WMS 주자재-부자재(같은 인벤토리 한정)와 별개, 재고 처리와 무관한 안내 전용
+model StockOutItemComponent {
+  parentItemId Int      @map("parent_item_id")
+  childItemId  Int      @map("child_item_id")
+  quantity     Int      @default(1) // 주 품목 1개당 포함 수량 (SQL CHECK > 0)
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  parent InventoryItem @relation("StockOutComponentParent", fields: [parentItemId], references: [id], onDelete: Cascade)
+  child  InventoryItem @relation("StockOutComponentChild", fields: [childItemId], references: [id], onDelete: Cascade)
+
+  @@id([parentItemId, childItemId])
+  @@index([childItemId])
+  @@map("stock_out_item_components")
+  @@schema("public")
+}
+
+/// 출고업무 v2 — 업무별 노출 설정 (행 존재 = 체크). 설정 > 출고 품목 관리 탭(구축/유지보수/사업업무)
+model StockOutItemPurpose {
+  inventoryItemId Int      @map("inventory_item_id")
+  purpose         String   @db.VarChar(16) // BUILD / MAINTENANCE / BUSINESS (SQL CHECK)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  item InventoryItem @relation("StockOutItemPurposes", fields: [inventoryItemId], references: [id], onDelete: Cascade)
+
+  @@id([inventoryItemId, purpose])
+  @@index([purpose])
+  @@map("stock_out_item_purposes")
   @@schema("public")
 }
 

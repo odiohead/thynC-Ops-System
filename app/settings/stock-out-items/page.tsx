@@ -1,207 +1,188 @@
 'use client'
 
 /**
- * 출고 품목 관리 (stock_out_request_design.md §4.1 — ADMIN 이상)
- * 출고업무 전용 품목 마스터 — WMS 품목·기기 관리와 독립. 사용 중 품목은 삭제 대신 비활성.
+ * 출고 품목 노출 설정 (projects/stock_out_v2_design.md §7 — ADMIN 이상 쓰기)
+ * 품목 소스 = 자재관리 품목(인벤토리×품목 행). 업무 탭(구축/유지보수/사업업무)마다 전체 활성 품목을 보여 주고
+ * 행별 '노출' 체크로 그 업무의 출고요청 폼에 보일지 정한다. 체크 = "이 업무는 이 인벤토리에서 이 품목을 출고".
  */
-import { useState, useEffect, useCallback } from 'react'
+import { Suspense, useState, useEffect, useCallback, useMemo } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { STOCK_OUT_PURPOSES, STOCK_OUT_PURPOSE_LABELS, isStockOutPurpose, type StockOutPurpose } from '@/lib/stockOutShared'
 
-interface StockOutItemRow {
+interface ItemRow {
   id: number
+  itemCode: string
   name: string
-  itemGroup: 'SYSTEM' | 'WEARABLE'
-  wmsModelName: string | null
-  sortOrder: number
-  isActive: boolean
-  _count?: { requestItems: number }
+  modelName: string | null
+  categoryName: string | null
+  isSerialManaged: boolean
+  isLotManaged: boolean
+  stockTotal: number
+  purposes: string[]
 }
+interface InventoryGroup { id: number; name: string; items: ItemRow[] }
 
-const GROUPS: { value: 'SYSTEM' | 'WEARABLE'; label: string }[] = [
-  { value: 'SYSTEM', label: '시스템' },
-  { value: 'WEARABLE', label: '웨어러블 디바이스' },
-]
-const GROUP_LABELS: Record<string, string> = { SYSTEM: '시스템', WEARABLE: '웨어러블 디바이스' }
+function StockOutItemsSettingsInner() {
+  const router = useRouter()
+  const sp = useSearchParams()
+  const tabParam = sp.get('tab')
+  const tab: StockOutPurpose = isStockOutPurpose(tabParam) ? tabParam : 'BUILD'
 
-export default function StockOutItemsSettingsPage() {
-  const [items, setItems] = useState<StockOutItemRow[]>([])
+  const [groups, setGroups] = useState<InventoryGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-
-  const [newName, setNewName] = useState('')
-  const [newGroup, setNewGroup] = useState<'SYSTEM' | 'WEARABLE'>('SYSTEM')
-  const [newWms, setNewWms] = useState('')
-  const [newOrder, setNewOrder] = useState('')
-
-  const [editId, setEditId] = useState<number | null>(null)
-  const [editName, setEditName] = useState('')
-  const [editGroup, setEditGroup] = useState<'SYSTEM' | 'WEARABLE'>('SYSTEM')
-  const [editWms, setEditWms] = useState('')
-  const [editOrder, setEditOrder] = useState('')
+  const [canEdit, setCanEdit] = useState(false)
+  const [busyIds, setBusyIds] = useState<Set<number>>(new Set())
+  const [q, setQ] = useState('')
 
   const load = useCallback(async () => {
     const res = await fetch('/api/settings/stock-out-items')
-    if (res.ok) {
-      const d = await res.json()
-      setItems(d.items ?? [])
-    }
+    if (res.ok) setGroups((await res.json()).inventories ?? [])
+    else setError('품목을 불러오지 못했습니다.')
     setLoading(false)
   }, [])
-
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    fetch('/api/auth/me').then((r) => (r.ok ? r.json() : null)).then((d) => d && setCanEdit(d.role === 'ADMIN' || d.role === 'SUPER_ADMIN')).catch(() => {})
+  }, [])
 
-  function flash(msg: string) {
-    setError(msg)
-    setTimeout(() => setError(null), 5000)
-  }
+  const counts = useMemo(() => {
+    const c: Record<string, number> = {}
+    for (const p of STOCK_OUT_PURPOSES) c[p] = 0
+    for (const g of groups) for (const it of g.items) for (const p of it.purposes) c[p] = (c[p] ?? 0) + 1
+    return c
+  }, [groups])
 
-  async function create() {
-    if (!newName.trim()) return
-    setBusy(true)
-    const res = await fetch('/api/settings/stock-out-items', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newName, itemGroup: newGroup, wmsModelName: newWms || null, sortOrder: newOrder !== '' ? Number(newOrder) : 0 }),
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    if (!needle) return groups
+    return groups
+      .map((g) => ({ ...g, items: g.items.filter((it) => [it.name, it.modelName ?? '', it.itemCode, it.categoryName ?? ''].some((v) => v.toLowerCase().includes(needle))) }))
+      .filter((g) => g.items.length > 0)
+  }, [groups, q])
+
+  function flash(msg: string) { setError(msg); setTimeout(() => setError(null), 5000) }
+
+  /** 체크 토글 — 낙관적 갱신, 실패 시 되돌림 */
+  async function toggle(itemId: number, enabled: boolean) {
+    if (!canEdit) return
+    const apply = (on: boolean) => setGroups((prev) => prev.map((g) => ({
+      ...g,
+      items: g.items.map((it) => it.id !== itemId ? it : { ...it, purposes: on ? Array.from(new Set([...it.purposes, tab])) : it.purposes.filter((p) => p !== tab) }),
+    })))
+    apply(enabled)
+    setBusyIds((s) => new Set(s).add(itemId))
+    const res = await fetch(`/api/settings/stock-out-items/${itemId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ purpose: tab, enabled }),
     })
-    const d = await res.json().catch(() => ({}))
-    setBusy(false)
-    if (!res.ok) { flash(d.error ?? '추가에 실패했습니다.'); return }
-    setNewName(''); setNewWms(''); setNewOrder('')
-    await load()
+    setBusyIds((s) => { const n = new Set(s); n.delete(itemId); return n })
+    if (!res.ok) { apply(!enabled); flash((await res.json().catch(() => ({}))).error ?? '저장에 실패했습니다.'); return }
+    router.refresh()
   }
 
-  function startEdit(it: StockOutItemRow) {
-    setEditId(it.id)
-    setEditName(it.name)
-    setEditGroup(it.itemGroup)
-    setEditWms(it.wmsModelName ?? '')
-    setEditOrder(String(it.sortOrder))
+  /** 인벤토리 섹션 전체 선택/해제 — 순차 호출(실패 행만 되돌림) */
+  async function toggleAll(g: InventoryGroup, enabled: boolean) {
+    const targets = g.items.filter((it) => it.purposes.includes(tab) !== enabled)
+    for (const it of targets) await toggle(it.id, enabled)
   }
-
-  async function saveEdit() {
-    if (editId == null) return
-    setBusy(true)
-    const res = await fetch(`/api/settings/stock-out-items/${editId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: editName, itemGroup: editGroup, wmsModelName: editWms || null, sortOrder: editOrder !== '' ? Number(editOrder) : 0 }),
-    })
-    const d = await res.json().catch(() => ({}))
-    setBusy(false)
-    if (!res.ok) { flash(d.error ?? '수정에 실패했습니다.'); return }
-    setEditId(null)
-    await load()
-  }
-
-  async function toggleActive(it: StockOutItemRow) {
-    setBusy(true)
-    const res = await fetch(`/api/settings/stock-out-items/${it.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isActive: !it.isActive }),
-    })
-    setBusy(false)
-    if (!res.ok) { flash('변경에 실패했습니다.'); return }
-    await load()
-  }
-
-  async function remove(it: StockOutItemRow) {
-    if (!confirm(`'${it.name}' 품목을 삭제하시겠습니까?`)) return
-    setBusy(true)
-    const res = await fetch(`/api/settings/stock-out-items/${it.id}`, { method: 'DELETE' })
-    const d = await res.json().catch(() => ({}))
-    setBusy(false)
-    if (!res.ok) { flash(d.error ?? '삭제에 실패했습니다.'); return }
-    await load()
-  }
-
-  const input = 'rounded-md border border-gray-300 px-2.5 py-1.5 text-sm'
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
+    <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
       <h1 className="text-xl font-bold text-gray-900">출고 품목 관리</h1>
       <p className="mt-0.5 text-sm text-gray-500">
-        출고업무(출고요청)에서 선택하는 품목 목록입니다. 사용 이력이 있는 품목은 삭제 대신 비활성으로 전환하세요.
+        자재관리 품목(인벤토리별) 중 각 업무의 출고요청에 노출할 품목을 체크합니다. 체크한 인벤토리에서 출고 처리됩니다.
+        {!canEdit && <span className="ml-1 text-gray-400">(변경은 관리자만)</span>}
       </p>
+
+      {/* 업무 탭 */}
+      <div className="mt-4 flex items-center gap-1 border-b border-gray-200" role="tablist">
+        {STOCK_OUT_PURPOSES.map((p) => (
+          <button
+            key={p}
+            type="button"
+            role="tab"
+            aria-selected={tab === p}
+            onClick={() => router.push(`/settings/stock-out-items?tab=${p}`)}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${tab === p ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          >
+            {STOCK_OUT_PURPOSE_LABELS[p]}
+            <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[11px] ${tab === p ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>{counts[p] ?? 0}</span>
+          </button>
+        ))}
+        <div className="ml-auto pb-1.5">
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="품목·모델·분류 검색" className="w-52 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
+        </div>
+      </div>
 
       {error && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">{error}</div>}
 
-      {/* 추가 */}
-      <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
-        <select value={newGroup} onChange={(e) => setNewGroup(e.target.value as 'SYSTEM' | 'WEARABLE')} className={input}>
-          {GROUPS.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
-        </select>
-        <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="품목명" className={`${input} w-44`} />
-        <input type="text" value={newWms} onChange={(e) => setNewWms(e.target.value)} placeholder="WMS 모델명 (출고 처리 매핑)" className={`${input} w-48 font-mono`} />
-        <input type="number" value={newOrder} onChange={(e) => setNewOrder(e.target.value)} placeholder="순서" className={`${input} w-20`} />
-        <button type="button" onClick={create} disabled={busy || !newName.trim()} className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">+ 추가</button>
-      </div>
-
-      {/* 목록 */}
-      <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-        {loading ? (
-          <p className="py-12 text-center text-sm text-gray-400">불러오는 중...</p>
-        ) : (
-          <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                {['그룹', '품목명', 'WMS 모델명', '순서', '사용', '활성', ''].map((h, i) => (
-                  <th key={i} className="whitespace-nowrap px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {items.map((it) => (
-                <tr key={it.id} className={it.isActive ? '' : 'bg-gray-50 text-gray-400'}>
-                  {editId === it.id ? (
-                    <>
-                      <td className="px-3 py-2">
-                        <select value={editGroup} onChange={(e) => setEditGroup(e.target.value as 'SYSTEM' | 'WEARABLE')} className={input}>
-                          {GROUPS.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
-                        </select>
-                      </td>
-                      <td className="px-3 py-2"><input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className={`${input} w-40`} /></td>
-                      <td className="px-3 py-2"><input type="text" value={editWms} onChange={(e) => setEditWms(e.target.value)} placeholder="WMS 모델명" className={`${input} w-36 font-mono`} /></td>
-                      <td className="px-3 py-2"><input type="number" value={editOrder} onChange={(e) => setEditOrder(e.target.value)} className={`${input} w-20`} /></td>
-                      <td className="px-3 py-2 text-xs">{it._count?.requestItems ?? 0}건</td>
-                      <td className="px-3 py-2" colSpan={2}>
-                        <div className="flex gap-1.5">
-                          <button type="button" onClick={saveEdit} disabled={busy} className="rounded-md bg-blue-600 px-2.5 py-1 text-xs text-white">저장</button>
-                          <button type="button" onClick={() => setEditId(null)} className="rounded-md border border-gray-300 px-2.5 py-1 text-xs text-gray-600">취소</button>
-                        </div>
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="whitespace-nowrap px-3 py-2 text-xs">{GROUP_LABELS[it.itemGroup]}</td>
-                      <td className="px-3 py-2">{it.name}</td>
-                      <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">{it.wmsModelName ?? <span className="text-red-400">미지정</span>}</td>
-                      <td className="whitespace-nowrap px-3 py-2 text-xs">{it.sortOrder}</td>
-                      <td className="whitespace-nowrap px-3 py-2 text-xs">{it._count?.requestItems ?? 0}건</td>
-                      <td className="whitespace-nowrap px-3 py-2">
-                        <button
-                          type="button"
-                          onClick={() => toggleActive(it)}
-                          disabled={busy}
-                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${it.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'}`}
-                        >
-                          {it.isActive ? '활성' : '비활성'}
-                        </button>
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2">
-                        <div className="flex justify-end gap-1.5">
-                          <button type="button" onClick={() => startEdit(it)} className="rounded-md border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50">수정</button>
-                          <button type="button" onClick={() => remove(it)} disabled={busy} className="rounded-md border border-red-200 px-2.5 py-1 text-xs text-red-500 hover:bg-red-50">삭제</button>
-                        </div>
-                      </td>
-                    </>
+      {loading ? (
+        <p className="py-12 text-center text-sm text-gray-400">불러오는 중...</p>
+      ) : filtered.length === 0 ? (
+        <p className="py-12 text-center text-sm text-gray-400">표시할 자재관리 품목이 없습니다.</p>
+      ) : (
+        <div className="mt-4 space-y-4">
+          {filtered.map((g) => {
+            const checked = g.items.filter((it) => it.purposes.includes(tab)).length
+            return (
+              <section key={g.id} className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2.5">
+                  <h2 className="text-sm font-semibold text-gray-800">{g.name} <span className="ml-1 font-normal text-gray-400">{checked} / {g.items.length} 노출</span></h2>
+                  {canEdit && (
+                    <div className="flex gap-1.5">
+                      <button type="button" onClick={() => void toggleAll(g, true)} className="rounded-md border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-100">전체 선택</button>
+                      <button type="button" onClick={() => void toggleAll(g, false)} className="rounded-md border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-100">전체 해제</button>
+                    </div>
                   )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+                </div>
+                <table className="min-w-full divide-y divide-gray-100 text-sm">
+                  <thead className="bg-white">
+                    <tr>
+                      {['노출', '품목코드', '품목명', '모델', '분류', '관리', '현재고'].map((h, i) => (
+                        <th key={h} className={`whitespace-nowrap px-3 py-2 text-xs font-medium uppercase tracking-wider text-gray-500 ${i === 6 ? 'text-right' : 'text-left'}`}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {g.items.map((it) => {
+                      const on = it.purposes.includes(tab)
+                      return (
+                        <tr key={it.id} className={on ? 'bg-blue-50/40' : ''}>
+                          <td className="px-3 py-1.5">
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              disabled={!canEdit || busyIds.has(it.id)}
+                              onChange={(e) => void toggle(it.id, e.target.checked)}
+                              aria-label={`${g.name} ${it.name} ${STOCK_OUT_PURPOSE_LABELS[tab]} 노출`}
+                              className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                            />
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-1.5 font-mono text-xs text-gray-500">{it.itemCode}</td>
+                          <td className="px-3 py-1.5 text-gray-900">{it.name}</td>
+                          <td className="whitespace-nowrap px-3 py-1.5 font-mono text-xs text-gray-600">{it.modelName ?? '-'}</td>
+                          <td className="whitespace-nowrap px-3 py-1.5 text-xs text-gray-500">{it.categoryName ?? '-'}</td>
+                          <td className="whitespace-nowrap px-3 py-1.5 text-xs text-gray-500">{it.isSerialManaged ? '시리얼' : it.isLotManaged ? 'LOT' : '수량'}</td>
+                          <td className="whitespace-nowrap px-3 py-1.5 text-right text-xs text-gray-600">{it.stockTotal.toLocaleString()}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </section>
+            )
+          })}
+        </div>
+      )}
     </div>
+  )
+}
+
+// useSearchParams 사용 컴포넌트는 Suspense 경계 필요 (Next.js App Router — 프리렌더 오류 방지)
+export default function StockOutItemsSettingsPage() {
+  return (
+    <Suspense fallback={<div className="mx-auto max-w-5xl px-4 py-6 sm:px-6"><p className="text-sm text-gray-400">불러오는 중...</p></div>}>
+      <StockOutItemsSettingsInner />
+    </Suspense>
   )
 }

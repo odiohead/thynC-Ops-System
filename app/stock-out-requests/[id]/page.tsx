@@ -5,6 +5,7 @@
  * 상태 변경(도메인→티켓 동기화)·수정 모달·삭제(티켓 동반) — 권한: 설계 §2-6.
  */
 import { useState, useEffect, useCallback } from 'react'
+import { STOCK_OUT_PURPOSE_LABELS, type StockOutPurpose } from '@/lib/stockOutShared'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import TicketStatusBadge from '@/app/tickets/components/TicketStatusBadge'
@@ -39,10 +40,9 @@ interface StockOutDetail {
   status: (CodeRef & { ticketStatus: TicketStatus | null }) | null
   createdBy: { id: string; name: string } | null
   ticket: { id: number; ticketCode: string; status: TicketStatus; owner: { id: string; name: string } | null } | null
-  items: { id: number; itemId: number; quantity: number; fulfilledSerials: string | null; item: { id: number; name: string; itemGroup: string } }[]
+  purpose: StockOutPurpose
+  items: { id: number; inventoryItemId: number; quantity: number; fulfilledSerials: string | null; item: { id: number; name: string; modelName: string | null; isSerialManaged: boolean; inventory: { id: number; name: string }; category: { name: string } | null } }[]
 }
-
-const GROUP_LABELS: Record<string, string> = { SYSTEM: '시스템', WEARABLE: '웨어러블 디바이스' }
 
 function codeBadge(c: CodeRef | null) {
   if (!c) return <span className="text-sm text-gray-400">-</span>
@@ -148,6 +148,7 @@ export default function StockOutDetailPage() {
             <Link href="/stock-out-requests" className="text-sm text-gray-400 hover:text-gray-600">출고업무</Link>
             <span className="text-gray-300">/</span>
             <span className="font-mono text-sm text-gray-500">{req.sorCode}</span>
+            <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">{STOCK_OUT_PURPOSE_LABELS[req.purpose] ?? req.purpose}</span>
             {codeBadge(req.status)}
           </div>
           <h1 className="mt-1 text-xl font-bold text-gray-900">{req.project?.projectName ?? '-'}</h1>
@@ -237,7 +238,8 @@ export default function StockOutDetailPage() {
         <table className="min-w-full divide-y divide-gray-100 text-sm">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 sm:px-6">그룹</th>
+              <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 sm:px-6">인벤토리</th>
+              <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">분류</th>
               <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">품목</th>
               <th className="px-4 py-2 text-right text-xs font-medium uppercase tracking-wider text-gray-500 sm:pr-6">수량</th>
             </tr>
@@ -245,9 +247,11 @@ export default function StockOutDetailPage() {
           <tbody className="divide-y divide-gray-100">
             {req.items.map((l) => (
               <tr key={l.id}>
-                <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-500 sm:px-6">{GROUP_LABELS[l.item.itemGroup] ?? l.item.itemGroup}</td>
+                <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-500 sm:px-6">{l.item.inventory.name}</td>
+                <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-500">{l.item.category?.name ?? '-'}</td>
                 <td className="px-4 py-2 text-gray-900">
                   {l.item.name}
+                  {l.item.modelName && l.item.modelName !== l.item.name && <span className="ml-1.5 font-mono text-xs text-gray-400">{l.item.modelName}</span>}
                   {l.fulfilledSerials && (
                     <details className="mt-0.5">
                       <summary className="cursor-pointer text-xs text-gray-400 hover:text-gray-600">처리 시리얼 {l.fulfilledSerials.split('\n').filter(Boolean).length}건</summary>
@@ -319,7 +323,8 @@ export default function StockOutDetailPage() {
             sorCode: req.sorCode,
             requestDate: req.requestDate.slice(0, 10),
             note: req.note,
-            items: req.items.map((l) => ({ itemId: l.itemId, quantity: l.quantity })),
+            purpose: req.purpose,
+            items: req.items.map((l) => ({ inventoryItemId: l.inventoryItemId, quantity: l.quantity, name: l.item.name, modelName: l.item.modelName, inventoryId: l.item.inventory.id, inventoryName: l.item.inventory.name, categoryName: l.item.category?.name ?? null })),
           } satisfies StockOutEditTarget}
         />
       )}

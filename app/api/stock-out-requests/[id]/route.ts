@@ -4,7 +4,8 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { canEditStockOutRequest } from '@/lib/stockOut'
+import { canEditStockOutRequest, validateStockOutLines } from '@/lib/stockOut'
+import type { StockOutPurpose } from '@/lib/stockOutShared'
 import { syncStockOutToTicket } from '@/lib/ticket-domains/stockOut'
 import { notifyTicketChanged } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
@@ -25,7 +26,7 @@ const detailInclude = {
   fulfilledBy: { select: { id: true, name: true } },
   ticket: { select: { id: true, ticketCode: true, status: true, owner: { select: { id: true, name: true } } } },
   items: {
-    select: { id: true, itemId: true, quantity: true, fulfilledSerials: true, item: { select: { id: true, name: true, itemGroup: true, sortOrder: true } } },
+    select: { id: true, inventoryItemId: true, quantity: true, fulfilledSerials: true, item: { select: { id: true, name: true, modelName: true, isSerialManaged: true, inventory: { select: { id: true, name: true } }, category: { select: { name: true } } } } },
     orderBy: { id: 'asc' as const },
   },
   // 처리 전표 (P2 — stock_out_request_id 역조회, 취소 여부 포함)
@@ -52,25 +53,6 @@ export async function GET(request: NextRequest, { params }: Params) {
   return NextResponse.json({ stockOutRequest })
 }
 
-/** items 전체 교체 입력 검증 (route.ts POST와 동일 규칙) */
-async function validateItems(raw: unknown): Promise<{ itemId: number; quantity: number }[]> {
-  if (!Array.isArray(raw) || raw.length === 0) throw new Error('출고 품목을 1개 이상 입력하세요.')
-  const lines: { itemId: number; quantity: number }[] = []
-  const seen = new Set<number>()
-  for (const row of raw) {
-    const itemId = Number((row as { itemId?: unknown })?.itemId)
-    const quantity = Number((row as { quantity?: unknown })?.quantity)
-    if (!Number.isInteger(itemId)) throw new Error('품목이 올바르지 않습니다.')
-    if (!Number.isInteger(quantity) || quantity <= 0) throw new Error('수량은 1 이상의 정수여야 합니다.')
-    if (seen.has(itemId)) throw new Error('같은 품목이 중복 입력되었습니다.')
-    seen.add(itemId)
-    lines.push({ itemId, quantity })
-  }
-  const found = await prisma.stockOutItem.count({ where: { id: { in: lines.map((l) => l.itemId) }, isActive: true } })
-  if (found !== lines.length) throw new Error('사용할 수 없는 품목이 포함되어 있습니다.')
-  return lines
-}
-
 export async function PUT(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
   if (!user || user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -80,7 +62,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const existing = await prisma.stockOutRequest.findUnique({
     where: { id },
-    include: { status: { select: { id: true, name: true, ticketStatus: true } } },
+    include: { status: { select: { id: true, name: true, ticketStatus: true } }, items: { select: { inventoryItemId: true } } },
   })
   if (!existing) return NextResponse.json({ error: '출고요청을 찾을 수 없습니다.' }, { status: 404 })
 
@@ -91,7 +73,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const body = await request.json()
   const data: Prisma.StockOutRequestUncheckedUpdateInput = {}
-  let items: { itemId: number; quantity: number }[] | null = null
+  let items: { inventoryItemId: number; quantity: number }[] | null = null
 
   try {
     if (body.requestDate !== undefined) {
@@ -115,7 +97,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
         if (!terminal && existing.resolvedAt) data.resolvedAt = null
       }
     }
-    if (body.items !== undefined) items = await validateItems(body.items)
+    if (body.items !== undefined) items = await validateStockOutLines(body.items, existing.purpose as StockOutPurpose, existing.items.map((l) => l.inventoryItemId))
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 })
   }

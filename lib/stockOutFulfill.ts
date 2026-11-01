@@ -1,17 +1,19 @@
 /**
- * 출고업무 P2 — 출고 처리 코어 (stock_out_request_design.md §13)
+ * 출고업무 — 출고 처리 코어 (stock_out_request_design.md §13 · v2 stock_out_v2_design.md §5)
  *
  * previewFulfillment: 검증·라인 판정만 (쓰기 없음) — 화면의 품목별 [확인]과 실행 전 게이트가 공유.
  * executeFulfillment: 전량 일치(all-or-nothing) 원칙으로 WMS 전표(재고 차감·시리얼 개체 OUT) +
- * 기기현황 등록(웨어러블 시리얼 — source WMS·ref INVENTORY_TX) + 요청 상태 '완료'(티켓 CLOSED)를
+ * 기기현황 등록(시리얼 추적 기기 — source WMS·ref INVENTORY_TX) + 요청 상태 '완료'(티켓 CLOSED)를
  * **단일 트랜잭션**으로 수행한다.
  *
- * 창고는 입력받지 않는다 (2026-09-03 개정 — 출고유형→인벤토리만 구분):
+ * v2 (2026-11-01): 출고유형 입력 폐기 — 요청 라인이 자재관리 품목(인벤토리×품목 행)을 직접 가리키므로
+ *  - 인벤토리 = 라인 품목의 inventory (한 요청에 여러 인벤토리 가능 → 인벤토리별 전표 분리)
+ *  - 전표 유형·기기 용도 = 인벤토리명 매핑(INVENTORY_OUT_META)
+ *  - 기기현황 등록 대상 = 품목에 연결된 device_info가 시리얼 추적(serialTracked)인 시리얼 품목
+ * 창고는 입력받지 않는다 (2026-09-03 개정):
  *  - 시리얼 품목: 개체의 실제 위치로 자동 그룹핑 (창고별 전표 분할)
  *  - LOT 품목: LOT 버킷(창고×LOT) 선택에 위치가 내장
  *  - 수량 품목: 재고 버킷에서 잔량 많은 순으로 자동 배분 (창고별 전표 분할)
- * 라인 모드는 WMS 품목의 관리 방식에서 파생 — 센서가 시리얼 품목으로 전환되면(별도 과제)
- * 코드 수정 없이 serial 경로를 탄다.
  */
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
@@ -19,7 +21,7 @@ import { planInventoryTransaction, applyInventoryTransaction, InventoryError, Tx
 import { registerDevicesIn, findUnitsBySerial } from '@/lib/deviceRegistry'
 import { normalizeSerial } from '@/lib/deviceRegistryShared'
 import { syncStockOutToTicket } from '@/lib/ticket-domains/stockOut'
-import { OUT_TYPE_META, isStockOutOutType, type StockOutOutType, type FulfillLineMode } from '@/lib/stockOutShared'
+import { outMetaForInventory, type FulfillLineMode } from '@/lib/stockOutShared'
 
 export class FulfillError extends Error {
   status: number
@@ -32,28 +34,28 @@ export class FulfillError extends Error {
 }
 
 export interface FulfillLineInput {
-  itemId: number // stock_out_items.id
+  inventoryItemId: number // inventory_items.id (요청 라인 식별)
   serials?: string[] // 시리얼 품목 — 스캔/입력 (개수 = 요청 수량)
   lots?: { warehouseId: number; lotNo: string; quantity: number }[] // 비시리얼 LOT 품목 — 버킷(창고×LOT)별 차감 (합 = 요청 수량)
   serialsNote?: string | null // 과도기 시리얼 기록 (비시리얼 품목 — 개체 미생성, 원문 보존)
 }
 
 export interface FulfillInput {
-  outType: StockOutOutType
   txDate?: string | null
   lines?: FulfillLineInput[]
 }
 
 export interface FulfillLinePreview {
-  itemId: number
+  inventoryItemId: number
   name: string
-  itemGroup: string
+  modelName: string | null
+  inventoryId: number
+  inventoryName: string
+  categoryName: string | null
   quantity: number
   mode: FulfillLineMode
-  wmsItemId: number | null
-  wmsItemName: string | null
   isLotManaged: boolean
-  /** 기기현황 등록 대상 (웨어러블 + WMS 시리얼 + device_info 모델 존재) */
+  /** 기기현황 등록 대상 (시리얼 품목 + device_info 시리얼 추적) */
   registry: boolean
   /** 재고 버킷(창고×LOT) — LOT 옵션·현재고 표시용 */
   buckets: { warehouseId: number; warehouseName: string; lotNo: string; quantity: number }[]
@@ -63,14 +65,21 @@ export interface FulfillLinePreview {
   messages: string[]
 }
 
+export interface FulfillInventoryPreview {
+  id: number
+  name: string
+  linkHospital: boolean
+  reasonName: string
+  reasonId: number | null
+  usageInput: string
+}
+
 export interface FulfillPreview {
   requestId: number
   sorCode: string
-  outType: StockOutOutType
-  usageInput: string
-  inventory: { id: number; name: string; linkHospital: boolean } | null
-  reasonName: string
-  reasonId: number | null
+  purpose: string
+  /** 라인이 속한 인벤토리(중복 제거) — 전표는 인벤토리별로 분리 */
+  inventories: FulfillInventoryPreview[]
   hospital: { hospitalCode: string; hospitalName: string } | null
   projectCode: string
   lines: FulfillLinePreview[]
@@ -78,22 +87,35 @@ export interface FulfillPreview {
   ok: boolean // 실행 가능 (전역 오류 없음 + 전 라인 ok/warning)
 }
 
+interface LoadedLine {
+  id: number
+  inventoryItemId: number
+  quantity: number
+  item: {
+    id: number; name: string; modelName: string | null; isActive: boolean; isSerialManaged: boolean; isLotManaged: boolean
+    inventory: { id: number; name: string; linkHospital: boolean; isActive: boolean }
+    category: { name: string } | null
+    deviceInfo: { id: number; deviceModel: string; serialTracked: boolean; isActive: boolean } | null
+  }
+}
+
 interface LoadedRequest {
   id: number
   sorCode: string
+  purpose: string
   statusId: number | null
   fulfilledAt: Date | null
   createdBy: { name: string } | null
   status: { ticketStatus: string | null } | null
   project: { projectCode: string; projectName: string; hospitalCode: string; hospital: { hospitalCode: string; hospitalName: string } | null }
-  items: { id: number; itemId: number; quantity: number; item: { id: number; name: string; itemGroup: string; wmsModelName: string | null } }[]
+  items: LoadedLine[]
 }
 
 async function loadRequest(requestId: number): Promise<LoadedRequest> {
   const req = await prisma.stockOutRequest.findUnique({
     where: { id: requestId },
     select: {
-      id: true, sorCode: true, statusId: true, fulfilledAt: true,
+      id: true, sorCode: true, purpose: true, statusId: true, fulfilledAt: true,
       createdBy: { select: { name: true } },
       status: { select: { ticketStatus: true } },
       project: {
@@ -104,8 +126,15 @@ async function loadRequest(requestId: number): Promise<LoadedRequest> {
       },
       items: {
         select: {
-          id: true, itemId: true, quantity: true,
-          item: { select: { id: true, name: true, itemGroup: true, wmsModelName: true } },
+          id: true, inventoryItemId: true, quantity: true,
+          item: {
+            select: {
+              id: true, name: true, modelName: true, isActive: true, isSerialManaged: true, isLotManaged: true,
+              inventory: { select: { id: true, name: true, linkHospital: true, isActive: true } },
+              category: { select: { name: true } },
+              deviceInfo: { select: { id: true, deviceModel: true, serialTracked: true, isActive: true } },
+            },
+          },
         },
         orderBy: { id: 'asc' },
       },
@@ -119,44 +148,47 @@ async function loadRequest(requestId: number): Promise<LoadedRequest> {
   return req as LoadedRequest
 }
 
+/** 라인들이 속한 인벤토리(중복 제거) + 전표 유형 해석 */
+async function resolveInventories(req: LoadedRequest, errors: string[]): Promise<Map<number, FulfillInventoryPreview>> {
+  const map = new Map<number, FulfillInventoryPreview>()
+  for (const line of req.items) {
+    const inv = line.item.inventory
+    if (map.has(inv.id)) continue
+    const meta = outMetaForInventory(inv.name)
+    const reason = await prisma.statusCode.findFirst({ where: { category: 'STOCK_OUT_TYPE', name: meta.reasonName }, select: { id: true } })
+    if (!inv.isActive) errors.push(`인벤토리 '${inv.name}'가 비활성 상태입니다.`)
+    if (!reason) errors.push(`WMS 출고 유형 '${meta.reasonName}'이(가) 없습니다. 설정 > 입출고 유형 관리를 확인하세요.`)
+    map.set(inv.id, { id: inv.id, name: inv.name, linkHospital: inv.linkHospital, reasonName: meta.reasonName, reasonId: reason?.id ?? null, usageInput: meta.usageInput })
+  }
+  return map
+}
+
 /** 검증·라인 판정 (쓰기 없음). 입력이 불완전한 라인은 'pending' — 실행은 전 라인 ok/warning일 때만. */
 export async function previewFulfillment(requestId: number, input: FulfillInput): Promise<FulfillPreview> {
-  if (!isStockOutOutType(input.outType)) throw new FulfillError('출고유형이 올바르지 않습니다.', 400)
-  const meta = OUT_TYPE_META[input.outType]
   const req = await loadRequest(requestId)
   const errors: string[] = []
-
-  // 인벤토리·전표 유형 해석 (시드 고정 이름) — 창고는 자동 결정이라 입력받지 않는다
-  const inventory = await prisma.inventory.findFirst({
-    where: { name: meta.inventoryName },
-    select: { id: true, name: true, linkHospital: true, isActive: true },
-  })
-  if (!inventory) errors.push(`인벤토리 '${meta.inventoryName}'를 찾을 수 없습니다.`)
-  else if (!inventory.isActive) errors.push(`인벤토리 '${meta.inventoryName}'가 비활성 상태입니다.`)
-
-  const reason = await prisma.statusCode.findFirst({
-    where: { category: 'STOCK_OUT_TYPE', name: meta.reasonName },
-    select: { id: true },
-  })
-  if (!reason) errors.push(`WMS 출고 유형 '${meta.reasonName}'이(가) 없습니다. 설정 > 입출고 유형 관리를 확인하세요.`)
+  const inventories = await resolveInventories(req, errors)
 
   const linesInput = new Map<number, FulfillLineInput>()
   for (const l of input.lines ?? []) {
-    if (linesInput.has(l.itemId)) errors.push('같은 품목 라인이 중복 전달되었습니다.')
-    linesInput.set(l.itemId, l)
+    if (linesInput.has(l.inventoryItemId)) errors.push('같은 품목 라인이 중복 전달되었습니다.')
+    linesInput.set(l.inventoryItemId, l)
   }
 
   const lines: FulfillLinePreview[] = []
   for (const line of req.items) {
+    const wms = line.item
+    const inv = inventories.get(wms.inventory.id)!
     const p: FulfillLinePreview = {
-      itemId: line.itemId,
-      name: line.item.name,
-      itemGroup: line.item.itemGroup,
+      inventoryItemId: line.inventoryItemId,
+      name: wms.name,
+      modelName: wms.modelName,
+      inventoryId: wms.inventory.id,
+      inventoryName: wms.inventory.name,
+      categoryName: wms.category?.name ?? null,
       quantity: line.quantity,
       mode: 'missing',
-      wmsItemId: null,
-      wmsItemName: null,
-      isLotManaged: false,
+      isLotManaged: wms.isLotManaged,
       registry: false,
       buckets: [],
       stockTotal: 0,
@@ -167,30 +199,12 @@ export async function previewFulfillment(requestId: number, input: FulfillInput)
     const err = (m: string) => { p.status = 'error'; p.messages.push(m) }
     const warn = (m: string) => { if (p.status !== 'error') p.status = 'warning'; p.messages.push(m) }
 
-    if (!inventory) { err('인벤토리 없음'); continue }
-    if (!line.item.wmsModelName) { err('WMS 품목 매핑이 없습니다. 설정 > 출고 품목 관리에서 모델명을 지정하세요.'); continue }
-
-    // 품목 해석 — (인벤토리, model_name)
-    const wmsItems = await prisma.inventoryItem.findMany({
-      where: { inventoryId: inventory.id, modelName: line.item.wmsModelName, isActive: true },
-      select: { id: true, name: true, isSerialManaged: true, isLotManaged: true },
-    })
-    if (wmsItems.length === 0) { err(`'${inventory.name}'에 재고 품목이 없습니다. (모델 ${line.item.wmsModelName}) — 처리 불가`); continue }
-    if (wmsItems.length > 1) { err(`'${inventory.name}'에 같은 모델 품목이 ${wmsItems.length}건 있어 매칭할 수 없습니다.`); continue }
-    const wms = wmsItems[0]
-    p.wmsItemId = wms.id
-    p.wmsItemName = wms.name
-    p.isLotManaged = wms.isLotManaged
+    if (!wms.inventory.isActive || !inv.reasonId) { err('인벤토리 또는 전표 유형을 해석할 수 없습니다.'); continue }
+    if (!wms.isActive) { err(`'${wms.name}'은(는) 자재관리에서 비활성 품목입니다. — 처리 불가`); continue }
     p.mode = wms.isSerialManaged ? 'serial' : wms.isLotManaged ? 'lot' : 'qty'
 
-    // 기기현황 등록 대상 — 웨어러블 + WMS 시리얼 + device_info 시리얼 추적 모델 (MGW1010은 SYSTEM 그룹이라 제외)
-    if (p.mode === 'serial' && line.item.itemGroup === 'WEARABLE') {
-      const di = await prisma.deviceInfo.findFirst({
-        where: { deviceModel: line.item.wmsModelName, serialTracked: true, isActive: true },
-        select: { id: true },
-      })
-      p.registry = !!di
-    }
+    // 기기현황 등록 대상 — 시리얼 품목 + 연결된 device_info가 시리얼 추적 (MGW1010은 device_info 미연결이라 제외)
+    if (p.mode === 'serial' && wms.deviceInfo?.serialTracked && wms.deviceInfo.isActive) p.registry = true
 
     // 재고 버킷 (창고×LOT — LOT 옵션·현재고 표시·수량 자동 배분 기준)
     const buckets = await prisma.inventoryStock.findMany({
@@ -201,7 +215,7 @@ export async function previewFulfillment(requestId: number, input: FulfillInput)
     p.buckets = buckets.map((b) => ({ warehouseId: b.warehouseId, warehouseName: b.warehouse.name, lotNo: b.lotNo, quantity: b.quantity }))
     p.stockTotal = p.buckets.reduce((s, b) => s + b.quantity, 0)
 
-    const li = linesInput.get(line.itemId)
+    const li = linesInput.get(line.inventoryItemId)
 
     if (p.mode === 'serial') {
       const serials = (li?.serials ?? []).map((s) => s.trim()).filter(Boolean)
@@ -217,7 +231,7 @@ export async function previewFulfillment(requestId: number, input: FulfillInput)
       const bySerial = new Map(units.map((u) => [u.serialNo, u]))
       for (const s of serials) {
         const u = bySerial.get(s)
-        if (!u) err(`${s}: '${inventory.name}'에 등록되지 않은 시리얼입니다.`)
+        if (!u) err(`${s}: '${wms.inventory.name}'의 '${wms.name}'에 등록되지 않은 시리얼입니다.`)
         else if (u.status !== 'IN_STOCK') err(`${s}: 재고 상태가 아닙니다. (현재 ${u.status === 'OUT' ? '출고됨' : '폐기됨'})`)
       }
       // 기기현황 충돌 검증 (타 병원 배치 중 → 진행 불가, 같은 병원 → 등록 생략 경고)
@@ -270,11 +284,8 @@ export async function previewFulfillment(requestId: number, input: FulfillInput)
   return {
     requestId: req.id,
     sorCode: req.sorCode,
-    outType: input.outType,
-    usageInput: meta.usageInput,
-    inventory: inventory ? { id: inventory.id, name: inventory.name, linkHospital: inventory.linkHospital } : null,
-    reasonName: meta.reasonName,
-    reasonId: reason?.id ?? null,
+    purpose: req.purpose,
+    inventories: Array.from(inventories.values()),
     hospital: req.project.hospital,
     projectCode: req.project.projectCode,
     lines,
@@ -301,10 +312,10 @@ export async function executeFulfillment(
     throw new FulfillError('검증을 통과하지 못한 라인이 있어 출고할 수 없습니다.', 400, { preview })
   }
   const req = await loadRequest(requestId)
-  const meta = OUT_TYPE_META[input.outType]
+  const invMeta = new Map(preview.inventories.map((i) => [i.id, i]))
   const hospitalName = req.project.hospital?.hospitalName ?? req.project.projectName
   const requester = req.createdBy?.name ?? req.sorCode
-  const linesInput = new Map((input.lines ?? []).map((l) => [l.itemId, l]))
+  const linesInput = new Map((input.lines ?? []).map((l) => [l.inventoryItemId, l]))
 
   const doneStatus = await prisma.statusCode.findFirst({
     where: { category: 'STOCK_OUT_STATUS', name: '완료' },
@@ -318,30 +329,34 @@ export async function executeFulfillment(
     plans: TxPlan[]
     serials: string[] // serial 모드 원문 (기록·기기현황 등록)
     registry: boolean
+    usageInput: string
+    modelInput: string | null
     serialsNote: string | null
   }
   const planned: PlannedLine[] = []
-  const base = {
-    txType: 'OUT' as const,
-    reasonId: preview.reasonId!,
-    destination: hospitalName.slice(0, 100),
-    requester: requester.slice(0, 100),
-    hospitalCode: preview.inventory!.linkHospital ? req.project.hospitalCode : null,
-    workType: 'PROJECT',
-    refCode: req.project.projectCode,
-    txDate: input.txDate ?? null,
-  }
   for (const line of req.items) {
-    const p = preview.lines.find((x) => x.itemId === line.itemId)!
-    const li = linesInput.get(line.itemId)
+    const p = preview.lines.find((x) => x.inventoryItemId === line.inventoryItemId)!
+    const inv = invMeta.get(p.inventoryId)!
+    const li = linesInput.get(line.inventoryItemId)
     const note = `출고요청 ${req.sorCode} 처리`
+    // 전표 공통 — 인벤토리별 전표 유형·병원 연결 (인벤토리가 섞이면 자연히 전표가 분리됨)
+    const base = {
+      txType: 'OUT' as const,
+      reasonId: inv.reasonId!,
+      destination: hospitalName.slice(0, 100),
+      requester: requester.slice(0, 100),
+      hospitalCode: inv.linkHospital ? req.project.hospitalCode : null,
+      workType: 'PROJECT',
+      refCode: req.project.projectCode,
+      txDate: input.txDate ?? null,
+    }
     const plans: TxPlan[] = []
     let serials: string[] = []
     if (p.mode === 'serial') {
       // 창고 자동 — 개체의 실제 위치로 그룹핑 (창고별 전표 분할)
       serials = (li?.serials ?? []).map((s) => s.trim()).filter(Boolean)
       const units = await prisma.inventoryUnit.findMany({
-        where: { itemId: p.wmsItemId!, serialNo: { in: serials } },
+        where: { itemId: line.inventoryItemId, serialNo: { in: serials } },
         select: { serialNo: true, warehouseId: true },
       })
       const byWh = new Map<number, string[]>()
@@ -352,11 +367,11 @@ export async function executeFulfillment(
         byWh.set(u.warehouseId, arr)
       }
       for (const [whId, group] of Array.from(byWh.entries())) {
-        plans.push(await planInventoryTransaction({ ...base, itemId: p.wmsItemId!, warehouseId: whId, quantity: group.length, serials: group, note }))
+        plans.push(await planInventoryTransaction({ ...base, itemId: line.inventoryItemId, warehouseId: whId, quantity: group.length, serials: group, note }))
       }
     } else if (p.mode === 'lot') {
       for (const l of li?.lots ?? []) {
-        plans.push(await planInventoryTransaction({ ...base, itemId: p.wmsItemId!, warehouseId: l.warehouseId, quantity: Math.trunc(l.quantity), lotNo: l.lotNo, note }))
+        plans.push(await planInventoryTransaction({ ...base, itemId: line.inventoryItemId, warehouseId: l.warehouseId, quantity: Math.trunc(l.quantity), lotNo: l.lotNo, note }))
       }
     } else {
       // qty — 잔량 많은 버킷부터 자동 배분 (창고별 전표 분할)
@@ -365,13 +380,16 @@ export async function executeFulfillment(
       for (const b of buckets) {
         if (remain <= 0) break
         const take = Math.min(remain, b.quantity)
-        plans.push(await planInventoryTransaction({ ...base, itemId: p.wmsItemId!, warehouseId: b.warehouseId, quantity: take, note }))
+        plans.push(await planInventoryTransaction({ ...base, itemId: line.inventoryItemId, warehouseId: b.warehouseId, quantity: take, note }))
         remain -= take
       }
       if (remain > 0) throw new FulfillError(`${line.item.name}: 재고가 부족합니다.`, 409)
     }
     const noteSerials = p.mode === 'serial' ? serials.join('\n') : (li?.serialsNote ?? '').trim().slice(0, 4000) || null
-    planned.push({ reqItemId: line.id, plans, serials, registry: p.registry, serialsNote: noteSerials })
+    planned.push({
+      reqItemId: line.id, plans, serials, registry: p.registry, usageInput: inv.usageInput,
+      modelInput: line.item.deviceInfo?.deviceModel ?? line.item.modelName, serialsNote: noteSerials,
+    })
   }
 
   // 실행 — 전표코드 P2002 재시도 (계획 재사용)
@@ -392,9 +410,8 @@ export async function executeFulfillment(
               txCodes.push(tx!.txCode)
               if (!firstTxCode) firstTxCode = tx!.txCode
             }
-            // 기기현황 등록 (웨어러블 시리얼 — 같은 트랜잭션, source WMS·ref INVENTORY_TX)
+            // 기기현황 등록 (시리얼 추적 기기 — 같은 트랜잭션, source WMS·ref INVENTORY_TX)
             if (pl.registry && pl.serials.length > 0) {
-              const line = req.items.find((x) => x.id === pl.reqItemId)!
               const result = await registerDevicesIn(
                 client,
                 {
@@ -404,7 +421,7 @@ export async function executeFulfillment(
                   ref: firstTxCode ? { type: 'INVENTORY_TX', code: firstTxCode } : null,
                   memo: `출고요청 ${req.sorCode} 출고`,
                 },
-                pl.serials.map((s) => ({ serialInput: s, modelInput: line.item.wmsModelName, usageTypeInput: meta.usageInput }))
+                pl.serials.map((s) => ({ serialInput: s, modelInput: pl.modelInput, usageTypeInput: pl.usageInput }))
               )
               registered += result.created.length + result.reregistered.length + result.transferred.length
               registrySkipped += result.skipped.length

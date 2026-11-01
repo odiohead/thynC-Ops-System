@@ -96,13 +96,15 @@ async function main() {
       orderBy: { id: 'asc' },
     })
     if (!project) throw new Error('프로젝트 없음')
-    const soEcg = await prisma.stockOutItem.findFirst({ where: { wmsModelName: 'MC200M-T' } })
-    const soSensor = await prisma.stockOutItem.findFirst({ where: { wmsModelName: 'MP1000F' } })
-    const soSystem = await prisma.stockOutItem.findFirst({ where: { wmsModelName: 'thynC시스템10' } })
-    if (!soEcg || !soSensor || !soSystem) throw new Error('출고 품목 마스터 매핑 누락')
+    // v2: 요청 라인 = 자재관리 품목 직접 참조. 시스템 품목은 대웅제약재고(다른 인벤토리) — 인벤토리 혼합 요청 검증
+    const soEcg = ecgItem
+    const soSensor = sensorItem
+    const daewoong = await prisma.inventory.findFirst({ where: { name: '대웅제약재고' } })
+    const soSystem = daewoong ? await prisma.inventoryItem.findFirst({ where: { inventoryId: daewoong.id, modelName: 'thynC시스템10', isActive: true } }) : null
+    if (!soSystem) throw new Error('대웅제약재고 thynC시스템10 품목 없음')
     const reqStatus = await prisma.statusCode.findFirst({ where: { category: 'STOCK_OUT_STATUS', name: '요청' } })
 
-    async function makeRequest(items: { itemId: number; quantity: number }[]) {
+    async function makeRequest(items: { inventoryItemId: number; quantity: number }[]) {
       const r = await prisma.stockOutRequest.create({
         data: { sorCode: await nextSorCode(), projectCode: project!.projectCode, statusId: reqStatus?.id ?? null, requestDate: new Date(), createdById: anyUser!.id },
       })
@@ -117,39 +119,36 @@ async function main() {
       ctx.ticketIds.push(tid)
       return r
     }
-    const r1 = await makeRequest([{ itemId: soEcg.id, quantity: 2 }, { itemId: soSensor.id, quantity: 3 }])
-    const r2 = await makeRequest([{ itemId: soSystem.id, quantity: 1 }])
+    const r1 = await makeRequest([{ inventoryItemId: soEcg.id, quantity: 2 }, { inventoryItemId: soSensor.id, quantity: 3 }])
+    const r2 = await makeRequest([{ inventoryItemId: soSystem.id, quantity: 1 }])
 
     // ── preview ──────────────────────────────────────────────
     console.log('▶ preview — 모드 판정·검증')
-    let pv = await previewFulfillment(r1.id, { outType: 'SELF_SALE' })
-    const lEcg = pv.lines.find((l) => l.itemId === soEcg.id)!
-    const lSen = pv.lines.find((l) => l.itemId === soSensor.id)!
+    let pv = await previewFulfillment(r1.id, {})
+    const lEcg = pv.lines.find((l) => l.inventoryItemId === soEcg.id)!
+    const lSen = pv.lines.find((l) => l.inventoryItemId === soSensor.id)!
     check('모드 판정 serial/lot + 기기현황 대상', lEcg.mode === 'serial' && lEcg.registry && lSen.mode === 'lot' && !lSen.registry)
     check('재고 버킷에 임시 창고 포함', lSen.buckets.some((b) => b.warehouseId === wh.id && b.lotNo === 'SMKLOT1'))
     check('입력 대기 = pending·실행 불가', lEcg.status === 'pending' && !pv.ok)
 
-    const pv2 = await previewFulfillment(r2.id, { outType: 'SELF_SALE', lines: [{ itemId: soSystem.id }] })
-    check("시스템@판매용 → '재고 품목 없음' 오류", pv2.lines[0].status === 'error' && pv2.lines[0].mode === 'missing')
+    const pv2 = await previewFulfillment(r2.id, { lines: [{ inventoryItemId: soSystem.id }] })
+    check('다른 인벤토리(대웅제약재고) 품목 → 인벤토리 자동 해석·수량 모드·전표 유형 판매', pv2.lines[0].mode === 'qty' && pv2.inventories.some((i) => i.name === '대웅제약재고' && i.reasonName === '판매'))
 
     pv = await previewFulfillment(r1.id, {
-      outType: 'SELF_SALE',
-      lines: [{ itemId: soEcg.id, serials: [S1] }, { itemId: soSensor.id, lots: [{ warehouseId: wh.id, lotNo: 'SMKLOT1', quantity: 2 }] }],
+      lines: [{ inventoryItemId: soEcg.id, serials: [S1] }, { inventoryItemId: soSensor.id, lots: [{ warehouseId: wh.id, lotNo: 'SMKLOT1', quantity: 2 }] }],
     })
     check('전량 불일치(시리얼 1/2·LOT 합 2/3) → 오류', pv.lines.every((l) => l.status === 'error') && !pv.ok)
 
     pv = await previewFulfillment(r1.id, {
-      outType: 'SELF_SALE',
-      lines: [{ itemId: soEcg.id, serials: [S1, S1] }, { itemId: soSensor.id, lots: [{ warehouseId: wh.id, lotNo: 'SMKLOT1', quantity: 3 }] }],
+      lines: [{ inventoryItemId: soEcg.id, serials: [S1, S1] }, { inventoryItemId: soSensor.id, lots: [{ warehouseId: wh.id, lotNo: 'SMKLOT1', quantity: 3 }] }],
     })
-    check('중복 시리얼 → 오류', pv.lines.find((l) => l.itemId === soEcg.id)!.messages.some((m) => m.includes('중복')))
+    check('중복 시리얼 → 오류', pv.lines.find((l) => l.inventoryItemId === soEcg.id)!.messages.some((m) => m.includes('중복')))
 
     pv = await previewFulfillment(r1.id, {
-      outType: 'SELF_SALE',
-      lines: [{ itemId: soEcg.id, serials: [S1, 'A999999'] }, { itemId: soSensor.id, lots: [{ warehouseId: wh.id, lotNo: 'SMKLOT1', quantity: 3 }] }],
+      lines: [{ inventoryItemId: soEcg.id, serials: [S1, 'A999999'] }, { inventoryItemId: soSensor.id, lots: [{ warehouseId: wh.id, lotNo: 'SMKLOT1', quantity: 3 }] }],
     })
-    check('미등록 시리얼 → 오류', pv.lines.find((l) => l.itemId === soEcg.id)!.status === 'error')
-    check('LOT 합 일치 라인은 통과', pv.lines.find((l) => l.itemId === soSensor.id)!.status === 'ok')
+    check('미등록 시리얼 → 오류', pv.lines.find((l) => l.inventoryItemId === soEcg.id)!.status === 'error')
+    check('LOT 합 일치 라인은 통과', pv.lines.find((l) => l.inventoryItemId === soSensor.id)!.status === 'ok')
 
     // 타 병원 배치 차단 — S2를 다른 병원에 등록
     const otherHospital = await prisma.hospital.findFirst({
@@ -162,10 +161,9 @@ async function main() {
         [{ serialInput: S2, modelInput: 'MC200M-T' }])
     )
     pv = await previewFulfillment(r1.id, {
-      outType: 'SELF_SALE',
-      lines: [{ itemId: soEcg.id, serials: SERIALS }, { itemId: soSensor.id, lots: [{ warehouseId: wh.id, lotNo: 'SMKLOT1', quantity: 3 }] }],
+      lines: [{ inventoryItemId: soEcg.id, serials: SERIALS }, { inventoryItemId: soSensor.id, lots: [{ warehouseId: wh.id, lotNo: 'SMKLOT1', quantity: 3 }] }],
     })
-    check('타 병원 배치 중 시리얼 → 진행 불가', pv.lines.find((l) => l.itemId === soEcg.id)!.status === 'error' && !pv.ok)
+    check('타 병원 배치 중 시리얼 → 진행 불가', pv.lines.find((l) => l.inventoryItemId === soEcg.id)!.status === 'error' && !pv.ok)
     // 차단 해제 (테스트 배치 제거)
     const s2unit = await prisma.deviceUnit.findFirst({ where: { serialNo: S2 }, select: { id: true } })
     if (s2unit) {
@@ -177,10 +175,9 @@ async function main() {
     // ── execute ──────────────────────────────────────────────
     console.log('▶ execute — 전량 처리')
     const goodInput = {
-      outType: 'SELF_SALE' as const,
       lines: [
-        { itemId: soEcg.id, serials: SERIALS },
-        { itemId: soSensor.id, lots: [{ warehouseId: wh.id, lotNo: 'SMKLOT1', quantity: 3 }], serialsNote: 'SN-A\nSN-B\nSN-C' },
+        { inventoryItemId: soEcg.id, serials: SERIALS },
+        { inventoryItemId: soSensor.id, lots: [{ warehouseId: wh.id, lotNo: 'SMKLOT1', quantity: 3 }], serialsNote: 'SN-A\nSN-B\nSN-C' },
       ],
     }
     const result = await executeFulfillment(r1.id, goodInput, { userId: anyUser.id, name: anyUser.name })
@@ -215,8 +212,8 @@ async function main() {
     })
     check("요청 완료 스탬프·상태 '완료'", !!r1After?.fulfilledAt && r1After?.fulfilledById === anyUser.id && r1After?.status?.name === '완료' && !!r1After?.resolvedAt)
     check('티켓 CLOSED (완료 → 직행)', r1After?.ticket?.status === 'CLOSED')
-    const lineEcg = r1After!.items.find((i) => i.itemId === soEcg.id)!
-    const lineSen = r1After!.items.find((i) => i.itemId === soSensor.id)!
+    const lineEcg = r1After!.items.find((i) => i.inventoryItemId === soEcg.id)!
+    const lineSen = r1After!.items.find((i) => i.inventoryItemId === soSensor.id)!
     check('fulfilledSerials 기록 (실출고·과도기 수기)', lineEcg.fulfilledSerials === SERIALS.join('\n') && lineSen.fulfilledSerials === 'SN-A\nSN-B\nSN-C')
 
     // 이중 처리

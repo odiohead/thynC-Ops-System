@@ -4,6 +4,47 @@
 
 ---
 
+## 2026-11-01 21:00 | 출고요청 팝업 — 'thynC 시스템 XX' 구성 부자재 '포함 n' 안내 (현재고 표시 제거)
+
+- 사용자 요구: 대웅제약재고 'thynC 시스템 10~100'은 운영팀재고 품목(서버·매니저PC 2·27인치 모니터·50인치 사이니지 1~2)으로 구성됨. 관리는 따로 하되, 팝업에서 시스템 수량을 적으면 운영팀재고 품목 행에 이미 포함된 수량을 알려 줄 것. 현재고 표시는 제거
+- WMS 주자재-부자재 매핑은 같은 인벤토리 한정(API 409)이라 안내 전용 `stock_out_item_components` 신설(마이그 `20261101200000_stock_out_item_components`) + 시드 `scripts/seed-stock-out-components.sql`(6종×4행, 멱등 upsert; 시스템 100 서버는 사용자 정정으로 서버(100병상))
+- 설정 GET에 품목별 `components` 추가, 팝업은 입력 수량×구성 수량을 child별 합산해 입력란 왼쪽 '포함 n' 배지(툴팁 출처). 요청 라인은 사용자가 적은 수량만 — 부자재 행이 구축 탭에 노출돼 있어야 보임
+- 같은 날 후속: 팝업 품목명 우측 모델명 표시 제거(사용자 요청). 시스템100 서버 구성 서버(100병상)으로 정정 후 dev2 빌드·재시작
+- dev2: 마이그·시드 적용(구성 24행), tsc·eslint 통과. 빌드는 요청 시
+- 영향: `prisma/schema.prisma`, 마이그 1건, `scripts/seed-stock-out-components.sql`(신규), `app/api/settings/stock-out-items/route.ts`, `app/stock-out-requests/_components/StockOutRequestFormModal.tsx`, README, 설계 문서 §13
+
+---
+
+## 2026-11-01 19:00 | 출고업무 v2 — 품목 소스를 자재관리(WMS) 품목으로 전환 + 업무 탭별 노출 설정 (dev2, 빌드·PROD 미반영)
+
+- 배경: 출고업무 개선 프로젝트 착수(구축 프로젝트 자재출고 우선). 전용 품목 마스터(`stock_out_items`)와 자재관리 품목의 이중 관리를 없애고, 업무(구축/유지보수/사업업무)에 따라 나가야 할 인벤토리가 다른 요구를 "인벤토리×품목 행 단위 노출 체크"로 표현. 설계 `projects/stock_out_v2_design.md` — 사용자 확정 결정: 체크 단위 = 인벤토리×품목 행 / 출고 처리 출고유형 선택 폐지(품목 인벤토리로 자동) / 기존 마스터 폐기 / 이번 범위 = 구축 요청 흐름 + 관리자 탭 3종. 관리자 화면은 체크박스 3열 제안 → 사용자 지시로 **업무 탭**(구축 → 유지보수 → 사업업무, 탭마다 전체 품목 + '노출' 체크 1열)으로 개정
+- DB: `stock_out_item_purposes`(PK inventory_item_id+purpose) · `stock_out_requests.purpose`(기본 BUILD) · `stock_out_request_items.inventory_item_id`(기존 라인 5개 → 대웅제약재고 같은 모델로 백필, `item_id` 제거) · **`stock_out_items` DROP**(오전에 추가한 그룹 2종·라이트 5종 포함 — 라이트는 자재관리에 이미 있는 `L-*` 품목 4종으로 대체). 시드는 구축 탭 초기값 14종(대웅제약재고 시스템 6·MGW1010·MC200M-T·MP100W·MP1000F·L-* 4)
+- 서버: `lib/stockOutShared.ts` 업무 구분 상수 + `INVENTORY_OUT_META`(인벤토리명 → 전표 유형·기기 용도; OUT_TYPE_META·품목 그룹 상수 삭제) · `lib/stockOutFulfill.ts` 재작성(인벤토리별 전표 분리, 기기현황 대상 = 연결 device_info 시리얼 추적, 입력에서 outType 제거) · `lib/stockOut.validateStockOutLines`(업무 노출 검증, 기존 라인 유지) · 설정 API GET(전체/`?purpose=`)·PUT 토글(POST/DELETE 제거)
+- 화면: 설정 > 출고 품목 관리 — 업무 탭·인벤토리 섹션·즉시 저장·전체 선택/해제·검색(`?tab=`) / 프로젝트 출고요청 팝업 — 구축 노출 품목을 인벤토리 → 분류 순 섹션, 모델명·현재고 표시 / 상세 — 인벤토리·분류 열, 업무 배지 / 출고 처리 카드 — 출고유형 버튼 제거, 열리면 바로 미리보기, 인벤토리·전표 유형 칩
+- 검증: tsc(힙 4GB)·eslint 통과, 스모크 `stock-out-smoke.mts` 31/31 · `stock-out-fulfill-smoke.mts` 23/23(판매용재고 시리얼·LOT + 대웅제약재고 수량 혼합 요청). 화면 확인은 빌드 후 사용자 테스트
+- 영향: `prisma/schema.prisma`, 마이그 `20261101160000_stock_out_v2_wms_items`, `lib/{stockOutShared,stockOut,stockOutFulfill}.ts`, `app/api/settings/stock-out-items/**`, `app/api/stock-out-requests/**`, `app/settings/stock-out-items/page.tsx`, `app/stock-out-requests/{[id]/page.tsx,_components/StockOutRequestFormModal.tsx,_components/FulfillCard.tsx}`, `scripts/seed-stock-out-masters.sql`, 스모크 2종, README, projects/README, 설계 문서
+
+---
+
+## 2026-11-01 15:00 | 출고업무 개선 1차 — 출고 품목 그룹 2종(전자제품·기타) + 웨어러블 '(라이트)' 품목 5종
+
+- 사용자 요청(출고업무 개선 프로젝트 착수 — 구축 프로젝트 자재출고부터): 출고 품목 마스터에 그룹 '전자제품'·'기타' 추가, 웨어러블 5종(MC200M-T·MP100W·MP1000F·MP2000F·MP2000R) 각각의 '(라이트)' 신규 품목 5종 추가
+- 그룹 어휘를 `lib/stockOutShared.ts` 단일 소스로 통합(기존엔 API 2곳·설정 화면·요청 모달·상세 4곳에 'SYSTEM'|'WEARABLE' 하드코딩) — `STOCK_OUT_ITEM_GROUPS`(SYSTEM/WEARABLE/ELECTRONICS/ETC)·라벨·`isStockOutItemGroup`. DB CHECK `stock_out_items_group_check` 재생성. 요청 모달은 품목이 있는 그룹만 섹션 표시하므로 전자제품·기타 품목이 등록되기 전엔 화면 변화 없음
+- 라이트 품목 5종은 `wms_model_name` NULL — 출고 처리(fulfill)에서 매핑 오류로 막히므로 해석 모델은 별도 결정(설정 > 출고 품목에서 지정). sort_order는 원 품목 +1로 바로 뒤 정렬
+- dev2: 마이그 `20261101140000_stock_out_item_groups_lite` 적용·resolve(159), 마스터 17종 확인, tsc·eslint 통과. 빌드·PROD 반영은 요청 시
+- 영향: `lib/stockOutShared.ts`(품목 그룹 상수 추가 — 기존 출고유형 상수 파일에 병합), `app/api/settings/stock-out-items/{route,[id]/route}.ts`, `app/settings/stock-out-items/page.tsx`, `app/stock-out-requests/_components/StockOutRequestFormModal.tsx`, `app/stock-out-requests/[id]/page.tsx`, `prisma/schema.prisma`(주석), `scripts/seed-stock-out-masters.sql`, README, `projects/stock_out_request_design.md` §14
+
+---
+
+## 2026-11-01 13:30 | [운영 데이터 조치] 'SpO2센서 교체완료' 태그 일괄 부여 — 대웅 산소포화도 센서 교체 리스트 87곳 (코드 변경 없음)
+
+- 입력: 대웅 `MP100W_replace.xlsx`(B2:P104, 101행 — 발주 단위라 13곳은 2~3행 반복, 거래처코드 기준 고유 87곳). I열 병원명·H열 거래처코드로 dev2(=PROD 10/30 동기화본) 대조: 거래처코드(`sales_deals.daewoong_client_code`)·정규화 이름(운영 병원 243곳 집합)·trigram 유사도 3단
+- 매핑: 코드=이름 일치 90행 / 코드만 일치 6행(BHS한서·서부산센텀·서울아산·세명종합·대구우리·순천한국 — 법인명 표기 차이) / 이름만 단일 일치 3행(남양주백·더열린은 딜에 거래처코드 없음, 엘병원은 시트 코드 10114610 ≠ 딜 10068728) / 미매칭 1곳 세웅병원(시트 '의료법인라움의료재단세웅병원' 코드 10112765 — 심평원 원본 HOSP-079741만 있고 운영 데이터 없음, 같은 주소(부산 금정구 서동로 162)의 운영 병원 **HOSP-000080 세웅종합병원**으로 매핑). 사용자 확인: 헷갈리는 곳 없음
+- 사용자 결정: 교체여부와 무관하게 **87곳 전부 완료 처리** — '진행 확정' 7곳(연세에스·혜민·서울에이스·김해굿모닝·큰힘·올바로·더열린), 공란 2곳(화순고려·KS), 김해복음(200대 중 55대 선제 교체) 포함
+- 적용: `hospital_tag_assignments` tag_id 7 INSERT 87행(`ON CONFLICT DO NOTHING` 멱등, note '대웅 산소포화도 센서 교체 리스트(MP100W_replace.xlsx, 2026-11-01) 일괄 부여', assigned_by NULL), 적용 후 count=87 아니면 ROLLBACK 가드. dev2 → PROD 순, 양쪽 기존 배정 0 → 87. PROD 백업 `~/backups/hospital_tag_assignments_before_spo2_20261101.dump`. 임시 SQL은 scratchpad에만 두고 미커밋
+
+---
+
 ## 2026-10-31 21:40 | VOC·AS 주간 대시보드 — 주간 보고 자료(PDF) 패널
 
 - 사용자 요청: 기존 주간보고 PDF(PPT 1페이지, 예 `thynC VOC 주요이슈_261023-261029`)의 내용을 `/voc/dashboard`에서도 보고 싶음. PPT 편집 기능은 원치 않음 → **PDF 업로드 → 이미지 표시**로 결정. 대시보드 최하단에 영역을 두고 그 안에서 업로드

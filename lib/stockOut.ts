@@ -4,6 +4,7 @@
  */
 import { Prisma, TicketStatus } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import { STOCK_OUT_PURPOSE_LABELS, type StockOutPurpose } from '@/lib/stockOutShared'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
@@ -49,4 +50,35 @@ export function canEditStockOutRequest(
   if (adminPerm) return true
   if (req.createdById !== user.userId) return false
   return !isTerminalStockOutStatus(req.status?.ticketStatus)
+}
+
+/** items 입력 검증 — [{inventoryItemId, quantity}] 최소 1행·해당 업무에 노출된 활성 자재관리 품목·정수 qty>0·중복 금지 (v2 §6) */
+export async function validateStockOutLines(raw: unknown, purpose: StockOutPurpose, keepIds: number[] = []): Promise<{ inventoryItemId: number; quantity: number }[]> {
+  if (!Array.isArray(raw) || raw.length === 0) throw new Error('출고 품목을 1개 이상 입력하세요.')
+  const lines: { inventoryItemId: number; quantity: number }[] = []
+  const seen = new Set<number>()
+  for (const row of raw) {
+    const r = row as { inventoryItemId?: unknown; itemId?: unknown; quantity?: unknown }
+    const inventoryItemId = Number(r?.inventoryItemId ?? r?.itemId)
+    const quantity = Number(r?.quantity)
+    if (!Number.isInteger(inventoryItemId)) throw new Error('품목이 올바르지 않습니다.')
+    if (!Number.isInteger(quantity) || quantity <= 0) throw new Error('수량은 1 이상의 정수여야 합니다.')
+    if (seen.has(inventoryItemId)) throw new Error('같은 품목이 중복 입력되었습니다.')
+    seen.add(inventoryItemId)
+    lines.push({ inventoryItemId, quantity })
+  }
+  // 이미 담긴 라인(keepIds)은 노출 해제돼도 유지 — 신규 라인만 업무 노출 체크 필수
+  const keep = new Set(keepIds)
+  const ids = lines.map((l) => l.inventoryItemId)
+  const found = await prisma.inventoryItem.findMany({
+    where: { id: { in: ids }, isActive: true },
+    select: { id: true, stockOutPurposes: { where: { purpose }, select: { purpose: true } } },
+  })
+  const byId = new Map(found.map((f) => [f.id, f]))
+  for (const id of ids) {
+    const f = byId.get(id)
+    if (!f) throw new Error('사용할 수 없는 품목이 포함되어 있습니다.')
+    if (f.stockOutPurposes.length === 0 && !keep.has(id)) throw new Error(`'${STOCK_OUT_PURPOSE_LABELS[purpose]}' 출고에 노출되지 않은 품목이 포함되어 있습니다. 설정 > 출고 품목 관리를 확인하세요.`)
+  }
+  return lines
 }
