@@ -175,6 +175,39 @@ export interface AsLostQuotaGroup {
 }
 export interface AsLostQuota { thresholdPct: number; hasPurchase: boolean; groups: AsLostQuotaGroup[] }
 
+/** 계약건별 도입 기기수량 · 상품유형(일반/라이트)×기기군 AS 교체 현황 (2026-11-02 — projects/as_deal_quota_design.md). 한도 경고 없음(비율만) */
+export const AS_PRODUCT_TYPE_ROWS = ['일반', '라이트', '미지정'] as const
+/** 라이트형 교체 한도 — 도입 수량의 100%까지만 교체 허용 (2026-11-02 사용자 정책). 일반형은 한도 없음 */
+export const AS_LITE_REPLACE_QUOTA_PCT = 100
+export type AsProductTypeRow = (typeof AS_PRODUCT_TYPE_ROWS)[number]
+export interface AsDealQuotaCell {
+  /** 도입 수량 — 상품유형의 계약완료 딜 기기 수량 합. null = 해당 상품유형 딜은 있으나 기기 수량 행 없음 */
+  introduced: number | null
+  /** 이 접수 제외 고장 교체 누계 */
+  before: number
+  /** 이 접수의 미종결 라인 + 교체 확정 라인 (분실 접수는 0 — 분실 교체는 분실 한도가 담당) */
+  thisReceipt: number
+  after: number
+  pctBefore: number | null
+  pctAfter: number | null
+  /** 라이트 행만 — 교체 누계가 이미 한도(도입 수량×100%)를 넘음 / 이 접수 처리 시 넘음. 그 외 행은 항상 false */
+  overBefore: boolean
+  overAfter: boolean
+}
+export interface AsDealQuotaRow { productType: AsProductTypeRow; hasDeal: boolean; cells: Record<Exclude<AsDeviceGroup, '기타'>, AsDealQuotaCell> }
+export interface AsDealQuotaDeal { dealCode: string; roundNo: number; contractDate: string | null; productType: AsProductTypeRow; ecg: number | null; spo2: number | null }
+export interface AsDealQuota {
+  /** 라이트 한도(%) — AS_LITE_REPLACE_QUOTA_PCT */
+  liteThresholdPct: number
+  /** 라이트 행 중 하나라도 이미 초과 / 이 접수 처리 시 초과 */
+  liteOverBefore: boolean
+  liteOverAfter: boolean
+  /** 계약완료 딜 목록 (도입 수량 출처 — 차수 순) */
+  deals: AsDealQuotaDeal[]
+  /** 표 행 — 일반·라이트는 딜이 있거나 교체가 있으면, 미지정은 딜·교체가 있을 때만 */
+  rows: AsDealQuotaRow[]
+}
+
 export const AS_DEVICE_GROUPS = ['심전계', '산소포화도', '기타'] as const
 export type AsDeviceGroup = (typeof AS_DEVICE_GROUPS)[number]
 export function asDeviceGroupOf(modelName: string | null | undefined, deviceKind: string | null | undefined, serialNo?: string | null): AsDeviceGroup {

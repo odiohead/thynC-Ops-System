@@ -22,9 +22,10 @@ import { asListHref, AS_PICKUP_METHODS, type AsPickupMethod,
   AS_RESOLVE_OUTCOMES, asResolveOutcomesFor, AS_INTAKE_STATE_LABELS, AS_DEVICE_KINDS, isAsIntakeIssue, asDeviceKindFromSerial, type AsIntakeState,
   AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, AS_TAG_BADGE_CLS, AS_TAG_FLAGS_EMPTY, asReceiptTags, type AsTagFlags,
   canMarkAsLineRepaired, asRepairDisabledReason, summarizeAsRepairProgress, AS_LINE_CONDITION_BADGE_CLS, isAsLineConditionBadge, summarizeAsReceiptWards,
-  isValidAsSerial, AS_SERIAL_RULE_TEXT, type AsLostQuota } from '@/lib/asReceiptShared' // 수리완료 체크·기기 상태 배지 (2026-09-17) · 시리얼 형식 게이트 (2026-09-30)
+  isValidAsSerial, AS_SERIAL_RULE_TEXT, type AsLostQuota, type AsDealQuota } from '@/lib/asReceiptShared' // 수리완료 체크·기기 상태 배지 (2026-09-17) · 시리얼 형식 게이트 (2026-09-30)
 import type { TicketStatus } from '@prisma/client'
 import { PRODUCT_TYPES, deviceConditionLabel, deviceSiteLabel } from '@/lib/deviceRegistryShared'
+import AsNoticeArea from '../_components/AsNoticeArea'
 
 interface CodeRef { id: number; name: string; color: string | null }
 
@@ -68,6 +69,7 @@ interface AsDetail {
   asCode: string
   category: string
   lostQuota?: AsLostQuota | null // 분실 접수만 — 구매수량 대비 누적 교체 제공 (2026-10-30)
+  dealQuota?: AsDealQuota | null // 계약건별 도입 수량 · 상품유형×기기군 고장 교체 누계 (2026-11-02)
   receiptDate: string
   reporterName: string | null
   pickupMethod: string | null
@@ -988,20 +990,32 @@ export default function AsReceiptDetailPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
       {error && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">{error}</div>}
-      {chatIntake?.changeDiff && chatIntake.changeDiff.length > 0 && (
-        <ChatChangePanel receiptId={req.id} intake={chatIntake} canEdit={canEdit} onDone={(msg) => { if (msg) setWarnings(msg.split('\n')); router.refresh(); void load() }} />
-      )}
-      {warnings.length > 0 && (
-        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
-          <div className="flex items-center justify-between">
-            <p className="font-medium">경고 {warnings.length}건</p>
-            <button type="button" className="text-xs text-amber-600 hover:underline" onClick={() => setWarnings([])}>닫기</button>
-          </div>
-          <ul className="mt-1 list-inside list-disc space-y-0.5 text-xs">
-            {warnings.map((w, i) => <li key={i}>{w}</li>)}
-          </ul>
-        </div>
-      )}
+      {/* 상단 알림 영역 — 상시 정책 알림(red + 최초 1회 모달) / 작업 결과 경고(amber, 닫기) 한 컴포넌트에서 분기 (2026-11-02) */}
+      <AsNoticeArea
+        alerts={(() => {
+          const dq = req.dealQuota
+          if (!dq || !(dq.liteOverBefore || dq.liteOverAfter)) return []
+          const closedReceipt = req.status?.ticketStatus === 'RESOLVED' || req.status?.ticketStatus === 'CLOSED'
+          const lite = dq.rows.find((r) => r.productType === '라이트')
+          const cells = lite ? (['심전계', '산소포화도'] as const).filter((g) => lite.cells[g].overBefore || lite.cells[g].overAfter).map((g) => ({ g, c: lite.cells[g] })) : []
+          return [{
+            key: `lite-over:${dq.liteOverBefore ? 'before' : 'after'}:${cells.map(({ g, c }) => `${g}=${c.after}/${c.introduced}`).join(',')}`,
+            title: dq.liteOverBefore
+              ? `라이트형 교체 수량 초과 — 도입 수량의 ${dq.liteThresholdPct}%를 이미 넘었습니다`
+              : `${closedReceipt ? '이 접수 포함' : '이 건 처리 시'} 라이트형 교체 수량이 도입 수량의 ${dq.liteThresholdPct}%를 초과합니다`,
+            lines: cells.map(({ g, c }) => (
+              <span key={g}>라이트 {g}: 교체 누계 <span className="font-mono">{c.before} / {c.introduced}</span>{c.thisReceipt > 0 && <> → {closedReceipt ? '이 접수 포함' : '처리 시'} <span className="font-mono">{c.after} / {c.introduced}</span> ({c.pctAfter}%)</>}</span>
+            )),
+          }]
+        })()}
+        panels={chatIntake?.changeDiff && chatIntake.changeDiff.length > 0 ? [{
+          key: `chat-change:${chatIntake.linkId}:${chatIntake.changeDetectedAt ?? ''}`,
+          title: '채널톡 변경 감지',
+          node: <ChatChangePanel receiptId={req.id} intake={chatIntake} canEdit={canEdit} onDone={(msg) => { if (msg) setWarnings(msg.split('\n')); router.refresh(); void load() }} />,
+        }] : []}
+        warnings={warnings}
+        onDismissWarnings={() => setWarnings([])}
+      />
 
       {/* 헤더 */}
       <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
@@ -1084,6 +1098,72 @@ export default function AsReceiptDetailPage() {
                     })}
                   </div>
                 )}
+              </div>
+            )
+          })()}
+          {/* 도입·AS 교체 현황 — 상품유형(일반/라이트)×기기군: 고장 교체 누계 / 계약완료 딜 도입 수량 (%). 한도 경고 없음, 계약건 목록은 접힘 (2026-11-02, as_deal_quota_design.md) */}
+          {req.dealQuota && (() => {
+            const dq = req.dealQuota
+            const closedReceipt = req.status?.ticketStatus === 'RESOLVED' || req.status?.ticketStatus === 'CLOSED'
+            const hasThis = dq.rows.some((r) => r.cells.심전계.thisReceipt + r.cells.산소포화도.thisReceipt > 0)
+            const alert = dq.liteOverBefore || dq.liteOverAfter
+            const cell = (c: AsDealQuota['rows'][number]['cells']['심전계']) => {
+              if (c.introduced === null) return <span className="text-gray-400">{c.before}{c.thisReceipt > 0 ? ` (+${c.thisReceipt})` : ''} / 미등록</span>
+              const bad = c.overBefore || c.overAfter
+              return (
+                <span className={bad ? 'font-semibold text-red-700' : ''}>
+                  <span className="font-mono">{c.before} / {c.introduced}</span> <span className={bad && c.overBefore ? 'text-red-600' : 'text-gray-400'}>({c.pctBefore}%)</span>
+                  {c.thisReceipt > 0 && <span className={`block ${c.overAfter ? 'text-red-700' : 'text-gray-500'}`}>→ <span className="font-mono">{c.after} / {c.introduced}</span> ({c.pctAfter}%)</span>}
+                </span>
+              )
+            }
+            return (
+              <div className={`relative sm:col-span-2 ${alert ? 'rounded-lg bg-red-50 px-3 py-2 -mx-3 -my-2' : ''}`}>
+                {alert && <span aria-hidden className="pointer-events-none absolute inset-0 animate-pulse rounded-lg border-2 border-red-500" />}
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className={label}>도입·AS 교체 현황{alert && <span className="ml-1.5 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold normal-case tracking-normal text-white">{dq.liteOverBefore ? '라이트 교체 수량 초과' : closedReceipt ? '이 접수 포함 라이트 한도 초과' : '이 건 처리 시 라이트 한도 초과'}</span>}</p>
+                  {dq.deals.length > 0 && (
+                    <details className="text-xs">
+                      <summary className="cursor-pointer select-none text-gray-500 hover:text-gray-700">계약건 {dq.deals.length}건</summary>
+                      <ul className="mt-1 space-y-0.5 rounded border border-gray-200 bg-gray-50 px-2 py-1.5 text-gray-600">
+                        {dq.deals.map((d) => (
+                          <li key={d.dealCode}>
+                            <span className="font-medium text-gray-800">{d.roundNo}차 {d.productType}</span>
+                            {d.contractDate && <span className="ml-1 text-gray-400">{d.contractDate}</span>}
+                            <span className="ml-2">심전계 <span className="font-mono">{d.ecg ?? '-'}</span> · 산소포화도 <span className="font-mono">{d.spo2 ?? '-'}</span></span>
+                            <span className="ml-1.5 font-mono text-[11px] text-gray-400">{d.dealCode}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </div>
+                {dq.rows.length === 0 ? (
+                  <p className="mt-1 text-xs text-gray-400">계약완료 계약건 없음</p>
+                ) : (
+                  <table className="mt-1 text-xs" title={`셀 = 이 병원의 고장 AS 교체 누계(이 접수 제외, 취소 제외) / 상품유형별 계약완료 딜 도입 수량 (%). 화살표 뒤는 ${closedReceipt ? '이 접수 포함' : '이 접수의 라인을 교체 처리했을 때'}. 라이트형은 도입 수량의 ${dq.liteThresholdPct}%까지만 교체 허용(초과 시 빨간 표시). 분실 교체는 분실 한도(구분 필드)가 담당`}>
+                    <thead>
+                      <tr className="text-gray-400">
+                        <th className="w-14 pb-0.5 text-left font-normal">유형</th>
+                        <th className="pb-0.5 pr-4 text-left font-normal">심전계</th>
+                        <th className="pb-0.5 text-left font-normal">산소포화도</th>
+                      </tr>
+                    </thead>
+                    <tbody className="align-top text-gray-700">
+                      {dq.rows.map((r) => (
+                        <tr key={r.productType}>
+                          <td className="py-0.5 pr-2">
+                            {r.productType === '라이트' ? <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-medium text-blue-800">라이트</span>
+                              : r.productType === '미지정' ? <span className="text-amber-700">미지정</span> : <span className="font-medium">일반</span>}
+                          </td>
+                          <td className="py-0.5 pr-4">{cell(r.cells.심전계)}</td>
+                          <td className="py-0.5">{cell(r.cells.산소포화도)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {hasThis && <p className="mt-0.5 text-[11px] text-gray-400">→ {closedReceipt ? '이 접수 포함' : '이 접수 처리 시'}</p>}
               </div>
             )
           })()}
