@@ -4,6 +4,24 @@
 
 ---
 
+## 2026-11-02 19:10 | 출고요청 첨부 파일 (엑셀 등) — 프로젝트 출고요청 모달·상세
+
+- **배경**: 프로젝트에서 출고요청할 때 엑셀 등 근거 파일을 붙일 수 없었음(사용자 요청). 설계 `projects/stock_out_v2_design.md` §15
+- **DB**: `stock_out_request_files`(request CASCADE, 분류 없음, N건) — 마이그 `20261102140000_stock_out_request_files` dev2 적용·resolve. Prisma `StockOutRequestFile` + `StockOutRequest.files`·`User.stockOutFilesUploaded`
+- **API**: `GET/POST /api/stock-out-requests/[id]/files`(multipart `files[]`, 파일별 실패 `failed[]`), `GET(302 attachment)/DELETE …/files/[fileId]`. 업로드 VIEWER 제외 누구나, 삭제는 업로더 본인 또는 `canEditStockOutRequest`. 한도 20MB·10개·실행 파일 차단(`lib/stockOutFiles.ts` 신규). 상세 `GET /api/stock-out-requests/[id]` 응답에 `files[]` 동봉
+- **화면**: `StockOutRequestFormModal` — 등록 모드는 비고 아래 '첨부 파일'에 담아 두고(제거 가능) 생성 직후 일괄 업로드(실패 시 alert, 요청은 생성됨), 수정 모드는 `StockOutFilesPanel`(신규, 드롭존+목록+삭제, 엑셀 아이콘 구분) 즉시 반영. 출고요청 상세 '기본 정보' 카드 하단 '첨부 파일' 섹션 추가
+- **검증**: tsc(힙 4GB)·eslint 통과, 서비스 스모크 8/8(테이블·relation·DTO·삭제 권한 판정). 화면 미확인(로그인 토큰 발급 불가) — dev2 빌드·재시작 수행
+- 파일: `prisma/schema.prisma`, `prisma/migrations/20261102140000_stock_out_request_files/`, `lib/stockOutFiles.ts`(신규), `app/api/stock-out-requests/[id]/files/{route.ts,[fileId]/route.ts}`(신규), `app/api/stock-out-requests/[id]/route.ts`, `app/stock-out-requests/_components/{StockOutFilesPanel.tsx(신규),StockOutRequestFormModal.tsx}`, `app/stock-out-requests/[id]/page.tsx`, `projects/stock_out_v2_design.md` §15, `README.md`
+
+## 2026-11-02 18:20 | 영업현황 딜 — 견적서·계약서 첨부 + 등록 필수 필드(상품유형·도입 기기 수량)
+
+- **배경**: `/sales/deals`에 견적서·계약서를 붙일 곳이 없었고, 딜이 상품유형·기기 수량 없이 생성될 수 있었음(기기 수량은 분실 10%·라이트 100% AS 한도의 분모). 설계 `projects/sales_crm_design.md` §7
+- **첨부 (필수 아님, 눈에 띄게)**: 신규 테이블 `sales_deal_files`(kind QUOTE/CONTRACT CHECK, 딜 CASCADE) — 마이그 `20261102100000_sales_deal_files`(dev2 적용·resolve). 딜 상세 '규모 · 계약' 카드 하단에 `DealFilesPanel` — 견적서/계약서 2열, 빈 열은 amber 테두리+'미첨부' 배지, 드롭존·다중 업로드(20MB·10개·실행파일 차단)·presigned 열람·삭제. API `GET/POST …/deals/[id]/files`, `GET(302)/DELETE …/files/[fileId]` (`checkSalesAccess` + 딜 병원 소속 검증, 감사 로그). 어휘·한도·DTO `lib/salesDealFiles.ts` 단일 소스. 편집 가능 여부는 서버 컴포넌트가 `isUserOrAbove`로 전달
+- **필수 필드 (서버 단일 강제)**: `POST /api/hospitals/[code]/sales/deals` — `productType` ∈ {일반, 라이트} 필수(기본값 제거), `devices[]` 합계 ≥1 필수 → 딜+`sales_deal_devices` 단일 트랜잭션 생성(종전 POST는 수량 미수신). `PUT` — 보냈을 때만 동일 검증(미전송 보존 유지). `shared.ts`에 `parseDealDevices`/`validateDealDevices`/`isDealProductType` 공용화
+- **화면 3곳**: ① `/sales/deals` '+ 등록' 모달 — 상품유형 '선택하세요' + 기기 마스터(`/api/settings/devices` 활성·수량 집계 대상) 수량 입력, 미충족 시 버튼 비활성 ② 딜 상세 — 라벨 `*`, 합계 0이면 빨간 안내 + 저장 차단 ③ 병원 상세 영업 정보 > 계약 이력 모달 — 상품유형 select + 도입 기기 수량 블록(`/api/hospitals/[code]/sales` 응답에 `deals[].productType/devices`·`masters.devices` 추가)
+- **검증**: tsc(힙 4GB)·eslint 통과, 서비스 레벨 스모크 15/15(어휘·devices 정제·기기 존재 검증·테이블 CHECK/FK 왕복). 화면은 미확인(로그인 토큰 발급 불가) — dev2 빌드·PROD는 요청 시. dev2 기준 기기 수량 미입력 딜 5건은 상세 저장 시 입력 필요
+- 파일: `prisma/schema.prisma`(SalesDealFile·User/SalesDeal relation), `prisma/migrations/20261102100000_sales_deal_files/`, `lib/salesDealFiles.ts`(신규), `app/api/hospitals/[code]/sales/deals/{shared.ts,route.ts,[id]/route.ts}`, `app/api/hospitals/[code]/sales/deals/[id]/files/{route.ts,[fileId]/route.ts}`(신규), `app/api/hospitals/[code]/sales/route.ts`, `app/sales/deals/[id]/{page.tsx,_components/DealDetailForm.tsx,_components/DealFilesPanel.tsx(신규)}`, `app/sales/deals/_components/DealsEntryTable.tsx`, `app/hospitals/[code]/_components/SalesSection.tsx`, `projects/sales_crm_design.md` §7, `README.md`
+
 ## 2026-11-02 11:30 | AS 접수 상세 — '도입·AS 교체 현황' 필드 (계약건별 도입 수량 · 상품유형×기기군 고장 교체 누계)
 
 - 사용자 요청: 라이트형 AS 교체 수량에 정책 제한이 있어, AS 상세 '1. 공통정보'에서 병원의 계약건별 도입 기기 수량과 기존 AS(교체) 수량을 `3 / 10` 형태로 보고 싶음. 설계 `projects/as_deal_quota_design.md` → 제안대로 승인, 한도는 비율만(경고 없음)

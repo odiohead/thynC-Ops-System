@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { checkSalesAccess, nextDealCode, syncHospitalIntroTypesFromDeals } from '@/lib/sales'
-import { parseDealBody, validateDealCodes } from './shared'
+import { DEAL_DEVICES_REQUIRED, DEAL_PRODUCT_TYPE_REQUIRED, isDealProductType, parseDealBody, parseDealDevices, validateDealCodes, validateDealDevices } from './shared'
 
 const auditSafe = (d: Record<string, unknown>) =>
   Object.fromEntries(Object.entries(d).map(([k, v]) => [k, typeof v === 'bigint' ? v.toString() : v]))
@@ -22,6 +22,14 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (!hospital) return NextResponse.json({ error: '병원을 찾을 수 없습니다.' }, { status: 404 })
 
   const body = await request.json()
+
+  // 등록 필수 필드 (2026-11-02): 상품유형 + 도입 기기 수량 1대 이상 — 분실 10%·라이트 100% 한도의 분모
+  if (!isDealProductType(body.productType)) return NextResponse.json({ error: DEAL_PRODUCT_TYPE_REQUIRED }, { status: 400 })
+  const devices = parseDealDevices(body)
+  if (!devices || devices.length === 0) return NextResponse.json({ error: DEAL_DEVICES_REQUIRED }, { status: 400 })
+  const deviceError = await validateDealDevices(devices)
+  if (deviceError) return NextResponse.json({ error: deviceError }, { status: 400 })
+
   const data = parseDealBody(body)
   const codeError = await validateDealCodes(data)
   if (codeError) return NextResponse.json({ error: codeError }, { status: 400 })
@@ -47,8 +55,13 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   try {
     const dealCode = await nextDealCode()
-    const deal = await prisma.salesDeal.create({
-      data: { ...data, dealCode, hospitalCode: params.code, roundNo: roundNo as number },
+    // 딜 + 도입 기기 수량 행 단일 트랜잭션 (수량 없는 딜을 만들지 않는다)
+    const deal = await prisma.$transaction(async (tx) => {
+      const created = await tx.salesDeal.create({
+        data: { ...data, dealCode, hospitalCode: params.code, roundNo: roundNo as number },
+      })
+      await tx.salesDealDevice.createMany({ data: devices.map((d) => ({ dealId: created.id, ...d })) })
+      return created
     })
 
     // 도입형태 자동 동기화 (딜 판매모델 → INTRO_TYPE) — 실패해도 딜 생성은 유지
@@ -61,7 +74,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       resource: 'sales_deal',
       resourceId: deal.id,
       resourceLabel: `${hospital.hospitalName} ${deal.roundNo}차 딜 (${deal.dealCode})`,
-      after: auditSafe(deal as unknown as Record<string, unknown>),
+      after: { ...auditSafe(deal as unknown as Record<string, unknown>), devices },
     })
 
     return NextResponse.json({ deal: { id: deal.id, dealCode: deal.dealCode, roundNo: deal.roundNo } }, { status: 201 })

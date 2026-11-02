@@ -143,3 +143,20 @@
 1. P1: `persons`·`person_affiliations` CREATE, `hospital_contacts` DROP, 프로필 컬럼 2개 DROP, PERSON_GROUP 시드
 2. P2: `sales_deals` 컬럼 추가 6·삭제 3, `projects.education_date` ADD, 코드 3카테고리 시드
 - 현재 영업 테이블 전부 0행 → 데이터 이전 불필요. 시드는 `seed-sales-masters.sql` v4로 갱신(idempotent 유지)
+
+## 7. 딜 첨부(견적서·계약서) + 등록 필수 필드 (2026-11-02 — 구현 완료 dev2)
+
+**배경**: `/sales/deals` 영업현황 관리에 견적서·계약서를 붙일 곳이 없었고, 딜이 상품유형·도입 기기 수량 없이 만들어질 수 있었다(기기 수량은 분실 10%·라이트 100% AS 한도의 분모 — `lib/asLostQuota.ts`·`lib/asDealQuota.ts`).
+
+### 7.1 첨부 — `sales_deal_files`
+- 컬럼: `deal_id`(FK CASCADE) · `kind` VARCHAR(20) CHECK ∈ {`QUOTE`(견적서), `CONTRACT`(계약서)} · `file_name`·`s3_key`·`size_bytes`·`content_type`·`uploaded_by`(users SET NULL)·`uploaded_at`. 종류별 N건 허용
+- **필수 아님** — 계약서가 추후 전달되는 경우가 있어 저장을 막지 않는다. 대신 딜 상세 '규모 · 계약' 카드 하단에 **견적서 / 계약서 2열** 패널(`DealFilesPanel`)을 상시 노출하고, 비어 있는 열은 amber 테두리 + '미첨부' 배지로 눈에 띄게 표시. 각 열에 드롭존·파일 선택(다중, 파일당 20MB·한 번에 10개, 실행 파일 확장자 차단), 파일명 클릭 → presigned 302(inline), 삭제 버튼
+- API: `GET/POST /api/hospitals/[code]/sales/deals/[id]/files(?kind=)` (POST multipart `kind` + `files[]`, 파일별 실패는 `failed[]`), `GET(302)/DELETE …/files/[fileId]`. 접근은 `checkSalesAccess`(조회/쓰기) + 딜의 병원 소속 검증. S3 키 `sales-deals/<dealId>/<quote|contract>/<ts>_<원본명>`. 어휘·한도·DTO는 `lib/salesDealFiles.ts` 단일 소스. 감사 로그 `sales_deal_file`
+- 편집 가능 여부는 서버 컴포넌트가 `isUserOrAbove`로 판정해 패널에 전달(VIEWER는 목록·열람만)
+
+### 7.2 등록 필수 필드 — 상품유형 · 도입 기기 수량
+- **서버(단일 강제점)**: `POST /api/hospitals/[code]/sales/deals` — `productType` ∈ {일반, 라이트} 필수(기본값 없음), `devices[]` 합계 ≥1 필수(기기 마스터 존재 검증) → 딜 + `sales_deal_devices` 행을 **한 트랜잭션**으로 생성(종전 POST는 수량을 받지 않았음). `PUT` — `productType`을 보냈다면 어휘 검증, `devices[]`를 보냈다면 합계 ≥1(미전송은 기존 값 보존 유지)
+- **화면 3곳 동일 규칙**: ① `/sales/deals` '+ 등록' 모달 — 상품유형 '선택하세요' 기본 + 기기 마스터(`/api/settings/devices`, 활성·수량 집계 대상) 수량 입력, 미충족 시 등록 버튼 비활성 ② 딜 상세 '규모 · 계약' — 라벨 `*`, 합계 0이면 빨간 안내 + 저장 차단 ③ 병원 상세 영업 정보 > 계약 이력 모달 — 상품유형 select + 도입 기기 수량 블록 추가(`/api/hospitals/[code]/sales` 응답에 `deals[].productType/devices`·`masters.devices` 동봉)
+- 기존 데이터: dev2 기준 딜 268건 중 기기 수량 미입력 5건 — 상세에서 저장하려면 수량 입력이 필요(병원 상세 모달 PUT은 devices 미전송 시 보존이지만 이제 모달도 수량을 보내므로 동일하게 요구됨)
+- 마이그레이션 `20261102100000_sales_deal_files` (DDL만 — 데이터 보정 없음)
+

@@ -3,7 +3,7 @@
 /**
  * 도입현황 입력 테이블 — 대웅 원장(thynC_status_DW.xlsx '1. 거래처별 종합현황') 컬럼 순서 재현 + 구파일 보강 금액.
  * 1행 = 1차수(딜, flat). 행 클릭 → /sales/deals/[id] 상세 편집. 금액은 대웅 축(씨어스 금액은 상세에서 별도 관리).
- * '등록' → 병원 검색·매핑 후 딜 생성 → 상세 페이지에서 부가 정보 입력.
+ * '등록' → 병원 검색·매핑 + 필수(상품유형·도입 기기 수량 ≥1, 2026-11-02) 후 딜 생성 → 상세 페이지에서 부가 정보 입력.
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -110,23 +110,43 @@ function HospitalSearch({ target, setTarget }: { target: HospitalPick | null; se
   )
 }
 
-/** 등록 모달 — 병원 매핑 + 딜 생성 → 상세 페이지에서 부가 정보 입력 */
+interface DeviceOpt { id: number; deviceName: string; deviceModel: string }
+
+/** 등록 모달 — 병원 매핑 + 필수 필드(상품유형·도입 기기 수량, 2026-11-02) + 딜 생성 → 상세 페이지에서 부가 정보 입력 */
 function CreateModal({ existingRounds, onClose }: { existingRounds: Map<string, number>; onClose: () => void }) {
   const router = useRouter()
   const [target, setTarget] = useState<HospitalPick | null>(null)
-  const [productType, setProductType] = useState('일반')
+  const [productType, setProductType] = useState('')
+  const [devices, setDevices] = useState<DeviceOpt[] | null>(null)
+  const [deviceQty, setDeviceQty] = useState<Record<number, string>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // 기기 마스터 — 활성 + 수량 집계 대상만 (딜 상세 '도입 기기 수량'과 동일 기준)
+  useEffect(() => {
+    fetch('/api/settings/devices', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : { devices: [] }))
+      .then((d) => setDevices(((d.devices ?? []) as Array<DeviceOpt & { isActive: boolean; quantityTracked: boolean }>)
+        .filter((x) => x.isActive && x.quantityTracked)
+        .map(({ id, deviceName, deviceModel }) => ({ id, deviceName, deviceModel }))))
+      .catch(() => setDevices([]))
+  }, [])
+
   const nextRound = target ? (existingRounds.get(target.hospitalCode) ?? 0) + 1 : null
+  const deviceTotal = (devices ?? []).reduce((a, d) => a + (parseInt(deviceQty[d.id] || '0') || 0), 0)
 
   const submit = async () => {
     if (!target) return
+    if (productType !== '일반' && productType !== '라이트') { setError('상품유형(일반/라이트)을 선택하세요.'); return }
+    if (deviceTotal === 0) { setError('도입 기기 수량을 1대 이상 입력하세요.'); return }
     setBusy(true); setError(null)
     const res = await fetch(`/api/hospitals/${target.hospitalCode}/sales/deals`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ productType }),
+      body: JSON.stringify({
+        productType,
+        devices: (devices ?? []).map((d) => ({ deviceId: d.id, quantity: parseInt(deviceQty[d.id] || '0') || 0 })),
+      }),
     })
     setBusy(false)
     if (!res.ok) { setError((await res.json().catch(() => ({}))).error ?? '등록에 실패했습니다.'); return }
@@ -137,25 +157,46 @@ function CreateModal({ existingRounds, onClose }: { existingRounds: Map<string, 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-semibold text-gray-800">도입현황 등록</h3>
-        <p className="mt-1 text-xs text-gray-500">병원을 매핑해 계약 이력(차수)을 만듭니다. 등록 후 상세 페이지에서 나머지 정보를 입력하세요. 기본 상태는 &lsquo;영업중&rsquo;입니다.</p>
+        <p className="mt-1 text-xs text-gray-500">병원을 매핑해 계약 이력(차수)을 만듭니다. 상품유형·도입 기기 수량은 필수이며, 나머지 정보(견적서·계약서 첨부 포함)는 등록 후 상세 페이지에서 입력하세요. 기본 상태는 &lsquo;영업중&rsquo;입니다.</p>
         <div className="mt-4">
-          <label className="mb-1 block text-xs font-medium text-gray-500">병원 *</label>
+          <label className="mb-1 block text-xs font-medium text-gray-500">병원 <span className="text-red-500">*</span></label>
           <HospitalSearch target={target} setTarget={setTarget} />
           {nextRound !== null && <p className="mt-1 text-xs text-blue-600">{nextRound}차로 등록됩니다</p>}
         </div>
         <div className="mt-4">
-          <label className="mb-1 block text-xs font-medium text-gray-500">상품유형</label>
+          <label className="mb-1 block text-xs font-medium text-gray-500">상품유형 <span className="text-red-500">*</span></label>
           <select className={inputCls} value={productType} onChange={(e) => setProductType(e.target.value)}>
+            <option value="">선택하세요</option>
             <option value="일반">일반</option>
             <option value="라이트">라이트</option>
           </select>
         </div>
+        <div className="mt-4">
+          <p className="text-xs font-medium text-gray-500">
+            도입 기기 수량 <span className="text-red-500">*</span>
+            <span className="ml-2 font-normal text-gray-400">합계 {deviceTotal}대 · 1대 이상</span>
+          </p>
+          {devices === null ? (
+            <p className="mt-2 text-sm text-gray-400">기기 목록을 불러오는 중…</p>
+          ) : devices.length === 0 ? (
+            <p className="mt-2 text-sm text-gray-400">등록된 기기가 없습니다. 설정 &gt; 장비 정보에서 기기를 먼저 등록하세요.</p>
+          ) : (
+            <div className="mt-2 grid grid-cols-2 gap-3">
+              {devices.map((d) => (
+                <div key={d.id}>
+                  <label className="mb-1 block text-xs text-gray-500" title={d.deviceModel}>{d.deviceName} <span className="text-gray-400">({d.deviceModel})</span></label>
+                  <input type="number" min={0} className={inputCls} placeholder="0" value={deviceQty[d.id] ?? ''} onChange={(e) => setDeviceQty({ ...deviceQty, [d.id]: e.target.value })} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onClose} className={btnGhost}>취소</button>
-          <button onClick={submit} disabled={busy || !target} className={btnPrimary}>등록</button>
+          <button onClick={submit} disabled={busy || !target || !productType || deviceTotal === 0} className={btnPrimary}>등록</button>
         </div>
       </div>
     </div>

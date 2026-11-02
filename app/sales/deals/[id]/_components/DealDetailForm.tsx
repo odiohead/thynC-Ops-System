@@ -4,12 +4,15 @@
  * 딜(계약 이력) 상세 편집 폼 — 엑셀 B~AK 전 항목 입력.
  * 병원·지역·종별은 자동 표시(수정 불가), 운영 축(공사 단계·일정·교육일·오더)은 연결 프로젝트에서 읽기 전용.
  * 저장은 기존 병원 스코프 딜 API(PUT /api/hospitals/[code]/sales/deals/[id]) 재사용.
+ * 필수(2026-11-02): 상품유형 + 도입 기기 수량 1대 이상. '규모 · 계약' 카드 하단에 견적서·계약서 첨부(DealFilesPanel, 필수 아님).
  */
 
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import PageHeader from '@/app/components/ui/PageHeader'
+import type { SalesDealFileDto } from '@/lib/salesDealFiles'
+import DealFilesPanel from './DealFilesPanel'
 
 export interface DealMasters {
   dealStatuses: { id: number; name: string }[]
@@ -86,7 +89,7 @@ const cardCls = 'rounded-xl border border-gray-200 bg-white p-5 shadow-sm'
 const sectionTitle = 'text-sm font-semibold text-gray-800'
 const readonlyCls = 'rounded-lg bg-gray-50 px-3 py-1.5 text-sm text-gray-700'
 
-export default function DealDetailForm({ deal, masters }: { deal: DealDetail; masters: DealMasters }) {
+export default function DealDetailForm({ deal, masters, files, canWrite }: { deal: DealDetail; masters: DealMasters; files: SalesDealFileDto[]; canWrite: boolean }) {
   const router = useRouter()
   const [form, setForm] = useState({
     roundNo: deal.roundNo.toString(),
@@ -140,7 +143,12 @@ export default function DealDetailForm({ deal, masters }: { deal: DealDetail; ma
   const sale = (num(form.amountProduct) ?? 0) + (num(form.amountConstruction) ?? 0)
   const dwSale = (num(form.daewoongAmountProduct) ?? 0) + (num(form.daewoongAmountConstruction) ?? 0)
 
+  const deviceTotal = masters.devices.reduce((a, d) => a + (parseInt(deviceQty[d.id] || '0') || 0), 0)
+
   const save = async () => {
+    // 필수 (2026-11-02): 상품유형 + 도입 기기 수량 1대 이상 — 서버도 동일 검증
+    if (form.productType !== '일반' && form.productType !== '라이트') { setError('상품유형(일반/라이트)을 선택하세요.'); return }
+    if (deviceTotal === 0) { setError('도입 기기 수량을 1대 이상 입력하세요.'); return }
     setBusy(true); setError(null); setSaved(false)
     const res = await fetch(`/api/hospitals/${deal.hospitalCode}/sales/deals/${deal.id}`, {
       method: 'PUT',
@@ -264,7 +272,7 @@ export default function DealDetailForm({ deal, masters }: { deal: DealDetail; ma
           <Sel label="병원 판매모델" value={form.hospitalModelId} onChange={(v) => setForm({ ...form, hospitalModelId: v })} options={masters.models} />
           <Sel label="씨어스 판매방식" value={form.seersModelId} onChange={(v) => setForm({ ...form, seersModelId: v })} options={masters.models} />
           <div>
-            <label className={labelCls}>상품유형</label>
+            <label className={labelCls}>상품유형 <span className="text-red-500">*</span></label>
             <select className={inputCls} value={form.productType} onChange={(e) => setForm({ ...form, productType: e.target.value })}>
               <option value="일반">일반</option>
               <option value="라이트">라이트</option>
@@ -282,10 +290,11 @@ export default function DealDetailForm({ deal, masters }: { deal: DealDetail; ma
         {/* 도입 기기 수량 — 설정 > 장비 정보 마스터 기준 (계약 스냅샷, 운영 실측은 연결 프로젝트) */}
         <div className="mt-4 border-t border-gray-100 pt-4">
           <p className="text-xs font-semibold text-gray-500">
-            도입 기기 수량
+            도입 기기 수량 <span className="text-red-500">*</span>
             <span className="ml-2 font-normal text-gray-400">
-              설정 &gt; 장비 정보 목록 기준 · 합계 {masters.devices.reduce((a, d) => a + (parseInt(deviceQty[d.id] || '0') || 0), 0)}대
+              설정 &gt; 장비 정보 목록 기준 · 합계 {deviceTotal}대
             </span>
+            {deviceTotal === 0 && <span className="ml-2 rounded bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-600">1대 이상 필수 — AS 한도(분실 10%·라이트 100%)의 분모</span>}
           </p>
           {masters.devices.length === 0 ? (
             <p className="mt-2 text-sm text-gray-400">등록된 기기가 없습니다. 설정 &gt; 장비 정보에서 기기를 먼저 등록하세요.</p>
@@ -306,6 +315,9 @@ export default function DealDetailForm({ deal, masters }: { deal: DealDetail; ma
             </div>
           )}
         </div>
+
+        {/* 견적서 · 계약서 첨부 (2026-11-02) — 필수 아님, 미첨부는 눈에 띄게 */}
+        <DealFilesPanel hospitalCode={deal.hospitalCode} dealId={deal.id} canWrite={canWrite} initialFiles={files} />
       </div>
 
       {/* 금액 · 정산 (씨어스 축 — 수기 입력) */}

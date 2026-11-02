@@ -6,9 +6,13 @@
  * 품목 = 자재관리 품목 중 해당 업무(이번 범위: 구축 BUILD)에 노출된 것 — 인벤토리 → 분류 순 섹션(품목명만, 모델명 미표시 — 2026-11-01), 빈 값/0 = 미요청.
  * 구성 안내 (2026-11-01): 주 품목(thynC 시스템 XX) 수량을 적으면 그 구성에 포함된 부자재(운영팀재고) 행의 수량 입력란 왼쪽에 '포함 n'을 표시
  * (재고 처리와 무관한 안내 — 사용자가 추가로 적는 수량만 요청됨).
+ * 첨부 파일 (2026-11-02): 등록 모드는 파일을 담아 두었다가 생성 직후 업로드, 수정 모드는 StockOutFilesPanel로 즉시 업로드·삭제. 엑셀 등 요청 근거.
  */
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { FileSpreadsheet, Paperclip, X } from 'lucide-react'
 import { STOCK_OUT_PURPOSE_LABELS, type StockOutPurpose } from '@/lib/stockOutShared'
+import { STOCK_OUT_FILE_MAX_BYTES, STOCK_OUT_FILES_PER_REQUEST, isSpreadsheetFile } from '@/lib/stockOutFiles'
+import StockOutFilesPanel, { fmtFileSize } from './StockOutFilesPanel'
 
 export interface StockOutItemOpt {
   id: number
@@ -62,11 +66,28 @@ export default function StockOutRequestFormModal({
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 등록 모드 첨부 — 생성 직후 /files 에 업로드 (수정 모드는 패널이 직접 처리)
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  function addPending(list: FileList | null) {
+    if (!list) return
+    setError(null)
+    const next = [...pendingFiles]
+    for (const f of Array.from(list)) {
+      if (f.size > STOCK_OUT_FILE_MAX_BYTES) { setError(`'${f.name}'은 파일당 ${Math.round(STOCK_OUT_FILE_MAX_BYTES / 1024 / 1024)}MB를 초과합니다.`); continue }
+      if (!next.some((x) => x.name === f.name && x.size === f.size)) next.push(f)
+    }
+    if (next.length > STOCK_OUT_FILES_PER_REQUEST) { setError(`첨부는 한 번에 최대 ${STOCK_OUT_FILES_PER_REQUEST}개까지 가능합니다.`); next.length = STOCK_OUT_FILES_PER_REQUEST }
+    setPendingFiles(next)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
 
   useEffect(() => {
     if (!open) return
     setError(null)
     setLoaded(false)
+    setPendingFiles([])
     fetch(`/api/settings/stock-out-items?purpose=${effPurpose}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
@@ -140,8 +161,21 @@ export default function StockOutRequestFormModal({
       ? await fetch(`/api/stock-out-requests/${editTarget.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       : await fetch('/api/stock-out-requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, projectCode: project.projectCode, purpose: effPurpose }) })
     const d = await res.json().catch(() => ({}))
+    if (!res.ok) { setBusy(false); setError(d.error ?? '저장에 실패했습니다.'); return }
+
+    // 등록 모드: 담아 둔 첨부를 생성된 요청에 업로드 (실패해도 요청은 이미 생성됨 — 상세에서 재시도 안내)
+    const newId: number | undefined = editTarget ? editTarget.id : d.stockOutRequest?.id
+    if (!editTarget && pendingFiles.length && newId) {
+      const fd = new FormData()
+      pendingFiles.forEach((f) => fd.append('files', f))
+      const up = await fetch(`/api/stock-out-requests/${newId}/files`, { method: 'POST', body: fd })
+      const ud = await up.json().catch(() => ({}))
+      const failed: { name: string; error: string }[] = ud.failed ?? []
+      if (!up.ok || failed.length) {
+        window.alert(`출고요청은 생성되었지만 첨부 ${failed.length || pendingFiles.length}건이 업로드되지 않았습니다.\n${ud.error ?? failed.map((f) => `${f.name}: ${f.error}`).join('\n')}\n출고요청 상세에서 다시 첨부해 주세요.`)
+      }
+    }
     setBusy(false)
-    if (!res.ok) { setError(d.error ?? '저장에 실패했습니다.'); return }
     onSaved()
     onClose()
   }
@@ -224,6 +258,41 @@ export default function StockOutRequestFormModal({
           <div>
             <label className={label}>비고</label>
             <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="배송·수령 관련 요청사항 등" className="mt-1 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
+          </div>
+
+          {/* 첨부 파일 (2026-11-02) — 엑셀 등 출고 근거. 등록 모드: 담아 두었다가 생성 직후 업로드 / 수정 모드: 즉시 반영 */}
+          <div>
+            <div className="flex items-baseline justify-between">
+              <label className={label}>첨부 파일 <span className="font-normal text-gray-400">(엑셀·PDF 등, 선택)</span></label>
+              {!editTarget && pendingFiles.length > 0 && <span className="text-xs text-gray-400">{pendingFiles.length}개 · {fmtFileSize(pendingFiles.reduce((s, f) => s + f.size, 0))}</span>}
+            </div>
+            {editTarget ? (
+              <div className="mt-1.5"><StockOutFilesPanel requestId={editTarget.id} canWrite compact /></div>
+            ) : (
+              <div className="mt-1.5 space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={busy}
+                  className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-gray-300 px-3 py-2 text-xs text-gray-500 hover:bg-gray-50"
+                >
+                  <Paperclip className="h-3.5 w-3.5" /> 파일 선택 <span className="text-gray-400">(파일당 {Math.round(STOCK_OUT_FILE_MAX_BYTES / 1024 / 1024)}MB · 최대 {STOCK_OUT_FILES_PER_REQUEST}개 · 생성 시 함께 업로드)</span>
+                </button>
+                <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => addPending(e.target.files)} />
+                {pendingFiles.length > 0 && (
+                  <ul className="divide-y divide-gray-100 rounded-md border border-gray-200">
+                    {pendingFiles.map((f, i) => (
+                      <li key={`${f.name}-${f.size}`} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+                        {isSpreadsheetFile(f.name) ? <FileSpreadsheet className="h-4 w-4 shrink-0 text-emerald-600" /> : <Paperclip className="h-3.5 w-3.5 shrink-0 text-gray-400" />}
+                        <span className="min-w-0 flex-1 truncate text-gray-800" title={f.name}>{f.name}</span>
+                        <span className="shrink-0 text-[11px] text-gray-400">{fmtFileSize(f.size)}</span>
+                        <button type="button" onClick={() => setPendingFiles(pendingFiles.filter((_, j) => j !== i))} disabled={busy} className="shrink-0 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-red-600" aria-label={`${f.name} 제거`}><X className="h-3.5 w-3.5" /></button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end gap-2 border-t border-gray-100 pt-3">

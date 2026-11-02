@@ -698,7 +698,15 @@ prisma/
 #### SalesDealDevice (딜별 도입 기기 수량 — 2026-07-31)
 - SalesDeal ↔ DeviceInfo N:M + `quantity` — 계약 스냅샷 (운영 실측은 ProjectDevice와 별개)
 - `(dealId, deviceInfoId)` UNIQUE, 딜 삭제 시 CASCADE. 수량 0은 행 미저장 — 기기 마스터가 늘어나면 기존 딜 상세에 0으로 표시
-- 딜 상세(`/sales/deals/[id]`) '규모·계약'에서 입력, PUT에 `devices` 배열이 온 경우에만 전체 교체(미전송 PUT은 보존)
+- 딜 상세(`/sales/deals/[id]`) '규모·계약'에서 입력, PUT에 `devices` 배열이 온 경우에만 전체 교체(미전송 PUT은 보존). **등록(POST)·보냈을 때 합계 ≥1 필수 (2026-11-02)** — POST는 딜+수량 행 단일 트랜잭션
+
+#### StockOutRequestFile (출고요청 첨부 — 엑셀 등, 2026-11-02 · `projects/stock_out_v2_design.md` §15)
+- `requestId`(CASCADE) · `fileName`·`s3Key`·`sizeBytes`·`contentType`·`uploadedById`(SET NULL)·`uploadedAt`. 분류 없음, 요청당 N건. 한도(20MB·10개)·DTO `lib/stockOutFiles.ts`. S3 키 `stock-out/<requestId>/<ts>_<원본명>`
+- 화면: 프로젝트 상세 출고요청 모달(등록 시 담아 두고 생성 직후 업로드 / 수정 시 즉시), 출고요청 상세 '기본 정보' 카드 '첨부 파일' 섹션(`StockOutFilesPanel`)
+
+#### SalesDealFile (딜 첨부 — 견적서·계약서, 2026-11-02 · `projects/sales_crm_design.md` §7)
+- `dealId`(CASCADE) · `kind` VARCHAR(20) CHECK `QUOTE`(견적서)/`CONTRACT`(계약서) · `fileName`·`s3Key`·`sizeBytes`·`contentType`·`uploadedById`(SET NULL)·`uploadedAt`. 종류별 N건, **필수 아님**(계약서 추후 전달 허용)
+- 어휘·라벨·한도(20MB·10개)·DTO는 `lib/salesDealFiles.ts` 단일 소스. S3 키 `sales-deals/<dealId>/<quote|contract>/<ts>_<원본명>`
 
 #### SalesActivity (영업 활동)
 - `activityDate`·`activityTypeId`(SALES_ACTIVITY_TYPE)·`content`(sanitize된 리치텍스트)·`authorId`·`dealId`(선택)
@@ -1118,6 +1126,8 @@ prisma/
   - 종별 도입 병원 카드에 **병상 침투율** 병기 (2026-08-10): 종별 도입 병상(계약완료 딜의 대웅 디바이스 수량 합, KPI '도입 병상'과 동일 기준) / 종별 전체 병상(심평원 `perm_sbd_cnt` 합) + 보조 게이지. 전체 병상 미연동(0) 종별은 분모 '-'·배지 '-%' 표시(게이지 생략)
 - **엑셀 다운로드 (2026-08-04)**: 두 탭 모두 우측 상단 '엑셀 다운로드' — **화면에 걸린 필터가 그대로 반영된 결과**를 받는다. 도입현황은 필터·정렬이 적용된 표를 컬럼 정의(`COLS`) 순서 그대로 29컬럼+순번으로 내보내며, xlsx 라이브러리는 클릭 시점에 동적 로드(초기 번들 제외)
 - **도입현황 (`/sales/deals`)**: 계약 이력 전용 입력 페이지. 엑셀 B~AK 컬럼 순서 flat 표(**1행 = 1차수(딜)**) + '+ 등록'(병원 검색·매핑 → 딜 생성 → 상세 이동) + 행 클릭 → 딜 상세 편집(`/sales/deals/[id]` — 전 필드 카드형 폼, 병원·지역·종별 자동 표시, 운영 축 읽기 전용, 프로젝트 연결 셀렉트, 삭제)
+  - **등록 필수 필드 (2026-11-02)**: 상품유형(일반/라이트, 기본값 없음) + 도입 기기 수량 합계 ≥1 — '+ 등록' 모달·딜 상세 저장·병원 상세 계약 이력 모달 3곳 동일, 서버(`POST`/`PUT /api/hospitals/[code]/sales/deals`)가 단일 강제. 수량은 분실 10%·라이트 100% AS 한도의 분모
+  - **견적서 · 계약서 첨부 (2026-11-02)**: 딜 상세 '규모 · 계약' 카드 하단 `DealFilesPanel` — 견적서/계약서 2열, 빈 열은 amber '미첨부' 배지(필수 아님), 드롭존·다중 업로드·presigned 열람·삭제. USER 등급 이상 편집, VIEWER 열람만
   - 기본 정렬 계약일 최신순 + 헤더 클릭 정렬(전 컬럼) + 필터(오더·병원종·대웅 사업부)
   - 엑셀 보강 컬럼 8종(보증기간·최초 인입일·용역매출·판매가 유형·대웅 사업부/사무소/담당자/연락처)은 `sales_deals`에 신설, 도입 기기 수량은 기기 마스터(설정>장비 정보) 기준 `SalesDealDevice`로 입력(새 기기 추가 시 기존 딜은 0 표시). 납품일·공사지연일은 추후 연동
   - 운영 축(공사 단계·답사일·공사시작/완료예정·교육일·종별·지역)은 연결 프로젝트·답사에서 **조인 표시(이중 저장 없음)**
@@ -1748,7 +1758,9 @@ npm run dev
 | POST | `/api/hospitals/[code]/sales/persons/[affId]/transfer` | **전원 처리** — 소속 종료 + 대상 병원 신규 소속 (이력 보존) |
 | POST | `/api/hospitals/[code]/sales/persons/[affId]/end` | 소속 종료 (퇴직 등) |
 | POST | `/api/hospitals/[code]/sales/deals/[id]/map-project` | 프로젝트 매핑/해제 전용 (다른 필드 불변, 같은 병원 검증·중복 409) — **호출처 없음**(2026-08-03 `/sales2` 폐기, 프로젝트 연결은 딜 상세 폼의 `projectCode`로 대체). 라우트는 보존 |
-| POST, PUT/DELETE | `/api/hospitals/[code]/sales/deals(/[id])` | 계약 건(차수) — `DEAL-YYYYMM-NNNN` 발번, round_no 자동, 같은 병원 프로젝트만 연결, 코드 FK 카테고리 검증 |
+| POST, PUT/DELETE | `/api/hospitals/[code]/sales/deals(/[id])` | 계약 건(차수) — `DEAL-YYYYMM-NNNN` 발번, round_no 자동, 같은 병원 프로젝트만 연결, 코드 FK 카테고리 검증. **POST: `productType`(일반/라이트)·`devices[]` 합계 ≥1 필수(2026-11-02)**, PUT: 보냈을 때만 동일 검증 |
+| GET/POST | `/api/hospitals/[code]/sales/deals/[id]/files` | 딜 첨부(견적서·계약서) 목록(`?kind=`) / 다중 업로드(multipart `kind`+`files[]`, 파일별 실패 `failed[]`) — `checkSalesAccess`, 딜 병원 소속 검증 (2026-11-02) |
+| GET, DELETE | `/api/hospitals/[code]/sales/deals/[id]/files/[fileId]` | 첨부 열람(302 presigned inline, 5분) / 삭제(S3+행, 감사 로그 `sales_deal_file`) |
 | POST, PUT/DELETE | `/api/hospitals/[code]/sales/activities(/[id])` | 영업 활동 |
 | GET/POST, PUT/DELETE | `/api/settings/sales-codes/[category](/[id])` | 영업 StatusCode 7카테고리 (화이트리스트 검증, 색상 지원, 사용 중 삭제 409) |
 | GET/PUT | `/api/settings/sales-targets` | 연도별 종별 목표 병상수 (AppSetting `sales_bed_targets_<year>` JSON, `period=h2`는 하반기 키 `sales_bed_targets_<year>_h2` — 열람: 영업 게이트, 수정: ADMIN 이상) |
@@ -1852,6 +1864,8 @@ npm run dev
 | PUT | `/api/stock-out-requests/[id]` | 수정 — 희망일·비고·상태(어댑터 동기화)·라인 전체 교체 |
 | DELETE | `/api/stock-out-requests/[id]` | 삭제 — 연결 티켓 동반 삭제 |
 | POST | `/api/stock-out-requests/[id]/fulfill` (+`?preview=true`) | 출고 처리 (P2 — `canManageStock`) — 검증/실행: WMS 차감+기기현황 등록+완료, 전량 일치. v2: body `{txDate, lines:[{inventoryItemId,…}]}` (outType 제거), 응답 `preview.inventories` |
+| GET/POST | `/api/stock-out-requests/[id]/files` | 출고요청 첨부(엑셀 등) 목록 / 다중 업로드(multipart `files[]`, 파일별 실패 `failed[]`) — 업로드 VIEWER 제외 (2026-11-02, `lib/stockOutFiles.ts`) |
+| GET, DELETE | `/api/stock-out-requests/[id]/files/[fileId]` | 첨부 다운로드(302 presigned attachment) / 삭제(업로더 본인 또는 `canEditStockOutRequest`) |
 | GET/POST | `/api/settings/stock-out-status` (+`[id]` PUT/DELETE) | 출고업무 상태 관리 (+티켓 상태 매핑 필수) |
 | GET | `/api/settings/stock-out-items` (`?purpose=BUILD`) | 출고 품목 노출 설정 — 자재관리 활성 품목 전체(인벤토리별 그룹·분류·관리방식·현재고·purposes), `?purpose=`면 그 업무에 체크된 품목만(요청 폼) (v2 2026-11-01) |
 | PUT | `/api/settings/stock-out-items/[inventoryItemId]` | `{purpose, enabled}` 업무별 노출 토글 (ADMIN, 멱등, 감사 로그) |

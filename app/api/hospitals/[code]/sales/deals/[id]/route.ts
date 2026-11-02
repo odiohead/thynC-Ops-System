@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { checkSalesAccess, syncHospitalIntroTypesFromDeals } from '@/lib/sales'
-import { parseDealBody, validateDealCodes } from '../shared'
+import { DEAL_DEVICES_REQUIRED, DEAL_PRODUCT_TYPE_REQUIRED, isDealProductType, parseDealBody, parseDealDevices, validateDealCodes, validateDealDevices } from '../shared'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,6 +29,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if ('error' in g) return g.error
 
   const body = await request.json()
+  // 상품유형 — 키 미전송 PUT은 보존, 보냈다면 어휘 필수 (2026-11-02)
+  if (body.productType !== undefined && !isDealProductType(body.productType)) return NextResponse.json({ error: DEAL_PRODUCT_TYPE_REQUIRED }, { status: 400 })
   const data = parseDealBody(body)
   const codeError = await validateDealCodes(data)
   if (codeError) return NextResponse.json({ error: codeError }, { status: 400 })
@@ -40,16 +42,12 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (!project || project.hospitalCode !== params.code) return NextResponse.json({ error: '이 병원의 프로젝트만 연결할 수 있습니다.' }, { status: 400 })
   }
 
-  // 기기 수량 (딜 상세 폼) — devices 배열이 온 경우에만 전체 교체 (병원 상세 계약 이력 모달 등 미전송 PUT은 기존 값 보존)
-  let devices: Array<{ deviceInfoId: number; quantity: number }> | null = null
-  if (Array.isArray(body.devices)) {
-    devices = (body.devices as Array<{ deviceId?: unknown; quantity?: unknown }>)
-      .map((d) => ({ deviceInfoId: Number(d.deviceId), quantity: Number(d.quantity) }))
-      .filter((d) => Number.isInteger(d.deviceInfoId) && Number.isInteger(d.quantity) && d.quantity > 0)
-    if (devices.length > 0) {
-      const found = await prisma.deviceInfo.count({ where: { id: { in: devices.map((d) => d.deviceInfoId) } } })
-      if (found !== devices.length) return NextResponse.json({ error: '기기 목록에 없는 항목이 있습니다.' }, { status: 400 })
-    }
+  // 기기 수량 — devices 배열이 온 경우에만 전체 교체 (미전송 PUT은 기존 값 보존). 보냈다면 합계 1대 이상 필수 (2026-11-02)
+  const devices = parseDealDevices(body)
+  if (devices !== null) {
+    if (devices.length === 0) return NextResponse.json({ error: DEAL_DEVICES_REQUIRED }, { status: 400 })
+    const deviceError = await validateDealDevices(devices)
+    if (deviceError) return NextResponse.json({ error: deviceError }, { status: 400 })
   }
 
   try {

@@ -11,6 +11,8 @@ import Link from 'next/link'
 import TicketStatusBadge from '@/app/tickets/components/TicketStatusBadge'
 import StockOutRequestFormModal, { type StockOutEditTarget } from '../_components/StockOutRequestFormModal'
 import FulfillCard from '../_components/FulfillCard'
+import StockOutFilesPanel from '../_components/StockOutFilesPanel'
+import { toStockOutFileDto, type StockOutFileDto } from '@/lib/stockOutFiles'
 import type { TicketStatus } from '@prisma/client'
 
 interface CodeRef { id: number; name: string; color: string | null }
@@ -41,6 +43,7 @@ interface StockOutDetail {
   createdBy: { id: string; name: string } | null
   ticket: { id: number; ticketCode: string; status: TicketStatus; owner: { id: string; name: string } | null } | null
   purpose: StockOutPurpose
+  files: StockOutFileDto[]
   items: { id: number; inventoryItemId: number; quantity: number; fulfilledSerials: string | null; item: { id: number; name: string; modelName: string | null; isSerialManaged: boolean; inventory: { id: number; name: string }; category: { name: string } | null } }[]
 }
 
@@ -86,7 +89,10 @@ export default function StockOutDetailPage() {
     const res = await fetch(`/api/stock-out-requests/${id}`)
     if (!res.ok) { setError('출고요청을 찾을 수 없습니다.'); setLoading(false); return }
     const d = await res.json()
-    setReq(d.stockOutRequest)
+    const r = d.stockOutRequest
+    // 첨부 — 서버 include 행(uploadedAt Date 직렬화 문자열)을 DTO로 정규화
+    type RawFile = Omit<Parameters<typeof toStockOutFileDto>[0], 'uploadedAt'> & { uploadedAt: string }
+    setReq({ ...r, files: (r.files ?? []).map((f: RawFile) => toStockOutFileDto({ ...f, uploadedAt: new Date(f.uploadedAt) })) })
     setLoading(false)
   }, [id])
 
@@ -227,6 +233,13 @@ export default function StockOutDetailPage() {
             <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">{req.note}</p>
           </div>
         )}
+        {/* 첨부 파일 (2026-11-02) — 엑셀 등 출고 근거. 업로드는 VIEWER 제외 누구나, 삭제는 업로더 본인 또는 수정 권한자(서버 판정) */}
+        <div className="border-t border-gray-100 px-4 py-4 sm:px-6">
+          <p className={label}>첨부 파일 <span className="normal-case tracking-normal text-gray-400">{req.files.length ? `${req.files.length}개` : ''}</span></p>
+          <div className="mt-2">
+            <StockOutFilesPanel requestId={req.id} canWrite={!!me && me.role !== 'VIEWER'} initialFiles={req.files} onChanged={(files) => setReq((prev) => (prev ? { ...prev, files } : prev))} />
+          </div>
+        </div>
       </div>
 
       {/* 품목 라인 */}

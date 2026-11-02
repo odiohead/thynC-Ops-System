@@ -21,7 +21,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   })
   if (!hospital) return NextResponse.json({ error: '병원을 찾을 수 없습니다.' }, { status: 404 })
 
-  const [profile, affiliations, deals, activities, codes, ownerCandidates, projects, daewoongStaff] = await Promise.all([
+  const [profile, affiliations, deals, activities, codes, ownerCandidates, projects, daewoongStaff, deviceInfos] = await Promise.all([
     prisma.hospitalSalesProfile.findUnique({
       where: { hospitalCode: params.code },
       include: {
@@ -55,6 +55,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         taxInvoice: { select: { id: true, name: true } },
         settlement: { select: { id: true, name: true } },
         project: { select: { projectCode: true, projectName: true } },
+        devices: { select: { deviceInfoId: true, quantity: true } }, // 도입 기기 수량 (계약 이력 모달 필수 입력, 2026-11-02)
       },
     }),
     prisma.salesActivity.findMany({
@@ -87,6 +88,12 @@ export async function GET(request: NextRequest, { params }: Params) {
       where: { hospitalCode: params.code },
       orderBy: { createdAt: 'asc' },
       select: { assignedUser: { select: { id: true, name: true, email: true, phone: true } } },
+    }),
+    // 기기 마스터 — 활성·수량 집계 대상 + 이 병원 딜에 수량이 있는 기기 (딜 상세 /sales/deals/[id]와 동일 기준)
+    prisma.deviceInfo.findMany({
+      where: { OR: [{ isActive: true, quantityTracked: true }, { salesDealDevices: { some: { deal: { hospitalCode: params.code } } } }] },
+      orderBy: { sortOrder: 'asc' },
+      select: { id: true, deviceName: true, deviceModel: true },
     }),
   ])
 
@@ -130,6 +137,6 @@ export async function GET(request: NextRequest, { params }: Params) {
     activities,
     derived: { introBeds, penetration, contractedTotal },
     daewoongStaff: daewoongStaff.map((a) => a.assignedUser),
-    masters: { codes: codesByCategory, owners, projects },
+    masters: { codes: codesByCategory, owners, projects, devices: deviceInfos },
   })
 }

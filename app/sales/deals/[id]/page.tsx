@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers'
 import { notFound } from 'next/navigation'
-import { verifyToken } from '@/lib/auth'
+import { verifyToken, isUserOrAbove } from '@/lib/auth'
+import { toSalesDealFileDto } from '@/lib/salesDealFiles'
 import { canAccessSales, toAmount } from '@/lib/sales'
 import { prisma } from '@/lib/prisma'
 import DealDetailForm, { type DealDetail, type DealMasters } from './_components/DealDetailForm'
@@ -36,6 +37,7 @@ export default async function SalesDealDetailPage({ params }: { params: { id: st
     where: { id },
     include: {
       devices: { select: { deviceInfoId: true, quantity: true } },
+      files: { include: { uploadedBy: { select: { name: true } } }, orderBy: { uploadedAt: 'asc' } }, // 견적서·계약서 첨부 (2026-11-02)
       hospital: { select: { hospitalCode: true, hospitalName: true, type: true, sidoName: true, sigunguName: true } },
       project: {
         select: {
@@ -144,5 +146,8 @@ export default async function SalesDealDetailPage({ params }: { params: { id: st
       : null,
   }
 
-  return <DealDetailForm deal={detail} masters={masters} />
+  // 편집(저장·첨부 업로드/삭제)은 USER 등급 이상 — checkSalesAccess(write)와 동일 기준
+  const canWrite = !!user && isUserOrAbove(user.role)
+
+  return <DealDetailForm deal={detail} masters={masters} files={deal.files.map(toSalesDealFileDto)} canWrite={canWrite} />
 }

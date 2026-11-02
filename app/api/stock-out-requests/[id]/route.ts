@@ -29,6 +29,8 @@ const detailInclude = {
     select: { id: true, inventoryItemId: true, quantity: true, fulfilledSerials: true, item: { select: { id: true, name: true, modelName: true, isSerialManaged: true, inventory: { select: { id: true, name: true } }, category: { select: { name: true } } } } },
     orderBy: { id: 'asc' as const },
   },
+  // 첨부 파일 — 엑셀 등 (2026-11-02)
+  files: { include: { uploadedBy: { select: { name: true } } }, orderBy: { uploadedAt: 'asc' as const } },
   // 처리 전표 (P2 — stock_out_request_id 역조회, 취소 여부 포함)
   transactions: {
     select: {

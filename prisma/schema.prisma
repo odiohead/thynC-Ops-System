@@ -332,6 +332,7 @@ model User {
   asReceiptsCreated         AsReceipt[]                  @relation("AsReceiptCreator")
   stockOutRequestsCreated   StockOutRequest[]            @relation("StockOutCreator")
   stockOutRequestsFulfilled StockOutRequest[]            @relation("StockOutFulfiller")
+  stockOutFilesUploaded     StockOutRequestFile[]        @relation("StockOutFileUploader") // 출고요청 첨부 업로드 (2026-11-02)
   salesActivities           SalesActivity[]              @relation("SalesActivityAuthor")
   salesOwnedProfiles        HospitalSalesProfile[]       @relation("SalesProfileOwner")
   weeklyItemsOwned          WeeklyItem[]                 @relation("WeeklyItemOwner")
@@ -355,6 +356,7 @@ model User {
   asIntakeAiRequested      AsIntakeLink[]        @relation("AsIntakeAiRequester")
   vocIntakeDecided         VocIntakeItem[]       @relation("VocIntakeDecider") // VOC 등록대기 등록·제외 (2026-10-30)
   vocDashboardReports      VocDashboardReport[]  @relation("VocDashboardReportUploader") // 주간 대시보드 보고 PDF 업로드 (2026-10-31)
+  salesDealFilesUploaded   SalesDealFile[]       @relation("SalesDealFileUploader") // 딜 견적서·계약서 첨부 업로드 (2026-11-02)
   hospitalAsMemos HospitalMeta[] @relation("HospitalAsMemoEditor")
   viewPrefs UserViewPref[] // 사용자별 화면 설정 (2026-10-01)
 }
@@ -2195,12 +2197,32 @@ model StockOutRequest {
   transactions InventoryTransaction[] // 처리 전표 (P2 — stock_out_request_id 역조회)
   ticket    Ticket?               @relation(fields: [ticketId], references: [id], onDelete: SetNull)
   items     StockOutRequestItem[]
+  files     StockOutRequestFile[] // 첨부파일 — 엑셀 등 (2026-11-02)
 
   @@index([projectCode])
   @@index([statusId])
   @@index([requestDate])
   @@index([createdAt])
   @@map("stock_out_requests")
+  @@schema("public")
+}
+
+/// 출고요청 첨부파일 — 엑셀 등 요청 근거 (projects/stock_out_v2_design.md §15, 2026-11-02). 분류 없음, 요청당 N건, 요청 삭제 시 CASCADE
+model StockOutRequestFile {
+  id           Int      @id @default(autoincrement())
+  requestId    Int      @map("request_id")
+  fileName     String   @map("file_name")
+  s3Key        String   @map("s3_key")
+  sizeBytes    Int      @map("size_bytes")
+  contentType  String?  @map("content_type")
+  uploadedById String?  @map("uploaded_by")
+  uploadedAt   DateTime @default(now()) @map("uploaded_at")
+
+  request    StockOutRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  uploadedBy User?           @relation("StockOutFileUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([requestId])
+  @@map("stock_out_request_files")
   @@schema("public")
 }
 
@@ -2729,6 +2751,7 @@ model SalesDeal {
   settlement         StatusCode? @relation("DealSettlement", fields: [settlementId], references: [id], onDelete: SetNull)
   activities         SalesActivity[]
   devices            SalesDealDevice[]
+  files              SalesDealFile[] // 견적서·계약서 첨부 (2026-11-02)
 
   @@unique([hospitalCode, roundNo])
   @@index([hospitalCode])
@@ -2767,6 +2790,26 @@ model SalesDealDevice {
 
   @@unique([dealId, deviceInfoId])
   @@map("sales_deal_devices")
+  @@schema("public")
+}
+
+/// 딜(계약 이력) 첨부 — 견적서·계약서 (projects/sales_crm_design.md §7, 2026-11-02). kind 어휘는 lib/salesDealFiles.ts 단일 소스
+model SalesDealFile {
+  id           Int      @id @default(autoincrement())
+  dealId       Int      @map("deal_id")
+  kind         String   @db.VarChar(20) // 'QUOTE'(견적서) | 'CONTRACT'(계약서)
+  fileName     String   @map("file_name")
+  s3Key        String   @map("s3_key")
+  sizeBytes    Int      @map("size_bytes")
+  contentType  String?  @map("content_type")
+  uploadedById String?  @map("uploaded_by")
+  uploadedAt   DateTime @default(now()) @map("uploaded_at")
+
+  deal       SalesDeal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  uploadedBy User?     @relation("SalesDealFileUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([dealId])
+  @@map("sales_deal_files")
   @@schema("public")
 }
 

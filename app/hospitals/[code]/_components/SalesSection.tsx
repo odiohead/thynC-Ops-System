@@ -46,6 +46,8 @@ interface Deal {
   amountProduct: number | null; amountConstruction: number | null; amountActual: number | null
   taxInvoiceId: number | null; settlementId: number | null
   contractDate: string | null; remark: string | null
+  productType: string // 일반/라이트 (필수, 2026-11-02)
+  devices: Array<{ deviceInfoId: number; quantity: number }> // 도입 기기 수량 (필수 ≥1)
   status: CodeItem | null; hospitalModel: CodeItem | null; seersModel: CodeItem | null
   taxInvoice: CodeItem | null; settlement: CodeItem | null
   project: { projectCode: string; projectName: string } | null
@@ -68,6 +70,7 @@ interface SalesData {
     codes: Record<string, CodeItem[]>
     owners: Array<{ id: string; name: string }>
     projects: Array<{ projectCode: string; projectName: string }>
+    devices: Array<{ id: number; deviceName: string; deviceModel: string }> // 기기 마스터 (활성·수량 집계 대상)
   }
 }
 
@@ -594,7 +597,7 @@ function ActivitiesTab({ code, data, onSaved }: { code: string; data: SalesData;
 // ─── 계약 이력 탭 — 컬럼 헤더 상시 노출 + 합계 행 + 등록/수정 모달 ───
 
 const DEAL_EMPTY = {
-  roundNo: '', statusId: '', hospitalModelId: '', seersModelId: '', contractDate: '',
+  roundNo: '', statusId: '', hospitalModelId: '', seersModelId: '', contractDate: '', productType: '',
   wardsText: '', deptsText: '', wardCount: '', bedCount: '',
   amountProduct: '', amountConstruction: '', amountActual: '',
   taxInvoiceId: '', settlementId: '', projectCode: '', remark: '',
@@ -603,9 +606,12 @@ const DEAL_EMPTY = {
 function DealsTab({ code, data, onSaved }: { code: string; data: SalesData; onSaved: () => void }) {
   const [modal, setModal] = useState<{ open: boolean; deal: Deal | null }>({ open: false, deal: null })
   const [form, setForm] = useState({ ...DEAL_EMPTY })
+  const [deviceQty, setDeviceQty] = useState<Record<number, string>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const deviceMasters = data.masters.devices ?? []
+  const deviceTotal = deviceMasters.reduce((a, d) => a + (parseInt(deviceQty[d.id] || '0') || 0), 0)
   const statuses = data.masters.codes.SALES_DEAL_STATUS ?? []
   const models = data.masters.codes.SALES_MODEL ?? []
   const taxInvoices = data.masters.codes.SALES_TAX_INVOICE ?? []
@@ -618,6 +624,7 @@ function DealsTab({ code, data, onSaved }: { code: string; data: SalesData; onSa
       hospitalModelId: deal.hospitalModelId?.toString() ?? '',
       seersModelId: deal.seersModelId?.toString() ?? '',
       contractDate: deal.contractDate ? deal.contractDate.slice(0, 10) : '',
+      productType: deal.productType ?? '',
       wardsText: deal.wardsText ?? '',
       deptsText: deal.deptsText ?? '',
       wardCount: deal.wardCount?.toString() ?? '',
@@ -630,11 +637,15 @@ function DealsTab({ code, data, onSaved }: { code: string; data: SalesData; onSa
       projectCode: deal.projectCode ?? '',
       remark: deal.remark ?? '',
     } : { ...DEAL_EMPTY })
+    setDeviceQty(Object.fromEntries(deviceMasters.map((d) => [d.id, String(deal?.devices?.find((x) => x.deviceInfoId === d.id)?.quantity ?? 0)])))
     setError(null)
     setModal({ open: true, deal })
   }
 
   const save = async () => {
+    // 필수 (2026-11-02): 상품유형 + 도입 기기 수량 1대 이상 — 서버 동일 검증
+    if (form.productType !== '일반' && form.productType !== '라이트') { setError('상품유형(일반/라이트)을 선택하세요.'); return }
+    if (deviceTotal === 0) { setError('도입 기기 수량을 1대 이상 입력하세요.'); return }
     setBusy(true); setError(null)
     const url = modal.deal ? `/api/hospitals/${code}/sales/deals/${modal.deal.id}` : `/api/hospitals/${code}/sales/deals`
     const res = await fetch(url, {
@@ -646,6 +657,8 @@ function DealsTab({ code, data, onSaved }: { code: string; data: SalesData; onSa
         hospitalModelId: form.hospitalModelId === '' ? null : parseInt(form.hospitalModelId),
         seersModelId: form.seersModelId === '' ? null : parseInt(form.seersModelId),
         contractDate: form.contractDate || null,
+        productType: form.productType,
+        devices: deviceMasters.map((d) => ({ deviceId: d.id, quantity: parseInt(deviceQty[d.id] || '0') || 0 })),
         wardsText: form.wardsText,
         deptsText: form.deptsText,
         wardCount: form.wardCount === '' ? null : form.wardCount,
@@ -773,6 +786,14 @@ function DealsTab({ code, data, onSaved }: { code: string; data: SalesData; onSa
               </div>
               <div><label className={labelCls}>계약일</label><input type="date" className={inputCls} value={form.contractDate} onChange={(e) => setForm({ ...form, contractDate: e.target.value })} /></div>
               <div>
+                <label className={labelCls}>상품유형 <span className="text-red-500">*</span></label>
+                <select className={inputCls} value={form.productType} onChange={(e) => setForm({ ...form, productType: e.target.value })}>
+                  <option value="">선택하세요</option>
+                  <option value="일반">일반</option>
+                  <option value="라이트">라이트</option>
+                </select>
+              </div>
+              <div>
                 <label className={labelCls}>병원 판매모델</label>
                 <select className={inputCls} value={form.hospitalModelId} onChange={(e) => setForm({ ...form, hospitalModelId: e.target.value })}>
                   <option value="">미지정</option>
@@ -791,6 +812,24 @@ function DealsTab({ code, data, onSaved }: { code: string; data: SalesData; onSa
               <div><label className={labelCls}>병동수 (계약 스냅샷)</label><input type="number" min={0} className={inputCls} value={form.wardCount} onChange={(e) => setForm({ ...form, wardCount: e.target.value })} /></div>
               <div><label className={labelCls}>병상수 (계약 스냅샷)</label><input type="number" min={0} className={inputCls} value={form.bedCount} onChange={(e) => setForm({ ...form, bedCount: e.target.value })} /></div>
             </div>
+
+            {/* 도입 기기 수량 — 필수 ≥1 (2026-11-02, 설정 > 장비 정보 마스터 기준. AS 한도 분모) */}
+            <p className="mt-4 text-xs font-semibold text-gray-500">
+              도입 기기 수량 <span className="text-red-500">*</span>
+              <span className="ml-2 font-normal text-gray-400">합계 {deviceTotal}대 · 1대 이상</span>
+            </p>
+            {deviceMasters.length === 0 ? (
+              <p className="mt-2 text-sm text-gray-400">등록된 기기가 없습니다. 설정 &gt; 장비 정보에서 기기를 먼저 등록하세요.</p>
+            ) : (
+              <div className="mt-2 grid grid-cols-2 gap-3 md:grid-cols-3">
+                {deviceMasters.map((d) => (
+                  <div key={d.id}>
+                    <label className={labelCls} title={d.deviceModel}>{d.deviceName} <span className="font-normal text-gray-400">({d.deviceModel})</span></label>
+                    <input type="number" min={0} className={inputCls} value={deviceQty[d.id] ?? '0'} onChange={(e) => setDeviceQty({ ...deviceQty, [d.id]: e.target.value })} />
+                  </div>
+                ))}
+              </div>
+            )}
 
             <p className="mt-4 text-xs font-semibold text-gray-500">금액 · 정산 <span className="font-normal">{"('판매' 합계 = 제품가+공사비 자동 계산)"}</span></p>
             <div className="mt-2 grid grid-cols-2 gap-3 md:grid-cols-3">

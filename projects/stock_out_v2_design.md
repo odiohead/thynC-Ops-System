@@ -101,3 +101,10 @@ PROD 반영 시: 마이그 백필 대상 1건 사전 확인, 시드 재실행, �
 - 화면: 좌측 주 품목 목록(구성 행이 있는 품목, 인벤토리 표기·구성품 수) + 하단 [+ 주 품목 추가] 선택(어떤 활성 자재관리 품목이든) / 우측 선택 주 품목의 구성품 표 [인벤토리 | 구성품 | 모델 | 1개당 포함 수량(blur·Enter 저장) | 삭제] + 하단 구성품 선택·수량·[+ 구성품 추가] + [구성 전체 삭제]. ADMIN만 편집(VIEWER·USER 열람)
 - API `app/api/settings/stock-out-components/route.ts`: GET(주 품목별 그룹) · PUT 업서트(parent≠child, qty≥1, **1단계 깊이** — 구성품이 주 품목이거나 주 품목이 다른 구성의 구성품이면 409) · DELETE(행 또는 주 품목 전체). 감사 로그 `setting:stock_out_item_component`
 - WMS 품목 상세의 부자재 구성(같은 인벤토리 한정·대량 출고가 참조)과 별개인 이유는 §13 그대로. 행이 없는 주 품목은 존재하지 않음(첫 구성품을 넣어야 저장됨 — 화면 안내 문구)
+
+## 15. 첨부 파일 — 엑셀 등 출고 근거 (2026-11-02 추가, 사용자 요청 "프로젝트에서 출고요청하는 기능에 파일 첨부(엑셀)")
+
+- 테이블 `stock_out_request_files`(request_id CASCADE · file_name · s3_key · size_bytes · content_type · uploaded_by SET NULL · uploaded_at) — 마이그 `20261102140000_stock_out_request_files`. 분류 없음, 요청당 N건. 한도·DTO `lib/stockOutFiles.ts` 단일 소스(파일당 20MB·한 번에 10개·실행 파일 확장자 차단, 엑셀 xlsx/xls/xlsm/csv는 아이콘 구분)
+- API `GET/POST /api/stock-out-requests/[id]/files` (POST multipart `files[]`, 파일별 실패 `failed[]`), `GET(302 presigned, attachment — 엑셀은 원본명으로 저장)/DELETE …/files/[fileId]`. 업로드는 VIEWER 제외 누구나(요청자·자재담당·엔지니어), 삭제는 업로더 본인 또는 `canEditStockOutRequest`(ADMIN 이상 / stock_out.admin / 요청자 종결 전). S3 키 `stock-out/<requestId>/<ts>_<원본명>`. 감사 로그 `stock_out_request_file`
+- 화면: ① 프로젝트 상세 '출고요청' 모달(등록) — 비고 아래 '첨부 파일' 블록에 파일을 담아 두고(제거 가능) **생성 직후** 새 요청의 /files로 일괄 업로드(실패 시 alert — 요청은 이미 생성, 상세에서 재첨부 안내) ② 수정 모달 — `StockOutFilesPanel`로 즉시 업로드·삭제 ③ 출고요청 상세 '기본 정보' 카드 하단 '첨부 파일' 섹션(드롭존 + 목록) — `GET /api/stock-out-requests/[id]` 응답 `files[]` 동봉
+
