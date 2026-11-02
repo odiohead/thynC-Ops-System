@@ -16,6 +16,8 @@
 - 검증(dev2): tsc 통과 · `as-receipt-smoke` 94/94(신규 [C-10a] 문제없음·변경, [C-10] 폐기 처리일·잠금 400, [C-10b] 관리자 보정 후 잠금 해제·드로어 폐기 최근 라인) · `smoke-device-registry`는 시작 전제(기기현황 없는 운영 병원 3곳)가 현 dev2 데이터에 없어 실행 불가 — [13] 기대값만 새 규칙으로 갱신 · 빌드·PM2 재시작 후 Playwright: 상세 선택지·문제없음 지정(DB NO_FAULT·기기 REPAIRED·이벤트 메모) → 해제 원복, 회수 라인 폐기 선택지·확인 취소 무변경, 폐기 잠금 배지, 큐 일괄 버튼, 목록 `처리0/6` 확인
 - 영향: `prisma/schema.prisma`·마이그, `lib/asReceiptShared.ts`, `lib/asReceiptService.ts`, `lib/asReceiptQueue.ts`, `lib/asReceiptColumns.ts`, `app/api/as-receipts/{[id]/repair-done,queue/repair-done,[id]/timeline,export,route}.ts`, `app/api/devices/units/[id]/_unitState.ts`, `app/as-receipts/{[id]/page,queue/page,page}.tsx`, `scripts/{as-receipt-smoke,smoke-device-registry}.mts`, README
 - **PROD 미반영** — 반영 시 마이그 SQL(백필 포함, 규칙 5)·빌드·재시작 필요, 협업 서버 무관
+- **PROD 배포 2026-11-02 (181ad59)** — 백업 PROD `~/backups/as_receipt_items_before_repair_result_20261102.dump`. 마이그는 2단계로: ① 빌드 전 컬럼+백필만(옛 코드가 빌드 중 repaired_at만 쓰더라도 CHECK에 걸리지 않게) ② 재시작 후 마이그 SQL 전체 재실행(백필 재확인·CHECK 2종) + `migrate resolve`. 결과 수리 2,376·폐기 1·미처리 13,925, 제약 2종·마이그 기록 확인, 협업 서버 번들 동일(재시작 불필요)
+- **배포 사고**: 첫 빌드가 `ssh 'bash -s' < 스크립트` 안에서 `next build` 시작 직후 멈춤(프로세스 epoll 대기·CPU 0, stdin이 스크립트 파이프) → 빌드가 이미 `.next`를 비운 상태라 **약 21분(12:56~13:17 KST) PROD 옛 서버가 정적 파일·`_error.js` 누락으로 화면 로딩 실패** 가능. 멈춘 빌드 종료 → `nohup … < /dev/null`로 분리 재빌드(약 5분) → 재시작 후 정적 파일 200·신규 오류 없음 확인. 재발 방지: PROD 빌드는 stdin 분리(`< /dev/null`) 독립 프로세스로 실행
 - 후속 검토(같은 날): 사용자 피드백으로 진행 중 라인에도 폐기를 여는 '폐기 판정'(판정만 기록 → 교체 최종확정 시 구기기 자동 폐기)을 dev2에 구현·검증(스모크 101/101)했으나, 기존 흐름(교체 확정 후 구기기 폐기)으로 충분하다는 사용자 결정으로 **되돌림** — 폐기는 교체로 회수된 기기에만 노출(1차 구현 그대로). 되돌린 뒤 스모크·빌드 재확인
 
 ## 2026-11-02 19:10 | 출고요청 첨부 파일 (엑셀 등) — 프로젝트 출고요청 모달·상세
