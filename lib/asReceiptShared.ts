@@ -109,7 +109,28 @@ export function asSerialFormatError(serialNo: string | null | undefined): string
   return isValidAsSerial(serialNo) ? null : `${serialNo ?? ''}: 시리얼 형식 오류 — [시리얼 보정]으로 정상 시리얼(${AS_SERIAL_RULE_TEXT})로 고친 뒤 처리할 수 있습니다`
 }
 
-// ─── 수리완료 체크 (2026-09-17 — device_condition_location_design.md §5.6·§7.2) ───
+// ─── 회수기기 처리 (2026-11-02 — 수리완료 체크박스 → 3택) ───
+// 라인 `repair_result` = 회수된 기기를 어떻게 처리했는가(고객에게 무엇을 해줬는지인 outcome과 별개 축). `repaired_at/by`는 세 값 공통의 처리일·처리자.
+// DB CHECK: (repair_result IS NULL) = (repaired_at IS NULL) — '처리됨' 판정은 repaired_at 유무로 해도 같다(큐·진행도 기존 판정 유지).
+// 기기현황 condition: 수리·문제없음 → REPAIRED(재사용 재고, 문제없음은 이벤트 메모로 구분) / 폐기 → SCRAPPED. 기기 상태를 새로 만들지 않는다.
+export const AS_REPAIR_RESULTS = ['REPAIRED', 'NO_FAULT', 'SCRAPPED'] as const
+export type AsRepairResult = (typeof AS_REPAIR_RESULTS)[number]
+/** 셀·배지용 짧은 표기 */
+export const AS_REPAIR_RESULT_LABELS: Record<AsRepairResult, string> = { REPAIRED: '수리', NO_FAULT: '문제없음', SCRAPPED: '폐기' }
+/** 툴팁·확인창·비고용 긴 표기 */
+export const AS_REPAIR_RESULT_DESC: Record<AsRepairResult, string> = { REPAIRED: '수리완료 (회수기기 수리)', NO_FAULT: '수리완료 (회수기기 문제없음)', SCRAPPED: '폐기' }
+export const AS_REPAIR_RESULT_BADGE_CLS: Record<AsRepairResult, string> = {
+  REPAIRED: 'bg-emerald-50 text-emerald-700',
+  NO_FAULT: 'bg-sky-50 text-sky-700',
+  SCRAPPED: 'bg-gray-200 text-gray-600',
+}
+/** repair-done API·선택지로 고르는 값(폐기는 확인·사유가 필요해 scrap-line 전용 경로) */
+export const AS_SETTABLE_REPAIR_RESULTS = ['REPAIRED', 'NO_FAULT'] as const
+export type AsSettableRepairResult = (typeof AS_SETTABLE_REPAIR_RESULTS)[number]
+export const isAsSettableRepairResult = (v: unknown): v is AsSettableRepairResult => v === 'REPAIRED' || v === 'NO_FAULT'
+export const asRepairResultLabel = (v: string | null | undefined): string => (v && v in AS_REPAIR_RESULT_LABELS ? AS_REPAIR_RESULT_LABELS[v as AsRepairResult] : '')
+
+// ─── 수리완료 체크 (2026-09-17 — device_condition_location_design.md §5.6·§7.2) — 2026-11-02부터 '회수기기 처리' 게이트로 그대로 사용 ───
 /** 결과가 이 집합이면 수리완료 대상이 아니다(분실·취소·미회수) */
 export const AS_REPAIR_EXCLUDED_OUTCOMES: readonly string[] = ['LOST', 'CANCELED', 'NOT_RECEIVED']
 /**
@@ -119,22 +140,34 @@ export const AS_REPAIR_EXCLUDED_OUTCOMES: readonly string[] = ['LOST', 'CANCELED
 export function canMarkAsLineRepaired(item: { intakeState: string | null | undefined; outcome: string | null | undefined }): boolean {
   return item.intakeState === 'RECEIVED' && !AS_REPAIR_EXCLUDED_OUTCOMES.includes(item.outcome ?? '')
 }
-/** 체크박스 비활성 사유 툴팁(§6.1) — 체크 가능하면 null */
+/** 회수기기 처리 비활성 사유 툴팁(§6.1) — 처리 가능하면 null */
 export function asRepairDisabledReason(item: { intakeState: string | null | undefined; outcome: string | null | undefined }): string | null {
   if (canMarkAsLineRepaired(item)) return null
   if (AS_REPAIR_EXCLUDED_OUTCOMES.includes(item.outcome ?? '')) return '분실·취소·미회수 라인'
-  return '입고 후 체크할 수 있습니다'
+  return '입고 후 처리할 수 있습니다'
 }
-/** 수리 진행도 `수리완료 n/m` — m = 체크 가능 라인 수(canMarkAsLineRepaired), n = 그중 repaired_at 있음. m=0이면 표시하지 않는다(호출부) */
-export function summarizeAsRepairProgress(items: { intakeState: string | null | undefined; outcome: string | null | undefined; repairedAt?: string | Date | null }[]): { repaired: number; repairable: number } {
+/**
+ * 회수처리 진행도 `회수처리 n/m` — m = 처리 가능 라인 수(canMarkAsLineRepaired), n = 그중 처리된 라인(repaired_at 있음 — 수리·문제없음·폐기 전부).
+ * `byResult`는 처리값별 내역(툴팁). m=0이면 표시하지 않는다(호출부). 필드명 repaired는 호환 유지(= 처리 완료 수)
+ */
+export function summarizeAsRepairProgress(items: { intakeState: string | null | undefined; outcome: string | null | undefined; repairedAt?: string | Date | null; repairResult?: string | null }[]): { repaired: number; repairable: number; byResult: Record<AsRepairResult, number> } {
   let repaired = 0
   let repairable = 0
+  const byResult: Record<AsRepairResult, number> = { REPAIRED: 0, NO_FAULT: 0, SCRAPPED: 0 }
   for (const i of items) {
     if (!canMarkAsLineRepaired(i)) continue
     repairable++
-    if (i.repairedAt) repaired++
+    if (i.repairedAt) {
+      repaired++
+      const r = (i.repairResult ?? 'REPAIRED') as AsRepairResult // 응답에 repairResult가 없는 구 호출부는 수리로 본다
+      if (r in byResult) byResult[r]++
+    }
   }
-  return { repaired, repairable }
+  return { repaired, repairable, byResult }
+}
+/** 진행도 툴팁 한 줄 — '수리 3 · 문제없음 1 · 폐기 0 / 처리 가능(입고) 라인 5' */
+export function asRepairProgressTitle(p: { repairable: number; byResult: Record<AsRepairResult, number> }): string {
+  return `${AS_REPAIR_RESULTS.map((r) => `${AS_REPAIR_RESULT_LABELS[r]} ${p.byResult[r]}`).join(' · ')} / 처리 가능(입고) 라인 ${p.repairable}`
 }
 /** 접수 비고 이력 최대 길이 — 초과 시 앞부분 절단 */
 export const AS_NOTE_MAX_LENGTH = 5000

@@ -2346,7 +2346,8 @@ model AsReceiptItem {
   shippedAt      DateTime? @map("shipped_at") @db.Date // 발송·교체일 (V열 — 라인 단위 부분 발송)
   draftOutcome   String?   @map("draft_outcome") // 처리방법 초안 (2026-09-14) — 최종확정 전까지 변경 가능, 확정 시 outcome으로 이관 (SQL CHECK)
   draftNewSerialNo String? @map("draft_new_serial_no") // 교체 초안 발송기기 시리얼
-  repairedAt     DateTime? @map("repaired_at") @db.Date // 수리완료 체크 업무일자(2026-09-17) — outcome과 독립인 제3축, 서버가 오늘 KST(B-34)
+  repairResult   String?   @map("repair_result") @db.VarChar(16) // 회수기기 처리(2026-11-02): REPAIRED 수리 / NO_FAULT 문제없음 / SCRAPPED 폐기 — SQL CHECK, (repair_result IS NULL) = (repaired_at IS NULL)
+  repairedAt     DateTime? @map("repaired_at") @db.Date // 회수기기 처리일(2026-11-02부터 3택 공통, 이전엔 수리완료 체크일) — outcome과 독립인 제3축, 서버가 오늘 KST(B-34)
   repairedById   String?   @map("repaired_by_id") // 체크한 사용자
 
   receipt   AsReceipt   @relation(fields: [receiptId], references: [id], onDelete: Cascade)

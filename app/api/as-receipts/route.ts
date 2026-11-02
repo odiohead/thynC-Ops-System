@@ -29,7 +29,7 @@ const listInclude = {
       id: true, serialNo: true, outcome: true, deviceKind: true, intakeState: true, receivedAt: true, shippedAt: true, shipTrackingNo: true, // 입고 대조 (2026-09-11) · 발송일·발송 송장 열 (2026-09-15) · 입고일 열 (2026-09-16)
       wardName: true, // 목록 '병동' 열 (2026-09-29 — 접수 병동 요약)
       newSerialNo: true, shipMethod: true, symptom: true, // 사용자 열(교체기 시리얼·발송방법·접수사유, 2026-10-01)
-      repairedAt: true, // 수리완료 체크 (2026-09-17) — 목록 기기군 배지 `수리 n/m`
+      repairedAt: true, repairResult: true, // 회수기기 처리 (2026-09-17 수리완료 → 2026-11-02 3택) — 목록 기기군 배지 `처리 n/m`
       device: { select: { deviceInfo: { select: { deviceName: true } }, placement: { select: { productType: true } } } }, // 목록 기기별 대수 표기 (CX #1) + 상품유형(일반/라이트, 2026-09-10)
       newDevice: { select: { placement: { select: { productType: true } } } }, // 교체 라인 — 구기기 배치가 회수된 뒤에는 교체기 배치의 상품유형으로 판별
     },

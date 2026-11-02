@@ -59,7 +59,7 @@ export const AS_LIST_COLUMNS: AsListColumnDef[] = [
   // ── 진행·처리 (상세 3번 카드 집계) ──
   { key: 'itemCount', label: '기기 수', width: 72, group: '진행·처리' },
   { key: 'closedCount', label: '종결 수', width: 72, group: '진행·처리' },
-  { key: 'repairProgress', label: '수리완료', width: 90, group: '진행·처리' },
+  { key: 'repairProgress', label: '회수처리', width: 90, group: '진행·처리' }, // 2026-11-02 '수리완료' → 회수기기 처리 3택(수리·문제없음·폐기) 진행도
   { key: 'intakeIssues', label: '입고 대조 이슈', width: 100, group: '진행·처리' },
   { key: 'serials', label: '시리얼', width: 220, group: '진행·처리' },
   { key: 'newSerials', label: '교체기 시리얼', width: 180, group: '진행·처리' },

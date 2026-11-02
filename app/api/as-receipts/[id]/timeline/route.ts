@@ -141,6 +141,15 @@ function summarizeAudit(row: { id: number; action: string; resourceLabel: string
     return { ...base, title: `시리얼 보정 ${str(after.previousSerialNo)} → ${str(after.serialNo)}`, details: [`${st[String(after.state)] ?? ''}${after.modelName ? ` · ${after.modelName}` : ''}`, ...warn].filter(Boolean) }
   }
   // 수리완료 체크·해제·폐기 (2026-09-17 — 기기 상태·위치 축 §6.1) — after { itemId, serialNo, repaired, repairedAt, condition, warnings } / { itemId, serialNo, memo, condition, warnings }
+  // 회수기기 처리 (2026-11-02) — after { serialNo, repairResult, repairResultLabel, repairedAt, condition, warnings }
+  if (suffix === '회수처리') {
+    const details: string[] = []
+    if (after.repairResult && after.repairedAt) details.push(`처리일 ${d10(after.repairedAt)}`)
+    if (after.condition) details.push(`기기 상태 ${deviceConditionLabel(String(after.condition))}`)
+    if (after.via === 'queue-bulk') details.push('수리대기 큐 일괄')
+    const what = after.repairResult ? `회수기기 처리 ${str(after.repairResultLabel)}` : '회수기기 처리 해제'
+    return { ...base, title: `${what} — ${str(after.serialNo)}`, details: [...details, ...warn] }
+  }
   if (suffix === '수리완료' || suffix === '수리완료 해제') {
     const details: string[] = []
     if (suffix === '수리완료' && after.repairedAt) details.push(`수리완료일 ${d10(after.repairedAt)}`)

@@ -3,7 +3,7 @@
 /**
  * AS 수리대기 큐 (2026-09-28 — as_repair_queue_design.md §4) — AS담당자용 기기 단위 화면
  * 버킷 2개(수리 대기 · 입고 예정) × 기기군 세그먼트(심전계 / 산소포화도 / 기타). 라인 1행 = 기기 1대.
- * 수리 대기 행 액션: [수리완료] 체크(단건·선택 일괄) · 처리방법 초안(수리반환/교체+발송기기) · [폐기] — 전부 기존 라인 API 재사용.
+ * 수리 대기 행 액션: 회수기기 처리 선택(수리·문제없음 — 단건·선택 일괄, 폐기 — 회수된 기기 단건만, 2026-11-02 수리완료 체크+[폐기] 통합) · 처리방법 초안(수리반환/교체+발송기기) — 전부 기존 라인 API 재사용.
  * 최종확정·발송정보는 접수 상세에서만(§5.3). 입고 예정은 읽기 전용.
  */
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
@@ -17,6 +17,7 @@ import {
   AS_TAG_LABELS, AS_TAG_BADGE_CLS, type AsTag, AS_OUTCOME_LABELS, type AsOutcome, AS_INTAKE_STATE_LABELS, type AsIntakeState,
   AS_PICKUP_METHOD_LABELS, type AsPickupMethod, AS_CATEGORY_LABELS, type AsCategory,
   AS_LINE_CONDITION_BADGE_CLS, isAsLineConditionBadge, AS_QUEUE_QS_KEY, AS_BACK_KEY, AS_QUEUE_BULK_MAX,
+  AS_REPAIR_RESULT_LABELS, AS_REPAIR_RESULT_DESC, type AsSettableRepairResult,
 } from '@/lib/asReceiptShared'
 import { deviceConditionLabel, deviceSiteLabel } from '@/lib/deviceRegistryShared'
 
@@ -33,6 +34,7 @@ interface QueueItem {
   intakeState: string
   receivedAt: string | null
   repairedAt: string | null
+  repairResult: string | null // 회수기기 처리 (2026-11-02) — 수리 대기 버킷은 전부 NULL
   device: {
     id: number
     deviceInfo: { deviceName: string }
@@ -186,27 +188,27 @@ function QueuePageInner() {
     }
   }
 
-  /** [수리완료] 단건 — 체크 즉시 기록, 다음 조회부터 수리 대기에서 빠짐 */
-  async function markRepaired(item: QueueItem) {
-    const r = await post(`/api/as-receipts/${item.receipt.id}/repair-done`, { itemId: item.id, repaired: true })
-    if (!r.ok) { flash([String(r.data.error ?? '수리완료 처리에 실패했습니다.')]); return }
+  /** 회수기기 처리 단건 (2026-09-28 수리완료 체크 → 2026-11-02 수리/문제없음) — 선택 즉시 기록, 다음 조회부터 수리 대기에서 빠짐 */
+  async function setResult(item: QueueItem, result: AsSettableRepairResult) {
+    const r = await post(`/api/as-receipts/${item.receipt.id}/repair-done`, { itemId: item.id, result })
+    if (!r.ok) { flash([String(r.data.error ?? '회수기기 처리에 실패했습니다.')]); return }
     const warnings = (r.data.warnings as string[] | undefined) ?? []
-    flash([`${item.serialNo} 수리완료 기록됨 (${item.receipt.asCode})`, ...warnings])
+    flash([`${item.serialNo} ${AS_REPAIR_RESULT_DESC[result]} 기록됨 (${item.receipt.asCode})`, ...warnings])
     router.refresh()
     await load()
   }
 
-  /** 선택 라인 수리완료 일괄 */
-  async function bulkRepaired() {
+  /** 선택 라인 회수기기 처리 일괄 — 수리 또는 문제없음 (폐기는 확인·사유가 필요해 단건만) */
+  async function bulkSetResult(result: AsSettableRepairResult) {
     const ids = Array.from(selected)
     if (!ids.length) return
-    if (!confirm(`선택한 ${ids.length}대를 수리완료로 기록합니다. 기기 상태가 '수리완료'로 바뀝니다. 계속할까요?`)) return
-    const r = await post('/api/as-receipts/queue/repair-done', { itemIds: ids })
-    if (!r.ok) { flash([String(r.data.error ?? '일괄 수리완료에 실패했습니다.')]); return }
+    if (!confirm(`선택한 ${ids.length}대를 '${AS_REPAIR_RESULT_DESC[result]}'로 기록합니다. 기기 상태가 '수리완료'로 바뀝니다. 계속할까요?`)) return
+    const r = await post('/api/as-receipts/queue/repair-done', { itemIds: ids, result })
+    if (!r.ok) { flash([String(r.data.error ?? '일괄 회수기기 처리에 실패했습니다.')]); return }
     const skipped = (r.data.skipped as { serialNo: string | null; reason: string }[] | undefined) ?? []
     const warnings = (r.data.warnings as string[] | undefined) ?? []
     flash([
-      `수리완료 ${r.data.updated}대 기록${skipped.length ? ` · 건너뜀 ${skipped.length}대` : ''}`,
+      `${AS_REPAIR_RESULT_LABELS[result]} ${r.data.updated}대 기록${skipped.length ? ` · 건너뜀 ${skipped.length}대` : ''}`,
       ...skipped.map((s) => `${s.serialNo ?? '?'}: ${s.reason}`),
       ...warnings,
     ])
@@ -214,6 +216,7 @@ function QueuePageInner() {
     router.refresh()
     await load()
   }
+
 
   /** 처리방법 초안 — 기기현황에 기록되지 않음, 최종확정은 접수 상세 */
   async function saveDraft(item: QueueItem, outcome: AsOutcome | null, newSerial?: string) {
@@ -226,6 +229,7 @@ function QueuePageInner() {
   }
 
   async function scrapLine(item: QueueItem) {
+    if (!confirm(`${item.serialNo} 기기를 폐기 처리합니다.\n기기 상태가 '폐기'로 기록되고 위치가 지워지며, 회수기기 처리는 '폐기'로 고정됩니다.\n되돌리려면 기기현황에서 관리자 보정이 필요합니다. 계속할까요?`)) return
     const memo = prompt(`${item.serialNo} 폐기 사유를 입력하세요 (필수 — 접수 비고에 기록):`)
     if (memo == null) return
     if (!memo.trim()) { flash(['폐기 사유를 입력하세요.']); return }
@@ -365,9 +369,11 @@ function QueuePageInner() {
         <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
           <span className="font-medium">{selected.size}대 선택</span>
           <span className="text-blue-300">|</span>
-          <button type="button" onClick={() => void bulkRepaired()} disabled={busy || selected.size > AS_QUEUE_BULK_MAX} className="rounded-md bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700 disabled:opacity-50" title={selected.size > AS_QUEUE_BULK_MAX ? `한 번에 최대 ${AS_QUEUE_BULK_MAX}대` : '선택한 기기를 수리완료로 기록 (기기 상태 수리완료 — 단건 체크와 같은 규칙)'}>
-            {busy ? '처리 중…' : `수리완료 ${selected.size}대 적용`}
-          </button>
+          {(['REPAIRED', 'NO_FAULT'] as const).map((r) => (
+            <button key={r} type="button" onClick={() => void bulkSetResult(r)} disabled={busy || selected.size > AS_QUEUE_BULK_MAX} className={`rounded-md px-3 py-1 text-sm text-white disabled:opacity-50 ${r === 'REPAIRED' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-sky-600 hover:bg-sky-700'}`} title={selected.size > AS_QUEUE_BULK_MAX ? `한 번에 최대 ${AS_QUEUE_BULK_MAX}대` : `선택한 기기를 '${AS_REPAIR_RESULT_DESC[r]}'로 기록 (기기 상태 수리완료 — 단건과 같은 규칙)`}>
+              {busy ? '처리 중…' : `${AS_REPAIR_RESULT_LABELS[r]} ${selected.size}대 적용`}
+            </button>
+          ))}
           <button type="button" onClick={() => setSelected(new Set())} disabled={busy} className="ml-auto text-xs text-blue-700 hover:underline">선택 해제</button>
         </div>
       )}
@@ -409,8 +415,7 @@ function QueuePageInner() {
                   {isWaiting && (
                     <>
                       <th className={`${thCls} min-w-[14rem]`}>처리방법</th>
-                      <th className={thCls}>수리완료</th>
-                      <th className={thCls}></th>
+                      <th className={thCls}>회수기기 처리</th>
                     </>
                   )}
                 </tr>
@@ -462,20 +467,24 @@ function QueuePageInner() {
                       {isWaiting && (
                         <>
                           <td className={tdCls}>{outcomeCell(item)}</td>
-                          <td className={`${tdCls} text-center`}>
-                            <input
-                              type="checkbox"
-                              checked={false}
+                          <td className={tdCls}>
+                            <select
+                              value=""
                               disabled={!canWrite || busy}
-                              onChange={() => void markRepaired(item)}
-                              className="h-4 w-4 rounded border-gray-300 text-emerald-600"
-                              title={!canWrite ? '수리완료 체크 권한이 없습니다' : '체크하면 수리완료로 기록되고 이 목록에서 빠집니다 (해제는 접수 상세)'}
-                            />
-                          </td>
-                          <td className={`${tdCls} whitespace-nowrap`}>
-                            {scrappable && (
-                              <button type="button" disabled={busy} onClick={() => void scrapLine(item)} className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-100 hover:text-red-600 disabled:opacity-40" title="회수된 기기를 폐기 처리합니다 (기기 상태 폐기·위치 없음, 사유 필수)">폐기</button>
-                            )}
+                              onChange={(e) => {
+                                const v = e.target.value
+                                if (v === 'SCRAPPED') void scrapLine(item)
+                                else if (v === 'REPAIRED' || v === 'NO_FAULT') void setResult(item, v)
+                              }}
+                              className="rounded-md border border-gray-300 px-1.5 py-1 text-xs disabled:opacity-40"
+                              title={!canWrite ? '회수기기 처리 권한이 없습니다' : `선택하면 기록되고 이 목록에서 빠집니다 (변경·해제는 접수 상세)${scrappable ? ' · 폐기는 사유 필수' : ''}`}
+                              aria-label={`${item.serialNo} 회수기기 처리`}
+                            >
+                              <option value="">선택</option>
+                              <option value="REPAIRED">수리</option>
+                              <option value="NO_FAULT">문제없음</option>
+                              {scrappable && <option value="SCRAPPED">폐기</option>}
+                            </select>
                           </td>
                         </>
                       )}

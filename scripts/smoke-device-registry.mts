@@ -2026,7 +2026,7 @@ async function main() {
     ok(r.status === 409 && String(r.json.error).includes(shared.DEVICE_REPAIR_IN_USE_MESSAGE), "units repair-done 사용중 → 409 '사용중 기기는 수리완료 처리할 수 없습니다'")
     // repair-undo
     r = await call(h(RC2.repairUndo.POST), 'POST', `${B}/api/devices/units/${p2}/repair-undo`, { ...UW, ...idP(p2), body: {} })
-    ok(r.status === 201 && r.json.after.condition === 'AS_WAITING' && r.json.event.eventType === 'CORRECT' && r.json.event.memo === '수리완료 해제' && r.json.lines.updated === 1 && (await lineOf(item2.id)).repairedAt == null && (await noteOf()).includes('[수리완료 해제 '), 'units repair-undo → CORRECT(AS_WAITING)·라인 NULL·비고', r.json)
+    ok(r.status === 201 && r.json.after.condition === 'AS_WAITING' && r.json.event.eventType === 'CORRECT' && r.json.event.memo === '수리완료 해제' && r.json.lines.updated === 1 && (await lineOf(item2.id)).repairedAt == null && (await noteOf()).includes('[회수처리 해제 '), 'units repair-undo → CORRECT(AS_WAITING)·라인 NULL·비고', r.json)
     ok(!!(await auditLabel('hospital_device', P(2), { endsWith: '수리완료 해제' })), "units repair-undo audit 라벨 '… 수리완료 해제'")
     r = await call(h(RC2.repairUndo.POST), 'POST', `${B}/api/devices/units/${p2}/repair-undo`, { ...A, ...idP(p2), body: {} })
     ok(r.status === 409, 'units repair-undo 수리완료 아님 → 409')
@@ -2039,7 +2039,8 @@ async function main() {
     {
       const u = await unitOf(p2)
       const note = await noteOf()
-      ok(u.condition === 'SCRAPPED' && u.locationSiteId == null && u.locationHospitalCode == null && (await lineOf(item2.id)).repairedAt == null && note.includes('[폐기 ') && note.includes('보드 파손'), 'units scrap → 유닛 I-1·라인 repaired_at NULL·비고 [폐기 …] memo')
+      const l2s = await lineOf(item2.id)
+      ok(u.condition === 'SCRAPPED' && u.locationSiteId == null && u.locationHospitalCode == null && l2s.repairResult === 'SCRAPPED' && l2s.repairedAt != null && note.includes('[폐기 ') && note.includes('보드 파손'), 'units scrap → 유닛 I-1·라인 회수기기 처리 폐기+처리일(2026-11-02)·비고 [폐기 …] memo')
     }
     r = await call(h(RC2.scrap.POST), 'POST', `${B}/api/devices/units/${p4}/scrap`, { ...A, ...idP(p4), body: { memo: 'x' } })
     ok(r.status === 409 && String(r.json.error).includes('먼저 회수'), 'units scrap ACTIVE → 409 먼저 회수')
@@ -2108,10 +2109,10 @@ async function main() {
     ok(r.status === 400 && String(r.json.error).includes('분실·취소·미회수'), 'as repair-done LOST 라인 → 400')
     r = await call(h(RC2.asRepairDone.POST), 'POST', `${B}/api/as-receipts/${receipt.id}/repair-done`, { ...UW, ...asP, body: { itemId: item2.id, repaired: true } })
     ok(r.status === 200 && r.json.success === true && r.json.repaired === true && r.json.repairedAt === today && r.json.repairedBy?.id === (realUser?.id ?? null) && r.json.condition === 'REPAIRED' && r.json.warnings.length === 0, 'as repair-done USER → 200 {repaired, repairedAt(오늘 KST), repairedBy, condition REPAIRED}', r.json)
-    ok(!!(await auditLabel('as_receipt', AS_R, { equals: `${AS_R} 수리완료` })), "as repair-done audit 라벨 '{asCode} 수리완료'")
+    ok(!!(await auditLabel('as_receipt', AS_R, { equals: `${AS_R} 회수처리` })), "as repair-done audit 라벨 '{asCode} 회수처리'(2026-11-02)")
     r = await call(h(RC2.asRepairDone.POST), 'POST', `${B}/api/as-receipts/${receipt.id}/repair-done`, { ...UW, ...asP, body: { itemId: item2.id, repaired: false } })
     ok(r.status === 200 && r.json.repaired === false && r.json.repairedAt === null && r.json.condition === 'AS_WAITING' && (await lineOf(item2.id)).repairedAt == null, 'as repair-done 해제 → 라인 NULL·기기 CORRECT AS_WAITING', r.json)
-    ok(!!(await auditLabel('as_receipt', AS_R, { equals: `${AS_R} 수리완료 해제` })), "as repair-done 해제 audit 라벨 '{asCode} 수리완료 해제'")
+    ok(!!(await auditLabel('as_receipt', AS_R, { equals: `${AS_R} 회수처리` })), "as repair-done 해제 audit 라벨 '{asCode} 회수처리'(2026-11-02 — after.repairResult null)")
     r = await call(h(RC2.asDetail.GET), 'GET', `${B}/api/as-receipts/${receipt.id}`, { ...UW, ...asP })
     {
       const it = r.json?.asReceipt?.items?.find((i: { id: number }) => i.id === item2.id)

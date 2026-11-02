@@ -22,7 +22,7 @@ import {
   type RegistryCtx, type UnitStateSnapshot,
 } from '@/lib/deviceRegistry'
 import { syncAsReceiptToTicket, createTicketForAsReceipt } from '@/lib/ticket-domains/asReceipt'
-import { AS_PICKUP_METHODS, defaultAsPickupMethod, AS_OUTCOMES, AS_RESOLVE_OUTCOMES, asResolveOutcomesFor, AS_CATEGORIES, AS_DEST_TYPES, AS_OUTCOME_LABELS, AS_REPAIR_EXCLUDED_OUTCOMES, appendAsNote as appendNote, asDeviceKindFromSerial, canMarkAsLineRepaired, isValidAsSerial, asSerialFormatError, AS_SERIAL_RULE_TEXT, type AsOutcome } from '@/lib/asReceiptShared'
+import { AS_PICKUP_METHODS, defaultAsPickupMethod, AS_OUTCOMES, AS_RESOLVE_OUTCOMES, asResolveOutcomesFor, AS_CATEGORIES, AS_DEST_TYPES, AS_OUTCOME_LABELS, AS_REPAIR_EXCLUDED_OUTCOMES, AS_REPAIR_RESULT_DESC, AS_REPAIR_RESULT_LABELS, type AsRepairResult, type AsSettableRepairResult, appendAsNote as appendNote, asDeviceKindFromSerial, canMarkAsLineRepaired, isValidAsSerial, asSerialFormatError, AS_SERIAL_RULE_TEXT, type AsOutcome } from '@/lib/asReceiptShared'
 import { nextAsCode } from '@/lib/asReceipt'
 import { addTicketEvent } from '@/lib/ticket'
 
@@ -242,7 +242,7 @@ async function reapplyLineState(
   tx: Prisma.TransactionClient,
   receipt: { asCode: string; hospitalCode: string },
   actor: { userId: string | null; name: string | null },
-  line: { serialNo: string; deviceId: number | null; intakeState: string; receivedAt: Date | string | null; repairedAt: Date | string | null; outcome?: string | null }
+  line: { serialNo: string; deviceId: number | null; intakeState: string; receivedAt: Date | string | null; repairedAt: Date | string | null; repairResult?: string | null; outcome?: string | null }
 ): Promise<string[]> {
   const warnings: string[] = []
   if (!line.deviceId || line.intakeState !== 'RECEIVED') return warnings
@@ -254,9 +254,9 @@ async function reapplyLineState(
     if (e instanceof RegistryError) { warnings.push(`${line.serialNo}: 입고 재적용 실패 — ${e.message}`); return warnings }
     throw e
   }
-  if (line.repairedAt) {
+  if (line.repairedAt && line.repairResult !== 'SCRAPPED') { // 폐기 라인은 기기 수리완료로 재적용하지 않는다(2026-11-02) — repairResult 없는 구 호출부는 수리로 본다
     try {
-      await markDeviceRepaired(asCtx(receipt, actor, ymd(line.repairedAt) ?? today), { deviceId: line.deviceId }, { client: tx })
+      await markDeviceRepaired(asCtx(receipt, actor, ymd(line.repairedAt) ?? today, line.repairResult === 'NO_FAULT' ? '문제없음 (회수기기 이상 없음)' : null), { deviceId: line.deviceId }, { client: tx })
     } catch (e) {
       if (e instanceof RegistryError) warnings.push(`${line.serialNo}: 수리완료 재적용 실패 — ${e.message}`)
       else throw e
@@ -345,11 +345,11 @@ export async function applyItemChanges(
 
   // 제거 (미종결) — IN_USE 복귀(실물 이동 근거 없음 → 병원, 게이트·플래그 소유 판정은 setUnitInUse). 병원 변경 시 미종결 라인 전부 대상(재추가 전제)
   // 병원 변경 재생성 라인은 입고·수리완료 기록을 보존해 새 매칭 기기에 재적용한다(§7.3 — 기존 유실 결함 동반 수정)
-  const carried = new Map<string, { intakeState: string; receivedAt: Date | null; receiptSerialNo: string | null; intakeSource: string; repairedAt: Date | null; repairedById: string | null }>()
+  const carried = new Map<string, { intakeState: string; receivedAt: Date | null; receiptSerialNo: string | null; intakeSource: string; repairResult: string | null; repairedAt: Date | null; repairedById: string | null }>()
   for (const item of existing) {
     if (seen.has(item.serialNo) && !(hospitalChanged && !item.outcome)) continue
     if (hospitalChanged && !item.outcome && seen.has(item.serialNo)) {
-      carried.set(item.serialNo, { intakeState: item.intakeState, receivedAt: item.receivedAt, receiptSerialNo: item.receiptSerialNo, intakeSource: item.intakeSource, repairedAt: item.repairedAt, repairedById: item.repairedById })
+      carried.set(item.serialNo, { intakeState: item.intakeState, receivedAt: item.receivedAt, receiptSerialNo: item.receiptSerialNo, intakeSource: item.intakeSource, repairResult: item.repairResult, repairedAt: item.repairedAt, repairedById: item.repairedById })
     }
     if (item.deviceId) {
       warnings.push(...(await setUnitInUse(tx, clearCtx, item.deviceId, { locationToHospital: true, memo: `라인 제거 ${receipt.asCode}` })))
@@ -361,7 +361,7 @@ export async function applyItemChanges(
   const addedKeys = nextKeys.filter((k) => !byKey.has(k))
   const matches = addedKeys.length ? await matchSerials(tx, receipt.hospitalCode, addedKeys) : []
   const flagTargets: FlagTarget[] = []
-  const reapply: { serialNo: string; deviceId: number | null; intakeState: string; receivedAt: Date | null; repairedAt: Date | null }[] = []
+  const reapply: { serialNo: string; deviceId: number | null; intakeState: string; receivedAt: Date | null; repairedAt: Date | null; repairResult: string | null }[] = []
   for (const m of matches) {
     const line = inputByKey.get(m.serialNo)!
     const w = matchWarning(m)
@@ -376,11 +376,11 @@ export async function applyItemChanges(
         wardName: line.wardName?.trim() || m.wardName,
         symptom: line.symptom?.trim() || null,
         processNote: line.processNote?.trim() || null,
-        ...(keep ? { intakeState: keep.intakeState, receivedAt: keep.receivedAt, receiptSerialNo: keep.receiptSerialNo, intakeSource: keep.intakeSource, repairedAt: keep.repairedAt, repairedById: keep.repairedById } : {}),
+        ...(keep ? { intakeState: keep.intakeState, receivedAt: keep.receivedAt, receiptSerialNo: keep.receiptSerialNo, intakeSource: keep.intakeSource, repairResult: keep.repairResult, repairedAt: keep.repairedAt, repairedById: keep.repairedById } : {}),
       },
     })
     if (m.state === 'ACTIVE_HERE' && !m.asOpen) flagTargets.push({ serialNo: m.serialNo, deviceId: m.deviceId! })
-    if (keep) reapply.push({ serialNo: m.serialNo, deviceId: m.deviceId, intakeState: keep.intakeState, receivedAt: keep.receivedAt, repairedAt: keep.repairedAt })
+    if (keep) reapply.push({ serialNo: m.serialNo, deviceId: m.deviceId, intakeState: keep.intakeState, receivedAt: keep.receivedAt, repairedAt: keep.repairedAt, repairResult: keep.repairResult })
   }
   warnings.push(...(await openAsFlags(tx, receipt, flagTargets, actor, ymd(receipt.receiptDate) ?? today)))
   for (const r of reapply) warnings.push(...(await reapplyLineState(tx, receipt, actor, r)))
@@ -522,9 +522,10 @@ export async function resolveAsLines(
 
         // 체크된 라인이 분실·취소로 확정되면 수리완료 해제 — n/m의 n이 m 집합 밖에 남지 않게(§7.3). 기기 condition은 아래 분기가 정한다
         if (item.repairedAt && (l.outcome === 'LOST' || l.outcome === 'CANCELED')) {
+          data.repairResult = null
           data.repairedAt = null
           data.repairedById = null
-          history.push(`${item.serialNo} 수리완료 해제 (${AS_OUTCOME_LABELS[l.outcome]} 확정)`)
+          history.push(`${item.serialNo} 회수처리 해제 (${AS_OUTCOME_LABELS[l.outcome]} 확정)`)
         }
 
         let lineWritten = false
@@ -853,8 +854,8 @@ export async function confirmAsIntake(receiptId: number, actor: { userId: string
         // 실물 이동 근거 없음 → IN_USE·병원(게이트 통과 시 — 플래그 소유면 AS_CLEAR, 아니면 CORRECT 폴백)
         if (item.deviceId) warnings.push(...(await setUnitInUse(tx, ctx, item.deviceId, { locationToHospital: true, memo: `미회수 확정 ${receipt.asCode}` })))
         // 미입고 라인은 수리완료 체크 불가(D5)지만 방어적으로 해제 — n/m 정합
-        await tx.asReceiptItem.update({ where: { id: item.id }, data: { outcome: 'NOT_RECEIVED', processNote: comment, ...(item.repairedAt ? { repairedAt: null, repairedById: null } : {}) } })
-        history = `${item.serialNo} 미회수 종결 — ${comment}${item.repairedAt ? ' (수리완료 해제)' : ''}`
+        await tx.asReceiptItem.update({ where: { id: item.id }, data: { outcome: 'NOT_RECEIVED', processNote: comment, ...(item.repairedAt ? { repairResult: null, repairedAt: null, repairedById: null } : {}) } })
+        history = `${item.serialNo} 미회수 종결 — ${comment}${item.repairedAt ? ' (회수처리 해제)' : ''}`
         break
       }
       case 'ACCEPT_EXTRA': {
@@ -996,14 +997,17 @@ export async function correctAsLineSerial(receiptId: number, actor: { userId: st
   }, { timeout: 60000, maxWait: 10000 })
 }
 
-// ── 수리완료 체크 · 폐기 (2026-09-17 — device_condition_location_design.md §7.1·§7.2) ─────────
+// ── 회수기기 처리: 수리 · 문제없음 · 폐기 (2026-09-17 수리완료 체크 → 2026-11-02 3택, device_condition_location_design.md §7.1·§7.2) ─────────
+// 라인 repair_result(REPAIRED/NO_FAULT/SCRAPPED) + repaired_at/by(처리일·처리자, DB CHECK로 짝 강제). 수리·문제없음은 기기 REPAIRED, 폐기는 SCRAPPED(scrapAsLineDevice).
 // 수리완료는 outcome·헤더 전이·완료 판정에 개입하지 않는 제3축(라인 repaired_at + 기기 condition REPAIRED). 게이트는 라인 단위 — 접수 상태 무관(종결 접수 허용, A-2).
 // 이 함수들은 outcome·draft_*·헤더 상태·advanceToShippedDone·completeAsReceipt·reopen을 절대 건드리지 않는다.
 
 export interface RepairDoneResult {
   itemId: number
   serialNo: string
+  /** 처리 결과(수리·문제없음) 여부 — 호환 필드(= repairResult != null) */
   repaired: boolean
+  repairResult: AsSettableRepairResult | null
   repairedAt: string | null
   repairedBy: { id: string; name: string | null } | null
   /** 기기 상태(원장 연결 라인만) */
@@ -1023,36 +1027,45 @@ async function requireRepairableLine(tx: Prisma.TransactionClient, receiptId: nu
 }
 
 /**
- * 수리완료 체크/해제 — `repaired=true`: repaired_at(오늘 KST, B-34)/by 기록 + `markDeviceRepaired`(AS_WAITING/NULL → REPAIRED, IN_USE는 경고 '이미 사용중')
- * `repaired=false`: repaired_at/by NULL + 기기 REPAIRED면 `undoDeviceRepaired`(CORRECT → AS_WAITING), 아니면 경고. 미등록 라인은 라인만 기록 + 경고(원장 확정 시 재적용).
- * 원장 RegistryError는 경고 흡수(유닛 쓰기 전 409만) — 단 **낙관 가드 409(동시 변경)는 전파**(tx 롤백 → 라우트 409 '다시 시도', §7.4: 라인만 커밋되고 기기 미반영인 반쪽 상태 방지).
- * 비고 이력 `[수리완료 …]`/`[수리완료 해제 …]`는 라인 또는 기기가 실제로 바뀐 호출에만(재체크 멱등 — 줄 누적 방지). (P2 리뷰 2026-09-17)
+ * 회수기기 처리(수리·문제없음) 지정/변경/해제 (2026-11-02 — 수리완료 체크/해제 확장).
+ * - `result` 지정: repair_result + repaired_at(오늘 KST, B-34)/by 기록(같은 값 재지정은 일자·사용자 유지 — 멱등, 수리↔문제없음 변경은 새 결정이라 오늘·현재 사용자) +
+ *   `markDeviceRepaired`(AS_WAITING/NULL → REPAIRED, IN_USE는 경고 '이미 사용중'). 문제없음은 기기 이벤트 메모 '문제없음'으로 구분(기기 상태 신설 없음).
+ * - `result=null` 해제: repair_result·repaired_at/by NULL + 기기 REPAIRED면 `undoDeviceRepaired`(CORRECT → AS_WAITING), 아니면 경고.
+ * - 폐기된 라인(SCRAPPED)은 이 함수로 바꿀 수 없다(400) — 되돌리기는 기기현황 관리자 보정. 미등록 라인은 라인만 기록 + 경고(원장 확정 시 재적용).
+ * 원장 RegistryError는 경고 흡수(유닛 쓰기 전 409만) — 단 **낙관 가드 409(동시 변경)는 전파**(tx 롤백 → 라우트 409 '다시 시도', §7.4).
+ * 비고 이력은 라인 또는 기기가 실제로 바뀐 호출에만(재지정 멱등 — 줄 누적 방지).
  */
-export async function setAsLineRepaired(receiptId: number, actor: { userId: string; name: string | null }, input: { itemId: number; repaired: boolean }): Promise<RepairDoneResult> {
+export async function setAsLineRepairResult(receiptId: number, actor: { userId: string; name: string | null }, input: { itemId: number; result: AsSettableRepairResult | null }): Promise<RepairDoneResult> {
   if (!Number.isInteger(input.itemId)) throw new AsServiceError(400, '라인이 올바르지 않습니다.')
+  if (input.result !== null && input.result !== 'REPAIRED' && input.result !== 'NO_FAULT') throw new AsServiceError(400, '회수기기 처리 값이 올바르지 않습니다 (수리/문제없음 — 폐기는 [폐기] 경로)')
   return prisma.$transaction(async (tx) => {
     const receipt = await tx.asReceipt.findUnique({ where: { id: receiptId }, select: { id: true, asCode: true, hospitalCode: true, note: true } })
     if (!receipt) throw new AsServiceError(404, 'AS접수를 찾을 수 없습니다.')
-    const item = await requireRepairableLine(tx, receiptId, input.itemId, '수리완료')
+    const item = await requireRepairableLine(tx, receiptId, input.itemId, '회수기기 처리')
+    if (item.repairResult === 'SCRAPPED') {
+      // 폐기 잠금 — 기기가 아직 폐기 상태면 변경 불가. 기기현황 관리자 보정으로 폐기를 해제한 뒤에는 라인도 다시 처리할 수 있다
+      const unit = item.deviceId ? await tx.deviceUnit.findUnique({ where: { id: item.deviceId }, select: { condition: true } }) : null
+      if (!unit || unit.condition === 'SCRAPPED') throw new AsServiceError(400, `${item.serialNo}: 폐기된 라인은 처리값을 바꿀 수 없습니다 — 기기현황에서 관리자 보정으로 폐기를 해제한 뒤 변경하세요`)
+    }
     const warnings: string[] = []
     const today = todayKst()
     let condition: string | null = null
-    const label = input.repaired ? '수리완료' : '수리완료 해제'
-    let lineChanged = false // 라인 repaired_at/by 변경 여부
-    let deviceChanged = false // 기기 이벤트 기록 여부 — 둘 다 아니면 비고 무기록(재체크 멱등)
+    const prev = (item.repairResult ?? null) as AsRepairResult | null
+    const label = input.result ? AS_REPAIR_RESULT_DESC[input.result] : '회수처리 해제'
+    let lineChanged = false // 라인 repair_result/repaired_at 변경 여부
+    let deviceChanged = false // 기기 이벤트 기록 여부 — 둘 다 아니면 비고 무기록(재지정 멱등)
     /** 낙관 가드 409(동시 변경)는 경고로 삼키지 않고 전파 — tx 롤백 → 라우트 409 '동시에 변경되어 다시 시도하세요'(§7.4) */
     const rethrowIfConcurrent = (e: RegistryError) => { if (e.message.includes(DEVICE_CONCURRENT_CHANGE_MESSAGE)) throw e }
 
-    if (input.repaired) {
-      // 이미 체크된 라인은 일자·사용자 유지(멱등), 기기 상태만 재확인
-      if (!item.repairedAt) {
-        await tx.asReceiptItem.update({ where: { id: item.id }, data: { repairedAt: new Date(today), repairedById: actor.userId } })
+    if (input.result) {
+      if (prev !== input.result) {
+        await tx.asReceiptItem.update({ where: { id: item.id }, data: { repairResult: input.result, repairedAt: new Date(today), repairedById: actor.userId } })
         lineChanged = true
       }
       if (!item.deviceId) warnings.push(`${item.serialNo}: 미등록 라인 — 기기 상태는 기록되지 않았습니다(원장 확정 시 재적용)`)
       else {
         try {
-          const r = await markDeviceRepaired(asCtx(receipt, actor, today), { deviceId: item.deviceId }, { client: tx })
+          const r = await markDeviceRepaired(asCtx(receipt, actor, today, input.result === 'NO_FAULT' ? '문제없음 (회수기기 이상 없음)' : null), { deviceId: item.deviceId }, { client: tx })
           condition = r.unit.condition
           deviceChanged = r.changed
           warnings.push(...r.warnings)
@@ -1061,18 +1074,18 @@ export async function setAsLineRepaired(receiptId: number, actor: { userId: stri
           rethrowIfConcurrent(e)
           const cur = await tx.deviceUnit.findUnique({ where: { id: item.deviceId }, select: { condition: true } })
           condition = cur?.condition ?? null
-          warnings.push(e.message.includes(DEVICE_REPAIR_IN_USE_MESSAGE) ? `${item.serialNo}: 기기는 이미 사용중(반환 확정) — 라인에만 수리완료를 기록했습니다` : `${item.serialNo}: 기기 상태 기록 실패 — ${e.message}`)
+          warnings.push(e.message.includes(DEVICE_REPAIR_IN_USE_MESSAGE) ? `${item.serialNo}: 기기는 이미 사용중(반환 확정) — 라인에만 ${AS_REPAIR_RESULT_LABELS[input.result]}을(를) 기록했습니다` : `${item.serialNo}: 기기 상태 기록 실패 — ${e.message}`)
         }
       }
     } else {
-      if (item.repairedAt) {
-        await tx.asReceiptItem.update({ where: { id: item.id }, data: { repairedAt: null, repairedById: null } })
+      if (item.repairedAt || prev) {
+        await tx.asReceiptItem.update({ where: { id: item.id }, data: { repairResult: null, repairedAt: null, repairedById: null } })
         lineChanged = true
       }
       if (!item.deviceId) warnings.push(`${item.serialNo}: 미등록 라인 — 기기 상태는 바꾸지 않았습니다`)
       else {
         try {
-          const r = await undoDeviceRepaired(asCtx(receipt, actor, today, '수리완료 해제'), { deviceId: item.deviceId }, { client: tx })
+          const r = await undoDeviceRepaired(asCtx(receipt, actor, today, '수리완료 해제'), { deviceId: item.deviceId }, { client: tx }) // 기기 이벤트 메모는 기기 관점 문구 유지(드로어 경로와 동일)
           condition = r.unit.condition
           deviceChanged = r.changed
           warnings.push(...r.warnings)
@@ -1086,24 +1099,34 @@ export async function setAsLineRepaired(receiptId: number, actor: { userId: stri
       }
     }
     if (lineChanged || deviceChanged) {
-      await tx.asReceipt.update({ where: { id: receipt.id }, data: { note: appendNote(receipt.note, `[${label} ${today} ${actor.name ?? ''}] ${item.serialNo}`) } })
+      const change = lineChanged && prev && input.result && prev !== input.result ? ` (${AS_REPAIR_RESULT_LABELS[prev]} → ${AS_REPAIR_RESULT_LABELS[input.result]})` : ''
+      await tx.asReceipt.update({ where: { id: receipt.id }, data: { note: appendNote(receipt.note, `[${label} ${today} ${actor.name ?? ''}] ${item.serialNo}${change}`) } })
     } else if (!warnings.length) warnings.push(`${item.serialNo}: 변경 사항 없음 — 이미 ${label} 상태입니다`)
-    const after = await tx.asReceiptItem.findUnique({ where: { id: item.id }, select: { repairedAt: true, repairedBy: { select: { id: true, name: true } } } })
-    return { itemId: item.id, serialNo: item.serialNo, repaired: input.repaired, repairedAt: ymd(after?.repairedAt), repairedBy: after?.repairedBy ?? null, condition, warnings }
+    const after = await tx.asReceiptItem.findUnique({ where: { id: item.id }, select: { repairResult: true, repairedAt: true, repairedBy: { select: { id: true, name: true } } } })
+    const res = (after?.repairResult ?? null) as AsSettableRepairResult | null
+    return { itemId: item.id, serialNo: item.serialNo, repaired: !!res, repairResult: res, repairedAt: ymd(after?.repairedAt), repairedBy: after?.repairedBy ?? null, condition, warnings }
   }, { timeout: 60000, maxWait: 10000 })
+}
+
+/** 수리완료 체크/해제 (2026-09-17 원형 — 호환 래퍼): repaired=true → 수리(REPAIRED), false → 해제. 스모크·구 클라이언트용 */
+export async function setAsLineRepaired(receiptId: number, actor: { userId: string; name: string | null }, input: { itemId: number; repaired: boolean }): Promise<RepairDoneResult> {
+  return setAsLineRepairResult(receiptId, actor, { itemId: input.itemId, result: input.repaired ? 'REPAIRED' : null })
 }
 
 export interface ScrapLineResult {
   itemId: number
   serialNo: string
+  repairResult: 'SCRAPPED'
+  repairedAt: string | null
   condition: string | null
   warnings: string[]
 }
 
 /**
  * 라인 기기 폐기(SCRAP) — 소속·`canMarkAsLineRepaired`·deviceId 필수(미등록 400)·condition ∉ {LOST, SCRAPPED}(400)·**memo 필수(400, A-5 완화책)**
- * → `scrapDevice`(배치 ACTIVE는 409 '배치 중 기기는 먼저 회수하세요' — 전파; 배치 행 없는 유닛(REGISTER 취소 등)은 허용 — §7.1) → 라인 repaired_at/by NULL → 비고 `[폐기 …] memo`.
+ * → `scrapDevice`(배치 ACTIVE는 409 '배치 중 기기는 먼저 회수하세요' — 전파; 배치 행 없는 유닛(REGISTER 취소 등)은 허용 — §7.1) → 라인 repair_result SCRAPPED + 처리일·처리자(2026-11-02, 이전엔 repaired_at NULL) → 비고 `[폐기 …] memo`.
  * 권한(!VIEWER)은 라우트. UI [폐기]는 `placement.status==='RECOVERED'`일 때만 노출(§6.1) — 배치 없음은 화면에서 도달하지 않는 서버 허용 집합.
+ * 진행 중 라인(병원 배치 중) '폐기 판정'은 2026-11-02 검토 후 제외 — 폐기는 교체 최종확정으로 구기기가 회수된 뒤 이 경로로.
  */
 export async function scrapAsLineDevice(receiptId: number, actor: { userId: string; name: string | null }, input: { itemId: number; memo: string }): Promise<ScrapLineResult> {
   if (!Number.isInteger(input.itemId)) throw new AsServiceError(400, '라인이 올바르지 않습니다.')
@@ -1118,9 +1141,10 @@ export async function scrapAsLineDevice(receiptId: number, actor: { userId: stri
     if (unit?.condition === 'LOST' || unit?.condition === 'SCRAPPED') throw new AsServiceError(400, `${item.serialNo}: 기기 상태 ${deviceConditionLabel(unit.condition)} — 폐기 대상이 아닙니다`)
     const today = todayKst()
     const r = await scrapDevice(asCtx(receipt, actor, today, memo), { deviceId: item.deviceId, memo }, { client: tx }) // RegistryError(ACTIVE 409 등)는 전파
-    if (item.repairedAt) await tx.asReceiptItem.update({ where: { id: item.id }, data: { repairedAt: null, repairedById: null } })
-    await tx.asReceipt.update({ where: { id: receipt.id }, data: { note: appendNote(receipt.note, `[폐기 ${today} ${actor.name ?? ''}] ${item.serialNo}${item.repairedAt ? ' (수리완료 해제)' : ''} — ${memo}`) } })
-    return { itemId: item.id, serialNo: item.serialNo, condition: r.unit.condition, warnings: r.warnings }
+    const prev = (item.repairResult ?? null) as AsRepairResult | null
+    await tx.asReceiptItem.update({ where: { id: item.id }, data: { repairResult: 'SCRAPPED', repairedAt: new Date(today), repairedById: actor.userId } })
+    await tx.asReceipt.update({ where: { id: receipt.id }, data: { note: appendNote(receipt.note, `[폐기 ${today} ${actor.name ?? ''}] ${item.serialNo}${prev ? ` (${AS_REPAIR_RESULT_LABELS[prev]} → 폐기)` : ''} — ${memo}`) } })
+    return { itemId: item.id, serialNo: item.serialNo, repairResult: 'SCRAPPED', repairedAt: today, condition: r.unit.condition, warnings: r.warnings }
   }, { timeout: 60000, maxWait: 10000 })
 }
 

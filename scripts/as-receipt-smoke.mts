@@ -28,9 +28,11 @@ import { nextAsCode, canEditAsReceipt } from '../lib/asReceipt'
 import { appendAsNote, summarizeAsItems } from '../lib/asReceiptShared'
 import {
   matchSerials, matchWarning, openAsFlags, resolveAsLines, applyItemChanges, AsServiceError, completeAsReceipt,
-  intakeAsLines, confirmAsIntake, confirmAsRegistry, correctAsLineSerial, setAsLineRepaired, scrapAsLineDevice, setUnitInUse,
+  intakeAsLines, confirmAsIntake, confirmAsRegistry, correctAsLineSerial, setAsLineRepaired, setAsLineRepairResult, scrapAsLineDevice, setUnitInUse,
 } from '../lib/asReceiptService'
-import { registerDevices } from '../lib/deviceRegistry/write'
+import { registerDevices, correctDevice } from '../lib/deviceRegistry/write'
+import { scrapDevice } from '../lib/deviceRegistry/condition'
+import { syncAsLinesForUnitState } from '../app/api/devices/units/[id]/_unitState'
 import { moveDeviceLocation } from '../lib/deviceRegistry/condition'
 import { RegistryError } from '../lib/deviceRegistry/core'
 import { REGISTRY_REF_TYPES, refLink, todayKst, unitStateChangesOf } from '../lib/deviceRegistryShared'
@@ -495,7 +497,7 @@ async function main() {
     u7 = await unitOf(D7); ev = await lastEvent(u7!.id)
     const line7b = await prisma.asReceiptItem.findUnique({ where: { id: i7b } })
     check("[C-7] 수리완료 해제 → CORRECT(REPAIRED→AS_WAITING, memo '수리완료 해제', ref AS) + 라인 repaired_at NULL + 비고",
-      !rd7.repaired && rd7.warnings.length === 0 && line7b?.repairedAt === null && u7?.condition === 'AS_WAITING' && ev?.eventType === 'CORRECT' && condBefore(ev) === 'REPAIRED' && condAfter(ev) === 'AS_WAITING' && ev.memo === '수리완료 해제' && ev.refCode === R7b.asCode && (await noteOf(R7b.id)).includes('[수리완료 해제 '),
+      !rd7.repaired && rd7.warnings.length === 0 && line7b?.repairedAt === null && u7?.condition === 'AS_WAITING' && ev?.eventType === 'CORRECT' && condBefore(ev) === 'REPAIRED' && condAfter(ev) === 'AS_WAITING' && ev.memo === '수리완료 해제' && ev.refCode === R7b.asCode && line7b?.repairResult === null && (await noteOf(R7b.id)).includes('[회수처리 해제 '), // 2026-11-02 비고 문구 '회수처리 해제'(기기 이벤트 메모는 '수리완료 해제' 유지)
       JSON.stringify({ rd7, u7, ev }))
 
     // [C-8] 체크된 라인 취소 → repaired_at NULL·비고 + 사용중·위치 센터 유지(I-4 예외) → 취소 라인 체크 400 → [병원 반환]
@@ -507,7 +509,7 @@ async function main() {
     let u8 = await unitOf(D8); ev = await lastEvent(u8!.id)
     const line8 = await prisma.asReceiptItem.findUnique({ where: { id: i8 } })
     check('[C-8] 체크된 라인 취소 → repaired_at NULL·비고 + 사용중·위치 센터 유지(AS_CLEAR, 플래그 해제, 경고 없음)',
-      line8?.outcome === 'CANCELED' && line8?.repairedAt === null && (await noteOf(R8.id)).includes('수리완료 해제') && u8?.condition === 'IN_USE' && atCenter(u8) && ev?.eventType === 'AS_CLEAR' && u8?.placement?.asStartedOn === null && res8.warnings.length === 0,
+      line8?.outcome === 'CANCELED' && line8?.repairedAt === null && line8?.repairResult === null && (await noteOf(R8.id)).includes('회수처리 해제') && u8?.condition === 'IN_USE' && atCenter(u8) && ev?.eventType === 'AS_CLEAR' && u8?.placement?.asStartedOn === null && res8.warnings.length === 0,
       JSON.stringify({ w: res8.warnings, u8, ev: ev?.eventType, line8: line8?.repairedAt }))
     check('[C-8] 취소 라인 수리완료 체크 → 400', (await errStatus(() => setAsLineRepaired(R8.id, actor, { itemId: i8, repaired: true }))) === 400)
     await moveDeviceLocation({ hospitalCode, actor, occurredOn: todayKst(), source: 'MANUAL' }, { deviceId: u8!.id, to: 'HOSPITAL' })
@@ -539,10 +541,39 @@ async function main() {
     check('[C-10] 분실 라인 폐기 → 400', (await errStatus(() => scrapAsLineDevice(R10.id, actor, { itemId: i10, memo: '스모크' }))) === 400)
     check("[C-10] 배치 중 기기 폐기 → 409 '먼저 회수'", (await errStatus(() => scrapAsLineDevice(R2.id, actor, { itemId: i2, memo: '스모크' }))) === 409)
     check('[C-10] memo 없는 폐기 → 400', (await errStatus(() => scrapAsLineDevice(R7b.id, actor, { itemId: i7b, memo: '  ' }))) === 400)
+    // [C-10a] 회수기기 처리 3택 (2026-11-02): 문제없음 → 기기 수리완료(REPAIR_DONE memo '문제없음…') · 수리로 변경 → 라인만(기기 이벤트 없음)·비고 '(문제없음 → 수리)'
+    const nf7 = await setAsLineRepairResult(R7b.id, actor, { itemId: i7b, result: 'NO_FAULT' })
+    u7 = await unitOf(D7); ev = await lastEvent(u7!.id)
+    const line7n = await prisma.asReceiptItem.findUnique({ where: { id: i7b } })
+    check("[C-10a] 문제없음 → 라인 NO_FAULT·처리일 + 기기 수리완료(REPAIR_DONE, memo '문제없음')",
+      nf7.repairResult === 'NO_FAULT' && nf7.repaired && line7n?.repairResult === 'NO_FAULT' && !!line7n?.repairedAt && u7?.condition === 'REPAIRED' && ev?.eventType === 'REPAIR_DONE' && String(ev?.memo ?? '').startsWith('문제없음') && (await noteOf(R7b.id)).includes('[수리완료 (회수기기 문제없음) '),
+      JSON.stringify({ nf7, line7n, ev }))
+    const evCount7 = await eventCount(u7!.id)
+    const rp7 = await setAsLineRepairResult(R7b.id, actor, { itemId: i7b, result: 'REPAIRED' })
+    check('[C-10a] 문제없음 → 수리 변경 → 라인만 변경(기기 이벤트 없음) + 비고 (문제없음 → 수리)',
+      rp7.repairResult === 'REPAIRED' && (await eventCount(u7!.id)) === evCount7 && (await noteOf(R7b.id)).includes('(문제없음 → 수리)'), JSON.stringify(rp7))
+    check('[C-10a] 잘못된 처리값 → 400', (await errStatus(() => setAsLineRepairResult(R7b.id, actor, { itemId: i7b, result: 'SCRAPPED' as never }))) === 400)
     const sc7 = await scrapAsLineDevice(R7b.id, actor, { itemId: i7b, memo: '스모크 폐기' })
     u7 = await unitOf(D7); ev = await lastEvent(u7!.id)
-    check('[C-10] 회수 기기 폐기 → SCRAPPED·위치 없음 + SCRAP(memo, ref AS) + 비고', sc7.condition === 'SCRAPPED' && u7?.condition === 'SCRAPPED' && u7?.locationSiteId == null && u7?.locationHospitalCode == null && ev?.eventType === 'SCRAP' && ev.memo === '스모크 폐기' && ev.refCode === R7b.asCode && (await noteOf(R7b.id)).includes('[폐기 '), JSON.stringify({ sc7, u7, ev }))
-    check('[C-10] 폐기 후 재체크 → 라인 기록 + 경고(폐기 기기)', await (async () => { const r = await setAsLineRepaired(R7b.id, actor, { itemId: i7b, repaired: true }); return r.repaired && r.condition === 'SCRAPPED' && r.warnings.length === 1 })())
+    check('[C-10] 회수 기기 폐기 → SCRAPPED·위치 없음 + SCRAP(memo, ref AS) + 비고', sc7.condition === 'SCRAPPED' && u7?.condition === 'SCRAPPED' && u7?.locationSiteId == null && u7?.locationHospitalCode == null && ev?.eventType === 'SCRAP' && ev.memo === '스모크 폐기' && ev.refCode === R7b.asCode && (await noteOf(R7b.id)).includes('[폐기 ') && (await noteOf(R7b.id)).includes('(수리 → 폐기)'), JSON.stringify({ sc7, u7, ev }))
+    // 2026-11-02 회수기기 처리 3택: 폐기 라인은 처리값 SCRAPPED + 처리일 기록(이전엔 repaired_at NULL), 이후 수리·문제없음·해제로 바꿀 수 없다(400 — 관리자 보정 경로)
+    const line7s = await prisma.asReceiptItem.findUnique({ where: { id: i7b } })
+    check('[C-10] 폐기 → 라인 처리값 SCRAPPED + 처리일 오늘', line7s?.repairResult === 'SCRAPPED' && line7s?.repairedAt?.toISOString().slice(0, 10) === todayKst() && sc7.repairResult === 'SCRAPPED', JSON.stringify(line7s))
+    check('[C-10] 폐기 라인 재처리(수리) → 400', (await errStatus(() => setAsLineRepaired(R7b.id, actor, { itemId: i7b, repaired: true }))) === 400)
+    check('[C-10] 폐기 라인 해제 → 400', (await errStatus(() => setAsLineRepairResult(R7b.id, actor, { itemId: i7b, result: null }))) === 400)
+    check('[C-10] 폐기 라인 재폐기 → 400', (await errStatus(() => scrapAsLineDevice(R7b.id, actor, { itemId: i7b, memo: '재폐기' }))) === 400)
+    // [C-10b] 관리자 보정으로 폐기 해제 → 라인 잠금 해제(문제없음 지정 가능) → 기기현황 드로어 폐기(라우트와 같은 tx: scrapDevice + 라인 동기화) → 최근 라인 폐기 기록 (2026-11-02)
+    await correctDevice({ hospitalCode: null, actor, occurredOn: todayKst(), source: 'MANUAL', memo: '[SMOKE] 폐기 보정' }, { deviceId: u7!.id, changes: { condition: 'REPAIRED', location: { kind: 'SITE', code: 'REFRESH_CENTER' } } })
+    const un7 = await setAsLineRepairResult(R7b.id, actor, { itemId: i7b, result: 'NO_FAULT' })
+    check('[C-10b] 관리자 보정(폐기 해제) 후 → 라인 문제없음 지정 가능', un7.repairResult === 'NO_FAULT' && (await prisma.asReceiptItem.findUnique({ where: { id: i7b } }))?.repairResult === 'NO_FAULT', JSON.stringify(un7))
+    const drawer7 = await prisma.$transaction(async (tx) => {
+      const r = await scrapDevice({ actor, occurredOn: todayKst(), source: 'MANUAL', memo: '[SMOKE] 드로어 폐기' }, { deviceId: u7!.id, memo: '[SMOKE] 드로어 폐기' }, { client: tx })
+      return syncAsLinesForUnitState(tx, { deviceId: u7!.id, serialNo: r.unit.serialNo, mode: 'scrap', actor, on: todayKst(), memo: '[SMOKE] 드로어 폐기' })
+    })
+    const line7d = await prisma.asReceiptItem.findUnique({ where: { id: i7b } })
+    const older7 = await prisma.asReceiptItem.findMany({ where: { deviceId: u7!.id, id: { lt: i7b } }, select: { id: true, repairResult: true } })
+    check('[C-10b] 드로어 폐기 → 최근 라인 1개만 폐기(문제없음 → 폐기)·과거 라인 무변경', drawer7.updated === 1 && line7d?.repairResult === 'SCRAPPED' && !!line7d?.repairedAt && older7.every((o) => o.repairResult !== 'SCRAPPED'), JSON.stringify({ drawer7, line7d, older7 }))
+
 
     // [C-11] 타병원 배치 기기 — 입고·체크 conflict 경고(라인만) → 병원 변경 재생성: 입고·수리완료 보존 + 새 병원 기기에 재적용
     if (hospitalB) {

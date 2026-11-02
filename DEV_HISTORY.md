@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-11-02 20:00 | AS 회수기기 처리 3택 — 수리완료 체크박스 → 수리 / 문제없음 / 폐기
+
+- 사용자 요청: 회수된 기기를 확인해 보니 문제없는 경우가 있어 처리 케이스를 '수리완료(회수기기 수리)·수리완료(회수기기 문제없음)·폐기' 3가지에서 고르게. 근거: PROD 처리내용에 '이상 없음' 언급 라인 219개가 수리완료로 체크돼 있으나 실제 수리와 단순 점검이 섞여 집계 불가
+- 데이터: `as_receipt_items.repair_result`(REPAIRED/NO_FAULT/SCRAPPED, CHECK) 추가 + CHECK `(repair_result IS NULL) = (repaired_at IS NULL)` — `repaired_at/by`는 세 값 공통 처리일·처리자. 마이그 `20261102100000_as_item_repair_result`(dev2 적용·resolve): 기존 체크 라인 → 수리, 그 접수(ref AS)로 폐기된 기기 라인 → 폐기+폐기 이벤트 일자·처리자. dev2 백필 수리 2,250·폐기 1 / **PROD 예상 수리 2,334·폐기 1(읽기 전용 집계, 미반영)**
+- 기기현황: 수리·문제없음 모두 기기 상태 '수리완료'(재사용 재고), 문제없음은 REPAIR_DONE 이벤트 메모 '문제없음 (회수기기 이상 없음)'으로 구분 — 기기 상태 신설 없음. 폐기는 기존 `scrapAsLineDevice`(확인+사유, 회수된 기기만)
+- 서비스 `setAsLineRepairResult`(지정·수리↔문제없음 변경은 라인만+비고 `(문제없음 → 수리)`·해제는 AS접수 복귀, 구 `setAsLineRepaired`는 호환 래퍼) · 폐기 라인 잠금 — 기기가 폐기 상태인 동안 400, 기기현황 관리자 보정으로 폐기 해제 후엔 다시 처리 가능 · 폐기 시 처리일 기록(이전엔 repaired_at NULL이라 **폐기 기기가 수리 대기 큐에 남던 문제** 해소) · 분실·취소 확정/미회수 시 처리값도 함께 해제 · 병원 변경 재생성·재적용 경로에 처리값 보존(폐기 라인은 기기 수리완료 재적용 안 함)
+- 기기현황 드로어 동기화(`_unitState`): [수리완료] → 미처리·폐기해제 라인을 수리로, [해제] → 수리·문제없음 라인만, [폐기] → 기기를 손에 쥔(결과 없음·교체) **최근 라인 1개**만 폐기(수리반환된 과거 라인 무변경 — 이전엔 전 라인 repaired_at NULL)
+- API: `POST /api/as-receipts/[id]/repair-done { itemId, result: REPAIRED|NO_FAULT|null }`(구 `{ repaired }` 수용, 감사 라벨 `{asCode} 회수처리`) · 큐 일괄 `{ itemIds, result? }`(폐기 불가) · 엑셀 '회수기기처리'·'회수처리일' 열(+ 합포장 열 폭 누락 보정) · 타임라인 '회수기기 처리 {값}'(구 '수리완료' 이력 표시 유지)
+- 화면: AS 상세 3번 카드 '회수기기 처리' 선택칸(선택/수리/문제없음 + 회수된 기기만 폐기, 처리값 색 구분·처리일, 폐기 잠금 배지) · 칩 `회수처리 n/m`(툴팁 내역) · 수리대기 큐 행 선택칸 + 일괄 [수리 n대]·[문제없음 n대](큐 폐기에도 확인창 추가) · 목록 기기 배지 `처리 n/m`·사용자 열 '회수처리'
+- 검증(dev2): tsc 통과 · `as-receipt-smoke` 94/94(신규 [C-10a] 문제없음·변경, [C-10] 폐기 처리일·잠금 400, [C-10b] 관리자 보정 후 잠금 해제·드로어 폐기 최근 라인) · `smoke-device-registry`는 시작 전제(기기현황 없는 운영 병원 3곳)가 현 dev2 데이터에 없어 실행 불가 — [13] 기대값만 새 규칙으로 갱신 · 빌드·PM2 재시작 후 Playwright: 상세 선택지·문제없음 지정(DB NO_FAULT·기기 REPAIRED·이벤트 메모) → 해제 원복, 회수 라인 폐기 선택지·확인 취소 무변경, 폐기 잠금 배지, 큐 일괄 버튼, 목록 `처리0/6` 확인
+- 영향: `prisma/schema.prisma`·마이그, `lib/asReceiptShared.ts`, `lib/asReceiptService.ts`, `lib/asReceiptQueue.ts`, `lib/asReceiptColumns.ts`, `app/api/as-receipts/{[id]/repair-done,queue/repair-done,[id]/timeline,export,route}.ts`, `app/api/devices/units/[id]/_unitState.ts`, `app/as-receipts/{[id]/page,queue/page,page}.tsx`, `scripts/{as-receipt-smoke,smoke-device-registry}.mts`, README
+- **PROD 미반영** — 반영 시 마이그 SQL(백필 포함, 규칙 5)·빌드·재시작 필요, 협업 서버 무관
+- 후속 검토(같은 날): 사용자 피드백으로 진행 중 라인에도 폐기를 여는 '폐기 판정'(판정만 기록 → 교체 최종확정 시 구기기 자동 폐기)을 dev2에 구현·검증(스모크 101/101)했으나, 기존 흐름(교체 확정 후 구기기 폐기)으로 충분하다는 사용자 결정으로 **되돌림** — 폐기는 교체로 회수된 기기에만 노출(1차 구현 그대로). 되돌린 뒤 스모크·빌드 재확인
+
 ## 2026-11-02 19:10 | 출고요청 첨부 파일 (엑셀 등) — 프로젝트 출고요청 모달·상세
 
 → **PROD 배포 2026-11-02 (e395b33)**: pull → 마이그 2건(`20261102100000_sales_deal_files`, `20261102140000_stock_out_request_files` — CREATE TABLE만) psql 적용·resolve → generate → 힙 4GB 빌드 → `pm2 restart thync-prod`(협업 번들 불변 2108cacb, 재시작 불필요) → 딜·출고요청 페이지·신규 files API 307 정상, 에러 로그 없음. 딜 첨부 + 등록 필수 필드(같은 커밋) 함께 반영

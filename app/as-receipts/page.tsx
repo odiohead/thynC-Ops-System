@@ -12,7 +12,7 @@ import DateRangeFilter from '@/app/components/ui/DateRangeFilter'
 import AsReceiptFormModal from './_components/AsReceiptFormModal'
 import AsTabs from './_components/AsTabs' // 접수 목록 ↔ 수리대기 탭 (2026-09-28)
 import { AS_LIST_COLUMNS, AS_LIST_COLUMN_MAP, AS_LIST_COLUMN_GROUPS, AS_LIST_VIEW_KEY, AS_LIST_COL_MIN, defaultAsListPrefs, normalizeAsListPrefs, samePrefs, type AsListPrefs } from '@/lib/asReceiptColumns' // 사용자 열 설정 (2026-10-01)
-import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsTag, AS_SEARCH_FIELDS, AS_SEARCH_FIELD_LABELS, AS_SEARCH_FIELD_PLACEHOLDER, parseAsSearchField, type AsSearchField, isAsCanceledStatus, AS_LIST_QS_KEY, AS_BACK_KEY, AS_BULK_STATUS_MAX, summarizeAsReceiptWards, AS_PICKUP_METHOD_LABELS, type AsPickupMethod, AS_DEST_TYPE_LABELS, type AsDestType, AS_OUTCOME_LABELS, type AsOutcome, AS_SHIP_METHOD_LABELS, type AsMethod, summarizeAsRepairProgress } from '@/lib/asReceiptShared'
+import { AS_CATEGORIES, AS_CATEGORY_LABELS, AS_REGISTRY_TAG_LABELS, AS_TAGS, AS_TAG_LABELS, AS_TAG_BADGE_CLS, asReceiptTags, asReceiptDeviceStateLabel, summarizeAsItemsByKind, summarizeAsItemsByGroup, summarizeAsItemProductTypes, type AsCategory, type AsRegistryTagSummary, type AsTag, AS_SEARCH_FIELDS, AS_SEARCH_FIELD_LABELS, AS_SEARCH_FIELD_PLACEHOLDER, parseAsSearchField, type AsSearchField, isAsCanceledStatus, AS_LIST_QS_KEY, AS_BACK_KEY, AS_BULK_STATUS_MAX, summarizeAsReceiptWards, AS_PICKUP_METHOD_LABELS, type AsPickupMethod, AS_DEST_TYPE_LABELS, type AsDestType, AS_OUTCOME_LABELS, type AsOutcome, AS_SHIP_METHOD_LABELS, type AsMethod, summarizeAsRepairProgress, asRepairProgressTitle } from '@/lib/asReceiptShared'
 
 interface CodeRef { id: number; name: string; color: string | null }
 /** 정렬 가능 컬럼 (2026-09-16) — 서버 정렬(`?sort=&dir=`). 계산 컬럼(기기상태·기기·유형·송장·태그)은 정렬 없음 */
@@ -56,7 +56,8 @@ interface AsRow {
     id: number; serialNo: string; outcome: string | null; deviceKind: string | null; intakeState: string; receivedAt: string | null; shippedAt: string | null; shipTrackingNo: string | null
     wardName: string | null // 접수 병동 (2026-09-29)
     newSerialNo: string | null; shipMethod: string | null; symptom: string | null // 사용자 열 (2026-10-01)
-    repairedAt: string | null // 수리완료 체크 (2026-09-17) — 기기 셀 `수리 n/m`
+    repairedAt: string | null // 회수처리일 (2026-09-17 수리완료 체크 → 2026-11-02 3택) — 기기 셀 `처리 n/m`
+    repairResult: string | null // 회수기기 처리 REPAIRED/NO_FAULT/SCRAPPED (2026-11-02)
     device: { deviceInfo: { deviceName: string }; placement: { productType: string | null } | null } | null
     newDevice: { placement: { productType: string | null } | null } | null
   }[]
@@ -85,7 +86,7 @@ function productTypeBadges(items: AsRow['items']) {
   )
 }
 
-/** 기기 열 (2026-09-15 축약) — ECG · SpO2 · ETC 코드 + 대수, 종결분은 흐리게 '/n'. 툴팁에 기존 상세 표기. 2026-09-17: 체크 가능(입고) 라인이 있으면 '수리 n/m' 병기(n<m amber · n=m green) */
+/** 기기 열 (2026-09-15 축약) — ECG · SpO2 · ETC 코드 + 대수, 종결분은 흐리게 '/n'. 툴팁에 기존 상세 표기. 2026-09-17: 체크 가능(입고) 라인이 있으면 '수리 n/m' 병기(n<m amber · n=m green). 2026-11-02 회수기기 처리 3택 → '처리 n/m'(수리·문제없음·폐기 모두 처리) */
 const DEVICE_GROUP_BADGE: Record<string, string> = {
   ECG: 'bg-sky-50 text-sky-700 ring-sky-200',
   SpO2: 'bg-rose-50 text-rose-700 ring-rose-200',
@@ -101,7 +102,7 @@ function deviceCell(r: AsRow) {
           {g.code}<span className="font-sans font-medium">{g.count}</span>
           {g.done > 0 && <span className="font-sans font-normal opacity-50">/{g.done}</span>}
           {g.repairable > 0 && (
-            <span className={`ml-0.5 font-sans font-medium ${g.repaired < g.repairable ? 'text-amber-700' : 'text-emerald-700'}`} title={`수리완료 ${g.repaired} / 입고 라인 ${g.repairable}`}>수리{g.repaired}/{g.repairable}</span>
+            <span className={`ml-0.5 font-sans font-medium ${g.repaired < g.repairable ? 'text-amber-700' : 'text-emerald-700'}`} title={`회수기기 처리 ${g.repaired} / 입고 라인 ${g.repairable} (수리·문제없음·폐기)`}>처리{g.repaired}/{g.repairable}</span>
           )}
         </span>
       ))}
@@ -226,7 +227,7 @@ function renderCell(key: string, r: AsRow): { node: React.ReactNode; title?: str
     // ── 진행·처리 (라인 집계) ──
     case 'itemCount': return { node: <span className="text-gray-700">{r.items.length}</span> }
     case 'closedCount': { const n = r.items.filter((i) => i.outcome).length; return { node: <span className={n === r.items.length && n > 0 ? 'text-emerald-700' : 'text-gray-700'}>{n}<span className="text-xs text-gray-400">/{r.items.length}</span></span> } }
-    case 'repairProgress': { const p = summarizeAsRepairProgress(r.items); return { node: p.repairable ? <span className={p.repaired < p.repairable ? 'text-amber-700' : 'text-emerald-700'}>{p.repaired}<span className="text-xs text-gray-400">/{p.repairable}</span></span> : dash } }
+    case 'repairProgress': { const p = summarizeAsRepairProgress(r.items); return { node: p.repairable ? <span className={p.repaired < p.repairable ? 'text-amber-700' : 'text-emerald-700'}>{p.repaired}<span className="text-xs text-gray-400">/{p.repairable}</span></span> : dash, title: p.repairable ? asRepairProgressTitle(p) : undefined } }
     case 'intakeIssues': return { node: r.intakeIssues > 0 ? <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700">{r.intakeIssues}대</span> : dash }
     case 'serials': { const v = r.items.map((i) => i.serialNo).join(', '); return { node: v ? <span className="font-mono text-xs text-gray-700">{v}</span> : dash, title: v || undefined } }
     case 'newSerials': { const v = r.items.map((i) => i.newSerialNo?.trim()).filter(Boolean).join(', '); return { node: v ? <span className="font-mono text-xs text-gray-700">{v}</span> : dash, title: v || undefined } }

@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { buildAsReceiptSearchOr } from '@/lib/asReceiptSearch'
-import { type AsPickupMethod, AS_CATEGORIES, AS_CATEGORY_LABELS, AS_DEST_TYPE_LABELS, AS_OUTCOME_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, AS_INTAKE_STATE_LABELS, type AsIntakeState, type AsCategory, type AsDestType, type AsMethod, type AsOutcome, parseAsSearchField } from '@/lib/asReceiptShared'
+import { type AsPickupMethod, AS_CATEGORIES, AS_CATEGORY_LABELS, AS_DEST_TYPE_LABELS, AS_OUTCOME_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, AS_INTAKE_STATE_LABELS, asRepairResultLabel, type AsIntakeState, type AsCategory, type AsDestType, type AsMethod, type AsOutcome, parseAsSearchField } from '@/lib/asReceiptShared'
 
 export const dynamic = 'force-dynamic'
 
@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
         select: {
           serialNo: true, deviceKind: true, wardName: true, symptom: true, processNote: true,
           outcome: true, newSerialNo: true, shipMethod: true, shipTrackingNo: true, shippedAt: true, intakeState: true, receivedAt: true, receiptSerialNo: true,
-          repairedAt: true, // 수리완료일 (2026-09-17)
+          repairResult: true, repairedAt: true, // 회수기기 처리·처리일 (2026-09-17 수리완료일 → 2026-11-02 3택)
           device: { select: { deviceInfo: { select: { deviceName: true } }, placement: { select: { ward: { select: { name: true } } } } } },
         },
         orderBy: { id: 'asc' },
@@ -108,7 +108,8 @@ export async function GET(request: NextRequest) {
         병동: i.device?.placement?.ward?.name ?? i.wardName ?? '',
         증상: i.symptom ?? '',
         처리내용: i.processNote ?? '',
-        수리완료일: d10(i.repairedAt), // 2026-09-17 — '처리내용' 뒤 (아래 !cols 폭 배열과 동기화)
+        회수기기처리: asRepairResultLabel(i.repairResult), // 2026-11-02 — 수리/문제없음/폐기 (아래 !cols 폭 배열과 동기화)
+        회수처리일: d10(i.repairedAt), // 2026-09-17 '수리완료일' → 2026-11-02 3택 공통 처리일
         입고상태: AS_INTAKE_STATE_LABELS[i.intakeState as AsIntakeState] ?? i.intakeState,
         라인입고일: i.receivedAt ? i.receivedAt.toISOString().slice(0, 10) : '',
         접수시리얼: i.receiptSerialNo ?? '',
@@ -131,12 +132,12 @@ export async function GET(request: NextRequest) {
 
   const ws = XLSX.utils.json_to_sheet(rows)
   ws['!cols'] = [
-    // 접수번호 접수일 병원 구분 상태 고객명 선교체 우선수리 펌웨어업데이트 부속품동봉 수거방법 수거송장 수거일 입고일
-    { wch: 15 }, { wch: 11 }, { wch: 22 }, { wch: 6 }, { wch: 8 }, { wch: 18 }, { wch: 7 }, { wch: 8 }, { wch: 12 }, { wch: 9 }, { wch: 9 }, { wch: 15 }, { wch: 11 }, { wch: 11 },
+    // 접수번호 접수일 병원 구분 상태 고객명 선교체 우선수리 펌웨어업데이트 부속품동봉 합포장 수거방법 수거송장 수거일 입고일 (합포장 폭 누락 보정 2026-11-02)
+    { wch: 15 }, { wch: 11 }, { wch: 22 }, { wch: 6 }, { wch: 8 }, { wch: 18 }, { wch: 7 }, { wch: 8 }, { wch: 12 }, { wch: 9 }, { wch: 7 }, { wch: 9 }, { wch: 15 }, { wch: 11 }, { wch: 11 },
     // 발송지구분 발송지정보 회수지상이 회수지정보 예상출하일
     { wch: 11 }, { wch: 24 }, { wch: 9 }, { wch: 24 }, { wch: 11 },
-    // 시리얼 기기종류 병동 증상 처리내용 수리완료일(2026-09-17) | 입고상태 라인입고일 접수시리얼 (2026-09-11) | 결과 발송일 발송방법 송장 교체기
-    { wch: 11 }, { wch: 10 }, { wch: 10 }, { wch: 28 }, { wch: 28 }, { wch: 11 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 11 }, { wch: 9 }, { wch: 15 }, { wch: 11 },
+    // 시리얼 기기종류 병동 증상 처리내용 회수기기처리 회수처리일(2026-11-02) | 입고상태 라인입고일 접수시리얼 (2026-09-11) | 결과 발송일 발송방법 송장 교체기
+    { wch: 11 }, { wch: 10 }, { wch: 10 }, { wch: 28 }, { wch: 28 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 11 }, { wch: 9 }, { wch: 15 }, { wch: 11 },
     // 완료일 상태변경일 담당 티켓 등록자 비고
     { wch: 11 }, { wch: 11 }, { wch: 8 }, { wch: 15 }, { wch: 10 }, { wch: 30 },
   ]

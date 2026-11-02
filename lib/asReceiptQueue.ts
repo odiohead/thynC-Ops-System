@@ -11,7 +11,7 @@ export const asDetailItemSelect = {
   symptom: true, processNote: true, outcome: true, newSerialNo: true, draftOutcome: true, draftNewSerialNo: true, // 초안 (2026-09-14)
   shipMethod: true, shipTrackingNo: true, shippedAt: true,
   intakeState: true, receivedAt: true, receiptSerialNo: true, intakeSource: true, // 입고 대조 (2026-09-11)
-  repairedAt: true, repairedBy: { select: { id: true, name: true } }, // 수리완료 체크 (2026-09-17 — 제3축)
+  repairResult: true, repairedAt: true, repairedBy: { select: { id: true, name: true } }, // 회수기기 처리(수리·문제없음·폐기)·처리일·처리자 (2026-09-17 수리완료 체크 → 2026-11-02 3택 — 제3축)
   device: {
     select: {
       id: true,
@@ -72,7 +72,7 @@ const OPEN_RECEIPT: Prisma.AsReceiptWhereInput = {
 /** 수리대기 큐 버킷 where (설계 §3.1·§3.2) */
 export function asQueueBucketWhere(bucket: AsQueueBucket): Prisma.AsReceiptItemWhereInput {
   if (bucket === 'WAITING') {
-    // 정상입고 ∧ 수리완료 미체크 ∧ 결과 없음 또는 교체(선교체 구기기 — 사후 입고). 수리반환 확정은 이미 병원으로 돌아간 기기라 제외. 접수 종결 무관(A-2)
+    // 정상입고 ∧ 회수기기 미처리(repaired_at NULL ⇔ repair_result NULL — DB CHECK, 폐기도 처리로 본다 2026-11-02) ∧ 결과 없음 또는 교체(선교체 구기기 — 사후 입고). 수리반환 확정은 이미 병원으로 돌아간 기기라 제외. 접수 종결 무관(A-2)
     return { intakeState: 'RECEIVED', repairedAt: null, OR: [{ outcome: null }, { outcome: 'REPLACE' }] }
   }
   // 입고 대기·미입고 ∧ 결과 없음 ∧ 접수 미종결 ∧ 회수할 기기가 있는 접수(분실·수거없음 제외)

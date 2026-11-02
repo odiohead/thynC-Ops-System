@@ -5,6 +5,7 @@
  * 1 공통정보 → 2 접수정보(접수자 입력, 시트 A~M·S·T + 태그·비고) → 3 AS상세내역(AS담당자 입력, 시트 N~X — 기기군별 카드: 라인별 처리내용, 기기군 단위 발송정보) → 4 기기등록 → 5 타임라인(2026-09-15 — 감사로그·티켓 로그 합성 이력).
  * 상태 변경(도메인→티켓 동기화)·수정 모달·삭제(티켓 동반) — 권한 §13-1.
  * 2026-09-17 기기 상태·위치 축(device_condition_location_design.md §6.1): 3번 카드 라인 '수리완료' 체크박스(입고된 라인만) · 카드 헤더 `수리완료 n/m` · 시리얼 셀 기기 상태 배지 · [폐기](회수 기기만).
+ * 2026-11-02 회수기기 처리 3택: '수리완료' 체크박스 + [폐기] 버튼 → '회수기기 처리' 선택칸(수리 / 문제없음 / 폐기 — 폐기는 회수된 기기만·확인+사유, 폐기 후 잠금) · 카드 헤더 `회수처리 n/m`.
  */
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -21,7 +22,7 @@ import { asListHref, AS_PICKUP_METHODS, type AsPickupMethod,
   AS_METHODS, AS_DEVICE_GROUPS, asDeviceGroupOf, type AsDeviceGroup,
   AS_RESOLVE_OUTCOMES, asResolveOutcomesFor, AS_INTAKE_STATE_LABELS, AS_DEVICE_KINDS, isAsIntakeIssue, asDeviceKindFromSerial, type AsIntakeState,
   AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, AS_TAG_BADGE_CLS, AS_TAG_FLAGS_EMPTY, asReceiptTags, type AsTagFlags,
-  canMarkAsLineRepaired, asRepairDisabledReason, summarizeAsRepairProgress, AS_LINE_CONDITION_BADGE_CLS, isAsLineConditionBadge, summarizeAsReceiptWards,
+  canMarkAsLineRepaired, asRepairDisabledReason, summarizeAsRepairProgress, asRepairProgressTitle, AS_REPAIR_RESULT_DESC, AS_REPAIR_RESULT_BADGE_CLS, type AsRepairResult, type AsSettableRepairResult, AS_LINE_CONDITION_BADGE_CLS, isAsLineConditionBadge, summarizeAsReceiptWards,
   isValidAsSerial, AS_SERIAL_RULE_TEXT, type AsLostQuota, type AsDealQuota } from '@/lib/asReceiptShared' // 수리완료 체크·기기 상태 배지 (2026-09-17) · 시리얼 형식 게이트 (2026-09-30)
 import type { TicketStatus } from '@prisma/client'
 import { PRODUCT_TYPES, deviceConditionLabel, deviceSiteLabel } from '@/lib/deviceRegistryShared'
@@ -58,7 +59,8 @@ interface ItemRow {
   receivedAt: string | null
   receiptSerialNo: string | null // 치환 전 접수 시리얼
   intakeSource: string
-  repairedAt: string | null // 수리완료 체크 (2026-09-17) — outcome과 독립인 제3축(YYYY-MM-DD)
+  repairResult: string | null // 회수기기 처리 REPAIRED 수리 / NO_FAULT 문제없음 / SCRAPPED 폐기 (2026-11-02) — outcome과 독립인 제3축
+  repairedAt: string | null // 회수처리일 (2026-09-17 수리완료 체크일 → 2026-11-02 3택 공통, YYYY-MM-DD)
   repairedBy: { id: string; name: string | null } | null
 }
 
@@ -245,15 +247,15 @@ interface GroupCardProps {
   extras: ItemRow[] // 접수 전체의 미식별입고 라인 (치환 후보 — 기기군 무관)
   onRegistryConfirm: (body: Record<string, unknown>) => Promise<boolean> // 원장 정합 확정 (2026-09-11)
   onCorrectSerial: (itemId: number, serial: string) => Promise<boolean> // 라인 시리얼 보정 (2026-09-15)
-  canRepair: boolean // 수리완료 체크·폐기 권한 — VIEWER 제외(접수 종결 여부 무관, A-2·A-5) (2026-09-17)
-  onToggleRepaired: (item: ItemRow, repaired: boolean) => Promise<boolean> // POST repair-done (2026-09-17)
+  canRepair: boolean // 회수기기 처리(수리·문제없음·폐기) 권한 — VIEWER 제외(접수 종결 여부 무관, A-2·A-5) (2026-09-17)
+  onSetRepairResult: (item: ItemRow, result: AsSettableRepairResult | null) => Promise<boolean> // POST repair-done { result } (2026-11-02 — 수리완료 토글 확장)
   onScrapLine: (item: ItemRow) => Promise<boolean> // POST scrap-line — confirm·memo 프롬프트는 호출부 (2026-09-17)
 }
 const MODEL_BY_KIND: Record<string, string> = { 심전도: '심전계', 산소포화도: '산소포화도', 게이트웨이: '게이트웨이' }
 
-function GroupCard({ index, group, items, asCode, category, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm, onCorrectSerial, canRepair, onToggleRepaired, onScrapLine }: GroupCardProps) {
+function GroupCard({ index, group, items, asCode, category, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm, onCorrectSerial, canRepair, onSetRepairResult, onScrapLine }: GroupCardProps) {
   const [fixSerial, setFixSerial] = useState<Record<number, string>>({}) // 시리얼 보정 입력 (2026-09-15) — 라인별, 빈 값 = 닫힘
-  const repair = summarizeAsRepairProgress(items) // 수리완료 n/m (2026-09-17) — m = 체크 가능 라인(canMarkAsLineRepaired)
+  const repair = summarizeAsRepairProgress(items) // 회수처리 n/m (2026-09-17 수리완료 → 2026-11-02 3택) — m = 처리 가능 라인(canMarkAsLineRepaired), n = 수리·문제없음·폐기
   const badSerialItems = items.filter((i) => !i.outcome && !isValidAsSerial(i.serialNo)) // 시리얼 형식 오류 — 보정 전 처리 불가 (2026-09-30)
   const issueItems = items.filter((i) => !i.outcome && isAsIntakeIssue(i.intakeState))
   const isShip = (o: string | null) => o === 'REPAIR_RETURN' || o === 'REPLACE'
@@ -353,8 +355,8 @@ function GroupCard({ index, group, items, asCode, category, hospitalCode, canRes
           {badSerialItems.length > 0 && <span className="ml-1.5 rounded bg-red-600 px-1.5 py-0.5 font-medium text-white" title={AS_SERIAL_RULE_TEXT}>시리얼 오류 {badSerialItems.length}</span>}
           {registryItems.length > 0 && <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">원장 확인 {registryItems.length}</span>}
           {repair.repairable > 0 && (
-            <span className={`ml-1.5 rounded px-1.5 py-0.5 font-medium ${repair.repaired < repair.repairable ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`} title="수리완료 체크 / 체크 가능(입고된) 라인">
-              수리완료 {repair.repaired}/{repair.repairable}
+            <span className={`ml-1.5 rounded px-1.5 py-0.5 font-medium ${repair.repaired < repair.repairable ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`} title={asRepairProgressTitle(repair)}>
+              회수처리 {repair.repaired}/{repair.repairable}
             </span>
           )}
         </span>
@@ -370,7 +372,7 @@ function GroupCard({ index, group, items, asCode, category, hospitalCode, canRes
                   )}
                 </th>
               )}
-              {['시리얼', '입고', '병동', '증상', '처리내용', '수리완료', '결과', '교체기', '발송'].map((h) => ( // 셀 나열(아래 <td>)과 1:1 — 열 추가 시 동시 수정
+              {['시리얼', '입고', '병동', '증상', '처리내용', '회수기기 처리', '결과', '교체기', '발송'].map((h) => ( // 셀 나열(아래 <td>)과 1:1 — 열 추가 시 동시 수정
                 <th key={h} className="whitespace-nowrap px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">{h}</th>
               ))}
             </tr>
@@ -409,32 +411,45 @@ function GroupCard({ index, group, items, asCode, category, hospitalCode, canRes
                     />
                   ) : <span className="text-xs text-gray-500" title={item.processNote ?? undefined}>{item.processNote ?? '-'}</span>}
                 </td>
-                {/* 수리완료 체크 (2026-09-17 §6.1) — 입고된 라인만(D5), 분실·취소·미회수 제외. 결과 확정 라인·종결 접수도 가능(선교체, A-2). outcome·헤더 상태에는 개입하지 않음 */}
+                {/* 회수기기 처리 (2026-09-17 수리완료 체크 → 2026-11-02 3택) — 입고된 라인만(D5), 분실·취소·미회수 제외. 결과 확정 라인·종결 접수도 가능(선교체, A-2). outcome·헤더 상태에는 개입하지 않음.
+                    수리·문제없음 → 기기 수리완료 / 폐기 → 회수된 기기(배치 RECOVERED)만 선택지 노출, 확인+사유 후 잠금(되돌리기는 기기현황 관리자 보정) */}
                 <td className="whitespace-nowrap px-3 py-2">
                   {(() => {
-                    const ok = canMarkAsLineRepaired(item) && isValidAsSerial(item.serialNo) // 시리얼 오류 라인은 보정 전 체크 불가 (2026-09-30)
-                    const checked = !!item.repairedAt
+                    const ok = canMarkAsLineRepaired(item) && isValidAsSerial(item.serialNo) // 시리얼 오류 라인은 보정 전 처리 불가 (2026-09-30)
+                    const res = (item.repairResult ?? (item.repairedAt ? 'REPAIRED' : null)) as AsRepairResult | null
                     const cond = item.device?.unit?.condition ?? null
                     const scrappable = canRepair && ok && item.device?.placement?.status === 'RECOVERED' && cond !== 'SCRAPPED' && cond !== 'LOST'
-                    const title = checked
-                      ? `수리완료 ${d10(item.repairedAt).slice(5)} ${item.repairedBy?.name ?? ''}`.trim()
-                      : !canRepair ? '수리완료 체크 권한이 없습니다' : !isValidAsSerial(item.serialNo) ? '시리얼 보정 후 체크할 수 있습니다' : (asRepairDisabledReason(item) ?? '체크하면 기기 상태가 수리완료로 기록됩니다')
+                    const done = res ? `${AS_REPAIR_RESULT_DESC[res]} · ${d10(item.repairedAt)} ${item.repairedBy?.name ?? ''}`.trim() : null
+                    if (res === 'SCRAPPED' && (cond === 'SCRAPPED' || !item.deviceId)) { // 폐기 잠금 — 기기현황 관리자 보정으로 폐기가 해제되면 다시 선택칸
+                      return (
+                        <span className="inline-flex items-center gap-1.5" title={`${done} — 되돌리려면 기기현황에서 관리자 보정`}>
+                          <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${AS_REPAIR_RESULT_BADGE_CLS.SCRAPPED}`}>폐기</span>
+                          <span className="text-xs text-gray-500">{d10(item.repairedAt).slice(5)}</span>
+                        </span>
+                      )
+                    }
+                    const title = done
+                      ?? (!canRepair ? '회수기기 처리 권한이 없습니다' : !isValidAsSerial(item.serialNo) ? '시리얼 보정 후 처리할 수 있습니다'
+                        : (asRepairDisabledReason(item) ?? `수리·문제없음은 기기 상태 '수리완료'로 기록됩니다${scrappable ? ' · 폐기는 기기 상태 폐기(사유 필수)' : ''}`))
                     return (
                       <span className="inline-flex items-center gap-1.5" title={title}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
+                        <select
+                          value={res ?? ''}
                           disabled={!canRepair || busy || !ok}
-                          onChange={(e) => void onToggleRepaired(item, e.target.checked)}
-                          className="rounded border-gray-300 disabled:opacity-40"
-                          aria-label={`${item.serialNo} 수리완료`}
-                        />
-                        {checked && <span className="text-xs text-emerald-700">{d10(item.repairedAt)}</span>}
-                        {scrappable && (
-                          <button type="button" disabled={busy} onClick={() => void onScrapLine(item)} className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-100 hover:text-red-600 disabled:opacity-40" title="회수된 기기를 폐기 처리합니다 (기기 상태 폐기·위치 없음, 사유 필수)">
-                            폐기
-                          </button>
-                        )}
+                          onChange={(e) => {
+                            const v = e.target.value
+                            if (v === 'SCRAPPED') void onScrapLine(item)
+                            else void onSetRepairResult(item, (v || null) as AsSettableRepairResult | null)
+                          }}
+                          className={`rounded-md border px-1.5 py-1 text-xs disabled:opacity-40 ${res ? `border-transparent font-medium ${AS_REPAIR_RESULT_BADGE_CLS[res]}` : 'border-gray-300'}`}
+                          aria-label={`${item.serialNo} 회수기기 처리`}
+                        >
+                          <option value="">{res ? '해제' : '선택'}</option>
+                          <option value="REPAIRED">수리</option>
+                          <option value="NO_FAULT">문제없음</option>
+                          {(scrappable || res === 'SCRAPPED') && <option value="SCRAPPED">폐기</option>}
+                        </select>
+                        {res && <span className="text-xs text-gray-500">{d10(item.repairedAt).slice(5)}</span>}
                       </span>
                     )
                   })()}
@@ -714,7 +729,7 @@ export default function AsReceiptDetailPage() {
   const canDelete = !!me && !!req && (isAdmin || adminPerm || (me.role !== 'VIEWER' && req.createdBy?.id === me.id && !isTerminal))
   // 라인 처리 — USER 이상 전원 (별도 처리 풀 없음, 설계 §7)
   const canResolve = !!me && me.role !== 'VIEWER' && !isTerminal
-  // 수리완료 체크·폐기 — VIEWER 제외, 접수 종결 여부 무관(선교체 구기기는 완료 후 수리 — A-2·A-5, 서버 repair-done/scrap-line과 동일)
+  // 회수기기 처리(수리·문제없음·폐기) — VIEWER 제외, 접수 종결 여부 무관(선교체 구기기는 완료 후 수리 — A-2·A-5, 서버 repair-done/scrap-line과 동일)
   const canRepair = !!me && me.role !== 'VIEWER'
   const openItems = req?.items.filter((i) => !i.outcome) ?? []
   const draftCount = req?.items.filter((i) => !i.outcome && i.draftOutcome).length ?? 0
@@ -878,19 +893,20 @@ export default function AsReceiptDetailPage() {
     return null
   }
 
-  /** 수리완료 체크/해제 (2026-09-17) — POST repair-done. 라인 repaired_at + 기기 condition(REPAIRED / 해제는 CORRECT). 종결 접수도 허용(A-2) */
-  async function toggleRepaired(item: ItemRow, repaired: boolean) {
+  /** 회수기기 처리 지정/변경/해제 (2026-09-17 수리완료 체크 → 2026-11-02 3택) — POST repair-done { result }. 수리·문제없음 → 기기 수리완료, 해제 → AS접수(확인). 종결 접수도 허용(A-2) */
+  async function setRepairResult(item: ItemRow, result: AsSettableRepairResult | null) {
     if (!req) return false
-    if (!repaired && !confirm(`${item.serialNo} 수리완료를 해제합니다 (기기 상태가 AS접수로 돌아갑니다).`)) return false
+    const prev = (item.repairResult ?? (item.repairedAt ? 'REPAIRED' : null)) as AsRepairResult | null
+    if (!result && prev && !confirm(`${item.serialNo} 회수기기 처리(${AS_REPAIR_RESULT_DESC[prev]})를 해제합니다 (기기 상태가 AS접수로 돌아갑니다).`)) return false
     setBusy(true)
     const res = await fetch(`/api/as-receipts/${req.id}/repair-done`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itemId: item.id, repaired }),
+      body: JSON.stringify({ itemId: item.id, result }),
     })
     const d = await res.json().catch(() => ({}))
     setBusy(false)
-    if (!res.ok) { flash(d.error ?? d.message ?? (repaired ? '수리완료 처리에 실패했습니다.' : '수리완료 해제에 실패했습니다.')); return false }
+    if (!res.ok) { flash(d.error ?? d.message ?? (result ? '회수기기 처리에 실패했습니다.' : '회수기기 처리 해제에 실패했습니다.')); return false }
     if (d.warnings?.length) setWarnings(d.warnings)
     router.refresh()
     await load()
@@ -900,7 +916,7 @@ export default function AsReceiptDetailPage() {
   /** 라인 기기 폐기 (2026-09-17, A-5) — confirm + 사유(memo) 필수 프롬프트 → POST scrap-line. 회수(RECOVERED) 기기만 — 배치 중이면 서버 409 */
   async function scrapLine(item: ItemRow) {
     if (!req) return false
-    if (!confirm(`${item.serialNo} 기기를 폐기 처리합니다.\n기기 상태가 '폐기'로 기록되고 위치가 지워지며, 라인의 수리완료 체크는 해제됩니다.\n되돌리려면 관리자 보정이 필요합니다. 계속할까요?`)) return false
+    if (!confirm(`${item.serialNo} 기기를 폐기 처리합니다.\n기기 상태가 '폐기'로 기록되고 위치가 지워지며, 회수기기 처리는 '폐기'로 고정됩니다.\n되돌리려면 기기현황에서 관리자 보정이 필요합니다. 계속할까요?`)) return false
     const memo = prompt(`${item.serialNo} 폐기 사유를 입력하세요 (필수 — 접수 비고에 기록):`)
     if (memo == null) return false
     if (!memo.trim()) { flash('폐기 사유를 입력하세요.'); return false }
@@ -1417,7 +1433,7 @@ export default function AsReceiptDetailPage() {
               onRegistryConfirm={registryConfirm}
               onCorrectSerial={correctSerial}
               canRepair={canRepair}
-              onToggleRepaired={toggleRepaired}
+              onSetRepairResult={setRepairResult}
               onScrapLine={scrapLine}
             />
           ))}
