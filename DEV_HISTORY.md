@@ -6,6 +6,8 @@
 
 ## 2026-11-02 19:10 | 출고요청 첨부 파일 (엑셀 등) — 프로젝트 출고요청 모달·상세
 
+→ **PROD 배포 2026-11-02 (e395b33)**: pull → 마이그 2건(`20261102100000_sales_deal_files`, `20261102140000_stock_out_request_files` — CREATE TABLE만) psql 적용·resolve → generate → 힙 4GB 빌드 → `pm2 restart thync-prod`(협업 번들 불변 2108cacb, 재시작 불필요) → 딜·출고요청 페이지·신규 files API 307 정상, 에러 로그 없음. 딜 첨부 + 등록 필수 필드(같은 커밋) 함께 반영
+
 - **배경**: 프로젝트에서 출고요청할 때 엑셀 등 근거 파일을 붙일 수 없었음(사용자 요청). 설계 `projects/stock_out_v2_design.md` §15
 - **DB**: `stock_out_request_files`(request CASCADE, 분류 없음, N건) — 마이그 `20261102140000_stock_out_request_files` dev2 적용·resolve. Prisma `StockOutRequestFile` + `StockOutRequest.files`·`User.stockOutFilesUploaded`
 - **API**: `GET/POST /api/stock-out-requests/[id]/files`(multipart `files[]`, 파일별 실패 `failed[]`), `GET(302 attachment)/DELETE …/files/[fileId]`. 업로드 VIEWER 제외 누구나, 삭제는 업로더 본인 또는 `canEditStockOutRequest`. 한도 20MB·10개·실행 파일 차단(`lib/stockOutFiles.ts` 신규). 상세 `GET /api/stock-out-requests/[id]` 응답에 `files[]` 동봉
