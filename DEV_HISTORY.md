@@ -4,6 +4,25 @@
 
 ---
 
+## 2026-11-02 21:40 | [운영 데이터 조치 — PROD만] 회수기기 처리 '문제없음' 보정 134라인 (처리내용 '정상품 동작 확인', 코드 변경 없음)
+
+- 사용자 지시: 처리내용에 '정상품 동작 확인'이 입력된 처리완료 라인을 회수기기 처리 '문제없음'으로. 분석(PROD 읽기): 문구 1,287라인(전부 산소포화도) — 처리내용이 '본체 판정 + 센서 판정(1000F·2000F·2000R)' 2칸 형식이라 1,133라인은 한쪽만 정상(예: `정상품 동작 확인(MP100W) 내부 케이블 단선(1000F(2차)` 862)으로 실제 고장 건 → 제외. **두 칸 모두 정상 154라인** 중 입고됨·결과 분실/취소/미회수 아님 134라인 대상(입고 기록 없는 수리반환 20라인은 화면 규칙상 처리 불가로 제외)
+- 적용(사용자 "134개 대상으로 PROD에 반영"): 수리→문제없음 128(처리일·처리자 유지) + 미처리→문제없음 6(처리일 = 발송일), 접수 82건 비고에 `[데이터 보정 2026-11-02] 회수기기 처리 → 문제없음 (처리내용 '정상품 동작 확인' 본체·센서 모두 정상): 시리얼(이전값→문제없음)…`. 기기현황 무변경. 단일 트랜잭션·대상 수 134 불일치 시 중단 가드·드라이런(ROLLBACK) 후 COMMIT. 결과 PROD 처리값 분포 미처리 13,942 · 문제없음 135(화면 직접 지정 1 포함) · 수리 2,248 · 폐기 1
+- 롤백: PROD `~/backups/as_items_nofault_before_20261102.sql`(라인 134·접수 비고 82 원복 UPDATE). dev2 미반영(다음 동기화 때 따라옴)
+- 참고(미조치): '이상 없음' 표현 268라인(`외관 이상 없음, 세척 및 점검, 점검 결과 이상 없음` 등)은 '사출 교체 후 이상 없음' 같은 실제 수리 건이 섞여 별도 분석 필요
+
+## 2026-11-02 21:00 | 제3자 기기 비계약 공급 현황(대웅 직판 — 카트온) — 마스터 플래그 + 병원 상세 도입 현황 통합
+
+- **배경**: 카트온(링 혈압계)은 우리가 계약하지 않고 대웅제약이 병원에 직접 판매 → 딜(계약 기반)에 둘 수 없고 병원 테이블 필드는 모델·시점·출처가 안 남음. 설계 `projects/third_party_supply_design.md`(사용자 결정: 새 체크박스 / 현재 수량 1행 / 도입 현황 카드 행 통합 / 1차 수기)
+- **DB**: `device_info.supply_tracked`(공급 현황 관리, 기본 false, 링BP SL-MPF1K07 시드 true) — 마이그 `20261102170000_device_info_supply_tracked`; `hospital_device_supplies`(병원×기기 UNIQUE, quantity CHECK ≥0, supplier 기본 '대웅제약', checked_on, note, updated_by) — `20261102170100_hospital_device_supplies`. dev2 적용·resolve. Prisma `HospitalDeviceSupply` + Hospital/DeviceInfo/User 관계
+- **설정 `/settings/devices`**: '공급 현황' 열(체크박스·`공급` 배지, ADMIN+ 전용 필드 목록 `ADMIN_ONLY_FIELD_KEYS`에 `supplyTracked` 추가), usageCount에 공급 행 가산(삭제 보호), 하단 설명 갱신
+- **원장 요약 `getHospitalDeviceSummary`**: `supply_tracked` 기기를 원장 대상이 아니어도 요약 행에 합류(0대·미입력도 상시 노출), 기대치 = 딜 수량 + 공급 수량 합산(`expectedSource` DEAL/SUPPLY/BOTH), 공급만 있으면 `compare:'hard'`·차이 = 배치(평가용 제외) − 공급, 상품유형 소행 기대치는 공급만일 때 null. `ModelSummary.supply`(수량·공급처·파악일·비고·수정자) 추가. 커버리지 `getGlobalCoverage`에 `sup` CTE(링BP 공급 합) → `CoverageRow.supplyBp`
+- **병원 상세 도입 현황 카드**: '계약' → '계약/공급' 열, 공급 셀 `공급(대웅) m`(툴팁 파악일·비고·수정자 / 딜+공급은 `a + 공급 b`), 미입력은 `— (공급 수량 미입력)`, 파악일·비고 소행. USER 등급 이상(`canWrite`)이면 행 옆 연필 → `HospitalDeviceSupplyModal`(신규: 수량·파악일·비고 저장, 행 삭제) → `router.refresh()`
+- **API**: `GET /api/hospitals/[code]/device-supplies`, `PUT/DELETE …/device-supplies/[deviceInfoId]`(USER+, supply_tracked 검증 — 기존 행은 꺼져도 수정 허용, 감사 로그 `hospital_device_supply`)
+- **`/devices` 축약 표**: 혈압계 셀 툴팁 `배치 n / 공급(대웅 직판) m` 병기(열 추가 없음)
+- **검증**: tsc(힙 4GB)·eslint 통과, 서비스 스모크 12/12(플래그 시드·행 상시 포함·none→hard 전환·diff·DTO·유형 소행 null·ECG 불변·커버리지 supplyBp·0 허용·음수 CHECK·삭제 복귀). 화면 미확인(로그인 토큰 발급 불가) — dev2 빌드·재시작 수행. 초기 대웅 자료 적재는 자료 수령 후 1회성 스크립트
+- 파일: `prisma/schema.prisma`, `prisma/migrations/20261102170000_*`·`20261102170100_*`, `app/api/settings/devices/{shared.ts,route.ts}`, `app/settings/devices/page.tsx`, `lib/deviceRegistry/read.ts`, `app/hospitals/[code]/page.tsx`, `app/hospitals/[code]/_components/{HospitalDeviceSummary.tsx,HospitalDeviceSupplyModal.tsx(신규)}`, `app/api/hospitals/[code]/device-supplies/{route.ts,[deviceInfoId]/route.ts}`(신규), `app/devices/_components/{GlobalCoverage.tsx,types.ts}`, `projects/third_party_supply_design.md`, `projects/hospital_device_registry_design.md`(B-18 각주), `README.md`
+
 ## 2026-11-02 20:00 | AS 회수기기 처리 3택 — 수리완료 체크박스 → 수리 / 문제없음 / 폐기
 
 - 사용자 요청: 회수된 기기를 확인해 보니 문제없는 경우가 있어 처리 케이스를 '수리완료(회수기기 수리)·수리완료(회수기기 문제없음)·폐기' 3가지에서 고르게. 근거: PROD 처리내용에 '이상 없음' 언급 라인 219개가 수리완료로 체크돼 있으나 실제 수리와 단순 점검이 섞여 집계 불가
