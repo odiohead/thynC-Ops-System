@@ -71,6 +71,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
       assignees: { include: { user: { select: { name: true } } } },
       contractor: { select: { name: true } },
       buildStatus: { select: { label: true, color: true } },
+      introType: { select: { name: true } }, // 도입형태 — 상세 폼과 같은 intro_type_id (구 contract_type 표시 중단, 2026-11-02)
       devices: {
         include: { deviceInfo: { select: { deviceModel: true } } },
       },
@@ -158,7 +159,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
                   <span>담당자 <span className="text-foreground">{p.assignees.length > 0 ? p.assignees.map((a) => a.user.name).join(', ') : '-'}</span></span>
                   <span>시작일 <span className="text-foreground">{fmt(p.startDate)}</span></span>
                   <span>종료(예상) <span className="text-foreground">{fmt(p.endDateExpected)}</span></span>
-                  <span>도입형태 <span className="text-foreground">{p.contractType ?? '-'}</span></span>
+                  <span>도입형태 <span className="text-foreground">{p.introType?.name ?? '-'}</span></span>
                   <span>구축업체 <span className="text-foreground">{p.contractor?.name ?? '-'}</span></span>
                 </div>
               </Link>
@@ -218,7 +219,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
                           {fmt(p.endDateExpected)}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '88px' }}>
-                          {p.contractType ?? <span className="text-gray-400">-</span>}
+                          {p.introType?.name ?? <span className="text-gray-400">-</span>}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3 text-gray-600" style={{ minWidth: '100px' }}>
                           {fmt(p.contractDate)}
