@@ -101,10 +101,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
     updateData.vehicleReservationBlocked = vehicleReservationBlocked === true
   }
-  // Slack 발송 유무: ADMIN만 가능
+  // Slack 발송 유무: 본인 또는 ADMIN (2026-11-03 — 본인 알림 수신 설정이라 셀프 변경 허용. 종전 ADMIN만이라 '내 정보 수정'에 토글이 없었음)
   if (slackNotifyEnabled !== undefined) {
-    if (!isAdmin) {
-      return NextResponse.json({ error: 'Slack 발송 설정 변경은 관리자만 가능합니다.' }, { status: 403 })
+    if (!isSelf && !isAdmin) {
+      return NextResponse.json({ error: 'Slack 발송 설정 변경은 본인 또는 관리자만 가능합니다.' }, { status: 403 })
     }
     updateData.slackNotifyEnabled = slackNotifyEnabled === true
   }

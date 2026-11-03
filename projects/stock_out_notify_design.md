@@ -95,4 +95,5 @@
 - 종전: 출고 완료 알림은 코드에서 요청자를 **항상** 태그(규칙 옵션과 무관) → 설정 화면에 보이지 않아 운영자가 확인·제어 불가
 - 개정: 규칙 멘션 어휘에 `requester`('요청자') 추가(`MENTION_MODES`). 이벤트 카탈로그 `requester: true`인 이벤트(현재 `STOCK_OUT_COMPLETED`)에서만 선택 가능 — 설정 화면 옵션 필터 + 라우트 API 400 검증. `notifyDomainEvent`는 `mentionUserIds`로 요청자 멘션 문구를 만들어 `dispatchToRoutes(requesterMention)`로 넘기고, `buildMentionLine`이 규칙 멘션이 'requester'인 채널에만 붙인다(본문 고정 삽입 제거)
 - PROD 설정: '출고 완료' 규칙을 추가할 때 멘션 = '요청자'. 태그는 요청자 계정 'Slack 발송' ON + 이메일 매핑 시 `@멘션`, 아니면 이름만
+- (2026-11-03 2차) 링크를 별도 줄 대신 **머리줄 끝 `→ *티켓 링크*`**로 — `*[출고요청 등록]* 병원명 → *티켓 링크*` 한 줄. `notifyDomainEvent`는 `linkLabel` 지정 시 머리줄에 붙이고 마지막 줄 생략(미지정 이벤트는 종전 '상세 보기' 유지)
 

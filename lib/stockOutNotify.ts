@@ -2,7 +2,7 @@
  * 출고업무 Slack 알림 (2026-11-02 — projects/stock_out_notify_design.md)
  *
  * 도메인 이벤트 2종을 `notifyDomainEvent`(lib/notify.ts — 업무 알림 단일 경로)로 보낸다.
- * 메시지(2026-11-03 피드백): 머리줄 '[이벤트] 병원명'만, 품목 줄 없음, 링크는 '*티켓 링크*' 라벨로 **출고요청 상세**(/stock-out-requests/[id] — 도메인 알림은 도메인 레코드 링크, 티켓 관점은 공통 규칙 담당), Slack 링크 미리보기 끔(lib/slack.ts unfurl off). 채널·사용 여부는 설정 > Slack 알림의 라우팅 규칙.
+ * 메시지(2026-11-03 피드백): 머리줄 '[이벤트] 병원명'만, 품목 줄 없음, 링크는 머리줄 끝 '→ *티켓 링크*'(한 줄 절약, 11-03 2차 피드백) 라벨로 **출고요청 상세**(/stock-out-requests/[id] — 도메인 알림은 도메인 레코드 링크, 티켓 관점은 공통 규칙 담당), Slack 링크 미리보기 끔(lib/slack.ts unfurl off). 채널·사용 여부는 설정 > Slack 알림의 라우팅 규칙.
  *  - STOCK_OUT_CREATED   : 출고요청 생성 직후 (POST /api/stock-out-requests)
  *  - STOCK_OUT_COMPLETED : 출고업무 상태가 '완료'로 진입할 때 — `notifyTicketChanged`의 상태 전이 판정에서 호출(경로 3종 공통), 취소는 제외.
  *                          요청자(출고요청 등록자)를 Slack에서 태그

@@ -75,6 +75,7 @@ export default function UsersPage() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [editName, setEditName] = useState('')
   const [editPhone, setEditPhone] = useState('')
+  const [editMySlackEnabled, setEditMySlackEnabled] = useState(true) // 내 정보 수정 — Slack 알림 발송(DM·요청자 멘션) 본인 토글 (2026-11-03)
   const [editMyOrgId, setEditMyOrgId] = useState('')
   const [editMyDeptId, setEditMyDeptId] = useState('')
   const [editMyDepartments, setEditMyDepartments] = useState<Department[]>([])
@@ -265,6 +266,7 @@ export default function UsersPage() {
     if (!currentUser) return
     setEditName(currentUser.name)
     setEditPhone(currentUser.phone ?? '')
+    setEditMySlackEnabled(currentUser.slackNotifyEnabled !== false)
     const orgId = currentUser.organization?.id?.toString() ?? ''
     setEditMyOrgId(orgId)
     setEditMyDeptId(currentUser.department?.id?.toString() ?? '')
@@ -302,6 +304,7 @@ export default function UsersPage() {
         phone: editPhone,
         organizationId: editMyOrgId ? parseInt(editMyOrgId) : null,
         departmentId: editMyDeptId ? parseInt(editMyDeptId) : null,
+        slackNotifyEnabled: editMySlackEnabled,
       }
       if (newPassword) { body.currentPassword = currentPassword; body.newPassword = newPassword }
 
@@ -313,7 +316,7 @@ export default function UsersPage() {
       const data = await res.json()
       if (!res.ok) { setEditError(data.error ?? '저장에 실패했습니다.'); return }
 
-      setCurrentUser((prev) => prev ? { ...prev, name: data.name, phone: data.phone, organization: data.organization ?? null, department: data.department ?? null } : prev)
+      setCurrentUser((prev) => prev ? { ...prev, name: data.name, phone: data.phone, organization: data.organization ?? null, department: data.department ?? null, slackNotifyEnabled: data.slackNotifyEnabled } : prev)
       setUsers((prev) => prev.map((u) => u.id === data.id ? data : u))
       router.refresh()
       setEditSuccess('저장되었습니다.')
@@ -750,7 +753,7 @@ export default function UsersPage() {
                   />
                   <span className="text-sm text-gray-700">
                     Slack 알림 발송
-                    <span className="block text-xs text-gray-400">체크 해제 시 이 계정에게는 Slack DM(지연 리마인드 등)을 발송하지 않습니다.</span>
+                    <span className="block text-xs text-gray-400">체크 해제 시 이 계정에게는 Slack DM(지연 리마인드 등)과 알림 속 @멘션(예: 출고 완료 요청자 태그)을 보내지 않습니다. 멘션은 계정 이메일이 Slack 계정과 같아야 걸립니다.</span>
                   </span>
                 </label>
               </div>
@@ -823,6 +826,18 @@ export default function UsersPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">연락처</label>
                 <input type="tel" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} placeholder="010-0000-0000" className={inputClass} />
               </div>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editMySlackEnabled}
+                  onChange={(e) => setEditMySlackEnabled(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700">
+                  Slack 알림 발송
+                  <span className="block text-xs text-gray-400">체크 해제 시 나에게 오는 Slack DM(지연 리마인드 등)과 알림 속 @멘션(예: 출고 완료 요청자 태그)을 받지 않습니다. 멘션은 계정 이메일이 Slack 계정과 같아야 걸립니다.</span>
+                </span>
+              </label>
 
               <div className="border-t border-gray-100 pt-3">
                 <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">비밀번호 변경 (선택)</p>

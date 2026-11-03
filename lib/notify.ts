@@ -1100,7 +1100,7 @@ export async function notifyDomainEvent(input: {
   mentionUserIds?: string[]
   /** 태그 뒤 문구 (예: '출고가 완료됐습니다') */
   mentionText?: string | null
-  /** 링크 텍스트 (기본 '상세 보기'). 지정하면 굵게 표시 — 출고업무 '티켓 링크' (2026-11-03) */
+  /** 링크 텍스트 (기본 '상세 보기' = 마지막 줄). 지정하면 머리줄 끝에 '→ *라벨*'로 굵게 — 출고업무 '티켓 링크' (2026-11-03) */
   linkLabel?: string
 }): Promise<void> {
   try {
@@ -1136,11 +1136,12 @@ export async function notifyDomainEvent(input: {
       queueName: core.queue.name,
       requesterMention,
       render: (mentionLine) => {
-        const head = `*[${def.label}]* ${input.title}`
+        // linkLabel 지정(출고업무 등): 링크를 머리줄 끝에 '→ *라벨*'로 붙여 한 줄 절약 (2026-11-03). 미지정은 종전대로 마지막 줄 '상세 보기'
+        const head = input.linkLabel ? `*[${def.label}]* ${input.title} → *<${link}|${input.linkLabel}>*` : `*[${def.label}]* ${input.title}`
         const lines = input.fields.filter((f) => f.value).map((f) => `• ${f.label}: ${f.value}`)
         if (input.warning) lines.push(`:warning: ${input.warning}`)
         if (input.actorName) lines.push(`• 처리자: ${input.actorName}`)
-        lines.push(input.linkLabel ? `*<${link}|${input.linkLabel}>*` : `<${link}|상세 보기>`)
+        if (!input.linkLabel) lines.push(`<${link}|상세 보기>`)
         if (mentionLine) lines.push(mentionLine)
         const text = [head, ...lines].join('\n')
         return { text, blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }] }
