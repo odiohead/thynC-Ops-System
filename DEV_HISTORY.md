@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-11-03 14:10 | 출고업무 Slack 알림 메시지 수정 — 머리줄 병원명만·품목 제거·'티켓 링크' 굵게·미리보기 끔
+
+- PROD 첫 발송(SOR-202611-0001, 1회성 스크립트 — PM2 밖 실행은 `NODE_ENV=production` 필요, 아니면 test 채널로 강등) 후 피드백 반영 (`projects/stock_out_notify_design.md` §7)
+- `lib/stockOutNotify.ts`: 머리줄 병원명만(프로젝트명·SOR 코드 제거), 품목 줄 제거(등록·완료), 링크 기본값(연결 티켓 상세)으로 복귀 + `linkLabel: '티켓 링크'`
+- `lib/notify.ts` `notifyDomainEvent`: `linkLabel` 옵션(지정 시 `*<url|라벨>*` 굵게, 미지정 '상세 보기' 유지)
+- `lib/slack.ts` `slackPostMessage`: `unfurl_links/unfurl_media: false` — 링크 미리보기 카드 제거(전 알림 공통)
+- tsc·eslint 통과. 빌드·PROD는 요청 시
+
 ## 2026-11-03 09:30 | 공사업체 비활성화 — 설정 `/settings/constructors` 상태 토글, 프로젝트 셀렉트에서 숨김(이력 보존)
 
 → **PROD 배포 2026-11-03 (697c64d)**: 공사업체 비활성화 + 제3자 기기 비계약 공급 현황(11-02) + 출고업무 Slack 알림(11-02 세션) + 프로젝트 목록 도입형태 필드 전환(9f95c2d) 함께 반영. pull → 마이그 3건(`20261102170000_device_info_supply_tracked`·`20261102170100_hospital_device_supplies`·`20261103090000_constructors_is_active`) psql 적용·resolve(링BP supply_tracked=true 확인) → generate → 빌드 **1차 실패 ENOSPC(디스크 29G 100%)** → 원인: PROD/DEV `.next/cache`(3.2G+2.7G, 재생성 가능 webpack 캐시)·`~/.npm/_cacache`(7.3G) → 캐시 삭제 + `npm cache clean` 후 12G 여유, 콜드 빌드 성공 → `pm2 restart thync-prod`(협업 번들 불변 2108cacb) → 프로젝트·설정·병원 상세·신규 API 307 정상, 에러 로그 없음. journal(426M)은 미정리. **후속**: 설정 > Slack 알림에서 출고업무 채널·규칙 지정 + 공통 규칙에서 출고업무 제외(출고 알림 설계 §), 대웅 카트온 자료 수령 시 공급 수량 1회성 적재

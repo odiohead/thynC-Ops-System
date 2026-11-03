@@ -1095,6 +1095,8 @@ export async function notifyDomainEvent(input: {
   mentionUserIds?: string[]
   /** 태그 뒤 문구 (예: '출고가 완료됐습니다') */
   mentionText?: string | null
+  /** 링크 텍스트 (기본 '상세 보기'). 지정하면 굵게 표시 — 출고업무 '티켓 링크' (2026-11-03) */
+  linkLabel?: string
 }): Promise<void> {
   try {
     const def = NOTIFY_EVENT_MAP[input.event]
@@ -1132,7 +1134,7 @@ export async function notifyDomainEvent(input: {
         if (input.warning) lines.push(`:warning: ${input.warning}`)
         if (input.actorName) lines.push(`• 처리자: ${input.actorName}`)
         if (fixedMention) lines.push(fixedMention)
-        lines.push(`<${link}|상세 보기>`)
+        lines.push(input.linkLabel ? `*<${link}|${input.linkLabel}>*` : `<${link}|상세 보기>`)
         if (mentionLine) lines.push(mentionLine)
         const text = [head, ...lines].join('\n')
         return { text, blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }] }

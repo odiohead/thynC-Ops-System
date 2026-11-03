@@ -74,6 +74,8 @@ export async function slackPostMessage(channel: string, message: SlackMessage): 
         channel,
         text: message.text,
         ...(message.blocks ? { blocks: message.blocks } : {}),
+        unfurl_links: false, // 링크 미리보기(사이트 카드) 끔 — 2026-11-03 출고업무 알림 피드백, 전 알림 공통
+        unfurl_media: false,
       }),
     })
     const data = (await res.json()) as { ok: boolean; error?: string; ts?: string; channel?: string }
