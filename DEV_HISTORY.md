@@ -6,6 +6,8 @@
 
 ## 2026-11-03 15:40 | Slack 알림 규칙 멘션 옵션 '요청자' — 출고 완료 요청자 태그를 규칙으로 제어
 
+→ **PROD 배포 2026-11-03 (1a7d715, 링크 정정 0c94324 포함)**: pull → 마이그 없음 → 힙 4GB 빌드(디스크 60%) → `pm2 restart thync-prod`(협업 번들 불변) → 설정·출고요청 상세·로그인 등 정상, 재시작 후 에러 0. 빌드 중(05:20~05:26 UTC) 구 프로세스가 갱신 중인 `.next`를 읽어 `TypeError … clientModules` 15건 기록 — 빌드 창 한정 일시 오류(재시작 후 재발 없음, in-place 빌드 특성). 등록 알림 재발송(링크 확인)은 분류기 차단으로 미실행 — 사용자 지시 시 또는 실제 출고요청 등록으로 확인
+
 - 배경: 출고 완료 요청자 태그가 코드 고정(항상)이라 설정 화면에 안 보임(사용자 지적) → 규칙 멘션 어휘에 `requester`('요청자') 추가, `projects/stock_out_notify_design.md` §8
 - `lib/notify-routes.ts` `MENTION_MODES`에 `requester` · `lib/notify-events.ts` `NotifyEventDef.requester`(STOCK_OUT_COMPLETED true) · `lib/notify.ts` `dispatchToRoutes.requesterMention` + `buildMentionLine` case 'requester'(그 규칙 채널에만), 본문 고정 삽입 제거 · 설정 이벤트 탭 멘션 셀렉트에 '요청자'(해당 이벤트만, 안내 문구) · 라우트 POST/PUT: 요청자 미제공 이벤트에 'requester'면 400
 - 동작 변화: PROD에 '출고 완료' 규칙을 멘션 '요청자'로 추가해야 태그됨(기존 규칙 없음). 다른 이벤트·공통 규칙 무영향
