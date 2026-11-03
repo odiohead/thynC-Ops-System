@@ -6,6 +6,8 @@
 
 ## 2026-11-03 14:10 | 출고업무 Slack 알림 메시지 수정 — 머리줄 병원명만·품목 제거·'티켓 링크' 굵게·미리보기 끔
 
+→ **PROD 배포 2026-11-03 (3e76385)**: pull → 마이그 없음 → 힙 4GB 빌드(디스크 60%) → `pm2 restart thync-prod`(협업 번들 불변) → SOR-202611-0001 등록 알림 재발송(live, '출고요청접수' 채널, 로그 #18688 sent) — 머리줄 병원명만·품목 없음·`*티켓 링크*`(TK-202611-00092)
+
 - PROD 첫 발송(SOR-202611-0001, 1회성 스크립트 — PM2 밖 실행은 `NODE_ENV=production` 필요, 아니면 test 채널로 강등) 후 피드백 반영 (`projects/stock_out_notify_design.md` §7)
 - `lib/stockOutNotify.ts`: 머리줄 병원명만(프로젝트명·SOR 코드 제거), 품목 줄 제거(등록·완료), 링크 기본값(연결 티켓 상세)으로 복귀 + `linkLabel: '티켓 링크'`
 - `lib/notify.ts` `notifyDomainEvent`: `linkLabel` 옵션(지정 시 `*<url|라벨>*` 굵게, 미지정 '상세 보기' 유지)
