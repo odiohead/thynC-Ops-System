@@ -149,6 +149,9 @@ export async function POST(request: NextRequest) {
     if (NOTIFY_EVENT_MAP[eventType] && !NOTIFY_EVENT_MAP[eventType].implemented) {
       return NextResponse.json({ error: `'${NOTIFY_EVENT_MAP[eventType].label}'은 발송 지점이 아직 구현되지 않은 이벤트입니다.` }, { status: 400 })
     }
+    if (body.mentionMode === 'requester' && !NOTIFY_EVENT_MAP[eventType]?.requester) {
+      return NextResponse.json({ error: "멘션 '요청자'는 요청자를 제공하는 이벤트(예: 출고 완료)에서만 선택할 수 있습니다." }, { status: 400 })
+    }
     const ch = await prisma.notifyChannel.findUnique({ where: { id: channelId } })
     if (!ch) return NextResponse.json({ error: '채널을 선택하세요.' }, { status: 400 })
 

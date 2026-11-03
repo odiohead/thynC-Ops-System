@@ -33,6 +33,8 @@ export interface NotifyEventDef {
   /** 도메인 이벤트의 고정 업무 유형 */
   refType?: string
   conditions: NotifyCondition[]
+  /** true = 발생 지점이 요청자(mentionUserIds)를 제공 → 규칙 멘션 옵션 '요청자' 선택 가능 (2026-11-03) */
+  requester?: boolean
   /** 구 notify_event_toggles 키 — 마이그레이션 매핑용 */
   legacyToggle?: 'created' | 'statusChanged' | 'queueTransferred' | 'sevEscalated' | 'assigned'
 }
@@ -60,7 +62,7 @@ export const NOTIFY_EVENTS: readonly NotifyEventDef[] = [
   { key: 'VOC_CHAT_CHANGE_DETECTED', label: '채널톡 변경 감지', group: 'VOC', kind: 'domain', implemented: false, refType: 'AS', conditions: ['queues'], description: '접수 후 원천 상담이 바뀌어 반영 판단이 필요할 때' },
   // ── 출고업무 (2026-11-02 — projects/stock_out_notify_design.md) ──
   { key: 'STOCK_OUT_CREATED', label: '출고요청 등록', group: 'STOCK_OUT', kind: 'domain', implemented: true, refType: 'STOCK_OUT', conditions: ['queues', 'severities'], description: '프로젝트 출고요청으로 출고업무가 생성됐을 때 — 요청자·업무 구분·희망 출고일·품목·수량' },
-  { key: 'STOCK_OUT_COMPLETED', label: '출고 완료', group: 'STOCK_OUT', kind: 'domain', implemented: true, refType: 'STOCK_OUT', conditions: ['queues', 'severities'], description: "출고업무가 '완료'로 바뀌었을 때 — [출고 처리]·상태 직접 변경·티켓 종료 공통, 취소는 제외. 요청자를 Slack에서 태그" },
+  { key: 'STOCK_OUT_COMPLETED', label: '출고 완료', group: 'STOCK_OUT', kind: 'domain', implemented: true, refType: 'STOCK_OUT', requester: true, conditions: ['queues', 'severities'], description: "출고업무가 '완료'로 바뀌었을 때 — [출고 처리]·상태 직접 변경·티켓 종료 공통, 취소는 제외. 규칙 멘션을 '요청자'로 두면 출고요청 등록자를 Slack에서 태그" },
   // ── 운영 ──
   { key: 'OPS_CHANNELTALK_SYNC_FAILED', label: '채널톡 동기화 실패', group: 'OPS', kind: 'domain', implemented: false, conditions: [], description: '채널톡 폴링 틱이 오류로 끝났을 때' },
   { key: 'OPS_SHEET_UNLINKED', label: '시트 행 미연결', group: 'OPS', kind: 'domain', implemented: false, conditions: [], description: '연결 전용 모드에서 24시간 내 채널톡 경로 접수를 못 찾은 시트 행' },

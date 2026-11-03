@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { refTypeLabelMap } from '@/lib/ticket-domains/meta'
 import type { NotifyEventDef, NotifyCondition } from '@/lib/notify-events'
 
-const MENTION_LABELS: Record<string, string> = { none: '멘션 없음', queue_members: '그룹 멤버', here: '@here', channel: '@channel' }
+const MENTION_LABELS: Record<string, string> = { none: '멘션 없음', queue_members: '그룹 멤버', here: '@here', channel: '@channel', requester: '요청자' } // requester = 도메인 이벤트가 요청자를 제공할 때만(ev.requester, 2026-11-03)
 const REF_TYPE_LABELS: Record<string, string> = refTypeLabelMap('NONE')
 const STATUS_LABELS: Record<string, string> = { OPEN: '접수', ASSIGNED: '배정', IN_PROGRESS: '처리중', PENDING: '대기', RESOLVED: '해결', CLOSED: '종결' }
 
@@ -140,8 +140,9 @@ export default function EventsTab({ globalEnabled }: { globalEnabled: boolean })
                               </label>
                               <label className="text-xs text-muted-foreground">멘션
                                 <select value={f.mentionMode} onChange={(e) => setF({ ...f, mentionMode: e.target.value })} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground">
-                                  {masters.mentionModes.map((m) => <option key={m} value={m}>{MENTION_LABELS[m] ?? m}</option>)}
+                                  {masters.mentionModes.filter((m) => m !== 'requester' || ev.requester).map((m) => <option key={m} value={m}>{MENTION_LABELS[m] ?? m}</option>)}
                                 </select>
+                                {ev.requester && <span className="mt-0.5 block text-[11px] text-muted-foreground">&lsquo;요청자&rsquo; = 요청 등록자를 Slack에서 태그 (계정 &lsquo;Slack 발송&rsquo; ON + 이메일 매핑 시 @멘션, 아니면 이름)</span>}
                               </label>
                               <label className="text-xs text-muted-foreground">규칙 이름(선택)
                                 <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder={`${ev.label} → 채널`} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground" />

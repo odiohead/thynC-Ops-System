@@ -16,11 +16,11 @@ import { NOTIFY_EVENT_KEYS } from '@/lib/notify-events'
 export const NOTIFY_ROUTE_EVENTS: readonly string[] = NOTIFY_EVENT_KEYS
 export type NotifyRouteEvent = string
 
-export const MENTION_MODES = ['none', 'queue_members', 'channel', 'here'] as const
+export const MENTION_MODES = ['none', 'queue_members', 'channel', 'here', 'requester'] as const // requester = 요청자(도메인 이벤트가 요청자를 제공할 때만 유효, 2026-11-03)
 export type MentionMode = (typeof MENTION_MODES)[number]
 
 /** 멘션 강도 — 같은 채널에 여러 규칙이 걸리면 강한 쪽을 쓴다 */
-const MENTION_RANK: Record<MentionMode, number> = { none: 0, queue_members: 1, here: 2, channel: 3 }
+const MENTION_RANK: Record<MentionMode, number> = { none: 0, requester: 1, queue_members: 2, here: 3, channel: 4 } // requester는 개인 태그라 그룹 멤버보다 약한 쪽
 
 export interface DigestOpts {
   kinds: ('overdue' | 'warning')[]

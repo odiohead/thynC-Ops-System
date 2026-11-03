@@ -10,6 +10,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { NOTIFY_ROUTE_EVENTS, MENTION_MODES, DEFAULT_DIGEST_OPTS } from '@/lib/notify-routes'
+import { NOTIFY_EVENT_MAP } from '@/lib/notify-events'
 import { SLA_METRICS } from '@/lib/sla'
 import { TICKET_STATUSES, TICKET_SEVERITIES } from '@/lib/slaSettings'
 
@@ -67,6 +68,9 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         ? Math.floor(body.digestHour)
         : before.digestHour
 
+  if (body.mentionMode === 'requester' && !NOTIFY_EVENT_MAP[eventType]?.requester) {
+    return NextResponse.json({ error: "멘션 '요청자'는 요청자를 제공하는 이벤트(예: 출고 완료)에서만 선택할 수 있습니다." }, { status: 400 })
+  }
   if (eventType === 'DAILY_DIGEST' && digestHour == null) {
     return NextResponse.json({ error: '일일 요약 규칙은 발송 시각(0~23시, KST)이 필요합니다.' }, { status: 400 })
   }

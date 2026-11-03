@@ -90,3 +90,9 @@
 - 머리줄 `*[출고요청 등록]* 병원명`만 (프로젝트명·SOR 코드 제거) · 품목 줄 제거(등록·완료 공통) · 링크 텍스트 '상세 보기' → **`*티켓 링크*`**(굵게). **링크 대상은 출고요청 상세 `/stock-out-requests/[id]` 유지** — 1차 반영 때 티켓 상세로 바꿨다가 정정(사용자 원칙: 도메인 이벤트 알림은 도메인 레코드로 링크, 티켓 관점은 공통 규칙 '전체 티켓 등록/상태 변경'이 담당) · Slack 링크 미리보기 카드 끔(`chat.postMessage` `unfurl_links/unfurl_media: false` — 전 알림 공통)
 - `notifyDomainEvent`에 `linkLabel` 옵션 추가(미지정이면 기존 '상세 보기' 그대로 — 다른 도메인 이벤트 무영향)
 
+## 8. 멘션 옵션 '요청자' (2026-11-03 — 사용자: "요청자 멘션 기능이 안 보인다")
+
+- 종전: 출고 완료 알림은 코드에서 요청자를 **항상** 태그(규칙 옵션과 무관) → 설정 화면에 보이지 않아 운영자가 확인·제어 불가
+- 개정: 규칙 멘션 어휘에 `requester`('요청자') 추가(`MENTION_MODES`). 이벤트 카탈로그 `requester: true`인 이벤트(현재 `STOCK_OUT_COMPLETED`)에서만 선택 가능 — 설정 화면 옵션 필터 + 라우트 API 400 검증. `notifyDomainEvent`는 `mentionUserIds`로 요청자 멘션 문구를 만들어 `dispatchToRoutes(requesterMention)`로 넘기고, `buildMentionLine`이 규칙 멘션이 'requester'인 채널에만 붙인다(본문 고정 삽입 제거)
+- PROD 설정: '출고 완료' 규칙을 추가할 때 멘션 = '요청자'. 태그는 요청자 계정 'Slack 발송' ON + 이메일 매핑 시 `@멘션`, 아니면 이름만
+

@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-11-03 15:40 | Slack 알림 규칙 멘션 옵션 '요청자' — 출고 완료 요청자 태그를 규칙으로 제어
+
+- 배경: 출고 완료 요청자 태그가 코드 고정(항상)이라 설정 화면에 안 보임(사용자 지적) → 규칙 멘션 어휘에 `requester`('요청자') 추가, `projects/stock_out_notify_design.md` §8
+- `lib/notify-routes.ts` `MENTION_MODES`에 `requester` · `lib/notify-events.ts` `NotifyEventDef.requester`(STOCK_OUT_COMPLETED true) · `lib/notify.ts` `dispatchToRoutes.requesterMention` + `buildMentionLine` case 'requester'(그 규칙 채널에만), 본문 고정 삽입 제거 · 설정 이벤트 탭 멘션 셀렉트에 '요청자'(해당 이벤트만, 안내 문구) · 라우트 POST/PUT: 요청자 미제공 이벤트에 'requester'면 400
+- 동작 변화: PROD에 '출고 완료' 규칙을 멘션 '요청자'로 추가해야 태그됨(기존 규칙 없음). 다른 이벤트·공통 규칙 무영향
+- tsc·eslint 통과. 링크 정정(0c94324)과 함께 PROD 반영 예정
+
 ## 2026-11-03 15:00 | 출고업무 Slack 알림 링크 정정 — 출고요청 상세로 복귀 (도메인 알림 = 도메인 링크 원칙)
 
 - 14:10 반영에서 링크를 연결 티켓 상세로 바꾼 것이 오류(사용자 지적) → `link: /stock-out-requests/[id]`로 복귀(등록·완료), 라벨 '티켓 링크' 굵게는 유지

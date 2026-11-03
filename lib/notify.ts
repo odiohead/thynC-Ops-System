@@ -161,6 +161,8 @@ async function dispatchToRoutes(args: {
   sig?: string | null
   queueId?: number
   queueName?: string
+  /** 규칙 멘션 '요청자'일 때 쓰는 문구 (예: '<@U…> 출고가 완료됐습니다') — 도메인 이벤트만 제공 */
+  requesterMention?: string | null
   render: (mentionLine: string | null) => { text: string; blocks: unknown[] }
 }): Promise<number> {
   const channels = args.eventTypes.length > 0 ? await resolveChannels(args.eventTypes, args.match) : []
@@ -187,7 +189,7 @@ async function dispatchToRoutes(args: {
   }
 
   for (const ch of channels) {
-    const mentionLine = await buildMentionLine(ch, args.queueId, args.queueName)
+    const mentionLine = await buildMentionLine(ch, args.queueId, args.queueName, args.requesterMention)
     const { text, blocks } = args.render(mentionLine)
     await dispatchToChannel({
       intendedChannel: ch.slackChannelId,
@@ -225,9 +227,12 @@ async function queueNotifyChannel(queueId: number): Promise<ResolvedChannel | nu
   }
 }
 
-/** 채널의 mention_mode → 멘션 문구. 전역 토글(notify_queue_mentions·notify_sev1_channel)이 킬스위치로 남는다 */
-async function buildMentionLine(ch: ResolvedChannel, queueId?: number, queueName?: string): Promise<string | null> {
+/** 채널의 mention_mode → 멘션 문구. 전역 토글(notify_queue_mentions·notify_sev1_channel)이 킬스위치로 남는다.
+ *  'requester'는 도메인 이벤트가 넘긴 요청자 멘션 문구(requesterMention)를 그대로 — 없으면 멘션 없음 (2026-11-03) */
+async function buildMentionLine(ch: ResolvedChannel, queueId?: number, queueName?: string, requesterMention?: string | null): Promise<string | null> {
   switch (ch.mentionMode) {
+    case 'requester':
+      return requesterMention ?? null
     case 'channel':
       return (await sev1ChannelOn()) ? '<!channel>' : null
     case 'here':
@@ -1091,7 +1096,7 @@ export async function notifyDomainEvent(input: {
   /** 경고 줄(선택) — 불일치·미식별 등 */
   warning?: string | null
   link?: string | null
-  /** 고정 태그 대상 시스템 계정 id(예: 출고 요청자, 2026-11-02) — 이메일로 Slack ID 매핑해 `<@U…>`. 계정 Slack 발송 OFF·매핑 실패는 이름만. 규칙의 멘션 옵션과 별개로 항상 붙는다 */
+  /** 요청자 계정 id(예: 출고 요청자) — 규칙 멘션 옵션이 '요청자'일 때만 태그(2026-11-03 개정 — 종전 '항상'). 이메일로 Slack ID 매핑해 `<@U…>`, 계정 Slack 발송 OFF·매핑 실패는 이름만 */
   mentionUserIds?: string[]
   /** 태그 뒤 문구 (예: '출고가 완료됐습니다') */
   mentionText?: string | null
@@ -1120,6 +1125,7 @@ export async function notifyDomainEvent(input: {
       }
       if (parts.length) fixedMention = [parts.join(' '), input.mentionText].filter(Boolean).join(' ')
     }
+    const requesterMention = fixedMention // 규칙 멘션 '요청자'를 고른 채널에만 붙는다 (buildMentionLine)
     await dispatchToRoutes({
       eventTypes: [input.event],
       match: { refType: core.refType, queueId: core.queueId, ctiId: core.ctiId, severity: core.severity },
@@ -1128,12 +1134,12 @@ export async function notifyDomainEvent(input: {
       refCode: domainRefCode(core) ?? core.ticketCode,
       queueId: core.queueId,
       queueName: core.queue.name,
+      requesterMention,
       render: (mentionLine) => {
         const head = `*[${def.label}]* ${input.title}`
         const lines = input.fields.filter((f) => f.value).map((f) => `• ${f.label}: ${f.value}`)
         if (input.warning) lines.push(`:warning: ${input.warning}`)
         if (input.actorName) lines.push(`• 처리자: ${input.actorName}`)
-        if (fixedMention) lines.push(fixedMention)
         lines.push(input.linkLabel ? `*<${link}|${input.linkLabel}>*` : `<${link}|상세 보기>`)
         if (mentionLine) lines.push(mentionLine)
         const text = [head, ...lines].join('\n')
