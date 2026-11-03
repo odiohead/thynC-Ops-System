@@ -2,7 +2,7 @@
  * 출고업무 Slack 알림 (2026-11-02 — projects/stock_out_notify_design.md)
  *
  * 도메인 이벤트 2종을 `notifyDomainEvent`(lib/notify.ts — 업무 알림 단일 경로)로 보낸다.
- * 메시지(2026-11-03 피드백): 머리줄 '[이벤트] 병원명'만, 품목 줄 없음, 링크는 '*티켓 링크*'(연결 티켓 상세), Slack 링크 미리보기 끔(lib/slack.ts unfurl off). 채널·사용 여부는 설정 > Slack 알림의 라우팅 규칙.
+ * 메시지(2026-11-03 피드백): 머리줄 '[이벤트] 병원명'만, 품목 줄 없음, 링크는 '*티켓 링크*' 라벨로 **출고요청 상세**(/stock-out-requests/[id] — 도메인 알림은 도메인 레코드 링크, 티켓 관점은 공통 규칙 담당), Slack 링크 미리보기 끔(lib/slack.ts unfurl off). 채널·사용 여부는 설정 > Slack 알림의 라우팅 규칙.
  *  - STOCK_OUT_CREATED   : 출고요청 생성 직후 (POST /api/stock-out-requests)
  *  - STOCK_OUT_COMPLETED : 출고업무 상태가 '완료'로 진입할 때 — `notifyTicketChanged`의 상태 전이 판정에서 호출(경로 3종 공통), 취소는 제외.
  *                          요청자(출고요청 등록자)를 Slack에서 태그
@@ -49,8 +49,9 @@ export async function notifyStockOutCreated(requestId: number): Promise<void> {
         { label: '요청자', value: r.createdBy?.name ?? '' },
         { label: '업무 구분', value: purposeOf(r.purpose) },
         { label: '희망 출고일', value: r.requestDate.toISOString().slice(0, 10) }, // @db.Date — UTC 자정 저장
-      ], // 품목 줄 제거 (2026-11-03 피드백) — 품목은 티켓/출고요청 상세에서
-      linkLabel: '티켓 링크', // 링크는 기본값 = 연결 티켓 상세 (2026-11-03)
+      ], // 품목 줄 제거 (2026-11-03 피드백) — 품목은 출고요청 상세에서
+      link: `/stock-out-requests/${r.id}`, // 도메인 알림 = 도메인 레코드 링크 (티켓 상세 아님 — 2026-11-03 정정, 공통 규칙만 티켓 관점)
+      linkLabel: '티켓 링크',
     })
   } catch (err) {
     console.error('[stock-out-notify] 등록 알림 예외:', err)
@@ -72,6 +73,7 @@ export async function notifyStockOutCompletedByTicket(ticketId: number, actorNam
       ], // 품목 줄 제거 (2026-11-03 피드백, 등록 알림과 동일)
       mentionUserIds: r.createdById ? [r.createdById] : [],
       mentionText: '출고가 완료됐습니다',
+      link: `/stock-out-requests/${r.id}`,
       linkLabel: '티켓 링크',
     })
   } catch (err) {
