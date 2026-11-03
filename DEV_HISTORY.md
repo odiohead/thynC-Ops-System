@@ -6,6 +6,8 @@
 
 ## 2026-11-03 09:30 | 공사업체 비활성화 — 설정 `/settings/constructors` 상태 토글, 프로젝트 셀렉트에서 숨김(이력 보존)
 
+→ **PROD 배포 2026-11-03 (697c64d)**: 공사업체 비활성화 + 제3자 기기 비계약 공급 현황(11-02) + 출고업무 Slack 알림(11-02 세션) + 프로젝트 목록 도입형태 필드 전환(9f95c2d) 함께 반영. pull → 마이그 3건(`20261102170000_device_info_supply_tracked`·`20261102170100_hospital_device_supplies`·`20261103090000_constructors_is_active`) psql 적용·resolve(링BP supply_tracked=true 확인) → generate → 빌드 **1차 실패 ENOSPC(디스크 29G 100%)** → 원인: PROD/DEV `.next/cache`(3.2G+2.7G, 재생성 가능 webpack 캐시)·`~/.npm/_cacache`(7.3G) → 캐시 삭제 + `npm cache clean` 후 12G 여유, 콜드 빌드 성공 → `pm2 restart thync-prod`(협업 번들 불변 2108cacb) → 프로젝트·설정·병원 상세·신규 API 307 정상, 에러 로그 없음. journal(426M)은 미정리. **후속**: 설정 > Slack 알림에서 출고업무 채널·규칙 지정 + 공통 규칙에서 출고업무 제외(출고 알림 설계 §), 대웅 카트온 자료 수령 시 공급 수량 1회성 적재
+
 - **배경**: 더 이상 이용하지 않는 공사업체도 연결 프로젝트 이력은 남아야 하므로 삭제 대신 비활성(사용자 요청)
 - **DB**: `constructors.is_active BOOLEAN NOT NULL DEFAULT true` — 마이그 `20261103090000_constructors_is_active`(dev2 적용·resolve). Prisma `Contractor.isActive`
 - **API**: `GET /api/constructors` — `?active=1`이면 활성만, 기본 전체(비활성 뒤 정렬) + `projectCount`. `PUT /api/constructors/[code]` — `{ isActive }` 단독 본문이면 토글만(다른 필드 불변), 일반 수정 본문에 `isActive` 동봉도 허용
