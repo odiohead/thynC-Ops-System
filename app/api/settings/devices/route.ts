@@ -14,18 +14,19 @@ export async function GET() {
     orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
     include: {
       // usageCount = 프로젝트 수량행 + 원장 개체(시리얼) + 딜 수량행 (hospital_device_registry_design.md §5.1)
-      _count: { select: { devices: true, deviceUnits: true, salesDealDevices: true } },
+      _count: { select: { devices: true, deviceUnits: true, salesDealDevices: true, hospitalSupplies: true } },
     },
   })
 
   return NextResponse.json({
     devices: devices.map((d) => ({
       ...toDeviceInfoDto(d),
-      usageCount: d._count.devices + d._count.deviceUnits + d._count.salesDealDevices,
+      usageCount: d._count.devices + d._count.deviceUnits + d._count.salesDealDevices + d._count.hospitalSupplies,
       usage: {
         projects: d._count.devices,
         registry: d._count.deviceUnits,
         deals: d._count.salesDealDevices,
+        supplies: d._count.hospitalSupplies, // 비계약 공급 현황 행 (2026-11-02)
       },
     })),
   })

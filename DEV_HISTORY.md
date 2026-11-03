@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-11-03 09:30 | 공사업체 비활성화 — 설정 `/settings/constructors` 상태 토글, 프로젝트 셀렉트에서 숨김(이력 보존)
+
+- **배경**: 더 이상 이용하지 않는 공사업체도 연결 프로젝트 이력은 남아야 하므로 삭제 대신 비활성(사용자 요청)
+- **DB**: `constructors.is_active BOOLEAN NOT NULL DEFAULT true` — 마이그 `20261103090000_constructors_is_active`(dev2 적용·resolve). Prisma `Contractor.isActive`
+- **API**: `GET /api/constructors` — `?active=1`이면 활성만, 기본 전체(비활성 뒤 정렬) + `projectCount`. `PUT /api/constructors/[code]` — `{ isActive }` 단독 본문이면 토글만(다른 필드 불변), 일반 수정 본문에 `isActive` 동봉도 허용
+- **설정 화면**: '상태' 열(활성/비활성 배지), 관리 열에 [비활성화]/[활성화] 버튼(비활성화는 확인창 — 연결 프로젝트 수 안내), 비활성 행 회색·취소선, 업체명 옆 '프로젝트 n', [삭제]는 연결 프로젝트 0건일 때만 노출(서버 409 규칙 그대로)
+- **프로젝트**: 등록(`/projects/new`)·상세 수정 셀렉트는 `?active=1`로 활성만 — 상세는 이미 연결된 업체가 비활성이면 선택값 보존용 `이름 (비활성)` 옵션 1개 유지(저장해도 연결 유지). 목록 필터(`ProjectFilters`)는 이력 조회용이라 전체 유지하되 `(비활성)` 표기. 목록 표시(`contractor.name`)는 영향 없음
+- **검증**: tsc(힙 4GB)·eslint 통과. 화면 미확인 — dev2 빌드는 요청 시
+- 파일: `prisma/schema.prisma`, `prisma/migrations/20261103090000_constructors_is_active/`, `app/api/constructors/{route.ts,[code]/route.ts}`, `app/settings/constructors/page.tsx`, `app/projects/{new/page.tsx,[code]/page.tsx,_components/ProjectFilters.tsx}`, `README.md`
+
+## 2026-11-02 22:30 | 출고업무 Slack 알림 — 출고요청 등록·출고 완료(요청자 태그) + 전용 채널
+
+- 사용자 요청: ① 출고요청으로 출고업무 생성 시 지정 채널 알림 ② 처리 완료 시 요청자 태그 알림 ③ 출고업무 전용 채널. 설계 `projects/stock_out_notify_design.md`(결정: 채널은 설정 화면 지정·운영 공지 공통 규칙에서 출고업무 제외·취소 미발송·요청자만 태그 — 이메일=Slack 계정). 티켓 공통 알림 동작은 변경 없음
+- 구현: 이벤트 카탈로그 그룹 '출고업무' + `STOCK_OUT_CREATED`·`STOCK_OUT_COMPLETED` · `notifyDomainEvent`에 `mentionUserIds`·`mentionText`(계정 Slack 발송 ON + 이메일 매핑 → `<@U…>`, 아니면 이름) · `lib/stockOutNotify.ts`(신규 — 메시지 조립) · 생성은 `POST /api/stock-out-requests` 커밋 후, 완료는 `notifyTicketChanged` 상태 전이 판정(출고업무 → CLOSED ∧ 도메인 상태 '완료')에서 — 완료 진입 경로 3종([출고 처리]·상태 직접 변경·티켓 종료) 공통·실제 전이 1회
+- 검증(dev2 — 실제 서버 + 로그인 쿠키, 요청자 이준호, Slack test 모드): tsc · 설정 API로 채널·규칙 2개·공통 규칙 #4·#5 출고업무 해제 → 생성 알림 출고 채널 1건·운영 공지 0 / 상태 직접 완료 → 완료 알림 1건 `<@U072NJMK363> 출고가 완료됐습니다` / 완료 재저장 0 / 취소 0 / 티켓 종료 → 완료 동기화 + 알림 1건 · Playwright 설정 화면 '출고업무' 그룹 2이벤트 '발송 중'·규칙 표시. [출고 처리] 실행은 재고 부작용으로 생략(같은 경로). 테스트 중 지운 티켓 코드 재사용으로 등록 알림 1시간 중복 방지가 걸려 기준선 미저장 → 테스트 로그 18행 정리 후 재검증(운영 무관 — 설계안 §6)
+- dev2 설정: 채널 '출고업무(dev 테스트)'·규칙 #8·#9·공통 규칙 #4·#5 출고업무 제외. 영향: `lib/notify-events.ts`, `lib/notify.ts`, `lib/stockOutNotify.ts`(신규), `app/api/stock-out-requests/route.ts`, README, projects/README·설계안. **PROD 미반영** — 배포 후 설정 화면에서 채널·규칙 지정 + 공통 규칙에서 출고업무 해제
+
 ## 2026-11-02 21:40 | [데이터] 프로젝트 도입형태(intro_type_id) 딜 기준 1회성 보정 — dev2·PROD + 목록 필드 전환
 
 - **배경**: 프로젝트 목록 '도입형태'가 비어 보임 → 목록은 옛 `projects.contract_type`, 상세는 `intro_type_id`를 보는 불일치 + `intro_type_id` 미입력 108건(dev2). 사용자 결정: 기능 변경 없이 **딜 데이터로 채울 수 있는 프로젝트만** 데이터 갱신

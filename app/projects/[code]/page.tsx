@@ -235,7 +235,7 @@ export default function ProjectDetailPage() {
     Promise.all([
       loadProject(),
       fetch('/api/settings/devices').then((r) => r.json()),
-      fetch('/api/constructors').then((r) => r.json()),
+      fetch('/api/constructors?active=1').then((r) => r.json()), // 비활성 업체는 셀렉트에서 숨김 — 현재 연결된 비활성 업체는 아래 렌더에서 '(비활성)'으로 유지 (2026-11-03)
       fetch('/api/settings/build-status').then((r) => r.json()),
       fetch('/api/auth/me').then((r) => r.json()),
       fetch('/api/settings/intro-type').then((r) => r.json()),
@@ -674,6 +674,10 @@ export default function ProjectDetailPage() {
                   {constructors.map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
+                  {/* 이미 연결된 업체가 비활성이면 선택값 보존용으로만 노출 (이력 유지) */}
+                  {constructorId && project?.contractor && !constructors.some((c) => String(c.id) === constructorId) && (
+                    <option value={constructorId}>{project.contractor.name} (비활성)</option>
+                  )}
                 </select>
               </div>
 

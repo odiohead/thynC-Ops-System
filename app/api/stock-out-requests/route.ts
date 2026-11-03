@@ -7,6 +7,7 @@ import { nextSorCode, validateStockOutLines } from '@/lib/stockOut'
 import { isStockOutPurpose, type StockOutPurpose } from '@/lib/stockOutShared'
 import { createTicketForStockOut } from '@/lib/ticket-domains/stockOut'
 import { notifyTicketCreated } from '@/lib/notify'
+import { notifyStockOutCreated } from '@/lib/stockOutNotify'
 import { syncTicketClocksSafe } from '@/lib/sla'
 
 export const dynamic = 'force-dynamic'
@@ -185,6 +186,7 @@ export async function POST(request: NextRequest) {
   // Slack 알림 — 티켓 파이프라인 단일 소스 (규칙 1), best-effort
   syncTicketClocksSafe(ticketId)
   notifyTicketCreated({ ticketId, actorName: user.name, actorId: user.userId }).catch(() => {})
+  notifyStockOutCreated(created.id).catch(() => {}) // 출고업무 전용 '출고요청 등록' 도메인 이벤트 (2026-11-02, projects/stock_out_notify_design.md)
 
   return NextResponse.json({ stockOutRequest }, { status: 201 })
 }

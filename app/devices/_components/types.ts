@@ -171,6 +171,8 @@ export interface CoverageRow {
   expectedByType?: Record<'일반' | '라이트', number | null>
   /** 계약완료 딜의 상품유형 존재 여부(수량 무관 — 판매유형 배지용, 2026-09-02) */
   dealProductTypes?: Record<'일반' | '라이트', boolean>
+  /** 비계약 공급 수량(대웅 직판) 링BP 합 — 혈압계 셀 툴팁 (2026-11-02) */
+  supplyBp?: number | null
 }
 
 export type CoverageProductTypeKey = '일반' | '라이트' | '미지정'

@@ -244,6 +244,12 @@ export interface ModelSummary {
   /** hard만 activeForCompare − expected */
   diff: number | null
   compare: 'hard' | 'soft' | 'none'
+  /** 기대치 출처 — DEAL: 계약완료 딜 수량 / SUPPLY: 비계약 공급 수량(대웅 직판) / BOTH: 합산 (third_party_supply_design.md §5.1, 2026-11-02) */
+  expectedSource: 'DEAL' | 'SUPPLY' | 'BOTH' | null
+  /** 기기 마스터 '공급 현황 관리' 플래그 — true면 배치·공급 0이어도 요약 행 상시 노출(입력 진입점) */
+  supplyTracked: boolean
+  /** 비계약 공급 현황 행(병원×기기 1행) — 없으면 null(파악 안 됨) */
+  supply: { quantity: number; supplier: string; checkedOn: string | null; note: string | null; updatedByName: string | null; updatedAt: string } | null
   /** 배치 중 유닛의 WMS 일시 매칭 집계 — out=OUT 매치, inStock=IN_STOCK 매치, unmatched=매치 없음(그 외 상태 포함) */
   wms: { out: number; inStock: number; unmatched: number }
   lastEvent: { type: string; on: string } | null
@@ -324,7 +330,7 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
   if (!hospital) return null
   const today = todayKst()
   const since = ymdMinusDays(today, 30)
-  const [expected, models, activeUnits, recRows, lastRows, wards, unassigned, lastEvent, lastImport, ptCtx, replAll, repl30, dealActRows, replByDeal, dealModelAgg] = await Promise.all([
+  const [expected, models, activeUnits, recRows, lastRows, wards, unassigned, lastEvent, lastImport, ptCtx, replAll, repl30, dealActRows, replByDeal, dealModelAgg, supplyModels, supplyRows] = await Promise.all([
     getExpectedDeviceCount(hospitalCode, client),
     loadTrackedModels(client),
     client.hospitalDevice.findMany({
@@ -369,9 +375,23 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
        GROUP BY 1`,
     countReplacementsByDeal(hospitalCode, client),
     fetchDealModelAgg(hospitalCode, client),
+    // 비계약 공급 현황(대웅 직판) — 공급 관리 기기 마스터 + 이 병원 공급 행 (third_party_supply_design.md §5.1, 2026-11-02)
+    client.deviceInfo.findMany({
+      where: { supplyTracked: true },
+      select: { id: true, deviceModel: true, deviceName: true, deviceClass: true, onpremDeviceType: true, serialPattern: true, isActive: true, sortOrder: true },
+    }),
+    client.hospitalDeviceSupply.findMany({
+      where: { hospitalCode },
+      select: { deviceInfoId: true, quantity: true, supplier: true, checkedOn: true, note: true, updatedAt: true, updatedBy: { select: { name: true } } },
+    }),
   ])
   // 계약 수량(B-25) — 딜 모델별 수량 1순위, 디바이스수 폴백
   const contract = computeContractExpected(expected.contractedDeals, dealModelAgg)
+  // 공급 관리 기기는 원장 대상(serial_tracked)이 아니어도 요약 행에 합류 — 정렬은 sortOrder·id
+  const supplyTrackedIds = new Set(supplyModels.map((m) => m.id))
+  for (const sm of supplyModels) if (!models.some((m) => m.id === sm.id)) models.push(sm)
+  models.sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
+  const supplyBy = new Map(supplyRows.map((r) => [r.deviceInfoId, r]))
 
   // 배치 중 유닛의 모델별 수 + WMS 일시 매칭 집계(배치 1쿼리) + 상품유형별 소계(B-22)
   const modelById = new Map(models.map((m) => [m.id, m]))
@@ -418,7 +438,9 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
     const activeEval = evalBy.get(m.id) ?? 0
     const activeForCompare = active - activeEval
     const recovered30d = recBy.get(m.id) ?? 0
-    if (!m.isActive && active === 0 && recovered30d === 0) continue
+    const supRow = supplyBy.get(m.id) ?? null
+    const isSupplyTracked = supplyTrackedIds.has(m.id)
+    if (!m.isActive && active === 0 && recovered30d === 0 && !supRow) continue
     let compare: ModelSummary['compare'] = 'none'
     let exp: number | null = null
     let diff: number | null = null
@@ -436,6 +458,15 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
       exp = contract.bpExpected
       diff = activeForCompare - exp
     }
+    // 비계약 공급 수량(대웅 직판) — 딜 기대치에 합산(쟁점 2: 둘 다 있으면 BOTH), 공급만 있으면 공급이 곧 기대치
+    const dealExp = exp
+    let expectedSource: ModelSummary['expectedSource'] = dealExp != null ? 'DEAL' : null
+    if (supRow) {
+      exp = (dealExp ?? 0) + supRow.quantity
+      compare = 'hard'
+      diff = activeForCompare - exp
+      expectedSource = dealExp != null ? 'BOTH' : 'SUPPLY'
+    }
     // 상품유형 소계 — 키: 계약 딜 유형 ∪ 이 모델 배치 유형(+미지정은 배치가 있을 때만)
     const ptm = ptBy.get(m.id) ?? new Map<ProductTypeKey, { active: number; evalN: number }>()
     const keys: ProductTypeKey[] = [...PRODUCT_TYPES.filter((t) => expectedByType.has(t) || ptm.has(t)), ...(ptm.has(PRODUCT_TYPE_UNSET_LABEL) ? [PRODUCT_TYPE_UNSET_LABEL as ProductTypeKey] : [])]
@@ -445,8 +476,9 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
       const forCompare = c.active - c.evalN
       // B-25: 유형별 기대 수량도 모델별 — ECG/SpO2/BP 각각 그 유형 딜의 모델 행 합(폴백은 ECG에만·SpO2는 soft면 디바이스수)
       const bt = k !== PRODUCT_TYPE_UNSET_LABEL ? contract.byType.get(k as ProductType) : undefined
+      // 공급 수량만 있는 모델(딜 없음)은 상품유형 축이 없으므로 유형별 기대치 null(대웅 직판은 일반/라이트 개념 밖)
       const expT =
-        k === PRODUCT_TYPE_UNSET_LABEL || compare === 'none'
+        k === PRODUCT_TYPE_UNSET_LABEL || compare === 'none' || (supRow && dealExp == null)
           ? null
           : m.onpremDeviceType === 1
             ? (bt?.ecg ?? 0)
@@ -470,6 +502,11 @@ export async function getHospitalDeviceSummary(hospitalCode: string, client: DbC
       expected: exp,
       diff,
       compare,
+      expectedSource,
+      supplyTracked: isSupplyTracked,
+      supply: supRow
+        ? { quantity: supRow.quantity, supplier: supRow.supplier, checkedOn: ymd(supRow.checkedOn), note: supRow.note, updatedByName: supRow.updatedBy?.name ?? null, updatedAt: supRow.updatedAt.toISOString() }
+        : null,
       wms: wmsBy.get(m.id) ?? { out: 0, inStock: 0, unmatched: active },
       lastEvent: lastBy.get(m.id) ?? null,
       byProductType,
@@ -611,6 +648,8 @@ export interface CoverageRow {
   byProductType: Record<CoverageProductTypeKey, CoverageModelCounts>
   /** 상품유형별 계약완료 딜 대웅 디바이스 수 합(축약 표 심전계 셀 툴팁용) — 그 유형 딜이 없으면 null */
   expectedByType: Record<'일반' | '라이트', number | null>
+  /** 비계약 공급 수량(대웅 직판) 링BP 합 — 혈압계 셀 툴팁용, 행 없으면 null (2026-11-02) */
+  supplyBp?: number | null
 }
 
 export type CoverageProductTypeKey = '일반' | '라이트' | '미지정'
@@ -716,6 +755,11 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
         FROM hospital_device_import_batches
        WHERE cancelled_at IS NULL
        ORDER BY hospital_code, created_at DESC
+    ), sup AS (
+      -- 비계약 공급 수량(대웅 직판) — 링BP(온프렘 10) 합 (third_party_supply_design.md §5.3 — 축약 표 혈압계 셀 툴팁용, 2026-11-02)
+      SELECT s.hospital_code, sum(s.quantity) FILTER (WHERE di.onprem_device_type = 10)::int AS supply_bp
+        FROM hospital_device_supplies s JOIN device_info di ON di.id = s.device_info_id
+       GROUP BY 1
     ), rows AS (
       SELECT p.hospital_code, p.hospital_name, p.status,
              coalesce(dl.deals, 0) AS deals, dl.expected,
@@ -726,6 +770,7 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
              coalesce(act.pt_l_ecg, 0) AS pt_l_ecg, coalesce(act.pt_l_spo2, 0) AS pt_l_spo2, coalesce(act.pt_l_bp, 0) AS pt_l_bp,
              coalesce(act.pt_u_ecg, 0) AS pt_u_ecg, coalesce(act.pt_u_spo2, 0) AS pt_u_spo2, coalesce(act.pt_u_bp, 0) AS pt_u_bp,
              dl.expected_normal, dl.expected_lite, dl.deal_normal, dl.deal_lite,
+             sup.supply_bp,
              CASE WHEN dl.expected IS NOT NULL THEN coalesce(act.ecg, 0) - dl.expected END AS diff,   -- ecg는 평가용 제외(§9.1) · expected NULL(딜 0건/전 딜 수량 미입력)이면 대조 없음
              coalesce(rec.recovered30d, 0) AS recovered30d,
              coalesce(dl.pt_kinds, 0) >= 2 AS product_type_mixed,
@@ -738,6 +783,7 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
         LEFT JOIN rec ON rec.hospital_code = p.hospital_code
         LEFT JOIN lev ON lev.hospital_code = p.hospital_code
         LEFT JOIN limp ON limp.hospital_code = p.hospital_code
+        LEFT JOIN sup ON sup.hospital_code = p.hospital_code
     )`
   const whereParts: Prisma.Sql[] = [Prisma.sql`TRUE`]
   if (filter === 'unregistered') whereParts.push(Prisma.sql`NOT registered`)
@@ -779,6 +825,7 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
     expected_lite: number | null
     deal_normal: boolean | null
     deal_lite: boolean | null
+    supply_bp: number | null
     diff: number | null
     recovered30d: number
     product_type_mixed: boolean
@@ -838,6 +885,7 @@ export async function getGlobalCoverage(params: CoverageParams, client: DbClient
         라이트: r.expected_lite == null ? null : n(r.expected_lite),
       },
       dealProductTypes: { 일반: !!r.deal_normal, 라이트: !!r.deal_lite },
+      supplyBp: r.supply_bp == null ? null : n(r.supply_bp),
       diff: r.diff == null ? null : n(r.diff),
       recovered30d: n(r.recovered30d),
       lastEvent: r.last_event_type ? { type: r.last_event_type, on: ymd(r.last_event_on)! } : null,

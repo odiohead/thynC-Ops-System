@@ -268,7 +268,7 @@ export default async function HospitalDetailPage({ params }: PageProps) {
           </dl>
           {/* 도입 현황 — 디바이스 원장 요약(D12, P1 임시 플레이스홀더 → P4에서 실데이터) */}
           <div className="border-t border-gray-100 px-6 py-5">
-            <HospitalDeviceSummary hospitalCode={hospital.hospitalCode} introBeds={hospital.introBeds} />
+            <HospitalDeviceSummary hospitalCode={hospital.hospitalCode} introBeds={hospital.introBeds} canWrite={isAdmin} />
           </div>
           {/* AS 현황 — 고장/분실 분리, 분실은 구매수량 대비 교체 제공(한도) (2026-10-30) */}
           <div className="border-t border-gray-100 px-6 py-5">

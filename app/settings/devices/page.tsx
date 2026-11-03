@@ -14,7 +14,7 @@ function isDeviceClass(v: string): v is DeviceClass {
   return (DEVICE_CLASSES as readonly string[]).includes(v)
 }
 
-const ADMIN_ONLY_HINT = '분류·온프렘 코드·시리얼 형식·원장 대상·수량 집계 대상은 관리자만 변경할 수 있습니다'
+const ADMIN_ONLY_HINT = '분류·온프렘 코드·시리얼 형식·원장 대상·수량 집계 대상·공급 현황 관리는 관리자만 변경할 수 있습니다'
 
 interface DeviceInfo {
   id: number
@@ -24,12 +24,13 @@ interface DeviceInfo {
   sortOrder: number
   createdAt: string
   usageCount: number
-  usage?: { projects: number; registry: number; deals: number }
+  usage?: { projects: number; registry: number; deals: number; supplies?: number }
   deviceClass: string
   onpremDeviceType: number | null
   serialPattern: string | null
   serialTracked: boolean
   quantityTracked: boolean
+  supplyTracked: boolean
 }
 
 interface EditForm {
@@ -42,6 +43,7 @@ interface EditForm {
   serialPattern: string
   serialTracked: boolean
   quantityTracked: boolean
+  supplyTracked: boolean // 비계약 공급 현황 관리(대웅 직판) — 2026-11-02
 }
 
 const emptyForm: EditForm = {
@@ -54,6 +56,7 @@ const emptyForm: EditForm = {
   serialPattern: '',
   serialTracked: false,
   quantityTracked: true,
+  supplyTracked: false,
 }
 
 function formFromDevice(d: DeviceInfo): EditForm {
@@ -67,6 +70,7 @@ function formFromDevice(d: DeviceInfo): EditForm {
     serialPattern: d.serialPattern ?? '',
     serialTracked: d.serialTracked,
     quantityTracked: d.quantityTracked,
+    supplyTracked: d.supplyTracked,
   }
 }
 
@@ -87,6 +91,7 @@ function buildBody(form: EditForm, isAdmin: boolean) {
     serialPattern: form.serialPattern.trim() || null,
     serialTracked: form.serialTracked,
     quantityTracked: form.quantityTracked,
+    supplyTracked: form.supplyTracked,
   }
 }
 
@@ -317,6 +322,17 @@ export default function DevicesSettingsPage() {
             className={checkboxCls}
           />
         </td>
+        {/* 공급 현황 관리 (비계약 — 대웅 직판) */}
+        <td className="px-3 py-3 text-center">
+          <input
+            type="checkbox"
+            checked={form.supplyTracked}
+            onChange={(e) => setForm((f) => ({ ...f, supplyTracked: e.target.checked }))}
+            disabled={lock}
+            title={title}
+            className={checkboxCls}
+          />
+        </td>
       </>
     )
   }
@@ -366,11 +382,18 @@ export default function DevicesSettingsPage() {
             <span className="text-sm text-gray-300">—</span>
           )}
         </td>
+        <td className="px-3 py-3 text-center">
+          {device.supplyTracked ? (
+            <span className="inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700" title="비계약 공급 현황 관리 — 병원 상세 도입 현황에서 공급 수량 입력">공급</span>
+          ) : (
+            <span className="text-sm text-gray-300">—</span>
+          )}
+        </td>
       </>
     )
   }
 
-  const COL_COUNT = 11
+  const COL_COUNT = 12 // 공급 현황 열 추가 (2026-11-02)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -425,6 +448,7 @@ export default function DevicesSettingsPage() {
                 <th className={thCls} title="시리얼 경고용 정규식 — 불일치 시 등록은 허용하되 경고 표시">시리얼 형식</th>
                 <th className={`${thCls} text-center`} title="기기 현황(시리얼 관리) 대상 모델">원장 대상</th>
                 <th className={`${thCls} text-center`} title="프로젝트·딜 수량 폼에 노출되는 모델">수량 집계</th>
+                <th className={`${thCls} text-center`} title="비계약 공급 현황 관리(대웅 직판 등) — 병원 상세 도입 현황에서 공급 수량을 입력하는 모델">공급 현황</th>
                 <th className={thCls}>등록일</th>
                 <th className={`${thCls} text-center`}>활성</th>
                 <th className={`${thCls} text-right`}>관리</th>
@@ -656,8 +680,8 @@ export default function DevicesSettingsPage() {
         </div>
 
         <p className="mt-3 text-xs text-gray-400">
-          원장 대상 = 시리얼 단위로 관리하는 모델(기기 현황 선택지) · 수량 집계 = 프로젝트·딜 수량 폼에 노출되는 모델.
-          사용 중(프로젝트·딜·원장)인 모델은 삭제 대신 비활성화됩니다.
+          원장 대상 = 시리얼 단위로 관리하는 모델(기기 현황 선택지) · 수량 집계 = 프로젝트·딜 수량 폼에 노출되는 모델(계약 축) · 공급 현황 = 우리가 계약하지 않고 대웅제약이 직접 파는 기기(카트온 등) — 병원 상세 도입 현황에서 공급 수량 입력(비계약 축).
+          사용 중(프로젝트·딜·원장·공급 현황)인 모델은 삭제 대신 비활성화됩니다.
         </p>
 
       </div>

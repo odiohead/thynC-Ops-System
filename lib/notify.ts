@@ -966,6 +966,12 @@ export async function notifyTicketChanged(input: {
 
     const prev = parseSig(lastSig)
     const statusChanged = prev.status !== undefined && prev.status !== core.status
+    // 출고업무 '출고 완료' 도메인 이벤트(2026-11-02, projects/stock_out_notify_design.md) — 완료 진입 경로 3종([출고 처리]·상태 직접 변경·티켓 종료)이
+    // 모두 이 함수를 거치므로 sig 비교로 판정된 실제 전이에서 1회. 취소(같은 CLOSED)는 도메인 상태명으로 거른다. 티켓 알림 동작에는 영향 없음
+    if (statusChanged && core.refType === 'STOCK_OUT' && core.status === 'CLOSED') {
+      const { notifyStockOutCompletedByTicket } = await import('@/lib/stockOutNotify')
+      await notifyStockOutCompletedByTicket(core.id, input.actorName ?? null)
+    }
     const ownerChanged = prev.owner !== undefined && prev.owner !== (core.ownerId ?? null)
     const sevChanged = prev.sev !== undefined && prev.sev !== core.severity
     const queueChanged = prev.queue !== undefined && prev.queue !== core.queueId
@@ -1085,6 +1091,10 @@ export async function notifyDomainEvent(input: {
   /** 경고 줄(선택) — 불일치·미식별 등 */
   warning?: string | null
   link?: string | null
+  /** 고정 태그 대상 시스템 계정 id(예: 출고 요청자, 2026-11-02) — 이메일로 Slack ID 매핑해 `<@U…>`. 계정 Slack 발송 OFF·매핑 실패는 이름만. 규칙의 멘션 옵션과 별개로 항상 붙는다 */
+  mentionUserIds?: string[]
+  /** 태그 뒤 문구 (예: '출고가 완료됐습니다') */
+  mentionText?: string | null
 }): Promise<void> {
   try {
     const def = NOTIFY_EVENT_MAP[input.event]
@@ -1098,6 +1108,16 @@ export async function notifyDomainEvent(input: {
     if (isPersonal) return
     const base = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || ''
     const link = input.link ? (input.link.startsWith('http') ? input.link : `${base}${input.link}`) : `${base}/tickets/${core.ticketCode}`
+    let fixedMention: string | null = null
+    if (input.mentionUserIds?.length) {
+      const users = await prisma.user.findMany({ where: { id: { in: input.mentionUserIds } }, select: { id: true, name: true, email: true, slackUserId: true, slackNotifyEnabled: true } })
+      const parts: string[] = []
+      for (const u of users) {
+        const sid = u.slackNotifyEnabled ? await resolveSlackUserId(u) : null
+        parts.push(sid ? `<@${sid}>` : u.name)
+      }
+      if (parts.length) fixedMention = [parts.join(' '), input.mentionText].filter(Boolean).join(' ')
+    }
     await dispatchToRoutes({
       eventTypes: [input.event],
       match: { refType: core.refType, queueId: core.queueId, ctiId: core.ctiId, severity: core.severity },
@@ -1111,6 +1131,7 @@ export async function notifyDomainEvent(input: {
         const lines = input.fields.filter((f) => f.value).map((f) => `• ${f.label}: ${f.value}`)
         if (input.warning) lines.push(`:warning: ${input.warning}`)
         if (input.actorName) lines.push(`• 처리자: ${input.actorName}`)
+        if (fixedMention) lines.push(fixedMention)
         lines.push(`<${link}|상세 보기>`)
         if (mentionLine) lines.push(mentionLine)
         const text = [head, ...lines].join('\n')

@@ -622,8 +622,8 @@ function CompactHospitalRow({ row, today, onOpenHospital }: { row: CoverageRow; 
     { key: 'ecg-lite', n: lite.ecg, title: row.expectedByType?.라이트 != null ? `라이트 계약 ${fmtInt(row.expectedByType.라이트)}대 (딜 모델별 수량 기준)` : undefined },
     { key: 'spo2', n: normal.spo2 },
     { key: 'spo2-lite', n: lite.spo2 },
-    { key: 'bp', n: normal.bp, title: '링 혈압계(CART BP) SL-MPF1K07' },
-    { key: 'bp-lite', n: lite.bp, title: '링 혈압계(CART BP) SL-MPF1K07' },
+    { key: 'bp', n: normal.bp, title: row.supplyBp != null ? `링 혈압계(CART BP) SL-MPF1K07 · 배치 ${fmtInt(normal.bp + lite.bp)} / 공급(대웅 직판) ${fmtInt(row.supplyBp)}대` : '링 혈압계(CART BP) SL-MPF1K07' },
+    { key: 'bp-lite', n: lite.bp, title: row.supplyBp != null ? `링 혈압계(CART BP) SL-MPF1K07 · 배치 ${fmtInt(normal.bp + lite.bp)} / 공급(대웅 직판) ${fmtInt(row.supplyBp)}대` : '링 혈압계(CART BP) SL-MPF1K07' },
   ]
   return (
     <TR className="cursor-pointer" onClick={() => onOpenHospital(row.hospitalCode)} title="클릭 → 기기 목록">

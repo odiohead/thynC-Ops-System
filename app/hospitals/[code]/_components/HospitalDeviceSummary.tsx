@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { getHospitalDeviceSummary, type ModelSummary, type ProductTypeKey } from '@/lib/deviceRegistry'
 import { DEVICE_EVENT_TYPE_LABELS, PRODUCT_TYPES, PRODUCT_TYPE_UNSET_LABEL, toYmd, type DeviceEventType } from '@/lib/deviceRegistryShared'
+import HospitalDeviceSupplyModal from './HospitalDeviceSupplyModal'
 
 /**
  * 병원 상세 '도입 현황' — 디바이스 원장 요약 (hospital_device_registry_design.md §6.2, D12)
@@ -11,8 +12,10 @@ import { DEVICE_EVENT_TYPE_LABELS, PRODUCT_TYPES, PRODUCT_TYPE_UNSET_LABEL, toYm
  * - 계약완료 딜 없음: 계약 축 모델(ECG·SpO2) 계약 열 '— (계약완료 딜 없음)'
  * - 상품유형 매트릭스(B-22): productTypeMixed면 모델 행 아래 '└ 일반 | 라이트 | 미지정' 소행(byProductType) + 하단 '교체 n건(일반 a · 라이트 b)'
  * 도입 병상 수(`hospitals.intro_beds`) 입력은 병원 수정 폼·Excel 가져오기·병원 PUT에 있으므로 여기서는 표시만 한다.
+ * 비계약 공급(대웅 직판 — third_party_supply_design.md, 2026-11-02): '공급 현황 관리' 기기는 0대여도 행 상시 노출, '계약/공급' 열에 `공급(대웅) m`,
+ * canWrite면 행 옆 연필 → HospitalDeviceSupplyModal(수량·파악일·비고), 값 있으면 소행(파악일·비고).
  */
-const COLUMNS = ['모델', '배치 중', '계약', '차이', '최근 이벤트'] as const
+const COLUMNS = ['모델', '배치 중', '계약/공급', '차이', '최근 이벤트'] as const
 const PT_KEYS: readonly ProductTypeKey[] = [...PRODUCT_TYPES, PRODUCT_TYPE_UNSET_LABEL]
 
 /** 계약 축이 있는 모델(온프렘 type 1=ECG hard, 3=SpO2 soft) — 딜 0건이면 compare='none'이 되므로 타입으로 판별 */
@@ -38,9 +41,20 @@ function Dash({ note }: { note?: string }) {
 }
 
 function ContractCell({ m, noDeals }: { m: ModelSummary; noDeals: boolean }) {
+  // 비계약 공급(대웅 직판) — 공급만: '공급(대웅) m' / 딜+공급: 'a + 공급 b' (툴팁에 파악일·비고·수정자)
+  if (m.supply && m.compare === 'hard' && m.expected != null) {
+    const sup = m.supply
+    const tip = [`${sup.supplier} 직판(비계약) 공급 수량 ${sup.quantity.toLocaleString()}대`, sup.checkedOn ? `파악 ${sup.checkedOn}` : null, sup.note ? `비고: ${sup.note}` : null, sup.updatedByName ? `수정 ${sup.updatedByName}` : null].filter(Boolean).join('\n')
+    if (m.expectedSource === 'BOTH') {
+      const deal = m.expected - sup.quantity
+      return <span className="tabular-nums text-gray-900" title={tip}>{deal.toLocaleString()} <span className="text-xs text-violet-700">+ 공급 {sup.quantity.toLocaleString()}</span></span>
+    }
+    return <span className="whitespace-nowrap tabular-nums text-violet-700" title={tip}><span className="text-xs">공급({sup.supplier.replace('제약', '')})</span> <span className="font-medium">{sup.quantity.toLocaleString()}</span></span>
+  }
   if (m.compare === 'hard' && m.expected != null) {
     return <span className="tabular-nums text-gray-900">{m.expected.toLocaleString()}</span>
   }
+  if (m.supplyTracked) return <Dash note="공급 수량 미입력" />
   if (m.compare === 'soft' && m.expected != null) {
     return (
       <span className="tabular-nums text-gray-600" title="심전계 계약 수량과 동수로 가정한 참고값">
@@ -84,9 +98,12 @@ function DiffCell({ m }: { m: ModelSummary }) {
 export default async function HospitalDeviceSummary({
   hospitalCode,
   introBeds,
+  canWrite = false,
 }: {
   hospitalCode: string
   introBeds: number | null
+  /** 공급 수량(대웅 직판) 입력 가능 — USER 등급 이상(쟁점 1) */
+  canWrite?: boolean
 }) {
   const ledgerHref = `/devices?hospital=${encodeURIComponent(hospitalCode)}`
   const importHref = `${ledgerHref}&tab=import`
@@ -102,7 +119,8 @@ export default async function HospitalDeviceSummary({
   }
 
   // 제3자 기기(링BP·참BP·RTLS)는 배치가 있을 때만 행 노출 — 계약 축 모델(웨어러블·GW)은 0대여도 헤더·계약 열 유지(§6.2)
-  const models = (summary?.models ?? []).filter((m) => m.deviceClass !== 'THIRD_PARTY' || m.active > 0)
+  // 단, '공급 현황 관리' 기기(supplyTracked)는 입력 진입점이므로 0대·미입력이어도 상시 노출 (2026-11-02)
+  const models = (summary?.models ?? []).filter((m) => m.deviceClass !== 'THIRD_PARTY' || m.active > 0 || m.supplyTracked || m.supply)
   const noDeals = (summary?.contractedDeals.length ?? 0) === 0
   const empty = !summary || summary.activeTotal === 0
   const lastImportMd = summary?.lastImport ? fmtMd(summary.lastImport.createdAt) : null
@@ -172,20 +190,38 @@ export default async function HospitalDeviceSummary({
                   <td className="whitespace-nowrap px-4 py-2.5 text-sm text-gray-900">
                     {m.deviceName}
                     <span className="ml-1.5 font-mono text-xs text-gray-400">{m.deviceModel}</span>
+                    {canWrite && (m.supplyTracked || m.supply) && (
+                      <HospitalDeviceSupplyModal
+                        hospitalCode={hospitalCode}
+                        target={{ deviceInfoId: m.deviceInfoId, deviceName: m.deviceName, deviceModel: m.deviceModel, supplier: m.supply?.supplier ?? '대웅제약', current: m.supply ? { quantity: m.supply.quantity, checkedOn: m.supply.checkedOn, note: m.supply.note } : null }}
+                      />
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-2.5 text-right text-sm">
-                    {empty ? <Dash /> : <ActiveCell m={m} />}
+                    {empty && !m.supply ? <Dash /> : <ActiveCell m={m} />}
                   </td>
                   <td className="whitespace-nowrap px-4 py-2.5 text-right text-sm">
                     <ContractCell m={m} noDeals={noDeals} />
                   </td>
                   <td className="whitespace-nowrap px-4 py-2.5 text-right text-sm">
-                    {empty ? <Dash /> : <DiffCell m={m} />}
+                    {empty && !m.supply ? <Dash /> : <DiffCell m={m} />}
                   </td>
                   <td className="whitespace-nowrap px-4 py-2.5 text-sm text-gray-600">
                     {m.lastEvent ? eventLabel(m.lastEvent) : <Dash />}
                   </td>
                 </tr>,
+                ...(m.supply && (m.supply.checkedOn || m.supply.note)
+                  ? [
+                      <tr key={`${m.deviceInfoId}-supply`} className="bg-violet-50/40">
+                        <td colSpan={COLUMNS.length} className="whitespace-nowrap px-4 py-1.5 pl-8 text-xs text-gray-500">
+                          <span className="mr-1 text-gray-400">└</span>
+                          {m.supply.checkedOn && <span>파악 {m.supply.checkedOn}</span>}
+                          {m.supply.checkedOn && m.supply.note && <span className="mx-1.5 text-gray-300">·</span>}
+                          {m.supply.note && <span className="text-gray-600">{m.supply.note}</span>}
+                        </td>
+                      </tr>,
+                    ]
+                  : []),
                 ...(matrix
                   ? PT_KEYS.filter((k) => m.byProductType?.[k]).map((k) => {
                       const c = m.byProductType[k]!

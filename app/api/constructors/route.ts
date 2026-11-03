@@ -18,12 +18,15 @@ async function generateConstructorCode(): Promise<string> {
   return `CON-${String(nextSeq).padStart(6, '0')}`
 }
 
-// GET: 전체 목록 (페이지네이션 없음)
-export async function GET() {
+// GET: 전체 목록 (페이지네이션 없음). `?active=1` 이면 활성 업체만(프로젝트 등록·수정 셀렉트용 — 2026-11-03), 기본은 전체(설정 화면·필터·이력)
+export async function GET(request: NextRequest) {
+  const activeOnly = request.nextUrl.searchParams.get('active') === '1'
   const constructors = await prisma.contractor.findMany({
-    orderBy: { id: 'asc' },
+    where: activeOnly ? { isActive: true } : undefined,
+    orderBy: [{ isActive: 'desc' }, { id: 'asc' }],
+    include: { _count: { select: { projects: true } } },
   })
-  return NextResponse.json({ constructors })
+  return NextResponse.json({ constructors: constructors.map(({ _count, ...c }) => ({ ...c, projectCount: _count.projects })) })
 }
 
 // POST: 등록 (ADMIN 전용)

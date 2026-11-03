@@ -1,7 +1,7 @@
 /**
  * 기기 모델 마스터(device_info) 5필드 — 파싱·검증·DTO (hospital_device_registry_design.md §5.1, §8.1)
  *
- * - deviceClass / onpremDeviceType / serialPattern / serialTracked / quantityTracked 는 ADMIN+ 전용.
+ * - deviceClass / onpremDeviceType / serialPattern / serialTracked / quantityTracked / supplyTracked 는 ADMIN+ 전용 (supplyTracked = 비계약 공급 현황 관리, third_party_supply_design.md 2026-11-02).
  * - 값 어휘(WEARABLE/GATEWAY/THIRD_PARTY, 온프렘 코드표)는 `lib/deviceRegistryShared.ts` 단일 소스, DB CHECK 없음(§5c).
  * - 라우트 2개(`route.ts`, `[id]/route.ts`)가 공유하는 서버 전용 헬퍼 — API 경로로 노출되지 않음(`app/api/weekly/shared.ts` 선례).
  */
@@ -14,10 +14,11 @@ export const ADMIN_ONLY_FIELD_KEYS = [
   'serialPattern',
   'serialTracked',
   'quantityTracked',
+  'supplyTracked',
 ] as const
 
 export const ADMIN_ONLY_FIELDS_ERROR =
-  '분류·온프렘 코드·시리얼 형식·원장 대상·수량 집계 대상은 관리자만 변경할 수 있습니다'
+  '분류·온프렘 코드·시리얼 형식·원장 대상·수량 집계 대상·공급 현황 관리는 관리자만 변경할 수 있습니다'
 
 export const SERIAL_PATTERN_ERROR = '시리얼 형식 정규식이 올바르지 않습니다'
 
@@ -33,6 +34,7 @@ export type AdminOnlyFieldsData = {
   serialPattern?: string | null
   serialTracked?: boolean
   quantityTracked?: boolean
+  supplyTracked?: boolean
 }
 
 type ParseResult = { ok: true; data: AdminOnlyFieldsData } | { ok: false; error: string }
@@ -83,6 +85,7 @@ export function parseAdminOnlyFields(body: unknown): ParseResult {
 
   if ('serialTracked' in b) data.serialTracked = toBool(b.serialTracked)
   if ('quantityTracked' in b) data.quantityTracked = toBool(b.quantityTracked)
+  if ('supplyTracked' in b) data.supplyTracked = toBool(b.supplyTracked)
 
   return { ok: true, data }
 }
@@ -108,5 +111,6 @@ export function toDeviceInfoDto(d: DeviceInfo) {
     serialPattern: d.serialPattern,
     serialTracked: d.serialTracked,
     quantityTracked: d.quantityTracked,
+    supplyTracked: d.supplyTracked,
   }
 }

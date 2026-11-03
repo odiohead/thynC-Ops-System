@@ -569,7 +569,7 @@ prisma/
 - User(DAEWOONG 소속) ↔ Hospital N:M 관계 테이블
 
 ### DeviceInfo (장비 정보)
-- 장비 모델명, 이름, 정렬 순서 + 디바이스 원장 5필드(2026-09-01, ADMIN+ 편집): `device_class`(WEARABLE/GATEWAY/THIRD_PARTY)·`onprem_device_type`·`serial_pattern`·`serial_tracked`(원장 대상)·`quantity_tracked`(수량 집계 대상)
+- 장비 모델명, 이름, 정렬 순서 + 디바이스 원장 5필드(2026-09-01, ADMIN+ 편집): `device_class`(WEARABLE/GATEWAY/THIRD_PARTY)·`onprem_device_type`·`serial_pattern`·`serial_tracked`(원장 대상)·`quantity_tracked`(수량 집계 대상)·**`supply_tracked`(공급 현황 관리 — 비계약 공급(대웅 직판) 수량 축, 2026-11-02 `projects/third_party_supply_design.md`)**. 3플래그 의미: 원장 대상=시리얼 축 / 수량 집계=계약(딜) 축 / 공급 현황=비계약 축(병원 상세 도입 현황에서 공급 수량 입력). 시드 링BP(카트온)만 true
 
 ### InventoryItem UDI 필드 (2026-08-04)
 - `udiDi`(UDI-DI, GS1 GTIN) · `ledgerName`(대장 표기 상품명) · `productClass`(완제품/반제품/원자재) · `materialNo`(원자재식별 NO) · `packUnit`(포장단위)
@@ -699,6 +699,10 @@ prisma/
 - SalesDeal ↔ DeviceInfo N:M + `quantity` — 계약 스냅샷 (운영 실측은 ProjectDevice와 별개)
 - `(dealId, deviceInfoId)` UNIQUE, 딜 삭제 시 CASCADE. 수량 0은 행 미저장 — 기기 마스터가 늘어나면 기존 딜 상세에 0으로 표시
 - 딜 상세(`/sales/deals/[id]`) '규모·계약'에서 입력, PUT에 `devices` 배열이 온 경우에만 전체 교체(미전송 PUT은 보존). **등록(POST)·보냈을 때 합계 ≥1 필수 (2026-11-02)** — POST는 딜+수량 행 단일 트랜잭션
+
+#### HospitalDeviceSupply (병원 × 기기 비계약 공급 현황 — 대웅 직판, 2026-11-02 · `projects/third_party_supply_design.md`)
+- `hospitalCode`(CASCADE) × `deviceInfoId` UNIQUE · `quantity`(CHECK ≥0 — 0 = 확인했는데 없음, 행 없음 = 파악 안 됨) · `supplier`(기본 '대웅제약') · `checkedOn`(파악일) · `note` · `updatedById`(SET NULL). 현재 수량 1행 upsert, 변경 이력은 감사 로그
+- `device_info.supply_tracked`(공급 현황 관리, ADMIN+ 전용 필드) = 입력 대상 기기 단일 소스. 도입 현황 카드 기대치 축: 딜 수량 + 공급 수량 합산
 
 #### StockOutRequestFile (출고요청 첨부 — 엑셀 등, 2026-11-02 · `projects/stock_out_v2_design.md` §15)
 - `requestId`(CASCADE) · `fileName`·`s3Key`·`sizeBytes`·`contentType`·`uploadedById`(SET NULL)·`uploadedAt`. 분류 없음, 요청당 N건. 한도(20MB·10개)·DTO `lib/stockOutFiles.ts`. S3 키 `stock-out/<requestId>/<ts>_<원본명>`
@@ -1069,6 +1073,7 @@ prisma/
 - 병원별 대웅 담당자(DAEWOONG 소속 User) 복수 선택 배정·해제 (DaewoongSelectModal 체크박스 방식) — **2026-09-18: 별도 카드(`DaewoongStaffTab`) 제거, 병원 상세 '영업 정보' 카드 개요 탭으로 편입**(칩 + [배정]/×, API `/daewoong-staff` 그대로). 따라서 영업 정보 카드 게이트(ADMIN 이상 또는 `sales.access` + SEERS 소속) 안에서만 보인다
 - **씨어스 영업담당**(`HospitalSalesProfile.ownerId`, 2026-09-18): 영업 정보 카드 개요 탭에서 지정 — 후보는 **RBAC 역할 `SALES_MANAGER` 보유 활성 계정**(`lib/sales.ts` `SALES_OWNER_ROLE_CODE`·`isSalesOwnerCandidate`, 종전 SEERS 활성 계정 전체). 저장 시 새 담당은 서버가 후보 여부 검증(기존 담당 유지는 역할이 빠져도 통과, 셀렉트에 '(역할 없음)' 표기로 유지)
 - 병원 상세 **도입 현황 카드**(`HospitalDeviceSummary`, 2026-09-01): 디바이스 원장 요약(모델 | 배치 중 | 계약 | 차이 | 최근 이벤트 + 최근 30일 회수·마지막 임포트)을 서버 컴포넌트가 `getHospitalDeviceSummary` 직접 호출로 표시, [디바이스 원장 열기 →]. 도입 병상 수는 표시만(수정은 병원 수정 폼). 원장 없음이면 헤더·계약 열 유지 + [디바이스 원장에서 임포트 →]
+  - **비계약 공급 현황(대웅 직판 — 카트온 등, 2026-11-02 `projects/third_party_supply_design.md`)**: '계약' 열 → **'계약/공급'**. `supply_tracked` 기기는 배치·공급 0이어도 행 상시 노출, 공급 행이 있으면 `공급(대웅) m`(툴팁 파악일·비고·수정자, 딜 수량도 있으면 `a + 공급 b` 합산) · 차이 = 배치(평가용 제외) − 기대치 · 파악일·비고 소행. USER 등급 이상이면 행 옆 연필 → `HospitalDeviceSupplyModal`(수량 0 이상·파악일·비고 / 행 삭제 = 파악 안 됨). 데이터 `hospital_device_supplies`(병원×기기 1행 upsert, 공급처 '대웅제약' 고정, 감사 로그 `hospital_device_supply`). `ModelSummary.expectedSource`(DEAL/SUPPLY/BOTH)·`supply`·`supplyTracked` 추가, 공급만 있는 모델은 상품유형 소행 기대치 null. `/devices` 축약 커버리지 표 혈압계 셀 툴팁에 `배치 n / 공급(대웅 직판) m` 병기(`CoverageRow.supplyBp`)
 - 시도/시군구/상태 필터, 페이지네이션 — 병원종·상태 필터는 표 상단 **체크박스 상시 노출** (2026-07-21, 구 멀티선택 드롭다운 대체. 선택 시 즉시 적용 + 초기화 버튼)
 - **병원상세정보연동 v2** (2026-09-14, `projects/hira_detail_sync_v2_design.md`): 대상 종별에 **의원(31)** 추가, 항목을 **허가병상수·진료과목·전문의수** 3종 체크박스로 확장. 병원당 항목 수만큼 호출하므로 일일 9,000콜 예산 안에서 `floor(9000/항목수)`개 병원씩 처리하고 남으면 `waiting` → 익일 00:10 KST 스케줄러(5분 tick, `lib/hira-detail-sync.ts`)가 자동 재개(수일~수주 1요청). 서버 재시작 시 상세 잡은 error가 아닌 waiting으로 돌려 즉시 재개. 요청 상세(로그 패널)에 진행률 바·대상/완료/실패·일차·오늘 호출·다음 실행·예상 잔여일·실패 병원 표본·**요청 취소** 버튼. HIRA 병원 상세에 '진료과목·전문의' 표(진료과목 전문의/전문과목 전문의/선택진료의사)·허가병상수, 병원 상세 기본 정보에 '진료과목 (심평원)' 한 줄 요약
 - **AS접수 라인 처리방법 초안 → 최종확정** (2026-09-14): 기기군 카드에서 라인 선택 → 처리방법(수리반환/교체/분실/취소) [처리방법 저장]은 **초안**(`draft_outcome`·`draft_new_serial_no`)으로만 기록되어 기기현황·티켓·시트에 영향이 없고 [지정 해제]·재지정으로 자유롭게 변경 가능. 발송정보(기기군 공통) 입력란은 처리방법 지정 아래로 이동, 확정·초안 발송 라인 모두에 적용. 3. AS상세내역 카드 하단 **[최종확정]**(기준일 입력)이 초안 전 라인을 한 번에 확정 — 이때만 기기현황(AS 해제·교체·회수) 기록, 확정 라인은 변경 불가, 전 라인 확정 시 '발송완료' 자동 전이(기존 규칙). 결과 열에 `(초안)` 점선 배지, 카드 헤더에 초안 수
@@ -1383,6 +1388,7 @@ prisma/
 - 목록 테이블: 번호·이름·이메일·소속·부서·추가일·삭제
 
 ### Slack 알림 (v2 재편, 2026-08-03 — `projects/notification_v2_design.md`)
+- **출고업무 알림 (2026-11-02 — `projects/stock_out_notify_design.md`)**: 도메인 이벤트 그룹 '출고업무' — `STOCK_OUT_CREATED`(출고요청 등록: 요청자·업무 구분·희망 출고일·품목·수량, `lib/stockOutNotify.ts`를 생성 라우트에서 호출) · `STOCK_OUT_COMPLETED`(출고 완료: 상태 '완료' 진입 — [출고 처리]·상태 직접 변경·티켓 종료 공통으로 `notifyTicketChanged` 상태 전이 판정에서 1회, 취소 제외, **요청자 Slack 태그**). `notifyDomainEvent` `mentionUserIds`·`mentionText`(계정 'Slack 발송' ON + 이메일 매핑 시 `<@U…>`, 아니면 이름). 채널은 설정 > Slack 알림 > 이벤트에서 규칙으로 지정(전용 채널) — 공통 규칙 '전체 티켓 등록'·'전체 상태 변경'의 업무유형에서 출고업무를 빼 중복 방지
 - **이벤트 소스 = 티켓 레이어** (P11 유지): 순수 티켓·도메인 업무 모두 티켓 mutation에서 알림 발생(`lib/notify.ts` `notifyTicketCreated`/`notifyTicketChanged`). 도메인 라우트는 저장 후 티켓 알림만 호출 — 이중 발송 구조 없음
 - **발송 모드는 env 소유** (`SLACK_NOTIFY_MODE`): `off` / `test`(전량 테스트 채널로 리라우팅 + **`[DEV→#원채널명]` 표식** — 라우팅 검증 가능, 비-production은 live 자동 강등) / `live`. 채널·정책은 전부 DB(설정 화면) — PROD 데이터 동기화로 DEV에 실채널 ID가 복사돼도 모드 게이트가 오발송을 차단
 - **DM 폐기 (v2)**: 배정 DM·SLA 초과 owner DM 제거. 대신 **채널 메시지에 담당자 @멘션**(`<@Uxxx>`, 이메일 lookup + `users.slack_user_id` 캐시, 매핑 실패 시 이름 폴백). `slackNotifyEnabled=false`도 채널 멘션은 발송(DM 아님)
@@ -1761,6 +1767,8 @@ npm run dev
 | POST | `/api/hospitals/[code]/sales/deals/[id]/map-project` | 프로젝트 매핑/해제 전용 (다른 필드 불변, 같은 병원 검증·중복 409) — **호출처 없음**(2026-08-03 `/sales2` 폐기, 프로젝트 연결은 딜 상세 폼의 `projectCode`로 대체). 라우트는 보존 |
 | POST, PUT/DELETE | `/api/hospitals/[code]/sales/deals(/[id])` | 계약 건(차수) — `DEAL-YYYYMM-NNNN` 발번, round_no 자동, 같은 병원 프로젝트만 연결, 코드 FK 카테고리 검증. **POST: `productType`(일반/라이트)·`devices[]` 합계 ≥1 필수(2026-11-02)**, PUT: 보냈을 때만 동일 검증 |
 | GET/POST | `/api/hospitals/[code]/sales/deals/[id]/files` | 딜 첨부(견적서·계약서) 목록(`?kind=`) / 다중 업로드(multipart `kind`+`files[]`, 파일별 실패 `failed[]`) — `checkSalesAccess`, 딜 병원 소속 검증 (2026-11-02) |
+| GET | `/api/hospitals/[code]/device-supplies` | 병원 비계약 공급 현황(대웅 직판) 목록 + `supply_tracked` 기기 마스터 (2026-11-02) |
+| PUT, DELETE | `/api/hospitals/[code]/device-supplies/[deviceInfoId]` | 공급 수량 upsert `{quantity≥0, checkedOn?, note?}` / 행 삭제 — USER 등급 이상, 기기 `supply_tracked` 검증(기존 행은 꺼져도 수정 허용), 감사 로그 `hospital_device_supply` |
 | GET, DELETE | `/api/hospitals/[code]/sales/deals/[id]/files/[fileId]` | 첨부 열람(302 presigned inline, 5분) / 삭제(S3+행, 감사 로그 `sales_deal_file`) |
 | POST, PUT/DELETE | `/api/hospitals/[code]/sales/activities(/[id])` | 영업 활동 |
 | GET/POST, PUT/DELETE | `/api/settings/sales-codes/[category](/[id])` | 영업 StatusCode 7카테고리 (화이트리스트 검증, 색상 지원, 사용 중 삭제 409) |
@@ -2036,10 +2044,10 @@ npm run dev
 ### 시공사
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| GET  | `/api/constructors` | 시공사 목록 |
+| GET  | `/api/constructors` | 시공사 목록 (+`projectCount`, 비활성 뒤 정렬) — `?active=1` 활성만(프로젝트 등록·수정 셀렉트, 2026-11-03) |
 | POST | `/api/constructors` | 시공사 등록 |
 | GET  | `/api/constructors/[code]` | 시공사 상세 |
-| PUT  | `/api/constructors/[code]` | 시공사 수정 |
+| PUT  | `/api/constructors/[code]` | 시공사 수정 — `{ isActive }` 단독이면 활성/비활성 토글만(2026-11-03, 삭제 대신 비활성: 연결 프로젝트 이력 보존) |
 | DELETE | `/api/constructors/[code]` | 시공사 삭제 |
 
 ### 사용자

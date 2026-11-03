@@ -31,20 +31,26 @@ export async function PUT(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: '공사업체를 찾을 수 없습니다.' }, { status: 404 })
   }
 
-  const { name, bizRegNumber, managerName, managerPhone, managerEmail } = await request.json()
-  if (!name?.trim()) {
+  const body = await request.json()
+  // 활성/비활성만 바꾸는 호출(`{ isActive }` 단독)은 다른 필드를 건드리지 않는다 — 비활성 = 이용 중단(이력 보존, 프로젝트 셀렉트에서 숨김) 2026-11-03
+  const toggleOnly = typeof body.isActive === 'boolean' && body.name === undefined
+  const { name, bizRegNumber, managerName, managerPhone, managerEmail } = body
+  if (!toggleOnly && !name?.trim()) {
     return NextResponse.json({ error: '업체명은 필수입니다.' }, { status: 400 })
   }
 
   const constructor = await prisma.contractor.update({
     where: { code: params.code },
-    data: {
-      name: name.trim(),
-      bizRegNumber: bizRegNumber?.trim() || null,
-      managerName: managerName?.trim() || null,
-      managerPhone: managerPhone?.trim() || null,
-      managerEmail: managerEmail?.trim() || null,
-    },
+    data: toggleOnly
+      ? { isActive: body.isActive }
+      : {
+          name: name.trim(),
+          bizRegNumber: bizRegNumber?.trim() || null,
+          managerName: managerName?.trim() || null,
+          managerPhone: managerPhone?.trim() || null,
+          managerEmail: managerEmail?.trim() || null,
+          ...(typeof body.isActive === 'boolean' ? { isActive: body.isActive } : {}),
+        },
   })
 
   await logAudit({

@@ -111,6 +111,7 @@ model Hospital {
   salesActivities       SalesActivity[]
   weeklyItems           WeeklyItem[]
 
+  deviceSupplies    HospitalDeviceSupply[] // 비계약 공급 현황 (2026-11-02)
   @@map("hospitals")
   @@schema("public")
 }
@@ -333,6 +334,7 @@ model User {
   stockOutRequestsCreated   StockOutRequest[]            @relation("StockOutCreator")
   stockOutRequestsFulfilled StockOutRequest[]            @relation("StockOutFulfiller")
   stockOutFilesUploaded     StockOutRequestFile[]        @relation("StockOutFileUploader") // 출고요청 첨부 업로드 (2026-11-02)
+  deviceSuppliesUpdated     HospitalDeviceSupply[]       @relation("DeviceSupplyUpdater") // 비계약 공급 수량 수정자 (2026-11-02)
   salesActivities           SalesActivity[]              @relation("SalesActivityAuthor")
   salesOwnedProfiles        HospitalSalesProfile[]       @relation("SalesProfileOwner")
   weeklyItemsOwned          WeeklyItem[]                 @relation("WeeklyItemOwner")
@@ -400,12 +402,14 @@ model DeviceInfo {
   serialPattern    String?          @map("serial_pattern")                      // 경고용 정규식
   serialTracked    Boolean          @default(false) @map("serial_tracked")      // 원장 대상 모델의 단일 소스
   quantityTracked  Boolean          @default(true) @map("quantity_tracked")     // 프로젝트·딜 수량 폼 노출 여부
+  supplyTracked    Boolean          @default(false) @map("supply_tracked")    // 비계약 공급 현황 관리(대웅 직판 등) — 병원 상세 공급 수량 입력·기대치 축 (third_party_supply_design.md, 2026-11-02)
   createdAt       DateTime         @default(now()) @map("created_at")
   updatedAt       DateTime         @updatedAt @map("updated_at")
   devices         ProjectDevice[]
   deviceUnits     DeviceUnit[]     // 시리얼 유닛(3층 구조 B-20, 2026-09-01) — 구 hospitalDevices(병원×모델 수량) 역관계 대체
   inventoryItems  InventoryItem[]
   salesDealDevices SalesDealDevice[]
+  hospitalSupplies HospitalDeviceSupply[] // 비계약 공급 현황 (2026-11-02)
 
   @@map("device_info")
   @@schema("public")
@@ -419,6 +423,7 @@ model Contractor {
   managerName  String?   @map("manager_name")
   managerPhone String?   @map("manager_phone")
   managerEmail String?   @map("manager_email")
+  isActive     Boolean   @default(true) @map("is_active") // 비활성 = 이용 중단(이력 보존, 프로젝트 셀렉트에서 숨김) — 2026-11-03
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
   projects     Project[]
@@ -2223,6 +2228,29 @@ model StockOutRequestFile {
 
   @@index([requestId])
   @@map("stock_out_request_files")
+  @@schema("public")
+}
+
+/// 병원 × 기기 비계약 공급 현황 (대웅 직판 — 카트온 등). 현재 수량 1행(upsert), 변경 이력은 감사 로그 (projects/third_party_supply_design.md §3.2, 2026-11-02)
+model HospitalDeviceSupply {
+  id           Int       @id @default(autoincrement())
+  hospitalCode String    @map("hospital_code")
+  deviceInfoId Int       @map("device_info_id")
+  quantity     Int // SQL CHECK >= 0 — 0 = 확인했는데 없음, 행 없음 = 파악 안 됨
+  supplier     String    @default("대웅제약") @db.VarChar(40)
+  checkedOn    DateTime? @map("checked_on") @db.Date // 파악일(대웅 자료 기준일)
+  note         String?   @db.Text
+  updatedById  String?   @map("updated_by_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  hospital   Hospital   @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: Cascade)
+  deviceInfo DeviceInfo @relation(fields: [deviceInfoId], references: [id])
+  updatedBy  User?      @relation("DeviceSupplyUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([hospitalCode, deviceInfoId])
+  @@index([deviceInfoId])
+  @@map("hospital_device_supplies")
   @@schema("public")
 }
 

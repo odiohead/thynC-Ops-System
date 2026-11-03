@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 import { ChevronDown, X } from 'lucide-react'
 
 interface BuildStatus { id: number; label: string }
-interface Contractor { id: number; name: string }
+interface Contractor { id: number; name: string; isActive?: boolean } // isActive=false → '(비활성)' 표기(이력 필터용으로 목록엔 유지, 2026-11-03)
 interface UserOption { id: string; name: string }
 
 interface Props {
@@ -223,7 +223,7 @@ export default function ProjectFilters({
 
         <MultiSelectDropdown
           label="구축업체"
-          options={contractors.map((c) => ({ id: String(c.id), name: c.name }))}
+          options={contractors.map((c) => ({ id: String(c.id), name: c.isActive === false ? `${c.name} (비활성)` : c.name }))}
           selectedIds={contractorIds}
           onChange={(ids) => handleMultiSelect('contractorId', ids)}
         />

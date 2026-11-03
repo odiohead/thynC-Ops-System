@@ -68,7 +68,7 @@ function NewProjectForm() {
 
     Promise.all([
       fetch('/api/settings/devices').then((r) => r.json()),
-      fetch('/api/constructors').then((r) => r.json()),
+      fetch('/api/constructors?active=1').then((r) => r.json()), // 비활성 업체는 신규 등록 셀렉트에서 숨김 (2026-11-03)
       fetch('/api/settings/build-status').then((r) => r.json()),
       fetch('/api/settings/intro-type').then((r) => r.json()),
       presetCode ? fetch(`/api/hospitals/${presetCode}`).then((r) => r.json()) : Promise.resolve(null),

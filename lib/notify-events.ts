@@ -13,6 +13,7 @@ export const NOTIFY_EVENT_GROUPS = [
   { key: 'SLA', label: 'SLA', description: 'SLA 시계가 판정하는 지연 이벤트 (기준값은 SLA 기준 탭)' },
   { key: 'AS', label: 'AS업무', description: 'AS접수 처리 단계별 이벤트' },
   { key: 'VOC', label: 'VOC', description: '채널톡 승격·변경 이벤트' },
+  { key: 'STOCK_OUT', label: '출고업무', description: '출고요청 등록·출고 완료 — 완료 알림은 요청자를 태그' }, // projects/stock_out_notify_design.md
   { key: 'OPS', label: '운영', description: '연동·배치 장애 등 운영자용 이벤트' },
 ] as const
 export type NotifyEventGroup = (typeof NOTIFY_EVENT_GROUPS)[number]['key']
@@ -57,6 +58,9 @@ export const NOTIFY_EVENTS: readonly NotifyEventDef[] = [
   // ── VOC ──
   { key: 'VOC_AUTO_CREATED', label: 'VOC 자동 승격', group: 'VOC', kind: 'domain', implemented: false, refType: 'VOC', conditions: ['queues'], description: '채널톡 태그로 VOC가 자동 생성됐을 때 (현재는 티켓 등록 이벤트로 발송)' },
   { key: 'VOC_CHAT_CHANGE_DETECTED', label: '채널톡 변경 감지', group: 'VOC', kind: 'domain', implemented: false, refType: 'AS', conditions: ['queues'], description: '접수 후 원천 상담이 바뀌어 반영 판단이 필요할 때' },
+  // ── 출고업무 (2026-11-02 — projects/stock_out_notify_design.md) ──
+  { key: 'STOCK_OUT_CREATED', label: '출고요청 등록', group: 'STOCK_OUT', kind: 'domain', implemented: true, refType: 'STOCK_OUT', conditions: ['queues', 'severities'], description: '프로젝트 출고요청으로 출고업무가 생성됐을 때 — 요청자·업무 구분·희망 출고일·품목·수량' },
+  { key: 'STOCK_OUT_COMPLETED', label: '출고 완료', group: 'STOCK_OUT', kind: 'domain', implemented: true, refType: 'STOCK_OUT', conditions: ['queues', 'severities'], description: "출고업무가 '완료'로 바뀌었을 때 — [출고 처리]·상태 직접 변경·티켓 종료 공통, 취소는 제외. 요청자를 Slack에서 태그" },
   // ── 운영 ──
   { key: 'OPS_CHANNELTALK_SYNC_FAILED', label: '채널톡 동기화 실패', group: 'OPS', kind: 'domain', implemented: false, conditions: [], description: '채널톡 폴링 틱이 오류로 끝났을 때' },
   { key: 'OPS_SHEET_UNLINKED', label: '시트 행 미연결', group: 'OPS', kind: 'domain', implemented: false, conditions: [], description: '연결 전용 모드에서 24시간 내 채널톡 경로 접수를 못 찾은 시트 행' },
