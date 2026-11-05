@@ -6,6 +6,8 @@
 
 ## 2026-11-05 14:30 | VOC 분류 다중 표시 + 대표 분류 채널톡 태그 자동 추종
 
+→ **PROD 배포 2026-11-05 (0f78e60 — dev2 VOC 작업 + DEV 출고요청 영업 유형 3d1906c 머지)**: dev2 빌드·재시작 → push → PROD pull(cebfef9→0f78e60) → 마이그 2건(`20261105120000_stock_out_sales_request`·`20261105120000_voc_type_manual`) psql 적용·resolve(voc_type_manual 백필 7,910) → `seed-stock-out-masters.sql`(영업 유형 노출 27행) · VOC 분류 5종 INSERT(33종) → generate → `resync-voc-types.mts` dry-run(대표 변경 예정 176·수동 보존 248) → `--apply` **562건 변경(행 910), 잔여 불일치 0**, VOC-202611-0118 대표 '오류HW/운영장비' 확인 → 힙 4GB 빌드(디스크 73%, 협업 번들 불변) → `pm2 restart thync-prod` → /voc·/voc/[id]·/m·출고업무·로그인·외부 URL 정상, 재시작 후 에러 0
+
 - 사용자 확인 요청 → 원인: 대표 분류 생성 시 고정 + 복수 분류 미노출(상세 `projects/voc_channeltalk_promotion_design.md` §7). "여러 개 다 보여주자" 승인
 - DB: `voc_receipts.voc_type_manual`(마이그 `20261105120000_voc_type_manual`, MANUAL/SHEET 기존 건 true 백필 7,897). VOC_TYPE 마스터 5종 추가(`seed-cs-masters.sql` 8-1, dev2 적용 → 33종)
 - 코드: `syncVocTypesFromChats` 대표 자동 추종(수동 제외)·태그 쉼표 정규화(`normalizeCategoryTag`), 목록·상세 API `types` 포함·필터 OR, PUT 대표 변경 시 manual=true, 목록 `typeBadges`·상세 배지 전부 + '(대표 수동 지정)'
