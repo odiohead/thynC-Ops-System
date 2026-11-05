@@ -17,6 +17,7 @@ import { prisma } from '@/lib/prisma'
 import { getSlackMode, resolveTargetChannel, slackPostMessage, slackLookupUserByEmail } from '@/lib/slack'
 import { FIELD_CATALOG, DEFAULT_FIELDS, TASK_TYPE_LABELS, TASK_TYPES, refTypeToTaskType } from '@/lib/notifyFields'
 import { summarizeStockOutItems } from '@/lib/stockOut'
+import { stockOutTitle } from '@/lib/stockOutShared'
 import { TICKET_STATUS_LABELS, TICKET_SEVERITY_LABELS, PERSONAL_QUEUE_NAME } from '@/lib/ticket-shared'
 import { resolveChannels, type NotifyRouteEvent, type ResolvedChannel } from '@/lib/notify-routes'
 import { emitNotification, ticketRecipients, queueMemberIds } from '@/lib/notify-center'
@@ -566,6 +567,8 @@ async function enrichTask(taskType: TaskType, refCode: string): Promise<Enriched
         select: {
           id: true, requestDate: true, resolvedAt: true,
           project: { select: { projectName: true, hospital: { select: { hospitalName: true } } } },
+          purpose: true, subPurpose: true, destType: true, destText: true,
+          destHospital: { select: { hospitalName: true } },
           createdBy: { select: { name: true } },
           status: { select: { name: true } },
           items: { select: { quantity: true, item: { select: { name: true } } } },
@@ -577,7 +580,7 @@ async function enrichTask(taskType: TaskType, refCode: string): Promise<Enriched
       if (r.items.length) fv.items = summarizeStockOutItems(r.items)
       if (r.createdBy?.name) fv.createdBy = r.createdBy.name
       if (r.resolvedAt) fv.resolvedAt = ymd(r.resolvedAt)!
-      return { hospitalName: r.project?.hospital?.hospitalName ?? null, title: r.project?.projectName ?? null, url: `${base}/stock-out-requests/${r.id}`, fieldValues: fv }
+      return { hospitalName: r.project?.hospital?.hospitalName ?? r.destHospital?.hospitalName ?? null, title: stockOutTitle(r), url: `${base}/stock-out-requests/${r.id}`, fieldValues: fv }
     }
     case 'AS': {
       const r = await prisma.asReceipt.findUnique({

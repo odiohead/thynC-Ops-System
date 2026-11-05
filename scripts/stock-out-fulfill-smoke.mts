@@ -112,7 +112,7 @@ async function main() {
       await prisma.stockOutRequestItem.createMany({ data: items.map((i) => ({ requestId: r.id, ...i })) })
       const tid = await prisma.$transaction((tx) =>
         createTicketForStockOut(tx, {
-          id: r.id, sorCode: r.sorCode, projectName: project!.projectName, hospitalCode: project!.hospitalCode,
+          id: r.id, sorCode: r.sorCode, title: project!.projectName, hospitalCode: project!.hospitalCode,
           statusName: '요청', statusId: r.statusId, note: null, requestDate: r.requestDate, resolvedAt: null, createdAt: r.createdAt,
         }, anyUser!.id, 'domain')
       )

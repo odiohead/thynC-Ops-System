@@ -2,16 +2,18 @@
 
 /**
  * 출고 품목 노출 설정 (projects/stock_out_v2_design.md §7 — ADMIN 이상 쓰기)
- * 품목 소스 = 자재관리 품목(인벤토리×품목 행). 업무 탭(구축/유지보수/사업업무)마다 전체 활성 품목을 보여 주고
+ * 품목 소스 = 자재관리 품목(인벤토리×품목 행). 업무 탭(구축/유지보수/사업업무 + 영업 유형 평가용/판매용/오산영업소 — 2026-11-05)마다 전체 활성 품목을 보여 주고
  * 행별 '노출' 체크로 그 업무의 출고요청 폼에 보일지 정한다. 체크 = "이 업무는 이 인벤토리에서 이 품목을 출고".
  */
 import { Suspense, useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { STOCK_OUT_PURPOSES, STOCK_OUT_PURPOSE_LABELS, isStockOutPurpose, type StockOutPurpose } from '@/lib/stockOutShared'
+import { STOCK_OUT_PURPOSES, STOCK_OUT_PURPOSE_LABELS, isStockOutPurpose, isStockOutSalesType, type StockOutPurpose } from '@/lib/stockOutShared'
 import ComponentsTab from './_components/ComponentsTab'
+import GuidesTab from './_components/GuidesTab'
 
 const COMPONENTS_TAB = 'COMPONENTS' as const
-type Tab = StockOutPurpose | typeof COMPONENTS_TAB
+const GUIDES_TAB = 'GUIDES' as const
+type Tab = StockOutPurpose | typeof COMPONENTS_TAB | typeof GUIDES_TAB
 
 interface ItemRow {
   id: number
@@ -30,8 +32,8 @@ function StockOutItemsSettingsInner() {
   const router = useRouter()
   const sp = useSearchParams()
   const tabParam = sp.get('tab')
-  const tab: Tab = tabParam === COMPONENTS_TAB ? COMPONENTS_TAB : isStockOutPurpose(tabParam) ? tabParam : 'BUILD'
-  const purposeTab: StockOutPurpose = tab === COMPONENTS_TAB ? 'BUILD' : tab
+  const tab: Tab = tabParam === COMPONENTS_TAB ? COMPONENTS_TAB : tabParam === GUIDES_TAB ? GUIDES_TAB : isStockOutPurpose(tabParam) ? tabParam : 'BUILD'
+  const purposeTab: StockOutPurpose = tab === COMPONENTS_TAB || tab === GUIDES_TAB ? 'BUILD' : tab
 
   const [groups, setGroups] = useState<InventoryGroup[]>([])
   const [loading, setLoading] = useState(true)
@@ -100,7 +102,7 @@ function StockOutItemsSettingsInner() {
       </p>
 
       {/* 업무 탭 */}
-      <div className="mt-4 flex items-center gap-1 border-b border-gray-200" role="tablist">
+      <div className="mt-4 flex items-center gap-1 overflow-x-auto whitespace-nowrap border-b border-gray-200" role="tablist">
         {STOCK_OUT_PURPOSES.map((p) => (
           <button
             key={p}
@@ -123,14 +125,32 @@ function StockOutItemsSettingsInner() {
         >
           구성 안내
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === GUIDES_TAB}
+          onClick={() => router.push(`/settings/stock-out-items?tab=${GUIDES_TAB}`)}
+          className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${tab === GUIDES_TAB ? 'border-violet-500 text-violet-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+        >
+          입력 가이드
+        </button>
         <div className="ml-auto pb-1.5">
-          {tab !== COMPONENTS_TAB && <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="품목·모델·분류 검색" className="w-52 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />}
+          {tab !== COMPONENTS_TAB && tab !== GUIDES_TAB && <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="품목·모델·분류 검색" className="w-52 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />}
         </div>
       </div>
 
       {error && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">{error}</div>}
 
-      {tab === COMPONENTS_TAB ? (
+      {isStockOutSalesType(tab) && (
+        <p className="mt-3 rounded-lg border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm text-violet-800">
+          출고요청(모바일 앱·PC 출고업무) &lsquo;{STOCK_OUT_PURPOSE_LABELS[tab]}&rsquo; 유형에 보일 품목을 체크합니다. 체크한 품목의 인벤토리에서 출고됩니다
+          (예: {STOCK_OUT_PURPOSE_LABELS[tab]} 재고 품목 + thynC운영팀재고의 배터리·에바폼).
+        </p>
+      )}
+
+      {tab === GUIDES_TAB ? (
+        <GuidesTab canEdit={canEdit} />
+      ) : tab === COMPONENTS_TAB ? (
         <ComponentsTab canEdit={canEdit} allItems={groups.flatMap((g) => g.items.map((it) => ({ id: it.id, name: it.name, modelName: it.modelName, inventoryName: g.name })))} />
       ) : loading ? (
         <p className="py-12 text-center text-sm text-gray-400">불러오는 중...</p>

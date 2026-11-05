@@ -4,6 +4,27 @@
 
 ---
 
+## 2026-11-05 13:30 | 출고업무 PC [출고요청] — 영업 유형(평가용·판매용·오산영업소) 등록·수정 모달
+
+- **사용자 요청**: PC '출고업무' 진입 시 우측 상단 [출고요청] 버튼으로 등록. 프로젝트 유형은 프로젝트 도메인 안에서만 → 여기서는 영업 유형 3종만. 기기현황 등록 질문에 '병원 납품처면 유형 무관 등록(현행 유지)' 답변
+- `StockOutRequestFormModal`에 영업 유형 모드(`project` 미지정): 유형 칩 → 목적 칩(오산영업소 자동) → 납품처 병원(`DestHospitalSearch` 신규 — 전체 병원 검색)/기타 → 수령지·수취인 → 희망일 → 품목(유형 탭 노출 품목) → 비고 → 첨부, 항목 아래 입력 가이드(설정 공용). 수정 모드는 유형 고정·목적/납품처/수령지/수취인 포함 PUT
+- 목록 `/stock-out-requests`: 우측 상단 [+ 출고요청](뷰어 숨김), '구분' 필터(전체·구축(프로젝트)·평가용·판매용·오산영업소 → `?purpose=`), 안내 문구 갱신. 상세: 영업 유형 [수정]이 새 모드로 열림(이전 커밋 전 임시 처리 — 프로젝트 머리줄 대체 — 제거)
+- 설정 '입력 가이드'·유형 탭 안내 문구를 모바일·PC 공용으로
+- 검증: tsc·eslint 0 (API는 직전 항목의 라우트 검증 29건이 동일 경로)
+- 영향 파일: `app/stock-out-requests/{page,[id]/page}.tsx`, `app/stock-out-requests/_components/{StockOutRequestFormModal,DestHospitalSearch}.tsx`, `app/settings/stock-out-items/{page,_components/GuidesTab}.tsx`, `lib/stockOutShared.ts`, `projects/stock_out_sales_request_design.md`, `README.md`
+
+## 2026-11-05 11:00 | 출고요청 영업 유형(평가용·판매용·오산영업소) — 모바일 등록 + 설정 유형별 품목 탭·입력 가이드
+
+- **사용자 요청**: 모바일 '출고요청' 기능정의 — 유형(평가용·판매용·오산영업소)·유형별 목적(오산영업소는 자동)·납품처(병원 검색/기타 텍스트)·수령지·수취인·품목별 수량·비고, 등록 시 출고업무 티켓 생성. 유형별 출고 인벤토리(배터리·에바폼은 thynC운영팀재고). 품목은 "설정탭에서 유형별로 지정", 항목별 가이드도 설정에서
+- **DB** (마이그 `20261105120000_stock_out_sales_request`, DEV 적용): `stock_out_requests.project_code` nullable + CHECK `kind`(영업 유형=프로젝트 NULL·목적·납품처 필수 / 그 외=프로젝트 필수) · 컬럼 `sub_purpose`·`dest_type`·`dest_hospital_code`(FK hospitals)·`dest_text`·`ship_address`·`recipient` + CHECK `dest` · purpose CHECK 2곳에 EVALUATION·SALES·OSAN_OFFICE
+- **설정**: 출고 품목 관리에 유형 탭 3개(업무 어휘 추가로 자동) + '입력 가이드' 탭(`GuidesTab`, `GET/PUT /api/settings/stock-out-guides`, app_settings JSON, 비우면 기본 문구). 노출 초기값 시드 `seed-stock-out-masters.sql` 2-b — 유형당 9종(유형 인벤토리 7종 + 운영팀 배터리·에바폼), 유형에 행이 있으면 건너뜀(DEV 적용)
+- **API**: POST 영업 유형 분기(목적 어휘·납품처·수령지·수취인 검증, 노출 품목만), PUT 영업 필드 수정, 목록 `createdById=me`·`purpose=SALES_TYPES`·납품처/수취인 검색. 제목 단일 소스 `stockOutTitle()`(티켓 `[출고요청] 평가용·데모 서울대학교병원`, 티켓 병원=납품처 병원)
+- **처리·알림**: `stockOutFulfill` 출고 대상 = 프로젝트 병원 또는 납품처(전표 출고처 텍스트, workType·refCode는 프로젝트만, 기기현황 등록은 병원 납품처만) · Slack 머리줄 납품처명·목적 병기·수취인
+- **화면**: 모바일 `/m/stock-out-requests`(내 요청 목록)·`/new`(등록 폼 — 항목 제목 아래 가이드, 하단 고정 등록)·`/[id]`(읽기 전용), `HospitalSearch` 컴포넌트. PC 목록·상세에 유형·목적·납품처·수령지·수취인, 수정 모달 재사용(희망일·품목·비고)
+- **검증**: DEV 라우트 직접 호출 29/29(검증 400 7종·뷰어 403·병원/기타 등록·티켓 제목/병원·목록 필터·PUT 동기화·출고 미리보기/실행·가이드) → 테스트 요청 삭제·전표 취소로 재고 원복 · 회귀 `stock-out-smoke` 31/0·`stock-out-fulfill-smoke` 23/0 · tsc·eslint 0
+- 설계: `projects/stock_out_sales_request_design.md`. 영향 파일: `prisma/schema.prisma`, `lib/{stockOutShared,stockOutFulfill,stockOutNotify,notify}.ts`, `lib/ticket-domains/stockOut.ts`, `app/api/stock-out-requests/{route,[id]/route}.ts`, `app/api/settings/stock-out-guides/route.ts`, `app/settings/stock-out-items/{page,_components/GuidesTab}.tsx`, `app/stock-out-requests/{page,[id]/page}.tsx`, `app/m/stock-out-requests/*`, `app/m/_components/HospitalSearch.tsx`, `scripts/seed-stock-out-masters.sql`, `scripts/stock-out-{smoke,fulfill-smoke}.mts`
+- **PROD 반영 시**: 마이그 SQL psql 적용·resolve → `seed-stock-out-masters.sql` 재실행(2-b 노출 초기값) → 빌드·재시작
+
 ## 2026-11-05 10:00 | 주간업무(/weekly) 담당 팀 다중 선택
 
 → **PROD 배포 2026-11-05 (386837a)**: pull → 마이그 `20261105090000_weekly_item_teams` psql 적용·resolve(owner_team_id 42건 백필 확인) → generate → 힙 4GB 빌드(디스크 72%, 8G 여유) → `pm2 restart thync-prod`(협업 번들 불변) → /weekly·마스터 API·로그인 정상, 재시작 후 에러 0

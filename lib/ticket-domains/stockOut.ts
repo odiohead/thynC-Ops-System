@@ -10,6 +10,7 @@ import { Prisma, TicketStatus } from '@prisma/client'
 import { generateTicketCode, addTicketEvent } from '@/lib/ticket'
 import { buildTicketDescription } from '@/lib/ticketCtiRules'
 import { summarizeStockOutItems } from '@/lib/stockOut'
+import { stockOutTitle } from '@/lib/stockOutShared'
 import { TICKET_DOMAIN_META } from './meta'
 import type { TicketDomainAdapter } from './types'
 import {
@@ -51,7 +52,8 @@ export function ticketStatusToStockOut(status: TicketStatus): string {
 interface StockOutForTicket {
   id: number
   sorCode: string | null
-  projectName: string
+  /** 티켓 제목 소스 — stockOutTitle() (프로젝트명 또는 "유형·목적 납품처") */
+  title: string
   hospitalCode: string | null
   statusName: string | null
   statusId?: number | null
@@ -89,7 +91,7 @@ export async function createTicketForStockOut(
   const ticket = await tx.ticket.create({
     data: {
       ticketCode,
-      title: `[출고요청] ${r.projectName}`,
+      title: `[출고요청] ${r.title}`,
       descriptionHtml: rule.fillDescription
         ? buildTicketDescription({ refType: 'STOCK_OUT', source: r.note, refCode: r.sorCode })
         : null,
@@ -120,7 +122,9 @@ export async function syncStockOutToTicket(tx: Prisma.TransactionClient, request
   const r = await tx.stockOutRequest.findUnique({
     where: { id: requestId },
     select: {
-      id: true, ticketId: true, resolvedAt: true,
+      id: true, ticketId: true, resolvedAt: true, purpose: true, subPurpose: true,
+      destType: true, destText: true, destHospitalCode: true,
+      destHospital: { select: { hospitalName: true } },
       project: { select: { projectName: true, hospitalCode: true } },
       status: { select: STATUS_MAPPING_SELECT },
     },
@@ -133,8 +137,8 @@ export async function syncStockOutToTicket(tx: Prisma.TransactionClient, request
   const nextStatus = mappedTicketStatus(r.status, hasOwner, () => stockOutStatusToTicket(r.status?.name ?? null, hasOwner))
 
   const data: Prisma.TicketUncheckedUpdateInput = {
-    title: `[출고요청] ${r.project.projectName}`,
-    hospitalCode: r.project.hospitalCode,
+    title: `[출고요청] ${stockOutTitle(r)}`,
+    hospitalCode: r.project?.hospitalCode ?? r.destHospitalCode ?? null,
   }
   if (nextStatus !== ticket.status) {
     data.status = nextStatus
@@ -182,6 +186,11 @@ interface StockOutBannerRel {
   id: number
   sorCode: string | null
   requestDate: Date | string | null
+  purpose: string
+  subPurpose: string | null
+  destType: string | null
+  destText: string | null
+  destHospital: { hospitalName: string } | null
   project: { projectCode: string; projectName: string } | null
   createdBy: { name: string } | null
   items: { quantity: number; item: { name: string } }[]
@@ -193,7 +202,8 @@ export const stockOutAdapter: TicketDomainAdapter = {
   detailInclude: {
     stockOutRequest: {
       select: {
-        id: true, sorCode: true, requestDate: true,
+        id: true, sorCode: true, requestDate: true, purpose: true, subPurpose: true, destType: true, destText: true,
+        destHospital: { select: { hospitalName: true } },
         project: { select: { projectCode: true, projectName: true } },
         createdBy: { select: { name: true } },
         items: { select: { quantity: true, item: { select: { name: true } } }, orderBy: { id: 'asc' as const } },
@@ -208,7 +218,7 @@ export const stockOutAdapter: TicketDomainAdapter = {
       refType: 'STOCK_OUT',
       code: r.sorCode ?? `#${r.id}`,
       meta: [
-        `프로젝트 ${r.project?.projectName ?? '-'}`,
+        r.project ? `프로젝트 ${r.project.projectName}` : stockOutTitle(r),
         summarizeStockOutItems(r.items ?? []),
         `희망 출고일 ${bannerDate(r.requestDate)}`,
         `요청 ${r.createdBy?.name ?? '-'}`,

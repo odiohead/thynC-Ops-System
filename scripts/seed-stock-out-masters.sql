@@ -32,3 +32,18 @@ SELECT ii.id, 'BUILD'
    AND ii.model_name IN ('thynC시스템10','thynC시스템20','thynC시스템30','thynC시스템40','thynC시스템50','thynC시스템100',
                          'MGW1010','MC200M-T','MP100W','MP1000F','L-MC200M-T','L-MP100W','L-MP2000F','L-MP2000R')
 ON CONFLICT DO NOTHING;
+
+-- 2-b) 영업 유형 노출 초기값 (2026-11-05 — projects/stock_out_sales_request_design.md §4, 멱등)
+--   평가용=평가용재고 / 판매용=판매용재고 / 오산영업소=오산영업소 의 MC200M-T·MP100W·MP1000F·MP2000F·MP2000R·MGW1010·전극
+--   + 세 유형 공통 thynC운영팀재고 배터리·에바폼. 유형별로 한 행이라도 있으면 건너뜀(관리자가 해제한 품목을 되살리지 않음)
+INSERT INTO stock_out_item_purposes (inventory_item_id, purpose)
+SELECT ii.id, t.purpose
+  FROM (VALUES ('EVALUATION','평가용재고'), ('SALES','판매용재고'), ('OSAN_OFFICE','오산영업소')) AS t(purpose, inv_name)
+  JOIN inventories inv ON inv.name = t.inv_name OR inv.name = 'thynC운영팀재고'
+  JOIN inventory_items ii ON ii.inventory_id = inv.id AND ii.is_active
+ WHERE NOT EXISTS (SELECT 1 FROM stock_out_item_purposes p WHERE p.purpose = t.purpose)
+   AND (
+     (inv.name = t.inv_name AND (ii.model_name IN ('MC200M-T','MP100W','MP1000F','MP2000F','MP2000R','MGW1010') OR ii.name LIKE '전극%'))
+     OR (inv.name = 'thynC운영팀재고' AND (ii.name LIKE '배터리%' OR ii.name LIKE '에바폼%'))
+   )
+ON CONFLICT DO NOTHING;

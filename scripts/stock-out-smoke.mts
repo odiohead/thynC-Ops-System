@@ -85,7 +85,7 @@ async function main() {
 
     const ticketId = await prisma.$transaction((tx) =>
       createTicketForStockOut(tx, {
-        id: sor.id, sorCode: sor.sorCode, projectName: project.projectName,
+        id: sor.id, sorCode: sor.sorCode, title: project.projectName,
         hospitalCode: project.hospitalCode, statusName: '요청', statusId: sor.statusId,
         note: sor.note, requestDate: sor.requestDate, resolvedAt: null, createdAt: sor.createdAt,
       }, anyUser.id, 'domain')
