@@ -203,16 +203,20 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
     data.hospitalCode = code
   }
-  if (body.ownerTeamId !== undefined) {
-    if (body.ownerTeamId !== null && !(Number.isInteger(body.ownerTeamId) && body.ownerTeamId > 0)) {
-      return NextResponse.json({ error: 'ownerTeamId가 올바르지 않습니다.' }, { status: 400 })
+  // 담당 팀 — 다중 `teamIds` (2026-11-05). 구 `ownerTeamId` 단일도 수용. 보냈을 때만 전체 교체, owner_team_id = 첫 팀
+  let teamIds: number[] | null = null
+  if (body.teamIds !== undefined || body.ownerTeamId !== undefined) {
+    const raw: unknown = body.teamIds !== undefined ? body.teamIds : body.ownerTeamId === null ? [] : [body.ownerTeamId]
+    if (!Array.isArray(raw) || raw.some((t) => !(Number.isInteger(t) && (t as number) > 0))) {
+      return NextResponse.json({ error: 'teamIds가 올바르지 않습니다.' }, { status: 400 })
     }
-    const teamId = Number.isInteger(body.ownerTeamId) && body.ownerTeamId > 0 ? (body.ownerTeamId as number) : null
-    if (teamId) {
-      const team = await prisma.department.findUnique({ where: { id: teamId }, select: { id: true } })
-      if (!team) return NextResponse.json({ error: '담당 팀을 찾을 수 없습니다.' }, { status: 400 })
+    teamIds = Array.from(new Set(raw as number[]))
+    if (teamIds.length) {
+      const found = await prisma.department.count({ where: { id: { in: teamIds } } })
+      if (found !== teamIds.length) return NextResponse.json({ error: '담당 팀을 찾을 수 없습니다.' }, { status: 400 })
     }
-    data.ownerTeamId = teamId
+    data.ownerTeamId = teamIds[0] ?? null
+    data.teams = { deleteMany: {}, create: teamIds.map((teamId, i) => ({ teamId, sortOrder: i })) }
   }
   if (body.ownerId !== undefined) {
     const ownerId = typeof body.ownerId === 'string' && body.ownerId ? body.ownerId : null

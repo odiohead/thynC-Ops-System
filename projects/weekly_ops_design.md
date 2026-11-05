@@ -358,3 +358,10 @@ CREATE TABLE weekly_week_notes (
   2. 섹션 구조: 주요 안건/주요 이슈 2섹션 → **사업/운영/개발 안건**(BIZ/OPS/DEV) 3섹션 — 기존 데이터 PROJECT→BIZ, ISSUE→OPS 마이그레이션
   3. '지연중인 안건' 탭 신설(완료 아카이브 좌측) — `scope=overdue`(미완료+목표일 경과, KST)
   4. 상세 모달: 92vw 2컬럼 대형화(좌 기본정보+설명 리치텍스트 / 우 진행 이력), 목표일 D-day 배지·병원 상세 링크, **주차별 진행 이력 인라인 수정**(빈 저장=삭제)
+
+## 10. 담당 팀 다중 선택 (2026-11-05 — 사용자 요청 "업무등록할 때 팀을 중복으로 선택")
+
+- 테이블 `weekly_item_teams`(item_id CASCADE × team_id→departments CASCADE, sort_order, PK(item, team)) — 마이그 `20261105090000_weekly_item_teams`, 기존 `owner_team_id` 백필. `owner_team_id`는 **첫 팀으로 동기 유지**(호환·구 소비처)
+- DTO `WeeklyItemDto.teamIds[]·teamNames[]` 추가(`ownerTeamId/Name` = 첫 팀 유지). API `POST/PUT /api/weekly/items` — `teamIds: number[]`(구 `ownerTeamId` 단일도 수용 → [id]), PUT은 보냈을 때만 전체 교체
+- 화면: 등록 행·상세 모달의 팀 Select → `TeamMultiSelect`(체크박스 드롭다운, 2개 초과 시 'A 외 n'), 보드·병원 스코프 '담당 팀' 열은 팀명 콤마 나열(툴팁 전체)
+

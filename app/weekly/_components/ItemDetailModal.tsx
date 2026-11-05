@@ -8,6 +8,7 @@ import Button from '@/app/components/ui/Button'
 import Badge from '@/app/components/ui/Badge'
 import { Input, Select } from '@/app/components/ui/Input'
 import SearchSelect from './SearchSelect'
+import TeamMultiSelect from './TeamMultiSelect'
 import RichContent from './RichContent'
 import WeeklyRichEditor from './WeeklyRichEditor'
 import CellEditor from './CellEditor'
@@ -42,7 +43,7 @@ interface FormState {
   bizType: string
   title: string
   hospitalCode: string
-  ownerTeamId: string // '' = 미지정, 숫자 문자열
+  ownerTeamIds: string[] // 담당 팀 다중 (2026-11-05)
   ownerId: string
   targetDate: string
   detail: string // 리치텍스트 HTML (구 데이터는 plain text)
@@ -107,7 +108,7 @@ export default function ItemDetailModal({ itemId, onClose, masters, canWrite, on
       bizType: it.bizType,
       title: it.title,
       hospitalCode: it.hospitalCode ?? '',
-      ownerTeamId: it.ownerTeamId != null ? String(it.ownerTeamId) : '',
+      ownerTeamIds: (it.teamIds ?? []).map(String),
       ownerId: it.ownerId ?? '',
       targetDate: it.targetDate ?? '',
       detail: it.detail ?? '',
@@ -164,7 +165,7 @@ export default function ItemDetailModal({ itemId, onClose, masters, canWrite, on
       bizType: form.bizType,
       title: form.title.trim(),
       hospitalCode: form.hospitalCode || null,
-      ownerTeamId: form.ownerTeamId ? Number(form.ownerTeamId) : null,
+      teamIds: form.ownerTeamIds.map(Number),
       ownerId: form.ownerId || null,
       targetDate: form.targetDate || null,
       detail: isEmptyRichText(form.detail) ? null : form.detail,
@@ -387,19 +388,14 @@ export default function ItemDetailModal({ itemId, onClose, masters, canWrite, on
                   />
                 </div>
                 <label className="block text-sm">
-                  <span className={fieldLabel}>담당 팀 (선택)</span>
-                  <Select
-                    value={form.ownerTeamId}
-                    onChange={(e) => set('ownerTeamId', e.target.value)}
+                  <span className={fieldLabel}>담당 팀 (선택, 복수 가능)</span>
+                  <TeamMultiSelect
+                    options={masters?.teams ?? []}
+                    value={form.ownerTeamIds}
+                    onChange={(ids) => set('ownerTeamIds', ids)}
                     disabled={!canWrite}
-                  >
-                    <option value="">— 팀 미지정 —</option>
-                    {(masters?.teams ?? []).map((t) => (
-                      <option key={t.id} value={String(t.id)}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </Select>
+                    placeholder="— 팀 미지정 —"
+                  />
                 </label>
                 <div className="block text-sm">
                   <span className={fieldLabel}>담당 (선택)</span>

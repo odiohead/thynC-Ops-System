@@ -298,7 +298,7 @@ export default function WeeklyPage() {
           title: form.title,
           bizType: form.bizType,
           hospitalCode: form.hospitalCode || undefined,
-          ownerTeamId: form.ownerTeamId ? Number(form.ownerTeamId) : undefined,
+          teamIds: form.ownerTeamIds.map(Number), // 담당 팀 다중 (2026-11-05)
           ownerId: form.ownerId || undefined,
           targetDate: form.targetDate || undefined,
         }),
@@ -533,7 +533,7 @@ export default function WeeklyPage() {
             <span className="text-muted-foreground">{isCurrentProg && editable ? '클릭하여 입력' : '—'}</span>
           )}
         </td>
-        <td className={`${tdCls} whitespace-nowrap`}>{it.ownerTeamName ?? '—'}</td>
+        <td className={`${tdCls} whitespace-nowrap`} title={it.teamNames.join(', ') || undefined}>{it.teamNames.length ? it.teamNames.join(', ') : '—'}</td>
         <td className={`${tdCls} whitespace-nowrap`}>
           <Badge variant={STATUS_VARIANT[st]}>{st}</Badge>
         </td>
@@ -700,7 +700,7 @@ export default function WeeklyPage() {
                     <span className="text-muted-foreground">—</span>
                   )}
                 </td>
-                <td className={`${tdCls} whitespace-nowrap`}>{it.ownerTeamName ?? '—'}</td>
+                <td className={`${tdCls} whitespace-nowrap`} title={it.teamNames.join(', ') || undefined}>{it.teamNames.length ? it.teamNames.join(', ') : '—'}</td>
                 <td className={`${tdCls} whitespace-nowrap`}>
                   <Badge variant={STATUS_VARIANT[st]}>{st}</Badge>
                 </td>

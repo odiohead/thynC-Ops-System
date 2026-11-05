@@ -102,10 +102,13 @@ export async function POST(request: NextRequest) {
 
   const hospitalCode = typeof body.hospitalCode === 'string' && body.hospitalCode ? body.hospitalCode : null
   const ownerId = typeof body.ownerId === 'string' && body.ownerId ? body.ownerId : null
-  if (body.ownerTeamId !== undefined && body.ownerTeamId !== null && !(Number.isInteger(body.ownerTeamId) && body.ownerTeamId > 0)) {
-    return NextResponse.json({ error: 'ownerTeamId가 올바르지 않습니다.' }, { status: 400 })
+  // 담당 팀 — 다중 `teamIds: number[]` (2026-11-05). 구 `ownerTeamId` 단일도 수용(→ [id]). owner_team_id는 첫 팀으로 동기
+  const teamIdsRaw: unknown = body.teamIds !== undefined ? body.teamIds : body.ownerTeamId !== undefined && body.ownerTeamId !== null ? [body.ownerTeamId] : []
+  if (!Array.isArray(teamIdsRaw) || teamIdsRaw.some((t) => !(Number.isInteger(t) && (t as number) > 0))) {
+    return NextResponse.json({ error: 'teamIds가 올바르지 않습니다.' }, { status: 400 })
   }
-  const ownerTeamId = Number.isInteger(body.ownerTeamId) && body.ownerTeamId > 0 ? (body.ownerTeamId as number) : null
+  const teamIds = Array.from(new Set(teamIdsRaw as number[]))
+  const ownerTeamId = teamIds[0] ?? null
   if (hospitalCode) {
     const hospital = await prisma.hospital.findUnique({ where: { hospitalCode }, select: { hospitalCode: true } })
     if (!hospital) return NextResponse.json({ error: '병원을 찾을 수 없습니다.' }, { status: 400 })
@@ -114,9 +117,9 @@ export async function POST(request: NextRequest) {
     const owner = await prisma.user.findUnique({ where: { id: ownerId }, select: { id: true } })
     if (!owner) return NextResponse.json({ error: '담당자를 찾을 수 없습니다.' }, { status: 400 })
   }
-  if (ownerTeamId) {
-    const team = await prisma.department.findUnique({ where: { id: ownerTeamId }, select: { id: true } })
-    if (!team) return NextResponse.json({ error: '담당 팀을 찾을 수 없습니다.' }, { status: 400 })
+  if (teamIds.length) {
+    const found = await prisma.department.count({ where: { id: { in: teamIds } } })
+    if (found !== teamIds.length) return NextResponse.json({ error: '담당 팀을 찾을 수 없습니다.' }, { status: 400 })
   }
 
   const agg = await prisma.weeklyItem.aggregate({ where: { kind: body.kind }, _max: { sortOrder: true } })
@@ -136,6 +139,7 @@ export async function POST(request: NextRequest) {
       hospitalCode,
       ownerId,
       ownerTeamId,
+      teams: { create: teamIds.map((teamId, i) => ({ teamId, sortOrder: i })) },
       targetDate,
       sortOrder,
       createdById: user.userId,

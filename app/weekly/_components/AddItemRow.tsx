@@ -5,13 +5,14 @@ import { useState } from 'react'
 import Button from '@/app/components/ui/Button'
 import { Input, Select } from '@/app/components/ui/Input'
 import SearchSelect from './SearchSelect'
+import TeamMultiSelect from './TeamMultiSelect'
 import { WEEKLY_BIZ_TYPES, type WeeklyMastersResponse } from '@/lib/weekly'
 
 export interface AddItemForm {
   title: string
   bizType: string
   hospitalCode: string
-  ownerTeamId: string // '' = 미지정, 숫자 문자열
+  ownerTeamIds: string[] // 담당 팀 다중 — 숫자 문자열, 선택 순서 (2026-11-05)
   ownerId: string
   targetDate: string
 }
@@ -27,7 +28,7 @@ export default function AddItemRow({ masters, busy, onSave, onCancel }: Props) {
   const [title, setTitle] = useState('')
   const [bizType, setBizType] = useState('공통')
   const [hospitalCode, setHospitalCode] = useState('')
-  const [ownerTeamId, setOwnerTeamId] = useState('')
+  const [ownerTeamIds, setOwnerTeamIds] = useState<string[]>([])
   const [ownerId, setOwnerId] = useState('')
   const [targetDate, setTargetDate] = useState('')
 
@@ -37,7 +38,7 @@ export default function AddItemRow({ masters, busy, onSave, onCancel }: Props) {
       alert('제목을 입력하세요.')
       return
     }
-    onSave({ title: title.trim(), bizType, hospitalCode, ownerTeamId, ownerId, targetDate })
+    onSave({ title: title.trim(), bizType, hospitalCode, ownerTeamIds, ownerId, targetDate })
   }
 
   // <tr>이 아닌 <div> — 테이블의 overflow-x-auto 래퍼 안에 두면 SearchSelect 드롭다운이
@@ -71,14 +72,7 @@ export default function AddItemRow({ masters, busy, onSave, onCancel }: Props) {
             placeholder="병원 검색 (선택)"
             emptyLabel="— 병원 미지정 —"
           />
-          <Select className="w-32" value={ownerTeamId} onChange={(e) => setOwnerTeamId(e.target.value)}>
-            <option value="">담당 팀 (선택)</option>
-            {(masters?.teams ?? []).map((t) => (
-              <option key={t.id} value={String(t.id)}>
-                {t.name}
-              </option>
-            ))}
-          </Select>
+          <TeamMultiSelect className="w-40" options={masters?.teams ?? []} value={ownerTeamIds} onChange={setOwnerTeamIds} />
           <SearchSelect
             className="w-32"
             value={ownerId}

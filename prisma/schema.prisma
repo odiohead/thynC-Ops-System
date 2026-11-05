@@ -372,6 +372,7 @@ model Department {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   users          User[]
   weeklyItems    WeeklyItem[]
+  weeklyItemTeams WeeklyItemTeam[] // 주간업무 담당 팀 다중 (2026-11-05)
 
   @@map("departments")
   @@schema("public")
@@ -2852,7 +2853,7 @@ model WeeklyItem {
   status        String    @default("진행") // '진행' | '보류'
   bizType       String    @default("공통") @map("biz_type") // 'thynC' | 'mobiCARE' | '공통'
   hospitalCode  String?   @map("hospital_code")
-  ownerTeamId   Int?      @map("owner_team_id") // 담당 팀 (departments)
+  ownerTeamId   Int?      @map("owner_team_id") // 담당 팀 (departments) — 2026-11-05부터 다중(teams)의 첫 팀을 동기 유지(호환용)
   ownerId       String?   @map("owner_id")
   targetDate    DateTime? @map("target_date") @db.Date
   completedWeek DateTime? @map("completed_week") @db.Date // 완료 주차(월요일) — NULL이면 미완료
@@ -2868,6 +2869,7 @@ model WeeklyItem {
   createdBy User?       @relation("WeeklyItemCreator", fields: [createdById], references: [id], onDelete: SetNull)
   updates   WeeklyItemUpdate[]
   files     WeeklyItemFile[]
+  teams     WeeklyItemTeam[] // 담당 팀 다중 (2026-11-05)
 
   @@index([kind])
   @@index([hospitalCode])
@@ -2910,6 +2912,21 @@ model WeeklyWeekNote {
 
   @@index([weekStart])
   @@map("weekly_week_notes")
+  @@schema("public")
+}
+
+/// 주간업무 항목 × 담당 팀 (다중 선택, 2026-11-05). owner_team_id는 첫 팀으로 동기(호환)
+model WeeklyItemTeam {
+  itemId    Int @map("item_id")
+  teamId    Int @map("team_id")
+  sortOrder Int @default(0) @map("sort_order") @db.SmallInt
+
+  item WeeklyItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  team Department @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@id([itemId, teamId])
+  @@index([teamId])
+  @@map("weekly_item_teams")
   @@schema("public")
 }
 

@@ -9,6 +9,7 @@ import type { WeeklyFileDto, WeeklyItemDto, WeeklyItemKind, WeeklyNoteDto, Weekl
 export const ITEM_INCLUDE = {
   hospital: { select: { hospitalName: true } },
   ownerTeam: { select: { name: true } },
+  teams: { select: { teamId: true, team: { select: { name: true } } }, orderBy: { sortOrder: 'asc' as const } }, // 담당 팀 다중 (2026-11-05)
   owner: { select: { name: true } },
   _count: { select: { files: true } }, // 첨부 건수 (weekly_attachments_design.md)
 } as const
@@ -42,6 +43,7 @@ export type ItemRow = {
   createdAt: Date
   hospital?: { hospitalName: string } | null
   ownerTeam?: { name: string } | null
+  teams?: { teamId: number; team: { name: string } }[] | null
   owner?: { name: string } | null
   _count?: { files: number } | null
 }
@@ -121,6 +123,8 @@ export function toItemDto(
     hospitalName: item.hospital?.hospitalName ?? null,
     ownerTeamId: item.ownerTeamId,
     ownerTeamName: item.ownerTeam?.name ?? null,
+    teamIds: (item.teams ?? []).map((t) => t.teamId),
+    teamNames: (item.teams ?? []).map((t) => t.team.name),
     ownerId: item.ownerId,
     ownerName: item.owner?.name ?? null,
     targetDate: item.targetDate ? ymd(item.targetDate) : null,

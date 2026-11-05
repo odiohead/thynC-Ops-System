@@ -137,8 +137,11 @@ export interface WeeklyItemDto {
   bizType: string // 'thynC' | 'mobiCARE' | '공통'
   hospitalCode: string | null
   hospitalName: string | null
+  /** 담당 팀 — 2026-11-05부터 다중(teamIds/teamNames). ownerTeamId/ownerTeamName은 첫 팀(호환) */
   ownerTeamId: number | null
   ownerTeamName: string | null
+  teamIds: number[]
+  teamNames: string[]
   ownerId: string | null
   ownerName: string | null
   targetDate: string | null // YYYY-MM-DD

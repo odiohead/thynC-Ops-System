@@ -700,6 +700,9 @@ prisma/
 - `(dealId, deviceInfoId)` UNIQUE, 딜 삭제 시 CASCADE. 수량 0은 행 미저장 — 기기 마스터가 늘어나면 기존 딜 상세에 0으로 표시
 - 딜 상세(`/sales/deals/[id]`) '규모·계약'에서 입력, PUT에 `devices` 배열이 온 경우에만 전체 교체(미전송 PUT은 보존). **등록(POST)·보냈을 때 합계 ≥1 필수 (2026-11-02)** — POST는 딜+수량 행 단일 트랜잭션
 
+#### WeeklyItemTeam (주간업무 항목 × 담당 팀 다중, 2026-11-05 · `projects/weekly_ops_design.md` §10)
+- `itemId`(CASCADE) × `teamId`(departments CASCADE) PK, `sortOrder`. `weekly_items.owner_team_id`는 첫 팀으로 동기(호환). DTO `teamIds/teamNames`, API `teamIds[]`(구 `ownerTeamId` 수용)
+
 #### HospitalDeviceSupply (병원 × 기기 비계약 공급 현황 — 대웅 직판, 2026-11-02 · `projects/third_party_supply_design.md`)
 - `hospitalCode`(CASCADE) × `deviceInfoId` UNIQUE · `quantity`(CHECK ≥0 — 0 = 확인했는데 없음, 행 없음 = 파악 안 됨) · `supplier`(기본 '대웅제약') · `checkedOn`(파악일) · `note` · `updatedById`(SET NULL). 현재 수량 1행 upsert, 변경 이력은 감사 로그
 - `device_info.supply_tracked`(공급 현황 관리, ADMIN+ 전용 필드) = 입력 대상 기기 단일 소스. 도입 현황 카드 기대치 축: 딜 수량 + 공급 수량 합산

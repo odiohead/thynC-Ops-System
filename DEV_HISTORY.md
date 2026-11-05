@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-11-05 10:00 | 주간업무(/weekly) 담당 팀 다중 선택
+
+- 사용자 요청: 업무 등록 시 팀 중복 선택. 설계 `projects/weekly_ops_design.md` §10
+- DB: `weekly_item_teams`(항목×부서 N:M, sort_order) — 마이그 `20261105090000_weekly_item_teams`(dev2 적용·resolve, 기존 owner_team_id 42건 백필). Prisma `WeeklyItemTeam` + `WeeklyItem.teams`·`Department.weeklyItemTeams`. `owner_team_id`는 첫 팀으로 동기 유지(호환)
+- API: `POST/PUT /api/weekly/items` `teamIds: number[]`(구 `ownerTeamId` 단일도 수용), 부서 존재 검증, PUT은 보냈을 때만 전체 교체. `ITEM_INCLUDE.teams`, DTO `teamIds/teamNames`(ownerTeamId/Name = 첫 팀 유지)
+- 화면: `TeamMultiSelect`(신규, 체크박스 드롭다운) — 등록 행(`AddItemRow`)·상세 모달(`ItemDetailModal`), 보드·병원 스코프 '담당 팀' 열 팀명 콤마 나열(툴팁)
+- 검증: tsc·eslint 통과, 서비스 스모크 7/7(2팀 생성·DTO 순서·호환 필드·전체 교체·백필 누락 0·CASCADE). 화면 미확인 — dev2 빌드는 요청 시
+
+## 2026-11-04 17:30 | [운영 데이터 조치 — PROD만] 계약완료 딜 24건 프로젝트 연결 (코드 변경 없음)
+
+- 배경: 병원×계약 기기현황 점검 중 계약완료 딜 266건 중 27건이 운영 프로젝트 미연결(`sales_deals.project_code` NULL). 병원별 프로젝트 대조 결과 24건은 병원에 미연결 프로젝트가 유일(14건은 계약일까지 일치, 10건은 계약일 공란·며칠 차이 — 맘모스정형외과는 프로젝트명 '연합정형외과병원 1차')
+- 사용자 지시 "3개 병원은 코멘트만, 나머지는 매핑": 화면 [프로젝트 매핑](`map-project`)과 같은 검증(같은 병원·딜 미연결·프로젝트 1:1 미사용)·감사 로그(`sales_deal_map_project`, 라벨 '[일괄 매핑 2026-11-04 — 병원 유일 미연결 프로젝트]') 24건. 드라이런 정상 24/문제 0 → 적용. 결과 연결 263 / 미연결 3
+- 보류 3건(엑셀 코멘트만): 광주센트럴 DEAL-202511-0004(후보 2·3차 계약일 동일) · 한도병원 DEAL-202606-0006(1차 프로젝트는 DEAL-202606-0001에 연결 — 2차 프로젝트 없음) · 노량진병원(가칭) DEAL-202608-0008(프로젝트 없음)
+- 롤백: PROD `~/backups/sales_deals_project_map_before_20261104.sql`(24행). 첫 적용 시도는 자동 모드 권한 분류기에 막혀 사용자 허락 후 실행. 점검 보고서 `Documents/병원x계약_기기현황_이상점검_20261104_v2.xlsx`(병원×딜 304행, 이상 195행)
+
 ## 2026-11-04 09:30 | [데이터] AS-202610-0239 · AS-202610-0276 교체 → 수리반환 정정 (PROD)
 
 - 요청(이준호 팀장 전달): 기기 교체로 발송됐으나 수리반환으로 변경 — 선교체 기기는 회수 완료. 날짜 11/03, 바로 반영
