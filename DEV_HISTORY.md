@@ -6,6 +6,8 @@
 
 ## 2026-11-05 10:00 | 주간업무(/weekly) 담당 팀 다중 선택
 
+→ **PROD 배포 2026-11-05 (386837a)**: pull → 마이그 `20261105090000_weekly_item_teams` psql 적용·resolve(owner_team_id 42건 백필 확인) → generate → 힙 4GB 빌드(디스크 72%, 8G 여유) → `pm2 restart thync-prod`(협업 번들 불변) → /weekly·마스터 API·로그인 정상, 재시작 후 에러 0
+
 - 사용자 요청: 업무 등록 시 팀 중복 선택. 설계 `projects/weekly_ops_design.md` §10
 - DB: `weekly_item_teams`(항목×부서 N:M, sort_order) — 마이그 `20261105090000_weekly_item_teams`(dev2 적용·resolve, 기존 owner_team_id 42건 백필). Prisma `WeeklyItemTeam` + `WeeklyItem.teams`·`Department.weeklyItemTeams`. `owner_team_id`는 첫 팀으로 동기 유지(호환)
 - API: `POST/PUT /api/weekly/items` `teamIds: number[]`(구 `ownerTeamId` 단일도 수용), 부서 존재 검증, PUT은 보냈을 때만 전체 교체. `ITEM_INCLUDE.teams`, DTO `teamIds/teamNames`(ownerTeamId/Name = 첫 팀 유지)
