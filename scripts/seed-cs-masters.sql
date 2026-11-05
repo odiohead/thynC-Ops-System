@@ -134,4 +134,13 @@ DELETE FROM status_codes s WHERE s.category = 'VOC_TYPE' AND s.value IS NULL
   AND NOT EXISTS (SELECT 1 FROM voc_receipts v WHERE v.voc_type_id = s.id)
   AND NOT EXISTS (SELECT 1 FROM ticket_domain_cti_rules r WHERE r.match_status_code_id = s.id);
 
+-- 8-1) 2026-11-05 채널톡 분류 태그 추가분(PROD 상담 실측 — 마스터 미등록 태그 5종). 쉼표 변형(설치,점검 등)은 코드에서 '-'로 정규화해 기존 행에 매핑
+INSERT INTO status_codes (name, value, category, "order", color) VALUES
+  ('EMR/연동',                 'c_EMR_연동',                    'VOC_TYPE', 132, '#F59E0B'),
+  ('EMR/사용',                 'c_EMR_사용',                    'VOC_TYPE', 133, '#F59E0B'),
+  ('사용/기기관리',            'd_사용_기기관리',               'VOC_TYPE', 145, '#0EA5E9'),
+  ('사용/병동-환자관리',       'd_사용_병동-환자관리',          'VOC_TYPE', 146, '#0EA5E9'),
+  ('AS/입출고',                'f_AS_입출고',                   'VOC_TYPE', 164, '#10B981')
+ON CONFLICT (name, category) DO UPDATE SET value = EXCLUDED.value, "order" = EXCLUDED."order", color = EXCLUDED.color;
+
 SELECT count(*) AS voc_types FROM status_codes WHERE category = 'VOC_TYPE';

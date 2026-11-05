@@ -16,6 +16,8 @@ export const CHANNELTALK_BOT_EMAIL = 'channeltalk-bot@seersthync.com'
 
 /** 채널톡 분류 태그(a~h_ 접두) — VOC 승격 트리거. '팀/…' 팀 태그는 조건 아님(2026-09-28 보류) */
 export const isCategoryTag = (t: string) => /^[a-h]_/.test(t)
+/** 분류 태그 정규화 — 채널톡 쪽 쉼표 변형('e_운영_설치,점검')을 마스터 값('-')으로 (2026-11-05) */
+export const normalizeCategoryTag = (t: string) => t.replace(/,/g, '-')
 export const isTeamTag = (t: string) => t.startsWith('팀/') || t === '팀'
 
 export const CHANNELTALK_VOC_INTERVALS = ['off', '1m', '5m', '10m'] as const

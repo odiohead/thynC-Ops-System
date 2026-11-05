@@ -16,6 +16,7 @@ const detailInclude = {
   hospital: { select: { hospitalCode: true, hospitalName: true } },
   channel: { select: { id: true, name: true, color: true } },
   vocType: { select: { id: true, name: true, color: true } },
+  types: { select: { vocType: { select: { id: true, name: true, color: true } } }, orderBy: { createdAt: 'asc' as const } }, // 복수 분류 (2026-11-05)
   status: { select: { id: true, name: true, color: true } },
   createdBy: { select: { id: true, name: true } },
   channeltalkChats: { orderBy: { linkedAt: 'asc' }, select: { linkReason: true, linkedAt: true, chat: { select: { id: true, channelId: true, state: true, tags: true, firstAskText: true, firstAskedAt: true, closedAt: true, messageCount: true } } } },
@@ -83,7 +84,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (body.customerName !== undefined) data.customerName = typeof body.customerName === 'string' && body.customerName.trim() ? body.customerName.trim() : null
     if (body.customerPhone !== undefined) data.customerPhone = typeof body.customerPhone === 'string' && body.customerPhone.trim() ? body.customerPhone.trim() : null
     if (body.channelId !== undefined) data.channelId = await statusCodeOf('VOC_CHANNEL', body.channelId, '접수 채널')
-    if (body.vocTypeId !== undefined) data.vocTypeId = await statusCodeOf('VOC_TYPE', body.vocTypeId, 'VOC 분류')
+    if (body.vocTypeId !== undefined) {
+      data.vocTypeId = await statusCodeOf('VOC_TYPE', body.vocTypeId, 'VOC 분류')
+      // 사람이 VOC 화면에서 대표 분류를 바꾸면 수동 지정 — 이후 채널톡 태그 변경을 자동 추종하지 않음 (2026-11-05)
+      if (data.vocTypeId !== existing.vocTypeId) data.vocTypeManual = true
+    }
     if (body.statusId !== undefined) {
       const sid = await statusCodeOf('VOC_STATUS', body.statusId, '상태')
       data.statusId = sid

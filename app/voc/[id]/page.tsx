@@ -45,6 +45,8 @@ interface VocDetail {
   hospital: { hospitalCode: string; hospitalName: string } | null
   channel: CodeRef | null
   vocType: CodeRef | null
+  types?: { vocType: CodeRef }[] // 복수 분류 — 연결 상담 태그 합집합 (2026-11-05)
+  vocTypeManual?: boolean
   status: CodeRef | null
   createdBy: { id: string; name: string } | null
   source?: string
@@ -263,8 +265,16 @@ export default function VocDetailPage() {
               </p>
             </div>
             <div>
-              <p className={label}>분류 · 채널</p>
-              <p className="mt-1 flex items-center gap-1.5">{codeBadge(voc.vocType)}{codeBadge(voc.channel)}</p>
+              <p className={label}>분류 · 채널 {voc.vocTypeManual && <span className="ml-1 normal-case tracking-normal text-gray-400" title="VOC 화면에서 직접 지정한 대표 분류 — 채널톡 태그 변경을 자동 추종하지 않음">(대표 수동 지정)</span>}</p>
+              <p className="mt-1 flex flex-wrap items-center gap-1.5">
+                {(() => {
+                  const seen = new Set<number>()
+                  const list = [voc.vocType, ...(voc.types ?? []).map((t) => t.vocType)].filter((c): c is CodeRef => !!c && !seen.has(c.id) && !!seen.add(c.id))
+                  return list.length ? list.map((c) => <span key={c.id}>{codeBadge(c)}</span>) : codeBadge(null)
+                })()}
+                <span className="mx-0.5 text-gray-300">·</span>
+                {codeBadge(voc.channel)}
+              </p>
             </div>
             <div>
               <p className={label}>담당 (티켓) · 생성자</p>

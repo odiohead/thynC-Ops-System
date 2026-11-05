@@ -19,6 +19,7 @@ const listInclude = {
   hospital: { select: { hospitalCode: true, hospitalName: true } },
   channel: { select: { id: true, name: true, color: true } },
   vocType: { select: { id: true, name: true, color: true } },
+  types: { select: { vocType: { select: { id: true, name: true, color: true } } }, orderBy: { createdAt: 'asc' as const } }, // 복수 분류 — 연결 상담 태그 합집합 (2026-11-05 화면 표시)
   status: { select: { id: true, name: true, color: true } },
   createdBy: { select: { id: true, name: true } },
   ticket: { select: { id: true, ticketCode: true, status: true, owner: { select: { id: true, name: true } } } },
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest) {
   if (Number.isInteger(statusId)) where.statusId = statusId
 
   const vocTypeId = parseInt(sp.get('vocTypeId') ?? '')
-  if (Number.isInteger(vocTypeId)) where.vocTypeId = vocTypeId
+  if (Number.isInteger(vocTypeId)) where.AND = [{ OR: [{ vocTypeId }, { types: { some: { vocTypeId } } }] }] // 대표 또는 복수 분류 중 하나라도 (2026-11-05)
 
   const hospitalCode = sp.get('hospitalCode')
   if (hospitalCode) where.hospitalCode = hospitalCode

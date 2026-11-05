@@ -2153,6 +2153,7 @@ model VocReceipt {
   createdById     String?   @map("created_by_id") // 생성자 — 배정이 아니라 기록 (계정 삭제 시 NULL)
   ticketId        Int?      @unique @map("ticket_id") // 도메인 1:1 연결 — CS 마스터 티켓
   source          String    @default("MANUAL") @db.VarChar(16) // MANUAL / CHANNELTALK (2026-09-28) / SHEET (구글시트 VOC현황_NEW 적재, 2026-10-30)
+  vocTypeManual   Boolean   @default(false) @map("voc_type_manual") // 대표 분류 수동 지정 — true면 채널톡 태그 변경 시 자동 추종 안 함 (2026-11-05)
   sourceRef       String?   @unique @map("source_ref") @db.VarChar(40) // 적재 멱등 키 — 'sheet:VOC현황_NEW:r1234' (2026-10-30)
   autoCreated     Boolean   @default(false) @map("auto_created") // 채널톡 태그 트리거 자동 생성
   createdAt       DateTime  @default(now()) @map("created_at")

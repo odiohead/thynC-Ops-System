@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-11-05 14:30 | VOC 분류 다중 표시 + 대표 분류 채널톡 태그 자동 추종
+
+- 사용자 확인 요청 → 원인: 대표 분류 생성 시 고정 + 복수 분류 미노출(상세 `projects/voc_channeltalk_promotion_design.md` §7). "여러 개 다 보여주자" 승인
+- DB: `voc_receipts.voc_type_manual`(마이그 `20261105120000_voc_type_manual`, MANUAL/SHEET 기존 건 true 백필 7,897). VOC_TYPE 마스터 5종 추가(`seed-cs-masters.sql` 8-1, dev2 적용 → 33종)
+- 코드: `syncVocTypesFromChats` 대표 자동 추종(수동 제외)·태그 쉼표 정규화(`normalizeCategoryTag`), 목록·상세 API `types` 포함·필터 OR, PUT 대표 변경 시 manual=true, 목록 `typeBadges`·상세 배지 전부 + '(대표 수동 지정)'
+- 보정: `scripts/resync-voc-types.mts` dev2 실행 — 대상 3,052건, dry-run 대표 변경 예정 172·수동 보존 248 → apply VOC 558건 변경(행 902), 잔여 불일치 0, 복수 분류 2개 이상 469건. tsc·eslint 통과. dev2 빌드·재시작 수행(요청). **PROD 반영 시**: 마이그 + seed 8-1 + 배포 후 `npx tsx scripts/resync-voc-types.mts --apply`
+
 ## 2026-11-05 10:00 | 주간업무(/weekly) 담당 팀 다중 선택
 
 → **PROD 배포 2026-11-05 (386837a)**: pull → 마이그 `20261105090000_weekly_item_teams` psql 적용·resolve(owner_team_id 42건 백필 확인) → generate → 힙 4GB 빌드(디스크 72%, 8G 여유) → `pm2 restart thync-prod`(협업 번들 불변) → /weekly·마스터 API·로그인 정상, 재시작 후 에러 0

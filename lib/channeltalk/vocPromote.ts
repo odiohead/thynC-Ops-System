@@ -16,7 +16,7 @@ import { createVocReceipt } from '@/lib/vocService'
 import { syncVocToTicket } from '@/lib/ticket-domains/voc'
 import { notifyTicketCreated } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
-import { channeltalkDeskChatUrl, CHANNELTALK_BOT_EMAIL, CHANNELTALK_VOC_CUTOVER_KEY, CHANNELTALK_VOC_PROMOTE_KEY, isCategoryTag, VOC_SKIP_LABEL, type VocSkipReason } from './shared'
+import { channeltalkDeskChatUrl, CHANNELTALK_BOT_EMAIL, CHANNELTALK_VOC_CUTOVER_KEY, CHANNELTALK_VOC_PROMOTE_KEY, isCategoryTag, normalizeCategoryTag, VOC_SKIP_LABEL, type VocSkipReason } from './shared'
 export { VOC_SKIP_LABEL, type VocSkipReason }
 
 const FOLLOWUP_DAYS = 14
@@ -59,7 +59,7 @@ async function botUserId(): Promise<string> {
 async function vocTypeIdFromTags(tags: string[]): Promise<number | null> {
   const first = tags.find(isCategoryTag)
   if (!first) return null
-  const row = await prisma.statusCode.findFirst({ where: { category: 'VOC_TYPE', value: first }, select: { id: true } })
+  const row = await prisma.statusCode.findFirst({ where: { category: 'VOC_TYPE', value: normalizeCategoryTag(first) }, select: { id: true } })
   return row?.id ?? null
 }
 async function channeltalkChannelId(): Promise<number | null> {
@@ -205,26 +205,35 @@ export async function promoteChat(chatId: string, opts: PromoteChatOptions = {})
 }
 
 /**
- * VOC 복수 분류 재동기화 (2026-10-27, as_channeltalk_intake_design.md §8) — 연결 상담 전부의 분류 태그 합집합 ↔ voc_receipt_types.
- * 대표 분류(voc_type_id)는 사람이 바꿨을 수 있으므로 건드리지 않고, 비어 있을 때만 첫 태그로 채운다. 반환: 추가+제거 건수
+ * VOC 분류 재동기화 (2026-10-27 복수 분류 · 2026-11-05 개정) — 연결 상담 전부의 분류 태그 합집합 ↔ voc_receipt_types(화면에 전부 표시).
+ * 대표 분류(voc_type_id)는 `vocTypeManual`(사람이 VOC 화면에서 직접 고름)이 아니면 **상담 첫 분류 태그를 자동 추종**(채널톡에서 태그를 바꾸면 따라감).
+ * 수동 지정 건은 대표 분류를 보존하고 복수 분류에도 남긴다. 태그는 쉼표 변형을 '-'로 정규화해 매핑. 반환: 추가+제거(+대표 변경) 건수
  */
 export async function syncVocTypesFromChats(vocId: number): Promise<number> {
   const v = await prisma.vocReceipt.findUnique({
     where: { id: vocId },
-    select: { vocTypeId: true, types: { select: { vocTypeId: true } }, channeltalkChats: { select: { chat: { select: { tags: true } } }, orderBy: { linkedAt: 'asc' } } },
+    select: { vocTypeId: true, vocTypeManual: true, types: { select: { vocTypeId: true } }, channeltalkChats: { select: { chat: { select: { tags: true } } }, orderBy: { linkedAt: 'asc' } } },
   })
   if (!v || !v.channeltalkChats.length) return 0
-  const tags = Array.from(new Set(v.channeltalkChats.flatMap((l) => l.chat.tags).filter(isCategoryTag)))
+  const tags = Array.from(new Set(v.channeltalkChats.flatMap((l) => l.chat.tags).filter(isCategoryTag).map(normalizeCategoryTag)))
   const codes = tags.length ? await prisma.statusCode.findMany({ where: { category: 'VOC_TYPE', value: { in: tags } }, select: { id: true, value: true } }) : []
   const byTag = new Map(codes.map((c) => [c.value!, c.id]))
-  const wantIds = new Set(tags.map((t) => byTag.get(t)).filter((id): id is number => !!id))
-  if (v.vocTypeId) wantIds.add(v.vocTypeId) // 대표 분류는 태그가 빠져도 유지
-  const haveIds = new Set(v.types.map((t) => t.vocTypeId))
+  const mappedIds = tags.map((t) => byTag.get(t)).filter((id): id is number => !!id)
+  const wantIds = new Set(mappedIds)
   let changed = 0
+  // 대표 분류: 수동 지정이면 보존(복수 분류에도 유지), 아니면 상담 첫 태그 추종. 매핑되는 태그가 없으면 기존 대표 유지
+  let repId = v.vocTypeId
+  if (v.vocTypeManual || mappedIds.length === 0) {
+    if (repId) wantIds.add(repId)
+  } else if (mappedIds[0] !== repId) {
+    repId = mappedIds[0]
+    await prisma.vocReceipt.update({ where: { id: vocId }, data: { vocTypeId: repId } })
+    changed++
+  }
+  const haveIds = new Set(v.types.map((t) => t.vocTypeId))
   for (const id of Array.from(wantIds)) if (!haveIds.has(id)) { await prisma.vocReceiptType.create({ data: { vocId, vocTypeId: id, tag: codes.find((c) => c.id === id)?.value ?? null } }); changed++ }
   const removeIds = Array.from(haveIds).filter((id) => !wantIds.has(id))
   if (removeIds.length) { await prisma.vocReceiptType.deleteMany({ where: { vocId, vocTypeId: { in: removeIds } } }); changed += removeIds.length }
-  if (!v.vocTypeId && tags.length) { const first = byTag.get(tags[0]); if (first) await prisma.vocReceipt.update({ where: { id: vocId }, data: { vocTypeId: first } }) }
   return changed
 }
 
