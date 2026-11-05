@@ -41,6 +41,7 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 | 이미지 처리 (GW 플래너) | sharp + poppler-utils(`pdftoppm`·`pdfinfo`, 시스템 패키지) |
 | PPTX 생성 (GW 플래너) | pptxgenjs |
 | DOCX 생성 (UDI 입출고대장) | jszip — 원본 양식 docx를 템플릿으로 열어 행 복제·텍스트 치환 (양식 100% 보존) |
+| 바코드 스캔 (모바일 앱) | barcode-detector 3.2.3 (zxing-cpp WASM ponyfill — iOS 포함 전 기기 동일 엔진). WASM은 `public/vendor/zxing_reader-3.1.6.wasm`로 자체 호스팅(외부 CDN 미사용, 패키지 갱신 시 동반 교체) |
 | 런타임 | Node.js 20 |
 
 ---
@@ -160,7 +161,7 @@ app/
 │   │   ├── items/                    # 품목 마스터 route/[id](재고·부자재 포함)/import + [id]/components(주자재-부자재 매핑) + [id]/lot-history(LOT별 입출고 요약)
 │   │   ├── transactions/            # 입출고 원장 route + [id](GET 상세·PUT 수정)/cancel + bulk(다품목 일괄) + bulk-serial(Excel 시리얼 일괄) + export(Excel)
 │   │   ├── stocks/                   # 인벤토리·위치별 현재고 집계 + export(Excel)
-│   │   ├── units/                    # 시리얼 개체 조회 + [id] 정정
+│   │   ├── units/                    # 시리얼 개체 조회 + [id] 정정 + lookup/(스캔 원문 → 시리얼 개체 조회, 모바일 앱 2026-11-04)
 │   │   ├── hospital-works/           # 출고 업무연결 후보
 │   │   ├── ledger/                   # UDI 입출고대장 — route(모델 목록·대장) + check/(출고완료 체크) + docx/(문서 생성)
 │   │   └── can-manage/               # 재고 처리 권한 여부 (UI 게이트)
@@ -259,6 +260,8 @@ app/
 │   └── audit-logs/                   # 감사 로그 (SUPER_ADMIN 전용)
 ├── inventory/                        # 자재 현황(인벤토리별 카드 섹션 + 섹션 입고/출고/이동 버튼) + [invId]/items/[itemId](인벤토리 자재 상세) + transactions/(이력·[id] 전표 상세) + items/(관리·[id] 품목 마스터 상세) + ledger/(UDI 입출고대장 — 모델별 조회·docx 출력) + components/TransactionModal(품목 선택 모드)·BulkTxModal(다품목 일괄 입출고)
 ├── login/                            # 로그인 페이지
+├── m/                                # 모바일 앱(PWA, 2026-11-04 — projects/mobile_pwa_design.md): layout(하단 탭·SW 등록) · home/ · login/(앱 범위 안 로그인, 90일 세션) · parking/ · stock-out-requests/(껍데기) · inventory/(자재관리 껍데기, 재고담당·재고책임자만) · stock/(ScanOutFlow·InFlow·QtyOutFlow·shared — 자재관리 하위로 이전 예정, 메뉴 미노출) · lookup/(시리얼 조회, 메뉴 미노출) · scan-test/(라벨 실측, 탭 미노출) · _components/(MobileShell·MobileHeader·BarcodeScanner·UnitCard·InstallBanner·ui·stockApi·useMobileMe)
+├── manifest.ts                       # PWA manifest — scope '/m/'(슬래시 필수 — '/m'이면 /maintenances 포함), start_url /m/home
 ├── notifications/                    # 알림함 (1.1 P5 — 목록·미읽음/종류 필터·일괄 읽음·개인 수신 설정)
 └── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper, StatusBadge, NotificationBell, MyWorkPanel 등)
     ├── useOverlayDismiss.ts          # 오버레이(드로어·모달) 공통 훅 — 배경 스크롤 잠금 + ESC 닫기
@@ -340,6 +343,7 @@ lib/
 ├── notify-center.ts                  # 내부 알림 생성 단일 진입점 (1.1 P5 — emit·수신자 산출·dedup·개인 설정)
 ├── slaSettings.ts                    # SLA 설정 입력 검증·정규화·CTI 서브트리 확장 (1.1 P2)
 ├── inventory.ts                      # 자재관리 — 품목 채번(nextItemCode) + 재고 처리 권한(canManageStock: ADMIN or 재고 담당자 풀)
+├── scanParse.ts                      # 바코드 스캔 원문 파서 (클라이언트·서버 공용) — GS1 원소열(GS 구분)·괄호 표기 → GTIN·LOT·유효기한·시리얼, 게이트웨이 합성형·기기 바코드형 후보. 픽스처 scripts/verify-scan-parse.mts
 ├── inventoryLot.ts                   # LOT 해석 단일 소스 — 전표/개체 이중 경로(resolveTxLotRows)·복수 LOT 행 분해·LOT 잔량(getLotStocks)·LOT 요약(summarizeLots)
 ├── itemUdi.ts                        # 품목 UDI 필드 부분 갱신·UDI-DI 검증(GTIN 체크디지트)·대장 표기명 폴백
 ├── udiLedger.ts                      # UDI 입출고대장 조립 — 문서 1부=모델 1종, 행은 UDI×LOT, 인벤토리 필터, MOVE·취소 제외
@@ -1038,6 +1042,16 @@ prisma/
 - **AI 어시스턴트 (2026-07-26)**: 모바일 헤더 압축(제목 축소·설명 숨김·버튼 라벨 단축), 병원 검색 입력 전폭, 답변 버블 폭 확대(94%), 대화 목록 드로어에 `useOverlayDismiss` 적용, **hover 없는 터치에서 접근 불가였던 대화 삭제 버튼 상시 노출**, 피드백(👍/👎)·정제 버튼 터치 타겟 확대
 - 공통 오버레이 동작은 `useOverlayDismiss` 훅으로 통일
 
+### 모바일 앱 (PWA) — `/m/*` (2026-11-04 프로토타입, `projects/mobile_pwa_design.md`)
+- 같은 Next 앱 안의 모바일 셸. 홈 화면 설치(manifest `scope:'/m/'`·`start_url:/m/home`, 아이콘 `public/icons/` — `scripts/gen-mobile-icons.mjs`), 홈 메뉴·하단 탭 [홈][주차등록][출고요청][자재관리] — 자재관리는 역할 재고담당(`inventory.manage`)·재고책임자(`inventory.admin`) 보유자만 노출(SUPER_ADMIN 포함, `/api/auth/me` permissions 기준). 데스크톱 Navigation은 `/m/*`에서 렌더하지 않음(`/m` 판정은 `/m/` 접두 — `/maintenances` 충돌 방지). 폰으로 PC 화면을 열면 드로어 하단에 '모바일 앱으로 열기'
+- **로그인** `/m/login` — 앱 범위 안(iOS 홈 화면 앱이 범위 밖 `/login`으로 나가면 쿠키 분리 가능). 기존 `POST /api/auth/login`에 `client:'mobile'` → 세션 **90일**(`SESSION_TTL_SEC.mobile`). 미들웨어: 비로그인 `/m/*` → `/m/login?next=`(앱 경로만 허용)
+- **서비스 워커** `public/m-sw.js`(scope `/m/`) — 문서 요청 실패·5xx 시 `/m-offline.html`만. API·데이터 캐시 없음(실시간 재고). 사이니지 SW(`/dashboard`)와 scope 분리
+- **주차** `/m/parking` — 기존 API 5종 그대로. 뒤 4자리 검색 + 입차일 칩(오늘·어제·날짜) + 최근 차량(기기 로컬) → 선택 시 할인 현황·자동 계산 병렬 → 하단 고정 [자동 등록] 확인 시트. 수동 등록 접이식. VIEWER는 조회만
+- **출고요청** `/m/stock-out-requests`·**자재관리** `/m/inventory` — 현재 '준비 중' 껍데기(2026-11-04). 출고요청은 요구사항 확정 후 구현, 입출고·시리얼 조회는 자재관리 하위로 재구성 예정
+- **자재 입출고(프로토타입, 메뉴 미노출)** `/m/stock` — 전표는 기존 `POST /api/inventory/transactions`(1전표 1품목). **출고·이동 = 스캔 먼저**: 첫 스캔이 품목·인벤토리·출발 위치를 정하고 이후 같은 품목·위치 재고만 담음(다른 품목·위치·비재고·중복은 스캐너에서 즉시 거절), 같은 시리얼 재고가 여러 품목이면 선택 시트. **입고 = 품목 먼저**: 유형·인벤토리·품목·위치 → 연속 스캔, GS1 LOT(AI 10) 자동·없으면 공통 LOT, 구매·기타는 기존 시리얼 거절, 회수는 출고 개체 복귀·미등록은 409 확인 후 신규 등록, GTIN≠품목 UDI 경고. 수량 품목은 선택+수량(비시리얼 LOT 품목은 PC 안내). 세트출고 부자재는 모바일 미지원(안내). 처리 권한(`canManageStock`) 없으면 조회 전용 안내
+- **시리얼 조회(프로토타입, 메뉴 미노출)** `/m/lookup` — 스캔 1건 → 인벤토리·위치/출고처·상태·LOT·태그(로그인 전원). `/m/scan-test` — 라벨 실측 도구(디코더 원문·형식·파서 결과·DB 일치, 전체 복사)
+- **카메라 스캐너**(`BarcodeScanner`) — 연속 스캔, 조준 영역만 디코드, 같은 값 1.5초 쿨다운, 판정 결과 플래시·비프·진동(Android), 손전등(지원 기기), 수동 입력란(블루투스·USB 리더 겸용). 카메라는 HTTPS 필수 → 폰 테스트는 dev 도메인
+
 ### 대시보드 (2026-07-20 개편 — 첫 화면 정보 밀도 강화)
 - **KPI 스탯 타일 6종** (최상단): 도입 병원(+검토중) / 도입 병상(+이번달 신규) / 유지보수 진행중(긴급 포함 시 빨강 강조) / 이번주 구축 / 차주 구축 예정 / 누적 도입률(전국 HIRA 모수 대비) — 타일 클릭 시 관련 페이지 이동
 - **2단 메인 그리드**: 좌(2/3) 이번주·차주 thynC 구축 현황(공사 상태별 요약 + **비고 인라인 수정** 유지), 우(1/3) **유지보수 진행중 최신 7건**(우선순위 점·상태 뱃지·상세 링크) + **종별 도입 현황**(도입/전국 미니 진행바, 검토중 병기)
@@ -1688,7 +1702,7 @@ npm run dev
 ### 인증
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| POST | `/api/auth/login` | 로그인 |
+| POST | `/api/auth/login` | 로그인 (`remember:true` 365일 · `client:'mobile'` 모바일 앱 90일 · 기본 7일) |
 | POST | `/api/auth/logout` | 로그아웃 |
 | GET  | `/api/auth/me` | 현재 사용자 정보 |
 
@@ -1785,6 +1799,11 @@ npm run dev
 | POST | `/api/parking/register` | 계정 1개로 할인권 1건 등록 (성공 시 audit `parking_discount` CREATE — 2026-09-29) |
 | POST | `/api/parking/plan` | 주차시간 기반 자동 할인권 조합 미리보기 (무료 30분·출차 여유 10분 반영, 읽기 전용) |
 | POST | `/api/parking/auto-apply` | 자동 계산 조합 순차 등록 (무료 먼저 → 903 유료, 실패 시 중단, 1건 이상 등록 시 audit `parking_discount` CREATE) |
+
+### 자재관리 — 모바일 시리얼 조회 (2026-11-04)
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET | `/api/inventory/units/lookup?code=` | 스캔 원문 → `lib/scanParse` 해석 + 시리얼 후보로 개체 조회(대소문자 무시, 인벤토리 간 중복 배열) + GS1 GTIN 일치 품목. 읽기 전용·로그인 전원 |
 
 ### 주간업무 관리 (2026-08-19 — 조회 SEERS 소속, 쓰기 USER 이상 `checkWeeklyAccess`)
 - `GET /api/weekly/board?week=YYYY-MM-DD` - 주차 통합 조회 (항목+금주/직전 update+주간 메모, week는 월요일만)

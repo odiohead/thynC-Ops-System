@@ -21,6 +21,35 @@
 - 보류 3건(엑셀 코멘트만): 광주센트럴 DEAL-202511-0004(후보 2·3차 계약일 동일) · 한도병원 DEAL-202606-0006(1차 프로젝트는 DEAL-202606-0001에 연결 — 2차 프로젝트 없음) · 노량진병원(가칭) DEAL-202608-0008(프로젝트 없음)
 - 롤백: PROD `~/backups/sales_deals_project_map_before_20261104.sql`(24행). 첫 적용 시도는 자동 모드 권한 분류기에 막혀 사용자 허락 후 실행. 점검 보고서 `Documents/병원x계약_기기현황_이상점검_20261104_v2.xlsx`(병원×딜 304행, 이상 195행)
 
+## 2026-11-04 17:10 | 모바일 앱 메뉴 재구성 — 주차등록·출고요청·자재관리(역할 게이트), 출고요청·자재관리 껍데기
+
+- **사용자 요청(프로토타입 리뷰)**: 첫 화면 메뉴를 주차등록·출고요청·자재관리로. 자재관리는 역할 '재고담당'·'재고책임자'만 노출, 입출고는 자재관리 진입 후 구현, 출고요청·자재관리는 우선 껍데기
+- 홈 타일·하단 탭 재구성, 자재관리 노출은 `hasInventoryMenu`(권한 키 `inventory.manage`·`inventory.admin` — 두 역할의 권한, SUPER_ADMIN 포함). `useMobileMe`가 셸·페이지 간 `/api/auth/me` 요청을 모듈 캐시로 공유(로그인 화면에선 조회 안 함)
+- `/m/stock-out-requests`(준비 중 + PC 화면 링크), `/m/inventory`(준비 중, 권한 없으면 안내) 신설. 프로토타입 `/m/stock`·`/m/lookup`은 메뉴에서 내림(코드 유지 — 자재관리 하위로 이전 예정). manifest 바로가기 주차등록·출고요청
+- 영향 파일: `app/m/home/page.tsx`, `app/m/_components/{MobileShell,useMobileMe}.tsx/ts`, `app/m/{stock-out-requests,inventory}/page.tsx`, `app/manifest.ts`, `README.md`, `projects/mobile_pwa_design.md` §12-1
+
+## 2026-11-04 16:45 | PROD → DEV 데이터 동기화 (1회) + 동기화 스크립트 수정 2건
+
+- **사용자 요청**: 모바일 PWA 확인용으로 PROD 데이터를 DEV에 1회 동기화. `scripts/sync-prod-data-to-dev.sh --yes` 실행(DEV PM2 정지 상태에서) — 사용자 75·병원 80,598·프로젝트 287·티켓 16,213·재고 유닛 42,460·위키 페이지 176, PROD와 건수 일치 확인. DEV 백업 `/home/ubuntu/backups/db-sync/dev_before_sync_20261104_074506.sql.gz`
+- **스키마 검사 차단 해소**: PROD에만 있던 수동 백업 테이블 `public._bak_projects_intro_type_20261102`(Prisma 비관리)를 DEV에 동일 DDL로 생성 → 데이터도 PROD에서 함께 복사됨
+- **스크립트 버그 수정**: 적재 직후 OFF UPDATE가 `app_settings does not exist`로 실패해 전체 롤백 — pg_dump 출력이 `search_path`를 빈 값으로 설정하기 때문. `public.app_settings`로 스키마 한정
+- **OFF 대상 추가**: PROD의 `channeltalk_voc_interval=1m`(채널톡 상담 폴링, DEV에는 없던 키)이 따라오면 DEV 스케줄러가 켜지므로 OFF 목록에 추가. 재시작 로그에서 channeltalk-as/voc 모두 OFF 확인
+- 영향 파일: `scripts/sync-prod-data-to-dev.sh`, `CLAUDE.md`(dev2 절차 9단계 문구)
+
+## 2026-11-04 10:30 | 모바일 앱(PWA) v1 프로토타입 — 로그인·주차·자재 입출고(카메라 바코드 스캔)·시리얼 조회 (dev)
+
+- **사용자 요청**: 모바일 앱은 PWA·같은 레포로(11-03 Q&A) → 초기 기능 로그인·주차·자재 입출고(카메라 스캔) 설계안 `projects/mobile_pwa_design.md` 작성 → "프로토타입 만들고 보면서 이야기하자". 결정 D-1~D-5는 설계 제안안 적용(모바일 세션 90일·부자재 미지원·1전표 1품목·드로어 진입 링크·thynC Ops)
+- **PWA 기반**: `app/manifest.ts`(scope `/m/` — `/m`이면 `/maintenances`까지 포함되므로 슬래시 필수, start_url `/m/home`, 바로가기 3종) · 아이콘 4종(`scripts/gen-mobile-icons.mjs` — logo.svg 워드마크 on #2C5CE5) · `public/m-sw.js`(scope `/m/`, 문서 실패·5xx 시 `/m-offline.html`만, 데이터 캐시 없음 — 사이니지 SW와 분리) · 루트 metadata `appleWebApp.capable`·apple-touch-icon
+- **인증**: `/m/login`(앱 범위 안 — iOS 홈 화면 앱 쿠키 분리 회피) → 기존 login API `client:'mobile'` → `SESSION_TTL_SEC.mobile` 90일·감사 로그 라벨 · `middleware.ts` 비로그인 `/m/*` → `/m/login?next=`(데스크톱은 `/login` 유지) + 공개 경로(manifest·SW·오프라인·icons·vendor)
+- **셸**: `app/m/layout.tsx` + `MobileShell`(하단 탭 홈·주차·자재·조회, SW 등록) · `Navigation`/`MainWrapper`가 `/m/*`에서 비렌더(사용자·메뉴 조회도 생략), 데스크톱 모바일 드로어에 '모바일 앱으로 열기'
+- **주차** `/m/parking`: 서버 무변경, 뒤 4자리 검색·입차일 칩(오늘/어제/날짜, 이후 호출 전부 전달)·최근 차량 → 할인 현황·자동 계산 병렬 → 하단 고정 [자동 등록] 확인 시트(결과는 서버 `finalState`로 갱신), 수동 등록 접이식, VIEWER 조회만
+- **자재** `/m/stock`: 기존 `POST /api/inventory/transactions`. 출고·이동은 스캔 먼저(첫 스캔이 품목·위치 고정, 다른 품목·위치·비재고·중복 즉시 거절, 동일 시리얼 다중 재고는 선택 시트), 입고는 품목 먼저(GS1 LOT 자동·공통 LOT·구매 중복 거절·회수 미등록 409 확인 후 신규 등록·UDI 불일치 경고), 수량 품목 출고·이동·입고(비시리얼 LOT은 PC 안내), 권한 없으면 조회 전용 안내
+- **스캔**: `barcode-detector@3.2.3` ponyfill(zxing-cpp WASM 전 기기 통일, wasm `public/vendor/zxing_reader-3.1.6.wasm` 자체 호스팅) · `BarcodeScanner`(연속·조준 영역 디코드·쿨다운·플래시/비프/진동·손전등·수동 입력) · `lib/scanParse.ts`(GS1 원소열/괄호·GW 합성형·기기 바코드형) + `scripts/verify-scan-parse.mts` 18건 · 신규 API `GET /api/inventory/units/lookup`(읽기 전용) · `/m/lookup` 시리얼 조회 · `/m/scan-test` 라벨 실측 도구
+- **검증(빌드 전)**: tsc 0·eslint 0, 파서 18건, 라우트 핸들러 직접 호출 26건 통과(DEV DB — 미들웨어·조회 API·출고/재출고 409/이동/GS1 LOT 입고/LOT 누락/회수 409·복귀). 생성 전표 4건(STK-202611-0001~0004)은 즉시 취소해 개체 원상 복구. **화면·카메라·설치는 빌드 후 폰 확인 필요**, M2-0 라벨 실측 게이트 남음
+- 영향: `app/manifest.ts`·`app/m/**`(신규) · `app/api/inventory/units/lookup/route.ts`(신규) · `lib/scanParse.ts`·`scripts/{verify-scan-parse.mts,gen-mobile-icons.mjs}`(신규) · `public/{m-sw.js,m-offline.html,icons/*,vendor/zxing_reader-3.1.6.wasm}`(신규) · `middleware.ts` · `lib/auth.ts` · `app/api/auth/login/route.ts` · `app/layout.tsx` · `app/components/{Navigation,MainWrapper}.tsx` · `package.json`/lock(barcode-detector) · `projects/{mobile_pwa_design.md,README.md}` · README.md
+
+---
+
 ## 2026-11-04 09:30 | [데이터] AS-202610-0239 · AS-202610-0276 교체 → 수리반환 정정 (PROD)
 
 - 요청(이준호 팀장 전달): 기기 교체로 발송됐으나 수리반환으로 변경 — 선교체 기기는 회수 완료. 날짜 11/03, 바로 반영

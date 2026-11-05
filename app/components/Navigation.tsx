@@ -124,9 +124,12 @@ export default function Navigation() {
   const [menuLoaded, setMenuLoaded] = useState(false)
   const menuFetched = useRef(false)
 
+  // 모바일 앱 셸(/m/*)에서는 네비게이션을 그리지 않으므로 사용자·메뉴 조회도 생략 (모바일 회선 절약)
+  const isMobileShell = pathname === '/m' || pathname.startsWith('/m/')
+
   // 사용자 정보 로드
   useEffect(() => {
-    if (pathname === '/login') return
+    if (pathname === '/login' || isMobileShell) return
     fetch('/api/auth/me')
       .then((r) => r.json())
       .then((data) => {
@@ -143,17 +146,17 @@ export default function Navigation() {
         }
       })
       .catch(() => {})
-  }, [pathname])
+  }, [pathname, isMobileShell])
 
   // 메뉴 데이터 로드 (최초 1회)
   useEffect(() => {
-    if (pathname === '/login' || menuFetched.current) return
+    if (pathname === '/login' || isMobileShell || menuFetched.current) return
     menuFetched.current = true
     fetch('/api/nav-menus')
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(data => { setMenuItems(data.items); setMenuLoaded(true) })
       .catch(() => { setMenuItems(FALLBACK_MENUS); setMenuLoaded(true) })
-  }, [pathname])
+  }, [pathname, isMobileShell])
 
   useEffect(() => {
     setMobileOpen(false)
@@ -176,8 +179,9 @@ export default function Navigation() {
     })
   }, [pathname, menuItems])
 
-  // 로그인·사이니지 대시보드·운행일지 인쇄는 네비게이션 없이 전체 화면 사용
+  // 로그인·사이니지 대시보드·운행일지 인쇄·모바일 앱 셸(/m/*)은 네비게이션 없이 전체 화면 사용
   if (pathname === '/login' || pathname === '/dashboard' || pathname === '/vehicle-reservations/logs/print') return null
+  if (isMobileShell) return null
 
   function isActive(href: string) {
     return pathname === href || pathname.startsWith(href + '/')
@@ -324,6 +328,14 @@ export default function Navigation() {
             <ThemeToggle className="shrink-0" />
           </div>
         </div>
+        {/* 모바일 앱 진입 — 폰으로 PC 화면을 연 경우에만 (드로어, lg 미만) · mobile_pwa_design.md D-4 */}
+        <a
+          href="/m/home"
+          className="mb-1 flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm text-primary hover:bg-accent transition-colors lg:hidden"
+        >
+          <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="5" y="2" width="14" height="20" rx="2" /><path d="M12 18h.01" /></svg>
+          모바일 앱으로 열기
+        </a>
         <button
           type="button"
           onClick={handleLogout}
