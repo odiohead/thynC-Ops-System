@@ -28,6 +28,8 @@
 - `/m/stock-out-requests`(준비 중 + PC 화면 링크), `/m/inventory`(준비 중, 권한 없으면 안내) 신설. 프로토타입 `/m/stock`·`/m/lookup`은 메뉴에서 내림(코드 유지 — 자재관리 하위로 이전 예정). manifest 바로가기 주차등록·출고요청
 - 영향 파일: `app/m/home/page.tsx`, `app/m/_components/{MobileShell,useMobileMe}.tsx/ts`, `app/m/{stock-out-requests,inventory}/page.tsx`, `app/manifest.ts`, `README.md`, `projects/mobile_pwa_design.md` §12-1
 
+→ **PROD 배포 2026-11-05 (cebfef9, 34e7f05 포함)**: pull → `npm install`(barcode-detector 3.2.3) → 마이그 없음(migrate status 최신) → 힙 4GB 빌드 → `pm2 restart thync-prod`(협업 번들 불변 — collab 재시작 불필요) → `/m/login` 200·비로그인 `/m/home`→`/m/login?next=`·manifest(바로가기 주차등록·출고요청)·zxing wasm 200·`/weekly` 정상
+
 ## 2026-11-04 16:45 | PROD → DEV 데이터 동기화 (1회) + 동기화 스크립트 수정 2건
 
 - **사용자 요청**: 모바일 PWA 확인용으로 PROD 데이터를 DEV에 1회 동기화. `scripts/sync-prod-data-to-dev.sh --yes` 실행(DEV PM2 정지 상태에서) — 사용자 75·병원 80,598·프로젝트 287·티켓 16,213·재고 유닛 42,460·위키 페이지 176, PROD와 건수 일치 확인. DEV 백업 `/home/ubuntu/backups/db-sync/dev_before_sync_20261104_074506.sql.gz`
