@@ -112,6 +112,7 @@ model Hospital {
   weeklyItems           WeeklyItem[]
 
   deviceSupplies    HospitalDeviceSupply[] // 비계약 공급 현황 (2026-11-02)
+  stockOutDestRequests StockOutRequest[] @relation("StockOutDestHospital") // 출고요청 납품처 (영업 유형, 2026-11-05)
   @@map("hospitals")
   @@schema("public")
 }
@@ -2183,8 +2184,14 @@ model VocReceipt {
 model StockOutRequest {
   id              Int       @id @default(autoincrement())
   sorCode         String    @unique @map("sor_code") @db.VarChar(20) // SOR-YYYYMM-NNNN
-  projectCode     String    @map("project_code") // 필수 연결 — 프로젝트 삭제는 RESTRICT(라우트 선검사 409)
-  purpose         String    @default("BUILD") @db.VarChar(16) // 업무 구분 BUILD 구축 / MAINTENANCE 유지보수 / BUSINESS 사업업무 (SQL CHECK, lib/stockOutShared.ts — v2 2026-11-01)
+  projectCode     String?   @map("project_code") // 구축 등 프로젝트 업무는 필수(SQL CHECK kind) — 영업 유형(평가용·판매용·오산영업소)은 NULL. 프로젝트 삭제는 RESTRICT(라우트 선검사 409)
+  purpose         String    @default("BUILD") @db.VarChar(16) // 업무 구분 BUILD 구축 / MAINTENANCE 유지보수 / BUSINESS 사업업무 / EVALUATION 평가용 / SALES 판매용 / OSAN_OFFICE 오산영업소 (SQL CHECK, lib/stockOutShared.ts)
+  subPurpose      String?   @map("sub_purpose") @db.VarChar(24) // 영업 유형의 목적 (데모·심포지엄 등 — lib/stockOutShared.ts STOCK_OUT_SUB_PURPOSES, 2026-11-05)
+  destType        String?   @map("dest_type") @db.VarChar(16) // 납품처 구분 HOSPITAL 병원 / OTHER 기타 (SQL CHECK dest)
+  destHospitalCode String?  @map("dest_hospital_code") // 납품처 병원 (destType=HOSPITAL)
+  destText        String?   @map("dest_text") @db.VarChar(200) // 납품처 텍스트 (destType=OTHER)
+  shipAddress     String?   @map("ship_address") @db.Text // 수령지
+  recipient       String?   @db.VarChar(100) // 수취인
   statusId        Int?      @map("status_id") // STOCK_OUT_STATUS (+ticket_status 매핑: 완료·취소→CLOSED)
   statusChangedAt DateTime? @default(now()) @map("status_changed_at")
   requestDate     DateTime  @map("request_date") @db.Date // 희망 출고일
@@ -2197,7 +2204,8 @@ model StockOutRequest {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  project   Project               @relation(fields: [projectCode], references: [projectCode])
+  project   Project?              @relation(fields: [projectCode], references: [projectCode])
+  destHospital Hospital?          @relation("StockOutDestHospital", fields: [destHospitalCode], references: [hospitalCode])
   status    StatusCode?           @relation("StockOutStatus", fields: [statusId], references: [id], onDelete: SetNull)
   createdBy User?                 @relation("StockOutCreator", fields: [createdById], references: [id], onDelete: SetNull)
   fulfilledBy User?               @relation("StockOutFulfiller", fields: [fulfilledById], references: [id], onDelete: SetNull)
@@ -2207,6 +2215,7 @@ model StockOutRequest {
   files     StockOutRequestFile[] // 첨부파일 — 엑셀 등 (2026-11-02)
 
   @@index([projectCode])
+  @@index([destHospitalCode], map: "stock_out_requests_dest_hospital_idx")
   @@index([statusId])
   @@index([requestDate])
   @@index([createdAt])

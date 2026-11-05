@@ -8,7 +8,8 @@ const FULLSCREEN_PATHS = ['/login', '/dashboard', '/vehicle-reservations/logs/pr
 export default function MainWrapper({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
-  if (FULLSCREEN_PATHS.includes(pathname)) return <>{children}</>
+  // 모바일 앱 셸(/m/*)은 자체 레이아웃 — startsWith('/m') 는 /maintenances 와 충돌하므로 '/m/' 로 판정
+  if (FULLSCREEN_PATHS.includes(pathname) || pathname === '/m' || pathname.startsWith('/m/')) return <>{children}</>
 
   return (
     <div className="lg:pl-60">

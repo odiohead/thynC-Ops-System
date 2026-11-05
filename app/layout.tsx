@@ -21,7 +21,12 @@ export const metadata: Metadata = {
   title: "Thync Ops",
   description: "Thync Operations Management",
   appleWebApp: {
-    title: "Thync Ops",
+    title: "thynC Ops",
+    capable: true, // 홈 화면 앱(모바일 PWA /m/*) — mobile_pwa_design.md §4.1
+    statusBarStyle: "default",
+  },
+  icons: {
+    apple: "/icons/apple-touch-icon.png",
   },
 };
 

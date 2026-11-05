@@ -44,6 +44,8 @@
 | [as_channeltalk_intake_design.md](as_channeltalk_intake_design.md) | AS접수 인입 소스 전환 — 구글시트 → 채널톡 상담 원문: AS 태그 트리거·ALF 확인문 규칙 파서(L1) 자동 생성·실패는 등록대기 큐(프리필 폼+원문+[Claude 도움요청])·생성 후 채널톡 변경 감지(반영은 사람)·시트 폴러 연결 전용 모드(역기입 유지)·VOC 복수 분류 | **P5 전환 완료 (PROD 2026-10-28) — 운영 중, 시트는 연결 전용·역기입 유지** |
 | [voc_channeltalk_promotion_design.md](voc_channeltalk_promotion_design.md) | 채널톡 상담 → VOC 승격 — 분류 태그 트리거 자동 생성(컷오버·고객 발화·담당자 발신 제외), 같은 고객 미종결 VOC 후속 연결, receivedAt=첫 발화, 상담 종료↔회신완료 동기화, 종료 상담 전량 재검사, VOC 분류 마스터를 채널톡 태그 28종으로 재편, 수동 승격·제외 | **구현 완료 (dev2 2026-09-28) — PROD 미반영** |
 | [third_party_supply_design.md](third_party_supply_design.md) | 제3자 기기 비계약 공급 현황(대웅 직판 — 카트온 등) — 기기 마스터 `supply_tracked` 플래그 + `hospital_device_supplies`(병원×기기 현재 수량 1행) + 병원 상세 '도입 현황' 카드 '계약/공급' 열 통합·모달 입력, 1차 수기만 | **구현 완료 dev2 (2026-11-02) — PROD 대기** |
+| [mobile_pwa_design.md](mobile_pwa_design.md) | 모바일 앱(PWA) v1 — 같은 레포·같은 Next 앱의 모바일 셸 `/m/*`(scope `/m/`, 범위 안 로그인 `/m/login`, 최소 SW), 주차 등록(기존 API 재사용), 자재 입고·출고·이동 + 카메라 연속 스캔(GS1 UDI 파서, 신규 읽기 전용 시리얼 조회 API), 시리얼 조회. 스키마 변경 없음, M0~M2(M2-0 라벨 실측 게이트) | **v1 PROD 반영 (2026-11-05) — 홈 메뉴 주차등록·출고요청·자재관리, 자재관리 하위 재구성·M2-0 라벨 실측 남음** |
+| [stock_out_sales_request_design.md](stock_out_sales_request_design.md) | 출고요청 영업 유형(평가용·판매용·오산영업소) 모바일 등록 — 프로젝트 없이 목적·납품처(병원 검색/기타)·수령지·수취인·품목 수량·비고, 설정 출고 품목 관리 유형별 탭으로 노출 품목(=출고 인벤토리) 지정, 입력 가이드 설정 탭, STOCK_OUT 티켓 자동 생성 | **dev 구현 완료 (2026-11-05) — 빌드·PROD 미반영** |
 
 ## 루트에 남아 있는 1.0 문서
 

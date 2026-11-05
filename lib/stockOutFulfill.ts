@@ -21,7 +21,7 @@ import { planInventoryTransaction, applyInventoryTransaction, InventoryError, Tx
 import { registerDevicesIn, findUnitsBySerial } from '@/lib/deviceRegistry'
 import { normalizeSerial } from '@/lib/deviceRegistryShared'
 import { syncStockOutToTicket } from '@/lib/ticket-domains/stockOut'
-import { outMetaForInventory, type FulfillLineMode } from '@/lib/stockOutShared'
+import { outMetaForInventory, stockOutTitle, type FulfillLineMode } from '@/lib/stockOutShared'
 
 export class FulfillError extends Error {
   status: number
@@ -81,7 +81,10 @@ export interface FulfillPreview {
   /** 라인이 속한 인벤토리(중복 제거) — 전표는 인벤토리별로 분리 */
   inventories: FulfillInventoryPreview[]
   hospital: { hospitalCode: string; hospitalName: string } | null
-  projectCode: string
+  /** 프로젝트 요청만 — 영업 유형(평가용·판매용·오산영업소)은 null */
+  projectCode: string | null
+  /** 출고처 표시명 (병원명·프로젝트명 또는 영업 유형 납품처) */
+  destinationLabel: string
   lines: FulfillLinePreview[]
   errors: string[] // 라인 외 전역 오류
   ok: boolean // 실행 가능 (전역 오류 없음 + 전 라인 ok/warning)
@@ -107,8 +110,27 @@ interface LoadedRequest {
   fulfilledAt: Date | null
   createdBy: { name: string } | null
   status: { ticketStatus: string | null } | null
-  project: { projectCode: string; projectName: string; hospitalCode: string; hospital: { hospitalCode: string; hospitalName: string } | null }
+  subPurpose: string | null
+  destType: string | null
+  destText: string | null
+  destHospital: { hospitalCode: string; hospitalName: string } | null
+  project: { projectCode: string; projectName: string; hospitalCode: string; hospital: { hospitalCode: string; hospitalName: string } | null } | null
   items: LoadedLine[]
+}
+
+/**
+ * 출고 대상 — 프로젝트 요청은 프로젝트 병원, 영업 유형은 납품처(병원이면 병원, 기타면 병원 없음).
+ * hospital이 null이면 기기현황 등록은 생략(배치 병원이 없음)하고 전표 출고처는 납품처 텍스트.
+ */
+function targetOf(req: LoadedRequest) {
+  const hospital = req.project ? req.project.hospital : req.destHospital
+  return {
+    hospital,
+    hospitalCode: req.project?.hospitalCode ?? req.destHospital?.hospitalCode ?? null,
+    destination: req.project?.hospital?.hospitalName ?? req.destHospital?.hospitalName ?? stockOutTitle(req),
+    workType: req.project ? 'PROJECT' : null,
+    refCode: req.project?.projectCode ?? null,
+  }
 }
 
 async function loadRequest(requestId: number): Promise<LoadedRequest> {
@@ -116,6 +138,8 @@ async function loadRequest(requestId: number): Promise<LoadedRequest> {
     where: { id: requestId },
     select: {
       id: true, sorCode: true, purpose: true, statusId: true, fulfilledAt: true,
+      subPurpose: true, destType: true, destText: true,
+      destHospital: { select: { hospitalCode: true, hospitalName: true } },
       createdBy: { select: { name: true } },
       status: { select: { ticketStatus: true } },
       project: {
@@ -166,6 +190,7 @@ async function resolveInventories(req: LoadedRequest, errors: string[]): Promise
 /** 검증·라인 판정 (쓰기 없음). 입력이 불완전한 라인은 'pending' — 실행은 전 라인 ok/warning일 때만. */
 export async function previewFulfillment(requestId: number, input: FulfillInput): Promise<FulfillPreview> {
   const req = await loadRequest(requestId)
+  const target = targetOf(req)
   const errors: string[] = []
   const inventories = await resolveInventories(req, errors)
 
@@ -204,7 +229,8 @@ export async function previewFulfillment(requestId: number, input: FulfillInput)
     p.mode = wms.isSerialManaged ? 'serial' : wms.isLotManaged ? 'lot' : 'qty'
 
     // 기기현황 등록 대상 — 시리얼 품목 + 연결된 device_info가 시리얼 추적 (MGW1010은 device_info 미연결이라 제외)
-    if (p.mode === 'serial' && wms.deviceInfo?.serialTracked && wms.deviceInfo.isActive) p.registry = true
+    // 배치 병원이 없는 출고(영업 유형 납품처 '기타')는 등록 생략
+    if (p.mode === 'serial' && wms.deviceInfo?.serialTracked && wms.deviceInfo.isActive && target.hospitalCode) p.registry = true
 
     // 재고 버킷 (창고×LOT — LOT 옵션·현재고 표시·수량 자동 배분 기준)
     const buckets = await prisma.inventoryStock.findMany({
@@ -243,7 +269,7 @@ export async function previewFulfillment(requestId: number, input: FulfillInput)
           const hit = ns ? found.get(ns) : undefined
           const dev = hit?.device
           if (dev && dev.status === 'ACTIVE') {
-            if (dev.hospitalCode && dev.hospitalCode !== req.project.hospitalCode) {
+            if (dev.hospitalCode && dev.hospitalCode !== target.hospitalCode) {
               err(`${s}: 다른 병원에서 사용 중인 기기입니다. (기기 현황 확인 필요 — 진행 불가)`)
             } else {
               warn(`${s}: 이미 이 병원에 배치된 기기 — 기기현황 등록은 생략됩니다.`)
@@ -286,8 +312,9 @@ export async function previewFulfillment(requestId: number, input: FulfillInput)
     sorCode: req.sorCode,
     purpose: req.purpose,
     inventories: Array.from(inventories.values()),
-    hospital: req.project.hospital,
-    projectCode: req.project.projectCode,
+    hospital: target.hospital,
+    projectCode: req.project?.projectCode ?? null,
+    destinationLabel: target.destination,
     lines,
     errors,
     ok,
@@ -313,7 +340,8 @@ export async function executeFulfillment(
   }
   const req = await loadRequest(requestId)
   const invMeta = new Map(preview.inventories.map((i) => [i.id, i]))
-  const hospitalName = req.project.hospital?.hospitalName ?? req.project.projectName
+  const target = targetOf(req)
+  const hospitalName = target.destination
   const requester = req.createdBy?.name ?? req.sorCode
   const linesInput = new Map((input.lines ?? []).map((l) => [l.inventoryItemId, l]))
 
@@ -345,9 +373,9 @@ export async function executeFulfillment(
       reasonId: inv.reasonId!,
       destination: hospitalName.slice(0, 100),
       requester: requester.slice(0, 100),
-      hospitalCode: inv.linkHospital ? req.project.hospitalCode : null,
-      workType: 'PROJECT',
-      refCode: req.project.projectCode,
+      hospitalCode: inv.linkHospital ? target.hospitalCode : null,
+      workType: target.workType,
+      refCode: target.refCode,
       txDate: input.txDate ?? null,
     }
     const plans: TxPlan[] = []
@@ -415,7 +443,7 @@ export async function executeFulfillment(
               const result = await registerDevicesIn(
                 client,
                 {
-                  hospitalCode: req.project.hospitalCode,
+                  hospitalCode: target.hospitalCode!,
                   actor: { userId: actor.userId, name: actor.name },
                   source: 'WMS',
                   ref: firstTxCode ? { type: 'INVENTORY_TX', code: firstTxCode } : null,

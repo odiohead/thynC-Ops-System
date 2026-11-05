@@ -10,6 +10,26 @@
 - DB: `voc_receipts.voc_type_manual`(마이그 `20261105120000_voc_type_manual`, MANUAL/SHEET 기존 건 true 백필 7,897). VOC_TYPE 마스터 5종 추가(`seed-cs-masters.sql` 8-1, dev2 적용 → 33종)
 - 코드: `syncVocTypesFromChats` 대표 자동 추종(수동 제외)·태그 쉼표 정규화(`normalizeCategoryTag`), 목록·상세 API `types` 포함·필터 OR, PUT 대표 변경 시 manual=true, 목록 `typeBadges`·상세 배지 전부 + '(대표 수동 지정)'
 - 보정: `scripts/resync-voc-types.mts` dev2 실행 — 대상 3,052건, dry-run 대표 변경 예정 172·수동 보존 248 → apply VOC 558건 변경(행 902), 잔여 불일치 0, 복수 분류 2개 이상 469건. tsc·eslint 통과. dev2 빌드·재시작 수행(요청). **PROD 반영 시**: 마이그 + seed 8-1 + 배포 후 `npx tsx scripts/resync-voc-types.mts --apply`
+## 2026-11-05 13:30 | 출고업무 PC [출고요청] — 영업 유형(평가용·판매용·오산영업소) 등록·수정 모달
+
+- **사용자 요청**: PC '출고업무' 진입 시 우측 상단 [출고요청] 버튼으로 등록. 프로젝트 유형은 프로젝트 도메인 안에서만 → 여기서는 영업 유형 3종만. 기기현황 등록 질문에 '병원 납품처면 유형 무관 등록(현행 유지)' 답변
+- `StockOutRequestFormModal`에 영업 유형 모드(`project` 미지정): 유형 칩 → 목적 칩(오산영업소 자동) → 납품처 병원(`DestHospitalSearch` 신규 — 전체 병원 검색)/기타 → 수령지·수취인 → 희망일 → 품목(유형 탭 노출 품목) → 비고 → 첨부, 항목 아래 입력 가이드(설정 공용). 수정 모드는 유형 고정·목적/납품처/수령지/수취인 포함 PUT
+- 목록 `/stock-out-requests`: 우측 상단 [+ 출고요청](뷰어 숨김), '구분' 필터(전체·구축(프로젝트)·평가용·판매용·오산영업소 → `?purpose=`), 안내 문구 갱신. 상세: 영업 유형 [수정]이 새 모드로 열림(이전 커밋 전 임시 처리 — 프로젝트 머리줄 대체 — 제거)
+- 설정 '입력 가이드'·유형 탭 안내 문구를 모바일·PC 공용으로
+- 검증: tsc·eslint 0 (API는 직전 항목의 라우트 검증 29건이 동일 경로)
+- 영향 파일: `app/stock-out-requests/{page,[id]/page}.tsx`, `app/stock-out-requests/_components/{StockOutRequestFormModal,DestHospitalSearch}.tsx`, `app/settings/stock-out-items/{page,_components/GuidesTab}.tsx`, `lib/stockOutShared.ts`, `projects/stock_out_sales_request_design.md`, `README.md`
+
+## 2026-11-05 11:00 | 출고요청 영업 유형(평가용·판매용·오산영업소) — 모바일 등록 + 설정 유형별 품목 탭·입력 가이드
+
+- **사용자 요청**: 모바일 '출고요청' 기능정의 — 유형(평가용·판매용·오산영업소)·유형별 목적(오산영업소는 자동)·납품처(병원 검색/기타 텍스트)·수령지·수취인·품목별 수량·비고, 등록 시 출고업무 티켓 생성. 유형별 출고 인벤토리(배터리·에바폼은 thynC운영팀재고). 품목은 "설정탭에서 유형별로 지정", 항목별 가이드도 설정에서
+- **DB** (마이그 `20261105120000_stock_out_sales_request`, DEV 적용): `stock_out_requests.project_code` nullable + CHECK `kind`(영업 유형=프로젝트 NULL·목적·납품처 필수 / 그 외=프로젝트 필수) · 컬럼 `sub_purpose`·`dest_type`·`dest_hospital_code`(FK hospitals)·`dest_text`·`ship_address`·`recipient` + CHECK `dest` · purpose CHECK 2곳에 EVALUATION·SALES·OSAN_OFFICE
+- **설정**: 출고 품목 관리에 유형 탭 3개(업무 어휘 추가로 자동) + '입력 가이드' 탭(`GuidesTab`, `GET/PUT /api/settings/stock-out-guides`, app_settings JSON, 비우면 기본 문구). 노출 초기값 시드 `seed-stock-out-masters.sql` 2-b — 유형당 9종(유형 인벤토리 7종 + 운영팀 배터리·에바폼), 유형에 행이 있으면 건너뜀(DEV 적용)
+- **API**: POST 영업 유형 분기(목적 어휘·납품처·수령지·수취인 검증, 노출 품목만), PUT 영업 필드 수정, 목록 `createdById=me`·`purpose=SALES_TYPES`·납품처/수취인 검색. 제목 단일 소스 `stockOutTitle()`(티켓 `[출고요청] 평가용·데모 서울대학교병원`, 티켓 병원=납품처 병원)
+- **처리·알림**: `stockOutFulfill` 출고 대상 = 프로젝트 병원 또는 납품처(전표 출고처 텍스트, workType·refCode는 프로젝트만, 기기현황 등록은 병원 납품처만) · Slack 머리줄 납품처명·목적 병기·수취인
+- **화면**: 모바일 `/m/stock-out-requests`(내 요청 목록)·`/new`(등록 폼 — 항목 제목 아래 가이드, 하단 고정 등록)·`/[id]`(읽기 전용), `HospitalSearch` 컴포넌트. PC 목록·상세에 유형·목적·납품처·수령지·수취인, 수정 모달 재사용(희망일·품목·비고)
+- **검증**: DEV 라우트 직접 호출 29/29(검증 400 7종·뷰어 403·병원/기타 등록·티켓 제목/병원·목록 필터·PUT 동기화·출고 미리보기/실행·가이드) → 테스트 요청 삭제·전표 취소로 재고 원복 · 회귀 `stock-out-smoke` 31/0·`stock-out-fulfill-smoke` 23/0 · tsc·eslint 0
+- 설계: `projects/stock_out_sales_request_design.md`. 영향 파일: `prisma/schema.prisma`, `lib/{stockOutShared,stockOutFulfill,stockOutNotify,notify}.ts`, `lib/ticket-domains/stockOut.ts`, `app/api/stock-out-requests/{route,[id]/route}.ts`, `app/api/settings/stock-out-guides/route.ts`, `app/settings/stock-out-items/{page,_components/GuidesTab}.tsx`, `app/stock-out-requests/{page,[id]/page}.tsx`, `app/m/stock-out-requests/*`, `app/m/_components/HospitalSearch.tsx`, `scripts/seed-stock-out-masters.sql`, `scripts/stock-out-{smoke,fulfill-smoke}.mts`
+- **PROD 반영 시**: 마이그 SQL psql 적용·resolve → `seed-stock-out-masters.sql` 재실행(2-b 노출 초기값) → 빌드·재시작
 
 ## 2026-11-05 10:00 | 주간업무(/weekly) 담당 팀 다중 선택
 
@@ -27,6 +47,37 @@
 - 사용자 지시 "3개 병원은 코멘트만, 나머지는 매핑": 화면 [프로젝트 매핑](`map-project`)과 같은 검증(같은 병원·딜 미연결·프로젝트 1:1 미사용)·감사 로그(`sales_deal_map_project`, 라벨 '[일괄 매핑 2026-11-04 — 병원 유일 미연결 프로젝트]') 24건. 드라이런 정상 24/문제 0 → 적용. 결과 연결 263 / 미연결 3
 - 보류 3건(엑셀 코멘트만): 광주센트럴 DEAL-202511-0004(후보 2·3차 계약일 동일) · 한도병원 DEAL-202606-0006(1차 프로젝트는 DEAL-202606-0001에 연결 — 2차 프로젝트 없음) · 노량진병원(가칭) DEAL-202608-0008(프로젝트 없음)
 - 롤백: PROD `~/backups/sales_deals_project_map_before_20261104.sql`(24행). 첫 적용 시도는 자동 모드 권한 분류기에 막혀 사용자 허락 후 실행. 점검 보고서 `Documents/병원x계약_기기현황_이상점검_20261104_v2.xlsx`(병원×딜 304행, 이상 195행)
+
+## 2026-11-04 17:10 | 모바일 앱 메뉴 재구성 — 주차등록·출고요청·자재관리(역할 게이트), 출고요청·자재관리 껍데기
+
+- **사용자 요청(프로토타입 리뷰)**: 첫 화면 메뉴를 주차등록·출고요청·자재관리로. 자재관리는 역할 '재고담당'·'재고책임자'만 노출, 입출고는 자재관리 진입 후 구현, 출고요청·자재관리는 우선 껍데기
+- 홈 타일·하단 탭 재구성, 자재관리 노출은 `hasInventoryMenu`(권한 키 `inventory.manage`·`inventory.admin` — 두 역할의 권한, SUPER_ADMIN 포함). `useMobileMe`가 셸·페이지 간 `/api/auth/me` 요청을 모듈 캐시로 공유(로그인 화면에선 조회 안 함)
+- `/m/stock-out-requests`(준비 중 + PC 화면 링크), `/m/inventory`(준비 중, 권한 없으면 안내) 신설. 프로토타입 `/m/stock`·`/m/lookup`은 메뉴에서 내림(코드 유지 — 자재관리 하위로 이전 예정). manifest 바로가기 주차등록·출고요청
+- 영향 파일: `app/m/home/page.tsx`, `app/m/_components/{MobileShell,useMobileMe}.tsx/ts`, `app/m/{stock-out-requests,inventory}/page.tsx`, `app/manifest.ts`, `README.md`, `projects/mobile_pwa_design.md` §12-1
+
+→ **PROD 배포 2026-11-05 (cebfef9, 34e7f05 포함)**: pull → `npm install`(barcode-detector 3.2.3) → 마이그 없음(migrate status 최신) → 힙 4GB 빌드 → `pm2 restart thync-prod`(협업 번들 불변 — collab 재시작 불필요) → `/m/login` 200·비로그인 `/m/home`→`/m/login?next=`·manifest(바로가기 주차등록·출고요청)·zxing wasm 200·`/weekly` 정상
+
+## 2026-11-04 16:45 | PROD → DEV 데이터 동기화 (1회) + 동기화 스크립트 수정 2건
+
+- **사용자 요청**: 모바일 PWA 확인용으로 PROD 데이터를 DEV에 1회 동기화. `scripts/sync-prod-data-to-dev.sh --yes` 실행(DEV PM2 정지 상태에서) — 사용자 75·병원 80,598·프로젝트 287·티켓 16,213·재고 유닛 42,460·위키 페이지 176, PROD와 건수 일치 확인. DEV 백업 `/home/ubuntu/backups/db-sync/dev_before_sync_20261104_074506.sql.gz`
+- **스키마 검사 차단 해소**: PROD에만 있던 수동 백업 테이블 `public._bak_projects_intro_type_20261102`(Prisma 비관리)를 DEV에 동일 DDL로 생성 → 데이터도 PROD에서 함께 복사됨
+- **스크립트 버그 수정**: 적재 직후 OFF UPDATE가 `app_settings does not exist`로 실패해 전체 롤백 — pg_dump 출력이 `search_path`를 빈 값으로 설정하기 때문. `public.app_settings`로 스키마 한정
+- **OFF 대상 추가**: PROD의 `channeltalk_voc_interval=1m`(채널톡 상담 폴링, DEV에는 없던 키)이 따라오면 DEV 스케줄러가 켜지므로 OFF 목록에 추가. 재시작 로그에서 channeltalk-as/voc 모두 OFF 확인
+- 영향 파일: `scripts/sync-prod-data-to-dev.sh`, `CLAUDE.md`(dev2 절차 9단계 문구)
+
+## 2026-11-04 10:30 | 모바일 앱(PWA) v1 프로토타입 — 로그인·주차·자재 입출고(카메라 바코드 스캔)·시리얼 조회 (dev)
+
+- **사용자 요청**: 모바일 앱은 PWA·같은 레포로(11-03 Q&A) → 초기 기능 로그인·주차·자재 입출고(카메라 스캔) 설계안 `projects/mobile_pwa_design.md` 작성 → "프로토타입 만들고 보면서 이야기하자". 결정 D-1~D-5는 설계 제안안 적용(모바일 세션 90일·부자재 미지원·1전표 1품목·드로어 진입 링크·thynC Ops)
+- **PWA 기반**: `app/manifest.ts`(scope `/m/` — `/m`이면 `/maintenances`까지 포함되므로 슬래시 필수, start_url `/m/home`, 바로가기 3종) · 아이콘 4종(`scripts/gen-mobile-icons.mjs` — logo.svg 워드마크 on #2C5CE5) · `public/m-sw.js`(scope `/m/`, 문서 실패·5xx 시 `/m-offline.html`만, 데이터 캐시 없음 — 사이니지 SW와 분리) · 루트 metadata `appleWebApp.capable`·apple-touch-icon
+- **인증**: `/m/login`(앱 범위 안 — iOS 홈 화면 앱 쿠키 분리 회피) → 기존 login API `client:'mobile'` → `SESSION_TTL_SEC.mobile` 90일·감사 로그 라벨 · `middleware.ts` 비로그인 `/m/*` → `/m/login?next=`(데스크톱은 `/login` 유지) + 공개 경로(manifest·SW·오프라인·icons·vendor)
+- **셸**: `app/m/layout.tsx` + `MobileShell`(하단 탭 홈·주차·자재·조회, SW 등록) · `Navigation`/`MainWrapper`가 `/m/*`에서 비렌더(사용자·메뉴 조회도 생략), 데스크톱 모바일 드로어에 '모바일 앱으로 열기'
+- **주차** `/m/parking`: 서버 무변경, 뒤 4자리 검색·입차일 칩(오늘/어제/날짜, 이후 호출 전부 전달)·최근 차량 → 할인 현황·자동 계산 병렬 → 하단 고정 [자동 등록] 확인 시트(결과는 서버 `finalState`로 갱신), 수동 등록 접이식, VIEWER 조회만
+- **자재** `/m/stock`: 기존 `POST /api/inventory/transactions`. 출고·이동은 스캔 먼저(첫 스캔이 품목·위치 고정, 다른 품목·위치·비재고·중복 즉시 거절, 동일 시리얼 다중 재고는 선택 시트), 입고는 품목 먼저(GS1 LOT 자동·공통 LOT·구매 중복 거절·회수 미등록 409 확인 후 신규 등록·UDI 불일치 경고), 수량 품목 출고·이동·입고(비시리얼 LOT은 PC 안내), 권한 없으면 조회 전용 안내
+- **스캔**: `barcode-detector@3.2.3` ponyfill(zxing-cpp WASM 전 기기 통일, wasm `public/vendor/zxing_reader-3.1.6.wasm` 자체 호스팅) · `BarcodeScanner`(연속·조준 영역 디코드·쿨다운·플래시/비프/진동·손전등·수동 입력) · `lib/scanParse.ts`(GS1 원소열/괄호·GW 합성형·기기 바코드형) + `scripts/verify-scan-parse.mts` 18건 · 신규 API `GET /api/inventory/units/lookup`(읽기 전용) · `/m/lookup` 시리얼 조회 · `/m/scan-test` 라벨 실측 도구
+- **검증(빌드 전)**: tsc 0·eslint 0, 파서 18건, 라우트 핸들러 직접 호출 26건 통과(DEV DB — 미들웨어·조회 API·출고/재출고 409/이동/GS1 LOT 입고/LOT 누락/회수 409·복귀). 생성 전표 4건(STK-202611-0001~0004)은 즉시 취소해 개체 원상 복구. **화면·카메라·설치는 빌드 후 폰 확인 필요**, M2-0 라벨 실측 게이트 남음
+- 영향: `app/manifest.ts`·`app/m/**`(신규) · `app/api/inventory/units/lookup/route.ts`(신규) · `lib/scanParse.ts`·`scripts/{verify-scan-parse.mts,gen-mobile-icons.mjs}`(신규) · `public/{m-sw.js,m-offline.html,icons/*,vendor/zxing_reader-3.1.6.wasm}`(신규) · `middleware.ts` · `lib/auth.ts` · `app/api/auth/login/route.ts` · `app/layout.tsx` · `app/components/{Navigation,MainWrapper}.tsx` · `package.json`/lock(barcode-detector) · `projects/{mobile_pwa_design.md,README.md}` · README.md
+
+---
 
 ## 2026-11-04 09:30 | [데이터] AS-202610-0239 · AS-202610-0276 교체 → 수리반환 정정 (PROD)
 
@@ -536,6 +587,17 @@
   - 수리반환으로 확정된 4대: 확정 시 AS 해제 이벤트 취소(#64069·#63993·#63994(CORRECT)·#63995, `cancelLastEvent`) → `replaceDevice`(발송일 10/15) → 라인 outcome REPLACE·new_serial_no·new_device_id, 비고 이력: 0285 P017310→P017644 · 0193 P029606→P030174, P016029→P019054, P019070→P018435
 - **남은 확인(담당자)**: 0042 교체기 P015599는 타 병원(HOSP-000102) ACTIVE·AS대기(AS-202609-0113) — 오타 의심, 이대로 최종확정 시 교체 실패. 0193 교체기 P018435는 원장 AS대기(수리완료 체크 없이 재사용 경고). P020636·P020449·P020656은 원장 미등록(확정 시 신규 등록). 코드 수정은 미착수(설계 브리핑 후 승인 대기)
 - 영향: PROD DB(as_receipt_items 9·as_receipts note 2·hospital_device_events·hospital_devices·device_units·audit_logs), DEV_HISTORY.md
+
+---
+
+## 2026-10-15 10:55 | PROD 데이터 보정: 채널톡 AS 시트 r4131(오산버팀병원) 수동 매핑 → HOSP-000869 등록 AS-202610-0206 + 수동 매핑 스크립트 신설
+
+- **사건(사용자 요청 "hosp-000869로 매핑해주면돼. 이번만")**: 시트 A/S r4131(2026-10-15, "오산버팀병원", P030548/A병동, 빨간색 느낌표·작동 불량)이 `실패 / 병원 매칭 실패 후보: 버팀병원, 버팀병원` — PROD에 정식명이 완전히 같은 버팀병원 2곳(HOSP-000869 기기 30대·HOSP-002983 기기 60대, 둘 다 운영) → 이름만으로는 유일 매칭 불가(매처 설계상 모호 → 실패가 정상). 교차 확인: 기기현황에서 P030548 위치 = HOSP-000869(사용중) — 사용자 지정과 일치
+- **처리**: `scripts/channeltalk-as-register-row.mts`(신규) `--row=4131 --hospital=HOSP-000869 --dry` → 계획 확인 후 실행. 동기화 인입 경로와 동일(파싱·기본값 택배수거/수거일 익일·`createAsReceipt`·봇 계정·티켓·SLA 시계·Slack·감사 로그) + 비고에 `수동 매핑: 시트 병원명 "오산버팀병원" → HOSP-000869 (사유)` 줄, 시트 AI~AL `등록완료 / AS-202610-0206 / 수동 매핑 사유 메모 / 시각` 되쓰기 → 이후 완료·발송·수거 역기입은 기존 틱이 담당
+- **결과(PROD)**: AS-202610-0206(접수, HOSP-000869, 라인 P030548 device_id 460 → 기기 AS_WAITING), 티켓 TK-202610-00627(OPEN), SLA 시계 1건, 시트 r4131 등록완료
+- **스크립트 안전장치**: 컷오버 이후·AI='실패'·AJ 공란 행만 / 병원코드 존재 / `[채널톡 rN]` 태그·동일 병원·접수일·시리얼 중복 시 중단(AJ 코드 승격 안내). 실행: `node --env-file=<.env> --import tsx scripts/channeltalk-as-register-row.mts --row= --hospital= [--reason=] [--dry]` — PROD는 규칙 5(명시 허락)
+- **남는 구조 문제(이번 범위 밖, 사용자 "이번만")**: 정식명이 같은 병원이 2곳이면 앞으로도 "버팀병원"·"오산버팀병원" 행은 매번 실패 → 병원명에 지역 구분을 넣거나(예: 버팀병원(오산)) 매처가 지역 접두를 분기하는 개선 필요 시 별도 결정
+- 영향: PROD DB(as_receipts·as_receipt_items·tickets·SLA·감사 로그 — 1건), 채널톡 AS 시트 r4131, scripts/channeltalk-as-register-row.mts(신규), README.md, DEV_HISTORY.md
 
 ---
 

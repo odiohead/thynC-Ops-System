@@ -5,7 +5,7 @@
  * 상태 변경(도메인→티켓 동기화)·수정 모달·삭제(티켓 동반) — 권한: 설계 §2-6.
  */
 import { useState, useEffect, useCallback } from 'react'
-import { STOCK_OUT_PURPOSE_LABELS, type StockOutPurpose } from '@/lib/stockOutShared'
+import { STOCK_OUT_PURPOSE_LABELS, stockOutTitle, stockOutDestName, subPurposeLabel, type StockOutPurpose } from '@/lib/stockOutShared'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import TicketStatusBadge from '@/app/tickets/components/TicketStatusBadge'
@@ -39,6 +39,13 @@ interface StockOutDetail {
   fulfilledBy: { id: string; name: string } | null
   transactions: FulfillTx[]
   project: { projectCode: string; projectName: string; hospital: { hospitalCode: string; hospitalName: string } | null } | null
+  // 영업 유형(평가용·판매용·오산영업소 — 모바일 등록, 2026-11-05)
+  subPurpose: string | null
+  destType: string | null
+  destText: string | null
+  destHospital: { hospitalCode: string; hospitalName: string } | null
+  shipAddress: string | null
+  recipient: string | null
   status: (CodeRef & { ticketStatus: TicketStatus | null }) | null
   createdBy: { id: string; name: string } | null
   ticket: { id: number; ticketCode: string; status: TicketStatus; owner: { id: string; name: string } | null } | null
@@ -157,7 +164,7 @@ export default function StockOutDetailPage() {
             <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">{STOCK_OUT_PURPOSE_LABELS[req.purpose] ?? req.purpose}</span>
             {codeBadge(req.status)}
           </div>
-          <h1 className="mt-1 text-xl font-bold text-gray-900">{req.project?.projectName ?? '-'}</h1>
+          <h1 className="mt-1 text-xl font-bold text-gray-900">{stockOutTitle(req)}</h1>
           {req.ticket && (
             <p className="mt-1 text-sm text-gray-500">
               연결 티켓{' '}
@@ -190,22 +197,49 @@ export default function StockOutDetailPage() {
       {/* 기본 정보 */}
       <div className="mb-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
         <div className="grid grid-cols-1 gap-x-6 gap-y-4 px-4 py-4 sm:grid-cols-2 sm:px-6 sm:py-5 md:grid-cols-4">
-          <div>
-            <p className={label}>프로젝트</p>
-            <p className="mt-1 text-sm text-gray-900">
-              {req.project ? (
-                <Link href={`/projects/${req.project.projectCode}`} className="text-blue-600 hover:underline">{req.project.projectName}</Link>
-              ) : '-'}
-            </p>
-          </div>
-          <div>
-            <p className={label}>병원</p>
-            <p className="mt-1 text-sm text-gray-900">
-              {req.project?.hospital ? (
-                <Link href={`/hospitals/${req.project.hospital.hospitalCode}`} className="text-blue-600 hover:underline">{req.project.hospital.hospitalName}</Link>
-              ) : '-'}
-            </p>
-          </div>
+          {req.project ? (
+            <>
+              <div>
+                <p className={label}>프로젝트</p>
+                <p className="mt-1 text-sm text-gray-900">
+                  <Link href={`/projects/${req.project.projectCode}`} className="text-blue-600 hover:underline">{req.project.projectName}</Link>
+                </p>
+              </div>
+              <div>
+                <p className={label}>병원</p>
+                <p className="mt-1 text-sm text-gray-900">
+                  {req.project.hospital ? (
+                    <Link href={`/hospitals/${req.project.hospital.hospitalCode}`} className="text-blue-600 hover:underline">{req.project.hospital.hospitalName}</Link>
+                  ) : '-'}
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <p className={label}>유형 · 목적</p>
+                <p className="mt-1 text-sm text-gray-900">
+                  {[STOCK_OUT_PURPOSE_LABELS[req.purpose] ?? req.purpose, subPurposeLabel(req.purpose, req.subPurpose)].filter(Boolean).join(' · ')}
+                </p>
+              </div>
+              <div>
+                <p className={label}>납품처{req.destType === 'OTHER' ? ' (기타)' : ''}</p>
+                <p className="mt-1 text-sm text-gray-900">
+                  {req.destHospital ? (
+                    <Link href={`/hospitals/${req.destHospital.hospitalCode}`} className="text-blue-600 hover:underline">{req.destHospital.hospitalName}</Link>
+                  ) : stockOutDestName(req) ?? '-'}
+                </p>
+              </div>
+              <div className="md:col-span-2">
+                <p className={label}>수령지</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-gray-900">{req.shipAddress ?? '-'}</p>
+              </div>
+              <div>
+                <p className={label}>수취인</p>
+                <p className="mt-1 text-sm text-gray-900">{req.recipient ?? '-'}</p>
+              </div>
+            </>
+          )}
           <div>
             <p className={label}>희망 출고일</p>
             <p className="mt-1 text-sm text-gray-900">{req.requestDate.slice(0, 10)}</p>
@@ -325,22 +359,25 @@ export default function StockOutDetailPage() {
       )}
 
       {/* 수정 모달 */}
-      {req.project && (
-        <StockOutRequestFormModal
-          open={editOpen}
-          onClose={() => setEditOpen(false)}
-          onSaved={() => { router.refresh(); void load() }}
-          project={{ projectCode: req.project.projectCode, projectName: req.project.projectName, hospitalName: req.project.hospital?.hospitalName }}
-          editTarget={{
-            id: req.id,
-            sorCode: req.sorCode,
-            requestDate: req.requestDate.slice(0, 10),
-            note: req.note,
-            purpose: req.purpose,
-            items: req.items.map((l) => ({ inventoryItemId: l.inventoryItemId, quantity: l.quantity, name: l.item.name, modelName: l.item.modelName, inventoryId: l.item.inventory.id, inventoryName: l.item.inventory.name, categoryName: l.item.category?.name ?? null })),
-          } satisfies StockOutEditTarget}
-        />
-      )}
+      {/* 프로젝트 요청 = 프로젝트 머리줄 / 영업 유형 = 목적·납품처·수령지·수취인까지 수정 (2026-11-05) */}
+      <StockOutRequestFormModal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        onSaved={() => { router.refresh(); void load() }}
+        project={req.project
+          ? { projectCode: req.project.projectCode, projectName: req.project.projectName, hospitalName: req.project.hospital?.hospitalName }
+          : null}
+        editTarget={{
+          id: req.id,
+          sorCode: req.sorCode,
+          requestDate: req.requestDate.slice(0, 10),
+          note: req.note,
+          purpose: req.purpose,
+          items: req.items.map((l) => ({ inventoryItemId: l.inventoryItemId, quantity: l.quantity, name: l.item.name, modelName: l.item.modelName, inventoryId: l.item.inventory.id, inventoryName: l.item.inventory.name, categoryName: l.item.category?.name ?? null })),
+          subPurpose: req.subPurpose, destType: req.destType, destHospital: req.destHospital, destText: req.destText,
+          shipAddress: req.shipAddress, recipient: req.recipient,
+        } satisfies StockOutEditTarget}
+      />
     </div>
   )
 }

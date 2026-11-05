@@ -12,8 +12,8 @@ export interface JWTPayload {
   organization?: { id: number; name: string; code: string }
 }
 
-/** 세션 수명 — 기본 7일, '로그인 상태 유지'(사이니지 등 장기 표시) 시 365일 */
-export const SESSION_TTL_SEC = { default: 60 * 60 * 24 * 7, remember: 60 * 60 * 24 * 365 } as const
+/** 세션 수명 — 기본 7일, '로그인 상태 유지'(사이니지 등 장기 표시) 시 365일, 모바일 앱(/m/login) 90일 (mobile_pwa_design.md D-1) */
+export const SESSION_TTL_SEC = { default: 60 * 60 * 24 * 7, remember: 60 * 60 * 24 * 365, mobile: 60 * 60 * 24 * 90 } as const
 
 export async function signToken(payload: JWTPayload, ttlSec: number = SESSION_TTL_SEC.default): Promise<string> {
   return new SignJWT({ ...payload })

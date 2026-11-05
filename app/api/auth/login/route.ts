@@ -5,9 +5,11 @@ import { signToken, SESSION_TTL_SEC } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 
 export async function POST(req: NextRequest) {
-  const { email, password, remember } = await req.json()
+  const { email, password, remember, client } = await req.json()
   // 로그인 상태 유지(사이니지 장기 표시용) — 토큰·쿠키 수명 365일 (2026-09-09)
-  const ttl = remember === true ? SESSION_TTL_SEC.remember : SESSION_TTL_SEC.default
+  // 모바일 앱(/m/login, client='mobile') — 90일 고정 (2026-11-04, mobile_pwa_design.md D-1)
+  const isMobile = client === 'mobile'
+  const ttl = isMobile ? SESSION_TTL_SEC.mobile : remember === true ? SESSION_TTL_SEC.remember : SESSION_TTL_SEC.default
 
   // 이메일 정규화 — 모바일 자동 대문자·복사 공백으로 인한 로그인 실패 방지 (DB 이메일은 소문자 저장이 불변식)
   const normalizedEmail = String(email ?? '').trim().toLowerCase()
@@ -57,7 +59,7 @@ export async function POST(req: NextRequest) {
     action: 'LOGIN',
     resource: 'auth',
     resourceId: user.id,
-    resourceLabel: `${user.name} (${user.email})${remember === true ? ' [로그인 상태 유지 365일]' : ''}`,
+    resourceLabel: `${user.name} (${user.email})${isMobile ? ' [모바일 앱 90일]' : remember === true ? ' [로그인 상태 유지 365일]' : ''}`,
   })
 
   return res

@@ -180,7 +180,7 @@ const res = await fetch(`/api/wiki/pages?refType=hospital&refCode=${code}`)
 6. dump를 `/tmp/restore.dump`로 복사 (postgres 슈퍼유저가 ubuntu home 못 읽음)
 7. 풀덤프인 경우 `pg_restore --list`로 TOC 추출 후 `_prisma_migrations` TABLE DATA 라인만 제거한 필터 파일 생성
 8. `sudo -u postgres pg_restore --data-only --disable-triggers --single-transaction --no-owner --no-privileges [-L /tmp/restore.list] /tmp/restore.dump`
-9. `/tmp/restore.dump`, `/tmp/restore.list` 정리 + DEV 전용 스케줄러 OFF: `UPDATE app_settings SET value='off' WHERE key IN ('channeltalk_as_interval')` (PROD 설정이 따라와 DEV에서 채널톡 시트 동기화가 켜지는 것 방지 — dev 스크립트는 적재 트랜잭션에서 자동 수행)
+9. `/tmp/restore.dump`, `/tmp/restore.list` 정리 + DEV 전용 스케줄러 OFF: `UPDATE public.app_settings SET value='off' WHERE key IN ('channeltalk_as_interval','channeltalk_voc_interval')` (PROD 설정이 따라와 DEV에서 채널톡 시트 동기화·VOC 상담 폴링이 켜지는 것 방지 — dev 스크립트는 적재 트랜잭션에서 자동 수행. 덤프가 search_path를 비우므로 스키마 한정 필수)
 10. `pm2 start thync-dev` + HTTP 응답 확인
 11. 주요 테이블 row 수 보고
 

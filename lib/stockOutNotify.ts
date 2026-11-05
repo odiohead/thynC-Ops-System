@@ -10,7 +10,7 @@
  */
 import { prisma } from '@/lib/prisma'
 import { notifyDomainEvent } from '@/lib/notify'
-import { STOCK_OUT_PURPOSE_LABELS, type StockOutPurpose } from '@/lib/stockOutShared'
+import { STOCK_OUT_PURPOSE_LABELS, stockOutDestName, stockOutTitle, subPurposeLabel, type StockOutPurpose } from '@/lib/stockOutShared'
 
 const STOCK_OUT_DONE_STATUS = '완료'
 
@@ -20,6 +20,8 @@ const notifySelect = {
   fulfilledBy: { select: { name: true } },
   status: { select: { name: true } },
   project: { select: { projectName: true, hospital: { select: { hospitalName: true } } } },
+  subPurpose: true, destType: true, destText: true, recipient: true,
+  destHospital: { select: { hospitalName: true } },
 } as const
 
 type NotifyRow = NonNullable<Awaited<ReturnType<typeof loadById>>>
@@ -32,7 +34,8 @@ function loadByTicket(ticketId: number) {
 }
 
 /** 머리줄 — 병원명만 (2026-11-03 피드백: 프로젝트명·SOR 코드 제거, 병원명 없으면 프로젝트명) */
-const titleOf = (r: NotifyRow) => r.project?.hospital?.hospitalName ?? r.project?.projectName ?? r.sorCode
+// 영업 유형(프로젝트 없음)은 납품처명 — 없으면 "유형·목적" (2026-11-05)
+const titleOf = (r: NotifyRow) => r.project?.hospital?.hospitalName ?? r.project?.projectName ?? stockOutDestName(r) ?? stockOutTitle(r)
 const ymdKst = (d: Date | null | undefined) => (d ? d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }) : '')
 const purposeOf = (p: string) => STOCK_OUT_PURPOSE_LABELS[p as StockOutPurpose] ?? p
 
@@ -47,8 +50,9 @@ export async function notifyStockOutCreated(requestId: number): Promise<void> {
       title: titleOf(r),
       fields: [
         { label: '요청자', value: r.createdBy?.name ?? '' },
-        { label: '업무 구분', value: purposeOf(r.purpose) },
+        { label: '업무 구분', value: [purposeOf(r.purpose), subPurposeLabel(r.purpose, r.subPurpose)].filter(Boolean).join(' · ') },
         { label: '희망 출고일', value: r.requestDate.toISOString().slice(0, 10) }, // @db.Date — UTC 자정 저장
+        ...(r.recipient ? [{ label: '수취인', value: r.recipient }] : []), // 영업 유형 (2026-11-05)
       ], // 품목 줄 제거 (2026-11-03 피드백) — 품목은 출고요청 상세에서
       link: `/stock-out-requests/${r.id}`, // 도메인 알림 = 도메인 레코드 링크 (티켓 상세 아님 — 2026-11-03 정정, 공통 규칙만 티켓 관점)
       linkLabel: '티켓 링크',

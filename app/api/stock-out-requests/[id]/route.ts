@@ -5,7 +5,7 @@ import { getAuthUser } from '@/lib/auth'
 import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { canEditStockOutRequest, validateStockOutLines } from '@/lib/stockOut'
-import type { StockOutPurpose } from '@/lib/stockOutShared'
+import { isStockOutSalesType, STOCK_OUT_SUB_PURPOSES, type StockOutPurpose } from '@/lib/stockOutShared'
 import { syncStockOutToTicket } from '@/lib/ticket-domains/stockOut'
 import { notifyTicketChanged } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
@@ -21,6 +21,7 @@ type Params = { params: { id: string } }
 
 const detailInclude = {
   project: { select: { projectCode: true, projectName: true, hospital: { select: { hospitalCode: true, hospitalName: true } } } },
+  destHospital: { select: { hospitalCode: true, hospitalName: true } },
   status: { select: { id: true, name: true, color: true, ticketStatus: true } },
   createdBy: { select: { id: true, name: true } },
   fulfilledBy: { select: { id: true, name: true } },
@@ -84,6 +85,36 @@ export async function PUT(request: NextRequest, { params }: Params) {
       data.requestDate = d
     }
     if (body.note !== undefined) data.note = typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null
+    // 영업 유형 전용 필드 (목적·납품처·수령지·수취인) — 프로젝트 요청에는 무시
+    if (isStockOutSalesType(existing.purpose)) {
+      const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null)
+      if (body.subPurpose !== undefined) {
+        if (!STOCK_OUT_SUB_PURPOSES[existing.purpose].some((o) => o.code === body.subPurpose)) return NextResponse.json({ error: '목적이 올바르지 않습니다.' }, { status: 400 })
+        data.subPurpose = body.subPurpose
+      }
+      if (body.destType !== undefined) {
+        if (body.destType === 'HOSPITAL') {
+          const code = typeof body.destHospitalCode === 'string' ? body.destHospitalCode.trim() : ''
+          const h = code ? await prisma.hospital.findUnique({ where: { hospitalCode: code }, select: { hospitalCode: true } }) : null
+          if (!h) return NextResponse.json({ error: '납품처 병원을 검색해서 선택하세요.' }, { status: 400 })
+          Object.assign(data, { destType: 'HOSPITAL', destHospitalCode: h.hospitalCode, destText: null })
+        } else if (body.destType === 'OTHER') {
+          const t = str(body.destText, 200)
+          if (!t) return NextResponse.json({ error: '납품처를 입력하세요.' }, { status: 400 })
+          Object.assign(data, { destType: 'OTHER', destHospitalCode: null, destText: t })
+        } else return NextResponse.json({ error: '납품처 구분이 올바르지 않습니다.' }, { status: 400 })
+      }
+      if (body.shipAddress !== undefined) {
+        const v = str(body.shipAddress, 500)
+        if (!v) return NextResponse.json({ error: '수령지를 입력하세요.' }, { status: 400 })
+        data.shipAddress = v
+      }
+      if (body.recipient !== undefined) {
+        const v = str(body.recipient, 100)
+        if (!v) return NextResponse.json({ error: '수취인을 입력하세요.' }, { status: 400 })
+        data.recipient = v
+      }
+    }
     if (body.statusId !== undefined) {
       const sid = Number(body.statusId)
       const row = Number.isInteger(sid)

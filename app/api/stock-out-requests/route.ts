@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { nextSorCode, validateStockOutLines } from '@/lib/stockOut'
-import { isStockOutPurpose, type StockOutPurpose } from '@/lib/stockOutShared'
+import { isStockOutPurpose, isStockOutSalesType, STOCK_OUT_SUB_PURPOSES, stockOutTitle, type StockOutPurpose } from '@/lib/stockOutShared'
 import { createTicketForStockOut } from '@/lib/ticket-domains/stockOut'
 import { notifyTicketCreated } from '@/lib/notify'
 import { notifyStockOutCreated } from '@/lib/stockOutNotify'
@@ -14,12 +14,14 @@ export const dynamic = 'force-dynamic'
 
 /**
  * 출고요청 목록/등록 (stock_out_request_design.md §7 — 7번째 티켓 도메인 STOCK_OUT)
- * 프로젝트 필수 연결. 등록 시 연결 티켓 자동 생성(레코드+라인+티켓 단일 트랜잭션).
+ * 구축 등 프로젝트 업무는 프로젝트 필수, 영업 유형(평가용·판매용·오산영업소 — 모바일 등록)은 프로젝트 없이
+ * 목적·납품처(병원/기타)·수령지·수취인 (stock_out_sales_request_design.md). 등록 시 연결 티켓 자동 생성(레코드+라인+티켓 단일 트랜잭션).
  * 담당 배정은 티켓이 단독 소유 — 도메인에는 생성자(createdBy)만 기록.
  */
 
 const listInclude = {
   project: { select: { projectCode: true, projectName: true, hospital: { select: { hospitalCode: true, hospitalName: true } } } },
+  destHospital: { select: { hospitalCode: true, hospitalName: true } },
   status: { select: { id: true, name: true, color: true } },
   createdBy: { select: { id: true, name: true } },
   ticket: { select: { id: true, ticketCode: true, status: true, owner: { select: { id: true, name: true } } } },
@@ -54,7 +56,12 @@ export async function GET(request: NextRequest) {
   if (projectCode) where.projectCode = projectCode
 
   const createdById = sp.get('createdById')
-  if (createdById) where.createdById = createdById
+  if (createdById === 'me') where.createdById = user.userId
+  else if (createdById) where.createdById = createdById
+
+  const purposeParam = sp.get('purpose')
+  if (purposeParam === 'SALES_TYPES') where.purpose = { in: ['EVALUATION', 'SALES', 'OSAN_OFFICE'] }
+  else if (isStockOutPurpose(purposeParam)) where.purpose = purposeParam
 
   const q = sp.get('q')?.trim()
   if (q) {
@@ -63,6 +70,9 @@ export async function GET(request: NextRequest) {
       { note: { contains: q, mode: 'insensitive' } },
       { project: { projectName: { contains: q, mode: 'insensitive' } } },
       { project: { hospital: { hospitalName: { contains: q, mode: 'insensitive' } } } },
+      { destHospital: { hospitalName: { contains: q, mode: 'insensitive' } } },
+      { destText: { contains: q, mode: 'insensitive' } },
+      { recipient: { contains: q, mode: 'insensitive' } },
     ]
   }
 
@@ -89,22 +99,59 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json()
 
-  // 프로젝트 필수 (설계 §2-3 — 프로젝트 없이 출고요청 불가)
-  const projectCode = typeof body.projectCode === 'string' ? body.projectCode.trim() : ''
-  if (!projectCode) return NextResponse.json({ error: '프로젝트를 선택하세요.' }, { status: 400 })
-  const project = await prisma.project.findUnique({
-    where: { projectCode },
-    select: { projectCode: true, projectName: true, hospitalCode: true },
-  })
-  if (!project) return NextResponse.json({ error: '프로젝트를 찾을 수 없습니다.' }, { status: 400 })
+  // 업무 구분 — 미지정이면 구축(프로젝트 팝업). 영업 유형이면 프로젝트 대신 납품처 축
+  const purpose: StockOutPurpose = body.purpose === undefined || body.purpose === null ? 'BUILD' : body.purpose
+  if (!isStockOutPurpose(purpose)) return NextResponse.json({ error: '업무 구분이 올바르지 않습니다.' }, { status: 400 })
+  const isSales = isStockOutSalesType(purpose)
 
   // 희망 출고일 필수
   const requestDate = body.requestDate ? new Date(body.requestDate) : new Date(NaN)
   if (isNaN(requestDate.getTime())) return NextResponse.json({ error: '희망 출고일을 입력하세요.' }, { status: 400 })
 
-  // 업무 구분 — 이번 범위는 프로젝트 팝업 = 구축(BUILD) 고정. 명시 입력 시 어휘만 검증
-  const purpose: StockOutPurpose = body.purpose === undefined || body.purpose === null ? 'BUILD' : body.purpose
-  if (!isStockOutPurpose(purpose)) return NextResponse.json({ error: '업무 구분이 올바르지 않습니다.' }, { status: 400 })
+  const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null)
+  let project: { projectCode: string; projectName: string; hospitalCode: string } | null = null
+  let sales: {
+    subPurpose: string; destType: 'HOSPITAL' | 'OTHER'; destHospitalCode: string | null; destText: string | null
+    destHospitalName: string | null; shipAddress: string; recipient: string
+  } | null = null
+
+  if (!isSales) {
+    // 프로젝트 필수 (설계 §2-3 — 프로젝트 업무는 프로젝트 없이 출고요청 불가)
+    const projectCode = typeof body.projectCode === 'string' ? body.projectCode.trim() : ''
+    if (!projectCode) return NextResponse.json({ error: '프로젝트를 선택하세요.' }, { status: 400 })
+    project = await prisma.project.findUnique({
+      where: { projectCode },
+      select: { projectCode: true, projectName: true, hospitalCode: true },
+    })
+    if (!project) return NextResponse.json({ error: '프로젝트를 찾을 수 없습니다.' }, { status: 400 })
+  } else {
+    // 목적 — 유형별 어휘, 1개뿐이면(오산영업소) 미입력 시 자동
+    const options = STOCK_OUT_SUB_PURPOSES[purpose]
+    const subPurpose = typeof body.subPurpose === 'string' && body.subPurpose ? body.subPurpose : options.length === 1 ? options[0].code : ''
+    if (!options.some((o) => o.code === subPurpose)) return NextResponse.json({ error: '목적을 선택하세요.' }, { status: 400 })
+    // 납품처 — 병원(검색 선택) 또는 기타(텍스트)
+    const destType = body.destType
+    let destHospitalCode: string | null = null
+    let destHospitalName: string | null = null
+    let destText: string | null = null
+    if (destType === 'HOSPITAL') {
+      const code = typeof body.destHospitalCode === 'string' ? body.destHospitalCode.trim() : ''
+      const h = code ? await prisma.hospital.findUnique({ where: { hospitalCode: code }, select: { hospitalCode: true, hospitalName: true } }) : null
+      if (!h) return NextResponse.json({ error: '납품처 병원을 검색해서 선택하세요.' }, { status: 400 })
+      destHospitalCode = h.hospitalCode
+      destHospitalName = h.hospitalName
+    } else if (destType === 'OTHER') {
+      destText = str(body.destText, 200)
+      if (!destText) return NextResponse.json({ error: '납품처를 입력하세요.' }, { status: 400 })
+    } else {
+      return NextResponse.json({ error: '납품처 구분(병원/기타)을 선택하세요.' }, { status: 400 })
+    }
+    const shipAddress = str(body.shipAddress, 500)
+    if (!shipAddress) return NextResponse.json({ error: '수령지를 입력하세요.' }, { status: 400 })
+    const recipient = str(body.recipient, 100)
+    if (!recipient) return NextResponse.json({ error: '수취인을 입력하세요.' }, { status: 400 })
+    sales = { subPurpose, destType, destHospitalCode, destText, destHospitalName, shipAddress, recipient }
+  }
 
   let items: { inventoryItemId: number; quantity: number }[]
   try {
@@ -129,6 +176,11 @@ export async function POST(request: NextRequest) {
   const statusRow = statusId ? await prisma.statusCode.findUnique({ where: { id: statusId }, select: { name: true } }) : null
 
   const note = typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null
+  const title = stockOutTitle({
+    purpose, subPurpose: sales?.subPurpose, project,
+    destType: sales?.destType, destText: sales?.destText,
+    destHospital: sales?.destHospitalName ? { hospitalName: sales.destHospitalName } : null,
+  })
 
   // 레코드+라인+연결 티켓 단일 트랜잭션 — 티켓 없는 출고요청을 만들지 않는다. 발번 P2002 1회 재시도.
   let created!: { id: number; sorCode: string }
@@ -139,8 +191,14 @@ export async function POST(request: NextRequest) {
         const sor = await tx.stockOutRequest.create({
           data: {
             sorCode: await nextSorCode(tx),
-            projectCode: project.projectCode,
+            projectCode: project?.projectCode ?? null,
             purpose,
+            ...(sales
+              ? {
+                  subPurpose: sales.subPurpose, destType: sales.destType, destHospitalCode: sales.destHospitalCode,
+                  destText: sales.destText, shipAddress: sales.shipAddress, recipient: sales.recipient,
+                }
+              : {}),
             statusId,
             requestDate,
             note,
@@ -151,8 +209,8 @@ export async function POST(request: NextRequest) {
         const tid = await createTicketForStockOut(tx, {
           id: sor.id,
           sorCode: sor.sorCode,
-          projectName: project.projectName,
-          hospitalCode: project.hospitalCode,
+          title,
+          hospitalCode: project?.hospitalCode ?? sales?.destHospitalCode ?? null,
           statusName: statusRow?.name ?? null,
           statusId: sor.statusId,
           note: sor.note,
@@ -179,7 +237,7 @@ export async function POST(request: NextRequest) {
     action: 'CREATE',
     resource: 'stock_out_request',
     resourceId: created.sorCode,
-    resourceLabel: `${created.sorCode} ${project.projectName}`,
+    resourceLabel: `${created.sorCode} ${title}`,
     after: stockOutRequest,
   })
 
