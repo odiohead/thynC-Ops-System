@@ -15,6 +15,7 @@ import HospitalTagChips from '@/app/hospitals/[code]/_components/HospitalTagChip
 import ChatChangePanel, { type ChatIntakeInfo } from '../_components/ChatChangePanel' // 채널톡 변경 감지 (2026-10-27)
 import AsMemoPanel from '@/app/hospitals/[code]/_components/AsMemoPanel'
 import AsReceiptFormModal, { type AsEditTarget } from '../_components/AsReceiptFormModal'
+import AsSplitModal from '../_components/AsSplitModal' // 접수 분할 (2026-11-07 as_receipt_split_design.md)
 import { asListHref, AS_PICKUP_METHODS, type AsPickupMethod,
   AS_CATEGORY_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, AS_DEST_TYPES,
   AS_DEST_TYPE_LABELS, AS_OUTCOME_LABELS,
@@ -662,6 +663,8 @@ export default function AsReceiptDetailPage() {
   const [warnings, setWarnings] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [splitOpen, setSplitOpen] = useState(false) // 접수 분할 모달 (2026-11-07)
+  const [splitInfo, setSplitInfo] = useState<{ from: { id: number; asCode: string } | null; children: { id: number; asCode: string; category: string; statusName: string | null; statusColor: string | null; itemCount: number }[] } | null>(null)
   const [me, setMe] = useState<{ id: string; role: string; permissions?: string[] } | null>(null)
 
   // 2. 접수정보 (접수자 입력 — 시트 A~M·S·T)
@@ -692,6 +695,7 @@ export default function AsReceiptDetailPage() {
     const r: AsDetail = d.asReceipt
     setReq(r)
     setChatIntake(d.intake ?? null)
+    setSplitInfo(d.split ?? null)
     setReloadSeq((n) => n + 1)
     setIntake({
       receiptDate: r.receiptDate.slice(0, 10),
@@ -968,7 +972,8 @@ export default function AsReceiptDetailPage() {
 
   async function remove() {
     if (!req) return
-    if (!confirm(`${req.asCode}를 삭제하시겠습니까? 연결된 티켓도 함께 삭제됩니다.\n(이 접수가 켠 AS 표시는 해제되고, 기록된 기기현황 이벤트는 보존됩니다)`)) return
+    const splitNote = splitInfo?.from ? `\n※ 분할된 접수입니다 — 삭제해도 기기 라인은 원본(${splitInfo.from.asCode})으로 돌아가지 않습니다. 되돌리려면 원본 [수정]에서 라인을 다시 추가하세요.` : splitInfo?.children.length ? `\n※ 분할 자식 ${splitInfo.children.map((c) => c.asCode).join(', ')}은(는) 그대로 남습니다.` : ''
+    if (!confirm(`${req.asCode}를 삭제하시겠습니까? 연결된 티켓도 함께 삭제됩니다.\n(이 접수가 켠 AS 표시는 해제되고, 기록된 기기현황 이벤트는 보존됩니다)${splitNote}`)) return
     setBusy(true)
     const res = await fetch(`/api/as-receipts/${req.id}`, { method: 'DELETE' })
     const d = await res.json().catch(() => ({}))
@@ -1064,10 +1069,24 @@ export default function AsReceiptDetailPage() {
             {asReceiptTags(req).map((t) => (
               <span key={t} className={`rounded-full px-2 py-0.5 text-xs font-medium ${AS_TAG_BADGE_CLS[t]}`}>{AS_TAG_LABELS[t]}</span>
             ))}
+            {splitInfo?.from && (
+              <Link href={`/as-receipts/${splitInfo.from.id}`} className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 hover:bg-violet-100" title="분할 원본 접수로 이동" data-testid="split-from-badge">분할 ← {splitInfo.from.asCode}</Link>
+            )}
           </div>
+          {!!splitInfo?.children.length && (
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs" data-testid="split-children">
+              <span className="text-violet-700">분할 →</span>
+              {splitInfo.children.map((c) => (
+                <Link key={c.id} href={`/as-receipts/${c.id}`} className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-violet-800 hover:bg-violet-100" title={`${AS_CATEGORY_LABELS[c.category as AsCategory] ?? c.category} · 기기 ${c.itemCount}대`}>
+                  <span className="font-mono">{c.asCode}</span><span className="text-violet-600">{c.itemCount}대</span>
+                  {c.statusName && <span className="rounded-full px-1.5" style={{ backgroundColor: `${c.statusColor ?? '#9CA3AF'}22`, color: c.statusColor ?? '#6B7280' }}>{c.statusName}</span>}
+                </Link>
+              ))}
+            </div>
+          )}
           <h1 className="mt-1 text-xl font-bold text-gray-900">
             {req.hospital?.hospitalName ?? '-'} <span className="font-normal text-gray-400">· {catLabel} · 기기 {req.items.length}대</span>
-            {chatIntake && <a href={`https://desk.channel.io/#/channels/${chatIntake.channelId ?? ''}/user_chats/${chatIntake.chatId}`} target="_blank" rel="noreferrer" className="ml-2 align-middle text-xs font-normal text-blue-600 hover:underline" title="원천 채널톡 상담">채널톡 상담 ↗</a>}
+            {chatIntake && <a href={`https://desk.channel.io/#/channels/${chatIntake.channelId ?? ''}/user_chats/${chatIntake.chatId}`} target="_blank" rel="noreferrer" className="ml-2 align-middle text-xs font-normal text-blue-600 hover:underline" title={chatIntake.inherited ? '원천 채널톡 상담 (분할 원본에 연결됨 — 변경 감지는 원본에서)' : '원천 채널톡 상담'}>채널톡 상담{chatIntake.inherited ? ' (원본)' : ''} ↗</a>}
           </h1>
         </div>
         <div className="flex items-center gap-2">
@@ -1084,6 +1103,9 @@ export default function AsReceiptDetailPage() {
           )}
           {canEdit && (
             <button type="button" onClick={() => setEditOpen(true)} disabled={busy} className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50" title="접수 기본값·기기 시리얼 수정">수정</button>
+          )}
+          {canEdit && !isTerminal && openItems.length >= 2 && (
+            <button type="button" onClick={() => setSplitOpen(true)} disabled={busy} className="rounded-lg border border-violet-300 px-3 py-1.5 text-sm text-violet-700 hover:bg-violet-50" title="미종결 기기 라인을 병동별 또는 구분별(고장↔분실) 새 접수로 분리" data-testid="split-open">분할</button>
           )}
           {isTerminal && !!me && me.role !== 'VIEWER' && (
             <button type="button" onClick={reopen} disabled={busy} className="rounded-lg border border-amber-300 px-3 py-1.5 text-sm text-amber-700 hover:bg-amber-50" title="완료·취소 접수를 다시 진행 상태로 (사유 기록)">리오픈</button>
@@ -1526,6 +1548,18 @@ export default function AsReceiptDetailPage() {
         </div>
       </Card>
 
+      {/* 분할 모달 (2026-11-07) */}
+      <AsSplitModal
+          open={splitOpen}
+          onClose={() => setSplitOpen(false)}
+          receipt={{ id: req.id, asCode: req.asCode, category: req.category, destInfo: req.destInfo, items: req.items.map((i) => ({ id: i.id, serialNo: i.serialNo, wardName: i.wardName, outcome: i.outcome, draftOutcome: i.draftOutcome, symptom: i.symptom, deviceName: i.device?.deviceInfo?.deviceName ?? null, placementWard: i.device?.placement?.ward?.name ?? null })) }}
+          onDone={(r) => {
+            setSplitOpen(false)
+            setWarnings([`분할 완료 — ${r.children.map((c) => `${c.key} ${c.count}대 → ${c.asCode}`).join(' · ')}`, ...r.warnings])
+            router.refresh()
+            void load()
+          }}
+        />
       {/* 수정 모달 */}
       {req.hospital && (
         <AsReceiptFormModal

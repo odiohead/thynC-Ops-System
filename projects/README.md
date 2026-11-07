@@ -12,13 +12,15 @@
 
 | 문서 | 대상 | 상태 |
 |---|---|---|
+| [as_receipt_split_design.md](as_receipt_split_design.md) | AS접수 분할 — 상세 [분할]로 미종결 라인을 병동별/구분별(고장↔분실) 새 접수(+티켓)로 분리: 라인 행 이동(입고·초안·수리기록 보존), 기기 원장 ref 정정 이동(`editEvent`)으로 되돌림 게이트 유지, `split_from_id` 1컬럼, 채널톡 변경 감지·시트 역기입은 분할 가족 기준. PROD AS-202611-0099(삭제 후 4건 재등록 우회) 실측 기반 | **구현 완료 (dev2 빌드 2026-11-07, 스모크 31·Playwright 16) — PROD 미반영**, P3 분할 취소 보류 |
 | [as_repair_queue_design.md](as_repair_queue_design.md) | AS 수리대기 큐 — AS담당자용 기기 단위 화면(`/as-receipts/queue`): 수리 대기·입고 예정 2버킷 × 심전계/산소포화도, 수리완료·처리방법 초안·폐기(기존 API 재사용), 스키마 변경 없음 | **PROD 배포 완료 (2026-09-28, f1d6d1d)** |
 | [weekly_attachments_design.md](weekly_attachments_design.md) | 주간업무 첨부파일 — 목표일 셀 클립 트리거(+첨부/📎n) · Modal 레이어 다중 업로드 · `weekly_item_files` · 항목 소속 검증 302 다운로드 | **PROD 배포 완료 (2026-09-19, 97342ce)** |
 | [hira_detail_sync_v2_design.md](hira_detail_sync_v2_design.md) | 심평원 병원상세정보연동 v2 — 의원급 확장·진료과목/전문의수 항목·일일 한도(9,000콜) 분할 자동 실행·요청 상세 진행 현황 | **구현 완료 (dev2, 2026-09-14) — 빌드·PROD 배포 대기** |
 | [notification_v1.1_design.md](notification_v1.1_design.md) · [HTML](notification_v1.1_design.html) | 1.1 알림체계 개선 (SLA 세분화·채널 라우팅·내부 알림·첫 화면 개인화) | **P1~P6 구현 완료 / P7 지표·PROD 배포 대기** |
 | [sales_crm_design.md](sales_crm_design.md) · [HTML](sales_crm_design.html) | 영업/CRM 모듈 v4 — 병원 축·차수 축 2데이터셋 (인적정보/전원 이력·딜 확장·`/sales` 도입 현황 목록, P1~P5) | **v4 P1~P3 구현 완료 (dev2, 2026-07-29) — P4 실데이터 검증 대기 · §7 딜 첨부(견적서·계약서)+등록 필수 필드 dev2 구현 2026-11-02** |
 | [daewoong_deal_migration_design.md](daewoong_deal_migration_design.md) | 대웅 원장(thynC_status.xlsx) 딜 전면 재적재 + 대웅 축 필드 분리·'대웅제약' 카드 | **검토 대기 (착수 승인 전)** |
-| [ops_system_2.0_plan.html](ops_system_2.0_plan.html) | **2.0 기획안** (설계안 아님) — 6테마 18항목 고도화 지도 (설치 기반·반복 매출·고객 경험·현장 운영·인텔리전스·기반), 실측 데이터 진단 + Wave 우선순위 — A1은 디바이스 원장으로 구현(2026-09) | **기획 검토 대기** |
+| [ops_system_2.0_plan.html](ops_system_2.0_plan.html) | **2.0 기획안** (설계안 아님) — 6테마 18항목 고도화 지도 (설치 기반·반복 매출·고객 경험·현장 운영·인텔리전스·기반), 실측 데이터 진단 + Wave 우선순위 — A1은 디바이스 원장으로 구현(2026-09) | v1 (2026-08-02) — v2로 대체 |
+| [ops_system_2.0_plan_v2.html](ops_system_2.0_plan_v2.html) | **2.0 기획안 v2** (설계안 아님, 2026-11-06) — 1.0+ 출시 반영(원장·AS 도메인·채널톡·출고 v2·PWA), PROD 11-06 실측 재진단(신호 8개: S2 해소·S6 수동 보정·S7 인프라·S8 어휘 불일치), 6테마 22항목(A1′·A4·D4·F4·F5 신규), Wave 0(인프라·정합성·셀프서비스) 신설 | **기획 검토 대기** |
 | [rbac_design.md](rbac_design.md) | 기능 역할(Role) 권한 체계 — RBAC Lite (등급 위에 가산 전용 역할·권한 카탈로그·`hasPermission`, 파일럿 자재관리, 2.0 테마 F 연계) | **Phase 1·2·3 구현 완료 (2026-08-04, dev2) — 선택 후속만 승인 대기** |
 | [notification_v2_design.md](notification_v2_design.md) | 알림 v2 — 티켓 단일 소스 재편 (delay-rules 폐기·그룹/SLA정책별 채널·CTI SLA·임박 배선·전역 요약, P1~P5) | **완료 (PROD 배포 2026-08-03)** |
 | [inventory_udi_ledger_design.md](inventory_udi_ledger_design.md) | 자재관리 UDI 입출고대장 — GMP 양식 F707-1(rev.4) docx 자동 생성 (device_info 모델 마스터 승격·LOT 해석 이원화 해소·문서 메타 편집, P0~P5) | **P0~P5 구현 완료 (dev2, 2026-08-04) — PROD 미반영** |

@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation'
 import { channeltalkDeskChatUrl } from '@/lib/channeltalk/shared'
 import type { AsIntakeDiffItem } from '@/lib/channeltalk/asIntakeShared'
 
-export interface ChatIntakeInfo { linkId: number; chatId: string; channelId: string | null; changeDetectedAt: string | null; changeDiff: AsIntakeDiffItem[] | null }
+export interface ChatIntakeInfo { linkId: number; chatId: string; channelId: string | null; changeDetectedAt: string | null; changeDiff: AsIntakeDiffItem[] | null; inherited?: boolean } // inherited: 분할 자식이 원본의 상담 링크를 읽기 전용 표시 (2026-11-07)
 
 export default function ChatChangePanel({ receiptId, intake, canEdit, onDone }: { receiptId: number; intake: ChatIntakeInfo; canEdit: boolean; onDone: (msg: string | null) => void }) {
   const router = useRouter()

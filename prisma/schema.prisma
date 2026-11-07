@@ -2344,10 +2344,13 @@ model AsReceipt {
   ticketId         Int?      @unique @map("ticket_id") // 도메인 1:1 연결 티켓
   source           String    @default("MANUAL") @db.VarChar(16) // MANUAL 화면 / SHEET 시트 폴링 / CHANNELTALK 상담 자동 / INTAKE_QUEUE 등록대기 수동 확정 / IMPORT 마이그 (2026-10-27, SQL CHECK)
   vocId            Int?      @map("voc_id") // 마스터 VOC (상담이 VOC에 연결돼 있으면 자동)
+  splitFromId      Int?      @map("split_from_id") // 분할 원본 접수 (2026-11-07 as_receipt_split_design.md §4.1) — 자식만 값 보유, 원본 삭제 시 NULL
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
   hospital  Hospital        @relation(fields: [hospitalCode], references: [hospitalCode])
+  splitFrom     AsReceipt?  @relation("AsReceiptSplit", fields: [splitFromId], references: [id], onDelete: SetNull)
+  splitChildren AsReceipt[] @relation("AsReceiptSplit")
   status    StatusCode?     @relation("AsReceiptStatus", fields: [statusId], references: [id], onDelete: SetNull)
   createdBy User?           @relation("AsReceiptCreator", fields: [createdById], references: [id], onDelete: SetNull)
   ticket    Ticket?         @relation(fields: [ticketId], references: [id], onDelete: SetNull)
@@ -2360,6 +2363,7 @@ model AsReceipt {
   @@index([receiptDate])
   @@index([createdAt])
   @@index([vocId])
+  @@index([splitFromId])
   @@map("as_receipts")
   @@schema("public")
 }

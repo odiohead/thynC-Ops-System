@@ -226,8 +226,11 @@ async function enqueue(chat: ChatRow, e: AsExtract, lastMessageId: string | null
 
 /** 접수 필드 diff — 연결 접수 현재값 vs 재추출값 (처리 필드는 비교하지 않음, 설계 §6) */
 export async function diffExtractAgainstReceipt(receiptId: number, e: AsExtract): Promise<AsIntakeDiffItem[]> {
-  const r = await prisma.asReceipt.findUnique({ where: { id: receiptId }, select: { category: true, destInfo: true, pickupDestInfo: true, pickupDestDiffers: true, preReplace: true, items: { where: { intakeSource: 'RECEIPT' }, select: { serialNo: true, wardName: true, symptom: true } } } })
-  if (!r) return []
+  const r0 = await prisma.asReceipt.findUnique({ where: { id: receiptId }, select: { category: true, destInfo: true, pickupDestInfo: true, pickupDestDiffers: true, preReplace: true, items: { where: { intakeSource: 'RECEIPT' }, select: { serialNo: true, wardName: true, symptom: true } } } })
+  if (!r0) return []
+  // 분할 가족 (2026-11-07 as_receipt_split_design.md §10) — 자식으로 이동한 라인도 상담의 일부. 시리얼·증상·병동 비교는 원본+자식 RECEIPT 라인 합집합으로(분할 자체가 '시리얼 변경'으로 오탐되지 않게)
+  const kids = await prisma.asReceiptItem.findMany({ where: { receipt: { splitFromId: receiptId }, intakeSource: 'RECEIPT' }, select: { serialNo: true, wardName: true, symptom: true } })
+  const r = { ...r0, items: [...r0.items, ...kids] }
   const out: AsIntakeDiffItem[] = []
   const norm = (v: string | null | undefined) => (v ?? '').replace(/\s+/g, ' ').trim()
   const cur = r.items.map((i) => i.serialNo).sort().join(', '), chat = e.lines.map((l) => l.serial).sort().join(', ')

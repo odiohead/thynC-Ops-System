@@ -63,7 +63,14 @@ export async function GET(request: NextRequest, { params }: Params) {
     asReceipt.category === 'LOST' ? computeAsLostQuota({ id: asReceipt.id, hospitalCode: asReceipt.hospitalCode }) : Promise.resolve(null),
     computeAsDealQuota({ id: asReceipt.id, hospitalCode: asReceipt.hospitalCode, category: asReceipt.category }),
   ])
-  return NextResponse.json({ asReceipt: { ...asReceipt, items, lostQuota, dealQuota }, intake: intake ? { linkId: intake.id, chatId: intake.chatId, channelId: intake.chat.channelId, changeDetectedAt: intake.changeDetectedAt, changeDiff: intake.changeDiff } : null })
+  // 분할 관계 (2026-11-07 as_receipt_split_design.md §7) — 원본·자식 링크. 자식은 원본의 채널톡 상담 링크를 읽기 전용으로 승계 표시(변경 감지 패널은 원본만)
+  const [splitFrom, splitChildren] = await Promise.all([
+    asReceipt.splitFromId ? prisma.asReceipt.findUnique({ where: { id: asReceipt.splitFromId }, select: { id: true, asCode: true } }) : Promise.resolve(null),
+    prisma.asReceipt.findMany({ where: { splitFromId: asReceipt.id }, select: { id: true, asCode: true, category: true, status: { select: { name: true, color: true } }, _count: { select: { items: true } } }, orderBy: { id: 'asc' } }),
+  ])
+  const split = { from: splitFrom, children: splitChildren.map((c) => ({ id: c.id, asCode: c.asCode, category: c.category, statusName: c.status?.name ?? null, statusColor: c.status?.color ?? null, itemCount: c._count.items })) }
+  const intakeShown = intake ?? (splitFrom ? await prisma.asIntakeLink.findFirst({ where: { receiptId: splitFrom.id, state: 'LINKED' }, select: { id: true, chatId: true, chat: { select: { channelId: true } } } }).then((l) => (l ? { id: l.id, chatId: l.chatId, changeDetectedAt: null, changeDiff: null, chat: l.chat, inherited: true as const } : null)) : null)
+  return NextResponse.json({ asReceipt: { ...asReceipt, items, lostQuota, dealQuota }, split, intake: intakeShown ? { linkId: intakeShown.id, chatId: intakeShown.chatId, channelId: intakeShown.chat.channelId, changeDetectedAt: intakeShown.changeDetectedAt, changeDiff: intakeShown.changeDiff, inherited: 'inherited' in intakeShown } : null })
 }
 
 /** YYYY-MM-DD | '' | null → Date | null (undefined = 미변경) */

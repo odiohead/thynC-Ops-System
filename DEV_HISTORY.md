@@ -4,6 +4,32 @@
 
 ---
 
+## 2026-11-07 12:00 | AS접수 분할 — 병동별 · 구분별 (설계 `projects/as_receipt_split_design.md`, dev2 빌드·재시작)
+
+- **배경(PROD 실측, 읽기 전용)**: AS-202611-0099 동아대학교병원(11-05) — 접수봇 자동 생성 14대(병동 4곳)를 담당자가 **삭제 후 병동별 4건 수동 재등록**(0099 번호 재사용·0100~0102). 부작용: 채널톡 상담 링크 고아(`as_intake_links` 212), 감사 로그상 한 코드가 두 접수, 기기 이력 AS 해제/접수 쌍 14개. 10-15에도 같은 병원 6건 선례. 사용자: "병동별·구분별(고장↔분실) 2축으로 단순화, 상세설계 → 추천대로 개발·dev2 빌드"
+- **DB**: `as_receipts.split_from_id`(자기참조 FK SET NULL·인덱스) — 마이그 `20261107090000_as_receipt_split` dev2 psql 적용·resolve. Prisma `splitFrom`/`splitChildren`
+- **서비스** `splitAsReceipt`(`lib/asReceiptService.ts`): 검증(미종결 라인만·원본 잔류 ≥1·그룹 ≤10·구분 축 1그룹 반대 구분·종결 409) → 자식 헤더 복사(상태·수거·송장·태그·VOC·source 승계, 분실 자식은 수거없음·송장 NULL, 허용 외 초안 해제 경고) → **라인 행 이동**(id·입고·초안·수리기록 보존) → 어댑터 티켓 생성 + 담당자·상위(VOC) 승계 + `link{split_from}` → 이동 기기 유닛의 `ref {AS,원본}` 이벤트(AS_OPEN·INTAKE 등) `editEvent`로 자식 코드 정정(되돌림 게이트·INTAKE 1회 스킵이 ref_code를 보므로 필수, 실패 시 tx 롤백) → 원본 비고 줄·티켓 동기화·`link{split_to}`. 채번 P2002 1회 재시도
+- **API**: `POST /api/as-receipts/[id]/split`(권한 = 수정, 감사 UPDATE 라벨 '분할' + 자식 CREATE 라벨 '(분할 ← 원본)', 합포장 자동 태그·SLA·Slack 자식 생성 알림) · `GET /api/as-receipts/[id]` 응답 `split { from, children[] }` + 자식은 원본 상담 링크 `intake.inherited` 승계 · 타임라인 '접수 분할 (병동별/구분별)'·'접수 등록 (분할)'
+- **연동 보정**: 채널톡 변경 감지 `diffExtractAgainstReceipt`·반영 `chat-change`(증상/병동 가족 라인, 시리얼 반영 시 자식 라인 재추가 금지)·시트 완료 역기입(가족 전원 종결일 때만 '완료') — 모두 분할 가족(원본+`split_from_id` 자식) 기준
+- **화면**: 상세 헤더 [분할](수정 권한·비종결·미종결 2대 이상) → `AsSplitModal`(병동별: 원장 배치 병동 우선 그룹핑, '원본에 남김' 기본 = 라인 최다 그룹, 나머지 분리 체크·그룹별 발송지 프리필 편집 / 구분별: 라인 체크, 초안 해제 예고) → confirm → 상단 알림 결과. 원본 `분할 →` 칩(자식 코드·대수·상태), 자식 `분할 ← 원본` 배지, '채널톡 상담 (원본)' 링크, 자식 삭제 confirm에 "라인은 원본으로 돌아가지 않음" 안내
+- **검증**: 서비스 스모크 `scripts/as-split-smoke.mts` 31/31(검증 거부 8종·병동별 2분할·라인 이동/보존·as_ref_code·INTAKE ref 정정·자식에서 수리반환 게이트 통과·구분별 초안 해제·채널톡 diff 가족·종결 409) · tsc·eslint 0 · dev2 힙 4GB 빌드·`pm2 restart thync-dev` · **Playwright 헤드리스 16/16**(분할 버튼→모달 그룹핑·기본값→병동별 2건 분할→알림·칩·타임라인→자식 배지·발송지→구분별 분실 분리→버튼 소멸) + DB 대조(잔류 3·자식 코드/발송지/합포장/asRefCode) + 스크린샷 육안 확인. 테스트 데이터 전부 삭제
+- **결정(사용자 '추천대로')**: D1 최다 그룹 잔류 · D2 담당자 승계 · D3 모달 그룹별 발송지 · D4 확정 라인 이동 금지 · D5 자식별 Slack 생성 알림 · D6 분할 취소는 P3 보류 · D7 별건(채번 재사용·PROD 고아 링크 212 보정)은 분리 결정 대기
+- 영향 파일: `prisma/schema.prisma`, `prisma/migrations/20261107090000_as_receipt_split/`, `lib/asReceiptService.ts`, `lib/channeltalk/asIntake.ts`, `lib/channeltalkAsSync.ts`, `app/api/as-receipts/[id]/{route,split/route,timeline/route,chat-change/route}.ts`, `app/as-receipts/[id]/page.tsx`, `app/as-receipts/_components/{AsSplitModal,ChatChangePanel}.tsx`, `scripts/as-split-smoke.mts`, `projects/{as_receipt_split_design.md,README.md}`, `README.md`
+- **PROD 반영 시**: 마이그 SQL psql 적용·resolve → generate → 힙 4GB 빌드·재시작(협업 번들 불변). 시드 변경 없음
+
+## 2026-11-06 14:00 | 운영관리시스템 2.0 기획안 v2 작성 (문서만 — 코드 변경 없음)
+
+- `projects/ops_system_2.0_plan_v2.html` 신규(+ 사용자 로컬 `Documents/thynC_OPS_2.0_기획안_v2_2026-11-06.html` 사본) — 8/2 v1을 현재 개발 형상·이용 패턴 기준으로 갱신. **기획안이며 설계안·착수 승인 아님**
+- 진단 근거: PROD 2026-11-06 읽기 전용 실측(고객 병원 233·배치 기기 28,599·티켓 16,292·AS 4,301·VOC 10,708·감사 로그 30일 12,879 중 AS 74%) + dev2 10-29 동기화본 보조 지표(로그인 30일 45/72·AS 리드타임 중앙값 8일·상위 10병원 AS 25%). PROD 2차 조회는 분류기 차단으로 dev2 대체·출처 표기
+- 구조 신호 갱신: S2(설치 기반 공백) 해소, S6 운영 데이터 수동 보정 28건/2개월, S7 인프라 한계(t3.medium·디스크 사건), S8 외부 어휘 불일치 신규. 6테마 22항목(신규 A1′ 원장 정확도·A4 AS 분석·D4 모바일 2.0·F4 인프라·F5 셀프서비스), Wave 0(F4·E1·F5) 신설, Wave 1을 '읽는 도구'(A4·E4·E2·A1′)로 재편. 결정 필요 6건(§7.3)
+- projects/README.md 목록 갱신(v1은 '대체됨' 표기)
+
+## 2026-11-06 10:30 | 목록 검색어 앞뒤 공백 trim 통일 — 공통 헬퍼 `lib/searchParam.ts`, 15곳 교체
+
+- 사용자 확인 요청 → 현황: `q` 파라미터 도메인(VOC·AS·티켓·상담·출고·자재·위키)은 이미 trim, 1.0 `search` 파라미터 라우트는 미처리(앞뒤 공백 검색어 0건)
+- `readSearch(sp, key='search')`·`trimSearch(v)` 신설. 교체: API 13곳(users, settings/inventory-managers(+candidates), field-engineers(+candidates), audit-logs, app-roles/candidates, projects, maintenances, install-plans, hospitals, hira-hospitals, etc-tasks) + 서버 페이지 2곳(`/projects`, `/hospitals`)
+- 동작 변화: 앞뒤 공백 제거, 공백만 입력 시 검색 조건 미적용(종전엔 `' '` contains). 화면 변경 없음. tsc·eslint 통과, dev2 빌드·재시작(요청)
+
 ## 2026-11-05 14:30 | VOC 분류 다중 표시 + 대표 분류 채널톡 태그 자동 추종
 
 → **PROD 배포 2026-11-05 (0f78e60 — dev2 VOC 작업 + DEV 출고요청 영업 유형 3d1906c 머지)**: dev2 빌드·재시작 → push → PROD pull(cebfef9→0f78e60) → 마이그 2건(`20261105120000_stock_out_sales_request`·`20261105120000_voc_type_manual`) psql 적용·resolve(voc_type_manual 백필 7,910) → `seed-stock-out-masters.sql`(영업 유형 노출 27행) · VOC 분류 5종 INSERT(33종) → generate → `resync-voc-types.mts` dry-run(대표 변경 예정 176·수동 보존 248) → `--apply` **562건 변경(행 910), 잔여 불일치 0**, VOC-202611-0118 대표 '오류HW/운영장비' 확인 → 힙 4GB 빌드(디스크 73%, 협업 번들 불변) → `pm2 restart thync-prod` → /voc·/voc/[id]·/m·출고업무·로그인·외부 URL 정상, 재시작 후 에러 0

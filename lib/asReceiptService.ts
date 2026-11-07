@@ -24,6 +24,8 @@ import {
 import { syncAsReceiptToTicket, createTicketForAsReceipt } from '@/lib/ticket-domains/asReceipt'
 import { AS_PICKUP_METHODS, defaultAsPickupMethod, AS_OUTCOMES, AS_RESOLVE_OUTCOMES, asResolveOutcomesFor, AS_CATEGORIES, AS_DEST_TYPES, AS_OUTCOME_LABELS, AS_REPAIR_EXCLUDED_OUTCOMES, AS_REPAIR_RESULT_DESC, AS_REPAIR_RESULT_LABELS, type AsRepairResult, type AsSettableRepairResult, appendAsNote as appendNote, asDeviceKindFromSerial, canMarkAsLineRepaired, isValidAsSerial, asSerialFormatError, AS_SERIAL_RULE_TEXT, type AsOutcome } from '@/lib/asReceiptShared'
 import { nextAsCode } from '@/lib/asReceipt'
+import { editEvent } from '@/lib/deviceRegistry/admin' // 분할 — 이동 라인 유닛의 AS ref 정정 (2026-11-07)
+import { AS_CATEGORY_LABELS, type AsCategory } from '@/lib/asReceiptShared'
 import { addTicketEvent } from '@/lib/ticket'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
@@ -1457,6 +1459,178 @@ export async function createAsReceipt(
         warnings: result.txWarnings,
         hospitalName: hospital.hospitalName,
       }
+    } catch (err) {
+      if (attempt === 0 && err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') continue
+      throw err
+    }
+  }
+}
+
+// ── 접수 분할 (2026-11-07 — projects/as_receipt_split_design.md) ─────────────────────────────
+// 미종결 라인을 병동별(WARD) / 구분별(CATEGORY) 새 접수(+티켓)로 분리. 라인 행은 **이동**(id·입고·초안·수리기록 보존),
+// 이동 라인 유닛의 이벤트 ref {AS, 원본코드}는 `editEvent`로 자식 코드로 정정(§5 — 되돌림 게이트·INTAKE 1회 스킵이 ref_code를 보므로 필수).
+
+export type AsSplitMode = 'WARD' | 'CATEGORY'
+export const AS_SPLIT_MAX_GROUPS = 10
+
+export interface SplitGroupInput {
+  /** 그룹 식별(병동명 등 — 비고·응답 표기용) */
+  key: string
+  itemIds: number[]
+  /** 자식 발송지 (미지정 = 원본 값) */
+  destInfo?: string | null
+  /** CATEGORY 모드만 — 원본의 반대 구분 */
+  category?: string | null
+}
+
+export interface SplitInput {
+  mode: AsSplitMode
+  groups: SplitGroupInput[]
+}
+
+export interface SplitChild { id: number; asCode: string; ticketId: number; category: string; key: string; count: number }
+export interface SplitResult { children: SplitChild[]; warnings: string[] }
+
+/** 비고 시스템 줄 접두 — 타임라인·검색용 고정 형식 */
+const splitStamp = (actorName: string | null) => `[분할 ${todayKst()}${actorName ? ` ${actorName}` : ''}]`
+
+export async function splitAsReceipt(receiptId: number, actor: { userId: string; name: string | null }, input: SplitInput): Promise<SplitResult> {
+  const mode = input.mode
+  if (mode !== 'WARD' && mode !== 'CATEGORY') throw new AsServiceError(400, '분할 기준이 올바르지 않습니다.')
+  const groups = Array.isArray(input.groups) ? input.groups : []
+  if (!groups.length) throw new AsServiceError(400, '분할할 그룹을 1개 이상 지정하세요.')
+  if (groups.length > AS_SPLIT_MAX_GROUPS) throw new AsServiceError(400, `분할 그룹은 최대 ${AS_SPLIT_MAX_GROUPS}개입니다.`)
+  if (mode === 'CATEGORY' && groups.length !== 1) throw new AsServiceError(400, '구분별 분할은 그룹 1개(반대 구분)만 가능합니다.')
+
+  const src = await prisma.asReceipt.findUnique({
+    where: { id: receiptId },
+    include: { status: { select: { id: true, name: true, ticketStatus: true } }, hospital: { select: { hospitalCode: true, hospitalName: true } }, ticket: { select: { id: true, ownerId: true, parentId: true, ticketCode: true } }, items: { select: { id: true, serialNo: true, deviceId: true, outcome: true, draftOutcome: true, draftNewSerialNo: true } } },
+  })
+  if (!src) throw new AsServiceError(404, 'AS접수를 찾을 수 없습니다.')
+  if (src.status?.ticketStatus === 'RESOLVED' || src.status?.ticketStatus === 'CLOSED') throw new AsServiceError(409, '종결(완료·취소)된 접수는 분할할 수 없습니다. 리오픈 후 분할하세요.')
+
+  // 라인 검증 — 소속·미종결·중복
+  const byId = new Map(src.items.map((i) => [i.id, i]))
+  const seen = new Set<number>()
+  const planned: { key: string; items: typeof src.items; destInfo: string | null; category: string }[] = []
+  for (const g of groups) {
+    const key = String(g.key ?? '').trim() || `그룹 ${planned.length + 1}`
+    const ids = Array.isArray(g.itemIds) ? g.itemIds.map((v) => Number(v)) : []
+    if (!ids.length) throw new AsServiceError(400, `${key}: 이동할 기기 라인이 없습니다.`)
+    const items: typeof src.items = []
+    for (const id of ids) {
+      if (!Number.isInteger(id)) throw new AsServiceError(400, '라인 id가 올바르지 않습니다.')
+      if (seen.has(id)) throw new AsServiceError(400, '같은 라인이 두 그룹에 들어 있습니다.')
+      const it = byId.get(id)
+      if (!it) throw new AsServiceError(400, `이 접수의 라인이 아닙니다: #${id}`)
+      if (it.outcome) throw new AsServiceError(400, `처리 확정된 라인은 이동할 수 없습니다: ${it.serialNo}`)
+      seen.add(id)
+      items.push(it)
+    }
+    const destInfo = typeof g.destInfo === 'string' && g.destInfo.trim() ? g.destInfo.trim() : src.destInfo
+    if (destInfo && destInfo.length > 5000) throw new AsServiceError(400, `${key}: 발송지 정보가 너무 깁니다.`)
+    let category = src.category
+    if (mode === 'CATEGORY') {
+      const want = String(g.category ?? '')
+      if (!(AS_CATEGORIES as readonly string[]).includes(want) || want === src.category) throw new AsServiceError(400, `구분별 분할은 원본과 다른 구분(${src.category === 'LOST' ? '고장' : '분실'})만 지정할 수 있습니다.`)
+      category = want
+    }
+    planned.push({ key, items, destInfo, category })
+  }
+  const remainingOpen = src.items.filter((i) => !i.outcome && !seen.has(i.id)).length
+  if (remainingOpen < 1) throw new AsServiceError(400, '원본에 미종결 라인이 1개 이상 남아야 합니다.')
+
+  const actorName = actor.name ?? null
+  const stamp = splitStamp(actorName)
+  const modeLabel = mode === 'WARD' ? '병동별' : '구분별'
+
+  // 전체를 한 트랜잭션 — 채번 P2002 1회 재시도(createAsReceipt 패턴)
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const warnings: string[] = []
+        const children: SplitChild[] = []
+        const noteLines: string[] = []
+        for (const g of planned) {
+          const lostChild = g.category === 'LOST' && mode === 'CATEGORY'
+          const child = await tx.asReceipt.create({
+            data: {
+              asCode: await nextAsCode(tx),
+              hospitalCode: src.hospitalCode,
+              category: g.category,
+              receiptDate: src.receiptDate,
+              reporterName: src.reporterName,
+              pickupMethod: mode === 'CATEGORY' ? (lostChild ? 'NONE' : src.pickupMethod ?? defaultAsPickupMethod(g.category)) : src.pickupMethod,
+              pickupTrackingNo: lostChild ? null : src.pickupTrackingNo,
+              pickedUpAt: lostChild ? null : src.pickedUpAt,
+              pickupDestDiffers: src.pickupDestDiffers,
+              pickupDestInfo: src.pickupDestInfo,
+              receivedAt: src.receivedAt,
+              checkedAt: src.checkedAt,
+              preReplace: src.preReplace,
+              priorityRepair: src.priorityRepair,
+              firmwareUpdate: src.firmwareUpdate,
+              accessoryIncluded: src.accessoryIncluded,
+              combinedPack: src.combinedPack,
+              destType: src.destType,
+              destInfo: g.destInfo,
+              expectedShipDate: src.expectedShipDate,
+              statusId: src.statusId,
+              statusChangedAt: new Date(),
+              note: `${stamp} ${src.asCode}에서 분리 (${modeLabel} · ${g.key} · ${g.items.length}대)`,
+              createdById: actor.userId,
+              source: src.source,
+              vocId: src.vocId,
+              splitFromId: src.id,
+            },
+          })
+          // 라인 이동 (§4.3) + 구분 축 초안 정리 (§3.3-4)
+          const ids = g.items.map((i) => i.id)
+          await tx.asReceiptItem.updateMany({ where: { id: { in: ids }, receiptId: src.id }, data: { receiptId: child.id } })
+          if (mode === 'CATEGORY') {
+            const allowed = asResolveOutcomesFor(g.category) as readonly string[]
+            const bad = g.items.filter((i) => i.draftOutcome && !allowed.includes(i.draftOutcome))
+            if (bad.length) {
+              await tx.asReceiptItem.updateMany({ where: { id: { in: bad.map((i) => i.id) } }, data: { draftOutcome: null, draftNewSerialNo: null } })
+              warnings.push(`${child.asCode}: ${AS_CATEGORY_LABELS[g.category as AsCategory]} 구분에서 허용되지 않는 처리방법 초안 해제 — ${bad.map((i) => `${i.serialNo}(${AS_OUTCOME_LABELS[i.draftOutcome as AsOutcome] ?? i.draftOutcome})`).join(', ')}`)
+            }
+          }
+          // 티켓 — 어댑터 생성 + 담당자·상위(VOC) 승계 (D2)
+          const tid = await createTicketForAsReceipt(tx, {
+            id: child.id, asCode: child.asCode, hospitalCode: src.hospitalCode, hospitalName: src.hospital.hospitalName,
+            category: g.category, statusName: src.status?.name ?? null, statusId: src.statusId,
+            description: `${src.asCode}에서 분할 (${modeLabel} · ${g.key})`, resolvedAt: null, createdAt: child.createdAt,
+          }, actor.userId, 'domain')
+          const inherit: Prisma.TicketUncheckedUpdateInput = {}
+          if (src.ticket?.ownerId) inherit.ownerId = src.ticket.ownerId
+          if (src.ticket?.parentId) inherit.parentId = src.ticket.parentId
+          if (Object.keys(inherit).length) {
+            await tx.ticket.update({ where: { id: tid }, data: inherit })
+            if (src.ticket?.parentId) await addTicketEvent(tx, tid, 'link', actor.userId, { event: 'parent_set', parentId: src.ticket.parentId, via: 'as_split' })
+          }
+          await addTicketEvent(tx, tid, 'link', actor.userId, { event: 'split_from', refType: 'AS', refCode: src.asCode, ticketId: src.ticket?.id ?? null, ticketCode: src.ticket?.ticketCode ?? null, mode, key: g.key, count: g.items.length })
+          // 원장 ref 정정 (§5) — 이동 라인 유닛의 ref {AS, 원본} 이벤트 전부 → 자식 코드. 실패는 전파(tx 롤백 → 409)
+          for (const it of g.items) {
+            if (!it.deviceId) continue
+            const evs = await tx.hospitalDeviceEvent.findMany({ where: { deviceId: it.deviceId, refType: 'AS', refCode: src.asCode }, select: { id: true }, orderBy: { id: 'asc' } })
+            for (const ev of evs) {
+              await editEvent(
+                { hospitalCode: src.hospitalCode, actor: { userId: actor.userId, name: actor.name }, source: 'MANUAL', memo: `접수 분할 ${src.asCode} → ${child.asCode}` },
+                { eventId: ev.id, patch: { ref: { type: 'AS', code: child.asCode } } },
+                { client: tx }
+              )
+            }
+          }
+          children.push({ id: child.id, asCode: child.asCode, ticketId: tid, category: g.category, key: g.key, count: g.items.length })
+          noteLines.push(`${g.key} ${g.items.length}대 → ${child.asCode}`)
+        }
+        // 원본 — 비고 줄·티켓 동기화·이력
+        const cur = await tx.asReceipt.findUnique({ where: { id: src.id }, select: { note: true } })
+        await tx.asReceipt.update({ where: { id: src.id }, data: { note: appendNote(cur?.note, `${stamp} ${modeLabel} 분할 — ${noteLines.join(' · ')}`) } })
+        await syncAsReceiptToTicket(tx, src.id, actor.userId)
+        if (src.ticket) await addTicketEvent(tx, src.ticket.id, 'link', actor.userId, { event: 'split_to', refType: 'AS', mode, children: children.map((c) => ({ asCode: c.asCode, ticketId: c.ticketId, key: c.key, count: c.count })) })
+        return { children, warnings }
+      }, { timeout: 60000, maxWait: 10000 })
     } catch (err) {
       if (attempt === 0 && err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') continue
       throw err

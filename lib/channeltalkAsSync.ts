@@ -417,13 +417,14 @@ export async function runChanneltalkAsSync(testIo?: ChanneltalkSyncTestIo): Prom
     if (codeRows.length) {
       const receipts = await prisma.asReceipt.findMany({
         where: { asCode: { in: codeRows.map(({ r }) => cell(r, C.SYS_CODE)) } },
-        select: { id: true, asCode: true, resolvedAt: true, sheetDoneSynced: true, status: { select: { name: true } } },
+        select: { id: true, asCode: true, resolvedAt: true, sheetDoneSynced: true, status: { select: { name: true } }, splitChildren: { select: { resolvedAt: true } } }, // 분할 자식 (2026-11-07) — 가족 전원 종결일 때만 '완료'
       })
       const byCode = new Map(receipts.map((x) => [x.asCode, x]))
       for (const { r, rowNo } of codeRows) {
         const rec = byCode.get(cell(r, C.SYS_CODE))
         if (!rec) continue
-        const want = rec.resolvedAt ? (rec.status?.name === '취소' ? '취소' : '완료') : '미완료'
+        const familyDone = !!rec.resolvedAt && rec.splitChildren.every((c) => !!c.resolvedAt)
+        const want = familyDone ? (rec.status?.name === '취소' ? '취소' : '완료') : '미완료'
         if (rec.sheetDoneSynced === want) continue
         if (rec.sheetDoneSynced == null) { doneSyncUpdates.push({ id: rec.id, value: want }); continue } // 기준선 채택
         rangeOf(rowNo, 'X', [want])

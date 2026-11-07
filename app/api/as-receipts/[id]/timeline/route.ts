@@ -93,7 +93,14 @@ function summarizeAudit(row: { id: number; action: string; resourceLabel: string
   const before = (row.before ?? {}) as Rec
   const warn = Array.isArray(after.warnings) && after.warnings.length ? [`경고 ${after.warnings.length}건`] : []
   const base = { id: `a${row.id}`, at: row.createdAt.toISOString(), actor: row.actorName, source: 'audit' as const }
-  if (row.action === 'CREATE') return { ...base, title: '접수 등록', details: suffix ? [suffix] : [] }
+  if (row.action === 'CREATE') return { ...base, title: suffix.includes('(분할 ←') ? '접수 등록 (분할)' : '접수 등록', details: suffix ? [suffix] : [] }
+  if (suffix === '분할') { // 접수 분할 (2026-11-07) — after { mode, items(잔류), children[{asCode,key,count,serials}], warnings }
+    const kids = Array.isArray(after.children) ? (after.children as Rec[]) : []
+    const details = kids.map((c) => `${str(c.key)} ${str(c.count)}대 → ${str(c.asCode)}`)
+    const remain = Array.isArray(after.items) ? (after.items as unknown[]).length : null
+    if (remain != null) details.push(`원본 잔류 ${remain}대`)
+    return { ...base, title: `접수 분할 (${after.mode === 'CATEGORY' ? '구분별' : '병동별'})`, details: [...details, ...warn] }
+  }
   if (row.action === 'DELETE') return { ...base, title: '접수 삭제', details: [] }
   if (suffix === '입고처리') {
     const r = (k: string) => (Array.isArray(after[k]) ? (after[k] as string[]) : [])

@@ -80,9 +80,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       if (fields.has('serials')) {
         // 기존 라인은 그대로(증상·병동 유지), 상담에만 있는 시리얼은 추가, 상담에서 빠진 시리얼은 제거(종결 라인은 applyItemChanges가 400)
         const chatSerials = new Set(e.lines.map((l) => l.serial))
+        const kidSerials = new Set((await tx.asReceiptItem.findMany({ where: { receipt: { splitFromId: id } }, select: { serialNo: true } })).map((i) => i.serialNo)) // 분할 자식 라인 — 원본에 다시 추가하지 않음 (2026-11-07)
         const lines: LineInput[] = [
           ...rec.items.filter((i) => chatSerials.has(i.serialNo)).map((i) => ({ serial: i.serialNo, symptom: i.symptom, wardName: i.wardName, deviceKind: i.deviceKind, processNote: i.processNote })),
-          ...e.lines.filter((l) => !rec.items.some((i) => i.serialNo === l.serial)).map((l) => ({ serial: l.serial, symptom: l.symptom, wardName: l.ward })),
+          ...e.lines.filter((l) => !rec.items.some((i) => i.serialNo === l.serial) && !kidSerials.has(l.serial)).map((l) => ({ serial: l.serial, symptom: l.symptom, wardName: l.ward })),
         ]
         warnings.push(...(await applyItemChanges(tx, rec, lines, { userId: user.userId, name: user.name })))
       }
@@ -91,7 +92,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         if (!m) continue
         const l = e.lines.find((x) => x.serial === m[2])
         if (!l) continue
-        await tx.asReceiptItem.updateMany({ where: { receiptId: id, serialNo: m[2] }, data: m[1] === 'symptom' ? { symptom: l.symptom } : { wardName: l.ward } })
+        await tx.asReceiptItem.updateMany({ where: { OR: [{ receiptId: id }, { receipt: { splitFromId: id } }], serialNo: m[2] }, data: m[1] === 'symptom' ? { symptom: l.symptom } : { wardName: l.ward } }) // 분할 자식 라인 포함 (2026-11-07)
       }
       const remaining = diff.filter((d) => !fields.has(d.field))
       await tx.asIntakeLink.update({ where: { id: link.id }, data: { changeDetectedAt: remaining.length ? undefined : null, changeDiff: remaining.length ? (remaining as unknown as Prisma.InputJsonValue) : Prisma.DbNull } })
