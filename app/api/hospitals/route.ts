@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
+import { readSearch } from '@/lib/searchParam'
 const s3Client = new S3Client({
   region: process.env.AWS_REGION!,
   credentials: {
@@ -104,7 +105,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
-  const search = searchParams.get('search') ?? ''
+  const search = readSearch(searchParams) // 앞뒤 공백 제거 (2026-11-06, lib/searchParam)
   const sido = searchParams.get('sido') ?? ''
 
   const where = {

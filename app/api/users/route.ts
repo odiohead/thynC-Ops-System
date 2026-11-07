@@ -4,13 +4,14 @@ import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import bcrypt from 'bcryptjs'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
+import { readSearch } from '@/lib/searchParam'
 export async function GET(req: NextRequest) {
   const user = await getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
   const orgCode = searchParams.get('organization')
-  const search = searchParams.get('search') ?? ''
+  const search = readSearch(searchParams) // 앞뒤 공백 제거 (2026-11-06, lib/searchParam)
   const pageParam = searchParams.get('page')
   const limitParam = searchParams.get('limit')
 

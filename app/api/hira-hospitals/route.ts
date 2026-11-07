@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 
+import { readSearch } from '@/lib/searchParam'
 const PAGE_SIZE = 20
 
 export async function GET(request: NextRequest) {
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
   }
 
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
-  const search = searchParams.get('search') ?? ''
+  const search = readSearch(searchParams) // 앞뒤 공백 제거 (2026-11-06, lib/searchParam)
   const sido = searchParams.get('sido') ?? ''
   const typeCode = searchParams.get('typeCode') ?? ''
 

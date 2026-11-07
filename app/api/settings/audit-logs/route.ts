@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, isSuperAdmin } from '@/lib/auth'
 import type { Prisma } from '@prisma/client'
 
+import { readSearch } from '@/lib/searchParam'
 export const dynamic = 'force-dynamic'
 
 const PAGE_SIZE_DEFAULT = 50
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
   const action = searchParams.get('action')
   const resource = searchParams.get('resource')
   const resourceId = searchParams.get('resourceId')
-  const search = searchParams.get('search') ?? ''
+  const search = readSearch(searchParams) // 앞뒤 공백 제거 (2026-11-06, lib/searchParam)
   const from = searchParams.get('from')
   const to = searchParams.get('to')
 

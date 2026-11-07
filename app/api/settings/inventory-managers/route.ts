@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
+import { readSearch } from '@/lib/searchParam'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
@@ -10,7 +11,7 @@ export async function GET(req: NextRequest) {
   if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
-  const search = searchParams.get('search') ?? ''
+  const search = readSearch(searchParams) // 앞뒤 공백 제거 (2026-11-06, lib/searchParam)
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
   const limit = Math.max(1, parseInt(searchParams.get('limit') ?? '20'))
 

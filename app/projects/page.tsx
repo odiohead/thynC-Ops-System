@@ -7,6 +7,7 @@ import ProjectFilters from './_components/ProjectFilters'
 import StatusBadge from '@/app/components/StatusBadge'
 import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
 
+import { trimSearch } from '@/lib/searchParam'
 export const dynamic = 'force-dynamic'
 
 const ECG_MODEL = 'MC200MT-T'
@@ -33,7 +34,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
   const user = token ? await verifyToken(token) : null
   const isAdmin = !!user && user.role !== 'VIEWER'
 
-  const search = (searchParams.search as string) ?? ''
+  const search = trimSearch(searchParams.search) // 앞뒤 공백 제거 (2026-11-06, lib/searchParam)
   const buildStatusId = (searchParams.buildStatusId as string) ?? ''
   const contractorId = (searchParams.contractorId as string) ?? ''
   const builderId = (searchParams.builderId as string) ?? ''

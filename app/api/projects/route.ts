@@ -8,10 +8,11 @@ import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { advanceHospitalStatus } from '@/lib/hospitalStatus'
 import { createTicketForProject } from '@/lib/ticketDomain'
 
+import { readSearch } from '@/lib/searchParam'
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const hospitalCode = searchParams.get('hospitalCode') ?? ''
-  const search = searchParams.get('search') ?? ''
+  const search = readSearch(searchParams) // 앞뒤 공백 제거 (2026-11-06, lib/searchParam)
   const buildStatusId = searchParams.get('buildStatusId') ?? ''
   const contractorId = searchParams.get('contractorId') ?? ''
   const builderId = searchParams.get('builderId') ?? ''

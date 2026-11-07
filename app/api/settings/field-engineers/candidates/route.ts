@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 
+import { readSearch } from '@/lib/searchParam'
 const VALID_WORK_TYPES = ['PROJECT', 'INSTALL_PLAN', 'MAINTENANCE', 'ETC_TASK'] as const
 type WorkType = typeof VALID_WORK_TYPES[number]
 
@@ -15,7 +16,7 @@ export async function GET(req: NextRequest) {
   if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
-  const search = searchParams.get('search') ?? ''
+  const search = readSearch(searchParams) // 앞뒤 공백 제거 (2026-11-06, lib/searchParam)
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
   const limit = Math.max(1, parseInt(searchParams.get('limit') ?? '20'))
   const workType = parseWorkType(searchParams.get('workType'))

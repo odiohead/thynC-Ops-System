@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>thynC 운영관리시스템 2.0 기획안 v2 (2026-11)</title>
+<style>
+  :root {
+    --ink: #1a1f2e; --sub: #5a6478; --line: #e3e7ef; --bg: #ffffff; --bg-soft: #f6f8fb;
+    --accent: #2563eb; --accent-soft: #eff4ff; --green: #16a34a; --green-soft: #f0fdf4;
+    --amber: #d97706; --amber-soft: #fffbeb; --red: #dc2626; --red-soft: #fef2f2;
+    --purple: #7c3aed; --purple-soft: #f5f3ff; --teal: #0d9488; --teal-soft: #f0fdfa; --gray-soft: #f1f5f9;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Pretendard Variable', Pretendard, -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif; color: var(--ink); background: var(--bg); line-height: 1.75; font-size: 15px; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 48px 32px 120px; }
+  h1 { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; line-height: 1.3; }
+  .subtitle { font-size: 17px; color: var(--sub); margin-top: 8px; }
+  h2 { font-size: 22px; font-weight: 800; letter-spacing: -0.3px; margin: 72px 0 20px; padding-top: 24px; border-top: 3px solid var(--ink); }
+  h2 .no { color: var(--accent); margin-right: 8px; }
+  h3 { font-size: 17px; font-weight: 700; margin: 40px 0 12px; }
+  h4 { font-size: 15px; font-weight: 700; margin: 24px 0 8px; }
+  p { margin: 12px 0; }
+  ul, ol { margin: 12px 0 12px 22px; } li { margin: 6px 0; }
+  strong { font-weight: 700; }
+  em { font-style: normal; background: linear-gradient(transparent 65%, #fde68a 65%); }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13.5px; }
+  th { background: var(--bg-soft); text-align: left; font-weight: 700; padding: 9px 12px; border: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 9px 12px; border: 1px solid var(--line); vertical-align: top; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .meta { display: flex; gap: 10px; flex-wrap: wrap; margin: 18px 0 0; }
+  .chip { font-size: 12.5px; padding: 4px 10px; border-radius: 999px; background: var(--bg-soft); border: 1px solid var(--line); color: var(--sub); }
+  .chip.accent { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+  .chip.amber { background: var(--amber-soft); color: var(--amber); border-color: transparent; }
+  .box { border: 1px solid var(--line); border-left: 4px solid var(--accent); background: var(--accent-soft); padding: 14px 18px; border-radius: 6px; margin: 18px 0; }
+  .box.amber { border-left-color: var(--amber); background: var(--amber-soft); }
+  .box.green { border-left-color: var(--green); background: var(--green-soft); }
+  .box.red { border-left-color: var(--red); background: var(--red-soft); }
+  .box.purple { border-left-color: var(--purple); background: var(--purple-soft); }
+  .tag { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-right: 6px; vertical-align: middle; }
+  .t-done { background: var(--green-soft); color: var(--green); } .t-part { background: var(--teal-soft); color: var(--teal); }
+  .t-wait { background: var(--gray-soft); color: var(--sub); } .t-new { background: var(--purple-soft); color: var(--purple); }
+  .t-drop { background: var(--red-soft); color: var(--red); } .t-quick { background: var(--amber-soft); color: var(--amber); }
+  .toc { background: var(--bg-soft); border: 1px solid var(--line); border-radius: 8px; padding: 18px 22px; margin: 28px 0; }
+  .toc ol { margin: 6px 0 0 20px; } .toc li { margin: 3px 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; background: #fff; }
+  .card h4 { margin: 0 0 6px; }
+  .small { font-size: 13px; color: var(--sub); }
+  .kpi { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0; }
+  .kpi div { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; background: var(--bg-soft); }
+  .kpi b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .kpi span { font-size: 12.5px; color: var(--sub); }
+  footer { margin-top: 80px; font-size: 12.5px; color: var(--sub); border-top: 1px solid var(--line); padding-top: 16px; }
+  @media (max-width: 720px) { .grid, .kpi { grid-template-columns: 1fr; } .wrap { padding: 28px 16px 80px; } }
+  @media print { h2 { page-break-before: auto; } .toc { display: none; } }
+</style>
+</head>
+<body><div class="wrap">
+
+<span class="chip amber">기획안 v2 (설계안 아님 — 착수 전 항목별 설계·승인 별도)</span>
+<h1 style="margin-top:14px">thynC 운영관리시스템 2.0 기획안 v2</h1>
+<p class="subtitle">— 장부는 생겼다. 이제 "믿을 수 있는 장부"와 "먼저 말하는 시스템"으로 —</p>
+<div class="meta">
+  <span class="chip">작성일 2026-11-06 (v1 2026-08-02 갱신)</span>
+  <span class="chip">작성 Claude (dev2)</span>
+  <span class="chip">근거 PROD 2026-11-06 실측 + dev2 10-29 동기화본(보조 지표)</span>
+  <span class="chip accent">상태: 기획 검토 대기</span>
+</div>
+
+<div class="toc"><strong>목차</strong>
+<ol>
+  <li>이 문서의 성격 · v1에서 무엇이 바뀌었나</li>
+  <li>8월 이후 달라진 것 — 1.0+ 출시 항목</li>
+  <li>현재(2026-11) 진단 — 실측 데이터가 말하는 것</li>
+  <li>비전 — 2.0의 전환 (유지 + 보강)</li>
+  <li>2.0 후보 기능 — 6테마 22항목 (v1 18항목 상태 갱신 + 신규 4)</li>
+  <li>우선순위 — 가치×난이도와 추천 Wave (재편)</li>
+  <li>전제 · 리스크 · 결정 필요 항목</li>
+  <li>부록 — 실측 데이터 상세</li>
+</ol></div>
+
+<h2><span class="no">1.</span>이 문서의 성격 · v1에서 무엇이 바뀌었나</h2>
+<p>이 문서는 <strong>기획안</strong>입니다. "무엇을, 왜 만들 가치가 있는가"를 다루고, 테이블·API·화면 설계는 다루지 않습니다. 각 항목은 방향이 선택된 뒤 별도 설계안(<code>projects/*_design.md</code>)을 작성하고 검토·승인을 거쳐야 착수합니다(기존 설계 게이트 그대로).</p>
+<div class="box">
+<strong>v1(8월 2일)과의 차이 세 가지</strong>
+<ul>
+  <li><strong>진단 데이터가 바뀌었습니다.</strong> v1은 PROD 7월 31일 동기화본 기준이었고, 그 뒤 3개월 동안 디바이스 원장(기기 30,206대), AS 도메인(접수 4,301건), 채널톡 적재·VOC 자동 승격(VOC 10,708건), 출고업무 v2, 모바일 PWA v1이 출시됐습니다. v1의 "설치 기반 공백" 신호는 해소됐고, 대신 <em>장부의 정확도를 사람이 손으로 지키고 있다</em>는 새 신호가 나타났습니다.</li>
+  <li><strong>이용 패턴이 확인됐습니다.</strong> 최근 30일 감사 로그 12,879건 중 74%가 AS 처리입니다. 티켓의 83%가 VOC·AS입니다. 시스템의 무게중심이 '기록'에서 'CS·AS 운영'으로 이동한 것이 데이터로 확인됩니다.</li>
+  <li><strong>Wave를 재편했습니다.</strong> v1 Wave 1의 A1(장비 개체)은 완료됐고, 그 자리에 "원장 정확도 운영(A1′)·AS 분석(A4)·운영 셀프서비스(F5)·인프라(F4)"가 들어옵니다. 반복 매출(B)은 여전히 본론이지만, 딜 데이터 보강(필수 필드·첨부·도입형태 보정)으로 착수 조건이 v1보다 좋아졌습니다.</li>
+</ul>
+</div>
+
+<h2><span class="no">2.</span>8월 이후 달라진 것 — 1.0+ 출시 항목</h2>
+<p>v1 작성 이후 3개월간 PROD에 반영된 것들입니다. 2.0 후보 항목의 전제가 되므로 먼저 정리합니다.</p>
+<table>
+<tr><th>영역</th><th>출시 내용 (2026-08 ~ 11)</th><th>v1 항목과의 관계</th></tr>
+<tr><td><strong>디바이스 원장</strong></td><td>3층 구조(기기 마스터 → 시리얼 개체 → 병원 배치) · 초기 임포트 138곳 23,478대 → 현재 ACTIVE 28,599대·225개 병원 · 상품유형(일반/라이트)·계약건 소프트 참조 · 상태·위치 축(수리완료·AS접수·센터/Hub) · 커버리지 표 · 제3자 기기 비계약 공급 현황(카트온)</td><td><span class="tag t-done">완료</span>A1 장비 개체</td></tr>
+<tr><td><strong>AS업무 도메인</strong></td><td>8번째 티켓 도메인 · 구 AS이력 3,236접수 마이그 · 라인 단위 처리(수리반환/교체/분실)·부분 발송·입고 대조·수리대기 큐·시리얼 형식 게이트 · 인입 소스를 구글시트 → <strong>채널톡 상담 원문</strong>으로 전환(10/28) · 분실 10%·라이트 100% 한도 정책 알림 · 회수기기 처리 3택</td><td>v1에 없던 축. A4(신규)의 데이터 기반</td></tr>
+<tr><td><strong>CS·VOC</strong></td><td>채널톡 Open API 원천 적재(상담 4,840건) · 분류 태그 트리거 VOC 자동 승격(월 800건, 승격률 90%) · 복수 분류·태그 자동 추종 · VOC현황 시트 과거 이력 7,896건 적재 · VOC·AS 주간 대시보드(+주간 보고 PDF)</td><td>E2 KPI의 첫 조각(주간 대시보드)</td></tr>
+<tr><td><strong>출고업무</strong></td><td>7번째 도메인 · v2: 품목 소스를 WMS 품목으로 전환, 업무 탭별 노출, 구성 안내(시스템 XX 부자재), 첨부, Slack 알림(등록·완료 요청자 태그) · 영업 유형(평가용·판매용·오산영업소) 모바일 등록</td><td>D 현장 운영의 실마리</td></tr>
+<tr><td><strong>영업 CRM</strong></td><td>딜 상품유형 · 도입 기기 수량(한도 분모) · 견적서·계약서 첨부 · 등록 필수 필드 · 프로젝트 도입형태 딜 기준 보정 · 영업 대시보드(지도·목표·침투율) · 계약완료 딜 24건 프로젝트 연결</td><td>B2 계약 달력의 입력 데이터 정비</td></tr>
+<tr><td><strong>주간업무</strong></td><td><code>/weekly</code> 안건 보드(사업·운영·개발) · 주차 네비 · 특이사항 · 첨부 · 담당 팀 다중</td><td>E2의 경영 리뷰 축</td></tr>
+<tr><td><strong>모바일</strong></td><td>PWA v1 — 앱 범위 로그인(90일), 주차등록, 출고요청, 자재관리 껍데기, 카메라 바코드 스캔</td><td>D2·D4(신규)의 출발점</td></tr>
+<tr><td><strong>기반</strong></td><td>RBAC v1.5(가산 역할·Assignment Group 팀 할당) · Slack 알림 이벤트 중심 재편(규칙·채널·요청자 멘션) · 심평원 허가병상 수집 · 공사업체 비활성 · 검색어 정규화</td><td><span class="tag t-part">부분</span>F2 권한</td></tr>
+</table>
+<p class="small">기간 중 PROD 배포 약 19회(9~11월), 설계 문서 30건, API 라우트 366개·페이지 134개 규모.</p>
+
+<h2><span class="no">3.</span>현재(2026-11) 진단 — 실측 데이터가 말하는 것</h2>
+<h3>3.1 규모 스냅샷 (PROD 2026-11-06)</h3>
+<div class="kpi">
+  <div><b>233</b><span>계약완료 고객 병원 (딜 266건)</span></div>
+  <div><b>28,599</b><span>배치 중 기기 (원장 225개 병원)</span></div>
+  <div><b>16,292</b><span>누적 티켓 (월 1,300~1,500)</span></div>
+  <div><b>73</b><span>활성 사용자 (30일 활동 51명)</span></div>
+</div>
+<table>
+<tr><th>축</th><th class="num">값</th><th>읽는 법</th></tr>
+<tr><td>AS 접수 누적 / 월</td><td class="num">4,301 / 430~486</td><td>최근 90일 라인 결과: 수리반환 3,650 · 교체 846 · 진행 791. 고장 1,287 : 분실 91</td></tr>
+<tr><td>VOC 누적 / 월 (시트 적재 제외)</td><td class="num">10,708 / ~800</td><td>채널톡 상담 월 ~900건 중 90%가 VOC로 자동 승격</td></tr>
+<tr><td>티켓 도메인 비중 (90일)</td><td class="num">VOC 54% · AS 32%</td><td>기타업무 5%, 유지보수 2.5%, 답사·프로젝트·설치계획 합 3%</td></tr>
+<tr><td>감사 로그 30일</td><td class="num">12,879건</td><td>AS 처리 9,548(74%) · 자재 전표 569 · 주차 343 · 주간업무 283 · 유지보수 120</td></tr>
+<tr><td>판매모델 (계약완료)</td><td class="num">사용량비례 197 / 266</td><td>구독 25 · 구축 16 · 분납 14 · 미지정 14. 라이트 13건</td></tr>
+<tr><td>자재 전표 / 출고요청</td><td class="num">월 ~400 / 누적 9</td><td>출고요청 도메인은 11월 들어 본격 사용 시작(8건)</td></tr>
+<tr><td>유지보수 (구 체계)</td><td class="num">월 31~46</td><td>HW 장애는 AS 도메인으로 이동, 유지보수는 현장 방문·점검류로 축소</td></tr>
+<tr><td>사용자 분포</td><td class="num">운영팀 24 · 사업팀 13</td><td>로그인 30일 45명 / 60일 58명 (dev2 10-29 동기화본)</td></tr>
+</table>
+
+<h3>3.2 이용 패턴 — 무엇이 실제로 쓰이는가</h3>
+<ul>
+  <li><strong>AS가 시스템 활동의 중심입니다.</strong> 운영팀 24명이 하루 평균 300건 이상의 AS 처리 액션을 남깁니다. AS 접수→종결 중앙값 8일, 평균 10일(최근 1,772건). 상위 10개 병원이 AS의 25%를 차지합니다(174개 병원 중).</li>
+  <li><strong>CS 인입은 채널톡 한 줄기로 모였습니다.</strong> 수기 VOC 등록은 사라지고 자동 승격이 기본이 됐습니다. 즉 "입력"은 거의 자동화됐고, 병목은 "읽고 판단하는" 쪽입니다. 현재 읽는 도구는 주간 대시보드 1개입니다.</li>
+  <li><strong>장부는 생겼지만 사람 손으로 지키고 있습니다.</strong> 9~11월 DEV_HISTORY에 "[운영 데이터 조치]·보정" 항목이 28건입니다. 시리얼 오타 정정, 교체↔수리반환 정정, 라이트 딜 기기 일괄 등록, 분실 라인 보정 등 — 전부 개발자가 SQL·스크립트로 처리했습니다.</li>
+  <li><strong>현장 도구 수요가 실증됐습니다.</strong> 모바일 PWA v1 출시 직후 주차등록 343건/30일, 출고요청 모바일 등록 시작. 바코드 스캔 기반은 깔렸습니다.</li>
+  <li><strong>인프라가 성장 속도를 못 따라갑니다.</strong> PROD는 t3.medium(2 vCPU·3.8GB)에 PROD·DEV·협업 서버·DB가 동거합니다. 11월 3일 디스크 100%로 빌드 실패, 빌드마다 스왑 2GB, DEV 빌드 중 load 15. 인스턴스 이전이 논의 중입니다.</li>
+</ul>
+
+<h3>3.3 구조적 신호 — v1 다섯 개의 갱신 + 신규 셋</h3>
+<table>
+<tr><th>#</th><th>신호</th><th>v1(8월) → 지금</th><th>2.0 함의</th></tr>
+<tr><td>S1</td><td>반복 매출 사업인데 반복 매출 모듈이 없다</td><td><span class="tag t-wait">그대로</span>사용량비례형 74%. 정산·청구·수금은 여전히 시스템 밖</td><td>B1 정산 원장은 여전히 2.0의 본론. 딜 데이터(기기 수량·상품유형·첨부)가 정비돼 분모는 준비됨</td></tr>
+<tr><td>S2</td><td>병원에 나가 있는 장비의 장부가 없다</td><td><span class="tag t-done">해소</span>원장 28,599대·225곳</td><td>질문이 바뀜: "장부를 어떻게 정확하게 유지하나" → A1′ 원장 정확도 운영 + E1 정합성</td></tr>
+<tr><td>S3</td><td>장애 대응이 사후적이다</td><td><span class="tag t-part">데이터 확보</span>AS 4,301건·라인 결과·회수기기 처리 결과가 구조화됨</td><td>예방(A2 PM)으로 가기 전에 <strong>A4 AS 분석</strong>(반복 고장 병원·모델·시리얼, 교체율, 리드타임)이 먼저 가능해짐</td></tr>
+<tr><td>S4</td><td>현장 운영 도구가 없다</td><td><span class="tag t-part">출발</span>출고업무 v2 + 모바일 PWA v1</td><td>D4 모바일 2.0(AS 입고 스캔·출고 처리·완료 보고)으로 확장</td></tr>
+<tr><td>S5</td><td>시스템이 먼저 말하지 않는다</td><td><span class="tag t-part">부분</span>정책 알림(분실 10%·라이트 100%), Slack 이벤트 규칙, 주간 대시보드</td><td>E2 KPI·E3 AI 부조종사의 재료(채널톡 원문·AS 라인·원장 이벤트)가 모두 갖춰짐</td></tr>
+<tr><td>S6 <span class="tag t-new">신규</span></td><td>운영 데이터 보정이 개발자에게 몰린다</td><td>2개월 28건, 전부 SQL·스크립트</td><td>F5 운영 셀프서비스(정정 UI·일괄 등록·역할별 관리 화면) + E1 자동 점검으로 흡수</td></tr>
+<tr><td>S7 <span class="tag t-new">신규</span></td><td>인프라가 한계다</td><td>메모리 스왑·디스크 사건·DEV/PROD 동거·수동 배포</td><td>F4 인프라·배포 체계 — 2.0 착수 전 Wave 0</td></tr>
+<tr><td>S8 <span class="tag t-new">신규</span></td><td>마스터와 외부 어휘가 어긋난다</td><td>채널톡 태그 vs VOC 분류 마스터 불일치 246건, 프로젝트 도입형태 vs 딜, 대웅 품목 vs WMS</td><td>F1 연동 허브의 첫 과제 = 어휘 동기화(태그·품목·병원 코드)</td></tr>
+</table>
+
+<h3>3.4 1.0+에서 이미 충분한 것 (2.0에서 건드리지 않을 것)</h3>
+<ul>
+  <li><strong>티켓 시스템</strong> — 8개 도메인 편입·SLA·라우팅·어댑터 레지스트리. 2.0은 그 위에 얹습니다.</li>
+  <li><strong>디바이스 원장 코어</strong> — 3층 구조·이벤트 fold·상태/위치 축. 2.0은 정확도 운영과 분석을 더할 뿐 구조를 다시 짜지 않습니다.</li>
+  <li><strong>채널톡 적재 파이프라인</strong> — 원문 5테이블·승격·AS 인입. 소스가 바뀌지 않는 한 재구축 대상이 아닙니다.</li>
+  <li><strong>위키·AI 어시스턴트 기반</strong>, <strong>워크플로 상태·코드 마스터</strong>, <strong>RBAC 가산 모델</strong> — 그대로.</li>
+</ul>
+
+<h2><span class="no">4.</span>비전 — 2.0의 전환 (유지 + 보강)</h2>
+<table>
+<tr><th>전환</th><th>1.0+ (지금)</th><th>2.0 (지향)</th></tr>
+<tr><td>① 사후 → 예방</td><td>병원이 채널톡으로 신고하면 AS 접수·발송·회수. 사건은 라인 단위로 정확히 남는다</td><td>반복 고장 병원·모델을 시스템이 먼저 짚고, 정기점검·선교체가 일정으로 잡힌다</td></tr>
+<tr><td>② 기록 → 지능</td><td>원장·AS·VOC·전표가 쌓인다. 읽는 도구는 주간 대시보드 하나</td><td>KPI 한 장, 병원 건강도, AI 요약·분류 제안이 입력 시점에 따라붙는다</td></tr>
+<tr><td>③ 내부 → 고객</td><td>병원은 채널톡으로만 접점. 진행 상황은 CS가 답한다</td><td>병원이 AS 진행·기기 현황·리포트를 스스로 본다</td></tr>
+<tr><td>④ <span class="tag t-new">보강</span>수작업 장부 → 신뢰 가능한 장부</td><td>정합성은 개발자가 SQL로 지킨다(28건/2개월)</td><td>규칙이 어긋남을 찾고, 운영자가 화면에서 고치고, 보정 이력이 남는다</td></tr>
+</table>
+<div class="box amber"><strong>2.0이 의도적으로 하지 않는 것</strong> (v1 유지) — 환자 데이터·임상 기능, thynC 제품 자체의 기능, 범용 그룹웨어화, 티켓·원장·채널톡 파이프라인의 재설계.</div>
+
+<h2><span class="no">5.</span>2.0 후보 기능 — 6테마 22항목</h2>
+<p class="small">상태 표기: <span class="tag t-done">완료</span>1.0+에서 출시 · <span class="tag t-part">부분</span>일부 출시 · <span class="tag t-wait">대기</span>v1 그대로 · <span class="tag t-new">신규</span>v2 추가 · <span class="tag t-quick">퀵윈</span>작게 시작 가능. 규모는 소형(1~2주)/중형(1~2개월)/대형(분기+)의 감입니다.</p>
+
+<h3>A. 설치 기반 (Install Base) — "병원에 나가 있는 장비의 장부"</h3>
+<div class="grid">
+<div class="card"><h4><span class="tag t-done">완료</span>A1 장비 개체 수명주기 관리</h4><p class="small">디바이스 원장으로 출시. 남은 갭: 원장 미등록 시리얼 생성 경로, 게이트웨이·제3자 기기 기대치 축.</p></div>
+<div class="card"><h4><span class="tag t-new">신규</span>A1′ 원장 정확도 운영 <span class="small">중형</span></h4><p class="small">WMS 출고 전표 ↔ 원장 배치 자동 대조, 대웅 디바이스 수 ↔ 딜 수량 ↔ 배치 수 3자 비교, 온프렘(thynC) 등록 현황과의 주기 대조, 어긋남 큐 + 화면 정정. "정합성을 사람이 아니라 규칙이 지키는" 첫 단계.</p></div>
+<div class="card"><h4><span class="tag t-wait">대기</span>A2 정기점검(PM) 스케줄링 <span class="small">중형</span></h4><p class="small">보증·설치일·AS 이력 기반 점검 주기. A4의 반복 고장 결과를 점검 대상 선정에 쓴다. D1과 짝.</p></div>
+<div class="card"><h4><span class="tag t-new">신규</span>A4 AS 분석 — 반복 고장·교체율·리드타임 <span class="small">소~중형</span></h4><p class="small">AS 4,301건·라인 결과·회수기기 처리 결과·원장 이벤트를 묶어 병원별·모델별·시리얼별 고장 반복, 교체율(일반/라이트), 접수→종결 리드타임(8일 중앙값)의 병목 단계를 본다. 분실 10%·라이트 100% 한도의 선행 경보. 2.0 중 가장 빨리 "시스템이 먼저 말하는" 경험을 줄 수 있는 항목.</p></div>
+<div class="card"><h4><span class="tag t-wait">조사</span>A3 장비 텔레메트리 <span class="small">대형·제품 협업</span></h4><p class="small">v1과 동일 — 제품팀과 대화만 먼저.</p></div>
+</div>
+
+<h3>B. 반복 매출 운영 (Revenue Operations) — "계약 이후의 돈 흐름"</h3>
+<div class="grid">
+<div class="card"><h4><span class="tag t-wait">대기</span>B1 사용량·구독 정산 원장 <span class="small">대형</span></h4><p class="small">사용량비례형 197건의 월 정산 사이클(사용량 원천 → 요율 → 청구 → 세금계산서 → 수금). 여전히 2.0의 본론이자 가장 큰 도메인 리스크. 정산 실무 인터뷰·대웅과의 역할 분담 확인이 선행 조건(v1 §7 그대로).</p></div>
+<div class="card"><h4><span class="tag t-wait">대기</span>B2 계약 수명주기 — 만기·갱신·보증 달력 <span class="small">중형</span></h4><p class="small">v1보다 착수 조건 개선: 딜에 상품유형·기기 수량·계약일·첨부가 채워지고 프로젝트 도입형태가 딜 기준으로 정비됨. 보증기간 텍스트 → 구조화가 첫 걸음.</p></div>
+<div class="card"><h4><span class="tag t-wait">대기</span>B3 경영 매출 지표 (MRR/ARR) <span class="small">퀵윈, B1 이후</span></h4><p class="small">v1 그대로.</p></div>
+</div>
+
+<h3>C. 고객 경험 (Customer-facing) — "병원이 보는 우리"</h3>
+<div class="grid">
+<div class="card"><h4><span class="tag t-wait">대기</span>C1 고객 포털 <span class="small">대형, F2 선행</span></h4><p class="small">AS 진행 조회·기기 현황·리포트 열람. 채널톡이 접점인 현 구조에서 "채널톡 안에서 보여주기"(링크·봇 답변)가 포털보다 먼저일 수 있음 — 결정 항목.</p></div>
+<div class="card"><h4><span class="tag t-part">재료 확보</span>C2 병원 건강도 스코어 <span class="small">중형</span></h4><p class="small">v1 때 없던 입력이 생김: AS 빈도·교체율·VOC 분류 분포·원장 배치 대비 계약 차이·미종결 티켓. A4·E1 뒤에 자연스럽게 따라옴.</p></div>
+<div class="card"><h4><span class="tag t-part">원시형 존재</span>C3 병원 정기 운영 리포트 <span class="small">중형</span></h4><p class="small">주간 VOC·AS 대시보드와 PDF 보고 패널이 내부용으로 존재. 병원 단위로 잘라 월간 리포트(AS·교체·기기 현황)를 자동 생성하는 것이 C의 가장 빠른 출발.</p></div>
+</div>
+
+<h3>D. 현장 운영 (Field Ops) — "월 500건 AS와 출고를 처리하는 사람들의 도구"</h3>
+<div class="grid">
+<div class="card"><h4><span class="tag t-wait">대기</span>D1 디스패치 보드 <span class="small">중형</span></h4><p class="small">엔지니어 부하·일정 한 화면. 출고요청·AS 발송·유지보수 방문이 이제 전부 티켓이라 소스는 준비됨.</p></div>
+<div class="card"><h4><span class="tag t-part">출발</span>D2 현장 완료 보고 강화 <span class="small">중형</span></h4><p class="small">모바일 PWA v1의 카메라·스캔 기반 위에 체크리스트·사진·서명.</p></div>
+<div class="card"><h4><span class="tag t-wait">대기</span>D3 구축 플레이북 <span class="small">중형</span></h4><p class="small">v1 그대로. 출고 '구성 안내'(시스템 XX 부자재)가 템플릿의 첫 조각.</p></div>
+<div class="card"><h4><span class="tag t-new">신규</span>D4 모바일 2.0 — 현장 스캔 워크플로 <span class="small">중형</span></h4><p class="small">PWA v1 확장: AS 입고 스캔(수거 기기 입고 대조), 출고 처리 시 시리얼 스캔으로 원장 등록, 자재 입출고 스캔, 주차. 11월 출고요청 모바일 등록이 첫 실사용.</p></div>
+</div>
+
+<h3>E. 인텔리전스 (Intelligence) — "시스템이 먼저 말하게 하기"</h3>
+<div class="grid">
+<div class="card"><h4><span class="tag t-quick">퀵윈·최우선</span>E1 데이터 정합성 자동 점검</h4><p class="small">2개월 28건의 수동 보정을 규칙으로: 딜 기기 수량 vs 배치 수, 원장 vs WMS 출고, 프로젝트 도입형태 vs 딜, 채널톡 태그 vs 분류 마스터, 교체 라인 vs 원장 이벤트, 중복 시리얼. 어긋남 큐 화면 + 담당 배정. A1′·F5의 공통 바닥.</p></div>
+<div class="card"><h4><span class="tag t-part">첫 조각</span>E2 경영 KPI 통합 대시보드 <span class="small">중형</span></h4><p class="small">주간 VOC·AS 대시보드 + 영업 대시보드(목표·침투율) + 주간업무 보드를 "회사 한 장"으로. AS 리드타임·교체율·채널톡 응답·출고 리드타임·자재 회전이 후보 지표.</p></div>
+<div class="card"><h4><span class="tag t-part">재료 확보</span>E3 AI 운영 부조종사 <span class="small">중형·단계별</span></h4><p class="small">채널톡 원문 4,840건·AS 라인·위키가 이미 어시스턴트 도구 범위. 1단계는 "읽기 보조"(상담 요약·AS 접수 초안·분류 제안), 2단계는 "제안"(유사 과거 사례·선교체 추천).</p></div>
+<div class="card"><h4><span class="tag t-quick">퀵윈</span>E4 통합 검색 (Cmd+K)</h4><p class="small">병원·시리얼·AS코드·VOC코드·티켓·위키를 한 입력창에서. 검색어 정규화(11/6)가 공통 헬퍼로 모인 것이 바닥.</p></div>
+</div>
+
+<h3>F. 기반·거버넌스 (Foundation) — "커지기 전에 깔아야 하는 것"</h3>
+<div class="grid">
+<div class="card"><h4><span class="tag t-wait">대기</span>F1 외부 연동 허브 <span class="small">중형·연동처별</span></h4><p class="small">첫 과제를 "어휘 동기화"로 좁힘: 채널톡 태그 ↔ VOC 분류, 대웅 품목·거래처 코드 ↔ WMS·병원, 온프렘 기기 타입 ↔ 기기 마스터. 회계·세금계산서는 B1 형태 확정 후.</p></div>
+<div class="card"><h4><span class="tag t-part">부분</span>F2 권한·감사 고도화</h4><p class="small">RBAC v1.5(가산 역할·팀 할당) 출시. 남은 것: 고객 포털용 외부 계정 모델, 감사 로그 조회 UI 고도화, 데이터 정정 권한의 분리.</p></div>
+<div class="card"><h4><span class="tag t-wait">조사</span>F3 의료기기 유통 규제 대응 점검</h4><p class="small">v1 그대로 — 조사만.</p></div>
+<div class="card"><h4><span class="tag t-new">신규·Wave 0</span>F4 인프라·배포 체계 <span class="small">소~중형</span></h4><p class="small">PROD 인스턴스 메모리 증설 또는 신규 이전(최소 8GB), DEV를 PROD 호스트에서 분리, 빌드를 서비스 밖에서(dev2 또는 CI) 수행해 산출물만 배포, 디스크·캐시 정리 자동화, 백업 검증. 2.0 어떤 항목보다 먼저.</p></div>
+<div class="card"><h4><span class="tag t-new">신규</span>F5 운영 셀프서비스 <span class="small">소형 묶음</span></h4><p class="small">개발자 SQL로 처리된 보정 28건을 유형별 관리 화면으로: 시리얼 정정, 교체↔수리반환 정정, 딜 기기 수량 일괄 입력, 라인 결과 되돌리기, 태그 마스터 추가 시 미매핑 경고. E1 큐와 연결.</p></div>
+</div>
+
+<h2><span class="no">6.</span>우선순위 — 가치×난이도와 추천 Wave (재편)</h2>
+<h3>6.1 매트릭스</h3>
+<table>
+<tr><th></th><th>낮은 난이도</th><th>높은 난이도</th></tr>
+<tr><td><strong>높은 가치</strong></td><td><strong>🎯 먼저:</strong> E1 정합성 점검 · F5 셀프서비스 · A4 AS 분석 · E4 통합 검색 · F4 인프라</td><td><strong>🏗 준비하고 착수:</strong> B1 정산 원장(도메인 확인 선행) · A1′ 원장 정확도(WMS·온프렘 대조) · C1 포털 · D4 모바일 2.0</td></tr>
+<tr><td><strong>중간 가치</strong></td><td><strong>🧩 사이사이:</strong> B2 계약 달력 · E2 KPI 뼈대 · C3 리포트 · F1 어휘 동기화</td><td><strong>⏸ 뒤로:</strong> A2 PM · D1 디스패치 · E3 AI 2단계 · C2 건강도 · B3 MRR · D2·D3 · A3·F3</td></tr>
+</table>
+
+<h3>6.2 추천 Wave (순서의 논리)</h3>
+<div class="box green"><strong>Wave 0 — 바닥 정비 (즉시, 1개월)</strong><br>F4 인프라(인스턴스·DEV 분리·빌드 분리) → E1 정합성 규칙 1차(5~6개 규칙 + 큐 화면) → F5 셀프서비스 상위 5종.<br><span class="small">논리: 2.0의 모든 지표·분석은 장부가 맞다는 전제 위에 서는데, 그 전제를 지금은 사람이 지킵니다. 그리고 이 수준의 변경을 매번 PROD 빌드로 밀어 넣기엔 서버가 버티지 못합니다.</span></div>
+<div class="box"><strong>Wave 1 — 읽는 도구 (2~3개월)</strong><br>A4 AS 분석 → E4 통합 검색 → E2 KPI 뼈대(주간 대시보드·영업 대시보드 통합) → A1′ 원장 정확도(WMS 대조부터).<br><span class="small">논리: 입력은 자동화됐고(채널톡·원장), 운영팀 24명이 하루 300건을 처리합니다. 다음 병목은 "판단"이고, 가장 빨리 체감되는 건 AS 분석입니다.</span></div>
+<div class="box purple"><strong>Wave 2 — 돈 흐름과 예방 (2.0의 본론, 분기 단위)</strong><br>B2 계약 달력 → B1 정산 원장(Wave 1 기간 중 도메인 확인 완료 조건) → A2 PM + D1 디스패치(짝) → D4 모바일 2.0.<br><span class="small">논리: v1과 같습니다. 다만 B2는 딜 데이터 정비로 바로 시작할 수 있고, D4는 PWA v1이 있어 v1 때보다 가볍습니다.</span></div>
+<div class="box amber"><strong>Wave 3 — 고객 접점과 지능화 (차별화)</strong><br>C3 운영 리포트 → E3 AI 부조종사(읽기 보조부터) → C2 건강도 → C1 포털 파일럿(또는 채널톡 안 셀프조회).<br><span class="small">상시 트랙: F1 어휘 동기화(Wave 0~1에 걸쳐 조금씩) · F3 규제 조사 · A3 텔레메트리 대화.</span></div>
+
+<h2><span class="no">7.</span>전제 · 리스크 · 결정 필요 항목</h2>
+<h3>7.1 전제</h3>
+<ul>
+  <li>1.0+의 티켓·원장·채널톡 파이프라인은 재설계하지 않고 그 위에 얹는다.</li>
+  <li>각 항목은 기획 → 설계안 → 검토·승인 → 구현의 게이트를 그대로 거친다. 이 문서는 어떤 항목의 착수 승인도 아니다.</li>
+  <li>숫자는 PROD 2026-11-06 실측(부록)이며, 로그인 활동·AS 리드타임·부서 분포는 dev2 10-29 동기화본이다.</li>
+</ul>
+<h3>7.2 주요 리스크</h3>
+<table>
+<tr><th>리스크</th><th>내용</th><th>완화</th></tr>
+<tr><td>장부 신뢰</td><td>E2·C2·A4의 숫자가 틀리면 신뢰를 잃는다. 원장은 아직 수동 보정 중</td><td>E1을 항상 선행. 분석 화면마다 "정합성 미확인 n건" 배지</td></tr>
+<tr><td>B1 도메인</td><td>정산 실무·요율·대웅 분담이 시스템 밖 지식</td><td>Wave 1 기간에 인터뷰·요율 실사. 확인 전 B1 착수 금지</td></tr>
+<tr><td>운영 부하</td><td>운영팀이 AS 처리에 묶여 새 도구 적응 여력이 적다</td><td>읽는 도구(A4·E4)는 입력 추가 없이 기존 데이터만 사용. 입력을 늘리는 항목(A2·D2)은 Wave 2 이후</td></tr>
+<tr><td>인프라</td><td>지금 서버에서는 Wave 1 수준의 배포 빈도도 위험</td><td>F4를 Wave 0으로 고정</td></tr>
+<tr><td>범위 팽창</td><td>22항목이 동시에 열리면 설계 게이트가 형식화된다</td><td>Wave당 동시 진행 2~3항목 제한</td></tr>
+</table>
+<h3>7.3 사용자 결정이 필요한 것 (기획 단계)</h3>
+<ol>
+  <li><strong>2.0의 중심</strong> — 추천은 "신뢰 가능한 장부 + AS 지능"(E1·A1′·A4)을 먼저, 그 다음 반복 매출(B). 회사 우선순위(예: 라이트형 확대로 B가 급하다면)에 따라 Wave 1·2 교체 가능.</li>
+  <li><strong>인프라 투자</strong> — 인스턴스 증설(t3.large/xlarge) vs 신규 이전, DEV 분리 여부. Wave 0의 첫 결정.</li>
+  <li><strong>B1 실현 가능성 확인 주체</strong> — 정산 실무(사용량 원천·요율·대웅 역할)를 누가, 언제 확인하는가.</li>
+  <li><strong>고객 접점 형태</strong> — 포털(C1) vs 채널톡 안 셀프조회. 포털이면 F2 외부 계정 모델이 선행.</li>
+  <li><strong>모바일 범위</strong> — D4를 운영팀 현장 도구로 한정할지, 영업(출고요청·방문 기록)까지 넓힐지.</li>
+  <li><strong>대웅과의 데이터 교환</strong> — F1 어휘 동기화를 위해 대웅 측 품목·거래처·디바이스 자료의 정기 수령 경로를 합의할 수 있는지.</li>
+</ol>
+
+<h2><span class="no">8.</span>부록 — 실측 데이터 상세</h2>
+<h3>8.1 PROD 2026-11-06 (읽기 전용 조회)</h3>
+<table>
+<tr><th>지표</th><th class="num">값</th><th>지표</th><th class="num">값</th></tr>
+<tr><td>병원 마스터(심평원 포함)</td><td class="num">80,598</td><td>계약완료 고객 병원</td><td class="num">233</td></tr>
+<tr><td>딜 / 계약완료</td><td class="num">273 / 266</td><td>프로젝트</td><td class="num">287</td></tr>
+<tr><td>기기 개체(시리얼)</td><td class="num">30,206</td><td>배치 중 / 원장 보유 병원</td><td class="num">28,599 / 225</td></tr>
+<tr><td>활성 사용자 (씨어스/대웅)</td><td class="num">73 (72/1)</td><td>30일 감사 로그 활동 사용자</td><td class="num">51</td></tr>
+<tr><td>티켓 누적</td><td class="num">16,292</td><td>AS 접수 누적</td><td class="num">4,301</td></tr>
+<tr><td>VOC 누적 (시트 7,896 포함)</td><td class="num">10,708</td><td>채널톡 상담 원문</td><td class="num">4,840</td></tr>
+<tr><td>출고요청 / 자재 전표</td><td class="num">9 / 1,584</td><td>유지보수 / 주간 안건 / 위키</td><td class="num">348 / 48 / 180</td></tr>
+<tr><td>Slack 알림 발송 누적</td><td class="num">8,309</td><td>감사 로그 30일</td><td class="num">12,879</td></tr>
+</table>
+<h4>월별 인입</h4>
+<table>
+<tr><th>월</th><th class="num">AS 접수</th><th class="num">VOC(시트 제외)</th><th class="num">티켓 전체</th><th class="num">출고요청</th><th class="num">유지보수</th><th class="num">자재 전표</th></tr>
+<tr><td>2026-08</td><td class="num">486</td><td class="num">0*</td><td class="num">1,520</td><td class="num">0</td><td class="num">31</td><td class="num">399</td></tr>
+<tr><td>2026-09</td><td class="num">430</td><td class="num">1,864*</td><td class="num">1,326</td><td class="num">1</td><td class="num">37</td><td class="num">442</td></tr>
+<tr><td>2026-10</td><td class="num">480</td><td class="num">802</td><td class="num">1,528</td><td class="num">0</td><td class="num">46</td><td class="num">387</td></tr>
+<tr><td>2026-11 (6일)</td><td class="num">110</td><td class="num">145</td><td class="num">297</td><td class="num">8</td><td class="num">4</td><td class="num">71</td></tr>
+</table>
+<p class="small">* VOC 자동 승격은 9/29 컷오버. 9월 수치에 소급 생성분(1,774건) 포함.</p>
+<h4>최근 90일 분포</h4>
+<ul class="small">
+  <li>티켓 도메인: VOC 2,384 · AS 1,378 · 기타업무 215 · 유지보수 110 · 답사 56 · 프로젝트 40 · 설치계획 32 · 출고 9</li>
+  <li>AS 라인 결과: 수리반환 3,650 · 교체 846 · 진행 791 · 취소 19 · 미회수 9 · 분실 1 / 접수 카테고리 고장 1,287 · 분실 91</li>
+  <li>감사 로그 리소스(30일): as_receipt 9,548 · inventory_tx 569 · auth 548 · parking_discount 343 · etc_task 298 · wiki_page 200 · weekly 283 · vehicle 126 · maintenance 120 · ticket 107 · project 104</li>
+  <li>채널톡 월별 상담 / VOC 승격: 7월 686/583 · 8월 944/810 · 9월 772/705 · 10월 900/811</li>
+  <li>계약완료 딜 판매모델: 사용량비례 197(라이트 10) · 구독 25 · 구축 16 · 분납 14 · 미지정 14</li>
+</ul>
+<h3>8.2 dev2 2026-10-29 동기화본 (보조 지표)</h3>
+<ul class="small">
+  <li>로그인: 30일 45명 · 60일 58명 / 활성 72명. 부서: thynC운영팀 24 · thynC사업팀 13 · 미지정 12 · 사업지원팀 8 · 이노베이션팀 4</li>
+  <li>AS 접수→종결(최근 종결 1,772건): 중앙값 8.0일 · 평균 10.0일. 상위 10개 병원이 AS 1,770건 중 438건(25%, 174개 병원)</li>
+  <li>미종결 티켓: VOC 155 · AS 119 · 기타 40 · 유지보수 22 · 프로젝트 17 · 답사 9</li>
+  <li>원장 ACTIVE 모델별: SpO2 13,912 · ECG 13,592 (게이트웨이·제3자는 수량 축 없음)</li>
+  <li>자재 품목: 운영팀재고 31 · 대웅제약재고 18 · 오산영업소·판매용·평가용 각 7</li>
+</ul>
+<h3>8.3 8월 이후 출시 목록 (DEV_HISTORY 발췌)</h3>
+<p class="small">디바이스 원장 설계·구현·초기 임포트(9/1~9/5) · AS업무 도메인화·AS이력 마이그(9/4~9/6) · 출고업무 신규·P2(9/3) · AS 상세 카드 재구성·입고 대조·수리대기 큐(9/11~9/28) · 기기 상태·위치 축(9/17) · 주간업무 첨부(9/18) · 채널톡 원천 적재·VOC 승격(9/28) · 병원 태그·AS메모(9/28~29) · AS 시리얼 게이트·목록 커스터마이징(9/30~10/1) · AS 부분 발송·입고확인일(10/14) · AS 라인 처리 개편(10/15) · AS 인입 소스 전환 P0~P5(10/27~28) · Slack 알림 이벤트 재편(10/27) · VOC 주간 대시보드(10/28) · 분실 한도·AS 현황(10/30) · VOC 시트 적재(10/30) · 대시보드 PDF 패널(10/31) · 출고업무 v2·구성 안내(11/1~2) · 딜 첨부·필수 필드(11/2) · AS 도입·교체 현황·라이트 한도(11/2) · 회수기기 3택(11/2) · 출고 Slack 알림(11/2~3) · 공사업체 비활성(11/3) · 제3자 공급 현황(11/2) · 모바일 PWA v1(11/4) · 출고 영업 유형(11/5) · 주간업무 팀 다중(11/5) · VOC 분류 다중·자동 추종(11/5) · 검색어 정규화(11/6)</p>
+
+<footer>thynC 운영관리시스템 2.0 기획안 v2 · 2026-11-06 · 설계안이 아니며 착수 승인이 아닙니다. 이전 판: <code>projects/ops_system_2.0_plan.html</code>(2026-08-02). 원본 파일: <code>projects/ops_system_2.0_plan_v2.html</code></footer>
+</div></body></html>

@@ -9,6 +9,7 @@ import { etcTaskVisitEventPayload } from '@/lib/etcTask'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { createTicketForEtcTask } from '@/lib/ticketDomain'
 
+import { readSearch } from '@/lib/searchParam'
 export const dynamic = 'force-dynamic'
 
 const include = {
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(request.url)
-  const search = searchParams.get('search') ?? ''
+  const search = readSearch(searchParams) // 앞뒤 공백 제거 (2026-11-06, lib/searchParam)
   const hospitalCode = searchParams.get('hospitalCode') ?? ''
   const statusId = searchParams.get('statusId') ?? ''
   const priority = searchParams.get('priority') ?? ''

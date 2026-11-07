@@ -7,12 +7,13 @@ import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { advanceHospitalStatus } from '@/lib/hospitalStatus'
 import { createTicketForInstallPlan } from '@/lib/ticketDomain'
 
+import { readSearch } from '@/lib/searchParam'
 export async function GET(request: NextRequest) {
   const authUser = await getAuthUser(request)
   if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(request.url)
-  const search = searchParams.get('search') ?? ''
+  const search = readSearch(searchParams) // 앞뒤 공백 제거 (2026-11-06, lib/searchParam)
   const hospitalCode = searchParams.get('hospitalCode') ?? ''
   const statusId = searchParams.get('statusId') ?? ''
   const authorId = searchParams.get('authorId') ?? ''

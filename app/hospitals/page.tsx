@@ -12,6 +12,7 @@ import ExportToDriveButton from './_components/ExportToDriveButton'
 import ExportExcelButton from './_components/ExportExcelButton'
 import ImportButton from './_components/ImportButton'
 
+import { trimSearch } from '@/lib/searchParam'
 const PAGE_SIZE = 20
 
 // 상품유형 배지 — /sales/deals 목록과 동일한 솔리드 컬러 pill (일반/라이트 복수 공존 표시)
@@ -46,7 +47,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
     : false
 
   const page = Math.max(1, parseInt((searchParams.page as string) ?? '1'))
-  const search = (searchParams.search as string) ?? ''
+  const search = trimSearch(searchParams.search) // 앞뒤 공백 제거 (2026-11-06, lib/searchParam)
   const sido = (searchParams.sido as string) ?? ''
   const rawStatus = searchParams.status
   const statusFilter: string[] = rawStatus
