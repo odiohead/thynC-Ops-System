@@ -12,7 +12,7 @@
 
 | 문서 | 대상 | 상태 |
 |---|---|---|
-| [as_receipt_split_design.md](as_receipt_split_design.md) | AS접수 분할 — 상세 [분할]로 미종결 라인을 병동별/구분별(고장↔분실) 새 접수(+티켓)로 분리: 라인 행 이동(입고·초안·수리기록 보존), 기기 원장 ref 정정 이동(`editEvent`)으로 되돌림 게이트 유지, `split_from_id` 1컬럼, 채널톡 변경 감지·시트 역기입은 분할 가족 기준. PROD AS-202611-0099(삭제 후 4건 재등록 우회) 실측 기반 | **구현 완료 (dev2 빌드 2026-11-07, 스모크 31·Playwright 16) — PROD 미반영**, P3 분할 취소 보류 |
+| [as_receipt_split_design.md](as_receipt_split_design.md) | AS접수 분할 — 상세 [분할]로 미종결 라인을 병동별/구분별(고장↔분실) 새 접수(+티켓)로 분리: 라인 행 이동(입고·초안·수리기록 보존), 기기 원장 ref 정정 이동(`editEvent`)으로 되돌림 게이트 유지, `split_from_id` 1컬럼, 채널톡 변경 감지·시트 역기입은 분할 가족 기준. PROD AS-202611-0099(삭제 후 4건 재등록 우회) 실측 기반 | **완료 (PROD 배포 2026-11-07, f0f42c9)** — P3 분할 취소 보류 |
 | [as_repair_queue_design.md](as_repair_queue_design.md) | AS 수리대기 큐 — AS담당자용 기기 단위 화면(`/as-receipts/queue`): 수리 대기·입고 예정 2버킷 × 심전계/산소포화도, 수리완료·처리방법 초안·폐기(기존 API 재사용), 스키마 변경 없음 | **PROD 배포 완료 (2026-09-28, f1d6d1d)** |
 | [weekly_attachments_design.md](weekly_attachments_design.md) | 주간업무 첨부파일 — 목표일 셀 클립 트리거(+첨부/📎n) · Modal 레이어 다중 업로드 · `weekly_item_files` · 항목 소속 검증 302 다운로드 | **PROD 배포 완료 (2026-09-19, 97342ce)** |
 | [hira_detail_sync_v2_design.md](hira_detail_sync_v2_design.md) | 심평원 병원상세정보연동 v2 — 의원급 확장·진료과목/전문의수 항목·일일 한도(9,000콜) 분할 자동 실행·요청 상세 진행 현황 | **구현 완료 (dev2, 2026-09-14) — 빌드·PROD 배포 대기** |

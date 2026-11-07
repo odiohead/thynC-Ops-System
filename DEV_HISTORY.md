@@ -6,6 +6,8 @@
 
 ## 2026-11-07 12:00 | AS접수 분할 — 병동별 · 구분별 (설계 `projects/as_receipt_split_design.md`, dev2 빌드·재시작)
 
+→ **PROD 배포 2026-11-07 (f0f42c9 — 분할 + 11-06 검색어 trim a7a2fca 동반)**: dev2 커밋 2건 push → PROD pull(0f78e60→f0f42c9, 34파일, 패키지·협업 변경 없음) → 마이그 `20261107090000_as_receipt_split` psql 적용·resolve(`split_from_id` 컬럼 확인, status 최신) → generate → 디스크 73%(7.9G 여유) → nohup 분리 힙 4GB 빌드(약 7분, EXIT 0, 협업 번들 해시 2108cacb 불변 — collab 재시작 생략) → `pm2 restart thync-prod` → /login 200(4s)·/as-receipts 307·외부 URL 200·split 라우트 번들 존재·Ready 이후 에러 0(이전 'Server Action' 오류는 재시작 전 구 탭 요청). PROD 데이터 변경 없음(DDL만)
+
 - **배경(PROD 실측, 읽기 전용)**: AS-202611-0099 동아대학교병원(11-05) — 접수봇 자동 생성 14대(병동 4곳)를 담당자가 **삭제 후 병동별 4건 수동 재등록**(0099 번호 재사용·0100~0102). 부작용: 채널톡 상담 링크 고아(`as_intake_links` 212), 감사 로그상 한 코드가 두 접수, 기기 이력 AS 해제/접수 쌍 14개. 10-15에도 같은 병원 6건 선례. 사용자: "병동별·구분별(고장↔분실) 2축으로 단순화, 상세설계 → 추천대로 개발·dev2 빌드"
 - **DB**: `as_receipts.split_from_id`(자기참조 FK SET NULL·인덱스) — 마이그 `20261107090000_as_receipt_split` dev2 psql 적용·resolve. Prisma `splitFrom`/`splitChildren`
 - **서비스** `splitAsReceipt`(`lib/asReceiptService.ts`): 검증(미종결 라인만·원본 잔류 ≥1·그룹 ≤10·구분 축 1그룹 반대 구분·종결 409) → 자식 헤더 복사(상태·수거·송장·태그·VOC·source 승계, 분실 자식은 수거없음·송장 NULL, 허용 외 초안 해제 경고) → **라인 행 이동**(id·입고·초안·수리기록 보존) → 어댑터 티켓 생성 + 담당자·상위(VOC) 승계 + `link{split_from}` → 이동 기기 유닛의 `ref {AS,원본}` 이벤트(AS_OPEN·INTAKE 등) `editEvent`로 자식 코드 정정(되돌림 게이트·INTAKE 1회 스킵이 ref_code를 보므로 필수, 실패 시 tx 롤백) → 원본 비고 줄·티켓 동기화·`link{split_to}`. 채번 P2002 1회 재시도

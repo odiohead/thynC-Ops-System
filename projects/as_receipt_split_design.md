@@ -1,6 +1,6 @@
 # AS접수 분할 설계 — 병동별 · 구분별
 
-> **상태**: 구현 완료 (dev2 빌드·재시작 2026-11-07 — 스모크 31/31·Playwright 16/16) — PROD 미반영. 결정 D1~D6 제안대로 적용(사용자 '추천대로 하고 보고 수정'), P3(분할 취소)·D7 별건은 보류
+> **상태**: 완료 — PROD 배포 2026-11-07 (f0f42c9; 스모크 31/31·Playwright 16/16). 결정 D1~D6 제안대로 적용(사용자 '추천대로 하고 보고 수정'), P3(분할 취소)·D7 별건은 보류
 > 상위 문서: `as_work_design.md`(AS 도메인) · `as_channeltalk_intake_design.md`(채널톡 인입·변경 감지) · `device_condition_location_design.md` §7(되돌림 게이트)
 
 ---
