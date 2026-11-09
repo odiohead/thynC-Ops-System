@@ -1,6 +1,6 @@
 # 출고업무 알림 — 유형별 규칙 조건 + 지정 Assignment Group 멘션 설계안
 
-> **상태**: dev2 구현·빌드 완료 (2026-11-09, 매칭 스모크 16/16 · Playwright 화면 검증) — PROD 미반영 · 작성 2026-11-09
+> **상태**: 완료 — PROD 배포 2026-11-09 (7a783e6, 마이그 적용). 운영 설정(Assignment Group '오산영업소 출고' + 출고요청 등록 규칙)은 §3.3 절차대로 사용자 등록 · 작성 2026-11-09
 > 선행 문서: `stock_out_notify_design.md`(출고 도메인 이벤트 2종), `stock_out_sales_request_design.md`(영업 유형 3종), `notification_v1.1_design.md` §5.1(채널 라우팅), `domain_event_notify_design.md`
 
 ---

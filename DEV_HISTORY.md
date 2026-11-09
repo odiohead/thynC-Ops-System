@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-11-09 14:40 | PROD 배포 — 레포트(02fd0af) + 출고업무 알림 유형별 규칙(7a783e6)
+
+- **절차**: dev2 커밋 2건 → push → PROD pull(f0f42c9 → 7a783e6, package.json 변경 없음) → 마이그 3건 psql 적용·resolve(`20261107130000_report_runs`, `20261107140000_report_runs_updated_at`, `20261109100000_notify_route_subtype_mention_queue`) → 레포트 nav 시드 `scripts/seed-report-nav.sql`(SUPER_ADMIN, sort 65) → 힙 4GB nohup 빌드 → `pm2 restart thync-prod` → /login 200, /reports·/api/reports·/api/settings/notify-routes 미인증 307 확인. 협업 서버 번들 해시 동일 → 재시작 생략
+- **사고·교훈**: 1차 빌드가 타입 오류(`prisma.reportRun` 없음)로 실패 — PROD에서 `npx prisma generate`를 안 한 탓(`npm run build`에 generate 없음, dev2는 수동 generate 후 빌드라 통과). 스키마 변경 배포는 **pull → prisma generate → build** 순서 필수. 실패한 빌드 동안 서비스는 200 유지(약 8분 뒤 재빌드 성공, 총 2회 빌드)
+- **후속(운영 설정)**: 설정 > Assignment Group '오산영업소 출고' 생성·멤버 등록 → 설정 > Slack 알림 > 출고요청 등록 규칙(출고 유형=오산영업소, 멘션=지정 Assignment Group 멤버) 추가. 코드 배포만으로는 태그가 붙지 않음
+- 영향 파일: DEV_HISTORY.md, projects/README.md, projects/stock_out_notify_subtype_design.md (문서만)
+
 ## 2026-11-09 11:30 | 출고업무 알림 유형별 규칙 — 조건 축 '출고 유형' + 멘션 '지정 Assignment Group 멤버' (오산영업소 등록 시 지정 그룹 태그)
 
 - **요구**: 출고요청 유형이 '오산영업소'일 때만 등록 알림에서 지정된 사람들을 태그. 하드코딩 없이 설정 > Slack 알림 > 출고업무에서 유형별·그룹별 제어, 태그 대상은 Assignment Group으로 지정 (설계 `projects/stock_out_notify_subtype_design.md`, 티켓 그룹 분기안은 티켓 소유 범위가 바뀌어 기각)
