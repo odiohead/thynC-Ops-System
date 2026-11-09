@@ -10,6 +10,7 @@
 - **조치**: PC `StockOutRequestFormModal` 품목명 `truncate` 제거 → `break-words` 줄바꿈(수량 입력은 우측 고정), 모델명이 이름에 포함돼 있지 않으면 모노 보조 표기 추가(testid `so-item-name-<id>`). 모바일 `/m/stock-out-requests/new` 품목 행 두 줄(모델명·품목명/재고) 모두 `truncate` → `break-words`
 - **검증**: Playwright — PC 모달 품목 전체 scrollWidth≤clientWidth(잘림 0), 모바일 390px 보조 줄 잘림 0, 스크린샷 확인. 목록·상세의 품목 요약 열은 범위 밖(툴팁 유지)
 - 영향 파일: app/stock-out-requests/_components/StockOutRequestFormModal.tsx, app/m/stock-out-requests/new/page.tsx
+- → **PROD 배포 2026-11-09 17:00 (e82cc32)** — 스키마·패키지 변경 없음, 빌드 후 thync-prod 재시작, /login 200·출고 화면 307(미인증) 확인, 협업 서버 번들 동일로 재시작 생략
 
 ## 2026-11-09 14:40 | PROD 배포 — 레포트(02fd0af) + 출고업무 알림 유형별 규칙(7a783e6)
 
