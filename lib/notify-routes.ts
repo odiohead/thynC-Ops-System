@@ -16,11 +16,11 @@ import { NOTIFY_EVENT_KEYS } from '@/lib/notify-events'
 export const NOTIFY_ROUTE_EVENTS: readonly string[] = NOTIFY_EVENT_KEYS
 export type NotifyRouteEvent = string
 
-export const MENTION_MODES = ['none', 'queue_members', 'channel', 'here', 'requester'] as const // requester = 요청자(도메인 이벤트가 요청자를 제공할 때만 유효, 2026-11-03)
+export const MENTION_MODES = ['none', 'queue_members', 'named_queue', 'channel', 'here', 'requester'] as const // requester = 요청자(도메인 이벤트가 요청자를 제공할 때만 유효, 2026-11-03) · named_queue = 규칙이 지정한 Assignment Group 멤버(티켓 그룹과 무관, 2026-11-09)
 export type MentionMode = (typeof MENTION_MODES)[number]
 
-/** 멘션 강도 — 같은 채널에 여러 규칙이 걸리면 강한 쪽을 쓴다 */
-const MENTION_RANK: Record<MentionMode, number> = { none: 0, requester: 1, queue_members: 2, here: 3, channel: 4 } // requester는 개인 태그라 그룹 멤버보다 약한 쪽
+/** 멘션 강도 — 같은 채널에 여러 규칙이 걸리면 강한 쪽을 쓴다. 동률은 먼저 매칭된 규칙(sortOrder) 유지 */
+const MENTION_RANK: Record<MentionMode, number> = { none: 0, requester: 1, queue_members: 2, named_queue: 2, here: 3, channel: 4 } // requester는 개인 태그라 그룹 멤버보다 약한 쪽
 
 export interface DigestOpts {
   kinds: ('overdue' | 'warning')[]
@@ -49,6 +49,8 @@ export interface RouteMatchInput {
   statusTo?: TicketStatus | null
   /** SLA 이벤트에서 대상 metric */
   metric?: string | null
+  /** 도메인 이벤트의 세부 유형 코드(예: 출고 유형 'OSAN_OFFICE') — 카탈로그 subTypeAxis (2026-11-09) */
+  subType?: string | null
 }
 
 export interface ResolvedChannel {
@@ -56,13 +58,15 @@ export interface ResolvedChannel {
   channelName: string
   slackChannelId: string
   mentionMode: MentionMode
+  /** mentionMode 'named_queue'가 태그할 Assignment Group (규칙의 mention_queue_id) */
+  mentionQueueId: number | null
   /** 이 채널로 발송하게 만든 규칙들 (로그·디버깅용) */
   routeIds: number[]
 }
 
 const ROUTE_SELECT = {
   id: true, name: true, eventType: true, refTypes: true, queueIds: true, ctiIds: true,
-  severities: true, statusTo: true, metrics: true, mentionMode: true, digestHour: true, digestOpts: true,
+  severities: true, statusTo: true, metrics: true, subTypes: true, mentionMode: true, mentionQueueId: true, digestHour: true, digestOpts: true,
   channel: { select: { id: true, name: true, slackChannelId: true, isActive: true } },
 } as const
 
@@ -76,7 +80,9 @@ type RouteRow = {
   severities: string[]
   statusTo: string[]
   metrics: string[]
+  subTypes: string[]
   mentionMode: string
+  mentionQueueId: number | null
   digestHour: number | null
   digestOpts: unknown
   channel: { id: number; name: string; slackChannelId: string; isActive: boolean }
@@ -91,6 +97,7 @@ function matches(r: RouteRow, input: RouteMatchInput, ancestors: number[]): bool
   if (r.severities.length > 0 && !r.severities.includes(input.severity)) return false
   if (r.statusTo.length > 0 && (!input.statusTo || !r.statusTo.includes(input.statusTo))) return false
   if (r.metrics.length > 0 && (!input.metric || !r.metrics.includes(input.metric))) return false
+  if (r.subTypes.length > 0 && (!input.subType || !r.subTypes.includes(input.subType))) return false
   return true
 }
 
@@ -121,13 +128,14 @@ export async function resolveChannels(
     if (prev) {
       // 같은 채널 중복 매칭 → 1건으로 합치고 멘션은 강한 쪽
       prev.routeIds.push(r.id)
-      if (MENTION_RANK[mode] > MENTION_RANK[prev.mentionMode]) prev.mentionMode = mode
+      if (MENTION_RANK[mode] > MENTION_RANK[prev.mentionMode]) { prev.mentionMode = mode; prev.mentionQueueId = mode === 'named_queue' ? r.mentionQueueId : null }
     } else {
       byChannel.set(key, {
         channelId: r.channel.id,
         channelName: r.channel.name,
         slackChannelId: r.channel.slackChannelId,
         mentionMode: mode,
+        mentionQueueId: mode === 'named_queue' ? r.mentionQueueId : null,
         routeIds: [r.id],
       })
     }

@@ -220,6 +220,7 @@ async function queueNotifyChannel(queueId: number): Promise<ResolvedChannel | nu
       channelName: q.notifyChannel.name,
       slackChannelId: q.notifyChannel.slackChannelId,
       mentionMode: 'none',
+      mentionQueueId: null,
       routeIds: [],
     }
   } catch (err) {
@@ -242,6 +243,14 @@ async function buildMentionLine(ch: ResolvedChannel, queueId?: number, queueName
       if (queueId == null || !(await queueMentionsOn())) return null
       const m = await queueMemberMentions(queueId)
       return m ? `${queueName ?? 'Assignment Group'}: ${m}` : null
+    }
+    case 'named_queue': {
+      // 규칙이 지정한 그룹의 멤버 — 티켓의 그룹과 무관 (2026-11-09, 출고 유형별 태그). 그룹 멘션 킬스위치 동일 적용
+      if (ch.mentionQueueId == null || !(await queueMentionsOn())) return null
+      const q = await prisma.ticketQueue.findUnique({ where: { id: ch.mentionQueueId }, select: { name: true, isActive: true } })
+      if (!q?.isActive) return null
+      const m = await queueMemberMentions(ch.mentionQueueId)
+      return m ? `${q.name}: ${m}` : null
     }
     default:
       return null
@@ -1105,6 +1114,8 @@ export async function notifyDomainEvent(input: {
   mentionText?: string | null
   /** 링크 텍스트 (기본 '상세 보기' = 마지막 줄). 지정하면 머리줄 끝에 '→ *라벨*'로 굵게 — 출고업무 '티켓 링크' (2026-11-03) */
   linkLabel?: string
+  /** 도메인 세부 유형 코드(예: 출고 유형) — 규칙 조건 subTypes와 매칭. 카탈로그 subTypeAxis가 있는 이벤트만 의미 있음 (2026-11-09) */
+  subType?: string | null
 }): Promise<void> {
   try {
     const def = NOTIFY_EVENT_MAP[input.event]
@@ -1131,7 +1142,7 @@ export async function notifyDomainEvent(input: {
     const requesterMention = fixedMention // 규칙 멘션 '요청자'를 고른 채널에만 붙는다 (buildMentionLine)
     await dispatchToRoutes({
       eventTypes: [input.event],
-      match: { refType: core.refType, queueId: core.queueId, ctiId: core.ctiId, severity: core.severity },
+      match: { refType: core.refType, queueId: core.queueId, ctiId: core.ctiId, severity: core.severity, subType: input.subType ?? null },
       eventType: 'domain_event',
       taskType,
       refCode: domainRefCode(core) ?? core.ticketCode,

@@ -13,6 +13,7 @@ import { NOTIFY_ROUTE_EVENTS, MENTION_MODES, DEFAULT_DIGEST_OPTS } from '@/lib/n
 import { NOTIFY_EVENT_MAP } from '@/lib/notify-events'
 import { SLA_METRICS } from '@/lib/sla'
 import { TICKET_STATUSES, TICKET_SEVERITIES } from '@/lib/slaSettings'
+import { cleanSubTypes, validateMentionQueue } from '@/lib/notifyRouteInput'
 
 function kindOf(request: NextRequest): 'channel' | 'route' | null {
   const k = new URL(request.url).searchParams.get('kind')
@@ -74,6 +75,10 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   if (eventType === 'DAILY_DIGEST' && digestHour == null) {
     return NextResponse.json({ error: '일일 요약 규칙은 발송 시각(0~23시, KST)이 필요합니다.' }, { status: 400 })
   }
+  // 멘션 모드·지정 그룹 (2026-11-09): 모드가 바뀌면 그룹을 다시 검증, 그대로면 기존 그룹 유지(단, named_queue가 아니면 비움)
+  const nextMention = (MENTION_MODES as readonly string[]).includes(body.mentionMode) ? (body.mentionMode as string) : before.mentionMode
+  const mq = await validateMentionQueue(nextMention, body.mentionQueueId ?? before.mentionQueueId)
+  if ('error' in mq) return NextResponse.json({ error: mq.error }, { status: 400 })
 
   const updated = await prisma.notifyRoute.update({
     where: { id },
@@ -87,13 +92,15 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       severities: arr(body.severities, before.severities).filter((x) => TICKET_SEVERITIES.includes(x)),
       statusTo: arr(body.statusTo, before.statusTo).filter((x) => TICKET_STATUSES.includes(x)),
       metrics: arr(body.metrics, before.metrics).filter((x) => (SLA_METRICS as readonly string[]).includes(x)),
-      ...((MENTION_MODES as readonly string[]).includes(body.mentionMode) ? { mentionMode: body.mentionMode } : {}),
+      mentionMode: nextMention,
+      mentionQueueId: mq.id,
+      subTypes: Array.isArray(body.subTypes) ? cleanSubTypes(eventType, body.subTypes) : cleanSubTypes(eventType, before.subTypes),
       digestHour: eventType === 'DAILY_DIGEST' ? digestHour : null,
       digestOpts: eventType === 'DAILY_DIGEST' ? (body.digestOpts ?? before.digestOpts ?? DEFAULT_DIGEST_OPTS) : null,
       ...(typeof body.isActive === 'boolean' ? { isActive: body.isActive } : {}),
       ...(Number.isFinite(body.sortOrder) ? { sortOrder: Math.floor(body.sortOrder) } : {}),
     },
-    include: { channel: { select: { id: true, name: true, isActive: true } } },
+    include: { channel: { select: { id: true, name: true, isActive: true } }, mentionQueue: { select: { id: true, name: true, isActive: true } } },
   })
 
   await logAudit({

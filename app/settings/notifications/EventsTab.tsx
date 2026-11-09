@@ -9,12 +9,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { refTypeLabelMap } from '@/lib/ticket-domains/meta'
 import type { NotifyEventDef, NotifyCondition } from '@/lib/notify-events'
 
-const MENTION_LABELS: Record<string, string> = { none: '멘션 없음', queue_members: '그룹 멤버', here: '@here', channel: '@channel', requester: '요청자' } // requester = 도메인 이벤트가 요청자를 제공할 때만(ev.requester, 2026-11-03)
+const MENTION_LABELS: Record<string, string> = { none: '멘션 없음', queue_members: '그룹 멤버 (티켓의 그룹)', named_queue: '지정 Assignment Group 멤버', here: '@here', channel: '@channel', requester: '요청자' } // requester = 도메인 이벤트가 요청자를 제공할 때만(ev.requester, 2026-11-03) · named_queue = 규칙이 고른 그룹 멤버(2026-11-09)
 const REF_TYPE_LABELS: Record<string, string> = refTypeLabelMap('NONE')
 const STATUS_LABELS: Record<string, string> = { OPEN: '접수', ASSIGNED: '배정', IN_PROGRESS: '처리중', PENDING: '대기', RESOLVED: '해결', CLOSED: '종결' }
 
 interface Channel { id: number; name: string; slackChannelId: string; isActive: boolean }
-interface Route { id: number; name: string; eventType: string; channelId: number; refTypes: string[]; queueIds: number[]; ctiIds: number[]; severities: string[]; statusTo: string[]; metrics: string[]; mentionMode: string; digestHour: number | null; isActive: boolean; channel: { id: number; name: string; isActive: boolean } }
+interface Route { id: number; name: string; eventType: string; channelId: number; refTypes: string[]; queueIds: number[]; ctiIds: number[]; severities: string[]; statusTo: string[]; metrics: string[]; subTypes: string[]; mentionMode: string; mentionQueueId: number | null; mentionQueue: { id: number; name: string; isActive: boolean } | null; digestHour: number | null; isActive: boolean; channel: { id: number; name: string; isActive: boolean } }
 interface Masters { events: string[]; eventDefs: NotifyEventDef[]; eventGroups: { key: string; label: string; description: string }[]; mentionModes: string[]; metrics: string[]; statuses: string[]; severities: string[]; queues: { id: number; name: string }[] }
 
 export default function EventsTab({ globalEnabled }: { globalEnabled: boolean }) {
@@ -26,7 +26,8 @@ export default function EventsTab({ globalEnabled }: { globalEnabled: boolean })
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [adding, setAdding] = useState<string | null>(null) // 규칙 추가 폼이 열린 이벤트 키
-  const [f, setF] = useState<{ channelId: number | ''; refTypes: string[]; queueIds: number[]; severities: string[]; statusTo: string[]; metrics: string[]; mentionMode: string; name: string }>({ channelId: '', refTypes: [], queueIds: [], severities: [], statusTo: [], metrics: [], mentionMode: 'none', name: '' })
+  const emptyForm = { channelId: '' as number | '', refTypes: [] as string[], queueIds: [] as number[], severities: [] as string[], statusTo: [] as string[], metrics: [] as string[], subTypes: [] as string[], mentionMode: 'none', mentionQueueId: '' as number | '', name: '' }
+  const [f, setF] = useState(emptyForm)
 
   const load = useCallback(async () => {
     const res = await fetch('/api/settings/notify-routes')
@@ -63,8 +64,9 @@ export default function EventsTab({ globalEnabled }: { globalEnabled: boolean })
 
   const chip = (on: boolean) => `rounded-full border px-2.5 py-1 text-xs ${on ? 'border-blue-500 bg-blue-50 text-blue-700' : 'text-muted-foreground'}`
   const toggle = <T,>(cur: T[], v: T) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v])
-  const scope = (r: Route) => {
+  const scope = (r: Route, ev: NotifyEventDef) => {
     const p: string[] = []
+    if (r.subTypes?.length && ev.subTypeAxis) p.push(`${ev.subTypeAxis.label} ${r.subTypes.map((c) => ev.subTypeAxis!.options.find((o) => o.code === c)?.label ?? c).join('·')}`)
     if (r.refTypes.length) p.push(r.refTypes.map((x) => REF_TYPE_LABELS[x] ?? x).join('·'))
     if (r.queueIds.length) p.push(`그룹 ${r.queueIds.map((id) => masters?.queues.find((q) => q.id === id)?.name ?? id).join('·')}`)
     if (r.severities.length) p.push(r.severities.join('·'))
@@ -72,7 +74,13 @@ export default function EventsTab({ globalEnabled }: { globalEnabled: boolean })
     if (r.metrics.length) p.push(`metric ${r.metrics.join('·')}`)
     return p.length ? p.join(' / ') : '전체'
   }
-  const openAdd = (ev: NotifyEventDef) => { setAdding(ev.key); setF({ channelId: '', refTypes: [], queueIds: [], severities: [], statusTo: [], metrics: [], mentionMode: 'none', name: '' }) }
+  const openAdd = (ev: NotifyEventDef) => { setAdding(ev.key); setF(emptyForm) }
+  /** 멘션 표기 — 지정 그룹은 그룹명까지, 그룹이 삭제·비활성이면 경고 (2026-11-09) */
+  const mentionLabel = (r: Route) => {
+    if (r.mentionMode !== 'named_queue') return MENTION_LABELS[r.mentionMode] ?? r.mentionMode
+    if (!r.mentionQueue) return <span className="text-amber-600">지정 그룹 멘션 (그룹 삭제됨 — 멘션 없이 발송)</span>
+    return <>지정 그룹 멘션: <b className="font-medium text-foreground">{r.mentionQueue.name}</b>{!r.mentionQueue.isActive && <span className="text-amber-600"> (비활성)</span>}</>
+  }
   const has = (ev: NotifyEventDef, c: NotifyCondition) => ev.conditions.includes(c)
 
   if (loading) return <p className="py-8 text-center text-sm text-muted-foreground">불러오는 중...</p>
@@ -114,8 +122,8 @@ export default function EventsTab({ globalEnabled }: { globalEnabled: boolean })
                             {evRoutes.map((r) => (
                               <div key={r.id} className={`flex flex-wrap items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs ${r.isActive && r.channel.isActive ? '' : 'opacity-50'}`}>
                                 <span className="font-medium text-foreground">#{r.channel.name}</span>{!r.channel.isActive && <span className="text-amber-600">(채널 비활성)</span>}
-                                <span className="text-muted-foreground">{scope(r)}</span>
-                                <span className="text-muted-foreground">· {MENTION_LABELS[r.mentionMode] ?? r.mentionMode}</span>
+                                <span className="text-muted-foreground">{scope(r, ev)}</span>
+                                <span className="text-muted-foreground" data-testid={`route-mention-${r.id}`}>· {mentionLabel(r)}</span>
                                 {ev.kind === 'digest' && r.digestHour != null && <span className="text-muted-foreground">· {String(r.digestHour).padStart(2, '0')}:00</span>}
                                 <span className="ml-auto flex gap-1">
                                   <button type="button" disabled={busy} onClick={() => patchRoute(r.id, { isActive: !r.isActive })} className="rounded border px-1.5 py-0.5 text-muted-foreground hover:bg-accent">{r.isActive ? '비활성' : '활성'}</button>
@@ -139,9 +147,16 @@ export default function EventsTab({ globalEnabled }: { globalEnabled: boolean })
                                 </select>
                               </label>
                               <label className="text-xs text-muted-foreground">멘션
-                                <select value={f.mentionMode} onChange={(e) => setF({ ...f, mentionMode: e.target.value })} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground">
+                                <select value={f.mentionMode} onChange={(e) => setF({ ...f, mentionMode: e.target.value, mentionQueueId: e.target.value === 'named_queue' ? f.mentionQueueId : '' })} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground" data-testid="route-mention-mode">
                                   {masters.mentionModes.filter((m) => m !== 'requester' || ev.requester).map((m) => <option key={m} value={m}>{MENTION_LABELS[m] ?? m}</option>)}
                                 </select>
+                                {f.mentionMode === 'named_queue' && (
+                                  <select value={f.mentionQueueId} onChange={(e) => setF({ ...f, mentionQueueId: e.target.value ? parseInt(e.target.value) : '' })} className="mt-1 w-full rounded-md border border-blue-300 bg-background px-2 py-1.5 text-sm text-foreground" data-testid="route-mention-queue" aria-label="태그할 Assignment Group">
+                                    <option value="">태그할 그룹 선택</option>
+                                    {masters.queues.filter((q) => q.name !== '개인 업무').map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
+                                  </select>
+                                )}
+                                {f.mentionMode === 'named_queue' && <span className="mt-0.5 block text-[11px] text-muted-foreground">티켓의 Assignment Group과 무관하게 선택한 그룹의 멤버를 태그합니다 (멤버 관리는 설정 &gt; Assignment Group). 티켓 그룹은 바뀌지 않음</span>}
                                 {ev.requester && <span className="mt-0.5 block text-[11px] text-muted-foreground">&lsquo;요청자&rsquo; = 요청 등록자를 Slack에서 태그 (계정 &lsquo;Slack 발송&rsquo; ON + 이메일 매핑 시 @멘션, 아니면 이름)</span>}
                               </label>
                               <label className="text-xs text-muted-foreground">규칙 이름(선택)
@@ -149,6 +164,7 @@ export default function EventsTab({ globalEnabled }: { globalEnabled: boolean })
                               </label>
                             </div>
                             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                              {has(ev, 'subTypes') && ev.subTypeAxis && <div data-testid="route-subtypes"><p className="text-xs text-muted-foreground">{ev.subTypeAxis.label} <span className="opacity-70">(비우면 전체)</span></p><div className="mt-1 flex flex-wrap gap-1.5">{ev.subTypeAxis.options.map((o) => <button key={o.code} type="button" onClick={() => setF({ ...f, subTypes: toggle(f.subTypes, o.code) })} className={chip(f.subTypes.includes(o.code))} data-testid={`route-subtype-${o.code}`}>{o.label}</button>)}</div></div>}
                               {has(ev, 'refTypes') && <div><p className="text-xs text-muted-foreground">업무 유형 <span className="opacity-70">(비우면 전체)</span></p><div className="mt-1 flex flex-wrap gap-1.5">{Object.keys(REF_TYPE_LABELS).map((r) => <button key={r} type="button" onClick={() => setF({ ...f, refTypes: toggle(f.refTypes, r) })} className={chip(f.refTypes.includes(r))}>{REF_TYPE_LABELS[r]}</button>)}</div></div>}
                               {has(ev, 'queues') && <div><p className="text-xs text-muted-foreground">Assignment Group <span className="opacity-70">(비우면 전체)</span></p><div className="mt-1 flex flex-wrap gap-1.5">{masters.queues.map((q) => <button key={q.id} type="button" onClick={() => setF({ ...f, queueIds: toggle(f.queueIds, q.id) })} className={chip(f.queueIds.includes(q.id))}>{q.name}</button>)}</div></div>}
                               {has(ev, 'severities') && <div><p className="text-xs text-muted-foreground">Severity <span className="opacity-70">(비우면 전체)</span></p><div className="mt-1 flex flex-wrap gap-1.5">{masters.severities.map((s) => <button key={s} type="button" onClick={() => setF({ ...f, severities: toggle(f.severities, s) })} className={chip(f.severities.includes(s))}>{s}</button>)}</div></div>}
@@ -156,9 +172,9 @@ export default function EventsTab({ globalEnabled }: { globalEnabled: boolean })
                               {has(ev, 'metrics') && <div><p className="text-xs text-muted-foreground">대상 metric <span className="opacity-70">(비우면 전체)</span></p><div className="mt-1 flex flex-wrap gap-1.5">{masters.metrics.map((m) => <button key={m} type="button" onClick={() => setF({ ...f, metrics: toggle(f.metrics, m) })} className={chip(f.metrics.includes(m))}>{m}</button>)}</div></div>}
                             </div>
                             <div className="flex gap-2">
-                              <button type="button" disabled={busy || !f.channelId} onClick={async () => {
+                              <button type="button" disabled={busy || !f.channelId || (f.mentionMode === 'named_queue' && !f.mentionQueueId)} data-testid="route-add-submit" onClick={async () => {
                                 const chName = channels.find((c) => c.id === f.channelId)?.name ?? ''
-                                const ok = await post({ kind: 'route', name: f.name.trim() || `${ev.label} → ${chName}`, eventType: ev.key, channelId: f.channelId, refTypes: f.refTypes, queueIds: f.queueIds, severities: f.severities, statusTo: has(ev, 'statusTo') ? f.statusTo : [], metrics: has(ev, 'metrics') ? f.metrics : [], mentionMode: f.mentionMode }, '규칙을 추가했습니다.')
+                                const ok = await post({ kind: 'route', name: f.name.trim() || `${ev.label} → ${chName}`, eventType: ev.key, channelId: f.channelId, refTypes: f.refTypes, queueIds: f.queueIds, severities: f.severities, statusTo: has(ev, 'statusTo') ? f.statusTo : [], metrics: has(ev, 'metrics') ? f.metrics : [], subTypes: has(ev, 'subTypes') ? f.subTypes : [], mentionMode: f.mentionMode, mentionQueueId: f.mentionMode === 'named_queue' ? f.mentionQueueId : null }, '규칙을 추가했습니다.')
                                 if (ok) setAdding(null)
                               }} className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">추가</button>
                               <button type="button" onClick={() => setAdding(null)} className="rounded-lg border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent">취소</button>

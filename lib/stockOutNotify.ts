@@ -47,6 +47,7 @@ export async function notifyStockOutCreated(requestId: number): Promise<void> {
     await notifyDomainEvent({
       event: 'STOCK_OUT_CREATED',
       ticketId: r.ticketId,
+      subType: r.purpose, // 규칙 조건 '출고 유형' (2026-11-09 — projects/stock_out_notify_subtype_design.md)
       title: titleOf(r),
       fields: [
         { label: '요청자', value: r.createdBy?.name ?? '' },
@@ -70,6 +71,7 @@ export async function notifyStockOutCompletedByTicket(ticketId: number, actorNam
     await notifyDomainEvent({
       event: 'STOCK_OUT_COMPLETED',
       ticketId,
+      subType: r.purpose, // 규칙 조건 '출고 유형'
       actorName: r.fulfilledBy?.name ?? actorName, // [출고 처리]면 처리자, 상태 직접 변경·티켓 종료면 변경한 사람
       title: titleOf(r),
       fields: [

@@ -143,6 +143,7 @@ app/
 │   │   └── project-issue-notes/      # 프로젝트 이슈노트 조회/생성 (프로젝트 상세 임베드용)
 │   ├── gateway-planner/              # GW 배치 플래너 (ADMIN 이상)
 │   │   └── jobs/                     # 잡 목록/업로드 + [id](상세·삭제)/scale(스케일 확정)/replace(재배치)/reanalyze/pptx
+│   ├── reports/                      # 레포트 (최고관리자) — 목록·생성 + [id](상세·문서번호 PATCH)/retry-ai/docx
 │   ├── vehicles/                     # 차량 마스터 CRUD (ADMIN 이상 쓰기)
 │   ├── vehicle-reservations/         # 차량예약 CRUD (충돌 검사 + soft 취소)
 │   │   └── [id]/return/              # 반납(POST: 주행거리 입력→운행일지 생성) / 반납취소(DELETE, ADMIN)
@@ -193,6 +194,8 @@ app/
 │   └── components/                   # TicketStatusBadge·TicketSeverityBadge·TicketRefTypeBadge(유형 배지 단일 소스)·LinkedWorkBanner(연결 업무 배너)·TicketLogPanel·OwnerSelect
 ├── tasks/                            # 업무(Task) 현황 (통합 조회)
 ├── gateway-planner/                  # GW 배치 플래너 — 도면 업로드·잡 목록 + [id](진행 폴링·스케일 확정·2점 보정·배치 미리보기·PPTX)
+├── reports/                          # 레포트 (최고관리자) — 병원 검색·생성 이력 + [id](진행 단계·웹 미리보기·Word 다운로드·AI 재실행·문서번호)
+│   └── _components/ReportView.tsx    # ReportDoc → 사내 양식 모양 웹 미리보기 (A4 종이, 결재란·목차 1./1))
 ├── vehicle-reservations/             # 차량예약 주간 현황 보드 + 예약/반납 모달 + 내 예약 + 운행일지 탭(VehicleLogsPanel)
 │   └── logs/print/                   # 운행일지 인쇄 (A4 가로, 차량별 1장 — 네비 없는 전체 화면)
 │   └── mobile/                       # 빠른 예약·반납 모바일 페이지 (가능 차량 실시간 검색 + 인라인 반납)
@@ -264,7 +267,7 @@ app/
 ├── m/                                # 모바일 앱(PWA, 2026-11-04 — projects/mobile_pwa_design.md): layout(하단 탭·SW 등록) · home/ · login/(앱 범위 안 로그인, 90일 세션) · parking/ · stock-out-requests/(영업 유형 출고요청 — 목록·new 등록·[id] 상세, _shared) · inventory/(자재관리 껍데기, 재고담당·재고책임자만) · stock/(ScanOutFlow·InFlow·QtyOutFlow·shared — 자재관리 하위로 이전 예정, 메뉴 미노출) · lookup/(시리얼 조회, 메뉴 미노출) · scan-test/(라벨 실측, 탭 미노출) · _components/(MobileShell·MobileHeader·BarcodeScanner·UnitCard·InstallBanner·HospitalSearch·ui·stockApi·useMobileMe)
 ├── manifest.ts                       # PWA manifest — scope '/m/'(슬래시 필수 — '/m'이면 /maintenances 포함), start_url /m/home
 ├── notifications/                    # 알림함 (1.1 P5 — 목록·미읽음/종류 필터·일괄 읽음·개인 수신 설정)
-└── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper, StatusBadge, NotificationBell, MyWorkPanel 등)
+└── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper, StatusBadge, NotificationBell, MyWorkPanel, HospitalSearchInput(PC 병원 검색 — 출고요청·레포트 공용) 등)
     ├── useOverlayDismiss.ts          # 오버레이(드로어·모달) 공통 훅 — 배경 스크롤 잠금 + ESC 닫기
     ├── theme/                        # ThemeProvider, ThemeToggle, useChartTheme (다크모드)
     └── ui/                           # 디자인 프리미티브 (Button, Card, Badge, Input, Table, Modal(모바일 바텀시트), PageHeader, EmptyState, Pager(상태 기반 페이저 — 첫/마지막·±5·번호 입력, 2026-09-16), DateRangeFilter(팝오버 달력 날짜 범위 필터 — 프리셋·직접 입력, 2026-09-16))
@@ -340,6 +343,7 @@ lib/
 ├── sla.ts                            # SLA 시계 엔진 (1.1 P1 — 정책 매칭·시계 생성/갱신·정지/재개·달성/초과, 알림과 독립)
 ├── sla-alerts.ts                     # SLA 알림 발송 (1.1 P4 — 초과 즉시 알림 1회성 + 지정 시각 일일 요약)
 ├── notify-routes.ts                  # 채널 라우팅 매칭 (1.1 P3 — 이벤트×조건 → 채널 N개, 같은 채널 1건 합침)
+├── notifyRouteInput.ts               # 라우팅 규칙 입력 검증 — subTypes 정제·지정 그룹 멘션 검증 (규칙 생성·수정 API 공용, 2026-11-09)
 ├── notify-events.ts                  # Slack 알림 이벤트 카탈로그 — 단일 소스(그룹·라벨·설명·조건 축·구현 여부·구 토글 매핑). 새 알림 = 항목 1개 + notifyDomainEvent() 1줄 (2026-10-27)
 ├── notify-center.ts                  # 내부 알림 생성 단일 진입점 (1.1 P5 — emit·수신자 산출·dedup·개인 설정)
 ├── slaSettings.ts                    # SLA 설정 입력 검증·정규화·CTI 서브트리 확장 (1.1 P2)
@@ -349,6 +353,11 @@ lib/
 ├── itemUdi.ts                        # 품목 UDI 필드 부분 갱신·UDI-DI 검증(GTIN 체크디지트)·대장 표기명 폴백
 ├── udiLedger.ts                      # UDI 입출고대장 조립 — 문서 1부=모델 1종, 행은 UDI×LOT, 인벤토리 필터, MOVE·취소 제외
 ├── udiLedgerDocx.ts                  # 대장 docx 생성 — 원본 양식 템플릿 재사용(jszip, 행 복제·<w:t> 치환) + 문서 메타(AppSetting)
+├── report/                           # 레포트 (projects/hospital_report_design.md)
+│   ├── doc.ts                        # ReportDoc 문서 모델 — 웹·Word 공용 (목차 8개 고정)
+│   ├── docx.ts                       # Word 생성 — 사내 양식 템플릿 재사용(assets/templates/seers-report-portrait-2026.docx)
+│   ├── runner.ts                     # 생성 시작·백그라운드 실행(수집→AI)·AI 재실행·중단 감지·문서 조립
+│   └── hospital/                     # 병원 운영 이력 보고서 — types·collect(SQL 수집·점검 규칙)·analyze(AI 단발 호출·구조화 출력·검증)·build(목차 배치)
 ├── gateway-planner/                  # GW 배치 플래너 (function_gateway_planner.html)
 │   ├── types.ts                      # 공용 타입 + 기본 배치 규칙
 │   ├── rules.ts                      # 규칙 로드/저장 (AppSetting gw_planner_rules)
@@ -644,6 +653,11 @@ prisma/
 - `hospitalCode`(→Hospital, SetNull), `model`, `inputTokens`/`outputTokens`/`cacheReadTokens`/`cacheWriteTokens`, `createdAt`
 - 채팅 응답 저장 시 best-effort 기록(실패해도 채팅 유지), 기존 대화는 마이그레이션 `20260720230000`에서 백필
 - 인덱스: `(created_at)`, `(user_id, created_at)`
+- `feature`(2026-11-07): `assistant`(기본) / `report`(레포트 — 보고서 1건 = 1행) — `/settings/ai-usage` 기능별 집계
+
+### ReportRun (레포트 생성 스냅샷 — 2026-11-07, `projects/hospital_report_design.md` §8)
+- `report_runs` — `id` uuid · `kind`(`HOSPITAL_HISTORY`) · `hospitalCode`(→Hospital, Cascade) · `status`(COLLECTING→ANALYZING→DONE/FAILED, CHECK) · `facts` JSONB(수집 스냅샷) · `aiResult` JSONB · `aiError` · `error` · `model`·`effort` · 토큰 · `docNumber` · `createdById`(→User, SetNull) · `createdAt`·`finishedAt`·`updatedAt`(중단 감지)
+- 웹 미리보기·Word가 같은 스냅샷으로 그려짐(다운로드 시 재조회 없음). AI만 실패하면 DONE + `aiError`. 인덱스 `(kind, created_at desc)`·`(hospital_code)`
 
 ### AiFeedback (어시스턴트 답변 피드백 — v3, 2026-07-25)
 - 답변 1건당 1행(`message_id` UNIQUE, 재전송 시 갱신). `ai_usage_logs`와 같은 이유로 메시지·세션에 **FK를 걸지 않아** 대화를 삭제해도 피드백은 보존
@@ -918,7 +932,7 @@ prisma/
 
 - 1.0은 채널이 env 상수(`SLACK_CHANNEL_MAIN`/`DELAY`)에 고정돼 유형별 분리가 불가능했다. 1.1은 **채널·규칙을 DB로** 옮겨 런타임 관리
 - **NotifyChannel** (`notify_channels`): `name`(UNIQUE)·`slackChannelId`·활성·순서. 설정 화면에서 **연결 테스트 발송** 가능
-- **NotifyRoute** (`notify_routes`): `eventType`(TICKET_CREATED·TICKET_STATUS_CHANGED·TICKET_QUEUE_TRANSFERRED·SEV_ESCALATED·SLA_BREACH·SLA_WARNING·DAILY_DIGEST) × 조건(`refTypes`/`queueIds`/`ctiIds`(서브트리)/`severities`/`statusTo`(전이 후 상태)/`metrics`) → `channelId`. `mentionMode`(none·queue_members·here·channel), **`digestHour`**(KST 0~23)·`digestOpts`(포함 섹션·그룹 기준·섹션 상한)
+- **NotifyRoute** (`notify_routes`): `eventType`(TICKET_CREATED·TICKET_STATUS_CHANGED·TICKET_QUEUE_TRANSFERRED·SEV_ESCALATED·SLA_BREACH·SLA_WARNING·DAILY_DIGEST) × 조건(`refTypes`/`queueIds`/`ctiIds`(서브트리)/`severities`/`statusTo`(전이 후 상태)/`metrics`/**`subTypes`**(도메인 세부 유형 — 카탈로그 `subTypeAxis`가 있는 이벤트만, 예: 출고 유형 `OSAN_OFFICE`, 2026-11-09)) → `channelId`. `mentionMode`(none·queue_members·**named_queue**·here·channel·requester) + **`mentionQueueId`**(named_queue가 태그할 Assignment Group FK, 그룹 삭제 시 SET NULL), **`digestHour`**(KST 0~23)·`digestOpts`(포함 섹션·그룹 기준·섹션 상한)
 - 매칭 의미론은 SLA 정책과 동일(축 간 AND, 배열 내부 OR, 빈 배열=전체)이나 **매칭된 규칙을 전부 실행**한다(다중 채널). 같은 채널 중복은 1건으로 합치고 멘션은 강한 쪽 채택. 규칙 0건이면 미발송 + `no_route` 스킵 로그
 - 시드 `scripts/seed-notify-routes.sql` — 기존 env 채널을 규칙 6행(등록·상태변경·그룹이관·Sev상향·일일요약 09:00·초과 즉시)으로 재현해 **배포 직후 동작이 1.0과 동일**
 
@@ -1413,6 +1427,7 @@ prisma/
 
 ### Slack 알림 (v2 재편, 2026-08-03 — `projects/notification_v2_design.md`)
 - **출고업무 알림 (2026-11-02 — `projects/stock_out_notify_design.md`)**: 도메인 이벤트 그룹 '출고업무' — `STOCK_OUT_CREATED`(출고요청 등록: 요청자·업무 구분·희망 출고일·품목·수량, `lib/stockOutNotify.ts`를 생성 라우트에서 호출) · `STOCK_OUT_COMPLETED`(출고 완료: 상태 '완료' 진입 — [출고 처리]·상태 직접 변경·티켓 종료 공통으로 `notifyTicketChanged` 상태 전이 판정에서 1회, 취소 제외, **요청자 Slack 태그**). `notifyDomainEvent` `mentionUserIds`·`mentionText`(계정 'Slack 발송' ON + 이메일 매핑 시 `<@U…>`, 아니면 이름) — **규칙 멘션 옵션 '요청자'(`requester`)를 고른 채널에만 태그(2026-11-03 개정, 종전 항상)**. 옵션은 카탈로그 `requester: true` 이벤트(출고 완료)에서만 노출·허용. 링크는 출고요청 상세(도메인 알림 = 도메인 링크 원칙), 라벨 '*티켓 링크*', Slack 미리보기 끔. 채널은 설정 > Slack 알림 > 이벤트에서 규칙으로 지정(전용 채널) — 공통 규칙 '전체 티켓 등록'·'전체 상태 변경'의 업무유형에서 출고업무를 빼 중복 방지
+- **출고업무 알림 유형별 규칙 (2026-11-09 — `projects/stock_out_notify_subtype_design.md`)**: 라우팅 규칙 모델 범용 확장 2가지 — ① 조건 축 **`subTypes`**(도메인 세부 유형: 카탈로그 `NotifyEventDef.subTypeAxis {label, options}`가 라벨·선택지 소유, 출고 2종은 출고 유형 6종 `lib/stockOutShared.ts`; `notifyDomainEvent({subType})` → `RouteMatchInput.subType` 매칭, 축 없는 이벤트는 API가 `[]` 강제) ② 멘션 모드 **`named_queue`('지정 Assignment Group 멤버')** — 규칙의 `mentionQueueId` 그룹 멤버를 태그(티켓의 그룹과 무관, 티켓 그룹 불변), 문구 `"{그룹명}: @a @b"`, 그룹 멘션 킬스위치 동일 적용, 강도는 queue_members와 동률(먼저 매칭된 규칙 유지). 운영: Assignment Group '오산영업소 출고' 생성 → 출고요청 등록 규칙(출고 유형=오산영업소, 멘션=지정 그룹) 추가 → 기존 공통 규칙과 같은 채널이면 1건으로 합쳐져 오산영업소 건만 멘션 줄이 붙음. 설정 화면: 출고 유형 칩 행(`route-subtypes`), 멘션 셀렉트에 그룹 선택(`route-mention-queue`), 규칙 행 요약 `출고 유형 오산영업소 · 지정 그룹 멘션: …`, 그룹 삭제 시 '(그룹 삭제됨 — 멘션 없이 발송)' 경고
 - **이벤트 소스 = 티켓 레이어** (P11 유지): 순수 티켓·도메인 업무 모두 티켓 mutation에서 알림 발생(`lib/notify.ts` `notifyTicketCreated`/`notifyTicketChanged`). 도메인 라우트는 저장 후 티켓 알림만 호출 — 이중 발송 구조 없음
 - **발송 모드는 env 소유** (`SLACK_NOTIFY_MODE`): `off` / `test`(전량 테스트 채널로 리라우팅 + **`[DEV→#원채널명]` 표식** — 라우팅 검증 가능, 비-production은 live 자동 강등) / `live`. 채널·정책은 전부 DB(설정 화면) — PROD 데이터 동기화로 DEV에 실채널 ID가 복사돼도 모드 게이트가 오발송을 차단
 - **DM 폐기 (v2)**: 배정 DM·SLA 초과 owner DM 제거. 대신 **채널 메시지에 담당자 @멘션**(`<@Uxxx>`, 이메일 lookup + `users.slack_user_id` 캐시, 매핑 실패 시 이름 폴백). `slackNotifyEnabled=false`도 채널 멘션은 발송(DM 아님)
@@ -1505,11 +1520,21 @@ prisma/
 - AppSetting `ai_assistant_settings`(JSON 단일 키), 변경은 다음 질문부터 적용. 감사 로그 `resource='setting:ai-assistant'`
 - 효과 측정은 `/settings/ai-usage`(사용량 원장 집계)와 `npx tsx scripts/ai-agent-smoke.mts`(회귀 질문셋 — 도구 호출·토큰·캐시 적중률·추정 비용 출력, 원장에 기록되지 않아 집계 오염 없음)로 확인
 
+### 레포트 — 고객 운영 이력 레포트 (`/reports`, 최고관리자 — 2026-11-07, 구성 개편 2026-11-08, `projects/hospital_report_design.md`)
+- 메인 네비 '레포트'(nav `allowed_roles={SUPER_ADMIN}`, 서버 `isSuperAdmin` 강제) → 병원 검색 → [보고서 생성] → 진행 단계(데이터 수집 → AI 분석 → 완료) → **웹 미리보기** → **Word 다운로드**
+- **숫자는 코드, 글은 AI, 모양은 양식**: 수치·표는 `lib/report/hospital/collect.ts` SQL 집계(병원·딜·프로젝트·기기 원장·AS·VOC·채널톡·유지보수·기타업무·티켓 + 데이터 점검 규칙 9종). AI는 구조화 출력으로 정해진 칸만(요약·VOC 분류별 확인된 내용·반복 문의 주제·주요 서비스 이슈·AS 운영 프로세스·시사점) — 반복 주제 횟수·기간과 이슈 접수일은 AI가 준 VOC 코드로 코드가 다시 셈, 없는 VOC 코드 제거, 데이터에 없는 숫자는 출처 아래 경고, 전화번호 패턴은 `(연락처 생략)`
+- **사내 양식 틀 + 고정 구성**: `02_SEERS_2026_보고서_세로양식`(머리글 문서번호·SEERS 로고, 결재란, 제목·작성일자·작성부서·작성자, 번호 체계 `1.`/`1)`, 바닥글 F401-5)을 템플릿으로 재사용. 본문은 사용자 지정 구성(2026-11-08) — 요약(기준 줄·요약 3문단·지표 4칸) → 1.병원 개요 2.계약 및 구축 이력 3.운영 연혁 4.AS 현황(분기 추이·처리 결과·수리 판정·AS 운영 프로세스) 5.진행 중·미결 사항 6.VOC 현황(분류별·반복 주제) 7.주요 서비스 이슈 8.시사점 → 출처. 데이터 점검 규칙은 해당 표 아래 ※ 주석. 어느 병원이든 같은 구성(빈 데이터는 기록 없음). 문서번호는 화면에서 입력(비우면 양식 문구), 결재란은 공란, 작성부서·작성자는 생성자 기준
+- 생성 이력 `report_runs` 스냅샷 보관, [다시 생성]·[AI 다시 실행](같은 수집 데이터). 실측(제주한라, Opus 5.5·high): 약 70초 · 입력 3.5만/출력 0.7~0.8만 토큰 · 약 0.3달러
+
+### 레포트 AI 설정 (`/settings/ai-assistant` 하단 '레포트' 섹션, 최고관리자)
+- 어시스턴트와 별도 AppSetting `ai_report_settings` = `{ model, effort }`. 모델은 코드 허용 목록에서 선택(`claude-opus-5-5`(기본) · `claude-opus-5` · `claude-sonnet-5-5`), effort `low`~`max`(기본 `high` — 항상 명시 전송). 거절(refusal) 시 서버 측 `fallbacks: "default"`(beta) 적용. 감사 로그 `setting:ai-report`
+
 ### AI 사용 현황 (`/settings/ai-usage`, ADMIN 이상 — 2026-07-20)
 - AI 어시스턴트 사용량 관리 — **사용량 원장 `ai_usage_logs` 집계** (2026-07-20 전환: 대화를 삭제해도 집계 보존, 기존 대화 백필)
 - **KPI**(이번달 질문·토큰·예상 비용·사용자, 전월 병기) + **월별 추이 차트 12개월**(질문 수·예상 비용, 단일 축 2차트) + **사용자별 테이블**(기간 필터 — 질문·세션·입력/출력/캐시 토큰·예상 비용·최근 사용) + **병원 컨텍스트 Top 10**
 - 비용은 토큰 × 단가(AppSetting `ai_usage_pricing` — 입력/출력/캐시읽기/캐시쓰기 USD·환율, 페이지에서 편집) **추정치** — 실청구는 Anthropic Console 기준
 - 대화 내용 미노출(메타데이터만), 계정 삭제 시에도 원장 스냅샷(이름·이메일)으로 집계 유지
+- **기능별 카드**(2026-11-07): 기간 내 AI 어시스턴트 / 레포트 건수·토큰·예상 비용 (`ai_usage_logs.feature`)
 
 ### 역할 관리 (RBAC Lite — SUPER_ADMIN 전용, 2026-08-04)
 - 직무 단위 **역할**(권한 키 묶음)을 정의하고 사용자에게 N:M 부여 — 기존 등급 체계 위에 얹는 **가산 전용**(기존 접근 불변, `projects/rbac_design.md`)
@@ -1986,7 +2011,7 @@ npm run dev
 |--------|----------|------|
 | GET  | `/api/settings/notify-routes` | 채널·규칙 목록 + `eventEnabled`(이벤트별 사용 여부) + 편집 마스터(이벤트 키·**카탈로그 `eventDefs`/`eventGroups`**·멘션 모드·Assignment Group·CTI·상태·Sev·metric) (2026-10-27) |
 | POST | `/api/settings/notify-routes` | `{kind:'channel'}` 채널 추가 / `{kind:'route'}` 규칙 추가(일일 요약은 발송 시각 필수, 미구현 이벤트 400) / `{kind:'test'}` **연결 테스트 발송** / `{kind:'event-enabled', eventKey, enabled}` 이벤트 사용 스위치 (2026-10-27) |
-| PUT  | `/api/settings/notify-routes/[id]?kind=channel\|route` | 채널·규칙 수정 (규칙은 조건·채널·멘션·발송 시각·활성) |
+| PUT  | `/api/settings/notify-routes/[id]?kind=channel\|route` | 채널·규칙 수정 (규칙은 조건·채널·멘션·발송 시각·활성 — `subTypes`·`mentionQueueId` 포함, named_queue는 활성 그룹 필수·'개인 업무' 불가 400) |
 | DELETE | `/api/settings/notify-routes/[id]?kind=channel\|route` | 삭제 (채널 삭제 시 연결 규칙 cascade — 발송 대상 없는 규칙을 남기지 않음) |
 
 ### 기타업무
@@ -2027,9 +2052,20 @@ npm run dev
 | POST | `/api/gateway-planner/jobs/[id]/reanalyze` | AI 재분석 (원본부터 파이프라인 재수행, 스케일 초기화) |
 | POST | `/api/gateway-planner/jobs/[id]/pptx` | PPTX 생성 → S3 저장 + presigned URL (PLACED 상태에서만) |
 | GET/PUT | `/api/settings/gateway-planner` | 배치 규칙 조회/저장 (AppSetting `gw_planner_rules`) |
-| GET | `/api/settings/ai-usage` | AI 어시스턴트 사용 집계 (`?from=&to=` — 월별 12개월·사용자별·병원별 Top10 + 단가) — ADMIN |
+| GET | `/api/settings/ai-usage` | AI 사용 집계 (`?from=&to=` — 월별 12개월·사용자별·기능별(어시스턴트/레포트)·병원별 Top10 + 단가) — ADMIN |
 | PUT | `/api/settings/ai-usage` | AI 사용 단가 저장 (AppSetting `ai_usage_pricing`) — ADMIN |
 | GET/PUT | `/api/settings/ai-assistant` | AI 어시스턴트 런타임 설정 — effort·캐시 TTL (AppSetting `ai_assistant_settings`, 모델 ID는 읽기 전용) — ADMIN |
+| GET/PUT | `/api/settings/ai-report` | 레포트 AI 설정 — 모델(허용 목록)·effort (AppSetting `ai_report_settings`) — SUPER_ADMIN |
+
+### 레포트 (최고관리자 — `projects/hospital_report_design.md`)
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET | `/api/reports?take=` | 생성 이력 목록 (최근순, 기본 20) |
+| POST | `/api/reports` | `{ hospitalCode, docNumber? }` → 고객 운영 이력 레포트 생성 시작 (백그라운드 수집→AI), `{ id }` |
+| GET | `/api/reports/[id]` | 상태·AI 상태 + `ReportDoc`(웹 미리보기용) — 10분 넘게 멈춘 실행은 중단 처리 |
+| PATCH | `/api/reports/[id]` | 문서번호 수정 |
+| POST | `/api/reports/[id]/retry-ai` | 같은 수집 데이터로 AI 단계만 재실행 (현재 레포트 AI 설정) |
+| GET | `/api/reports/[id]/docx` | Word 다운로드 (사내 양식 템플릿, `<병원명>_운영레포트_<YYYYMMDD>.docx`) |
 
 ### AI 어시스턴트
 | Method | Endpoint | 설명 |

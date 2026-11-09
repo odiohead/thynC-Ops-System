@@ -4,6 +4,57 @@
 
 ---
 
+## 2026-11-09 11:30 | 출고업무 알림 유형별 규칙 — 조건 축 '출고 유형' + 멘션 '지정 Assignment Group 멤버' (오산영업소 등록 시 지정 그룹 태그)
+
+- **요구**: 출고요청 유형이 '오산영업소'일 때만 등록 알림에서 지정된 사람들을 태그. 하드코딩 없이 설정 > Slack 알림 > 출고업무에서 유형별·그룹별 제어, 태그 대상은 Assignment Group으로 지정 (설계 `projects/stock_out_notify_subtype_design.md`, 티켓 그룹 분기안은 티켓 소유 범위가 바뀌어 기각)
+- **DB**: `notify_routes.sub_types TEXT[]`(도메인 세부 유형 조건), `mention_queue_id INT FK ticket_queues ON DELETE SET NULL` + 인덱스 — 마이그레이션 `20261109100000_notify_route_subtype_mention_queue` (dev2 적용·resolve, PROD 미적용)
+- **카탈로그** (`lib/notify-events.ts`): `NotifyCondition`에 `subTypes`, `NotifyEventDef.subTypeAxis {label, options}` — 출고 2종에 출고 유형 6종 축(`lib/stockOutShared.ts` 단일 소스). 범용 축이라 AS 고장/분실 등 다른 도메인도 재사용 가능
+- **라우팅·발송**: `MENTION_MODES`에 `named_queue`(강도 queue_members와 동률), `RouteMatchInput.subType` 매칭 1줄, `ResolvedChannel.mentionQueueId`; `buildMentionLine` case named_queue(규칙 지정 그룹 멤버 — 비활성 그룹·킬스위치 OFF·매핑 0명이면 멘션 생략); `notifyDomainEvent({subType})`; `lib/stockOutNotify.ts` 등록·완료 호출에 `subType: purpose`
+- **API** (`/api/settings/notify-routes` POST·PUT): `subTypes`는 카탈로그 축 옵션 코드만(축 없는 이벤트는 []), `named_queue`는 활성 그룹 필수·'개인 업무' 불가(400), 응답에 `mentionQueue {id,name,isActive}`. 헬퍼는 `lib/notifyRouteInput.ts`(route.ts 비핸들러 export 불가)
+- **화면** (`app/settings/notifications/EventsTab.tsx`): 축 있는 이벤트에 "출고 유형 (비우면 전체)" 칩 행, 멘션 '지정 Assignment Group 멤버' 선택 시 그룹 셀렉트(개인 업무 제외) + 안내, 추가 버튼은 그룹 미선택 시 비활성, 규칙 행 요약에 유형·지정 그룹명, 그룹 삭제 시 경고 표기
+- **검증**: 매칭 스모크 16/16(오산 → 공통+오산 규칙 같은 채널 1건 병합·named_queue, 판매용 → 멘션 없음, subType 미제공 → 유형 규칙 미매칭, 입력 정제·검증, 그룹 삭제 SET NULL) · dev2 빌드 · Playwright 화면 확인
+- 영향 파일: prisma/schema.prisma, lib/notify-events.ts, lib/notify-routes.ts, lib/notify.ts, lib/stockOutNotify.ts, lib/notifyRouteInput.ts(신규), app/api/settings/notify-routes/route.ts·[id]/route.ts, app/settings/notifications/EventsTab.tsx, README.md, projects/README.md
+
+## 2026-11-08 01:20 | 레포트 구성 2차 개편 — 사용자 지정 '제주한라병원_운영레포트_20261107' 양식·구성으로 고정
+
+- **사용자 요청**: 양식 안내대로 목차 구성은 필수가 아니고 목적·배경은 불필요 — 지정 파일의 양식·구성을 반영해 어느 병원을 생성해도 동일하게
+- **구성**: 요약(기준 줄·AI 요약 3문단·지표 4칸) → 1.병원 개요(항목표) 2.계약 및 구축 이력 3.운영 연혁(AI 주요 이슈를 '서비스 이슈'로 합침) 4.AS 현황(분기 추이·처리 결과·수리 판정·AS 운영 프로세스) 5.진행 중·미결 사항 6.VOC 현황(분류별+확인된 내용·반복 주제) 7.주요 서비스 이슈 8.시사점(굵은 제목 불릿) → 출처. 1차의 '데이터 신뢰도 점검' 표는 해당 표 아래 ※ 주석으로 분산
+- **서식(Word·웹 공통)**: 표 머리 `E8EDF5`+남색 굵게, 표 위·아래 남색 선, 항목 열·합계 행 `F2F2F2`, 목차·하위 제목 굵게, 지표 표 전체 폭, 주석 왼쪽 정렬
+- **문서 모델**: `ReportDoc.intro/outro` 추가, 목차 상수 제거, 블록 `kv`·`kpi`·불릿 `{lead,text}` 추가. Word 하위 번호 목록은 하위 항목 있는 목차 순으로 양식 numId 3~9 배정
+- **AI 스키마 2차**: summary(3문단)·groupNotes·themes·keyIssues(vocCodes·ask)·asProcess·insights — 구 실행분(risks·recommendations·vocCode)도 새 구성으로 렌더
+- **수집 추가**: 대웅 거래처코드·병원 측 창구(현 소속 인물, 전화번호 제외). 접수 경로 코드(IMPORT/SHEET…) 한글 표기
+- **개인정보**: VOC 제목·AS 메모·AI 문장 속 전화번호 패턴 `(연락처 생략)` 처리 (dev2 실데이터 VOC 제목에서 휴대폰 번호 노출 발견)
+- **이름**: 제목 '고객 운영 이력 레포트', 다운로드 파일 `<병원명>_운영레포트_<YYYYMMDD>.docx`
+- **검증**: tsc(힙 4GB) 0 · 구 실행분 렌더 호환 · 신규 AI 1회(dev2 제주한라 93초, 35,933/10,717 토큰, 숫자 경고 0) · Word→PDF 7쪽 육안 확인. dev2 빌드(힙 4GB)·`pm2 restart thync-dev` 후 Playwright 19/19 — 신규·구 실행분 모두 목차 8개(목적·배경 없음)·지표 4칸·제목·출처, 휴대폰 번호·원시 코드 노출 없음, 확인된 내용 열·AS 운영 프로세스, Word 다운로드 `제주한라병원_운영레포트_20261108.docx`, 모바일 가로 넘침 0. 스크린샷 육안 확인. dev2 DB 테스트 레포트 1건 추가(총 4건)
+- 파일: `lib/report/{doc,docx}.ts`, `lib/report/hospital/{types,collect,analyze,build}.ts`, `app/reports/_components/ReportView.tsx`, `app/reports/{page,[id]/page}.tsx`, `app/api/reports/{route,[id]/docx/route}.ts`, `app/settings/ai-assistant/ReportAiSettings.tsx`, `projects/hospital_report_design.md`(§5 재작성·§16), `projects/README.md`, `README.md`
+
+## 2026-11-07 23:30 | 레포트 — 병원 운영 이력 보고서 (사내 양식 웹 미리보기·Word, 레포트 전용 AI 설정) — 설계 `projects/hospital_report_design.md`
+
+- **사용자 요청**: 제주한라 수작업 보고서를 기능화 — 메인 네비 '레포트'(최고관리자), 병원 조회→생성, 웹 먼저·Word 다운로드, 사내 양식 `02_SEERS_2026_보고서_세로양식` 포맷·구성 고정, AI 모델·effort는 어시스턴트와 별도. 설계 D1~D8 "추천대로"
+- **원칙**: 숫자·표는 SQL 수집기, AI는 구조화 출력으로 정해진 칸만(검토 결과·반복 문의 주제·주요 이슈·리스크·결론), 웹·Word는 같은 `ReportDoc`, 결과는 `report_runs` 스냅샷
+- **DB**: 마이그 `20261107130000_report_runs`(+`ai_usage_logs.feature`)·`20261107140000_report_runs_updated_at` dev2 psql 적용·resolve, nav 시드 `scripts/seed-report-nav.sql` dev2 적용
+- **서버**: `lib/report/{doc,docx,runner}.ts` · `lib/report/hospital/{types,collect,analyze,build}.ts` · `lib/ai/settings.ts`(레포트 설정·허용 모델 3종, 기본 `claude-opus-5-5`·`high`) · API `/api/reports`(목록·생성) · `/api/reports/[id]`(GET·PATCH 문서번호) · `/retry-ai` · `/docx` · `/api/settings/ai-report` · `/api/settings/ai-usage` 기능별 집계
+- **화면**: `/reports`(병원 검색·생성 이력) · `/reports/[id]`(진행 단계·웹 미리보기 `ReportView`·Word 다운로드·다시 생성·AI 다시 실행·문서번호) · 설정 > AI 어시스턴트 하단 '레포트' 섹션 · AI 사용 현황 기능별 카드. PC 병원 검색 `HospitalSearchInput` 공용화(출고요청 재-export)
+- **Word**: 사내 양식 템플릿 `assets/templates/seers-report-portrait-2026.docx` 재사용(머리글 문서번호·결재란 셀·목차 numId 2/하위 3~9+101)
+- **검증**: tsc(힙 4GB)·eslint 0 · AI 검증 9/9 · 실행기 E2E dev2(제주한라 72초·입력 34,957/출력 7,879 토큰·사용량 원장 `report`) · `fallbacks` 3모델 수용 확인 · Word→PDF 육안 확인 · 빈 병원 목차 유지. 실제 AI 호출 총 5회(약 1.5달러 미만)
+- **dev2 빌드·재시작(요청)** → Playwright 헤드리스 17/17: SUPER_ADMIN 네비 노출·병원 검색→생성→상세 이동·ANALYZING 관측·60초 DONE·미리보기 목차·AI 칸·문서번호 저장 반영·Word 다운로드(55KB, 파일명 규칙)·설정 레포트 섹션·사용 현황 기능별·모바일 가로 스크롤 0 / ADMIN 네비 미노출·화면 차단 문구·API·docx 403·설정 섹션 미노출. 스크린샷 확인 후 수정 2건(상단 토큰 표기 한글이 고정폭 글꼴에서 깨짐·모바일 결재란 날짜 잘림) → 재빌드·재확인. dev2 DB에 테스트 보고서 3건(제주한라) 남음
+- 영향 파일: 위 신규 + `prisma/schema.prisma`, `app/settings/ai-assistant/{page,ReportAiSettings}.tsx`, `app/settings/ai-usage/page.tsx`, `app/api/settings/ai-usage/route.ts`, `app/components/HospitalSearchInput.tsx`, `app/stock-out-requests/_components/DestHospitalSearch.tsx`, `README.md`, `projects/{hospital_report_design,README}.md`
+- **PROD 반영 시**: 마이그 2건 psql 적용·resolve → generate → `seed-report-nav.sql` → 힙 4GB 빌드·`pm2 restart thync-prod`
+
+## 2026-11-07 22:10 | [운영 데이터 조치 — PROD만] 제주한라병원(HOSP-000142) 기기현황 초기 도입분 722대 등록 (Drive 현황 파일 · 설치일 소급, 코드 변경 없음)
+
+- 배경: 병원 운영 이력 보고서 작성 중 원장 280대(AS 유래만) vs 계약 1,000대 확인. 누락 원인 — 9/5 초기 임포트에서 엘병원(남양주)과 시리얼 1대(P007485 — 실제로는 제주한라 기기, 2026-01-12 AS 교체 회수) 교차 중복으로 병원 단위 제외 + 후속 '중복 25곳 정리 후 편입' 미실행, 11/4 보완은 'ACTIVE 0대' 조건이라 재차 누락
+- 입력: 9/4 추출본 `OneDrive/문서/기기현황_초기임포트/제주한라병원_기기임포트.xlsx`(심전계 500 · 산소포화도 500). 1회성 스크립트(scratchpad `tmp-hanla-device-import.mts`) — `previewRows`→`importBatch`, 원장 개체가 전혀 없는 시리얼만 등록. 배치일 2025-09-14(PROJ-000042 설치 종료일)·상품유형 일반·DEAL-202506-0003·actor 관리자, 병동은 파일명 그대로(기존 AS 유래 병동과 별칭 병합 안 함 — 사용자 '추천대로')
+- dev2 롤백 리허설 → PROD 드라이런(롤백) → 사용자 승인 후 `--apply`: 배치 145, REGISTER 722(산소포화도 278 · 심전계 444), 신규 병동 6(62·80+81·82병동, 중환자실1~3), 경고 0, 대상 중 미연결 AS 라인 0
+- 미등록 278행(자동 제외): 이미 ACTIVE 172(130/42) · 제주한라 회수 70(57/13) · 타병원 회수 12(산소) · 타병원 ACTIVE 24(23/1) — 목록 `Documents/제주한라병원_원장보완_미등록목록_20261107.xlsx`(확인 필요 36대)
+- 결과 원장 ACTIVE 산소포화도 505 · 심전계 497(병동 미지정 124 · 임시 병동 '대웅'·'여러병동' 78 잔존). 산소포화도 +5는 AS 교체 유입 대체기(62)와 짝 회수 파일 기기(57) 차이 — 시리얼 단위 대조 미실시. 임시 스크립트 PROD·dev2 삭제·미커밋, dev2 미반영(다음 동기화 때 따라옴)
+
+## 2026-11-07 21:20 | [운영 데이터 조치 — PROD만] 고아 채널톡 상담 링크 212 → AS-202611-0099 재연결 (코드 변경 없음)
+
+- 배경: 11-05 접수봇 원본 AS-202611-0099(14대) 삭제 → 병동별 수동 재등록 4건 사건으로 `as_intake_links` 212(상담 6aec2d0c…)가 `receipt_id NULL · LINKED` 고아로 남음. 사용자 지시 "212도 0099에 재연결"
+- 조치(단일 트랜잭션, 사용자 명시 허락): 백업 `public._bak_as_intake_link_212_20261107`(1행) → `UPDATE as_intake_links SET receipt_id=4318(AS-202611-0099, 85병동 4대), decided_at=now()` → 감사 로그 `as_intake_link` UPDATE 1행. 결과 212 → 4318 LINKED
+- 참고: 0100~0102는 0099의 분할 자식이 아니라(`split_from_id` NULL) 상담에 새 메시지가 오면 변경 감지가 시리얼 10대 차이를 보고할 수 있음 — 가족 연결(`split_from_id=4318` 3행)은 별도 결정
+
 ## 2026-11-07 12:00 | AS접수 분할 — 병동별 · 구분별 (설계 `projects/as_receipt_split_design.md`, dev2 빌드·재시작)
 
 → **PROD 배포 2026-11-07 (f0f42c9 — 분할 + 11-06 검색어 trim a7a2fca 동반)**: dev2 커밋 2건 push → PROD pull(0f78e60→f0f42c9, 34파일, 패키지·협업 변경 없음) → 마이그 `20261107090000_as_receipt_split` psql 적용·resolve(`split_from_id` 컬럼 확인, status 최신) → generate → 디스크 73%(7.9G 여유) → nohup 분리 힙 4GB 빌드(약 7분, EXIT 0, 협업 번들 해시 2108cacb 불변 — collab 재시작 생략) → `pm2 restart thync-prod` → /login 200(4s)·/as-receipts 307·외부 URL 200·split 라우트 번들 존재·Ready 이후 에러 0(이전 'Server Action' 오류는 재시작 전 구 탭 요청). PROD 데이터 변경 없음(DDL만)

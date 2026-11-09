@@ -16,6 +16,7 @@ import { NOTIFY_ROUTE_EVENTS, MENTION_MODES, DEFAULT_DIGEST_OPTS } from '@/lib/n
 import { NOTIFY_EVENTS, NOTIFY_EVENT_GROUPS, NOTIFY_EVENT_MAP, NOTIFY_EVENT_ENABLED_KEY } from '@/lib/notify-events'
 import { SLA_METRICS } from '@/lib/sla'
 import { TICKET_STATUSES, TICKET_SEVERITIES } from '@/lib/slaSettings'
+import { cleanSubTypes, validateMentionQueue } from '@/lib/notifyRouteInput'
 
 /** 규칙 입력 정규화 — 배열 축은 빈 배열 = 전체 */
 function routeData(body: Record<string, unknown>) {
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest) {
     }),
     prisma.notifyRoute.findMany({
       orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
-      include: { channel: { select: { id: true, name: true, isActive: true } } },
+      include: { channel: { select: { id: true, name: true, isActive: true } }, mentionQueue: { select: { id: true, name: true, isActive: true } } },
     }),
     prisma.ticketQueue.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { sortOrder: 'asc' } }),
     prisma.ticketCti.findMany({ select: { id: true, parentId: true, level: true, name: true }, orderBy: [{ level: 'asc' }, { sortOrder: 'asc' }] }),
@@ -154,6 +155,8 @@ export async function POST(request: NextRequest) {
     }
     const ch = await prisma.notifyChannel.findUnique({ where: { id: channelId } })
     if (!ch) return NextResponse.json({ error: '채널을 선택하세요.' }, { status: 400 })
+    const mq = await validateMentionQueue(body.mentionMode, body.mentionQueueId)
+    if ('error' in mq) return NextResponse.json({ error: mq.error }, { status: 400 })
 
     const data = routeData(body)
     // 다이제스트 규칙은 발송 시각이 없으면 아무 일도 일어나지 않는다 → 입구에서 막는다
@@ -168,10 +171,12 @@ export async function POST(request: NextRequest) {
       data: {
         name, eventType, channelId,
         ...data,
+        subTypes: cleanSubTypes(eventType, body.subTypes),
+        mentionQueueId: mq.id,
         // Prisma JSON 컬럼은 null을 별도 타입으로 다뤄 undefined(미설정)로 넘긴다
         digestOpts: eventType === 'DAILY_DIGEST' ? ((data.digestOpts ?? DEFAULT_DIGEST_OPTS) as object) : undefined,
       },
-      include: { channel: { select: { id: true, name: true, isActive: true } } },
+      include: { channel: { select: { id: true, name: true, isActive: true } }, mentionQueue: { select: { id: true, name: true, isActive: true } } },
     })
     await logAudit({
       req: request, actor: auditActorFromJWT(user), action: 'CREATE',
