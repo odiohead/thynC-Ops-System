@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-11-09 16:10 | 출고요청 등록 폼 — 품목명 잘림 해소 (줄바꿈 + 모델명 보조 표기)
+
+- **문제**: 품목명이 `산소포화도센서(평가용)_MP2000R`처럼 식별부(용도·모델)가 끝에 있는데 PC 모달(2열 그리드)·모바일 등록 화면이 `truncate`로 앞부분만 보여 비슷한 이름끼리 구분 불가
+- **조치**: PC `StockOutRequestFormModal` 품목명 `truncate` 제거 → `break-words` 줄바꿈(수량 입력은 우측 고정), 모델명이 이름에 포함돼 있지 않으면 모노 보조 표기 추가(testid `so-item-name-<id>`). 모바일 `/m/stock-out-requests/new` 품목 행 두 줄(모델명·품목명/재고) 모두 `truncate` → `break-words`
+- **검증**: Playwright — PC 모달 품목 전체 scrollWidth≤clientWidth(잘림 0), 모바일 390px 보조 줄 잘림 0, 스크린샷 확인. 목록·상세의 품목 요약 열은 범위 밖(툴팁 유지)
+- 영향 파일: app/stock-out-requests/_components/StockOutRequestFormModal.tsx, app/m/stock-out-requests/new/page.tsx
+
 ## 2026-11-09 14:40 | PROD 배포 — 레포트(02fd0af) + 출고업무 알림 유형별 규칙(7a783e6)
 
 - **절차**: dev2 커밋 2건 → push → PROD pull(f0f42c9 → 7a783e6, package.json 변경 없음) → 마이그 3건 psql 적용·resolve(`20261107130000_report_runs`, `20261107140000_report_runs_updated_at`, `20261109100000_notify_route_subtype_mention_queue`) → 레포트 nav 시드 `scripts/seed-report-nav.sql`(SUPER_ADMIN, sort 65) → 힙 4GB nohup 빌드 → `pm2 restart thync-prod` → /login 200, /reports·/api/reports·/api/settings/notify-routes 미인증 307 확인. 협업 서버 번들 해시 동일 → 재시작 생략

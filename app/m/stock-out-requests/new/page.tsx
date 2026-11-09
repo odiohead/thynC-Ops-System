@@ -258,8 +258,9 @@ export default function MobileStockOutRequestNewPage() {
                     {g.items.map((it) => (
                       <li key={it.id} className="flex items-center gap-3 px-3 py-2.5">
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold">{it.modelName || it.name}</p>
-                          <p className="truncate text-xs text-muted-foreground">{it.modelName ? it.name : ''}{it.modelName ? ' · ' : ''}재고 {it.stockTotal}</p>
+                          {/* 품목명 줄바꿈 허용 — 끝부분(모델·용도)으로 식별하므로 자르지 않는다 (2026-11-09) */}
+                          <p className="break-words text-sm font-semibold leading-snug">{it.modelName || it.name}</p>
+                          <p className="break-words text-xs leading-snug text-muted-foreground">{it.modelName ? it.name : ''}{it.modelName ? ' · ' : ''}재고 {it.stockTotal}</p>
                         </div>
                         <Stepper value={qty[it.id] ?? 0} onChange={(n) => setQty((q) => ({ ...q, [it.id]: n }))} />
                       </li>

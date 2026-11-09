@@ -373,7 +373,11 @@ export default function StockOutRequestFormModal({
                         <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
                           {c.list.map((it) => (
                             <div key={it.id} className="flex items-center justify-between gap-2">
-                              <span className="min-w-0 truncate text-sm text-gray-800" title={it.name}>{it.name}</span>
+                              {/* 품목명은 자르지 않고 줄바꿈 — 식별부(모델명)가 이름 끝에 있어 앞부분만으로는 구분 불가 (2026-11-09). 모델명이 이름에 없으면 모노 보조 표기 */}
+                              <span className="min-w-0 flex-1 break-words text-sm leading-snug text-gray-800" data-testid={`so-item-name-${it.id}`}>
+                                {it.name}
+                                {it.modelName && !it.name.includes(it.modelName) && <span className="ml-1 whitespace-nowrap font-mono text-[11px] text-gray-500">{it.modelName}</span>}
+                              </span>
                               <div className="flex shrink-0 items-center gap-1.5">
                                 {included.get(it.id) && (
                                   <span
