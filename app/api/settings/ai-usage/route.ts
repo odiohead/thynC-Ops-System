@@ -128,6 +128,21 @@ export async function GET(request: NextRequest) {
     LIMIT 10
   `
 
+  // 기능별 (기간 필터) — assistant / report (2026-11-07 레포트 비용 분리)
+  const features = await prisma.$queryRaw<
+    { feature: string; calls: bigint; input_tokens: bigint; output_tokens: bigint; cache_read: bigint; cache_write: bigint }[]
+  >`
+    SELECT l.feature, count(*) AS calls,
+           COALESCE(sum(l.input_tokens), 0)::bigint AS input_tokens,
+           COALESCE(sum(l.output_tokens), 0)::bigint AS output_tokens,
+           COALESCE(sum(l.cache_read_tokens), 0)::bigint AS cache_read,
+           COALESCE(sum(l.cache_write_tokens), 0)::bigint AS cache_write
+    FROM ai_usage_logs l
+    WHERE l.created_at >= ${fromUtc} AND l.created_at < ${toUtc}
+    GROUP BY l.feature
+    ORDER BY 1
+  `
+
   const toNum = (v: bigint) => Number(v)
   return NextResponse.json({
     from,
@@ -153,6 +168,14 @@ export async function GET(request: NextRequest) {
       cacheReadTokens: toNum(r.cache_read),
       cacheWriteTokens: toNum(r.cache_write),
       lastUsed: r.last_used,
+    })),
+    features: features.map((r) => ({
+      feature: r.feature,
+      calls: toNum(r.calls),
+      inputTokens: toNum(r.input_tokens),
+      outputTokens: toNum(r.output_tokens),
+      cacheReadTokens: toNum(r.cache_read),
+      cacheWriteTokens: toNum(r.cache_write),
     })),
     hospitals: hospitals.map((r) => ({
       hospitalCode: r.hospital_code,

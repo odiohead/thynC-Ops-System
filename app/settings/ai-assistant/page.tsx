@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import ReportAiSettings from './ReportAiSettings'
 
 /**
  * AI 어시스턴트 설정 (ADMIN 이상)
@@ -172,6 +173,8 @@ export default function AiAssistantSettingsPage() {
           </span>
         )}
       </div>
+
+      <ReportAiSettings />
     </div>
   )
 }

@@ -38,13 +38,27 @@ interface HospitalRow {
   questions: number
   sessions: number
 }
+interface FeatureRow {
+  feature: string
+  calls: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+}
 interface UsageData {
   from: string
   to: string
   pricing: Pricing
   monthly: MonthRow[]
   users: UserRow[]
+  features?: FeatureRow[]
   hospitals: HospitalRow[]
+}
+
+const FEATURE_LABEL: Record<string, { name: string; unit: string }> = {
+  assistant: { name: 'AI 어시스턴트', unit: '답변' },
+  report: { name: '레포트', unit: '보고서' },
 }
 
 interface Tokens {
@@ -320,6 +334,25 @@ export default function AiUsagePage() {
       </div>
 
       {/* 병원별 Top 10 */}
+      {(data.features?.length ?? 0) > 0 && (
+        <div className={`${cardCls} mb-4 p-4`}>
+          <div className="mb-2 text-sm font-semibold text-gray-800">기능별 <span className="ml-1 text-xs font-normal text-gray-400">(기간 내 · 레포트는 보고서 1건 = 1행, 모델 단가 차이로 비용은 근사치)</span></div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {data.features!.map((f) => {
+              const lb = FEATURE_LABEL[f.feature] ?? { name: f.feature, unit: '건' }
+              return (
+                <div key={f.feature} className="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2 text-sm">
+                  <span className="text-gray-700">{lb.name}</span>
+                  <span className="tabular-nums text-gray-900">
+                    {f.calls.toLocaleString()}{lb.unit} · {fmtTok(f.inputTokens + f.cacheReadTokens + f.cacheWriteTokens)}/{fmtTok(f.outputTokens)} · {fmtCost(costUsd(f, pricing), pricing)}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {data.hospitals.length > 0 && (
         <div className={`${cardCls} p-4`}>
           <div className="mb-2 text-sm font-semibold text-gray-800">병원 컨텍스트 사용 Top 10 <span className="ml-1 text-xs font-normal text-gray-400">(기간 내, 병원 연결 세션만)</span></div>

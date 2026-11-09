@@ -104,6 +104,7 @@ model Hospital {
   inventoryUnits        InventoryUnit[]
   aiChatSessions        AiChatSession[]
   aiUsageLogs           AiUsageLog[]
+  reportRuns            ReportRun[]
   tickets               Ticket[]
   salesProfile          HospitalSalesProfile?
   personAffiliations    PersonAffiliation[]
@@ -322,6 +323,7 @@ model User {
   appRoles                  AppUserRole[]
   aiChatSessions            AiChatSession[]
   aiUsageLogs               AiUsageLog[]
+  reportRuns                ReportRun[]
   aiFeedbacks               AiFeedback[]
   gatewayPlanJobs           GatewayPlanJob[]             @relation("GatewayPlanJobCreator")
   ownedTickets              Ticket[]                     @relation("TicketOwner")
@@ -1992,6 +1994,7 @@ model AiUsageLog {
   outputTokens     Int      @default(0) @map("output_tokens")
   cacheReadTokens  Int      @default(0) @map("cache_read_tokens")
   cacheWriteTokens Int      @default(0) @map("cache_write_tokens")
+  feature          String   @default("assistant") @db.VarChar(20) // assistant | report (2026-11-07 — 레포트 비용 분리 집계)
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -2000,6 +2003,36 @@ model AiUsageLog {
   @@index([createdAt])
   @@index([userId, createdAt])
   @@map("ai_usage_logs")
+  @@schema("public")
+}
+
+// ─── 레포트 (projects/hospital_report_design.md §8) ───
+// 생성 결과 스냅샷 — 웹 미리보기와 Word 다운로드가 같은 facts/ai_result로 그려진다
+model ReportRun {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kind         String    @default("HOSPITAL_HISTORY") @db.VarChar(40)
+  hospitalCode String    @map("hospital_code")
+  status       String    @default("COLLECTING") @db.VarChar(20) // COLLECTING → ANALYZING → DONE / FAILED
+  facts        Json?
+  aiResult     Json?     @map("ai_result")
+  aiError      String?   @map("ai_error")
+  error        String?
+  model        String?   @db.VarChar(50)
+  effort       String?   @db.VarChar(20)
+  inputTokens  Int       @default(0) @map("input_tokens")
+  outputTokens Int       @default(0) @map("output_tokens")
+  docNumber    String?   @map("doc_number") @db.VarChar(50)
+  createdById  String?   @map("created_by_id")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  finishedAt   DateTime? @map("finished_at") @db.Timestamptz
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  hospital  Hospital @relation(fields: [hospitalCode], references: [hospitalCode], onDelete: Cascade)
+  createdBy User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([kind, createdAt(sort: Desc)])
+  @@index([hospitalCode])
+  @@map("report_runs")
   @@schema("public")
 }
 
@@ -2066,6 +2099,7 @@ model TicketQueue {
   ctiDefaults     TicketCti[]           @relation("CtiDefaultQueue")
   members         TicketQueueMember[]
   domainRules     TicketDomainCtiRule[] @relation("CtiRuleQueue")
+  mentionRoutes   NotifyRoute[]         @relation("RouteMentionQueue") // 지정 그룹 멘션 규칙 역참조 (2026-11-09)
 
   @@map("ticket_queues")
   @@schema("public")
@@ -2591,7 +2625,9 @@ model NotifyRoute {
   severities  String[]      @default([])
   statusTo    String[]      @default([]) @map("status_to") // 상태변경: 이 상태로 바뀔 때만
   metrics     String[]      @default([]) // SLA 이벤트: 대상 metric 한정
-  mentionMode String        @default("none") @map("mention_mode") @db.VarChar(20) // none|queue_members|channel|here
+  mentionMode String        @default("none") @map("mention_mode") @db.VarChar(20) // none|queue_members|channel|here|requester|named_queue
+  subTypes    String[]      @default([]) @map("sub_types") // 도메인 세부 유형 조건(예: 출고 유형 OSAN_OFFICE) — 축 라벨·옵션은 카탈로그 subTypeAxis (2026-11-09)
+  mentionQueueId Int?       @map("mention_queue_id") // mention_mode 'named_queue' — 티켓 그룹과 무관하게 이 그룹 멤버를 태그 (2026-11-09)
   digestHour  Int?          @map("digest_hour") @db.SmallInt // DAILY_DIGEST 전용 (KST 0~23)
   digestOpts  Json?         @map("digest_opts")
   isActive    Boolean       @default(true) @map("is_active")
@@ -2599,9 +2635,11 @@ model NotifyRoute {
   createdAt   DateTime      @default(now()) @map("created_at")
   updatedAt   DateTime      @updatedAt @map("updated_at")
   channel     NotifyChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  mentionQueue TicketQueue? @relation("RouteMentionQueue", fields: [mentionQueueId], references: [id], onDelete: SetNull)
 
   @@index([eventType, isActive])
   @@index([channelId])
+  @@index([mentionQueueId])
   @@map("notify_routes")
   @@schema("public")
 }

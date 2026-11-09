@@ -55,3 +55,43 @@ export async function getAiSettings(): Promise<AiAssistantSettings> {
     return DEFAULT_AI_SETTINGS
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 레포트 전용 AI 설정 (AppSetting `ai_report_settings` — projects/hospital_report_design.md §7.1)
+// 어시스턴트와 분리. 모델은 자유 입력이 아니라 코드 허용 목록에서 고른다(오타 404 방지 원칙 유지).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const AI_REPORT_SETTINGS_KEY = 'ai_report_settings'
+
+export const AI_REPORT_MODELS = [
+  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', note: '권장 — 분석·종합 글쓰기 품질 우선' },
+  { id: 'claude-opus-5', label: 'Claude Opus 5', note: '어시스턴트 채팅과 같은 모델' },
+  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', note: '더 저렴·빠름, 해석 깊이는 낮을 수 있음' },
+] as const
+export type AiReportModel = (typeof AI_REPORT_MODELS)[number]['id']
+
+export interface AiReportSettings {
+  model: AiReportModel
+  effort: AiEffort
+}
+
+/** D4 — 기본 Opus 5.5 · high (Opus 5.5의 API 기본 effort는 medium이므로 항상 명시 전송) */
+export const DEFAULT_AI_REPORT_SETTINGS: AiReportSettings = { model: 'claude-opus-5-5', effort: 'high' }
+
+export function sanitizeAiReportSettings(input: unknown): AiReportSettings {
+  const o = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
+  const model = AI_REPORT_MODELS.some((m) => m.id === o.model) ? (o.model as AiReportModel) : DEFAULT_AI_REPORT_SETTINGS.model
+  const effort = AI_EFFORTS.includes(o.effort as AiEffort) ? (o.effort as AiEffort) : DEFAULT_AI_REPORT_SETTINGS.effort
+  return { model, effort }
+}
+
+export async function getAiReportSettings(): Promise<AiReportSettings> {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: AI_REPORT_SETTINGS_KEY } })
+    if (!row?.value) return DEFAULT_AI_REPORT_SETTINGS
+    return sanitizeAiReportSettings(JSON.parse(row.value))
+  } catch (e) {
+    console.error('[ai-settings] 레포트 설정 조회 실패, 기본값 사용:', e)
+    return DEFAULT_AI_REPORT_SETTINGS
+  }
+}
