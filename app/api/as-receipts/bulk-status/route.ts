@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { asDoneBlockedByOpenLines } from '@/lib/asReceipt' // 헤더 종결 가드 (2026-11-11)
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isUserOrAbove } from '@/lib/auth'
 import { hasPermission } from '@/lib/appRoles'
@@ -56,6 +57,11 @@ export async function POST(request: NextRequest) {
     const data = asStatusChangeData(existing, next, today)
     if (!Object.keys(data).length) {
       unchanged.push(existing.asCode)
+      continue
+    }
+    const blocked = await asDoneBlockedByOpenLines(prisma, existing.id, next) // 미종결 라인 남긴 채 '완료' 금지 (2026-11-11)
+    if (blocked) {
+      skipped.push({ asCode: existing.asCode, reason: blocked })
       continue
     }
     try {

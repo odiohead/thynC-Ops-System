@@ -72,3 +72,17 @@ export function canDeleteAsReceipt(
   if (receipt.createdById !== user.userId) return false
   return !isTerminalAsStatus(receipt.status?.ticketStatus)
 }
+
+/**
+ * 헤더 종결 가드 (2026-11-11 — PROD AS-202610-0449 사례: 교체 초안·발송일만 있고 최종확정 없이 '완료'로 닫혀 8대가 분실 수량에서 누락)
+ * 상태를 **'완료'**(종결)로 바꾸려는데 미종결 라인(outcome NULL)이 남아 있으면 안내 문구를 돌려준다(호출부 409). '취소'는 접수 자체를 접는 정상 경로라 막지 않는다.
+ * 단건 PUT·일괄 상태변경 공용. 통과하면 null.
+ */
+export async function asDoneBlockedByOpenLines(client: DbClient, receiptId: number, next: { name?: string | null; ticketStatus?: string | null }): Promise<string | null> {
+  const terminal = next.ticketStatus === 'RESOLVED' || next.ticketStatus === 'CLOSED'
+  if (!terminal || next.name === '취소') return null
+  const open = await client.asReceiptItem.findMany({ where: { receiptId, outcome: null }, select: { serialNo: true, draftOutcome: true }, orderBy: { id: 'asc' } })
+  if (!open.length) return null
+  const drafts = open.filter((i) => i.draftOutcome).length
+  return `미종결 기기 라인이 ${open.length}대 남아 있어 '${next.name ?? '완료'}'로 닫을 수 없습니다 (${open.slice(0, 5).map((i) => i.serialNo).join(', ')}${open.length > 5 ? ' …' : ''}${drafts ? ` · 처리방법 초안 ${drafts}대` : ''}) — 3. AS상세내역에서 [최종확정] 또는 라인취소 후 4. 기기등록 [완료]로 닫으세요.`
+}

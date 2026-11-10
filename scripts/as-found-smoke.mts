@@ -25,7 +25,7 @@ async function expectErr(name: string, fn: () => Promise<unknown>, status: numbe
   }
 }
 const LOST_S = 'A970001', FAULT_S = 'A970002', NEW_S = 'A970101'
-const ALL = [LOST_S, FAULT_S, NEW_S]
+const ALL = [LOST_S, FAULT_S, NEW_S, 'A970102']
 const WARD = 'SMOKE되찾음병동', WARD2 = 'SMOKE되찾음복귀병동'
 
 async function cleanupRegistry(hospitalCode: string) {
@@ -105,6 +105,22 @@ async function main() {
 
     console.log('▶ 재되찾음 409')
     await expectErr('이미 되찾음 409', () => markAsLineFound(lost.id, actor, { itemId: lostItem.id }), 409, '이미 되찾음')
+
+    console.log('▶ 되찾은 기기가 이미 이 병원에 재등록된 경우 (PROD AS-202611-0026 사례, 2026-11-10 완화) — 재배치 생략·교체기기 회수만')
+    // 되찾은 기기(LOST_S)는 지금 IN_USE·ACTIVE(위 되찾음으로 복귀). 교체기기 NEW_S는 RECOVERED. 새 분실 접수로 LOST_S 교체 확정 → NEW2_S 발송 → LOST_S를 새 접수 원장 확정처럼 재등록 → 되찾음
+    const NEW2_S = 'A970102'
+    const lostB = await createAsReceipt({ ...base, category: 'LOST', pickupMethod: 'NONE', lines: [{ serial: LOST_S, symptom: '분실2' }] }, actor)
+    receiptIds.push(lostB.id)
+    const lineB = await prisma.asReceiptItem.findFirstOrThrow({ where: { receiptId: lostB.id } })
+    await resolveAsLines(lostB.id, actor, { lines: [{ itemId: lineB.id, outcome: 'REPLACE', newSerial: NEW2_S }], shipMethod: 'PARCEL', shipTrackingNo: 'SMOKEFOUND2' })
+    check('2차 교체 확정 — 분실 기기 LOST·회수', (await unitOf(LOST_S))?.condition === 'LOST')
+    const rereg = await registerDevices({ hospitalCode, actor, occurredOn: todayKst(), source: 'MANUAL', memo: '[SMOKE] 되찾은 기기 재등록(다른 접수 원장 확정 흉내)' }, [{ serialInput: LOST_S, deviceInfoId: model.id, wardName: WARD, productType: '일반' }])
+    check('되찾은 기기 재등록 → ACTIVE', rereg.reregistered.length + rereg.created.length === 1 && (await unitOf(LOST_S))?.placement?.status === 'ACTIVE', JSON.stringify(rereg.skipped))
+    const f2 = await markAsLineFound(lostB.id, actor, { itemId: lineB.id, memo: '이미 재등록된 상태' })
+    check('되찾음 성공 + 재배치 생략 경고', f2.warnings.some((w) => w.includes('재배치는 건너뛰고')), JSON.stringify(f2.warnings))
+    const uL = await unitOf(LOST_S), uN2 = await unitOf(NEW2_S)
+    check('되찾은 기기 ACTIVE 유지 · 교체기기 RECOVERED', uL?.placement?.status === 'ACTIVE' && uN2?.placement?.status === 'RECOVERED', JSON.stringify({ uL, uN2 }))
+    check('라인 FOUND', (await prisma.asReceiptItem.findUniqueOrThrow({ where: { id: lineB.id } })).outcome === 'FOUND')
   } finally {
     const rows = await prisma.asReceipt.findMany({ where: { id: { in: receiptIds } }, select: { id: true, ticketId: true, asCode: true } })
     await prisma.asReceipt.deleteMany({ where: { id: { in: receiptIds } } })

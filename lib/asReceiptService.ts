@@ -1329,42 +1329,48 @@ export async function markAsLineFound(receiptId: number, actor: { userId: string
     }
     assertAsSerialOk(item.serialNo)
 
-    // 되찾은 기기 — 분실 상태·미배치여야 한다
+    // 되찾은 기기 — 기본은 분실 상태·미배치 → 재배치. 이미 **이 병원에 배치 중**이면(되찾은 기기를 새 고장 접수의 원장 확정 등으로 먼저 재등록한 경우 — PROD AS-202611-0026 사례, 2026-11-10)
+    // 재배치를 건너뛰고 경고만 남긴다. 타 병원 배치만 거부. 기기 상태가 분실이 아니어도 막지 않는다(재배치 시 전이표가 판단)
     const foundDev = await getUnitOr404(tx, item.deviceId!)
-    if (foundDev.placement?.status === 'ACTIVE') throw new AsServiceError(409, `${item.serialNo}: 이미 배치 중인 기기입니다 (${foundDev.placement.hospitalCode === receipt.hospitalCode ? '이 병원' : '타 병원'}) — 기기현황을 확인하세요.`)
     const foundState = await unitStateOf(tx, foundDev.unit)
-    if (foundState.condition !== 'LOST') throw new AsServiceError(409, `${item.serialNo}: 기기 상태가 분실이 아닙니다 (현재 ${deviceConditionLabel(foundState.condition)}) — 기기현황에서 상태를 확인하세요.`)
+    const foundActiveHere = foundDev.placement?.status === 'ACTIVE' && foundDev.placement.hospitalCode === receipt.hospitalCode
+    if (foundDev.placement?.status === 'ACTIVE' && !foundActiveHere) throw new AsServiceError(409, `${item.serialNo}: 타 병원에 배치 중인 기기입니다 — 기기현황을 확인하세요.`)
+    const warnings: string[] = []
+    if (foundActiveHere) warnings.push(`${item.serialNo}: 이미 이 병원에 배치되어 있어(${foundDev.placement?.asRefCode ? `${foundDev.placement.asRefCode}로 재등록` : '재등록됨'}) 재배치는 건너뛰고 교체기기 회수만 기록했습니다`)
+    else if (foundState.condition !== 'LOST') warnings.push(`${item.serialNo}: 기기 상태가 분실이 아니라 ${deviceConditionLabel(foundState.condition)}였습니다 — 사용중으로 재배치했습니다`)
 
-    // 교체기기 — 이 병원에 배치 중이고, 이 접수가 최근 상태를 기록한 기기여야 회수할 수 있다
+    // 교체기기 — 이 병원에 배치 중이어야 회수할 수 있다. 다른 접수의 AS 표시가 켜져 있으면(그 접수가 처리 중) 거부, 아니면 마지막 기록의 접수와 무관하게 허용 (2026-11-10 완화)
     const newDev = await getUnitOr404(tx, item.newDeviceId!)
     const newLabel = newDev.unit.serialNo
     if (newDev.placement?.status !== 'ACTIVE' || newDev.placement.hospitalCode !== receipt.hospitalCode) {
       throw new AsServiceError(409, `교체기기 ${newLabel}가 이 병원에 배치 중이 아닙니다 (${newDev.placement?.status === 'ACTIVE' ? '타 병원 배치' : '회수 상태'}) — 기기현황을 확인하세요.`)
     }
-    const gate = await ownsDeviceState(tx, receipt.asCode, item.newDeviceId!)
-    if (!gate.owns) throw new AsServiceError(409, `교체기기 ${newLabel}: 다른 접수(${gate.by})가 최근 상태를 기록해 회수할 수 없습니다.`)
+    if (newDev.placement.asStartedOn && newDev.placement.asRefCode && newDev.placement.asRefCode !== receipt.asCode) {
+      throw new AsServiceError(409, `교체기기 ${newLabel}: 다른 접수(${newDev.placement.asRefCode})가 AS 처리 중인 기기라 회수할 수 없습니다 — 그 접수를 먼저 정리하세요.`)
+    }
 
     const wardName = (input.wardName ?? '').trim() || null
     const targetWard = wardName ?? (newDev.placement.wardId ? (await tx.hospitalWard.findUnique({ where: { id: newDev.placement.wardId }, select: { name: true } }))?.name ?? null : null) ?? item.wardName ?? null
     const ctx = asCtx(receipt, actor, foundAt, memo ?? `되찾음 ${receipt.asCode}`)
-    const warnings: string[] = []
 
     // ① 교체기기 회수 — 사유 RETURN(반납), 관련 기기 = 되찾은 기기. RegistryError(전이 불가 등)는 전파 → 전체 롤백
     const returnReason = await reasonByValue(tx, 'RETURN')
     const rec = await recoverDevice({ ...ctx, memo: `되찾음 ${receipt.asCode} — 교체기기 회수` }, { deviceId: item.newDeviceId!, reasonCodeId: returnReason.id, relatedDeviceId: item.deviceId! }, { client: tx })
     warnings.push(...rec.warnings.map((w) => `${newLabel}: ${w}`))
 
-    // ② 되찾은 기기 재배치 — LOST → IN_USE(전이표 REGISTER), 교체기기 배치의 계약건·상품유형 승계
-    const reg = await registerDevicesIn(tx, { ...ctx, memo: `되찾음 ${receipt.asCode} — 분실기기 사용중 복귀` }, [{
-      serialInput: item.serialNo, wardName: targetWard, productType: newDev.placement.productType ?? undefined, dealCode: newDev.placement.dealCode ?? undefined, memo: `되찾음 ${receipt.asCode}`,
-    }], { autoCreateWard: true })
-    if (reg.skipped.length) throw new AsServiceError(409, `${item.serialNo}: 재배치 실패 — ${reg.skipped.map((s) => s.reason).join(', ')}`)
-    if (reg.created.length + reg.reregistered.length !== 1) throw new AsServiceError(409, `${item.serialNo}: 재배치 결과가 올바르지 않습니다.`)
-    warnings.push(...reg.warnings)
+    // ② 되찾은 기기 재배치 — LOST → IN_USE(전이표 REGISTER), 교체기기 배치의 계약건·상품유형 승계. 이미 이 병원 배치면 생략(위 경고)
+    if (!foundActiveHere) {
+      const reg = await registerDevicesIn(tx, { ...ctx, memo: `되찾음 ${receipt.asCode} — 분실기기 사용중 복귀` }, [{
+        serialInput: item.serialNo, wardName: targetWard, productType: newDev.placement.productType ?? undefined, dealCode: newDev.placement.dealCode ?? undefined, memo: `되찾음 ${receipt.asCode}`,
+      }], { autoCreateWard: true })
+      if (reg.skipped.length) throw new AsServiceError(409, `${item.serialNo}: 재배치 실패 — ${reg.skipped.map((s) => s.reason).join(', ')}`)
+      if (reg.created.length + reg.reregistered.length !== 1) throw new AsServiceError(409, `${item.serialNo}: 재배치 결과가 올바르지 않습니다.`)
+      warnings.push(...reg.warnings)
+    }
 
     // ③ 라인·비고
     await tx.asReceiptItem.update({ where: { id: item.id }, data: { outcome: 'FOUND', foundAt: new Date(foundAt), foundById: actor.userId, recallTrackingNo } })
-    const line = `[되찾음 ${today} ${actor.name ?? ''}] ${item.serialNo} 사용중 복귀(${targetWard ?? '병동 미지정'}) · 교체기기 ${newLabel} 회수(반납)${recallTrackingNo ? ` · 회수 송장 ${recallTrackingNo}` : ''}${foundAt !== today ? ` · 되찾은 날 ${foundAt}` : ''}${memo ? ` — ${memo}` : ''}`
+    const line = `[되찾음 ${today} ${actor.name ?? ''}] ${item.serialNo} ${foundActiveHere ? '이미 배치 중(재배치 생략)' : `사용중 복귀(${targetWard ?? '병동 미지정'})`} · 교체기기 ${newLabel} 회수(반납)${recallTrackingNo ? ` · 회수 송장 ${recallTrackingNo}` : ''}${foundAt !== today ? ` · 되찾은 날 ${foundAt}` : ''}${memo ? ` — ${memo}` : ''}`
     await tx.asReceipt.update({ where: { id: receipt.id }, data: { note: appendNote(receipt.note, line) } })
     return { itemId: item.id, serialNo: item.serialNo, newSerialNo: item.newSerialNo ?? newLabel, foundAt, wardName: targetWard, warnings }
   }, { timeout: 60000, maxWait: 10000 })

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { asDoneBlockedByOpenLines } from '@/lib/asReceipt' // 헤더 종결 가드 (2026-11-11)
 import { isAsLineLockedByStockOut } from '@/lib/asReceiptShared' // 출고요청 잠금 (2026-11-10)
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
@@ -166,9 +167,13 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (body.statusId !== undefined) {
       const sid = Number(body.statusId)
       const row = Number.isInteger(sid)
-        ? await prisma.statusCode.findFirst({ where: { id: sid, category: 'AS_STATUS' }, select: { id: true, ticketStatus: true } })
+        ? await prisma.statusCode.findFirst({ where: { id: sid, category: 'AS_STATUS' }, select: { id: true, name: true, ticketStatus: true } })
         : null
       if (!row) throw new AsServiceError(400, '상태가 올바르지 않습니다.')
+      if (row.id !== existing.statusId) { // 미종결 라인 남긴 채 '완료' 금지 (2026-11-11)
+        const blocked = await asDoneBlockedByOpenLines(prisma, id, row)
+        if (blocked) throw new AsServiceError(409, blocked)
+      }
       data.statusId = row.id
       Object.assign(data, asStatusChangeData(existing, row, todayKst())) // statusChangedAt·완료일 자동 관리 — 일괄 상태변경과 공용 (2026-09-21)
     }

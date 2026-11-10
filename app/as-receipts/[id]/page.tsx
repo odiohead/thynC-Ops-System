@@ -17,7 +17,7 @@ import AsMemoPanel from '@/app/hospitals/[code]/_components/AsMemoPanel'
 import AsReceiptFormModal, { type AsEditTarget } from '../_components/AsReceiptFormModal'
 import AsSplitModal from '../_components/AsSplitModal' // 접수 분할 (2026-11-07 as_receipt_split_design.md)
 import AsFoundModal, { type FoundTarget } from '../_components/AsFoundModal' // 분실기기 되찾음 (2026-11-10 as_lost_found_design.md)
-import { canMarkAsLineFound, asResolveUiOptionsFor, AS_RESOLVE_UI_LABELS, AS_STOCK_OUT_REQUEST_UI, isAsLineLockedByStockOut, type AsResolveUiOption } from '@/lib/asReceiptShared'
+import { canMarkAsLineFound, asResolveUiOptionsFor, AS_RESOLVE_UI_LABELS, AS_STOCK_OUT_REQUEST_UI, AS_LOST_DIRECT_REPLACE_LABEL, isAsLineLockedByStockOut, type AsResolveUiOption } from '@/lib/asReceiptShared'
 import AsStockOutRequestModal, { type AsStockOutLine } from '../_components/AsStockOutRequestModal' // 분실 AS → 출고요청 (2026-11-10 as_lost_stock_out_link_design.md)
 import { asListHref, AS_PICKUP_METHODS, type AsPickupMethod,
   AS_CATEGORY_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, AS_DEST_TYPES,
@@ -263,10 +263,11 @@ interface GroupCardProps {
   onScrapLine: (item: ItemRow) => Promise<boolean> // POST scrap-line — confirm·memo 프롬프트는 호출부 (2026-09-17)
   onFound: (item: ItemRow) => void // 분실기기 되찾음 모달 열기 (2026-11-10) — 분실 접수·교체 확정 라인
   onStockOutRequest: (items: ItemRow[]) => void // 분실 AS → 출고요청 모달 열기 (2026-11-10) — 선택 미종결 라인
+  canDirectReplace: boolean // 분실 접수 '교체(시리얼 직접 입력)' 예외 노출 — ADMIN 또는 as_receipt.admin (2026-11-11). 선택 라인에 교체 초안이 있으면 권한 무관 노출
 }
 const MODEL_BY_KIND: Record<string, string> = { 심전도: '심전계', 산소포화도: '산소포화도', 게이트웨이: '게이트웨이' }
 
-function GroupCard({ index, group, items, asCode, category, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm, onCorrectSerial, canRepair, onSetRepairResult, onScrapLine, onFound, onStockOutRequest }: GroupCardProps) {
+function GroupCard({ index, group, items, asCode, category, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm, onCorrectSerial, canRepair, onSetRepairResult, onScrapLine, onFound, onStockOutRequest, canDirectReplace }: GroupCardProps) {
   const [fixSerial, setFixSerial] = useState<Record<number, string>>({}) // 시리얼 보정 입력 (2026-09-15) — 라인별, 빈 값 = 닫힘
   const repair = summarizeAsRepairProgress(items) // 회수처리 n/m (2026-09-17 수리완료 → 2026-11-02 3택) — m = 처리 가능 라인(canMarkAsLineRepaired), n = 수리·문제없음·폐기
   const badSerialItems = items.filter((i) => !i.outcome && !isValidAsSerial(i.serialNo)) // 시리얼 형식 오류 — 보정 전 처리 불가 (2026-09-30)
@@ -624,7 +625,7 @@ function GroupCard({ index, group, items, asCode, category, hospitalCode, canRes
                 <span className="text-xs font-medium text-gray-500">처리방법</span>
                 <select value={outcome} onChange={(e) => setOutcome(e.target.value as AsResolveUiOption | '')} disabled={draftSel.length === 0} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm disabled:opacity-50" data-testid="as-outcome-select" title={draftSel.length === 0 ? '미확정 라인을 선택하면 처리방법을 지정할 수 있습니다' : category === 'LOST' ? "분실 접수: '출고요청'은 출고업무 티켓을 만들어 기기를 보냅니다(출고 완료 시 교체 자동 확정) · 분실종결은 기기 미제공 마감" : "선택한 미확정 라인의 처리방법 — '-'(미선택)이면 기존 처리방법을 바꾸지 않고 발송정보만 저장합니다"}>
                   <option value="">-</option>
-                  {asResolveUiOptionsFor(category).map((o) => <option key={o} value={o}>{AS_RESOLVE_UI_LABELS[o]}</option>)}
+                  {asResolveUiOptionsFor(category, { allowDirectReplace: canDirectReplace || selOpenItems.some((i) => i.draftOutcome === 'REPLACE') }).map((o) => <option key={o} value={o}>{category === 'LOST' && o === 'REPLACE' ? AS_LOST_DIRECT_REPLACE_LABEL : AS_RESOLVE_UI_LABELS[o]}</option>)}
                 </select>
               </>
             )}
@@ -1501,6 +1502,7 @@ export default function AsReceiptDetailPage() {
               onScrapLine={scrapLine}
               onFound={(it) => setFoundTarget({ id: it.id, serialNo: it.serialNo, newSerialNo: it.newSerialNo, wardName: it.wardName, placementWard: it.device?.placement?.ward?.name ?? null })}
               onStockOutRequest={(its) => setStockOutTarget(its.map((it) => it.id))}
+              canDirectReplace={isAdmin || adminPerm}
             />
           ))}
           {canResolve && openItems.length > 0 && (

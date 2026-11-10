@@ -88,11 +88,14 @@ export function asResolveOutcomesFor(category: string | null | undefined): reado
 /** 화면 처리방법 선택지 (2026-11-10 D1 — as_lost_stock_out_link_design.md): 분실 접수는 '교체'(시리얼 직접 입력) 대신 '출고요청'(UI 전용 값)으로 기기 제공. 서버 검증은 `asResolveOutcomesFor`(REPLACE 허용 — 출고 실행 경로·과거 호환) */
 export const AS_STOCK_OUT_REQUEST_UI = 'STOCK_OUT_REQUEST' as const
 export type AsResolveUiOption = AsOutcome | typeof AS_STOCK_OUT_REQUEST_UI
-export function asResolveUiOptionsFor(category: string | null | undefined): readonly AsResolveUiOption[] {
+export function asResolveUiOptionsFor(category: string | null | undefined, opts: { allowDirectReplace?: boolean } = {}): readonly AsResolveUiOption[] {
   if (category !== 'LOST') return AS_RESOLVE_OUTCOMES
-  return [AS_STOCK_OUT_REQUEST_UI, ...asResolveOutcomesFor(category).filter((o) => o !== 'REPLACE')]
+  // 분실 접수 '교체(시리얼 직접 입력)'는 예외 경로(2026-11-11): 선택 라인에 교체 초안이 이미 있거나(과거 발송분 사후 확정) AS 관리 권한일 때만 노출
+  return [AS_STOCK_OUT_REQUEST_UI, ...asResolveOutcomesFor(category).filter((o) => o !== 'REPLACE' || opts.allowDirectReplace)]
 }
 export const AS_RESOLVE_UI_LABELS: Record<AsResolveUiOption, string> = { ...AS_OUTCOME_LABELS, [AS_STOCK_OUT_REQUEST_UI]: '출고요청' }
+/** 분실 접수에서 '교체' 라벨 — 출고요청과 구분 */
+export const AS_LOST_DIRECT_REPLACE_LABEL = '교체 (시리얼 직접 입력 — 예외)'
 /** 활성(미종결) 출고요청에 묶인 라인인가 — 대기 중 잠금 판정 단일 소스(화면·서버 공용). 요청 상태의 ticketStatus가 종결이 아니면 활성 */
 export function isAsLineLockedByStockOut(item: { stockOutRequest?: { status?: { ticketStatus?: string | null } | null } | null } | null | undefined): boolean {
   const r = item?.stockOutRequest
