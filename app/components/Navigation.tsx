@@ -324,7 +324,7 @@ export default function Navigation() {
             </div>
           ) : <span />}
           <div className="flex shrink-0 items-center gap-0.5">
-            <NotificationBell />
+            <NotificationBell placement="sidebar" />
             <ThemeToggle className="shrink-0" />
           </div>
         </div>

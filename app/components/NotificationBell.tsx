@@ -49,7 +49,20 @@ const KIND_ICON: Record<string, string> = {
   comment: '💬',
 }
 
-export default function NotificationBell({ compact = false }: { compact?: boolean }) {
+/**
+ * 패널 위치 (2026-11-09): 벨이 어디에 붙어 있느냐에 따라 다르다.
+ *  - 'header'  : 모바일 상단 헤더(lg 미만) — 헤더 바로 아래 뷰포트 기준 고정(fixed). 폰은 좌우 1rem 여백 전체 폭, sm 이상은 오른쪽 정렬 w-80 (기본)
+ *  - 'sidebar' : 데스크탑 사이드바 하단 — 벨 **위로**, 왼쪽 정렬해 본문 쪽으로 펼침
+ *    종전엔 항상 벨 아래·오른쪽 끝 정렬이라 사이드바 하단 벨에서는 패널이 화면 아래·왼쪽 밖(x<0, y>뷰포트)으로 나가 "눌러도 안 보이는" 증상,
+ *    모바일 헤더에서도 벨 오른쪽에 다른 버튼이 있어 왼쪽이 22px 잘렸다 (Playwright 실측).
+ */
+export type NotificationBellPlacement = 'header' | 'sidebar'
+const PANEL_POS: Record<NotificationBellPlacement, string> = {
+  header: 'fixed left-4 right-4 top-16 w-auto sm:left-auto sm:w-80',
+  sidebar: 'absolute bottom-full left-0 mb-2 w-80',
+}
+
+export default function NotificationBell({ compact = false, placement = 'header' }: { compact?: boolean; placement?: NotificationBellPlacement }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState<Item[]>([])
@@ -144,7 +157,10 @@ export default function NotificationBell({ compact = false }: { compact?: boolea
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800">
+        <div
+          data-testid="notification-panel"
+          className={`z-50 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800 ${PANEL_POS[placement]}`}
+        >
           <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2 dark:border-gray-700">
             <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">알림 {unread > 0 && `(${unread})`}</span>
             <div className="flex items-center gap-2">
