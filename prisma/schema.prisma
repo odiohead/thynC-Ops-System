@@ -350,7 +350,8 @@ model User {
   deviceImportsCancelled    HospitalDeviceImportBatch[]  @relation("DeviceImportCancelledBy")
   deviceEventsActed         HospitalDeviceEvent[]        @relation("DeviceEventActor")
   deviceEventsEdited        HospitalDeviceEvent[]        @relation("DeviceEventEditor")
-  asItemsRepaired           AsReceiptItem[]              @relation("AsItemRepairedBy") // AS 라인 수리완료 체크(2026-09-17)
+  asItemsRepaired           AsReceiptItem[]              @relation("AsItemRepairedBy")
+  asItemsFound        AsReceiptItem[] @relation("AsItemFoundBy") // AS 라인 수리완료 체크(2026-09-17)
 
   @@map("users")
   @@schema("public")
@@ -2235,10 +2236,13 @@ model StockOutRequest {
   fulfilledAt     DateTime? @map("fulfilled_at") // 출고 처리 시각 (P2 — 이중 처리 가드, NULL=미처리)
   fulfilledById   String?   @map("fulfilled_by_id") // 처리자 (자재담당자)
   ticketId        Int?      @unique @map("ticket_id") // 도메인 1:1 연결 티켓
+  asReceiptId     Int?      @map("as_receipt_id") // 분실 AS 연동 요청 — 접수에서 [출고요청]으로 생성 (2026-11-10, as_lost_stock_out_link_design.md)
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
   project   Project?              @relation(fields: [projectCode], references: [projectCode])
+  asReceipt AsReceipt?            @relation("StockOutAsReceipt", fields: [asReceiptId], references: [id], onDelete: SetNull)
+  asItems   AsReceiptItem[]       @relation("AsItemStockOut") // 이 요청으로 기기를 받을 AS 라인(대기 중 잠금) (2026-11-10)
   destHospital Hospital?          @relation("StockOutDestHospital", fields: [destHospitalCode], references: [hospitalCode])
   status    StatusCode?           @relation("StockOutStatus", fields: [statusId], references: [id], onDelete: SetNull)
   createdBy User?                 @relation("StockOutCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -2249,6 +2253,7 @@ model StockOutRequest {
   files     StockOutRequestFile[] // 첨부파일 — 엑셀 등 (2026-11-02)
 
   @@index([projectCode])
+  @@index([asReceiptId], map: "stock_out_requests_as_receipt_idx")
   @@index([destHospitalCode], map: "stock_out_requests_dest_hospital_idx")
   @@index([statusId])
   @@index([requestDate])
@@ -2385,6 +2390,7 @@ model AsReceipt {
   hospital  Hospital        @relation(fields: [hospitalCode], references: [hospitalCode])
   splitFrom     AsReceipt?  @relation("AsReceiptSplit", fields: [splitFromId], references: [id], onDelete: SetNull)
   splitChildren AsReceipt[] @relation("AsReceiptSplit")
+  stockOutRequests StockOutRequest[] @relation("StockOutAsReceipt") // 분실 기기 제공 출고요청 (2026-11-10)
   status    StatusCode?     @relation("AsReceiptStatus", fields: [statusId], references: [id], onDelete: SetNull)
   createdBy User?           @relation("AsReceiptCreator", fields: [createdById], references: [id], onDelete: SetNull)
   ticket    Ticket?         @relation(fields: [ticketId], references: [id], onDelete: SetNull)
@@ -2426,17 +2432,25 @@ model AsReceiptItem {
   repairResult   String?   @map("repair_result") @db.VarChar(16) // 회수기기 처리(2026-11-02): REPAIRED 수리 / NO_FAULT 문제없음 / SCRAPPED 폐기 — SQL CHECK, (repair_result IS NULL) = (repaired_at IS NULL)
   repairedAt     DateTime? @map("repaired_at") @db.Date // 회수기기 처리일(2026-11-02부터 3택 공통, 이전엔 수리완료 체크일) — outcome과 독립인 제3축, 서버가 오늘 KST(B-34)
   repairedById   String?   @map("repaired_by_id") // 체크한 사용자
+  foundAt        DateTime? @map("found_at") @db.Date // 분실기기 되찾음 처리일 (2026-11-10 — outcome FOUND와 동시 존재, SQL CHECK)
+  foundById      String?   @map("found_by_id")
+  recallTrackingNo String? @map("recall_tracking_no") @db.VarChar(50) // 되찾음 시 회수하는 교체기기 송장(선택)
+  recallReceivedAt DateTime? @map("recall_received_at") @db.Date // 교체기기 센터 입고일(선택, 사후 기입)
+  stockOutRequestId Int?    @map("stock_out_request_id") // 분실 AS 출고요청 연결 — 활성 요청이면 라인 잠금, 완료 후에도 추적용 보존 (2026-11-10)
 
   receipt   AsReceipt   @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   device    DeviceUnit? @relation("AsItemDevice", fields: [deviceId], references: [id], onDelete: SetNull)
   newDevice DeviceUnit? @relation("AsItemNewDevice", fields: [newDeviceId], references: [id], onDelete: SetNull)
   repairedBy User?      @relation("AsItemRepairedBy", fields: [repairedById], references: [id], onDelete: SetNull)
+  foundBy    User?      @relation("AsItemFoundBy", fields: [foundById], references: [id], onDelete: SetNull)
+  stockOutRequest StockOutRequest? @relation("AsItemStockOut", fields: [stockOutRequestId], references: [id], onDelete: SetNull)
 
   @@unique([receiptId, serialNo])
   @@index([deviceId])
   @@index([newDeviceId])
   @@index([serialNo])
   @@index([intakeState])
+  @@index([stockOutRequestId], map: "as_receipt_items_stock_out_request_idx")
   @@map("as_receipt_items")
   @@schema("public")
 }

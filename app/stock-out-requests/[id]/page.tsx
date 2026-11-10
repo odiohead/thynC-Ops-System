@@ -52,6 +52,8 @@ interface StockOutDetail {
   purpose: StockOutPurpose
   files: StockOutFileDto[]
   items: { id: number; inventoryItemId: number; quantity: number; fulfilledSerials: string | null; item: { id: number; name: string; modelName: string | null; isSerialManaged: boolean; inventory: { id: number; name: string }; category: { name: string } | null } }[]
+  asReceipt: { id: number; asCode: string; category: string; hospital: { hospitalCode: string; hospitalName: string } | null } | null // 분실 AS 연동 (2026-11-10)
+  asItems: { id: number; serialNo: string; outcome: string | null; newSerialNo: string | null; wardName: string | null; deviceKind: string | null; shippedAt: string | null; device: { deviceInfo: { deviceName: string } | null } | null }[]
 }
 
 function codeBadge(c: CodeRef | null) {
@@ -220,6 +222,7 @@ export default function StockOutDetailPage() {
                 <p className={label}>유형 · 목적</p>
                 <p className="mt-1 text-sm text-gray-900">
                   {[STOCK_OUT_PURPOSE_LABELS[req.purpose] ?? req.purpose, subPurposeLabel(req.purpose, req.subPurpose)].filter(Boolean).join(' · ')}
+                  {req.asReceipt && <Link href={`/as-receipts/${req.asReceipt.id}`} className="ml-2 rounded-full border border-teal-300 bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700 hover:bg-teal-100" title="이 출고요청을 만든 분실 AS 접수" data-testid="so-as-link">AS {req.asReceipt.asCode}</Link>}
                 </p>
               </div>
               <div>
@@ -280,7 +283,7 @@ export default function StockOutDetailPage() {
       <div className="mb-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 sm:px-6">
           <h2 className="text-sm font-semibold text-gray-700">출고 품목</h2>
-          <span className="text-xs text-gray-400">{req.items.length}종 · 총 {totalQty}개</span>
+          <span className="text-xs text-gray-400">{req.asReceipt && !req.fulfilledAt && <span className="mr-2 text-teal-700">자리표시 — 출고 처리에서 입력한 본체 시리얼·센서류로 확정됩니다</span>}{req.items.length}종 · 총 {totalQty}개</span>
         </div>
         <table className="min-w-full divide-y divide-gray-100 text-sm">
           <thead className="bg-gray-50">
@@ -312,6 +315,30 @@ export default function StockOutDetailPage() {
           </tbody>
         </table>
       </div>
+
+      {/* 분실 AS 연동 — 접수 기기 라인과 출고 시리얼 (2026-11-10) */}
+      {req.asReceipt && req.asItems.length > 0 && (
+        <div className="mb-4 overflow-hidden rounded-lg border border-teal-200 bg-white shadow-sm" data-testid="so-as-lines">
+          <div className="flex items-center justify-between border-b border-teal-100 bg-teal-50/60 px-4 py-3 sm:px-6">
+            <h2 className="text-sm font-semibold text-teal-800">분실 AS 기기 <span className="font-normal text-teal-600">— <Link href={`/as-receipts/${req.asReceipt.id}`} className="hover:underline">{req.asReceipt.asCode}</Link> · {req.asReceipt.hospital?.hospitalName ?? ''}</span></h2>
+            <span className="text-xs text-teal-700">{req.asItems.length}대 · 출고 완료 {req.asItems.filter((i) => i.newSerialNo).length}대</span>
+          </div>
+          <table className="min-w-full divide-y divide-gray-100 text-sm">
+            <thead className="bg-gray-50"><tr>{['분실 기기', '기기', '병동', '출고 시리얼', '발송일'].map((h) => <th key={h} className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 sm:px-6">{h}</th>)}</tr></thead>
+            <tbody className="divide-y divide-gray-100">
+              {req.asItems.map((l) => (
+                <tr key={l.id}>
+                  <td className="whitespace-nowrap px-4 py-2 font-mono text-xs text-gray-700 sm:px-6">{l.serialNo}</td>
+                  <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-500">{l.device?.deviceInfo?.deviceName ?? l.deviceKind ?? '-'}</td>
+                  <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-500">{l.wardName ?? '-'}</td>
+                  <td className="whitespace-nowrap px-4 py-2 font-mono text-xs">{l.newSerialNo ? <span className="text-teal-700">{l.newSerialNo}</span> : <span className="text-gray-300">출고 대기</span>}</td>
+                  <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-500">{l.shippedAt ? l.shippedAt.slice(0, 10) : '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* 출고 처리 (P2 — 자재담당자, stock_out_request_design.md §13) */}
       {canManage && !req.fulfilledAt && !isTerminal && (
@@ -363,6 +390,7 @@ export default function StockOutDetailPage() {
       <StockOutRequestFormModal
         open={editOpen}
         onClose={() => setEditOpen(false)}
+        lockItems={!!req.asReceipt}
         onSaved={() => { router.refresh(); void load() }}
         project={req.project
           ? { projectCode: req.project.projectCode, projectName: req.project.projectName, hospitalName: req.project.hospital?.hospitalName }

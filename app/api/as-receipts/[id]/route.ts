@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isAsLineLockedByStockOut } from '@/lib/asReceiptShared' // 출고요청 잠금 (2026-11-10)
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isUserOrAbove } from '@/lib/auth'
@@ -247,10 +248,13 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     where: { id },
     include: {
       status: { select: { id: true, name: true, ticketStatus: true } },
-      items: { select: { id: true, serialNo: true, deviceId: true, outcome: true } },
+      items: { select: { id: true, serialNo: true, deviceId: true, outcome: true, stockOutRequest: { select: { sorCode: true, status: { select: { ticketStatus: true } } } } } },
     },
   })
   if (!existing) return NextResponse.json({ error: 'AS접수를 찾을 수 없습니다.' }, { status: 404 })
+  // 활성 출고요청에 묶인 라인이 있으면 삭제 불가 (2026-11-10 — 먼저 출고요청 취소)
+  const lockedLine = existing.items.find((i) => !i.outcome && isAsLineLockedByStockOut(i))
+  if (lockedLine) return NextResponse.json({ error: `출고요청 ${lockedLine.stockOutRequest?.sorCode ?? ''} 처리 대기 중인 라인(${lockedLine.serialNo})이 있어 삭제할 수 없습니다 — 먼저 출고요청을 취소하세요` }, { status: 409 })
 
   // ADMIN 이상 또는 (USER 이상 + as_receipt.admin 권한) — RBAC v1.5 가산, VIEWER 제외
   const adminPerm = isUserOrAbove(user.role) && (await hasPermission(user, 'as_receipt.admin'))

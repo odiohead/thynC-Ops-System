@@ -22,6 +22,7 @@ const notifySelect = {
   project: { select: { projectName: true, hospital: { select: { hospitalName: true } } } },
   subPurpose: true, destType: true, destText: true, recipient: true,
   destHospital: { select: { hospitalName: true } },
+  asReceipt: { select: { asCode: true } }, // 분실 AS 연동 (2026-11-10)
 } as const
 
 type NotifyRow = NonNullable<Awaited<ReturnType<typeof loadById>>>
@@ -35,7 +36,7 @@ function loadByTicket(ticketId: number) {
 
 /** 머리줄 — 병원명만 (2026-11-03 피드백: 프로젝트명·SOR 코드 제거, 병원명 없으면 프로젝트명) */
 // 영업 유형(프로젝트 없음)은 납품처명 — 없으면 "유형·목적" (2026-11-05)
-const titleOf = (r: NotifyRow) => r.project?.hospital?.hospitalName ?? r.project?.projectName ?? stockOutDestName(r) ?? stockOutTitle(r)
+const titleOf = (r: NotifyRow) => `${r.project?.hospital?.hospitalName ?? r.project?.projectName ?? stockOutDestName(r) ?? stockOutTitle(r)}${r.asReceipt ? ` · ${r.asReceipt.asCode}` : ''}` // 분실 AS 연동이면 접수번호 병기 (2026-11-10)
 const ymdKst = (d: Date | null | undefined) => (d ? d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }) : '')
 const purposeOf = (p: string) => STOCK_OUT_PURPOSE_LABELS[p as StockOutPurpose] ?? p
 

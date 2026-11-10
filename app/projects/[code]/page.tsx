@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
+import FileDropZone from '@/app/components/FileDropZone' // 첨부 끌어다 놓기 (2026-11-10)
 // 이슈노트는 위키 임베드로 전환 — 메인→위키 import 승인 예외 (CLAUDE.md 규칙 7 참고)
 import ProjectIssueNotePanel from '@/app/wiki/components/ProjectIssueNotePanel'
 import FieldEngineerSelectModal from '@/app/components/FieldEngineerSelectModal'
@@ -349,10 +350,12 @@ export default function ProjectDetailPage() {
     }
   }
 
-  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? [])
-    const category = pendingCategoryRef.current
-    if (files.length === 0 || !category) return
+  function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    void uploadProjectFiles(pendingCategoryRef.current ?? '', Array.from(e.target.files ?? []))
+  }
+  /** 파일 선택·끌어다 놓기 공용 업로드 — 카테고리별 (2026-11-10) */
+  async function uploadProjectFiles(category: string, files: File[]) {
+    if (files.length === 0 || !category || uploadingCategory) return
 
     setUploadingCategory(category)
     setUploadError(null)
@@ -568,7 +571,7 @@ export default function ProjectDetailPage() {
                   const catFiles = project.files.filter((f) => f.fileCategory === cat.key)
                   const isUploading = uploadingCategory === cat.key
                   return (
-                    <div key={cat.key} className="px-6 py-4">
+                    <FileDropZone key={cat.key} onFiles={(fs) => void uploadProjectFiles(cat.key, fs)} disabled={!!uploadingCategory} className="px-6 py-4" label={`${cat.label}에 첨부`}>
                       <div className="flex items-center justify-between">
                         <h3 className="text-sm font-medium text-gray-700">{cat.label}</h3>
                         <button
@@ -614,7 +617,7 @@ export default function ProjectDetailPage() {
                           ))}
                         </ul>
                       )}
-                    </div>
+                    </FileDropZone>
                   )
                 })}
               </div>
@@ -741,7 +744,7 @@ export default function ProjectDetailPage() {
                 const catFiles = project.files.filter((f) => f.fileCategory === cat.key)
                 const isUploading = uploadingCategory === cat.key
                 return (
-                  <div key={cat.key} className="px-6 py-4">
+                  <FileDropZone key={cat.key} onFiles={(fs) => void uploadProjectFiles(cat.key, fs)} disabled={!!uploadingCategory} className="px-6 py-4" label={`${cat.label}에 첨부`}>
                     <div className="flex items-center justify-between">
                       <h3 className="text-sm font-medium text-gray-700">{cat.label}</h3>
                       <button
@@ -787,7 +790,7 @@ export default function ProjectDetailPage() {
                         ))}
                       </ul>
                     )}
-                  </div>
+                  </FileDropZone>
                 )
               })}
             </div>

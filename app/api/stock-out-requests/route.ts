@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import type { Prisma } from '@prisma/client'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { nextSorCode, validateStockOutLines } from '@/lib/stockOut'
-import { isStockOutPurpose, isStockOutSalesType, STOCK_OUT_SUB_PURPOSES, stockOutTitle, type StockOutPurpose } from '@/lib/stockOutShared'
-import { createTicketForStockOut } from '@/lib/ticket-domains/stockOut'
+import { isStockOutPurpose } from '@/lib/stockOutShared'
+import { createStockOutRequest, StockOutCreateError } from '@/lib/stockOutCreate'
 import { notifyTicketCreated } from '@/lib/notify'
 import { notifyStockOutCreated } from '@/lib/stockOutNotify'
 import { syncTicketClocksSafe } from '@/lib/sla'
@@ -21,6 +20,7 @@ export const dynamic = 'force-dynamic'
 
 const listInclude = {
   project: { select: { projectCode: true, projectName: true, hospital: { select: { hospitalCode: true, hospitalName: true } } } },
+  asReceipt: { select: { id: true, asCode: true } }, // 분실 AS 연동 (2026-11-10)
   destHospital: { select: { hospitalCode: true, hospitalName: true } },
   status: { select: { id: true, name: true, color: true } },
   createdBy: { select: { id: true, name: true } },
@@ -98,136 +98,16 @@ export async function POST(request: NextRequest) {
   if (!user || user.role === 'VIEWER') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()
-
-  // 업무 구분 — 미지정이면 구축(프로젝트 팝업). 영업 유형이면 프로젝트 대신 납품처 축
-  const purpose: StockOutPurpose = body.purpose === undefined || body.purpose === null ? 'BUILD' : body.purpose
-  if (!isStockOutPurpose(purpose)) return NextResponse.json({ error: '업무 구분이 올바르지 않습니다.' }, { status: 400 })
-  const isSales = isStockOutSalesType(purpose)
-
-  // 희망 출고일 필수
-  const requestDate = body.requestDate ? new Date(body.requestDate) : new Date(NaN)
-  if (isNaN(requestDate.getTime())) return NextResponse.json({ error: '희망 출고일을 입력하세요.' }, { status: 400 })
-
-  const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null)
-  let project: { projectCode: string; projectName: string; hospitalCode: string } | null = null
-  let sales: {
-    subPurpose: string; destType: 'HOSPITAL' | 'OTHER'; destHospitalCode: string | null; destText: string | null
-    destHospitalName: string | null; shipAddress: string; recipient: string
-  } | null = null
-
-  if (!isSales) {
-    // 프로젝트 필수 (설계 §2-3 — 프로젝트 업무는 프로젝트 없이 출고요청 불가)
-    const projectCode = typeof body.projectCode === 'string' ? body.projectCode.trim() : ''
-    if (!projectCode) return NextResponse.json({ error: '프로젝트를 선택하세요.' }, { status: 400 })
-    project = await prisma.project.findUnique({
-      where: { projectCode },
-      select: { projectCode: true, projectName: true, hospitalCode: true },
-    })
-    if (!project) return NextResponse.json({ error: '프로젝트를 찾을 수 없습니다.' }, { status: 400 })
-  } else {
-    // 목적 — 유형별 어휘, 1개뿐이면(오산영업소) 미입력 시 자동
-    const options = STOCK_OUT_SUB_PURPOSES[purpose]
-    const subPurpose = typeof body.subPurpose === 'string' && body.subPurpose ? body.subPurpose : options.length === 1 ? options[0].code : ''
-    if (!options.some((o) => o.code === subPurpose)) return NextResponse.json({ error: '목적을 선택하세요.' }, { status: 400 })
-    // 납품처 — 병원(검색 선택) 또는 기타(텍스트)
-    const destType = body.destType
-    let destHospitalCode: string | null = null
-    let destHospitalName: string | null = null
-    let destText: string | null = null
-    if (destType === 'HOSPITAL') {
-      const code = typeof body.destHospitalCode === 'string' ? body.destHospitalCode.trim() : ''
-      const h = code ? await prisma.hospital.findUnique({ where: { hospitalCode: code }, select: { hospitalCode: true, hospitalName: true } }) : null
-      if (!h) return NextResponse.json({ error: '납품처 병원을 검색해서 선택하세요.' }, { status: 400 })
-      destHospitalCode = h.hospitalCode
-      destHospitalName = h.hospitalName
-    } else if (destType === 'OTHER') {
-      destText = str(body.destText, 200)
-      if (!destText) return NextResponse.json({ error: '납품처를 입력하세요.' }, { status: 400 })
-    } else {
-      return NextResponse.json({ error: '납품처 구분(병원/기타)을 선택하세요.' }, { status: 400 })
-    }
-    const shipAddress = str(body.shipAddress, 500)
-    if (!shipAddress) return NextResponse.json({ error: '수령지를 입력하세요.' }, { status: 400 })
-    const recipient = str(body.recipient, 100)
-    if (!recipient) return NextResponse.json({ error: '수취인을 입력하세요.' }, { status: 400 })
-    sales = { subPurpose, destType, destHospitalCode, destText, destHospitalName, shipAddress, recipient }
-  }
-
-  let items: { inventoryItemId: number; quantity: number }[]
+  // 검증·발번·라인·연결 티켓은 공용 코어(lib/stockOutCreate.ts — 분실 AS [출고요청]과 동일 경로, 2026-11-10). 수동 생성은 AS 연결 없음
+  let created: { id: number; sorCode: string; ticketId: number; title: string }
   try {
-    items = await validateStockOutLines(body.items, purpose)
+    created = await createStockOutRequest({ ...body, asReceiptId: null }, { userId: user.userId, name: user.name })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 })
+    if (e instanceof StockOutCreateError) return NextResponse.json({ error: e.message }, { status: e.status })
+    throw e
   }
-
-  // 상태 — 지정 시 카테고리 검증, 미지정이면 '요청'
-  let statusId: number | null = null
-  if (body.statusId !== undefined && body.statusId !== null && body.statusId !== '') {
-    const sid = Number(body.statusId)
-    const row = Number.isInteger(sid)
-      ? await prisma.statusCode.findFirst({ where: { id: sid, category: 'STOCK_OUT_STATUS' }, select: { id: true } })
-      : null
-    if (!row) return NextResponse.json({ error: '상태가 올바르지 않습니다.' }, { status: 400 })
-    statusId = row.id
-  } else {
-    const req = await prisma.statusCode.findFirst({ where: { category: 'STOCK_OUT_STATUS', name: '요청' }, select: { id: true } })
-    statusId = req?.id ?? null
-  }
-  const statusRow = statusId ? await prisma.statusCode.findUnique({ where: { id: statusId }, select: { name: true } }) : null
-
-  const note = typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null
-  const title = stockOutTitle({
-    purpose, subPurpose: sales?.subPurpose, project,
-    destType: sales?.destType, destText: sales?.destText,
-    destHospital: sales?.destHospitalName ? { hospitalName: sales.destHospitalName } : null,
-  })
-
-  // 레코드+라인+연결 티켓 단일 트랜잭션 — 티켓 없는 출고요청을 만들지 않는다. 발번 P2002 1회 재시도.
-  let created!: { id: number; sorCode: string }
-  let ticketId!: number
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const result = await prisma.$transaction(async (tx) => {
-        const sor = await tx.stockOutRequest.create({
-          data: {
-            sorCode: await nextSorCode(tx),
-            projectCode: project?.projectCode ?? null,
-            purpose,
-            ...(sales
-              ? {
-                  subPurpose: sales.subPurpose, destType: sales.destType, destHospitalCode: sales.destHospitalCode,
-                  destText: sales.destText, shipAddress: sales.shipAddress, recipient: sales.recipient,
-                }
-              : {}),
-            statusId,
-            requestDate,
-            note,
-            createdById: user.userId,
-          },
-        })
-        await tx.stockOutRequestItem.createMany({ data: items.map((l) => ({ requestId: sor.id, ...l })) })
-        const tid = await createTicketForStockOut(tx, {
-          id: sor.id,
-          sorCode: sor.sorCode,
-          title,
-          hospitalCode: project?.hospitalCode ?? sales?.destHospitalCode ?? null,
-          statusName: statusRow?.name ?? null,
-          statusId: sor.statusId,
-          note: sor.note,
-          requestDate: sor.requestDate,
-          resolvedAt: null,
-          createdAt: sor.createdAt,
-        }, user.userId, 'domain')
-        return { sor, tid }
-      })
-      created = result.sor
-      ticketId = result.tid
-      break
-    } catch (err) {
-      if (attempt === 0 && err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') continue
-      throw err
-    }
-  }
+  const ticketId = created.ticketId
+  const title = created.title
 
   const stockOutRequest = await prisma.stockOutRequest.findUnique({ where: { id: created.id }, include: listInclude })
 

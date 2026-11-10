@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { unlinkAsLinesFromStockOut } from '@/lib/asReceiptService' // 분실 AS 연동 — 취소·삭제 시 라인 잠금 해제 (2026-11-10)
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
@@ -21,6 +22,9 @@ type Params = { params: { id: string } }
 
 const detailInclude = {
   project: { select: { projectCode: true, projectName: true, hospital: { select: { hospitalCode: true, hospitalName: true } } } },
+  // 분실 AS 연동 (2026-11-10 — as_lost_stock_out_link_design.md §5.1): 접수·묶인 라인(출고 처리 카드 AS 모드의 본체 목록)
+  asReceipt: { select: { id: true, asCode: true, category: true, hospital: { select: { hospitalCode: true, hospitalName: true } } } },
+  asItems: { select: { id: true, serialNo: true, outcome: true, newSerialNo: true, wardName: true, deviceKind: true, shippedAt: true, device: { select: { deviceInfo: { select: { deviceName: true } } } } }, orderBy: { id: 'asc' as const } },
   destHospital: { select: { hospitalCode: true, hospitalName: true } },
   status: { select: { id: true, name: true, color: true, ticketStatus: true } },
   createdBy: { select: { id: true, name: true } },
@@ -130,11 +134,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
         if (!terminal && existing.resolvedAt) data.resolvedAt = null
       }
     }
-    if (body.items !== undefined) items = await validateStockOutLines(body.items, existing.purpose as StockOutPurpose, existing.items.map((l) => l.inventoryItemId))
+    if (body.items !== undefined) {
+      if (existing.asReceiptId) return NextResponse.json({ error: '분실 AS 연동 출고요청의 품목은 출고 처리 시 입력한 시리얼로 정해집니다 — 품목을 직접 수정할 수 없습니다.' }, { status: 400 }) // 2026-11-10
+      items = await validateStockOutLines(body.items, existing.purpose as StockOutPurpose, existing.items.map((l) => l.inventoryItemId))
+    }
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 })
   }
 
+  // 상태가 '취소'로 바뀌면 묶인 AS 라인 잠금 해제 (2026-11-10 — 분실 AS 연동)
+  const nextStatusName = data.statusId && data.statusId !== existing.statusId ? (await prisma.statusCode.findUnique({ where: { id: data.statusId as number }, select: { name: true } }))?.name ?? null : null
+  let unlinked = 0
   // 갱신 + 라인 교체 + 티켓 동기화(어댑터 경유 — 규칙 3)를 한 트랜잭션으로
   await prisma.$transaction(async (tx) => {
     await tx.stockOutRequest.update({ where: { id }, data })
@@ -142,6 +152,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       await tx.stockOutRequestItem.deleteMany({ where: { requestId: id } })
       await tx.stockOutRequestItem.createMany({ data: items.map((l) => ({ requestId: id, ...l })) })
     }
+    if (existing.asReceiptId && nextStatusName === '취소') unlinked = await unlinkAsLinesFromStockOut(tx, id, { userId: user.userId, name: user.name }, '취소')
     await syncStockOutToTicket(tx, id, user.userId)
   })
 
@@ -155,7 +166,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     resourceId: existing.sorCode,
     resourceLabel: `${existing.sorCode}`,
     before: existing,
-    after: stockOutRequest,
+    after: { ...stockOutRequest, ...(unlinked ? { asUnlinked: unlinked } : {}) },
   })
 
   if (existing.ticketId) {
@@ -184,6 +195,8 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: '삭제 권한이 없습니다. 본인 요청은 완료·취소 전까지만 삭제할 수 있습니다.' }, { status: 403 })
   }
 
+  // 분실 AS 연동 요청이면 묶인 라인 잠금 해제 + 접수 비고 (FK SET NULL이 링크는 지우지만 비고 기록을 위해 먼저) (2026-11-10)
+  if (existing.asReceiptId) await prisma.$transaction((tx) => unlinkAsLinesFromStockOut(tx, id, { userId: user.userId, name: user.name }, '삭제'))
   await prisma.stockOutRequest.delete({ where: { id } }) // 라인은 FK CASCADE
 
   // 연결 티켓도 삭제 (도메인과 생명주기 공유 — 유지보수 P5·VOC 선례)

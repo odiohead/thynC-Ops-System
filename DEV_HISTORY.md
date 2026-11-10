@@ -4,6 +4,53 @@
 
 ---
 
+## 2026-11-10 18:30 | 분실 AS ↔ 출고업무 연동 — 분실 접수 [출고요청] → 출고 처리(AS 모드) → AS 교체 자동 확정 (설계 `projects/as_lost_stock_out_link_design.md`, dev2 빌드)
+
+- **배경·정책**: 분실 AS의 기기 제공은 다른 부서가 출고업무(판매용 재고)로 처리 → 수동으로 출고요청 만들고 교체기 시리얼을 다시 적던 흐름을 연동. 결정 D1 분실 접수 처리방법에서 '교체' 숨김(UI, 출고요청 단일 경로) · D2 같은 기기군이면 모델 무관 허용(품목은 출고 시리얼 기준 자동 보정) · D3 송장은 AS 발송정보에서 추후 입력 · D4 센서류는 출고 시 자재담당자 선택 · D6 요청 취소·삭제 시 잠금 해제
+- **DB** `20261110160000_as_stock_out_link`: `stock_out_requests.as_receipt_id`(FK as_receipts SET NULL) · `as_receipt_items.stock_out_request_id`(FK SET NULL) + 인덱스 (dev2 적용·resolve, PROD 미적용). 시리얼 매핑은 완료 시 기존 교체기 컬럼에 기록(별도 테이블 없음)
+- **생성 공용 코어** `lib/stockOutCreate.ts`(신규): `prepareStockOutCreate`(검증)·`createStockOutRequestIn`(레코드+라인+티켓, tx 주입)·`createStockOutRequest`(단독, P2002 재시도) — `POST /api/stock-out-requests`가 이 코어를 호출하도록 교체(동작 동일), 분실 AS 경로와 같은 함수
+- **AS 서비스**(lib/asReceiptService.ts): `createStockOutForAsLines`(분실·미종결·미잠금 라인 → 기기군별 판매용 노출 본체 **자리표시 품목**(분실 기기 모델 일치 우선, 없으면 기기군 첫 품목, 0이면 409 설정 안내) → 판매용·LOST_REPLACE·납품처 접수 병원 출고요청 + 라인 `stock_out_request_id` + 비고 `[출고요청 …]`) · `resolveAsLines` 코어를 **`resolveAsLinesIn(tx, …, { viaStockOutRequestId })`** 로 분리(출고 실행이 같은 트랜잭션에서 호출) · 활성 출고요청 잠금 가드(`isAsLineLockedByStockOut`·`ACTIVE_STOCK_OUT_WHERE`): 초안·확정·시리얼 보정·라인 제거/병원 변경·분할 이동·접수 삭제 전부 409 · `unlinkAsLinesFromStockOut`(취소·삭제 시 해제 + 비고)
+- **출고 코어**(lib/stockOutFulfill.ts) **AS 모드**: `FulfillInput.asLines[{asItemId, serial}]`·`extraLines[]`. `buildAsMode` — 접수 라인별 시리얼 판정(형식·중복·분실 기기와 동일·판매용 노출 본체 재고 IN_STOCK·**같은 기기군**·타 병원 ACTIVE) → 시리얼이 결정한 품목×개수 + 센서류 입력을 **가상 라인**으로 만들어 기존 판정·전표 엔진 재사용(`previewCore`). 실행: 자리표시 품목을 가상 라인으로 덮어쓰기 → WMS OUT 전표(기존) → 본체는 `registerDevicesIn` 대신 **`resolveAsLinesIn(REPLACE, newSerial, 발송일=출고일, 택배)`**(구기기 분실 회수·새 기기 REGISTER 관련 기기·계약건 승계·'발송완료' 자동 전이) → AS 비고 `[출고 완료 …] SOR : A→B …` → 요청 완료(기존). preview에 `asLink`(접수·라인 판정)·`extraCatalog`(판매용 노출 중 본체 제외)·`asBodyItemIds`
+- **API**: `POST /api/as-receipts/[id]/stock-out-request {itemIds, requestDate, shipAddress?, recipient?, note?}`(신규, VIEWER 제외 — 감사 2건·출고 생성 알림) · AS 상세 라인에 `stockOutRequest {id, sorCode, status}` · 타임라인 '출고요청 생성' · 출고 상세 GET `asReceipt`·`asItems` · PUT: AS 연동 요청 품목 수정 400, 상태 '취소' 시 라인 해제 · DELETE: 해제 비고 후 삭제 · 목록 `asReceipt` · 알림 머리줄 `· AS-…`
+- **화면**: AS 상세 — 분실 접수 처리방법 **출고요청 / 분실종결 / 라인취소**(`asResolveUiOptionsFor`, 교체 숨김) → [출고요청 (n대)] → `AsStockOutRequestModal`(**대상 라인 체크리스트** — 기기군 카드가 나뉘어 있어 카드 선택분은 미리 체크, 다른 기기군 라인은 모달에서 추가해 한 번에 요청 · 희망 출고일·수령지·수취인·비고 프리필). 잠긴 라인은 체크 불가 + 결과 셀 '출고요청 SOR-… · 상태' 링크 배지, 교체 확정 후 SOR 링크 병기, '구분' 필드에 연결 출고요청 칩 · 출고 상세 — '유형·목적'에 `AS AS-…` 칩, '분실 AS 기기' 카드(분실 기기 → 출고 시리얼·발송일), 품목 카드 자리표시 안내, 수정 모달 품목 숨김(`lockItems`) · `FulfillCard` AS 모드 — ① 본체: 접수 기기마다 출고 시리얼 1개 → [본체 확인] ② 센서류·부자재(선택): 판매용 노출 품목 선택·수량·LOT/시리얼 → [확인] → [출고 실행 + AS 교체 확정] · 출고 목록 AS 코드 칩
+- **검증**: `scripts/as-stock-out-link-smoke.mts` 32/32(출고요청 생성·자리표시·잠금 4종·고장 400·분실종결 병행·preview pending/기기군 불일치/미등록/중복·실행 → 요청 완료·품목 보정·전표·AS REPLACE 매핑·발송일·원장·WMS OUT·헤더 발송완료·분실 수량 +2·되찾음 가능·재실행 409·취소 해제) — WMS 입고까지 포함해 전부 정리 · tsc · dev2 빌드 · Playwright 화면
+- 영향 파일: prisma/schema.prisma, prisma/migrations/20261110160000_as_stock_out_link, lib/stockOutCreate.ts(신규), lib/asReceiptService.ts, lib/asReceiptShared.ts, lib/asReceiptQueue.ts, lib/stockOutFulfill.ts, lib/stockOutNotify.ts, app/api/stock-out-requests/route.ts·[id]/route.ts, app/api/as-receipts/[id]/stock-out-request/route.ts(신규)·[id]/route.ts·[id]/timeline/route.ts, app/as-receipts/_components/AsStockOutRequestModal.tsx(신규), app/as-receipts/[id]/page.tsx, app/stock-out-requests/_components/FulfillCard.tsx·StockOutRequestFormModal.tsx, app/stock-out-requests/[id]/page.tsx·page.tsx, scripts/as-stock-out-link-smoke.mts(신규), README.md, projects/README.md
+
+## 2026-11-10 15:20 | 파일 첨부 끌어다 놓기(드래그앤드롭) — 공용 `FileDropZone` + 첨부 화면 6곳 적용 (수정만 — 빌드는 일괄)
+
+- **요청**: 프로젝트에서 출고요청 등록할 때 첨부가 클릭 선택만 가능 → 끌어다 놓기 지원, 다른 첨부 영역도 동일하게
+- **공용 컴포넌트** `app/components/FileDropZone.tsx`: 자식 영역에 파일 드래그 진입 시 강조(ring·배경) + 가운데 '여기에 놓으면 첨부됩니다' 배지, 드롭 시 `onFiles(File[])`. 파일이 아닌 드래그 무시, 자식 진입/이탈 깜박임은 depth 카운터로 방지, `disabled`면 무반응. 기존 숨은 input·클릭 선택은 호출부 그대로(업로드 함수를 `uploadFiles(File[])`로 분리해 두 경로가 공유)
+- **적용**: 출고요청 등록 모달 대기 첨부(`StockOutRequestFormModal` — 프로젝트 상세·출고업무 공통, 버튼 문구 '파일 선택 또는 끌어다 놓기') · 프로젝트 상세 첨부파일 카드(견적서/계약서 + 카테고리별 행 — 행 위에 놓으면 그 카테고리로 업로드) · 답사(`SiteVisitForm` MultiFileField) · 기타업무(`EtcTaskForm`) · 설치계획(`InstallPlanForm` FileField) · 유지보수(`MaintenanceForm`) — 저장 전(ID 없음)·권한 없음·업로드 중은 비활성. 이미 지원하던 곳(출고요청 상세 첨부 패널·딜 첨부·주간업무 첨부·VOC 주간보고·게이트웨이 플래너)은 그대로
+- **검증**: tsc 통과. 화면(드롭 시뮬레이션)은 일괄 빌드 후 Playwright로 확인 예정
+- 영향 파일: app/components/FileDropZone.tsx(신규), app/stock-out-requests/_components/StockOutRequestFormModal.tsx, app/projects/[code]/page.tsx, app/site-visits/SiteVisitForm.tsx, app/etc-tasks/EtcTaskForm.tsx, app/install-plans/InstallPlanForm.tsx, app/maintenances/MaintenanceForm.tsx
+
+## 2026-11-10 11:30 | 분실기기 되찾음 — 분실 접수 교체 확정 라인 [되찾음] + 분실 수량 단일 정의 (설계 `projects/as_lost_found_design.md`, dev2 빌드)
+
+- **배경(PROD 실측 11-09)**: 분실 10% 한도 분자가 "취소 아닌 분실 접수의 교체 확정 라인 수"라 되찾은 기기를 되돌릴 경로가 접수 취소뿐(리오픈·원장 보정은 집계 불변). 병원 상세 블록(확정만)과 AS 상세 '구분'(이 접수 제외 → 미종결 포함)이 다른 숫자를 보였음(더자인 0 vs 0→5 등)
+- **정책(사용자 확정)**: 교체기기 발송 후 되찾으면 **되찾은 기기를 병원이 계속 쓰고 교체기기는 회수**(2대 사용 없음). 발송 전 되찾음은 기존 라인 취소. 추천안 D1(이력 이관 라인 버튼 숨김)·D2(즉시 회수 기록)·D3(outcome FOUND) 채택
+- **DB**: outcome CHECK에 `FOUND`, `found_at`·`found_by_id`·`recall_tracking_no`·`recall_received_at`, CHECK `(outcome='FOUND') = (found_at IS NOT NULL)` — 마이그 `20261110090000_as_item_found` (dev2 적용·resolve, PROD 미적용)
+- **서비스** `markAsLineFound`(lib/asReceiptService.ts): 분실 접수·REPLACE 라인·교체기기 별도 유닛만(`canMarkAsLineFound`) → 되찾은 기기 LOST·미배치 검증, 교체기기 이 병원 ACTIVE + 되돌림 게이트(`ownsDeviceState`) → ① 교체기기 `recoverDevice`(사유 RETURN, related=되찾은 기기) ② 되찾은 기기 `registerDevicesIn` 재배치(LOST→IN_USE, 교체기기 배치의 계약건·상품유형 승계, 병동 = 입력/교체기기 병동/라인 병동) ③ 라인 REPLACE→FOUND(교체 이력 보존)·비고 이력. 한 트랜잭션, 헤더 상태 불변
+- **한도 단일 정의**(lib/asLostQuota.ts): 분자 = 병원 분실 접수의 교체 확정 라인(**이 접수 포함**, FOUND 자동 제외) — 종전 `r.id <> receipt.id` 분기 제거. `thisReceipt` = 이 접수 미종결 라인만('처리 시 n+k' 보조). 병원 블록(id 0)과 접수 상세가 같은 숫자
+- **API** `POST /api/as-receipts/[id]/found {itemId, foundAt?, wardName?, recallTrackingNo?, memo?}` (VIEWER 제외) — 감사 `되찾음`, 타임라인 '분실기기 되찾음', SLA 시계 동기화. 상세 조회 라인에 `foundAt·foundBy·recallTrackingNo·recallReceivedAt`
+- **화면**: AS 상세 라인 결과 셀에 [되찾음] 버튼(분실·교체 확정·별도 유닛, 종결 접수도) → `AsFoundModal`(되찾은 날·복귀 병동·회수 송장·메모·요약 confirm). 결과 배지 '되찾음'(툴팁에 처리일·회수 정보), 교체 시리얼 취소선. '구분' 필드 주 숫자 = 병원 분실 수량(병원 블록과 동일), 미종결 있을 때만 `→ 이 접수 미종결 k대 처리 시`. 상단 정책 배너·툴팁 문구 동일 정의로 갱신. 병원 블록 툴팁 '되찾음 제외 · 접수 상세와 같은 숫자'. `AS_REPAIR_EXCLUDED_OUTCOMES`에 FOUND(회수기기 처리 대상 아님)
+- **검증**: `scripts/as-found-smoke.mts` 19/19(교체 확정 → 분실 수량 +1·두 화면 동일 → 거부 4종 → 되찾음 → FOUND·IN_USE 복귀 병동·교체기기 RECOVERED(RETURN, related)·분실 수량 −1·비고 → 재되찾음 409), tsc, dev2 빌드, Playwright 화면
+- 영향 파일: prisma/schema.prisma, prisma/migrations/20261110090000_as_item_found, lib/asReceiptShared.ts, lib/asLostQuota.ts, lib/asReceiptService.ts, lib/asReceiptQueue.ts(상세 select), app/api/as-receipts/[id]/found/route.ts(신규), app/api/as-receipts/[id]/timeline/route.ts, app/as-receipts/_components/AsFoundModal.tsx(신규), app/as-receipts/[id]/page.tsx, app/hospitals/[code]/_components/HospitalAsSummary.tsx, scripts/as-found-smoke.mts(신규), README.md, projects/README.md
+
+## 2026-11-09 18:10 | AS접수 검색 — 교체 발송기기 시리얼로도 접수 검색 (수정만 — 빌드는 일괄)
+
+- **요구**: 접수된 기기 시리얼뿐 아니라 교체로 나간 기기 시리얼로도 AS 접수 레코드를 찾고 싶음
+- **조치**: `lib/asReceiptSearch.ts` `buildAsReceiptSearchOr`의 시리얼 조건을 `serial_no OR new_serial_no(교체 확정) OR draft_new_serial_no(교체 초안)`로 확장 — 항목 '시리얼번호'와 '통합검색' 모두 적용, 목록·Excel export 공용 헬퍼라 둘 다 반영. 대소문자 무시·부분 일치·쉼표 복수 키워드 동일. 라벨 주석·placeholder 문구 갱신(`lib/asReceiptShared.ts`)
+- **검증**: dev2 DB 스모크 — 교체 시리얼로 원 접수 검색, 소문자·부분 일치, '접수번호' 항목은 비대상 유지 (5/5). tsc 통과
+- 영향 파일: lib/asReceiptSearch.ts, lib/asReceiptShared.ts
+
+## 2026-11-09 17:40 | 알림 벨 패널 위치 수정 — 사이드바 하단은 위로, 모바일 헤더는 뷰포트 고정 (수정만 — 빌드는 다른 건과 일괄)
+
+- **증상**: 좌측 하단(사이드바) 알림 벨을 눌러도 상세가 안 보임. Playwright 실측(수정 전): 데스크탑 패널 x=-137·y=848(뷰포트 900) → 화면 아래·왼쪽 밖, 모바일 헤더 패널 x=-22 → 왼쪽 22px 잘림
+- **원인**: `NotificationBell` 패널이 항상 벨 **아래·오른쪽 끝 정렬**(`absolute right-0 mt-2`). 사이드바 하단 벨은 아래 공간이 없고, 벨 오른쪽에 다른 버튼이 있어 폭 320px 패널이 왼쪽으로 넘침
+- **조치**: `placement` prop 추가 — `sidebar`(데스크탑 사이드바·드로어 하단): 벨 위로(`absolute bottom-full left-0 mb-2`) 본문 쪽으로 펼침 / `header`(모바일 상단, 기본): 뷰포트 기준 `fixed left-4 right-4 top-16`, sm 이상은 오른쪽 정렬 w-80. Navigation 사이드바 호출부에 `placement="sidebar"`. 패널 testid `notification-panel`
+- **검증**: tsc 통과. 화면 검증(`scratchpad/ui-bell.mjs after`)은 일괄 빌드 후 수행 예정
+- 영향 파일: app/components/NotificationBell.tsx, app/components/Navigation.tsx
+
 ## 2026-11-09 16:10 | 출고요청 등록 폼 — 품목명 잘림 해소 (줄바꿈 + 모델명 보조 표기)
 
 - **문제**: 품목명이 `산소포화도센서(평가용)_MP2000R`처럼 식별부(용도·모델)가 끝에 있는데 PC 모달(2열 그리드)·모바일 등록 화면이 `truncate`로 앞부분만 보여 비슷한 이름끼리 구분 불가

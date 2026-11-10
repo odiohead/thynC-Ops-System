@@ -5,11 +5,12 @@
  * "이 접수 이전 제공 / 구매수량 (%)"를 표기하고, 이미 초과했거나 이 접수를 교체 처리하면 초과하는 경우 식별 표시.
  *
  * - 분모(구매수량) = 계약완료 딜의 `sales_deal_devices.quantity` 합(기기군별). 행이 없는 병원은 null('구매수량 미등록') — 사용자 결정: 원장 배치 수로 대체하지 않음
- * - 분자(이전 제공) = 같은 병원의 다른 분실 접수(취소 제외) 라인 중 결과가 '제공'(`AS_LOST_PROVIDED_OUTCOMES` = REPLACE·REPAIR_RETURN) 대수
+ * - 분자(병원 분실 수량, 2026-11-10 단일 정의 — as_lost_found_design.md §4) = 같은 병원의 분실 접수(취소 제외, **이 접수 포함**) 라인 중 결과가 '제공'(`AS_LOST_PROVIDED_OUTCOMES` = REPLACE·REPAIR_RETURN) 대수.
+ *   되찾음(FOUND) 라인은 outcome이 바뀌므로 자동 제외. 병원 상세 블록(receipt id 0)과 접수 상세가 **같은 숫자**를 보인다 (종전엔 접수 상세가 자기 접수를 빼서 달랐음)
  *   · REPAIR_RETURN을 포함하는 이유(2026-10-30 센트럴병원 HOSP-000076 사례): thynC AS이력 마이그(IMPORT)는 "발송기기(W) = 접수 시리얼(F)"이면 수리반환으로
  *     분류했는데, 분실 행은 CS가 새 기기에 분실 기기의 시리얼 라벨을 승계해 W에 같은 시리얼을 적는 관행이라 실제로는 전부 새 기기 제공(196라인·55곳).
  *     분실 기기를 수리해 돌려주는 경우는 없으므로 분실 접수의 수리반환 = 제공으로 본다 (앱에서는 분실 접수에 수리반환 선택 자체를 막음 — `asResolveOutcomesFor`)
- * - 이 접수 = 미종결 라인 전부 + 이미 제공 확정된 라인 (분실 접수는 교체 발송이 기본이므로 미종결 라인은 전부 교체 예정으로 본다)
+ * - 이 접수(thisReceipt) = 미종결 라인 수만 (교체 예정 — '처리 시 n+k' 보조 표기·사전 경고용). 확정 라인은 이미 분자에 들어 있다
  * - 기기군 접기는 asDeviceGroupOf(원장 모델명 → 미등록 라인 기기종류 → 시리얼 접두) 단일 소스
  */
 import { prisma } from '@/lib/prisma'
@@ -29,11 +30,11 @@ export async function computeAsLostQuota(receipt: { id: number; hospitalCode: st
       SELECT di.device_name, i.device_kind, i.serial_no
       FROM as_receipt_items i JOIN as_receipts r ON r.id = i.receipt_id LEFT JOIN status_codes s ON s.id = r.status_id
       LEFT JOIN device_units du ON du.id = i.device_id LEFT JOIN device_info di ON di.id = du.device_info_id
-      WHERE r.hospital_code = ${receipt.hospitalCode} AND r.category = 'LOST' AND r.id <> ${receipt.id} AND i.outcome IN (${PROVIDED}) AND coalesce(s.name, '') <> '취소'`,
+      WHERE r.hospital_code = ${receipt.hospitalCode} AND r.category = 'LOST' AND i.outcome IN (${PROVIDED}) AND coalesce(s.name, '') <> '취소'`,
     prisma.$queryRaw<{ device_name: string | null; device_kind: string | null; serial_no: string }[]>`
       SELECT di.device_name, i.device_kind, i.serial_no
       FROM as_receipt_items i LEFT JOIN device_units du ON du.id = i.device_id LEFT JOIN device_info di ON di.id = du.device_info_id
-      WHERE i.receipt_id = ${receipt.id} AND (i.outcome IS NULL OR i.outcome IN (${PROVIDED}))`,
+      WHERE i.receipt_id = ${receipt.id} AND i.outcome IS NULL`,
   ])
   const purchased = new Map<AsDeviceGroup, number>()
   for (const r of purchasedRows) { const g = asDeviceGroupOf(r.device_name, null); purchased.set(g, (purchased.get(g) ?? 0) + Number(r.qty)) }

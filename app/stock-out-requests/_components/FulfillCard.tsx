@@ -4,8 +4,12 @@
  * 출고 처리 카드 (stock_out_request_design.md §13.4 · v2 stock_out_v2_design.md §5·§7 — 자재담당자 전용)
  * v2: 출고유형 선택 없음 — 인벤토리는 요청 라인의 자재관리 품목이 결정(인벤토리별 전표 분리, 전표 유형 자동).
  * 열리면 바로 미리보기 → 품목별 입력 후 **[확인]**(라인 단위 검증·잠금) → 전 품목 확인 완료 시 [출고 실행] (전량 일치·all-or-nothing).
+ * **AS 모드 (2026-11-10 — projects/as_lost_stock_out_link_design.md §5.2)**: 분실 AS 연동 요청(`preview.asLink`)이면 품목 라인 대신
+ *  ① 본체 — 접수 기기(심전계·산소포화도)마다 출고 시리얼 1개 → [본체 확인]  ② 센서류·부자재(선택) — 판매용 노출 품목에서 추가·LOT/수량 → [확인]
+ *  [출고 실행]이 재고 차감 + AS 라인 교체 확정(교체기 기입·원장)까지 한 번에 처리한다.
  */
 import { useState, useCallback, useEffect } from 'react'
+import Link from 'next/link'
 
 interface Bucket { warehouseId: number; warehouseName: string; lotNo: string; quantity: number }
 interface PreviewLine {
@@ -23,12 +27,19 @@ interface PreviewLine {
   status: 'ok' | 'warning' | 'error' | 'pending'
   messages: string[]
 }
+interface AsLinePreview { asItemId: number; lostSerialNo: string; deviceGroup: string; deviceName: string | null; wardName: string | null; serial: string | null; itemName: string | null; status: 'ok' | 'error' | 'pending'; messages: string[] }
+interface ExtraCatalogItem { inventoryItemId: number; name: string; modelName: string | null; inventoryName: string; categoryName: string | null; mode: 'serial' | 'lot' | 'qty'; buckets: Bucket[]; stockTotal: number }
 interface Preview {
   inventories: { id: number; name: string; reasonName: string; usageInput: string }[]
   lines: PreviewLine[]
   errors: string[]
   ok: boolean
+  /** 분실 AS 연동 (AS 모드) */
+  asLink?: { receipt: { id: number; asCode: string; hospitalName: string | null }; lines: AsLinePreview[] } | null
+  extraCatalog?: ExtraCatalogItem[]
+  asBodyItemIds?: number[]
 }
+interface ExtraRow { inventoryItemId: number; quantity: string }
 
 interface LotRow { bucketKey: string; quantity: string } // bucketKey = `${warehouseId}|${lotNo}`
 
@@ -68,6 +79,12 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
   const [preview, setPreview] = useState<Preview | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // AS 모드 (2026-11-10)
+  const [asSerials, setAsSerials] = useState<Record<number, string>>({}) // asItemId → 출고 시리얼
+  const [bodyConfirmed, setBodyConfirmed] = useState(false)
+  const [extras, setExtras] = useState<ExtraRow[]>([]) // 센서류·부자재 추가 라인
+  const [extraPick, setExtraPick] = useState('')
+  const asMode = !!preview?.asLink
 
   const buildLines = useCallback((p: Preview | null) => {
     if (!p) return []
@@ -84,20 +101,33 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
     }))
   }, [serialText, lotRows, noteText])
 
+  /** AS 모드 본문 — 접수 라인별 시리얼 + 센서류 라인 (일반 모드는 lines) */
+  const buildAsBody = useCallback(() => ({
+    txDate,
+    asLines: Object.entries(asSerials).filter(([, v]) => v.trim()).map(([k, v]) => ({ asItemId: Number(k), serial: v.trim().toUpperCase() })),
+    extraLines: extras.filter((e) => e.inventoryItemId && e.quantity !== '').map((e) => ({
+      inventoryItemId: e.inventoryItemId, quantity: parseInt(e.quantity) || 0,
+      serials: (serialText[e.inventoryItemId] ?? '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean),
+      lots: (lotRows[e.inventoryItemId] ?? []).filter((r) => r.bucketKey && r.quantity !== '').map((r) => { const [wh, ...lot] = r.bucketKey.split('|'); return { warehouseId: Number(wh), lotNo: lot.join('|'), quantity: parseInt(r.quantity) || 0 } }),
+      serialsNote: (noteText[e.inventoryItemId] ?? '').trim() || null,
+    })),
+  }), [txDate, asSerials, extras, serialText, lotRows, noteText])
+
   const callPreview = useCallback(async (withLines: boolean, base: Preview | null) => {
     setBusy(true)
     setError(null)
+    const body = base?.asLink ? buildAsBody() : { txDate, lines: withLines ? buildLines(base) : [] }
     const res = await fetch(`/api/stock-out-requests/${requestId}/fulfill?preview=true`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ txDate, lines: withLines ? buildLines(base) : [] }),
+      body: JSON.stringify(body),
     })
     const d = await res.json().catch(() => ({}))
     setBusy(false)
     if (!res.ok) { setError(d.error ?? '검증에 실패했습니다.'); return null }
     setPreview(d.preview)
     return d.preview as Preview
-  }, [requestId, txDate, buildLines])
+  }, [requestId, txDate, buildLines, buildAsBody])
 
   // 카드가 열리면 바로 미리보기 (v2 — 출고유형 선택 단계 없음)
   useEffect(() => { void callPreview(false, null) }, [requestId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -123,13 +153,13 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
 
   async function execute() {
     if (!preview) return
-    if (!confirm('출고를 실행합니다. 재고 차감·기기현황 등록·요청 완료 처리가 한 번에 진행됩니다.')) return
+    if (!confirm(preview.asLink ? `출고를 실행합니다.\n재고 차감 + 분실 AS ${preview.asLink.receipt.asCode} 라인 교체 확정(교체기 시리얼 기입·분실 기기 회수·새 기기 병원 배치) + 요청 완료가 한 번에 진행됩니다.` : '출고를 실행합니다. 재고 차감·기기현황 등록·요청 완료 처리가 한 번에 진행됩니다.')) return
     setBusy(true)
     setError(null)
     const res = await fetch(`/api/stock-out-requests/${requestId}/fulfill`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ txDate, lines: buildLines(preview) }),
+      body: JSON.stringify(preview.asLink ? buildAsBody() : { txDate, lines: buildLines(preview) }),
     })
     const d = await res.json().catch(() => ({}))
     setBusy(false)
@@ -141,7 +171,24 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
     onDone()
   }
 
-  const allConfirmed = !!preview && preview.lines.length > 0 && preview.lines.every((l) => confirmed.has(l.inventoryItemId))
+  /** AS 모드 — [본체 확인]: 시리얼 전부 입력 후 서버 판정, 전부 ok면 잠금 */
+  async function confirmBody() {
+    if (!preview?.asLink) return
+    const missing = preview.asLink.lines.filter((l) => !(asSerials[l.asItemId] ?? '').trim())
+    if (missing.length) { setError(`출고 시리얼을 입력하지 않은 기기가 ${missing.length}대 있습니다: ${missing.map((l) => l.lostSerialNo).join(', ')}`); return }
+    const p = await callPreview(true, preview)
+    if (p?.asLink && p.asLink.lines.every((l) => l.status === 'ok')) setBodyConfirmed(true)
+  }
+  /** AS 모드 — 센서류 라인 [확인] (가상 라인 판정) */
+  async function confirmExtra(id: number) {
+    const p = await callPreview(true, preview)
+    const after = p?.lines.find((x) => x.inventoryItemId === id)
+    if (after && (after.status === 'ok' || after.status === 'warning')) setConfirmed((prev) => new Set(prev).add(id))
+  }
+  const extraLineOf = (id: number) => preview?.lines.find((l) => l.inventoryItemId === id) ?? null
+  const catalogOf = (id: number) => preview?.extraCatalog?.find((c) => c.inventoryItemId === id) ?? null
+  const extrasConfirmed = extras.every((e) => confirmed.has(e.inventoryItemId))
+  const allConfirmed = asMode ? bodyConfirmed && extrasConfirmed : !!preview && preview.lines.length > 0 && preview.lines.every((l) => confirmed.has(l.inventoryItemId))
   const ready = allConfirmed && !!preview?.ok
   const label = 'text-xs font-medium text-gray-500'
   const input = 'rounded-md border border-gray-300 px-2.5 py-1.5 text-sm'
@@ -185,9 +232,113 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
               </div>
             )}
 
-            {/* 품목별 입력 + [확인] (라인 단위 검증·잠금) */}
-            <div className="space-y-3">
-              {preview.lines.map((l) => {
+            {/* AS 모드 — ① 본체 (접수 기기별 출고 시리얼) ② 센서류·부자재 (2026-11-10) */}
+            {preview.asLink && (
+              <div className="space-y-4" data-testid="fulfill-as-mode">
+                <div className="rounded-lg border border-teal-200 bg-teal-50/40 px-3 py-2 text-xs text-teal-900">
+                  분실 AS <Link href={`/as-receipts/${preview.asLink.receipt.id}`} className="font-medium hover:underline">{preview.asLink.receipt.asCode}</Link> · {preview.asLink.receipt.hospitalName ?? ''} — 접수 기기마다 보낼 본체 시리얼을 1개씩 입력하세요(같은 기기군이면 모델이 달라도 됩니다). 센서류는 아래에서 추가합니다. 출고 실행 시 AS 라인이 교체로 확정되고 교체기 시리얼이 기입됩니다. 송장번호는 AS 상세 발송정보에서 추후 입력합니다.
+                </div>
+                <div className={`rounded-lg border p-3 ${bodyConfirmed ? 'border-green-300 bg-green-50/40' : 'border-gray-200'}`} data-testid="fulfill-as-body">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-gray-800">본체 <span className="ml-1 text-xs text-gray-400">{preview.asLink.lines.length}대 · {Array.from(preview.asLink.lines.reduce((m, l) => m.set(l.deviceGroup, (m.get(l.deviceGroup) ?? 0) + 1), new Map<string, number>())).map(([g, n]) => `${g} ${n}`).join(' · ')}</span></p>
+                    {bodyConfirmed ? (
+                      <span className="flex items-center gap-2"><span className="text-xs font-medium text-green-600">✓ 확인됨</span><button type="button" onClick={() => setBodyConfirmed(false)} className="rounded-md border border-gray-300 px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-50">수정</button></span>
+                    ) : (
+                      <button type="button" onClick={() => void confirmBody()} disabled={busy} className="rounded-md bg-gray-800 px-3 py-1 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-50" data-testid="fulfill-as-body-confirm">본체 확인</button>
+                    )}
+                  </div>
+                  <div className="mt-2 divide-y divide-gray-100 rounded-md border border-gray-200">
+                    {preview.asLink.lines.map((l) => (
+                      <div key={l.asItemId} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm" data-testid={`fulfill-as-line-${l.lostSerialNo}`}>
+                        <span className="w-20 text-xs text-gray-500">{l.deviceGroup}</span>
+                        <span className="font-mono text-xs text-gray-700" title={`분실 기기${l.deviceName ? ` · ${l.deviceName}` : ''}${l.wardName ? ` · ${l.wardName}` : ''}`}>{l.lostSerialNo}</span>
+                        <span className="text-gray-300">→</span>
+                        <input
+                          type="text" value={asSerials[l.asItemId] ?? ''} disabled={bodyConfirmed}
+                          onChange={(e) => { setAsSerials((p) => ({ ...p, [l.asItemId]: e.target.value })); setBodyConfirmed(false) }}
+                          placeholder="출고 본체 시리얼" className={`w-40 rounded-md border px-2 py-1 font-mono text-xs disabled:bg-gray-50 disabled:text-gray-500 ${l.status === 'error' ? 'border-red-400 bg-red-50' : 'border-gray-300'}`}
+                        />
+                        {l.itemName && l.status === 'ok' && <span className="text-xs text-green-700">{l.itemName}</span>}
+                        {l.messages.length > 0 && <span className={`text-xs ${l.status === 'error' ? 'text-red-600' : 'text-gray-400'}`}>{l.messages.join(' · ')}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 p-3" data-testid="fulfill-as-extras">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-gray-800">센서류·부자재 <span className="ml-1 text-xs text-gray-400">(선택 — 판매용 재고, 모델·수량은 자재담당자가 정함)</span></p>
+                    <div className="flex items-center gap-2">
+                      <select value={extraPick} onChange={(e) => setExtraPick(e.target.value)} className={`${input} text-xs`} data-testid="fulfill-extra-pick">
+                        <option value="">품목 선택</option>
+                        {(preview.extraCatalog ?? []).filter((c) => !extras.some((e) => e.inventoryItemId === c.inventoryItemId)).map((c) => <option key={c.inventoryItemId} value={c.inventoryItemId}>{c.name}{c.modelName && c.modelName !== c.name ? ` (${c.modelName})` : ''} — 재고 {c.stockTotal}</option>)}
+                      </select>
+                      <button type="button" disabled={!extraPick} onClick={() => { setExtras((p) => [...p, { inventoryItemId: Number(extraPick), quantity: '1' }]); setExtraPick('') }} className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40" data-testid="fulfill-extra-add">+ 추가</button>
+                    </div>
+                  </div>
+                  {extras.length === 0 && <p className="mt-2 text-xs text-gray-400">추가한 센서류가 없습니다 — 본체만 출고하려면 비워 두세요.</p>}
+                  <div className="mt-2 space-y-2">
+                    {extras.map((e) => {
+                      const c = catalogOf(e.inventoryItemId)
+                      const l = extraLineOf(e.inventoryItemId)
+                      const id = e.inventoryItemId
+                      const isConfirmed = confirmed.has(id)
+                      const qty = parseInt(e.quantity) || 0
+                      const serialCnt = (serialText[id] ?? '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean).length
+                      return (
+                        <div key={id} className={`rounded-md border p-2.5 ${isConfirmed ? 'border-green-300 bg-green-50/40' : l?.status === 'error' ? 'border-red-300 bg-red-50/40' : 'border-gray-200'}`} data-testid={`fulfill-extra-${id}`}>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-medium text-gray-800">{c?.name ?? `품목 #${id}`}{c?.modelName && c.modelName !== c.name && <span className="ml-1 font-mono text-xs text-gray-400">{c.modelName}</span>}</span>
+                            <span className="text-xs text-gray-400">{c?.inventoryName ?? ''} · 재고 {c?.stockTotal ?? '-'}</span>
+                            <label className="ml-auto flex items-center gap-1 text-xs text-gray-500">수량
+                              <input type="number" min="1" value={e.quantity} disabled={isConfirmed} onChange={(ev) => { const v = ev.target.value; setExtras((p) => p.map((x) => (x.inventoryItemId === id ? { ...x, quantity: v } : x))); unlockLine(id) }} className={`${input} w-20 text-right disabled:bg-gray-50`} />
+                            </label>
+                            {isConfirmed ? (
+                              <><span className="text-xs font-medium text-green-600">✓ 확인됨</span><button type="button" onClick={() => unlockLine(id)} className="rounded-md border border-gray-300 px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-50">수정</button></>
+                            ) : (
+                              <button type="button" onClick={() => void confirmExtra(id)} disabled={busy || qty <= 0} className="rounded-md bg-gray-800 px-3 py-1 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-50">확인</button>
+                            )}
+                            {!isConfirmed && <button type="button" onClick={() => { setExtras((p) => p.filter((x) => x.inventoryItemId !== id)); unlockLine(id) }} className="text-xs text-red-400 hover:text-red-600">삭제</button>}
+                          </div>
+                          {c?.mode === 'serial' && (
+                            <div className="mt-2">
+                              <div className="flex items-baseline justify-between"><p className={label}>시리얼 (줄 단위)</p><span className={`text-xs ${serialCnt === qty ? 'text-green-600' : 'text-gray-400'}`}>{serialCnt} / {qty}</span></div>
+                              <textarea value={serialText[id] ?? ''} disabled={isConfirmed} onChange={(ev) => { setSerialText((p) => ({ ...p, [id]: ev.target.value })); unlockLine(id) }} rows={Math.min(6, Math.max(2, qty))} className="mt-1 w-full rounded-md border border-gray-300 px-2.5 py-1.5 font-mono text-sm disabled:bg-gray-50" />
+                            </div>
+                          )}
+                          {c?.mode === 'lot' && (
+                            <div className="mt-2 space-y-1.5">
+                              <p className={label}>LOT별 수량 (합 = {qty})</p>
+                              {(lotRows[id] ?? [{ bucketKey: '', quantity: '' }]).map((row, ri) => {
+                                const multiWh = new Set(c.buckets.map((b) => b.warehouseId)).size > 1
+                                return (
+                                  <div key={ri} className="flex items-center gap-2">
+                                    <select value={row.bucketKey} disabled={isConfirmed} onChange={(ev) => { const v = ev.target.value; setLotRows((p) => { const rows = [...(p[id] ?? [{ bucketKey: '', quantity: '' }])]; rows[ri] = { ...rows[ri], bucketKey: v }; return { ...p, [id]: rows } }); unlockLine(id) }} className={`${input} disabled:bg-gray-50`}>
+                                      <option value="">LOT 선택</option>
+                                      {c.buckets.map((b) => <option key={`${b.warehouseId}|${b.lotNo}`} value={`${b.warehouseId}|${b.lotNo}`}>{b.lotNo || '(LOT 없음)'}{multiWh ? ` @${b.warehouseName}` : ''} — 잔량 {b.quantity}</option>)}
+                                    </select>
+                                    <input type="number" min="1" value={row.quantity} disabled={isConfirmed} onChange={(ev) => { const v = ev.target.value; setLotRows((p) => { const rows = [...(p[id] ?? [{ bucketKey: '', quantity: '' }])]; rows[ri] = { ...rows[ri], quantity: v }; return { ...p, [id]: rows } }); unlockLine(id) }} placeholder="수량" className={`${input} w-24 text-right disabled:bg-gray-50`} />
+                                    {ri > 0 && !isConfirmed && <button type="button" onClick={() => { setLotRows((p) => ({ ...p, [id]: (p[id] ?? []).filter((_, i) => i !== ri) })); unlockLine(id) }} className="text-xs text-red-400 hover:text-red-600">삭제</button>}
+                                  </div>
+                                )
+                              })}
+                              {!isConfirmed && <button type="button" onClick={() => setLotRows((p) => ({ ...p, [id]: [...(p[id] ?? [{ bucketKey: '', quantity: '' }]), { bucketKey: '', quantity: '' }] }))} className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-500 hover:bg-gray-50">+ LOT 추가</button>}
+                              <textarea value={noteText[id] ?? ''} disabled={isConfirmed} onChange={(ev) => setNoteText((p) => ({ ...p, [id]: ev.target.value }))} rows={2} placeholder="시리얼 기록 (선택 — 줄 단위, 재고 차감과 무관)" className="mt-1 w-full rounded-md border border-dashed border-gray-300 px-2.5 py-1.5 font-mono text-xs disabled:bg-gray-50" />
+                            </div>
+                          )}
+                          {c?.mode === 'qty' && <p className="mt-1 text-xs text-gray-500">수량 차감 {qty}개 · 잔량 많은 위치부터 자동</p>}
+                          {l && l.messages.length > 0 && <ul className={`mt-1.5 space-y-0.5 text-xs ${STATUS_TONE[l.status]}`}>{l.messages.map((m, i) => <li key={i}>· {m}</li>)}</ul>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 품목별 입력 + [확인] (라인 단위 검증·잠금) — 일반 모드 */}
+            <div className={`space-y-3 ${preview.asLink ? 'hidden' : ''}`}>
+              {(preview.asLink ? [] : preview.lines).map((l) => {
                 const id = l.inventoryItemId
                 const isConfirmed = confirmed.has(id)
                 const lErrs = localErr[id] ?? []
@@ -304,15 +455,16 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
             </div>
 
             <div className="flex items-center justify-end gap-3 border-t border-gray-100 pt-3">
-              <span className="text-xs text-gray-400">{confirmed.size} / {preview.lines.length} 품목 확인됨</span>
+              <span className="text-xs text-gray-400">{preview.asLink ? `본체 ${bodyConfirmed ? '확인됨' : '미확인'} · 센서류 ${extras.filter((e) => confirmed.has(e.inventoryItemId)).length} / ${extras.length} 확인됨` : `${confirmed.size} / ${preview.lines.length} 품목 확인됨`}</span>
               <button
                 type="button"
                 onClick={execute}
                 disabled={busy || !ready}
                 className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
-                title={ready ? '' : '모든 품목을 [확인]해야 실행할 수 있습니다'}
+                title={ready ? '' : preview.asLink ? '[본체 확인]과 센서류 [확인]을 마쳐야 실행할 수 있습니다' : '모든 품목을 [확인]해야 실행할 수 있습니다'}
+                data-testid="fulfill-execute"
               >
-                {busy ? '처리 중...' : '출고 실행'}
+                {busy ? '처리 중...' : preview.asLink ? '출고 실행 + AS 교체 확정' : '출고 실행'}
               </button>
             </div>
           </>

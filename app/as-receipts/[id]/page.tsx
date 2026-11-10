@@ -16,12 +16,15 @@ import ChatChangePanel, { type ChatIntakeInfo } from '../_components/ChatChangeP
 import AsMemoPanel from '@/app/hospitals/[code]/_components/AsMemoPanel'
 import AsReceiptFormModal, { type AsEditTarget } from '../_components/AsReceiptFormModal'
 import AsSplitModal from '../_components/AsSplitModal' // 접수 분할 (2026-11-07 as_receipt_split_design.md)
+import AsFoundModal, { type FoundTarget } from '../_components/AsFoundModal' // 분실기기 되찾음 (2026-11-10 as_lost_found_design.md)
+import { canMarkAsLineFound, asResolveUiOptionsFor, AS_RESOLVE_UI_LABELS, AS_STOCK_OUT_REQUEST_UI, isAsLineLockedByStockOut, type AsResolveUiOption } from '@/lib/asReceiptShared'
+import AsStockOutRequestModal, { type AsStockOutLine } from '../_components/AsStockOutRequestModal' // 분실 AS → 출고요청 (2026-11-10 as_lost_stock_out_link_design.md)
 import { asListHref, AS_PICKUP_METHODS, type AsPickupMethod,
   AS_CATEGORY_LABELS, AS_PICKUP_METHOD_LABELS, AS_SHIP_METHOD_LABELS, AS_DEST_TYPES,
   AS_DEST_TYPE_LABELS, AS_OUTCOME_LABELS,
   type AsCategory, type AsMethod, type AsDestType, type AsOutcome, AS_REGISTRY_TAG_LABELS, AS_REGISTRY_TAG_DESC, type AsRegistryTag, type AsRegistryLineTag,
   AS_METHODS, AS_DEVICE_GROUPS, asDeviceGroupOf, type AsDeviceGroup,
-  AS_RESOLVE_OUTCOMES, asResolveOutcomesFor, AS_INTAKE_STATE_LABELS, AS_DEVICE_KINDS, isAsIntakeIssue, asDeviceKindFromSerial, type AsIntakeState,
+  AS_RESOLVE_OUTCOMES, AS_INTAKE_STATE_LABELS, AS_DEVICE_KINDS, isAsIntakeIssue, asDeviceKindFromSerial, type AsIntakeState,
   AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, AS_TAG_BADGE_CLS, AS_TAG_FLAGS_EMPTY, asReceiptTags, type AsTagFlags,
   canMarkAsLineRepaired, asRepairDisabledReason, summarizeAsRepairProgress, asRepairProgressTitle, AS_REPAIR_RESULT_DESC, AS_REPAIR_RESULT_BADGE_CLS, type AsRepairResult, type AsSettableRepairResult, AS_LINE_CONDITION_BADGE_CLS, isAsLineConditionBadge, summarizeAsReceiptWards,
   isValidAsSerial, AS_SERIAL_RULE_TEXT, type AsLostQuota, type AsDealQuota } from '@/lib/asReceiptShared' // 수리완료 체크·기기 상태 배지 (2026-09-17) · 시리얼 형식 게이트 (2026-09-30)
@@ -63,6 +66,12 @@ interface ItemRow {
   repairResult: string | null // 회수기기 처리 REPAIRED 수리 / NO_FAULT 문제없음 / SCRAPPED 폐기 (2026-11-02) — outcome과 독립인 제3축
   repairedAt: string | null // 회수처리일 (2026-09-17 수리완료 체크일 → 2026-11-02 3택 공통, YYYY-MM-DD)
   repairedBy: { id: string; name: string | null } | null
+  foundAt: string | null // 분실기기 되찾음 (2026-11-10) — outcome FOUND와 동시
+  foundBy: { id: string; name: string | null } | null
+  recallTrackingNo: string | null
+  recallReceivedAt: string | null
+  stockOutRequestId: number | null // 분실 AS 출고요청 연결 (2026-11-10) — 활성 요청이면 잠금
+  stockOutRequest: { id: number; sorCode: string; status: { name: string; color: string | null; ticketStatus: string | null } | null } | null
 }
 
 interface TimelineEvent { id: string; at: string; actor: string | null; source: 'audit' | 'ticket'; title: string; details: string[]; noteDiff?: { removed: string[]; added: string[] } } // /api/as-receipts/[id]/timeline (2026-09-15 · 비고 수정 내용 2026-10-14)
@@ -118,6 +127,7 @@ const OUTCOME_BADGE_CLS: Record<string, string> = {
   LOST: 'bg-red-50 text-red-600',
   CANCELED: 'bg-gray-100 text-gray-500',
   NOT_RECEIVED: 'bg-amber-100 text-amber-700',
+  FOUND: 'bg-teal-50 text-teal-700', // 되찾음 (2026-11-10)
 }
 
 const INTAKE_BADGE_CLS: Record<string, string> = {
@@ -251,10 +261,12 @@ interface GroupCardProps {
   canRepair: boolean // 회수기기 처리(수리·문제없음·폐기) 권한 — VIEWER 제외(접수 종결 여부 무관, A-2·A-5) (2026-09-17)
   onSetRepairResult: (item: ItemRow, result: AsSettableRepairResult | null) => Promise<boolean> // POST repair-done { result } (2026-11-02 — 수리완료 토글 확장)
   onScrapLine: (item: ItemRow) => Promise<boolean> // POST scrap-line — confirm·memo 프롬프트는 호출부 (2026-09-17)
+  onFound: (item: ItemRow) => void // 분실기기 되찾음 모달 열기 (2026-11-10) — 분실 접수·교체 확정 라인
+  onStockOutRequest: (items: ItemRow[]) => void // 분실 AS → 출고요청 모달 열기 (2026-11-10) — 선택 미종결 라인
 }
 const MODEL_BY_KIND: Record<string, string> = { 심전도: '심전계', 산소포화도: '산소포화도', 게이트웨이: '게이트웨이' }
 
-function GroupCard({ index, group, items, asCode, category, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm, onCorrectSerial, canRepair, onSetRepairResult, onScrapLine }: GroupCardProps) {
+function GroupCard({ index, group, items, asCode, category, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm, onCorrectSerial, canRepair, onSetRepairResult, onScrapLine, onFound, onStockOutRequest }: GroupCardProps) {
   const [fixSerial, setFixSerial] = useState<Record<number, string>>({}) // 시리얼 보정 입력 (2026-09-15) — 라인별, 빈 값 = 닫힘
   const repair = summarizeAsRepairProgress(items) // 회수처리 n/m (2026-09-17 수리완료 → 2026-11-02 3택) — m = 처리 가능 라인(canMarkAsLineRepaired), n = 수리·문제없음·폐기
   const badSerialItems = items.filter((i) => !i.outcome && !isValidAsSerial(i.serialNo)) // 시리얼 형식 오류 — 보정 전 처리 불가 (2026-09-30)
@@ -269,7 +281,7 @@ function GroupCard({ index, group, items, asCode, category, hospitalCode, canRes
   const [nrComment, setNrComment] = useState<Record<number, string>>({}) // 미회수 코멘트
   // 처리방법 — '' = 미선택(기본, 2026-10-15). 미선택이면 처리방법을 건드리지 않고 발송정보만 저장한다
   // (종전 기본 '수리반환'이 며칠 뒤 송장 입력 시 교체 초안을 덮어쓰던 버그 — ad48e89)
-  const [outcome, setOutcome] = useState<AsOutcome | ''>('')
+  const [outcome, setOutcome] = useState<AsResolveUiOption | ''>('') // 분실 접수는 '출고요청'(UI 전용 값) 포함 (2026-11-10)
   const [newSerials, setNewSerials] = useState<Record<number, string>>({})
   const [notes, setNotes] = useState<Record<number, string>>({})
   // 발송정보 입력 (2026-10-14 부분 발송 — 라인마다 발송일·송장이 다를 수 있음). 처리방법과 한 번에 저장(선택 라인 대상).
@@ -286,7 +298,7 @@ function GroupCard({ index, group, items, asCode, category, hospitalCode, canRes
   //  · 미확정 처리 가능 라인 → 항상 선택 가능(발송정보까지 입력된 초안도). 처리방법(+발송정보) 지정·변경
   //  · 확정 발송 라인 중 발송정보 미완료 → 발송정보만 기입 (발송정보까지 입력된 확정 라인은 잠금 — 2026-10-14 휴먼에러 방지 유지)
   //  · 헤더 전체 선택은 발송정보까지 입력된 라인을 제외 — 송장 일괄 입력 시 기발송분 혼입 방지
-  const isOpenItem = (i: ItemRow) => !i.outcome && !isAsIntakeIssue(i.intakeState) && isValidAsSerial(i.serialNo) // 미입고·미식별입고·시리얼 오류는 처리 대상 아님
+  const isOpenItem = (i: ItemRow) => !i.outcome && !isAsIntakeIssue(i.intakeState) && isValidAsSerial(i.serialNo) && !isAsLineLockedByStockOut(i) // 미입고·미식별입고·시리얼 오류·출고요청 대기(잠금)는 처리 대상 아님
   const shipDone = (i: ItemRow) => (i.outcome ? isShip(i.outcome) : isShip(i.draftOutcome)) && !!i.shippedAt && (!!i.shipTrackingNo || i.shipMethod === 'VISIT')
   const isOpenSelectable = (i: ItemRow) => canResolve && isOpenItem(i)
   const isShipFixSelectable = (i: ItemRow) => canEdit && !!i.outcome && isShip(i.outcome) && !shipDone(i)
@@ -315,7 +327,7 @@ function GroupCard({ index, group, items, asCode, category, hospitalCode, canRes
     selCount === 0 ? null
     : !pickOutcome && shipInputEmpty ? (selOpenItems.length ? '처리방법을 선택하거나 발송정보를 입력하세요' : '발송정보를 입력하세요')
     : shipBlocked.length && !shipInputEmpty ? `처리방법이 ${shipBlocked.some((i) => !i.draftOutcome) ? '지정되지 않은' : '발송 대상이 아닌(분실·취소)'} 라인이 있어 발송정보를 저장할 수 없습니다: ${shipBlocked.map((i) => i.serialNo).join(', ')} — 처리방법을 먼저 지정하세요`
-    : pickOutcome && !shipInputEmpty && !isShip(outcome) && shipFixSel.length === 0 ? `${AS_OUTCOME_LABELS[outcome as AsOutcome]}은(는) 발송정보를 받지 않습니다 — 발송정보 입력을 비우세요`
+    : pickOutcome && !shipInputEmpty && !isShip(outcome) && shipFixSel.length === 0 ? `${AS_RESOLVE_UI_LABELS[outcome as AsResolveUiOption]}은(는) 발송정보를 받지 않습니다 — 발송정보 입력을 비우세요`
     : badNewSerial.length ? `교체기 시리얼을 확인하세요 (${AS_SERIAL_RULE_TEXT}): ${badNewSerial.map((i) => i.serialNo).join(', ')}`
     : null
   const canSave = selCount > 0 && !blockReason
@@ -327,6 +339,7 @@ function GroupCard({ index, group, items, asCode, category, hospitalCode, canRes
   /** 선택 라인 저장 — 처리방법 초안(미확정 라인) + 발송정보(입력 시, 발송 라인만). 기기현황 기록은 [최종확정] 시점 */
   async function saveDraft() {
     if (!canSave) return
+    if (outcome === AS_STOCK_OUT_REQUEST_UI) { onStockOutRequest(selOpenItems); return } // 분실 접수 — 출고요청 모달 (저장 아님)
     const lines = pickOutcome
       ? selOpenItems.map((i) => ({ itemId: i.id, outcome: outcome as AsOutcome, newSerial: outcome === 'REPLACE' ? serialOf(i) : undefined }))
       : []
@@ -457,12 +470,27 @@ function GroupCard({ index, group, items, asCode, category, hospitalCode, canRes
                 </td>
                 <td className="whitespace-nowrap px-3 py-2">
                   {item.outcome ? (
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${OUTCOME_BADGE_CLS[item.outcome] ?? 'bg-gray-100 text-gray-500'}`}>{AS_OUTCOME_LABELS[item.outcome as AsOutcome] ?? item.outcome}</span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${OUTCOME_BADGE_CLS[item.outcome] ?? 'bg-gray-100 text-gray-500'}`}
+                        title={item.outcome === 'FOUND' ? `되찾음 ${d10(item.foundAt)} ${item.foundBy?.name ?? ''} — 교체기기 ${item.newSerialNo ?? ''} 회수(반납)${item.recallTrackingNo ? ` · 송장 ${item.recallTrackingNo}` : ''}`.trim() : undefined}
+                      >{AS_OUTCOME_LABELS[item.outcome as AsOutcome] ?? item.outcome}</span>
+                      {/* 분실기기 되찾음 (2026-11-10) — 분실 접수·교체 확정·교체기기가 별도 유닛인 라인만. 종결 접수도 허용(사후 사건) */}
+                      {item.stockOutRequest && <Link href={`/stock-out-requests/${item.stockOutRequest.id}`} className="font-mono text-[11px] text-teal-700 hover:underline" title="이 라인의 기기를 보낸 출고요청">{item.stockOutRequest.sorCode}</Link>}
+                      {canRepair && canMarkAsLineFound(category, item) && (
+                        <button type="button" disabled={busy} onClick={() => onFound(item)} className="rounded border border-teal-300 px-1.5 py-0.5 text-[11px] text-teal-700 hover:bg-teal-50 disabled:opacity-40" title="분실기기를 되찾음 — 되찾은 기기 사용중 복귀, 교체기기 회수(반납), 분실 제공 수량 −1" data-testid={`found-open-${item.serialNo}`}>되찾음</button>
+                      )}
+                    </span>
+                  ) : item.stockOutRequest ? (
+                    /* 분실 AS 출고요청 대기 (2026-11-10) — 출고 완료까지 잠금 */
+                    <Link href={`/stock-out-requests/${item.stockOutRequest.id}`} className="inline-flex items-center gap-1 rounded-full border border-teal-300 bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700 hover:bg-teal-100" title="출고요청 처리 대기 — 출고가 완료되면 교체로 자동 확정됩니다. 취소하려면 출고요청을 취소하세요" data-testid={`so-lock-${item.serialNo}`}>
+                      출고요청 {item.stockOutRequest.sorCode} · {item.stockOutRequest.status?.name ?? '요청'}
+                    </Link>
                   ) : item.draftOutcome ? (
                     <span className="rounded-full border border-dashed border-blue-400 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700" title="초안 — 최종확정 전까지 변경 가능">{AS_OUTCOME_LABELS[item.draftOutcome as AsOutcome] ?? item.draftOutcome} (초안)</span>
                   ) : <span className="text-xs text-gray-300">미지정</span>}
                 </td>
-                <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-gray-600">{item.newSerialNo ?? (item.draftNewSerialNo ? <span className="text-blue-600" title="초안">{item.draftNewSerialNo}</span> : '-')}</td>
+                <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-gray-600">{item.newSerialNo ? <span className={item.outcome === 'FOUND' ? 'text-gray-400 line-through' : ''} title={item.outcome === 'FOUND' ? '되찾음 — 교체기기 회수(반납)' : undefined}>{item.newSerialNo}</span> : (item.draftNewSerialNo ? <span className="text-blue-600" title="초안">{item.draftNewSerialNo}</span> : '-')}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-500">
                   {item.shippedAt ? (
                     <>
@@ -594,9 +622,9 @@ function GroupCard({ index, group, items, asCode, category, hospitalCode, canRes
               <>
                 <span className="text-gray-300">|</span>
                 <span className="text-xs font-medium text-gray-500">처리방법</span>
-                <select value={outcome} onChange={(e) => setOutcome(e.target.value as AsOutcome | '')} disabled={draftSel.length === 0} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm disabled:opacity-50" title={draftSel.length === 0 ? '미확정 라인을 선택하면 처리방법을 지정할 수 있습니다' : "선택한 미확정 라인의 처리방법 — '-'(미선택)이면 기존 처리방법을 바꾸지 않고 발송정보만 저장합니다"}>
+                <select value={outcome} onChange={(e) => setOutcome(e.target.value as AsResolveUiOption | '')} disabled={draftSel.length === 0} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm disabled:opacity-50" data-testid="as-outcome-select" title={draftSel.length === 0 ? '미확정 라인을 선택하면 처리방법을 지정할 수 있습니다' : category === 'LOST' ? "분실 접수: '출고요청'은 출고업무 티켓을 만들어 기기를 보냅니다(출고 완료 시 교체 자동 확정) · 분실종결은 기기 미제공 마감" : "선택한 미확정 라인의 처리방법 — '-'(미선택)이면 기존 처리방법을 바꾸지 않고 발송정보만 저장합니다"}>
                   <option value="">-</option>
-                  {asResolveOutcomesFor(category).map((o) => <option key={o} value={o}>{AS_OUTCOME_LABELS[o]}</option>)}
+                  {asResolveUiOptionsFor(category).map((o) => <option key={o} value={o}>{AS_RESOLVE_UI_LABELS[o]}</option>)}
                 </select>
               </>
             )}
@@ -633,7 +661,7 @@ function GroupCard({ index, group, items, asCode, category, hospitalCode, canRes
               </>
             )}
             <button type="button" onClick={saveDraft} disabled={busy || !canSave} className="rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50" title="처리방법을 고르면 처리방법(+입력한 발송정보)을, '-'이면 발송정보만 저장합니다 — 최종확정 전까지 변경 가능">
-              {busy ? '저장 중...' : saveLabel}
+              {busy ? '저장 중...' : outcome === AS_STOCK_OUT_REQUEST_UI ? `출고요청 (${selCount}대)` : saveLabel}
             </button>
             {selOpenItems.some((i) => i.draftOutcome) && (
               <button type="button" onClick={clearDraft} disabled={busy} className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50">지정 해제</button>
@@ -664,6 +692,11 @@ export default function AsReceiptDetailPage() {
   const [busy, setBusy] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [splitOpen, setSplitOpen] = useState(false) // 접수 분할 모달 (2026-11-07)
+  const [foundTarget, setFoundTarget] = useState<FoundTarget | null>(null) // 분실기기 되찾음 모달 (2026-11-10)
+  const [stockOutTarget, setStockOutTarget] = useState<number[] | null>(null) // 분실 AS → 출고요청 모달 (2026-11-10) — 카드에서 미리 고른 라인 id
+  /** 출고요청에 담을 수 있는 라인 전부 — 미종결·미잠금·정상 시리얼·입고 대조 이슈 없음 (기기군 무관, 모달 체크리스트) */
+  const stockOutCandidates: AsStockOutLine[] = (req?.items ?? []).filter((it) => !it.outcome && !isAsLineLockedByStockOut(it) && isValidAsSerial(it.serialNo) && !isAsIntakeIssue(it.intakeState))
+    .map((it) => ({ id: it.id, serialNo: it.serialNo, deviceGroup: asDeviceGroupOf(it.device?.deviceInfo?.deviceName ?? null, it.deviceKind, it.serialNo), wardName: it.device?.placement?.ward?.name ?? it.wardName }))
   const [splitInfo, setSplitInfo] = useState<{ from: { id: number; asCode: string } | null; children: { id: number; asCode: string; category: string; statusName: string | null; statusColor: string | null; itemCount: number }[] } | null>(null)
   const [me, setMe] = useState<{ id: string; role: string; permissions?: string[] } | null>(null)
 
@@ -1025,9 +1058,9 @@ export default function AsReceiptDetailPage() {
               key: `lost-over:${over ? 'before' : 'after'}:${cells.map((g) => `${g.group}=${g.after}/${g.purchased}`).join(',')}`,
               title: over
                 ? `분실 제공 한도 초과 — 구매수량의 ${lq.thresholdPct}%를 이미 넘었습니다`
-                : `${closedReceipt ? '이 접수 포함' : '이 건 처리 시'} 분실 기기 제공이 구매수량의 ${lq.thresholdPct}%를 초과합니다`,
+                : `이 접수의 미종결 라인을 교체 처리하면 분실 기기 제공이 구매수량의 ${lq.thresholdPct}%를 초과합니다`,
               lines: cells.map((g) => (
-                <span key={g.group}>{g.group}: 이전 제공 <span className="font-mono">{g.before} / {g.purchased}</span> ({g.pctBefore}%){g.thisReceipt > 0 && <> → {closedReceipt ? '이 접수 포함' : '처리 시'} <span className="font-mono">{g.after} / {g.purchased}</span> ({g.pctAfter}%)</>}</span>
+                <span key={g.group}>{g.group}: 분실 수량 <span className="font-mono">{g.before} / {g.purchased}</span> ({g.pctBefore}%){g.thisReceipt > 0 && <> → 미종결 {g.thisReceipt}대 처리 시 <span className="font-mono">{g.after} / {g.purchased}</span> ({g.pctAfter}%)</>}</span>
               )),
             })
           }
@@ -1131,24 +1164,33 @@ export default function AsReceiptDetailPage() {
             const over = !!q && q.groups.some((g) => g.overBefore)
             const overAfter = !over && !!q && q.groups.some((g) => g.overAfter)
             const alert = over || overAfter
-            const closedReceipt = req.status?.ticketStatus === 'RESOLVED' || req.status?.ticketStatus === 'CLOSED' // 종결 접수면 '처리 시'가 아니라 '이 접수 포함'
+            // 2026-11-10 단일 정의(as_lost_found_design.md §4): 주 숫자 = 병원 분실 수량(교체 확정 라인, 이 접수 포함, 되찾음 제외) — 병원 상세 블록과 같은 값. 미종결 라인이 있을 때만 '처리 시 n+k' 보조 표기
             return (
               <div className={`relative ${alert ? 'rounded-lg bg-red-50 px-3 py-2 -mx-3 -my-2' : ''}`}>
                 {alert && <span aria-hidden className="pointer-events-none absolute inset-0 animate-pulse rounded-lg border-2 border-red-500" />}
-                <p className={label}>구분{alert && <span className="ml-1.5 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold normal-case tracking-normal text-white">{over ? `분실 제공 한도 ${q!.thresholdPct}% 초과` : closedReceipt ? `이 접수 포함 ${q!.thresholdPct}% 초과` : `이 건 처리 시 ${q!.thresholdPct}% 초과`}</span>}</p>
+                <p className={label}>구분{alert && <span className="ml-1.5 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold normal-case tracking-normal text-white">{over ? `분실 제공 한도 ${q!.thresholdPct}% 초과` : `이 접수 처리 시 ${q!.thresholdPct}% 초과`}</span>}</p>
                 <p className="mt-1 text-sm text-gray-900">{catLabel}</p>
+                {req.category === 'LOST' && (() => {
+                  const reqs = Array.from(new Map(req.items.filter((i) => i.stockOutRequest).map((i) => [i.stockOutRequest!.id, i.stockOutRequest!])).values())
+                  return reqs.length ? (
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs" data-testid="as-stock-out-links">
+                      <span className="text-gray-400">출고요청</span>
+                      {reqs.map((r) => <Link key={r.id} href={`/stock-out-requests/${r.id}`} className="rounded-full border border-teal-300 bg-teal-50 px-2 py-0.5 font-medium text-teal-700 hover:bg-teal-100">{r.sorCode} · {r.status?.name ?? '요청'} ({req.items.filter((i) => i.stockOutRequestId === r.id).length}대)</Link>)}
+                    </div>
+                  ) : null
+                })()}
                 {q && (
-                  <div className="mt-1 space-y-0.5 text-xs" title={`분실 기기 신규 제공 한도 = 구매수량(계약완료 딜 기기 수량)의 ${q.thresholdPct}%. '이전 제공'은 다른 분실 접수의 교체 확정 대수, 화살표 뒤는 이 접수의 라인을 교체 처리했을 때`}>
+                  <div className="mt-1 space-y-0.5 text-xs" data-testid="lost-quota" title={`병원 분실 수량 = 이 병원 분실 접수의 교체 확정 대수(이 접수 포함, 되찾음 제외) — 병원 상세 'AS 현황'과 같은 숫자. 한도 = 구매수량(계약완료 딜 기기 수량)의 ${q.thresholdPct}%. 화살표 뒤는 이 접수의 미종결 라인을 교체 처리했을 때`}>
                     {q.groups.map((g) => {
                       const bad = g.overBefore || g.overAfter
                       return (
                         <p key={g.group} className={bad ? 'font-semibold text-red-700' : 'text-gray-700'}>
                           <span className="inline-block w-16 text-gray-500">{g.group}</span>
                           {g.purchased === null
-                            ? <span className="text-gray-400">구매수량 미등록{g.before + g.thisReceipt > 0 ? ` (제공 ${g.before}대, 이 접수 ${g.thisReceipt}대)` : ''}</span>
+                            ? <span className="text-gray-400">구매수량 미등록{g.before + g.thisReceipt > 0 ? ` (분실 수량 ${g.before}대${g.thisReceipt > 0 ? `, 이 접수 미종결 ${g.thisReceipt}대` : ''})` : ''}</span>
                             : <>
-                                <span className="font-mono">{g.before} / {g.purchased}</span> ({g.pctBefore}%)
-                                {g.thisReceipt > 0 && <span className={`block pl-16 ${g.overAfter ? 'text-red-700' : 'text-gray-500'}`}>→ {closedReceipt ? '이 접수 포함' : '처리 시'} <span className="font-mono">{g.after} / {g.purchased}</span> ({g.pctAfter}%)</span>}
+                                <span className="font-mono" data-testid={`lost-quota-${g.group}`}>{g.before} / {g.purchased}</span> ({g.pctBefore}%)
+                                {g.thisReceipt > 0 && <span className={`block pl-16 ${g.overAfter ? 'text-red-700' : 'text-gray-500'}`}>→ 이 접수 미종결 {g.thisReceipt}대 처리 시 <span className="font-mono">{g.after} / {g.purchased}</span> ({g.pctAfter}%)</span>}
                               </>}
                         </p>
                       )
@@ -1457,6 +1499,8 @@ export default function AsReceiptDetailPage() {
               canRepair={canRepair}
               onSetRepairResult={setRepairResult}
               onScrapLine={scrapLine}
+              onFound={(it) => setFoundTarget({ id: it.id, serialNo: it.serialNo, newSerialNo: it.newSerialNo, wardName: it.wardName, placementWard: it.device?.placement?.ward?.name ?? null })}
+              onStockOutRequest={(its) => setStockOutTarget(its.map((it) => it.id))}
             />
           ))}
           {canResolve && openItems.length > 0 && (
@@ -1549,6 +1593,22 @@ export default function AsReceiptDetailPage() {
       </Card>
 
       {/* 분할 모달 (2026-11-07) */}
+      <AsStockOutRequestModal
+        key={stockOutTarget ? `so-${stockOutTarget.join(',')}` : 'so-closed'} // 열 때마다 새로 마운트 — 체크리스트 초기 선택이 카드 선택을 따라가게 (2026-11-10 화면 검증)
+        open={!!stockOutTarget}
+        onClose={() => setStockOutTarget(null)}
+        receipt={{ id: req.id, asCode: req.asCode, hospitalName: req.hospital?.hospitalName ?? null, destInfo: req.destInfo, reporterName: req.reporterName }}
+        candidates={stockOutCandidates}
+        initialSelected={stockOutTarget ?? []}
+        onDone={(r) => { setStockOutTarget(null); setWarnings([`출고요청 ${r.sorCode} 생성 — ${r.itemCount}대. 출고가 완료되면 교체기 시리얼이 자동 기입됩니다.`]); router.refresh(); void load() }}
+      />
+      <AsFoundModal
+        open={!!foundTarget}
+        onClose={() => setFoundTarget(null)}
+        receipt={{ id: req.id, asCode: req.asCode }}
+        item={foundTarget}
+        onDone={(r) => { setFoundTarget(null); setWarnings([`${r.serialNo} 되찾음 처리 — 사용중 복귀 · 교체기기 ${r.newSerialNo ?? ''} 회수(반납) · 분실 제공 수량 −1`, ...r.warnings]); router.refresh(); void load() }}
+      />
       <AsSplitModal
           open={splitOpen}
           onClose={() => setSplitOpen(false)}

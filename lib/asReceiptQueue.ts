@@ -12,6 +12,8 @@ export const asDetailItemSelect = {
   shipMethod: true, shipTrackingNo: true, shippedAt: true,
   intakeState: true, receivedAt: true, receiptSerialNo: true, intakeSource: true, // 입고 대조 (2026-09-11)
   repairResult: true, repairedAt: true, repairedBy: { select: { id: true, name: true } }, // 회수기기 처리(수리·문제없음·폐기)·처리일·처리자 (2026-09-17 수리완료 체크 → 2026-11-02 3택 — 제3축)
+  foundAt: true, foundBy: { select: { id: true, name: true } }, recallTrackingNo: true, recallReceivedAt: true, // 분실기기 되찾음 (2026-11-10)
+  stockOutRequestId: true, stockOutRequest: { select: { id: true, sorCode: true, status: { select: { name: true, color: true, ticketStatus: true } } } }, // 분실 AS 출고요청 연결 (2026-11-10)
   device: {
     select: {
       id: true,

@@ -94,6 +94,18 @@ function summarizeAudit(row: { id: number; action: string; resourceLabel: string
   const warn = Array.isArray(after.warnings) && after.warnings.length ? [`경고 ${after.warnings.length}건`] : []
   const base = { id: `a${row.id}`, at: row.createdAt.toISOString(), actor: row.actorName, source: 'audit' as const }
   if (row.action === 'CREATE') return { ...base, title: suffix.includes('(분할 ←') ? '접수 등록 (분할)' : '접수 등록', details: suffix ? [suffix] : [] }
+  if (suffix === '출고요청') { // 분실 AS → 출고요청 (2026-11-10) — after { sorCode, itemCount, serials, groups }
+    const groups = Array.isArray(after.groups) ? (after.groups as Rec[]).map((g) => `${str(g.group)} ${str(g.count)}대`).join(' · ') : ''
+    const serials = Array.isArray(after.serials) ? (after.serials as unknown[]).map(String).join(', ') : ''
+    return { ...base, title: '출고요청 생성', details: [`${str(after.sorCode)} 분실기기 제공 ${str(after.itemCount)}대${groups ? ` (${groups})` : ''}`, ...(serials ? [serials] : []), ...warn] }
+  }
+  if (suffix === '되찾음') { // 분실기기 되찾음 (2026-11-10) — after { serialNo, newSerialNo, foundAt, wardName, recallTrackingNo, memo, warnings }
+    const details = [`${str(after.serialNo)} 사용중 복귀${after.wardName ? ` (${str(after.wardName)})` : ''}`, `교체기기 ${str(after.newSerialNo)} 회수(반납)`]
+    if (after.recallTrackingNo) details.push(`회수 송장 ${str(after.recallTrackingNo)}`)
+    if (after.foundAt) details.push(`되찾은 날 ${d10(after.foundAt)}`)
+    if (after.memo) details.push(str(after.memo))
+    return { ...base, title: '분실기기 되찾음', details: [...details, ...warn] }
+  }
   if (suffix === '분할') { // 접수 분할 (2026-11-07) — after { mode, items(잔류), children[{asCode,key,count,serials}], warnings }
     const kids = Array.isArray(after.children) ? (after.children as Rec[]) : []
     const details = kids.map((c) => `${str(c.key)} ${str(c.count)}대 → ${str(c.asCode)}`)

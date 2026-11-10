@@ -65,7 +65,7 @@ export function asReceiptTags(r: Partial<AsTagFlags>): AsTag[] {
   return AS_TAGS.filter((t) => r[AS_TAG_FIELDS[t]] === true)
 }
 
-export const AS_OUTCOMES = ['REPAIR_RETURN', 'REPLACE', 'LOST', 'CANCELED', 'NOT_RECEIVED'] as const
+export const AS_OUTCOMES = ['REPAIR_RETURN', 'REPLACE', 'LOST', 'CANCELED', 'NOT_RECEIVED', 'FOUND'] as const
 export type AsOutcome = (typeof AS_OUTCOMES)[number]
 export const AS_OUTCOME_LABELS: Record<AsOutcome, string> = {
   REPAIR_RETURN: '수리반환',
@@ -73,12 +73,32 @@ export const AS_OUTCOME_LABELS: Record<AsOutcome, string> = {
   LOST: '분실종결',
   CANCELED: '라인취소',
   NOT_RECEIVED: '미회수', // 입고 대조 예외 — 접수자 확인에서만 확정 (2026-09-11)
+  FOUND: '되찾음', // 분실 접수 교체 확정 라인을 되찾음 처리 — 교체기기 회수, 분실 제공 집계 제외 (2026-11-10, as_lost_found_design.md)
+}
+/** 분실기기 되찾음 처리 가능 라인 — 분실 접수 · 교체 확정 · 교체기기가 원장에 별도 유닛으로 연결(마이그 라인은 라벨 승계라 제외, D1) */
+export function canMarkAsLineFound(category: string | null | undefined, item: { outcome: string | null | undefined; deviceId: number | null | undefined; newDeviceId: number | null | undefined }): boolean {
+  return category === 'LOST' && item.outcome === 'REPLACE' && !!item.deviceId && !!item.newDeviceId && item.deviceId !== item.newDeviceId
 }
 /** 라인 처리 패널에서 고를 수 있는 결과 — 미회수는 접수자 확인 절차 전용 */
 export const AS_RESOLVE_OUTCOMES = ['REPAIR_RETURN', 'REPLACE', 'LOST', 'CANCELED'] as const
 /** 접수 구분별 선택 가능한 처리방법 (2026-10-30): 분실 접수는 기기를 수리해 돌려줄 수 없으므로 '수리반환' 제외 — UI 선택지·서버 검증(초안·확정) 단일 소스 */
 export function asResolveOutcomesFor(category: string | null | undefined): readonly AsOutcome[] {
   return category === 'LOST' ? AS_RESOLVE_OUTCOMES.filter((o) => o !== 'REPAIR_RETURN') : AS_RESOLVE_OUTCOMES
+}
+/** 화면 처리방법 선택지 (2026-11-10 D1 — as_lost_stock_out_link_design.md): 분실 접수는 '교체'(시리얼 직접 입력) 대신 '출고요청'(UI 전용 값)으로 기기 제공. 서버 검증은 `asResolveOutcomesFor`(REPLACE 허용 — 출고 실행 경로·과거 호환) */
+export const AS_STOCK_OUT_REQUEST_UI = 'STOCK_OUT_REQUEST' as const
+export type AsResolveUiOption = AsOutcome | typeof AS_STOCK_OUT_REQUEST_UI
+export function asResolveUiOptionsFor(category: string | null | undefined): readonly AsResolveUiOption[] {
+  if (category !== 'LOST') return AS_RESOLVE_OUTCOMES
+  return [AS_STOCK_OUT_REQUEST_UI, ...asResolveOutcomesFor(category).filter((o) => o !== 'REPLACE')]
+}
+export const AS_RESOLVE_UI_LABELS: Record<AsResolveUiOption, string> = { ...AS_OUTCOME_LABELS, [AS_STOCK_OUT_REQUEST_UI]: '출고요청' }
+/** 활성(미종결) 출고요청에 묶인 라인인가 — 대기 중 잠금 판정 단일 소스(화면·서버 공용). 요청 상태의 ticketStatus가 종결이 아니면 활성 */
+export function isAsLineLockedByStockOut(item: { stockOutRequest?: { status?: { ticketStatus?: string | null } | null } | null } | null | undefined): boolean {
+  const r = item?.stockOutRequest
+  if (!r) return false
+  const ts = r.status?.ticketStatus ?? null
+  return ts !== 'RESOLVED' && ts !== 'CLOSED'
 }
 /** 분실 접수에서 '새 기기 제공'으로 세는 라인 결과 — 분실 한도 집계(`lib/asLostQuota.ts`) 단일 소스. REPAIR_RETURN은 AS이력 마이그(IMPORT) 분류 잔재(라벨 승계 발송)라 제공으로 본다 */
 export const AS_LOST_PROVIDED_OUTCOMES = ['REPLACE', 'REPAIR_RETURN'] as const
@@ -132,7 +152,7 @@ export const asRepairResultLabel = (v: string | null | undefined): string => (v 
 
 // ─── 수리완료 체크 (2026-09-17 — device_condition_location_design.md §5.6·§7.2) — 2026-11-02부터 '회수기기 처리' 게이트로 그대로 사용 ───
 /** 결과가 이 집합이면 수리완료 대상이 아니다(분실·취소·미회수) */
-export const AS_REPAIR_EXCLUDED_OUTCOMES: readonly string[] = ['LOST', 'CANCELED', 'NOT_RECEIVED']
+export const AS_REPAIR_EXCLUDED_OUTCOMES: readonly string[] = ['LOST', 'CANCELED', 'NOT_RECEIVED', 'FOUND'] // FOUND: 되찾은 기기는 회수기기가 아니다 (2026-11-10)
 /**
  * 라인 수리완료 체크 가능 여부 — 입고된 라인(D5)만, 분실·취소·미회수 라인 제외. 접수 상태(종결 포함, A-2)·outcome NULL/REPAIR_RETURN/REPLACE는 허용.
  * 카드 헤더 `수리완료 n/m`의 m(분모)도 이 판정으로 센다.
@@ -198,13 +218,15 @@ export const AS_LOST_QUOTA_PCT = 10
 export interface AsLostQuotaGroup {
   group: '심전계' | '산소포화도'
   purchased: number | null // 계약완료 딜 기기 수량 합 — null = 구매수량 미등록
-  before: number // 이 접수 이전(다른 분실 접수) 교체 제공 대수
-  thisReceipt: number // 이 접수의 미종결 + 교체 확정 라인 수
+  /** 병원 분실 수량(단일 정의, 2026-11-10 as_lost_found_design.md §4) = 취소 아닌 분실 접수의 교체 확정 라인(REPLACE·REPAIR_RETURN) 수 — **이 접수 포함**, 되찾음(FOUND) 제외. 병원 상세 블록과 같은 숫자 */
+  before: number
+  /** 이 접수의 미종결 라인 수(교체 예정) — 접수 상세의 '처리 시' 보조 표기 전용 */
+  thisReceipt: number
   after: number // before + thisReceipt
   pctBefore: number | null
   pctAfter: number | null
   overBefore: boolean // 이미 한도 초과
-  overAfter: boolean // 이 접수를 교체 처리하면 초과
+  overAfter: boolean // 이 접수의 미종결 라인을 교체 처리하면 초과
 }
 export interface AsLostQuota { thresholdPct: number; hasPurchase: boolean; groups: AsLostQuotaGroup[] }
 
@@ -316,15 +338,15 @@ export type AsSearchField = (typeof AS_SEARCH_FIELDS)[number]
 export const AS_SEARCH_FIELD_LABELS: Record<AsSearchField, string> = {
   all: '통합검색',
   hospital: '병원명',
-  serial: '시리얼번호',
+  serial: '시리얼번호', // 접수 시리얼 + 교체 발송기기 시리얼(확정·초안) (2026-11-09)
   code: '접수번호',
   tracking: '송장번호', // 수거(접수 헤더)·발송(라인) 모두, 영숫자만 비교
   owner: '담당자', // 연결 티켓 담당자 이름
 }
 export const AS_SEARCH_FIELD_PLACEHOLDER: Record<AsSearchField, string> = {
-  all: '접수번호·병원·시리얼·송장·담당자 (쉼표로 여러 개)',
+  all: '접수번호·병원·시리얼(접수·교체)·송장·담당자 (쉼표로 여러 개)',
   hospital: '병원명 (쉼표로 여러 개)',
-  serial: '시리얼번호 (쉼표로 여러 개)',
+  serial: '접수 또는 교체 발송기기 시리얼 (쉼표로 여러 개)',
   code: '접수번호 (쉼표로 여러 개)',
   tracking: '수거·발송 송장번호 (쉼표로 여러 개)',
   owner: '담당자 이름 (쉼표로 여러 개)',

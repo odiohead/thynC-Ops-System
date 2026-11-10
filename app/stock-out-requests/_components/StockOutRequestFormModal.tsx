@@ -11,6 +11,7 @@
  * 평가용·판매용·오산영업소 등록/수정 — 유형·목적·납품처(병원 검색/기타)·수령지·수취인 + 항목 아래 입력 가이드. 프로젝트 유형은 여기서 만들지 않음(프로젝트 상세 전용).
  */
 import { useState, useEffect, useMemo, useRef } from 'react'
+import FileDropZone from '@/app/components/FileDropZone' // 첨부 끌어다 놓기 (2026-11-10)
 import { FileSpreadsheet, Paperclip, X } from 'lucide-react'
 import {
   STOCK_OUT_PURPOSE_LABELS, STOCK_OUT_SALES_TYPES, STOCK_OUT_SUB_PURPOSES, STOCK_OUT_GUIDE_FIELDS, isStockOutSalesType,
@@ -62,6 +63,7 @@ export default function StockOutRequestFormModal({
   project,
   editTarget,
   purpose = 'BUILD',
+  lockItems = false,
 }: {
   open: boolean
   onClose: () => void
@@ -71,6 +73,8 @@ export default function StockOutRequestFormModal({
   project?: { projectCode: string; projectName: string; hospitalName?: string | null } | null
   /** 지정 시 수정 모드 (PUT), 미지정이면 등록 (POST) */
   editTarget?: StockOutEditTarget | null
+  /** 분실 AS 연동 요청 — 품목은 출고 시 시리얼로 정해지므로 폼에서 숨기고 전송하지 않음 (2026-11-10) */
+  lockItems?: boolean
   /** 업무 구분 — 이번 범위는 프로젝트 팝업 = 구축 */
   purpose?: StockOutPurpose
 }) {
@@ -96,7 +100,7 @@ export default function StockOutRequestFormModal({
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  function addPending(list: FileList | null) {
+  function addPending(list: FileList | File[] | null) {
     if (!list) return
     setError(null)
     const next = [...pendingFiles]
@@ -220,7 +224,7 @@ export default function StockOutRequestFormModal({
       if (v) { setError(v); return }
     }
     if (!requestDate) { setError('희망 출고일을 입력하세요.'); return }
-    if (lines.length === 0) { setError('출고 품목 수량을 1개 이상 입력하세요.'); return }
+    if (!lockItems && lines.length === 0) { setError('출고 품목 수량을 1개 이상 입력하세요.'); return }
     setBusy(true)
     setError(null)
     const salesFields = salesMode
@@ -231,7 +235,7 @@ export default function StockOutRequestFormModal({
           shipAddress: shipAddress.trim(), recipient: recipient.trim(),
         }
       : {}
-    const payload = { requestDate, note: note || null, items: lines, ...salesFields }
+    const payload = { requestDate, note: note || null, ...(lockItems ? {} : { items: lines }), ...salesFields }
     const res = editTarget
       ? await fetch(`/api/stock-out-requests/${editTarget.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       : await fetch('/api/stock-out-requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, projectCode: project?.projectCode, purpose: effPurpose }) })
@@ -350,6 +354,9 @@ export default function StockOutRequestFormModal({
             <input type="date" value={requestDate} onChange={(e) => setRequestDate(e.target.value)} className="mt-1 w-44 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm" />
           </div>
 
+          {lockItems ? (
+            <p className="rounded-md border border-teal-200 bg-teal-50/60 px-3 py-2 text-xs text-teal-800">분실 AS 연동 요청 — 품목은 출고 처리에서 입력한 본체 시리얼·센서류로 정해집니다 (여기서 수정 불가).</p>
+          ) : (
           <div>
             <div className="flex items-baseline justify-between">
               <label className={label}>출고 품목별 수량 *</label>
@@ -405,6 +412,7 @@ export default function StockOutRequestFormModal({
               </div>
             )}
           </div>
+          )}
 
           <div>
             <label className={label}>비고</label>
@@ -421,14 +429,14 @@ export default function StockOutRequestFormModal({
             {editTarget ? (
               <div className="mt-1.5"><StockOutFilesPanel requestId={editTarget.id} canWrite compact /></div>
             ) : (
-              <div className="mt-1.5 space-y-1.5">
+              <FileDropZone onFiles={(fs) => addPending(fs)} disabled={busy} className="mt-1.5 space-y-1.5" testId="so-pending-drop">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={busy}
                   className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-gray-300 px-3 py-2 text-xs text-gray-500 hover:bg-gray-50"
                 >
-                  <Paperclip className="h-3.5 w-3.5" /> 파일 선택 <span className="text-gray-400">(파일당 {Math.round(STOCK_OUT_FILE_MAX_BYTES / 1024 / 1024)}MB · 최대 {STOCK_OUT_FILES_PER_REQUEST}개 · 생성 시 함께 업로드)</span>
+                  <Paperclip className="h-3.5 w-3.5" /> 파일 선택 또는 끌어다 놓기 <span className="text-gray-400">(파일당 {Math.round(STOCK_OUT_FILE_MAX_BYTES / 1024 / 1024)}MB · 최대 {STOCK_OUT_FILES_PER_REQUEST}개 · 생성 시 함께 업로드)</span>
                 </button>
                 <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => addPending(e.target.files)} />
                 {pendingFiles.length > 0 && (
@@ -443,7 +451,7 @@ export default function StockOutRequestFormModal({
                     ))}
                   </ul>
                 )}
-              </div>
+              </FileDropZone>
             )}
           </div>
 

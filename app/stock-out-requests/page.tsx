@@ -23,6 +23,7 @@ interface StockOutRow {
   note: string | null
   createdAt: string
   project: { projectCode: string; projectName: string; hospital: { hospitalCode: string; hospitalName: string } | null } | null
+  asReceipt?: { id: number; asCode: string } | null // 분실 AS 연동 (2026-11-10)
   purpose: string
   subPurpose: string | null
   destType: string | null
@@ -178,6 +179,7 @@ export default function StockOutListPage() {
                         <span>
                           <span className="mr-1 rounded bg-violet-50 px-1.5 py-0.5 text-xs font-medium text-violet-700">{STOCK_OUT_PURPOSE_LABELS[r.purpose as StockOutPurpose] ?? r.purpose}</span>
                           {subPurposeLabel(r.purpose, r.subPurpose) ?? ''}
+                          {r.asReceipt && <span className="ml-1 rounded bg-teal-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-teal-700" title="분실 AS 연동 출고요청">{r.asReceipt.asCode}</span>}
                         </span>
                       )}
                     </td>

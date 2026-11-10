@@ -35,7 +35,7 @@ function CategoryBlock({ title, stat, href, quota, mode }: { title: string; stat
         </p>
         <span className="text-xs text-gray-400">{stat.receipts}건 →</span>
       </div>
-      <div className="space-y-1 text-sm" title={mode === 'lost' ? `교체 제공 / 구매수량(계약완료 딜 '도입 기기 수량') — 한도 ${quota.thresholdPct}%` : '누적 접수 대수 / 구매수량(계약완료 딜 \'도입 기기 수량\')'}>
+      <div className="space-y-1 text-sm" title={mode === 'lost' ? `분실 수량(교체 확정 라인, 되찾음 제외 — AS 접수 상세 '구분'과 같은 숫자) / 구매수량(계약완료 딜 '도입 기기 수량') — 한도 ${quota.thresholdPct}%` : '누적 접수 대수 / 구매수량(계약완료 딜 \'도입 기기 수량\')'}>
         {(['심전계', '산소포화도'] as const).map((group) => {
           const purchased = purchasedOf(group)
           const q = quota.groups.find((g) => g.group === group)

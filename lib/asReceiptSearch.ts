@@ -28,6 +28,7 @@ export async function findAsReceiptIdsByTracking(keywords: string[]): Promise<nu
 /**
  * 목록·export 공용 검색 OR 조건 (2026-09-18 항목 지정·쉼표 복수 키워드)
  * field: all(통합 = 접수번호·고객명·병원명·시리얼·송장·담당자) / hospital / serial / code / tracking / owner(연결 티켓 담당자)
+ * serial(및 all)은 접수 시리얼뿐 아니라 **교체 발송기기 시리얼**(new_serial_no 확정·draft_new_serial_no 초안)도 대상 (2026-11-09 — 교체된 기기로 접수 역추적)
  * 키워드는 ','로 분리해 OR — 어느 키워드든 어느 대상이든 하나라도 맞으면 포함. 조건이 하나도 없으면 null(필터 없음)
  */
 export async function buildAsReceiptSearchOr(q: string, field: AsSearchField = 'all'): Promise<Prisma.AsReceiptWhereInput[] | null> {
@@ -39,7 +40,10 @@ export async function buildAsReceiptSearchOr(q: string, field: AsSearchField = '
     if (field === 'all' || field === 'code') or.push({ asCode: ci(k) })
     if (field === 'all') or.push({ reporterName: ci(k) })
     if (field === 'all' || field === 'hospital') or.push({ hospital: { hospitalName: ci(k) } })
-    if (field === 'all' || field === 'serial') or.push({ items: { some: { serialNo: ci(k.replace(/\s+/g, '')) } } })
+    if (field === 'all' || field === 'serial') {
+      const s = ci(k.replace(/\s+/g, ''))
+      or.push({ items: { some: { OR: [{ serialNo: s }, { newSerialNo: s }, { draftNewSerialNo: s }] } } })
+    }
     if (field === 'all' || field === 'owner') or.push({ ticket: { owner: { name: ci(k) } } })
   }
   if (field === 'all' || field === 'tracking') {

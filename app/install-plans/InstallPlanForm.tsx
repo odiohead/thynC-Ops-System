@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import RichTextEditor from '@/app/components/RichTextEditor'
+import FileDropZone from '@/app/components/FileDropZone' // 첨부 끌어다 놓기 (2026-11-10)
 import FieldEngineerSelectModal from '@/app/components/FieldEngineerSelectModal'
 
 interface Hospital {
@@ -83,8 +84,9 @@ function FileField({ label, fileCategory, installPlanId, savedFiles, onSavedFile
     setDeletingId(null)
   }
 
-  async function handleFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const selected = Array.from(e.target.files ?? [])
+  const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => uploadFiles(Array.from(e.target.files ?? []))
+  /** 파일 선택·끌어다 놓기 공용 업로드 (2026-11-10) */
+  async function uploadFiles(selected: File[]) {
     if (selected.length === 0) return
     setUploading(true)
     setUploadError(null)
@@ -111,7 +113,7 @@ function FileField({ label, fileCategory, installPlanId, savedFiles, onSavedFile
   }
 
   return (
-    <div className="space-y-2">
+    <FileDropZone onFiles={(fs) => void uploadFiles(fs)} disabled={uploading || !canEdit} className="space-y-2 -m-1 p-1">
       {displayFiles.length === 0 ? (
         <p className="text-xs text-gray-400">등록된 파일이 없습니다.</p>
       ) : (
@@ -162,10 +164,11 @@ function FileField({ label, fileCategory, installPlanId, savedFiles, onSavedFile
           >
             {uploading ? '업로드 중...' : `+ ${label} 추가`}
           </button>
+          <span className="ml-2 text-[11px] text-gray-400">또는 파일을 여기로 끌어다 놓기</span>
         </div>
       )}
       {uploadError && <p className="text-xs text-red-500">{uploadError}</p>}
-    </div>
+    </FileDropZone>
   )
 }
 
