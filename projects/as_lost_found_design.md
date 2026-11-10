@@ -1,6 +1,6 @@
 # 분실기기 되찾음 처리 + 분실 제공 수량 표기 통일 설계안
 
-> **상태**: dev2 구현·빌드 완료 (2026-11-10 — 스모크 19/19 · Playwright 화면 검증) — PROD 미반영. 결정: D1 숨김 · D2 즉시 회수 · D3 outcome FOUND · §4 단일 정의 · 작성 2026-11-09
+> **상태**: 완료 — PROD 배포 2026-11-10 (a969559, 마이그 적용). 결정: D1 숨김 · D2 즉시 회수 · D3 outcome FOUND · §4 단일 정의 · 작성 2026-11-09
 > 선행: `as_receipt_design.md`(라인 결과·원장 연동), `lib/asLostQuota.ts`(분실 10% 한도), `hospital_device_registry_design.md`(기기 상태 전이표)
 
 ---
