@@ -12,6 +12,7 @@
 - **공용** `lib/asReceiptShared.ts`: `AS_QUEUE_SORTS`·라벨·`parseAsQueueSort`·`parseAsTags`
 - **검증**: tsc · dev2 빌드 · Playwright(칩 토글 → URL tag 반영·건수 변화, 선교체 먼저 정렬 시 첫 행 선교체 태그, 정렬 URL 반영)
 - 영향 파일: lib/asReceiptShared.ts, lib/asReceiptQueue.ts, app/api/as-receipts/queue/route.ts, app/as-receipts/queue/page.tsx, README.md
+- → **PROD 배포 2026-11-11 (09c43a1)** — 스키마·패키지 변경 없음, 빌드 1회 성공·thync-prod 재시작, 협업 서버 번들 동일
 
 ## 2026-11-11 18:50 | [운영 데이터 조치 — PROD만] AS-202611-0013 중복 시리얼 3라인 보정 — 원장 연결 해제 + 교체기 3대 제주한라 등록
 
@@ -34,6 +35,7 @@
 - **코드 보완**(`app/api/inventory/items/[id]/route.ts` PUT): 시리얼 관리 여부 변경 잠금을 "**취소된 전표 제외** 이력이 있고 **현재고(수량 합 또는 IN_STOCK 개체)가 남아 있을 때만** 409"로 완화. 재고가 0이면 과거 전표가 있어도 화면에서 변경 가능(과거 전표는 수량 기록으로 유지). 오류 문구에 수량·개체 수와 조치 안내. tsc 통과 — dev2 빌드·PROD 반영은 다음 일괄 때
 - 영향 파일: app/api/inventory/items/[id]/route.ts
 - **추가 조치(같은 날)**: ITEM-0049~0053(thynC시스템20/30/40/50/100, 대웅제약재고) 동일 전환 — 전부 현재고 0·개체 0(0050은 살아 있는 입고1·출고1 상쇄). 과거 전표 비고 표기·감사 5행·백업 `_bak_inventory_items_49_53_20261111`·`_bak_inventory_tx_items_49_53_20261111`
+- → **PROD 배포 2026-11-11 (09c43a1)** — 스키마·패키지 변경 없음, 빌드 1회 성공·thync-prod 재시작, 협업 서버 번들 동일
 
 ## 2026-11-11 14:00 | 분실 접수 '교체(시리얼 직접 입력)' 예외 노출 + 미종결 라인 남긴 '완료' 차단 (PROD AS-202610-0449 사례)
 
