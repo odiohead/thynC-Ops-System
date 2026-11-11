@@ -72,13 +72,20 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (!name) return NextResponse.json({ error: '품목명을 입력해주세요.' }, { status: 400 })
 
   // 시리얼 관리 여부는 재고 이력이 생기면 변경 금지 — 수량↔개체 정합이 깨짐 (function_wms.md §4-1)
+  // 2026-11-11 완화(PROD ITEM-0022 사례 — 취소된 입고 1건뿐인데 막힘): **취소된 전표는 세지 않고**, 살아 있는 전표가 있어도 **현재고 0·개체 0**이면 허용.
+  // 수량 재고나 개체가 남아 있으면 종전대로 409 (플래그만 바꾸면 수량↔개체가 어긋남). 과거 전표는 수량 기록으로 그대로 남는다
   // LOT 관리 여부는 이력이 있어도 변경 허용 (2026-07-20) — 기존 개체·전표의 LOT는 없음(-) 유지, 이후 입출고부터 규칙 적용
   const wantSerial = !!body.isSerialManaged
   const wantLot = !!body.isLotManaged // 비시리얼 품목도 LOT 관리 가능 (전표 단위 기록)
   if (wantSerial !== before.isSerialManaged) {
-    const txCount = await prisma.inventoryTransaction.count({ where: { itemId: id } })
-    if (txCount > 0) {
-      return NextResponse.json({ error: `입출고 이력이 ${txCount}건 있어 시리얼 관리 여부를 변경할 수 없습니다.` }, { status: 409 })
+    const [txCount, stockAgg, unitCount] = await Promise.all([
+      prisma.inventoryTransaction.count({ where: { itemId: id, canceledAt: null } }),
+      prisma.inventoryStock.aggregate({ where: { itemId: id }, _sum: { quantity: true } }),
+      prisma.inventoryUnit.count({ where: { itemId: id, status: 'IN_STOCK' } }),
+    ])
+    const stockQty = stockAgg._sum.quantity ?? 0
+    if (txCount > 0 && (stockQty > 0 || unitCount > 0)) {
+      return NextResponse.json({ error: `입출고 이력이 ${txCount}건 있고 현재고가 남아 있어(수량 ${stockQty}·개체 ${unitCount}) 시리얼 관리 여부를 변경할 수 없습니다. 재고를 0으로 정리(출고·조정)한 뒤 변경하거나 새 품목으로 분리하세요.` }, { status: 409 })
     }
   }
 

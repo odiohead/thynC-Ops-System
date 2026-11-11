@@ -14,7 +14,7 @@ import AsTabs from '../_components/AsTabs'
 import {
   AS_QUEUE_BUCKETS, AS_QUEUE_BUCKET_LABELS, AS_QUEUE_BUCKET_DESC, parseAsQueueBucket, type AsQueueBucket,
   AS_DEVICE_GROUP_CODE_LIST, AS_DEVICE_GROUP_CODE_LABELS, parseAsDeviceGroupCode, type AsDeviceGroupCode,
-  AS_TAG_LABELS, AS_TAG_BADGE_CLS, type AsTag, AS_OUTCOME_LABELS, type AsOutcome, AS_INTAKE_STATE_LABELS, type AsIntakeState,
+  AS_TAG_LABELS, AS_TAG_BADGE_CLS, type AsTag, AS_TAGS, parseAsTags, AS_QUEUE_SORTS, AS_QUEUE_SORT_LABELS, parseAsQueueSort, type AsQueueSort, AS_OUTCOME_LABELS, type AsOutcome, AS_INTAKE_STATE_LABELS, type AsIntakeState,
   AS_PICKUP_METHOD_LABELS, type AsPickupMethod, AS_CATEGORY_LABELS, type AsCategory,
   AS_LINE_CONDITION_BADGE_CLS, isAsLineConditionBadge, AS_QUEUE_QS_KEY, AS_BACK_KEY, AS_QUEUE_BULK_MAX,
   AS_REPAIR_RESULT_LABELS, AS_REPAIR_RESULT_DESC, type AsSettableRepairResult,
@@ -124,7 +124,8 @@ function QueuePageInner() {
   const [group, setGroup] = useState<AsDeviceGroupCode>(() => parseAsDeviceGroupCode(searchParams.get('group')))
   const [hospitalInput, setHospitalInput] = useState(searchParams.get('hospital') ?? '')
   const [hospital, setHospital] = useState(searchParams.get('hospital') ?? '')
-  const [priority, setPriority] = useState(searchParams.get('priority') === '1')
+  const [tags, setTags] = useState<AsTag[]>(() => parseAsTags([...searchParams.getAll('tag'), ...(searchParams.get('priority') === '1' ? ['PRIORITY_REPAIR'] : [])])) // 태그 필터 (2026-11-11) — 복수 AND
+  const [sort, setSort] = useState<AsQueueSort>(() => parseAsQueueSort(searchParams.get('sort')))
   const [page, setPage] = useState(() => Math.max(1, parseInt(searchParams.get('page') ?? '1') || 1))
   const [data, setData] = useState<QueueData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -144,10 +145,11 @@ function QueuePageInner() {
     p.set('bucket', bucket)
     p.set('group', group)
     if (hospital) p.set('hospital', hospital)
-    if (priority) p.set('priority', '1')
+    for (const t of tags) p.append('tag', t)
+    if (sort !== 'default') p.set('sort', sort)
     if (page > 1) p.set('page', String(page))
     return p
-  }, [bucket, group, hospital, priority, page])
+  }, [bucket, group, hospital, tags, sort, page])
 
   // URL 동기화 + 마지막 조회 보관(상세 [← 목록]·탭 복귀용) — 목록 페이지와 같은 패턴
   useEffect(() => {
@@ -339,7 +341,7 @@ function QueuePageInner() {
         })}
       </div>
 
-      {/* 필터 줄 — 기기군 세그먼트 · 병원 · 우선수리 */}
+      {/* 필터 줄 — 기기군 세그먼트 · 병원 · 태그 필터 · 정렬 (2026-11-11 태그·정렬 추가) */}
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <div className="inline-flex overflow-hidden rounded-md border border-gray-300 bg-white text-sm">
           {AS_DEVICE_GROUP_CODE_LIST.map((g) => (
@@ -358,10 +360,21 @@ function QueuePageInner() {
           <button type="submit" className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700 hover:bg-gray-50">검색</button>
           {hospital && <button type="button" onClick={() => { setHospital(''); setHospitalInput(''); setPage(1) }} className="text-xs text-gray-500 hover:underline">지우기</button>}
         </form>
-        <label className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-sm ${priority ? 'border-red-300 bg-red-50 text-red-700' : 'border-gray-200 bg-white text-gray-700'}`} title="'우선수리' 태그 접수의 기기만">
-          <input type="checkbox" checked={priority} onChange={(e) => { setPriority(e.target.checked); setPage(1) }} className="rounded border-gray-300" />
-          우선수리만
-        </label>
+        {/* 태그 필터 — 목록과 같은 AND 의미(복수 체크 = 전부 켜진 접수의 기기) · 정렬 (2026-11-11) */}
+        <div className="flex flex-wrap items-center gap-1" data-testid="queue-tags">
+          {AS_TAGS.map((t) => {
+            const on = tags.includes(t)
+            return (
+              <button key={t} type="button" onClick={() => { setTags((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t])); setPage(1) }} className={`rounded-full border px-2.5 py-1 text-xs ${on ? AS_TAG_BADGE_CLS[t] + ' border-transparent font-medium ring-1 ring-current' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`} title={on ? `${AS_TAG_LABELS[t]} 태그 접수의 기기만 (해제하려면 클릭)` : `${AS_TAG_LABELS[t]} 태그 접수의 기기만`} data-testid={`queue-tag-${t}`}>
+                {AS_TAG_LABELS[t]}
+              </button>
+            )
+          })}
+          {tags.length > 0 && <button type="button" onClick={() => { setTags([]); setPage(1) }} className="text-xs text-gray-500 hover:underline">태그 해제</button>}
+        </div>
+        <select value={sort} onChange={(e) => { setSort(parseAsQueueSort(e.target.value)); setPage(1) }} className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm" title="정렬" data-testid="queue-sort">
+          {AS_QUEUE_SORTS.map((o) => <option key={o} value={o}>{AS_QUEUE_SORT_LABELS[o]}</option>)}
+        </select>
         <span className="ml-auto text-sm text-gray-500">{total.toLocaleString()}대</span>
       </div>
 

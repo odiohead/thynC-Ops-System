@@ -4,14 +4,15 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, isUserOrAbove } from '@/lib/auth'
 import { hasPermission } from '@/lib/appRoles'
 import { canEditAsReceipt } from '@/lib/asReceipt'
-import { AS_QUEUE_BUCKETS, AS_DEVICE_GROUP_CODE_LIST, AS_DEVICE_GROUP_TO_CODE, asDeviceGroupOf, asReceiptTags, parseAsQueueBucket, type AsDeviceGroupCode, type AsQueueBucket } from '@/lib/asReceiptShared'
+import { AS_QUEUE_BUCKETS, AS_DEVICE_GROUP_CODE_LIST, AS_DEVICE_GROUP_TO_CODE, asDeviceGroupOf, asReceiptTags, parseAsQueueBucket, type AsDeviceGroupCode, type AsQueueBucket, parseAsTags, parseAsQueueSort, AS_TAG_FIELDS } from '@/lib/asReceiptShared'
 import { asDetailItemSelect, asQueueBucketWhere, asQueueOrderBy, asDeviceGroupWhere, shapeAsDetailItems } from '@/lib/asReceiptQueue'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * AS 수리대기 큐 (2026-09-28 — as_repair_queue_design.md §5.1) — 라인 1행 = 기기 1대
- * GET ?bucket=WAITING|INCOMING &group=ECG|SPO2|ETC &hospital=코드|이름 &priority=1 &page &pageSize
+ * GET ?bucket=WAITING|INCOMING &group=ECG|SPO2|ETC &hospital=코드|이름 &tag=PRE_REPLACE&tag=… (복수 = 모두 켜진 접수, AND — 목록과 동일) &sort=default|pre_replace|priority|received_asc|received_desc|receipt_asc|receipt_desc|hospital &page &pageSize
+ *   (`priority=1`은 구 호환 — tag=PRIORITY_REPAIR와 같음, 2026-11-11)
  * - counts: 버킷 × 기기군 전체 건수(필터 무관 — 헤더용). 기기군 판정은 클라이언트 `asDeviceGroupOf`와 같은 규칙(서버 where는 asDeviceGroupWhere)
  * - items: 상세 라인 select 그대로(`device.unit` 정형화) + receipt 헤더 요약(tags·canEdit)
  * 권한: 조회 전원(AS업무 nav와 동일)
@@ -24,7 +25,8 @@ export async function GET(request: NextRequest) {
   const groupRaw = sp.get('group')
   const group = (AS_DEVICE_GROUP_CODE_LIST as readonly string[]).includes(groupRaw ?? '') ? (groupRaw as AsDeviceGroupCode) : null // 미지정 = 전 기기군
   const hospital = sp.get('hospital')?.trim() || null
-  const priority = sp.get('priority') === '1'
+  const tags = parseAsTags([...sp.getAll('tag'), ...(sp.get('priority') === '1' ? ['PRIORITY_REPAIR'] : [])]) // 태그 필터 (2026-11-11) — 복수 AND
+  const sort = parseAsQueueSort(sp.get('sort'))
   const page = Math.max(1, parseInt(sp.get('page') ?? '1') || 1)
   const pageSize = Math.min(200, Math.max(1, parseInt(sp.get('pageSize') ?? '50') || 50))
 
@@ -48,14 +50,14 @@ export async function GET(request: NextRequest) {
       asQueueBucketWhere(bucket),
       ...(group ? [asDeviceGroupWhere(group)] : []),
       ...(hospital ? [{ receipt: { OR: [{ hospitalCode: hospital }, { hospital: { hospitalName: { contains: hospital } } }] } }] : []),
-      ...(priority ? [{ receipt: { priorityRepair: true } }] : []),
+      ...tags.map((t) => ({ receipt: { [AS_TAG_FIELDS[t]]: true } })),
     ],
   }
   const [total, rows] = await Promise.all([
     prisma.asReceiptItem.count({ where }),
     prisma.asReceiptItem.findMany({
       where,
-      orderBy: asQueueOrderBy(bucket),
+      orderBy: asQueueOrderBy(bucket, sort),
       skip: (page - 1) * pageSize,
       take: pageSize,
       select: {

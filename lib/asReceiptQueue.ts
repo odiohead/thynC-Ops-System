@@ -4,6 +4,7 @@
  */
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import type { AsQueueSort } from '@/lib/asReceiptShared'
 import type { AsQueueBucket, AsDeviceGroupCode } from '@/lib/asReceiptShared'
 
 export const asDetailItemSelect = {
@@ -85,9 +86,19 @@ export function asQueueBucketWhere(bucket: AsQueueBucket): Prisma.AsReceiptItemW
   }
 }
 
-/** 버킷별 정렬 — 수리 대기: 우선수리 태그 먼저 → 입고 오래된 순 / 입고 예정: 접수일 오래된 순 */
-export function asQueueOrderBy(bucket: AsQueueBucket): Prisma.AsReceiptItemOrderByWithRelationInput[] {
-  return bucket === 'WAITING'
+/** 버킷별 기본 정렬 — 수리 대기: 우선수리 태그 먼저 → 입고 오래된 순 / 입고 예정: 접수일 오래된 순. `sort`(2026-11-11)로 태그 우선·입고/접수일·병원명 정렬 선택 */
+export function asQueueOrderBy(bucket: AsQueueBucket, sort: AsQueueSort = 'default'): Prisma.AsReceiptItemOrderByWithRelationInput[] {
+  const base: Prisma.AsReceiptItemOrderByWithRelationInput[] = bucket === 'WAITING'
     ? [{ receipt: { priorityRepair: 'desc' } }, { receivedAt: 'asc' }, { id: 'asc' }]
     : [{ receipt: { receiptDate: 'asc' } }, { id: 'asc' }]
+  switch (sort) {
+    case 'pre_replace': return [{ receipt: { preReplace: 'desc' } }, ...base]
+    case 'priority': return [{ receipt: { priorityRepair: 'desc' } }, ...(bucket === 'WAITING' ? [{ receivedAt: 'asc' as const }] : [{ receipt: { receiptDate: 'asc' as const } }]), { id: 'asc' }]
+    case 'received_asc': return [{ receivedAt: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }]
+    case 'received_desc': return [{ receivedAt: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }]
+    case 'receipt_asc': return [{ receipt: { receiptDate: 'asc' } }, { id: 'asc' }]
+    case 'receipt_desc': return [{ receipt: { receiptDate: 'desc' } }, { id: 'desc' }]
+    case 'hospital': return [{ receipt: { hospital: { hospitalName: 'asc' } } }, ...base]
+    default: return base
+  }
 }

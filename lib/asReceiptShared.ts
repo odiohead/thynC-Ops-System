@@ -442,6 +442,26 @@ export function asReceiptDeviceStateLabel(hasOpenLines: boolean, tags: AsRegistr
 /** 목록 마지막 조회 쿼리스트링 보관 키 — 상세 [목록] 복귀 시 필터·페이지 복원 (2026-09-21, 프로젝트 목록 sessionStorage 선례) */
 export const AS_LIST_QS_KEY = 'as_receipts_list_qs'
 /** 수리대기 큐 마지막 조회 쿼리스트링 보관 키 (2026-09-28 — as_repair_queue_design.md §4.1) */
+/** 수리대기 큐 정렬 (2026-11-11 — 사용자 요청 "선교체가 최상단에") — 기본값은 종전 규칙(수리 대기: 우선수리 먼저 → 입고 오래된 순 / 입고 예정: 접수일 오래된 순) */
+export const AS_QUEUE_SORTS = ['default', 'pre_replace', 'priority', 'received_asc', 'received_desc', 'receipt_asc', 'receipt_desc', 'hospital'] as const
+export type AsQueueSort = (typeof AS_QUEUE_SORTS)[number]
+export const AS_QUEUE_SORT_LABELS: Record<AsQueueSort, string> = {
+  default: '기본 (우선수리 먼저 · 오래된 순)',
+  pre_replace: '선교체 먼저',
+  priority: '우선수리 먼저',
+  received_asc: '입고 오래된 순',
+  received_desc: '입고 최근 순',
+  receipt_asc: '접수 오래된 순',
+  receipt_desc: '접수 최근 순',
+  hospital: '병원명 순',
+}
+export function parseAsQueueSort(v: string | null | undefined): AsQueueSort {
+  return (AS_QUEUE_SORTS as readonly string[]).includes(v ?? '') ? (v as AsQueueSort) : 'default'
+}
+/** ?tag= 복수 파싱 — 카탈로그에 있는 태그만, 중복 제거 */
+export function parseAsTags(values: readonly string[]): AsTag[] {
+  return Array.from(new Set(values.filter((v): v is AsTag => (AS_TAGS as readonly string[]).includes(v))))
+}
 export const AS_QUEUE_QS_KEY = 'as_receipts_queue_qs'
 /** 상세 [← 목록]이 돌아갈 화면 — 마지막으로 머문 쪽('list' 접수 목록 / 'queue' 수리대기). 각 페이지의 URL 동기화 effect가 기록 */
 export const AS_BACK_KEY = 'as_receipts_back'
