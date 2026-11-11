@@ -6,6 +6,7 @@
  */
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
 import Pager from '@/app/components/ui/Pager'
 import DateRangeFilter from '@/app/components/ui/DateRangeFilter'
@@ -514,6 +515,8 @@ function AsReceiptListInner() {
         </div>
         <div className="flex items-center gap-2">
           <TicketRuleSettingButton refType="AS" />
+          {/* AS 대시보드 (2026-11-11 projects/as_dashboard_design.md) — 현황·기간 분석·병원별·기기 품질 */}
+          <Link href="/as-receipts/dashboard" className="rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">대시보드</Link>
           {/* 채널톡 인입 등록대기 큐 (2026-10-27 as_channeltalk_intake_design.md §5) — 건수는 PENDING */}
           <button type="button" onClick={() => router.push('/as-receipts/intake')} className={`rounded-lg border px-3.5 py-2 text-sm font-medium ${intakePending > 0 ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100' : 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50'}`} title="채널톡 상담에서 자동 접수에 실패한 건">
             등록대기{intakePending > 0 ? ` ${intakePending}` : ''}

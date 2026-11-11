@@ -114,3 +114,61 @@ export async function computeAsDealQuota(receipt: { id: number; hospitalCode: st
     rows,
   }
 }
+
+/** 병원별 라이트형 교체 현황 (AS 대시보드 '병원별' 표 — 2026-11-11, projects/as_dashboard_design.md §4.3) */
+export interface AsLiteQuotaHospitalGroup { group: Grp; introduced: number | null; replaced: number; pct: number | null; over: boolean }
+export interface AsLiteQuotaHospital { groups: AsLiteQuotaHospitalGroup[]; replaced: number; over: boolean }
+
+/**
+ * 전 병원 라이트형 고장 교체 누계 / 라이트 도입 수량 — `computeAsDealQuota`의 '라이트' 행과 **같은 정의**(이 접수 제외 분기만 없음)를 한 번에 집계한다.
+ * 분모 = 계약완료·상품유형 라이트 딜의 기기 수량 합(딜은 있는데 수량 행이 없으면 null), 분자 = 고장 접수(취소 제외) REPLACE 라인 중 교체된 기기의 원장 상품유형이 라이트.
+ * 라이트 딜이 있거나 라이트 교체가 1대 이상인 병원만 담는다. 한도 `AS_LITE_REPLACE_QUOTA_PCT`. 정의를 바꿀 때는 두 함수를 함께 고칠 것(대조: scripts/as-dashboard-smoke.mts)
+ */
+export async function computeAsLiteQuotaAll(): Promise<Map<string, AsLiteQuotaHospital>> {
+  const [dealRows, lineRows] = await Promise.all([
+    prisma.$queryRaw<{ hospital_code: string; device_name: string | null; qty: number | null }[]>`
+      SELECT d.hospital_code, di.device_name, sum(dd.quantity)::int AS qty
+      FROM sales_deals d JOIN status_codes s ON s.id = d.status_id
+      LEFT JOIN sales_deal_devices dd ON dd.deal_id = d.id AND dd.quantity > 0
+      LEFT JOIN device_info di ON di.id = dd.device_info_id
+      WHERE s.name = '계약완료' AND d.product_type = '라이트'
+      GROUP BY d.hospital_code, di.device_name`,
+    prisma.$queryRaw<(LineRow & { hospital_code: string })[]>`
+      SELECT r.hospital_code, di.device_name, i.device_kind, i.serial_no, hd.product_type
+      FROM as_receipt_items i JOIN as_receipts r ON r.id = i.receipt_id LEFT JOIN status_codes s ON s.id = r.status_id
+      LEFT JOIN device_units du ON du.id = i.device_id LEFT JOIN device_info di ON di.id = du.device_info_id
+      LEFT JOIN LATERAL (
+        SELECT h.product_type FROM hospital_devices h WHERE h.device_id = i.device_id
+        ORDER BY (h.hospital_code = r.hospital_code) DESC, h.id DESC LIMIT 1
+      ) hd ON TRUE
+      WHERE r.category <> 'LOST' AND i.outcome = 'REPLACE' AND coalesce(s.name, '') <> '취소' AND hd.product_type = '라이트'`,
+  ])
+  const introduced = new Map<string, Partial<Record<Grp, number>>>()
+  const hasLiteDeal = new Set<string>()
+  for (const r of dealRows) {
+    hasLiteDeal.add(r.hospital_code)
+    if (!r.device_name || !r.qty) continue
+    const g = asDeviceGroupOf(r.device_name, null)
+    if (g === '기타') continue
+    const m = introduced.get(r.hospital_code) ?? {}
+    m[g] = (m[g] ?? 0) + Number(r.qty); introduced.set(r.hospital_code, m)
+  }
+  const replaced = new Map<string, Partial<Record<Grp, number>>>()
+  for (const r of lineRows) {
+    const g = asDeviceGroupOf(r.device_name, r.device_kind, r.serial_no)
+    if (g === '기타') continue
+    const m = replaced.get(r.hospital_code) ?? {}
+    m[g] = (m[g] ?? 0) + 1; replaced.set(r.hospital_code, m)
+  }
+  const out = new Map<string, AsLiteQuotaHospital>()
+  const codes = new Set<string>(Array.from(hasLiteDeal).concat(Array.from(replaced.keys())))
+  codes.forEach((code) => {
+    const groups: AsLiteQuotaHospitalGroup[] = GROUPS.map((group) => {
+      const intro = hasLiteDeal.has(code) ? introduced.get(code)?.[group] ?? null : null
+      const n = replaced.get(code)?.[group] ?? 0
+      return { group, introduced: intro, replaced: n, pct: intro ? Math.round((n / intro) * 1000) / 10 : null, over: intro !== null && n > (intro * AS_LITE_REPLACE_QUOTA_PCT) / 100 }
+    })
+    out.set(code, { groups, replaced: groups.reduce((a, g) => a + g.replaced, 0), over: groups.some((g) => g.over) })
+  })
+  return out
+}

@@ -5,7 +5,7 @@ import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { AS_CATEGORIES, AS_TAGS, AS_TAG_FIELDS, parseSerialTextarea, summarizeAsRegistryTags, isAsIntakeIssue, type AsTag, parseAsSearchField } from '@/lib/asReceiptShared'
 import { asDeviceGroupWhere } from '@/lib/asReceiptQueue'
-import { buildAsReceiptSearchOr, findOpenLinesBySerial, duplicatesForReceipt, syncCombinedPackByTracking } from '@/lib/asReceiptSearch'
+import { buildAsReceiptSearchOr, findAsNeedsCheckReceiptIds, findOpenLinesBySerial, duplicatesForReceipt, syncCombinedPackByTracking } from '@/lib/asReceiptSearch'
 import { createAsReceipt, AsServiceError, type LineInput } from '@/lib/asReceiptService'
 import { toRegistryErrorResponse } from '@/lib/deviceRegistry'
 import { notifyTicketCreated } from '@/lib/notify'
@@ -77,19 +77,7 @@ export async function GET(request: NextRequest) {
 
   // 접수 기기상태 '확인필요' 필터 (2026-09-15) — 목록 배지와 같은 정의: 미종결 라인 중 원장 정합 태그(미등록·미배치·회수·타병원) 또는 입고 대조(미입고·미식별입고) 또는 중복접수(같은 시리얼 미종결 라인이 다른 접수에 — 2026-09-18)가 있는 접수
   if (sp.get('needsCheck') === '1') {
-    const rows = await prisma.$queryRaw<{ id: number }[]>(Prisma.sql`
-      SELECT DISTINCT r.id FROM as_receipts r
-      JOIN as_receipt_items i ON i.receipt_id = r.id AND i.outcome IS NULL
-      LEFT JOIN device_units du ON du.serial_no = i.serial_no
-      LEFT JOIN hospital_devices hd ON hd.device_id = du.id
-      LEFT JOIN status_codes rs ON rs.id = r.status_id
-      WHERE COALESCE(rs.name, '') <> '취소' -- 취소 접수는 기기상태 '취소' — 확인필요 대상 아님 (2026-09-21, isAsCanceledStatus와 동일 기준)
-        AND (i.intake_state IN ('MISMATCH', 'EXTRA')
-         OR du.id IS NULL OR hd.id IS NULL OR hd.status <> 'ACTIVE' OR hd.hospital_code IS DISTINCT FROM r.hospital_code
-         OR EXISTS (SELECT 1 FROM as_receipt_items o JOIN as_receipts orr ON orr.id = o.receipt_id LEFT JOIN status_codes os ON os.id = orr.status_id
-                    WHERE o.serial_no = i.serial_no AND o.outcome IS NULL AND o.receipt_id <> r.id
-                      AND (os.ticket_status IS NULL OR os.ticket_status NOT IN ('RESOLVED', 'CLOSED'))))`) // 중복접수 (2026-09-18) — 상대 접수가 종결이면 제외 (2026-09-19, findOpenLinesBySerial과 동일 정의)
-    where.id = { in: rows.map((x) => x.id) }
+    where.id = { in: await findAsNeedsCheckReceiptIds() } // 판정 SQL은 lib/asReceiptSearch 단일 소스 (AS 대시보드와 공용, 2026-11-11)
   }
 
   const hospitalCode = sp.get('hospitalCode')

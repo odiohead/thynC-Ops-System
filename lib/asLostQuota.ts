@@ -61,3 +61,48 @@ export async function computeAsLostQuota(receipt: { id: number; hospitalCode: st
   })
   return { thresholdPct: AS_LOST_QUOTA_PCT, hasPurchase: groups.some((g) => g.purchased !== null), groups }
 }
+
+/** 병원별 분실 제공 현황 (AS 대시보드 '병원별' 표 — 2026-11-11, projects/as_dashboard_design.md §4.3) */
+export interface AsLostQuotaHospitalGroup { group: AsLostQuotaGroup['group']; purchased: number | null; provided: number; pct: number | null; over: boolean }
+export interface AsLostQuotaHospital { groups: AsLostQuotaHospitalGroup[]; provided: number; over: boolean }
+
+/**
+ * 전 병원 분실 제공 누계 / 구매수량 — `computeAsLostQuota`(병원 1곳)와 **같은 정의**를 한 번에 집계한다.
+ * 분모 = 계약완료 딜 기기 수량 합(없으면 null), 분자 = 분실 접수(취소 제외)의 제공 확정 라인(`AS_LOST_PROVIDED_OUTCOMES`), 한도 `AS_LOST_QUOTA_PCT`.
+ * 분실 제공이 1대 이상인 병원만 담는다. 정의를 바꿀 때는 두 함수를 함께 고칠 것(대조: scripts/as-dashboard-smoke.mts)
+ */
+export async function computeAsLostQuotaAll(): Promise<Map<string, AsLostQuotaHospital>> {
+  const [purchasedRows, providedRows] = await Promise.all([
+    prisma.$queryRaw<{ hospital_code: string; device_name: string; qty: number }[]>`
+      SELECT d.hospital_code, di.device_name, sum(dd.quantity)::int AS qty
+      FROM sales_deal_devices dd JOIN sales_deals d ON d.id = dd.deal_id JOIN status_codes s ON s.id = d.status_id JOIN device_info di ON di.id = dd.device_info_id
+      WHERE s.name = '계약완료' AND dd.quantity > 0 GROUP BY d.hospital_code, di.device_name`,
+    prisma.$queryRaw<{ hospital_code: string; device_name: string | null; device_kind: string | null; serial_no: string }[]>`
+      SELECT r.hospital_code, di.device_name, i.device_kind, i.serial_no
+      FROM as_receipt_items i JOIN as_receipts r ON r.id = i.receipt_id LEFT JOIN status_codes s ON s.id = r.status_id
+      LEFT JOIN device_units du ON du.id = i.device_id LEFT JOIN device_info di ON di.id = du.device_info_id
+      WHERE r.category = 'LOST' AND i.outcome IN (${PROVIDED}) AND coalesce(s.name, '') <> '취소'`,
+  ])
+  const purchased = new Map<string, Map<AsDeviceGroup, number>>()
+  for (const r of purchasedRows) {
+    const g = asDeviceGroupOf(r.device_name, null)
+    const m = purchased.get(r.hospital_code) ?? new Map<AsDeviceGroup, number>()
+    m.set(g, (m.get(g) ?? 0) + Number(r.qty)); purchased.set(r.hospital_code, m)
+  }
+  const provided = new Map<string, Map<AsDeviceGroup, number>>()
+  for (const r of providedRows) {
+    const g = asDeviceGroupOf(r.device_name, r.device_kind, r.serial_no)
+    const m = provided.get(r.hospital_code) ?? new Map<AsDeviceGroup, number>()
+    m.set(g, (m.get(g) ?? 0) + 1); provided.set(r.hospital_code, m)
+  }
+  const out = new Map<string, AsLostQuotaHospital>()
+  provided.forEach((prov, code) => {
+    const groups: AsLostQuotaHospitalGroup[] = QUOTA_GROUPS.map((group) => {
+      const p = purchased.get(code)?.get(group) ?? null
+      const n = prov.get(group) ?? 0
+      return { group, purchased: p, provided: n, pct: p ? Math.round((n / p) * 1000) / 10 : null, over: p !== null && n > (p * AS_LOST_QUOTA_PCT) / 100 }
+    })
+    out.set(code, { groups, provided: groups.reduce((a, g) => a + g.provided, 0), over: groups.some((g) => g.over) })
+  })
+  return out
+}

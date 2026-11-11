@@ -4,6 +4,28 @@
 
 ---
 
+## 2026-11-12 10:30 | AS 대시보드 작업 중 발견분 조치 — 기기군 '기타' where NULL 누락 · VOC·AS 주간 대시보드 병원 링크 (dev2 빌드)
+
+- **요청**: "조치하지 않은 것 조치하고 커밋·푸시·PROD 반영까지" — 11-11 AS 대시보드 항목의 미조치 ①②
+- **① 기기군 '기타' where**(`lib/asReceiptQueue.asDeviceGroupWhere`): 종전 ETC = `NOT (심전계 OR 산소포화도)` — 미등록이고 기기종류가 NULL인 라인은 `NOT … LIKE`가 NULL이 되어 어느 군에도 안 잡혔다(dev2 3라인 — 시리얼 칸에 `[57병동]` 같은 값이 들어간 라인). 판정 값을 **원장 모델명 / 미등록 기기종류 / 시리얼 접두(A·P+숫자)** 세 경우로 겹치지 않게 나눠 NULL 없는 컬럼만 비교하도록 재작성 — JS `asDeviceGroupOf`와 같은 규칙(ecg·spo2 영문 표기, 심전계 우선, 접두 뒤 숫자 포함). 심전계·산소포화도 건수는 종전과 동일. 영향: 수리대기 큐 기기군 '기타'·AS 대시보드 작업 대기 기기군별 건수(목록 `?group=`은 ECG/SPO2만 받아 무관)
+- **② 병원 링크**(`/voc/dashboard`): AS 병원 TOP 2개 표의 `/as-receipts?hospital=코드`는 목록이 받지 않는 파라미터라 필터 없이 전체가 열렸다 → `q=병원명&field=hospital&from=&to=`(병원 상세 AS 현황·AS 대시보드와 같은 형식, 기간 = 표의 집계 구간). API 응답에 `as.windowFrom`/`windowTo` 추가
+- **③ 같은 결함 추가 발견·조치**: 같은 화면 VOC 병원 TOP의 `/voc?hospital=코드`도 동일 — VOC 목록은 URL 파라미터를 아예 읽지 않았다. VOC 목록이 `hospitalCode`·`from`·`to`를 첫 조회 필터로 읽도록 하고(API는 이미 `hospitalCode` 지원), 병원은 **해제 가능한 칩**('병원: OOO ✕' — 해제 시 URL도 `/voc`로 정리)으로 표시. 링크는 `/voc?hospitalCode=&from=&to=`. 파라미터 없이 열면 종전과 동일
+- **검증**: tsc · eslint · `scripts/as-dashboard-smoke.mts` 64/64(ETC 라인 수 JS↔where 일치 + 세 기기군 where 합 = 전체 라인 16,156 — 종전 ETC는 참고 출력이던 것을 검사로 승격) · dev2 빌드 · Playwright 실제 화면 26/26(링크 형식, AS 목록 건수−취소 = 대시보드 접수 건수, VOC 목록 건수 = 대시보드 VOC 건수, 칩 표시·해제·URL 정리, 기간 입력 반영, VOC 목록 무파라미터 전체, 큐 버킷×기기군 필터 건수 = 헤더 counts·3군 합 = 전체)
+- 영향 파일: lib/asReceiptQueue.ts, lib/vocDashboard.ts, app/voc/dashboard/page.tsx, app/voc/page.tsx, scripts/as-dashboard-smoke.mts, projects/as_dashboard_design.md, README.md
+- 스키마·패키지 변경 없음
+
+## 2026-11-11 19:10 | AS 대시보드 — `/as-receipts/dashboard` (현황·기간 분석·병원별·기기·품질 4탭 + 공통 필터, 설계 `projects/as_dashboard_design.md`, dev2 빌드)
+
+- **요청**: "AS업무에도 대시보드 — 목록 우측 상단 [대시보드] 버튼으로 진입, 기본 현황 + 기간 지정 조회·병원별 건수 조회, 여러 부서가 실제로 쓸 수 있게. 묻지 말고 고민해서 dev2 빌드까지" → 이 건에 한해 설계 검토 게이트 없이 구현, **사용자 검토·피드백 대기**(설계안 §9에 검토 때 정할 것 7개)
+- **구성**: 탭 4개 = 질문 4개. ① 현황(조회 시점 — 숫자 한 줄·단계별 진행 현황(경과일 4구간 막대·체류 중앙값)·기기 단위 작업 대기 4칸·오래된 접수 10건·진행 중 접수가 많은 병원) ② 기간 분석(직전 동기간 대비 숫자 한 줄·접수/완료/발송 추이(일·주·월, 차트/표)·처리 결과·소요일(접수→입고→발송)·구성) ③ 병원별(전 병원 표 — 정렬·검색·한도 초과만·미완료만·CSV / 병원 선택 시 한도 현황·병동별·기간 내 접수) ④ 기기·품질(기기군·상품유형별 100대당 고장·재접수율·수리 후 30일 내 재접수·재접수까지 걸린 기간·반복 접수 기기 15대·회수기기 처리자·접수사유 키워드). 공통 필터 기간·구분·기기군·**병원**(고르면 전 탭이 그 병원 기준), URL 동기화
+- **정의는 기존 화면과 같게**(숫자가 서로 달라지지 않게): 미종결·2주 경과 = 목록 요약, 수리 대기·입고 예정 = 수리대기 큐 `asQueueBucketWhere`, 확인필요 = 목록 `needsCheck`(판정 SQL을 목록 라우트 → `lib/asReceiptSearch.findAsNeedsCheckReceiptIds`로 옮겨 공용화, 동작 동일), 분실 10%·라이트 100% 한도 = 병원 1곳 함수와 같은 정의의 일괄판 `computeAsLostQuotaAll`·`computeAsLiteQuotaAll` 신설, 취소 접수·라인취소는 물량 제외(VOC·AS 주간 대시보드와 동일), 기기군은 `asDeviceGroupOf`
+- **API** `GET /api/as-receipts/dashboard?section=now|period|hospitals|quality&from=&to=&category=&group=&hospital=&granularity=` — 읽기 전용·로그인 전원, 탭 하나가 섹션 하나(dev2 응답 30~200ms). 스키마·패키지 변경 없음
+- **차트**: 이중 축을 쓰지 않음(막대와 선은 같은 단위끼리만 — 건↔건, 대↔대 토글). 계열색 3개·경과일 4단계는 라이트/다크 표면에서 색각 구분·대비 검증 후 채택, 글자는 계열색 미사용
+- **검증**: `scripts/as-dashboard-smoke.mts` 62/62(독립 SQL·기존 정의 대조 — 한도 일괄 집계는 접수 이력 병원 188곳 전부 단건 함수와 대조) · tsc · eslint · dev2 빌드 · Playwright 실제 화면 49/49(API↔화면 숫자, 칸·단계 행 드릴다운 건수 일치, 프리셋·직접 지정·전체 기간, 간격·단위·표 전환, 병원 선택/해제·URL 복원, 빈 기간, CSV, VIEWER 열람, 다크 모드, 모바일 390px 가로 넘침 없음)
+- **작업 중 발견(→ ①② 2026-11-12 조치, 위 항목)**: ① 목록·큐의 기기군 '기타' where(`asDeviceGroupWhere('ETC')`)가 미등록·기기종류 없는 라인을 못 잡음(NOT … LIKE가 NULL) — dev2 3라인(비정상 시리얼), 대시보드는 JS 판정이라 '기타'로 셈 ② VOC·AS 주간 대시보드 병원 링크 `/as-receipts?hospital=코드`는 목록이 받지 않는 파라미터(필터 안 걸림) ③ dev2 데이터가 10-29 기준이라 '오늘·이번 주 접수'는 0, 경과일은 전부 15일 이상으로 보임
+- 영향 파일: lib/asDashboard.ts(신규), lib/asLostQuota.ts, lib/asDealQuota.ts, lib/asReceiptSearch.ts, app/api/as-receipts/dashboard/route.ts(신규), app/api/as-receipts/route.ts, app/as-receipts/dashboard/page.tsx·_components/{parts,NowTab,PeriodTab,HospitalsTab,QualityTab}.tsx(신규), app/as-receipts/page.tsx([대시보드] 버튼), scripts/as-dashboard-smoke.mts(신규), projects/as_dashboard_design.md(신규), projects/README.md, README.md
+- 커밋·PROD 반영 없음
+
 ## 2026-11-11 20:30 | 수리대기 큐 — 태그 필터(선교체·우선수리·펌웨어·부속품·합포장) + 정렬 선택 (dev2 빌드)
 
 - **요청**: 고객 요청 "선교체가 최상단에" → 특정 태그 고정 정렬 대신 접수 목록과 같은 **태그 체크 필터**와 **정렬 선택**을 수리대기 큐에 추가(사용자 제안 채택)

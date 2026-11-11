@@ -12,6 +12,7 @@
 
 | 문서 | 대상 | 상태 |
 |---|---|---|
+| [as_dashboard_design.md](as_dashboard_design.md) | AS 대시보드 — `/as-receipts/dashboard`(AS업무 목록 [대시보드] 진입): 공통 필터(기간·구분·기기군·병원) + 탭 4개 = 질문 4개 — 현황(단계별 재공·경과일·기기 단위 작업 대기)·기간 분석(접수·완료·발송 추이, 처리 결과, 소요일)·병원별(전 병원 표 + 분실 10%·라이트 100% 한도, 병원 드릴다운)·기기·품질(100대당 고장·재접수율·회수기기 처리·접수사유 키워드). 기존 정의 재사용(목록 요약·수리대기 큐·한도 함수), 스키마 변경 없음 | **1차 구현 완료 (dev2 빌드 2026-11-11) — 사용자 검토 대기, PROD 미반영** |
 | [hospital_report_design.md](hospital_report_design.md) | 레포트 — 병원 운영 이력 보고서: 메인 네비 '레포트'(최고관리자), 병원 검색→생성→웹 미리보기→Word 다운로드(사내 양식 `02_SEERS_2026_보고서_세로양식` 템플릿 재사용). 숫자·표는 SQL 수집기, AI는 구조화 출력으로 정해진 칸만(요약·확인된 내용·반복 주제·주요 이슈·AS 프로세스·시사점), 구성은 2026-11-08 사용자 지정 레포트(제주한라 운영레포트) 고정, 웹·Word는 같은 `ReportDoc` 렌더, `report_runs` 스냅샷, 레포트 전용 AI 설정(모델 허용 목록·effort) | **완료 (PROD 배포 2026-11-09, 02fd0af·7a783e6 — report_runs·ai_usage_logs.feature 마이그·레포트 nav 시드 적용)** |
 | [as_lost_stock_out_link_design.md](as_lost_stock_out_link_design.md) | 분실 AS ↔ 출고업무 연동 — 분실 접수 라인 체크 → 처리방법 '출고요청' → 판매용·'분실기기 제공' 출고 티켓 자동 생성(라인 잠금·배지), 출고 처리 카드 AS 모드(본체 접수 기기별 출고 시리얼 1개 + 센서류 LOT 선택) → 출고 실행 시 AS 라인 교체 확정(교체기 자동 기입·원장 처리). `stock_out_requests.as_receipt_id`·`as_receipt_items.stock_out_request_id` | **완료 (PROD 배포 2026-11-10, a969559 — 마이그 적용)** |
 | [as_lost_found_design.md](as_lost_found_design.md) | 분실기기 되찾음 — 분실 접수 교체 확정 라인에 [되찾음](outcome `FOUND`): 되찾은 기기 사용중 복귀(재배치 REGISTER)·교체기기 회수(RECOVER RETURN), 분실 10% 한도 분자 자동 차감 + 병원 블록·AS 상세 분실 수량 단일 정의(같은 병원 = 같은 숫자, 되찾음 즉시 감소). 정책: 발송 후 되찾으면 교체기기 회수(2대 사용 없음) | **완료 (PROD 배포 2026-11-10, a969559 — 마이그 적용)** |

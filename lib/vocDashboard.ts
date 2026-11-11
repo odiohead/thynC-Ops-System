@@ -98,6 +98,9 @@ export interface VocDashboard {
     topHospitalsByRatio: HospitalAsRow[]
     ratioMinDeployed: number
     windowDays: number
+    /** 병원 TOP 집계 구간(접수일, 양끝 포함) — 병원 행 → AS 접수 목록 링크의 from/to (2026-11-12) */
+    windowFrom: string
+    windowTo: string
   }
 }
 
@@ -302,7 +305,7 @@ export async function buildVocDashboard(opts: { weekStart: Date }): Promise<VocD
       shipDays: { n: n0(shipRows[0]?.n), median: num(shipRows[0]?.med), p90: num(shipRows[0]?.p90), avg: num(shipRows[0]?.avg) },
       weekly: weeklyAs,
       topHospitalsByDevices: topByDevices, topHospitalsByRatio: topByRatio,
-      ratioMinDeployed: RATIO_MIN_DEPLOYED, windowDays: TOP_WINDOW_DAYS,
+      ratioMinDeployed: RATIO_MIN_DEPLOYED, windowDays: TOP_WINDOW_DAYS, windowFrom: topStartSql, windowTo: ymd(addDays(weekEndDay, -1)),
     },
   }
 }

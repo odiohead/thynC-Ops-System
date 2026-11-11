@@ -51,20 +51,29 @@ export function shapeAsDetailItems<T extends AsDetailItem>(items: T[]) {
 }
 
 /**
- * 기기군 where (목록 ?group= 필터와 동일 규칙 — 원장 모델명 → 미등록 기기종류 → 시리얼 접두 A 심전계 / P 산소포화도).
- * ETC는 두 군 어디에도 안 잡히는 라인. 클라이언트 `asDeviceGroupOf`와 같은 판정이어야 한다(건수 대조 검증 항목).
+ * 기기군 where (목록 ?group= 필터와 동일 규칙) — 클라이언트 `asDeviceGroupOf`와 **같은 판정**이어야 한다(건수 대조: scripts/as-dashboard-smoke.mts).
+ * 판정 기준이 되는 값은 라인마다 하나: ① 원장 연결 라인 = 모델명 ② 미등록·기기종류 있음 = 기기종류 ③ 미등록·기기종류 없음 = 시리얼 접두(A+숫자 심전계 / P+숫자 산소포화도).
+ * 세 경우를 서로 겹치지 않게 나눠 쓴다 — 2026-11-12: 종전 ETC는 `NOT (심전계 OR 산소포화도)` 였는데 기기종류가 NULL인 미등록 라인은
+ * SQL에서 NOT … LIKE 가 NULL이 되어 어느 군에도 안 잡혔다(비정상 시리얼 라인이 큐·대시보드 '기타'에서 누락). 경우별로 NULL이 없는 컬럼만 비교하도록 변경.
  */
 export function asDeviceGroupWhere(group: AsDeviceGroupCode): Prisma.AsReceiptItemWhereInput {
-  const of = (nameKey: string, prefix: string): Prisma.AsReceiptItemWhereInput => ({
+  // asDeviceGroupOf의 이름 판정: 심전계 = /심전/ 또는 /ecg/i, 산소포화도 = /산소/ 또는 /spo2/i (심전계 판정이 먼저)
+  const ecgName = (f: 'deviceName' | 'deviceKind') => ({ OR: [{ [f]: { contains: '심전' } }, { [f]: { contains: 'ecg', mode: 'insensitive' as const } }] })
+  const spo2Name = (f: 'deviceName' | 'deviceKind') => ({ OR: [{ [f]: { contains: '산소' } }, { [f]: { contains: 'spo2', mode: 'insensitive' as const } }] })
+  const nameIs = (f: 'deviceName' | 'deviceKind') =>
+    group === 'ECG' ? ecgName(f) : group === 'SPO2' ? { AND: [spo2Name(f), { NOT: ecgName(f) }] } : { NOT: [ecgName(f), spo2Name(f)] }
+  // 시리얼 접두 + 숫자 (asDeviceKindFromSerial: /^A\d/ · /^P\d/ — 시리얼은 대문자 정규화 저장)
+  const serialIs = (prefix: string): Prisma.AsReceiptItemWhereInput => ({ OR: Array.from({ length: 10 }, (_, d) => ({ serialNo: { startsWith: `${prefix}${d}` } })) })
+  const serialCase: Prisma.AsReceiptItemWhereInput =
+    group === 'ECG' ? serialIs('A') : group === 'SPO2' ? serialIs('P') : { NOT: [serialIs('A'), serialIs('P')] }
+  const noKind: Prisma.AsReceiptItemWhereInput = { OR: [{ deviceKind: null }, { deviceKind: '' }] }
+  return {
     OR: [
-      { device: { deviceInfo: { deviceName: { contains: nameKey } } } },
-      { deviceId: null, deviceKind: { contains: nameKey } },
-      { deviceId: null, deviceKind: null, serialNo: { startsWith: prefix } },
+      { device: { deviceInfo: nameIs('deviceName') } }, // ① 원장 연결 (모델명은 NOT NULL)
+      { deviceId: null, AND: [{ NOT: noKind }, nameIs('deviceKind')] }, // ② 미등록 · 기기종류 있음
+      { deviceId: null, AND: [noKind, serialCase] }, // ③ 미등록 · 기기종류 없음 → 시리얼 접두
     ],
-  })
-  if (group === 'ECG') return of('심전', 'A')
-  if (group === 'SPO2') return of('산소', 'P')
-  return { NOT: [of('심전', 'A'), of('산소', 'P')] }
+  }
 }
 
 /** 접수 헤더 미종결 (상태 없음 포함 — summary·overdue2w와 동일 정의) */

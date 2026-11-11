@@ -54,6 +54,27 @@ export async function buildAsReceiptSearchOr(q: string, field: AsSearchField = '
   return or
 }
 
+/**
+ * 접수 기기상태 '확인필요' 접수 id (2026-09-15 정의 — 목록 `needsCheck=1` 필터·AS 대시보드 공용, 2026-11-11 목록 라우트에서 이동)
+ * 목록 배지와 같은 정의: 미종결 라인 중 원장 정합 태그(미등록·미배치·회수·타병원) 또는 입고 대조(미입고·미식별입고) 또는
+ * 중복접수(같은 시리얼의 미종결 라인이 다른 미종결 접수에 — 2026-09-18, 상대 접수가 종결이면 제외 2026-09-19)가 있는 접수. 취소 접수는 대상 아님(2026-09-21)
+ */
+export async function findAsNeedsCheckReceiptIds(): Promise<number[]> {
+  const rows = await prisma.$queryRaw<{ id: number }[]>(Prisma.sql`
+    SELECT DISTINCT r.id FROM as_receipts r
+    JOIN as_receipt_items i ON i.receipt_id = r.id AND i.outcome IS NULL
+    LEFT JOIN device_units du ON du.serial_no = i.serial_no
+    LEFT JOIN hospital_devices hd ON hd.device_id = du.id
+    LEFT JOIN status_codes rs ON rs.id = r.status_id
+    WHERE COALESCE(rs.name, '') <> '취소'
+      AND (i.intake_state IN ('MISMATCH', 'EXTRA')
+       OR du.id IS NULL OR hd.id IS NULL OR hd.status <> 'ACTIVE' OR hd.hospital_code IS DISTINCT FROM r.hospital_code
+       OR EXISTS (SELECT 1 FROM as_receipt_items o JOIN as_receipts orr ON orr.id = o.receipt_id LEFT JOIN status_codes os ON os.id = orr.status_id
+                  WHERE o.serial_no = i.serial_no AND o.outcome IS NULL AND o.receipt_id <> r.id
+                    AND (os.ticket_status IS NULL OR os.ticket_status NOT IN ('RESOLVED', 'CLOSED'))))`)
+  return rows.map((x) => x.id)
+}
+
 export interface AsOpenLineRef { receiptId: number; asCode: string }
 
 /** 중복접수 상대가 되는 접수 조건 — 헤더가 종결(완료·취소, ticketStatus RESOLVED/CLOSED)이면 라인이 열려 있어도 제외 (2026-09-19: 한쪽을 취소해도 '확인필요'가 남던 문제) */

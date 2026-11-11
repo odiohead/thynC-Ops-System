@@ -4,8 +4,8 @@
  * VOC 접수 목록 (cs_ticket_workflow_design.md §5)
  * CS 사건의 원본 도메인 레코드 — 연결 티켓(refType 'VOC')이 CS 마스터 티켓.
  */
-import { useState, useEffect, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
 
@@ -61,7 +61,12 @@ function codeBadge(c: CodeRef | null) {
 }
 
 export default function VocListPage() {
+  return <Suspense><VocListInner /></Suspense>
+}
+
+function VocListInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [rows, setRows] = useState<VocReceipt[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -71,8 +76,10 @@ export default function VocListPage() {
   const [statuses, setStatuses] = useState<CodeRef[]>([])
   const [types, setTypes] = useState<CodeRef[]>([])
 
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
+  // 대시보드 병원 TOP 링크로 들어온 경우 — ?hospitalCode=&from=&to= 를 첫 조회 필터로 (2026-11-12, 종전에는 URL 파라미터를 읽지 않아 전체 목록이 열렸다)
+  const [from, setFrom] = useState(searchParams.get('from') ?? '')
+  const [to, setTo] = useState(searchParams.get('to') ?? '')
+  const [hospitalCode, setHospitalCode] = useState(searchParams.get('hospitalCode') ?? '')
   const [statusId, setStatusId] = useState('')
   const [vocTypeId, setVocTypeId] = useState('')
   const [qInput, setQInput] = useState('')
@@ -96,6 +103,7 @@ export default function VocListPage() {
     if (to) params.set('to', to)
     if (statusId) params.set('statusId', statusId)
     if (vocTypeId) params.set('vocTypeId', vocTypeId)
+    if (hospitalCode) params.set('hospitalCode', hospitalCode)
     if (q) params.set('q', q)
     params.set('page', String(page))
     params.set('pageSize', String(pageSize))
@@ -106,7 +114,7 @@ export default function VocListPage() {
       setTotal(d.total ?? 0)
     }
     setLoading(false)
-  }, [from, to, statusId, vocTypeId, q, page])
+  }, [from, to, statusId, vocTypeId, hospitalCode, q, page])
 
   useEffect(() => { void load() }, [load])
 
@@ -161,6 +169,12 @@ export default function VocListPage() {
           />
           <button type="button" onClick={() => { setQ(qInput); setPage(1) }} className="rounded-md bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700">검색</button>
         </div>
+        {hospitalCode && (
+          <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 py-1 pl-2.5 pr-1 text-sm text-blue-800">
+            병원: {rows.find((r) => r.hospital?.hospitalCode === hospitalCode)?.hospital?.hospitalName ?? hospitalCode}
+            <button type="button" aria-label="병원 필터 해제" title="병원 필터 해제" onClick={() => { setHospitalCode(''); setPage(1); window.history.replaceState(null, '', '/voc') }} className="rounded-full px-1.5 text-blue-600 hover:bg-blue-100">✕</button>
+          </span>
+        )}
         <span className="ml-auto text-sm text-gray-500">{total.toLocaleString()}건</span>
       </div>
 

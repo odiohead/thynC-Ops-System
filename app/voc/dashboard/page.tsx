@@ -137,7 +137,7 @@ function VocDashboardInner() {
               <tbody>
                 {volume.topHospitals4w.map((h) => (
                   <tr key={h.hospitalCode} className="border-t border-gray-100">
-                    <td className="py-1"><Link href={`/voc?hospital=${h.hospitalCode}`} className="text-blue-600 hover:underline">{h.name}</Link></td>
+                    <td className="py-1"><Link href={`/voc?${new URLSearchParams({ hospitalCode: h.hospitalCode, from: as.windowFrom, to: as.windowTo }).toString()}`} className="text-blue-600 hover:underline">{h.name}</Link></td>
                     <td className="py-1 pr-4 text-right font-medium text-gray-900">{h.count}</td>
                     <td className="py-1 pl-2 text-xs text-gray-600">{h.topType ?? '—'}</td>
                   </tr>
@@ -190,8 +190,8 @@ function VocDashboardInner() {
           </Card>
         </div>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <HospitalTable title={`병원 TOP 10 — 최근 ${as.windowDays}일 AS 접수 대수`} rows={as.topHospitalsByDevices} mode="devices" />
-          <HospitalTable title={`병원 TOP 10 — 배치 기기 대비 AS 접수율 (최근 ${as.windowDays}일, 배치 ${as.ratioMinDeployed}대 이상)`} rows={as.topHospitalsByRatio} mode="ratio" />
+          <HospitalTable title={`병원 TOP 10 — 최근 ${as.windowDays}일 AS 접수 대수`} rows={as.topHospitalsByDevices} mode="devices" from={as.windowFrom} to={as.windowTo} />
+          <HospitalTable title={`병원 TOP 10 — 배치 기기 대비 AS 접수율 (최근 ${as.windowDays}일, 배치 ${as.ratioMinDeployed}대 이상)`} rows={as.topHospitalsByRatio} mode="ratio" from={as.windowFrom} to={as.windowTo} />
         </div>
       </section>
 
@@ -263,7 +263,10 @@ function AsTrend({ data, prefix, chart, axisProps, tooltipProps }: { data: VocDa
   )
 }
 
-function HospitalTable({ title, rows, mode }: { title: string; rows: HospitalAsRow[]; mode: 'devices' | 'ratio' }) {
+function HospitalTable({ title, rows, mode, from, to }: { title: string; rows: HospitalAsRow[]; mode: 'devices' | 'ratio'; from: string; to: string }) {
+  // AS 접수 목록은 병원을 병원명 검색(q + field=hospital)으로 받는다(병원 상세 AS 현황·AS 대시보드와 같은 형식). 집계 구간을 접수일 기간으로 함께 넘긴다.
+  // 2026-11-12: 종전 `?hospital=코드`는 목록이 받지 않는 파라미터라 필터 없이 전체 목록이 열렸다
+  const listHref = (name: string) => `/as-receipts?${new URLSearchParams({ from, to, q: name, field: 'hospital' }).toString()}`
   return (
     <Card title={title}>
       <table className="w-full text-sm">
@@ -273,7 +276,7 @@ function HospitalTable({ title, rows, mode }: { title: string; rows: HospitalAsR
         <tbody>
           {rows.map((h) => (
             <tr key={h.hospitalCode} className="border-t border-gray-100">
-              <td className="py-1"><Link href={`/as-receipts?hospital=${h.hospitalCode}`} className="text-blue-600 hover:underline">{h.name}</Link></td>
+              <td className="py-1"><Link href={listHref(h.name)} className="text-blue-600 hover:underline">{h.name}</Link></td>
               <td className="py-1 text-right text-gray-700">{h.receipts}</td>
               <td className="py-1 text-right font-medium text-gray-900">{h.faultDevices}</td>
               <td className="py-1 text-right text-gray-700">{h.lostDevices}</td>
