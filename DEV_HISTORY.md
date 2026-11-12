@@ -4,6 +4,45 @@
 
 ---
 
+## 2026-11-12 16:30 | 출고요청 시스템 구성품 개편 — 구성품 종류 고정·요청 팝업 합계/미출고 섹션·출고 처리 인벤토리별 카드 + 미출고분 thynC운영팀재고 편입 (dev2 빌드, 마이그·시드 dev2만)
+
+- **요청**: ① 요청 팝업 — '시스템' 분류에는 thynC시스템 10~100 수량만, 구성품은 하단 별도 섹션에 종류별 합계로, 그 아래 신청자 '미출고' 입력 섹션 ② 구성품은 5종 고정, '출고 품목 관리'에서는 수량만 ③ 출고 처리 — 대웅제약재고·thynC운영팀재고 카드 분리, 대웅제약재고에서 시스템(모자재) 시리얼 + 구성품별 '출고'·'미출고' 기재란 분리 ④ 구성품 5종을 대웅제약재고에 복제
+- **사용자 결정(질문 4건)**: 미출고분 = **thynC운영팀재고로 편입** · 구성품 출고분 = 대웅제약재고에서 재고 차감 · 6개 시스템 모두 같은 5종(수량만 다름) · dev2 데이터는 PROD 동기화
+- **DB** `20261112150000_stock_out_component_kinds`(dev2 적용·resolve, **PROD 미적용**): `stock_out_component_kinds`(item = 대웅제약재고 복제 품목 / source = 운영팀재고 원본) · `stock_out_request_components`(요청 단위 합계·미출고·처리 시리얼) · `stock_out_item_components` CHECK를 quantity ≥ 0으로(0 = 미포함). **시드** `scripts/seed-stock-out-component-kinds.sql`(멱등): 현재 구성 설정의 구성품을 대웅제약재고에 품목 정보 그대로 복제(재고 0) → 종류 등록 → 구성 설정을 복제 품목으로 교체 → 시스템×종류 전 조합 채움. dev2 실행: 5종 복제(ITEM-0075~0079)
+- **설정**: 구성 탭을 시스템 6 × 구성품 5 표로 교체 — 칸에서 수량만 수정(blur·Enter 저장, 0 = 미포함), 추가·삭제 없음. API `/api/settings/stock-out-components` GET `{kinds, parents}`·PUT 수량만(DELETE 폐지). 종류 품목은 품목 노출 탭 목록에서 제외·노출 409·직접 요청 400
+- **요청 팝업**(`StockOutRequestFormModal`): 시스템 품목 아래 개별 표기 제거 → '시스템' 분류 아래 **시스템 구성품**(종류별 합계, 자동 계산) + **미출고 수량**(종류별 입력, 합계 0이면 비활성·초과는 빨간 표시·저장 차단). 서버 `resolveStockOutComponents`(합계 계산·미출고 검증)·`writeStockOutComponents` — 생성 코어·PUT 공용. 출고 처리된 요청은 구성품 불변
+- **출고 처리**(`lib/stockOutFulfill.ts`·`FulfillCard`): 인벤토리별 카드. 구성품 **출고분** = 가상 라인(기존 판정·전표 엔진 재사용, 유형 판매·병원 연결), **미출고분** = `holds` — 대웅제약재고 OUT(유형 기타·병원 연결 없음) + 원본 품목 IN(유형 기타)으로 편입, 편입 창고 선택. 시리얼 품목은 출고·미출고 시리얼 각각(겹치면 오류·편입 대상에 같은 시리얼 있으면 오류), 수량 품목은 재고 ≥ 출고+미출고·시리얼 기록 메모. 미출고 0이면 미출고 칸 없음, 전량 미출고면 출고 칸 없음. 결과 `held`, 처리 시리얼은 구성품 행에 기록
+- **상세**: '출고 품목' 아래 구성품 표(수량·출고·미출고, 처리 후 시리얼 펼침) · 모바일 상세 '시스템 구성품' 섹션. 수정 팝업은 미출고 복원
+- **PROD → dev2 데이터 동기화**(같은 작업 중, 사용자 선택): 정기 백업 `thync_ops_20261112_010001.dump`(PROD 10:00 KST 시점) · dev2 백업 `dev_before_sync_20261112_142824.sql.gz` · `_prisma_migrations`·`_bak_*` 제외 139테이블 TRUNCATE → data-only 단일 트랜잭션 적재 · `channeltalk_as_interval`·`channeltalk_voc_interval`·`channeltalk_as_intake` off. 결과 users 77 · projects 290 · tickets 16,521 · as_receipts 4,392 · hospital_devices 31,017 · wiki_pages 185
+- **⚠ dev2 구성 설정은 임의로 맞춘 값**: 백업 시점(10:00) PROD 구성은 시스템별 4종(서버 3종류·데스크탑 2)이었고 이후 PROD에서 바뀐 설정은 조회 권한 차단으로 못 읽음 → dev2만 "6개 시스템 공통 5종(서버(100병상) 1·데스크탑 1·데스크탑(그래픽카드포함) 1·27인치 모니터 1·50인치 사이니지 1 또는 2)"으로 수정. **PROD는 시드가 그 시점 PROD 설정을 그대로 복제**하므로 실행 후 종류가 5종인지 확인 필요(시스템별 서버가 남아 있으면 7종이 됨)
+- **검증**: tsc · eslint · dev2 빌드 · `scripts/stock-out-components-smoke.mts` 43/43(요청 검증 3종·합계/미출고 저장·미리보기 가상 라인·미출고 판정·시리얼 겹침/개수·재고 부족·편입 위치·실행 후 대웅제약재고 전량 차감·운영팀재고 +미출고·시리얼 개체 이동·전표 유형/병원 연결·처리 시리얼 기록·재실행 409, 전부 원복) · Playwright 실제 화면 44/44(구성 탭 표·수량 저장·0 저장 / 팝업 합계·합산·미출고 활성·초과 차단·저장 / 상세 표·수정 복원 / 출고 처리 카드 2개·구성품 5종·칸 구성 3유형·편입 위치·겹친 시리얼 오류·9/9 확인·실행 → 완료·시리얼 기록·편입 전표 3건 / 모바일 상세) — 실행 후 재고 변동 대조(대웅 구성품 0 유지, 운영팀 서버 +1·모니터 +2·사이니지 +1) 뒤 테스트 데이터 원복
+- 영향 파일: prisma/schema.prisma, prisma/migrations/20261112150000_stock_out_component_kinds, scripts/seed-stock-out-component-kinds.sql(신규), scripts/stock-out-components-smoke.mts(신규), scripts/seed-stock-out-components.sql(재실행 금지 표기), lib/stockOut.ts, lib/stockOutCreate.ts, lib/stockOutFulfill.ts, app/api/stock-out-requests/[id]/route.ts, app/api/settings/stock-out-components/route.ts, app/api/settings/stock-out-items/route.ts·[id]/route.ts, app/stock-out-requests/_components/{StockOutRequestFormModal,FulfillCard}.tsx, app/stock-out-requests/[id]/page.tsx, app/m/stock-out-requests/[id]/page.tsx, app/settings/stock-out-items/page.tsx·_components/ComponentsTab.tsx, projects/stock_out_v2_design.md, README.md
+- **PROD 반영 시**: 마이그 SQL psql 적용·resolve → **시드 `seed-stock-out-component-kinds.sql` 실행(PROD DB 쓰기 — 품목 5종 생성·구성 설정 교체, 명시 허락 필요)** → 종류 수 확인 → `npx prisma generate` → 힙 4GB 빌드·재시작. 이후 운영: 구성품 재고를 대웅제약재고에 입고해야 출고 처리 가능. 커밋·PROD 반영 없음
+
+## 2026-11-12 13:00 | 출고요청 팝업 — 구성품 줄바꿈 + 구성품별 '미출고수량' 입력·저장·상세 표시 (dev2 빌드, 마이그 dev2만)
+
+- **⚠ 같은 날 16:30 개편으로 대체** — 이 항목의 라인 단위 테이블(`stock_out_request_item_components`)·마이그(`20261112120000_…`)·주 품목 아래 표기는 폐기(커밋·PROD 반영 전이라 dev2에서 DROP·기록 삭제). 아래는 경과 기록
+
+- **요청**: (11:30 항목 후속) 주 품목 아래 구성품 표기를 줄바꿈하고, 계산된 수량에 대해 '미출고'할 수량을 적을 수 있게 — 구성품명·수량 다음에 '미출고수량' 숫자 입력
+- **팝업**(`StockOutRequestFormModal`): 구성품을 한 줄에 하나씩 `구성품명 · 수량 · [미출고수량]`. 입력란은 주 품목 수량을 적었을 때만 나오고(머리글 '미출고수량'), 수량(구성 수량 × 입력 수량)을 넘으면 빨간 표시 + 저장 차단 안내. 수정 팝업은 저장된 미출고수량을 복원
+- **DB** `20261112120000_stock_out_item_component_unshipped`(dev2 적용·resolve, **PROD 미적용**): `stock_out_request_item_components` — 라인별 구성 스냅샷(`unit_quantity`) + `unshipped_quantity`, 라인 FK CASCADE. 미출고만 저장하지 않고 구성 전체를 복사해 두는 이유: 상세에서 '수량 대비 미출고'를 보여 주려면 요청 시점 구성이 필요(설정이 나중에 바뀌어도 불변)
+- **서버**: `lib/stockOut.validateStockOutLines`가 `items[].unshipped: [{childItemId, quantity}]`를 받아 구성 소속·0 ≤ 미출고 ≤ 포함 수량 검증 후 라인에 스냅샷을 붙임(`StockOutLine`) · `writeStockOutLines`(라인 + 스냅샷 쓰기) 신설 — 생성 코어(`lib/stockOutCreate`)·수정 PUT(라인 교체)이 공용. `unshipped`를 안 보내는 호출(모바일 등록·분실 AS 연동)은 미출고 0으로 스냅샷만 저장. 상세 GET 라인에 `components[{childItemId, unitQuantity, unshippedQuantity, child.name}]`
+- **표시**: 출고요청 상세 '출고 품목' 품목명 아래 `구성품 수량 [미출고 n]`(PC), 모바일 상세도 동일 정보. **재고 처리·출고 전표·티켓 요약·Slack 알림에는 반영하지 않음**(안내 전용 유지 — 검토 대상). 이 변경 전에 만든 요청은 스냅샷이 없어 구성 표시 없음
+- **검증**: tsc · eslint · dev2 빌드 · Playwright 실제 화면 24/24(구성품 한 줄에 하나, 수량 입력 전 입력란 없음 → 입력 후 구성품 수만큼, 초과 빨간 표시·저장 차단, 생성 → 상세 API 스냅샷·미출고 = 입력값, 상세 화면 표기, 수정 팝업 복원, 수량 줄이면 초과 차단, 수정 저장 반영, API 직접: 초과·구성 밖 품목·음수 400, `unshipped` 없는 저장은 미출고 0, 모바일 상세) — 테스트 출고요청은 삭제(스냅샷 CASCADE 확인, 테이블 0행)
+- 영향 파일: prisma/schema.prisma, prisma/migrations/20261112120000_stock_out_item_component_unshipped, lib/stockOut.ts, lib/stockOutCreate.ts, app/api/stock-out-requests/[id]/route.ts, app/stock-out-requests/_components/StockOutRequestFormModal.tsx, app/stock-out-requests/[id]/page.tsx, app/m/stock-out-requests/[id]/page.tsx, app/settings/stock-out-items/_components/ComponentsTab.tsx, projects/stock_out_v2_design.md, README.md
+- **PROD 반영 시**: 마이그 SQL psql 적용·resolve → `npx prisma generate` → 힙 4GB 빌드·재시작(패키지·협업 번들 변경 없음). 커밋·PROD 반영 없음
+
+## 2026-11-12 11:30 | 출고요청 팝업 — 시스템 품목 구성품을 주 품목명 아래에 표시 ('포함 n' 배지 제거, dev2 빌드)
+
+- **⚠ 같은 날 16:30 개편으로 대체** — 주 품목명 아래 표기는 별도 '시스템 구성품' 섹션으로 바뀜. 아래는 경과 기록
+
+- **요청**: 프로젝트 출고요청에서 대웅제약재고 'thynC시스템' 품목을 고르면 thynC운영팀재고 행에 '포함 n'이 뜨던 것을 변경 → 대웅제약재고 카드 안 시스템 6종 **품목명 아래에 구성품·수량을 작은 글씨로** 보여 주고, 수량을 적으면 그 자리에서 가산(예: 시스템100 수량 2 → 구성 수량 × 2). 운영팀재고 카드에는 포함 수량을 표기하지 않음
+- **변경**(`StockOutRequestFormModal`): 구성(`components`)이 있는 품목은 이름 아래에 `구성품명 수량` 목록 — 수량 미입력이면 1개 기준(회색), 입력하면 구성 수량 × 입력 수량(강조색, 줄바꿈은 구성품 단위). 부자재 행의 '포함 n' 배지와 합산 로직(`included`) 삭제. 안내 전용인 점은 그대로 — 요청 라인은 사용자가 직접 적은 수량만 생성(구성품은 요청 수량·'n종 · 총 n개'에 안 들어감). 구성품이 '구축' 탭에 노출돼 있지 않아도 표시됨(이름은 설정에서 옴)
+- 프로젝트 상세·출고업무 목록(영업 유형)·출고 상세 수정이 같은 팝업을 쓰므로 구성이 설정된 품목이면 어디서든 같은 표기. 모바일 앱(`/m/stock-out-requests/new`)은 원래 포함 표기가 없어 변경 없음. 설정 > 출고 품목 관리 > 구성 탭 안내 문구 갱신
+- **검증**: tsc · eslint · dev2 빌드 · Playwright 실제 화면 32/32(데스크톱 1440·모바일 390 — 6종 1개 기준 표기 = 설정값, 수량 2·3 입력 시 × 수량, 지우면 복귀, 다른 시스템 불변, '포함 n' 배지 0, 요약 '1종 · 총 2개', 구성품 행 입력란 비어 있음, 팝업 폭 안)
+- 영향 파일: app/stock-out-requests/_components/StockOutRequestFormModal.tsx, app/settings/stock-out-items/_components/ComponentsTab.tsx, projects/stock_out_v2_design.md, README.md
+- 스키마·API·패키지 변경 없음. 커밋·PROD 반영 없음
+
 ## 2026-11-12 10:30 | AS 대시보드 작업 중 발견분 조치 — 기기군 '기타' where NULL 누락 · VOC·AS 주간 대시보드 병원 링크 (dev2 빌드)
 
 - **요청**: "조치하지 않은 것 조치하고 커밋·푸시·PROD 반영까지" — 11-11 AS 대시보드 항목의 미조치 ①②

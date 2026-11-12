@@ -26,6 +26,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const key = { inventoryItemId_purpose: { inventoryItemId: id, purpose } }
   const existed = !!(await prisma.stockOutItemPurpose.findUnique({ where: key }))
+  // 시스템 구성품 종류(대웅제약재고 복제 품목)는 시스템 수량에서 자동 계산돼 출고되므로 직접 요청 품목으로 노출하지 않는다 (2026-11-12)
+  if (enabled && !existed && (await prisma.stockOutComponentKind.count({ where: { itemId: id } })) > 0) {
+    return NextResponse.json({ error: '시스템 구성품 품목은 출고요청 품목으로 노출할 수 없습니다. 시스템 수량에 따라 자동으로 계산됩니다.' }, { status: 409 })
+  }
   if (enabled && !existed) await prisma.stockOutItemPurpose.create({ data: { inventoryItemId: id, purpose } })
   if (!enabled && existed) await prisma.stockOutItemPurpose.delete({ where: key })
 

@@ -151,7 +151,7 @@ function StockOutItemsSettingsInner() {
       {tab === GUIDES_TAB ? (
         <GuidesTab canEdit={canEdit} />
       ) : tab === COMPONENTS_TAB ? (
-        <ComponentsTab canEdit={canEdit} allItems={groups.flatMap((g) => g.items.map((it) => ({ id: it.id, name: it.name, modelName: it.modelName, inventoryName: g.name })))} />
+        <ComponentsTab canEdit={canEdit} />
       ) : loading ? (
         <p className="py-12 text-center text-sm text-gray-400">불러오는 중...</p>
       ) : filtered.length === 0 ? (

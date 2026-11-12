@@ -14,6 +14,12 @@
  *  - 시리얼 품목: 개체의 실제 위치로 자동 그룹핑 (창고별 전표 분할)
  *  - LOT 품목: LOT 버킷(창고×LOT) 선택에 위치가 내장
  *  - 수량 품목: 재고 버킷에서 잔량 많은 순으로 자동 배분 (창고별 전표 분할)
+ *
+ * 시스템 구성품 (2026-11-12 — stock_out_v2_design.md §13): 요청 단위 구성품(`stock_out_request_components`, 대웅제약재고의 구성품 품목)을
+ *  - **출고분**(합계 − 미출고) = 가상 라인으로 만들어 기존 라인 판정·전표 엔진을 그대로 태운다(분실 AS 모드의 가상 라인과 같은 방식, `component: true`)
+ *  - **미출고분** = `holds` — 대웅제약재고 구성품 품목에서 출고(유형 '기타', 병원 연결 없음) + 원본 품목(thynC운영팀재고, kinds.source)으로 입고해 편입.
+ *    입고 위치는 `holdWarehouseId`(편입 대상 인벤토리의 창고). 시리얼 품목은 출고분과 미출고분 시리얼을 따로 받는다.
+ *  처리 시리얼은 구성품 행의 shipped_serials / unshipped_serials 에 기록.
  */
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
@@ -42,6 +48,13 @@ export interface FulfillLineInput {
   serialsNote?: string | null // 과도기 시리얼 기록 (비시리얼 품목 — 개체 미생성, 원문 보존)
 }
 
+/** 시스템 구성품 미출고분 입력 — itemId = 구성품 종류(대웅제약재고 품목) */
+export interface FulfillHoldInput {
+  itemId: number
+  serials?: string[] // 시리얼 품목 — 미출고분 시리얼 (개수 = 미출고 수량)
+  serialsNote?: string | null // 비시리얼 품목 — 시리얼 기록(선택, 재고와 무관)
+}
+
 export interface FulfillInput {
   txDate?: string | null
   lines?: FulfillLineInput[]
@@ -49,6 +62,10 @@ export interface FulfillInput {
   asLines?: { asItemId: number; serial: string }[]
   /** AS 모드 — 센서류·부자재 추가 라인(판매용 노출 품목, 본체 제외). 출고 실행 시 요청 품목으로 기록 */
   extraLines?: (FulfillLineInput & { quantity: number })[]
+  /** 시스템 구성품 미출고분 (2026-11-12) */
+  holds?: FulfillHoldInput[]
+  /** 미출고분을 편입할 창고 (편입 대상 인벤토리 소속) — 생략 시 첫 창고 */
+  holdWarehouseId?: number | null
 }
 
 /** AS 모드 — 접수 라인별 판정 */
@@ -94,6 +111,30 @@ export interface FulfillLinePreview {
   stockTotal: number
   status: 'ok' | 'warning' | 'error' | 'pending' // pending = 입력 대기 (실행 불가)
   messages: string[]
+  /** 시스템 구성품 출고분 가상 라인 (2026-11-12) — quantity = 합계 − 미출고 */
+  component?: boolean
+}
+
+/** 시스템 구성품 미출고분 판정 — 대웅제약재고 구성품 품목 → 원본 품목(thynC운영팀재고)으로 편입 */
+export interface FulfillHoldPreview {
+  itemId: number
+  name: string
+  modelName: string | null
+  inventoryName: string
+  quantity: number // 미출고 수량
+  shipQuantity: number // 같은 구성품의 출고분 (표시용)
+  mode: 'serial' | 'qty' | 'unsupported'
+  stockTotal: number
+  targetItemName: string | null
+  targetInventoryName: string | null
+  status: 'ok' | 'error' | 'pending'
+  messages: string[]
+}
+export interface FulfillHoldTarget {
+  inventoryId: number
+  inventoryName: string
+  warehouses: { id: number; name: string }[]
+  warehouseId: number | null
 }
 
 export interface FulfillInventoryPreview {
@@ -122,6 +163,11 @@ export interface FulfillPreview {
   /** 출고처 표시명 (병원명·프로젝트명 또는 영업 유형 납품처) */
   destinationLabel: string
   lines: FulfillLinePreview[]
+  /** 시스템 구성품 미출고분 (2026-11-12) — 없으면 빈 배열 */
+  holds: FulfillHoldPreview[]
+  holdTarget: FulfillHoldTarget | null
+  /** 시스템 구성품 요약(표시 순서) — 화면이 구성품별로 출고분·미출고분을 묶어 보여 준다 */
+  components: { itemId: number; name: string; quantity: number; unshippedQuantity: number; inventoryId: number }[]
   errors: string[] // 라인 외 전역 오류
   ok: boolean // 실행 가능 (전역 오류 없음 + 전 라인 ok/warning)
 }
@@ -130,6 +176,8 @@ interface LoadedLine {
   id: number
   inventoryItemId: number
   quantity: number
+  /** 시스템 구성품 출고분 가상 라인이면 구성품 행 id */
+  componentId?: number
   item: {
     id: number; name: string; modelName: string | null; isActive: boolean; isSerialManaged: boolean; isLotManaged: boolean
     inventory: { id: number; name: string; linkHospital: boolean; isActive: boolean }
@@ -156,6 +204,19 @@ interface LoadedRequest {
   asReceiptId: number | null
   asReceipt: { id: number; asCode: string; hospitalCode: string; hospital: { hospitalName: string } | null } | null
   asItems: { id: number; serialNo: string; outcome: string | null; deviceKind: string | null; wardName: string | null; device: { deviceInfo: { deviceName: string } | null } | null }[]
+  /** 시스템 구성품 합계·미출고 (2026-11-12) */
+  components: LoadedComponent[]
+}
+
+interface LoadedComponent {
+  id: number
+  itemId: number
+  quantity: number
+  unshippedQuantity: number
+  item: LoadedLine['item'] & {
+    /** 구성품 종류 → 원본 품목(미출고분 편입 대상) */
+    stockOutKind: { source: { id: number; name: string; isActive: boolean; isSerialManaged: boolean; isLotManaged: boolean; inventory: { id: number; name: string; isActive: boolean } } } | null
+  }
 }
 
 /**
@@ -204,6 +265,21 @@ async function loadRequest(requestId: number): Promise<LoadedRequest> {
           },
         },
         orderBy: { id: 'asc' },
+      },
+      components: {
+        select: {
+          id: true, itemId: true, quantity: true, unshippedQuantity: true,
+          item: {
+            select: {
+              id: true, name: true, modelName: true, isActive: true, isSerialManaged: true, isLotManaged: true,
+              inventory: { select: { id: true, name: true, linkHospital: true, isActive: true } },
+              category: { select: { name: true } },
+              deviceInfo: { select: { id: true, deviceModel: true, serialTracked: true, isActive: true } },
+              stockOutKind: { select: { source: { select: { id: true, name: true, isActive: true, isSerialManaged: true, isLotManaged: true, inventory: { select: { id: true, name: true, isActive: true } } } } } },
+            },
+          },
+        },
+        orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
       },
     },
   })
@@ -261,6 +337,7 @@ async function previewCore(req: LoadedRequest, input: FulfillInput): Promise<Ful
       stockTotal: 0,
       status: 'pending',
       messages: [],
+      ...(line.componentId ? { component: true } : {}),
     }
     lines.push(p)
     const err = (m: string) => { p.status = 'error'; p.messages.push(m) }
@@ -358,6 +435,9 @@ async function previewCore(req: LoadedRequest, input: FulfillInput): Promise<Ful
     projectCode: req.project?.projectCode ?? null,
     destinationLabel: target.destination,
     lines,
+    holds: [],
+    holdTarget: null,
+    components: [],
     errors,
     ok,
   }
@@ -478,14 +558,113 @@ async function buildAsMode(req: LoadedRequest, input: FulfillInput): Promise<AsP
   }
 }
 
+/** 미출고분 편입 전표 유형 — 대웅제약재고 출고·thynC운영팀재고 입고 모두 '기타' (판매·구매가 아님) */
+const HOLD_REASON_NAME = '기타'
+
+/**
+ * 시스템 구성품 미출고분 판정 (쓰기 없음) — 구성품 품목(대웅제약재고)에 재고가 있어야 하고, 원본 품목(kinds.source)으로 편입할 수 있어야 한다.
+ * 시리얼 품목: 미출고 수량만큼 시리얼(구성품 품목의 IN_STOCK 개체), 출고분 시리얼과 겹치면 안 되고 편입 대상 품목에 같은 시리얼이 없어야 한다.
+ * 수량 품목: 재고 ≥ 출고분 + 미출고분. LOT 관리 품목은 지원하지 않는다.
+ */
+async function previewHolds(req: LoadedRequest, input: FulfillInput, errors: string[]): Promise<{ holds: FulfillHoldPreview[]; holdTarget: FulfillHoldTarget | null }> {
+  const comps = req.components.filter((c) => c.unshippedQuantity > 0)
+  if (!comps.length) return { holds: [], holdTarget: null }
+
+  // 편입 대상 인벤토리 — 원본 품목들의 인벤토리(하나여야 한다) + 창고 선택
+  const targetInvs = new Map<number, string>()
+  for (const c of comps) { const inv = c.item.stockOutKind?.source.inventory; if (inv) targetInvs.set(inv.id, inv.name) }
+  let holdTarget: FulfillHoldTarget | null = null
+  if (targetInvs.size > 1) errors.push(`미출고분 편입 대상 인벤토리가 여러 개입니다 (${Array.from(targetInvs.values()).join(', ')}). 구성품 종류 설정을 확인하세요.`)
+  else if (targetInvs.size === 1) {
+    const [inventoryId, inventoryName] = Array.from(targetInvs.entries())[0]
+    const warehouses = await prisma.warehouse.findMany({ where: { inventoryId, isActive: true }, select: { id: true, name: true }, orderBy: { id: 'asc' } })
+    let warehouseId: number | null = warehouses[0]?.id ?? null
+    if (input.holdWarehouseId != null) {
+      if (warehouses.some((w) => w.id === input.holdWarehouseId)) warehouseId = input.holdWarehouseId
+      else errors.push(`미출고분 편입 위치가 '${inventoryName}'의 창고가 아닙니다.`)
+    }
+    if (!warehouses.length) errors.push(`'${inventoryName}'에 사용 가능한 창고가 없어 미출고분을 편입할 수 없습니다.`)
+    holdTarget = { inventoryId, inventoryName, warehouses, warehouseId }
+  }
+  const [outReason, inReason] = await Promise.all([
+    prisma.statusCode.findFirst({ where: { category: 'STOCK_OUT_TYPE', name: HOLD_REASON_NAME }, select: { id: true } }),
+    prisma.statusCode.findFirst({ where: { category: 'STOCK_IN_TYPE', name: HOLD_REASON_NAME }, select: { id: true } }),
+  ])
+  if (!outReason || !inReason) errors.push(`WMS 입출고 유형 '${HOLD_REASON_NAME}'이(가) 없어 미출고분을 편입할 수 없습니다. 설정 > 입출고 유형 관리를 확인하세요.`)
+
+  const inputBy = new Map((input.holds ?? []).map((h) => [h.itemId, h]))
+  const shipSerialsBy = new Map((input.lines ?? []).map((l) => [l.inventoryItemId, new Set((l.serials ?? []).map((s) => s.trim()).filter(Boolean))]))
+  const holds: FulfillHoldPreview[] = []
+  for (const c of comps) {
+    const src = c.item.stockOutKind?.source ?? null
+    const shipQty = c.quantity - c.unshippedQuantity
+    const p: FulfillHoldPreview = {
+      itemId: c.itemId, name: c.item.name, modelName: c.item.modelName, inventoryName: c.item.inventory.name,
+      quantity: c.unshippedQuantity, shipQuantity: shipQty,
+      mode: c.item.isSerialManaged ? 'serial' : c.item.isLotManaged ? 'unsupported' : 'qty',
+      stockTotal: 0, targetItemName: src?.name ?? null, targetInventoryName: src?.inventory.name ?? null,
+      status: 'pending', messages: [],
+    }
+    holds.push(p)
+    const err = (m: string) => { p.status = 'error'; p.messages.push(m) }
+
+    if (!src) { err('편입할 원본 품목이 등록돼 있지 않습니다 (구성품 종류 설정 확인).'); continue }
+    if (!c.item.isActive || !c.item.inventory.isActive) { err(`'${c.item.name}'(${c.item.inventory.name})이 비활성 상태입니다.`); continue }
+    if (!src.isActive || !src.inventory.isActive) { err(`편입 대상 '${src.name}'(${src.inventory.name})이 비활성 상태입니다.`); continue }
+    if (p.mode === 'unsupported' || src.isLotManaged) { err('LOT 관리 품목은 미출고분 편입을 지원하지 않습니다. 자재관리에서 직접 처리하세요.'); continue }
+    if (src.isSerialManaged !== c.item.isSerialManaged) { err(`시리얼 관리 여부가 편입 대상 '${src.name}'(${src.inventory.name})과 다릅니다. 두 품목의 설정을 맞추세요.`); continue }
+
+    const buckets = await prisma.inventoryStock.findMany({ where: { itemId: c.itemId, quantity: { gt: 0 }, lotNo: '' }, select: { quantity: true } })
+    p.stockTotal = buckets.reduce((s, b) => s + b.quantity, 0)
+    const li = inputBy.get(c.itemId)
+
+    if (p.mode === 'serial') {
+      const serials = (li?.serials ?? []).map((s) => s.trim()).filter(Boolean)
+      if (serials.length === 0) { p.messages.push(`미출고분 시리얼 ${p.quantity}개 입력 대기`); continue } // pending
+      if (new Set(serials).size !== serials.length) err('입력한 시리얼에 중복이 있습니다.')
+      if (serials.length !== p.quantity) err(`시리얼 수가 미출고 수량과 다릅니다. (입력 ${serials.length} / 미출고 ${p.quantity})`)
+      const shipSet = shipSerialsBy.get(c.itemId)
+      for (const s of serials) if (shipSet?.has(s)) err(`${s}: 출고분에도 입력된 시리얼입니다.`)
+      const units = await prisma.inventoryUnit.findMany({ where: { itemId: c.itemId, serialNo: { in: serials } }, select: { serialNo: true, status: true } })
+      const bySerial = new Map(units.map((u) => [u.serialNo, u]))
+      for (const s of serials) {
+        const u = bySerial.get(s)
+        if (!u) err(`${s}: '${c.item.inventory.name}'의 '${c.item.name}'에 등록되지 않은 시리얼입니다.`)
+        else if (u.status !== 'IN_STOCK') err(`${s}: 재고 상태가 아닙니다. (현재 ${u.status === 'OUT' ? '출고됨' : '폐기됨'})`)
+      }
+      const dup = await prisma.inventoryUnit.findMany({ where: { itemId: src.id, serialNo: { in: serials } }, select: { serialNo: true } })
+      for (const d of dup) err(`${d.serialNo}: 이미 '${src.inventory.name}'의 '${src.name}'에 등록된 시리얼입니다.`)
+    } else {
+      if (p.stockTotal < shipQty + p.quantity) err(`재고 부족 (현재 ${p.stockTotal}, 출고 ${shipQty} + 미출고 ${p.quantity}) — 편입 불가`)
+      else p.messages.push(`재고 ${p.stockTotal}개 — 미출고 ${p.quantity}개를 ${src.inventory.name}로 편입`)
+    }
+    if (p.status === 'pending') p.status = 'ok'
+  }
+  return { holds, holdTarget }
+}
+
 interface Prepared { req: LoadedRequest; input: FulfillInput; preview: FulfillPreview; asPrep: AsPrep | null }
 
 /** 요청 로드 → (AS 모드면 가상 라인 구성) → 판정. preview·execute 공용 */
 async function prepareFulfillment(requestId: number, input: FulfillInput): Promise<Prepared> {
   const loaded = await loadRequest(requestId)
   if (!loaded.asReceiptId || !loaded.asReceipt) {
-    const preview = await previewCore(loaded, input)
-    return { req: loaded, input, preview, asPrep: null }
+    // 시스템 구성품 출고분 = 가상 라인(합계 − 미출고 > 0인 구성품) → 기존 라인 판정·전표 엔진 재사용
+    const shipLines: LoadedLine[] = loaded.components
+      .filter((c) => c.quantity - c.unshippedQuantity > 0)
+      .map((c) => ({ id: -c.id, inventoryItemId: c.itemId, quantity: c.quantity - c.unshippedQuantity, componentId: c.id, item: c.item }))
+    const req = shipLines.length ? { ...loaded, items: [...loaded.items, ...shipLines] } : loaded
+    const preview = await previewCore(req, input)
+    const directIds = new Set(loaded.items.map((l) => l.inventoryItemId))
+    for (const c of loaded.components) {
+      if (directIds.has(c.itemId)) preview.errors.push(`'${c.item.name}'이(가) 요청 품목과 시스템 구성품에 함께 들어 있습니다. 요청 품목에서 빼고 다시 저장하세요.`)
+    }
+    const h = await previewHolds(loaded, input, preview.errors)
+    preview.holds = h.holds
+    preview.holdTarget = h.holdTarget
+    preview.components = loaded.components.map((c) => ({ itemId: c.itemId, name: c.item.name, quantity: c.quantity, unshippedQuantity: c.unshippedQuantity, inventoryId: c.item.inventory.id }))
+    preview.ok = preview.errors.length === 0 && preview.lines.every((l) => l.status === 'ok' || l.status === 'warning') && h.holds.every((x) => x.status === 'ok')
+    return { req, input, preview, asPrep: null }
   }
   const asPrep = await buildAsMode(loaded, input)
   const preview = await previewCore(asPrep.req, asPrep.input)
@@ -506,6 +685,8 @@ export interface FulfillResult {
   registered: number
   registrySkipped: number
   warnings: string[]
+  /** 시스템 구성품 미출고분 편입 수량 합 (2026-11-12) */
+  held: number
 }
 
 /** 출고 실행 — 전량 일치·단일 트랜잭션. 실패 시 전부 롤백. */
@@ -546,6 +727,8 @@ export async function executeFulfillment(
     serialsNote: string | null
   }
   const planned: PlannedLine[] = []
+  /** 수량 품목의 버킷 차감 계획 누계 — itemId → warehouseId → 수량. 같은 구성품의 미출고분 편입이 남은 재고에서 배분되도록 */
+  const qtyTaken = new Map<number, Map<number, number>>()
   for (const line of req.items) {
     const p = preview.lines.find((x) => x.inventoryItemId === line.inventoryItemId)!
     const inv = invMeta.get(p.inventoryId)!
@@ -593,6 +776,9 @@ export async function executeFulfillment(
         if (remain <= 0) break
         const take = Math.min(remain, b.quantity)
         plans.push(await planInventoryTransaction({ ...base, itemId: line.inventoryItemId, warehouseId: b.warehouseId, quantity: take, note }))
+        const t = qtyTaken.get(line.inventoryItemId) ?? new Map<number, number>()
+        t.set(b.warehouseId, (t.get(b.warehouseId) ?? 0) + take)
+        qtyTaken.set(line.inventoryItemId, t)
         remain -= take
       }
       if (remain > 0) throw new FulfillError(`${line.item.name}: 재고가 부족합니다.`, 409)
@@ -602,6 +788,69 @@ export async function executeFulfillment(
       reqItemId: line.id, inventoryItemId: line.inventoryItemId, plans, serials, registry: p.registry, usageInput: inv.usageInput,
       modelInput: line.item.deviceInfo?.deviceModel ?? line.item.modelName, serialsNote: noteSerials,
     })
+  }
+
+  // 시스템 구성품 미출고분 편입 계획 — 구성품 품목(대웅제약재고) OUT + 원본 품목(thynC운영팀재고) IN
+  interface PlannedHold { itemId: number; outPlans: TxPlan[]; inPlan: TxPlan; quantity: number; serialsNote: string | null }
+  const plannedHolds: PlannedHold[] = []
+  const componentItemIds = new Set(req.components.map((c) => c.itemId))
+  if (preview.holds.length > 0) {
+    const [outReason, inReason] = await Promise.all([
+      prisma.statusCode.findFirst({ where: { category: 'STOCK_OUT_TYPE', name: HOLD_REASON_NAME }, select: { id: true } }),
+      prisma.statusCode.findFirst({ where: { category: 'STOCK_IN_TYPE', name: HOLD_REASON_NAME }, select: { id: true } }),
+    ])
+    const toWarehouseId = preview.holdTarget?.warehouseId
+    if (!outReason || !inReason || !toWarehouseId) throw new FulfillError('미출고분 편입 정보를 해석할 수 없습니다.', 409)
+    const holdInput = new Map((input.holds ?? []).map((h) => [h.itemId, h]))
+    for (const h of preview.holds) {
+      const comp = req.components.find((c) => c.itemId === h.itemId)!
+      const src = comp.item.stockOutKind!.source
+      const li = holdInput.get(h.itemId)
+      const note = `출고요청 ${req.sorCode} 미출고분 → ${src.inventory.name} 편입`
+      const outBase = {
+        txType: 'OUT' as const, reasonId: outReason.id, itemId: h.itemId,
+        destination: src.inventory.name.slice(0, 100), requester: requester.slice(0, 100),
+        hospitalCode: null, workType: target.workType, refCode: target.refCode, txDate: input.txDate ?? null, note,
+      }
+      const outPlans: TxPlan[] = []
+      let serials: string[] = []
+      if (h.mode === 'serial') {
+        serials = (li?.serials ?? []).map((x) => x.trim()).filter(Boolean)
+        const units = await prisma.inventoryUnit.findMany({ where: { itemId: h.itemId, serialNo: { in: serials } }, select: { serialNo: true, warehouseId: true } })
+        const byWh = new Map<number, string[]>()
+        for (const u of units) {
+          if (u.warehouseId == null) throw new FulfillError(`${u.serialNo}: 개체 위치가 없습니다.`, 409)
+          byWh.set(u.warehouseId, [...(byWh.get(u.warehouseId) ?? []), u.serialNo])
+        }
+        for (const [whId, group] of Array.from(byWh.entries())) {
+          outPlans.push(await planInventoryTransaction({ ...outBase, warehouseId: whId, quantity: group.length, serials: group }))
+        }
+      } else {
+        // 출고분이 먼저 가져간 수량을 뺀 남은 재고에서 잔량 많은 순으로 배분
+        const taken = qtyTaken.get(h.itemId)
+        const buckets = (await prisma.inventoryStock.findMany({ where: { itemId: h.itemId, quantity: { gt: 0 }, lotNo: '' }, select: { warehouseId: true, quantity: true } }))
+          .map((b) => ({ warehouseId: b.warehouseId, quantity: b.quantity - (taken?.get(b.warehouseId) ?? 0) }))
+          .filter((b) => b.quantity > 0)
+          .sort((a, b) => b.quantity - a.quantity)
+        let remain = h.quantity
+        for (const b of buckets) {
+          if (remain <= 0) break
+          const take = Math.min(remain, b.quantity)
+          outPlans.push(await planInventoryTransaction({ ...outBase, warehouseId: b.warehouseId, quantity: take }))
+          remain -= take
+        }
+        if (remain > 0) throw new FulfillError(`${h.name}: 미출고분을 편입할 재고가 부족합니다.`, 409)
+      }
+      const inPlan = await planInventoryTransaction({
+        txType: 'IN', reasonId: inReason.id, itemId: src.id, warehouseId: toWarehouseId, quantity: h.quantity,
+        destination: comp.item.inventory.name.slice(0, 100), requester: requester.slice(0, 100),
+        txDate: input.txDate ?? null, note, ...(h.mode === 'serial' ? { serials } : {}),
+      })
+      plannedHolds.push({
+        itemId: h.itemId, outPlans, inPlan, quantity: h.quantity,
+        serialsNote: h.mode === 'serial' ? serials.join('\n') : (li?.serialsNote ?? '').trim().slice(0, 4000) || null,
+      })
+    }
   }
 
   // 실행 — 전표코드 P2002 재시도 (계획 재사용)
@@ -647,8 +896,21 @@ export async function executeFulfillment(
             }
             // 시리얼 기록 (serial 모드 = 실제 출고 시리얼 / lot·qty 모드 = 과도기 수기 기록)
             if (pl.serialsNote) {
-              await client.stockOutRequestItem.updateMany({ where: { requestId: req.id, inventoryItemId: pl.inventoryItemId }, data: { fulfilledSerials: pl.serialsNote } })
+              if (componentItemIds.has(pl.inventoryItemId)) await client.stockOutRequestComponent.updateMany({ where: { requestId: req.id, itemId: pl.inventoryItemId }, data: { shippedSerials: pl.serialsNote } })
+              else await client.stockOutRequestItem.updateMany({ where: { requestId: req.id, inventoryItemId: pl.inventoryItemId }, data: { fulfilledSerials: pl.serialsNote } })
             }
+          }
+
+          // 시스템 구성품 미출고분 편입 — 대웅제약재고 OUT → thynC운영팀재고 IN (같은 트랜잭션, 요청에 전표 연결)
+          let held = 0
+          for (const ph of plannedHolds) {
+            for (const plan of [...ph.outPlans, ph.inPlan]) {
+              const tx = await applyInventoryTransaction(client, plan, actor.userId)
+              await client.inventoryTransaction.update({ where: { id: tx!.id }, data: { stockOutRequestId: req.id } })
+              txCodes.push(tx!.txCode)
+            }
+            held += ph.quantity
+            if (ph.serialsNote) await client.stockOutRequestComponent.updateMany({ where: { requestId: req.id, itemId: ph.itemId }, data: { unshippedSerials: ph.serialsNote } })
           }
 
           // AS 모드 — 분실 라인 교체 확정 (같은 트랜잭션): 구기기 RECOVER(분실)·새 기기 REGISTER(관련 기기·계약건 승계)·라인 교체기/발송일 기록·'발송완료' 자동 전이
@@ -683,7 +945,7 @@ export async function executeFulfillment(
           })
           await syncStockOutToTicket(client, req.id, actor.userId)
 
-          return { txCodes, registered, registrySkipped, warnings }
+          return { txCodes, registered, registrySkipped, warnings, held }
         },
         { timeout: 120_000, maxWait: 10_000 }
       )

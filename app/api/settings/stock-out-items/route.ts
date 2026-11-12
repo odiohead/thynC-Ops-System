@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
     where: {
       isActive: true,
       inventory: { isActive: true },
+      stockOutKind: { is: null }, // 시스템 구성품 종류는 직접 요청 품목이 아님 — 목록에서 제외 (2026-11-12)
       ...(purposeParam ? { stockOutPurposes: { some: { purpose: purposeParam } } } : {}),
     },
     select: {
@@ -47,7 +48,8 @@ export async function GET(request: NextRequest) {
       inventory: { select: { id: true, name: true, sortOrder: true } },
       category: { select: { name: true, sortOrder: true } },
       stockOutPurposes: { select: { purpose: true } },
-      stockOutComponents: { select: { childItemId: true, quantity: true, child: { select: { name: true } } }, orderBy: { sortOrder: 'asc' } },
+      // 시스템 구성 — 구성품 종류로 등록된 것만, 수량 0(미포함)은 제외 (2026-11-12)
+      stockOutComponents: { where: { quantity: { gt: 0 }, child: { stockOutKind: { isNot: null } } }, select: { childItemId: true, quantity: true, child: { select: { name: true } } }, orderBy: { sortOrder: 'asc' } },
       stocks: { select: { quantity: true } },
     },
     orderBy: [{ inventory: { sortOrder: 'asc' } }, { inventory: { id: 'asc' } }, { category: { sortOrder: 'asc' } }, { sortOrder: 'asc' }, { id: 'asc' }],
@@ -65,5 +67,7 @@ export async function GET(request: NextRequest) {
       components: it.stockOutComponents.map((c) => ({ childItemId: c.childItemId, childName: c.child.name, quantity: c.quantity })),
     })
   }
-  return NextResponse.json({ inventories: groups })
+  // 시스템 구성품 종류(고정 목록) — 출고요청 팝업의 '시스템 구성품'·'미출고 수량' 섹션 (2026-11-12)
+  const kinds = await prisma.stockOutComponentKind.findMany({ select: { itemId: true, item: { select: { name: true } } }, orderBy: [{ sortOrder: 'asc' }, { itemId: 'asc' }] })
+  return NextResponse.json({ inventories: groups, componentKinds: kinds.map((k) => ({ itemId: k.itemId, name: k.item.name })) })
 }

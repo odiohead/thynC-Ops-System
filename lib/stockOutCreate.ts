@@ -7,7 +7,7 @@
  */
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { nextSorCode, validateStockOutLines } from '@/lib/stockOut'
+import { nextSorCode, validateStockOutLines, writeStockOutLines, writeStockOutComponents, resolveStockOutComponents, type StockOutLine, type StockOutComponentRow } from '@/lib/stockOut'
 import { isStockOutPurpose, isStockOutSalesType, STOCK_OUT_SUB_PURPOSES, stockOutTitle, type StockOutPurpose } from '@/lib/stockOutShared'
 import { createTicketForStockOut } from '@/lib/ticket-domains/stockOut'
 
@@ -20,6 +20,8 @@ export interface StockOutCreateBody {
   purpose?: unknown; requestDate?: unknown; projectCode?: unknown; subPurpose?: unknown
   destType?: unknown; destHospitalCode?: unknown; destText?: unknown; shipAddress?: unknown; recipient?: unknown
   items?: unknown; statusId?: unknown; note?: unknown
+  /** 시스템 구성품 미출고 수량 [{itemId, quantity}] (2026-11-12) */
+  unshipped?: unknown
   /** 분실 AS 연동 — 접수 id (2026-11-10) */
   asReceiptId?: number | null
 }
@@ -29,7 +31,9 @@ export interface StockOutCreatePrepared {
   requestDate: Date
   project: { projectCode: string; projectName: string; hospitalCode: string } | null
   sales: { subPurpose: string; destType: 'HOSPITAL' | 'OTHER'; destHospitalCode: string | null; destText: string | null; destHospitalName: string | null; shipAddress: string; recipient: string } | null
-  items: { inventoryItemId: number; quantity: number }[]
+  items: StockOutLine[]
+  /** 시스템 구성품 합계·미출고 (시스템 라인이 없으면 빈 배열) */
+  components: StockOutComponentRow[]
   statusId: number | null
   statusName: string | null
   note: string | null
@@ -74,8 +78,12 @@ export async function prepareStockOutCreate(body: StockOutCreateBody, client: Pr
     sales = { subPurpose, destType, destHospitalCode, destText, destHospitalName, shipAddress, recipient }
   }
 
-  let items: { inventoryItemId: number; quantity: number }[]
-  try { items = await validateStockOutLines(body.items, purpose) } catch (e) { throw new StockOutCreateError((e as Error).message) }
+  let items: StockOutLine[]
+  let components: StockOutComponentRow[]
+  try {
+    items = await validateStockOutLines(body.items, purpose)
+    components = await resolveStockOutComponents(items, body.unshipped ?? [], [], client)
+  } catch (e) { throw new StockOutCreateError((e as Error).message) }
 
   let statusId: number | null = null
   if (body.statusId !== undefined && body.statusId !== null && body.statusId !== '') {
@@ -91,7 +99,7 @@ export async function prepareStockOutCreate(body: StockOutCreateBody, client: Pr
   const note = typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null
   const title = stockOutTitle({ purpose, subPurpose: sales?.subPurpose, project, destType: sales?.destType, destText: sales?.destText, destHospital: sales?.destHospitalName ? { hospitalName: sales.destHospitalName } : null })
   const asReceiptId = Number.isInteger(body.asReceiptId) ? (body.asReceiptId as number) : null
-  return { purpose, requestDate, project, sales, items, statusId, statusName: statusRow?.name ?? null, note, title, asReceiptId }
+  return { purpose, requestDate, project, sales, items, components, statusId, statusName: statusRow?.name ?? null, note, title, asReceiptId }
 }
 
 /** 레코드 + 라인 + 연결 티켓 — 호출부 트랜잭션 안에서 (티켓 없는 출고요청을 만들지 않는다) */
@@ -109,7 +117,8 @@ export async function createStockOutRequestIn(tx: Prisma.TransactionClient, p: S
       asReceiptId: p.asReceiptId,
     },
   })
-  await tx.stockOutRequestItem.createMany({ data: p.items.map((l) => ({ requestId: sor.id, ...l })) })
+  await writeStockOutLines(tx, sor.id, p.items)
+  await writeStockOutComponents(tx, sor.id, p.components) // 시스템 구성품 합계·미출고 (2026-11-12)
   const ticketId = await createTicketForStockOut(tx, {
     id: sor.id, sorCode: sor.sorCode, title: p.title,
     hospitalCode: p.project?.hospitalCode ?? p.sales?.destHospitalCode ?? null,

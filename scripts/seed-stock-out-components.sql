@@ -1,3 +1,5 @@
+-- ⚠ 2026-11-12 이후 재실행 금지 — 구성품이 대웅제약재고 복제 품목(stock_out_component_kinds)으로 바뀌었다.
+--   이 파일은 2026-11-01 최초 구성(운영팀재고 품목 직접 참조) 기록용. 현재 절차: scripts/seed-stock-out-component-kinds.sql + 설정 > 출고 품목 관리 > 구성 탭(수량만)
 -- 출고요청 품목 구성 시드 — thynC 시스템 XX(대웅제약재고) 1개당 thynC운영팀재고 부자재 (2026-11-01 사용자 제공 구성, 멱등)
 --   psql -U thync -d thync_ops_dev -f scripts/seed-stock-out-components.sql
 -- 10/20/30: 서버(워크스테이션)1·매니저PC 2·27인치 모니터 1·50인치 사이니지 1

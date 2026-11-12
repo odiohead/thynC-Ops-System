@@ -4,8 +4,10 @@
  * 출고요청 등록·수정 모달 (stock_out_request_design.md §8 · v2 stock_out_v2_design.md §7)
  * 프로젝트는 읽기 전용(프로젝트 상세에서 진입 — 생성 진입점 한정, §2 파생 결정).
  * 품목 = 자재관리 품목 중 해당 업무(이번 범위: 구축 BUILD)에 노출된 것 — 인벤토리 → 분류 순 섹션(품목명만, 모델명 미표시 — 2026-11-01), 빈 값/0 = 미요청.
- * 구성 안내 (2026-11-01): 주 품목(thynC 시스템 XX) 수량을 적으면 그 구성에 포함된 부자재(운영팀재고) 행의 수량 입력란 왼쪽에 '포함 n'을 표시
- * (재고 처리와 무관한 안내 — 사용자가 추가로 적는 수량만 요청됨).
+ * 시스템 구성품 (2026-11-12 개편 — stock_out_v2_design.md §13): '시스템' 분류(thynC시스템 XX)에는 수량만 적고, 그 아래 별도 섹션 두 개가 붙는다.
+ *  ① 시스템 구성품 — 고정 종류(`componentKinds`)별 합계 = Σ(시스템 수량 × 구성 수량), 읽기 전용
+ *  ② 미출고 수량 — 신청자가 종류별로 입력(0 ≤ 미출고 ≤ 합계). 요청에 `unshipped: [{itemId, quantity}]`로 저장되고, 출고 처리에서 미출고분은 thynC운영팀재고로 편입된다.
+ * 구성품은 직접 요청 품목이 아니다(대웅제약재고의 구성품 품목 — 출고 처리에서 합계만큼 자동으로 출고 대상이 됨).
  * 첨부 파일 (2026-11-02): 등록 모드는 파일을 담아 두었다가 생성 직후 업로드, 수정 모드는 StockOutFilesPanel로 즉시 업로드·삭제. 엑셀 등 요청 근거.
  * 영업 유형 모드 (2026-11-05 — stock_out_sales_request_design.md §5): project 미지정이면 출고업무 목록 [출고요청]에서 여는
  * 평가용·판매용·오산영업소 등록/수정 — 유형·목적·납품처(병원 검색/기타)·수령지·수취인 + 항목 아래 입력 가이드. 프로젝트 유형은 여기서 만들지 않음(프로젝트 상세 전용).
@@ -41,6 +43,8 @@ export interface StockOutEditTarget {
   purpose: StockOutPurpose
   /** 이미 담긴 라인 — 노출 해제된 품목도 폼에 유지하기 위해 표시용 정보 동반 */
   items: { inventoryItemId: number; quantity: number; name?: string; modelName?: string | null; inventoryId?: number; inventoryName?: string; categoryName?: string | null }[]
+  /** 시스템 구성품 미출고 수량 (2026-11-12) — itemId = 구성품 종류 */
+  unshipped?: { itemId: number; quantity: number }[]
   /** 영업 유형 전용 */
   subPurpose?: string | null
   destType?: string | null
@@ -92,6 +96,9 @@ export default function StockOutRequestFormModal({
   const [items, setItems] = useState<StockOutItemOpt[]>([])
   const [loaded, setLoaded] = useState(false)
   const [qty, setQty] = useState<Record<number, string>>({})
+  // 시스템 구성품 — 고정 종류 목록 + 종류별 미출고 수량 입력값 (2026-11-12)
+  const [kinds, setKinds] = useState<{ itemId: number; name: string }[]>([])
+  const [unshipped, setUnshipped] = useState<Record<number, string>>({})
   const [requestDate, setRequestDate] = useState('')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
@@ -141,7 +148,7 @@ export default function StockOutRequestFormModal({
     setError(null)
     setLoaded(false)
     setPendingFiles([])
-    if (!effPurpose) { setItems([]); setLoaded(true); return } // 영업 유형 미선택
+    if (!effPurpose) { setItems([]); setKinds([]); setLoaded(true); return } // 영업 유형 미선택
     fetch(`/api/settings/stock-out-items?purpose=${effPurpose}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
@@ -156,18 +163,23 @@ export default function StockOutRequestFormModal({
           }
         }
         setItems(list)
+        setKinds(d?.componentKinds ?? [])
         setLoaded(true)
       })
     if (editTarget) {
       setRequestDate(editTarget.requestDate)
       setNote(editTarget.note ?? '')
       const map: Record<number, string> = {}
+      const un: Record<number, string> = {}
       editTarget.items.forEach((l) => { map[l.inventoryItemId] = String(l.quantity) })
+      for (const u of editTarget.unshipped ?? []) if (u.quantity > 0) un[u.itemId] = String(u.quantity)
       setQty(map)
+      setUnshipped(un)
     } else {
       setRequestDate(todayKst())
       setNote('')
       setQty({})
+      setUnshipped({})
     }
   }, [open, editTarget, effPurpose])
 
@@ -189,23 +201,19 @@ export default function StockOutRequestFormModal({
     () => items.map((it) => ({ inventoryItemId: it.id, quantity: parseInt(qty[it.id] ?? '') || 0 })).filter((l) => l.quantity > 0),
     [items, qty]
   )
-  const totalQty = lines.reduce((s, l) => s + l.quantity, 0)
-
-  /** 구성 포함 수량 — childId → { total, sources[] } (주 품목 입력 수량 × 구성 수량 합) */
-  const included = useMemo(() => {
-    const map = new Map<number, { total: number; sources: { name: string; qty: number }[] }>()
+  /** 시스템 구성품 합계 — 종류 id → Σ(시스템 입력 수량 × 구성 수량) */
+  const compTotals = useMemo(() => {
+    const m = new Map<number, number>()
     for (const it of items) {
       const n = parseInt(qty[it.id] ?? '') || 0
-      if (n <= 0 || !it.components?.length) continue
-      for (const c of it.components) {
-        const cur = map.get(c.childItemId) ?? { total: 0, sources: [] }
-        cur.total += n * c.quantity
-        cur.sources.push({ name: it.name, qty: n * c.quantity })
-        map.set(c.childItemId, cur)
-      }
+      if (n <= 0) continue
+      for (const c of it.components ?? []) m.set(c.childItemId, (m.get(c.childItemId) ?? 0) + n * c.quantity)
     }
-    return map
+    return m
   }, [items, qty])
+  /** 구성을 가진 품목(시스템)이 하나라도 노출돼 있을 때만 구성품 섹션을 보인다 */
+  const hasSystems = kinds.length > 0 && items.some((it) => (it.components?.length ?? 0) > 0)
+  const totalQty = lines.reduce((s, l) => s + l.quantity, 0)
 
   function validateSales(): string | null {
     if (!salesTypeKey) return '유형을 선택하세요.'
@@ -225,6 +233,19 @@ export default function StockOutRequestFormModal({
     }
     if (!requestDate) { setError('희망 출고일을 입력하세요.'); return }
     if (!lockItems && lines.length === 0) { setError('출고 품목 수량을 1개 이상 입력하세요.'); return }
+    // 미출고 수량 — 합계가 있는 구성품만, 0 ≤ 미출고 ≤ 합계
+    const unshippedPayload: { itemId: number; quantity: number }[] = []
+    if (!lockItems && hasSystems) {
+      for (const k of kinds) {
+        const raw = unshipped[k.itemId] ?? ''
+        const total = compTotals.get(k.itemId) ?? 0
+        if (raw === '' || total === 0) continue
+        const u = Number(raw)
+        if (!Number.isInteger(u) || u < 0) { setError(`'${k.name}' 미출고 수량은 0 이상의 정수로 입력하세요.`); return }
+        if (u > total) { setError(`'${k.name}' 미출고 수량(${u})이 구성품 수량(${total})보다 많습니다.`); return }
+        if (u > 0) unshippedPayload.push({ itemId: k.itemId, quantity: u })
+      }
+    }
     setBusy(true)
     setError(null)
     const salesFields = salesMode
@@ -235,7 +256,7 @@ export default function StockOutRequestFormModal({
           shipAddress: shipAddress.trim(), recipient: recipient.trim(),
         }
       : {}
-    const payload = { requestDate, note: note || null, ...(lockItems ? {} : { items: lines }), ...salesFields }
+    const payload = { requestDate, note: note || null, ...(lockItems ? {} : { items: lines, unshipped: unshippedPayload }), ...salesFields }
     const res = editTarget
       ? await fetch(`/api/stock-out-requests/${editTarget.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       : await fetch('/api/stock-out-requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, projectCode: project?.projectCode, purpose: effPurpose }) })
@@ -385,26 +406,60 @@ export default function StockOutRequestFormModal({
                                 {it.name}
                                 {it.modelName && !it.name.includes(it.modelName) && <span className="ml-1 whitespace-nowrap font-mono text-[11px] text-gray-500">{it.modelName}</span>}
                               </span>
-                              <div className="flex shrink-0 items-center gap-1.5">
-                                {included.get(it.id) && (
-                                  <span
-                                    className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700"
-                                    title={included.get(it.id)!.sources.map((s) => `${s.name} → ${s.qty}`).join('\n')}
-                                  >
-                                    포함 {included.get(it.id)!.total}
-                                  </span>
-                                )}
-                                <input
-                                  type="number" min="0"
-                                  value={qty[it.id] ?? ''}
-                                  onChange={(e) => setQty((prev) => ({ ...prev, [it.id]: e.target.value }))}
-                                  placeholder="0"
-                                  className="w-16 rounded-md border border-gray-300 px-2 py-1 text-right text-sm"
-                                />
-                              </div>
+                              <input
+                                type="number" min="0"
+                                value={qty[it.id] ?? ''}
+                                onChange={(e) => setQty((prev) => ({ ...prev, [it.id]: e.target.value }))}
+                                placeholder="0"
+                                className="w-16 shrink-0 rounded-md border border-gray-300 px-2 py-1 text-right text-sm"
+                              />
                             </div>
                           ))}
                         </div>
+                        {/* 시스템 구성품 · 미출고 수량 — 시스템(구성을 가진 품목)이 있는 분류 바로 아래 (2026-11-12) */}
+                        {hasSystems && c.list.some((it) => (it.components?.length ?? 0) > 0) && (
+                          <div className="mt-3 space-y-2">
+                            <div className="rounded-md border border-amber-200 bg-amber-50/50 px-3 py-2" data-testid="so-comp-totals">
+                              <p className="mb-1 text-[11px] font-semibold text-amber-800">시스템 구성품 <span className="font-normal text-amber-700/80">— 위 시스템 수량에 따라 자동 계산</span></p>
+                              <div className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2">
+                                {kinds.map((k) => {
+                                  const total = compTotals.get(k.itemId) ?? 0
+                                  return (
+                                    <div key={k.itemId} className="flex items-center justify-between gap-2 text-sm" data-testid={`so-comp-total-${k.itemId}`}>
+                                      <span className={`min-w-0 flex-1 break-words leading-snug ${total > 0 ? 'text-gray-800' : 'text-gray-400'}`}>{k.name}</span>
+                                      <span className={`w-16 shrink-0 pr-2 text-right tabular-nums ${total > 0 ? 'font-semibold text-amber-800' : 'text-gray-300'}`}>{total}</span>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                            <div className="rounded-md border border-gray-200 bg-gray-50/60 px-3 py-2" data-testid="so-comp-unshipped">
+                              <p className="mb-1 text-[11px] font-semibold text-gray-700">미출고 수량 <span className="font-normal text-gray-500">— 구성품 중 출고하지 않을 수량 (신청자 입력)</span></p>
+                              <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
+                                {kinds.map((k) => {
+                                  const total = compTotals.get(k.itemId) ?? 0
+                                  const raw = unshipped[k.itemId] ?? ''
+                                  const over = total > 0 && raw !== '' && (!(Number(raw) >= 0) || Number(raw) > total)
+                                  return (
+                                    <div key={k.itemId} className="flex items-center justify-between gap-2 text-sm">
+                                      <span className={`min-w-0 flex-1 break-words leading-snug ${total > 0 ? 'text-gray-800' : 'text-gray-400'}`}>{k.name}</span>
+                                      <input
+                                        type="number" min="0" max={total}
+                                        value={total > 0 ? raw : ''}
+                                        disabled={total === 0}
+                                        onChange={(e) => setUnshipped((prev) => ({ ...prev, [k.itemId]: e.target.value }))}
+                                        placeholder="0"
+                                        aria-label={`${k.name} 미출고 수량`}
+                                        title={total > 0 ? `${k.name} ${total}개 중 출고하지 않을 수량` : '시스템 수량을 먼저 입력하세요'}
+                                        className={`w-16 shrink-0 rounded-md border px-2 py-1 text-right text-sm disabled:bg-gray-100 disabled:text-gray-300 ${over ? 'border-red-400 bg-red-50' : 'border-gray-300'}`}
+                                      />
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

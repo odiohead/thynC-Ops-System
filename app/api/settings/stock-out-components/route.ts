@@ -1,9 +1,9 @@
 /**
- * 출고요청 구성 안내 설정 (projects/stock_out_v2_design.md §13·§14) — ADMIN 이상 쓰기
- * stock_out_item_components: 주 품목(예: 대웅제약재고 thynC 시스템 XX) 1개당 부자재(예: 운영팀재고) 포함 수량. 인벤토리 제한 없음(안내 전용).
- * GET    → 주 품목별 부자재 목록
- * PUT    { parentItemId, childItemId, quantity } → 업서트
- * DELETE ?parentItemId=&childItemId= → 1행 삭제 (childItemId 생략 시 주 품목 구성 전체 삭제)
+ * 출고요청 시스템 구성 설정 (projects/stock_out_v2_design.md §13·§14 — 2026-11-12 개편) — ADMIN 이상 쓰기
+ * 구성품 종류는 고정(`stock_out_component_kinds` — scripts/seed-stock-out-component-kinds.sql로 등록)이고, 여기서는 **수량만** 바꾼다.
+ * stock_out_item_components: 시스템(parent) × 구성품 종류(child) 전 조합, 수량 0 = 미포함.
+ * GET → { kinds: [{itemId, name, modelName, sourceName, sourceInventory}], parents: [{ parent, quantities: { [kindItemId]: n } }] }
+ * PUT { parentItemId, childItemId, quantity } → 수량 변경 (0 이상 정수). 종류·시스템 추가/삭제는 지원하지 않음
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
@@ -17,18 +17,27 @@ const itemSelect = { id: true, itemCode: true, name: true, modelName: true, isAc
 export async function GET(request: NextRequest) {
   const user = await getAuthUser(request)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const rows = await prisma.stockOutItemComponent.findMany({
-    include: { parent: { select: itemSelect }, child: { select: itemSelect } },
-    orderBy: [{ parentItemId: 'asc' }, { sortOrder: 'asc' }, { childItemId: 'asc' }],
-  })
-  const parents: { parent: typeof rows[number]['parent']; children: { item: typeof rows[number]['child']; quantity: number; sortOrder: number }[] }[] = []
+  const [kinds, rows] = await Promise.all([
+    prisma.stockOutComponentKind.findMany({
+      select: { itemId: true, sortOrder: true, item: { select: itemSelect }, source: { select: itemSelect } },
+      orderBy: [{ sortOrder: 'asc' }, { itemId: 'asc' }],
+    }),
+    prisma.stockOutItemComponent.findMany({ include: { parent: { select: itemSelect } }, orderBy: [{ parentItemId: 'asc' }] }),
+  ])
+  const kindIds = new Set(kinds.map((k) => k.itemId))
+  const parents: { parent: typeof rows[number]['parent']; quantities: Record<number, number> }[] = []
   for (const r of rows) {
+    if (!kindIds.has(r.childItemId)) continue // 종류로 등록되지 않은 옛 구성 행은 무시 (시드 실행 전)
     let p = parents.find((x) => x.parent.id === r.parentItemId)
-    if (!p) { p = { parent: r.parent, children: [] }; parents.push(p) }
-    p.children.push({ item: r.child, quantity: r.quantity, sortOrder: r.sortOrder })
+    if (!p) { p = { parent: r.parent, quantities: {} }; parents.push(p) }
+    p.quantities[r.childItemId] = r.quantity
   }
-  parents.sort((a, b) => a.parent.inventory.id - b.parent.inventory.id || a.parent.name.localeCompare(b.parent.name, 'ko'))
-  return NextResponse.json({ parents })
+  // 이름의 숫자 순(시스템10 → 100)
+  parents.sort((a, b) => a.parent.inventory.id - b.parent.inventory.id || a.parent.name.localeCompare(b.parent.name, 'ko', { numeric: true }))
+  return NextResponse.json({
+    kinds: kinds.map((k) => ({ itemId: k.itemId, itemCode: k.item.itemCode, name: k.item.name, modelName: k.item.modelName, inventoryName: k.item.inventory.name, sourceItemCode: k.source.itemCode, sourceInventoryName: k.source.inventory.name })),
+    parents,
+  })
 }
 
 export async function PUT(request: NextRequest) {
@@ -37,57 +46,24 @@ export async function PUT(request: NextRequest) {
   const body = await request.json().catch(() => ({}))
   const parentItemId = Number(body.parentItemId)
   const childItemId = Number(body.childItemId)
-  const quantity = Math.trunc(Number(body.quantity ?? 1))
+  const quantity = Number(body.quantity)
   if (!Number.isInteger(parentItemId) || !Number.isInteger(childItemId)) return NextResponse.json({ error: '품목이 올바르지 않습니다.' }, { status: 400 })
-  if (parentItemId === childItemId) return NextResponse.json({ error: '자기 자신을 구성품으로 넣을 수 없습니다.' }, { status: 400 })
-  if (!Number.isFinite(quantity) || quantity <= 0) return NextResponse.json({ error: '포함 수량은 1 이상의 정수여야 합니다.' }, { status: 400 })
-
-  const [parent, child] = await Promise.all([
-    prisma.inventoryItem.findUnique({ where: { id: parentItemId }, select: itemSelect }),
-    prisma.inventoryItem.findUnique({ where: { id: childItemId }, select: itemSelect }),
-  ])
-  if (!parent) return NextResponse.json({ error: '주 품목을 찾을 수 없습니다.' }, { status: 404 })
-  if (!child) return NextResponse.json({ error: '구성품 품목을 찾을 수 없습니다.' }, { status: 404 })
-  // 1단계 깊이 — 구성품이 다시 주 품목이면 포함 수량 계산이 재귀가 되므로 금지
-  const childIsParent = await prisma.stockOutItemComponent.count({ where: { parentItemId: childItemId } })
-  if (childIsParent > 0) return NextResponse.json({ error: '이미 주 품목으로 구성을 가진 품목은 구성품이 될 수 없습니다.' }, { status: 409 })
-  const parentIsChild = await prisma.stockOutItemComponent.count({ where: { childItemId: parentItemId } })
-  if (parentIsChild > 0) return NextResponse.json({ error: '다른 주 품목의 구성품인 품목은 주 품목이 될 수 없습니다.' }, { status: 409 })
+  if (!Number.isInteger(quantity) || quantity < 0) return NextResponse.json({ error: '수량은 0 이상의 정수여야 합니다. (0 = 미포함)' }, { status: 400 })
 
   const key = { parentItemId_childItemId: { parentItemId, childItemId } }
-  const before = await prisma.stockOutItemComponent.findUnique({ where: key })
-  const maxOrder = before ? null : await prisma.stockOutItemComponent.aggregate({ where: { parentItemId }, _max: { sortOrder: true } })
-  const row = await prisma.stockOutItemComponent.upsert({
-    where: key,
-    create: { parentItemId, childItemId, quantity, sortOrder: (maxOrder?._max.sortOrder ?? 0) + 1 },
-    update: { quantity },
-  })
-  await logAudit({
-    req: request, actor: auditActorFromJWT(user), action: before ? 'UPDATE' : 'CREATE', resource: 'setting:stock_out_item_component',
-    resourceId: `${parentItemId}:${childItemId}`,
-    resourceLabel: `${parent.inventory.name} / ${parent.name} ← ${child.inventory.name} / ${child.name} × ${quantity}`,
-    before: before ?? undefined, after: row,
-  })
-  return NextResponse.json({ component: { parentItemId, childItemId, quantity: row.quantity, sortOrder: row.sortOrder } }, { status: before ? 200 : 201 })
-}
+  const [before, kind] = await Promise.all([
+    prisma.stockOutItemComponent.findUnique({ where: key, include: { parent: { select: itemSelect }, child: { select: itemSelect } } }),
+    prisma.stockOutComponentKind.findUnique({ where: { itemId: childItemId }, select: { itemId: true } }),
+  ])
+  // 수량만 수정 — 시스템·구성품 종류는 고정 (행이 없는 조합 = 등록되지 않은 시스템 또는 종류)
+  if (!before || !kind) return NextResponse.json({ error: '등록된 시스템·구성품 조합이 아닙니다. 구성품 종류와 시스템은 고정이며 수량만 바꿀 수 있습니다.' }, { status: 404 })
 
-export async function DELETE(request: NextRequest) {
-  const user = await getAuthUser(request)
-  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  const sp = request.nextUrl.searchParams
-  const parentItemId = Number(sp.get('parentItemId'))
-  const childRaw = sp.get('childItemId')
-  const childItemId = childRaw ? Number(childRaw) : null
-  if (!Number.isInteger(parentItemId) || (childItemId !== null && !Number.isInteger(childItemId))) return NextResponse.json({ error: '품목이 올바르지 않습니다.' }, { status: 400 })
-  const where = childItemId === null ? { parentItemId } : { parentItemId, childItemId }
-  const rows = await prisma.stockOutItemComponent.findMany({ where, include: { parent: { select: { name: true } }, child: { select: { name: true } } } })
-  if (rows.length === 0) return NextResponse.json({ error: '구성 행이 없습니다.' }, { status: 404 })
-  await prisma.stockOutItemComponent.deleteMany({ where })
+  const row = await prisma.stockOutItemComponent.update({ where: key, data: { quantity } })
   await logAudit({
-    req: request, actor: auditActorFromJWT(user), action: 'DELETE', resource: 'setting:stock_out_item_component',
-    resourceId: childItemId === null ? String(parentItemId) : `${parentItemId}:${childItemId}`,
-    resourceLabel: `${rows[0].parent.name} 구성 ${childItemId === null ? `전체 ${rows.length}행` : `← ${rows[0].child.name}`} 삭제`,
-    before: rows.map((r) => ({ childItemId: r.childItemId, quantity: r.quantity })),
+    req: request, actor: auditActorFromJWT(user), action: 'UPDATE', resource: 'setting:stock_out_item_component',
+    resourceId: `${parentItemId}:${childItemId}`,
+    resourceLabel: `${before.parent.name} ← ${before.child.name} × ${quantity}`,
+    before: { quantity: before.quantity }, after: { quantity: row.quantity },
   })
-  return NextResponse.json({ deleted: rows.length })
+  return NextResponse.json({ component: { parentItemId, childItemId, quantity: row.quantity } })
 }

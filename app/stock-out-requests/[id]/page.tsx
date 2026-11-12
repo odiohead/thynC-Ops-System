@@ -52,6 +52,8 @@ interface StockOutDetail {
   purpose: StockOutPurpose
   files: StockOutFileDto[]
   items: { id: number; inventoryItemId: number; quantity: number; fulfilledSerials: string | null; item: { id: number; name: string; modelName: string | null; isSerialManaged: boolean; inventory: { id: number; name: string }; category: { name: string } | null } }[]
+  /** 시스템 구성품 합계·미출고 + 출고 처리 시리얼 기록 (2026-11-12) */
+  components?: { id: number; itemId: number; quantity: number; unshippedQuantity: number; shippedSerials: string | null; unshippedSerials: string | null; item: { name: string; modelName: string | null } }[]
   asReceipt: { id: number; asCode: string; category: string; hospital: { hospitalCode: string; hospitalName: string } | null } | null // 분실 AS 연동 (2026-11-10)
   asItems: { id: number; serialNo: string; outcome: string | null; newSerialNo: string | null; wardName: string | null; deviceKind: string | null; shippedAt: string | null; device: { deviceInfo: { deviceName: string } | null } | null }[]
 }
@@ -314,6 +316,46 @@ export default function StockOutDetailPage() {
             ))}
           </tbody>
         </table>
+        {/* 시스템 구성품 (2026-11-12) — 요청 시점 합계(시스템 수량 × 구성 수량)와 신청자 미출고 수량, 출고 처리 후에는 출고분·미출고분 시리얼 */}
+        {!!req.components?.length && (
+          <div className="border-t border-gray-200 px-4 py-3 sm:px-6" data-testid="sor-components">
+            <div className="flex items-baseline justify-between">
+              <h3 className="text-xs font-semibold text-gray-700">시스템 구성품 <span className="font-normal text-gray-400">— 시스템 수량에 따라 계산된 구성품과 미출고 수량</span></h3>
+              <span className="text-xs text-gray-400">{req.components.length}종 · 총 {req.components.reduce((a, c) => a + c.quantity, 0)}개{req.components.some((c) => c.unshippedQuantity > 0) ? ` · 미출고 ${req.components.reduce((a, c) => a + c.unshippedQuantity, 0)}개` : ''}</span>
+            </div>
+            <table className="mt-2 min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-gray-500">
+                  <th className="py-1 font-medium">구성품</th>
+                  <th className="py-1 text-right font-medium">수량</th>
+                  <th className="py-1 text-right font-medium">출고</th>
+                  <th className="py-1 text-right font-medium">미출고</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {req.components.map((c) => (
+                  <tr key={c.id} data-testid={`sor-component-${c.itemId}`}>
+                    <td className="py-1.5 text-gray-900">
+                      {c.item.name}
+                      {(c.shippedSerials || c.unshippedSerials) && (
+                        <details className="mt-0.5">
+                          <summary className="cursor-pointer text-xs text-gray-400 hover:text-gray-600">처리 시리얼{c.shippedSerials ? ` · 출고 ${c.shippedSerials.split('\n').filter(Boolean).length}건` : ''}{c.unshippedSerials ? ` · 미출고 ${c.unshippedSerials.split('\n').filter(Boolean).length}건` : ''}</summary>
+                          {c.shippedSerials && <pre className="mt-1 whitespace-pre-wrap rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600"><span className="font-sans text-[11px] text-gray-400">출고</span>{'\n'}{c.shippedSerials}</pre>}
+                          {c.unshippedSerials && <pre className="mt-1 whitespace-pre-wrap rounded bg-amber-50 px-2 py-1 font-mono text-xs text-gray-600"><span className="font-sans text-[11px] text-amber-700">미출고 (thynC운영팀재고 편입)</span>{'\n'}{c.unshippedSerials}</pre>}
+                        </details>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap py-1.5 text-right font-medium tabular-nums text-gray-900">{c.quantity.toLocaleString()}</td>
+                    <td className="whitespace-nowrap py-1.5 text-right tabular-nums text-gray-700">{(c.quantity - c.unshippedQuantity).toLocaleString()}</td>
+                    <td className="whitespace-nowrap py-1.5 text-right tabular-nums">
+                      {c.unshippedQuantity > 0 ? <span className="rounded bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-700">{c.unshippedQuantity.toLocaleString()}</span> : <span className="text-gray-300">0</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* 분실 AS 연동 — 접수 기기 라인과 출고 시리얼 (2026-11-10) */}
@@ -402,6 +444,7 @@ export default function StockOutDetailPage() {
           note: req.note,
           purpose: req.purpose,
           items: req.items.map((l) => ({ inventoryItemId: l.inventoryItemId, quantity: l.quantity, name: l.item.name, modelName: l.item.modelName, inventoryId: l.item.inventory.id, inventoryName: l.item.inventory.name, categoryName: l.item.category?.name ?? null })),
+          unshipped: (req.components ?? []).filter((c) => c.unshippedQuantity > 0).map((c) => ({ itemId: c.itemId, quantity: c.unshippedQuantity })),
           subPurpose: req.subPurpose, destType: req.destType, destHospital: req.destHospital, destText: req.destText,
           shipAddress: req.shipAddress, recipient: req.recipient,
         } satisfies StockOutEditTarget}

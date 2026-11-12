@@ -1189,6 +1189,9 @@ model InventoryItem {
   stockOutPurposes StockOutItemPurpose[]   @relation("StockOutItemPurposes") // 출고요청 업무별 노출 설정
   stockOutComponents StockOutItemComponent[] @relation("StockOutComponentParent") // 출고요청 구성 안내 — 이 품목 1개에 포함되는 부자재
   stockOutUsedIn     StockOutItemComponent[] @relation("StockOutComponentChild")  // 출고요청 구성 안내 — 이 품목이 부자재로 포함되는 주 품목
+  stockOutKind              StockOutComponentKind?     @relation("StockOutKindItem")   // 시스템 구성품 종류(대웅제약재고 복제 품목) (2026-11-12)
+  stockOutKindSourceOf      StockOutComponentKind?     @relation("StockOutKindSource") // 이 품목(thynC운영팀재고 원본)을 복제한 구성품 종류
+  stockOutRequestComponents StockOutRequestComponent[] @relation("StockOutRequestComponentItem") // 출고요청 단위 구성품 (2026-11-12)
 
   @@index([categoryId])
   @@index([inventoryId])
@@ -2243,6 +2246,7 @@ model StockOutRequest {
   project   Project?              @relation(fields: [projectCode], references: [projectCode])
   asReceipt AsReceipt?            @relation("StockOutAsReceipt", fields: [asReceiptId], references: [id], onDelete: SetNull)
   asItems   AsReceiptItem[]       @relation("AsItemStockOut") // 이 요청으로 기기를 받을 AS 라인(대기 중 잠금) (2026-11-10)
+  components StockOutRequestComponent[] // 시스템 구성품 합계·미출고 (2026-11-12)
   destHospital Hospital?          @relation("StockOutDestHospital", fields: [destHospitalCode], references: [hospitalCode])
   status    StatusCode?           @relation("StockOutStatus", fields: [statusId], references: [id], onDelete: SetNull)
   createdBy User?                 @relation("StockOutCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -2321,11 +2325,11 @@ model StockOutRequestItem {
   @@schema("public")
 }
 
-/// 출고요청 품목 구성 안내 (2026-11-01) — 대웅제약재고 'thynC 시스템 XX' 1개당 thynC운영팀재고 부자재 수량. 인벤토리가 달라 WMS 주자재-부자재(같은 인벤토리 한정)와 별개, 재고 처리와 무관한 안내 전용
+/// 출고요청 시스템 구성 (2026-11-01, 2026-11-12 개편) — 'thynC 시스템 XX'(parent) 1개당 구성품 종류(child = StockOutComponentKind.itemId, 대웅제약재고 복제 품목) 수량. 시스템 × 종류 전 조합을 유지하고 수량만 수정(0 = 미포함, SQL CHECK >= 0)
 model StockOutItemComponent {
   parentItemId Int      @map("parent_item_id")
   childItemId  Int      @map("child_item_id")
-  quantity     Int      @default(1) // 주 품목 1개당 포함 수량 (SQL CHECK > 0)
+  quantity     Int      @default(1) // 주 품목 1개당 포함 수량 (SQL CHECK >= 0 — 0 = 미포함)
   sortOrder    Int      @default(0) @map("sort_order")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
 
@@ -2335,6 +2339,40 @@ model StockOutItemComponent {
   @@id([parentItemId, childItemId])
   @@index([childItemId])
   @@map("stock_out_item_components")
+  @@schema("public")
+}
+
+/// 시스템 구성품 종류 (2026-11-12) — 고정 목록. item = 대웅제약재고에 복제한 구성품 품목(출고분 재고 차감), source = thynC운영팀재고 원본(출고 처리에서 미출고분이 편입되는 품목). 등록은 scripts/seed-stock-out-component-kinds.sql
+model StockOutComponentKind {
+  itemId       Int      @id @map("item_id")
+  sourceItemId Int      @unique @map("source_item_id")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  item   InventoryItem @relation("StockOutKindItem", fields: [itemId], references: [id], onDelete: Cascade)
+  source InventoryItem @relation("StockOutKindSource", fields: [sourceItemId], references: [id])
+
+  @@map("stock_out_component_kinds")
+  @@schema("public")
+}
+
+/// 출고요청 단위 구성품 (2026-11-12) — 저장 시점의 구성품별 합계(시스템 수량 × 구성 수량의 합) + 신청자 미출고 수량 + 출고 처리 기록(출고분·미출고분 시리얼)
+model StockOutRequestComponent {
+  id                Int     @id @default(autoincrement())
+  requestId         Int     @map("request_id")
+  itemId            Int     @map("item_id") // 구성품 종류(대웅제약재고 복제 품목)
+  quantity          Int // 합계 수량 (SQL CHECK > 0)
+  unshippedQuantity Int     @default(0) @map("unshipped_quantity") // 신청자가 적은 미출고 수량 (SQL CHECK 0..quantity) — 출고 처리 시 thynC운영팀재고로 편입
+  shippedSerials    String? @map("shipped_serials") @db.Text // 출고분 시리얼 기록 (줄 단위)
+  unshippedSerials  String? @map("unshipped_serials") @db.Text // 미출고분 시리얼 기록 (줄 단위)
+  sortOrder         Int     @default(0) @map("sort_order")
+
+  request StockOutRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  item    InventoryItem   @relation("StockOutRequestComponentItem", fields: [itemId], references: [id])
+
+  @@unique([requestId, itemId])
+  @@index([itemId])
+  @@map("stock_out_request_components")
   @@schema("public")
 }
 

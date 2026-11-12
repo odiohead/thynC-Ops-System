@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { canEditStockOutRequest, validateStockOutLines } from '@/lib/stockOut'
+import { canEditStockOutRequest, validateStockOutLines, writeStockOutLines, writeStockOutComponents, resolveStockOutComponents, type StockOutLine, type StockOutComponentRow } from '@/lib/stockOut'
 import { isStockOutSalesType, STOCK_OUT_SUB_PURPOSES, type StockOutPurpose } from '@/lib/stockOutShared'
 import { syncStockOutToTicket } from '@/lib/ticket-domains/stockOut'
 import { notifyTicketChanged } from '@/lib/notify'
@@ -34,6 +34,8 @@ const detailInclude = {
     select: { id: true, inventoryItemId: true, quantity: true, fulfilledSerials: true, item: { select: { id: true, name: true, modelName: true, isSerialManaged: true, inventory: { select: { id: true, name: true } }, category: { select: { name: true } } } } },
     orderBy: { id: 'asc' as const },
   },
+  // 시스템 구성품 합계·미출고 + 출고 처리 시리얼 기록 (2026-11-12)
+  components: { select: { id: true, itemId: true, quantity: true, unshippedQuantity: true, shippedSerials: true, unshippedSerials: true, item: { select: { name: true, modelName: true } } }, orderBy: { sortOrder: 'asc' as const } },
   // 첨부 파일 — 엑셀 등 (2026-11-02)
   files: { include: { uploadedBy: { select: { name: true } } }, orderBy: { uploadedAt: 'asc' as const } },
   // 처리 전표 (P2 — stock_out_request_id 역조회, 취소 여부 포함)
@@ -69,7 +71,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const existing = await prisma.stockOutRequest.findUnique({
     where: { id },
-    include: { status: { select: { id: true, name: true, ticketStatus: true } }, items: { select: { inventoryItemId: true } } },
+    include: { status: { select: { id: true, name: true, ticketStatus: true } }, items: { select: { inventoryItemId: true, quantity: true } }, components: { select: { itemId: true, unshippedQuantity: true } } },
   })
   if (!existing) return NextResponse.json({ error: '출고요청을 찾을 수 없습니다.' }, { status: 404 })
 
@@ -80,7 +82,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const body = await request.json()
   const data: Prisma.StockOutRequestUncheckedUpdateInput = {}
-  let items: { inventoryItemId: number; quantity: number }[] | null = null
+  let items: StockOutLine[] | null = null
+  let components: StockOutComponentRow[] | null = null // 시스템 구성품 — 품목 또는 미출고 수량이 오면 다시 계산
 
   try {
     if (body.requestDate !== undefined) {
@@ -138,6 +141,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
       if (existing.asReceiptId) return NextResponse.json({ error: '분실 AS 연동 출고요청의 품목은 출고 처리 시 입력한 시리얼로 정해집니다 — 품목을 직접 수정할 수 없습니다.' }, { status: 400 }) // 2026-11-10
       items = await validateStockOutLines(body.items, existing.purpose as StockOutPurpose, existing.items.map((l) => l.inventoryItemId))
     }
+    // 출고 처리된 요청은 구성품(합계·미출고·처리 시리얼)을 건드리지 않는다 — 처리 기록 보존
+    if (!existing.fulfilledAt && (body.items !== undefined || body.unshipped !== undefined)) {
+      // 품목만 바꾼 호출(미출고를 모르는 화면)은 기존 미출고를 새 합계 한도로 이어받는다
+      components = await resolveStockOutComponents(items ?? existing.items, body.unshipped, existing.components)
+    }
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 })
   }
@@ -150,8 +158,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
     await tx.stockOutRequest.update({ where: { id }, data })
     if (items) {
       await tx.stockOutRequestItem.deleteMany({ where: { requestId: id } })
-      await tx.stockOutRequestItem.createMany({ data: items.map((l) => ({ requestId: id, ...l })) })
+      await writeStockOutLines(tx, id, items)
     }
+    if (components) await writeStockOutComponents(tx, id, components)
     if (existing.asReceiptId && nextStatusName === '취소') unlinked = await unlinkAsLinesFromStockOut(tx, id, { userId: user.userId, name: user.name }, '취소')
     await syncStockOutToTicket(tx, id, user.userId)
   })

@@ -16,7 +16,10 @@ interface Detail extends MobileStockOutRow {
   fulfilledAt: string | null
   createdBy: { name: string } | null
   ticket: { ticketCode: string; owner: { name: string } | null } | null
+  /** 시스템 구성품 합계·미출고 (2026-11-12) */
+  components?: { itemId: number; quantity: number; unshippedQuantity: number; item: { name: string } }[]
 }
+
 
 export default function MobileStockOutRequestDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -73,6 +76,23 @@ export default function MobileStockOutRequestDetailPage() {
                 ))}
               </ul>
             </Section>
+
+            {/* 시스템 구성품 합계·미출고 (2026-11-12) */}
+            {!!r.components?.length && (
+              <Section title="시스템 구성품">
+                <ul className="divide-y divide-border">
+                  {r.components.map((c) => (
+                    <li key={c.itemId} className="flex items-center justify-between gap-3 py-2 text-sm">
+                      <span className="min-w-0 truncate">{c.item.name}</span>
+                      <span className="shrink-0">
+                        <span className="font-semibold">{c.quantity}</span>
+                        {c.unshippedQuantity > 0 && <span className="ml-2 text-xs font-medium text-amber-700">미출고 {c.unshippedQuantity}</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </Section>
+            )}
 
             {r.note && (
               <Section title="비고">
