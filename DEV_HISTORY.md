@@ -13,6 +13,7 @@
 - **검증**: tsc · eslint · `scripts/as-dashboard-smoke.mts` 64/64(ETC 라인 수 JS↔where 일치 + 세 기기군 where 합 = 전체 라인 16,156 — 종전 ETC는 참고 출력이던 것을 검사로 승격) · dev2 빌드 · Playwright 실제 화면 26/26(링크 형식, AS 목록 건수−취소 = 대시보드 접수 건수, VOC 목록 건수 = 대시보드 VOC 건수, 칩 표시·해제·URL 정리, 기간 입력 반영, VOC 목록 무파라미터 전체, 큐 버킷×기기군 필터 건수 = 헤더 counts·3군 합 = 전체)
 - 영향 파일: lib/asReceiptQueue.ts, lib/vocDashboard.ts, app/voc/dashboard/page.tsx, app/voc/page.tsx, scripts/as-dashboard-smoke.mts, projects/as_dashboard_design.md, README.md
 - 스키마·패키지 변경 없음
+- → **PROD 배포 2026-11-12 09:06 (0baecea)** — AS 대시보드 포함. pull(5fea6b7 → 0baecea) → 힙 4GB nohup 빌드 1회 성공(약 7분) → thync-prod 재시작 → /login 200·신규 경로 미인증 307, 협업 서버 번들 동일(재시작 생략), 디스크 72%. PROD 읽기 전용 스모크 64/64(ECG 3,102 · SPO2 13,691 · ETC 3 = 전체 16,796)
 
 ## 2026-11-11 19:10 | AS 대시보드 — `/as-receipts/dashboard` (현황·기간 분석·병원별·기기·품질 4탭 + 공통 필터, 설계 `projects/as_dashboard_design.md`, dev2 빌드)
 
@@ -24,7 +25,7 @@
 - **검증**: `scripts/as-dashboard-smoke.mts` 62/62(독립 SQL·기존 정의 대조 — 한도 일괄 집계는 접수 이력 병원 188곳 전부 단건 함수와 대조) · tsc · eslint · dev2 빌드 · Playwright 실제 화면 49/49(API↔화면 숫자, 칸·단계 행 드릴다운 건수 일치, 프리셋·직접 지정·전체 기간, 간격·단위·표 전환, 병원 선택/해제·URL 복원, 빈 기간, CSV, VIEWER 열람, 다크 모드, 모바일 390px 가로 넘침 없음)
 - **작업 중 발견(→ ①② 2026-11-12 조치, 위 항목)**: ① 목록·큐의 기기군 '기타' where(`asDeviceGroupWhere('ETC')`)가 미등록·기기종류 없는 라인을 못 잡음(NOT … LIKE가 NULL) — dev2 3라인(비정상 시리얼), 대시보드는 JS 판정이라 '기타'로 셈 ② VOC·AS 주간 대시보드 병원 링크 `/as-receipts?hospital=코드`는 목록이 받지 않는 파라미터(필터 안 걸림) ③ dev2 데이터가 10-29 기준이라 '오늘·이번 주 접수'는 0, 경과일은 전부 15일 이상으로 보임
 - 영향 파일: lib/asDashboard.ts(신규), lib/asLostQuota.ts, lib/asDealQuota.ts, lib/asReceiptSearch.ts, app/api/as-receipts/dashboard/route.ts(신규), app/api/as-receipts/route.ts, app/as-receipts/dashboard/page.tsx·_components/{parts,NowTab,PeriodTab,HospitalsTab,QualityTab}.tsx(신규), app/as-receipts/page.tsx([대시보드] 버튼), scripts/as-dashboard-smoke.mts(신규), projects/as_dashboard_design.md(신규), projects/README.md, README.md
-- 커밋·PROD 반영 없음
+- → **PROD 배포 2026-11-12 09:06 (0baecea)** — 사용자 검토·피드백은 PROD 화면 기준으로 계속(설계안 §9 검토 항목 7개 미결)
 
 ## 2026-11-11 20:30 | 수리대기 큐 — 태그 필터(선교체·우선수리·펌웨어·부속품·합포장) + 정렬 선택 (dev2 빌드)
 
