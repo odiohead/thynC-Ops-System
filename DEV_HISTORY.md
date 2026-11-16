@@ -13,7 +13,7 @@
 - **dev2는 지금 PROD 원본과 다름**: VOC·CS 티켓 139건 추가, AS 접수 91건의 상위 VOC 변경(보정 적용 상태). PROD는 미반영
 - 영향: dev2 DB 전체 데이터, DEV_HISTORY.md
 
-## 2026-11-16 11:10 | VOC 과소 집계 수정 — 채널톡 후속 연결 조건 축소 + 묶인 상담 개별 VOC 분리 (dev2 빌드·dev2 데이터 보정, PROD 미반영)
+## 2026-11-16 11:10 | VOC 과소 집계 수정 — 채널톡 후속 연결 조건 축소 + 묶인 상담 개별 VOC 분리 (dev2 빌드·dev2 데이터 보정 → PROD 배포·보정 완료)
 
 - **보고**: "VOC 대시보드 46주차 수치가 너무 줄었다 — 채널톡 누락인가" → 수집 누락이 아니라 **새 상담이 새 VOC가 되지 않고 기존 VOC에 후속 상담으로 묶인 것**. PROD 실측(11-16): 46주차(11/6~11/12) 분류 태그 상담 184건 → 새 VOC 103 · 후속 연결 81, 대시보드 VOC 109(전주 174). AS 태그 상담 130건인데 VOC 'AS' 분류 67. 10/30 이후 후속 연결 142건 중 141건이 AS 접수가 딸린 VOC. AS 영역 접수 건수(107)는 정상
 - **원인**: 승격 규칙 ④(같은 고객의 미종결 VOC가 14일 내 있으면 후속 연결)와 ⑦(하위 티켓 미종결이면 VOC '접수' 유지)의 결합. 10/28 AS 인입이 채널톡 상담으로 바뀐 뒤 VOC마다 AS 하위 티켓이 생겨 VOC가 오래 열려 있고, 그동안 같은 고객 계정(계정 1개가 여러 병원을 접수하기도 함)의 새 상담이 전부 흡수됨. 예: PROD VOC-202610-0766 1건에 상담 8건·AS 접수 8건·병원 2곳. VOC 레코드 자체가 1건이라 목록·CS 티켓·대시보드 모두 과소
@@ -23,7 +23,8 @@
 - **검증**: tsc · eslint · `scripts/voc-followup-rule-smoke.mts` 9/9(전 고객 121명 — 후속 대상은 응대 중 상담이 있는 VOC뿐·불일치 0, 상담 상태 closed/opened/snoozed/initial 전환별 판정, 14일 창, 원복) · dev2 빌드
 - **이번 범위 밖(미조치)**: 하위 AS 티켓이 종결돼도 VOC 상태 재판정이 돌지 않아 '접수'로 남는 VOC(PROD 70건) — 흡수는 더 일으키지 않지만 미해결 건수를 부풀림
 - 영향 파일: lib/channeltalk/vocPromote.ts, scripts/fix-voc-followup-split.mts(신규), scripts/voc-followup-rule-smoke.mts(신규), projects/voc_channeltalk_promotion_design.md(§1 ④·§8), projects/README.md, README.md
-- 스키마·패키지·API 변경 없음. **PROD 반영 시**: 코드 배포(힙 4GB 빌드·재시작, 협업 번들 무관) **먼저** → `npx tsx scripts/fix-voc-followup-split.mts` dry-run → `--apply`(PROD DB 쓰기 — 명시 허락 필요, 11-16 기준 대상 약 142건). 커밋·PROD 반영 없음
+- 스키마·패키지·API 변경 없음. **PROD 반영 시**: 코드 배포(힙 4GB 빌드·재시작, 협업 번들 무관) **먼저** → `npx tsx scripts/fix-voc-followup-split.mts` dry-run → `--apply`(PROD DB 쓰기 — 명시 허락 필요, 11-16 기준 대상 약 142건).
+- → **PROD 배포 2026-11-16 13:10 (fdfaf77)** — 사용자 지시 "prod에 반영해줘". VOC 수정분만 커밋(회원가입·심평원 요양기호 대응은 미커밋 유지). pull(79e3324 → fdfaf77, 패키지·스키마 변경 없음) → 힙 4GB nohup 빌드 1회 성공 → `pm2 restart thync-prod` → /login 200·`/voc/dashboard` 미인증 307, 채널톡 스케줄러 재개, 협업 서버 번들 동일(재시작 생략), 디스크 73%. **데이터 보정**: 백업 `~/backups/voc_followup_split_before_20261116_0409.dump`(voc_*·ticket*·as_receipts·as_intake_links) → dry-run(대상 145) → `--apply`: **새 VOC 145(회신완료 96) · AS 접수 이동 94 · 원 VOC 71건 재판정(회신완료 전환 49) · 유지 1(VOC-202611-0211) · 오류 0**, 재실행 대상 0, 실행 로그 `~/backups/voc_followup_split_apply_20261116_*.log`. 결과(PROD): 주별 VOC 10/23 177→178 · 10/30 174→216 · **11/06(46주차) 109→189** · 11/13(진행 중) 66, VOC 'AS' 분류 46주차 67→134, 주별 연결 상담 수 = VOC 수(유지 1건 제외), VOC 11,005 = CS 티켓 11,005, 코드 중복·VOC↔티켓 상태 불일치 0. 분리로 열린 새 VOC에는 SLA 시계를 만들지 않음
 
 ## 2026-11-12 16:30 | 출고요청 시스템 구성품 개편 — 구성품 종류 고정·요청 팝업 합계/미출고 섹션·출고 처리 인벤토리별 카드 + 미출고분 thynC운영팀재고 편입 (dev2 빌드, 마이그·시드 dev2만)
 
