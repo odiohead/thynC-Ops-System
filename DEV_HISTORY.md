@@ -4,6 +4,27 @@
 
 ---
 
+## 2026-11-16 11:20 | PROD → dev2 데이터 동기화 (정기 백업 20261116_010001) + 후속 연결 분리 보정 dev2 재적용
+
+- **요청**: "PROD 데이터를 dev2로 마이그해줘. dev2에서 보게" — 아래 VOC 과소 집계 수정 결과를 최신 PROD 데이터로 dev2에서 확인하기 위함
+- **동기화(dev2 절차)**: PROD `~/backups/db/thync_ops_20261116_010001.dump`(11-16 10:00 KST 시점) SCP → `pm2 stop thync-dev thync-collab` → dev2 백업 `dev_before_sync_20261116_111743.sql.gz` → `_prisma_migrations`·`_bak_*` 제외 142테이블 TRUNCATE + data-only 단일 트랜잭션 적재(덤프의 `_bak_*` 22개는 dev2에 없어 TOC에서 제외, dev2 전용 `signup_requests`는 비움) + `channeltalk_as_interval`·`channeltalk_voc_interval`·`channeltalk_as_intake` off → PM2 재기동 /login 200, 채널톡 스케줄러 OFF 로그 확인
+- **결과**: users 77 · hospitals 80,594 · projects 290 · tickets 16,631 · voc 10,852 · as_receipts 4,440 · hospital_devices 31,027 · wiki_pages 185 · 출고 구성품 종류 7(PROD와 동일해짐) · 마이그 기록 179 유지
+- **분리 보정 재적용**(`fix-voc-followup-split.mts --apply`, dev2만 — 동기화로 앞선 적용분이 PROD 원본으로 덮였기 때문): 후속 연결 140건 중 분리 139 · 유지 1(연결 당시 응대 중인 상담 있음, VOC-202611-0211) · AS 접수 이동 91 · 원 VOC 68건 재판정(회신완료 전환 49) · 오류 0 · 재실행 대상 0. 주별 VOC 10/23 177→178 · 10/30 174→216 · **11/06(46주차) 109→189** · 11/13(진행 중) 36→52, VOC 'AS' 분류 46주차 67→134, VOC 10,852→10,991, 연결 행 3,318 불변, 알림 로그·SLA 시계 증가 0
+- **dev2는 지금 PROD 원본과 다름**: VOC·CS 티켓 139건 추가, AS 접수 91건의 상위 VOC 변경(보정 적용 상태). PROD는 미반영
+- 영향: dev2 DB 전체 데이터, DEV_HISTORY.md
+
+## 2026-11-16 11:10 | VOC 과소 집계 수정 — 채널톡 후속 연결 조건 축소 + 묶인 상담 개별 VOC 분리 (dev2 빌드·dev2 데이터 보정, PROD 미반영)
+
+- **보고**: "VOC 대시보드 46주차 수치가 너무 줄었다 — 채널톡 누락인가" → 수집 누락이 아니라 **새 상담이 새 VOC가 되지 않고 기존 VOC에 후속 상담으로 묶인 것**. PROD 실측(11-16): 46주차(11/6~11/12) 분류 태그 상담 184건 → 새 VOC 103 · 후속 연결 81, 대시보드 VOC 109(전주 174). AS 태그 상담 130건인데 VOC 'AS' 분류 67. 10/30 이후 후속 연결 142건 중 141건이 AS 접수가 딸린 VOC. AS 영역 접수 건수(107)는 정상
+- **원인**: 승격 규칙 ④(같은 고객의 미종결 VOC가 14일 내 있으면 후속 연결)와 ⑦(하위 티켓 미종결이면 VOC '접수' 유지)의 결합. 10/28 AS 인입이 채널톡 상담으로 바뀐 뒤 VOC마다 AS 하위 티켓이 생겨 VOC가 오래 열려 있고, 그동안 같은 고객 계정(계정 1개가 여러 병원을 접수하기도 함)의 새 상담이 전부 흡수됨. 예: PROD VOC-202610-0766 1건에 상담 8건·AS 접수 8건·병원 2곳. VOC 레코드 자체가 1건이라 목록·CS 티켓·대시보드 모두 과소
+- **규칙 개정**(`lib/channeltalk/vocPromote.findOpenVocForCustomer`): 후속 대상 VOC는 **담당자가 응대 중인 연결 상담(진행중 `opened`·보류 `snoozed`)이 남아 있는 것**만 — 종료(`closed`)·봇만 응대(`initial`)는 제외. 10/28 이전의 실제 동작(후속 주 0~1건)과 같다
+- **보정 스크립트** `scripts/fix-voc-followup-split.mts`(기본 dry-run · `--apply` · `--since=` 기본 2026-10-28 · 멱등): 연결 당시 응대 중인 상담이 없던 후속 연결을 상담별 새 VOC로 분리 — 접수시각 = 고객 첫 발화(원래 주에 집계), 코드 = 연결된 달, VOC·티켓 created_at = 원래 연결 시각, 그 상담에서 만든 AS 접수를 새 VOC로 이동(`voc_id` + AS 티켓 Master·타임라인 이벤트), 상태 판정(회신완료 시각 = 상담 종료·하위 티켓 종결 중 늦은 쪽), 원 VOC 분류·상태 재판정. 알림·SLA 시계 없음. 연결 행을 지우지 않고 갱신해 폴링 틱과 경합 없음(`promoteChat` 옵션 `moveLink`·`vocCode`·`skipStatusSync` 추가)
+- **dev2 적용**(11-12 PROD 사본): 분리 109(유지 0) · AS 접수 이동 69 · 원 VOC 54건 재판정(회신완료 전환 34) · 오류 0 · 재실행 대상 0. 주별 VOC 10/23 177→178 · 10/30 174→216 · 11/06 94→160, 주별 연결 상담 수 = VOC 수, VOC 10,800→10,909, 연결 행 3,241 불변, 알림 로그·SLA 시계 증가 0, 정합성 검사(접수↔VOC·티켓 상태 불일치 등) 악화 없음
+- **검증**: tsc · eslint · `scripts/voc-followup-rule-smoke.mts` 9/9(전 고객 121명 — 후속 대상은 응대 중 상담이 있는 VOC뿐·불일치 0, 상담 상태 closed/opened/snoozed/initial 전환별 판정, 14일 창, 원복) · dev2 빌드
+- **이번 범위 밖(미조치)**: 하위 AS 티켓이 종결돼도 VOC 상태 재판정이 돌지 않아 '접수'로 남는 VOC(PROD 70건) — 흡수는 더 일으키지 않지만 미해결 건수를 부풀림
+- 영향 파일: lib/channeltalk/vocPromote.ts, scripts/fix-voc-followup-split.mts(신규), scripts/voc-followup-rule-smoke.mts(신규), projects/voc_channeltalk_promotion_design.md(§1 ④·§8), projects/README.md, README.md
+- 스키마·패키지·API 변경 없음. **PROD 반영 시**: 코드 배포(힙 4GB 빌드·재시작, 협업 번들 무관) **먼저** → `npx tsx scripts/fix-voc-followup-split.mts` dry-run → `--apply`(PROD DB 쓰기 — 명시 허락 필요, 11-16 기준 대상 약 142건). 커밋·PROD 반영 없음
+
 ## 2026-11-12 16:30 | 출고요청 시스템 구성품 개편 — 구성품 종류 고정·요청 팝업 합계/미출고 섹션·출고 처리 인벤토리별 카드 + 미출고분 thynC운영팀재고 편입 (dev2 빌드, 마이그·시드 dev2만)
 
 - **요청**: ① 요청 팝업 — '시스템' 분류에는 thynC시스템 10~100 수량만, 구성품은 하단 별도 섹션에 종류별 합계로, 그 아래 신청자 '미출고' 입력 섹션 ② 구성품은 5종 고정, '출고 품목 관리'에서는 수량만 ③ 출고 처리 — 대웅제약재고·thynC운영팀재고 카드 분리, 대웅제약재고에서 시스템(모자재) 시리얼 + 구성품별 '출고'·'미출고' 기재란 분리 ④ 구성품 5종을 대웅제약재고에 복제

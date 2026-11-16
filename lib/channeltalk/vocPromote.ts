@@ -5,7 +5,9 @@
  *  ① 트리거 = 분류 태그(a~h_ 접두) 존재 — 팀 태그(팀/…)는 조건 아님(보류)
  *  ② 고객 텍스트 발화 1건 이상, 담당자 발신 상담(발송안내 등) 아님, 수동 제외 아님
  *  ③ 컷오버: 고객 첫 발화가 AppSetting channeltalk_voc_cutover(KST 일자) 이후 — 과거 상담은 소급하지 않음(수동 승격만)
- *  ④ 단위: 같은 고객(user_id)의 미종결 VOC가 14일 내 있으면 새로 만들지 않고 그 VOC에 상담 추가(AUTO_FOLLOWUP)
+ *  ④ 단위: 상담 1건 = VOC 1건. 같은 고객(user_id)의 미종결 VOC(14일 내)에 **담당자가 응대 중인 상담(진행중·보류)이 남아 있을 때만**
+ *     새로 만들지 않고 그 VOC에 상담 추가(AUTO_FOLLOWUP). 상담이 모두 끝난 VOC는 하위 AS 티켓 때문에 '접수'로 남아 있어도 대상 아님
+ *     (2026-11-16 개정 — AS 진행 중인 VOC가 같은 고객의 새 접수를 14일간 흡수해 VOC가 과소 생성되던 문제)
  *  ⑤ 시점: 태그가 걸린 틱에 생성. receivedAt = 고객 첫 발화 시각(SLA 왜곡 방지). 제목 = 첫 발화 1줄
  *  ⑥ 분류 = 상담 tags 중 첫 분류 태그 ↔ status_codes(VOC_TYPE).value / 채널 '채널톡' / 담당 = assignee 매니저 이메일 ↔ users
  *  ⑦ 종결: 상담 closed → VOC '회신완료'(하위 티켓 미종결이면 유지) / 재오픈 → '처리중'
@@ -20,7 +22,8 @@ import { channeltalkDeskChatUrl, CHANNELTALK_BOT_EMAIL, CHANNELTALK_VOC_CUTOVER_
 export { VOC_SKIP_LABEL, type VocSkipReason }
 
 const FOLLOWUP_DAYS = 14
-
+/** 후속 연결 대상 VOC의 조건 — 이 상태의 연결 상담이 하나라도 있어야 한다. initial(봇만 응대, 닫히지 않음)·closed는 '응대 중'이 아니다 */
+const FOLLOWUP_ACTIVE_CHAT_STATES = ['opened', 'snoozed']
 
 interface ChatForEval {
   id: string; tags: string[]; firstUserMessageAt: Date | null; managerInitiated: boolean; vocExcludedAt: Date | null
@@ -81,13 +84,17 @@ const CHAT_SELECT = {
   user: { select: { name: true, mobileNumber: true, landlineNumber: true, hospitalNameRaw: true } },
 } as const
 
-/** 같은 고객의 미종결 VOC (14일 내 접수) — 있으면 후속 상담으로 연결 */
-async function findOpenVocForCustomer(userId: string | null, since: Date): Promise<number | null> {
+/** 같은 고객의 미종결 VOC (14일 내 접수) 중 응대 중인 상담이 남아 있는 것 — 있으면 후속 상담으로 연결 */
+export async function findOpenVocForCustomer(userId: string | null, since: Date): Promise<number | null> {
   if (!userId) return null
   const row = await prisma.vocChanneltalkChat.findFirst({
     where: {
       chat: { userId },
-      voc: { receivedAt: { gte: since }, OR: [{ status: null }, { status: { ticketStatus: { notIn: ['RESOLVED', 'CLOSED'] } } }] },
+      voc: {
+        receivedAt: { gte: since },
+        OR: [{ status: null }, { status: { ticketStatus: { notIn: ['RESOLVED', 'CLOSED'] } } }],
+        channeltalkChats: { some: { chat: { state: { in: FOLLOWUP_ACTIVE_CHAT_STATES } } } },
+      },
     },
     orderBy: { voc: { receivedAt: 'desc' } },
     select: { vocId: true },
@@ -156,11 +163,17 @@ export interface PromoteChatOptions {
   noFollowup?: boolean
   /** Slack 알림·SLA 시계 생략 — 일괄 보정·리허설용 */
   silent?: boolean
+  /** 이미 다른 VOC에 연결된 상담을 새 VOC로 옮긴다(연결 행을 지우지 않고 갱신 — 폴링 틱과 경합 없음). 후속 연결 분리 보정용 */
+  moveLink?: boolean
+  /** VOC 코드 지정 — 보정 시 원래 연결된 달 기준 채번 */
+  vocCode?: string
+  /** 생성 직후 상담 상태 → VOC 상태 판정 생략 — 호출부가 하위 티켓을 옮긴 뒤 직접 판정할 때 */
+  skipStatusSync?: boolean
 }
 export async function promoteChat(chatId: string, opts: PromoteChatOptions = {}): Promise<{ vocId: number; vocCode: string; reason: 'AUTO_TAG' | 'AUTO_FOLLOWUP' | 'MANUAL' }> {
   const c = await prisma.channeltalkUserChat.findUnique({ where: { id: chatId }, select: CHAT_SELECT })
   if (!c) throw new Error('상담을 찾을 수 없습니다')
-  if (c.vocLink) throw new Error('이미 VOC에 연결된 상담입니다')
+  if (c.vocLink && !opts.moveLink) throw new Error('이미 VOC에 연결된 상담입니다')
   if (!opts.manual && !opts.skipEval) {
     const skip = evaluateChat(c, await readCutover())
     if (skip) throw new Error(`승격 대상 아님: ${VOC_SKIP_LABEL[skip]}`)
@@ -169,7 +182,7 @@ export async function promoteChat(chatId: string, opts: PromoteChatOptions = {})
   const receivedAt = c.firstUserMessageAt ?? new Date()
 
   // ④ 같은 고객 미종결 VOC → 후속 연결
-  const openVoc = opts.manual || opts.noFollowup ? null : await findOpenVocForCustomer(c.userId, new Date(receivedAt.getTime() - FOLLOWUP_DAYS * 86400_000))
+  const openVoc = opts.manual || opts.noFollowup || opts.moveLink ? null : await findOpenVocForCustomer(c.userId, new Date(receivedAt.getTime() - FOLLOWUP_DAYS * 86400_000))
   if (openVoc) {
     await prisma.vocChanneltalkChat.create({ data: { vocId: openVoc, chatId: c.id, linkReason: 'AUTO_FOLLOWUP', linkedById: null } })
     await syncVocTypesFromChats(openVoc)
@@ -192,11 +205,14 @@ export async function promoteChat(chatId: string, opts: PromoteChatOptions = {})
     source: 'CHANNELTALK',
     autoCreated: !opts.manual,
     ownerId,
+    vocCode: opts.vocCode ?? null,
   }, actorId)
-  await prisma.vocChanneltalkChat.create({ data: { vocId: created.id, chatId: c.id, linkReason: opts.manual ? 'MANUAL' : 'AUTO_TAG', linkedById: opts.manual ? actorId : null } })
+  const linkData = { vocId: created.id, linkReason: opts.manual ? 'MANUAL' : 'AUTO_TAG', linkedById: opts.manual ? actorId : null }
+  if (c.vocLink) await prisma.vocChanneltalkChat.update({ where: { chatId: c.id }, data: linkData })
+  else await prisma.vocChanneltalkChat.create({ data: { ...linkData, chatId: c.id } })
   await syncVocTypesFromChats(created.id) // 복수 분류 (2026-10-27)
   // 상담이 이미 종료돼 있으면(늦은 태그) 즉시 회신완료 판정
-  if (c.state === 'closed') await syncVocStatusFromChat(created.id, actorId)
+  if (c.state === 'closed' && !opts.skipStatusSync) await syncVocStatusFromChat(created.id, actorId)
   if (!opts.silent) {
     syncTicketClocksSafe(created.ticketId)
     notifyTicketCreated({ ticketId: created.ticketId, actorName: '채널톡 접수봇', actorId }).catch(() => {})
