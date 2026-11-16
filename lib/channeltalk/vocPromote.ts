@@ -11,6 +11,7 @@
  *  ⑤ 시점: 태그가 걸린 틱에 생성. receivedAt = 고객 첫 발화 시각(SLA 왜곡 방지). 제목 = 첫 발화 1줄
  *  ⑥ 분류 = 상담 tags 중 첫 분류 태그 ↔ status_codes(VOC_TYPE).value / 채널 '채널톡' / 담당 = assignee 매니저 이메일 ↔ users
  *  ⑦ 종결: 상담 closed → VOC '회신완료'(하위 티켓 미종결이면 유지) / 재오픈 → '처리중'
+ *     하위 티켓 때문에 유지된 VOC는 하위 티켓이 전부 종결되면 다음 틱에 '회신완료'(resolveVocsAfterChildrenClosed, 2026-11-16)
  * 늦게 걸린 태그는 vocSync의 종료 상담 전량 재검사(기본 24h)로 수집.
  */
 import { prisma } from '@/lib/prisma'
@@ -290,6 +291,36 @@ export async function syncVocStatusFromChat(vocId: number, actorId: string | nul
   return null
 }
 
+/**
+ * ⑦ 보완 (2026-11-16) — 하위 티켓 종결 후 재판정. 상담은 모두 끝났는데 하위 티켓(AS 등) 때문에 열려 있던 VOC를, 하위 티켓이 전부 종결되면 '회신완료'로.
+ * syncVocStatusFromChat은 상담이 변경될 때만 돌아, 하위 티켓이 나중에 끝나면 다시 판정할 기회가 없었다(상담·AS가 다 끝났는데 '접수'로 남던 원인).
+ * 틱마다 DB 조회만(API 호출 없음) — 하위 티켓이 어느 경로로 닫히든(AS 처리·일괄 상태 변경·티켓 화면·자동 종결) 다음 틱에 반영.
+ * 하위 티켓이 종결된 **뒤에** 사람이 상태를 바꾼 VOC(예: 다시 '처리중')는 건드리지 않는다 — VOC 상태 변경 시각 > 하위 티켓의 마지막 상태 변경 시각이면 제외.
+ * 하위 티켓이 없는 VOC는 대상 아님(상담 종료 시점 판정으로 충분). 반환: 회신완료로 바꾼 건수
+ */
+export async function resolveVocsAfterChildrenClosed(actorId: string | null, log: (l: string) => void): Promise<number> {
+  const cands = await prisma.vocReceipt.findMany({
+    where: {
+      OR: [{ status: null }, { status: { ticketStatus: { in: ['OPEN', 'IN_PROGRESS'] } } }],
+      channeltalkChats: { some: {}, every: { chat: { state: 'closed' } } },
+      ticket: { children: { some: {}, every: { status: { in: ['RESOLVED', 'CLOSED'] } } } },
+    },
+    select: { id: true, vocCode: true, statusChangedAt: true, ticket: { select: { children: { select: { statusChangedAt: true } } } } },
+    orderBy: { id: 'asc' },
+  })
+  let n = 0
+  for (const v of cands) {
+    const lastChildChange = Math.max(...(v.ticket?.children ?? []).map((c) => c.statusChangedAt.getTime()))
+    if (v.statusChangedAt && v.statusChangedAt.getTime() > lastChildChange) continue // 하위 티켓 종결 뒤 사람이 상태를 정함
+    try {
+      if ((await syncVocStatusFromChat(v.id, actorId)) === 'resolved') { n++; log(`VOC 회신완료(하위 티켓 종결) ${v.vocCode}`) }
+    } catch (e) {
+      log(`하위 티켓 종결 재판정 실패 — ${v.vocCode}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  return n
+}
+
 /** 틱 후처리 — 변경된 상담 id 집합에 대해 승격·상태 동기화 */
 export async function promoteChanneltalkVocs(changedChatIds: string[], log: (l: string) => void): Promise<PromoteResult> {
   const r: PromoteResult = { created: 0, followups: 0, resolved: 0, reopened: 0, queued: 0, settled: 0, errors: [] }
@@ -323,6 +354,12 @@ export async function promoteChanneltalkVocs(changedChatIds: string[], log: (l: 
       const msg = `상담 ${c.id}: ${e instanceof Error ? e.message : String(e)}`
       r.errors.push(msg); log(`승격 실패 — ${msg}`)
     }
+  }
+  try {
+    r.resolved += await resolveVocsAfterChildrenClosed(actorId, log)
+  } catch (e) {
+    const msg = `하위 티켓 종결 재판정: ${e instanceof Error ? e.message : String(e)}`
+    r.errors.push(msg); log(msg)
   }
   try {
     const q = await queueUnpromotedChats(cutover, categoryTags, log)
