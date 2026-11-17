@@ -31,6 +31,7 @@
 - **시각**: 10:00 KST(UTC 01:00, 업무 시간) → **22:00 KST**(cron `0 13 * * *`)
 - **dev2 검증**(시험 접두 `db-backups-test/` — 끝난 뒤 전부 삭제): 설정 없는 환경 셸·업로드 직접 호출 모두 코드 3·덤프 0 / 접두 지정 정상 백업(`thync_ops_dev_…` 55.9MB·테이블 152·월 사본·`.env` 사본) / 재실행 시 `.env` 변경 없음 생략 / 설정 없이 `--list` 가능 / 쓰기 불가 폴더로 덤프 실패 → 코드 1·알림 경로 호출 / 서버 내 정리는 7일 지난 파일만 삭제
 - 영향 파일: scripts/backup-db.sh(신규), scripts/backup-db-to-s3.mts, .env.example(`DB_BACKUP_S3_PREFIX`·`BACKUP_ALERT_SLACK_CHANNEL`), README.md(서버 환경 > DB 백업), CLAUDE.md(정기 백업 시각)
+- → **PROD 적용 2026-11-18 08:50 (a192844)** — 사용자 지시 "커밋 & 푸시하고 prod에 적용해줘". 운영 서버(54.117.160.187): pull(스크립트·문서만 — 빌드·재시작 없음) → `.env`에 `DB_BACKUP_S3_PREFIX=db-backups` 추가 → cron을 `0 13 * * * …/scripts/backup-db.sh`(22:00 KST)로 교체 → cron과 같은 환경으로 1회 실행: 덤프 57MB(13초) → S3 `db-backups/daily/thync_ops_20261118_084835.dump`(테이블 173) → `.env` 사본 갱신(설정 추가로 내용이 바뀜) → 정리 0, 종료 코드 0. 구 `~/scripts/backup-prod-db.sh`(+`.bak`)는 운영 서버·기존 서버 양쪽에서 삭제. 앱 2개 무중단(재시작 0)
 
 ## 2026-11-18 08:30 | 운영 서버 전환 완료 — PROD = 54.117.160.187 (기존 13.125.238.77 운영 앱 정지)
 
