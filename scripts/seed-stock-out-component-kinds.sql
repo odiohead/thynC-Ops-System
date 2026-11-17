@@ -1,6 +1,8 @@
 -- 출고요청 시스템 구성품 — 대웅제약재고 복제 + 구성품 종류 등록 (2026-11-12, 멱등)
 --   psql -U thync -d thync_ops_dev -f scripts/seed-stock-out-component-kinds.sql
 -- 전제: 마이그 20261112150000_stock_out_component_kinds 적용.
+-- 2026-11-17 이후: 서버 품목 병상별 분리(scripts/migrate-system-units-to-servers.sql)로 구성 설정의 구성품이 전부 대웅제약재고 품목이 됐다 —
+--   이 시드를 다시 실행해도 복제할 원본이 없어 아무 일도 하지 않는다(편입 대상 원본 1개에 종류 여러 개가 걸릴 수 있음: source_item_id UNIQUE 해제).
 -- 하는 일 (현재 '구성' 설정 stock_out_item_components 기준 — 특정 품목명을 고정하지 않는다):
 --   1) 구성품으로 쓰이는 품목 중 대웅제약재고 소속이 아닌 것(= thynC운영팀재고 원본)을 **대웅제약재고에 품목 정보 그대로 복제**(새 품목코드, 재고 0)
 --   2) stock_out_component_kinds 에 (복제 품목, 원본 품목) 등록 — 원본은 출고 처리에서 미출고분이 편입되는 품목

@@ -28,6 +28,7 @@ import { registerDevicesIn, findUnitsBySerial } from '@/lib/deviceRegistry'
 import { normalizeSerial } from '@/lib/deviceRegistryShared'
 import { syncStockOutToTicket } from '@/lib/ticket-domains/stockOut'
 import { outMetaForInventory, stockOutTitle, type FulfillLineMode } from '@/lib/stockOutShared'
+import { resolveStockOutComponents } from '@/lib/stockOut'
 import { resolveAsLinesIn, AsServiceError } from '@/lib/asReceiptService' // 분실 AS 연동 — 출고 실행 시 라인 교체 확정 (2026-11-10)
 import { asDeviceGroupOf, appendAsNote, isValidAsSerial, AS_SERIAL_RULE_TEXT, type AsDeviceGroup } from '@/lib/asReceiptShared'
 
@@ -658,6 +659,14 @@ async function prepareFulfillment(requestId: number, input: FulfillInput): Promi
     const directIds = new Set(loaded.items.map((l) => l.inventoryItemId))
     for (const c of loaded.components) {
       if (directIds.has(c.itemId)) preview.errors.push(`'${c.item.name}'이(가) 요청 품목과 시스템 구성품에 함께 들어 있습니다. 요청 품목에서 빼고 다시 저장하세요.`)
+    }
+    // 구성품 기록이 없는 요청(2026-11-12 개편 전 등록분 등) — 시스템이 수량 품목이라 구성품 없이 처리하면 서버 시리얼을 받지 못하고
+    // 구성품 재고도 빠지지 않는다. 조용히 넘어가지 않도록 막는다 (2026-11-17, system_server_split_design.md §11)
+    if (loaded.components.length === 0) {
+      const expected = await resolveStockOutComponents(loaded.items.map((l) => ({ inventoryItemId: l.inventoryItemId, quantity: l.quantity })), undefined, [])
+      if (expected.length > 0) {
+        preview.errors.push('이 요청에는 시스템 구성품(서버 등)이 계산돼 있지 않아 출고 처리할 수 없습니다. 요청을 [수정]에서 그대로 저장하면 구성품이 채워집니다.')
+      }
     }
     const h = await previewHolds(loaded, input, preview.errors)
     preview.holds = h.holds

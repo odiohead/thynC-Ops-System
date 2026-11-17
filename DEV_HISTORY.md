@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-11-17 12:40 | 시스템 품목 수량 관리 전환 + 서버 품목 병상별 분리 (설계 `projects/system_server_split_design.md`, dev2 마이그·데이터 이관·빌드 — PROD 미반영)
+
+- **요청**: thynC시스템 XX는 논리 품목이므로 시리얼 관리 해제 · 서버(워크스테이션)을 서버(10·20·30·40병상)으로 재정의 · 시스템 품목에 등록된 개체를 서버(XX병상)으로 이관 · 앞으로 시스템은 수량만. 11-11 재고실사 때 서버 본체 시리얼(Dell·Lenovo) 117개가 시스템 품목의 개체로 등록돼 있었음
+- **사용자 결정**: D1 thynC운영팀재고 서버(워크스테이션)(ITEM-0069)은 1종 그대로 — 대웅 4종이 모두 이 품목으로 편입 · D2 시스템 수량은 그대로(이관 직후 시스템 수량 = 서버 수량) · D3 신규 서버 품목 모델명 = 품목명. 설계안 검토 후 착수·dev2 빌드 승인
+- **DB** `20261117100000_stock_out_kind_source_non_unique`(dev2 적용·resolve, **PROD 미적용**): `stock_out_component_kinds.source_item_id` UNIQUE → 일반 인덱스. 스키마 `sourceItemId` `@unique` 제거·역방향 관계 목록화. **앱 코드 변경은 이것뿐** — 출고요청·출고 처리 엔진은 품목의 관리 방식(시리얼/수량)을 보고 동작해 데이터만 바꾸면 맞는다(시스템 라인 = 수량 모드, 서버 구성품 = 시리얼, 미출고분 편입은 구성품별로 따로 계획)
+- **데이터 이관** `scripts/migrate-system-units-to-servers.sql`(신규, 1회성 — 전제·사후 검증 DO 블록, `-v finish=ROLLBACK|COMMIT`, 재실행 시 전제에서 멈춤): ① ITEM-0076 서버(워크스테이션) → 서버(10병상) 개명, 서버(20·30·40병상) 신규(ITEM-0082~0084) ② 구성품 종류 7 → 10종(편입 대상 = ITEM-0069), 표시 순서 서버 병상순 먼저 ③ 구성 설정: 시스템 XX → 서버(XX병상) 1 ④ 서버 품목에 원 전표와 같은 일자·위치·수량의 입고 전표 9건 신설 + 시리얼 연결 이동(시스템 쪽 원 전표는 수량 전표로 남기고 비고에 표기) ⑤ 개체 117대 `item_id` 변경(시리얼·창고·등록일 불변) + 서버 재고 행 ⑥ 시스템 6종 시리얼 해제 ⑦ 서버(워크스테이션)이 구성품으로 잡힌 출고요청을 요청의 시스템 병상에 맞는 서버로 교체 ⑧ 감사 로그 10행 ⑨ 백업 `_bak_sys_split_*_20261117` 8개
+- **dev2 적용 결과**: 이관 18·12·13·23·16·35 = 117대, 입고 전표 STK-202611-0188~0196, 대기 요청 SOR-202611-0011 구성품 → 서버(30병상)(dev2는 대상 1건, PROD는 SOR-202611-0006·0011 2건)
+- **검증**: tsc · `scripts/system-server-split-smoke.mts`(신규, DEV 전용) 34/34 — 구조(시스템 수량 = 서버 수량 = 개체, 구성, 편입 대상) + 시스템10 ×1·시스템20 ×2 요청(서버 10병상 전량 미출고·20병상 1대 미출고) 실행 후 시스템·서버 수량 동반 감소, 미출고 2대가 같은 서버(워크스테이션)으로 편입, 시스템 출고 전표는 수량만 · `scripts/stock-out-components-smoke.mts` 43/43 · dev2 빌드 · Playwright 실제 화면 29/29(구성 표 6×10, 자재 현황 수량·S/N 표시, 서버(10병상) 상세 개체 18대·이관 전표 비고, 요청 상세·출고 처리 카드)
+- **기존 스모크 보정**: `stock-out-components-smoke.mts`의 '수량 미출고분 재고 부족' 검사는 대웅제약재고 구성품 재고가 0이라는 전제였는데 11-13 실재고 입고(데스크탑 160 등) 뒤로는 부족해지지 않아 실패(42/43) → 기존 재고가 있으면 ok를 기대하도록 수정
+- **설계 정정**: 설계안에 "출고 처리 카드의 시스템 라인 메모 칸을 숨긴다"고 적었으나, 코드 확인 결과 그 메모 칸은 구성품 출고분 라인에만 있어 화면 변경 불필요(문서 §4 정정)
+- **보완(같은 날, 사용자 dev2 확인에서 발견)**: 시스템100 1개 요청의 출고 처리에 서버(100병상) 시리얼 입력란이 없음 — 구성품 행은 요청 저장 때 만들어지는데 11-12 개편 전 등록 후 다시 저장하지 않은 요청에는 행이 없고, 시스템이 수량 품목이 되자 서버 시리얼을 받을 칸이 사라짐(이관 설계에서 '구성품이 아예 없는 요청'을 빠뜨림). dev2 5건(SOR-202611-0001·0006·0010·0012·0014), PROD는 같은 조건 0건. ① `scripts/backfill-stock-out-request-components.sql`(신규, 멱등) — 미처리 요청에 현재 구성 설정으로 구성품 행 채움(dev2 5건·24행 적용) ② `lib/stockOutFulfill.ts` 가드 — 구성품 행 0건인데 설정상 구성품이 있어야 하는 요청은 출고 처리 불가(전역 오류 + [수정] 재저장 안내). 스모크에 가드 검사 추가(35/35)
+- **운영 유의**: 출고요청 처리로는 시스템·서버 수량이 계속 일치. **입고는 시스템 수량·서버 시리얼을 각각** 해야 일치(자동 연동 없음). 구성 표는 열 10개라 좁은 화면에서 마지막 열들이 가로 스크롤
+- 영향 파일: prisma/schema.prisma, prisma/migrations/20261117100000_stock_out_kind_source_non_unique, scripts/migrate-system-units-to-servers.sql(신규), scripts/backfill-stock-out-request-components.sql(신규), lib/stockOutFulfill.ts, scripts/system-server-split-smoke.mts(신규), scripts/stock-out-components-smoke.mts, scripts/seed-stock-out-component-kinds.sql(주석), projects/system_server_split_design.md(신규), projects/README.md, README.md
+- **PROD 반영 시**: ① 마이그 SQL psql 적용·resolve → `npx prisma generate` → 힙 4GB 빌드·재시작(패키지·협업 번들 변경 없음) ② `migrate-system-units-to-servers.sql` dry-run → 결과 확인 → 적용(**PROD DB 쓰기 — 명시 허락 필요**). ③ `backfill-stock-out-request-components.sql` 실행(대상 0건이어도 확인). 배포와 이관 사이에 시스템 품목 출고가 처리되면 전제 검사에서 멈춘다. 커밋·PROD 반영 없음
+
 ## 2026-11-17 11:45 | DB 백업 S3 보관 스크립트 (dev2 검증 → PROD 적용 완료)
 
 - **배경**: 서버 증설 검토 중 확인 — PROD 일일 백업이 DB와 같은 디스크(`~/backups/db`, 7일)에만 있고 서버 밖 사본·실패 알림이 없음. DB 분리(RDS)는 아직 불필요, 백업의 S3 사본부터 두기로. 사용자 결정: 기존 버킷 `seers-thync-ops`에 디렉토리 추가

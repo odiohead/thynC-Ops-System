@@ -1190,7 +1190,7 @@ model InventoryItem {
   stockOutComponents StockOutItemComponent[] @relation("StockOutComponentParent") // 출고요청 구성 안내 — 이 품목 1개에 포함되는 부자재
   stockOutUsedIn     StockOutItemComponent[] @relation("StockOutComponentChild")  // 출고요청 구성 안내 — 이 품목이 부자재로 포함되는 주 품목
   stockOutKind              StockOutComponentKind?     @relation("StockOutKindItem")   // 시스템 구성품 종류(대웅제약재고 복제 품목) (2026-11-12)
-  stockOutKindSourceOf      StockOutComponentKind?     @relation("StockOutKindSource") // 이 품목(thynC운영팀재고 원본)을 복제한 구성품 종류
+  stockOutKindSourceOf      StockOutComponentKind[]    @relation("StockOutKindSource") // 이 품목(thynC운영팀재고 원본)을 복제한 구성품 종류
   stockOutRequestComponents StockOutRequestComponent[] @relation("StockOutRequestComponentItem") // 출고요청 단위 구성품 (2026-11-12)
 
   @@index([categoryId])
@@ -2345,13 +2345,14 @@ model StockOutItemComponent {
 /// 시스템 구성품 종류 (2026-11-12) — 고정 목록. item = 대웅제약재고에 복제한 구성품 품목(출고분 재고 차감), source = thynC운영팀재고 원본(출고 처리에서 미출고분이 편입되는 품목). 등록은 scripts/seed-stock-out-component-kinds.sql
 model StockOutComponentKind {
   itemId       Int      @id @map("item_id")
-  sourceItemId Int      @unique @map("source_item_id")
+  sourceItemId Int      @map("source_item_id") // 원본 1개에 종류 여러 개 가능 (2026-11-17 — 서버 10·20·30·40병상 → 서버(워크스테이션))
   sortOrder    Int      @default(0) @map("sort_order")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   item   InventoryItem @relation("StockOutKindItem", fields: [itemId], references: [id], onDelete: Cascade)
   source InventoryItem @relation("StockOutKindSource", fields: [sourceItemId], references: [id])
 
+  @@index([sourceItemId])
   @@map("stock_out_component_kinds")
   @@schema("public")
 }

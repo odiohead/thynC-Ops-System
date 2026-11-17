@@ -105,8 +105,11 @@ async function main() {
     check('편입 대상 = 원본 품목의 인벤토리 + 창고 기본 선택', pv.holdTarget?.inventoryName === kSerial.source.inventory.name && !!pv.holdTarget?.warehouseId && pv.holdTarget.warehouses.length > 0, JSON.stringify(pv.holdTarget))
     check('시리얼 미출고분은 입력 대기', pv.holds.find((h) => h.itemId === kSerial.itemId)?.status === 'pending')
     check('수량 미출고분(전량) 재고 충분 → ok', pv.holds.find((h) => h.itemId === kAllHold.itemId)?.status === 'ok')
-    check('수량 미출고분 재고 부족(출고+미출고) → error', pv.holds.find((h) => h.itemId === kPartHold.itemId)?.status === 'error', pv.holds.find((h) => h.itemId === kPartHold.itemId)?.messages.join(' / '))
-    check('실행 불가(ok=false)', pv.ok === false)
+    // 대웅제약재고에 실재고가 이미 있으면 '1개 모자라게' 입고해도 부족해지지 않는다 — 그때는 ok가 맞다 (2026-11-17, 11-13 실재고 입고 이후)
+    const partStock0 = stock0.get(kPartHold.itemId) ?? 0
+    check(partStock0 > 0 ? `수량 미출고분 — 기존 재고 ${partStock0}개가 있어 부족 아님 → ok` : '수량 미출고분 재고 부족(출고+미출고) → error',
+      pv.holds.find((h) => h.itemId === kPartHold.itemId)?.status === (partStock0 > 0 ? 'ok' : 'error'), pv.holds.find((h) => h.itemId === kPartHold.itemId)?.messages.join(' / '))
+    check('실행 불가(ok=false) — 시리얼 입력 대기', pv.ok === false)
     await inTx(kPartHold.itemId, 1) // 부족분 채움
 
     const ss = compSerials.get(kSerial.itemId)!
