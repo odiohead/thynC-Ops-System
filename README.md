@@ -53,6 +53,13 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 | DEV  | https://dev.ops.seersthync.com | 3001 | `thync-dev`  |
 | PROD | https://ops.seersthync.com     | 3000 | `thync-prod` |
 
+### DB 백업 (2026-11-17)
+
+- **일일 덤프**: PROD 서버 cron(`0 1 * * *` — 서버 시각 UTC = **10:00 KST**) `/home/ubuntu/scripts/backup-prod-db.sh` → `~/backups/db/thync_ops_YYYYMMDD_HHMMSS.dump`(pg_dump custom, 서버에는 7일 보관)
+- **S3 사본** `scripts/backup-db-to-s3.mts`(덤프 성공 직후 셸에서 호출): 덤프를 끝까지 읽어 검증(잘린 파일 차단) → `s3://$S3_BUCKET_NAME/db-backups/daily/` 업로드 → 크기 대조 → 그 달 첫 백업을 `db-backups/monthly/thync_ops_YYYYMM.dump`로 복사 → 보관 기간 정리(**일일 30일 · 월 12개월**, 최신 일일 7개는 항상 유지, 이름 규칙에 맞는 키만 삭제). 실패 시 종료 코드 1 + Slack 알림(`.env` `BACKUP_ALERT_SLACK_CHANNEL` — 채널 ID·사용자 ID 또는 이메일(DM), 앱과 같은 Slack 모드 규칙 — cron에서는 `NODE_ENV=production`)
+- **복원**: `npx tsx scripts/backup-db-to-s3.mts --list` → `--download <키> <저장 경로>` → `pg_restore --no-owner --no-acl -d <DB> <파일>`
+- `.env`(비밀키)와 S3 첨부 파일은 이 백업 대상이 아님
+
 ---
 
 ## 디렉토리 구조
