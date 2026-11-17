@@ -6,20 +6,24 @@
  *
  * 키 구조: <prefix>/daily/thync_ops_YYYYMMDD_HHMMSS.dump   — 매일 1개, DAILY_KEEP_DAYS(30)일 보관
  *          <prefix>/monthly/thync_ops_YYYYMM.dump          — 그 달 첫 백업의 사본, MONTHLY_KEEP_MONTHS(12)개월 보관
+ *          <prefix>/env/env_YYYYMMDD_HHMMSS                 — 레포 루트 .env **평문** 사본(2026-11-17 사용자 결정 — 암호화 권고했으나 임시로 평문).
+ *                                                             내용이 직전 사본과 다를 때만 올리고 최신 ENV_KEEP(10)개 보관.
+ *                                                             ⚠ 같은 버킷·키를 쓰는 환경(dev2 등)에서 PROD 비밀키를 읽을 수 있다 — 제대로 된 비밀 관리 도구로 옮기면 이 단계 제거
  *
  * 사용 (서버의 백업 셸 스크립트가 pg_dump 성공 직후 호출 — cwd 무관, .env는 이 파일 기준 레포 루트에서 읽음):
  *   npx tsx scripts/backup-db-to-s3.mts <덤프 파일>          업로드 → 크기 대조 → 월 사본 → 보관 기간 지난 것 정리
  *   npx tsx scripts/backup-db-to-s3.mts --list               S3에 있는 백업 목록
  *   npx tsx scripts/backup-db-to-s3.mts --download <키> <저장 경로>   복원용 내려받기 (크기 대조)
  *   npx tsx scripts/backup-db-to-s3.mts --alert "<메시지>"   실패 알림만 발송 (pg_dump 자체가 실패했을 때 셸에서 호출)
- * 옵션: --prefix=<접두>(기본 env DB_BACKUP_S3_PREFIX 또는 db-backups) · --no-prune(정리 생략)
+ * 옵션: --prefix=<접두>(기본 env DB_BACKUP_S3_PREFIX 또는 db-backups) · --no-prune(정리 생략) · --no-env(.env 사본 생략) · --env-source=<경로>(기본 레포 루트 .env — Node 자체 옵션 --env-file과 겹치지 않게 다른 이름)
  *
  * 실패 시: 종료 코드 1 + Slack 알림(env BACKUP_ALERT_SLACK_CHANNEL — 채널 ID·사용자 ID 또는 이메일(그 사용자에게 DM). 미설정이면 로그만).
  *          Slack 모드(off/test/live)는 앱과 같은 규칙(lib/slack) — 운영 서버 cron에서는 NODE_ENV=production 으로 실행해야 live가 유지된다.
  * 정리 안전장치: 이름이 규칙에 맞는 키만 지우고, 일일 백업은 날짜와 무관하게 최신 7개는 항상 남긴다. 업로드·대조가 실패한 실행에서는 정리하지 않는다.
  */
 import dotenv from 'dotenv'
-import { createReadStream, createWriteStream, existsSync, statSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, readFileSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { pipeline } from 'node:stream/promises'
 import { hostname } from 'node:os'
@@ -35,9 +39,11 @@ dotenv.config({ path: [path.join(ROOT, '.env.local'), path.join(ROOT, '.env')], 
 const DAILY_KEEP_DAYS = Number(process.env.DB_BACKUP_DAILY_KEEP_DAYS ?? 30)
 const MONTHLY_KEEP_MONTHS = Number(process.env.DB_BACKUP_MONTHLY_KEEP_MONTHS ?? 12)
 const DAILY_KEEP_MIN = 7 // 날짜와 무관하게 항상 남기는 최신 일일 백업 수
+const ENV_KEEP = 10 // .env 사본 보관 개수(내용이 바뀔 때만 1개씩 늘어난다)
 const MIN_DUMP_BYTES = 1024 * 1024 // 이보다 작으면 깨진 덤프로 본다
 const DAILY_RE = /\/daily\/thync_ops_(\d{8})_\d{6}\.dump$/
 const MONTHLY_RE = /\/monthly\/thync_ops_(\d{6})\.dump$/
+const ENV_RE = /\/env\/env_\d{8}_\d{6}$/
 
 const args = process.argv.slice(2)
 const flag = (name: string) => args.includes(name)
@@ -127,7 +133,30 @@ async function upload(file: string) {
     log(`월 사본 생성 s3://${BUCKET}/${monthlyKey}`)
   }
 
+  if (!flag('--no-env')) await backupEnv(s3, base.slice('thync_ops_'.length, -'.dump'.length))
   if (!flag('--no-prune')) await prune(s3)
+}
+
+/** .env 평문 사본 — 직전 사본과 내용(sha256)이 같으면 생략, 다르면 새 키로 올리고 최신 ENV_KEEP개만 남긴다 */
+async function backupEnv(s3: S3Client, stamp: string) {
+  const file = opt('--env-source') ?? path.join(ROOT, '.env')
+  if (!existsSync(file)) throw new Error(`.env 파일 없음: ${file}`)
+  const body = readFileSync(file)
+  if (!body.length) throw new Error(`.env 파일이 비어 있습니다: ${file}`)
+  const sha = createHash('sha256').update(body).digest('hex')
+  const existing = (await listAll(s3, `${PREFIX}/env/`)).filter((o) => ENV_RE.test(o.key))
+  const latest = existing.at(-1)
+  if (latest) {
+    const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: latest.key }))
+    if (head.Metadata?.sha256 === sha) { log(`.env 변경 없음 — 사본 유지 (${latest.key})`); return }
+  }
+  const key = `${PREFIX}/env/env_${stamp}`
+  await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body, ContentType: 'text/plain; charset=utf-8', ServerSideEncryption: 'AES256', Metadata: { sha256: sha } }))
+  const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }))
+  if (head.ContentLength !== body.length) throw new Error(`.env 업로드 크기 불일치: 원본 ${body.length} · S3 ${head.ContentLength}`)
+  const old = Array.from(new Set([...existing.map((o) => o.key), key])).sort().slice(0, -ENV_KEEP)
+  if (old.length) await s3.send(new DeleteObjectsCommand({ Bucket: BUCKET, Delete: { Objects: old.map((Key) => ({ Key })) } }))
+  log(`.env 사본 업로드 s3://${BUCKET}/${key} (${body.length}바이트${old.length ? ` · 옛 사본 ${old.length}개 삭제` : ''})`)
 }
 
 async function prune(s3: S3Client) {
