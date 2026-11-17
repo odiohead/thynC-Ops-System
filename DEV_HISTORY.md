@@ -4,7 +4,7 @@
 
 ---
 
-## 2026-11-17 11:45 | DB 백업 S3 보관 스크립트 (dev2 검증, PROD 미적용)
+## 2026-11-17 11:45 | DB 백업 S3 보관 스크립트 (dev2 검증 → PROD 적용 완료)
 
 - **배경**: 서버 증설 검토 중 확인 — PROD 일일 백업이 DB와 같은 디스크(`~/backups/db`, 7일)에만 있고 서버 밖 사본·실패 알림이 없음. DB 분리(RDS)는 아직 불필요, 백업의 S3 사본부터 두기로. 사용자 결정: 기존 버킷 `seers-thync-ops`에 디렉토리 추가
 - **구현** `scripts/backup-db-to-s3.mts`(앱의 S3 SDK·키 재사용, 서버 추가 설치 없음): 덤프 검증(전체를 읽어 잘린 파일 차단·테이블 데이터 수) → `db-backups/daily/` 업로드(SSE AES256) → 크기 대조 → 그 달 첫 백업을 `db-backups/monthly/`로 복사 → 보관 정리(일일 30일·월 12개월, 최신 일일 7개 항상 유지, 이름 규칙에 맞는 키만). 부가 모드 `--list` · `--download <키> <경로>` · `--alert "<메시지>"`(pg_dump 자체 실패 시 셸에서 호출). 실패 시 종료 코드 1 + Slack 알림(`BACKUP_ALERT_SLACK_CHANNEL`, 미설정이면 로그만). `.env`는 스크립트 위치 기준 레포 루트에서 읽어 cron cwd 무관
@@ -15,7 +15,8 @@
 - **알림 대상**: 사용자 지정 — `joon.lee@seers.co.kr` DM. `BACKUP_ALERT_SLACK_CHANNEL`에 이메일을 넣으면 Slack 사용자로 조회해 DM(조회 확인됨)
 - **미결**: 백업 시각이 문서의 '01:00 KST'가 아니라 **10:00 KST**(서버 UTC 01:00, 업무 시간)임 — 변경 여부
 - 영향 파일: scripts/backup-db-to-s3.mts(신규), README.md
-- 스키마·패키지·API 변경 없음. 커밋·PROD 반영 없음
+- 스키마·패키지·API 변경 없음
+- → **PROD 적용 2026-11-17 11:50 (f0c1c7a)** — 사용자 지시 "슬랙은 joon.lee@seers.co.kr로, PROD 반영해". 이 건만 커밋. pull(빌드·재시작 없음) → `.env`에 `BACKUP_ALERT_SLACK_CHANNEL=joon.lee@seers.co.kr` 추가 → 서버 스크립트 `/home/ubuntu/scripts/backup-prod-db.sh` 수정(원본 `.bak_20261117` 보존): `APP_DIR` 변수, pg_dump 실패 시 `--alert`, 성공 뒤 S3 보관 호출(`NODE_ENV=production`, 실패해도 서버 내 백업·7일 정리는 그대로 진행). **cron과 같은 환경(env -i)으로 1회 실행**: 덤프 14초 → 업로드 56.2MB·테이블 165 → 월 사본 `monthly/thync_ops_202611.dump` → 정리 0, 전체 19초, `db-backups/` 2개 확인. 실패 알림 경로는 '[테스트]' 표기 DM 1건으로 확인(live). cron 시각은 그대로(UTC 01:00 = 10:00 KST) — 다음 정기 실행 11-18부터 자동 보관
 
 ## 2026-11-16 13:25 | VOC — 하위 티켓(AS) 종결 후 '회신완료' 재판정 (dev2 빌드 → PROD 배포 완료)
 
