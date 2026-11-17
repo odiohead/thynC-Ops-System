@@ -4,7 +4,7 @@
 
 ---
 
-## 2026-11-17 12:40 | 시스템 품목 수량 관리 전환 + 서버 품목 병상별 분리 (설계 `projects/system_server_split_design.md`, dev2 마이그·데이터 이관·빌드 → PROD DB·데이터 반영 완료, PROD 빌드는 보류)
+## 2026-11-17 12:40 | 시스템 품목 수량 관리 전환 + 서버 품목 병상별 분리 (설계 `projects/system_server_split_design.md`, dev2 마이그·데이터 이관·빌드 → PROD 반영 완료)
 
 - **요청**: thynC시스템 XX는 논리 품목이므로 시리얼 관리 해제 · 서버(워크스테이션)을 서버(10·20·30·40병상)으로 재정의 · 시스템 품목에 등록된 개체를 서버(XX병상)으로 이관 · 앞으로 시스템은 수량만. 11-11 재고실사 때 서버 본체 시리얼(Dell·Lenovo) 117개가 시스템 품목의 개체로 등록돼 있었음
 - **사용자 결정**: D1 thynC운영팀재고 서버(워크스테이션)(ITEM-0069)은 1종 그대로 — 대웅 4종이 모두 이 품목으로 편입 · D2 시스템 수량은 그대로(이관 직후 시스템 수량 = 서버 수량) · D3 신규 서버 품목 모델명 = 품목명. 설계안 검토 후 착수·dev2 빌드 승인
@@ -19,7 +19,8 @@
 - 영향 파일: prisma/schema.prisma, prisma/migrations/20261117100000_stock_out_kind_source_non_unique, scripts/migrate-system-units-to-servers.sql(신규), scripts/backfill-stock-out-request-components.sql(신규), lib/stockOutFulfill.ts, scripts/system-server-split-smoke.mts(신규), scripts/stock-out-components-smoke.mts, scripts/seed-stock-out-component-kinds.sql(주석), projects/system_server_split_design.md(신규), projects/README.md, README.md
 - **PROD 반영 시**: ① 마이그 SQL psql 적용·resolve → `npx prisma generate` → 힙 4GB 빌드·재시작(패키지·협업 번들 변경 없음) ② `migrate-system-units-to-servers.sql` dry-run → 결과 확인 → 적용(**PROD DB 쓰기 — 명시 허락 필요**). ③ `backfill-stock-out-request-components.sql` 실행(대상 0건이어도 확인). 배포와 이관 사이에 시스템 품목 출고가 처리되면 전제 검사에서 멈춘다.
 - → **PROD 반영 2026-11-17 13:28 (eabcd8f) — DB·데이터만, 빌드 없음**: dev2 커밋(이번 건만 골라 스테이징 — 작업 트리의 심평원 요양기호 대응·회원가입 변경은 미포함) → push → PROD pull(6a3071f → eabcd8f, **소스만**) → 마이그 `20261117100000_stock_out_kind_source_non_unique` psql 적용·resolve → `migrate-system-units-to-servers.sql` dry-run(dev2·설계 값과 일치) → 적용: 개체 117대(18·12·13·23·16·35), 서버 입고 전표 STK-202611-0223~0231, 신규 품목 ITEM-0082~0084, 구성품 종류 10종, 대기 요청 SOR-202611-0006 → 서버(20병상)·SOR-202611-0011 → 서버(30병상), 감사 로그 32375~32384, 백업 `_bak_sys_split_*_20261117` 8개 → `backfill-stock-out-request-components.sql` 대상 0건 → 별도 조회로 6쌍 수량 = 개체 일치 확인, 읽기 전용 미리보기(SOR-202611-0014·0006·0011): 시스템 수량 모드 ok·서버 시리얼 구성품 라인, /login 200
-- **⚠ PROD 빌드 보류**: PROD 서버에서 구글 폰트 주소가 확장자 없이 내려와(`fonts.gstatic.com/l/font?kit=…` — 배포 직전 curl로 확인, 13:10 항목과 같은 원인) `next build`가 실패하는 상태라 빌드·재시작을 하지 않음. 지금 도는 빌드(79e3324 계열)는 바뀐 데이터로 정상 동작한다 — 출고 엔진이 품목 관리 방식을 보고 동작하고, UNIQUE 해제는 쓰이지 않는 역방향 관계에만 영향. **빠진 것은 출고 처리 가드 1건**(구성품 행 없는 요청 차단 — PROD 대상 0건, 신규 요청은 저장 때 구성품이 생김). PROD 소스는 eabcd8f인데 빌드는 이전 것이므로 **다음 PROD 빌드 때 `npx prisma generate` 필수**(스키마 변경 포함). 새 서버(54.117.160.187)는 손대지 않음 — 전환 때 최종 덤프로 이 데이터가 넘어가고 코드는 pull·빌드 필요
+- → **PROD 빌드·재시작 2026-11-17 13:44 (66ccd85)**: `npx prisma generate` → 힙 4GB nohup 빌드 1회 성공(약 10분) → `pm2 restart thync-prod` → /login 200·`/api/health` buildCommit 66ccd85·미인증 307, 협업 번들 동일(재시작 생략). 출고 처리 가드 포함. 빌드 실패에 대비해 `.next`(캐시 제외)를 보관했다가 성공 후 삭제
+- **정정 — 빌드를 미뤘던 판단은 틀렸다**: 13:28에는 "PROD 서버가 구글 폰트 주소를 확장자 없이 받아 빌드가 실패하는 상태"라며 DB·데이터만 반영하고 빌드를 미뤘으나, 실제로 빌드해 보지 않고 curl 결과와 다른 작업의 기록만으로 단정한 것이었다. PROD는 `.next/cache/webpack`에 폰트 로더 결과가 남아 있어 로그인 화면의 폰트 설정이 바뀌지 않는 한 구글에 다시 요청하지 않는다(로더 캐시 가능, 캐시 버전은 next 버전·설정 키 기준이라 커밋이 바뀌어도 유지) — 사용자 지적 후 실제 빌드로 확인. **PROD의 `.next/cache`를 지우면 다음 빌드는 폰트를 다시 받아야 해서 실패할 수 있다**
 
 ## 2026-11-17 11:45 | DB 백업 S3 보관 스크립트 (dev2 검증 → PROD 적용 완료)
 
