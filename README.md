@@ -48,17 +48,25 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 
 ## 서버 환경
 
-| 환경 | URL | 포트 | PM2 프로세스명 |
-|------|-----|------|----------------|
-| DEV  | https://dev.ops.seersthync.com | 3001 | `thync-dev`  |
-| PROD | https://ops.seersthync.com     | 3000 | `thync-prod` |
+| 환경 | URL | 호스트 (AWS EC2, 서울) | 포트 | PM2 프로세스명 |
+|------|-----|------------------------|------|----------------|
+| DEV  | https://dev.ops.seersthync.com | 13.125.238.77 — t3.medium·30GB (구 PROD 호스트, 2026-11-18부터 DEV 전용) | 3001 | `thync-dev`  |
+| PROD | https://ops.seersthync.com     | **54.117.160.187** — t3.large(2 vCPU·8GB)·100GB·Ubuntu 24.04 (2026-11-18 이전) | 3000 · 협업 1234 | `thync-prod` · `thync-collab-prod` |
 
-### DB 백업 (2026-11-17)
+- **2026-11-18 운영 서버 이전**: 기존 인스턴스 사양 변경 대신 새 인스턴스에 전부 설치(Node 20·PostgreSQL 16·Nginx·PM2·certbot) → S3 백업으로 복원 리허설 → 최종 덤프 이전 → Route53 전환. PROD와 DEV는 이제 **서로 다른 호스트**이고 DB도 각자 로컬(`thync_ops` / `thync_ops_dev`). 접속은 두 서버 모두 같은 키(`joon-board-key.pem`)
+- 기존 서버에는 옛 `thynC-Ops-PROD` 디렉토리·`thync_ops` DB·정지된 운영 PM2 프로세스가 남아 있을 수 있다 — 운영이 아니며 켜면 안 된다(채널톡 이중 처리·Slack 이중 발송)
+- 파일 저장소(S3 `seers-thync-ops`)는 PROD·DEV·dev2가 **공유**한다
+- SSL: 새 서버 인증서는 기존 서버 것의 사본(ops + dev.ops 겸용, 2027-02-02 만료) — 서버별 재발급 필요(`certbot --nginx -d ops.seersthync.com` / 기존 서버는 `dev.ops`만)
 
-- **일일 덤프**: PROD 서버 cron(`0 1 * * *` — 서버 시각 UTC = **10:00 KST**) `/home/ubuntu/scripts/backup-prod-db.sh` → `~/backups/db/thync_ops_YYYYMMDD_HHMMSS.dump`(pg_dump custom, 서버에는 7일 보관)
-- **S3 사본** `scripts/backup-db-to-s3.mts`(덤프 성공 직후 셸에서 호출): 덤프를 끝까지 읽어 검증(잘린 파일 차단) → `s3://$S3_BUCKET_NAME/db-backups/daily/` 업로드 → 크기 대조 → 그 달 첫 백업을 `db-backups/monthly/thync_ops_YYYYMM.dump`로 복사 → 보관 기간 정리(**일일 30일 · 월 12개월**, 최신 일일 7개는 항상 유지, 이름 규칙에 맞는 키만 삭제). 실패 시 종료 코드 1 + Slack 알림(`.env` `BACKUP_ALERT_SLACK_CHANNEL` — 채널 ID·사용자 ID 또는 이메일(DM), 앱과 같은 Slack 모드 규칙 — cron에서는 `NODE_ENV=production`)
-- **복원**: `npx tsx scripts/backup-db-to-s3.mts --list` → `--download <키> <저장 경로>` → `pg_restore --no-owner --no-acl -d <DB> <파일>`
-- **`.env` 사본 (2026-11-17, 평문 — 사용자 결정)**: 같은 실행에서 레포 루트 `.env`를 `db-backups/env/env_YYYYMMDD_HHMMSS`로 올림. 직전 사본과 내용이 다를 때만 올리고 최신 10개 보관. **암호화하지 않음** — 같은 버킷·키를 쓰는 환경(dev2 포함)에서 PROD 비밀키가 읽힌다. 비밀 관리 도구로 옮기면 이 단계 제거(`--no-env`)
+### DB 백업 (2026-11-17 · 스크립트 저장소 이관·시각 변경 2026-11-18)
+
+- **대상·시각**: 운영 DB(`thync_ops`)를 **매일 22:00 KST**에 백업. 운영 서버(54.117.160.187) cron `0 13 * * * /home/ubuntu/thynC-Ops-System/thynC-Ops-PROD/scripts/backup-db.sh` (서버 시각 UTC — 13:00 UTC = 22:00 KST)
+- **`scripts/backup-db.sh`**(저장소 관리 — 구 `~/scripts/backup-prod-db.sh`는 폐기): 레포 `.env`의 `DATABASE_URL`로 `pg_dump`(custom) → `~/backups/db/<DB명>_YYYYMMDD_HHMMSS.dump`(파일명·로그 시각 KST, 서버에는 7일 보관) → 아래 S3 단계 호출. DB 비밀번호를 스크립트에 적지 않는다. 덤프 실패 시 Slack 알림
+- **환경 구분은 설정으로**: `.env`에 **`DB_BACKUP_S3_PREFIX`가 있는 환경만** 백업한다(운영 = `db-backups`). 없으면 셸은 덤프도 뜨지 않고, 업로드 스크립트도 올리지 않고 종료(코드 3) — DEV·dev2의 덤프가 운영 백업 폴더에 섞이지 않게 한다. DEV도 백업하려면 그 환경 `.env`에 **다른 접두**(예: `db-backups-dev`)를 적는다(보관 정리가 접두 단위)
+- **S3 사본** `scripts/backup-db-to-s3.mts`: 덤프를 끝까지 읽어 검증(잘린 파일 차단) → `s3://$S3_BUCKET_NAME/<접두>/daily/` 업로드 → 크기 대조 → 그 달 첫 백업을 `<접두>/monthly/<DB명>_YYYYMM.dump`로 복사 → 보관 기간 정리(**일일 30일 · 월 12개월**, 최신 일일 7개는 항상 유지, 이름 규칙에 맞는 키만 삭제). 실패 시 종료 코드 1 + Slack 알림(`.env` `BACKUP_ALERT_SLACK_CHANNEL` — 채널 ID·사용자 ID 또는 이메일(DM), 앱과 같은 Slack 모드 규칙 — 셸이 `NODE_ENV=production`으로 호출)
+- **복원**(어느 환경에서나 가능): `npx tsx scripts/backup-db-to-s3.mts --list` → `--download <키> <저장 경로>` → `pg_restore --no-owner --no-acl -d <DB> <파일>`
+- **`.env` 사본 (평문 — 사용자 결정)**: 같은 실행에서 레포 루트 `.env`를 `<접두>/env/env_YYYYMMDD_HHMMSS`로 올림. 직전 사본과 내용이 다를 때만 올리고 최신 10개 보관. **암호화하지 않음** — 같은 버킷·키를 쓰는 환경(DEV·dev2 포함)에서 PROD 비밀키가 읽힌다. 비밀 관리 도구로 옮기면 이 단계 제거(`--no-env`)
+- 새 서버를 만들 때 할 일은 `.env`에 `DB_BACKUP_S3_PREFIX`·`BACKUP_ALERT_SLACK_CHANNEL`을 넣고 위 cron 한 줄을 등록하는 것뿐
 - S3 첨부 파일은 이 백업 대상이 아님
 
 ---

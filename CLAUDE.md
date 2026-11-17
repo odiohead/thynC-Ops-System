@@ -26,14 +26,19 @@
 
 | 명칭 | 경로 | 호스트 | DB | PM2 |
 |---|---|---|---|---|
-| **prod** | `/home/ubuntu/thynC-Ops-System/thynC-Ops-PROD` | AWS EC2 (13.125.238.77) | `thync_ops` | `thync-prod` |
-| **dev** | `/home/ubuntu/thynC-Ops-System/...` (PROD와 같은 호스트) | AWS EC2 (13.125.238.77) | `thync_ops_dev` | `thync-dev` |
+| **prod** | `/home/ubuntu/thynC-Ops-System/thynC-Ops-PROD` | AWS EC2 **54.117.160.187** (t3.large·100GB, 2026-11-18 이전) | `thync_ops` | `thync-prod` · `thync-collab-prod` |
+| **dev** | `/home/ubuntu/thynC-Ops-System/thynC-Ops-DEV` | AWS EC2 **13.125.238.77** (구 PROD 호스트 — 2026-11-18부터 DEV 전용) | `thync_ops_dev` | `thync-dev` |
 | **dev2** | `/home/ubuntu/workspace/thynC-Ops-System` | 사용자 WSL2 (별도 PC) | `thync_ops_dev` (로컬) | `thync-dev` |
 
-작업 디렉토리(cwd)로 환경을 자동 식별:
-- `/home/ubuntu/thynC-Ops-System/thynC-Ops-PROD` → **prod**
-- `/home/ubuntu/thynC-Ops-System/...` (PROD 호스트의 dev) → **dev**
+작업 디렉토리(cwd)와 **호스트**로 환경을 식별:
+- 54.117.160.187 의 `/home/ubuntu/thynC-Ops-System/thynC-Ops-PROD` → **prod**
+- 13.125.238.77 의 `/home/ubuntu/thynC-Ops-System/thynC-Ops-DEV` → **dev**
 - `/home/ubuntu/workspace/thynC-Ops-System` → **dev2**
+
+> **⚠️ 2026-11-18 운영 서버 이전** — PROD는 새 인스턴스(54.117.160.187)로 옮겼고, 기존 인스턴스(13.125.238.77)는 DEV 전용이다. **PROD와 DEV는 이제 서로 다른 호스트**(DB도 각자 로컬).
+> - 접속: 두 서버 모두 `ssh -i ~/.ssh/joon-board-key.pem ubuntu@<IP>` (dev2 기준)
+> - 기존 서버(13.125.238.77)에는 **옛 `thynC-Ops-PROD` 디렉토리·`thync_ops` DB·정지된 `thync-prod`/`thync-collab-prod`가 남아 있을 수 있다 — 운영이 아니다.** 여기서 운영 앱을 켜면 채널톡 이중 처리·Slack 이중 발송이 난다. PROD 작업은 반드시 54.117.160.187에서
+> - 도메인: `ops.seersthync.com` → 54.117.160.187, `dev.ops.seersthync.com` → 13.125.238.77
 
 `dev`와 `dev2`는 같은 main 브랜치를 공유하므로, 작업 전 `git pull` 권장 (다른 환경에서 작업 중일 가능성).
 
@@ -105,7 +110,7 @@ PGPASSWORD=... psql -U thync -d thync_ops -c "ALTER TABLE ..."
 
 `.env` 수정만 예외. 소스 코드는 반드시 DEV → git push → PROD git pull 절차를 따르세요.
 ```bash
-# PROD 반영 절차
+# PROD 반영 절차 — PROD 호스트(54.117.160.187)에서. dev2에서는: ssh -i ~/.ssh/joon-board-key.pem ubuntu@54.117.160.187
 cd /home/ubuntu/thynC-Ops-System/thynC-Ops-PROD
 git pull origin main
 npm install                      # package.json 변경 시
@@ -165,14 +170,13 @@ const res = await fetch(`/api/wiki/pages?refType=hospital&refCode=${code}`)
 
 **환경별 동작 (cwd로 자동 분기)**
 
-#### dev에서 실행 시 (PROD와 같은 호스트)
-- `scripts/sync-prod-data-to-dev.sh` 실행
-- PROD/DEV 모두 localhost에 있어 별도 dump 전송 불필요
-- 스크립트가 스키마 diff 검사 → 다르면 abort
-- DEV 백업 자동 생성 (`/home/ubuntu/backups/db-sync/`)
+#### dev에서 실행 시 (13.125.238.77 — 2026-11-18부터 PROD와 다른 호스트)
+- **`scripts/sync-prod-data-to-dev.sh`를 그대로 쓰지 말 것** — PROD·DEV가 같은 호스트(localhost)에 있다는 전제의 스크립트라, 지금 돌리면 기존 서버에 남은 **옛 `thync_ops`(2026-11-18 08:08 시점에서 멈춘 사본)** 를 읽는다
+- 아래 dev2 절차와 같은 방식으로 진행: PROD(54.117.160.187)의 최신 덤프를 가져와(SCP 또는 S3 `db-backups/daily/` — `npx tsx scripts/backup-db-to-s3.mts --list`/`--download`) → DEV 백업 → TRUNCATE → data-only 적재 → DEV 전용 스케줄러 OFF
+- 스크립트를 원격 덤프 방식으로 고치는 것은 별도 작업
 
 #### dev2에서 실행 시 (별도 PC, WSL2)
-1. PROD `~/backups/db/` 중 **가장 최신** `thync_ops_*.dump` 자동 선택 (일일 01:00 KST 정기 백업)
+1. PROD(54.117.160.187) `~/backups/db/` 중 **가장 최신** `thync_ops_*.dump` 자동 선택 (정기 백업은 **매일 22:00 KST** — cron `0 13 * * *` UTC, `scripts/backup-db.sh`. 2026-11-18 이전 덤프는 10:00 KST·UTC 파일명. 같은 덤프가 S3 `db-backups/daily/`에도 있음)
 2. SCP로 `/home/ubuntu/backups/db-sync/`에 전송
 3. `pm2 stop thync-dev`
 4. 현재 DEV 백업: `dev_before_sync_<ts>.sql.gz`
@@ -313,6 +317,9 @@ if (user.role !== 'ADMIN') return 403
 ---
 
 ## 비상시 DB 복구 절차
+
+> 2026-11-18 이후 PROD(54.117.160.187) 복구의 기본 원천은 **S3 백업**이다 — `npx tsx scripts/backup-db-to-s3.mts --list` → `--download <키> <경로>` → `pg_restore --no-owner --no-acl -d thync_ops <파일>` (README '서버 환경 > DB 백업'). 설정 파일은 S3 `db-backups/env/`의 `.env` 사본. 아래 'DEV 덤프 복원'은 PROD·DEV가 같은 호스트이던 때의 절차라, 지금은 DEV 호스트(13.125.238.77)에서 덤프를 떠 옮겨야 한다.
+
 ```bash
 # 1. pg_hba.conf 임시 trust 설정
 sudo vi /etc/postgresql/*/main/pg_hba.conf
