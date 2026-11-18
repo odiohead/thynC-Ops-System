@@ -398,9 +398,6 @@ lib/
     ├── projectIssueNote.ts           # 프로젝트 이슈노트 — 루트 카테고리 보장·보호 판정 (refType 'project_issue')
     └── hospitalNote.ts               # 병원 노트 — 루트 카테고리 보장·보호 판정·페이지 조회 (refType 'hospital_note')
 
-prisma/
-├── schema.prisma                     # DB 스키마
-├── seed.ts                           # 기본 데이터 시드 (Organization, 상담유형, 문서유형 포함)
 usage-ingest/                         # thynC 사용량 수신부 (2026-11-18 — 본체와 별도 프로세스·별도 DB, 본체 코드를 가져다 쓰지 않음. projects/usage_collection_design.md)
 ├── index.mts                         # HTTP 서버 — 토큰 인증·빈도 제한·용량 안전장치·호출 3종(handshake/push/finish) + health
 ├── store.mts                         # 원본 DB 저장 SQL 전부 (고유 키 기준 덮어쓰기, 원본 행은 지우지 않음, 대조·상태 이력 달 조각 생성)
@@ -419,6 +416,9 @@ agents/thync-usage-agent/             # 병원 서버용 사용량 수집 Agent 
 
 scripts/usage-*.mts                   # 사용량 수집 운영 스크립트 — issue-token(발급·목록·폐기)·status(수신 현황)·rewind(수신 위치 되돌리기)·move-hospital(병원 코드 변경 반영)·collect-smoke(끝단 검증, dev2 전용)·lib(공용)
 
+prisma/
+├── schema.prisma                     # DB 스키마
+├── seed.ts                           # 기본 데이터 시드 (Organization, 상담유형, 문서유형 포함)
 ├── seed-admin.ts                     # 관리자 계정 생성
 └── seed-hira.ts                      # HIRA 병원 데이터 시드
 ```
@@ -1065,14 +1065,6 @@ scripts/usage-*.mts                   # 사용량 수집 운영 스크립트 —
 
 ---
 
-## 인증 및 역할 체계
-
-- 세션: JWT httpOnly 쿠키. 기본 7일, 로그인 시 '로그인 상태 유지 (1년)' 체크하면 365일 (`lib/auth.ts` `SESSION_TTL_SEC`, 2026-09-09 — 사이니지 상시 표시용)
-
-### 역할 (Role)
-
-| 역할 | 설명 |
-|------|------|
 ### 사용량 원본 DB — `thync_usage` / `thync_usage_dev` (2026-11-18, 본체와 **별도 DB**)
 
 병원 서버의 Agent가 보낸 원본 행을 그대로 쌓는 DB다. 본체 DB(`thync_ops`)와 다른 DB이고 Prisma 모델이 없다. 스키마는 `usage-ingest/migrations/*.sql`로 관리한다(`node usage-ingest/dist/migrate.mjs`). 본체 테이블을 참조하지 않으며, 본체에서는 `.env`의 `USAGE_DATABASE_URL`로 접속한다.
@@ -1093,6 +1085,14 @@ scripts/usage-*.mts                   # 사용량 수집 운영 스크립트 —
 
 ---
 
+## 인증 및 역할 체계
+
+- 세션: JWT httpOnly 쿠키. 기본 7일, 로그인 시 '로그인 상태 유지 (1년)' 체크하면 365일 (`lib/auth.ts` `SESSION_TTL_SEC`, 2026-09-09 — 사이니지 상시 표시용)
+
+### 역할 (Role)
+
+| 역할 | 설명 |
+|------|------|
 | `SUPER_ADMIN` | 전체 시스템 최고 관리자. 소속 관리, 타계정 수정 포함 모든 권한 |
 | `ADMIN` | 일반 관리자. 사용자 생성, 설정 관리 등 |
 | `USER` | 일반 사용자. 병원·프로젝트·답사 생성·수정 가능 |
@@ -1658,17 +1658,6 @@ scripts/usage-*.mts                   # 사용량 수집 운영 스크립트 —
 
 > 프로젝트 파일·답사 파일 업로드는 AWS S3로 전환되었습니다. Google Drive는 병원 목록 내보내기 등 Drive 전용 기능에 활용됩니다.
 
----
-
-## Google Drive 연동 설정
-
-Google Drive 연동을 사용하려면 아래 절차를 따릅니다.
-
-### 1. 서비스 계정 JSON 키 발급
-
-1. [Google Cloud Console](https://console.cloud.google.com/) → IAM 및 관리자 → 서비스 계정
-2. 서비스 계정 생성 후 **키 추가 → JSON** 다운로드
-3. Google Drive API 활성화 (API 및 서비스 → 라이브러리)
 ### thynC 사용량 수집 (2026-11-18 — 초기 버전: 수집·적재까지, `projects/usage_collection_design.md`)
 
 고객사 병원 서버의 thynC DB에서 사용량 판단에 필요한 **원본 행**을 가져와 쌓는다. 계산은 병원 서버가 아니라 시스템에서 한다(지표 계산·조회 화면은 다음 단계).
@@ -1681,6 +1670,17 @@ Google Drive 연동을 사용하려면 아래 절차를 따릅니다.
 - **용량 안전장치**: 원본 DB가 `USAGE_MAX_BYTES`를 넘으면 기기 상태 이력 수신만 멈춘다(병원 DB에 남아 있어 상한을 풀면 이어서 들어옴)
 - **검증**: `npx tsx scripts/usage-collect-smoke.mts` (dev2 전용 — 로컬 MySQL의 빈 제품 DB에 가상 데이터를 넣고 Agent → 수신부 → 원본 DB를 끝까지 돌림)
 
+---
+
+## Google Drive 연동 설정
+
+Google Drive 연동을 사용하려면 아래 절차를 따릅니다.
+
+### 1. 서비스 계정 JSON 키 발급
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → IAM 및 관리자 → 서비스 계정
+2. 서비스 계정 생성 후 **키 추가 → JSON** 다운로드
+3. Google Drive API 활성화 (API 및 서비스 → 라이브러리)
 4. 공유할 Drive 폴더에 서비스 계정 이메일을 **편집자**로 초대
 
 ### 2. JSON 키를 한 줄 문자열로 변환
@@ -2340,6 +2340,17 @@ npm run dev
 | GET  | `/api/wiki/hospital-notes?hospitalCode=` | 병원 노트 페이지 조회 (본문 포함, 없으면 null) |
 | POST | `/api/wiki/hospital-notes` | 병원 노트 생성(`{hospitalCode}`, 멱등) / **상담이력 append**(`{hospitalCode, appendMd, consultationType?}` — 마크다운→블록 변환 후 날짜·상담자 헤더와 함께 하단 추가, 버전 스냅샷) — USER+ |
 
+### 사용량 수신부 (본체와 별도 프로세스 — `usage-ingest/`, 2026-11-18)
+
+본체 앱(Next)의 라우트가 아니다. Nginx가 `/api/usage-ingest/`만 수신부 프로세스(127.0.0.1:3110)로 넘긴다. 인증은 로그인 쿠키가 아니라 병원 토큰(`Authorization: Bearer`)이고, 본문은 gzip 압축 JSON이다.
+
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET  | `/api/usage-ingest/health` | 상태 확인 — 버전, DB 접속, 상태 이력 수신 중지 여부 (인증 없음) |
+| POST | `/api/usage-ingest/v1/handshake` | 실행 시작 — 서버 이름·Agent 버전·DB 시각을 보내고, 실행 번호·측정 기준 시각·연도별 받은 번호·대조할 차례 여부를 받는다 (`dry_run`이면 아무것도 바꾸지 않음) |
+| POST | `/api/usage-ingest/v1/push` | 종류별 행 전송 — `organizations`·`wards`·`device_registers`·`measurements`(기기 포함)·`device_status`·`measurement_index`·`reconcile_measurements`·`status_check`. 요청당 5,000행 |
+| POST | `/api/usage-ingest/v1/finish` | 실행 결과 보고 — 성공이면 수신 기준 시각 전진, 전체 수신 종류의 사라진 행 표시 |
+
 ---
 
 ## 배포
@@ -2358,18 +2369,13 @@ cd /home/ubuntu/thynC-Ops-System/thynC-Ops-PROD
 git pull origin main
 npm run build
 pm2 restart thync-prod
-### 사용량 수신부 (본체와 별도 프로세스 — `usage-ingest/`, 2026-11-18)
-
-본체 앱(Next)의 라우트가 아니다. Nginx가 `/api/usage-ingest/`만 수신부 프로세스(127.0.0.1:3110)로 넘긴다. 인증은 로그인 쿠키가 아니라 병원 토큰(`Authorization: Bearer`)이고, 본문은 gzip 압축 JSON이다.
-
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| GET  | `/api/usage-ingest/health` | 상태 확인 — 버전, DB 접속, 상태 이력 수신 중지 여부 (인증 없음) |
-| POST | `/api/usage-ingest/v1/handshake` | 실행 시작 — 서버 이름·Agent 버전·DB 시각을 보내고, 실행 번호·측정 기준 시각·연도별 받은 번호·대조할 차례 여부를 받는다 (`dry_run`이면 아무것도 바꾸지 않음) |
-| POST | `/api/usage-ingest/v1/push` | 종류별 행 전송 — `organizations`·`wards`·`device_registers`·`measurements`(기기 포함)·`device_status`·`measurement_index`·`reconcile_measurements`·`status_check`. 요청당 5,000행 |
-| POST | `/api/usage-ingest/v1/finish` | 실행 결과 보고 — 성공이면 수신 기준 시각 전진, 전체 수신 종류의 사라진 행 표시 |
-
 ```
+
+> `npm run start`, `nohup`, `node` 등으로 직접 서버를 실행하지 마세요. 반드시 PM2를 사용합니다.
+
+### 사용량 수신부 반영 (`usage-ingest/`가 바뀐 배포에서만)
+
+수신부는 본체와 따로 빌드하고 따로 재시작한다. 본체 빌드(`npm run build`)에는 들어 있지 않다.
 
 ```bash
 npm run build:usage-ingest                 # 1초 안에 끝남
