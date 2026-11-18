@@ -19,6 +19,9 @@
 - **검증**: `scripts/usage-metrics-test.mts`(신규) — 순수 함수 16개 + dev2 검증용 데이터로 화면용 계산과 별도 SQL(창 함수) 계산 대조 일치 · tsc(전체 0)·eslint · dev 반영 후 실데이터 대조·실제 화면 확인은 아래 '→' 항목
 - **dev2에서 하지 않은 것**: dev 서버 원본 DB를 dev2로 복사하려던 것은 권한 분류기에 막혀 하지 않음(로컬 DB를 지우고 덮어쓰는 동작) — dev2는 가상 데이터로만 확인. dev2 본체 빌드·재시작도 하지 않음(작업 트리에 다른 건의 미커밋 변경이 섞여 있음)
 - 영향 파일: app/usage/{page,UsageClient}.tsx(신규), app/api/usage/{_shared.ts,hospitals,daily,status}(신규), lib/usage/{metrics,daily,db,access}.ts(신규), lib/permissions.ts(`usage.view`), app/components/NavIcons.tsx(`activity`), app/hospitals/[code]/_components/SystemStatusCard.tsx, scripts/usage-metrics-test.mts·seed-usage-nav.sql(신규), projects/usage_collection_design.md(§14), projects/README.md, README.md, CLAUDE.md(규칙 9)
+- → **dev 반영 2026-11-18 11:45 (ad48e69)** — dev 서버(13.125.238.77): dev에만 있던 미커밋 개발 이력 항목 2건(10:25 사용량 수집 dev 반영·09:50 dev 최신화)을 보존한 채 pull(e646bbc → ad48e69, 출고요청 유형 dde554b도 함께 내려옴) → 함께 내려온 마이그 `20261118100000_stock_out_fulfill_draft`를 dev DB에 적용·resolve → `prisma generate` → `seed-usage-nav.sql`(메뉴 '사용량' 등록) → 힙 4GB 빌드 1회 성공(약 8분, `/usage`·`/api/usage/*` 3종 포함) → `pm2 restart thync-dev` → /login 200, 미인증 `/usage`·`/api/usage/*` 307. 수신부는 건드리지 않음(코드 변경 없음)
+- → **dev 실데이터 대조**(동수원병원 HOSP-000038, `usage-metrics-test.mts`): 화면용 계산과 별도 SQL 계산이 30일·90일 모두 일치. 최근 30일 — 평균 측정 환자 수 13.0·최대 동시측정 최고 17(11-14)·오늘 12 / 심전계 등록 21대 동시 가동률 평균 55%·일 사용률 평균 62% / 산소포화도 등록 21대 39%·44% / 카트온 등록 0대. 계산 시간 0.7~0.9초(빌드와 동시 실행 중 측정)
+- → **실제 화면은 열어 보지 못함**: 로그인 상태의 화면을 헤드리스 브라우저로 확인하려고 dev 서버에서 관리자 로그인 토큰을 만들려던 것이 권한 분류기에 막힘. 화면 배치·차트 렌더링은 사용자 확인 필요(계산 값과 빌드·미인증 차단만 확인됨)
 - 스키마·패키지 변경 없음(원본 DB·본체 DB 모두). **PROD 반영 시**: 수신부·원본 DB가 PROD에 아직 없으므로 화면만 올라가면 '사용량 원본 DB가 설정되지 않았습니다' 안내가 뜬다 — 수신부를 PROD에 올린 뒤에 메뉴를 등록할 것
 
 ## 2026-11-18 11:04 | [PROD 적용 기록] 출고요청 유형·유형 기준 기기 등록·출고 처리 입력 내용 자동 저장 (dde554b)
