@@ -32,10 +32,11 @@ const DOW = ['일', '월', '화', '수', '목', '금', '토']
 
 /**
  * 일별 추이 필터 — 지표와 기기를 각각 켜고 끈다.
- * 건수 지표(측정 환자 수·최대 동시측정 수)는 병원 전체, 비율 지표(동시 가동률·일 사용률)는 켠 기기마다 한 줄씩 그린다.
+ * 건수 지표(측정 환자 수·신규 측정 수·최대 동시측정 수)는 병원 전체, 비율 지표(동시 가동률·일 사용률)는 켠 기기마다 한 줄씩 그린다.
  */
 const TREND_METRICS = [
   { key: 'measured', label: '측정 환자 수', unit: 'count' },
+  { key: 'started', label: '신규 측정 수', unit: 'count' },
   { key: 'peak', label: '최대 동시측정 수', unit: 'count' },
   { key: 'peakRate', label: '동시 가동률', unit: 'rate', dash: '6 3' },
   { key: 'useRate', label: '일 사용률', unit: 'rate', dash: '2 3' },
@@ -47,12 +48,12 @@ const RATE_METRICS = TREND_METRICS.filter((m): m is Extract<(typeof TREND_METRIC
 const TREND_PREF_KEY = 'usage.trend.filter'
 type TrendFilter = { metrics: Record<TrendMetric, boolean>; devices: Record<DeviceKey, boolean> }
 const DEFAULT_TREND: TrendFilter = {
-  metrics: { measured: true, peak: true, peakRate: true, useRate: false },
+  metrics: { measured: true, started: true, peak: true, peakRate: true, useRate: false },
   devices: { ecg: true, spo2: true, cart: true },
 }
 const rateKey = (device: DeviceKey, metric: RateMetric) => `${device}_${metric}`
 /** 일별 추이 한 줄 — 기기별 비율은 `${기기}_${지표}` 키 (수치가 없는 날은 null) */
-type TrendRow = { label: string; measured: number; peak: number; today: boolean; [rate: string]: string | number | boolean | null }
+type TrendRow = { label: string; measured: number; started: number; peak: number; today: boolean; [rate: string]: string | number | boolean | null }
 
 type Hospital = { hospitalCode: string; hospitalName: string; servers: number; lastSuccessAt: string | null }
 type Daily = UsageDaily & { hospitalName: string }
@@ -73,7 +74,7 @@ export default function UsageClient() {
   const params = useSearchParams()
   const chart = useChartTheme()
   const lineColor = chart.dark ? '#FB923C' : '#C2410C' // 흰 바탕에서도 구분되는 진한 주황
-  const countColor: Record<'measured' | 'peak', string> = { measured: chart.blue, peak: lineColor }
+  const countColor: Record<'measured' | 'started' | 'peak', string> = { measured: chart.blue, started: chart.dark ? '#67E8F9' : '#0891B2', peak: lineColor }
   const deviceColor: Record<DeviceKey, string> = {
     ecg: chart.dark ? '#34D399' : '#047857',
     spo2: chart.dark ? '#C4B5FD' : '#6D28D9',
@@ -202,7 +203,7 @@ export default function UsageClient() {
     if (!collecting) return []
     // 동시 가동률(%) = 그날 최대 동시사용 수 ÷ 계약·공급 수량, 일 사용률(%) = 그날 사용 횟수 ÷ 계약·공급 수량. 수량이나 수치가 없는 날은 비운다
     return data!.days.map((d, i) => {
-      const row: TrendRow = { label: md(d.date), measured: d.measured, peak: d.peak, today: d.today }
+      const row: TrendRow = { label: md(d.date), measured: d.measured, started: d.started, peak: d.peak, today: d.today }
       for (const slot of DEVICE_SLOTS) {
         const day = deviceByKey.get(slot.key)?.days[i]
         row[rateKey(slot.key, 'peakRate')] = !day || !day.capacity || day.peak === null ? null : (day.peak / day.capacity) * 100
@@ -222,7 +223,7 @@ export default function UsageClient() {
       dash: m.dash,
     })),
   )
-  const showCount = trendFilter.metrics.measured || trendFilter.metrics.peak
+  const showCount = trendFilter.metrics.measured || trendFilter.metrics.started || trendFilter.metrics.peak
   const showRate = rateLines.length > 0
   let rateMax = 100
   for (const r of trend)
@@ -338,6 +339,7 @@ export default function UsageClient() {
         {/* 요약 한 줄 */}
         <Card className="flex flex-wrap">
           <SummaryCell label="기간 평균 측정 환자 수" value={collecting ? fixed1(data!.summary.avgMeasured) : '—'} hint="오늘 제외" />
+          <SummaryCell label="기간 평균 신규 측정 수" value={collecting ? fixed1(data!.summary.avgStarted) : '—'} hint="오늘 제외" divided />
           <SummaryCell
             label="최대 동시측정 최고"
             value={collecting ? num(data!.summary.maxPeak) : '—'}
@@ -373,15 +375,15 @@ export default function UsageClient() {
                         disabled={!available}
                         onChange={() => toggleTrend('metrics', m.key)}
                         className="h-3.5 w-3.5"
-                        style={m.unit === 'count' ? { accentColor: countColor[m.key as 'measured' | 'peak'] } : undefined}
+                        style={m.unit === 'count' ? { accentColor: countColor[m.key as 'measured' | 'started' | 'peak'] } : undefined}
                       />
                       <span
                         aria-hidden
-                        className={m.key === 'measured' ? 'h-2.5 w-2.5 rounded-sm' : 'h-0 w-4 border-t-[3px]'}
+                        className={m.key === 'measured' || m.key === 'started' ? 'h-2.5 w-2.5 rounded-sm' : 'h-0 w-4 border-t-[3px]'}
                         style={
                           m.unit === 'count'
-                            ? m.key === 'measured'
-                              ? { background: countColor.measured }
+                            ? m.key === 'measured' || m.key === 'started'
+                              ? { background: countColor[m.key] }
                               : { borderColor: countColor.peak }
                             : { borderColor: chart.tick, borderTopStyle: m.key === 'peakRate' ? 'dashed' : 'dotted' }
                         }
@@ -446,6 +448,13 @@ export default function UsageClient() {
                         ))}
                       </Bar>
                     )}
+                    {trendFilter.metrics.started && (
+                      <Bar yAxisId="count" dataKey="started" name="신규 측정 수" fill={countColor.started} maxBarSize={22} radius={[3, 3, 0, 0]} isAnimationActive={false}>
+                        {trend.map((r) => (
+                          <Cell key={r.label} fillOpacity={r.today ? 0.45 : 1} />
+                        ))}
+                      </Bar>
+                    )}
                     {trendFilter.metrics.peak && (
                       <Line yAxisId="count" type="linear" dataKey="peak" name="최대 동시측정 수" stroke={countColor.peak} strokeWidth={2.5} dot={false} isAnimationActive={false} />
                     )}
@@ -467,7 +476,7 @@ export default function UsageClient() {
                   </ComposedChart>
                 </ResponsiveContainer>
                 <p className="px-2 pt-1 text-[11px] text-muted-foreground">
-                  왼쪽 축 = 건수(측정 환자 수·최대 동시측정 수, 병원 전체), 오른쪽 축 = 비율(%) — 동시 가동률 = 그날 최대 동시사용 수 ÷ 계약·공급 수량(긴 점선), 일 사용률 = 그날 사용 횟수 ÷ 계약·공급 수량(짧은 점선), 색 = 기기
+                  왼쪽 축 = 건수(측정 환자 수 = 그날 진행 중이던 측정·신규 측정 수 = 그날 시작한 측정·최대 동시측정 수, 병원 전체), 오른쪽 축 = 비율(%) — 동시 가동률 = 그날 최대 동시사용 수 ÷ 계약·공급 수량(긴 점선), 일 사용률 = 그날 사용 횟수 ÷ 계약·공급 수량(짧은 점선), 색 = 기기
                 </p>
               </>
             ) : (
@@ -535,6 +544,9 @@ export default function UsageClient() {
                     측정 환자 수
                   </th>
                   <th scope="col" rowSpan={2} className="whitespace-nowrap px-3.5 py-2.5 text-right align-bottom text-xs font-medium text-muted-foreground">
+                    신규 측정 수
+                  </th>
+                  <th scope="col" rowSpan={2} className="whitespace-nowrap px-3.5 py-2.5 text-right align-bottom text-xs font-medium text-muted-foreground">
                     최대 동시측정 수
                   </th>
                   {DEVICE_SLOTS.map((slot) => (
@@ -553,8 +565,8 @@ export default function UsageClient() {
                 {tableRows.length === 0 && (
                   <tr>
                     <td className="px-5 py-2.5 text-muted-foreground">—</td>
-                    {Array.from({ length: 8 }, (_, i) => (
-                      <td key={i} className={`px-3.5 py-2.5 text-right text-muted-foreground ${i >= 2 && i % 2 === 0 ? 'border-l border-border' : ''}`}>
+                    {Array.from({ length: 9 }, (_, i) => (
+                      <td key={i} className={`px-3.5 py-2.5 text-right text-muted-foreground ${i >= 3 && i % 2 === 1 ? 'border-l border-border' : ''}`}>
                         —
                       </td>
                     ))}
@@ -573,6 +585,7 @@ export default function UsageClient() {
                         )}
                       </td>
                       <td className="px-3.5 py-2.5 text-right tabular-nums">{num(r.measured)}</td>
+                      <td className="px-3.5 py-2.5 text-right tabular-nums">{num(r.started)}</td>
                       <td className="px-3.5 py-2.5 text-right tabular-nums">{num(r.peak)}</td>
                       {DEVICE_SLOTS.map((slot) => {
                         const d = deviceByKey.get(slot.key)?.days[i]

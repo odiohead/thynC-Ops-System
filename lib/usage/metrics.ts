@@ -3,6 +3,7 @@
  *
  * 병원 단위, 일별:
  *  - 측정 환자 수      그날 걸쳐 있던 측정 건수 (환자 식별값을 받지 않으므로 측정 건수로 센다)
+ *  - 신규 측정 수      그날 시작한 측정 건수 (날짜를 넘겨 이어지는 측정은 시작한 날에만)
  *  - 최대 동시측정 수   그날 어느 한 시점에 동시에 진행 중이던 측정의 최대 수
  *  - 기기 종류별        사용 횟수(그날 걸쳐 있던 "측정 × 기기"의 수), 최대 동시사용 수, 계약·공급 수량(가동률의 분모)
  *
@@ -10,6 +11,7 @@
  *  - 측정: 실제로 시작된 측정(상태 2 측정 중 · 3 종료 · 8 완료 · 10 삭제/보관 기한 경과). 대기(1)는 제외. 최소 측정 시간 없음.
  *    종료·완료(3·8)인데 붙은 기기 기록이 전혀 없는 측정(자식 측정 포함)은 제외 — 기기를 연결하지 않고 열었다 닫은 측정
  *    (2026-11-18 사용자 결정). 진행 중(2)과 상태 10(보관 기한이 지나 기기 기록이 지워짐)은 기기 기록이 없어도 센다.
+ *    그 서버의 기기 상태 이력을 측정 끝까지 아직 다 받지 못했으면(Agent 가 따라잡는 중) 제외하지 않는다.
  *    환자 수·동시측정은 부모 측정만 센다(심전도 리드 추가로 생긴 자식 행 제외).
  *    진행 중인 측정은 현재 시각까지, 병원에서 삭제된 진행 중 측정은 삭제를 확인한 시각까지.
  *    상태 10 은 두 가지다 (2026-11-18 PROD 화순성심병원 실데이터로 확인):
@@ -42,7 +44,7 @@
 import { prisma } from '@/lib/prisma'
 import { DEAL_STATUS_CATEGORY, DEAL_STATUS_CONTRACTED, normalizeSerial } from '@/lib/deviceRegistryShared'
 import { usagePool } from './db'
-import { DAY_SEC, average, changeRate, dayLabel, dayStats, localDayStart, maxOf, spanStats, weekStartOf, type Interval } from './daily'
+import { DAY_SEC, average, changeRate, dayLabel, dayStats, localDayStart, maxOf, startedIn, weekStartOf, type Interval } from './daily'
 
 export const USAGE_TZ = 'Asia/Seoul'
 const TZ_OFFSET_HOURS = 9
@@ -189,9 +191,41 @@ export function hospitalModelOf(plans: CapacityPlan[]): SaleModel {
   return set.size === 1 ? Array.from(set)[0] : 'general'
 }
 
-/** 측정 환자 수에 넣는 측정인가 — 종료·완료인데 기기 기록이 전혀 없으면 제외 (진행 중·상태 10 은 기기 기록이 없어도 센다) */
-export function countsAsMeasurement(status: number, hasDeviceRecord: boolean): boolean {
-  return hasDeviceRecord || !(status === 3 || status === 8)
+/**
+ * 측정 환자 수에 넣는 측정인가 — 종료·완료인데 기기 기록이 전혀 없으면 제외 (진행 중·상태 10 은 기기 기록이 없어도 센다).
+ * 단 그 서버의 기기 상태 이력이 측정 끝까지 아직 다 들어오지 않았으면(historyComplete=false) 기기 기록이 없다고 단정하지 않고 센다
+ * — Agent 가 상태 이력을 따라잡는 중(status_behind)이면 나중에 기기 기록이 생긴다 (2026-11-18 화순성심 서버 12 사례).
+ */
+export function countsAsMeasurement(status: number, hasDeviceRecord: boolean, historyComplete: boolean = true): boolean {
+  return hasDeviceRecord || !(status === 3 || status === 8) || !historyComplete
+}
+
+/**
+ * 서버별로 기기 상태 이력을 언제까지 받았는가(epoch 초, 병원 현지 시각). 마지막 성공 실행이 이력을 다 따라잡았으면 그 실행의
+ * 병원 DB 시각, 따라잡는 중이면 받은 이력의 마지막 시각. 실행 기록이 없으면 목록에 없음(= 모름).
+ */
+async function loadStatusCoverage(hospitalCode: string): Promise<Map<string, number>> {
+  const pool = usagePool()
+  const runs = await pool.query(
+    `SELECT s.id::text AS server, EXTRACT(EPOCH FROM r.source_now)::float8 AS source_now, COALESCE((r.stats->>'status_behind')::boolean, false) AS behind
+       FROM agent_servers s
+       JOIN LATERAL (SELECT source_now, stats FROM agent_runs WHERE server = s.id AND status = 'ok' ORDER BY id DESC LIMIT 1) r ON true
+      WHERE s.hospital_code = $1`,
+    [hospitalCode],
+  )
+  const cov = new Map<string, number>()
+  for (const r of runs.rows) {
+    if (!r.behind) {
+      if (r.source_now !== null) cov.set(String(r.server), Number(r.source_now))
+      continue
+    }
+    const m = await pool.query(
+      `SELECT EXTRACT(EPOCH FROM max(event_at))::float8 AS t FROM raw_device_status WHERE hospital_code = $1 AND server = $2`,
+      [hospitalCode, r.server],
+    )
+    if (m.rows[0]?.t != null) cov.set(String(r.server), Number(m.rows[0].t))
+  }
+  return cov
 }
 
 /** 기기 시리얼(정규화) → 판매모델. 운영관리시스템 기기 현황에서 이 병원에 있거나 있었던 기기의 계약건 기준. 없으면 목록에 없음(= 일반형) */
@@ -224,8 +258,9 @@ export type UsageDaily = {
   /** 판매모델별로 이 병원에 계약 수량이나 기간 내 사용이 있는지 — 화면이 고를 수 있는 판매모델 */
   models: { key: UsageModel; label: string; available: boolean }[]
   receive: { servers: number; lastSuccessAt: string | null }
-  summary: { avgMeasured: number | null; maxPeak: number | null; maxPeakDate: string | null; todayMeasured: number }
-  days: { date: string; measured: number; peak: number; today: boolean }[]
+  summary: { avgMeasured: number | null; avgStarted: number | null; maxPeak: number | null; maxPeakDate: string | null; todayMeasured: number }
+  /** measured = 그날 진행 중이던 측정 수, started = 그날 시작한 측정 수(신규) */
+  days: { date: string; measured: number; started: number; peak: number; today: boolean }[]
   devices: UsageDevice[]
   /** 기기별 수치가 있는 첫 날 (그 전은 병원 서버에 기기 정보가 남아 있지 않다) */
   deviceDataFrom: string | null
@@ -274,7 +309,7 @@ export async function getUsageDaily(hospitalCode: string, days: number, model: U
   return (await buildUsage(hospitalCode, days, model, nowMs)).daily
 }
 
-/** 일별 지표 + (주간 실측정 수용) 선택한 판매모델의 부모 측정 구간 */
+/** 일별 지표 + (주간 집계용) 선택한 판매모델의 부모 측정 구간 */
 async function buildUsage(
   hospitalCode: string,
   days: number,
@@ -288,7 +323,7 @@ async function buildUsage(
   const toExclusive = dayLabel(today + DAY_SEC)
   const kinds = USAGE_DEVICE_KINDS.map((k) => k.type)
 
-  const [receive, measurements, units, plans, modelBySerial] = await Promise.all([
+  const [receive, measurements, units, plans, modelBySerial, statusCoverage] = await Promise.all([
     getUsageReceive(hospitalCode),
     pool.query(
       `WITH ${MEASUREMENT_CTE}
@@ -325,6 +360,7 @@ async function buildUsage(
     ),
     loadCapacityPlans(hospitalCode, [...kinds]),
     loadModelBySerial(hospitalCode),
+    loadStatusCoverage(hospitalCode),
   ])
   // 기기 종류의 도입 수량이 한 판매모델뿐이면 그 모델, 섞였으면 시리얼의 계약건, 그래도 모르면 기본 모델(카트온 사용량비례형·그 밖 일반형)
   const hospitalModel = hospitalModelOf(Array.from(plans.values()))
@@ -370,7 +406,8 @@ async function buildUsage(
     const key = `${r.server}|${r.measurement_code}`
     all.push({ key, status: Number(r.measurement_status), iv })
     if (Number(r.parent_type) !== 0) continue
-    if (!countsAsMeasurement(Number(r.measurement_status), withDevice.has(key))) continue
+    const covered = statusCoverage.get(String(r.server))
+    if (!countsAsMeasurement(Number(r.measurement_status), withDevice.has(key), covered !== undefined && iv.e <= covered)) continue
     if (inModel(key, 'general')) parentKeysByModel.general++
     if (inModel(key, 'usage')) parentKeysByModel.usage++
     if (inModel(key, model)) parents.push(iv)
@@ -401,7 +438,7 @@ async function buildUsage(
   const dayStarts = Array.from({ length: days }, (_, i) => first + i * DAY_SEC)
   const dayRows = dayStarts.map((d) => {
     const st = dayStats(parents, d)
-    return { date: dayLabel(d), measured: st.count, peak: st.peak, today: d === today }
+    return { date: dayLabel(d), measured: st.count, started: startedIn(parents, d, d + DAY_SEC), peak: st.peak, today: d === today }
   })
   const deviceKnown = dayStarts.map((d) => dayStats(purged, d).count === 0)
   const firstKnown = deviceKnown.indexOf(true)
@@ -450,6 +487,7 @@ async function buildUsage(
     receive,
     summary: {
       avgMeasured: average(past.map((r) => r.measured)),
+      avgStarted: average(past.map((r) => r.started)),
       maxPeak: receive.servers > 0 ? maxPeak : null,
       maxPeakDate: receive.servers > 0 ? maxPeakDate : null,
       todayMeasured: dayRows[dayRows.length - 1]?.measured ?? 0,
@@ -461,7 +499,7 @@ async function buildUsage(
   return { daily, parents, today }
 }
 
-// ─── 주간 (2026-11-18 사용자 결정: 최근 12주, 월~일, 주간 실측정 수 · 최대 동시/동시 가동률은 평균 + 최고) ───
+// ─── 주간 (2026-11-18 사용자 결정: 최근 12주, 월~일, 주간 신규 측정 수 · 최대 동시/동시 가동률은 평균 + 최고) ───
 
 export const USAGE_WEEKS = 12
 
@@ -472,10 +510,10 @@ export type UsageWeek = {
   weekEnd: string
   /** 이번 주(진행 중) */
   current: boolean
-  /** 그 주에 한순간이라도 진행 중이던 측정 수 (중복 없이 — 5일짜리 측정도 1건) */
-  measured: number
-  /** 전주 대비 실측정 수 증감(%) — 이번 주·전주 0건이면 null */
-  measuredChange: number | null
+  /** 주간 신규 측정 수 — 그 주에 시작한 측정 수 (2026-11-18 사용자 결정: 주간 실측정 수 대신) */
+  started: number
+  /** 전주 대비 신규 측정 수 증감(%) — 이번 주·첫 주·전주 0건이면 null */
+  startedChange: number | null
   /** 일별 최대 동시측정 수의 주 평균(오늘 제외) · 주 최고(오늘 포함) */
   peakAvg: number | null
   peakMax: number | null
@@ -515,8 +553,8 @@ export function aggregateWeeks(daily: UsageDaily, parents: Interval[], today: nu
       weekStart: dayLabel(start),
       weekEnd: dayLabel(start + 6 * DAY_SEC),
       current: w === 0,
-      measured: spanStats(parents, start, end).count,
-      measuredChange: null,
+      started: startedIn(parents, start, end),
+      startedChange: null,
       peakAvg: average(doneIdx.map((i) => daily.days[i].peak)),
       peakMax: maxOf(idx.map((i) => daily.days[i].peak)),
       devices: daily.devices.map((dv) => ({
@@ -527,7 +565,7 @@ export function aggregateWeeks(daily: UsageDaily, parents: Interval[], today: nu
       })),
     })
   }
-  for (let i = 1; i < rows.length; i++) if (!rows[i].current) rows[i].measuredChange = changeRate(rows[i].measured, rows[i - 1].measured)
+  for (let i = 1; i < rows.length; i++) if (!rows[i].current) rows[i].startedChange = changeRate(rows[i].started, rows[i - 1].started)
   return rows
 }
 

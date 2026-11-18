@@ -25,7 +25,7 @@ export function dayStats(intervals: Interval[], dayStart: number): { count: numb
   return spanStats(intervals, dayStart, dayStart + DAY_SEC)
 }
 
-/** dayStats 의 일반형 — [start, end) 구간 동안 걸쳐 있던 수와 최대 동시 수 (주간 실측정 수 등) */
+/** dayStats 의 일반형 — [start, end) 구간 동안 걸쳐 있던 수와 최대 동시 수  */
 export function spanStats(intervals: Interval[], dayStart: number, dayEnd: number): { count: number; peak: number } {
   const events: { t: number; d: number }[] = []
   let count = 0
@@ -44,6 +44,13 @@ export function spanStats(intervals: Interval[], dayStart: number, dayEnd: numbe
     if (running > peak) peak = running
   }
   return { count, peak }
+}
+
+/** [start, end) 안에 시작한 구간의 수 — 신규 측정 수 (날짜를 넘겨 이어지는 측정은 시작한 날에만 1건) */
+export function startedIn(intervals: Interval[], start: number, end: number): number {
+  let n = 0
+  for (const iv of intervals) if (iv.s >= start && iv.s < end) n++
+  return n
 }
 
 /** epoch 초(현지 기준) → 'YYYY-MM-DD' */

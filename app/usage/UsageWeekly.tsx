@@ -2,7 +2,7 @@
 
 /**
  * 사용량 화면 — 주간 통계 (일별 화면 아래)
- * 최근 12주(월~일). 주간 실측정 수(중복 없이)·전주 대비, 최대 동시측정 수 평균·최고, 기기 종류별 동시 가동률 평균·최고.
+ * 최근 12주(월~일). 주간 신규 측정 수(그 주에 시작한 측정)·전주 대비, 최대 동시측정 수 평균·최고, 기기 종류별 동시 가동률 평균·최고.
  * 이번 주는 진행 중 — 막대를 흐리게, 전주 대비는 내지 않는다. 정의는 lib/usage/metrics.ts aggregateWeeks.
  */
 import { useEffect, useState } from 'react'
@@ -67,7 +67,7 @@ export default function UsageWeekly({ hospital, model }: { hospital: string; mod
   const devices = collecting ? data!.capacities.filter((c) => c.capacity !== null) : []
   const weeks = collecting ? data!.weeks : []
   const rows = weeks.map((w) => {
-    const r: Record<string, string | number | boolean | null> = { label: md(w.weekStart), measured: w.measured, peakAvg: w.peakAvg, current: w.current }
+    const r: Record<string, string | number | boolean | null> = { label: md(w.weekStart), started: w.started, peakAvg: w.peakAvg, current: w.current }
     for (const d of w.devices) r[`${d.key}Rate`] = d.peakRateAvg
     return r
   })
@@ -86,7 +86,7 @@ export default function UsageWeekly({ hospital, model }: { hospital: string; mod
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
             <span aria-hidden className="h-2.5 w-2.5 rounded-sm" style={{ background: chart.blue }} />
-            주간 실측정 수
+            주간 신규 측정 수
           </span>
           <span className="flex items-center gap-1.5">
             <span aria-hidden className="h-0 w-4 border-t-[3px]" style={{ borderColor: orange }} />
@@ -128,7 +128,7 @@ export default function UsageWeekly({ hospital, model }: { hospital: string; mod
                     String(name).includes('가동률') ? `${Math.round(Number(v))}%` : String(name).includes('평균') ? Number(v).toFixed(1) : Number(v).toLocaleString()
                   }
                 />
-                <Bar yAxisId="count" dataKey="measured" name="주간 실측정 수" fill={chart.blue} maxBarSize={28} radius={[3, 3, 0, 0]} isAnimationActive={false}>
+                <Bar yAxisId="count" dataKey="started" name="주간 신규 측정 수" fill={chart.blue} maxBarSize={28} radius={[3, 3, 0, 0]} isAnimationActive={false}>
                   {rows.map((r) => (
                     <Cell key={String(r.label)} fillOpacity={r.current ? 0.45 : 1} />
                   ))}
@@ -152,7 +152,7 @@ export default function UsageWeekly({ hospital, model }: { hospital: string; mod
               </ComposedChart>
             </ResponsiveContainer>
             <p className="px-2 pt-1 text-[11px] text-muted-foreground">
-              주간 실측정 수 = 그 주에 한순간이라도 진행 중이던 측정 수(여러 날에 걸친 측정도 그 주 1건) · 평균 = 그 주 일별 값의 평균(오늘 제외) · 최고 = 그 주 일별 최고 · 막대 아래 날짜 = 그 주 월요일
+              주간 신규 측정 수 = 그 주(월~일)에 시작한 측정 수(전주에 시작해 이어진 측정은 세지 않음) · 평균 = 그 주 일별 값의 평균(오늘 제외) · 최고 = 그 주 일별 최고 · 막대 아래 날짜 = 그 주 월요일
             </p>
           </>
         ) : (
@@ -170,7 +170,7 @@ export default function UsageWeekly({ hospital, model }: { hospital: string; mod
                 주 (월~일)
               </th>
               <th scope="col" rowSpan={2} className="whitespace-nowrap px-3.5 py-2.5 text-right align-bottom text-xs font-medium text-muted-foreground">
-                실측정 수
+                신규 측정 수
               </th>
               <th scope="col" rowSpan={2} className="whitespace-nowrap px-3.5 py-2.5 text-right align-bottom text-xs font-medium text-muted-foreground">
                 전주 대비
@@ -208,13 +208,13 @@ export default function UsageWeekly({ hospital, model }: { hospital: string; mod
                     </Badge>
                   )}
                 </td>
-                <td className="px-3.5 py-2.5 text-right tabular-nums">{num(w.measured)}</td>
+                <td className="px-3.5 py-2.5 text-right tabular-nums">{num(w.started)}</td>
                 <td
                   className={`px-3.5 py-2.5 text-right tabular-nums ${
-                    w.measuredChange === null ? 'text-muted-foreground' : w.measuredChange > 0 ? 'text-success' : w.measuredChange < 0 ? 'text-destructive' : ''
+                    w.startedChange === null ? 'text-muted-foreground' : w.startedChange > 0 ? 'text-success' : w.startedChange < 0 ? 'text-destructive' : ''
                   }`}
                 >
-                  {change(w.measuredChange)}
+                  {change(w.startedChange)}
                 </td>
                 <td className="border-l border-border px-3.5 py-2.5 text-right tabular-nums">{fixed1(w.peakAvg)}</td>
                 <td className="px-3.5 py-2.5 text-right tabular-nums">{num(w.peakMax)}</td>
