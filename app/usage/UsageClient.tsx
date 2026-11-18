@@ -12,9 +12,15 @@ import PageHeader from '@/app/components/ui/PageHeader'
 import Badge from '@/app/components/ui/Badge'
 import { Card } from '@/app/components/ui/Card'
 import { useChartTheme } from '@/app/components/theme/useChartTheme'
-import type { UsageDaily, UsageDevice } from '@/lib/usage/metrics'
+import type { UsageDaily, UsageDevice, UsageModel } from '@/lib/usage/metrics'
 
 const PERIODS = [30, 90] as const
+/** 판매모델 보기 — 딜의 '판매모델 구분' 기준 (서버 lib/usage/metrics.ts USAGE_MODELS 와 같은 키) */
+const MODELS: { key: UsageModel; label: string }[] = [
+  { key: 'all', label: '합산' },
+  { key: 'general', label: '일반형' },
+  { key: 'usage', label: '사용량비례형' },
+]
 const DEVICE_SLOTS = [
   { key: 'ecg', label: '심전계' },
   { key: 'spo2', label: '산소포화도' },
@@ -63,6 +69,8 @@ export default function UsageClient() {
   const hospital = params.get('hospital') ?? ''
   const daysParam = Number(params.get('days'))
   const days = (PERIODS as readonly number[]).includes(daysParam) ? daysParam : PERIODS[0]
+  const modelParam = params.get('model')
+  const model: UsageModel = MODELS.some((m) => m.key === modelParam) ? (modelParam as UsageModel) : 'all'
 
   const [hospitals, setHospitals] = useState<Hospital[] | null>(null)
   const [data, setData] = useState<Daily | null>(null)
@@ -98,10 +106,11 @@ export default function UsageClient() {
   }, [])
 
   const go = useCallback(
-    (code: string, d: number) => {
+    (code: string, d: number, m: UsageModel = 'all') => {
       const q = new URLSearchParams()
       if (code) q.set('hospital', code)
       q.set('days', String(d))
+      if (m !== 'all') q.set('model', m)
       router.replace(`/usage?${q.toString()}`, { scroll: false })
     },
     [router],
@@ -129,8 +138,8 @@ export default function UsageClient() {
 
   // 병원을 고르지 않고 들어오면 목록의 첫 병원을 연다
   useEffect(() => {
-    if (!hospital && hospitals && hospitals.length > 0) go(hospitals[0].hospitalCode, days)
-  }, [hospital, hospitals, days, go])
+    if (!hospital && hospitals && hospitals.length > 0) go(hospitals[0].hospitalCode, days, model)
+  }, [hospital, hospitals, days, model, go])
 
   useEffect(() => {
     if (!hospital) {
@@ -140,7 +149,7 @@ export default function UsageClient() {
     let alive = true
     setLoading(true)
     setError(null)
-    fetch(`/api/usage/daily?hospital=${encodeURIComponent(hospital)}&days=${days}`)
+    fetch(`/api/usage/daily?hospital=${encodeURIComponent(hospital)}&days=${days}&model=${model}`)
       .then(async (res) => {
         const body = await res.json().catch(() => ({}))
         if (!alive) return
@@ -160,7 +169,7 @@ export default function UsageClient() {
     return () => {
       alive = false
     }
-  }, [hospital, days])
+  }, [hospital, days, model])
 
   const collecting = !!data && data.receive.servers > 0
   const inList = !!hospitals?.some((h) => h.hospitalCode === hospital)
@@ -252,7 +261,7 @@ export default function UsageClient() {
                   key={p}
                   type="button"
                   aria-pressed={p === days}
-                  onClick={() => go(hospital, p)}
+                  onClick={() => go(hospital, p, model)}
                   className={`h-7 rounded px-3.5 text-[13px] font-medium transition-colors ${
                     p === days ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                   }`}
@@ -262,7 +271,38 @@ export default function UsageClient() {
               ))}
             </div>
           </div>
+          <div className="flex flex-col gap-1.5">
+            <div id="usage-model-label" className="text-xs font-medium text-muted-foreground">
+              판매모델
+            </div>
+            <div role="group" aria-labelledby="usage-model-label" className="flex h-9 gap-1 rounded-md border border-border bg-card p-[3px]">
+              {MODELS.map((m) => {
+                const available = !data || data.models.find((x) => x.key === m.key)?.available !== false
+                return (
+                  <button
+                    key={m.key}
+                    type="button"
+                    aria-pressed={m.key === model}
+                    disabled={!available && m.key !== model}
+                    title={available ? undefined : '이 병원에는 이 판매모델의 계약이나 사용이 없습니다'}
+                    onClick={() => go(hospital, days, m.key)}
+                    className={`h-7 rounded px-3.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                      m.key === model ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
         </div>
+        {model !== 'all' && (
+          <p className="-mt-2 text-xs text-muted-foreground">
+            {MODELS.find((m) => m.key === model)?.label} 기준 — 기기는 기기 현황의 계약건(딜) 판매모델로 나누고, 계약건이 연결되지 않은 기기와 기기 정보가 없는 측정은 일반형으로 셉니다.
+            측정 환자 수는 그 판매모델 기기가 붙은 측정, 가동률의 분모는 그 판매모델 딜의 계약 수량(공급 수량은 일반형)입니다.
+          </p>
+        )}
 
         {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">{error}</div>}
 

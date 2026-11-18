@@ -5,7 +5,7 @@
  *   npx tsx scripts/usage-metrics-test.mts <병원코드> [30|90]   + 원본 DB 의 실제 데이터로, 화면용 계산과 별도 SQL 계산을 대조 (읽기 전용)
  */
 import { DAY_SEC, average, dayLabel, dayStats, localDayStart } from '../lib/usage/daily'
-import { capacityOn, getUsageDaily } from '../lib/usage/metrics'
+import { capacityOn, getUsageDaily, planForModel } from '../lib/usage/metrics'
 import { fmtTime, positional, usageDb } from './usage-lib.mts'
 
 let passed = 0
@@ -45,6 +45,11 @@ const h = (n: number) => D + n * 3600
   check('계약일 없는 딜은 전 기간', capacityOn(plan, '2020-01-01').capacity === 3)
   check('공급만 있으면 공급 수량', JSON.stringify(capacityOn({ deals: [], supply: 7 }, '2026-11-18')) === '{"capacity":7,"contract":null,"supply":7}')
   check('계약 + 공급은 합산', capacityOn({ deals: [{ date: '2025-01-01', qty: 5 }], supply: 2 }, '2026-11-18').capacity === 7)
+  const mixed = { deals: [{ date: '2025-01-01', qty: 20, model: 'general' as const }, { date: '2025-06-01', qty: 50, model: 'usage' as const }], supply: 5 }
+  check('판매모델: 합산 = 일반 + 사용량 + 공급', capacityOn(planForModel(mixed, 'all'), '2026-01-01').capacity === 75)
+  check('판매모델: 일반형 = 일반 딜 + 공급', capacityOn(planForModel(mixed, 'general'), '2026-01-01').capacity === 25)
+  check('판매모델: 사용량비례형 = 사용량 딜만 (공급 제외)', capacityOn(planForModel(mixed, 'usage'), '2026-01-01').capacity === 50)
+  check('판매모델: 사용량 딜 계약일 전에는 없음', capacityOn(planForModel(mixed, 'usage'), '2025-05-31').capacity === null)
   check('둘 다 없으면 null', capacityOn(undefined, '2026-11-18').capacity === null && capacityOn({ deals: [{ date: '2027-01-01', qty: 5 }], supply: null }, '2026-11-18').capacity === null)
 }
 
@@ -65,10 +70,12 @@ if (hospital) {
          SELECT start_at AS s,
                 CASE WHEN measurement_status = 2
                      THEN LEAST(end_at, COALESCE(source_gone_at AT TIME ZONE 'Asia/Seoul', now() AT TIME ZONE 'Asia/Seoul'))
+                     WHEN measurement_status = 10 AND source_modified_at < end_at THEN source_modified_at
                      ELSE end_at END AS e
          FROM raw_measurements
          WHERE hospital_code = $1 AND measurement_status IN (2, 3, 10) AND COALESCE(parent_type, 0) = 0
            AND start_at IS NOT NULL AND end_at IS NOT NULL
+           AND NOT (measurement_status = 10 AND source_modified_at < end_at AND start_at = source_created_at)
        ), mm AS (SELECT s, GREATEST(e, s + interval '1 second') AS e FROM m WHERE e >= s),
        days AS (SELECT generate_series($2::date, $3::date, interval '1 day')::date AS d),
        ev AS (
@@ -94,6 +101,20 @@ if (hospital) {
       const known = dv.days.filter((d) => d.uses !== null)
       check(`${dv.label}: 사용 횟수 ≥ 최대 동시사용 (수치 있는 ${known.length}일)`, known.every((d) => (d.uses as number) >= (d.peak as number)))
       check(`${dv.label}: 오늘 계약·공급 수량 = 마지막 날 분모`, dv.capacity === dv.days[dv.days.length - 1].capacity)
+    }
+    // 판매모델로 나눈 값의 관계
+    const [gen, use] = await Promise.all([getUsageDaily(hospital, days, 'general'), getUsageDaily(hospital, days, 'usage')])
+    const sumOk = daily.days.every((d, i) => d.measured <= gen.days[i].measured + use.days[i].measured && d.measured >= Math.max(gen.days[i].measured, use.days[i].measured))
+    check('판매모델: 합산 측정 수는 일반형·사용량비례형 각각 이상, 둘의 합 이하 (섞인 측정은 양쪽에 셈)', sumOk)
+    for (let k = 0; k < daily.devices.length; k++) {
+      const a = daily.devices[k], g = gen.devices[k], u = use.devices[k]
+      const usesOk = a.days.every((d, i) => d.uses === null || d.uses === (g.days[i].uses ?? 0) + (u.days[i].uses ?? 0))
+      const capOk = a.days.every((d, i) => (d.capacity ?? 0) === (g.days[i].capacity ?? 0) + (u.days[i].capacity ?? 0))
+      check(`${a.label}: 사용 횟수 합산 = 일반형 + 사용량비례형, 분모 합산 = 일반형 + 사용량비례형`, usesOk && capOk)
+    }
+    console.log(`  판매모델 선택지: ${daily.models.map((m) => `${m.label}${m.available ? '' : '(없음)'}`).join(' · ')}`)
+    for (const [name, x] of [['일반형', gen], ['사용량비례형', use]] as const) {
+      console.log(`  ${name}: 평균 측정 환자 수 ${x.summary.avgMeasured?.toFixed(1) ?? '-'} · ` + x.devices.map((dv) => `${dv.label} 계약 ${dv.capacity ?? '-'} 동시 가동률 ${dv.avgPeakRate === null ? '-' : Math.round(dv.avgPeakRate) + '%'}`).join(' · '))
     }
     const last = daily.days.slice(-7)
     console.log('\n  최근 7일')
