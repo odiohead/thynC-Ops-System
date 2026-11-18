@@ -1,0 +1,165 @@
+'use client'
+
+/**
+ * 사용량 산정기준 — 화면에 보이는 수치를 어떻게 세는지 설명한다.
+ * 정의의 단일 소스는 lib/usage/metrics.ts · lib/usage/daily.ts 이고, 이 문서는 그 설명이다.
+ * 계산 규칙을 바꾸면 이 내용도 함께 고칠 것 (CRITERIA_REVISED 갱신).
+ * UsageCriteriaContent 는 팝업과 (나중의) 산정기준 설명 페이지가 같이 쓴다.
+ */
+import { useState, type ReactNode } from 'react'
+import { BookOpen } from 'lucide-react'
+import Modal from '@/app/components/ui/Modal'
+
+export const CRITERIA_REVISED = '2026-11-18'
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-[13px] font-semibold text-foreground">{title}</h3>
+      {children}
+    </section>
+  )
+}
+
+function Rows({ rows }: { rows: [string, ReactNode][] }) {
+  return (
+    <dl className="divide-y divide-border overflow-hidden rounded-md border border-border text-[13px]">
+      {rows.map(([k, v]) => (
+        <div key={k} className="grid gap-1 px-3 py-2 sm:grid-cols-[150px_1fr] sm:gap-3">
+          <dt className="font-medium text-muted-foreground">{k}</dt>
+          <dd className="text-foreground">{v}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+function Bullets({ items }: { items: ReactNode[] }) {
+  return (
+    <ul className="flex list-disc flex-col gap-1 pl-5 text-[13px] text-foreground marker:text-muted-foreground">
+      {items.map((x, i) => (
+        <li key={i}>{x}</li>
+      ))}
+    </ul>
+  )
+}
+
+export function UsageCriteriaContent() {
+  return (
+    <div className="flex flex-col gap-5">
+      <p className="text-[13px] text-muted-foreground">
+        병원 서버의 측정 기록(원본)을 받아 화면을 열 때 계산합니다. 환자 식별값은 받지 않으므로 <b className="text-foreground">환자 수는 측정 건수</b>입니다. 기준 개정일 {CRITERIA_REVISED}
+      </p>
+
+      <Section title="1. 측정 1건">
+        <Rows
+          rows={[
+            ['세는 단위', '측정 1건 = 환자 1명. 같은 환자를 다시 측정하면 2건 (환자를 구분할 수 없음)'],
+            ['포함', '실제로 시작된 측정 — 측정 중 · 종료 · 완료 · 삭제(시작된 뒤 삭제했거나 보관 기한이 지난 것)'],
+            ['제외', '대기 중인 측정, 시작하기 전에 삭제한 측정, 심전도 리드 추가로 생긴 보조 측정'],
+            ['기기 기록 없는 측정', '종료·완료됐는데 붙은 기기 기록이 전혀 없는 측정은 제외 (기기를 연결하지 않고 열었다 닫은 측정). 진행 중인 측정과, 보관 기한이 지나 병원 서버에서 기기 기록이 지워진 측정은 셉니다'],
+          ]}
+        />
+      </Section>
+
+      <Section title="2. 측정 구간 (언제부터 언제까지)">
+        <Rows
+          rows={[
+            ['시작', '측정 시작 시각'],
+            ['끝 — 종료', '종료 시각'],
+            ['끝 — 측정 중', '지금 (예정 종료 시각이 더 이르면 예정 종료 시각)'],
+            ['끝 — 측정 중 삭제', '삭제한 시각'],
+            ['끝 — 보관 기한 경과', '원래 종료 시각 (병원 서버는 종료 약 90일 뒤 기록을 지움)'],
+            ['하루의 경계', '병원 현지 자정 (한국 시간)'],
+          ]}
+        />
+      </Section>
+
+      <Section title="3. 일별 지표">
+        <Rows
+          rows={[
+            ['측정 환자 수', '그날 한순간이라도 진행 중이던 측정 수'],
+            ['최대 동시측정 수', '그날 어느 한 시점에 동시에 진행 중이던 측정 수의 최댓값 (한 측정이 끝나는 바로 그 시각에 다른 측정이 시작하면 겹친 것으로 보지 않음)'],
+            ['기간 평균 측정 환자 수', '일별 측정 환자 수의 평균 — 오늘은 하루가 끝나지 않아 제외'],
+            ['오늘 측정 환자 수', '오늘 0시부터 지금까지 진행 중이던 측정 수'],
+          ]}
+        />
+      </Section>
+
+      <Section title="4. 이런 경우는">
+        <Bullets
+          items={[
+            <>
+              <b>최소 측정 시간 없음</b> — 아주 짧은 측정도 1건입니다.
+            </>,
+            <>
+              <b>날짜를 넘긴 측정은 걸친 날마다 1건</b> — 3일짜리 측정은 3일 동안 매일 1건 (같은 날 안에서는 1건). 그래서 측정 환자 수는 ‘그날 새로 시작한 측정’이 아니라 ‘그날 측정 중이던 환자 수’입니다.
+            </>,
+            <>
+              <b>기기 교체</b> — 환자 수는 그대로 1건. 기기 사용 횟수는 시리얼마다 따로 셉니다(다른 기기로 바꾸면 2회, 같은 기기를 떼었다 다시 붙이면 1회).
+            </>,
+            <>
+              <b>리드 추가</b> — 환자 수에는 넣지 않고, 거기 붙은 기기는 기기 사용으로 셉니다.
+            </>,
+          ]}
+        />
+      </Section>
+
+      <Section title="5. 기기별 가동률 (심전계 · 산소포화도 · 카트온)">
+        <Rows
+          rows={[
+            ['기기 사용 1회', '측정 × 기기 종류 × 시리얼 하나. 그 기기의 첫 상태 기록부터, 측정에 붙어 있으면 측정 끝까지, 빠졌으면 마지막 상태 기록까지'],
+            ['분모 (기기 수량)', '운영관리시스템 병원 상세 ‘도입 현황’의 계약·공급 수량 — 병원 서버에 등록된 기기 수가 아닙니다. 날짜별로 그날까지 계약된 딜만 셉니다(공급 수량은 현재 값)'],
+            ['동시 가동률', '그날 최대 동시사용 대수 ÷ 그날의 계약·공급 수량'],
+            ['일 사용률', '그날 사용 횟수 ÷ 그날의 계약·공급 수량 (날짜를 넘긴 사용은 날마다 1회 — ‘그날 한 번이라도 쓰인 기기의 비율’에 가까움)'],
+            ['수치가 비는 날 (—)', '보관 기한이 지나 병원 서버에서 기기 기록이 지워진 측정이 걸친 날, 또는 계약·공급 수량이 없는 기기'],
+          ]}
+        />
+      </Section>
+
+      <Section title="6. 주간 통계 (최근 12주, 월~일)">
+        <Rows
+          rows={[
+            ['주간 실측정 수', '그 주에 한순간이라도 진행 중이던 측정 수 — 여러 날에 걸친 측정도 그 주 1건(일별 측정 환자 수를 더한 값이 아님). 두 주에 걸친 측정은 두 주에 각 1건'],
+            ['전주 대비', '주간 실측정 수의 증감률. 이번 주(진행 중)는 내지 않음'],
+            ['최대 동시측정 수', '평균 = 그 주 일별 최대 동시측정 수의 평균(오늘 제외) · 최고 = 그 주 일별 값 중 최고'],
+            ['동시 가동률', '평균 = 그 주 일별 동시 가동률의 평균(오늘·수치 없는 날 제외) · 최고 = 그 주 일별 최고. 계약·공급 수량이 있는 기기만'],
+            ['판매모델', '위에서 고른 판매모델(합산·일반형·사용량비례형)이 그대로 적용'],
+          ]}
+        />
+      </Section>
+
+      <Section title="7. 판매모델 (합산 · 일반형 · 사용량비례형)">
+        <Rows
+          rows={[
+            ['딜의 판매모델', '딜의 ‘판매모델 구분’이 ‘사용량’으로 시작하면 사용량비례형, 그 밖은 일반형'],
+            ['기기', '그 기기 종류의 계약·공급이 한 판매모델뿐이면 그 모델. 섞여 있으면 기기 현황에 연결된 계약건(딜)의 모델, 연결이 없으면 일반형'],
+            ['카트온', '딜 없는 공급 수량과 계약건이 연결되지 않은 카트온은 사용량비례형'],
+            ['측정 (환자 수)', '심전계·산소포화도의 판매모델을 따릅니다. 둘 다 없으면 카트온, 기기 정보가 없으면 병원의 판매모델(모든 도입 수량이 한 모델이면 그 모델, 아니면 일반형). 심전계·산소포화도의 모델이 섞인 측정은 양쪽에 셉니다'],
+            ['분모', '그 판매모델 딜의 계약 수량. 딜 없는 공급 수량은 일반형(카트온은 사용량비례형)'],
+          ]}
+        />
+      </Section>
+    </div>
+  )
+}
+
+/** 페이지 우측 상단의 '산정기준' 버튼 + 팝업 */
+export default function UsageCriteriaButton() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        <BookOpen size={14} aria-hidden />
+        산정기준
+      </button>
+      <Modal open={open} onClose={() => setOpen(false)} title="사용량 산정기준" widthClass="max-w-3xl">
+        <UsageCriteriaContent />
+      </Modal>
+    </>
+  )
+}

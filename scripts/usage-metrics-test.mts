@@ -4,8 +4,8 @@
  *   npx tsx scripts/usage-metrics-test.mts                    계산 함수(순수) 검사
  *   npx tsx scripts/usage-metrics-test.mts <병원코드> [30|90]   + 원본 DB 의 실제 데이터로, 화면용 계산과 별도 SQL 계산을 대조 (읽기 전용)
  */
-import { DAY_SEC, average, dayLabel, dayStats, localDayStart } from '../lib/usage/daily'
-import { capacityOn, defaultModelOf, getUsageDaily, hospitalModelOf, measurementModels, planForModel, typeModelOf } from '../lib/usage/metrics'
+import { DAY_SEC, average, changeRate, dayLabel, dayStats, localDayStart, spanStats, weekStartOf } from '../lib/usage/daily'
+import { aggregateWeeks, capacityOn, countsAsMeasurement, defaultModelOf, getUsageDaily, hospitalModelOf, measurementModels, planForModel, typeModelOf } from '../lib/usage/metrics'
 import { fmtTime, positional, usageDb } from './usage-lib.mts'
 
 let passed = 0
@@ -38,6 +38,32 @@ const h = (n: number) => D + n * 3600
   check('현지 오늘: 23:30 KST', dayLabel(localDayStart(Date.UTC(2026, 10, 17, 14, 30), 9)) === '2026-11-17')
   check('현지 오늘: 00:30 KST', dayLabel(localDayStart(Date.UTC(2026, 10, 17, 15, 30), 9)) === '2026-11-18')
   check('평균은 없는 값을 뺀다', average([10, null, 20]) === 15 && average([null]) === null && average([]) === null)
+
+  // 주간 — 월~일, 2026-11-10(화)이 속한 주의 월요일은 11-09, 11-16(월)은 그날
+  check('주 시작: 화요일 → 그 주 월요일', dayLabel(weekStartOf(D)) === '2026-11-09')
+  check('주 시작: 월요일 → 그날, 일요일 → 6일 전', dayLabel(weekStartOf(D + 6 * DAY_SEC)) === '2026-11-16' && dayLabel(weekStartOf(D + 5 * DAY_SEC)) === '2026-11-09')
+  const W = weekStartOf(D)
+  check('주간 실측정 수: 5일짜리 측정은 그 주 1건', spanStats([{ s: W + 3600, e: W + 5 * DAY_SEC }], W, W + 7 * DAY_SEC).count === 1)
+  check('주간 실측정 수: 주를 넘긴 측정은 두 주에 각 1건', spanStats([{ s: W + 6 * DAY_SEC, e: W + 9 * DAY_SEC }], W, W + 7 * DAY_SEC).count === 1 && spanStats([{ s: W + 6 * DAY_SEC, e: W + 9 * DAY_SEC }], W + 7 * DAY_SEC, W + 14 * DAY_SEC).count === 1)
+  check('측정 포함: 종료·완료인데 기기 기록 없음 → 제외', !countsAsMeasurement(3, false) && !countsAsMeasurement(8, false))
+  check('측정 포함: 기기 기록 있으면 종료·완료도 셈', countsAsMeasurement(3, true) && countsAsMeasurement(8, true))
+  check('측정 포함: 진행 중·상태 10 은 기기 기록이 없어도 셈', countsAsMeasurement(2, false) && countsAsMeasurement(10, false))
+  check('증감률: 10 → 15 = +50%, 이전 0이면 null', changeRate(15, 10) === 50 && changeRate(3, 0) === null)
+
+  // aggregateWeeks — 지난주(11-09~15) + 이번 주(11-16 월 ~ 오늘 11-18 수)
+  const today = W + 9 * DAY_SEC // 11-18
+  const dates = Array.from({ length: 10 }, (_, i) => W + i * DAY_SEC)
+  const daily = {
+    days: dates.map((d, i) => ({ date: dayLabel(d), measured: 0, peak: i + 1, today: d === today })),
+    devices: [{ key: 'ecg', label: '심전계', days: dates.map((d, i) => ({ date: dayLabel(d), uses: 1, peak: i === 2 ? null : i + 1, capacity: 10 })) }],
+  } as unknown as Parameters<typeof aggregateWeeks>[0]
+  const parents = [{ s: W + 3600, e: W + 2 * DAY_SEC }, { s: W + 6 * DAY_SEC, e: W + 8 * DAY_SEC }, { s: W + 8 * DAY_SEC, e: W + 9 * DAY_SEC + 3600 }]
+  const wk = aggregateWeeks(daily, parents, today, 2)
+  check('주별: 2주, 이번 주가 마지막·진행 중', wk.length === 2 && wk[0].weekStart === '2026-11-09' && wk[0].weekEnd === '2026-11-15' && wk[1].current && !wk[0].current)
+  check('주별: 실측정 수 — 지난주 2, 이번 주 2', wk[0].measured === 2 && wk[1].measured === 2, wk.map((w) => w.measured))
+  check('주별: 최대 동시 평균(오늘 제외)·최고(오늘 포함)', wk[0].peakAvg === 4 && wk[0].peakMax === 7 && wk[1].peakAvg === 8.5 && wk[1].peakMax === 10, wk.map((w) => [w.peakAvg, w.peakMax]))
+  check('주별: 가동률 평균은 수치 없는 날 제외', Math.abs((wk[0].devices[0].peakRateAvg ?? 0) - (1 + 2 + 4 + 5 + 6 + 7) / 6 * 10) < 1e-9 && wk[0].devices[0].peakRateMax === 70)
+  check('주별: 이번 주는 전주 대비 없음, 첫 주도 없음', wk[0].measuredChange === null && wk[1].measuredChange === null)
   // 계약·공급 수량 (가동률의 분모)
   const plan = { deals: [{ date: '2025-05-21', qty: 20 }, { date: '2026-11-15', qty: 10 }, { date: null, qty: 3 }], supply: null }
   check('계약일 전에는 그 딜을 세지 않는다', capacityOn(plan, '2026-11-14').capacity === 23)

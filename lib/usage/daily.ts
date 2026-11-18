@@ -22,7 +22,11 @@ export function normalize(iv: Interval): Interval {
  * 같은 시각에 하나가 끝나고 다른 하나가 시작하면 동시에 진행한 것으로 세지 않는다.
  */
 export function dayStats(intervals: Interval[], dayStart: number): { count: number; peak: number } {
-  const dayEnd = dayStart + DAY_SEC
+  return spanStats(intervals, dayStart, dayStart + DAY_SEC)
+}
+
+/** dayStats 의 일반형 — [start, end) 구간 동안 걸쳐 있던 수와 최대 동시 수 (주간 실측정 수 등) */
+export function spanStats(intervals: Interval[], dayStart: number, dayEnd: number): { count: number; peak: number } {
   const events: { t: number; d: number }[] = []
   let count = 0
   for (const raw of intervals) {
@@ -51,6 +55,24 @@ export function dayLabel(dayStart: number): string {
 export function localDayStart(nowMs: number, offsetHours: number): number {
   const local = Math.floor(nowMs / 1000) + offsetHours * 3600
   return Math.floor(local / DAY_SEC) * DAY_SEC
+}
+
+/** 그 날이 속한 주의 월요일 자정 (epoch 초, 현지 기준). 1970-01-01 은 목요일 */
+export function weekStartOf(dayStart: number): number {
+  const day = Math.floor(dayStart / DAY_SEC)
+  return (day - ((day + 3) % 7)) * DAY_SEC
+}
+
+/** 증감률(%) — 이전 값이 없거나 0이면 null */
+export function changeRate(cur: number | null, prev: number | null): number | null {
+  if (cur === null || prev === null || prev === 0) return null
+  return ((cur - prev) / prev) * 100
+}
+
+/** 최댓값 (null 제외). 값이 없으면 null */
+export function maxOf(values: (number | null)[]): number | null {
+  const xs = values.filter((v): v is number => v !== null)
+  return xs.length === 0 ? null : Math.max(...xs)
 }
 
 /** 평균 (null 제외). 값이 없으면 null */

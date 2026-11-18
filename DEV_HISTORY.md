@@ -4,6 +4,28 @@
 
 ---
 
+## 2026-11-18 17:05 | 사용량 — 산정 기준 확정: 기기 기록 없는 종료 측정 제외 · 상태 8(완료) 포함 · 최소 측정 시간 없음 (dev2 → dev·PROD)
+
+- 사용자 결정: 최소 측정 시간 없음(현행 유지), 종료·완료인데 기기 기록이 전혀 없는 측정(자식 측정 포함)은 제외, 상태 8(완료)은 종료처럼 포함. 진행 중(2)·상태 10(보관 기한 경과로 기기 기록 지워짐)은 기기 기록 없어도 셈(`countsAsMeasurement`)
+- PROD 데이터 읽기 전용 확인: 화순성심 30일 일평균 54.6 → 46.9, 최대 동시 63 → 51 (기기 없는 종료 측정 23건, 평균 10일짜리), 동수원 변화 없음. 가동률(기기 단위)은 영향 없음
+- '산정기준' 팝업 문구 갱신, 테스트 55/55
+- 파일: `lib/usage/metrics.ts`, `app/usage/UsageCriteria.tsx`, `scripts/usage-metrics-test.mts`, `projects/usage_collection_design.md`
+
+## 2026-11-18 16:50 | 사용량 — 주간 통계 영역 (dev2 → dev·PROD)
+
+- 사용자 선택: 일별 지표의 주 단위만(그 밖 지표 보류), 병원 하나씩, 같은 페이지 아래, 측정 환자 수는 '주간 실측정 수', 최대 동시·가동률은 평균 + 최고, 최근 12주, 그래프 + 표
+- 주는 월~일, 이번 주는 '진행 중'(막대 흐리게·전주 대비 없음), 판매모델 선택 그대로 적용, 가동률은 동시 가동률 기준·계약·공급 수량이 있는 기기만
+- 계산: 일별 계산 본체를 `buildUsage`로 분리해 주간이 재사용(약 12주 = 최대 90일 창) → `aggregateWeeks`(순수 함수)로 주별 행. 주간 실측정 수 = `spanStats`(dayStats 일반형)로 주 구간에 걸친 부모 측정 수(중복 없이). `weekStartOf`·`changeRate`·`maxOf` 추가
+- PROD 데이터 읽기 전용 확인(약 2초/병원): 화순성심 주 87~123건·동시 평균 40~72, 동수원 주 16~34건·심전계 동시 가동률 평균 43~73%
+- '산정기준' 팝업에 주간 통계 절 추가
+- 파일: `lib/usage/daily.ts`, `lib/usage/metrics.ts`, `app/api/usage/weekly/route.ts`(신규), `app/usage/UsageWeekly.tsx`(신규), `app/usage/UsageClient.tsx`, `app/usage/UsageCriteria.tsx`, `scripts/usage-metrics-test.mts`(52/52), `README.md`, `projects/usage_collection_design.md`
+
+## 2026-11-18 16:20 | 사용량 — '산정기준' 팝업 (dev2 → dev·PROD)
+
+- `/usage` 우측 상단(수신 상태 옆)에 '산정기준' 버튼 → 팝업으로 현재 계산 규칙 설명: 측정 1건(포함·제외·기기 정보 없는 측정), 측정 구간(상태별 끝 시각·현지 자정), 일별 지표 4종, 이런 경우는(최소 측정 시간 없음·날짜 넘김은 걸친 날마다 1건·기기 교체·리드 추가), 기기별 가동률(사용 1회·분모·동시/일 사용률·빈 날), 판매모델
+- 내용 컴포넌트(`UsageCriteriaContent`)를 팝업과 분리 — 나중에 산정기준 설명 페이지로 그대로 씀(사용자 지시). 규칙의 단일 소스는 `lib/usage/metrics.ts`·`daily.ts`, 규칙 변경 시 이 설명과 `CRITERIA_REVISED`를 함께 갱신
+- 파일: `app/usage/UsageCriteria.tsx`(신규), `app/usage/UsageClient.tsx`, `README.md`, `projects/usage_collection_design.md`
+
 ## 2026-11-18 15:40 | 사용량 — 카트온 사용량비례형 + 일별 추이 지표·기기 필터 (dev2 → dev·PROD)
 
 - 카트온은 사용량비례형 (사용자 지시): 딜이 없는 비계약 공급 수량(대웅 직판)과, 두 모델이 섞인 종류에서 계약건이 연결되지 않은 카트온 기기의 기본 모델을 사용량비례형으로(`defaultModelOf`, 그 밖 기기는 일반형 유지). 딜에 들어간 카트온은 딜의 판매모델을 따름

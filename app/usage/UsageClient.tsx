@@ -13,6 +13,8 @@ import Badge from '@/app/components/ui/Badge'
 import { Card } from '@/app/components/ui/Card'
 import { useChartTheme } from '@/app/components/theme/useChartTheme'
 import type { UsageDaily, UsageDevice, UsageModel } from '@/lib/usage/metrics'
+import UsageCriteriaButton from './UsageCriteria'
+import UsageWeekly from './UsageWeekly'
 
 const PERIODS = [30, 90] as const
 /** 판매모델 보기 — 딜의 '판매모델 구분' 기준 (서버 lib/usage/metrics.ts USAGE_MODELS 와 같은 키) */
@@ -245,9 +247,12 @@ export default function UsageClient() {
         title="사용량"
         description="병원 서버에서 수집한 측정 기록으로 계산합니다. 환자 수는 측정 건수 기준입니다."
         actions={
-          <div className="flex h-9 items-center gap-2 text-[13px] text-muted-foreground">
-            <span aria-hidden className={`h-2 w-2 rounded-full ${collecting ? 'bg-success' : 'bg-gray-400'}`} />
-            <span>{statusText}</span>
+          <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+            <div className="flex h-9 items-center gap-2 text-[13px] text-muted-foreground">
+              <span aria-hidden className={`h-2 w-2 rounded-full ${collecting ? 'bg-success' : 'bg-gray-400'}`} />
+              <span>{statusText}</span>
+            </div>
+            <UsageCriteriaButton />
           </div>
         }
       />
@@ -583,6 +588,9 @@ export default function UsageClient() {
             </table>
           </div>
         </Card>
+
+        {/* 주간 통계 */}
+        <UsageWeekly hospital={hospital} model={model} />
       </div>
     </div>
   )
