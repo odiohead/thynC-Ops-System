@@ -8,7 +8,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { nextSorCode, validateStockOutLines, writeStockOutLines, writeStockOutComponents, resolveStockOutComponents, type StockOutLine, type StockOutComponentRow } from '@/lib/stockOut'
-import { isStockOutPurpose, isStockOutSalesType, STOCK_OUT_SUB_PURPOSES, stockOutTitle, type StockOutPurpose, isStockOutBuildType, STOCK_OUT_POC_EXCLUDED_INVENTORY, type StockOutBuildType } from '@/lib/stockOutShared'
+import { isStockOutPurpose, isStockOutSalesType, STOCK_OUT_SUB_PURPOSES, STOCK_OUT_PROJECT_OPTIONAL, stockOutItemListOf, stockOutTitle, type StockOutPurpose, isStockOutBuildType, STOCK_OUT_POC_EXCLUDED_INVENTORY, type StockOutBuildType } from '@/lib/stockOutShared'
 import { createTicketForStockOut } from '@/lib/ticket-domains/stockOut'
 
 export class StockOutCreateError extends Error {
@@ -36,6 +36,8 @@ export interface StockOutCreatePrepared {
   components: StockOutComponentRow[]
   /** 구축 요청의 유형 GENERAL/LITE/POC (2026-11-18) — 그 외 업무 구분·미지정은 null */
   buildType: StockOutBuildType | null
+  /** 프로젝트에 연결된 영업 유형(임상연구용)의 목적 코드 — sales 없이 sub_purpose만 저장 (2026-11-18) */
+  projectSubPurpose: string | null
   statusId: number | null
   statusName: string | null
   note: string | null
@@ -46,7 +48,9 @@ export interface StockOutCreatePrepared {
 export async function prepareStockOutCreate(body: StockOutCreateBody, client: Prisma.TransactionClient | typeof prisma = prisma): Promise<StockOutCreatePrepared> {
   const purpose: StockOutPurpose = body.purpose === undefined || body.purpose === null ? 'BUILD' : (body.purpose as StockOutPurpose)
   if (!isStockOutPurpose(purpose)) throw new StockOutCreateError('업무 구분이 올바르지 않습니다.')
-  const isSales = isStockOutSalesType(purpose)
+  // 임상연구용은 프로젝트 출고요청에서도 만든다 — 프로젝트 코드가 오면 프로젝트 연결(납품처 없음), 없으면 납품처로 요청 (2026-11-18)
+  const projectCodeIn = typeof body.projectCode === 'string' ? body.projectCode.trim() : ''
+  const isSales = isStockOutSalesType(purpose) && !(projectCodeIn && STOCK_OUT_PROJECT_OPTIONAL.includes(purpose))
   const requestDate = body.requestDate ? new Date(body.requestDate as string) : new Date(NaN)
   if (isNaN(requestDate.getTime())) throw new StockOutCreateError('희망 출고일을 입력하세요.')
   const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null)
@@ -59,11 +63,13 @@ export async function prepareStockOutCreate(body: StockOutCreateBody, client: Pr
     if (!isStockOutBuildType(body.subPurpose)) throw new StockOutCreateError('구축 유형이 올바르지 않습니다.')
     buildType = body.subPurpose
   }
+  let projectSubPurpose: string | null = null
   if (!isSales) {
-    const projectCode = typeof body.projectCode === 'string' ? body.projectCode.trim() : ''
+    const projectCode = projectCodeIn
     if (!projectCode) throw new StockOutCreateError('프로젝트를 선택하세요.')
     project = await client.project.findUnique({ where: { projectCode }, select: { projectCode: true, projectName: true, hospitalCode: true } })
     if (!project) throw new StockOutCreateError('프로젝트를 찾을 수 없습니다.')
+    if (isStockOutSalesType(purpose)) projectSubPurpose = STOCK_OUT_SUB_PURPOSES[purpose][0].code // 프로젝트 연결 임상연구용 — 목적 1개 자동
   } else {
     const options = STOCK_OUT_SUB_PURPOSES[purpose]
     const subPurpose = typeof body.subPurpose === 'string' && body.subPurpose ? body.subPurpose : options.length === 1 ? options[0].code : ''
@@ -89,7 +95,7 @@ export async function prepareStockOutCreate(body: StockOutCreateBody, client: Pr
   let items: StockOutLine[]
   let components: StockOutComponentRow[]
   try {
-    items = await validateStockOutLines(body.items, purpose)
+    items = await validateStockOutLines(body.items, stockOutItemListOf(purpose, buildType))
     if (buildType === 'POC') await assertPocItems(items.map((l) => l.inventoryItemId), client)
     components = await resolveStockOutComponents(items, body.unshipped ?? [], [], client)
   } catch (e) { throw new StockOutCreateError((e as Error).message) }
@@ -108,7 +114,7 @@ export async function prepareStockOutCreate(body: StockOutCreateBody, client: Pr
   const note = typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null
   const title = stockOutTitle({ purpose, subPurpose: sales?.subPurpose, project, destType: sales?.destType, destText: sales?.destText, destHospital: sales?.destHospitalName ? { hospitalName: sales.destHospitalName } : null })
   const asReceiptId = Number.isInteger(body.asReceiptId) ? (body.asReceiptId as number) : null
-  return { purpose, requestDate, project, sales, items, components, buildType, statusId, statusName: statusRow?.name ?? null, note, title, asReceiptId }
+  return { purpose, requestDate, project, sales, items, components, buildType, projectSubPurpose, statusId, statusName: statusRow?.name ?? null, note, title, asReceiptId }
 }
 
 /** 데모(PoC)는 대웅제약재고에서 나가지 않는다 (2026-11-18) — 화면이 그 영역을 숨기지만 서버도 막는다 */
@@ -124,7 +130,7 @@ export async function createStockOutRequestIn(tx: Prisma.TransactionClient, p: S
       sorCode: await nextSorCode(tx),
       projectCode: p.project?.projectCode ?? null,
       purpose: p.purpose,
-      ...(p.buildType ? { subPurpose: p.buildType } : {}),
+      ...(p.buildType ? { subPurpose: p.buildType } : p.projectSubPurpose ? { subPurpose: p.projectSubPurpose } : {}),
       ...(p.sales ? { subPurpose: p.sales.subPurpose, destType: p.sales.destType, destHospitalCode: p.sales.destHospitalCode, destText: p.sales.destText, shipAddress: p.sales.shipAddress, recipient: p.sales.recipient } : {}),
       statusId: p.statusId,
       requestDate: p.requestDate,

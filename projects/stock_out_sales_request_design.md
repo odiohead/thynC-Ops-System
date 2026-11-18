@@ -47,3 +47,15 @@
 ## 8. 남은 것
 - 모바일에서 요청 수정·취소 (현재 PC)
 - 유형·목적을 설정에서 추가하는 기능 (현재 코드 고정 — 유형마다 인벤토리 연결이 있어 변경 빈도 낮음)
+
+## 9. 유형 추가 — 임상연구용·유지보수·데모(PoC) 품목 목록 (2026-11-18 추가, dev2 구현 — 빌드·PROD 미반영)
+
+- **요청(사용자)**: 출고업무 [출고요청]에 '임상연구용'(목적 '임상연구')·'유지보수'(목적 '유지보수') 추가 — 납품처·수령지 등은 기존과 동일, 출고 품목 관리에서 품목 제어. 프로젝트 출고요청에도 '임상연구용' 추가. 데모(PoC)가 출고 품목 관리에 안 보이는 것도 지적 → **결정**: 데모(PoC) 탭을 추가하되 현재 보이는 품목으로 초기 설정 · 임상연구용은 탭 하나를 출고업무·프로젝트 공용
+- **유형 정의**(`lib/stockOutShared.ts`): `STOCK_OUT_PURPOSES`에 `CLINICAL` 추가. 납품처 유형 `STOCK_OUT_SALES_TYPES` = 평가용·판매용·오산영업소·임상연구용·유지보수(배열 순서 = 칩 순서, 이름은 '영업 유형'으로 유지). `MAINTENANCE`는 v2에서 프로젝트 필수 유형으로 정의만 돼 있던 것(품목 0·요청 0)을 납품처 유형으로 전환 — 새 코드를 만들지 않고 기존 탭을 그대로 쓴다. 목적은 각 1개(`CLINICAL_RESEARCH`·`MAINTENANCE`)라 자동 선택, 제목은 목적이 유형 이름과 겹치면 생략(`subPurposeShortLabel` — '유지보수 OO병원')
+- **프로젝트의 임상연구용**: `purpose=CLINICAL` + `project_code`(납품처·수령지·수취인 없음, 목적 자동). 구축의 하위 유형이 아니라 같은 임상연구용 유형이라 목록·알림 세부 유형·통계에서 한 유형으로 묶인다. 프로젝트를 붙일 수 있는 납품처 유형은 `STOCK_OUT_PROJECT_OPTIONAL`(임상연구용뿐), 납품처 형태 판정은 `isStockOutDestMode(purpose, projectCode)`. 프로젝트 폼 칩 `STOCK_OUT_PROJECT_TYPES` = 구축(일반)/구축(라이트)/데모(PoC)/임상연구용. 수정 모드에서는 구축 3종 안에서만 바꿀 수 있고 임상연구용은 고정(업무 구분이 바뀌는 전환은 새로 요청)
+- **품목 목록**: 설정 탭 = `STOCK_OUT_ITEM_LISTS`(구축/데모(PoC)/유지보수/사업업무/평가용/판매용/오산영업소/임상연구용) = `stock_out_item_purposes.purpose`. 요청이 쓰는 목록은 `stockOutItemListOf(purpose, subPurpose)` — 데모(PoC)만 전용 목록(`POC`)이고 나머지는 업무 구분 그대로. 데모(PoC) 요청의 저장 형태(`BUILD`+`POC`)는 바꾸지 않았다. 데모(PoC) 탭은 대웅제약재고를 표시하지 않고 토글 API도 거부(409), 요청 생성·수정의 `assertPocItems`도 유지
+- **DB**(마이그 `20261118150000_stock_out_clinical_maintenance_poc_list`): 유형·목록 CHECK 갱신, `stock_out_requests_kind_check`(유지보수 = 납품처 유형 / 임상연구용 = 프로젝트 연결 또는 납품처 중 하나), 데모(PoC) 목록 초기값 INSERT(구축 목록 중 대웅제약재고 제외 — dev2 31종). **PROD 반영 전 확인**: 기존에 유지보수(`MAINTENANCE`) 요청이 있으면 새 제약에 걸린다(dev2 기준 0건)
+- **화면**: 출고업무 [출고요청]·모바일 등록의 유형 칩 5종(모바일은 한 줄 분할 버튼 → 줄바꿈 칩), 프로젝트 폼 칩 4종(유형을 바꾸면 그 유형의 목록을 다시 불러오고 입력한 수량은 유지), 목록·상세 배지에 임상연구용 표시, 목록 필터 유형에 2종 추가. `GET /api/stock-out-requests?purpose=SALES_TYPES`는 납품처로 요청한 것만(프로젝트 연결 임상연구용 제외)
+- **기기 등록·전표**: 변경 없음 — 전표 유형·기기 용도는 품목이 속한 인벤토리가 정하고, 시리얼 관리 기기가 병원(납품처 병원 또는 프로젝트 병원)으로 나가면 기기현황에 등록(상품유형은 병원 계약 기준, 혼합이면 처리 화면에서 선택)
+- **초기 상태**: 임상연구용·유지보수 탭은 비어 있다 — 관리자가 품목을 체크해야 요청 폼에 품목이 나온다(전용 인벤토리는 만들지 않음)
+- **검증**: `scripts/stock-out-types-smoke.mts` 28/28 · 회귀 `stock-out-build-type-smoke` 26 · `stock-out-components-smoke` 43 · `system-server-split-smoke` 35 · `as-stock-out-link-smoke` 32 · tsc · eslint

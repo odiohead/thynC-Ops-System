@@ -11,16 +11,19 @@
  * 첨부 파일 (2026-11-02): 등록 모드는 파일을 담아 두었다가 생성 직후 업로드, 수정 모드는 StockOutFilesPanel로 즉시 업로드·삭제. 엑셀 등 요청 근거.
  * 영업 유형 모드 (2026-11-05 — stock_out_sales_request_design.md §5): project 미지정이면 출고업무 목록 [출고요청]에서 여는
  * 평가용·판매용·오산영업소 등록/수정 — 유형·목적·납품처(병원 검색/기타)·수령지·수취인 + 항목 아래 입력 가이드. 프로젝트 유형은 여기서 만들지 않음(프로젝트 상세 전용).
- * 구축 요청 유형 (2026-11-18): 프로젝트(구축) 요청은 구축(일반) / 구축(라이트) / 데모(PoC) 중 하나를 반드시 고른다(`subPurpose`로 저장).
- *  일반·라이트는 출고되는 기기가 기기현황에 그 상품유형으로 등록되고, 데모(PoC)는 대웅제약재고에서 나가지 않으므로 그 재고 영역(시스템·구성품 포함)을 숨긴다.
+ * 프로젝트 요청 유형 (2026-11-18): 프로젝트 요청은 구축(일반) / 구축(라이트) / 데모(PoC) / 임상연구용 중 하나를 반드시 고른다.
+ *  구축 3종은 purpose BUILD + `subPurpose`, 임상연구용은 purpose CLINICAL(프로젝트 연결)로 저장된다. 유형마다 품목 목록이 다르다 —
+ *  구축(일반·라이트) = '구축' 탭 · 데모(PoC) = '데모(PoC)' 탭(대웅제약재고 없음) · 임상연구용 = '임상연구용' 탭(출고업무 [출고요청]과 공용).
+ *  일반·라이트는 출고되는 기기가 기기현황에 그 상품유형으로 등록된다. 유형을 바꿔도 입력한 수량은 남고, 새 목록에 없는 품목만 빠진다.
+ * 임상연구용·유지보수 (2026-11-18): 영업 유형 모드(프로젝트 없음)의 유형 칩에 추가 — 목적은 하나라 자동 선택, 나머지 항목은 평가용·판매용과 같다.
  */
 import { useState, useEffect, useMemo, useRef } from 'react'
 import FileDropZone from '@/app/components/FileDropZone' // 첨부 끌어다 놓기 (2026-11-10)
 import { FileSpreadsheet, Paperclip, X } from 'lucide-react'
 import {
-  STOCK_OUT_PURPOSE_LABELS, STOCK_OUT_SALES_TYPES, STOCK_OUT_SUB_PURPOSES, STOCK_OUT_GUIDE_FIELDS, isStockOutSalesType,
-  STOCK_OUT_BUILD_TYPES, STOCK_OUT_BUILD_TYPE_LABELS, STOCK_OUT_POC_EXCLUDED_INVENTORY, isStockOutBuildType,
-  type StockOutPurpose, type StockOutSalesType, type StockOutGuideKey, type StockOutBuildType,
+  STOCK_OUT_PURPOSE_LABELS, STOCK_OUT_SALES_TYPES, STOCK_OUT_SALES_TYPES_TEXT, STOCK_OUT_SUB_PURPOSES, STOCK_OUT_GUIDE_FIELDS, isStockOutSalesType,
+  STOCK_OUT_BUILD_TYPES, STOCK_OUT_PROJECT_TYPES, STOCK_OUT_PROJECT_TYPE_LABELS, STOCK_OUT_ITEM_LIST_LABELS, STOCK_OUT_POC_EXCLUDED_INVENTORY, stockOutProjectTypeOf,
+  type StockOutPurpose, type StockOutSalesType, type StockOutGuideKey, type StockOutProjectType, type StockOutItemList,
 } from '@/lib/stockOutShared'
 import DestHospitalSearch, { type DestHospital } from './DestHospitalSearch'
 import { STOCK_OUT_FILE_MAX_BYTES, STOCK_OUT_FILES_PER_REQUEST, isSpreadsheetFile } from '@/lib/stockOutFiles'
@@ -88,14 +91,19 @@ export default function StockOutRequestFormModal({
   const salesMode = !project
   // 영업 유형 — 등록은 선택, 수정은 고정 (품목 라인이 유형 인벤토리에 묶여 있음)
   const [salesType, setSalesType] = useState<StockOutSalesType | ''>('')
-  const effPurpose: StockOutPurpose | '' = editTarget?.purpose ?? (salesMode ? salesType : purpose)
+  // 프로젝트 요청 유형 (2026-11-18) — 구축(일반)/구축(라이트)/데모(PoC)/임상연구용
+  const [projType, setProjType] = useState<StockOutProjectType | ''>('')
+  const effPurpose: StockOutPurpose | '' = editTarget?.purpose ?? (salesMode ? salesType : projType === 'CLINICAL' ? 'CLINICAL' : purpose)
   const [subPurpose, setSubPurpose] = useState('')
-  // 구축 요청 유형 (2026-11-18) — 구축(일반)/구축(라이트)/데모(PoC). 프로젝트(구축) 요청에서만 쓴다
-  const [buildType, setBuildType] = useState<StockOutBuildType | ''>('')
-  const buildMode = !salesMode && effPurpose === 'BUILD' && !lockItems
-  const isPoc = buildMode && buildType === 'POC'
+  const projMode = !salesMode && !lockItems && (effPurpose === 'BUILD' || effPurpose === 'CLINICAL')
+  const isPoc = projMode && projType === 'POC'
+  // 수정 모드: 임상연구용(프로젝트 연결)은 유형 고정 · 구축 요청은 구축 3종 안에서만 변경(업무 구분이 바뀌는 전환은 새로 요청)
+  const typeLocked = !!editTarget && editTarget.purpose === 'CLINICAL'
+  const typeOptions: readonly StockOutProjectType[] = editTarget ? STOCK_OUT_BUILD_TYPES : STOCK_OUT_PROJECT_TYPES
   // 유형 없이 만들어진 옛 요청(2026-11-18 이전)을 수정할 때는 유형이 선택 사항 — 처리 끝난 옛 요청의 비고 수정 등을 막지 않는다
-  const buildTypeRequired = buildMode && !(editTarget && !isStockOutBuildType(editTarget.subPurpose))
+  const typeRequired = projMode && !(editTarget && stockOutProjectTypeOf(editTarget.purpose, editTarget.subPurpose) === null)
+  /** 품목 목록(설정 > 출고 품목 관리의 탭) — 데모(PoC)만 전용 목록, 나머지는 업무 구분 그대로 */
+  const listKey: StockOutItemList | '' = isPoc ? 'POC' : effPurpose
   const [destType, setDestType] = useState<'HOSPITAL' | 'OTHER' | ''>('')
   const [destHospital, setDestHospital] = useState<DestHospital | null>(null)
   const [destText, setDestText] = useState('')
@@ -148,19 +156,21 @@ export default function StockOutRequestFormModal({
   // 등록 모드에서 유형을 바꾸면 목적 재설정(1개면 자동)
   function pickSalesType(t: StockOutSalesType) {
     setSalesType(t)
+    setQty({}); setUnshipped({}) // 유형마다 출고 인벤토리가 달라 수량은 비운다
     const opts = STOCK_OUT_SUB_PURPOSES[t]
     setSubPurpose(opts.length === 1 ? opts[0].code : '')
   }
 
+  // 품목 목록 — 유형(목록)이 바뀔 때마다 다시 불러온다. 입력값은 건드리지 않는다
   useEffect(() => {
     if (!open) return
-    setError(null)
+    let stale = false
     setLoaded(false)
-    setPendingFiles([])
-    if (!effPurpose) { setItems([]); setKinds([]); setLoaded(true); return } // 영업 유형 미선택
-    fetch(`/api/settings/stock-out-items?purpose=${effPurpose}`)
+    if (!listKey) { setItems([]); setKinds([]); setLoaded(true); return } // 영업 유형 미선택
+    fetch(`/api/settings/stock-out-items?purpose=${listKey}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
+        if (stale) return
         const list: StockOutItemOpt[] = []
         for (const g of (d?.inventories ?? []) as { id: number; name: string; items: Omit<StockOutItemOpt, 'inventoryId' | 'inventoryName'>[] }[]) {
           for (const it of g.items) list.push({ ...it, inventoryId: g.id, inventoryName: g.name })
@@ -175,7 +185,15 @@ export default function StockOutRequestFormModal({
         setKinds(d?.componentKinds ?? [])
         setLoaded(true)
       })
-    setBuildType(isStockOutBuildType(editTarget?.subPurpose) ? editTarget.subPurpose : '')
+    return () => { stale = true }
+  }, [open, editTarget, listKey])
+
+  // 폼을 열 때 입력값 초기화 (등록 = 빈 값, 수정 = 대상 값)
+  useEffect(() => {
+    if (!open) return
+    setError(null)
+    setPendingFiles([])
+    setProjType(editTarget ? stockOutProjectTypeOf(editTarget.purpose, editTarget.subPurpose) ?? '' : '')
     if (editTarget) {
       setRequestDate(editTarget.requestDate)
       setNote(editTarget.note ?? '')
@@ -191,7 +209,7 @@ export default function StockOutRequestFormModal({
       setQty({})
       setUnshipped({})
     }
-  }, [open, editTarget, effPurpose])
+  }, [open, editTarget])
 
   const salesTypeKey = (effPurpose && isStockOutSalesType(effPurpose) ? effPurpose : null) as StockOutSalesType | null
 
@@ -249,7 +267,7 @@ export default function StockOutRequestFormModal({
       const v = validateSales()
       if (v) { setError(v); return }
     }
-    if (buildTypeRequired && !buildType) { setError('유형을 선택하세요 — 구축(일반) / 구축(라이트) / 데모(PoC)'); return }
+    if (typeRequired && !projType) { setError('유형을 선택하세요 — 구축(일반) / 구축(라이트) / 데모(PoC) / 임상연구용'); return }
     if (!requestDate) { setError('희망 출고일을 입력하세요.'); return }
     if (!lockItems && lines.length === 0) { setError('출고 품목 수량을 1개 이상 입력하세요.'); return }
     // 미출고 수량 — 합계가 있는 구성품만, 0 ≤ 미출고 ≤ 합계
@@ -275,7 +293,7 @@ export default function StockOutRequestFormModal({
           shipAddress: shipAddress.trim(), recipient: recipient.trim(),
         }
       : {}
-    const payload = { requestDate, note: note || null, ...(lockItems ? {} : { items: lines, unshipped: unshippedPayload }), ...salesFields, ...(buildMode && buildType ? { subPurpose: buildType } : {}) }
+    const payload = { requestDate, note: note || null, ...(lockItems ? {} : { items: lines, unshipped: unshippedPayload }), ...salesFields, ...(projMode && effPurpose === 'BUILD' && projType && projType !== 'CLINICAL' ? { subPurpose: projType } : {}) }
     const res = editTarget
       ? await fetch(`/api/stock-out-requests/${editTarget.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       : await fetch('/api/stock-out-requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, projectCode: project?.projectCode, purpose: effPurpose }) })
@@ -313,7 +331,7 @@ export default function StockOutRequestFormModal({
           <div>
             <h2 className="text-lg font-bold text-gray-900">
               {editTarget ? `출고요청 수정 — ${editTarget.sorCode}` : '출고요청'}
-              {effPurpose && <span className="ml-1 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">{buildMode && buildType ? STOCK_OUT_BUILD_TYPE_LABELS[buildType] : STOCK_OUT_PURPOSE_LABELS[effPurpose]}</span>}
+              {effPurpose && <span className="ml-1 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">{projMode && projType ? STOCK_OUT_PROJECT_TYPE_LABELS[projType] : STOCK_OUT_PURPOSE_LABELS[effPurpose]}</span>}
             </h2>
             <p className="mt-0.5 text-sm text-gray-500">
               {project ? (
@@ -322,7 +340,7 @@ export default function StockOutRequestFormModal({
                   {project.hospitalName && <span className="ml-1.5 text-gray-400">· {project.hospitalName}</span>}
                 </>
               ) : (
-                '평가용·판매용·오산영업소 출고 — 구축 프로젝트 출고는 프로젝트 상세에서 요청합니다.'
+                `${STOCK_OUT_SALES_TYPES_TEXT} 출고 — 구축 프로젝트 출고는 프로젝트 상세에서 요청합니다.`
               )}
             </p>
           </div>
@@ -388,20 +406,24 @@ export default function StockOutRequestFormModal({
             </>
           )}
 
-          {buildMode && (
+          {projMode && (
             <div data-testid="so-build-type">
-              <label className={label}>유형 {buildTypeRequired ? '*' : <span className="font-normal text-gray-400">(유형 없이 만들어진 요청 — 지정하면 그 유형으로 처리됩니다)</span>}</label>
+              <label className={label}>유형 {typeRequired ? '*' : <span className="font-normal text-gray-400">(유형 없이 만들어진 요청 — 지정하면 그 유형으로 처리됩니다)</span>}</label>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {STOCK_OUT_BUILD_TYPES.map((t) => (
-                  <button key={t} type="button" onClick={() => setBuildType(t)} className={chip(buildType === t)} data-testid={`so-build-type-${t}`}>{STOCK_OUT_BUILD_TYPE_LABELS[t]}</button>
+                {typeLocked ? (
+                  <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-sm text-gray-700">{STOCK_OUT_PROJECT_TYPE_LABELS.CLINICAL} <span className="text-xs text-gray-400">(수정 불가)</span></span>
+                ) : typeOptions.map((t) => (
+                  <button key={t} type="button" onClick={() => setProjType(t)} className={chip(projType === t)} data-testid={`so-build-type-${t}`}>{STOCK_OUT_PROJECT_TYPE_LABELS[t]}</button>
                 ))}
               </div>
               <p className="mt-1 text-[11px] leading-snug text-gray-400">
-                {buildType === 'POC'
-                  ? `데모(PoC)는 ${STOCK_OUT_POC_EXCLUDED_INVENTORY}에서 나가지 않습니다 — 그 재고 품목은 고를 수 없습니다.${pocHiddenQty > 0 ? ` (입력해 둔 ${STOCK_OUT_POC_EXCLUDED_INVENTORY} 수량 ${pocHiddenQty}개는 저장되지 않습니다)` : ''}`
-                  : buildType
-                    ? `출고되는 기기는 병원 기기현황에 ${buildType === 'LITE' ? '라이트형' : '일반형'}으로 등록됩니다.`
-                    : '출고되는 기기를 일반형·라이트형 중 무엇으로 등록할지, 또는 데모(PoC)인지 고르세요.'}
+                {projType === 'POC'
+                  ? `데모(PoC)는 ${STOCK_OUT_POC_EXCLUDED_INVENTORY}에서 나가지 않습니다 — 데모(PoC)용 품목만 고를 수 있습니다.${pocHiddenQty > 0 ? ` (입력해 둔 ${STOCK_OUT_POC_EXCLUDED_INVENTORY} 수량 ${pocHiddenQty}개는 저장되지 않습니다)` : ''}`
+                  : projType === 'CLINICAL'
+                    ? '임상연구 목적 출고입니다 — 임상연구용 품목만 고를 수 있습니다.'
+                    : projType
+                      ? `출고되는 기기는 병원 기기현황에 ${projType === 'LITE' ? '라이트형' : '일반형'}으로 등록됩니다.`
+                      : editTarget ? '구축(일반)·구축(라이트)·데모(PoC) 중에서 고르세요.' : '구축(일반)·구축(라이트)·데모(PoC)·임상연구용 중에서 고르세요.'}
               </p>
             </div>
           )}
@@ -421,12 +443,12 @@ export default function StockOutRequestFormModal({
               <span className="text-xs text-gray-400">{lines.length}종 · 총 {totalQty}개</span>
             </div>
             {guide('items')}
-            {(salesMode && !effPurpose) || (buildTypeRequired && !buildType) ? (
+            {(salesMode && !effPurpose) || (typeRequired && !projType) ? (
               <p className="mt-2 text-sm text-gray-400">유형을 먼저 선택하세요.</p>
             ) : !loaded ? (
               <p className="mt-2 text-sm text-gray-400">품목을 불러오는 중…</p>
             ) : items.length === 0 ? (
-              <p className="mt-2 text-sm text-gray-400">{`'${effPurpose ? STOCK_OUT_PURPOSE_LABELS[effPurpose] : ''}' 출고에 노출된 품목이 없습니다. 설정 > 출고 품목 관리에서 지정하세요.`}</p>
+              <p className="mt-2 text-sm text-gray-400">{`'${listKey ? STOCK_OUT_ITEM_LIST_LABELS[listKey] : ''}' 출고에 노출된 품목이 없습니다. 설정 > 출고 품목 관리에서 지정하세요.`}</p>
             ) : (
               <div className="mt-1.5 space-y-3">
                 {sections.map((inv) => (

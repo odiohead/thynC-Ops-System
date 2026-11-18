@@ -79,7 +79,7 @@ async function main() {
 
     console.log('\n▶ ① 요청 유형 검증')
     try { await mk('XYZ'); check('잘못된 유형 → 거부', false) } catch (e) { check('잘못된 유형 → 거부', e instanceof StockOutCreateError, (e as Error).message) }
-    try { await mk('POC'); check('데모(PoC) + 대웅제약재고 품목 → 거부', false) } catch (e) { check('데모(PoC) + 대웅제약재고 품목 → 거부', e instanceof StockOutCreateError && (e as Error).message.includes('대웅제약재고'), (e as Error).message) }
+    try { await mk('POC'); check('데모(PoC) + 대웅제약재고 품목 → 거부', false) } catch (e) { check('데모(PoC) + 대웅제약재고 품목 → 거부(데모(PoC) 목록에 없음)', e instanceof StockOutCreateError && /대웅제약재고|데모\(PoC\)/.test((e as Error).message), (e as Error).message) }
     const poc = await mk('POC', { itemId: opsItem.id })
     check('데모(PoC) + 운영팀 재고 품목 → 생성, 유형 저장', (await typeOf(poc.id)) === 'POC')
     const pvPoc = await previewFulfillment(poc.id, {})

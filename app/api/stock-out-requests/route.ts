@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import type { Prisma } from '@prisma/client'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { isStockOutPurpose, isStockOutBuildType } from '@/lib/stockOutShared'
+import { isStockOutPurpose, isStockOutBuildType, STOCK_OUT_SALES_TYPES } from '@/lib/stockOutShared'
 import { createStockOutRequest, StockOutCreateError } from '@/lib/stockOutCreate'
 import { notifyTicketCreated } from '@/lib/notify'
 import { notifyStockOutCreated } from '@/lib/stockOutNotify'
@@ -60,7 +60,8 @@ export async function GET(request: NextRequest) {
   else if (createdById) where.createdById = createdById
 
   const purposeParam = sp.get('purpose')
-  if (purposeParam === 'SALES_TYPES') where.purpose = { in: ['EVALUATION', 'SALES', 'OSAN_OFFICE'] }
+  // SALES_TYPES = 납품처로 요청한 것 전부(평가용·판매용·오산영업소·임상연구용·유지보수) — 프로젝트에 연결된 임상연구용은 제외
+  if (purposeParam === 'SALES_TYPES') { where.purpose = { in: [...STOCK_OUT_SALES_TYPES] }; if (where.projectCode === undefined) where.projectCode = null }
   else if (isStockOutPurpose(purposeParam)) where.purpose = purposeParam
 
   const q = sp.get('q')?.trim()

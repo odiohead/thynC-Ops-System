@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { isStockOutPurpose } from '@/lib/stockOutShared'
+import { isStockOutItemList } from '@/lib/stockOutShared'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,7 +34,8 @@ export async function GET(request: NextRequest) {
   const user = await getAuthUser(request)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const purposeParam = request.nextUrl.searchParams.get('purpose')
-  if (purposeParam && !isStockOutPurpose(purposeParam)) return NextResponse.json({ error: '업무 구분이 올바르지 않습니다.' }, { status: 400 })
+  // purpose = 품목 목록(설정 탭) — 업무 구분 + 데모(PoC) (2026-11-18)
+  if (purposeParam && !isStockOutItemList(purposeParam)) return NextResponse.json({ error: '업무 구분이 올바르지 않습니다.' }, { status: 400 })
 
   const items = await prisma.inventoryItem.findMany({
     where: {

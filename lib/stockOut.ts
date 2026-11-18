@@ -4,7 +4,7 @@
  */
 import { Prisma, TicketStatus } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { STOCK_OUT_PURPOSE_LABELS, type StockOutPurpose } from '@/lib/stockOutShared'
+import { STOCK_OUT_ITEM_LIST_LABELS, type StockOutItemList } from '@/lib/stockOutShared'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
@@ -55,8 +55,8 @@ export function canEditStockOutRequest(
 /** 출고요청 라인 */
 export interface StockOutLine { inventoryItemId: number; quantity: number }
 
-/** items 입력 검증 — [{inventoryItemId, quantity}] 최소 1행·해당 업무에 노출된 활성 자재관리 품목·정수 qty>0·중복 금지 (v2 §6) */
-export async function validateStockOutLines(raw: unknown, purpose: StockOutPurpose, keepIds: number[] = []): Promise<StockOutLine[]> {
+/** items 입력 검증 — [{inventoryItemId, quantity}] 최소 1행·해당 품목 목록(설정 탭 — `stockOutItemListOf`)에 노출된 활성 자재관리 품목·정수 qty>0·중복 금지 (v2 §6) */
+export async function validateStockOutLines(raw: unknown, list: StockOutItemList, keepIds: number[] = []): Promise<StockOutLine[]> {
   if (!Array.isArray(raw) || raw.length === 0) throw new Error('출고 품목을 1개 이상 입력하세요.')
   const lines: StockOutLine[] = []
   const seen = new Set<number>()
@@ -75,7 +75,7 @@ export async function validateStockOutLines(raw: unknown, purpose: StockOutPurpo
   const ids = lines.map((l) => l.inventoryItemId)
   const found = await prisma.inventoryItem.findMany({
     where: { id: { in: ids }, isActive: true },
-    select: { id: true, name: true, stockOutKind: { select: { itemId: true } }, stockOutPurposes: { where: { purpose }, select: { purpose: true } } },
+    select: { id: true, name: true, stockOutKind: { select: { itemId: true } }, stockOutPurposes: { where: { purpose: list }, select: { purpose: true } } },
   })
   const byId = new Map(found.map((f) => [f.id, f]))
   for (const id of ids) {
@@ -83,7 +83,7 @@ export async function validateStockOutLines(raw: unknown, purpose: StockOutPurpo
     if (!f) throw new Error('사용할 수 없는 품목이 포함되어 있습니다.')
     // 시스템 구성품 종류는 시스템 수량에서 자동 계산 — 직접 라인으로 받지 않는다 (출고 처리에서 같은 품목이 두 번 잡히는 것 방지)
     if (f.stockOutKind) throw new Error(`'${f.name}'은(는) 시스템 구성품이라 직접 요청할 수 없습니다. 시스템 수량에 따라 자동 계산됩니다.`)
-    if (f.stockOutPurposes.length === 0 && !keep.has(id)) throw new Error(`'${STOCK_OUT_PURPOSE_LABELS[purpose]}' 출고에 노출되지 않은 품목이 포함되어 있습니다. 설정 > 출고 품목 관리를 확인하세요.`)
+    if (f.stockOutPurposes.length === 0 && !keep.has(id)) throw new Error(`'${STOCK_OUT_ITEM_LIST_LABELS[list]}' 출고에 노출되지 않은 품목이 포함되어 있습니다. 설정 > 출고 품목 관리를 확인하세요.`)
   }
   return lines
 }

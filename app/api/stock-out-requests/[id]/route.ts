@@ -6,7 +6,7 @@ import { getAuthUser } from '@/lib/auth'
 import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { canEditStockOutRequest, validateStockOutLines, writeStockOutLines, writeStockOutComponents, resolveStockOutComponents, type StockOutLine, type StockOutComponentRow } from '@/lib/stockOut'
-import { isStockOutSalesType, isStockOutBuildType, STOCK_OUT_SUB_PURPOSES, type StockOutPurpose } from '@/lib/stockOutShared'
+import { isStockOutSalesType, isStockOutDestMode, isStockOutBuildType, stockOutItemListOf, STOCK_OUT_SUB_PURPOSES } from '@/lib/stockOutShared'
 import { assertPocItems } from '@/lib/stockOutCreate'
 import { syncStockOutToTicket } from '@/lib/ticket-domains/stockOut'
 import { notifyTicketChanged } from '@/lib/notify'
@@ -93,8 +93,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
       data.requestDate = d
     }
     if (body.note !== undefined) data.note = typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null
-    // 영업 유형 전용 필드 (목적·납품처·수령지·수취인) — 프로젝트 요청에는 무시
-    if (isStockOutSalesType(existing.purpose)) {
+    // 영업 유형 전용 필드 (목적·납품처·수령지·수취인) — 프로젝트 요청(프로젝트 연결 임상연구용 포함)에는 무시
+    if (isStockOutSalesType(existing.purpose) && isStockOutDestMode(existing.purpose, existing.projectCode)) {
       const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null)
       if (body.subPurpose !== undefined) {
         if (!STOCK_OUT_SUB_PURPOSES[existing.purpose].some((o) => o.code === body.subPurpose)) return NextResponse.json({ error: '목적이 올바르지 않습니다.' }, { status: 400 })
@@ -146,7 +146,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
     if (body.items !== undefined) {
       if (existing.asReceiptId) return NextResponse.json({ error: '분실 AS 연동 출고요청의 품목은 출고 처리 시 입력한 시리얼로 정해집니다 — 품목을 직접 수정할 수 없습니다.' }, { status: 400 }) // 2026-11-10
-      items = await validateStockOutLines(body.items, existing.purpose as StockOutPurpose, existing.items.map((l) => l.inventoryItemId))
+      // 품목 목록 = 요청 유형의 설정 탭(데모(PoC)는 전용 목록 — 유형을 함께 바꾸는 호출이면 새 유형 기준)
+      items = await validateStockOutLines(body.items, stockOutItemListOf(existing.purpose, (data.subPurpose as string | undefined) ?? existing.subPurpose), existing.items.map((l) => l.inventoryItemId))
     }
     // 데모(PoC)는 대웅제약재고 품목 불가 — 유형을 데모로 바꾸거나 데모 요청의 품목을 바꿀 때 검사
     if (existing.purpose === 'BUILD' && ((data.subPurpose ?? existing.subPurpose) === 'POC') && (items || data.subPurpose !== undefined)) {

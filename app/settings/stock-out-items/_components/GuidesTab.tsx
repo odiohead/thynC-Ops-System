@@ -6,7 +6,7 @@
  */
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { STOCK_OUT_GUIDE_FIELDS } from '@/lib/stockOutShared'
+import { STOCK_OUT_GUIDE_FIELDS, STOCK_OUT_SALES_TYPES_TEXT } from '@/lib/stockOutShared'
 
 export default function GuidesTab({ canEdit }: { canEdit: boolean }) {
   const router = useRouter()
@@ -40,7 +40,7 @@ export default function GuidesTab({ canEdit }: { canEdit: boolean }) {
   return (
     <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
       <p className="text-sm text-gray-500">
-        평가용·판매용·오산영업소 출고요청 화면(모바일 앱·PC 출고업무 [출고요청])에서 각 항목 제목 아래에 보이는 안내 문구입니다. 비워 두면 기본 문구가 표시됩니다.
+        {STOCK_OUT_SALES_TYPES_TEXT} 출고요청 화면(모바일 앱·PC 출고업무 [출고요청])에서 각 항목 제목 아래에 보이는 안내 문구입니다. 비워 두면 기본 문구가 표시됩니다.
       </p>
       <div className="mt-4 space-y-4">
         {STOCK_OUT_GUIDE_FIELDS.map((f) => (

@@ -2382,7 +2382,7 @@ model StockOutRequestComponent {
 /// 출고업무 v2 — 업무별 노출 설정 (행 존재 = 체크). 설정 > 출고 품목 관리 탭(구축/유지보수/사업업무)
 model StockOutItemPurpose {
   inventoryItemId Int      @map("inventory_item_id")
-  purpose         String   @db.VarChar(16) // BUILD / MAINTENANCE / BUSINESS (SQL CHECK)
+  purpose         String   @db.VarChar(16) // 품목 목록(설정 탭): BUILD / POC / MAINTENANCE / BUSINESS / EVALUATION / SALES / OSAN_OFFICE / CLINICAL (SQL CHECK — lib/stockOutShared STOCK_OUT_ITEM_LISTS)
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   item InventoryItem @relation("StockOutItemPurposes", fields: [inventoryItemId], references: [id], onDelete: Cascade)

@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation'
 import { ExternalLink } from 'lucide-react'
 import MobileHeader from '../../_components/MobileHeader'
 import { Notice, Section } from '../../_components/ui'
-import { STOCK_OUT_PURPOSE_LABELS, subPurposeLabel, stockOutDestName, type StockOutPurpose } from '@/lib/stockOutShared'
+import { STOCK_OUT_PURPOSE_LABELS, subPurposeLabel, stockOutDestName, stockOutKindLabel, type StockOutPurpose } from '@/lib/stockOutShared'
 import { StatusPill, type MobileStockOutRow } from '../_shared'
 
 interface Detail extends MobileStockOutRow {
@@ -52,7 +52,7 @@ export default function MobileStockOutRequestDetailPage() {
           <>
             <Section title={<span className="flex items-center gap-2">{r.project ? r.project.projectName : STOCK_OUT_PURPOSE_LABELS[r.purpose as StockOutPurpose] ?? r.purpose} <StatusPill status={r.status} /></span>}>
               <dl className="grid grid-cols-[5.5rem_1fr] gap-y-2 text-sm">
-                {(!r.project || r.subPurpose) && row(r.project ? '유형' : '목적', subPurposeLabel(r.purpose, r.subPurpose))}
+                {r.project ? (r.subPurpose ? row('유형', stockOutKindLabel(r.purpose, r.subPurpose)) : null) : row('목적', subPurposeLabel(r.purpose, r.subPurpose))}
                 {!r.project && row(r.destType === 'OTHER' ? '납품처(기타)' : '납품처', stockOutDestName(r))}
                 {row('수령지', r.shipAddress)}
                 {row('수취인', r.recipient)}

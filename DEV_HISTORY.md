@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-11-18 23:57 | 출고요청 유형 추가 — 임상연구용·유지보수(출고업무 [출고요청]) · 프로젝트 임상연구용 · 데모(PoC) 품목 탭 (dev2 빌드·화면 검증 완료 — PROD 미반영)
+
+- **요청**: 출고업무 [출고요청]에 '임상연구용'(목적 '임상연구')·'유지보수'(목적 '유지보수') 추가(납품처·수령지 등 기존과 동일, 출고 품목 관리에서 품목 제어), 프로젝트 출고요청에도 '임상연구용' 추가. 데모(PoC)가 출고 품목 관리에 안 보이는 이유 질문 → 오전에 구축 목록을 공유(대웅제약재고만 숨김)하도록 만들었기 때문. **결정**: 데모(PoC) 탭 추가·현재 보이는 품목으로 초기 설정 / 임상연구용 탭은 출고업무·프로젝트 공용
+- **유형**: `CLINICAL`(임상연구용) 신설, `MAINTENANCE`(유지보수 — 프로젝트 필수 유형으로 정의만 돼 있고 미사용)를 납품처로 요청하는 유형으로 전환. 납품처 유형 5종(평가용·판매용·오산영업소·임상연구용·유지보수), 목적 1개는 자동. 프로젝트의 임상연구용은 `purpose=CLINICAL`에 프로젝트 연결(납품처 없음)
+- **품목 목록**: 설정 탭 = 구축/데모(PoC)/유지보수/사업업무/평가용/판매용/오산영업소/임상연구용. 데모(PoC) 요청은 저장 형태(`BUILD`+`POC`) 그대로, 품목만 전용 목록. 데모(PoC) 탭에는 대웅제약재고 미표시·서버 거부. 임상연구용·유지보수 탭은 빈 채로 시작
+- **DB**: 마이그 `20261118150000_stock_out_clinical_maintenance_poc_list`(dev2 적용·resolve, **PROD 미적용**) — 유형·목록 CHECK, kind_check, 데모(PoC) 목록 초기값 31종
+- **화면**: 요청 폼(프로젝트 칩 4종·유형별 목록 재조회·수량 유지, 납품처 유형 칩 5종), 모바일 등록 유형 칩(5종이라 줄바꿈 칩으로), 목록 배지·필터, 모바일 상세, 설정 탭. 제목·목록에서 '유지보수·유지보수' 같은 중복 표기 생략
+- **검증**: tsc · eslint · `scripts/stock-out-types-smoke.mts` 28/28 · 회귀 `stock-out-build-type-smoke` 26 · `stock-out-components-smoke` 43 · `system-server-split-smoke` 35 · `as-stock-out-link-smoke` 32. dev2 빌드 후 실제 화면 검증(Playwright 28/28 — 설정 탭 8종·데모(PoC) 탭 대웅제약재고 미표시·토글 저장, 출고업무 [출고요청] 유형 5종과 전송 본문, 프로젝트 폼 유형 4종·유형 전환 시 수량 유지, 목록·상세·수정, 모바일 390px 유형 칩). 검증용 요청·목록 체크는 원복. 안내 문구의 '평가용·판매용·오산영업소' 고정 표기는 유형 목록에서 만들어 쓰도록 변경(`STOCK_OUT_SALES_TYPES_TEXT`)
+- 영향 파일: lib/stockOutShared.ts, lib/stockOut.ts, lib/stockOutCreate.ts, app/settings/stock-out-items/_components/GuidesTab.tsx, app/api/stock-out-requests/route.ts, app/api/stock-out-requests/[id]/route.ts, app/api/settings/stock-out-items/route.ts, app/api/settings/stock-out-items/[id]/route.ts, app/settings/stock-out-items/page.tsx, app/stock-out-requests/_components/StockOutRequestFormModal.tsx, app/stock-out-requests/page.tsx, app/m/stock-out-requests/new/page.tsx, app/m/stock-out-requests/[id]/page.tsx, prisma/migrations/20261118150000_stock_out_clinical_maintenance_poc_list, scripts/stock-out-types-smoke.mts(신규), scripts/stock-out-build-type-smoke.mts, projects/stock_out_sales_request_design.md, README.md
+- **PROD 반영 시**: 기존 유지보수(`MAINTENANCE`) 요청 0건 확인 → 마이그 SQL 적용·resolve(제약 3개 교체 + 데모(PoC) 목록 INSERT — DDL·DML, 명시 허락) → 빌드·재시작(스키마 파일 변경 없음 — generate 불필요). 반영 후 관리자가 임상연구용·유지보수 탭 품목을 체크해야 사용 가능. 커밋·PROD 반영 없음
+
 ## 2026-11-18 18:20 | 사용량 — 신규 측정 수(일별·요약·주간) + 기기 기록 없는 측정 제외 오판 수정 (dev2 → dev·PROD)
 
 - 신규 측정 수 = 그날 시작한 측정 수(`startedIn`). 일별 추이 지표(막대, 기본 켬)·일자별 표 열·요약 '기간 평균 신규 측정 수'(오늘 제외) 추가

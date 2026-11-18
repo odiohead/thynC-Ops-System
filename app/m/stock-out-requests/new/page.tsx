@@ -181,11 +181,19 @@ export default function MobileStockOutRequestNewPage() {
         <Section>
           <div className="space-y-5">
             <Block title="유형" guide={guides.type} required>
-              <Segmented
-                value={type as StockOutSalesType}
-                options={STOCK_OUT_SALES_TYPES.map((t) => ({ value: t, label: STOCK_OUT_PURPOSE_LABELS[t] }))}
-                onChange={(v) => setType(v)}
-              />
+              {/* 유형 5종(2026-11-18 임상연구용·유지보수 추가) — 한 줄 분할 버튼에 안 들어가 줄바꿈 칩으로 */}
+              <div className="flex flex-wrap gap-2" data-testid="m-so-types">
+                {STOCK_OUT_SALES_TYPES.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setType(t)}
+                    className={cn('h-10 rounded-full border px-4 text-sm font-medium', type === t ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-foreground')}
+                  >
+                    {STOCK_OUT_PURPOSE_LABELS[t]}
+                  </button>
+                ))}
+              </div>
             </Block>
 
             {type && (

@@ -1,12 +1,13 @@
 /**
  * 출고 품목 노출 토글 (projects/stock_out_v2_design.md §6) — ADMIN 이상
  * PUT /api/settings/stock-out-items/[inventoryItemId] { purpose, enabled } → stock_out_item_purposes INSERT/DELETE (멱등)
+ * purpose = 품목 목록(설정 탭 — 업무 구분 + 데모(PoC), 2026-11-18). 데모(PoC) 목록에는 대웅제약재고 품목을 넣을 수 없다.
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { isStockOutPurpose, STOCK_OUT_PURPOSE_LABELS } from '@/lib/stockOutShared'
+import { isStockOutItemList, STOCK_OUT_ITEM_LIST_LABELS, STOCK_OUT_POC_EXCLUDED_INVENTORY } from '@/lib/stockOutShared'
 
 type Params = { params: { id: string } }
 
@@ -18,7 +19,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })
   const body = await request.json().catch(() => ({}))
   const { purpose, enabled } = body as { purpose?: unknown; enabled?: unknown }
-  if (!isStockOutPurpose(purpose)) return NextResponse.json({ error: '업무 구분이 올바르지 않습니다.' }, { status: 400 })
+  if (!isStockOutItemList(purpose)) return NextResponse.json({ error: '업무 구분이 올바르지 않습니다.' }, { status: 400 })
   if (typeof enabled !== 'boolean') return NextResponse.json({ error: 'enabled는 true/false여야 합니다.' }, { status: 400 })
 
   const item = await prisma.inventoryItem.findUnique({ where: { id }, select: { id: true, name: true, modelName: true, inventory: { select: { name: true } } } })
@@ -30,6 +31,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if (enabled && !existed && (await prisma.stockOutComponentKind.count({ where: { itemId: id } })) > 0) {
     return NextResponse.json({ error: '시스템 구성품 품목은 출고요청 품목으로 노출할 수 없습니다. 시스템 수량에 따라 자동으로 계산됩니다.' }, { status: 409 })
   }
+  if (enabled && !existed && purpose === 'POC' && item.inventory.name === STOCK_OUT_POC_EXCLUDED_INVENTORY) {
+    return NextResponse.json({ error: `데모(PoC)는 ${STOCK_OUT_POC_EXCLUDED_INVENTORY}에서 출고하지 않습니다 — 이 재고의 품목은 데모(PoC) 목록에 넣을 수 없습니다.` }, { status: 409 })
+  }
   if (enabled && !existed) await prisma.stockOutItemPurpose.create({ data: { inventoryItemId: id, purpose } })
   if (!enabled && existed) await prisma.stockOutItemPurpose.delete({ where: key })
 
@@ -40,7 +44,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       action: 'UPDATE',
       resource: 'setting:stock_out_item_purpose',
       resourceId: id,
-      resourceLabel: `${item.inventory.name} / ${item.name}${item.modelName ? ` (${item.modelName})` : ''} — ${STOCK_OUT_PURPOSE_LABELS[purpose]} ${enabled ? '노출' : '숨김'}`,
+      resourceLabel: `${item.inventory.name} / ${item.name}${item.modelName ? ` (${item.modelName})` : ''} — ${STOCK_OUT_ITEM_LIST_LABELS[purpose]} ${enabled ? '노출' : '숨김'}`,
       before: { purpose, enabled: existed },
       after: { purpose, enabled },
     })
