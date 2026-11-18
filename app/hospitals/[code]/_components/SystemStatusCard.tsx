@@ -91,6 +91,19 @@ export default function SystemStatusCard({ hospitalCode, canWrite }: { hospitalC
 
   useEffect(() => { void load() }, [load])
 
+  // 사용량 수집 상태 (볼 권한이 없거나 수집 전이면 아무것도 표시하지 않는다)
+  const [usage, setUsage] = useState<{ servers: number; lastSuccessAt: string | null } | null>(null)
+  useEffect(() => {
+    let alive = true
+    fetch(`/api/usage/status?hospital=${encodeURIComponent(hospitalCode)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (alive && body?.visible && body.collecting) setUsage({ servers: body.servers, lastSuccessAt: body.lastSuccessAt })
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [hospitalCode])
+
   function flash(msg: string) {
     setError(msg)
     setTimeout(() => setError(null), 5000)
@@ -206,9 +219,26 @@ export default function SystemStatusCard({ hospitalCode, canWrite }: { hospitalC
 
   return (
     <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-      <div className="border-b border-gray-200 px-6 py-4">
+      <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-6 py-4">
         <h2 className="text-sm font-semibold text-gray-700">thynC 시스템 현황</h2>
+        {usage && (
+          <a href={`/usage?hospital=${encodeURIComponent(hospitalCode)}`} className="inline-flex items-center gap-1 text-[13px] font-medium text-blue-700 hover:text-blue-800">
+            사용량 보기
+            <svg aria-hidden width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+          </a>
+        )}
       </div>
+
+      {/* 사용량 수집 상태 — 병원 서버에 수집 Agent가 설치돼 데이터가 들어오는 병원만 (메인 → /api/usage HTTP 호출) */}
+      {usage && (
+        <div className="flex items-center gap-4 border-b border-gray-100 px-6 py-3 text-sm">
+          <span className="w-24 shrink-0 text-[13px] text-gray-500">사용량 수집</span>
+          <span className="flex min-w-0 items-center gap-2 text-gray-700">
+            <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-green-600" />
+            수신 중 · 마지막 수신 {usage.lastSuccessAt ? new Date(usage.lastSuccessAt).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(5, 16) : '—'} · 서버 {usage.servers}대
+          </span>
+        </div>
+      )}
 
       {error && <div className="mx-6 mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>}
 

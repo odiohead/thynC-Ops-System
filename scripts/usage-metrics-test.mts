@@ -1,0 +1,107 @@
+/**
+ * 사용량 지표 계산 검증 (projects/usage_collection_design.md §14)
+ *
+ *   npx tsx scripts/usage-metrics-test.mts                    계산 함수(순수) 검사
+ *   npx tsx scripts/usage-metrics-test.mts <병원코드> [30|90]   + 원본 DB 의 실제 데이터로, 화면용 계산과 별도 SQL 계산을 대조 (읽기 전용)
+ */
+import { DAY_SEC, average, dayLabel, dayStats, localDayStart } from '../lib/usage/daily'
+import { getUsageDaily } from '../lib/usage/metrics'
+import { fmtTime, positional, usageDb } from './usage-lib.mts'
+
+let passed = 0
+let failed = 0
+function check(name: string, ok: boolean, detail?: unknown) {
+  if (ok) passed++
+  else failed++
+  console.log(`  ${ok ? '✓' : '✗'} ${name}${!ok && detail !== undefined ? ` — ${JSON.stringify(detail)}` : ''}`)
+}
+
+console.log('■ 계산 함수')
+const D = Date.UTC(2026, 10, 10) / 1000 // 2026-11-10 00:00 (현지 시각을 숫자로 본 값)
+const h = (n: number) => D + n * 3600
+{
+  check('구간이 없으면 0, 0', JSON.stringify(dayStats([], D)) === '{"count":0,"peak":0}')
+  check('하루 안의 한 구간 → 1건, 동시 1', JSON.stringify(dayStats([{ s: h(9), e: h(15) }], D)) === '{"count":1,"peak":1}')
+  check('겹치지 않는 두 구간 → 2건, 동시 1', JSON.stringify(dayStats([{ s: h(1), e: h(5) }, { s: h(6), e: h(9) }], D)) === '{"count":2,"peak":1}')
+  check('겹치는 두 구간 → 2건, 동시 2', JSON.stringify(dayStats([{ s: h(1), e: h(8) }, { s: h(6), e: h(9) }], D)) === '{"count":2,"peak":2}')
+  check('같은 시각에 끝나고 시작 → 동시 1 (교대)', dayStats([{ s: h(1), e: h(6) }, { s: h(6), e: h(9) }], D).peak === 1)
+  check('전날부터 다음 날까지 이어지는 구간 → 그날 1건', dayStats([{ s: h(-30), e: h(40) }], D).count === 1)
+  check('자정에 정확히 끝난 구간은 그날에 세지 않는다', dayStats([{ s: h(-10), e: h(0) }], D).count === 0)
+  check('자정에 시작한 구간은 그날에 센다', dayStats([{ s: h(0), e: h(2) }], D).count === 1)
+  check('다음 날 자정에 시작한 구간은 세지 않는다', dayStats([{ s: h(24), e: h(30) }], D).count === 0)
+  check('길이가 0인 구간도 그날 1건으로 센다', dayStats([{ s: h(3), e: h(3) }], D).count === 1)
+  check('끝이 시작보다 이른 구간도 1건 (1초로 본다)', dayStats([{ s: h(3), e: h(1) }], D).count === 1)
+  const many = Array.from({ length: 12 }, (_, i) => ({ s: h(i), e: h(i + 3) }))
+  check('3시간짜리가 1시간 간격으로 12개 → 12건, 동시 3', JSON.stringify(dayStats(many, D)) === '{"count":12,"peak":3}')
+  check('날짜 표기', dayLabel(D) === '2026-11-10' && dayLabel(D + DAY_SEC) === '2026-11-11')
+  // 2026-11-17 23:30 KST = 14:30 UTC → 현지 오늘은 11-17, 00:30 KST(= 전날 15:30 UTC) → 11-18
+  check('현지 오늘: 23:30 KST', dayLabel(localDayStart(Date.UTC(2026, 10, 17, 14, 30), 9)) === '2026-11-17')
+  check('현지 오늘: 00:30 KST', dayLabel(localDayStart(Date.UTC(2026, 10, 17, 15, 30), 9)) === '2026-11-18')
+  check('평균은 없는 값을 뺀다', average([10, null, 20]) === 15 && average([null]) === null && average([]) === null)
+}
+
+const [hospital, daysArg] = positional
+if (hospital) {
+  const days = daysArg === '90' ? 90 : 30
+  console.log(`\n■ 실제 데이터 대조 — ${hospital}, 최근 ${days}일`)
+  const t0 = Date.now()
+  const daily = await getUsageDaily(hospital, days)
+  const ms = Date.now() - t0
+  console.log(`  화면용 계산 ${ms}ms · 서버 ${daily.receive.servers}대 · 마지막 수신 ${fmtTime(daily.receive.lastSuccessAt)} · 기기 수치 시작 ${daily.deviceDataFrom ?? '-'}`)
+  const db = usageDb()
+  await db.connect()
+  try {
+    // 화면용 계산과 다른 방식(SQL 창 함수)으로 같은 지표를 낸다
+    const sql = await db.query(
+      `WITH m AS (
+         SELECT start_at AS s,
+                CASE WHEN measurement_status = 2
+                     THEN LEAST(end_at, COALESCE(source_gone_at AT TIME ZONE 'Asia/Seoul', now() AT TIME ZONE 'Asia/Seoul'))
+                     ELSE end_at END AS e
+         FROM raw_measurements
+         WHERE hospital_code = $1 AND measurement_status IN (2, 3, 10) AND COALESCE(parent_type, 0) = 0
+           AND start_at IS NOT NULL AND end_at IS NOT NULL
+       ), mm AS (SELECT s, GREATEST(e, s + interval '1 second') AS e FROM m WHERE e >= s),
+       days AS (SELECT generate_series($2::date, $3::date, interval '1 day')::date AS d),
+       ev AS (
+         SELECT d.d, GREATEST(mm.s, d.d::timestamp) AS t, 1 AS delta FROM days d JOIN mm ON mm.s < d.d + 1 AND mm.e > d.d
+         UNION ALL
+         SELECT d.d, LEAST(mm.e, (d.d + 1)::timestamp), -1 FROM days d JOIN mm ON mm.s < d.d + 1 AND mm.e > d.d
+       ), run AS (SELECT d, sum(delta) OVER (PARTITION BY d ORDER BY t, delta) AS c FROM ev)
+       SELECT to_char(days.d, 'YYYY-MM-DD') AS date,
+              (SELECT count(*) FROM mm WHERE mm.s < days.d + 1 AND mm.e > days.d)::int AS measured,
+              COALESCE((SELECT max(c) FROM run WHERE run.d = days.d), 0)::int AS peak
+       FROM days ORDER BY days.d`,
+      [hospital, daily.range.from, daily.range.to],
+    )
+    const byDate = new Map(sql.rows.map((r) => [r.date as string, r]))
+    // 오늘은 두 계산 사이에 시각이 흐르므로 뺀다
+    const diffs = daily.days.filter((d) => !d.today).filter((d) => {
+      const r = byDate.get(d.date)
+      return !r || r.measured !== d.measured || r.peak !== d.peak
+    })
+    check(`측정 환자 수·최대 동시측정 수: ${daily.days.length - 1}일 모두 별도 SQL 계산과 일치`, diffs.length === 0, diffs.slice(0, 3))
+    check('측정 환자 수 ≥ 최대 동시측정 수 (모든 날)', daily.days.every((d) => d.measured >= d.peak))
+    for (const dv of daily.devices) {
+      const known = dv.days.filter((d) => d.uses !== null)
+      check(`${dv.label}: 사용 횟수 ≥ 최대 동시사용 (수치 있는 ${known.length}일)`, known.every((d) => (d.uses as number) >= (d.peak as number)))
+    }
+    const last = daily.days.slice(-7)
+    console.log('\n  최근 7일')
+    console.log('  날짜        측정환자 최대동시 | ' + daily.devices.map((d) => `${d.label}(등록 ${d.registered}) 사용/동시`).join(' | '))
+    last.forEach((d, i) => {
+      const idx = daily.days.length - last.length + i
+      const dev = daily.devices.map((x) => `${x.days[idx].uses ?? '-'}/${x.days[idx].peak ?? '-'}`.padStart(8)).join('              | ')
+      console.log(`  ${d.date}  ${String(d.measured).padStart(6)} ${String(d.peak).padStart(8)} | ${dev}${d.today ? '  (오늘)' : ''}`)
+    })
+    console.log(`\n  요약: 평균 측정 환자 수 ${daily.summary.avgMeasured?.toFixed(1) ?? '-'} · 최대 동시측정 최고 ${daily.summary.maxPeak ?? '-'} (${daily.summary.maxPeakDate ?? '-'}) · 오늘 ${daily.summary.todayMeasured}`)
+    for (const dv of daily.devices) {
+      console.log(`  ${dv.label}: 등록 ${dv.registered}대 · 동시 가동률 평균 ${dv.avgPeakRate === null ? '-' : Math.round(dv.avgPeakRate) + '%'} · 일 사용률 평균 ${dv.avgUseRate === null ? '-' : Math.round(dv.avgUseRate) + '%'}`)
+    }
+  } finally {
+    await db.end()
+  }
+}
+
+console.log(`\n결과: ${passed}개 통과, ${failed}개 실패`)
+process.exit(failed > 0 ? 1 : 0)

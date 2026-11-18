@@ -160,7 +160,8 @@ const res = await fetch(`/api/wiki/pages?refType=hospital&refCode=${code}`)
 ### 9. 사용량 수집 — 수신부·원본 DB는 본체와 분리 (2026-11-18, `projects/usage_collection_design.md`)
 
 - **수신부(`usage-ingest/`)는 본체와 별도 프로세스**(PM2 `thync-usage-ingest-dev`/`-prod`)이고 본체 코드(`lib/*`·Prisma)를 import 하지 않는다. 본체 모듈도 `usage-ingest/`를 import 하지 않는다
-- **원본은 본체와 별도 DB**(`thync_usage`/`thync_usage_dev`, 전용 계정 `thync_usage`). Prisma 모델을 만들지 말 것 — 스키마 변경은 `usage-ingest/migrations/NNNN_설명.sql` 추가 → `npm run build:usage-ingest` → `node usage-ingest/dist/migrate.mjs`. 본체에서는 `.env`의 `USAGE_DATABASE_URL`로만 접속(`scripts/usage-lib.mts`)
+- **원본은 본체와 별도 DB**(`thync_usage`/`thync_usage_dev`, 전용 계정 `thync_usage`). Prisma 모델을 만들지 말 것 — 스키마 변경은 `usage-ingest/migrations/NNNN_설명.sql` 추가 → `npm run build:usage-ingest` → `node usage-ingest/dist/migrate.mjs`. 본체에서는 `.env`의 `USAGE_DATABASE_URL`로만 접속 — 화면·API는 `lib/usage/db.ts`(조회 전용 세션, 쓰기 불가), 운영 스크립트는 `scripts/usage-lib.mts`
+- **사용량 지표의 정의는 `lib/usage/metrics.ts`·`lib/usage/daily.ts` 단일 소스** — 측정 환자 수·최대 동시측정·기기 사용 구간·가동률 계산을 화면이나 다른 라우트에 다시 쓰지 말 것. 메인 모듈(병원 상세 등)은 `lib/usage`를 import 하지 않고 `/api/usage/*`를 HTTP로 호출한다(위키와 같은 경계). 정의를 바꾸면 `npx tsx scripts/usage-metrics-test.mts <병원코드>`로 별도 SQL 계산과 대조
 - **원본 행은 지우지 않는다** — 병원에서 사라진 것은 표시만(`gone_at`·`source_gone_at`·`removed_at`). 병원 DB에서 지워진 뒤에는 원본 DB가 유일한 사본
 - **Agent(`agents/thync-usage-agent/`)는 조회 전용** — 쿼리는 `source.go`에만 두고, 환자 식별 컬럼·`SELECT *`·쓰기 문장을 넣지 말 것(`agent_test.go`가 검사). 중앙에서 쿼리·명령을 내려받는 기능, 자동 업데이트, 포트를 여는 기능 추가 금지
 - **수신부는 본체와 따로 빌드·재시작** — `npm run build`(본체)에는 수신부 빌드가 들어 있지 않다. `usage-ingest/`가 바뀐 배포에서만 `npm run build:usage-ingest` → (스키마 파일이 추가됐으면 `node usage-ingest/dist/migrate.mjs`) → `pm2 restart thync-usage-ingest-<env>`. 본체만 바뀐 배포에서는 수신부를 건드리지 않는다. 재시작 중 실패한 전송은 Agent가 다음 실행 때 다시 보낸다

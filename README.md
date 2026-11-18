@@ -416,6 +416,12 @@ agents/thync-usage-agent/             # 병원 서버용 사용량 수집 Agent 
 
 scripts/usage-*.mts                   # 사용량 수집 운영 스크립트 — issue-token(발급·목록·폐기)·status(수신 현황)·rewind(수신 위치 되돌리기)·move-hospital(병원 코드 변경 반영)·collect-smoke(끝단 검증, dev2 전용)·lib(공용)
 
+app/usage/                            # 사용량 화면 (2026-11-18) — page.tsx(권한 게이트)·UsageClient.tsx(병원·기간 선택 → 요약 한 줄 → 일별 추이 → 기기별 가동률 3종 → 일자별 표)
+app/api/usage/                        # 사용량 조회 API — hospitals(수집 중인 병원)·daily(일별 지표)·status(병원 상세의 진입 링크용) + _shared.ts(공통 게이트)
+lib/usage/                            # 사용량 지표 — metrics.ts(원본 DB에서 바로 계산, 정의 단일 소스)·daily.ts(일별 건수·최대 동시 순수 함수)·db.ts(원본 DB 조회 전용 접속)·access.ts(접근 게이트)
+scripts/usage-metrics-test.mts        # 사용량 지표 계산 검증 — 순수 함수 검사 + (병원코드를 주면) 화면용 계산과 별도 SQL 계산 대조
+scripts/seed-usage-nav.sql            # 사용량 메뉴 등록(멱등) — 운영현황 아래, SEERS 소속 ADMIN 이상
+
 prisma/
 ├── schema.prisma                     # DB 스키마
 ├── seed.ts                           # 기본 데이터 시드 (Organization, 상담유형, 문서유형 포함)
@@ -1671,6 +1677,10 @@ prisma/
 - **지우지 않는 원본**: 병원 DB는 보관 기한(기본 90일)이 지나면 기기 정보를 지우고, 기기 교체는 이전 시리얼을 덮어쓴다. 원본 DB에는 이전 기기 행과 상태 이력이 남고, 병원에서 삭제된 측정은 표시만 된다
 - **수신 현황**: `npx tsx scripts/usage-status.mts [병원코드] [--stale=48]` — 서버별 마지막 성공, Agent 버전, 받은 양, 원본 DB 크기
 - **용량 안전장치**: 원본 DB가 `USAGE_MAX_BYTES`를 넘으면 기기 상태 이력 수신만 멈춘다(병원 DB에 남아 있어 상한을 풀면 이어서 들어옴)
+- **화면 `/usage`** (2026-11-18, 권한: ADMIN 이상 또는 `usage.view` + SEERS 소속 · 디자인은 Claude 디자인 캔버스 '사용량 화면 시안'): 병원과 기간(최근 30일/90일)을 고르면 ① 요약 한 줄 — 기간 평균 측정 환자 수·최대 동시측정 최고·오늘 측정 환자 수 ② 일별 추이(막대 = 측정 환자 수, 선 = 최대 동시측정 수) ③ **기기별 가동률** — 심전계·산소포화도·카트온 각각 등록 기기 수, 동시 가동률(최대 동시사용 ÷ 등록 기기), 일 사용률(일 사용 횟수 ÷ 등록 기기) ④ 일자별 표. 미리 집계하지 않고 화면을 열 때 원본 DB에서 계산한다(`lib/usage/metrics.ts`)
+  - **정의**: 측정 환자 수 = 그날 걸쳐 있던 측정 건수(환자 식별값을 받지 않으므로 측정 건수로 셈, 대기 상태·멀티리드 자식 측정 제외) · 최대 동시측정 수 = 그날 한 시점에 동시에 진행 중이던 측정의 최대 수 · 기기 사용 = (측정 × 기기 종류 × 시리얼) 단위, 구간은 첫 상태 이력 ~ 측정 끝(교체돼 빠진 기기는 마지막 상태 이력까지) · 하루의 경계는 병원 현지 자정(Asia/Seoul) · 진행 중인 오늘은 평균에서 제외
+  - 등록 기기 수는 병원 서버의 기기 등록 현재 값(반납 제외)이라 과거 날짜에도 같은 분모를 쓴다. 보관 기한이 지나 기기 정보가 지워진 측정이 걸친 날은 기기별 수치를 내지 않는다
+  - 병원 상세 'thynC 시스템 현황' 카드에 수집 중인 병원만 '사용량 보기' 링크와 수신 상태 한 줄 표시(메인 → `/api/usage/status` HTTP 호출)
 - **검증**: `npx tsx scripts/usage-collect-smoke.mts` (dev2 전용 — 로컬 MySQL의 빈 제품 DB에 가상 데이터를 넣고 Agent → 수신부 → 원본 DB를 끝까지 돌림)
 
 ---
@@ -2354,6 +2364,16 @@ npm run dev
 | POST | `/api/usage-ingest/v1/handshake` | 실행 시작 — 서버 이름·Agent 버전·DB 시각을 보내고, 실행 번호·측정 기준 시각·연도별 받은 번호·대조할 차례 여부를 받는다 (`dry_run`이면 아무것도 바꾸지 않음) |
 | POST | `/api/usage-ingest/v1/push` | 종류별 행 전송 — `organizations`·`wards`·`device_registers`·`measurements`(기기 포함)·`device_status`·`measurement_index`·`reconcile_measurements`·`status_check`. 요청당 5,000행 |
 | POST | `/api/usage-ingest/v1/finish` | 실행 결과 보고 — 성공이면 수신 기준 시각 전진, 전체 수신 종류의 사라진 행 표시 |
+
+### 사용량 조회 (본체 — `/usage` 화면용, 2026-11-18)
+
+권한: (ADMIN 이상 또는 `usage.view`) + SEERS 소속. 원본 DB를 조회 전용으로 읽는다(`.env` `USAGE_DATABASE_URL` 없으면 503).
+
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET  | `/api/usage/hospitals` | 사용량 데이터가 들어오는 병원 목록 — 병원명·서버 수·마지막 수신 시각 |
+| GET  | `/api/usage/daily?hospital=&days=30\|90` | 병원의 일별 지표 — 측정 환자 수·최대 동시측정 수, 기기 종류별 사용 횟수·최대 동시사용·등록 기기 수·기간 평균 가동률, 요약, 수신 상태 |
+| GET  | `/api/usage/status?hospital=` | 병원의 수집 상태(병원 상세의 링크 표시 판단용) — 볼 권한이 없거나 수집 전이면 `visible:false`/`collecting:false` |
 
 ---
 

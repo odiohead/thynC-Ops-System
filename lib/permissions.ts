@@ -28,6 +28,13 @@ export const PERMISSIONS = {
     description:
       '영업현황(대시보드·도입현황)·병원 영업 정보 열람과 편집. VIEWER 등급은 열람만 가능(편집은 USER 등급 이상). 단 SEERS 소속 요건은 별개 축이라 이 권한으로 풀리지 않음',
   },
+  // 사용량 (2026-11-18 — projects/usage_collection_design.md §14)
+  'usage.view': {
+    label: '사용량 조회',
+    module: '사용량',
+    description:
+      '병원별 사용량 화면(/usage — 일별 측정 환자 수·최대 동시측정 수·기기별 가동률) 열람. ADMIN 이상은 이 권한 없이도 볼 수 있다. SEERS 소속 요건은 별개 축이라 이 권한으로 대체되지 않는다.',
+  },
   // 카탈로그 v1.2 (2026-08-06)
   'inventory.admin': {
     label: '자재 관리자',

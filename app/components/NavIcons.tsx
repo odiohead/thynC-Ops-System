@@ -191,6 +191,14 @@ export function TrendingUpIcon() {
 }
 
 /** 디바이스 원장 — 웨어러블 기기(밴드 + 본체 + 파형) 외곽선 */
+export function ActivityIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12h4l3-8 4 16 3-8h4" />
+    </svg>
+  )
+}
+
 export function DeviceIcon() {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
@@ -255,6 +263,7 @@ export const ICON_MAP: Record<string, () => ReactNode> = {
   'ticket': TicketIcon,
   'trending-up': TrendingUpIcon,
   'device': DeviceIcon,
+  'activity': ActivityIcon,
 }
 
 export function getMenuIcon(iconKey: string | null | undefined): ReactNode | null {
