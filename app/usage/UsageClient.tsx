@@ -28,16 +28,29 @@ const DEVICE_SLOTS = [
 ] as const
 const DOW = ['일', '월', '화', '수', '목', '금', '토']
 
-/** 일별 추이에서 켜고 끌 수 있는 지표. 가동률은 동시 가동률(최대 동시사용 ÷ 계약·공급 수량) 기준 */
-const TREND_SERIES = [
+/**
+ * 일별 추이 필터 — 지표와 기기를 각각 켜고 끈다.
+ * 건수 지표(측정 환자 수·최대 동시측정 수)는 병원 전체, 비율 지표(동시 가동률·일 사용률)는 켠 기기마다 한 줄씩 그린다.
+ */
+const TREND_METRICS = [
   { key: 'measured', label: '측정 환자 수', unit: 'count' },
   { key: 'peak', label: '최대 동시측정 수', unit: 'count' },
-  { key: 'ecgRate', label: '심전계 가동률', unit: 'rate', device: 'ecg' },
-  { key: 'spo2Rate', label: '산소포화도 가동률', unit: 'rate', device: 'spo2' },
+  { key: 'peakRate', label: '동시 가동률', unit: 'rate', dash: '6 3' },
+  { key: 'useRate', label: '일 사용률', unit: 'rate', dash: '2 3' },
 ] as const
-type TrendKey = (typeof TREND_SERIES)[number]['key']
-const TREND_PREF_KEY = 'usage.trend.series'
-const ALL_TREND_ON: Record<TrendKey, boolean> = { measured: true, peak: true, ecgRate: true, spo2Rate: true }
+type TrendMetric = (typeof TREND_METRICS)[number]['key']
+type RateMetric = Extract<TrendMetric, 'peakRate' | 'useRate'>
+type DeviceKey = (typeof DEVICE_SLOTS)[number]['key']
+const RATE_METRICS = TREND_METRICS.filter((m): m is Extract<(typeof TREND_METRICS)[number], { unit: 'rate' }> => m.unit === 'rate')
+const TREND_PREF_KEY = 'usage.trend.filter'
+type TrendFilter = { metrics: Record<TrendMetric, boolean>; devices: Record<DeviceKey, boolean> }
+const DEFAULT_TREND: TrendFilter = {
+  metrics: { measured: true, peak: true, peakRate: true, useRate: false },
+  devices: { ecg: true, spo2: true, cart: true },
+}
+const rateKey = (device: DeviceKey, metric: RateMetric) => `${device}_${metric}`
+/** 일별 추이 한 줄 — 기기별 비율은 `${기기}_${지표}` 키 (수치가 없는 날은 null) */
+type TrendRow = { label: string; measured: number; peak: number; today: boolean; [rate: string]: string | number | boolean | null }
 
 type Hospital = { hospitalCode: string; hospitalName: string; servers: number; lastSuccessAt: string | null }
 type Daily = UsageDaily & { hospitalName: string }
@@ -58,11 +71,11 @@ export default function UsageClient() {
   const params = useSearchParams()
   const chart = useChartTheme()
   const lineColor = chart.dark ? '#FB923C' : '#C2410C' // 흰 바탕에서도 구분되는 진한 주황
-  const trendColor: Record<TrendKey, string> = {
-    measured: chart.blue,
-    peak: lineColor,
-    ecgRate: chart.dark ? '#34D399' : '#047857',
-    spo2Rate: chart.dark ? '#C4B5FD' : '#6D28D9',
+  const countColor: Record<'measured' | 'peak', string> = { measured: chart.blue, peak: lineColor }
+  const deviceColor: Record<DeviceKey, string> = {
+    ecg: chart.dark ? '#34D399' : '#047857',
+    spo2: chart.dark ? '#C4B5FD' : '#6D28D9',
+    cart: chart.dark ? '#F472B6' : '#BE185D',
   }
   const axis = { tick: { fontSize: 11, fill: chart.tick }, axisLine: false as const, tickLine: false as const }
 
@@ -76,16 +89,17 @@ export default function UsageClient() {
   const [data, setData] = useState<Daily | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [trendOn, setTrendOn] = useState<Record<TrendKey, boolean>>(ALL_TREND_ON)
+  const [trendFilter, setTrendFilter] = useState<TrendFilter>(DEFAULT_TREND)
 
-  // 켜 둔 지표는 이 브라우저에 기억한다 (없거나 읽을 수 없으면 전부 켠 상태)
+  // 켜 둔 지표·기기는 이 브라우저에 기억한다 (없거나 읽을 수 없으면 기본값)
   useEffect(() => {
     try {
       const saved = JSON.parse(window.localStorage.getItem(TREND_PREF_KEY) ?? 'null')
       if (saved && typeof saved === 'object') {
-        setTrendOn((prev) => {
-          const next = { ...prev }
-          for (const s of TREND_SERIES) if (typeof saved[s.key] === 'boolean') next[s.key] = saved[s.key]
+        setTrendFilter((prev) => {
+          const next: TrendFilter = { metrics: { ...prev.metrics }, devices: { ...prev.devices } }
+          for (const m of TREND_METRICS) if (typeof saved.metrics?.[m.key] === 'boolean') next.metrics[m.key] = saved.metrics[m.key]
+          for (const d of DEVICE_SLOTS) if (typeof saved.devices?.[d.key] === 'boolean') next.devices[d.key] = saved.devices[d.key]
           return next
         })
       }
@@ -93,9 +107,12 @@ export default function UsageClient() {
       // 저장소를 쓸 수 없는 환경 — 기본값으로 둔다
     }
   }, [])
-  const toggleTrend = useCallback((key: TrendKey) => {
-    setTrendOn((prev) => {
-      const next = { ...prev, [key]: !prev[key] }
+  const toggleTrend = useCallback((group: 'metrics' | 'devices', key: string) => {
+    setTrendFilter((prev) => {
+      const next: TrendFilter =
+        group === 'metrics'
+          ? { ...prev, metrics: { ...prev.metrics, [key]: !prev.metrics[key as TrendMetric] } }
+          : { ...prev, devices: { ...prev.devices, [key]: !prev.devices[key as DeviceKey] } }
       try {
         window.localStorage.setItem(TREND_PREF_KEY, JSON.stringify(next))
       } catch {
@@ -181,30 +198,37 @@ export default function UsageClient() {
   }, [collecting, data])
   const trend = useMemo(() => {
     if (!collecting) return []
-    // 동시 가동률(%) = 그날 최대 동시사용 수 ÷ 그날의 계약·공급 수량. 수량이 없거나 수치가 없는 날은 비운다
-    const rate = (key: string, i: number) => {
-      const day = deviceByKey.get(key)?.days[i]
-      return !day || !day.capacity || day.peak === null ? null : (day.peak / day.capacity) * 100
-    }
-    return data!.days.map((d, i) => ({
-      label: md(d.date),
-      measured: d.measured,
-      peak: d.peak,
-      ecgRate: rate('ecg', i),
-      spo2Rate: rate('spo2', i),
-      today: d.today,
-    }))
+    // 동시 가동률(%) = 그날 최대 동시사용 수 ÷ 계약·공급 수량, 일 사용률(%) = 그날 사용 횟수 ÷ 계약·공급 수량. 수량이나 수치가 없는 날은 비운다
+    return data!.days.map((d, i) => {
+      const row: TrendRow = { label: md(d.date), measured: d.measured, peak: d.peak, today: d.today }
+      for (const slot of DEVICE_SLOTS) {
+        const day = deviceByKey.get(slot.key)?.days[i]
+        row[rateKey(slot.key, 'peakRate')] = !day || !day.capacity || day.peak === null ? null : (day.peak / day.capacity) * 100
+        row[rateKey(slot.key, 'useRate')] = !day || !day.capacity || day.uses === null ? null : (day.uses / day.capacity) * 100
+      }
+      return row
+    })
   }, [collecting, data, deviceByKey])
-  // 계약·공급 수량이 없는 종류의 가동률은 낼 수 없다
-  const trendAvailable = (s: (typeof TREND_SERIES)[number]) =>
-    !('device' in s) || !collecting || !!deviceByKey.get(s.device)?.days.some((d) => !!d.capacity)
-  const showCount = trendOn.measured || trendOn.peak
-  const showRate = (trendOn.ecgRate && trendAvailable(TREND_SERIES[2])) || (trendOn.spo2Rate && trendAvailable(TREND_SERIES[3]))
-  const rateTop = useMemo(() => {
-    let max = 100
-    for (const r of trend) for (const v of [r.ecgRate, r.spo2Rate]) if (v !== null && v > max) max = v
-    return Math.ceil(max / 50) * 50
-  }, [trend])
+  // 계약·공급 수량이 없는 기기의 비율은 낼 수 없다
+  const deviceAvailable = (key: DeviceKey) => !collecting || !!deviceByKey.get(key)?.days.some((d) => !!d.capacity)
+  const anyDeviceAvailable = DEVICE_SLOTS.some((d) => deviceAvailable(d.key))
+  const rateLines = RATE_METRICS.filter((m) => trendFilter.metrics[m.key]).flatMap((m) =>
+    DEVICE_SLOTS.filter((d) => trendFilter.devices[d.key] && deviceAvailable(d.key)).map((d) => ({
+      key: rateKey(d.key, m.key),
+      name: `${d.label} ${m.label}`,
+      color: deviceColor[d.key],
+      dash: m.dash,
+    })),
+  )
+  const showCount = trendFilter.metrics.measured || trendFilter.metrics.peak
+  const showRate = rateLines.length > 0
+  let rateMax = 100
+  for (const r of trend)
+    for (const l of rateLines) {
+      const v = r[l.key]
+      if (typeof v === 'number' && v > rateMax) rateMax = v
+    }
+  const rateTop = Math.ceil(rateMax / 50) * 50
   const tableRows = useMemo(() => (collecting ? [...data!.days].reverse() : []), [collecting, data])
 
   const statusText = !hospital
@@ -299,8 +323,8 @@ export default function UsageClient() {
         </div>
         {model !== 'all' && (
           <p className="-mt-2 text-xs text-muted-foreground">
-            {MODELS.find((m) => m.key === model)?.label} 기준 — 기기는 기기 현황의 계약건(딜) 판매모델로 나누고, 계약건이 연결되지 않은 기기와 기기 정보가 없는 측정은 일반형으로 셉니다.
-            측정 환자 수는 그 판매모델 기기가 붙은 측정, 가동률의 분모는 그 판매모델 딜의 계약 수량(공급 수량은 일반형)입니다.
+            {MODELS.find((m) => m.key === model)?.label} 기준 — 기기는 병원 상세 ‘도입 현황’의 판매모델로 나눕니다(그 기기의 계약·공급이 한 판매모델뿐이면 그 모델, 섞였으면 기기 현황의 계약건 — 연결이 없으면 일반형, 카트온은 사용량비례형).
+            측정 환자 수는 심전계·산소포화도의 판매모델로(없으면 카트온), 가동률의 분모는 그 판매모델 딜의 계약 수량(공급 수량은 일반형, 카트온은 사용량비례형)입니다.
           </p>
         )}
 
@@ -327,38 +351,66 @@ export default function UsageClient() {
         <Card>
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border px-5 py-3.5">
             <h2 className="text-sm font-semibold">일별 추이</h2>
-            <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-              <legend className="sr-only">표시할 지표</legend>
-              {TREND_SERIES.map((s) => {
-                const available = trendAvailable(s)
-                return (
-                  <label
-                    key={s.key}
-                    className={`flex h-7 items-center gap-1.5 text-xs ${available ? 'cursor-pointer text-foreground' : 'text-muted-foreground'}`}
-                    title={available ? undefined : '계약·공급 수량이 없어 가동률을 낼 수 없습니다'}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={trendOn[s.key] && available}
-                      disabled={!available}
-                      onChange={() => toggleTrend(s.key)}
-                      className="h-3.5 w-3.5"
-                      style={{ accentColor: trendColor[s.key] }}
-                    />
-                    <span
-                      aria-hidden
-                      className={s.key === 'measured' ? 'h-2.5 w-2.5 rounded-sm' : 'h-0 w-4 border-t-[3px]'}
-                      style={
-                        s.key === 'measured'
-                          ? { background: trendColor[s.key] }
-                          : { borderColor: trendColor[s.key], borderTopStyle: s.unit === 'rate' ? 'dashed' : 'solid' }
-                      }
-                    />
-                    {s.label}
-                  </label>
-                )
-              })}
-            </fieldset>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
+              <fieldset className="flex flex-wrap items-center gap-x-3.5 gap-y-1">
+                <legend className="float-left mr-2 text-[11px] font-medium text-muted-foreground">지표</legend>
+                {TREND_METRICS.map((m) => {
+                  const available = m.unit === 'count' || anyDeviceAvailable
+                  return (
+                    <label
+                      key={m.key}
+                      className={`flex h-7 items-center gap-1.5 text-xs ${available ? 'cursor-pointer text-foreground' : 'text-muted-foreground'}`}
+                      title={available ? undefined : '계약·공급 수량이 있는 기기가 없어 비율을 낼 수 없습니다'}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={trendFilter.metrics[m.key] && available}
+                        disabled={!available}
+                        onChange={() => toggleTrend('metrics', m.key)}
+                        className="h-3.5 w-3.5"
+                        style={m.unit === 'count' ? { accentColor: countColor[m.key as 'measured' | 'peak'] } : undefined}
+                      />
+                      <span
+                        aria-hidden
+                        className={m.key === 'measured' ? 'h-2.5 w-2.5 rounded-sm' : 'h-0 w-4 border-t-[3px]'}
+                        style={
+                          m.unit === 'count'
+                            ? m.key === 'measured'
+                              ? { background: countColor.measured }
+                              : { borderColor: countColor.peak }
+                            : { borderColor: chart.tick, borderTopStyle: m.key === 'peakRate' ? 'dashed' : 'dotted' }
+                        }
+                      />
+                      {m.label}
+                    </label>
+                  )
+                })}
+              </fieldset>
+              <fieldset className="flex flex-wrap items-center gap-x-3.5 gap-y-1">
+                <legend className="float-left mr-2 text-[11px] font-medium text-muted-foreground">기기</legend>
+                {DEVICE_SLOTS.map((d) => {
+                  const available = deviceAvailable(d.key)
+                  return (
+                    <label
+                      key={d.key}
+                      className={`flex h-7 items-center gap-1.5 text-xs ${available ? 'cursor-pointer text-foreground' : 'text-muted-foreground'}`}
+                      title={available ? '가동률·사용률 선에 적용됩니다' : '계약·공급 수량이 없어 가동률을 낼 수 없습니다'}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={trendFilter.devices[d.key] && available}
+                        disabled={!available}
+                        onChange={() => toggleTrend('devices', d.key)}
+                        className="h-3.5 w-3.5"
+                        style={{ accentColor: deviceColor[d.key] }}
+                      />
+                      <span aria-hidden className="h-2.5 w-2.5 rounded-full" style={{ background: deviceColor[d.key] }} />
+                      {d.label}
+                    </label>
+                  )
+                })}
+              </fieldset>
+            </div>
           </div>
           <div className="px-3 pb-3 pt-5 sm:px-5">
             {collecting ? (
@@ -380,28 +432,37 @@ export default function UsageClient() {
                     <Tooltip
                       contentStyle={chart.tooltip}
                       cursor={{ fill: chart.grid, opacity: 0.5 }}
-                      formatter={(v, name) => (String(name).includes('가동률') ? `${Math.round(Number(v))}%` : Number(v).toLocaleString())}
+                      formatter={(v, name) => (/가동률|사용률/.test(String(name)) ? `${Math.round(Number(v))}%` : Number(v).toLocaleString())}
                     />
-                    {trendOn.measured && (
-                      <Bar yAxisId="count" dataKey="measured" name="측정 환자 수" fill={trendColor.measured} maxBarSize={22} radius={[3, 3, 0, 0]} isAnimationActive={false}>
+                    {trendFilter.metrics.measured && (
+                      <Bar yAxisId="count" dataKey="measured" name="측정 환자 수" fill={countColor.measured} maxBarSize={22} radius={[3, 3, 0, 0]} isAnimationActive={false}>
                         {trend.map((r) => (
                           <Cell key={r.label} fillOpacity={r.today ? 0.45 : 1} />
                         ))}
                       </Bar>
                     )}
-                    {trendOn.peak && (
-                      <Line yAxisId="count" type="linear" dataKey="peak" name="최대 동시측정 수" stroke={trendColor.peak} strokeWidth={2.5} dot={false} isAnimationActive={false} />
+                    {trendFilter.metrics.peak && (
+                      <Line yAxisId="count" type="linear" dataKey="peak" name="최대 동시측정 수" stroke={countColor.peak} strokeWidth={2.5} dot={false} isAnimationActive={false} />
                     )}
-                    {trendOn.ecgRate && trendAvailable(TREND_SERIES[2]) && (
-                      <Line yAxisId="rate" type="linear" dataKey="ecgRate" name="심전계 가동률" stroke={trendColor.ecgRate} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls={false} isAnimationActive={false} />
-                    )}
-                    {trendOn.spo2Rate && trendAvailable(TREND_SERIES[3]) && (
-                      <Line yAxisId="rate" type="linear" dataKey="spo2Rate" name="산소포화도 가동률" stroke={trendColor.spo2Rate} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls={false} isAnimationActive={false} />
-                    )}
+                    {rateLines.map((l) => (
+                      <Line
+                        key={l.key}
+                        yAxisId="rate"
+                        type="linear"
+                        dataKey={l.key}
+                        name={l.name}
+                        stroke={l.color}
+                        strokeWidth={2}
+                        strokeDasharray={l.dash}
+                        dot={false}
+                        connectNulls={false}
+                        isAnimationActive={false}
+                      />
+                    ))}
                   </ComposedChart>
                 </ResponsiveContainer>
                 <p className="px-2 pt-1 text-[11px] text-muted-foreground">
-                  왼쪽 축 = 건수(측정 환자 수·최대 동시측정 수), 오른쪽 축 = 가동률(%, 그날 최대 동시사용 수 ÷ 계약·공급 수량)
+                  왼쪽 축 = 건수(측정 환자 수·최대 동시측정 수, 병원 전체), 오른쪽 축 = 비율(%) — 동시 가동률 = 그날 최대 동시사용 수 ÷ 계약·공급 수량(긴 점선), 일 사용률 = 그날 사용 횟수 ÷ 계약·공급 수량(짧은 점선), 색 = 기기
                 </p>
               </>
             ) : (

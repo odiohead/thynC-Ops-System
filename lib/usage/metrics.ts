@@ -26,10 +26,14 @@
  *    (hospital_device_supplies, 대웅 직판). 날짜별로 그날까지 계약된 딜만 센다(계약일 ≤ 그날, 계약일이 없는 딜은 전 기간).
  *    공급 수량은 이력이 없어 현재 값을 전 기간에 쓴다. 계약 수량에는 용도 구분이 없어 평가용 제외는 해당 없음.
  *  - 판매모델 (2026-11-18 사용자 결정): 딜의 '판매모델 구분'(daewoong_model_kind)이 '사용량'으로 시작하면 사용량비례형, 그 밖(일반·미입력)은 일반형.
- *      분모: 계약 수량을 딜의 판매모델로 나눈다. 비계약 공급 수량(대웅 직판)은 일반형.
- *      사용량: 기기 시리얼 → 운영관리시스템 기기 현황(hospital_devices)의 계약건(deal_code) → 그 딜의 판매모델.
- *              기기 현황에 없거나 계약건이 연결되지 않은 기기는 일반형 (사용자 지시 — 연결은 담당자가 맞춘다).
- *      측정(환자 수·동시측정)은 붙은 기기의 판매모델로 나눈다. 두 모델의 기기가 섞인 측정은 양쪽에 세고, 기기 정보가 없는 측정은 일반형.
+ *      분모: 계약 수량을 딜의 판매모델로 나눈다. 비계약 공급 수량(대웅 직판)은 일반형, 단 카트온은 사용량비례형(2026-11-18 사용자 지시).
+ *      사용량: 기기 종류의 도입 수량(계약 딜 + 공급)이 한 판매모델뿐이면 그 종류의 기기는 모두 그 모델 (2026-11-18 사용자 지시 —
+ *              공식 도입 수량이 기준. 예: 화순성심 심전계 150·산소포화도 150 = 사용량 딜 → 시리얼 등록 여부와 무관하게 사용량비례형).
+ *              두 모델이 섞인 종류만 기기 시리얼 → 기기 현황(hospital_devices)의 계약건(deal_code) → 그 딜의 판매모델로 가르고,
+ *              기기 현황에 없거나 계약건이 연결되지 않은 기기는 일반형, 카트온은 사용량비례형 (사용자 지시 — 연결은 담당자가 맞춘다).
+ *      측정(환자 수·동시측정)은 심전계·산소포화도의 판매모델로 나눈다. 둘 다 없는 측정만 카트온의 모델,
+ *      기기 정보가 없는 측정은 병원의 판매모델(모든 도입 수량이 한 모델뿐이면 그 모델, 아니면 일반형).
+ *      (카트온·체온계 등이 함께 붙었다고 다른 모델에 중복으로 세지 않는다. 심전계·산소포화도 모델이 섞인 측정은 양쪽에 센다)
  */
 import { prisma } from '@/lib/prisma'
 import { DEAL_STATUS_CATEGORY, DEAL_STATUS_CONTRACTED, normalizeSerial } from '@/lib/deviceRegistryShared'
@@ -88,12 +92,21 @@ export type UsageDevice = {
   days: UsageDeviceDay[]
 }
 
-type CapacityPlan = { deals: { date: string | null; qty: number; model: SaleModel }[]; supply: number | null }
+type CapacityPlan = { deals: { date: string | null; qty: number; model: SaleModel }[]; supply: number | null; supplyModel?: SaleModel }
 
-/** 판매모델에 맞는 계획만 남긴다 (공급 수량은 일반형) */
+/**
+ * 딜로 판매모델을 알 수 없는 수량·기기의 기본 판매모델 — 카트온은 사용량비례형 (2026-11-18 사용자 지시), 그 밖은 일반형.
+ * 비계약 공급 수량(대웅 직판)과, 두 모델이 섞인 종류에서 기기 현황 계약건이 연결되지 않은 기기에 쓴다.
+ */
+const USAGE_BY_DEFAULT_TYPES = new Set([10])
+export function defaultModelOf(type: number): SaleModel {
+  return USAGE_BY_DEFAULT_TYPES.has(type) ? 'usage' : 'general'
+}
+
+/** 판매모델에 맞는 계획만 남긴다 (공급 수량은 supplyModel — 없으면 일반형) */
 export function planForModel(plan: CapacityPlan | undefined, model: UsageModel): CapacityPlan | undefined {
   if (!plan || model === 'all') return plan
-  return { deals: plan.deals.filter((d) => d.model === model), supply: model === 'general' ? plan.supply : null }
+  return { ...plan, deals: plan.deals.filter((d) => d.model === model), supply: (plan.supplyModel ?? 'general') === model ? plan.supply : null }
 }
 
 /** 기기 종류별 계약·공급 수량 — 운영관리시스템 DB (병원 상세 '도입 현황'과 같은 원천), 딜별 판매모델 포함 */
@@ -123,13 +136,49 @@ async function loadCapacityPlans(hospitalCode: string, types: number[]): Promise
   ])
   const plans = new Map<number, CapacityPlan>()
   const plan = (t: number) => {
-    const p = plans.get(t) ?? { deals: [], supply: null }
+    const p = plans.get(t) ?? { deals: [], supply: null, supplyModel: defaultModelOf(t) }
     plans.set(t, p)
     return p
   }
   for (const r of deals) plan(Number(r.t)).deals.push({ date: r.contract_date, qty: Number(r.qty), model: r.m === 'usage' ? 'usage' : 'general' })
   for (const r of supply) plan(Number(r.t)).supply = Number(r.qty)
   return plans
+}
+
+/**
+ * 기기 종류 → 판매모델. 운영관리시스템의 도입 수량(계약 딜 + 공급)이 한 판매모델뿐이면 그 종류의 기기는 모두 그 모델이다
+ * (시리얼이 기기 현황에 없어도). 두 모델이 섞였거나 수량이 없으면 null — 시리얼별로 기기 현황의 계약건을 본다.
+ */
+export function typeModelOf(plan: CapacityPlan | undefined): SaleModel | null {
+  if (!plan) return null
+  const set = new Set<SaleModel>(plan.deals.map((d) => d.model))
+  if (plan.supply !== null) set.add(plan.supplyModel ?? 'general')
+  return set.size === 1 ? Array.from(set)[0] : null
+}
+
+/** 측정이 붙은 기기 종류 → 측정의 판매모델 판정에 쓰는 순위. 심전계·산소포화도가 우선, 없으면 카트온, 그 밖의 기기(체온·혈압)는 안 본다 */
+const MAIN_TYPES = new Set([1, 3])
+const KIND_TYPES = new Set<number>(USAGE_DEVICE_KINDS.map((k) => k.type))
+
+/**
+ * 측정의 판매모델 — 심전계·산소포화도가 붙었으면 그 기기들의 모델, 없으면 카트온의 모델,
+ * 둘 다 없으면(기기 정보 없는 측정) 병원의 판매모델(fallback — 도입 수량이 한 모델뿐이면 그 모델, 아니면 일반형).
+ * (심전계·산소포화도의 모델이 섞인 측정은 양쪽에 센다)
+ */
+export function measurementModels(main: Set<SaleModel> | undefined, other: Set<SaleModel> | undefined, fallback: SaleModel = 'general'): Set<SaleModel> {
+  if (main && main.size > 0) return main
+  if (other && other.size > 0) return other
+  return new Set<SaleModel>([fallback])
+}
+
+/** 병원의 판매모델 — 모든 기기 종류의 도입 수량(계약 딜 + 공급)이 한 판매모델뿐이면 그 모델, 섞였거나 없으면 일반형 */
+export function hospitalModelOf(plans: CapacityPlan[]): SaleModel {
+  const set = new Set<SaleModel>()
+  for (const p of plans) {
+    for (const d of p.deals) set.add(d.model)
+    if (p.supply !== null) set.add(p.supplyModel ?? 'general')
+  }
+  return set.size === 1 ? Array.from(set)[0] : 'general'
 }
 
 /** 기기 시리얼(정규화) → 판매모델. 운영관리시스템 기기 현황에서 이 병원에 있거나 있었던 기기의 계약건 기준. 없으면 목록에 없음(= 일반형) */
@@ -254,30 +303,35 @@ export async function getUsageDaily(hospitalCode: string, days: number, model: U
     loadCapacityPlans(hospitalCode, [...kinds]),
     loadModelBySerial(hospitalCode),
   ])
-  const modelOf = (serial: string | null): SaleModel => modelBySerial.get(normalizeSerial(serial).serialNo) ?? 'general'
+  // 기기 종류의 도입 수량이 한 판매모델뿐이면 그 모델, 섞였으면 시리얼의 계약건, 그래도 모르면 기본 모델(카트온 사용량비례형·그 밖 일반형)
+  const hospitalModel = hospitalModelOf(Array.from(plans.values()))
+  const typeModel = new Map<number, SaleModel | null>(Array.from(plans.entries()).map(([t, p]) => [t, typeModelOf(p)]))
+  const modelOf = (type: number, serial: string | null): SaleModel =>
+    typeModel.get(type) ?? modelBySerial.get(normalizeSerial(serial).serialNo) ?? defaultModelOf(type)
 
-  // 기기 사용 단위 → 판매모델. 측정(과 부모 측정)마다 붙은 기기의 판매모델을 모은다
+  // 기기 사용 단위 → 판매모델. 측정(과 부모 측정)마다 붙은 기기의 판매모델을 심전계·산소포화도 / 카트온으로 나눠 모은다
   type Unit = { key: string; type: number; model: SaleModel; iv: Interval }
   const unitList: Unit[] = []
-  const modelsOf = new Map<string, Set<SaleModel>>()
-  const addModel = (key: string, m: SaleModel) => {
-    const set = modelsOf.get(key) ?? new Set<SaleModel>()
+  const mainModels = new Map<string, Set<SaleModel>>()
+  const otherModels = new Map<string, Set<SaleModel>>()
+  const addModel = (key: string, type: number, m: SaleModel) => {
+    if (!KIND_TYPES.has(type)) return
+    const map = MAIN_TYPES.has(type) ? mainModels : otherModels
+    const set = map.get(key) ?? new Set<SaleModel>()
     set.add(m)
-    modelsOf.set(key, set)
+    map.set(key, set)
   }
   for (const r of units.rows) {
     if (r.s === null || r.e === null) continue
     const key = `${r.server}|${r.measurement_code}`
-    const m = modelOf(r.serial_number)
-    addModel(key, m)
-    if (r.parent_measurement_code) addModel(`${r.server}|${r.parent_measurement_code}`, m)
-    unitList.push({ key, type: Number(r.device_type), model: m, iv: { s: Number(r.s), e: Number(r.e) } })
+    const type = Number(r.device_type)
+    const m = modelOf(type, r.serial_number)
+    addModel(key, type, m)
+    if (r.parent_measurement_code) addModel(`${r.server}|${r.parent_measurement_code}`, type, m)
+    unitList.push({ key, type, model: m, iv: { s: Number(r.s), e: Number(r.e) } })
   }
-  const inModel = (key: string, sel: UsageModel) => {
-    if (sel === 'all') return true
-    const set = modelsOf.get(key)
-    return set ? set.has(sel) : sel === 'general' // 기기 정보가 없는 측정은 일반형
-  }
+  const inModel = (key: string, sel: UsageModel) =>
+    sel === 'all' || measurementModels(mainModels.get(key), otherModels.get(key), hospitalModel).has(sel)
 
   // 측정 구간 (환자 수·동시측정은 부모 측정만)
   const parents: Interval[] = []
@@ -310,7 +364,7 @@ export async function getUsageDaily(hospitalCode: string, days: number, model: U
   const purged = all.filter((m) => m.status === 10 && !hasUnits.has(m.key)).map((m) => m.iv)
 
   // 고를 수 있는 판매모델: 계약 수량이 있거나 기간 안에 그 모델의 측정이 있으면
-  const hasContract = (sel: SaleModel) => Array.from(plans.values()).some((p) => (planForModel(p, sel)?.deals.length ?? 0) > 0 || (sel === 'general' && p.supply !== null))
+  const hasContract = (sel: SaleModel) => Array.from(plans.values()).some((p) => (planForModel(p, sel)?.deals.length ?? 0) > 0 || planForModel(p, sel)?.supply != null)
   const models = USAGE_MODELS.map((x) => ({
     key: x.key as UsageModel,
     label: x.label,

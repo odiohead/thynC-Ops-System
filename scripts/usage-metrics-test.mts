@@ -5,7 +5,7 @@
  *   npx tsx scripts/usage-metrics-test.mts <병원코드> [30|90]   + 원본 DB 의 실제 데이터로, 화면용 계산과 별도 SQL 계산을 대조 (읽기 전용)
  */
 import { DAY_SEC, average, dayLabel, dayStats, localDayStart } from '../lib/usage/daily'
-import { capacityOn, getUsageDaily, planForModel } from '../lib/usage/metrics'
+import { capacityOn, defaultModelOf, getUsageDaily, hospitalModelOf, measurementModels, planForModel, typeModelOf } from '../lib/usage/metrics'
 import { fmtTime, positional, usageDb } from './usage-lib.mts'
 
 let passed = 0
@@ -51,6 +51,30 @@ const h = (n: number) => D + n * 3600
   check('판매모델: 사용량비례형 = 사용량 딜만 (공급 제외)', capacityOn(planForModel(mixed, 'usage'), '2026-01-01').capacity === 50)
   check('판매모델: 사용량 딜 계약일 전에는 없음', capacityOn(planForModel(mixed, 'usage'), '2025-05-31').capacity === null)
   check('둘 다 없으면 null', capacityOn(undefined, '2026-11-18').capacity === null && capacityOn({ deals: [{ date: '2027-01-01', qty: 5 }], supply: null }, '2026-11-18').capacity === null)
+
+  // 기기 종류의 판매모델 = 도입 수량이 한 모델뿐이면 그 모델 (화순성심: 심전계 150 사용량 딜)
+  check('종류 모델: 사용량 딜만 → 사용량비례형', typeModelOf({ deals: [{ date: '2025-05-28', qty: 150, model: 'usage' }], supply: null }) === 'usage')
+  check('종류 모델: 공급만 → 일반형', typeModelOf({ deals: [], supply: 100 }) === 'general')
+  // 카트온은 사용량비례형 (공급 수량·연결 안 된 기기)
+  check('기본 모델: 카트온 사용량비례형, 심전계 일반형', defaultModelOf(10) === 'usage' && defaultModelOf(1) === 'general' && defaultModelOf(3) === 'general')
+  const cartSupply = { deals: [], supply: 100, supplyModel: defaultModelOf(10) }
+  check('종류 모델: 카트온 공급만 → 사용량비례형', typeModelOf(cartSupply) === 'usage')
+  check('카트온 공급은 사용량비례형 분모', capacityOn(planForModel(cartSupply, 'usage'), '2026-11-18').capacity === 100 && capacityOn(planForModel(cartSupply, 'general'), '2026-11-18').capacity === null)
+  check('카트온 사용량 딜 + 공급 → 한 모델(사용량비례형)', typeModelOf({ deals: [{ date: null, qty: 10, model: 'usage' }], supply: 3, supplyModel: 'usage' }) === 'usage')
+  check('종류 모델: 사용량 딜 + 공급 → 섞임(null, 시리얼로)', typeModelOf({ deals: [{ date: null, qty: 10, model: 'usage' }], supply: 3 }) === null)
+  check('종류 모델: 일반·사용량 딜 → 섞임(null)', typeModelOf(mixed) === null)
+  check('종류 모델: 수량 없음 → null', typeModelOf(undefined) === null)
+  // 측정의 판매모델 = 심전계·산소포화도 우선, 없으면 카트온, 둘 다 없으면 일반형
+  const S = (...m: ('general' | 'usage')[]) => new Set(m)
+  const eq = (a: Set<string>, b: string[]) => a.size === b.length && b.every((x) => a.has(x))
+  check('측정 모델: 사용량 심전계 + 일반 카트온 → 사용량만', eq(measurementModels(S('usage'), S('general')), ['usage']))
+  check('측정 모델: 카트온만 → 카트온의 모델', eq(measurementModels(undefined, S('general')), ['general']))
+  check('측정 모델: 심전계 모델이 섞이면 양쪽', eq(measurementModels(S('usage', 'general'), undefined), ['usage', 'general']))
+  check('측정 모델: 기기 정보 없음 → 일반형', eq(measurementModels(undefined, undefined), ['general']))
+  check('측정 모델: 기기 정보 없음 + 병원이 사용량비례형뿐 → 사용량', eq(measurementModels(undefined, undefined, 'usage'), ['usage']))
+  const hwasun = [{ deals: [{ date: '2025-05-28', qty: 150, model: 'usage' as const }], supply: null }, { deals: [], supply: 100, supplyModel: defaultModelOf(10) }]
+  check('병원 모델: 화순성심(사용량 딜 + 카트온 공급) → 사용량비례형', hospitalModelOf(hwasun) === 'usage')
+  check('병원 모델: 섞이면 일반형', hospitalModelOf([...hwasun, { deals: [], supply: 5 }]) === 'general' && hospitalModelOf([]) === 'general')
 }
 
 const [hospital, daysArg] = positional
