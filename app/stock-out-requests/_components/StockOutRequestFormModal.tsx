@@ -11,13 +11,16 @@
  * 첨부 파일 (2026-11-02): 등록 모드는 파일을 담아 두었다가 생성 직후 업로드, 수정 모드는 StockOutFilesPanel로 즉시 업로드·삭제. 엑셀 등 요청 근거.
  * 영업 유형 모드 (2026-11-05 — stock_out_sales_request_design.md §5): project 미지정이면 출고업무 목록 [출고요청]에서 여는
  * 평가용·판매용·오산영업소 등록/수정 — 유형·목적·납품처(병원 검색/기타)·수령지·수취인 + 항목 아래 입력 가이드. 프로젝트 유형은 여기서 만들지 않음(프로젝트 상세 전용).
+ * 구축 요청 유형 (2026-11-18): 프로젝트(구축) 요청은 구축(일반) / 구축(라이트) / 데모(PoC) 중 하나를 반드시 고른다(`subPurpose`로 저장).
+ *  일반·라이트는 출고되는 기기가 기기현황에 그 상품유형으로 등록되고, 데모(PoC)는 대웅제약재고에서 나가지 않으므로 그 재고 영역(시스템·구성품 포함)을 숨긴다.
  */
 import { useState, useEffect, useMemo, useRef } from 'react'
 import FileDropZone from '@/app/components/FileDropZone' // 첨부 끌어다 놓기 (2026-11-10)
 import { FileSpreadsheet, Paperclip, X } from 'lucide-react'
 import {
   STOCK_OUT_PURPOSE_LABELS, STOCK_OUT_SALES_TYPES, STOCK_OUT_SUB_PURPOSES, STOCK_OUT_GUIDE_FIELDS, isStockOutSalesType,
-  type StockOutPurpose, type StockOutSalesType, type StockOutGuideKey,
+  STOCK_OUT_BUILD_TYPES, STOCK_OUT_BUILD_TYPE_LABELS, STOCK_OUT_POC_EXCLUDED_INVENTORY, isStockOutBuildType,
+  type StockOutPurpose, type StockOutSalesType, type StockOutGuideKey, type StockOutBuildType,
 } from '@/lib/stockOutShared'
 import DestHospitalSearch, { type DestHospital } from './DestHospitalSearch'
 import { STOCK_OUT_FILE_MAX_BYTES, STOCK_OUT_FILES_PER_REQUEST, isSpreadsheetFile } from '@/lib/stockOutFiles'
@@ -45,7 +48,7 @@ export interface StockOutEditTarget {
   items: { inventoryItemId: number; quantity: number; name?: string; modelName?: string | null; inventoryId?: number; inventoryName?: string; categoryName?: string | null }[]
   /** 시스템 구성품 미출고 수량 (2026-11-12) — itemId = 구성품 종류 */
   unshipped?: { itemId: number; quantity: number }[]
-  /** 영업 유형 전용 */
+  /** 영업 유형 = 목적 코드 · 구축 = 요청 유형(GENERAL/LITE/POC, 2026-11-18 — 그 전 요청은 null) */
   subPurpose?: string | null
   destType?: string | null
   destHospital?: DestHospital | null
@@ -87,6 +90,12 @@ export default function StockOutRequestFormModal({
   const [salesType, setSalesType] = useState<StockOutSalesType | ''>('')
   const effPurpose: StockOutPurpose | '' = editTarget?.purpose ?? (salesMode ? salesType : purpose)
   const [subPurpose, setSubPurpose] = useState('')
+  // 구축 요청 유형 (2026-11-18) — 구축(일반)/구축(라이트)/데모(PoC). 프로젝트(구축) 요청에서만 쓴다
+  const [buildType, setBuildType] = useState<StockOutBuildType | ''>('')
+  const buildMode = !salesMode && effPurpose === 'BUILD' && !lockItems
+  const isPoc = buildMode && buildType === 'POC'
+  // 유형 없이 만들어진 옛 요청(2026-11-18 이전)을 수정할 때는 유형이 선택 사항 — 처리 끝난 옛 요청의 비고 수정 등을 막지 않는다
+  const buildTypeRequired = buildMode && !(editTarget && !isStockOutBuildType(editTarget.subPurpose))
   const [destType, setDestType] = useState<'HOSPITAL' | 'OTHER' | ''>('')
   const [destHospital, setDestHospital] = useState<DestHospital | null>(null)
   const [destText, setDestText] = useState('')
@@ -166,6 +175,7 @@ export default function StockOutRequestFormModal({
         setKinds(d?.componentKinds ?? [])
         setLoaded(true)
       })
+    setBuildType(isStockOutBuildType(editTarget?.subPurpose) ? editTarget.subPurpose : '')
     if (editTarget) {
       setRequestDate(editTarget.requestDate)
       setNote(editTarget.note ?? '')
@@ -185,34 +195,42 @@ export default function StockOutRequestFormModal({
 
   const salesTypeKey = (effPurpose && isStockOutSalesType(effPurpose) ? effPurpose : null) as StockOutSalesType | null
 
+  /** 화면에 보이는 품목 — 데모(PoC)는 대웅제약재고를 통째로 뺀다(시스템·구성품도 그 재고라 함께 사라진다) */
+  const visibleItems = useMemo(() => (isPoc ? items.filter((it) => it.inventoryName !== STOCK_OUT_POC_EXCLUDED_INVENTORY) : items), [items, isPoc])
+
   /** 인벤토리 → 분류 순 섹션 */
   const sections = useMemo(() => {
     const byInv = new Map<number, { name: string; cats: Map<string, StockOutItemOpt[]> }>()
-    for (const it of items) {
+    for (const it of visibleItems) {
       const inv = byInv.get(it.inventoryId) ?? { name: it.inventoryName, cats: new Map() }
       const key = it.categoryName ?? '기타'
       inv.cats.set(key, [...(inv.cats.get(key) ?? []), it])
       byInv.set(it.inventoryId, inv)
     }
     return Array.from(byInv.entries()).map(([id, v]) => ({ id, name: v.name, cats: Array.from(v.cats.entries()).map(([cat, list]) => ({ cat, list })) }))
-  }, [items])
+  }, [visibleItems])
 
   const lines = useMemo(
-    () => items.map((it) => ({ inventoryItemId: it.id, quantity: parseInt(qty[it.id] ?? '') || 0 })).filter((l) => l.quantity > 0),
-    [items, qty]
+    () => visibleItems.map((it) => ({ inventoryItemId: it.id, quantity: parseInt(qty[it.id] ?? '') || 0 })).filter((l) => l.quantity > 0),
+    [visibleItems, qty]
   )
   /** 시스템 구성품 합계 — 종류 id → Σ(시스템 입력 수량 × 구성 수량) */
   const compTotals = useMemo(() => {
     const m = new Map<number, number>()
-    for (const it of items) {
+    for (const it of visibleItems) {
       const n = parseInt(qty[it.id] ?? '') || 0
       if (n <= 0) continue
       for (const c of it.components ?? []) m.set(c.childItemId, (m.get(c.childItemId) ?? 0) + n * c.quantity)
     }
     return m
-  }, [items, qty])
+  }, [visibleItems, qty])
   /** 구성을 가진 품목(시스템)이 하나라도 노출돼 있을 때만 구성품 섹션을 보인다 */
-  const hasSystems = kinds.length > 0 && items.some((it) => (it.components?.length ?? 0) > 0)
+  const hasSystems = kinds.length > 0 && visibleItems.some((it) => (it.components?.length ?? 0) > 0)
+  /** 데모(PoC)로 바꾸면 사라지는 대웅제약재고 입력 수 — 유형 칩 아래 안내용 */
+  const pocHiddenQty = useMemo(
+    () => (isPoc ? items.filter((it) => it.inventoryName === STOCK_OUT_POC_EXCLUDED_INVENTORY).reduce((n, it) => n + (parseInt(qty[it.id] ?? '') || 0), 0) : 0),
+    [isPoc, items, qty]
+  )
   const totalQty = lines.reduce((s, l) => s + l.quantity, 0)
 
   function validateSales(): string | null {
@@ -231,6 +249,7 @@ export default function StockOutRequestFormModal({
       const v = validateSales()
       if (v) { setError(v); return }
     }
+    if (buildTypeRequired && !buildType) { setError('유형을 선택하세요 — 구축(일반) / 구축(라이트) / 데모(PoC)'); return }
     if (!requestDate) { setError('희망 출고일을 입력하세요.'); return }
     if (!lockItems && lines.length === 0) { setError('출고 품목 수량을 1개 이상 입력하세요.'); return }
     // 미출고 수량 — 합계가 있는 구성품만, 0 ≤ 미출고 ≤ 합계
@@ -256,7 +275,7 @@ export default function StockOutRequestFormModal({
           shipAddress: shipAddress.trim(), recipient: recipient.trim(),
         }
       : {}
-    const payload = { requestDate, note: note || null, ...(lockItems ? {} : { items: lines, unshipped: unshippedPayload }), ...salesFields }
+    const payload = { requestDate, note: note || null, ...(lockItems ? {} : { items: lines, unshipped: unshippedPayload }), ...salesFields, ...(buildMode && buildType ? { subPurpose: buildType } : {}) }
     const res = editTarget
       ? await fetch(`/api/stock-out-requests/${editTarget.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       : await fetch('/api/stock-out-requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, projectCode: project?.projectCode, purpose: effPurpose }) })
@@ -294,7 +313,7 @@ export default function StockOutRequestFormModal({
           <div>
             <h2 className="text-lg font-bold text-gray-900">
               {editTarget ? `출고요청 수정 — ${editTarget.sorCode}` : '출고요청'}
-              {effPurpose && <span className="ml-1 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">{STOCK_OUT_PURPOSE_LABELS[effPurpose]}</span>}
+              {effPurpose && <span className="ml-1 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">{buildMode && buildType ? STOCK_OUT_BUILD_TYPE_LABELS[buildType] : STOCK_OUT_PURPOSE_LABELS[effPurpose]}</span>}
             </h2>
             <p className="mt-0.5 text-sm text-gray-500">
               {project ? (
@@ -369,6 +388,24 @@ export default function StockOutRequestFormModal({
             </>
           )}
 
+          {buildMode && (
+            <div data-testid="so-build-type">
+              <label className={label}>유형 {buildTypeRequired ? '*' : <span className="font-normal text-gray-400">(유형 없이 만들어진 요청 — 지정하면 그 유형으로 처리됩니다)</span>}</label>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {STOCK_OUT_BUILD_TYPES.map((t) => (
+                  <button key={t} type="button" onClick={() => setBuildType(t)} className={chip(buildType === t)} data-testid={`so-build-type-${t}`}>{STOCK_OUT_BUILD_TYPE_LABELS[t]}</button>
+                ))}
+              </div>
+              <p className="mt-1 text-[11px] leading-snug text-gray-400">
+                {buildType === 'POC'
+                  ? `데모(PoC)는 ${STOCK_OUT_POC_EXCLUDED_INVENTORY}에서 나가지 않습니다 — 그 재고 품목은 고를 수 없습니다.${pocHiddenQty > 0 ? ` (입력해 둔 ${STOCK_OUT_POC_EXCLUDED_INVENTORY} 수량 ${pocHiddenQty}개는 저장되지 않습니다)` : ''}`
+                  : buildType
+                    ? `출고되는 기기는 병원 기기현황에 ${buildType === 'LITE' ? '라이트형' : '일반형'}으로 등록됩니다.`
+                    : '출고되는 기기를 일반형·라이트형 중 무엇으로 등록할지, 또는 데모(PoC)인지 고르세요.'}
+              </p>
+            </div>
+          )}
+
           <div>
             <label className={label}>희망 출고일 *</label>
             {guide('requestDate')}
@@ -384,7 +421,7 @@ export default function StockOutRequestFormModal({
               <span className="text-xs text-gray-400">{lines.length}종 · 총 {totalQty}개</span>
             </div>
             {guide('items')}
-            {salesMode && !effPurpose ? (
+            {(salesMode && !effPurpose) || (buildTypeRequired && !buildType) ? (
               <p className="mt-2 text-sm text-gray-400">유형을 먼저 선택하세요.</p>
             ) : !loaded ? (
               <p className="mt-2 text-sm text-gray-400">품목을 불러오는 중…</p>

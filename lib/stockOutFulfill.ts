@@ -20,14 +20,21 @@
  *  - **미출고분** = `holds` — 대웅제약재고 구성품 품목에서 출고(유형 '기타', 병원 연결 없음) + 원본 품목(thynC운영팀재고, kinds.source)으로 입고해 편입.
  *    입고 위치는 `holdWarehouseId`(편입 대상 인벤토리의 창고). 시리얼 품목은 출고분과 미출고분 시리얼을 따로 받는다.
  *  처리 시리얼은 구성품 행의 shipped_serials / unshipped_serials 에 기록.
+ *
+ * 기기 상품유형 (2026-11-18): 기기현황에 등록되는 기기를 일반형으로 올릴지 라이트형으로 올릴지는 **출고요청의 유형**이 정한다(사용자 결정 —
+ *  계약 매핑이나 품목이 아니라 요청 때 고른 유형: 구축(일반) → 일반 · 구축(라이트) → 라이트. 데모(PoC)는 대웅제약재고가 빠져 등록 대상 기기가 없다).
+ *  - 유형이 없는 요청(2026-11-18 이전 구축 요청·영업 유형): 병원 계약이 한 종류면 원장 기본값 규칙 그대로, 일반·라이트가 섞였으면 처리 화면에서 고른다(`input.productType`)
+ *    — 종전엔 이 경우 등록 단계에서 '상품유형 필수'로 거부되고 화면엔 원인이 안 보였다(PROD SOR-202611-0014)
+ *  - 품목명이 'L…'인지(라이트용 품목)는 **경고만** 한다 — 유형과 어긋나도 막지 않는다(사람이 판단)
+ *  - AS 모드(분실 교체)는 대상 아님 — 교체기가 구 기기 배치의 상품유형·계약건을 물려받는다
  */
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { planInventoryTransaction, applyInventoryTransaction, InventoryError, TxPlan } from '@/lib/inventory'
-import { registerDevicesIn, findUnitsBySerial } from '@/lib/deviceRegistry'
+import { registerDevicesIn, findUnitsBySerial, getHospitalProductTypeContext, RegistryError } from '@/lib/deviceRegistry'
 import { normalizeSerial } from '@/lib/deviceRegistryShared'
 import { syncStockOutToTicket } from '@/lib/ticket-domains/stockOut'
-import { outMetaForInventory, stockOutTitle, type FulfillLineMode } from '@/lib/stockOutShared'
+import { outMetaForInventory, stockOutTitle, isLiteItemName, stockOutProductTypeOf, stockOutKindLabel, type FulfillLineMode } from '@/lib/stockOutShared'
 import { resolveStockOutComponents } from '@/lib/stockOut'
 import { resolveAsLinesIn, AsServiceError } from '@/lib/asReceiptService' // 분실 AS 연동 — 출고 실행 시 라인 교체 확정 (2026-11-10)
 import { asDeviceGroupOf, appendAsNote, isValidAsSerial, AS_SERIAL_RULE_TEXT, type AsDeviceGroup } from '@/lib/asReceiptShared'
@@ -67,6 +74,20 @@ export interface FulfillInput {
   holds?: FulfillHoldInput[]
   /** 미출고분을 편입할 창고 (편입 대상 인벤토리 소속) — 생략 시 첫 창고 */
   holdWarehouseId?: number | null
+  /** 기기 상품유형(일반/라이트, 2026-11-18) — 요청에 유형이 없고 병원 계약이 섞여 있을 때만 쓰인다(처리 화면에서 고른 값). 요청 유형이 있으면 무시 */
+  productType?: string | null
+}
+
+/** 출고되는 기기를 기기현황에 어떤 상품유형으로 등록하는지 — 등록 대상 라인이 있고 출고처가 병원일 때만 */
+export interface FulfillProductTypePreview {
+  /** 이번 판정에 쓴 상품유형 — null = 정해지지 않음 */
+  value: '일반' | '라이트' | null
+  /** REQUEST = 요청 유형(구축(일반)/구축(라이트)) · HOSPITAL = 병원 계약이 한 종류 · CHOSEN = 처리 화면에서 고름 */
+  source: 'REQUEST' | 'HOSPITAL' | 'CHOSEN' | null
+  /** 요청 유형 표시명 (source REQUEST일 때) */
+  requestKind: string | null
+  /** 요청에 유형이 없고 병원 계약이 일반·라이트 혼합 → 처리 화면에서 골라야 한다 */
+  needsChoice: boolean
 }
 
 /** AS 모드 — 접수 라인별 판정 */
@@ -169,6 +190,8 @@ export interface FulfillPreview {
   holdTarget: FulfillHoldTarget | null
   /** 시스템 구성품 요약(표시 순서) — 화면이 구성품별로 출고분·미출고분을 묶어 보여 준다 */
   components: { itemId: number; name: string; quantity: number; unshippedQuantity: number; inventoryId: number }[]
+  /** 기기 상품유형 (2026-11-18) — 해당 없으면 null */
+  productType?: FulfillProductTypePreview | null
   errors: string[] // 라인 외 전역 오류
   ok: boolean // 실행 가능 (전역 오류 없음 + 전 라인 ok/warning)
 }
@@ -646,6 +669,55 @@ async function previewHolds(req: LoadedRequest, input: FulfillInput, errors: str
 
 interface Prepared { req: LoadedRequest; input: FulfillInput; preview: FulfillPreview; asPrep: AsPrep | null }
 
+/**
+ * 기기 상품유형 판정 (2026-11-18) — 기기현황 등록 대상 라인이 있을 때만 preview.productType 을 채운다.
+ * 요청 유형이 정하면 그대로, 없으면 병원 계약 기준(한 종류면 그 값 표시·섞였으면 선택 필요). 품목(L 여부)과 어긋나면 그 라인에 경고(차단 아님).
+ */
+async function applyProductType(req: LoadedRequest, input: FulfillInput, preview: FulfillPreview): Promise<void> {
+  preview.productType = null
+  const target = targetOf(req)
+  const regLines = preview.lines.filter((l) => l.registry)
+  if (!target.hospitalCode || regLines.length === 0) return
+  const fromRequest = stockOutProductTypeOf(req.purpose, req.subPurpose)
+  let value: FulfillProductTypePreview['value'] = null
+  let source: FulfillProductTypePreview['source'] = null
+  let needsChoice = false
+  if (fromRequest) {
+    value = fromRequest; source = 'REQUEST'
+  } else {
+    const ctx = await getHospitalProductTypeContext(target.hospitalCode)
+    if (ctx.mixed) {
+      needsChoice = true
+      const chosen = input.productType === '일반' || input.productType === '라이트' ? input.productType : null
+      if (chosen) { value = chosen; source = 'CHOSEN' }
+      else preview.errors.push('이 병원은 일반·라이트 계약이 함께 있는데 출고요청에 유형이 없습니다 — 위에서 기기를 일반형·라이트형 중 무엇으로 등록할지 고르세요.')
+    } else if (ctx.default) {
+      value = ctx.default; source = 'HOSPITAL'
+    }
+  }
+  preview.productType = { value, source, requestKind: source === 'REQUEST' ? stockOutKindLabel(req.purpose, req.subPurpose) : null, needsChoice }
+
+  // 품목(L 여부) ↔ 상품유형 — 경고만 (2026-11-18 사용자 결정: 차단하지 않고 사람이 판단)
+  if (!value) return
+  const itemOf = new Map(req.items.map((l) => [l.inventoryItemId, l.item]))
+  // 같은 재고·같은 기기 모델에 L 품목이 따로 있는지 (L 품목이 없는 재고의 일반 품목은 라이트형이어도 경고하지 않는다)
+  const liteSiblings = await prisma.inventoryItem.findMany({
+    where: { isActive: true, name: { startsWith: 'L' }, inventoryId: { in: Array.from(new Set(regLines.map((l) => l.inventoryId))) }, deviceInfoId: { not: null } },
+    select: { name: true, inventoryId: true, deviceInfoId: true },
+  })
+  const hasLiteSibling = (inventoryId: number, deviceInfoId: number | null | undefined) =>
+    deviceInfoId != null && liteSiblings.some((x) => x.inventoryId === inventoryId && x.deviceInfoId === deviceInfoId && isLiteItemName(x.name))
+  for (const l of regLines) {
+    const lite = isLiteItemName(l.name)
+    let msg: string | null = null
+    if (value === '일반' && lite) msg = '일반형으로 등록되는데 라이트용(L) 품목입니다 — 맞는지 확인하세요 (처리는 가능)'
+    else if (value === '라이트' && !lite && hasLiteSibling(l.inventoryId, itemOf.get(l.inventoryItemId)?.deviceInfo?.id)) msg = '라이트형으로 등록되는데 일반 품목입니다(같은 재고에 L 품목이 있음) — 맞는지 확인하세요 (처리는 가능)'
+    if (!msg) continue
+    l.messages.push(msg)
+    if (l.status === 'ok') l.status = 'warning'
+  }
+}
+
 /** 요청 로드 → (AS 모드면 가상 라인 구성) → 판정. preview·execute 공용 */
 async function prepareFulfillment(requestId: number, input: FulfillInput): Promise<Prepared> {
   const loaded = await loadRequest(requestId)
@@ -668,6 +740,7 @@ async function prepareFulfillment(requestId: number, input: FulfillInput): Promi
         preview.errors.push('이 요청에는 시스템 구성품(서버 등)이 계산돼 있지 않아 출고 처리할 수 없습니다. 요청을 [수정]에서 그대로 저장하면 구성품이 채워집니다.')
       }
     }
+    await applyProductType(req, input, preview)
     const h = await previewHolds(loaded, input, preview.errors)
     preview.holds = h.holds
     preview.holdTarget = h.holdTarget
@@ -717,6 +790,8 @@ export async function executeFulfillment(
   const hospitalName = target.destination
   const requester = req.createdBy?.name ?? req.sorCode
   const linesInput = new Map((input.lines ?? []).map((l) => [l.inventoryItemId, l]))
+  // 기기현황 등록에 명시할 상품유형 (2026-11-18) — 요청 유형·처리 화면 선택일 때만. 병원 기준(HOSPITAL)은 원장 기본값 규칙이 같은 값을 낸다
+  const regProductType = preview.productType && (preview.productType.source === 'REQUEST' || preview.productType.source === 'CHOSEN') ? preview.productType.value : null
 
   const doneStatus = await prisma.statusCode.findFirst({
     where: { category: 'STOCK_OUT_STATUS', name: '완료' },
@@ -888,17 +963,25 @@ export async function executeFulfillment(
             }
             // 기기현황 등록 (시리얼 추적 기기 — 같은 트랜잭션, source WMS·ref INVENTORY_TX). AS 모드 본체는 아래 AS 교체 확정(replaceDevice)이 등록·구기기 회수를 담당
             if (pl.registry && pl.serials.length > 0 && !(asPrep && asPrep.bodyItemIds.has(pl.inventoryItemId))) {
-              const result = await registerDevicesIn(
-                client,
-                {
-                  hospitalCode: target.hospitalCode!,
-                  actor: { userId: actor.userId, name: actor.name },
-                  source: 'WMS',
-                  ref: firstTxCode ? { type: 'INVENTORY_TX', code: firstTxCode } : null,
-                  memo: `출고요청 ${req.sorCode} 출고`,
-                },
-                pl.serials.map((s) => ({ serialInput: s, modelInput: pl.modelInput, usageTypeInput: pl.usageInput }))
-              )
+              // 요청 유형(또는 처리 화면 선택)이 상품유형을 정했으면 그 값으로 등록. 병원 계약이 한 종류뿐이면 넘기지 않고 원장 기본값 규칙에 맡긴다
+              let result: Awaited<ReturnType<typeof registerDevicesIn>>
+              try {
+                result = await registerDevicesIn(
+                  client,
+                  {
+                    hospitalCode: target.hospitalCode!,
+                    actor: { userId: actor.userId, name: actor.name },
+                    source: 'WMS',
+                    ref: firstTxCode ? { type: 'INVENTORY_TX', code: firstTxCode } : null,
+                    memo: `출고요청 ${req.sorCode} 출고`,
+                  },
+                  pl.serials.map((s) => ({ serialInput: s, modelInput: pl.modelInput, usageTypeInput: pl.usageInput, ...(regProductType ? { productType: regProductType } : {}) }))
+                )
+              } catch (e) {
+                // 기기현황 쪽 거부 사유를 그대로 화면에 보인다 (종전엔 '출고 처리 중 오류'로만 표시 — 2026-11-18 SOR-202611-0014)
+                if (e instanceof RegistryError) throw new FulfillError(`기기현황 등록 실패 — ${e.message} (출고는 반영되지 않았습니다)`, e.status >= 400 && e.status < 500 ? e.status : 400)
+                throw e
+              }
               registered += result.created.length + result.reregistered.length + result.transferred.length
               registrySkipped += result.skipped.length
               for (const w of result.warnings) warnings.push(w)
@@ -947,6 +1030,8 @@ export async function executeFulfillment(
             data: {
               fulfilledAt: new Date(),
               fulfilledById: actor.userId,
+              fulfillDraft: Prisma.DbNull, // 임시 저장 비움 (2026-11-18)
+              fulfillDraftAt: null,
               statusId: doneStatus.id,
               statusChangedAt: new Date(),
               resolvedAt: new Date(),

@@ -10,8 +10,12 @@
  * **인벤토리별 카드 + 시스템 구성품 (2026-11-12 — stock_out_v2_design.md §13)**: 일반 모드는 품목을 인벤토리별 카드(대웅제약재고 / thynC운영팀재고 …)로 나눠 보여 준다.
  *  시스템이 든 요청은 대웅제약재고 카드 아래 '시스템 구성품' — 구성품마다 **출고**(합계 − 미출고, 기존 라인 입력 그대로)와 **미출고**(신청자가 적은 수량 → thynC운영팀재고 편입) 칸을 따로 둔다.
  *  미출고 수량이 0인 구성품은 미출고 칸이 없고, 전량 미출고면 출고 칸이 없다. 편입 위치(창고)는 구성품 섹션에서 한 번 고른다.
+ * **기기 등록 유형 (2026-11-18)**: 기기현황에 등록되는 기기의 상품유형(일반/라이트)은 출고요청의 유형(구축(일반)/구축(라이트))이 정한다 — 상단에 표시만 한다.
+ *  유형이 없는 옛 요청은 병원 계약 기준이고, 일반·라이트 계약이 섞인 병원이면 여기서 일반형/라이트형을 골라야 한다. 품목이 L 품목인지와 어긋나면 그 품목에 경고만 뜬다(처리는 가능).
+ * **입력 내용 자동 저장 (2026-11-18)**: 시리얼·LOT·기록·확인 여부(·옛 요청의 유형 선택)를 서버(요청 행)에 임시 저장 — 창을 닫았다 열거나 다른 PC에서 열어도 이어서 작업.
+ *  열릴 때 저장분을 되살리고 서버 판정을 다시 받아, 여전히 통과하는 품목만 '확인됨'으로 복원한다(그사이 재고가 바뀌었을 수 있음). 출고일은 저장하지 않는다(항상 오늘).
  */
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 
 interface Bucket { warehouseId: number; warehouseName: string; lotNo: string; quantity: number }
@@ -46,6 +50,8 @@ interface Preview {
   holds?: HoldPreview[]
   holdTarget?: { inventoryId: number; inventoryName: string; warehouses: { id: number; name: string }[]; warehouseId: number | null } | null
   components?: { itemId: number; name: string; quantity: number; unshippedQuantity: number; inventoryId: number }[]
+  /** 기기 상품유형 (2026-11-18) — 출고되는 기기를 기기현황에 일반형/라이트형 중 무엇으로 등록하는지. 등록 대상이 없거나 병원 출고가 아니면 null */
+  productType?: { value: '일반' | '라이트' | null; source: 'REQUEST' | 'HOSPITAL' | 'CHOSEN' | null; requestKind: string | null; needsChoice: boolean } | null
   errors: string[]
   ok: boolean
   /** 분실 AS 연동 (AS 모드) */
@@ -56,6 +62,57 @@ interface Preview {
 interface ExtraRow { inventoryItemId: number; quantity: string }
 
 interface LotRow { bucketKey: string; quantity: string } // bucketKey = `${warehouseId}|${lotNo}`
+
+/** 입력 상태 묶음 — 서버 본문과 임시 저장의 공통 원천. productType = 요청에 유형이 없고 병원 계약이 섞였을 때 여기서 고른 값(그 외엔 null) */
+interface Snap {
+  serialText: Record<number, string>; lotRows: Record<number, LotRow[]>; noteText: Record<number, string>
+  holdSerialText: Record<number, string>; holdNoteText: Record<number, string>; holdWarehouseId: number | null
+  asSerials: Record<number, string>; extras: ExtraRow[]; productType: string | null
+}
+/** 서버에 임시 저장되는 형태 (출고일은 제외 — 다시 열면 항상 오늘) */
+interface Draft extends Partial<Snap> { confirmed?: number[]; holdConfirmed?: number[]; bodyConfirmed?: boolean; savedByName?: string | null }
+const EMPTY_SNAP: Snap = { serialText: {}, lotRows: {}, noteText: {}, holdSerialText: {}, holdNoteText: {}, holdWarehouseId: null, asSerials: {}, extras: [], productType: null }
+
+const splitLines = (t: string | undefined) => (t ?? '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean)
+const lotsOf = (rows: LotRow[] | undefined) => (rows ?? []).filter((r) => r.bucketKey && r.quantity !== '').map((r) => {
+  const [wh, ...lot] = r.bucketKey.split('|')
+  return { warehouseId: Number(wh), lotNo: lot.join('|'), quantity: parseInt(r.quantity) || 0 }
+})
+function linesBody(p: Preview | null, s: Snap) {
+  return (p?.lines ?? []).map((l) => ({
+    inventoryItemId: l.inventoryItemId,
+    serials: l.mode === 'serial' ? splitLines(s.serialText[l.inventoryItemId]) : undefined,
+    lots: l.mode === 'lot' ? lotsOf(s.lotRows[l.inventoryItemId]) : undefined,
+    serialsNote: l.mode !== 'serial' ? (s.noteText[l.inventoryItemId] ?? '').trim() || null : undefined,
+  }))
+}
+/** 시스템 구성품 미출고분 본문 */
+function holdsBody(p: Preview | null, s: Snap) {
+  return (p?.holds ?? []).map((h) => ({
+    itemId: h.itemId,
+    serials: h.mode === 'serial' ? splitLines(s.holdSerialText[h.itemId]) : undefined,
+    serialsNote: h.mode !== 'serial' ? (s.holdNoteText[h.itemId] ?? '').trim() || null : undefined,
+  }))
+}
+/** 처리 API 본문 — AS 모드는 접수 라인별 시리얼 + 센서류 라인, 일반 모드는 lines·holds(+고른 상품유형) */
+function requestBody(p: Preview | null, s: Snap, txDate: string, withLines: boolean) {
+  if (p?.asLink) {
+    return {
+      txDate,
+      asLines: Object.entries(s.asSerials).filter(([, v]) => v.trim()).map(([k, v]) => ({ asItemId: Number(k), serial: v.trim().toUpperCase() })),
+      extraLines: s.extras.filter((e) => e.inventoryItemId && e.quantity !== '').map((e) => ({
+        inventoryItemId: e.inventoryItemId, quantity: parseInt(e.quantity) || 0,
+        serials: splitLines(s.serialText[e.inventoryItemId]),
+        lots: lotsOf(s.lotRows[e.inventoryItemId]),
+        serialsNote: (s.noteText[e.inventoryItemId] ?? '').trim() || null,
+      })),
+    }
+  }
+  return {
+    txDate, lines: withLines ? linesBody(p, s) : [], holds: withLines ? holdsBody(p, s) : [], holdWarehouseId: s.holdWarehouseId,
+    ...(s.productType ? { productType: s.productType } : {}),
+  }
+}
 
 function todayKst(): string {
   return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
@@ -106,58 +163,110 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
   const [holdConfirmed, setHoldConfirmed] = useState<Set<number>>(new Set())
   const [holdWarehouseId, setHoldWarehouseId] = useState<number | null>(null)
 
-  const buildLines = useCallback((p: Preview | null) => {
-    if (!p) return []
-    return p.lines.map((l) => ({
-      inventoryItemId: l.inventoryItemId,
-      serials: l.mode === 'serial' ? (serialText[l.inventoryItemId] ?? '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean) : undefined,
-      lots: l.mode === 'lot'
-        ? (lotRows[l.inventoryItemId] ?? []).filter((r) => r.bucketKey && r.quantity !== '').map((r) => {
-            const [wh, ...lot] = r.bucketKey.split('|')
-            return { warehouseId: Number(wh), lotNo: lot.join('|'), quantity: parseInt(r.quantity) || 0 }
-          })
-        : undefined,
-      serialsNote: l.mode !== 'serial' ? (noteText[l.inventoryItemId] ?? '').trim() || null : undefined,
-    }))
-  }, [serialText, lotRows, noteText])
+  // 기기 상품유형 (2026-11-18) — 요청에 유형이 없고 병원 계약이 일반·라이트 혼합일 때만 여기서 고른다(그 외엔 요청 유형·병원 계약이 정함)
+  const [productType, setProductType] = useState<string | null>(null)
+  // 입력 내용 임시 저장 (2026-11-18)
+  const [hydrated, setHydrated] = useState(false)
+  const [saveInfo, setSaveInfo] = useState<{ at: string; by: string | null } | null>(null)
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'error'>('idle')
+  const lastSavedJson = useRef('')
+  const latestDraftJson = useRef('')
 
-  /** 시스템 구성품 미출고분 본문 */
-  const buildHolds = useCallback((p: Preview | null) => (p?.holds ?? []).map((h) => ({
-    itemId: h.itemId,
-    serials: h.mode === 'serial' ? (holdSerialText[h.itemId] ?? '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean) : undefined,
-    serialsNote: h.mode !== 'serial' ? (holdNoteText[h.itemId] ?? '').trim() || null : undefined,
-  })), [holdSerialText, holdNoteText])
+  const snap: Snap = { serialText, lotRows, noteText, holdSerialText, holdNoteText, holdWarehouseId, asSerials, extras, productType }
 
-  /** AS 모드 본문 — 접수 라인별 시리얼 + 센서류 라인 (일반 모드는 lines) */
-  const buildAsBody = useCallback(() => ({
-    txDate,
-    asLines: Object.entries(asSerials).filter(([, v]) => v.trim()).map(([k, v]) => ({ asItemId: Number(k), serial: v.trim().toUpperCase() })),
-    extraLines: extras.filter((e) => e.inventoryItemId && e.quantity !== '').map((e) => ({
-      inventoryItemId: e.inventoryItemId, quantity: parseInt(e.quantity) || 0,
-      serials: (serialText[e.inventoryItemId] ?? '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean),
-      lots: (lotRows[e.inventoryItemId] ?? []).filter((r) => r.bucketKey && r.quantity !== '').map((r) => { const [wh, ...lot] = r.bucketKey.split('|'); return { warehouseId: Number(wh), lotNo: lot.join('|'), quantity: parseInt(r.quantity) || 0 } }),
-      serialsNote: (noteText[e.inventoryItemId] ?? '').trim() || null,
-    })),
-  }), [txDate, asSerials, extras, serialText, lotRows, noteText])
-
-  const callPreview = useCallback(async (withLines: boolean, base: Preview | null) => {
-    setBusy(true)
-    setError(null)
-    const body = base?.asLink ? buildAsBody() : { txDate, lines: withLines ? buildLines(base) : [], holds: withLines ? buildHolds(base) : [], holdWarehouseId }
+  const postPreview = async (body: unknown) => {
     const res = await fetch(`/api/stock-out-requests/${requestId}/fulfill?preview=true`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    const d = await res.json().catch(() => ({}))
-    setBusy(false)
-    if (!res.ok) { setError(d.error ?? '검증에 실패했습니다.'); return null }
-    setPreview(d.preview)
-    return d.preview as Preview
-  }, [requestId, txDate, buildLines, buildHolds, holdWarehouseId, buildAsBody])
+    return { ok: res.ok, d: (await res.json().catch(() => ({}))) as { preview?: Preview; draft?: Draft | null; draftAt?: string | null; error?: string } }
+  }
 
-  // 카드가 열리면 바로 미리보기 (v2 — 출고유형 선택 단계 없음)
-  useEffect(() => { void callPreview(false, null) }, [requestId]) // eslint-disable-line react-hooks/exhaustive-deps
+  /** 서버 판정 — s를 주면 그 입력으로(상태 반영 전에 바로 판정할 때), 없으면 현재 입력으로 */
+  const callPreview = async (withLines: boolean, base: Preview | null, s: Snap = snap) => {
+    setBusy(true)
+    setError(null)
+    const { ok, d } = await postPreview(requestBody(base, s, txDate, withLines))
+    setBusy(false)
+    if (!ok || !d.preview) { setError(d.error ?? '검증에 실패했습니다.'); return null }
+    setPreview(d.preview)
+    return d.preview
+  }
+
+  /** 카드가 열리면 미리보기 + 임시 저장분 복원 — 복원한 입력으로 다시 판정받아 여전히 통과하는 항목만 '확인됨'으로 되살린다 */
+  const hydrate = async () => {
+    setBusy(true)
+    setError(null)
+    const first = await postPreview(requestBody(null, EMPTY_SNAP, txDate, false))
+    if (!first.ok || !first.d.preview) { setBusy(false); setError(first.d.error ?? '검증에 실패했습니다.'); return }
+    let p = first.d.preview
+    const draft = first.d.draft ?? null
+    if (draft) {
+      const s: Snap = {
+        serialText: draft.serialText ?? {}, lotRows: draft.lotRows ?? {}, noteText: draft.noteText ?? {},
+        holdSerialText: draft.holdSerialText ?? {}, holdNoteText: draft.holdNoteText ?? {}, holdWarehouseId: draft.holdWarehouseId ?? null,
+        asSerials: draft.asSerials ?? {}, extras: draft.extras ?? [], productType: draft.productType === '일반' || draft.productType === '라이트' ? draft.productType : null,
+      }
+      setSerialText(s.serialText); setLotRows(s.lotRows); setNoteText(s.noteText)
+      setHoldSerialText(s.holdSerialText); setHoldNoteText(s.holdNoteText); setHoldWarehouseId(s.holdWarehouseId)
+      setAsSerials(s.asSerials); setExtras(s.extras); setProductType(s.productType)
+      const second = await postPreview(requestBody(p, s, txDate, true))
+      if (second.ok && second.d.preview) {
+        const p2 = second.d.preview
+        p = p2
+        const passed = (id: number) => { const l = p2.lines.find((x) => x.inventoryItemId === id); return !!l && (l.status === 'ok' || l.status === 'warning') }
+        setConfirmed(new Set((draft.confirmed ?? []).filter(passed)))
+        setHoldConfirmed(new Set((draft.holdConfirmed ?? []).filter((id) => p2.holds?.find((h) => h.itemId === id)?.status === 'ok')))
+        setBodyConfirmed(!!draft.bodyConfirmed && !!p2.asLink && p2.asLink.lines.every((l) => l.status === 'ok'))
+      }
+      if (first.d.draftAt) setSaveInfo({ at: first.d.draftAt, by: draft.savedByName ?? null })
+    }
+    setPreview(p)
+    setBusy(false)
+    setHydrated(true)
+  }
+  useEffect(() => { void hydrate() }, [requestId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 입력이 바뀌면 잠시 뒤 서버에 임시 저장 (복원 직후 상태가 기준선 — 그 뒤 달라졌을 때만 보낸다)
+  const draftJson = hydrated
+    ? JSON.stringify({
+        serialText, lotRows, noteText, confirmed: Array.from(confirmed).sort((x, y) => x - y),
+        holdSerialText, holdNoteText, holdConfirmed: Array.from(holdConfirmed).sort((x, y) => x - y), holdWarehouseId,
+        asSerials, extras, bodyConfirmed, ...(productType ? { productType } : {}),
+      })
+    : ''
+  const saveDraft = async (json: string) => {
+    setSaveState('saving')
+    const res = await fetch(`/api/stock-out-requests/${requestId}/fulfill-draft`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: `{"draft":${json}}` }).catch(() => null)
+    const d = res ? await res.json().catch(() => ({})) : {}
+    if (!res || !res.ok) { setSaveState('error'); return }
+    lastSavedJson.current = json
+    setSaveState('idle')
+    if (d.savedAt) setSaveInfo({ at: d.savedAt, by: d.savedByName ?? null })
+  }
+  useEffect(() => {
+    if (!hydrated) return
+    latestDraftJson.current = draftJson
+    if (lastSavedJson.current === '') { lastSavedJson.current = draftJson; return }
+    if (draftJson === lastSavedJson.current) return
+    const t = setTimeout(() => { void saveDraft(draftJson) }, 700)
+    return () => clearTimeout(t)
+  }, [draftJson, hydrated]) // eslint-disable-line react-hooks/exhaustive-deps
+  // 화면을 떠날 때 아직 보내지 않은 입력이 있으면 마지막으로 한 번 보낸다
+  useEffect(() => () => {
+    if (latestDraftJson.current && latestDraftJson.current !== lastSavedJson.current) {
+      void fetch(`/api/stock-out-requests/${requestId}/fulfill-draft`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: `{"draft":${latestDraftJson.current}}`, keepalive: true }).catch(() => {})
+    }
+  }, [requestId])
+
+  /** 상품유형 선택 — 품목 경고가 달라질 수 있어 확인을 풀고 다시 판정 */
+  async function changeProductType(next: '일반' | '라이트') {
+    setProductType(next)
+    setConfirmed(new Set())
+    setHoldConfirmed(new Set())
+    await callPreview(true, preview, { ...snap, productType: next })
+  }
 
   /** 품목별 [확인] — 라인 단위 검증 후 잠금 */
   async function confirmLine(l: PreviewLine) {
@@ -202,7 +311,7 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
     const res = await fetch(`/api/stock-out-requests/${requestId}/fulfill`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(preview.asLink ? buildAsBody() : { txDate, lines: buildLines(preview), holds: buildHolds(preview), holdWarehouseId }),
+      body: JSON.stringify(requestBody(preview, snap, txDate, true)),
     })
     const d = await res.json().catch(() => ({}))
     setBusy(false)
@@ -211,6 +320,7 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
       if (d.preview) { setPreview(d.preview); setConfirmed(new Set()); setHoldConfirmed(new Set()) }
       return
     }
+    lastSavedJson.current = latestDraftJson.current // 서버가 임시 저장분을 비웠다 — 떠날 때 다시 보내지 않게
     onDone()
   }
 
@@ -478,6 +588,30 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
               </div>
             </div>
           )}
+          {/* 기기 등록 유형 — 요청 유형(구축(일반)/구축(라이트))이 정한다. 유형 없는 옛 요청은 병원 계약 기준, 계약이 섞였으면 여기서 고른다 */}
+          {preview?.productType && !preview.asLink && (preview.productType.value || preview.productType.needsChoice) && (
+            <div className="pb-1" data-testid="fulfill-product-type">
+              <p className={label}>기기 등록 유형 <span className="font-normal text-gray-400">— 병원 기기현황에 등록되는 상품유형</span>{preview.productType.needsChoice && <span className="ml-1 text-red-500">필수</span>}</p>
+              {preview.productType.needsChoice ? (
+                <>
+                  <div className="mt-1 flex gap-1.5">
+                    {(['일반', '라이트'] as const).map((t) => (
+                      <button
+                        key={t} type="button" disabled={busy} onClick={() => void changeProductType(t)} data-testid={`fulfill-product-type-${t}`}
+                        className={`rounded-full border px-3 py-1 text-sm disabled:opacity-60 ${preview.productType?.value === t ? 'border-teal-600 bg-teal-600 text-white' : preview.productType?.value ? 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50' : 'border-red-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+                      >{t}형</button>
+                    ))}
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-gray-400">이 요청에는 유형이 없고 병원에 일반·라이트 계약이 함께 있습니다 — 요청 [수정]에서 유형을 지정해도 됩니다.</p>
+                </>
+              ) : (
+                <p className="mt-1 text-sm text-gray-900">
+                  <span className="rounded-md border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-800">{preview.productType.value}형</span>
+                  <span className="ml-1.5 text-xs text-gray-400">{preview.productType.source === 'REQUEST' ? `요청 유형 ${preview.productType.requestKind ?? ''}` : '병원 계약 기준'}</span>
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {!preview && !error && <p className="text-sm text-gray-400">검증 중…</p>}
@@ -656,7 +790,13 @@ export default function FulfillCard({ requestId, onDone }: { requestId: number; 
               })}
             </div>
 
-            <div className="flex items-center justify-end gap-3 border-t border-gray-100 pt-3">
+            <div className="flex flex-wrap items-center justify-end gap-3 border-t border-gray-100 pt-3">
+              <span className={`mr-auto text-xs ${saveState === 'error' ? 'text-red-600' : 'text-gray-400'}`} data-testid="fulfill-draft-state">
+                {saveState === 'saving' ? '입력 내용 저장 중…'
+                  : saveState === 'error' ? '입력 내용을 저장하지 못했습니다 — 네트워크를 확인하세요'
+                  : saveInfo ? `입력 내용 저장됨 · ${new Date(saveInfo.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Seoul' })}${saveInfo.by ? ` · ${saveInfo.by}` : ''}`
+                  : ''}
+              </span>
               <span className="text-xs text-gray-400">{preview.asLink ? `본체 ${bodyConfirmed ? '확인됨' : '미확인'} · 센서류 ${extras.filter((e) => confirmed.has(e.inventoryItemId)).length} / ${extras.length} 확인됨` : `${confirmed.size + holdConfirmed.size} / ${preview.lines.length + holdsAll.length} 항목 확인됨`}</span>
               <button
                 type="button"

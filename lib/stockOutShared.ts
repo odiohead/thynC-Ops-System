@@ -45,7 +45,33 @@ export const STOCK_OUT_SUB_PURPOSES: Record<StockOutSalesType, { code: string; l
 }
 export function subPurposeLabel(type: string, code: string | null | undefined): string | null {
   if (!code) return null
+  if (type === 'BUILD') return STOCK_OUT_BUILD_TYPE_LABELS[code as StockOutBuildType] ?? code
   return STOCK_OUT_SUB_PURPOSES[type as StockOutSalesType]?.find((s) => s.code === code)?.label ?? code
+}
+
+/**
+ * 구축(프로젝트) 출고요청의 유형 (2026-11-18) — 요청 작성 때 고른다. `stock_out_requests.sub_purpose`에 저장(영업 유형의 '목적'과 같은 칸).
+ *  - GENERAL 구축(일반) / LITE 구축(라이트): 출고되는 심전계·산소포화도가 병원 기기현황에 그 **상품유형**으로 등록된다(계약 매핑이 아니라 유형 기준 — 사용자 결정)
+ *  - POC 데모(PoC): 대웅제약재고에서 나가지 않는다 — 요청 폼에서 그 재고 영역을 숨기고 서버도 거부한다
+ * 2026-11-18 이전 구축 요청은 값이 없다(null) — 출고 처리는 병원 계약이 한 종류면 그 유형으로, 일반·라이트가 섞였으면 처리 화면에서 고르게 한다.
+ */
+export const STOCK_OUT_BUILD_TYPES = ['GENERAL', 'LITE', 'POC'] as const
+export type StockOutBuildType = (typeof STOCK_OUT_BUILD_TYPES)[number]
+export const STOCK_OUT_BUILD_TYPE_LABELS: Record<StockOutBuildType, string> = { GENERAL: '구축(일반)', LITE: '구축(라이트)', POC: '데모(PoC)' }
+export function isStockOutBuildType(v: unknown): v is StockOutBuildType {
+  return typeof v === 'string' && (STOCK_OUT_BUILD_TYPES as readonly string[]).includes(v)
+}
+/** 데모(PoC) 요청에서 쓸 수 없는 재고 */
+export const STOCK_OUT_POC_EXCLUDED_INVENTORY = '대웅제약재고'
+/** 요청 유형이 정하는 기기 상품유형 — 구축(일반)=일반 · 구축(라이트)=라이트 · 그 외(데모·미지정·영업 유형)=정해지지 않음(null) */
+export function stockOutProductTypeOf(purpose: string, subPurpose: string | null | undefined): '일반' | '라이트' | null {
+  if (purpose !== 'BUILD') return null
+  return subPurpose === 'GENERAL' ? '일반' : subPurpose === 'LITE' ? '라이트' : null
+}
+/** 업무 구분 표시 — 구축 요청은 유형이 있으면 그 이름('구축(라이트)' 등), 없으면 '구축' */
+export function stockOutKindLabel(purpose: string, subPurpose: string | null | undefined): string {
+  if (purpose === 'BUILD' && isStockOutBuildType(subPurpose)) return STOCK_OUT_BUILD_TYPE_LABELS[subPurpose]
+  return STOCK_OUT_PURPOSE_LABELS[purpose as StockOutPurpose] ?? purpose
 }
 
 /** 납품처 구분 */
@@ -115,3 +141,12 @@ export function outMetaForInventory(inventoryName: string): InventoryOutMeta {
 
 /** 처리 라인 모드 — WMS 품목 관리 방식에서 파생 (센서가 시리얼 품목으로 전환되면 자동으로 serial 경로) */
 export type FulfillLineMode = 'serial' | 'lot' | 'qty' | 'missing'
+
+/**
+ * 라이트용 품목인지 — 품목명이 'L' + 한글로 시작(예: 'L심전계(L-MC200M-T)', 'L산소포화도본체(L-MP100W)'). 2026-11-18
+ * 출고 처리에서 계약 상품유형과 어긋날 때 **경고**하는 데만 쓴다(판정·차단 근거 아님 — 상품유형은 계약 기준).
+ */
+export function isLiteItemName(name: string | null | undefined): boolean {
+  return /^L[가-힣]/.test((name ?? '').trim())
+}
+

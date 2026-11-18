@@ -52,7 +52,7 @@ export default function MobileStockOutRequestDetailPage() {
           <>
             <Section title={<span className="flex items-center gap-2">{r.project ? r.project.projectName : STOCK_OUT_PURPOSE_LABELS[r.purpose as StockOutPurpose] ?? r.purpose} <StatusPill status={r.status} /></span>}>
               <dl className="grid grid-cols-[5.5rem_1fr] gap-y-2 text-sm">
-                {!r.project && row('목적', subPurposeLabel(r.purpose, r.subPurpose))}
+                {(!r.project || r.subPurpose) && row(r.project ? '유형' : '목적', subPurposeLabel(r.purpose, r.subPurpose))}
                 {!r.project && row(r.destType === 'OTHER' ? '납품처(기타)' : '납품처', stockOutDestName(r))}
                 {row('수령지', r.shipAddress)}
                 {row('수취인', r.recipient)}

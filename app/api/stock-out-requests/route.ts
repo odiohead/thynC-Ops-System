@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import type { Prisma } from '@prisma/client'
 import { getAuthUser } from '@/lib/auth'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
-import { isStockOutPurpose } from '@/lib/stockOutShared'
+import { isStockOutPurpose, isStockOutBuildType } from '@/lib/stockOutShared'
 import { createStockOutRequest, StockOutCreateError } from '@/lib/stockOutCreate'
 import { notifyTicketCreated } from '@/lib/notify'
 import { notifyStockOutCreated } from '@/lib/stockOutNotify'
@@ -99,6 +99,10 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json()
   // 검증·발번·라인·연결 티켓은 공용 코어(lib/stockOutCreate.ts — 분실 AS [출고요청]과 동일 경로, 2026-11-10). 수동 생성은 AS 연결 없음
+  // 구축 요청은 유형 필수 (2026-11-18) — 구축(일반)/구축(라이트)/데모(PoC). 출고되는 기기의 상품유형과 데모의 재고 범위를 요청 때 정한다
+  if ((body.purpose === undefined || body.purpose === null || body.purpose === 'BUILD') && !isStockOutBuildType(body.subPurpose)) {
+    return NextResponse.json({ error: '유형을 선택하세요 — 구축(일반) / 구축(라이트) / 데모(PoC)' }, { status: 400 })
+  }
   let created: { id: number; sorCode: string; ticketId: number; title: string }
   try {
     created = await createStockOutRequest({ ...body, asReceiptId: null }, { userId: user.userId, name: user.name })

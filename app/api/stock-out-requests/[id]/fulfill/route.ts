@@ -14,6 +14,8 @@ type Params = { params: { id: string } }
 /**
  * 출고요청 처리 (stock_out_request_design.md §13.3 — 자재담당자 전용)
  * ?preview=true — 검증·라인 판정만. 본 실행은 전량 일치·단일 트랜잭션(WMS 차감 + 기기현황 등록 + 상태 완료).
+ * 기기 상품유형(2026-11-18) — 기기현황 등록은 요청 유형(구축(일반)/구축(라이트))을 따른다. 유형 없는 옛 요청이고 병원 계약이 일반·라이트 혼합이면 본문 `productType`('일반'|'라이트') 필수.
+ * 미리보기 응답에는 임시 저장분 `draft`·`draftAt`이 함께 내려간다(저장은 PUT …/fulfill-draft).
  */
 export async function POST(request: NextRequest, { params }: Params) {
   const user = await getAuthUser(request)
@@ -31,7 +33,9 @@ export async function POST(request: NextRequest, { params }: Params) {
   try {
     if (isPreview) {
       const preview = await previewFulfillment(id, body)
-      return NextResponse.json({ preview })
+      // 임시 저장분(2026-11-18) — 화면이 열릴 때 입력 내용을 되살리는 데 쓴다. 저장한 사람·시각 포함
+      const saved = await prisma.stockOutRequest.findUnique({ where: { id }, select: { fulfillDraft: true, fulfillDraftAt: true } })
+      return NextResponse.json({ preview, draft: saved?.fulfillDraft ?? null, draftAt: saved?.fulfillDraftAt ?? null })
     }
 
     const result = await executeFulfillment(id, body, { userId: user.userId, name: user.name })

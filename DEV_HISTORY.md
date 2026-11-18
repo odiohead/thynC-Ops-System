@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-11-18 10:24 | 출고요청 유형(구축(일반)/구축(라이트)/데모(PoC)) · 유형 기준 기기 등록 · 출고 처리 입력 내용 자동 저장 (dev2 코드·마이그·스모크, 빌드·화면 검증 전 — PROD 미반영)
+
+- **발단**: PROD `/stock-out-requests/17`(SOR-202611-0014, 구로성심병원 2차 구축) 출고 처리가 원인 표시 없이 실패(09:31·09:35·09:36). 로그의 원인은 기기현황 등록 단계의 `상품유형 필수 — 이 병원은 일반·라이트 딜이 함께 있습니다` — 출고 처리가 상품유형을 넘기지 않는데 이 병원은 1차 일반·2차 라이트가 함께 있음. 재고·기기현황 변동 없음. 같은 조건 병원 3곳(구로성심·메디인·울산)
+- **사용자 결정(토론)**: 중요한 것은 계약 매핑이 아니라 **출고 기기가 일반형으로 등록되느냐 라이트형으로 등록되느냐**(요청 시점에 계약(딜)이 없을 수 있고 PoC는 계약과 무관) → **출고요청 작성 때 유형을 고른다**: 구축(일반) / 구축(라이트) / 데모(PoC). 데모(PoC)는 대웅제약재고에서 나가지 않으므로 그 재고 영역을 **아예 숨긴다**. 품목 L 여부는 **체크(경고)만**(차단 없음). 추가 요청 — 처리 화면에서 품목별로 입력한 내용이 창을 닫으면 사라지니 **저장한 데이터는 남게**. (같은 날 먼저 만든 '출고 처리 화면에서 계약(딜) 선택' 안은 커밋 전에 걷어냄)
+- **요청 유형**: 새 컬럼 없이 `stock_out_requests.sub_purpose`에 `GENERAL`/`LITE`/`POC` 저장(영업 유형의 '목적'과 같은 칸 — `lib/stockOutShared` `STOCK_OUT_BUILD_TYPES`·`stockOutKindLabel`·`stockOutProductTypeOf`). `POST /api/stock-out-requests`는 구축 요청에 유형 필수(400), `PUT`은 처리 전까지 유형 변경 허용. 데모(PoC)에 대웅제약재고 품목이 있으면 서버가 거부(`assertPocItems`). lib(`createStockOutRequest`)는 유형 없이도 생성 가능(스모크·내부 호출)
+- **요청 폼**(`StockOutRequestFormModal` — 프로젝트 상세·출고요청 상세 [수정]): 유형 칩 3개(필수, 고르기 전엔 품목 목록 대신 '유형을 먼저 선택하세요'), 데모(PoC)는 대웅제약재고 카드(시스템·구성품·미출고 포함)가 사라지고 거기 입력해 둔 수량은 전송되지 않음. 상세 헤더 배지·목록·모바일 상세에 유형 표시
+- **기기 등록**(`lib/stockOutFulfill.applyProductType`): 구축(일반) → 일반 · 구축(라이트) → 라이트로 `registerDevicesIn`에 상품유형 전달. **유형 없는 옛 요청**은 병원 계약이 한 종류면 종전처럼 자동, 일반·라이트 혼합이면 처리 화면에서 일반형/라이트형을 골라야 실행(미선택이면 원인을 적은 오류 표시) — 요청 [수정]에서 유형을 지정해도 됨. 계약건(딜)은 지정하지 않음: 계약이 1건인 병원은 원장 규칙대로 그 딜, 여러 건이면 미지정으로 등록
+- **품목 경고**(`isLiteItemName`): 일반형 + L 품목 / 라이트형 + 일반 품목(같은 재고·같은 기기 모델에 L 품목이 따로 있을 때만) → 그 품목에 경고만
+- **오류 표시**: 기기현황 거부 사유를 '기기현황 등록 실패 — …'로 화면에 표시(종전 '출고 처리 중 오류가 발생했습니다')
+- **입력 내용 자동 저장**: 마이그 `20261118100000_stock_out_fulfill_draft`(dev2 적용·resolve, **PROD 미적용**) — `stock_out_requests.fulfill_draft`·`fulfill_draft_at`. `PUT /api/stock-out-requests/[id]/fulfill-draft`, 미리보기 응답에 `draft`. 화면이 입력 0.7초 뒤·이탈 시 저장, 열 때 복원 후 재판정해 통과 항목만 확인됨 복원. 출고일 미저장, 실행 성공 시 비움
+- **검증**: tsc · eslint · `scripts/stock-out-build-type-smoke.mts` 26/26(구로성심병원 — 유형 검증·PoC 거부·라이트/일반 등록·옛 요청 선택·실제 출고 실행까지, 전부 원복) · 기존 `stock-out-components-smoke.mts` 43/43 · `system-server-split-smoke.mts` 35/35. **dev2 빌드와 실제 화면 검증은 하지 않음**(빌드는 명시 요청 시에만 — 화면 동작은 미확인)
+- 영향 파일: lib/stockOutShared.ts, lib/stockOutCreate.ts, lib/stockOutFulfill.ts, app/api/stock-out-requests/route.ts, app/api/stock-out-requests/[id]/route.ts, app/api/stock-out-requests/[id]/fulfill/route.ts, app/api/stock-out-requests/[id]/fulfill-draft/route.ts(신규), app/stock-out-requests/_components/{StockOutRequestFormModal,FulfillCard}.tsx, app/stock-out-requests/page.tsx, app/stock-out-requests/[id]/page.tsx, app/m/stock-out-requests/[id]/page.tsx, prisma/schema.prisma, prisma/migrations/20261118100000_stock_out_fulfill_draft, scripts/stock-out-build-type-smoke.mts(신규), projects/stock_out_v2_design.md, README.md
+- **PROD 반영 시**: 마이그 SQL psql 적용·resolve(컬럼 2개 추가 — DDL, 명시 허락) → `npx prisma generate` → 힙 4GB 빌드·재시작(협업 번들 무관). 반영 후 SOR-202611-0014는 요청 [수정]에서 유형을 '구축(라이트)'로 지정하거나 처리 화면에서 라이트형을 고르면 처리 가능. 커밋·PROD 반영 없음
+
 ## 2026-11-18 09:35 | thynC 사용량 수집 초기 버전 — 병원 서버 Agent(Go) + 수신부(별도 프로세스) + 원본 DB(별도 DB) (설계 `projects/usage_collection_design.md`, dev2 구현·검증 → 커밋·push, dev·PROD 미반영)
 
 - **요청**: 고객사 병원 서버의 thynC DB에서 사용량을 받아 시스템에서 보여 주려 함. 기존 '스마트싱크'(thynx jar)와 별개로 개발. 토론으로 정한 것 — 병원 서버는 요약이 아니라 **원본 행**을 보내고 계산은 시스템에서(세는 기준이 지표마다 다름: 하루를 넘기면 몇 건인지, 기기 교체를 1건/2건으로 볼지) · 기기별 집계 가능해야 함 · 구독형/일반·병동명·기관명 · 기기 상태 이력 전부 · Agent는 Go + systemd 타이머(상주 아님) · **식별 단위는 병원**(서버는 그 아래) · 누락분 재전송 가능 · 모든 원본 테이블에 병원 구분 컬럼 · 수신부는 본체와 별도 프로세스 · 원본은 본체와 별도 DB. 초기 범위는 Agent + 원본 적재 스키마 + 수신 인터페이스까지(지표 계산·화면은 다음 단계). 설계안 1~3차 검토 후 착수 승인, dev2에 Go·MySQL 설치 승인

@@ -5,7 +5,7 @@
  * 상태 변경(도메인→티켓 동기화)·수정 모달·삭제(티켓 동반) — 권한: 설계 §2-6.
  */
 import { useState, useEffect, useCallback } from 'react'
-import { STOCK_OUT_PURPOSE_LABELS, stockOutTitle, stockOutDestName, subPurposeLabel, type StockOutPurpose } from '@/lib/stockOutShared'
+import { STOCK_OUT_PURPOSE_LABELS, stockOutTitle, stockOutDestName, subPurposeLabel, stockOutKindLabel, type StockOutPurpose } from '@/lib/stockOutShared'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import TicketStatusBadge from '@/app/tickets/components/TicketStatusBadge'
@@ -165,7 +165,7 @@ export default function StockOutDetailPage() {
             <Link href="/stock-out-requests" className="text-sm text-gray-400 hover:text-gray-600">출고업무</Link>
             <span className="text-gray-300">/</span>
             <span className="font-mono text-sm text-gray-500">{req.sorCode}</span>
-            <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">{STOCK_OUT_PURPOSE_LABELS[req.purpose] ?? req.purpose}</span>
+            <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600" data-testid="so-kind">{stockOutKindLabel(req.purpose, req.subPurpose)}</span>
             {codeBadge(req.status)}
           </div>
           <h1 className="mt-1 text-xl font-bold text-gray-900">{stockOutTitle(req)}</h1>

@@ -6,7 +6,8 @@ import { getAuthUser } from '@/lib/auth'
 import { hasPermission } from '@/lib/appRoles'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { canEditStockOutRequest, validateStockOutLines, writeStockOutLines, writeStockOutComponents, resolveStockOutComponents, type StockOutLine, type StockOutComponentRow } from '@/lib/stockOut'
-import { isStockOutSalesType, STOCK_OUT_SUB_PURPOSES, type StockOutPurpose } from '@/lib/stockOutShared'
+import { isStockOutSalesType, isStockOutBuildType, STOCK_OUT_SUB_PURPOSES, type StockOutPurpose } from '@/lib/stockOutShared'
+import { assertPocItems } from '@/lib/stockOutCreate'
 import { syncStockOutToTicket } from '@/lib/ticket-domains/stockOut'
 import { notifyTicketChanged } from '@/lib/notify'
 import { syncTicketClocksSafe } from '@/lib/sla'
@@ -122,6 +123,12 @@ export async function PUT(request: NextRequest, { params }: Params) {
         data.recipient = v
       }
     }
+    // 구축 유형 (2026-11-18) — 출고 처리 전까지만 바꿀 수 있다(처리된 요청은 등록된 기기 유형과 어긋나지 않게 고정)
+    if (existing.purpose === 'BUILD' && body.subPurpose !== undefined && body.subPurpose !== existing.subPurpose) {
+      if (!isStockOutBuildType(body.subPurpose)) return NextResponse.json({ error: '유형이 올바르지 않습니다 — 구축(일반) / 구축(라이트) / 데모(PoC)' }, { status: 400 })
+      if (existing.fulfilledAt) return NextResponse.json({ error: '출고 처리된 요청은 유형을 바꿀 수 없습니다.' }, { status: 409 })
+      data.subPurpose = body.subPurpose
+    }
     if (body.statusId !== undefined) {
       const sid = Number(body.statusId)
       const row = Number.isInteger(sid)
@@ -140,6 +147,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (body.items !== undefined) {
       if (existing.asReceiptId) return NextResponse.json({ error: '분실 AS 연동 출고요청의 품목은 출고 처리 시 입력한 시리얼로 정해집니다 — 품목을 직접 수정할 수 없습니다.' }, { status: 400 }) // 2026-11-10
       items = await validateStockOutLines(body.items, existing.purpose as StockOutPurpose, existing.items.map((l) => l.inventoryItemId))
+    }
+    // 데모(PoC)는 대웅제약재고 품목 불가 — 유형을 데모로 바꾸거나 데모 요청의 품목을 바꿀 때 검사
+    if (existing.purpose === 'BUILD' && ((data.subPurpose ?? existing.subPurpose) === 'POC') && (items || data.subPurpose !== undefined)) {
+      await assertPocItems((items ?? existing.items).map((l) => l.inventoryItemId))
     }
     // 출고 처리된 요청은 구성품(합계·미출고·처리 시리얼)을 건드리지 않는다 — 처리 기록 보존
     if (!existing.fulfilledAt && (body.items !== undefined || body.unshipped !== undefined)) {

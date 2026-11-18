@@ -11,7 +11,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import TicketRuleSettingButton from '@/app/components/TicketRuleSettingButton'
-import { STOCK_OUT_PURPOSE_LABELS, STOCK_OUT_SALES_TYPES, subPurposeLabel, stockOutDestName, type StockOutPurpose } from '@/lib/stockOutShared'
+import { STOCK_OUT_PURPOSE_LABELS, STOCK_OUT_SALES_TYPES, subPurposeLabel, stockOutDestName, isStockOutBuildType, type StockOutPurpose } from '@/lib/stockOutShared'
 import StockOutRequestFormModal from './_components/StockOutRequestFormModal'
 
 interface CodeRef { id: number; name: string; color: string | null }
@@ -175,7 +175,13 @@ export default function StockOutListPage() {
                   <tr key={r.id} className="cursor-pointer hover:bg-gray-50" onClick={() => router.push(`/stock-out-requests/${r.id}`)}>
                     <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-blue-600">{r.sorCode}</td>
                     <td className="max-w-[12rem] truncate px-3 py-2 text-gray-900">
-                      {r.project ? r.project.projectName : (
+                      {r.project ? (
+                        <span>
+                          {/* 구축 요청 유형 — 구축(일반)/구축(라이트)/데모(PoC) (2026-11-18, 그 전 요청은 표시 없음) */}
+                          {isStockOutBuildType(r.subPurpose) && <span className="mr-1 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">{subPurposeLabel(r.purpose, r.subPurpose)}</span>}
+                          {r.project.projectName}
+                        </span>
+                      ) : (
                         <span>
                           <span className="mr-1 rounded bg-violet-50 px-1.5 py-0.5 text-xs font-medium text-violet-700">{STOCK_OUT_PURPOSE_LABELS[r.purpose as StockOutPurpose] ?? r.purpose}</span>
                           {subPurposeLabel(r.purpose, r.subPurpose) ?? ''}

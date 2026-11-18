@@ -8,7 +8,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { nextSorCode, validateStockOutLines, writeStockOutLines, writeStockOutComponents, resolveStockOutComponents, type StockOutLine, type StockOutComponentRow } from '@/lib/stockOut'
-import { isStockOutPurpose, isStockOutSalesType, STOCK_OUT_SUB_PURPOSES, stockOutTitle, type StockOutPurpose } from '@/lib/stockOutShared'
+import { isStockOutPurpose, isStockOutSalesType, STOCK_OUT_SUB_PURPOSES, stockOutTitle, type StockOutPurpose, isStockOutBuildType, STOCK_OUT_POC_EXCLUDED_INVENTORY, type StockOutBuildType } from '@/lib/stockOutShared'
 import { createTicketForStockOut } from '@/lib/ticket-domains/stockOut'
 
 export class StockOutCreateError extends Error {
@@ -34,6 +34,8 @@ export interface StockOutCreatePrepared {
   items: StockOutLine[]
   /** 시스템 구성품 합계·미출고 (시스템 라인이 없으면 빈 배열) */
   components: StockOutComponentRow[]
+  /** 구축 요청의 유형 GENERAL/LITE/POC (2026-11-18) — 그 외 업무 구분·미지정은 null */
+  buildType: StockOutBuildType | null
   statusId: number | null
   statusName: string | null
   note: string | null
@@ -51,6 +53,12 @@ export async function prepareStockOutCreate(body: StockOutCreateBody, client: Pr
 
   let project: StockOutCreatePrepared['project'] = null
   let sales: StockOutCreatePrepared['sales'] = null
+  // 구축 유형 (2026-11-18) — 값이 오면 검증. 필수 여부는 호출부(화면 API)가 정한다(분실 AS 연동·스크립트 등 유형 없는 호출 허용)
+  let buildType: StockOutBuildType | null = null
+  if (purpose === 'BUILD' && body.subPurpose !== undefined && body.subPurpose !== null && body.subPurpose !== '') {
+    if (!isStockOutBuildType(body.subPurpose)) throw new StockOutCreateError('구축 유형이 올바르지 않습니다.')
+    buildType = body.subPurpose
+  }
   if (!isSales) {
     const projectCode = typeof body.projectCode === 'string' ? body.projectCode.trim() : ''
     if (!projectCode) throw new StockOutCreateError('프로젝트를 선택하세요.')
@@ -82,6 +90,7 @@ export async function prepareStockOutCreate(body: StockOutCreateBody, client: Pr
   let components: StockOutComponentRow[]
   try {
     items = await validateStockOutLines(body.items, purpose)
+    if (buildType === 'POC') await assertPocItems(items.map((l) => l.inventoryItemId), client)
     components = await resolveStockOutComponents(items, body.unshipped ?? [], [], client)
   } catch (e) { throw new StockOutCreateError((e as Error).message) }
 
@@ -99,7 +108,13 @@ export async function prepareStockOutCreate(body: StockOutCreateBody, client: Pr
   const note = typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null
   const title = stockOutTitle({ purpose, subPurpose: sales?.subPurpose, project, destType: sales?.destType, destText: sales?.destText, destHospital: sales?.destHospitalName ? { hospitalName: sales.destHospitalName } : null })
   const asReceiptId = Number.isInteger(body.asReceiptId) ? (body.asReceiptId as number) : null
-  return { purpose, requestDate, project, sales, items, components, statusId, statusName: statusRow?.name ?? null, note, title, asReceiptId }
+  return { purpose, requestDate, project, sales, items, components, buildType, statusId, statusName: statusRow?.name ?? null, note, title, asReceiptId }
+}
+
+/** 데모(PoC)는 대웅제약재고에서 나가지 않는다 (2026-11-18) — 화면이 그 영역을 숨기지만 서버도 막는다 */
+export async function assertPocItems(inventoryItemIds: number[], client: Prisma.TransactionClient | typeof prisma = prisma): Promise<void> {
+  const bad = await client.inventoryItem.findMany({ where: { id: { in: inventoryItemIds }, inventory: { name: STOCK_OUT_POC_EXCLUDED_INVENTORY } }, select: { name: true } })
+  if (bad.length) throw new StockOutCreateError(`데모(PoC) 요청에는 ${STOCK_OUT_POC_EXCLUDED_INVENTORY} 품목을 넣을 수 없습니다: ${bad.map((b) => b.name).join(', ')}`)
 }
 
 /** 레코드 + 라인 + 연결 티켓 — 호출부 트랜잭션 안에서 (티켓 없는 출고요청을 만들지 않는다) */
@@ -109,6 +124,7 @@ export async function createStockOutRequestIn(tx: Prisma.TransactionClient, p: S
       sorCode: await nextSorCode(tx),
       projectCode: p.project?.projectCode ?? null,
       purpose: p.purpose,
+      ...(p.buildType ? { subPurpose: p.buildType } : {}),
       ...(p.sales ? { subPurpose: p.sales.subPurpose, destType: p.sales.destType, destHospitalCode: p.sales.destHospitalCode, destText: p.sales.destText, shipAddress: p.sales.shipAddress, recipient: p.sales.recipient } : {}),
       statusId: p.statusId,
       requestDate: p.requestDate,

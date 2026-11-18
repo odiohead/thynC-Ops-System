@@ -2240,6 +2240,8 @@ model StockOutRequest {
   fulfilledById   String?   @map("fulfilled_by_id") // 처리자 (자재담당자)
   ticketId        Int?      @unique @map("ticket_id") // 도메인 1:1 연결 티켓
   asReceiptId     Int?      @map("as_receipt_id") // 분실 AS 연동 요청 — 접수에서 [출고요청]으로 생성 (2026-11-10, as_lost_stock_out_link_design.md)
+  fulfillDraft    Json?     @map("fulfill_draft") // 출고 처리 입력 내용 임시 저장(2026-11-18) — 품목별 시리얼·LOT·확인 여부·(옛 요청의) 상품유형 선택. 출고 실행 시 비움
+  fulfillDraftAt  DateTime? @map("fulfill_draft_at") // 임시 저장 시각
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
