@@ -56,7 +56,7 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 
 - **2026-11-18 운영 서버 이전**: 기존 인스턴스 사양 변경 대신 새 인스턴스에 전부 설치(Node 20·PostgreSQL 16·Nginx·PM2·certbot) → S3 백업으로 복원 리허설 → 최종 덤프 이전 → Route53 전환. PROD와 DEV는 이제 **서로 다른 호스트**이고 DB도 각자 로컬(`thync_ops` / `thync_ops_dev`). 접속은 두 서버 모두 같은 키(`joon-board-key.pem`)
 - 기존 서버에는 옛 `thynC-Ops-PROD` 디렉토리·`thync_ops` DB·정지된 운영 PM2 프로세스가 남아 있을 수 있다 — 운영이 아니며 켜면 안 된다(채널톡 이중 처리·Slack 이중 발송)
-- **사용량 수신부** (2026-11-18 — 현재 dev2에만 설치, dev·PROD 미설치): 본체와 별도 PM2 프로세스 `thync-usage-ingest-dev`(127.0.0.1:3110), 원본 DB `thync_usage_dev`(전용 계정 `thync_usage`, 본체 DB 접속 권한 없음). 서버에 올릴 때는 Nginx가 `/api/usage-ingest/` 경로만 이 프로세스로 넘긴다 — `projects/usage_collection_design.md` §13.5
+- **사용량 수신부** (2026-11-18 — dev2·DEV·PROD 설치): 본체와 별도 PM2 프로세스 `thync-usage-ingest-dev`/`thync-usage-ingest-prod`(127.0.0.1:3110), 원본 DB `thync_usage_dev`/`thync_usage`(전용 계정 `thync_usage`, 본체 DB 접속 권한 없음). Nginx가 `/api/usage-ingest/` 경로만 이 프로세스로 넘긴다. 용량 상한 DEV 2GB·PROD 20GB(`usage-ingest/.env` `USAGE_MAX_BYTES`). **PROD 원본 DB는 일일 백업 대상이 아니다**(`backup-db.sh`는 `thync_ops`만) — `projects/usage_collection_design.md` §7.4·§13.5
 - 파일 저장소(S3 `seers-thync-ops`)는 PROD·DEV·dev2가 **공유**한다
 - SSL: 서버에서 certbot으로 발급하는 Let's Encrypt 인증서(AWS ACM 아님, 90일·자동 갱신). **2026-11-18 서버별로 분리 발급** — 운영 서버 `ops.seersthync.com` 전용(인증서 이름 `ops.seersthync.com`), DEV 서버 `dev.ops.seersthync.com` 전용(인증서 이름 `dev.ops.seersthync.com`). 둘 다 2027-02-15 만료·갱신 시험 통과. DEV 서버에는 옛 겸용 인증서(`ops.seersthync.com`, ops+dev.ops, 2027-02-02 만료)가 운영 도메인 블록용으로 남아 있고 갱신은 되지 않는다(되돌리기 대비 보존 — 기존 서버 운영 흔적을 정리할 때 함께 삭제)
 

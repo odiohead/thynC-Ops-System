@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-11-18 13:45 | [PROD 반영] 사용량 수집 수신부·원본 DB·사용량 화면 + dev 반영(분모 변경) — 4bf4b60
+
+- **요청**: "DEV에도 반영하고, 이제 PROD에도 반영하자" + 병원 서버 Agent는 URL·토큰만 바꾸면 되는지
+- **dev(13.125.238.77)**: dev에만 있는 미커밋 개발 이력 항목을 보존한 채 pull(e587e9a → 4bf4b60) → 힙 4GB 빌드 → `pm2 restart thync-dev` → /login 200·미인증 `/usage` 307. 동수원병원 실데이터 대조 30/30 — 분모 계약 20·20(서버 등록 21·21 대신), 30일 평균 동시 가동률 심전계 58%·산소포화도 41%, 일 사용률 65%·47%
+- **PROD(54.117.160.187) — 사용량 기능 첫 반영**: 작업 트리 깨끗함 확인 후 pull(dde554b → 4bf4b60, 패키지·본체 스키마 변경 없음 — `pg`는 이미 설치돼 있음) →
+  1. 원본 DB `thync_usage` + 전용 계정 `thync_usage`(무작위 비밀번호, `REVOKE CONNECT … FROM PUBLIC`) — 전용 계정으로 본체 `hospitals` 조회 시 permission denied 확인. 본체 DB `thync_ops` 권한은 건드리지 않음
+  2. `usage-ingest/.env`(600, `USAGE_MAX_BYTES` **20GB** — 디스크 96GB 중 83GB 여유) · 본체 `.env`에 `USAGE_DATABASE_URL` 추가(백업 `.env.bak-before-usage-20261118`)
+  3. `npm run build:usage-ingest`(a7d7864c, index.mjs sha256 d1507b08…) → `migrate.mjs`(0001_init) → PM2 `thync-usage-ingest-prod` 등록·`pm2 save`
+  4. Nginx `/etc/nginx/sites-available/thync-ops` 443 블록에 `location /api/usage-ingest/` → 127.0.0.1:3110(dev와 같은 설정, 백업 `/etc/nginx/thync-ops.bak-before-usage-20261118`) → `nginx -t` → reload. 외부 `https://ops.seersthync.com/api/usage-ingest/health` ok·토큰 없는 handshake 401
+  5. 메뉴 `scripts/seed-usage-nav.sql`(본체 DB `nav_menu_items` 1행 — '사용량', 운영현황 아래)
+  6. 본체 힙 4GB 빌드(독립 프로세스, `.next/cache` 유지, 약 5분) → `pm2 restart thync-prod` → /login 200·미인증 `/usage`·`/api/usage/*` 307, 스케줄러 정상 기동. 협업 번들 sha 동일(2108cacb — 재시작 안 함)
+  7. 운영 토큰 발급: HOSP-000038 동수원병원 `tua_acfe…`, HOSP-000168 화순성심병원 `tua_5b57…` — 원문은 PROD `/home/ubuntu/usage-prod-tokens-20261118.txt`(600)에만 저장(대화·저장소에 남기지 않음)
+- **병원 서버 전환 방법**(사용자 작업): `agent.env`의 `USAGE_ENDPOINT`(→ `https://ops.seersthync.com/api/usage-ingest/v1`)와 `USAGE_TOKEN`을 함께 바꾸면 끝 — Agent는 상주하지 않아 재시작 불필요, 다음 타이머 실행부터 운영으로 감. 운영 수신부는 처음 보는 병원으로 받아 병원 DB에 남은 약 90일치를 몇 시간에 걸쳐 따라잡음. dev에 받은 데이터는 그대로 남음
+- **남은 일**: ① **PROD 원본 DB 백업 없음** — 일일 백업(`scripts/backup-db.sh`)은 `thync_ops`만 덤프한다. 병원에서 지워진 뒤에는 원본 DB가 유일한 사본이라 백업 방식 결정 필요(설계 §7.4) ② dev 토큰 2개(동수원·화순성심)는 전환 확인 후 폐기 ③ 로그인 상태의 실제 화면은 여전히 확인 못 함(로그인 토큰 발급이 권한 분류기에 막힘)
+
 ## 2026-11-18 13:25 | 사용량 가동률 분모 → 운영관리시스템의 계약·공급 수량 (dev2 구현 → 커밋·push → dev·PROD 반영)
 
 - **요청**: 사용률 계산의 기기 수량은 병원 서버(클라이언트)에서 가져온 등록 기기 수가 아니라 운영관리시스템의 그 병원 기기 수 — 병원 화면에서 보여 주는 수치로
