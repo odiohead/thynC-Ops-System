@@ -1,0 +1,32 @@
+[Unit]
+Description=thynC usage agent - collect usage records and send them to the ops system
+Documentation=file:/opt/thync-usage-agent/README.txt
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=thync-usage
+Group=thync-usage
+EnvironmentFile=/etc/thync-usage-agent/agent.env
+ExecStart=/opt/thync-usage-agent/thync-usage-agent run
+TimeoutStartSec=30min
+
+# 병원 서버의 본업(환자 모니터링)에 영향을 주지 않도록 낮은 우선순위로 돈다
+Nice=10
+IOSchedulingClass=idle
+
+# 격리 — 파일 시스템에 쓰지 않고, 권한을 올리지 못한다
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=

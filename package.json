@@ -4,12 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build && node collab-server/build.mjs",
+    "build": "next build && node collab-server/build.mjs && node usage-ingest/build.mjs",
     "start": "next start",
     "lint": "next lint",
     "seed": "npx prisma db seed",
     "seed:admin": "tsx prisma/seed-admin.ts",
     "build:collab": "node collab-server/build.mjs",
+    "build:usage-ingest": "node usage-ingest/build.mjs",
     "start:collab": "node collab-server/dist/index.mjs"
   },
   "prisma": {
@@ -48,6 +49,7 @@
     "jszip": "^3.10.1",
     "lucide-react": "^1.7.0",
     "next": "14.2.35",
+    "pg": "^8.23.1",
     "pptxgenjs": "^4.0.1",
     "react": "^18",
     "react-dom": "^18",
@@ -62,6 +64,7 @@
     "@types/dotenv": "^6.1.1",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20",
+    "@types/pg": "^8.23.1",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "eslint": "^8",

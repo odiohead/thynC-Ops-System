@@ -43,6 +43,7 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 | DOCX 생성 (UDI 입출고대장) | jszip — 원본 양식 docx를 템플릿으로 열어 행 복제·텍스트 치환 (양식 100% 보존) |
 | 바코드 스캔 (모바일 앱) | barcode-detector 3.2.3 (zxing-cpp WASM ponyfill — iOS 포함 전 기기 동일 엔진). WASM은 `public/vendor/zxing_reader-3.1.6.wasm`로 자체 호스팅(외부 CDN 미사용, 패키지 갱신 시 동반 교체) |
 | 런타임 | Node.js 20 |
+| 사용량 수집 (2026-11-18) | **Agent**: Go 단일 실행 파일(병원 서버에서 systemd 타이머로 실행 — `agents/thync-usage-agent/`, 의존성은 MySQL 드라이버 1개) · **수신부**: Node 내장 HTTP + `pg`(본체와 별도 프로세스 — `usage-ingest/`, esbuild 단일 파일) · **원본 DB**: PostgreSQL `thync_usage(_dev)`(본체와 별도 DB, Prisma 미사용 — SQL 파일로 관리) |
 
 ---
 
@@ -55,6 +56,7 @@ thynC 구축 및 운영을 위한 내부 데이터 관리 시스템입니다.
 
 - **2026-11-18 운영 서버 이전**: 기존 인스턴스 사양 변경 대신 새 인스턴스에 전부 설치(Node 20·PostgreSQL 16·Nginx·PM2·certbot) → S3 백업으로 복원 리허설 → 최종 덤프 이전 → Route53 전환. PROD와 DEV는 이제 **서로 다른 호스트**이고 DB도 각자 로컬(`thync_ops` / `thync_ops_dev`). 접속은 두 서버 모두 같은 키(`joon-board-key.pem`)
 - 기존 서버에는 옛 `thynC-Ops-PROD` 디렉토리·`thync_ops` DB·정지된 운영 PM2 프로세스가 남아 있을 수 있다 — 운영이 아니며 켜면 안 된다(채널톡 이중 처리·Slack 이중 발송)
+- **사용량 수신부** (2026-11-18 — 현재 dev2에만 설치, dev·PROD 미설치): 본체와 별도 PM2 프로세스 `thync-usage-ingest-dev`(127.0.0.1:3110), 원본 DB `thync_usage_dev`(전용 계정 `thync_usage`, 본체 DB 접속 권한 없음). 서버에 올릴 때는 Nginx가 `/api/usage-ingest/` 경로만 이 프로세스로 넘긴다 — `projects/usage_collection_design.md` §13.5
 - 파일 저장소(S3 `seers-thync-ops`)는 PROD·DEV·dev2가 **공유**한다
 - SSL: 서버에서 certbot으로 발급하는 Let's Encrypt 인증서(AWS ACM 아님, 90일·자동 갱신). **2026-11-18 서버별로 분리 발급** — 운영 서버 `ops.seersthync.com` 전용(인증서 이름 `ops.seersthync.com`), DEV 서버 `dev.ops.seersthync.com` 전용(인증서 이름 `dev.ops.seersthync.com`). 둘 다 2027-02-15 만료·갱신 시험 통과. DEV 서버에는 옛 겸용 인증서(`ops.seersthync.com`, ops+dev.ops, 2027-02-02 만료)가 운영 도메인 블록용으로 남아 있고 갱신은 되지 않는다(되돌리기 대비 보존 — 기존 서버 운영 흔적을 정리할 때 함께 삭제)
 
@@ -399,6 +401,24 @@ lib/
 prisma/
 ├── schema.prisma                     # DB 스키마
 ├── seed.ts                           # 기본 데이터 시드 (Organization, 상담유형, 문서유형 포함)
+usage-ingest/                         # thynC 사용량 수신부 (2026-11-18 — 본체와 별도 프로세스·별도 DB, 본체 코드를 가져다 쓰지 않음. projects/usage_collection_design.md)
+├── index.mts                         # HTTP 서버 — 토큰 인증·빈도 제한·용량 안전장치·호출 3종(handshake/push/finish) + health
+├── store.mts                         # 원본 DB 저장 SQL 전부 (고유 키 기준 덮어쓰기, 원본 행은 지우지 않음, 대조·상태 이력 달 조각 생성)
+├── validate.mts                      # 수신 본문 검증
+├── migrate.mts                       # 원본 DB 스키마 적용 (migrations/*.sql 을 한 번씩 — Prisma 마이그레이션과 별개)
+├── migrations/0001_init.sql          # 원본 DB 스키마 (식별·수신 기록·원본 6종, 상태 이력 월별 분할)
+├── build.mjs                         # esbuild → dist/index.mjs·migrate.mjs (npm run build:usage-ingest, npm run build 에도 포함)
+└── .env.example                      # 수신부 설정 (본체 .env 와 별개 — USAGE_DATABASE_URL·USAGE_INGEST_PORT·USAGE_MAX_BYTES)
+
+agents/thync-usage-agent/             # 병원 서버용 사용량 수집 Agent (Go, 2026-11-18) — 조회 전용, 환자 식별 정보 미조회, 실행 후 종료
+├── source.go                         # 제품 DB(MySQL thync) 조회 — 쿼리 전부. 금지 컬럼·SELECT *·쓰기 문장이 없음을 agent_test.go 가 검사
+├── sync.go · client.go · check.go    # 한 번의 수집·전송·대조 / 수신부 통신(gzip JSON, 재시도) / 점검 명령
+├── config.go · main.go               # 설정(/etc/thync-usage-agent/agent.env) / 명령(run·check·version)
+├── build.sh · VERSION                # 정적 실행 파일 + 설치 묶음(dist/thync-usage-agent-<버전>.tar.gz) — Go 도구 필요(dev2: ~/.local/go)
+└── deploy/                           # systemd 서비스·타이머(1시간), install.sh·uninstall.sh, create-db-user.sql(조회 전용 계정), agent.env.example, README.txt
+
+scripts/usage-*.mts                   # 사용량 수집 운영 스크립트 — issue-token(발급·목록·폐기)·status(수신 현황)·rewind(수신 위치 되돌리기)·move-hospital(병원 코드 변경 반영)·collect-smoke(끝단 검증, dev2 전용)·lib(공용)
+
 ├── seed-admin.ts                     # 관리자 계정 생성
 └── seed-hira.ts                      # HIRA 병원 데이터 시드
 ```
@@ -1053,6 +1073,26 @@ prisma/
 
 | 역할 | 설명 |
 |------|------|
+### 사용량 원본 DB — `thync_usage` / `thync_usage_dev` (2026-11-18, 본체와 **별도 DB**)
+
+병원 서버의 Agent가 보낸 원본 행을 그대로 쌓는 DB다. 본체 DB(`thync_ops`)와 다른 DB이고 Prisma 모델이 없다. 스키마는 `usage-ingest/migrations/*.sql`로 관리한다(`node usage-ingest/dist/migrate.mjs`). 본체 테이블을 참조하지 않으며, 본체에서는 `.env`의 `USAGE_DATABASE_URL`로 접속한다.
+
+| 구분 | 테이블 | 내용 |
+|---|---|---|
+| 식별 | `agent_tokens` | 병원 토큰 (SHA-256만 저장, 병원당 활성 2개까지) |
+| 식별 | `agent_servers` | 병원의 서버 — 첫 접속 때 자동 등록. `(hospital_code, server_id)` UNIQUE, 마지막 성공 시각·측정 수신 기준 시각·마지막 대조 시각 |
+| 수신 기록 | `agent_runs` · `status_cursors` | 실행 이력(상태·건수·대조 결과·오류) · 상태 이력을 연도별로 어디까지 받았고 어디까지 대조했는지 |
+| 원본 | `raw_organizations` · `raw_wards` · `raw_device_registers` | 기관 · 병동(병상 수) · 기기 등록(구독형 여부) — 매 실행 전체 수신, 사라진 행은 `gone_at` |
+| 원본 | `raw_measurements` | 측정 (환자 식별 정보 없음). 병원에서 삭제된 측정은 `source_gone_at`만 기록 |
+| 원본 | `raw_measurement_devices` | 측정에 붙은 기기. 키에 시리얼 포함 — 교체된 이전 기기는 `removed_at`만 찍힌 채 남음. 전송 시점의 구독형 여부 |
+| 원본 | `raw_device_status` | 기기 상태 이력. 발생 시각 기준 **월별 분할**(`raw_device_status_yYYYYmMM`, 수신 시 자동 생성) |
+
+- 모든 원본 테이블에 `hospital_code`(병원 구분)와 `server`(병원 아래 서버 구분)가 있다. 고유 키에는 서버가 들어간다
+- 병원 DB의 시각은 변환 없이 시간대 없는 `timestamp`로 저장한다(시간대는 `agent_servers.db_time_zone`)
+- 본체에서 병원 코드가 바뀌면(중복 병원 정리) `scripts/usage-move-hospital.mts`로 원본 DB도 바꿔야 한다
+
+---
+
 | `SUPER_ADMIN` | 전체 시스템 최고 관리자. 소속 관리, 타계정 수정 포함 모든 권한 |
 | `ADMIN` | 일반 관리자. 사용자 생성, 설정 관리 등 |
 | `USER` | 일반 사용자. 병원·프로젝트·답사 생성·수정 가능 |
@@ -1629,6 +1669,18 @@ Google Drive 연동을 사용하려면 아래 절차를 따릅니다.
 1. [Google Cloud Console](https://console.cloud.google.com/) → IAM 및 관리자 → 서비스 계정
 2. 서비스 계정 생성 후 **키 추가 → JSON** 다운로드
 3. Google Drive API 활성화 (API 및 서비스 → 라이브러리)
+### thynC 사용량 수집 (2026-11-18 — 초기 버전: 수집·적재까지, `projects/usage_collection_design.md`)
+
+고객사 병원 서버의 thynC DB에서 사용량 판단에 필요한 **원본 행**을 가져와 쌓는다. 계산은 병원 서버가 아니라 시스템에서 한다(지표 계산·조회 화면은 다음 단계).
+
+- **Agent** (`thync-usage-agent`, 병원 서버): systemd 타이머가 1시간마다 실행, 끝나면 종료. 제품 DB를 조회 전용 계정으로 읽어 측정·측정에 붙은 기기·기기 상태 이력·기기 등록·병동·기관을 HTTPS로 보낸다. 환자 이름·환자코드·주민번호·연락처·주소·생년월일은 조회하지 않는다. 포트를 열지 않고 중앙에서 명령을 받지 않는다
+- **식별 단위는 병원**: 토큰이 병원에 속하고(`scripts/usage-issue-token.mts`), 병원의 서버는 첫 접속 때 자동 등록된다. 수신 주소와 토큰은 Agent 설정(`USAGE_ENDPOINT`·`USAGE_TOKEN`)으로 바꾼다
+- **누락 없이 받기**: 어디까지 받았는지는 수신부가 기억(저장 성공 후에만 전진) → 끊겼다 살아나면 이어 보냄 · 하루 1회 대조(측정 전체 목록, 상태 이력 구간 행 수)로 빠진 것을 다시 받음 · 수동 되돌리기 `scripts/usage-rewind.mts` / 현장 `run --full`
+- **지우지 않는 원본**: 병원 DB는 보관 기한(기본 90일)이 지나면 기기 정보를 지우고, 기기 교체는 이전 시리얼을 덮어쓴다. 원본 DB에는 이전 기기 행과 상태 이력이 남고, 병원에서 삭제된 측정은 표시만 된다
+- **수신 현황**: `npx tsx scripts/usage-status.mts [병원코드] [--stale=48]` — 서버별 마지막 성공, Agent 버전, 받은 양, 원본 DB 크기
+- **용량 안전장치**: 원본 DB가 `USAGE_MAX_BYTES`를 넘으면 기기 상태 이력 수신만 멈춘다(병원 DB에 남아 있어 상한을 풀면 이어서 들어옴)
+- **검증**: `npx tsx scripts/usage-collect-smoke.mts` (dev2 전용 — 로컬 MySQL의 빈 제품 DB에 가상 데이터를 넣고 Agent → 수신부 → 원본 DB를 끝까지 돌림)
+
 4. 공유할 Drive 폴더에 서비스 계정 이메일을 **편집자**로 초대
 
 ### 2. JSON 키를 한 줄 문자열로 변환
@@ -2306,6 +2358,17 @@ cd /home/ubuntu/thynC-Ops-System/thynC-Ops-PROD
 git pull origin main
 npm run build
 pm2 restart thync-prod
+### 사용량 수신부 (본체와 별도 프로세스 — `usage-ingest/`, 2026-11-18)
+
+본체 앱(Next)의 라우트가 아니다. Nginx가 `/api/usage-ingest/`만 수신부 프로세스(127.0.0.1:3110)로 넘긴다. 인증은 로그인 쿠키가 아니라 병원 토큰(`Authorization: Bearer`)이고, 본문은 gzip 압축 JSON이다.
+
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET  | `/api/usage-ingest/health` | 상태 확인 — 버전, DB 접속, 상태 이력 수신 중지 여부 (인증 없음) |
+| POST | `/api/usage-ingest/v1/handshake` | 실행 시작 — 서버 이름·Agent 버전·DB 시각을 보내고, 실행 번호·측정 기준 시각·연도별 받은 번호·대조할 차례 여부를 받는다 (`dry_run`이면 아무것도 바꾸지 않음) |
+| POST | `/api/usage-ingest/v1/push` | 종류별 행 전송 — `organizations`·`wards`·`device_registers`·`measurements`(기기 포함)·`device_status`·`measurement_index`·`reconcile_measurements`·`status_check`. 요청당 5,000행 |
+| POST | `/api/usage-ingest/v1/finish` | 실행 결과 보고 — 성공이면 수신 기준 시각 전진, 전체 수신 종류의 사라진 행 표시 |
+
 ```
 
 > `npm run start`, `nohup`, `node` 등으로 직접 서버를 실행하지 마세요. 반드시 PM2를 사용합니다.

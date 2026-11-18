@@ -42,3 +42,8 @@ next-env.d.ts
 collab-server/dist/
 scripts/gateway-planner-phase0/work/
 .env.bak*
+
+# 사용량 수신부 번들 산출물 (build:usage-ingest로 생성)
+usage-ingest/dist/
+# 사용량 Agent 빌드 산출물
+agents/thync-usage-agent/dist/

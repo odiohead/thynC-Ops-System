@@ -1,0 +1,12 @@
+[Unit]
+Description=thynC usage agent - hourly run
+
+[Timer]
+# 매시 정각 기준, 병원마다 최대 10분까지 흩어서 실행한다
+OnCalendar=hourly
+RandomizedDelaySec=10min
+# 서버가 꺼져 있어 놓친 실행은 켜진 뒤 바로 수행한다
+Persistent=true
+
+[Install]
+WantedBy=timers.target
