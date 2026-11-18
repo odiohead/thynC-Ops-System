@@ -4,7 +4,7 @@
  * 병원 단위, 일별:
  *  - 측정 환자 수      그날 걸쳐 있던 측정 건수 (환자 식별값을 받지 않으므로 측정 건수로 센다)
  *  - 최대 동시측정 수   그날 어느 한 시점에 동시에 진행 중이던 측정의 최대 수
- *  - 기기 종류별        사용 횟수(그날 걸쳐 있던 "측정 × 기기"의 수), 최대 동시사용 수, 등록 기기 수
+ *  - 기기 종류별        사용 횟수(그날 걸쳐 있던 "측정 × 기기"의 수), 최대 동시사용 수, 계약·공급 수량(가동률의 분모)
  *
  * 정의
  *  - 측정: 실제로 시작된 측정(상태 2 측정 중 · 3 종료 · 10 보관 기한 경과). 대기(1)는 제외.
@@ -16,7 +16,13 @@
  *      끝   = 지금도 측정에 붙어 있으면 측정의 끝, 빠졌으면 마지막 상태 이력 시각
  *  - 하루의 경계는 병원 현지 자정. 국내 병원 기준 Asia/Seoul 로 본다.
  *  - 보관 기한이 지나 기기 정보가 지워진 측정(상태 10, 기기 단위 없음)이 걸친 날은 기기별 수치를 내지 않는다(null).
+ *  - 가동률의 분모 = 운영관리시스템의 계약·공급 수량 (2026-11-18 사용자 결정 — 병원 서버의 기기 등록 수가 아니다).
+ *    병원 상세 '도입 현황' 카드의 '계약/공급' 값과 같은 규칙: 계약완료 딜의 기기 수량(sales_deal_devices) + 비계약 공급 수량
+ *    (hospital_device_supplies, 대웅 직판). 날짜별로 그날까지 계약된 딜만 센다(계약일 ≤ 그날, 계약일이 없는 딜은 전 기간).
+ *    공급 수량은 이력이 없어 현재 값을 전 기간에 쓴다. 계약 수량에는 용도 구분이 없어 평가용 제외는 해당 없음.
  */
+import { prisma } from '@/lib/prisma'
+import { DEAL_STATUS_CATEGORY, DEAL_STATUS_CONTRACTED } from '@/lib/deviceRegistryShared'
 import { usagePool } from './db'
 import { DAY_SEC, average, dayLabel, dayStats, localDayStart, type Interval } from './daily'
 
@@ -34,17 +40,72 @@ export const USAGE_PERIODS = [30, 90] as const
 
 export type UsageHospital = { hospitalCode: string; servers: number; lastSuccessAt: string | null }
 
-export type UsageDeviceDay = { date: string; uses: number | null; peak: number | null }
+export type UsageDeviceDay = {
+  date: string
+  uses: number | null
+  peak: number | null
+  /** 그날의 계약·공급 수량 (가동률의 분모). 없으면 null */
+  capacity: number | null
+}
+
+export type UsageCapacitySource = 'DEAL' | 'SUPPLY' | 'BOTH'
 
 export type UsageDevice = {
   type: number
   key: string
   label: string
-  registered: number
-  /** 기간 평균(오늘·수치 없는 날 제외), % — 등록 기기가 없으면 null */
+  /** 오늘 기준 계약·공급 수량 — 병원 상세 '도입 현황'의 '계약/공급'과 같은 값. 없으면 null */
+  capacity: number | null
+  capacitySource: UsageCapacitySource | null
+  /** 오늘 기준 수량의 내역 */
+  contractQty: number | null
+  supplyQty: number | null
+  /** 기간 평균(오늘·수치 없는 날·분모 없는 날 제외), % */
   avgPeakRate: number | null
   avgUseRate: number | null
   days: UsageDeviceDay[]
+}
+
+type CapacityPlan = { deals: { date: string | null; qty: number }[]; supply: number | null }
+
+/** 기기 종류별 계약·공급 수량 — 운영관리시스템 DB (병원 상세 '도입 현황'과 같은 원천) */
+async function loadCapacityPlans(hospitalCode: string, types: number[]): Promise<Map<number, CapacityPlan>> {
+  const [deals, supply] = await Promise.all([
+    prisma.$queryRaw<{ t: number; contract_date: string | null; qty: number }[]>`
+      SELECT di.onprem_device_type AS t, to_char(sd.contract_date, 'YYYY-MM-DD') AS contract_date, sum(sdd.quantity)::int AS qty
+        FROM sales_deals sd
+        JOIN status_codes sc ON sc.id = sd.status_id
+        JOIN sales_deal_devices sdd ON sdd.deal_id = sd.id
+        JOIN device_info di ON di.id = sdd.device_info_id
+       WHERE sd.hospital_code = ${hospitalCode} AND sc.category = ${DEAL_STATUS_CATEGORY} AND sc.name = ${DEAL_STATUS_CONTRACTED}
+         AND di.onprem_device_type = ANY(${types})
+       GROUP BY 1, 2`,
+    prisma.$queryRaw<{ t: number; qty: number }[]>`
+      SELECT di.onprem_device_type AS t, sum(s.quantity)::int AS qty
+        FROM hospital_device_supplies s
+        JOIN device_info di ON di.id = s.device_info_id
+       WHERE s.hospital_code = ${hospitalCode} AND di.onprem_device_type = ANY(${types})
+       GROUP BY 1`,
+  ])
+  const plans = new Map<number, CapacityPlan>()
+  const plan = (t: number) => {
+    const p = plans.get(t) ?? { deals: [], supply: null }
+    plans.set(t, p)
+    return p
+  }
+  for (const r of deals) plan(Number(r.t)).deals.push({ date: r.contract_date, qty: Number(r.qty) })
+  for (const r of supply) plan(Number(r.t)).supply = Number(r.qty)
+  return plans
+}
+
+/** 그날(YYYY-MM-DD)의 계약·공급 수량. 계약 딜도 공급도 없으면 null */
+export function capacityOn(plan: CapacityPlan | undefined, date: string): { capacity: number | null; contract: number | null; supply: number | null } {
+  if (!plan) return { capacity: null, contract: null, supply: null }
+  const signed = plan.deals.filter((d) => d.date === null || d.date <= date)
+  const contract = signed.length > 0 ? signed.reduce((a, d) => a + d.qty, 0) : null
+  const supply = plan.supply
+  if (contract === null && supply === null) return { capacity: null, contract: null, supply: null }
+  return { capacity: (contract ?? 0) + (supply ?? 0), contract, supply }
 }
 
 export type UsageDaily = {
@@ -102,7 +163,7 @@ export async function getUsageDaily(hospitalCode: string, days: number, nowMs: n
   const toExclusive = dayLabel(today + DAY_SEC)
   const kinds = USAGE_DEVICE_KINDS.map((k) => k.type)
 
-  const [receive, measurements, units, registered] = await Promise.all([
+  const [receive, measurements, units, plans] = await Promise.all([
     getUsageReceive(hospitalCode),
     pool.query(
       `WITH ${MEASUREMENT_CTE}
@@ -136,12 +197,7 @@ export async function getUsageDaily(hospitalCode: string, days: number, nowMs: n
        JOIN m ON m.server = COALESCE(st.server, d.server) AND m.measurement_code = COALESCE(st.measurement_code, d.measurement_code)`,
       [hospitalCode, from, toExclusive],
     ),
-    pool.query(
-      `SELECT device_type, count(*)::int AS n FROM raw_device_registers
-       WHERE hospital_code = $1 AND gone_at IS NULL AND COALESCE(return_status, 0) = 0 AND device_type = ANY($2::int[])
-       GROUP BY device_type`,
-      [hospitalCode, kinds],
-    ),
+    loadCapacityPlans(hospitalCode, [...kinds]),
   ])
 
   // 측정 구간 (환자 수·동시측정은 부모 측정만)
@@ -169,7 +225,6 @@ export async function getUsageDaily(hospitalCode: string, days: number, nowMs: n
   }
   // 보관 기한이 지나 기기 정보가 지워진 측정 — 이 측정이 걸친 날은 기기별 수치를 알 수 없다
   const purged = all.filter((m) => m.status === 10 && !hasUnits.has(m.key)).map((m) => m.iv)
-  const registeredByType = new Map<number, number>(registered.rows.map((r) => [Number(r.device_type), Number(r.n)]))
 
   const dayStarts = Array.from({ length: days }, (_, i) => first + i * DAY_SEC)
   const dayRows = dayStarts.map((d) => {
@@ -181,21 +236,27 @@ export async function getUsageDaily(hospitalCode: string, days: number, nowMs: n
 
   const devices: UsageDevice[] = USAGE_DEVICE_KINDS.map((k) => {
     const ivs = unitsByType.get(k.type) ?? []
-    const reg = registeredByType.get(k.type) ?? 0
+    const plan = plans.get(k.type)
     const rows: UsageDeviceDay[] = dayStarts.map((d, i) => {
-      if (!deviceKnown[i]) return { date: dayLabel(d), uses: null, peak: null }
+      const date = dayLabel(d)
+      const cap = capacityOn(plan, date).capacity
+      if (!deviceKnown[i]) return { date, uses: null, peak: null, capacity: cap }
       const st = dayStats(ivs, d)
-      return { date: dayLabel(d), uses: st.count, peak: st.peak }
+      return { date, uses: st.count, peak: st.peak, capacity: cap }
     })
     const past = rows.filter((_, i) => dayStarts[i] !== today)
-    const rate = (v: number | null) => (v === null || reg === 0 ? null : (v / reg) * 100)
+    const rate = (v: number | null, cap: number | null) => (v === null || !cap ? null : (v / cap) * 100)
+    const now = capacityOn(plan, dayLabel(today))
     return {
       type: k.type,
       key: k.key,
       label: k.label,
-      registered: reg,
-      avgPeakRate: average(past.map((r) => rate(r.peak))),
-      avgUseRate: average(past.map((r) => rate(r.uses))),
+      capacity: now.capacity,
+      capacitySource: now.capacity === null ? null : now.contract !== null && now.supply !== null ? 'BOTH' : now.supply !== null ? 'SUPPLY' : 'DEAL',
+      contractQty: now.contract,
+      supplyQty: now.supply,
+      avgPeakRate: average(past.map((r) => rate(r.peak, r.capacity))),
+      avgUseRate: average(past.map((r) => rate(r.uses, r.capacity))),
       days: rows,
     }
   })

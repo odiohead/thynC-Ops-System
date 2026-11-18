@@ -22,7 +22,7 @@ const DEVICE_SLOTS = [
 ] as const
 const DOW = ['일', '월', '화', '수', '목', '금', '토']
 
-/** 일별 추이에서 켜고 끌 수 있는 지표. 가동률은 동시 가동률(최대 동시사용 ÷ 등록 기기) 기준 */
+/** 일별 추이에서 켜고 끌 수 있는 지표. 가동률은 동시 가동률(최대 동시사용 ÷ 계약·공급 수량) 기준 */
 const TREND_SERIES = [
   { key: 'measured', label: '측정 환자 수', unit: 'count' },
   { key: 'peak', label: '최대 동시측정 수', unit: 'count' },
@@ -172,11 +172,10 @@ export default function UsageClient() {
   }, [collecting, data])
   const trend = useMemo(() => {
     if (!collecting) return []
-    // 동시 가동률(%) = 그날 최대 동시사용 수 ÷ 등록 기기 수. 등록 기기가 없거나 수치가 없는 날은 비운다
+    // 동시 가동률(%) = 그날 최대 동시사용 수 ÷ 그날의 계약·공급 수량. 수량이 없거나 수치가 없는 날은 비운다
     const rate = (key: string, i: number) => {
-      const dv = deviceByKey.get(key)
-      const peak = dv?.days[i]?.peak
-      return !dv || dv.registered === 0 || peak === null || peak === undefined ? null : (peak / dv.registered) * 100
+      const day = deviceByKey.get(key)?.days[i]
+      return !day || !day.capacity || day.peak === null ? null : (day.peak / day.capacity) * 100
     }
     return data!.days.map((d, i) => ({
       label: md(d.date),
@@ -187,9 +186,9 @@ export default function UsageClient() {
       today: d.today,
     }))
   }, [collecting, data, deviceByKey])
-  // 등록 기기가 없는 종류의 가동률은 낼 수 없다
+  // 계약·공급 수량이 없는 종류의 가동률은 낼 수 없다
   const trendAvailable = (s: (typeof TREND_SERIES)[number]) =>
-    !('device' in s) || !collecting || (deviceByKey.get(s.device)?.registered ?? 0) > 0
+    !('device' in s) || !collecting || !!deviceByKey.get(s.device)?.days.some((d) => !!d.capacity)
   const showCount = trendOn.measured || trendOn.peak
   const showRate = (trendOn.ecgRate && trendAvailable(TREND_SERIES[2])) || (trendOn.spo2Rate && trendAvailable(TREND_SERIES[3]))
   const rateTop = useMemo(() => {
@@ -296,7 +295,7 @@ export default function UsageClient() {
                   <label
                     key={s.key}
                     className={`flex h-7 items-center gap-1.5 text-xs ${available ? 'cursor-pointer text-foreground' : 'text-muted-foreground'}`}
-                    title={available ? undefined : '등록된 기기가 없어 가동률을 낼 수 없습니다'}
+                    title={available ? undefined : '계약·공급 수량이 없어 가동률을 낼 수 없습니다'}
                   >
                     <input
                       type="checkbox"
@@ -362,7 +361,7 @@ export default function UsageClient() {
                   </ComposedChart>
                 </ResponsiveContainer>
                 <p className="px-2 pt-1 text-[11px] text-muted-foreground">
-                  왼쪽 축 = 건수(측정 환자 수·최대 동시측정 수), 오른쪽 축 = 가동률(%, 그날 최대 동시사용 수 ÷ 등록 기기 수)
+                  왼쪽 축 = 건수(측정 환자 수·최대 동시측정 수), 오른쪽 축 = 가동률(%, 그날 최대 동시사용 수 ÷ 계약·공급 수량)
                 </p>
               </>
             ) : (
@@ -379,7 +378,7 @@ export default function UsageClient() {
                 기기별 가동률
               </h2>
               <p className="text-xs text-muted-foreground">
-                동시 가동률 = 최대 동시사용 수 ÷ 등록 기기 수 · 일 사용률 = 일 사용 횟수 ÷ 등록 기기 수
+                동시 가동률 = 최대 동시사용 수 ÷ 계약·공급 수량 · 일 사용률 = 일 사용 횟수 ÷ 계약·공급 수량 (병원 상세 ‘도입 현황’의 계약/공급)
               </p>
             </div>
             <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
@@ -555,15 +554,16 @@ function DevicePanel({
   tooltip: CSSProperties
   axis: AxisProps
 }) {
-  const registered = device?.registered ?? 0
+  const capacity = device?.capacity ?? null
+  const hasCapacity = !!device?.days.some((d) => !!d.capacity)
   const rows = useMemo(() => {
-    if (!device || registered === 0) return []
+    if (!device || !hasCapacity) return []
     return device.days.map((d) => ({
       label: md(d.date),
-      peakRate: d.peak === null ? null : (d.peak / registered) * 100,
-      useRate: d.uses === null ? null : (d.uses / registered) * 100,
+      peakRate: d.peak === null || !d.capacity ? null : (d.peak / d.capacity) * 100,
+      useRate: d.uses === null || !d.capacity ? null : (d.uses / d.capacity) * 100,
     }))
-  }, [device, registered])
+  }, [device, hasCapacity])
   const top = useMemo(() => {
     let max = 100
     for (const r of rows) {
@@ -572,17 +572,28 @@ function DevicePanel({
     }
     return Math.ceil(max / 50) * 50
   }, [rows])
+  const capacityTitle =
+    device && capacity !== null
+      ? [
+          device.contractQty !== null ? `계약 ${device.contractQty.toLocaleString()}대` : null,
+          device.supplyQty !== null ? `공급(대웅 직판) ${device.supplyQty.toLocaleString()}대` : null,
+        ]
+          .filter(Boolean)
+          .join(' + ')
+      : undefined
 
   return (
     <Card className="min-w-0">
       <div className="flex items-baseline justify-between gap-3 border-b border-border px-5 py-3.5">
         <h3 className="text-sm font-semibold">{label}</h3>
-        <span className="text-xs text-muted-foreground">등록 {device ? `${registered}대` : '—'}</span>
+        <span className="text-xs text-muted-foreground" title={capacityTitle}>
+          {!device ? '계약 —' : capacity === null ? '계약 없음' : `${device.capacitySource === 'SUPPLY' ? '공급' : '계약'} ${capacity.toLocaleString()}대${device.capacitySource === 'BOTH' ? ' (공급 포함)' : ''}`}
+        </span>
       </div>
-      {device && registered === 0 ? (
+      {device && !hasCapacity ? (
         <div className="flex h-[244px] flex-col items-center justify-center gap-1.5 px-5 text-center">
-          <p className="text-sm font-semibold">등록된 기기가 없습니다</p>
-          <p className="text-[13px] text-muted-foreground">병원 서버에 이 종류의 기기가 등록되면 표시됩니다.</p>
+          <p className="text-sm font-semibold">계약·공급 수량이 없습니다</p>
+          <p className="text-[13px] text-muted-foreground">병원 상세의 ‘도입 현황’에 이 기기의 계약 수량이나 공급 수량이 있으면 가동률이 표시됩니다.</p>
         </div>
       ) : (
         <>

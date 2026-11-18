@@ -5,7 +5,7 @@
  *   npx tsx scripts/usage-metrics-test.mts <병원코드> [30|90]   + 원본 DB 의 실제 데이터로, 화면용 계산과 별도 SQL 계산을 대조 (읽기 전용)
  */
 import { DAY_SEC, average, dayLabel, dayStats, localDayStart } from '../lib/usage/daily'
-import { getUsageDaily } from '../lib/usage/metrics'
+import { capacityOn, getUsageDaily } from '../lib/usage/metrics'
 import { fmtTime, positional, usageDb } from './usage-lib.mts'
 
 let passed = 0
@@ -38,6 +38,14 @@ const h = (n: number) => D + n * 3600
   check('현지 오늘: 23:30 KST', dayLabel(localDayStart(Date.UTC(2026, 10, 17, 14, 30), 9)) === '2026-11-17')
   check('현지 오늘: 00:30 KST', dayLabel(localDayStart(Date.UTC(2026, 10, 17, 15, 30), 9)) === '2026-11-18')
   check('평균은 없는 값을 뺀다', average([10, null, 20]) === 15 && average([null]) === null && average([]) === null)
+  // 계약·공급 수량 (가동률의 분모)
+  const plan = { deals: [{ date: '2025-05-21', qty: 20 }, { date: '2026-11-15', qty: 10 }, { date: null, qty: 3 }], supply: null }
+  check('계약일 전에는 그 딜을 세지 않는다', capacityOn(plan, '2026-11-14').capacity === 23)
+  check('계약일부터 센다', capacityOn(plan, '2026-11-15').capacity === 33)
+  check('계약일 없는 딜은 전 기간', capacityOn(plan, '2020-01-01').capacity === 3)
+  check('공급만 있으면 공급 수량', JSON.stringify(capacityOn({ deals: [], supply: 7 }, '2026-11-18')) === '{"capacity":7,"contract":null,"supply":7}')
+  check('계약 + 공급은 합산', capacityOn({ deals: [{ date: '2025-01-01', qty: 5 }], supply: 2 }, '2026-11-18').capacity === 7)
+  check('둘 다 없으면 null', capacityOn(undefined, '2026-11-18').capacity === null && capacityOn({ deals: [{ date: '2027-01-01', qty: 5 }], supply: null }, '2026-11-18').capacity === null)
 }
 
 const [hospital, daysArg] = positional
@@ -85,10 +93,11 @@ if (hospital) {
     for (const dv of daily.devices) {
       const known = dv.days.filter((d) => d.uses !== null)
       check(`${dv.label}: 사용 횟수 ≥ 최대 동시사용 (수치 있는 ${known.length}일)`, known.every((d) => (d.uses as number) >= (d.peak as number)))
+      check(`${dv.label}: 오늘 계약·공급 수량 = 마지막 날 분모`, dv.capacity === dv.days[dv.days.length - 1].capacity)
     }
     const last = daily.days.slice(-7)
     console.log('\n  최근 7일')
-    console.log('  날짜        측정환자 최대동시 | ' + daily.devices.map((d) => `${d.label}(등록 ${d.registered}) 사용/동시`).join(' | '))
+    console.log('  날짜        측정환자 최대동시 | ' + daily.devices.map((d) => `${d.label}(계약 ${d.capacity ?? '-'}) 사용/동시`).join(' | '))
     last.forEach((d, i) => {
       const idx = daily.days.length - last.length + i
       const dev = daily.devices.map((x) => `${x.days[idx].uses ?? '-'}/${x.days[idx].peak ?? '-'}`.padStart(8)).join('              | ')
@@ -96,7 +105,7 @@ if (hospital) {
     })
     console.log(`\n  요약: 평균 측정 환자 수 ${daily.summary.avgMeasured?.toFixed(1) ?? '-'} · 최대 동시측정 최고 ${daily.summary.maxPeak ?? '-'} (${daily.summary.maxPeakDate ?? '-'}) · 오늘 ${daily.summary.todayMeasured}`)
     for (const dv of daily.devices) {
-      console.log(`  ${dv.label}: 등록 ${dv.registered}대 · 동시 가동률 평균 ${dv.avgPeakRate === null ? '-' : Math.round(dv.avgPeakRate) + '%'} · 일 사용률 평균 ${dv.avgUseRate === null ? '-' : Math.round(dv.avgUseRate) + '%'}`)
+      console.log(`  ${dv.label}: 계약·공급 ${dv.capacity ?? '-'}대(${dv.capacitySource ?? '-'}) · 동시 가동률 평균 ${dv.avgPeakRate === null ? '-' : Math.round(dv.avgPeakRate) + '%'} · 일 사용률 평균 ${dv.avgUseRate === null ? '-' : Math.round(dv.avgUseRate) + '%'}`)
     }
   } finally {
     await db.end()
