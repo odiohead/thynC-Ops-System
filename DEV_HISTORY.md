@@ -120,6 +120,27 @@
 - 확인: 로그인 200(로컬·도메인), 스케줄러 기동 로그 정상, PROD 데이터로 SOR-202611-0014 미리보기 판정(읽기 전용) — 선택 전 '일반·라이트 계약이 함께 … 고르세요' 오류, 라이트형 선택 시 오류 없음·등록 대상 L심전계 90·L산소포화도본체 90·품목 경고 없음
 - 남은 일(사용자·담당자): SOR-202611-0014는 처리 화면에서 라이트형을 고르거나 요청 [수정]에서 '구축(라이트)' 지정 후 처리. 유형 없는 미처리 구축 요청은 PROD에 3건
 
+## 2026-11-18 10:25 | 사용량 수집 dev 반영 — 원본 DB·수신부·Nginx 경로·동수원병원 토큰 (설계 §13.5 1~6단계, dev 서버 13.125.238.77)
+
+- **요청**: "pull해서 dev에 반영해줘. 토큰 발행까지" → 토큰 병원 "HOSP-000038 동수원병원"
+- **소스**: `git pull`(819f6cb → e646bbc — 사용량 수집 925ba90, 동기화 스크립트 개편 9f8f84c, 수신부 빌드 본체 빌드에서 분리 c44cb4b) → `npm install`(`pg`). 본체 마이그 없음
+- **원본 DB**: `CREATE ROLE thync_usage`(무작위 비밀번호) · `CREATE DATABASE thync_usage_dev OWNER thync_usage` · `REVOKE CONNECT ... FROM PUBLIC` on `thync_ops_dev`·`thync_ops`(옛 PROD 사본)·`thync_usage_dev` → 전용 계정으로 본체 DB 접속 거부 확인, 본체 `thync` 정상
+- **설정**: `usage-ingest/.env`(`.env.example` 기반, dev 디스크 주석 정정) · 본체 `.env`에 `USAGE_DATABASE_URL` 추가(백업 `.env.bak-before-usage-20261118`)
+- **수신부**: `npm run build:usage-ingest`(a7d7864c, index.mjs sha256 d1507b08…) → `node usage-ingest/dist/migrate.mjs`(0001_init) → `pm2 start ... --name thync-usage-ingest-dev --time` → `pm2 save`. 127.0.0.1:3110, 용량 상한 2GB
+- **Nginx**: `/etc/nginx/sites-available/thync-ops`의 `dev.ops` HTTPS 블록에 `location /api/usage-ingest/` → 127.0.0.1:3110(`X-Real-IP`·`X-Forwarded-For`, `client_max_body_size 10m`, 타임아웃 130s) → `nginx -t` → reload. 백업 `/etc/nginx/thync-ops.bak-before-usage-20261118`
+- **토큰**: `usage-issue-token.mts HOSP-000038 "dev 시범 — 동수원병원"` → `tua_c08e…`(원문은 사용자에게 전달, 저장 안 함)
+- **확인**: `https://dev.ops.seersthync.com/api/usage-ingest/health` ok·db true / 토큰 없는 handshake 401 / 발급 토큰으로 `dry_run` handshake 200(hospital_code HOSP-000038 확정, 원본 DB 기록 0) / 본체 `/login` 200
+- **첫 수신 확인(10:40 KST, 사용자가 병원 서버에 설치·실행)**: 서버 `thynC-suwon.dongsuwon-2`(Agent 0.1.0, MySQL 8.0.45, SYSTEM(KST)), run 1 전체 동기화+대조 ok·10초, 원격 IP 1.109.82.15(Nginx `X-Real-IP` 전달 확인 — §13.4 미확인 항목 해소). 기관 3·병동 1(5병동 58병상)·기기 등록 42(유형 1·3 각 21, 구독형 0)·측정 1,122(진행 중 11·종료 185·삭제 상태 926, 2025-07~)·측정 기기 282·상태 이력 200,000(전송 상한 40회×5,000 도달 → `status_behind`, 2026-08-05~10-05분, 이후분은 다음 실행에서 이어 받음)·대조 누락 0. 원본 DB 63MB
+- **남은 일**: 동수원병원 서버에 Agent 설치(§13.5 7단계 — 설치 묶음·`install.sh`·`create-db-user.sql`·`agent.env`·`check`·타이머) · 병원 서버 외부 통신 확인 · 원본 DB 백업 방식(PROD 전)
+- 영향 파일: 코드 변경 없음 — 서버 설정(PostgreSQL 역할·DB, PM2, Nginx, `.env`·`usage-ingest/.env`), DEV_HISTORY.md
+
+## 2026-11-18 09:50 | dev(13.125.238.77) 최신화 — git pull + 마이그 9건 + PROD 데이터 동기화(S3 백업 기준)
+
+- **소스**: `git pull`(3d1906c → 819f6cb, 36커밋, package.json 변경 없음) → 미적용 마이그 9건(`20261105120000_voc_type_manual` ~ `20261117100000_stock_out_kind_source_non_unique`) psql 단일 tx(lock_timeout 5s) 적용·`migrate resolve --applied` → `prisma generate`. 멱등 시드 `seed-cs-masters`·`seed-report-nav`·`seed-stock-out-component-kinds` 실행(아래 동기화로 덮임). `migrate-system-units-to-servers.sql`은 dry-run 전제 검사에서 중단(DEV 품목코드가 PROD와 달라 ITEM-0076 부재) → PROD 데이터 동기화로 대체
+- **PROD → dev 데이터 동기화**(사용자 지시 "S3에 있는 거 가져와"): `scripts/sync-prod-data-to-dev.sh`는 같은 호스트 전제(옛 `thync_ops` 읽음)라 사용하지 않고 수동 절차로 진행 — `backup-db-to-s3.mts --download db-backups/daily/thync_ops_20261118_084835.dump`(새 PROD 08:48 KST, 테이블 173) → 스키마 diff(PROD 전용 `_bak_*` 31개·CHECK 제약 표기 차이 외 동일) → `pm2 stop thync-dev` → DEV 백업 `~/backups/db-sync/dev_before_sync_20261118_004738.sql.gz` → TOC에서 `_prisma_migrations`·`_bak_*` TABLE DATA 제외(141개) → `pg_restore --data-only --disable-triggers -f` SQL 생성 → `sudo -u postgres psql --single-transaction`으로 public·wiki 142개 TRUNCATE + 적재 + `channeltalk_as/voc_interval=off` → 141개 테이블 행 수 덤프와 전부 일치, `_prisma_migrations` 178 보존 → `pm2 start thync-dev`, /login 200
+- 참고: DEV 전용 `_bak_projects_intro_type_20261102`는 TRUNCATE로 비워짐(내용은 위 DEV 백업에 있음). `.next`는 여전히 구 빌드 — 빌드는 사용자 요청 시
+- 영향 파일: 코드 변경 없음(DB·문서만) — DEV_HISTORY.md
+
 ## 2026-11-18 10:24 | 출고요청 유형(구축(일반)/구축(라이트)/데모(PoC)) · 유형 기준 기기 등록 · 출고 처리 입력 내용 자동 저장 (dev2 코드·마이그·스모크, 빌드·화면 검증 전 — PROD 미반영)
 
 - **발단**: PROD `/stock-out-requests/17`(SOR-202611-0014, 구로성심병원 2차 구축) 출고 처리가 원인 표시 없이 실패(09:31·09:35·09:36). 로그의 원인은 기기현황 등록 단계의 `상품유형 필수 — 이 병원은 일반·라이트 딜이 함께 있습니다` — 출고 처리가 상품유형을 넘기지 않는데 이 병원은 1차 일반·2차 라이트가 함께 있음. 재고·기기현황 변동 없음. 같은 조건 병원 3곳(구로성심·메디인·울산)
