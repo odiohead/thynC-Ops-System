@@ -25,7 +25,9 @@
  *  - 보관 기한이 지나 기기 정보가 지워진 측정(상태 10, 기기 단위 없음)이 걸친 날은 기기별 수치를 내지 않는다(null).
  *  - 가동률의 분모 = 운영관리시스템의 계약·공급 수량 (2026-11-18 사용자 결정 — 병원 서버의 기기 등록 수가 아니다).
  *    병원 상세 '도입 현황' 카드의 '계약/공급' 값과 같은 규칙: 계약완료 딜의 기기 수량(sales_deal_devices) + 비계약 공급 수량
- *    (hospital_device_supplies, 대웅 직판). 날짜별로 그날까지 계약된 딜만 센다(계약일 ≤ 그날, 계약일이 없는 딜은 전 기간).
+ *    (hospital_device_supplies, 대웅 직판). 날짜별로 그날까지 도입된 딜만 센다 — 딜의 도입일 ≤ 그날.
+ *    도입일 = 연결 프로젝트의 구축 종료일(예상) → 없으면 프로젝트 시작일 → 없으면 딜 계약일, 셋 다 없으면 전 기간
+ *    (2026-11-18 사용자 결정 — 계약일 기준이면 계약~설치 사이 가동률이 낮게 나온다. 예: 문산중앙 3차 계약 9/29·구축 12/22).
  *    공급 수량은 이력이 없어 현재 값을 전 기간에 쓴다. 계약 수량에는 용도 구분이 없어 평가용 제외는 해당 없음.
  *  - 판매모델 (2026-11-18 사용자 결정): 딜의 '판매모델 구분'(daewoong_model_kind)이 '사용량'으로 시작하면 사용량비례형, 그 밖(일반·미입력)은 일반형.
  *      분모: 계약 수량을 딜의 판매모델로 나눈다. 비계약 공급 수량(대웅 직판)은 일반형, 단 카트온은 사용량비례형(2026-11-18 사용자 지시).
@@ -114,11 +116,15 @@ export function planForModel(plan: CapacityPlan | undefined, model: UsageModel):
 /** 기기 종류별 계약·공급 수량 — 운영관리시스템 DB (병원 상세 '도입 현황'과 같은 원천), 딜별 판매모델 포함 */
 async function loadCapacityPlans(hospitalCode: string, types: number[]): Promise<Map<number, CapacityPlan>> {
   const [deals, supply] = await Promise.all([
-    prisma.$queryRawUnsafe<{ t: number; contract_date: string | null; qty: number; m: SaleModel }[]>(
-      `SELECT di.onprem_device_type AS t, to_char(sd.contract_date, 'YYYY-MM-DD') AS contract_date, sum(sdd.quantity)::int AS qty,
+    // 수량을 세기 시작하는 날 = 연결 프로젝트의 구축 종료일(예상) → 없으면 프로젝트 시작일 → 없으면 딜 계약일 (2026-11-18 사용자 결정)
+    prisma.$queryRawUnsafe<{ t: number; from_date: string | null; qty: number; m: SaleModel }[]>(
+      `SELECT di.onprem_device_type AS t,
+              to_char(COALESCE(p.end_date_expected, p.start_date, sd.contract_date), 'YYYY-MM-DD') AS from_date,
+              sum(sdd.quantity)::int AS qty,
               ${MODEL_SQL} AS m
          FROM sales_deals sd
          JOIN status_codes sc ON sc.id = sd.status_id
+         LEFT JOIN projects p ON p.project_code = sd.project_code
          JOIN sales_deal_devices sdd ON sdd.deal_id = sd.id
          JOIN device_info di ON di.id = sdd.device_info_id
         WHERE sd.hospital_code = $1 AND sc.category = $2 AND sc.name = $3
@@ -142,7 +148,7 @@ async function loadCapacityPlans(hospitalCode: string, types: number[]): Promise
     plans.set(t, p)
     return p
   }
-  for (const r of deals) plan(Number(r.t)).deals.push({ date: r.contract_date, qty: Number(r.qty), model: r.m === 'usage' ? 'usage' : 'general' })
+  for (const r of deals) plan(Number(r.t)).deals.push({ date: r.from_date, qty: Number(r.qty), model: r.m === 'usage' ? 'usage' : 'general' })
   for (const r of supply) plan(Number(r.t)).supply = Number(r.qty)
   return plans
 }
