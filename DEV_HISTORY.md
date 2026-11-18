@@ -22,6 +22,24 @@
 - → **PROD 빌드·재시작 2026-11-17 13:44 (66ccd85)**: `npx prisma generate` → 힙 4GB nohup 빌드 1회 성공(약 10분) → `pm2 restart thync-prod` → /login 200·`/api/health` buildCommit 66ccd85·미인증 307, 협업 번들 동일(재시작 생략). 출고 처리 가드 포함. 빌드 실패에 대비해 `.next`(캐시 제외)를 보관했다가 성공 후 삭제
 - **정정 — 빌드를 미뤘던 판단은 틀렸다**: 13:28에는 "PROD 서버가 구글 폰트 주소를 확장자 없이 받아 빌드가 실패하는 상태"라며 DB·데이터만 반영하고 빌드를 미뤘으나, 실제로 빌드해 보지 않고 curl 결과와 다른 작업의 기록만으로 단정한 것이었다. PROD는 `.next/cache/webpack`에 폰트 로더 결과가 남아 있어 로그인 화면의 폰트 설정이 바뀌지 않는 한 구글에 다시 요청하지 않는다(로더 캐시 가능, 캐시 버전은 next 버전·설정 키 기준이라 커밋이 바뀌어도 유지) — 사용자 지적 후 실제 빌드로 확인. **PROD의 `.next/cache`를 지우면 다음 빌드는 폰트를 다시 받아야 해서 실패할 수 있다**
 
+## 2026-11-18 09:30 | PROD → 개발 환경 데이터 동기화 스크립트 개편 — S3 백업 기반·DEV 서버/dev2 공용 (dev2 검증, 미커밋)
+
+- **요청**: "PROD 데이터를 dev 서버로 들이붓는 스크립트를 현재 상황에 맞게 개선" — 운영 서버 이전으로 PROD·DEV가 다른 호스트가 되어, `scripts/sync-prod-data-to-dev.sh`(같은 호스트의 `thync_ops`를 직접 읽음)를 그대로 돌리면 기존 서버에 남은 옛 운영 DB를 읽게 됨
+- **개편**(`scripts/sync-prod-data-to-dev.sh` 전면 재작성 — 이름 유지): PROD 데이터 원천 = **PROD가 매일 S3에 올리는 백업 덤프**(`backup-db-to-s3.mts --list/--download`). 기본 동작은 PROD 서버 무접속. 대상 DB는 레포 `.env`의 `DATABASE_URL` → **DEV 서버와 dev2가 같은 스크립트 사용**(dev2의 수작업 11단계 절차 대체)
+- **순서**: 덤프 확보(S3 최신 / `--key=` / `--file=` / `--fresh`=PROD에 SSH `pg_dump`) → 점검 → 확인 프롬프트(`--yes`) → 이 레포 PM2 앱만 정지 → 대상 DB 백업(항상) → `TRUNCATE`(public·wiki, `_prisma_migrations`·`_bak_*` 제외) + data-only 적재(`--disable-triggers`, postgres 슈퍼유저) + DEV 전용 OFF 3종을 한 트랜잭션 → 재기동·HTTP 확인 → 건수 보고. `--dry`는 점검·계획만
+- **종전과 달라진 점**: 스키마 완전 일치 요구(다르면 무조건 중단 — 미배포 마이그가 있는 dev2에서는 쓸 수 없었음) → **컬럼 단위 호환 검사**(덤프의 COPY 컬럼이 대상에 다 있으면 통과, 없으면 변경 전 중단·PROD에만 있는 마이그 이름 안내). 덤프에만 있는 테이블은 건너뛰고 대상에만 있는 테이블은 비워 둠. wiki 스키마 명시 포함. 운영 환경 실행 거부 가드(`.env` `DB_BACKUP_S3_PREFIX` 또는 DB명이 `_dev` 아님). 실패·중단 시에도 정지한 PM2 앱을 다시 켬(trap)
+- **dev2 검증**(실제 dev2 DB는 `--dry`만, 적재는 임시 DB `thync_synctest_dev`로 — 끝난 뒤 삭제): `--dry` 계획 출력(적재 150·건너뜀 22(`_bak_*`)·비워 둠 1(`signup_requests`)) / 임시 DB 실제 적재 9초 — users 80·tickets 16,896·voc 11,060·as_items 17,081·wiki 187·ydoc 124, 마이그 기록 180 보존, OFF 3종 적용, 시퀀스 정상, FK 위반 0 / 대상 컬럼 1개 제거 → 변경 전 중단·건수 불변 / 대상에만 필수 컬럼 추가 → 적재 중 오류·롤백·건수 불변 / DB명 `thync_ops` 거부 / 운영 표시 `.env` 거부 / `--fresh --dry`(PROD SSH 덤프, 읽기 전용) 통과
+- **DEV 서버(13.125.238.77)에서 쓰려면**: 그 서버의 레포가 3d1906c(11월 초)에 머물러 있어 `git pull`·마이그 적용·빌드가 먼저 필요(지금 실행하면 컬럼 검사에서 중단됨)
+- 영향 파일: scripts/sync-prod-data-to-dev.sh, CLAUDE.md(PROD → DEV 데이터 동기화 절 — 공용 스크립트 기준으로 재작성)
+- 코드(앱) 변경 없음. 커밋·PROD 반영 없음(개발 환경 전용 스크립트)
+
+## 2026-11-18 09:10 | SSL 인증서 서버별 분리 발급 (운영 = ops 전용, DEV = dev.ops 전용)
+
+- **배경**: 서버 이전 때 새 서버가 기존 서버의 겸용 인증서(ops + dev.ops 한 장) 사본을 쓰고 있었다. Let's Encrypt 갱신은 인증서의 모든 도메인이 그 서버를 가리켜야 통과하므로, 그대로 두면 내년 1월 자동 갱신이 양쪽 모두 실패 → 2027-02-02 만료. 사용자 확인("서버에서 발급받은 건가, AWS가 아니고?" → Let's Encrypt·certbot 설명 후 "지금 진행")
+- **운영 서버(54.117.160.187)**: `certbot certonly --nginx --cert-name ops.seersthync.com -d ops.seersthync.com --renew-with-new-domains`(시험 발급 통과 후 실제 발급) — 같은 인증서 이름·경로라 Nginx 설정 무변경, reload만. 제공 인증서 = `ops.seersthync.com` 단독, 2027-02-15 만료, `certbot renew --dry-run` 성공, 외부 HTTPS 200·검증 통과
+- **DEV 서버(13.125.238.77)**: 별도 인증서 `dev.ops.seersthync.com` 발급 후 `dev.ops` 서버 블록의 인증서 경로 2줄만 교체(certbot `--nginx`, 원본 설정 `~/thync-ops.nginx.bak_20261118_cert`). 2027-02-15 만료, 외부 HTTPS 200·검증 통과. **옛 겸용 인증서는 운영 도메인 블록이 아직 참조하므로 남겨 둠**(사용자 결정 — 기존 서버 운영 앱을 며칠 더 보존. 갱신은 실패하며 2027-02-02 만료)
+- 서비스 중단 없음(Nginx reload). 코드 변경 없음 — README 서버 환경의 SSL 항목 갱신
+
 ## 2026-11-18 08:50 | DB 백업 — 셸 스크립트 저장소 이관·환경 구분 설정화·시각 22:00 KST
 
 - **요청**: "PROD DB를 주기적으로 백업해 S3에 보관하는 게 목적. 방법은 말한 대로 개선, 시각은 KST 22:00" — 앞서 설명한 약점 3가지(덤프 셸·예약이 저장소 밖 / 셸에 DB 비밀번호 평문 / 다른 서버에서 잘못 실행해도 막는 장치 없음) 해소

@@ -168,36 +168,29 @@ const res = await fetch(`/api/wiki/pages?refType=hospital&refCode=${code}`)
 - "상용 데이터 가져와"
 - "DB 데이터 PROD에서 가져와"
 
-**환경별 동작 (cwd로 자동 분기)**
+**동작 — dev(13.125.238.77)·dev2 공통: `scripts/sync-prod-data-to-dev.sh`** (2026-11-18 개편)
 
-#### dev에서 실행 시 (13.125.238.77 — 2026-11-18부터 PROD와 다른 호스트)
-- **`scripts/sync-prod-data-to-dev.sh`를 그대로 쓰지 말 것** — PROD·DEV가 같은 호스트(localhost)에 있다는 전제의 스크립트라, 지금 돌리면 기존 서버에 남은 **옛 `thync_ops`(2026-11-18 08:08 시점에서 멈춘 사본)** 를 읽는다
-- 아래 dev2 절차와 같은 방식으로 진행: PROD(54.117.160.187)의 최신 덤프를 가져와(SCP 또는 S3 `db-backups/daily/` — `npx tsx scripts/backup-db-to-s3.mts --list`/`--download`) → DEV 백업 → TRUNCATE → data-only 적재 → DEV 전용 스케줄러 OFF
-- 스크립트를 원격 덤프 방식으로 고치는 것은 별도 작업
+PROD와 개발 환경이 서로 다른 호스트라, PROD 데이터는 **PROD가 매일 22:00 KST에 S3로 올리는 백업 덤프**(`db-backups/daily/`)에서 가져온다. 스크립트는 기본적으로 PROD 서버에 접속하지 않는다.
 
-#### dev2에서 실행 시 (별도 PC, WSL2)
-1. PROD(54.117.160.187) `~/backups/db/` 중 **가장 최신** `thync_ops_*.dump` 자동 선택 (정기 백업은 **매일 22:00 KST** — cron `0 13 * * *` UTC, `scripts/backup-db.sh`. 2026-11-18 이전 덤프는 10:00 KST·UTC 파일명. 같은 덤프가 S3 `db-backups/daily/`에도 있음)
-2. SCP로 `/home/ubuntu/backups/db-sync/`에 전송
-3. `pm2 stop thync-dev`
-4. 현재 DEV 백업: `dev_before_sync_<ts>.sql.gz`
-5. 36개 테이블 `TRUNCATE ... RESTART IDENTITY CASCADE` (`_prisma_migrations` 제외)
-6. dump를 `/tmp/restore.dump`로 복사 (postgres 슈퍼유저가 ubuntu home 못 읽음)
-7. 풀덤프인 경우 `pg_restore --list`로 TOC 추출 후 `_prisma_migrations` TABLE DATA 라인만 제거한 필터 파일 생성
-8. `sudo -u postgres pg_restore --data-only --disable-triggers --single-transaction --no-owner --no-privileges [-L /tmp/restore.list] /tmp/restore.dump`
-9. `/tmp/restore.dump`, `/tmp/restore.list` 정리 + DEV 전용 스케줄러 OFF: `UPDATE public.app_settings SET value='off' WHERE key IN ('channeltalk_as_interval','channeltalk_voc_interval')` (PROD 설정이 따라와 DEV에서 채널톡 시트 동기화·VOC 상담 폴링이 켜지는 것 방지 — dev 스크립트는 적재 트랜잭션에서 자동 수행. 덤프가 search_path를 비우므로 스키마 한정 필수)
-10. `pm2 start thync-dev` + HTTP 응답 확인
-11. 주요 테이블 row 수 보고
+```bash
+scripts/sync-prod-data-to-dev.sh --dry    # 점검·계획만 (아무것도 안 바꿈) — 먼저 이것으로 확인
+scripts/sync-prod-data-to-dev.sh --yes    # S3의 가장 최신 일일 백업으로 실행
+```
 
-**옵션 (양쪽 공통)**
-- `"PROD에서 새로 dump 떠서 동기화"` → 정기 백업 안 쓰고 PROD 서버에서 즉시 `pg_dump -Fc --data-only` 신규 생성 후 진행
-- `"특정 파일로 동기화: <파일명>"` → 자동 최신 대신 지정 파일 사용
+스크립트가 하는 일(순서): 덤프 확보 → 점검(대상 환경·덤프 판독·테이블/컬럼 호환) → 이 레포의 PM2 앱 정지 → 대상 DB 백업(`~/backups/db-sync/dev_before_sync_<ts>.sql.gz`) → `TRUNCATE` + data-only 적재 + DEV 전용 스케줄러 OFF(`channeltalk_as_interval`·`channeltalk_voc_interval`·`channeltalk_as_intake`)를 **한 트랜잭션**으로(postgres 슈퍼유저 — FK 트리거 비활성) → 앱 재기동·HTTP 확인 → 주요 테이블 건수 보고
 
-**안전장치 (양쪽 공통)**
-- DEV 백업은 **항상** 생성 (생략 옵션 없음)
-- 동기화 전 PM2 정지 → DB 커넥션 정리
-- 단일 트랜잭션 적재 → 실패 시 자동 롤백
-- `_prisma_migrations`는 **절대 덮어쓰지 않음** → DEV 마이그레이션 히스토리 보호
-- PROD DB는 **읽기(pg_dump)만** 수행, DDL/DML 절대 금지
+**옵션**
+- `"PROD에서 새로 dump 떠서 동기화"` → `--fresh` (PROD에 SSH로 `pg_dump`만 수행 — 읽기 전용. SSH 키가 있는 dev2에서만 가능)
+- `"특정 파일로 동기화: <파일명>"` → `--key=db-backups/daily/<파일>`(S3) 또는 `--file=<경로>`(이미 받아 둔 덤프)
+
+**안전장치**
+- 운영 환경에서는 실행 거부 — `.env`에 `DB_BACKUP_S3_PREFIX`(운영 표시)가 있거나 대상 DB명이 `_dev`로 끝나지 않으면 중단
+- 대상 DB 백업은 **항상** 생성 (생략 옵션 없음)
+- 덤프에 있는 컬럼이 대상에 없으면(대상 스키마가 PROD보다 뒤처짐) **아무것도 바꾸기 전에 중단** — `git pull`·마이그 적용 후 재실행. 대상이 앞서 있는 경우(미배포 마이그)는 허용: 대상에만 있는 테이블은 비워 두고, 덤프에만 있는 테이블(`_bak_*`)은 건너뜀
+- 단일 트랜잭션 적재 → 실패 시 자동 롤백(대상 DB 그대로)
+- `_prisma_migrations`는 **절대 덮어쓰지 않음** → 개발 환경 마이그레이션 히스토리 보호
+- PROD DB는 **읽기(S3 백업 또는 `pg_dump`)만**, DDL/DML 절대 금지
+- dev2는 실행 후 dev2 전용 보정(예: 미커밋 기능의 시드)이 필요하면 따로 적용
 
 ### 위키 Phase 진행
 
