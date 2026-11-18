@@ -38,6 +38,7 @@
 | D13 | 실제 병원 서버의 데이터는 dev에서 받는다 (dev2는 로컬 PC) | §9 |
 | D14 | 수신부는 운영관리시스템 본체와 **별도 프로세스**로 둔다 | §8 — 위키 협업 서버와 같은 방식 |
 | D15 | 원본은 본체와 **별도 DB**에 둔다. 같은 PostgreSQL 안에서 시작하고, 양이 확인되면 별도 서버로 옮긴다 | §7.4 |
+| D16 | 수신부 **빌드도 본체 빌드와 분리**한다 (2026-11-18) | §8.1 — 본체 빌드가 수신부 때문에 실패하지 않게 |
 
 ## 3. 제품 DB에서 확인한 사실 (백엔드 소스 `01.01.442` 기준)
 
@@ -359,14 +360,14 @@
 |---|---|
 | 위치 | 이 레포 `usage-ingest/` (협업 서버 `collab-server/`와 같은 방식) |
 | 구현 | TypeScript, Node 내장 HTTP 서버. 본체 코드(`lib/*`, Prisma)를 가져다 쓰지 않는다 |
-| 빌드 | `npm run build:usage-ingest` → `usage-ingest/dist/index.mjs` 단일 파일. `npm run build`에도 포함 |
+| 빌드 | `npm run build:usage-ingest` → `usage-ingest/dist/index.mjs` 단일 파일. 본체 빌드(`npm run build`)에는 들어 있지 않다 |
 | 실행 | PM2 `thync-usage-ingest-dev` / `thync-usage-ingest-prod` |
 | 설정 | `usage-ingest/.env` (본체 `.env`와 별개) — `USAGE_DATABASE_URL`, `USAGE_INGEST_PORT`, `USAGE_MAX_BYTES` |
 | 새 패키지 | `pg` (PostgreSQL 접속) 1개 |
 | 상태 확인 | `GET /api/usage-ingest/health` — 버전, DB 접속 여부 (인증 없음) |
 
 - **Nginx에서 `/api/usage-ingest/` 경로만 수신부로 넘긴다.** Agent가 보는 주소는 본체와 같은 도메인이고, 본체 앱은 이 경로를 받지 않는다. 그래서 본체의 미들웨어는 고치지 않는다.
-- **재시작은 수신부 코드가 바뀐 배포에서만 한다.** `sha256sum usage-ingest/dist/index.mjs`가 이전 배포와 다르면 재시작한다 (협업 서버와 같은 규칙). 본체와 공유하는 코드가 없으므로 본체만 바뀐 배포에서는 값이 같다.
+- **빌드와 재시작은 수신부 코드가 바뀐 배포에서만 한다.** `usage-ingest/`가 바뀌었으면 `npm run build:usage-ingest` → `pm2 restart thync-usage-ingest-<환경>`. 본체만 바뀐 배포에서는 수신부를 빌드하지도 재시작하지도 않는다. 빌드는 1초 안에 끝난다.
 - 재시작하는 몇 초 동안 들어온 전송은 실패하고, Agent가 다음 실행 때 다시 보낸다.
 
 ### 8.2 호출
@@ -454,7 +455,7 @@ dev에서 받을 때의 주의:
 - Agent 버전 `0.1.0`. 빌드 결과는 정적 실행 파일 1개(7.6MB)와 설치 묶음 `thync-usage-agent-0.1.0.tar.gz`.
 - 수신부는 `127.0.0.1:3110`에만 묶인다. 버전은 소스 해시 앞 8자라, 소스가 같으면 빌드 결과가 바이트 단위로 같다.
 - 토큰 형식은 `tua_` + 16진수 48자.
-- 새 패키지: `pg`, `@types/pg`. `npm run build`에 수신부 빌드가 포함됐다(`build:usage-ingest`로 따로도 가능).
+- 새 패키지: `pg`, `@types/pg`. 수신부는 `npm run build:usage-ingest`로 따로 빌드한다. 처음에는 본체 빌드(`npm run build`)에 포함했다가 같은 날 분리했다 — 수신부 빌드 실패가 본체 배포를 막지 않게, 수신부가 없는 서버에서 불필요하게 돌지 않게.
 
 ### 13.2 설계에서 달라지거나 구체화된 것
 

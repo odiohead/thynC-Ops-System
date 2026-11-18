@@ -163,7 +163,7 @@ const res = await fetch(`/api/wiki/pages?refType=hospital&refCode=${code}`)
 - **원본은 본체와 별도 DB**(`thync_usage`/`thync_usage_dev`, 전용 계정 `thync_usage`). Prisma 모델을 만들지 말 것 — 스키마 변경은 `usage-ingest/migrations/NNNN_설명.sql` 추가 → `npm run build:usage-ingest` → `node usage-ingest/dist/migrate.mjs`. 본체에서는 `.env`의 `USAGE_DATABASE_URL`로만 접속(`scripts/usage-lib.mts`)
 - **원본 행은 지우지 않는다** — 병원에서 사라진 것은 표시만(`gone_at`·`source_gone_at`·`removed_at`). 병원 DB에서 지워진 뒤에는 원본 DB가 유일한 사본
 - **Agent(`agents/thync-usage-agent/`)는 조회 전용** — 쿼리는 `source.go`에만 두고, 환자 식별 컬럼·`SELECT *`·쓰기 문장을 넣지 말 것(`agent_test.go`가 검사). 중앙에서 쿼리·명령을 내려받는 기능, 자동 업데이트, 포트를 여는 기능 추가 금지
-- **수신부 재시작은 수신부 코드가 바뀐 배포에서만** — `sha256sum usage-ingest/dist/index.mjs`가 이전 배포와 다르면 `pm2 restart thync-usage-ingest-<env>`(본체와 공유 코드가 없어 본체만 바뀐 배포에서는 값이 같다). 재시작 중 실패한 전송은 Agent가 다음 실행 때 다시 보낸다
+- **수신부는 본체와 따로 빌드·재시작** — `npm run build`(본체)에는 수신부 빌드가 들어 있지 않다. `usage-ingest/`가 바뀐 배포에서만 `npm run build:usage-ingest` → (스키마 파일이 추가됐으면 `node usage-ingest/dist/migrate.mjs`) → `pm2 restart thync-usage-ingest-<env>`. 본체만 바뀐 배포에서는 수신부를 건드리지 않는다. 재시작 중 실패한 전송은 Agent가 다음 실행 때 다시 보낸다
 - **dev·PROD 서버의 원본 DB·계정 생성, Nginx 경로 추가, PM2 등록은 서버 설정 변경** — 명시 허락 후에만(현재 dev2에만 설치). 절차는 설계 문서 §13.5
 - 변경 후 검증: `agents/thync-usage-agent/build.sh`(go vet·test 포함) → `npx tsx scripts/usage-collect-smoke.mts`(dev2 전용 — 로컬 MySQL 빈 제품 DB + PM2 수신부 필요)
 

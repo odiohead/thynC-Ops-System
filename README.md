@@ -407,7 +407,7 @@ usage-ingest/                         # thynC 사용량 수신부 (2026-11-18 �
 ├── validate.mts                      # 수신 본문 검증
 ├── migrate.mts                       # 원본 DB 스키마 적용 (migrations/*.sql 을 한 번씩 — Prisma 마이그레이션과 별개)
 ├── migrations/0001_init.sql          # 원본 DB 스키마 (식별·수신 기록·원본 6종, 상태 이력 월별 분할)
-├── build.mjs                         # esbuild → dist/index.mjs·migrate.mjs (npm run build:usage-ingest, npm run build 에도 포함)
+├── build.mjs                         # esbuild → dist/index.mjs·migrate.mjs (npm run build:usage-ingest — 본체 빌드 npm run build 와 별개)
 └── .env.example                      # 수신부 설정 (본체 .env 와 별개 — USAGE_DATABASE_URL·USAGE_INGEST_PORT·USAGE_MAX_BYTES)
 
 agents/thync-usage-agent/             # 병원 서버용 사용량 수집 Agent (Go, 2026-11-18) — 조회 전용, 환자 식별 정보 미조회, 실행 후 종료
@@ -2371,7 +2371,11 @@ pm2 restart thync-prod
 
 ```
 
-> `npm run start`, `nohup`, `node` 등으로 직접 서버를 실행하지 마세요. 반드시 PM2를 사용합니다.
+```bash
+npm run build:usage-ingest                 # 1초 안에 끝남
+node usage-ingest/dist/migrate.mjs         # usage-ingest/migrations 에 새 파일이 있을 때만
+pm2 restart thync-usage-ingest-dev         # PROD: thync-usage-ingest-prod
+```
 
 ---
 
