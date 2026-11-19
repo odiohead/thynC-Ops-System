@@ -2310,6 +2310,38 @@ model HospitalDeviceSupply {
   @@schema("public")
 }
 
+/// 사용량 일별 집계 — 병원 × 날짜 × 판매모델 (전체 병원 화면용, projects/usage_overview_design.md §5).
+/// 원본은 사용량 원본 DB 에 있고, lib/usage/stats.ts 가 lib/usage/metrics.ts 의 계산 결과를 주기적으로 덮어쓴다.
+model UsageDailyStat {
+  hospitalCode String   @map("hospital_code")
+  date         DateTime @db.Date
+  model        String   @db.VarChar(10) // all | general | usage (SQL CHECK)
+  measured     Int // 측정 환자 수 (그날 진행 중이던 측정)
+  started      Int // 신규 측정 수 (그날 시작한 측정)
+  peak         Int // 최대 동시측정 수
+  computedAt   DateTime @default(now()) @map("computed_at")
+
+  @@id([hospitalCode, date, model])
+  @@map("usage_daily_stats")
+  @@schema("public")
+}
+
+/// 사용량 일별 집계 — 병원 × 날짜 × 판매모델 × 기기 종류(제품 device_type: 1 심전계 · 3 산소포화도 · 10 카트온)
+model UsageDailyDeviceStat {
+  hospitalCode String   @map("hospital_code")
+  date         DateTime @db.Date
+  model        String   @db.VarChar(10)
+  deviceType   Int      @map("device_type")
+  uses         Int? // 사용 횟수 — null = 기기별 수치를 알 수 없는 날
+  peak         Int? // 최대 동시사용 수
+  capacity     Int? // 그날의 계약·공급 수량 (가동률의 분모) — null = 수량 없음
+
+  @@id([hospitalCode, date, model, deviceType])
+  @@index([model, deviceType, date])
+  @@map("usage_daily_device_stats")
+  @@schema("public")
+}
+
 /// 출고요청 품목 라인 (수량 입력된 품목만 저장)
 model StockOutRequestItem {
   id              Int @id @default(autoincrement())

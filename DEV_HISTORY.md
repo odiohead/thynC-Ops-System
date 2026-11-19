@@ -4,6 +4,26 @@
 
 ---
 
+## 2026-11-19 15:08 | 사용량 — 전체 병원 화면(서비스 단위 가동률) 구현 (dev2 빌드·화면 검증 → dev 반영 — PROD 미반영)
+
+- **요청**: 설계안(`projects/usage_overview_design.md`) 제안값 그대로 dev2·dev에 구현 — "보고 이야기하자". 결정 항목(D1~D8)은 사용자가 화면을 본 뒤 확정
+- **화면**: 병원을 고르지 않은 `/usage`가 전체 병원 화면(메뉴 '사용량'의 첫 화면), `/usage?hospital=`은 기존 병원별 화면 그대로(처음 병원을 자동으로 여는 동작 제거, '전체 병원' 링크 추가). 기기(심전계·산소포화도·카트온)·판매모델 선택 → 요약 한 줄(전체 가동률·증가/감소/유지/판정 보류 병원 수) → 빠른 필터(전체·상위 10·하위 10·증가·감소·판정 보류)·병원 검색 → 병원 표(순위·`평균 최대 동시 / 수량 (비율)`+막대·이전 30일·변화 %p·12주 추이 선·수신), 가동률·이전·변화 열 정렬, 행을 누르면 병원별 화면(30일)
+- **정의**(`lib/usage/overview.ts` — 순수 함수): 가동률 = 동시 가동률의 최근 30일 평균(병원별 화면 '동시 가동률 평균'과 같은 값), 이전 30일과 비교해 ±5%p 이상이면 증가·감소, 유효한 날 14일 미만·수량 없음·기기 이력 따라잡는 중·집계 전이면 판정 보류, 수신이 24시간 넘게 끊긴 병원은 마지막 수신일부터 평균에서 제외, 수량이 바뀐 병원은 '수량 a → b' 표시, 전체 가동률 = Σ 평균 최대 동시 ÷ Σ 수량. '산정기준' 팝업에 8절 추가
+- **일별 집계**: 본체 DB 표 2개 `usage_daily_stats`·`usage_daily_device_stats`(마이그 `20261119100000_usage_daily_stats`). `lib/usage/stats.ts`가 병원마다 최근 91일을 판매모델 3종으로 다시 계산해 덮어쓰고, `lib/usage/stats-scheduler.ts`가 1시간마다 실행(AppSetting `usage_stats_interval`, 기본 1h, 기동 1분 뒤 첫 실행), 마지막 실행은 `usage_stats_last_run`. 수동 실행·대조 `scripts/usage-stats-rebuild.mts`
+- **계산부 정리**: `buildUsage`를 읽기(`loadUsage`)와 판매모델별 계산(`computeUsage`)으로 나눔 — 판매모델 3종을 원본 한 번 읽어 함께 냄(`getUsageDailyAllModels`). 병원별 화면의 값은 그대로(검사로 확인)
+- **경계**: `instrumentation.ts` → `lib/usage/stats-scheduler` 기동 1건(CLAUDE.md 규칙 9에 기록). 원본 DB에는 쓰지 않음, 수신부 변경 없음
+- **dev2 원본 DB**: 비어 있어 화면을 볼 수 없었으므로 DEV 서버의 원본 데이터(동수원·화순성심, 11-18 13시까지)를 복사해 넣음(토큰 표 제외). 그래서 dev2에서는 두 병원 모두 '수신 지연'으로 보임
+- **검증**: tsc · eslint · `usage-metrics-test.mts` 순수 77/77, 실데이터(화순 30일) 93/93 — 판매모델 3종 일괄 = 개별 계산, 전체 병원 화면 가동률 = 병원별 화면 평균 · `usage-stats-rebuild.mts --check` 저장값 = 다시 낸 값(두 병원) · dev2 빌드 후 실제 화면 26/26(Playwright — 표 값과 API 대조 3기기, 선택·주소 반영, 병원별 화면 왕복, 산정기준, 가상 25곳으로 필터·정렬·검색·보류 사유·수량 변동, 390px, 빈 상태) · 스케줄러 기동 후 자동 집계 확인. 2곳 집계 약 4초
+- **확인 못 한 것**: 판정 기준(±5%p·14일)을 PROD 실데이터에 적용해 본 결과(PROD 조회 차단), 병원이 많을 때의 집계 시간
+- 파일: lib/usage/metrics.ts, lib/usage/stats.ts(신규), lib/usage/stats-scheduler.ts(신규), lib/usage/overview.ts(신규), app/api/usage/overview/route.ts(신규), app/usage/UsageOverview.tsx(신규), app/usage/page.tsx, app/usage/UsageClient.tsx, app/usage/UsageCriteria.tsx, instrumentation.ts, prisma/schema.prisma, prisma/migrations/20261119100000_usage_daily_stats, scripts/usage-stats-rebuild.mts(신규), scripts/usage-metrics-test.mts, README.md, CLAUDE.md, projects/usage_overview_design.md, projects/README.md
+
+## 2026-11-19 14:52 | 사용량 — 전체 병원 화면(서비스 단위 가동률) 설계안 작성 (문서만 — 구현·커밋 없음)
+
+- 사용자 요청: 병원별 화면에 이어 서비스 차원에서 보는 화면 — 가동률 상위·하위 병원, 늘고 있는·줄고 있는 병원 식별, 걸러낸 병원은 사람이 상세 분석
+- 설계안 `projects/usage_overview_design.md`(검토 대기): 병원 표 하나 + 빠른 필터, 기준은 동시 가동률(기기 선택·기본 심전계), 최근 30일 vs 이전 30일 ±5%p 판정, 12주 추이, 판매모델 선택, 일별 집계를 본체 DB 표 2개에 저장하고 1시간마다 갱신, `instrumentation.ts` → `lib/usage` 스케줄러 기동 1건(경계 예외 — 승인 필요)
+- 설계 중 PROD 읽기(두 병원 90일 값·계산 시간 실측)가 권한 차단에 걸려 판정 기준을 실데이터에 적용해 보지 못함 — 문서 §8에 기록. 도입 병원 규모 234곳은 dev2 사본 기준
+- 파일: `projects/usage_overview_design.md`(신규), `projects/README.md`
+
 ## 2026-11-19 10:42 | 사용량 — 일자별 표 기기별 '최대 동시'에 수량·가동률 함께 표시 (dev2 → PROD)
 
 - 사용자 요청: 일자별 표의 기기별 '최대 동시'를 '수치 / 기기 전체 수량 (XX%)'로. 예: `41 / 150 (27%)`

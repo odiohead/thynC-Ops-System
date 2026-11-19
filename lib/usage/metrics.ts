@@ -309,6 +309,15 @@ export async function getUsageDaily(hospitalCode: string, days: number, model: U
   return (await buildUsage(hospitalCode, days, model, nowMs)).daily
 }
 
+/**
+ * 판매모델 3종(합산·일반형·사용량비례형)의 일별 지표를 원본을 한 번만 읽어 함께 낸다 — 전체 병원 화면의 일별 집계용
+ * (lib/usage/stats.ts). 각 값은 getUsageDaily(…, model) 과 같다.
+ */
+export async function getUsageDailyAllModels(hospitalCode: string, days: number, nowMs: number = Date.now()): Promise<Record<UsageModel, UsageDaily>> {
+  const loaded = await loadUsage(hospitalCode, days, nowMs)
+  return { all: computeUsage(loaded, 'all').daily, general: computeUsage(loaded, 'general').daily, usage: computeUsage(loaded, 'usage').daily }
+}
+
 /** 일별 지표 + (주간 집계용) 선택한 판매모델의 부모 측정 구간 */
 async function buildUsage(
   hospitalCode: string,
@@ -316,6 +325,31 @@ async function buildUsage(
   model: UsageModel,
   nowMs: number,
 ): Promise<{ daily: UsageDaily; parents: Interval[]; today: number }> {
+  return computeUsage(await loadUsage(hospitalCode, days, nowMs), model)
+}
+
+type UsageUnit = { key: string; type: number; model: SaleModel; iv: Interval }
+
+/** 원본에서 읽어 판매모델과 무관하게 정리해 둔 것 — computeUsage 가 판매모델별로 센다 */
+type LoadedUsage = {
+  hospitalCode: string
+  days: number
+  today: number
+  first: number
+  from: string
+  receive: { servers: number; lastSuccessAt: string | null }
+  plans: Map<number, CapacityPlan>
+  unitList: UsageUnit[]
+  /** 측정 환자 수에 넣는 부모 측정 (기기 기록 없는 종료 측정 제외 뒤) */
+  parentCands: { key: string; iv: Interval }[]
+  /** 보관 기한이 지나 기기 정보가 지워진 측정 — 이 측정이 걸친 날은 기기별 수치를 알 수 없다 */
+  purged: Interval[]
+  inModel: (key: string, sel: UsageModel) => boolean
+  models: UsageDaily['models']
+}
+
+/** 원본 DB·운영관리시스템 DB 를 읽는다 (병원 하나, 판매모델과 무관) */
+async function loadUsage(hospitalCode: string, days: number, nowMs: number): Promise<LoadedUsage> {
   const pool = usagePool()
   const today = localDayStart(nowMs, TZ_OFFSET_HOURS)
   const first = today - (days - 1) * DAY_SEC
@@ -369,8 +403,7 @@ async function buildUsage(
     typeModel.get(type) ?? modelBySerial.get(normalizeSerial(serial).serialNo) ?? defaultModelOf(type)
 
   // 기기 사용 단위 → 판매모델. 측정(과 부모 측정)마다 붙은 기기의 판매모델을 심전계·산소포화도 / 카트온으로 나눠 모은다
-  type Unit = { key: string; type: number; model: SaleModel; iv: Interval }
-  const unitList: Unit[] = []
+  const unitList: UsageUnit[] = []
   const mainModels = new Map<string, Set<SaleModel>>()
   const withDevice = new Set<string>() // 기기 기록이 하나라도 있는 측정 (자식 측정의 기기는 부모에도)
   const otherModels = new Map<string, Set<SaleModel>>()
@@ -396,7 +429,7 @@ async function buildUsage(
     sel === 'all' || measurementModels(mainModels.get(key), otherModels.get(key), hospitalModel).has(sel)
 
   // 측정 구간 (환자 수·동시측정은 부모 측정만)
-  const parents: Interval[] = []
+  const parentCands: { key: string; iv: Interval }[] = []
   const all: { key: string; status: number; iv: Interval }[] = []
   const parentKeysByModel = { general: 0, usage: 0 }
   for (const r of measurements.rows) {
@@ -410,21 +443,11 @@ async function buildUsage(
     if (!countsAsMeasurement(Number(r.measurement_status), withDevice.has(key), covered !== undefined && iv.e <= covered)) continue
     if (inModel(key, 'general')) parentKeysByModel.general++
     if (inModel(key, 'usage')) parentKeysByModel.usage++
-    if (inModel(key, model)) parents.push(iv)
+    parentCands.push({ key, iv })
   }
 
-  // 기기 사용 구간 (종류별, 선택한 판매모델만) + 기기 단위가 하나라도 있는 측정
-  const unitsByType = new Map<number, Interval[]>()
-  const hasUnits = new Set<string>()
-  for (const u of unitList) {
-    hasUnits.add(u.key)
-    if (!kinds.includes(u.type as (typeof kinds)[number])) continue
-    if (model !== 'all' && u.model !== model) continue
-    const list = unitsByType.get(u.type) ?? []
-    list.push(u.iv)
-    unitsByType.set(u.type, list)
-  }
-  // 보관 기한이 지나 기기 정보가 지워진 측정 — 이 측정이 걸친 날은 기기별 수치를 알 수 없다
+  // 보관 기한이 지나 기기 정보가 지워진 측정(기기 단위가 하나도 없는 상태 10) — 이 측정이 걸친 날은 기기별 수치를 알 수 없다
+  const hasUnits = new Set<string>(unitList.map((u) => u.key))
   const purged = all.filter((m) => m.status === 10 && !hasUnits.has(m.key)).map((m) => m.iv)
 
   // 고를 수 있는 판매모델: 계약 수량이 있거나 기간 안에 그 모델의 측정이 있으면
@@ -434,6 +457,24 @@ async function buildUsage(
     label: x.label,
     available: x.key === 'all' ? true : hasContract(x.key) || parentKeysByModel[x.key] > 0,
   }))
+
+  return { hospitalCode, days, today, first, from, receive, plans, unitList, parentCands, purged, inModel, models }
+}
+
+/** 읽어 둔 원본으로 한 판매모델의 일별 지표를 센다 (DB 를 읽지 않는다) */
+function computeUsage(loaded: LoadedUsage, model: UsageModel): { daily: UsageDaily; parents: Interval[]; today: number } {
+  const { hospitalCode, days, today, first, from, receive, plans, unitList, parentCands, purged, inModel, models } = loaded
+  const parents = parentCands.filter((p) => inModel(p.key, model)).map((p) => p.iv)
+
+  // 기기 사용 구간 (종류별, 선택한 판매모델만)
+  const unitsByType = new Map<number, Interval[]>()
+  for (const u of unitList) {
+    if (!KIND_TYPES.has(u.type)) continue
+    if (model !== 'all' && u.model !== model) continue
+    const list = unitsByType.get(u.type) ?? []
+    list.push(u.iv)
+    unitsByType.set(u.type, list)
+  }
 
   const dayStarts = Array.from({ length: days }, (_, i) => first + i * DAY_SEC)
   const dayRows = dayStarts.map((d) => {

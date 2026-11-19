@@ -1,12 +1,15 @@
 'use client'
 
 /**
- * 사용량 화면 (클라이언트) — 디자인: Claude 디자인 캔버스 '사용량 화면 시안'
+ * 사용량 — 병원별 화면 (클라이언트, /usage?hospital=<병원코드>) — 디자인: Claude 디자인 캔버스 '사용량 화면 시안'
+ * 병원을 고르지 않은 /usage 는 전체 병원 화면(UsageOverview)이다.
  * 위에서 아래로: 제목·수신 상태 → 병원·기간 → 요약 한 줄 → 일별 추이 → 기기별 가동률 → 일자별 표
  * 데이터가 없어도 같은 구조가 그대로 보인다(값은 —).
  */
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { ChevronLeft } from 'lucide-react'
 import { Bar, CartesianGrid, Cell, ComposedChart, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import PageHeader from '@/app/components/ui/PageHeader'
 import Badge from '@/app/components/ui/Badge'
@@ -156,11 +159,6 @@ export default function UsageClient() {
     }
   }, [])
 
-  // 병원을 고르지 않고 들어오면 목록의 첫 병원을 연다
-  useEffect(() => {
-    if (!hospital && hospitals && hospitals.length > 0) go(hospitals[0].hospitalCode, days, model)
-  }, [hospital, hospitals, days, model, go])
-
   useEffect(() => {
     if (!hospital) {
       setData(null)
@@ -261,6 +259,14 @@ export default function UsageClient() {
       <div className="flex flex-col gap-5">
         {/* 조건 */}
         <div className="flex flex-wrap items-end gap-3">
+          <Link
+            href={model === 'all' ? '/usage' : `/usage?model=${model}`}
+            data-testid="usage-back-overview"
+            className="flex h-9 items-center gap-1 rounded-md border border-border bg-card pl-2 pr-3 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <ChevronLeft size={15} aria-hidden />
+            전체 병원
+          </Link>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="usage-hospital" className="text-xs font-medium text-muted-foreground">
               병원

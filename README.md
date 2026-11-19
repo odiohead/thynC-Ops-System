@@ -416,10 +416,11 @@ agents/thync-usage-agent/             # 병원 서버용 사용량 수집 Agent 
 
 scripts/usage-*.mts                   # 사용량 수집 운영 스크립트 — issue-token(발급·목록·폐기)·status(수신 현황)·rewind(수신 위치 되돌리기)·move-hospital(병원 코드 변경 반영)·collect-smoke(끝단 검증, dev2 전용)·lib(공용)
 
-app/usage/                            # 사용량 화면 (2026-11-18) — page.tsx(권한 게이트)·UsageClient.tsx(병원·기간 선택 → 요약 한 줄 → 일별 추이 → 기기별 가동률 3종 → 일자별 표)·UsageWeekly.tsx(주간 통계 — 최근 12주)·UsageCriteria.tsx(우측 상단 '산정기준' 팝업 — 건수·가동률·판매모델 산정 규칙 설명, 나중의 설명 페이지와 공용 UsageCriteriaContent)
-app/api/usage/                        # 사용량 조회 API — hospitals(수집 중인 병원)·daily(일별 지표)·weekly(주간 지표)·status(병원 상세의 진입 링크용) + _shared.ts(공통 게이트)
-lib/usage/                            # 사용량 지표 — metrics.ts(원본 DB에서 바로 계산, 정의 단일 소스)·daily.ts(일별 건수·최대 동시 순수 함수)·db.ts(원본 DB 조회 전용 접속)·access.ts(접근 게이트)
-scripts/usage-metrics-test.mts        # 사용량 지표 계산 검증 — 순수 함수 검사 + (병원코드를 주면) 화면용 계산과 별도 SQL 계산 대조
+app/usage/                            # 사용량 화면 (2026-11-18) — page.tsx(권한 게이트 · `hospital` 값이 없으면 전체 병원 화면, 있으면 병원별 화면)·UsageOverview.tsx(전체 병원 화면, 2026-11-19 — 기기·판매모델 → 요약 한 줄 → 빠른 필터 → 병원 표: 가동률·이전 30일·변화·12주 추이·수신)·UsageClient.tsx(병원별 화면 — 병원·기간 선택 → 요약 한 줄 → 일별 추이 → 기기별 가동률 3종 → 일자별 표)·UsageWeekly.tsx(주간 통계 — 최근 12주)·UsageCriteria.tsx(우측 상단 '산정기준' 팝업 — 건수·가동률·판매모델 산정 규칙 설명, 나중의 설명 페이지와 공용 UsageCriteriaContent)
+app/api/usage/                        # 사용량 조회 API — overview(전체 병원의 가동률 순위·변화 — 일별 집계를 읽음)·hospitals(수집 중인 병원)·daily(일별 지표)·weekly(주간 지표)·status(병원 상세의 진입 링크용) + _shared.ts(공통 게이트)
+lib/usage/                            # 사용량 지표 — metrics.ts(원본 DB에서 바로 계산, 정의 단일 소스)·daily.ts(일별 건수·최대 동시 순수 함수)·db.ts(원본 DB 조회 전용 접속)·access.ts(접근 게이트)·stats.ts(일별 집계를 본체 DB 표 2개에 저장 — 최근 91일을 다시 계산해 덮어씀)·stats-scheduler.ts(1시간마다 집계, instrumentation.ts 가 기동)·overview.ts(전체 병원 화면의 기간 평균·변화·판정 — 순수 함수 + 조회)
+scripts/usage-metrics-test.mts        # 사용량 지표 계산 검증 — 순수 함수 검사(전체 병원 화면의 기간 평균·판정 포함) + (병원코드를 주면) 화면용 계산과 별도 SQL 계산 대조
+scripts/usage-stats-rebuild.mts       # 사용량 일별 집계 수동 실행 — 전 병원 / 병원 하나 / `--check`(저장된 집계와 병원별 화면 계산 대조, 읽기 전용)
 scripts/seed-usage-nav.sql            # 사용량 메뉴 등록(멱등) — 운영현황 아래, SEERS 소속 ADMIN 이상
 
 prisma/
@@ -1074,6 +1075,11 @@ prisma/
 
 ---
 
+### UsageDailyStat · UsageDailyDeviceStat (사용량 일별 집계 — 2026-11-19, 본체 DB)
+- 전체 병원 화면(`/usage`)이 읽는 저장 값. 원본은 사용량 원본 DB에 있고, `lib/usage/stats.ts`가 `lib/usage/metrics.ts`의 계산 결과를 주기적으로 덮어쓴다(최근 91일, 그보다 오래된 행은 그대로). 병원 FK 없음(원본 DB의 병원 코드 그대로), 원본 DB에서 사라진 병원의 행은 갱신 때 삭제
+- `usage_daily_stats`: PK(`hospital_code`, `date`, `model`) — `model` = all·general·usage(CHECK), `measured`(측정 환자 수)·`started`(신규 측정 수)·`peak`(최대 동시측정 수)·`computed_at`
+- `usage_daily_device_stats`: PK(`hospital_code`, `date`, `model`, `device_type`) — `device_type` = 제품 기기 종류(1 심전계·3 산소포화도·10 카트온), `uses`(사용 횟수)·`peak`(최대 동시사용 수) — null = 기기별 수치를 알 수 없는 날, `capacity`(그날의 계약·공급 수량) — null = 수량 없음. 인덱스(`model`, `device_type`, `date`)
+
 ### 사용량 원본 DB — `thync_usage` / `thync_usage_dev` (2026-11-18, 본체와 **별도 DB**)
 
 병원 서버의 Agent가 보낸 원본 행을 그대로 쌓는 DB다. 본체 DB(`thync_ops`)와 다른 DB이고 Prisma 모델이 없다. 스키마는 `usage-ingest/migrations/*.sql`로 관리한다(`node usage-ingest/dist/migrate.mjs`). 본체 테이블을 참조하지 않으며, 본체에서는 `.env`의 `USAGE_DATABASE_URL`로 접속한다.
@@ -1685,6 +1691,10 @@ prisma/
   - **판매모델 선택**(합산/일반형/사용량비례형, 2026-11-18): 딜의 '판매모델 구분'이 '사용량'으로 시작하면 사용량비례형, 그 밖은 일반형. 기기는 도입 수량(계약·공급)이 한 판매모델뿐이면 그 모델, 섞였으면 기기 현황의 계약건(딜) 연결로(연결이 없으면 일반형), 측정은 심전계·산소포화도의 판매모델로(없으면 카트온, 기기 정보 없으면 병원의 판매모델), 분모는 그 판매모델 딜의 계약 수량(공급 수량은 일반형, 카트온은 사용량비례형). 일별 추이는 지표(측정 환자 수·최대 동시측정 수·동시 가동률·일 사용률)와 기기(심전계·산소포화도·카트온) 필터
   - 상태 10 측정 중 대기 중에 삭제된 것(수정 시각 < 예정 종료, 시작 = 생성)은 제외하고, 시작된 뒤 삭제된 것은 삭제 시각까지 센다
   - 병원 상세 'thynC 시스템 현황' 카드에 수집 중인 병원만 '사용량 보기' 링크와 수신 상태 한 줄 표시(메인 → `/api/usage/status` HTTP 호출)
+- **전체 병원 화면 `/usage`** (2026-11-19 — dev2·dev 구현, `projects/usage_overview_design.md`): 병원을 고르지 않은 `/usage`. 수집 중인 병원을 한 표에 놓고 어느 병원을 들여다볼지 골라낸다 — 병원을 누르면 병원별 화면(`/usage?hospital=코드&days=30`)으로 이동, 병원별 화면에는 '전체 병원' 링크
+  - **구성**: 기기(심전계·산소포화도·카트온) · 판매모델 선택 → 요약 한 줄(전체 가동률 = Σ 병원별 평균 최대 동시 ÷ Σ 수량, 증가·감소·유지·판정 보류 병원 수) → 빠른 필터(전체·상위 10·하위 10·증가·감소·판정 보류) + 병원 검색 → 병원 표(순위 · 가동률 `평균 최대 동시 / 수량 (비율)` + 막대 · 이전 30일 · 변화 %p · 12주 추이 선 · 수신). 가동률·이전 30일·변화 열 정렬
+  - **정의**(`lib/usage/overview.ts` 단일 소스): 가동률 = 동시 가동률(그날 최대 동시사용 수 ÷ 그날의 계약·공급 수량)의 평균, 최근 30일 = 병원별 화면의 '최근 30일'과 같은 날짜(오늘 제외) → 병원별 화면의 '동시 가동률 평균'과 같은 값 · 이전 30일 = 그 앞 30일 · 변화 = 최근 − 이전(%p), ±5%p 이상이면 증가·감소 · 유효한 날 = 수량과 기기별 수치가 있는 날(오늘 제외, 수신이 24시간 넘게 끊긴 병원은 마지막 수신일부터 제외) · 판정 보류 = 집계 전·수량 없음·기기 상태 이력 따라잡는 중·어느 한 기간의 유효한 날 14일 미만 · 두 기간 사이 수량이 바뀐 병원은 '수량 150 → 300' 표시
+  - **일별 집계**: 병원별 화면은 열 때 원본에서 계산하지만, 전체 병원 화면은 본체 DB의 일별 집계(`usage_daily_stats`·`usage_daily_device_stats`)를 읽는다. `lib/usage/stats-scheduler.ts`가 1시간마다(AppSetting `usage_stats_interval` — 30m·1h·3h·6h·off, 기본 1h, 앱 기동 1분 뒤 첫 실행) 수집 중인 병원을 하나씩 돌며 **최근 91일을 통째로 다시 계산해 덮어쓴다**(늦게 들어오는 데이터·딜 수정·산정 기준 변경 반영, 판매모델 3종 함께). 마지막 실행은 AppSetting `usage_stats_last_run`(화면의 '집계 시각'). 수동 실행·대조: `npx tsx scripts/usage-stats-rebuild.mts [병원코드] [--check]`
 - **검증**: `npx tsx scripts/usage-collect-smoke.mts` (dev2 전용 — 로컬 MySQL의 빈 제품 DB에 가상 데이터를 넣고 Agent → 수신부 → 원본 DB를 끝까지 돌림)
 
 ---
@@ -2375,6 +2385,7 @@ npm run dev
 
 | Method | Endpoint | 설명 |
 |--------|----------|------|
+| GET  | `/api/usage/overview?device=ecg\|spo2\|cart&model=all\|general\|usage` | 전체 병원의 가동률 — 병원별 최근 30일 동시 가동률 평균(평균 최대 동시·수량·유효 일수)·이전 30일·변화(%p)·판정(up·down·flat·hold + 보류 사유)·수량 변동·12주 추이·수신 상태, 서비스 전체 한 줄, 마지막 집계 실행. 일별 집계를 읽는다 |
 | GET  | `/api/usage/hospitals` | 사용량 데이터가 들어오는 병원 목록 — 병원명·서버 수·마지막 수신 시각 |
 | GET  | `/api/usage/daily?hospital=&days=30\|90&model=all\|general\|usage` | 병원의 일별 지표 — 측정 환자 수·최대 동시측정 수, 기기 종류별 사용 횟수·최대 동시사용·그날의 계약·공급 수량·기간 평균 가동률, 요약, 수신 상태 |
 | GET  | `/api/usage/weekly?hospital=&model=all\|general\|usage` | 병원의 주간 지표(최근 12주, 월~일) — 주간 신규 측정 수·전주 대비, 최대 동시측정 수 평균·최고, 기기 종류별 동시 가동률 평균·최고 |

@@ -93,5 +93,17 @@ export async function register() {
     } catch (err) {
       console.error('[instrumentation] 위키 청크 스케줄러 초기화 실패:', err)
     }
+
+    // 사용량 일별 집계 주기 갱신 — 전체 병원 화면(/usage)이 읽는 표 (projects/usage_overview_design.md §5.3)
+    // 메인 → lib/usage import 는 이 기동 1건만 허용(CLAUDE.md 규칙 9). 설정 화면이 없어 기본값 '1h', 원본 DB 미설정 환경에서는 돌지 않는다
+    try {
+      const { startUsageStatsScheduler } = await import('@/lib/usage/stats-scheduler')
+      const us = await prisma.appSetting.findUnique({
+        where: { key: 'usage_stats_interval' },
+      })
+      startUsageStatsScheduler(us?.value || '1h')
+    } catch (err) {
+      console.error('[instrumentation] 사용량 집계 스케줄러 초기화 실패:', err)
+    }
   }
 }

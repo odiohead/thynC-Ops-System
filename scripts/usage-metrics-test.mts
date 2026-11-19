@@ -5,7 +5,8 @@
  *   npx tsx scripts/usage-metrics-test.mts <병원코드> [30|90]   + 원본 DB 의 실제 데이터로, 화면용 계산과 별도 SQL 계산을 대조 (읽기 전용)
  */
 import { DAY_SEC, average, changeRate, dayLabel, dayStats, localDayStart, spanStats, startedIn, weekStartOf } from '../lib/usage/daily'
-import { aggregateWeeks, capacityOn, countsAsMeasurement, defaultModelOf, getUsageDaily, hospitalModelOf, measurementModels, planForModel, typeModelOf } from '../lib/usage/metrics'
+import { aggregateWeeks, capacityOn, countsAsMeasurement, defaultModelOf, getUsageDaily, getUsageDailyAllModels, hospitalModelOf, measurementModels, planForModel, typeModelOf } from '../lib/usage/metrics'
+import { OVERVIEW_DAYS, summarizeOverview, summarizeOverviewTotal, type OverviewDay } from '../lib/usage/overview'
 import { fmtTime, positional, usageDb } from './usage-lib.mts'
 
 let passed = 0
@@ -105,6 +106,52 @@ const h = (n: number) => D + n * 3600
   check('병원 모델: 섞이면 일반형', hospitalModelOf([...hwasun, { deals: [], supply: 5 }]) === 'general' && hospitalModelOf([]) === 'general')
 }
 
+console.log('\n■ 전체 병원 화면 — 기간 평균·판정')
+{
+  const T = Date.UTC(2026, 10, 19) / 1000 // 오늘 = 2026-11-19 (목)
+  // 오늘에서 back 일 전의 하루. 기본 수량 100
+  const day = (back: number, peak: number | null, capacity: number | null = 100): OverviewDay => ({ date: dayLabel(T - back * DAY_SEC), peak, capacity })
+  // 최근 = 오늘 포함 30일(back 0~29), 이전 = 그 앞 30일(back 30~59)
+  const series = (recentPeak: number, prevPeak: number, cap: number | null = 100) =>
+    Array.from({ length: 91 }, (_, back) => day(back, back < OVERVIEW_DAYS ? recentPeak : prevPeak, cap))
+  const flat = summarizeOverview(series(20, 20), T, T)
+  check('최근 30일 = 오늘을 뺀 29일, 이전 = 30일', flat.validDays === 29 && flat.prevValidDays === 30)
+  check('가동률 = 일별 (최대 동시 ÷ 수량)의 평균', flat.rate === 20 && flat.avgPeak === 20 && flat.avgCapacity === 100 && flat.capacity === 100)
+  check('변화 0%p → 유지', flat.change === 0 && flat.verdict === 'flat' && flat.hold === null)
+  check('+5%p → 증가, +4%p → 유지', summarizeOverview(series(25, 20), T, T).verdict === 'up' && summarizeOverview(series(24, 20), T, T).verdict === 'flat')
+  check('−5%p → 감소, −4%p → 유지', summarizeOverview(series(15, 20), T, T).verdict === 'down' && summarizeOverview(series(16, 20), T, T).verdict === 'flat')
+  check('오늘 값은 평균에 넣지 않는다', summarizeOverview([day(0, 100), ...series(20, 20).slice(1)], T, T).rate === 20)
+  const none = summarizeOverview([], T, T)
+  check('집계 행이 없으면 판정 보류(집계 전)', none.hold === 'pending' && none.verdict === 'hold' && none.rate === null)
+  const noCap = summarizeOverview(series(20, 20, null), T, T)
+  check('계약·공급 수량이 없으면 가동률 없음 · 판정 보류(수량 없음)', noCap.hold === 'no_capacity' && noCap.rate === null && noCap.capacity === null)
+  check('기기 상태 이력을 따라잡는 중이면 값은 내되 판정 보류', (() => { const r = summarizeOverview(series(30, 20), T, T, true); return r.hold === 'behind' && r.rate === 30 && r.change === 10 })())
+  // 이전 기간에 수치 있는 날이 13일뿐 (나머지는 기기별 수치 없음)
+  const shortPrev = Array.from({ length: 91 }, (_, back) => day(back, back >= 30 && back < 60 && back >= 43 ? null : 20))
+  check('어느 한 기간의 유효한 날이 14일 미만이면 판정 보류', (() => { const r = summarizeOverview(shortPrev, T, T); return r.prevValidDays === 13 && r.hold === 'short' && r.rate === 20 })())
+  // 수신이 끊긴 병원: 마지막 수신일(5일 전) 자정 전까지만 유효 → 최근 기간은 back 6~29 = 24일
+  const cut = summarizeOverview([...Array.from({ length: 6 }, (_, back) => day(back, 0)), ...series(20, 20).slice(6)], T, T - 5 * DAY_SEC)
+  check('수신이 끊긴 병원: 마지막 수신일부터는 평균에서 뺀다', cut.validDays === 24 && cut.rate === 20 && cut.verdict === 'flat')
+  // 수량이 100 → 200 으로 늘어남 (최근 10일)
+  const grown = Array.from({ length: 91 }, (_, back) => day(back, 20, back < 10 ? 200 : 100))
+  check('수량 변동: 처음 값 → 지금 값', JSON.stringify(summarizeOverview(grown, T, T).capacityChange) === '{"from":100,"to":200}' && summarizeOverview(series(20, 20), T, T).capacityChange === null)
+  check('수량이 바뀌면 가동률은 날마다 그날 수량으로', Math.abs(summarizeOverview(grown, T, T).rate! - (9 * 10 + 20 * 20) / 29) < 1e-9)
+  const w = flat.weeks
+  check('12주 추이: 12개, 마지막이 이번 주(월요일 11-16)', w.length === 12 && w[11].weekStart === '2026-11-16' && w[0].weekStart === '2026-08-31')
+  // 이번 주(11-16 월 ~ 11-18 수, 오늘 11-19 제외)만 30, 그 전은 20 / 집계가 60일뿐이면 그보다 앞선 주는 비운다
+  const thisWeek = summarizeOverview(Array.from({ length: 91 }, (_, back) => day(back, back >= 1 && back <= 3 ? 30 : back === 0 ? 99 : 20)), T, T).weeks
+  check('12주 추이: 이번 주는 오늘을 뺀 날만', thisWeek[11].rate === 30 && thisWeek[10].rate === 20)
+  check('12주 추이: 집계가 없는 주는 비운다', summarizeOverview(series(20, 20).slice(0, 60), T, T).weeks[0].rate === null && w[0].rate === 20)
+  // 전체: 큰 병원 30/150, 작은 병원 13/20 → (30+13)/(150+20)
+  const big = summarizeOverview(series(30, 30, 150), T, T)
+  const small = summarizeOverview(series(13, 10, 20), T, T)
+  const total = summarizeOverviewTotal([big, small, noCap, none])
+  check('전체 가동률 = Σ 평균 최대 동시 ÷ Σ 수량 (단순 평균 아님)', Math.abs(total.rate! - (43 / 170) * 100) < 1e-9 && total.peakSum === 43 && total.capacitySum === 170 && total.rated === 2)
+  check('전체 변화 = 두 기간 모두 값이 있는 병원끼리', Math.abs(total.change! - ((43 / 170) * 100 - (40 / 170) * 100)) < 1e-9)
+  check('판정별 병원 수', total.up === 1 && total.flat === 1 && total.hold === 2 && total.down === 0)
+  check('병원이 없으면 전체 값 없음', summarizeOverviewTotal([]).rate === null && summarizeOverviewTotal([]).capacitySum === null)
+}
+
 const [hospital, daysArg] = positional
 if (hospital) {
   const days = daysArg === '90' ? 90 : 30
@@ -163,6 +210,19 @@ if (hospital) {
       const usesOk = a.days.every((d, i) => d.uses === null || d.uses === (g.days[i].uses ?? 0) + (u.days[i].uses ?? 0))
       const capOk = a.days.every((d, i) => (d.capacity ?? 0) === (g.days[i].capacity ?? 0) + (u.days[i].capacity ?? 0))
       check(`${a.label}: 사용 횟수 합산 = 일반형 + 사용량비례형, 분모 합산 = 일반형 + 사용량비례형`, usesOk && capOk)
+    }
+    // 판매모델 3종을 한 번 읽어 낸 값 = 판매모델마다 따로 낸 값 (오늘은 계산 사이에 시각이 흐르므로 뺀다)
+    const trio = await getUsageDailyAllModels(hospital, days)
+    const pastOf = (x: typeof daily) => JSON.stringify([x.days.filter((d) => !d.today), x.devices.map((dv) => dv.days.slice(0, -1)), x.models])
+    check('판매모델 3종 일괄 계산 = 판매모델별 계산 (합산·일반형·사용량비례형)', pastOf(trio.all) === pastOf(daily) && pastOf(trio.general) === pastOf(gen) && pastOf(trio.usage) === pastOf(use))
+    if (days === OVERVIEW_DAYS) {
+      // 전체 병원 화면의 '최근 30일 가동률' = 이 화면의 '동시 가동률 평균'
+      const todayStart = Date.parse(`${daily.range.to}T00:00:00Z`) / 1000
+      for (const dv of daily.devices) {
+        const o = summarizeOverview(dv.days.map((d) => ({ date: d.date, peak: d.peak, capacity: d.capacity })), todayStart, todayStart)
+        const same = o.rate === null || dv.avgPeakRate === null ? o.rate === dv.avgPeakRate : Math.abs(o.rate - dv.avgPeakRate) < 1e-9
+        check(`${dv.label}: 전체 병원 화면의 최근 30일 가동률 = 병원별 화면의 동시 가동률 평균`, same, { overview: o.rate, hospital: dv.avgPeakRate })
+      }
     }
     console.log(`  판매모델 선택지: ${daily.models.map((m) => `${m.label}${m.available ? '' : '(없음)'}`).join(' · ')}`)
     for (const [name, x] of [['일반형', gen], ['사용량비례형', use]] as const) {
