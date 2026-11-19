@@ -591,7 +591,7 @@ export default function UsageClient() {
                         const d = deviceByKey.get(slot.key)?.days[i]
                         const muted = !d || d.uses === null ? 'text-muted-foreground' : ''
                         return (
-                          <DeviceCells key={slot.key} uses={d?.uses ?? null} peak={d?.peak ?? null} className={muted} />
+                          <DeviceCells key={slot.key} uses={d?.uses ?? null} peak={d?.peak ?? null} capacity={d?.capacity ?? null} className={muted} />
                         )
                       })}
                     </tr>
@@ -648,11 +648,23 @@ function DeviceSubHeader() {
   )
 }
 
-function DeviceCells({ uses, peak, className }: { uses: number | null; peak: number | null; className: string }) {
+/** 최대 동시 = '최대 동시사용 수 / 그날의 계약·공급 수량 (동시 가동률%)' — 비율이 주 정보(굵게), 수치·수량은 흐리게. 수량이 없는 날은 수치만 */
+function DeviceCells({ uses, peak, capacity, className }: { uses: number | null; peak: number | null; capacity: number | null; className: string }) {
   return (
     <>
       <td className={`border-l border-border px-3.5 py-2.5 text-right tabular-nums ${className}`}>{num(uses)}</td>
-      <td className={`px-3.5 py-2.5 text-right tabular-nums ${className}`}>{num(peak)}</td>
+      <td className={`whitespace-nowrap px-3.5 py-2.5 text-right tabular-nums ${className}`}>
+        {peak !== null && !!capacity ? (
+          <>
+            <span className="text-muted-foreground">
+              {num(peak)} / {capacity.toLocaleString()}
+            </span>{' '}
+            <span className="font-bold text-foreground">({pct((peak / capacity) * 100)}%)</span>
+          </>
+        ) : (
+          num(peak)
+        )}
+      </td>
     </>
   )
 }
