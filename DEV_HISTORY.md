@@ -14,6 +14,7 @@
 - **경계**: `instrumentation.ts` → `lib/usage/stats-scheduler` 기동 1건(CLAUDE.md 규칙 9에 기록). 원본 DB에는 쓰지 않음, 수신부 변경 없음
 - **dev2 원본 DB**: 비어 있어 화면을 볼 수 없었으므로 DEV 서버의 원본 데이터(동수원·화순성심, 11-18 13시까지)를 복사해 넣음(토큰 표 제외). 그래서 dev2에서는 두 병원 모두 '수신 지연'으로 보임
 - **검증**: tsc · eslint · `usage-metrics-test.mts` 순수 77/77, 실데이터(화순 30일) 93/93 — 판매모델 3종 일괄 = 개별 계산, 전체 병원 화면 가동률 = 병원별 화면 평균 · `usage-stats-rebuild.mts --check` 저장값 = 다시 낸 값(두 병원) · dev2 빌드 후 실제 화면 26/26(Playwright — 표 값과 API 대조 3기기, 선택·주소 반영, 병원별 화면 왕복, 산정기준, 가상 25곳으로 필터·정렬·검색·보류 사유·수량 변동, 390px, 빈 상태) · 스케줄러 기동 후 자동 집계 확인. 2곳 집계 약 4초
+- **기기 상태 이력 조회문 수정**(dev 반영 중 발견): DEV 서버에서 화순성심 91일 집계가 조회 시간 상한(20초)에 걸려 실패 — 기존 조회문(`raw_device_status JOIN m`)이 통계에 따라 서버 번호만으로 병합 조인을 골라 2억 7천만 행을 비교(25초, 병원별 화면의 주간 통계도 같은 조회라 DEV에서는 이미 느렸음). 측정 코드 목록으로 먼저 좁히도록 바꿈(`measurement_code = ANY(ARRAY(SELECT … FROM m))`) → 0.6초, 결과는 두 병원 모두 기존과 해시 일치. dev2 2곳 집계 4.4초 → 0.5초. 한 병원이 실패해도 나머지는 집계되고 화면에 '집계 전'·경고가 뜨는 것은 이때 확인됨
 - **확인 못 한 것**: 판정 기준(±5%p·14일)을 PROD 실데이터에 적용해 본 결과(PROD 조회 차단), 병원이 많을 때의 집계 시간
 - 파일: lib/usage/metrics.ts, lib/usage/stats.ts(신규), lib/usage/stats-scheduler.ts(신규), lib/usage/overview.ts(신규), app/api/usage/overview/route.ts(신규), app/usage/UsageOverview.tsx(신규), app/usage/page.tsx, app/usage/UsageClient.tsx, app/usage/UsageCriteria.tsx, instrumentation.ts, prisma/schema.prisma, prisma/migrations/20261119100000_usage_daily_stats, scripts/usage-stats-rebuild.mts(신규), scripts/usage-metrics-test.mts, README.md, CLAUDE.md, projects/usage_overview_design.md, projects/README.md
 

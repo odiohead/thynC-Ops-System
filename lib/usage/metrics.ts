@@ -372,8 +372,10 @@ async function loadUsage(hospitalCode: string, days: number, nowMs: number): Pro
          SELECT ds.server, ds.measurement_code, ds.device_type::int AS device_type, COALESCE(ds.serial_number, '') AS serial_number,
                 min(ds.event_at) AS fe, max(ds.event_at) AS le
          FROM raw_device_status ds
-         JOIN m ON m.server = ds.server AND m.measurement_code = ds.measurement_code
-         WHERE ds.hospital_code = $1 AND ds.event_at >= timestamp '2000-01-01'
+         -- 측정 코드 목록으로 먼저 좁힌다(색인 hospital_code·measurement_code 사용). m 과 바로 JOIN 하면 통계에 따라 서버 번호만으로
+         -- 병합 조인을 골라 수억 행을 비교한다(2026-11-19 DEV 화순성심 25초 → 0.6초). 다른 서버의 같은 코드는 아래 m 과의 JOIN 에서 빠진다
+         WHERE ds.hospital_code = $1 AND ds.measurement_code = ANY (ARRAY(SELECT measurement_code FROM m))
+           AND ds.event_at >= timestamp '2000-01-01'
          GROUP BY ds.server, ds.measurement_code, ds.device_type, COALESCE(ds.serial_number, '')
        ),
        d AS (
