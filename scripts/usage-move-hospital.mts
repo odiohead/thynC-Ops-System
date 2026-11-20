@@ -39,6 +39,20 @@ try {
   await db.query('BEGIN')
   let total = 0
   for (const t of HOSPITAL_TABLES) {
+    if (t === 'agent_enrollments') {
+      // 새 코드에 이미 수집 등록이 있으면 서버 대수를 합치고 이전 등록 행은 지운다 (병원코드가 기본 키라 그대로 옮기면 충돌)
+      const merged = await db.query(
+        `UPDATE agent_enrollments n SET expected_servers = LEAST(50, n.expected_servers + o.expected_servers), updated_at = now()
+           FROM agent_enrollments o WHERE n.hospital_code = $2 AND o.hospital_code = $1`,
+        [from, to],
+      )
+      if (merged.rowCount) {
+        await db.query(`DELETE FROM agent_enrollments WHERE hospital_code = $1`, [from])
+        console.log(`  ${t}: 등록 합침 (서버 대수 합산)`)
+        total += 1
+        continue
+      }
+    }
     const r = await db.query(`UPDATE ${t} SET hospital_code = $2 WHERE hospital_code = $1`, [from, to])
     console.log(`  ${t}: ${r.rowCount}행`)
     total += r.rowCount ?? 0

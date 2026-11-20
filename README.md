@@ -399,27 +399,31 @@ lib/
     └── hospitalNote.ts               # 병원 노트 — 루트 카테고리 보장·보호 판정·페이지 조회 (refType 'hospital_note')
 
 usage-ingest/                         # thynC 사용량 수신부 (2026-11-18 — 본체와 별도 프로세스·별도 DB, 본체 코드를 가져다 쓰지 않음. projects/usage_collection_design.md)
-├── index.mts                         # HTTP 서버 — 토큰 인증·빈도 제한·용량 안전장치·호출 3종(handshake/push/finish) + health
+├── index.mts                         # HTTP 서버 — 인증(병원 토큰 또는 서버 키)·빈도 제한·용량 안전장치·호출 3종(handshake/push/finish) + health
+├── enroll.mts                        # 수집 병원 등록·서버 키 발급(enroll/check·enroll), 본체 전용 관리 호출(/internal/v1/*), 설치 파일 제공(/agent/install.sh·latest·설치 묶음) — 2026-11-20
 ├── store.mts                         # 원본 DB 저장 SQL 전부 (고유 키 기준 덮어쓰기, 원본 행은 지우지 않음, 대조·상태 이력 달 조각 생성)
 ├── validate.mts                      # 수신 본문 검증
 ├── migrate.mts                       # 원본 DB 스키마 적용 (migrations/*.sql 을 한 번씩 — Prisma 마이그레이션과 별개)
 ├── migrations/0001_init.sql          # 원본 DB 스키마 (식별·수신 기록·원본 6종, 상태 이력 월별 분할)
+├── migrations/0002_enrollment.sql    # 수집 병원 등록(agent_enrollments)·서버 키와 차단(agent_servers 컬럼)·관리 호출 확인 값(agent_admin_secret)
 ├── build.mjs                         # esbuild → dist/index.mjs·migrate.mjs (npm run build:usage-ingest — 본체 빌드 npm run build 와 별개)
 └── .env.example                      # 수신부 설정 (본체 .env 와 별개 — USAGE_DATABASE_URL·USAGE_INGEST_PORT·USAGE_MAX_BYTES)
 
 agents/thync-usage-agent/             # 병원 서버용 사용량 수집 Agent (Go, 2026-11-18) — 조회 전용, 환자 식별 정보 미조회, 실행 후 종료
 ├── source.go                         # 제품 DB(MySQL thync) 조회 — 쿼리 전부. 금지 컬럼·SELECT *·쓰기 문장이 없음을 agent_test.go 가 검사
 ├── sync.go · client.go · check.go    # 한 번의 수집·전송·대조 / 수신부 통신(gzip JSON, 재시도) / 점검 명령
-├── config.go · main.go               # 설정(/etc/thync-usage-agent/agent.env) / 명령(run·check·version)
+├── config.go · main.go               # 설정(/etc/thync-usage-agent/agent.env) / 명령(run·check·enroll·enroll-check·version)
+├── enroll.go                         # 등록 명령 — 병원코드 확인(enroll-check)·서버 등록과 키 수령(enroll). 설치 스크립트가 호출 (0.2.0)
 ├── build.sh · VERSION                # 정적 실행 파일 + 설치 묶음(dist/thync-usage-agent-<버전>.tar.gz) — Go 도구 필요(dev2: ~/.local/go)
-└── deploy/                           # systemd 서비스·타이머(1시간), install.sh·uninstall.sh, create-db-user.sql(조회 전용 계정), agent.env.example, README.txt
+└── deploy/                           # systemd 서비스·타이머(1시간), install.sh(병원코드·서버 이름만 묻고 DB 계정 생성·서버 등록·점검·타이머까지 — 운영관리시스템에서 wget 으로 받아 실행)·uninstall.sh, create-db-user.sql(조회 전용 계정), agent.env.example, README.txt
 
 scripts/usage-*.mts                   # 사용량 수집 운영 스크립트 — issue-token(발급·목록·폐기)·status(수신 현황)·rewind(수신 위치 되돌리기)·move-hospital(병원 코드 변경 반영)·collect-smoke(끝단 검증, dev2 전용)·lib(공용)
 
-app/usage/                            # 사용량 화면 (2026-11-18) — page.tsx(권한 게이트 · `hospital` 값이 없으면 전체 병원 화면, 있으면 병원별 화면)·UsageOverview.tsx(전체 병원 화면, 2026-11-19 — 기기·판매모델 → 요약 한 줄 → 빠른 필터 → 병원 표: 가동률·이전 30일·변화·12주 추이·수신)·UsageClient.tsx(병원별 화면 — 병원·기간 선택 → 요약 한 줄 → 일별 추이 → 기기별 가동률 3종 → 일자별 표)·UsageWeekly.tsx(주간 통계 — 최근 12주)·UsageCriteria.tsx(우측 상단 '산정기준' 팝업 — 건수·가동률·판매모델 산정 규칙 설명, 나중의 설명 페이지와 공용 UsageCriteriaContent)
-app/api/usage/                        # 사용량 조회 API — overview(전체 병원의 가동률 순위·변화 — 일별 집계를 읽음)·hospitals(수집 중인 병원)·daily(일별 지표)·weekly(주간 지표)·status(병원 상세의 진입 링크용) + _shared.ts(공통 게이트)
-lib/usage/                            # 사용량 지표 — metrics.ts(원본 DB에서 바로 계산, 정의 단일 소스)·daily.ts(일별 건수·최대 동시 순수 함수)·db.ts(원본 DB 조회 전용 접속)·access.ts(접근 게이트)·stats.ts(일별 집계를 본체 DB 표 2개에 저장 — 최근 91일을 다시 계산해 덮어씀)·stats-scheduler.ts(1시간마다 집계, instrumentation.ts 가 기동)·overview.ts(전체 병원 화면의 기간 평균·변화·판정 — 순수 함수 + 조회)
+app/usage/                            # 사용량 화면 (2026-11-18) — agents/(에이전트 관리 화면 `/usage/agents`, 2026-11-20 — 운영 중인 병원 중 수집 중 요약 · 설치 명령 · 병원별 서버 수집 상태 · 병원 등록/대수 수정/차단/재등록 허용)·page.tsx(권한 게이트 · `hospital` 값이 없으면 전체 병원 화면, 있으면 병원별 화면)·UsageOverview.tsx(전체 병원 화면, 2026-11-19 — 기기·판매모델 → 요약 한 줄 → 빠른 필터 → 병원 표: 가동률·이전 30일·변화·12주 추이·수신)·UsageClient.tsx(병원별 화면 — 병원·기간 선택 → 요약 한 줄 → 일별 추이 → 기기별 가동률 3종 → 일자별 표)·UsageWeekly.tsx(주간 통계 — 최근 12주)·UsageCriteria.tsx(우측 상단 '산정기준' 팝업 — 건수·가동률·판매모델 산정 규칙 설명, 나중의 설명 페이지와 공용 UsageCriteriaContent)
+app/api/usage/                        # 사용량 조회 API — overview(전체 병원의 가동률 순위·변화 — 일별 집계를 읽음)·agents(에이전트 관리 — 등록 현황 조회, 병원 등록·수정·해제·서버 조치는 수신부 관리 호출 경유)·hospitals(수집 중인 병원)·daily(일별 지표)·weekly(주간 지표)·status(병원 상세의 진입 링크용) + _shared.ts(공통 게이트)
+lib/usage/                            # 사용량 지표 — metrics.ts(원본 DB에서 바로 계산, 정의 단일 소스)·daily.ts(일별 건수·최대 동시 순수 함수)·db.ts(원본 DB 조회 전용 접속)·access.ts(접근 게이트)·stats.ts(일별 집계를 본체 DB 표 2개에 저장 — 최근 91일을 다시 계산해 덮어씀)·stats-scheduler.ts(1시간마다 집계, instrumentation.ts 가 기동)·overview.ts(전체 병원 화면의 기간 평균·변화·판정 — 순수 함수 + 조회)·agents.ts(에이전트 관리 — 등록 현황 조회·병원 상태 판정·수신부 관리 호출 `ingestAdmin`)
 scripts/usage-metrics-test.mts        # 사용량 지표 계산 검증 — 순수 함수 검사(전체 병원 화면의 기간 평균·판정 포함) + (병원코드를 주면) 화면용 계산과 별도 SQL 계산 대조
+scripts/usage-enroll-smoke.mts        # 수집 병원 등록·서버 키·설치 스크립트 전 과정 검증 (dev2 전용 — PM2 수신부·로컬 MySQL 가상 제품 DB·sudo 필요, 시스템에는 설치하지 않음)
 scripts/usage-stats-rebuild.mts       # 사용량 일별 집계 수동 실행 — 전 병원 / 병원 하나 / `--check`(저장된 집계와 병원별 화면 계산 대조, 읽기 전용)
 scripts/seed-usage-nav.sql            # 사용량 메뉴 등록(멱등) — 운영현황 아래, SEERS 소속 ADMIN 이상
 
@@ -1087,7 +1091,9 @@ prisma/
 | 구분 | 테이블 | 내용 |
 |---|---|---|
 | 식별 | `agent_tokens` | 병원 토큰 (SHA-256만 저장, 병원당 활성 2개까지) |
-| 식별 | `agent_servers` | 병원의 서버 — 첫 접속 때 자동 등록. `(hospital_code, server_id)` UNIQUE, 마지막 성공 시각·측정 수신 기준 시각·마지막 대조 시각 |
+| 식별 | `agent_enrollments` | 수집 병원 등록(2026-11-20) — 병원코드(PK)·병원명 사본(설치 확인 문구용)·서버 대수(`expected_servers`, 설치 자리 수)·메모. 이미 수집 중이던 병원은 당시 서버 수로 등록 |
+| 식별 | `agent_servers` | 병원의 서버 — 설치 스크립트의 등록(서버 키 발급) 또는 병원 토큰의 첫 접속 때 생김. `(hospital_code, server_id)` UNIQUE, 마지막 성공 시각·측정 수신 기준 시각·마지막 대조 시각. 서버 키는 SHA-256만(`key_hash`·`key_prefix`·`key_issued_at`), 등록 시각·IP(`enrolled_at`·`enroll_ip`), 재등록 허용(`reenroll_allowed_at`), 차단(`blocked_at` — 접속 거부·자리 계산 제외) |
+| 식별 | `agent_admin_secret` | 본체 앱이 수신부 관리 호출에 내는 값 1행 (원본 DB를 읽을 수 있는 쪽만 안다) |
 | 수신 기록 | `agent_runs` · `status_cursors` | 실행 이력(상태·건수·대조 결과·오류) · 상태 이력을 연도별로 어디까지 받았고 어디까지 대조했는지 |
 | 원본 | `raw_organizations` · `raw_wards` · `raw_device_registers` | 기관 · 병동(병상 수) · 기기 등록(구독형 여부) — 매 실행 전체 수신, 사라진 행은 `gone_at` |
 | 원본 | `raw_measurements` | 측정 (환자 식별 정보 없음). 병원에서 삭제된 측정은 `source_gone_at`만 기록 |
@@ -1691,6 +1697,11 @@ prisma/
   - **판매모델 선택**(합산/일반형/사용량비례형, 2026-11-18): 딜의 '판매모델 구분'이 '사용량'으로 시작하면 사용량비례형, 그 밖은 일반형. 기기는 도입 수량(계약·공급)이 한 판매모델뿐이면 그 모델, 섞였으면 기기 현황의 계약건(딜) 연결로(연결이 없으면 일반형), 측정은 심전계·산소포화도의 판매모델로(없으면 카트온, 기기 정보 없으면 병원의 판매모델), 분모는 그 판매모델 딜의 계약 수량(공급 수량은 일반형, 카트온은 사용량비례형). 일별 추이는 지표(측정 환자 수·최대 동시측정 수·동시 가동률·일 사용률)와 기기(심전계·산소포화도·카트온) 필터
   - 상태 10 측정 중 대기 중에 삭제된 것(수정 시각 < 예정 종료, 시작 = 생성)은 제외하고, 시작된 뒤 삭제된 것은 삭제 시각까지 센다
   - 병원 상세 'thynC 시스템 현황' 카드에 수집 중인 병원만 '사용량 보기' 링크와 수신 상태 한 줄 표시(메인 → `/api/usage/status` HTTP 호출)
+- **빠른 설치 · 병원 등록 · 에이전트 관리** (2026-11-20 — dev2·DEV 구현, `projects/usage_agent_enroll_design.md`): ① 운영관리시스템 [사용량 > 에이전트 관리](`/usage/agents`, 전체 병원 화면 우측 상단 버튼)에서 병원 목록의 병원을 골라 서버 대수를 적어 등록 ② 병원 서버에서 `wget -qO install.sh https://<도메인>/api/usage-ingest/agent/install.sh && sudo bash install.sh` — **병원코드와 서버 이름(기본값 호스트명)만 묻는다**. 스크립트가 설치 묶음 내려받기(SHA-256 확인)·실행 파일/서비스 배치·"○○병원(HOSP-…)에 등록합니다. 맞습니까?" 확인·조회 전용 DB 계정 생성·서버 등록·점검·타이머 켜기·첫 실행까지 한다
+  - **등록이 문지기, 키는 자동 발급**: 사람이 다루는 토큰이 없다. 등록된 병원이고 자리(서버 대수 − 차단되지 않은 서버 수)가 남았을 때만 그 서버 전용 키(`tuk_…`, DB에는 SHA-256만)를 준다. 키는 등록한 서버 이름으로만 쓸 수 있고, 같은 이름의 재등록은 관리자가 '재등록 허용'을 누른 뒤 한 번만, 차단한 서버는 키·병원 토큰 모두 거부. 자리는 기한 없이 열려 있다. 기존 병원 토큰(`tua_…`)은 그대로 동작
+  - **에이전트 관리 화면**: 요약 한 줄(운영 중인 병원 N곳 중 수집 중 M곳 — 운영 = 병원 상태 '운영', 수집 중인 서버 = 최근 24시간 안에 수신 성공) · 설치 명령(복사) · 병원 표(상태: 수집 중/일부 수집/수신 끊김/설치 대기, `수집 / 대수`, 서버별 마지막 수신·버전·조치). 손봐야 할 병원이 위로. 전체 병원 화면에서는 일부 서버만 수집 중인 병원명 옆에 `서버 1/2`
+  - **본체는 원본 DB에 쓰지 않는다**: 변경은 수신부의 관리 호출(`/internal/v1/*`, 같은 서버에서 직접 + 원본 DB의 확인 값)로 한다. 새 환경 변수·Nginx 변경 없음. 설치 묶음(`agents/thync-usage-agent/dist/thync-usage-agent-<버전>.tar.gz`)은 git에 없으므로 배포 때 서버에 복사
+  - **조회 전용 DB 계정 자동 생성의 영향 확인**(dev2 MySQL 8.0.46, 전후 전체 비교): 새 계정 2행과 그 계정의 SELECT 권한 56행만 추가, 기존 계정·제품 표·서버 설정 변화 없음, 새 계정으로 쓰기 거부. 검증 `npx tsx scripts/usage-enroll-smoke.mts`
 - **전체 병원 화면 `/usage`** (2026-11-19 — dev2·dev 구현, `projects/usage_overview_design.md`): 병원을 고르지 않은 `/usage`. 수집 중인 병원을 한 표에 놓고 어느 병원을 들여다볼지 골라낸다 — 병원을 누르면 병원별 화면(`/usage?hospital=코드&days=30`)으로 이동, 병원별 화면에는 '전체 병원' 링크
   - **구성**: 기기(심전계·산소포화도·카트온) · 판매모델 선택 → 요약 한 줄(전체 가동률 = Σ 병원별 평균 최대 동시 ÷ Σ 수량, 증가·감소·유지·판정 보류 병원 수) → 빠른 필터(전체·상위 10·하위 10·증가·감소·판정 보류) + 병원 검색 → 병원 표(순위 · 가동률 `평균 최대 동시 / 수량 (비율)` + 막대 · 이전 30일 · 변화 %p · 12주 추이 선 · 수신). 가동률·이전 30일·변화 열 정렬
   - **정의**(`lib/usage/overview.ts` 단일 소스): 가동률 = 동시 가동률(그날 최대 동시사용 수 ÷ 그날의 계약·공급 수량)의 평균, 최근 30일 = 병원별 화면의 '최근 30일'과 같은 날짜(오늘 제외) → 병원별 화면의 '동시 가동률 평균'과 같은 값 · 이전 30일 = 그 앞 30일 · 변화 = 최근 − 이전(%p), ±5%p 이상이면 증가·감소 · 유효한 날 = 수량과 기기별 수치가 있는 날(오늘 제외, 수신이 24시간 넘게 끊긴 병원은 마지막 수신일부터 제외) · 판정 보류 = 집계 전·수량 없음·기기 상태 이력 따라잡는 중·어느 한 기간의 유효한 날 14일 미만 · 두 기간 사이 수량이 바뀐 병원은 '수량 150 → 300' 표시
@@ -2378,6 +2389,10 @@ npm run dev
 | POST | `/api/usage-ingest/v1/handshake` | 실행 시작 — 서버 이름·Agent 버전·DB 시각을 보내고, 실행 번호·측정 기준 시각·연도별 받은 번호·대조할 차례 여부를 받는다 (`dry_run`이면 아무것도 바꾸지 않음) |
 | POST | `/api/usage-ingest/v1/push` | 종류별 행 전송 — `organizations`·`wards`·`device_registers`·`measurements`(기기 포함)·`device_status`·`measurement_index`·`reconcile_measurements`·`status_check`. 요청당 5,000행 |
 | POST | `/api/usage-ingest/v1/finish` | 실행 결과 보고 — 성공이면 수신 기준 시각 전진, 전체 수신 종류의 사라진 행 표시 |
+| GET  | `/api/usage-ingest/agent/install.sh` · `/agent/latest` · `/agent/<설치 묶음>` | 설치 파일 (인증 없음, 2026-11-20) — 설치 시작 스크립트(설치 묶음의 SHA-256·수신 주소가 적혀 나감) · 묶음 버전 · 묶음 파일. 묶음은 서버의 `agents/thync-usage-agent/dist/`에서 가장 높은 버전 |
+| POST | `/api/usage-ingest/v1/enroll/check` | 병원코드 확인 `{hospital_code}` — 등록된 병원이면 병원명·서버 대수·등록된 서버 이름·남은 자리, 아니면 404 `not_registered` (인증 없음, IP당 10분 30회) |
+| POST | `/api/usage-ingest/v1/enroll` | 서버 등록 `{hospital_code, server_id, hostname, agent_version}` — 등록된 병원이고 자리가 남았을 때만 그 서버 전용 키(`tuk_…`) 발급. 409 `no_slot`(자리 없음)·`name_taken`(같은 이름 — 재등록 허용 시에만 다시 발급)·403 `blocked` |
+| POST | `/internal/v1/enrollments` · `/enrollments/remove` · `/servers/action` | **본체 앱 전용 관리 호출** — Nginx가 넘기지 않는 경로. 같은 서버에서 직접 온 요청이고 `agent_admin_secret` 값을 냈을 때만 처리(아니면 404). 병원 등록·수정(`create_only`면 이미 있을 때 409)·등록 해제(서버가 없을 때만)·서버 차단/해제/재등록 허용 |
 
 ### 사용량 조회 (본체 — `/usage` 화면용, 2026-11-18)
 
@@ -2386,6 +2401,11 @@ npm run dev
 | Method | Endpoint | 설명 |
 |--------|----------|------|
 | GET  | `/api/usage/overview?device=ecg\|spo2\|cart&model=all\|general\|usage` | 전체 병원의 가동률 — 병원별 최근 30일 동시 가동률 평균(평균 최대 동시·수량·유효 일수)·이전 30일·변화(%p)·판정(up·down·flat·hold + 보류 사유)·수량 변동·12주 추이·수신 상태, 서비스 전체 한 줄, 마지막 집계 실행. 일별 집계를 읽는다 |
+| GET  | `/api/usage/agents` | 에이전트 관리 — 요약(운영 중인 병원 수·그중 수집 중·등록·일부 수집·수신 끊김·설치 대기), 병원별 서버 대수·수집 중인 서버 수·상태·서버 목록(마지막 수신·버전·인증 방식·차단·재등록 대기), 설치 묶음 버전 |
+| POST | `/api/usage/agents` | 수집 병원 등록 `{hospitalCode, expectedServers(1~50), note?}` — 병원 목록에 있는 병원만(병원명은 본체 값), 이미 등록이면 409 (ADMIN 이상) |
+| PATCH/DELETE | `/api/usage/agents/[code]` | 서버 대수·메모 수정 / 등록 해제(서버가 있으면 409 — 받은 기록은 지우지 않음) (ADMIN 이상) |
+| POST | `/api/usage/agents/servers/[id]` | 서버 조치 `{action: block\|unblock\|allow_reenroll\|cancel_reenroll}` (ADMIN 이상) |
+| GET  | `/api/usage/agents/hospitals?q=` | 등록할 병원 찾기 — 병원명·병원코드, 이미 등록한 병원 제외, 운영 중인 병원 먼저, 최대 20곳 (ADMIN 이상) |
 | GET  | `/api/usage/hospitals` | 사용량 데이터가 들어오는 병원 목록 — 병원명·서버 수·마지막 수신 시각 |
 | GET  | `/api/usage/daily?hospital=&days=30\|90&model=all\|general\|usage` | 병원의 일별 지표 — 측정 환자 수·최대 동시측정 수, 기기 종류별 사용 횟수·최대 동시사용·그날의 계약·공급 수량·기간 평균 가동률, 요약, 수신 상태 |
 | GET  | `/api/usage/weekly?hospital=&model=all\|general\|usage` | 병원의 주간 지표(최근 12주, 월~일) — 주간 신규 측정 수·전주 대비, 최대 동시측정 수 평균·최고, 기기 종류별 동시 가동률 평균·최고 |

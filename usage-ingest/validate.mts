@@ -4,6 +4,8 @@
  */
 
 export class BadRequest extends Error {}
+/** 접속은 됐지만 허용되지 않는 요청 (차단된 서버, 다른 서버의 키) → 403 */
+export class Forbidden extends Error {}
 
 type Obj = Record<string, unknown>
 

@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-11-20 21:57 | 사용량 수집 Agent — 빠른 설치(wget) · 수집 병원 등록 · 에이전트 관리 (dev2 빌드·검증 → dev 반영 — PROD 미반영)
+
+- **요청**: 병원 서버에 Agent를 빨리 설치하게 — 설치 파일을 wget으로 받고, 실행하면 병원코드(+ 서버 이름, 기본값 호스트명)만 넣으면 등록까지 끝나게. 운영관리시스템에 수집 병원 등록(병원 목록에서 선택 + 서버 대수), 에이전트 관리 페이지(운영 중인 병원 N곳 중 수집 M곳, 일부 서버만 수집 중인 병원 표시), 전체 병원 화면은 그대로 두고 우측 상단 '에이전트 관리' 버튼. 설계 `projects/usage_agent_enroll_design.md`
+- **사용자 결정**: 토큰은 내 제안대로(사람이 다루는 토큰만 없애고, 등록이 문지기 · 서버 키 자동 발급) / 자리는 기한 없이 / 설치 중 "○○병원(HOSP-…)에 등록합니다. 맞습니까?" 확인 / DB 계정 자동 생성은 기존 서비스에 영향이 없으면 반영 / DEV 서버까지 반영 / 설치 파일은 주소만 알면 받기
+- **수신부**(`usage-ingest/` — 원본 DB `0002_enrollment.sql`): `agent_enrollments`(병원 · 서버 대수), `agent_servers`에 서버 키 해시 · 등록 IP · 재등록 허용 · 차단, `agent_admin_secret`. `POST /v1/enroll/check`·`/v1/enroll`(인증 없음 — 등록된 병원이고 자리가 남았을 때만 그 서버 전용 키 발급, IP당 10분 30회), 인증에 서버 키 추가(등록한 서버 이름으로만 접속 · 다른 서버의 실행 불가 · 차단 서버 거부), `GET /agent/install.sh`·`/agent/latest`·설치 묶음(SHA-256 · 수신 주소가 적힌 설치 시작 스크립트), 본체 전용 관리 호출 `/internal/v1/*`(Nginx가 넘기지 않는 경로 + 같은 서버 직접 요청 + 원본 DB의 확인 값). 병원 토큰은 그대로 동작, 기존 수집 병원은 당시 서버 수로 등록
+- **Agent 0.2.0**: `enroll-check` · `enroll` 명령(설치 스크립트가 호출, 사유별 종료 코드). 수집 동작 변경 없음
+- **설치 스크립트**(`deploy/install.sh`): 실행 파일 · 서비스 배치 → 병원코드 확인(틀리면 다시 물음, 최대 5회) → 서버 이름 → 조회 전용 DB 계정 생성(root 접속이 안 되면 관리자 계정을 물음) → 서버 등록 · 설정 저장 → 점검 → 타이머 · 첫 실행. DB 준비가 안 되면 자리를 쓰지 않고 멈춤, 다시 실행하면 설정 · 키 유지(업그레이드 겸용), 질문은 `/dev/tty`에서(파이프 실행 가능), `--hospital`·`--server`·`--yes`·`--no-db-user`·`--no-service`·`DESTDIR`. `create-db-user.sql`에 비밀번호 재설정(`ALTER USER`) 줄
+- **DB 계정 생성의 영향 확인**(dev2 MySQL 8.0.46 — 병원 서버 8.0.45, 실행 전후 전체 비교): 새 계정 2행 + 그 계정의 SELECT 권한 56행만 추가, 기존 계정(해시 · 권한) · 제품 표(목록 · 행 수) · 전역 변수 변화 없음, 새 계정으로 삭제 · 표 생성 · 시스템 표 조회 거부 → 영향 없음으로 판단해 반영. 복제 구성 서버에서는 확인하지 못함
+- **본체**: `lib/usage/agents.ts`(등록 현황 · 병원 상태 수집 중/일부 수집/수신 끊김/설치 대기 · `ingestAdmin`), `app/api/usage/agents/*`(조회, 병원 등록 · 수정 · 해제 · 서버 조치 · 병원 검색 — 변경은 ADMIN 이상, 감사 기록), `/usage/agents` 화면(요약 한 줄 · 설치 명령 복사 · 병원 표 · 병원 등록/대수 수정 모달), 전체 병원 화면에 '에이전트 관리' 버튼과 병원명 옆 `서버 1/2`(일부 서버만 수집). 운영 중인 병원 = 병원 상태 '운영'(226곳), 수집 중 = 최근 24시간 안에 수신 성공. 본체는 원본 DB에 쓰지 않음(CLAUDE.md 규칙 9에 기록)
+- **검증**: `scripts/usage-enroll-smoke.mts` 57/57(관리 호출 문지기 · 설치 스크립트 내려받아 실행 · DB 계정 · 설치한 설정으로 수집 · 자리/이름/키 묶음 · 차단 · 재등록 · 터미널 입력 · 빈도 제한 · 병원 토큰) · `usage-collect-smoke.mts` 93/93 · `usage-metrics-test.mts` 84/84 · Agent `go vet`·`go test` · tsc · eslint · dev2 빌드 후 실제 화면: 에이전트 관리 27/27, 전체 병원 화면 27/27(Playwright)
+- **검증 중 찾아 고친 것**: 이미 등록된 병원을 다시 등록하면 409를 주면서 서버 대수는 바꿔 버림(→ `create_only`) / 터미널 입력이 끊기면 병원코드 질문을 끝없이 되풀이(→ 입력 실패 시 중단 · 5회 한도) / 버튼이 늘어 390px에서 전체 병원 화면 머리글이 넘침
+- **하지 못한 것**: 실제 병원 서버에서의 설치(전용 계정 · systemd 등록 경로는 dev2에서 실행하지 않음 — 임시 디렉토리에 `--no-service`로 검증)
+- 파일: usage-ingest/{enroll.mts(신규),index.mts,store.mts,validate.mts,migrations/0002_enrollment.sql(신규)}, agents/thync-usage-agent/{enroll.go(신규),enroll_test.go(신규),main.go,VERSION,deploy/install.sh,deploy/create-db-user.sql,deploy/README.txt,deploy/agent.env.example}, lib/usage/{agents.ts(신규),overview.ts}, app/api/usage/agents/*(신규), app/usage/agents/*(신규), app/usage/UsageOverview.tsx, scripts/{usage-enroll-smoke.mts(신규),usage-lib.mts,usage-move-hospital.mts,usage-metrics-test.mts}, README.md, CLAUDE.md, projects/usage_agent_enroll_design.md(신규), projects/README.md
+
 ## 2026-11-19 15:08 | 사용량 — 전체 병원 화면(서비스 단위 가동률) 구현 (dev2 빌드·화면 검증 → dev 반영 — PROD 미반영)
 
 - **요청**: 설계안(`projects/usage_overview_design.md`) 제안값 그대로 dev2·dev에 구현 — "보고 이야기하자". 결정 항목(D1~D8)은 사용자가 화면을 본 뒤 확정

@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowDown, ArrowUp } from 'lucide-react'
+import { ArrowDown, ArrowUp, Server } from 'lucide-react'
 import PageHeader from '@/app/components/ui/PageHeader'
 import Badge from '@/app/components/ui/Badge'
 import { Card } from '@/app/components/ui/Card'
@@ -161,12 +161,21 @@ export default function UsageOverview() {
         title="사용량"
         description="수집 중인 전체 병원의 가동률입니다. 병원을 누르면 그 병원의 일별 사용량으로 이동합니다."
         actions={
-          <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+          // 좁은 화면에서는 줄을 바꾼다 (PageHeader 의 actions 칸은 줄어들지 않으므로 폭 상한을 준다)
+          <div className="flex max-w-[calc(100vw-2rem)] flex-wrap items-center justify-end gap-x-4 gap-y-2">
             <div className="flex h-9 items-center gap-2 text-[13px] text-muted-foreground" data-testid="overview-run">
               <span aria-hidden className={`h-2 w-2 rounded-full ${data?.run ? 'bg-success' : 'bg-gray-400'}`} />
               <span>{data ? (data.run ? `집계 ${stamp(data.run.finishedAt)} · 수집 병원 ${data.rows.length}곳` : `집계 전 · 수집 병원 ${data.rows.length}곳`) : loading ? '불러오는 중' : '—'}</span>
             </div>
             <UsageCriteriaButton />
+            <Link
+              href="/usage/agents"
+              data-testid="overview-agents"
+              className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Server size={14} aria-hidden />
+              에이전트 관리
+            </Link>
           </div>
         }
       />
@@ -264,6 +273,16 @@ export default function UsageOverview() {
                       <Link href={open(r)} onClick={(e) => e.stopPropagation()} className="font-medium text-foreground hover:underline">
                         {r.hospitalName}
                       </Link>
+                      {r.receive.expected !== null && r.receive.collecting < r.receive.expected && (
+                        <Badge
+                          variant="warning"
+                          className="ml-2"
+                          data-testid={`overview-partial-${r.hospitalCode}`}
+                          title={`등록한 서버 ${r.receive.expected}대 중 ${r.receive.collecting}대만 수집 중입니다(최근 24시간) — 이 병원의 수치는 일부 서버의 것일 수 있습니다. 에이전트 관리에서 확인하세요`}
+                        >
+                          서버 {r.receive.collecting}/{r.receive.expected}
+                        </Badge>
+                      )}
                     </td>
                     <td className="px-3.5 py-3 text-right">
                       <RateCell row={r} />

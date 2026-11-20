@@ -7,6 +7,7 @@
 import { DAY_SEC, average, changeRate, dayLabel, dayStats, localDayStart, spanStats, startedIn, weekStartOf } from '../lib/usage/daily'
 import { aggregateWeeks, capacityOn, countsAsMeasurement, defaultModelOf, getUsageDaily, getUsageDailyAllModels, hospitalModelOf, measurementModels, planForModel, typeModelOf } from '../lib/usage/metrics'
 import { OVERVIEW_DAYS, summarizeOverview, summarizeOverviewTotal, type OverviewDay } from '../lib/usage/overview'
+import { agentHospitalState } from '../lib/usage/agents'
 import { fmtTime, positional, usageDb } from './usage-lib.mts'
 
 let passed = 0
@@ -150,6 +151,17 @@ console.log('\n■ 전체 병원 화면 — 기간 평균·판정')
   check('전체 변화 = 두 기간 모두 값이 있는 병원끼리', Math.abs(total.change! - ((43 / 170) * 100 - (40 / 170) * 100)) < 1e-9)
   check('판정별 병원 수', total.up === 1 && total.flat === 1 && total.hold === 2 && total.down === 0)
   check('병원이 없으면 전체 값 없음', summarizeOverviewTotal([]).rate === null && summarizeOverviewTotal([]).capacitySum === null)
+}
+
+console.log('\n■ 에이전트 관리 — 병원 상태')
+{
+  check('서버 2대 등록 · 2대 수집 → 수집 중', agentHospitalState(2, 2, 2, true) === 'collecting')
+  check('서버 2대 등록 · 1대만 수집 → 일부 수집', agentHospitalState(2, 2, 1, true) === 'partial')
+  check('서버 대수 2 · 설치 1대 · 그 1대 수집 → 일부 수집 (설치가 덜 됨)', agentHospitalState(2, 1, 1, true) === 'partial')
+  check('받은 적이 있는데 지금 수집 0대 → 수신 끊김', agentHospitalState(2, 2, 0, true) === 'stopped')
+  check('서버가 없으면 설치 대기', agentHospitalState(2, 0, 0, false) === 'waiting')
+  check('등록만 하고 한 번도 받지 못했으면 설치 대기 (수신 끊김 아님)', agentHospitalState(2, 1, 0, false) === 'waiting')
+  check('등록 없이 병원 토큰으로 수집 → 설치된 서버 수가 기준', agentHospitalState(null, 2, 2, true) === 'collecting' && agentHospitalState(null, 2, 1, true) === 'partial')
 }
 
 const [hospital, daysArg] = positional

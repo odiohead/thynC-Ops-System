@@ -1,11 +1,17 @@
 -- thync-usage-agent 용 조회 전용 DB 계정 (MySQL 8)
---   sudo mysql < create-db-user.sql      (비밀번호를 아래 두 줄에 똑같이 넣는다)
+--   install.sh 가 비밀번호를 만들어 넣고 실행한다. 직접 실행할 때는 비밀번호를 아래 네 줄에 똑같이 넣는다:
+--   sudo mysql < create-db-user.sql
+--
+-- 하는 일은 계정 하나(접속 위치 2개)를 만들고 아래 테이블의 SELECT 를 주는 것뿐이다.
+-- 다른 계정, 테이블과 데이터, 서버 설정은 건드리지 않는다. 다시 실행하면 이 계정의 비밀번호만 새 값으로 맞춘다.
 --
 -- 이 계정은 사용량 수집에 필요한 테이블만 SELECT 할 수 있다.
 -- 환자 테이블(patient*, his_*), 신호 데이터, 사용자 계정 테이블에는 권한이 없다.
 
 CREATE USER IF NOT EXISTS 'thync_usage_ro'@'localhost' IDENTIFIED BY '여기에_비밀번호';
 CREATE USER IF NOT EXISTS 'thync_usage_ro'@'127.0.0.1' IDENTIFIED BY '여기에_비밀번호';
+ALTER USER 'thync_usage_ro'@'localhost' IDENTIFIED BY '여기에_비밀번호';
+ALTER USER 'thync_usage_ro'@'127.0.0.1' IDENTIFIED BY '여기에_비밀번호';
 
 GRANT SELECT ON thync.organization     TO 'thync_usage_ro'@'localhost', 'thync_usage_ro'@'127.0.0.1';
 GRANT SELECT ON thync.ward             TO 'thync_usage_ro'@'localhost', 'thync_usage_ro'@'127.0.0.1';

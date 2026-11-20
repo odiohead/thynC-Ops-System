@@ -50,6 +50,7 @@ export function fmtBytes(n: number): string {
 
 /** 원본 테이블 — 병원 코드를 가진 테이블 전부 (병원 코드 변경·집계에 쓴다) */
 export const HOSPITAL_TABLES = [
+  'agent_enrollments',
   'agent_tokens',
   'agent_servers',
   'agent_runs',

@@ -177,7 +177,11 @@ export function summarizeOverviewTotal(rows: OverviewStats[]): OverviewTotal {
 export type OverviewRow = OverviewStats & {
   hospitalCode: string
   hospitalName: string
-  receive: { servers: number; lastSuccessAt: string | null; delayed: boolean; behind: boolean }
+  /**
+   * servers = 차단되지 않은 서버 수, collecting = 그중 최근 24시간 안에 수신한 서버 수,
+   * expected = 에이전트 관리에 등록한 서버 대수(등록 없으면 null). collecting < expected 면 일부 서버만 수집 중
+   */
+  receive: { servers: number; expected: number | null; collecting: number; lastSuccessAt: string | null; delayed: boolean; behind: boolean }
 }
 
 export type UsageOverview = {
@@ -211,11 +215,14 @@ export async function getUsageOverview(device: OverviewDeviceKey, model: UsageMo
 
   const [servers, stats, run] = await Promise.all([
     usagePool().query(
-      `SELECT s.hospital_code, count(*)::int AS servers, max(s.last_success_at) AS last_success_at,
+      `SELECT s.hospital_code, count(*) FILTER (WHERE s.blocked_at IS NULL)::int AS servers, max(s.last_success_at) AS last_success_at,
+              count(*) FILTER (WHERE s.blocked_at IS NULL AND s.last_success_at > now() - make_interval(hours => $1))::int AS collecting,
+              (SELECT e.expected_servers FROM agent_enrollments e WHERE e.hospital_code = s.hospital_code) AS expected,
               bool_or(COALESCE((r.stats->>'status_behind')::boolean, false)) AS behind
          FROM agent_servers s
          LEFT JOIN LATERAL (SELECT stats FROM agent_runs WHERE server = s.id AND status = 'ok' ORDER BY id DESC LIMIT 1) r ON true
         GROUP BY s.hospital_code`,
+      [OVERVIEW_RECEIVE_DELAY_HOURS],
     ),
     prisma.usageDailyDeviceStat.findMany({
       where: { model, deviceType, date: { gte: new Date(firstNeeded * 1000) } },
@@ -243,7 +250,14 @@ export async function getUsageOverview(device: OverviewDeviceKey, model: UsageMo
     return {
       hospitalCode: code,
       hospitalName: nameOf.get(code) ?? code,
-      receive: { servers: Number(r.servers), lastSuccessAt: last ? last.toISOString() : null, delayed, behind: !!r.behind },
+      receive: {
+        servers: Number(r.servers),
+        expected: r.expected === null ? null : Number(r.expected),
+        collecting: Number(r.collecting),
+        lastSuccessAt: last ? last.toISOString() : null,
+        delayed,
+        behind: !!r.behind,
+      },
       ...summarizeOverview(daysOf.get(code) ?? [], today, validBefore, !!r.behind),
     }
   })

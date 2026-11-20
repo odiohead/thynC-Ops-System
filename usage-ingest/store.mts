@@ -3,7 +3,7 @@
  * 모든 저장은 고유 키 기준 덮어쓰기(멱등)이고, 원본 행은 지우지 않는다.
  */
 import type pg from 'pg'
-import { BadRequest, asArray, asObject, bigint, int, reqBigint, reqStr, smallint, str, ts } from './validate.mts'
+import { BadRequest, Forbidden, asArray, asObject, bigint, int, reqBigint, reqStr, smallint, str, ts } from './validate.mts'
 
 type Db = pg.PoolClient
 
@@ -69,12 +69,13 @@ export async function handshake(
   remoteIp: string | null,
   statusPaused: boolean,
 ) {
-  let server: { id: string; since: string | null; reconciled_recent: boolean } | undefined
+  let server: { id: string; since: string | null; reconciled_recent: boolean; blocked: boolean } | undefined
   if (input.dryRun) {
     // 점검(check)은 아무것도 바꾸지 않는다
     const r = await db.query(
       `SELECT id, to_char(measurements_synced_until - interval '2 days', 'YYYY-MM-DD HH24:MI:SS') AS since,
-              (reconciled_at IS NOT NULL AND reconciled_at > now() - interval '23 hours') AS reconciled_recent
+              (reconciled_at IS NOT NULL AND reconciled_at > now() - interval '23 hours') AS reconciled_recent,
+              (blocked_at IS NOT NULL) AS blocked
        FROM agent_servers WHERE hospital_code = $1 AND server_id = $2`,
       [hospitalCode, input.serverId],
     )
@@ -87,11 +88,14 @@ export async function handshake(
          hostname = EXCLUDED.hostname, agent_version = EXCLUDED.agent_version,
          db_version = EXCLUDED.db_version, db_time_zone = EXCLUDED.db_time_zone, last_seen_at = now()
        RETURNING id, to_char(measurements_synced_until - interval '2 days', 'YYYY-MM-DD HH24:MI:SS') AS since,
-                 (reconciled_at IS NOT NULL AND reconciled_at > now() - interval '23 hours') AS reconciled_recent`,
+                 (reconciled_at IS NOT NULL AND reconciled_at > now() - interval '23 hours') AS reconciled_recent,
+                 (blocked_at IS NOT NULL) AS blocked`,
       [hospitalCode, input.serverId, input.hostname, input.agentVersion, input.dbVersion, input.dbTimeZone],
     )
     server = r.rows[0]
   }
+  // 관리자가 차단한 서버 — 병원 토큰으로 들어와도 받지 않는다 (던지면 위의 갱신도 되돌려진다)
+  if (server?.blocked) throw new Forbidden('이 서버는 차단되어 있습니다 — 운영관리시스템 에이전트 관리에서 확인하세요')
 
   const serverPk = server ? Number(server.id) : null
   const cursors: Record<string, { last_id: number; verified_id: number }> = {}
