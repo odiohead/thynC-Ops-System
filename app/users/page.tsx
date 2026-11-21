@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import SignupRequestsPanel from './SignupRequestsPanel' // 가입 신청 승인·반려 (2026-11-13)
 
 interface Organization {
   id: number
@@ -368,6 +369,15 @@ export default function UsersPage() {
           </button>
         )}
       </div>
+
+      {/* 가입 신청 — ADMIN 이상 (2026-11-13). 승인하면 계정이 만들어지므로 목록을 다시 불러온다 */}
+      {isAdmin && (
+        <SignupRequestsPanel
+          organizations={organizations}
+          isSuperAdmin={currentUser?.role === 'SUPER_ADMIN'}
+          onApproved={() => { void fetch('/api/users').then((r) => r.json()).then((list) => setUsers(Array.isArray(list) ? list : [])) }}
+        />
+      )}
 
       {/* 조직 탭 */}
       <div className="flex gap-1 mb-4 border-b border-gray-200 overflow-x-auto scrollbar-none">

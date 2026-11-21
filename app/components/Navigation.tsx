@@ -129,7 +129,7 @@ export default function Navigation() {
 
   // 사용자 정보 로드
   useEffect(() => {
-    if (pathname === '/login' || isMobileShell) return
+    if (pathname === '/login' || pathname === '/signup' || isMobileShell) return
     fetch('/api/auth/me')
       .then((r) => r.json())
       .then((data) => {
@@ -150,7 +150,7 @@ export default function Navigation() {
 
   // 메뉴 데이터 로드 (최초 1회)
   useEffect(() => {
-    if (pathname === '/login' || isMobileShell || menuFetched.current) return
+    if (pathname === '/login' || pathname === '/signup' || isMobileShell || menuFetched.current) return
     menuFetched.current = true
     fetch('/api/nav-menus')
       .then(r => r.ok ? r.json() : Promise.reject())
@@ -180,7 +180,7 @@ export default function Navigation() {
   }, [pathname, menuItems])
 
   // 로그인·사이니지 대시보드·운행일지 인쇄·모바일 앱 셸(/m/*)은 네비게이션 없이 전체 화면 사용
-  if (pathname === '/login' || pathname === '/dashboard' || pathname === '/vehicle-reservations/logs/print') return null
+  if (pathname === '/login' || pathname === '/signup' || pathname === '/dashboard' || pathname === '/vehicle-reservations/logs/print') return null
   if (isMobileShell) return null
 
   function isActive(href: string) {

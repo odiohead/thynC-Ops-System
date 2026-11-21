@@ -100,7 +100,8 @@ app/
 │   ├── tasks/                        # 업무(Task) 통합 조회
 │   ├── nav-menus/                    # 네비게이션 메뉴 조회 (Navigation 컴포넌트용)
 │   ├── constructors/                 # 시공사 관리
-│   ├── users/                        # 시스템 사용자 관리
+│   ├── signup/                       # 회원가입 신청 (공개 — 신청 후 관리자 승인, 2026-11-13)
+│   ├── users/                        # 시스템 사용자 관리 (+ SignupRequestsPanel — 가입 신청 승인·반려)
 │   ├── settings/
 │   │   ├── organizations/            # 소속(조직) 관리 (SUPER_ADMIN 전용)
 │   │   ├── departments/              # 부서 관리 (ADMIN 이상)
@@ -437,6 +438,9 @@ prisma/
 ---
 
 ## 데이터베이스 스키마
+
+### SignupRequest (회원가입 신청 — 2026-11-13)
+- `signup_requests`: 공개 가입 신청. `email`(소문자 정규화, **PENDING 중복은 부분 UNIQUE**) · `password_hash`(bcrypt — 승인 시 `users.password`로 옮기고, 승인·반려 후 `''`로 비움) · `name` · `phone` · `organization_id`(신청자가 고른 소속) · `memo` · `status`(PENDING/APPROVED/REJECTED, SQL CHECK) · `reject_reason` · `reviewed_by_id`/`reviewed_at` · `user_id`(승인으로 만든 계정) · `ip_address`. **승인 전에는 `users`에 행을 만들지 않는다**(담당자 후보·권한 판정에 미승인 계정이 섞이지 않게)
 
 ### User (시스템 사용자)
 - 이메일, 비밀번호(bcrypt), 이름, 전화번호
@@ -1489,6 +1493,7 @@ prisma/
 
 ### 사용자 관리
 - 시스템 사용자 등록·수정·삭제 (ADMIN 이상)
+- **회원가입 신청 → 관리자 승인 (2026-11-13)**: 로그인 화면 [회원가입 신청] → `/signup`(공개 — 이름·이메일·비밀번호(8자 이상)·연락처·소속·신청 메모) → 접수만 되고 계정은 생기지 않음. 승인 전 로그인은 비밀번호가 맞을 때만 '가입 승인 대기 중' 안내(이메일만으로 신청 여부 미노출). **계정 관리 상단 '가입 신청' 패널**(ADMIN 이상 — 대기 건수 배지·목록): [승인] 모달에서 권한(기본 일반, 최고관리자는 최고관리자만 부여)·소속(신청값 기본)·부서를 정해 계정 생성(신청자가 정한 비밀번호 그대로, 즉시 로그인 가능) / [반려](사유 선택) · '처리 내역 보기'(최근 30건). 방어: 가입된 이메일·대기 중 이메일 409, 요청 빈도 제한(IP당 10분 5회·전체 10분 30회 → 429), 대기 300건 상한, 감사 로그(신청·승인·반려). 신청 도착 알림(벨·Slack)과 신청자 통지 메일은 없음
 - 소속 드롭다운 연결
 - **SUPER_ADMIN의 타계정 수정**: 이름·연락처·역할·소속·부서·비밀번호 + **차량예약 사용 제한** 일괄 수정 (현재 비밀번호 확인 없이 변경 가능)
 - **차량예약 사용 제한 토글**: 타계정 수정 모달에서 체크 시 해당 계정 차량예약 차단, 목록에 `예약제한` 뱃지 표시 (변경 권한 ADMIN 이상)
@@ -1851,9 +1856,13 @@ npm run dev
 ### 인증
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| POST | `/api/auth/login` | 로그인 (`remember:true` 365일 · `client:'mobile'` 모바일 앱 90일 · 기본 7일) |
+| POST | `/api/auth/login` | 로그인 (`remember:true` 365일 · `client:'mobile'` 모바일 앱 90일 · 기본 7일). 계정이 없고 같은 이메일의 가입 신청이 대기 중이며 비밀번호가 맞으면 403 `code:'SIGNUP_PENDING'` (2026-11-13) |
 | POST | `/api/auth/logout` | 로그아웃 |
 | GET  | `/api/auth/me` | 현재 사용자 정보 |
+| GET  | `/api/auth/signup` | 회원가입 신청 화면의 소속 선택지 `{organizations[{id,name}]}` — 공개 (2026-11-13) |
+| POST | `/api/auth/signup` | 회원가입 신청 접수 `{name, email, password, phone, organizationId, memo?}` — 공개, 계정은 만들지 않음(PENDING). 검증 400 · 가입/대기 중 이메일 409 · 빈도 제한 429 · 대기 상한 503 |
+| GET  | `/api/signup-requests` | 가입 신청 목록 `?status=PENDING(기본)\|DONE` → `{requests, pendingCount}` — ADMIN 이상 |
+| POST | `/api/signup-requests/[id]` | 가입 신청 처리 — `{action:'approve', role?, organizationId?, departmentId?}` 계정 생성 / `{action:'reject', reason?}` — ADMIN 이상, 처리된 신청 409, 최고관리자 부여는 최고관리자만 |
 
 ### 대시보드
 | Method | Endpoint | 설명 |

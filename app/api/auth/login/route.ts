@@ -19,6 +19,11 @@ export async function POST(req: NextRequest) {
     include: { organization: { select: { id: true, name: true, code: true } } },
   })
   if (!user) {
+    // 가입 신청 후 승인 대기 중인 계정 (2026-11-13) — 비밀번호가 맞을 때만 안내한다(이메일만으로 신청 여부가 드러나지 않게)
+    const pending = await prisma.signupRequest.findFirst({ where: { email: normalizedEmail, status: 'PENDING' }, select: { passwordHash: true } })
+    if (pending?.passwordHash && typeof password === 'string' && (await bcrypt.compare(password, pending.passwordHash))) {
+      return NextResponse.json({ error: '가입 승인 대기 중입니다. 관리자 승인 후 로그인할 수 있습니다.', code: 'SIGNUP_PENDING' }, { status: 403 })
+    }
     return NextResponse.json({ error: '이메일 또는 비밀번호가 올바르지 않습니다.' }, { status: 401 })
   }
 

@@ -7,6 +7,7 @@ export async function middleware(req: NextRequest) {
   // 공개 경로 제외
   if (
     pathname === '/login' ||
+    pathname === '/signup' ||               // 회원가입 신청 (2026-11-13 — 접수 API는 /api/auth/signup)
     pathname.startsWith('/api/auth') ||
     pathname.startsWith('/api/mail-queue') ||
     pathname === '/api/health' ||           // 사이니지 생존 확인 (무인증)

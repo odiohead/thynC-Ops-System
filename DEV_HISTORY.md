@@ -384,6 +384,20 @@
 - 스키마·패키지·API 변경 없음. **PROD 반영 시**: 코드 배포(힙 4GB 빌드·재시작, 협업 번들 무관) **먼저** → `npx tsx scripts/fix-voc-followup-split.mts` dry-run → `--apply`(PROD DB 쓰기 — 명시 허락 필요, 11-16 기준 대상 약 142건).
 - → **PROD 배포 2026-11-16 13:10 (fdfaf77)** — 사용자 지시 "prod에 반영해줘". VOC 수정분만 커밋(회원가입·심평원 요양기호 대응은 미커밋 유지). pull(79e3324 → fdfaf77, 패키지·스키마 변경 없음) → 힙 4GB nohup 빌드 1회 성공 → `pm2 restart thync-prod` → /login 200·`/voc/dashboard` 미인증 307, 채널톡 스케줄러 재개, 협업 서버 번들 동일(재시작 생략), 디스크 73%. **데이터 보정**: 백업 `~/backups/voc_followup_split_before_20261116_0409.dump`(voc_*·ticket*·as_receipts·as_intake_links) → dry-run(대상 145) → `--apply`: **새 VOC 145(회신완료 96) · AS 접수 이동 94 · 원 VOC 71건 재판정(회신완료 전환 49) · 유지 1(VOC-202611-0211) · 오류 0**, 재실행 대상 0, 실행 로그 `~/backups/voc_followup_split_apply_20261116_*.log`. 결과(PROD): 주별 VOC 10/23 177→178 · 10/30 174→216 · **11/06(46주차) 109→189** · 11/13(진행 중) 66, VOC 'AS' 분류 46주차 67→134, 주별 연결 상담 수 = VOC 수(유지 1건 제외), VOC 11,005 = CS 티켓 11,005, 코드 중복·VOC↔티켓 상태 불일치 0. 분리로 열린 새 VOC에는 SLA 시계를 만들지 않음
 
+## 2026-11-13 13:00 | 회원가입 — 가입 신청 후 관리자 승인 (기본 기능, dev2 빌드·마이그 dev2만)
+
+- **요청**: 회원가입 기능 — 자동 가입이 아니라 **가입 신청 후 관리자가 승인**하는 방식으로, 기본 기능을 dev2에
+- **구조**: 신청은 별도 테이블 `signup_requests`에 쌓고 **승인 시에만 `users` 행 생성**(담당자 후보·권한 판정 등 users를 보는 곳에 미승인 계정이 섞이지 않게). 비밀번호는 신청 때 bcrypt 해시로 보관 → 승인 시 계정으로 이동, 승인·반려 후 신청 행의 해시는 비움
+- **DB** `20261113100000_signup_requests`(dev2 적용·resolve, **PROD 미적용**): status CHECK(PENDING/APPROVED/REJECTED), PENDING 이메일 부분 UNIQUE
+- **신청(공개)**: 로그인 화면에 [회원가입 신청] 링크 → `/signup`(미들웨어 공개 경로·사이드 메뉴 없는 전체 화면) — 이름·이메일·비밀번호(8자 이상)+확인·연락처·소속(활성 소속 선택)·신청 메모(선택) → 접수 완료 안내. API `GET/POST /api/auth/signup`
+- **승인 전 로그인**: 계정이 없고 같은 이메일의 대기 신청이 있으며 **비밀번호가 맞을 때만** '가입 승인 대기 중' 403(`SIGNUP_PENDING`) — 틀리면 일반 오류(이메일만으로 신청 여부가 드러나지 않게)
+- **승인·반려(ADMIN 이상)**: 계정 관리 상단 **'가입 신청' 패널**(`app/users/SignupRequestsPanel.tsx`) — 대기 건수 배지·목록, [승인] 모달(권한 기본 일반·소속은 신청값 기본·부서 선택 → 계정 생성, 최고관리자 부여는 최고관리자만), [반려](사유 선택), '처리 내역 보기'(최근 30건). API `GET /api/signup-requests` · `POST /api/signup-requests/[id]`. 동시 처리 방지(상태 조건부 갱신), 이메일 중복은 users UNIQUE가 최종 방어
+- **공개 엔드포인트 방어**(`lib/signup.ts`): 입력 검증, 가입된 이메일·대기 중 이메일 409, 요청 빈도 제한(IP당 10분 5회 + **전체 10분 30회** — 프록시 없이 직접 붙으면 IP 헤더를 지어낼 수 있어 IP 무관 상한 병행, IP는 x-real-ip → x-forwarded-for 마지막 값), 대기 300건 상한, 소속 선택지는 이름만 공개, 감사 로그(신청·승인·반려)
+- **이번 범위 밖**: 신청 도착 알림(벨·Slack — 지금은 계정 관리 화면에서 확인), 신청자에게 승인·반려 통지(메일), 이메일 도메인 제한·이메일 인증, 모바일 앱 로그인 화면(`/m/login`)의 가입 링크, 반려된 신청자 안내(다시 신청은 가능)
+- **검증**: tsc · eslint · dev2 빌드 · Playwright 실제 화면 30/30(로그인 화면 링크 → 신청 화면·소속 선택지·비밀번호 불일치 차단·접수 완료 / 대기 중 재신청 409·짧은 비밀번호 400 / 승인 전 로그인 대기 안내·틀린 비밀번호는 일반 오류 / 패널 대기 배지·목록·해시 미노출·반려·승인 모달 기본값·승인 → 계정 생성(뷰어·씨어스·부서)·계정 목록 반영·처리 내역 / 재처리 409 / 승인 계정 로그인·뷰어는 목록·처리 403 / 반려 계정 로그인 불가 / 가입된 이메일 409 / 빈도 제한 같은 IP 6번째 429·IP 바꿔도 전체 상한 429) — 테스트 계정·신청 행 삭제
+- 영향 파일: prisma/schema.prisma, prisma/migrations/20261113100000_signup_requests, lib/signup.ts(신규), app/api/auth/signup/route.ts(신규), app/api/signup-requests/route.ts·[id]/route.ts(신규), app/api/auth/login/route.ts, middleware.ts, app/signup/page.tsx(신규), app/users/SignupRequestsPanel.tsx(신규), app/users/page.tsx, app/login/page.tsx, app/components/{MainWrapper,Navigation}.tsx, README.md
+- **PROD 반영 시**: 마이그 SQL psql 적용·resolve → `npx prisma generate` → 힙 4GB 빌드·재시작(패키지·협업 번들 변경 없음). 공개 URL에 가입 신청이 열리므로 Nginx가 `X-Real-IP`를 넘기는지 확인. 커밋·PROD 반영 없음
+
 ## 2026-11-12 16:30 | 출고요청 시스템 구성품 개편 — 구성품 종류 고정·요청 팝업 합계/미출고 섹션·출고 처리 인벤토리별 카드 + 미출고분 thynC운영팀재고 편입 (dev2 빌드, 마이그·시드 dev2만)
 
 - **요청**: ① 요청 팝업 — '시스템' 분류에는 thynC시스템 10~100 수량만, 구성품은 하단 별도 섹션에 종류별 합계로, 그 아래 신청자 '미출고' 입력 섹션 ② 구성품은 5종 고정, '출고 품목 관리'에서는 수량만 ③ 출고 처리 — 대웅제약재고·thynC운영팀재고 카드 분리, 대웅제약재고에서 시스템(모자재) 시리얼 + 구성품별 '출고'·'미출고' 기재란 분리 ④ 구성품 5종을 대웅제약재고에 복제

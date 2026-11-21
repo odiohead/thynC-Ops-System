@@ -332,6 +332,12 @@ export default function LoginPage() {
               </div>
             </form>
 
+            {/* 회원가입 신청 (2026-11-13) — 신청 후 관리자 승인 */}
+            <p className="lp-fadeup-3" style={{ marginTop: 18, fontSize: 13, color: '#64748B', textAlign: 'center' }}>
+              계정이 없으신가요?{' '}
+              <a href="/signup" style={{ color: '#2C5CE5', fontWeight: 600, textDecoration: 'none' }}>회원가입 신청</a>
+            </p>
+
             {/* Footer */}
             <div
               className="lp-fadeup-3"
