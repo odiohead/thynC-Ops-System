@@ -24,7 +24,7 @@ import {
 import { syncAsReceiptToTicket, createTicketForAsReceipt } from '@/lib/ticket-domains/asReceipt'
 import { AS_PICKUP_METHODS, defaultAsPickupMethod, AS_OUTCOMES, AS_RESOLVE_OUTCOMES, asResolveOutcomesFor, canMarkAsLineFound, AS_CATEGORIES, AS_DEST_TYPES, AS_OUTCOME_LABELS, AS_REPAIR_EXCLUDED_OUTCOMES, AS_REPAIR_RESULT_DESC, AS_REPAIR_RESULT_LABELS, type AsRepairResult, type AsSettableRepairResult, appendAsNote as appendNote, asDeviceKindFromSerial, canMarkAsLineRepaired, isValidAsSerial, asSerialFormatError, AS_SERIAL_RULE_TEXT, type AsOutcome } from '@/lib/asReceiptShared'
 import { nextAsCode } from '@/lib/asReceipt'
-import { editEvent } from '@/lib/deviceRegistry/admin' // 분할 — 이동 라인 유닛의 AS ref 정정 (2026-11-07)
+import { editEvent, cancelLastEvent } from '@/lib/deviceRegistry/admin' // 분할 — 이동 라인 유닛의 AS ref 정정 (2026-11-07) · 교체기 정정 — 잘못된 교체 취소 (2026-11-23)
 import { reasonByValue } from '@/lib/deviceRegistry/core' // 되찾음 — 교체기기 회수 사유 RETURN (2026-11-10)
 import { prepareStockOutCreate, createStockOutRequestIn, StockOutCreateError } from '@/lib/stockOutCreate' // 분실 AS [출고요청] (2026-11-10)
 import { asDeviceGroupOf, isAsLineLockedByStockOut } from '@/lib/asReceiptShared'
@@ -454,6 +454,35 @@ export async function resolveAsLines(
   return prisma.$transaction((tx) => resolveAsLinesIn(tx, receiptId, actor, input), { timeout: 120000, maxWait: 10000 })
 }
 
+/**
+ * 교체 발송기기 점검 (2026-11-23) — 같은 접수 안에서 앞뒤가 맞지 않는 교체기 입력을 확정 전에 막는다.
+ *  · 같은 접수의 다른 라인(접수된 기기)을 교체기로 넣은 경우 — 수리반환으로 돌려보내는 기기의 시리얼을 잘못 적은 것
+ *    (AS-202611-0256: 교체기 칸에 같은 접수의 수리반환 기기를 넣어, 실제 교체기가 센터 재고로 남았다)
+ *  · 같은 접수의 다른 라인이 이미 같은 교체기를 쓰는 경우
+ * `pending` = 이번 요청이 함께 지정하는 라인별 교체기(라인 id → 시리얼, 교체가 아니면 null). 그 라인은 저장된 값 대신 이 값으로 본다.
+ */
+type ReplacementCheckItem = { id: number; serialNo: string; outcome: string | null; newSerialNo: string | null; draftOutcome: string | null; draftNewSerialNo: string | null }
+export function assertReplacementSerialOk(items: readonly ReplacementCheckItem[], itemId: number, newSerial: string, pending?: ReadonlyMap<number, string | null>): void {
+  const self = items.find((i) => i.id === itemId)
+  if (self && self.serialNo === newSerial) throw new AsServiceError(400, `${newSerial}: 접수된 기기와 교체 발송기기가 같습니다.`)
+  for (const other of items) {
+    if (other.id === itemId) continue
+    if (other.serialNo === newSerial) {
+      throw new AsServiceError(400, `${newSerial}: 이 접수의 다른 라인으로 접수된 기기입니다 — 교체 발송기기로 지정할 수 없습니다. 실제로 보낸 교체기의 시리얼을 확인하세요.`)
+    }
+    const otherNew = pending?.has(other.id)
+      ? pending.get(other.id) ?? null
+      : other.outcome === 'REPLACE' || other.outcome === 'FOUND'
+        ? other.newSerialNo
+        : other.outcome == null && other.draftOutcome === 'REPLACE'
+          ? other.draftNewSerialNo
+          : null
+    if (otherNew && otherNew === newSerial) {
+      throw new AsServiceError(400, `${newSerial}: 이 접수의 다른 라인(${other.serialNo})이 이미 교체 발송기기로 쓰고 있습니다.`)
+    }
+  }
+}
+
 function validateResolveInput(input: ResolveInput): void {
   if (!Array.isArray(input.lines) || input.lines.length === 0) throw new AsServiceError(400, '처리할 라인을 선택하세요.')
   for (const l of input.lines) {
@@ -494,7 +523,7 @@ export async function resolveAsLinesIn(
         select: {
           id: true, asCode: true, hospitalCode: true, category: true, note: true,
           status: { select: { ticketStatus: true } },
-          items: { select: { id: true, serialNo: true, deviceId: true, outcome: true, intakeState: true, repairedAt: true, stockOutRequestId: true, stockOutRequest: { select: { sorCode: true, status: { select: { ticketStatus: true } } } } } },
+          items: { select: { id: true, serialNo: true, deviceId: true, outcome: true, newSerialNo: true, draftOutcome: true, draftNewSerialNo: true, intakeState: true, repairedAt: true, stockOutRequestId: true, stockOutRequest: { select: { sorCode: true, status: { select: { ticketStatus: true } } } } } },
         },
       })
       if (!receipt) throw new AsServiceError(404, 'AS접수를 찾을 수 없습니다.')
@@ -510,6 +539,11 @@ export async function resolveAsLinesIn(
       const warnings: string[] = []
       const today = todayKst()
       const history: string[] = [] // 비고 이력 — 체크된 라인이 분실·취소로 확정될 때 수리완료 해제(§7.3)
+      // 교체 발송기기 점검 (2026-11-23) — 이번에 함께 확정하는 라인들의 교체기까지 놓고 본다
+      const pendingNew = new Map<number, string | null>(input.lines.map((l) => [l.itemId, l.outcome === 'REPLACE' ? normalizeSerial(l.newSerial ?? '').serialNo : null]))
+      for (const l of input.lines) {
+        if (l.outcome === 'REPLACE') assertReplacementSerialOk(receipt.items, l.itemId, normalizeSerial(l.newSerial ?? '').serialNo, pendingNew)
+      }
 
       const ctxFor = (occurredOn: string): RegistryCtx => ({
         hospitalCode: receipt.hospitalCode,
@@ -639,7 +673,7 @@ export async function draftAsLines(receiptId: number, input: { lines: DraftLineI
   return prisma.$transaction(async (tx) => {
     const receipt = await tx.asReceipt.findUnique({
       where: { id: receiptId },
-      select: { category: true, status: { select: { ticketStatus: true } }, items: { select: { id: true, serialNo: true, outcome: true, intakeState: true, stockOutRequest: { select: { sorCode: true, status: { select: { ticketStatus: true } } } } } } },
+      select: { category: true, status: { select: { ticketStatus: true } }, items: { select: { id: true, serialNo: true, outcome: true, newSerialNo: true, draftOutcome: true, draftNewSerialNo: true, intakeState: true, stockOutRequest: { select: { sorCode: true, status: { select: { ticketStatus: true } } } } } } },
     })
     if (!receipt) throw new AsServiceError(404, 'AS접수를 찾을 수 없습니다.')
     if (receipt.status?.ticketStatus === 'RESOLVED' || receipt.status?.ticketStatus === 'CLOSED') throw new AsServiceError(409, '완료·취소된 접수는 처리할 수 없습니다.')
@@ -649,6 +683,11 @@ export async function draftAsLines(receiptId: number, input: { lines: DraftLineI
       }
     }
     const byId = new Map(receipt.items.map((i) => [i.id, i]))
+    // 교체 발송기기 점검 (2026-11-23) — 초안 저장 단계에서 먼저 걸러 준다
+    const pendingNew = new Map<number, string | null>(input.lines.map((l) => [l.itemId, l.outcome === 'REPLACE' ? normalizeSerial(l.newSerial ?? '').serialNo : null]))
+    for (const l of input.lines) {
+      if (l.outcome === 'REPLACE') assertReplacementSerialOk(receipt.items, l.itemId, normalizeSerial(l.newSerial ?? '').serialNo, pendingNew)
+    }
     let updated = 0
     for (const l of input.lines) {
       const item = byId.get(l.itemId)
@@ -1032,6 +1071,98 @@ export async function correctAsLineSerial(receiptId: number, actor: { userId: st
     await tx.asReceipt.update({ where: { id: receipt.id }, data: { note: appendNote(receipt.note, `[시리얼 보정 ${today} ${actor.name ?? ''}] ${item.serialNo} → ${m.serialNo}${m.modelName ? ` (${m.modelName})` : m.state === 'NONE' ? ' (미등록)' : ''}`) } })
     return { serialNo: m.serialNo, previousSerialNo: item.serialNo, state: m.state, modelName: m.modelName, warnings }
   }, { timeout: 60000, maxWait: 10000 })
+}
+
+
+// ── 교체기 정정 (2026-11-23 — projects/as_replacement_correct_design.md) ─────────
+// 교체로 확정한 라인의 교체 발송기기를 잘못 적었을 때 고친다. 확정은 기기현황을 바꾸므로(구기기 회수·교체기 배치·둘의 연결)
+// 시리얼 글자만 바꾸면 안 되고, **잘못된 교체의 기기현황 기록을 취소한 뒤 맞는 교체기로 교체를 다시 기록**한다 —
+// 처음부터 맞게 넣은 것과 같은 결과가 된다(업무일자는 원래 교체의 날짜 그대로).
+//  · 잘못 넣은 교체기에 그 뒤 다른 기록(다른 접수의 AS·병동 이동 등)이 쌓였으면 취소가 막힌다(409) — 그때는 기기현황 관리자 보정이 필요하다
+//  · 출고요청으로 나간 교체기(자재 전표와 묶임)·되찾음 처리된 라인은 대상이 아니다
+//  · 접수 상태(진행·완료)는 건드리지 않는다. 라인의 발송일·발송방법·처리내용도 그대로다
+
+export interface CorrectReplacementResult {
+  serialNo: string
+  previousNewSerialNo: string | null
+  newSerialNo: string
+  /** 기기현황을 바꿨는가 — 미등록 라인은 라인의 시리얼만 바꾼다 */
+  registryChanged: boolean
+  warnings: string[]
+}
+
+export async function correctAsLineReplacement(
+  receiptId: number,
+  actor: { userId: string; name: string | null },
+  input: { itemId: number; newSerial: string; reason?: string | null }
+): Promise<CorrectReplacementResult> {
+  if (!Number.isInteger(input.itemId)) throw new AsServiceError(400, '라인이 올바르지 않습니다.')
+  const newSerial = normalizeSerial(input.newSerial ?? '').serialNo
+  if (!newSerial) throw new AsServiceError(400, '맞는 교체 발송기기 시리얼을 입력하세요.')
+  assertInputSerialOk(newSerial, '교체 발송기기')
+  const reason = (input.reason ?? '').trim().slice(0, 200)
+  return prisma.$transaction(async (tx) => {
+    const receipt = await tx.asReceipt.findUnique({
+      where: { id: receiptId },
+      select: {
+        id: true, asCode: true, hospitalCode: true, note: true,
+        items: { select: { id: true, serialNo: true, deviceId: true, outcome: true, newSerialNo: true, newDeviceId: true, draftOutcome: true, draftNewSerialNo: true, shippedAt: true, foundAt: true, stockOutRequestId: true, stockOutRequest: { select: { sorCode: true } } } },
+      },
+    })
+    if (!receipt) throw new AsServiceError(404, 'AS접수를 찾을 수 없습니다.')
+    const item = receipt.items.find((i) => i.id === input.itemId)
+    if (!item) throw new AsServiceError(400, '이 접수의 라인이 아닙니다.')
+    if (item.outcome === 'FOUND' || item.foundAt) throw new AsServiceError(409, `${item.serialNo}: 되찾음 처리된 라인은 교체기를 정정할 수 없습니다.`)
+    if (item.outcome !== 'REPLACE') throw new AsServiceError(409, `${item.serialNo}: 교체로 확정된 라인만 교체기를 정정할 수 있습니다 (확정 전에는 처리방법에서 바로 바꾸세요).`)
+    if (item.stockOutRequestId) {
+      throw new AsServiceError(409, `${item.serialNo}: 출고요청 ${item.stockOutRequest?.sorCode ?? ''}(으)로 나간 교체기입니다 — 자재 출고 기록과 묶여 있어 여기서 정정할 수 없습니다.`)
+    }
+    if (item.newSerialNo === newSerial) throw new AsServiceError(400, `${newSerial}: 지금 적혀 있는 교체 발송기기와 같습니다.`)
+    assertReplacementSerialOk(receipt.items, item.id, newSerial)
+
+    const warnings: string[] = []
+    let registryChanged = false
+    let newDeviceId: number | null = item.newDeviceId
+    if (!item.deviceId) {
+      // 미등록 라인 — 확정 때도 기기현황에 쓰지 않았다. 라인의 시리얼만 고친다
+      warnings.push(`${item.serialNo}: 미등록 라인 — 기기현황에는 기록이 없어 라인의 시리얼만 고쳤습니다`)
+      newDeviceId = null
+    } else {
+      // 이 접수가 남긴 구기기의 회수 기록(잘못된 교체) — 가장 최근 것
+      const recover = await tx.hospitalDeviceEvent.findFirst({
+        where: { deviceId: item.deviceId, eventType: 'RECOVER', refType: 'AS', refCode: receipt.asCode },
+        orderBy: { id: 'desc' },
+      })
+      if (!recover) {
+        throw new AsServiceError(409, `${item.serialNo}: 기기현황에서 이 교체의 회수 기록을 찾지 못했습니다 — 기기현황 관리자 보정이 필요합니다.`)
+      }
+      const occurredOn = ymd(recover.occurredOn) ?? (item.shippedAt ? ymd(item.shippedAt) : null) ?? todayKst()
+      const ctx: RegistryCtx = {
+        hospitalCode: receipt.hospitalCode,
+        actor: { userId: actor.userId, name: actor.name },
+        occurredOn,
+        source: 'MANUAL',
+        ref: { type: 'AS', code: receipt.asCode },
+      }
+      try {
+        // ① 잘못된 교체 취소 — 같은 묶음의 기록(교체기 배치·타 병원 이관 회수)까지 함께 되돌린다. 그 뒤 기록이 있으면 409
+        const cancelled = await cancelLastEvent(ctx, { eventId: recover.id }, { client: tx })
+        warnings.push(...cancelled.warnings.map((w) => `${item.serialNo}: ${w}`))
+        // ② 맞는 교체기로 다시 기록 — 회수 사유는 원래 교체의 것(분실 접수는 분실)을 그대로
+        const result = await replaceDevice(ctx, { oldDeviceId: item.deviceId, newSerial, reasonCodeId: recover.reasonCodeId }, { client: tx })
+        warnings.push(...result.warnings.map((w) => `${item.serialNo}: ${w}`))
+        newDeviceId = result.newDevice.id
+        registryChanged = true
+      } catch (e) {
+        if (e instanceof RegistryError) throw new AsServiceError(e.status, `${item.serialNo} 교체기 정정 실패 — ${e.message}`)
+        throw e
+      }
+    }
+    await tx.asReceiptItem.update({ where: { id: item.id }, data: { newSerialNo: newSerial, newDeviceId } })
+    const line = `[교체기 정정 ${todayKst()} ${actor.name ?? ''}] ${item.serialNo}: ${item.newSerialNo ?? '-'} → ${newSerial}${reason ? ` (${reason})` : ''}`
+    await tx.asReceipt.update({ where: { id: receipt.id }, data: { note: appendNote(receipt.note, line) } })
+    return { serialNo: item.serialNo, previousNewSerialNo: item.newSerialNo, newSerialNo: newSerial, registryChanged, warnings }
+  }, { timeout: 120000, maxWait: 10000 })
 }
 
 // ── 회수기기 처리: 수리 · 문제없음 · 폐기 (2026-09-17 수리완료 체크 → 2026-11-02 3택, device_condition_location_design.md §7.1·§7.2) ─────────

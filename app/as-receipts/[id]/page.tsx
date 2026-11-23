@@ -17,6 +17,7 @@ import AsMemoPanel from '@/app/hospitals/[code]/_components/AsMemoPanel'
 import AsReceiptFormModal, { type AsEditTarget } from '../_components/AsReceiptFormModal'
 import AsSplitModal from '../_components/AsSplitModal' // 접수 분할 (2026-11-07 as_receipt_split_design.md)
 import AsFoundModal, { type FoundTarget } from '../_components/AsFoundModal' // 분실기기 되찾음 (2026-11-10 as_lost_found_design.md)
+import AsReplacementCorrectModal, { type ReplacementTarget } from '../_components/AsReplacementCorrectModal' // 교체기 정정 (2026-11-23 as_replacement_correct_design.md)
 import { canMarkAsLineFound, asResolveUiOptionsFor, AS_RESOLVE_UI_LABELS, AS_STOCK_OUT_REQUEST_UI, AS_LOST_DIRECT_REPLACE_LABEL, isAsLineLockedByStockOut, type AsResolveUiOption } from '@/lib/asReceiptShared'
 import AsStockOutRequestModal, { type AsStockOutLine } from '../_components/AsStockOutRequestModal' // 분실 AS → 출고요청 (2026-11-10 as_lost_stock_out_link_design.md)
 import { asListHref, AS_PICKUP_METHODS, type AsPickupMethod,
@@ -262,12 +263,13 @@ interface GroupCardProps {
   onSetRepairResult: (item: ItemRow, result: AsSettableRepairResult | null) => Promise<boolean> // POST repair-done { result } (2026-11-02 — 수리완료 토글 확장)
   onScrapLine: (item: ItemRow) => Promise<boolean> // POST scrap-line — confirm·memo 프롬프트는 호출부 (2026-09-17)
   onFound: (item: ItemRow) => void // 분실기기 되찾음 모달 열기 (2026-11-10) — 분실 접수·교체 확정 라인
+  onCorrectReplacement: (item: ItemRow) => void // 교체기 정정 모달 열기 (2026-11-23) — 교체 확정 라인(출고요청으로 나간 교체기 제외)
   onStockOutRequest: (items: ItemRow[]) => void // 분실 AS → 출고요청 모달 열기 (2026-11-10) — 선택 미종결 라인
   canDirectReplace: boolean // 분실 접수 '교체(시리얼 직접 입력)' 예외 노출 — ADMIN 또는 as_receipt.admin (2026-11-11). 선택 라인에 교체 초안이 있으면 권한 무관 노출
 }
 const MODEL_BY_KIND: Record<string, string> = { 심전도: '심전계', 산소포화도: '산소포화도', 게이트웨이: '게이트웨이' }
 
-function GroupCard({ index, group, items, asCode, category, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm, onCorrectSerial, canRepair, onSetRepairResult, onScrapLine, onFound, onStockOutRequest, canDirectReplace }: GroupCardProps) {
+function GroupCard({ index, group, items, asCode, category, hospitalCode, canResolve, canEdit, busy, onDraft, onSaveProcessNote, onApplyShipInfo, onConfirm, extras, onRegistryConfirm, onCorrectSerial, canRepair, onSetRepairResult, onScrapLine, onFound, onCorrectReplacement, onStockOutRequest, canDirectReplace }: GroupCardProps) {
   const [fixSerial, setFixSerial] = useState<Record<number, string>>({}) // 시리얼 보정 입력 (2026-09-15) — 라인별, 빈 값 = 닫힘
   const repair = summarizeAsRepairProgress(items) // 회수처리 n/m (2026-09-17 수리완료 → 2026-11-02 3택) — m = 처리 가능 라인(canMarkAsLineRepaired), n = 수리·문제없음·폐기
   const badSerialItems = items.filter((i) => !i.outcome && !isValidAsSerial(i.serialNo)) // 시리얼 형식 오류 — 보정 전 처리 불가 (2026-09-30)
@@ -491,7 +493,12 @@ function GroupCard({ index, group, items, asCode, category, hospitalCode, canRes
                     <span className="rounded-full border border-dashed border-blue-400 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700" title="초안 — 최종확정 전까지 변경 가능">{AS_OUTCOME_LABELS[item.draftOutcome as AsOutcome] ?? item.draftOutcome} (초안)</span>
                   ) : <span className="text-xs text-gray-300">미지정</span>}
                 </td>
-                <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-gray-600">{item.newSerialNo ? <span className={item.outcome === 'FOUND' ? 'text-gray-400 line-through' : ''} title={item.outcome === 'FOUND' ? '되찾음 — 교체기기 회수(반납)' : undefined}>{item.newSerialNo}</span> : (item.draftNewSerialNo ? <span className="text-blue-600" title="초안">{item.draftNewSerialNo}</span> : '-')}</td>
+                <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-gray-600">{item.newSerialNo ? <span className={item.outcome === 'FOUND' ? 'text-gray-400 line-through' : ''} title={item.outcome === 'FOUND' ? '되찾음 — 교체기기 회수(반납)' : undefined}>{item.newSerialNo}</span> : (item.draftNewSerialNo ? <span className="text-blue-600" title="초안">{item.draftNewSerialNo}</span> : '-')}
+                  {/* 교체기 정정 (2026-11-23) — 교체로 확정한 라인의 교체기 시리얼을 잘못 적었을 때. 출고요청으로 나간 교체기는 자재 기록과 묶여 제외 */}
+                  {canEdit && item.outcome === 'REPLACE' && !item.stockOutRequest && (
+                    <button type="button" disabled={busy} onClick={() => onCorrectReplacement(item)} className="ml-1.5 rounded border border-gray-300 px-1.5 py-0.5 font-sans text-[11px] text-gray-500 hover:bg-gray-50 hover:text-gray-700 disabled:opacity-40" title="교체 발송기기 시리얼을 잘못 적었을 때 고칩니다" data-testid={`replacement-fix-${item.id}`}>정정</button>
+                  )}
+                </td>
                 <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-500">
                   {item.shippedAt ? (
                     <>
@@ -694,6 +701,7 @@ export default function AsReceiptDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [splitOpen, setSplitOpen] = useState(false) // 접수 분할 모달 (2026-11-07)
   const [foundTarget, setFoundTarget] = useState<FoundTarget | null>(null) // 분실기기 되찾음 모달 (2026-11-10)
+  const [replacementTarget, setReplacementTarget] = useState<ReplacementTarget | null>(null) // 교체기 정정 모달 (2026-11-23)
   const [stockOutTarget, setStockOutTarget] = useState<number[] | null>(null) // 분실 AS → 출고요청 모달 (2026-11-10) — 카드에서 미리 고른 라인 id
   /** 출고요청에 담을 수 있는 라인 전부 — 미종결·미잠금·정상 시리얼·입고 대조 이슈 없음 (기기군 무관, 모달 체크리스트) */
   const stockOutCandidates: AsStockOutLine[] = (req?.items ?? []).filter((it) => !it.outcome && !isAsLineLockedByStockOut(it) && isValidAsSerial(it.serialNo) && !isAsIntakeIssue(it.intakeState))
@@ -1501,6 +1509,7 @@ export default function AsReceiptDetailPage() {
               onSetRepairResult={setRepairResult}
               onScrapLine={scrapLine}
               onFound={(it) => setFoundTarget({ id: it.id, serialNo: it.serialNo, newSerialNo: it.newSerialNo, wardName: it.wardName, placementWard: it.device?.placement?.ward?.name ?? null })}
+              onCorrectReplacement={(it) => setReplacementTarget({ id: it.id, serialNo: it.serialNo, newSerialNo: it.newSerialNo })}
               onStockOutRequest={(its) => setStockOutTarget(its.map((it) => it.id))}
               canDirectReplace={isAdmin || adminPerm}
             />
@@ -1610,6 +1619,13 @@ export default function AsReceiptDetailPage() {
         receipt={{ id: req.id, asCode: req.asCode }}
         item={foundTarget}
         onDone={(r) => { setFoundTarget(null); setWarnings([`${r.serialNo} 되찾음 처리 — 사용중 복귀 · 교체기기 ${r.newSerialNo ?? ''} 회수(반납) · 분실 제공 수량 −1`, ...r.warnings]); router.refresh(); void load() }}
+      />
+      <AsReplacementCorrectModal
+        open={!!replacementTarget}
+        onClose={() => setReplacementTarget(null)}
+        receipt={{ id: req.id, asCode: req.asCode }}
+        item={replacementTarget}
+        onDone={(r) => { setReplacementTarget(null); setWarnings([`${r.serialNo} 교체기 정정 — ${r.previousNewSerialNo ?? '-'} → ${r.newSerialNo}${r.registryChanged ? ' · 기기현황 반영' : ''}`, ...r.warnings]); router.refresh(); void load() }}
       />
       <AsSplitModal
           open={splitOpen}
