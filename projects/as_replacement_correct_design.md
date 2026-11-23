@@ -1,6 +1,6 @@
 # AS — 교체기 정정 · 교체 발송기기 입력 차단
 
-> **상태: dev2·DEV 구현 (2026-11-23) — PROD 미반영**
+> **상태: 완료 — PROD 반영 2026-11-23 (e65ad1d)**. 권한·대상 범위(§2 제안값)는 사용자 확인 전
 > 관련: [as_work_design.md](as_work_design.md) (AS업무 — 라인 결과 확정·초안/최종확정), [hospital_device_registry_design.md](hospital_device_registry_design.md) (기기현황 — 교체·이벤트 취소)
 
 ---
@@ -98,6 +98,7 @@ DB 변경 없음.
 - 회귀: `as-receipt-smoke` 94 · `as-found-smoke` 24 · `as-split-smoke` 31 · `as-stock-out-link-smoke` 32
 - dev2 빌드 후 실제 화면(Playwright) 9/9 — [정정] 버튼 노출 조건, 모달, 같은 접수의 다른 라인 시리얼 오류 표시, 정정 뒤 교체기 칸과 안내, 초안 저장 API 차단 2종, DB 상태 대조
 - DEV 서버(2026-11-23, 6f44261): 빌드 · 재시작 후 DEV DB에서 스모크 31/31
+- PROD(2026-11-23 18:36, e65ad1d): 빌드 · 재시작, 응답과 산출물 확인. PROD에서 정정 기능을 실제로 실행해 보지는 않았다(스모크는 테스트 데이터를 만들므로 PROD에서 돌리지 않는다)
 
 ## 8. 이번 범위가 아닌 것
 
