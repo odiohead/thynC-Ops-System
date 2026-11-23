@@ -12,6 +12,7 @@
 - **입력 차단**: `assertReplacementSerialOk` — 교체기가 그 라인의 접수 기기 / 같은 접수의 다른 라인으로 접수된 기기 / 같은 접수의 다른 라인이 이미 쓰는 교체기면 400. 초안 저장(`draftAsLines`) · 최종확정(`resolveAsLinesIn`) · 정정에 공통 적용. 교체기가 이미 그 병원에서 사용 중인 경우는 막지 않음(자재 출고로 먼저 등록된 선교체가 정상적으로 그 모양)
 - **검증**: tsc · eslint · `scripts/as-replacement-correct-smoke.mts` 31/31(차단 5 · PROD 사례 재현과 정정 · 오입력으로 새 기기가 등록된 경우와 재정정 · 이후 기록이 있어 막히는 경우 · 미등록 라인 · 거부 6) · 회귀 `as-receipt-smoke` 94 · `as-found-smoke` 24 · `as-split-smoke` 31 · `as-stock-out-link-smoke` 32 · dev2 빌드 후 실제 화면 9/9(Playwright — [정정] 버튼 노출 조건 · 모달 · 다른 라인 시리얼 오류 표시 · 정정 뒤 교체기 칸과 안내 · 초안 저장 API 차단 2종, DB 상태 대조, 검증 데이터 삭제)
 - DB 변경 없음
+- **DEV 서버(13.125.238.77) 반영 2026-11-23 (6f44261)**: `git pull`(6183399 → 6f44261, DB·패키지 변경 없음) → 힙 4GB 빌드(nohup) → `pm2 restart thync-dev`. 로그인 200(로컬·dev.ops.seersthync.com), 미인증 정정 API 307, 빌드 산출물에 [정정] 버튼·정정 API 포함, DEV DB에서 `as-replacement-correct-smoke` 31/31. DEV 화면을 브라우저로 직접 열어 보지는 않음. PROD 미반영
 - 파일: lib/asReceiptService.ts, app/api/as-receipts/[id]/correct-replacement/route.ts(신규), app/as-receipts/_components/AsReplacementCorrectModal.tsx(신규), app/as-receipts/[id]/page.tsx, scripts/as-replacement-correct-smoke.mts(신규), projects/as_replacement_correct_design.md(신규), projects/README.md, README.md
 
 ## 2026-11-23 17:40 | [운영 데이터 조치 — PROD만] AS-202611-0256 교체기 정정 — P011670의 교체기 P010909(오입력) → P011968

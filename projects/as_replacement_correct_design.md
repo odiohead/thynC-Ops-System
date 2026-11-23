@@ -96,7 +96,8 @@ DB 변경 없음.
 
 - `scripts/as-replacement-correct-smoke.mts` 31/31
 - 회귀: `as-receipt-smoke` 94 · `as-found-smoke` 24 · `as-split-smoke` 31 · `as-stock-out-link-smoke` 32
-- 화면 검증 결과는 `DEV_HISTORY.md` 2026-11-23 항목
+- dev2 빌드 후 실제 화면(Playwright) 9/9 — [정정] 버튼 노출 조건, 모달, 같은 접수의 다른 라인 시리얼 오류 표시, 정정 뒤 교체기 칸과 안내, 초안 저장 API 차단 2종, DB 상태 대조
+- DEV 서버(2026-11-23, 6f44261): 빌드 · 재시작 후 DEV DB에서 스모크 31/31
 
 ## 8. 이번 범위가 아닌 것
 
