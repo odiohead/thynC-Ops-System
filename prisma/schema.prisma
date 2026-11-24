@@ -45,6 +45,11 @@ model HiraHospital {
   detailSyncedAt DateTime? @map("detail_synced_at")
   deptSyncedAt   DateTime? @map("dept_synced_at")
   sdrSyncedAt    DateTime? @map("sdr_synced_at")
+  // 요양기호 변경 대응 (2026-11-12, lib/hiraTwin.ts)
+  lastSeenAt     DateTime? @map("last_seen_at")     // 목록 동기화가 마지막으로 이 요양기호를 받은 시각 — 최근 완전한 동기화 이전이면 폐기된 키
+  supersededById Int?      @map("superseded_by_id") // 이 레코드를 대체한 심평원 레코드 — 병원 등록 동기화에서 제외
+  supersededBy   HiraHospital?  @relation("HiraSuperseded", fields: [supersededById], references: [id], onDelete: SetNull)
+  supersedes     HiraHospital[] @relation("HiraSuperseded")
   createdAt      DateTime  @default(now()) @map("created_at")
   hospital       Hospital?
   depts          HiraHospitalDept[]

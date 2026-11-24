@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 
 type Job = {
   id: number
@@ -14,6 +15,15 @@ type Job = {
   doneCount: number
   failedCount: number
   nextRunAt: string | null
+}
+
+/** 병원목록 동기화 '확인 필요' — 이미 등록된 병원과 같은 곳으로 보이는 심평원 레코드 (lib/hiraTwin.ts) */
+type ReviewRow = {
+  hiraHospitalId: number
+  name: string
+  address: string | null
+  reasonText: string
+  candidates: { hospitalCode: string; hospitalName: string; status: string; hiraName: string }[]
 }
 
 type Progress = {
@@ -113,6 +123,9 @@ export default function HiraSyncPageClient({ initialJobs, detailTypes, detailIte
   const logRef = useRef<HTMLDivElement>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<string | null>(null)
+  const [review, setReview] = useState<ReviewRow[]>([])
+  const [resolvingId, setResolvingId] = useState<number | null>(null)
+  const router = useRouter()
   const [selectedTypes, setSelectedTypes] = useState<string[]>([])
   const [selectedItems, setSelectedItems] = useState<string[]>(detailItems.map((d) => d.key))
   const [progress, setProgress] = useState<Progress | null>(null)
@@ -186,6 +199,19 @@ export default function HiraSyncPageClient({ initialJobs, detailTypes, detailIte
     }
   }
 
+  // 확인 필요 목록 — 실행 없이 계획만 조회
+  const fetchReview = useCallback(async () => {
+    const res = await fetch('/api/hospitals/sync-from-hira', { cache: 'no-store' })
+    if (res.ok) {
+      const json = await res.json()
+      setReview(json.review ?? [])
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchReview()
+  }, [fetchReview])
+
   async function syncHospitals() {
     setSyncing(true)
     setSyncResult(null)
@@ -196,12 +222,49 @@ export default function HiraSyncPageClient({ initialJobs, detailTypes, detailIte
       if (!res.ok) {
         setError(json.error ?? '동기화 실패')
       } else {
+        router.refresh()
         setSyncResult(json.message)
+        setReview(json.review ?? [])
       }
     } catch {
       setError('동기화 중 오류가 발생했습니다.')
     } finally {
       setSyncing(false)
+    }
+  }
+
+  async function resolveReview(row: ReviewRow, action: 'relink' | 'create', hospitalCode?: string) {
+    const target = row.candidates.find((c) => c.hospitalCode === hospitalCode)
+    const ok = window.confirm(
+      action === 'relink'
+        ? `'${target?.hospitalName ?? hospitalCode}'(${hospitalCode})의 심평원 연결을 '${row.name}' 레코드로 바꿉니다.\n병원코드와 업무 데이터는 그대로입니다.`
+        : `'${row.name}'을(를) 새 미계약 병원으로 등록합니다.\n이미 등록된 병원과 다른 곳일 때만 진행하세요.`,
+    )
+    if (!ok) return
+    setResolvingId(row.hiraHospitalId)
+    setError(null)
+    try {
+      const res = await fetch('/api/hospitals/sync-from-hira/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hiraHospitalId: row.hiraHospitalId, action, hospitalCode }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setError(json.error ?? '처리 실패')
+      } else {
+        router.refresh()
+        setSyncResult(
+          action === 'relink'
+            ? `${target?.hospitalName ?? hospitalCode}의 심평원 연결을 교체했습니다.`
+            : `${row.name}을(를) ${json.hospitalCode}로 등록했습니다.`,
+        )
+      }
+      await fetchReview()
+    } catch {
+      setError('처리 중 오류가 발생했습니다.')
+    } finally {
+      setResolvingId(null)
     }
   }
 
@@ -302,6 +365,40 @@ export default function HiraSyncPageClient({ initialJobs, detailTypes, detailIte
         )}
         {syncResult && (
           <div className="border-b border-green-100 bg-green-50 px-6 py-3 text-sm text-green-600">{syncResult}</div>
+        )}
+        {review.length > 0 && (
+          <div className="border-b border-amber-100 bg-amber-50 px-6 py-4">
+            <p className="text-sm font-medium text-amber-800">
+              확인 필요 {review.length}건 — 이미 등록된 병원과 같은 곳으로 보여 새로 등록하지 않았습니다.
+            </p>
+            <ul className="mt-3 space-y-2">
+              {review.map((r) => (
+                <li key={r.hiraHospitalId} className="rounded-md border border-amber-200 bg-white p-3">
+                  <div className="text-sm font-medium text-gray-800">{r.name}</div>
+                  <div className="mt-0.5 text-xs text-gray-500">{r.address ?? '주소 없음'} · {r.reasonText}</div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {r.candidates.map((c) => (
+                      <button
+                        key={c.hospitalCode}
+                        onClick={() => resolveReview(r, 'relink', c.hospitalCode)}
+                        disabled={resolvingId !== null}
+                        className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        같은 병원 — {c.hospitalName} ({c.hospitalCode} · {c.status})에 연결
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => resolveReview(r, 'create')}
+                      disabled={resolvingId !== null}
+                      className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      다른 병원 — 새로 등록
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
         {hasRunning && (
           <div className="flex items-center gap-2 px-6 py-3 text-xs text-blue-600">

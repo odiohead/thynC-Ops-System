@@ -83,6 +83,8 @@ async function fetchPage(
 
 async function upsertBatch(items: Record<string, unknown>[]): Promise<number> {
   let count = 0
+  // 이 요양기호가 심평원에서 내려온 시각 — 최근 완전한 동기화 이후로 안 찍힌 레코드는 폐기된 키 (lib/hiraTwin.ts)
+  const lastSeenAt = new Date()
   for (let offset = 0; offset < items.length; offset += UPSERT_BATCH) {
     const batch = items.slice(offset, offset + UPSERT_BATCH)
     for (const item of batch) {
@@ -122,8 +124,8 @@ async function upsertBatch(items: Record<string, unknown>[]): Promise<number> {
 
       await prisma.hiraHospital.upsert({
         where: { hiraId },
-        create: { hiraId, ...data },
-        update: data,
+        create: { hiraId, ...data, lastSeenAt },
+        update: { ...data, lastSeenAt },
       })
       count++
     }
@@ -145,6 +147,8 @@ async function runSync(jobId: number, apiKey: string) {
     await addLog('init', `연동을 시작합니다. 총 ${totalGroups}개 종별코드를 처리합니다.`, { totalGroups })
 
     let cumulativeCount = 0
+    // 실패했거나 일부만 받은 종별 — 하나라도 있으면 이 잡은 '완전한 동기화'가 아니다(폐기 키 판정 기준에서 제외)
+    const failedGroups: string[] = []
 
     for (let i = 0; i < CL_CODES.length; i++) {
       const { code: clCd, name: clCdName } = CL_CODES[i]
@@ -176,6 +180,8 @@ async function runSync(jobId: number, apiKey: string) {
           groupIndex, totalPages, fetchedCount: allItems.length,
         })
 
+        if (allItems.length < totalCount) failedGroups.push(clCd)
+
         const upsertedCount = await upsertBatch(allItems)
         cumulativeCount += upsertedCount
 
@@ -184,6 +190,7 @@ async function runSync(jobId: number, apiKey: string) {
         })
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e)
+        failedGroups.push(clCd)
         await addLog('error', `${idxStr} 종별코드 ${clCd} 오류: ${errMsg} — 해당 코드 스킵`, { groupIndex })
       }
 
@@ -192,9 +199,18 @@ async function runSync(jobId: number, apiKey: string) {
 
     await prisma.hiraSyncJob.update({
       where: { id: jobId },
-      data: { status: 'done', endedAt: new Date(), totalCount: cumulativeCount },
+      data: {
+        status: 'done', endedAt: new Date(), totalCount: cumulativeCount,
+        params: { complete: failedGroups.length === 0, failedGroups },
+      },
     })
-    await addLog('done', '연동이 완료되었습니다.', { totalProcessed: cumulativeCount })
+    await addLog(
+      'done',
+      failedGroups.length === 0
+        ? '연동이 완료되었습니다.'
+        : `연동이 완료되었습니다. (일부 종별 미완료: ${failedGroups.join(', ')} — 요양기호 변경 자동 판정에는 쓰이지 않습니다)`,
+      { totalProcessed: cumulativeCount, failedGroups },
+    )
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : String(e)
     await prisma.hiraSyncJob.update({

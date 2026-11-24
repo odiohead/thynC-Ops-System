@@ -352,6 +352,8 @@ lib/
 ├── hospitalNameMatcher.ts            # 병원명 자유 표기→hospitalCode 매처 — AS 마이그 검증 별칭 매칭 lib 승격 (NFC·법인 접두·학교 축약·괄호 별칭, 유일 매칭만 확정). 후보 풀 2계층(2026-10-08): core(프로젝트·기기·딜 보유)+extended(채널톡 OpsCode 연결 병원, 정식명·별칭 유일 일치만). 검증 scripts/verify-hospital-matcher.mts
 ├── audit.ts                          # 감사 로그 헬퍼 (logAudit, auditActorFromJWT, redact)
 ├── hospitalStatus.ts                 # 병원 thynC 현황상태 단방향 자동 진행 헬퍼 (advanceHospitalStatus)
+├── hiraTwin.ts                       # 심평원 요양기호 변경 대응 — 폐기 키 판정·쌍둥이 탐지·병원목록 동기화 계획/실행·확인 필요 처리 (2026-11-12)
+├── hospitalListOrder.ts              # 병원 목록 정렬 — 미계약 아닌 병원 먼저 (목록 페이지·GET /api/hospitals 공용, 2026-11-12)
 ├── vehicleLog.ts                     # 운행일지 거리 재계산(recalcVehicleLogs) + 주행거리 무결성 검사(checkOdometerConsistency)
 ├── maintenanceVisit.ts               # 유지보수 방문일정 정규화(normalizeVisits) + 캘린더 페이로드(visitEventPayload) + ymd/visitKey — 기타업무 업무기간도 공유
 ├── etcTask.ts                        # 기타업무 캘린더 이벤트 페이로드(etcTaskVisitEventPayload)
@@ -471,6 +473,7 @@ prisma/
 - HIRA에서 가져온 공공 병원 데이터 원본
 - hiraId, 병원명, 종별코드, 시도/시군구, 주소, 전화번호, 의사 수 등
 - 상세연동 항목(2026-09-14 v2): `perm_sbd_cnt`/`detail_synced_at`(허가병상수), `dept_synced_at`·`sdr_synced_at`(진료과목·전문의수 연동 시각)
+- **요양기호 변경 대응(2026-11-12, `lib/hiraTwin.ts`)**: `last_seen_at`(목록 동기화가 이 요양기호를 마지막으로 받은 시각 — 최근 '완전한' 동기화 시작보다 이전이거나 NULL이면 폐기된 키) · `superseded_by_id`(이 레코드를 대체한 심평원 레코드, 자기참조 FK SET NULL — 병원 등록 동기화에서 제외). 마이그 `20261112170000_hira_hospital_last_seen`
 - **HiraHospitalDept** (`hira_hospital_depts`): 병원별 진료과목 — `dgsbjt_cd/nm`, `pr_sdr_cnt`(진료과목별 전문의), `cdiag_dr_cnt`(선택진료의사), `dtl_sdr_cnt`(전문과목별 전문의) — 심평원 getDgsbjtInfo·getSpcSbjtSdrInfo 결과를 과목 코드로 병합, unique(hospital, code)
 - **HiraSyncJob** 분할 실행 컬럼: `params`(typeCodes·items), `total_targets/done_count/failed_count`, `daily_quota`, `calls_today/quota_date`, `day_count`, `next_run_at`; status `running|waiting|done|error|cancelled`
 - **HiraSyncJobTarget** (`hira_sync_job_targets`): 잡별 대상 병원 진행 상태(`pending/done/failed`, error) — 재개·재시작 시 pending만 이어서 처리
@@ -665,6 +668,7 @@ prisma/
 - 심평원 연동 실행 단위 (백그라운드 비동기 처리)
 - 시작시간 (`startedAt`), 종료시간 (`endedAt`), 상태 (`status`: running/done/error), 연동건수 (`totalCount`)
 - 잡 유형 (`jobType`: basis 병원목록 / detail 병원상세정보) — 목록·상세 연동은 동시에 하나만 실행 (공통 배타)
+- basis 잡 `params`(2026-11-12): `{ complete, failedGroups }` — 전 종별을 빠짐없이 받았을 때만 `complete: true`. 폐기 키 판정은 `complete`인 최근 잡의 시작 시각만 기준으로 쓴다(종별 하나라도 실패·부분 수신이면 제외)
 
 ### HiraSyncLog (심평원 연동 로그)
 - HiraSyncJob 1:N 관계
@@ -1190,6 +1194,7 @@ prisma/
 
 ### 병원 관리
 - HIRA 병원 데이터 검색 및 조회 (모달 방식)
+- **목록 정렬(2026-11-12, `lib/hospitalListOrder.ts`)**: 병원 목록(`/hospitals`)과 병원 검색 선택(`GET /api/hospitals` — 각 업무 등록 화면 공용)은 **미계약이 아닌 병원 먼저**, 그 안에서 최근 등록순. 심평원 일괄 등록 미계약 병원이 같은 이름의 고객 병원 위에 오지 않게 함
 - 병원 상세 → 답사 관리 카드 + 설치계획(가안) 관리 카드 + 유지보수 카드 + 구축 프로젝트 카드 + 사용 자재 카드 + **상담이력 카드**(SEERS 전용) + 병원 노트 순으로 표시 (각 카드에서 해당 병원 데이터 직접 조회, 행 클릭 상세 이동, ADMIN 이상 등록 버튼 제공)
 - 운영 병원 등록·수정·삭제
   - 등록: 병원명+상태만으로 즉시 등록, HIRA 연결은 선택
@@ -1672,6 +1677,7 @@ prisma/
 - **상담유형(ConsultationType) 관리**: AI 어시스턴트 상담유형 동적 추가·수정·삭제·순서 변경
 - **문서유형(DocumentType) 관리**: AI 어시스턴트 문서유형 동적 추가·수정·삭제·순서 변경 (value 코드값 포함)
 - **심평원 연동 관리** (SUPER_ADMIN 전용): 심평원 Open API 병원 데이터 동기화
+  - **요양기호 변경 대응(2026-11-12, `lib/hiraTwin.ts`)**: [병원목록 동기화]는 병원이 없는 심평원 레코드를 미계약 병원으로 만들기 전에 **쌍둥이**(시군구·개설일이 같고 주소 또는 전화가 같은, 이미 병원에 연결된 다른 심평원 레코드)를 찾는다. ① 쌍둥이 없음 → 종전대로 등록 ② 쌍둥이 1건이 폐기된 키이고 새 레코드가 살아 있음 → 병원을 만들지 않고 기존 병원의 심평원 연결·심평원 명칭만 교체(병원코드·업무 데이터 불변, 구 레코드 대체 표시, 감사 로그) ③ 그 외(구 키도 살아 있음·후보 여러 건·완전한 목록 동기화 이력 없음) → 등록하지 않고 화면의 **확인 필요** 목록에 표시 — 건별 [같은 병원 — OO에 연결] / [다른 병원 — 새로 등록] ④ 병원이 없고 심평원에서도 더 이상 내려오지 않는 레코드 → 건너뜀. 배경: 요양기호만 바뀐 같은 병원이 미계약 병원으로 중복 생성된 4쌍(2026-11-12 PROD 수동 정리). 검증 `scripts/hira-twin-smoke.mts`(DEV 전용)
   - 연동 시작 버튼 → 백그라운드 비동기 처리 (브라우저 닫아도 서버에서 계속 실행)
   - 연동 히스토리 목록 (시작시간·종료시간·유형·상태·연동건수)
   - 히스토리 행 클릭 시 상세 로그 패널 표시 (이벤트 타입별 색상 구분)
@@ -1879,12 +1885,15 @@ npm run dev
 ### 병원
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| GET  | `/api/hospitals` | 병원 목록 |
+| GET  | `/api/hospitals` | 병원 목록 (미계약이 아닌 병원 먼저 → 최근 등록순, 2026-11-12) |
 | POST | `/api/hospitals` | 병원 등록 |
 | GET  | `/api/hospitals/[code]` | 병원 상세 |
 | PUT  | `/api/hospitals/[code]` | 병원 수정 |
 | DELETE | `/api/hospitals/[code]` | 병원 삭제 |
 | POST | `/api/hospitals/import` | Excel 일괄 가져오기 (`?preview=true` 미리보기) |
+| GET | `/api/hospitals/sync-from-hira` | 병원목록 동기화 계획(실행 안 함) — `{ syncAt, createCount, relink[], review[], skippedDead, message }` (SUPER_ADMIN, 2026-11-12) |
+| POST | `/api/hospitals/sync-from-hira` | 병원목록 동기화 실행 — 신규 미계약 병원 등록 + 요양기호 변경 자동 재연결, 응답 `{ created, relinked[], review[], skippedDead, message }` (SUPER_ADMIN) |
+| POST | `/api/hospitals/sync-from-hira/resolve` | '확인 필요' 1건 처리 — body `{ hiraHospitalId, action: 'relink'\|'create', hospitalCode? }` (SUPER_ADMIN, 2026-11-12) |
 | POST | `/api/hospitals/[code]/transfer-work` | 병원 업무 일괄 이전 (SUPER_ADMIN) |
 | POST | `/api/work-items/reassign` | 업무 병원 재지정 (ADMIN 이상, type/code/newHospitalCode) |
 | GET  | `/api/hospitals/[code]/daewoong-staff` | 병원 담당자 목록 |

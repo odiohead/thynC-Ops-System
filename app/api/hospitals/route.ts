@@ -5,6 +5,7 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 import { readSearch } from '@/lib/searchParam'
+import { hospitalPageIdsActiveFirst, sortByIdOrder } from '@/lib/hospitalListOrder'
 const s3Client = new S3Client({
   region: process.env.AWS_REGION!,
   credentials: {
@@ -118,12 +119,11 @@ export async function GET(request: NextRequest) {
     ...(sido && { sidoName: sido }),
   }
 
-  const [hospitals, total, statusCodes] = await Promise.all([
+  // 미계약이 아닌 병원 먼저 (2026-11-12) — 같은 이름의 미계약 행이 고객 병원 위에 오지 않게
+  const pageIds = await hospitalPageIdsActiveFirst(where, (page - 1) * PAGE_SIZE, PAGE_SIZE)
+  const [rows, total, statusCodes] = await Promise.all([
     prisma.hospital.findMany({
-      where,
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-      orderBy: { createdAt: 'desc' },
+      where: { id: { in: pageIds } },
       select: {
         id: true,
         hospitalCode: true,
@@ -140,6 +140,7 @@ export async function GET(request: NextRequest) {
     prisma.statusCode.findMany({ select: { name: true, color: true } }),
   ])
 
+  const hospitals = sortByIdOrder(rows, pageIds)
   const colorMap = new Map(statusCodes.map((sc) => [sc.name, sc.color]))
 
   return NextResponse.json({

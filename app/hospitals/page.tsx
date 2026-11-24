@@ -13,6 +13,7 @@ import ExportExcelButton from './_components/ExportExcelButton'
 import ImportButton from './_components/ImportButton'
 
 import { trimSearch } from '@/lib/searchParam'
+import { hospitalPageIdsActiveFirst, sortByIdOrder } from '@/lib/hospitalListOrder'
 const PAGE_SIZE = 20
 
 // 상품유형 배지 — /sales/deals 목록과 동일한 솔리드 컬러 pill (일반/라이트 복수 공존 표시)
@@ -76,12 +77,11 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
     ...(typeFilter.length > 0 && { type: { in: typeFilter } }),
   }
 
-  const [hospitals, total, sidoRows, statusCodes, typeRows] = await Promise.all([
+  // 미계약이 아닌 병원 먼저, 그 안에서 최근 등록순 (2026-11-12, lib/hospitalListOrder)
+  const pageIds = await hospitalPageIdsActiveFirst(where, (page - 1) * PAGE_SIZE, PAGE_SIZE)
+  const [hospitalRows, total, sidoRows, statusCodes, typeRows] = await Promise.all([
     prisma.hospital.findMany({
-      where,
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-      orderBy: { createdAt: 'desc' },
+      where: { id: { in: pageIds } },
       select: {
         id: true,
         hospitalCode: true,
@@ -114,6 +114,7 @@ export default async function HospitalsPage({ searchParams }: PageProps) {
     }),
   ])
 
+  const hospitals = sortByIdOrder(hospitalRows, pageIds)
   const statusColorMap = new Map(statusCodes.map((sc) => [sc.name, sc.color]))
 
   // 병원별 판매모델(도입형태)·상품유형(딜 합집합, 일반/라이트 순 고정)

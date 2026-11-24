@@ -1,79 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
 import { getAuthUser, isSuperAdmin } from '@/lib/auth'
+import { auditActorFromJWT } from '@/lib/audit'
+import { executeHospitalSyncFromHira, hiraSyncSummaryText, planHospitalSyncFromHira } from '@/lib/hiraTwin'
 
 export const dynamic = 'force-dynamic'
+
+/**
+ * 병원 등록 동기화 — 병원이 없는 심평원 레코드를 미계약 병원으로 등록.
+ * 요양기호만 바뀐 같은 병원은 새로 만들지 않는다 (2026-11-12, lib/hiraTwin.ts):
+ * 구 레코드가 폐기된 키면 기존 병원의 연결만 교체, 판단이 애매하면 '확인 필요'로 돌려준다.
+ */
+
+// GET — 실행하지 않고 계획만 (화면의 '확인 필요' 목록)
+export async function GET(request: NextRequest) {
+  const user = await getAuthUser(request)
+  if (!user || !isSuperAdmin(user.role)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  const plan = await planHospitalSyncFromHira()
+  return NextResponse.json({
+    syncAt: plan.syncAt,
+    createCount: plan.create.length,
+    relink: plan.relink,
+    review: plan.review,
+    skippedDead: plan.skippedDead,
+    message: hiraSyncSummaryText({ created: plan.create.length, relinked: plan.relink.length, review: plan.review.length, skippedDead: plan.skippedDead }),
+  })
+}
 
 export async function POST(request: NextRequest) {
   const user = await getAuthUser(request)
   if (!user || !isSuperAdmin(user.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-
-  // hira_hospitals 중 hospitals에 아직 없는 것 찾기
-  const unlinked = await prisma.hiraHospital.findMany({
-    where: { hospital: null },
-    select: {
-      hiraId: true,
-      name: true,
-      typeName: true,
-      typeCode: true,
-      sidoCode: true,
-      sidoName: true,
-      sigunguCode: true,
-      sigunguName: true,
-      eupmyeondong: true,
-      postalCode: true,
-      address: true,
-      coordinateX: true,
-      coordinateY: true,
-    },
-  })
-
-  if (unlinked.length === 0) {
-    return NextResponse.json({ created: 0, message: '신규 병원이 없습니다.' })
-  }
-
-  // 현재 최대 hospitalCode 번호 조회
-  const allCodes = await prisma.hospital.findMany({
-    where: { hospitalCode: { startsWith: 'HOSP-' } },
-    select: { hospitalCode: true },
-  })
-  let maxNum = allCodes.reduce((max, h) => {
-    const match = h.hospitalCode.match(/^HOSP-(\d+)$/)
-    return match ? Math.max(max, parseInt(match[1])) : max
-  }, 0)
-
-  // 배치로 생성
-  let created = 0
-  for (const h of unlinked) {
-    maxNum++
-    const hospitalCode = `HOSP-${String(maxNum).padStart(6, '0')}`
-
-    await prisma.hospital.create({
-      data: {
-        hospitalCode,
-        hiraId: h.hiraId,
-        hiraHospitalName: h.name,
-        hospitalName: h.name,
-        type: h.typeName ?? h.typeCode ?? '',
-        sidoCode: h.sidoCode ?? null,
-        sidoName: h.sidoName ?? null,
-        sigunguCode: h.sigunguCode ?? null,
-        sigunguName: h.sigunguName ?? null,
-        eupmyeondong: h.eupmyeondong ?? null,
-        postalCode: h.postalCode ?? null,
-        address: h.address ?? null,
-        coordinateX: h.coordinateX ?? null,
-        coordinateY: h.coordinateY ?? null,
-        status: '미계약',
-      },
-    })
-    created++
-  }
-
-  return NextResponse.json({
-    created,
-    message: `${created}건의 병원이 등록되었습니다.`,
-  })
+  const result = await executeHospitalSyncFromHira({ req: request, actor: auditActorFromJWT(user) })
+  const nothing = result.created === 0 && result.relinked.length === 0 && result.review.length === 0
+  return NextResponse.json({ ...result, message: nothing ? '신규 병원이 없습니다.' : result.message })
 }
