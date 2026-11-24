@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-11-24 14:49 | 사용량 — 열람 권한을 SEERS 소속 USER 이상으로 넓힘 (dev2 빌드·화면 검증 → PROD 반영)
+
+- **요청**: "SEERS 소속 USER도 사용량 메뉴 볼 수 있게 해줘". 종전: (ADMIN 이상 또는 `usage.view`) + SEERS 소속 — PROD에서 볼 수 있는 계정은 SEERS 소속 ADMIN 13·SUPER_ADMIN 1, `usage.view`를 가진 역할 0개
+- **변경**: `lib/usage/access.ts` 게이트를 (USER 이상 또는 `usage.view`) + 활성 + SEERS 소속으로. 화면(`/usage`·`/usage/agents`)과 `/api/usage/*`가 모두 이 게이트를 쓰므로 한 곳만 바꿈. VIEWER는 종전대로 `usage.view` 권한이 있을 때만, SEERS 소속 요건·에이전트 관리의 변경(ADMIN 이상)은 그대로. 거부 안내 문구 2곳·권한 카탈로그 설명(`usage.view`는 이제 VIEWER에게 열어 줄 때만 의미) 갱신
+- **메뉴**: `scripts/seed-usage-nav.sql`의 허용 등급에 USER 추가(새로 넣는 환경용). 이미 행이 있는 환경은 1회 UPDATE 필요 — `UPDATE nav_menu_items SET allowed_roles = ARRAY['SUPER_ADMIN','ADMIN','USER'] WHERE menu_key = 'usage';` (**PROD·DEV 서버 미적용**). dev2에는 메뉴 행이 없어(데이터 동기화로 지워짐) 시드를 실행해 새 값으로 넣음
+- **검증**: tsc · eslint · dev2 계정으로 게이트 직접 호출 — SEERS USER·ADMIN·SUPER_ADMIN 열람 가능, SEERS VIEWER 거부, 비활성 USER 거부(타 소속 USER·ADMIN 계정은 dev2에 없어 확인 못 함 — 소속 판정 코드는 바꾸지 않음). dev2 빌드 후 실제 화면(Playwright, SEERS 소속 USER·ADMIN·VIEWER 계정 22항목): USER — 운영현황 아래 '사용량' 메뉴 보임 · 전체 병원 화면과 조회 API 200 · 에이전트 관리는 열람만([병원 등록]·관리 열 없음) · 병원 등록 요청 403 / ADMIN — 종전과 같음([병원 등록] 있음) / VIEWER — 메뉴 없음 · 화면 거부 안내 · 조회 API 403(`/api/usage/status`는 설계대로 200에 `visible:false`)
+- **PROD 반영 시**: 커밋·push → pull → 힙 4GB 빌드 → `pm2 restart thync-prod` + 위 메뉴 UPDATE 1건(PROD DB 쓰기 — 명시 허락). 반영되면 SEERS 소속 USER 47명이 사용량 화면과 에이전트 관리(열람만)를 보게 됨
+- 파일: lib/usage/access.ts, app/usage/page.tsx, app/usage/agents/page.tsx, lib/permissions.ts, scripts/seed-usage-nav.sql, README.md, projects/usage_collection_design.md, projects/usage_overview_design.md
+
+## 2026-11-24 11:10 | [운영 데이터 조치 — PROD만] 사용량 에이전트 관리에 '운영' 병원 216곳 일괄 등록
+
+- **요청**: 에이전트 일괄 설치 준비 — `병원목록_20261123(서버수량 표기).xlsx`(226곳, D열 서버 수량)의 운영 병원을 에이전트 관리에 모두 등록, 강남의원(서버 수량 NA)은 제외
+- **사전 확인(읽기 전용)**: 226곳 모두 PROD '운영'·병원명 일치, PROD 운영 중 파일에 없는 곳은 테스트병원(HOSP-080599)뿐. 이미 등록 9곳은 수량이 파일과 같아 건너뜀
+- **조치**: 1회성 스크립트(`scripts/tmp-usage-bulk-enroll.mts`, 커밋 안 함) — 화면 등록과 같은 경로(`ingestAdmin('/enrollments', create_only)` + 감사 로그) · 병원명은 본체 값 · 메모 없음. dry-run(대상 216곳·서버 321대) → `--apply` 등록 216·실패 0 → 스크립트·목록 PROD·dev2 삭제
+- **결과(PROD)**: 에이전트 관리 225곳·예상 서버 331대(created_by '일괄 등록(Claude Code)' 216곳/321대), 파일 대비 225곳 등록·수량 전부 일치, 미등록은 HOSP-032798 재단법인한국의학연구소강남의원 1곳. 감사 로그 216행(actor '운영 보정(Claude Code)', resource `usage_agent_enrollment`). 수신부 health 200
+- 코드 변경 없음 · dev2·DEV 원본 DB 미반영
+
 ## 2026-11-24 09:21 | 심평원 요양기호 변경 대응 — dev2 빌드·화면 검증 → 커밋(1eb7155) → PROD 반영 (DEV 서버 미반영)
 
 - 기능 설명·검증 내역은 아래 **2026-11-12 16:15 항목**(11-12에 dev2에서 만들고 미커밋으로 두었던 것). 사용자 "진행해"(dev2 빌드·화면 검증) → "PROD 반영하고 알려줘"
