@@ -5,8 +5,8 @@
  *   npx tsx scripts/usage-metrics-test.mts <병원코드> [30|90]   + 원본 DB 의 실제 데이터로, 화면용 계산과 별도 SQL 계산을 대조 (읽기 전용)
  */
 import { DAY_SEC, average, changeRate, dayLabel, dayStats, localDayStart, spanStats, startedIn, weekStartOf } from '../lib/usage/daily'
-import { aggregateWeeks, capacityOn, countsAsMeasurement, defaultModelOf, getUsageDaily, getUsageDailyAllModels, hospitalModelOf, measurementModels, planForModel, typeModelOf } from '../lib/usage/metrics'
-import { OVERVIEW_DAYS, summarizeOverview, summarizeOverviewTotal, type OverviewDay } from '../lib/usage/overview'
+import { aggregateWeeks, capacityOn, countsAsMeasurement, defaultModelOf, deviceModelOf, getUsageDaily, getUsageDailyAllModels, hospitalModelOf, measurementModels, planForModel, premiumModel, typeModelOf } from '../lib/usage/metrics'
+import { OVERVIEW_DAYS, summarizeOverview, summarizeOverviewActivity, summarizeOverviewTotal, summarizeOverviewTrend, type OverviewDay } from '../lib/usage/overview'
 import { agentHospitalState } from '../lib/usage/agents'
 import { fmtTime, positional, usageDb } from './usage-lib.mts'
 
@@ -94,6 +94,14 @@ const h = (n: number) => D + n * 3600
   check('종류 모델: 사용량 딜 + 공급 → 섞임(null, 시리얼로)', typeModelOf({ deals: [{ date: null, qty: 10, model: 'usage' }], supply: 3 }) === null)
   check('종류 모델: 일반·사용량 딜 → 섞임(null)', typeModelOf(mixed) === null)
   check('종류 모델: 수량 없음 → null', typeModelOf(undefined) === null)
+  // 기기 하나의 판매모델 (2026-11-25 — 섞인 종류는 병원 서버의 기기 등록 값)
+  check('등록 값: 1 사용량비례형 · 0 일반형 · 없음 null', premiumModel(1) === 'usage' && premiumModel(0) === 'general' && premiumModel(null) === null && premiumModel(undefined) === null)
+  check('기기 모델: 종류가 한 모델뿐이면 등록 값과 무관하게 그 모델', deviceModelOf(1, 'usage', 0, 'general') === 'usage' && deviceModelOf(3, 'general', 1, 'usage') === 'general')
+  check('기기 모델: 섞인 종류의 심전계는 등록 값 (문산중앙 — 계약건 연결 없음)', deviceModelOf(1, null, 1, undefined) === 'usage' && deviceModelOf(1, null, 0, undefined) === 'general')
+  check('기기 모델: 등록 값이 계약건보다 먼저', deviceModelOf(3, null, 1, 'general') === 'usage' && deviceModelOf(3, null, 0, 'usage') === 'general')
+  check('기기 모델: 등록 값이 없으면 계약건, 그것도 없으면 일반형', deviceModelOf(1, null, null, 'usage') === 'usage' && deviceModelOf(1, null, null, undefined) === 'general')
+  check('기기 모델: 수량이 없는 종류(undefined)도 등록 값', deviceModelOf(1, undefined, 1, undefined) === 'usage')
+  check('기기 모델: 카트온은 등록 값을 보지 않는다 (계약건 → 사용량비례형)', deviceModelOf(10, null, 0, undefined) === 'usage' && deviceModelOf(10, null, 0, 'general') === 'general')
   // 측정의 판매모델 = 심전계·산소포화도 우선, 없으면 카트온, 둘 다 없으면 일반형
   const S = (...m: ('general' | 'usage')[]) => new Set(m)
   const eq = (a: Set<string>, b: string[]) => a.size === b.length && b.every((x) => a.has(x))
@@ -162,6 +170,36 @@ console.log('\n■ 에이전트 관리 — 병원 상태')
   check('서버가 없으면 설치 대기', agentHospitalState(2, 0, 0, false) === 'waiting')
   check('등록만 하고 한 번도 받지 못했으면 설치 대기 (수신 끊김 아님)', agentHospitalState(2, 1, 0, false) === 'waiting')
   check('등록 없이 병원 토큰으로 수집 → 설치된 서버 수가 기준', agentHospitalState(null, 2, 2, true) === 'collecting' && agentHospitalState(null, 2, 1, true) === 'partial')
+}
+
+
+console.log('\n■ 전체 병원 대시보드 (2026-11-25)')
+{
+  const T = Date.UTC(2026, 10, 25) / 1000 // 오늘 2026-11-25 (수)
+  const dayOf = (offset: number) => dayLabel(T + offset * DAY_SEC)
+  const mk = (peak: number, cap: number): OverviewDay[] => Array.from({ length: 84 }, (_, i) => ({ date: dayOf(-(i + 1)), peak, capacity: cap }))
+  const a = summarizeOverview(mk(10, 100), T, T) // 10%
+  const b = summarizeOverview(mk(30, 50), T, T) // 60%
+  check('주별 값에 평균 최대 동시·평균 수량이 함께 나온다', a.weeks.length === 12 && a.weeks[5].avgPeak === 10 && a.weeks[5].avgCapacity === 100 && a.weeks[5].rate === 10)
+  const trend = summarizeOverviewTrend([a, b])
+  check('전체 추이: 주마다 Σ 평균 최대 동시 ÷ Σ 평균 수량 (단순 평균 35% 아님)', trend.length === 12 && Math.abs(trend[5].rate! - (40 / 150) * 100) < 1e-9 && trend[5].hospitals === 2, trend[5])
+  const none = summarizeOverview([], T, T)
+  const t2 = summarizeOverviewTrend([a, none])
+  check('전체 추이: 값이 없는 병원은 빼고 센다', t2[5].hospitals === 1 && t2[5].rate === 10, t2[5])
+  check('전체 추이: 병원이 없으면 빈 목록', summarizeOverviewTrend([]).length === 0)
+  check('전체 추이: 모두 값이 없으면 null', summarizeOverviewTrend([none]).every((w) => w.rate === null && w.hospitals === 0))
+  // 측정 활동: 최근 30일(오늘 제외 29일) 하루 10건, 이전 30일 하루 5건
+  const days = [
+    ...Array.from({ length: 29 }, (_, i) => ({ date: dayOf(-(i + 1)), started: 10, measured: 100 })),
+    ...Array.from({ length: 30 }, (_, i) => ({ date: dayOf(-(i + 30)), started: 5, measured: 50 })),
+    { date: dayOf(0), started: 999, measured: 999 }, // 오늘은 빠진다
+    { date: dayOf(-60), started: 999, measured: 999 }, // 이전 30일보다 앞은 빠진다
+  ]
+  const act = summarizeOverviewActivity(days, T)
+  check('측정 활동: 최근 30일 합(오늘 제외) · 이전 30일 합', act.started === 290 && act.prevStarted === 150, act)
+  check('측정 활동: 증감률 · 하루 평균 측정 환자', Math.abs(act.startedChange! - ((290 - 150) / 150) * 100) < 1e-9 && act.avgMeasured === 100)
+  check('측정 활동: 일별 값은 날짜순 29일', act.days.length === 29 && act.days[0].date === dayOf(-29) && act.days[28].date === dayOf(-1))
+  check('측정 활동: 이전 기간이 없으면 증감률 없음', summarizeOverviewActivity(days.slice(0, 29), T).startedChange === null && summarizeOverviewActivity([], T).avgMeasured === null)
 }
 
 const [hospital, daysArg] = positional

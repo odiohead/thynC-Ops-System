@@ -35,8 +35,12 @@
  *      분모: 계약 수량을 딜의 판매모델로 나눈다. 비계약 공급 수량(대웅 직판)은 일반형, 단 카트온은 사용량비례형(2026-11-18 사용자 지시).
  *      사용량: 기기 종류의 도입 수량(계약 딜 + 공급)이 한 판매모델뿐이면 그 종류의 기기는 모두 그 모델 (2026-11-18 사용자 지시 —
  *              공식 도입 수량이 기준. 예: 화순성심 심전계 150·산소포화도 150 = 사용량 딜 → 시리얼 등록 여부와 무관하게 사용량비례형).
- *              두 모델이 섞인 종류만 기기 시리얼 → 기기 현황(hospital_devices)의 계약건(deal_code) → 그 딜의 판매모델로 가르고,
- *              기기 현황에 없거나 계약건이 연결되지 않은 기기는 일반형, 카트온은 사용량비례형 (사용자 지시 — 연결은 담당자가 맞춘다).
+ *              두 모델이 섞인(또는 수량이 없는) 종류의 심전계·산소포화도는 **병원 서버의 기기 등록 값**(device_register.premium —
+ *              1 사용량비례형 / 0 일반형)으로 가른다 (2026-11-25 사용자 결정 — 문산중앙: 딜 일반 12·사용량 48 = 서버 등록 12·48 인데
+ *              기기 현황에 계약건이 연결된 기기가 없어 전부 일반형으로 세고 있었다). 값은 측정 기기 행에 수집 시점 값으로 들어 있고,
+ *              교체로 측정 기기 목록에서 빠진 기기는 현재 기기 등록 값을 쓴다. 병원 서버에 등록 정보가 없는 기기만 종전 규칙 —
+ *              기기 시리얼 → 기기 현황(hospital_devices)의 계약건(deal_code) → 그 딜의 판매모델, 그것도 없으면 일반형.
+ *              카트온은 등록 값을 보지 않는다(종전대로 계약건 → 없으면 사용량비례형).
  *      측정(환자 수·동시측정)은 심전계·산소포화도의 판매모델로 나눈다. 둘 다 없는 측정만 카트온의 모델,
  *      기기 정보가 없는 측정은 병원의 판매모델(모든 도입 수량이 한 모델뿐이면 그 모델, 아니면 일반형).
  *      (카트온·체온계 등이 함께 붙었다고 다른 모델에 중복으로 세지 않는다. 심전계·산소포화도 모델이 섞인 측정은 양쪽에 센다)
@@ -156,6 +160,45 @@ async function loadCapacityPlans(hospitalCode: string, types: number[]): Promise
 }
 
 /**
+ * 그날(today, 'YYYY-MM-DD') 기준 병원별 계약·공급 수량 — 기기 종류 하나, 판매모델 하나. 전체 병원 화면의 '수집 범위(수량 기준)'용.
+ * loadCapacityPlans + capacityOn 과 같은 규칙을 전 병원에 한 번에 적용한 것이다(도입일 ≤ 그날인 계약완료 딜 + 비계약 공급 수량).
+ */
+export async function loadCapacityByHospital(type: number, model: UsageModel, today: string): Promise<Map<string, number>> {
+  const supplyModel = defaultModelOf(type)
+  const [deals, supply] = await Promise.all([
+    prisma.$queryRawUnsafe<{ hospital_code: string; qty: number }[]>(
+      `SELECT sd.hospital_code, sum(sdd.quantity)::int AS qty
+         FROM sales_deals sd
+         JOIN status_codes sc ON sc.id = sd.status_id
+         LEFT JOIN projects p ON p.project_code = sd.project_code
+         JOIN sales_deal_devices sdd ON sdd.deal_id = sd.id
+         JOIN device_info di ON di.id = sdd.device_info_id
+        WHERE sc.category = $1 AND sc.name = $2 AND di.onprem_device_type = $3
+          AND (COALESCE(p.end_date_expected, p.start_date, sd.contract_date) IS NULL
+               OR COALESCE(p.end_date_expected, p.start_date, sd.contract_date)::date <= $4::date)
+          AND ($5 = 'all' OR ${MODEL_SQL} = $5)
+        GROUP BY 1`,
+      DEAL_STATUS_CATEGORY,
+      DEAL_STATUS_CONTRACTED,
+      type,
+      today,
+      model,
+    ),
+    model === 'all' || model === supplyModel
+      ? prisma.$queryRaw<{ hospital_code: string; qty: number }[]>`
+          SELECT s.hospital_code, sum(s.quantity)::int AS qty
+            FROM hospital_device_supplies s
+            JOIN device_info di ON di.id = s.device_info_id
+           WHERE di.onprem_device_type = ${type}
+           GROUP BY 1`
+      : Promise.resolve([] as { hospital_code: string; qty: number }[]),
+  ])
+  const out = new Map<string, number>()
+  for (const r of [...deals, ...supply]) out.set(r.hospital_code, (out.get(r.hospital_code) ?? 0) + Number(r.qty))
+  return out
+}
+
+/**
  * 기기 종류 → 판매모델. 운영관리시스템의 도입 수량(계약 딜 + 공급)이 한 판매모델뿐이면 그 종류의 기기는 모두 그 모델이다
  * (시리얼이 기기 현황에 없어도). 두 모델이 섞였거나 수량이 없으면 null — 시리얼별로 기기 현황의 계약건을 본다.
  */
@@ -169,6 +212,27 @@ export function typeModelOf(plan: CapacityPlan | undefined): SaleModel | null {
 /** 측정이 붙은 기기 종류 → 측정의 판매모델 판정에 쓰는 순위. 심전계·산소포화도가 우선, 없으면 카트온, 그 밖의 기기(체온·혈압)는 안 본다 */
 const MAIN_TYPES = new Set([1, 3])
 const KIND_TYPES = new Set<number>(USAGE_DEVICE_KINDS.map((k) => k.type))
+
+/** 병원 서버의 기기 등록 값(premium) → 판매모델. 1 사용량비례형 · 0 일반형 · 값 없음(등록 정보 없음)은 null */
+export function premiumModel(premium: number | null | undefined): SaleModel | null {
+  return premium === 1 ? 'usage' : premium === 0 ? 'general' : null
+}
+
+/**
+ * 기기 하나의 판매모델 (순수 함수 — scripts/usage-metrics-test.mts 에서 검증)
+ *  1) 그 종류의 도입 수량이 한 판매모델뿐이면 그 모델 (typeModel)
+ *  2) 심전계·산소포화도는 병원 서버의 기기 등록 값 (premium)
+ *  3) 기기 현황에 연결된 계약건의 모델 (registryModel)
+ *  4) 기본 모델 — 카트온 사용량비례형, 그 밖 일반형
+ */
+export function deviceModelOf(type: number, typeModel: SaleModel | null | undefined, premium: number | null | undefined, registryModel: SaleModel | undefined): SaleModel {
+  if (typeModel) return typeModel
+  if (MAIN_TYPES.has(type)) {
+    const p = premiumModel(premium)
+    if (p) return p
+  }
+  return registryModel ?? defaultModelOf(type)
+}
 
 /**
  * 측정의 판매모델 — 심전계·산소포화도가 붙었으면 그 기기들의 모델, 없으면 카트온의 모델,
@@ -228,7 +292,7 @@ async function loadStatusCoverage(hospitalCode: string): Promise<Map<string, num
   return cov
 }
 
-/** 기기 시리얼(정규화) → 판매모델. 운영관리시스템 기기 현황에서 이 병원에 있거나 있었던 기기의 계약건 기준. 없으면 목록에 없음(= 일반형) */
+/** 기기 시리얼(정규화) → 판매모델. 운영관리시스템 기기 현황에서 이 병원에 있거나 있었던 기기의 계약건 기준 — 병원 서버에 기기 등록 값이 없는 기기에만 쓴다 */
 async function loadModelBySerial(hospitalCode: string): Promise<Map<string, SaleModel>> {
   const rows = await prisma.$queryRawUnsafe<{ serial_no: string; m: SaleModel }[]>(
     `SELECT u.serial_no, ${MODEL_SQL} AS m
@@ -379,11 +443,16 @@ async function loadUsage(hospitalCode: string, days: number, nowMs: number): Pro
          GROUP BY ds.server, ds.measurement_code, ds.device_type, COALESCE(ds.serial_number, '')
        ),
        d AS (
-         SELECT server, measurement_code, device_type, serial_number, removed_at
+         SELECT server, measurement_code, device_type, serial_number, removed_at, premium
          FROM raw_measurement_devices WHERE hospital_code = $1
+       ),
+       reg AS (
+         SELECT server, serial_number, premium FROM raw_device_registers WHERE hospital_code = $1
        )
        SELECT m.server, m.measurement_code, m.parent_measurement_code, COALESCE(st.device_type, d.device_type) AS device_type,
               COALESCE(st.serial_number, d.serial_number) AS serial_number,
+              -- 일반/사용량 구분: 측정 기기 행의 값(수집 시점) → 없으면(교체로 목록에서 빠진 기기) 현재 기기 등록 값
+              COALESCE(d.premium, reg.premium) AS premium,
               EXTRACT(EPOCH FROM GREATEST(m.s_ts, COALESCE(st.fe, m.s_ts)))::float8 AS s,
               EXTRACT(EPOCH FROM LEAST(m.e_ts,
                 CASE WHEN d.measurement_code IS NOT NULL AND d.removed_at IS NULL THEN m.e_ts
@@ -391,18 +460,20 @@ async function loadUsage(hospitalCode: string, days: number, nowMs: number): Pro
        FROM st
        FULL JOIN d ON d.server = st.server AND d.measurement_code = st.measurement_code
                   AND d.device_type = st.device_type AND d.serial_number = st.serial_number
-       JOIN m ON m.server = COALESCE(st.server, d.server) AND m.measurement_code = COALESCE(st.measurement_code, d.measurement_code)`,
+       JOIN m ON m.server = COALESCE(st.server, d.server) AND m.measurement_code = COALESCE(st.measurement_code, d.measurement_code)
+       LEFT JOIN reg ON reg.server = m.server AND reg.serial_number = COALESCE(st.serial_number, d.serial_number)`,
       [hospitalCode, from, toExclusive],
     ),
     loadCapacityPlans(hospitalCode, [...kinds]),
     loadModelBySerial(hospitalCode),
     loadStatusCoverage(hospitalCode),
   ])
-  // 기기 종류의 도입 수량이 한 판매모델뿐이면 그 모델, 섞였으면 시리얼의 계약건, 그래도 모르면 기본 모델(카트온 사용량비례형·그 밖 일반형)
+  // 기기 종류의 도입 수량이 한 판매모델뿐이면 그 모델, 섞였으면 병원 서버의 기기 등록 값(심전계·산소포화도) →
+  // 기기 현황의 계약건 → 기본 모델(카트온 사용량비례형·그 밖 일반형) — deviceModelOf
   const hospitalModel = hospitalModelOf(Array.from(plans.values()))
   const typeModel = new Map<number, SaleModel | null>(Array.from(plans.entries()).map(([t, p]) => [t, typeModelOf(p)]))
-  const modelOf = (type: number, serial: string | null): SaleModel =>
-    typeModel.get(type) ?? modelBySerial.get(normalizeSerial(serial).serialNo) ?? defaultModelOf(type)
+  const modelOf = (type: number, serial: string | null, premium: number | null): SaleModel =>
+    deviceModelOf(type, typeModel.get(type), premium, modelBySerial.get(normalizeSerial(serial).serialNo))
 
   // 기기 사용 단위 → 판매모델. 측정(과 부모 측정)마다 붙은 기기의 판매모델을 심전계·산소포화도 / 카트온으로 나눠 모은다
   const unitList: UsageUnit[] = []
@@ -420,7 +491,7 @@ async function loadUsage(hospitalCode: string, days: number, nowMs: number): Pro
     if (r.s === null || r.e === null) continue
     const key = `${r.server}|${r.measurement_code}`
     const type = Number(r.device_type)
-    const m = modelOf(type, r.serial_number)
+    const m = modelOf(type, r.serial_number, r.premium === null || r.premium === undefined ? null : Number(r.premium))
     withDevice.add(key)
     if (r.parent_measurement_code) withDevice.add(`${r.server}|${r.parent_measurement_code}`)
     addModel(key, type, m)
