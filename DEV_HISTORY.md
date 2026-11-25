@@ -13,6 +13,7 @@
 - **dev2 데이터 상태(주의)**: 화면 확인용으로 dev2 본체 DB의 `usage_daily_stats`·`usage_daily_device_stats`를 PROD 사본으로 바꾸고, dev2 원본 DB에 PROD의 수집 서버 목록(211대, 서버 키 제외)·등록·서버별 마지막 실행과 문산중앙 원본(측정 4,609 · 상태 이력 52만 행)을 넣음. dev2 집계 스케줄러는 **꺼 둠**(`usage_stats_interval=off`) — 켜면 원본이 없는 186곳의 집계를 0으로 덮어쓴다
 - **검증 중 본 것(PROD, 손대지 않음)**: PROD 마지막 집계(13:58~14:11)가 188곳에 **12.8분** 걸렸고 1곳(HOSP-000115)이 조회 시간 상한에 걸려 실패 — 1시간 주기 집계가 병원 수 증가로 무거워지고 있음. 화면 상단의 '병원 1곳을 계산하지 못했습니다' 안내가 이것
 - 파일: app/usage/UsageOverview.tsx(전면 개편), app/usage/UsageCriteria.tsx, lib/usage/overview.ts, lib/usage/metrics.ts, scripts/usage-metrics-test.mts, README.md, projects/usage_overview_design.md, projects/README.md
+- **DEV 서버(13.125.238.77) 반영 2026-11-25 14:30 (bd55a06)**: `git pull`(6f44261 → bd55a06 — 그동안 DEV에 올리지 않았던 심평원 요양기호 변경 대응 1eb7155 · 사용량 열람 권한 76d2319 포함, 패키지·협업 서버·수신부 변경 없음) → 마이그 `20261112170000_hira_hospital_last_seen` psql 적용·resolve(`thync_ops_dev`) → generate → 사용량 메뉴 허용 등급에 USER 추가(1행 UPDATE) → 힙 4GB 빌드(nohup) → `pm2 restart thync-dev`. 확인: 로그인 200(로컬·dev.ops.seersthync.com), 미인증 `/usage`·조회 API 307, 빌드 산출물에 대시보드 문구 포함, 새 규칙으로 집계 다시 계산(2곳), 스케줄러 기동. 정지된 옛 운영 앱·수신부는 건드리지 않음. DEV 화면을 브라우저로 직접 열어 보지는 않음. **DEV 원본 데이터는 동수원·화순성심 2곳이고 11-18에서 멈춰 있어, DEV의 대시보드는 병원 2곳(둘 다 수신 지연)만 보인다** — 실제 규모의 화면은 dev2(`localhost:3000/usage`, PROD 집계 사본 188곳)에서 볼 수 있다. PROD 미반영
 
 ## 2026-11-25 14:23 | 사용량 — 판매모델이 섞인 병원의 측정을 병원 서버의 기기 등록 값으로 구분 (dev2 → DEV 서버 반영, PROD 미반영)
 
