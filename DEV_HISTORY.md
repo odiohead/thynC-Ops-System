@@ -14,6 +14,7 @@
 - **DB** `20261126140000_usage_dashboard_views`(dev2 · DEV 적용 · resolve, **PROD 미적용**)
 - **검증**: tsc · eslint · `usage-metrics-test.mts` 순수 130/130(새 20). dev2 빌드 후 실제 화면(Playwright, 최고관리자 · 일반 계정) 49/49 — 필터별로 핵심 수치 · 표 · 상위 10 · 수집 범위 · 신규 측정이 같은 병원 집합으로 재계산, 추이 기간 5종(26주는 12주와 겹치는 구간 값 동일 · 가동률과 순위는 불변), 병원 지정, 보기 저장 · 바뀜 · 덮어 저장 · 되돌리기 · 같은 이름 거부, 공유 전후 다른 계정의 목록 · 404 · 403 · 관리 창 잠금, 삭제 시 '전체'로, 390px · 다크 · 스크립트 오류 없음. 검증용 보기와 감사 기록은 삭제
 - 파일: lib/usage/filters.ts(신규), lib/usage/views.ts(신규), lib/usage/overview.ts, app/api/usage/overview/route.ts, app/api/usage/views/*(신규), app/api/usage/filter-hospitals/route.ts(신규), app/usage/UsageOverview.tsx, app/usage/OverviewFilters.tsx(신규), app/usage/OverviewViews.tsx(신규), app/usage/UsageCriteria.tsx, prisma/schema.prisma, prisma/migrations/20261126140000_usage_dashboard_views, scripts/usage-metrics-test.mts, README.md, projects/usage_dashboard_filter_design.md(신규), projects/README.md
+- **DEV 서버 반영 2026-11-26 13:36 (64078e9)** — 아래 구간 표 항목과 같은 배포(절차 · 확인 내용은 그 항목). DEV에는 저장된 보기 표가 비어 있음. **PROD 미반영**
 
 ## 2026-11-26 13:27 | 사용량 — 기기 사용 구간 표: 집계와 병원별 화면이 원본 상태 이력을 읽지 않게 (dev2 검증 → DEV 서버 반영, PROD 미반영)
 
@@ -24,6 +25,7 @@
 - **검증(dev2)**: 수신 시나리오 `usage-collect-smoke.mts` 99/99(구간 표 검사 6 추가 — 첫 수신 · 기기 교체 · 대조로 되돌려 재수신 · 전체 재전송 · 나눠 받음 · 용량 상한 뒤 재개에서 구간 표 = 원본에서 다시 묶은 값) · 변환 168만 행 → 2,063구간 1초, `--verify` 일치, 재실행 불변 · 문산중앙의 저장된 집계(원본으로 계산) = 구간 표로 다시 계산한 값 · 실데이터 대조 통과 · **병원 하나 91일 계산 1,965ms → 21ms** · 보관 정리는 임시 2024-01 조각으로 미리 보기 → 구간 없을 때 중단 → 변환 뒤 삭제 → 구간 유지 확인
 - **PROD에 올릴 때**(원본 DB 쓰기 — 명시 허락): 수신부 빌드 → 스키마 0003 → 수신부 재시작 → 변환(6,200만 행, 업무 외 시간) → `--verify` → 그 뒤에 본체. 순서가 바뀌면 구간 표가 빈 채로 계산된다(설계 문서 §8.4)
 - 파일: usage-ingest/migrations/0003_device_usage_spans.sql(신규), usage-ingest/store.mts, lib/usage/metrics.ts, scripts/usage-spans-backfill.mts(신규), scripts/usage-status-retention.mts(신규), scripts/usage-collect-smoke.mts, scripts/usage-lib.mts, README.md, CLAUDE.md, projects/usage_spans_design.md(신규), projects/README.md
+- **DEV 서버(13.125.238.77) 반영 2026-11-26 13:36 (64078e9 — 아래 필터 · 저장된 보기와 같은 배포)**: `git pull`(f1b5d0d → 64078e9, 패키지 · 협업 서버 변경 없음) → `npm run build:usage-ingest` → `node usage-ingest/dist/migrate.mjs`(원본 DB `thync_usage_dev`에 0003) → `pm2 restart thync-usage-ingest-dev` → `usage-spans-backfill.mts --dry` → 실행(달 조각 6개 117만 행 → 1,134구간, 2초) → `--verify` 2곳 일치 → 본체 DB 마이그 `20261126140000_usage_dashboard_views` psql 적용 · resolve(`thync_ops_dev`) → generate → 힙 4GB 빌드(nohup) → `pm2 restart thync-dev`. 확인: 재시작 전 `usage-stats-rebuild.mts --check` — **저장돼 있던 집계(원본으로 계산) = 구간 표로 다시 계산한 값**(두 병원 294 · 882행 전부), 로그인 200(로컬 · dev.ops.seersthync.com), 미인증 `/usage` · 조회 · 보기 · 병원 지정 API 307, 빌드 산출물에 보기 저장 문구 · 보기 API 포함, 스케줄러 첫 주기 최근(3일) 0초, **전체 91일 집계 2곳 547ms**(구간 표 이전 6.5초), 다시 `--check` · `--verify` 일치, 재시작 뒤 새 오류 없음. DEV 화면을 브라우저로 직접 열어 보지는 않음(화면 검증은 dev2 빌드본). DEV 원본은 2곳(11-18에서 멈춤)이라 대시보드에는 병원 2곳만 보인다. **PROD 미반영**
 
 ## 2026-11-26 12:38 | 사용량 — 일별 집계를 '매시간 최근 3일 + 하루 한 번 전체'로 나눔 · 집계 전용 조회 상한 (dev2 검증 → DEV 서버 → PROD 반영)
 
