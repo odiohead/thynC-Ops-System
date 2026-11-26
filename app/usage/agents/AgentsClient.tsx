@@ -12,6 +12,7 @@ import { ChevronLeft, Copy, Plus } from 'lucide-react'
 import PageHeader from '@/app/components/ui/PageHeader'
 import Badge from '@/app/components/ui/Badge'
 import Modal from '@/app/components/ui/Modal'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 import { Card } from '@/app/components/ui/Card'
 import type { AgentHospital, AgentHospitalState, AgentOverview, AgentServer } from '@/lib/usage/agents'
 
@@ -423,6 +424,8 @@ const validCount = (v: string) => {
 
 /** 병원 등록 — 병원 목록에 있는 병원을 골라 서버 대수를 적는다 (병원명·병원코드는 입력하지 않는다) */
 function RegisterModal({ busy, onClose, onSubmit }: { busy: boolean; onClose: () => void; onSubmit: (h: SearchHospital, expected: number, note: string) => void }) {
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(true, onClose)
   const [q, setQ] = useState('')
   const [results, setResults] = useState<SearchHospital[] | null>(null)
   const [picked, setPicked] = useState<SearchHospital | null>(null)
@@ -448,7 +451,7 @@ function RegisterModal({ busy, onClose, onSubmit }: { busy: boolean; onClose: ()
   }, [q])
 
   return (
-    <Modal open onClose={onClose} title="수집 병원 등록" widthClass="max-w-xl">
+    <Modal open onClose={guard.requestClose} closeOnBackdrop={false} dialogRef={guard.ref} title="수집 병원 등록" widthClass="max-w-xl">
       <form
         className="flex flex-col gap-4"
         onSubmit={(e) => {
@@ -490,17 +493,19 @@ function RegisterModal({ busy, onClose, onSubmit }: { busy: boolean; onClose: ()
         </div>
         <ServerCountField value={expected} onChange={setExpected} />
         <NoteField value={note} onChange={setNote} />
-        <ModalButtons busy={busy} disabled={!picked || !validCount(expected)} submitLabel="등록" onClose={onClose} />
+        <ModalButtons busy={busy} disabled={!picked || !validCount(expected)} submitLabel="등록" onClose={guard.requestClose} />
       </form>
     </Modal>
   )
 }
 
 function EditModal({ hospital, busy, onClose, onSubmit }: { hospital: AgentHospital; busy: boolean; onClose: () => void; onSubmit: (expected: number, note: string) => void }) {
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(true, onClose)
   const [expected, setExpected] = useState(String(hospital.expectedServers ?? Math.max(1, hospital.registeredServers)))
   const [note, setNote] = useState(hospital.note ?? '')
   return (
-    <Modal open onClose={onClose} title={`${hospital.hospitalName} — 서버 대수`} widthClass="max-w-xl">
+    <Modal open onClose={guard.requestClose} closeOnBackdrop={false} dialogRef={guard.ref} title={`${hospital.hospitalName} — 서버 대수`} widthClass="max-w-xl">
       <form
         className="flex flex-col gap-4"
         onSubmit={(e) => {
@@ -513,7 +518,7 @@ function EditModal({ hospital, busy, onClose, onSubmit }: { hospital: AgentHospi
         </p>
         <ServerCountField value={expected} onChange={setExpected} />
         <NoteField value={note} onChange={setNote} />
-        <ModalButtons busy={busy} disabled={!validCount(expected)} submitLabel="저장" onClose={onClose} />
+        <ModalButtons busy={busy} disabled={!validCount(expected)} submitLabel="저장" onClose={guard.requestClose} />
       </form>
     </Modal>
   )

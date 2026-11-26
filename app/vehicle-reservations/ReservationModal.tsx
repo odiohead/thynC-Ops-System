@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 
 export interface VehicleOption {
   id: number
@@ -78,6 +79,8 @@ export default function ReservationModal({
   const isView = mode === 'view'
   const isReturn = mode === 'return'
   const readOnly = isView || isReturn
+  // 작성 중 닫기 확인 — 등록·수정·반납 입력 중에는 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(true, onClose)
   const r = reservation
   const reservedVehicle = r ? vehicles.find((v) => v.id === r.vehicleId) : undefined
 
@@ -199,14 +202,15 @@ export default function ReservationModal({
   const title = mode === 'create' ? '차량 예약' : mode === 'edit' ? '예약 수정' : isReturn ? '차량 반납' : '예약 상세'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={isView ? onClose : undefined}>
       <div
+        ref={guard.ref}
         className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold text-gray-900">{title}</h2>
-          <button onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
+          <button onClick={guard.requestClose} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
@@ -436,7 +440,7 @@ export default function ReservationModal({
           )}
 
           <button
-            onClick={isReturn ? () => { setError(null); setMode('view') } : onClose}
+            onClick={isReturn ? () => { setError(null); setMode('view') } : guard.requestClose}
             className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100"
           >
             {isReturn ? '뒤로' : '닫기'}

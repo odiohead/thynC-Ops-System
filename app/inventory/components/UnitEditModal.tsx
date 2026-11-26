@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState } from 'react'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 
 // 개체(시리얼 단품) 태그·메모 편집 모달 — PATCH /api/inventory/units/[id]
 interface UnitLite {
@@ -17,7 +18,8 @@ export default function UnitEditModal({ unit, onClose, onSaved }: {
 }) {
   const [tags, setTags] = useState((unit.tags ?? []).join(', '))
   const [memo, setMemo] = useState(unit.memo ?? '')
-  const backdropDown = useRef(false) // 모달 안 드래그 후 배경에서 마우스를 놓아도 닫히지 않도록
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(true, onClose)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -46,10 +48,8 @@ export default function UnitEditModal({ unit, onClose, onSaved }: {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onMouseDown={(e) => { backdropDown.current = e.target === e.currentTarget }}
-      onClick={(e) => { if (e.target === e.currentTarget && backdropDown.current) onClose(); backdropDown.current = false }}
     >
-      <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div ref={guard.ref} className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
         <div className="mb-3">
           <h3 className="text-sm font-semibold text-gray-900">개체 편집</h3>
           <p className="mt-0.5 font-mono text-xs text-gray-500">{unit.serialNo}</p>
@@ -75,7 +75,7 @@ export default function UnitEditModal({ unit, onClose, onSaved }: {
           </div>
         </div>
         <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">취소</button>
+          <button onClick={guard.requestClose} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">취소</button>
           <button onClick={save} disabled={busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">
             {busy ? '저장 중...' : '저장'}
           </button>

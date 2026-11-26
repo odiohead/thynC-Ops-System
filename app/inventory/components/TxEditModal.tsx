@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 
 interface Reason { id: number; name: string; value: string | null }
 
@@ -27,7 +28,8 @@ interface EditableTx {
 export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; onClose: () => void; onDone: () => void }) {
   const [reasons, setReasons] = useState<Reason[]>([])
   const [reasonId, setReasonId] = useState<number | null>(tx.reasonCode?.id ?? null)
-  const backdropDown = useRef(false) // 모달 안 드래그 후 배경에서 마우스를 놓아도 닫히지 않도록
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(true, onClose)
   const [quantity, setQuantity] = useState(String(tx.quantity))
   const [requester, setRequester] = useState(tx.requester ?? '')
   const [destination, setDestination] = useState(tx.destination ?? '')
@@ -76,10 +78,8 @@ export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; o
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onMouseDown={(e) => { backdropDown.current = e.target === e.currentTarget }}
-      onClick={(e) => { if (e.target === e.currentTarget && backdropDown.current) onClose(); backdropDown.current = false }}
     >
-      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div ref={guard.ref} className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
         <div className="mb-4">
           <h2 className="text-base font-semibold text-gray-900">전표 수정 <span className="ml-1 font-mono text-xs font-normal text-gray-400">{tx.txCode}</span></h2>
           <p className="mt-1 text-xs text-gray-400">
@@ -137,7 +137,7 @@ export default function TxEditModal({ tx, onClose, onDone }: { tx: EditableTx; o
         {error && <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
 
         <div className="mt-5 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50">취소</button>
+          <button onClick={guard.requestClose} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50">취소</button>
           <button onClick={save} disabled={busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
             {busy ? '저장 중...' : '저장'}
           </button>

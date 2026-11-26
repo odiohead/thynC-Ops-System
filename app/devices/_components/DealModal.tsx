@@ -8,6 +8,7 @@
  */
 import { useMemo, useState } from 'react'
 import Modal from '@/app/components/ui/Modal'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 import Button from '@/app/components/ui/Button'
 import { Select, Textarea } from '@/app/components/ui/Input'
 import { todayKst, toYmd } from '@/lib/deviceRegistryShared'
@@ -37,9 +38,11 @@ export function dealOptionLabel(d: SummaryDealRow): string {
 
 export function DealModal(props: DealModalProps) {
   const { open, onClose } = props
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(open, onClose)
   return (
-    <Modal open={open} onClose={onClose} title="계약건 지정" widthClass="max-w-md">
-      {open && <DealForm {...props} />}
+    <Modal open={open} onClose={guard.requestClose} closeOnBackdrop={false} dialogRef={guard.ref} title="계약건 지정" widthClass="max-w-md">
+      {open && <DealForm {...props} onClose={guard.requestClose} />}
     </Modal>
   )
 }

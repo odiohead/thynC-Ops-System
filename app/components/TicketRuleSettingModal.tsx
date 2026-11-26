@@ -7,6 +7,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import Modal from '@/app/components/ui/Modal'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 import Button from '@/app/components/ui/Button'
 import type { DomainRefType } from '@/lib/ticket-domains/meta'
 
@@ -60,6 +61,8 @@ export default function TicketRuleSettingModal({
   onClose: () => void
   refType: DomainRefType
 }) {
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(open, onClose)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -128,7 +131,7 @@ export default function TicketRuleSettingModal({
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={`${meta?.label ?? ''} → 티켓 자동생성 설정`} widthClass="max-w-2xl">
+    <Modal open={open} onClose={guard.requestClose} closeOnBackdrop={false} dialogRef={guard.ref} title={`${meta?.label ?? ''} → 티켓 자동생성 설정`} widthClass="max-w-2xl">
       {loading ? (
         <div className="py-10 text-center text-sm text-muted-foreground">불러오는 중...</div>
       ) : (
@@ -222,7 +225,7 @@ export default function TicketRuleSettingModal({
           </p>
 
           <div className="flex justify-end gap-2 border-t border-border pt-3">
-            <Button variant="outline" onClick={onClose} disabled={saving}>
+            <Button variant="outline" onClick={guard.requestClose} disabled={saving}>
               취소
             </Button>
             <Button onClick={save} disabled={saving}>

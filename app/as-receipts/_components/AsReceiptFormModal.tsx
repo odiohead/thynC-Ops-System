@@ -6,6 +6,7 @@
  * → 라인별 증상·기기종류 입력 → 등록. 수정 모드는 종결 라인 제거 불가(서버 400).
  */
 import { useState, useEffect } from 'react'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 import { AS_PICKUP_METHODS, defaultAsPickupMethod,
   AS_CATEGORIES, AS_CATEGORY_LABELS, AS_PICKUP_METHOD_LABELS,
   AS_DEVICE_KINDS, AS_TAGS, AS_TAG_LABELS, AS_TAG_FIELDS, AS_TAG_FLAGS_EMPTY, parseSerialTextarea, type AsCategory, type AsTag, type AsTagFlags,
@@ -76,6 +77,8 @@ export default function AsReceiptFormModal({
   /** 지정 시 수정 모드 (PUT), 미지정이면 등록 (POST) */
   editTarget?: AsEditTarget | null
 }) {
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(open, onClose)
   const [hospital, setHospital] = useState<{ code: string; name: string } | null>(null)
   const [hospitalQ, setHospitalQ] = useState('')
   const [hospitalOpts, setHospitalOpts] = useState<HospitalOpt[]>([])
@@ -290,14 +293,14 @@ export default function AsReceiptFormModal({
   const input = 'mt-1 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div
+        ref={guard.ref}
         className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-start justify-between">
           <h2 className="text-lg font-bold text-gray-900">{editTarget ? `AS접수 수정 — ${editTarget.asCode}` : 'AS접수 등록'}</h2>
-          <button type="button" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">✕</button>
+          <button type="button" onClick={guard.requestClose} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">✕</button>
         </div>
 
         {error && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -501,7 +504,7 @@ export default function AsReceiptFormModal({
           </div>
 
           <div className="flex justify-end gap-2 border-t border-gray-100 pt-3">
-            <button type="button" onClick={onClose} disabled={busy} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">취소</button>
+            <button type="button" onClick={guard.requestClose} disabled={busy} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">취소</button>
             <button
               type="button"
               onClick={submit}

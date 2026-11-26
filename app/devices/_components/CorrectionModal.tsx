@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import Modal from '@/app/components/ui/Modal'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 import Button from '@/app/components/ui/Button'
 import { Input, Select } from '@/app/components/ui/Input'
 import { cn } from '@/lib/cn'
@@ -57,6 +58,8 @@ interface Baseline {
 const EMPTY_FORM: FormState = { deviceInfoId: '', serialNo: '', macAddress: '', extDeviceCode: '', usageTypeId: '', productType: '', occurredOn: '' }
 
 export function CorrectionModal({ open, onClose, hospitalCode, device, models, onDone }: CorrectionModalProps) {
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(open, onClose)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [base, setBase] = useState<Baseline | null>(null)
   const [loading, setLoading] = useState(false)
@@ -204,7 +207,7 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
   const title = device ? `식별 정정 (관리) — ${device.serialNo}` : '식별 정정 (관리)'
 
   return (
-    <Modal open={open} onClose={onClose} title={title}>
+    <Modal open={open} onClose={guard.requestClose} closeOnBackdrop={false} dialogRef={guard.ref} title={title}>
       {!device ? (
         <p className="text-sm text-muted-foreground">정정할 기기가 지정되지 않았습니다.</p>
       ) : (
@@ -324,7 +327,7 @@ export function CorrectionModal({ open, onClose, hospitalCode, device, models, o
           )}
 
           <div className="flex items-center justify-end gap-2 pt-1">
-            <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={submitting}>
+            <Button type="button" variant="ghost" size="sm" onClick={guard.requestClose} disabled={submitting}>
               취소
             </Button>
             <Button type="submit" size="sm" disabled={submitting || loading || !base || !hasChanges || occurredOnInvalid}>

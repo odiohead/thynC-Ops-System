@@ -28,6 +28,7 @@ import {
 import DestHospitalSearch, { type DestHospital } from './DestHospitalSearch'
 import { STOCK_OUT_FILE_MAX_BYTES, STOCK_OUT_FILES_PER_REQUEST, isSpreadsheetFile } from '@/lib/stockOutFiles'
 import StockOutFilesPanel, { fmtFileSize } from './StockOutFilesPanel'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 
 export interface StockOutItemOpt {
   id: number
@@ -88,6 +89,8 @@ export default function StockOutRequestFormModal({
   /** 업무 구분 — 이번 범위는 프로젝트 팝업 = 구축 */
   purpose?: StockOutPurpose
 }) {
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(open, onClose)
   const salesMode = !project
   // 영업 유형 — 등록은 선택, 수정은 고정 (품목 라인이 유형 인벤토리에 묶여 있음)
   const [salesType, setSalesType] = useState<StockOutSalesType | ''>('')
@@ -325,8 +328,8 @@ export default function StockOutRequestFormModal({
   const chip = (on: boolean) => `rounded-full border px-3 py-1 text-sm ${on ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div ref={guard.ref} className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6">
         <div className="mb-4 flex items-start justify-between">
           <div>
             <h2 className="text-lg font-bold text-gray-900">
@@ -344,7 +347,7 @@ export default function StockOutRequestFormModal({
               )}
             </p>
           </div>
-          <button type="button" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">✕</button>
+          <button type="button" onClick={guard.requestClose} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">✕</button>
         </div>
 
         {error && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -570,7 +573,7 @@ export default function StockOutRequestFormModal({
           </div>
 
           <div className="flex justify-end gap-2 border-t border-gray-100 pt-3">
-            <button type="button" onClick={onClose} disabled={busy} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">취소</button>
+            <button type="button" onClick={guard.requestClose} disabled={busy} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">취소</button>
             <button type="button" onClick={submit} disabled={busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
               {busy ? '저장 중...' : editTarget ? '수정 저장' : '출고요청 생성'}
             </button>

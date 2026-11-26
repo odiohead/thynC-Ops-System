@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 
 interface Inventory { id: number; name: string; isActive: boolean }
 interface Warehouse { id: number; name: string; inventoryId: number; isActive: boolean }
@@ -29,6 +30,8 @@ function todayLocal(): string {
 const inputCls = 'rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
 export default function BulkTxModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(true, onClose)
   const [inventories, setInventories] = useState<Inventory[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [inReasons, setInReasons] = useState<Reason[]>([])
@@ -172,10 +175,10 @@ export default function BulkTxModal({ onClose, onDone }: { onClose: () => void; 
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4">
-      <div className="my-8 w-full max-w-4xl rounded-xl bg-white shadow-xl">
+      <div ref={guard.ref} className="my-8 w-full max-w-4xl rounded-xl bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
           <h2 className="text-base font-semibold text-gray-900">다품목 일괄 입출고</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">✕</button>
+          <button onClick={guard.requestClose} className="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         <div className="space-y-4 px-5 py-4">
@@ -296,7 +299,7 @@ export default function BulkTxModal({ onClose, onDone }: { onClose: () => void; 
         </div>
 
         <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-3">
-          <button onClick={onClose} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">취소</button>
+          <button onClick={guard.requestClose} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">취소</button>
           <button onClick={submit} disabled={submitting || inventoryId === ''} className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
             {submitting ? '처리 중…' : `${txType === 'IN' ? '입고' : '출고'} 등록`}
           </button>

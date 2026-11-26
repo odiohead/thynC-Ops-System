@@ -9,6 +9,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import Modal from '@/app/components/ui/Modal'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 import Button from '@/app/components/ui/Button'
 import { Select, Textarea } from '@/app/components/ui/Input'
 import { todayKst, type OccurredOnBasis } from '@/lib/deviceRegistryShared'
@@ -35,9 +36,11 @@ const BULK_MAX = 2000
 
 export function RecoverModal(props: RecoverModalProps) {
   const { open, onClose } = props
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(open, onClose)
   return (
-    <Modal open={open} onClose={onClose} title="회수" widthClass="max-w-xl">
-      {open && <RecoverForm {...props} />}
+    <Modal open={open} onClose={guard.requestClose} closeOnBackdrop={false} dialogRef={guard.ref} title="회수" widthClass="max-w-xl">
+      {open && <RecoverForm {...props} onClose={guard.requestClose} />}
     </Modal>
   )
 }

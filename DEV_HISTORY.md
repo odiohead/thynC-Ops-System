@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-11-26 15:30 | 입력형 모달 — 바깥 클릭 닫힘 방지 + 작성 중 닫기 확인 (dev2 → DEV)
+
+- **요청**(팀원 개선 요청): 출고요청 등 팝업에서 입력 중 바깥을 클릭하면 창이 닫혀 다시 작성해야 함 → 바깥 클릭 닫힘 방지, X·취소 시 작성 중인 내용이 있으면 확인, OPS 입력형 모달 공통 적용 검토. 1차 = 입력이 많은 모달 + 공통 Modal을 쓰는 입력 모달 (사용자 승인 — 추천안대로)
+- **공통**: `app/components/useUnsavedGuard.ts`(신규) — 모달 본문 ref 안의 input·change·drop 이벤트로 '입력함'을 기억(열 때마다 초기화, 프로그램이 넣은 기본값·수정 모달의 기존 값은 제외), `requestClose`는 입력이 있으면 확인 후 닫기(문구 '작성 중인 내용이 있습니다. 창을 닫으시겠습니까?'), 저장 성공 후 닫기는 확인 없음, 저장 후 창이 남는 화면은 `reset()`. `ui/Modal`에 `closeOnBackdrop`(기본 true)·`dialogRef` 추가 — 입력형은 ESC도 확인을 거침
+- **적용**: 출고요청 · AS접수 · AS 출고요청 · 차량예약(보기 모드는 바깥 클릭 닫기 유지) · 자재관리 단건 입출고·다품목 일괄·시리얼 일괄(처리 완료 후 reset)·전표 수정·시리얼 수정 · 기기현황 등록·교체·회수·병동 이동·상품유형·AS 접수·계약건·정정 · 티켓 자동생성 설정 · 에이전트 관리 병원 등록·서버 대수 수정. 유지보수·답사·기타업무·설치계획은 모달이 아니라 페이지라 대상 아님(내부 병원 검색 창은 선택형)
+- **한계**: 입력 이벤트가 없는 버튼형 선택(칩 등)만 바꾼 경우는 '입력'으로 치지 않음 — 필요하면 화면별로 `dirty`를 넘긴다. 2차(그 밖의 직접 구현 모달·모바일 화면)는 미적용
+- **검증**: tsc·eslint · dev2 빌드 · Playwright 실제 화면 19/19 — 출고요청·자재관리 입고·에이전트 병원 등록(ESC) 각각: 바깥 클릭 유지 / 입력 없이 닫기 = 확인 없이 닫힘 / 입력 후 닫기 = 확인 문구 / 확인 취소 = 유지 / 확인 = 닫힘, 보기 전용 공통 Modal(산정기준)은 바깥 클릭으로 닫힘 유지, 페이지 오류 0
+- 영향 파일: app/components/useUnsavedGuard.ts(신규), app/components/ui/Modal.tsx, app/stock-out-requests/_components/StockOutRequestFormModal.tsx, app/as-receipts/_components/{AsReceiptFormModal,AsStockOutRequestModal}.tsx, app/vehicle-reservations/ReservationModal.tsx, app/inventory/components/{TransactionModal,BulkTxModal,BulkSerialTxModal,TxEditModal,UnitEditModal}.tsx, app/devices/_components/{RegisterModal,ReplaceModal,RecoverModal,MoveWardModal,ProductTypeModal,AsFlagModal,DealModal,CorrectionModal}.tsx, app/components/TicketRuleSettingModal.tsx, app/usage/agents/AgentsClient.tsx, README.md
+
 ## 2026-11-25 14:23 | 사용량 — 전체 병원 화면을 대시보드로 개편 (dev2 빌드·화면 검증 → DEV 서버 → PROD 반영)
 
 - **요청**: "현재 GUI는 약간 조악하다. 더 멋진 대시보드로 — '운영' 중인 병원 전체의 가동률도 보이고, 상위 10·하위 10도 탭이 아니라 별도 영역으로, 그 밖에 유의미한 지표들. 지금의 전체 리스트는 제일 하단에. DEV까지 바로 반영해줘" — 설계 검토 없이 바로 구현 지시. 설계 문서 `projects/usage_overview_design.md` §10

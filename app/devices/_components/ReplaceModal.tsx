@@ -14,6 +14,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import Modal from '@/app/components/ui/Modal'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 import Button from '@/app/components/ui/Button'
 import Badge from '@/app/components/ui/Badge'
 import { Input, Select, Textarea } from '@/app/components/ui/Input'
@@ -78,9 +79,11 @@ function modelLabel(m: { deviceName: string; deviceModel: string } | null | unde
 
 export function ReplaceModal(props: ReplaceModalProps) {
   const { open, onClose } = props
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(open, onClose)
   return (
-    <Modal open={open} onClose={onClose} title="교체 (회수 + 신 기기 등록)" widthClass="max-w-2xl">
-      {open && <ReplaceForm {...props} />}
+    <Modal open={open} onClose={guard.requestClose} closeOnBackdrop={false} dialogRef={guard.ref} title="교체 (회수 + 신 기기 등록)" widthClass="max-w-2xl">
+      {open && <ReplaceForm {...props} onClose={guard.requestClose} />}
     </Modal>
   )
 }

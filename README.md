@@ -288,6 +288,7 @@ app/
 ├── notifications/                    # 알림함 (1.1 P5 — 목록·미읽음/종류 필터·일괄 읽음·개인 수신 설정)
 └── components/                       # 공통 컴포넌트 (Navigation, NavIcons, MainWrapper, StatusBadge, NotificationBell, MyWorkPanel, HospitalSearchInput(PC 병원 검색 — 출고요청·레포트 공용) 등)
     ├── useOverlayDismiss.ts          # 오버레이(드로어·모달) 공통 훅 — 배경 스크롤 잠금 + ESC 닫기
+    ├── useUnsavedGuard.ts            # 입력형 모달 작성 내용 유실 방지 — 입력이 있으면 X·취소·ESC 닫기 전 확인(2026-11-26)
     ├── theme/                        # ThemeProvider, ThemeToggle, useChartTheme (다크모드)
     └── ui/                           # 디자인 프리미티브 (Button, Card, Badge, Input, Table, Modal(모바일 바텀시트), PageHeader, EmptyState, Pager(상태 기반 페이저 — 첫/마지막·±5·번호 입력, 2026-09-16), DateRangeFilter(팝오버 달력 날짜 범위 필터 — 프리셋·직접 입력, 2026-09-16))
 
@@ -1151,6 +1152,7 @@ prisma/
 - **티켓 (2026-07-26)**: 목록 = 모바일 카드(티켓번호·Sev·유형·상태 배지 + 그룹/담당/병원/경과, SEV1·2 좌측 액센트 유지) + 그룹 탭 가로 스크롤 + 필터 셀렉트 2열 · 상세 = 전이 버튼 전폭 분할·연결 업무 배너 CTA 전폭·서브 티켓 카드 전환 · 생성 = 병원 검색이 공통 `ui/Modal`(바텀시트) · 대시보드 = 필터 2열, Sev/유형 차트 세로 스택, 표는 min-width 가로 스크롤
 - **AI 어시스턴트 (2026-07-26)**: 모바일 헤더 압축(제목 축소·설명 숨김·버튼 라벨 단축), 병원 검색 입력 전폭, 답변 버블 폭 확대(94%), 대화 목록 드로어에 `useOverlayDismiss` 적용, **hover 없는 터치에서 접근 불가였던 대화 삭제 버튼 상시 노출**, 피드백(👍/👎)·정제 버튼 터치 타겟 확대
 - 공통 오버레이 동작은 `useOverlayDismiss` 훅으로 통일
+- **입력형 모달 닫기 확인 (2026-11-26)**: 입력형 모달은 바깥(배경) 클릭으로 닫히지 않고, X·취소·ESC로 닫을 때 사용자가 입력한 내용이 있으면 '작성 중인 내용이 있습니다. 창을 닫으시겠습니까?' 확인 — `useUnsavedGuard`(입력 여부 = 모달 안 input·change·drop 이벤트) + 공통 `ui/Modal`의 `closeOnBackdrop={false}`·`dialogRef`. 적용: 출고요청·AS접수·AS 출고요청·차량예약(보기 모드는 바깥 클릭 닫기 유지)·자재관리 입출고 5종(단건·다품목·시리얼 일괄·전표 수정·시리얼 수정)·기기현황 8종(등록·교체·회수·병동 이동·상품유형·AS 접수·계약건·정정)·티켓 자동생성 설정·에이전트 관리 2종. 보기 전용 모달은 기존처럼 바깥 클릭으로 닫힘. 새 입력형 모달은 이 방식을 따른다
 
 ### 모바일 앱 (PWA) — `/m/*` (2026-11-04 프로토타입, `projects/mobile_pwa_design.md`)
 - 같은 Next 앱 안의 모바일 셸. 홈 화면 설치(manifest `scope:'/m/'`·`start_url:/m/home`, 아이콘 `public/icons/` — `scripts/gen-mobile-icons.mjs`), 홈 메뉴·하단 탭 [홈][주차등록][출고요청][자재관리] — 자재관리는 역할 재고담당(`inventory.manage`)·재고책임자(`inventory.admin`) 보유자만 노출(SUPER_ADMIN 포함, `/api/auth/me` permissions 기준). 데스크톱 Navigation은 `/m/*`에서 렌더하지 않음(`/m` 판정은 `/m/` 접두 — `/maintenances` 충돌 방지). 폰으로 PC 화면을 열면 드로어 하단에 '모바일 앱으로 열기'

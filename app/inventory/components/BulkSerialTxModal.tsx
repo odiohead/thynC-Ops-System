@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 
 interface Inventory { id: number; name: string; isActive: boolean }
 interface Warehouse { id: number; name: string; inventoryId: number; isActive: boolean }
@@ -28,7 +29,8 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
   const [inventoryId, setInventoryId] = useState<number | null>(null)
   const [warehouseId, setWarehouseId] = useState<number | null>(null)
   const [reasonId, setReasonId] = useState<number | null>(null)
-  const backdropDown = useRef(false) // 모달 안 드래그 후 배경에서 마우스를 놓아도 닫히지 않도록
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(true, onClose)
   const [destination, setDestination] = useState('')
   const [requester, setRequester] = useState('')
   const [txDate, setTxDate] = useState(() => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10)) // 입출고일 — 소급 등록 지원
@@ -87,6 +89,7 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
       setDoneMsg(`전표 ${data.created.length}건 생성 완료 (품목 ${data.created.length}종, 시리얼 ${data.totalUnits}개)`)
       setPreview(null)
       setFile(null)
+      guard.reset() // 처리 완료 — 닫을 때 확인하지 않음
       onDone()
     } else {
       setError(data.error ?? '실행 실패')
@@ -101,13 +104,11 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onMouseDown={(e) => { backdropDown.current = e.target === e.currentTarget }}
-      onClick={(e) => { if (e.target === e.currentTarget && backdropDown.current) onClose(); backdropDown.current = false }}
     >
-      <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div ref={guard.ref} className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold text-gray-900">Excel 일괄 입출고 (시리얼 품목)</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">✕</button>
+          <button onClick={guard.requestClose} className="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         <div className="mb-4 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
@@ -227,7 +228,7 @@ export default function BulkSerialTxModal({ onClose, onDone }: { onClose: () => 
         )}
 
         <div className="mt-5 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">닫기</button>
+          <button onClick={guard.requestClose} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">닫기</button>
           {!preview ? (
             <button onClick={handlePreview} disabled={!ready || busy}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">

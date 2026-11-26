@@ -8,6 +8,7 @@
  */
 import { useState } from 'react'
 import Modal from '@/app/components/ui/Modal'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 import Button from '@/app/components/ui/Button'
 import { Textarea } from '@/app/components/ui/Input'
 import { todayKst, type OccurredOnBasis } from '@/lib/deviceRegistryShared'
@@ -32,10 +33,12 @@ export interface AsFlagModalProps {
 
 export function AsFlagModal(props: AsFlagModalProps) {
   const { open, onClose, deviceIds, devices } = props
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(open, onClose)
   const title = deviceIds.length === 1 && devices[0] ? `AS 접수 — ${devices[0].serialNo}` : `AS 접수 (${deviceIds.length.toLocaleString()}대)`
   return (
-    <Modal open={open} onClose={onClose} title={title} widthClass="max-w-md">
-      {open && deviceIds.length > 0 && <AsFlagForm {...props} />}
+    <Modal open={open} onClose={guard.requestClose} closeOnBackdrop={false} dialogRef={guard.ref} title={title} widthClass="max-w-md">
+      {open && deviceIds.length > 0 && <AsFlagForm {...props} onClose={guard.requestClose} />}
     </Modal>
   )
 }

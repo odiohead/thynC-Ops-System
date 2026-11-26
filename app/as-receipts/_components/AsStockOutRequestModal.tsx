@@ -7,6 +7,7 @@
  * 생성되는 출고업무: 판매용 · 분실기기 제공 · 납품처 = 접수 병원. 라인은 출고 완료까지 잠긴다.
  */
 import { useState } from 'react'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 
 export interface AsStockOutLine { id: number; serialNo: string; deviceGroup: string; wardName: string | null }
 
@@ -20,6 +21,8 @@ export default function AsStockOutRequestModal({ open, onClose, receipt, candida
   initialSelected: number[]
   onDone: (r: { sorCode: string; requestId: number; itemCount: number }) => void
 }) {
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(open, onClose)
   const [picked, setPicked] = useState<Set<number>>(() => new Set(initialSelected))
   const items = candidates.filter((c) => picked.has(c.id))
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
@@ -56,11 +59,11 @@ export default function AsStockOutRequestModal({ open, onClose, receipt, candida
   const label = 'text-xs font-medium text-gray-500'
   const inputCls = 'mt-1 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm'
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()} data-testid="as-stock-out-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div ref={guard.ref} className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl" data-testid="as-stock-out-modal">
         <div className="mb-3 flex items-start justify-between">
           <h2 className="text-lg font-bold text-gray-900">출고요청 — {receipt.asCode}</h2>
-          <button type="button" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">✕</button>
+          <button type="button" onClick={guard.requestClose} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">✕</button>
         </div>
         <p className="mb-3 text-xs leading-relaxed text-gray-500">판매용 재고 · 목적 &lsquo;분실기기 제공&rsquo; · 납품처 {receipt.hospitalName ?? '접수 병원'}으로 출고업무 티켓을 만듭니다. 센서류는 자재담당자가 출고 시 추가하고, 출고가 완료되면 교체기 시리얼이 이 접수에 자동 기입됩니다.</p>
         <div className="mb-3 rounded-md border border-teal-200 bg-teal-50/50 px-3 py-2 text-sm text-teal-900" data-testid="as-stock-out-summary">
@@ -102,7 +105,7 @@ export default function AsStockOutRequestModal({ open, onClose, receipt, candida
           </div>
         </div>
         <div className="mt-4 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">취소</button>
+          <button type="button" onClick={guard.requestClose} className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">취소</button>
           <button type="button" onClick={submit} disabled={busy} className="rounded-lg bg-teal-600 px-3.5 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50" data-testid="so-req-submit">{busy ? '생성 중…' : '출고요청 생성'}</button>
         </div>
       </div>

@@ -16,6 +16,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Modal from '@/app/components/ui/Modal'
+import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 import Button from '@/app/components/ui/Button'
 import Badge from '@/app/components/ui/Badge'
 import { Select, Textarea } from '@/app/components/ui/Input'
@@ -61,9 +62,11 @@ interface ParsedItem {
 
 export function RegisterModal(props: RegisterModalProps) {
   const { open, onClose } = props
+  // 작성 중 닫기 확인 — 바깥 클릭으로 닫지 않음 (2026-11-26)
+  const guard = useUnsavedGuard(open, onClose)
   return (
-    <Modal open={open} onClose={onClose} title="기기 등록" widthClass="max-w-3xl">
-      {open && <RegisterForm {...props} />}
+    <Modal open={open} onClose={guard.requestClose} closeOnBackdrop={false} dialogRef={guard.ref} title="기기 등록" widthClass="max-w-3xl">
+      {open && <RegisterForm {...props} onClose={guard.requestClose} />}
     </Modal>
   )
 }
