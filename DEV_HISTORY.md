@@ -4,7 +4,7 @@
 
 ---
 
-## 2026-11-26 13:27 | 사용량 — 대시보드 필터(종별 · 병원 지정 · 추이 기간) · 저장된 보기 (dev2 빌드·화면 검증 → DEV 서버 반영, PROD 미반영)
+## 2026-11-26 13:27 | 사용량 — 대시보드 필터(종별 · 병원 지정 · 추이 기간) · 저장된 보기 (dev2 빌드·화면 검증 → DEV 서버 → PROD 반영)
 
 - **요청**: 대시보드에 필터 개념 — 종별로 나눠 보기 · 몇 개 종만 골라 보기 · 원하는 병원군 지정 · 기간(기본 12주, 지정 · 전체). 설계안(`projects/usage_dashboard_filter_design.md`) 검토 중 사용자 의견 "대시보드 템플릿 개념 — 저장하면 리스트업해 놓고 클릭해서 보기, 공유하면 모두가 고를 수 있고 안 하면 내 리스트에만" → '병원군'을 **저장된 보기**로 개정. 이후 "모두 다 개발해서 DEV까지 진행" — 나머지 결정 항목은 제안값
 - **필터**(서버에서 건다 — `lib/usage/overview.ts` `getUsageOverview(device, model, filters)`): 종별(여러 개) · 병원 지정(코드 목록)으로 병원을 좁히고 같은 계산을 돌린다. 핵심 수치 · 판매모델별 · 추이 · 분포 · 상위/하위 · 변화 · 점검 · 표 · 수집 범위(분모도 같은 조건의 운영 병원) · 신규 측정이 모두 같은 병원 집합. **가동률 · 순위 · 판정은 언제나 최근 30일 대 이전 30일**, 추이 기간은 추이 영역에만 적용
@@ -14,9 +14,10 @@
 - **DB** `20261126140000_usage_dashboard_views`(dev2 · DEV 적용 · resolve, **PROD 미적용**)
 - **검증**: tsc · eslint · `usage-metrics-test.mts` 순수 130/130(새 20). dev2 빌드 후 실제 화면(Playwright, 최고관리자 · 일반 계정) 49/49 — 필터별로 핵심 수치 · 표 · 상위 10 · 수집 범위 · 신규 측정이 같은 병원 집합으로 재계산, 추이 기간 5종(26주는 12주와 겹치는 구간 값 동일 · 가동률과 순위는 불변), 병원 지정, 보기 저장 · 바뀜 · 덮어 저장 · 되돌리기 · 같은 이름 거부, 공유 전후 다른 계정의 목록 · 404 · 403 · 관리 창 잠금, 삭제 시 '전체'로, 390px · 다크 · 스크립트 오류 없음. 검증용 보기와 감사 기록은 삭제
 - 파일: lib/usage/filters.ts(신규), lib/usage/views.ts(신규), lib/usage/overview.ts, app/api/usage/overview/route.ts, app/api/usage/views/*(신규), app/api/usage/filter-hospitals/route.ts(신규), app/usage/UsageOverview.tsx, app/usage/OverviewFilters.tsx(신규), app/usage/OverviewViews.tsx(신규), app/usage/UsageCriteria.tsx, prisma/schema.prisma, prisma/migrations/20261126140000_usage_dashboard_views, scripts/usage-metrics-test.mts, README.md, projects/usage_dashboard_filter_design.md(신규), projects/README.md
-- **DEV 서버 반영 2026-11-26 13:36 (64078e9)** — 아래 구간 표 항목과 같은 배포(절차 · 확인 내용은 그 항목). DEV에는 저장된 보기 표가 비어 있음. **PROD 미반영**
+- **DEV 서버 반영 2026-11-26 13:36 (64078e9)** — 아래 구간 표 항목과 같은 배포(절차 · 확인 내용은 그 항목). DEV에는 저장된 보기 표가 비어 있음
+- **PROD(54.117.160.187) 반영 2026-11-26 14:19 (0352533)** — 아래 구간 표 항목과 같은 배포(절차 · 확인 내용은 그 항목). 본체 DB `thync_ops`에 `usage_dashboard_views` 추가(마이그 `20261126140000_usage_dashboard_views` psql 적용 · resolve). 비로그인 `/usage` · `/api/usage/overview` · `/api/usage/views` · `/api/usage/filter-hospitals` 307, 빌드 산출물에 "지금 조건을 보기로 저장" 포함. **PROD 화면은 브라우저로 열어 보지 않았다**(화면 검증은 dev2에서 한 것) — 저장된 보기는 비어 있는 상태로 시작
 
-## 2026-11-26 13:27 | 사용량 — 기기 사용 구간 표: 집계와 병원별 화면이 원본 상태 이력을 읽지 않게 (dev2 검증 → DEV 서버 반영, PROD 미반영)
+## 2026-11-26 13:27 | 사용량 — 기기 사용 구간 표: 집계와 병원별 화면이 원본 상태 이력을 읽지 않게 (dev2 검증 → DEV 서버 → PROD 반영)
 
 - **계기**: 사용자 제안 "로우 데이터에서 정제된 통계 데이터를 별도 테이블로". 일별 집계 표는 이미 있지만 그것을 채울 때도 병원별 화면을 열 때도 원본 상태 이력(PROD 4개월 6,200만 행 · 20GB, 월 7GB 증가)을 통째로 읽고 있었음 — 계산이 거기서 쓰는 것은 '측정 × 기기 × 시리얼별 첫 · 마지막 기록 시각'뿐. 설계 `projects/usage_spans_design.md`
 - **구간 표** `device_usage_spans`(원본 DB, 스키마 `0003`): 수신부가 상태 이력을 저장하는 같은 문장에서 갱신(새로 들어간 행만, 더 이른 첫 시각 · 더 늦은 마지막 시각 — 같은 행을 다시 받아도, 변환을 몇 번 돌려도 같은 결과). 본체 계산(`lib/usage/metrics.ts`)은 원본 대신 이 표를 읽음. Agent 변경 없음
@@ -26,6 +27,13 @@
 - **PROD에 올릴 때**(원본 DB 쓰기 — 명시 허락): 수신부 빌드 → 스키마 0003 → 수신부 재시작 → 변환(6,200만 행, 업무 외 시간) → `--verify` → 그 뒤에 본체. 순서가 바뀌면 구간 표가 빈 채로 계산된다(설계 문서 §8.4)
 - 파일: usage-ingest/migrations/0003_device_usage_spans.sql(신규), usage-ingest/store.mts, lib/usage/metrics.ts, scripts/usage-spans-backfill.mts(신규), scripts/usage-status-retention.mts(신규), scripts/usage-collect-smoke.mts, scripts/usage-lib.mts, README.md, CLAUDE.md, projects/usage_spans_design.md(신규), projects/README.md
 - **DEV 서버(13.125.238.77) 반영 2026-11-26 13:36 (64078e9 — 아래 필터 · 저장된 보기와 같은 배포)**: `git pull`(f1b5d0d → 64078e9, 패키지 · 협업 서버 변경 없음) → `npm run build:usage-ingest` → `node usage-ingest/dist/migrate.mjs`(원본 DB `thync_usage_dev`에 0003) → `pm2 restart thync-usage-ingest-dev` → `usage-spans-backfill.mts --dry` → 실행(달 조각 6개 117만 행 → 1,134구간, 2초) → `--verify` 2곳 일치 → 본체 DB 마이그 `20261126140000_usage_dashboard_views` psql 적용 · resolve(`thync_ops_dev`) → generate → 힙 4GB 빌드(nohup) → `pm2 restart thync-dev`. 확인: 재시작 전 `usage-stats-rebuild.mts --check` — **저장돼 있던 집계(원본으로 계산) = 구간 표로 다시 계산한 값**(두 병원 294 · 882행 전부), 로그인 200(로컬 · dev.ops.seersthync.com), 미인증 `/usage` · 조회 · 보기 · 병원 지정 API 307, 빌드 산출물에 보기 저장 문구 · 보기 API 포함, 스케줄러 첫 주기 최근(3일) 0초, **전체 91일 집계 2곳 547ms**(구간 표 이전 6.5초), 다시 `--check` · `--verify` 일치, 재시작 뒤 새 오류 없음. DEV 화면을 브라우저로 직접 열어 보지는 않음(화면 검증은 dev2 빌드본). DEV 원본은 2곳(11-18에서 멈춤)이라 대시보드에는 병원 2곳만 보인다. **PROD 미반영**
+- **PROD(54.117.160.187) 반영 2026-11-26 14:19 (0352533 — 위 필터 · 저장된 보기와 같은 배포)**: 사용자 "PROD에 반영해줘"(순서 · 원본 DB 쓰기를 미리 알리고 진행). `git pull`(00453fd → 0352533, 패키지 · 협업 서버 변경 없음) → `npm run build:usage-ingest`(6c893986) → `node usage-ingest/dist/migrate.mjs`(원본 DB `thync_usage`에 0003) → `pm2 restart thync-usage-ingest-prod` 13:40 → `usage-spans-backfill.mts --dry` → 실행 13:42(달 조각 15개 → **116,329구간, 118초** — 가장 큰 2026-09 조각 45초) → 원본과 대조 → 본체 DB 마이그 · generate → 힙 4GB 빌드(nohup, 성공) → 협업 번들 해시 불변(2108cacb…)이라 협업 서버는 그대로 → `pm2 restart thync-prod` 14:19
+  - **원본과 대조**: 원본에서 다시 묶은 구간 118,664 = 구간 표 118,664 — 빠짐 0 · 원본에 없는 구간 0 · 시각 다름 0 · 병원 다름 0 (병원 193곳, 원본 **8,290만 행** — 미리 보기의 6,200만은 통계 추정값이었고 수신 재개 뒤 밀린 이력이 들어오는 중). 변환 뒤 늘어난 2,335구간은 새 수신부가 넣은 것 → 수신 중 갱신도 확인됨
+  - **`--verify`를 병원 없이 돌리면 PROD에서는 쓸 수 없을 만큼 느리다**: 병원마다 색인으로 원본을 읽어 20분이 지나도 끝나지 않았고 정시 수신과 겹쳐 서버 부하가 7까지 올랐음 → 멈추고(읽기 전용) 전체를 한 문장으로 묶어 비교하는 조회로 대체(8분 25초, 한 시점이라 수신 중에도 정확). 스크립트의 전 병원 모드는 이 방식으로 바꿔야 함 — **아직 안 고쳤다**(병원 코드를 주는 방식은 그대로 쓸 수 있음)
+  - **재시작 전 확인**(`usage-stats-rebuild.mts --check`, 새 코드로 다시 계산 = 저장된 집계인가): HOSP-000046 · HOSP-000023 일치. HOSP-000115(목포중앙)는 134건 다름 — 저장된 값이 11-24 17:04 계산분이고 그 날짜들의 상태 이력은 11-25 10~11시에 들어온 것(전체 집계 때마다 시간 초과로 빠지던 병원)이라 저장된 쪽이 낡은 것. 재시작 뒤 첫 집계 후 일치 확인
+  - **재시작 후**: 로그인 200(로컬 · ops.seersthync.com), 첫 집계가 **전체(91일) 36초 · 병원 193곳 · 실패 없음**(이전 전체 697초 · 1곳 실패, 최근 3일만 63초 — 전체 기록이 없어 첫 주기가 전체로 돌았음), 수신부 오류 없음, 원본 DB 27GB(상한 60GB) · 구간 표 41MB
+  - **빌드 중 영향**: 14:12:57~14:13:36 `POST /api/as-receipts/bulk-status` 3건이 500(빌드가 `.next`를 바꾸는 동안 옛 프로세스가 그 경로를 처음 읽음) — 14:13:49부터 같은 요청 200. 재시작 순간 알림 조회 502 12건. 업무 시간 빌드의 비용
+  - **하지 않은 것**: 원본 보관 정리(`usage-status-retention.mts --apply`) 미실행 · PROD 원본 DB 백업은 여전히 미결정
 
 ## 2026-11-26 12:38 | 사용량 — 일별 집계를 '매시간 최근 3일 + 하루 한 번 전체'로 나눔 · 집계 전용 조회 상한 (dev2 검증 → DEV 서버 → PROD 반영)
 

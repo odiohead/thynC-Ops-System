@@ -1,6 +1,6 @@
 # 사용량 — 전체 병원 대시보드 필터 · 저장된 보기 (종별 · 병원 지정 · 기간) 설계안
 
-> **상태: 구현 완료 — dev2 · DEV 서버 반영 (2026-11-26), PROD 미반영.** 사용자 "모두 다 개발해서 DEV까지" — 결정 항목은 제안값으로 진행. 구현 노트 §9.
+> **상태: 구현 완료 — dev2 · DEV 서버 · PROD 반영 (2026-11-26, PROD 14:19).** 사용자 "모두 다 개발해서 DEV까지" → "PROD에 반영해줘" — 결정 항목은 제안값으로 진행. 구현 노트 §9, PROD 반영 결과 §9.6.
 > 2026-11-26 개정: '병원군'을 **저장된 보기**(조건 묶음에 이름을 붙여 저장 · 목록에서 눌러 보기 · 공유)로 바꿈 — 사용자 의견 "대시보드 템플릿 개념, 저장하면 어딘가 리스트업해 놓고 클릭해서 보기, 공유하면 모두가 고를 수 있고 안 하면 내 리스트에만".
 > 관련: [usage_overview_design.md](usage_overview_design.md) §10(지금의 대시보드) · 계산 규칙의 단일 소스 `lib/usage/overview.ts`
 
@@ -212,3 +212,8 @@ usage_dashboard_views
 2. 구간 표 설계의 PROD 절차(usage_spans_design.md §8.4)와 같은 배포에 묶인다 — 본체 코드가 구간 표를 읽으므로 **수신부 스키마 · 변환이 먼저**다
 3. 본체 빌드 → `pm2 restart thync-prod`
 
+### 9.6 PROD 반영 결과 (2026-11-26 14:19, 0352533)
+
+- 구간 표와 같은 배포(`projects/usage_spans_design.md` §8.5). 본체 DB `thync_ops`에 `usage_dashboard_views` 추가 → 빌드 → `pm2 restart thync-prod`
+- 확인한 것: 로그인 200, 비로그인 `/usage` · `/api/usage/overview` · `/api/usage/views` · `/api/usage/filter-hospitals` 307, 빌드 산출물에 저장 문구 포함, 재시작 뒤 집계 정상
+- 확인하지 않은 것: **PROD 화면을 브라우저로 열어 보지 않았다** — 화면 동작은 dev2 검증(§9.3)에 기대고 있다. 저장된 보기는 비어 있는 상태로 시작한다
