@@ -4,13 +4,13 @@
  * 사용량 — 전체 병원 대시보드 (projects/usage_overview_design.md §10, 2026-11-25 개편)
  * 수집 중인 병원 전체의 가동률을 서비스 단위로 본다. 병원을 누르면 병원별 화면(/usage?hospital=)으로 간다.
  * 위에서 아래로:
- *   제목·집계 시각 → 저장된 보기 목록 → 기기·판매모델 · 필터(종별 · 병원 지정 · 추이 기간)
+ *   제목·집계 시각 → 저장된 보기 목록 → 기기·판매모델 · 필터(종별 · 병원 지정 · 도입 병상 · 추이 기간)
  *   ① 핵심 수치 — 전체 가동률(+판매모델별) · 수집 범위(운영 병원 대비) · 측정 활동
  *   ② 전체 가동률 추이(고른 기간) · 종별 가동률 · 가동률 분포
  *   ③ 상위 10 · 하위 10
  *   ④ 이전 30일 대비 변화(많이 오른·내린 병원) · 점검 필요
  *   ⑤ 전체 병원 표 (필터·검색·정렬)
- * 조건(기기 · 판매모델 · 종별 · 병원 지정 · 추이 기간)은 주소에 담고, 저장된 보기는 `view=번호` 로 연다
+ * 조건(기기 · 판매모델 · 종별 · 병원 지정 · 도입 병상 · 추이 기간)은 주소에 담고, 저장된 보기는 `view=번호` 로 연다
  * (projects/usage_dashboard_filter_design.md). 필터는 서버가 걸어 화면 전체가 같은 병원 집합으로 다시 계산된다.
  * 계산 규칙은 lib/usage/overview.ts, 값은 일별 집계(lib/usage/stats.ts)에서 온다. 이 파일은 받은 값을 배치만 한다.
  */
@@ -25,7 +25,7 @@ import { Card } from '@/app/components/ui/Card'
 import { useChartTheme } from '@/app/components/theme/useChartTheme'
 import type { UsageModel } from '@/lib/usage/metrics'
 import type { OverviewDeviceKey, OverviewHold, OverviewRow, OverviewTotal, UsageOverview as OverviewData } from '@/lib/usage/overview'
-import { DEFAULT_FILTERS, DEFAULT_TREND, diffFilters, filtersFromParams, filtersToParams, type ViewFilters } from '@/lib/usage/filters'
+import { DEFAULT_FILTERS, DEFAULT_TREND, bedsLabel, diffFilters, filtersFromParams, filtersToParams, type ViewFilters } from '@/lib/usage/filters'
 import UsageCriteriaButton from './UsageCriteria'
 import { FilterBar } from './OverviewFilters'
 import { ViewBar, type UsageViewItem } from './OverviewViews'
@@ -201,7 +201,13 @@ export default function UsageOverview() {
   const deviceLabel = DEVICES.find((d) => d.key === device)!.label
   const modelLabel = MODELS.find((m) => m.key === model)!.label
   /** 병원을 좁힌 조건을 한 줄로 — 제목 뒤에 붙인다 */
-  const scopeText = [current.types.length > 0 ? current.types.join(' · ') : null, current.hospitals.length > 0 ? `지정 병원 ${current.hospitals.length}곳` : null].filter(Boolean).join(' · ')
+  const scopeText = [
+    current.types.length > 0 ? current.types.join(' · ') : null,
+    current.hospitals.length > 0 ? `지정 병원 ${current.hospitals.length}곳` : null,
+    current.beds ? `도입 ${bedsLabel(current.beds)}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
   const open = useCallback(
     (r: OverviewRow) => {
       const q = new URLSearchParams({ hospital: r.hospitalCode, days: '30' })
@@ -270,9 +276,10 @@ export default function UsageOverview() {
             filters={current}
             typeOptions={data?.options.types ?? []}
             firstDate={data?.options.firstDate ?? null}
+            bedOptions={data?.options.beds ?? null}
             hospitalCount={data ? data.rows.length : null}
             onChange={update}
-            onClear={() => update({ types: [], hospitals: [], trend: DEFAULT_TREND })}
+            onClear={() => update({ types: [], hospitals: [], beds: null, trend: DEFAULT_TREND })}
           />
         </div>
         {data && (
@@ -518,7 +525,10 @@ export default function UsageOverview() {
                         <Link href={open(r)} onClick={(e) => e.stopPropagation()} className="font-medium text-foreground hover:underline">
                           {r.hospitalName}
                         </Link>
-                        <span className="ml-2 text-xs text-muted-foreground">{r.hospitalType}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {r.hospitalType}
+                          {r.introBeds !== null && ` · ${r.introBeds.toLocaleString()}병상`}
+                        </span>
                         {isPartial(r) && (
                           <Badge
                             variant="warning"

@@ -2,15 +2,15 @@
 
 /**
  * 사용량 대시보드 — 필터 줄 (projects/usage_dashboard_filter_design.md §3.1 · §3.4)
- * 종별(여러 개) · 병원 지정 · 추이 기간. 값은 부모(주소)가 갖고, 여기서는 고르는 화면만 그린다.
+ * 종별(여러 개) · 병원 지정 · 도입 병상(범위) · 추이 기간. 값은 부모(주소)가 갖고, 여기서는 고르는 화면만 그린다.
  * 필터는 화면 전체에 적용된다 — 계산은 서버(lib/usage/overview.ts)가 고른 병원만으로 다시 한다.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Check, ChevronDown, Search, X } from 'lucide-react'
 import Modal from '@/app/components/ui/Modal'
 import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
 import DateRangeFilter from '@/app/components/ui/DateRangeFilter'
-import { TREND_WEEK_OPTIONS, sameTrend, sortTypes, trendLabel, type TrendRange, type ViewFilters } from '@/lib/usage/filters'
+import { BED_PRESETS, TREND_WEEK_OPTIONS, bedsLabel, sameBeds, sameTrend, sortTypes, trendLabel, type BedRange, type TrendRange, type ViewFilters } from '@/lib/usage/filters'
 
 export type FilterHospital = { hospitalCode: string; hospitalName: string; type: string; collecting: boolean; tags: string[] }
 
@@ -18,7 +18,7 @@ const btn =
   'flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-[13px] font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50'
 const md = (date: string) => date.slice(5)
 
-/** 바깥을 누르거나 ESC 로 닫히는 작은 선택 창 */
+/** 바깥을 누르거나 ESC 로 닫히는 작은 선택 창. 화면 오른쪽을 넘으면 넘는 만큼 왼쪽으로 당겨 연다(좁은 화면) */
 function Popover({ open, onClose, children, className = '' }: { open: boolean; onClose: () => void; children: ReactNode; className?: string }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -34,6 +34,15 @@ function Popover({ open, onClose, children, className = '' }: { open: boolean; o
       document.removeEventListener('keydown', onKey)
     }
   }, [open, onClose])
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!open || !el) return
+    el.style.transform = ''
+    const r = el.getBoundingClientRect()
+    const over = r.right - (document.documentElement.clientWidth - 8)
+    const dx = over > 0 ? Math.min(over, Math.max(0, r.left - 8)) : 0
+    if (dx > 0) el.style.transform = `translateX(${-dx}px)`
+  }, [open])
   if (!open) return null
   return (
     <div ref={ref} className={`absolute left-0 top-full z-30 mt-1 min-w-[220px] rounded-lg border border-border bg-card p-1.5 text-card-foreground shadow-lg ${className}`}>
@@ -46,6 +55,7 @@ export function FilterBar({
   filters,
   typeOptions,
   firstDate,
+  bedOptions,
   hospitalCount,
   onChange,
   onClear,
@@ -55,16 +65,18 @@ export function FilterBar({
   typeOptions: { type: string; count: number }[]
   /** 일별 집계가 있는 첫 날 — '전체' 기간의 시작 */
   firstDate: string | null
+  /** 도입 병상 범위 조절의 끝(가장 큰 도입 병상 수)과 값이 비어 있는 병원 수 (불러오기 전이면 null) */
+  bedOptions: { max: number; missing: number } | null
   /** 지금 조건에 들어온 병원 수 (불러오기 전이면 null) */
   hospitalCount: number | null
   onChange: (patch: Partial<ViewFilters>) => void
-  /** 종별 · 병원 지정 · 추이 기간을 기본으로 */
+  /** 종별 · 병원 지정 · 도입 병상 · 추이 기간을 기본으로 */
   onClear: () => void
 }) {
-  const [open, setOpen] = useState<'types' | 'trend' | null>(null)
+  const [open, setOpen] = useState<'types' | 'beds' | 'trend' | null>(null)
   const [picker, setPicker] = useState(false)
-  const active = filters.types.length > 0 || filters.hospitals.length > 0 || !sameTrend(filters.trend, { kind: 'weeks', weeks: 12 })
-  const narrowed = filters.types.length > 0 || filters.hospitals.length > 0
+  const narrowed = filters.types.length > 0 || filters.hospitals.length > 0 || filters.beds !== null
+  const active = narrowed || !sameTrend(filters.trend, { kind: 'weeks', weeks: 12 })
 
   const toggleType = (t: string) => onChange({ types: filters.types.includes(t) ? filters.types.filter((x) => x !== t) : [...filters.types, t] })
   const typeText = filters.types.length === 0 ? '전체' : filters.types.length === 1 ? filters.types[0] : `${filters.types[0]} 외 ${filters.types.length - 1}`
@@ -120,6 +132,17 @@ export function FilterBar({
       </div>
 
       <div className="relative flex flex-col gap-1.5">
+        <span className="text-xs font-medium text-muted-foreground">도입 병상</span>
+        <button type="button" className={btn} aria-expanded={open === 'beds'} data-testid="filter-beds" onClick={() => setOpen(open === 'beds' ? null : 'beds')}>
+          <span className={filters.beds ? 'text-foreground' : 'text-muted-foreground'}>{bedsLabel(filters.beds)}</span>
+          <ChevronDown size={14} aria-hidden className="text-muted-foreground" />
+        </button>
+        <Popover open={open === 'beds'} onClose={() => setOpen(null)} className="w-[300px] max-w-[calc(100vw-1rem)] p-3">
+          <BedRangePanel value={filters.beds} max={bedOptions?.max ?? 0} missing={bedOptions?.missing ?? 0} onCommit={(beds) => onChange({ beds })} />
+        </Popover>
+      </div>
+
+      <div className="relative flex flex-col gap-1.5">
         <span className="text-xs font-medium text-muted-foreground">추이 기간</span>
         <button type="button" className={btn} aria-expanded={open === 'trend'} data-testid="filter-trend" onClick={() => setOpen(open === 'trend' ? null : 'trend')}>
           {filters.trend.kind === 'range' ? `${md(filters.trend.from)} ~ ${md(filters.trend.to)}` : trendLabel(filters.trend)}
@@ -167,6 +190,158 @@ export function FilterBar({
       </p>
 
       {picker && <HospitalPickerModal selected={filters.hospitals} onClose={() => setPicker(false)} onApply={(codes) => onChange({ hospitals: codes })} />}
+    </div>
+  )
+}
+
+/** 범위 조절 막대의 손잡이 두 개 — 겹쳐 놓은 range 입력 둘. 막대는 눌리지 않고 손잡이만 잡힌다 */
+const thumb =
+  'pointer-events-none absolute inset-x-0 top-0 h-5 w-full cursor-pointer appearance-none bg-transparent focus:outline-none ' +
+  '[&::-webkit-slider-runnable-track]:h-5 [&::-webkit-slider-runnable-track]:bg-transparent ' +
+  '[&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:mt-0.5 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:cursor-grab [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-card [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:shadow-md ' +
+  '[&:focus-visible::-webkit-slider-thumb]:ring-2 [&:focus-visible::-webkit-slider-thumb]:ring-primary/40 ' +
+  '[&::-moz-range-track]:bg-transparent ' +
+  '[&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:cursor-grab [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-card [&::-moz-range-thumb]:bg-primary'
+
+/**
+ * 도입 병상 범위 — 손잡이 두 개로 최소 · 최대를 끌어 정하거나, 빠른 선택을 누르거나, 숫자를 적는다.
+ * 오른쪽 손잡이를 끝까지 두면 '그 이상 전부'(상한 없음), 둘 다 끝이면 범위 없음.
+ * 끄는 동안은 여기서만 값을 갖고 있다가 멈추면 반영한다(끌 때마다 다시 계산하지 않게).
+ */
+function BedRangePanel({ value, max, missing, onCommit }: { value: BedRange | null; max: number; missing: number; onCommit: (b: BedRange | null) => void }) {
+  // 막대의 끝: 가장 큰 도입 병상 수. 저장된 범위가 그보다 크면 거기까지 늘린다
+  const top = Math.max(max, value?.min ?? 0, value?.max ?? 0)
+  const draftOf = (v: BedRange | null): [number, number] => [v?.min ?? 0, v?.max ?? top]
+  const rangeOf = ([lo, hi]: [number, number]): BedRange | null => (lo <= 0 && hi >= top ? null : { min: lo, max: hi >= top ? null : hi })
+  const [draft, setDraft] = useState<[number, number]>(draftOf(value))
+  const [text, setText] = useState<[string, string]>(['', ''])
+  const applied = draftOf(value)
+  const appliedKey = `${applied[0]}-${applied[1]}`
+  useEffect(() => {
+    setDraft(applied)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appliedKey])
+  useEffect(() => setText([String(draft[0]), draft[1] >= top ? '' : String(draft[1])]), [draft, top])
+  // 멈춘 뒤에 반영
+  const onCommitRef = useRef(onCommit)
+  onCommitRef.current = onCommit
+  useEffect(() => {
+    if (`${draft[0]}-${draft[1]}` === appliedKey) return
+    const t = setTimeout(() => onCommitRef.current(rangeOf(draft)), 350)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, appliedKey])
+
+  const [lo, hi] = draft
+  const pct = (n: number) => (top > 0 ? (Math.min(n, top) / top) * 100 : 0)
+  const typed = (which: 0 | 1) => {
+    const raw = text[which].trim()
+    const n = raw === '' ? (which === 0 ? 0 : top) : Math.round(Number(raw))
+    if (!Number.isFinite(n) || n < 0) return setText([String(lo), hi >= top ? '' : String(hi)])
+    setDraft(which === 0 ? [Math.min(n, hi), hi] : [lo, Math.max(Math.min(n, top), lo)])
+  }
+  const num = 'h-8 w-20 rounded-md border border-border bg-card px-2 text-right text-[13px] tabular-nums text-foreground placeholder:text-muted-foreground'
+  const current = rangeOf(draft)
+
+  return (
+    <div className="flex flex-col gap-3" data-testid="beds-panel">
+      <div className="flex flex-wrap gap-1.5">
+        {BED_PRESETS.map((p) => {
+          const on = sameBeds(current, p.range)
+          return (
+            <button
+              key={p.label}
+              type="button"
+              aria-pressed={on}
+              data-testid={`beds-preset-${p.label}`}
+              onClick={() => onCommit(on ? null : p.range)}
+              className={`rounded-full border px-2.5 py-1 text-xs tabular-nums transition-colors ${on ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+            >
+              {p.label}
+            </button>
+          )
+        })}
+      </div>
+
+      <div>
+        <div className="mb-1 flex items-baseline justify-between text-[13px]">
+          <span className="font-medium tabular-nums text-foreground" data-testid="beds-readout">
+            {bedsLabel(current)}
+          </span>
+          <span className="text-[11px] tabular-nums text-muted-foreground">0 ~ {top.toLocaleString()}병상</span>
+        </div>
+        <div className="relative h-5">
+          <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-muted" />
+          <div className="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-primary" style={{ left: `${pct(lo)}%`, right: `${100 - pct(hi)}%` }} />
+          <input
+            type="range"
+            min={0}
+            max={top}
+            step={1}
+            value={lo}
+            disabled={top === 0}
+            aria-label="도입 병상 최소"
+            data-testid="beds-min"
+            onChange={(e) => setDraft([Math.min(Number(e.target.value), hi), hi])}
+            className={thumb}
+            style={{ zIndex: lo > top / 2 ? 2 : 1 }}
+          />
+          <input
+            type="range"
+            min={0}
+            max={top}
+            step={1}
+            value={Math.min(hi, top)}
+            disabled={top === 0}
+            aria-label="도입 병상 최대"
+            data-testid="beds-max"
+            onChange={(e) => setDraft([lo, Math.max(Number(e.target.value), lo)])}
+            className={thumb}
+            style={{ zIndex: lo > top / 2 ? 1 : 2 }}
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+        <input
+          type="number"
+          inputMode="numeric"
+          min={0}
+          max={top}
+          value={text[0]}
+          aria-label="최소 병상"
+          data-testid="beds-min-input"
+          onChange={(e) => setText([e.target.value, text[1]])}
+          onBlur={() => typed(0)}
+          onKeyDown={(e) => e.key === 'Enter' && typed(0)}
+          className={num}
+        />
+        <span>~</span>
+        <input
+          type="number"
+          inputMode="numeric"
+          min={0}
+          max={top}
+          value={text[1]}
+          placeholder="제한 없음"
+          aria-label="최대 병상"
+          data-testid="beds-max-input"
+          onChange={(e) => setText([text[0], e.target.value])}
+          onBlur={() => typed(1)}
+          onKeyDown={(e) => e.key === 'Enter' && typed(1)}
+          className={num}
+        />
+        <span>병상</span>
+        {value && (
+          <button type="button" data-testid="beds-clear" onClick={() => onCommit(null)} className="ml-auto text-xs underline-offset-2 hover:text-foreground hover:underline">
+            지우기
+          </button>
+        )}
+      </div>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        병원 정보의 도입 병상 수 기준입니다. 오른쪽 끝까지 두면 그 이상 전부입니다.
+        {missing > 0 && ` 도입 병상이 비어 있는 병원 ${missing}곳은 범위를 정하면 빠집니다.`}
+      </p>
     </div>
   )
 }

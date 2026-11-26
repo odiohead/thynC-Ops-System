@@ -11,6 +11,7 @@ export const dynamic = 'force-dynamic'
  *   ?device=ecg|spo2|cart&model=all|general|usage
  *   &types=종합병원,병원            종별 (여러 개)
  *   &hospitals=HOSP-…,HOSP-…       병원 지정
+ *   &beds=51-100 | 201-            도입 병상 수 범위 (끝 포함, 뒤가 비면 그 이상 전부)
  *   &weeks=12|26|52 | &range=all | &from=YYYY-MM-DD&to=YYYY-MM-DD   추이 기간 (기본 12주)
  *   &view=번호                     저장된 보기의 조건을 바탕으로 — 주소에 따로 적은 조건이 있으면 그것이 우선한다
  * 병원마다 최근 30일 동시 가동률 평균 · 이전 30일 · 변화(%p)와 판정 · 12주 추이 · 수신 상태, 그리고 대상 병원 전체의
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
       base = view.filters
     }
     const f: ViewFilters = { ...base, ...filtersFromParams((k) => sp.get(k)) }
-    const data = await getUsageOverview(f.device, f.model, { types: f.types, hospitals: f.hospitals, trend: f.trend })
+    const data = await getUsageOverview(f.device, f.model, { types: f.types, hospitals: f.hospitals, beds: f.beds, trend: f.trend })
     return NextResponse.json({ ...data, view })
   } catch (e) {
     return usageError(e)

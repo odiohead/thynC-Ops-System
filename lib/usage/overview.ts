@@ -21,7 +21,7 @@ import { usagePool } from './db'
 import { DAY_SEC, average, dayLabel, localDayStart, weekStartOf } from './daily'
 import { USAGE_DEVICE_KINDS, USAGE_MODELS, loadCapacityByHospital, type UsageModel } from './metrics'
 import { OPERATING_HOSPITAL_STATUS } from './agents'
-import { DEFAULT_TREND, NO_TYPE_LABEL, TREND_WEEKLY_MAX_WEEKS, sortTypes, type OverviewFilters, type TrendRange } from './filters'
+import { DEFAULT_TREND, NO_TYPE_LABEL, TREND_WEEKLY_MAX_WEEKS, inBedRange, sortTypes, type OverviewFilters, type TrendRange } from './filters'
 import { getUsageStatsRun, type UsageStatsRun } from './stats'
 
 /** 최근·이전 기간의 길이(일) — 병원별 화면의 기본 기간과 같다 */
@@ -341,6 +341,8 @@ export type OverviewRow = OverviewStats & {
   hospitalName: string
   /** 종별 (병원 정보의 종별 — 비어 있으면 '종별 없음') */
   hospitalType: string
+  /** 도입 병상 수 (병원 정보 — 비어 있으면 null) */
+  introBeds: number | null
   /**
    * servers = 차단되지 않은 서버 수, collecting = 그중 최근 24시간 안에 수신한 서버 수,
    * expected = 에이전트 관리에 등록한 서버 대수(등록 없으면 null). collecting < expected 면 일부 서버만 수집 중
@@ -361,7 +363,7 @@ export type UsageOverview = {
   total: OverviewTotal
   /** 같은 기기의 판매모델별 전체 한 줄 (합산·일반형·사용량비례형) — total 은 byModel[model] 과 같다 */
   byModel: Record<UsageModel, OverviewTotal>
-  /** 종별별 전체 한 줄 — 병원 지정 안에서, 종별 필터와 무관하게 전부(비교용). 고른 종별은 filters.types */
+  /** 종별별 전체 한 줄 — 병원 지정 · 도입 병상 범위 안에서, 종별 필터와 무관하게 전부(비교용). 고른 종별은 filters.types */
   byType: { type: string; hospitals: number; total: OverviewTotal }[]
   /** 전체 가동률의 추이 — 고른 기간 (기본 12주, 오래된 구간부터) */
   trend: OverviewTrend
@@ -369,8 +371,11 @@ export type UsageOverview = {
   activity: OverviewActivity
   /** 적용된 필터 */
   filters: OverviewFilters
-  /** 고를 수 있는 값 — 종별(수집 중인 병원 기준 병원 수) · 일별 집계가 있는 첫 날 */
-  options: { types: { type: string; count: number }[]; firstDate: string | null }
+  /**
+   * 고를 수 있는 값 — 종별(수집 중인 병원 기준 병원 수) · 일별 집계가 있는 첫 날 ·
+   * 도입 병상(운영 · 수집 중인 병원을 통틀어 가장 큰 값 = 범위 조절의 끝, 수집 중인 병원 가운데 값이 빈 병원 수). 필터와 무관하게 낸다
+   */
+  options: { types: { type: string; count: number }[]; firstDate: string | null; beds: { max: number; missing: number } }
   rows: OverviewRow[]
 }
 
@@ -383,12 +388,12 @@ export function isUsageModel(v: string | null): v is UsageModel {
 
 /**
  * 수집 중인 병원의 가동률 — 일별 집계(본체 DB)와 수신 상태(원본 DB)를 읽는다.
- * filters 로 병원을 좁히면(종별 · 병원 지정) 모든 값이 그 병원들만으로 계산된다.
+ * filters 로 병원을 좁히면(종별 · 병원 지정 · 도입 병상) 모든 값이 그 병원들만으로 계산된다.
  */
 export async function getUsageOverview(
   device: OverviewDeviceKey,
   model: UsageModel,
-  filters: OverviewFilters = { types: [], hospitals: [], trend: DEFAULT_TREND },
+  filters: OverviewFilters = { types: [], hospitals: [], beds: null, trend: DEFAULT_TREND },
   nowMs: number = Date.now(),
 ): Promise<UsageOverview> {
   const today = localDayStart(nowMs, TZ_OFFSET_HOURS)
@@ -398,6 +403,7 @@ export async function getUsageOverview(
   const deviceType = USAGE_DEVICE_KINDS.find((k) => k.key === device)!.type
   const pickedHospitals = filters.hospitals.length > 0 ? new Set(filters.hospitals) : null
   const pickedTypes = filters.types.length > 0 ? new Set(filters.types) : null
+  const bedRange = filters.beds
 
   const [servers, run, operatingRows, capacityNow, firstStat] = await Promise.all([
     usagePool().query(
@@ -411,24 +417,36 @@ export async function getUsageOverview(
       [OVERVIEW_RECEIVE_DELAY_HOURS],
     ),
     getUsageStatsRun(),
-    prisma.hospital.findMany({ where: { status: OPERATING_HOSPITAL_STATUS }, select: { hospitalCode: true, type: true } }),
+    prisma.hospital.findMany({ where: { status: OPERATING_HOSPITAL_STATUS }, select: { hospitalCode: true, type: true, introBeds: true } }),
     loadCapacityByHospital(deviceType, model, dayLabel(today)),
     prisma.usageDailyDeviceStat.aggregate({ _min: { date: true } }),
   ])
   const codes = servers.rows.map((r) => r.hospital_code as string)
-  const meta = await prisma.hospital.findMany({ where: { hospitalCode: { in: codes } }, select: { hospitalCode: true, hospitalName: true, type: true } })
+  const meta = await prisma.hospital.findMany({ where: { hospitalCode: { in: codes } }, select: { hospitalCode: true, hospitalName: true, type: true, introBeds: true } })
   const nameOf = new Map(meta.map((n) => [n.hospitalCode, n.hospitalName]))
   const typeLabel = (t: string | null | undefined) => (t && t.trim() ? t.trim() : NO_TYPE_LABEL)
   const typeOf = new Map(meta.map((n) => [n.hospitalCode, typeLabel(n.type)]))
   const typeOfCode = (code: string) => typeOf.get(code) ?? NO_TYPE_LABEL
+  const bedsOf = new Map(meta.map((n) => [n.hospitalCode, n.introBeds]))
+  const bedsOfCode = (code: string) => bedsOf.get(code) ?? null
 
   // 고를 수 있는 종별 — 수집 중인 병원 전체 기준 (필터와 무관)
   const typeCounts = new Map<string, number>()
   for (const c of codes) typeCounts.set(typeOfCode(c), (typeCounts.get(typeOfCode(c)) ?? 0) + 1)
   const firstDay = firstStat._min.date ? firstStat._min.date.getTime() / 1000 : null
 
-  // 대상 병원: 병원 지정(scope) → 종별(selected). 종별 비교(byType)는 scope 전체로 낸다
-  const scopeServers = servers.rows.filter((r) => !pickedHospitals || pickedHospitals.has(r.hospital_code as string))
+  // 고를 수 있는 도입 병상 범위 (필터와 무관) — 끝은 운영 병원과 수집 중인 병원을 통틀어 가장 큰 값, missing 은 수집 중인 병원 가운데 값이 빈 곳
+  const bedValues = codes.map(bedsOfCode)
+  const bedOptions = {
+    max: [...bedValues, ...operatingRows.map((h) => h.introBeds)].reduce<number>((a, b) => Math.max(a, b ?? 0), 0),
+    missing: bedValues.filter((b) => b === null).length,
+  }
+
+  // 대상 병원: 병원 지정 · 도입 병상(scope) → 종별(selected). 종별 비교(byType)는 scope 전체로 낸다
+  const scoped = pickedHospitals !== null || bedRange !== null
+  const scopeServers = servers.rows.filter(
+    (r) => (!pickedHospitals || pickedHospitals.has(r.hospital_code as string)) && inBedRange(bedsOfCode(r.hospital_code as string), bedRange),
+  )
   const inTypes = (code: string) => !pickedTypes || pickedTypes.has(typeOfCode(code))
   const scopeCodes = scopeServers.map((r) => r.hospital_code as string)
 
@@ -439,7 +457,7 @@ export async function getUsageOverview(
     prisma.usageDailyDeviceStat.findMany({
       where: {
         deviceType,
-        ...(pickedHospitals ? { hospitalCode: { in: scopeCodes } } : {}),
+        ...(scoped ? { hospitalCode: { in: scopeCodes } } : {}),
         OR: [{ date: { gte: new Date(firstNeeded * 1000) } }, { model, date: { gte: new Date(loadFrom * 1000) } }],
       },
       select: { hospitalCode: true, date: true, model: true, peak: true, capacity: true },
@@ -450,7 +468,7 @@ export async function getUsageOverview(
       where: {
         model,
         date: { gte: new Date(prevStart * 1000), lt: new Date(today * 1000) },
-        ...(pickedHospitals || pickedTypes ? { hospitalCode: { in: scopeCodes.filter(inTypes) } } : {}),
+        ...(scoped || pickedTypes ? { hospitalCode: { in: scopeCodes.filter(inTypes) } } : {}),
       },
       _sum: { started: true, measured: true },
     }),
@@ -475,6 +493,7 @@ export async function getUsageOverview(
       hospitalCode: code,
       hospitalName: nameOf.get(code) ?? code,
       hospitalType: typeOfCode(code),
+      introBeds: bedsOfCode(code),
       receive: {
         servers: Number(r.servers),
         expected: r.expected === null ? null : Number(r.expected),
@@ -486,7 +505,7 @@ export async function getUsageOverview(
       ...summarizeOverview(daysOf.get(`${m}|${code}`) ?? [], today, validBefore, !!r.behind),
     }
   })
-  const scopeRows = rowsFor(model) // 병원 지정까지만 적용 — 종별 비교용
+  const scopeRows = rowsFor(model) // 병원 지정 · 도입 병상까지만 적용 — 종별 비교용
   const rows = scopeRows.filter((r) => inTypes(r.hospitalCode))
   // 기본 순서: 가동률 높은 순, 값이 없는 병원은 아래로 (이름순)
   rows.sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1) || a.hospitalName.localeCompare(b.hospitalName, 'ko'))
@@ -500,7 +519,9 @@ export async function getUsageOverview(
 
   // 수집 범위: 같은 조건의 운영 병원 가운데 최근 24시간 안에 수신한 병원 (병원 수 · 계약·공급 수량)
   const operating = new Set(
-    operatingRows.filter((h) => (!pickedHospitals || pickedHospitals.has(h.hospitalCode)) && (!pickedTypes || pickedTypes.has(typeLabel(h.type)))).map((h) => h.hospitalCode),
+    operatingRows
+      .filter((h) => (!pickedHospitals || pickedHospitals.has(h.hospitalCode)) && inBedRange(h.introBeds, bedRange) && (!pickedTypes || pickedTypes.has(typeLabel(h.type))))
+      .map((h) => h.hospitalCode),
   )
   const collectingCodes = new Set(rows.filter((r) => r.receive.collecting > 0).map((r) => r.hospitalCode))
   let capacityOperating = 0
@@ -548,10 +569,11 @@ export async function getUsageOverview(
     trend,
     coverage,
     activity,
-    filters: { types: filters.types, hospitals: filters.hospitals, trend: filters.trend },
+    filters: { types: filters.types, hospitals: filters.hospitals, beds: bedRange, trend: filters.trend },
     options: {
       types: sortTypes(Array.from(typeCounts.entries()).map(([type, count]) => ({ type, count }))),
       firstDate: firstDay === null ? null : dayLabel(firstDay),
+      beds: bedOptions,
     },
     rows,
   }

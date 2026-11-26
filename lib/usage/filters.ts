@@ -5,6 +5,8 @@
  *   기기 · 판매모델                         고른 값
  *   종별 types                             여러 개. 비면 전체
  *   병원 지정 hospitals                     병원 코드 목록. 비면 지정 없음. 종별과 함께면 둘 다 만족하는 병원
+ *   도입 병상 beds                          병원 정보의 도입 병상 수 범위(min ~ max, max 없으면 그 이상 전부). null 이면 범위 없음.
+ *                                          범위를 정하면 도입 병상이 비어 있는 병원은 빠진다
  *   추이 기간 trend                         12주(기본) · 26주 · 52주 · 전체 · 직접 지정(from ~ to)
  * 추이 기간은 추이 영역의 범위만 바꾼다 — 가동률 · 순위 · 판정은 '최근 30일 대 이전 30일' 그대로다.
  */
@@ -18,17 +20,29 @@ export const TREND_WEEK_OPTIONS = [12, 26, 52] as const
 export type TrendWeeks = (typeof TREND_WEEK_OPTIONS)[number]
 export type TrendRange = { kind: 'weeks'; weeks: TrendWeeks } | { kind: 'all' } | { kind: 'range'; from: string; to: string }
 
-export type OverviewFilters = { types: string[]; hospitals: string[]; trend: TrendRange }
+/** 도입 병상 수 범위 — 끝 포함. max 가 null 이면 min 이상 전부 */
+export type BedRange = { min: number; max: number | null }
+
+export type OverviewFilters = { types: string[]; hospitals: string[]; beds: BedRange | null; trend: TrendRange }
 export type ViewFilters = OverviewFilters & { device: FilterDevice; model: FilterModel }
 
 export const DEFAULT_TREND: TrendRange = { kind: 'weeks', weeks: 12 }
-export const DEFAULT_FILTERS: ViewFilters = { device: 'ecg', model: 'all', types: [], hospitals: [], trend: DEFAULT_TREND }
+export const DEFAULT_FILTERS: ViewFilters = { device: 'ecg', model: 'all', types: [], hospitals: [], beds: null, trend: DEFAULT_TREND }
 
 /** 주 단위로 보여 주는 최대 길이(주) — 이보다 길면 월 단위 */
 export const TREND_WEEKLY_MAX_WEEKS = 26
 /** 한 보기에 담을 수 있는 병원 수 · 종별 수 */
 export const FILTER_MAX_HOSPITALS = 500
 export const FILTER_MAX_TYPES = 20
+/** 도입 병상 범위로 받아들이는 가장 큰 수 */
+export const FILTER_MAX_BEDS = 100_000
+/** 도입 병상 범위의 빠른 선택 */
+export const BED_PRESETS: { label: string; range: BedRange }[] = [
+  { label: '0~50', range: { min: 0, max: 50 } },
+  { label: '51~100', range: { min: 51, max: 100 } },
+  { label: '101~200', range: { min: 101, max: 200 } },
+  { label: '201~', range: { min: 201, max: null } },
+]
 
 const CODE_RE = /^[A-Za-z0-9_-]{1,40}$/
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -44,6 +58,45 @@ function cleanHospitals(v: unknown): string[] {
   return uniq(list.map((x) => String(x).trim()).filter((x) => CODE_RE.test(x))).slice(0, FILTER_MAX_HOSPITALS)
 }
 
+const isBedCount = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= FILTER_MAX_BEDS
+
+/**
+ * 도입 병상 범위를 정리한다 — 모르는 모양이면 undefined, '범위 없음'(0 이상 전부)이면 null.
+ * min 이 없으면 0, max 가 없으면 상한 없음.
+ */
+export function parseBeds(v: unknown): BedRange | null | undefined {
+  if (v === null) return null
+  if (!v || typeof v !== 'object') return undefined
+  const b = v as { min?: unknown; max?: unknown }
+  const min = b.min === undefined || b.min === null ? 0 : b.min
+  const max = b.max === undefined ? null : b.max
+  if (!isBedCount(min) || (max !== null && (!isBedCount(max) || max < min))) return undefined
+  return min === 0 && max === null ? null : { min, max }
+}
+
+/** 주소의 beds 값 — '51-100' · '201-'(이상) · '-50'(이하). 비었거나 모르는 모양이면 범위 없음(null) */
+export function parseBedsParam(text: string): BedRange | null {
+  const m = /^(\d{0,6})-(\d{0,6})$/.exec(text.trim())
+  if (!m) return null
+  return parseBeds({ min: m[1] === '' ? 0 : Number(m[1]), max: m[2] === '' ? null : Number(m[2]) }) ?? null
+}
+
+export function sameBeds(a: BedRange | null, b: BedRange | null): boolean {
+  return a === null || b === null ? a === b : a.min === b.min && a.max === b.max
+}
+
+/** 병원의 도입 병상 수가 범위에 드는가 — 범위가 있으면 값이 비어 있는 병원은 들지 않는다 */
+export function inBedRange(beds: number | null | undefined, range: BedRange | null): boolean {
+  if (!range) return true
+  if (beds === null || beds === undefined) return false
+  return beds >= range.min && (range.max === null || beds <= range.max)
+}
+
+export function bedsLabel(b: BedRange | null): string {
+  if (!b) return '전체'
+  return b.max === null ? `${b.min.toLocaleString()}병상 이상` : `${b.min.toLocaleString()}~${b.max.toLocaleString()}병상`
+}
+
 /** 추이 기간 — 모르는 모양이면 null */
 export function parseTrend(v: unknown): TrendRange | null {
   if (!v || typeof v !== 'object') return null
@@ -56,7 +109,7 @@ export function parseTrend(v: unknown): TrendRange | null {
 
 /**
  * 주소의 조건 → 조건 묶음의 일부. **주소에 적힌 것만** 돌려준다(저장된 보기 위에 덮어쓰기 위해).
- * device · model · types · hospitals · weeks=12|26|52 · range=all · from&to
+ * device · model · types · hospitals · beds=51-100|201- · weeks=12|26|52 · range=all · from&to
  */
 export function filtersFromParams(get: (key: string) => string | null): Partial<ViewFilters> {
   const out: Partial<ViewFilters> = {}
@@ -68,6 +121,8 @@ export function filtersFromParams(get: (key: string) => string | null): Partial<
   if (types !== null) out.types = cleanTypes(types)
   const hospitals = get('hospitals')
   if (hospitals !== null) out.hospitals = cleanHospitals(hospitals)
+  const beds = get('beds')
+  if (beds !== null) out.beds = parseBedsParam(beds)
   const weeks = get('weeks')
   const range = get('range')
   const from = get('from')
@@ -85,6 +140,7 @@ export function filtersToParams(f: ViewFilters, only?: (keyof ViewFilters)[]): U
   if (want('model') && (only || f.model !== DEFAULT_FILTERS.model)) q.set('model', f.model)
   if (want('types') && (only || f.types.length > 0)) q.set('types', f.types.join(','))
   if (want('hospitals') && (only || f.hospitals.length > 0)) q.set('hospitals', f.hospitals.join(','))
+  if (want('beds') && (only || f.beds !== null)) q.set('beds', f.beds ? `${f.beds.min}-${f.beds.max ?? ''}` : '')
   if (want('trend') && (only || !sameTrend(f.trend, DEFAULT_TREND))) {
     if (f.trend.kind === 'all') q.set('range', 'all')
     else if (f.trend.kind === 'range') {
@@ -111,6 +167,7 @@ export function diffFilters(a: ViewFilters, b: ViewFilters): (keyof ViewFilters)
   if (a.model !== b.model) out.push('model')
   if (!sameSet(a.types, b.types)) out.push('types')
   if (!sameSet(a.hospitals, b.hospitals)) out.push('hospitals')
+  if (!sameBeds(a.beds, b.beds)) out.push('beds')
   if (!sameTrend(a.trend, b.trend)) out.push('trend')
   return out
 }
@@ -124,7 +181,10 @@ export function normalizeViewFilters(input: unknown): { filters: ViewFilters } |
   const trend = v.trend === undefined ? DEFAULT_TREND : parseTrend(v.trend)
   if (!trend) return { error: '추이 기간이 올바르지 않습니다.' }
   if (Array.isArray(v.hospitals) && v.hospitals.length > FILTER_MAX_HOSPITALS) return { error: `병원은 ${FILTER_MAX_HOSPITALS}곳까지 지정할 수 있습니다.` }
-  return { filters: { device: v.device as FilterDevice, model: v.model as FilterModel, types: cleanTypes(v.types), hospitals: cleanHospitals(v.hospitals), trend } }
+  // 도입 병상 필터가 생기기 전(2026-11-26)에 저장한 보기에는 beds 가 없다 — 범위 없음으로 읽는다
+  const beds = v.beds === undefined ? null : parseBeds(v.beds)
+  if (beds === undefined) return { error: '도입 병상 범위가 올바르지 않습니다.' }
+  return { filters: { device: v.device as FilterDevice, model: v.model as FilterModel, types: cleanTypes(v.types), hospitals: cleanHospitals(v.hospitals), beds, trend } }
 }
 
 /** 저장돼 있던 조건 묶음을 읽는다 — 모양이 어긋난 항목은 기본값으로 */
@@ -137,6 +197,7 @@ export function readViewFilters(input: unknown): ViewFilters {
     model: (FILTER_MODELS as readonly string[]).includes(String(v.model)) ? (v.model as FilterModel) : DEFAULT_FILTERS.model,
     types: cleanTypes(v.types),
     hospitals: cleanHospitals(v.hospitals),
+    beds: parseBeds(v.beds) ?? null,
     trend: parseTrend(v.trend) ?? DEFAULT_TREND,
   }
 }

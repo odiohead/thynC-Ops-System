@@ -10,7 +10,7 @@ import { useState } from 'react'
 import { Bookmark, Plus, RotateCcw, Save, Settings2, Share2, Trash2 } from 'lucide-react'
 import Modal from '@/app/components/ui/Modal'
 import { useUnsavedGuard } from '@/app/components/useUnsavedGuard'
-import { trendLabel, type ViewFilters } from '@/lib/usage/filters'
+import { bedsLabel, trendLabel, type ViewFilters } from '@/lib/usage/filters'
 
 export type UsageViewItem = {
   id: number
@@ -34,6 +34,7 @@ export function describeFilters(f: ViewFilters): string {
     MODEL_LABEL[f.model] ?? f.model,
     f.types.length ? `종별 ${f.types.join(' · ')}` : null,
     f.hospitals.length ? `병원 ${f.hospitals.length}곳 지정` : null,
+    f.beds ? `도입 ${bedsLabel(f.beds)}` : null,
     `추이 ${trendLabel(f.trend)}`,
   ]
     .filter(Boolean)

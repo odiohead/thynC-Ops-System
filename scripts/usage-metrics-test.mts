@@ -7,7 +7,7 @@
 import { DAY_SEC, average, changeRate, dayLabel, dayStats, localDayStart, spanStats, startedIn, weekStartOf } from '../lib/usage/daily'
 import { aggregateWeeks, capacityOn, countsAsMeasurement, defaultModelOf, deviceModelOf, getUsageDaily, getUsageDailyAllModels, hospitalModelOf, measurementModels, planForModel, premiumModel, typeModelOf } from '../lib/usage/metrics'
 import { OVERVIEW_DAYS, planTrend, summarizeOverview, summarizeOverviewActivity, summarizeOverviewBuckets, summarizeOverviewTotal, summarizeOverviewTrend, type OverviewDay } from '../lib/usage/overview'
-import { DEFAULT_FILTERS, diffFilters, filtersFromParams, filtersToParams, normalizeViewFilters, readViewFilters, sortTypes, type ViewFilters } from '../lib/usage/filters'
+import { BED_PRESETS, DEFAULT_FILTERS, bedsLabel, diffFilters, filtersFromParams, filtersToParams, inBedRange, normalizeViewFilters, parseBeds, parseBedsParam, readViewFilters, sortTypes, type ViewFilters } from '../lib/usage/filters'
 import { agentHospitalState } from '../lib/usage/agents'
 import { statsRunMode } from '../lib/usage/stats'
 import { fmtTime, positional, usageDb } from './usage-lib.mts'
@@ -253,17 +253,28 @@ console.log('\n■ 대시보드 필터 · 추이 기간 · 저장된 보기의 �
   check('주소에 적힌 것만 읽는다', JSON.stringify(filtersFromParams(get('model=usage&types=종합병원,병원'))) === JSON.stringify({ model: 'usage', types: ['종합병원', '병원'] }))
   check('추이: weeks · range=all · from/to', JSON.stringify(filtersFromParams(get('weeks=26')).trend) === '{"kind":"weeks","weeks":26}' && filtersFromParams(get('range=all')).trend?.kind === 'all' && JSON.stringify(filtersFromParams(get('from=2026-10-01&to=2026-10-31')).trend) === '{"kind":"range","from":"2026-10-01","to":"2026-10-31"}')
   check('모르는 값은 버린다 (기기 · 주 수 · 뒤집힌 날짜 · 이상한 병원 코드)', JSON.stringify(filtersFromParams(get('device=xx&weeks=7&from=2026-11-01&to=2026-10-01&hospitals=HOSP-000001,<bad>'))) === JSON.stringify({ hospitals: ['HOSP-000001'] }))
-  const f: ViewFilters = { device: 'spo2', model: 'general', types: ['병원'], hospitals: ['HOSP-000001', 'HOSP-000002'], trend: { kind: 'weeks', weeks: 26 } }
+  const f: ViewFilters = { device: 'spo2', model: 'general', types: ['병원'], hospitals: ['HOSP-000001', 'HOSP-000002'], beds: { min: 51, max: 100 }, trend: { kind: 'weeks', weeks: 26 } }
   check('주소로 적었다 다시 읽으면 같은 조건', diffFilters({ ...DEFAULT_FILTERS, ...filtersFromParams(get(filtersToParams(f).toString())) }, f).length === 0)
   check('기본값은 주소에 적지 않는다', filtersToParams(DEFAULT_FILTERS).toString() === '')
   check('보기에서 바뀐 것만 적기 — 빈 값도 적는다(보기의 종별을 지운 경우)', filtersToParams({ ...f, types: [] }, ['types']).toString() === 'types=' && JSON.stringify(filtersFromParams(get('types=')).types) === '[]')
   check('다른 항목 찾기 — 순서는 보지 않는다', diffFilters(f, { ...f, hospitals: ['HOSP-000002', 'HOSP-000001'] }).length === 0 && JSON.stringify(diffFilters(f, { ...f, model: 'all', trend: { kind: 'all' } })) === '["model","trend"]')
   // 저장할 조건 검사
   const ok = normalizeViewFilters({ device: 'ecg', model: 'all', types: ['병원', '병원', ' '], hospitals: ['HOSP-000001', 'x y'], trend: { kind: 'all' } })
-  check('저장 전 정리: 중복 · 빈 종별 · 이상한 코드 제거', 'filters' in ok && JSON.stringify(ok.filters) === JSON.stringify({ device: 'ecg', model: 'all', types: ['병원'], hospitals: ['HOSP-000001'], trend: { kind: 'all' } }), ok)
+  check('저장 전 정리: 중복 · 빈 종별 · 이상한 코드 제거', 'filters' in ok && JSON.stringify(ok.filters) === JSON.stringify({ device: 'ecg', model: 'all', types: ['병원'], hospitals: ['HOSP-000001'], beds: null, trend: { kind: 'all' } }), ok)
   check('저장 거부: 모르는 기기 · 판매모델 · 추이', 'error' in normalizeViewFilters({ device: 'x', model: 'all' }) && 'error' in normalizeViewFilters({ device: 'ecg', model: 'x' }) && 'error' in normalizeViewFilters({ device: 'ecg', model: 'all', trend: { kind: 'weeks', weeks: 9 } }))
   check('저장 거부: 병원 500곳 초과', 'error' in normalizeViewFilters({ device: 'ecg', model: 'all', hospitals: Array.from({ length: 501 }, (_, i) => `H${i}`) }))
   check('저장돼 있던 조건이 어긋나 있어도 읽는다(기본값으로)', JSON.stringify(readViewFilters({ device: 'zzz', types: ['병원'] })) === JSON.stringify({ ...DEFAULT_FILTERS, types: ['병원'] }) && JSON.stringify(readViewFilters(null)) === JSON.stringify(DEFAULT_FILTERS))
+  // 도입 병상 범위
+  check('도입 병상: 주소 51-100 · 201-(이상) · -50(이하)', JSON.stringify(parseBedsParam('51-100')) === '{"min":51,"max":100}' && JSON.stringify(parseBedsParam('201-')) === '{"min":201,"max":null}' && JSON.stringify(parseBedsParam('-50')) === '{"min":0,"max":50}')
+  check('도입 병상: 0 이상 전부 · 빈 값 · 뒤집힌 범위 · 모르는 모양은 범위 없음', parseBedsParam('0-') === null && parseBedsParam('') === null && parseBedsParam('100-51') === null && parseBedsParam('abc') === null && parseBedsParam('-') === null)
+  check('도입 병상: 주소에 적었다 다시 읽으면 같은 범위 (상한 없음 포함)', BED_PRESETS.every((p) => JSON.stringify(filtersFromParams(get(filtersToParams({ ...DEFAULT_FILTERS, beds: p.range }).toString())).beds) === JSON.stringify(p.range)), filtersToParams({ ...DEFAULT_FILTERS, beds: BED_PRESETS[3].range }).toString())
+  check('도입 병상: 주소에 없으면 건드리지 않고, 빈 값이면 보기의 범위를 지운다', !('beds' in filtersFromParams(get('model=usage'))) && filtersToParams({ ...f, beds: null }, ['beds']).toString() === 'beds=' && filtersFromParams(get('beds=')).beds === null)
+  check('도입 병상: 다른 항목 찾기', JSON.stringify(diffFilters(f, { ...f, beds: null })) === '["beds"]' && JSON.stringify(diffFilters(f, { ...f, beds: { min: 51, max: null } })) === '["beds"]' && diffFilters(f, { ...f, beds: { min: 51, max: 100 } }).length === 0)
+  check('도입 병상: 빠른 선택 넷은 서로 겹치지 않고 0부터 빈틈없이 이어진다', BED_PRESETS.length === 4 && BED_PRESETS[0].range.min === 0 && BED_PRESETS.every((p, i) => i === 0 || p.range.min === (BED_PRESETS[i - 1].range.max as number) + 1) && BED_PRESETS[3].range.max === null)
+  check('도입 병상: 범위에 드는가 — 끝 포함, 상한 없음, 값이 빈 병원은 범위가 있으면 빠진다', inBedRange(51, { min: 51, max: 100 }) && inBedRange(100, { min: 51, max: 100 }) && !inBedRange(101, { min: 51, max: 100 }) && !inBedRange(50, { min: 51, max: 100 }) && inBedRange(9999, { min: 201, max: null }) && !inBedRange(200, { min: 201, max: null }) && inBedRange(0, { min: 0, max: 50 }) && !inBedRange(null, { min: 0, max: 50 }) && inBedRange(null, null))
+  check('도입 병상: 저장 — 없던 보기는 범위 없음, 이상한 범위는 거부', (() => { const a = normalizeViewFilters({ device: 'ecg', model: 'all' }); const b = normalizeViewFilters({ device: 'ecg', model: 'all', beds: { min: 101, max: 200 } }); return 'filters' in a && a.filters.beds === null && 'filters' in b && JSON.stringify(b.filters.beds) === '{"min":101,"max":200}' })() && 'error' in normalizeViewFilters({ device: 'ecg', model: 'all', beds: { min: 200, max: 100 } }) && 'error' in normalizeViewFilters({ device: 'ecg', model: 'all', beds: { min: -1, max: 10 } }) && 'error' in normalizeViewFilters({ device: 'ecg', model: 'all', beds: '51-100' }))
+  check('도입 병상: 저장돼 있던 범위가 어긋나 있으면 범위 없음으로 읽는다', readViewFilters({ device: 'ecg', model: 'all', beds: { min: 'x' } }).beds === null && parseBeds({ min: 0, max: null }) === null && parseBeds({ max: 50 })?.min === 0)
+  check('도입 병상: 표기', bedsLabel(null) === '전체' && bedsLabel({ min: 51, max: 100 }) === '51~100병상' && bedsLabel({ min: 201, max: null }) === '201병상 이상')
   check('종별 순서: 상급종합 → 종합병원 → 병원 → 요양병원 → 그 밖', sortTypes([{ type: '의원' }, { type: '병원' }, { type: '기타' }, { type: '상급종합' }, { type: '요양병원' }, { type: '종합병원' }]).map((x) => x.type).join(',') === '상급종합,종합병원,병원,요양병원,의원,기타')
 }
 
