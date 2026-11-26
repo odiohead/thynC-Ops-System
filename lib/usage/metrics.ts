@@ -47,7 +47,7 @@
  */
 import { prisma } from '@/lib/prisma'
 import { DEAL_STATUS_CATEGORY, DEAL_STATUS_CONTRACTED, normalizeSerial } from '@/lib/deviceRegistryShared'
-import { usagePool } from './db'
+import { usageBatchPool, usagePool } from './db'
 import { DAY_SEC, average, changeRate, dayLabel, dayStats, localDayStart, maxOf, startedIn, weekStartOf, type Interval } from './daily'
 
 export const USAGE_TZ = 'Asia/Seoul'
@@ -377,8 +377,9 @@ export async function getUsageDaily(hospitalCode: string, days: number, model: U
  * 판매모델 3종(합산·일반형·사용량비례형)의 일별 지표를 원본을 한 번만 읽어 함께 낸다 — 전체 병원 화면의 일별 집계용
  * (lib/usage/stats.ts). 각 값은 getUsageDaily(…, model) 과 같다.
  */
-export async function getUsageDailyAllModels(hospitalCode: string, days: number, nowMs: number = Date.now()): Promise<Record<UsageModel, UsageDaily>> {
-  const loaded = await loadUsage(hospitalCode, days, nowMs)
+export async function getUsageDailyAllModels(hospitalCode: string, days: number, nowMs: number = Date.now(), opts: { batch?: boolean } = {}): Promise<Record<UsageModel, UsageDaily>> {
+  // batch: 일별 집계가 부를 때 — 조회 시간 상한이 긴 풀을 쓴다 (lib/usage/db.ts usageBatchPool)
+  const loaded = await loadUsage(hospitalCode, days, nowMs, opts.batch ? usageBatchPool() : usagePool())
   return { all: computeUsage(loaded, 'all').daily, general: computeUsage(loaded, 'general').daily, usage: computeUsage(loaded, 'usage').daily }
 }
 
@@ -413,8 +414,7 @@ type LoadedUsage = {
 }
 
 /** 원본 DB·운영관리시스템 DB 를 읽는다 (병원 하나, 판매모델과 무관) */
-async function loadUsage(hospitalCode: string, days: number, nowMs: number): Promise<LoadedUsage> {
-  const pool = usagePool()
+async function loadUsage(hospitalCode: string, days: number, nowMs: number, pool: ReturnType<typeof usagePool> = usagePool()): Promise<LoadedUsage> {
   const today = localDayStart(nowMs, TZ_OFFSET_HOURS)
   const first = today - (days - 1) * DAY_SEC
   const from = dayLabel(first)

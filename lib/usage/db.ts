@@ -13,7 +13,7 @@ export class UsageDbUnavailable extends Error {
   }
 }
 
-const globalForUsage = globalThis as unknown as { usagePool?: Pool }
+const globalForUsage = globalThis as unknown as { usagePool?: Pool; usageBatchPool?: Pool }
 
 export function usagePool(): Pool {
   const url = process.env.USAGE_DATABASE_URL
@@ -30,6 +30,27 @@ export function usagePool(): Pool {
     globalForUsage.usagePool = pool
   }
   return globalForUsage.usagePool
+}
+
+/**
+ * 일별 집계(lib/usage/stats.ts)용 — 읽기 전용은 같고 조회 시간 상한만 길다.
+ * 화면 조회는 20초 상한으로 보호하지만, 병원 하나의 91일을 다시 계산하는 집계는 큰 병원에서 그보다 오래 걸린다
+ * (2026-11-26 PROD 목포중앙 — 상태 이력 167만 행, 24초 → 매번 실패). 화면이 쓰는 풀과 따로 두어 화면 조회를 밀어내지 않는다.
+ */
+export function usageBatchPool(): Pool {
+  const url = process.env.USAGE_DATABASE_URL
+  if (!url) throw new UsageDbUnavailable()
+  if (!globalForUsage.usageBatchPool) {
+    const pool = new Pool({
+      connectionString: url,
+      max: 2,
+      idleTimeoutMillis: 30_000,
+      options: '-c default_transaction_read_only=on -c statement_timeout=120000',
+    })
+    pool.on('error', (e) => console.error('[usage] 원본 DB 연결 오류(집계)', e.message))
+    globalForUsage.usageBatchPool = pool
+  }
+  return globalForUsage.usageBatchPool
 }
 
 export function isUsageConfigured(): boolean {

@@ -1,8 +1,9 @@
 /**
  * 사용량 일별 집계 수동 실행 (projects/usage_overview_design.md §5)
  *
- *   npx tsx scripts/usage-stats-rebuild.mts                전 병원 — 스케줄러가 1시간마다 하는 것과 같다
- *   npx tsx scripts/usage-stats-rebuild.mts <병원코드>      그 병원만
+ *   npx tsx scripts/usage-stats-rebuild.mts                전 병원, 최근 91일 전체 — 스케줄러가 하루 한 번(새벽 3시 이후) 하는 것과 같다
+ *   npx tsx scripts/usage-stats-rebuild.mts --recent       전 병원, 최근 3일만 — 스케줄러가 매시간 하는 것과 같다
+ *   npx tsx scripts/usage-stats-rebuild.mts <병원코드>      그 병원만 (--recent 를 붙이면 최근 3일만)
  *   npx tsx scripts/usage-stats-rebuild.mts --check        다시 계산하지 않고, 저장된 집계와 병원별 화면 계산을 대조 (읽기 전용)
  *
  * 본체 DB 의 usage_daily_stats · usage_daily_device_stats 에 쓴다(원본 DB 는 읽기만). 산정 기준을 바꾼 뒤 과거분을
@@ -11,7 +12,7 @@
 import { prisma } from '../lib/prisma'
 import { USAGE_MODELS, getUsageDailyAllModels, listUsageHospitals } from '../lib/usage/metrics'
 import { getUsageOverview } from '../lib/usage/overview'
-import { USAGE_STATS_DAYS, getUsageStatsRun, rebuildAllUsageStats, rebuildUsageStats } from '../lib/usage/stats'
+import { USAGE_STATS_DAYS, USAGE_STATS_RECENT_DAYS, getUsageStatsFullRun, getUsageStatsRun, rebuildAllUsageStats, rebuildUsageStats } from '../lib/usage/stats'
 import { flag, positional } from './usage-lib.mts'
 
 const [only] = positional
@@ -53,18 +54,21 @@ if (flag('--check')) {
   process.exit(diffTotal > 0 ? 1 : 0)
 }
 
+const recent = flag('--recent')
 if (only) {
   const t0 = Date.now()
-  const r = await rebuildUsageStats(only)
+  const r = await rebuildUsageStats(only, Date.now(), recent ? USAGE_STATS_RECENT_DAYS : USAGE_STATS_DAYS)
   console.log(`${only}: ${r.from} ~ ${r.to} (${r.days}일) 집계 저장 — ${Date.now() - t0}ms`)
 } else {
-  const r = await rebuildAllUsageStats()
-  console.log(`병원 ${r.hospitals}곳 집계 저장 — ${r.ms}ms${r.removed ? ` · 원본에 없는 병원의 행 ${r.removed}개 삭제` : ''}`)
+  const r = await rebuildAllUsageStats(Date.now(), recent ? 'recent' : 'full')
+  console.log(`병원 ${r.hospitals}곳 ${recent ? '최근 3일' : '전체 91일'} 집계 저장 — ${r.ms}ms${r.removed ? ` · 원본에 없는 병원의 행 ${r.removed}개 삭제` : ''}`)
   for (const f of r.failed) console.log(`  실패 ${f.hospitalCode}: ${f.error}`)
 }
 
 const run = await getUsageStatsRun()
-if (run) console.log(`마지막 전체 집계: ${run.finishedAt} (${run.ms}ms, 병원 ${run.hospitals}곳, 실패 ${run.failed.length})`)
+if (run) console.log(`마지막 집계(${run.mode === 'recent' ? '최근 3일' : '전체'}): ${run.finishedAt} (${run.ms}ms, 병원 ${run.hospitals}곳, 실패 ${run.failed.length})`)
+const fullRun = await getUsageStatsFullRun()
+if (fullRun) console.log(`마지막 전체 집계: ${fullRun.finishedAt} (${fullRun.ms}ms, 병원 ${fullRun.hospitals}곳, 실패 ${fullRun.failed.length})`)
 for (const device of ['ecg', 'spo2', 'cart'] as const) {
   const o = await getUsageOverview(device, 'all')
   console.log(`\n[${device}] 전체 ${pct(o.total.rate)} (${o.total.peakSum === null ? '-' : Math.round(o.total.peakSum)} / ${o.total.capacitySum ?? '-'}) · 증가 ${o.total.up} · 감소 ${o.total.down} · 유지 ${o.total.flat} · 보류 ${o.total.hold}`)

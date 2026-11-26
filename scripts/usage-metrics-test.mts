@@ -8,6 +8,7 @@ import { DAY_SEC, average, changeRate, dayLabel, dayStats, localDayStart, spanSt
 import { aggregateWeeks, capacityOn, countsAsMeasurement, defaultModelOf, deviceModelOf, getUsageDaily, getUsageDailyAllModels, hospitalModelOf, measurementModels, planForModel, premiumModel, typeModelOf } from '../lib/usage/metrics'
 import { OVERVIEW_DAYS, summarizeOverview, summarizeOverviewActivity, summarizeOverviewTotal, summarizeOverviewTrend, type OverviewDay } from '../lib/usage/overview'
 import { agentHospitalState } from '../lib/usage/agents'
+import { statsRunMode } from '../lib/usage/stats'
 import { fmtTime, positional, usageDb } from './usage-lib.mts'
 
 let passed = 0
@@ -172,6 +173,19 @@ console.log('\n■ 에이전트 관리 — 병원 상태')
   check('등록 없이 병원 토큰으로 수집 → 설치된 서버 수가 기준', agentHospitalState(null, 2, 2, true) === 'collecting' && agentHospitalState(null, 2, 1, true) === 'partial')
 }
 
+
+console.log('\n■ 일별 집계 주기 — 최근 3일 / 하루 한 번 전체 (2026-11-26)')
+{
+  // KST 시각 → epoch ms
+  const kst = (d: number, h: number, m = 0) => Date.UTC(2026, 10, d, h - 9, m)
+  check('전체 집계를 한 적이 없으면 full', statsRunMode(kst(26, 14), null) === 'full')
+  check('오늘 03:05 에 전체를 돌렸으면 그 뒤는 recent', statsRunMode(kst(26, 4, 1), kst(26, 3, 5)) === 'recent' && statsRunMode(kst(26, 23, 59), kst(26, 3, 5)) === 'recent')
+  check('다음 날 02:59 까지 recent, 03:00 부터 full', statsRunMode(kst(27, 2, 59), kst(26, 3, 5)) === 'recent' && statsRunMode(kst(27, 3, 0), kst(26, 3, 5)) === 'full')
+  check('어제 오후에 돌린 전체 → 오늘 02:30 은 recent, 03:01 은 full', statsRunMode(kst(26, 2, 30), kst(25, 14, 42)) === 'recent' && statsRunMode(kst(26, 3, 1), kst(25, 14, 42)) === 'full')
+  check('새벽에 앱이 내려가 있었으면 다시 뜬 뒤 첫 주기가 full', statsRunMode(kst(26, 10, 0), kst(25, 3, 2)) === 'full')
+  check('오늘 03시 이후(낮)에 돌린 전체가 있으면 recent', statsRunMode(kst(26, 15, 0), kst(26, 12, 42)) === 'recent')
+  check('자정 직후(00:30)는 어제 03시가 기준 — 어제 03:10 전체면 recent', statsRunMode(kst(27, 0, 30), kst(26, 3, 10)) === 'recent')
+}
 
 console.log('\n■ 전체 병원 대시보드 (2026-11-25)')
 {
