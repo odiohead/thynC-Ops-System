@@ -4,12 +4,14 @@
  * 사용량 — 전체 병원 대시보드 (projects/usage_overview_design.md §10, 2026-11-25 개편)
  * 수집 중인 병원 전체의 가동률을 서비스 단위로 본다. 병원을 누르면 병원별 화면(/usage?hospital=)으로 간다.
  * 위에서 아래로:
- *   제목·집계 시각 → 기기·판매모델
+ *   제목·집계 시각 → 저장된 보기 목록 → 기기·판매모델 · 필터(종별 · 병원 지정 · 추이 기간)
  *   ① 핵심 수치 — 전체 가동률(+판매모델별) · 수집 범위(운영 병원 대비) · 측정 활동
- *   ② 전체 가동률 12주 추이 · 가동률 분포
+ *   ② 전체 가동률 추이(고른 기간) · 종별 가동률 · 가동률 분포
  *   ③ 상위 10 · 하위 10
  *   ④ 이전 30일 대비 변화(많이 오른·내린 병원) · 점검 필요
  *   ⑤ 전체 병원 표 (필터·검색·정렬)
+ * 조건(기기 · 판매모델 · 종별 · 병원 지정 · 추이 기간)은 주소에 담고, 저장된 보기는 `view=번호` 로 연다
+ * (projects/usage_dashboard_filter_design.md). 필터는 서버가 걸어 화면 전체가 같은 병원 집합으로 다시 계산된다.
  * 계산 규칙은 lib/usage/overview.ts, 값은 일별 집계(lib/usage/stats.ts)에서 온다. 이 파일은 받은 값을 배치만 한다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -22,8 +24,14 @@ import Badge from '@/app/components/ui/Badge'
 import { Card } from '@/app/components/ui/Card'
 import { useChartTheme } from '@/app/components/theme/useChartTheme'
 import type { UsageModel } from '@/lib/usage/metrics'
-import type { OverviewDeviceKey, OverviewHold, OverviewRow, OverviewTotal, UsageOverview as Overview } from '@/lib/usage/overview'
+import type { OverviewDeviceKey, OverviewHold, OverviewRow, OverviewTotal, UsageOverview as OverviewData } from '@/lib/usage/overview'
+import { DEFAULT_FILTERS, DEFAULT_TREND, diffFilters, filtersFromParams, filtersToParams, type ViewFilters } from '@/lib/usage/filters'
 import UsageCriteriaButton from './UsageCriteria'
+import { FilterBar } from './OverviewFilters'
+import { ViewBar, type UsageViewItem } from './OverviewViews'
+
+/** 조회 응답 — 저장된 보기로 열었으면 그 보기가 함께 온다 */
+type Overview = OverviewData & { view: UsageViewItem | null }
 
 const DEVICES: { key: OverviewDeviceKey; label: string }[] = [
   { key: 'ecg', label: '심전계' },
@@ -77,12 +85,21 @@ const FILTER_TEST: Record<Filter, (r: OverviewRow) => boolean> = {
 export default function UsageOverview() {
   const router = useRouter()
   const params = useSearchParams()
-  const deviceParam = params.get('device')
-  const device: OverviewDeviceKey = DEVICES.some((d) => d.key === deviceParam) ? (deviceParam as OverviewDeviceKey) : 'ecg'
-  const modelParam = params.get('model')
-  const model: UsageModel = MODELS.some((m) => m.key === modelParam) ? (modelParam as UsageModel) : 'all'
-
+  const [views, setViews] = useState<UsageViewItem[] | null>(null)
   const [data, setData] = useState<Overview | null>(null)
+
+  // 조건: 저장된 보기(view=번호)의 조건 위에 주소에 적힌 조건을 덮는다 — 서버(조회 API)와 같은 순서
+  const qs = params.toString()
+  const viewParam = params.get('view')
+  const viewId = viewParam !== null && /^\d+$/.test(viewParam) ? Number(viewParam) : null
+  const activeView = viewId === null ? null : (views?.find((v) => v.id === viewId) ?? (data?.view?.id === viewId ? data.view : null))
+  const current: ViewFilters = useMemo(
+    () => ({ ...(activeView?.filters ?? DEFAULT_FILTERS), ...filtersFromParams((k) => new URLSearchParams(qs).get(k)) }),
+    [activeView, qs],
+  )
+  const { device, model } = current
+  const viewChanged = !!activeView && diffFilters(current, activeView.filters).length > 0
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
@@ -90,22 +107,36 @@ export default function UsageOverview() {
   const [sort, setSort] = useState<Sort>({ key: 'rate', desc: true })
   const tableRef = useRef<HTMLDivElement>(null)
 
-  const go = useCallback(
-    (d: OverviewDeviceKey, m: UsageModel) => {
-      const q = new URLSearchParams()
-      if (d !== 'ecg') q.set('device', d)
-      if (m !== 'all') q.set('model', m)
-      const qs = q.toString()
-      router.replace(qs ? `/usage?${qs}` : '/usage', { scroll: false })
+  /** 조건을 바꾼다 — 보기를 연 상태면 그 보기에서 달라진 것만 주소에 적는다('바뀜') */
+  const update = useCallback(
+    (patch: Partial<ViewFilters>) => {
+      const next: ViewFilters = { ...current, ...patch }
+      let q: URLSearchParams
+      if (activeView) {
+        q = filtersToParams(next, diffFilters(next, activeView.filters))
+        q.set('view', String(activeView.id))
+      } else q = filtersToParams(next)
+      const s = q.toString()
+      router.replace(s ? `/usage?${s}` : '/usage', { scroll: false })
     },
-    [router],
+    [router, current, activeView],
   )
+  /** 보기를 연다 (null = 조건 없는 전체) */
+  const openView = useCallback((id: number | null) => router.replace(id === null ? '/usage' : `/usage?view=${id}`, { scroll: false }), [router])
+  const loadViews = useCallback(async () => {
+    const res = await fetch('/api/usage/views', { cache: 'no-store' })
+    if (res.ok) setViews(((await res.json()).views ?? []) as UsageViewItem[])
+    else setViews([])
+  }, [])
+  useEffect(() => {
+    void loadViews()
+  }, [loadViews])
 
   useEffect(() => {
     let alive = true
     setLoading(true)
     setError(null)
-    fetch(`/api/usage/overview?device=${device}&model=${model}`)
+    fetch(`/api/usage/overview${qs ? `?${qs}` : ''}`, { cache: 'no-store' })
       .then(async (res) => {
         const body = await res.json().catch(() => ({}))
         if (!alive) return
@@ -125,7 +156,7 @@ export default function UsageOverview() {
     return () => {
       alive = false
     }
-  }, [device, model])
+  }, [qs])
 
   // 순위는 가동률 높은 순(서버가 그 순서로 준다) — 정렬·필터를 바꿔도 순위 숫자는 그대로다
   const ranked = useMemo<Ranked[]>(() => {
@@ -165,8 +196,12 @@ export default function UsageOverview() {
   }, [rated])
 
   const total = data?.total
+  /** 수집 서버가 등록된 병원 전체 수 — 필터와 무관 */
+  const collectingTotal = (data?.options.types ?? []).reduce((a, t) => a + t.count, 0)
   const deviceLabel = DEVICES.find((d) => d.key === device)!.label
   const modelLabel = MODELS.find((m) => m.key === model)!.label
+  /** 병원을 좁힌 조건을 한 줄로 — 제목 뒤에 붙인다 */
+  const scopeText = [current.types.length > 0 ? current.types.join(' · ') : null, current.hospitals.length > 0 ? `지정 병원 ${current.hospitals.length}곳` : null].filter(Boolean).join(' · ')
   const open = useCallback(
     (r: OverviewRow) => {
       const q = new URLSearchParams({ hospital: r.hospitalCode, days: '30' })
@@ -208,7 +243,7 @@ export default function UsageOverview() {
           <div className="flex max-w-[calc(100vw-2rem)] flex-wrap items-center justify-end gap-x-4 gap-y-2">
             <div className="flex h-9 items-center gap-2 text-[13px] text-muted-foreground" data-testid="overview-run">
               <span aria-hidden className={`h-2 w-2 rounded-full ${data?.run ? 'bg-success' : 'bg-gray-400'}`} />
-              <span>{data ? (data.run ? `집계 ${stamp(data.run.finishedAt)} · 수집 병원 ${data.rows.length}곳` : `집계 전 · 수집 병원 ${data.rows.length}곳`) : loading ? '불러오는 중' : '—'}</span>
+              <span>{data ? (data.run ? `집계 ${stamp(data.run.finishedAt)} · 수집 병원 ${collectingTotal}곳` : `집계 전 · 수집 병원 ${collectingTotal}곳`) : loading ? '불러오는 중' : '—'}</span>
             </div>
             <UsageCriteriaButton />
             <Link
@@ -224,16 +259,27 @@ export default function UsageOverview() {
       />
 
       <div className="flex flex-col gap-5">
+        {/* 저장된 보기 — 누르면 그 조건으로 화면 전체가 바뀐다 */}
+        <ViewBar views={views} activeId={activeView ? activeView.id : null} changed={viewChanged} current={current} onOpen={openView} onRevert={() => activeView && openView(activeView.id)} onReload={loadViews} />
+
         {/* 조건 — 아래 모든 영역에 함께 적용된다 */}
-        <div className="flex flex-wrap items-end gap-3">
-          <Segmented label="기기" id="overview-device" options={DEVICES} value={device} onChange={(v) => go(v, model)} />
-          <Segmented label="판매모델" id="overview-model" options={MODELS} value={model} onChange={(v) => go(device, v)} />
-          {data && (
-            <p className="pb-2 text-xs text-muted-foreground">
-              최근 30일 {md(data.recent.from)} ~ {md(data.recent.to)} (오늘 제외) · 이전 30일 {md(data.prev.from)} ~ {md(data.prev.to)}
-            </p>
-          )}
+        <div className="flex flex-wrap items-end gap-x-3 gap-y-3">
+          <Segmented label="기기" id="overview-device" options={DEVICES} value={device} onChange={(v) => update({ device: v })} />
+          <Segmented label="판매모델" id="overview-model" options={MODELS} value={model} onChange={(v) => update({ model: v })} />
+          <FilterBar
+            filters={current}
+            typeOptions={data?.options.types ?? []}
+            firstDate={data?.options.firstDate ?? null}
+            hospitalCount={data ? data.rows.length : null}
+            onChange={update}
+            onClear={() => update({ types: [], hospitals: [], trend: DEFAULT_TREND })}
+          />
         </div>
+        {data && (
+          <p className="-mt-2 text-xs text-muted-foreground">
+            가동률 · 순위 · 변화는 최근 30일 {md(data.recent.from)} ~ {md(data.recent.to)} (오늘 제외) 과 이전 30일 {md(data.prev.from)} ~ {md(data.prev.to)} 기준입니다. 추이 기간은 추이 영역에만 적용됩니다.
+          </p>
+        )}
 
         {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">{error}</div>}
         {data?.run && data.run.failed.length > 0 && (
@@ -248,8 +294,9 @@ export default function UsageOverview() {
           <div className="grid gap-4 lg:grid-cols-12">
             <Card className="flex flex-col justify-between gap-4 p-5 lg:col-span-5" data-testid="overview-total">
               <div>
-                <div className="text-[13px] font-medium text-muted-foreground">
+                <div className="text-[13px] font-medium text-muted-foreground" data-testid="overview-total-title">
                   전체 {deviceLabel} 가동률{model !== 'all' && ` · ${modelLabel}`}
+                  {scopeText && ` · ${scopeText}`}
                 </div>
                 <div className="mt-1 flex flex-wrap items-end gap-x-3 gap-y-1">
                   <span className={`text-5xl font-bold leading-none tracking-tight ${total?.rate == null ? 'text-muted-foreground' : 'text-foreground'}`} data-testid="overview-total-rate">
@@ -264,14 +311,14 @@ export default function UsageOverview() {
               </div>
               <div className="flex flex-col gap-2 border-t border-border pt-3.5" data-testid="overview-by-model">
                 {MODELS.map((m) => (
-                  <ModelMeter key={m.key} label={m.label} total={data?.byModel?.[m.key]} active={m.key === model} onClick={() => go(device, m.key)} />
+                  <ModelMeter key={m.key} label={m.label} total={data?.byModel?.[m.key]} active={m.key === model} onClick={() => update({ model: m.key })} />
                 ))}
               </div>
             </Card>
 
             <Card className="flex flex-col justify-between gap-4 p-5 lg:col-span-3" data-testid="overview-coverage">
               <div>
-                <div className="text-[13px] font-medium text-muted-foreground">수집 범위 · 운영 병원 기준</div>
+                <div className="text-[13px] font-medium text-muted-foreground">수집 범위 · 운영 병원 기준{scopeText && ` · ${scopeText}`}</div>
                 <div className="mt-1 flex items-baseline gap-1.5">
                   <span className="text-[28px] font-bold leading-tight text-foreground">{data ? data.coverage.collecting.toLocaleString() : '—'}</span>
                   <span className="text-sm text-muted-foreground">/ {data ? data.coverage.operating.toLocaleString() : '—'}곳</span>
@@ -280,7 +327,7 @@ export default function UsageOverview() {
                   )}
                 </div>
                 <Meter value={data && data.coverage.operating > 0 ? (data.coverage.collecting / data.coverage.operating) * 100 : null} className="mt-2.5" />
-                <p className="mt-2 text-xs text-muted-foreground">운영 중인 병원 가운데 최근 24시간 안에 수신한 병원</p>
+                <p className="mt-2 text-xs text-muted-foreground">{scopeText ? '같은 조건의 운영 병원' : '운영 중인 병원'} 가운데 최근 24시간 안에 수신한 병원</p>
               </div>
               <dl className="flex flex-col gap-1.5 border-t border-border pt-3.5 text-[13px]">
                 <Row
@@ -315,18 +362,36 @@ export default function UsageOverview() {
             </Card>
           </div>
 
-          {/* ② 추이 · 분포 */}
+          {/* ② 추이 · 종별 · 분포 */}
           <div className="grid gap-4 lg:grid-cols-12">
-            <Card className="lg:col-span-7" data-testid="overview-trend">
-              <PanelHead title="전체 가동률 12주 추이" note="주(월~일)마다 병원별 평균 최대 동시의 합 ÷ 수량의 합" />
+            <Card className="lg:col-span-6" data-testid="overview-trend">
+              <PanelHead
+                title={
+                  current.trend.kind === 'weeks'
+                    ? `전체 가동률 ${current.trend.weeks}주 추이`
+                    : current.trend.kind === 'all'
+                      ? '전체 가동률 추이 · 전체 기간'
+                      : `전체 가동률 추이 · ${data?.trend.from ?? current.trend.from} ~ ${data?.trend.to ?? current.trend.to}`
+                }
+                note={`${data?.trend.unit === 'month' ? '달' : '주(월~일)'}마다 병원별 평균 최대 동시의 합 ÷ 수량의 합`}
+              />
               <div className="px-2 pb-3 pt-1 sm:px-4">
-                <TrendChart weeks={data?.trend ?? []} />
+                <TrendChart trend={data?.trend ?? null} />
               </div>
             </Card>
-            <Card className="lg:col-span-5" data-testid="overview-dist">
+            <Card className="lg:col-span-3" data-testid="overview-by-type">
+              <PanelHead title="종별 가동률" note="누르면 그 종별만" />
+              <TypeBreakdown
+                rows={data?.byType ?? []}
+                selected={current.types}
+                loading={loading}
+                onPick={(t) => update({ types: current.types.length === 1 && current.types[0] === t ? [] : [t] })}
+              />
+            </Card>
+            <Card className="lg:col-span-3" data-testid="overview-dist">
               <PanelHead
                 title="가동률 분포"
-                note={dist.median === null ? '병원 수 · 가동률 10%p 구간' : `병원 ${rated.length}곳 · 중앙값 ${pct(dist.median)} · 평균 ${pct(dist.mean)}`}
+                note={dist.median === null ? '병원 수 · 10%p 구간' : `중앙값 ${pct(dist.median)} · 평균 ${pct(dist.mean)}`}
               />
               <Distribution bins={dist.bins} max={dist.max} />
             </Card>
@@ -442,7 +507,7 @@ export default function UsageOverview() {
                   {visible.length === 0 && (
                     <tr>
                       <td colSpan={7} className="px-5 py-10 text-center text-sm text-muted-foreground">
-                        {loading ? '불러오는 중...' : ranked.length === 0 ? '아직 수집 중인 병원이 없습니다. 병원 서버에 수집 Agent를 설치하면 여기에 나타납니다.' : '조건에 맞는 병원이 없습니다.'}
+                        {loading ? '불러오는 중...' : ranked.length === 0 ? (scopeText ? '고른 조건에 수집 중인 병원이 없습니다. 필터를 바꿔 보세요.' : '아직 수집 중인 병원이 없습니다. 병원 서버에 수집 Agent를 설치하면 여기에 나타납니다.') : '조건에 맞는 병원이 없습니다.'}
                       </td>
                     </tr>
                   )}
@@ -453,6 +518,7 @@ export default function UsageOverview() {
                         <Link href={open(r)} onClick={(e) => e.stopPropagation()} className="font-medium text-foreground hover:underline">
                           {r.hospitalName}
                         </Link>
+                        <span className="ml-2 text-xs text-muted-foreground">{r.hospitalType}</span>
                         {isPartial(r) && (
                           <Badge
                             variant="warning"
@@ -611,12 +677,13 @@ function DailyBars({ days }: { days: Overview['activity']['days'] }) {
   )
 }
 
-/** 전체 가동률 12주 추이 — 한 줄짜리 선. 이번 주(진행 중)까지 그리고 마지막 값에 표시 */
-function TrendChart({ weeks }: { weeks: Overview['trend'] }) {
+/** 전체 가동률 추이 — 한 줄짜리 선. 고른 기간을 주 또는 달 단위로, 진행 중인 마지막 구간까지 그리고 마지막 값에 표시 */
+function TrendChart({ trend }: { trend: Overview['trend'] | null }) {
   const chart = useChartTheme()
-  const rows = weeks.map((w) => ({ label: md(w.weekStart), rate: w.rate === null ? null : Math.round(w.rate * 10) / 10, hospitals: w.hospitals }))
+  const month = trend?.unit === 'month'
+  const rows = (trend?.points ?? []).map((w) => ({ label: w.label, rate: w.rate === null ? null : Math.round(w.rate * 10) / 10, hospitals: w.hospitals }))
   const values = rows.map((r) => r.rate).filter((v): v is number => v !== null)
-  if (values.length === 0) return <div className="flex h-[220px] items-center justify-center text-sm text-muted-foreground">추이를 그릴 집계가 아직 없습니다.</div>
+  if (values.length === 0) return <div className="flex h-[220px] items-center justify-center px-4 text-center text-sm text-muted-foreground">{trend && trend.points.length === 0 ? '고른 기간에 집계가 없습니다.' : '추이를 그릴 집계가 아직 없습니다.'}</div>
   const hi = Math.max(...values)
   // 세로축: 0 에서 시작, 눈금은 10·20·50 단위의 깔끔한 값
   const step = hi * 1.15 <= 50 ? 10 : hi * 1.15 <= 100 ? 20 : 50
@@ -624,16 +691,16 @@ function TrendChart({ weeks }: { weeks: Overview['trend'] }) {
   const ticks = Array.from({ length: top / step + 1 }, (_, i) => i * step)
   const lastIdx = rows.map((r) => r.rate !== null).lastIndexOf(true)
   return (
-    <div className="h-[220px]" role="img" aria-label={`전체 가동률 12주 추이: ${rows.map((r) => `${r.label} ${r.rate === null ? '없음' : r.rate + '%'}`).join(', ')}`}>
+    <div className="h-[220px]" role="img" aria-label={`전체 가동률 추이: ${rows.map((r) => `${r.label} ${r.rate === null ? '없음' : r.rate + '%'}`).join(', ')}`}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={rows} margin={{ top: 18, right: 58, bottom: 0, left: -8 }}>
           <CartesianGrid vertical={false} stroke={chart.grid} />
-          <XAxis dataKey="label" tick={{ fontSize: 11, fill: chart.tick }} tickLine={false} axisLine={{ stroke: chart.grid }} interval="preserveStartEnd" />
+          <XAxis dataKey="label" tick={{ fontSize: 11, fill: chart.tick }} tickLine={false} axisLine={{ stroke: chart.grid }} interval="preserveStartEnd" minTickGap={14} />
           <YAxis domain={[0, top]} ticks={ticks} tick={{ fontSize: 11, fill: chart.tick }} tickLine={false} axisLine={false} tickFormatter={(v: number) => `${v}%`} width={48} />
           <Tooltip
             cursor={{ stroke: chart.tick, strokeWidth: 1 }}
             contentStyle={chart.tooltip}
-            labelFormatter={(l) => `${l} 주`}
+            labelFormatter={(l) => (month ? `${l}` : `${l} 주`)}
             formatter={(v, _n, item) => [`${v}% · 병원 ${(item?.payload as { hospitals?: number })?.hospitals ?? 0}곳`, '가동률']}
           />
           <Line
@@ -649,7 +716,7 @@ function TrendChart({ weeks }: { weeks: Overview['trend'] }) {
               const last = p.index === lastIdx
               return (
                 <g key={`d${p.index}`}>
-                  <circle cx={p.cx} cy={p.cy} r={last ? 4.5 : 2.5} fill={chart.blue} stroke={chart.tooltip.backgroundColor} strokeWidth={last ? 2 : 1} />
+                  <circle cx={p.cx} cy={p.cy} r={last ? 4.5 : rows.length > 30 ? 1.5 : 2.5} fill={chart.blue} stroke={chart.tooltip.backgroundColor} strokeWidth={last ? 2 : 1} />
                   {last && (
                     <text x={p.cx + 9} y={p.cy + 4} fontSize={12} fontWeight={700} fill={chart.tooltip.color}>
                       {p.value}%
@@ -662,6 +729,45 @@ function TrendChart({ weeks }: { weeks: Overview['trend'] }) {
         </LineChart>
       </ResponsiveContainer>
     </div>
+  )
+}
+
+/** 종별마다 전체 가동률(Σ 평균 최대 동시 ÷ Σ 수량) · 병원 수 · 이전 30일 대비. 줄을 누르면 그 종별 하나로 필터 */
+function TypeBreakdown({ rows, selected, loading, onPick }: { rows: Overview['byType']; selected: string[]; loading: boolean; onPick: (type: string) => void }) {
+  if (rows.length === 0) return <p className="px-5 pb-6 pt-3 text-center text-sm text-muted-foreground">{loading ? '불러오는 중...' : '표시할 종별이 없습니다.'}</p>
+  return (
+    <ul className="pb-2">
+      {rows.map((r) => {
+        const on = selected.includes(r.type)
+        const dim = selected.length > 0 && !on
+        return (
+          <li key={r.type}>
+            <button
+              type="button"
+              aria-pressed={on}
+              data-testid={`by-type-${r.type}`}
+              onClick={() => onPick(r.type)}
+              title={r.total.rate == null ? `${r.type} · 병원 ${r.hospitals}곳` : `${r.type} · 평균 최대 동시 ${num(r.total.peakSum)}대 / 계약·공급 ${num(r.total.capacitySum)}대 · 병원 ${r.hospitals}곳`}
+              className={`flex w-full flex-col gap-1 px-5 py-2 text-left transition-colors hover:bg-accent/50 ${dim ? 'opacity-50' : ''}`}
+            >
+              <span className="flex items-baseline justify-between gap-2 text-[13px]">
+                <span className={on ? 'font-semibold text-foreground' : 'text-foreground'}>
+                  {r.type}
+                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">{r.hospitals}곳</span>
+                </span>
+                <span className="whitespace-nowrap tabular-nums">
+                  <b className={`font-bold ${r.total.rate == null ? 'text-muted-foreground' : 'text-foreground'}`}>{pct1(r.total.rate)}</b>
+                  {r.total.change != null && (
+                    <span className={`ml-1.5 text-xs ${Math.abs(r.total.change) < 0.05 ? 'text-muted-foreground' : r.total.change > 0 ? 'text-success' : 'text-destructive'}`}>{signedPp(r.total.change)}</span>
+                  )}
+                </span>
+              </span>
+              <Meter value={r.total.rate ?? null} thin />
+            </button>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 

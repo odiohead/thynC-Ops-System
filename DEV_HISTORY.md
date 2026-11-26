@@ -4,6 +4,27 @@
 
 ---
 
+## 2026-11-26 13:27 | 사용량 — 대시보드 필터(종별 · 병원 지정 · 추이 기간) · 저장된 보기 (dev2 빌드·화면 검증 → DEV 서버 반영, PROD 미반영)
+
+- **요청**: 대시보드에 필터 개념 — 종별로 나눠 보기 · 몇 개 종만 골라 보기 · 원하는 병원군 지정 · 기간(기본 12주, 지정 · 전체). 설계안(`projects/usage_dashboard_filter_design.md`) 검토 중 사용자 의견 "대시보드 템플릿 개념 — 저장하면 리스트업해 놓고 클릭해서 보기, 공유하면 모두가 고를 수 있고 안 하면 내 리스트에만" → '병원군'을 **저장된 보기**로 개정. 이후 "모두 다 개발해서 DEV까지 진행" — 나머지 결정 항목은 제안값
+- **필터**(서버에서 건다 — `lib/usage/overview.ts` `getUsageOverview(device, model, filters)`): 종별(여러 개) · 병원 지정(코드 목록)으로 병원을 좁히고 같은 계산을 돌린다. 핵심 수치 · 판매모델별 · 추이 · 분포 · 상위/하위 · 변화 · 점검 · 표 · 수집 범위(분모도 같은 조건의 운영 병원) · 신규 측정이 모두 같은 병원 집합. **가동률 · 순위 · 판정은 언제나 최근 30일 대 이전 30일**, 추이 기간은 추이 영역에만 적용
+- **추이 기간**: 12주(기본) · 26주 · 52주 · 전체(집계 첫 날 2026-08-23부터) · 직접 지정. 26주까지 주 단위, 그보다 길면 달 단위(`planTrend` · `summarizeOverviewBuckets` — 12주 추이 계산과 같은 규칙을 임의 구간에 적용). 응답의 `trend`가 `{ unit, from, to, points[] }` 모양으로 바뀜
+- **종별 가동률** 영역 추가(종별마다 병원 수 · 가동률 · 이전 30일 대비 — 병원 지정 안에서 전 종별, 줄을 누르면 그 종별만)
+- **저장된 보기**: 조건 묶음(기기 · 판매모델 · 종별 · 병원 지정 · 추이 기간)에 이름을 붙여 본체 DB `usage_dashboard_views`에 저장. 화면 위 목록에서 눌러 봄(`view=번호`), 공유를 켜면 모두의 목록에 · 끄면 내 목록에만, 수정 · 삭제는 만든 사람과 ADMIN 이상, 보기를 연 뒤 조건을 바꾸면 '바뀜' + [저장](권한 있을 때) · [새 보기로 저장] · [되돌리기]. 공유하지 않은 남의 보기는 번호로도 열리지 않음(404). 감사 기록. 한 사람 50개 · 한 보기 병원 500곳
+- **DB** `20261126140000_usage_dashboard_views`(dev2 · DEV 적용 · resolve, **PROD 미적용**)
+- **검증**: tsc · eslint · `usage-metrics-test.mts` 순수 130/130(새 20). dev2 빌드 후 실제 화면(Playwright, 최고관리자 · 일반 계정) 49/49 — 필터별로 핵심 수치 · 표 · 상위 10 · 수집 범위 · 신규 측정이 같은 병원 집합으로 재계산, 추이 기간 5종(26주는 12주와 겹치는 구간 값 동일 · 가동률과 순위는 불변), 병원 지정, 보기 저장 · 바뀜 · 덮어 저장 · 되돌리기 · 같은 이름 거부, 공유 전후 다른 계정의 목록 · 404 · 403 · 관리 창 잠금, 삭제 시 '전체'로, 390px · 다크 · 스크립트 오류 없음. 검증용 보기와 감사 기록은 삭제
+- 파일: lib/usage/filters.ts(신규), lib/usage/views.ts(신규), lib/usage/overview.ts, app/api/usage/overview/route.ts, app/api/usage/views/*(신규), app/api/usage/filter-hospitals/route.ts(신규), app/usage/UsageOverview.tsx, app/usage/OverviewFilters.tsx(신규), app/usage/OverviewViews.tsx(신규), app/usage/UsageCriteria.tsx, prisma/schema.prisma, prisma/migrations/20261126140000_usage_dashboard_views, scripts/usage-metrics-test.mts, README.md, projects/usage_dashboard_filter_design.md(신규), projects/README.md
+
+## 2026-11-26 13:27 | 사용량 — 기기 사용 구간 표: 집계와 병원별 화면이 원본 상태 이력을 읽지 않게 (dev2 검증 → DEV 서버 반영, PROD 미반영)
+
+- **계기**: 사용자 제안 "로우 데이터에서 정제된 통계 데이터를 별도 테이블로". 일별 집계 표는 이미 있지만 그것을 채울 때도 병원별 화면을 열 때도 원본 상태 이력(PROD 4개월 6,200만 행 · 20GB, 월 7GB 증가)을 통째로 읽고 있었음 — 계산이 거기서 쓰는 것은 '측정 × 기기 × 시리얼별 첫 · 마지막 기록 시각'뿐. 설계 `projects/usage_spans_design.md`
+- **구간 표** `device_usage_spans`(원본 DB, 스키마 `0003`): 수신부가 상태 이력을 저장하는 같은 문장에서 갱신(새로 들어간 행만, 더 이른 첫 시각 · 더 늦은 마지막 시각 — 같은 행을 다시 받아도, 변환을 몇 번 돌려도 같은 결과). 본체 계산(`lib/usage/metrics.ts`)은 원본 대신 이 표를 읽음. Agent 변경 없음
+- **기존 행 변환** `scripts/usage-spans-backfill.mts`(`--dry` · `--partition` · `--verify`): 달 조각마다 묶어 넣음. 설계의 '기록 수' 컬럼은 두지 않음 — 더하는 값이라 수신과 변환이 겹칠 때 맞추기 어렵고, 시각만으로 대조가 된다
+- **원본 보관 정리** `scripts/usage-status-retention.mts`: 보관 기간(기본 6개월) 밖의 달 조각을 지움 — 기본은 미리 보기, `--apply`로만 실행, 지우기 전에 그 조각의 구간이 구간 표에 다 있는지 확인. **어느 환경에서도 지우지 않았다**(6개월보다 오래된 달이 아직 없음). CLAUDE.md 규칙 9의 '원본 행은 지우지 않는다'에 기기 상태 이력만 예외로 적음 — 자동 실행 금지 · PROD는 명시 허락 후
+- **검증(dev2)**: 수신 시나리오 `usage-collect-smoke.mts` 99/99(구간 표 검사 6 추가 — 첫 수신 · 기기 교체 · 대조로 되돌려 재수신 · 전체 재전송 · 나눠 받음 · 용량 상한 뒤 재개에서 구간 표 = 원본에서 다시 묶은 값) · 변환 168만 행 → 2,063구간 1초, `--verify` 일치, 재실행 불변 · 문산중앙의 저장된 집계(원본으로 계산) = 구간 표로 다시 계산한 값 · 실데이터 대조 통과 · **병원 하나 91일 계산 1,965ms → 21ms** · 보관 정리는 임시 2024-01 조각으로 미리 보기 → 구간 없을 때 중단 → 변환 뒤 삭제 → 구간 유지 확인
+- **PROD에 올릴 때**(원본 DB 쓰기 — 명시 허락): 수신부 빌드 → 스키마 0003 → 수신부 재시작 → 변환(6,200만 행, 업무 외 시간) → `--verify` → 그 뒤에 본체. 순서가 바뀌면 구간 표가 빈 채로 계산된다(설계 문서 §8.4)
+- 파일: usage-ingest/migrations/0003_device_usage_spans.sql(신규), usage-ingest/store.mts, lib/usage/metrics.ts, scripts/usage-spans-backfill.mts(신규), scripts/usage-status-retention.mts(신규), scripts/usage-collect-smoke.mts, scripts/usage-lib.mts, README.md, CLAUDE.md, projects/usage_spans_design.md(신규), projects/README.md
+
 ## 2026-11-26 12:38 | 사용량 — 일별 집계를 '매시간 최근 3일 + 하루 한 번 전체'로 나눔 · 집계 전용 조회 상한 (dev2 검증 → DEV 서버 → PROD 반영)
 
 - **계기**: PROD 집계 한 바퀴가 188곳에 14분(840초), 목포중앙(HOSP-000115 — 91일 상태 이력 167만 행)은 조회 상한 20초를 넘겨 매번 실패. PROD 실측(무거운 부분만): 목포중앙 91일 23.9초 → 3일 0.1초, 김포우리 3.5초 → 0.02초

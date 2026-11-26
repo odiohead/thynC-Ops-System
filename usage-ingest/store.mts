@@ -477,14 +477,31 @@ async function pushDeviceStatus(db: Db, ctx: RunCtx, raw: Record<string, unknown
   })
   if (rows.length === 0) return { accepted: 0, cursor: null }
   await ensureStatusPartitions(db, months)
+  // 원본 저장과 함께 기기 사용 구간 표를 갱신한다 (projects/usage_spans_design.md) — 새로 들어간 행만 구간에 반영하고,
+  // 다시 받은 행(이미 있는 행)은 ins 에 나오지 않는다. 구간 갱신은 LEAST / GREATEST 라 순서와 무관하다.
   const ins = await db.query(
-    `INSERT INTO raw_device_status (hospital_code, server, table_year, source_id, measurement_code, device_type,
-       serial_number, status, battery_value, device_kind, event_at)
-     SELECT $1, $2, $3, x.source_id, x.measurement_code, x.device_type, x.serial_number, x.status, x.battery_value,
-       x.device_kind, x.event_at
-     FROM jsonb_to_recordset($4::jsonb) AS x(source_id bigint, measurement_code text, device_type smallint,
-       serial_number text, status smallint, battery_value smallint, device_kind smallint, event_at timestamp(3))
-     ON CONFLICT (server, table_year, source_id, event_at) DO NOTHING`,
+    `WITH ins AS (
+       INSERT INTO raw_device_status (hospital_code, server, table_year, source_id, measurement_code, device_type,
+         serial_number, status, battery_value, device_kind, event_at)
+       SELECT $1, $2, $3, x.source_id, x.measurement_code, x.device_type, x.serial_number, x.status, x.battery_value,
+         x.device_kind, x.event_at
+       FROM jsonb_to_recordset($4::jsonb) AS x(source_id bigint, measurement_code text, device_type smallint,
+         serial_number text, status smallint, battery_value smallint, device_kind smallint, event_at timestamp(3))
+       ON CONFLICT (server, table_year, source_id, event_at) DO NOTHING
+       RETURNING measurement_code, device_type, serial_number, event_at
+     ), sp AS (
+       INSERT INTO device_usage_spans (hospital_code, server, measurement_code, device_type, serial_number, first_event_at, last_event_at)
+       SELECT $1, $2, i.measurement_code, COALESCE(i.device_type, 0), COALESCE(i.serial_number, ''), min(i.event_at), max(i.event_at)
+       FROM ins i
+       WHERE i.event_at >= timestamp '2000-01-01'
+       GROUP BY i.measurement_code, COALESCE(i.device_type, 0), COALESCE(i.serial_number, '')
+       ON CONFLICT (server, measurement_code, device_type, serial_number) DO UPDATE SET
+         first_event_at = LEAST(device_usage_spans.first_event_at, EXCLUDED.first_event_at),
+         last_event_at = GREATEST(device_usage_spans.last_event_at, EXCLUDED.last_event_at),
+         updated_at = now()
+       RETURNING 1
+     )
+     SELECT (SELECT count(*) FROM ins)::int AS inserted, (SELECT count(*) FROM sp)::int AS spans`,
     [ctx.hospitalCode, ctx.server, year, JSON.stringify(rows)],
   )
   // 저장이 끝난 뒤에만 위치를 앞으로 옮긴다 (같은 트랜잭션)
@@ -494,7 +511,7 @@ async function pushDeviceStatus(db: Db, ctx: RunCtx, raw: Record<string, unknown
      RETURNING last_id`,
     [ctx.server, year, maxId],
   )
-  return { accepted: rows.length, inserted: ins.rowCount ?? 0, cursor: Number(cur.rows[0].last_id) }
+  return { accepted: rows.length, inserted: Number(ins.rows[0]?.inserted ?? 0), cursor: Number(cur.rows[0].last_id) }
 }
 
 /** 상태 이력 대조 — 병원 쪽 구간 행 수보다 받은 행 수가 적으면 그 구간부터 다시 받도록 위치를 되돌린다 */

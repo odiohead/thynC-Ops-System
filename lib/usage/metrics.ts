@@ -284,7 +284,7 @@ async function loadStatusCoverage(hospitalCode: string): Promise<Map<string, num
       continue
     }
     const m = await pool.query(
-      `SELECT EXTRACT(EPOCH FROM max(event_at))::float8 AS t FROM raw_device_status WHERE hospital_code = $1 AND server = $2`,
+      `SELECT EXTRACT(EPOCH FROM max(last_event_at))::float8 AS t FROM device_usage_spans WHERE hospital_code = $1 AND server = $2`,
       [hospitalCode, r.server],
     )
     if (m.rows[0]?.t != null) cov.set(String(r.server), Number(m.rows[0].t))
@@ -433,14 +433,13 @@ async function loadUsage(hospitalCode: string, days: number, nowMs: number, pool
     pool.query(
       `WITH ${MEASUREMENT_CTE},
        st AS (
-         SELECT ds.server, ds.measurement_code, ds.device_type::int AS device_type, COALESCE(ds.serial_number, '') AS serial_number,
-                min(ds.event_at) AS fe, max(ds.event_at) AS le
-         FROM raw_device_status ds
-         -- 측정 코드 목록으로 먼저 좁힌다(색인 hospital_code·measurement_code 사용). m 과 바로 JOIN 하면 통계에 따라 서버 번호만으로
-         -- 병합 조인을 골라 수억 행을 비교한다(2026-11-19 DEV 화순성심 25초 → 0.6초). 다른 서버의 같은 코드는 아래 m 과의 JOIN 에서 빠진다
-         WHERE ds.hospital_code = $1 AND ds.measurement_code = ANY (ARRAY(SELECT measurement_code FROM m))
-           AND ds.event_at >= timestamp '2000-01-01'
-         GROUP BY ds.server, ds.measurement_code, ds.device_type, COALESCE(ds.serial_number, '')
+         -- 기기 사용 구간 표 — 수신부가 상태 이력을 받을 때 '측정 × 기기 × 시리얼별 첫·마지막 기록 시각'을 갱신해 둔 것
+         -- (projects/usage_spans_design.md, 2026-11-26). 원본 상태 이력(월 2천만 행)을 읽지 않는다.
+         -- 측정 코드 목록으로 좁힌다(색인 hospital_code·measurement_code). 다른 서버의 같은 코드는 아래 m 과의 JOIN 에서 빠진다
+         SELECT sp.server, sp.measurement_code, sp.device_type::int AS device_type, sp.serial_number,
+                sp.first_event_at AS fe, sp.last_event_at AS le
+         FROM device_usage_spans sp
+         WHERE sp.hospital_code = $1 AND sp.measurement_code = ANY (ARRAY(SELECT measurement_code FROM m))
        ),
        d AS (
          SELECT server, measurement_code, device_type, serial_number, removed_at, premium

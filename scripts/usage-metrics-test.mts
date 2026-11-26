@@ -6,7 +6,8 @@
  */
 import { DAY_SEC, average, changeRate, dayLabel, dayStats, localDayStart, spanStats, startedIn, weekStartOf } from '../lib/usage/daily'
 import { aggregateWeeks, capacityOn, countsAsMeasurement, defaultModelOf, deviceModelOf, getUsageDaily, getUsageDailyAllModels, hospitalModelOf, measurementModels, planForModel, premiumModel, typeModelOf } from '../lib/usage/metrics'
-import { OVERVIEW_DAYS, summarizeOverview, summarizeOverviewActivity, summarizeOverviewTotal, summarizeOverviewTrend, type OverviewDay } from '../lib/usage/overview'
+import { OVERVIEW_DAYS, planTrend, summarizeOverview, summarizeOverviewActivity, summarizeOverviewBuckets, summarizeOverviewTotal, summarizeOverviewTrend, type OverviewDay } from '../lib/usage/overview'
+import { DEFAULT_FILTERS, diffFilters, filtersFromParams, filtersToParams, normalizeViewFilters, readViewFilters, sortTypes, type ViewFilters } from '../lib/usage/filters'
 import { agentHospitalState } from '../lib/usage/agents'
 import { statsRunMode } from '../lib/usage/stats'
 import { fmtTime, positional, usageDb } from './usage-lib.mts'
@@ -214,6 +215,56 @@ console.log('\n■ 전체 병원 대시보드 (2026-11-25)')
   check('측정 활동: 증감률 · 하루 평균 측정 환자', Math.abs(act.startedChange! - ((290 - 150) / 150) * 100) < 1e-9 && act.avgMeasured === 100)
   check('측정 활동: 일별 값은 날짜순 29일', act.days.length === 29 && act.days[0].date === dayOf(-29) && act.days[28].date === dayOf(-1))
   check('측정 활동: 이전 기간이 없으면 증감률 없음', summarizeOverviewActivity(days.slice(0, 29), T).startedChange === null && summarizeOverviewActivity([], T).avgMeasured === null)
+}
+
+console.log('\n■ 대시보드 필터 · 추이 기간 · 저장된 보기의 조건 (2026-11-26)')
+{
+  const T = Date.UTC(2026, 10, 26) / 1000 // 오늘 2026-11-26 (목), 이번 주 월요일 11-23
+  const dayOf = (offset: number) => dayLabel(T + offset * DAY_SEC)
+  const FIRST = Date.UTC(2026, 7, 23) / 1000 // 집계 첫 날 2026-08-23 (일)
+  // 추이 구간
+  const p12 = planTrend({ kind: 'weeks', weeks: 12 }, T, FIRST)
+  check('12주: 주 단위 12구간, 첫 구간은 11주 전 월요일(09-07), 마지막은 이번 주(11-23)부터 오늘까지', p12.unit === 'week' && p12.buckets.length === 12 && p12.buckets[0].label === '09-07' && p12.buckets[11].label === '11-23' && p12.buckets[11].end === T + DAY_SEC, p12.buckets.map((b) => b.label))
+  const p26 = planTrend({ kind: 'weeks', weeks: 26 }, T, FIRST)
+  check('26주: 주 단위 26구간', p26.unit === 'week' && p26.buckets.length === 26)
+  const p52 = planTrend({ kind: 'weeks', weeks: 52 }, T, FIRST)
+  check('52주: 월 단위(26주 초과), 달 표기 YYYY-MM — 51주 전 월요일(2025-12-01)의 달부터 2026-11 까지 12구간', p52.unit === 'month' && p52.buckets[0].label === '2025-12' && p52.buckets[p52.buckets.length - 1].label === '2026-11' && p52.buckets.length === 12, p52.buckets.map((b) => b.label))
+  const pAll = planTrend({ kind: 'all' }, T, FIRST)
+  check('전체: 집계 첫 날(08-23)부터 — 첫 구간은 그 주 월요일(08-17) 이름이지만 08-23 부터만 센다', pAll.unit === 'week' && pAll.from === FIRST && pAll.buckets[0].label === '08-17' && pAll.buckets[0].start === FIRST, pAll.buckets.slice(0, 2))
+  check('전체: 집계가 아직 없으면 12주와 같은 범위', planTrend({ kind: 'all' }, T, null).buckets.length === 12)
+  const pR = planTrend({ kind: 'range', from: '2026-10-01', to: '2026-10-31' }, T, FIRST)
+  check('직접 지정 10-01 ~ 10-31: 주 단위 5구간(09-28 주 ~ 10-26 주), 양 끝은 걸친 날만', pR.unit === 'week' && pR.buckets.length === 5 && pR.buckets[0].start === Date.UTC(2026, 9, 1) / 1000 && pR.buckets[4].end === Date.UTC(2026, 10, 1) / 1000, pR.buckets)
+  const pClamp = planTrend({ kind: 'range', from: '2026-01-01', to: '2027-12-31' }, T, FIRST)
+  check('직접 지정이 집계 첫 날 · 오늘을 넘으면 그 안으로 맞춘다', pClamp.from === FIRST && pClamp.to === T + DAY_SEC)
+  check('직접 지정이 오늘 뒤뿐이면 구간 없음', planTrend({ kind: 'range', from: '2027-01-01', to: '2027-01-31' }, T, FIRST).buckets.length === 0)
+  // 구간별 전체 가동률 = 12주 추이 함수와 같은 값
+  const mk = (peak: number, cap: number, n = 100): OverviewDay[] => Array.from({ length: n }, (_, i) => ({ date: dayOf(-(i + 1)), peak, capacity: cap }))
+  const dA = mk(10, 100)
+  const dB = mk(30, 50, 20) // 최근 20일만 값이 있는 병원
+  const trendOld = summarizeOverviewTrend([summarizeOverview(dA, T, T), summarizeOverview(dB, T, T)])
+  const trendNew = summarizeOverviewBuckets([{ days: dA, validBefore: T }, { days: dB, validBefore: T }], T, p12.buckets)
+  check('구간별 계산(12주) = 12주 추이 계산 — 값 · 병원 수', trendNew.length === 12 && trendNew.every((p, i) => p.hospitals === trendOld[i].hospitals && (p.rate === null ? trendOld[i].rate === null : Math.abs(p.rate - trendOld[i].rate!) < 1e-9)), { trendNew, trendOld })
+  const late = summarizeOverviewBuckets([{ days: dA, validBefore: T - 10 * DAY_SEC }], T, p12.buckets)
+  check('수신이 끊긴 병원은 마지막 수신일 뒤의 구간에서 빠진다', late[11].hospitals === 0 && late[11].rate === null && late[9].hospitals === 1, late.slice(8))
+  const monthly = summarizeOverviewBuckets([{ days: dA, validBefore: T }], T, p52.buckets)
+  check('월 단위: 값이 없는 달은 null, 있는 달은 10%', monthly[0].rate === null && monthly[monthly.length - 1].rate === 10 && monthly[monthly.length - 1].label === '2026-11')
+  // 조건 묶음 ↔ 주소
+  const get = (qs: string) => (k: string) => new URLSearchParams(qs).get(k)
+  check('주소에 적힌 것만 읽는다', JSON.stringify(filtersFromParams(get('model=usage&types=종합병원,병원'))) === JSON.stringify({ model: 'usage', types: ['종합병원', '병원'] }))
+  check('추이: weeks · range=all · from/to', JSON.stringify(filtersFromParams(get('weeks=26')).trend) === '{"kind":"weeks","weeks":26}' && filtersFromParams(get('range=all')).trend?.kind === 'all' && JSON.stringify(filtersFromParams(get('from=2026-10-01&to=2026-10-31')).trend) === '{"kind":"range","from":"2026-10-01","to":"2026-10-31"}')
+  check('모르는 값은 버린다 (기기 · 주 수 · 뒤집힌 날짜 · 이상한 병원 코드)', JSON.stringify(filtersFromParams(get('device=xx&weeks=7&from=2026-11-01&to=2026-10-01&hospitals=HOSP-000001,<bad>'))) === JSON.stringify({ hospitals: ['HOSP-000001'] }))
+  const f: ViewFilters = { device: 'spo2', model: 'general', types: ['병원'], hospitals: ['HOSP-000001', 'HOSP-000002'], trend: { kind: 'weeks', weeks: 26 } }
+  check('주소로 적었다 다시 읽으면 같은 조건', diffFilters({ ...DEFAULT_FILTERS, ...filtersFromParams(get(filtersToParams(f).toString())) }, f).length === 0)
+  check('기본값은 주소에 적지 않는다', filtersToParams(DEFAULT_FILTERS).toString() === '')
+  check('보기에서 바뀐 것만 적기 — 빈 값도 적는다(보기의 종별을 지운 경우)', filtersToParams({ ...f, types: [] }, ['types']).toString() === 'types=' && JSON.stringify(filtersFromParams(get('types=')).types) === '[]')
+  check('다른 항목 찾기 — 순서는 보지 않는다', diffFilters(f, { ...f, hospitals: ['HOSP-000002', 'HOSP-000001'] }).length === 0 && JSON.stringify(diffFilters(f, { ...f, model: 'all', trend: { kind: 'all' } })) === '["model","trend"]')
+  // 저장할 조건 검사
+  const ok = normalizeViewFilters({ device: 'ecg', model: 'all', types: ['병원', '병원', ' '], hospitals: ['HOSP-000001', 'x y'], trend: { kind: 'all' } })
+  check('저장 전 정리: 중복 · 빈 종별 · 이상한 코드 제거', 'filters' in ok && JSON.stringify(ok.filters) === JSON.stringify({ device: 'ecg', model: 'all', types: ['병원'], hospitals: ['HOSP-000001'], trend: { kind: 'all' } }), ok)
+  check('저장 거부: 모르는 기기 · 판매모델 · 추이', 'error' in normalizeViewFilters({ device: 'x', model: 'all' }) && 'error' in normalizeViewFilters({ device: 'ecg', model: 'x' }) && 'error' in normalizeViewFilters({ device: 'ecg', model: 'all', trend: { kind: 'weeks', weeks: 9 } }))
+  check('저장 거부: 병원 500곳 초과', 'error' in normalizeViewFilters({ device: 'ecg', model: 'all', hospitals: Array.from({ length: 501 }, (_, i) => `H${i}`) }))
+  check('저장돼 있던 조건이 어긋나 있어도 읽는다(기본값으로)', JSON.stringify(readViewFilters({ device: 'zzz', types: ['병원'] })) === JSON.stringify({ ...DEFAULT_FILTERS, types: ['병원'] }) && JSON.stringify(readViewFilters(null)) === JSON.stringify(DEFAULT_FILTERS))
+  check('종별 순서: 상급종합 → 종합병원 → 병원 → 요양병원 → 그 밖', sortTypes([{ type: '의원' }, { type: '병원' }, { type: '기타' }, { type: '상급종합' }, { type: '요양병원' }, { type: '종합병원' }]).map((x) => x.type).join(',') === '상급종합,종합병원,병원,요양병원,의원,기타')
 }
 
 const [hospital, daysArg] = positional

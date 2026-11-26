@@ -399,6 +399,7 @@ model User {
   salesDealFilesUploaded   SalesDealFile[]       @relation("SalesDealFileUploader") // 딜 견적서·계약서 첨부 업로드 (2026-11-02)
   hospitalAsMemos HospitalMeta[] @relation("HospitalAsMemoEditor")
   viewPrefs UserViewPref[] // 사용자별 화면 설정 (2026-10-01)
+  usageDashboardViews UsageDashboardView[] @relation("UsageDashboardViewOwner") // 사용량 대시보드 저장된 보기 (2026-11-26)
 }
 
 model Department {
@@ -2373,6 +2374,25 @@ model UsageDailyDeviceStat {
   @@id([hospitalCode, date, model, deviceType])
   @@index([model, deviceType, date])
   @@map("usage_daily_device_stats")
+  @@schema("public")
+}
+
+/// 사용량 대시보드 — 저장된 보기 (2026-11-26, projects/usage_dashboard_filter_design.md §4.3)
+/// 조건 묶음(기기 · 판매모델 · 종별 · 병원 지정 · 추이 기간)에 이름을 붙여 저장. isShared 면 사용량을 볼 수 있는 모두의 목록에 나온다.
+/// filters 의 모양·검사는 lib/usage/filters.ts normalizeViewFilters 단일 소스
+model UsageDashboardView {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(60)
+  ownerId   String   @map("owner_id")
+  isShared  Boolean  @default(false) @map("is_shared")
+  filters   Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  owner     User     @relation("UsageDashboardViewOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, name])
+  @@index([isShared])
+  @@map("usage_dashboard_views")
   @@schema("public")
 }
 

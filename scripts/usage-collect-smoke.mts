@@ -69,6 +69,28 @@ async function pgNum(sql: string, params: unknown[] = []): Promise<number> {
   const r = await pg(sql, params)
   return Number(Object.values(r[0])[0])
 }
+/**
+ * 기기 사용 구간 표 = 원본 상태 이력에서 다시 묶은 값 인가 (projects/usage_spans_design.md) — 수신부가 받을 때 함께 갱신한다.
+ * 빠진 구간 · 원본에 없는 구간 · 첫/마지막 시각이 다른 구간의 수를 돌려준다(전부 0 이어야 한다).
+ */
+async function spanGap(hospital: string): Promise<{ spans: number; missing: number; extra: number; diff: number }> {
+  const r = await pg(
+    `WITH r AS (
+       SELECT server, measurement_code, COALESCE(device_type, 0)::smallint AS dt, COALESCE(serial_number, '') AS sn, min(event_at) AS fe, max(event_at) AS le
+         FROM raw_device_status WHERE hospital_code = $1 AND event_at >= timestamp '2000-01-01' GROUP BY 1, 2, 3, 4
+     ), s AS (
+       SELECT server, measurement_code, device_type AS dt, serial_number AS sn, first_event_at AS fe, last_event_at AS le
+         FROM device_usage_spans WHERE hospital_code = $1
+     )
+     SELECT count(*) FILTER (WHERE s.server IS NOT NULL)::int AS spans, count(*) FILTER (WHERE s.server IS NULL)::int AS missing,
+            count(*) FILTER (WHERE r.server IS NULL)::int AS extra,
+            count(*) FILTER (WHERE r.server IS NOT NULL AND s.server IS NOT NULL AND (r.fe <> s.fe OR r.le <> s.le))::int AS diff
+       FROM r FULL JOIN s ON s.server = r.server AND s.measurement_code = r.measurement_code AND s.dt = r.dt AND s.sn = r.sn`,
+    [hospital],
+  )
+  return { spans: Number(r[0].spans), missing: Number(r[0].missing), extra: Number(r[0].extra), diff: Number(r[0].diff) }
+}
+const spansOk = (g: { spans: number; missing: number; extra: number; diff: number }) => g.spans > 0 && g.missing === 0 && g.extra === 0 && g.diff === 0
 
 const work = mkdtempSync(path.join(tmpdir(), 'usage-smoke-'))
 function writeConfig(name: string, token: string, extra: Record<string, string> = {}): string {
@@ -292,6 +314,8 @@ try {
     check('측정 기기의 구독형 여부: 등록값 1 → 1, 등록값 없음 → 0, 미등록 기기 → 없음', dev.find((x) => x.serial_number === 'E001')?.premium === 1 && dev.find((x) => x.serial_number === 'S001')?.premium === 0 && dev.find((x) => x.serial_number === 'X999')?.premium === null, dev)
     const st = await pgNum(`SELECT count(*) FROM raw_device_status WHERE hospital_code = $1`, [H1])
     check(`기기 상태 이력 ${srcStatus}행 전부 (템플릿 기관 제외)`, st === srcStatus, { st, srcStatus })
+    const g0 = await spanGap(H1)
+    check(`기기 사용 구간 표가 함께 채워졌다 (${g0.spans}구간 = 원본에서 다시 묶은 값)`, spansOk(g0), g0)
     const cur = (await pg(`SELECT c.* FROM status_cursors c JOIN agent_servers s ON s.id = c.server WHERE s.hospital_code = $1`, [H1]))[0]
     check('수신 위치 = 병원의 마지막 번호', cur?.last_id === myNum(`SELECT MAX(d.device_status_info_id) FROM device_status_info_2026 d JOIN measurement_info m ON m.measurement_code = d.measurement_code WHERE m.organization_code <> 'REF_ORG'`), cur)
     const parts = await pg(`SELECT tableoid::regclass::text AS part, count(*)::int AS n FROM raw_device_status WHERE hospital_code = $1 GROUP BY 1 ORDER BY 1`, [H1])
@@ -336,6 +360,7 @@ try {
     check('성공', r.code === 0, r.out.slice(-400))
     check('M1 기기 3행: 이전 E001 은 빠진 시각만 기록, 새 E003·S001 은 현재', dev.length === 3 && dev.find((x) => x.serial_number === 'E001')?.removed_at !== null && dev.find((x) => x.serial_number === 'E003')?.removed_at === null && dev.find((x) => x.serial_number === 'S001')?.removed_at === null, dev)
     check('새 기기의 상태 이력 40행 도착', (await pgNum(`SELECT count(*) FROM raw_device_status WHERE hospital_code = $1 AND serial_number = 'E003'`, [H1])) === 40)
+    { const g = await spanGap(H1); check('기기 교체 뒤에도 구간 표 = 원본 (새 기기 구간 추가, 이전 기기 구간 유지)', spansOk(g) && (await pgNum(`SELECT count(*) FROM device_usage_spans WHERE hospital_code = $1 AND serial_number IN ('E001', 'E003')`, [H1])) >= 2, g) }
     check('이전 기기의 상태 이력은 그대로', (await pgNum(`SELECT count(*) FROM raw_device_status WHERE hospital_code = $1 AND serial_number = 'E001'`, [H1])) === 1200)
   }
 
@@ -419,6 +444,7 @@ try {
     check('대조 결과: 상태 이력 행 수 부족 발견 → 수신 위치 되돌림', sc?.ok === false && sc?.source - sc?.received === 300, sc)
     const r2 = agent(cfgA)
     check('다음 실행에서 상태 이력 300행 복구', r2.code === 0 && (await pgNum(`SELECT count(*) FROM raw_device_status WHERE hospital_code = $1`, [H1])) === stTotal, { now: await pgNum(`SELECT count(*) FROM raw_device_status WHERE hospital_code = $1`, [H1]), stTotal })
+    { const g = await spanGap(H1); check('대조로 위치를 되돌려 다시 받은 뒤 구간 표 = 원본', spansOk(g), g) }
     await db.query(`UPDATE agent_servers SET reconciled_at = NULL WHERE hospital_code = $1`, [H1])
     const r3 = agent(cfgA)
     const run3 = await lastRun(H1, 'smoke-a')
@@ -429,6 +455,7 @@ try {
   section('8. 수동 재전송 — 중앙에서 위치 되돌리기 / 현장 옵션')
   {
     const total = await pgNum(`SELECT count(*) FROM raw_device_status WHERE hospital_code = $1`, [H1])
+    const spansBeforeFull = (await spanGap(H1)).spans
     const dry = spawnSync('npx', ['tsx', 'scripts/usage-rewind.mts', H1, '--status=0', '--measurements'], { cwd: ROOT, encoding: 'utf8' })
     const cur0 = (await pg(`SELECT c.last_id FROM status_cursors c JOIN agent_servers s ON s.id = c.server WHERE s.hospital_code = $1`, [H1]))[0]?.last_id
     check('되돌리기 미리 보기는 아무것도 바꾸지 않는다', dry.status === 0 && dry.stdout.includes('미리 보기') && cur0 > 0, dry.stdout)
@@ -438,6 +465,7 @@ try {
     const run = await lastRun(H1, 'smoke-a')
     check('다음 실행이 측정 전체·상태 이력 전체를 다시 보냈다', r.code === 0 && run?.full_sync === true && run?.stats?.sent?.device_status === sourceStatusCount(`'SMOKE_A','SMOKE_B'`), run?.stats)
     check('다시 받아도 행 수 불변', (await pgNum(`SELECT count(*) FROM raw_device_status WHERE hospital_code = $1`, [H1])) === total)
+    { const g = await spanGap(H1); check('전체를 다시 받아도 구간 표는 그대로 (= 원본)', spansOk(g) && g.spans === spansBeforeFull, { ...g, before: spansBeforeFull }) }
     const r2 = agent(cfgA, ['run', '--full', '--status-from', '100'])
     const run2 = await lastRun(H1, 'smoke-a')
     const expectFrom100 = myNum(`SELECT COUNT(*) FROM device_status_info_2026 d JOIN measurement_info m ON m.measurement_code = d.measurement_code WHERE m.organization_code <> 'REF_ORG' AND d.device_status_info_id >= 100`)
@@ -466,6 +494,7 @@ try {
     const r2 = agent(cfgA)
     const got = await pgNum(`SELECT count(*) FROM raw_device_status WHERE hospital_code = $1`, [H1])
     check('수신부가 올라온 뒤 실행 — 끊긴 지점부터 이어서 전부 도착', r2.code === 0 && got === total, { got, total })
+    { const g = await spanGap(H1); check('나눠 받은 뒤에도 구간 표 = 원본', spansOk(g), g) }
     const badTok = writeConfig('smoke-a-tok', 'tua_' + 'f'.repeat(48), { USAGE_SERVER_ID: 'smoke-a' })
     const rTok = agent(badTok)
     check('잘못된 토큰은 거부 (다시 시도하지 않고 바로 실패)', rTok.code === 1 && rTok.out.includes('401'), rTok.out.slice(-200))
@@ -487,6 +516,7 @@ try {
     await waitIngest(true)
     const r2 = agent(cfgA)
     check('상한을 풀면 멈춘 동안의 상태 이력 120행이 이어서 들어온다', r2.code === 0 && (await pgNum(`SELECT count(*) FROM raw_device_status WHERE hospital_code = $1`, [H1])) === stBefore + 120)
+    { const g = await spanGap(H1); check('용량 상한으로 멈췄다 이어 받은 뒤 구간 표 = 원본', spansOk(g), g) }
   }
 
   // ── 11. 병원 구분 ────────────────────────────────────────────────────

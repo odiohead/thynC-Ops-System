@@ -60,4 +60,5 @@ export const HOSPITAL_TABLES = [
   'raw_measurements',
   'raw_measurement_devices',
   'raw_device_status',
+  'device_usage_spans',
 ] as const

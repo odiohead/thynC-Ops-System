@@ -12,6 +12,8 @@
  *  - 전체 12주 추이 = 주마다 Σ(병원별 그 주 평균 최대 동시) ÷ Σ(병원별 그 주 평균 수량) — 전체 가동률과 같은 방식
  *  - 수집 범위 = 운영 중인 병원(병원 상태 '운영') 가운데 최근 24시간 안에 수신한 병원. 수량 기준은 그 병원들의 오늘 계약·공급 수량 합
  *  - 측정 활동 = 일별 집계의 신규 측정 수·측정 환자 수를 전 병원 합산 (최근 30일 vs 이전 30일, 오늘 제외)
+ *  - 필터(종별 · 병원 지정, 2026-11-26)는 계산에 들어가는 병원 목록만 바꾼다 — 규칙은 같다. 추이 기간은 추이 영역의 범위만 바꾼다
+ *    (26주까지 주 단위, 그보다 길면 월 단위). 가동률 · 순위 · 판정은 언제나 최근 30일 대 이전 30일이다
  * 규칙을 바꾸면 '산정기준' 팝업(app/usage/UsageCriteria.tsx)도 함께 고칠 것.
  */
 import { prisma } from '@/lib/prisma'
@@ -19,6 +21,7 @@ import { usagePool } from './db'
 import { DAY_SEC, average, dayLabel, localDayStart, weekStartOf } from './daily'
 import { USAGE_DEVICE_KINDS, USAGE_MODELS, loadCapacityByHospital, type UsageModel } from './metrics'
 import { OPERATING_HOSPITAL_STATUS } from './agents'
+import { DEFAULT_TREND, NO_TYPE_LABEL, TREND_WEEKLY_MAX_WEEKS, sortTypes, type OverviewFilters, type TrendRange } from './filters'
 import { getUsageStatsRun, type UsageStatsRun } from './stats'
 
 /** 최근·이전 기간의 길이(일) — 병원별 화면의 기본 기간과 같다 */
@@ -205,6 +208,89 @@ export function summarizeOverviewTrend(rows: OverviewStats[]): OverviewTrendWeek
   return out
 }
 
+/** 추이의 한 구간 — [start, end) (epoch 초, 현지 자정 기준). label 은 주의 월요일 'MM-DD' 또는 달 'YYYY-MM' */
+export type TrendBucket = { start: number; end: number; label: string }
+export type TrendPlan = { unit: 'week' | 'month'; from: number; to: number; buckets: TrendBucket[] }
+
+/**
+ * 추이 기간 → 구간 목록 (순수 함수).
+ *  - N주: 이번 주 월요일에서 N−1주 전부터 오늘까지. 전체: 집계 첫 날부터. 직접 지정: from ~ to (집계 첫 날 · 오늘을 넘지 않게)
+ *  - 길이가 26주 이하면 주(월~일) 단위, 그보다 길면 달 단위. 범위에 일부만 걸친 첫 · 마지막 구간은 걸친 날만 센다
+ * @param firstDay 일별 집계가 있는 첫 날 자정 (없으면 null — 그때 '전체'는 12주와 같다)
+ */
+export function planTrend(trend: TrendRange, today: number, firstDay: number | null): TrendPlan {
+  const thisMonday = weekStartOf(today)
+  const end = today + DAY_SEC
+  let from: number
+  let to = end
+  if (trend.kind === 'weeks') from = thisMonday - (trend.weeks - 1) * 7 * DAY_SEC
+  else if (trend.kind === 'all') from = firstDay ?? thisMonday - (OVERVIEW_WEEKS - 1) * 7 * DAY_SEC
+  else {
+    from = dayStartOf(trend.from)
+    to = Math.min(dayStartOf(trend.to) + DAY_SEC, end)
+    if (firstDay !== null && from < firstDay) from = firstDay
+  }
+  const buckets: TrendBucket[] = []
+  if (from >= to) return { unit: 'week', from, to, buckets }
+  const unit: TrendPlan['unit'] = (to - from) / DAY_SEC <= TREND_WEEKLY_MAX_WEEKS * 7 ? 'week' : 'month'
+  if (unit === 'week') {
+    for (let ws = weekStartOf(from); ws < to; ws += 7 * DAY_SEC) {
+      buckets.push({ start: Math.max(ws, from), end: Math.min(ws + 7 * DAY_SEC, to), label: dayLabel(ws).slice(5) })
+    }
+  } else {
+    const d = new Date(from * 1000)
+    let y = d.getUTCFullYear()
+    let m = d.getUTCMonth()
+    for (;;) {
+      const ms = Date.UTC(y, m, 1) / 1000
+      if (ms >= to) break
+      const next = Date.UTC(y, m + 1, 1) / 1000
+      buckets.push({ start: Math.max(ms, from), end: Math.min(next, to), label: `${y}-${String(m + 1).padStart(2, '0')}` })
+      m += 1
+      if (m === 12) {
+        m = 0
+        y += 1
+      }
+    }
+  }
+  return { unit, from, to, buckets }
+}
+
+export type OverviewTrendPoint = { start: string; label: string; rate: number | null; hospitals: number }
+/** 전체 가동률의 추이 — 고른 기간, 주 또는 달 단위 */
+export type OverviewTrend = { unit: 'week' | 'month'; from: string; to: string; points: OverviewTrendPoint[] }
+
+/**
+ * 병원별 일별 값 → 구간별 전체 가동률 (순수 함수). 구간마다 그 구간에 유효한 날이 있는 병원끼리
+ * Σ(병원별 평균 최대 동시) ÷ Σ(병원별 평균 수량) — summarizeOverviewTrend 와 같은 규칙을 임의의 구간에 적용한 것이다.
+ * 유효한 날의 조건도 summarizeOverview 와 같다(수량과 수치가 있고, 오늘이 아니고, 수신이 끊긴 병원은 validBefore 전).
+ */
+export function summarizeOverviewBuckets(hospitals: { days: OverviewDay[]; validBefore: number }[], today: number, buckets: TrendBucket[]): OverviewTrendPoint[] {
+  const maps = hospitals.map((h) => ({ byDay: new Map(h.days.map((d) => [dayStartOf(d.date), d])), limit: Math.min(h.validBefore, today) }))
+  return buckets.map((b) => {
+    let peak = 0
+    let cap = 0
+    let n = 0
+    for (const h of maps) {
+      let ps = 0
+      let cs = 0
+      let k = 0
+      for (let t = b.start; t < Math.min(b.end, h.limit); t += DAY_SEC) {
+        const d = h.byDay.get(t)
+        if (!d || !d.capacity || d.peak === null) continue
+        ps += d.peak
+        cs += d.capacity
+        k++
+      }
+      if (k === 0) continue
+      peak += ps / k
+      cap += cs / k
+      n++
+    }
+    return { start: dayLabel(b.start), label: b.label, rate: cap > 0 ? (peak / cap) * 100 : null, hospitals: n }
+  })
+}
+
 /** 수집 범위 — 운영 중인 병원 가운데 얼마나 수집하고 있는가 */
 export type OverviewCoverage = {
   /** 운영 중인 병원 수(병원 상태 '운영') · 그중 최근 24시간 안에 수신한 병원 수 */
@@ -253,6 +339,8 @@ export function summarizeOverviewActivity(days: { date: string; started: number;
 export type OverviewRow = OverviewStats & {
   hospitalCode: string
   hospitalName: string
+  /** 종별 (병원 정보의 종별 — 비어 있으면 '종별 없음') */
+  hospitalType: string
   /**
    * servers = 차단되지 않은 서버 수, collecting = 그중 최근 24시간 안에 수신한 서버 수,
    * expected = 에이전트 관리에 등록한 서버 대수(등록 없으면 null). collecting < expected 면 일부 서버만 수집 중
@@ -273,10 +361,16 @@ export type UsageOverview = {
   total: OverviewTotal
   /** 같은 기기의 판매모델별 전체 한 줄 (합산·일반형·사용량비례형) — total 은 byModel[model] 과 같다 */
   byModel: Record<UsageModel, OverviewTotal>
-  /** 전체 가동률의 12주 추이 (오래된 주부터) */
-  trend: OverviewTrendWeek[]
+  /** 종별별 전체 한 줄 — 병원 지정 안에서, 종별 필터와 무관하게 전부(비교용). 고른 종별은 filters.types */
+  byType: { type: string; hospitals: number; total: OverviewTotal }[]
+  /** 전체 가동률의 추이 — 고른 기간 (기본 12주, 오래된 구간부터) */
+  trend: OverviewTrend
   coverage: OverviewCoverage
   activity: OverviewActivity
+  /** 적용된 필터 */
+  filters: OverviewFilters
+  /** 고를 수 있는 값 — 종별(수집 중인 병원 기준 병원 수) · 일별 집계가 있는 첫 날 */
+  options: { types: { type: string; count: number }[]; firstDate: string | null }
   rows: OverviewRow[]
 }
 
@@ -287,15 +381,25 @@ export function isUsageModel(v: string | null): v is UsageModel {
   return USAGE_MODELS.some((m) => m.key === v)
 }
 
-/** 수집 중인 병원 전체의 가동률 — 일별 집계(본체 DB)와 수신 상태(원본 DB)를 읽는다 */
-export async function getUsageOverview(device: OverviewDeviceKey, model: UsageModel, nowMs: number = Date.now()): Promise<UsageOverview> {
+/**
+ * 수집 중인 병원의 가동률 — 일별 집계(본체 DB)와 수신 상태(원본 DB)를 읽는다.
+ * filters 로 병원을 좁히면(종별 · 병원 지정) 모든 값이 그 병원들만으로 계산된다.
+ */
+export async function getUsageOverview(
+  device: OverviewDeviceKey,
+  model: UsageModel,
+  filters: OverviewFilters = { types: [], hospitals: [], trend: DEFAULT_TREND },
+  nowMs: number = Date.now(),
+): Promise<UsageOverview> {
   const today = localDayStart(nowMs, TZ_OFFSET_HOURS)
   const recentStart = today - (OVERVIEW_DAYS - 1) * DAY_SEC
   const prevStart = recentStart - OVERVIEW_DAYS * DAY_SEC
   const firstNeeded = Math.min(prevStart, weekStartOf(today) - (OVERVIEW_WEEKS - 1) * 7 * DAY_SEC)
   const deviceType = USAGE_DEVICE_KINDS.find((k) => k.key === device)!.type
+  const pickedHospitals = filters.hospitals.length > 0 ? new Set(filters.hospitals) : null
+  const pickedTypes = filters.types.length > 0 ? new Set(filters.types) : null
 
-  const [servers, stats, run, operatingRows, capacityNow, activityRows] = await Promise.all([
+  const [servers, run, operatingRows, capacityNow, firstStat] = await Promise.all([
     usagePool().query(
       `SELECT s.hospital_code, count(*) FILTER (WHERE s.blocked_at IS NULL)::int AS servers, max(s.last_success_at) AS last_success_at,
               count(*) FILTER (WHERE s.blocked_at IS NULL AND s.last_success_at > now() - make_interval(hours => $1))::int AS collecting,
@@ -306,24 +410,51 @@ export async function getUsageOverview(device: OverviewDeviceKey, model: UsageMo
         GROUP BY s.hospital_code`,
       [OVERVIEW_RECEIVE_DELAY_HOURS],
     ),
-    // 판매모델 3종을 함께 읽는다 — 고른 모델은 병원 표, 나머지는 판매모델별 전체 한 줄에 쓴다
+    getUsageStatsRun(),
+    prisma.hospital.findMany({ where: { status: OPERATING_HOSPITAL_STATUS }, select: { hospitalCode: true, type: true } }),
+    loadCapacityByHospital(deviceType, model, dayLabel(today)),
+    prisma.usageDailyDeviceStat.aggregate({ _min: { date: true } }),
+  ])
+  const codes = servers.rows.map((r) => r.hospital_code as string)
+  const meta = await prisma.hospital.findMany({ where: { hospitalCode: { in: codes } }, select: { hospitalCode: true, hospitalName: true, type: true } })
+  const nameOf = new Map(meta.map((n) => [n.hospitalCode, n.hospitalName]))
+  const typeLabel = (t: string | null | undefined) => (t && t.trim() ? t.trim() : NO_TYPE_LABEL)
+  const typeOf = new Map(meta.map((n) => [n.hospitalCode, typeLabel(n.type)]))
+  const typeOfCode = (code: string) => typeOf.get(code) ?? NO_TYPE_LABEL
+
+  // 고를 수 있는 종별 — 수집 중인 병원 전체 기준 (필터와 무관)
+  const typeCounts = new Map<string, number>()
+  for (const c of codes) typeCounts.set(typeOfCode(c), (typeCounts.get(typeOfCode(c)) ?? 0) + 1)
+  const firstDay = firstStat._min.date ? firstStat._min.date.getTime() / 1000 : null
+
+  // 대상 병원: 병원 지정(scope) → 종별(selected). 종별 비교(byType)는 scope 전체로 낸다
+  const scopeServers = servers.rows.filter((r) => !pickedHospitals || pickedHospitals.has(r.hospital_code as string))
+  const inTypes = (code: string) => !pickedTypes || pickedTypes.has(typeOfCode(code))
+  const scopeCodes = scopeServers.map((r) => r.hospital_code as string)
+
+  // 추이 범위가 기본 창(이전 30일 · 12주)보다 앞에서 시작하면 고른 판매모델만 그만큼 더 읽는다
+  const plan = planTrend(filters.trend, today, firstDay)
+  const loadFrom = Math.min(firstNeeded, plan.buckets.length > 0 ? plan.from : firstNeeded)
+  const [stats, activityRows] = await Promise.all([
     prisma.usageDailyDeviceStat.findMany({
-      where: { deviceType, date: { gte: new Date(firstNeeded * 1000) } },
+      where: {
+        deviceType,
+        ...(pickedHospitals ? { hospitalCode: { in: scopeCodes } } : {}),
+        OR: [{ date: { gte: new Date(firstNeeded * 1000) } }, { model, date: { gte: new Date(loadFrom * 1000) } }],
+      },
       select: { hospitalCode: true, date: true, model: true, peak: true, capacity: true },
       orderBy: { date: 'asc' },
     }),
-    getUsageStatsRun(),
-    prisma.hospital.findMany({ where: { status: OPERATING_HOSPITAL_STATUS }, select: { hospitalCode: true } }),
-    loadCapacityByHospital(deviceType, model, dayLabel(today)),
     prisma.usageDailyStat.groupBy({
       by: ['date'],
-      where: { model, date: { gte: new Date(prevStart * 1000), lt: new Date(today * 1000) } },
+      where: {
+        model,
+        date: { gte: new Date(prevStart * 1000), lt: new Date(today * 1000) },
+        ...(pickedHospitals || pickedTypes ? { hospitalCode: { in: scopeCodes.filter(inTypes) } } : {}),
+      },
       _sum: { started: true, measured: true },
     }),
   ])
-  const codes = servers.rows.map((r) => r.hospital_code as string)
-  const names = await prisma.hospital.findMany({ where: { hospitalCode: { in: codes } }, select: { hospitalCode: true, hospitalName: true } })
-  const nameOf = new Map(names.map((n) => [n.hospitalCode, n.hospitalName]))
   const daysOf = new Map<string, OverviewDay[]>() // `${판매모델}|${병원코드}` → 일별 값
   for (const s of stats) {
     const k = `${s.model}|${s.hospitalCode}`
@@ -332,15 +463,18 @@ export async function getUsageOverview(device: OverviewDeviceKey, model: UsageMo
     daysOf.set(k, list)
   }
 
-  const rowsFor = (m: UsageModel): OverviewRow[] => servers.rows.map((r) => {
+  const validBeforeOf = new Map<string, number>()
+  const rowsFor = (m: UsageModel): OverviewRow[] => scopeServers.map((r) => {
     const code = r.hospital_code as string
     const last = r.last_success_at ? new Date(r.last_success_at) : null
     const delayed = !last || nowMs - last.getTime() > OVERVIEW_RECEIVE_DELAY_HOURS * 3600 * 1000
     // 수신이 끊긴 병원: 마지막 수신일은 하루가 다 들어오지 않았으므로 그 전날까지만 유효
     const validBefore = !delayed ? today : last ? localDayStart(last.getTime(), TZ_OFFSET_HOURS) : 0
+    validBeforeOf.set(code, validBefore)
     return {
       hospitalCode: code,
       hospitalName: nameOf.get(code) ?? code,
+      hospitalType: typeOfCode(code),
       receive: {
         servers: Number(r.servers),
         expected: r.expected === null ? null : Number(r.expected),
@@ -352,14 +486,22 @@ export async function getUsageOverview(device: OverviewDeviceKey, model: UsageMo
       ...summarizeOverview(daysOf.get(`${m}|${code}`) ?? [], today, validBefore, !!r.behind),
     }
   })
-  const rows = rowsFor(model)
+  const scopeRows = rowsFor(model) // 병원 지정까지만 적용 — 종별 비교용
+  const rows = scopeRows.filter((r) => inTypes(r.hospitalCode))
   // 기본 순서: 가동률 높은 순, 값이 없는 병원은 아래로 (이름순)
   rows.sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1) || a.hospitalName.localeCompare(b.hospitalName, 'ko'))
   const total = summarizeOverviewTotal(rows)
-  const byModel = Object.fromEntries(USAGE_MODELS.map((x) => [x.key, x.key === model ? total : summarizeOverviewTotal(rowsFor(x.key))])) as Record<UsageModel, OverviewTotal>
+  const byModel = Object.fromEntries(
+    USAGE_MODELS.map((x) => [x.key, x.key === model ? total : summarizeOverviewTotal(rowsFor(x.key).filter((r) => inTypes(r.hospitalCode)))]),
+  ) as Record<UsageModel, OverviewTotal>
+  const byTypeMap = new Map<string, OverviewRow[]>()
+  for (const r of scopeRows) byTypeMap.set(r.hospitalType, [...(byTypeMap.get(r.hospitalType) ?? []), r])
+  const byType = sortTypes(Array.from(byTypeMap.entries()).map(([type, list]) => ({ type, hospitals: list.length, total: summarizeOverviewTotal(list) })))
 
-  // 수집 범위: 운영 중인 병원 가운데 최근 24시간 안에 수신한 병원 (병원 수 · 계약·공급 수량)
-  const operating = new Set(operatingRows.map((h) => h.hospitalCode))
+  // 수집 범위: 같은 조건의 운영 병원 가운데 최근 24시간 안에 수신한 병원 (병원 수 · 계약·공급 수량)
+  const operating = new Set(
+    operatingRows.filter((h) => (!pickedHospitals || pickedHospitals.has(h.hospitalCode)) && (!pickedTypes || pickedTypes.has(typeLabel(h.type)))).map((h) => h.hospitalCode),
+  )
   const collectingCodes = new Set(rows.filter((r) => r.receive.collecting > 0).map((r) => r.hospitalCode))
   let capacityOperating = 0
   let capacityCollecting = 0
@@ -381,6 +523,16 @@ export async function getUsageOverview(device: OverviewDeviceKey, model: UsageMo
     activityRows.map((a) => ({ date: a.date.toISOString().slice(0, 10), started: a._sum.started ?? 0, measured: a._sum.measured ?? 0 })),
     today,
   )
+  const trend: OverviewTrend = {
+    unit: plan.unit,
+    from: dayLabel(plan.from),
+    to: dayLabel(Math.max(plan.from, plan.to - DAY_SEC)),
+    points: summarizeOverviewBuckets(
+      rows.map((r) => ({ days: daysOf.get(`${model}|${r.hospitalCode}`) ?? [], validBefore: validBeforeOf.get(r.hospitalCode) ?? today })),
+      today,
+      plan.buckets,
+    ),
+  }
 
   return {
     device,
@@ -392,9 +544,15 @@ export async function getUsageOverview(device: OverviewDeviceKey, model: UsageMo
     run,
     total,
     byModel,
-    trend: summarizeOverviewTrend(rows),
+    byType,
+    trend,
     coverage,
     activity,
+    filters: { types: filters.types, hospitals: filters.hospitals, trend: filters.trend },
+    options: {
+      types: sortTypes(Array.from(typeCounts.entries()).map(([type, count]) => ({ type, count }))),
+      firstDate: firstDay === null ? null : dayLabel(firstDay),
+    },
     rows,
   }
 }
