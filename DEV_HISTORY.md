@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-11-26 12:38 | 사용량 — 일별 집계를 '매시간 최근 3일 + 하루 한 번 전체'로 나눔 · 집계 전용 조회 상한 (dev2 검증)
+
+- **계기**: PROD 집계 한 바퀴가 188곳에 14분(840초), 목포중앙(HOSP-000115 — 91일 상태 이력 167만 행)은 조회 상한 20초를 넘겨 매번 실패. PROD 실측(무거운 부분만): 목포중앙 91일 23.9초 → 3일 0.1초, 김포우리 3.5초 → 0.02초
+- **사용자 결정**: 개선안 A(갱신 범위 나누기) 진행. B(수신부가 '측정 × 기기별 첫·마지막 기록 시각' 표를 유지하는 구조 변경 — 사용자의 "정제된 통계 데이터를 별도 테이블로" 제안에 해당)는 설계안 검토 뒤
+- **변경**: `lib/usage/stats.ts` — 매 주기는 최근 3일(`USAGE_STATS_RECENT_DAYS`, Agent 의 측정 변동분 기준 '최근 2일'에 맞춤), 91일 전체는 날마다 새벽 3시 이후 첫 주기(`statsRunMode` 순수 함수). 저장된 행이 없는 새 병원은 매 주기에서도 전체를 채움. 실행 기록에 `mode` 추가, 전체 실행은 `usage_stats_last_full`에도 남김(이전 기록은 전체로 간주 — 배포 직후 전체를 한 번 더 돌지 않게). `lib/usage/db.ts` `usageBatchPool`(읽기 전용, 조회 상한 120초, 연결 2개) — 집계만 사용, 화면 조회 풀(20초)과 분리. `scripts/usage-stats-rebuild.mts --recent`
+- **값은 같다**: 그날의 값은 그날에 걸친 측정만 보고 계산하므로 3일만 다시 계산해도 전체 계산과 같다. 달라지는 것은 과거 날짜가 갱신되는 시점 — 딜 수량 수정·늦게 들어온 상태 이력·산정 기준 변경이 3일보다 앞선 날에 반영되는 것은 다음 날 새벽(바로 맞추려면 수동 실행)
+- **검증**: tsc · eslint · `usage-metrics-test.mts` 107/107(주기 판정 7). dev2 문산중앙 실데이터 — 전체 계산 뒤 같은 시각 기준으로 최근 3일만 다시 계산: 모든 날의 측정·기기 값 동일, 3일 밖 267행은 다시 쓰지 않음(계산 시각 그대로), 3일 안 9행만 갱신, 1,965ms → 79ms. 전 병원 실행과 스케줄러는 dev2에서 돌리지 않음(dev2 집계는 PROD 사본이라 전 병원 실행이 원본 없는 병원을 0으로 덮음)
+- 파일: lib/usage/stats.ts, lib/usage/stats-scheduler.ts, lib/usage/db.ts, lib/usage/metrics.ts, scripts/usage-stats-rebuild.mts, scripts/usage-metrics-test.mts, app/usage/UsageCriteria.tsx, README.md, CLAUDE.md, projects/usage_overview_design.md
+
+## 2026-11-26 12:35 | [운영 설정 조치 — PROD만] 사용량 수신부 용량 상한 20GB → 60GB (기기 상태 이력 수신 재개)
+
+- **발견**: 집계 부하를 조사하다 PROD 원본 DB(`thync_usage`)가 20GB에 닿아 있는 것을 확인. 수신부의 용량 안전장치(`USAGE_MAX_BYTES`)가 걸려 **2026-11-25 12:02부터 기기 상태 이력 수신이 전 병원에서 중단**(handshake 에 `status_paused`) — 약 24시간 반. 원인: 11-25 09~12시 에이전트 일괄 설치로 과거 상태 이력 약 6천만 행이 한꺼번에 들어옴(09시 3,000만 · 10시 1,890만 · 11시 1,040만 행). 측정·측정 기기는 계속 수신됨. 그동안의 기기 사용 구간은 측정 기기 목록 기준으로만 계산됨(교체된 기기 누락)
+- **조치**(사용자 "용량 상한 60GB로 올리고"): PROD `usage-ingest/.env` `USAGE_MAX_BYTES` 21474836480 → 64424509440(사본 `.env.bak-20261126`) → `pm2 restart thync-usage-ingest-prod`(12:35). 기동 로그에 새 상한 확인. 받은 위치는 서버에 남아 있어 멈춘 지점부터 이어 받는다
+- **용량 전망**: 상태 이력은 한 달 약 2천만 행 · 7GB(색인 포함). PROD 디스크 여유 63GB. 60GB 상한은 지금 속도로 5~6개월분 — 원본 보관 기간은 B 설계 때 함께 결정(지금은 '원본 행은 지우지 않는다')
+- 소스 변경 없음
+
 ## 2026-11-26 15:30 | 입력형 모달 — 바깥 클릭 닫힘 방지 + 작성 중 닫기 확인 (dev2 → DEV)
 
 - **요청**(팀원 개선 요청): 출고요청 등 팝업에서 입력 중 바깥을 클릭하면 창이 닫혀 다시 작성해야 함 → 바깥 클릭 닫힘 방지, X·취소 시 작성 중인 내용이 있으면 확인, OPS 입력형 모달 공통 적용 검토. 1차 = 입력이 많은 모달 + 공통 Modal을 쓰는 입력 모달 (사용자 승인 — 추천안대로)
@@ -12,6 +28,7 @@
 - **한계**: 입력 이벤트가 없는 버튼형 선택(칩 등)만 바꾼 경우는 '입력'으로 치지 않음 — 필요하면 화면별로 `dirty`를 넘긴다. 2차(그 밖의 직접 구현 모달·모바일 화면)는 미적용
 - **검증**: tsc·eslint · dev2 빌드 · Playwright 실제 화면 19/19 — 출고요청·자재관리 입고·에이전트 병원 등록(ESC) 각각: 바깥 클릭 유지 / 입력 없이 닫기 = 확인 없이 닫힘 / 입력 후 닫기 = 확인 문구 / 확인 취소 = 유지 / 확인 = 닫힘, 보기 전용 공통 Modal(산정기준)은 바깥 클릭으로 닫힘 유지, 페이지 오류 0
 - 영향 파일: app/components/useUnsavedGuard.ts(신규), app/components/ui/Modal.tsx, app/stock-out-requests/_components/StockOutRequestFormModal.tsx, app/as-receipts/_components/{AsReceiptFormModal,AsStockOutRequestModal}.tsx, app/vehicle-reservations/ReservationModal.tsx, app/inventory/components/{TransactionModal,BulkTxModal,BulkSerialTxModal,TxEditModal,UnitEditModal}.tsx, app/devices/_components/{RegisterModal,ReplaceModal,RecoverModal,MoveWardModal,ProductTypeModal,AsFlagModal,DealModal,CorrectionModal}.tsx, app/components/TicketRuleSettingModal.tsx, app/usage/agents/AgentsClient.tsx, README.md
+- → **DEV 서버 반영 2026-11-26 (827fb0b)**: pull(bd55a06 → 827fb0b, 마이그·패키지·협업·수신부 변경 없음) → 힙 4GB 빌드 성공 → `pm2 restart thync-dev` → /login 200(로컬·https), 빌드 산출물에 확인 문구 포함(청크 9개). 디스크 83%(여유 5.0G). PROD 미반영
 
 ## 2026-11-25 14:23 | 사용량 — 전체 병원 화면을 대시보드로 개편 (dev2 빌드·화면 검증 → DEV 서버 → PROD 반영)
 
