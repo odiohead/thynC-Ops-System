@@ -43,14 +43,17 @@ export async function canAdminInventory(user: { userId: string; role: string }):
 }
 
 /**
- * 전표 메타 수정 권한 — 관리자(ADMIN 이상)이면서 재고 담당자 풀 등록 또는
- * 'inventory.manage' 권한 보유자 (2026-07-20, RBAC 편입 2026-08-04 — 등급은 자격 요건으로 유지)
+ * 전표 메타 수정 권한 — 관리자(ADMIN 이상)이면서 재고 담당자 풀 등록 또는 'inventory.manage' 권한 보유자
+ * (2026-07-20, RBAC 편입 2026-08-04 — 등급은 자격 요건으로 유지)
+ * + 자재 관리자: USER 이상 + 'inventory.admin'(역할 '재고책임자')은 등급과 무관하게 가능 (2026-11-27 — 가산 전용)
  */
 export async function canEditTxMeta(user: { userId: string; role: string }): Promise<boolean> {
-  if (!isAdminOrAbove(user.role)) return false
-  const mgr = await prisma.inventoryManager.findUnique({ where: { userId: user.userId } })
-  if (mgr) return true
-  return hasPermission(user, 'inventory.manage')
+  if (isAdminOrAbove(user.role)) {
+    const mgr = await prisma.inventoryManager.findUnique({ where: { userId: user.userId } })
+    if (mgr) return true
+    if (await hasPermission(user, 'inventory.manage')) return true
+  }
+  return isUserOrAbove(user.role) && hasPermission(user, 'inventory.admin')
 }
 
 /** KST 오늘 날짜 (YYYY-MM-DD) */

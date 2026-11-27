@@ -18,6 +18,16 @@
 - **PROD(54.117.160.187) 반영 2026-11-27 13:40 (e29a656)**: `git pull`(8800bef → e29a656) → 힙 4GB 빌드(성공) → 협업 번들 해시 불변(2108cacb…) → `pm2 restart thync-prod`. 로그인 200(로컬 · ops.seersthync.com), 비로그인 전표 취소 호출 307, 빌드 산출물에 새 안내 문구 포함, 빌드~재시작 사이 5xx · 정적 파일 400 없음. **PROD에서 실제 전표 취소는 해 보지 않았다**(동작 검증은 dev2). AS-202611-0431은 초안 그대로 — 담당자 최종확정 대기
 - 파일: lib/deviceRegistry/hooks.ts, lib/inventory.ts(전표 취소 부분 — 같은 파일에 다른 세션의 미커밋 변경 있음), app/api/inventory/transactions/[id]/cancel/route.ts, app/inventory/transactions/page.tsx, scripts/stock-out-fulfill-smoke.mts, README.md, projects/hospital_device_registry_design.md, projects/stock_out_request_design.md
 
+## 2026-11-27 10:40 | 재고책임자 역할로 전표 사후 수정·재고 담당자 관리·입출고대장 문서 정보 허용 (dev2 — 빌드·커밋 전)
+
+- **요청**: 관리자 등급으로만 되던 자재관리 3기능을 역할 '재고책임자'로 해결 — 이준표 계정의 ADMIN 등급을 빼기 위한 선행 작업(등급 변경은 사용자가 직접)
+- **방식**: 새 권한 키 대신 기존 `inventory.admin`(자재 관리자 — PROD에서 재고책임자 역할만 보유, 4명)의 범위에 세 기능을 더함 → 역할·권한 데이터 변경 없이 적용. RBAC 가산 전용·VIEWER 차단(USER 이상) 유지
+- **변경**: `lib/inventory.ts` `canEditTxMeta` = (ADMIN AND (재고 담당자 풀 OR `inventory.manage`)) OR (USER 이상 AND `inventory.admin`) — 기존 ADMIN 경로는 그대로 · 재고 담당자 풀 API 3종(`/api/settings/inventory-managers`·`/candidates`·`/[id]`)·UDI 문서 메타 PUT(`/api/settings/udi-ledger`) = `canAdminInventory` · 설정 화면 '재고 담당자 관리'·'입출고대장 문서'의 접근 판정을 등급 → `/api/inventory/can-manage`의 `canAdmin`으로 · '입출고대장 문서' 메뉴를 다른 자재관리 설정처럼 USER까지 노출(마이그 `20261127100000_udi_ledger_nav_inventory_admin` — dev2 적용·resolve) · 권한 카탈로그 `inventory.admin` 설명 갱신
+- **유지**: 출고업무 설정(출고 품목 목록·구성품·안내 문구·상태코드)은 ADMIN 등급 그대로
+- **검증**: tsc · eslint · 권한 판정 스모크 6/6(dev2 계정 — USER+재고책임자: 전표 수정·담당자 관리·UDI 가능 / VIEWER로 낮춘 재고책임자·USER+재고담당만·역할 없는 USER: 불가 / 역할·풀 없는 ADMIN: 전표 수정 불가(기존과 동일)·설정 가능 / SUPER_ADMIN 전부 가능). 빌드·실제 화면 확인은 하지 않음
+- 영향 파일: lib/inventory.ts, lib/permissions.ts, app/api/settings/inventory-managers/{route,candidates/route,[id]/route}.ts, app/api/settings/udi-ledger/route.ts, app/settings/inventory-managers/page.tsx, app/settings/udi-ledger/page.tsx, app/inventory/components/TxEditModal.tsx(주석), prisma/migrations/20261127100000_udi_ledger_nav_inventory_admin, README.md
+- **반영 시**: 마이그 SQL(메뉴 1행 UPDATE) psql 적용·resolve → 빌드·재시작. 패키지·협업 서버·수신부 변경 없음
+
 ## 2026-11-26 14:45 | 사용량 — 대시보드에 도입 병상 필터(범위 막대 · 빠른 선택) 추가 · 구간 표 대조를 운영 중에도 돌릴 수 있게 (dev2 빌드·화면 검증 → DEV 서버 → PROD 반영)
 
 - **도입 병상 필터** (사용자 요청 "도입규모에 따른 필터 — min/max를 좌우 드래그로, 프리셋 0~50 · 51~100 · 101~200 · 200~"): 병원 정보의 도입 병상 수(`hospitals.intro_beds`) 범위로 대상 병원을 좁힘. 조건 묶음에 `beds: { min, max } | null`(끝 포함, max 없으면 그 이상 전부), 주소 `beds=51-100` · `201-`, 저장된 보기에도 저장(이전 보기는 범위 없음으로 읽음). 병원 지정과 같은 단계에서 적용 — 가동률 · 추이 · 분포 · 순위 · 표 · 수집 범위 · 신규 측정 전부 그 병원들만으로 계산, 종별 가동률은 그 범위 안의 모든 종별

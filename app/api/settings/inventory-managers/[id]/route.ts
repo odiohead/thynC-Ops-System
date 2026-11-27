@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser } from '@/lib/auth'
+import { canAdminInventory } from '@/lib/inventory' // ADMIN 또는 자재 관리자(재고책임자) — 2026-11-27
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 type Params = { params: { id: string } }
 
 export async function DELETE(req: NextRequest, { params }: Params) {
   const user = await getAuthUser(req)
-  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!user || !(await canAdminInventory(user))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const id = parseInt(params.id)
   if (isNaN(id)) return NextResponse.json({ error: '잘못된 ID입니다.' }, { status: 400 })

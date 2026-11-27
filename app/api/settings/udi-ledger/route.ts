@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser } from '@/lib/auth'
+import { canAdminInventory } from '@/lib/inventory'
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 import { getLedgerDocMeta, DEFAULT_DOC_META, DOC_META_KEY, type LedgerDocMeta } from '@/lib/udiLedgerDocx'
 
@@ -14,10 +15,10 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ meta: await getLedgerDocMeta(), defaults: DEFAULT_DOC_META })
 }
 
-// PUT — 문서 메타 수정 (ADMIN 이상)
+// PUT — 문서 메타 수정 (ADMIN 또는 자재 관리자 'inventory.admin' — 2026-11-27)
 export async function PUT(req: NextRequest) {
   const user = await getAuthUser(req)
-  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!user || !(await canAdminInventory(user))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await req.json()
   const str = (v: unknown, fallback: string) => (typeof v === 'string' && v.trim() ? v.trim() : fallback)

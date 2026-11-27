@@ -31,12 +31,18 @@ export default function UdiLedgerSettingsPage() {
 
   useEffect(() => {
     ;(async () => {
+      // 접근: ADMIN 또는 자재 관리자(재고책임자 — inventory.admin), 서버 PUT과 같은 판정 (2026-11-27)
+      const perm = await fetch('/api/inventory/can-manage')
+      if (!perm.ok || (await perm.json()).canAdmin !== true) {
+        router.push('/')
+        return
+      }
       const res = await fetch('/api/settings/udi-ledger')
       if (res.ok) setMeta((await res.json()).meta)
       else setError((await res.json()).error ?? '불러오지 못했습니다.')
       setLoading(false)
     })()
-  }, [])
+  }, [router])
 
   async function save() {
     if (!meta) return

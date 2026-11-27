@@ -30,7 +30,8 @@ export default function InventoryManagersPage() {
   const [page, setPage] = useState(1)
   const limit = 20
   const [loading, setLoading] = useState(true)
-  const [userRole, setUserRole] = useState<string | null>(null)
+  // 접근: ADMIN 또는 자재 관리자(재고책임자 — inventory.admin) — 서버 canAdminInventory와 같은 판정 (2026-11-27)
+  const [allowed, setAllowed] = useState<boolean | null>(null)
 
   const [showModal, setShowModal] = useState(false)
   const [search, setSearch] = useState('')
@@ -54,14 +55,10 @@ export default function InventoryManagersPage() {
   }, [])
 
   async function fetchMe() {
-    const res = await fetch('/api/auth/me')
-    if (res.ok) {
-      const data = await res.json()
-      setUserRole(data.role ?? null)
-      if (data.role !== 'SUPER_ADMIN' && data.role !== 'ADMIN') {
-        router.push('/')
-      }
-    }
+    const res = await fetch('/api/inventory/can-manage')
+    const ok = res.ok && (await res.json()).canAdmin === true
+    setAllowed(ok)
+    if (!ok) router.push('/')
   }
 
   useEffect(() => {
@@ -143,7 +140,7 @@ export default function InventoryManagersPage() {
     return <div className="p-8 text-sm text-gray-500">로딩 중...</div>
   }
 
-  if (userRole && userRole !== 'SUPER_ADMIN' && userRole !== 'ADMIN') {
+  if (allowed === false) {
     return null
   }
 

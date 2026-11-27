@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, isAdminOrAbove } from '@/lib/auth'
+import { getAuthUser } from '@/lib/auth'
+import { canAdminInventory } from '@/lib/inventory' // ADMIN 또는 자재 관리자(재고책임자) — 2026-11-27
 import { logAudit, auditActorFromJWT } from '@/lib/audit'
 
 import { readSearch } from '@/lib/searchParam'
@@ -8,7 +9,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   const user = await getAuthUser(req)
-  if (!user || !isAdminOrAbove(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!user || !(await canAdminInventory(user))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
   const search = readSearch(searchParams) // 앞뒤 공백 제거 (2026-11-06, lib/searchParam)
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const authUser = await getAuthUser(req)
-  if (!authUser || !isAdminOrAbove(authUser.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!authUser || !(await canAdminInventory(authUser))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { userId } = await req.json()
   if (!userId) return NextResponse.json({ error: 'userId가 필요합니다.' }, { status: 400 })
