@@ -2,6 +2,8 @@ import { prisma } from '@/lib/prisma'
 import { isAdminOrAbove, isUserOrAbove } from '@/lib/auth'
 import { hasPermission } from '@/lib/appRoles'
 import { Prisma } from '@prisma/client'
+import { isRegistryError } from '@/lib/deviceRegistry/core'
+import { cancelEventsOfRef, type CancelRefItem } from '@/lib/deviceRegistry/hooks'
 
 /**
  * 품목 코드 생성: ITEM-NNNN (전체 순번 4자리). function_wms.md §6-5
@@ -714,9 +716,12 @@ const cancelInclude = {
 /**
  * 전표 취소 — 재고를 역방향으로 되돌리고 canceled_at 마킹 (역전표 미생성).
  * 세트출고 주자재 전표를 취소하면 연결된 부자재 자식 전표도 함께 취소된다.
+ * 출고 전표가 기기현황에 등록한 기기(출고요청 처리 — ref INVENTORY_TX)는 그 등록도 같은 트랜잭션에서 취소한다(2026-11-27 —
+ * PROD STK-202611-0431: 전표만 취소돼 A149248 이 더필병원 배치로 남아 다른 병원의 AS 교체 확정이 막혔다). 그 기기에 이후
+ * 기록이 있으면 전표 취소를 거부한다(409). 출고요청의 상태는 되돌리지 않는다(수동 — 출고요청 v1 한계).
  * function_wms.md §6-3. 되돌림이 음수를 만들거나 개체가 이미 변경됐으면 InventoryError(409).
  */
-export async function cancelInventoryTransaction(transactionId: number, actorId: string) {
+export async function cancelInventoryTransaction(transactionId: number, actorId: string, actorName: string | null = null) {
   const tx = await prisma.inventoryTransaction.findUnique({
     where: { id: transactionId },
     include: cancelInclude,
@@ -735,17 +740,49 @@ export async function cancelInventoryTransaction(transactionId: number, actorId:
 
   return prisma.$transaction(async (client) => {
     const now = new Date()
+    const registryCancelled: CancelRefItem[] = []
+    const registryWarnings: string[] = []
     for (const t of [tx, ...children]) {
+      // 기기현황 등록 취소 — 이 전표로 나간 시리얼 가운데, 이 전표(또는 같은 출고요청의 전표)를 근거로 등록된 기기
+      if (t.txType === 'OUT' && t.item.isSerialManaged && t.units.length > 0) {
+        const units = await client.inventoryUnit.findMany({ where: { id: { in: t.units.map((u) => u.unitId) } }, select: { serialNo: true } })
+        const codes = t.stockOutRequestId
+          ? (await client.inventoryTransaction.findMany({ where: { stockOutRequestId: t.stockOutRequestId }, select: { txCode: true } })).map((x) => x.txCode)
+          : [t.txCode]
+        try {
+          const r = await cancelEventsOfRef(
+            client,
+            Array.from(new Set([t.txCode, ...codes])).map((code) => ({ type: 'INVENTORY_TX' as const, code })),
+            { userId: actorId, name: actorName },
+            { serials: units.map((u) => u.serialNo) },
+          )
+          registryCancelled.push(...r.cancelled)
+          registryWarnings.push(...r.warnings)
+        } catch (e) {
+          if (isRegistryError(e)) {
+            throw new InventoryError(`기기현황에 이후 기록이 있어 전표를 취소할 수 없습니다 — ${e.message}. 기기현황에서 그 기록을 먼저 정리한 뒤 다시 취소하세요.`, 409)
+          }
+          throw e
+        }
+      }
       await reverseTransaction(client, t)
       await client.inventoryTransaction.update({
         where: { id: t.id },
         data: { canceledAt: now, canceledById: actorId },
       })
     }
-    return client.inventoryTransaction.findUniqueOrThrow({
+    // AS 접수에 묶인 출고요청의 전표 — 교체기 등록은 AS 교체 확정(ref AS)이 한 것이라 여기서 되돌리지 않는다. 사람이 정리하도록 알린다
+    if (tx.txType === 'OUT' && tx.stockOutRequestId) {
+      const sor = await client.stockOutRequest.findUnique({ where: { id: tx.stockOutRequestId }, select: { sorCode: true, asReceipt: { select: { asCode: true } } } })
+      if (sor?.asReceipt) {
+        registryWarnings.push(`이 전표는 출고요청 ${sor.sorCode}(AS 접수 ${sor.asReceipt.asCode})의 교체 발송분입니다 — AS 접수의 교체 확정과 기기현황의 교체 기록은 되돌려지지 않았습니다. AS 접수에서 교체기를 확인하세요.`)
+      }
+    }
+    const updated = await client.inventoryTransaction.findUniqueOrThrow({
       where: { id: tx.id },
       include: { item: { select: { id: true, name: true, itemCode: true } }, childTxs: { select: { txCode: true } } },
     })
+    return { ...updated, registryCancelled, registryWarnings }
   })
 }
 

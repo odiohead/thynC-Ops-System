@@ -101,10 +101,25 @@ export default function TransactionsPage() {
 
   async function handleCancel(tx: Tx) {
     const setMsg = tx.childTxs.length > 0 ? `\n(세트출고 부자재 전표 ${tx.childTxs.length}건도 함께 취소됩니다)` : ''
-    if (!confirm(`전표 ${tx.txCode}를 취소하시겠습니까? 재고가 역방향으로 되돌아갑니다.${setMsg}`)) return
+    if (!confirm(`전표 ${tx.txCode}를 취소하시겠습니까? 재고가 역방향으로 되돌아갑니다.${setMsg}\n이 전표로 기기현황에 등록된 기기가 있으면 그 등록도 함께 취소됩니다.`)) return
     const res = await fetch(`/api/inventory/transactions/${tx.id}/cancel`, { method: 'POST' })
-    if (res.ok) { fetchTxs(page) }
-    else { setError((await res.json()).error ?? '취소 실패'); setTimeout(() => setError(null), 5000) }
+    if (res.ok) {
+      const d = await res.json().catch(() => ({}))
+      const cancelled = (d.registryCancelled ?? []) as { serialNo: string }[]
+      const warns = (d.registryWarnings ?? []) as string[]
+      if (cancelled.length > 0 || warns.length > 0) {
+        const names = cancelled.slice(0, 10).map((c) => c.serialNo).join(', ')
+        const lines = ['전표를 취소했습니다.']
+        if (cancelled.length > 0) lines.push(`기기현황 등록 ${cancelled.length}대도 함께 취소했습니다: ${names}${cancelled.length > 10 ? ` 외 ${cancelled.length - 10}대` : ''}`)
+        if (warns.length > 0) lines.push('', '확인 필요:', ...warns)
+        alert(lines.join('\n'))
+      }
+      fetchTxs(page)
+    } else {
+      // 기기현황 때문에 막힌 경우 등 긴 안내가 있어 오래 보여 준다
+      setError((await res.json().catch(() => ({}))).error ?? '취소 실패')
+      setTimeout(() => setError(null), 15000)
+    }
   }
 
   const totalPages = Math.ceil(total / limit)

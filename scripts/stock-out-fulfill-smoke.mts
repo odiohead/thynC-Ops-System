@@ -5,15 +5,19 @@
  *  preview — 모드 판정(serial/lot)·재고 품목 없음(시스템@판매용)·전량 불일치·미등록 시리얼·LOT 합 불일치·타 병원 배치 차단
  *  execute — 전표 생성(링크·workType PROJECT)·재고 차감·개체 OUT·기기현황 등록(용도 판매용·source WMS·ref INVENTORY_TX)·
  *            fulfilledSerials 기록·요청 완료·티켓 CLOSED·이중 처리 409
+ *  전표 취소(2026-11-27) — 그 전표로 등록된 기기현황 기록도 함께 취소 · 기기에 이후 기록이 있으면 전표 취소 409(아무것도 안 바뀜) ·
+ *            시리얼로 좁혀 취소 · LOT 전표는 영향 없음 · 요청 상태는 그대로(수동)
  * 테스트 데이터는 전부 삭제한다 (재고·개체·전표·창고·요청·티켓·기기현황).
  *
  *   npx tsx scripts/stock-out-fulfill-smoke.mts
  */
 import { PrismaClient } from '@prisma/client'
-import { planInventoryTransaction, applyInventoryTransaction } from '../lib/inventory'
+import { planInventoryTransaction, applyInventoryTransaction, cancelInventoryTransaction, InventoryError } from '../lib/inventory'
 import { previewFulfillment, executeFulfillment, FulfillError } from '../lib/stockOutFulfill'
 import { createTicketForStockOut } from '../lib/ticket-domains/stockOut'
-import { registerDevicesIn } from '../lib/deviceRegistry/write'
+import { registerDevicesIn, recoverDevice } from '../lib/deviceRegistry/write'
+import { cancelLastEvent } from '../lib/deviceRegistry/admin'
+import { cancelEventsOfRef } from '../lib/deviceRegistry/hooks'
 import { nextSorCode } from '../lib/stockOut'
 
 const prisma = new PrismaClient()
@@ -222,6 +226,70 @@ async function main() {
       dup = e instanceof FulfillError && e.status === 409
     }
     check('이중 처리 409', dup)
+
+    // ── 전표 취소 → 기기현황 등록도 함께 취소 (2026-11-27) ─────────────
+    console.log('▶ 전표 취소 — 기기현황 등록 동반 취소')
+    const actor = { userId: anyUser.id, name: anyUser.name }
+    const placementOf = async (serial: string) => (await prisma.deviceUnit.findUnique({ where: { serialNo: serial }, include: { placement: true } }))
+    const eventCount = (serial: string) => prisma.hospitalDeviceEvent.count({ where: { device: { serialNo: serial } } })
+    const senTx = txs.find((t) => t.itemId === sensorItem.id)!
+
+    // (1) 시리얼로 좁혀 취소 — 같은 ref 를 쓰는 두 대 중 S1 만 (실행해 보고 되돌린다)
+    class Rollback extends Error {}
+    let narrowed: Awaited<ReturnType<typeof cancelEventsOfRef>> | null = null
+    let s2Inside: string | null | undefined
+    try {
+      await prisma.$transaction(async (c) => {
+        narrowed = await cancelEventsOfRef(c, [{ type: 'INVENTORY_TX', code: ecgTx!.txCode }], actor, { serials: [S1] })
+        s2Inside = (await c.hospitalDevice.findFirst({ where: { unit: { serialNo: S2 } }, select: { status: true } }))?.status
+        throw new Rollback()
+      })
+    } catch (e) { if (!(e instanceof Rollback)) throw e }
+    check('시리얼로 좁혀 취소 — S1 만 취소되고 S2 는 그대로 (되돌림)', narrowed!.cancelled.length === 1 && narrowed!.cancelled[0].serialNo === S1 && narrowed!.cancelled[0].restored === null && s2Inside === 'ACTIVE', JSON.stringify(narrowed))
+    check('되돌린 뒤 두 대 모두 배치 중', (await placementOf(S1))?.placement?.status === 'ACTIVE' && (await placementOf(S2))?.placement?.status === 'ACTIVE')
+    const none = await prisma.$transaction((c) => cancelEventsOfRef(c, [{ type: 'INVENTORY_TX', code: senTx.txCode }], actor, { serials: [] }))
+    check('시리얼이 없는 전표는 아무것도 취소하지 않는다', none.cancelled.length === 0)
+
+    // (2) 기기에 이후 기록이 있으면 전표 취소가 막힌다 — 아무것도 바뀌지 않는다
+    const s2 = await placementOf(S2)
+    const reason = await prisma.statusCode.findFirst({ where: { category: 'DEVICE_RECOVERY_REASON' }, orderBy: { order: 'asc' } })
+    if (!reason) throw new Error('DEVICE_RECOVERY_REASON 없음')
+    const rec = await recoverDevice({ actor }, { deviceId: s2!.id, reasonCodeId: reason.id })
+    let blocked: string | null = null
+    try { await cancelInventoryTransaction(ecgTx!.id, anyUser.id, anyUser.name) } catch (e) {
+      if (e instanceof InventoryError && e.status === 409) blocked = e.message
+      else throw e
+    }
+    check('이후 기록(회수)이 있으면 전표 취소 409 — 어느 기기 때문인지 안내', !!blocked && blocked.includes(S2) && blocked.includes('기기현황'), blocked ?? '거부되지 않음')
+    const ecgTxMid = await prisma.inventoryTransaction.findUnique({ where: { id: ecgTx!.id } })
+    const stockMid = await prisma.inventoryStock.findFirst({ where: { itemId: ecgItem.id, warehouseId: wh.id, lotNo: '' } })
+    check('막힌 취소는 아무것도 바꾸지 않는다 (전표 유효 · 재고 0 · S1 배치 중 · 개체 OUT)',
+      ecgTxMid?.canceledAt === null && stockMid?.quantity === 0 && (await placementOf(S1))?.placement?.status === 'ACTIVE'
+      && (await prisma.inventoryUnit.count({ where: { serialNo: { in: SERIALS }, status: 'OUT' } })) === 2)
+    // 이후 기록을 정리(회수 취소)하면 다시 취소할 수 있다
+    await cancelLastEvent({ actor }, { eventId: rec.event.id })
+    check('회수 기록을 취소하면 S2 다시 배치 중', (await placementOf(S2))?.placement?.status === 'ACTIVE')
+
+    // (3) 정상 취소 — 재고·개체 복구 + 기기현황 등록 2대 취소
+    const cancelled = await cancelInventoryTransaction(ecgTx!.id, anyUser.id, anyUser.name)
+    check('전표 취소 성공 — 함께 취소된 기기현황 등록 2대', !!cancelled.canceledAt && cancelled.registryCancelled.length === 2 && cancelled.registryCancelled.map((c) => c.serialNo).sort().join() === SERIALS.join(), JSON.stringify(cancelled.registryCancelled.map((c) => c.serialNo)))
+    const stockEnd = await prisma.inventoryStock.findFirst({ where: { itemId: ecgItem.id, warehouseId: wh.id, lotNo: '' } })
+    check('재고 복구(0→2) · 개체 IN_STOCK', stockEnd?.quantity === 2 && (await prisma.inventoryUnit.count({ where: { serialNo: { in: SERIALS }, status: 'IN_STOCK', warehouseId: wh.id } })) === 2)
+    const after1 = await placementOf(S1)
+    const after2 = await placementOf(S2)
+    check('기기현황 — 배치 기록 없음 · 이벤트 0 · 상태/위치 비움 (유닛은 남김)',
+      !!after1 && !!after2 && after1.placement === null && after2.placement === null && (await eventCount(S1)) === 0 && (await eventCount(S2)) === 0
+      && after1.condition === null && after1.locationHospitalCode === null && after2.condition === null,
+      JSON.stringify({ p1: after1?.placement, c1: after1?.condition, e1: await eventCount(S1), e2: await eventCount(S2) }))
+    const senTxEnd = await prisma.inventoryTransaction.findUnique({ where: { id: senTx.id } })
+    const r1End = await prisma.stockOutRequest.findUnique({ where: { id: r1.id }, include: { status: true } })
+    check("같은 요청의 LOT 전표는 그대로 · 요청 상태는 '완료' 그대로(수동)", senTxEnd?.canceledAt === null && r1End?.status?.name === '완료')
+    let again = false
+    try { await cancelInventoryTransaction(ecgTx!.id, anyUser.id, anyUser.name) } catch (e) { again = e instanceof InventoryError && e.status === 409 }
+    check('이미 취소된 전표 재취소 409', again)
+    // 기기현황 기록이 없는 전표(LOT)는 종전과 같이 취소된다
+    const senCancelled = await cancelInventoryTransaction(senTx.id, anyUser.id, anyUser.name)
+    check('기기현황 기록이 없는 전표 취소 — 동반 취소 0건', !!senCancelled.canceledAt && senCancelled.registryCancelled.length === 0)
   } finally {
     console.log('▶ 정리')
     await cleanupAll(ctx)
