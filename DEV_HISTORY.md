@@ -27,6 +27,7 @@
 - **검증**: tsc · eslint · 권한 판정 스모크 6/6(dev2 계정 — USER+재고책임자: 전표 수정·담당자 관리·UDI 가능 / VIEWER로 낮춘 재고책임자·USER+재고담당만·역할 없는 USER: 불가 / 역할·풀 없는 ADMIN: 전표 수정 불가(기존과 동일)·설정 가능 / SUPER_ADMIN 전부 가능). 빌드·실제 화면 확인은 하지 않음
 - 영향 파일: lib/inventory.ts, lib/permissions.ts, app/api/settings/inventory-managers/{route,candidates/route,[id]/route}.ts, app/api/settings/udi-ledger/route.ts, app/settings/inventory-managers/page.tsx, app/settings/udi-ledger/page.tsx, app/inventory/components/TxEditModal.tsx(주석), prisma/migrations/20261127100000_udi_ledger_nav_inventory_admin, README.md
 - **반영 시**: 마이그 SQL(메뉴 1행 UPDATE) psql 적용·resolve → 빌드·재시작. 패키지·협업 서버·수신부 변경 없음
+- → **DEV·PROD 반영 2026-11-27 (d5385cb)** — 사용자 지시 "PROD까지 바로 반영". 두 서버 pull(e29a656 → d5385cb) → 마이그 SQL psql 적용(메뉴 1행)·resolve → 힙 4GB 빌드 성공 → `pm2 restart thync-dev`/`thync-prod` → /login 200(로컬·https), PROD 미인증 `/settings/udi-ledger` 307. 협업 번들 sha 동일(2108cacb — 재시작 안 함), PROD 디스크 50%. 이준표 계정 ADMIN 등급 제거는 사용자가 직접(미실행)
 
 ## 2026-11-26 14:45 | 사용량 — 대시보드에 도입 병상 필터(범위 막대 · 빠른 선택) 추가 · 구간 표 대조를 운영 중에도 돌릴 수 있게 (dev2 빌드·화면 검증 → DEV 서버 → PROD 반영)
 
